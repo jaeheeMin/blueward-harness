@@ -44,7 +44,7 @@ def test_마켓플레이스_항목이_harness_를_가리킨다():
     assert entries[0]["source"] == "./plugins/harness"
 
 
-HOOK_MATCHERS = {"Write|Edit", "Bash|PowerShell"}
+HOOK_MATCHERS = {"Write|Edit", "Bash|PowerShell", "mcp__.*__setObjectSource"}
 
 
 def _hook_file_refs(hooks_json: dict) -> list[str]:
@@ -68,6 +68,7 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
         "pre-bash-git-guard.sh",
         "session-start-sync.sh",
         "stop-deliver.sh",
+        "mcp_source_guard.py",
     }
 
     # 각 훅이 가리키는 파일이 실제로 플러그인 안에 있어야 한다.

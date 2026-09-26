@@ -1,7 +1,7 @@
 {
   "name": "harness",
   "description": "고객사 Project Repository 에 설치해 쓰는 Blueward 하네스. 구조 생성, 문서 검사(doc-guard), 협업 규칙과 Skill 을 제공한다.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "author": {
     "name": "jaeheeMin"
   },

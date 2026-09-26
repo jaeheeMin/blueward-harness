@@ -1,0 +1,16 @@
+{
+  "_comment": "objectSourceUrl 패턴 -> 언어 확장자 매핑 데이터(#60). mcp_source_guard.py 가 이 파일로 ABAP/CDS 를 판별한다. 코드에 조건문을 늘어놓지 않고 데이터로 두는 것이 CLAUDE.md 원칙 2다. checker/code_checks.yaml 이 아는 확장자(.abap, .cds)와 맞아야 한다. 패턴은 대소문자 구분 없이(re.IGNORECASE) 쿼리스트링을 뗀 URL 디코딩 경로에 순서대로 정규식 검색(re.search)한다. 새 ADT 오브젝트 종류가 나오면 여기에 패턴만 추가하면 된다.",
+  "patterns": [
+    { "regex": "/sap/bc/adt/oo/classes/", "suffix": ".abap" },
+    { "regex": "/sap/bc/adt/oo/interfaces/", "suffix": ".abap" },
+    { "regex": "/sap/bc/adt/programs/programs/", "suffix": ".abap" },
+    { "regex": "/sap/bc/adt/programs/includes/", "suffix": ".abap" },
+    { "regex": "/sap/bc/adt/functions/groups/[^/]+/fmodules/", "suffix": ".abap" },
+    { "regex": "/sap/bc/adt/functions/groups/[^/]+/includes/", "suffix": ".abap" },
+    { "regex": "/sap/bc/adt/ddic/ddl/?sources/", "suffix": ".cds" },
+    { "regex": "/sap/bc/adt/acm/dcl/sources/", "suffix": ".cds" },
+    { "regex": "/sap/bc/adt/ddic/ddlx/sources/", "suffix": ".cds" },
+    { "regex": "/sap/bc/adt/ddic/ddla/sources/", "suffix": ".cds" },
+    { "regex": "/sap/bc/adt/ddic/srvd/sources/", "suffix": ".cds" }
+  ]
+}

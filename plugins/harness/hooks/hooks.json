@@ -19,6 +19,16 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-git-guard.sh\""
           }
         ]
+      },
+      {
+        "matcher": "mcp__.*__setObjectSource",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project python \"${CLAUDE_PLUGIN_ROOT}/hooks/mcp_source_guard.py\" || { echo \"harness: 훅을 실행할 수 없어 MCP 쓰기를 검사하지 못했다. uv 가 설치되어 있는지 확인한다. 검사하지 못한 상태로 통과시키지 않는다.\" >&2; exit 2; }",
+            "timeout": 120
+          }
+        ]
       }
     ],
     "SessionStart": [
