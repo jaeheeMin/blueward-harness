@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
 import shutil
@@ -229,6 +230,103 @@ def test_gh_pr_가_아닌_명령은_영향을_받지_않는다():
     code, out = _run_guard("gh pr view 123 -R owner/repo")
     assert code == 0
     assert out is None
+
+
+# --- gh pr merge 가드가 엔진 빌드 로그(stderr)에 흔들리지 않는지(#63) ---------
+#
+# uv 가 캐시 없이 엔진을 새로 빌드하면 "Building doc-guard-checker ...",
+# "Installed N packages ..." 같은 진행 로그를 stderr 로 낸다. 예전에는 훅이
+# `2>&1` 로 stdout 과 합쳐 받아, 판정 자체는 정상(종료코드 0, PRD 변경 없음)인데도
+# 그 로그가 JSON 앞에 섞여 jq 해석이 실패해 "확인하지 못해 merge 를 막습니다" 로
+# 잘못 거절했다. 여기서는 진짜 uvx 를 부르지 않고, PATH 맨 앞에 그 상황을 흉내
+# 내는 가짜 uvx 스크립트를 두어 재현한다 — 네트워크나 실제 엔진 빌드가 필요 없다.
+
+
+@pytest.fixture()
+def fake_uvx(tmp_path):
+    """PATH 맨 앞에 둘 가짜 `uvx` 실행 파일을 만드는 헬퍼를 돌려준다.
+
+    반환값은 `(stdout, stderr, exit_code) -> bin_dir` 함수다. bin_dir 을
+    `_run_guard` 의 PATH 맨 앞에 붙이면, 훅이 부르는 `uvx` 가 진짜 대신 이
+    스크립트로 간다. 인자는 무엇이 오든 무시하고 미리 정한 내용만 낸다.
+    """
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+
+    def _make(stdout: str, stderr: str = "", exit_code: int = 0) -> Path:
+        script = bin_dir / "uvx"
+        # base64 로 내용을 담아 셸 이스케이프(따옴표·한글) 문제를 피한다.
+        out_b64 = base64.b64encode(stdout.encode("utf-8")).decode("ascii")
+        err_b64 = base64.b64encode(stderr.encode("utf-8")).decode("ascii")
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf '%s' '{err_b64}' | base64 -d >&2\n"
+            f"printf '%s' '{out_b64}' | base64 -d\n"
+            f"exit {exit_code}\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        script.chmod(0o755)
+        return bin_dir
+
+    return _make
+
+
+def _run_guard_with_fake_uvx(command: str, fake_uvx_dir: Path) -> tuple[int, dict | None]:
+    fake_path = f"{fake_uvx_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+    return _run_guard(command, env={"PATH": fake_path})
+
+
+_BUILD_LOG_STDERR = (
+    "Building doc-guard-checker (blueward-harness)==0.1.0\n"
+    "Installed 10 packages in 15ms\n"
+)
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git/gh 명령을 거부한다")
+@pytest.mark.skipif(shutil.which("base64") is None,
+                     reason="base64 가 없으면 가짜 uvx 출력을 안전하게 담을 수 없다")
+def test_엔진_빌드_로그가_stderr에_섞여도_승인_판정을_읽는다(fake_uvx):
+    """#63: uv 가 새로 빌드할 때의 stderr 로그가 JSON 해석을 방해하면 안 된다."""
+    stdout_json = json.dumps({"touches_ssot": False, "approved": True, "reason": "PRD 변경 없음"})
+    bin_dir = fake_uvx(stdout_json, _BUILD_LOG_STDERR, 0)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert code == 0
+    assert out is None  # 통과 — merge 를 막지 않는다
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git/gh 명령을 거부한다")
+@pytest.mark.skipif(shutil.which("base64") is None,
+                     reason="base64 가 없으면 가짜 uvx 출력을 안전하게 담을 수 없다")
+def test_엔진_빌드_로그가_섞여도_미승인_판정은_여전히_막는다(fake_uvx):
+    """#63 수정이 거절해야 할 경우까지 통과시키게 되지 않았는지 확인한다."""
+    stdout_json = json.dumps({"touches_ssot": True, "approved": False, "reason": "승인 없음"})
+    bin_dir = fake_uvx(stdout_json, _BUILD_LOG_STDERR, 1)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert code == 0
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "승인 없음" in reason
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git/gh 명령을 거부한다")
+@pytest.mark.skipif(shutil.which("base64") is None,
+                     reason="base64 가 없으면 가짜 uvx 출력을 안전하게 담을 수 없다")
+def test_판정_출력이_json이_아니면_여전히_거절한다(fake_uvx):
+    """stdout 자체가 JSON 이 아니면(엔진이 정말 실패한 경우) 여전히 막는다."""
+    bin_dir = fake_uvx("이것은 JSON 이 아니다\n", _BUILD_LOG_STDERR, 1)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert code == 0
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "확인되지 않는 상태로 통과시키지 않습니다" in reason
+    # stderr 의 빌드 로그가 "자세히" 에 담겨야 한다 — 사람이 원인을 알 수 있게.
+    assert "Building" in reason or "Installed" in reason
 
 
 # --- 세션 시작 훅의 공통 개발 규칙 요약(#53) --------------------------------

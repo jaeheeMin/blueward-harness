@@ -212,10 +212,24 @@ if gh_is_pr_merge "$cmd"; then
     deny "uvx 가 없어 PRD 승인 여부를 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다."
   fi
 
+  # stdout 과 stderr 를 나눠 받는다(#63). uv 가 엔진을 캐시 없이 새로 빌드할 때
+  # "Building doc-guard-checker ...", "Installed N packages ..." 같은 진행
+  # 로그를 stderr 로 낸다. 예전에는 `2>&1` 로 합쳐 받아 그 로그가 JSON 앞뒤에
+  # 섞여 들어왔고, 판정 자체는 정상(종료코드 0, touches_ssot: false)인데도
+  # 아래 jq 해석이 실패해 "확인하지 못해 merge 를 막습니다" 로 잘못 거절했다.
+  # 이제 JSON 해석은 stdout 만으로 하고, stderr 는 실패했을 때 사람에게 보여줄
+  # "자세히" 로만 쓴다.
+  ssot_err_file="$(mktemp 2>/dev/null)" || {
+    deny "임시 파일을 만들지 못해 PR #$pr_number 의 PRD 승인 여부를 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다."
+  }
+  trap 'rm -f "$ssot_err_file"' EXIT
+
   set +e
-  ssot_out="$(uvx --from "$engine" python -m checker.ssot_approval check-pr --repo "$repo" --pr "$pr_number" 2>&1)"
+  ssot_out="$(uvx --from "$engine" python -m checker.ssot_approval check-pr --repo "$repo" --pr "$pr_number" 2>"$ssot_err_file")"
   ssot_rc=$?
   set -e
+  ssot_err="$(cat "$ssot_err_file" 2>/dev/null)" || ssot_err=""
+  rm -f "$ssot_err_file"
 
   # uvx 가 판정 로직을 아예 못 받았거나(#12 와 같은 사정) 못 돌렸으면, 그
   # 출력은 checker.ssot_approval 이 약속한 JSON 이 아니라 uvx/python 이 낸
@@ -233,9 +247,20 @@ if gh_is_pr_merge "$cmd"; then
     reason="$(printf '%s' "$ssot_out" | jq -r '.reason // empty' 2>/dev/null)" || true
     deny "PRD(docs/ssot) 를 바꾼 PR #$pr_number 인데 작성자가 아닌 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason"
   else
-    # $ssot_out 은 uvx/gh 가 낸 원문 오류일 수 있어 큰따옴표·역슬래시가 섞여
-    # 있을 수 있다. deny() 가 그대로 JSON 에 끼워 넣으므로 여기서 지운다.
-    detail="$(printf '%s' "$ssot_out" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
+    # $ssot_out(stdout)과 $ssot_err(stderr)는 uvx/gh 가 낸 원문 오류일 수 있어
+    # 큰따옴표·역슬래시가 섞여 있을 수 있다. deny() 가 그대로 JSON 에 끼워
+    # 넣으므로 여기서 지운다. JSON 해석에는 쓰지 않고 사람이 읽을 "자세히"
+    # 에만 둘 다 보여준다.
+    detail_raw="$ssot_out"
+    if [ -n "$ssot_err" ]; then
+      if [ -n "$detail_raw" ]; then
+        detail_raw="$detail_raw
+$ssot_err"
+      else
+        detail_raw="$ssot_err"
+      fi
+    fi
+    detail="$(printf '%s' "$detail_raw" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
     deny "PR #$pr_number 의 PRD 승인 여부를 확인하지 못해 merge 를 막습니다(종료코드 $ssot_rc). 확인되지 않는 상태로 통과시키지 않습니다. 자세히: $detail"
   fi
 fi
