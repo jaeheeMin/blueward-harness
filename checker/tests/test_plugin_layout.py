@@ -398,3 +398,77 @@ def test_프로젝트_conventions_가_있으면_함께_안내한다(tmp_path):
     assert "conventions/naming.md" in out
     assert "이 저장소의 Convention" in out
     assert "CR-004 제외" in out
+
+
+# --- 미커밋 판정에서 인계 메모 제외(#59) ------------------------------------
+#
+# /harness:deliver 는 .superpowers/ 와 *handoff*.md 를 스테이징에서 뺀다. 두
+# 훅이 그것을 "커밋되지 않은 변경" 으로 세면 deliver 로 없앨 수 없는 경고가
+# 매 세션 뜬다.
+
+
+def _run_stop_deliver(repo: Path) -> str:
+    env = {
+        **os.environ,
+        "CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT),
+        "CLAUDE_PROJECT_DIR": str(repo),
+    }
+    done = subprocess.run(
+        [_BASH, str(PLUGIN_ROOT / "hooks" / "stop-deliver.sh")],
+        input="{}",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+def _leave_handoff_only(repo: Path) -> None:
+    (repo / "harness-handoff.md").write_text("메모\n", encoding="utf-8")
+    (repo / "docs").mkdir()
+    (repo / "docs" / "인계-handoff.md").write_text("메모\n", encoding="utf-8")
+    (repo / ".superpowers").mkdir()
+    (repo / ".superpowers" / "state.json").write_text("{}\n", encoding="utf-8")
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_인계_메모만_남으면_stop_훅이_막지_않는다(tmp_path):
+    repo = tmp_path / "project"
+    _init_temp_git_repo(repo)
+    _leave_handoff_only(repo)
+
+    assert _run_stop_deliver(repo).strip() == ""
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_인계_메모_말고_다른_변경이_있으면_stop_훅이_막는다(tmp_path):
+    repo = tmp_path / "project"
+    _init_temp_git_repo(repo)
+    _leave_handoff_only(repo)
+    (repo / "README.md").write_text("changed\n", encoding="utf-8", newline="\n")
+
+    out = _run_stop_deliver(repo)
+
+    assert '"decision"' in out and "block" in out
+    assert "/harness:deliver" in out
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_인계_메모만_남으면_세션_시작_훅이_미커밋_경고를_내지_않는다(tmp_path):
+    repo = tmp_path / "project"
+    _init_temp_git_repo(repo)
+    _leave_handoff_only(repo)
+
+    assert "커밋되지 않은 변경" not in _run_session_start_sync(repo)
+
+    (repo / "README.md").write_text("changed\n", encoding="utf-8", newline="\n")
+    out = _run_session_start_sync(repo)
+    assert "커밋되지 않은 변경" in out
+    assert "README.md" in out
+    # "handoff" 단어 자체는 Plugin 경로(예: worktree 이름)에 섞일 수 있어 파일 이름으로 본다.
+    assert "harness-handoff.md" not in out
+    assert "인계-handoff.md" not in out
+    assert ".superpowers" not in out
