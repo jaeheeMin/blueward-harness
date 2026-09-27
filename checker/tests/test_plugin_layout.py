@@ -207,8 +207,13 @@ _HAS_BASH = _BASH is not None
 _HAS_JQ = shutil.which("jq") is not None
 
 
-def _run_guard(command: str, env: dict | None = None) -> tuple[int, dict | None]:
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+def _run_guard(
+    command: str, env: dict | None = None, cwd: str | None = None
+) -> tuple[int, dict | None]:
+    payload_obj = {"tool_name": "Bash", "tool_input": {"command": command}}
+    if cwd is not None:
+        payload_obj["cwd"] = cwd
+    payload = json.dumps(payload_obj)
     full_env = {**os.environ, **(env or {})}
     done = subprocess.run(
         [_BASH, str(PLUGIN_ROOT / "hooks" / "pre-bash-git-guard.sh")],
@@ -392,14 +397,23 @@ def _init_temp_git_repo(repo: Path) -> None:
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
 
 
-def _run_session_start_sync(repo: Path) -> str:
+def _run_session_start_sync(
+    repo: Path, project_dir: Path | None = None, stdin_cwd: str | None = None
+) -> str:
     env = {
         **os.environ,
         "CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT),
-        "CLAUDE_PROJECT_DIR": str(repo),
+        "CLAUDE_PROJECT_DIR": str(project_dir if project_dir is not None else repo),
     }
+    # stdin_cwd 를 명시하지 않으면 cwd 필드 없는 "{}" 를 보낸다 — jq 유무와
+    # 무관하게 CLAUDE_PROJECT_DIR 로 그대로 대체되어(#71) 기존 동작과 같다.
+    # subprocess.run 에 input 을 항상 명시적으로 줘야 한다: 안 주면 부모(pytest)
+    # 프로세스의 stdin 을 그대로 물려받는데, 훅이 이제 `cat` 으로 stdin 을 읽으므로
+    # 터미널에 매달린 stdin 이면 EOF 없이 멈춘다.
+    payload = json.dumps({"cwd": stdin_cwd}) if stdin_cwd is not None else "{}"
     done = subprocess.run(
         [_BASH, str(PLUGIN_ROOT / "hooks" / "session-start-sync.sh")],
+        input=payload,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -453,15 +467,18 @@ def test_프로젝트_conventions_가_있으면_함께_안내한다(tmp_path):
 # 매 세션 뜬다.
 
 
-def _run_stop_deliver(repo: Path) -> str:
+def _run_stop_deliver(
+    repo: Path, project_dir: Path | None = None, stdin_cwd: str | None = None
+) -> str:
     env = {
         **os.environ,
         "CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT),
-        "CLAUDE_PROJECT_DIR": str(repo),
+        "CLAUDE_PROJECT_DIR": str(project_dir if project_dir is not None else repo),
     }
+    payload = json.dumps({"cwd": stdin_cwd}) if stdin_cwd is not None else "{}"
     done = subprocess.run(
         [_BASH, str(PLUGIN_ROOT / "hooks" / "stop-deliver.sh")],
-        input="{}",
+        input=payload,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -518,3 +535,146 @@ def test_인계_메모만_남으면_세션_시작_훅이_미커밋_경고를_내
     assert "harness-handoff.md" not in out
     assert "인계-handoff.md" not in out
     assert ".superpowers" not in out
+
+
+# --- 세션이 다른 worktree 로 옮겨도 stdin cwd 를 따라간다(#71) ----------------
+#
+# CLAUDE_PROJECT_DIR 은 세션을 "처음 연" 폴더 그대로 남는다. Claude Code 는
+# 세션이 실제로 있는 위치를 훅 stdin JSON 의 `cwd` 로 넘긴다(SessionStart,
+# Stop, PreToolUse 공통 필드). 여기서는 CLAUDE_PROJECT_DIR 을 저장소 A 에,
+# stdin cwd 를 저장소 B 에 고정해 두고, 세 훅이 A 가 아니라 B 를 보고
+# 판단하는지 확인한다.
+
+
+def _ensure_branch(repo: Path, branch: str) -> None:
+    """repo 의 현재 브랜치를 `branch` 로 맞춘다. init.defaultBranch 설정이
+    환경마다 달라(예: master) 매번 같은 이름을 보장할 수 없으므로, 이미 그
+    이름이면 건너뛰고 아니면 새로 만든다."""
+    current = subprocess.run(
+        ["git", "symbolic-ref", "--short", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if current != branch:
+        subprocess.run(["git", "checkout", "-q", "-b", branch], cwd=repo, check=True)
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_stop_훅이_A가_깨끗해도_cwd인_B가_더러우면_막는다(tmp_path):
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    _init_temp_git_repo(repo_a)
+    _init_temp_git_repo(repo_b)
+    (repo_b / "README.md").write_text("changed-in-b\n", encoding="utf-8", newline="\n")
+
+    out = _run_stop_deliver(repo_b, project_dir=repo_a, stdin_cwd=str(repo_b))
+
+    assert '"decision"' in out and "block" in out
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_stop_훅이_A가_더러워도_cwd인_B가_깨끗하면_막지_않는다(tmp_path):
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    _init_temp_git_repo(repo_a)
+    _init_temp_git_repo(repo_b)
+    (repo_a / "README.md").write_text("changed-in-a\n", encoding="utf-8", newline="\n")
+
+    out = _run_stop_deliver(repo_b, project_dir=repo_a, stdin_cwd=str(repo_b))
+
+    assert out.strip() == ""
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_세션_시작_훅이_A가_아니라_cwd인_B의_브랜치를_보고한다(tmp_path):
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    _init_temp_git_repo(repo_a)
+    _init_temp_git_repo(repo_b)
+    _ensure_branch(repo_a, "feature/repo-a")
+    _ensure_branch(repo_b, "feature/repo-b")
+
+    out = _run_session_start_sync(repo_b, project_dir=repo_a, stdin_cwd=str(repo_b))
+
+    assert "현재 브랜치: feature/repo-b" in out
+    assert "feature/repo-a" not in out
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_세션_시작_훅이_존재하지_않는_cwd면_CLAUDE_PROJECT_DIR로_대체한다(tmp_path):
+    """cwd 가 stdin 에 있어도 존재하지 않는 경로면 기존 동작(CLAUDE_PROJECT_DIR)을
+    그대로 유지한다."""
+    repo_a = tmp_path / "repo-a"
+    _init_temp_git_repo(repo_a)
+    _ensure_branch(repo_a, "feature/repo-a")
+    missing = str(tmp_path / "이런-폴더는-없다")
+
+    out = _run_session_start_sync(repo_a, project_dir=repo_a, stdin_cwd=missing)
+
+    assert "현재 브랜치: feature/repo-a" in out
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+def test_git_가드가_cwd인_B가_main이면_A가_feature여도_커밋을_막는다(tmp_path):
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    _init_temp_git_repo(repo_a)
+    _init_temp_git_repo(repo_b)
+    _ensure_branch(repo_a, "feature/repo-a")
+    _ensure_branch(repo_b, "main")
+
+    code, out = _run_guard(
+        "git commit -m test",
+        env={"CLAUDE_PROJECT_DIR": str(repo_a)},
+        cwd=str(repo_b),
+    )
+
+    assert code == 0
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "main 브랜치" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+def test_git_가드가_cwd인_B가_feature면_A가_main이어도_커밋을_막지_않는다(tmp_path):
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    _init_temp_git_repo(repo_a)
+    _init_temp_git_repo(repo_b)
+    _ensure_branch(repo_a, "main")
+    _ensure_branch(repo_b, "feature/repo-b")
+
+    code, out = _run_guard(
+        "git commit -m test",
+        env={"CLAUDE_PROJECT_DIR": str(repo_a)},
+        cwd=str(repo_b),
+    )
+
+    assert code == 0
+    assert out is None
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+def test_git_가드가_존재하지_않는_cwd면_CLAUDE_PROJECT_DIR로_대체한다(tmp_path):
+    """cwd 가 stdin 에 있어도 존재하지 않는 경로면 기존 동작(CLAUDE_PROJECT_DIR)을
+    그대로 유지한다."""
+    repo_a = tmp_path / "repo-a"
+    _init_temp_git_repo(repo_a)
+    _ensure_branch(repo_a, "main")
+    missing = str(tmp_path / "이런-폴더는-없다")
+
+    code, out = _run_guard(
+        "git commit -m test",
+        env={"CLAUDE_PROJECT_DIR": str(repo_a)},
+        cwd=missing,
+    )
+
+    assert code == 0
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "main 브랜치" in out["hookSpecificOutput"]["permissionDecisionReason"]

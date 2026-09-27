@@ -6,7 +6,27 @@ set -euo pipefail
 # cd 뒤에는 "$0" 이 상대 경로일 때 깨질 수 있어 미리 계산한다.
 plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
-cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
+input="$(cat)"
+
+# 세션이 다른 git worktree 로 옮겨가도(#71) 그 worktree 기준으로 판단하기
+# 위해, 훅에 오는 stdin JSON 의 cwd 를 최우선으로 쓴다. CLAUDE_PROJECT_DIR 은
+# 세션을 "처음 연" 폴더라 세션 도중 다른 worktree 로 옮기면 더는 맞지 않는다.
+# cwd 가 없거나 존재하지 않는 디렉터리면 CLAUDE_PROJECT_DIR 로, 그것도 없으면
+# 지금 디렉터리로 되돌아간다.
+if command -v jq >/dev/null 2>&1; then
+  stdin_cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)"
+else
+  # jq 가 없으면 근사 정규식으로 뽑는다. 아래에서 존재하는 디렉터리인지 다시
+  # 검증하므로 완벽한 JSON 파서가 아니어도 안전하다.
+  stdin_cwd="$(printf '%s' "$input" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"cwd"[[:space:]]*:[[:space:]]*"([^"]*)"/\1/')"
+fi
+stdin_cwd="$(printf '%s' "$stdin_cwd" | tr -d '\r')"
+if [ -n "$stdin_cwd" ] && [ -d "$stdin_cwd" ]; then
+  resolved_dir="$stdin_cwd"
+else
+  resolved_dir="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+fi
+cd "$resolved_dir"
 
 lines=""
 add() {
@@ -32,7 +52,7 @@ fi
 
 # 저장소마다 다른 인수인계 파일을 쓰기 위해 저장소 이름을 구한다. 연결된
 # 워크트리에서는 `.git` 이 파일이므로 실제 디렉터리를 물어서 쓴다.
-repo_name="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || echo "${CLAUDE_PROJECT_DIR:-$PWD}")")"
+repo_name="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || echo "$resolved_dir")")"
 CARRYOVER="$(git rev-parse --git-dir)/${repo_name}-unfinished"
 CARRYOVER_PENDING=""
 if [ -f "$CARRYOVER" ]; then
