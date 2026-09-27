@@ -141,7 +141,12 @@ jobs:
   after-merge:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # job 에 permissions 를 적으면 적지 않은 권한은 모두 none 이 된다. 판정은
+    # commits/{sha}/pulls, pulls/{n}/reviews, contents/.github/ssot-approvers 를
+    # 읽어야 하므로 issues 만 주면 403 으로 판정 불가가 된다(#77).
     permissions:
+      contents: read
+      pull-requests: read
       issues: write
     steps:
       - name: 판정 엔진 가져오기
