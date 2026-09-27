@@ -275,3 +275,22 @@ def test_decide_commit_는_merge된_pr이_승인됐으면_통과(monkeypatch):
 
     result = mod.decide_commit(mod.GhClient(), "owner/repo", "sha")
     assert result["approved"] is True
+
+
+# --- 재사용 워크플로 권한 ------------------------------------------------------
+
+
+def test_after_merge_job_은_판정에_필요한_읽기_권한을_가진다():
+    """job 에 permissions 를 적으면 빠진 권한은 none 이 된다. issues 만 주면
+    commits/{sha}/pulls 조회가 403 으로 막혀 사후 감지가 판정 불가로 끝난다(#77)."""
+    from pathlib import Path
+
+    import yaml
+
+    workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ssot-approval.yml"
+    jobs = yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"]
+    permissions = jobs["after-merge"]["permissions"]
+
+    assert permissions.get("contents") in ("read", "write")
+    assert permissions.get("pull-requests") in ("read", "write")
+    assert permissions.get("issues") == "write"
