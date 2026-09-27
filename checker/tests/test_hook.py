@@ -328,6 +328,26 @@ def test_모르는_확장자의_코드_비슷한_파일은_관여하지_않는�
     assert code == 0 and out is None
 
 
+def test_설치본에서도_bdef_한글_이름을_막는다(installed_hook, tmp_path):
+    """BDEF(abapGit 확장자 `.bdef.asbdef`, #72)도 CR-001 로 검사한다."""
+    target = tmp_path / "zbnh2_i_course.bdef.asbdef"
+    code, out = run_hook(
+        installed_hook, _write_payload(target, "action 승인하기;\n"), str(ENGINE_ROOT)
+    )
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "CR-001" in reason
+    assert "승인하기" in reason
+
+
+def test_설치본에서도_규칙을_지킨_bdef는_통과시킨다(installed_hook, tmp_path):
+    target = tmp_path / "zbnh2_i_course.bdef.asbdef"
+    code, out = run_hook(
+        installed_hook, _write_payload(target, "action approve;\n"), str(ENGINE_ROOT)
+    )
+    assert code == 0 and out is None
+
+
 def test_코드_엔진을_받을_수_없으면_통과가_아니라_거절한다(installed_hook, tmp_path):
     """CLAUDE.md 원칙 7: '검사를 못 했다' 를 '통과' 로 뭉개지 않는다."""
     target = tmp_path / "z_report.abap"

@@ -54,7 +54,7 @@ TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".yaml", ".yml", ".json", ".csv"}
 # 위 STANDARDS_MARKERS 와 같은 사정이다). 그래서 여기 목록은 "검사 엔진에 보낼 만한
 # 확장자인가" 만 작게 판단하는 손으로 옮겨 적은 사본이고, 언어별로 정확히 어떤 규칙이
 # 도는지는 엔진이 결정한다. 언어가 늘면 이 목록과 `code_checks.yaml` 을 함께 고친다.
-CODE_SUFFIXES = {".abap", ".js", ".ts", ".mjs", ".cjs", ".cds"}
+CODE_SUFFIXES = {".abap", ".js", ".ts", ".mjs", ".cjs", ".cds", ".asbdef"}
 
 # 기준 폴더는 이 둘을 함께 가진 디렉터리다. `checker/locate.py` 의 `find_standards_root`
 # 와 같은 판단이다. 설치된 플러그인에는 엔진(checker 패키지)이 따라오지 않아 가져다
