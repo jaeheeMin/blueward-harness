@@ -21,7 +21,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*__setObjectSource",
+        "matcher": "mcp__.*__(setObjectSource|renamePreview|renameExecute|extractMethodPreview|extractMethodExecute|createObject)",
         "hooks": [
           {
             "type": "command",

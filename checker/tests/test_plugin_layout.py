@@ -45,7 +45,11 @@ def test_마켓플레이스_항목이_harness_를_가리킨다():
     assert entries[0]["source"] == "./plugins/harness"
 
 
-HOOK_MATCHERS = {"Write|Edit", "Bash|PowerShell", "mcp__.*__setObjectSource"}
+HOOK_MATCHERS = {
+    "Write|Edit",
+    "Bash|PowerShell",
+    "mcp__.*__(setObjectSource|renamePreview|renameExecute|extractMethodPreview|extractMethodExecute|createObject)",
+}
 
 
 def _hook_file_refs(hooks_json: dict) -> list[str]:
@@ -83,6 +87,48 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
 
     pre_matchers = {entry["matcher"] for entry in events["PreToolUse"]}
     assert pre_matchers == HOOK_MATCHERS
+
+
+_MCP_SERVERS = ["abap-adt", "abap-adt-z5u", "abap-adt-z5u-dev"]
+_MCP_SOURCE_GUARD_TOOL_NAMES = [
+    "setObjectSource",
+    "renamePreview",
+    "renameExecute",
+    "extractMethodPreview",
+    "extractMethodExecute",
+    "createObject",
+]
+
+
+def _mcp_source_guard_matcher() -> str:
+    hooks_json = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    matchers = [
+        entry["matcher"]
+        for entry in hooks_json["hooks"]["PreToolUse"]
+        for hook in entry["hooks"]
+        if "mcp_source_guard.py" in hook["command"]
+    ]
+    assert len(matchers) == 1
+    return matchers[0]
+
+
+@pytest.mark.parametrize("server", _MCP_SERVERS)
+@pytest.mark.parametrize("tool_name", _MCP_SOURCE_GUARD_TOOL_NAMES)
+def test_mcp_source_guard_매처가_세_서버의_여섯_도구를_모두_잡는다(server, tool_name):
+    """#61: rename*, extractMethod*, createObject 를 세 ADT 서버 이름 어디서 불러도
+    `mcp_source_guard.py` 매처가 잡아야 한다."""
+    matcher = _mcp_source_guard_matcher()
+    assert re.fullmatch(matcher, f"mcp__{server}__{tool_name}")
+
+
+@pytest.mark.parametrize(
+    "tool_name", ["renameEvaluate", "validateNewObject", "extractMethodEvaluate", "getObjectSource"]
+)
+def test_mcp_source_guard_매처는_다루지_않는_도구를_잡지_않는다(tool_name):
+    """#61: 이름이 비슷한 관련 없는 도구(예: renameEvaluate)까지 잡아 불필요하게
+    막지 않는다."""
+    matcher = _mcp_source_guard_matcher()
+    assert not re.fullmatch(matcher, f"mcp__abap-adt-z5u__{tool_name}")
 
 
 @pytest.mark.parametrize("name", ["start", "deliver", "wrapup", "scaffold", "prd", "spec"])
