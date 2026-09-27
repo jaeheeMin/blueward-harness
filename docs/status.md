@@ -188,6 +188,21 @@ CR-002 는 적용하지 않는다. ADT 주소 `/sap/bc/adt/bo/behaviordefinition
 Skill·테스트 이름을 맞췄다. 동작은 그대로다. 이 문서의 설계 이력 문장은 옛 구조를
 설명하는 기록이라 옛 말을 그대로 둔다.
 
+**PRD 사후 감지가 Actions 에서 실제로 돌게 고쳤다(#77).** #49 의 세 번째 장치(merge
+뒤 감지)는 그때까지 Actions 에서 제대로 돈 적이 없었다. public-cloud PR #19 를 승인
+없이 merge 한 뒤의 실행은 두 군데서 실패했다 — merge 된 PR 을 찾는
+`gh api repos/.../commits/<sha>/pulls` 가 `HTTP 403 Resource not accessible by
+integration` 으로 막혀 판정 불가가 됐고, 이슈를 만드는 `gh issue create` 는 git 저장소
+밖에서 돌아 실패했다(뒤의 것은 #51 에서 고침). 그래서 public-cloud 이슈 #20 은
+자동화가 아니라 사람 계정으로 열린 것이었다. 앞의 것의 원인은 after-merge job 이
+`permissions` 에 `issues: write` 만 적어, 적지 않은 `contents`·`pull-requests` 가
+`none` 이 된 것이다. 두 읽기 권한을 더하고 워크플로 권한을 확인하는 테스트를 넣었다.
+public-cloud 에서 다시 시험했다: PR #22 는 승인 없이 check 가 실패했고, Claude 의
+`gh pr merge` 는 Hook 이 막았고, 사람이 Merge 버튼을 누르자 Actions 가
+`"approved": false` 로 판정해 이슈 #23 을 github-actions 계정으로 열었다. 세 장치가
+모두 실제로 동작하는 것을 확인한 첫 기록이다. 시험용으로 PRD 에 넣은 한 줄은 그대로
+둔다(지우는 것도 승인이 필요한 PRD 변경이라).
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
