@@ -71,6 +71,7 @@ def _payload(url, source, tool_name="mcp__abap_adt__setObjectSource") -> dict:
 
 ABAP_URL = "/sap/bc/adt/oo/classes/zcl_x/source/main"
 CDS_URL = "/sap/bc/adt/ddic/ddl/sources/z_i_order/source/main"
+BDEF_URL = "/sap/bc/adt/bo/behaviordefinitions/zbnh2_i_course/source/main"
 
 
 def test_한글_이름이_있는_abap_소스는_막는다(installed_hook):
@@ -111,6 +112,22 @@ def test_cds_url은_cds_규칙으로_한글_이름을_막는다(installed_hook):
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert "CR-001" in reason
     assert "주문번호" in reason
+
+
+def test_bdef_url은_cr001로_한글_이름을_막는다(installed_hook):
+    """BDEF(동작 정의)는 이전에는 objectSourceUrl 을 판별하지 못해 검사 불능으로
+    항상 거절됐다(#72) — 이제 언어를 알아 CR-001 로 정상 판정한다."""
+    code, out = run_hook(installed_hook, _payload(BDEF_URL, "action 승인하기;\n"), str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "CR-001" in reason
+    assert "승인하기" in reason
+    assert BDEF_URL in reason
+
+
+def test_bdef_url은_규칙을_지킨_소스를_통과시킨다(installed_hook):
+    code, out = run_hook(installed_hook, _payload(BDEF_URL, "action approve;\n"), str(ENGINE_ROOT))
+    assert code == 0 and out is None
 
 
 def test_알_수_없는_url은_검사_불능으로_거절한다(installed_hook):

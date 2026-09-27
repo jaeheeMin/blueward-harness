@@ -230,6 +230,73 @@ def test_cds_주석_안의_한글은_괜찮다():
     assert _rules(check_source("t.cds", text), "CR-001") == []
 
 
+# --- BDEF(RAP 동작 정의, #72) --------------------------------------------------
+
+BDEF_SAMPLE = """managed implementation in class zbp_bnh2_i_course unique;
+strict ( 2 );
+
+define behavior for ZBNH2_I_COURSE //alias <alias_name>
+persistent table zbnh2_course
+lock master
+authorization master ( instance )
+//etag master <field_name>
+{
+  create ( authorization : global );
+  update;
+  delete;
+  field ( readonly, numbering : managed ) CourseUuid;
+  field ( mandatory : create ) CourseId, CourseName, CourseLength, Price;
+  field ( readonly : update ) CourseId;
+
+  mapping for zbnh2_course corresponding
+    {
+      CourseUuid   = course_uuid;
+      CourseId     = course_id;
+      //Price = price;
+      CurrencyCode = currency_code;
+    }
+
+}
+"""
+
+
+def test_bdef_한글_이름은_위반():
+    findings = check_source("t.asbdef", "action 승인하기;\n")
+    hits = _rules(findings, "CR-001")
+    assert len(hits) == 1
+    assert "승인하기" in hits[0]["message"]
+
+
+def test_bdef_줄_주석_안의_한글은_괜찮다():
+    text = "define behavior for Z_I_ORDER //한글 주석\n{\n}\n"
+    assert _rules(check_source("t.asbdef", text), "CR-001") == []
+
+
+def test_bdef_블록_주석_안의_한글은_괜찮다():
+    text = "/* 한글 블록 주석 */\ndefine behavior for Z_I_ORDER\n{\n}\n"
+    assert _rules(check_source("t.asbdef", text), "CR-001") == []
+
+
+def test_bdef_문자열_안의_한글은_괜찮다():
+    text = "define behavior for Z_I_ORDER\n{\n  //'한글 문자열' = 1;\n}\n"
+    assert _rules(check_source("t.asbdef", text), "CR-001") == []
+
+
+def test_bdef_실제_샘플은_통과():
+    assert check_source("t.asbdef", BDEF_SAMPLE) == []
+
+
+def test_bdef는_반복문_모양이_있어도_cr002를_적용하지_않는다():
+    """BDEF 에는 반복문 개념이 없어 CR-002 설정 대상이 아니다."""
+    text = "LOOP AT lt_x INTO ls_x.\n  SELECT SINGLE * FROM t001 INTO ls_y.\nENDLOOP.\n"
+    assert _rules(check_source("t.asbdef", text), "CR-002") == []
+
+
+def test_bdef는_cr002_설정에_없다():
+    cfg = code_rules._load_config()
+    assert "bdef" not in (cfg["rules"]["CR-002"].get("languages") or [])
+
+
 # --- 확장자·읽기 실패 ----------------------------------------------------------
 
 

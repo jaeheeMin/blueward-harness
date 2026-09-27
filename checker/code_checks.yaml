@@ -14,11 +14,15 @@ languages:
   cds:
     # CDS(Core Data Services) 정의.
     suffixes: [".cds"]
+  bdef:
+    # RAP 동작 정의(Behavior Definition). abapGit 형식(`<name>.bdef.asbdef`)의
+    # 확장자는 `.asbdef` 다(#72). 반복문 개념이 없어 CR-002 대상이 아니다.
+    suffixes: [".asbdef"]
 
 rules:
   CR-001:
     title: "이름에 한글을 쓰지 않는다"
-    languages: [abap, js, cds]
+    languages: [abap, js, cds, bdef]
     fix: "영문 이름으로 바꾼다. 주석과 문자열은 그대로 둬도 된다."
   CR-002:
     title: "반복문 안에서 DB 를 조회하지 않는다"

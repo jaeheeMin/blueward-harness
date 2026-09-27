@@ -26,9 +26,9 @@ DATA 주문번호 TYPE vbeln.
 DATA lv_order_no TYPE vbeln. " 주문번호
 ```
 
-**기계 검사**: 코드 저장 시(훅)와 PR 검사(Actions)에서 막는다. ABAP, JS/TS, CDS 를
-본다. 정말 예외라면 같은 줄이나 바로 위 줄에 `harness:allow CR-001 <이유>` 를
-주석으로 남긴다 — 이유 없이는 예외로 인정하지 않는다.
+**기계 검사**: 코드 저장 시(훅)와 PR 검사(Actions)에서 막는다. ABAP, JS/TS, CDS,
+BDEF(동작 정의)를 본다. 정말 예외라면 같은 줄이나 바로 위 줄에 `harness:allow
+CR-001 <이유>` 를 주석으로 남긴다 — 이유 없이는 예외로 인정하지 않는다.
 
 ## CR-002 반복문 안에서 DB 를 조회하지 않는다
 

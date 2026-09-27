@@ -217,7 +217,63 @@ def _mask_c_like(text: str) -> str:
     return "".join(out)
 
 
-_MASKERS = {"abap": _mask_abap, "js": _mask_c_like, "cds": _mask_c_like}
+def _mask_bdef(text: str) -> str:
+    """RAP 동작 정의(BDEF)의 주석과 문자열 내용을 지운다(#72).
+
+    `//` 줄 주석, `/* ... */` 블록 주석(여러 줄에 걸칠 수 있다 — 줄바꿈은 지우지
+    않는다)은 JS/CDS 가 함께 쓰는 `_mask_c_like` 와 같은 모양이라 그 처리를
+    그대로 옮겨 왔다. 다만 문자열은 그대로 재사용하지 않았다 — `_mask_c_like` 는
+    `"`, `` ` `` 도 문자열(또는 그 시작)로 본다. BDEF 문법에는 `"` 로 시작하는
+    ABAP 식 주석도, `` ` `` 고정 문자열도 없으므로 그대로 쓰면 문법에 없는
+    것까지 지워 실제로는 코드인 자리를 놓치게 된다(모듈 docstring의 "스캐너는
+    정밀 파서가 아니라 휴리스틱이다" 원칙과 반대 방향의 실수). BDEF 의 문자열은
+    드물게 나오는 `'...'` 하나뿐이고, ABAP 리터럴과 같이 작은따옴표 두 번으로
+    이스케이프한다고 보며 줄을 넘지 않는다고 본다(ABAP 문자열과 같은 가정,
+    `_mask_abap` 참고).
+    """
+    out = list(text)
+    i, n = 0, len(text)
+    while i < n:
+        two = text[i:i + 2]
+        if two == "//":
+            end = text.find("\n", i)
+            end = n if end == -1 else end
+            for k in range(i, end):
+                out[k] = " "
+            i = end
+            continue
+        if two == "/*":
+            close = text.find("*/", i + 2)
+            end = n if close == -1 else close + 2
+            for k in range(i, end):
+                if text[k] != "\n":
+                    out[k] = " "
+            i = end
+            continue
+        c = text[i]
+        if c == "'":
+            j = i + 1
+            while j < n:
+                if text[j] == "'":
+                    if j + 1 < n and text[j + 1] == "'":
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                if text[j] == "\n":
+                    # 닫히지 않은 문자열. 정상 BDEF 라면 안 생긴다(ABAP 과 같은 가정).
+                    break
+                j += 1
+            for k in range(i, min(j, n)):
+                if text[k] != "\n":
+                    out[k] = " "
+            i = j
+            continue
+        i += 1
+    return "".join(out)
+
+
+_MASKERS = {"abap": _mask_abap, "js": _mask_c_like, "cds": _mask_c_like, "bdef": _mask_bdef}
 
 
 # --- CR-001: 이름에 한글 등 비ASCII 문자 ------------------------------------------

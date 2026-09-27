@@ -23,7 +23,8 @@ checker/
                     훅(`uvx` 로 `python -m checker.ssot_approval` 을 부른다)이
                     같은 판정 로직을 쓴다
   code_rules.py     공통 개발 규칙 CR-001(한글 이름), CR-002(반복문 안 DB
-                    조회)를 코드(ABAP, JS/TS, CDS)에서 검사한다(#54). 문서
+                    조회)를 코드(ABAP, JS/TS, CDS, BDEF)에서 검사한다(#54,
+                    #72). BDEF 는 반복문이 없어 CR-001 만 적용한다. 문서
                     검사(engine.py)와 관할이 다르다 — 기준 폴더(`templates/`
                     와 `rules/` 를 함께 가진 폴더)를 요구하지 않고 모듈
                     하나에 CLI 까지 담는다.
