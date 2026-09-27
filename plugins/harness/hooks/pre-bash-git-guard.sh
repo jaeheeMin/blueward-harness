@@ -1,9 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
-
 input="$(cat)"
+
+# 세션이 다른 git worktree 로 옮겨가도(#71) 그 worktree 기준으로 판단하기
+# 위해, 훅에 오는 stdin JSON 의 cwd 를 최우선으로 쓴다. CLAUDE_PROJECT_DIR 은
+# 세션을 "처음 연" 폴더라 세션 도중 다른 worktree 로 옮기면 더는 맞지 않는다.
+# cwd 가 없거나 존재하지 않는 디렉터리면 CLAUDE_PROJECT_DIR 로, 그것도 없으면
+# 지금 디렉터리로 되돌아간다.
+#
+# 한계: 이 검사는 명령이 실제로 "실행되는" 디렉터리가 아니라 세션의 cwd 를
+# 본다. `cd 다른곳 && git commit` 처럼 명령 자체가 다른 저장소로 옮겨 가면
+# 이 훅은 여전히 cwd(세션이 있는 저장소) 기준으로 판단한다 — 이 스크립트는
+# 명령 문자열을 셸처럼 실행하지 않으므로 그 이동을 알 수 없다. 이 범위
+# 밖의 한계이며, 최종 방어선은 위쪽 주석대로 `.githooks/pre-push` 와 GitHub
+# 브랜치 보호 규칙이다.
+if command -v jq >/dev/null 2>&1; then
+  stdin_cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)"
+else
+  # jq 가 없으면 근사 정규식으로 뽑는다. 아래에서 존재하는 디렉터리인지 다시
+  # 검증하므로 완벽한 JSON 파서가 아니어도 안전하다.
+  stdin_cwd="$(printf '%s' "$input" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"cwd"[[:space:]]*:[[:space:]]*"([^"]*)"/\1/')"
+fi
+stdin_cwd="$(printf '%s' "$stdin_cwd" | tr -d '\r')"
+if [ -n "$stdin_cwd" ] && [ -d "$stdin_cwd" ]; then
+  resolved_dir="$stdin_cwd"
+else
+  resolved_dir="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+fi
+cd "$resolved_dir"
 
 # 거부는 jq 없이도 낼 수 있어야 한다. 이 훅이 막아야 하는 상황 중 하나가
 # jq 부재이기 때문이다. 그래서 사유 문자열에 큰따옴표와 역슬래시를 쓰지 않는다.
