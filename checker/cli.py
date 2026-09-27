@@ -20,7 +20,7 @@ from pathlib import Path
 
 from checker.engine import OUT_OF_SCOPE, check, summarize
 from checker.loader import load
-from checker.locate import group_by_company
+from checker.locate import group_by_standards_root
 from checker.model import ConfigError
 
 EXIT_PASS = 0
@@ -80,14 +80,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--auto",
         action="store_true",
-        help="파일마다 회사 폴더를 스스로 찾아 그 회사의 rules/ 를 쓴다. "
-        "여러 회사의 문서를 한 번에 검사할 때 쓴다",
+        help="파일마다 기준 폴더(`templates/` 와 `rules/` 를 함께 가진 폴더)를 스스로 "
+        "찾아 그 rules/ 를 쓴다. 기준 폴더가 여러 개인 문서를 한 번에 검사할 때 쓴다",
     )
     parser.add_argument(
         "--root",
         type=Path,
         default=None,
-        help="관할 glob 을 맞춰 볼 기준 경로. 기본은 규칙 폴더의 한 단계 위(회사 폴더)",
+        help="관할 glob 을 맞춰 볼 기준 경로. 기본은 rules/ 의 한 단계 위(기준 폴더)",
     )
     args = parser.parse_args(argv)
 
@@ -138,7 +138,7 @@ def _clean(paths: list[Path], out_dir: Path | None) -> int:
 def _check_with_rules(rules: Path, root_arg: Path | None, paths: list[Path]) -> dict:
     rules_path = rules.resolve()
     types = load(rules_path)
-    # 관할 glob 은 회사 폴더를 기준으로 쓴다(`docs/제안서/**`). 규칙은 그 아래
+    # 관할 glob 은 기준 폴더를 기준으로 쓴다(`docs/제안서/**`). 규칙은 그 아래
     # `rules/` 에 있으므로 한 단계 위가 기준이 된다.
     rules_dir = rules_path if rules_path.is_dir() else rules_path.parent
     root = (root_arg or rules_dir.parent).resolve()
@@ -146,20 +146,21 @@ def _check_with_rules(rules: Path, root_arg: Path | None, paths: list[Path]) -> 
 
 
 def _check_auto(paths: list[Path]) -> dict:
-    """파일마다 회사 폴더를 찾아 그 회사의 규칙으로 검사하고 하나로 합친다.
+    """파일마다 기준 폴더를 찾아 그 규칙으로 검사하고 하나로 합친다.
 
-    문서 저장소 하나에 회사가 여럿 있으므로 한 PR 이 두 회사 폴더를 건드릴 수 있다.
-    회사마다 규칙이 다르니 묶어서 각각 돌린 뒤 결과를 합친다.
+    보통 Project Repository 에는 기준 폴더가 하나지만, 한 저장소에 여럿 두면 한 PR 이
+    두 기준 폴더를 건드릴 수 있다. 기준 폴더마다 규칙이 다르니 묶어서 각각 돌린 뒤
+    결과를 합친다.
     """
-    grouped, orphans = group_by_company(paths)
+    grouped, orphans = group_by_standards_root(paths)
 
     files = []
-    for company, members in sorted(grouped.items()):
-        types = load(company / "rules")
-        part = check([(p, _relative(p, company)) for p in members], types)
+    for root, members in sorted(grouped.items()):
+        types = load(root / "rules")
+        part = check([(p, _relative(p, root)) for p in members], types)
         files.extend(part["files"])
 
-    # 회사 폴더 바깥의 파일은 대조할 기준이 없다. 검사한 적이 없으므로 통과라고
+    # 기준 폴더 바깥의 파일은 대조할 기준이 없다. 검사한 적이 없으므로 통과라고
     # 답하지 않는다.
     for p in orphans:
         files.append(

@@ -24,8 +24,9 @@ checker/
                     같은 판정 로직을 쓴다
   code_rules.py     공통 개발 규칙 CR-001(한글 이름), CR-002(반복문 안 DB
                     조회)를 코드(ABAP, JS/TS, CDS)에서 검사한다(#54). 문서
-                    검사(engine.py)와 관할이 다르다 — 회사 폴더(templates/
-                    rules)를 요구하지 않고 모듈 하나에 CLI 까지 담는다.
+                    검사(engine.py)와 관할이 다르다 — 기준 폴더(`templates/`
+                    와 `rules/` 를 함께 가진 폴더)를 요구하지 않고 모듈
+                    하나에 CLI 까지 담는다.
                     `pre_write_guard.py` 훅과 `scripts/check_changed.py` 가
                     같은 함수(`build_report`)를 쓴다
   code_checks.yaml  code_rules.py 의 설정. 언어별 확장자와, 그 언어에 어느
@@ -47,28 +48,28 @@ checker/
 Actions 는 팀원 PC 에 설치된 플러그인을 쓸 수 없다. 엔진을 `plugins/` 안으로
 옮기면 Actions 경로가 끊긴다.
 
-**엔진은 자기 저장소를 검사하지 않는다.** 회사별 문서 저장소가 이것을 가져다 쓴다.
+**엔진은 자기 저장소를 검사하지 않는다.** 고객사별 Project Repository 가 이것을
+가져다 쓴다.
 
 ```
-client-docs/
-  <회사>/
-    templates/    기준 문서. 원본 형식 그대로 둔다
-    rules/        그 회사의 규칙
-    docs/         검사 대상
+<Project Repository>/
+  templates/    기준 문서. 원본 형식 그대로 둔다
+  rules/        이 저장소의 규칙
+  docs/         검사 대상
 ```
 
 ```
-doc-guard --rules <회사>/rules/ <회사>/docs/*.md
+doc-guard --rules <Project Repository>/rules/ <Project Repository>/docs/*.md
 ```
 
-회사가 여럿이면 `--auto` 로 파일마다 회사 폴더를 스스로 찾게 한다. 한 PR 이 두 회사
-폴더를 건드릴 수 있으므로 GitHub Actions 쪽이 이것을 쓴다.
+기준 폴더가 여러 개면 `--auto` 로 파일마다 기준 폴더를 스스로 찾게 한다. 한 PR 이 두
+기준 폴더를 건드릴 수 있으므로 GitHub Actions 쪽이 이것을 쓴다.
 
 ```
 doc-guard --auto <바뀐 파일들>
 ```
 
-회사 폴더는 `templates/` 와 `rules/` 를 함께 가진 디렉터리다. 이 판단은 `locate.py` 에
+기준 폴더는 `templates/` 와 `rules/` 를 함께 가진 디렉터리다. 이 판단은 `locate.py` 에
 한 벌만 두고 플러그인 훅과 Actions 가 함께 쓴다. `engine.py` 는 폴더 규약을 모른다.
 
 ## 설계 원칙
@@ -192,7 +193,7 @@ doc-guard --clean <파일...> [--out-dir <곳>]
 | 플러그인 훅 | 팀원 PC 에서 문서를 저장할 때 | 텍스트 문서 | `plugins/harness/hooks/` |
 | GitHub Actions | 커밋해서 올릴 때 | 모든 형식 | `.github/workflows/doc-guard.yml` |
 
-둘이 하는 일은 같다 — 회사 폴더를 찾고, 엔진을 부르고, 종료코드로 분기한다. 끝만 다르다.
+둘이 하는 일은 같다 — 기준 폴더를 찾고, 엔진을 부르고, 종료코드로 분기한다. 끝만 다르다.
 훅은 저장을 막고 Actions 는 job 을 실패시키며 PR 에 결과를 남긴다.
 
 오피스 문서(docx·xlsx·pptx)는 훅으로 잡을 수 없다. 팀원이 엑셀이나 파워포인트에서 작업해

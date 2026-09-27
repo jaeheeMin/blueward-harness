@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from check_changed import (  # noqa: E402
     EXIT_CONFIG_ERROR,
     EXIT_PASS,
-    has_company_folder,
+    has_standards_root,
     main_entry,
     split_listing,
 )
@@ -102,20 +102,20 @@ def test_git_이_한글_경로를_이스케이프하지_않게_한다(tmp_path):
 
 
 def test_규칙_폴더를_찾는다(tmp_path):
-    assert not has_company_folder(tmp_path)
+    assert not has_standards_root(tmp_path)
 
     (tmp_path / "대한물산" / "templates").mkdir(parents=True)
-    assert not has_company_folder(tmp_path), "templates 만으로는 규칙 폴더가 아니다"
+    assert not has_standards_root(tmp_path), "templates 만으로는 규칙 폴더가 아니다"
 
     (tmp_path / "대한물산" / "rules").mkdir()
-    assert has_company_folder(tmp_path)
+    assert has_standards_root(tmp_path)
 
 
 def test_규칙_폴더가_한_단계_아래_있어도_찾는다(tmp_path):
     """`acme/templates` 와 `acme/rules` 처럼 한 단계 들어간 곳도 찾아야 한다."""
     (tmp_path / "acme" / "templates").mkdir(parents=True)
     (tmp_path / "acme" / "rules").mkdir()
-    assert has_company_folder(tmp_path)
+    assert has_standards_root(tmp_path)
 
 
 def test_규칙_폴더가_없으면_통과로_답하지_않는다(tmp_path, monkeypatch, capsys):

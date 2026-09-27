@@ -45,21 +45,22 @@ ENGINE_TIMEOUT_SECONDS = 110
 TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".yaml", ".yml", ".json", ".csv"}
 
 # 공통 개발 규칙(CR-001, CR-002, `checker.code_rules`, #54)의 검사 대상 확장자. 문서
-# 검사와는 다른 소관이라 따로 둔다 — 회사 폴더(templates/rules) 를 요구하지 않고, 어느
-# Project Repository 어느 폴더의 코드에도 똑같이 적용된다(`conventions/common.md`).
+# 검사와는 다른 소관이라 따로 둔다 — 기준 폴더(`templates/` 와 `rules/` 를 함께 가진
+# 폴더)를 요구하지 않고, 어느 Project Repository 어느 폴더의 코드에도 똑같이
+# 적용된다(`conventions/common.md`).
 #
 # 정확히 어느 언어에 어느 규칙을 적용할지는 엔진 쪽 데이터(`checker/code_checks.yaml`)가
 # 정한다 — 이 훅은 그 설정을 가져다 쓰지 않는다(설치본에는 엔진이 따라오지 않으므로,
-# 위 COMPANY_MARKERS 와 같은 사정이다). 그래서 여기 목록은 "검사 엔진에 보낼 만한
+# 위 STANDARDS_MARKERS 와 같은 사정이다). 그래서 여기 목록은 "검사 엔진에 보낼 만한
 # 확장자인가" 만 작게 판단하는 손으로 옮겨 적은 사본이고, 언어별로 정확히 어떤 규칙이
 # 도는지는 엔진이 결정한다. 언어가 늘면 이 목록과 `code_checks.yaml` 을 함께 고친다.
 CODE_SUFFIXES = {".abap", ".js", ".ts", ".mjs", ".cjs", ".cds"}
 
-# 회사 폴더는 이 둘을 함께 가진 디렉터리다. `checker/locate.py` 의 `find_company_root`
+# 기준 폴더는 이 둘을 함께 가진 디렉터리다. `checker/locate.py` 의 `find_standards_root`
 # 와 같은 판단이다. 설치된 플러그인에는 엔진(checker 패키지)이 따라오지 않아 가져다
 # 쓸 수 없으므로 여기 그대로 옮겨 적는다 — `checker/locate.py` 가 바뀌면 이쪽도 손으로
 # 맞춰야 한다는 뜻이고, 그 대가는 알고 지는 것이다(#12 결정 사항).
-COMPANY_MARKERS = ("templates", "rules")
+STANDARDS_MARKERS = ("templates", "rules")
 
 ALLOW = 0  # 통과. 아무것도 출력하지 않으면 통과다.
 
@@ -98,10 +99,10 @@ def deny(reason: str) -> None:
     sys.exit(0)
 
 
-def find_company_root(path: Path) -> Path | None:
-    """문서에서 위로 올라가며 회사 폴더를 찾는다. 없으면 None.
+def find_standards_root(path: Path) -> Path | None:
+    """문서에서 위로 올라가며 기준 폴더를 찾는다. 없으면 None.
 
-    `checker/locate.py` 의 같은 이름 함수를 그대로 옮긴 것이다. 위 COMPANY_MARKERS
+    `checker/locate.py` 의 같은 이름 함수를 그대로 옮긴 것이다. 위 STANDARDS_MARKERS
     주석을 본다.
     """
     try:
@@ -109,7 +110,7 @@ def find_company_root(path: Path) -> Path | None:
     except OSError:
         start = path
     for parent in [start.parent, *start.parent.parents]:
-        if all((parent / marker).is_dir() for marker in COMPANY_MARKERS):
+        if all((parent / marker).is_dir() for marker in STANDARDS_MARKERS):
             return parent
     return None
 
@@ -189,7 +190,7 @@ def format_code_violations(report: dict) -> str:
 def _check_code(path: Path, content: str) -> None:
     """공통 개발 규칙(CR-001, CR-002)을 코드에 적용한다(#54).
 
-    문서 검사(`_main` 의 나머지 절반)와 소관이 다르다 — 회사 폴더(`templates`/`rules`)
+    문서 검사(`_main` 의 나머지 절반)와 소관이 다르다 — 기준 폴더(`templates`/`rules`)
     를 요구하지 않는다. 이 두 규칙은 어느 Project Repository, 어느 폴더의 코드에도
     똑같이 적용되기 때문이다(`conventions/common.md`). 무엇이 위반인지는 전부
     `checker.code_rules` 가 판정하고, 이 훅은 대상 확장자를 고르고 판정을 받아 막을지
@@ -287,8 +288,8 @@ def _main() -> None:
     suffix = path.suffix.lower()
 
     if suffix in CODE_SUFFIXES:
-        # 공통 개발 규칙(#54)은 문서 검사와 소관이 다르다 — 회사 폴더를 요구하지
-        # 않으므로 아래 doc-guard 절차(find_company_root 등)를 타지 않는다.
+        # 공통 개발 규칙(#54)은 문서 검사와 소관이 다르다 — 기준 폴더를 요구하지
+        # 않으므로 아래 doc-guard 절차(find_standards_root 등)를 타지 않는다.
         if _has_broken_encoding(raw_path):
             deny(
                 "코드 경로가 깨져 들어와(인코딩 문제) 이 파일을 확인할 수 없습니다.\n"
@@ -306,7 +307,7 @@ def _main() -> None:
     if _has_broken_encoding(raw_path):
         # 경로 문자열에 U+FFFD(대체 문자)나 짝을 잃은 서로게이트가 섞여 있다면,
         # 어딘가에서 인코딩이 깨져 들어왔다는 뜻이다. 원래 경로를 잃어버렸으므로
-        # 이 문서가 회사 폴더 아래(=doc-guard 소관)인지조차 판단할 수 없다.
+        # 이 문서가 기준 폴더 아래(=doc-guard 소관)인지조차 판단할 수 없다.
         # 판단 불능을 관할 밖으로 뭉개면, 진짜 위반 문서가 깨진 경로 덕에 조용히
         # 통과해 버린다 — 이슈 #14, CLAUDE.md 원칙 7("검사를 못 했다" 를 "통과" 나
         # "위반" 으로 뭉개지 않는다).
@@ -315,8 +316,8 @@ def _main() -> None:
             "판단할 수 없습니다.\n확인되지 않는 상태로 통과시키지 않습니다."
         )
 
-    company = find_company_root(path)
-    if company is None:
+    standards_root = find_standards_root(path)
+    if standards_root is None:
         allow()  # doc-guard 의 소관이 아니다
 
     content = proposed_content(tool, tool_input, path)
@@ -324,7 +325,7 @@ def _main() -> None:
         allow()
 
     try:
-        relative = path.resolve().relative_to(company.resolve())
+        relative = path.resolve().relative_to(standards_root.resolve())
     except ValueError:
         allow()
 
@@ -333,14 +334,14 @@ def _main() -> None:
         staged.parent.mkdir(parents=True, exist_ok=True)
         staged.write_text(content, encoding="utf-8")
 
-        # 규칙은 회사 폴더의 진짜 것을 쓰고(템플릿 경로가 거기서 풀린다), 관할을 맞춰 볼
+        # 규칙은 기준 폴더의 진짜 것을 쓰고(템플릿 경로가 거기서 풀린다), 관할을 맞춰 볼
         # 기준만 임시 폴더로 둔다. 그래야 파일명·위치 규칙이 원래 자리 기준으로 판정된다.
         #
         # 엔진 자체는 이 저장소에 있지 않고 uvx 로 GitHub 에서 받는다. 처음 받을 때는
         # 네트워크가 필요하고 시간이 걸리지만, uv 캐시에 남아 이후로는 빠르다.
         cmd = [
             "uvx", "--from", engine_spec(), "doc-guard",
-            "--rules", str(company / "rules"),
+            "--rules", str(standards_root / "rules"),
             "--root", tmp,
             str(staged),
         ]
@@ -405,7 +406,7 @@ def _force_utf8_io() -> None:
     예전에는 stdout 은 `deny()` 안에서, stdin 은 `_main()` 안에서 따로따로
     손댔다. 그러다 stdout 조치만 남고 stdin 조치가 빠지는 일이 실제로 있었다
     (#14) — Windows 콘솔 기본 코드페이지로 표준입력을 읽으면 한글이 섞인
-    경로가 깨지고, `find_company_root` 가 회사 폴더를 찾지 못해 위반 문서를
+    경로가 깨지고, `find_standards_root` 가 기준 폴더를 찾지 못해 위반 문서를
     조용히 통과시켰다. 입출력 인코딩을 이 함수 하나로 모아, 한쪽만 고쳐지고
     다른 쪽은 잊히는 일이 다시 생기지 않게 한다.
     """

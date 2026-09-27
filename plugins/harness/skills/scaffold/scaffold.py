@@ -5,8 +5,8 @@
 test_scaffold.py`)가 사람 손 없이 반복 실행할 수 있어야 하기 때문이다.
 
 만드는 자리는 `skeleton/` 아래를 그대로 옮긴 것이다. `templates/` 와 `rules/`
-를 프로젝트 저장소 루트에 두면, `checker.locate.find_company_root` 가 이
-루트를 회사 폴더로 찾아내고 `관할` glob 도 이 루트를 기준으로 맞아떨어진다.
+를 프로젝트 저장소 루트에 두면, `checker.locate.find_standards_root` 가 이
+루트를 기준 폴더로 찾아내고 `관할` glob 도 이 루트를 기준으로 맞아떨어진다.
 CLAUDE.md 의 "지금 어디까지 왔나" 가 이 전제를 설명한다.
 
 이미 있는 파일은 절대 덮어쓰지 않는다. 두 번째 실행에서도 사람이 이미 채워

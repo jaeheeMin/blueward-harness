@@ -58,7 +58,7 @@ Actions 는 팀원 PC 에 설치된 플러그인을 쓸 수 없다. 엔진을 `p
 플러그인 훅이 생긴 뒤에 아래로 설치한다. 그 전에는 엔진을 직접 부른다.
 
 ```bash
-uv run doc-guard --rules <회사>/rules/ <회사>/docs/파일.md
+uv run doc-guard --rules <Project Repository>/rules/ <Project Repository>/docs/파일.md
 ```
 
 ```

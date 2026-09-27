@@ -1,6 +1,6 @@
 """훅과 GitHub Actions 두 껍데기가 쓰는 부분.
 
-둘이 하는 일은 같다 — 회사 폴더를 찾고, 엔진을 부르고, 종료코드로 분기한다. 끝만 다르다.
+둘이 하는 일은 같다 — 기준 폴더를 찾고, 엔진을 부르고, 종료코드로 분기한다. 끝만 다르다.
 훅은 저장을 막고 Actions 는 PR 을 실패시킨다.
 """
 from __future__ import annotations
@@ -20,14 +20,14 @@ HOOK = Path(__file__).resolve().parents[2] / "plugins" / "harness" / "hooks" / "
 
 # --- --auto ---------------------------------------------------------------
 
-def test_auto_는_회사_폴더를_스스로_찾는다(capsys, sample):
+def test_auto_는_기준_폴더를_스스로_찾는다(capsys, sample):
     code = main(["--auto", str(sample / "docs/제안서/제안서최종.md")])
     out = json.loads(capsys.readouterr().out)
     assert code == EXIT_VIOLATION
     assert out["files"][0]["type"] == "제안서"
 
 
-def test_auto_는_회사_폴더_밖을_관할_밖으로_둔다(capsys, sample, tmp_path):
+def test_auto_는_기준_폴더_밖을_관할_밖으로_둔다(capsys, sample, tmp_path):
     outside = tmp_path / "아무데나.md"
     outside.write_text("# 제목\n", encoding="utf-8")
     code = main(["--auto", str(outside)])

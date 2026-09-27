@@ -106,7 +106,7 @@ def check_file(path: Path, relative: str, types: list[DocType]) -> dict:
 def summarize(files: list[dict]) -> dict:
     """상태 목록에서 요약을 낸다.
 
-    `check()` 와, 회사별로 나눠 돌린 뒤 합치는 `cli._check_auto` 가 같은 계산을 쓰도록
+    `check()` 와, 기준 폴더별로 나눠 돌린 뒤 합치는 `cli._check_auto` 가 같은 계산을 쓰도록
     한 곳에 둔다. `skipped` 는 관할 안에 있었지만 자리표시·시스템 파일이라 문서로 보지
     않은 것이다 — 검사한 것(`scoped`)으로도, 관할 밖으로도 세면 이중으로 뭉개진다.
     """

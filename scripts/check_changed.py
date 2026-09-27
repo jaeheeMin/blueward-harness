@@ -14,16 +14,16 @@
 있으면 "바뀐 것이 없다" 는 뜻이라 통과(0)가 맞지만, 목록 파일을 읽지 못하면 무엇이
 바뀌었는지조차 알아내지 못한 것이므로 검사 불능(2)이다.
 
-회사 폴더(`templates/` 와 `rules/` 를 함께 둔 폴더)가 저장소 안에 하나도 없어도
+기준 폴더(`templates/` 와 `rules/` 를 함께 가진 폴더)가 저장소 안에 하나도 없어도
 지금까지는 조용히 통과했다. 관할 glob 이 아무 것도 매치하지 못해 모든 문서가
 out_of_scope 로 빠지기 때문이다. 이 워크플로를 부르는 저장소는 검사받을 뜻으로 부른
-것이므로, 회사 폴더가 아예 없는 것은 관할 밖이 아니라 설정을 빠뜨린 것이다(#24). 바뀐
-파일이 있는데 회사 폴더가 하나도 없으면 검사 불능으로 끝낸다. 바뀐 파일이 없을 때는 이
+것이므로, 기준 폴더가 아예 없는 것은 관할 밖이 아니라 설정을 빠뜨린 것이다(#24). 바뀐
+파일이 있는데 기준 폴더가 하나도 없으면 검사 불능으로 끝낸다. 바뀐 파일이 없을 때는 이
 검사를 하지 않는다 — 그것은 정당한 통과이지 설정 오류가 아니다.
 
 **공통 개발 규칙(CR-001, CR-002, #54)은 문서 검사와 소관이 갈린다.** `checker.code_rules`
 가 아는 확장자(`.abap`, `.js`/`.ts`, `.cds` 등)는 doc-guard 의 `--auto` 로 보내지 않고
-따로 검사한다 — 회사 폴더를 요구하지 않으므로, 바뀐 파일이 전부 코드뿐이면 회사 폴더가
+따로 검사한다 — 기준 폴더를 요구하지 않으므로, 바뀐 파일이 전부 코드뿐이면 기준 폴더가
 하나도 없어도(#24 가드) 검사 불능으로 끝내지 않는다. 그 가드는 문서에만 해당한다. 두
 검사의 리포트는 하나의 JSON 에 함께 담되(`code_rules` 키), 종료코드는 둘 중 더 나쁜
 쪽을 따른다 — 검사 불능(2) > 위반(1) > 통과(0).
@@ -71,11 +71,11 @@ def split_listing(text: str) -> tuple[list[str], list[str]]:
     return found, missing
 
 
-def has_company_folder(root: Path, depth: int = 2) -> bool:
-    """회사 폴더가 하나라도 있는지 본다.
+def has_standards_root(root: Path, depth: int = 2) -> bool:
+    """기준 폴더가 하나라도 있는지 본다.
 
-    `templates/` 와 `rules/` 를 함께 둔 폴더가 회사 폴더다. `checker.locate` 의
-    `find_company_root` 는 문서 하나에서 위로 올라가며 찾지만, 여기서는 저장소 전체에
+    `templates/` 와 `rules/` 를 함께 둔 폴더가 기준 폴더다. `checker.locate` 의
+    `find_standards_root` 는 문서 하나에서 위로 올라가며 찾지만, 여기서는 저장소 전체에
     그런 폴더가 정말 하나도 없는지를 위에서 아래로 훑어 확인한다.
     """
     for level in range(depth + 1):
@@ -138,7 +138,7 @@ def main_entry(argv: list[str] | None = None) -> int:
         )
 
     if not found:
-        # 애초에 목록이 비어 있었다. 검사할 것이 없고 그 사실은 리포트가 싣는다. 회사
+        # 애초에 목록이 비어 있었다. 검사할 것이 없고 그 사실은 리포트가 싣는다. 기준
         # 폴더 유무도 따지지 않는다 — 바뀐 것이 없다는 정당한 통과이지 설정 오류가
         # 아니다.
         print(EMPTY_REPORT)
@@ -146,11 +146,11 @@ def main_entry(argv: list[str] | None = None) -> int:
 
     doc_files, code_files = split_by_language(found)
 
-    if doc_files and not has_company_folder(Path.cwd()):
-        # 바뀐 문서가 있는데 대조할 회사 폴더가 하나도 없다. 지금까지는 모든 문서가
-        # out_of_scope 로 빠져 조용히 통과했다(#24) — 회사 폴더를 만드는 것을 잊은
+    if doc_files and not has_standards_root(Path.cwd()):
+        # 바뀐 문서가 있는데 대조할 기준 폴더가 하나도 없다. 지금까지는 모든 문서가
+        # out_of_scope 로 빠져 조용히 통과했다(#24) — 기준 폴더를 만드는 것을 잊은
         # Project Repository 가 정확히 이 모양이 된다. 코드만 바뀐 경우는 이 가드를
-        # 타지 않는다 — CR-001/CR-002 는 회사 폴더가 있든 없든 항상 적용된다.
+        # 타지 않는다 — CR-001/CR-002 는 기준 폴더가 있든 없든 항상 적용된다.
         return config_error(
             "이 저장소에서 `templates/` 와 `rules/` 를 함께 가진 폴더를 찾지 못해 "
             "검사할 수 없습니다. doc-guard 를 쓰는 Project Repository 라면 "

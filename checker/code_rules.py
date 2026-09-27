@@ -2,9 +2,10 @@
 기계로 검사한다(#54, `plugins/harness/conventions/common.md`).
 
 문서 검사(`checker.engine`)와는 관할이 다르다. 문서 쪽은 템플릿과 규칙 파일을 요구하지만,
-이 두 규칙은 어느 Project Repository, 어느 회사 폴더에서나 항상 같다 — 회사별 `rules.yaml`
-로 켜고 끄는 대상이 아니다. 그래서 `checker.engine` 의 관할(glob)·규칙(rule kind) 틀을
-쓰지 않고 이 파일 하나에 CLI 까지 둔다. 다만 "규칙은 코드가 아니라 데이터" 라는 원칙은
+이 두 규칙은 어느 Project Repository, 어느 기준 폴더(`templates/` 와 `rules/` 를 함께
+가진 폴더)에서나 항상 같다 — 기준 폴더별 `rules.yaml` 로 켜고 끄는 대상이 아니다.
+그래서 `checker.engine` 의 관할(glob)·규칙(rule kind) 틀을 쓰지 않고 이 파일 하나에
+CLI 까지 둔다. 다만 "규칙은 코드가 아니라 데이터" 라는 원칙은
 그대로 지킨다 — 어느 언어에서 어느 규칙을 적용하는지는 `code_checks.yaml` 에 있고, 여기
 있는 것은 언어별 주석·문자열·반복문을 알아보는 스캐너뿐이다.
 
