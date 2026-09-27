@@ -26,7 +26,12 @@ warn() {
 
 # 변경이 없으면 jq 유무와 무관하게 조용히 끝난다. jq 유무 검사를 이 앞에
 # 두면 변경이 없어도 매번 경고가 나가 버린다.
-changed="$(git status --porcelain || true)"
+# /harness:deliver 가 스테이징에서 빼는 것(.superpowers/, *handoff*.md)은 여기서도
+# 세지 않는다(#59). 세면 인계 메모 하나만 남아도 deliver 로 없앨 수 없는
+# 경고가 매번 뜬다. 한글 경로는 porcelain 이 따옴표로 감싸므로 따옴표도 허용한다.
+# --untracked-files=all 로 파일 단위로 본다. 기본값은 추적 안 된 폴더를 `?? docs/`
+# 한 줄로 접어, 그 안에 인계 메모만 있어도 걸러 내지 못한다.
+changed="$(git status --porcelain --untracked-files=all | grep -Ev '^.. "?((.*/)?\.superpowers/|.*handoff.*\.md"?$)' || true)"
 if [ -z "$changed" ]; then
   exit 0
 fi

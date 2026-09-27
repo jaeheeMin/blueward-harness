@@ -77,10 +77,20 @@ if [ "$branch" = "main" ]; then
   add "main 에서는 커밋할 수 없습니다. 작업을 시작하려면 /harness:start 를 실행하십시오."
 fi
 
-changed="$(git status --porcelain || true)"
+# /harness:deliver 가 스테이징에서 빼는 것(.superpowers/, *handoff*.md)은 여기서도
+# 세지 않는다(#59). 세면 인계 메모 하나만 남아도 deliver 로 없앨 수 없는
+# 경고가 매번 뜬다. 한글 경로는 porcelain 이 따옴표로 감싸므로 따옴표도 허용한다.
+# --untracked-files=all 로 파일 단위로 본다. 기본값은 추적 안 된 폴더를 `?? docs/`
+# 한 줄로 접어, 그 안에 인계 메모만 있어도 걸러 내지 못한다.
+changed="$(git status --porcelain --untracked-files=all | grep -Ev '^.. "?((.*/)?\.superpowers/|.*handoff.*\.md"?$)' || true)"
 if [ -n "$changed" ]; then
   add "커밋되지 않은 변경이 있습니다."
-  add "$changed"
+  # 파일 단위로 보므로 목록이 길어질 수 있다. 세션 맥락을 채우지 않게 20줄까지만 싣는다.
+  add "$(printf '%s\n' "$changed" | head -n 20)"
+  total="$(printf '%s\n' "$changed" | wc -l | tr -d ' ')"
+  if [ "$total" -gt 20 ]; then
+    add "... 외 $((total - 20))개"
+  fi
   add "작업을 마칠 때 /harness:deliver 로 커밋과 푸시와 PR 까지 정리하십시오."
 fi
 
