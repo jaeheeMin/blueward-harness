@@ -112,7 +112,7 @@ SELECT·OPEN CURSOR 를 잡는다. JS/TS 는 `for`/`while`/`.forEach`/`.map` 의
 `harness:allow CR-00N <이유>` 주석으로 예외를 남길 수 있고, 이유가 없으면 예외로
 인정하지 않는다. doc-guard 와 같은 두 관문을 그대로 쓴다 — `pre_write_guard.py`
 훅이 코드를 저장할 때, `scripts/check_changed.py` 가 PR 마다 막는다. 코드 검사는
-회사 폴더(`templates`/`rules`)를 요구하지 않는다(#24 가드가 코드에는 적용되지
+기준 폴더(`templates/` 와 `rules/` 를 함께 가진 폴더)를 요구하지 않는다(#24 가드가 코드에는 적용되지
 않는다) — 이 두 규칙은 어느 Project Repository, 어느 폴더에도 항상 같기
 때문이다. PR 코멘트는 문서 위반과 코드 위반을 절을 나눠 보여준다. MCP 로 ABAP
 오브젝트를 직접 쓰는 경로는 처음에 걸지 않았다 — 도구 이름과 소스 필드를
@@ -126,7 +126,7 @@ MCP 서버(npm `mcp-abap-abap-adt-api`)에서 소스를 쓰는 도구는 `setObj
 `mcp__.*__setObjectSource` 로 그 호출을 가로챈다 — 서버 이름은 프로젝트마다
 다르므로 이름에 매이지 않는다. 언어는 `objectSourceUrl` 경로로 가리고, 그 매핑은
 데이터(`mcp_object_source_map.json`)다(원칙 2). 판정은 파일 저장 때와 같은
-`checker.code_rules` 를 `uvx` 로 부른다. 매핑에 없는 경로(예: BDEF), `source`
+`checker.code_rules` 를 `uvx` 로 부른다. 매핑에 없는 경로, `source`
 누락, 엔진 실행 실패는 검사 불능으로 거절한다 — 실제로 막히는 경로가 나오면
 매핑 파일에 한 줄 더해 넓힌다. public-cloud 에서 새 세션을 열어 080 테넌트를
 대상으로 확인했다: 한글 이름 소스는 SAP 에 닿기 전에 막히고, 깨끗한 소스는 훅을
@@ -135,14 +135,58 @@ MCP 서버(npm `mcp-abap-abap-adt-api`)에서 소스를 쓰는 도구는 `setObj
 세션에서만 돈다. 그래서 MCP 서버 셋(`abap-adt`, `abap-adt-z5u`,
 `abap-adt-z5u-dev`)을 사용자 범위로도 등록해, harness 가 켜진 Project
 Repository 에서 바로 SAP 에 쓸 수 있게 했다. 이름 바꾸기·리팩터링 도구
-(`renameExecute` 등)는 소스 본문 없이 서버에서 코드를 바꿔 이 훅에 걸리지 않는다
-— #61 로 남겼다.
+(`renameExecute` 등)는 소스 본문 없이 서버에서 코드를 바꿔 이 훅에 걸리지 않았다
+— 아래 #61 에서 걸었다.
 
 **merge 가드가 엔진 빌드 로그 때문에 PRD 승인 판정을 읽지 못하던 결함을
 고쳤다(#63).** `pre-bash-git-guard.sh` 가 판정 출력과 uv 의 빌드 로그(stderr)를
 한데 받아, main 이 바뀐 뒤 첫 merge 가 정상 PR 인데도 막혔다. 막는 쪽으로
 틀렸으니 원칙 7 은 지켰지만 헛된 거절이었다. 이제 둘을 나눠 받아 판정은 stdout
 만 읽는다.
+
+**Stop Hook 과 세션 시작 Hook 이 인계 메모를 미커밋으로 세지 않는다(#59).**
+`/harness:deliver` 는 `.superpowers/` 와 `*handoff*.md` 를 스테이징에서 빼는데,
+두 Hook 은 이것들을 걸러 내지 않아 인계 메모만 남아도 매 턴 deliver 를 요구했다.
+같은 기준으로 걸러 내고, `--untracked-files=all` 로 파일 단위로 본다.
+
+**MCP 리팩터링·생성 도구가 새로 붙이는 이름에도 CR-001 을 건다(#61).**
+`mcp_source_guard.py` 매처를 `renamePreview`, `renameExecute`,
+`extractMethodPreview`, `extractMethodExecute`, `createObject` 까지 넓혔다. 새
+이름이 담기는 칸은 도구마다 다르다 — `renameRefactoring.newName`,
+`refactoring.newName`, `proposal.name`(JSON 문자열), `name`. 이름을 한 줄 `.abap`
+으로 엔진에 넣고 CR-001 결과만 본다. `extractMethodExecute` 는 이름 칸이 없어
+`affectedObjects[].textReplaceDeltas[].contentNew` 코드 조각을 이어 붙여 검사한다.
+이 경로는 코드를 옮기거나 이름만 바꾸므로 CR-002 는 보지 않는다. 칸이 없거나 JSON
+을 풀지 못하면 검사 불능으로 거절한다. 입력 모양은 로컬 npx 캐시의 패키지
+핸들러와 `abap-adt-api` 타입 정의로 확인했고, 실제 SAP 에 리팩터링을 걸어 본 끝까지는
+아직 보지 않았다. 조사 중 `fixEdits` 도 소스 본문을 받아 따로 이슈(#69)로
+남겼으나, `fixEdits` 는 빠른 수정의 수정안(범위 + 내용)을 계산해 돌려받을 뿐
+저장하지 않는다(POST, `lockHandle` 없음). 저장은 결국 `setObjectSource` 를 거치므로
+막을 구멍이 없어 구현하지 않고 닫았다.
+
+**세션 Hook 이 지금 작업 폴더로 판단한다(#71).** `session-start-sync.sh`,
+`stop-deliver.sh`, `pre-bash-git-guard.sh` 는 `CLAUDE_PROJECT_DIR`(세션을 처음 연
+폴더)로 이동해 판단했으므로, 세션이 다른 worktree 로 옮기면 원래 폴더를 보고 경고나
+거절을 냈다. 이제 모든 Hook 입력에 오는 `cwd`(Claude Code 문서상 worktree 를
+따라간다)를 먼저 쓰고, 없거나 존재하지 않는 폴더면 `CLAUDE_PROJECT_DIR` 로
+되돌아간다. `cd 다른폴더 && git commit` 처럼 명령 안에서 폴더를 바꾸는 경우는 여전히
+`cwd` 기준으로 판단한다. 실제 세션에서 worktree 로 옮긴 뒤의 동작은 아직 보지 않았다.
+
+**RAP 동작 정의(BDEF)에도 CR-001 을 건다(#72).** 전에는 MCP 로 쓸 때 언어를
+판별하지 못해 늘 검사 불능으로 거절됐고, 파일로 저장할 때는 검사 없이 통과했다.
+엔진에 `bdef` 언어를 넣었다 — `//`, `/* */` 주석과 `'...'` 문자열을 지운다(JS/CDS 용
+마스킹은 `"`, `` ` `` 도 문자열로 봐서 BDEF 에 맞지 않는다). 반복문이 없으므로
+CR-002 는 적용하지 않는다. ADT 주소 `/sap/bc/adt/bo/behaviordefinitions/` 는 080
+테넌트에서 실제 BDEF 를 조회해 확인했고, abapGit 확장자 `.asbdef` 는 abapGit 의
+`zcl_abapgit_object_bdef` 소스로 확인했다. BDEF 문자열의 이스케이프(`''`)는 실물이
+드물어 ABAP 과 같다고 가정했다.
+
+**"회사 폴더" 라는 옛 용어를 "기준 폴더" 로 정리했다(#36).** `templates/` 와
+`rules/` 를 함께 가진 폴더를 가리키는 말이다. `find_company_root` →
+`find_standards_root`, `group_by_company` → `group_by_standards_root`,
+`has_company_folder` → `has_standards_root` 로 바꾸고 도움말·주석·README·Scaffold
+Skill·테스트 이름을 맞췄다. 동작은 그대로다. 이 문서의 설계 이력 문장은 옛 구조를
+설명하는 기록이라 옛 말을 그대로 둔다.
 
 ## 아직 정하지 않은 것
 
