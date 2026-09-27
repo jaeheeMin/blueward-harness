@@ -7,7 +7,8 @@ description: 새 고객사 Project Repository 를 처음 만들었을 때 표준
 
 새로 만든 Project Repository 에 doc-guard 가 기대하는 표준 구조를 만드는
 입구다. `templates/` 와 `rules/` 를 저장소 루트에 두면, 검사 엔진이 문서에서
-위로 올라가며 이 둘을 찾아 "여기가 회사 폴더다" 라고 판단한다.
+위로 올라가며 이 둘을 찾아 "여기가 기준 폴더(`templates/` 와 `rules/` 를 함께 가진
+폴더)다" 라고 판단한다.
 
 1. 고객사 이름과 프로젝트 이름이 인자로 주어지지 않았으면, 한 번에 같이
    물어본다("어느 고객사, 어느 프로젝트인가요?"). PRD(`docs/ssot/`) 변경 PR 을

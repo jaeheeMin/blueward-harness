@@ -73,8 +73,8 @@ def installed_hook(tmp_path_factory) -> Path:
 
 
 @pytest.fixture()
-def company(tmp_path) -> Path:
-    """`templates/` 와 `rules/` 와 `docs/` 를 든 가짜 고객사 폴더."""
+def standards_root(tmp_path) -> Path:
+    """`templates/` 와 `rules/` 와 `docs/` 를 든 가짜 기준 폴더."""
     root = tmp_path / "회사"
     _write(root / "templates" / "제안서.md", PROPOSAL_TEMPLATE)
     _write(root / "rules" / "제안서.yaml", PROPOSAL_RULES)
@@ -83,11 +83,11 @@ def company(tmp_path) -> Path:
 
 
 @pytest.fixture()
-def ssot_company(tmp_path) -> Path:
-    """`고객사/프로젝트` 처럼 한글 폴더가 겹으로 이어지는 회사 폴더(#14).
+def ssot_standards_root(tmp_path) -> Path:
+    """`고객사/프로젝트` 처럼 한글 폴더가 겹으로 이어지는 기준 폴더(#14).
 
-    `company` 픽스처는 회사 폴더 이름 하나만 한글이다. 여기서는 그 위 폴더도
-    한글로 두어, 실제 프로젝트 저장소에서 흔한 모양을 흉내 낸다.
+    `standards_root` 픽스처는 기준 폴더 이름 하나만 한글이다. 여기서는 그 위
+    폴더도 한글로 두어, 실제 프로젝트 저장소에서 흔한 모양을 흉내 낸다.
     """
     root = tmp_path / "고객사" / "프로젝트"
     (root / "templates").mkdir(parents=True)
@@ -143,8 +143,8 @@ def _write_payload(path: Path, content: str) -> dict:
     return {"tool_name": "Write", "tool_input": {"file_path": str(path), "content": content}}
 
 
-def test_설치본에서도_위반_문서를_막는다(installed_hook, company):
-    target = company / "docs" / "제안서" / "위반.md"
+def test_설치본에서도_위반_문서를_막는다(installed_hook, standards_root):
+    target = standards_root / "docs" / "제안서" / "위반.md"
     code, out = run_hook(
         installed_hook, _write_payload(target, "# 제안서\n\n## 개요\n"), str(ENGINE_ROOT)
     )
@@ -152,29 +152,29 @@ def test_설치본에서도_위반_문서를_막는다(installed_hook, company):
     assert "일정" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-def test_설치본에서도_규칙에_맞는_문서는_통과시킨다(installed_hook, company):
-    target = company / "docs" / "제안서" / "통과.md"
+def test_설치본에서도_규칙에_맞는_문서는_통과시킨다(installed_hook, standards_root):
+    target = standards_root / "docs" / "제안서" / "통과.md"
     code, out = run_hook(
         installed_hook, _write_payload(target, PROPOSAL_TEMPLATE), str(ENGINE_ROOT)
     )
     assert code == 0 and out is None
 
 
-def test_회사_폴더_밖의_파일은_관할_밖이라_통과시킨다(installed_hook, tmp_path):
+def test_기준_폴더_밖의_파일은_관할_밖이라_통과시킨다(installed_hook, tmp_path):
     outside = tmp_path / "아무데나.md"
     code, out = run_hook(installed_hook, _write_payload(outside, "아무거나"), str(ENGINE_ROOT))
     assert code == 0 and out is None
 
 
-def test_텍스트가_아닌_확장자는_관여하지_않는다(installed_hook, company):
-    target = company / "docs" / "제안서" / "파일.docx"
+def test_텍스트가_아닌_확장자는_관여하지_않는다(installed_hook, standards_root):
+    target = standards_root / "docs" / "제안서" / "파일.docx"
     code, out = run_hook(installed_hook, _write_payload(target, "아무거나"), str(ENGINE_ROOT))
     assert code == 0 and out is None
 
 
-def test_엔진을_받을_수_없으면_통과가_아니라_거절한다(installed_hook, company, tmp_path):
+def test_엔진을_받을_수_없으면_통과가_아니라_거절한다(installed_hook, standards_root, tmp_path):
     """CLAUDE.md 원칙 7: '검사를 못 했다' 를 '통과' 로 뭉개지 않는다."""
-    target = company / "docs" / "제안서" / "아무.md"
+    target = standards_root / "docs" / "제안서" / "아무.md"
     missing_engine = str(tmp_path / "존재하지-않는-경로")
     code, out = run_hook(installed_hook, _write_payload(target, "아무거나"), missing_engine)
     assert decision(out) == "deny"
@@ -213,8 +213,8 @@ def test_입력을_해석하지_못하면_통과시키지_않는다(installed_ho
 # 깨뜨려, 아래 단언 중 적어도 하나는 실패한다 — 그것이 이 테스트의 존재 이유다.
 
 
-def test_한글이_겹친_경로에서도_설치본이_파일명_위반을_막는다(installed_hook, ssot_company):
-    target = ssot_company / "docs" / "ssot" / "PRD_v2.md"
+def test_한글이_겹친_경로에서도_설치본이_파일명_위반을_막는다(installed_hook, ssot_standards_root):
+    target = ssot_standards_root / "docs" / "ssot" / "PRD_v2.md"
     code, out = run_hook_bytes(
         installed_hook, _write_payload(target, "# PRD\n"), str(ENGINE_ROOT)
     )
@@ -222,16 +222,16 @@ def test_한글이_겹친_경로에서도_설치본이_파일명_위반을_막�
     assert "파일 이름이 정해진 형식과 다르다" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-def test_한글이_겹친_경로에서도_설치본이_규칙에_맞는_파일은_통과시킨다(installed_hook, ssot_company):
-    target = ssot_company / "docs" / "ssot" / "PRD.md"
+def test_한글이_겹친_경로에서도_설치본이_규칙에_맞는_파일은_통과시킨다(installed_hook, ssot_standards_root):
+    target = ssot_standards_root / "docs" / "ssot" / "PRD.md"
     code, out = run_hook_bytes(
         installed_hook, _write_payload(target, "# PRD\n"), str(ENGINE_ROOT)
     )
     assert code == 0 and out is None
 
 
-def test_한글_파일명도_설치본이_위반으로_잡는다(installed_hook, ssot_company):
-    target = ssot_company / "docs" / "ssot" / "요구사항.md"
+def test_한글_파일명도_설치본이_위반으로_잡는다(installed_hook, ssot_standards_root):
+    target = ssot_standards_root / "docs" / "ssot" / "요구사항.md"
     code, out = run_hook_bytes(
         installed_hook, _write_payload(target, "# 요구사항\n"), str(ENGINE_ROOT)
     )
@@ -242,7 +242,7 @@ def test_한글_파일명도_설치본이_위반으로_잡는다(installed_hook,
 def test_경로가_깨져_들어오면_검사_불능으로_거절한다(installed_hook, tmp_path):
     """경로 문자열에 U+FFFD 가 섞여 있으면 관할 판단 자체가 불가능하다(#14).
 
-    진짜 관할 밖(회사 폴더가 없는 경우, 위 테스트들에도 있다)과는 받는 처분이
+    진짜 관할 밖(기준 폴더가 없는 경우, 위 테스트들에도 있다)과는 받는 처분이
     달라야 한다 — 이쪽은 allow 가 아니라 deny 다(CLAUDE.md 원칙 7).
     """
     target = tmp_path / "��" / "docs" / "PRD.md"
@@ -257,8 +257,8 @@ def test_경로가_깨져_들어오면_검사_불능으로_거절한다(installe
 
 # --- 공통 개발 규칙(CR-001, CR-002, #54) -----------------------------------
 #
-# 문서 검사와 소관이 다르다 — 회사 폴더(`templates`/`rules`)를 요구하지 않는다.
-# 그래서 아래 테스트는 `company` 픽스처 없이 아무 임시 폴더에서나 확인한다.
+# 문서 검사와 소관이 다르다 — 기준 폴더(`templates`/`rules`)를 요구하지 않는다.
+# 그래서 아래 테스트는 `standards_root` 픽스처 없이 아무 임시 폴더에서나 확인한다.
 
 
 def test_설치본에서도_코드의_한글_이름을_막는다(installed_hook, tmp_path):
@@ -296,10 +296,10 @@ def test_설치본에서도_규칙을_지킨_코드는_통과시킨다(installed
     assert code == 0 and out is None
 
 
-def test_회사_폴더가_없어도_공통_개발_규칙은_적용된다(installed_hook, tmp_path):
+def test_기준_폴더가_없어도_공통_개발_규칙은_적용된다(installed_hook, tmp_path):
     """CR-001/CR-002 는 doc-guard 와 달리 `templates`/`rules` 를 요구하지 않는다.
 
-    `tmp_path` 는 어느 회사 폴더에도 속하지 않지만(company 픽스처를 쓰지 않았다),
+    `tmp_path` 는 어느 기준 폴더에도 속하지 않지만(standards_root 픽스처를 쓰지 않았다),
     그래도 위반이 막혀야 이 규칙이 문서 검사와 소관이 다르다는 설계가 지켜진다.
     """
     target = tmp_path / "아무데나" / "z_report.abap"

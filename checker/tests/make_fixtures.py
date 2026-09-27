@@ -4,7 +4,7 @@ docx·xlsx·pptx 는 바이너리라 커밋하면 리뷰에서 diff 를 볼 수 
 의도한 위반을 담고 있나" 를 아무도 확인할 수 없다. 생성 스크립트로 두면 무엇이 들어 있는지가
 코드로 읽히고 고칠 때 diff 가 남는다.
 
-만들어지는 구조는 실제 문서 저장소와 같다. 회사 폴더 하나가 templates/ rules/ docs/ 를
+만들어지는 구조는 실제 문서 저장소와 같다. 기준 폴더 하나가 templates/ rules/ docs/ 를
 들고 있고, 검사는 그 바깥에서 부른다.
 """
 from __future__ import annotations
