@@ -115,11 +115,34 @@ SELECT·OPEN CURSOR 를 잡는다. JS/TS 는 `for`/`while`/`.forEach`/`.map` 의
 회사 폴더(`templates`/`rules`)를 요구하지 않는다(#24 가드가 코드에는 적용되지
 않는다) — 이 두 규칙은 어느 Project Repository, 어느 폴더에도 항상 같기
 때문이다. PR 코멘트는 문서 위반과 코드 위반을 절을 나눠 보여준다. MCP 로 ABAP
-오브젝트를 직접 쓰는 경로는 아직 걸지 않았다 — 이 저장소에는 그 MCP 서버 자체가
-연결되어 있지 않아(다른 프로젝트의 프로젝트 범위 `.mcp.json` 에만 있다) 정확한
-도구 이름과 소스 필드를 이 저장소 안에서 확인할 방법이 없었다. 잘못 짚은 필드를
-걸면 검사가 도는 것처럼 보이면서 실은 아무것도 안 보는 채로 통과시킬 위험이
-있으므로(원칙 7), 확인 전에는 걸지 않기로 했다.
+오브젝트를 직접 쓰는 경로는 처음에 걸지 않았다 — 도구 이름과 소스 필드를
+확인하기 전에 짐작으로 걸면 아무것도 안 보면서 통과시킬 위험이 있었다(원칙 7).
+그 경로는 아래 #60 에서 확인한 뒤 걸었다.
+
+**MCP 로 ABAP 소스를 SAP 에 바로 쓸 때도 CR-001·CR-002 를 검사한다(#60).** ADT
+MCP 서버(npm `mcp-abap-abap-adt-api`)에서 소스를 쓰는 도구는 `setObjectSource`
+하나고, 입력 `source` 에 전체 소스가 담긴다(부분 패치가 아니다). 새 훅
+`plugins/harness/hooks/mcp_source_guard.py` 가 `PreToolUse` 매처
+`mcp__.*__setObjectSource` 로 그 호출을 가로챈다 — 서버 이름은 프로젝트마다
+다르므로 이름에 매이지 않는다. 언어는 `objectSourceUrl` 경로로 가리고, 그 매핑은
+데이터(`mcp_object_source_map.json`)다(원칙 2). 판정은 파일 저장 때와 같은
+`checker.code_rules` 를 `uvx` 로 부른다. 매핑에 없는 경로(예: BDEF), `source`
+누락, 엔진 실행 실패는 검사 불능으로 거절한다 — 실제로 막히는 경로가 나오면
+매핑 파일에 한 줄 더해 넓힌다. public-cloud 에서 새 세션을 열어 080 테넌트를
+대상으로 확인했다: 한글 이름 소스는 SAP 에 닿기 전에 막히고, 깨끗한 소스는 훅을
+통과하며, 매핑에 없는 경로는 검사 불능으로 막힌다. 깨끗한 소스가 SAP 에 실제로
+써지는 끝까지는 로그인 쿠키가 만료돼 보지 못했다. 이 훅은 harness Plugin 이 켜진
+세션에서만 돈다. 그래서 MCP 서버 셋(`abap-adt`, `abap-adt-z5u`,
+`abap-adt-z5u-dev`)을 사용자 범위로도 등록해, harness 가 켜진 Project
+Repository 에서 바로 SAP 에 쓸 수 있게 했다. 이름 바꾸기·리팩터링 도구
+(`renameExecute` 등)는 소스 본문 없이 서버에서 코드를 바꿔 이 훅에 걸리지 않는다
+— #61 로 남겼다.
+
+**merge 가드가 엔진 빌드 로그 때문에 PRD 승인 판정을 읽지 못하던 결함을
+고쳤다(#63).** `pre-bash-git-guard.sh` 가 판정 출력과 uv 의 빌드 로그(stderr)를
+한데 받아, main 이 바뀐 뒤 첫 merge 가 정상 PR 인데도 막혔다. 막는 쪽으로
+틀렸으니 원칙 7 은 지켰지만 헛된 거절이었다. 이제 둘을 나눠 받아 판정은 stdout
+만 읽는다.
 
 ## 아직 정하지 않은 것
 
@@ -132,14 +155,6 @@ SELECT·OPEN CURSOR 를 잡는다. JS/TS 는 `for`/`while`/`.forEach`/`.map` 의
   고치는 방법을 행동 단위로 알려주거나 고쳐진 파일을 만들어 주는 것은 나중 일이다.
 - **끝난 프로젝트 산출물의 보관.** 문서 저장소의 `docs/` 가 하던 자산 보관
   역할이 사라졌다. Project Repository 를 그대로 보관할지 정하지 않았다.
-- **MCP 로 ABAP 을 직접 쓸 때의 검사(#54 의 남은 절반).** Claude 가 ADT MCP
-  서버(`writeSource`/`setObjectSource` 류 도구)로 오브젝트를 바로 쓰면 그
-  코드는 `pre_write_guard.py`(Write/Edit 훅)를 거치지 않아 CR-001/CR-002 가
-  걸리지 않는다. 그 MCP 서버 자체가 이 저장소에 연결되어 있지 않아 정확한
-  도구 이름과 소스 필드를 확인하지 못했다. 다음에 손댈 사람은 그 MCP 서버가
-  실제로 연결된 프로젝트에서 도구 스키마(필드 이름)를 먼저 확인하고,
-  `hooks.json` 에 `PreToolUse` 매처(`mcp__<서버>__<도구>`)를 추가해 같은
-  `checker.code_rules` 판정을 태우면 된다.
 
 ## 설계 배경 (CLAUDE.md 에서 줄이며 옮긴 것)
 
