@@ -223,6 +223,18 @@ fixture 세 곳(`test_hook.py`, `test_mcp_source_guard.py`, `test_code_rules.py`
 문장에 CR-003 도 새로 걸려 깨졌다 — 의도한 위반 예시가 아니라 CR-002 확인용
 데이터였으므로 `*` 를 필드 목록으로 바꿔 CR-003 을 걸지 않게 고쳤다.
 
+**CR-002 의 반복문 판정이 집계 함수만 있는 SELECT 를 오인했다(#83).** `_scan_abap_cr002`
+는 `SELECT SINGLE` 도 아니고 `INTO TABLE` 도 아니면 무조건 SELECT...ENDSELECT 반복문을
+여는 것으로 봐서, `SELECT COUNT( * ) FROM vbak INTO @DATA(lv_n).` 처럼 결과가 한 줄로
+정해지는 집계 SELECT 뒤의 무관한 SELECT 문까지 전부 "반복문 안" 으로 잘못 잡아 CR-002
+오탐을 냈다. `INTO CORRESPONDING FIELDS OF TABLE`/`APPENDING TABLE`/`APPENDING
+CORRESPONDING FIELDS OF TABLE` 도 `INTO TABLE` 과 똑같이 내부 테이블 대상인데 문자 그대로
+일치만 봐서 같은 이유로 오탐이었다. 판정 부분을 `_abap_select_opens_loop` 로 떼어 내어,
+내부 테이블 대상 넷(단 `PACKAGE SIZE n` 이 있으면 예외의 예외로 반복문을 연다)과 `GROUP
+BY` 없이 필드 전부가 `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` 집계 함수뿐인 경우를 반복문을 열지
+않는 것으로 고쳤다. `SELECT DISTINCT` 는 여러 행이 나올 수 있어 이 집계 예외에서 뺐고,
+그 밖의 애매한 모양은 모듈 docstring 의 원칙대로 여전히 반복문(과검출 쪽)으로 본다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.

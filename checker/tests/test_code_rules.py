@@ -126,6 +126,119 @@ def test_abap_open_cursor가_반복문_밖에_있으면_괜찮다():
     assert _rules(check_source("t.abap", text), "CR-002") == []
 
 
+# --- CR-002 (ABAP): 집계 함수·내부 테이블 대상은 반복문을 열지 않는다(#83) -----------
+
+
+def test_abap_count_집계함수만_있는_select는_반복문을_열지_않는다():
+    """이슈 #83 예시: COUNT( * ) 로 끝나는 SELECT 뒤의 무관한 SELECT 는 CR-002 가 아니다."""
+    text = (
+        "SELECT COUNT( * ) FROM vbak INTO @DATA(lv_n).\n"
+        "SELECT vbeln FROM vbak INTO TABLE @DATA(lt).\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-002") == []
+
+
+def test_abap_새_문법_fields_집계함수만_있으면_반복문을_열지_않는다():
+    text = (
+        "SELECT FROM vbak FIELDS COUNT( * ) INTO @DATA(lv_n).\n"
+        "SELECT vbeln FROM vbak INTO TABLE @DATA(lt).\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-002") == []
+
+
+def test_abap_집계함수_여러개_나열해도_반복문을_열지_않는다():
+    text = (
+        "SELECT SUM( netwr ), MAX( erdat ) FROM vbak INTO (@DATA(lv_sum), @DATA(lv_max)).\n"
+        "SELECT vbeln FROM vbak INTO TABLE @DATA(lt).\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-002") == []
+
+
+def test_abap_집계함수에_별칭이_붙어도_반복문을_열지_않는다():
+    text = (
+        "SELECT FROM vbak FIELDS COUNT( * ) AS cnt, MAX( erdat ) AS last\n"
+        "  WHERE vkorg = @lv_vkorg INTO @DATA(ls_stat).\n"
+        "SELECT vbeln FROM vbak INTO TABLE @DATA(lt).\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-002") == []
+
+
+def test_abap_옛_문법_집계함수를_공백으로_나열해도_반복문을_열지_않는다():
+    text = (
+        "SELECT MAX( erdat ) MIN( erdat ) FROM vbak INTO (lv_max, lv_min).\n"
+        "SELECT vbeln FROM vbak INTO TABLE lt.\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-002") == []
+
+
+def test_abap_집계와_일반_필드가_섞이면_반복문으로_본다():
+    text = (
+        "SELECT vkorg COUNT( * ) FROM vbak INTO (lv_vkorg, lv_n).\n"
+        "  SELECT vbeln FROM vbap INTO TABLE lt.\n"
+        "ENDSELECT.\n"
+    )
+    assert len(_rules(check_source("t.abap", text), "CR-002")) == 1
+
+
+def test_abap_into_corresponding_fields_of_table_뒤_select는_반복문을_열지_않는다():
+    text = (
+        "SELECT * FROM vbak INTO CORRESPONDING FIELDS OF TABLE @DATA(lt_vbak).\n"
+        "SELECT vbeln FROM vbap INTO TABLE @DATA(lt_vbap).\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-002") == []
+
+
+def test_abap_appending_table_뒤_select는_반복문을_열지_않는다():
+    text = (
+        "SELECT vbeln FROM vbak APPENDING TABLE @DATA(lt_vbak).\n"
+        "SELECT vbeln FROM vbap INTO TABLE @DATA(lt_vbap).\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-002") == []
+
+
+def test_abap_진짜_endselect_반복문_안의_select는_여전히_위반():
+    """집계 함수도 내부 테이블 대상도 아닌 SELECT 는 여전히 반복문을 연다(회귀 방지)."""
+    text = (
+        "SELECT vbeln FROM vbak INTO ls_vbak.\n"
+        "  SELECT SINGLE * FROM vbap INTO ls_vbap WHERE vbeln = ls_vbak-vbeln.\n"
+        "ENDSELECT.\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-002")
+    assert len(hits) == 1 and hits[0]["line"] == 2
+
+
+def test_abap_집계함수와_group_by가_함께_있으면_반복문을_연다():
+    """GROUP BY 가 있으면 필드가 전부 집계 함수여도 여러 행이 나오므로 반복문이다."""
+    text = (
+        "SELECT COUNT( * ) FROM vbak INTO lv_n GROUP BY vkorg.\n"
+        "  SELECT SINGLE * FROM vbap INTO ls_vbap WHERE vkorg = 'X'.\n"
+        "ENDSELECT.\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-002")
+    assert len(hits) == 1 and hits[0]["line"] == 2
+
+
+def test_abap_into_table_package_size는_반복문을_연다():
+    """PACKAGE SIZE 는 내부 테이블 대상이라도 n건씩 나눠 가져오는 반복 조회다."""
+    text = (
+        "SELECT vbeln FROM vbak INTO TABLE @DATA(lt_vbak) PACKAGE SIZE 100.\n"
+        "  SELECT SINGLE * FROM vbap INTO ls_vbap WHERE vbeln = lt_vbak-vbeln.\n"
+        "ENDSELECT.\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-002")
+    assert len(hits) == 1 and hits[0]["line"] == 2
+
+
+def test_abap_여러_줄에_걸친_select도_올바르게_판정된다():
+    text = (
+        "SELECT COUNT( * )\n"
+        "  FROM vbak\n"
+        "  INTO @DATA(lv_n).\n"
+        "SELECT vbeln FROM vbak INTO TABLE @DATA(lt).\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-002") == []
+
+
 # --- CR-003 (ABAP) ------------------------------------------------------------
 
 
