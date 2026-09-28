@@ -96,6 +96,7 @@ Claude> 커밋했습니다. origin/main 을 rebase 했습니다. 푸시했습니
 | `/harness:start` | 새 작업 시작. 이슈와 브랜치를 만든다 |
 | `/harness:deliver` | 작업 마무리. 커밋·동기화·푸시·PR 을 한 번에 |
 | `/harness:wrapup` | 못 끝낸 작업을 이슈로 남길 때 |
+| `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받을 때 |
 
 main 에 직접 커밋하거나 맨손 `git push` 하면 훅이 거부한다. 훅이 막으면
 우회하지 않는다. `--no-verify` 로 건너뛰지도 않는다. 거부 메시지의 안내를

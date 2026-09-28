@@ -2,7 +2,8 @@
 
 고객사 Project Repository 에 설치해 쓰는 Blueward 하네스다. 새 저장소의 표준
 구조를 만들고, 문서가 템플릿을 따르는지 검사하고(doc-guard), 협업 규칙과
-`/harness:start` · `/harness:deliver` · `/harness:wrapup` Skill 을 한 번에 제공한다.
+`/harness:start` · `/harness:deliver` · `/harness:wrapup` · `/harness:sync`
+Skill 을 한 번에 제공한다.
 
 ```
 plugins/harness/
@@ -20,6 +21,7 @@ plugins/harness/
     scaffold/                  /harness:scaffold — Project Repository 표준 구조 생성
     prd/SKILL.md               /harness:prd — PRD 작성·수정
     spec/SKILL.md              /harness:spec — 개발 Spec 작성·수정
+    sync/SKILL.md              /harness:sync — 원격 최신 상태를 로컬 브랜치로 당겨받기
   rules/                       위 Skill 이 참조하는 협업 규칙 5개
   conventions/common.md        어느 저장소에서나 같은 공통 개발 규칙(CR-001 ~ CR-008)
 ```
@@ -53,7 +55,7 @@ plugins/harness/
 
 ## 제공하는 것
 
-### Skill 6개
+### Skill 7개
 
 플러그인 스킬은 이름 앞에 플러그인 이름이 붙으므로 아래 이름으로 나타난다.
 
@@ -65,6 +67,7 @@ plugins/harness/
 | `/harness:scaffold` | 새 Project Repository 에 표준 구조를 만든다 |
 | `/harness:prd` | PRD 를 새로 쓰거나, 요구사항이 바뀌었을 때 고친다 |
 | `/harness:spec` | PRD 요구사항으로 개발 Spec 을 만들거나, PRD 가 바뀌어 고친다 |
+| `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다 |
 
 ### 훅 4개
 
@@ -72,7 +75,7 @@ plugins/harness/
 |---|---|---|
 | `pre_write_guard.py` | `PreToolUse` (Write\|Edit) | 문서가 템플릿을 벗어나면 저장을 막는다(doc-guard). 코드(`.abap`, `.js`/`.ts`, `.cds`, `.asbdef`)는 공통 개발 규칙 CR-001·CR-002·CR-003·CR-007 을 어기면 막는다(#54, #72, #81. BDEF 는 CR-001 만, CR-003·CR-007 은 ABAP·JS/TS 만) |
 | `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 PRD 를 바꿨는데 승인이 없어도 막는다(#49) |
-| `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고 지난 세션에서 남은 경고를 전한다 |
+| `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고 지난 세션에서 남은 경고를 전한다. upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리) |
 | `stop-deliver.sh` | `Stop` | 커밋되지 않은 변경이 남았으면 `/harness:deliver` 를 안내한다 |
 
 ### 규칙 5개

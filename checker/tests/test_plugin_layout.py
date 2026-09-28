@@ -131,7 +131,7 @@ def test_mcp_source_guard_매처는_다루지_않는_도구를_잡지_않는다(
     assert not re.fullmatch(matcher, f"mcp__abap-adt-z5u__{tool_name}")
 
 
-@pytest.mark.parametrize("name", ["start", "deliver", "wrapup", "scaffold", "prd", "spec"])
+@pytest.mark.parametrize("name", ["start", "deliver", "wrapup", "scaffold", "prd", "spec", "sync"])
 def test_스킬이_있고_frontmatter_에_name_이_있다(name):
     skill_md = PLUGIN_ROOT / "skills" / name / "SKILL.md"
     assert skill_md.is_file(), f"{skill_md} 가 없다"
@@ -142,7 +142,7 @@ def test_스킬이_있고_frontmatter_에_name_이_있다(name):
     assert re.search(r"^name:\s*\S+", frontmatter, re.MULTILINE), "name: 이 없다"
 
 
-@pytest.mark.parametrize("name", ["start", "deliver", "wrapup", "prd", "spec"])
+@pytest.mark.parametrize("name", ["start", "deliver", "wrapup", "prd", "spec", "sync"])
 def test_스킬이_저장소_루트_기준_규칙_경로를_쓰지_않는다(name):
     """설치된 플러그인은 저장소 루트가 아니므로 `rules/xxx.md` 처럼 곧바로 쓴
     경로는 항상 깨진다. 스킬의 base directory 에서 상대 경로(`../../rules/`)로
@@ -458,6 +458,215 @@ def test_프로젝트_conventions_가_있으면_함께_안내한다(tmp_path):
     assert "conventions/naming.md" in out
     assert "이 저장소의 Convention" in out
     assert "CR-004 제외" in out
+
+
+# --- upstream 없는 브랜치에서도 자동 동기화가 실패하지 않는다(#87) -----------
+#
+# 옛 훅은 `git pull --rebase` 를 맨몸으로 불렀다. 이 명령은 현재 브랜치에
+# upstream 이 없으면(예: 방금 만든 로컬 브랜치) "There is no tracking
+# information for the current branch" 로 실패하는데, public-cloud 저장소에서
+# `/harness:start` 로 막 만든 브랜치에서 이 증상이 그대로 재현됐다(#87). 이제는
+# upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스한다.
+#
+# 아래 테스트는 실제 origin 원격(bare 저장소)을 두고, 그 원격을 앞서가게 한
+# 뒤 훅이 스스로 fetch·rebase 하는지 서브프로세스로 확인한다.
+
+
+def _init_bare_origin(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "--bare"], cwd=path, check=True)
+    # 클론했을 때 "remote HEAD refers to nonexistent ref" 경고 없이 main 을
+    # 바로 체크아웃하도록, bare 저장소의 HEAD 를 미리 main 으로 맞춰 둔다.
+    subprocess.run(["git", "symbolic-ref", "HEAD", "refs/heads/main"], cwd=path, check=True)
+
+
+def _clone(origin: Path, dest: Path) -> None:
+    subprocess.run(["git", "clone", "-q", str(origin), str(dest)], check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=dest, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=dest, check=True)
+
+
+def _commit_all(repo: Path, message: str) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", message], cwd=repo, check=True)
+
+
+def _log_subjects(repo: Path) -> str:
+    done = subprocess.run(
+        ["git", "log", "--format=%s"], cwd=repo, capture_output=True, text=True, check=True
+    )
+    return done.stdout
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_upstream_없는_브랜치는_origin_main_기준으로_리베이스한다(tmp_path):
+    origin = tmp_path / "origin.git"
+    _init_bare_origin(origin)
+
+    seed = tmp_path / "seed"
+    _clone(origin, seed)
+    (seed / "README.md").write_text("v1\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "init")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+
+    work = tmp_path / "work"
+    _clone(origin, work)
+    subprocess.run(["git", "switch", "-q", "-c", "local-no-upstream"], cwd=work, check=True)
+
+    # 로컬 브랜치를 만든 뒤에 origin/main 을 더 앞서가게 한다 — work 는 upstream
+    # 이 없는 상태로 origin/main 보다 뒤처진다.
+    (seed / "README.md").write_text("v1\nv2\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "second commit on main")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+
+    out = _run_session_start_sync(work)
+
+    assert "원격 짝 브랜치가 없어 origin/main 기준으로 맞췄습니다" in out
+    assert "second commit on main" in _log_subjects(work)
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_upstream_있고_뒤처지면_upstream_기준으로_리베이스한다(tmp_path):
+    origin = tmp_path / "origin.git"
+    _init_bare_origin(origin)
+
+    seed = tmp_path / "seed"
+    _clone(origin, seed)
+    (seed / "README.md").write_text("v1\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "init")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+    subprocess.run(
+        ["git", "push", "-q", "-u", "origin", "HEAD:feature/1-thing"], cwd=seed, check=True
+    )
+
+    work = tmp_path / "work"
+    _clone(origin, work)
+    subprocess.run(
+        ["git", "switch", "-q", "-c", "feature/1-thing", "origin/feature/1-thing"],
+        cwd=work,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "branch", "-q", "--set-upstream-to=origin/feature/1-thing"], cwd=work, check=True
+    )
+
+    # 다른 참여자가 같은 원격 브랜치에 커밋을 얹는다.
+    other = tmp_path / "other"
+    _clone(origin, other)
+    subprocess.run(["git", "switch", "-q", "feature/1-thing"], cwd=other, check=True)
+    (other / "feature.txt").write_text("more\n", encoding="utf-8", newline="\n")
+    _commit_all(other, "feat: extend feature file")
+    subprocess.run(["git", "push", "-q", "origin", "feature/1-thing"], cwd=other, check=True)
+
+    out = _run_session_start_sync(work)
+
+    assert "기준으로 최신 상태로 맞췄습니다" in out
+    assert "origin/feature/1-thing" in out
+    assert "feat: extend feature file" in _log_subjects(work)
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_이미_최신이면_그대로_보고한다(tmp_path):
+    origin = tmp_path / "origin.git"
+    _init_bare_origin(origin)
+
+    seed = tmp_path / "seed"
+    _clone(origin, seed)
+    (seed / "README.md").write_text("v1\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "init")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+
+    work = tmp_path / "work"
+    _clone(origin, work)
+    before = _log_subjects(work)
+
+    out = _run_session_start_sync(work)
+
+    assert "이미 최신 상태입니다" in out
+    assert _log_subjects(work) == before
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_미커밋_변경이_있으면_자동_동기화를_건너뛴다(tmp_path):
+    origin = tmp_path / "origin.git"
+    _init_bare_origin(origin)
+
+    seed = tmp_path / "seed"
+    _clone(origin, seed)
+    (seed / "README.md").write_text("v1\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "init")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+
+    work = tmp_path / "work"
+    _clone(origin, work)
+    (work / "README.md").write_text("v1\ndirty\n", encoding="utf-8", newline="\n")
+
+    # origin/main 을 앞서가게 해서 "당겨받을 것이 있는데도 건너뛰는지"를 본다.
+    (seed / "README.md").write_text("v1\nv2\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "second commit on main")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+
+    before_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=work, capture_output=True, text=True, check=True
+    ).stdout
+    before_dirty = (work / "README.md").read_text(encoding="utf-8")
+
+    out = _run_session_start_sync(work)
+
+    assert "커밋되지 않은 변경이 있어 자동 동기화(리베이스)를 건너뛰었습니다" in out
+    assert "원격을 가져왔습니다" in out
+    assert "/harness:sync" in out
+    after_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=work, capture_output=True, text=True, check=True
+    ).stdout
+    assert after_head == before_head
+    assert (work / "README.md").read_text(encoding="utf-8") == before_dirty
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_리베이스_충돌이_나면_되돌리고_보고한다(tmp_path):
+    origin = tmp_path / "origin.git"
+    _init_bare_origin(origin)
+
+    base = tmp_path / "base"
+    _clone(origin, base)
+    subprocess.run(["git", "switch", "-q", "-c", "feature/2-conflict"], cwd=base, check=True)
+    (base / "README.md").write_text("line1\nline2\n", encoding="utf-8", newline="\n")
+    _commit_all(base, "feat: unrelated setup commit")
+    subprocess.run(
+        ["git", "push", "-q", "-u", "origin", "feature/2-conflict"], cwd=base, check=True
+    )
+
+    work = tmp_path / "work"
+    _clone(origin, work)
+    subprocess.run(["git", "switch", "-q", "feature/2-conflict"], cwd=work, check=True)
+    (work / "README.md").write_text("LOCAL\nline2\n", encoding="utf-8", newline="\n")
+    _commit_all(work, "feat: change first line locally")
+    # 일부러 push 하지 않는다 — 로컬에만 있는 커밋으로 남겨 리베이스 충돌을 만든다.
+
+    other = tmp_path / "other"
+    _clone(origin, other)
+    subprocess.run(["git", "switch", "-q", "feature/2-conflict"], cwd=other, check=True)
+    (other / "README.md").write_text("REMOTE\nline2\n", encoding="utf-8", newline="\n")
+    _commit_all(other, "feat: change first line remotely")
+    subprocess.run(["git", "push", "-q", "origin", "feature/2-conflict"], cwd=other, check=True)
+
+    before_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=work, capture_output=True, text=True, check=True
+    ).stdout
+
+    out = _run_session_start_sync(work)
+
+    assert "충돌해 원래 상태로 되돌렸습니다" in out
+    assert "/harness:sync" in out
+    git_dir = subprocess.run(
+        ["git", "rev-parse", "--git-dir"], cwd=work, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert not (work / git_dir / "rebase-merge").exists()
+    after_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=work, capture_output=True, text=True, check=True
+    ).stdout
+    assert after_head == before_head
 
 
 # --- 미커밋 판정에서 인계 메모 제외(#59) ------------------------------------

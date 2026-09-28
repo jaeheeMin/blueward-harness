@@ -64,34 +64,39 @@ fi
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 알수없음)"
 add "현재 브랜치: $branch"
 
-if git remote get-url origin >/dev/null 2>&1; then
-  if git fetch --all --prune --quiet >/dev/null 2>&1; then
-    add "원격을 가져왔습니다."
-    if git pull --rebase --quiet >/dev/null 2>&1; then
-      add "최신 상태로 맞췄습니다."
+git_dir="$(git rev-parse --git-dir)"
+
+# 리베이스를 실행하고 성공·충돌·그 밖의 실패를 메시지로 남긴다. 실패해도
+# 이 함수 자체는 항상 0 을 반환한다 — set -e 때문에 스크립트 전체가
+# 죽어 세션 시작 요약이 통째로 사라지는 것을 막기 위해서다.
+run_rebase() {
+  local target="$1"
+  local success_msg="$2"
+  local rebase_output
+  if rebase_output="$(git rebase "$target" 2>&1)"; then
+    add "$success_msg"
+    return 0
+  fi
+  # 리베이스가 중간에 멈췄으면 되돌린다. 세션을 매끄럽게 시작하려고 만든
+  # 훅이 저장소를 충돌 상태로 남겨 두면, 그다음에 무엇을 해도 막힌다.
+  if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; then
+    if git rebase --abort >/dev/null 2>&1; then
+      add "$target 기준 리베이스가 충돌해 원래 상태로 되돌렸습니다. 원격과의 차이는 /harness:sync 로 다시 확인하십시오."
     else
-      # 리베이스가 중간에 멈췄으면 되돌린다. 세션을 매끄럽게 시작하려고 만든
-      # 훅이 저장소를 충돌 상태로 남겨 두면, 그다음에 무엇을 해도 막힌다.
-      git_dir="$(git rev-parse --git-dir)"
-      if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; then
-        if git rebase --abort >/dev/null 2>&1; then
-          add "pull --rebase 가 충돌해 원래 상태로 되돌렸습니다. 원격과의 차이를 직접 확인해야 합니다."
-        else
-          # abort 실패를 성공으로 보고하면, 리베이스가 진행 중인 상태로 남아
-          # .githooks/pre-commit 의 브랜치 검사가 통째로 건너뛰어지는데도
-          # 그 사실이 드러나지 않는다.
-          add "pull --rebase 가 충돌했고 되돌리기(git rebase --abort)도 실패했습니다. 저장소가 리베이스 진행 중 상태로 남아 있으니 직접 확인하십시오."
-        fi
-      else
-        add "pull --rebase 가 실패했습니다. 로컬 변경이나 인증 상태를 먼저 확인해야 합니다."
-      fi
+      # abort 실패를 성공으로 보고하면, 리베이스가 진행 중인 상태로 남아
+      # .githooks/pre-commit 의 브랜치 검사가 통째로 건너뛰어지는데도
+      # 그 사실이 드러나지 않는다.
+      add "$target 기준 리베이스가 충돌했고 되돌리기(git rebase --abort)도 실패했습니다. 저장소가 리베이스 진행 중 상태로 남아 있으니 직접 확인하십시오."
     fi
   else
-    add "fetch 에 실패했습니다. 네트워크나 인증 상태를 확인해야 합니다."
+    # 첫 줄만 담는다 — git 오류는 대개 첫 줄에 원인이 있고, 전체를 실으면
+    # 세션 시작 요약이 리베이스 로그로 채워진다.
+    local rebase_err
+    rebase_err="$(printf '%s\n' "$rebase_output" | head -n1)"
+    add "$target 기준 리베이스가 실패했습니다: ${rebase_err:-원인을 알 수 없습니다}. /harness:sync 로 상황을 직접 확인하십시오."
   fi
-else
-  add "원격 저장소가 연결되어 있지 않습니다. 푸시와 PR 과 이슈 관련 동작은 원격을 연결한 뒤에 가능합니다."
-fi
+  return 0
+}
 
 if [ "$branch" = "main" ]; then
   add "main 에서는 커밋할 수 없습니다. 작업을 시작하려면 /harness:start 를 실행하십시오."
@@ -102,7 +107,50 @@ fi
 # 경고가 매번 뜬다. 한글 경로는 porcelain 이 따옴표로 감싸므로 따옴표도 허용한다.
 # --untracked-files=all 로 파일 단위로 본다. 기본값은 추적 안 된 폴더를 `?? docs/`
 # 한 줄로 접어, 그 안에 인계 메모만 있어도 걸러 내지 못한다.
+#
+# 이 값은 아래 자동 동기화를 할지 말지도 정한다 — dirty 한 트리에서 훅이
+# 알아서 stash 하거나 커밋하면 사용자 모르게 작업 내용이 섞이거나 사라질 수
+# 있어서, 그런 경우 자동 동기화 자체를 건너뛴다(자동 stash·자동 커밋 금지).
 changed="$(git status --porcelain --untracked-files=all | grep -Ev '^.. "?((.*/)?\.superpowers/|.*handoff.*\.md"?$)' || true)"
+
+# 이미 진행 중인 리베이스나 병합이 있으면 자동 동기화를 시도하지 않는다. 그
+# 위에 또 리베이스를 걸면 실패하거나, 진행 중이던 것과 뒤섞여 저장소를 더
+# 꼬아 놓을 수 있다.
+if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ] || [ -f "$git_dir/MERGE_HEAD" ]; then
+  add "이미 리베이스나 병합이 진행 중이라 자동 동기화를 건너뜁니다. 직접 마무리하거나 /harness:sync 안내를 참고하십시오."
+elif git remote get-url origin >/dev/null 2>&1; then
+  # fetch 는 작업 트리를 건드리지 않으므로 미커밋 변경이 있어도 한다. 건너뛰는
+  # 것은 리베이스뿐이다 — 그래야 /harness:sync 를 부르기 전에도 원격 상태를 본다.
+  if fetch_output="$(git fetch --all --prune 2>&1)"; then
+    add "원격을 가져왔습니다."
+    upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+    if [ -n "$changed" ]; then
+      add "커밋되지 않은 변경이 있어 자동 동기화(리베이스)를 건너뛰었습니다. /harness:sync 로 당겨받으십시오."
+    elif [ -n "$upstream" ]; then
+      behind="$(git rev-list --count "HEAD..$upstream" 2>/dev/null || echo 0)"
+      if [ "$behind" = "0" ]; then
+        add "이미 최신 상태입니다($upstream 기준)."
+      else
+        run_rebase "$upstream" "$upstream 기준으로 최신 상태로 맞췄습니다."
+      fi
+    elif git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+      behind="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+      if [ "$behind" = "0" ]; then
+        add "이미 최신 상태입니다(origin/main 기준). 원격 짝 브랜치가 없어 origin/main 을 기준으로 확인했습니다."
+      else
+        run_rebase origin/main "원격 짝 브랜치가 없어 origin/main 기준으로 맞췄습니다."
+      fi
+    else
+      add "원격 짝 브랜치가 없고 origin/main 도 없어 자동 동기화를 건너뜁니다."
+    fi
+  else
+    fetch_err="$(printf '%s\n' "$fetch_output" | head -n1)"
+    add "fetch 에 실패했습니다: ${fetch_err:-원인을 알 수 없습니다}. 네트워크나 인증 상태를 확인해야 합니다."
+  fi
+else
+  add "원격 저장소가 연결되어 있지 않습니다. 푸시와 PR 과 이슈 관련 동작은 원격을 연결한 뒤에 가능합니다."
+fi
+
 if [ -n "$changed" ]; then
   add "커밋되지 않은 변경이 있습니다."
   # 파일 단위로 보므로 목록이 길어질 수 있다. 세션 맥락을 채우지 않게 20줄까지만 싣는다.

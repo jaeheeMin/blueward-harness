@@ -250,6 +250,25 @@ CATCH 는 실물을 못 찾아 확인하지 못했다. priority 1·2 는 `blockP
 실행 등)은 하지 않았다 — Hook 처럼 강제할 수 없고 로그인 만료 시 검사 불능 처리가
 필요해, 지금은 문서로 관계만 적는다.
 
+**`/harness:sync` 를 추가하고 세션 시작 훅이 upstream 없는 브랜치에서도 실패하지
+않게 고쳤다(#87).** `session-start-sync.sh` 는 그동안 `git pull --rebase` 를
+맨몸으로 불렀는데, 이 명령은 현재 브랜치에 upstream 이 없으면(예:
+`/harness:start` 로 막 만든 로컬 브랜치) "There is no tracking information for
+the current branch" 로 실패하고, 훅은 그 원인을 알려주지 못한 채 모호한 메시지만
+남겼다 — public-cloud 저장소에서 실제로 재현됐다. 이제 훅은 upstream 이 있으면
+그것을, 없으면 `origin/main` 을 기준으로 리베이스한다. 이미 최신이면 그대로
+알리고, 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화 자체를
+건너뛴다(자동 stash·자동 커밋은 하지 않는다). 리베이스 충돌은 그대로 abort 해
+되돌리고 원인을 알린다. 사용자가 능동적으로 "최신으로 맞춰줘" 라고 할 때 쓰는
+`/harness:sync` Skill 도 같은 기준 판단 로직을 문서로 담아 추가했다 — 미커밋
+변경이 있으면 세션 훅과 달리 조용히 건너뛰지 않고 (a) 먼저 `/harness:deliver`
+로 커밋, (b) 임시 커밋으로 치웠다가 되돌리기, (c) 취소 중 사용자가 고르게 한다.
+`git stash` 는 같은 저장소의 모든 worktree 가 공유해 다른 세션의 변경과 섞일 수
+있어 이 스킬도, 세션 훅도 쓰지 않는다. bare 원격을 둔 임시 저장소로 upstream
+없음·upstream 뒤처짐·이미 최신·미커밋 변경·리베이스 충돌·원격 없음 여섯
+시나리오를 실제로 훅을 실행해 확인했고, 같은 시나리오 중 다섯 개를
+`checker/tests/test_plugin_layout.py` 에 자동화된 테스트로 남겼다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
