@@ -8,6 +8,30 @@ SAP naming rule 같은 것 — 은 여기 두지 않고 그 저장소 `conventio
 두 규칙이 부딪히면 프로젝트 `conventions/` 가 이긴다. 다만 **CR-004(비밀
 정보)만은 어떤 프로젝트 Convention 으로도 뒤집지 못한다.**
 
+## 기본 대상과 ATC 와의 관계
+
+기본 대상은 **S/4HANA Cloud Public Edition 의 ABAP Cloud**(Developer
+Extensibility)다. 예시와 판단은 ABAP Cloud 에서 쓸 수 있는 문법을 기준으로
+하고, classic ABAP 은 검사기가 함께 받아 줄 뿐 기준으로 삼지 않는다.
+
+SAP 에는 자체 검사 도구 ATC(ABAP Test Cockpit)가 있고, 하네스는 그것을
+대신하지 않는다. 둘은 보는 것과 자리가 다르다.
+
+| | 하네스 기계 검사 | ATC |
+|---|---|---|
+| 자리 | 저장 전(Hook), PR(Actions) | SAP 테넌트 안(ADT 실행, 운송 release) |
+| 보는 것 | 아래 CR 규칙 | SAP 가 정한 check variant |
+
+080 개발 테넌트(2026-09-28 실측)의 시스템 variant 는
+`ABAP_CLOUD_DEVELOPMENT_DEFAULT` 였다. 실제 Z 클래스 다섯 개에 돌려 보니
+`SELECT *`, `FIELDS *`, 반복문 안 `SELECT` 자리에서 finding 이 나오지
+않았다 — CR-002, CR-003 은 ATC 와 겹치지 않는다. 빈 CATCH 는 실물 사례가
+없어 확인하지 못했다. 같은 실측에서 priority 1·2 finding 은 운송을 막고
+(`blockPriority`), priority 3 은 막지 않았다(`allowTransports`). 운송
+release 때 ATC 를 자동으로 돌릴지와 막는 기준은 테넌트 관리자 설정이다
+(ABAP Development Tools User Guide, "Working with ATC During Transport
+Release").
+
 ## CR-001 이름에 한글을 쓰지 않는다
 
 변수, 함수, 클래스, 객체, 필드 같은 이름에는 한글을 쓰지 않는다. 주석과
@@ -120,7 +144,13 @@ Cloud BAdI, 사용자 로직 등)만 쓴다. 프라이빗 프로젝트에서 다
 **좋은 예 (ABAP Cloud)**: Cloud BAdI 구현 클래스에서 정해진 확장 지점만
 구현한다.
 
-**기계 검사**: 문서로만.
+**기계 검사**: 하네스는 검사하지 않는다. Public Cloud 에서는 플랫폼이 막는다
+— ABAP Cloud 는 같은 software component 의 오브젝트나 released API 만 쓰거나
+확장할 수 있다("Both language versions only allow access to repository
+objects of the same software component or repository object released with
+the required release contracts", SAP 공식 PDF "ABAP Cloud: Background
+Concepts and Overview", help.sap.com). Private Cloud·온프레미스처럼 classic
+ABAP 을 함께 쓰는 프로젝트에서는 리뷰로 본다.
 
 ## CR-006 하드코딩한 값은 설정이나 상수로 뺀다
 
@@ -169,7 +199,8 @@ ENDTRY.
 
 **기계 검사**: 코드 저장 시(훅)와 PR 검사(Actions)에서 막는다. ABAP, JS/TS 를
 본다. "완전히 빈" CATCH 만 잡는다 — ABAP 은 `CATCH ... .` (옛 문법
-`CATCH SYSTEM-EXCEPTIONS ... .` 는 `ENDCATCH.` 까지) 뒤에 다음
+`CATCH SYSTEM-EXCEPTIONS ... .` 는 `ENDCATCH.` 까지 — ABAP Cloud 에는 이
+문법이 없어 classic ABAP 에서만 해당한다) 뒤에 다음
 CATCH/CLEANUP/ENDTRY(또는 ENDCATCH)까지 문장이 하나도 없으면(주석만 있어도
 같다) 위반이고, JS/TS 는 `catch {}`/`catch (e) {}` 와 `.catch(() => {})`/
 `.catch(function(){})` 처럼 처리 콜백이 빈 프로미스 형태를 잡는다. 예외를

@@ -101,9 +101,13 @@ CR-007(빈 CATCH, ABAP·JS/TS)은 기계로도 검사한다(#54, #81). 검사 �
 `checker/code_rules.py` 이고, `pre_write_guard.py` 훅이 코드를 저장할 때,
 MCP ADT 도구 경로는 `mcp_source_guard.py` 가, `.github/workflows/doc-guard.yml` 이
 PR 마다 각각 부른다 — doc-guard 와 같은 엔진 저장소, 같은 관문 구조를 그대로 쓴다.
-나머지 CR-004~CR-006, CR-008 은 사람이 리뷰로만 본다 — CR-004(비밀정보)는 범용
-시크릿 스캐너가, CR-005(표준 객체 수정)는 SAP 메타데이터가, CR-006(하드코딩)은
+CR-005(표준 객체 수정)는 기본 대상인 Public Cloud(ABAP Cloud)에서 플랫폼이
+막으므로 하네스가 검사하지 않는다. 나머지 CR-004, CR-006, CR-008 은 사람이
+리뷰로만 본다 — CR-004(비밀정보)는 범용 시크릿 스캐너가, CR-006(하드코딩)은
 프로젝트별 도메인 지식이 있어야 하고, CR-008 은 코드 검사 대상이 아니다.
+SAP ATC 와의 관계는 `conventions/common.md` 의 "기본 대상과 ATC 와의 관계" 에
+있다 — 080 실측으로 ATC 기본 variant 가 CR-002·CR-003 패턴을 잡지 않는 것을
+확인했다(#85).
 
 ## 주의: 저장소에 같은 훅이 남아 있으면 두 번 돈다
 
