@@ -1,5 +1,5 @@
 """MCP ADT 도구로 SAP 오브젝트에 바로 쓰거나 이름을 새로 붙이는 경로에도 공통
-개발 규칙(CR-001, CR-002)을 건다(#60, #61).
+개발 규칙(CR-001, CR-002, CR-003, CR-007)을 건다(#60, #61, #81).
 
 Claude 가 ADT MCP 서버(예: npm `mcp-abap-abap-adt-api`)의 도구로 오브젝트에 바로
 쓰거나 리팩토링으로 새 이름을 붙이면 Write/Edit 도구를 거치지 않으므로
@@ -10,12 +10,16 @@ Claude 가 ADT MCP 서버(예: npm `mcp-abap-abap-adt-api`)의 도구로 오브�
 
 **두 갈래.**
 
-1. `setObjectSource` — 코드 본문(`source`)을 통째로 검사한다(#60). CR-001,
-   CR-002 를 모두 본다.
+1. `setObjectSource` — 코드 본문(`source`)을 통째로 검사한다(#60). 엔진이
+   아는 규칙을 전부 본다 — 지금은 CR-001, CR-002, CR-003(SELECT *, ABAP),
+   CR-007(빈 CATCH, ABAP)이다(#81). 규칙이 늘어도 이 경로는 고치지 않는다 —
+   `checker.code_rules` 가 `code_checks.yaml` 을 보고 언어에 맞는 규칙을
+   알아서 고른다(CLAUDE.md 원칙 2).
 2. `renamePreview`, `renameExecute`, `extractMethodPreview`,
    `extractMethodExecute`, `createObject` — 리팩토링/생성이 새로 붙이는
-   **이름**만 검사한다(#61). 이 도구들은 기존 코드를 옮기거나 이름만 바꿀 뿐이라
-   CR-002(반복문 안 DB 조회)의 대상이 아니므로 **CR-001 만** 본다.
+   **이름**만 검사한다(#61). 이 도구들은 기존 코드를 옮기거나 이름만 바꿀 뿐이고
+   이름 하나짜리 텍스트에는 반복문도 SELECT 문도 CATCH 블록도 있을 수 없으므로,
+   CR-002/CR-003/CR-007 의 대상이 아니다 — **CR-001 만** 본다(`_filter_report_to_rules`).
    `extractMethodExecute` 만 예외적으로 이름 필드가 따로 없다 — 새 메서드 이름은
    `refactoring.affectedObjects[].textReplaceDeltas[].contentNew` 안의 ABAP
    코드 조각에만 있어서, 그 조각들을 이어 붙여 검사한다.
@@ -173,7 +177,7 @@ def _engine_command(staged: Path) -> list[str]:
 
 
 def _check_code(url: str, content: str, suffix: str) -> None:
-    """공통 개발 규칙(CR-001, CR-002)을 MCP 로 쓰려는 코드에 적용한다.
+    """공통 개발 규칙(CR-001, CR-002, CR-003, CR-007)을 MCP 로 쓰려는 코드에 적용한다.
 
     `pre_write_guard.py::_check_code` 와 같은 구조다. 다른 점은 검사 대상이 디스크
     파일이 아니라 MCP 호출의 `source` 문자열이라, 임시 파일 이름을 원래 경로가

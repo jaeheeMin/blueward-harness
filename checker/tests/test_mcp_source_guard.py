@@ -98,6 +98,25 @@ def test_반복문_안의_select가_있는_abap_소스는_막는다(installed_ho
     assert "CR-002" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
+def test_select_star가_있는_abap_소스는_cr003으로_막는다(installed_hook):
+    """CR-003(SELECT *) 도 setObjectSource 경로에서 걸린다(#81) — 이 경로는
+    `_check_code` 로 CR-001·CR-002 와 같은 전체 엔진 판정을 그대로 쓰므로,
+    `code_checks.yaml` 에 CR-003 을 추가하는 것만으로 자동으로 걸린다."""
+    text = "SELECT * FROM vbak INTO TABLE lt_vbak WHERE vbeln IN lt_vbeln.\n"
+    code, out = run_hook(installed_hook, _payload(ABAP_URL, text), str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "CR-003" in reason
+
+
+def test_빈_catch가_있는_abap_소스는_cr007로_막는다(installed_hook):
+    text = "TRY.\n    lo_service->call( ).\n  CATCH cx_root.\nENDTRY.\n"
+    code, out = run_hook(installed_hook, _payload(ABAP_URL, text), str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "CR-007" in reason
+
+
 def test_규칙을_지킨_abap_소스는_통과시킨다(installed_hook):
     code, out = run_hook(
         installed_hook, _payload(ABAP_URL, "DATA lv_order TYPE vbeln.\n"), str(ENGINE_ROOT)
@@ -150,9 +169,12 @@ def test_source가_없으면_검사_불능으로_거절한다(installed_hook):
 
 
 def test_harness_allow_주석이_있으면_통과시킨다(installed_hook):
+    # 필드 목록을 써서 CR-002(반복문 안 SELECT) 만 걸리게 한다 — `*` 를 쓰면 CR-003
+    # (SELECT *) 도 함께 걸려 harness:allow 가 CR-002 하나만 예외 처리했을 때
+    # 통과하는지를 보려는 이 테스트의 의도가 흐려진다.
     text = (
         "LOOP AT lt_order INTO ls_order.\n"
-        '  SELECT SINGLE * FROM vbak INTO ls_vbak WHERE vbeln = ls_order-vbeln. "#harness:allow CR-002 이유\n'
+        '  SELECT SINGLE vbeln FROM vbak INTO ls_vbak-vbeln WHERE vbeln = ls_order-vbeln. "#harness:allow CR-002 이유\n'
         "ENDLOOP.\n"
     )
     code, out = run_hook(installed_hook, _payload(ABAP_URL, text), str(ENGINE_ROOT))
