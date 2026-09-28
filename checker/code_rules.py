@@ -329,7 +329,9 @@ _ABAP_ITAB_TARGET_RE = re.compile(
 # `PACKAGE SIZE n` 은 내부 테이블 대상이라도 n건씩 나눠 가져오는 진짜 반복
 # 조회라 예외의 예외다 — 있으면 ENDSELECT 가 필요하다.
 _ABAP_PACKAGE_SIZE_RE = re.compile(r"\bPACKAGE\s+SIZE\b", re.IGNORECASE)
-_ABAP_GROUP_BY_RE = re.compile(r"\bGROUP\s+BY\b", re.IGNORECASE)
+# ABAP Keyword Documentation(SELECT): 집계만의 결과가 한 줄인 것은 "GROUP BY 와
+# UNION 이 없을 때" 뿐이다. 둘 중 하나라도 있으면 여러 행이 나올 수 있다.
+_ABAP_GROUP_BY_RE = re.compile(r"\b(?:GROUP\s+BY|UNION)\b", re.IGNORECASE)
 _ABAP_FROM_RE = re.compile(r"\bFROM\b", re.IGNORECASE)
 _ABAP_FIELDS_RE = re.compile(r"\bFIELDS\b", re.IGNORECASE)
 # 새 문법(`SELECT FROM t FIELDS ...`)의 필드 목록이 끝나는 자리 — 이 중 어느 절이든
@@ -389,7 +391,8 @@ def _abap_select_opens_loop(segment: str) -> bool:
     가져오는 진짜 반복 조회라 예외의 예외로 반복문을 연다.
 
     그 밖의 경우 필드 목록이 전부 `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` 집계 함수뿐이고
-    `GROUP BY` 가 없으면 결과가 항상 한 줄이므로 반복문이 아니다. `SELECT
+    `GROUP BY` 와 `UNION` 이 없으면 결과가 항상 한 줄이므로 반복문이 아니다
+    (ABAP Keyword Documentation, SELECT 의 ENDSELECT 예외 조건). `SELECT
     DISTINCT` 는 여러 행이 나올 수 있어 이 예외에서 뺀다(집계 예외 대상이
     아니라 기존처럼 반복문으로 본다). `GROUP BY` 가 있으면 집계 함수만
     나열했어도 그룹 수만큼 여러 행이 나오므로 반복문으로 본다.

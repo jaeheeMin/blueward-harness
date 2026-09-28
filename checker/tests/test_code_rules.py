@@ -171,6 +171,16 @@ def test_abap_옛_문법_집계함수를_공백으로_나열해도_반복문을_
     assert _rules(check_source("t.abap", text), "CR-002") == []
 
 
+def test_abap_집계만이라도_union_이_있으면_반복문으로_본다():
+    text = (
+        "SELECT FROM vbak FIELDS MAX( erdat ) AS d\n"
+        "  UNION SELECT FROM vbap FIELDS MAX( erdat ) AS d INTO @DATA(ls_d).\n"
+        "  SELECT vbeln FROM vbak INTO TABLE @DATA(lt).\n"
+        "ENDSELECT.\n"
+    )
+    assert len(_rules(check_source("t.abap", text), "CR-002")) == 1
+
+
 def test_abap_집계와_일반_필드가_섞이면_반복문으로_본다():
     text = (
         "SELECT vkorg COUNT( * ) FROM vbak INTO (lv_vkorg, lv_n).\n"

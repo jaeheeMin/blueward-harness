@@ -77,8 +77,8 @@ SELECT vbeln, erdat, kunnr FROM vbak INTO TABLE lt_vbak WHERE vbeln IN lt_vbeln.
 
 **기계 검사**: 코드 저장 시(훅)와 PR 검사(Actions)에서 막는다. ABAP 만 본다(옛
 문법 `SELECT [SINGLE] [DISTINCT] * FROM`, 새 문법 `SELECT FROM ... FIELDS *`,
-조인의 `<별칭>~*`). `COUNT( * )` 는 통과한다. CDS 는 필드 목록 와일드카드 문법이
-불확실해 이번에는 넣지 않았다. 정말 예외라면 같은 줄이나 바로 위 줄에
+조인의 `<별칭>~*`). `COUNT( * )` 는 통과한다. CDS view entity 는 `SELECT *` 자체를
+지원하지 않아 SAP 가 활성화 단계에서 막으므로 따로 검사하지 않는다. 정말 예외라면 같은 줄이나 바로 위 줄에
 `harness:allow CR-003 <이유>` 를 주석으로 남긴다 — 이유 없이는 예외로 인정하지
 않는다.
 
