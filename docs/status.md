@@ -234,6 +234,21 @@ CORRESPONDING FIELDS OF TABLE` 도 `INTO TABLE` 과 똑같이 내부 테이블 �
 BY` 없이 필드 전부가 `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` 집계 함수뿐인 경우를 반복문을 열지
 않는 것으로 고쳤다. `SELECT DISTINCT` 는 여러 행이 나올 수 있어 이 집계 예외에서 뺐고,
 그 밖의 애매한 모양은 모듈 docstring 의 원칙대로 여전히 반복문(과검출 쪽)으로 본다.
+뒤이어 ABAP Keyword Documentation 의 ENDSELECT 예외 조건에 맞춰 `UNION` 도 반복문
+쪽으로 넣었고, CDS view entity 는 `SELECT *` 자체를 지원하지 않아 CR-003 을 걸지 않는
+근거를 적었다.
+
+**하네스의 기본 대상을 Public Cloud(ABAP Cloud)로 정하고 ATC 와의 관계를 실측했다(#85).**
+SAP 관련 판단은 SAP 공식 문서와 실제 테넌트 조회만 근거로 삼기로 했다. 080 개발
+테넌트의 시스템 ATC variant 는 `ABAP_CLOUD_DEVELOPMENT_DEFAULT` 이고, MCP 의
+`createAtcRun` 에는 variant 이름이 아니라 `atcCheckVariant` 가 돌려준 ID 를 넣어야
+돌았다. `SELECT *`, `FIELDS *`, 반복문 안 `SELECT` 가 실제로 든 Z 클래스 다섯 개에 돌려
+보니 그 자리에는 finding 이 없었다 — 하네스 CR-002·CR-003 은 ATC 와 겹치지 않는다. 빈
+CATCH 는 실물을 못 찾아 확인하지 못했다. priority 1·2 는 `blockPriority`, 3 은
+`allowTransports` 였다. CR-005 는 ABAP Cloud 가 released API 만 허용해 플랫폼이 막으므로
+하네스 검사 대상에서 뺐다. ATC 를 하네스에 자동으로 붙이는 것(Skill 단계에서 MCP 로
+실행 등)은 하지 않았다 — Hook 처럼 강제할 수 없고 로그인 만료 시 검사 불능 처리가
+필요해, 지금은 문서로 관계만 적는다.
 
 ## 아직 정하지 않은 것
 
