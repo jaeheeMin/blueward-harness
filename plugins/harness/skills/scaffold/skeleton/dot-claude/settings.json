@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "harness@blueward-harness": true
+  },
+  "extraKnownMarketplaces": {
+    "blueward-harness": {
+      "source": {
+        "source": "github",
+        "repo": "jaeheeMin/blueward-harness"
+      }
+    }
+  }
+}

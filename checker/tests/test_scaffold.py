@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -60,6 +61,7 @@ EXPECTED_FILES = {
     ".github/workflows/doc-guard.yml",
     ".github/workflows/ssot-approval.yml",
     ".github/ssot-approvers",
+    ".claude/settings.json",
 }
 
 
@@ -84,6 +86,20 @@ def test_예상하는_파일을_모두_만들고_치환한다(tmp_path: Path):
     assert "블루워드 테스트프로젝트" in claude_md
     prd = (tmp_path / "docs" / "ssot" / "PRD.md").read_text(encoding="utf-8")
     assert "테스트프로젝트 PRD" in prd
+
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_text = settings_path.read_text(encoding="utf-8")
+    assert json.loads(settings_text) == {
+        "enabledPlugins": {"harness@blueward-harness": True},
+        "extraKnownMarketplaces": {
+            "blueward-harness": {
+                "source": {"source": "github", "repo": "jaeheeMin/blueward-harness"}
+            }
+        },
+    }
+    # BOM 없이, 끝 줄바꿈이 있게 쓴다.
+    assert not settings_text.startswith("﻿")
+    assert settings_text.endswith("\n")
 
 
 def test_승인자를_주면_ssot_approvers_파일에_한_줄씩_적는다(tmp_path: Path):
@@ -131,6 +147,106 @@ def test_dry_run은_아무것도_만들지_않는다(tmp_path: Path):
     assert result["dry_run"] is True
     # 폴더 자체가 생기지 않아야 한다.
     assert list(tmp_path.iterdir()) == []
+
+
+# --- .claude/settings.json 병합 ---------------------------------------------
+
+EXPECTED_ENABLED_PLUGINS = {"harness@blueward-harness": True}
+EXPECTED_MARKETPLACES = {
+    "blueward-harness": {
+        "source": {"source": "github", "repo": "jaeheeMin/blueward-harness"}
+    }
+}
+
+
+def _write_settings(tmp_path: Path, data: dict | str) -> Path:
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(data, str):
+        settings_path.write_text(data, encoding="utf-8")
+    else:
+        settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return settings_path
+
+
+def test_기존_settings_json에_다른_키가_있으면_보존하며_두_키만_추가한다(tmp_path: Path):
+    existing = {"otherKey": "손대면 안 된다", "permissions": {"allow": ["Bash(git:*)"]}}
+    settings_path = _write_settings(tmp_path, existing)
+
+    result = scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    assert result["merged"] == [".claude/settings.json"]
+    assert result["warnings"] == []
+    assert ".claude/settings.json" not in result["created"]
+
+    data = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert data["otherKey"] == "손대면 안 된다"
+    assert data["permissions"] == {"allow": ["Bash(git:*)"]}
+    assert data["enabledPlugins"] == EXPECTED_ENABLED_PLUGINS
+    assert data["extraKnownMarketplaces"] == EXPECTED_MARKETPLACES
+    # 기존 키 순서가 그대로 유지되고 새 키는 끝에 붙는다.
+    assert list(data.keys())[:2] == ["otherKey", "permissions"]
+
+
+def test_settings_json에_BOM이_있어도_합친다(tmp_path: Path):
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(json.dumps({"otherKey": 1}), encoding="utf-8-sig")
+
+    result = scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    assert result["merged"] == [".claude/settings.json"]
+    assert result["warnings"] == []
+    raw = settings_path.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf")
+    data = json.loads(raw.decode("utf-8"))
+    assert data["otherKey"] == 1
+    assert data["enabledPlugins"] == EXPECTED_ENABLED_PLUGINS
+
+
+def test_settings_json에_이미_같은_값이_있으면_아무것도_안_바꾼다(tmp_path: Path):
+    existing = {
+        "enabledPlugins": EXPECTED_ENABLED_PLUGINS,
+        "extraKnownMarketplaces": EXPECTED_MARKETPLACES,
+    }
+    settings_path = _write_settings(tmp_path, existing)
+    original_text = settings_path.read_text(encoding="utf-8")
+
+    result = scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    assert result["merged"] == []
+    assert result["warnings"] == []
+    assert ".claude/settings.json" in result["skipped"]
+    assert settings_path.read_text(encoding="utf-8") == original_text
+
+
+def test_settings_json이_충돌하는_값이면_안_바꾸고_경고한다(tmp_path: Path):
+    existing = {"enabledPlugins": {"harness@blueward-harness": False}}
+    settings_path = _write_settings(tmp_path, existing)
+    original_text = settings_path.read_text(encoding="utf-8")
+
+    result = scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    assert result["merged"] == []
+    assert ".claude/settings.json" in result["skipped"]
+    assert len(result["warnings"]) == 1
+    assert result["warnings"][0]["path"] == ".claude/settings.json"
+    assert "harness@blueward-harness" in result["warnings"][0]["message"]
+    # 손대지 않았어야 한다.
+    assert settings_path.read_text(encoding="utf-8") == original_text
+
+
+def test_settings_json이_깨진_json이면_안_바꾸고_경고한다(tmp_path: Path):
+    settings_path = _write_settings(tmp_path, "{ 이건 JSON 이 아니다")
+    original_text = settings_path.read_text(encoding="utf-8")
+
+    result = scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    assert result["merged"] == []
+    assert ".claude/settings.json" in result["skipped"]
+    assert len(result["warnings"]) == 1
+    assert result["warnings"][0]["path"] == ".claude/settings.json"
+    assert settings_path.read_text(encoding="utf-8") == original_text
 
 
 # --- 검사 엔진과의 통합 -----------------------------------------------------
