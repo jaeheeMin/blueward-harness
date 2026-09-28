@@ -203,6 +203,26 @@ public-cloud 에서 다시 시험했다: PR #22 는 승인 없이 check 가 실�
 모두 실제로 동작하는 것을 확인한 첫 기록이다. 시험용으로 PRD 에 넣은 한 줄은 그대로
 둔다(지우는 것도 승인이 필요한 PRD 변경이라).
 
+**CR-003(SELECT *)·CR-007(빈 CATCH)에 기계 검사를 추가했다(#81).** CR-001·CR-002 와
+같은 구조(마스킹 → 스캔 → `harness:allow` 예외)를 그대로 따랐다. CR-003 은 ABAP 만
+본다 — 옛 문법(`SELECT [SINGLE] [DISTINCT] * FROM`), 새 문법(`SELECT FROM ...
+FIELDS *`), 조인의 별칭 전체 필드(`<별칭>~*`) 세 모양이고, `COUNT( * )` 는 `SELECT`
+와 `*` 사이에 다른 토큰이 끼어 있어 정규식이 저절로 구분한다. CDS 는 넣지 않았다 —
+`select from x { * }` 류 필드 목록 와일드카드 문법이 실제로 어떤 모양인지 확인하지
+못해, 넣으면 오탐이나 놓침 어느 쪽으로 잘못될지 몰라서다. CR-007 은 ABAP(`CATCH ...
+.` 뒤 다음 CATCH/CLEANUP/ENDTRY 까지 statement 가 없으면, `CATCH SYSTEM-EXCEPTIONS
+... ENDCATCH` 도 같은 기준으로)과 JS/TS(`catch {}`/`catch (e) {}`, 그리고 판단해서
+추가한 `.catch(() => {})`/`.catch(function(){})` 같은 빈 프로미스 콜백)를 본다.
+ABAP 쪽은 statement 를 순서대로만 보고 판정해 중첩 TRY 도 스택 없이 안전하다.
+`mcp_source_guard.py` 의 `setObjectSource` 경로는 코드를 고치지 않고도 자동으로
+새 규칙을 적용받았다 — 그 경로가 `code_checks.yaml` 을 따르는 전체 엔진 판정을
+그대로 쓰기 때문이다(설계가 의도한 대로 동작한 것을 이번에 확인했다). 이름만 보는
+rename/extractMethod/createObject 경로는 그대로 CR-001 만 본다. 기존 테스트
+fixture 세 곳(`test_hook.py`, `test_mcp_source_guard.py`, `test_code_rules.py`
+각 1개)이 `harness:allow CR-002` 로 CR-002 만 예외 처리했던 `SELECT SINGLE * FROM`
+문장에 CR-003 도 새로 걸려 깨졌다 — 의도한 위반 예시가 아니라 CR-002 확인용
+데이터였으므로 `*` 를 필드 목록으로 바꿔 CR-003 을 걸지 않게 고쳤다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
