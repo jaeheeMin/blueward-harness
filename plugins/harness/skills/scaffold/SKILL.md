@@ -30,8 +30,17 @@ description: 새 고객사 Project Repository 를 처음 만들었을 때 표준
    `uv` 가 없으면 `python` 으로 바로 부른다. `--ssot-approver` 는 생략할 수
    있다.
 4. 스크립트는 이미 있는 파일을 절대 덮어쓰지 않고 건너뛴다(`skipped`). 만든
-   목록(`created`)과 건너뛴 목록을 사용자에게 보고한다.
+   목록(`created`)과 건너뛴 목록을 사용자에게 보고한다. `.claude/settings.json`
+   만은 예외로, 이미 있어도 harness Plugin 자동 설치에 쓰는 두 항목
+   (`enabledPlugins`·`extraKnownMarketplaces` 안의 `harness@blueward-harness`
+   ·`blueward-harness`)이 없으면 그 항목만 채워 넣고 나머지 키는 그대로
+   둔다(`merged`). 이미 같은 값이면 손대지 않는다. 다른 값이 이미 있거나
+   JSON 을 못 읽으면 손대지 않고 `warnings` 로 알린다 — 이때는 사용자에게
+   그 내용을 그대로 보여주고, 두 항목을 손으로 넣어야 한다고 안내한다.
 5. 다음에 할 일을 안내한다.
+   - `.claude/settings.json` 덕분에 이 저장소 폴더를 여는 팀원은 별도 설치
+     없이 blueward-harness 마켓플레이스와 harness Plugin 설치 안내를
+     자동으로 받는다. `merged` 나 `warnings` 가 있었으면 그 사실도 알린다.
    - 고객사에게 받은 Template 원본을 `templates/` 에 그대로 넣는다.
    - 그 Template 을 대조할 규칙을 `rules/` 에 추가한다(`rules/README.md`
      예시 참고).
@@ -68,6 +77,7 @@ env/README.md                      환경별 접속 URL(Credential 은 안 둠)
 .github/workflows/doc-guard.yml    PR·main 커밋마다 doc-guard 를 부르는 워크플로
 .github/workflows/ssot-approval.yml PR·main 커밋마다 PRD 변경 승인을 검사하는 워크플로(#49)
 .github/ssot-approvers             PRD 변경 PR 을 승인할 수 있는 GitHub 아이디 목록
+.claude/settings.json              harness Plugin 자동 설치 안내(#89). 이미 있으면 두 항목만 합친다
 ```
 
 `rules/ssot.yaml`, `rules/spec.yaml`, `rules/audit-changes.yaml`,

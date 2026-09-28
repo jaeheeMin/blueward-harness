@@ -269,6 +269,22 @@ the current branch" 로 실패하고, 훅은 그 원인을 알려주지 못한 �
 시나리오를 실제로 훅을 실행해 확인했고, 같은 시나리오 중 다섯 개를
 `checker/tests/test_plugin_layout.py` 에 자동화된 테스트로 남겼다.
 
+**scaffold 가 `.claude/settings.json` 도 만들어 harness Plugin 자동 설치를 안내하게 했다(#89).**
+`dot-github` 처럼 스켈레톤에 `dot-claude/settings.json` 을 두고 실제로 만들 때
+`.claude` 로 되돌린다. 새 저장소라 그 파일이 아직 없으면 `enabledPlugins`
+(`harness@blueward-harness`)와 `extraKnownMarketplaces`(`blueward-harness`,
+`jaeheeMin/blueward-harness`) 두 키를 그대로 쓴다. 이미 있는 저장소라면
+`scaffold.py` 의 "이미 있는 파일은 덮어쓰지 않는다" 는 원칙에 예외를
+하나 둬야 했다 — 파일 전체를 건너뛰면 팀원이 각자 설치해야 하는 원래
+문제로 돌아가기 때문이다. 그래서 이 파일만은 JSON 으로 읽어 두 항목이
+없을 때만 그 항목만 채우고 나머지 키·값과 키 순서는 그대로 두며
+(`merged`), 이미 같은 값이면 손대지 않고(`skipped`), 다른 값이 이미
+있거나 JSON 파싱에 실패하면 역시 손대지 않고 무엇이 걸렸는지
+`warnings` 로 돌려준다 — 검사를 못 한 것을 통과나 위반(덮어쓰기)으로
+뭉개지 않는다는 CLAUDE.md 원칙을 이 파일 하나에도 그대로 적용한 것이다.
+빈 저장소·다른 키 보존·이미 같은 값·충돌 값·깨진 JSON 다섯 경우를
+`checker/tests/test_scaffold.py` 에 테스트로 남겼다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.

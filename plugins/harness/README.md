@@ -145,8 +145,11 @@ Project Repository 의 CLAUDE.md 에 짧게 적어 둬야 세션이 매번 상�
 새 고객사 Project Repository 를 처음 만들었을 때, 검사기가 기대하는 표준
 구조 — 저장소 루트의 `templates/` 와 `rules/`, `docs/ssot/PRD.md`,
 `conventions/`, `audit/`, `env/`, 그리고 PR·main 커밋마다 doc-guard 를
-부르는 `.github/workflows/doc-guard.yml` — 를 한 번에 만들어 준다. 자세한
-절차는 `skills/scaffold/SKILL.md` 를 읽는다.
+부르는 `.github/workflows/doc-guard.yml` — 를 한 번에 만들어 준다.
+`.claude/settings.json` 도 함께 만들어, 이 저장소 폴더를 여는 팀원이 별도
+설치 없이 blueward-harness 마켓플레이스와 harness Plugin 설치 안내를 받게
+한다(#89) — 이미 그 파일이 있으면 통째로 덮어쓰지 않고 없는 두 항목만
+채워 넣는다. 자세한 절차는 `skills/scaffold/SKILL.md` 를 읽는다.
 
 ## Audit
 

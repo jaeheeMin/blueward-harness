@@ -10,7 +10,9 @@ test_scaffold.py`)가 사람 손 없이 반복 실행할 수 있어야 하기 �
 CLAUDE.md 의 "지금 어디까지 왔나" 가 이 전제를 설명한다.
 
 이미 있는 파일은 절대 덮어쓰지 않는다. 두 번째 실행에서도 사람이 이미 채워
-넣은 내용을 잃지 않아야 한다.
+넣은 내용을 잃지 않아야 한다. 유일한 예외는 `.claude/settings.json` 이다 —
+harness Plugin 자동 설치에 쓰는 두 항목이 없을 때만 그 항목만 채워 넣고,
+나머지 내용과 값이 다른 경우는 역시 건드리지 않는다(`_plan_claude_settings_merge`).
 """
 from __future__ import annotations
 
@@ -22,11 +24,103 @@ from pathlib import Path
 
 SKELETON = Path(__file__).resolve().parent / "skeleton"
 
-# 스켈레톤 안에서는 `dot-github` 라는 이름으로 둔다. 이 폴더가 `.github` 그대로면
-# 이 스킬이 사는 blueward-harness 저장소 자신의 워크플로와 뒤섞여 보이고, 일부
-# 도구는 점으로 시작하는 폴더를 조용히 건너뛴다. 실제로 만들 때만 `.github` 로
-# 되돌린다.
-RENAME = {"dot-github": ".github"}
+# 스켈레톤 안에서는 `dot-github`, `dot-claude` 라는 이름으로 둔다. 이 폴더가
+# `.github`·`.claude` 그대로면 이 스킬이 사는 blueward-harness 저장소 자신의
+# 워크플로·설정과 뒤섞여 보이고, 일부 도구는 점으로 시작하는 폴더를 조용히
+# 건너뛴다. 실제로 만들 때만 원래 이름으로 되돌린다.
+RENAME = {"dot-github": ".github", "dot-claude": ".claude"}
+
+# 새 저장소를 여는 팀원이 harness Plugin 설치를 자동으로 안내받도록 넣는 값.
+# 이미 있는 `.claude/settings.json` 은 절대 통째로 덮어쓰지 않고, 이 두 키가
+# 없을 때만 채워 넣는다(_plan_claude_settings_merge).
+CLAUDE_SETTINGS_REL = Path(".claude") / "settings.json"
+EXPECTED_ENABLED_PLUGIN = ("harness@blueward-harness", True)
+EXPECTED_MARKETPLACE = (
+    "blueward-harness",
+    {"source": {"source": "github", "repo": "jaeheeMin/blueward-harness"}},
+)
+
+
+def _plan_claude_settings_merge(existing_text: str) -> dict:
+    """기존 `.claude/settings.json` 을 두 키(enabledPlugins·extraKnownMarketplaces
+    안의 harness 항목)만 채워 합칠 계획을 세운다. 이 함수는 읽기만 하고 아무
+    파일도 쓰지 않는다 — `--dry-run` 에서도 그대로 판정을 미리 보여줄 수 있게.
+
+    돌려주는 사전의 `status` 는 넷 중 하나다.
+    - "unchanged": 이미 같은 값이 있다. 아무것도 바꾸지 않는다.
+    - "merged": 두 항목 중 하나 이상이 없어 채워 넣었다. `text` 에 새 내용이 있다.
+    - "conflict": 같은 키가 다른 값으로 이미 있다. 무엇이 다른지 `message` 에 담는다.
+    - "invalid_json": JSON 으로 못 읽는다(파싱 실패 또는 최상위가 객체가 아님).
+
+    "conflict" 와 "invalid_json" 은 이 파일을 건드리지 않는다는 뜻이다 — 검사를
+    못 했다고 통과로 뭉개지 않는 것과 같은 원칙으로, 자동으로 못 합칠 값을
+    통과(조용히 스킵)로도, 임의로 덮어써 위반(값 파괴)으로도 만들지 않는다.
+    """
+    try:
+        data = json.loads(existing_text)
+    except json.JSONDecodeError as exc:
+        return {
+            "status": "invalid_json",
+            "message": f".claude/settings.json 이 올바른 JSON 이 아니라 건드리지 않았다({exc}). 두 키를 손으로 넣어야 한다.",
+            "text": None,
+        }
+    if not isinstance(data, dict):
+        return {
+            "status": "invalid_json",
+            "message": ".claude/settings.json 의 최상위가 객체(object)가 아니라 건드리지 않았다.",
+            "text": None,
+        }
+
+    changed = False
+    conflicts: list[str] = []
+
+    enabled_key, enabled_value = EXPECTED_ENABLED_PLUGIN
+    enabled_plugins = data.get("enabledPlugins")
+    if enabled_plugins is None:
+        data["enabledPlugins"] = {enabled_key: enabled_value}
+        changed = True
+    elif isinstance(enabled_plugins, dict):
+        if enabled_key not in enabled_plugins:
+            enabled_plugins[enabled_key] = enabled_value
+            changed = True
+        elif enabled_plugins[enabled_key] is not enabled_value:
+            conflicts.append(
+                f'enabledPlugins["{enabled_key}"] 가 이미 {enabled_plugins[enabled_key]!r} 로 설정돼 있다'
+            )
+    else:
+        conflicts.append("enabledPlugins 가 객체(object)가 아니다")
+
+    market_key, market_value = EXPECTED_MARKETPLACE
+    marketplaces = data.get("extraKnownMarketplaces")
+    if marketplaces is None:
+        data["extraKnownMarketplaces"] = {market_key: market_value}
+        changed = True
+    elif isinstance(marketplaces, dict):
+        if market_key not in marketplaces:
+            marketplaces[market_key] = market_value
+            changed = True
+        elif marketplaces[market_key] != market_value:
+            conflicts.append(
+                f'extraKnownMarketplaces["{market_key}"] 가 이미 다른 값으로 설정돼 있다'
+            )
+    else:
+        conflicts.append("extraKnownMarketplaces 가 객체(object)가 아니다")
+
+    if conflicts:
+        return {
+            "status": "conflict",
+            "message": ".claude/settings.json 의 기존 값과 달라 건드리지 않았다: "
+            + "; ".join(conflicts),
+            "text": None,
+        }
+
+    if not changed:
+        return {"status": "unchanged", "message": None, "text": None}
+
+    # 들여쓰기 2칸, UTF-8, BOM 없음, 끝 줄바꿈. 기존 키 순서는 dict 삽입 순서로
+    # 그대로 유지되고, 새로 채운 키만 끝에 붙는다.
+    text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    return {"status": "merged", "message": None, "text": text}
 
 
 def _dest_relative(src_relative: Path) -> Path:
@@ -56,15 +150,23 @@ def scaffold(
 ) -> dict:
     """`root` 아래에 표준 구조를 만들고 결과를 사전으로 돌려준다.
 
-    기존 파일은 건드리지 않는다. `dry_run` 이면 만들 목록만 셈하고 아무것도
-    쓰지 않는다. `ssot_approvers` 는 `.github/ssot-approvers` 에 한 줄씩
-    적어 넣을 GitHub 아이디 목록이다 — 비워 두면(기본값) 그 파일은 누구든
-    승인할 수 있다는 뜻으로 남는다.
+    기존 파일은 건드리지 않는다. 다만 `.claude/settings.json` 만은 예외로,
+    이미 있으면 `enabledPlugins`·`extraKnownMarketplaces` 안의 harness 항목
+    두 개가 없을 때만 그 항목만 채워 넣고 나머지는 그대로 둔다(`merged`).
+    이미 같은 값이면 손대지 않고(`skipped`), 다른 값이 있거나 JSON 을 못
+    읽으면 역시 손대지 않고 무엇이 걸렸는지 `warnings` 에 담는다 — 검사를
+    못 한 것을 통과로도, 위반(덮어쓰기)으로도 만들지 않는다.
+
+    `dry_run` 이면 만들 목록만 셈하고 아무것도 쓰지 않는다. `ssot_approvers`
+    는 `.github/ssot-approvers` 에 한 줄씩 적어 넣을 GitHub 아이디 목록이다
+    — 비워 두면(기본값) 그 파일은 누구든 승인할 수 있다는 뜻으로 남는다.
     """
     today = date.today().isoformat()
     approvers = list(ssot_approvers or [])
     created: list[str] = []
     skipped: list[str] = []
+    merged: list[str] = []
+    warnings: list[dict] = []
 
     for src in sorted(SKELETON.rglob("*")):
         if src.is_dir():
@@ -74,6 +176,19 @@ def scaffold(
         dest = root / rel
 
         if dest.exists():
+            if rel == CLAUDE_SETTINGS_REL:
+                # utf-8-sig: Windows PowerShell 이 쓴 파일은 BOM 이 붙어 있을 수 있다.
+                plan = _plan_claude_settings_merge(dest.read_text(encoding="utf-8-sig"))
+                if plan["status"] == "merged":
+                    if not dry_run:
+                        dest.write_text(plan["text"], encoding="utf-8", newline="\n")
+                    merged.append(rel_posix)
+                elif plan["status"] == "unchanged":
+                    skipped.append(rel_posix)
+                else:  # "conflict" 또는 "invalid_json" — 손대지 않고 알린다.
+                    skipped.append(rel_posix)
+                    warnings.append({"path": rel_posix, "message": plan["message"]})
+                continue
             skipped.append(rel_posix)
             continue
 
@@ -91,6 +206,8 @@ def scaffold(
         "root": root.as_posix(),
         "created": created,
         "skipped": skipped,
+        "merged": merged,
+        "warnings": warnings,
         "dry_run": dry_run,
     }
 
@@ -131,6 +248,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     result = scaffold(root, args.client, args.project, args.dry_run, args.ssot_approvers)
+    for warning in result["warnings"]:
+        print(f"경고: {warning['path']} — {warning['message']}", file=sys.stderr)
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
     return 0
