@@ -314,6 +314,112 @@ def _abap_statements(masked: str) -> list[tuple[int, int]]:
     return statements
 
 
+# --- CR-002 (ABAP): 이 SELECT 문이 SELECT...ENDSELECT 반복문을 여는가(#83) ----------
+
+_ABAP_SELECT_SINGLE_RE = re.compile(r"^\s*SELECT\s+SINGLE\b", re.IGNORECASE)
+_ABAP_SELECT_DISTINCT_RE = re.compile(r"^\s*SELECT\s+DISTINCT\b", re.IGNORECASE)
+# 내부 테이블을 대상으로 하는 결과절. 옛 문법 `INTO TABLE`, 구조체 대응
+# `INTO CORRESPONDING FIELDS OF TABLE`, 추가하는 `APPENDING TABLE`,
+# `APPENDING CORRESPONDING FIELDS OF TABLE` 넷 다 한 번에 전체 결과를 담으므로
+# ENDSELECT 가 필요 없다.
+_ABAP_ITAB_TARGET_RE = re.compile(
+    r"\b(?:INTO|APPENDING)\s+(?:CORRESPONDING\s+FIELDS\s+OF\s+)?TABLE\b",
+    re.IGNORECASE,
+)
+# `PACKAGE SIZE n` 은 내부 테이블 대상이라도 n건씩 나눠 가져오는 진짜 반복
+# 조회라 예외의 예외다 — 있으면 ENDSELECT 가 필요하다.
+_ABAP_PACKAGE_SIZE_RE = re.compile(r"\bPACKAGE\s+SIZE\b", re.IGNORECASE)
+# ABAP Keyword Documentation(SELECT): 집계만의 결과가 한 줄인 것은 "GROUP BY 와
+# UNION 이 없을 때" 뿐이다. 둘 중 하나라도 있으면 여러 행이 나올 수 있다.
+_ABAP_GROUP_BY_RE = re.compile(r"\b(?:GROUP\s+BY|UNION)\b", re.IGNORECASE)
+_ABAP_FROM_RE = re.compile(r"\bFROM\b", re.IGNORECASE)
+_ABAP_FIELDS_RE = re.compile(r"\bFIELDS\b", re.IGNORECASE)
+# 새 문법(`SELECT FROM t FIELDS ...`)의 필드 목록이 끝나는 자리 — 이 중 어느 절이든
+# 먼저 나오는 지점까지가 필드 목록이다.
+_ABAP_CLAUSE_BOUNDARY_RE = re.compile(
+    r"\b(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|INTO|APPENDING|UP\s+TO)\b",
+    re.IGNORECASE,
+)
+# `COUNT( * )`, `COUNT(*)`, `COUNT( DISTINCT f )`, `SUM( f ) AS total` 처럼 괄호 안
+# 공백 유무와 별칭(`AS x`) 유무와 상관없이 집계 함수 하나로 이루어진 필드. 필드 목록
+# 전체가 이것들만 쉼표(새 문법)나 공백(옛 문법 `MAX( a ) MIN( b )`)으로 이어진 것인지
+# 본다.
+_ABAP_AGG_ITEM = (
+    r"(?:COUNT|SUM|MIN|MAX|AVG)\s*\(\s*(?:DISTINCT\s+)?[^()]*\)"
+    r"(?:\s+AS\s+[A-Za-z_][A-Za-z0-9_]*)?"
+)
+_ABAP_AGG_LIST_RE = re.compile(
+    rf"\s*{_ABAP_AGG_ITEM}(?:\s*,\s*{_ABAP_AGG_ITEM}|\s+{_ABAP_AGG_ITEM})*\s*",
+    re.IGNORECASE,
+)
+
+
+def _abap_select_field_list(segment: str) -> str | None:
+    """SELECT 문에서 필드 목록 부분만 뽑는다.
+
+    새 문법은 `FIELDS` 키워드 다음부터 `WHERE`/`GROUP BY`/`HAVING`/`ORDER BY`/
+    `INTO`/`APPENDING`/`UP TO` 중 가장 먼저 나오는 절 앞까지다. 옛 문법은
+    `SELECT`(그리고 이미 처리한 `SINGLE`/`DISTINCT`) 다음부터 `FROM` 앞까지다.
+    """
+    fields_m = _ABAP_FIELDS_RE.search(segment)
+    if fields_m:
+        start = fields_m.end()
+        boundary_m = _ABAP_CLAUSE_BOUNDARY_RE.search(segment, start)
+        end = boundary_m.start() if boundary_m else len(segment)
+        return segment[start:end]
+
+    from_m = _ABAP_FROM_RE.search(segment)
+    select_m = _ABAP_KEYWORD_RE.match(segment)
+    if not from_m or not select_m:
+        return None
+    return segment[select_m.end():from_m.start()]
+
+
+def _abap_all_fields_are_aggregates(field_list: str) -> bool:
+    return bool(_ABAP_AGG_LIST_RE.fullmatch(field_list))
+
+
+def _abap_select_opens_loop(segment: str) -> bool:
+    """이 SELECT 문이 SELECT...ENDSELECT 반복문을 여는지 판정한다(#83).
+
+    `SELECT SINGLE` 은 한 줄만 가져오므로 ENDSELECT 가 필요 없다 — 옛 문법
+    `SELECT SINGLE f FROM t INTO ...`, 새 문법 `SELECT SINGLE FROM t FIELDS ...
+    INTO ...` 모두 마찬가지다. 결과를 내부 테이블에 담는 `INTO TABLE`,
+    `INTO CORRESPONDING FIELDS OF TABLE`, `APPENDING TABLE`,
+    `APPENDING CORRESPONDING FIELDS OF TABLE` 도 한 번에 전체를 가져오므로
+    반복문을 열지 않는다 — 다만 `PACKAGE SIZE n` 이 함께 있으면 n건씩 나눠
+    가져오는 진짜 반복 조회라 예외의 예외로 반복문을 연다.
+
+    그 밖의 경우 필드 목록이 전부 `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` 집계 함수뿐이고
+    `GROUP BY` 와 `UNION` 이 없으면 결과가 항상 한 줄이므로 반복문이 아니다
+    (ABAP Keyword Documentation, SELECT 의 ENDSELECT 예외 조건). `SELECT
+    DISTINCT` 는 여러 행이 나올 수 있어 이 예외에서 뺀다(집계 예외 대상이
+    아니라 기존처럼 반복문으로 본다). `GROUP BY` 가 있으면 집계 함수만
+    나열했어도 그룹 수만큼 여러 행이 나오므로 반복문으로 본다.
+
+    그 밖의(판정 불가한) 모양은 모듈 docstring의 원칙과 사용자 판단에 따라
+    반복문을 여는 쪽(과검출)으로 본다 — 놓쳐서 진짜 위반을 통과시키는 것보다
+    낫다고 본다.
+    """
+    if _ABAP_SELECT_SINGLE_RE.match(segment):
+        return False
+
+    if _ABAP_ITAB_TARGET_RE.search(segment):
+        return bool(_ABAP_PACKAGE_SIZE_RE.search(segment))
+
+    if _ABAP_SELECT_DISTINCT_RE.match(segment):
+        return True
+
+    if _ABAP_GROUP_BY_RE.search(segment):
+        return True
+
+    field_list = _abap_select_field_list(segment)
+    if field_list is not None and _abap_all_fields_are_aggregates(field_list):
+        return False
+
+    return True
+
+
 def _scan_abap_cr002(masked: str) -> list[tuple[str, int, str]]:
     findings: list[tuple[str, int, str]] = []
     stack: list[str] = []  # "loop" | "do" | "while" | "select"
@@ -351,13 +457,14 @@ def _scan_abap_cr002(masked: str) -> list[tuple[str, int, str]]:
                     "CR-002", keyword_offset,
                     "SELECT 문이 반복문(LOOP/DO/WHILE/SELECT) 안에 있다.",
                 ))
-            # `SELECT SINGLE` 은 한 줄만 가져오므로 ENDSELECT 가 필요 없다. `INTO TABLE`
-            # 이 없는 그 밖의 SELECT 는 결과를 한 줄씩 훑는 SELECT...ENDSELECT 반복문을
-            # 연다 — 그 뒤 ENDSELECT 까지는 이 반복문 안이다. 이 구분이 없으면
-            # `SELECT SINGLE ... .` 문 하나마다 반복문이 하나씩 열린 것으로 잘못 세어,
-            # 짝이 맞는 ENDSELECT 가 없으니 스택이 영영 비지 않는다.
-            is_single = bool(re.match(r"\s*SELECT\s+SINGLE\b", segment, re.IGNORECASE))
-            if not is_single and not re.search(r"INTO\s+TABLE", segment, re.IGNORECASE):
+            # 이 SELECT 가 SELECT...ENDSELECT 반복문을 여는지는 `_abap_select_opens_loop`
+            # 가 판정한다(#83) — `SELECT SINGLE`, 내부 테이블 대상(`INTO TABLE` 계열),
+            # 집계 함수만으로 이루어진 필드 목록(GROUP BY 없이)은 한 줄/한 번에 결과가
+            # 정해지므로 반복문을 열지 않는다. 반복문을 열면 그 뒤 ENDSELECT 까지는 이
+            # 반복문 안이다. 이 구분이 없으면 반복문을 열지 않는 SELECT 문 하나마다
+            # 반복문이 하나씩 열린 것으로 잘못 세어, 짝이 맞는 ENDSELECT 가 없으니
+            # 스택이 영영 비지 않는다.
+            if _abap_select_opens_loop(segment):
                 stack.append("select")
         elif keyword == "OPEN":
             om = re.match(r"\s*OPEN\s+(\w+)", segment, re.IGNORECASE)

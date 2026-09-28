@@ -29,10 +29,10 @@ rules:
     languages: [abap, js]
     fix: "반복문 밖에서 한 번에 모아 조회한다 — FOR ALL ENTRIES / JOIN / IN, ABAP Cloud 는 CDS view."
   CR-003:
-    # CDS 는 넣지 않았다. `select from x { * }` 같은 필드 목록 와일드카드 문법이
-    # CDS 에도 있는지, 있다면 어떤 모양인지가 불확실해 넣으면 오탐(과검출)이나
-    # 놓침(과소검출) 중 어느 쪽으로도 잘못될 위험이 있다. 확실한 ABAP 부터 먼저
-    # 넣고, CDS 는 실제 문법을 확인한 뒤 별도로 다룬다(이슈 #81 보고 참고).
+    # CDS 는 검사하지 않는다. ABAP Keyword Documentation 에 따르면 CDS view
+    # entity 는 `SELECT *` 를 아예 지원하지 않아 활성화 단계에서 SAP 가 막는다
+    # (abencds_select_statement_v2). ABAP Cloud 에서 쓰는 것이 view entity 이고,
+    # `*` 를 허용하던 DDIC-based view 는 obsolete 다.
     title: "SELECT * 대신 필요한 필드만 조회한다"
     languages: [abap]
     fix: "필요한 필드만 나열한다(옛 문법은 필드 목록, 새 문법은 FIELDS 절). COUNT( * ) 는 그대로 둬도 된다."
