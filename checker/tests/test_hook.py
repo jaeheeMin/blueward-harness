@@ -311,9 +311,12 @@ def test_기준_폴더가_없어도_공통_개발_규칙은_적용된다(install
 
 def test_harness_allow_주석이_있는_코드는_통과시킨다(installed_hook, tmp_path):
     target = tmp_path / "z_report.abap"
+    # 필드 목록을 써서 CR-002(반복문 안 SELECT) 만 걸리게 한다 — `*` 를 쓰면 CR-003
+    # (SELECT *) 도 함께 걸려 harness:allow 가 CR-002 하나만 예외 처리했을 때
+    # 통과하는지를 보려는 이 테스트의 의도가 흐려진다.
     text = (
         "LOOP AT lt_order INTO ls_order.\n"
-        '  SELECT SINGLE * FROM vbak INTO ls_vbak WHERE vbeln = ls_order-vbeln. "#harness:allow CR-002 이유\n'
+        '  SELECT SINGLE vbeln FROM vbak INTO ls_vbak-vbeln WHERE vbeln = ls_order-vbeln. "#harness:allow CR-002 이유\n'
         "ENDLOOP.\n"
     )
     code, out = run_hook(installed_hook, _write_payload(target, text), str(ENGINE_ROOT))

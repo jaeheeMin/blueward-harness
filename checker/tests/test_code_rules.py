@@ -1,4 +1,5 @@
-"""CR-001(한글 이름)과 CR-002(반복문 안 DB 조회)의 기계 검사(#54)."""
+"""CR-001(한글 이름), CR-002(반복문 안 DB 조회), CR-003(SELECT *),
+CR-007(빈 CATCH)의 기계 검사(#54, #81)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -125,6 +126,166 @@ def test_abap_open_cursor가_반복문_밖에_있으면_괜찮다():
     assert _rules(check_source("t.abap", text), "CR-002") == []
 
 
+# --- CR-003 (ABAP) ------------------------------------------------------------
+
+
+def test_abap_select_star는_위반():
+    text = "SELECT * FROM vbak INTO TABLE lt_vbak WHERE vbeln IN lt_vbeln.\n"
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+    assert hits[0]["line"] == 1
+    assert hits[0]["allowed"] is False
+
+
+def test_abap_select_single_star도_위반():
+    text = "SELECT SINGLE * FROM vbak INTO ls_vbak.\n"
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+
+
+def test_abap_select_distinct_star도_위반():
+    text = "SELECT DISTINCT * FROM vbak INTO TABLE lt_vbak.\n"
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+
+
+def test_abap_새_문법_fields_star도_위반():
+    text = "SELECT FROM vbak FIELDS * WHERE vbeln = lv_vbeln INTO TABLE @lt_vbak.\n"
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+
+
+def test_abap_조인의_별칭_전체_필드도_위반():
+    text = (
+        "SELECT a~*, b~carrid FROM spfli AS a JOIN sflight AS b "
+        "ON a~carrid = b~carrid INTO TABLE @lt_result.\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+    assert "a~*" in hits[0]["message"]
+
+
+def test_abap_필드_목록_select는_괜찮다():
+    text = "SELECT vbeln, erdat, kunnr FROM vbak INTO TABLE lt_vbak WHERE vbeln IN lt_vbeln.\n"
+    assert _rules(check_source("t.abap", text), "CR-003") == []
+
+
+def test_abap_새_문법_필드_목록도_괜찮다():
+    text = "SELECT FROM vbak FIELDS vbeln, erdat WHERE vbeln = lv_vbeln INTO TABLE @lt_vbak.\n"
+    assert _rules(check_source("t.abap", text), "CR-003") == []
+
+
+def test_abap_count_star는_괜찮다():
+    text = "SELECT COUNT( * ) FROM vbak INTO lv_count.\n"
+    assert _rules(check_source("t.abap", text), "CR-003") == []
+
+
+def test_abap_select_single_count_star도_괜찮다():
+    text = "SELECT SINGLE COUNT( * ) FROM vbak INTO lv_count.\n"
+    assert _rules(check_source("t.abap", text), "CR-003") == []
+
+
+def test_abap_문자열_안의_select_star는_괜찮다():
+    text = "lv_x = ' SELECT * FROM vbak '.\n"
+    assert _rules(check_source("t.abap", text), "CR-003") == []
+
+
+def test_abap_주석_안의_select_star는_괜찮다():
+    text = "* SELECT * FROM vbak\nDATA lv_x TYPE i.\n"
+    assert _rules(check_source("t.abap", text), "CR-003") == []
+
+
+def test_cds는_cr003_설정에_없다():
+    """CDS 의 `select from x { * }` 문법이 불확실해 이번에는 넣지 않았다(#81 보고 참고)."""
+    cfg = code_rules._load_config()
+    assert "cds" not in (cfg["rules"]["CR-003"].get("languages") or [])
+
+
+# --- CR-007 (ABAP): 빈 CATCH ----------------------------------------------------
+
+
+def test_abap_빈_catch는_위반():
+    text = "TRY.\n    lo_service->call( ).\n  CATCH cx_root.\nENDTRY.\n"
+    hits = _rules(check_source("t.abap", text), "CR-007")
+    assert len(hits) == 1
+    assert hits[0]["line"] == 3
+    assert hits[0]["allowed"] is False
+
+
+def test_abap_주석만_있는_catch도_위반():
+    text = (
+        "TRY.\n"
+        "    lo_service->call( ).\n"
+        "  CATCH cx_root.\n"
+        "    \" 나중에 처리한다\n"
+        "ENDTRY.\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-007")
+    assert len(hits) == 1
+    assert hits[0]["line"] == 3
+
+
+def test_abap_처리_문장이_있는_catch는_괜찮다():
+    text = (
+        "TRY.\n"
+        "    lo_service->call( ).\n"
+        "  CATCH cx_root INTO lx_error.\n"
+        "    MESSAGE lx_error->get_text( ) TYPE 'E'.\n"
+        "ENDTRY.\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-007") == []
+
+
+def test_abap_여러_catch가_모두_비어있으면_각각_위반():
+    text = "TRY.\n    foo( ).\n  CATCH cx_a.\n  CATCH cx_b.\nENDTRY.\n"
+    hits = _rules(check_source("t.abap", text), "CR-007")
+    assert sorted(h["line"] for h in hits) == [3, 4]
+
+
+def test_abap_system_exceptions_빈_블록은_위반():
+    text = "CATCH SYSTEM-EXCEPTIONS arithmetic_errors = 1.\nENDCATCH.\n"
+    hits = _rules(check_source("t.abap", text), "CR-007")
+    assert len(hits) == 1
+    assert "SYSTEM-EXCEPTIONS" in hits[0]["message"]
+
+
+def test_abap_system_exceptions_처리_있으면_괜찮다():
+    text = "CATCH SYSTEM-EXCEPTIONS arithmetic_errors = 1.\n  result = a / b.\nENDCATCH.\n"
+    assert _rules(check_source("t.abap", text), "CR-007") == []
+
+
+def test_abap_중첩_try_안쪽만_비어있으면_안쪽만_위반():
+    text = (
+        "TRY.\n"
+        "    TRY.\n"
+        "      foo( ).\n"
+        "    CATCH cx_b.\n"
+        "    ENDTRY.\n"
+        "  CATCH cx_a.\n"
+        "    handle( ).\n"
+        "ENDTRY.\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-007")
+    assert len(hits) == 1
+    assert hits[0]["line"] == 4
+
+
+def test_abap_중첩_try_바깥쪽만_비어있으면_바깥쪽만_위반():
+    text = (
+        "TRY.\n"
+        "    TRY.\n"
+        "      foo( ).\n"
+        "    CATCH cx_b.\n"
+        "      handle_inner( ).\n"
+        "    ENDTRY.\n"
+        "  CATCH cx_a.\n"
+        "ENDTRY.\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-007")
+    assert len(hits) == 1
+    assert hits[0]["line"] == 7
+
+
 # --- 예외: harness:allow ----------------------------------------------------
 
 
@@ -174,6 +335,44 @@ def test_다른_규칙번호의_allow는_적용되지_않는다():
     assert len(hits) == 1 and hits[0]["allowed"] is False
 
 
+def test_cr003에_이유_있는_allow는_예외로_인정한다():
+    text = 'SELECT * FROM vbak INTO TABLE lt_vbak. "#harness:allow CR-003 임시로 전체 조회\n'
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1 and hits[0]["allowed"] is True
+
+
+def test_cr003에_이유_없는_allow는_예외로_인정하지_않는다():
+    text = 'SELECT * FROM vbak INTO TABLE lt_vbak. "#harness:allow CR-003\n'
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+    assert hits[0]["allowed"] is False
+    assert "이유" in hits[0]["note"]
+
+
+def test_cr007에_이유_있는_allow는_예외로_인정한다():
+    text = (
+        "TRY.\n"
+        "    lo_service->call( ).\n"
+        '  CATCH cx_root. "#harness:allow CR-007 로그는 상위에서 남긴다\n'
+        "ENDTRY.\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-007")
+    assert len(hits) == 1 and hits[0]["allowed"] is True
+
+
+def test_cr007에_이유_없는_allow는_예외로_인정하지_않는다():
+    text = (
+        "TRY.\n"
+        "    lo_service->call( ).\n"
+        '  CATCH cx_root. "#harness:allow CR-007\n'
+        "ENDTRY.\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-007")
+    assert len(hits) == 1
+    assert hits[0]["allowed"] is False
+    assert "이유" in hits[0]["note"]
+
+
 # --- JS/TS (CAP) -------------------------------------------------------------
 
 
@@ -214,6 +413,60 @@ def test_js_forEach_콜백_안의_insert도_위반():
 def test_js_문자열과_주석_안의_한글은_괜찮다():
     text = "// 한글 주석\nconst ok = '한글 문자열';\nconst tpl = `템플릿 ${ok} 안`;\n"
     assert _rules(check_source("t.js", text), "CR-001") == []
+
+
+# --- CR-007 (JS/TS) -------------------------------------------------------------
+
+
+def test_js_빈_catch는_위반():
+    text = "try {\n  doIt();\n} catch (e) {}\n"
+    hits = _rules(check_source("t.js", text), "CR-007")
+    assert len(hits) == 1 and hits[0]["line"] == 3
+
+
+def test_js_바인딩_없는_빈_catch도_위반():
+    text = "try {\n  doIt();\n} catch {}\n"
+    hits = _rules(check_source("t.js", text), "CR-007")
+    assert len(hits) == 1 and hits[0]["line"] == 3
+
+
+def test_js_주석만_있는_catch도_위반():
+    text = "try {\n  doIt();\n} catch (e) {\n  // 나중에 처리\n}\n"
+    hits = _rules(check_source("t.js", text), "CR-007")
+    assert len(hits) == 1
+
+
+def test_js_처리_있는_catch는_괜찮다():
+    text = "try {\n  doIt();\n} catch (e) {\n  log(e);\n}\n"
+    assert _rules(check_source("t.js", text), "CR-007") == []
+
+
+def test_js_promise_catch_화살표_빈_몸통은_위반():
+    text = "promise.then(x => x).catch(() => {});\n"
+    hits = _rules(check_source("t.js", text), "CR-007")
+    assert len(hits) == 1
+
+
+def test_js_promise_catch_function_빈_몸통도_위반():
+    text = "promise.catch(function () {\n  // ignore\n});\n"
+    hits = _rules(check_source("t.js", text), "CR-007")
+    assert len(hits) == 1
+
+
+def test_js_promise_catch_처리_있으면_괜찮다():
+    text = "promise.catch(err => { log(err); });\n"
+    assert _rules(check_source("t.js", text), "CR-007") == []
+
+
+def test_js_promise_catch_이름_있는_콜백은_판정하지_않는다():
+    """이름만 넘긴 콜백은 몸통을 볼 수 없어 놓친다(과검출보다 낫다, 모듈 docstring)."""
+    text = "promise.catch(handleError);\n"
+    assert _rules(check_source("t.js", text), "CR-007") == []
+
+
+def test_js_주석_문자열_속_catch_모양은_괜찮다():
+    text = "// catch {} in comment\nconst s = 'catch {}';\n"
+    assert _rules(check_source("t.js", text), "CR-007") == []
 
 
 # --- CDS ----------------------------------------------------------------------
@@ -356,7 +609,10 @@ def test_cli_예외로_인정된_위반만_있으면_종료코드_0(tmp_path: Pa
     target = tmp_path / "예외.abap"
     target.write_text(
         "LOOP AT lt_order INTO ls_order.\n"
-        '  SELECT SINGLE * FROM vbak INTO ls_vbak WHERE vbeln = ls_order-vbeln. "#harness:allow CR-002 이유\n'
+        # 필드 목록을 써서 CR-002(반복문 안 SELECT) 만 걸리게 한다 — `*` 를 쓰면
+        # CR-003(SELECT *) 도 함께 걸려 이 테스트가 확인하려는 것(CR-002 하나만
+        # 예외 처리됐을 때 통과하는지)이 흐려진다.
+        '  SELECT SINGLE vbeln FROM vbak INTO ls_vbak-vbeln WHERE vbeln = ls_order-vbeln. "#harness:allow CR-002 이유\n'
         "ENDLOOP.\n",
         encoding="utf-8",
     )

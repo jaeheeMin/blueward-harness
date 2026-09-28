@@ -1,5 +1,6 @@
-"""공통 개발 규칙 CR-001(이름에 한글 금지)과 CR-002(반복문 안 DB 조회 금지)를 코드에서
-기계로 검사한다(#54, `plugins/harness/conventions/common.md`).
+"""공통 개발 규칙 CR-001(이름에 한글 금지), CR-002(반복문 안 DB 조회 금지),
+CR-003(SELECT * 금지), CR-007(빈 CATCH 금지)을 코드에서 기계로 검사한다
+(#54, #81, `plugins/harness/conventions/common.md`).
 
 문서 검사(`checker.engine`)와는 관할이 다르다. 문서 쪽은 템플릿과 규칙 파일을 요구하지만,
 이 두 규칙은 어느 Project Repository, 어느 기준 폴더(`templates/` 와 `rules/` 를 함께
@@ -94,8 +95,8 @@ def _offset_to_linecol(offset: int, line_starts: list[int]) -> tuple[int, int]:
 # --- 마스킹: 주석·문자열의 내용을 공백으로 지운다(길이와 줄바꿈은 그대로 둔다) -------
 #
 # 마스킹한 뒤 문자열은 원문과 길이가 같고 줄바꿈 위치도 같다. 그래서 마스킹한 문자열에서
-# 얻은 오프셋을 원문의 줄·칸으로 그대로 옮길 수 있다. CR-001(이름) 과 CR-002(반복문) 가
-# 이 하나의 마스킹 결과를 함께 쓴다.
+# 얻은 오프셋을 원문의 줄·칸으로 그대로 옮길 수 있다. CR-001(이름), CR-002(반복문),
+# CR-003(SELECT *), CR-007(빈 CATCH) 이 이 하나의 마스킹 결과를 함께 쓴다.
 
 
 def _mask_abap(text: str) -> str:
@@ -463,6 +464,153 @@ def _scan_js_cr002(masked: str) -> list[tuple[str, int, str]]:
     return findings
 
 
+# --- CR-003 (ABAP): SELECT * ------------------------------------------------------
+#
+# 옛 문법 `SELECT [SINGLE] [DISTINCT] * FROM`, 새 문법(7.40+) `SELECT FROM <table>
+# FIELDS *`, 조인에서 별칭 전체를 뽑는 `<alias>~*` 세 모양을 잡는다. `COUNT( * )` 는
+# `SELECT` 와 `*` 사이에 `COUNT(` 가 끼어 있어 아래 첫 정규식과 모양이 다르므로 저절로
+# 통과한다(예외 목록에 따로 올릴 필요가 없다). 문(statement) 단위로 보는 이유는 여러
+# 줄에 걸친 SELECT 를 하나로 보기 위해서다 — `\s`가 줄바꿈도 포함하므로 한 statement
+# 안이면 줄이 나뉘어 있어도 잡는다. 서브쿼리(`... WHERE x IN ( SELECT * FROM ... )`)
+# 도 같은 statement 안이므로 함께 잡힌다.
+
+_ABAP_CR003_STAR_FROM_RE = re.compile(
+    r"\bSELECT\s+(?:SINGLE\s+)?(?:DISTINCT\s+)?\*\s+FROM\b", re.IGNORECASE,
+)
+_ABAP_CR003_FIELDS_STAR_RE = re.compile(r"\bFIELDS\s+\*(?=\s|,|\)|\.|$)", re.IGNORECASE)
+_ABAP_CR003_ALIAS_STAR_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*~\*")
+
+
+def _scan_abap_cr003(masked: str) -> list[tuple[str, int, str]]:
+    findings: list[tuple[str, int, str]] = []
+    for start, end in _abap_statements(masked):
+        segment = masked[start:end]
+        if not re.search(r"\bSELECT\b", segment, re.IGNORECASE):
+            continue
+        for m in _ABAP_CR003_STAR_FROM_RE.finditer(segment):
+            findings.append((
+                "CR-003", start + m.start(),
+                "SELECT * 로 전체 필드를 조회한다. 필요한 필드만 나열한다.",
+            ))
+        for m in _ABAP_CR003_FIELDS_STAR_RE.finditer(segment):
+            findings.append((
+                "CR-003", start + m.start(),
+                "SELECT ... FIELDS * 로 전체 필드를 조회한다. 필요한 필드만 나열한다.",
+            ))
+        for m in _ABAP_CR003_ALIAS_STAR_RE.finditer(segment):
+            findings.append((
+                "CR-003", start + m.start(),
+                f"조인에서 '{m.group()}' 로 별칭의 전체 필드를 조회한다. 필요한 필드만 나열한다.",
+            ))
+    return findings
+
+
+# --- CR-007 (ABAP): 빈 CATCH ---------------------------------------------------
+#
+# `CATCH <예외...> [INTO x].` 뒤에 다음 `CATCH`/`CLEANUP`/`ENDTRY` 까지 statement 가
+# 하나도 없으면(주석만 있는 경우도 포함 — 주석은 이미 마스킹으로 지워져 statement 로
+# 잡히지 않는다) 빈 CATCH 로 본다. 옛 문법 `CATCH SYSTEM-EXCEPTIONS ... = n.` 은
+# `ENDCATCH.` 하나로만 닫히므로 종료 키워드 집합이 다르다. 중첩 TRY 는 statement 를
+# 순서대로만 보고 판정하므로(스택을 두지 않는다) 저절로 안전하다 — 어떤 CATCH 든
+# "바로 다음 statement" 만 보고, 그 다음 statement 가 무엇이든(중첩 TRY 시작이든,
+# 처리 코드든) 같은 기준으로 판정되기 때문이다.
+
+_ABAP_CR007_NORMAL_TERMINATORS = frozenset({"CATCH", "CLEANUP", "ENDTRY"})
+_ABAP_CR007_SYSTEM_TERMINATORS = frozenset({"ENDCATCH"})
+
+
+def _scan_abap_cr007(masked: str) -> list[tuple[str, int, str]]:
+    findings: list[tuple[str, int, str]] = []
+    parsed: list[tuple[str, int, str]] = []  # (keyword, keyword_offset, segment)
+
+    for start, end in _abap_statements(masked):
+        segment = masked[start:end]
+        km = _ABAP_KEYWORD_RE.match(segment)
+        keyword = km.group(2).upper() if km else ""
+        keyword_offset = start + (len(km.group(1)) if km else 0)
+        parsed.append((keyword, keyword_offset, segment))
+
+    for idx, (keyword, keyword_offset, segment) in enumerate(parsed):
+        if keyword != "CATCH":
+            continue
+        if idx + 1 >= len(parsed):
+            # 짝이 되는 종료 statement 가 없다 — 구문 오류에 가까우므로 판정하지
+            # 않는다(이 스캐너는 파서가 아니라 휴리스틱이다, 모듈 docstring 참고).
+            continue
+
+        is_system = bool(re.search(r"SYSTEM-EXCEPTIONS", segment, re.IGNORECASE))
+        terminators = _ABAP_CR007_SYSTEM_TERMINATORS if is_system else _ABAP_CR007_NORMAL_TERMINATORS
+        next_keyword = parsed[idx + 1][0]
+        if next_keyword not in terminators:
+            continue
+
+        if is_system:
+            message = "CATCH SYSTEM-EXCEPTIONS ... ENDCATCH 블록이 비어 있다. 오류를 조용히 삼키지 않는다."
+        else:
+            message = "CATCH 블록이 비어 있다(주석만 있거나 처리 문장이 없다). 오류를 조용히 삼키지 않는다."
+        findings.append(("CR-007", keyword_offset, message))
+
+    return findings
+
+
+# --- CR-007 (JS/TS): 빈 catch --------------------------------------------------
+#
+# `catch (e) { }`/`catch { }` 문형과 `.catch(() => {})`/`.catch(function(){})`
+# 프로미스 형태 두 가지를 본다. 앞의 것은 `.catch(` 처럼 멤버 접근으로 쓰인 것과
+# 구별해야 한다 — `catch` 바로 앞(공백 제외)이 `.` 이면 프로미스 호출이지 try/catch
+# 문이 아니다. 뒤의 것은 몸통이 정확히 빈 화살표/함수 표현식(주석만 있어도 마스킹 후
+# 공백뿐이라 잡힌다)일 때만 본다 — 더 복잡한 모양(이름 있는 함수 참조 등)까지 파싱하는
+# 것은 이 스캐너의 몫을 넘는다(놓치는 쪽으로 기운다, 모듈 docstring 참고).
+
+_JS_CATCH_KEYWORD_RE = re.compile(r"\bcatch\b")
+_JS_PROMISE_CATCH_EMPTY_RE = re.compile(
+    r"\.\s*catch\s*\(\s*(?:"
+    r"(?:\(\s*\)|[A-Za-z_$][\w$]*)\s*=>\s*\{\s*\}"
+    r"|function\b[^{(]*\([^)]*\)\s*\{\s*\}"
+    r")\s*\)",
+    re.IGNORECASE,
+)
+
+
+def _scan_js_cr007(masked: str) -> list[tuple[str, int, str]]:
+    findings: list[tuple[str, int, str]] = []
+    n = len(masked)
+
+    for m in _JS_CATCH_KEYWORD_RE.finditer(masked):
+        start = m.start()
+        j = start - 1
+        while j >= 0 and masked[j].isspace():
+            j -= 1
+        if j >= 0 and masked[j] == ".":
+            continue  # `.catch(...)` 프로미스 호출이다 — 아래에서 따로 본다.
+
+        pos = m.end()
+        while pos < n and masked[pos].isspace():
+            pos += 1
+        if pos < n and masked[pos] == "(":
+            pos = _matching_brace(masked, pos) + 1
+            while pos < n and masked[pos].isspace():
+                pos += 1
+        if pos >= n or masked[pos] != "{":
+            continue  # 몸통을 못 찾았다 — 놓치는 쪽으로 기운다.
+
+        brace_end = _matching_brace(masked, pos)
+        body = masked[pos + 1:brace_end]
+        if body.strip() == "":
+            findings.append((
+                "CR-007", start,
+                "catch 블록이 비어 있다(주석만 있거나 처리 문장이 없다). 오류를 조용히 삼키지 않는다.",
+            ))
+
+    for m in _JS_PROMISE_CATCH_EMPTY_RE.finditer(masked):
+        findings.append((
+            "CR-007", m.start(),
+            ".catch() 의 처리 콜백이 비어 있다(주석만 있거나 처리 문장이 없다). 오류를 조용히 삼키지 않는다.",
+        ))
+
+    return findings
+
+
 # --- 예외: harness:allow --------------------------------------------------------
 
 _ALLOW_RE = re.compile(r"harness:allow\s+(CR-\d{3})(.*)", re.IGNORECASE)
@@ -523,6 +671,18 @@ def check_source(path_str: str, text: str, language: str | None = None) -> list[
             raw_findings.extend(_scan_abap_cr002(masked))
         elif language == "js":
             raw_findings.extend(_scan_js_cr002(masked))
+
+    cr003 = rules_cfg.get("CR-003") or {}
+    if language in (cr003.get("languages") or []):
+        if language == "abap":
+            raw_findings.extend(_scan_abap_cr003(masked))
+
+    cr007 = rules_cfg.get("CR-007") or {}
+    if language in (cr007.get("languages") or []):
+        if language == "abap":
+            raw_findings.extend(_scan_abap_cr007(masked))
+        elif language == "js":
+            raw_findings.extend(_scan_js_cr007(masked))
 
     line_starts = _line_starts(text)
     raw_lines = text.split("\n")
@@ -638,7 +798,10 @@ def main(argv: list[str] | None = None) -> int:
     _force_utf8()
     parser = argparse.ArgumentParser(
         prog="python -m checker.code_rules",
-        description="공통 개발 규칙 CR-001(한글 이름), CR-002(반복문 안 DB 조회)를 검사한다.",
+        description=(
+            "공통 개발 규칙 CR-001(한글 이름), CR-002(반복문 안 DB 조회), "
+            "CR-003(SELECT *), CR-007(빈 CATCH)을 검사한다."
+        ),
     )
     parser.add_argument("--json", action="store_true", help="이 도구는 항상 JSON 을 낸다. 명시하고 싶을 때 쓴다")
     parser.add_argument("paths", nargs="+", type=Path, help="검사할 소스 파일")

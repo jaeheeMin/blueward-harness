@@ -44,7 +44,8 @@ ENGINE_TIMEOUT_SECONDS = 110
 # 의미 있게 만들어지지 않으므로 손대지 않는다. 그쪽은 GitHub Actions 검사가 잡는다.
 TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".yaml", ".yml", ".json", ".csv"}
 
-# 공통 개발 규칙(CR-001, CR-002, `checker.code_rules`, #54)의 검사 대상 확장자. 문서
+# 공통 개발 규칙(CR-001, CR-002, CR-003, CR-007, `checker.code_rules`, #54, #81)의
+# 검사 대상 확장자. 문서
 # 검사와는 다른 소관이라 따로 둔다 — 기준 폴더(`templates/` 와 `rules/` 를 함께 가진
 # 폴더)를 요구하지 않고, 어느 Project Repository 어느 폴더의 코드에도 똑같이
 # 적용된다(`conventions/common.md`).
@@ -188,7 +189,7 @@ def format_code_violations(report: dict) -> str:
 
 
 def _check_code(path: Path, content: str) -> None:
-    """공통 개발 규칙(CR-001, CR-002)을 코드에 적용한다(#54).
+    """공통 개발 규칙(CR-001, CR-002, CR-003, CR-007)을 코드에 적용한다(#54, #81).
 
     문서 검사(`_main` 의 나머지 절반)와 소관이 다르다 — 기준 폴더(`templates`/`rules`)
     를 요구하지 않는다. 이 두 규칙은 어느 Project Repository, 어느 폴더의 코드에도

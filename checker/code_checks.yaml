@@ -28,3 +28,15 @@ rules:
     title: "반복문 안에서 DB 를 조회하지 않는다"
     languages: [abap, js]
     fix: "반복문 밖에서 한 번에 모아 조회한다 — FOR ALL ENTRIES / JOIN / IN, ABAP Cloud 는 CDS view."
+  CR-003:
+    # CDS 는 넣지 않았다. `select from x { * }` 같은 필드 목록 와일드카드 문법이
+    # CDS 에도 있는지, 있다면 어떤 모양인지가 불확실해 넣으면 오탐(과검출)이나
+    # 놓침(과소검출) 중 어느 쪽으로도 잘못될 위험이 있다. 확실한 ABAP 부터 먼저
+    # 넣고, CDS 는 실제 문법을 확인한 뒤 별도로 다룬다(이슈 #81 보고 참고).
+    title: "SELECT * 대신 필요한 필드만 조회한다"
+    languages: [abap]
+    fix: "필요한 필드만 나열한다(옛 문법은 필드 목록, 새 문법은 FIELDS 절). COUNT( * ) 는 그대로 둬도 된다."
+  CR-007:
+    title: "오류를 조용히 삼키지 않는다(빈 CATCH 를 두지 않는다)"
+    languages: [abap, js]
+    fix: "예외를 기록하거나 사용자에게 알린다. 정말 무시해도 된다면 harness:allow 로 이유를 남긴다."

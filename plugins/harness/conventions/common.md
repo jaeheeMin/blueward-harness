@@ -75,7 +75,12 @@ SELECT * FROM vbak INTO TABLE lt_vbak WHERE vbeln IN lt_vbeln.
 SELECT vbeln, erdat, kunnr FROM vbak INTO TABLE lt_vbak WHERE vbeln IN lt_vbeln.
 ```
 
-**기계 검사**: 문서로만.
+**기계 검사**: 코드 저장 시(훅)와 PR 검사(Actions)에서 막는다. ABAP 만 본다(옛
+문법 `SELECT [SINGLE] [DISTINCT] * FROM`, 새 문법 `SELECT FROM ... FIELDS *`,
+조인의 `<별칭>~*`). `COUNT( * )` 는 통과한다. CDS 는 필드 목록 와일드카드 문법이
+불확실해 이번에는 넣지 않았다. 정말 예외라면 같은 줄이나 바로 위 줄에
+`harness:allow CR-003 <이유>` 를 주석으로 남긴다 — 이유 없이는 예외로 인정하지
+않는다.
 
 ## CR-004 비밀정보를 소스나 저장소에 두지 않는다
 
@@ -162,7 +167,16 @@ TRY.
 ENDTRY.
 ```
 
-**기계 검사**: 문서로만.
+**기계 검사**: 코드 저장 시(훅)와 PR 검사(Actions)에서 막는다. ABAP, JS/TS 를
+본다. "완전히 빈" CATCH 만 잡는다 — ABAP 은 `CATCH ... .` (옛 문법
+`CATCH SYSTEM-EXCEPTIONS ... .` 는 `ENDCATCH.` 까지) 뒤에 다음
+CATCH/CLEANUP/ENDTRY(또는 ENDCATCH)까지 문장이 하나도 없으면(주석만 있어도
+같다) 위반이고, JS/TS 는 `catch {}`/`catch (e) {}` 와 `.catch(() => {})`/
+`.catch(function(){})` 처럼 처리 콜백이 빈 프로미스 형태를 잡는다. 예외를
+잡아 로그만 남기고 재던지지 않는 것처럼 "완전히 비어 있지는 않은" 경우는
+모양만으로 판정할 수 없어 사람 리뷰의 몫으로 남긴다. 정말 예외라면 같은 줄이나
+바로 위 줄에 `harness:allow CR-007 <이유>` 를 주석으로 남긴다 — 이유 없이는
+예외로 인정하지 않는다.
 
 ## CR-008 이름 접두어와 네이밍 규칙은 프로젝트 conventions 에 둔다
 
