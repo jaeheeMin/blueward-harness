@@ -65,5 +65,6 @@
 | `/harness:scaffold` | Project Repository 표준 구조 만들기 |
 | `/harness:prd` | PRD 만들기·고치기 |
 | `/harness:spec` | PRD 요구사항으로 개발 Spec 만들기·고치기 |
+| `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받기 |
 
 `/release`, `/intake` 는 필요해지면 `jaeheeMin/public-cloud` 에서 가져온다.
