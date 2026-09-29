@@ -34,13 +34,17 @@ description: 새 고객사 Project Repository 를 처음 만들었을 때 표준
    만은 예외로, 이미 있어도 harness Plugin 자동 설치에 쓰는 두 항목
    (`enabledPlugins`·`extraKnownMarketplaces` 안의 `harness@blueward-harness`
    ·`blueward-harness`)이 없으면 그 항목만 채워 넣고 나머지 키는 그대로
-   둔다(`merged`). 이미 같은 값이면 손대지 않는다. 다른 값이 이미 있거나
+   둔다(`merged`). 마켓플레이스 항목에는 Plugin 자동 업데이트를 켜는
+   `"autoUpdate": true` 도 들어가며, 예전에 만든 설정에 이 키만 없으면 채운다
+   (#99). 이미 같은 값이면 손대지 않는다. 다른 값이 이미 있거나
    JSON 을 못 읽으면 손대지 않고 `warnings` 로 알린다 — 이때는 사용자에게
    그 내용을 그대로 보여주고, 두 항목을 손으로 넣어야 한다고 안내한다.
 5. 다음에 할 일을 안내한다.
    - `.claude/settings.json` 덕분에 이 저장소 폴더를 여는 팀원은 별도 설치
      없이 blueward-harness 마켓플레이스와 harness Plugin 설치 안내를
-     자동으로 받는다. `merged` 나 `warnings` 가 있었으면 그 사실도 알린다.
+     자동으로 받는다. 자동 업데이트도 켜져 있어 새 버전이 나오면 세션 중
+     `Plugin updated: harness · Run /reload-plugins to apply` 로 알림을
+     받는다. `merged` 나 `warnings` 가 있었으면 그 사실도 알린다.
    - 고객사에게 받은 Template 원본을 `templates/` 에 그대로 넣는다.
    - 그 Template 을 대조할 규칙을 `rules/` 에 추가한다(`rules/README.md`
      예시 참고).

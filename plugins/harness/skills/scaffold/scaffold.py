@@ -37,8 +37,14 @@ CLAUDE_SETTINGS_REL = Path(".claude") / "settings.json"
 EXPECTED_ENABLED_PLUGIN = ("harness@blueward-harness", True)
 EXPECTED_MARKETPLACE = (
     "blueward-harness",
-    {"source": {"source": "github", "repo": "jaeheeMin/blueward-harness"}},
+    {"source": {"source": "github", "repo": "jaeheeMin/blueward-harness"}, "autoUpdate": True},
 )
+# 외부 마켓플레이스는 Plugin 자동 업데이트가 기본으로 꺼져 있다. 저장소 설정에
+# 이 값을 두면 그 저장소를 여는 팀원 모두 새 버전을 자동으로 받고 알림을 본다
+# (https://code.claude.com/docs/en/plugins/loading "Which marketplaces and
+# plugins auto-update"). 예전 scaffold 가 만든 설정에는 이 키가 없으므로, source 가
+# 같고 이 키만 없으면 채워 넣는다(#99).
+AUTO_UPDATE_KEY = "autoUpdate"
 
 
 def _plan_claude_settings_merge(existing_text: str) -> dict:
@@ -96,12 +102,21 @@ def _plan_claude_settings_merge(existing_text: str) -> dict:
         data["extraKnownMarketplaces"] = {market_key: market_value}
         changed = True
     elif isinstance(marketplaces, dict):
-        if market_key not in marketplaces:
-            marketplaces[market_key] = market_value
+        entry = marketplaces.get(market_key)
+        if entry is None:
+            marketplaces[market_key] = dict(market_value)
             changed = True
-        elif marketplaces[market_key] != market_value:
+        elif not isinstance(entry, dict) or entry.get("source") != market_value["source"]:
             conflicts.append(
                 f'extraKnownMarketplaces["{market_key}"] 가 이미 다른 값으로 설정돼 있다'
+            )
+        elif AUTO_UPDATE_KEY not in entry:
+            entry[AUTO_UPDATE_KEY] = True
+            changed = True
+        elif entry[AUTO_UPDATE_KEY] is not True:
+            conflicts.append(
+                f'extraKnownMarketplaces["{market_key}"].autoUpdate 가 이미 '
+                f'{entry[AUTO_UPDATE_KEY]!r} 로 설정돼 있다(자동 업데이트를 끈 것이면 그대로 둔다)'
             )
     else:
         conflicts.append("extraKnownMarketplaces 가 객체(object)가 아니다")
