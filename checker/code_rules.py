@@ -243,13 +243,88 @@ def _skip_js_template_expr(text: str, i: int, n: int) -> int:
     return j
 
 
+# `/` 앞의 직전 유의미 문자가 이것 중 하나거나 텍스트 시작이면, 그 `/` 는 나눗셈이
+# 아니라 정규식 리터럴이 시작될 수 있는 자리다(값 뒤가 아니라 값이 와야 할 자리라는
+# 뜻이다).
+_REGEX_PREV_OP_CHARS = set("(,=:[!&|?{};+-*%~^<>")
+# 직전 토큰이 이 키워드들 중 하나여도 같은 이유로 정규식이 시작될 수 있는 자리다.
+_REGEX_PREV_KEYWORDS = {
+    "return", "typeof", "case", "in", "of", "delete", "void", "throw", "new", "else", "do",
+}
+
+
+def _regex_literal_may_start(out: list[str], i: int) -> bool:
+    """`out[i]` 의 `/` 가 나눗셈이 아니라 정규식 리터럴의 시작일 수 있는지 본다(#97).
+
+    `out` 은 지금까지 문자열·주석을 마스킹해 온 결과다(공백으로 지워진 자리는 그대로
+    공백이다). 그래서 이 자리 직전의 "유의미한" 문자를 찾을 때 주석이나 문자열은
+    자연히 건너뛴다. 직전 문자가 `( , = : [ ! & | ? { } ; + - * % ~ ^ < >` 중 하나거나
+    텍스트 시작이면 값이 아니라 식(정규식 리터럴 포함)이 올 자리다. 직전 문자가
+    식별자의 일부라면, 그 식별자 전체가 `return`/`typeof`/`case`/`in`/`of`/`delete`/
+    `void`/`throw`/`new`/`else`/`do` 같은 키워드일 때만 같은 이유로 정규식 자리다 —
+    보통의 식별자나 숫자 뒤(`a / b`, `1 / 2`)나 `)`/`]` 뒤(`(a) / 2`)는 나눗셈이다.
+    """
+    j = i - 1
+    while j >= 0 and out[j] in " \t\r\n":
+        j -= 1
+    if j < 0:
+        return True
+    prev = out[j]
+    if prev in _REGEX_PREV_OP_CHARS:
+        return True
+    if prev.isalnum() or prev in "_$":
+        end = j + 1
+        start = j
+        while start >= 0 and (out[start].isalnum() or out[start] in "_$"):
+            start -= 1
+        word = "".join(out[start + 1:end])
+        return word in _REGEX_PREV_KEYWORDS
+    return False
+
+
+def _skip_js_regex(text: str, i: int, n: int) -> int | None:
+    """`text[i]` 가 정규식 리터럴을 여는 `/` 라고 보고, 짝이 맞는 닫는 `/` 다음
+    위치를 찾는다(#97).
+
+    `\\` 로 이스케이프하고, 문자 클래스(`[...]`) 안의 `/` 는 닫는 `/` 로 보지 않는다
+    (`/[/]/` 가 한 리터럴이다). 줄을 넘기면 닫히지 않은 것이므로 `None` 을 돌려준다 —
+    실제로는 나눗셈 두 번이었을 수 있어 마스킹하지 않는다."""
+    j = i + 1
+    in_class = False
+    while j < n:
+        c = text[j]
+        if c == "\n":
+            return None
+        if c == "\\" and j + 1 < n:
+            j += 2
+            continue
+        if in_class:
+            if c == "]":
+                in_class = False
+            j += 1
+            continue
+        if c == "[":
+            in_class = True
+            j += 1
+            continue
+        if c == "/":
+            return j + 1
+        j += 1
+    return None
+
+
 def _mask_c_like(text: str) -> str:
     """JS/TS 와 CDS 가 함께 쓰는 마스킹.
 
     `//` 줄 주석, `/* ... */` 블록 주석(여러 줄에 걸칠 수 있다 — 줄바꿈은 지우지 않는다),
     `'...'`/`"..."`(`\\` 로 이스케이프), `` `...` `` 템플릿 리터럴(중첩된 `${}` 와 그
     안의 중첩 템플릿까지 포함해 통째로 문자열로 본다, ABAP `|...|` 와 같은 이유,
-    `_skip_js_template` 참고)을 지운다.
+    `_skip_js_template` 참고), 정규식 리터럴(`/.../flags`, #97)을 지운다.
+
+    정규식 리터럴은 나눗셈과 같은 글자(`/`)로 시작해 둘을 구분해야 한다.
+    `_regex_literal_may_start` 로 직전 문자를 보고 정규식이 시작될 수 있는 자리인지
+    가른 뒤, 그 자리에서만 `_skip_js_regex` 로 닫는 `/` 를 찾는다. 찾지 못하면(줄바꿈을
+    만나거나 애초에 나눗셈 자리였다면) 그 `/` 는 그냥 한 글자로 두고 넘어간다.
     """
     out = list(text)
     i, n = 0, len(text)
@@ -285,6 +360,17 @@ def _mask_c_like(text: str) -> str:
                     out[k] = " "
             i = j
             continue
+        if c == "/" and _regex_literal_may_start(out, i):
+            j = _skip_js_regex(text, i, n)
+            if j is not None:
+                for k in range(i, j):
+                    if text[k] != "\n":
+                        out[k] = " "
+                flags_end = j
+                while flags_end < n and text[flags_end].isalpha():
+                    flags_end += 1
+                i = flags_end
+                continue
         i += 1
     return "".join(out)
 
