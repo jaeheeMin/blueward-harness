@@ -294,3 +294,117 @@ def test_after_merge_job_은_판정에_필요한_읽기_권한을_가진다():
     assert permissions.get("contents") in ("read", "write")
     assert permissions.get("pull-requests") in ("read", "write")
     assert permissions.get("issues") == "write"
+
+
+# --- 사람이 merge 해야 하는 경로(#104) -----------------------------------------
+
+
+def test_load_human_merge_paths_는_주석과_빈_줄을_무시한다():
+    text = "# 설명\n\nplugins/\n  checker/  # 엔진\n\\.github\\\n"
+    assert mod.load_human_merge_paths(text) == ["plugins/", "checker/", ".github/"]
+
+
+def test_load_human_merge_paths_빈_내용은_빈_목록():
+    assert mod.load_human_merge_paths("") == []
+    assert mod.load_human_merge_paths(None) == []
+    assert mod.load_human_merge_paths("# 주석뿐\n") == []
+
+
+def test_human_merge_hits_는_접두어_아래_파일만_돌려준다():
+    files = ["README.md", "plugins/harness/a.sh", "checker/x.py", "docs/plugins/a.md"]
+    assert mod.human_merge_hits(files, ["plugins/", "checker/"]) == [
+        "plugins/harness/a.sh",
+        "checker/x.py",
+    ]
+
+
+def test_human_merge_hits_는_역슬래시와_앞_슬래시를_정규화한다():
+    files = ["plugins\\harness\\a.sh", "/checker/x.py"]
+    assert mod.human_merge_hits(files, ["plugins/", "checker/"]) == files
+
+
+def test_human_merge_hits_목록이_비면_아무것도_걸리지_않는다():
+    assert mod.human_merge_hits(["plugins/a"], []) == []
+
+
+class _FakeClient:
+    """`GhClient` 의 읽기 메서드만 흉내 내는 fake. 경로 -> 응답 사전."""
+
+    def __init__(self, responses):
+        self.responses = responses
+        self.asked = []
+
+    def get_json(self, path):
+        self.asked.append(path)
+        return self.responses[path]
+
+    def get_all(self, path, per_page=100):
+        self.asked.append(path)
+        return self.responses[path]
+
+    def get_json_or_none_404(self, path):
+        self.asked.append(path)
+        return self.responses.get(path)
+
+
+def _human_client(list_text, files):
+    import base64
+
+    responses = {
+        "repos/o/r/pulls/5": {"base": {"ref": "main"}},
+        "repos/o/r/pulls/5/files": [{"filename": f} for f in files],
+    }
+    if list_text is not None:
+        content = base64.b64encode(list_text.encode("utf-8")).decode("ascii")
+        responses["repos/o/r/contents/.github/human-merge-paths?ref=main"] = {"content": content}
+    return _FakeClient(responses)
+
+
+def test_decide_human_merge_는_보호_경로를_바꾸면_사람이_필요하다():
+    client = _human_client("plugins/\n", ["README.md", "plugins/harness/a.sh"])
+    result = mod.decide_human_merge(client, "o/r", 5)
+    assert result == {
+        "requires_human": True,
+        "paths": ["plugins/harness/a.sh"],
+        "pr": 5,
+        "repo": "o/r",
+    }
+    # 목록은 head 가 아니라 base 브랜치에서 읽는다.
+    assert any("human-merge-paths?ref=main" in p for p in client.asked)
+
+
+def test_decide_human_merge_는_보호_경로를_안_바꾸면_사람이_필요없다():
+    client = _human_client("plugins/\n", ["README.md"])
+    assert mod.decide_human_merge(client, "o/r", 5)["requires_human"] is False
+
+
+def test_decide_human_merge_는_목록_파일이_없으면_제한이_없다():
+    client = _human_client(None, ["plugins/harness/a.sh"])
+    result = mod.decide_human_merge(client, "o/r", 5)
+    assert result["requires_human"] is False
+    assert result["paths"] == []
+
+
+def test_check_human_merge_종료코드(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mod, "decide_human_merge",
+        lambda c, r, n: {"requires_human": False, "paths": [], "pr": n, "repo": r},
+    )
+    assert mod.cmd_check_human_merge(_FakeArgs()) == EXIT_OK
+
+    monkeypatch.setattr(
+        mod, "decide_human_merge",
+        lambda c, r, n: {"requires_human": True, "paths": ["plugins/a"], "pr": n, "repo": r},
+    )
+    assert mod.cmd_check_human_merge(_FakeArgs()) == mod.EXIT_HUMAN_REQUIRED == 1
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["requires_human"] is True
+
+
+def test_check_human_merge_는_gh_오류를_통과로_뭉개지_않고_2(monkeypatch, capsys):
+    def _raise(c, r, n):
+        raise GhError("네트워크가 없다")
+
+    monkeypatch.setattr(mod, "decide_human_merge", _raise)
+    assert mod.cmd_check_human_merge(_FakeArgs()) == EXIT_UNKNOWN
+    out = json.loads(capsys.readouterr().out)
+    assert out["requires_human"] is None
