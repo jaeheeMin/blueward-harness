@@ -288,6 +288,49 @@ $ssot_err"
     detail="$(printf '%s' "$detail_raw" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
     deny "PR #$pr_number 의 PRD 승인 여부를 확인하지 못해 merge 를 막습니다(종료코드 $ssot_rc). 확인되지 않는 상태로 통과시키지 않습니다. 자세히: $detail"
   fi
+
+  # 0-1) Plugin·엔진처럼 사람이 직접 merge 해야 하는 경로(.github/human-merge-paths)
+  #      를 바꾼 PR 이면 거부한다(#104). Claude 세션은 소유자의 GitHub 계정으로
+  #      동작해 GitHub 가 사람과 구분하지 못하므로, 여기서 Claude 의 `gh pr merge`
+  #      만 막고 사람은 GitHub 화면의 Merge 버튼으로 병합한다. 위와 같은 이유로
+  #      stdout/stderr 를 나눠 받고, 판정 불가는 통과가 아니라 거부다.
+  hm_err_file="$(mktemp 2>/dev/null)" || {
+    deny "임시 파일을 만들지 못해 PR #$pr_number 가 사람이 merge 해야 하는 경로를 바꿨는지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다."
+  }
+  set +e
+  hm_out="$(uvx --from "$engine" python -m checker.ssot_approval check-human-merge --repo "$repo" --pr "$pr_number" 2>"$hm_err_file")"
+  hm_rc=$?
+  set -e
+  hm_err="$(cat "$hm_err_file" 2>/dev/null)" || hm_err=""
+  rm -f "$hm_err_file"
+
+  hm_json_ok=0
+  if printf '%s' "$hm_out" | jq -e . >/dev/null 2>&1; then
+    hm_json_ok=1
+  fi
+
+  if [ "$hm_json_ok" -eq 1 ] && [ "$hm_rc" -eq 0 ]; then
+    : # 보호 경로를 안 바꿨다. 통과시키고 나머지 검사를 계속한다.
+  elif [ "$hm_json_ok" -eq 1 ] && [ "$hm_rc" -eq 1 ]; then
+    hm_paths="$(printf '%s' "$hm_out" | jq -r '(.paths // []) | .[:5] | join(", ")' 2>/dev/null | tr -d '\r"\\')" || true
+    hm_total="$(printf '%s' "$hm_out" | jq -r '(.paths // []) | length' 2>/dev/null | tr -d '\r')" || true
+    if [ "${hm_total:-0}" -gt 5 ] 2>/dev/null; then
+      hm_paths="$hm_paths 등 ${hm_total}개"
+    fi
+    deny "PR #$pr_number 은 사람이 직접 merge 해야 하는 경로($hm_paths)를 바꿨습니다. Claude 는 이 PR 을 merge 할 수 없습니다. 사용자에게 GitHub 화면에서 Merge 버튼으로 병합해 달라고 요청하십시오."
+  else
+    hm_detail_raw="$hm_out"
+    if [ -n "$hm_err" ]; then
+      if [ -n "$hm_detail_raw" ]; then
+        hm_detail_raw="$hm_detail_raw
+$hm_err"
+      else
+        hm_detail_raw="$hm_err"
+      fi
+    fi
+    hm_detail="$(printf '%s' "$hm_detail_raw" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
+    deny "PR #$pr_number 가 사람이 merge 해야 하는 경로를 바꿨는지 확인하지 못해 merge 를 막습니다(종료코드 $hm_rc). 확인되지 않는 상태로 통과시키지 않습니다. 자세히: $hm_detail"
+  fi
 fi
 
 # 1) 되돌릴 수 없는 강제 푸시는 어떤 경우에도 거부한다. 선언 접두어보다 먼저

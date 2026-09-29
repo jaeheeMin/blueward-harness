@@ -380,6 +380,91 @@ def test_판정_출력이_json이_아니면_여전히_거절한다(fake_uvx):
     assert "Building" in reason or "Installed" in reason
 
 
+# --- 병합 가드: 사람이 직접 병합해야 하는 경로(#104) ---------------------
+#
+# 훅은 uvx 를 두 번 부른다(PRD 승인, 사람 병합 경로). 가짜 uvx 가 인자를 보고
+# 서브명령별로 다른 답을 내게 해서 두 번째 검사만 따로 확인한다.
+
+
+def _make_dispatch_uvx(tmp_path: Path, human_stdout: str, human_rc: int) -> Path:
+    bin_dir = tmp_path / "dispatch-bin"
+    bin_dir.mkdir()
+    ssot_b64 = base64.b64encode(
+        json.dumps({"touches_ssot": False, "approved": True, "reason": "PRD 변경 없음"}).encode("utf-8")
+    ).decode("ascii")
+    human_b64 = base64.b64encode(human_stdout.encode("utf-8")).decode("ascii")
+    script = bin_dir / "uvx"
+    script.write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$*" in\n'
+        f"  *check-human-merge*) printf '%s' '{human_b64}' | base64 -d; exit {human_rc} ;;\n"
+        f"  *) printf '%s' '{ssot_b64}' | base64 -d; exit 0 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    script.chmod(0o755)
+    return bin_dir
+
+
+_HUMAN_MERGE_SKIPS = [
+    pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다"),
+    pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git/gh 명령을 거부한다"),
+    pytest.mark.skipif(shutil.which("base64") is None, reason="base64 가 없으면 가짜 uvx 를 만들 수 없다"),
+]
+
+
+def _needs_hook_env(fn):
+    for mark in _HUMAN_MERGE_SKIPS:
+        fn = mark(fn)
+    return fn
+
+
+@_needs_hook_env
+def test_보호_경로를_바꾼_PR_의_병합은_사람_몫이라고_거부한다(tmp_path):
+    payload = json.dumps(
+        {"requires_human": True, "paths": ["plugins/harness/a.sh", "checker/x.py"], "pr": 123, "repo": "owner/repo"}
+    )
+    bin_dir = _make_dispatch_uvx(tmp_path, payload, 1)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert code == 0
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "사람이 직접 merge" in reason
+    assert "plugins/harness/a.sh" in reason
+    assert "Merge 버튼" in reason
+
+
+@_needs_hook_env
+def test_보호_경로를_안_바꾼_PR_의_병합은_통과시킨다(tmp_path):
+    payload = json.dumps({"requires_human": False, "paths": [], "pr": 123, "repo": "owner/repo"})
+    bin_dir = _make_dispatch_uvx(tmp_path, payload, 0)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert code == 0
+    assert out is None
+
+
+@_needs_hook_env
+def test_사람_병합_경로_판정_불능이면_거부한다(tmp_path):
+    payload = json.dumps({"requires_human": None, "paths": [], "reason": "판정 불가: 네트워크"})
+    bin_dir = _make_dispatch_uvx(tmp_path, payload, 2)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert code == 0
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "확인하지 못해" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@_needs_hook_env
+def test_사람_병합_경로_판정_출력이_json이_아니면_거부한다(tmp_path):
+    bin_dir = _make_dispatch_uvx(tmp_path, "이것은 JSON 이 아니다", 0)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert code == 0
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
 # --- 세션 시작 훅의 공통 개발 규칙 요약(#53) --------------------------------
 #
 # 임시 git 저장소를 만들어 그 안에서 session-start-sync.sh 를 직접 돌린다.
