@@ -607,6 +607,54 @@ def test_js_한글_이름은_중첩_템플릿과_무관하게_여전히_위반()
     assert len(hits) == 1 and "이름" in hits[0]["message"]
 
 
+# --- CR-001 (JS): 정규식 리터럴 안의 한글(#97) --------------------------------------
+
+
+def test_js_정규식_리터럴_안의_한글은_괜찮다():
+    """이슈 #97: `if (/로그인이 바뀌어/.test(line))` 처럼 정규식 리터럴 안의 한글이
+    이름으로 오인되어 CR-001 로 잡혔다. 정규식 리터럴 안의 문자는 이름이 아니다."""
+    text = "if (/로그인이 바뀌어/.test(line)) {}\n"
+    assert _rules(check_source("t.js", text), "CR-001") == []
+
+
+def test_js_정규식_리터럴_플래그와_이스케이프_안의_한글도_괜찮다():
+    text = "const re = /세션\\s*만료/gi;\n"
+    assert _rules(check_source("t.js", text), "CR-001") == []
+
+
+def test_js_replace_인자_정규식_리터럴_안의_한글도_괜찮다():
+    text = 'x = a.replace(/[가-힣]+/g, "");\n'
+    assert _rules(check_source("t.js", text), "CR-001") == []
+
+
+def test_js_한글_이름은_정규식_리터럴과_무관하게_여전히_위반():
+    findings = check_source("t.js", "const 이름 = 1;\n")
+    hits = _rules(findings, "CR-001")
+    assert len(hits) == 1 and "이름" in hits[0]["message"]
+
+
+def test_js_나누기_연산은_정규식_시작으로_보지_않는다():
+    """`a / b / c` 처럼 나눗셈이 이어져도 정규식 리터럴의 시작으로 잘못 보고 그
+    사이 코드를 마스킹하면 안 된다."""
+    text = "const r = a / b / c; const 값 = 1;\n"
+    hits = _rules(check_source("t.js", text), "CR-001")
+    assert len(hits) == 1 and "값" in hits[0]["message"]
+
+
+def test_js_괄호_뒤_나누기_연산도_정규식_시작으로_보지_않는다():
+    """`)` 뒤의 `/` 는 괄호로 감싼 값을 나누는 연산이지 정규식 시작이 아니다.
+    뒤에 나오는 식별자가 그대로 보이는지(마스킹으로 가려지지 않는지)로 확인한다."""
+    text = "x = (a) / 2; y = b / 3; const 개수 = 1;\n"
+    hits = _rules(check_source("t.js", text), "CR-001")
+    assert len(hits) == 1 and "개수" in hits[0]["message"]
+
+
+def test_js_정규식_문자_클래스_안의_슬래시와_이스케이프_슬래시를_올바르게_처리한다():
+    text = "const re1 = /[/]/;\nconst re2 = /a\\/b/;\nconst 이름2 = 1;\n"
+    hits = _rules(check_source("t.js", text), "CR-001")
+    assert len(hits) == 1 and "이름2" in hits[0]["message"]
+
+
 # --- CR-007 (JS/TS) -------------------------------------------------------------
 
 
