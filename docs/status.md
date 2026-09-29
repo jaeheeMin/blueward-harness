@@ -285,6 +285,21 @@ the current branch" 로 실패하고, 훅은 그 원인을 알려주지 못한 �
 빈 저장소·다른 키 보존·이미 같은 값·충돌 값·깨진 JSON 다섯 경우를
 `checker/tests/test_scaffold.py` 에 테스트로 남겼다.
 
+**CR-001·CR-003 이 public-cloud 실제 코드에서 오탐을 냈다(#91).** CR-001 은
+`_mask_c_like` 가 템플릿 리터럴을 "다음 백틱까지" 로 나이브하게 닫아, `` `${cond ?
+`한글` : `한글`}` `` 처럼 `${}` 표현식 안에 백틱 템플릿이 중첩되면 바깥 템플릿을 실제보다
+일찍 닫힌 것으로 잘못 보고 중첩 템플릿의 내용(그 안의 한글 포함)을 문자열이 아닌 코드로
+남겼다(adt-login `scripts/adt-proxy/session.js`·`proxy.js`). `_skip_js_template`/
+`_skip_js_template_expr`/`_skip_js_simple_string` 세 함수로 나눠, `${` 를 만나면
+중괄호 깊이를 세면서 그 안의 문자열과 중첩 템플릿을 재귀적으로 건너뛰도록 고쳤다.
+CR-003 은 `SELECT * FROM @gt_output_temp AS A1 ...` 처럼 FROM 대상이 호스트 표현식
+(내부 테이블)이면 DB 조회가 아니라 이 규칙의 이유(DB 컬럼 낭비)에 해당하지 않는데도
+잡았다 — CR-002 가 #83/#84 에서 같은 `FROM\s+@` 판정으로 내부 테이블 대상 SELECT 를
+반복문에서 뺀 것과 같은 이유로, `_scan_abap_cr003` 도 FROM 대상이 `@` 로 시작하면 그
+statement 전체를 건너뛰게 했다. `SELECT * FROM ztable`, `SELECT FROM ztab FIELDS *`
+같은 진짜 DB 테이블 대상과 `const 이름 = 1`, `DATA 금액 TYPE i` 같은 진짜 한글 이름은
+여전히 잡히는지 회귀 테스트로 확인했다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
