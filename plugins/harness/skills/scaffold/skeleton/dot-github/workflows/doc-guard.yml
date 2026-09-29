@@ -1,5 +1,6 @@
 # 이 저장소(Project Repository)의 PR 과 main 커밋마다 doc-guard 검사를 돌린다.
 # 검사 엔진은 blueward-harness 저장소에서 그때그때 내려받아 쓴다.
+# issues: write 는 main push 가 실패했을 때 이슈를 열기 위해 필요하다(#95).
 name: doc-guard
 on:
   pull_request:
@@ -11,3 +12,4 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: write
