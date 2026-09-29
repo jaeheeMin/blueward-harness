@@ -300,6 +300,15 @@ statement 전체를 건너뛰게 했다. `SELECT * FROM ztable`, `SELECT FROM zt
 같은 진짜 DB 테이블 대상과 `const 이름 = 1`, `DATA 금액 TYPE i` 같은 진짜 한글 이름은
 여전히 잡히는지 회귀 테스트로 확인했다.
 
+**Claude 가 Plugin·엔진 PR 을 직접 merge 하지 못하게 했다(#104).** Claude 세션은
+소유자의 GitHub 계정으로 동작해 GitHub 가 사람과 구분하지 못하므로, 훅이 `gh pr merge`
+를 거부하는 방식으로 막는다. 보호 경로는 `.github/human-merge-paths`(데이터, base
+브랜치에서 읽어 PR 이 자기 보호를 못 지운다)이고, 판정은 `checker.ssot_approval
+check-human-merge`(0 해당 없음, 1 사람 필요, 2 판정 불능)가 한다. `human-merge-alert.yml`
+이 해당 PR 이 열리거나 병합될 때 이슈를 열고 닫으며, secret `TEAMS_PLUGIN_ALERT_WEBHOOK`
+이 있으면 Teams 1:1 채팅으로도 보낸다. 워크플로는 실제 GitHub 에서 돌려 보지 못했다.
+느슨한 명령 파싱(#101)은 그대로다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
