@@ -93,7 +93,8 @@ def test_예상하는_파일을_모두_만들고_치환한다(tmp_path: Path):
         "enabledPlugins": {"harness@blueward-harness": True},
         "extraKnownMarketplaces": {
             "blueward-harness": {
-                "source": {"source": "github", "repo": "jaeheeMin/blueward-harness"}
+                "source": {"source": "github", "repo": "jaeheeMin/blueward-harness"},
+                "autoUpdate": True,
             }
         },
     }
@@ -154,9 +155,11 @@ def test_dry_run은_아무것도_만들지_않는다(tmp_path: Path):
 EXPECTED_ENABLED_PLUGINS = {"harness@blueward-harness": True}
 EXPECTED_MARKETPLACES = {
     "blueward-harness": {
-        "source": {"source": "github", "repo": "jaeheeMin/blueward-harness"}
+        "source": {"source": "github", "repo": "jaeheeMin/blueward-harness"},
+        "autoUpdate": True,
     }
 }
+OLD_MARKETPLACE_ENTRY = {"source": {"source": "github", "repo": "jaeheeMin/blueward-harness"}}
 
 
 def _write_settings(tmp_path: Path, data: dict | str) -> Path:
@@ -233,6 +236,38 @@ def test_settings_json이_충돌하는_값이면_안_바꾸고_경고한다(tmp_
     assert result["warnings"][0]["path"] == ".claude/settings.json"
     assert "harness@blueward-harness" in result["warnings"][0]["message"]
     # 손대지 않았어야 한다.
+    assert settings_path.read_text(encoding="utf-8") == original_text
+
+
+def test_예전_scaffold_설정에는_autoUpdate만_채운다(tmp_path: Path):
+    existing = {
+        "enabledPlugins": {"harness@blueward-harness": True},
+        "extraKnownMarketplaces": {"blueward-harness": dict(OLD_MARKETPLACE_ENTRY)},
+    }
+    settings_path = _write_settings(tmp_path, existing)
+
+    result = scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    assert result["merged"] == [".claude/settings.json"]
+    assert result["warnings"] == []
+    data = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert data["extraKnownMarketplaces"] == EXPECTED_MARKETPLACES
+
+
+def test_autoUpdate를_false로_둔_설정은_안_바꾸고_경고한다(tmp_path: Path):
+    entry = dict(OLD_MARKETPLACE_ENTRY, autoUpdate=False)
+    existing = {
+        "enabledPlugins": {"harness@blueward-harness": True},
+        "extraKnownMarketplaces": {"blueward-harness": entry},
+    }
+    settings_path = _write_settings(tmp_path, existing)
+    original_text = settings_path.read_text(encoding="utf-8")
+
+    result = scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    assert result["merged"] == []
+    assert len(result["warnings"]) == 1
+    assert "autoUpdate" in result["warnings"][0]["message"]
     assert settings_path.read_text(encoding="utf-8") == original_text
 
 
