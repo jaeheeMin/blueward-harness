@@ -3,6 +3,12 @@
 # 이 저장소가 아니라 client-docs 같은 문서 저장소에서 불린다. 바뀐 문서만 골라 검사하고,
 # 위반이면 job 을 실패시키고 PR 에 결과를 남긴다.
 #
+# main 에 push 된 커밋이 실패하면(#95 — 무료 비공개 저장소라 branch protection 을
+# 걸 수 없어, PR 검사가 실패한 채로 병합됐을 수 있다) 이슈를 열어 알린다. 재사용
+# 워크플로 자체는 permissions 를 선언하지 않으므로 — job 에 permissions 를 적으면
+# 적지 않은 권한은 모두 none 이 된다 — 이슈를 열려면 부르는 쪽이 issues: write 를
+# 함께 줘야 한다.
+#
 # 문서 저장소 쪽에서는 이렇게 부른다.
 #
 #   jobs:
@@ -11,6 +17,7 @@
 #       permissions:
 #         contents: read
 #         pull-requests: write
+#         issues: write   # main push 실패를 이슈로 알리려면 필요하다
 
 name: doc-guard
 
@@ -152,3 +159,42 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: main push 실패를 이슈로 알리기
+        if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # 이 저장소는 개인 비공개 Project Repository 라 branch protection 을 걸 수
+          # 없다(문서 상단 참고, ssot-approval.yml 과 같은 사정). PR 검사가 실패한
+          # 채로 병합됐을 수 있으니, main 에서마저 실패하면 최소한 이슈로 남겨 놓친
+          # 채 지나가지 않게 한다. 이 스텝은 판정을 되돌리지 않는다 — job 은 위
+          # 판정 스텝에서 이미 실패로 끝났고, 이 스텝이 성공해도 그 결과는 바뀌지
+          # 않는다.
+          sha_short="${GITHUB_SHA:0:7}"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          commit_url="${{ github.server_url }}/${{ github.repository }}/commit/${GITHUB_SHA}"
+          prefix="main 의 doc-guard 검사 실패:"
+          title="$prefix $sha_short"
+          body="커밋: ${GITHUB_SHA} ($commit_url)
+          워크플로 실행: $run_url
+
+          병합 전 PR 검사가 실패한 채 병합됐을 수 있다. 원인을 고친 PR 을 올린다."
+
+          # 같은 원인으로 이미 열려 있는 이슈가 있으면 새로 만들지 않고 코멘트만
+          # 남긴다(제목 접두어로 판단 — 커밋마다 sha 가 달라 제목 전체는 못 맞춘다).
+          existing_number="$(gh issue list --state open --json number,title \
+            --jq ".[] | select(.title | startswith(\"$prefix\")) | .number" | head -n1)"
+          if [ -n "$existing_number" ]; then
+            gh issue comment "$existing_number" --body "$body"
+            exit 0
+          fi
+
+          # 라벨이 없는 저장소에서도 실패하지 않게, 있을 때만 붙인다.
+          if gh label list --json name --jq '.[].name' 2>/dev/null | grep -qxF "type:fix"; then
+            gh issue create --title "$title" --body "$body" --label "type:fix"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
