@@ -47,6 +47,12 @@ def test_abap_문자열_템플릿_안의_한글은_괜찮다():
     assert _rules(findings, "CR-001") == []
 
 
+def test_abap_금액_같은_한글_변수명도_여전히_위반():
+    findings = check_source("t.abap", "DATA 금액 TYPE i.\n")
+    hits = _rules(findings, "CR-001")
+    assert len(hits) == 1 and "금액" in hits[0]["message"]
+
+
 # --- CR-002 (ABAP) -----------------------------------------------------------
 
 
@@ -318,6 +324,38 @@ def test_abap_주석_안의_select_star는_괜찮다():
     assert _rules(check_source("t.abap", text), "CR-003") == []
 
 
+# --- CR-003 (ABAP): 내부 테이블(호스트 표현식) 대상 SELECT 는 예외다(#91) ----------
+
+
+def test_abap_내부테이블_대상_select_star는_괜찮다():
+    """이슈 #91: `SELECT * FROM @itab ...` 은 이미 메모리에 있는 내부 테이블을
+    다시 참조하는 것이라 DB 조회가 아니다 — CR-003 이 규칙으로 삼는 이유(DB 컬럼
+    낭비)에 해당하지 않는다. precedent: #84 의 CR-002 도 같은 `FROM\\s+@` 판정으로
+    내부 테이블 대상을 예외로 뒀다."""
+    text = (
+        "SELECT * FROM @gt_output_temp AS A1 WHERE (LV_WHERE_EXCLUDE) "
+        "ORDER BY (lv_sort_string).\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-003") == []
+
+
+def test_abap_내부테이블_대상_fields_star도_괜찮다():
+    text = "SELECT FROM @lt_itab AS a FIELDS * INTO TABLE @lt_result.\n"
+    assert _rules(check_source("t.abap", text), "CR-003") == []
+
+
+def test_abap_실제_db_테이블_select_star는_내부테이블_예외와_무관하게_여전히_위반():
+    text = "SELECT * FROM ztable INTO TABLE lt_result.\n"
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+
+
+def test_abap_실제_db_테이블_fields_star도_여전히_위반():
+    text = "SELECT FROM ztab FIELDS * INTO TABLE @lt_result.\n"
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+
+
 def test_cds는_cr003_설정에_없다():
     """CDS 의 `select from x { * }` 문법이 불확실해 이번에는 넣지 않았다(#81 보고 참고)."""
     cfg = code_rules._load_config()
@@ -536,6 +574,37 @@ def test_js_forEach_콜백_안의_insert도_위반():
 def test_js_문자열과_주석_안의_한글은_괜찮다():
     text = "// 한글 주석\nconst ok = '한글 문자열';\nconst tpl = `템플릿 ${ok} 안`;\n"
     assert _rules(check_source("t.js", text), "CR-001") == []
+
+
+# --- CR-001 (JS): 템플릿 리터럴 안에 중첩된 백틱 템플릿(#91) -----------------------
+
+
+def test_js_템플릿_리터럴_속_중첩된_삼항_백틱의_한글은_괜찮다():
+    """이슈 #91: `${cond ? `한글` : `한글`}` 처럼 표현식 안에 백틱 템플릿이 중첩되면,
+    바깥 템플릿을 감싸는 코드가 나이브하게 다음 백틱을 닫는 따옴표로 보아 중첩된
+    템플릿의 내용을 문자열이 아닌 코드로 잘못 남겨 그 안의 한글을 이름으로 오인했다
+    (public-cloud adt-login `scripts/adt-proxy/session.js`)."""
+    text = (
+        "console.log(`   프록시      ${up ? `기동 중 :${t.port}` "
+        ": `내려감 :${t.port}`}`);\n"
+    )
+    assert _rules(check_source("t.js", text), "CR-001") == []
+
+
+def test_js_템플릿_리터럴_속_중첩된_백틱의_한글_물음표도_괜찮다():
+    """같은 이슈의 두 번째 사례(`scripts/adt-proxy/proxy.js`) — 중첩 조건이
+    거짓 분기가 빈 문자열이고, 물음표가 문자열 안에 있는 모양."""
+    text = (
+        '  console.log(`[proxy] keepalive ${up.statusCode}'
+        '${dead ? `  <<< 세션 만료? ${HINT}` : ""}`);\n'
+    )
+    assert _rules(check_source("t.js", text), "CR-001") == []
+
+
+def test_js_한글_이름은_중첩_템플릿과_무관하게_여전히_위반():
+    findings = check_source("t.js", "const 이름 = 1;\n")
+    hits = _rules(findings, "CR-001")
+    assert len(hits) == 1 and "이름" in hits[0]["message"]
 
 
 # --- CR-007 (JS/TS) -------------------------------------------------------------

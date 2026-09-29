@@ -168,12 +168,88 @@ def _mask_abap(text: str) -> str:
     return "\n".join(out_lines)
 
 
+def _skip_js_simple_string(text: str, i: int, n: int) -> int:
+    """`text[i]` 가 `'` 나 `\"` 라고 보고, 짝이 맞는 닫는 따옴표 다음 위치를 찾는다.
+
+    `\\` 로 이스케이프하고, 줄을 넘기면(닫히지 않은 문자열) 그 줄 끝에서 멈춘다.
+    """
+    quote = text[i]
+    j = i + 1
+    while j < n:
+        if text[j] == "\\" and j + 1 < n:
+            j += 2
+            continue
+        if text[j] == quote:
+            return j + 1
+        if text[j] == "\n":
+            return j
+        j += 1
+    return n
+
+
+def _skip_js_template(text: str, i: int, n: int) -> int:
+    """`text[i]` 가 템플릿 리터럴을 여는 `` ` `` 라고 보고, 짝이 맞는 닫는 `` ` `` 다음
+    위치를 찾는다(#91).
+
+    템플릿 리터럴은 일반 텍스트 구간과 `${ 표현식 }` 구간을 오간다. 표현식 구간 안에는
+    임의의 JS 코드가 올 수 있고, 그 안에 다시 `'...'`/`\"...\"`/`` `...` `` 문자열이나
+    중첩된 템플릿 리터럴이 나올 수 있다(예: `` `${cond ? `한글` : `한글`}` ``). 예전
+    구현은 다음에 나오는 백틱을 무조건 닫는 따옴표로 보아, 이런 중첩된 백틱을 만나면
+    바깥 템플릿을 실제보다 일찍 닫힌 것으로 잘못 보고, 중첩 템플릿의 내용(그 안의 한글
+    포함)을 문자열이 아닌 코드로 남겨 CR-001 오탐을 냈다. 이제는 `${` 를 만나면 중괄호
+    깊이를 세면서 그 안의 문자열·중첩 템플릿을 재귀적으로 건너뛰어, 실제 표현식이 끝나는
+    짝 맞는 `}` 까지 안전하게 지나간다.
+    """
+    j = i + 1
+    while j < n:
+        c = text[j]
+        if c == "\\":
+            j += 2
+            continue
+        if c == "`":
+            return j + 1
+        if c == "$" and j + 1 < n and text[j + 1] == "{":
+            j = _skip_js_template_expr(text, j + 2, n)
+            continue
+        j += 1
+    return n
+
+
+def _skip_js_template_expr(text: str, i: int, n: int) -> int:
+    """`${` 다음(여는 중괄호 하나를 이미 센 상태)부터 짝이 맞는 `}` 다음 위치까지
+    건너뛴다. 안에 나오는 문자열·중첩 템플릿·중괄호(객체 리터럴 등)를 고려한다."""
+    depth = 1
+    j = i
+    while j < n and depth > 0:
+        c = text[j]
+        if c == "\\":
+            j += 2
+            continue
+        if c in "'\"":
+            j = _skip_js_simple_string(text, j, n)
+            continue
+        if c == "`":
+            j = _skip_js_template(text, j, n)
+            continue
+        if c == "{":
+            depth += 1
+            j += 1
+            continue
+        if c == "}":
+            depth -= 1
+            j += 1
+            continue
+        j += 1
+    return j
+
+
 def _mask_c_like(text: str) -> str:
     """JS/TS 와 CDS 가 함께 쓰는 마스킹.
 
     `//` 줄 주석, `/* ... */` 블록 주석(여러 줄에 걸칠 수 있다 — 줄바꿈은 지우지 않는다),
-    `'...'`/`"..."`(`\\` 로 이스케이프), `` `...` `` 템플릿 리터럴(`${}` 포함 통째로 문자열로
-    본다, ABAP `|...|` 와 같은 이유)을 지운다.
+    `'...'`/`"..."`(`\\` 로 이스케이프), `` `...` `` 템플릿 리터럴(중첩된 `${}` 와 그
+    안의 중첩 템플릿까지 포함해 통째로 문자열로 본다, ABAP `|...|` 와 같은 이유,
+    `_skip_js_template` 참고)을 지운다.
     """
     out = list(text)
     i, n = 0, len(text)
@@ -195,20 +271,15 @@ def _mask_c_like(text: str) -> str:
             i = end
             continue
         c = text[i]
-        if c in "'\"`":
-            quote = c
-            j = i + 1
-            while j < n:
-                if text[j] == "\\" and j + 1 < n:
-                    j += 2
-                    continue
-                if text[j] == quote:
-                    j += 1
-                    break
-                if text[j] == "\n" and quote != "`":
-                    # 닫히지 않은 작은/큰따옴표 문자열. 정상 코드라면 안 생긴다.
-                    break
-                j += 1
+        if c == "`":
+            j = _skip_js_template(text, i, n)
+            for k in range(i, min(j, n)):
+                if text[k] != "\n":
+                    out[k] = " "
+            i = j
+            continue
+        if c in "'\"":
+            j = _skip_js_simple_string(text, i, n)
             for k in range(i, min(j, n)):
                 if text[k] != "\n":
                     out[k] = " "
@@ -580,12 +651,18 @@ def _scan_js_cr002(masked: str) -> list[tuple[str, int, str]]:
 # 줄에 걸친 SELECT 를 하나로 보기 위해서다 — `\s`가 줄바꿈도 포함하므로 한 statement
 # 안이면 줄이 나뉘어 있어도 잡는다. 서브쿼리(`... WHERE x IN ( SELECT * FROM ... )`)
 # 도 같은 statement 안이므로 함께 잡힌다.
+#
+# FROM 대상이 호스트 표현식(`FROM @itab`)이면 예외다(#91). 이미 메모리에 있는 내부
+# 테이블을 다시 참조하는 것이라 DB 조회가 아니고, 이 규칙이 막으려는 이유(DB 컬럼
+# 낭비)에 해당하지 않는다. CR-002 가 같은 판정(`from_itab`, `_scan_abap_cr002`)으로
+# 내부 테이블 대상 SELECT 를 반복문에서 뺀 것(#83/#84)과 같은 이유다.
 
 _ABAP_CR003_STAR_FROM_RE = re.compile(
     r"\bSELECT\s+(?:SINGLE\s+)?(?:DISTINCT\s+)?\*\s+FROM\b", re.IGNORECASE,
 )
 _ABAP_CR003_FIELDS_STAR_RE = re.compile(r"\bFIELDS\s+\*(?=\s|,|\)|\.|$)", re.IGNORECASE)
 _ABAP_CR003_ALIAS_STAR_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*~\*")
+_ABAP_FROM_ITAB_RE = re.compile(r"\bFROM\s+@", re.IGNORECASE)
 
 
 def _scan_abap_cr003(masked: str) -> list[tuple[str, int, str]]:
@@ -593,6 +670,8 @@ def _scan_abap_cr003(masked: str) -> list[tuple[str, int, str]]:
     for start, end in _abap_statements(masked):
         segment = masked[start:end]
         if not re.search(r"\bSELECT\b", segment, re.IGNORECASE):
+            continue
+        if _ABAP_FROM_ITAB_RE.search(segment):
             continue
         for m in _ABAP_CR003_STAR_FROM_RE.finditer(segment):
             findings.append((
