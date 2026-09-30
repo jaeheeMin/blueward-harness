@@ -338,6 +338,17 @@ statement 전체에 `FROM @` 가 있으면 건너뛰어서, `SELECT * FROM ekko 
 `mcp_source_guard.py`, `session-start-sync.sh`, `stop-deliver.sh`. 거부·허용 판정은 그대로다.
 Plugin version 0.10.11.
 
+**세션 시작 때 uv·jq·gh 가 없으면 winget 으로 자동 설치한다(#116, 세션 시작 때 uv·jq 없으면
+winget 으로 자동 설치).** Plugin 설치 단계에서는 Windows 프로그램을 설치할 수 없지만 세션 시작
+Hook 에서는 된다. 사용자가 "묻지 않고 설치하고 알림만" 을 골랐다. 새 `hooks/ensure-tools.sh` 를
+`session-start-sync.sh` 가 jq 를 쓰기 전에 부른다(jq 없이 동작). 없는 도구를 `astral-sh.uv`·
+`jqlang.jq`·`GitHub.cli` 로 설치하고(uv·jq 는 `--scope user` 먼저), 실행 파일이 실제로 생긴 것을
+확인한 뒤에야 성공이라 알린다. 이 세션 PATH 에 없으면 "Claude Code 를 새로 여십시오". winget
+없음·비 Windows·설치 실패는 수동 설치 명령만 안내하고, 실패는 24시간 동안 다시 시도하지 않는다.
+`HARNESS_NO_AUTO_INSTALL=1` 로 끈다. `hooks.json` 의 SessionStart 에 `timeout` 600 을 주고,
+uv 가 없을 때의 Write|Edit·MCP 안내에도 다음 할 일을 붙였다. 테스트는 가짜 winget 으로 한다.
+Plugin version 0.10.12. 진짜 winget 의 동작(UAC·정책 차단)은 아직 실기에서 확인하지 않았다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
