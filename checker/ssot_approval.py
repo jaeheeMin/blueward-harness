@@ -17,6 +17,9 @@ merge 하는 것을 막을 방법이 없으므로, 이 모듈은 "막는다" 대
 목록은 PR 이 아니라 **base 브랜치**에서 읽는다 — PR 이 자기 보호를 스스로
 지울 수 없게 하기 위해서다.
 
+**승인은 PR 의 현재 head 커밋에 대한 것일 때만 인정한다(#119).** 승인한 뒤 새 커밋이
+올라오면 그 승인은 낡은 것이라 미승인이다. 새 커밋에 다시 Approve 하면 통과한다.
+
 **판정은 순수 함수(`touches_ssot`, `load_approvers`, `is_approved`,
 `load_human_merge_paths`, `human_merge_hits`)에 있고,
 GitHub 에서 무엇을 읽어와야 하는지는 `GhClient` 와 `decide_*` 함수에 있다.**
@@ -111,19 +114,31 @@ def human_merge_hits(files: list[str], prefixes: list[str]) -> list[str]:
     return [f for f in files if any(_normalize(f).startswith(p) for p in prefixes)]
 
 
-def is_approved(author: str, reviews: list[dict], approvers: set[str]) -> tuple[bool, str]:
-    """작성자가 아닌 사람의 최신 리뷰 상태가 APPROVED 인지 본다.
+def _short(sha: str | None) -> str:
+    return (sha or "")[:7] or "알 수 없는 커밋"
+
+
+def evaluate_approval(
+    author: str, reviews: list[dict], approvers: set[str], head_sha: str | None = None
+) -> tuple[bool, str, list[dict]]:
+    """승인 여부, 사유, 그리고 "승인은 했지만 옛 커밋 기준" 인 승인자 목록을 돌려준다.
 
     리뷰는 `submitted_at` 기준으로 정렬해 리뷰어별 최신 상태만 남긴다. 나중에
     한 CHANGES_REQUESTED 는 앞서 한 APPROVED 를 취소한다. `approvers` 가
     비어 있지 않으면 그 목록에 있는 사람의 승인만 인정한다.
+
+    `head_sha` 를 주면(#119) 그 리뷰어의 최신 상태가 APPROVED 이면서 그 리뷰가
+    `head_sha` 에 대해 제출된 것일 때만 인정한다. 승인한 뒤 새 커밋이 올라오면
+    승인자가 보지 않은 내용이 들어가므로(무료 요금제에는 "새 커밋이 올라오면
+    승인 취소" 기능이 없다), 옛 커밋에 대한 승인은 "낡았다(stale)" 고 보고
+    미승인으로 친다. 새 커밋에 다시 Approve 하면 그 리뷰가 최신이라 인정된다.
     """
     author_l = (author or "").strip().lower()
 
     def _key(review: dict) -> str:
         return review.get("submitted_at") or ""
 
-    latest: dict[str, str] = {}
+    latest: dict[str, tuple[str, str | None]] = {}
     for review in sorted(reviews, key=_key):
         user = (review.get("user") or {}).get("login")
         if not user:
@@ -132,21 +147,44 @@ def is_approved(author: str, reviews: list[dict], approvers: set[str]) -> tuple[
         if state not in _STATE_CHANGING:
             # COMMENTED 등은 상태를 바꾸지 않는다.
             continue
-        latest[user.strip().lower()] = state
+        latest[user.strip().lower()] = (state, review.get("commit_id"))
 
-    approving = [
-        login
-        for login, state in latest.items()
-        if state == "APPROVED" and login != author_l and (not approvers or login in approvers)
-    ]
+    approving: list[str] = []
+    stale: list[dict] = []
+    for login, (state, commit_id) in latest.items():
+        if state != "APPROVED" or login == author_l or (approvers and login not in approvers):
+            continue
+        if head_sha is None or commit_id == head_sha:
+            approving.append(login)
+        else:
+            stale.append({"login": login, "commit": commit_id})
 
     if approving:
         who = ", ".join(sorted(approving))
-        return True, f"{who} 가 승인했다"
+        return True, f"{who} 가 승인했다", []
+
+    if stale:
+        stale.sort(key=lambda e: e["login"])
+        who = ", ".join(e["login"] for e in stale)
+        commits = ", ".join(sorted({_short(e["commit"]) for e in stale}))
+        reason = (
+            f"승인자 {who} 의 승인은 이전 커밋({commits})에 대한 것이고, 그 뒤 새 커밋이 "
+            "올라와 다시 승인이 필요합니다. 다음: 사람이 할 일 - 승인자에게 최신 커밋을 보고 "
+            "이 PR 을 다시 Approve 해 달라고 요청하십시오."
+        )
+        return False, reason, stale
 
     if approvers:
-        return False, f"승인자({', '.join(sorted(approvers))}) 중 아무도 승인하지 않았다"
-    return False, "작성자가 아닌 사람의 승인이 없다"
+        return False, f"승인자({', '.join(sorted(approvers))}) 중 아무도 승인하지 않았다", []
+    return False, "작성자가 아닌 사람의 승인이 없다", []
+
+
+def is_approved(
+    author: str, reviews: list[dict], approvers: set[str], head_sha: str | None = None
+) -> tuple[bool, str]:
+    """`evaluate_approval` 의 (승인 여부, 사유) 만 돌려준다."""
+    approved, reason, _ = evaluate_approval(author, reviews, approvers, head_sha)
+    return approved, reason
 
 
 # --- GitHub 에서 읽어오는 부분 ----------------------------------------------
@@ -271,8 +309,17 @@ def decide_pr(client: GhClient, repo: str, pr: int) -> dict:
     base_ref = (info.get("base") or {}).get("ref") or "main"
     reviews = fetch_pr_reviews(client, repo, pr)
     approvers = fetch_approvers(client, repo, base_ref)
-    approved, reason = is_approved(author, reviews, approvers)
-    return {"touches_ssot": True, "approved": approved, "reason": reason}
+    # 승인은 PR 의 현재 head 커밋에 대한 것이어야 한다(#119). head 를 모르면 옛
+    # 승인을 걸러낼 수 없으므로 통과시키지 않고 판정 불가로 답한다(원칙 7).
+    # merge 된 PR 의 head.sha 는 merge 시점의 마지막 커밋이라 after-merge 도 같다.
+    head_sha = (info.get("head") or {}).get("sha")
+    if not head_sha:
+        raise GhError(f"PR #{pr} 의 head 커밋을 응답에서 찾지 못했다")
+    approved, reason, stale = evaluate_approval(author, reviews, approvers, head_sha)
+    result = {"touches_ssot": True, "approved": approved, "reason": reason}
+    if stale:
+        result["stale_approvers"] = [e["login"] for e in stale]
+    return result
 
 
 def decide_human_merge(client: GhClient, repo: str, pr: int) -> dict:

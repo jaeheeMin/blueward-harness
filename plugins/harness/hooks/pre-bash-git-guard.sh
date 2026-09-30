@@ -289,7 +289,16 @@ check_one_merge() {
     : # PRD 를 안 바꿨거나 이미 승인됐다. 통과시키고 나머지 검사를 계속한다.
   elif [ "$ssot_json_ok" -eq 1 ] && [ "$ssot_rc" -eq 1 ]; then
     reason="$(printf '%s' "$ssot_out" | jq -r '.reason // empty' 2>/dev/null)" || true
-    deny "PRD(docs/ssot) 를 바꾼 PR #$pr_number 인데 작성자가 아닌 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 다음: 사람이 할 일 - .github/ssot-approvers 에 적힌 승인자(PR 작성자가 아닌 사람)에게 이 PR 의 리뷰에서 Approve 를 요청하십시오. Approve 가 달린 뒤 Claude 가 gh pr merge 를 다시 실행합니다."
+    # 승인은 했지만 그 뒤 새 커밋이 올라온 경우(#119)의 사유에는 이미 "다음:" 이
+    # 들어 있다. 일반 안내를 또 붙여 "다음:" 이 겹치지 않게 한다.
+    case "$reason" in
+      *"다음:"*)
+        deny "PRD(docs/ssot) 를 바꾼 PR #$pr_number 인데 현재 최신 커밋에 대한 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 그 뒤 다음: Approve 가 최신 커밋에 달리면 Claude 가 gh pr merge 를 다시 실행합니다."
+        ;;
+      *)
+        deny "PRD(docs/ssot) 를 바꾼 PR #$pr_number 인데 작성자가 아닌 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 다음: 사람이 할 일 - .github/ssot-approvers 에 적힌 승인자(PR 작성자가 아닌 사람)에게 이 PR 의 리뷰에서 Approve 를 요청하십시오. Approve 가 달린 뒤 Claude 가 gh pr merge 를 다시 실행합니다."
+        ;;
+    esac
   else
     # $ssot_out(stdout)과 $ssot_err(stderr)는 uvx/gh 가 낸 원문 오류일 수 있어
     # 큰따옴표·역슬래시가 섞여 있을 수 있다. deny() 가 그대로 JSON 에 끼워

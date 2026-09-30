@@ -359,6 +359,21 @@ pass·skipping 은 통과. gh 는 실패 1·진행 중 8 로 끝나면서도 JSO
 branch`(gh 2.100 에서 확인)이며 이때만 통과. 그 밖에 JSON 을 못 얻으면 검사 불능으로 거부한다.
 사람의 웹 Merge 버튼은 범위 밖. 테스트는 가짜 gh 로 한다. Plugin version 0.10.14.
 
+**PRD 승인은 PR 의 현재 head 커밋에 대한 것일 때만 인정한다(#119, 승인 뒤 새 커밋이 올라오면
+PRD 승인 다시 요구).** 예전에는 승인자의 최신 리뷰가 APPROVED 이기만 하면 됐고, 승인 뒤에 올라온
+커밋도 그대로 통과했다. GitHub 유료 요금제의 "새 커밋이 올라오면 승인 취소" 가 무료 요금제에는
+없어 검사기가 대신한다. `checker/ssot_approval.py` 의 `evaluate_approval`(순수 함수, `is_approved`
+는 그 겉모양)이 리뷰어별 최신 상태의 `commit_id` 가 PR 의 `head.sha` 와 같은 승인만 센다. 옛
+커밋에 대한 승인만 있으면 미승인이고, 사유에 "이전 커밋(abc1234)에 대한 것이고 새 커밋이 올라와
+다시 승인이 필요합니다. 다음: 사람이 할 일 - …다시 Approve 요청" 을 담고 JSON 에 `stale_approvers`
+를 더한다. 새 커밋에 다시 Approve 하면 통과하고, 나중의 CHANGES_REQUESTED 가 취소하는 것과 작성자·
+승인자 목록 걸러내기는 그대로다. head 를 응답에서 못 찾으면 통과시키지 않고 판정 불가(종료코드
+2)다. 세 곳(PR 검사, merge 뒤 감지, `gh pr merge` Hook)이 같은 `decide_pr` 를 부르므로 함께 따른다.
+merge 뒤 감지는 merge 된 PR 의 `head.sha` 를 쓴다. Hook 은 사유에 이미 "다음:" 이 있으면 일반
+안내를 또 붙이지 않는다. Actions 트리거(`pull_request` 의 `synchronize`, `pull_request_review`)는
+이미 새 커밋·리뷰마다 돌게 되어 있어 바꾸지 않았다. Plugin version 0.10.15. 실제 GitHub 에서
+승인 → 새 커밋 → merge 시도를 돌려 보지는 않았다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.

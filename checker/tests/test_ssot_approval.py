@@ -59,8 +59,11 @@ def test_load_approvers_빈_내용은_빈_집합():
 # --- is_approved ---------------------------------------------------------
 
 
-def _review(login: str, state: str, submitted_at: str) -> dict:
-    return {"user": {"login": login}, "state": state, "submitted_at": submitted_at}
+def _review(login: str, state: str, submitted_at: str, commit_id: str | None = None) -> dict:
+    review = {"user": {"login": login}, "state": state, "submitted_at": submitted_at}
+    if commit_id is not None:
+        review["commit_id"] = commit_id
+    return review
 
 
 def test_리뷰가_없으면_승인되지_않았다():
@@ -119,6 +122,121 @@ def test_리뷰어_로그인_대소문자를_가리지_않는다():
     reviews = [_review("Reviewer", "APPROVED", "2026-01-01T00:00:00Z")]
     approved, _ = is_approved("Author", reviews, set())
     assert approved is True
+
+
+# --- is_approved: 새 커밋이 올라오면 옛 승인은 낡는다(#119) ---------------------
+
+HEAD = "bbbbbbb1111111111111111111111111111111bb"
+OLD = "aaaaaaa2222222222222222222222222222222aa"
+
+
+def test_옛_커밋에_대한_승인만_있으면_낡아서_미승인이다():
+    reviews = [_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", OLD)]
+    approved, reason = is_approved("author", reviews, set(), HEAD)
+    assert approved is False
+    assert "reviewer" in reason
+    assert "이전 커밋(aaaaaaa)" in reason
+    assert "새 커밋이 올라와 다시 승인이 필요합니다" in reason
+    assert "다음: 사람이 할 일" in reason
+
+
+def test_head_를_안_주면_커밋을_보지_않는다():
+    reviews = [_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", OLD)]
+    approved, _ = is_approved("author", reviews, set())
+    assert approved is True
+
+
+def test_옛_승인_뒤_head_에_다시_승인하면_통과한다():
+    reviews = [
+        _review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", OLD),
+        _review("reviewer", "APPROVED", "2026-01-02T00:00:00Z", HEAD),
+    ]
+    approved, reason = is_approved("author", reviews, set(), HEAD)
+    assert approved is True
+    assert "reviewer" in reason
+
+
+def test_head_에_승인한_뒤_changes_requested_면_미승인이고_낡은_것도_아니다():
+    reviews = [
+        _review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", HEAD),
+        _review("reviewer", "CHANGES_REQUESTED", "2026-01-02T00:00:00Z", HEAD),
+    ]
+    approved, reason, stale = mod.evaluate_approval("author", reviews, set(), HEAD)
+    assert approved is False
+    assert stale == []
+    assert "이전 커밋" not in reason
+
+
+def test_head_에_승인한_뒤_commented_는_승인을_지우지_않는다():
+    reviews = [
+        _review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", HEAD),
+        _review("reviewer", "COMMENTED", "2026-01-02T00:00:00Z", HEAD),
+    ]
+    approved, _ = is_approved("author", reviews, set(), HEAD)
+    assert approved is True
+
+
+def test_옛_승인_뒤_head_에서_commented_만_하면_여전히_낡았다():
+    reviews = [
+        _review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", OLD),
+        _review("reviewer", "COMMENTED", "2026-01-02T00:00:00Z", HEAD),
+    ]
+    approved, _ = is_approved("author", reviews, set(), HEAD)
+    assert approved is False
+
+
+def test_한_사람의_옛_승인과_다른_사람의_head_승인이_있으면_통과한다():
+    reviews = [
+        _review("old-one", "APPROVED", "2026-01-01T00:00:00Z", OLD),
+        _review("new-one", "APPROVED", "2026-01-02T00:00:00Z", HEAD),
+    ]
+    approved, reason, stale = mod.evaluate_approval("author", reviews, set(), HEAD)
+    assert approved is True
+    assert "new-one" in reason
+    assert stale == []
+
+
+def test_작성자의_head_승인은_여전히_인정하지_않는다():
+    reviews = [_review("author", "APPROVED", "2026-01-01T00:00:00Z", HEAD)]
+    approved, _, stale = mod.evaluate_approval("author", reviews, set(), HEAD)
+    assert approved is False
+    assert stale == []
+
+
+def test_작성자의_옛_승인은_낡은_승인으로_세지_않는다():
+    reviews = [_review("author", "APPROVED", "2026-01-01T00:00:00Z", OLD)]
+    approved, reason, stale = mod.evaluate_approval("author", reviews, set(), HEAD)
+    assert approved is False
+    assert stale == []
+    assert "이전 커밋" not in reason
+
+
+def test_승인자_목록에_없는_사람의_head_승인은_인정하지_않는다():
+    reviews = [_review("outsider", "APPROVED", "2026-01-01T00:00:00Z", HEAD)]
+    approved, _, stale = mod.evaluate_approval("author", reviews, {"insider"}, HEAD)
+    assert approved is False
+    assert stale == []
+
+
+def test_승인자_목록에_없는_사람의_옛_승인은_낡은_승인으로_세지_않는다():
+    reviews = [_review("outsider", "APPROVED", "2026-01-01T00:00:00Z", OLD)]
+    approved, reason, stale = mod.evaluate_approval("author", reviews, {"insider"}, HEAD)
+    assert approved is False
+    assert stale == []
+    assert "이전 커밋" not in reason
+
+
+def test_승인자_목록의_사람이_head_에_승인하면_통과한다():
+    reviews = [_review("insider", "APPROVED", "2026-01-01T00:00:00Z", HEAD)]
+    approved, _ = is_approved("author", reviews, {"insider"}, HEAD)
+    assert approved is True
+
+
+def test_commit_id_가_없는_승인은_head_와_같다고_볼_수_없어_낡은_것으로_친다():
+    reviews = [_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z")]
+    approved, reason, stale = mod.evaluate_approval("author", reviews, set(), HEAD)
+    assert approved is False
+    assert stale == [{"login": "reviewer", "commit": None}]
 
 
 # --- CLI: check-pr -----------------------------------------------------------
@@ -211,12 +329,16 @@ def test_check_commit_는_gh_오류면_2(monkeypatch, capsys):
 
 
 def test_decide_pr_는_fetch_함수들을_조합한다(monkeypatch):
-    monkeypatch.setattr(mod, "fetch_pr_info", lambda c, r, n: {"user": {"login": "author"}, "base": {"ref": "main"}})
+    monkeypatch.setattr(
+        mod,
+        "fetch_pr_info",
+        lambda c, r, n: {"user": {"login": "author"}, "base": {"ref": "main"}, "head": {"sha": "head1"}},
+    )
     monkeypatch.setattr(mod, "fetch_pr_files", lambda c, r, n: ["docs/ssot/PRD.md"])
     monkeypatch.setattr(
         mod,
         "fetch_pr_reviews",
-        lambda c, r, n: [_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z")],
+        lambda c, r, n: [_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "head1")],
     )
     monkeypatch.setattr(mod, "fetch_approvers", lambda c, r, ref: set())
 
@@ -275,6 +397,65 @@ def test_decide_commit_는_merge된_pr이_승인됐으면_통과(monkeypatch):
 
     result = mod.decide_commit(mod.GhClient(), "owner/repo", "sha")
     assert result["approved"] is True
+
+
+def _client_for_pr(reviews, head_sha="bbbbbbb1111"):
+    return _FakeClient(
+        {
+            "repos/o/r/pulls/7": {
+                "user": {"login": "author"},
+                "base": {"ref": "main"},
+                "head": {"sha": head_sha},
+            },
+            "repos/o/r/pulls/7/files": [{"filename": "docs/ssot/PRD.md"}],
+            "repos/o/r/pulls/7/reviews": reviews,
+            "repos/o/r/contents/.github/ssot-approvers?ref=main": None,
+        }
+    )
+
+
+def test_decide_pr_는_옛_커밋_승인이면_stale_approvers_를_담아_미승인으로_답한다():
+    client = _client_for_pr([_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "aaaaaaa9999")])
+    result = mod.decide_pr(client, "o/r", 7)
+    assert result["touches_ssot"] is True
+    assert result["approved"] is False
+    assert result["stale_approvers"] == ["reviewer"]
+    assert "이전 커밋(aaaaaaa)" in result["reason"]
+
+
+def test_decide_pr_는_head_에_다시_승인하면_통과한다():
+    client = _client_for_pr(
+        [
+            _review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "aaaaaaa9999"),
+            _review("reviewer", "APPROVED", "2026-01-02T00:00:00Z", "bbbbbbb1111"),
+        ]
+    )
+    result = mod.decide_pr(client, "o/r", 7)
+    assert result == {"touches_ssot": True, "approved": True, "reason": "reviewer 가 승인했다"}
+
+
+def test_decide_pr_는_head_를_모르면_통과시키지_않고_판정_불가로_답한다():
+    client = _client_for_pr([_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "x")])
+    client.responses["repos/o/r/pulls/7"] = {"user": {"login": "author"}, "base": {"ref": "main"}}
+    with pytest.raises(GhError):
+        mod.decide_pr(client, "o/r", 7)
+
+
+def test_decide_commit_는_merge_시점_head_에_대한_승인만_인정한다():
+    # merge 된 PR 의 head.sha 는 merge 시점의 마지막 커밋이다.
+    client = _client_for_pr([_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "aaaaaaa9999")])
+    client.responses["repos/o/r/commits/msha/pulls"] = [
+        {"number": 7, "merged_at": "2026-01-03T00:00:00Z", "html_url": "https://x/7"}
+    ]
+    result = mod.decide_commit(client, "o/r", "msha")
+    assert result["approved"] is False
+    assert result["prs"][0]["pr"] == 7
+    assert "이전 커밋" in result["prs"][0]["reason"]
+
+    client.responses["repos/o/r/pulls/7/reviews"].append(
+        _review("reviewer", "APPROVED", "2026-01-02T00:00:00Z", "bbbbbbb1111")
+    )
+    assert mod.decide_commit(client, "o/r", "msha")["approved"] is True
 
 
 # --- 재사용 워크플로 권한 ------------------------------------------------------
