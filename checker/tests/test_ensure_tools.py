@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -61,12 +62,34 @@ def _write_exec(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
+_HIDDEN_TOOLS = {"uv", "uvx", "jq", "gh", "winget"}
+_posix_base: str | None = None
+
+
 def _base_path() -> list[str]:
-    """coreutils 가 있는 폴더만. 진짜 uv·jq·gh·winget 이 잡히지 않게 좁힌다."""
+    """coreutils 가 있는 폴더만. 진짜 uv·jq·gh·winget 이 잡히지 않게 좁힌다.
+
+    Linux(CI 의 ubuntu-latest)는 jq·gh 가 /usr/bin 에 기본으로 깔려 있어 /usr/bin 을
+    그대로 넣으면 "도구가 없는 PC" 를 흉내 낼 수 없다. 그래서 /usr/bin 과 /bin 의
+    실행 파일을 위 도구만 빼고 임시 폴더에 링크해 그 폴더를 쓴다.
+    """
+    global _posix_base
     if os.name == "nt":
         usr_bin = Path(_BASH).parent.parent / "usr" / "bin"
         return [str(usr_bin)]
-    return ["/usr/bin", "/bin"]
+    if _posix_base is None:
+        base = Path(tempfile.mkdtemp(prefix="ensure-tools-bin-"))
+        for src_dir in ("/usr/bin", "/bin"):
+            if not os.path.isdir(src_dir):
+                continue
+            for name in os.listdir(src_dir):
+                if name in _HIDDEN_TOOLS or (base / name).exists():
+                    continue
+                src = os.path.join(src_dir, name)
+                if os.path.isfile(src) and os.access(src, os.X_OK):
+                    (base / name).symlink_to(src)
+        _posix_base = str(base)
+    return [_posix_base]
 
 
 class Env:
