@@ -293,6 +293,24 @@ def test_gh_pr_가_아닌_명령은_영향을_받지_않는다():
 # 내는 가짜 uvx 스크립트를 두어 재현한다 — 네트워크나 실제 엔진 빌드가 필요 없다.
 
 
+def _fake_uvx_prelude() -> str:
+    """가짜 uvx 스크립트 첫머리. 호출을 기록하고 merge_command 는 진짜 모듈로 보낸다(#101).
+
+    merge 가드는 uvx 를 세 종류로 부른다(명령 분해, PRD 승인, 사람 병합 경로).
+    분해 호출만 진짜 checker.merge_command 로 넘겨 훅과의 연동까지 실제로
+    확인하고, 나머지는 각 가짜가 미리 정한 답을 낸다. PYTHONPATH 는
+    `_run_guard_with_fake_uvx` 가 준다.
+    """
+    py = Path(sys.executable).as_posix()
+    return (
+        "#!/usr/bin/env bash\n"
+        'echo "$*" >> "${FAKE_UVX_LOG:-/dev/null}"\n'
+        'case "$*" in\n'
+        f"  *checker.merge_command*) exec '{py}' -m checker.merge_command ;;\n"
+        "esac\n"
+    )
+
+
 @pytest.fixture()
 def fake_uvx(tmp_path):
     """PATH 맨 앞에 둘 가짜 `uvx` 실행 파일을 만드는 헬퍼를 돌려준다.
@@ -310,8 +328,8 @@ def fake_uvx(tmp_path):
         out_b64 = base64.b64encode(stdout.encode("utf-8")).decode("ascii")
         err_b64 = base64.b64encode(stderr.encode("utf-8")).decode("ascii")
         script.write_text(
-            "#!/usr/bin/env bash\n"
-            f"printf '%s' '{err_b64}' | base64 -d >&2\n"
+            _fake_uvx_prelude()
+            + f"printf '%s' '{err_b64}' | base64 -d >&2\n"
             f"printf '%s' '{out_b64}' | base64 -d\n"
             f"exit {exit_code}\n",
             encoding="utf-8",
@@ -323,9 +341,14 @@ def fake_uvx(tmp_path):
     return _make
 
 
-def _run_guard_with_fake_uvx(command: str, fake_uvx_dir: Path) -> tuple[int, dict | None]:
+def _run_guard_with_fake_uvx(
+    command: str, fake_uvx_dir: Path, extra_env: dict | None = None
+) -> tuple[int, dict | None]:
     fake_path = f"{fake_uvx_dir}{os.pathsep}{os.environ.get('PATH', '')}"
-    return _run_guard(command, env={"PATH": fake_path})
+    return _run_guard(
+        command,
+        env={"PATH": fake_path, "PYTHONPATH": str(REPO_ROOT), **(extra_env or {})},
+    )
 
 
 _BUILD_LOG_STDERR = (
@@ -395,8 +418,8 @@ def _make_dispatch_uvx(tmp_path: Path, human_stdout: str, human_rc: int) -> Path
     human_b64 = base64.b64encode(human_stdout.encode("utf-8")).decode("ascii")
     script = bin_dir / "uvx"
     script.write_text(
-        "#!/usr/bin/env bash\n"
-        'case "$*" in\n'
+        _fake_uvx_prelude()
+        + 'case "$*" in\n'
         f"  *check-human-merge*) printf '%s' '{human_b64}' | base64 -d; exit {human_rc} ;;\n"
         f"  *) printf '%s' '{ssot_b64}' | base64 -d; exit 0 ;;\n"
         "esac\n",
@@ -463,6 +486,79 @@ def test_사람_병합_경로_판정_출력이_json이_아니면_거부한다(tm
     assert code == 0
     assert out is not None
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# --- 병합 가드: 명령을 나눠 조각마다 판정한다(#101) ---------------------------
+#
+# 가짜 uvx 는 checker.merge_command 만 진짜 모듈로 보내고 나머지 호출은
+# FAKE_UVX_LOG 에 기록한다. 가짜 gh 는 `gh repo view` 에 "own/repo" 를 답한다.
+
+
+def _add_fake_gh(bin_dir: Path) -> None:
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$*" in\n'
+        "  *'repo view'*) echo own/repo ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+
+
+def _run_merge_scenario(tmp_path: Path, command: str) -> tuple[dict | None, list[str]]:
+    payload = json.dumps({"requires_human": False, "paths": [], "pr": 1, "repo": "x/y"})
+    bin_dir = _make_dispatch_uvx(tmp_path, payload, 0)
+    _add_fake_gh(bin_dir)
+    log = tmp_path / "uvx.log"
+    code, out = _run_guard_with_fake_uvx(command, bin_dir, {"FAKE_UVX_LOG": str(log)})
+    assert code == 0
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return out, lines
+
+
+@_needs_hook_env
+def test_세미콜론으로_묶은_두_merge_는_각자의_저장소로_검사한다(tmp_path):
+    out, log = _run_merge_scenario(
+        tmp_path,
+        "gh pr merge 100 --squash; gh pr merge 51 --squash -R jaeheeMin/public-cloud",
+    )
+    assert out is None
+    joined = "\n".join(log)
+    for sub in ("check-pr", "check-human-merge"):
+        assert f"{sub} --repo own/repo --pr 100" in joined
+        assert f"{sub} --repo jaeheeMin/public-cloud --pr 51" in joined
+    # 첫 PR 이 두 번째의 저장소로 조회되는 일이 없어야 한다.
+    assert "--repo jaeheeMin/public-cloud --pr 100" not in joined
+
+
+@_needs_hook_env
+def test_따옴표_안에만_있는_gh_pr_merge_는_merge_검사를_받지_않는다(tmp_path):
+    out, log = _run_merge_scenario(
+        tmp_path, 'gh issue create --title t --body "본문에 gh pr merge 5 라고 적음"'
+    )
+    assert out is None
+    assert not any("check-pr" in line or "check-human-merge" in line for line in log)
+
+
+@_needs_hook_env
+def test_heredoc_본문의_gh_pr_merge_는_merge_검사를_받지_않는다(tmp_path):
+    out, log = _run_merge_scenario(
+        tmp_path, "gh issue create --body-file - <<'EOF'\n설명\ngh pr merge 5\nEOF\n"
+    )
+    assert out is None
+    assert not any("check-pr" in line or "check-human-merge" in line for line in log)
+
+
+@_needs_hook_env
+def test_명령을_나누지_못하면_한_명령에_하나씩_실행하라며_거부한다(tmp_path):
+    out, log = _run_merge_scenario(tmp_path, 'echo "미완 && gh pr merge 5 -R o/r')
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "한 명령에 하나씩" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert not any("check-pr" in line for line in log)
 
 
 # --- 세션 시작 훅의 공통 개발 규칙 요약(#53) --------------------------------
