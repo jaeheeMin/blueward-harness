@@ -12,6 +12,9 @@
 # 이벤트는 쓰기 토큰으로 돌므로 PR head 코드는 절대 checkout 하거나 실행하지
 # 않는다(기본 checkout 은 base). 목록도 같은 이유로 base 에서 읽는다.
 #
+# 저장소 소유자가 아닌 사람이 올린 PR 은 보호 경로와 무관하게 알린다. 병합
+# 권한은 소유자에게만 있으므로 병합 전에 PR 이 온 것을 알아야 하기 때문이다.
+#
 # 판정 불가(gh api 오류 등)는 통과도 알림도 아니다(CLAUDE.md 원칙 7). 종료코드 2
 # 면 job 을 실패시켜 "검사를 못 했다" 를 드러낸다.
 #
@@ -52,6 +55,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set +e
           uv run python -m checker.ssot_approval check-human-merge \
@@ -62,18 +67,21 @@ jobs:
           echo "exit-code=$code" >> "$GITHUB_OUTPUT"
           cat error.txt >&2 || true
           cat result.json || true
-
-      - name: 판정 불능이면 실패
-        if: steps.decide.outputs.exit-code != '0' && steps.decide.outputs.exit-code != '1'
-        shell: bash
-        env:
-          CODE: ${{ steps.decide.outputs.exit-code }}
-        run: |
-          echo "::error title=사람 merge 경로 판정 불능::확인하지 못했다(종료코드 $CODE). 통과로 보지 않는다."
-          exit 1
+          # 판정 불능이면 경로 목록이 없으므로 아래 알림이 읽을 수 있게 비워 둔다.
+          if ! jq -e '.paths' result.json >/dev/null 2>&1; then
+            echo '{"paths": []}' > result.json
+          fi
+          # 소유자가 아닌 사람이 올린 PR 은 무엇을 바꿨든 알린다. 병합 권한은
+          # 소유자에게만 있으므로, 병합 전에 소유자가 PR 이 온 것을 알아야 한다.
+          # 판정 불능이어도 다른 사람의 PR 이면 알림은 보낸다(실패는 마지막 단계가 드러낸다).
+          if [ "$code" = "1" ] || [ "$PR_AUTHOR" != "$OWNER" ]; then
+            echo "notify=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "notify=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: GitHub 이슈로 알리기
-        if: steps.decide.outputs.exit-code == '1'
+        if: steps.decide.outputs.notify == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -87,6 +95,11 @@ jobs:
         run: |
           prefix="사람 확인 필요: PR #${PR_NUMBER} "
           paths="$(jq -r '.paths | map("- `" + . + "`") | join("\n")' result.json)"
+          protected=1
+          if [ -z "$paths" ]; then
+            protected=0
+            paths="- 없음(보호 경로 밖의 변경)"
+          fi
 
           if [ "$ACTION" = "closed" ]; then
             # 병합됐다. 열려 있는 알림 이슈가 있으면 기록을 남기고 닫는다.
@@ -104,10 +117,18 @@ jobs:
               printf -- '- PR: %s\n- 작성자: %s\n\n바뀐 보호 경로:\n%s\n' "$PR_URL" "$PR_AUTHOR" "$paths"
             } > body.md
           else
-            title="${prefix}이 Plugin·엔진 경로를 바꿈 (${PR_TITLE})"
+            if [ "$protected" -eq 1 ]; then
+              title="${prefix}이 Plugin·엔진 경로를 바꿈 (${PR_TITLE})"
+            else
+              title="${prefix}을 ${PR_AUTHOR} 가 올림 (${PR_TITLE})"
+            fi
             {
               printf -- '- PR: %s\n- 작성자: %s\n\n바뀐 보호 경로:\n%s\n\n' "$PR_URL" "$PR_AUTHOR" "$paths"
-              printf 'Claude 는 이 PR 을 merge 할 수 없다(훅이 거부한다). GitHub 화면의 Merge 버튼으로 사람이 직접 병합해야 한다.\n'
+              if [ "$protected" -eq 1 ]; then
+                printf 'Claude 는 이 PR 을 merge 할 수 없다(훅이 거부한다). GitHub 화면의 Merge 버튼으로 사람이 직접 병합해야 한다.\n'
+              else
+                printf '저장소 소유자가 아닌 사람이 올린 PR 이다. 내용을 확인한 뒤 병합한다.\n'
+              fi
             } > body.md
           fi
 
@@ -115,7 +136,7 @@ jobs:
             --label "type:chore" --assignee "$OWNER"
 
       - name: Teams 로 알리기
-        if: steps.decide.outputs.exit-code == '1'
+        if: steps.decide.outputs.notify == 'true'
         shell: bash
         env:
           WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
@@ -137,9 +158,13 @@ jobs:
           else
             heading="사람 확인 필요: PR #${PR_NUMBER}"
           fi
-          details="${PR_TITLE} — 작성자 ${PR_AUTHOR}. 바뀐 보호 경로: ${paths}"
-          if [ "$ACTION" != "closed" ]; then
-            details="${details}. Claude 는 merge 할 수 없으니 GitHub 화면에서 직접 병합하세요."
+          if [ -n "$paths" ]; then
+            details="${PR_TITLE} — 작성자 ${PR_AUTHOR}. 바뀐 보호 경로: ${paths}"
+            if [ "$ACTION" != "closed" ]; then
+              details="${details}. Claude 는 merge 할 수 없으니 GitHub 화면에서 직접 병합하세요."
+            fi
+          else
+            details="${PR_TITLE} — 작성자 ${PR_AUTHOR}(저장소 소유자가 아님). 보호 경로 변경은 없다."
           fi
 
           jq -n --arg heading "$heading" --arg details "$details" --arg url "$PR_URL" '{
@@ -164,3 +189,15 @@ jobs:
           # 눈에 띄게 한다(이슈는 앞 단계에서 이미 만들어졌다).
           curl -sS --fail-with-body -X POST -H "Content-Type: application/json" \
             --data @payload.json "$WEBHOOK" > /dev/null
+
+      # 알림을 먼저 보낸 뒤에 실패시킨다. 판정을 못 했어도 다른 사람의 PR 알림은
+      # 가야 하기 때문이다. 앞 단계가 실패했으면 이 단계는 돌지 않지만 job 은
+      # 이미 실패로 드러난다.
+      - name: 판정 불능이면 실패
+        if: steps.decide.outputs.exit-code != '0' && steps.decide.outputs.exit-code != '1'
+        shell: bash
+        env:
+          CODE: ${{ steps.decide.outputs.exit-code }}
+        run: |
+          echo "::error title=사람 merge 경로 판정 불능::확인하지 못했다(종료코드 $CODE). 통과로 보지 않는다."
+          exit 1
