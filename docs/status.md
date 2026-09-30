@@ -349,6 +349,16 @@ Hook 에서는 된다. 사용자가 "묻지 않고 설치하고 알림만" 을 �
 uv 가 없을 때의 Write|Edit·MCP 안내에도 다음 할 일을 붙였다. 테스트는 가짜 winget 으로 한다.
 Plugin version 0.10.12. 진짜 winget 의 동작(UAC·정책 차단)은 아직 실기에서 확인하지 않았다.
 
+**검사가 실패·진행 중인 PR 의 Claude 병합을 거부한다(#120, 검사가 실패·진행 중인 PR 의 Claude 병합
+거부).** 무료 요금제는 빨간불이어도 Merge 버튼을 잠그지 못하므로 `pre-bash-git-guard.sh` 의
+`check_one_merge` 에 `gh pr checks <n> -R <repo> --json name,state,bucket,link` 단계를 uvx 검사보다
+먼저 넣었다(gh 한 번이라 싸고, 빨간불 PR 을 먼저 알린다). `bucket` 이 fail·cancel 이면 검사 이름
+(최대 5개)과 첫 링크를 원인으로 거부하고, pending 등 끝나지 않은 것이면 `--watch` 안내로 거부한다.
+pass·skipping 은 통과. gh 는 실패 1·진행 중 8 로 끝나면서도 JSON 을 내므로 종료코드가 아니라 JSON 을
+읽는다. 검사가 하나도 없는 PR 은 stdout 이 비고 종료코드 1, stderr `no checks reported on the '...'
+branch`(gh 2.100 에서 확인)이며 이때만 통과. 그 밖에 JSON 을 못 얻으면 검사 불능으로 거부한다.
+사람의 웹 Merge 버튼은 범위 밖. 테스트는 가짜 gh 로 한다. Plugin version 0.10.14.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
