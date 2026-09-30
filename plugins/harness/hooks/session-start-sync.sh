@@ -8,6 +8,13 @@ plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 input="$(cat)"
 
+# uv·jq·gh 가 있는지 보고 Windows 에서는 없는 것을 winget 으로 설치한다(#116).
+# 아래에서 jq 를 쓰기 전에 해 둔다. 실패해도 세션 시작을 막지 않는다.
+tools_notice=""
+if [ -f "${plugin_root}/hooks/ensure-tools.sh" ]; then
+  tools_notice="$(bash "${plugin_root}/hooks/ensure-tools.sh" </dev/null 2>/dev/null || true)"
+fi
+
 # 세션이 다른 git worktree 로 옮겨가도(#71) 그 worktree 기준으로 판단하기
 # 위해, 훅에 오는 stdin JSON 의 cwd 를 최우선으로 쓴다. CLAUDE_PROJECT_DIR 은
 # 세션을 "처음 연" 폴더라 세션 도중 다른 worktree 로 옮기면 더는 맞지 않는다.
@@ -34,7 +41,12 @@ add() {
 "
 }
 
+if [ -n "$tools_notice" ]; then
+  add "$tools_notice"
+fi
+
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  printf '%s' "$lines"
   echo "이 디렉터리는 git 저장소가 아닙니다. harness 의 자동 동기화가 동작하지 않습니다. 다음: 작업할 프로젝트 폴더(git 저장소)에서 Claude Code 를 다시 여십시오."
   exit 0
 fi

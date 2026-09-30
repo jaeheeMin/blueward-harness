@@ -76,7 +76,25 @@ plugins/harness/
 | `pre_write_guard.py` | `PreToolUse` (Write\|Edit) | 문서가 템플릿을 벗어나면 저장을 막는다(doc-guard). 코드(`.abap`, `.js`/`.ts`, `.cds`, `.asbdef`)는 공통 개발 규칙 CR-001·CR-002·CR-003·CR-007 을 어기면 막는다(#54, #72, #81. BDEF 는 CR-001 만, CR-003·CR-007 은 ABAP·JS/TS 만) |
 | `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 PRD 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104) |
 | `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고 지난 세션에서 남은 경고를 전한다. upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리) |
+| `ensure-tools.sh` | `SessionStart` (session-start-sync.sh 가 부름) | uv·jq·gh 가 없으면 Windows 에서 winget 으로 설치하고 결과를 알린다(#116). 아래 "도구 자동 설치" 참고 |
 | `stop-deliver.sh` | `Stop` | 커밋되지 않은 변경이 남았으면 `/harness:deliver` 를 안내한다 |
+
+### 도구 자동 설치(#116)
+
+Hook 은 검사 Engine 을 받는 데 uv, 명령을 읽는 데 jq, GitHub 작업에 gh 를 쓴다.
+세션을 시작할 때 셋이 있는지 보고, **Windows 에서 winget 이 있으면 없는 것을
+묻지 않고 설치한 뒤 알린다**(uv·jq 는 `--scope user` 로 먼저 시도). 다 있으면 아무
+말도 하지 않는다.
+
+- 설치한 프로그램은 이미 열린 세션의 PATH 에 없다. 실행 파일이 생긴 것을 확인한
+  뒤 "Claude Code 를 새로 여십시오" 라고 안내한다.
+- gh 는 설치만 한다. 로그인이 안 되어 있으면 `gh auth login` 을 안내한다.
+- winget 이 없거나, 설치가 실패하거나(권한·회사 정책 포함), Windows 가 아니면
+  설치 명령만 안내한다(macOS 는 `brew install uv jq gh`).
+- 실패한 도구는 24시간 동안 다시 설치를 시도하지 않는다. 기록은
+  `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/harness}/tool-install-failures` 에 있다.
+- **끄려면** 환경 변수 `HARNESS_NO_AUTO_INSTALL=1` 을 설정한다. 설치는 하지 않고
+  안내만 한다.
 
 ### 규칙 5개
 
