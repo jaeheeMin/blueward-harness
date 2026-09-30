@@ -205,6 +205,53 @@ check_one_merge() {
     deny "gh pr merge 의 대상 PR 을 확인하지 못해 PRD 승인 여부를 판정할 수 없습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. 다음: Claude 가 PR 번호를 붙여(예: gh pr merge 123) 다시 실행하십시오. 그래도 안 되면 gh auth status 로 로그인 상태를 확인하고, 로그인 안 됨이면 사람이 gh auth login 을 실행하십시오."
   fi
 
+  # -1) 대상 PR 의 검사(status checks)가 실패했거나 아직 진행 중이면 거부한다(#120).
+  #     무료 요금제는 빨간불이어도 Merge 버튼을 잠그지 못하므로, 적어도 Claude 의
+  #     `gh pr merge` 는 여기서 막는다(사람의 웹 Merge 버튼은 범위 밖). 싼 gh 호출
+  #     한 번이라 uvx 로 엔진을 받는 아래 검사들보다 먼저 두고, 빨간불 PR 이면 그
+  #     사실을 먼저 알린다.
+  #
+  #     gh pr checks 는 검사가 실패하면 종료코드 1, 진행 중이면 8 을 내면서도
+  #     --json 출력은 정상으로 낸다. 그래서 종료코드가 아니라 stdout 의 JSON 을
+  #     읽는다. 검사가 하나도 없는 PR(CI 없는 저장소)은 stdout 이 비고 종료코드 1
+  #     에 stderr 가 "no checks reported on the ... branch" 인 경우이며(gh 2.100
+  #     에서 확인), 그때만 통과시킨다. 그 밖에 JSON 을 못 얻으면 통과가 아니라
+  #     검사 불능으로 거부한다(CLAUDE.md 원칙 7).
+  ck_err_file="$(mktemp 2>/dev/null)" || {
+    deny "임시 파일을 만들지 못해 PR #$pr_number 의 검사 상태를 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
+  }
+  set +e
+  ck_out="$(gh pr checks "$pr_number" -R "$repo" --json name,state,bucket,link 2>"$ck_err_file")"
+  ck_rc=$?
+  set -e
+  ck_err="$(cat "$ck_err_file" 2>/dev/null)" || ck_err=""
+  rm -f "$ck_err_file"
+  ck_out="$(printf '%s' "$ck_out" | tr -d '\r')"
+
+  if [ -z "$ck_out" ] && printf '%s' "$ck_err" | grep -q 'no checks reported'; then
+    : # 검사가 하나도 없는 PR(CI 없는 저장소). 막을 검사가 없으므로 통과시킨다.
+  elif ! printf '%s' "$ck_out" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    ck_detail="$(printf '%s\n%s' "$ck_out" "$ck_err" | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
+    deny "PR #$pr_number 의 검사 상태를 확인하지 못해 merge 를 막습니다(종료코드 $ck_rc). 검사 불능이므로 통과시키지 않습니다. $next_retry 자세히: $ck_detail"
+  else
+    ck_fail_names="$(printf '%s' "$ck_out" | jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .name] | .[:5] | join(", ")' 2>/dev/null | tr -d '\r"\\`$')" || true
+    ck_fail_total="$(printf '%s' "$ck_out" | jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length' 2>/dev/null | tr -d '\r')" || true
+    ck_fail_link="$(printf '%s' "$ck_out" | jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .link // empty] | .[0] // empty' 2>/dev/null | tr -d '\r"\\`$ ')" || true
+    ck_wait_names="$(printf '%s' "$ck_out" | jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping" and .bucket != "fail" and .bucket != "cancel") | .name] | .[:5] | join(", ")' 2>/dev/null | tr -d '\r"\\`$')" || true
+    ck_wait_total="$(printf '%s' "$ck_out" | jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping" and .bucket != "fail" and .bucket != "cancel")] | length' 2>/dev/null | tr -d '\r')" || true
+    if [ "${ck_fail_total:-0}" -gt 0 ] 2>/dev/null; then
+      if [ "$ck_fail_total" -gt 5 ]; then
+        ck_fail_names="$ck_fail_names 등 ${ck_fail_total}개"
+      fi
+      deny "PR #$pr_number 의 검사가 실패해 merge 를 막습니다. 실패한 검사: $ck_fail_names 링크: $ck_fail_link 다음: Claude 가 실패한 검사의 로그(gh run view --log-failed 또는 위 링크)를 보고 원인을 고쳐 다시 올린 뒤 검사가 모두 통과하면 다시 merge 하십시오. 문서·코드 검사 실패라면 PR 코멘트에 파일별 원인과 고칠 방법이 있습니다."
+    elif [ "${ck_wait_total:-0}" -gt 0 ] 2>/dev/null; then
+      if [ "$ck_wait_total" -gt 5 ]; then
+        ck_wait_names="$ck_wait_names 등 ${ck_wait_total}개"
+      fi
+      deny "PR #$pr_number 의 검사가 아직 끝나지 않았습니다($ck_wait_names). 끝나기 전에는 merge 하지 않습니다. 다음: gh pr checks $pr_number --watch 로 끝날 때까지 기다린 뒤 결과가 모두 통과이면 다시 merge 하십시오."
+    fi
+  fi
+
   if ! command -v uvx >/dev/null 2>&1; then
     deny "uvx 가 없어 PRD 승인 여부를 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_uv"
   fi

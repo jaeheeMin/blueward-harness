@@ -336,6 +336,7 @@ def fake_uvx(tmp_path):
             newline="\n",
         )
         script.chmod(0o755)
+        _add_fake_gh(bin_dir)
         return bin_dir
 
     return _make
@@ -446,6 +447,7 @@ def _make_dispatch_uvx(tmp_path: Path, human_stdout: str, human_rc: int) -> Path
         newline="\n",
     )
     script.chmod(0o755)
+    _add_fake_gh(bin_dir)
     return bin_dir
 
 
@@ -513,17 +515,46 @@ def test_사람_병합_경로_판정_출력이_json이_아니면_거부한다(tm
 # FAKE_UVX_LOG 에 기록한다. 가짜 gh 는 `gh repo view` 에 "own/repo" 를 답한다.
 
 
-def _add_fake_gh(bin_dir: Path) -> None:
+_PASS_CHECKS = [
+    {"name": "test (ubuntu-latest)", "state": "SUCCESS", "bucket": "pass", "link": "https://example.com/1"},
+    {"name": "alert", "state": "SUCCESS", "bucket": "pass", "link": "https://example.com/2"},
+]
+
+
+def _check(name: str, bucket: str, link: str = "https://example.com/run/9") -> dict:
+    return {"name": name, "state": bucket.upper(), "bucket": bucket, "link": link}
+
+
+def _add_fake_gh(bin_dir: Path, checks: dict | None = None) -> None:
+    """가짜 gh. `repo view` 는 own/repo 를, `pr checks <번호>` 는 번호별로 정한 답을 낸다(#120).
+
+    checks 는 {PR 번호: 답} 이다. 답이 list 면 그 JSON 을 종료코드 0 으로, 문자열이면
+    "none"(검사 없음: stdout 비고 종료코드 1, stderr 'no checks reported'),
+    "error"(HTTP 오류, 종료코드 1), "garbled"(JSON 아닌 stdout) 흉내를 낸다.
+    ("fail-rc1" 처럼 종료코드만 다른 실제 gh 동작은 list 뒤에 종료코드를 튜플로 준다.)
+    번호가 없으면 모두 통과하는 검사를 낸다.
+    """
+    checks = checks or {}
+    lines = ["#!/usr/bin/env bash", 'case "$*" in', "  *'repo view'*) echo own/repo ;;"]
+    entries = list(checks.items()) + [("*", _PASS_CHECKS)]
+    for num, spec in entries:
+        rc = 0
+        if isinstance(spec, tuple):
+            spec, rc = spec
+        pat = "*'pr checks'*" if num == "*" else f"*'pr checks {num} '*"
+        if isinstance(spec, list):
+            b64 = base64.b64encode(json.dumps(spec).encode("utf-8")).decode("ascii")
+            body = f"printf '%s' '{b64}' | base64 -d; exit {rc}"
+        elif spec == "none":
+            body = "echo \"no checks reported on the 'x' branch\" >&2; exit 1"
+        elif spec == "error":
+            body = "echo 'HTTP 502: Bad Gateway' >&2; exit 1"
+        else:  # garbled
+            body = "echo '<html>not json</html>'; exit 0"
+        lines.append(f"  {pat}) {body} ;;")
+    lines += ["  *) exit 1 ;;", "esac", ""]
     gh = bin_dir / "gh"
-    gh.write_text(
-        "#!/usr/bin/env bash\n"
-        'case "$*" in\n'
-        "  *'repo view'*) echo own/repo ;;\n"
-        "  *) exit 1 ;;\n"
-        "esac\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    gh.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     gh.chmod(0o755)
 
 
@@ -578,6 +609,126 @@ def test_명령을_나누지_못하면_한_명령에_하나씩_실행하라며_�
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "한 명령에 하나씩" in out["hookSpecificOutput"]["permissionDecisionReason"]
     assert not any("check-pr" in line for line in log)
+
+
+# --- 병합 가드: 검사가 실패·진행 중인 PR 은 거부한다(#120) ---------------------
+#
+# 가짜 gh 가 `gh pr checks <번호> ... --json` 에 미리 정한 답을 낸다. 실제 gh 는
+# 검사 실패면 종료코드 1, 진행 중이면 8 을 내면서도 JSON 을 stdout 에 낸다.
+
+
+def _merge_with_checks(tmp_path: Path, command: str, checks: dict | None) -> tuple[dict | None, list[str]]:
+    payload = json.dumps({"requires_human": False, "paths": [], "pr": 1, "repo": "x/y"})
+    bin_dir = _make_dispatch_uvx(tmp_path, payload, 0)
+    _add_fake_gh(bin_dir, checks)
+    log = tmp_path / "uvx.log"
+    code, out = _run_guard_with_fake_uvx(command, bin_dir, {"FAKE_UVX_LOG": str(log)})
+    assert code == 0
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return out, lines
+
+
+def _reason(out: dict) -> str:
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    return out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@_needs_hook_env
+def test_검사가_모두_통과면_다음_검사로_넘어가_통과한다(tmp_path):
+    out, log = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", {123: _PASS_CHECKS})
+    assert out is None
+    assert any("check-pr" in line for line in log)  # 기존 uvx 검사까지 갔다
+
+
+@_needs_hook_env
+def test_검사가_실패한_PR_의_병합은_이름과_링크와_다음_할_일로_거부한다(tmp_path):
+    checks = {123: ([_check("test (windows-latest)", "fail", "https://example.com/run/77"),
+                     _check("alert", "pass")], 1)}
+    out, log = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", checks)
+    reason = _reason(out)
+    assert "test (windows-latest)" in reason
+    assert "https://example.com/run/77" in reason
+    assert "다음:" in reason
+    assert "gh run view --log-failed" in reason
+    assert "alert" not in reason
+    assert not any("check-pr" in line for line in log)  # 싼 검사가 먼저 막았다
+
+
+@_needs_hook_env
+def test_취소된_검사도_실패처럼_거부한다(tmp_path):
+    out, _ = _merge_with_checks(
+        tmp_path, "gh pr merge 123 -R owner/repo", {123: ([_check("build", "cancel")], 1)}
+    )
+    reason = _reason(out)
+    assert "build" in reason and "다음:" in reason
+
+
+@_needs_hook_env
+def test_실패한_검사_이름의_따옴표와_달러는_지우고_JSON_이_깨지지_않는다(tmp_path):
+    out, _ = _merge_with_checks(
+        tmp_path,
+        "gh pr merge 123 -R owner/repo",
+        {123: ([_check('bad "q" $x `y` \\z', "fail")], 1)},
+    )
+    reason = _reason(out)
+    assert "bad q x y z" in reason
+
+
+@_needs_hook_env
+def test_진행_중인_검사가_있으면_watch_안내와_함께_거부한다(tmp_path):
+    checks = {123: ([_check("test (ubuntu-latest)", "pending"), _check("alert", "pass")], 8)}
+    out, log = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", checks)
+    reason = _reason(out)
+    assert "test (ubuntu-latest)" in reason
+    assert "아직 끝나지 않았습니다" in reason
+    assert "gh pr checks 123 --watch" in reason
+    assert "다음:" in reason
+    assert not any("check-pr" in line for line in log)
+
+
+@_needs_hook_env
+def test_건너뛴_검사만_있으면_통과한다(tmp_path):
+    out, _ = _merge_with_checks(
+        tmp_path, "gh pr merge 123 -R owner/repo",
+        {123: [_check("optional", "skipping"), _check("alert", "pass")]},
+    )
+    assert out is None
+
+
+@_needs_hook_env
+def test_검사가_하나도_없는_PR_은_통과한다(tmp_path):
+    out, log = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", {123: "none"})
+    assert out is None
+    assert any("check-pr" in line for line in log)
+
+
+@_needs_hook_env
+def test_검사_목록이_빈_배열이어도_통과한다(tmp_path):
+    out, _ = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", {123: []})
+    assert out is None
+
+
+@_needs_hook_env
+@pytest.mark.parametrize("mode", ["error", "garbled"])
+def test_검사_상태를_못_얻으면_검사_불능으로_거부한다(tmp_path, mode):
+    out, log = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", {123: mode})
+    reason = _reason(out)
+    assert "확인하지 못해" in reason
+    assert "검사 불능" in reason
+    assert "다음:" in reason
+    assert not any("check-pr" in line for line in log)
+
+
+@_needs_hook_env
+def test_두_merge_중_두번째_PR_이_빨간불이면_그_PR_을_짚어_거부한다(tmp_path):
+    checks = {200: ([_check("doc-guard", "fail", "https://example.com/run/200")], 1)}
+    out, _ = _merge_with_checks(
+        tmp_path, "gh pr merge 100 -R o/r; gh pr merge 200 -R o/r", checks
+    )
+    reason = _reason(out)
+    assert "PR #200" in reason
+    assert "doc-guard" in reason
 
 
 # --- 세션 시작 훅의 공통 개발 규칙 요약(#53) --------------------------------
