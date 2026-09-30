@@ -180,6 +180,18 @@ def test_엔진을_받을_수_없으면_통과가_아니라_거절한다(install
     assert decision(out) == "deny"
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert "확인되지 않는 상태로 통과시키지 않습니다" in reason
+    assert "다음:" in reason  # #113(Hook 거부 메시지에 원인과 다음 할 일 함께 안내)
+
+
+def test_거부_문구에_설치_명령과_이슈_저장소가_적혀_있다():
+    """#113(Hook 거부 메시지에 원인과 다음 할 일 함께 안내): uv 가 없을 때 사람이
+    할 일이 명령 그대로 적혀 있어야 한다."""
+    hooks_dir = PLUGIN_SRC / "hooks"
+    for name in ("pre_write_guard.py", "mcp_source_guard.py"):
+        text = (hooks_dir / name).read_text(encoding="utf-8")
+        assert "winget install --id astral-sh.uv -e" in text
+        assert "jaeheeMin/blueward-harness" in text
+        assert "관리하는 담당자에게 알리십시오" not in text
 
 
 def test_규칙_설정_오류면_거절하고_담당자에게_알리라고_한다(installed_hook, tmp_path):
@@ -193,6 +205,7 @@ def test_규칙_설정_오류면_거절하고_담당자에게_알리라고_한�
     assert decision(out) == "deny"
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert "문서의 문제가 아닙니다" in reason
+    assert "rules/" in reason and "다음:" in reason
 
 def test_입력을_해석하지_못하면_통과시키지_않는다(installed_hook):
     # 입력을 못 읽으면 소관인지조차 모른다. 모른다는 것을 통과로 바꾸지 않는다(원칙 7).

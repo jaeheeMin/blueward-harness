@@ -65,6 +65,21 @@ STANDARDS_MARKERS = ("templates", "rules")
 
 ALLOW = 0  # 통과. 아무것도 출력하지 않으면 통과다.
 
+# 거부 메시지는 "왜 막혔는지" 와 "다음에 할 일" 을 함께 담는다(#113 Hook 거부 메시지에
+# 원인과 다음 할 일 함께 안내). 이 메시지는 Claude 가 먼저 읽고 개발자가 아닐 수도 있는
+# 팀원에게 전한다 — Claude 가 스스로 못 하는 일(프로그램 설치, 로그인)은 "사람이 할 일" 로
+# 밝히고 명령을 그대로 적는다. 아래 두 문구를 여러 거부에서 같이 쓴다.
+NEXT_ENGINE_FAIL = (
+    "다음: 사람이 할 일 — uv 가 없다면 PowerShell 에서 `winget install --id astral-sh.uv -e` "
+    "로 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오. 이미 설치돼 있다면 네트워크"
+    "(엔진을 처음 받을 때 필요)를 확인하고 같은 작업을 다시 시도하십시오. 계속되면 위 사유를 "
+    "붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
+)
+NEXT_RETRY = (
+    "다음: 같은 작업을 한 번 더 시도하십시오. 계속되면 위 내용을 붙여 "
+    "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일)."
+)
+
 
 def allow() -> None:
     sys.exit(ALLOW)
@@ -219,10 +234,11 @@ def _check_code(path: Path, content: str) -> None:
             deny(
                 "harness 가 공통 개발 규칙 검사 엔진을 받거나 실행하지 못해 이 코드를 "
                 "확인할 수 없었습니다.\n"
-                f"사유: {exc}\n\n"
-                "확인할 것: uv 가 설치되어 있는가, 네트워크가 되는가. 로컬에서 개발·테스트 "
-                "중이라면 DOC_GUARD_ENGINE 환경변수로 엔진 경로를 지정할 수 있습니다.\n"
-                "확인되지 않는 상태로 통과시키지 않습니다."
+                f"사유: {exc}\n"
+                "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                + NEXT_ENGINE_FAIL
+                + " 로컬에서 개발·테스트 중이라면 DOC_GUARD_ENGINE 환경변수로 엔진 경로를 "
+                "지정할 수 있습니다."
             )
 
     if done.returncode == 0:
@@ -233,8 +249,9 @@ def _check_code(path: Path, content: str) -> None:
     except json.JSONDecodeError:
         deny(
             "공통 개발 규칙 검사기의 출력을 해석하지 못했습니다.\n"
-            f"{(done.stderr or done.stdout or '').strip()[:500]}\n\n"
-            "확인되지 않는 상태로 통과시키지 않습니다."
+            f"{(done.stderr or done.stdout or '').strip()[:500]}\n"
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_RETRY
         )
 
     # 리포트의 file 은 임시 스테이징 경로다. 사람에게는 원래 저장하려던 경로를 보여준다.
@@ -245,8 +262,8 @@ def _check_code(path: Path, content: str) -> None:
         deny(
             "harness: 이 코드가 공통 개발 규칙을 어겼습니다(conventions/common.md).\n\n"
             + format_code_violations(report)
-            + "\n\n위를 고치거나, 정말 예외라면 같은 줄이나 바로 위 줄에 주석으로 "
-              "`harness:allow CR-00N <이유>` 를 남기고 다시 저장하십시오."
+            + "\n\n다음: Claude 가 위 항목을 고쳐 다시 저장하십시오. 정말 예외라면 같은 줄이나 "
+              "바로 위 줄에 주석으로 `harness:allow CR-00N <이유>` 를 남기고 다시 저장하십시오."
         )
 
     if done.returncode == 2:
@@ -254,14 +271,18 @@ def _check_code(path: Path, content: str) -> None:
         deny(
             "공통 개발 규칙 검사기가 이 코드를 읽지 못했습니다.\n"
             + "\n".join(r for r in reasons if r)
-            + "\n\n확인되지 않는 상태로 통과시키지 않습니다."
+            + "\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            "다음: 위 사유가 코드 내용(문법, 인코딩)의 문제라면 Claude 가 고쳐 다시 저장하십시오. "
+            "그렇지 않으면 같은 작업을 한 번 더 시도하고, 계속되면 위 내용을 붙여 "
+            "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일)."
         )
 
     # 0, 1, 2 는 checker.code_rules 가 약속한 종료코드다. 그 밖은 계약에 없다.
     deny(
         f"공통 개발 규칙 검사기가 알 수 없는 종료코드({done.returncode})로 끝나 이 코드를 "
         "확인할 수 없었습니다.\n"
-        "확인되지 않는 상태로 통과시키지 않습니다."
+        "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+        + NEXT_RETRY
     )
 
 
@@ -273,7 +294,8 @@ def _main() -> None:
         # 통과로 바꾸지 않는다(CLAUDE.md 원칙 7).
         deny(
             "doc-guard 훅이 Claude Code 가 넘긴 입력을 해석하지 못해 이 문서를 확인할 수 "
-            "없었습니다.\n확인되지 않는 상태로 통과시키지 않습니다."
+            "없었습니다.\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_RETRY
         )
 
     tool = payload.get("tool_name") or ""
@@ -294,7 +316,10 @@ def _main() -> None:
         if _has_broken_encoding(raw_path):
             deny(
                 "코드 경로가 깨져 들어와(인코딩 문제) 이 파일을 확인할 수 없습니다.\n"
-                "확인되지 않는 상태로 통과시키지 않습니다."
+                "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                "다음: Claude 가 파일 경로를 확인해 정확한 경로로 다시 저장하십시오. 같은 "
+                "현상이 계속되면 그 경로를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 "
+                "알리십시오(사람이 할 일)."
             )
         content = proposed_content(tool, tool_input, path)
         if content is None:
@@ -314,7 +339,10 @@ def _main() -> None:
         # "위반" 으로 뭉개지 않는다).
         deny(
             "문서 경로가 깨져 들어와(인코딩 문제) 이 문서가 doc-guard 소관인지 "
-            "판단할 수 없습니다.\n확인되지 않는 상태로 통과시키지 않습니다."
+            "판단할 수 없습니다.\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            "다음: Claude 가 문서 경로를 확인해 정확한 경로로 다시 저장하십시오. 같은 "
+            "현상이 계속되면 그 경로를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 "
+            "알리십시오(사람이 할 일)."
         )
 
     standards_root = find_standards_root(path)
@@ -357,11 +385,11 @@ def _main() -> None:
             # 상태로 통과시키면 정확히 필요한 순간에 보호가 사라진다.
             deny(
                 "doc-guard 가 검사 엔진을 받거나 실행하지 못해 이 문서를 확인할 수 없었습니다.\n"
-                f"사유: {exc}\n\n"
-                "확인할 것: uv 가 설치되어 있는가, 엔진을 처음 받는 것이라면 네트워크가 "
-                "되는가. 로컬에서 개발·테스트 중이라면 DOC_GUARD_ENGINE 환경변수로 엔진 "
-                "경로를 지정할 수 있습니다.\n"
-                "확인되지 않는 상태로 통과시키지 않습니다."
+                f"사유: {exc}\n"
+                "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                + NEXT_ENGINE_FAIL
+                + " 로컬에서 개발·테스트 중이라면 DOC_GUARD_ENGINE 환경변수로 엔진 경로를 "
+                "지정할 수 있습니다."
             )
 
     if done.returncode == 0:
@@ -372,8 +400,9 @@ def _main() -> None:
     except json.JSONDecodeError:
         deny(
             "doc-guard 검사기의 출력을 해석하지 못했습니다.\n"
-            f"{(done.stderr or done.stdout or '').strip()[:500]}\n\n"
-            "확인되지 않는 상태로 통과시키지 않습니다."
+            f"{(done.stderr or done.stdout or '').strip()[:500]}\n"
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_RETRY
         )
 
     if done.returncode == 2:
@@ -382,14 +411,18 @@ def _main() -> None:
         deny(
             "doc-guard 규칙 파일에 문제가 있어 검사할 수 없습니다.\n"
             f"{report.get('message', '')}\n\n"
-            "이것은 문서의 문제가 아닙니다. 규칙 파일을 관리하는 담당자에게 알리십시오."
+            "이것은 문서의 문제가 아닙니다.\n"
+            "다음: 사람이 할 일 — 이 Project Repository 의 rules/ 파일을 고칠 수 있는 담당자"
+            "(저장소 소유자)에게 위 메시지를 그대로 전달해 rules/ 를 고치게 하십시오. 고쳐질 "
+            "때까지 이 문서는 저장할 수 없습니다. 엔진 쪽 문제로 보이면 "
+            "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
         )
 
     if done.returncode == 1:
         deny(
             "doc-guard: 이 문서가 템플릿을 따르지 않습니다.\n\n"
             + format_violations(report)
-            + "\n\n위 템플릿을 보고 고친 뒤 다시 저장하십시오."
+            + "\n\n다음: Claude 가 위 템플릿을 보고 문서를 고친 뒤 다시 저장하십시오."
         )
 
     # 0, 1, 2 는 검사기가 약속한 종료코드다(checker/cli.py). 그 밖은 계약에 없으므로
@@ -397,7 +430,8 @@ def _main() -> None:
     deny(
         f"doc-guard 검사기가 알 수 없는 종료코드({done.returncode})로 끝나 이 문서를 "
         "확인할 수 없었습니다.\n"
-        "확인되지 않는 상태로 통과시키지 않습니다."
+        "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+        + NEXT_RETRY
     )
 
 
@@ -435,7 +469,8 @@ def main() -> None:
         deny(
             "doc-guard 훅에서 예상치 못한 오류가 나 이 문서를 확인할 수 없었습니다.\n"
             f"사유: {type(exc).__name__}: {exc}\n"
-            "확인되지 않는 상태로 통과시키지 않습니다."
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_RETRY
         )
 
 

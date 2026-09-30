@@ -103,7 +103,7 @@ else
   # jq 가 없다고 통과시키지 않는다. pre-bash-git-guard.sh 와 같은 태도다.
   # printf 로 직접 JSON 을 내므로, 사유 문자열에서 JSON 을 깨뜨릴 수 있는
   # 큰따옴표와 역슬래시를 미리 지운다.
-  reason="jq 가 설치되어 있지 않습니다. jq 를 설치하십시오. ${reason}"
+  reason="jq 가 설치되어 있지 않습니다. 사람이 할 일 - PowerShell 에서 winget install --id jqlang.jq -e 로 jq 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오. ${reason}"
   reason="$(printf '%s' "$reason" | tr -d '"\\')"
   printf '{"decision":"block","reason":"%s"}\n' "$reason"
 fi

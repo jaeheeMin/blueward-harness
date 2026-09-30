@@ -327,6 +327,17 @@ statement 전체에 `FROM @` 가 있으면 건너뛰어서, `SELECT * FROM ekko 
 서브쿼리 안의 SELECT * 는 따로 판정된다(`@itab` 이면 통과, DB 테이블이면 위반). public-cloud
 `src/` 의 ABAP 26개에는 새로 잡히는 것이 없었다.
 
+**Hook 거부 메시지마다 원인과 다음 할 일을 함께 적었다(#113, Hook 거부 메시지에 원인과 다음
+할 일 함께 안내).** 메시지는 Claude 가 먼저 읽고 개발자가 아닐 수도 있는 팀원에게 전하므로,
+"왜 막혔는지" 뒤에 "다음:" 으로 할 일을 붙였다. 설치·로그인처럼 Claude 가 못 하는 일은
+"사람이 할 일" 로 밝히고 명령을 적었다(`winget install --id astral-sh.uv -e`,
+`GitHub.cli`, `jqlang.jq`, `gh auth login`). PRD 승인이 없으면 `.github/ssot-approvers` 의
+승인자에게 Approve 를 요청하라고, 판정 불가는 네트워크·`gh auth status` 확인 뒤 재시도하고
+계속되면 `jaeheeMin/blueward-harness` 이슈로 알리라고 안내한다. "저장소 관리자에게 알리라"
+는 이 이슈 저장소로 바꿨다. 대상은 `pre-bash-git-guard.sh`, `pre_write_guard.py`,
+`mcp_source_guard.py`, `session-start-sync.sh`, `stop-deliver.sh`. 거부·허용 판정은 그대로다.
+Plugin version 0.10.11.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
