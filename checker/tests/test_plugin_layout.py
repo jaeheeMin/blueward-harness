@@ -384,6 +384,25 @@ def test_엔진_빌드_로그가_섞여도_미승인_판정은_여전히_막는�
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert "승인 없음" in reason
+    # #113(Hook 거부 메시지에 원인과 다음 할 일 함께 안내): 누구에게 무엇을 요청할지 적혀야 한다.
+    assert ".github/ssot-approvers" in reason
+    assert "Approve" in reason
+
+
+def test_git_가드의_모든_거부_메시지에_다음_할_일이_들어_있다():
+    """#113(Hook 거부 메시지에 원인과 다음 할 일 함께 안내): deny 한 줄마다 '다음:' 이
+    직접 있거나 '다음:' 을 담은 $next_* 변수를 붙여야 한다."""
+    text = (PLUGIN_ROOT / "hooks" / "pre-bash-git-guard.sh").read_text(encoding="utf-8")
+    lines = [ln for ln in text.splitlines() if re.match(r'\s*deny "', ln)]
+    assert len(lines) >= 10
+    for ln in lines:
+        assert "다음:" in ln or "$next_" in ln, f"다음 할 일이 없는 거부 메시지: {ln.strip()[:80]}"
+    # 변수 자체가 설치·로그인 명령을 담는지도 본다.
+    assert "winget install --id astral-sh.uv -e" in text
+    assert "winget install --id GitHub.cli -e" in text
+    assert "gh auth login" in text
+    assert "winget install --id jqlang.jq -e" in text
+    assert "저장소 관리자에게" not in text
 
 
 @pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")

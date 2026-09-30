@@ -35,7 +35,7 @@ add() {
 }
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
-  echo "이 디렉터리는 git 저장소가 아닙니다. harness 의 자동 동기화가 동작하지 않습니다."
+  echo "이 디렉터리는 git 저장소가 아닙니다. harness 의 자동 동기화가 동작하지 않습니다. 다음: 작업할 프로젝트 폴더(git 저장소)에서 Claude Code 를 다시 여십시오."
   exit 0
 fi
 
@@ -86,7 +86,7 @@ run_rebase() {
       # abort 실패를 성공으로 보고하면, 리베이스가 진행 중인 상태로 남아
       # .githooks/pre-commit 의 브랜치 검사가 통째로 건너뛰어지는데도
       # 그 사실이 드러나지 않는다.
-      add "$target 기준 리베이스가 충돌했고 되돌리기(git rebase --abort)도 실패했습니다. 저장소가 리베이스 진행 중 상태로 남아 있으니 직접 확인하십시오."
+      add "$target 기준 리베이스가 충돌했고 되돌리기(git rebase --abort)도 실패했습니다. 저장소가 리베이스 진행 중 상태로 남아 있습니다. 다음: git status 로 상태를 확인하고 git rebase --abort 를 직접 실행하십시오(어려우면 사람에게 도움을 요청)."
     fi
   else
     # 첫 줄만 담는다 — git 오류는 대개 첫 줄에 원인이 있고, 전체를 실으면
@@ -117,7 +117,7 @@ changed="$(git status --porcelain --untracked-files=all | grep -Ev '^.. "?((.*/)
 # 위에 또 리베이스를 걸면 실패하거나, 진행 중이던 것과 뒤섞여 저장소를 더
 # 꼬아 놓을 수 있다.
 if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ] || [ -f "$git_dir/MERGE_HEAD" ]; then
-  add "이미 리베이스나 병합이 진행 중이라 자동 동기화를 건너뜁니다. 직접 마무리하거나 /harness:sync 안내를 참고하십시오."
+  add "이미 리베이스나 병합이 진행 중이라 자동 동기화를 건너뜁니다. 다음: git status 로 상태를 확인하고 git rebase --continue(또는 --abort), git merge --abort 로 마무리한 뒤 /harness:sync 를 실행하십시오."
 elif git remote get-url origin >/dev/null 2>&1; then
   # fetch 는 작업 트리를 건드리지 않으므로 미커밋 변경이 있어도 한다. 건너뛰는
   # 것은 리베이스뿐이다 — 그래야 /harness:sync 를 부르기 전에도 원격 상태를 본다.
@@ -141,14 +141,14 @@ elif git remote get-url origin >/dev/null 2>&1; then
         run_rebase origin/main "원격 짝 브랜치가 없어 origin/main 기준으로 맞췄습니다."
       fi
     else
-      add "원격 짝 브랜치가 없고 origin/main 도 없어 자동 동기화를 건너뜁니다."
+      add "원격 짝 브랜치가 없고 origin/main 도 없어 자동 동기화를 건너뜁니다. 다음: 원격에 main 브랜치가 있는지 확인하고, 작업을 마칠 때 /harness:deliver 로 푸시하십시오."
     fi
   else
     fetch_err="$(printf '%s\n' "$fetch_output" | head -n1)"
-    add "fetch 에 실패했습니다: ${fetch_err:-원인을 알 수 없습니다}. 네트워크나 인증 상태를 확인해야 합니다."
+    add "fetch 에 실패했습니다: ${fetch_err:-원인을 알 수 없습니다}. 다음: 네트워크를 확인하고 gh auth status 로 로그인 상태를 보십시오(로그인 안 됨이면 사람이 gh auth login 실행). 확인한 뒤 /harness:sync 를 실행하십시오."
   fi
 else
-  add "원격 저장소가 연결되어 있지 않습니다. 푸시와 PR 과 이슈 관련 동작은 원격을 연결한 뒤에 가능합니다."
+  add "원격 저장소가 연결되어 있지 않습니다. 푸시와 PR 과 이슈 관련 동작은 원격을 연결한 뒤에 가능합니다. 다음: 사람이 할 일 - 프로젝트의 GitHub 저장소 주소를 확인해 git remote add origin 주소 로 연결하십시오."
 fi
 
 if [ -n "$changed" ]; then

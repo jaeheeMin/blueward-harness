@@ -95,6 +95,25 @@ _URL_MAP_PATH = Path(__file__).with_name("mcp_object_source_map.json")
 
 ALLOW = 0
 
+# 거부 메시지는 "왜 막혔는지" 와 "다음에 할 일" 을 함께 담는다(#113 Hook 거부 메시지에
+# 원인과 다음 할 일 함께 안내). `pre_write_guard.py` 의 같은 이름 문구와 맞춘다 —
+# Claude 가 스스로 못 하는 일(프로그램 설치)은 "사람이 할 일" 로 밝힌다.
+NEXT_ENGINE_FAIL = (
+    "다음: 사람이 할 일 — uv 가 없다면 PowerShell 에서 `winget install --id astral-sh.uv -e` "
+    "로 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오. 이미 설치돼 있다면 네트워크"
+    "(엔진을 처음 받을 때 필요)를 확인하고 같은 작업을 다시 시도하십시오. 계속되면 위 사유를 "
+    "붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
+)
+NEXT_RETRY = (
+    "다음: 같은 작업을 한 번 더 시도하십시오. 계속되면 위 내용을 붙여 "
+    "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일)."
+)
+NEXT_FIX_INPUT = (
+    "다음: Claude 가 이 MCP 호출의 입력을 확인해 올바른 형태로 다시 호출하십시오. 같은 "
+    "현상이 계속되면 호출 내용을 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 "
+    "알리십시오(사람이 할 일)."
+)
+
 
 def allow() -> None:
     sys.exit(ALLOW)
@@ -200,10 +219,11 @@ def _check_code(url: str, content: str, suffix: str) -> None:
                 "harness 가 공통 개발 규칙 검사 엔진을 받거나 실행하지 못해 이 MCP 쓰기를 "
                 "확인할 수 없었습니다.\n"
                 f"objectSourceUrl: {url}\n"
-                f"사유: {exc}\n\n"
-                "확인할 것: uv 가 설치되어 있는가, 네트워크가 되는가. 로컬에서 개발·테스트 "
-                "중이라면 DOC_GUARD_ENGINE 환경변수로 엔진 경로를 지정할 수 있습니다.\n"
-                "확인되지 않는 상태로 통과시키지 않습니다."
+                f"사유: {exc}\n"
+                "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                + NEXT_ENGINE_FAIL
+                + " 로컬에서 개발·테스트 중이라면 DOC_GUARD_ENGINE 환경변수로 엔진 경로를 "
+                "지정할 수 있습니다."
             )
 
     if done.returncode == 0:
@@ -215,8 +235,9 @@ def _check_code(url: str, content: str, suffix: str) -> None:
         deny(
             "공통 개발 규칙 검사기의 출력을 해석하지 못했습니다.\n"
             f"objectSourceUrl: {url}\n"
-            f"{(done.stderr or done.stdout or '').strip()[:500]}\n\n"
-            "확인되지 않는 상태로 통과시키지 않습니다."
+            f"{(done.stderr or done.stdout or '').strip()[:500]}\n"
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_RETRY
         )
 
     # 리포트의 file 은 임시 스테이징 경로다. 사람에게는 원래 objectSourceUrl 을 보여준다.
@@ -229,8 +250,8 @@ def _check_code(url: str, content: str, suffix: str) -> None:
             "(conventions/common.md).\n"
             f"objectSourceUrl: {url}\n\n"
             + format_code_violations(report)
-            + "\n\n위를 고치거나, 정말 예외라면 같은 줄이나 바로 위 줄에 주석으로 "
-              "`harness:allow CR-00N <이유>` 를 남기고 다시 쓰십시오."
+            + "\n\n다음: Claude 가 위 항목을 고쳐 다시 쓰십시오. 정말 예외라면 같은 줄이나 "
+              "바로 위 줄에 주석으로 `harness:allow CR-00N <이유>` 를 남기고 다시 쓰십시오."
         )
 
     if done.returncode == 2:
@@ -239,7 +260,10 @@ def _check_code(url: str, content: str, suffix: str) -> None:
             "공통 개발 규칙 검사기가 이 MCP 쓰기의 코드를 읽지 못했습니다.\n"
             f"objectSourceUrl: {url}\n"
             + "\n".join(r for r in reasons if r)
-            + "\n\n확인되지 않는 상태로 통과시키지 않습니다."
+            + "\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            "다음: 위 사유가 코드 내용(문법, 인코딩)의 문제라면 Claude 가 고쳐 다시 쓰십시오. "
+            "그렇지 않으면 같은 작업을 한 번 더 시도하고, 계속되면 위 내용을 붙여 "
+            "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일)."
         )
 
     # 0, 1, 2 는 checker.code_rules 가 약속한 종료코드다. 그 밖은 계약에 없다.
@@ -247,7 +271,8 @@ def _check_code(url: str, content: str, suffix: str) -> None:
         f"공통 개발 규칙 검사기가 알 수 없는 종료코드({done.returncode})로 끝나 이 MCP "
         "쓰기를 확인할 수 없었습니다.\n"
         f"objectSourceUrl: {url}\n"
-        "확인되지 않는 상태로 통과시키지 않습니다."
+        "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+        + NEXT_RETRY
     )
 
 
@@ -313,10 +338,11 @@ def _run_engine_and_get_violations(tool: str, content: str, suffix: str, context
                 f"harness 가 공통 개발 규칙 검사 엔진을 받거나 실행하지 못해 이 MCP 쓰기"
                 f"({tool})를 확인할 수 없었습니다.\n"
                 f"{context}\n"
-                f"사유: {exc}\n\n"
-                "확인할 것: uv 가 설치되어 있는가, 네트워크가 되는가. 로컬에서 개발·테스트 "
-                "중이라면 DOC_GUARD_ENGINE 환경변수로 엔진 경로를 지정할 수 있습니다.\n"
-                "확인되지 않는 상태로 통과시키지 않습니다."
+                f"사유: {exc}\n"
+                "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                + NEXT_ENGINE_FAIL
+                + " 로컬에서 개발·테스트 중이라면 DOC_GUARD_ENGINE 환경변수로 엔진 경로를 "
+                "지정할 수 있습니다."
             )
 
     if done.returncode == 0:
@@ -328,8 +354,9 @@ def _run_engine_and_get_violations(tool: str, content: str, suffix: str, context
         deny(
             "공통 개발 규칙 검사기의 출력을 해석하지 못했습니다.\n"
             f"MCP 도구: {tool}\n{context}\n"
-            f"{(done.stderr or done.stdout or '').strip()[:500]}\n\n"
-            "확인되지 않는 상태로 통과시키지 않습니다."
+            f"{(done.stderr or done.stdout or '').strip()[:500]}\n"
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_RETRY
         )
 
     if done.returncode == 2:
@@ -338,14 +365,18 @@ def _run_engine_and_get_violations(tool: str, content: str, suffix: str, context
             f"공통 개발 규칙 검사기가 이 MCP 쓰기({tool})의 코드를 읽지 못했습니다.\n"
             f"{context}\n"
             + "\n".join(r for r in reasons if r)
-            + "\n\n확인되지 않는 상태로 통과시키지 않습니다."
+            + "\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            "다음: 위 사유가 입력 내용의 문제라면 Claude 가 고쳐 다시 호출하십시오. 그렇지 "
+            "않으면 같은 작업을 한 번 더 시도하고, 계속되면 위 내용을 붙여 "
+            "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일)."
         )
 
     if done.returncode != 1:
         deny(
             f"공통 개발 규칙 검사기가 알 수 없는 종료코드({done.returncode})로 끝나 이 MCP "
             f"쓰기({tool})를 확인할 수 없었습니다.\n{context}\n"
-            "확인되지 않는 상태로 통과시키지 않습니다."
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_RETRY
         )
 
     for entry in report.get("files", []):
@@ -369,7 +400,7 @@ def _check_name(tool: str, name: str) -> None:
         "(conventions/common.md).\n"
         f"{context}\n\n"
         + format_code_violations(report)
-        + "\n\n이름을 영문으로 바꿔 다시 시도하십시오."
+        + "\n\n다음: Claude 가 이름을 영문으로 바꿔 같은 MCP 도구를 다시 호출하십시오."
     )
 
 
@@ -388,8 +419,8 @@ def _check_extract_method_execute_content(tool: str, content: str) -> None:
         "있습니다(conventions/common.md). extractMethodExecute 는 기존 코드를 옮기는 "
         "것뿐이라 CR-002(반복문 안 DB 조회)는 여기서 보지 않습니다.\n\n"
         + format_code_violations(report)
-        + "\n\n위 이름을 고치거나, 정말 예외라면 해당 코드 줄이나 바로 위 줄에 주석으로 "
-          "`harness:allow CR-001 <이유>` 를 남기고 다시 시도하십시오."
+        + "\n\n다음: Claude 가 위 이름을 고쳐 다시 시도하십시오. 정말 예외라면 해당 코드 줄이나 "
+          "바로 위 줄에 주석으로 `harness:allow CR-001 <이유>` 를 남기고 다시 시도하십시오."
     )
 
 
@@ -402,7 +433,8 @@ def _extract_name(tool: str, tool_kind: str, tool_input: dict) -> str:
         if not isinstance(name, str) or not name.strip():
             deny(
                 f"이 MCP 쓰기({tool})의 name 이 없거나 빈 문자열이거나 문자열이 아니어서 "
-                "새 이름을 확인할 수 없습니다.\n\n확인되지 않는 상태로 통과시키지 않습니다."
+                "새 이름을 확인할 수 없습니다.\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                + NEXT_FIX_INPUT
             )
         return name
 
@@ -412,15 +444,17 @@ def _extract_name(tool: str, tool_kind: str, tool_input: dict) -> str:
     if parsed is None:
         deny(
             f"이 MCP 쓰기({tool})의 {sub_field} 를 객체로도, JSON 문자열로도 해석하지 못해 "
-            "새 이름을 확인할 수 없습니다.\n\n확인되지 않는 상태로 통과시키지 않습니다."
+            "새 이름을 확인할 수 없습니다.\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_FIX_INPUT
         )
 
     name = parsed.get(key)
     if not isinstance(name, str) or not name.strip():
         deny(
             f"이 MCP 쓰기({tool})의 {sub_field}.{key} 가 없거나 빈 문자열이거나 문자열이 "
-            "아니어서 새 이름을 확인할 수 없습니다.\n\n확인되지 않는 상태로 통과시키지 "
-            "않습니다."
+            "아니어서 새 이름을 확인할 수 없습니다.\n확인되지 않는 상태로 통과시키지 "
+            "않습니다.\n\n"
+            + NEXT_FIX_INPUT
         )
     return name
 
@@ -438,14 +472,16 @@ def _handle_extract_method_execute(tool: str, tool_input: dict) -> None:
     if parsed is None:
         deny(
             f"이 MCP 쓰기({tool})의 refactoring 을 객체로도, JSON 문자열로도 해석하지 못해 "
-            "검사할 코드를 찾을 수 없습니다.\n\n확인되지 않는 상태로 통과시키지 않습니다."
+            "검사할 코드를 찾을 수 없습니다.\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_FIX_INPUT
         )
 
     affected = parsed.get("affectedObjects")
     if not isinstance(affected, list):
         deny(
             f"이 MCP 쓰기({tool})의 refactoring.affectedObjects 가 없거나 배열이 아니어서 "
-            "검사할 코드를 찾을 수 없습니다.\n\n확인되지 않는 상태로 통과시키지 않습니다."
+            "검사할 코드를 찾을 수 없습니다.\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_FIX_INPUT
         )
 
     contents: list[str] = []
@@ -466,7 +502,8 @@ def _handle_extract_method_execute(tool: str, tool_input: dict) -> None:
         deny(
             f"이 MCP 쓰기({tool})의 "
             "refactoring.affectedObjects[].textReplaceDeltas[].contentNew 에서 검사할 "
-            "코드를 하나도 찾지 못했습니다.\n\n확인되지 않는 상태로 통과시키지 않습니다."
+            "코드를 하나도 찾지 못했습니다.\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_FIX_INPUT
         )
 
     _check_extract_method_execute_content(tool, "\n".join(contents))
@@ -480,7 +517,8 @@ def _main() -> None:
         # 것을 통과로 바꾸지 않는다(CLAUDE.md 원칙 7).
         deny(
             "harness 훅이 Claude Code 가 넘긴 입력을 해석하지 못해 이 MCP 쓰기를 확인할 "
-            "수 없었습니다.\n확인되지 않는 상태로 통과시키지 않습니다."
+            "수 없었습니다.\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_RETRY
         )
 
     tool = payload.get("tool_name") or ""
@@ -499,14 +537,18 @@ def _main() -> None:
             deny(
                 "이 MCP 쓰기(setObjectSource)에 source(코드 본문)가 없거나 문자열이 아니어서 "
                 "공통 개발 규칙을 확인할 수 없습니다.\n"
-                f"objectSourceUrl: {url!r}\n\n확인되지 않는 상태로 통과시키지 않습니다."
+                f"objectSourceUrl: {url!r}\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                "다음: Claude 가 source 에 코드 본문(문자열)을 담아 setObjectSource 를 "
+                "다시 호출하십시오."
             )
 
         if not isinstance(url, str) or not url:
             deny(
                 "이 MCP 쓰기(setObjectSource)에 objectSourceUrl 이 없거나 문자열이 아니어서 "
-                "어떤 언어인지 판별할 수 없어 공통 개발 규칙을 확인할 수 없습니다.\n\n"
-                "확인되지 않는 상태로 통과시키지 않습니다."
+                "어떤 언어인지 판별할 수 없어 공통 개발 규칙을 확인할 수 없습니다.\n"
+                "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                "다음: Claude 가 objectSourceUrl 에 오브젝트의 source 경로(/sap/bc/adt/... "
+                "/source/main)를 담아 setObjectSource 를 다시 호출하십시오."
             )
 
         suffix = suffix_for_url(url)
@@ -514,10 +556,13 @@ def _main() -> None:
             deny(
                 "이 objectSourceUrl 이 알려진 ABAP/CDS 오브젝트 경로 패턴과 맞지 않아 어떤 "
                 "언어인지 판별할 수 없어 공통 개발 규칙을 확인할 수 없습니다.\n"
-                f"objectSourceUrl: {url}\n\n"
-                "이 경로가 실제로 ABAP 이나 CDS 라면 "
-                f"{_URL_MAP_PATH.name} 에 패턴을 추가하십시오({_URL_MAP_PATH}).\n"
-                "확인되지 않는 상태로 통과시키지 않습니다."
+                f"objectSourceUrl: {url}\n"
+                "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                "다음: 이 경로가 실제로 ABAP 이나 CDS 라면 "
+                f"{_URL_MAP_PATH.name} 에 패턴을 추가하십시오({_URL_MAP_PATH}). 패턴 추가는 "
+                "harness Plugin 을 고치는 일이므로 jaeheeMin/blueward-harness 저장소에 "
+                "이슈로 요청하십시오(사람이 할 일). 경로를 잘못 넣은 것이라면 Claude 가 "
+                "올바른 objectSourceUrl 로 다시 호출하십시오."
             )
 
         _check_code(url, source, suffix)
@@ -559,7 +604,8 @@ def main() -> None:
         deny(
             "harness 훅에서 예상치 못한 오류가 나 이 MCP 쓰기를 확인할 수 없었습니다.\n"
             f"사유: {type(exc).__name__}: {exc}\n"
-            "확인되지 않는 상태로 통과시키지 않습니다."
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_RETRY
         )
 
 
