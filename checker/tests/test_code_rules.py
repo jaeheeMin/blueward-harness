@@ -344,6 +344,54 @@ def test_abap_내부테이블_대상_fields_star도_괜찮다():
     assert _rules(check_source("t.abap", text), "CR-003") == []
 
 
+def test_abap_db_테이블_select_star_안의_itab_서브쿼리가_바깥_검사를_면제하지_않는다():
+    """이슈 #103: 예외는 `*` 를 품은 SELECT 의 FROM 대상만 본다."""
+    text = (
+        "SELECT * FROM ekko WHERE ebeln IN ( SELECT ebeln FROM @itab ) "
+        "INTO TABLE @DATA(lt).\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+
+
+def test_abap_db_테이블_fields_star_안의_itab_서브쿼리도_바깥은_위반():
+    text = (
+        "SELECT FROM ekko FIELDS * WHERE ebeln IN ( SELECT ebeln FROM @itab ) "
+        "INTO TABLE @DATA(lt).\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+
+
+def test_abap_내부테이블_select_star는_별칭_있어도_괜찮다():
+    text = "SELECT * FROM @lt_items AS i INTO TABLE @DATA(lt2).\n"
+    assert _rules(check_source("t.abap", text), "CR-003") == []
+
+
+def test_abap_itab_서브쿼리_안의_select_star는_괜찮다():
+    text = (
+        "SELECT ebeln FROM ekko WHERE ebeln IN ( SELECT * FROM @itab ) "
+        "INTO TABLE @DATA(lt).\n"
+    )
+    assert _rules(check_source("t.abap", text), "CR-003") == []
+
+
+def test_abap_필드_목록_바깥과_db_테이블_서브쿼리_select_star는_위반():
+    text = (
+        "SELECT ebeln FROM @itab AS i WHERE ebeln IN ( SELECT * FROM ekko ) "
+        "INTO TABLE @DATA(lt).\n"
+    )
+    hits = _rules(check_source("t.abap", text), "CR-003")
+    assert len(hits) == 1
+
+
+def test_abap_내부테이블_join_별칭_전체_필드는_괜찮고_db_테이블_별칭은_위반():
+    itab = "SELECT i~* FROM @lt_i AS i INTO TABLE @DATA(lt).\n"
+    assert _rules(check_source("t.abap", itab), "CR-003") == []
+    db = "SELECT i~* FROM ekko AS i WHERE ebeln IN ( SELECT ebeln FROM @lt ) INTO TABLE @DATA(lt2).\n"
+    assert len(_rules(check_source("t.abap", db), "CR-003")) == 1
+
+
 def test_abap_실제_db_테이블_select_star는_내부테이블_예외와_무관하게_여전히_위반():
     text = "SELECT * FROM ztable INTO TABLE lt_result.\n"
     hits = _rules(check_source("t.abap", text), "CR-003")
