@@ -1,0 +1,342 @@
+"""세션 시작 때 uv·jq·gh 를 점검하고 winget 으로 설치하는 스크립트 검사(#116).
+
+진짜 시스템은 건드리지 않는다. 가짜 winget·uv·jq·gh 를 임시 폴더에 만들고 PATH 와
+LOCALAPPDATA 를 그 안으로 돌려서 스크립트를 실행한다. winget 을 실제로 부르지 않는다.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from checker.tests.test_plugin_layout import _BASH, _HAS_BASH, PLUGIN_ROOT
+
+pytestmark = pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 스크립트를 실행해 볼 수 없다")
+
+ENSURE = PLUGIN_ROOT / "hooks" / "ensure-tools.sh"
+SESSION_START = PLUGIN_ROOT / "hooks" / "session-start-sync.sh"
+
+WINDOWS_UNAME = "MINGW64_NT-10.0"
+
+FAKE_WINGET = """#!/bin/sh
+echo "$@" >> "$FAKE_LOG"
+case "$FAKE_WINGET_MODE" in
+  fail) exit 1 ;;
+  scope_fail)
+    case "$*" in *--scope*) exit 1 ;; esac ;;
+esac
+id=""
+prev=""
+for a in "$@"; do
+  [ "$prev" = "--id" ] && id="$a"
+  prev="$a"
+done
+case "$id" in
+  astral-sh.uv) tool=uv ;;
+  jqlang.jq) tool=jq ;;
+  GitHub.cli) tool=gh ;;
+esac
+mkdir -p "$LOCALAPPDATA/Microsoft/WinGet/Links"
+echo fake > "$LOCALAPPDATA/Microsoft/WinGet/Links/$tool.exe"
+exit 0
+"""
+
+FAKE_GH = """#!/bin/sh
+if [ "$1" = "auth" ]; then
+  [ "$FAKE_GH_LOGIN" = "0" ] && exit 1
+  exit 0
+fi
+exit 0
+"""
+
+FAKE_TOOL = "#!/bin/sh\nexit 0\n"
+
+
+def _write_exec(path: Path, body: str) -> None:
+    path.write_text(body, encoding="utf-8", newline="\n")
+    path.chmod(0o755)
+
+
+_HIDDEN_TOOLS = {"uv", "uvx", "jq", "gh", "winget"}
+_posix_base: str | None = None
+
+
+def _base_path() -> list[str]:
+    """coreutils 가 있는 폴더만. 진짜 uv·jq·gh·winget 이 잡히지 않게 좁힌다.
+
+    Linux(CI 의 ubuntu-latest)는 jq·gh 가 /usr/bin 에 기본으로 깔려 있어 /usr/bin 을
+    그대로 넣으면 "도구가 없는 PC" 를 흉내 낼 수 없다. 그래서 /usr/bin 과 /bin 의
+    실행 파일을 위 도구만 빼고 임시 폴더에 링크해 그 폴더를 쓴다.
+    """
+    global _posix_base
+    if os.name == "nt":
+        usr_bin = Path(_BASH).parent.parent / "usr" / "bin"
+        return [str(usr_bin)]
+    if _posix_base is None:
+        base = Path(tempfile.mkdtemp(prefix="ensure-tools-bin-"))
+        for src_dir in ("/usr/bin", "/bin"):
+            if not os.path.isdir(src_dir):
+                continue
+            for name in os.listdir(src_dir):
+                if name in _HIDDEN_TOOLS or (base / name).exists():
+                    continue
+                src = os.path.join(src_dir, name)
+                if os.path.isfile(src) and os.access(src, os.X_OK):
+                    (base / name).symlink_to(src)
+        _posix_base = str(base)
+    return [_posix_base]
+
+
+class Env:
+    def __init__(self, tmp_path: Path):
+        self.tmp = tmp_path
+        self.bin = tmp_path / "fakebin"
+        self.bin.mkdir()
+        self.local = tmp_path / "localappdata"
+        self.local.mkdir()
+        self.data = tmp_path / "plugin-data"
+        self.log = tmp_path / "winget.log"
+        self.extra_path: list[str] = []
+
+    def add_tool(self, name: str) -> None:
+        _write_exec(self.bin / name, FAKE_GH if name == "gh" else FAKE_TOOL)
+
+    def add_winget(self) -> None:
+        _write_exec(self.bin / "winget", FAKE_WINGET)
+
+    def add_links_exe(self, name: str) -> None:
+        links = self.local / "Microsoft" / "WinGet" / "Links"
+        links.mkdir(parents=True, exist_ok=True)
+        (links / f"{name}.exe").write_text("fake", encoding="utf-8")
+
+    def winget_calls(self) -> list[str]:
+        if not self.log.exists():
+            return []
+        return self.log.read_text(encoding="utf-8").splitlines()
+
+    def run(self, script: Path = ENSURE, stdin: str = "", **overrides: str) -> str:
+        env = {
+            **os.environ,
+            "PATH": os.pathsep.join([str(self.bin), *self.extra_path, *_base_path()]),
+            "LOCALAPPDATA": str(self.local),
+            "HARNESS_PROGRAMFILES": str(self.tmp / "programfiles"),
+            # Git Bash 는 $HOME/bin 을 PATH 에 덧붙인다. 진짜 jq 가 잡히지 않게 HOME 도 비운다.
+            "HOME": str(self.tmp / "home"),
+            "CLAUDE_PLUGIN_DATA": str(self.data),
+            "CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT),
+            "HARNESS_FAKE_UNAME": WINDOWS_UNAME,
+            "FAKE_LOG": str(self.log),
+            "FAKE_WINGET_MODE": "ok",
+            "FAKE_GH_LOGIN": "1",
+        }
+        env.pop("HARNESS_NO_AUTO_INSTALL", None)
+        env.update(overrides)
+        done = subprocess.run(
+            [_BASH, str(script)],
+            input=stdin,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=60,
+        )
+        return done.stdout
+
+
+@pytest.fixture
+def env(tmp_path):
+    return Env(tmp_path)
+
+
+def _all_tools(env: Env) -> None:
+    for name in ("uv", "jq", "gh"):
+        env.add_tool(name)
+
+
+def test_다_있으면_아무것도_내지_않고_winget_도_부르지_않는다(env):
+    _all_tools(env)
+    env.add_winget()
+
+    assert env.run() == ""
+    assert env.winget_calls() == []
+
+
+def test_uv_가_없으면_winget_으로_설치하고_새로_열라고_알린다(env):
+    env.add_tool("jq")
+    env.add_tool("gh")
+    env.add_winget()
+
+    out = env.run()
+
+    calls = env.winget_calls()
+    assert len(calls) == 1
+    assert "install --id astral-sh.uv -e --silent" in calls[0]
+    assert "--accept-package-agreements" in calls[0]
+    assert "--accept-source-agreements" in calls[0]
+    assert "--disable-interactivity" in calls[0]
+    assert "--scope user" in calls[0]
+    assert "uv 가 없어 winget 으로 설치했습니다" in out
+    assert "다음: 이 세션은 새 프로그램을 아직 못 찾으니 Claude Code 를 새로 여십시오." in out
+    assert not (env.data / "tool-install-failures").exists()
+
+
+def test_user_scope_설치가_실패하면_scope_없이_다시_시도한다(env):
+    env.add_tool("jq")
+    env.add_tool("gh")
+    env.add_winget()
+
+    out = env.run(FAKE_WINGET_MODE="scope_fail")
+
+    calls = env.winget_calls()
+    assert len(calls) == 2
+    assert "--scope user" in calls[0]
+    assert "--scope" not in calls[1]
+    assert "uv 가 없어 winget 으로 설치했습니다" in out
+
+
+def test_gh_는_scope_없이_설치한다(env):
+    env.add_tool("uv")
+    env.add_tool("jq")
+    env.add_winget()
+
+    env.run()
+
+    calls = env.winget_calls()
+    assert len(calls) == 1
+    assert "--id GitHub.cli" in calls[0]
+    assert "--scope" not in calls[0]
+
+
+def test_설치가_실패하면_수동_명령을_안내하고_실패를_기록한다(env):
+    env.add_tool("jq")
+    env.add_tool("gh")
+    env.add_winget()
+
+    out = env.run(FAKE_WINGET_MODE="fail")
+
+    assert "uv 를 winget 으로 설치하지 못했습니다" in out
+    assert "다음: 사람이 할 일 - PowerShell 에서 winget install --id astral-sh.uv -e" in out
+    assert "설치했습니다" not in out
+    state = (env.data / "tool-install-failures").read_text(encoding="utf-8")
+    assert state.startswith("uv ")
+
+
+def test_24시간_안에_다시_열면_winget_을_부르지_않고_안내만_한다(env):
+    env.add_tool("jq")
+    env.add_tool("gh")
+    env.add_winget()
+    env.run(FAKE_WINGET_MODE="fail")
+    first_calls = len(env.winget_calls())
+
+    out = env.run(FAKE_WINGET_MODE="fail")
+
+    assert len(env.winget_calls()) == first_calls
+    assert "24시간 동안 다시 시도하지 않습니다" in out
+    assert "winget install --id astral-sh.uv -e" in out
+
+
+def test_24시간이_지난_실패_기록은_다시_시도한다(env):
+    env.add_tool("jq")
+    env.add_tool("gh")
+    env.add_winget()
+    env.data.mkdir()
+    (env.data / "tool-install-failures").write_text("uv 1000\n", encoding="utf-8")
+
+    out = env.run()
+
+    assert len(env.winget_calls()) == 1
+    assert "winget 으로 설치했습니다" in out
+    assert "uv 1000" not in (env.data / "tool-install-failures").read_text(encoding="utf-8")
+
+
+def test_winget_이_없으면_설치_안내만_한다(env):
+    env.add_tool("jq")
+    env.add_tool("gh")
+
+    out = env.run()
+
+    assert "uv 가 없고 winget 도 찾지 못해" in out
+    assert "winget install --id astral-sh.uv -e" in out
+    assert env.winget_calls() == []
+
+
+def test_Windows_가_아니면_설치하지_않고_brew_를_안내한다(env):
+    env.add_tool("gh")
+    env.add_winget()
+
+    out = env.run(HARNESS_FAKE_UNAME="Darwin")
+
+    assert env.winget_calls() == []
+    assert "brew install uv jq" in out
+    assert "Windows 가 아니라" in out
+
+
+def test_HARNESS_NO_AUTO_INSTALL_이면_설치하지_않는다(env):
+    env.add_tool("jq")
+    env.add_tool("gh")
+    env.add_winget()
+
+    out = env.run(HARNESS_NO_AUTO_INSTALL="1")
+
+    assert env.winget_calls() == []
+    assert "HARNESS_NO_AUTO_INSTALL=1" in out
+    assert "winget install --id astral-sh.uv -e" in out
+    assert not (env.data / "tool-install-failures").exists()
+
+
+def test_winget_링크_폴더에만_있으면_새로_열라고_알린다(env):
+    env.add_tool("jq")
+    env.add_tool("gh")
+    env.add_winget()
+    env.add_links_exe("uv")
+
+    out = env.run()
+
+    assert env.winget_calls() == []
+    assert "uv 는 설치돼 있지만 이 세션이 아직 못 찾습니다. 다음: Claude Code 를 새로 여십시오." in out
+
+
+def test_winget_패키지_폴더에만_있어도_찾는다(env):
+    env.add_tool("jq")
+    env.add_tool("gh")
+    env.add_winget()
+    pkg = env.local / "Microsoft" / "WinGet" / "Packages" / "astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe"
+    pkg.mkdir(parents=True)
+    (pkg / "uv.exe").write_text("fake", encoding="utf-8")
+
+    out = env.run()
+
+    assert env.winget_calls() == []
+    assert "uv 는 설치돼 있지만 이 세션이 아직 못 찾습니다" in out
+
+
+def test_gh_가_있어도_로그인이_안_돼_있으면_로그인을_안내한다(env):
+    _all_tools(env)
+    env.add_winget()
+
+    out = env.run(FAKE_GH_LOGIN="0")
+
+    assert env.winget_calls() == []
+    assert "다음: 사람이 할 일 - gh auth login 을 실행해 GitHub 에 로그인하십시오." in out
+
+
+def test_세션_시작_요약에_설치_결과가_실린다(env):
+    env.add_tool("jq")
+    env.add_tool("gh")
+    env.add_winget()
+    git = shutil.which("git")
+    assert git
+    env.extra_path.append(str(Path(git).parent))
+    repo = env.tmp / "project"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+    out = env.run(SESSION_START, stdin="{}", CLAUDE_PROJECT_DIR=str(repo))
+
+    assert "uv 가 없어 winget 으로 설치했습니다" in out
+    assert "현재 브랜치:" in out
