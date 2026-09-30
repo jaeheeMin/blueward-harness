@@ -131,62 +131,26 @@ sub="$(git_subcommand "$cmd")"
 # 불가(네트워크 없음, gh 없음, uvx 없음, 예상 못한 종료코드)는 통과가
 # 아니라 거부로 답한다(CLAUDE.md 원칙 7) — merge 를 막는 것이 이 훅의
 # 목적이므로, 모른다는 것을 통과로 답하면 그 순간 보호가 사라진다.
-gh_is_pr_merge() {
-  set -f
-  stage=0  # 0: gh 를 못 찾음, 1: gh 뒤 pr 을 기다림, 2: pr 뒤 merge 를 기다림
-  for tok in $1; do
-    tok="${tok#\"}"; tok="${tok%\"}"
-    tok="${tok#\'}"; tok="${tok%\'}"
-    if [ "$stage" -eq 0 ]; then
-      base="${tok##*/}"
-      base="${base##*\\}"
-      base="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
-      case "$base" in *.exe) base="${base%.exe}" ;; esac
-      case "$base" in gh) stage=1 ;; esac
-      continue
-    fi
-    case "$tok" in
-      -*) continue ;;
-    esac
-    if [ "$stage" -eq 1 ]; then
-      if [ "$tok" = "pr" ]; then stage=2; else set +f; return 1; fi
-      continue
-    fi
-    set +f
-    [ "$tok" = "merge" ]
-    return $?
-  done
-  set +f
-  return 1
-}
+#
+# 명령에서 실제 `gh pr merge` 호출을 골라내는 일은 셸이 아니라 엔진의
+# checker.merge_command 가 한다(#101). 예전에는 명령 전체를 공백으로 쪼개
+# 훑어서, `;` 로 묶인 두 번째 merge 의 `-R` 이 첫 번째 PR 에 적용되고 이슈
+# 본문(--body, heredoc)에 든 "gh pr merge" 글자도 merge 로 읽혔다. 이제는
+# 따옴표·heredoc 본문을 명령으로 보지 않고 `;`·`&&`·`||`·`|`·개행으로 나눈
+# 조각마다 자기 PR 번호와 -R 을 짝짓는다. 확실히 나누지 못하면(따옴표 불균형
+# 등) 막고 "merge 는 한 명령에 하나씩" 이라고 안내한다.
+#
+# 한계: 변수로 감춘 명령(`x=merge; gh pr $x`)이나 큰따옴표 안의 `$(...)` 치환은
+# 알아보지 못한다. 그 앞의 첫 관문인 아래 `pr merge` 부분 문자열 검사도
+# 마찬가지다. 최종 방어선은 Actions 의 doc-guard 검사와 GitHub 화면이다.
+engine="${DOC_GUARD_ENGINE:-git+https://github.com/jaeheeMin/blueward-harness@main}"
 
-if gh_is_pr_merge "$cmd"; then
-  repo=""
-  prref=""
-  after_merge=0
-  expect=""
-  set -f
-  for tok in $cmd; do
-    tok="${tok#\"}"; tok="${tok%\"}"
-    tok="${tok#\'}"; tok="${tok%\'}"
-    if [ -n "$expect" ]; then
-      case "$expect" in repo) repo="$tok" ;; esac
-      expect=""
-      continue
-    fi
-    if [ "$after_merge" -eq 0 ]; then
-      case "$tok" in merge) after_merge=1 ;; esac
-      continue
-    fi
-    case "$tok" in
-      -R|--repo) expect=repo ;;
-      --repo=*) repo="${tok#--repo=}" ;;
-      -R=*) repo="${tok#-R=}" ;;
-      -*) : ;;
-      *) [ -z "$prref" ] && prref="$tok" ;;
-    esac
-  done
-  set +f
+# merge 한 건을 검사한다. $1=저장소(-R, 없으면 빈 값), $2=PR 지정(번호·URL·브랜치,
+# 없으면 빈 값). deny() 는 exit 하므로 여러 건 중 하나라도 걸리면 명령 전체가
+# 거부된다.
+check_one_merge() {
+  repo="$1"
+  prref="$2"
 
   # URL 형태(.../pull/123)면 번호와 저장소를 URL 에서 바로 뽑는다.
   case "$prref" in
@@ -232,7 +196,6 @@ if gh_is_pr_merge "$cmd"; then
     deny "gh pr merge 의 대상 PR 을 확인하지 못해 PRD 승인 여부를 판정할 수 없습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다."
   fi
 
-  engine="${DOC_GUARD_ENGINE:-git+https://github.com/jaeheeMin/blueward-harness@main}"
   if ! command -v uvx >/dev/null 2>&1; then
     deny "uvx 가 없어 PRD 승인 여부를 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다."
   fi
@@ -331,7 +294,50 @@ $hm_err"
     hm_detail="$(printf '%s' "$hm_detail_raw" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
     deny "PR #$pr_number 가 사람이 merge 해야 하는 경로를 바꿨는지 확인하지 못해 merge 를 막습니다(종료코드 $hm_rc). 확인되지 않는 상태로 통과시키지 않습니다. 자세히: $hm_detail"
   fi
-fi
+}
+
+# 첫 관문: `pr merge` 글자가 명령에 없으면 merge 일 수 없으므로 엔진을 부르지
+# 않는다. 일반 명령마다 uvx 를 띄우면 느려서 사람들이 훅을 끄게 된다.
+case "$cmd" in
+  *"pr merge"*)
+    if ! command -v uvx >/dev/null 2>&1; then
+      deny "uvx 가 없어 이 명령이 gh pr merge 인지, PRD 승인이 있는지 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다."
+    fi
+    mc_err_file="$(mktemp 2>/dev/null)" || {
+      deny "임시 파일을 만들지 못해 이 명령이 gh pr merge 인지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다."
+    }
+    set +e
+    mc_out="$(printf '%s' "$cmd" | uvx --from "$engine" python -m checker.merge_command 2>"$mc_err_file")"
+    mc_rc=$?
+    set -e
+    mc_err="$(cat "$mc_err_file" 2>/dev/null)" || mc_err=""
+    rm -f "$mc_err_file"
+
+    if ! printf '%s' "$mc_out" | jq -e . >/dev/null 2>&1; then
+      mc_detail="$(printf '%s\n%s' "$mc_out" "$mc_err" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
+      deny "이 명령이 gh pr merge 인지 확인하지 못해 막습니다(종료코드 $mc_rc). 확인되지 않는 상태로 통과시키지 않습니다. 자세히: $mc_detail"
+    fi
+    if [ "$mc_rc" -eq 2 ] && printf '%s' "$mc_out" | jq -e 'has("error")' >/dev/null 2>&1; then
+      deny "명령을 셸 문법대로 믿을 만하게 나누지 못해 gh pr merge 가 있는지 확인할 수 없습니다. merge 는 한 명령에 하나씩, 다른 명령과 묶지 말고 실행하십시오."
+    fi
+    if [ "$mc_rc" -ne 0 ] || ! printf '%s' "$mc_out" | jq -e '.merges | type == "array"' >/dev/null 2>&1; then
+      deny "이 명령이 gh pr merge 인지 확인하지 못해 막습니다(종료코드 $mc_rc). 확인되지 않는 상태로 통과시키지 않습니다. merge 는 한 명령에 하나씩 실행하십시오."
+    fi
+
+    # 한 줄에 한 건씩 "저장소 PR지정". 윈도우 jq 의 CRLF 는 벗긴다. 공백 구분
+    # read 는 빈 앞칸을 삼켜 저장소 없음과 PR 지정 없음을 헷갈리므로, 빈 값은
+    # "-" 자리표시자로 받아 되돌린다(저장소·PR 지정에 "-" 만 오는 일은 없다).
+    mc_lines="$(printf '%s' "$mc_out" | jq -r '.merges[] | [((.repo // "") | if . == "" then "-" else . end), ((.prref // "") | if . == "" then "-" else . end)] | join(" ")' | tr -d '\r')"
+    while IFS=' ' read -r mc_repo mc_prref; do
+      [ -z "$mc_repo" ] && continue
+      [ "$mc_repo" = "-" ] && mc_repo=""
+      [ "$mc_prref" = "-" ] && mc_prref=""
+      check_one_merge "$mc_repo" "$mc_prref"
+    done <<EOF
+$mc_lines
+EOF
+    ;;
+esac
 
 # 1) 되돌릴 수 없는 강제 푸시는 어떤 경우에도 거부한다. 선언 접두어보다 먼저
 #    검사하는 이유는, 접두어가 이 동작까지 열어 주는 문이 되지 않게 하기
