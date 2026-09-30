@@ -25,6 +25,11 @@ PR 은 작성자 본인이 아닌 사람이 한 번 이상 읽은 뒤에 병합�
 4. **병합 방식은 squash 다(`gh pr merge --squash`).** 병합한 뒤에는 PR
    링크를 사용자에게 보고한다.
 
+`.github/human-merge-paths` 에 적힌 경로(이 저장소는 `plugins/`, `checker/`,
+`.github/`)를 바꾼 PR 은 훅이 강제한다. Claude 의 `gh pr merge` 는 거부되고,
+사람이 GitHub 화면의 Merge 버튼으로 병합한다. PR 이 열리거나 병합되면
+이슈와 Teams 로 소유자에게 알린다(#104).
+
 조건 중 하나라도 애매하면 이 예외를 적용하지 않고 사람에게 맡긴다.
 
 이 예외를 두는 이유는, 틀려도 동작에 영향이 없고 되돌리기 쉬운 문서만

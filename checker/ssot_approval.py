@@ -10,7 +10,15 @@ merge 하는 것을 막을 방법이 없으므로, 이 모듈은 "막는다" 대
 - 같은 워크플로의 `after-merge` job — main 에 승인 없이 들어온 것을 잡아 이슈를 연다.
 - `plugins/harness/hooks/pre-bash-git-guard.sh` — `gh pr merge` 를 거부한다.
 
-**판정은 순수 함수(`touches_ssot`, `load_approvers`, `is_approved`)에 있고,
+같은 방식으로 "사람이 직접 merge 해야 하는 경로(`.github/human-merge-paths`)를
+바꾼 PR 인가" 도 판정한다(#104). Claude 세션은 소유자 계정으로 동작해 GitHub 가
+사람과 구분하지 못하므로, 훅(`check-human-merge` 로 `gh pr merge` 거부)과
+`.github/workflows/human-merge-alert.yml`(소유자에게 알림) 두 곳이 부른다.
+목록은 PR 이 아니라 **base 브랜치**에서 읽는다 — PR 이 자기 보호를 스스로
+지울 수 없게 하기 위해서다.
+
+**판정은 순수 함수(`touches_ssot`, `load_approvers`, `is_approved`,
+`load_human_merge_paths`, `human_merge_hits`)에 있고,
 GitHub 에서 무엇을 읽어와야 하는지는 `GhClient` 와 `decide_*` 함수에 있다.**
 셋을 가르는 이유는 순수 함수는 `gh` 없이도 테스트할 수 있어야 하고, `gh` 를
 부르는 부분은 네트워크 없이 단위 테스트할 수 없기 때문이다.
@@ -40,6 +48,7 @@ SSOT_PREFIX = "docs/ssot/"
 
 EXIT_OK = 0
 EXIT_NOT_APPROVED = 1
+EXIT_HUMAN_REQUIRED = 1  # check-human-merge 의 "사람이 merge 해야 한다". 값은 위와 같다.
 EXIT_UNKNOWN = 2
 
 # 상태를 바꾸는 리뷰만 "최신 상태" 갱신에 참여한다. COMMENTED 는 리뷰가 남긴
@@ -76,6 +85,30 @@ def load_approvers(text: str | None) -> set[str]:
         if login:
             approvers.add(login)
     return approvers
+
+
+def load_human_merge_paths(text: str | None) -> list[str]:
+    """`.github/human-merge-paths` 를 읽는다.
+
+    한 줄에 경로 접두어 하나, `#` 뒤는 주석. 비어 있으면 빈 목록이고, 그것은
+    "제한 없음" 이다.
+    """
+    if not text:
+        return []
+    prefixes: list[str] = []
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        prefix = _normalize(line)
+        if prefix:
+            prefixes.append(prefix)
+    return prefixes
+
+
+def human_merge_hits(files: list[str], prefixes: list[str]) -> list[str]:
+    """바뀐 파일 중 보호 접두어 아래에 있는 것을 순서대로 돌려준다."""
+    return [f for f in files if any(_normalize(f).startswith(p) for p in prefixes)]
 
 
 def is_approved(author: str, reviews: list[dict], approvers: set[str]) -> tuple[bool, str]:
@@ -205,6 +238,18 @@ def fetch_approvers(client: GhClient, repo: str, ref: str) -> set[str]:
     return load_approvers(text)
 
 
+def fetch_human_merge_paths(client: GhClient, repo: str, ref: str) -> list[str]:
+    data = client.get_json_or_none_404(f"repos/{repo}/contents/.github/human-merge-paths?ref={ref}")
+    if not data:
+        return []
+    content = data.get("content", "") or ""
+    try:
+        text = base64.b64decode(content).decode("utf-8", errors="replace")
+    except (ValueError, TypeError):
+        text = ""
+    return load_human_merge_paths(text)
+
+
 def fetch_commit_associated_prs(client: GhClient, repo: str, sha: str) -> list[dict]:
     return client.get_json(f"repos/{repo}/commits/{sha}/pulls") or []
 
@@ -228,6 +273,17 @@ def decide_pr(client: GhClient, repo: str, pr: int) -> dict:
     approvers = fetch_approvers(client, repo, base_ref)
     approved, reason = is_approved(author, reviews, approvers)
     return {"touches_ssot": True, "approved": approved, "reason": reason}
+
+
+def decide_human_merge(client: GhClient, repo: str, pr: int) -> dict:
+    """PR 이 사람이 직접 merge 해야 하는 경로를 바꿨는지 판정한다(#104)."""
+    info = fetch_pr_info(client, repo, pr)
+    base_ref = (info.get("base") or {}).get("ref") or "main"
+    prefixes = fetch_human_merge_paths(client, repo, base_ref)
+    if not prefixes:
+        return {"requires_human": False, "paths": [], "pr": pr, "repo": repo}
+    hits = human_merge_hits(fetch_pr_files(client, repo, pr), prefixes)
+    return {"requires_human": bool(hits), "paths": hits, "pr": pr, "repo": repo}
 
 
 def decide_commit(client: GhClient, repo: str, sha: str) -> dict:
@@ -286,6 +342,19 @@ def cmd_check_pr(args: argparse.Namespace) -> int:
     return EXIT_NOT_APPROVED
 
 
+def cmd_check_human_merge(args: argparse.Namespace) -> int:
+    client = GhClient()
+    try:
+        result = decide_human_merge(client, args.repo, args.pr)
+    except GhError as exc:
+        # 모르는 것을 "사람 확인 불필요" 로 답하지 않는다(원칙 7).
+        _print({"requires_human": None, "paths": [], "reason": f"판정 불가: {exc}"})
+        return EXIT_UNKNOWN
+
+    _print(result)
+    return EXIT_HUMAN_REQUIRED if result["requires_human"] else EXIT_OK
+
+
 def cmd_check_commit(args: argparse.Namespace) -> int:
     client = GhClient()
     try:
@@ -316,6 +385,13 @@ def build_parser() -> argparse.ArgumentParser:
     check_commit.add_argument("--repo", required=True, help="owner/repo")
     check_commit.add_argument("--sha", required=True, help="커밋 SHA")
     check_commit.set_defaults(func=cmd_check_commit)
+
+    check_human = sub.add_parser(
+        "check-human-merge", help="PR 이 사람이 직접 merge 해야 하는 경로를 바꿨는지 판정한다"
+    )
+    check_human.add_argument("--repo", required=True, help="owner/repo")
+    check_human.add_argument("--pr", required=True, type=int, help="PR 번호")
+    check_human.set_defaults(func=cmd_check_human_merge)
 
     return parser
 

@@ -1,0 +1,166 @@
+# 사람이 직접 merge 해야 하는 경로를 바꾼 PR 을 소유자에게 알린다(#104).
+#
+# Claude 세션은 소유자의 GitHub 계정으로 동작해 GitHub 가 사람과 구분하지 못한다.
+# 그래서 훅(`pre-bash-git-guard.sh`)이 Claude 의 `gh pr merge` 를 거부하고, 사람은
+# GitHub 화면의 Merge 버튼으로 병합한다. 이 워크플로는 그 사람이 PR 이 열린 것을
+# 놓치지 않게 하고, 병합됐다는 기록을 남기는 쪽이다. 보호 경로는 데이터
+# (`.github/human-merge-paths`)이고 판정은 `checker.ssot_approval check-human-merge`
+# 가 한다 — 훅과 같은 코드라 "보호 경로" 의 뜻이 갈라지지 않는다.
+#
+# `pull_request_target` 을 쓰는 이유: 알림 워크플로 자체를 PR 이 바꿔 자기 알림을
+# 끄지 못하게, 항상 base 브랜치의 워크플로와 목록을 쓰기 위해서다. 그 대가로 이
+# 이벤트는 쓰기 토큰으로 돌므로 PR head 코드는 절대 checkout 하거나 실행하지
+# 않는다(기본 checkout 은 base). 목록도 같은 이유로 base 에서 읽는다.
+#
+# 판정 불가(gh api 오류 등)는 통과도 알림도 아니다(CLAUDE.md 원칙 7). 종료코드 2
+# 면 job 을 실패시켜 "검사를 못 했다" 를 드러낸다.
+#
+# Teams 알림은 선택이다. 웹훅(Power Automate "Teams 웹후크 요청을 받은 경우" →
+# Flow 봇 "채팅 또는 채널에 카드 게시")은 소유자가 따로 만들어야 하므로, secret
+# `TEAMS_PLUGIN_ALERT_WEBHOOK` 이 비어 있으면 알림만 건너뛰고 오류로 보지 않는다.
+# GitHub 이슈가 먼저 만들어지므로 Teams 전송이 실패해도 기록은 남는다.
+
+name: human-merge-alert
+
+on:
+  pull_request_target:
+    types: [opened, reopened, closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  alert:
+    # 닫힘은 병합된 경우에만 본다. 그냥 닫힌 PR 은 알릴 것이 없다.
+    if: github.event.action != 'closed' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      # pull_request_target 의 기본 checkout 은 base 다. head 를 받지 않는다.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: 보호 경로를 바꿨는지 판정
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          uv run python -m checker.ssot_approval check-human-merge \
+            --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" \
+            > result.json 2> error.txt
+          code=$?
+          set -e
+          echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+          cat error.txt >&2 || true
+          cat result.json || true
+
+      - name: 판정 불능이면 실패
+        if: steps.decide.outputs.exit-code != '0' && steps.decide.outputs.exit-code != '1'
+        shell: bash
+        env:
+          CODE: ${{ steps.decide.outputs.exit-code }}
+        run: |
+          echo "::error title=사람 merge 경로 판정 불능::확인하지 못했다(종료코드 $CODE). 통과로 보지 않는다."
+          exit 1
+
+      - name: GitHub 이슈로 알리기
+        if: steps.decide.outputs.exit-code == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+          ACTION: ${{ github.event.action }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          prefix="사람 확인 필요: PR #${PR_NUMBER} "
+          paths="$(jq -r '.paths | map("- `" + . + "`") | join("\n")' result.json)"
+
+          if [ "$ACTION" = "closed" ]; then
+            # 병합됐다. 열려 있는 알림 이슈가 있으면 기록을 남기고 닫는다.
+            found="$(gh issue list --state open --limit 100 --json number,title \
+              | jq -r --arg p "$prefix" '.[] | select(.title | startswith($p)) | .number' | head -n1)"
+            if [ -n "$found" ]; then
+              printf '병합됨 by %s\n\n%s\n' "$MERGED_BY" "$PR_URL" > comment.md
+              gh issue comment "$found" --body-file comment.md
+              gh issue close "$found"
+              exit 0
+            fi
+            title="${prefix}이(가) 병합됨 (${PR_TITLE})"
+            {
+              printf '알림 이슈 없이 병합된 PR 이다. 병합한 사람: %s\n\n' "$MERGED_BY"
+              printf -- '- PR: %s\n- 작성자: %s\n\n바뀐 보호 경로:\n%s\n' "$PR_URL" "$PR_AUTHOR" "$paths"
+            } > body.md
+          else
+            title="${prefix}이 Plugin·엔진 경로를 바꿈 (${PR_TITLE})"
+            {
+              printf -- '- PR: %s\n- 작성자: %s\n\n바뀐 보호 경로:\n%s\n\n' "$PR_URL" "$PR_AUTHOR" "$paths"
+              printf 'Claude 는 이 PR 을 merge 할 수 없다(훅이 거부한다). GitHub 화면의 Merge 버튼으로 사람이 직접 병합해야 한다.\n'
+            } > body.md
+          fi
+
+          gh issue create --title "$title" --body-file body.md \
+            --label "type:chore" --assignee "$OWNER"
+
+      - name: Teams 로 알리기
+        if: steps.decide.outputs.exit-code == '1'
+        shell: bash
+        env:
+          WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+          ACTION: ${{ github.event.action }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::notice title=Teams 알림 건너뜀::TEAMS_PLUGIN_ALERT_WEBHOOK 이 비어 있다."
+            exit 0
+          fi
+
+          paths="$(jq -r '.paths | join(", ")' result.json)"
+          if [ "$ACTION" = "closed" ]; then
+            heading="PR #${PR_NUMBER} 병합됨 (병합한 사람: ${MERGED_BY})"
+          else
+            heading="사람 확인 필요: PR #${PR_NUMBER}"
+          fi
+          details="${PR_TITLE} — 작성자 ${PR_AUTHOR}. 바뀐 보호 경로: ${paths}"
+          if [ "$ACTION" != "closed" ]; then
+            details="${details}. Claude 는 merge 할 수 없으니 GitHub 화면에서 직접 병합하세요."
+          fi
+
+          jq -n --arg heading "$heading" --arg details "$details" --arg url "$PR_URL" '{
+            type: "message",
+            attachments: [{
+              contentType: "application/vnd.microsoft.card.adaptive",
+              contentUrl: null,
+              content: {
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                type: "AdaptiveCard",
+                version: "1.4",
+                body: [
+                  {type: "TextBlock", text: $heading, weight: "Bolder", size: "Medium", wrap: true},
+                  {type: "TextBlock", text: $details, wrap: true}
+                ],
+                actions: [{type: "Action.OpenUrl", title: "PR 열기", url: $url}]
+              }
+            }]
+          }' > payload.json
+
+          # 웹훅 URL 자체가 비밀이므로 출력하지 않는다. 2xx 가 아니면 실패시켜
+          # 눈에 띄게 한다(이슈는 앞 단계에서 이미 만들어졌다).
+          curl -sS --fail-with-body -X POST -H "Content-Type: application/json" \
+            --data @payload.json "$WEBHOOK" > /dev/null
