@@ -741,7 +741,10 @@ def _scan_js_cr002(masked: str) -> list[tuple[str, int, str]]:
 # FROM 대상이 호스트 표현식(`FROM @itab`)이면 예외다(#91). 이미 메모리에 있는 내부
 # 테이블을 다시 참조하는 것이라 DB 조회가 아니고, 이 규칙이 막으려는 이유(DB 컬럼
 # 낭비)에 해당하지 않는다. CR-002 가 같은 판정(`from_itab`, `_scan_abap_cr002`)으로
-# 내부 테이블 대상 SELECT 를 반복문에서 뺀 것(#83/#84)과 같은 이유다.
+# 내부 테이블 대상 SELECT 를 반복문에서 뺀 것(#83/#84)과 같은 이유다. 이 예외는 `*` 를
+# 품은 SELECT 하나의 FROM 대상만 보고 판정한다(#103) — statement 전체에 `FROM @` 가
+# 있는지로 보면 DB 테이블 SELECT * 안의 `FROM @itab` 서브쿼리 때문에 바깥 SELECT * 까지
+# 검사에서 빠진다.
 
 _ABAP_CR003_STAR_FROM_RE = re.compile(
     r"\bSELECT\s+(?:SINGLE\s+)?(?:DISTINCT\s+)?\*\s+FROM\b", re.IGNORECASE,
@@ -749,27 +752,51 @@ _ABAP_CR003_STAR_FROM_RE = re.compile(
 _ABAP_CR003_FIELDS_STAR_RE = re.compile(r"\bFIELDS\s+\*(?=\s|,|\)|\.|$)", re.IGNORECASE)
 _ABAP_CR003_ALIAS_STAR_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*~\*")
 _ABAP_FROM_ITAB_RE = re.compile(r"\bFROM\s+@", re.IGNORECASE)
+_ABAP_CR003_SELECT_RE = re.compile(r"\bSELECT\b", re.IGNORECASE)
+_ABAP_CR003_FROM_RE = re.compile(r"\bFROM\b", re.IGNORECASE)
+
+
+def _abap_cr003_from_is_itab(segment: str, pos: int) -> bool:
+    """`pos` 에 있는 `*` 를 품은 SELECT 의 FROM 대상이 내부 테이블(`@...`)인가(#103).
+
+    statement 전체가 아니라 그 `*` 가 속한 SELECT 하나의 FROM 대상만 본다. `pos` 앞의
+    가장 가까운 `SELECT` 가 그 `*` 의 SELECT 이고(서브쿼리면 안쪽 SELECT), 그 뒤 첫
+    `FROM` 이 대상이다. 그래서 DB 테이블 SELECT * 안에 `FROM @itab` 서브쿼리가 있어도
+    바깥 SELECT 는 예외가 되지 않고, `FROM @itab` 서브쿼리 안의 SELECT * 는 통과한다.
+    """
+    selects = [m for m in _ABAP_CR003_SELECT_RE.finditer(segment, 0, pos)]
+    if not selects:
+        return False
+    from_m = _ABAP_CR003_FROM_RE.search(segment, selects[-1].end())
+    if not from_m:
+        return False
+    return bool(_ABAP_FROM_ITAB_RE.match(segment, from_m.start()))
 
 
 def _scan_abap_cr003(masked: str) -> list[tuple[str, int, str]]:
     findings: list[tuple[str, int, str]] = []
     for start, end in _abap_statements(masked):
         segment = masked[start:end]
-        if not re.search(r"\bSELECT\b", segment, re.IGNORECASE):
-            continue
-        if _ABAP_FROM_ITAB_RE.search(segment):
+        if not _ABAP_CR003_SELECT_RE.search(segment):
             continue
         for m in _ABAP_CR003_STAR_FROM_RE.finditer(segment):
+            # 옛 문법은 `*` 바로 뒤가 FROM 이라 그 FROM 대상만 본다.
+            if _ABAP_FROM_ITAB_RE.match(segment, m.end() - len("FROM")):
+                continue
             findings.append((
                 "CR-003", start + m.start(),
                 "SELECT * 로 전체 필드를 조회한다. 필요한 필드만 나열한다.",
             ))
         for m in _ABAP_CR003_FIELDS_STAR_RE.finditer(segment):
+            if _abap_cr003_from_is_itab(segment, m.start()):
+                continue
             findings.append((
                 "CR-003", start + m.start(),
                 "SELECT ... FIELDS * 로 전체 필드를 조회한다. 필요한 필드만 나열한다.",
             ))
         for m in _ABAP_CR003_ALIAS_STAR_RE.finditer(segment):
+            if _abap_cr003_from_is_itab(segment, m.start()):
+                continue
             findings.append((
                 "CR-003", start + m.start(),
                 f"조인에서 '{m.group()}' 로 별칭의 전체 필드를 조회한다. 필요한 필드만 나열한다.",

@@ -319,6 +319,14 @@ PowerShell here-string 본문을 뺀 실제 `gh pr merge` 호출을 `{repo, prre
 명령이나 큰따옴표 안의 `$(...)` 는 여전히 알아보지 못한다. 저장소는 `-R`/`--repo`
 에서만 뽑고 URL 의 owner/name 은 훅이 prref 에서 뽑는다.
 
+**CR-003 내부 테이블 예외를 `*` 가 속한 SELECT 하나로 좁혔다(#103).** #91 의 예외는
+statement 전체에 `FROM @` 가 있으면 건너뛰어서, `SELECT * FROM ekko WHERE ebeln IN
+( SELECT ebeln FROM @itab )` 처럼 DB 테이블 SELECT * 안에 내부 테이블 서브쿼리가 있으면
+바깥 SELECT * 까지 놓쳤다. 이제 `SELECT * FROM` 은 그 FROM 바로 뒤가 `@` 인지, `FIELDS *`·
+`alias~*` 는 `_abap_cr003_from_is_itab` 로 앞의 가장 가까운 SELECT 의 첫 FROM 대상을 본다.
+서브쿼리 안의 SELECT * 는 따로 판정된다(`@itab` 이면 통과, DB 테이블이면 위반). public-cloud
+`src/` 의 ABAP 26개에는 새로 잡히는 것이 없었다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
