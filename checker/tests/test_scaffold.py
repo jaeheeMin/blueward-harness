@@ -61,6 +61,8 @@ EXPECTED_FILES = {
     ".github/workflows/doc-guard.yml",
     ".github/workflows/ssot-approval.yml",
     ".github/ssot-approvers",
+    ".github/risk-gate.yaml",
+    ".github/workflows/risk-gate.yml",
     ".claude/settings.json",
 }
 
@@ -111,6 +113,26 @@ def test_승인자를_주면_ssot_approvers_파일에_한_줄씩_적는다(tmp_p
     assert "alice" in text
     assert "@bob" in text
     assert "{{" not in text
+
+
+def test_위험도_게이트_기준_파일과_워크플로를_만든다(tmp_path: Path):
+    """#102: 새 Project Repository 에 위험도 게이트가 기본으로 들어간다."""
+    from checker.risk_gate import DEFAULT_CONFIG, OWN_CHECK_NAME, load_config
+
+    scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    # 기준 파일은 엔진이 그대로 읽히고, 값은 엔진 기본값과 같다(스켈레톤과 엔진이 어긋나지 않게).
+    text = (tmp_path / ".github" / "risk-gate.yaml").read_text(encoding="utf-8")
+    assert "{{" not in text
+    assert load_config(text) == DEFAULT_CONFIG
+
+    # 호출 워크플로의 job id 는 게이트가 자기 check run 을 알아보는 이름과 같아야 교착이 없다.
+    workflow = (tmp_path / ".github" / "workflows" / "risk-gate.yml").read_text(encoding="utf-8")
+    assert f"\n  {OWN_CHECK_NAME}:\n    uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@main" in workflow
+    for trigger in ("pull_request:", "pull_request_review:", "push:"):
+        assert trigger in workflow
+    for permission in ("contents: read", "pull-requests: write", "issues: write", "checks: read", "statuses: read"):
+        assert permission in workflow
 
 
 def test_승인자를_안_주면_ssot_approvers_는_주석만_남는다(tmp_path: Path):

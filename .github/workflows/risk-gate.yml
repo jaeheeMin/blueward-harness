@@ -1,0 +1,243 @@
+# Project Repository 가 가져다 쓰는 재사용 워크플로(#102).
+#
+# PR 의 위험도(크기, 위험 경로, 비밀값, 다른 검사 결과)를 판정해, 위험한 PR 에만 사람의
+# 승인을 요구한다. 위험하지 않은 PR 은 승인 없이 병합할 수 있다. 기준은 Project Repository 의
+# `.github/risk-gate.yaml`(base 브랜치에서 읽는다)이고, 그 파일이 없으면 게이트는 꺼져 있어
+# 이 워크플로는 아무것도 막지 않는다. 판정 로직(`checker.risk_gate`)은 Claude 병합 Hook 과
+# 같은 코드다.
+#
+#   check         PR 이 열리거나 새 커밋·리뷰가 생길 때마다 판정한다. 위험하고 승인이 없으면
+#                 job 을 실패시키고, 이유와 다음 할 일을 job 요약과 PR 코멘트(하나를 갱신)로
+#                 남긴다. 사유가 "다른 검사가 아직 진행 중" 뿐이면 그 검사가 끝날 때까지
+#                 최대 10분 기다렸다가 판정한다 — 검사 순서 때문에 헛되이 빨간불이 되지
+#                 않게 하기 위해서다. 게이트 자신과 ssot-approval·alert 는 기다리지 않는다
+#                 (서로를 기다리는 교착 방지). 무료 요금제는 빨간불이어도 Merge 버튼을 잠그지
+#                 못하므로 이 검사는 막는 것이 아니라 드러내는 것이고, 막는 것은 Hook 이다.
+#   after-merge   main 에 push 될 때마다 위험한 변경이 승인 없이 들어왔는지 다시 보고, 그렇다면
+#                 소유자에게 배정한 이슈를 연다(제목이 같은 열린 이슈가 있으면 만들지 않는다).
+#
+# 판정 불가(종료코드 2: 네트워크·권한 오류, 설정 파일 오류 등)는 통과도 위반도 아니다(CLAUDE.md
+# 원칙 7). 이 워크플로도 실패로 답하고, 그것이 "PR 이 위험하다" 가 아니라 "검사를 못 했다" 라고
+# 분명히 밝힌다.
+#
+# 부르는 쪽은 아래 권한을 명시해야 한다(재사용 워크플로는 호출한 쪽의 권한을 넘지 못한다).
+# `checks`·`statuses` 는 다른 검사의 결과를 읽는 데 쓴다.
+#
+#   jobs:
+#     risk-gate:          # job id 는 반드시 risk-gate — 게이트가 자기 check run 을 알아보는 이름이다.
+#       uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@main
+#       permissions:
+#         contents: read
+#         pull-requests: write
+#         issues: write
+#         checks: read
+#         statuses: read
+
+name: risk-gate
+
+on:
+  workflow_call:
+    inputs:
+      engine-ref:
+        description: 판정 로직을 가져올 blueward-harness 의 ref
+        type: string
+        default: main
+      wait-checks:
+        description: 다른 검사가 끝나길 기다리는 최대 시간(초)
+        type: number
+        default: 600
+
+jobs:
+  check:
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 새 커밋·리뷰가 오면 이전 판정은 낡은 것이므로 취소하고 최신으로 다시 판정한다.
+    concurrency:
+      group: risk-gate-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: read
+      statuses: read
+    steps:
+      - name: 판정 엔진 가져오기
+        uses: actions/checkout@v4
+        with:
+          repository: jaeheeMin/blueward-harness
+          ref: ${{ inputs.engine-ref }}
+          path: .harness-engine
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: 위험도 판정
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WAIT_CHECKS: ${{ inputs.wait-checks }}
+        run: |
+          set +e
+          uv run --project .harness-engine python .harness-engine/scripts/risk_gate.py \
+            check-pr --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --wait-checks "$WAIT_CHECKS" \
+            > result.json 2> error.txt
+          code=$?
+          set -e
+          echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+          cat error.txt >&2 || true
+          cat result.json || true
+
+      - name: 요약과 PR 코멘트 갱신
+        uses: actions/github-script@v7
+        env:
+          EXIT_CODE: ${{ steps.decide.outputs.exit-code }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- risk-gate -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const code = process.env.EXIT_CODE;
+
+            let result = {};
+            try { result = JSON.parse(fs.readFileSync('result.json', 'utf8')); } catch (e) {}
+            const reasons = (result.reasons || []).map(r => `- ${r}`).join('\n');
+
+            let body;
+            if (code === '0' && (!result.enabled || !result.requires_approval)) {
+              // 게이트가 꺼져 있거나 위험하지 않은 PR 이다. 코멘트를 달지 않고, 이전에 위험하다고
+              // 남긴 코멘트가 있으면(새 커밋으로 위험이 풀린 경우) 지운다.
+              body = null;
+            } else if (code === '0') {
+              body = `${marker}\n## risk-gate\n\n✅ 위험도 높음 — 승인됨 (${result.approval_note || ''})\n\n이유:\n${reasons}`;
+            } else if (code === '1') {
+              body = `${marker}\n## risk-gate\n\n⚠️ 위험도 높음 — 사람의 승인이 필요합니다.\n\n이유:\n${reasons}\n\n승인 상태: ${result.approval_note || '승인이 없다.'}\n\n${result.next || ''}`;
+            } else {
+              const detail = (reasons || fs.readFileSync('error.txt', 'utf8')).slice(0, 1000);
+              body = `${marker}\n## risk-gate\n\n⚠️ 위험도 검사 불능 — 이것은 이 PR 의 문제가 아니다. 저장소 소유자에게 알려야 한다.\n\n\`\`\`\n${detail}\n\`\`\``;
+            }
+
+            if (body !== null) {
+              await core.summary.addRaw(body.replace(marker + '\n', ''), true).write();
+            }
+
+            const existing = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+            const mine = existing.data.find(c => c.body.includes(marker));
+            if (body === null) {
+              if (mine) await github.rest.issues.deleteComment({ owner, repo, comment_id: mine.id });
+              return;
+            }
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: 판정
+        shell: bash
+        env:
+          CODE: ${{ steps.decide.outputs.exit-code }}
+        run: |
+          case "$CODE" in
+            0)
+              echo "통과"
+              ;;
+            1)
+              echo "::error title=위험도 높음 - 승인 필요::이 PR 은 위험도가 높아 승인자의 Approve 가 필요하다. 이유와 다음 할 일은 PR 코멘트와 job 요약에 있다."
+              exit 1
+              ;;
+            *)
+              echo "::error title=위험도 검사 불능::위험도를 판정하지 못했다(종료코드 $CODE). 저장소 소유자에게 알려야 한다."
+              exit 1
+              ;;
+          esac
+
+  after-merge:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # job 에 permissions 를 적으면 적지 않은 권한은 모두 none 이 된다. 판정은 commits/{sha},
+    # commits/{sha}/pulls, pulls/{n}/reviews, 설정·승인자 파일, check run 을 읽는다(#77).
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+      checks: read
+      statuses: read
+    steps:
+      - name: 판정 엔진 가져오기
+        uses: actions/checkout@v4
+        with:
+          repository: jaeheeMin/blueward-harness
+          ref: ${{ inputs.engine-ref }}
+          path: .harness-engine
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: merge 뒤 위험도·승인 확인
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set +e
+          uv run --project .harness-engine python .harness-engine/scripts/risk_gate.py \
+            check-commit --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" \
+            > result.json 2> error.txt
+          code=$?
+          set -e
+          echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+          cat error.txt >&2 || true
+          cat result.json || true
+
+      - name: 승인 없이 위험한 변경이 들어왔으면 이슈를 연다
+        if: steps.decide.outputs.exit-code == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          sha_short="${GITHUB_SHA:0:7}"
+          title="승인 없이 위험한 변경이 main 에 들어왔다: $sha_short"
+
+          # 같은 커밋에 이미 이슈가 열려 있으면 다시 만들지 않는다.
+          existing_titles="$(gh issue list --state open --limit 200 --json title --jq '.[].title' || true)"
+          if printf '%s\n' "$existing_titles" | grep -qxF "$title"; then
+            echo "이미 이슈가 있다: $title"
+            exit 0
+          fi
+
+          reasons="$(jq -r '(.reasons // []) | map("- " + .) | join("\n")' result.json 2>/dev/null || true)"
+          prs="$(jq -r '(.prs // []) | map(if type=="object" then "#\(.pr) (\(.url))" else "#\(.)" end) | join(", ")' result.json 2>/dev/null || true)"
+          if [ -z "$prs" ]; then prs="없음(PR 없이 직접 push)"; fi
+          next="$(jq -r '.next // empty' result.json 2>/dev/null || true)"
+
+          {
+            printf '이 커밋(%s)이 승인 없이 main 에 들어왔다.\n\n' "$GITHUB_SHA"
+            printf '위험한 이유:\n%s\n\n' "$reasons"
+            printf '연관된 PR: %s\n\n' "$prs"
+            printf '%s\n' "$next"
+            printf '할 일: 승인자가 사후 검토하고, 필요하면 되돌린다.\n'
+          } > body.md
+
+          # type:fix 라벨이나 소유자 배정이 안 되는 저장소(라벨 없음, 조직 소유)에서도 기록은 남긴다.
+          gh issue create --title "$title" --body-file body.md --label "type:fix" --assignee "$OWNER" \
+            || gh issue create --title "$title" --body-file body.md
+
+      - name: 판정 불능이면 실패
+        if: steps.decide.outputs.exit-code != '0' && steps.decide.outputs.exit-code != '1'
+        shell: bash
+        env:
+          CODE: ${{ steps.decide.outputs.exit-code }}
+        run: |
+          echo "::error title=위험도 검사 불능::merge 뒤 위험도를 판정하지 못했다(종료코드 $CODE). 통과로 보지 않는다."
+          exit 1
