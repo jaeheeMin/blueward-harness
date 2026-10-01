@@ -40,6 +40,24 @@ PR 은 작성자 본인이 아닌 사람이 한 번 이상 읽은 뒤에 병합�
 위임하기 위해서다. 검사 통과만으로는 로직이나 요구사항과 실제로 맞는지까지
 보장하지 못하므로, 코드와 기준이 되는 파일은 여전히 사람이 병합한다.
 
+### 위험도에 따른 승인(#102)
+
+Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험도를 판정한다. 바뀐 줄이
+300 을 넘거나 파일이 10개를 넘을 때, 위험 경로(`docs/ssot/`, `rules/`, `.github/` 등과
+`.github/human-merge-paths`)를 바꿀 때, 추가된 줄에 비밀값 모양이 있을 때, 다른 검사가
+실패했거나 진행 중일 때 그 PR 은 위험하다. 위험하지 않은 PR 은 승인 없이 병합할 수 있고,
+위험한 PR 은 `.github/ssot-approvers` 의 사람 가운데 **작성자가 아닌 사람이 PR 의 마지막
+커밋에 Approve** 해야 한다. 승인이 없으면 PR 검사(`risk-gate`)가 빨간불이 되고 이유와 다음
+할 일이 PR 코멘트에 남으며, Claude 의 `gh pr merge` 는 훅이 거부한다. 승인 없이 병합됐으면
+병합 뒤 이슈가 열린다. 승인자 목록에 작성자 말고 사람이 없으면 위험한 PR 은 승인으로 풀 수
+없으니 한 명 이상 적어 둔다.
+
+기준은 `.github/risk-gate.yaml`(`max_changed_lines`, `max_changed_files`, `high_risk_paths`,
+`secret_scan`, `require_checks_green`, `ai_review`, `approvers_file`)에서 고친다. 이 파일은
+기준 브랜치에서 읽으므로 고친 값은 병합된 뒤부터 적용되고, 파일을 지우면 게이트가 꺼진다.
+**blueward-harness 저장소 자신은 승인자가 한 명뿐이라 아직 이 파일을 두지 않아 게이트가
+꺼져 있다.**
+
 ## 스킬 없이 직접 해도 되는 것
 
 다음은 스킬을 거치지 않고 직접 수행해도 된다.
