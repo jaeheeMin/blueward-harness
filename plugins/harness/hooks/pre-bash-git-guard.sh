@@ -359,6 +359,53 @@ $hm_err"
     hm_detail="$(printf '%s' "$hm_detail_raw" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
     deny "PR #$pr_number 가 사람이 merge 해야 하는 경로를 바꿨는지 확인하지 못해 merge 를 막습니다(종료코드 $hm_rc). 확인되지 않는 상태로 통과시키지 않습니다. $next_retry 자세히: $hm_detail"
   fi
+
+  # 0-2) PR 위험도(크기·위험 경로·비밀값·다른 검사)가 높은데 최신 커밋에 대한 승인이 없으면
+  #      거부한다(#102). 기준은 대상 저장소의 .github/risk-gate.yaml 이고 없으면 게이트가
+  #      꺼진 것이라 통과(종료코드 0)다. 위와 같은 이유로 stdout/stderr 를 나눠 받고, 판정
+  #      불가는 통과가 아니라 거부다. 엔진이 돌려주는 next 에는 이미 "다음:" 이 들어 있다.
+  rg_err_file="$(mktemp 2>/dev/null)" || {
+    deny "임시 파일을 만들지 못해 PR #$pr_number 의 위험도를 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
+  }
+  set +e
+  rg_out="$(uvx --from "$engine" python -m checker.risk_gate check-pr --repo "$repo" --pr "$pr_number" 2>"$rg_err_file")"
+  rg_rc=$?
+  set -e
+  rg_err="$(cat "$rg_err_file" 2>/dev/null)" || rg_err=""
+  rm -f "$rg_err_file"
+
+  rg_json_ok=0
+  if printf '%s' "$rg_out" | jq -e . >/dev/null 2>&1; then
+    rg_json_ok=1
+  fi
+
+  if [ "$rg_json_ok" -eq 1 ] && [ "$rg_rc" -eq 0 ]; then
+    : # 게이트가 꺼져 있거나 위험하지 않거나 위험하지만 승인됐다. 통과시킨다.
+  elif [ "$rg_json_ok" -eq 1 ] && [ "$rg_rc" -eq 1 ]; then
+    rg_reasons="$(printf '%s' "$rg_out" | jq -r '(.reasons // []) | .[:5] | join(" / ")' 2>/dev/null | tr -d '\r"\\`$')" || true
+    rg_total="$(printf '%s' "$rg_out" | jq -r '(.reasons // []) | length' 2>/dev/null | tr -d '\r')" || true
+    if [ "${rg_total:-0}" -gt 5 ] 2>/dev/null; then
+      rg_reasons="$rg_reasons 등 ${rg_total}개"
+    fi
+    next_risk="$(printf '%s' "$rg_out" | jq -r '.next // empty' 2>/dev/null | tr -d '\r"\\`$')" || true
+    case "$next_risk" in
+      *"다음:"*) : ;;
+      *) next_risk="다음: 사람이 할 일 - .github/ssot-approvers 에 적힌 승인자(PR 작성자가 아닌 사람)에게 최신 커밋을 보고 Approve 를 요청하십시오." ;;
+    esac
+    deny "PR #$pr_number 은 위험도가 높은데 최신 커밋에 대한 승인자의 Approve 가 없어 merge 를 막습니다. 이유: $rg_reasons $next_risk Approve 가 달리면 Claude 가 gh pr merge 를 다시 실행합니다."
+  else
+    rg_detail_raw="$rg_out"
+    if [ -n "$rg_err" ]; then
+      if [ -n "$rg_detail_raw" ]; then
+        rg_detail_raw="$rg_detail_raw
+$rg_err"
+      else
+        rg_detail_raw="$rg_err"
+      fi
+    fi
+    rg_detail="$(printf '%s' "$rg_detail_raw" | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
+    deny "PR #$pr_number 의 위험도를 확인하지 못해 merge 를 막습니다(종료코드 $rg_rc). 검사 불능이므로 통과시키지 않습니다. $next_retry 자세히: $rg_detail"
+  fi
 }
 
 # 첫 관문: `pr merge` 글자가 명령에 없으면 merge 일 수 없으므로 엔진을 부르지

@@ -731,6 +731,115 @@ def test_두_merge_중_두번째_PR_이_빨간불이면_그_PR_을_짚어_거부
     assert "doc-guard" in reason
 
 
+# --- 병합 가드: PR 위험도에 따른 승인 요구(#102) -----------------------------
+#
+# 훅은 PRD 승인·사람 병합 경로 검사 뒤에 `checker.risk_gate check-pr` 를 부른다. 가짜 uvx 가
+# risk_gate 호출에만 정해 둔 답을 내고 나머지(승인·사람 경로)는 통과로 답한다.
+
+
+def _make_risk_uvx(tmp_path: Path, risk_stdout: str, risk_rc: int) -> Path:
+    bin_dir = tmp_path / "risk-bin"
+    bin_dir.mkdir()
+    risk_b64 = base64.b64encode(risk_stdout.encode("utf-8")).decode("ascii")
+    ssot_b64 = base64.b64encode(
+        json.dumps({"touches_ssot": False, "approved": True, "reason": "PRD 변경 없음"}).encode("utf-8")
+    ).decode("ascii")
+    human_b64 = base64.b64encode(
+        json.dumps({"requires_human": False, "paths": [], "pr": 1, "repo": "x/y"}).encode("utf-8")
+    ).decode("ascii")
+    script = bin_dir / "uvx"
+    script.write_text(
+        _fake_uvx_prelude()
+        + 'case "$*" in\n'
+        f"  *checker.risk_gate*) printf '%s' '{risk_b64}' | base64 -d; exit {risk_rc} ;;\n"
+        f"  *check-human-merge*) printf '%s' '{human_b64}' | base64 -d; exit 0 ;;\n"
+        f"  *) printf '%s' '{ssot_b64}' | base64 -d; exit 0 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    script.chmod(0o755)
+    _add_fake_gh(bin_dir)
+    return bin_dir
+
+
+@_needs_hook_env
+def test_위험도가_낮거나_게이트가_꺼져_있으면_통과시킨다(tmp_path):
+    payload = json.dumps({"enabled": False, "risk": "low", "reasons": ["risk-gate 설정 없음"],
+                          "requires_approval": False, "approved": None, "next": ""})
+    bin_dir = _make_risk_uvx(tmp_path, payload, 0)
+    log = tmp_path / "uvx.log"
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir, {"FAKE_UVX_LOG": str(log)})
+    assert code == 0
+    assert out is None
+    assert any("checker.risk_gate check-pr --repo owner/repo --pr 123" in ln for ln in log.read_text(encoding="utf-8").splitlines())
+
+
+@_needs_hook_env
+def test_위험하지만_승인됐으면_통과시킨다(tmp_path):
+    payload = json.dumps({"enabled": True, "risk": "high", "reasons": ["위험 경로를 바꿈: rules/a.yaml"],
+                          "requires_approval": True, "approved": True, "next": ""})
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", _make_risk_uvx(tmp_path, payload, 0))
+    assert code == 0
+    assert out is None
+
+
+@_needs_hook_env
+def test_위험하고_승인이_없으면_이유와_다음_할_일로_거부한다(tmp_path):
+    payload = json.dumps({
+        "enabled": True, "risk": "high",
+        "reasons": ["바뀐 줄이 500줄로 기준(300줄)을 넘음", "위험 경로를 바꿈: rules/a.yaml"],
+        "requires_approval": True, "approved": False,
+        "next": "다음: 사람이 할 일 - 승인자(.github/ssot-approvers 의 사람, 작성자 제외)에게 최신 커밋을 보고 Approve 를 요청하십시오. 또는 PR 을 나눠 기준 이하로 줄이십시오.",
+    })
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", _make_risk_uvx(tmp_path, payload, 1))
+    assert code == 0
+    reason = _reason(out)
+    assert "PR #123" in reason and "위험도가 높" in reason
+    assert "500줄" in reason and "rules/a.yaml" in reason
+    assert "다음: 사람이 할 일" in reason and "Approve" in reason
+    assert reason.count("다음:") == 1  # 엔진이 준 안내 하나만
+
+
+@_needs_hook_env
+def test_위험도_사유는_다섯_개까지만_보이고_따옴표는_지운다(tmp_path):
+    reasons = [f"사유 번호 {i} 큰따옴표\"포함" for i in range(8)]
+    payload = json.dumps({"enabled": True, "risk": "high", "reasons": reasons,
+                          "requires_approval": True, "approved": False, "next": "다음: 사람이 할 일 - 승인 요청"})
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", _make_risk_uvx(tmp_path, payload, 1))
+    assert code == 0
+    reason = _reason(out)  # JSON 이 깨지지 않고 파싱됐다
+    assert "사유 번호 4" in reason and "사유 번호 5" not in reason
+    assert "등 8개" in reason
+
+
+@_needs_hook_env
+def test_엔진이_다음_안내를_안_주면_기본_안내를_붙인다(tmp_path):
+    payload = json.dumps({"enabled": True, "risk": "high", "reasons": ["x"], "requires_approval": True,
+                          "approved": False, "next": ""})
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", _make_risk_uvx(tmp_path, payload, 1))
+    assert code == 0
+    assert "다음: 사람이 할 일" in _reason(out)
+
+
+@_needs_hook_env
+def test_위험도_판정_불능이면_검사_불능으로_거부한다(tmp_path):
+    payload = json.dumps({"enabled": None, "risk": None, "reasons": ["판정 불가: 네트워크"],
+                          "requires_approval": None, "approved": None, "next": ""})
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", _make_risk_uvx(tmp_path, payload, 2))
+    assert code == 0
+    reason = _reason(out)
+    assert "위험도를 확인하지 못해" in reason and "검사 불능" in reason
+    assert "다음:" in reason
+
+
+@_needs_hook_env
+def test_위험도_판정_출력이_json이_아니면_exit_0_이어도_거부한다(tmp_path):
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", _make_risk_uvx(tmp_path, "JSON 아님", 0))
+    assert code == 0
+    assert "위험도를 확인하지 못해" in _reason(out)
+
+
 # --- 세션 시작 훅의 공통 개발 규칙 요약(#53) --------------------------------
 #
 # 임시 git 저장소를 만들어 그 안에서 session-start-sync.sh 를 직접 돌린다.
