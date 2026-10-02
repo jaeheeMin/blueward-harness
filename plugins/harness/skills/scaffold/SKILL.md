@@ -54,6 +54,12 @@ description: 새 고객사 Project Repository 를 처음 만들었을 때 표준
      자리에서 PRD 변경 PR 의 승인 여부를 검사한다(#49).
    - 승인자를 나중에 추가·변경하려면 `.github/ssot-approvers` 를 직접 고친다.
      비어 있으면(주석뿐이면) 작성자가 아닌 누구의 승인이든 인정한다.
+   - `.github/workflows/risk-gate.yml` 과 `.github/risk-gate.yaml` 은 PR 위험도에 따라
+     승인을 요구한다(#102). 위험한 PR(크기·위험 경로·비밀값·검사 실패)만 승인자 목록
+     (`.github/ssot-approvers`)의 사람이 Approve 해야 통과하고 나머지는 승인 없이
+     병합된다. **승인자 목록에 작성자가 아닌 사람이 한 명도 없으면 위험한 PR 을
+     승인으로 통과시킬 수 없다** — 사용자에게 승인자를 꼭 넣도록 안내한다. 기준은
+     `.github/risk-gate.yaml` 에서 고치고(주석 참고), 파일을 지우면 게이트가 꺼진다.
    - PRD 는 `/harness:prd` Skill 로 만든다. 지금은 `docs/ssot/PRD.md` 가
      빈 스텁으로만 있다.
 
@@ -81,6 +87,8 @@ env/README.md                      환경별 접속 URL(Credential 은 안 둠)
 .github/workflows/doc-guard.yml    PR·main 커밋마다 doc-guard 를 부르는 워크플로
 .github/workflows/ssot-approval.yml PR·main 커밋마다 PRD 변경 승인을 검사하는 워크플로(#49)
 .github/ssot-approvers             PRD 변경 PR 을 승인할 수 있는 GitHub 아이디 목록
+.github/workflows/risk-gate.yml    PR·main 커밋마다 PR 위험도를 판정하는 워크플로(#102)
+.github/risk-gate.yaml             위험도 기준(크기·위험 경로·비밀값·검사 통과). 위험한 PR 만 승인자가 Approve 해야 통과
 .claude/settings.json              harness Plugin 자동 설치 안내(#89). 이미 있으면 두 항목만 합친다
 ```
 

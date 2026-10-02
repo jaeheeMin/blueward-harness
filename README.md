@@ -104,6 +104,13 @@ main 에 직접 커밋하거나 맨손 `git push` 하면 훅이 거부한다. �
 
 자세한 규칙은 `plugins/harness/rules/` 가 정본이다. 요약은 `CLAUDE.md` 에 있다.
 
+**위험한 PR 만 승인을 요구한다(#102).** 고객사 Project Repository 에는 `/harness:scaffold` 가
+`.github/risk-gate.yaml`(기준)과 `.github/workflows/risk-gate.yml`(PR 검사·병합 뒤 감지)을
+넣는다. 크기, 위험 경로, 비밀값, 다른 검사 결과 중 하나라도 걸리면 승인자 목록의 사람(작성자
+제외)이 마지막 커밋에 Approve 해야 통과하고, Claude 병합 훅도 같은 판정(`checker.risk_gate`)으로
+거부한다. 기준은 `.github/risk-gate.yaml` 에서 고치고 파일을 지우면 꺼진다. 이 저장소
+자신은 승인자가 한 명뿐이라 아직 이 파일을 두지 않았다(게이트 꺼짐).
+
 > **브랜치 보호가 걸려 있지 않다.** 이 저장소는 개인 계정의 private 저장소이고
 > 요금제가 Free 라, GitHub 서버 쪽에서 main 을 강제로 지킬 수 없다. 지금
 > main 을 지키는 것은 로컬 훅뿐이고, 훅을 설치하지 않은 clone 에서는 막을

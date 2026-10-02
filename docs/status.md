@@ -374,6 +374,29 @@ merge 뒤 감지는 merge 된 PR 의 `head.sha` 를 쓴다. Hook 은 사유에 �
 이미 새 커밋·리뷰마다 돌게 되어 있어 바꾸지 않았다. Plugin version 0.10.15. 실제 GitHub 에서
 승인 → 새 커밋 → merge 시도를 돌려 보지는 않았다.
 
+**PR 위험도에 따라 승인을 요구한다(#102, PR 위험도에 따른 승인 요구).** 처음에는 모든 PR 에 승인을
+요구하려 했지만 작성자는 자기 PR 을 승인할 수 없고 Claude 도 소유자 계정으로 PR 을 올려 승인자가
+한 명이면 돌아가지 않아, 기계로 볼 수 있는 것은 엄격히 검사하고 위험한 PR 만 사람이 승인하게 했다.
+새 모듈 `checker/risk_gate.py`(진입점 `scripts/risk_gate.py`)가 판정한다. 기준은 대상 저장소의
+`.github/risk-gate.yaml` 이고 PR 이 아닌 base 브랜치에서 읽으며, 파일이 없으면 게이트는 꺼져 통과
+(종료코드 0)다. 기준 하나는 `@criterion` 으로 등록한 작은 함수(`size`, `paths`, `secret`,
+`checks`, `ai_review`)라 기준을 더해도 판정 흐름은 고치지 않는다. 비밀값 사유에는 파일:줄과 패턴
+이름만 담고 값은 담지 않는다. 위험한 PR 은 `approvers_file` 의 사람 가운데 작성자가 아닌 사람이
+마지막 커밋에 한 Approve(#119 의 `evaluate_approval` 재사용)가 있어야 통과하고, 작성자를 뺀 승인자가
+없으면 승인으로 풀 수 없다고 밝힌다. 종료코드는 0 통과, 1 승인 필요, 2 판정 불가(설정 오류 포함).
+예상 못 한 예외도 파이썬 기본 종료코드 1(승인 필요와 겹침)이 아니라 판정 불가(종료코드 2)로 끝낸다.
+세 곳이 `decide_pr` 를 부른다 — 재사용 워크플로 `.github/workflows/risk-gate.yml` 의 `check`(빨간불,
+PR 코멘트 하나를 갱신, job 요약)와 `after-merge`(병합 직전 main 의 기준으로 다시 판정해 소유자에게
+배정한 이슈, 제목 중복 방지), 그리고 `gh pr merge` Hook(`check_one_merge` 맨 끝). 다른 검사가
+진행 중이라 위험으로 판정되는 경우는 `--wait-checks` 로 job 안에서 최대 10분 기다린 뒤 판정하고,
+게이트 자신(`risk-gate`)과 `ssot-approval`·`alert` 는 세지 않는다. `workflow_run` 으로 다른 워크플로
+완료마다 깨우지 않는 이유는 그 이벤트가 PR 의 check 가 아니라 main 쪽에 결과를 남겨 PR 화면의
+빨간불을 고치지 못해서다. scaffold 가 `risk-gate.yaml` 과 호출 워크플로를 새 저장소에 넣는다.
+**blueward-harness 자신에는 `risk-gate.yaml` 을 두지 않았다**(승인자가 한 명뿐이라 게이트가 계속
+막히므로 꺼 둔다). AI 리뷰(`ai_review`)는 `ai-review` check run 을 읽는 자리만 마련했고 만드는 쪽은
+#125 다. Plugin version 0.10.16. 실제 GitHub Actions·실제 `gh` 로 돌려 본 것은 아직 없다(가짜
+클라이언트·가짜 uvx 테스트만).
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.

@@ -1,0 +1,36 @@
+# 이 저장소(Project Repository)의 PR 과 main 커밋마다 PR 위험도를 판정해, 위험한 PR 에만
+# 사람의 승인을 요구한다(#102). 기준은 `.github/risk-gate.yaml` 이고, 판정 로직은
+# blueward-harness 저장소에서 그때그때 내려받아 쓴다 — doc-guard.yml 과 같은 사정이다.
+#
+# 다시 판정하는 때(= 이 워크플로가 다시 도는 때):
+# - PR 이 열리거나 새 커밋이 올라올 때(opened, synchronize, reopened, ready_for_review)
+# - 리뷰가 달리거나 취소될 때(승인하면 곧바로 초록불이 된다)
+# - 판정이 다른 검사의 진행 중을 만나면 그 검사가 끝날 때까지 이 job 안에서 최대 10분
+#   기다린 뒤 판정한다. 다른 워크플로가 끝날 때마다 따로 깨우는 방식(workflow_run 등)은 쓰지
+#   않는다 — 그 이벤트는 PR 의 check 가 아니라 main 쪽에 결과를 남겨 PR 화면의 빨간불을
+#   고치지 못하기 때문이다.
+# - 실패한 다른 검사를 새 커밋 없이 "Re-run" 해서 고쳤다면, 이 검사도 화면에서 "Re-run" 한다.
+#
+# job id 는 반드시 `risk-gate` 로 둔다. 판정이 다른 검사의 상태를 볼 때 자기 자신을 알아보는
+# 이름이다(바꾸면 자기 자신을 기다리다 교착한다).
+name: risk-gate
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+  push:
+    branches: [main]
+
+# 새 커밋·리뷰가 오면 이전 판정을 취소하고 최신으로 다시 판정하는 설정(concurrency)은
+# 부르는 쪽이 아니라 재사용 워크플로 안에 있다.
+
+jobs:
+  risk-gate:
+    uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: read
+      statuses: read
