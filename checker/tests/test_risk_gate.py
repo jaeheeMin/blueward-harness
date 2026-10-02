@@ -243,7 +243,7 @@ def test_ai_review_가_켜져_있으면_일반_검사에서_빼고_따로_읽는
 def test_ai_review_성공_실패_대기_없음():
     assert rg.ai_review_reasons([_run("ai-review")]) == ([], [])
     flagged, waiting = rg.ai_review_reasons([_run("ai-review", conclusion="failure")])
-    assert flagged == ["AI 리뷰에서 심각한 지적이 나옴"] and waiting == []
+    assert len(flagged) == 1 and "AI 리뷰 검사가 실패함" in flagged[0] and "검사 불능" in flagged[0] and waiting == []
     flagged, waiting = rg.ai_review_reasons([_run("ai-review", status="in_progress", conclusion=None)])
     assert flagged == [] and "끝나지 않음" in waiting[0]
     flagged, waiting = rg.ai_review_reasons([_run("test")])
@@ -470,8 +470,8 @@ def test_ai_review_를_켜면_결과를_읽는다():
     ok = rg.decide_pr(_client(config=cfg, check_runs=[_run("ai-review")]), "o/r", 5)
     assert ok["risk"] == "low"
     bad = rg.decide_pr(_client(config=cfg, check_runs=[_run("ai-review", conclusion="failure")]), "o/r", 5)
-    assert bad["risk"] == "high" and "AI 리뷰에서 심각한 지적" in bad["reasons"][0]
-    assert "AI 리뷰의 지적" in bad["next"]
+    assert bad["risk"] == "high" and "AI 리뷰 검사가 실패함" in bad["reasons"][0]
+    assert "ai-review 결과 코멘트" in bad["next"] and "검사 불능" in bad["next"]
     pending = rg.decide_pr(_client(config=cfg), "o/r", 5)
     assert pending["risk"] == "high" and pending["waiting_on_checks"] is True
 
@@ -692,3 +692,75 @@ def test_기준_등록부는_이름이_겹치지_않는다():
     names = [n for n, _ in rg.CRITERIA]
     assert names == ["size", "paths", "secret", "checks", "ai_review"]
     assert len(names) == len(set(names))
+
+
+# --- precheck-pr(#125) ---------------------------------------------------------------
+
+
+def test_precheck_설정이_없으면_돌리지_않는다():
+    assert rg.precheck_pr(_client(config=None), "o/r", 5) == {
+        "enabled": False, "gate": False, "risky": False, "reasons": ["risk-gate 설정 없음"]}
+
+
+def test_precheck_ai_review_가_꺼져_있으면_돌리지_않는다():
+    result = rg.precheck_pr(_client(config="ai_review: false\n"), "o/r", 5)
+    assert result["enabled"] is False and result["gate"] is True and result["risky"] is False
+
+
+def test_precheck_위험하지_않으면_돌려도_된다():
+    result = rg.precheck_pr(_client(config="ai_review: true\n"), "o/r", 5)
+    assert result == {"enabled": True, "gate": True, "risky": False, "reasons": []}
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        [_file("src/a.py", 500, 0)],
+        [_file("rules/a.yaml")],
+        [_file("a.py", 1, 0, patch=_patch(AWS_KEY))],
+    ],
+)
+def test_precheck_크기_경로_비밀값이_위험이면_돌리지_않는다(files):
+    result = rg.precheck_pr(_client(config="ai_review: true\n", files=files), "o/r", 5)
+    assert result["enabled"] is True and result["risky"] is True and result["reasons"]
+
+
+def test_precheck_는_checks_와_ai_review_기준을_평가하지_않는다():
+    runs = [_run("test", conclusion="failure"), _run("ai-review", conclusion="failure"),
+            _run("slow", status="in_progress", conclusion=None)]
+    client = _client(config="ai_review: true\n", check_runs=runs)
+    result = rg.precheck_pr(client, "o/r", 5)
+    assert result["risky"] is False
+    assert not any("check-runs" in path or "/status" in path for path in client.asked)
+
+
+class _PreArgs:
+    repo, pr = "o/r", 5
+
+
+def test_cmd_precheck_pr_종료코드(monkeypatch, capsys):
+    for result, code in [
+        ({"enabled": True, "gate": True, "risky": False, "reasons": []}, 0),
+        ({"enabled": True, "gate": True, "risky": True, "reasons": ["x"]}, 3),
+        ({"enabled": False, "gate": True, "risky": False, "reasons": ["꺼짐"]}, 3),
+        ({"enabled": False, "gate": False, "risky": False, "reasons": ["없음"]}, 3),
+    ]:
+        monkeypatch.setattr(rg, "precheck_pr", lambda *a, _r=result: _r)
+        assert rg.cmd_precheck_pr(_PreArgs()) == code
+        assert _last_json(capsys) == result
+
+
+@pytest.mark.parametrize("exc", [GhError("네트워크"), rg.ConfigError("설정"), RuntimeError("뜻밖"), TypeError("x")])
+def test_cmd_precheck_pr_판정_불가는_2(monkeypatch, capsys, exc):
+    def _raise(*a, **k):
+        raise exc
+
+    monkeypatch.setattr(rg, "precheck_pr", _raise)
+    assert rg.cmd_precheck_pr(_PreArgs()) == 2
+    out = _last_json(capsys)
+    assert out["enabled"] is None and out["risky"] is None and "판정 불가" in out["reasons"][0]
+
+
+def test_main_precheck_pr_인자를_해석한다(monkeypatch):
+    monkeypatch.setattr(rg, "precheck_pr", lambda c, r, p: {"enabled": True, "gate": True, "risky": False, "reasons": []})
+    assert rg.main(["precheck-pr", "--repo", "o/r", "--pr", "5"]) == 0
