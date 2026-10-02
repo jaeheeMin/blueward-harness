@@ -31,8 +31,10 @@ secret_scan: true
 # 검사 통과: 이 PR 의 다른 검사가 실패했거나 아직 진행 중이면 위험하다.
 require_checks_green: true
 
-# AI 리뷰: 켜면 이름이 ai-review 인 검사의 결과를 읽는다(심각한 지적이면 위험, 아직 없거나
-# 진행 중이면 대기). 그 검사를 만드는 workflow 가 있을 때만 켠다. 없는데 켜면 계속 대기로 본다.
+# AI 리뷰: 켜면 이름이 ai-review 인 검사의 결과를 읽는다(실패 = 심각한 지적 또는 AI 리뷰 검사
+# 불능이면 위험, 아직 없거나 진행 중이면 대기). 그 검사는 .github/workflows/ai-review.yml 이 만든다.
+# 켜려면: (1) `claude setup-token` 으로 만든 토큰을 `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>`
+# 로 등록 (2) 여기를 true 로. 위험도가 낮은 PR 에만 리뷰를 돌린다.
 ai_review: false
 
 # 승인자 목록 파일. 한 줄에 GitHub 아이디 하나. 작성자를 뺀 승인자가 한 명도 없으면 위험한
