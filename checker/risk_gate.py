@@ -22,8 +22,10 @@
               게이트 자신(`risk-gate`)과 같은 PR 에서 도는 `ssot-approval`, `alert` 는 뺀다.
               자신을 세면 "자기 자신이 끝나길 기다리는" 교착이 생기기 때문이다.
 - `ai_review` 설정에서 켠 때만 본다. 이름이 `ai-review` 인 check run 의 결론을 읽는다
-              (success 면 통과, failure 면 심각한 지적). 그 check run 을 만드는 쪽은 #125 이고
-              여기서는 읽는 약속(이름과 결론)만 정해 둔다. 없거나 끝나지 않았으면 대기로 본다.
+              (success 면 통과, 그 밖의 결론이면 실패). 그 check run 은 재사용 워크플로
+              `ai-review.yml`(#125)이 만든다. 실패는 "심각한 지적" 일 수도, "AI 리뷰를 못 돌린
+              검사 불능" 일 수도 있어 사유가 둘을 뭉개지 않고 PR 코멘트를 보라고 안내한다.
+              없거나 끝나지 않았으면 대기로 본다.
 
 위험한 PR 은 승인자 목록(`approvers_file`, 기본 `.github/ssot-approvers`)에 있는 사람 가운데
 **작성자가 아닌 사람이 PR 의 마지막 커밋에 Approve** 해야 통과한다. 이 판정은
@@ -41,6 +43,13 @@
 **검사 진행 중 대기.** PR 이 열리면 다른 검사와 게이트가 동시에 시작된다. `--wait-checks` 를
 주면 사유가 "다른 검사가 아직 진행 중" 뿐일 때 그 검사가 끝날 때까지 정해진 시간 안에서
 기다렸다가 다시 판정한다. 그래서 검사 순서 때문에 게이트가 헛되이 빨간불이 되지 않는다.
+
+**AI 리뷰 사전 판정(`precheck-pr`, #125).** AI 리뷰는 위험도가 낮은 PR 에만 돌린다(위험한 PR
+은 어차피 사람이 본다). `ai-review.yml` 이 리뷰를 돌리기 전에 이 하위 명령으로 base 의 기준
+가운데 `size`·`paths`·`secret` 만 평가한다. `checks`·`ai_review` 는 뺀다 — `checks` 는 이 AI
+리뷰 자신을 기다리는 교착을 만들고, `ai_review` 는 이 리뷰의 결과를 읽는 기준이기 때문이다.
+종료코드: 0 AI 리뷰를 돌려도 됨(설정이 있고 `ai_review: true` 이며 위험하지 않음), 3 돌리지
+않음(설정 없음, `ai_review: false`, 이미 위험함 — 사유를 출력), 2 판정 불가. 1 은 쓰지 않는다.
 """
 from __future__ import annotations
 
@@ -315,7 +324,7 @@ def ai_review_reasons(check_runs: list[dict]) -> tuple[list[str], list[str]]:
         return [], ["AI 리뷰 결과(ai-review 검사)가 아직 없음"]
     states = [_run_state(r) for r in runs]
     if "fail" in states:
-        return ["AI 리뷰에서 심각한 지적이 나옴"], []
+        return ["AI 리뷰 검사가 실패함(심각한 지적 또는 AI 리뷰 검사 불능 — ai-review 결과 코멘트를 확인)"], []
     if "pending" in states:
         return [], ["AI 리뷰가 아직 끝나지 않음"]
     return [], []
@@ -436,7 +445,10 @@ def build_next(findings: list[Finding], approval: str, approvers_file: str) -> s
     if waiting:
         steps.append("진행 중인 검사가 끝난 뒤 PR 의 risk-gate 검사를 다시 실행하십시오")
     if any(f.criterion == "ai_review" and not f.waiting for f in findings):
-        steps.append("AI 리뷰의 지적을 고치십시오")
+        steps.append(
+            "PR 의 ai-review 결과 코멘트를 확인해, 심각한 지적이면 고치고 AI 리뷰 검사 불능이면 "
+            "원인(시크릿·토큰 등)을 해결한 뒤 ai-review 검사를 다시 실행하십시오"
+        )
 
     split = " 또는 PR 을 나눠 기준 이하로 줄이십시오" if kinds & {"size", "paths"} else ""
     if approval == "no_approvers":
@@ -606,6 +618,44 @@ def decide_pr_waiting(
         sleep(interval)
 
 
+# AI 리뷰 사전 판정에서 평가하는 기준. 나머지(checks, ai_review)는 이름으로 거른다.
+PRECHECK_CRITERIA = frozenset({"size", "paths", "secret"})
+
+EXIT_SKIP = 3  # precheck-pr: AI 리뷰를 돌리지 않는다(설정 없음·꺼짐·이미 위험)
+
+
+def precheck_pr(client: GhClient, repo: str, pr: int) -> dict:
+    """AI 리뷰를 돌려도 되는 PR 인지 가린다(#125). `size`·`paths`·`secret` 기준만 평가한다."""
+    info = fetch_pr_info(client, repo, pr)
+    ref = (info.get("base") or {}).get("ref") or "main"
+    cfg_text = fetch_text(client, repo, ref, CONFIG_PATH)
+    if cfg_text is None:
+        return {"enabled": False, "gate": False, "risky": False, "reasons": ["risk-gate 설정 없음"]}
+    cfg = load_config(cfg_text)
+    if not cfg["ai_review"]:
+        return {"enabled": False, "gate": True, "risky": False, "reasons": ["ai_review 가 꺼져 있음"]}
+
+    def _no_check_runs() -> list[dict]:
+        raise AssertionError("precheck 는 다른 검사의 결과를 읽지 않는다")
+
+    ctx = Context(
+        cfg=cfg,
+        files=fetch_pr_file_entries(client, repo, pr),
+        prefixes=cfg["high_risk_paths"] + fetch_human_merge_paths(client, repo, ref),
+        load_check_runs=_no_check_runs,
+    )
+    findings = []
+    for name, fn in CRITERIA:
+        if name in PRECHECK_CRITERIA:
+            findings.extend(fn(ctx))
+    return {
+        "enabled": True,
+        "gate": True,
+        "risky": bool(findings),
+        "reasons": [f.message for f in findings],
+    }
+
+
 def decide_commit(client: GhClient, repo: str, sha: str) -> dict:
     """병합 뒤(push) 이 커밋이 승인 없이 들어온 위험한 변경인지 판정한다.
 
@@ -721,6 +771,22 @@ def cmd_check_pr(args: argparse.Namespace) -> int:
     return _exit_for(result)
 
 
+def cmd_precheck_pr(args: argparse.Namespace) -> int:
+    client = GhClient()
+    try:
+        result = precheck_pr(client, args.repo, args.pr)
+    except (GhError, ConfigError) as exc:
+        _print({"enabled": None, "gate": None, "risky": None, "reasons": [f"판정 불가: {exc}"]})
+        return EXIT_UNKNOWN
+    except Exception as exc:  # noqa: BLE001 - 어떤 오류도 "돌려도 됨"(0)으로 보이면 안 된다
+        traceback.print_exc(file=sys.stderr)
+        reason = f"판정 불가: 예상 못 한 오류 {type(exc).__name__}: {exc}"
+        _print({"enabled": None, "gate": None, "risky": None, "reasons": [reason]})
+        return EXIT_UNKNOWN
+    _print(result)
+    return EXIT_OK if result["enabled"] and not result["risky"] else EXIT_SKIP
+
+
 def cmd_check_commit(args: argparse.Namespace) -> int:
     client = GhClient()
     try:
@@ -755,6 +821,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check_pr.add_argument("--wait-interval", type=int, default=20, metavar="SECONDS", help="기다리는 동안 다시 보는 간격")
     check_pr.set_defaults(func=cmd_check_pr)
+
+    precheck = sub.add_parser(
+        "precheck-pr",
+        help="AI 리뷰를 돌려도 되는 PR 인지 가린다. 종료코드 0 돌려도 됨, 3 돌리지 않음(사유 출력), 2 판정 불가",
+    )
+    precheck.add_argument("--repo", required=True, help="owner/repo")
+    precheck.add_argument("--pr", required=True, type=int, help="PR 번호")
+    precheck.set_defaults(func=cmd_precheck_pr)
 
     check_commit = sub.add_parser("check-commit", help="병합된(또는 직접 push 된) 커밋의 위험도·승인 여부를 판정한다")
     check_commit.add_argument("--repo", required=True, help="owner/repo")

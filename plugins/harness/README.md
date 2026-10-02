@@ -164,6 +164,11 @@ Project Repository 의 CLAUDE.md 에 짧게 적어 둬야 세션이 매번 상�
 구조 — 저장소 루트의 `templates/` 와 `rules/`, `docs/ssot/PRD.md`,
 `conventions/`, `audit/`, `env/`, 그리고 PR·main 커밋마다 doc-guard 를
 부르는 `.github/workflows/doc-guard.yml` — 를 한 번에 만들어 준다.
+`.github/workflows/ai-review.yml` 은 위험도가 낮은 PR 에만 Claude AI 리뷰를 돌리는
+호출 워크플로로, **기본은 꺼짐**이다(#125). 켜려면 `claude setup-token` 으로 만든 토큰을
+`gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 `.github/risk-gate.yaml`
+의 `ai_review` 를 `true` 로 바꾼다. 심각한 지적이 나오면 `ai-review` 검사가 실패해 risk gate 가
+"승인 필요" 로 판정한다.
 `.claude/settings.json` 도 함께 만들어, 이 저장소 폴더를 여는 팀원이 별도
 설치 없이 blueward-harness 마켓플레이스와 harness Plugin 설치 안내를 받게
 한다(#89) — 이미 그 파일이 있으면 통째로 덮어쓰지 않고 없는 두 항목만
