@@ -643,6 +643,31 @@ def test_check_pr_는_판정_불가를_통과로_뭉개지_않고_2(monkeypatch,
     assert "판정 불가" in out["reasons"][0]
 
 
+@pytest.mark.parametrize("exc", [RuntimeError("뜻밖"), TypeError("섞인 키"), AttributeError("list")])
+def test_check_pr_는_예상_못_한_예외도_승인_필요가_아니라_2(monkeypatch, capsys, exc):
+    def _raise(*a, **k):
+        raise exc
+
+    monkeypatch.setattr(rg, "decide_pr_waiting", _raise)
+    assert rg.cmd_check_pr(_Args()) == 2
+    out = _last_json(capsys)
+    assert out["requires_approval"] is None and out["approved"] is None
+    assert "판정 불가" in out["reasons"][0]
+    assert type(exc).__name__ in out["reasons"][0] and str(exc) in out["reasons"][0]
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("뜻밖"), TypeError("섞인 키")])
+def test_check_commit_은_예상_못_한_예외도_2(monkeypatch, capsys, exc):
+    def _raise(c, r, s):
+        raise exc
+
+    monkeypatch.setattr(rg, "decide_commit", _raise)
+    assert rg.cmd_check_commit(_Args()) == 2
+    out = _last_json(capsys)
+    assert out["prs"] == []
+    assert type(exc).__name__ in out["reasons"][0] and str(exc) in out["reasons"][0]
+
+
 def test_check_commit_종료코드(monkeypatch, capsys):
     monkeypatch.setattr(rg, "decide_commit", lambda c, r, s: rg._commit_result(True, "low", True, [], [], ""))
     assert rg.cmd_check_commit(_Args()) == 0

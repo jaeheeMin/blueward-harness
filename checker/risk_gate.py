@@ -50,6 +50,7 @@ import json
 import re
 import sys
 import time
+import traceback
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -697,6 +698,12 @@ def _exit_for(result: dict) -> int:
     return EXIT_NOT_APPROVED
 
 
+def _unexpected(exc: Exception) -> dict:
+    """예상 못 한 예외. 파이썬 기본 종료코드 1 은 EXIT_NOT_APPROVED 와 겹치므로 판정 불가로 바꾼다."""
+    traceback.print_exc(file=sys.stderr)
+    return _unknown(RuntimeError(f"예상 못 한 오류 {type(exc).__name__}: {exc}"))
+
+
 def cmd_check_pr(args: argparse.Namespace) -> int:
     client = GhClient()
     try:
@@ -706,6 +713,9 @@ def cmd_check_pr(args: argparse.Namespace) -> int:
         )
     except (GhError, ConfigError) as exc:
         _print(_unknown(exc))
+        return EXIT_UNKNOWN
+    except Exception as exc:  # noqa: BLE001 - 어떤 오류도 "승인 필요"(1)로 보이면 안 된다
+        _print(_unexpected(exc))
         return EXIT_UNKNOWN
     _print(result)
     return _exit_for(result)
@@ -717,6 +727,11 @@ def cmd_check_commit(args: argparse.Namespace) -> int:
         result = decide_commit(client, args.repo, args.sha)
     except (GhError, ConfigError) as exc:
         payload = _unknown(exc)
+        payload["prs"] = []
+        _print(payload)
+        return EXIT_UNKNOWN
+    except Exception as exc:  # noqa: BLE001 - 위와 같은 이유
+        payload = _unexpected(exc)
         payload["prs"] = []
         _print(payload)
         return EXIT_UNKNOWN

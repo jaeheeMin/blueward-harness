@@ -384,6 +384,7 @@ merge 뒤 감지는 merge 된 PR 의 `head.sha` 를 쓴다. Hook 은 사유에 �
 이름만 담고 값은 담지 않는다. 위험한 PR 은 `approvers_file` 의 사람 가운데 작성자가 아닌 사람이
 마지막 커밋에 한 Approve(#119 의 `evaluate_approval` 재사용)가 있어야 통과하고, 작성자를 뺀 승인자가
 없으면 승인으로 풀 수 없다고 밝힌다. 종료코드는 0 통과, 1 승인 필요, 2 판정 불가(설정 오류 포함).
+예상 못 한 예외도 파이썬 기본 종료코드 1(승인 필요와 겹침)이 아니라 판정 불가(종료코드 2)로 끝낸다.
 세 곳이 `decide_pr` 를 부른다 — 재사용 워크플로 `.github/workflows/risk-gate.yml` 의 `check`(빨간불,
 PR 코멘트 하나를 갱신, job 요약)와 `after-merge`(병합 직전 main 의 기준으로 다시 판정해 소유자에게
 배정한 이슈, 제목 중복 방지), 그리고 `gh pr merge` Hook(`check_one_merge` 맨 끝). 다른 검사가
