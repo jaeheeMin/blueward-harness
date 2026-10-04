@@ -656,17 +656,73 @@ def precheck_pr(client: GhClient, repo: str, pr: int) -> dict:
     }
 
 
-def decide_commit(client: GhClient, repo: str, sha: str) -> dict:
+LINK_RETRIES = 3  # 커밋-PR 연결이 비어 있을 때 조회하는 최대 횟수(처음 포함)
+LINK_RETRY_INTERVAL = 5  # 다시 조회하기 전에 쉬는 시간(초)
+
+_TITLE_PR_NUMBER = re.compile(r"\(#(\d+)\)\s*$")
+
+
+def _merged_prs_for_commit(
+    client: GhClient,
+    repo: str,
+    sha: str,
+    commit: dict,
+    retries: int = LINK_RETRIES,
+    interval: float = LINK_RETRY_INTERVAL,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[dict]:
+    """main 커밋을 병합해 들여온 PR 을 찾는다. 못 찾으면 빈 목록(직접 push 로 본다).
+
+    병합 직후에는 GitHub 가 `commits/{sha}/pulls` 의 연결을 늦게 돌려줄 수 있어(#130) 비면 바로
+    단정하지 않는다. (1) 짧게 몇 번 다시 조회하고, (2) 그래도 비면 squash 병합 커밋 제목 끝의
+    `(#123)` 을 근거로 `pulls/123` 을 읽어 그 PR 이 병합됐고 `merge_commit_sha` 가 이 커밋일 때만
+    그 PR 로 본다. 조회 실패(GhError)는 그대로 올려 판정 불가로 이어지게 한다 — 단, 제목 번호가
+    PR 이 아니라 404 인 경우는 근거 없음으로 본다.
+    """
+    for attempt in range(max(retries, 1)):
+        if attempt:
+            sleep(interval)
+        merged = [p for p in fetch_commit_associated_prs(client, repo, sha) if p.get("merged_at")]
+        if merged:
+            return merged
+
+    message = ((commit.get("commit") or {}).get("message") or "").splitlines()
+    match = _TITLE_PR_NUMBER.search(message[0].strip()) if message else None
+    if not match:
+        return []
+    number = int(match.group(1))
+    try:
+        info = fetch_pr_info(client, repo, number) or {}
+    except GhError as exc:
+        if exc.status == 404:
+            return []
+        raise
+    if info.get("merged_at") and info.get("merge_commit_sha") == sha:
+        return [{"number": number, "merged_at": info["merged_at"], "html_url": info.get("html_url", "")}]
+    return []
+
+
+def decide_commit(
+    client: GhClient,
+    repo: str,
+    sha: str,
+    sleep: Callable[[float], None] = time.sleep,
+    retry_interval: float = LINK_RETRY_INTERVAL,
+) -> dict:
     """병합 뒤(push) 이 커밋이 승인 없이 들어온 위험한 변경인지 판정한다.
 
     기준은 병합 직전 main(첫 부모)에서 읽는다 — 병합된 PR 이 기준을 바꿨다면 그 바뀐 기준이
     아니라 병합 전 기준으로 판정해야 PR 이 자기 게이트를 풀 수 없다.
+
+    PR 없이 들어온 커밋으로 볼 때는 "다른 검사가 아직 진행 중" 같은 대기 사유(`waiting`)를 위험으로
+    세지 않는다. 이 판정은 push 직후 돌아 검사가 진행 중인 것이 정상이고, 끝나길 기다리면 push
+    워크플로가 길어진다. 실패한 검사·크기·경로·비밀값은 그대로 위험이다.
     """
     commit = client.get_json(f"repos/{repo}/commits/{sha}") or {}
     parents = commit.get("parents") or []
     ref = (parents[0].get("sha") if parents else None) or sha
 
-    merged = [p for p in fetch_commit_associated_prs(client, repo, sha) if p.get("merged_at")]
+    merged = _merged_prs_for_commit(client, repo, sha, commit, interval=retry_interval, sleep=sleep)
     if merged:
         problems = []
         enabled = False
@@ -694,7 +750,7 @@ def decide_commit(client: GhClient, repo: str, sha: str) -> dict:
         prefixes=cfg["high_risk_paths"] + fetch_human_merge_paths(client, repo, ref),
         load_check_runs=lambda: fetch_check_runs(client, repo, sha),
     )
-    findings = evaluate(ctx)
+    findings = [f for f in evaluate(ctx) if not f.waiting]
     if not findings:
         return _commit_result(True, "low", True, [], [], "")
     reasons = ["PR 없이 main 에 직접 들어옴"] + [f.message for f in findings]

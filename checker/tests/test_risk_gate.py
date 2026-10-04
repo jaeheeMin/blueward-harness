@@ -537,6 +537,9 @@ def test_기다리라고_하지_않으면_바로_돌려준다(monkeypatch):
 # --- decide_commit ----------------------------------------------------------------
 
 
+_NOSLEEP = lambda s: None  # noqa: E731 - 재조회 간격을 건너뛴다
+
+
 def _commit_client(*, prs, config="", files=None, parent="parent0", author="bob", approved=False):
     r = {
         "repos/o/r/commits/m1": {"parents": [{"sha": parent}], "author": {"login": author},
@@ -585,19 +588,138 @@ def test_게이트가_꺼져_있으면_병합_뒤에도_통과():
 
 def test_PR_없이_main_에_직접_들어온_위험한_변경은_1():
     client = _commit_client(prs=[], files=[_file("docs/ssot/PRD.md")])
-    result = rg.decide_commit(client, "o/r", "m1")
+    result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
     assert result["approved"] is False and "PR 없이" in result["reasons"][0]
     assert rg._exit_for(result) == 1
 
 
 def test_PR_없이_들어온_안전한_변경은_통과():
     client = _commit_client(prs=[], files=[_file("src/a.py")])
-    assert rg._exit_for(rg.decide_commit(client, "o/r", "m1")) == 0
+    assert rg._exit_for(rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)) == 0
 
 
 def test_PR_없이_들어온_커밋도_설정이_없으면_통과():
     client = _commit_client(prs=[], config=None, files=[_file("docs/ssot/PRD.md")])
-    assert rg._exit_for(rg.decide_commit(client, "o/r", "m1")) == 0
+    assert rg._exit_for(rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)) == 0
+
+
+# --- decide_commit: 연결 지연·진행 중 검사 (#130) -----------------------------------
+
+
+class _SeqClient(FakeClient):
+    """`commits/m1/pulls` 를 부를 때마다 `pulls_seq` 의 다음 응답을 돌려준다(마지막은 반복)."""
+
+    def __init__(self, responses, pulls_seq):
+        super().__init__(responses)
+        self.pulls_seq = list(pulls_seq)
+        self.pull_calls = 0
+
+    def _lookup(self, path):
+        if path == "repos/o/r/commits/m1/pulls":
+            self.asked.append(path)
+            i = min(self.pull_calls, len(self.pulls_seq) - 1)
+            self.pull_calls += 1
+            value = self.pulls_seq[i]
+            if isinstance(value, Exception):
+                raise value
+            return value
+        return super()._lookup(path)
+
+
+def _late_client(pulls_seq, *, title="feat: x (#5)", files=None, pr_info=None, check_runs=None, config=""):
+    base = _commit_client(prs=[], files=files if files is not None else [_file("src/a.py")], config=config)
+    r = dict(base.responses)
+    r["repos/o/r/commits/m1"] = dict(r["repos/o/r/commits/m1"], commit={"message": title + "\n\n본문"})
+    if pr_info is not None:
+        r["repos/o/r/pulls/5"] = dict(r["repos/o/r/pulls/5"], **pr_info)
+    if check_runs is not None:
+        r["repos/o/r/commits/m1/check-runs*"] = {"check_runs": check_runs}
+    return _SeqClient(r, pulls_seq)
+
+
+_MERGED_PR = {"number": 5, "merged_at": "2026-01-01", "html_url": "u"}
+_MERGED_INFO = {"merged_at": "2026-01-01", "merge_commit_sha": "m1", "html_url": "https://x/5", "number": 5}
+
+
+def test_연결이_늦게_잡혀도_재조회로_PR_을_찾는다():
+    sleeps = []
+    client = _late_client([[], [], [_MERGED_PR]], files=[_file("rules/a.yaml")])
+    result = rg.decide_commit(client, "o/r", "m1", sleep=sleeps.append, retry_interval=2)
+    assert client.pull_calls == 3 and sleeps == [2, 2]
+    assert result["prs"][0]["pr"] == 5 and not any("PR 없이" in r for r in result["reasons"])
+
+
+def test_재조회에도_비면_커밋_제목의_PR_번호로_찾는다():
+    client = _late_client([[]], pr_info=_MERGED_INFO, files=[_file("rules/a.yaml")])
+    result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
+    assert client.pull_calls == rg.LINK_RETRIES
+    assert result["prs"][0]["pr"] == 5 and not any("PR 없이" in r for r in result["reasons"])
+    assert rg._exit_for(result) == 1  # 위험한 PR 을 승인 없이 병합 — PR 경로로 판정됨
+
+
+def test_제목의_PR_번호로_찾은_승인된_PR_은_통과():
+    client = _late_client([[]], pr_info=_MERGED_INFO, files=[_file("rules/a.yaml")])
+    client.responses["repos/o/r/pulls/5/reviews"] = [_review("alice", "APPROVED", HEAD)]
+    assert rg._exit_for(rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)) == 0
+
+
+def test_제목_PR_번호의_merge_commit_sha_가_다르면_직접_push_로_본다():
+    info = dict(_MERGED_INFO, merge_commit_sha="other")
+    client = _late_client([[]], pr_info=info, files=[_file("docs/ssot/PRD.md")])
+    result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
+    assert "PR 없이" in result["reasons"][0] and rg._exit_for(result) == 1
+
+
+def test_제목_PR_번호의_PR_이_병합되지_않았으면_직접_push_로_본다():
+    info = {"merged_at": None, "merge_commit_sha": "m1", "number": 5}
+    client = _late_client([[]], pr_info=info, files=[_file("docs/ssot/PRD.md")])
+    assert "PR 없이" in rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)["reasons"][0]
+
+
+def test_제목_번호가_PR_이_아니어서_404_면_직접_push_로_본다():
+    client = _late_client([[]], files=[_file("docs/ssot/PRD.md")])
+    client.responses["repos/o/r/pulls/5"] = GhError("gh: Not Found (HTTP 404)", status=404)
+    assert "PR 없이" in rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)["reasons"][0]
+
+
+def test_PR_번호_근거도_연결도_없는_진짜_직접_push_는_잡힌다():
+    client = _late_client([[]], title="chore: 직접 수정", files=[_file("docs/ssot/PRD.md")])
+    result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
+    assert client.pull_calls == rg.LINK_RETRIES
+    assert "PR 없이" in result["reasons"][0] and rg._exit_for(result) == 1
+
+
+def test_직접_push_에서_진행_중인_검사만_있으면_위험이_아니다():
+    runs = [{"name": "ci / test", "status": "in_progress", "conclusion": None}]
+    client = _late_client([[]], title="chore: x", check_runs=runs, config="require_checks_green: true\n")
+    result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
+    assert result["risk"] == "low" and rg._exit_for(result) == 0
+
+
+def test_직접_push_에서_실패한_검사는_위험이다():
+    runs = [
+        {"name": "ci / test", "status": "completed", "conclusion": "failure"},
+        {"name": "ci / lint", "status": "in_progress", "conclusion": None},
+    ]
+    client = _late_client([[]], title="chore: x", check_runs=runs, config="require_checks_green: true\n")
+    result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
+    assert rg._exit_for(result) == 1
+    assert any("실패" in r for r in result["reasons"]) and not any("끝나지 않음" in r for r in result["reasons"])
+
+
+def test_연결_조회가_실패하면_판정_불가_2(monkeypatch):
+    client = _late_client([GhError("boom")], title="chore: x")
+    monkeypatch.setattr(rg, "GhClient", lambda: client)
+    monkeypatch.setattr(rg.time, "sleep", _NOSLEEP)
+    assert rg.cmd_check_commit(_Args()) == 2
+
+
+def test_제목_번호_조회가_실패하면_판정_불가_2(monkeypatch):
+    client = _late_client([[]], pr_info=None)
+    client.responses["repos/o/r/pulls/5"] = GhError("timeout")
+    monkeypatch.setattr(rg, "GhClient", lambda: client)
+    monkeypatch.setattr(rg.time, "sleep", _NOSLEEP)
+    assert rg.cmd_check_commit(_Args()) == 2
 
 
 # --- CLI 종료코드 -----------------------------------------------------------------
