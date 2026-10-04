@@ -69,6 +69,7 @@ EXPECTED_FILES = {
     ".github/risk-gate.yaml",
     ".github/workflows/risk-gate.yml",
     ".github/workflows/ai-review.yml",
+    ".github/workflows/gitleaks.yml",
     ".claude/settings.json",
 }
 

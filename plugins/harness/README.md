@@ -188,9 +188,10 @@ CR-007(빈 CATCH, ABAP·JS/TS)은 기계로도 검사한다(#54, #81). 검사 �
 MCP ADT 도구 경로는 `mcp_source_guard.py` 가, `.github/workflows/doc-guard.yml` 이
 PR 마다 각각 부른다 — doc-guard 와 같은 엔진 저장소, 같은 관문 구조를 그대로 쓴다.
 CR-005(표준 객체 수정)는 기본 대상인 Public Cloud(ABAP Cloud)에서 플랫폼이
-막으므로 하네스가 검사하지 않는다. 나머지 CR-004, CR-006, CR-008 은 사람이
-리뷰로만 본다 — CR-004(비밀정보)는 범용 시크릿 스캐너가, CR-006(하드코딩)은
-프로젝트별 도메인 지식이 있어야 하고, CR-008 은 코드 검사 대상이 아니다.
+막으므로 하네스가 검사하지 않는다. CR-004 는 아래 gitleaks 가 잡고, 나머지 CR-006, CR-008 은 사람이
+리뷰로만 본다 — CR-006(하드코딩)은 프로젝트별 도메인 지식이 있어야 하고, CR-008 은
+코드 검사 대상이 아니다. CR-004(비밀정보)는 이 검사기가 아니라 범용 시크릿 스캐너인
+gitleaks 가 맡는다(아래 "비밀정보 검사").
 SAP ATC 와의 관계는 `conventions/common.md` 의 "기본 대상과 ATC 와의 관계" 에
 있다 — 080 실측으로 ATC 기본 variant 가 CR-002·CR-003 패턴을 잡지 않는 것을
 확인했다(#85).
@@ -238,6 +239,35 @@ Project Repository 의 CLAUDE.md 에 짧게 적어 둬야 세션이 매번 상�
 설치 없이 blueward-harness 마켓플레이스와 harness Plugin 설치 안내를 받게
 한다(#89) — 이미 그 파일이 있으면 통째로 덮어쓰지 않고 없는 두 항목만
 채워 넣는다. 자세한 절차는 `skills/scaffold/SKILL.md` 를 읽는다.
+
+## 비밀정보 검사(#159)
+
+CR-004 는 `.github/workflows/gitleaks.yml` 재사용 워크플로가 PR·main 커밋마다 gitleaks 로
+검사한다(`/harness:scaffold` 가 호출 워크플로를 만든다). gitleaks-action 은 조직 계정에 라이선스
+키가 필요해 쓰지 않고, 릴리즈 바이너리를 버전과 sha256 으로 고정해 받는다. PR 은 base..head 커밋
+범위만, main push 는 그 push 범위만 훑고, 값은 `--redact` 로 가려서 출력한다. 위험도 검사
+(risk-gate)의 비밀값 기준은 그대로 두고 별도 빨간불로 병행한다.
+
+- **세 갈래 판정.** 유출 발견(위반), 통과, 검사 불능(gitleaks 오류, 설정 오류, 검사 범위를 못 찾음)이
+  서로 다른 메시지로 갈린다. 검사 불능을 통과로 두지 않는다. 판정은 `scripts/gitleaks_scan.sh`.
+- **기본 설정**은 `checker/gitleaks/harness.toml` — gitleaks 기본 규칙에 SAP 로그온 쿠키
+  `MYSAPSSO2`, 세션 쿠키 `SAP_SESSIONID_<SID>_<client>`, SAP 접속 비밀번호 대입 규칙을 더했다.
+- **Project Repository 가 설정을 바꾸려면** 저장소 꼭대기에 `.gitleaks.toml` 을 둔다. 있으면 하네스
+  기본 설정 대신 그것만 쓰므로, 하네스 규칙을 유지하려면 워크플로가 엔진을 내려받는 자리를 이어받는다.
+  PR 은 자기가 낸 파일이 아니라 **base 커밋의 `.gitleaks.toml`** 로 검사한다(PR 이 자기 allowlist 로
+  자기 비밀값을 통과시키지 못하게). PR 이 이 파일을 바꾸면 경고가 뜨고, 변경은 병합 뒤부터 적용된다.
+  base 에 파일이 없으면 하네스 기본 설정을 쓴다.
+
+  ```toml
+  [extend]
+  path = ".harness-engine/checker/gitleaks/harness.toml"
+
+  [allowlist]
+  paths = ['''^docs/samples/''']
+  ```
+
+  `[extend] path` 는 저장소 꼭대기(현재 폴더) 기준이다.
+- pre-commit 훅 연결은 아직 없다.
 
 ## Audit
 

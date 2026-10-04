@@ -1,0 +1,108 @@
+# Project Repository 가 가져다 쓰는 재사용 워크플로(#159).
+#
+# 커밋에 비밀정보가 들어갔는지 gitleaks 로 검사한다(공통 개발 규칙 CR-004). 위험도 검사
+# (risk-gate)의 비밀값 기준과는 별개로, 발견되면 PR 을 빨갛게 만든다. gitleaks-action 은
+# 조직 계정에 라이선스 키를 요구하므로 쓰지 않고, 릴리즈 바이너리를 버전과 sha256 으로
+# 고정해 받아 쓴다. 버전을 올릴 때는 GITLEAKS_VERSION 과 GITLEAKS_SHA256(릴리즈의
+# gitleaks_<버전>_checksums.txt 의 linux_x64 줄)을 함께 고친다.
+#
+# 검사 범위
+#   PR            base..head 커밋 범위(PR 이 더한 커밋만)
+#   push(main)    이 push 의 범위(github.event.before..sha). 새 브랜치면 그 이력 전체,
+#                 이전 커밋이 사라진 강제 push 면 마지막 커밋 하나(경고를 남긴다)
+#
+# 설정
+#   저장소 꼭대기에 `.gitleaks.toml` 이 있으면 그것을, 없으면 하네스 기본 설정
+#   (PR 은 PR 이 낸 head 의 파일이 아니라 base 커밋의 파일을 쓴다 — PR 이 자기 allowlist 로 자기
+#   비밀값을 통과시키지 못하게 하려는 것이다. PR 이 `.gitleaks.toml` 을 바꾸면 경고하고, 그 변경은
+#   병합 뒤부터 적용된다. base 에 파일이 없으면 하네스 기본 설정)
+#   (`checker/gitleaks/harness.toml`: gitleaks 기본 규칙 + SAP 쿠키·비밀번호 규칙)을 쓴다.
+#   자기 설정에서 하네스 규칙을 이어받으려면(허용 목록만 더하는 경우):
+#
+#     [extend]
+#     path = ".harness-engine/checker/gitleaks/harness.toml"   # 이 워크플로가 엔진을 내려받는 자리
+#
+#     [allowlist]
+#     paths = ['''^docs/samples/''']
+#
+# 결과는 세 갈래다. 유출 발견(위반), 통과, 검사 불능(gitleaks 오류, 설정 오류, 검사 범위를
+# 못 찾음 등)이 서로 다른 메시지를 내며, 검사 불능은 통과도 위반도 아니다(CLAUDE.md 원칙 7).
+# 비밀값은 --redact 로 가려서 출력하고, 가려진 JSON 리포트만 아티팩트로 남긴다.
+# 판정 셸은 scripts/gitleaks_scan.sh 에 있다.
+#
+# 부르는 쪽 예:
+#
+#   on:
+#     pull_request:
+#     push:
+#       branches: [main]
+#   jobs:
+#     gitleaks:
+#       uses: jaeheeMin/blueward-harness/.github/workflows/gitleaks.yml@main
+#       permissions:
+#         contents: read
+
+name: gitleaks
+
+on:
+  workflow_call:
+    inputs:
+      engine-ref:
+        description: 판정 스크립트와 기본 설정을 가져올 blueward-harness 의 ref
+        type: string
+        default: main
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - name: 저장소 가져오기
+        uses: actions/checkout@v4
+        with:
+          # 커밋 범위를 훑으려면 전체 이력이 있어야 한다. PR 은 합성 커밋이 아니라 head 를 본다.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: 검사 엔진 가져오기
+        uses: actions/checkout@v4
+        with:
+          repository: jaeheeMin/blueward-harness
+          ref: ${{ inputs.engine-ref }}
+          path: .harness-engine
+
+      - name: gitleaks 받기
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/gitleaks-bin"
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP/gitleaks-bin" gitleaks
+          "$RUNNER_TEMP/gitleaks-bin/gitleaks" version
+
+      - name: 비밀정보 검사
+        id: scan
+        shell: bash
+        env:
+          GITLEAKS_BIN: ${{ runner.temp }}/gitleaks-bin/gitleaks
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REPORT_PATH: ${{ runner.temp }}/gitleaks-report.json
+        run: bash .harness-engine/scripts/gitleaks_scan.sh
+
+      - name: 리포트 올리기(값은 가려져 있다)
+        if: always() && steps.scan.outputs.result == 'leak'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: ${{ runner.temp }}/gitleaks-report.json
+          retention-days: 14

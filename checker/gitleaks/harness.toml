@@ -1,0 +1,54 @@
+# 하네스 기본 gitleaks 설정(#159). gitleaks 기본 규칙에 SAP 접속 비밀 규칙을 더한다.
+# 재사용 워크플로(.github/workflows/gitleaks.yml)가 Project Repository 에 `.gitleaks.toml` 이
+# 없을 때 이 파일을 쓴다. 있으면 그 파일을 쓰므로, 하네스 규칙을 유지하려면 그 파일에서 이어받는다.
+#
+#   # Project Repository 꼭대기의 .gitleaks.toml
+#   [extend]
+#   path = ".harness-engine/checker/gitleaks/harness.toml"   # 워크플로가 엔진을 내려받는 자리
+#
+#   [allowlist]
+#   paths = ['''^docs/samples/''']
+#
+# 허용 목록은 그 파일의 [allowlist] 에 둔다(경로·정규식·커밋). 값이 아니라 규칙을 데이터로 다룬다.
+
+title = "blueward-harness gitleaks"
+
+[extend]
+useDefault = true
+
+# SAP 로그온 티켓 쿠키. 값은 보통 수백 자의 base64/URL 인코딩 문자열이다.
+[[rules]]
+id = "sap-mysapsso2-cookie"
+description = "SAP 로그온 티켓 쿠키(MYSAPSSO2) 값"
+regex = '''(?i)MYSAPSSO2["']?\s*[=:]\s*["']?([A-Za-z0-9%+/=._~-]{20,})'''
+secretGroup = 1
+keywords = ["mysapsso2"]
+tags = ["sap", "cookie"]
+
+# SAP 세션 쿠키. 이름에 시스템 ID 와 클라이언트가 붙는다(SAP_SESSIONID_Z5U_080).
+[[rules]]
+id = "sap-sessionid-cookie"
+description = "SAP 세션 쿠키(SAP_SESSIONID_<SID>_<client>) 값"
+regex = '''(?i)SAP_SESSIONID_[A-Z0-9]{3}_[0-9]{3}["']?\s*[=:]\s*["']?([A-Za-z0-9%+/=._~-]{16,})'''
+secretGroup = 1
+keywords = ["sap_sessionid_"]
+tags = ["sap", "cookie"]
+
+# SAP 접속 비밀번호 대입. 이름에 sap·adt·abap·s4 가 들어간 변수에 비밀번호를 대입하는 줄만 본다.
+# 일반 "password" 대입은 기본 규칙과 오탐이 겹치므로 여기서 다루지 않는다.
+[[rules]]
+id = "sap-password-assignment"
+description = "SAP 접속 비밀번호 대입(SAP_PASSWORD=..., adt.password: ...)"
+regex = '''(?i)(?:sap|adt|abap|s4)[\w.-]{0,30}(?:password|passwd|pwd)["']?\s*[:=]\s*["']?([^\s"'<>$`{}]{6,})'''
+secretGroup = 1
+entropy = 2.0
+keywords = ["sap", "adt", "abap", "s4"]
+tags = ["sap", "password"]
+
+  [rules.allowlist]
+  description = "자리표시 값(환경 변수 참조, 예시 문구)"
+  regexTarget = "secret"
+  regexes = [
+    '''(?i)^(?:x+|\*+|\.+|changeme|change_me|password|passwd|example|sample|dummy|secret|your[\w-]*|my[\w-]*password|redacted|null|none|undefined)$''',
+    '''(?i)^(?:process\.env|env\.|os\.environ|getenv|secrets\.)''',
+  ]

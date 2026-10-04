@@ -1,0 +1,16 @@
+# 이 저장소(Project Repository)의 PR 과 main 커밋마다 비밀정보(CR-004)를 gitleaks 로 검사한다(#159).
+# 검사 로직은 blueward-harness 저장소에서 그때그때 내려받아 쓴다 — doc-guard.yml 과 같은 사정이다.
+# 저장소 꼭대기에 `.gitleaks.toml` 이 있으면 그 설정을, 없으면 하네스 기본 설정(SAP 쿠키·비밀번호
+# 규칙 포함)을 쓴다. 하네스 규칙을 유지한 채 허용 목록만 더하려면 `.gitleaks.toml` 에서 이어받는다:
+#   [extend]
+#   path = ".harness-engine/checker/gitleaks/harness.toml"
+name: gitleaks
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  gitleaks:
+    uses: jaeheeMin/blueward-harness/.github/workflows/gitleaks.yml@main
+    permissions:
+      contents: read
