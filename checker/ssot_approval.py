@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import re
 import subprocess
 import sys
 
@@ -191,7 +192,28 @@ def is_approved(
 
 
 class GhError(RuntimeError):
-    """`gh` 호출이 실패했다. 판정 불가(EXIT_UNKNOWN)로 이어진다."""
+    """`gh` 호출이 실패했다. 판정 불가(EXIT_UNKNOWN)로 이어진다.
+
+    `status` 는 `gh` 가 stderr 마지막 줄에 `(HTTP 404)` 로 알려 준 HTTP 상태 코드다.
+    시간 초과·실행 실패처럼 HTTP 응답을 못 받은 경우와 상태 표기가 없는 경우는 None 이다.
+    """
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+# `gh api` 는 HTTP 오류를 `gh: <서버 메시지> (HTTP 404)` 한 줄로 stderr 에 낸다.
+_HTTP_STATUS_TAIL = re.compile(r"\(HTTP (\d{3})\)\s*$")
+
+
+def _http_status(stderr: str) -> int | None:
+    """stderr 의 마지막 비어 있지 않은 줄 끝의 `(HTTP nnn)` 만 상태 코드로 읽는다."""
+    lines = [ln for ln in stderr.strip().splitlines() if ln.strip()]
+    if not lines:
+        return None
+    m = _HTTP_STATUS_TAIL.search(lines[-1])
+    return int(m.group(1)) if m else None
 
 
 class GhClient:
@@ -216,7 +238,8 @@ class GhClient:
         if done.returncode != 0:
             raise GhError(
                 f"gh {' '.join(args)} 가 종료코드 {done.returncode} 로 실패했다: "
-                f"{done.stderr.strip()}"
+                f"{done.stderr.strip()}",
+                status=_http_status(done.stderr),
             )
         return done.stdout
 
@@ -231,7 +254,9 @@ class GhClient:
         try:
             return self.get_json(path)
         except GhError as exc:
-            if "404" in str(exc) or "Not Found" in str(exc):
+            # 오류 메시지 문자열이 아니라 HTTP 상태로만 "파일 없음" 을 판정한다. 메시지에는
+            # 요청 경로(40자리 SHA)가 들어가 "404" 가 우연히 섞일 수 있다.
+            if exc.status == 404:
                 return None
             raise
 
