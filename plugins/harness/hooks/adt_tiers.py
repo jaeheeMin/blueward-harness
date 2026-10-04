@@ -373,14 +373,15 @@ def _next_for_writable(tiers: Tiers, exclude: str | None = None, extra: str | No
     ]
     if writable:
         text = (
-            "다음: Claude 가 쓰기가 허용된 서버로 바꿔 같은 작업을 하십시오 — 허용 서버: "
-            + ", ".join(writable) + ". 로그인이 필요하면 해당 서버의 로그인 스킬을 쓰도록 "
-            "사람에게 안내하십시오."
+            "다음: 멈추고 사람에게 알리십시오. 다른 서버(쓰기 허용: " + ", ".join(writable)
+            + ")에서 해야 하는 작업인지는 사람이 정합니다(사람이 할 일). 사람이 정하기 전에는 "
+            "다른 서버로 옮겨 다시 시도하지 마십시오."
         )
     else:
         text = (
-            "다음: env/adt-tiers.yaml 에 writes_allowed: true 인 서버가 없습니다. 쓰기가 "
-            "필요하면 사람이 파일을 확인해 개발 서버의 writes_allowed 를 정하십시오(사람이 할 일)."
+            "다음: 멈추고 사람에게 알리십시오. env/adt-tiers.yaml 에 writes_allowed: true 인 "
+            "서버가 없습니다. 쓰기가 필요하면 사람이 파일을 확인해 개발 서버의 writes_allowed 를 "
+            "정하십시오(사람이 할 일)."
         )
     if extra:
         text += "\n" + extra

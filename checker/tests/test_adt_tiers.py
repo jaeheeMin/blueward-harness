@@ -87,12 +87,29 @@ def test_mcp_도구_이름이_아니면_none(name):
 
 # --- 판정(순수 함수) -----------------------------------------------------------
 
+def _지시_없음(reason: str) -> None:
+    """다른 서버로 바꿔 같은 작업을 하라는 지시가 없어야 한다(#160)."""
+    for phrase in ("같은 작업을 하십시오", "바꿔 같은", "Claude 가 쓰기가 허용된", "로그인 스킬"):
+        assert phrase not in reason
+
+
 def test_쓰기_금지_서버의_쓰기_도구는_거절하고_허용_서버를_안내한다():
     d = adt_tiers.decide("mcp__abap-adt-z5u__deleteObject", {}, _tiers(), DEFAULTS)
     assert d.kind == "deny"
     assert "writes_allowed: false" in d.reason
     assert "abap-adt-z5u-dev" in d.reason  # 파일에서 읽은 허용 서버
-    assert "다음:" in d.reason
+    assert "다음: 멈추고 사람에게 알리십시오" in d.reason
+    assert "(사람이 할 일)" in d.reason
+    _지시_없음(d.reason)
+
+
+def test_허용_서버가_없으면_사람이_파일을_확인하라고만_안내한다():
+    no_writable = TIERS_YAML.replace("writes_allowed: true", "writes_allowed: false")
+    d = adt_tiers.decide("mcp__abap-adt-z5u__deleteObject", {}, _tiers(no_writable), DEFAULTS)
+    assert d.kind == "deny"
+    assert "writes_allowed: true 인 서버가 없습니다" in d.reason
+    assert "(사람이 할 일)" in d.reason
+    _지시_없음(d.reason)
 
 
 def test_허용_서버의_쓰기_도구는_테넌트_판정을_통과한다():
@@ -105,6 +122,7 @@ def test_모르는_서버의_쓰기_도구는_거절한다():
     assert d.kind == "deny"
     assert "other-server" in d.reason
     assert "abap-adt-z5u-dev" in d.reason
+    _지시_없음(d.reason)
 
 
 def test_쓰기_금지_서버라도_쓰기_목록에_없는_조회_도구는_통과한다():
@@ -277,6 +295,8 @@ def test_훅_쓰기_금지_서버의_쓰기는_엔진을_부르기_전에_거절
     assert code == 0 and _decision(out) == "deny"
     assert "writes_allowed: false" in _reason(out)
     assert "abap-adt-z5u-dev" in _reason(out)
+    assert "다음: 멈추고 사람에게 알리십시오" in _reason(out)
+    _지시_없음(_reason(out))
 
 
 @pytest.mark.parametrize("tool", ["deleteObject", "activateObjects", "runClass", "createObject"])

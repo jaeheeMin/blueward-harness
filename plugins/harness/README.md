@@ -116,7 +116,7 @@ data_tools: [tableContents, runQuery]
 
 | 상황 | 동작 |
 |---|---|
-| 서버가 `writes_allowed: false` 이고 도구가 `write_tools` 에 있다 | 거절. 쓰기가 허용된 서버 이름을 파일에서 읽어 "다음:" 에 보여 준다 |
+| 서버가 `writes_allowed: false` 이고 도구가 `write_tools` 에 있다 | 거절. 쓰기가 허용된 서버 이름을 파일에서 읽어 알리되, "다음:" 은 멈추고 사람에게 알려 다른 서버에서 할 일인지 정하게 한다(Claude 가 서버를 바꿔 다시 시도하지 않는다) |
 | 서버가 `servers` 에 없고 도구가 `write_tools` 에 있다 | 거절(모르는 서버는 쓰기 허용으로 보지 않는다) |
 | `writes_allowed: true` 서버의 쓰기 도구 | 테넌트 판정은 통과하고, 기존 코드 규칙(CR) 검사가 이어진다 |
 | 도구가 `data_tools`(기본 `tableContents`, `runQuery`)에 있다 | 어느 서버든 사용자에게 되묻는다(`ask`). 쿼리에 `SELECT *` 나 `FIELDS *` 가 있으면 사유에 CR-003 을 적는다 |
