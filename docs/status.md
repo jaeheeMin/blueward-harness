@@ -179,8 +179,11 @@ CR-003 을 적는다. 파일이 없으면 쓰기는 기존 코드 규칙만 보�
 잡으면 ADT 가 아닌 서버 호출마다 `uv` 를 띄우는 비용이 크다. 그 한계로, 파일의 `write_tools` 에 새
 이름을 적어도 매처에 없으면 막히지 않는다. scaffold 는 `env/adt-tiers.example.yaml`(훅이 읽지
 않는 예시, 서버 이름은 자리표시, 전부 `writes_allowed: false`)을 만든다 — 빈 활성 파일을 두면
-채우기 전까지 모든 쓰기가 막히기 때문이다. 실제 MCP 호출로 100 쓰기가 막히는 것은 public-cloud 에서
-확인할 일로 남았다.
+채우기 전까지 모든 쓰기가 막히기 때문이다. 실제 세션 확인(2026-10-04, public-cloud, harness 0.10.22):
+`abap-adt-z5u`(100)의 `deleteObject` 는 SAP 에 닿기 전에 PreToolUse 훅이 거절했고, `abap-adt-z5u-dev`(080)의
+`tableContents` 는 권한 우회 모드 세션에서도 되묻는 창이 떴다. 거절하면 Claude Code 가 "The user doesn't want to
+proceed with this tool use" 만 돌려주고 MCP·SAP 요청은 없었다. 허용하면 SAP 까지 갔다(080 세션 만료로 500).
+후속: 거절 메시지가 허용 서버에서 같은 작업을 하라고 지시하는 문제(#160), 서버별 데이터 도구 막기 설정(#161).
 
 **세션 Hook 이 지금 작업 폴더로 판단한다(#71).** `session-start-sync.sh`,
 `stop-deliver.sh`, `pre-bash-git-guard.sh` 는 `CLAUDE_PROJECT_DIR`(세션을 처음 연
