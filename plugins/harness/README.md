@@ -153,6 +153,11 @@ Hook 은 검사 Engine 을 받는 데 uv, 명령을 읽는 데 jq, GitHub 작업
   설치 명령만 안내한다(macOS 는 `brew install uv jq gh`).
 - 실패한 도구는 24시간 동안 다시 설치를 시도하지 않는다. 기록은
   `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/harness}/tool-install-failures` 에 있다.
+- **설치에 쓰는 시간에는 상한이 있다(#131).** 세션 시작 훅은 600초에 끊기므로, 설치
+  전체는 300초(`HARNESS_TOOLS_BUDGET`), winget 한 번은 90초(`HARNESS_INSTALL_TIMEOUT`)까지만
+  기다린다. 상한을 넘으면 남은 도구 설치를 건너뛰고 "다음 세션을 열면 자동으로 다시
+  시도합니다" 와 수동 설치 명령을 알린다. 상한에 걸린 것은 실패 기록에 넣지 않아 다음
+  세션에 바로 다시 시도한다. 그 뒤의 동기화와 지난 경고 전달은 그대로 실행된다.
 - **끄려면** 환경 변수 `HARNESS_NO_AUTO_INSTALL=1` 을 설정한다. 설치는 하지 않고
   안내만 한다.
 
