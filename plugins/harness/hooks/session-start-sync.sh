@@ -84,6 +84,28 @@ if [ -f "$repo_top/.mcp.json" ] && [ ! -f "$repo_top/env/adt-tiers.yaml" ]; then
   add "env/adt-tiers.yaml 이 없어 테넌트별 쓰기 차단이 꺼져 있습니다. 다음: 사람이 env/adt-tiers.yaml 에 MCP 서버별 writes_allowed 와 write_tools 를 적으십시오(예시: env/adt-tiers.example.yaml 또는 harness README 의 \"테넌트별 쓰기 차단\" 절)."
 fi
 
+# 기준 폴더(templates/ 와 rules/ 를 함께 가진 폴더)가 하나도 없는 Project Repository 는
+# doc-guard 가 걸리지 않는다. scaffold 를 모르면 모른 채 작업을 시작하므로 안내한다(#128).
+# 자동 실행은 묻지 않고 파일을 만드는 일이라 하지 않는다. 플러그인 저장소(marketplace.json
+# 이 꼭대기에 있다)와 HARNESS_NO_SCAFFOLD_HINT=1 은 안내하지 않는다. 작업 트리를 보므로
+# 아직 커밋하지 않은 scaffold 결과도 인정한다. 꼭대기에서 3단계 아래 폴더까지만 찾고
+# .git·node_modules·.venv 같은 폴더는 들어가지 않는다. 판정이 실패해도 훅은 계속 간다.
+if [ "${HARNESS_NO_SCAFFOLD_HINT:-}" != "1" ] && [ ! -f "$repo_top/.claude-plugin/marketplace.json" ]; then
+  has_standards=""
+  while IFS= read -r tpl_dir; do
+    tpl_dir="${tpl_dir%$'\r'}"
+    if [ -d "$(dirname "$tpl_dir")/rules" ]; then
+      has_standards="1"
+      break
+    fi
+  done < <(find "$repo_top" -maxdepth 4 \
+    \( -name .git -o -name node_modules -o -name .venv -o -name venv -o -name __pycache__ \) -prune \
+    -o -type d -name templates -print 2>/dev/null || true)
+  if [ -z "$has_standards" ]; then
+    add "기준 폴더(templates/ 와 rules/)가 없습니다. 다음: /harness:scaffold 를 실행해 표준 구조를 만드십시오(이 저장소가 Project Repository 가 아니면 HARNESS_NO_SCAFFOLD_HINT=1 로 이 안내를 끌 수 있습니다)."
+  fi
+fi
+
 git_dir="$(git rev-parse --git-dir)"
 
 # 리베이스를 실행하고 성공·충돌·그 밖의 실패를 메시지로 남긴다. 실패해도
