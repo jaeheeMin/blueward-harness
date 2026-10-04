@@ -111,6 +111,8 @@ main 에 직접 커밋하거나 맨손 `git push` 하면 훅이 거부한다. �
 거부한다. 기준은 `.github/risk-gate.yaml` 에서 고치고 파일을 지우면 꺼진다. 이 저장소
 자신은 승인자가 한 명뿐이라 아직 이 파일을 두지 않았다(게이트 꺼짐).
 
+**Plugin version 올림도 검사한다(#136).** `plugins/harness/` 를 바꾼 PR 은 `plugin.json` version 이 base 보다 커야 `checker` 워크플로가 통과한다(`scripts/check_plugin_version.py --base <ref>` 로 로컬에서도 돌릴 수 있다).
+
 > **브랜치 보호가 걸려 있지 않다.** 이 저장소는 개인 계정의 private 저장소이고
 > 요금제가 Free 라, GitHub 서버 쪽에서 main 을 강제로 지킬 수 없다. 지금
 > main 을 지키는 것은 로컬 훅뿐이고, 훅을 설치하지 않은 clone 에서는 막을

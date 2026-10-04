@@ -18,6 +18,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # version 검사(아래)가 base 와의 공통 조상을 찾으려면 PR 이력이 필요하다. 이력이 필요한
+          # 것은 PR 때뿐이라 push 는 얕게 받는다. 0 을 문자열로 쓴다 — 식에서 숫자 0 은 거짓이라
+          # `조건 && 0 || 1` 은 늘 1 이 된다.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -45,3 +50,10 @@ jobs:
           code=$?
           set -e
           test "$code" -eq 1 || { echo "종료코드가 1이 아니라 $code 다"; exit 1; }
+
+      # plugins/harness/ 를 바꾼 PR 은 plugin.json version 을 올려야 한다(CLAUDE.md 원칙 8, #136).
+      # git 과 파일 경로만 보는 검사라 OS 마다 돌릴 이유가 없어 ubuntu 에서만 한 번 돈다.
+      - name: Plugin version 올림 확인
+        if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: uv run python scripts/check_plugin_version.py --base "${{ github.event.pull_request.base.sha }}"

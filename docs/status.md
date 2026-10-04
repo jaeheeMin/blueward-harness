@@ -423,6 +423,14 @@ Claude GitHub App 설치 여부, OIDC 교환, 허용 도구 문법의 실동작�
 GhError 로 판정 불가). risk_gate, 승인자 파일, human-merge-paths 읽기가 같은 함수를 쓰므로 함께
 고쳐진다. 실제 GitHub 에서 5xx 를 일으켜 보지는 않았다(가짜 subprocess 로만 확인).
 
+**Plugin 자체 검증 테스트를 더했다(#136).** `plugins/harness/` 를 바꾼 PR 이 plugin.json version 을
+올렸는지 `checker.plugin_version`(진입점 `scripts/check_plugin_version.py`)이 `checker.yml` 의 PR 단계에서
+확인한다. 올리지 않으면 종료코드 1, base 나 plugin.json 을 읽지 못하면 통과가 아니라 2(원칙 7)다. version
+은 점으로 나눈 정수로 비교한다(0.10.9 < 0.10.17). base 이력이 필요해 PR 때만 fetch-depth 0 으로 받고
+ubuntu 에서만 돈다. `test_plugin_layout.py` 에는 스킬 전수 검사(name 이 디렉터리 이름과 같고 description
+이 있음, `../../rules/`·`../../conventions/` 참조가 실재함)를 더했다. hooks.json 이 가리키는 파일 존재는
+기존 검사가 이미 봐서 다시 만들지 않았다. 실제 GitHub PR 위에서 단계를 돌려 보지는 않았다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
