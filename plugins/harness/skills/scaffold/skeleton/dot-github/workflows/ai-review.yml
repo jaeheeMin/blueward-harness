@@ -1,0 +1,27 @@
+# 위험도가 낮은 PR 에만 Claude AI 리뷰를 돌리는 호출 워크플로다(#125). 심각한 지적이 나오면 이 검사가
+# 실패하고, risk-gate 의 `ai_review` 기준이 그 결과를 읽어 "승인 필요" 로 판정한다.
+# 판정·리뷰 로직은 blueward-harness 저장소에 있다 — risk-gate.yml 과 같은 사정이다.
+#
+# **기본은 꺼짐이다.** `.github/risk-gate.yaml` 의 `ai_review` 가 false 이면 이 워크플로는 리뷰 없이
+# 건너뛰고 성공으로 끝난다. 켜려면:
+#   (1) `claude setup-token` 으로 만든 토큰을 `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록
+#   (2) `.github/risk-gate.yaml` 의 `ai_review` 를 true 로 바꾼다
+# 켰는데 시크릿이 없으면 통과시키지 않고 "검사 불능" 으로 실패한다. 포크 PR 에는 시크릿이 전달되지 않는다.
+#
+# job id 는 반드시 `ai-review` 로 둔다. risk-gate 가 이 이름의 check run 의 결론을 읽는다
+# (바꾸면 AI 리뷰 결과를 못 찾고 계속 대기로 본다).
+name: ai-review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  ai-review:
+    uses: jaeheeMin/blueward-harness/.github/workflows/ai-review.yml@main
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write

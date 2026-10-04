@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -39,6 +40,9 @@ def _load_scaffold_module():
 scaffold_mod = _load_scaffold_module()
 scaffold = scaffold_mod.scaffold
 
+# 스켈레톤의 치환 자리표시자. 워크플로의 `${{ ... }}` 표현식은 자리표시자가 아니다.
+_PLACEHOLDER = re.compile(r"(?<!\$)\{\{")
+
 EXPECTED_FILES = {
     "CLAUDE.md",
     "docs/ssot/PRD.md",
@@ -63,6 +67,7 @@ EXPECTED_FILES = {
     ".github/ssot-approvers",
     ".github/risk-gate.yaml",
     ".github/workflows/risk-gate.yml",
+    ".github/workflows/ai-review.yml",
     ".claude/settings.json",
 }
 
@@ -82,7 +87,7 @@ def test_예상하는_파일을_모두_만들고_치환한다(tmp_path: Path):
         path = tmp_path / rel
         assert path.is_file(), f"{rel} 이 만들어지지 않았다"
         text = path.read_text(encoding="utf-8")
-        assert "{{" not in text, f"{rel} 에 치환되지 않은 자리표시자가 남아 있다"
+        assert not _PLACEHOLDER.search(text), f"{rel} 에 치환되지 않은 자리표시자가 남아 있다"
 
     claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     assert "블루워드 테스트프로젝트" in claude_md
@@ -133,6 +138,31 @@ def test_위험도_게이트_기준_파일과_워크플로를_만든다(tmp_path
         assert trigger in workflow
     for permission in ("contents: read", "pull-requests: write", "issues: write", "checks: read", "statuses: read"):
         assert permission in workflow
+
+
+def test_ai_review_호출_워크플로를_만들고_기본은_꺼져_있다(tmp_path: Path):
+    """#125: job id 는 ai-review(risk gate 가 읽는 이름), 시크릿을 넘기고, 기준 파일은 꺼진 채다."""
+    import yaml
+
+    from checker.risk_gate import AI_REVIEW_CHECK_NAME, load_config
+
+    scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    text = (tmp_path / ".github" / "workflows" / "ai-review.yml").read_text(encoding="utf-8")
+    assert not _PLACEHOLDER.search(text)
+    data = yaml.safe_load(text)
+    on = data.get("on", data.get(True))
+    assert set(on["pull_request"]["types"]) == {"opened", "synchronize", "reopened", "ready_for_review"}
+    assert list(data["jobs"]) == [AI_REVIEW_CHECK_NAME]
+    job = data["jobs"][AI_REVIEW_CHECK_NAME]
+    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/ai-review.yml@main"
+    assert job["secrets"] == {"CLAUDE_CODE_OAUTH_TOKEN": "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"}
+    assert job["permissions"] == {
+        "contents": "read", "pull-requests": "write", "issues": "read", "id-token": "write"}
+
+    risk = (tmp_path / ".github" / "risk-gate.yaml").read_text(encoding="utf-8")
+    assert load_config(risk)["ai_review"] is False
+    assert "gh secret set CLAUDE_CODE_OAUTH_TOKEN" in risk and "claude setup-token" in risk
 
 
 def test_승인자를_안_주면_ssot_approvers_는_주석만_남는다(tmp_path: Path):

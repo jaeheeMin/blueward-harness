@@ -60,6 +60,11 @@ description: 새 고객사 Project Repository 를 처음 만들었을 때 표준
      병합된다. **승인자 목록에 작성자가 아닌 사람이 한 명도 없으면 위험한 PR 을
      승인으로 통과시킬 수 없다** — 사용자에게 승인자를 꼭 넣도록 안내한다. 기준은
      `.github/risk-gate.yaml` 에서 고치고(주석 참고), 파일을 지우면 게이트가 꺼진다.
+   - `.github/workflows/ai-review.yml` 은 위험도가 낮은 PR 에만 Claude AI 리뷰를 돌린다(#125).
+     **기본은 꺼짐**이라 아무것도 하지 않는다. 켜려면 (1) `claude setup-token` 으로 만든 토큰을
+     `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 (2)
+     `.github/risk-gate.yaml` 의 `ai_review` 를 `true` 로 바꾼다. 켰는데 시크릿이 없으면
+     통과가 아니라 검사 불능으로 실패하니 사용자에게 두 단계를 함께 안내한다.
    - PRD 는 `/harness:prd` Skill 로 만든다. 지금은 `docs/ssot/PRD.md` 가
      빈 스텁으로만 있다.
 
@@ -89,6 +94,7 @@ env/README.md                      환경별 접속 URL(Credential 은 안 둠)
 .github/ssot-approvers             PRD 변경 PR 을 승인할 수 있는 GitHub 아이디 목록
 .github/workflows/risk-gate.yml    PR·main 커밋마다 PR 위험도를 판정하는 워크플로(#102)
 .github/risk-gate.yaml             위험도 기준(크기·위험 경로·비밀값·검사 통과). 위험한 PR 만 승인자가 Approve 해야 통과
+.github/workflows/ai-review.yml    위험도 낮은 PR 에만 Claude AI 리뷰를 돌리는 워크플로(#125). 기본 꺼짐
 .claude/settings.json              harness Plugin 자동 설치 안내(#89). 이미 있으면 두 항목만 합친다
 ```
 
