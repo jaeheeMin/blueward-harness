@@ -589,3 +589,84 @@ def test_check_human_merge_는_gh_오류를_통과로_뭉개지_않고_2(monkeyp
     assert mod.cmd_check_human_merge(_FakeArgs()) == EXIT_UNKNOWN
     out = json.loads(capsys.readouterr().out)
     assert out["requires_human"] is None
+
+
+# --- GhClient 의 "파일 없음" 판정은 HTTP 404 로만 한다(#129) ---------------------
+
+import subprocess  # noqa: E402
+
+_SHA_404 = "a4041b2c3d4e5f60718293a4b5c6d7e8f9012340"  # 40자리 SHA 에 "404" 가 든다
+_CONTENTS = f"repos/o/r/contents/.github/risk-gate.yaml?ref={_SHA_404}"
+
+
+def _fake_gh(monkeypatch, *, returncode=1, stderr="", stdout="", exc=None):
+    def _run(cmd, **kwargs):
+        if exc is not None:
+            raise exc
+        return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(mod.subprocess, "run", _run)
+
+
+def test_진짜_404_는_파일_없음_None(monkeypatch):
+    _fake_gh(monkeypatch, stderr="gh: Not Found (HTTP 404)\n")
+    assert mod.GhClient().get_json_or_none_404(_CONTENTS) is None
+
+
+def test_ref_가_없어서_나는_404_도_HTTP_404_라서_None(monkeypatch):
+    _fake_gh(monkeypatch, stderr="gh: No commit found for the ref abc (HTTP 404)\n")
+    assert mod.GhClient().get_json_or_none_404(_CONTENTS) is None
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "gh: Server Error (HTTP 502)\n",
+        "gh: Service Unavailable (HTTP 503)\n",
+        "gh: Not Found for a moment, try again (HTTP 500)\n",  # 본문에 Not Found 가 있어도
+        "gh: API rate limit exceeded (HTTP 403)\n",
+        "",
+        "error connecting to api.github.com\n",
+    ],
+)
+def test_요청_경로에_404_가_있어도_5xx_등은_GhError(monkeypatch, stderr):
+    _fake_gh(monkeypatch, stderr=stderr)
+    with pytest.raises(GhError):
+        mod.GhClient().get_json_or_none_404(_CONTENTS)
+
+
+def test_시간_초과는_경로에_404_가_있어도_GhError(monkeypatch):
+    _fake_gh(monkeypatch, exc=subprocess.TimeoutExpired(["gh", "api", _CONTENTS], 30))
+    with pytest.raises(GhError) as info:
+        mod.GhClient().get_json_or_none_404(_CONTENTS)
+    assert "404" in str(info.value)  # 메시지에 경로가 섞여도
+    assert info.value.status is None
+
+
+def test_stderr_중간에_HTTP_404_가_있어도_마지막_줄이_아니면_404_가_아니다(monkeypatch):
+    _fake_gh(monkeypatch, stderr="gh: x (HTTP 404)\nlater: connection reset\n")
+    with pytest.raises(GhError):
+        mod.GhClient().get_json_or_none_404(_CONTENTS)
+
+
+def test_세_호출부는_5xx_를_파일_없음으로_읽지_않는다(monkeypatch):
+    from checker import risk_gate as rg
+
+    _fake_gh(monkeypatch, stderr="gh: Bad Gateway (HTTP 502)\n")
+    client = mod.GhClient()
+    with pytest.raises(GhError):
+        rg.fetch_text(client, "o", _SHA_404, ".github/risk-gate.yaml")
+    with pytest.raises(GhError):
+        mod.fetch_approvers(client, "o/r", _SHA_404)
+    with pytest.raises(GhError):
+        mod.fetch_human_merge_paths(client, "o/r", _SHA_404)
+
+
+def test_세_호출부는_진짜_404_에서_기존_의미를_지킨다(monkeypatch):
+    from checker import risk_gate as rg
+
+    _fake_gh(monkeypatch, stderr="gh: Not Found (HTTP 404)\n")
+    client = mod.GhClient()
+    assert rg.fetch_text(client, "o", _SHA_404, ".github/risk-gate.yaml") is None
+    assert mod.fetch_approvers(client, "o/r", _SHA_404) == set()
+    assert mod.fetch_human_merge_paths(client, "o/r", _SHA_404) == []

@@ -415,6 +415,14 @@ PR 코멘트 하나를 갱신, job 요약)와 `after-merge`(병합 직전 main �
 적었다. Plugin version 0.10.17. **실제 토큰으로 돌려 본 적은 없다**(가짜 클라이언트·YAML 구조 검사만).
 Claude GitHub App 설치 여부, OIDC 교환, 허용 도구 문법의 실동작은 확인하지 못했다.
 
+**"파일 없음" 판정을 HTTP 404 로만 한다(#129, risk_gate 파일 없음 판정).** `GhClient.get_json_or_none_404`
+가 오류 메시지에 "404"·"Not Found" 가 있으면 파일 없음으로 봐서, 요청 경로의 40자리 SHA 에 "404" 가
+우연히 들어 있을 때(약 1%) 시간 초과·5xx 가 설정 없음(게이트 꺼짐)으로 읽혔다. `gh api` 는 HTTP
+오류를 stderr 마지막 줄 `gh: <메시지> (HTTP 404)` 로 내고 종료코드는 1 이라, `GhError.status` 에 그
+줄 끝의 상태 코드만 담고 `status == 404` 일 때만 None 으로 본다(시간 초과·상태 표기 없음은 None 이라
+GhError 로 판정 불가). risk_gate, 승인자 파일, human-merge-paths 읽기가 같은 함수를 쓰므로 함께
+고쳐진다. 실제 GitHub 에서 5xx 를 일으켜 보지는 않았다(가짜 subprocess 로만 확인).
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
