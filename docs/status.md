@@ -415,6 +415,10 @@ PR 코멘트 하나를 갱신, job 요약)와 `after-merge`(병합 직전 main �
 적었다. Plugin version 0.10.17. **실제 토큰으로 돌려 본 적은 없다**(가짜 클라이언트·YAML 구조 검사만).
 Claude GitHub App 설치 여부, OIDC 교환, 허용 도구 문법의 실동작은 확인하지 못했다.
 
+**AI 리뷰 러너에서 저장소 MCP 서버를 띄우지 않는다(#144, 저장소 MCP).** `ai-review.yml` 의 `claude_args` 에
+`--strict-mcp-config` 를 넣어 PR 저장소 `.mcp.json` 의 서버(SAP ADT 등)가 러너에서 뜨지 않게 했다. 액션은
+자기 서버를 `--mcp-config` 로 따로 넣으므로 그대로 남는다. 실제 러너 로그로는 아직 확인하지 못했다.
+
 **"파일 없음" 판정을 HTTP 404 로만 한다(#129, risk_gate 파일 없음 판정).** `GhClient.get_json_or_none_404`
 가 오류 메시지에 "404"·"Not Found" 가 있으면 파일 없음으로 봐서, 요청 경로의 40자리 SHA 에 "404" 가
 우연히 들어 있을 때(약 1%) 시간 초과·5xx 가 설정 없음(게이트 꺼짐)으로 읽혔다. `gh api` 는 HTTP

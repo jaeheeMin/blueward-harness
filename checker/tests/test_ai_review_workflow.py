@@ -93,6 +93,11 @@ def test_claude_code_action_사용(wf):
     assert step["continue-on-error"] is True
 
 
+def test_저장소_MCP_서버를_띄우지_않는다(wf):
+    # PR 저장소의 .mcp.json 이 러너에서 SAP MCP 서버를 띄우지 않게 한다(#144).
+    assert "--strict-mcp-config" in _step(wf, "claude")["with"]["claude_args"].split()
+
+
 def test_프롬프트가_결과_경로와_주입_방지를_담는다(wf):
     prompt = _step(wf, "claude")["with"]["prompt"]
     assert "${{ runner.temp }}/ai-review.json" in prompt
