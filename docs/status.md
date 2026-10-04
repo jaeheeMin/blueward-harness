@@ -510,6 +510,24 @@ scaffold 가 자동으로 불리지 않고 훅에도 안내가 없어, scaffold 
 돈다. 테스트는 `checker/tests/test_session_scaffold_hint.py`. 4단계보다 깊은 곳에만 기준 폴더가 있으면 없는 것으로
 보고 안내한다. Plugin version 0.10.22.
 
+**비밀정보(CR-004)를 gitleaks 로 검사한다(#159, gitleaks 비밀정보 검사).** 전에는 CR-004 가 문서뿐이었고 기계로 보는 것은
+위험도 검사의 `secret` 기준(#126)뿐이었다(올릴 뿐 막지 않고, SAP 비밀번호·쿠키 패턴도 없다). 그 기준은 그대로 두고
+`.github/workflows/gitleaks.yml` 재사용 워크플로를 병행해 두었다(호출 워크플로는 scaffold 스켈레톤에 추가). gitleaks-action 은
+조직 계정에 라이선스 키가 필요해 쓰지 않고, 릴리즈 바이너리 v8.30.1(linux x64)을 워크플로 안의 sha256 으로 고정해 받는다.
+범위는 PR 이면 base..head 커밋만, main push 면 `before..sha`(새 브랜치는 그 이력 전체, 이전 커밋이 사라진 강제 push 는 마지막
+커밋 하나와 경고)이고, 값은 `--redact` 로 가리며 가려진 JSON 리포트만 유출 때 아티팩트로 남긴다. 판정은
+`scripts/gitleaks_scan.sh` 가 한다 — 유출에만 `--exit-code 2` 를 지정해 2 는 "유출 발견", 0 은 통과, 그 밖(오류 1, 알 수 없는
+플래그 126 등)은 "검사 불능"으로 서로 다른 메시지를 내며 실패한다. 실물 확인에서 gitleaks 는 없는 커밋 범위나 git 저장소가 아닌
+폴더에도 "0 commits scanned" 로 종료코드 0 을 냈으므로, 스크립트가 범위의 커밋과 저장소를 먼저 확인해 못 찾으면 검사 불능으로
+막는다(통과로 뭉개지 않는다, 원칙 7). 기본 설정은 `checker/gitleaks/harness.toml`(gitleaks 기본 규칙 + `MYSAPSSO2`,
+`SAP_SESSIONID_<SID>_<client>`, SAP 접속 비밀번호 대입 규칙). 저장소 꼭대기에 `.gitleaks.toml` 이 있으면 그것만 쓰되, PR 은 head 가 아니라 base 커밋의 파일을 임시 파일로 꺼내 쓴다(PR 이
+같은 PR 안에서 allowlist 를 넣어 자기 비밀값을 통과시키지 못하게 — 바꿨으면 경고하고 병합 뒤부터 적용, base 에 없으면 하네스 기본
+설정, 읽기 오류는 검사 불능, main push 는 체크아웃된 파일). 하네스
+규칙을 유지하려면 거기서 `[extend] path = ".harness-engine/checker/gitleaks/harness.toml"` 로 이어받는다(`[extend] path` 는 현재
+폴더 기준이라 스크립트를 저장소 꼭대기에서 돌린다 — 실물로 확인). 이 저장소 자신에는 켜지 않았다(테스트에 가짜 토큰이 많다).
+pre-commit 훅 연결은 별도 이슈다. 테스트는 `checker/tests/test_gitleaks_scan.py`(가짜 gitleaks 로 종료 코드 분기, 환경 변수
+`GITLEAKS_BIN` 이 있으면 진짜 바이너리로 SAP 규칙까지). Plugin version 0.10.23.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
