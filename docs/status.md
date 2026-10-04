@@ -498,6 +498,18 @@ stdin 에 cwd 가 없으면 `session-start-sync.sh` 가 `set -e` 와 `pipefail` 
 기존 결함이 드러나 `|| true` 로 고쳤다(실제 훅 입력에는 cwd 가 있어 드물다). Plugin version 0.10.21.
 `timeout` 명령이 없는 PC 에서는 예전처럼 대기에 상한이 없다(Git Bash 에는 있다).
 
+**기준 폴더가 없는 저장소에서 세션을 열면 `/harness:scaffold` 를 안내한다(#128).** 전에는 harness 를 설치해도
+scaffold 가 자동으로 불리지 않고 훅에도 안내가 없어, scaffold 를 모르는 사람이 `templates/`, `rules/` 없이
+작업을 시작하면 doc-guard 가 아예 걸리지 않았다. 자동 실행은 묻지 않고 파일을 만드는 일이라 택하지 않고
+안내만 한다. `session-start-sync.sh` 가 (1) git 저장소가 아니거나 (2) `HARNESS_NO_SCAFFOLD_HINT=1` 이거나
+(3) 저장소 꼭대기에 `.claude-plugin/marketplace.json` 이 있거나(플러그인 저장소) (4) 작업 트리의 꼭대기에서
+3단계 아래까지 `templates/` 와 `rules/` 를 한 폴더에 함께 가진 곳이 있으면 말하지 않고, 아니면 "기준 폴더(templates/
+와 rules/)가 없습니다. 다음: /harness:scaffold 를 실행해 …" 를 낸다. Project Repository 인지 가르는 표식은
+따로 만들지 않고 이 두 가지(플러그인 저장소 표식, 끄는 환경 변수)로 정했다. `.git`, `node_modules`, `.venv` 는
+들어가지 않는다. 작업 트리를 보므로 아직 커밋하지 않은 scaffold 결과도 인정한다. 판정 명령이 실패해도 훅은 계속
+돈다. 테스트는 `checker/tests/test_session_scaffold_hint.py`. 4단계보다 깊은 곳에만 기준 폴더가 있으면 없는 것으로
+보고 안내한다. Plugin version 0.10.22.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
