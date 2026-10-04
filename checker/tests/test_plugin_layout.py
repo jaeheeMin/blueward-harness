@@ -1347,3 +1347,49 @@ def test_git_가드가_존재하지_않는_cwd면_CLAUDE_PROJECT_DIR로_대체�
     assert out is not None
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "main 브랜치" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+# --- Skill 배선 전수 검사(#136) -------------------------------------------------
+#
+# 위의 이름 지정 검사는 스킬을 목록에 적어 둔 것만 본다. 새 스킬이 목록에서 빠져도
+# 걸리도록 skills/ 아래 SKILL.md 를 전부 훑는다.
+
+_SKILL_MDS = sorted((PLUGIN_ROOT / "skills").glob("*/SKILL.md"))
+
+
+def _frontmatter_fields(text: str) -> dict[str, str]:
+    assert text.startswith("---"), "frontmatter 로 시작하지 않는다"
+    block = text.split("---", 2)[1]
+    fields: dict[str, str] = {}
+    for m in re.finditer(r"^([A-Za-z_-]+):[ \t]*(.*)$", block, re.MULTILINE):
+        fields[m.group(1)] = m.group(2).strip()
+    return fields
+
+
+def test_스킬이_하나_이상_있다():
+    assert _SKILL_MDS, "skills/*/SKILL.md 가 하나도 없다"
+
+
+@pytest.mark.parametrize("skill_md", _SKILL_MDS, ids=lambda p: p.parent.name)
+def test_모든_스킬의_name_이_디렉터리_이름과_같고_description_이_있다(skill_md):
+    fields = _frontmatter_fields(skill_md.read_text(encoding="utf-8"))
+    assert fields.get("name") == skill_md.parent.name, (
+        f"{skill_md} 의 name({fields.get('name')!r}) 이 디렉터리 이름과 다르다"
+    )
+    assert fields.get("description"), f"{skill_md} 에 description 이 없거나 비어 있다"
+
+
+_PLUGIN_REL_REF = re.compile(r"\.\./\.\./(?:rules|conventions)/[A-Za-z0-9_.\-]+\.md")
+
+
+@pytest.mark.parametrize("skill_md", _SKILL_MDS, ids=lambda p: p.parent.name)
+def test_스킬이_참조한_규칙_문서가_실제로_있다(skill_md):
+    """`../../rules/x.md`, `../../conventions/x.md` 는 스킬 디렉터리 기준이다. 문서
+    이름을 바꾸거나 지우고 스킬을 안 고치면 조용히 깨지므로 존재를 확인한다."""
+    text = skill_md.read_text(encoding="utf-8")
+    missing = [
+        ref
+        for ref in sorted(set(_PLUGIN_REL_REF.findall(text)))
+        if not (skill_md.parent / ref).is_file()
+    ]
+    assert not missing, f"{skill_md} 가 없는 문서를 참조한다: {missing}"
