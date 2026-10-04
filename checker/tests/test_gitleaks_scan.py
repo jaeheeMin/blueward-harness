@@ -96,6 +96,8 @@ def _fake_gitleaks(tmp_path: Path) -> Path:
         "exit \"${FAKE_CODE:-0}\"\n",
         encoding="utf-8", newline="\n",
     )
+    # Linux 에서는 실행 비트가 없으면 126(권한 없음)으로 끝난다.
+    fake.chmod(0o755)
     return fake
 
 
