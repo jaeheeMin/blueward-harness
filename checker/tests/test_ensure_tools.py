@@ -1,4 +1,4 @@
-"""세션 시작 때 uv·jq·gh 를 점검하고 winget 으로 설치하는 스크립트 검사(#116).
+"""세션 시작 때 uv·jq·gh·gitleaks 를 점검하고 winget 으로 설치하는 스크립트 검사(#116).
 
 진짜 시스템은 건드리지 않는다. 가짜 winget·uv·jq·gh 를 임시 폴더에 만들고 PATH 와
 LOCALAPPDATA 를 그 안으로 돌려서 스크립트를 실행한다. winget 을 실제로 부르지 않는다.
@@ -41,6 +41,7 @@ case "$id" in
   astral-sh.uv) tool=uv ;;
   jqlang.jq) tool=jq ;;
   GitHub.cli) tool=gh ;;
+  Gitleaks.Gitleaks) tool=gitleaks ;;
 esac
 mkdir -p "$LOCALAPPDATA/Microsoft/WinGet/Links"
 echo fake > "$LOCALAPPDATA/Microsoft/WinGet/Links/$tool.exe"
@@ -63,7 +64,7 @@ def _write_exec(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
-_HIDDEN_TOOLS = {"uv", "uvx", "jq", "gh", "winget"}
+_HIDDEN_TOOLS = {"uv", "uvx", "jq", "gh", "gitleaks", "winget"}
 _posix_base: str | None = None
 
 
@@ -103,6 +104,8 @@ class Env:
         self.data = tmp_path / "plugin-data"
         self.log = tmp_path / "winget.log"
         self.extra_path: list[str] = []
+        # 기존 검사는 uv·jq·gh 만 본다. gitleaks(#170)는 기본으로 있는 것으로 두고, 없는 경우는 따로 본다.
+        _write_exec(self.bin / "gitleaks", FAKE_TOOL)
 
     def add_tool(self, name: str) -> None:
         _write_exec(self.bin / name, FAKE_GH if name == "gh" else FAKE_TOOL)
@@ -386,3 +389,46 @@ def test_상한에_걸린_뒤에도_세션_시작_동기화와_지난_경고가_
     assert "지난 경고 내용" in out
     assert "현재 브랜치:" in out
     assert "원격 저장소가 연결되어 있지 않습니다" in out
+
+
+# --- gitleaks(#170) ---------------------------------------------------------
+
+
+def test_gitleaks_가_없으면_winget_Gitleaks_Gitleaks_로_설치한다(env):
+    for name in ("uv", "jq", "gh"):
+        env.add_tool(name)
+    (env.bin / "gitleaks").unlink()
+    env.add_winget()
+
+    out = env.run()
+
+    calls = env.winget_calls()
+    assert len(calls) == 1
+    assert "install --id Gitleaks.Gitleaks -e --silent" in calls[0]
+    assert "--scope user" in calls[0]
+    assert "gitleaks 가 없어 winget 으로 설치했습니다" in out
+
+
+def test_gitleaks_는_설치돼_있지만_PATH_밖이면_새로_열라고만_안내한다(env):
+    for name in ("uv", "jq", "gh"):
+        env.add_tool(name)
+    (env.bin / "gitleaks").unlink()
+    env.add_links_exe("gitleaks")
+    env.add_winget()
+
+    out = env.run()
+
+    assert env.winget_calls() == []
+    assert "gitleaks 는 설치돼 있지만 이 세션이 아직 못 찾습니다" in out
+
+
+def test_gitleaks_도_끄는_변수와_수동_설치_안내를_따른다(env):
+    for name in ("uv", "jq", "gh"):
+        env.add_tool(name)
+    (env.bin / "gitleaks").unlink()
+    env.add_winget()
+
+    out = env.run(HARNESS_NO_AUTO_INSTALL="1")
+
+    assert env.winget_calls() == []
+    assert "winget install --id Gitleaks.Gitleaks -e" in out

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 세션 시작 때 harness Hook 이 쓰는 도구(uv, jq, gh)가 있는지 보고, Windows 에서
+# 세션 시작 때 harness Hook 이 쓰는 도구(uv, jq, gh, gitleaks)가 있는지 보고, Windows 에서
 # 없으면 winget 으로 설치한다(#116). session-start-sync.sh 가 부른다.
 #
 # - 결과는 stdout 으로 한 줄씩 낸다. 다 있으면 아무것도 내지 않는다.
@@ -79,6 +79,7 @@ winget_id() {
     uv) echo "astral-sh.uv" ;;
     jq) echo "jqlang.jq" ;;
     gh) echo "GitHub.cli" ;;
+    gitleaks) echo "Gitleaks.Gitleaks" ;;
   esac
 }
 
@@ -170,7 +171,7 @@ say() {
 missing_for_brew=""
 gh_bin=""
 
-for tool in uv jq gh; do
+for tool in uv jq gh gitleaks; do
   id="$(winget_id "$tool")"
   locate_tool "$tool"
 

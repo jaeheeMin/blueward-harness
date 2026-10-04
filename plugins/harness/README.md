@@ -11,7 +11,8 @@ plugins/harness/
   hooks/
     hooks.json                 네 훅을 선언
     pre_write_guard.py         문서 검사(doc-guard) — Write/Edit 직전에 막을지 정한다
-    pre-bash-git-guard.sh      push 가드 — 스킬을 거치지 않은 git push 를 막는다
+    pre-bash-git-guard.sh      git 가드 — 스킬을 거치지 않은 git push 와 비밀정보가 든 커밋을 막는다
+    gitleaks-harness.toml      하네스 기본 gitleaks 설정(checker/gitleaks/harness.toml 의 복사본)
     session-start-sync.sh      세션 시작 때 원격과 동기화하고 남은 경고를 전한다
     stop-deliver.sh            세션 종료 때 커밋 안 된 변경을 알린다
   skills/
@@ -89,10 +90,10 @@ plugins/harness/
 | 훅 | 시점 | 하는 일 |
 |---|---|---|
 | `pre_write_guard.py` | `PreToolUse` (Write\|Edit) | 문서가 템플릿을 벗어나면 저장을 막는다(doc-guard). 코드(`.abap`, `.js`/`.ts`, `.cds`, `.asbdef`)는 공통 개발 규칙 CR-001·CR-002·CR-003·CR-007 을 어기면 막는다(#54, #72, #81. BDEF 는 CR-001 만, CR-003·CR-007 은 ABAP·JS/TS 만) |
-| `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 PRD 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120) |
+| `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 PRD 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120). `git commit` 은 staged 변경을 gitleaks 로 검사해 비밀값이 있으면 막는다(#170, 아래 "비밀정보 검사" 참고) |
 | `mcp_source_guard.py` | `PreToolUse` (SAP ADT MCP 도구 19개) | MCP 로 SAP 에 쓰거나 이름을 붙이는 경로의 코드 규칙 CR-001·CR-002·CR-003·CR-007 검사(#60, #61)와, `env/adt-tiers.yaml` 기준 테넌트별 쓰기 차단·데이터 추출 되묻기(#148). 아래 "테넌트별 쓰기 차단" 참고 |
 | `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고 지난 세션에서 남은 경고를 전한다. upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리). 저장소 안(꼭대기에서 3단계까지)에 `templates/` 와 `rules/` 를 함께 가진 폴더가 없으면 `/harness:scaffold` 를 안내한다(#128, 자동 실행은 하지 않는다. 플러그인 저장소(`.claude-plugin/marketplace.json` 이 꼭대기에 있다)와 git 저장소가 아닌 곳은 말하지 않고, `HARNESS_NO_SCAFFOLD_HINT=1` 로 끈다) |
-| `ensure-tools.sh` | `SessionStart` (session-start-sync.sh 가 부름) | uv·jq·gh 가 없으면 Windows 에서 winget 으로 설치하고 결과를 알린다(#116). 아래 "도구 자동 설치" 참고 |
+| `ensure-tools.sh` | `SessionStart` (session-start-sync.sh 가 부름) | uv·jq·gh·gitleaks 가 없으면 Windows 에서 winget 으로 설치하고 결과를 알린다(#116, gitleaks 는 #170). 아래 "도구 자동 설치" 참고 |
 | `stop-deliver.sh` | `Stop` | 커밋되지 않은 변경이 남았으면 `/harness:deliver` 를 안내한다 |
 
 ### 테넌트별 쓰기 차단과 데이터 추출 되묻기(#148)
@@ -143,16 +144,16 @@ MCP 서버의 모든 호출마다 훅(`uv` 기동)을 띄우는 비용 때문이
 
 ### 도구 자동 설치(#116)
 
-Hook 은 검사 Engine 을 받는 데 uv, 명령을 읽는 데 jq, GitHub 작업에 gh 를 쓴다.
-세션을 시작할 때 셋이 있는지 보고, **Windows 에서 winget 이 있으면 없는 것을
-묻지 않고 설치한 뒤 알린다**(uv·jq 는 `--scope user` 로 먼저 시도). 다 있으면 아무
+Hook 은 검사 Engine 을 받는 데 uv, 명령을 읽는 데 jq, GitHub 작업에 gh, 커밋 전 비밀정보 검사에
+gitleaks(`Gitleaks.Gitleaks`, #170)를 쓴다. 세션을 시작할 때 넷이 있는지 보고, **Windows 에서 winget 이 있으면 없는 것을
+묻지 않고 설치한 뒤 알린다**(gh 를 뺀 나머지는 `--scope user` 로 먼저 시도). 다 있으면 아무
 말도 하지 않는다.
 
 - 설치한 프로그램은 이미 열린 세션의 PATH 에 없다. 실행 파일이 생긴 것을 확인한
   뒤 "Claude Code 를 새로 여십시오" 라고 안내한다.
 - gh 는 설치만 한다. 로그인이 안 되어 있으면 `gh auth login` 을 안내한다.
 - winget 이 없거나, 설치가 실패하거나(권한·회사 정책 포함), Windows 가 아니면
-  설치 명령만 안내한다(macOS 는 `brew install uv jq gh`).
+  설치 명령만 안내한다(macOS 는 `brew install uv jq gh gitleaks`).
 - 실패한 도구는 24시간 동안 다시 설치를 시도하지 않는다. 기록은
   `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/harness}/tool-install-failures` 에 있다.
 - **설치에 쓰는 시간에는 상한이 있다(#131).** 세션 시작 훅은 600초에 끊기므로, 설치
@@ -269,7 +270,35 @@ CR-004 는 `.github/workflows/gitleaks.yml` 재사용 워크플로가 PR·main �
   ```
 
   `[extend] path` 는 저장소 꼭대기(현재 폴더) 기준이다.
-- pre-commit 훅 연결은 아직 없다.
+
+### 커밋 전 검사(#170)
+
+PR 에서 막혀도 원격으로 올리는 순간 비밀값은 이미 GitHub 에 올라간다(그 값은 폐기·교체해야 한다). 그래서
+`pre-bash-git-guard.sh` 가 **Claude 의 `git commit`** 에도 같은 규칙으로 staged 변경을 검사한다. 사람이
+터미널에서 직접 한 커밋은 이 훅을 거치지 않으므로 Actions 가 잡는다. 커밋일 때만 gitleaks 를 부른다
+(앞에 `cd x &&` 같은 git 이 아닌 조각이 있어도 잡는다). `git add x && git commit` 처럼 commit 앞에 git 명령이
+  있으면 훅 시점의 staged 가 커밋될 내용과 달라 "검사 불능" 으로 막는다 — `git add` 를 먼저 따로 실행한 뒤
+  `git commit` 을 별도 명령으로 실행한다(읽기 전용 status·diff·log·show·rev-parse 는 예외).
+
+- **판정.** `gitleaks git --pre-commit --staged --redact --exit-code 2`. 종료 0 은 통과, 2 는 "비밀값 발견"
+  (규칙·파일·줄만 알리고 값은 가린다), 그 밖은 "검사 불능"으로 서로 다른 문구로 막는다. gitleaks 가 없을
+  때도 "검사 불능"이며 `winget install --id Gitleaks.Gitleaks -e` 를 안내한다(세션 시작 때 자동 설치도
+  시도한다). staged 변경이 없으면 검사할 것이 없어 gitleaks 를 부르지 않는다.
+- **설정.** 저장소 꼭대기의 `.gitleaks.toml` 이 있으면 그것, 없으면 하네스 기본 설정이다. 플러그인 설치본엔
+  `checker/` 가 없어 훅은 `hooks/gitleaks-harness.toml`(`checker/gitleaks/harness.toml` 과 같아야 하고 테스트가
+  지킨다)을 쓴다. `[extend] path` 는 현재 폴더 기준이라, 훅은 그 복사본을 `.harness-engine/checker/gitleaks/harness.toml`
+  자리에 둔 임시 폴더에서 gitleaks 를 불러 Actions 용 `.gitleaks.toml` 이 로컬에서도 풀린다. PR 과 달리 로컬은
+  작업 폴더의 `.gitleaks.toml` 을 쓴다.
+- **staged 밖 변경이 들어가는 커밋은 막는다.** `-a`, `--all`, `-i`, `--include`, `-o`, `--only` 는 working tree
+  내용을 커밋에 넣어 staged 만 보는 검사로는 범위를 알 수 없다(검사 불능). `git add` 로 올린 뒤 옵션 없이
+  커밋한다. `--amend` 는 새로 들어가는 것이 staged 변경뿐이라 그대로 검사한다. 경로를 직접 지정하는
+  `git commit 파일명` 은 알아내지 못한다(Actions 가 잡는다). merge·rebase·cherry-pick·revert 진행 중이거나
+  git 저장소가 아닌 곳은 검사하지 않고 지나간다.
+- **건너뛰기는 사람만.** 훅 프로세스의 환경 변수 `HARNESS_SKIP_SECRET_SCAN=1` 일 때만 건너뛰며, 건너뛰면
+  "비밀정보 검사를 건너뜀" 을 알림으로 남긴다. 명령 앞에 붙인 `HARNESS_SKIP_SECRET_SCAN=1 git commit` 은 훅의
+  환경이 아니므로 무시한다. Claude 는 이 변수를 스스로 켜지 않는다(`rules/governance.md`).
+- 테스트는 `checker/tests/test_git_guard_secret_scan.py`(가짜 gitleaks 로 분기, `GITLEAKS_BIN_REAL` 이 있으면
+  진짜 바이너리로 SAP 규칙·설정 이어받기까지).
 
 ## Audit
 
