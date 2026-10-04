@@ -3,6 +3,9 @@ set -euo pipefail
 
 input="$(cat)"
 
+# 아래에서 cd 하기 전에 이 스크립트가 있는 폴더를 잡아 둔다(상대 경로로 불렸을 수 있다).
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # 세션이 다른 git worktree 로 옮겨가도(#71) 그 worktree 기준으로 판단하기
 # 위해, 훅에 오는 stdin JSON 의 cwd 를 최우선으로 쓴다. CLAUDE_PROJECT_DIR 은
 # 세션을 "처음 연" 폴더라 세션 도중 다른 worktree 로 옮기면 더는 맞지 않는다.
@@ -469,11 +472,225 @@ if [ "$sub" = "commit" ]; then
   fi
 fi
 
+# 2-1) 커밋에 들어갈 staged 변경에서 비밀정보를 gitleaks 로 검사한다(#170). 푸시하는 순간
+#      비밀값은 이미 GitHub 에 올라가므로(폐기·교체해야 한다) 커밋 전에 막는 보조 관문이다.
+#      주 관문은 Actions 의 gitleaks 검사(#159)이고 같은 규칙(하네스 기본 설정 + SAP 규칙,
+#      프로젝트 .gitleaks.toml)을 쓴다. Claude 의 git commit 에만 걸린다 — 사람이 터미널에서
+#      직접 한 커밋은 이 훅을 거치지 않으므로 Actions 가 잡는다.
+#
+#      커밋일 때만 gitleaks 를 부른다(다른 명령마다 부르면 느려서 훅을 끄게 된다). `git add .
+#      && git commit` 처럼 묶인 명령도 잡도록, 큰따옴표·작은따옴표 안과 heredoc 본문을 걷어낸
+#      명령을 ; && || | 로 나눠 조각마다 하위 명령을 본다. 위의 sub 는 첫 git 명령만 본다.
+#
+#      건너뛰기: 이 훅 프로세스 자신의 환경 변수 HARNESS_SKIP_SECRET_SCAN=1 일 때만. 명령 문자열
+#      안의 접두어(HARNESS_SKIP_SECRET_SCAN=1 git commit)는 이 훅의 환경이 아니라 무시한다.
+#      사람만 켠다(governance.md). 건너뛰면 그 사실을 알림으로 남긴다.
+#
+#      검사 범위를 정직하게 하려고, staged 밖 변경이 커밋에 들어가는 형태(-a, --all, -i,
+#      --include, -o, --only)는 막는다. -a 나 --include 는 working tree 의 내용을 커밋에 넣어
+#      staged 만 보는 검사로는 범위를 알 수 없다(검사 불능). --amend 는 새로 들어가는 것이
+#      staged 변경뿐이라 staged 검사로 충분하다(기존 커밋의 내용은 이미 지난 일이다).
+#      한계: `git commit 파일명`(경로 지정)도 working tree 내용을 커밋하지만 따옴표 안 메시지와
+#      구분해 안정적으로 알아내기 어려워 막지 못한다. 최종 방어선은 Actions 다.
+skip_notice=""
+
+# 훅이 정상으로 끝낼 때의 출구. 비밀정보 검사를 건너뛰었으면 그 알림을 함께 낸다.
+finish_ok() {
+  if [ -n "$skip_notice" ]; then
+    printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}\n' "$skip_notice" "$skip_notice"
+  fi
+  exit 0
+}
+
+# 명령에서 heredoc 본문과 따옴표 안 문자열을 걷어 낸다(따옴표 문자열은 Q 한 글자로 바꾼다).
+strip_for_scan() {
+  printf '%s\n' "$1" \
+    | awk -v q="'" '
+        skip { t = $0; sub(/^[ \t]+/, "", t); if (t == w) skip = 0; next }
+        { print
+          if (match($0, "(^|[^<])<<-?[ \t]*[\"" q "]?[A-Za-z_][A-Za-z0-9_]*")) {
+            s = substr($0, RSTART, RLENGTH)
+            sub(/^[^<]?<<-?[ \t]*/, "", s); sub("^[\"" q "]", "", s)
+            w = s; skip = 1
+          } }' \
+    | tr '\n' '\001' \
+    | sed -E "s/\"[^\"]*\"/Q/g; s/'[^']*'/Q/g" \
+    | tr '\001' '\n' \
+    | sed -E 's/(&&|\|\||;|\||&)/\n/g'
+}
+
+# gitleaks 실행 파일을 찾는다. 결과는 gl_bin. 찾는 차례: GITLEAKS_BIN(테스트·직접 지정),
+# PATH, 그리고 winget 이 설치한 자리(ensure-tools.sh 의 locate_tool 과 같은 곳).
+find_gitleaks() {
+  gl_bin=""
+  if [ -n "${GITLEAKS_BIN:-}" ]; then
+    gl_bin="$(command -v "$GITLEAKS_BIN" 2>/dev/null || true)"
+    return 0
+  fi
+  gl_bin="$(command -v gitleaks 2>/dev/null || true)"
+  [ -n "$gl_bin" ] && return 0
+  lad="${LOCALAPPDATA:-$HOME/AppData/Local}"
+  if command -v cygpath >/dev/null 2>&1; then
+    lad="$(cygpath -u "$lad" 2>/dev/null || printf '%s' "$lad")"
+  else
+    lad="$(printf '%s' "$lad" | tr '\\' '/')"
+  fi
+  for d in \
+    "$lad/Microsoft/WinGet/Links" \
+    "$lad"/Microsoft/WinGet/Packages/Gitleaks.Gitleaks_*; do
+    if [ -f "$d/gitleaks.exe" ]; then
+      gl_bin="$d/gitleaks.exe"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# 이 훅은 명령 전체가 실행되기 전에 돈다. 같은 명령에서 commit 앞 조각이 인덱스를 바꾸면
+# (git add 등) 훅 시점의 staged 는 커밋될 내용이 아니다. 그래서 commit 앞에 git 조각이 있으면
+# 검사할 수 없다고 본다. 목록을 맞추지 않고 "어떤 git 하위 명령이든" 으로 단순하게 하되, 인덱스를
+# 못 바꾸는 읽기 전용(status, diff, log, show, rev-parse)만 예외로 둔다.
+commit_seg=""
+gl_prior_git=""
+while IFS= read -r seg; do
+  case "$seg" in *[![:space:]]*) ;; *) continue ;; esac
+  gl_sub="$(git_subcommand "$seg")"
+  if [ "$gl_sub" = "commit" ]; then
+    commit_seg="$seg"
+    break
+  fi
+  case "$gl_sub" in
+    ''|status|diff|log|show|rev-parse) ;;
+    *) gl_prior_git="$gl_sub" ;;
+  esac
+done <<EOF
+$(strip_for_scan "$cmd")
+EOF
+
+if [ -n "$commit_seg" ]; then
+  if [ "${HARNESS_SKIP_SECRET_SCAN:-}" = "1" ]; then
+    skip_notice="비밀정보 검사를 건너뜀: HARNESS_SKIP_SECRET_SCAN=1 이 켜져 있어 이 커밋의 gitleaks 검사를 하지 않았습니다. 이 커밋에 비밀값이 있는지 확인되지 않았습니다. 다음: 사람이 그 변수를 끈 뒤 Claude Code 를 새로 여십시오."
+  elif gl_top="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$gl_top" ]; then
+    # merge·rebase·cherry-pick 진행 중이면 staged 에 남이 쓴 내용이 섞여 이 검사의 대상이
+    # 아니다. 기존 훅이 통과시키던 상황을 그대로 둔다.
+    gl_busy=0
+    for gp in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply; do
+      if [ -e "$(git rev-parse --git-path "$gp" 2>/dev/null)" ]; then gl_busy=1; fi
+    done
+
+    if [ "$gl_busy" -eq 0 ]; then
+      if [ -n "$gl_prior_git" ]; then
+        deny "검사 불능: 같은 명령에서 git commit 앞에 git $gl_prior_git 가 먼저 실행되어, 훅이 검사하는 시점의 staged 가 실제로 커밋될 내용과 다를 수 있습니다. 검사하지 못한 상태로 통과시키지 않습니다. 다음: Claude 가 git add 를 먼저 따로 실행한 뒤 git commit 을 별도 명령으로 실행하십시오."
+      fi
+      # staged 밖 변경이 커밋에 들어가는 형태를 막는다.
+      gl_scope_bad=0
+      gl_after=0
+      set -f
+      for tok in $commit_seg; do
+        tok="${tok#\"}"; tok="${tok%\"}"
+        tok="${tok#\'}"; tok="${tok%\'}"
+        if [ "$gl_after" -eq 0 ]; then
+          [ "$tok" = "commit" ] && gl_after=1
+          continue
+        fi
+        case "$tok" in
+          --all|--include|--only) gl_scope_bad=1 ;;
+          --*) : ;;
+          -?*)
+            # 묶인 짧은 옵션(-am). 값을 받는 글자(m F C c t S)를 만나면 나머지는 값이다.
+            gl_rest="${tok#-}"
+            while [ -n "$gl_rest" ]; do
+              gl_ch="${gl_rest%"${gl_rest#?}"}"
+              gl_rest="${gl_rest#?}"
+              case "$gl_ch" in
+                a|i|o) gl_scope_bad=1 ;;
+                m|F|C|c|t|S) break ;;
+              esac
+            done
+            ;;
+        esac
+      done
+      set +f
+      if [ "$gl_scope_bad" -eq 1 ]; then
+        deny "검사 불능: git commit 에 -a, --all, -i, --include, -o, --only 가 있어 staged 밖의 변경까지 커밋에 들어갑니다. 비밀정보 검사는 staged 변경만 보므로 이 커밋의 범위를 검사할 수 없고, 검사하지 못한 상태로 통과시키지 않습니다. 다음: Claude 가 커밋할 파일을 git add 로 올린 뒤 -a 같은 옵션 없이 git commit 을 다시 실행하십시오."
+      fi
+
+      # staged 변경이 없으면 검사할 것이 없다(커밋 자체도 대개 실패한다).
+      gl_staged=0
+      git diff --cached --quiet >/dev/null 2>&1 || gl_staged=1
+      if [ "$gl_staged" -eq 1 ]; then
+        find_gitleaks
+        if [ -z "$gl_bin" ]; then
+          deny "검사 불능: gitleaks 가 없어 비밀정보 검사를 하지 못했습니다. 검사하지 못한 상태로 커밋을 통과시키지 않습니다. 다음: 사람이 할 일 - PowerShell 에서 winget install --id Gitleaks.Gitleaks -e 를 실행해 gitleaks 를 설치한 뒤 Claude Code 를 새로 여십시오(세션을 다시 시작하면 자동 설치도 다시 시도합니다)."
+        fi
+
+        gl_tmp="$(mktemp -d 2>/dev/null)" || deny "검사 불능: 임시 폴더를 만들지 못해 비밀정보 검사를 하지 못했습니다. 검사하지 못한 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
+        mkdir -p "$gl_tmp/.harness-engine/checker/gitleaks"
+        if ! cp "$hook_dir/gitleaks-harness.toml" "$gl_tmp/.harness-engine/checker/gitleaks/harness.toml" 2>/dev/null; then
+          rm -rf "$gl_tmp"
+          deny "검사 불능: 하네스 기본 gitleaks 설정(hooks/gitleaks-harness.toml)을 읽지 못해 비밀정보 검사를 하지 못했습니다. 검사하지 못한 상태로 통과시키지 않습니다. 다음: 사람이 할 일 - harness 플러그인을 다시 설치하거나 갱신하십시오. 계속되면 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
+        fi
+
+        # 설정: 저장소의 .gitleaks.toml 이 있으면 그것, 없으면 하네스 기본 설정. 설정 안의
+        # [extend] path 는 설정 파일 위치가 아니라 gitleaks 를 부른 현재 폴더 기준이다. 프로젝트
+        # .gitleaks.toml 이 Actions 용 경로(.harness-engine/checker/gitleaks/harness.toml)로
+        # 이어받아도 로컬에서 풀리도록, 그 경로에 플러그인 복사본을 둔 임시 폴더를 현재 폴더로
+        # 하고 저장소는 경로 인자로 넘긴다.
+        if [ -f "$gl_top/.gitleaks.toml" ]; then
+          gl_cfg="$gl_top/.gitleaks.toml"
+        else
+          gl_cfg=".harness-engine/checker/gitleaks/harness.toml"
+        fi
+
+        gl_out_file="$gl_tmp/out.txt"
+        gl_tcmd=()
+        command -v timeout >/dev/null 2>&1 && gl_tcmd=(timeout 120)
+        set +e
+        ( cd "$gl_tmp" && ${gl_tcmd[@]+"${gl_tcmd[@]}"} "$gl_bin" git --pre-commit --staged --redact --exit-code 2 --no-banner --no-color -v -c "$gl_cfg" "$gl_top" ) >"$gl_out_file" 2>&1 </dev/null
+        gl_rc=$?
+        set -e
+        # 로그의 색 코드(ESC)가 JSON 에 들어가면 안 되므로 지운다(--no-color 는 로그 줄엔 듣지 않는다).
+        gl_out="$(sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$gl_out_file" 2>/dev/null | tr -d '\r')" || gl_out=""
+        rm -rf "$gl_tmp"
+
+        # gitleaks 는 저장소를 못 읽는 등의 오류도 종료코드 0 으로 끝낼 때가 있어 로그의 ERR 도
+        # 본다. 값은 --redact 로 가려지고, 요약에는 규칙·파일·줄만 쓴다.
+        if [ "$gl_rc" -eq 0 ] && printf '%s\n' "$gl_out" | grep -Eq '(^|[[:space:]])(ERR|FTL)([[:space:]]|$)'; then
+          gl_rc=99
+        fi
+
+        case "$gl_rc" in
+          0)
+            : # 비밀값이 발견되지 않았다.
+            ;;
+          2)
+            gl_summary="$(printf '%s\n' "$gl_out" | awk '
+              /^RuleID:/ { r = $2 }
+              /^File:/   { f = $0; sub(/^File:[ \t]*/, "", f) }
+              /^Line:/   { n++; if (n <= 5) printf "%s%s %s:%s", (n > 1 ? ", " : ""), r, f, $2 }
+              END { if (n > 5) printf " 등 %d건", n }' | tr -d '"\\`$')"
+            deny "비밀값 발견: 커밋에 들어갈 staged 변경에서 비밀정보 모양이 발견되어 커밋을 막습니다(값은 가려서 표시하지 않습니다). 발견: $gl_summary 다음: Claude 가 해당 줄을 파일에서 빼고 git add 로 다시 올린 뒤 커밋하십시오. 진짜 비밀값이면 이미 노출된 것으로 보고 폐기하고 새로 발급해 교체해야 하므로 사람에게 알리십시오. 오탐이면 사람이 할 일 - 저장소의 .gitleaks.toml 의 [allowlist] 에 해당 경로나 정규식을 추가하십시오(Claude 가 스스로 추가하지 않습니다)."
+            ;;
+          *)
+            if [ "$gl_rc" -eq 124 ]; then
+              gl_detail="시간 초과(120초)"
+            else
+              gl_detail="$(printf '%s\n' "$gl_out" | grep -E 'FTL|ERR' | head -n 3 | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
+              [ -z "$gl_detail" ] && gl_detail="출력 없음"
+            fi
+            deny "검사 불능: gitleaks 가 오류로 끝나(종료코드 $gl_rc) 비밀정보 검사를 하지 못했습니다. 이것은 비밀값이 발견됐다는 뜻이 아니며, 검사하지 못한 상태로 통과시키지도 않습니다. 사유: $gl_detail 다음: gitleaks 가 동작하는지, 저장소의 .gitleaks.toml 이 올바른 TOML 이고 [extend] path 가 .harness-engine/checker/gitleaks/harness.toml 인지 확인하고 같은 커밋을 다시 시도하십시오. 계속되면 사람이 할 일 - 원인을 해결하십시오(급하면 HARNESS_SKIP_SECRET_SCAN=1 을 환경에 설정하고 Claude Code 를 새로 여십시오. 이 변수는 사람만 켜고 Claude 는 켜지 않습니다)."
+            ;;
+        esac
+      fi
+    fi
+  fi
+fi
+
 # 3) /harness:deliver 스킬이 절차를 따르고 있다는 선언이면 여기서 통과시킨다.
 #    위의 두 검사를 지난 뒤라 강제 푸시와 main 커밋은 이미 걸러져 있다.
 case "$cmd" in
   DELIVER=1*)
-    exit 0
+    finish_ok
     ;;
 esac
 
@@ -482,4 +699,4 @@ if [ "$sub" = "push" ]; then
   deny "푸시는 /harness:deliver 스킬이 수행합니다. /harness:deliver 는 커밋과 fetch 와 rebase 와 푸시와 PR 생성을 한 번에 처리합니다. 다음: /harness:deliver 를 실행하십시오. 이미 그 스킬 절차를 따르는 중이라면 명령 앞에 DELIVER=1 을 붙여 다시 실행하십시오."
 fi
 
-exit 0
+finish_ok

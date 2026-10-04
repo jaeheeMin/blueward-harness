@@ -34,6 +34,8 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
    나눈다. 커밋 메시지 형식은
    `<이 스킬의 base directory>/../../rules/commit-and-pr.md` 를 따르고,
    제목은 명사형으로 끝내며, 본문에 `Refs #{이슈번호}` 를 넣는다.
+   `git add` 와 `git commit` 은 한 명령으로 묶지 않고 따로 실행한다(커밋 전 비밀정보
+   검사가 staged 를 보기 때문, #170).
 7. 스테이징에서 `.superpowers/` 와 `*handoff*.md` 를 뺀다. `.claude/` 와
    `CLAUDE.md` 와 `rules/` 는 이 저장소의 정식 산출물이므로 빼지 않는다.
 8. `git push` 를 실행할 때는 명령 앞에 `DELIVER=1` 을 붙인다. **4단계에서
