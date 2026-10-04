@@ -1379,6 +1379,24 @@ def test_모든_스킬의_name_이_디렉터리_이름과_같고_description_이
     assert fields.get("description"), f"{skill_md} 에 description 이 없거나 비어 있다"
 
 
+# https://code.claude.com/docs/en/skills.md 의 frontmatter reference 표에 있는 필드(#147).
+# 문서는 모르는 필드를 오류 없이 무시한다고 하므로, 오타가 조용히 묻히지 않게 막는다.
+_SKILL_FRONTMATTER_FIELDS = {
+    "name", "description", "when_to_use", "argument-hint", "arguments",
+    "disable-model-invocation", "user-invocable", "allowed-tools",
+    "disallowed-tools", "model", "effort", "context", "agent", "background",
+    "hooks", "paths", "shell", "metadata", "license", "compatibility",
+}
+
+
+@pytest.mark.parametrize("skill_md", _SKILL_MDS, ids=lambda p: p.parent.name)
+def test_스킬_frontmatter_필드는_공식_지원_목록_안에_있고_compatibility_는_500자_이하다(skill_md):
+    fields = _frontmatter_fields(skill_md.read_text(encoding="utf-8"))
+    unknown = sorted(set(fields) - _SKILL_FRONTMATTER_FIELDS)
+    assert not unknown, f"{skill_md} 에 공식 문서에 없는 frontmatter 필드가 있다: {unknown}"
+    assert len(fields.get("compatibility", "")) <= 500, f"{skill_md} compatibility 가 500자를 넘는다"
+
+
 _PLUGIN_REL_REF = re.compile(r"\.\./\.\./(?:rules|conventions)/[A-Za-z0-9_.\-]+\.md")
 
 
