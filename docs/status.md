@@ -423,6 +423,16 @@ Claude GitHub App 설치 여부, OIDC 교환, 허용 도구 문법의 실동작�
 GhError 로 판정 불가). risk_gate, 승인자 파일, human-merge-paths 읽기가 같은 함수를 쓰므로 함께
 고쳐진다. 실제 GitHub 에서 5xx 를 일으켜 보지는 않았다(가짜 subprocess 로만 확인).
 
+**after-merge 의 직접 push 오판을 줄였다(#130, risk_gate after-merge).** `decide_commit` 이
+`commits/{sha}/pulls` 가 비었다고 바로 "PR 없이 main 에 직접 들어옴" 으로 보던 것을 고쳤다. 비면 최대 3회
+(간격 5초, `sleep` 주입 가능) 다시 조회하고, 그래도 비면 squash 병합 커밋 제목 끝 `(#123)` 의 번호로
+`pulls/123` 을 읽어 그 PR 이 병합됐고 `merge_commit_sha` 가 이 커밋일 때만 그 PR 로 판정한다(제목 번호가
+PR 이 아니라 404 면 근거 없음). 근거가 모두 없을 때만 직접 push 다. 직접 push 경로에서는 "다른 검사가
+아직 끝나지 않음" 같은 대기 사유(`waiting` Finding)를 위험으로 세지 않는다 — push 직후엔 검사가 진행
+중인 게 정상이고, 기다리면 워크플로가 길어지며, 실패한 검사·크기·경로·비밀값은 그대로 위험이다. 다만
+진행 중이던 검사가 나중에 실패하는 것은 이 실행이 못 잡는다. 조회 실패는 여전히 판정 불가(2)다. PR 이 연결된 경로의
+판정은 바꾸지 않았다. 실제 GitHub 에서 연결 지연을 재현해 보지는 못했다(가짜 클라이언트만).
+
 **Plugin 자체 검증 테스트를 더했다(#136).** `plugins/harness/` 를 바꾼 PR 이 plugin.json version 을
 올렸는지 `checker.plugin_version`(진입점 `scripts/check_plugin_version.py`)이 `checker.yml` 의 PR 단계에서
 확인한다. 올리지 않으면 종료코드 1, base 나 plugin.json 을 읽지 못하면 통과가 아니라 2(원칙 7)다. version
