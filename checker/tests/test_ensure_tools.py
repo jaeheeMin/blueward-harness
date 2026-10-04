@@ -378,7 +378,10 @@ def test_상한에_걸린_뒤에도_세션_시작_동기화와_지난_경고가_
         HARNESS_INSTALL_TIMEOUT="1",
     )
 
-    assert "도구 설치 시간 상한(2초)" in out
+    # 시간은 초 단위(SECONDS)라 빠른 머신에서는 상한보다 한 번 시도의 시간 초과가 먼저 온다.
+    # 이 테스트가 보는 것은 설치가 멈춰도 아래 동기화·경고가 나온다는 점이다.
+    assert "도구 설치 시간 상한(2초)" in out or "설치하지 못했습니다(시간 초과)" in out
+    assert "설치했습니다" not in out
     assert "지난 세션에서 남은 경고가 있습니다." in out
     assert "지난 경고 내용" in out
     assert "현재 브랜치:" in out
