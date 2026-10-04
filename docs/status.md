@@ -164,6 +164,24 @@ Repository 에서 바로 SAP 에 쓸 수 있게 했다. 이름 바꾸기·리팩
 저장하지 않는다(POST, `lockHandle` 없음). 저장은 결국 `setObjectSource` 를 거치므로
 막을 구멍이 없어 구현하지 않고 닫았다.
 
+**MCP 가드가 테넌트별로 쓰기를 막고 데이터 추출은 되묻는다(#148).** 전에는 어느 SAP
+테넌트(MCP 서버)인지 보지 않아, 쓰기 금지 테넌트(public-cloud 기준 100)에 대한 삭제·활성화·
+운송·코드 실행을 막지 못했다(조사 인계 H2). 새 모듈 `hooks/adt_tiers.py`(순수 함수)가 프로젝트의
+`env/adt-tiers.yaml`(public-cloud 형식 그대로: `servers.<이름>.writes_allowed`, `write_tools`,
+`data_tools`)을 읽는다. `mcp_source_guard.py` 는 코드 규칙 검사 앞에 이 판정을 먼저 돌린다.
+쓰기 금지 서버와 모르는 서버의 쓰기 도구는 거절(모르는 서버를 쓰기 허용으로 보지 않는다),
+`data_tools`(기본 `tableContents`, `runQuery`)는 `ask` 로 되묻고 `SELECT *`·`FIELDS *` 면 사유에
+CR-003 을 적는다. 파일이 없으면 쓰기는 기존 코드 규칙만 보고 데이터 도구만 되묻는다(2026-10-04
+결정 "안 ①") — 대신 `.mcp.json` 이 있는 저장소의 세션 시작 때 "꺼져 있다" 고 알린다. 파일이 있는데
+깨졌거나 필수 키가 없으면 거절한다(원칙 7). 훅이 PyYAML 없이 도는 탓에 필요한 부분집합만 읽는 작은
+해석기를 두었고 모르는 문법은 해석 못 함으로 거절한다. 기본 데이터 도구 목록은
+`mcp_default_tools.json` 에 둔다(원칙 2). 매처는 알려진 19개 도구 이름 목록으로 넓혔다 — 모든 MCP 를
+잡으면 ADT 가 아닌 서버 호출마다 `uv` 를 띄우는 비용이 크다. 그 한계로, 파일의 `write_tools` 에 새
+이름을 적어도 매처에 없으면 막히지 않는다. scaffold 는 `env/adt-tiers.example.yaml`(훅이 읽지
+않는 예시, 서버 이름은 자리표시, 전부 `writes_allowed: false`)을 만든다 — 빈 활성 파일을 두면
+채우기 전까지 모든 쓰기가 막히기 때문이다. 실제 MCP 호출로 100 쓰기가 막히는 것은 public-cloud 에서
+확인할 일로 남았다.
+
 **세션 Hook 이 지금 작업 폴더로 판단한다(#71).** `session-start-sync.sh`,
 `stop-deliver.sh`, `pre-bash-git-guard.sh` 는 `CLAUDE_PROJECT_DIR`(세션을 처음 연
 폴더)로 이동해 판단했으므로, 세션이 다른 worktree 로 옮기면 원래 폴더를 보고 경고나

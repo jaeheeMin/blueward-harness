@@ -76,6 +76,14 @@ fi
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 알수없음)"
 add "현재 브랜치: $branch"
 
+# SAP ADT MCP 를 쓰는 저장소(.mcp.json 이 있다)인데 env/adt-tiers.yaml 이 없으면 테넌트별
+# 쓰기 차단이 꺼져 있다(#148, 파일 없음은 코드 규칙만 검사하고 데이터 도구만 되묻는다).
+# 조용히 넘기면 꺼진 줄 모르므로 알린다. .mcp.json 이 없는 저장소는 말하지 않는다.
+repo_top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [ -f "$repo_top/.mcp.json" ] && [ ! -f "$repo_top/env/adt-tiers.yaml" ]; then
+  add "env/adt-tiers.yaml 이 없어 테넌트별 쓰기 차단이 꺼져 있습니다. 다음: 사람이 env/adt-tiers.yaml 에 MCP 서버별 writes_allowed 와 write_tools 를 적으십시오(예시: env/adt-tiers.example.yaml 또는 harness README 의 \"테넌트별 쓰기 차단\" 절)."
+fi
+
 git_dir="$(git rev-parse --git-dir)"
 
 # 리베이스를 실행하고 성공·충돌·그 밖의 실패를 메시지로 남긴다. 실패해도
