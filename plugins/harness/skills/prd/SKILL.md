@@ -1,6 +1,6 @@
 ---
 name: prd
-description: PRD 를 처음 만들 때, 또는 요구사항이 바뀌어 PRD 를 고칠 때 쓴다. 사용자가 "PRD 만들어줘", "요구사항 바뀌었어", "PRD 수정" 이라고 말할 때 사용한다.
+description: PRD 를 처음 만들 때, 또는 요구사항이 바뀌어 PRD 를 고칠 때 쓴다. 사용자가 "PRD 만들어줘", "요구사항 바뀌었어", "PRD 수정" 이라고 말할 때 사용한다. 이럴 땐 쓰지 않는다 — 개발 Spec 을 만들거나 고치는 말이면 spec 스킬로(PRD 를 고친 뒤 Spec 에 반영하는 일도 spec).
 ---
 
 # /harness:prd

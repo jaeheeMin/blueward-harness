@@ -451,6 +451,15 @@ Agent 호출 때 `model` 을 넘기면 정의보다 우선하고, Bash 를 쓰�
 model, 무시되는 필드 없음, 읽기 전용 둘의 disallowedTools). 실제 세션의 에이전트 목록에 뜨는지와 읽기 전용
 에이전트에서 MCP 조회가 실제로 되는지는 Plugin 갱신 뒤에 확인한다.
 
+**스킬 description 겹침을 정리했다(#147).** 일곱 스킬의 description 끝에 "이럴 땐 쓰지 않는다 — X 스킬로" 를 더해
+겹치던 말을 갈랐다(다 했어는 deliver, 여기까지·나머지는 다음에는 wrapup, 최신으로·당겨받아는 sync, 초기 세팅은
+scaffold, PRD 수정은 prd, 스펙 수정은 spec). 기존 트리거 문구와 본문 절차는 그대로다. `when_to_use` 는 description
+과 합쳐 1,536자에서 잘리는 같은 목록이라 따로 쓰지 않았다. start·deliver·wrapup·sync·scaffold 에는 공식 문서가
+지원하는 `compatibility`(500자 이하 문자열, Claude Code 는 받기만 하고 동작하지 않는 안내용)로 git·gh·uv 전제를
+적었다. `allowed-tools` 는 제한이 아니라 사전 승인 목록이라 넣지 않았다. `test_plugin_layout.py` 에 스킬 frontmatter
+필드가 공식 지원 목록 안인지 보는 검사를 더했다(문서는 모르는 필드를 오류 없이 무시하므로 오타가 조용히 묻힌다).
+description 만으로 실제 호출이 갈리는지는 세션에서 말을 던져 확인해 보지 못했다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.

@@ -1,6 +1,7 @@
 ---
 name: scaffold
-description: 새 고객사 Project Repository 를 처음 만들었을 때 표준 구조(templates/, rules/, docs/ssot/ 등)를 만든다. 사용자가 "스캐폴딩 해줘", "프로젝트 구조 만들어줘", "초기 세팅해줘" 라고 말할 때 사용한다.
+description: 새 고객사 Project Repository 를 처음 만들었을 때 표준 구조(templates/, rules/, docs/ssot/ 등)를 만든다. 사용자가 "스캐폴딩 해줘", "프로젝트 구조 만들어줘", "초기 세팅해줘" 라고 말할 때 사용한다. 이럴 땐 쓰지 않는다 — 작업(이슈·브랜치)을 시작하는 말이면 start 스킬로, 구조가 이미 있는 저장소에서 문서를 만들거나 고치는 말이면 prd·spec 스킬로.
+compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시크릿 등록 안내에 GitHub CLI(gh)를 쓴다.
 ---
 
 # /harness:scaffold
