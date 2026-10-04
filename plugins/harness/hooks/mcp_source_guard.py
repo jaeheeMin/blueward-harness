@@ -8,6 +8,13 @@ Claude 가 ADT MCP 서버(예: npm `mcp-abap-abap-adt-api`)의 도구로 오브�
 검사한다. 매처가 서버 이름에 매이지 않으므로 이 스크립트도 어떤 MCP 서버가
 불렀는지 신경 쓰지 않는다 — 도구 이름 끝(마지막 `__` 뒤)으로만 갈래를 나눈다.
 
+**테넌트 판정(#148).** 코드 규칙 검사 앞에 `adt_tiers.py` 의 판정이 먼저 돈다 —
+프로젝트의 `env/adt-tiers.yaml` 에서 `writes_allowed: false` 인 서버의 `write_tools`
+도구는 거절, `data_tools`(기본 `tableContents`, `runQuery`)는 사용자에게 되묻는다
+(`ask`). 파일이 없으면 쓰기 도구는 아래 코드 규칙만, 데이터 도구는 되묻기만 한다.
+파일이 있는데 읽지 못하면 거절한다. 테넌트 판정을 통과한 호출만 아래 두 갈래로
+간다. 서버 이름은 이 판정에서만 쓰고, 아래 갈래는 여전히 도구 이름 끝으로만 나눈다.
+
 **두 갈래.**
 
 1. `setObjectSource` — 코드 본문(`source`)을 통째로 검사한다(#60). 엔진이
@@ -65,6 +72,11 @@ import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+
+# 스크립트로 실행되면 이 폴더가 sys.path 맨 앞이라 바로 import 되지만, 다른 방식으로
+# 불려도 같은 폴더의 모듈을 찾게 한다.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import adt_tiers  # noqa: E402
 
 # 검사 엔진을 받아 오는 기본 위치. `pre_write_guard.py` 와 GitHub Actions 재사용
 # 워크플로의 기본 `engine-ref` (main) 와 맞춘다.
@@ -509,6 +521,53 @@ def _handle_extract_method_execute(tool: str, tool_input: dict) -> None:
     _check_extract_method_execute_content(tool, "\n".join(contents))
 
 
+def ask(reason: str) -> None:
+    """사용자에게 되묻는다. 사유는 권한 대화상자에 보인다(Claude Code 훅 문서)."""
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": reason,
+        }
+    }
+    json.dump(payload, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    sys.exit(0)
+
+
+def _check_tenant(tool: str, tool_input: object, cwd: object) -> None:
+    """`env/adt-tiers.yaml` 로 테넌트별 쓰기 차단과 데이터 추출 되묻기를 건다(#148).
+
+    막거나 되물으면 여기서 끝나고(`deny()`/`ask()`), 그대로 두면 돌아가 기존 코드 규칙
+    검사가 이어진다. 판정 로직은 `adt_tiers.py` 의 순수 함수다.
+    """
+    if adt_tiers.split_mcp_tool_name(tool) is None:
+        return
+
+    tiers = None
+    path = adt_tiers.find_tiers_file(cwd if isinstance(cwd, str) and cwd else None)
+    if path is not None:
+        try:
+            tiers = adt_tiers.load_tiers(path)
+        except adt_tiers.TiersError as exc:
+            deny(adt_tiers.load_error_reason(path, exc))
+
+    try:
+        default_data_tools = adt_tiers.load_default_data_tools()
+    except (OSError, ValueError, adt_tiers.TiersError) as exc:
+        deny(
+            "harness: 기본 데이터 도구 목록(mcp_default_tools.json)을 읽지 못해 이 MCP 호출을 "
+            f"확인할 수 없었습니다.\n사유: {exc}\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + NEXT_RETRY
+        )
+
+    decision = adt_tiers.decide(tool, tool_input, tiers, default_data_tools)
+    if decision.kind == "deny":
+        deny(decision.reason)
+    if decision.kind == "ask":
+        ask(decision.reason)
+
+
 def _main() -> None:
     try:
         payload = json.loads(sys.stdin.read() or "{}")
@@ -522,12 +581,18 @@ def _main() -> None:
         )
 
     tool = payload.get("tool_name") or ""
+    tool_input = payload.get("tool_input") or {}
+
+    # 1단계(#148): 테넌트 판정. 쓰기 금지 서버의 쓰기 도구는 코드 규칙을 보기 전에
+    # 막고, 데이터 추출 도구는 되묻는다. 통과하면 2단계(기존 코드 규칙 검사)로 간다.
+    _check_tenant(tool, tool_input, payload.get("cwd"))
+
+    # 2단계: 기존 코드 규칙(CR) 검사. 여섯 도구만 대상이고 나머지는 여기서 통과한다.
     match = _TOOL_NAME_RE.match(tool)
     if not match:
         allow()
 
     tool_kind = match.group(1)
-    tool_input = payload.get("tool_input") or {}
 
     if tool_kind == "setObjectSource":
         url = tool_input.get("objectSourceUrl")

@@ -1,0 +1,53 @@
+# SAP ADT MCP 서버별 쓰기 허용 표 — 예시 파일이다. harness 훅은 이 파일을 읽지 않는다.
+#
+# SAP 에 MCP 서버(.mcp.json)를 붙여 쓰는 프로젝트라면 이 파일을 env/adt-tiers.yaml
+# 로 복사해 고친다. 그 파일이 있으면 harness 훅이 읽어서, writes_allowed: false 인
+# 서버에서 write_tools 도구를 부르는 것을 SAP 에 닿기 전에 막는다. 없으면 이 차단은
+# 꺼져 있다(세션을 열 때 알려 준다).
+#
+# 고칠 곳:
+#   - servers 아래 이름을 .mcp.json 의 MCP 서버 이름과 똑같이 바꾼다. 서버 이름이
+#     다르면 "모르는 서버" 로 보고 쓰기를 막는다(안전한 쪽).
+#   - 쓰기를 허용할 서버(보통 개발 테넌트 하나)만 writes_allowed: true 로 바꾼다.
+#   - 비밀번호, 계정 ID, 쿠키는 여기 적지 않는다.
+#
+# 훅이 읽는 키: servers.<이름>.writes_allowed, write_tools, data_tools.
+# 나머지(system, client, role, host 등)는 사람이 보는 정보다.
+# 알려진 도구 이름만 훅이 잡는다. 목록에 새 도구를 더해도 hooks.json 의 매처에 없으면
+# 잡히지 않는다(harness Plugin README 참고).
+
+system: EXAMPLE
+
+servers:
+  example-read-server:        # .mcp.json 의 서버 이름으로 바꾼다
+    client: "100"
+    role: customizing
+    writes_allowed: false     # 조회 전용. 쓰기 도구는 막는다
+
+  example-dev-server:         # .mcp.json 의 서버 이름으로 바꾼다
+    client: "080"
+    role: development
+    writes_allowed: false     # 쓰기를 허용할 개발 서버만 true 로 바꾼다
+
+# 쓰기로 취급하는 MCP 도구. 서버 이름 접두어(mcp__<서버>__)를 뗀 이름이다.
+write_tools:
+  - setObjectSource
+  - createObject
+  - deleteObject
+  - activateObjects
+  - activateByName
+  - renameExecute
+  - extractMethodExecute
+  - createTransport
+  - transportRelease
+  - transportDelete
+  - publishServiceBinding
+  - unPublishServiceBinding
+  - runClass
+  - gitPullRepo
+  - pushRepo
+
+# 데이터 추출 도구. 어느 서버든 사용자에게 되묻는다.
+data_tools:
+  - tableContents
+  - runQuery

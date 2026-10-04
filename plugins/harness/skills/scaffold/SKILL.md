@@ -90,6 +90,7 @@ audit/README.md                    Audit 두 종류(변경 기록·진행 원장
 audit/changes/.gitkeep             변경 기록이 쌓일 자리
 audit/ledger/.gitkeep              진행 원장이 쌓일 자리
 env/README.md                      환경별 접속 URL(Credential 은 안 둠)
+env/adt-tiers.example.yaml         SAP MCP 서버별 쓰기 허용 표 예시(#148). 훅은 읽지 않는다 — 복사해 env/adt-tiers.yaml 로 고쳐 쓴다
 .github/workflows/doc-guard.yml    PR·main 커밋마다 doc-guard 를 부르는 워크플로
 .github/workflows/ssot-approval.yml PR·main 커밋마다 PRD 변경 승인을 검사하는 워크플로(#49)
 .github/ssot-approvers             PRD 변경 PR 을 승인할 수 있는 GitHub 아이디 목록

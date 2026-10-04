@@ -48,7 +48,9 @@ def test_마켓플레이스_항목이_harness_를_가리킨다():
 HOOK_MATCHERS = {
     "Write|Edit",
     "Bash|PowerShell",
-    "mcp__.*__(setObjectSource|renamePreview|renameExecute|extractMethodPreview|extractMethodExecute|createObject)",
+    "mcp__.*__(setObjectSource|renamePreview|renameExecute|extractMethodPreview|extractMethodExecute|createObject"
+    "|deleteObject|activateObjects|activateByName|createTransport|transportRelease|transportDelete"
+    "|publishServiceBinding|unPublishServiceBinding|runClass|gitPullRepo|pushRepo|tableContents|runQuery)",
 }
 
 

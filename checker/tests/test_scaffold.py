@@ -62,6 +62,7 @@ EXPECTED_FILES = {
     "audit/changes/.gitkeep",
     "audit/ledger/.gitkeep",
     "env/README.md",
+    "env/adt-tiers.example.yaml",
     ".github/workflows/doc-guard.yml",
     ".github/workflows/ssot-approval.yml",
     ".github/ssot-approvers",

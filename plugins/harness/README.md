@@ -90,9 +90,54 @@ plugins/harness/
 |---|---|---|
 | `pre_write_guard.py` | `PreToolUse` (Write\|Edit) | 문서가 템플릿을 벗어나면 저장을 막는다(doc-guard). 코드(`.abap`, `.js`/`.ts`, `.cds`, `.asbdef`)는 공통 개발 규칙 CR-001·CR-002·CR-003·CR-007 을 어기면 막는다(#54, #72, #81. BDEF 는 CR-001 만, CR-003·CR-007 은 ABAP·JS/TS 만) |
 | `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 PRD 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120) |
+| `mcp_source_guard.py` | `PreToolUse` (SAP ADT MCP 도구 19개) | MCP 로 SAP 에 쓰거나 이름을 붙이는 경로의 코드 규칙 CR-001·CR-002·CR-003·CR-007 검사(#60, #61)와, `env/adt-tiers.yaml` 기준 테넌트별 쓰기 차단·데이터 추출 되묻기(#148). 아래 "테넌트별 쓰기 차단" 참고 |
 | `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고 지난 세션에서 남은 경고를 전한다. upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리) |
 | `ensure-tools.sh` | `SessionStart` (session-start-sync.sh 가 부름) | uv·jq·gh 가 없으면 Windows 에서 winget 으로 설치하고 결과를 알린다(#116). 아래 "도구 자동 설치" 참고 |
 | `stop-deliver.sh` | `Stop` | 커밋되지 않은 변경이 남았으면 `/harness:deliver` 를 안내한다 |
+
+### 테넌트별 쓰기 차단과 데이터 추출 되묻기(#148)
+
+SAP ADT MCP 서버는 테넌트(클라이언트)마다 하나씩 붙는다. 프로젝트 루트의
+`env/adt-tiers.yaml` 에 서버별로 쓰기를 허용하는지 적어 두면 `mcp_source_guard.py` 가
+그것을 읽는다. 훅 입력의 `cwd` 에서 위로 올라가며(저장소 루트까지) 찾는다.
+
+```yaml
+servers:
+  abap-adt-z5u:            # .mcp.json 의 서버 이름과 같아야 한다
+    client: "100"          # client, role 은 안내문용
+    role: customizing
+    writes_allowed: false
+  abap-adt-z5u-dev:
+    client: "080"
+    writes_allowed: true
+write_tools: [setObjectSource, createObject, deleteObject, activateObjects, ...]
+data_tools: [tableContents, runQuery]
+```
+
+| 상황 | 동작 |
+|---|---|
+| 서버가 `writes_allowed: false` 이고 도구가 `write_tools` 에 있다 | 거절. 쓰기가 허용된 서버 이름을 파일에서 읽어 "다음:" 에 보여 준다 |
+| 서버가 `servers` 에 없고 도구가 `write_tools` 에 있다 | 거절(모르는 서버는 쓰기 허용으로 보지 않는다) |
+| `writes_allowed: true` 서버의 쓰기 도구 | 테넌트 판정은 통과하고, 기존 코드 규칙(CR) 검사가 이어진다 |
+| 도구가 `data_tools`(기본 `tableContents`, `runQuery`)에 있다 | 어느 서버든 사용자에게 되묻는다(`ask`). 쿼리에 `SELECT *` 나 `FIELDS *` 가 있으면 사유에 CR-003 을 적는다 |
+| 파일이 없다 | 쓰기 도구는 기존 CR 검사만, 데이터 도구는 기본 목록으로 되묻는다. 세션 시작 때 `.mcp.json` 이 있는 저장소에만 "꺼져 있다" 고 알린다 |
+| 파일이 있는데 읽거나 해석하지 못한다(필수 키 `servers`·`write_tools`, 서버마다 `writes_allowed` true/false) | 거절(검사 불능). 파일을 고치라고 안내한다 |
+
+파일은 PyYAML 없이 작은 해석기로 읽는다 — 맵, 글자 목록, `[a, b]` 한 줄 목록, 주석,
+따옴표 글자만 지원하고, 그 밖의 문법(앵커, 여러 줄 글자, 탭 들여쓰기)은 해석 못 함으로
+거절한다. 도구 이름은 `mcp__<서버>__<도구>` 에서 마지막 `__` 를 기준으로 나눈다.
+scaffold 는 `env/adt-tiers.example.yaml`(예시, 훅은 읽지 않음)을 만든다.
+
+**한계.** 훅 매처(`hooks.json`)는 이름 목록 정규식이라 목록에 있는 19개 도구만
+가로챈다 — 코드 규칙 검사 6개(`setObjectSource`, `renamePreview`, `renameExecute`,
+`extractMethodPreview`, `extractMethodExecute`, `createObject`), 쓰기 11개(`deleteObject`,
+`activateObjects`, `activateByName`, `createTransport`, `transportRelease`,
+`transportDelete`, `publishServiceBinding`, `unPublishServiceBinding`, `runClass`,
+`gitPullRepo`, `pushRepo`), 데이터 2개. **`write_tools` 나
+`data_tools` 에 새 이름을 적어도 매처에 없으면 훅이 불리지 않아 막히지 않는다** — 이름을
+늘리려면 매처도 함께 고쳐야 한다. 모든 MCP 도구(`mcp__.*__.*`)를 잡지 않은 것은 ADT 가 아닌
+MCP 서버의 모든 호출마다 훅(`uv` 기동)을 띄우는 비용 때문이다. 플러그인이 번들한 MCP 서버
+이름은 `plugin_<플러그인>_<서버>` 꼴이라 `servers` 에 그대로 적어야 한다.
 
 ### 도구 자동 설치(#116)
 
