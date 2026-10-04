@@ -133,8 +133,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # --strict-mcp-config: PR 저장소의 .mcp.json 서버를 띄우지 않는다(리뷰에 필요 없고 비신뢰 입력).
+          # 액션이 --mcp-config 로 넣는 자기 서버만 남는다(#144).
           claude_args: |
-            --max-turns ${{ inputs.max-turns }} --model ${{ inputs.model }} --allowedTools "Read,Glob,Grep,Write,Bash(git diff:*),Bash(git log:*)"
+            --strict-mcp-config --max-turns ${{ inputs.max-turns }} --model ${{ inputs.model }} --allowedTools "Read,Glob,Grep,Write,Bash(git diff:*),Bash(git log:*)"
           prompt: |
             당신은 이 저장소의 PR 코드 리뷰어다. 아래 규칙을 지켜 리뷰하라.
 
