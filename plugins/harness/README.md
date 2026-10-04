@@ -22,6 +22,10 @@ plugins/harness/
     prd/SKILL.md               /harness:prd — PRD 작성·수정
     spec/SKILL.md              /harness:spec — 개발 Spec 작성·수정
     sync/SKILL.md              /harness:sync — 원격 최신 상태를 로컬 브랜치로 당겨받기
+  agents/
+    researcher.md              harness:researcher — 조회 전용 조사(sonnet, 쓰기 도구 없음)
+    reviewer.md                harness:reviewer — 읽기 전용 검토(sonnet, 쓰기 도구 없음)
+    implementer.md             harness:implementer — 구현(sonnet)
   rules/                       위 Skill 이 참조하는 협업 규칙 5개
   conventions/common.md        어느 저장소에서나 같은 공통 개발 규칙(CR-001 ~ CR-008)
 ```
@@ -68,6 +72,17 @@ plugins/harness/
 | `/harness:prd` | PRD 를 새로 쓰거나, 요구사항이 바뀌었을 때 고친다 |
 | `/harness:spec` | PRD 요구사항으로 개발 Spec 을 만들거나, PRD 가 바뀌어 고친다 |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다 |
+
+### 서브에이전트 3개(#139)
+
+`agents/` 의 정의 파일이 모델과 도구를 고정한다. 이름은 `harness:` 가 앞에 붙고,
+`@agent-harness:researcher` 처럼 부를 수 있다. 언제 쓰는지는 `rules/delegation.md` 를 읽는다.
+
+| 에이전트 | 하는 일 |
+|---|---|
+| `harness:researcher` | 조회 전용 조사. 쓰기·편집 도구가 없고 상태를 바꾸는 명령을 금한다 |
+| `harness:reviewer` | 읽기 전용 검토. 쓰기·편집 도구가 없고 자기 승인을 하지 않는다 |
+| `harness:implementer` | 범위를 정해 준 구현. 커밋·푸시는 하지 않는다 |
 
 ### 훅 4개
 

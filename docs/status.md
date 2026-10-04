@@ -431,6 +431,16 @@ ubuntu 에서만 돈다. `test_plugin_layout.py` 에는 스킬 전수 검사(nam
 이 있음, `../../rules/`·`../../conventions/` 참조가 실재함)를 더했다. hooks.json 이 가리키는 파일 존재는
 기존 검사가 이미 봐서 다시 만들지 않았다. 실제 GitHub PR 위에서 단계를 돌려 보지는 않았다.
 
+**위임 규칙을 Plugin agents 정의로 고정했다(#139).** `plugins/harness/agents/` 에 `researcher`(조회 전용),
+`reviewer`(읽기 전용 검토), `implementer`(구현) 를 두었고 모두 `model: sonnet` 이다. 앞의 둘은
+`disallowedTools` 로 Write·Edit·NotebookEdit 만 뺀다 — 허용 목록 `tools` 를 쓰면 서버 이름이 사용자마다 다른 MCP
+조회 도구(SAP 소스 조회 등)까지 막히기 때문이다. `implementer` 는 도구를 제한하지 않는다. `plugin.json` 에는 `agents`
+키를 넣지 않는다(넣으면 자동 탐색을 대체한다). `delegation.md` 에 정의 표를 더하고 강제 방식 절을 고쳤다 —
+Agent 호출 때 `model` 을 넘기면 정의보다 우선하고, Bash 를 쓰는 읽기 전용 에이전트의 상태 변경 금지는 도구가
+아니라 본문 지침이다. `test_plugin_layout.py` 가 agents 를 전수로 훑는다(frontmatter, name, description,
+model, 무시되는 필드 없음, 읽기 전용 둘의 disallowedTools). 실제 세션의 에이전트 목록에 뜨는지와 읽기 전용
+에이전트에서 MCP 조회가 실제로 되는지는 Plugin 갱신 뒤에 확인한다.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.

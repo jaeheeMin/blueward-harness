@@ -1393,3 +1393,62 @@ def test_스킬이_참조한_규칙_문서가_실제로_있다(skill_md):
         if not (skill_md.parent / ref).is_file()
     ]
     assert not missing, f"{skill_md} 가 없는 문서를 참조한다: {missing}"
+
+
+# --- agents 전수 검사(#139) -----------------------------------------------------
+#
+# agents/*.md 는 서브에이전트 하나다. 모델과 쓰기 금지를 정의가 고정하므로 그 값이
+# 빠지거나 바뀌면 걸리도록 전수로 훑는다.
+
+_AGENT_MDS = sorted((PLUGIN_ROOT / "agents").glob("*.md"))
+_READ_ONLY_AGENTS = {"researcher", "reviewer"}
+# Plugin agents 에서는 무시되는 필드(공식 문서). 써도 동작하지 않으니 못 쓰게 한다.
+_IGNORED_AGENT_FIELDS = ("permissionMode", "hooks", "mcpServers", "initialPrompt")
+
+
+def test_에이전트가_하나_이상_있다():
+    assert _AGENT_MDS, "agents/*.md 가 하나도 없다"
+
+
+@pytest.mark.parametrize("agent_md", _AGENT_MDS, ids=lambda p: p.stem)
+def test_모든_에이전트의_name_이_파일_이름과_같고_description_과_model_이_있다(agent_md):
+    fields = _frontmatter_fields(agent_md.read_text(encoding="utf-8"))
+    assert fields.get("name") == agent_md.stem, (
+        f"{agent_md} 의 name({fields.get('name')!r}) 이 파일 이름과 다르다"
+    )
+    assert fields.get("description"), f"{agent_md} 에 description 이 없거나 비어 있다"
+    assert fields.get("model") == "sonnet", f"{agent_md} 의 model 이 sonnet 이 아니다"
+
+
+@pytest.mark.parametrize("agent_md", _AGENT_MDS, ids=lambda p: p.stem)
+def test_에이전트는_Plugin_에서_무시되는_필드를_쓰지_않는다(agent_md):
+    fields = _frontmatter_fields(agent_md.read_text(encoding="utf-8"))
+    used = [f for f in _IGNORED_AGENT_FIELDS if f in fields]
+    assert not used, f"{agent_md} 가 Plugin agents 에서 무시되는 필드를 쓴다: {used}"
+
+
+@pytest.mark.parametrize(
+    "agent_md",
+    [p for p in _AGENT_MDS if p.stem in _READ_ONLY_AGENTS],
+    ids=lambda p: p.stem,
+)
+def test_읽기_전용_에이전트는_쓰기_도구를_disallowedTools_로_뺀다(agent_md):
+    """허용 목록(tools) 대신 금지 목록을 쓴다. 허용 목록은 MCP 조회 도구까지 막는데, MCP 서버
+    이름은 사용자마다 달라 하나씩 나열할 수 없다."""
+    fields = _frontmatter_fields(agent_md.read_text(encoding="utf-8"))
+    assert "tools" not in fields, f"{agent_md} 가 tools 허용 목록을 쓴다(MCP 조회까지 막힌다)"
+    denied = {t.strip() for t in fields.get("disallowedTools", "").split(",") if t.strip()}
+    missing = {"Write", "Edit", "NotebookEdit"} - denied
+    assert not missing, f"{agent_md} 의 disallowedTools 에 쓰기 도구가 빠졌다: {sorted(missing)}"
+
+
+def test_읽기_전용_에이전트_둘이_모두_있다():
+    assert _READ_ONLY_AGENTS <= {p.stem for p in _AGENT_MDS}
+
+
+def test_plugin_json_에_agents_키가_없다():
+    """agents 키를 넣으면 agents/ 자동 탐색을 대체한다."""
+    plugin_json = json.loads(
+        (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    assert "agents" not in plugin_json
