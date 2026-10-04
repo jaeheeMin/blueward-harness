@@ -12,6 +12,7 @@
         client: "100"                 # 선택, 안내문에만 쓴다
         role: customizing             # 선택, 안내문에만 쓴다
         writes_allowed: false         # 필수, true/false
+        data_access: ask              # 선택, ask(기본) 또는 deny — deny 면 data_tools 를 막는다
     write_tools: [setObjectSource, ...]   # 필수, 쓰기로 취급하는 도구 이름
     data_tools: [tableContents, runQuery] # 선택, 되묻는 도구 이름
 
@@ -40,6 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 TIERS_RELATIVE_PATH = Path("env") / "adt-tiers.yaml"
+DATA_ACCESS_VALUES = ("ask", "deny")
 _DEFAULT_TOOLS_PATH = Path(__file__).with_name("mcp_default_tools.json")
 
 
@@ -250,8 +252,14 @@ def parse_tiers(text: str) -> Tiers:
         allowed = info.get("writes_allowed")
         if not isinstance(allowed, bool):
             raise TiersError(f"servers.{name}.writes_allowed 가 없거나 true/false 가 아니다")
+        data_access = info["data_access"] if "data_access" in info else "ask"
+        if data_access not in DATA_ACCESS_VALUES:  # 글자가 아닌 값(None, bool 등)도 여기서 걸린다
+            raise TiersError(
+                f"servers.{name}.data_access 가 ask 또는 deny 가 아니다: {data_access!r}"
+            )
         servers[name] = {
             "writes_allowed": allowed,
+            "data_access": data_access,
             "client": None if info.get("client") is None else str(info["client"]),
             "role": None if info.get("role") is None else str(info["role"]),
         }
@@ -316,6 +324,8 @@ def decide(
 
     `tiers` 가 None 이면 `env/adt-tiers.yaml` 이 없는 것이다 — 쓰기 도구는 건드리지
     않고(`pass`), 기본 데이터 도구만 되묻는다(2026-10-04 결정, #148).
+    `data_access: deny` 인 서버의 데이터 도구는 거절한다. 키가 없거나 `ask` 면, 그리고
+    `servers` 에 없는 서버면 되묻는다(모르는 서버는 쓰기와 달리 바꾸지 않았다, #161).
     파일이 있으나 깨진 경우는 호출부가 `TiersError` 로 처리한다(여기까지 오지 않는다).
     """
     parsed = split_mcp_tool_name(tool_name)
@@ -347,6 +357,16 @@ def decide(
         return PASS
 
     if tool in data_tools:
+        info = None if tiers is None else tiers.servers.get(server)
+        if info is not None and info["data_access"] == "deny":
+            return Decision("deny", (
+                f"harness: MCP 서버 {_server_label(server, info)} 는 data_access: deny 라 데이터 "
+                f"도구 {tool} 를 부를 수 없습니다(env/adt-tiers.yaml). 이 서버의 테이블 데이터는 "
+                "대화에 싣지 않습니다.\n\n"
+                "다음: 멈추고 사람에게 알리십시오. 이 서버에서 데이터를 꺼내야 하는지, 필요하면 "
+                "data_access 를 바꿀지는 사람이 정합니다(사람이 할 일). 사람이 정하기 전에는 다른 "
+                "서버로 옮겨 다시 시도하지 마십시오."
+            ))
         reason = (
             f"harness: {server} 의 {tool} 는 SAP 테이블 데이터를 꺼내 대화에 싣습니다. 개인정보나 "
             "기밀이 섞일 수 있으니 필요한 테이블·필드·행 수만 가져오는지 확인하고 허용하십시오."
@@ -394,6 +414,6 @@ def load_error_reason(path: Path, exc: Exception) -> str:
         "쓰는지 확인할 수 없었습니다. 확인되지 않는 상태로 통과시키지 않습니다.\n"
         f"파일: {path}\n사유: {exc}\n\n"
         "다음: 사람이 env/adt-tiers.yaml 을 고치십시오 — 필수 키는 servers(서버마다 "
-        "writes_allowed: true/false)와 write_tools(도구 이름 목록)입니다. 예시는 harness "
+        "writes_allowed: true/false)와 write_tools(도구 이름 목록)입니다. data_access 를 적었다면 ask 또는 deny 여야 합니다. 예시는 harness "
         "플러그인 README 의 \"테넌트별 쓰기 차단\" 절에 있습니다."
     )

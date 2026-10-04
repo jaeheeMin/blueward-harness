@@ -107,6 +107,7 @@ servers:
     client: "100"          # client, role 은 안내문용
     role: customizing
     writes_allowed: false
+    data_access: deny      # 선택(기본 ask). deny 면 데이터 도구를 막는다
   abap-adt-z5u-dev:
     client: "080"
     writes_allowed: true
@@ -119,9 +120,10 @@ data_tools: [tableContents, runQuery]
 | 서버가 `writes_allowed: false` 이고 도구가 `write_tools` 에 있다 | 거절. 쓰기가 허용된 서버 이름을 파일에서 읽어 알리되, "다음:" 은 멈추고 사람에게 알려 다른 서버에서 할 일인지 정하게 한다(Claude 가 서버를 바꿔 다시 시도하지 않는다) |
 | 서버가 `servers` 에 없고 도구가 `write_tools` 에 있다 | 거절(모르는 서버는 쓰기 허용으로 보지 않는다) |
 | `writes_allowed: true` 서버의 쓰기 도구 | 테넌트 판정은 통과하고, 기존 코드 규칙(CR) 검사가 이어진다 |
-| 도구가 `data_tools`(기본 `tableContents`, `runQuery`)에 있다 | 어느 서버든 사용자에게 되묻는다(`ask`). 쿼리에 `SELECT *` 나 `FIELDS *` 가 있으면 사유에 CR-003 을 적는다 |
+| 도구가 `data_tools`(기본 `tableContents`, `runQuery`)에 있고 서버가 `data_access: deny` 다(#161) | 거절. 운영 실데이터 서버처럼 승인을 받아도 데이터를 꺼내면 안 되는 서버에 쓴다. "다음:" 은 멈추고 사람에게 알려 데이터가 필요한지 정하게 한다(다른 서버로 옮겨 다시 하지 않는다) |
+| 도구가 `data_tools` 에 있고 `data_access` 가 없거나 `ask` 이거나 서버가 `servers` 에 없다 | 사용자에게 되묻는다(`ask`). 쿼리에 `SELECT *` 나 `FIELDS *` 가 있으면 사유에 CR-003 을 적는다 |
 | 파일이 없다 | 쓰기 도구는 기존 CR 검사만, 데이터 도구는 기본 목록으로 되묻는다. 세션 시작 때 `.mcp.json` 이 있는 저장소에만 "꺼져 있다" 고 알린다 |
-| 파일이 있는데 읽거나 해석하지 못한다(필수 키 `servers`·`write_tools`, 서버마다 `writes_allowed` true/false) | 거절(검사 불능). 파일을 고치라고 안내한다 |
+| 파일이 있는데 읽거나 해석하지 못한다(필수 키 `servers`·`write_tools`, 서버마다 `writes_allowed` true/false, `data_access` 는 있으면 `ask`·`deny` 만) | 거절(검사 불능). 파일을 고치라고 안내한다 |
 
 파일은 PyYAML 없이 작은 해석기로 읽는다 — 맵, 글자 목록, `[a, b]` 한 줄 목록, 주석,
 따옴표 글자만 지원하고, 그 밖의 문법(앵커, 여러 줄 글자, 탭 들여쓰기)은 해석 못 함으로

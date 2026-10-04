@@ -138,6 +138,76 @@ def test_데이터_도구는_어느_서버든_되묻는다(server, tool):
     assert "CR-003" not in d.reason
 
 
+# --- data_access (#161) ---------------------------------------------------------
+
+DENY_YAML = TIERS_YAML.replace(
+    "    writes_allowed: false\n    login_skill: /c100",
+    "    writes_allowed: false\n    data_access: deny\n    login_skill: /c100",
+)
+
+
+@pytest.mark.parametrize("tool", ["tableContents", "runQuery"])
+def test_data_access_deny_서버의_데이터_도구는_거절한다(tool):
+    assert "data_access: deny" in DENY_YAML
+    d = adt_tiers.decide(f"mcp__abap-adt-z5u__{tool}", {"sqlQuery": "SELECT a FROM t"}, _tiers(DENY_YAML), DEFAULTS)
+    assert d.kind == "deny"
+    assert "data_access: deny" in d.reason and tool in d.reason
+    assert "다음: 멈추고 사람에게 알리십시오" in d.reason
+    assert "(사람이 할 일)" in d.reason
+    assert "abap-adt-z5u-dev" not in d.reason  # 다른 서버를 안내하지 않는다
+    _지시_없음(d.reason)
+
+
+def test_data_access_deny_는_파일의_data_tools_에_더한_도구에도_적용된다():
+    text = DENY_YAML.replace("  - runQuery\n", "  - runQuery\n  - customQuery\n")
+    d = adt_tiers.decide("mcp__abap-adt-z5u__customQuery", {}, _tiers(text), DEFAULTS)
+    assert d.kind == "deny"
+
+
+def test_data_access_deny_는_다른_서버의_데이터_도구에_번지지_않는다():
+    d = adt_tiers.decide("mcp__abap-adt-z5u-dev__tableContents", {}, _tiers(DENY_YAML), DEFAULTS)
+    assert d.kind == "ask"
+
+
+@pytest.mark.parametrize("value", ["ask", '"ask"'])
+def test_data_access_ask_는_되묻는다(value):
+    text = DENY_YAML.replace("data_access: deny", f"data_access: {value}")
+    d = adt_tiers.decide("mcp__abap-adt-z5u__tableContents", {}, _tiers(text), DEFAULTS)
+    assert d.kind == "ask"
+
+
+def test_data_access_키가_없으면_ask_로_본다():
+    assert _tiers().servers["abap-adt-z5u"]["data_access"] == "ask"
+    d = adt_tiers.decide("mcp__abap-adt-z5u__tableContents", {}, _tiers(), DEFAULTS)
+    assert d.kind == "ask"
+
+
+@pytest.mark.parametrize("value", ["allow", "Deny", "true", "", "[deny]", "1"])
+def test_data_access_값이_ask_deny_가_아니면_tierserror(value):
+    text = DENY_YAML.replace("data_access: deny", f"data_access: {value}")
+    with pytest.raises(adt_tiers.TiersError, match="data_access"):
+        adt_tiers.parse_tiers(text)
+
+
+def test_data_access_deny_서버의_쓰기_도구는_기존_쓰기_판정_그대로다():
+    d = adt_tiers.decide("mcp__abap-adt-z5u__deleteObject", {}, _tiers(DENY_YAML), DEFAULTS)
+    assert d.kind == "deny" and "writes_allowed: false" in d.reason
+    text = DENY_YAML.replace("    role: development\n    writes_allowed: true",
+                             "    role: development\n    data_access: deny\n    writes_allowed: true")
+    d = adt_tiers.decide("mcp__abap-adt-z5u-dev__deleteObject", {}, _tiers(text), DEFAULTS)
+    assert d.kind == "pass"
+
+
+def test_data_access_deny_서버의_데이터_도구가_아닌_읽기_도구는_통과한다():
+    d = adt_tiers.decide("mcp__abap-adt-z5u__getObjectSource", {}, _tiers(DENY_YAML), DEFAULTS)
+    assert d.kind == "pass"
+
+
+def test_모르는_서버의_데이터_도구는_바꾸지_않고_되묻는다():
+    d = adt_tiers.decide("mcp__other-server__tableContents", {}, _tiers(DENY_YAML), DEFAULTS)
+    assert d.kind == "ask"
+
+
 @pytest.mark.parametrize(
     "query",
     [
@@ -319,6 +389,21 @@ def test_훅_데이터_도구는_파일_유무와_무관하게_되묻는다(hook
     code, out = _run(hook, repo, "mcp__abap-adt-z5u-dev__tableContents", {"ddicEntityName": "T000"})
     assert code == 0 and _decision(out) == "ask"
     assert out["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+
+
+def test_훅_data_access_deny_서버의_데이터_도구는_거절한다(hook, tmp_path):
+    repo = _project(tmp_path, DENY_YAML)
+    code, out = _run(hook, repo, "mcp__abap-adt-z5u__tableContents", {"ddicEntityName": "T000"})
+    assert code == 0 and _decision(out) == "deny"
+    assert "data_access: deny" in _reason(out)
+    _지시_없음(_reason(out))
+
+
+def test_훅_data_access_값이_잘못되면_파일_오류로_거절한다(hook, tmp_path):
+    repo = _project(tmp_path, DENY_YAML.replace("data_access: deny", "data_access: maybe"))
+    code, out = _run(hook, repo, "mcp__abap-adt-z5u-dev__tableContents", {"ddicEntityName": "T000"})
+    assert code == 0 and _decision(out) == "deny"
+    assert "해석하지 못해" in _reason(out) and "data_access" in _reason(out)
 
 
 def test_훅_runquery_select_star_는_사유에_cr003을_적는다(hook, tmp_path):
