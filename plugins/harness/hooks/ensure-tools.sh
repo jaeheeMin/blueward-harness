@@ -11,12 +11,21 @@
 # 환경 변수
 #   HARNESS_NO_AUTO_INSTALL=1  설치하지 않고 안내만 한다
 #   HARNESS_FAKE_UNAME         (테스트용) uname -s 결과를 대신한다
+#   HARNESS_TOOLS_BUDGET       (기본 300) 이 스크립트 전체가 설치에 쓸 수 있는 초. 넘기면 남은
+#                              설치를 건너뛰고 다음 세션에 다시 시도하라고 알린다(#131)
+#   HARNESS_INSTALL_TIMEOUT    (기본 90) winget 한 번이 기다릴 수 있는 초
 #   CLAUDE_PLUGIN_DATA         실패 기록을 둘 폴더(기본 $HOME/.claude/harness)
 
 set +e
 
 RETRY_SECONDS=86400
-INSTALL_TIMEOUT=90
+INSTALL_TIMEOUT="${HARNESS_INSTALL_TIMEOUT:-90}"
+# 훅 전체 제한(600초) 안에서 동기화와 경고 전달이 돌 수 있게 설치에 쓰는 시간을 묶는다(#131).
+# 최악: 설치 상한 300초 + gh auth status 15초 = 315초.
+TOOLS_BUDGET="${HARNESS_TOOLS_BUDGET:-300}"
+AUTH_TIMEOUT=15
+case "$INSTALL_TIMEOUT" in '' | *[!0-9]*) INSTALL_TIMEOUT=90 ;; esac
+case "$TOOLS_BUDGET" in '' | *[!0-9]*) TOOLS_BUDGET=300 ;; esac
 
 # 이 스크립트는 예기치 않은 상태에서도 Hook 을 죽이지 않는다.
 uname_s="${HARNESS_FAKE_UNAME:-$(uname -s 2>/dev/null || echo unknown)}"
@@ -41,10 +50,16 @@ program_files="$(to_unix_path "${HARNESS_PROGRAMFILES:-${PROGRAMFILES:-C:/Progra
 state_dir="$(to_unix_path "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/harness}")"
 state_file="$state_dir/tool-install-failures"
 
-timeout_cmd=()
+have_timeout=0
 if command -v timeout >/dev/null 2>&1; then
-  timeout_cmd=(timeout "$INSTALL_TIMEOUT")
+  have_timeout=1
 fi
+
+# 남은 설치 시간(초). SECONDS 는 이 셸이 시작한 뒤 흐른 초다.
+budget_left() {
+  echo "$((TOOLS_BUDGET - SECONDS))"
+}
+budget_hit=0
 
 winget_bin=""
 if [ "$is_windows" = "1" ]; then
@@ -125,9 +140,21 @@ record_failure() {
 
 winget_try() {
   # 인자: 도구 id, 추가 옵션...
-  local id="$1"
+  local id="$1" limit left
   shift
-  "${timeout_cmd[@]}" "$winget_bin" install --id "$id" -e --silent \
+  limit="$INSTALL_TIMEOUT"
+  left="$(budget_left)"
+  # 전체 상한이 한 번의 대기보다 적게 남았으면 그만큼만 기다린다. 이때 시간 초과는
+  # 설치가 실패한 것이 아니라 상한에 걸린 것이므로 실패 기록에 넣지 않는다.
+  budget_hit=0
+  if [ "$left" -lt "$limit" ]; then
+    limit="$left"
+    budget_hit=1
+  fi
+  [ "$limit" -lt 1 ] && limit=1
+  local -a tcmd=()
+  [ "$have_timeout" = "1" ] && tcmd=(timeout "$limit")
+  "${tcmd[@]}" "$winget_bin" install --id "$id" -e --silent \
     --accept-package-agreements --accept-source-agreements --disable-interactivity \
     "$@" < /dev/null > /dev/null 2>&1
 }
@@ -162,8 +189,11 @@ for tool in uv jq gh; do
         say "$tool 가 없습니다. HARNESS_NO_AUTO_INSTALL=1 이라 자동으로 설치하지 않았습니다. 다음: 사람이 할 일 - $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
       elif recent_failure "$tool"; then
         say "$tool 가 없습니다. 최근에 자동 설치가 실패해 24시간 동안 다시 시도하지 않습니다. 다음: 사람이 할 일 - $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
+      elif [ "$(budget_left)" -le 0 ]; then
+        say "$tool 가 없지만 도구 설치에 쓸 시간(${TOOLS_BUDGET}초)을 넘겨 설치하지 않았습니다. 다음: 다음 세션을 열면 자동으로 다시 시도합니다. 급하면 사람이 할 일 - $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
       else
         ok=0
+        over=0
         if [ "$tool" = "gh" ]; then
           winget_try "$id"
           rc=$?
@@ -175,6 +205,10 @@ for tool in uv jq gh; do
           locate_tool "$tool"
           if [ "$found_where" != "none" ]; then
             ok=1
+          elif [ "$rc" = "124" ] && [ "$budget_hit" = "1" ]; then
+            over=1
+          elif [ "$(budget_left)" -le 0 ]; then
+            over=1
           else
             winget_try "$id"
             rc=$?
@@ -189,6 +223,9 @@ for tool in uv jq gh; do
           else
             say "$tool 가 없어 winget 으로 설치했습니다. 다음: 이 세션은 새 프로그램을 아직 못 찾으니 Claude Code 를 새로 여십시오."
           fi
+        elif [ "$over" = "1" ] || { [ "$rc" = "124" ] && [ "$budget_hit" = "1" ]; }; then
+          # 상한에 걸린 것은 실패가 아니라 미완료다. 기록하지 않아 다음 세션에 바로 다시 시도한다.
+          say "$tool 설치가 도구 설치 시간 상한(${TOOLS_BUDGET}초)에 걸려 끝나지 않았습니다. 설치됐는지 판단하지 못했습니다. 다음: 다음 세션을 열면 자동으로 다시 시도합니다. 급하면 사람이 할 일 - $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
         else
           record_failure "$tool"
           if [ "$rc" = "124" ]; then
@@ -213,7 +250,9 @@ if [ -n "$missing_for_brew" ]; then
 fi
 
 if [ -n "$gh_bin" ]; then
-  if ! "${timeout_cmd[@]}" "$gh_bin" auth status < /dev/null > /dev/null 2>&1; then
+  tcmd=()
+  [ "$have_timeout" = "1" ] && tcmd=(timeout "$AUTH_TIMEOUT")
+  if ! "${tcmd[@]}" "$gh_bin" auth status < /dev/null > /dev/null 2>&1; then
     say "gh 에 GitHub 로그인이 되어 있지 않습니다. 다음: 사람이 할 일 - gh auth login 을 실행해 GitHub 에 로그인하십시오."
   fi
 fi

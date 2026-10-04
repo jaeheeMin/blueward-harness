@@ -27,6 +27,7 @@ FAKE_WINGET = """#!/bin/sh
 echo "$@" >> "$FAKE_LOG"
 case "$FAKE_WINGET_MODE" in
   fail) exit 1 ;;
+  hang) sleep 30; exit 0 ;;
   scope_fail)
     case "$*" in *--scope*) exit 1 ;; esac ;;
 esac
@@ -340,3 +341,45 @@ def test_세션_시작_요약에_설치_결과가_실린다(env):
 
     assert "uv 가 없어 winget 으로 설치했습니다" in out
     assert "현재 브랜치:" in out
+
+
+def test_winget_이_계속_멈추면_상한에서_멈추고_다음_세션_재시도를_안내한다(env):
+    env.add_winget()  # uv·jq·gh 모두 없다
+
+    out = env.run(FAKE_WINGET_MODE="hang", HARNESS_TOOLS_BUDGET="3", HARNESS_INSTALL_TIMEOUT="2")
+
+    # uv 첫 시도(2초) + 둘째 시도(남은 1초)에서 상한이 다 찬다. jq·gh 는 시도하지 않는다.
+    assert len(env.winget_calls()) in (1, 2)
+    assert "uv 설치가 도구 설치 시간 상한(3초)에 걸려" in out
+    assert "jq 가 없지만 도구 설치에 쓸 시간(3초)을 넘겨 설치하지 않았습니다" in out
+    assert "gh 가 없지만 도구 설치에 쓸 시간(3초)을 넘겨 설치하지 않았습니다" in out
+    assert "다음: 다음 세션을 열면 자동으로 다시 시도합니다" in out
+    assert "설치했습니다" not in out
+    # 상한에 걸린 것은 실패 기록에 넣지 않는다 - 다음 세션에 바로 다시 시도한다.
+    assert not (env.data / "tool-install-failures").exists()
+
+
+def test_상한에_걸린_뒤에도_세션_시작_동기화와_지난_경고가_나온다(env):
+    env.add_winget()
+    git = shutil.which("git")
+    assert git
+    env.extra_path.append(str(Path(git).parent))
+    repo = env.tmp / "project"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / ".git" / "project-unfinished").write_text("지난 경고 내용\n", encoding="utf-8")
+
+    out = env.run(
+        SESSION_START,
+        stdin="{}",
+        CLAUDE_PROJECT_DIR=str(repo),
+        FAKE_WINGET_MODE="hang",
+        HARNESS_TOOLS_BUDGET="2",
+        HARNESS_INSTALL_TIMEOUT="1",
+    )
+
+    assert "도구 설치 시간 상한(2초)" in out
+    assert "지난 세션에서 남은 경고가 있습니다." in out
+    assert "지난 경고 내용" in out
+    assert "현재 브랜치:" in out
+    assert "원격 저장소가 연결되어 있지 않습니다" in out

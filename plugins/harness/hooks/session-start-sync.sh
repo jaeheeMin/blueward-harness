@@ -25,7 +25,7 @@ if command -v jq >/dev/null 2>&1; then
 else
   # jq 가 없으면 근사 정규식으로 뽑는다. 아래에서 존재하는 디렉터리인지 다시
   # 검증하므로 완벽한 JSON 파서가 아니어도 안전하다.
-  stdin_cwd="$(printf '%s' "$input" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"cwd"[[:space:]]*:[[:space:]]*"([^"]*)"/\1/')"
+  stdin_cwd="$(printf '%s' "$input" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"cwd"[[:space:]]*:[[:space:]]*"([^"]*)"/\1/' || true)"
 fi
 stdin_cwd="$(printf '%s' "$stdin_cwd" | tr -d '\r')"
 if [ -n "$stdin_cwd" ] && [ -d "$stdin_cwd" ]; then
