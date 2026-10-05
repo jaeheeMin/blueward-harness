@@ -427,8 +427,10 @@ PR 코멘트 하나를 갱신, job 요약)와 `after-merge`(병합 직전 main �
 빨간불을 고치지 못해서다. scaffold 가 `risk-gate.yaml` 과 호출 워크플로를 새 저장소에 넣는다.
 **blueward-harness 자신에는 `risk-gate.yaml` 을 두지 않았다**(승인자가 한 명뿐이라 게이트가 계속
 막히므로 꺼 둔다). AI 리뷰(`ai_review`)는 `ai-review` check run 을 읽는 자리를 마련했고 만드는 쪽은
-#125 로 이어진다(아래). Plugin version 0.10.16. 실제 GitHub Actions·실제 `gh` 로 돌려 본 것은 아직 없다(가짜
-클라이언트·가짜 uvx 테스트만).
+#125 로 이어진다(아래). Plugin version 0.10.16. 처음에는 가짜 클라이언트·가짜 uvx 테스트만 거쳤고, 실제 실행은
+public-cloud 에서 확인했다(2026-10-05): `.github/` 를 바꾼 public-cloud PR #126 은 위험도 높음(위험 경로)으로
+실패했다가 작성자가 아닌 승인자(CSH-DOT123)의 Approve 뒤 병합됐고 main 의 after-merge 도 성공했다. 작은
+설정 PR #130 은 위험도 낮음으로 승인 없이 통과했다.
 
 **위험도가 낮은 PR 에만 AI 리뷰를 돌린다(#125, AI 리뷰).** risk gate 의 `ai_review` 기준이 읽을
 `ai-review` check run 을 만드는 쪽을 채웠다. **기본은 꺼짐**(`ai_review: false`)이라 켜지 않은
@@ -445,8 +447,10 @@ PR 코멘트 하나를 갱신, job 요약)와 `after-merge`(병합 직전 main �
 만들지 않고, 이미 있는 코멘트만 갱신한다). `ai_review_reasons` 의 실패 사유와 `build_next` 안내는
 "심각한 지적" 과 "검사 불능" 을 뭉개지 않도록 바꿨다. scaffold 가 호출 워크플로(job id `ai-review`)를
 넣고 `risk-gate.yaml` 주석에 켜는 방법(`claude setup-token` → `gh secret set` → `ai_review: true`)을
-적었다. Plugin version 0.10.17. **실제 토큰으로 돌려 본 적은 없다**(가짜 클라이언트·YAML 구조 검사만).
-Claude GitHub App 설치 여부, OIDC 교환, 허용 도구 문법의 실동작은 확인하지 못했다.
+적었다. Plugin version 0.10.17. 처음에는 가짜 클라이언트·YAML 구조 검사만 거쳤다. 그 뒤 public-cloud 에서
+`ai_review: true` 와 `CLAUDE_CODE_OAUTH_TOKEN` 을 등록하고 시험 PR(public-cloud #120)로 AI 리뷰가 실제 토큰으로
+Claude 를 돌려 pass 하는 것을 확인했다(2026-10-04, 시험 PR·이슈는 닫음). 이후 public-cloud PR 마다 `ai-review`
+검사가 돈다(예: #126·#130 pass).
 
 **AI 리뷰 러너에서 저장소 MCP 서버를 띄우지 않는다(#144, 저장소 MCP).** `ai-review.yml` 의 `claude_args` 에
 `--strict-mcp-config` 를 넣어 PR 저장소 `.mcp.json` 의 서버(SAP ADT 등)가 러너에서 뜨지 않게 했다. 액션은
