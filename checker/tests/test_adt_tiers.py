@@ -271,6 +271,17 @@ def test_public_cloud_형식을_그대로_읽는다():
     assert t.data_tools == {"tableContents", "runQuery"}
 
 
+def test_atc_variant_키는_거절하지_않고_무시한다():
+    text = TIERS_YAML.replace(
+        "writes_allowed: true",
+        "writes_allowed: true\n    atc_variant: ABAP_CLOUD_DEVELOPMENT_DEFAULT",
+        1,
+    )
+    assert "atc_variant" in text
+    t = adt_tiers.parse_tiers(text)
+    assert t.servers == _tiers().servers
+
+
 def test_한_줄_목록과_따옴표도_읽는다():
     t = _tiers(
         'servers:\n  "a-b":\n    writes_allowed: true\nwrite_tools: [setObjectSource, "createObject"]\n'
