@@ -146,6 +146,26 @@ def test_형식에_맞는_진행_원장은_통과한다(tmp_path: Path, capsys):
     assert out["summary"]["violations"] == 0
 
 
+def test_스펙_칸이_대시인_start_등록_줄도_통과하고_스캐폴드_템플릿_자체도_통과한다(tmp_path: Path, capsys):
+    scaffold(tmp_path, "고객사", "프로젝트", False)
+    ledger = tmp_path / "audit" / "ledger" / "구매요청승인.md"
+    _write(ledger, LEDGER_VALID.replace("docs/spec/구매요청.md", "-").replace("| 진행 | #50 |", "| 진행 |  |"))
+
+    code, out = _run_auto(capsys, ledger)
+
+    assert code == EXIT_PASS
+    assert out["summary"]["violations"] == 0
+
+    template = tmp_path / "templates" / "harness" / "audit-ledger.md"
+    copy = tmp_path / "audit" / "ledger" / "새프로그램.md"
+    _write(copy, template.read_text(encoding="utf-8"))
+
+    code, out = _run_auto(capsys, copy)
+
+    assert code == EXIT_PASS
+    assert out["summary"]["violations"] == 0
+
+
 def test_진행_원장에_개발_건_절이_없으면_위반이다(tmp_path: Path, capsys):
     scaffold(tmp_path, "고객사", "프로젝트", False)
     ledger = tmp_path / "audit" / "ledger" / "구매요청승인.md"
