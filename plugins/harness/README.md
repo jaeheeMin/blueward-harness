@@ -306,9 +306,11 @@ PR 에서 막혀도 원격으로 올리는 순간 비밀값은 이미 GitHub 에
 원장)의 템플릿과 doc-guard 규칙도 함께 만든다(#43). 변경 기록은
 `YYYYMMDD-<요약>.md` 로 기록 하나에 파일 하나를 써 여러 사람이 동시에
 기록해도 PR 이 충돌하지 않게 하고, 진행 원장은 프로그램 하나에 파일 하나로
-개발 건의 진행 상태를 표로 담는다. `/harness:prd` · `/harness:spec` ·
-`/harness:deliver` Skill 이 이 형식으로 기록을 남길 예정이고, 사람이 직접
-적어도 된다. 형식에 맞지 않는 기록(파일 이름, 필수 절)은
+개발 건의 진행 상태를 표로 담는다. `/harness:prd` · `/harness:start` ·
+`/harness:spec` · `/harness:deliver` Skill 이 이 형식으로 기록을 남기고, 사람이
+직접 적어도 된다(#173: feat·fix 작업을 start 하면 원장에 개발 건 줄이 `진행` 으로
+생기고 Spec 칸은 `-` 다. spec 이 같은 번호로 Spec 칸을 채우고, deliver 가 `리뷰`
+로 바꾸며, `완료` 는 사람이 쓴다). 형식에 맞지 않는 기록(파일 이름, 필수 절)은
 `rules/audit-changes.yaml` 과 `rules/audit-ledger.yaml` 이 doc-guard 로
 검사한다.
 
