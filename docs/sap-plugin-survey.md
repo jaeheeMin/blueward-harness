@@ -118,7 +118,13 @@ Clean Core A~D ↔ ATC 우선순위 표는 sap-docs 로 공식 확인된 것만 
 - P2(080 실측): #85 에서 대부분 끝났다(`conventions/common.md` 의 ATC 절, `docs/status.md` #85).
   variant `ABAP_CLOUD_DEVELOPMENT_DEFAULT`, Z 클래스 다섯 개 실행, `createAtcRun` 은 `atcCheckVariant`
   가 돌려준 ID 필요, priority 1·2 는 운송을 막고(`blockPriority`) 3 은 막지 않음(`allowTransports`).
-  남은 것: ABAP Cloud 금지 구문이 080 문법 검사에서 실제로 막히는지, 빈 CATCH 사례 — public-cloud 세션에 맡김.
+  남은 것이던 금지 구문·빈 CATCH 는 2026-10-05 public-cloud 세션이 080 문법 검사(저장·활성화 없음, 대상
+  `ZCL_MJH_MRP_REFRESH`)로 확인했다: `SELECT SINGLE * FROM mara` → 오류 "테이블 MARA은(는) 사용할 수 없습니다",
+  `CALL TRANSACTION` → 오류 ""CALL" is not allowed in the current ABAP language version",
+  `CALL FUNCTION 'POPUP_TO_CONFIRM'` → 오류 "함수 모듈 POPUP_TO_CONFIRM을(를) 사용할 수 없습니다",
+  빈 `CATCH cx_root` → 오류·경고 없음. 즉 released 가 아닌 객체·금지 문장(Level C/D)은 문법 단계에서 막히고
+  (CR-005 를 기계 검사하지 않는 근거와 맞음), 빈 CATCH 는 문법 검사가 잡지 않는다(CR-007 을 하네스가 검사하는
+  이유). 빈 CATCH 가 ATC 에서 걸리는지는 보지 않았다. P2 는 끝났다.
 - P3(공식 문서): Level A~D 정의는 확인됨(learning.sap.com "Explaining Extensibility Model Best Practices").
   **등급 ↔ ATC priority 대응은 공식 문서에서 찾지 못했다** — help.sap.com BTP 가이드는 "Priority 1 and 2
   findings" 를 차단 모드로 막으라고만 한다. 그래서 H6 에 대응표는 넣지 않고 ATC 가 내는 priority 를
