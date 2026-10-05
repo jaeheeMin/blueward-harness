@@ -21,8 +21,8 @@ SAP 테넌트에서 ATC 를 돌려 지적(finding)을 모으고, 고칠 수 있�
 | 도구 | 인자 | 돌려주는 것 |
 |---|---|---|
 | `atcCheckVariant` | `variant`(variant 이름) | 글자 하나 — worklist ID |
-| `createAtcRun` | `variant`(**위 ID**, 이름이 아니다), `mainUrl`(대상 오브젝트 ADT URL), `maxResults`(선택, 기본 100) | `id`, `timestamp`, `infos` |
-| `atcWorklists` | `runResultId`(위 `id`), `timestamp`·`usedObjectSet`(선택), `includeExempted`(선택) | `objects[]` — 오브젝트마다 `findings[]`(`priority`, `checkId`, `checkTitle`, `messageId`, `messageTitle`, `location`(소스 URL과 줄·열 범위), `quickfixInfo`) |
+| `createAtcRun` | `variant`(**위 ID**, 이름이 아니다), `mainUrl`(대상 오브젝트 또는 패키지 ADT URL), `maxResults`(선택, 기본 100) | `id`, `timestamp`, `infos` — `infos` 의 `FINDING_STATS` 가 priority 1·2·3 건수다(예: `"0,2,0"`) |
+| `atcWorklists` | `runResultId`(위 `id`), `timestamp`(`createAtcRun` 이 준 값)·`usedObjectSet`(선택), `includeExempted`(선택) | `objects[]` — 오브젝트마다 `findings[]`(`priority`, `checkId`, `checkTitle`, `messageId`, `messageTitle`, `location`, `quickfixInfo`). `location` 은 소스 URL 과 `range` 인데 의미 있는 것은 **줄 번호뿐**이다(080 실측: `column` 0, start·end 같음) |
 | `getObjectSource` | `objectSourceUrl`, `startLine`·`maxLines`(선택) | 소스 |
 | `syntaxCheckCode` | `url`(필수), `code`(선택, 없으면 이번 세션에 읽거나 쓴 소스) | 문법 오류·경고 |
 | `lock` / `setObjectSource` / `unLock` | `objectUrl` → `objectSourceUrl`·`source`·`lockHandle`(·`transport`) → `objectUrl`·`lockHandle` | 쓰기. 쓰기 허용 서버에서만 |
@@ -42,7 +42,9 @@ SAP 테넌트에서 ATC 를 돌려 지적(finding)을 모으고, 고칠 수 있�
    않고 묻는다.
    - 대상: 오브젝트 하나 또는 패키지. 가장 좁은 범위로 시작한다. 대상의 ADT URL
      (`mainUrl`)을 `searchObject` 나 `objectStructure` 로 확인한다. 패키지는 담긴
-     오브젝트 목록을 먼저 보여 주고 범위를 확인받는다.
+     오브젝트 목록을 먼저 보여 주고 범위를 확인받는다. 패키지 실행은 오래 걸린다
+     (080 실측: 패키지 하나에 120초를 넘겨 MCP 가 백그라운드 작업으로 넘겼다) —
+     시작 전에 사용자에게 알리고, 결과가 올 때까지 기다린다.
    - 서버: 어느 MCP 서버(테넌트)에서 돌릴지. ATC **실행**은 어느 서버든 할 수
      있다. 소스 **수정**은 `env/adt-tiers.yaml` 에서 `writes_allowed: true` 인
      서버에서만 한다 — 아니면 4단계까지(분류와 보고)만 하고 수정은 하지 않는다.
@@ -52,16 +54,22 @@ SAP 테넌트에서 ATC 를 돌려 지적(finding)을 모으고, 고칠 수 있�
      않는다.
 2. **실행과 수집.** `atcCheckVariant`(variant 이름) → 돌려받은 ID 를
    `createAtcRun` 의 `variant` 에 → 돌려받은 `id` 를 `atcWorklists` 의 `runResultId`
-   에 넣어 finding 을 모은다.
+   에 넣어 finding 을 모은다. worklist ID 와 `id` 가 같은 값으로 올 수 있다(080
+   실측) — 같아도 이상한 것이 아니니 각각 정해진 자리에 넘긴다.
+   - worklist 를 읽기 전에 `createAtcRun` 의 `infos` 에서 `FINDING_STATS`(priority
+     1·2·3 건수)를 먼저 본다. 합계가 `maxResults` 이상이면 worklist 가 잘린다 —
+     `maxResults` 를 합계보다 크게 다시 돌리거나, 대상을 좁히자고 사용자에게
+     묻는다. 잘린 결과로 "전부" 라고 말하지 않는다.
    - 도구가 오류를 내거나, ID 가 비었거나, `id` 가 없거나, worklist 를 읽지
      못하면 **"검사 불능"** 이라고 보고하고 멈춘다. 통과나 "지적 없음" 으로 말하지
-     않는다. 세션 만료로 보이면(`ADT session expired`, 401) 그 서버에 로그인하는
-     프로젝트의 스킬(예: 테넌트 로그인 스킬)을 안내한다.
-   - `objects` 가 비었고 오류도 없을 때만 "지적 0건" 이라고 하되, 어느 서버·대상·
-     variant 로 돌렸는지를 함께 적는다. `maxResults`(기본 100)에 걸려 잘렸을 수
-     있으면 그 사실을 적는다.
+     않는다. 세션 만료는 `ADT session expired`·401 뿐 아니라 **400** 으로도 나타난다
+     (080 실측: `atcCheckVariant`·`searchObject` 가 400) — 400 이 나오면 세션 만료부터
+     의심하고, 그 서버에 로그인하는 프로젝트의 스킬(예: 테넌트 로그인 스킬)을
+     안내한다.
+   - `FINDING_STATS` 가 `0,0,0` 이고 `objects` 가 비었고 오류도 없을 때만 "지적 0건"
+     이라고 하되, 어느 서버·대상·variant 로 돌렸는지를 함께 적는다.
 3. **표로 보여 주기.** finding 을 체크 종류(`checkTitle`)와 `priority` 별로 묶어
-   개수와 대표 위치(오브젝트·줄)를 표로 보여 준다. 다음 사실을 표 아래에 적는다.
+   개수와 대표 위치(오브젝트·줄 번호)를 표로 보여 준다. 다음 사실을 표 아래에 적는다.
    - priority 1·2 지적은 운송 release 를 막고(`blockPriority`), priority 3 은
      막지 않는다(`allowTransports`) — 080 개발 테넌트 실측(#85)이고, release 때
      ATC 를 돌릴지와 막는 기준은 테넌트 관리자 설정이다.

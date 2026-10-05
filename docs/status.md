@@ -549,6 +549,14 @@ pre-commit 훅 연결은 별도 이슈다. 테스트는 `checker/tests/test_gitl
 
 **ATC 지적 처리 스킬 `/harness:atc` 를 추가했다(#179, `docs/sap-plugin-survey.md` H6).** 순서: 0) `env/adt-tiers.yaml` 이 없으면 멈춘다(이 하네스 저장소처럼 테넌트 보호가 없는 곳에서 SAP 를 부르지 않게) → 1) 대상·서버·variant 확인(수정은 `writes_allowed: true` 서버에서만) → 2) `atcCheckVariant`(이름 → worklist ID) → `createAtcRun`(`variant` 에 그 ID, `mainUrl`) → `atcWorklists`(`runResultId`), 실패·빈 응답은 "검사 불능" → 3) 체크 종류·priority 별 표(priority 1·2 는 운송을 막는다, #85) → 4) 자동(동작 불변)·확인 후(동작·성능·의미 변경 가능, 승인 뒤)·수동(설계 변경·released API 대체, 목록만) 분류, 애매하면 확인 후 → 5) `"#EC`·exemption 은 근거와 사용자 승인이 있을 때만, `atcRequestExemption` 은 Claude 가 단독 제출하지 않음 → 6) `lock`·`setObjectSource`·`unLock` 으로 수정, `syntaxCheckCode`, 같은 variant 로 재실행해 전후 증감 표 → 7) CR 규칙과 겹치는 지적 메모, 커밋·PR 은 `/harness:deliver`. 도구 인자는 이 PC 의 MCP 서버 소스(`mcp-abap-abap-adt-api` 0.1.1 의 `dist/handlers/AtcHandlers.js`, `CodeAnalysisHandlers.js`, `ObjectSourceHandlers.js`, `ObjectLockHandlers.js`, 반환 형태는 `abap-adt-api/build/api/atc.d.ts`)에서 읽었고 SAP 는 부르지 않았다. variant 이름은 서버 항목의 선택 키 `servers.<서버>.atc_variant` 에 두기로 했다 — `adt_tiers.py` 해석기가 서버 항목의 모르는 키를 이미 무시하므로 코드 변경은 없고(주석과 무시를 확인하는 테스트만 더함), 스킬이 파일을 직접 읽고 키가 없으면 사람에게 묻는다. 스캐폴드의 `adt-tiers.example.yaml` 에 주석 처리한 예를 넣었다. Clean Core 등급 ↔ priority 대응표는 공식 근거가 없어(PR #177) 넣지 않았다. 외부 스킬(matt1as/claude-abap-skills Apache-2.0, arc-mcp/arc-1 MIT)은 아이디어(3단계 분류, `"#EC` 거부, 재실행 증감)만 참고하고 문장은 옮기지 않았다. 한계: 이 절차는 LLM 이 따르는 문서라 실제 테넌트에서 돌려 본 것은 아직 없다(이슈 완료 조건 — 병합 뒤 public-cloud 세션에서 Z 클래스 하나로). `atcWorklists` 반환의 `location` 이 소스 URL 과 줄·열 범위인지, 패키지 대상 `mainUrl`(`/sap/bc/adt/packages/...`)이 쓰이는지는 형식 정의만 확인했고 실측하지 못했다. Plugin version 0.10.28.
 
+**`/harness:atc` 를 080 시험 결과에 맞게 고쳤다(#182).** public-cloud 세션이 080 에서 `ZCL_MJH_MRP_REFRESH`
+와 패키지 `ZMJH_TEST` 로 4단계(분류)까지 시험했다(2026-10-05, 소스 수정 없음). 결과: WHERE 없는 DELETE 2건
+(priority 2, `blockPriority`)을 "확인 후" 로 분류, `#EC`·exemption 은 하지 않음. 문서와 다른 점을 반영했다 —
+`location` 은 줄 번호만 의미 있음(column 0), 세션 만료가 400 으로도 나옴, worklist ID 와 run `id` 가 같을 수
+있음, `createAtcRun` 의 `infos` 에 `FINDING_STATS`(priority 1·2·3 건수)가 와서 `maxResults`(기본 100) 잘림을
+미리 알 수 있음(패키지는 128건), 패키지 실행은 120초를 넘겨 백그라운드로 넘어감. ATC 가 활성화 전 소스를
+보는지는 아직 시험하지 않았다. Plugin version 0.10.29.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
