@@ -113,6 +113,19 @@ variant 이름은 하드코딩 말고 프로젝트 설정에서(080 실측값
 `ABAP_CLOUD_DEVELOPMENT_DEFAULT`, `conventions/common.md` 에 기록됨).
 Clean Core A~D ↔ ATC 우선순위 표는 sap-docs 로 공식 확인된 것만 넣는다.
 
+**선행 조건 진행(2026-10-05 기록)**
+
+- P2(080 실측): #85 에서 대부분 끝났다(`conventions/common.md` 의 ATC 절, `docs/status.md` #85).
+  variant `ABAP_CLOUD_DEVELOPMENT_DEFAULT`, Z 클래스 다섯 개 실행, `createAtcRun` 은 `atcCheckVariant`
+  가 돌려준 ID 필요, priority 1·2 는 운송을 막고(`blockPriority`) 3 은 막지 않음(`allowTransports`).
+  남은 것: ABAP Cloud 금지 구문이 080 문법 검사에서 실제로 막히는지, 빈 CATCH 사례 — public-cloud 세션에 맡김.
+- P3(공식 문서): Level A~D 정의는 확인됨(learning.sap.com "Explaining Extensibility Model Best Practices").
+  **등급 ↔ ATC priority 대응은 공식 문서에서 찾지 못했다** — help.sap.com BTP 가이드는 "Priority 1 and 2
+  findings" 를 차단 모드로 막으라고만 한다. 그래서 H6 에 대응표는 넣지 않고 ATC 가 내는 priority 를
+  그대로 쓴다. `ABAP_CLOUD_DEVELOPMENT_DEFAULT` 의 검사 내용과 Public Edition 의 clean core 전용 variant
+  여부도 공식 문서로 확인하지 못했다(SAP 직원 블로그만 있음, 근거로 쓰지 않음). Public Edition 은 ABAP
+  Cloud 가 의무이고 strict 언어 버전은 released API 만 허용한다는 것까지는 확인됨(ABAP Cloud 배경 문서).
+
 **참고**: matt1as/claude-abap-skills `abap-cloud-rap/atc-remediation/SKILL.md`,
 arc-mcp/arc-1 `skills/sap-clean-core-atc/SKILL.md`.
 
