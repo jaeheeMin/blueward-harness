@@ -17,6 +17,8 @@
     data_tools: [tableContents, runQuery] # 선택, 되묻는 도구 이름
 
 그 밖의 키(host, proxy_port, tier, login_skill 등)는 사람이 보는 정보라 무시한다.
+`atc_variant`(서버 항목의 선택 키)는 `/harness:atc` 스킬이 파일을 직접 읽어 쓰므로
+이 해석기는 읽지도 거절하지도 않는다(#179).
 어떤 도구가 쓰기인지는 코드에 박지 않고 이 파일에서 읽는다(CLAUDE.md 원칙 2).
 파일이 없을 때 데이터 도구를 알아야 하므로 기본 `data_tools` 만
 `mcp_default_tools.json` 에 둔다.

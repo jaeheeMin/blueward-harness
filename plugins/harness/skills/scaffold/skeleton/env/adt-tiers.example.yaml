@@ -16,8 +16,12 @@
 #     적지 않거나 ask 면 지금처럼 사용자에게 되묻는다(기본). ask/deny 외의 값은 파일
 #     오류로 보고 MCP 호출을 막는다.
 #
+#   - /harness:atc 스킬이 쓸 ATC check variant 가 있으면 서버 항목에 atc_variant 로
+#     적는다. 훅은 읽지 않는다(스킬이 이 파일을 직접 읽는다). 적지 않으면 스킬이
+#     사람에게 variant 이름을 묻는다.
+#
 # 훅이 읽는 키: servers.<이름>.writes_allowed, servers.<이름>.data_access, write_tools, data_tools.
-# 나머지(system, client, role, host 등)는 사람이 보는 정보다.
+# 나머지(system, client, role, atc_variant, host 등)는 훅이 무시한다.
 # 알려진 도구 이름만 훅이 잡는다. 목록에 새 도구를 더해도 hooks.json 의 매처에 없으면
 # 잡히지 않는다(harness Plugin README 참고).
 
@@ -35,6 +39,7 @@ servers:
     role: development
     writes_allowed: false     # 쓰기를 허용할 개발 서버만 true 로 바꾼다
     data_access: ask
+    # atc_variant: ABAP_CLOUD_DEVELOPMENT_DEFAULT   # 선택. 테넌트에서 확인한 이름으로 바꾼다
 
 # 쓰기로 취급하는 MCP 도구. 서버 이름 접두어(mcp__<서버>__)를 뗀 이름이다.
 write_tools:

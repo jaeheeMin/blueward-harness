@@ -23,6 +23,7 @@ plugins/harness/
     prd/SKILL.md               /harness:prd — PRD 작성·수정
     spec/SKILL.md              /harness:spec — 개발 Spec 작성·수정
     sync/SKILL.md              /harness:sync — 원격 최신 상태를 로컬 브랜치로 당겨받기
+    atc/SKILL.md               /harness:atc — SAP ATC 지적 실행·분류·처리
   agents/
     researcher.md              harness:researcher — 조회 전용 조사(sonnet, 쓰기 도구 없음)
     reviewer.md                harness:reviewer — 읽기 전용 검토(sonnet, 쓰기 도구 없음)
@@ -60,7 +61,7 @@ plugins/harness/
 
 ## 제공하는 것
 
-### Skill 7개
+### Skill 8개
 
 플러그인 스킬은 이름 앞에 플러그인 이름이 붙으므로 아래 이름으로 나타난다.
 
@@ -73,6 +74,7 @@ plugins/harness/
 | `/harness:prd` | PRD 를 새로 쓰거나, 요구사항이 바뀌었을 때 고친다 |
 | `/harness:spec` | PRD 요구사항으로 개발 Spec 을 만들거나, PRD 가 바뀌어 고친다 |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다 |
+| `/harness:atc` | SAP ATC 지적을 돌려 자동·확인 후·수동으로 나눠 처리하고 재실행해 증감을 보고한다(`env/adt-tiers.yaml` 이 있는 Project Repository 에서만. variant 는 서버 항목의 `atc_variant`) |
 
 ### 서브에이전트 3개(#139)
 
