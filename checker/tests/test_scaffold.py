@@ -52,6 +52,7 @@ EXPECTED_FILES = {
     "templates/harness/spec.md",
     "templates/harness/audit-change.md",
     "templates/harness/audit-ledger.md",
+    "templates/forms/.gitkeep",
     "rules/README.md",
     "rules/ssot.yaml",
     "rules/spec.yaml",

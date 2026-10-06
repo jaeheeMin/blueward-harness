@@ -23,7 +23,7 @@ plugins/harness/
     wrapup/SKILL.md            /harness:wrapup — 남은 작업의 이슈화
     scaffold/                  /harness:scaffold — Project Repository 표준 구조 생성
     prd/SKILL.md               /harness:prd — PRD 작성·수정
-    spec/SKILL.md              /harness:spec — 개발 Spec 작성·수정
+    spec/SKILL.md              /harness:spec — 개발 Spec 작성·수정(양식 지도: form-map.md)
     sync/SKILL.md              /harness:sync — 원격 최신 상태를 로컬 브랜치로 당겨받기
     atc/SKILL.md               /harness:atc — SAP ATC 지적 실행·분류·처리
   agents/

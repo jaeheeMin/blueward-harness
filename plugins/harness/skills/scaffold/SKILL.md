@@ -86,6 +86,7 @@ templates/harness/PRD.md           PRD 틀
 templates/harness/spec.md          개발 Spec 틀
 templates/harness/audit-change.md  변경 기록 템플릿
 templates/harness/audit-ledger.md  진행 원장 템플릿
+templates/forms/.gitkeep           양식 지도(고객사 양식의 시트·칸 위치)가 쌓일 자리
 rules/README.md                    규칙 작성법과 예시
 rules/ssot.yaml                    PRD 파일명·필수 절 규칙
 rules/spec.yaml                    Spec 파일명·필수 절 규칙
