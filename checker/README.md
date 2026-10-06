@@ -200,6 +200,27 @@ doc-guard --clean <파일...> [--out-dir <곳>]
 오피스 문서(docx·xlsx·pptx)는 훅으로 잡을 수 없다. 팀원이 엑셀이나 파워포인트에서 작업해
 폴더에 넣으므로 Claude 를 거치지 않아 훅이 불리지 않는다. 그쪽은 Actions 가 맡는다.
 
+## 양식 파일 산출(`checker.export`)
+
+검사가 아니라 쓰기 도구다. 작업본 md 의 `## 양식 항목` 을 양식 지도
+(`templates/forms/<양식>.yaml`, 형식은 `plugins/harness/skills/spec/form-map.md`)가
+가리키는 xlsx 템플릿 복사본에 채워 `산출.폴더` 에 쓴다(#192).
+
+```bash
+python -m checker.export --spec docs/spec/DEV-001-요약.md --root <Project Repository 루트> [--form <양식>]
+```
+
+stdout 에 JSON 한 줄 `{"status": "ok|rejected|error", "files": [...], "problems": [{"form", "sheet", "item", "reason"}], "warnings": [...], "next": "..."}`
+을 낸다. 종료코드는 0 산출함, 1 거부(필수 `미정`·`최대_행` 초과·짝 행 수 불일치·같은 이름 파일 존재
+등, 아무것도 쓰지 않음), 2 읽지 못함(작업본·지도·템플릿 못 읽음, 지도에 없는 항목, 경로가 루트 밖,
+예상하지 못한 예외)이다. 산출물은 임시 파일로 먼저 쓴 뒤 한꺼번에 최종 이름으로 바꾸며, 실패하면
+이번 실행이 만든 파일을 모두 지운다. `warnings` 는 지운 제어 문자와, 해당 없음 시트에 남은 템플릿
+샘플(그림·셀)을 알린다.
+
+쓰기는 openpyxl 을 쓰지 않는다. load→save 는 도형·그림·인쇄 설정·calcChain 을 잃기 때문에, zip 수준에서
+바뀐 시트 XML 만 고치고 나머지 항목은 같은 순서로 그대로 복사한다. 문자열은 `inlineStr`, 셀 서식은 유지한다.
+수식이 있는 통합문서는 `fullCalcOnLoad` 를 켠다.
+
 ## 개발
 
 ```bash
