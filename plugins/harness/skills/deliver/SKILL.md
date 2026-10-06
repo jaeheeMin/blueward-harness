@@ -16,6 +16,10 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
    최근 커밋은 이 저장소의 메시지 문체를 맞추기 위한 참고 자료다.
 2. 현재 브랜치가 main 이면 거부하고 `/harness:start` 를 안내한다. 변경이 없으면 그
    사실을 알리고 멈춘다.
+   이어서 080 에 쓴 ABAP 오브젝트의 활성화를 확인한다.
+   `uv run --no-project python <이 스킬의 base directory>/../../hooks/activation_gate.py check .`
+   를 실행한다. 종료코드가 0 이 아니면 출력된 오브젝트 목록과 `다음:` 안내를 사용자에게
+   그대로 보여 주고 **멈춘다**(커밋·푸시로 넘어가지 않는다). 푸시 훅도 같은 검사로 막는다.
 3. 기준 브랜치를 `git fetch origin {base}` 로 가져오고,
    `git rev-list HEAD..origin/{base} --count` 로 새 커밋이 있는지 확인하고,
    있을 때만 리베이스한다.

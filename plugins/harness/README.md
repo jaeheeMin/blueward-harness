@@ -12,6 +12,8 @@ plugins/harness/
     hooks.json                 네 훅을 선언
     pre_write_guard.py         문서 검사(doc-guard) — Write/Edit 직전에 막을지 정한다
     pre-bash-git-guard.sh      git 가드 — 스킬을 거치지 않은 git push 와 비밀정보가 든 커밋을 막는다
+    mcp_activation_tracker.py  ADT MCP 호출 뒤 ABAP 오브젝트의 활성화 상태를 기록한다(PostToolUse, #190)
+    activation_gate.py         기록에 활성화 안 된 오브젝트가 있으면 푸시·src/ 쓰기를 막는 관문(adt_activation.py 공용)
     gitleaks-harness.toml      하네스 기본 gitleaks 설정(checker/gitleaks/harness.toml 의 복사본)
     session-start-sync.sh      세션 시작 때 원격과 동기화하고 남은 경고를 전한다
     stop-deliver.sh            세션 종료 때 커밋 안 된 변경을 알린다

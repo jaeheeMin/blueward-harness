@@ -286,6 +286,47 @@ def _check_code(path: Path, content: str) -> None:
     )
 
 
+def _check_activation_gate(path: Path) -> None:
+    """저장소 루트의 `src/` 아래에 쓰려는데 활성화되지 않은 ABAP 오브젝트가 있으면 막는다(#190).
+
+    `src/` 스냅샷에는 활성화에 성공한 소스만 담는다. 저장소를 찾지 못하거나 `src/` 밖이면
+    아무것도 하지 않고 아래 기존 판정으로 넘어간다. 걸리지 않으면 돌아온다.
+    """
+    start = path.parent
+    while not start.is_dir() and start != start.parent:
+        start = start.parent
+    try:
+        done = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], cwd=str(start),
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    top = done.stdout.strip()
+    if done.returncode != 0 or not top:
+        return
+    # Windows 의 대소문자·단축 경로(8.3)가 달라도 같은 폴더로 보게 양쪽을 맞춘다.
+    src_dir = os.path.normcase(os.path.realpath(os.path.join(top, "src")))
+    target = os.path.normcase(os.path.realpath(str(path)))
+    if target != src_dir and not target.startswith(src_dir + os.sep):
+        return
+
+    # 관문을 실행하지 못하면(import 실패 포함) 통과가 아니라 검사 불능으로 막는다.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import adt_activation  # noqa: E402
+
+        ok, message = adt_activation.gate(top)
+    except Exception as exc:  # noqa: BLE001
+        deny(
+            "harness: 활성화 관문을 실행하지 못해 ABAP 오브젝트의 활성화 성공을 확인할 수 없습니다(검사 불능).\n"
+            f"사유: {type(exc).__name__}: {exc}\n"
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n" + NEXT_RETRY
+        )
+    if not ok:
+        deny("harness: src/ 에는 활성화에 성공한 소스만 담습니다. " + message)
+
+
 def _main() -> None:
     try:
         payload = json.loads(sys.stdin.read() or "{}")
@@ -309,6 +350,8 @@ def _main() -> None:
 
     path = Path(raw_path)
     suffix = path.suffix.lower()
+
+    _check_activation_gate(path)
 
     if suffix in CODE_SUFFIXES:
         # 공통 개발 규칙(#54)은 문서 검사와 소관이 다르다 — 기준 폴더를 요구하지
