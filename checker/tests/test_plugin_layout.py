@@ -54,6 +54,11 @@ HOOK_MATCHERS = {
 }
 
 
+POST_HOOK_MATCHERS = {
+    "mcp__.*__(setObjectSource|createObject|deleteObject|activateObjects|activateByName|inactiveObjects)",
+}
+
+
 def _hook_file_refs(hooks_json: dict) -> list[str]:
     """hooks.json 의 모든 command 문자열에서 `hooks/<파일>` 참조를 뽑는다."""
     refs: list[str] = []
@@ -76,6 +81,7 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
         "session-start-sync.sh",
         "stop-deliver.sh",
         "mcp_source_guard.py",
+        "mcp_activation_tracker.py",
     }
 
     # 각 훅이 가리키는 파일이 실제로 플러그인 안에 있어야 한다.
@@ -89,6 +95,10 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
 
     pre_matchers = {entry["matcher"] for entry in events["PreToolUse"]}
     assert pre_matchers == HOOK_MATCHERS
+
+    # #190: 활성화 기록 훅은 PostToolUse 한 곳에 둔다.
+    post_matchers = {entry["matcher"] for entry in events["PostToolUse"]}
+    assert post_matchers == POST_HOOK_MATCHERS
 
 
 _MCP_SERVERS = ["abap-adt", "abap-adt-z5u", "abap-adt-z5u-dev"]

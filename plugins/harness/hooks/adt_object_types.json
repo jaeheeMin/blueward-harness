@@ -1,0 +1,22 @@
+{
+  "_comment": "ADT URL 컬렉션 경로 -> 오브젝트 TYPE 표(#190). adt_activation.py 가 setObjectSource·activateByName·deleteObject 의 URL 에서 'TYPE:NAME' 키를 만들 때 쓴다. 경로는 /sap/bc/adt/ 뒤 소문자이고, 가장 긴 것이 먼저 맞는다. 표에 없는 URL 은 'URL:<루트 URL>' 키로 추적한다. 새 오브젝트 종류가 나오면 여기에 한 줄만 더한다(CLAUDE.md 원칙 2).",
+  "collections": {
+    "oo/classes": "CLAS",
+    "oo/interfaces": "INTF",
+    "ddic/ddl/sources": "DDLS",
+    "ddic/ddlsources": "DDLS",
+    "bo/behaviordefinitions": "BDEF",
+    "ddic/tables": "TABL",
+    "ddic/structures": "TABL",
+    "ddic/srvd/sources": "SRVD",
+    "businessservices/bindings": "SRVB",
+    "ddic/ddlx/sources": "DDLX",
+    "ddic/ddla/sources": "DDLA",
+    "acm/dcl/sources": "DCLS",
+    "ddic/dataelements": "DTEL",
+    "ddic/domains": "DOMA",
+    "programs/programs": "PROG",
+    "programs/includes": "PROG",
+    "functions/groups": "FUGR"
+  }
+}

@@ -686,6 +686,30 @@ if [ -n "$commit_seg" ]; then
   fi
 fi
 
+# 2-2) 푸시 전에 080 에 쓴 ABAP 오브젝트가 모두 활성화됐는지 본다(#190). 선언
+#      접두어(DELIVER=1)보다 먼저 검사한다 — 접두어가 이 관문을 여는 문이 되지
+#      않게 하기 위해서다. 기록 파일도 실패 표식도 없으면(대부분의 푸시) python 을 부르지 않는다.
+#      기록이 있는데 관문을 실행하지 못하면 통과가 아니라 검사 불능으로 거부한다.
+#      관문 출력(여러 줄, 따옴표 포함 가능)은 deny() 에 끼우지 않고 jq 로 JSON 인코딩한다.
+if [ "$sub" = "push" ]; then
+  act_git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null | tr -d '\r' || true)"
+  if [ -n "$act_git_dir" ] && { [ -e "$act_git_dir/harness-adt-activation.json" ] || [ -e "$act_git_dir/harness-adt-activation.error" ]; }; then
+    set +e
+    act_out="$(PYTHONIOENCODING=utf-8 uv run --no-project python "$hook_dir/activation_gate.py" check "$(pwd)" 2>&1)"
+    act_rc=$?
+    set -e
+    if [ "$act_rc" -ne 0 ]; then
+      act_out="$(printf '%s' "$act_out" | tr -d '\r')"
+      if [ "$act_rc" -ne 1 ]; then
+        act_out="활성화 관문을 실행하지 못해(종료코드 $act_rc) 활성화 성공을 확인할 수 없습니다(검사 불능). 확인되지 않는 상태로 통과시키지 않습니다. 사유: $act_out 다음: uv 가 있는지 확인하고 같은 명령을 다시 시도하십시오. $next_install_uv"
+      fi
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' \
+        "$(printf '%s' "푸시를 막습니다. $act_out" | jq -Rs .)"
+      exit 0
+    fi
+  fi
+fi
+
 # 3) /harness:deliver 스킬이 절차를 따르고 있다는 선언이면 여기서 통과시킨다.
 #    위의 두 검사를 지난 뒤라 강제 푸시와 main 커밋은 이미 걸러져 있다.
 case "$cmd" in
