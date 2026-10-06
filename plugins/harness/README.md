@@ -243,7 +243,10 @@ Project Repository 의 CLAUDE.md 에 짧게 적어 둬야 세션이 매번 상�
 `.claude/settings.json` 도 함께 만들어, 이 저장소 폴더를 여는 팀원이 별도
 설치 없이 blueward-harness 마켓플레이스와 harness Plugin 설치 안내를 받게
 한다(#89) — 이미 그 파일이 있으면 통째로 덮어쓰지 않고 없는 두 항목만
-채워 넣는다. 자세한 절차는 `skills/scaffold/SKILL.md` 를 읽는다.
+채워 넣는다. `conventions/` 에는 블루어드 사내 표준 두 개(`naming.md` — SAP Public
+Cloud & BTP 이름 규칙, `cap-ui5.md` — CAP·SAPUI5 개발 표준)를 기본값으로 함께
+둔다(#187). 고객사 표준이 정해지면 그 파일을 고치고, 이미 있는 파일은 덮어쓰지
+않는다. 자세한 절차는 `skills/scaffold/SKILL.md` 를 읽는다.
 
 ## 비밀정보 검사(#159)
 

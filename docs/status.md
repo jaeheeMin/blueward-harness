@@ -561,6 +561,8 @@ pre-commit 훅 연결은 별도 이슈다. 테스트는 `checker/tests/test_gitl
 미리 알 수 있음(패키지는 128건), 패키지 실행은 120초를 넘겨 백그라운드로 넘어감. ATC 가 활성화 전 소스를
 보는지는 아직 시험하지 않았다. Plugin version 0.10.29.
 
+**사내 개발표준을 scaffold 기본 Convention 으로 넣었다(#187).** 공통 개발 규칙 CR-008 은 이름 규칙을 프로젝트 `conventions/` 에 두라고 하는데, scaffold 가 만드는 `conventions/` 에는 README.md 뿐이라 Claude Code 가 개발할 때 참고할 이름 규칙이 없었다. 블루어드 사내 표준 두 개를 정리해 스켈레톤에 넣었다 — `conventions/naming.md`(SAP S/4HANA Public Cloud & BTP Naming Guide v1.2: Common, RAP, KeyUser Objects, Communication configuration, SAPUI5, NodeJS, Fiori Launchpad & Work Zone) 와 `conventions/cap-ui5.md`(CAP·SAPUI5 개발표준 정의서 v1.0: 형상관리, 프로젝트 구조, 이름 규칙, 코드 작성 규칙, Secure 코딩). 사내 기본값이라 각 파일 머리에 "고객사 표준이 정해지면 이 파일을 고친다" 와 "공통 개발 규칙과 부딪히면 이 파일이 이긴다(CR-004 제외)" 를 적었다. 하네스가 공개 저장소라 원본(PDF·docx)과 작성자·승인자 이름, 개정 이력, 회사 약어는 넣지 않고 회사 약어는 `<회사약어>` 자리표시로 바꿨다. 스켈레톤 `CLAUDE.md` 에 이름을 지을 때 `conventions/` 를 먼저 읽으라는 줄을 넣었고, 세션 시작 훅은 `conventions/*.md` 를 이미 Convention 으로 안내하므로 훅은 그대로다. scaffold 는 이미 있는 파일을 덮어쓰지 않으므로 기존 Project Repository 에 같은 이름의 파일이 있으면 그대로 두고 건너뛴다(테스트로 확인). 원문 두 문서는 서로 맞춰져 있지 않아(상수 접두어, 변수 접두어, Control ID 등) `cap-ui5.md` 끝에 다른 곳을 표로 모았고 어느 쪽을 따를지는 프로젝트가 정한다. 원문의 코드 예시·화면 그림은 옮기지 못했다. 테스트는 `checker/tests/test_scaffold.py` 에 두 파일 생성, 기존 파일 보존, 사람 이름·개정 이력 없음 확인을 더했다. Plugin version 0.10.30.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.

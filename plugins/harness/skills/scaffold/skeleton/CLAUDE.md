@@ -25,5 +25,7 @@ Project Repository 다. 이 프로젝트의 최종 산출물과, 그 산출물�
 - 고객사 템플릿과 검사 규칙은 이 저장소 안 `templates/` 와 `rules/` 에 둔다.
 - `docs/ssot/PRD.md` 가 SSOT 이고, Convention 과 Template 은 링크로만
   참조한다.
+- 객체·파일·변수 이름을 지을 때는 `conventions/` 의 파일(특히 `naming.md`)을
+  먼저 읽는다. CAP·SAPUI5 코드는 `conventions/cap-ui5.md` 도 읽는다.
 - 비밀번호 같은 Credential 은 저장소에 두지 않는다.
 - 검사를 못 했다는 결과를 통과로 보지 않는다.
