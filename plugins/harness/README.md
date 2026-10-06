@@ -2,20 +2,27 @@
 
 고객사 Project Repository 에 설치해 쓰는 Blueward 하네스다. 새 저장소의 표준
 구조를 만들고, 문서가 템플릿을 따르는지 검사하고(doc-guard), 협업 규칙과
-`/harness:start` · `/harness:deliver` · `/harness:wrapup` · `/harness:sync`
-Skill 을 한 번에 제공한다.
+`/harness:start` · `/harness:deliver` · `/harness:wrapup` · `/harness:sync` 를 비롯한
+Skill 8개를 한 번에 제공한다.
 
 ```
 plugins/harness/
   .claude-plugin/plugin.json   플러그인 정의
   hooks/
-    hooks.json                 네 훅을 선언
-    pre_write_guard.py         문서 검사(doc-guard) — Write/Edit 직전에 막을지 정한다
-    pre-bash-git-guard.sh      git 가드 — 스킬을 거치지 않은 git push 와 비밀정보가 든 커밋을 막는다
+    hooks.json                 훅 6개를 선언
+    pre_write_guard.py         문서·코드 검사(doc-guard) — Write/Edit 직전에 막을지 정한다. src/ 쓰기는 활성화 관문도 건다
+    pre-bash-git-guard.sh      git 가드 — 스킬을 거치지 않은 git push, 비밀정보가 든 커밋, 활성화 안 된 ABAP 오브젝트가 있는 푸시를 막는다
+    mcp_source_guard.py        SAP ADT MCP 도구 가드 — 코드 규칙 검사, 테넌트별 쓰기 차단, 데이터 추출 되묻기
     mcp_activation_tracker.py  ADT MCP 호출 뒤 ABAP 오브젝트의 활성화 상태를 기록한다(PostToolUse, #190)
     activation_gate.py         기록에 활성화 안 된 오브젝트가 있으면 푸시·src/ 쓰기를 막는 관문(adt_activation.py 공용)
+    adt_activation.py          활성화 기록·관문의 공용 로직
+    adt_object_types.json      ADT URL 로 오브젝트 TYPE 을 찾는 표
+    adt_tiers.py               env/adt-tiers.yaml 해석(mcp_source_guard.py 가 씀)
+    mcp_default_tools.json     adt-tiers.yaml 이 없을 때 쓰는 기본 데이터 추출 도구 목록
+    mcp_object_source_map.json objectSourceUrl 패턴으로 언어(ABAP·CDS·BDEF)를 가리는 표
     gitleaks-harness.toml      하네스 기본 gitleaks 설정(checker/gitleaks/harness.toml 의 복사본)
     session-start-sync.sh      세션 시작 때 원격과 동기화하고 남은 경고를 전한다
+    ensure-tools.sh            세션 시작 때 uv·jq·gh·gitleaks 가 있는지 보고 없으면 설치한다(session-start-sync.sh 가 부름)
     stop-deliver.sh            세션 종료 때 커밋 안 된 변경을 알린다
   skills/
     start/SKILL.md             /harness:start — 이슈와 브랜치 생성
@@ -89,13 +96,17 @@ plugins/harness/
 | `harness:reviewer` | 읽기 전용 검토. 쓰기·편집 도구가 없고 자기 승인을 하지 않는다 |
 | `harness:implementer` | 범위를 정해 준 구현. 커밋·푸시는 하지 않는다 |
 
-### 훅 4개
+### 훅 6개
+
+`hooks.json` 이 선언하는 훅은 여섯 개다(아래 표의 `ensure-tools.sh` 는 선언된 훅이 아니라
+`session-start-sync.sh` 가 부르는 도우미다).
 
 | 훅 | 시점 | 하는 일 |
 |---|---|---|
-| `pre_write_guard.py` | `PreToolUse` (Write\|Edit) | 문서가 템플릿을 벗어나면 저장을 막는다(doc-guard). 코드(`.abap`, `.js`/`.ts`, `.cds`, `.asbdef`)는 공통 개발 규칙 CR-001·CR-002·CR-003·CR-007 을 어기면 막는다(#54, #72, #81. BDEF 는 CR-001 만, CR-003·CR-007 은 ABAP·JS/TS 만) |
-| `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 PRD 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120). `git commit` 은 staged 변경을 gitleaks 로 검사해 비밀값이 있으면 막는다(#170, 아래 "비밀정보 검사" 참고) |
+| `pre_write_guard.py` | `PreToolUse` (Write\|Edit) | 문서가 템플릿을 벗어나면 저장을 막는다(doc-guard). 코드(`.abap`, `.js`/`.ts`, `.cds`, `.asbdef`)는 공통 개발 규칙 CR-001·CR-002·CR-003·CR-007 을 어기면 막는다(#54, #72, #81. BDEF 는 CR-001 만, CR-003·CR-007 은 ABAP·JS/TS 만). 저장소 루트 `src/` 아래에 쓸 때는 활성화 안 된 ABAP 오브젝트가 있으면 막는다(활성화 관문, #190, 아래 절) |
+| `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 PRD 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120). `git commit` 은 staged 변경을 gitleaks 로 검사해 비밀값이 있으면 막는다(#170, 아래 "비밀정보 검사" 참고). `git push` 는 080 에 쓴 ABAP 오브젝트 중 활성화 안 된 것이 있어도 막는다(활성화 관문, #190, 아래 절) |
 | `mcp_source_guard.py` | `PreToolUse` (SAP ADT MCP 도구 19개) | MCP 로 SAP 에 쓰거나 이름을 붙이는 경로의 코드 규칙 CR-001·CR-002·CR-003·CR-007 검사(#60, #61)와, `env/adt-tiers.yaml` 기준 테넌트별 쓰기 차단·데이터 추출 되묻기(#148). 아래 "테넌트별 쓰기 차단" 참고 |
+| `mcp_activation_tracker.py` | `PostToolUse` (SAP ADT MCP 도구 6개: `setObjectSource`·`createObject`·`deleteObject`·`activateObjects`·`activateByName`·`inactiveObjects`) | ADT MCP 로 쓴 ABAP 오브젝트와 활성화 결과를 `.git` 아래 기록 파일에 남긴다(#190, 아래 절). 기록하지 못하면 표식 파일을 남기고 exit 2 로 알린다 |
 | `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고 지난 세션에서 남은 경고를 전한다. upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리). 저장소 안(꼭대기에서 3단계까지)에 `templates/` 와 `rules/` 를 함께 가진 폴더가 없으면 `/harness:scaffold` 를 안내한다(#128, 자동 실행은 하지 않는다. 플러그인 저장소(`.claude-plugin/marketplace.json` 이 꼭대기에 있다)와 git 저장소가 아닌 곳은 말하지 않고, `HARNESS_NO_SCAFFOLD_HINT=1` 로 끈다) |
 | `ensure-tools.sh` | `SessionStart` (session-start-sync.sh 가 부름) | uv·jq·gh·gitleaks 가 없으면 Windows 에서 winget 으로 설치하고 결과를 알린다(#116, gitleaks 는 #170). 아래 "도구 자동 설치" 참고 |
 | `stop-deliver.sh` | `Stop` | 커밋되지 않은 변경이 남았으면 `/harness:deliver` 를 안내한다 |
@@ -145,6 +156,60 @@ scaffold 는 `env/adt-tiers.example.yaml`(예시, 훅은 읽지 않음)을 만�
 늘리려면 매처도 함께 고쳐야 한다. 모든 MCP 도구(`mcp__.*__.*`)를 잡지 않은 것은 ADT 가 아닌
 MCP 서버의 모든 호출마다 훅(`uv` 기동)을 띄우는 비용 때문이다. 플러그인이 번들한 MCP 서버
 이름은 `plugin_<플러그인>_<서버>` 꼴이라 `servers` 에 그대로 적어야 한다.
+
+### 080 에 쓴 오브젝트의 활성화 확인(#190)
+
+`setObjectSource` 로 쓰고 활성화하지 않았거나 활성화가 실패한 채로 푸시나 `src/` 스냅샷으로 넘어가는 일을
+막는다. `mcp_activation_tracker.py`(PostToolUse)가 ADT MCP 호출을 `.git` 아래
+`harness-adt-activation.json` 에 기록하고(worktree 별, 세션을 넘어 남는다), `activation_gate.py` 가 그
+기록을 읽어 세 곳에서 건다 — `git push`(`pre-bash-git-guard.sh`), 저장소 루트 `src/` 아래 Write/Edit
+(`pre_write_guard.py`), `/harness:deliver` 2단계.
+
+| 상태 | 뜻 |
+|---|---|
+| `written` | 썼고 활성화 확인 전 |
+| `active` | 활성화 성공 |
+| `failed` | 활성화 응답이 실패 |
+| `unknown` | 활성화 응답을 해석하지 못해 확인 불능 |
+
+`active` 가 아니면 모두 막는다 — 확인하지 못한 것을 통과로 두지 않는다. 기록을 읽지 못하는 것도 통과가 아니라
+검사 불능으로 막는다.
+
+**막혔을 때.**
+- 다시 활성화한다(`activateObjects`·`activateByName`). 실패면 메시지를 읽고 소스를 고친다.
+- Eclipse 등 다른 도구로 활성화했으면 `inactiveObjects` 를 불러 기록을 서버 상태에 맞춘다(서버에 비활성으로
+  남지 않은 항목은 `active` 가 된다).
+- 서버에서 지울 오브젝트면 `deleteObject` 로 지워 기록에서 뺀다.
+- 기록 실패 표식 `.git/harness-adt-activation.error` 가 있으면 훅이 기록을 못 남긴 것이다. `inactiveObjects` 로
+  남은 비활성이 없음을 사람이 확인한 뒤 그 파일을 지운다. Claude 는 이 파일을 지우지 않는다.
+
+**한계.** `git -C 다른곳 push` 나 `cd other && git push` 는 현재 worktree 의 기록만 본다. Bash 로 `src/` 에
+쓰는 경로(`cp`, 리다이렉션)는 막지 못한다(Write/Edit 만). 기록은 worktree 별이라 다른 worktree 에서 쓴 것은
+보지 못한다. PostToolUse 는 이미 끝난 호출을 막을 수 없어 관문을 푸시와 `src/` 쓰기에 건다. 설계 상세와 실측은
+`docs/status.md` 의 #190 절에 있다.
+
+### 고객사 양식으로 Spec 쓰고 양식 파일 산출(#191·#192)
+
+고객사 양식(xlsx)이 있는 프로젝트는 Spec 을 그 양식대로 쓰고 양식 파일로 뽑는다.
+
+- **양식 지도.** Project Repository 의 `templates/forms/<양식>.yaml` 이 양식의 시트·칸·표·서술 위치와 산출
+  파일명 규칙을 적는다. 형식 정본은 [`skills/spec/form-map.md`](skills/spec/form-map.md). 엔진은 `rules/` 만 읽으므로
+  지도는 doc-guard 검사 대상이 아니고, 스킬이 읽는다.
+- **작성(`/harness:spec`).** 지도가 있으면 쓸 양식을 매번 묻는다. 파일명에 들어가는 항목(예: 개발 ID, Title,
+  처음엔 버전 0.1)부터 받아 산출될 파일명을 보여 주고 확인받은 뒤, 나머지를 Spec 의 `## 양식 항목` 절에 적는다.
+  모르는 값은 추측하지 않고 묻고, 그래도 없으면 `미정` 이다. 지도가 없으면 기존처럼 `spec.md` 틀만 쓴다.
+- **산출.** 작업본이 다 채워지면 `python -m checker.export` 로 지도의 템플릿 복사본에 값을 채워
+  `산출.폴더` 에 만든다. 플러그인 설치본에는 엔진이 없어 `uvx` 로 받아 부른다. 명령은
+  [`skills/spec/SKILL.md`](skills/spec/SKILL.md) 의 "양식 파일 산출" 절 그대로 쓴다. 옵션과 JSON 출력은
+  `checker/README.md` 에 있다.
+- **종료코드.** 0 산출함, 1 거부(필수 항목이 `미정`, `최대_행` 초과, 같은 이름 파일이 이미 있음 등 — 아무 파일도
+  쓰지 않는다), 2 읽지 못함(작업본·지도·템플릿을 못 읽음, 지도에 없는 항목 — 검사 불능이지 통과도 위반도
+  아니다). stdout 이 JSON 으로 읽히지 않으면 산출 불능으로 알린다.
+- **이전 판은 덮어쓰지 않는다.** 내용이 바뀌면 양식의 변경이력 표에 행을 더해 버전을 올리고 다시 산출한다.
+  파일명의 `v<버전>` 이 달라져 새 파일이 생기고 이전 판은 남는다.
+- **경고(`warnings`).** 지도에 없는 템플릿 샘플(해당 없음 시트에 남은 그림·셀)은 산출이 지우지 않고 경고로
+  알린다. 사람이 엑셀에서 열어 확인하고 지운다.
+- **xlsx 검사는 Actions 몫.** 훅은 바이너리를 못 보므로 산출한 xlsx 는 PR 에서 `doc-guard.yml` 이 `검사_규칙` 으로 검사한다.
 
 ### 도구 자동 설치(#116)
 
