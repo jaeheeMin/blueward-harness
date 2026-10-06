@@ -58,6 +58,8 @@ EXPECTED_FILES = {
     "rules/audit-changes.yaml",
     "rules/audit-ledger.yaml",
     "conventions/README.md",
+    "conventions/naming.md",
+    "conventions/cap-ui5.md",
     "audit/README.md",
     "audit/changes/.gitkeep",
     "audit/ledger/.gitkeep",
@@ -193,6 +195,30 @@ def test_두번째_실행은_아무것도_만들지_않고_기존_파일을_보�
     assert set(second["skipped"]) == EXPECTED_FILES
     # 덮어쓰지 않았어야 한다.
     assert claude_md.read_text(encoding="utf-8") == edited
+
+
+def test_이미_있는_사내_표준_Convention_파일은_덮어쓰지_않는다(tmp_path: Path):
+    (tmp_path / "conventions").mkdir()
+    naming = tmp_path / "conventions" / "naming.md"
+    edited = "# 고객사 표준으로 고친 이름 규칙\n"
+    naming.write_text(edited, encoding="utf-8")
+
+    result = scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    assert "conventions/naming.md" in result["skipped"]
+    assert "conventions/cap-ui5.md" in result["created"]
+    assert naming.read_text(encoding="utf-8") == edited
+
+
+def test_사내_표준_Convention_파일에_사람_이름과_개정_이력이_없다():
+    skeleton = Path(scaffold_mod.__file__).resolve().parent / "skeleton" / "conventions"
+    for name in ("naming.md", "cap-ui5.md"):
+        text = (skeleton / name).read_text(encoding="utf-8")
+        assert "사내 기본값이다. 고객사 표준이 정해지면 이 파일을 고친다" in text
+        assert "개정 이력" not in text
+        assert "작성자" not in text and "승인자" not in text
+        # 원문의 특정 회사 약어·저장소·프로젝트 접두어는 공개 저장소에 두지 않는다.
+        assert not re.search(r"\bibr\b|irisbright|\bscm", text, re.IGNORECASE)
 
 
 def test_dry_run은_아무것도_만들지_않는다(tmp_path: Path):

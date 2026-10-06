@@ -92,6 +92,8 @@ rules/spec.yaml                    Spec 파일명·필수 절 규칙
 rules/audit-changes.yaml           변경 기록의 파일명·필수 절 규칙
 rules/audit-ledger.yaml            진행 원장의 파일명·필수 절 규칙
 conventions/README.md              이 프로젝트에서만 통하는 Convention
+conventions/naming.md              블루어드 사내 표준 이름 규칙(Naming Guide v1.2 정리). 고객사 표준이 정해지면 고친다(#187)
+conventions/cap-ui5.md             블루어드 사내 표준 CAP·SAPUI5 개발 표준(v1.0 정리). 고객사 표준이 정해지면 고친다(#187)
 audit/README.md                    Audit 두 종류(변경 기록·진행 원장) 설명
 audit/changes/.gitkeep             변경 기록이 쌓일 자리
 audit/ledger/.gitkeep              진행 원장이 쌓일 자리
