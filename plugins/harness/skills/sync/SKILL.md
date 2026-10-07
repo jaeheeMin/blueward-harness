@@ -34,8 +34,8 @@ compatibility: git 과 origin 원격이 필요하다.
    `origin/{base}` 가 몇 커밋 앞서 있는지도 참고로 함께 보고한다(리베이스
    대상은 아니고 참고 정보다).
 5. `git rev-list --count HEAD..{target}` 이 0 이면 "이미 최신" 이라고
-   보고하고 끝낸다. **미커밋 변경이 있어도 여기서 끝나므로 그 변경은
-   건드리지 않는다.**
+   보고하고 끝낸다(아래 "플러그인 버전 확인" 은 하고 끝낸다). **미커밋
+   변경이 있어도 여기서 끝나므로 그 변경은 건드리지 않는다.**
 6. **미커밋 변경 확인**: `git status --porcelain --untracked-files=all` 을
    `session-start-sync.sh` 와 같은 규칙으로 걸러 `.superpowers/` 와
    `*handoff*.md` 는 제외한다. 남는 변경이 있으면 **멈추고** 파일 목록을
@@ -89,6 +89,43 @@ compatibility: git 과 origin 원격이 필요하다.
    - upstream 이 없는 브랜치였다면: "원격에 아직 짝 브랜치가 없다. 첫
      `/harness:deliver` 에서 생긴다." upstream 을 이 스킬이 임의로
      설정하지 않는다.
+   - 아래 "플러그인 버전 확인" 결과. 5단계에서 "이미 최신" 으로 끝날 때도
+     이 확인은 한다.
+
+## 플러그인 버전 확인
+
+git 을 맞춰도 Claude Code 플러그인(훅·스킬)은 따로 갱신된다. 자동 업데이트가
+켜져 있으면 새 버전을 뒤에서 내려받지만, **이미 열린 세션은 처음 올린 버전을
+계속 쓴다**(공식 문서 code.claude.com/docs/en/plugins/loading "When
+auto-update runs"). 그 차이를 알려 준다. 플러그인을 이 스킬이 대신 갱신하지는
+않는다 — 아래 명령은 사람이 친다.
+
+1. **세션 버전**: `<이 스킬의 base directory>/../../.claude-plugin/plugin.json`
+   의 `version`. 지금 세션에 올라온 플러그인이다.
+2. **내려받은 버전**: `~/.claude/plugins/installed_plugins.json` 의
+   `plugins["harness@blueward-harness"]` 항목 중 `projectPath` 가 지금 저장소
+   루트(`git rev-parse --show-toplevel`)와 같은 것의 `version`. 경로는
+   대소문자와 `/`·`\` 차이를 무시하고 비교한다. 같은 항목이 없으면 `scope` 가
+   `user` 인 항목을 쓴다. 파일이나 항목이 없으면 "모름" 으로 둔다.
+3. **최신 버전**: GitHub main 의 `plugins/harness/.claude-plugin/plugin.json`
+   `version`.
+   `gh api repos/jaeheeMin/blueward-harness/contents/plugins/harness/.claude-plugin/plugin.json --jq .content`
+   (base64) 로 읽고, gh 가 안 되면
+   `curl -fsSL https://raw.githubusercontent.com/jaeheeMin/blueward-harness/main/plugins/harness/.claude-plugin/plugin.json`
+   로 읽는다. 둘 다 실패하면 **"최신 버전을 확인하지 못했다" 고 보고하고
+   최신이라고 하지 않는다.**
+4. 판정과 안내(버전은 점으로 나눈 숫자로 비교한다):
+   - 세션 = 최신: "플러그인 최신(0.x.y)" 한 줄.
+   - 세션 < 최신, 내려받은 버전 = 최신: "새 버전이 내려받아져 있지만 이
+     세션은 옛 버전이다. `/reload-plugins` 를 치거나 세션을 새로 여십시오."
+   - 세션 < 최신, 내려받은 버전 < 최신 또는 모름: "아직 내려받지 않았다.
+     `/plugin` → Installed → harness → **Update now**(셸에서는
+     `claude plugin update harness@blueward-harness`) 뒤 `/reload-plugins`."
+     자동 업데이트는 세션의 첫 메시지 뒤 최대 10분 안에 돌므로 방금 연
+     세션이면 조금 뒤 다시 확인해도 된다고 덧붙인다.
+   - 세션 > 최신: 개발 중인 로컬 플러그인일 수 있다 — 버전만 알리고 안내하지
+     않는다.
+   세 버전을 모두 보고에 적는다.
 
 ## 하지 않는 것
 
