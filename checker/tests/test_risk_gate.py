@@ -114,8 +114,8 @@ def test_줄과_파일이_모두_넘으면_사유가_둘():
 
 
 def test_위험_경로_아래를_바꾸면_사유():
-    reasons = rg.path_reasons(["src/a.py", "docs/ssot/PRD.md"], ["docs/ssot/"])
-    assert reasons == ["위험 경로를 바꿈: docs/ssot/PRD.md"]
+    reasons = rg.path_reasons(["src/a.py", "docs/ssot/SRS.md"], ["docs/ssot/"])
+    assert reasons == ["위험 경로를 바꿈: docs/ssot/SRS.md"]
 
 
 def test_위험_경로가_아니면_사유가_없다():
@@ -328,7 +328,7 @@ def _review(login, state, commit, at="2026-01-01T00:00:00Z"):
 
 
 def test_설정_파일이_없으면_게이트가_꺼진_것이라_통과():
-    client = _client(config=None, files=[_file("docs/ssot/PRD.md", 9999)])
+    client = _client(config=None, files=[_file("docs/ssot/SRS.md", 9999)])
     result = rg.decide_pr(client, "o/r", 5)
     assert result["enabled"] is False and result["risk"] == "low"
     assert result["reasons"] == ["risk-gate 설정 없음"]
@@ -587,7 +587,7 @@ def test_게이트가_꺼져_있으면_병합_뒤에도_통과():
 
 
 def test_PR_없이_main_에_직접_들어온_위험한_변경은_1():
-    client = _commit_client(prs=[], files=[_file("docs/ssot/PRD.md")])
+    client = _commit_client(prs=[], files=[_file("docs/ssot/SRS.md")])
     result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
     assert result["approved"] is False and "PR 없이" in result["reasons"][0]
     assert rg._exit_for(result) == 1
@@ -599,7 +599,7 @@ def test_PR_없이_들어온_안전한_변경은_통과():
 
 
 def test_PR_없이_들어온_커밋도_설정이_없으면_통과():
-    client = _commit_client(prs=[], config=None, files=[_file("docs/ssot/PRD.md")])
+    client = _commit_client(prs=[], config=None, files=[_file("docs/ssot/SRS.md")])
     assert rg._exit_for(rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)) == 0
 
 
@@ -665,25 +665,25 @@ def test_제목의_PR_번호로_찾은_승인된_PR_은_통과():
 
 def test_제목_PR_번호의_merge_commit_sha_가_다르면_직접_push_로_본다():
     info = dict(_MERGED_INFO, merge_commit_sha="other")
-    client = _late_client([[]], pr_info=info, files=[_file("docs/ssot/PRD.md")])
+    client = _late_client([[]], pr_info=info, files=[_file("docs/ssot/SRS.md")])
     result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
     assert "PR 없이" in result["reasons"][0] and rg._exit_for(result) == 1
 
 
 def test_제목_PR_번호의_PR_이_병합되지_않았으면_직접_push_로_본다():
     info = {"merged_at": None, "merge_commit_sha": "m1", "number": 5}
-    client = _late_client([[]], pr_info=info, files=[_file("docs/ssot/PRD.md")])
+    client = _late_client([[]], pr_info=info, files=[_file("docs/ssot/SRS.md")])
     assert "PR 없이" in rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)["reasons"][0]
 
 
 def test_제목_번호가_PR_이_아니어서_404_면_직접_push_로_본다():
-    client = _late_client([[]], files=[_file("docs/ssot/PRD.md")])
+    client = _late_client([[]], files=[_file("docs/ssot/SRS.md")])
     client.responses["repos/o/r/pulls/5"] = GhError("gh: Not Found (HTTP 404)", status=404)
     assert "PR 없이" in rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)["reasons"][0]
 
 
 def test_PR_번호_근거도_연결도_없는_진짜_직접_push_는_잡힌다():
-    client = _late_client([[]], title="chore: 직접 수정", files=[_file("docs/ssot/PRD.md")])
+    client = _late_client([[]], title="chore: 직접 수정", files=[_file("docs/ssot/SRS.md")])
     result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
     assert client.pull_calls == rg.LINK_RETRIES
     assert "PR 없이" in result["reasons"][0] and rg._exit_for(result) == 1

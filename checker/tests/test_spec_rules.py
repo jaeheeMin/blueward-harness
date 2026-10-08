@@ -18,7 +18,7 @@ SPEC_VALID = """# DEV-001 결재단계 추가
 
 ## 근거 요구사항
 
-REQ-031 ([PRD](../ssot/PRD.md))
+REQ-031 ([SRS](../ssot/SRS.md))
 
 ## 개요
 

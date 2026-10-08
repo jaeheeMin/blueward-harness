@@ -1,8 +1,8 @@
-# <프로젝트> PRD
+# <프로젝트> SRS
 
 이 프로젝트의 SSOT(Single Source of Truth) 다. 요구사항이 바뀌면 이 문서를
 고치고, 바뀐 이유와 영향받는 Spec 은 `audit/changes/` 에 남긴다. 새로 만들
-때도 고칠 때도 `/harness:prd` Skill 을 쓴다.
+때도 고칠 때도 `/harness:srs` Skill 을 쓴다.
 
 ## 배경과 목표
 

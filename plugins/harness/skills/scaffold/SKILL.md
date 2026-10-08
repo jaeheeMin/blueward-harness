@@ -1,6 +1,6 @@
 ---
 name: scaffold
-description: 새 고객사 Project Repository 를 처음 만들었을 때 표준 구조(templates/, rules/, docs/ssot/ 등)를 만든다. 사용자가 "스캐폴딩 해줘", "프로젝트 구조 만들어줘", "초기 세팅해줘" 라고 말할 때 사용한다. 이럴 땐 쓰지 않는다 — 작업(이슈·브랜치)을 시작하는 말이면 start 스킬로, 구조가 이미 있는 저장소에서 문서를 만들거나 고치는 말이면 prd·spec 스킬로.
+description: 새 고객사 Project Repository 를 처음 만들었을 때 표준 구조(templates/, rules/, docs/ssot/ 등)를 만든다. 사용자가 "스캐폴딩 해줘", "프로젝트 구조 만들어줘", "초기 세팅해줘" 라고 말할 때 사용한다. 이럴 땐 쓰지 않는다 — 작업(이슈·브랜치)을 시작하는 말이면 start 스킬로, 구조가 이미 있는 저장소에서 문서를 만들거나 고치는 말이면 srs·spec 스킬로.
 compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시크릿 등록 안내에 GitHub CLI(gh)를 쓴다.
 ---
 
@@ -12,8 +12,8 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
 폴더)다" 라고 판단한다.
 
 1. 고객사 이름과 프로젝트 이름이 인자로 주어지지 않았으면, 한 번에 같이
-   물어본다("어느 고객사, 어느 프로젝트인가요?"). PRD(`docs/ssot/`) 변경 PR 을
-   승인할 사람의 GitHub 아이디도 물어본다("PRD 변경을 승인할 사람이 있나요?
+   물어본다("어느 고객사, 어느 프로젝트인가요?"). SRS(`docs/ssot/`) 변경 PR 을
+   승인할 사람의 GitHub 아이디도 물어본다("SRS 변경을 승인할 사람이 있나요?
    없으면 작성자가 아닌 누구의 승인이든 인정합니다"). 없다고 하면 비워 둔다.
 2. `git rev-parse --show-toplevel` 로 현재 위치가 이 Project Repository 의
    루트인지 확인한다. 스캐폴딩은 항상 저장소 루트에서 실행한다.
@@ -52,7 +52,7 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
    - 환경별 접속 URL 을 `env/` 에 적는다.
    - `.github/workflows/doc-guard.yml` 이 이제부터 이 저장소의 PR 과 main
      커밋마다 검사를 돌린다. `.github/workflows/ssot-approval.yml` 은 같은
-     자리에서 PRD 변경 PR 의 승인 여부를 검사한다(#49).
+     자리에서 SRS 변경 PR 의 승인 여부를 검사한다(#49).
    - 승인자를 나중에 추가·변경하려면 `.github/ssot-approvers` 를 직접 고친다.
      비어 있으면(주석뿐이면) 작성자가 아닌 누구의 승인이든 인정한다.
    - `.github/workflows/risk-gate.yml` 과 `.github/risk-gate.yaml` 은 PR 위험도에 따라
@@ -72,23 +72,23 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
      만들면 하네스 규칙이 빠지므로 `[extend] path = ".harness-engine/checker/gitleaks/harness.toml"` 로
      이어받게 안내한다. PR 은 base 의 `.gitleaks.toml` 로 검사하므로 그 파일의 변경은 병합 뒤부터 적용된다.
      유출 발견과 검사 불능(gitleaks 오류)은 서로 다른 메시지로 실패한다.
-   - PRD 는 `/harness:prd` Skill 로 만든다. 지금은 `docs/ssot/PRD.md` 가
+   - SRS 는 `/harness:srs` Skill 로 만든다. 지금은 `docs/ssot/SRS.md` 가
      빈 스텁으로만 있다.
 
 ## 만들어지는 구조
 
 ```
 CLAUDE.md                          이 저장소가 무엇인지, 디렉터리와 규칙 요약
-docs/ssot/PRD.md                   요구사항의 정본(SSOT). 아직 빈 스텁
+docs/ssot/SRS.md                   요구사항의 정본(SSOT). 아직 빈 스텁
 docs/spec/.gitkeep                 개발 Spec 이 쌓일 자리
 templates/README.md                고객사 템플릿 원본을 두는 자리
-templates/harness/PRD.md           PRD 틀
+templates/harness/SRS.md           SRS 틀
 templates/harness/spec.md          개발 Spec 틀
 templates/harness/audit-change.md  변경 기록 템플릿
 templates/harness/audit-ledger.md  진행 원장 템플릿
 templates/forms/.gitkeep           양식 지도(고객사 양식의 시트·칸 위치)가 쌓일 자리
 rules/README.md                    규칙 작성법과 예시
-rules/ssot.yaml                    PRD 파일명·필수 절 규칙
+rules/ssot.yaml                    SRS 파일명·필수 절 규칙
 rules/spec.yaml                    Spec 파일명·필수 절 규칙
 rules/audit-changes.yaml           변경 기록의 파일명·필수 절 규칙
 rules/audit-ledger.yaml            진행 원장의 파일명·필수 절 규칙
@@ -101,8 +101,8 @@ audit/ledger/.gitkeep              진행 원장이 쌓일 자리
 env/README.md                      환경별 접속 URL(Credential 은 안 둠)
 env/adt-tiers.example.yaml         SAP MCP 서버별 쓰기 허용 표 예시(#148). 훅은 읽지 않는다 — 복사해 env/adt-tiers.yaml 로 고쳐 쓴다
 .github/workflows/doc-guard.yml    PR·main 커밋마다 doc-guard 를 부르는 워크플로
-.github/workflows/ssot-approval.yml PR·main 커밋마다 PRD 변경 승인을 검사하는 워크플로(#49)
-.github/ssot-approvers             PRD 변경 PR 을 승인할 수 있는 GitHub 아이디 목록
+.github/workflows/ssot-approval.yml PR·main 커밋마다 SRS 변경 승인을 검사하는 워크플로(#49)
+.github/ssot-approvers             SRS 변경 PR 을 승인할 수 있는 GitHub 아이디 목록
 .github/workflows/risk-gate.yml    PR·main 커밋마다 PR 위험도를 판정하는 워크플로(#102)
 .github/risk-gate.yaml             위험도 기준(크기·위험 경로·비밀값·검사 통과). 위험한 PR 만 승인자가 Approve 해야 통과
 .github/workflows/ai-review.yml    위험도 낮은 PR 에만 Claude AI 리뷰를 돌리는 워크플로(#125). 기본 꺼짐

@@ -63,8 +63,8 @@
 | `/harness:deliver` | 작업 마무리 — 커밋, 동기화, 푸시, PR |
 | `/harness:wrapup` | 못 끝낸 작업을 이슈로 |
 | `/harness:scaffold` | Project Repository 표준 구조 만들기 |
-| `/harness:prd` | PRD 만들기·고치기 |
-| `/harness:spec` | PRD 요구사항으로 개발 Spec 만들기·고치기 |
+| `/harness:srs` | SRS(요구사항정의서) 만들기·고치기 |
+| `/harness:spec` | SRS 요구사항으로 개발 Spec 만들기·고치기 |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받기 |
 | `/harness:atc` | SAP ATC 지적 실행·분류·처리(`env/adt-tiers.yaml` 이 있는 Project Repository 에서) |
 

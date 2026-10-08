@@ -27,15 +27,15 @@ from checker.ssot_approval import (
 
 
 def test_touches_ssot_는_docs_ssot_아래만_본다():
-    assert touches_ssot(["docs/ssot/PRD.md"]) is True
-    assert touches_ssot(["README.md", "docs/ssot/PRD.md"]) is True
+    assert touches_ssot(["docs/ssot/SRS.md"]) is True
+    assert touches_ssot(["README.md", "docs/ssot/SRS.md"]) is True
     assert touches_ssot(["docs/spec/DEV-001.md"]) is False
     assert touches_ssot([]) is False
 
 
 def test_touches_ssot_는_역슬래시_경로도_본다():
     # Windows 러너나 gh api 응답에 역슬래시가 섞여 들어올 가능성을 대비한다.
-    assert touches_ssot(["docs\\ssot\\PRD.md"]) is True
+    assert touches_ssot(["docs\\ssot\\SRS.md"]) is True
 
 
 # --- load_approvers ----------------------------------------------------------
@@ -334,7 +334,7 @@ def test_decide_pr_는_fetch_함수들을_조합한다(monkeypatch):
         "fetch_pr_info",
         lambda c, r, n: {"user": {"login": "author"}, "base": {"ref": "main"}, "head": {"sha": "head1"}},
     )
-    monkeypatch.setattr(mod, "fetch_pr_files", lambda c, r, n: ["docs/ssot/PRD.md"])
+    monkeypatch.setattr(mod, "fetch_pr_files", lambda c, r, n: ["docs/ssot/SRS.md"])
     monkeypatch.setattr(
         mod,
         "fetch_pr_reviews",
@@ -363,7 +363,7 @@ def test_decide_pr_는_ssot를_안_건드리면_리뷰를_보지_않는다(monke
 
 def test_decide_commit_는_merge된_pr이_없으면_커밋_파일을_본다(monkeypatch):
     monkeypatch.setattr(mod, "fetch_commit_associated_prs", lambda c, r, s: [])
-    monkeypatch.setattr(mod, "fetch_commit_files", lambda c, r, s: ["docs/ssot/PRD.md"])
+    monkeypatch.setattr(mod, "fetch_commit_files", lambda c, r, s: ["docs/ssot/SRS.md"])
 
     result = mod.decide_commit(mod.GhClient(), "owner/repo", "sha")
     assert result["approved"] is False
@@ -407,7 +407,7 @@ def _client_for_pr(reviews, head_sha="bbbbbbb1111"):
                 "base": {"ref": "main"},
                 "head": {"sha": head_sha},
             },
-            "repos/o/r/pulls/7/files": [{"filename": "docs/ssot/PRD.md"}],
+            "repos/o/r/pulls/7/files": [{"filename": "docs/ssot/SRS.md"}],
             "repos/o/r/pulls/7/reviews": reviews,
             "repos/o/r/contents/.github/ssot-approvers?ref=main": None,
         }

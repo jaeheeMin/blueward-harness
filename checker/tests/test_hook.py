@@ -47,7 +47,7 @@ SSOT_RULES = r"""관할: "docs/ssot/**"
 
 규칙:
   - 종류: filename
-    패턴: '^PRD\.md$'
+    패턴: '^SRS\.md$'
 """
 
 
@@ -227,18 +227,18 @@ def test_입력을_해석하지_못하면_통과시키지_않는다(installed_ho
 
 
 def test_한글이_겹친_경로에서도_설치본이_파일명_위반을_막는다(installed_hook, ssot_standards_root):
-    target = ssot_standards_root / "docs" / "ssot" / "PRD_v2.md"
+    target = ssot_standards_root / "docs" / "ssot" / "SRS_v2.md"
     code, out = run_hook_bytes(
-        installed_hook, _write_payload(target, "# PRD\n"), str(ENGINE_ROOT)
+        installed_hook, _write_payload(target, "# SRS\n"), str(ENGINE_ROOT)
     )
     assert decision(out) == "deny"
     assert "파일 이름이 정해진 형식과 다르다" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_한글이_겹친_경로에서도_설치본이_규칙에_맞는_파일은_통과시킨다(installed_hook, ssot_standards_root):
-    target = ssot_standards_root / "docs" / "ssot" / "PRD.md"
+    target = ssot_standards_root / "docs" / "ssot" / "SRS.md"
     code, out = run_hook_bytes(
-        installed_hook, _write_payload(target, "# PRD\n"), str(ENGINE_ROOT)
+        installed_hook, _write_payload(target, "# SRS\n"), str(ENGINE_ROOT)
     )
     assert code == 0 and out is None
 
@@ -258,9 +258,9 @@ def test_경로가_깨져_들어오면_검사_불능으로_거절한다(installe
     진짜 관할 밖(기준 폴더가 없는 경우, 위 테스트들에도 있다)과는 받는 처분이
     달라야 한다 — 이쪽은 allow 가 아니라 deny 다(CLAUDE.md 원칙 7).
     """
-    target = tmp_path / "��" / "docs" / "PRD.md"
+    target = tmp_path / "��" / "docs" / "SRS.md"
     code, out = run_hook_bytes(
-        installed_hook, _write_payload(target, "# PRD\n"), str(ENGINE_ROOT)
+        installed_hook, _write_payload(target, "# SRS\n"), str(ENGINE_ROOT)
     )
     assert decision(out) == "deny"
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]

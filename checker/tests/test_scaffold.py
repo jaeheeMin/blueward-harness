@@ -45,10 +45,10 @@ _PLACEHOLDER = re.compile(r"(?<!\$)\{\{")
 
 EXPECTED_FILES = {
     "CLAUDE.md",
-    "docs/ssot/PRD.md",
+    "docs/ssot/SRS.md",
     "docs/spec/.gitkeep",
     "templates/README.md",
-    "templates/harness/PRD.md",
+    "templates/harness/SRS.md",
     "templates/harness/spec.md",
     "templates/harness/audit-change.md",
     "templates/harness/audit-ledger.md",
@@ -96,8 +96,8 @@ def test_예상하는_파일을_모두_만들고_치환한다(tmp_path: Path):
 
     claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     assert "블루워드 테스트프로젝트" in claude_md
-    prd = (tmp_path / "docs" / "ssot" / "PRD.md").read_text(encoding="utf-8")
-    assert "테스트프로젝트 PRD" in prd
+    srs = (tmp_path / "docs" / "ssot" / "SRS.md").read_text(encoding="utf-8")
+    assert "테스트프로젝트 SRS" in srs
 
     settings_path = tmp_path / ".claude" / "settings.json"
     settings_text = settings_path.read_text(encoding="utf-8")
@@ -376,19 +376,19 @@ def _run_auto(capsys, *paths: Path) -> tuple[int, dict]:
 
 def test_스캐폴딩한_구조를_검사기가_그대로_읽는다(tmp_path: Path, capsys):
     scaffold(tmp_path, "고객사", "프로젝트", False)
-    prd = tmp_path / "docs" / "ssot" / "PRD.md"
+    srs = tmp_path / "docs" / "ssot" / "SRS.md"
 
-    code, out = _run_auto(capsys, prd)
+    code, out = _run_auto(capsys, srs)
     assert code == EXIT_PASS
     assert out["summary"]["scoped"] == 1
     assert out["summary"]["passed"] == 1
     assert out["summary"]["violations"] == 0
 
     # 이름을 바꾼 버전은 rules/ssot.yaml 의 filename 규칙을 어긴다.
-    prd_v2 = prd.parent / "PRD_v2.md"
-    prd_v2.write_text(prd.read_text(encoding="utf-8"), encoding="utf-8")
+    srs_v2 = srs.parent / "SRS_v2.md"
+    srs_v2.write_text(srs.read_text(encoding="utf-8"), encoding="utf-8")
 
-    code, out = _run_auto(capsys, prd_v2)
+    code, out = _run_auto(capsys, srs_v2)
     assert code == EXIT_VIOLATION
     assert out["summary"]["violations"] == 1
     assert out["files"][0]["violations"][0]["rule"] == "filename"

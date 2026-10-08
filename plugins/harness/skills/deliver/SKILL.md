@@ -96,8 +96,8 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 
 관련 개발 건이 있으면 `## 진행 원장` 절을 추가해 그 개발 건이 등록된 진행
 원장 파일과 DEV 번호를 링크한다(예: `[DEV-003](audit/ledger/구매요청승인.md)`).
-`docs/ssot/` 아래 파일이 이번 변경에 포함되면(PRD 변경) `## Review notes` 에
-"PRD 변경: 사람 승인이 필요하다" 한 줄을 넣고, 이 브랜치에서 추가한
+`docs/ssot/` 아래 파일이 이번 변경에 포함되면(SRS 변경) `## Review notes` 에
+"SRS 변경: 사람 승인이 필요하다" 한 줄을 넣고, 이 브랜치에서 추가한
 `audit/changes/` 변경 기록 링크를 함께 적는다.
 
 ## 원격이 없을 때
