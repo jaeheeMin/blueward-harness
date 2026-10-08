@@ -25,7 +25,7 @@ Spec 칸에 그 파일 링크를 적는다 — 원장의 ID 로 Spec 을 곧장 
 
 ## 누가 쓰나
 
-`/harness:prd`, `/harness:start`, `/harness:spec`, `/harness:deliver` Skill 이
+`/harness:srs`, `/harness:start`, `/harness:spec`, `/harness:deliver` Skill 이
 작업하면서 이 형식으로 기록을 남긴다. 사람이 직접 적어도 된다.
 
 진행 원장의 개발 건 줄은 이렇게 채워진다.

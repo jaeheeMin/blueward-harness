@@ -1,4 +1,4 @@
-"""PRD(`docs/ssot/`) 를 바꾼 PR 이 승인받았는지 판정한다(#49).
+"""SRS(`docs/ssot/`) 를 바꾼 PR 이 승인받았는지 판정한다(#49).
 
 Project Repository 는 개인 무료 계정의 비공개 저장소라 브랜치 보호·ruleset·
 CODEOWNERS 를 쓸 수 없다. 무료 요금제에서는 쓰기 권한자가 화면에서 그냥
@@ -359,13 +359,13 @@ def decide_human_merge(client: GhClient, repo: str, pr: int) -> dict:
 
 
 def decide_commit(client: GhClient, repo: str, sha: str) -> dict:
-    """merge 뒤(push) 이 커밋이 승인 없이 PRD 를 바꿨는지 판정한다."""
+    """merge 뒤(push) 이 커밋이 승인 없이 SRS 를 바꿨는지 판정한다."""
     prs = fetch_commit_associated_prs(client, repo, sha)
     merged_prs = [p for p in prs if p.get("merged_at")]
 
     if not merged_prs:
         # 이 커밋과 연관된 merge PR 이 없다 — PR 없이 main 에 직접 push 됐을 수
-        # 있다. 그 경우 PR 승인 절차 자체를 거치지 않았으므로, PRD 를 바꿨다면
+        # 있다. 그 경우 PR 승인 절차 자체를 거치지 않았으므로, SRS 를 바꿨다면
         # 곧바로 승인 없음으로 본다.
         files = fetch_commit_files(client, repo, sha)
         if touches_ssot(files):

@@ -86,7 +86,7 @@ CONFIG_PATH = ".github/risk-gate.yaml"
 # workflow 의 게이트 job 이름과 같아야 한다. caller 의 job id 가 이 값이라 check run 이름이
 # `risk-gate / check` 처럼 나온다. 이름이 이 값(또는 `이 값 / ...`)인 check 는 세지 않는다.
 OWN_CHECK_NAME = "risk-gate"
-# 같은 PR 에서 함께 도는 보조 검사. `ssot-approval` 은 PRD 승인 여부를, `alert` 는
+# 같은 PR 에서 함께 도는 보조 검사. `ssot-approval` 은 SRS 승인 여부를, `alert` 는
 # human-merge-alert 의 알림 job 이다. 둘은 이 게이트의 사유(경로·승인)와 겹치거나 검사
 # 결과가 아니라 알림이므로 "검사 실패" 로 세지 않는다.
 EXCLUDED_CHECK_GROUPS = frozenset({OWN_CHECK_NAME, "ssot-approval"})

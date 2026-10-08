@@ -18,7 +18,7 @@ checker/
     external_traces.py    다른 거래처 흔적이 남아 있는지 (오피스 전체)
   ooxml.py          오피스 파일의 본문이 아닌 자리를 읽는다
   cleaner.py        흔적을 걷어낸 새 파일을 만든다 (사람이 직접 부른다)
-  ssot_approval.py  PRD(docs/ssot/) 변경 PR 의 승인 여부를 판정한다(#49).
+  ssot_approval.py  SRS(docs/ssot/) 변경 PR 의 승인 여부를 판정한다(#49).
                     Actions(`scripts/ssot_approval.py` 가 감싼다)와 harness
                     훅(`uvx` 로 `python -m checker.ssot_approval` 을 부른다)이
                     같은 판정 로직을 쓴다

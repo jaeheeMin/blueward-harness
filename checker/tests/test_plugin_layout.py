@@ -143,7 +143,7 @@ def test_mcp_source_guard_매처는_다루지_않는_도구를_잡지_않는다(
     assert not re.fullmatch(matcher, f"mcp__abap-adt-z5u__{tool_name}")
 
 
-@pytest.mark.parametrize("name", ["start", "deliver", "wrapup", "scaffold", "prd", "spec", "sync"])
+@pytest.mark.parametrize("name", ["start", "deliver", "wrapup", "scaffold", "srs", "spec", "sync"])
 def test_스킬이_있고_frontmatter_에_name_이_있다(name):
     skill_md = PLUGIN_ROOT / "skills" / name / "SKILL.md"
     assert skill_md.is_file(), f"{skill_md} 가 없다"
@@ -154,7 +154,7 @@ def test_스킬이_있고_frontmatter_에_name_이_있다(name):
     assert re.search(r"^name:\s*\S+", frontmatter, re.MULTILINE), "name: 이 없다"
 
 
-@pytest.mark.parametrize("name", ["start", "deliver", "wrapup", "prd", "spec", "sync"])
+@pytest.mark.parametrize("name", ["start", "deliver", "wrapup", "srs", "spec", "sync"])
 def test_스킬이_저장소_루트_기준_규칙_경로를_쓰지_않는다(name):
     """설치된 플러그인은 저장소 루트가 아니므로 `rules/xxx.md` 처럼 곧바로 쓴
     경로는 항상 깨진다. 스킬의 base directory 에서 상대 경로(`../../rules/`)로
@@ -299,7 +299,7 @@ def test_gh_pr_가_아닌_명령은_영향을_받지_않는다():
 #
 # uv 가 캐시 없이 엔진을 새로 빌드하면 "Building doc-guard-checker ...",
 # "Installed N packages ..." 같은 진행 로그를 stderr 로 낸다. 예전에는 훅이
-# `2>&1` 로 stdout 과 합쳐 받아, 판정 자체는 정상(종료코드 0, PRD 변경 없음)인데도
+# `2>&1` 로 stdout 과 합쳐 받아, 판정 자체는 정상(종료코드 0, SRS 변경 없음)인데도
 # 그 로그가 JSON 앞에 섞여 jq 해석이 실패해 "확인하지 못해 merge 를 막습니다" 로
 # 잘못 거절했다. 여기서는 진짜 uvx 를 부르지 않고, PATH 맨 앞에 그 상황을 흉내
 # 내는 가짜 uvx 스크립트를 두어 재현한다 — 네트워크나 실제 엔진 빌드가 필요 없다.
@@ -308,7 +308,7 @@ def test_gh_pr_가_아닌_명령은_영향을_받지_않는다():
 def _fake_uvx_prelude() -> str:
     """가짜 uvx 스크립트 첫머리. 호출을 기록하고 merge_command 는 진짜 모듈로 보낸다(#101).
 
-    merge 가드는 uvx 를 세 종류로 부른다(명령 분해, PRD 승인, 사람 병합 경로).
+    merge 가드는 uvx 를 세 종류로 부른다(명령 분해, SRS 승인, 사람 병합 경로).
     분해 호출만 진짜 checker.merge_command 로 넘겨 훅과의 연동까지 실제로
     확인하고, 나머지는 각 가짜가 미리 정한 답을 낸다. PYTHONPATH 는
     `_run_guard_with_fake_uvx` 가 준다.
@@ -376,7 +376,7 @@ _BUILD_LOG_STDERR = (
                      reason="base64 가 없으면 가짜 uvx 출력을 안전하게 담을 수 없다")
 def test_엔진_빌드_로그가_stderr에_섞여도_승인_판정을_읽는다(fake_uvx):
     """#63: uv 가 새로 빌드할 때의 stderr 로그가 JSON 해석을 방해하면 안 된다."""
-    stdout_json = json.dumps({"touches_ssot": False, "approved": True, "reason": "PRD 변경 없음"})
+    stdout_json = json.dumps({"touches_ssot": False, "approved": True, "reason": "SRS 변경 없음"})
     bin_dir = fake_uvx(stdout_json, _BUILD_LOG_STDERR, 0)
     code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
     assert code == 0
@@ -437,7 +437,7 @@ def test_판정_출력이_json이_아니면_여전히_거절한다(fake_uvx):
 
 # --- 병합 가드: 사람이 직접 병합해야 하는 경로(#104) ---------------------
 #
-# 훅은 uvx 를 두 번 부른다(PRD 승인, 사람 병합 경로). 가짜 uvx 가 인자를 보고
+# 훅은 uvx 를 두 번 부른다(SRS 승인, 사람 병합 경로). 가짜 uvx 가 인자를 보고
 # 서브명령별로 다른 답을 내게 해서 두 번째 검사만 따로 확인한다.
 
 
@@ -445,7 +445,7 @@ def _make_dispatch_uvx(tmp_path: Path, human_stdout: str, human_rc: int) -> Path
     bin_dir = tmp_path / "dispatch-bin"
     bin_dir.mkdir()
     ssot_b64 = base64.b64encode(
-        json.dumps({"touches_ssot": False, "approved": True, "reason": "PRD 변경 없음"}).encode("utf-8")
+        json.dumps({"touches_ssot": False, "approved": True, "reason": "SRS 변경 없음"}).encode("utf-8")
     ).decode("ascii")
     human_b64 = base64.b64encode(human_stdout.encode("utf-8")).decode("ascii")
     script = bin_dir / "uvx"
@@ -745,7 +745,7 @@ def test_두_merge_중_두번째_PR_이_빨간불이면_그_PR_을_짚어_거부
 
 # --- 병합 가드: PR 위험도에 따른 승인 요구(#102) -----------------------------
 #
-# 훅은 PRD 승인·사람 병합 경로 검사 뒤에 `checker.risk_gate check-pr` 를 부른다. 가짜 uvx 가
+# 훅은 SRS 승인·사람 병합 경로 검사 뒤에 `checker.risk_gate check-pr` 를 부른다. 가짜 uvx 가
 # risk_gate 호출에만 정해 둔 답을 내고 나머지(승인·사람 경로)는 통과로 답한다.
 
 
@@ -754,7 +754,7 @@ def _make_risk_uvx(tmp_path: Path, risk_stdout: str, risk_rc: int) -> Path:
     bin_dir.mkdir()
     risk_b64 = base64.b64encode(risk_stdout.encode("utf-8")).decode("ascii")
     ssot_b64 = base64.b64encode(
-        json.dumps({"touches_ssot": False, "approved": True, "reason": "PRD 변경 없음"}).encode("utf-8")
+        json.dumps({"touches_ssot": False, "approved": True, "reason": "SRS 변경 없음"}).encode("utf-8")
     ).decode("ascii")
     human_b64 = base64.b64encode(
         json.dumps({"requires_human": False, "paths": [], "pr": 1, "repo": "x/y"}).encode("utf-8")

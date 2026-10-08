@@ -53,7 +53,7 @@ if ! command -v jq >/dev/null 2>&1; then
   # 판단할 수 없을 때 통과시키지 않는다. 통과시키면 정확히 이 상황에서
   # 보호가 사라진다. 다만 검사 대상이 git 명령이나 `gh pr merge` 이므로
   # 그 밖의 명령은 막지 않는다. `gh pr merge` 도 여기 넣은 이유는 아래
-  # PRD 승인 검사가 이 훅 안에서 jq 로 결과를 읽기 때문이다(#49).
+  # SRS 승인 검사가 이 훅 안에서 jq 로 결과를 읽기 때문이다(#49).
   case "$input" in
     *git*|*"pr merge"*)
       deny "jq 가 없어 git/gh 명령을 검사하지 못했습니다. 검사할 수 없는 상태로 통과시키지 않습니다. 다음: 사람이 할 일 - PowerShell 에서 winget install --id jqlang.jq -e 를 실행해 jq 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오(macOS 는 brew install jq)."
@@ -131,7 +131,7 @@ git_subcommand() {
 
 sub="$(git_subcommand "$cmd")"
 
-# 0) gh pr merge 대상 PR 이 PRD(docs/ssot/) 를 바꿨는데 승인이 없으면 거부한다
+# 0) gh pr merge 대상 PR 이 SRS(docs/ssot/) 를 바꿨는데 승인이 없으면 거부한다
 #    (#49). 별도 훅 프로세스를 새로 두지 않고 이 훅에 얹는 이유는, 이미
 #    Bash|PowerShell 을 지켜보는 훅이 있는데 같은 이벤트에 두 번째 훅
 #    프로세스를 또 띄우면 같은 명령을 두 번 파싱하고 두 배로 느려지기
@@ -182,7 +182,7 @@ check_one_merge() {
   esac
 
   if ! command -v gh >/dev/null 2>&1; then
-    deny "gh 가 없어 이 PR 이 PRD(docs/ssot) 를 바꿨는지, 승인이 있는지 확인할 수 없습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_gh"
+    deny "gh 가 없어 이 PR 이 SRS(docs/ssot) 를 바꿨는지, 승인이 있는지 확인할 수 없습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_gh"
   fi
 
   # 번호를 못 얻었으면(현재 브랜치나 브랜치 이름으로 지정한 경우) gh pr view
@@ -205,7 +205,7 @@ check_one_merge() {
   fi
 
   if [ -z "$repo" ] || [ -z "$pr_number" ]; then
-    deny "gh pr merge 의 대상 PR 을 확인하지 못해 PRD 승인 여부를 판정할 수 없습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. 다음: Claude 가 PR 번호를 붙여(예: gh pr merge 123) 다시 실행하십시오. 그래도 안 되면 gh auth status 로 로그인 상태를 확인하고, 로그인 안 됨이면 사람이 gh auth login 을 실행하십시오."
+    deny "gh pr merge 의 대상 PR 을 확인하지 못해 SRS 승인 여부를 판정할 수 없습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. 다음: Claude 가 PR 번호를 붙여(예: gh pr merge 123) 다시 실행하십시오. 그래도 안 되면 gh auth status 로 로그인 상태를 확인하고, 로그인 안 됨이면 사람이 gh auth login 을 실행하십시오."
   fi
 
   # -1) 대상 PR 의 검사(status checks)가 실패했거나 아직 진행 중이면 거부한다(#120).
@@ -256,7 +256,7 @@ check_one_merge() {
   fi
 
   if ! command -v uvx >/dev/null 2>&1; then
-    deny "uvx 가 없어 PRD 승인 여부를 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_uv"
+    deny "uvx 가 없어 SRS 승인 여부를 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_uv"
   fi
 
   # stdout 과 stderr 를 나눠 받는다(#63). uv 가 엔진을 캐시 없이 새로 빌드할 때
@@ -267,7 +267,7 @@ check_one_merge() {
   # 이제 JSON 해석은 stdout 만으로 하고, stderr 는 실패했을 때 사람에게 보여줄
   # "자세히" 로만 쓴다.
   ssot_err_file="$(mktemp 2>/dev/null)" || {
-    deny "임시 파일을 만들지 못해 PR #$pr_number 의 PRD 승인 여부를 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
+    deny "임시 파일을 만들지 못해 PR #$pr_number 의 SRS 승인 여부를 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
   }
   trap 'rm -f "$ssot_err_file"' EXIT
 
@@ -289,17 +289,17 @@ check_one_merge() {
   fi
 
   if [ "$ssot_json_ok" -eq 1 ] && [ "$ssot_rc" -eq 0 ]; then
-    : # PRD 를 안 바꿨거나 이미 승인됐다. 통과시키고 나머지 검사를 계속한다.
+    : # SRS 를 안 바꿨거나 이미 승인됐다. 통과시키고 나머지 검사를 계속한다.
   elif [ "$ssot_json_ok" -eq 1 ] && [ "$ssot_rc" -eq 1 ]; then
     reason="$(printf '%s' "$ssot_out" | jq -r '.reason // empty' 2>/dev/null)" || true
     # 승인은 했지만 그 뒤 새 커밋이 올라온 경우(#119)의 사유에는 이미 "다음:" 이
     # 들어 있다. 일반 안내를 또 붙여 "다음:" 이 겹치지 않게 한다.
     case "$reason" in
       *"다음:"*)
-        deny "PRD(docs/ssot) 를 바꾼 PR #$pr_number 인데 현재 최신 커밋에 대한 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 그 뒤 다음: Approve 가 최신 커밋에 달리면 Claude 가 gh pr merge 를 다시 실행합니다."
+        deny "SRS(docs/ssot) 를 바꾼 PR #$pr_number 인데 현재 최신 커밋에 대한 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 그 뒤 다음: Approve 가 최신 커밋에 달리면 Claude 가 gh pr merge 를 다시 실행합니다."
         ;;
       *)
-        deny "PRD(docs/ssot) 를 바꾼 PR #$pr_number 인데 작성자가 아닌 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 다음: 사람이 할 일 - .github/ssot-approvers 에 적힌 승인자(PR 작성자가 아닌 사람)에게 이 PR 의 리뷰에서 Approve 를 요청하십시오. Approve 가 달린 뒤 Claude 가 gh pr merge 를 다시 실행합니다."
+        deny "SRS(docs/ssot) 를 바꾼 PR #$pr_number 인데 작성자가 아닌 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 다음: 사람이 할 일 - .github/ssot-approvers 에 적힌 승인자(PR 작성자가 아닌 사람)에게 이 PR 의 리뷰에서 Approve 를 요청하십시오. Approve 가 달린 뒤 Claude 가 gh pr merge 를 다시 실행합니다."
         ;;
     esac
   else
@@ -317,7 +317,7 @@ $ssot_err"
       fi
     fi
     detail="$(printf '%s' "$detail_raw" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
-    deny "PR #$pr_number 의 PRD 승인 여부를 확인하지 못해 merge 를 막습니다(종료코드 $ssot_rc). 확인되지 않는 상태로 통과시키지 않습니다. $next_retry 자세히: $detail"
+    deny "PR #$pr_number 의 SRS 승인 여부를 확인하지 못해 merge 를 막습니다(종료코드 $ssot_rc). 확인되지 않는 상태로 통과시키지 않습니다. $next_retry 자세히: $detail"
   fi
 
   # 0-1) Plugin·엔진처럼 사람이 직접 merge 해야 하는 경로(.github/human-merge-paths)
@@ -416,7 +416,7 @@ $rg_err"
 case "$cmd" in
   *"pr merge"*)
     if ! command -v uvx >/dev/null 2>&1; then
-      deny "uvx 가 없어 이 명령이 gh pr merge 인지, PRD 승인이 있는지 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_uv"
+      deny "uvx 가 없어 이 명령이 gh pr merge 인지, SRS 승인이 있는지 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_uv"
     fi
     mc_err_file="$(mktemp 2>/dev/null)" || {
       deny "임시 파일을 만들지 못해 이 명령이 gh pr merge 인지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."

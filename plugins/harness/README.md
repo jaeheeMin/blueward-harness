@@ -29,7 +29,7 @@ plugins/harness/
     deliver/SKILL.md           /harness:deliver — 커밋·동기화·푸시·PR
     wrapup/SKILL.md            /harness:wrapup — 남은 작업의 이슈화
     scaffold/                  /harness:scaffold — Project Repository 표준 구조 생성
-    prd/SKILL.md               /harness:prd — PRD 작성·수정
+    srs/SKILL.md               /harness:srs — SRS 작성·수정
     spec/SKILL.md              /harness:spec — 개발 Spec 작성·수정(양식 지도: form-map.md)
     sync/SKILL.md              /harness:sync — 원격 최신 상태를 로컬 브랜치로 당겨받기
     atc/SKILL.md               /harness:atc — SAP ATC 지적 실행·분류·처리
@@ -80,8 +80,8 @@ plugins/harness/
 | `/harness:deliver` | 작업을 마무리한다. 커밋·동기화·푸시·PR 생성을 한 번에 |
 | `/harness:wrapup` | 세션에서 끝내지 못한 작업을 이슈로 남긴다 |
 | `/harness:scaffold` | 새 Project Repository 에 표준 구조를 만든다 |
-| `/harness:prd` | PRD 를 새로 쓰거나, 요구사항이 바뀌었을 때 고친다 |
-| `/harness:spec` | PRD 요구사항으로 개발 Spec 을 만들거나, PRD 가 바뀌어 고친다 |
+| `/harness:srs` | SRS(요구사항정의서)를 새로 쓰거나, 요구사항이 바뀌었을 때 고친다 |
+| `/harness:spec` | SRS 요구사항으로 개발 Spec 을 만들거나, SRS 가 바뀌어 고친다 |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다. 지금 세션의 플러그인 버전이 main 보다 낮으면 `/reload-plugins`·Update now 를 안내한다(#203) |
 | `/harness:atc` | SAP ATC 지적을 돌려 자동·확인 후·수동으로 나눠 처리하고 재실행해 증감을 보고한다(`env/adt-tiers.yaml` 이 있는 Project Repository 에서만. variant 는 서버 항목의 `atc_variant`) |
 
@@ -104,7 +104,7 @@ plugins/harness/
 | 훅 | 시점 | 하는 일 |
 |---|---|---|
 | `pre_write_guard.py` | `PreToolUse` (Write\|Edit) | 문서가 템플릿을 벗어나면 저장을 막는다(doc-guard). 코드(`.abap`, `.js`/`.ts`, `.cds`, `.asbdef`)는 공통 개발 규칙 CR-001·CR-002·CR-003·CR-007 을 어기면 막는다(#54, #72, #81. BDEF 는 CR-001 만, CR-003·CR-007 은 ABAP·JS/TS 만). 저장소 루트 `src/` 아래에 쓸 때는 활성화 안 된 ABAP 오브젝트가 있으면 막는다(활성화 관문, #190, 아래 절) |
-| `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 PRD 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120). `git commit` 은 staged 변경을 gitleaks 로 검사해 비밀값이 있으면 막는다(#170, 아래 "비밀정보 검사" 참고). `git push` 는 080 에 쓴 ABAP 오브젝트 중 활성화 안 된 것이 있어도 막는다(활성화 관문, #190, 아래 절) |
+| `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 SRS 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120). `git commit` 은 staged 변경을 gitleaks 로 검사해 비밀값이 있으면 막는다(#170, 아래 "비밀정보 검사" 참고). `git push` 는 080 에 쓴 ABAP 오브젝트 중 활성화 안 된 것이 있어도 막는다(활성화 관문, #190, 아래 절) |
 | `mcp_source_guard.py` | `PreToolUse` (SAP ADT MCP 도구 19개) | MCP 로 SAP 에 쓰거나 이름을 붙이는 경로의 코드 규칙 CR-001·CR-002·CR-003·CR-007 검사(#60, #61)와, `env/adt-tiers.yaml` 기준 테넌트별 쓰기 차단·데이터 추출 되묻기(#148). 아래 "테넌트별 쓰기 차단" 참고 |
 | `mcp_activation_tracker.py` | `PostToolUse` (SAP ADT MCP 도구 6개: `setObjectSource`·`createObject`·`deleteObject`·`activateObjects`·`activateByName`·`inactiveObjects`) | ADT MCP 로 쓴 ABAP 오브젝트와 활성화 결과를 `.git` 아래 기록 파일에 남긴다(#190, 아래 절). 기록하지 못하면 표식 파일을 남기고 exit 2 로 알린다 |
 | `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고 지난 세션에서 남은 경고를 전한다. upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리). 저장소 안(꼭대기에서 3단계까지)에 `templates/` 와 `rules/` 를 함께 가진 폴더가 없으면 `/harness:scaffold` 를 안내한다(#128, 자동 실행은 하지 않는다. 플러그인 저장소(`.claude-plugin/marketplace.json` 이 꼭대기에 있다)와 git 저장소가 아닌 곳은 말하지 않고, `HARNESS_NO_SCAFFOLD_HINT=1` 로 끈다) |
@@ -299,7 +299,7 @@ Project Repository 의 CLAUDE.md 에 짧게 적어 둬야 세션이 매번 상�
 ## Skill: /harness:scaffold
 
 새 고객사 Project Repository 를 처음 만들었을 때, 검사기가 기대하는 표준
-구조 — 저장소 루트의 `templates/` 와 `rules/`, `docs/ssot/PRD.md`,
+구조 — 저장소 루트의 `templates/` 와 `rules/`, `docs/ssot/SRS.md`,
 `conventions/`, `audit/`, `env/`, 그리고 PR·main 커밋마다 doc-guard 를
 부르는 `.github/workflows/doc-guard.yml` — 를 한 번에 만들어 준다.
 `.github/workflows/ai-review.yml` 은 위험도가 낮은 PR 에만 Claude AI 리뷰를 돌리는
@@ -378,7 +378,7 @@ PR 에서 막혀도 원격으로 올리는 순간 비밀값은 이미 GitHub 에
 원장)의 템플릿과 doc-guard 규칙도 함께 만든다(#43). 변경 기록은
 `YYYYMMDD-<요약>.md` 로 기록 하나에 파일 하나를 써 여러 사람이 동시에
 기록해도 PR 이 충돌하지 않게 하고, 진행 원장은 프로그램 하나에 파일 하나로
-개발 건의 진행 상태를 표로 담는다. `/harness:prd` · `/harness:start` ·
+개발 건의 진행 상태를 표로 담는다. `/harness:srs` · `/harness:start` ·
 `/harness:spec` · `/harness:deliver` Skill 이 이 형식으로 기록을 남기고, 사람이
 직접 적어도 된다(#173: feat·fix 작업을 start 하면 원장에 개발 건 줄이 `진행` 으로
 생기고 Spec 칸은 `-` 다. spec 이 같은 번호로 Spec 칸을 채우고, deliver 가 `리뷰`
@@ -386,9 +386,9 @@ PR 에서 막혀도 원격으로 올리는 순간 비밀값은 이미 GitHub 에
 `rules/audit-changes.yaml` 과 `rules/audit-ledger.yaml` 이 doc-guard 로
 검사한다.
 
-## PRD 변경 승인(#49)
+## SRS 변경 승인(#49)
 
-`docs/ssot/`(PRD) 를 바꾼 PR 은 작성자가 아닌 사람의 Approve 가 있어야 한다.
+`docs/ssot/`(SRS) 를 바꾼 PR 은 작성자가 아닌 사람의 Approve 가 있어야 한다.
 Project Repository 는 개인 무료 계정의 비공개 저장소라 브랜치 보호·ruleset·
 CODEOWNERS 를 강제할 수 없으므로(무료 요금제 한계), 이 규칙은 "막는다" 가
 아니라 "승인 없이 넘어가면 반드시 드러나고 기록에 남는다" 로 세 겹을 쌓는다.
@@ -398,11 +398,11 @@ CODEOWNERS 를 강제할 수 없으므로(무료 요금제 한계), 이 규칙�
 1. **PR 검사** — `.github/workflows/ssot-approval.yml`(`/harness:scaffold`
    가 만든다)이 `pull_request` 와 `pull_request_review` 마다 판정하고, 승인이
    없으면 job 을 실패시키고 PR 코멘트로 사유를 알린다.
-2. **merge 뒤 감지** — 같은 워크플로가 `push` 마다 그 커밋의 PR 을 찾아, PRD
+2. **merge 뒤 감지** — 같은 워크플로가 `push` 마다 그 커밋의 PR 을 찾아, SRS
    를 바꿨는데 승인이 없었으면 이슈를 연다. PR 없이 main 에 직접 push 된
    경우도 잡는다.
 3. **harness 훅** — `pre-bash-git-guard.sh` 가 `gh pr merge` 명령을 가로채,
-   대상 PR 이 PRD 를 바꿨는데 승인이 없으면 거부한다. 판정 자체를 할 수
+   대상 PR 이 SRS 를 바꿨는데 승인이 없으면 거부한다. 판정 자체를 할 수
    없으면(네트워크 없음, `gh`·`uvx` 없음) 통과가 아니라 거부로 답한다
    (CLAUDE.md 원칙 7).
 

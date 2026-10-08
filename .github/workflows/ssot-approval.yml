@@ -1,6 +1,6 @@
 # Project Repository 가 가져다 쓰는 재사용 워크플로(#49).
 #
-# docs/ssot/ (PRD) 를 바꾼 PR 은 작성자가 아닌 사람의 Approve 가 있어야 한다.
+# docs/ssot/ (SRS) 를 바꾼 PR 은 작성자가 아닌 사람의 Approve 가 있어야 한다.
 # Project Repository 는 개인 무료 계정의 비공개 저장소라 브랜치 보호·ruleset·
 # CODEOWNERS 를 강제할 수 없다(public-cloud 에서 403 확인) — 무료 요금제는
 # 쓰기 권한자가 화면에서 그냥 merge 하는 것을 막지 못한다. 그래서 이 워크플로는
@@ -19,7 +19,7 @@
 #
 # 판정 불가(네트워크, gh api 오류 등)는 통과도 위반도 아니다(CLAUDE.md 원칙
 # 7). `checker.ssot_approval` 이 종료코드 2 로 답하면 이 워크플로도 실패로
-# 답하고, 그것이 "PRD 가 잘못됐다" 가 아니라 "검사를 못 했다" 라고 분명히
+# 답하고, 그것이 "SRS 가 잘못됐다" 가 아니라 "검사를 못 했다" 라고 분명히
 # 밝힌다.
 #
 # 문서 저장소 쪽에서는 이렇게 부른다. 이 워크플로 자체는 권한을 선언하지
@@ -100,12 +100,12 @@ jobs:
               // 남으면 소음이다.
               body = null;
             } else if (code === '0') {
-              body = `${marker}\n## ssot-approval\n\n✅ PRD 변경 승인됨 (${result.reason || ''})`;
+              body = `${marker}\n## ssot-approval\n\n✅ SRS 변경 승인됨 (${result.reason || ''})`;
             } else if (code === '1') {
-              body = `${marker}\n## ssot-approval\n\n⚠️ PRD 변경 승인 필요 — docs/ssot 를 바꾼 PR 은 작성자가 아닌 승인자의 Approve 가 있어야 한다. 승인자: \`.github/ssot-approvers\` (없으면 누구든)\n\n사유: ${result.reason || '승인이 없다.'}`;
+              body = `${marker}\n## ssot-approval\n\n⚠️ SRS 변경 승인 필요 — docs/ssot 를 바꾼 PR 은 작성자가 아닌 승인자의 Approve 가 있어야 한다. 승인자: \`.github/ssot-approvers\` (없으면 누구든)\n\n사유: ${result.reason || '승인이 없다.'}`;
             } else {
               const detail = (result.reason || fs.readFileSync('error.txt', 'utf8')).slice(0, 1000);
-              body = `${marker}\n## ssot-approval\n\n⚠️ PRD 승인 검사 불능 — 이것은 이 PR 의 문제가 아니다. 저장소 관리자에게 알려야 한다.\n\n\`\`\`\n${detail}\n\`\`\``;
+              body = `${marker}\n## ssot-approval\n\n⚠️ SRS 승인 검사 불능 — 이것은 이 PR 의 문제가 아니다. 저장소 관리자에게 알려야 한다.\n\n\`\`\`\n${detail}\n\`\`\``;
             }
 
             const existing = await github.rest.issues.listComments({ owner, repo, issue_number });
@@ -129,11 +129,11 @@ jobs:
               echo "통과"
               ;;
             1)
-              echo "::error title=PRD 변경 승인 필요::docs/ssot 를 바꾼 PR 은 작성자가 아닌 승인자의 Approve 가 있어야 한다. PR 코멘트를 본다."
+              echo "::error title=SRS 변경 승인 필요::docs/ssot 를 바꾼 PR 은 작성자가 아닌 승인자의 Approve 가 있어야 한다. PR 코멘트를 본다."
               exit 1
               ;;
             *)
-              echo "::error title=PRD 승인 검사 불능::승인 여부를 확인하지 못했다(종료코드 $code). 저장소 관리자에게 알려야 한다."
+              echo "::error title=SRS 승인 검사 불능::승인 여부를 확인하지 못했다(종료코드 $code). 저장소 관리자에게 알려야 한다."
               exit 1
               ;;
           esac
@@ -187,9 +187,9 @@ jobs:
           sha_short="${GITHUB_SHA:0:7}"
           code="${{ steps.decide.outputs.exit-code }}"
           if [ "$code" = "1" ]; then
-            title="승인 없이 PRD 변경이 main 에 들어왔다: $sha_short"
+            title="승인 없이 SRS 변경이 main 에 들어왔다: $sha_short"
           else
-            title="PRD 승인 확인 불능: $sha_short"
+            title="SRS 승인 확인 불능: $sha_short"
           fi
 
           # 같은 커밋에 이미 이슈가 열려 있으면 다시 만들지 않는다.

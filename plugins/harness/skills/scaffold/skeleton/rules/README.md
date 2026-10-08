@@ -35,8 +35,8 @@
 ## harness 가 미리 넣어 둔 규칙
 
 `ssot.yaml` 외에 `audit-changes.yaml` 과 `audit-ledger.yaml` 과 `spec.yaml`
-도 이미 있다. `ssot.yaml` 은 `docs/ssot/PRD.md` 의 파일 이름과 필수 절
-(`templates/harness/PRD.md` 의 `##` 제목)을 검사하고, `audit-changes.yaml`
+도 이미 있다. `ssot.yaml` 은 `docs/ssot/SRS.md` 의 파일 이름과 필수 절
+(`templates/harness/SRS.md` 의 `##` 제목)을 검사하고, `audit-changes.yaml`
 과 `audit-ledger.yaml` 은 `audit/changes/` 와 `audit/ledger/` 에 쓰는 기록의
 파일 이름과 필수 절을 검사하고, `spec.yaml` 은 `docs/spec/` 에 쓰는 개발
 Spec 의 파일 이름(`DEV-001-<요약>.md`)과 필수 절(`templates/harness/spec.md`

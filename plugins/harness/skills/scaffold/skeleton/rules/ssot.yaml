@@ -1,8 +1,8 @@
-# PRD 는 docs/ssot/ 에 하나만 두고 이름을 고정한다. 필수 절은
-# templates/harness/PRD.md 의 `##` 제목에서 그대로 읽는다.
-템플릿: ../templates/harness/PRD.md
+# SRS 는 docs/ssot/ 에 하나만 두고 이름을 고정한다. 필수 절은
+# templates/harness/SRS.md 의 `##` 제목에서 그대로 읽는다.
+템플릿: ../templates/harness/SRS.md
 관할: "docs/ssot/**"
 규칙:
   - 종류: filename
-    패턴: '^PRD\.md$'
+    패턴: '^SRS\.md$'
   - 종류: required_sections

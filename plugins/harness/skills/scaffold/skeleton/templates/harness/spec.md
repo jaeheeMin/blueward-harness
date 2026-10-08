@@ -6,8 +6,8 @@
 
 ## 근거 요구사항
 
-이 Spec 이 구현하는 REQ 번호와 `docs/ssot/PRD.md` 링크를 적는다. 예:
-REQ-012, REQ-014 ([PRD](../ssot/PRD.md))
+이 Spec 이 구현하는 REQ 번호와 `docs/ssot/SRS.md` 링크를 적는다. 예:
+REQ-012, REQ-014 ([SRS](../ssot/SRS.md))
 
 ## 개요
 
@@ -36,4 +36,4 @@ Convention 과 Template 은 본문에 옮겨 적지 않고 링크만 적는다. 
 |---|---|---|
 |  |  |  |
 
-PRD 나 설계가 바뀌어 이 Spec 을 고칠 때마다 한 행씩 남긴다.
+SRS 나 설계가 바뀌어 이 Spec 을 고칠 때마다 한 행씩 남긴다.

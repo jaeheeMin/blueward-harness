@@ -251,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
         dest="ssot_approvers",
         default=None,
         metavar="GITHUB_ID",
-        help="docs/ssot(PRD) 변경 PR 을 승인할 수 있는 GitHub 아이디. 여러 번 줄 수 있다. "
+        help="docs/ssot(SRS) 변경 PR 을 승인할 수 있는 GitHub 아이디. 여러 번 줄 수 있다. "
         "생략하면 .github/ssot-approvers 를 비워 두고, 그러면 작성자가 아닌 누구의 "
         "승인이든 인정한다",
     )
