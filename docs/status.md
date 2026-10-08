@@ -569,6 +569,8 @@ pre-commit 훅 연결은 별도 이슈다. 테스트는 `checker/tests/test_gitl
 
 **규칙 설정이 깨졌을 때 설정 파일 수정은 허용한다(#209, 2026-10-08).** PRD→SRS 이름을 옮기다 `templates/harness/PRD.md` 를 먼저 옮기면 `rules/ssot.yaml` 이 없는 템플릿을 가리켜 엔진이 설정 오류(종료코드 2)를 내고, `pre_write_guard.py` 가 모든 Edit/Write 를 거부해 `rules/ssot.yaml` 도 못 고치는 교착이 났다(관할 안 문서 쓰기만 막히는 것이 아니라 설정 파일 쓰기도 이 경로에 걸린다). 이제 설정 오류일 때 쓰려는 파일이 기준 폴더의 `rules/` 아래 `*.yaml`·`*.yml` 이거나 `templates/` 아래 파일이면 허용하되, 조용히 통과시키지 않고 `additionalContext` 로 "규칙 설정에 오류가 있어 문서 검사를 못 하는 상태다. 설정 파일 수정이라 허용한다. 사유: …" 를 알린다. 경로는 `resolve()` 로 `..` 를 걷어낸 상대 경로로 판정하고 대소문자는 `normcase` 로 맞춘다. 그 밖의 파일은 그대로 거부하고(원칙 7), 설정이 정상일 때의 동작은 바뀌지 않는다. `/harness:srs` 옛 구조 옮기기 순서도 새 템플릿 만들기 → ssot.yaml 고치기 → 문서 옮기기 → 옛 템플릿 지우기 → 링크 수정으로 바꿔 깨진 순간 자체를 없앴다. 테스트는 `checker/tests/test_hook.py` 에 6건. Plugin version 0.10.37.
 
+**테이블·구조체 정의 소스도 쓰기 전에 검사한다(#215, 2026-10-08).** `mcp_object_source_map.json` 에 `/sap/bc/adt/ddic/tables/`·`/sap/bc/adt/ddic/structures/` 를 `.cds` 로 추가했다. 전에는 이 URL 로 `setObjectSource` 를 부르면 언어를 판별하지 못해 검사 불능으로 거절됐다. CR-001 은 CDS 스캐너가 주석(`//`, `/* */`)과 문자열(`'...'`, 어노테이션 라벨 포함)을 지운 뒤 남은 코드의 한글을 이름으로 보므로, `@EndUserText.label : '분개 업로드 요청'` 이나 `// 파일 이름` 은 통과하고 한글 필드명(`파일명 : abap.char(10);`)은 잡힌다. 테스트는 `checker/tests/test_mcp_source_guard.py` 에 추가. Plugin version 0.10.39.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.

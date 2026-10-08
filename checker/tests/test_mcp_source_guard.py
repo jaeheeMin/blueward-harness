@@ -393,3 +393,51 @@ def test_이_다섯_도구_말고_다른_mcp_도구는_관여하지_않는다(in
     payload = _create_object_payload("mcp__abap_adt__renameEvaluate", KOREAN_NAME)
     code, out = run_hook(installed_hook, payload, str(ENGINE_ROOT))
     assert code == 0 and out is None
+
+
+# --- 테이블·구조체 정의(#215): CDS 와 같은 규칙으로 검사한다 -------------------
+
+TABLE_URL = "/sap/bc/adt/ddic/tables/zmjh_je_upl/source/main"
+STRUCTURE_URL = "/sap/bc/adt/ddic/structures/zmjh_s_upl/source/main"
+
+# 실제 ABAP Cloud 테이블 소스 — 라벨·주석에만 한글이 있다.
+TABLE_SOURCE = """@EndUserText.label : '분개 업로드 요청'
+@AbapCatalog.enhancement.category : #NOT_EXTENSIBLE
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #A
+@AbapCatalog.dataMaintenance : #RESTRICTED
+define table zmjh_je_upl {
+  key client : abap.clnt not null;
+  key upload_uuid : sysuuid_x16 not null;
+  file_name : abap.char(255); // 파일 이름
+  created_by : abp_creation_user;
+}
+"""
+TABLE_SOURCE_KOREAN_FIELD = TABLE_SOURCE.replace(
+    "file_name : abap.char(255);", "파일명 : abap.char(10);"
+)
+
+
+def test_테이블_url은_cds_확장자로_판별한다(installed_hook):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("mcp_source_guard_under_test", installed_hook)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.suffix_for_url(TABLE_URL) == ".cds"
+    assert module.suffix_for_url(STRUCTURE_URL) == ".cds"
+
+
+@pytest.mark.parametrize("url", [TABLE_URL, STRUCTURE_URL])
+def test_테이블_소스는_라벨과_주석의_한글을_이름으로_보지_않고_통과시킨다(installed_hook, url):
+    code, out = run_hook(installed_hook, _payload(url, TABLE_SOURCE), str(ENGINE_ROOT))
+    assert code == 0 and out is None
+
+
+@pytest.mark.parametrize("url", [TABLE_URL, STRUCTURE_URL])
+def test_테이블_소스의_한글_필드명은_cr001로_막는다(installed_hook, url):
+    code, out = run_hook(installed_hook, _payload(url, TABLE_SOURCE_KOREAN_FIELD), str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "CR-001" in reason
+    assert "파일명" in reason
