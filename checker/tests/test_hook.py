@@ -374,3 +374,81 @@ def test_코드_엔진을_받을_수_없으면_통과가_아니라_거절한다(
     assert decision(out) == "deny"
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert "확인되지 않는 상태로 통과시키지 않습니다" in reason
+
+
+# --- 규칙 설정이 깨졌을 때 설정 파일 수정은 허용한다(#209) ---------------------------
+
+MISSING_TEMPLATE_RULES = """템플릿: ../templates/없는템플릿.md
+관할: "docs/제안서/**"
+
+규칙:
+  - 종류: required_sections
+"""
+
+
+@pytest.fixture()
+def missing_template_root(tmp_path) -> Path:
+    """규칙이 없는 템플릿을 가리키는 기준 폴더 — PRD→SRS 이름 변경 도중의 상태."""
+    root = tmp_path / "회사3"
+    _write(root / "templates" / "제안서.md", PROPOSAL_TEMPLATE)
+    _write(root / "rules" / "ssot.yaml", MISSING_TEMPLATE_RULES)
+    (root / "docs" / "제안서").mkdir(parents=True)
+    return root
+
+
+def _notice(out: dict | None) -> str:
+    assert out is not None and "permissionDecision" not in out["hookSpecificOutput"]
+    return out["hookSpecificOutput"]["additionalContext"]
+
+
+def test_설정_오류면_규칙_파일_수정은_허용하고_알린다(installed_hook, missing_template_root):
+    target = missing_template_root / "rules" / "ssot.yaml"
+    code, out = run_hook(
+        installed_hook, _write_payload(target, PROPOSAL_RULES), str(ENGINE_ROOT)
+    )
+    assert code == 0
+    notice = _notice(out)
+    assert "규칙 설정에 오류가 있어 문서 검사를 못 하는 상태" in notice
+    assert "설정 파일 수정이라 허용" in notice and "사유:" in notice
+
+
+def test_설정_오류면_templates_아래_쓰기는_허용하고_알린다(installed_hook, missing_template_root):
+    target = missing_template_root / "templates" / "SRS.md"
+    code, out = run_hook(
+        installed_hook, _write_payload(target, "# SRS\n"), str(ENGINE_ROOT)
+    )
+    assert code == 0
+    assert "설정 파일 수정이라 허용" in _notice(out)
+
+
+def test_설정_오류면_일반_문서_쓰기는_여전히_거절한다(installed_hook, missing_template_root):
+    target = missing_template_root / "docs" / "제안서" / "SRS.md"
+    code, out = run_hook(
+        installed_hook, _write_payload(target, "# SRS\n"), str(ENGINE_ROOT)
+    )
+    assert decision(out) == "deny"
+    assert "문서의 문제가 아닙니다" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_설정_오류면_상위_경로_우회로_일반_문서를_쓰는_것은_거절한다(installed_hook, missing_template_root):
+    target = missing_template_root / "rules" / ".." / "docs" / "제안서" / "x.md"
+    code, out = run_hook(
+        installed_hook, _write_payload(target, "# x\n"), str(ENGINE_ROOT)
+    )
+    assert decision(out) == "deny"
+
+
+def test_설정_오류면_rules_아래여도_yaml_이_아니면_거절한다(installed_hook, missing_template_root):
+    target = missing_template_root / "rules" / "메모.md"
+    code, out = run_hook(
+        installed_hook, _write_payload(target, "# 메모\n"), str(ENGINE_ROOT)
+    )
+    assert decision(out) == "deny"
+
+
+def test_설정이_정상이면_규칙_파일_수정도_알림_없이_평소대로_검사한다(installed_hook, standards_root):
+    target = standards_root / "rules" / "제안서.yaml"
+    code, out = run_hook(
+        installed_hook, _write_payload(target, PROPOSAL_RULES), str(ENGINE_ROOT)
+    )
+    assert code == 0 and out is None

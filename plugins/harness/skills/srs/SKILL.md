@@ -15,14 +15,21 @@ description: 요구사항정의서(SRS)를 처음 만들 때, 또는 요구사�
 **옛 구조 확인(먼저).** `docs/ssot/PRD.md` 가 있고 `docs/ssot/SRS.md` 가 없으면
 조용히 `SRS.md` 를 새로 만들지 않는다. 이 저장소는 예전 이름(PRD)으로 만든
 것이라고 사용자에게 알리고, 옮기는 방법을 안내한 뒤 사용자가 원하면 옮긴다.
-옮기려면 다음을 한다.
+옮기려면 아래 순서대로 한다. 순서가 중요하다 — 규칙(`rules/ssot.yaml`)이 없는
+템플릿을 가리키는 순간이 생기면 doc-guard 훅이 모든 쓰기를 막는다.
 
-- `git mv docs/ssot/PRD.md docs/ssot/SRS.md`
-- `git mv templates/harness/PRD.md templates/harness/SRS.md`
-- `rules/ssot.yaml` 의 템플릿 경로(`PRD.md`)와 `filename` 패턴(`'^PRD\.md$'`)을
-  SRS 로 바꾼다.
-- 두 파일 제목 줄의 "PRD" 를 "SRS" 로 바꾼다.
-- `docs/spec/`, `audit/` 등에 있는 `PRD.md` 링크를 `SRS.md` 로 바꾼다.
+1. 새 템플릿 `templates/harness/SRS.md` 를 옛 템플릿 내용으로 만든다(제목 줄의
+   "PRD" 는 "SRS" 로).
+2. `rules/ssot.yaml` 의 템플릿 경로(`PRD.md`)와 `filename` 패턴(`'^PRD\.md$'`)을
+   SRS 로 바꾼다.
+3. `git mv docs/ssot/PRD.md docs/ssot/SRS.md` 한 뒤 제목 줄의 "PRD" 를 "SRS" 로
+   바꾼다.
+4. `git rm templates/harness/PRD.md`
+5. `docs/spec/`, `audit/` 등에 있는 `PRD.md` 링크를 `SRS.md` 로 바꾼다.
+
+(설정이 깨져 훅이 막은 경우에도 `rules/` 의 yaml 과 `templates/` 아래 파일을 고치는
+쓰기는 허용되고 오류 상태임을 알려 준다. 그래도 위 순서를 지켜 깨진 순간을 만들지
+않는 것이 먼저다.)
 
 옮기는 PR 도 `docs/ssot/` 를 바꾸므로 사람 승인이 필요하다. 사용자가 옮기지
 않겠다고 하면 이 스킬은 거기서 멈춘다(`PRD.md` 를 그대로 고치지도, `SRS.md` 를

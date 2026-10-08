@@ -95,6 +95,23 @@ def _has_broken_encoding(text: str) -> bool:
     return any(ch == "�" or 0xD800 <= ord(ch) <= 0xDFFF for ch in text)
 
 
+def allow_with_notice(notice: str) -> None:
+    """쓰기는 허용하되 사유를 Claude 에게 보여 준다. 조용한 통과가 아니다(#209).
+
+    `permissionDecision` 은 싣지 않는다 — 허용을 이 훅이 선언하지 않고 평소 권한
+    흐름에 맡기며, 알림만 `additionalContext` 로 덧붙인다.
+    """
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": notice,
+        }
+    }
+    json.dump(payload, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    sys.exit(0)
+
+
 def deny(reason: str) -> None:
     """쓰기를 막고 사유를 사람과 Claude 에게 보여준다.
 
@@ -129,6 +146,21 @@ def find_standards_root(path: Path) -> Path | None:
         if all((parent / marker).is_dir() for marker in STANDARDS_MARKERS):
             return parent
     return None
+
+
+def is_config_file(relative: Path) -> bool:
+    """기준 폴더 기준 상대 경로가 규칙 설정 자체인지 본다(#209).
+
+    `rules/` 아래 `*.yaml`·`*.yml`, 또는 `templates/` 아래 모든 파일이다. 호출하는 쪽이
+    `resolve()` 로 `..` 를 걷어낸 경로를 넘기므로 `rules/../docs/x.md` 는 `docs/x.md`
+    로 판정된다. Windows 의 대소문자 차이는 `normcase` 로 맞춘다.
+    """
+    parts = [os.path.normcase(p) for p in relative.parts]
+    if len(parts) < 2 or ".." in parts:
+        return False
+    if parts[0] == "templates":
+        return True
+    return parts[0] == "rules" and parts[-1].endswith((".yaml", ".yml"))
 
 
 def engine_spec() -> str:
@@ -449,6 +481,15 @@ def _main() -> None:
         )
 
     if done.returncode == 2:
+        if is_config_file(relative):
+            # 설정이 깨진 상태에서 설정 자체를 고치는 쓰기까지 막으면 스스로 풀 수 없는
+            # 교착이 된다(#209). 허용하되 문서 검사를 못 한 상태임을 숨기지 않는다.
+            allow_with_notice(
+                "doc-guard: 규칙 설정에 오류가 있어 문서 검사를 못 하는 상태다. "
+                "설정 파일 수정이라 허용한다.\n"
+                f"사유: {report.get('message', '')}\n"
+                "이 쓰기는 검사를 통과한 것이 아니다. 설정을 고친 뒤 다시 확인하라."
+            )
         # 설정 오류는 문서 위반과 받는 사람이 다르다. 문서를 쓰는 팀원은 규칙 파일을
         # 고칠 권한도 지식도 없으므로, 자기 문서를 들여다보며 헤매게 두면 안 된다.
         deny(
