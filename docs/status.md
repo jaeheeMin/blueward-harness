@@ -567,6 +567,8 @@ pre-commit 훅 연결은 별도 이슈다. 테스트는 `checker/tests/test_gitl
 
 **요구사항 문서 이름을 PRD 에서 SRS(요구사항정의서)로 바꿨다(#206, 2026-10-08).** 스킬은 `/harness:srs`, 문서는 `docs/ssot/SRS.md`, 템플릿은 `templates/harness/SRS.md`, 규칙 `rules/ssot.yaml` 의 패턴은 `^SRS\.md$`. 승인 검사 판정은 경로(`docs/ssot/`) 기준이라 로직은 그대로다. 옛 구조(`docs/ssot/PRD.md` 만 있고 `SRS.md` 가 없음) 저장소는 `/harness:srs`·`/harness:spec` 이 조용히 새로 만들지 않고 알린 뒤 옮기는 방법을 안내한다(옮기는 PR 도 사람 승인 필요). Plugin version 0.10.36.
 
+**규칙 설정이 깨졌을 때 설정 파일 수정은 허용한다(#209, 2026-10-08).** PRD→SRS 이름을 옮기다 `templates/harness/PRD.md` 를 먼저 옮기면 `rules/ssot.yaml` 이 없는 템플릿을 가리켜 엔진이 설정 오류(종료코드 2)를 내고, `pre_write_guard.py` 가 모든 Edit/Write 를 거부해 `rules/ssot.yaml` 도 못 고치는 교착이 났다(관할 안 문서 쓰기만 막히는 것이 아니라 설정 파일 쓰기도 이 경로에 걸린다). 이제 설정 오류일 때 쓰려는 파일이 기준 폴더의 `rules/` 아래 `*.yaml`·`*.yml` 이거나 `templates/` 아래 파일이면 허용하되, 조용히 통과시키지 않고 `additionalContext` 로 "규칙 설정에 오류가 있어 문서 검사를 못 하는 상태다. 설정 파일 수정이라 허용한다. 사유: …" 를 알린다. 경로는 `resolve()` 로 `..` 를 걷어낸 상대 경로로 판정하고 대소문자는 `normcase` 로 맞춘다. 그 밖의 파일은 그대로 거부하고(원칙 7), 설정이 정상일 때의 동작은 바뀌지 않는다. `/harness:srs` 옛 구조 옮기기 순서도 새 템플릿 만들기 → ssot.yaml 고치기 → 문서 옮기기 → 옛 템플릿 지우기 → 링크 수정으로 바꿔 깨진 순간 자체를 없앴다. 테스트는 `checker/tests/test_hook.py` 에 6건. Plugin version 0.10.37.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.
