@@ -56,6 +56,83 @@ def test_load_approvers_빈_내용은_빈_집합():
     assert load_approvers("# 주석뿐\n\n") == set()
 
 
+# --- parse_approvers / approvers_for: 작성자별 승인자 ---------------------------
+
+USER_FORMAT = "# 형식: <PR 작성자>: <승인자> <승인자> ...\njaeheeMin: CSH-DOT123 Blueward-Huiseong\n*: jaeheeMin\n"
+
+
+def test_parse_approvers_는_작성자_줄과_별표_줄과_옛_형식을_나눈다():
+    p = mod.parse_approvers("Alice: @Bob, carol  dana # 주석\n*: eve\nfrank\n\n")
+    assert p.by_author == {"alice": {"bob", "carol", "dana"}}
+    assert p.default == {"eve", "frank"}
+    assert p.has_entries is True
+
+
+def test_parse_approvers_는_내용이_없으면_has_entries_가_거짓():
+    for text in (None, "", "# 주석뿐\n\n"):
+        p = mod.parse_approvers(text)
+        assert p.has_entries is False and p.by_author == {} and p.default == set()
+
+
+def test_같은_작성자_줄이_여러_번이면_합친다():
+    p = mod.parse_approvers("alice: bob\nALICE: carol\n")
+    assert mod.approvers_for(p, "alice") == {"bob", "carol"}
+
+
+def test_작성자_전용_줄이_있으면_별표와_옛_형식은_무시한다():
+    p = mod.parse_approvers("alice: bob\n*: carol\ndana\n")
+    assert mod.approvers_for(p, "Alice") == {"bob"}
+    assert mod.approvers_for(p, "eve") == {"carol", "dana"}
+
+
+def test_작성자_본인은_늘_승인자에서_빠진다():
+    p = mod.parse_approvers("alice: alice bob\n*: eve\n")
+    assert mod.approvers_for(p, "alice") == {"bob"}
+    assert mod.approvers_for(p, "eve") == set()
+
+
+def test_load_approvers_는_모든_승인자의_합집합():
+    assert load_approvers(USER_FORMAT) == {"csh-dot123", "blueward-huiseong", "jaeheemin"}
+
+
+def _reviews(login):
+    return [_review(login, "APPROVED", "2026-01-01T00:00:00Z", "head1")]
+
+
+def _judge(author, text, reviewer):
+    return mod.judge_by_rules(author, _reviews(reviewer), mod.parse_approvers(text), "head1")
+
+
+@pytest.mark.parametrize("author, reviewer, ok", [
+    ("jaeheeMin", "CSH-DOT123", True),
+    ("jaeheeMin", "blueward-huiseong", True),
+    ("jaeheeMin", "someone", False),
+    ("CSH-DOT123", "Blueward-Huiseong", False),
+    ("CSH-DOT123", "jaeheeMin", True),
+])
+def test_사용자_예시_형식의_판정(author, reviewer, ok):
+    assert _judge(author, USER_FORMAT, reviewer)[0] is ok
+
+
+def test_내용이_없는_파일은_누구든_승인할_수_있다():
+    for text in (None, "", "# 주석뿐\n"):
+        assert _judge("author", text, "anyone")[0] is True
+
+
+def test_내용은_있는데_이_작성자의_승인자가_없으면_누구든이_아니라_미승인():
+    approved, reason, stale = _judge("zed", "alice: bob\n", "bob")
+    assert approved is False and stale == []
+    assert "승인할 사람이" in reason and ".github/ssot-approvers" in reason
+    # 전용 줄에 본인뿐인 경우도 같다.
+    assert _judge("carol", "carol: carol\n", "alice")[0] is False
+
+
+def test_옛_형식에서_목록에_작성자뿐이어도_예전처럼_미승인():
+    assert _judge("author", "author\n", "anyone")[0] is False
+    assert _judge("author", "author\nbob\n", "bob")[0] is True
+    assert _judge("author", "author\nbob\n", "anyone")[0] is False
+
+
 # --- is_approved ---------------------------------------------------------
 
 
@@ -340,7 +417,7 @@ def test_decide_pr_는_fetch_함수들을_조합한다(monkeypatch):
         "fetch_pr_reviews",
         lambda c, r, n: [_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "head1")],
     )
-    monkeypatch.setattr(mod, "fetch_approvers", lambda c, r, ref: set())
+    monkeypatch.setattr(mod, "fetch_approver_rules", lambda c, r, ref: mod.parse_approvers(None))
 
     result = mod.decide_pr(mod.GhClient(), "owner/repo", 1)
     assert result == {"touches_ssot": True, "approved": True, "reason": "reviewer 가 승인했다"}
@@ -354,7 +431,7 @@ def test_decide_pr_는_ssot를_안_건드리면_리뷰를_보지_않는다(monke
         raise AssertionError("호출되면 안 된다")
 
     monkeypatch.setattr(mod, "fetch_pr_reviews", _boom)
-    monkeypatch.setattr(mod, "fetch_approvers", _boom)
+    monkeypatch.setattr(mod, "fetch_approver_rules", _boom)
 
     result = mod.decide_pr(mod.GhClient(), "owner/repo", 1)
     assert result["touches_ssot"] is False

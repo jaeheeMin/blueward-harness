@@ -54,7 +54,8 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
      커밋마다 검사를 돌린다. `.github/workflows/ssot-approval.yml` 은 같은
      자리에서 SRS 변경 PR 의 승인 여부를 검사한다(#49).
    - 승인자를 나중에 추가·변경하려면 `.github/ssot-approvers` 를 직접 고친다.
-     비어 있으면(주석뿐이면) 작성자가 아닌 누구의 승인이든 인정한다.
+     비어 있으면(주석뿐이면) 작성자가 아닌 누구의 승인이든 인정한다. 작성자별로 승인자를
+     나누려면 `<PR 작성자>: <승인자> ...` 줄을 적는다(파일 주석에 형식과 예시가 있다).
    - `.github/workflows/risk-gate.yml` 과 `.github/risk-gate.yaml` 은 PR 위험도에 따라
      승인을 요구한다(#102). 위험한 PR(크기·위험 경로·비밀값·검사 실패)만 승인자 목록
      (`.github/ssot-approvers`)의 사람이 Approve 해야 통과하고 나머지는 승인 없이

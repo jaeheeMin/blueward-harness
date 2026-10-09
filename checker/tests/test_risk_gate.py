@@ -352,7 +352,7 @@ def test_크기가_크면_위험하고_승인이_없으면_1():
     assert result["risk"] == "high" and result["requires_approval"] is True
     assert result["approved"] is False
     assert "500줄" in result["reasons"][0]
-    assert result["next"].startswith("다음: 사람이 할 일 - 승인자(.github/ssot-approvers 의 사람, 작성자 제외)")
+    assert result["next"].startswith("다음: 사람이 할 일 - 승인자(.github/ssot-approvers 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)")
     assert "PR 을 나눠" in result["next"]
     assert rg._exit_for(result) == 1
 
@@ -452,6 +452,54 @@ def test_승인자_목록이_비었거나_작성자뿐이면_승인으로_풀_�
     assert "비어 있" in result["approval_note"]
     assert "승인자의 GitHub 아이디를 추가" in result["next"]
     assert rg._exit_for(result) == 1
+
+
+_USER_FORMAT = "# 형식: <PR 작성자>: <승인자> <승인자> ...\njaeheeMin: CSH-DOT123 Blueward-Huiseong\n*: jaeheeMin\n"
+
+
+def _gate(author, approvers, reviewer=None, **kw):
+    reviews = [_review(reviewer, "APPROVED", HEAD)] if reviewer else []
+    client = _client(files=[_file("rules/a.yaml")], approvers=approvers, author=author, reviews=reviews, **kw)
+    return rg.decide_pr(client, "o/r", 5)
+
+
+@pytest.mark.parametrize("reviewer, ok", [
+    ("csh-dot123", True),
+    ("Blueward-Huiseong", True),
+    ("someone", False),
+])
+def test_작성자_전용_줄의_승인자만_인정한다(reviewer, ok):
+    assert _gate("jaeheeMin", _USER_FORMAT, reviewer)["approved"] is ok
+
+
+def test_다른_작성자는_별표_줄을_따르고_전용_줄_사람은_승인할_수_없다():
+    assert _gate("CSH-DOT123", _USER_FORMAT, "Blueward-Huiseong")["approved"] is False
+    assert _gate("CSH-DOT123", _USER_FORMAT, "jaeheeMin")["approved"] is True
+
+
+def test_전용_줄이_있으면_별표_줄과_옛_형식_줄은_무시한다():
+    text = "alice: bob\n*: carol\ndana\n"
+    assert _gate("alice", text, "carol")["approved"] is False
+    assert _gate("alice", text, "bob")["approved"] is True
+    assert _gate("eve", text, "carol")["approved"] is True
+    assert _gate("eve", text, "dana")["approved"] is True
+    assert _gate("eve", text, "bob")["approved"] is False
+
+
+def test_이_작성자를_승인할_사람이_없으면_no_approvers():
+    # carol 의 전용 줄은 본인뿐이고, 다른 작성자 줄이 있어도 carol 에겐 소용없다.
+    result = _gate("carol", "carol: carol\n*: alice\n", "alice")
+    assert result["approved"] is False
+    assert "승인자의 GitHub 아이디를 추가" in result["next"]
+    # 내용이 있는데 이 작성자 몫이 없다.
+    result = _gate("zed", "alice: bob\n", "bob")
+    assert result["approved"] is False
+    assert "승인자의 GitHub 아이디를 추가" in result["next"]
+
+
+def test_옛_형식_파일은_예전과_같이_동작한다():
+    assert _gate("bob", "alice\n@Carol # 주석\n", "carol")["approved"] is True
+    assert _gate("bob", "alice\n@Carol # 주석\n", "dana")["approved"] is False
 
 
 def test_approvers_file_설정을_따른다():

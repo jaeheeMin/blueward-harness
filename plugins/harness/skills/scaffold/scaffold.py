@@ -145,8 +145,9 @@ def _dest_relative(src_relative: Path) -> Path:
 
 def _render(text: str, client: str, project: str, today: str, ssot_approvers: list[str]) -> str:
     # 승인자가 없으면 빈 문자열로 치환한다 — `.github/ssot-approvers` 는 그러면
-    # 주석과 빈 줄만 남고, 그것을 `checker.ssot_approval.load_approvers` 가
-    # "누구든 승인할 수 있다" 로 읽는다.
+    # 주석과 빈 줄만 남고, 그것을 `checker.ssot_approval.parse_approvers` 가
+    # "누구든 승인할 수 있다" 로 읽는다. 아이디를 한 줄씩 넣으면 옛 형식 줄이라
+    # `*:` 줄과 같다(작성자별 줄은 사용자가 나중에 파일에 직접 적는다).
     approvers_block = "\n".join(ssot_approvers)
     return (
         text.replace("{{client}}", client)

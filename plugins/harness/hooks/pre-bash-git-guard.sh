@@ -299,7 +299,7 @@ check_one_merge() {
         deny "SRS(docs/ssot) 를 바꾼 PR #$pr_number 인데 현재 최신 커밋에 대한 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 그 뒤 다음: Approve 가 최신 커밋에 달리면 Claude 가 gh pr merge 를 다시 실행합니다."
         ;;
       *)
-        deny "SRS(docs/ssot) 를 바꾼 PR #$pr_number 인데 작성자가 아닌 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 다음: 사람이 할 일 - .github/ssot-approvers 에 적힌 승인자(PR 작성자가 아닌 사람)에게 이 PR 의 리뷰에서 Approve 를 요청하십시오. Approve 가 달린 뒤 Claude 가 gh pr merge 를 다시 실행합니다."
+        deny "SRS(docs/ssot) 를 바꾼 PR #$pr_number 인데 작성자가 아닌 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 다음: 사람이 할 일 - .github/ssot-approvers 에서 이 PR 작성자에게 정해진 승인자(작성자 본인 제외)에게 이 PR 의 리뷰에서 Approve 를 요청하십시오. Approve 가 달린 뒤 Claude 가 gh pr merge 를 다시 실행합니다."
         ;;
     esac
   else
@@ -393,7 +393,7 @@ $hm_err"
     next_risk="$(printf '%s' "$rg_out" | jq -r '.next // empty' 2>/dev/null | tr -d '\r"\\`$')" || true
     case "$next_risk" in
       *"다음:"*) : ;;
-      *) next_risk="다음: 사람이 할 일 - .github/ssot-approvers 에 적힌 승인자(PR 작성자가 아닌 사람)에게 최신 커밋을 보고 Approve 를 요청하십시오." ;;
+      *) next_risk="다음: 사람이 할 일 - .github/ssot-approvers 에서 이 PR 작성자에게 정해진 승인자(작성자 본인 제외)에게 최신 커밋을 보고 Approve 를 요청하십시오." ;;
     esac
     deny "PR #$pr_number 은 위험도가 높은데 최신 커밋에 대한 승인자의 Approve 가 없어 merge 를 막습니다. 이유: $rg_reasons $next_risk Approve 가 달리면 Claude 가 gh pr merge 를 다시 실행합니다."
   else

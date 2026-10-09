@@ -27,10 +27,11 @@
               검사 불능" 일 수도 있어 사유가 둘을 뭉개지 않고 PR 코멘트를 보라고 안내한다.
               없거나 끝나지 않았으면 대기로 본다.
 
-위험한 PR 은 승인자 목록(`approvers_file`, 기본 `.github/ssot-approvers`)에 있는 사람 가운데
-**작성자가 아닌 사람이 PR 의 마지막 커밋에 Approve** 해야 통과한다. 이 판정은
-`ssot_approval.evaluate_approval`(#119)을 그대로 쓴다. 작성자를 뺀 승인 가능한 사람이
-하나도 없으면 승인으로 풀 수 없다고 사유와 다음 할 일을 밝힌다.
+위험한 PR 은 승인자 목록(`approvers_file`, 기본 `.github/ssot-approvers`)에서 **그 PR 작성자에게
+정해진 승인자(작성자 본인 제외)가 PR 의 마지막 커밋에 Approve** 해야 통과한다. 목록은
+`<작성자>: <승인자> ...` 줄(작성자 전용)과 `*:` 줄·옛 형식 줄(전용 줄이 없는 작성자 모두)로 적는다
+(`ssot_approval.parse_approvers`). 이 판정은 `ssot_approval.evaluate_approval`(#119)을 그대로
+쓴다. 작성자를 뺀 승인 가능한 사람이 하나도 없으면 승인으로 풀 수 없다고 사유와 다음 할 일을 밝힌다.
 
 세 곳이 같은 `decide_pr` 를 부른다 — PR 검사 workflow(`risk-gate.yml` 의 `check`), 병합 뒤
 감지(`after-merge`, `decide_commit`), Claude 병합 Hook. 셋이 같은 코드로 같은 판정을 내려야
@@ -71,6 +72,7 @@ from checker.ssot_approval import (
     EXIT_UNKNOWN,
     GhClient,
     GhError,
+    ParsedApprovers,
     _normalize,
     evaluate_approval,
     fetch_commit_associated_prs,
@@ -78,7 +80,8 @@ from checker.ssot_approval import (
     fetch_pr_info,
     fetch_pr_reviews,
     human_merge_hits,
-    load_approvers,
+    approvers_for,
+    parse_approvers,
 )
 
 CONFIG_PATH = ".github/risk-gate.yaml"
@@ -453,18 +456,18 @@ def build_next(findings: list[Finding], approval: str, approvers_file: str) -> s
     split = " 또는 PR 을 나눠 기준 이하로 줄이십시오" if kinds & {"size", "paths"} else ""
     if approval == "no_approvers":
         steps.append(
-            f"사람이 할 일 - {approvers_file} 에 작성자가 아닌 승인자의 GitHub 아이디를 추가하십시오"
+            f"사람이 할 일 - {approvers_file} 에 이 PR 작성자가 아닌 승인자의 GitHub 아이디를 추가하십시오"
             f"(이 파일은 기준 브랜치에서 읽으므로 따로 먼저 반영해야 합니다).{split}"
         )
     elif approval == "stale":
         steps.append(
-            f"사람이 할 일 - 승인자({approvers_file} 의 사람, 작성자 제외)에게 최신 커밋을 보고 "
-            "다시 Approve 를 요청하십시오"
+            f"사람이 할 일 - 승인자({approvers_file} 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)에게 "
+            "최신 커밋을 보고 다시 Approve 를 요청하십시오"
         )
     else:
         steps.append(
-            f"사람이 할 일 - 승인자({approvers_file} 의 사람, 작성자 제외)에게 최신 커밋을 보고 "
-            f"Approve 를 요청하십시오.{split}"
+            f"사람이 할 일 - 승인자({approvers_file} 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)에게 "
+            f"최신 커밋을 보고 Approve 를 요청하십시오.{split}"
         )
     steps = [s.rstrip(".") for s in steps]
     if len(steps) == 1:
@@ -550,13 +553,12 @@ def _result_from(findings: list[Finding], approval_state: str, approved: bool | 
     }
 
 
-def _judge_approval(author: str, reviews: list[dict], approvers: set[str], head_sha: str) -> tuple[str, bool, str, list[str]]:
-    """(상태, 승인 여부, 설명, 낡은 승인자) 를 돌려준다."""
-    author_l = (author or "").strip().lower()
-    eligible = {a for a in approvers if a != author_l}
+def _judge_approval(author: str, reviews: list[dict], approvers: ParsedApprovers, head_sha: str) -> tuple[str, bool, str, list[str]]:
+    """(상태, 승인 여부, 설명, 낡은 승인자) 를 돌려준다. 승인자는 이 작성자에게 정해진 사람이다."""
+    eligible = approvers_for(approvers, author)
     if not eligible:
-        return "no_approvers", False, "승인자 목록이 비어 있거나 작성자 외에 승인할 수 있는 사람이 없음", []
-    approved, note, stale = evaluate_approval(author, reviews, approvers, head_sha)
+        return "no_approvers", False, "승인자 목록이 비어 있거나 이 작성자 외에 승인할 수 있는 사람이 없음", []
+    approved, note, stale = evaluate_approval(author, reviews, eligible, head_sha)
     if approved:
         return "ok", True, note, []
     if stale:
@@ -592,7 +594,7 @@ def decide_pr(client: GhClient, repo: str, pr: int, config_ref: str | None = Non
         return _result_from([], "none", None, "", [], cfg["approvers_file"])
 
     author = (info.get("user") or {}).get("login", "")
-    approvers = load_approvers(fetch_text(client, repo, ref, cfg["approvers_file"]))
+    approvers = parse_approvers(fetch_text(client, repo, ref, cfg["approvers_file"]))
     state, approved, note, stale = _judge_approval(
         author, fetch_pr_reviews(client, repo, pr), approvers, head_sha
     )

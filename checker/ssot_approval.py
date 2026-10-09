@@ -20,7 +20,7 @@ merge 하는 것을 막을 방법이 없으므로, 이 모듈은 "막는다" 대
 **승인은 PR 의 현재 head 커밋에 대한 것일 때만 인정한다(#119).** 승인한 뒤 새 커밋이
 올라오면 그 승인은 낡은 것이라 미승인이다. 새 커밋에 다시 Approve 하면 통과한다.
 
-**판정은 순수 함수(`touches_ssot`, `load_approvers`, `is_approved`,
+**판정은 순수 함수(`touches_ssot`, `parse_approvers`, `approvers_for`, `is_approved`,
 `load_human_merge_paths`, `human_merge_hits`)에 있고,
 GitHub 에서 무엇을 읽어와야 하는지는 `GhClient` 와 `decide_*` 함수에 있다.**
 셋을 가르는 이유는 순수 함수는 `gh` 없이도 테스트할 수 있어야 하고, `gh` 를
@@ -47,6 +47,7 @@ import json
 import re
 import subprocess
 import sys
+from typing import NamedTuple
 
 SSOT_PREFIX = "docs/ssot/"
 
@@ -60,6 +61,12 @@ EXIT_UNKNOWN = 2
 # 있다)를 그대로 둔다.
 _STATE_CHANGING = {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
 
+NO_APPROVER_FOR_AUTHOR = (
+    "이 작성자의 PR 을 승인할 사람이 .github/ssot-approvers 에 없다(작성자 본인은 제외). "
+    "다음: 사람이 할 일 - 이 작성자 줄이나 `*:` 줄에 작성자가 아닌 승인자의 GitHub 아이디를 "
+    "추가하십시오(이 파일은 기준 브랜치에서 읽으므로 따로 먼저 반영해야 합니다)."
+)
+
 
 def _normalize(path: str) -> str:
     return path.replace("\\", "/").lstrip("/")
@@ -70,25 +77,84 @@ def touches_ssot(files: list[str]) -> bool:
     return any(_normalize(f).startswith(SSOT_PREFIX) for f in files)
 
 
-def load_approvers(text: str | None) -> set[str]:
-    """`.github/ssot-approvers` 를 읽는다.
+class ParsedApprovers(NamedTuple):
+    """`.github/ssot-approvers` 를 읽은 결과.
 
-    한 줄에 GitHub 아이디 하나. `#` 뒤는 주석이고, 앞의 `@` 는 있어도 없어도
-    된다. 대소문자는 구분하지 않는다(GitHub 아이디 자체가 대소문자를 구분하지
-    않는다). 빈 파일이거나 내용이 없으면 빈 집합을 돌려주고, 그것은 "누구든
-    승인할 수 있다" 는 뜻으로 `is_approved` 가 해석한다.
+    `by_author` 는 PR 작성자(소문자)별 전용 승인자, `default` 는 `*:` 줄과 옛 형식
+    줄(콜론 없는 줄)의 합이다. `has_entries` 는 주석·빈 줄 말고 내용이 있었는가다.
     """
-    if not text:
-        return set()
-    approvers: set[str] = set()
-    for line in text.splitlines():
+
+    by_author: dict[str, set[str]]
+    default: set[str]
+    has_entries: bool
+
+    def for_author(self, author: str | None) -> set[str]:
+        return approvers_for(self, author)
+
+    def everyone(self) -> set[str]:
+        result = set(self.default)
+        for logins in self.by_author.values():
+            result |= logins
+        return result
+
+
+def _logins(text: str) -> set[str]:
+    return {t.lstrip("@").lower() for t in re.split(r"[\s,]+", text) if t.lstrip("@")}
+
+
+def parse_approvers(text: str | None) -> ParsedApprovers:
+    """`.github/ssot-approvers` 를 읽는다. 순수 함수다.
+
+    형식은 한 줄에 하나다. `#` 뒤는 주석이고 대소문자는 구분하지 않는다(GitHub
+    아이디 자체가 구분하지 않는다). 아이디 앞의 `@` 는 있어도 없어도 된다.
+
+    - `<PR 작성자>: <승인자> <승인자> ...` — 그 작성자의 PR 을 승인할 사람들(공백이나
+      쉼표로 나눈다). 작성자 자리의 `*` 는 전용 줄이 없는 모든 작성자에게 해당한다.
+    - 콜론 없는 줄(옛 형식, 한 줄 한 아이디) — `*:` 줄에 적은 것과 같다.
+    - 같은 작성자 줄이 여러 번이면 합친다.
+    """
+    by_author: dict[str, set[str]] = {}
+    default: set[str] = set()
+    has_entries = False
+    for line in (text or "").splitlines():
         line = line.split("#", 1)[0].strip()
         if not line:
             continue
-        login = line.lstrip("@").strip().lower()
-        if login:
-            approvers.add(login)
-    return approvers
+        if ":" not in line:
+            login = line.lstrip("@").strip().lower()
+            if login:
+                default.add(login)
+                has_entries = True
+            continue
+        left, right = line.split(":", 1)
+        key = left.strip().lstrip("@").strip().lower()
+        has_entries = True
+        if not key:
+            continue
+        if key == "*":
+            default |= _logins(right)
+        else:
+            by_author.setdefault(key, set()).update(_logins(right))
+    return ParsedApprovers(by_author, default, has_entries)
+
+
+def approvers_for(parsed: ParsedApprovers, author: str | None) -> set[str]:
+    """이 PR 작성자의 PR 을 승인할 수 있는 사람들(작성자 본인은 늘 뺀다).
+
+    그 작성자 전용 줄이 있으면 그 줄의 사람만, 없으면 `*:` 줄과 옛 형식 줄의 합이다.
+    """
+    author_l = (author or "").strip().lower()
+    chosen = parsed.by_author[author_l] if author_l in parsed.by_author else parsed.default
+    return {a for a in chosen if a != author_l}
+
+
+def load_approvers(text: str | None) -> set[str]:
+    """`.github/ssot-approvers` 에 적힌 모든 승인자의 합집합(작성자 구분 없음).
+
+    작성자별 판정은 `parse_approvers` + `approvers_for` 를 쓴다. 옛 형식 파일(한 줄
+    한 아이디)이면 예전과 같은 결과다. 내용이 없으면 빈 집합이다.
+    """
+    return parse_approvers(text).everyone()
 
 
 def load_human_merge_paths(text: str | None) -> list[str]:
@@ -289,16 +355,37 @@ def fetch_pr_reviews(client: GhClient, repo: str, pr: int) -> list[dict]:
     return client.get_all(f"repos/{repo}/pulls/{pr}/reviews")
 
 
-def fetch_approvers(client: GhClient, repo: str, ref: str) -> set[str]:
+def fetch_approver_rules(client: GhClient, repo: str, ref: str) -> ParsedApprovers:
     data = client.get_json_or_none_404(f"repos/{repo}/contents/.github/ssot-approvers?ref={ref}")
     if not data:
-        return set()
+        return parse_approvers(None)
     content = data.get("content", "") or ""
     try:
         text = base64.b64decode(content).decode("utf-8", errors="replace")
     except (ValueError, TypeError):
         text = ""
-    return load_approvers(text)
+    return parse_approvers(text)
+
+
+def fetch_approvers(client: GhClient, repo: str, ref: str) -> set[str]:
+    """모든 승인자의 합집합. 작성자별 판정은 `fetch_approver_rules` 를 쓴다."""
+    return fetch_approver_rules(client, repo, ref).everyone()
+
+
+def judge_by_rules(
+    author: str, reviews: list[dict], rules: ParsedApprovers, head_sha: str | None
+) -> tuple[bool, str, list[dict]]:
+    """작성자에게 정해진 승인자로 `evaluate_approval` 을 부른다.
+
+    파일에 내용이 없으면 "누구든" 이다. 내용은 있는데 이 작성자의 PR 을 승인할 사람이
+    (작성자 본인을 빼면) 없으면, "누구든" 으로 풀지 않고 미승인으로 답한다.
+    """
+    if not rules.has_entries:
+        return evaluate_approval(author, reviews, set(), head_sha)
+    eligible = approvers_for(rules, author)
+    if not eligible:
+        return False, NO_APPROVER_FOR_AUTHOR, []
+    return evaluate_approval(author, reviews, eligible, head_sha)
 
 
 def fetch_human_merge_paths(client: GhClient, repo: str, ref: str) -> list[str]:
@@ -333,14 +420,14 @@ def decide_pr(client: GhClient, repo: str, pr: int) -> dict:
     author = (info.get("user") or {}).get("login", "")
     base_ref = (info.get("base") or {}).get("ref") or "main"
     reviews = fetch_pr_reviews(client, repo, pr)
-    approvers = fetch_approvers(client, repo, base_ref)
+    rules = fetch_approver_rules(client, repo, base_ref)
     # 승인은 PR 의 현재 head 커밋에 대한 것이어야 한다(#119). head 를 모르면 옛
     # 승인을 걸러낼 수 없으므로 통과시키지 않고 판정 불가로 답한다(원칙 7).
     # merge 된 PR 의 head.sha 는 merge 시점의 마지막 커밋이라 after-merge 도 같다.
     head_sha = (info.get("head") or {}).get("sha")
     if not head_sha:
         raise GhError(f"PR #{pr} 의 head 커밋을 응답에서 찾지 못했다")
-    approved, reason, stale = evaluate_approval(author, reviews, approvers, head_sha)
+    approved, reason, stale = judge_by_rules(author, reviews, rules, head_sha)
     result = {"touches_ssot": True, "approved": approved, "reason": reason}
     if stale:
         result["stale_approvers"] = [e["login"] for e in stale]
