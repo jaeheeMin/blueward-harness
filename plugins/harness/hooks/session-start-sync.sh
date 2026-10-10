@@ -66,12 +66,17 @@ fi
 # 워크트리에서는 `.git` 이 파일이므로 실제 디렉터리를 물어서 쓴다.
 repo_name="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || echo "$resolved_dir")")"
 CARRYOVER="$(git rev-parse --git-dir)/${repo_name}-unfinished"
-CARRYOVER_PENDING=""
-if [ -f "$CARRYOVER" ]; then
-  add "지난 세션에서 남은 경고가 있습니다."
-  add "$(cat "$CARRYOVER")"
-  CARRYOVER_PENDING="$CARRYOVER"
-fi
+# 옛 형식(경고 텍스트가 덧붙여 쌓인 파일, 첫 줄이 format=2 가 아니다)은 한 번 그대로
+# 보여 주고 지운다(#224). 새 형식(format=2)은 원격을 가져온 뒤 아래에서 판정한다.
+# stop-deliver.sh 가 덮어쓰기 전에 옆으로 옮겨 둔 `.legacy` 파일도 같게 다룬다.
+LEGACY_PENDING=()
+for legacy_file in "$CARRYOVER" "${CARRYOVER}.legacy"; do
+  if [ -f "$legacy_file" ] && [ "$(head -n1 "$legacy_file" | tr -d '\r')" != "format=2" ]; then
+    add "지난 세션에서 남은 경고가 있습니다."
+    add "$(cat "$legacy_file")"
+    LEGACY_PENDING+=("$legacy_file")
+  fi
+done
 
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 알수없음)"
 add "현재 브랜치: $branch"
@@ -107,6 +112,218 @@ if [ "${HARNESS_NO_SCAFFOLD_HINT:-}" != "1" ] && [ ! -f "$repo_top/.claude-plugi
 fi
 
 git_dir="$(git rev-parse --git-dir)"
+
+# --- 지난 세션 기록 판정(#224) --------------------------------------------
+#
+# stop-deliver.sh 가 대답마다 덮어쓰는 기록(format=2)을 읽어, 이미 처리된 것은 조용히
+# 지우고 처리 안 된 것만 알린다. 원격을 가져온 뒤에 불러야 원격 반영이 보인다.
+# 판정 중 git 명령이 실패하면 통과로 뭉개지 않고 "확인 불능" 으로 알리고 기록을 남긴다.
+# 기록을 어떻게 고칠지는 keep_snap, keep_unpushed 로 정하고 finish_carryover 가 적용한다.
+keep_snap=0
+keep_unpushed=0
+clean_ref=""
+carry_active=0
+
+# 경로를 글롭으로 해석하지 않게 한다(pages/[id].tsx 같은 이름).
+CG() { git --literal-pathspecs -C "$repo_top" "$@"; }
+
+# 작은따옴표로 감싸 셸에 그대로 붙여 넣을 수 있게 한다.
+shq() {
+  local s="$1" out="" q="'" bs=$'\\' pre
+  while [[ "$s" == *"$q"* ]]; do
+    pre="${s%%"$q"*}"
+    out="$out$pre$q$bs$q$q"
+    s="${s#*"$q"}"
+  done
+  printf '%s' "'$out$s'"
+}
+
+judge_carryover() {
+  [ -f "$CARRYOVER" ] || return 0
+  [ "$(head -n1 "$CARRYOVER" | tr -d '\r')" = "format=2" ] || return 0
+  carry_active=1
+
+  local line first=1
+  local r_snap_ref="" r_snap_commit="" r_snap_time="" r_snap_failed="" r_snap_files="" r_big_files=""
+  local r_unpushed_branch="" r_unpushed_head=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if [ "$first" -eq 1 ]; then first=0; continue; fi
+    case "$line" in
+      snap_ref=*) r_snap_ref="${line#snap_ref=}" ;;
+      snap_commit=*) r_snap_commit="${line#snap_commit=}" ;;
+      snap_time=*) r_snap_time="${line#snap_time=}" ;;
+      snap_failed=*) r_snap_failed="${line#snap_failed=}" ;;
+      snap_file=*) r_snap_files="${r_snap_files}${line#snap_file=}"$'\n' ;;
+      big_file=*) r_big_files="${r_big_files}${line#big_file=}"$'\n' ;;
+      unpushed_branch=*) r_unpushed_branch="${line#unpushed_branch=}" ;;
+      unpushed_head=*) r_unpushed_head="${line#unpushed_head=}" ;;
+    esac
+  done < "$CARRYOVER"
+
+  # 1) 작업 사본
+  if [ -n "$r_snap_commit" ] || [ -n "$r_snap_failed" ] || [ -n "$r_big_files" ]; then
+    if [ -n "$changed" ]; then
+      # 아직 변경이 남아 있다. 아래 "커밋되지 않은 변경" 안내로 충분하다. 기록과 ref 는 둔다.
+      keep_snap=1
+    else
+      judge_snapshot "$r_snap_ref" "$r_snap_commit" "$r_snap_time" "$r_snap_failed" "$r_snap_files" "$r_big_files"
+    fi
+  fi
+
+  # 2) push 안 된 커밋
+  if [ -n "$r_unpushed_branch" ]; then
+    judge_unpushed "$r_unpushed_branch" "$r_unpushed_head"
+  fi
+}
+
+judge_snapshot() {
+  local snap_ref="$1" snap_commit="$2" snap_time="$3" snap_failed="$4" snap_files="$5" big_files="$6"
+  local ent st f cnt head_blob snap_blob eval_err=0
+  local lost_files=() lost_del=() missing_big=()
+
+  if [ -n "$snap_failed" ]; then
+    add "지난 세션 종료 때 커밋되지 않은 변경이 있었으나 작업 사본을 뜨지 못했습니다. 그 변경이 지금 남아 있는지 확인할 수 없습니다(지난 작업 확인 불능). 다음: git log 와 git status 로 직접 확인하십시오."
+  fi
+
+  # 크기 때문에 사본에 담지 못한 새 파일이 커밋도 안 된 채 사라졌는지 본다(사본이 없어도 본다).
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    [ -e "$repo_top/$f" ] && continue
+    CG rev-parse -q --verify "HEAD:$f" >/dev/null 2>&1 && continue
+    missing_big+=("$f")
+  done <<< "$big_files"
+
+  if [ -z "$snap_commit" ]; then
+    for f in ${missing_big[@]+"${missing_big[@]}"}; do
+      add "크기 상한(50MB)을 넘어 작업 사본에 담지 못한 파일이 커밋되지 않은 채 사라졌습니다(복구할 수 없음): ${f}"
+    done
+    return 0
+  fi
+
+  if ! CG cat-file -e "${snap_commit}^{commit}" 2>/dev/null; then
+    add "지난 세션의 작업 사본(${snap_commit:0:7})을 찾을 수 없어 확인할 수 없습니다(지난 작업 확인 불능)."
+    keep_snap=1
+    return 0
+  fi
+
+  while IFS= read -r ent; do
+    [ -n "$ent" ] || continue
+    st="${ent%% *}"
+    f="${ent#* }"
+    head_blob="$(CG rev-parse -q --verify "HEAD:$f" 2>/dev/null || true)"
+    if [ "$st" = "D" ]; then
+      [ -z "$head_blob" ] && continue
+    else
+      snap_blob="$(CG rev-parse -q --verify "${snap_commit}:$f" 2>/dev/null || true)"
+      if [ -z "$snap_blob" ]; then eval_err=1; continue; fi
+      [ "$head_blob" = "$snap_blob" ] && continue
+    fi
+    # 사본 이후 어느 ref(원격 포함, refs/harness 제외)에서든 이 파일을 건드린 커밋이 있으면 처리된 것으로 본다.
+    if cnt="$(CG rev-list --count --since="$snap_time" --exclude='refs/harness/*' --all "^${snap_commit}" -- "$f" 2>/dev/null)"; then
+      [ "${cnt:-0}" -gt 0 ] && continue
+    else
+      eval_err=1
+      continue
+    fi
+    if [ "$st" = "D" ]; then lost_del+=("$f"); else lost_files+=("$f"); fi
+  done <<< "$snap_files"
+
+  if [ "$eval_err" -eq 1 ]; then
+    add "지난 세션의 미커밋 작업을 일부 판정하지 못했습니다(지난 작업 확인 불능). 작업 사본 ${snap_commit} 는 남겨 두었습니다. 다음: git diff --name-status HEAD ${snap_commit} 로 직접 비교하십시오."
+    keep_snap=1
+    return 0
+  fi
+
+  if [ "${#lost_files[@]}" -gt 0 ] || [ "${#lost_del[@]}" -gt 0 ] || [ "${#missing_big[@]}" -gt 0 ]; then
+    local n=$(( ${#lost_files[@]} + ${#lost_del[@]} )) shown=0 args=""
+    if [ "$n" -gt 0 ]; then
+      add "지난 세션의 미커밋 작업 가운데 커밋되지 않고 사라진 것이 ${n}개 있습니다. 작업 사본: ${snap_commit}"
+      for f in ${lost_files[@]+"${lost_files[@]}"}; do
+        [ "$shown" -lt 10 ] || break
+        shown=$((shown + 1))
+        add "- ${f}"
+        args="${args} $(shq "$f")"
+      done
+      for f in ${lost_del[@]+"${lost_del[@]}"}; do
+        [ "$shown" -lt 10 ] || break
+        shown=$((shown + 1))
+        add "- ${f} (사본에서는 삭제된 파일이나 지금 HEAD 에 남아 있음)"
+      done
+      if [ "$n" -gt "$shown" ]; then
+        add "... 외 $((n - shown))개. 전체: git diff --name-status HEAD ${snap_commit}"
+      fi
+      if [ -n "$args" ]; then
+        add "다음: git --literal-pathspecs restore --source=${snap_commit} --${args}"
+      fi
+      add "복구가 끝나면 사본 ref 를 지울 수 있습니다: git update-ref -d ${snap_ref}"
+    fi
+    for f in ${missing_big[@]+"${missing_big[@]}"}; do
+      add "크기 상한(50MB)을 넘어 작업 사본에 담지 못한 파일이 커밋되지 않은 채 사라졌습니다(복구할 수 없음): ${f}"
+    done
+    # 같은 경고가 되풀이되지 않게 기록은 지우되, 복구용 사본 ref 는 남긴다.
+    return 0
+  fi
+
+  # 전부 처리됐다. 조용히 기록과 ref 를 지운다.
+  case "$snap_ref" in
+    refs/harness/unfinished/*) clean_ref="$snap_ref" ;;
+  esac
+}
+
+judge_unpushed() {
+  local ub="$1" uh="$2" tr_state contains cnt up
+  if ! CG show-ref -q --verify "refs/heads/$ub" 2>/dev/null; then
+    return 0   # 브랜치가 지워졌다
+  fi
+  tr_state="$(CG for-each-ref --format='%(upstream:track)' "refs/heads/$ub" 2>/dev/null || true)"
+  if [ "$tr_state" = "[gone]" ]; then
+    return 0   # 원격 브랜치가 병합 뒤 지워졌다. squash 병합은 커밋을 포함 관계로 알 수 없어 이것으로 본다.
+  fi
+  if [ -n "$uh" ] && CG cat-file -e "${uh}^{commit}" 2>/dev/null; then
+    if contains="$(CG branch -r --contains "$uh" 2>/dev/null)"; then
+      [ -n "$contains" ] && return 0   # 어느 원격 ref 에 들어갔다
+    else
+      add "push 안 한 커밋이 있었는지 판정하지 못했습니다(지난 작업 확인 불능). 다음: git status -sb 로 ${ub} 브랜치를 확인하십시오."
+      keep_unpushed=1
+      return 0
+    fi
+  else
+    # 커밋이 리베이스·amend 로 바뀌었다. 지금 브랜치 기준으로 다시 센다.
+    up="$(CG rev-parse --abbrev-ref --symbolic-full-name "${ub}@{u}" 2>/dev/null || true)"
+    if [ -n "$up" ]; then
+      cnt="$(CG rev-list --count "${ub}@{u}..${ub}" 2>/dev/null || echo 0)"
+    elif [ -n "$(CG remote 2>/dev/null || true)" ]; then
+      cnt="$(CG rev-list --count "$ub" --not --remotes 2>/dev/null || echo 0)"
+    else
+      cnt=0
+    fi
+    [ "${cnt:-0}" -gt 0 ] || return 0
+  fi
+  add "push 안 한 커밋이 ${ub} 브랜치에 있습니다. 다음: /harness:deliver"
+  keep_unpushed=1
+}
+
+# 판정 결과를 기록에 반영한다. 남길 것이 없으면 파일을 지우고, 한쪽만 남기면 다른 쪽 줄을 뺀다.
+finish_carryover() {
+  [ "$carry_active" -eq 1 ] || return 0
+  if [ "$keep_snap" -eq 0 ] && [ "$keep_unpushed" -eq 0 ]; then
+    rm -f "$CARRYOVER"
+  else
+    local drop=""
+    [ "$keep_snap" -eq 1 ] || drop='^(snap_commit|snap_time|sig|snap_failed|snap_file|big_file)='
+    if [ "$keep_unpushed" -eq 0 ]; then
+      drop="${drop:+${drop}|}^unpushed_(branch|head|count)="
+    fi
+    if [ -n "$drop" ]; then
+      grep -Ev "$drop" "$CARRYOVER" > "${CARRYOVER}.tmp.$$" || true
+      mv -f "${CARRYOVER}.tmp.$$" "$CARRYOVER"
+    fi
+  fi
+  if [ -n "$clean_ref" ]; then
+    CG update-ref -d "$clean_ref" >/dev/null 2>&1 || true
+  fi
+}
 
 # 리베이스를 실행하고 성공·충돌·그 밖의 실패를 메시지로 남긴다. 실패해도
 # 이 함수 자체는 항상 0 을 반환한다 — set -e 때문에 스크립트 전체가
@@ -158,12 +375,17 @@ changed="$(git status --porcelain --untracked-files=all | grep -Ev '^.. "?((.*/)
 # 이미 진행 중인 리베이스나 병합이 있으면 자동 동기화를 시도하지 않는다. 그
 # 위에 또 리베이스를 걸면 실패하거나, 진행 중이던 것과 뒤섞여 저장소를 더
 # 꼬아 놓을 수 있다.
+# 지난 세션 기록 판정은 원격을 가져온 뒤에만 한다(원격에 병합됐는지, 원격 브랜치가 지워졌는지
+# 알아야 하므로). ok: fetch 성공, none: 원격이 없어 가져올 것이 없다, 그 밖: 판정하지 않는다.
+fetch_state="skipped"
 if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ] || [ -f "$git_dir/MERGE_HEAD" ]; then
   add "이미 리베이스나 병합이 진행 중이라 자동 동기화를 건너뜁니다. 다음: git status 로 상태를 확인하고 git rebase --continue(또는 --abort), git merge --abort 로 마무리한 뒤 /harness:sync 를 실행하십시오."
 elif git remote get-url origin >/dev/null 2>&1; then
   # fetch 는 작업 트리를 건드리지 않으므로 미커밋 변경이 있어도 한다. 건너뛰는
   # 것은 리베이스뿐이다 — 그래야 /harness:sync 를 부르기 전에도 원격 상태를 본다.
+  fetch_state="failed"
   if fetch_output="$(git fetch --all --prune 2>&1)"; then
+    fetch_state="ok"
     add "원격을 가져왔습니다."
     upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
     if [ -n "$changed" ]; then
@@ -190,8 +412,19 @@ elif git remote get-url origin >/dev/null 2>&1; then
     add "fetch 에 실패했습니다: ${fetch_err:-원인을 알 수 없습니다}. 다음: 네트워크를 확인하고 gh auth status 로 로그인 상태를 보십시오(로그인 안 됨이면 사람이 gh auth login 실행). 확인한 뒤 /harness:sync 를 실행하십시오."
   fi
 else
+  fetch_state="none"
   add "원격 저장소가 연결되어 있지 않습니다. 푸시와 PR 과 이슈 관련 동작은 원격을 연결한 뒤에 가능합니다. 다음: 사람이 할 일 - 프로젝트의 GitHub 저장소 주소를 확인해 git remote add origin 주소 로 연결하십시오."
 fi
+
+case "$fetch_state" in
+  ok | none) judge_carryover ;;
+  *)
+    # 원격 상태를 모르면 병합·삭제 여부를 판정할 수 없다. 통과시키지 않고 기록을 남긴다.
+    if [ -f "$CARRYOVER" ] && [ "$(head -n1 "$CARRYOVER" | tr -d '')" = "format=2" ]; then
+      add "원격을 가져오지 못해 지난 작업을 판정하지 못했습니다(지난 작업 확인 불능). 기록은 남겨 두었으니 원격 연결을 확인한 뒤 다음 세션에서 다시 판정합니다."
+    fi
+    ;;
+esac
 
 if [ -n "$changed" ]; then
   add "커밋되지 않은 변경이 있습니다."
@@ -245,8 +478,9 @@ fi
 printf '%s' "$lines"
 
 # 전달이 끝난 뒤에 지운다. 지우고 나서 출력에 실패하면 경고가 사라진다.
-if [ -n "$CARRYOVER_PENDING" ]; then
-  rm -f "$CARRYOVER_PENDING"
-fi
+for legacy_file in ${LEGACY_PENDING[@]+"${LEGACY_PENDING[@]}"}; do
+  rm -f "$legacy_file"
+done
+finish_carryover
 
 exit 0
