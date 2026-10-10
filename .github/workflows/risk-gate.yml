@@ -32,6 +32,12 @@
 #         issues: write
 #         checks: read
 #         statuses: read
+#         actions: write    # 승인 뒤 같은 커밋의 옛 실패 실행을 다시 돌리는 데 쓴다(#221)
+#
+# `actions: write` 가 없어도 판정은 전과 같이 돈다. 다만 승인으로 초록불이 된 뒤에도 승인
+# 전에 실패한 옛 실행이 PR 화면에 빨간불로 남고, rerun-stale job 이 그 사실을 경고로 알린다.
+# check job 에는 permissions 를 따로 적지 않아 부르는 쪽 권한을 그대로 받는다 — job 에 적으면
+# 부르는 쪽이 주지 않은 권한을 요구하는 꼴이 될 수 있어서다.
 
 name: risk-gate
 
@@ -56,12 +62,7 @@ jobs:
     concurrency:
       group: risk-gate-${{ github.event.pull_request.number }}
       cancel-in-progress: true
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
-      checks: read
-      statuses: read
+    # permissions 는 적지 않는다 — 부르는 쪽이 준 권한을 그대로 쓴다(위 머리 주석).
     steps:
       - name: 판정 엔진 가져오기
         uses: actions/checkout@v4
@@ -157,6 +158,71 @@ jobs:
               exit 1
               ;;
           esac
+
+  # 승인(pull_request_review)으로 check 가 통과하면, 같은 커밋에서 승인 전에 pull_request 로
+  # 돌다 실패·취소된 옛 실행을 다시 돌린다. 안 그러면 PR 화면에 "risk-gate / check" 가 실패와
+  # 통과로 둘 다 남는다. 다시 도는 실행은 pull_request 이벤트라 이 job 을 타지 않으므로 반복이
+  # 없다. 판정은 리뷰를 API 로 실시간 읽어 하니(checker.risk_gate) 다시 돌려도 승인이 인정된다.
+  # check job 이 끝난 뒤에 도는 별도 job 인 것은 concurrency(cancel-in-progress) 때문이다 —
+  # check 가 도는 중에 다시 돌리면 같은 그룹이라 지금 실행이 취소된다.
+  # 이 job 은 실패해도 판정을 바꾸지 않는다: 어떤 경우에도 성공으로 끝난다.
+  rerun-stale:
+    needs: check
+    if: github.event_name == 'pull_request_review' && needs.check.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 같은 커밋의 옛 실패 실행 다시 돌리기
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set +e
+          note() {
+            echo "::warning title=옛 실패 실행을 다시 돌리지 못함::$1"
+            printf '%s\n' "- $1" >> "$GITHUB_STEP_SUMMARY"
+          }
+          no_perm="권한이 없어 이전 실패 실행을 다시 돌리지 못했다. 부르는 쪽 워크플로 job 의 permissions 에 actions: write 를 추가한다."
+
+          # github 컨텍스트는 재사용 워크플로 안에서도 부르는 쪽 것이다. 이 실행의 workflow_id 를
+          # API 로 읽어, 같은 부르는 쪽 워크플로 파일의 같은 PR head 실행만 찾는다.
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" 2>err.txt)"
+          if [ $? -ne 0 ]; then
+            if grep -q '403' err.txt; then note "$no_perm"; else note "이 실행의 정보를 읽지 못해 옛 실패 실행을 다시 돌리지 못했다: $(head -c 200 err.txt | tr '\n' ' ')"; fi
+            exit 0
+          fi
+          wf_id="$(printf '%s' "$run_json" | jq -r '.workflow_id')"
+          head_sha="$PR_HEAD_SHA"
+
+          stale="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf_id/runs?head_sha=$head_sha&event=pull_request&per_page=100" \
+            --jq ".workflow_runs[] | select(.id != $RUN_ID and (.conclusion == \"failure\" or .conclusion == \"cancelled\")) | \"\(.id) \(.conclusion)\"" 2>err.txt)"
+          if [ $? -ne 0 ]; then
+            if grep -q '403' err.txt; then note "$no_perm"; else note "옛 실행 목록을 읽지 못해 다시 돌리지 못했다: $(head -c 200 err.txt | tr '\n' ' ')"; fi
+            exit 0
+          fi
+          if [ -z "$stale" ]; then
+            echo "다시 돌릴 옛 실패 실행이 없다."
+            exit 0
+          fi
+
+          while read -r id conclusion; do
+            [ -z "$id" ] && continue
+            # 실패는 실패한 job 만, 취소는 통째로 다시 돌린다.
+            if [ "$conclusion" = "failure" ]; then ep="rerun-failed-jobs"; else ep="rerun"; fi
+            if gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/$ep" >/dev/null 2>err.txt; then
+              echo "옛 실행 $id($conclusion)를 다시 돌렸다."
+              printf '%s\n' "- 옛 실행 $id($conclusion)를 다시 돌렸다." >> "$GITHUB_STEP_SUMMARY"
+            elif grep -q '403' err.txt; then
+              note "$no_perm"
+              break
+            else
+              note "옛 실행 $id 를 다시 돌리지 못했다: $(head -c 200 err.txt | tr '\n' ' ')"
+            fi
+          done <<< "$stale"
+          exit 0
 
   after-merge:
     if: github.event_name == 'push'

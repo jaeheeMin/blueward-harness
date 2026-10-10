@@ -732,6 +732,71 @@ def test_검사_상태를_못_얻으면_검사_불능으로_거부한다(tmp_pat
     assert not any("check-pr" in line for line in log)
 
 
+def _run_at(name: str, bucket: str, started: str, workflow: str = "risk-gate") -> dict:
+    return {**_check(name, bucket), "workflow": workflow, "startedAt": started}
+
+
+@_needs_hook_env
+def test_같은_이름_옛_실패와_새_통과면_통과한다(tmp_path):
+    checks = {123: ([
+        _run_at("risk-gate / check", "fail", "2026-10-10T01:00:00Z"),
+        _run_at("risk-gate / check", "pass", "2026-10-10T02:00:00Z"),
+    ], 1)}
+    out, log = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", checks)
+    assert out is None
+    assert any("check-pr" in line for line in log)
+
+
+@_needs_hook_env
+def test_같은_이름_새_실패와_옛_통과면_거부한다(tmp_path):
+    checks = {123: ([
+        _run_at("risk-gate / check", "pass", "2026-10-10T01:00:00Z"),
+        _run_at("risk-gate / check", "fail", "2026-10-10T02:00:00Z"),
+    ], 1)}
+    out, _ = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", checks)
+    assert "risk-gate / check" in _reason(out)
+
+
+@_needs_hook_env
+def test_같은_이름_새_진행_중과_옛_통과면_대기로_거부한다(tmp_path):
+    checks = {123: ([
+        _run_at("risk-gate / check", "pass", "2026-10-10T01:00:00Z"),
+        _run_at("risk-gate / check", "pending", "0001-01-01T00:00:00Z"),
+    ], 8)}
+    out, _ = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", checks)
+    assert "아직 끝나지 않았습니다" in _reason(out)
+
+
+@_needs_hook_env
+def test_옛_실패와_새_건너뜀이면_건너뜀이_실패를_가리지_못해_거부한다(tmp_path):
+    checks = {123: ([
+        _run_at("risk-gate / check", "fail", "2026-10-10T01:00:00Z"),
+        _run_at("risk-gate / check", "skipping", "2026-10-10T02:00:00Z"),
+    ], 1)}
+    out, _ = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", checks)
+    assert "risk-gate / check" in _reason(out)
+
+
+@_needs_hook_env
+def test_같은_그룹이_모두_건너뜀이면_통과한다(tmp_path):
+    checks = {123: [
+        _run_at("risk-gate / check", "skipping", "2026-10-10T01:00:00Z"),
+        _run_at("risk-gate / check", "skipping", "2026-10-10T02:00:00Z"),
+    ]}
+    out, _ = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", checks)
+    assert out is None
+
+
+@_needs_hook_env
+def test_이름이_같아도_워크플로가_다르면_각각_최신을_본다(tmp_path):
+    checks = {123: ([
+        _run_at("check", "fail", "2026-10-10T01:00:00Z", "ssot-approval"),
+        _run_at("check", "pass", "2026-10-10T02:00:00Z", "risk-gate"),
+    ], 1)}
+    out, _ = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", checks)
+    assert "check" in _reason(out)
+
+
 @_needs_hook_env
 def test_두_merge_중_두번째_PR_이_빨간불이면_그_PR_을_짚어_거부한다(tmp_path):
     checks = {200: ([_check("doc-guard", "fail", "https://example.com/run/200")], 1)}
