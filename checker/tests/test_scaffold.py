@@ -141,8 +141,14 @@ def test_위험도_게이트_기준_파일과_워크플로를_만든다(tmp_path
     assert f"\n  {OWN_CHECK_NAME}:\n    uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@main" in workflow
     for trigger in ("pull_request:", "pull_request_review:", "push:"):
         assert trigger in workflow
-    for permission in ("contents: read", "pull-requests: write", "issues: write", "checks: read", "statuses: read"):
+    for permission in ("contents: read", "pull-requests: write", "issues: write", "checks: read", "statuses: read", "actions: write"):
         assert permission in workflow
+
+    import yaml
+
+    ssot = yaml.safe_load((tmp_path / ".github" / "workflows" / "ssot-approval.yml").read_text(encoding="utf-8"))
+    assert ssot["jobs"]["ssot-approval"]["permissions"] == {
+        "contents": "read", "pull-requests": "write", "issues": "write", "actions": "write"}
 
 
 def test_ai_review_호출_워크플로를_만들고_기본은_꺼져_있다(tmp_path: Path):

@@ -224,7 +224,7 @@ check_one_merge() {
     deny "임시 파일을 만들지 못해 PR #$pr_number 의 검사 상태를 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
   }
   set +e
-  ck_out="$(gh pr checks "$pr_number" -R "$repo" --json name,state,bucket,link 2>"$ck_err_file")"
+  ck_out="$(gh pr checks "$pr_number" -R "$repo" --json name,state,bucket,link,workflow,startedAt 2>"$ck_err_file")"
   ck_rc=$?
   set -e
   ck_err="$(cat "$ck_err_file" 2>/dev/null)" || ck_err=""
@@ -237,11 +237,28 @@ check_one_merge() {
     ck_detail="$(printf '%s\n%s' "$ck_out" "$ck_err" | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
     deny "PR #$pr_number 의 검사 상태를 확인하지 못해 merge 를 막습니다(종료코드 $ck_rc). 검사 불능이므로 통과시키지 않습니다. $next_retry 자세히: $ck_detail"
   else
-    ck_fail_names="$(printf '%s' "$ck_out" | jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .name] | .[:5] | join(", ")' 2>/dev/null | tr -d '\r"\\`$')" || true
-    ck_fail_total="$(printf '%s' "$ck_out" | jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length' 2>/dev/null | tr -d '\r')" || true
-    ck_fail_link="$(printf '%s' "$ck_out" | jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .link // empty] | .[0] // empty' 2>/dev/null | tr -d '\r"\\`$ ')" || true
-    ck_wait_names="$(printf '%s' "$ck_out" | jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping" and .bucket != "fail" and .bucket != "cancel") | .name] | .[:5] | join(", ")' 2>/dev/null | tr -d '\r"\\`$')" || true
-    ck_wait_total="$(printf '%s' "$ck_out" | jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping" and .bucket != "fail" and .bucket != "cancel")] | length' 2>/dev/null | tr -d '\r')" || true
+    # 같은 워크플로의 같은 이름 검사가 여러 번 돈 PR(재실행, pull_request 와
+    # pull_request_review 로 따로 돈 경우)은 옛 실패가 화면에 남는다. 그래서 (workflow,
+    # name) 마다 가장 늦게 시작한 것만 본다. 진행 중은 아직 startedAt 이 비어 있을 수
+    # 있으니 가장 최신으로 친다.
+    # 건너뜀(skipping)은 같은 그룹에 다른 결과가 있으면 후보에서 뺀다 — 옛 실패를 가리면 안 된다. 시작 시각이 같거나 없으면 모두 남겨 예전처럼 판정한다.
+    ck_latest="$(printf '%s' "$ck_out" | jq -c '
+      group_by([.workflow // "", .name])
+      | map(
+          . as $all
+          | (map(select(.bucket != "skipping")) | if length > 0 then . else $all end) as $cand
+          | ($cand | map(if .bucket == "pending" then "9999" else (.startedAt // "") end) | max) as $newest
+          | $cand | map(select((if .bucket == "pending" then "9999" else (.startedAt // "") end) == $newest))
+        )
+      | add // []' 2>/dev/null | tr -d '\r')" || ck_latest=""
+    if ! printf '%s' "$ck_latest" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      ck_latest="$ck_out"
+    fi
+    ck_fail_names="$(printf '%s' "$ck_latest" | jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .name] | .[:5] | join(", ")' 2>/dev/null | tr -d '\r"\\`$')" || true
+    ck_fail_total="$(printf '%s' "$ck_latest" | jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length' 2>/dev/null | tr -d '\r')" || true
+    ck_fail_link="$(printf '%s' "$ck_latest" | jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .link // empty] | .[0] // empty' 2>/dev/null | tr -d '\r"\\`$ ')" || true
+    ck_wait_names="$(printf '%s' "$ck_latest" | jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping" and .bucket != "fail" and .bucket != "cancel") | .name] | .[:5] | join(", ")' 2>/dev/null | tr -d '\r"\\`$')" || true
+    ck_wait_total="$(printf '%s' "$ck_latest" | jq -r '[.[] | select(.bucket != "pass" and .bucket != "skipping" and .bucket != "fail" and .bucket != "cancel")] | length' 2>/dev/null | tr -d '\r')" || true
     if [ "${ck_fail_total:-0}" -gt 0 ] 2>/dev/null; then
       if [ "$ck_fail_total" -gt 5 ]; then
         ck_fail_names="$ck_fail_names 등 ${ck_fail_total}개"
