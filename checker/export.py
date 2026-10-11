@@ -31,6 +31,7 @@ import json
 import os
 import posixpath
 import re
+import subprocess
 import sys
 import zipfile
 from dataclasses import dataclass, field
@@ -661,6 +662,54 @@ def _inside(root: Path, path: Path, what: str, form: str = "") -> Path:
     return resolved
 
 
+def resolve_form(root: Path, form: str) -> str:
+    """`--form` 값을 지도 이름(파일 이름 stem)으로 바꾼다. 이름 또는 지도 파일 경로를 받는다.
+
+    경로는 --root 기준 상대 또는 절대이고 `.yaml`/`.yml` 확장자가 있어야 한다. 경로는 root 의
+    `templates/forms/` 바로 아래의 실제 파일만 허용한다.
+    """
+    if not form:
+        raise ExportError("--form 이 비어 있다")
+    is_path = any(c in form for c in "/\\") or form.lower().endswith((".yaml", ".yml"))
+    if not is_path:
+        return form
+    p = Path(form)
+    if not p.is_absolute():
+        # 구분자 없는 `Backlog.yaml` 은 templates/forms 아래 파일 이름으로 본다.
+        p = root / (Path("templates") / "forms" / form if not any(c in form for c in "/\\") else p)
+    resolved = p.resolve()
+    forms_dir = (root / "templates" / "forms").resolve()
+    if resolved.parent != forms_dir:
+        raise ExportError(f"--form {form} 이 양식 지도 폴더({forms_dir}) 안의 파일이 아니다", form=form)
+    if resolved.suffix.lower() not in (".yaml", ".yml") or not resolved.is_file():
+        raise ExportError(f"--form {form} 에 해당하는 양식 지도 파일(.yaml)이 없다", form=form)
+    name = resolved.stem
+    if resolved.suffix != ".yaml":
+        raise ExportError(f"양식 지도는 `.yaml` 확장자여야 한다: {resolved.name}", form=form)
+    return name
+
+
+def _in_origin_main(root: Path, rel: str) -> tuple[bool | None, str]:
+    """root 기준 상대 경로 rel 이 origin/main 트리에 있는지. 판단 불능이면 (None, 사유). fetch 는 하지 않는다."""
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-c", "core.quotepath=false", "-C", str(root), *args],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+    try:
+        head = git("rev-parse", "--verify", "--quiet", "origin/main^{commit}")
+        if head.returncode != 0:
+            return None, "git 저장소가 아니거나 origin/main 을 읽지 못했다(fetch 가 필요할 수 있다)"
+        ls = git("ls-tree", "-r", "--name-only", "origin/main", "--", rel)
+    except FileNotFoundError:
+        return None, "git 을 실행하지 못했다(git 이 없다)"
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, f"git 실행이 실패했다: {e}"
+    if ls.returncode != 0:
+        return None, f"origin/main 트리를 읽지 못했다: {(ls.stderr or '').strip()}"
+    return bool(ls.stdout.strip()), ""
+
+
 def load_map(root: Path, form: str) -> tuple[dict, Path]:
     _check_form_name(form)
     path = _inside(root, root / "templates" / "forms" / f"{form}.yaml", "양식 지도", form)
@@ -751,7 +800,7 @@ def is_srs_map(fmap: dict) -> bool:
 
 
 def build_form(
-    form: str, spec_sections: dict, root: Path, srs: SrsDoc | None = None
+    form: str, spec_sections: dict, root: Path, srs: SrsDoc | None = None, replaced: list | None = None
 ) -> tuple[list[tuple[Path, bytes]], list[dict], list[dict]]:
     """한 양식을 산출한다. (쓸 파일, 거부 사유들, 경고들) 을 낸다. 못 읽으면 ExportError.
 
@@ -995,8 +1044,18 @@ def build_form(
         else:
             out_path = folder / out_name
             if out_path.exists():
-                problem("", "파일명", f"{out_path.relative_to(root.resolve()).as_posix()} 가 이미 있다. 이전 판은 덮어쓰지 않는다 — 버전을 올려 새 판으로 산출한다")
-                out_path = None
+                rel = out_path.relative_to(root.resolve()).as_posix()
+                in_main, why = _in_origin_main(root, rel)
+                if in_main is False:
+                    # 이 브랜치에서 만든 판(main 에 아직 없다) — 같은 버전으로 다시 산출한다.
+                    if replaced is not None:
+                        replaced.append({"file": rel, "reason": f"{rel} 는 origin/main 에 없는 판(이 브랜치에서 만든 판)이라 같은 버전으로 덮어쓴다"})
+                elif in_main:
+                    problem("", "파일명", f"{rel} 가 이미 있고 main 에 이미 있는 판이다. 이전 판은 덮어쓰지 않는다 — 버전을 올려 새 판으로 산출한다")
+                    out_path = None
+                else:
+                    problem("", "파일명", f"{rel} 가 이미 있는데 main 에 있는 판인지 판단하지 못해 덮어쓰지 않는다(검사 불능, 통과 아님): {why}")
+                    out_path = None
 
     unique: list[dict] = []
     for p in problems:
@@ -1293,7 +1352,7 @@ def _field_value(spec_sections, sname, name) -> str:
 
 # ---------------------------------------------------------------- 진입점
 
-def _commit(writes: list[tuple[Path, bytes]], root: Path) -> list[str]:
+def _commit(writes: list[tuple[Path, bytes]], root: Path, replace: frozenset[Path] = frozenset()) -> list[str]:
     """산출물을 원자적으로 쓴다.
 
     모두 같은 폴더의 임시 파일로 먼저 쓰고, 전부 성공하면 최종 이름으로 rename 한다. 최종 이름이
@@ -1302,6 +1361,7 @@ def _commit(writes: list[tuple[Path, bytes]], root: Path) -> list[str]:
     """
     temps: list[Path] = []
     finals: list[Path] = []
+    backups: list[tuple[Path, Path]] = []
     made_dirs: list[Path] = []
     try:
         for i, (path, data) in enumerate(writes):
@@ -1318,13 +1378,22 @@ def _commit(writes: list[tuple[Path, bytes]], root: Path) -> list[str]:
                 fh.write(data)
         for (path, _), tmp in zip(writes, temps):
             if path.exists():
-                raise ExportError(f"{path} 가 이미 있다. 이전 판은 덮어쓰지 않는다")
+                if path not in replace:
+                    raise ExportError(f"{path} 가 이미 있다. 이전 판은 덮어쓰지 않는다")
+                backup = path.parent / f".{path.name}.{os.getpid()}.bak"
+                os.replace(path, backup)
+                backups.append((path, backup))
             os.rename(tmp, path)
             finals.append(path)
     except BaseException as e:
         for f in temps + finals:
             try:
                 f.unlink()
+            except OSError:
+                pass
+        for path, backup in backups:
+            try:
+                os.replace(backup, path)
             except OSError:
                 pass
         for d in sorted(set(made_dirs), key=lambda x: len(x.parts), reverse=True):
@@ -1337,6 +1406,11 @@ def _commit(writes: list[tuple[Path, bytes]], root: Path) -> list[str]:
         if isinstance(e, Exception):
             raise ExportError(f"산출물을 쓰지 못했다: {e}") from None
         raise
+    for _, backup in backups:
+        try:
+            backup.unlink()
+        except OSError:
+            pass
     return [p.relative_to(root).as_posix() for p, _ in writes]
 
 
@@ -1363,6 +1437,7 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
         raise ExportError(f"작업본 {spec} 를 읽지 못했다: {e}") from None
     srs: SrsDoc | None = None
     if only_form is not None:
+        only_form = resolve_form(root, only_form)
         _check_form_name(only_form)
         if is_srs_map(load_map(root, only_form)[0]):
             srs = parse_srs(text)
@@ -1389,8 +1464,9 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
     writes: list[tuple[Path, bytes]] = []
     problems: list[dict] = []
     warnings: list[dict] = []
+    replaced: list[dict] = []
     for form, sections in jobs:
-        w, p, wa = build_form(form, sections, root, srs)
+        w, p, wa = build_form(form, sections, root, srs, replaced)
         writes += w
         problems += p
         warnings += wa
@@ -1409,11 +1485,15 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
     unchecked = any(w.get("type") == "dropdown-unchecked" for w in warnings)
     flagged = outside or unchecked
     note = _warning_note(outside, unchecked)
+    # 이 브랜치에서 만든 판을 같은 버전으로 덮어쓰는 경우의 표시(덮어쓸 파일이 없으면 빈 dict)
+    rp = {"replaced": True, "replaced_files": replaced} if replaced else {}
+    rp_note = " 이 브랜치에서 만든 판(origin/main 에 없음)은 같은 버전으로 덮어썼다." if replaced else ""
     if check_only:
         files = [p.relative_to(root).as_posix() for p in names]
         return (EXIT_WARNING if flagged else EXIT_OK), {
             "status": "warning" if flagged else "ok",
             "dry_run": True,
+            **rp,
             "files": files,
             "problems": [],
             "warnings": warnings,
@@ -1422,10 +1502,11 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
                 + (note + " 고친 뒤 다시 확인한다." if flagged else "문제가 없으면 --check 없이 다시 실행해 산출한다.")
             ),
         }
-    written = _commit(writes, root)
+    written = _commit(writes, root, frozenset(root / r["file"] for r in replaced))
     if flagged:
         return EXIT_WARNING, {
             "status": "warning",
+            **rp,
             "files": written,
             "problems": [],
             "warnings": warnings,
@@ -1436,10 +1517,11 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
         }
     return EXIT_OK, {
         "status": "ok",
+        **rp,
         "files": written,
         "problems": [],
         "warnings": warnings,
-        "next": "다음: 엑셀로 한 번 열어 서식을 확인한다. 올리면 PR 에서 doc-guard(Actions)가 파일 이름과 구조를 검사한다.",
+        "next": "다음:" + rp_note + " 엑셀로 한 번 열어 서식을 확인한다. 올리면 PR 에서 doc-guard(Actions)가 파일 이름과 구조를 검사한다.",
     }
 
 
@@ -1457,6 +1539,7 @@ def list_values(root: Path, form: str) -> dict:
 
     열 이름은 지도 표의 `열` 이름이다. 지도에 없는 열의 유효성은 내지 않는다.
     """
+    form = resolve_form(root, form)
     _check_form_name(form)
     fmap, map_path = load_map(root, form)
     infos, raw, paths, _, wb_xml = _read_template(root, map_path, fmap, form)
@@ -1540,7 +1623,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--spec", type=Path, help="작업본 md(docs/spec/DEV-xxx-….md) 또는 원본이 SRS 인 지도면 docs/ssot/SRS.md")
     parser.add_argument("--root", type=Path, required=True, help="Project Repository 루트")
-    parser.add_argument("--form", help="이 양식만 산출한다(생략하면 작업본의 모든 양식). 원본이 SRS 인 지도는 필수")
+    parser.add_argument("--form", help="이 양식만 산출한다(생략하면 작업본의 모든 양식). 지도 이름 또는 지도 파일 경로(--root 기준 상대·절대). 원본이 SRS 인 지도는 필수")
     parser.add_argument("--check", action="store_true", help="파일을 쓰지 않고 같은 검사·보고만 한다")
     parser.add_argument("--list-values", action="store_true", help="--form 지도 템플릿의 드롭다운 허용 값을 열별 JSON 으로 낸다")
     args = parser.parse_args(argv)

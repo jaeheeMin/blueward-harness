@@ -147,7 +147,12 @@ uvx --from "${DOC_GUARD_ENGINE:-git+https://github.com/jaeheeMin/blueward-harnes
 Bash 도구로 실행한다(Windows Git Bash 에서도 같다). PowerShell 도구는 `${..:-..}` 를
 못 쓰므로, PowerShell 이면 `$e = if ($env:DOC_GUARD_ENGINE) { $env:DOC_GUARD_ENGINE } else { "git+https://github.com/jaeheeMin/blueward-harness@main" }`
 로 정한 뒤 `uvx --from $e python -m checker.export --spec … --root …` 로 부른다.
-양식이 여럿이면 모두 만들고, 하나만 만들려면 `--form <양식 이름>` 을 더한다. 결과는
+양식이 여럿이면 모두 만들고, 하나만 만들려면 `--form <양식 이름 또는 지도 파일 경로>` 를 더한다
+(`--form Backlog` 와 `--form templates/forms/Backlog.yaml` 은 같다. 경로는 `--root` 기준 상대 또는 절대이고
+`templates/forms/` 안의 지도 파일이어야 한다. 없는 파일이면 종료코드 2). 같은 이름 산출 파일이 이미 있으면
+엔진이 그 파일이 `origin/main` 에 있는지 본다 — 없으면(이 브랜치에서 만든 판) 같은 버전으로 다시 산출하고
+결과 JSON 에 `replaced: true` 가 붙는다. 엔진은 fetch 하지 않으므로 산출 전에 `/harness:sync` 나 `git fetch origin` 으로
+`origin/main` 을 최신으로 맞춘다. 결과는
 stdout 의 JSON 한 줄이다. stdout 이 JSON 으로 읽히지 않으면(uvx 실패, 엔진 못 받음 등)
 종료코드와 무관하게 "산출 불능" 이라고 알린다. 거부(rejected)로 취급하지 않고 통과로도 넘기지 않는다.
 
@@ -163,11 +168,13 @@ stdout 의 JSON 한 줄이다. stdout 이 JSON 으로 읽히지 않으면(uvx �
 - `status: rejected` (1) — 아무 파일도 만들지 않았다. `problems` 의 양식·시트·항목·
   사유를 그대로 보여 주고 작업본을 고친 뒤 다시 돌린다. 값을 추측해 채우지 않고
   모르는 값은 사용자에게 묻는다. 같은 이름 파일이 이미 있어 거부된 것이면 아래 "버전 올리기".
+  사유가 "main 에 있는 판인지 판단하지 못해" 이면(git 없음·origin/main 못 읽음) 검사 불능이다 — fetch 한 뒤 다시 한다.
 - `status: error` (2) — 작업본·지도·템플릿을 읽지 못했거나 작업본이 지도에 없는 것을
   가리키거나, 경로가 저장소 밖이거나, 예상하지 못한 오류가 났다. 산출하지 못했다고
   알리고 `problems` 의 원인을 보여 준다. 통과로 넘기지 않는다.
 
-**버전 올리기.** 이미 산출한 판은 덮어쓰지 않고 지우지도 않는다. 내용이 바뀌면
+**버전 올리기.** main 에 이미 있는 판은 덮어쓰지 않고 지우지도 않는다(거부 사유 "main 에 이미 있는 판이다").
+이 브랜치에서 만든 판(origin/main 에 없음)은 버전을 올리지 않아도 그대로 다시 산출된다. 내용이 바뀌면
 작업본의 양식 변경이력 표(예: Change History, 변경이력, 개정이력)에 행을 더해 새
 버전으로 올린 뒤(Spec `## 변경 이력` 에도 같은 사건을 적는다) 다시 산출한다. 파일
 이름의 `v<버전>` 은 그 표의 마지막 행에서 오므로 새 파일이 만들어지고 이전 판은 남는다.
