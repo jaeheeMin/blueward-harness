@@ -60,3 +60,34 @@ def test_예시_지도의_열과_항목_키가_모두_문자열이다():
             assert isinstance(field["항목"], str)
         for table in sheet.get("표", []):
             assert all(isinstance(k, str) for k in table["열"])
+
+
+def _srs_example_map() -> dict:
+    text = FORM_MAP_MD.read_text(encoding="utf-8")
+    blocks = [yaml.safe_load(b) for b in re.findall(r"```yaml\n(.*?)```", text, re.DOTALL)]
+    found = [b for b in blocks if "원본: SRS" in yaml.safe_dump(b, allow_unicode=True)]
+    assert found, "form-map.md 에 원본이 SRS 인 지도 예시가 없다"
+    return found[0]
+
+
+def test_SRS_원본_예시_지도가_표기_키를_갖는다():
+    data = _srs_example_map()
+    assert data["양식"] and data["템플릿"]
+    assert data["산출"]["자리"]["버전"] == {"메타": "버전"}
+    table = next(t for s in data["시트"] for t in s.get("표", []) if t.get("원본") == "SRS")
+    assert table["번호_열"] in table["열"]
+    assert table["md_전용"] and all(isinstance(k, str) for k in table["열"])
+    assert not any(s.get("칸") or s.get("서술") for s in data["시트"])
+
+
+def test_원본이_SRS_인_지도_표기를_엔진이_알아본다():
+    from checker import export
+
+    assert export.is_srs_map(_srs_example_map())
+    assert not export.is_srs_map(_example_map())
+
+
+def test_형식_정본이_드롭다운_목록_출력과_종료코드_3을_설명한다():
+    text = FORM_MAP_MD.read_text(encoding="utf-8")
+    for needle in ("--list-values", "종료코드 3", "type: dropdown", "--check", "md_전용", "번호_열"):
+        assert needle in text, needle

@@ -13,6 +13,13 @@ zip 수준에서 바뀐 시트의 XML 만 고치고 나머지 항목은 같은 �
        쓸 수 없다(이미 있음, 금지 문자, 파일명 패턴). 아무 파일도 쓰지 않는다.
     2  읽지 못함. 작업본·지도·템플릿을 못 읽거나 작업본이 지도에 없는 것을 가리킨다.
        검사 불능이지 통과도 위반도 아니다.
+    3  산출했으나 경고가 있다(#228). 표 값이 템플릿 드롭다운 목록 밖이다. 파일은 썼고 stdout 의
+       `status` 는 `warning`, `warnings` 에서 `type: dropdown` 이 목록 밖 값이다(행·열·값·허용 값).
+       허용 값을 읽지 못해 검사하지 못한 칸은 `type: dropdown-unchecked` 경고로만 알리고 종료코드는 0 이다.
+
+원본이 SRS 인 지도(표에 `원본: SRS`)는 `## 양식 항목` 이 아니라 SRS.md 의 `## 요구사항` 표와
+`### REQ-xxx` 상세 절을 읽는다(`--form <지도>` 와 `--spec <SRS.md>`). `--check` 는 파일을 쓰지 않고
+같은 보고만 낸다. `--list-values` 는 지도 템플릿의 드롭다운 허용 값을 열별로 JSON 으로 낸다.
 """
 from __future__ import annotations
 
@@ -32,9 +39,13 @@ from xml.sax.saxutils import escape, unescape
 
 import yaml
 
+from checker.xlsx_validation import ListReader
+from checker.xlsx_validation import find as find_validation
+
 EXIT_OK = 0
 EXIT_REJECTED = 1
 EXIT_ERROR = 2
+EXIT_WARNING = 3
 
 FORBIDDEN_NAME_CHARS = '\\/:*?"<>|'
 UNDECIDED = "미정"
@@ -152,6 +163,7 @@ class SheetXml:
         self.pre, self.post = xml[: m.start()], xml[m.end():]
         self.rows: dict[int, _Row] = {}
         self.dirty = False
+        self.filter_change: tuple[str, str] | None = None
         self._max_row = 0
         self._max_col = 0
         for rm in _ROW_RE.finditer(m.group(1) or ""):
@@ -287,8 +299,35 @@ class SheetXml:
         c = self.cell(ref)
         return c.style if c else None
 
+    def unhide(self, num: int) -> None:
+        """쓰는 행에 숨김 속성이 있으면 지운다(양식에서 숨겨진 행에 쓰면 산출물에서 안 보인다)."""
+        row = self.rows.get(num)
+        if row and any(k == "hidden" and v in ("1", "true") for k, v in row.attrs):
+            row.attrs = [(k, v) for k, v in row.attrs if k != "hidden"]
+            row.raw = None
+            self.dirty = True
+
+    def autofit(self, num: int) -> None:
+        """값을 쓴 행의 고정 줄 높이(ht·customHeight)를 지워 엑셀이 내용에 맞춰 높이를 잡게 한다."""
+        row = self.rows.get(num)
+        if row and any(k in ("ht", "customHeight") for k, _ in row.attrs):
+            row.attrs = [(k, v) for k, v in row.attrs if k not in ("ht", "customHeight")]
+            row.raw = None
+            self.dirty = True
+
     def render(self) -> str:
         pre = self.pre
+        post = self.post
+        self.filter_change = None
+        if self._max_row:
+            # 자동 필터 범위는 쓴 행이 그 끝을 넘을 때만 늘린다(없으면 건드리지 않는다).
+            def grow(m: re.Match) -> str:
+                c1, r1, c2, r2 = m.group(2), int(m.group(3)), m.group(4), int(m.group(5))
+                if self._max_row <= r2:
+                    return m.group(0)
+                self.filter_change = (f"{c1}{r1}:{c2}{r2}", f"{c1}{r1}:{c2}{self._max_row}")
+                return f'{m.group(1)}{c1}{r1}:{c2}{self._max_row}"'
+            post = re.sub(r'(<autoFilter\b[^>]*?\bref=")([A-Z]+)(\d+):([A-Z]+)(\d+)"', grow, post, count=1)
         if self._max_row:
             def fix(m: re.Match) -> str:
                 a, b = m.group(1).split(":") if ":" in m.group(1) else (m.group(1), m.group(1))
@@ -299,7 +338,7 @@ class SheetXml:
                 return f'<dimension ref="{c1}{r1}:{c2}{r2}"/>'
             pre = re.sub(r'<dimension ref="([^"]+)"\s*/>', fix, pre, count=1)
         body = "".join(self.rows[n].render() for n in sorted(self.rows))
-        return f"{pre}<sheetData>{body}</sheetData>{self.post}"
+        return f"{pre}<sheetData>{body}</sheetData>{post}"
 
 
 # ---------------------------------------------------------------- xlsx(zip) 읽기
@@ -343,6 +382,26 @@ def _date_styles(zf: zipfile.ZipFile) -> set[str]:
             if nid in _BUILTIN_DATE_IDS or nid in custom:
                 out.add(str(i))
     return out
+
+
+def _extend_filter_database(workbook_xml: str, sheet: str, old_ref: str, new_ref: str) -> str:
+    """자동 필터 범위를 늘렸으면 그 시트의 숨은 이름 `_xlnm._FilterDatabase` 의 범위도 같이 늘린다."""
+    def absolute(ref: str) -> str:
+        a, b = ref.split(":")
+        return "$" + re.sub(r"(\d+)$", r"$\1", a) + ":$" + re.sub(r"(\d+)$", r"$\1", b)
+
+    old_abs, new_abs = absolute(old_ref), absolute(new_ref)
+
+    def fix(m: re.Match) -> str:
+        sheet_part, _, rng = m.group(2).rpartition("!")
+        name = unescape(sheet_part.strip("'").replace("''", "'"), {"&quot;": '"', "&apos;": "'"})
+        if name == sheet and rng == old_abs:
+            return f"{m.group(1)}{sheet_part}!{new_abs}{m.group(3)}"
+        return m.group(0)
+
+    return re.sub(
+        r'(<definedName\b[^>]*name="_xlnm\._FilterDatabase"[^>]*>)([^<]*)(</definedName>)', fix, workbook_xml
+    )
 
 
 def _with_full_calc(workbook_xml: str) -> str:
@@ -494,6 +553,96 @@ def parse_spec(text: str) -> dict[str, dict[str, tuple[Section, dict[str, list[s
     return forms
 
 
+# ---------------------------------------------------------------- SRS(md) 읽기
+
+_REQ_ID = re.compile(r"^REQ-(\d+)$")
+_META_LINE = re.compile(r"^\s*(?:[-*]\s+)?(?:\*\*)?([^:：*|#]{1,30}?)(?:\*\*)?\s*[:：]\s*(?:\*\*)?(.*?)(?:\*\*)?\s*$")
+
+
+@dataclass
+class SrsDoc:
+    header: list[str]  # 요구사항 표 머리글(정규화)
+    rows: list[list[str]]
+    bad: list[tuple[int, int]]  # 셀 수가 틀린 행 (행 번호, 셀 수)
+    details: dict[str, dict[str, str]]  # REQ-xxx → {소제목(정규화): 본문}
+    meta: dict[str, str]  # 문서 머리의 `이름: 값` 줄 (예: 버전)
+
+
+def parse_srs(text: str) -> SrsDoc:
+    """SRS.md → `## 요구사항` 표(1건 1줄)와 `### REQ-xxx` 상세 절의 `#### <열 이름>` 본문.
+
+    문서 머리(첫 `##` 앞)의 `이름: 값` 줄은 meta 로 모은다(파일명의 버전 자리가 쓴다).
+    """
+    lines = re.split(r"\r\n|\n|\r", text)
+    fenced: list[bool] = []  # 코드 펜스(```) 안의 줄은 제목·표로 보지 않는다
+    inside = False
+    for l in lines:
+        if l.lstrip().startswith("```"):
+            fenced.append(True)  # 펜스 줄 자신도 제목이 아니다
+            inside = not inside
+        else:
+            fenced.append(inside)
+    first_h2 = next((i for i, l in enumerate(lines) if re.match(r"^##\s", l) and not fenced[i]), len(lines))
+    meta: dict[str, str] = {}
+    for l in lines[:first_h2]:
+        if l.lstrip().startswith("#"):
+            continue
+        m = _META_LINE.match(l)
+        if m and m.group(2):
+            meta.setdefault(norm(m.group(1)), m.group(2).strip())
+    start = next((i for i, l in enumerate(lines) if re.match(r"^##\s+요구사항\s*$", l) and not fenced[i]), None)
+    if start is None:
+        raise ExportError("SRS 에 `## 요구사항` 절이 없다")
+    end = next((i for i in range(start + 1, len(lines)) if re.match(r"^##\s", lines[i]) and not fenced[i]), len(lines))
+    body = lines[start + 1: end]
+    body_fenced = fenced[start + 1: end]
+    first_h3 = next((i for i, l in enumerate(body) if re.match(r"^###\s", l) and not body_fenced[i]), len(body))
+    parsed = _parse_table(body[:first_h3], "SRS · 요구사항")
+    if not parsed:
+        raise ExportError("SRS 의 `## 요구사항` 절에 표가 없다")
+    header, rows, bad = parsed
+
+    details: dict[str, dict[str, str]] = {}
+    cur: str | None = None
+    field_name: str | None = None
+    buf: list[str] = []
+
+    def flush_field() -> None:
+        nonlocal field_name, buf
+        if cur is not None and field_name is not None:
+            while buf and not buf[0].strip():
+                buf.pop(0)
+            while buf and not buf[-1].strip():
+                buf.pop()
+            details[cur][field_name] = "\n".join(x.rstrip() for x in buf)
+        field_name, buf = None, []
+
+    for k, l in enumerate(body[first_h3:], start=first_h3):
+        in_fence = body_fenced[k]
+        h3 = None if in_fence else re.match(r"^###\s+(.+?)\s*$", l)
+        if h3:
+            flush_field()
+            m = re.match(r"^(REQ-\d+)\b", h3.group(1))
+            cur = m.group(1) if m else None
+            if cur is not None:
+                if cur in details:
+                    raise ExportError(f"SRS 에 `### {cur}` 상세 절이 두 번 나온다", item=cur)
+                details[cur] = {}
+            continue
+        h4 = None if in_fence else re.match(r"^####\s+(.+?)\s*$", l)
+        if h4 and cur is not None:
+            flush_field()
+            field_name = norm(h4.group(1))
+            if field_name in details[cur]:
+                raise ExportError(f"{cur} 상세 절에 `#### {field_name}` 이 두 번 나온다", item=cur)
+            details[cur][field_name] = ""
+            continue
+        if field_name is not None:
+            buf.append(l)
+    flush_field()
+    return SrsDoc(header, rows, bad, details, meta)
+
+
 # ---------------------------------------------------------------- 지도
 
 def _check_form_name(form: str) -> None:
@@ -577,25 +726,8 @@ def _drawing_count(raw: dict[str, bytes], sheet_path: str) -> int:
 
 # ---------------------------------------------------------------- 산출 한 양식
 
-def build_form(
-    form: str, spec_sections: dict, root: Path
-) -> tuple[list[tuple[Path, bytes]], list[dict], list[dict]]:
-    """한 양식을 산출한다. (쓸 파일, 거부 사유들, 경고들) 을 낸다. 못 읽으면 ExportError."""
-    fmap, map_path = load_map(root, form)
-    problems: list[dict] = []
-    warnings: list[dict] = []
-
-    def problem(sheet: str, item: str, reason: str) -> None:
-        problems.append({"form": form, "sheet": sheet, "item": item, "reason": reason})
-
-    def warn(sheet: str, item: str, reason: str) -> None:
-        warnings.append({"form": form, "sheet": sheet, "item": item, "reason": reason})
-
-    map_sheets = {norm(s["이름"]): s for s in fmap["시트"]}
-    for sheet in spec_sections:
-        if sheet not in map_sheets:
-            raise ExportError(f"작업본의 시트 {sheet!r} 이 양식 지도에 없다", form=form, sheet=sheet)
-
+def _read_template(root: Path, map_path: Path, fmap: dict, form: str):
+    """지도의 템플릿 xlsx 를 읽는다. (zip 항목들, 항목별 바이트, 시트 경로, 날짜 서식, workbook.xml)."""
     tpl = _inside(root, map_path.parent / str(fmap["템플릿"]), "템플릿", form)
     try:
         with zipfile.ZipFile(tpl) as zf:
@@ -606,6 +738,56 @@ def build_form(
         wb_xml = raw["xl/workbook.xml"].decode("utf-8")
     except (OSError, zipfile.BadZipFile, KeyError, UnicodeDecodeError) as e:
         raise ExportError(f"템플릿 {tpl} 를 읽지 못했다: {e}", form=form) from None
+    return infos, raw, paths, date_styles, wb_xml
+
+
+def is_srs_map(fmap: dict) -> bool:
+    """표 하나라도 `원본: SRS` 면 SRS.md 의 요구사항 표를 원본으로 하는 지도다."""
+    return any(
+        isinstance(t, dict) and norm(str(t.get("원본", ""))).upper() == "SRS"
+        for s in fmap["시트"] if isinstance(s, dict)
+        for t in (s.get("표") or [])
+    )
+
+
+def build_form(
+    form: str, spec_sections: dict, root: Path, srs: SrsDoc | None = None
+) -> tuple[list[tuple[Path, bytes]], list[dict], list[dict]]:
+    """한 양식을 산출한다. (쓸 파일, 거부 사유들, 경고들) 을 낸다. 못 읽으면 ExportError.
+
+    `srs` 가 있으면 지도의 `원본: SRS` 표를 SRS.md 요구사항 표·상세 절로 채운다(작업본 `## 양식 항목` 은 쓰지 않는다).
+    """
+    fmap, map_path = load_map(root, form)
+    if is_srs_map(fmap) != (srs is not None):
+        raise ExportError(
+            "이 지도는 원본이 SRS 다 — SRS.md 를 `--spec` 으로 주고 `--form` 으로 이 지도를 고른다"
+            if is_srs_map(fmap) else "이 지도는 원본이 SRS 가 아니다 — 작업본의 `## 양식 항목` 으로 산출한다",
+            form=form,
+        )
+    problems: list[dict] = []
+    warnings: list[dict] = []
+
+    def problem(sheet: str, item: str, reason: str) -> None:
+        problems.append({"form": form, "sheet": sheet, "item": item, "reason": reason})
+
+    def warn(sheet: str, item: str, reason: str) -> None:
+        warnings.append({"form": form, "sheet": sheet, "item": item, "reason": reason})
+
+    map_sheets = {norm(s["이름"]): s for s in fmap["시트"]}
+    if srs is not None:
+        for s in fmap["시트"]:
+            if s.get("칸") or s.get("서술") or any(
+                norm(str(t.get("원본", ""))).upper() != "SRS" for t in (s.get("표") or [])
+            ):
+                raise ExportError(
+                    f"원본이 SRS 인 지도에는 시트 {s['이름']!r} 의 칸·서술·원본 없는 표를 둘 수 없다(`원본: SRS` 표만 쓴다)",
+                    form=form, sheet=norm(s["이름"]),
+                )
+    for sheet in spec_sections:
+        if sheet not in map_sheets:
+            raise ExportError(f"작업본의 시트 {sheet!r} 이 양식 지도에 없다", form=form, sheet=sheet)
+
+    infos, raw, paths, date_styles, wb_xml = _read_template(root, map_path, fmap, form)
     base1904 = bool(re.search(r'date1904="(1|true)"', wb_xml))
 
     editors: dict[str, SheetXml] = {}
@@ -634,7 +816,91 @@ def build_form(
                 warn(sname, item, f"{ref} 에 쓸 값에서 XML 에 넣을 수 없는 제어 문자 {removed}개를 지웠다")
         return put
 
+    reader = ListReader(raw, paths, wb_xml)
+    validations: dict[str, list] = {}
+    unchecked_seen: set[tuple[str, str]] = set()
+
+    def make_check(sname: str):
+        """표에 쓴 값이 템플릿 드롭다운 목록 안인지 본다. (칸 검사, 행 검사) 를 돌려준다.
+
+        warnings 의 type: dropdown(목록 밖 값) / dropdown-unchecked(허용 값을 읽지 못해 검사 못 함) /
+        dropdown-empty(목록 범위가 실제로 비어 있어 검사할 값이 없음) / dropdown-missing(그 줄엔 드롭다운이 없음).
+        """
+        def unchecked(kind: str, header: str, formula: str, reason: str) -> None:
+            if (sname, kind, formula) in unchecked_seen:
+                return
+            unchecked_seen.add((sname, kind, formula))
+            warnings.append({"form": form, "sheet": sname, "item": header, "type": kind, "reason": reason})
+
+        def load() -> bool:
+            try:
+                if sname not in validations:
+                    validations[sname] = reader.validations(sname)
+            except Exception as e:  # 유효성 XML 이 예상과 다르면 검사 불능으로 알린다
+                validations[sname] = []
+                unchecked("dropdown-unchecked", "", "", f"시트 {sname} 의 데이터 유효성을 읽지 못해 목록 검사를 못 했다({type(e).__name__}: {e})")
+                return False
+            return True
+
+        def check(tname: str, label: str, header: str, ref: str, val: str) -> None:
+            if not load():
+                return
+            col, row = split_ref(ref)
+            v = find_validation(validations[sname], col2n(col), row)
+            if v is None or not v.enforced:
+                return  # 드롭다운이 없거나, 엑셀이 목록 밖 값을 받는 설정(오류 메시지 꺼짐·정보·경고 스타일)
+            if v.allowed is None:
+                unchecked("dropdown-unchecked", header, v.formula,
+                          f"{header} 열의 드롭다운 목록({v.formula})을 읽지 못해 목록 검사를 못 했다: {v.why}")
+                return
+            if v.empty:
+                unchecked("dropdown-empty", header, v.formula,
+                          f"{header} 열의 드롭다운 목록({v.formula})에 값이 없어 검사할 허용 값이 없다")
+                return
+            if val.strip() in v.allowed:
+                return
+            shown = ", ".join(v.allowed[:30]) + (f" … (전체 {len(v.allowed)}개)" if len(v.allowed) > 30 else "")
+            hint = ""
+            same = [a for a in v.allowed if a.lower() == val.strip().lower()]
+            if same:
+                hint = f" 대소문자만 다르다({same[0]!r})."
+            warnings.append({
+                "form": form, "sheet": sname, "item": label, "type": "dropdown",
+                "row": row, "column": header, "cell": ref, "value": val, "allowed": list(v.allowed),
+                "reason": f"{label} 의 {header} 칸({ref}) 값 {val!r} 이 드롭다운 허용 값 밖이다.{hint} 허용 값: {shown}",
+            })
+
+        def row_check(tname: str, label: str, rn: int, letters: list[str]) -> None:
+            """이 줄이 드롭다운 범위 밖이면(같은 열의 다른 줄엔 드롭다운이 있는데) 한 줄로 알린다."""
+            if not load():
+                return
+            vs = validations[sname]
+            missing = [
+                c for c in letters
+                if any(c1 <= col2n(c) <= c2 for v in vs for c1, _, c2, _ in v.ranges)
+                and find_validation(vs, col2n(c), rn) is None
+            ]
+            if missing:
+                warnings.append({
+                    "form": form, "sheet": sname, "item": label, "type": "dropdown-missing", "row": rn,
+                    "reason": f"{label}: {rn}행 — 이 줄엔 드롭다운이 없다(열 {', '.join(missing)}). 이 줄의 값은 목록 검사를 못 한다",
+                })
+        return check, row_check
+
     for sname, smap in map_sheets.items():
+        if srs is not None:
+            srs_tabs = [t for t in smap.get("표") or [] if norm(str(t.get("원본", ""))).upper() == "SRS"]
+            if not srs_tabs:
+                continue  # SRS 원본 지도는 SRS 표가 있는 시트만 건드린다(드롭다운 목록 시트 등은 그대로)
+            ed = editor(sname)
+            put = make_put(sname, ed)
+            for t in srs_tabs:
+                tname = norm(t["이름"])
+                rows = _srs_table_rows(form, sname, tname, t, srs, problem)
+                chk, rchk = make_check(sname)
+                _write_table(form, sname, tname, t, {tname: t}, {}, ed, md_values, problem, [], put,
+                             srs_rows=rows, check=chk, row_check=rchk)
+            continue
         na = sname not in spec_sections or spec_sections[sname][0].na
         sec, subs = spec_sections.get(sname, (Section(na=True), {}))
         ed = editor(sname)
@@ -674,7 +940,9 @@ def build_form(
         sheet_tops = [(split_ref(_cell_range(f["위치"])[0])[1], f["항목"]) for f in fields.values()]
         sheet_tops += [(split_ref(_cell_range(n["위치"])[0])[1], n["이름"]) for n in texts.values()]
         for tname, t in tables.items():
-            _write_table(form, sname, tname, t, tables, subs, ed, md_values, problem, sheet_tops, put)
+            chk, rchk = make_check(sname)
+            _write_table(form, sname, tname, t, tables, subs, ed, md_values, problem, sheet_tops, put,
+                         check=chk, row_check=rchk)
 
         # 서술: 한 셀이면 줄바꿈 포함 한 셀, 범위면 줄마다 범위 첫 열의 한 행씩
         for name, n in texts.items():
@@ -714,7 +982,7 @@ def build_form(
                 warn(sname, "", f"템플릿 샘플({', '.join(parts)})이 남아 있다 — 엑셀에서 확인해 지우십시오")
 
     # 파일명
-    out_name = _file_name(form, fmap, map_sheets, spec_sections, md_values, problem)
+    out_name = _file_name(form, fmap, map_sheets, spec_sections, md_values, problem, srs.meta if srs else None)
     out_path = None
     if out_name:
         bad = [c for c in FORBIDDEN_NAME_CHARS if c in out_name]
@@ -742,20 +1010,31 @@ def build_form(
     has_formula = any(
         re.search(rb"<f[\s>/]", data) for name, data in raw.items() if name.startswith("xl/worksheets/sheet")
     )
+    rendered = {path: ed.render() for path, ed in changed.items()}
+    new_wb = wb_xml
+    if has_formula:
+        new_wb = _with_full_calc(new_wb)
+    for s_name, ed in editors.items():
+        if ed.dirty and ed.filter_change:
+            new_wb = _extend_filter_database(new_wb, s_name, *ed.filter_change)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zo:
         for info in infos:
             data = raw[info.filename]
             if info.filename in changed:
                 bom = b"\xef\xbb\xbf" if data.startswith(b"\xef\xbb\xbf") else b""
-                data = bom + changed[info.filename].render().encode("utf-8")
-            elif info.filename == "xl/workbook.xml" and has_formula:
-                data = _with_full_calc(data.decode("utf-8")).encode("utf-8")
+                data = bom + rendered[info.filename].encode("utf-8")
+            elif info.filename == "xl/workbook.xml" and new_wb != wb_xml:
+                data = new_wb.encode("utf-8")
             zo.writestr(copy.copy(info), data)
     return [(out_path, buf.getvalue())], [], warnings
 
 
-def _write_table(form, sname, tname, t, tables, subs, ed, md_values, problem, sheet_tops, put) -> None:
+def _write_table(
+    form, sname, tname, t, tables, subs, ed, md_values, problem, sheet_tops, put,
+    srs_rows: tuple[list[dict[str, str]], list[str]] | None = None, check=None, row_check=None,
+) -> None:
+    """표를 쓴다. `srs_rows` 가 있으면 (행들, 행 이름들)을 그대로 쓰고 작업본 표는 읽지 않는다."""
     cols = {norm(k): str(v) for k, v in (t.get("열") or {}).items()}
     start = int(t["시작_행"])
     max_rows = int(t["최대_행"]) if t.get("최대_행") is not None else None
@@ -763,28 +1042,39 @@ def _write_table(form, sname, tname, t, tables, subs, ed, md_values, problem, sh
     if partner and partner not in tables:
         raise ExportError(f"표 {tname!r} 의 짝 {partner!r} 이 지도에 없다", form=form, sheet=sname, item=tname)
 
-    md_rows = _md_table_rows(form, sname, tname, cols, subs, problem)
-    if partner is None:
-        md_rows = [r for r in md_rows if any(v for v in r.values())]
+    labels: list[str] | None = None
+    if srs_rows is not None:
+        md_rows, labels = srs_rows
     else:
-        pr = _md_table_rows(form, sname, partner, {norm(k): v for k, v in (tables[partner].get("열") or {}).items()}, subs)
-        if len(pr) != len(md_rows) and tname < partner:
-            problem(sname, tname, f"짝 표 {partner!r} 와 행 수가 다르다({len(md_rows)}행 대 {len(pr)}행)")
+        md_rows = _md_table_rows(form, sname, tname, cols, subs, problem)
+        if partner is None:
+            md_rows = [r for r in md_rows if any(v for v in r.values())]
+        else:
+            pr = _md_table_rows(form, sname, partner, {norm(k): v for k, v in (tables[partner].get("열") or {}).items()}, subs)
+            if len(pr) != len(md_rows) and tname < partner:
+                problem(sname, tname, f"짝 표 {partner!r} 와 행 수가 다르다({len(md_rows)}행 대 {len(pr)}행)")
     md_values.setdefault("tables", {})[tname] = [r for r in md_rows if any(v for v in r.values())]
     if t.get("필수") and not md_values["tables"][tname]:
         problem(sname, tname, "필수 표가 미정이거나 비어 있다")
 
     # 행 펼치기
     out_rows: list[dict[str, str]] = []
+    out_labels: list[str] = []
     split_rows = t.get("여러_줄") == "행"
-    for r in md_rows:
+    for k, r in enumerate(md_rows):
+        label = labels[k] if labels else ""
         if split_rows:
             lines = {c: _BR.split(v) if v else [""] for c, v in r.items()}
             h = max(len(v) for v in lines.values()) if lines else 1
             for i in range(h):
                 out_rows.append({c: (v[i].strip() if i < len(v) else "") for c, v in lines.items()})
+                out_labels.append(label)
         else:
             out_rows.append({c: _BR.sub("\n", v) for c, v in r.items()})
+            out_labels.append(label)
+    header_of = {}
+    for name, letter in cols.items():
+        header_of.setdefault(letter, name)
     if max_rows is not None and len(out_rows) > max_rows:
         problem(sname, tname, f"행이 최대 {max_rows}행을 넘었다({len(out_rows)}행)")
         return
@@ -820,10 +1110,18 @@ def _write_table(form, sname, tname, t, tables, subs, ed, md_values, problem, sh
             if val:
                 style = ed.style_of(f"{c}{clone}") if (new_row and clone) else None
                 put(tname, ref, val, style=style, clone_row=clone if new_row else None)
+                if check:
+                    check(tname, out_labels[i] or f"{rn}행", header_of.get(c, c), ref, val)
             elif not new_row:
                 ed.clear(ref)
             elif clone:
                 ed.blank(ref, ed.style_of(f"{c}{clone}"), clone)
+        ed.unhide(rn)
+        if any(row.get(c) for c in letters):
+            if srs_rows is not None:
+                ed.autofit(rn)  # 여러 줄 칸이 템플릿의 고정 줄 높이에 잘리지 않게
+            if row_check:
+                row_check(tname, out_labels[i] or f"{rn}행", rn, [c for c in letters if row.get(c)])
     for rn in range(start + len(out_rows), tmpl_last + 1):
         for c in letters:
             ed.clear(f"{c}{rn}")
@@ -850,7 +1148,81 @@ def _md_table_rows(form, sname, tname, cols_by_name, subs, problem=None) -> list
     return [{L: _clean(v) for L, v in zip(letters, r)} for r in rows]
 
 
-def _file_name(form, fmap, map_sheets, spec_sections, md_values, problem) -> str | None:
+def _srs_table_rows(form, sname, tname, t, srs: SrsDoc, problem) -> tuple[list[dict[str, str]], list[str]]:
+    """SRS 요구사항 표 + 상세 절 → ({열 문자: 값} 행들, 행 이름(REQ-xxx)들).
+
+    md 표 열은 지도 `열` 이름이거나 `ID`(→ `번호_열` 에 REQ 번호의 숫자) 거나 지도 `md_전용` 에 적힌 열이다.
+    상세 절 `#### <열 이름>` 은 지도 `열` 의 해당 칸 값이 된다. 그 밖의 이름은 읽지 못함(오타를 조용히 버리지 않는다).
+    """
+    cols = {norm(k): str(v) for k, v in (t.get("열") or {}).items()}
+    md_only = {norm(x) for x in (t.get("md_전용") or [])}
+    id_name = norm(t["번호_열"]) if t.get("번호_열") else None
+    if id_name and id_name not in cols:
+        raise ExportError(f"표 {tname!r} 의 번호_열 {id_name!r} 이 지도 열에 없다", form=form, sheet=sname, item=tname)
+    if "ID" not in srs.header:
+        raise ExportError("SRS 요구사항 표에 `ID` 열이 없다", form=form, sheet=sname, item=tname)
+    if len(set(srs.header)) != len(srs.header):
+        raise ExportError("SRS 요구사항 표에 같은 이름의 열이 둘 이상 있다", form=form, sheet=sname, item=tname)
+    letters: list[str | None] = []
+    for h in srs.header:
+        if h == "ID" or h in md_only:
+            letters.append(None)
+        elif h in cols:
+            letters.append(cols[h])
+        else:
+            raise ExportError(
+                f"SRS 요구사항 표의 열 {h!r} 이 양식 지도의 열에도 `md_전용` 에도 없다",
+                form=form, sheet=sname, item=h,
+            )
+    for n, cnt in srs.bad:
+        problem(sname, tname, f"요구사항 표 {n}번째 행의 셀 수({cnt})가 머리글({len(srs.header)})과 다르다")
+
+    all_ids = {r[srs.header.index("ID")].strip() for r in srs.rows}
+    for rid, fields in srs.details.items():
+        if rid not in all_ids:
+            raise ExportError(f"`### {rid}` 상세 절에 해당하는 요구사항 표 행이 없다", form=form, sheet=sname, item=rid)
+        for fname in fields:
+            if fname not in md_only and (fname not in cols or fname == id_name):
+                raise ExportError(
+                    f"{rid} 상세 절의 `#### {fname}` 이 양식 지도의 열에 없다", form=form, sheet=sname, item=rid
+                )
+
+    rows: list[dict[str, str]] = []
+    labels: list[str] = []
+    seen: set[str] = set()
+    id_at = srs.header.index("ID")
+    for r in srs.rows:
+        rid = r[id_at].strip()
+        m = _REQ_ID.match(rid)
+        if not m:
+            problem(sname, rid or "(빈 ID)", f"요구사항 표의 ID {rid!r} 가 `REQ-숫자` 모양이 아니다")
+            continue
+        if rid in seen:
+            problem(sname, rid, "요구사항 표에 같은 ID 가 두 줄 이상 있다")
+            continue
+        seen.add(rid)
+        row: dict[str, str] = {}
+        if id_name:
+            row[cols[id_name]] = str(int(m.group(1)))
+        for letter, v in zip(letters, r):
+            if letter:
+                row[letter] = _clean(v)
+        for fname, body in srs.details.get(rid, {}).items():
+            body = _clean(body)
+            if fname in md_only or not body:
+                continue
+            if row.get(cols[fname]):
+                problem(sname, rid, f"{fname} 이 표 칸과 상세 절 양쪽에 적혀 있다 — 한쪽만 둔다")
+            else:
+                row[cols[fname]] = body
+        rows.append(row)
+        labels.append(rid)
+    if not rows and not srs.bad:
+        problem(sname, tname, "요구사항 표에 산출할 요구사항 줄이 없다")
+    return rows, labels
+
+
+def _file_name(form, fmap, map_sheets, spec_sections, md_values, problem, meta=None) -> str | None:
     out = fmap["산출"]
     slots = out.get("자리") or {}
     ok = True
@@ -874,6 +1246,12 @@ def _file_name(form, fmap, map_sheets, spec_sections, md_values, problem) -> str
                     break
             else:
                 raise ExportError(f"`자리.{name}` 의 칸 {want!r} 이 지도에 없다", form=form, item=name)
+        elif "메타" in spec:
+            # SRS 문서 머리의 `이름: 값` 줄(예: `버전: 0.1`)
+            key = norm(spec["메타"])
+            v = (meta or {}).get(key, "")
+            if key == "버전":
+                v = re.sub(r"^[vV](?=\d)", "", v)
         elif "표" in spec:
             tname, col = norm(spec["표"]), norm(spec.get("열", ""))
             tmap = next((t for sm in map_sheets.values() for t in sm.get("표", []) or [] if norm(t["이름"]) == tname), None)
@@ -889,7 +1267,7 @@ def _file_name(form, fmap, map_sheets, spec_sections, md_values, problem) -> str
             else:
                 v = vals[0] if spec.get("행") == "처음" else vals[-1]
         else:
-            raise ExportError(f"`자리.{name}` 에 `칸` 이나 `표` 가 없다", form=form, item=name)
+            raise ExportError(f"`자리.{name}` 에 `칸`·`표`·`메타` 가 없다", form=form, item=name)
         if v and spec.get("떼기") and v.startswith(str(spec["떼기"])):
             v = v[len(str(spec["떼기"])):]
         return v.strip()
@@ -962,25 +1340,57 @@ def _commit(writes: list[tuple[Path, bytes]], root: Path) -> list[str]:
     return [p.relative_to(root).as_posix() for p, _ in writes]
 
 
-def run(spec: Path, root: Path, only_form: str | None) -> tuple[int, dict]:
+def _srs_map_names(root: Path) -> list[str]:
+    """templates/forms 에서 `원본: SRS` 표가 있는 지도 이름들(읽지 못한 지도는 건너뛴다)."""
+    out: list[str] = []
+    folder = root / "templates" / "forms"
+    if not folder.is_dir():
+        return out
+    for f in sorted(folder.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(f.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("시트"), list) and is_srs_map(data):
+                out.append(f.stem)
+        except Exception:
+            continue
+    return out
+
+
+def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False) -> tuple[int, dict]:
     try:
         text = spec.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         raise ExportError(f"작업본 {spec} 를 읽지 못했다: {e}") from None
-    forms = parse_spec(text)
-    for name in forms:
-        _check_form_name(name)
+    srs: SrsDoc | None = None
     if only_form is not None:
         _check_form_name(only_form)
-        if only_form not in forms:
-            raise ExportError(f"작업본에 양식 {only_form!r} 소절이 없다", form=only_form)
-        forms = {only_form: forms[only_form]}
+        if is_srs_map(load_map(root, only_form)[0]):
+            srs = parse_srs(text)
+    if srs is not None:
+        jobs: list[tuple[str, dict]] = [(only_form, {})]
+    else:
+        try:
+            forms = parse_spec(text)
+        except ExportError as e:
+            maps = _srs_map_names(root)
+            if only_form is None and maps and "`## 양식 항목` 절이 없다" in e.reason:
+                raise ExportError(
+                    f"SRS 원본은 --form <지도> 가 필요하다(이 저장소의 SRS 원본 지도: {', '.join(maps)})"
+                ) from None
+            raise
+        for name in forms:
+            _check_form_name(name)
+        if only_form is not None:
+            if only_form not in forms:
+                raise ExportError(f"작업본에 양식 {only_form!r} 소절이 없다", form=only_form)
+            forms = {only_form: forms[only_form]}
+        jobs = list(forms.items())
 
     writes: list[tuple[Path, bytes]] = []
     problems: list[dict] = []
     warnings: list[dict] = []
-    for form, sections in forms.items():
-        w, p, wa = build_form(form, sections, root)
+    for form, sections in jobs:
+        w, p, wa = build_form(form, sections, root, srs)
         writes += w
         problems += p
         warnings += wa
@@ -995,13 +1405,113 @@ def run(spec: Path, root: Path, only_form: str | None) -> tuple[int, dict]:
     names = [p for p, _ in writes]
     if len(set(names)) != len(names):
         raise ExportError("서로 다른 양식이 같은 파일 이름을 산출한다")
+    outside = any(w.get("type") == "dropdown" for w in warnings)
+    unchecked = any(w.get("type") == "dropdown-unchecked" for w in warnings)
+    flagged = outside or unchecked
+    note = _warning_note(outside, unchecked)
+    if check_only:
+        files = [p.relative_to(root).as_posix() for p in names]
+        return (EXIT_WARNING if flagged else EXIT_OK), {
+            "status": "warning" if flagged else "ok",
+            "dry_run": True,
+            "files": files,
+            "problems": [],
+            "warnings": warnings,
+            "next": (
+                "다음: 확인만 했고 파일은 만들지 않았다. "
+                + (note + " 고친 뒤 다시 확인한다." if flagged else "문제가 없으면 --check 없이 다시 실행해 산출한다.")
+            ),
+        }
     written = _commit(writes, root)
+    if flagged:
+        return EXIT_WARNING, {
+            "status": "warning",
+            "files": written,
+            "problems": [],
+            "warnings": warnings,
+            "next": (
+                f"다음: 파일은 만들었지만 {note} "
+                "고쳐 다시 산출한다(같은 이름 파일이 있으면 덮지 않으므로 방금 만든 파일을 지우거나 버전을 올린다)."
+            ),
+        }
     return EXIT_OK, {
         "status": "ok",
         "files": written,
         "problems": [],
         "warnings": warnings,
         "next": "다음: 엑셀로 한 번 열어 서식을 확인한다. 올리면 PR 에서 doc-guard(Actions)가 파일 이름과 구조를 검사한다.",
+    }
+
+
+def _warning_note(outside: bool, unchecked: bool) -> str:
+    parts = []
+    if outside:
+        parts.append("`type: dropdown` 경고의 값이 템플릿 드롭다운 목록 밖이다 — 허용 값 중에서 고른다.")
+    if unchecked:
+        parts.append("허용 값을 읽지 못해 검사하지 못한 열이 있다(`type: dropdown-unchecked`) — 통과가 아니니 그 열의 값을 사람이 확인한다.")
+    return " ".join(parts)
+
+
+def list_values(root: Path, form: str) -> dict:
+    """지도 템플릿의 드롭다운 허용 값을 시트·열별로 낸다(스킬이 읽어 사용자에게 고르게 한다).
+
+    열 이름은 지도 표의 `열` 이름이다. 지도에 없는 열의 유효성은 내지 않는다.
+    """
+    _check_form_name(form)
+    fmap, map_path = load_map(root, form)
+    infos, raw, paths, _, wb_xml = _read_template(root, map_path, fmap, form)
+    reader = ListReader(raw, paths, wb_xml)
+    sheets: list[dict] = []
+    for s in fmap["시트"]:
+        sname = norm(s["이름"])
+        headers: dict[int, str] = {}
+        for t in s.get("표") or []:
+            for name, letter in (t.get("열") or {}).items():
+                headers.setdefault(col2n(str(letter)), norm(name))
+        if not headers or sname not in paths:
+            continue
+        columns: list[dict] = []
+        try:
+            validations = reader.validations(sname)
+        except Exception as e:
+            raise ExportError(f"시트 {sname!r} 의 데이터 유효성을 읽지 못했다: {e}", form=form, sheet=sname) from None
+        for v in validations:
+            for c in sorted({c for c1, _, c2, _ in v.ranges for c in range(c1, c2 + 1)} & set(headers)):
+                cells = " ".join(
+                    f"{n2col(c)}{r1}:{n2col(c)}{r2}" if r1 != r2 else f"{n2col(c)}{r1}"
+                    for c1, r1, c2, r2 in v.ranges if c1 <= c <= c2
+                )
+                columns.append({
+                    "column": headers[c],
+                    "letter": n2col(c),
+                    "cells": cells,
+                    "allowed": v.allowed,
+                    "enforced": v.enforced,
+                    **({"unreadable": v.why} if v.allowed is None else {}),
+                    **({"empty": v.why} if v.empty else {}),
+                })
+        columns.sort(key=lambda x: col2n(x["letter"]))
+        sheets.append({"sheet": sname, "columns": columns})
+    warns = [
+        {"form": form, "sheet": sh["sheet"], "item": c["column"], "type": "dropdown-unchecked",
+         "reason": f"{c['column']} 열의 허용 값을 읽지 못했다: {c['unreadable']}"}
+        for sh in sheets for c in sh["columns"] if c["allowed"] is None
+    ] + [
+        {"form": form, "sheet": sh["sheet"], "item": c["column"], "type": "dropdown-empty",
+         "reason": f"{c['column']} 열의 목록이 비어 있어 허용 값이 없다"}
+        for sh in sheets for c in sh["columns"] if c.get("empty")
+    ]
+    unread = any(w["type"] == "dropdown-unchecked" for w in warns)
+    return {
+        "status": "warning" if unread else "ok",
+        "form": form,
+        "sheets": sheets,
+        "problems": [],
+        "warnings": warns,
+        "next": (
+            "다음: 드롭다운이 있는 열은 `allowed` 안의 값만 쓴다(`enforced: false` 인 열은 엑셀이 목록 밖 값도 받는다). "
+            + ("허용 값을 읽지 못한 열(`allowed: null`)이 있다 — 그 열은 값을 사람이 확인한다." if unread else "목록 밖 값은 산출 때 경고된다.")
+        ),
     }
 
 
@@ -1026,17 +1536,27 @@ def main(argv: list[str] | None = None) -> int:
     _force_utf8()
     parser = argparse.ArgumentParser(
         prog="python -m checker.export",
-        description="작업본(md)의 `## 양식 항목` 을 양식 xlsx 로 산출한다.",
+        description="작업본(md)의 `## 양식 항목` 이나 SRS.md 의 요구사항 표를 양식 xlsx 로 산출한다.",
     )
-    parser.add_argument("--spec", type=Path, required=True, help="작업본 md(docs/spec/DEV-xxx-….md)")
+    parser.add_argument("--spec", type=Path, help="작업본 md(docs/spec/DEV-xxx-….md) 또는 원본이 SRS 인 지도면 docs/ssot/SRS.md")
     parser.add_argument("--root", type=Path, required=True, help="Project Repository 루트")
-    parser.add_argument("--form", help="이 양식만 산출한다(생략하면 작업본의 모든 양식)")
+    parser.add_argument("--form", help="이 양식만 산출한다(생략하면 작업본의 모든 양식). 원본이 SRS 인 지도는 필수")
+    parser.add_argument("--check", action="store_true", help="파일을 쓰지 않고 같은 검사·보고만 한다")
+    parser.add_argument("--list-values", action="store_true", help="--form 지도 템플릿의 드롭다운 허용 값을 열별 JSON 으로 낸다")
     args = parser.parse_args(argv)
     try:
         root = args.root.resolve()
         if not root.is_dir():
             raise ExportError(f"--root {args.root} 가 폴더가 아니다")
-        code, report = run(args.spec, root, args.form)
+        if args.list_values:
+            if not args.form:
+                raise ExportError("--list-values 에는 --form <지도 이름> 이 필요하다")
+            report = list_values(root, args.form)
+            code = EXIT_WARNING if report["status"] == "warning" else EXIT_OK
+        else:
+            if args.spec is None:
+                raise ExportError("--spec 이 필요하다(--list-values 가 아니면)")
+            code, report = run(args.spec, root, args.form, args.check)
     except ExportError as e:
         code, report = EXIT_ERROR, _error_report(e.reason, e.form, e.sheet, e.item)
     except Exception as e:  # 예상하지 못한 오류도 검사 불능(2)이지 거부(1)가 아니다

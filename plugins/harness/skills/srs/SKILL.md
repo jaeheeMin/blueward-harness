@@ -1,6 +1,6 @@
 ---
 name: srs
-description: 요구사항정의서(SRS)를 처음 만들 때, 또는 요구사항이 바뀌어 SRS 를 고칠 때 쓴다. 사용자가 "SRS 만들어줘", "요구사항정의서 만들어줘", "요구사항 바뀌었어", "SRS 수정" 이라고 말할 때 사용한다(예전 이름 "PRD" 로 말해도 이 스킬이다). 이럴 땐 쓰지 않는다 — 개발 Spec 을 만들거나 고치는 말이면 spec 스킬로(SRS 를 고친 뒤 Spec 에 반영하는 일도 spec).
+description: 요구사항정의서(SRS)를 처음 만들 때, 또는 요구사항이 바뀌어 SRS 를 고칠 때 쓴다. 사용자가 "SRS 만들어줘", "요구사항정의서 만들어줘", "요구사항 바뀌었어", "SRS 수정", "Backlog 양식으로 뽑아줘" 라고 말할 때 사용한다(예전 이름 "PRD" 로 말해도 이 스킬이다). 이럴 땐 쓰지 않는다 — 개발 Spec 을 만들거나 고치는 말이면 spec 스킬로(SRS 를 고친 뒤 Spec 에 반영하는 일도 spec).
 ---
 
 # /harness:srs
@@ -67,6 +67,47 @@ uv run --no-project python "<이 스킬의 base directory>/../start/reserve_numb
 SRS 의 마지막 REQ 번호 다음으로 이어 붙인다. 종료코드 2 는 번호를 정하지 못한
 것이니 사유를 알리고 멈춘다.
 
+## 양식 지도와 요구사항 표
+
+SRS 를 쓰기 전에 고객사 산출물 양식(예: Backlog List)이 있는지 본다. 있으면 SRS 요구사항 표의 열과
+허용 값이 그 양식에서 온다. 형식 정본은 `<이 스킬의 base directory>/../spec/form-map.md` 의
+"원본이 SRS 인 지도" 절이다.
+
+1. **지도 찾기.** `templates/forms/*.yaml` 을 모두 읽어 표에 `원본: SRS` 가 있는 지도를 찾는다.
+   - 폴더가 없거나 `원본: SRS` 지도가 없으면 "지도 없음" 이다. 이 절의 나머지를 건너뛰고 지금처럼
+     `templates/harness/SRS.md` 틀의 기본 열(ID, Title, Status, Priority (PO), 출처)로 md 만 쓴다.
+   - 읽지 못한 지도(파싱 오류, 필수 키 없음)가 하나라도 있으면 목록에서 조용히 빼지 않는다. 어느 파일이 왜
+     안 읽히는지 알리고 멈춘다. `원본: SRS` 지도가 둘 이상이면 어느 양식으로 쓸지 묻는다.
+2. **열.** 지도 표의 `열` 이름이 요구사항 표의 열 이름이고 상세 절 소제목이다. 짧은 값(LoB, Applicability, Scope item,
+   Type, Responsible, Status, Priority (PO), Target Release, Target Sprint, Development RICEFW ID …)은
+   `## 요구사항` 표의 열에 쓰고, 한 줄로 끝나지 않는 서술(Short Description, Acceptance Criteria, Proposed
+   Solution, Dependencies, Impact, Configuration Considerations …)은 요구사항마다 상세 절 `### REQ-xxx <제목>`
+   아래 `#### <열 이름>` 에 쓴다. 표에는 `ID`(= `REQ-xxx`, 지도 `번호_열` 의 숫자가 된다)가 있어야 하고, 엑셀에
+   가지 않는 열(출처 등)은 지도 `md_전용` 에 적힌 이름으로만 둔다. 지도에 없는 이름의 열·소제목은 산출이
+   읽지 못한다. 지도 `설명` 이 어느 열에 무엇을 적는지 알려 주면 그대로 따른다.
+3. **허용 값.** 드롭다운이 있는 열은 허용 값 안에서만 고른다. 지도 템플릿의 데이터 유효성에서 읽어 오며 따로 목록을
+   관리하지 않는다.
+
+   ```bash
+   uvx --from "${DOC_GUARD_ENGINE:-git+https://github.com/jaeheeMin/blueward-harness@main}" \
+     python -m checker.export --root "$(git rev-parse --show-toplevel)" --form <지도 이름> --list-values
+   ```
+
+   stdout 은 JSON 한 줄이다. `sheets[].columns[]` 의 `column`(지도 열 이름)별 `allowed` 가 허용 값이다.
+   그 열은 사용자에게 허용 값을 보기로 보여 주고 고르게 한다(`AskUserQuestion` 을 쓸 수 있으면 쓴다. 값이 많으면
+   일부만 보여 주고 나머지는 말로 고르게 한다). 허용 값 밖의 값을 사용자가 말하면 그대로 쓰지 않고 허용 값을 다시
+   보여 준다. `allowed` 가 `null` 이면(`unreadable` 에 사유, 이때 `status: warning`·종료코드 3) 허용 값을 읽지 못한 열이니 그렇다고 알리고,
+   값은 사용자가 확인하게 한다. `allowed` 가 `[]` 이면(`empty`) 목록이 비어 있는 열(예: Responsible 목록을 아직 안 채운 양식)이라
+   고를 값이 없다고 알린다. `enforced: false` 인 열은 엑셀이 목록 밖 값도 받는 설정이라 허용 값을 권장으로만 보여 준다. 명령이
+   실패하거나 stdout 이 JSON 이 아니면 허용 값을 확인하지 못했다고 알린다 — 추측으로 값을 채우지 않는다.
+4. **상태·우선순위.** 상태는 Backlog 의 Status 하나뿐이다: New / Planned / In Process / Done / On Hold / Dropped /
+   Duplicate. 우선순위는 Backlog 의 값(`1. Must-Have` …)이다. 지도가 있으면 3 의 허용 값이 정본이고, 지도가 없을
+   때의 상태는 위 일곱 값이다. 새 요구사항은 `New` 로 시작한다.
+5. **Development RICEFW ID.** 이 요구사항이 개발이면 REQ 와 같은 번호의 `DEV-xxx`(`REQ-003` → `DEV-003`)를 적는다.
+   설정만 하는 요구사항은 비운다. 개발 ID(`CO-006-01` 같은 모듈 체계)는 Spec 양식 쪽 이름이니 여기에 섞지 않는다.
+6. **버전.** 산출 파일 이름의 버전은 SRS.md 문서 머리(제목 아래, 첫 `##` 앞)의 `버전: 0.1` 줄에서 온다. 줄이 없으면
+   사용자에게 물어 적는다(처음이면 0.1).
+
 ## 만들기
 
 1. 입력 문서를 확인한다. 사용자가 경로를 줬으면 그것을 읽고, 안 줬으면
@@ -79,14 +120,16 @@ SRS 의 마지막 REQ 번호 다음으로 이어 붙인다. 종료코드 2 는 �
    것은 추측으로 채우지 않고 `## 미결 사항` 에 남긴다.
 3. `templates/harness/SRS.md` 틀대로 `docs/ssot/SRS.md` 를 쓴다. 요구사항은
    위 "요구사항 단위와 번호" 대로 나누고 번호를 받아 붙이며 출처(입력 문서·회의·질문
-   답)를 적는다. Convention·Template·규칙은 본문에 옮기지 않고 링크만 적는다.
+   답)를 적는다. 표의 열·상세 절·드롭다운 값은 위 "양식 지도와 요구사항 표" 를 따른다.
+   Convention·Template·규칙은 본문에 옮기지 않고 링크만 적는다.
 4. 변경 기록을 남긴다. `audit/changes/YYYYMMDD-SRS-최초작성.md` 를
    `templates/harness/audit-change.md` 틀로 쓴다. 종류는 "결정", 바뀐 것은
    전체 REQ 목록, 근거는 읽은 입력 문서 목록, 영향은 "이후 Spec 작성 대상"
    으로 적는다.
 5. 저장 전에 doc-guard 훅이 이 틀을 검사한다. 막히면 사유를 읽고 빠진 절을
    채운다.
-6. 마무리를 안내한다. SRS 는 SSOT 라 SRS 를 바꾸는 PR 은 사람이 승인해야
+6. 양식 지도가 있으면 아래 "양식 파일 산출" 로 xlsx 를 만든다.
+7. 마무리를 안내한다. SRS 는 SSOT 라 SRS 를 바꾸는 PR 은 사람이 승인해야
    한다(승인을 강제로 막는 장치는 아직 없다). 다음 단계는
    `/harness:spec` 으로 Spec 을 만드는 것이다.
 
@@ -94,9 +137,12 @@ SRS 의 마지막 REQ 번호 다음으로 이어 붙인다. 종료코드 2 는 �
 
 1. 무엇이 왜 바뀌는지 받는다. 근거(고객 요청, 회의, 기술 제약 등) 없이
    고치지 않는다.
-2. 해당 REQ 를 고친다. 기존 REQ 의 번호는 새로 매기지 않는다. 바뀐 REQ 는
-   상태를 `변경됨` 으로, 없앤 REQ 는 행을 지우지 않고 `폐기` 로 둔다. 새
-   요구사항의 번호는 "요구사항 단위와 번호" 대로 받는다.
+2. 해당 REQ 를 고친다(표 줄과 상세 절). 기존 REQ 의 번호는 새로 매기지 않는다. 상태는 Backlog Status
+   하나뿐이라 "바뀜" 을 상태로 적지 않는다 — 내용이 바뀐 REQ 의 상태는 그대로 두거나 진행 상황에 맞게
+   사용자가 정한 값으로 바꾸고(예: `Planned` → `In Process`), 바뀐 사실은 변경 기록(4)에 남는다. 없앤 REQ 는
+   행을 지우지 않고 `Dropped` 로, 다른 요구사항과 겹치면 `Duplicate` 로 둔다. 새
+   요구사항의 번호는 "요구사항 단위와 번호" 대로 받는다. 드롭다운 열의 값은 "양식 지도와 요구사항 표" 3 의
+   허용 값에서 고른다.
 3. 영향을 찾는다. 바뀐 REQ 번호로 `docs/spec/`, `audit/ledger/`, 그 밖의
    `docs/` 를 검색해 영향받는 파일 목록을 사용자에게 보여 준다. 사용자가
    원하면 그 Spec 들도 고친다 — 개발자는 왜 바뀌었는지 모르므로, 고친 Spec
@@ -104,9 +150,43 @@ SRS 의 마지막 REQ 번호 다음으로 이어 붙인다. 종료코드 2 는 �
 4. 변경 기록 `audit/changes/YYYYMMDD-<요약>.md` 을 `templates/harness/
    audit-change.md` 틀로 남긴다. 바뀐 것에는 REQ 번호와 파일을, 근거에는
    왜 바뀌었는지를, 영향에는 3 에서 찾은 목록을 적는다.
-5. 마무리를 안내한다. SRS 변경 PR 도 사람 승인이 필요하다.
+5. 양식 지도가 있으면 문서 머리의 `버전:` 을 올리고(0.1 씩, 큰 변경이면 사용자에게 묻는다) 아래 "양식 파일 산출"
+   로 새 판 xlsx 를 만든다. 이전 판은 덮어쓰지도 지우지도 않는다.
+6. 마무리를 안내한다. SRS 변경 PR 도 사람 승인이 필요하다.
    `/harness:deliver` 로 올릴 때는 PR 본문에 "SRS 변경" 이라는 표시와 이번
    변경 기록 링크를 적는다.
+
+## 양식 파일 산출
+
+"양식 지도와 요구사항 표" 의 지도가 있을 때만 한다. `docs/ssot/SRS.md` 를 직접 읽어 지도의 템플릿 복사본에
+요구사항을 4행부터(지도 `시작_행`) 한 줄씩 쓴다. 서식·드롭다운·다른 시트는 그대로 두고 값만 바꾼다.
+
+1. 먼저 파일을 쓰지 않는 확인을 한다.
+
+   ```bash
+   uvx --from "${DOC_GUARD_ENGINE:-git+https://github.com/jaeheeMin/blueward-harness@main}" \
+     python -m checker.export --spec docs/ssot/SRS.md --root "$(git rev-parse --show-toplevel)" --form <지도 이름> --check
+   ```
+
+2. 문제가 없으면 `--check` 를 빼고 같은 명령으로 산출한다. 명령 실행 방법(PowerShell 이면 `$e = if
+   ($env:DOC_GUARD_ENGINE) {…}` 로 정해 `uvx --from $e …`)은 `<이 스킬의 base directory>/../spec/SKILL.md`
+   의 "양식 파일 산출" 과 같다. 결과는 stdout 의 JSON 한 줄이다. JSON 으로 읽히지 않으면(uvx 실패 등) 종료코드와
+   무관하게 "산출 불능" 이라고 알린다. 통과로도 위반으로도 넘기지 않는다.
+3. 결과를 읽는다.
+   - `status: ok` (0) — `files` 의 경로를 알리고 엑셀로 열어 드롭다운과 4행부터의 요구사항을 확인하라고 권한다.
+     `warnings` 가 있으면(예: `type: dropdown-empty` — 목록이 비어 있어 검사할 값이 없다, `dropdown-missing` — 그 줄엔 드롭다운이
+     없다) 그대로 보여 준다. 엑셀에서 4행부터의 줄 높이가 내용에 맞는지도 확인하라고 권한다.
+   - `status: warning` (3) — 값이 드롭다운 목록 밖이거나(`type: dropdown`), 허용 값을 읽지 못해 검사하지 못한 열이 있다
+     (`type: dropdown-unchecked`, `next` 에 "검사하지 못한 열이 있다"). 앞의 것은 `item`(REQ-xxx)·
+     `column`·`value`·`allowed` 를 그대로 보여 주고, 허용 값 중에서 고르게 해 SRS.md 를 고친 뒤 다시 한다(1 부터).
+     `--check` 로 먼저 확인했다면 파일은 아직 없다. 이미 만든 파일이 있으면(아직 커밋 전이면) 그 파일만 지우고
+     다시 산출한다. 허용 값 밖의 값을 그대로 둘지는 사용자가 정하고, 그대로 두면 그렇다고 마무리 안내에 적는다.
+     뒤의 것(`dropdown-unchecked`)은 통과가 아니다 — 그 열의 값을 사용자가 허용 목록과 대조하게 하고, 검사하지 못했다고 마무리 안내에 적는다.
+   - `status: rejected` (1) — 아무 파일도 만들지 않았다. `problems` 의 항목을 그대로 보여 주고 고친 뒤 다시 한다.
+     버전 줄이 없다는 거부면 사용자에게 버전을 묻는다. 같은 이름 파일이 있다는 거부면 `버전:` 을 올려 새 판으로 낸다.
+   - `status: error` (2) — SRS·지도·템플릿을 읽지 못했거나 SRS 의 열이 지도에 없다. 산출하지 못했다고 알리고
+     `problems` 의 원인을 보여 준다. 통과로 넘기지 않는다.
+4. 산출한 xlsx 의 검사(파일 이름 등)는 PR 을 열 때 Actions(doc-guard)가 맡는다. 산출 성공은 doc-guard 통과가 아니다.
 
 ## 저장 전 검사
 
