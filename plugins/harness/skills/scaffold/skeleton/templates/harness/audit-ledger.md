@@ -13,7 +13,7 @@
 |---|---|---|---|---|---|
 |  |  |  |  | 대기 |  |
 
-ID 칸은 `docs/spec/` 의 Spec 파일과 같은 DEV 번호(`DEV-001`)를 적고, Spec
+ID 칸은 `docs/spec/` 의 Spec 파일, 그 근거 요구사항(`REQ-001`)과 같은 번호의 DEV 번호(`DEV-001`)를 적고, Spec
 칸은 그 파일 링크(`../../docs/spec/DEV-001-<요약>.md`)를 적는다. Spec 이 아직
 없으면 Spec 칸은 `-` 로 둔다. 상태는 대기 / 진행 / 리뷰 / 완료 가운데 하나로
 적는다 — 진행은 `/harness:start` 가, 대기는 `/harness:spec` 이 Spec 만

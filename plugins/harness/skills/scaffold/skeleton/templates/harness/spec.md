@@ -6,8 +6,9 @@
 
 ## 근거 요구사항
 
-이 Spec 이 구현하는 REQ 번호와 `docs/ssot/SRS.md` 링크를 적는다. 예:
-REQ-012, REQ-014 ([SRS](../ssot/SRS.md))
+이 Spec 이 구현하는 REQ 번호 하나와 `docs/ssot/SRS.md` 링크를 적는다. Spec 의
+DEV 번호는 이 REQ 의 번호와 같다(REQ-012 → DEV-012). 예:
+REQ-012 ([SRS](../ssot/SRS.md))
 
 ## 개요
 

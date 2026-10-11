@@ -14,15 +14,16 @@ base directory>` 는 이 스킬이 로드될 때 위에 표시되는 경로다.
 
 ## Spec 번호(DEV)
 
-개발 건 하나에 `DEV-001` 처럼 이어지는 번호 하나를 붙이고, Spec 파일 하나가
-그 번호를 갖는다(`docs/spec/DEV-001-<요약>.md`). 진행 원장의 개발 건 표에서
-ID 칸에 같은 번호를 적어 Spec 과 원장이 한 번호로 연결되게 한다. 다음 번호는
-`docs/spec/` 의 파일 이름과 `audit/ledger/*.md` 의 개발 건 표에 있는 DEV
-번호를 모두 훑어 가장 큰 수에 1을 더하고, `DEV-001` 처럼 3자리로 채운다.
-`/harness:start` 가 개발 건을 등록할 때도 이 계산식을 쓴다.
+요구사항 1건 = Spec 1건 = 개발 1건이고 번호는 하나다. Spec 번호는 근거 요구사항의
+번호를 그대로 쓴다(`REQ-003` → `DEV-003`). Spec 파일 하나가 그 번호를 갖고
+(`docs/spec/DEV-003-<요약>.md`), 진행 원장의 개발 건 표 ID 칸에도 같은 번호를
+적어 SRS·Spec·원장이 한 번호로 연결되게 한다. 숫자는 3자리로 0 을 채운다.
 
-이미 `/harness:start` 가 번호를 잡아 둔 개발 건이면 새 번호를 만들지 않는다
-(아래 "만들기" 3).
+근거 REQ 가 없는 개발(SRS 를 거치지 않는 개발)이면 그 브랜치·이슈에 찜해 둔
+번호(이슈 제목의 `[DEV-xxx]`)를 쓴다. 이 번호는 새로 계산하지 않는다 — 번호 찜과
+계산식은 `<이 스킬의 base directory>/../start/SKILL.md` 의 "번호 찜" 에 있고
+스크립트(`reserve_number.py`)가 한다. 찜 번호가 아직 없으면 `claim --issue <번호>`
+로 붙인다.
 
 ## 만들기
 
@@ -32,18 +33,20 @@ ID 칸에 같은 번호를 적어 Spec 과 원장이 한 번호로 연결되게 
    스텁 그대로면(요구사항 절에 `REQ-001` 한 줄만 비어 있으면) 이 Spec 이
    근거로 삼을 SRS 가 없다는 뜻이니, 멈추고 먼저 `/harness:srs` 로 SRS 를
    만들라고 안내한다.
-2. 이번 Spec 이 다룰 REQ 를 정한다. 사용자가 REQ 번호를 직접 줬으면 그것을
+2. 이번 Spec 이 다룰 REQ 하나를 정한다(요구사항 1건 = Spec 1건). 사용자가 REQ 번호를 직접 줬으면 그것을
    쓰고, 안 줬으면 SRS 의 요구사항 표에서 상태가 `유효` 나 `변경됨` 이면서
    아직 어느 Spec 의 `## 근거 요구사항` 에도 적히지 않은 REQ 를 찾아 목록으로
    보여 주고 고르게 한다. 이 개발 건이 속할 프로그램(진행 원장 파일)도 함께
    묻는다 — `audit/ledger/*.md` 목록을 보여 주거나, 새 프로그램이면
    `templates/harness/audit-ledger.md` 틀로 새 파일을 만든다.
-3. DEV 번호를 정한다. 먼저 브랜치 이름과, 브랜치 이름의 이슈 번호로 `gh issue view` 해 읽은
-   이슈 본문(`/harness:start` 가 남긴 `진행 원장: DEV-xxx` 줄)에서 DEV 번호를 찾는다.
-   그 번호가 `audit/ledger/*.md` 의 개발 건 표에 이미 있고 Spec 칸이 `-` 이면
-   새 번호를 만들지 않고 그 번호를 쓴다(2 의 프로그램 선택도 그 원장 파일로
-   정해진 것으로 보고 다시 묻지 않는다). 못 찾았거나 이미 Spec 이 있으면 위 "Spec
-   번호" 대로 다음 DEV 번호를 정한다.
+3. DEV 번호를 정한다. 2 의 REQ 번호가 있으면 그 숫자가 DEV 번호다(`REQ-003` →
+   `DEV-003`). 그 번호가 `audit/ledger/*.md` 의 개발 건 표에 이미 있고 Spec 칸이
+   `-` 이면 그 줄을 이어받는다(2 의 프로그램 선택도 그 원장 파일로 정해진 것으로
+   보고 다시 묻지 않는다). 근거 REQ 가 없으면 브랜치 이름의 이슈 번호로 `gh issue view`
+   해 읽은 이슈 제목의 `[DEV-xxx]`(또는 본문의 `진행 원장: DEV-xxx` 줄)를 쓴다.
+   어디서도 번호를 못 찾으면 위 "Spec 번호" 대로 `claim` 으로 찜한다. 번호를 직접
+   계산하지 않는다. 같은 번호의 Spec 이 이미 있으면 새로 만들지 않고 "고치기" 로
+   안내한다.
 4. 양식을 고른다. `templates/forms/*.yaml`(양식 지도)을 모두 읽어 본다.
    - 폴더가 없거나 비었으면 "지도 없음" 이다. 이 단계를 건너뛰고 기존처럼
      `templates/harness/spec.md` 틀만 쓴다.
@@ -54,7 +57,7 @@ ID 칸에 같은 번호를 적어 Spec 과 원장이 한 번호로 연결되게 
      고르는 것도 된다.
    - 지도 형식은 `<이 스킬의 base directory>/form-map.md` 에 있다.
 5. `templates/harness/spec.md` 틀대로 `docs/spec/DEV-xxx-<요약>.md` 를
-   쓴다. `## 근거 요구사항` 에는 2 에서 고른 REQ 번호를 모두 적는다.
+   쓴다. `## 근거 요구사항` 에는 2 에서 고른 REQ 번호 하나를 적는다.
    Convention·Template·규칙 본문은 옮겨 적지 않고 링크만 적는다. `## 참조`
    에는 공통 개발 규칙(harness Plugin 의 `conventions/common.md`)을 GitHub
    링크 `https://github.com/jaeheeMin/blueward-harness/blob/main/plugins/harness/conventions/common.md`
