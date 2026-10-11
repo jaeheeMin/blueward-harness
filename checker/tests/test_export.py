@@ -10,6 +10,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -423,7 +424,8 @@ def test_이미_있는_파일은_덮지_않고_거부(proj, capsys):
     before = produced.read_bytes()
     code, report = _run(proj, capsys)
     assert code == 1
-    assert "이미 있다" in report["problems"][0]["reason"] and "버전" in report["problems"][0]["reason"]
+    # git 저장소가 아니라 main 에 있는 판인지 판단하지 못한다 — 덮지 않고 사유를 밝힌다
+    assert "판단하지 못" in report["problems"][0]["reason"] and "통과 아님" in report["problems"][0]["reason"]
     assert produced.read_bytes() == before
 
 
@@ -1151,3 +1153,97 @@ def test_대소문자만_다른_값은_힌트를_붙여_경고한다(bproj, caps
     assert code == 3
     w = next(w for w in report["warnings"] if w["type"] == "dropdown")
     assert "대소문자만 다르다('Finance')" in w["reason"]
+
+
+# ---------------------------------------------------------------- --form 경로, 미병합 판 다시 산출
+
+def _form_results(proj: Path, capsys, form: str):
+    code, report = _run(proj, capsys, SPEC, "--check", "--form", form)
+    return code, report["files"], report["status"]
+
+
+def test_form_이름과_경로_세_형태가_같은_결과(proj, capsys):
+    by_name = _form_results(proj, capsys, "시험양식")
+    assert by_name[0] == 0 and len(by_name[1]) == 1
+    absolute = str((proj / "templates" / "forms" / "시험양식.yaml").resolve())
+    for form in ("templates/forms/시험양식.yaml", absolute, "templates/forms/시험양식.yaml".replace("/", os.sep)):
+        assert _form_results(proj, capsys, form) == by_name
+    # 구분자 없는 `이름.yaml` 은 templates/forms 아래 파일 이름으로 본다
+    assert _form_results(proj, capsys, "시험양식.yaml") == by_name
+
+
+def test_form_경로가_없거나_밖이면_종료코드_2(proj, capsys):
+    (proj / "other.yaml").write_text(MAP, encoding="utf-8")
+    for form in ("templates/forms/없는양식.yaml", "other.yaml", "templates/other.yaml", "../x/templates/forms/시험양식.yaml"):
+        code, report = _run(proj, capsys, SPEC, "--check", "--form", form)
+        assert code == 2 and report["status"] == "error", form
+        assert report["files"] == []
+
+
+def test_list_values_도_form_경로를_받는다(proj, capsys):
+    code = export.main(["--root", str(proj), "--form", "templates/forms/시험양식.yaml", "--list-values"])
+    out = json.loads(capsys.readouterr().out)
+    assert code in (0, 3) and out["form"] == "시험양식"
+    code = export.main(["--root", str(proj), "--form", "templates/forms/없음.yaml", "--list-values"])
+    assert code == 2
+    capsys.readouterr()
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
+        cwd=cwd, check=True, capture_output=True,
+    )
+
+
+@pytest.fixture
+def gproj(proj: Path, tmp_path_factory) -> Path:
+    """origin(bare)을 가진 git 저장소. 산출물은 아직 없고 origin/main 에 초기 커밋만 있다."""
+    bare = tmp_path_factory.mktemp("origin") / "o.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(bare)], check=True, capture_output=True)
+    _git(proj, "init", "-b", "main")
+    _git(proj, "add", "-A")
+    _git(proj, "commit", "-m", "init")
+    _git(proj, "remote", "add", "origin", str(bare))
+    _git(proj, "push", "origin", "main")
+    return proj
+
+
+def test_main_에_없는_기존_산출_파일은_같은_버전으로_덮어쓴다(gproj, capsys):
+    code, report = _run(gproj, capsys)
+    assert code == 0 and "replaced" not in report
+    produced = _produced(gproj, report)
+    produced.write_bytes(b"stale")
+    code, report = _run(gproj, capsys)
+    assert code == 0
+    assert report["replaced"] is True and report["replaced_files"][0]["file"] == report["files"][0]
+    assert "origin/main 에 없" in report["replaced_files"][0]["reason"]
+    assert produced.read_bytes() != b"stale"
+    _assert_sheets_sane(produced)
+    assert not list(produced.parent.glob(".*.bak")) and not list(produced.parent.glob(".*.tmp"))
+
+
+def test_main_에_있는_산출_파일은_거부한다(gproj, capsys):
+    code, report = _run(gproj, capsys)
+    produced = _produced(gproj, report)
+    _git(gproj, "add", "-A")
+    _git(gproj, "commit", "-m", "산출")
+    _git(gproj, "push", "origin", "main")
+    before = produced.read_bytes()
+    code, report = _run(gproj, capsys)
+    assert code == 1 and "replaced" not in report
+    reason = report["problems"][0]["reason"]
+    assert "main 에 이미 있는 판" in reason and "버전을 올려" in reason
+    assert produced.read_bytes() == before
+
+
+def test_origin_main_을_읽지_못하면_거부하고_사유를_밝힌다(gproj, capsys):
+    code, report = _run(gproj, capsys)
+    produced = _produced(gproj, report)
+    _git(gproj, "remote", "remove", "origin")  # origin/main 참조가 사라진다
+    before = produced.read_bytes()
+    code, report = _run(gproj, capsys)
+    assert code == 1
+    reason = report["problems"][0]["reason"]
+    assert "판단하지 못" in reason and "origin/main" in reason
+    assert produced.read_bytes() == before
