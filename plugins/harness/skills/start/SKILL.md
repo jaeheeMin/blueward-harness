@@ -14,7 +14,8 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 3. 사용자가 설명한 작업 내용으로 GitHub 이슈를 만든다. 제목과 본문과 라벨을
    `<이 스킬의 base directory>/../../rules/issue-and-release.md` 의 형식에
    맞춘다. `<이 스킬의 base directory>` 는 이 스킬이 로드될 때 위에 표시되는
-   경로다.
+   경로다. 저장소 꼭대기에 `audit/ledger/` 가 있고 작업 type 이 `feat` 또는
+   `fix` 면 `gh issue create` 대신 아래 "번호 찜" 의 `reserve` 로 만든다.
 4. 발급된 이슈 번호로 `{type}/{issue-number}-{work}` 브랜치를 만들고 이동한다.
    `type` 은 작업 성격에서 판단하고, `work` 는 영문 소문자와 붙임표로 요약한다.
 5. 개발 건 등록 여부를 정한다(아래 "진행 원장 등록"). 해당하지 않으면 묻지 않고
@@ -23,7 +24,41 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
    DEV 번호와 원장 파일도 함께 알린다.
 
 이미 존재하는 이슈 번호를 사용자가 지정한 경우에는 3단계를 건너뛰고 그 이슈를
-읽어 브랜치 이름을 만든다.
+읽어 브랜치 이름을 만든다. 원장이 있는 저장소의 `feat`·`fix` 면 그 이슈를
+"번호 찜" 의 `claim` 으로 받는다.
+
+## 번호 찜
+
+요구사항·Spec·원장·이슈가 한 번호(`DEV-003`)를 쓴다. 번호는 작업을 시작할 때
+이슈 제목 앞에 `[DEV-003] ` 로 찜해, 두 사람이 동시에 시작해도 서로 다른 번호를
+받게 한다. 계산(origin/main 의 SRS·Spec·원장 번호와 모든 이슈 제목의 찜 번호 중
+가장 큰 것 + 1)과 만든 직후 겹침 확인은 스크립트가 한다 — 손으로 계산하지 않는다.
+`/harness:srs` 와 `/harness:spec` 도 같은 스크립트를 쓴다.
+
+```bash
+uv run --no-project python "<이 스킬의 base directory>/reserve_number.py" reserve \
+  --title "<제목>" --body-file <본문 파일> --label type:feat
+uv run --no-project python "<이 스킬의 base directory>/reserve_number.py" claim --issue <번호>
+uv run --no-project python "<이 스킬의 base directory>/reserve_number.py" next
+```
+
+`uv` 가 없으면 `python` 으로 바로 부른다. `reserve` 는 제목을 `[DEV-xxx] <제목>`
+으로 이슈를 만들고, `claim` 은 이미 있는 이슈에 번호가 없으면 붙이고 있으면 그
+번호를 낸다. 결과는 JSON 한 줄이다(`number`, `issue`, `title`, `renumbered_from`).
+제목은 `[DEV-xxx]` 를 뺀 내용만 넘긴다.
+
+- 종료코드 0 — `number` 가 찜 번호다. `renumbered_from` 이 있으면 더 앞선 이슈와
+  번호가 겹쳐 바뀐 것이다. 사용자에게 "번호가 겹쳐 DEV-xxx 로 바꿨다" 고 알린다.
+- 종료코드 3 — 원장이 없어 찜하지 않는다. 이슈는 `gh issue create` 로 만들고
+  제목에 번호를 붙이지 않는다.
+- 종료코드 2 — 판정 불능(git·gh 실패, 3번 다시 매겨도 겹침). 출력된 사유를 그대로
+  알린다. 번호를 추측하거나 번호 없이 넘어가지 않는다. `reserve` 가 이슈를 만든
+  뒤에 실패했을 수 있으니 이슈 목록을 확인하고 중복으로 만들지 않는다.
+
+번호는 등록 여부를 묻기 전에 찜한다. 겹침을 막으려면 시작 시점에 잡아 두어야
+하기 때문이다. 사용자가 원장 등록을 하지 않겠다고 하면 이슈 제목의 번호는 남고,
+원장·Spec 에 쓰이지 않은 빈 번호가 될 수 있다(다음 계산은 이슈 제목도 훑으므로
+다시 쓰이지 않는다).
 
 ## 진행 원장 등록
 
@@ -38,8 +73,7 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 2. 개발 건이 속할 프로그램(원장 파일)을 정한다. `audit/ledger/*.md` 목록을 보여
    주고 고르게 하거나, 새 프로그램이면 `templates/harness/audit-ledger.md` 틀로
    `audit/ledger/<프로그램>.md` 를 새로 만든다.
-3. DEV 번호는 `<이 스킬의 base directory>/../spec/SKILL.md` 의 "Spec 번호" 절과
-   같은 계산식으로 정한다(여기에 다시 적지 않는다).
+3. DEV 번호는 위 "번호 찜" 으로 이슈 제목에 잡은 번호다. 새로 계산하지 않는다.
 4. 그 원장의 `## 개발 건` 표에 `| DEV-xxx | <이슈 제목> | - | <gh 사용자> | 진행 |  |`
    줄을 추가한다. Spec 칸은 Spec 이 아직 없으므로 `-` 이고, 담당은
    `gh api user --jq .login` 으로 얻는다. 표의 빈 줄(템플릿이 둔 자리 표시 줄)이
