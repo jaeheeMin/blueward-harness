@@ -30,13 +30,17 @@ base directory>` 는 이 스킬이 로드될 때 위에 표시되는 경로다.
 1. `docs/ssot/SRS.md` 를 읽는다. 없는데 `docs/ssot/PRD.md` 가 있으면 예전
    이름(PRD)으로 만든 저장소다 — 멈추고 그렇게 알린 뒤, 옮기는 방법은
    `/harness:srs` 스킬의 "옛 구조 확인" 절을 따르라고 안내한다. 아직 `templates/harness/SRS.md` 의 빈
-   스텁 그대로면(요구사항 절에 `REQ-001` 한 줄만 비어 있으면) 이 Spec 이
+   스텁 그대로면(요구사항 절에 표가 없거나 `REQ-001` 한 줄만 비어 있으면) 이 Spec 이
    근거로 삼을 SRS 가 없다는 뜻이니, 멈추고 먼저 `/harness:srs` 로 SRS 를
    만들라고 안내한다.
 2. 이번 Spec 이 다룰 REQ 하나를 정한다(요구사항 1건 = Spec 1건). 사용자가 REQ 번호를 직접 줬으면 그것을
-   쓰고, 안 줬으면 SRS 의 요구사항 표에서 상태가 `유효` 나 `변경됨` 이면서
-   아직 어느 Spec 의 `## 근거 요구사항` 에도 적히지 않은 REQ 를 찾아 목록으로
-   보여 주고 고르게 한다. 이 개발 건이 속할 프로그램(진행 원장 파일)도 함께
+   쓰되, 그 REQ 의 상태(Backlog Status)가 `Dropped` 나 `Duplicate` 면 Spec 을 만들지 않고 그렇다고
+   알린다. 번호를 안 줬으면 SRS 의 요구사항 표에서 상태가 `Dropped`·`Duplicate` 가 아니면서
+   아직 어느 Spec 의 `## 근거 요구사항` 에도 적히지 않은 REQ(= 아직 Spec 이 없는 REQ)를 찾아 목록으로
+   보여 주고 고르게 한다. 상태 값은 Backlog Status(New / Planned / In Process / Done / On Hold /
+   Dropped / Duplicate) 하나뿐이다 — 옛 `유효`·`변경됨`·`폐기` 로 적힌 SRS 면 `Dropped` 는 `폐기` 에 해당하고
+   나머지는 Spec 대상으로 보되, 상태 값을 바꾸자는 안내는 `/harness:srs` 쪽 일이라고 알린다. 상세는 REQ 의
+   `### REQ-xxx` 상세 절(Short Description, Acceptance Criteria …)에 있으니 함께 읽는다. 이 개발 건이 속할 프로그램(진행 원장 파일)도 함께
    묻는다 — `audit/ledger/*.md` 목록을 보여 주거나, 새 프로그램이면
    `templates/harness/audit-ledger.md` 틀로 새 파일을 만든다.
 3. DEV 번호를 정한다. 2 의 REQ 번호가 있으면 그 숫자가 DEV 번호다(`REQ-003` →
@@ -57,7 +61,8 @@ base directory>` 는 이 스킬이 로드될 때 위에 표시되는 경로다.
      고르는 것도 된다.
    - 지도 형식은 `<이 스킬의 base directory>/form-map.md` 에 있다.
 5. `templates/harness/spec.md` 틀대로 `docs/spec/DEV-xxx-<요약>.md` 를
-   쓴다. `## 근거 요구사항` 에는 2 에서 고른 REQ 번호 하나를 적는다.
+   쓴다. `## 근거 요구사항` 에는 2 에서 고른 REQ 번호 하나를 적는다. 상태(Status)는 SRS 가 정본이라
+   적지 않는다.
    Convention·Template·규칙 본문은 옮겨 적지 않고 링크만 적는다. `## 참조`
    에는 공통 개발 규칙(harness Plugin 의 `conventions/common.md`)을 GitHub
    링크 `https://github.com/jaeheeMin/blueward-harness/blob/main/plugins/harness/conventions/common.md`
@@ -151,6 +156,10 @@ stdout 의 JSON 한 줄이다. stdout 이 JSON 으로 읽히지 않으면(uvx �
   `warnings` 가 있으면 항목별 내용을 그대로 사용자에게 보여 준다(예: 해당 없음 시트에 템플릿
   샘플 그림·셀이 남아 있다, 제어 문자를 지웠다). 지도 밖 샘플은 산출이 지우지 않으므로
   엑셀에서 직접 확인해 지우게 한다. `rejected`·`error` 에서도 `warnings` 는 보여 준다.
+- `status: warning` (3) — 파일은 만들었지만 표 값이 양식의 드롭다운 목록 밖이거나(`type: dropdown`), 허용 값을 읽지 못해
+  검사하지 못한 열이 있다(`type: dropdown-unchecked` — 통과가 아니니 그렇다고 알린다). `warnings` 의 `type: dropdown`
+  항목(행·열·값·허용 값)을 그대로 보여 주고 허용 값 중에서 고치게 한다. 고친 뒤 다시 산출하려면 방금 만든 파일을
+  (아직 커밋 전이면) 지우거나 `--check` 로 먼저 확인한 뒤 산출한다.
 - `status: rejected` (1) — 아무 파일도 만들지 않았다. `problems` 의 양식·시트·항목·
   사유를 그대로 보여 주고 작업본을 고친 뒤 다시 돌린다. 값을 추측해 채우지 않고
   모르는 값은 사용자에게 묻는다. 같은 이름 파일이 이미 있어 거부된 것이면 아래 "버전 올리기".

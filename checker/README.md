@@ -221,6 +221,17 @@ stdout 에 JSON 한 줄 `{"status": "ok|rejected|error", "files": [...], "proble
 바뀐 시트 XML 만 고치고 나머지 항목은 같은 순서로 그대로 복사한다. 문자열은 `inlineStr`, 셀 서식은 유지한다.
 수식이 있는 통합문서는 `fullCalcOnLoad` 를 켠다.
 
+SRS 원본 산출(#228). 지도 표에 `원본: SRS` 가 있으면 작업본이 아니라 `docs/ssot/SRS.md` 의 `## 요구사항` 표
+(요구사항 1건 = 1줄)와 `### REQ-xxx` 상세 절을 읽어 시트의 여러 행에 쓴다(`--form <지도>` 필요, `--spec` 은
+SRS.md). `REQ-003` 은 숫자 3 으로 쓰고, 지도에 없는 열은 `md_전용` 에 적은 것만 허용한다. 표 값은 템플릿 데이터
+유효성(표준·x14 확장·정의 이름·다른 시트 범위)에서 읽은 드롭다운 허용 값과 대조해, 목록 밖이면 파일은 쓰되
+종료코드 3(`status: warning`, `warnings[].type == "dropdown"` 에 행·열·값·허용 값)으로 알린다. 허용 값을 읽지 못한
+칸(`dropdown-unchecked`)도 종료코드 3 이고 `next` 가 "검사하지 못한 열" 로 구분한다. 목록이 실제로 비어 있으면
+`dropdown-empty` 알림만 내고 종료코드는 그대로다. 엑셀이 목록 밖 값을 받는 유효성(오류 메시지 꺼짐·정보/경고 스타일)은
+검사하지 않는다. `--check` 는 파일을 쓰지 않고 같은 보고만 낸다.
+`--root R --form <지도> --list-values` 는 지도 열 이름별 허용 값을 JSON 으로 낸다. 쓰는 행의 `hidden` 은
+풀고 고정 줄 높이도 지우고, 자동 필터(`autoFilter`·`_xlnm._FilterDatabase`)는 쓴 행이 그 범위를 넘을 때만 늘린다.
+
 ## 개발
 
 ```bash

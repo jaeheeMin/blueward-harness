@@ -631,3 +631,523 @@ def test_검사_규칙의_pattern_별칭도_읽는다(proj, capsys):
     )
     code, report = _run(proj, capsys)
     assert code == 1 and any("패턴" in p["reason"] for p in report["problems"])
+
+
+# ---------------------------------------------------------------- SRS 원본(#228)
+#
+# 고객 양식은 저장소에 넣지 않으므로 Backlog 모양의 합성 xlsx 를 XML 로 직접 만든다. openpyxl 은 x14 확장
+# (extLst) 유효성을 저장 때 잃기 때문에 이 픽스처를 만드는 데도 쓰지 않는다.
+
+_NS = (
+    'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+)
+
+BACKLOG_MAP = """\
+양식: Backlog
+설명: SRS 요구사항 표를 Backlog 시트로
+템플릿: ../Backlog.xlsx
+산출:
+  폴더: docs/out
+  파일명: "BW_Backlog List_v{버전}.xlsx"
+  자리:
+    버전: {메타: 버전}
+시트:
+  - 이름: Backlog
+    표:
+      - 이름: Backlog
+        원본: SRS
+        머리글_행: 3
+        시작_행: 4
+        번호_열: Backlog ID
+        md_전용: [출처]
+        열:
+          Backlog ID: A
+          LoB: B
+          Title: C
+          Short Description: D
+          Status: E
+          Priority (PO): F
+          Development RICEFW ID: G
+          Flag: H
+  - 이름: Values Drop Down
+    설명: 드롭다운 목록 시트 — 건드리지 않는다
+"""
+
+SRS_MD = """\
+# 시험 SRS
+
+버전: 0.2
+
+## 배경과 목표
+
+x
+
+## 요구사항
+
+| ID | Title | LoB | Status | Priority (PO) | Development RICEFW ID | 출처 |
+|---|---|---|---|---|---|---|
+| REQ-002 | 결재 | Finance | New | 1. Must-Have | DEV-002 | 회의록 |
+| REQ-003 | 보고서 | Sales | Planned | 2. Should-Have |  | 메일 |
+
+### REQ-002 결재
+
+#### Short Description
+
+첫 줄
+둘째 줄
+
+### REQ-003 보고서
+
+#### Short Description
+
+보고서 한 줄
+
+## 참조
+
+없음
+"""
+
+
+def _backlog_template(
+    path: Path,
+    *,
+    lob_formula: str = "'Values Drop Down'!$D$4:$D$7",
+    hidden_row: bool = True,
+    lob_sqref: str = "B4:B20 B30:B40",
+    flag_attrs: str = 'showErrorMessage="1"',
+    local_cells: bool = False,
+) -> None:
+    """Backlog 모양의 합성 xlsx. 표준 유효성(정의 이름·직접 목록)과 x14 유효성(다른 시트 범위)을 둘 다 가진다."""
+    heads = ["Backlog ID", "LoB", "Title", "Short Description\n", "Status", "Priority\n(PO)", "Development RICEFW ID", "Flag"]
+    head_cells = "".join(
+        f'<c r="{c}3" s="1" t="inlineStr"><is><t xml:space="preserve">{h}</t></is></c>' for c, h in zip("ABCDEFGH", heads)
+    )
+    head_cells = head_cells.replace(">Status<", "> Status<")
+    rows = [
+        '<row r="1"><c r="A1" t="inlineStr"><is><t>Backlog</t></is></c>'
+        + ('<c r="H1" t="inlineStr"><is><t>Alpha</t></is></c>' if local_cells else "")
+        + "</row>",
+        '<row r="2">' + ('<c r="H2" t="inlineStr"><is><t>Beta</t></is></c>' if local_cells else "") + "</row>"
+        if local_cells else '<row r="2"/>',
+        f'<row r="3" ht="40" customHeight="1">{head_cells}</row>',
+    ]
+    for r in range(4, 9):
+        hid = ' hidden="1"' if (hidden_row and r == 5) else ""
+        rows.append(f'<row r="{r}" spans="1:8" ht="30" customHeight="1"{hid}>' + "".join(f'<c r="{c}{r}" s="1"/>' for c in "ABCDEFGH") + "</row>")
+    x14 = (
+        '<extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">'
+        '<x14:dataValidations count="2" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">'
+        '<x14:dataValidation type="list" allowBlank="1" showErrorMessage="1"><x14:formula1>'
+        f"<xm:f>{lob_formula}</xm:f></x14:formula1><xm:sqref>{lob_sqref}</xm:sqref></x14:dataValidation>"
+        '<x14:dataValidation type="list" allowBlank="1" showErrorMessage="1"><x14:formula1>'
+        "<xm:f>'Values Drop Down'!$B$4:$B$8</xm:f></x14:formula1><xm:sqref>E4:E20</xm:sqref></x14:dataValidation>"
+        "</x14:dataValidations></ext></extLst>"
+    )
+    sheet1 = (
+        f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet {_NS}>'
+        '<dimension ref="A1:H8"/><sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+        f'<sheetData>{"".join(rows)}</sheetData>'
+        '<autoFilter ref="A3:H6"></autoFilter>'
+        '<dataValidations count="2">'
+        '<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="F4:F20"><formula1>Priorities</formula1></dataValidation>'
+        f'<dataValidation type="list" allowBlank="1" {flag_attrs} sqref="H4:H20"><formula1>"Y,N"</formula1></dataValidation>'
+        "</dataValidations>"
+        '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>'
+        f"{x14}</worksheet>"
+    )
+
+    def inl(ref: str, text: str) -> str:
+        return f'<c r="{ref}" t="inlineStr"><is><t>{text}</t></is></c>'
+
+    vdd_rows = [
+        f'<row r="4"><c r="A4" t="s"><v>0</v></c>{inl("B4", "New")}<c r="D4" t="s"><v>3</v></c></row>',
+        f'<row r="5"><c r="A5" t="s"><v>1</v></c>{inl("B5", "Planned")}{inl("D5", "Sales")}</row>',
+        f'<row r="6"><c r="A6" t="s"><v>2</v></c></row>',  # B6, D6 는 빈 칸(무시돼야 한다)
+        f'<row r="7">{inl("B7", "In Process")}{inl("D7", "R&amp;D")}</row>',
+        f'<row r="8">{inl("B8", "Done")}</row>',
+    ]
+    sheet2 = (
+        f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet {_NS}>'
+        f'<dimension ref="A4:D8"/><sheetData>{"".join(vdd_rows)}</sheetData></worksheet>'
+    )
+    sst = (
+        f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst {_NS} count="4" uniqueCount="4">'
+        "<si><t>1. Must-Have</t></si><si><t>2. Should-Have</t></si><si><t>3. Could-Have</t></si>"
+        '<si><r><t>Fin</t></r><r><t>ance</t></r><rPh sb="0" eb="1"><t>무시</t></rPh></si></sst>'
+    )
+    workbook = (
+        f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook {_NS}><bookViews><workbookView/></bookViews>'
+        '<sheets><sheet name="Backlog" sheetId="1" r:id="rId1"/><sheet name="Values Drop Down" sheetId="2" r:id="rId2"/></sheets>'
+        '<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">Backlog!$A$3:$H$6</definedName>'
+        "<definedName name=\"Priorities\">'Values Drop Down'!$A$4:$A$6</definedName></definedNames>"
+        '<calcPr calcId="191029"/></workbook>'
+    )
+    rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    ofd = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    wb_rels = (
+        f'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="{rels_ns}">'
+        f'<Relationship Id="rId1" Type="{ofd}/worksheet" Target="worksheets/sheet1.xml"/>'
+        f'<Relationship Id="rId2" Type="{ofd}/worksheet" Target="worksheets/sheet2.xml"/>'
+        f'<Relationship Id="rId3" Type="{ofd}/styles" Target="styles.xml"/>'
+        f'<Relationship Id="rId4" Type="{ofd}/sharedStrings" Target="sharedStrings.xml"/></Relationships>'
+    )
+    styles = (
+        f'<?xml version="1.0" encoding="UTF-8"?><styleSheet {_NS}>'
+        '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+        '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+        '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1"/></xf></cellXfs></styleSheet>'
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>'
+    )
+    root_rels = (
+        f'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="{rels_ns}">'
+        f'<Relationship Id="rId1" Type="{ofd}/officeDocument" Target="xl/workbook.xml"/></Relationships>'
+    )
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zo:
+        zo.writestr("[Content_Types].xml", content_types)
+        zo.writestr("_rels/.rels", root_rels)
+        zo.writestr("xl/workbook.xml", workbook)
+        zo.writestr("xl/_rels/workbook.xml.rels", wb_rels)
+        zo.writestr("xl/styles.xml", styles)
+        zo.writestr("xl/sharedStrings.xml", sst)
+        zo.writestr("xl/worksheets/sheet1.xml", sheet1)
+        zo.writestr("xl/worksheets/sheet2.xml", sheet2)
+
+
+@pytest.fixture
+def bproj(tmp_path: Path) -> Path:
+    (tmp_path / "templates" / "forms").mkdir(parents=True)
+    (tmp_path / "templates" / "forms" / "Backlog.yaml").write_text(BACKLOG_MAP, encoding="utf-8")
+    _backlog_template(tmp_path / "templates" / "Backlog.xlsx")
+    return tmp_path
+
+
+def _srs_run(proj: Path, capsys, text: str = SRS_MD, *extra: str):
+    srs = proj / "SRS.md"
+    srs.write_text(text, encoding="utf-8")
+    code = export.main(["--spec", str(srs), "--root", str(proj), "--form", "Backlog", *extra])
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1
+    return code, json.loads(out)
+
+
+def _read_parts(path: Path) -> dict[str, bytes]:
+    with zipfile.ZipFile(path) as z:
+        return {n: z.read(n) for n in z.namelist()}
+
+
+def _sheet1(path: Path) -> str:
+    return zipfile.ZipFile(path).read("xl/worksheets/sheet1.xml").decode("utf-8")
+
+
+def _cell_values(path: Path) -> dict[str, object]:
+    ws = openpyxl.load_workbook(path)["Backlog"]
+    return {c.coordinate: c.value for row in ws.iter_rows(min_row=4, max_row=8) for c in row if c.value is not None}
+
+
+def test_SRS_원본은_요구사항_표를_여러_행에_쓰고_REQ_번호를_숫자로_쓴다(bproj, capsys):
+    code, report = _srs_run(bproj, capsys)
+    assert code == 0 and report["status"] == "ok" and report["warnings"] == []
+    assert report["files"] == ["docs/out/BW_Backlog List_v0.2.xlsx"]
+    got = _cell_values(bproj / report["files"][0])
+    assert got["A4"] == 2 and got["A5"] == 3  # REQ-002 → 2
+    assert [got[f"{c}4"] for c in "BCEF"] == ["Finance", "결재", "New", "1. Must-Have"]
+    assert got["G4"] == "DEV-002" and "G5" not in got
+    assert got["D4"] == "첫 줄\n둘째 줄"  # 상세 절 → 셀, 여러 줄은 셀 안 줄바꿈
+    assert got["D5"] == "보고서 한 줄"
+    assert "회의록" not in _sheet1(bproj / report["files"][0])  # md 전용 열은 엑셀로 가지 않는다
+
+
+def test_SRS_원본_산출물의_시트_XML이_well_formed(bproj, capsys):
+    _, report = _srs_run(bproj, capsys)
+    _assert_sheets_sane(bproj / report["files"][0])
+
+
+def test_지도에도_md_전용에도_없는_열은_종료코드_2(bproj, capsys):
+    code, report = _srs_run(bproj, capsys, SRS_MD.replace("출처", "엉뚱"))
+    assert code == 2 and "엉뚱" in report["problems"][0]["reason"]
+
+
+def test_상세_절_소제목이_지도_열에_없으면_종료코드_2(bproj, capsys):
+    code, report = _srs_run(bproj, capsys, SRS_MD.replace("#### Short Description\n\n보고서", "#### Nope\n\n보고서"))
+    assert code == 2 and "Nope" in report["problems"][0]["reason"]
+
+
+def test_표에_없는_REQ의_상세_절은_종료코드_2(bproj, capsys):
+    code, report = _srs_run(bproj, capsys, SRS_MD.replace("### REQ-003 보고서", "### REQ-009 보고서"))
+    assert code == 2 and "REQ-009" in report["problems"][0]["reason"]
+
+
+def test_표_칸과_상세_절_양쪽에_있으면_거부(bproj, capsys):
+    text = SRS_MD.replace("| ID | Title |", "| ID | Short Description | Title |").replace("|---|---|---|", "|---|---|---|---|", 1)
+    text = text.replace("| REQ-002 | 결재 |", "| REQ-002 | 표에도 있음 | 결재 |").replace("| REQ-003 | 보고서 |", "| REQ-003 |  | 보고서 |")
+    code, report = _srs_run(bproj, capsys, text)
+    assert code == 1
+    assert any(p["item"] == "REQ-002" and "양쪽" in p["reason"] for p in report["problems"])
+
+
+_NO_DETAIL_3 = "### REQ-003 보고서\n\n#### Short Description\n\n보고서 한 줄\n"
+
+
+def test_ID가_REQ_숫자가_아니거나_겹치면_거부(bproj, capsys):
+    dup = SRS_MD.replace("| REQ-003 | 보고서", "| REQ-002 | 보고서").replace(_NO_DETAIL_3, "")
+    code, report = _srs_run(bproj, capsys, dup)
+    assert code == 1 and any("두 줄 이상" in p["reason"] for p in report["problems"])
+    bad = SRS_MD.replace("| REQ-003 | 보고서", "| 3 | 보고서").replace(_NO_DETAIL_3, "")
+    code, report = _srs_run(bproj, capsys, bad)
+    assert code == 1 and any("REQ-숫자" in p["reason"] for p in report["problems"])
+
+
+def test_버전은_SRS_머리의_버전_줄에서_온다(bproj, capsys):
+    code, report = _srs_run(bproj, capsys, SRS_MD.replace("버전: 0.2", "- 버전: v1.3"))
+    assert code == 0 and report["files"] == ["docs/out/BW_Backlog List_v1.3.xlsx"]
+
+
+def test_버전_줄이_없으면_거부하고_파일을_쓰지_않는다(bproj, capsys):
+    code, report = _srs_run(bproj, capsys, SRS_MD.replace("버전: 0.2\n", ""))
+    assert code == 1 and any("버전" in p["item"] for p in report["problems"])
+    assert not (bproj / "docs").exists()
+
+
+def test_SRS_지도는_양식을_고르지_않으면_종료코드_2로_알려_준다(bproj, capsys):
+    srs = bproj / "SRS.md"
+    srs.write_text(SRS_MD, encoding="utf-8")
+    code = export.main(["--spec", str(srs), "--root", str(bproj)])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 2 and "--form <지도>" in report["problems"][0]["reason"] and "Backlog" in report["problems"][0]["reason"]
+
+
+def test_작업본_지도에_SRS를_먹이면_종료코드_2(proj, capsys):
+    srs = proj / "SRS.md"
+    srs.write_text(SRS_MD, encoding="utf-8")
+    # 원본이 SRS 가 아닌 지도에는 --form 을 줘도 작업본 경로로 간다(`## 양식 항목` 이 없으니 읽지 못함)
+    code = export.main(["--spec", str(srs), "--root", str(proj), "--form", "시험양식"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 2 and "양식 항목" in report["problems"][0]["reason"]
+
+
+# -- 드롭다운 허용 값
+
+def test_드롭다운_허용_값을_표준_x14_정의_이름_직접_목록에서_읽는다(bproj, capsys):
+    code = export.main(["--root", str(bproj), "--form", "Backlog", "--list-values"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0 and report["status"] == "ok" and report["warnings"] == []
+    cols = {c["column"]: c for c in report["sheets"][0]["columns"]}
+    assert report["sheets"][0]["sheet"] == "Backlog"
+    # x14 + 다른 시트 범위: 빈 칸(D6)은 무시, sharedStrings 서식 있는 글(Fin+ance)은 이어 붙이고 윗주는 뺀다, &amp; 는 푼다
+    assert cols["LoB"]["allowed"] == ["Finance", "Sales", "R&D"]
+    assert cols["LoB"]["cells"] == "B4:B20 B30:B40" and cols["LoB"]["letter"] == "B"
+    assert cols["Status"]["allowed"] == ["New", "Planned", "In Process", "Done"]  # 가운데 빈 칸 무시
+    # 표준 + 정의 이름(Priorities → 'Values Drop Down'!$A$4:$A$6, sharedStrings)
+    assert cols["Priority (PO)"]["allowed"] == ["1. Must-Have", "2. Should-Have", "3. Could-Have"]
+    # 직접 적은 목록
+    assert cols["Flag"]["allowed"] == ["Y", "N"]
+    assert "Title" not in cols  # 유효성이 없는 열은 내지 않는다
+
+
+def test_읽지_못하는_목록_수식은_허용_값_null과_사유로_알린다(bproj, capsys):
+    _backlog_template(bproj / "templates" / "Backlog.xlsx", lob_formula="INDIRECT(&quot;A1&quot;)")
+    code = export.main(["--root", str(bproj), "--form", "Backlog", "--list-values"])
+    report = json.loads(capsys.readouterr().out)
+    lob = next(c for c in report["sheets"][0]["columns"] if c["column"] == "LoB")
+    # 읽지 못한 열이 있으면 통과처럼 0 으로 두지 않고 3(경고)
+    assert code == 3 and report["status"] == "warning" and lob["allowed"] is None and lob["unreadable"]
+    assert any(w["type"] == "dropdown-unchecked" and w["item"] == "LoB" for w in report["warnings"])
+
+
+def test_목록_밖_값은_행_열_값_허용_값과_함께_경고하고_종료코드_3(bproj, capsys):
+    text = SRS_MD.replace("| Finance |", "| Marketing |").replace("| 1. Must-Have |", "| 9. Nope |")
+    code, report = _srs_run(bproj, capsys, text)
+    assert code == 3 and report["status"] == "warning"
+    assert (bproj / report["files"][0]).exists()  # 산출은 한다
+    drops = [w for w in report["warnings"] if w["type"] == "dropdown"]
+    lob = next(w for w in drops if w["column"] == "LoB")
+    assert (lob["item"], lob["value"], lob["cell"], lob["row"]) == ("REQ-002", "Marketing", "B4", 4)
+    assert lob["allowed"] == ["Finance", "Sales", "R&D"] and "허용 값: Finance, Sales, R&D" in lob["reason"]
+    assert any(w["column"] == "Priority (PO)" and w["value"] == "9. Nope" for w in drops)
+    assert len(drops) == 2  # 목록 안 값(Sales, New, Planned, 2. Should-Have)은 경고하지 않는다
+    # 칸 값은 그대로 들어 있다
+    assert _cell_values(bproj / report["files"][0])["B4"] == "Marketing"
+
+
+def test_목록_안_값은_경고_없이_종료코드_0(bproj, capsys):
+    code, report = _srs_run(bproj, capsys)
+    assert code == 0 and not [w for w in report["warnings"] if w["type"] == "dropdown"]
+
+
+def test_check는_파일을_쓰지_않고_같은_경고를_낸다(bproj, capsys):
+    code, report = _srs_run(bproj, capsys, SRS_MD.replace("| Finance |", "| Marketing |"), "--check")
+    assert code == 3 and report["status"] == "warning" and report["dry_run"] is True
+    assert report["files"] == ["docs/out/BW_Backlog List_v0.2.xlsx"]
+    assert not (bproj / "docs").exists()
+    code, report = _srs_run(bproj, capsys, SRS_MD, "--check")
+    assert code == 0 and report["dry_run"] is True and not (bproj / "docs").exists()
+
+
+def test_목록을_읽지_못한_칸은_검사_불능_경고와_종료코드_3(bproj, capsys):
+    _backlog_template(bproj / "templates" / "Backlog.xlsx", lob_formula="INDIRECT(&quot;A1&quot;)")
+    code, report = _srs_run(bproj, capsys, SRS_MD.replace("| Finance |", "| Marketing |"))
+    assert code == 3 and report["status"] == "warning"
+    assert [w["type"] for w in report["warnings"]] == ["dropdown-unchecked"]
+    assert "검사하지 못한 열이 있다" in report["next"] and "목록 밖" not in report["next"]
+    assert (bproj / report["files"][0]).exists()
+
+
+# -- 행 속성·서식·확장 유효성 보존
+
+def test_쓰는_행의_hidden은_지운다(bproj, capsys):
+    tpl = zipfile.ZipFile(bproj / "templates" / "Backlog.xlsx").read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert '<row r="5" spans="1:8" ht="30" customHeight="1" hidden="1">' in tpl
+    _, report = _srs_run(bproj, capsys)
+    out = _sheet1(bproj / report["files"][0])
+    assert "hidden" not in out
+    assert re.search(r'<row r="5"[^>]*>', out)
+
+
+def test_쓰지_않는_행의_hidden은_그대로(bproj, capsys):
+    # 요구사항 한 줄만 쓰면 5행은 쓰지 않는다
+    text = SRS_MD.replace("| REQ-003 | 보고서 | Sales | Planned | 2. Should-Have |  | 메일 |\n", "").replace(
+        "### REQ-003 보고서\n\n#### Short Description\n\n보고서 한 줄\n", ""
+    )
+    _, report = _srs_run(bproj, capsys, text)
+    assert 'r="5"' in _sheet1(bproj / report["files"][0]) and 'hidden="1"' in _sheet1(bproj / report["files"][0])
+
+
+def test_산출물에_x14_유효성과_표준_유효성이_바이트_그대로_남는다(bproj, capsys):
+    _, report = _srs_run(bproj, capsys)
+    tpl = zipfile.ZipFile(bproj / "templates" / "Backlog.xlsx").read("xl/worksheets/sheet1.xml").decode("utf-8")
+    out = _sheet1(bproj / report["files"][0])
+    ext = lambda x: re.search(r"<extLst>.*</extLst>", x, re.S).group(0)
+    std = lambda x: re.search(r"<dataValidations count=.*?</dataValidations>", x, re.S).group(0)
+    assert ext(out) == ext(tpl) and std(out) == std(tpl)
+    assert out.count("<x14:dataValidation ") == 2
+    # 목록 시트와 나머지 항목도 바이트 그대로
+    a, b = zipfile.ZipFile(bproj / "templates" / "Backlog.xlsx"), zipfile.ZipFile(bproj / report["files"][0])
+    for n in ("xl/worksheets/sheet2.xml", "xl/styles.xml", "xl/sharedStrings.xml"):
+        assert a.read(n) == b.read(n)
+
+
+def test_자동_필터는_쓴_행이_범위를_넘을_때만_늘린다(bproj, capsys):
+    # 2건(4~5행)은 필터 A3:H6 안 — 필터와 숨은 이름 모두 그대로
+    _, report = _srs_run(bproj, capsys)
+    out = _read_parts(bproj / report["files"][0])
+    assert '<autoFilter ref="A3:H6"></autoFilter>' in out["xl/worksheets/sheet1.xml"].decode("utf-8")
+    assert "Backlog!$A$3:$H$6" in out["xl/workbook.xml"].decode("utf-8")
+    # 5건(4~8행)은 넘는다 — 둘 다 8행까지
+    rows = "".join(f"| REQ-{n:03d} | t{n} | Sales | New | 1. Must-Have |  | x |\n" for n in range(4, 7))
+    text = SRS_MD.replace("\n### REQ-002", rows + "\n### REQ-002", 1)
+    for f in (bproj / "docs" / "out").glob("*"):
+        f.unlink()
+    _, report = _srs_run(bproj, capsys, text)
+    out = _read_parts(bproj / report["files"][0])
+    assert '<autoFilter ref="A3:H8"></autoFilter>' in out["xl/worksheets/sheet1.xml"].decode("utf-8")
+    wb = out["xl/workbook.xml"].decode("utf-8")
+    assert "Backlog!$A$3:$H$8" in wb and "$H$6" not in wb
+
+
+def test_다른_시트_드롭다운_목록_시트는_건드리지_않아도_경고가_없다(bproj, capsys):
+    _, report = _srs_run(bproj, capsys)
+    assert not any(w.get("sheet") == "Values Drop Down" for w in report["warnings"])
+
+
+def test_SRS_원본_지도에_칸이나_원본_없는_표가_섞이면_종료코드_2(bproj, capsys):
+    path = bproj / "templates" / "forms" / "Backlog.yaml"
+    path.write_text(BACKLOG_MAP + "    칸:\n      - 항목: x\n        위치: A1\n", encoding="utf-8")
+    # 두 번째 시트 아래에 칸이 붙는다
+    code, report = _srs_run(bproj, capsys)
+    assert code == 2 and "SRS" in report["problems"][0]["reason"]
+
+
+# -- 줄 높이·목록 읽기·검사 대상 (#228 검토 지적)
+
+def test_값을_쓴_행의_고정_줄_높이는_지우고_다른_행은_그대로(bproj, capsys):
+    _, report = _srs_run(bproj, capsys)
+    out = _sheet1(bproj / report["files"][0])
+    row = lambda n: re.search(rf'<row r="{n}"[^>]*>', out).group(0)
+    for n in (4, 5):
+        assert "ht=" not in row(n) and "customHeight" not in row(n)
+    for n in (6, 8):
+        assert 'ht="30" customHeight="1"' in row(n)
+    assert 'ht="40" customHeight="1"' in row(3)
+
+
+def test_시트_이름_없는_같은_시트_범위_목록은_그_시트_기준으로_읽는다(bproj, capsys):
+    _backlog_template(bproj / "templates" / "Backlog.xlsx", lob_formula="$H$1:$H$2", local_cells=True)
+    code = export.main(["--root", str(bproj), "--form", "Backlog", "--list-values"])
+    report = json.loads(capsys.readouterr().out)
+    lob = next(c for c in report["sheets"][0]["columns"] if c["column"] == "LoB")
+    assert code == 0 and lob["allowed"] == ["Alpha", "Beta"]
+
+
+_WITH_FLAG = SRS_MD.replace("| 출처 |\n|---|---|---|---|---|---|---|", "| 출처 | Flag |\n|---|---|---|---|---|---|---|---|").replace(
+    "| 회의록 |", "| 회의록 | Q |"
+).replace("| 메일 |", "| 메일 | Q |")
+
+
+def test_오류_메시지가_켜진_stop_유효성은_목록_밖_값을_경고한다(bproj, capsys):
+    code, report = _srs_run(bproj, capsys, _WITH_FLAG)
+    assert code == 3 and [w["column"] for w in report["warnings"] if w["type"] == "dropdown"] == ["Flag", "Flag"]
+
+
+def test_정보_스타일이거나_오류_메시지가_꺼진_유효성은_검사하지_않는다(bproj, capsys):
+    for attrs in ('errorStyle="information" showErrorMessage="1"', 'errorStyle="warning" showErrorMessage="1"', ""):
+        for f in (bproj / "docs" / "out").glob("*") if (bproj / "docs").exists() else []:
+            f.unlink()
+        _backlog_template(bproj / "templates" / "Backlog.xlsx", flag_attrs=attrs)
+        code, report = _srs_run(bproj, capsys, _WITH_FLAG)
+        assert code == 0 and not [w for w in report["warnings"] if w["type"] == "dropdown"], attrs
+    code = export.main(["--root", str(bproj), "--form", "Backlog", "--list-values"])
+    flag = next(c for c in json.loads(capsys.readouterr().out)["sheets"][0]["columns"] if c["column"] == "Flag")
+    assert flag["enforced"] is False and flag["allowed"] == ["Y", "N"]
+
+
+def test_목록_범위가_실제로_비어_있으면_알림만_내고_종료코드에_영향_없다(bproj, capsys):
+    _backlog_template(bproj / "templates" / "Backlog.xlsx", lob_formula="'Values Drop Down'!$F$4:$F$6")
+    code, report = _srs_run(bproj, capsys)
+    assert code == 0 and report["status"] == "ok"
+    assert [w["type"] for w in report["warnings"]] == ["dropdown-empty"]
+    assert "검사하지 못한" not in report["next"]
+
+
+def test_정의_이름을_못_찾으면_읽지_못한_것이라_종료코드_3(bproj, capsys):
+    _backlog_template(bproj / "templates" / "Backlog.xlsx", lob_formula="NoSuchName")
+    code, report = _srs_run(bproj, capsys)
+    assert code == 3 and [w["type"] for w in report["warnings"]] == ["dropdown-unchecked"]
+
+
+def test_코드_펜스_안의_제목은_소제목으로_보지_않는다(bproj, capsys):
+    text = SRS_MD.replace(
+        "첫 줄\n둘째 줄", "첫 줄\n```\n#### Nope\n### REQ-009 x\n## 요구사항\n```\n둘째 줄"
+    )
+    code, report = _srs_run(bproj, capsys, text)
+    assert code == 0, report
+    assert _cell_values(bproj / report["files"][0])["D4"] == "첫 줄\n```\n#### Nope\n### REQ-009 x\n## 요구사항\n```\n둘째 줄"
+
+
+def test_쓰는_행이_드롭다운_범위_밖이면_그_줄만_알린다(bproj, capsys):
+    _backlog_template(bproj / "templates" / "Backlog.xlsx", lob_sqref="B4:B5 B30:B40")
+    rows = "| REQ-004 | t4 | Sales | New | 1. Must-Have |  | x |\n"
+    code, report = _srs_run(bproj, capsys, SRS_MD.replace("\n### REQ-002", rows + "\n### REQ-002", 1))
+    miss = [w for w in report["warnings"] if w["type"] == "dropdown-missing"]
+    assert code == 0 and len(miss) == 1
+    assert miss[0]["row"] == 6 and miss[0]["item"] == "REQ-004"
+    assert "6행" in miss[0]["reason"] and "이 줄엔 드롭다운이 없다" in miss[0]["reason"]
+
+
+def test_대소문자만_다른_값은_힌트를_붙여_경고한다(bproj, capsys):
+    code, report = _srs_run(bproj, capsys, SRS_MD.replace("| Finance |", "| finance |"))
+    assert code == 3
+    w = next(w for w in report["warnings"] if w["type"] == "dropdown")
+    assert "대소문자만 다르다('Finance')" in w["reason"]
