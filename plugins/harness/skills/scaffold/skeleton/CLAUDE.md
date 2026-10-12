@@ -20,7 +20,7 @@ Project Repository 다. 이 프로젝트의 최종 산출물과, 그 산출물�
 
 ## 규칙
 
-- 산출물은 `docs/` 아래 두고 버전은 파일명에 남긴다(`개발사양서_v1.0.xlsx`).
+- 산출물은 `docs/` 아래 두고 버전은 파일명에 남긴다(`개발사양서_v0.1.xlsx`).
   이전 버전도 지우지 않는다.
 - 고객사 템플릿과 검사 규칙은 이 저장소 안 `templates/` 와 `rules/` 에 둔다.
 - `docs/ssot/SRS.md` 가 SSOT 이고, Convention 과 Template 은 링크로만

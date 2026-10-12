@@ -61,7 +61,7 @@ plugins/harness/
 
 ```json
 {
-  "enabledPlugins": ["harness@blueward-harness"]
+  "enabledPlugins": { "harness@blueward-harness": true }
 }
 ```
 
