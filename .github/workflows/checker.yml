@@ -51,7 +51,8 @@ jobs:
           set -e
           test "$code" -eq 1 || { echo "종료코드가 1이 아니라 $code 다"; exit 1; }
 
-      # plugins/harness/ 를 바꾼 PR 은 plugin.json version 을 올려야 한다(CLAUDE.md 원칙 8, #136).
+      # 배포되는 파일(plugins/harness/, checker/ 의 엔진, pyproject.toml, uv.lock, scripts/, 재사용 워크플로)을 바꾼 PR 은 plugin.json version 을 올려야 한다
+      # (CLAUDE.md 원칙 8, #136, #149 — 엔진은 version 태그로 배포된다).
       # git 과 파일 경로만 보는 검사라 OS 마다 돌릴 이유가 없어 ubuntu 에서만 한 번 돈다.
       - name: Plugin version 올림 확인
         if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'

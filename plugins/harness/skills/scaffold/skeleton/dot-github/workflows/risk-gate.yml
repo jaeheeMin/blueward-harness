@@ -27,7 +27,7 @@ on:
 
 jobs:
   risk-gate:
-    uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@main
+    uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@stable
     permissions:
       contents: read
       pull-requests: write

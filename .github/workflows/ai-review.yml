@@ -27,7 +27,7 @@
 #
 #   jobs:
 #     ai-review:          # job id 는 반드시 ai-review — risk-gate 가 이 이름의 check run 을 읽는다.
-#       uses: jaeheeMin/blueward-harness/.github/workflows/ai-review.yml@main
+#       uses: jaeheeMin/blueward-harness/.github/workflows/ai-review.yml@stable
 #       secrets:
 #         CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 #       permissions:
@@ -44,7 +44,7 @@ on:
       engine-ref:
         description: 판정 로직을 가져올 blueward-harness 의 ref
         type: string
-        default: main
+        default: stable
       model:
         description: 리뷰에 쓸 Claude 모델
         type: string

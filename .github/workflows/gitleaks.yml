@@ -38,7 +38,7 @@
 #       branches: [main]
 #   jobs:
 #     gitleaks:
-#       uses: jaeheeMin/blueward-harness/.github/workflows/gitleaks.yml@main
+#       uses: jaeheeMin/blueward-harness/.github/workflows/gitleaks.yml@stable
 #       permissions:
 #         contents: read
 
@@ -50,7 +50,7 @@ on:
       engine-ref:
         description: 판정 스크립트와 기본 설정을 가져올 blueward-harness 의 ref
         type: string
-        default: main
+        default: stable
 
 jobs:
   gitleaks:

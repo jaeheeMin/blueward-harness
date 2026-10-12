@@ -46,7 +46,7 @@ def test_caller_는_기존_caller_처럼_main_을_부른다():
     assert caller["on"]["pull_request_target"]["types"] == ["synchronize"]
     assert caller["on"]["pull_request_review"]["types"] == ["dismissed"]
     job = caller["jobs"]["pr-tamper-alert"]
-    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/pr-tamper-alert.yml@main"
+    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/pr-tamper-alert.yml@stable"
     assert job["permissions"] == {"contents": "read", "issues": "write", "pull-requests": "read"}
 
 

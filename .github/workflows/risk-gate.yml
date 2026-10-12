@@ -25,7 +25,7 @@
 #
 #   jobs:
 #     risk-gate:          # job id 는 반드시 risk-gate — 게이트가 자기 check run 을 알아보는 이름이다.
-#       uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@main
+#       uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@stable
 #       permissions:
 #         contents: read
 #         pull-requests: write
@@ -47,7 +47,7 @@ on:
       engine-ref:
         description: 판정 로직을 가져올 blueward-harness 의 ref
         type: string
-        default: main
+        default: stable
       wait-checks:
         description: 다른 검사가 끝나길 기다리는 최대 시간(초)
         type: number

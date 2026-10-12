@@ -31,8 +31,13 @@
 6. **문서 버전은 파일명에 남긴다**(`개발사양서_v0.1.xlsx`), 이전 판도 지우지 않는다.
 7. **"검사를 못 했다" 를 "통과" 나 "위반" 으로 뭉개지 않는다.** 검사할 수
    없으면 통과시키지도, 위반이라 하지도 말고 검사 불능이라고 말한다.
-8. **`plugins/harness/` 안 파일을 바꾸면 `plugins/harness/.claude-plugin/plugin.json`
-   의 version 을 올린다.** 같으면 팀원 PC 설치본이 갱신되지 않는다.
+8. **배포되는 파일(`plugins/harness/`, 엔진 `checker/`(`checker/tests/` 와 안의 `*.md` 제외),
+   `pyproject.toml`, `uv.lock`, `scripts/`, 재사용 워크플로)을 바꾸면
+   `plugins/harness/.claude-plugin/plugin.json` 의 version 을 올린다.** 같으면 팀원 PC
+   설치본이 갱신되지 않고, 병합해도 엔진 태그 `v{version}` 과 `stable` 이 새로 붙지
+   않아 훅·Project Repository 에 배포되지 않는다. 훅은 엔진을 plugin.json version
+   과 같은 태그로, caller workflow 는 `@stable` 로 받는다(병합하면 Actions 가 태그를
+   자동으로 붙인다, #149).
 9. **스킬·규칙·훅 동작을 바꾸면 길잡이도 고친다.**
    `docs/guide/harness-guide.html` 의 해당 탭을 같은 PR 에서 고치고, 병합 뒤
    아티팩트에 다시 올린다(`docs/guide/README.md`). public-cloud 쪽 변경은 이

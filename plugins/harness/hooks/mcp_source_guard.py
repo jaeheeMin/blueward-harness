@@ -78,9 +78,7 @@ from urllib.parse import unquote, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import adt_tiers  # noqa: E402
 
-# 검사 엔진을 받아 오는 기본 위치. `pre_write_guard.py` 와 GitHub Actions 재사용
-# 워크플로의 기본 `engine-ref` (main) 와 맞춘다.
-DEFAULT_ENGINE_SPEC = "git+https://github.com/jaeheeMin/blueward-harness@main"
+import engine_spec as _engine_spec  # noqa: E402
 
 # 엔진을 실행할 시간. `pre_write_guard.py` 와 같은 이유로 넉넉히 둔다.
 ENGINE_TIMEOUT_SECONDS = 110
@@ -150,8 +148,32 @@ def deny(reason: str) -> None:
 
 
 def engine_spec() -> str:
-    """검사 엔진을 어디서 받을지 정한다. `pre_write_guard.py` 의 같은 함수와 같다."""
-    return os.environ.get("DOC_GUARD_ENGINE") or DEFAULT_ENGINE_SPEC
+    """검사 엔진을 어디서 받을지 정한다(#149).
+
+    기본은 플러그인 판(plugin.json version)과 같은 태그 `v{version}` 이다 — 판 계산은
+    `engine_spec.py` 한 곳이 한다. `DOC_GUARD_ENGINE` 환경변수를 두면 그것을 `uvx --from`
+    에 그대로 넘긴다 — 개발과 테스트가 로컬 체크아웃 경로를 가리켜 네트워크 없이 빠르게
+    돌리는 통로다. version 을 읽지 못하면 `@main` 으로 넘어가지 않고 검사 불능으로 막는다.
+    """
+    try:
+        return _engine_spec.engine_spec()
+    except _engine_spec.EngineSpecError as exc:
+        deny(
+            "harness 가 검사 엔진의 판을 정하지 못해 검사할 수 없었습니다.\n"
+            f"사유: {exc}\n"
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            "다음: 사람이 할 일 — 플러그인 설치가 깨졌을 수 있습니다. 플러그인을 다시 설치하거나 "
+            "갱신하십시오. 계속되면 위 사유를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 "
+            "알리십시오."
+        )
+
+
+def engine_hint() -> str:
+    """엔진을 못 받거나 못 돌렸을 때 사유 문구 앞에 붙일 원인 후보(태그 없음 등)."""
+    try:
+        return _engine_spec.tag_hint(_engine_spec.engine_spec())
+    except _engine_spec.EngineSpecError:
+        return ""
 
 
 def _load_url_patterns() -> list[tuple[re.Pattern[str], str]]:
@@ -233,6 +255,7 @@ def _check_code(url: str, content: str, suffix: str) -> None:
                 f"objectSourceUrl: {url}\n"
                 f"사유: {exc}\n"
                 "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                + engine_hint()
                 + NEXT_ENGINE_FAIL
                 + " 로컬에서 개발·테스트 중이라면 DOC_GUARD_ENGINE 환경변수로 엔진 경로를 "
                 "지정할 수 있습니다."
@@ -249,6 +272,7 @@ def _check_code(url: str, content: str, suffix: str) -> None:
             f"objectSourceUrl: {url}\n"
             f"{(done.stderr or done.stdout or '').strip()[:500]}\n"
             "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + engine_hint()
             + NEXT_RETRY
         )
 
@@ -352,6 +376,7 @@ def _run_engine_and_get_violations(tool: str, content: str, suffix: str, context
                 f"{context}\n"
                 f"사유: {exc}\n"
                 "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                + engine_hint()
                 + NEXT_ENGINE_FAIL
                 + " 로컬에서 개발·테스트 중이라면 DOC_GUARD_ENGINE 환경변수로 엔진 경로를 "
                 "지정할 수 있습니다."
@@ -368,6 +393,7 @@ def _run_engine_and_get_violations(tool: str, content: str, suffix: str, context
             f"MCP 도구: {tool}\n{context}\n"
             f"{(done.stderr or done.stdout or '').strip()[:500]}\n"
             "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + engine_hint()
             + NEXT_RETRY
         )
 

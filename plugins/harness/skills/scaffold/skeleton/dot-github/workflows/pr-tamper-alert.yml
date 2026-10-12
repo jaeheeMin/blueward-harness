@@ -7,7 +7,7 @@ on:
 
 jobs:
   pr-tamper-alert:
-    uses: jaeheeMin/blueward-harness/.github/workflows/pr-tamper-alert.yml@main
+    uses: jaeheeMin/blueward-harness/.github/workflows/pr-tamper-alert.yml@stable
     secrets:
       TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
     permissions:

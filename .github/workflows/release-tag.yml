@@ -1,0 +1,168 @@
+# 배포되는 파일이 main 에 들어오면 엔진 판 태그를 붙이고 stable 을 옮긴다(#149).
+#
+# 두 곳이 이 태그를 쓴다.
+#   - 팀원 PC 훅: 엔진을 plugin.json version 과 같은 태그 v{version} 으로 받는다
+#     (`plugins/harness/hooks/engine_spec.py`). 플러그인과 엔진이 한 짝으로 움직인다.
+#   - Project Repository 의 caller workflow: 움직이는 태그 `stable` 을 부른다(`@stable`,
+#     엔진 입력 `engine-ref` 기본값도 stable). main 에 방금 들어온 변경이 모든 고객사 PR 검사에
+#     즉시 번지지 않고, 이 워크플로가 stable 을 옮긴 뒤에야 퍼진다.
+#
+# 사람이 따로 배포를 지시하지 않는다. version 을 올린 PR 이 병합되면 이 워크플로가 돈다.
+#
+# 돌 조건(paths). PR 검사(`checker/plugin_version.py`)가 version 을 올리라고 요구하는 파일과
+# 같은 범위다: plugins/harness/ 전부, 엔진 checker/(시험 checker/tests/ 와 안의 *.md 제외),
+# pyproject.toml, uv.lock, scripts/, 그리고 Project Repository 가 부르는 재사용 워크플로
+# (workflow_call 을 가진 파일. 새로 생기면 아래 목록에 더한다 — 시험이 어긋남을 잡는다).
+# version 을 안 올리고 병합했다면 같은 v{version} 태그가 다른 커밋에 이미 있으므로 아래에서 실패한다.
+#
+# 실패하거나 건너뛰면 조용히 넘어가지 않는다(CLAUDE.md 원칙 7). 아래 알림 단계가 저장소 owner 를
+# 담당자로 이슈를 만든다(열린 알림 이슈가 있으면 코멘트만 남긴다).
+#   - version 을 읽지 못하거나 `0.10.17` 같은 모양이 아니다.
+#   - 같은 v{version} 태그가 이미 다른 커밋에 있다: version 을 올리지 않고 병합한 것이다.
+#     태그는 한 번 붙으면 옮기지 않는다(받아 간 PC 의 캐시와 어긋나지 않게).
+#   - stable 이 이 커밋의 조상이 아니라 옮기지 않고 건너뛴다(더 새로운 실행이 이미 옮겼을 수 있다).
+#
+# 실행이 겹쳐 중간 판의 실행이 밀려나도(아래 concurrency 는 대기 중인 실행을 최신 하나로 바꾼다),
+# 다음 실행이 "직전 stable 이후 main 이력에서 plugin.json 이 바뀐 커밋" 중 태그 없는 version 을
+# 각각 그 커밋에 붙인다. 그래도 빠졌다면 workflow_dispatch 로 보충한다(issue-and-release.md).
+name: release-tag
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - plugins/harness/**
+      - checker/**
+      - '!checker/tests/**'
+      - '!checker/**/*.md'
+      - pyproject.toml
+      - uv.lock
+      - scripts/**
+      - .github/workflows/ai-review.yml
+      - .github/workflows/doc-guard.yml
+      - .github/workflows/gitleaks.yml
+      - .github/workflows/pr-tamper-alert.yml
+      - .github/workflows/risk-gate.yml
+      - .github/workflows/ssot-approval.yml
+  workflow_dispatch:
+
+# 태그 push 에 contents: write, 실패 알림 이슈에 issues: write. 그 밖의 권한은 주지 않는다.
+permissions:
+  contents: write
+  issues: write
+
+# 두 실행이 겹쳐 stable 을 서로 덮어쓰지 않게 줄 세운다. 진행 중인 실행은 끊지 않는다.
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 태그 비교와 조상 확인에 전체 이력과 태그가 필요하다.
+          fetch-depth: 0
+
+      - name: 버전 태그를 붙이고 stable 을 옮기기
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          out="${GITHUB_OUTPUT:-/dev/null}"
+          pj="plugins/harness/.claude-plugin/plugin.json"
+          re='^[0-9]+(\.[0-9]+)*$'
+
+          # 알림 단계가 읽도록 사유를 남긴다. 한 줄이어야 한다.
+          problem() {
+            echo "::error::$1"
+            printf 'problem=%s\n' "$1" >> "$out"
+          }
+
+          version_at() {
+            git show "$1:$pj" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])'
+          }
+
+          # 원격의 태그를 최신으로 맞춘다(다른 실행이 방금 붙였을 수 있다).
+          git fetch --force --tags origin
+
+          version=""
+          if ! version="$(version_at "$GITHUB_SHA")" || ! [[ "$version" =~ $re ]]; then
+            problem "plugin.json 의 version 을 읽지 못했거나 0.10.17 같은 모양이 아니다(${version:-읽기 실패}). 태그를 붙이지 못했다. 다음: version 을 고쳐 다시 병합하라."
+            exit 1
+          fi
+          tag="v$version"
+
+          # 중간 판 보충: 직전 stable 이후 main 이력에서 plugin.json 이 바뀐 커밋 중 태그 없는 version 을 그 커밋에 붙인다.
+          # stable 이 없거나 이 커밋의 조상이 아니면 이력을 알 수 없으므로 하지 않는다(전체 이력을 태깅하지 않는다).
+          if stable_sha="$(git rev-parse -q --verify "refs/tags/stable^{commit}")" && git merge-base --is-ancestor "$stable_sha" "$GITHUB_SHA"; then
+            for c in $(git log --first-parent --reverse --format=%H "$stable_sha..$GITHUB_SHA" -- "$pj"); do
+              [ "$c" = "$GITHUB_SHA" ] && continue
+              v="$(version_at "$c" 2>/dev/null)" || continue
+              [[ "$v" =~ $re ]] || continue
+              if ! git rev-parse -q --verify "refs/tags/v$v" > /dev/null; then
+                git tag "v$v" "$c"
+                git push origin "refs/tags/v$v"
+                echo "중간 판 v$v 를 $c 에 붙였다."
+              fi
+            done
+          fi
+
+          if existing="$(git rev-parse -q --verify "refs/tags/$tag^{commit}")"; then
+            if [ "$existing" != "$GITHUB_SHA" ]; then
+              problem "태그 $tag 가 이미 다른 커밋($existing)에 있다. plugin.json version 을 올리지 않고 병합한 것이다. 태그는 옮기지 않는다. 다음: version 을 올리는 PR 을 병합하라."
+              exit 1
+            fi
+            echo "태그 $tag 가 이미 이 커밋에 있다. 그대로 둔다."
+          else
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag"
+            echo "태그 $tag 를 $GITHUB_SHA 에 붙였다."
+          fi
+
+          if old="$(git rev-parse -q --verify "refs/tags/stable^{commit}")"; then
+            if ! git merge-base --is-ancestor "$old" "$GITHUB_SHA"; then
+              problem "stable($old)이 이 커밋($GITHUB_SHA)의 조상이 아니라 옮기지 않았다. 더 새로운 실행이 이미 stable 을 옮겼을 수 있다. 다음: stable 이 의도한 판을 가리키는지 확인하라."
+              exit 0
+            fi
+          fi
+          git tag -f stable "$GITHUB_SHA"
+          git push -f origin refs/tags/stable
+          echo "stable 을 $tag ($GITHUB_SHA) 로 옮겼다."
+
+      - name: 실패하거나 건너뛰면 이슈로 알리기
+        if: failure() || steps.tag.outputs.problem != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # gh issue 가 저장소를 확실히 찾도록 명시한다.
+          GH_REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          PROBLEM: ${{ steps.tag.outputs.problem }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="release-tag: 엔진 판 배포가 안 됐다"
+          {
+            printf -- '- 커밋: %s\n- 실행: %s\n- 사유: %s\n\n' "$SHA" "$RUN_URL" "${PROBLEM:-(사유가 남지 않았다. 실행 로그를 확인한다.)}"
+            printf '엔진 판 태그 v{version} 과 stable 이 이 커밋 기준으로 갱신되지 않았을 수 있다. 훅은 v{version} 태그로, Project Repository 는 stable 로 엔진을 받으므로 확인이 필요하다.\n'
+            printf '고친 뒤 Actions 의 release-tag 를 workflow_dispatch 로 다시 실행한다(main 에서).\n'
+          } > body.md
+
+          # 같은 제목의 열린 알림 이슈가 있으면 새로 만들지 않고 코멘트만 남긴다.
+          found="$(gh issue list --state open --limit 100 --json number,title \
+            | jq -r --arg t "$title" '.[] | select(.title == $t) | .number' | head -n1)"
+          if [ -n "$found" ]; then
+            gh issue comment "$found" --body-file body.md
+            exit 0
+          fi
+
+          # 담당자는 저장소 owner. 지정할 수 없으면 담당자 없이 만든다.
+          if ! gh issue create --title "$title" --body-file body.md \
+              --label "type:chore" --assignee "$OWNER"; then
+            echo "::warning title=담당자 지정 실패::${OWNER} 를 담당자로 지정하지 못해 담당자 없이 만든다."
+            gh issue create --title "$title" --body-file body.md --label "type:chore"
+          fi

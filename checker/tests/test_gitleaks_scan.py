@@ -45,7 +45,7 @@ def test_재사용_워크플로는_바이너리를_버전과_해시로_고정하
 def test_호출_워크플로는_스켈레톤에_있고_재사용_워크플로를_한_줄로_부른다():
     data = yaml.safe_load(SKELETON_WORKFLOW.read_text(encoding="utf-8"))
     job = data["jobs"]["gitleaks"]
-    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/gitleaks.yml@main"
+    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/gitleaks.yml@stable"
     assert job["permissions"] == {"contents": "read"}
     assert set(data[True]) == {"pull_request", "push"}
 
