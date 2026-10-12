@@ -256,6 +256,10 @@ def _script(wf: dict) -> str:
     return next(s["run"] for s in steps if s.get("id") == "tag")
 
 
+def _step(wf: dict, name: str) -> dict:
+    return next(s for s in wf["jobs"]["tag"]["steps"] if s.get("name") == name)
+
+
 def _reusable_workflow_files() -> set[str]:
     found = set()
     for path in WORKFLOWS.glob("*.yml"):
@@ -338,7 +342,7 @@ def test_release_tag_는_contents_와_issues_쓰기_권한만_가진다(release_
 
 
 def test_release_tag_는_실패하거나_건너뛰면_owner_에게_이슈를_만든다(release_wf):
-    notify = release_wf["jobs"]["tag"]["steps"][-1]
+    notify = _step(release_wf, "실패하거나 건너뛰면 이슈로 알리기")
     assert "failure()" in notify["if"] and "steps.tag.outputs.problem" in notify["if"]
     assert notify["env"]["GH_REPO"] == "${{ github.repository }}"
     assert notify["env"]["OWNER"] == "${{ github.repository_owner }}"
@@ -355,6 +359,35 @@ def test_release_tag_는_main_에서만_돌고_이력과_태그를_받는다(rel
 
 def test_release_tag_실행이_겹치지_않게_줄_세운다(release_wf):
     assert release_wf["concurrency"] == {"group": "release-tag", "cancel-in-progress": False}
+
+
+TEAMS_STEP = "Teams 로 새 판 알리기"
+
+
+def test_Teams_알림은_새_태그를_붙였을_때만_돌고_실패해도_job_을_깨지_않는다(release_wf):
+    step = _step(release_wf, TEAMS_STEP)
+    assert "steps.tag.outputs.tagged != ''" in step["if"]
+    assert step["continue-on-error"] is True
+    assert step["env"]["WEBHOOK"] == "${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}"
+    assert step["env"]["TAGGED"] == "${{ steps.tag.outputs.tagged }}"
+    # secret 이 비면 건너뛴다
+    assert '[ -z "$WEBHOOK" ]' in step["run"] and "exit 0" in step["run"]
+
+
+def test_Teams_알림은_사용자_입력을_run_에_직접_넣지_않고_JSON_은_jq_로_만든다(release_wf):
+    step = _step(release_wf, TEAMS_STEP)
+    assert "${{" not in step["run"]  # 모든 값은 env 로 받는다
+    assert "jq -n" in step["run"]
+    assert "application/vnd.microsoft.card.adaptive" in step["run"]
+    assert "https://claude.ai/artifact/HD5TUKWCEbaAkYE9vSUkR8" in step["env"]["GUIDE_URL"]
+    assert "/reload-plugins" in step["run"]
+    assert "git log --first-parent" in step["run"]
+
+
+def test_Teams_알림은_이슈_알림_뒤에_있고_태그_단계_출력으로_tagged_를_받는다(release_wf):
+    names = [s.get("name") for s in release_wf["jobs"]["tag"]["steps"]]
+    assert names.index(TEAMS_STEP) > names.index("버전 태그를 붙이고 stable 을 옮기기")
+    assert "tagged=" in _script(release_wf)
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash 가 없으면 스크립트를 돌려 볼 수 없다")
@@ -491,3 +524,81 @@ class TestReleaseTagScript:
         assert env.remote_tag("v0.10.51") == last
         assert env.remote_tag("v0.10.50") == ""
         assert old
+
+    def tagged(self) -> str:
+        found = ""
+        for line in self.output.read_text(encoding="utf-8").splitlines():
+            if line.startswith("tagged="):
+                found = line[len("tagged="):]
+        return found
+
+    def test_새로_붙인_태그를_출력에_남긴다(self, env):
+        sha = env.commit("0.10.54")
+        assert env.run(sha).returncode == 0
+        assert env.tagged() == "v0.10.54"
+
+    def test_이미_있는_태그만_만나면_새_태그가_없다(self, env):
+        sha = env.commit("0.10.54")
+        assert env.run(sha).returncode == 0
+        env.output.write_text("", encoding="utf-8")
+        assert env.run(sha).returncode == 0
+        assert env.tagged() == ""
+
+    def test_중간_판_보충도_새_태그로_센다(self, env):
+        first = env.commit("0.10.54")
+        assert env.run(first).returncode == 0
+        env.commit("0.10.55")
+        last = env.commit("0.10.56")
+        env.output.write_text("", encoding="utf-8")
+        assert env.run(last).returncode == 0
+        assert env.tagged() == "v0.10.55 v0.10.56"
+
+    def _teams_script(self, release_wf, curl_body: str) -> Path:
+        """Teams 단계의 run 을 파일로 쓰고, curl 을 대신할 셸 함수 파일(BASH_ENV 로 읽힌다)을 만든다."""
+        script = _step(release_wf, TEAMS_STEP)["run"]
+        (self.tmp / "teams.sh").write_bytes(script.encode("utf-8"))
+        fake = self.tmp / "fake_curl.sh"
+        fake.write_bytes(("curl() {\n" + curl_body + "\n}\n").encode("utf-8"))
+        return fake
+
+    def _teams(self, fake: Path, **env_vars) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [_BASH, str(self.tmp / "teams.sh")], cwd=self.work, capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "BASH_ENV": fake.as_posix(), "RUN_URL": "https://example.com/run",
+                 "GUIDE_URL": "https://claude.ai/artifact/HD5TUKWCEbaAkYE9vSUkR8", **env_vars},
+            timeout=120)
+
+    @pytest.mark.skipif(shutil.which("jq") is None, reason="jq 가 없으면 카드를 만들어 볼 수 없다")
+    def test_Teams_카드에_새_판과_직전_태그_이후_병합_목록이_담긴다(self, env, release_wf):
+        first = env.commit("0.10.54", "release (#10)")
+        assert env.run(first).returncode == 0
+        env.commit(None, "feat: 첫 변경 (#12)")
+        last = env.commit("0.10.55", "fix: 둘째 변경 (#13)")
+        assert env.run(last).returncode == 0
+        # 가짜 curl(셸 함수)은 --data @payload.json 의 파일을 그대로 복사한다.
+        fake = env._teams_script(
+            release_wf, 'while [ $# -gt 0 ]; do case "$1" in @*) cp "${1#@}" "$CAPTURE";; esac; shift; done')
+        capture = env.tmp / "captured.json"
+
+        done = env._teams(fake, TAGGED="v0.10.55", WEBHOOK="", CAPTURE=str(capture))  # secret 이 없으면 보내지 않는다
+        assert done.returncode == 0 and not capture.exists()
+
+        done = env._teams(fake, TAGGED="v0.10.55", WEBHOOK="https://example.com/hook", CAPTURE=str(capture))
+        assert done.returncode == 0, done.stderr
+        assert capture.exists(), done.stdout + done.stderr
+        card = json.loads(capture.read_text(encoding="utf-8"))
+        joined = "\n".join(b["text"] for b in card["attachments"][0]["content"]["body"])
+        assert "하네스 v0.10.55 배포됨" in joined
+        assert "v0.10.54" in joined  # 직전 태그
+        assert "feat: 첫 변경 (#12)" in joined and "fix: 둘째 변경 (#13)" in joined
+        assert "release (#10)" not in joined  # 직전 태그 이전은 담지 않는다
+        assert "/reload-plugins" in joined
+
+    @pytest.mark.skipif(shutil.which("jq") is None, reason="jq 가 없으면 카드를 만들어 볼 수 없다")
+    def test_Teams_전송이_실패해도_경고만_남기고_성공으로_끝난다(self, env, release_wf):
+        sha = env.commit("0.10.54")
+        assert env.run(sha).returncode == 0
+        fake = env._teams_script(release_wf, "return 22")
+        done = env._teams(fake, TAGGED="v0.10.54", WEBHOOK="https://example.com/hook")
+        assert done.returncode == 0
+        assert "::warning" in done.stdout
