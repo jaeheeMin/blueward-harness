@@ -1247,3 +1247,92 @@ def test_origin_main_을_읽지_못하면_거부하고_사유를_밝힌다(gproj
     reason = report["problems"][0]["reason"]
     assert "판단하지 못" in reason and "origin/main" in reason
     assert produced.read_bytes() == before
+
+
+# -- 엑셀 행 높이 상한을 넘어 잘릴 긴 셀 경고 (#240)
+
+def _set_layout(proj: Path, cols: str = "", merges: str = "") -> None:
+    """Backlog 템플릿 시트에 열 너비(`<cols>`)와 병합 셀을 끼워 넣는다."""
+    path = proj / "templates" / "Backlog.xlsx"
+    parts = _read_parts(path)
+    with zipfile.ZipFile(path) as z:
+        infos = z.infolist()
+    sheet = parts["xl/worksheets/sheet1.xml"].decode("utf-8")
+    sheet = sheet.replace("<sheetData>", f"<cols>{cols}</cols><sheetData>") if cols else sheet
+    sheet = sheet.replace('<autoFilter', f"<mergeCells>{merges}</mergeCells><autoFilter") if merges else sheet
+    parts["xl/worksheets/sheet1.xml"] = sheet.encode("utf-8")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zo:
+        for info in infos:
+            zo.writestr(info.filename, parts[info.filename])
+
+
+def _long_srs(desc: str) -> str:
+    return SRS_MD.replace("첫 줄\n둘째 줄", desc)
+
+
+def _tall(report: dict) -> list[dict]:
+    return [w for w in report["warnings"] if w.get("type") == "cell-too-tall"]
+
+
+def test_좁은_열의_긴_셀은_행_높이_상한을_넘어_경고하고_종료코드_3(bproj, capsys):
+    _set_layout(bproj, '<col min="4" max="4" width="10" customWidth="1"/>')
+    code, report = _srs_run(bproj, capsys, _long_srs("x" * 300))  # 10칸씩 30줄 = 450pt
+    w = _tall(report)
+    assert code == 3 and report["status"] == "warning" and len(w) == 1
+    assert (w[0]["row"], w[0]["column"], w[0]["cell"], w[0]["req"]) == (4, "Short Description", "D4", "REQ-002")
+    assert w[0]["est_lines"] == 30 and w[0]["est_height_pt"] == 450 and w[0]["limit_pt"] == 409
+    assert (bproj / report["files"][0]).exists()  # 파일은 썼다
+
+
+def test_전각_글자는_두_칸으로_세어_같은_길이도_더_높다(bproj, capsys):
+    _set_layout(bproj, '<col min="4" max="4" width="20" customWidth="1"/>')
+    code, report = _srs_run(bproj, capsys, _long_srs("가" * 300))  # 10자씩 30줄
+    assert code == 3 and _tall(report)[0]["est_lines"] == 30
+    (bproj / "docs" / "out" / "BW_Backlog List_v0.2.xlsx").unlink()
+    code, report = _srs_run(bproj, capsys, _long_srs("x" * 300))  # 20자씩 15줄 = 225pt
+    assert code == 0 and report["warnings"] == []
+
+
+def test_명시한_줄바꿈도_줄_수에_센다(bproj, capsys):
+    _set_layout(bproj, '<col min="4" max="4" width="100" customWidth="1"/>')
+    code, report = _srs_run(bproj, capsys, _long_srs("\n".join(f"항목 {i}" for i in range(30))))
+    w = _tall(report)
+    assert code == 3 and len(w) == 1 and w[0]["est_lines"] == 30
+
+
+def test_짧은_셀은_좁은_열이어도_경고_없다(bproj, capsys):
+    _set_layout(bproj, '<col min="4" max="4" width="10" customWidth="1"/>')
+    code, report = _srs_run(bproj, capsys)
+    assert code == 0 and report["warnings"] == []
+
+
+def test_병합_셀은_범위_너비의_합으로_센다(bproj, capsys):
+    cols = '<col min="4" max="6" width="10" customWidth="1"/>'
+    _set_layout(bproj, cols)
+    code, report = _srs_run(bproj, capsys, _long_srs("x" * 300))  # D 한 칸 10 → 30줄
+    assert code == 3
+    (bproj / "docs" / "out" / "BW_Backlog List_v0.2.xlsx").unlink()
+    _set_layout(bproj, cols, '<mergeCell ref="D4:F4"/>')  # D~F 합 30칸 → 10줄
+    code, report = _srs_run(bproj, capsys, _long_srs("x" * 300))
+    assert code == 0 and report["warnings"] == []
+
+
+def test_줄바꿈_서식이_없는_셀은_한_줄로_보이므로_경고하지_않는다(bproj, capsys):
+    path = bproj / "templates" / "Backlog.xlsx"
+    parts = _read_parts(path)
+    parts["xl/worksheets/sheet1.xml"] = parts["xl/worksheets/sheet1.xml"].replace(b'r="D4" s="1"', b'r="D4" s="0"')
+    with zipfile.ZipFile(path) as z:
+        order = [i.filename for i in z.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zo:
+        for n in order:
+            zo.writestr(n, parts[n])
+    _set_layout(bproj, '<col min="4" max="4" width="10" customWidth="1"/>')
+    code, report = _srs_run(bproj, capsys, _long_srs("x" * 300))
+    assert code == 0 and report["warnings"] == []
+
+
+def test_check도_긴_셀을_경고하고_파일은_쓰지_않는다(bproj, capsys):
+    _set_layout(bproj, '<col min="4" max="4" width="10" customWidth="1"/>')
+    code, report = _srs_run(bproj, capsys, _long_srs("x" * 300), "--check")
+    assert code == 3 and report["dry_run"] is True and len(_tall(report)) == 1
+    assert not (bproj / "docs" / "out").exists()

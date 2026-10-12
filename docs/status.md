@@ -583,6 +583,8 @@ pre-commit 훅 연결은 별도 이슈다. 테스트는 `checker/tests/test_gitl
 
 **양식 산출 `--form` 에 경로도 받고, 이 브랜치에서 만든 판은 같은 버전으로 다시 산출한다(#233, 2026-10-11).** public-cloud 가 Backlog 산출을 쓰며(PR #175) 걸린 두 가지. `--form` 이 지도 파일 이름 stem(`Backlog`)만 받아 `templates/forms/Backlog.yaml` 을 주면 종료코드 2 였다 — 이제 `templates/forms/` 바로 아래 `.yaml` 이면 상대·절대·`이름.yaml` 경로도 받는다(`--list-values` 포함). 같은 이름 산출 파일이 있으면 늘 거부해 PR 전 SRS 를 고쳐 다시 뽑을 때마다 버전을 올려야 했다 — 이제 그 경로가 `origin/main` 트리에 없으면(이 브랜치에서 만든 판) 같은 버전으로 덮어쓰고 `replaced` 를 알리며, `origin/main` 에 있는 판은 거부하고 버전을 올리라 안내한다. git·`origin/main` 을 읽지 못하면 거부(검사 불능, 통과 아님). 엔진은 fetch 하지 않으므로 스킬이 산출 전에 sync/fetch 하라고 안내한다. Plugin version 0.10.45.
 
+**SRS 요청 출처를 Backlog 엑셀에 남기고, 엑셀에서 잘릴 긴 셀을 경고한다(#240, 2026-10-12).** public-cloud 에서 `/harness:srs` 를 시험 요구사항으로 실제로 돌렸다(이슈 #176 — 번호 찜 DEV-003, 드롭다운 질문 3개, v0.1 거부·v0.2 산출·같은 판 재산출 덮어쓰기, 엑셀 드롭다운 모두 기대대로. 시험 뒤 이슈를 삭제해 `next` 가 다시 DEV-003 인 것까지 확인). 세 가지가 비어 고쳤다. 요청 출처(`출처` 열)는 `md_전용` 이라 엑셀에 안 가서, Short Description 첫 줄에 `요청: <사람(부서)>, <날짜>, <근거>` 를 쓰게 했다 — 이슈 번호는 넣지 않는다(한 개발에 이슈가 여러 건 붙을 수 있어 추적은 DEV 번호로, 사용자 지적). 지도에 있는데 SRS 표에 없는 짧은 열(Development RICEFW ID)은 추가하라고 안내한다. 판매오더(REQ-002) Short Description 이 엑셀 행 높이 상한(409pt)을 넘어 잘려, `checker.export` 가 열 너비(`<cols>`)·글꼴 크기·전각 2칸·명시 줄바꿈으로 높이를 어림해 넘을 셀을 `cell-too-tall` 경고(종료코드 3, 줄바꿈 서식 없는 셀·여러 행 병합 셀은 제외)로 알리고, 스킬은 Short Description 을 요약으로, 세부 기능은 Acceptance Criteria 로 나누게 한다. public-cloud 실제 파일로 REQ-002 H5 가 추정 108줄·1473pt 로 잡혔다. Plugin version 0.10.48.
+
 ## 아직 정하지 않은 것
 
 정한 것과 정하지 않은 것을 섞지 않기 위해 남겨 둔다.

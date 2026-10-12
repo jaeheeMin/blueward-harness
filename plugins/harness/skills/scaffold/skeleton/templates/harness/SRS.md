@@ -33,7 +33,9 @@
 문서·회의·질문 답에서 왔는지를 적는다.
 
 열은 고객사 양식 지도(`templates/forms/`)가 있으면 그 지도의 열을 따르고(`/harness:srs`
-가 읽는다), 없으면 위 다섯 열이 기본이다. 상태는 Backlog 의 Status 하나로 적는다 —
+가 읽는다), 없으면 위 다섯 열이 기본이다. 지도에 따라 `Development RICEFW ID` 같은 열이
+표에 더 들어간다 — 개발이면 REQ 와 같은 번호의 `DEV-001` 을 적고, 지도가 없을 땐 이 열은
+선택이다. 상태는 Backlog 의 Status 하나로 적는다 —
 New / Planned / In Process / Done / On Hold / Dropped / Duplicate. 없앤 요구사항은 줄을
 지우지 않고 Dropped 로 남기고, 다른 요구사항과 겹치면 Duplicate 로 둔다. 우선순위는
 Backlog 의 값(`1. Must-Have` …)을 쓴다. 양식에 드롭다운이 있는 열은 그 목록 안의 값만 쓴다.
@@ -42,6 +44,23 @@ Backlog 의 값(`1. Must-Have` …)을 쓴다. 양식에 드롭다운이 있는 
 상세 절을 둔다. 상세 절 제목은 `### REQ-001 <요구사항 제목>`, 그 아래 소제목은 양식 열
 이름(`#### Short Description`, `#### Acceptance Criteria`, `#### Proposed Solution`,
 `#### Dependencies` …)이다. 양식이 없으면 `#### 설명`, `#### 완료 조건` 을 쓴다.
+
+`#### Short Description` 은 몇 줄짜리 요약이고 첫 줄은 요청 출처다(엑셀에 가는 칸이라 `출처`
+열과 따로 적는다). 세부 기능·조건은 Acceptance Criteria 로 나눈다 — 한 셀이 너무 길면 엑셀에서
+잘린다. 이슈 번호는 넣지 않는다(추적은 DEV 번호). 예:
+
+```
+### REQ-001 <요구사항 제목>
+
+#### Short Description
+
+요청: <사람(부서)>, <YYYY-MM-DD>, <근거(회의·메일·문서 링크)>
+<요약 몇 줄>
+
+#### Acceptance Criteria
+
+- <세부 기능·조건>
+```
 
 ## 참조
 
