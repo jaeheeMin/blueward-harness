@@ -11,7 +11,7 @@ on:
     branches: [main]
 jobs:
   ssot-approval:
-    uses: jaeheeMin/blueward-harness/.github/workflows/ssot-approval.yml@main
+    uses: jaeheeMin/blueward-harness/.github/workflows/ssot-approval.yml@stable
     permissions:
       contents: read
       pull-requests: write

@@ -13,7 +13,7 @@
 #
 #   jobs:
 #     doc-guard:
-#       uses: jaeheeMin/blueward-harness/.github/workflows/doc-guard.yml@main
+#       uses: jaeheeMin/blueward-harness/.github/workflows/doc-guard.yml@stable
 #       permissions:
 #         contents: read
 #         pull-requests: write
@@ -27,7 +27,7 @@ on:
       engine-ref:
         description: 검사 엔진을 가져올 blueward-harness 의 ref
         type: string
-        default: main
+        default: stable
       comment:
         description: 결과를 PR 코멘트로 남길지
         type: boolean

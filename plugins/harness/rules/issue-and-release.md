@@ -37,6 +37,29 @@
 버전은 `YYYY.MM.DD` 형식을 쓴다. 같은 날 두 번째 릴리즈부터는 뒤에 `.2`,
 `.3` 처럼 순번을 붙인다. 예: `2026.09.13`, `2026.09.13.2`.
 
+## 엔진 배포 (plugin.json version 과 태그)
+
+`plugins/harness/.claude-plugin/plugin.json` 의 version 이 곧 배포 단위다. 배포되는 파일을
+바꾸면 version 을 올린다: `plugins/harness/` 전부, 엔진 `checker/`(시험 `checker/tests/` 와 안의
+`*.md` 문서는 제외), `pyproject.toml`, `uv.lock`, `scripts/`, 그리고 Project Repository 가 부르는
+재사용 워크플로(`workflow_call` 을 가진 `.github/workflows/*.yml`). PR 검사(`checker/plugin_version.py`)가
+확인한다.
+
+main 에 version 이 바뀐 plugin.json 이 병합되면 Actions(`release-tag.yml`)가 그 커밋에
+`v{version}` 태그를 붙이고 움직이는 태그 `stable` 을 그 커밋으로 옮긴다. 사람이 따로 배포를
+지시하지 않는다. 팀원 PC 훅은 엔진을 `v{version}` 으로, Project Repository 의 caller workflow 는
+`@stable` 로 받는다. 같은 `v{version}` 태그가 이미 다른 커밋에 있으면(version 을 안 올리고 병합)
+워크플로가 실패하고, 실패하거나 stable 을 옮기지 못하고 건너뛰면 저장소 owner 앞으로 이슈
+("release-tag: 엔진 판 배포가 안 됐다")가 열린다. 병합 직후 태그가 붙기까지 잠시 걸리므로, 그 사이
+갱신한 PC 에서는 엔진 판을 받을 수 없다는 안내가 나올 수 있다 — 병합 뒤 `git ls-remote --tags origin`
+으로 `v{version}` 과 `stable` 이 새 커밋을 가리키는지 본 다음 플러그인을 갱신한다.
+
+짧은 간격으로 병합이 겹쳐 중간 판의 실행이 밀려나도(실행은 줄을 서고 대기 중인 실행은 최신 하나만
+남는다) 다음 실행이 직전 `stable` 이후 main 이력에서 plugin.json 이 바뀐 커밋 중 태그 없는 version 을
+각각 그 커밋에 붙인다. 그래도 빠진 태그나 어긋난 `stable` 이 있으면 Actions 에서 `release-tag` 를
+main 으로 수동 실행(workflow_dispatch)해 보충한다 — 그 커밋 기준으로 `v{version}` 을 붙이고 `stable` 을
+옮긴다.
+
 ## 릴리즈 노트 구성
 
 변경 내용을 다음 네 절로 나눈다.

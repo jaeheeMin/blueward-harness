@@ -139,7 +139,7 @@ def test_위험도_게이트_기준_파일과_워크플로를_만든다(tmp_path
 
     # 호출 워크플로의 job id 는 게이트가 자기 check run 을 알아보는 이름과 같아야 교착이 없다.
     workflow = (tmp_path / ".github" / "workflows" / "risk-gate.yml").read_text(encoding="utf-8")
-    assert f"\n  {OWN_CHECK_NAME}:\n    uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@main" in workflow
+    assert f"\n  {OWN_CHECK_NAME}:\n    uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@stable" in workflow
     for trigger in ("pull_request:", "pull_request_review:", "push:"):
         assert trigger in workflow
     for permission in ("contents: read", "pull-requests: write", "issues: write", "checks: read", "statuses: read", "actions: write"):
@@ -167,7 +167,7 @@ def test_ai_review_호출_워크플로를_만들고_기본은_꺼져_있다(tmp_
     assert set(on["pull_request"]["types"]) == {"opened", "synchronize", "reopened", "ready_for_review"}
     assert list(data["jobs"]) == [AI_REVIEW_CHECK_NAME]
     job = data["jobs"][AI_REVIEW_CHECK_NAME]
-    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/ai-review.yml@main"
+    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/ai-review.yml@stable"
     assert job["secrets"] == {"CLAUDE_CODE_OAUTH_TOKEN": "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"}
     assert job["permissions"] == {
         "contents": "read", "pull-requests": "write", "issues": "read", "id-token": "write"}

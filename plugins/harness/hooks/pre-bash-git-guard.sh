@@ -163,7 +163,40 @@ sub="$(git_subcommand "$cmd")"
 # 한계: 변수로 감춘 명령(`x=merge; gh pr $x`)이나 큰따옴표 안의 `$(...)` 치환은
 # 알아보지 못한다. 그 앞의 첫 관문인 아래 `pr merge` 부분 문자열 검사도
 # 마찬가지다. 최종 방어선은 Actions 의 doc-guard 검사와 GitHub 화면이다.
-engine="${DOC_GUARD_ENGINE:-git+https://github.com/jaeheeMin/blueward-harness@main}"
+#
+# 엔진 판(#149): 플러그인 판(plugin.json version)과 같은 태그 v{version} 이다. 판 계산은
+# engine_spec.py 한 곳이 하고 py 훅과 스킬도 같은 값을 쓴다. DOC_GUARD_ENGINE 이 있으면
+# 그것이 우선이다. 모든 Bash 명령마다 uv 를 띄우지 않으려고, 엔진을 실제로 부르는 갈래
+# (uvx 확인 직후)에서만 resolve_engine 을 부른다. 판을 못 정하면 main 으로 넘어가지 않고
+# 거부한다(원칙 7).
+engine=""
+resolve_engine() {
+  if [ -n "$engine" ]; then
+    return 0
+  fi
+  if [ -n "${DOC_GUARD_ENGINE:-}" ]; then
+    engine="$DOC_GUARD_ENGINE"
+    return 0
+  fi
+  es_err_file="$(mktemp 2>/dev/null)" || {
+    deny "임시 파일을 만들지 못해 검사 엔진의 판을 정하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
+  }
+  es_rc=0
+  engine="$(uv run --no-project python "$hook_dir/engine_spec.py" 2>"$es_err_file")" || es_rc=$?
+  es_detail="$(tr -d '"\\`$\r' < "$es_err_file" 2>/dev/null | tr '\n' ' ')" || es_detail=""
+  rm -f "$es_err_file"
+  engine="$(printf '%s' "$engine" | tr -d '\r')"
+  if [ "$es_rc" -ne 0 ] || [ -z "$engine" ]; then
+    engine=""
+    deny "검사 엔진의 판을 정하지 못했습니다(종료코드 $es_rc). 플러그인 설치가 깨졌거나 uv 를 실행하지 못한 것입니다. 검사 불능이므로 통과시키지 않습니다. 사유: $es_detail 다음: 사람이 할 일 - 플러그인을 다시 설치하거나 갱신하십시오. uv 가 없다면 PowerShell 에서 winget install --id astral-sh.uv -e 로 설치하십시오. 계속되면 이 메시지 전체를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
+  fi
+  # 태그 고정이면 그 태그가 아직 없을 수 있다는 단서를 재시도 안내에 덧붙인다.
+  case "$engine" in
+    *@v[0-9]*)
+      next_retry="$next_retry 참고: 이 검사는 엔진 판 ${engine##*@} 을 받아 실행합니다. 그 판을 받을 수 없으면(저장소에 태그가 아직 없을 수 있음 - 플러그인 새 판이 병합된 직후에는 태그가 붙기까지 잠시 걸립니다) 같은 이유로 실패합니다."
+      ;;
+  esac
+}
 
 # merge 한 건을 검사한다. $1=저장소(-R, 없으면 빈 값), $2=PR 지정(번호·URL·브랜치,
 # 없으면 빈 값). deny() 는 exit 하므로 여러 건 중 하나라도 걸리면 명령 전체가
@@ -522,6 +555,7 @@ if [[ "$cmd" =~ $pr_word_re ]] && [[ "$cmd" =~ $pr_sub_re ]]; then
   if ! command -v uvx >/dev/null 2>&1; then
     deny "uvx 가 없어 이 명령이 다른 계정 PR 을 바꾸는지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. $next_install_uv"
   fi
+  resolve_engine
   pm_err_file="$(mktemp 2>/dev/null)" || {
     deny "임시 파일을 만들지 못해 이 명령의 대상 PR 을 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
   }
@@ -566,6 +600,7 @@ case "$cmd" in
     if ! command -v uvx >/dev/null 2>&1; then
       deny "uvx 가 없어 이 명령이 gh pr merge 인지, SRS 승인이 있는지 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_uv"
     fi
+    resolve_engine
     mc_err_file="$(mktemp 2>/dev/null)" || {
       deny "임시 파일을 만들지 못해 이 명령이 gh pr merge 인지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
     }

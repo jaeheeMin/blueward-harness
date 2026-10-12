@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from checker.plugin_version import PLUGIN_JSON, judge, main, parse_version
+from checker.plugin_version import PLUGIN_JSON, is_reusable_workflow, judge, main, parse_version
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL = "plugins/harness/skills/start/SKILL.md"
@@ -34,8 +34,56 @@ def test_version_형식이_틀리면_예외다(bad):
 
 
 def test_plugin_이_안_바뀌었으면_통과한다():
-    v = judge(["checker/engine.py", "README.md"], "0.10.17", "0.10.17")
+    v = judge(["README.md", "docs/status.md"], "0.10.17", "0.10.17")
     assert v.code == 0
+
+
+def test_엔진을_바꾸고_version_이_같으면_실패한다():
+    # 엔진은 version 과 같은 태그로 배포되므로 version 을 안 올리면 퍼지지 않는다(#149).
+    v = judge(["checker/engine.py"], "0.10.17", "0.10.17")
+    assert v.code == 1
+    assert "다음:" in v.message and "checker/" in v.message
+
+
+def test_엔진을_바꾸고_version_을_올렸으면_통과한다():
+    assert judge(["checker/engine.py"], "0.10.17", "0.10.18").code == 0
+
+
+@pytest.mark.parametrize("path", ["pyproject.toml", "uv.lock", "scripts/risk_gate.py", "scripts/gitleaks_scan.sh"])
+def test_빌드_설정과_scripts_를_바꾸고_version_이_같으면_실패한다(path):
+    assert judge([path], "0.10.17", "0.10.17").code == 1
+    assert judge([path], "0.10.17", "0.10.18").code == 0
+
+
+def test_재사용_워크플로를_바꾸고_version_이_같으면_실패한다():
+    wf = ".github/workflows/doc-guard.yml"
+    assert judge([wf], "0.10.17", "0.10.17", frozenset({wf})).code == 1
+    assert judge([wf], "0.10.17", "0.10.18", frozenset({wf})).code == 0
+
+
+def test_이_저장소_전용_워크플로는_배포물이_아니다():
+    wf = ".github/workflows/checker.yml"
+    assert judge([wf], "0.10.17", "0.10.17", frozenset()).code == 0
+    assert judge([wf], "0.10.17", "0.10.17", frozenset({".github/workflows/doc-guard.yml"})).code == 0
+
+
+def test_checker_안의_md_문서는_배포물이_아니다():
+    assert judge(["checker/README.md", "checker/sub/NOTES.md"], "0.10.17", "0.10.17").code == 0
+    assert judge(["checker/engine.py", "checker/README.md"], "0.10.17", "0.10.17").code == 1
+
+
+def test_workflow_call_을_가진_yaml_만_재사용_워크플로로_본다():
+    assert is_reusable_workflow("name: x\non:\n  workflow_call:\n    inputs: {}\n")
+    assert not is_reusable_workflow("name: x\non:\n  push:\n")
+    assert not is_reusable_workflow("# 부르는 쪽: workflow_call: 로 부른다\non: push\n")
+
+
+def test_엔진_시험만_바꾸면_version_을_따지지_않는다():
+    assert judge(["checker/tests/test_x.py"], "0.10.17", "0.10.17").code == 0
+
+
+def test_checker_와_이름이_비슷한_다른_폴더는_엔진이_아니다():
+    assert judge(["checker_notes/a.md", "scripts_old/x.py", "docs/status.md"], "0.10.17", "0.10.17").code == 0
 
 
 def test_변경_파일이_없어도_통과한다():
@@ -160,3 +208,26 @@ def test_스크립트가_모듈_진입점을_부른다(repo):
         env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
     )
     assert done.returncode == 1
+
+
+def test_진입점_재사용_워크플로를_바꾸고_version_을_안_올리면_1(repo):
+    _write(repo, ".github/workflows/doc-guard.yml", "on:\n  workflow_call:\n")
+    _commit(repo)
+    assert main(["--base", "main"]) == 1
+
+
+def test_진입점_이_저장소_전용_워크플로만_바꾸면_0(repo):
+    _write(repo, ".github/workflows/checker.yml", "on:\n  push:\n")
+    _commit(repo)
+    assert main(["--base", "main"]) == 0
+
+
+def test_진입점_재사용_워크플로를_지워도_version_을_따진다(repo):
+    _write(repo, ".github/workflows/old.yml", "on:\n  workflow_call:\n")
+    _commit(repo)
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "--ff-only", "feat")
+    _git(repo, "checkout", "-q", "-b", "feat2")
+    (repo / ".github/workflows/old.yml").unlink()
+    _commit(repo)
+    assert main(["--base", "main"]) == 1

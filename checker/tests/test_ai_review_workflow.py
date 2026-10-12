@@ -42,7 +42,7 @@ def _named(wf: dict, name: str) -> dict:
 def test_workflow_call_입력과_시크릿(wf):
     call = _on(wf)["workflow_call"]
     inputs = call["inputs"]
-    assert inputs["engine-ref"]["default"] == "main"
+    assert inputs["engine-ref"]["default"] == "stable"
     assert inputs["model"]["default"] == "sonnet"
     assert inputs["max-turns"]["type"] == "number" and inputs["max-turns"]["default"] == 10
     assert call["secrets"]["CLAUDE_CODE_OAUTH_TOKEN"]["required"] is False

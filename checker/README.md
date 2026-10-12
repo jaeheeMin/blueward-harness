@@ -113,8 +113,10 @@ SRS 요구사항 상세 절(`### REQ-n` 제목부터 다음 `##`·`###` 전까�
 상세 절은 `##` 나 `#` 제목에서도 닫히고, 코드 펜스는 ``` 와 `~~~` 를 모두 인식한다. 번호는 ASCII 영숫자
 경계로 찾으므로 `REQ-001의` 처럼 조사가 붙어도 잡히고 `XREQ-001`·`REQ-0012` 는 `REQ-001` 로 보지 않는다.
 
-**배포 순서.** 이 규칙 종류는 엔진(blueward-harness main)에 반영된 뒤에만 Project Repository `rules/ssot.yaml`
-에 켠다. 먼저 켜면 엔진이 `'req_cross_reference' 는 모르는 규칙 종류다` 라는 `config_error` JSON 을 내고
+**배포 순서.** 이 규칙 종류는 엔진이 배포된 뒤에만 Project Repository `rules/ssot.yaml` 에 켠다. 배포는
+main 병합이 아니라 태그 기준이다 — 병합 뒤 `release-tag` 가 엔진 판 태그 `v{version}` 과 `stable` 을 옮겨야
+(Actions 의 caller 는 `@stable`, 팀원 PC 훅은 `v{version}`) 그 엔진이 퍼진다. `git ls-remote --tags origin` 으로
+`stable` 이 새 커밋을 가리키는지 확인한 뒤 켠다. 먼저 켜면 엔진이 `'req_cross_reference' 는 모르는 규칙 종류다` 라는 `config_error` JSON 을 내고
 종료코드 2(검사 불능)로 끝난다 — 통과도 위반도 아니다.
 
 규칙 파일에서 켜고 값은 데이터로 둔다(스켈레톤 `rules/ssot.yaml`).

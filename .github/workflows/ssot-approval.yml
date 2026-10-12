@@ -27,7 +27,7 @@
 #
 #   jobs:
 #     ssot-approval:
-#       uses: jaeheeMin/blueward-harness/.github/workflows/ssot-approval.yml@main
+#       uses: jaeheeMin/blueward-harness/.github/workflows/ssot-approval.yml@stable
 #       permissions:
 #         contents: read
 #         pull-requests: write
@@ -50,7 +50,7 @@ on:
       engine-ref:
         description: 판정 로직을 가져올 blueward-harness 의 ref
         type: string
-        default: main
+        default: stable
 
 jobs:
   check:
