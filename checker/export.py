@@ -16,6 +16,8 @@ zip 수준에서 바뀐 시트의 XML 만 고치고 나머지 항목은 같은 �
     3  산출했으나 경고가 있다(#228). 표 값이 템플릿 드롭다운 목록 밖이다. 파일은 썼고 stdout 의
        `status` 는 `warning`, `warnings` 에서 `type: dropdown` 이 목록 밖 값이다(행·열·값·허용 값).
        허용 값을 읽지 못해 검사하지 못한 칸은 `type: dropdown-unchecked` 경고로만 알리고 종료코드는 0 이다.
+       쓴 셀이 엑셀 행 높이 상한(409pt)을 넘어 잘릴 것으로 추정되면 `type: cell-too-tall` 경고(행·열·REQ·추정
+       줄 수)를 내고 종료코드는 3 이다(내용이 잘려 보이는 건 산출물 품질 문제라 파일은 쓰되 고치라고 알린다).
 
 원본이 SRS 인 지도(표에 `원본: SRS`)는 `## 양식 항목` 이 아니라 SRS.md 의 `## 요구사항` 표와
 `### REQ-xxx` 상세 절을 읽는다(`--form <지도>` 와 `--spec <SRS.md>`). `--check` 는 파일을 쓰지 않고
@@ -33,6 +35,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import unicodedata
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -340,6 +343,107 @@ class SheetXml:
             pre = re.sub(r'<dimension ref="([^"]+)"\s*/>', fix, pre, count=1)
         body = "".join(self.rows[n].render() for n in sorted(self.rows))
         return f"{pre}<sheetData>{body}</sheetData>{post}"
+
+
+# ---------------------------------------------------------------- 셀 높이 추정
+
+MAX_ROW_HEIGHT_PT = 409.0  # 엑셀 행 높이 상한. 넘으면 셀 내용이 잘려 보인다.
+_DEFAULT_COL_WIDTH = 8.43
+_DEFAULT_FONT_PT = 11.0
+# 엑셀 기본 행 높이는 11pt 글꼴에서 15pt 다. 글꼴 크기가 다르면 같은 비율(15/11)로 줄 높이를 잡는다.
+# 실제 높이는 글꼴(맑은 고딕 등)에 따라 다르므로 어림값이다.
+_LINE_PT_PER_FONT_PT = 15.0 / 11.0
+
+
+def _char_cols(ch: str) -> int:
+    """한 글자가 차지하는 칸 수. 한글·한자·전각은 2칸, 나머지는 1칸."""
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def _estimate_lines(text: str, chars_per_line: float) -> int:
+    """칸 수 기준으로 접어 넣었을 때 줄 수. 명시한 줄바꿈은 새 줄이고, 글자 단위로 접는다(어림값)."""
+    limit = max(1, int(chars_per_line))
+    total = 0
+    for para in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        used, lines = 0, 1
+        for ch in para:
+            w = _char_cols(ch)
+            if used + w > limit:
+                lines += 1
+                used = 0
+            used += w
+        total += lines
+    return total
+
+
+class TallEstimator:
+    """시트 XML 과 styles.xml 에서 열 너비·병합·글꼴 크기·줄바꿈 서식을 읽어 셀 높이를 어림한다.
+
+    엑셀은 열 너비 단위가 기본 글꼴 숫자 한 글자 폭이다. 그래서 한 줄 칸 수 = 열 너비(기본 글꼴 11pt 기준,
+    셀 글꼴이 더 크면 그 비율로 줄인다)이고, 한글 등 전각은 2칸으로 센다. 줄 바꿈 서식(wrapText)이 없는 셀은
+    엑셀이 한 줄로 보여 주므로 높이 문제가 없다고 본다. 여러 행에 걸친 병합 셀은 한 행의 상한에 걸리지 않아 건너뛴다.
+    """
+
+    def __init__(self, sheet_xml: str, styles_xml: str | None):
+        self.default_width = _DEFAULT_COL_WIDTH
+        m = re.search(r"<sheetFormatPr\b[^>]*>", sheet_xml)
+        if m:
+            d = dict(_ATTR_RE.findall(m.group(0))).get("defaultColWidth")
+            if d:
+                try:
+                    self.default_width = float(d)
+                except ValueError:
+                    pass
+        self.widths: dict[int, float] = {}
+        for m in re.finditer(r"<col\b[^>]*>", sheet_xml):
+            a = dict(_ATTR_RE.findall(m.group(0)))
+            try:
+                lo, hi, w = int(a["min"]), int(a["max"]), float(a["width"])
+            except (KeyError, ValueError):
+                continue
+            for c in range(lo, min(hi, lo + 2000) + 1):
+                self.widths[c] = w
+        self.merges: dict[str, tuple[int, int, int, int]] = {}
+        for m in re.finditer(r"<mergeCell\b[^>]*>", sheet_xml):
+            ref = dict(_ATTR_RE.findall(m.group(0))).get("ref", "")
+            if ":" not in ref:
+                continue
+            a, b = ref.split(":")
+            (c1, r1), (c2, r2) = split_ref(a), split_ref(b)
+            self.merges[a] = (col2n(c1), r1, col2n(c2), r2)
+        # styles.xml: 글꼴 크기, cellXfs(글꼴 번호, 줄바꿈 여부)
+        self.fonts: list[float] = []
+        self.xfs: list[tuple[int, bool]] = []
+        if styles_xml:
+            fm = re.search(r"<fonts\b[^>]*>(.*?)</fonts>", styles_xml, re.S)
+            for f in re.finditer(r"<font\b[^>]*?(?:/>|>(.*?)</font>)", fm.group(1) if fm else "", re.S):
+                sz = re.search(r'<sz\b[^>]*\bval="([\d.]+)"', f.group(1) or "")
+                self.fonts.append(float(sz.group(1)) if sz else _DEFAULT_FONT_PT)
+            cx = re.search(r"<cellXfs\b[^>]*>(.*?)</cellXfs>", styles_xml, re.S)
+            for x in re.finditer(r"<xf\b([^>]*?)(?:/>|>(.*?)</xf>)", cx.group(1) if cx else "", re.S):
+                a = dict(_ATTR_RE.findall(x.group(1)))
+                al = re.search(r"<alignment\b[^>]*>", x.group(2) or "")
+                wrap = bool(al and dict(_ATTR_RE.findall(al.group(0))).get("wrapText") in ("1", "true"))
+                self.xfs.append((int(a.get("fontId", "0") or 0), wrap))
+        self.base_pt = self.fonts[0] if self.fonts else _DEFAULT_FONT_PT
+
+    def estimate(self, ref: str, text: str, style: str | None) -> tuple[int, float] | None:
+        """(추정 줄 수, 추정 높이 pt). 높이 문제가 없다고 볼 셀이면 None."""
+        font_id, wrap = 0, False
+        if style is not None and style.isdigit() and int(style) < len(self.xfs):
+            font_id, wrap = self.xfs[int(style)]
+        if not wrap:
+            return None
+        col, row = split_ref(ref)
+        c1 = c2 = col2n(col)
+        if ref in self.merges:
+            c1, r1, c2, r2 = self.merges[ref]
+            if r2 > r1:
+                return None
+        width = sum(self.widths.get(c, self.default_width) for c in range(c1, c2 + 1))
+        pt = self.fonts[font_id] if font_id < len(self.fonts) else self.base_pt
+        lines = _estimate_lines(text, width * self.base_pt / pt)
+        return lines, round(lines * pt * _LINE_PT_PER_FONT_PT, 1)
 
 
 # ---------------------------------------------------------------- xlsx(zip) 읽기
@@ -852,8 +956,10 @@ def build_form(
                 raise ExportError(f"템플릿에서 시트 {sheet!r} 의 XML 을 찾지 못했다", form=form, sheet=sheet) from None
         return editors[sheet]
 
+    written: list[tuple[str, SheetXml, str, str, str, str, str]] = []  # 쓴 셀: 높이 추정용
+
     def make_put(sname: str, ed: SheetXml):
-        def put(item: str, ref: str, text: str, **kw) -> None:
+        def put(item: str, ref: str, text: str, label: str = "", header: str = "", **kw) -> None:
             try:
                 removed = ed.set(ref, text, **kw)
             except CellTooLong as e:
@@ -863,6 +969,7 @@ def build_form(
                 raise ExportError(e.reason, form=form, sheet=sname, item=item) from None
             if removed:
                 warn(sname, item, f"{ref} 에 쓸 값에서 XML 에 넣을 수 없는 제어 문자 {removed}개를 지웠다")
+            written.append((sname, ed, item, ref, text, label, header))
         return put
 
     reader = ListReader(raw, paths, wb_xml)
@@ -1030,6 +1137,28 @@ def build_form(
                     parts.append(f"값이 있는 셀 {len(left)}개: {', '.join(left[:5])}{' …' if len(left) > 5 else ''}")
                 warn(sname, "", f"템플릿 샘플({', '.join(parts)})이 남아 있다 — 엑셀에서 확인해 지우십시오")
 
+    # 쓴 셀이 엑셀 행 높이 상한을 넘어 잘릴지 어림한다(type: cell-too-tall).
+    styles_xml = raw["xl/styles.xml"].decode("utf-8-sig") if "xl/styles.xml" in raw else None
+    estimators: dict[str, TallEstimator] = {}
+    for sname, ed, item, ref, text, label, header in written:
+        est = estimators.get(sname)
+        if est is None:
+            est = estimators[sname] = TallEstimator(ed.pre + ed.post, styles_xml)
+        got = est.estimate(ref, _CTRL.sub("", text), ed.style_of(ref))
+        if got and got[1] > MAX_ROW_HEIGHT_PT:
+            col, row = split_ref(ref)
+            shown = label or item
+            warnings.append({
+                "form": form, "sheet": sname, "item": shown, "type": "cell-too-tall",
+                "row": row, "column": header or col, "cell": ref, "req": label,
+                "est_lines": got[0], "est_height_pt": got[1], "limit_pt": MAX_ROW_HEIGHT_PT,
+                "reason": (
+                    f"{shown} 의 {header or col} 칸({ref})이 열 너비 기준으로 약 {got[0]}줄(약 {got[1]:g}pt)이라 "
+                    f"엑셀 행 높이 상한 {MAX_ROW_HEIGHT_PT:g}pt 를 넘어 위아래가 잘릴 것으로 보인다(어림값). "
+                    "요약만 남기고 세부 내용은 다른 열(Acceptance Criteria 등)로 나눈다"
+                ),
+            })
+
     # 파일명
     out_name = _file_name(form, fmap, map_sheets, spec_sections, md_values, problem, srs.meta if srs else None)
     out_path = None
@@ -1168,7 +1297,8 @@ def _write_table(
             val = row.get(c, "")
             if val:
                 style = ed.style_of(f"{c}{clone}") if (new_row and clone) else None
-                put(tname, ref, val, style=style, clone_row=clone if new_row else None)
+                put(tname, ref, val, label=out_labels[i], header=header_of.get(c, c),
+                    style=style, clone_row=clone if new_row else None)
                 if check:
                     check(tname, out_labels[i] or f"{rn}행", header_of.get(c, c), ref, val)
             elif not new_row:
@@ -1483,8 +1613,9 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
         raise ExportError("서로 다른 양식이 같은 파일 이름을 산출한다")
     outside = any(w.get("type") == "dropdown" for w in warnings)
     unchecked = any(w.get("type") == "dropdown-unchecked" for w in warnings)
-    flagged = outside or unchecked
-    note = _warning_note(outside, unchecked)
+    tall = any(w.get("type") == "cell-too-tall" for w in warnings)
+    flagged = outside or unchecked or tall
+    note = _warning_note(outside, unchecked, tall)
     # 이 브랜치에서 만든 판을 같은 버전으로 덮어쓰는 경우의 표시(덮어쓸 파일이 없으면 빈 dict)
     rp = {"replaced": True, "replaced_files": replaced} if replaced else {}
     rp_note = " 이 브랜치에서 만든 판(origin/main 에 없음)은 같은 버전으로 덮어썼다." if replaced else ""
@@ -1525,12 +1656,14 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
     }
 
 
-def _warning_note(outside: bool, unchecked: bool) -> str:
+def _warning_note(outside: bool, unchecked: bool, tall: bool = False) -> str:
     parts = []
     if outside:
         parts.append("`type: dropdown` 경고의 값이 템플릿 드롭다운 목록 밖이다 — 허용 값 중에서 고른다.")
     if unchecked:
         parts.append("허용 값을 읽지 못해 검사하지 못한 열이 있다(`type: dropdown-unchecked`) — 통과가 아니니 그 열의 값을 사람이 확인한다.")
+    if tall:
+        parts.append("엑셀에서 잘릴 것으로 보이는 긴 셀이 있다(`type: cell-too-tall`, 어림값) — 요약만 남기고 세부는 다른 열로 나눈다.")
     return " ".join(parts)
 
 
