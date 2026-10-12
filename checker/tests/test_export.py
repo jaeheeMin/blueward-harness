@@ -872,6 +872,19 @@ def test_SRS_원본은_요구사항_표를_여러_행에_쓰고_REQ_번호를_�
     assert "회의록" not in _sheet1(bproj / report["files"][0])  # md 전용 열은 엑셀로 가지 않는다
 
 
+def test_다음_단계_열은_지도_md_전용에_없어도_오류_없이_산출되고_엑셀에_안_간다(bproj, capsys):
+    text = SRS_MD.replace("| 출처 |\n|---|---|---|---|---|---|---|", "| 출처 | 다음 단계 |\n|---|---|---|---|---|---|---|---|").replace(
+        "| 회의록 |", "| 회의록 | 개발 |"
+    ).replace("| 메일 |", "| 메일 | 설정 |")
+    assert "md_전용: [출처]" in BACKLOG_MAP  # 지도는 다음 단계를 적지 않았다
+    code, report = _srs_run(bproj, capsys, text)
+    assert code == 0 and report["status"] == "ok" and report["warnings"] == []
+    got = _cell_values(bproj / report["files"][0])
+    assert got["A4"] == 2 and got["G4"] == "DEV-002" and "G5" not in got
+    sheet = _sheet1(bproj / report["files"][0])
+    assert "개발" not in sheet and "설정" not in sheet
+
+
 def test_SRS_원본_산출물의_시트_XML이_well_formed(bproj, capsys):
     _, report = _srs_run(bproj, capsys)
     _assert_sheets_sane(bproj / report["files"][0])

@@ -60,6 +60,7 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _INT = re.compile(r"^(0|-?[1-9]\d{0,14})$")
 _CTRL = re.compile("[" + chr(0) + "-" + chr(8) + chr(0xB) + chr(0xC) + chr(0xE) + "-" + chr(0x1F) + chr(0xFFFE) + chr(0xFFFF) + chr(0xD800) + "-" + chr(0xDFFF) + "]")  # XML 1.0 에 못 넣는 문자
 MAX_CELL_CHARS = 32767
+SRS_NEXT_STEP_COL = "다음 단계"  # SRS 요구사항 표의 엔진 기본 md 전용 열(개발/설정/미정). 엑셀로 쓰지 않고 값도 여기서 검사하지 않는다.
 
 
 class ExportError(Exception):
@@ -1340,11 +1341,12 @@ def _md_table_rows(form, sname, tname, cols_by_name, subs, problem=None) -> list
 def _srs_table_rows(form, sname, tname, t, srs: SrsDoc, problem) -> tuple[list[dict[str, str]], list[str]]:
     """SRS 요구사항 표 + 상세 절 → ({열 문자: 값} 행들, 행 이름(REQ-xxx)들).
 
-    md 표 열은 지도 `열` 이름이거나 `ID`(→ `번호_열` 에 REQ 번호의 숫자) 거나 지도 `md_전용` 에 적힌 열이다.
+    md 표 열은 지도 `열` 이름이거나 `ID`(→ `번호_열` 에 REQ 번호의 숫자) 거나 `다음 단계`(엔진 기본 md 전용)
+    거나 지도 `md_전용` 에 적힌 열이다.
     상세 절 `#### <열 이름>` 은 지도 `열` 의 해당 칸 값이 된다. 그 밖의 이름은 읽지 못함(오타를 조용히 버리지 않는다).
     """
     cols = {norm(k): str(v) for k, v in (t.get("열") or {}).items()}
-    md_only = {norm(x) for x in (t.get("md_전용") or [])}
+    md_only = {norm(x) for x in (t.get("md_전용") or [])} | {SRS_NEXT_STEP_COL}
     id_name = norm(t["번호_열"]) if t.get("번호_열") else None
     if id_name and id_name not in cols:
         raise ExportError(f"표 {tname!r} 의 번호_열 {id_name!r} 이 지도 열에 없다", form=form, sheet=sname, item=tname)
