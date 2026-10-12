@@ -278,7 +278,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.51, public-cloud main 기준 (2026-10-12)</div>
+      <div class="note">harness 0.10.52, public-cloud main 기준 (2026-10-12)</div>
     </div>
   </nav>
 
@@ -690,7 +690,8 @@ fix/31-broken-link</pre>
   </section>
 
   <div class="callouts">
-    <div class="callout warn"><span class="k">번호</span><div>REQ 번호는 Claude 가 번호표 기계로 받아서 붙여. 마지막 번호에 손으로 1 을 더하지 않아.</div></div>
+    <div class="callout warn"><span class="k">번호</span><div>REQ 번호는 Claude 가 번호표 기계로 받아서 붙여. 마지막 번호에 손으로 1 을 더하지 않아. 새 제목이 이미 있는 REQ 제목을 포함하거나 반대로 그 안에 들어 있으면 번호표 기계가 번호를 안 주고 "기존 개발의 하위 작업이야, 새 개발이야?" 를 물어봐. 하위 작업이면 새 줄 대신 그 REQ 를 넓히고, 정말 새 개발이면 확인했다는 표시를 붙여 다시 받아.</div></div>
+    <div class="callout warn"><span class="k">다른 번호 적기</span><div>상세 절에 다른 요구사항 번호(<code>REQ-002</code>, <code>DEV-002</code>)를 적으면 저장이 거절돼. 같은 개발이면 새 REQ 로 쪼개지 말고 그 REQ 의 범위를 넓혀. 정말 별개면 <code>### REQ-003</code> 제목 바로 아래, 첫 <code>####</code> 소제목 앞에 <code>관계: 별개 — 이유</code> 한 줄을 적어(이 자리는 엑셀로 안 나가). 자기 번호의 DEV 와 <code>옛 REQ-001</code> 처럼 앞에 "옛" 이 붙은 표기는 괜찮아.</div></div>
     <div class="callout warn"><span class="k">긴 칸</span><div>Short Description 은 몇 줄짜리 요약으로 써. 엑셀 한 칸은 높이 한계(409pt)를 넘으면 잘려 보여. 세부 기능은 Acceptance Criteria 로 나눠. 산출 때 <code>cell-too-tall</code> 경고가 나오면 그 칸이 너무 긴 거야.</div></div>
     <div class="callout warn"><span class="k">옛 이름</span><div><code>docs/ssot/PRD.md</code> 만 있는 옛 구조면, 조용히 새로 만들지 않고 옮길지 먼저 물어봐.</div></div>
     <div class="callout warn"><span class="k">승인 필요</span><div>SRS 를 바꾼 PR 은 작성자 말고 다른 승인자의 Approve 가 있어야 병합돼.</div></div>
@@ -753,6 +754,7 @@ fix/31-broken-link</pre>
     <div class="callout warn"><span class="k">승인 다시</span><div>승인 받은 뒤에 커밋을 더 올리면 승인을 <b>다시</b> 받아야 해. 승인은 마지막 커밋에 찍힌 것만 쳐줘.</div></div>
     <div class="callout warn"><span class="k">덮어쓰기</span><div>main 에 이미 있는 판(같은 파일명)은 덮어쓰지 않아. 그래서 버전을 꼭 올려.</div></div>
     <div class="callout warn"><span class="k">새 줄 말고 넓히기</span><div>새 요구사항을 넣기 전에 Claude 가 지금 있는 개발 목록을 보여 주고 "기존 개발의 일부야, 새 개발이야?" 를 물어. 일부면 새 줄을 만들지 않고 그 REQ 의 범위와 완료 조건을 넓혀. 그 REQ 의 "하지 않는 것" 에 적혀 있던 걸 하게 된 거라면 거기서 빼서 범위로 옮겨. 변경 기록 종류는 "요구사항 변경" 이야. 설정만 하는 별개 건처럼 정말 따로면 새 줄이야.</div></div>
+    <div class="callout warn"><span class="k">관계 줄</span><div>고치다가 상세 절에 다른 번호를 적게 되면 그 절 제목 아래(첫 <code>####</code> 앞)에 <code>관계: 별개 — 이유</code> 를 적어야 저장돼. 같은 개발이면 번호를 적을 게 아니라 범위를 넓히는 거야.</div></div>
   </div>
 
   <div class="next"><button data-go="srs-new">← SRS 만들기</button><button data-go="spec-new">다음: Spec 만들기 →</button></div>
@@ -1421,6 +1423,8 @@ Closes #143</pre>
     <tr><td><code>--force</code> 거절</td><td>남의 작업을 지울 수 있음</td><td>쓰지 않아. deliver 가 안전한 방법을 씀</td></tr>
     <tr><td>브랜치 이름 형식 거절</td><td>규칙과 다름</td><td><code>git branch -m feat/12-new-name</code></td></tr>
     <tr><td>문서 저장 거절</td><td>템플릿과 다름 (빠진 절, 틀린 파일명)</td><td>메시지의 사유대로 고쳐서 다시 저장</td></tr>
+    <tr><td>SRS 저장 거절: "다른 번호(REQ-002 …)를 말하는데 관계 줄이 없다"</td><td>한 개발이 REQ 둘로 쪼개졌을 수 있음</td><td>같은 개발이면 그 REQ 의 범위를 넓히고 새 REQ 는 지워. 별개면 그 절 제목 아래, 첫 <code>####</code> 앞에 <code>관계: 별개 — 이유</code> 한 줄</td></tr>
+    <tr><td>번호 찜이 멈추고 "겹치는 REQ" 를 보여 줌 (종료코드 4)</td><td>새 제목이 기존 REQ 제목과 겹침</td><td>하위 작업이면 번호 없이 그 개발에 붙고, 새 개발이 맞다고 답하면 확인 표시와 함께 다시 받아</td></tr>
     <tr><td>코드 저장 거절 (CR-00x)</td><td>공통 개발 규칙 위반</td><td>코드를 고쳐. 꼭 필요하면 이유를 단 <code>harness:allow</code> 주석</td></tr>
     <tr><td>엔진을 못 받음 / <code>uv</code> 없음</td><td>검사 도구가 없어 검사 불능</td><td><code>winget install --id astral-sh.uv -e</code> 후 Claude Code 다시 열기</td></tr>
     <tr><td>git 명령이 전부 거절</td><td><code>jq</code> 가 없음</td><td>jq 설치 후 다시 열기</td></tr>

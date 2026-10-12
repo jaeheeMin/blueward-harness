@@ -10,9 +10,10 @@
 
 하위 명령
   next                         다음 번호를 `DEV-xxx` 로 출력한다.
-  reserve --title T [--body-file F] [--label L ...]
+  reserve --title T [--body-file F] [--label L ...] [--confirmed-new]
                                이슈를 `[DEV-xxx] T` 로 만들고 겹침을 확인한다.
-  claim --issue N              이슈에 번호가 없으면 붙이고, 있으면 그 번호를 낸다.
+  claim --issue N [--confirmed-new]
+                               이슈에 번호가 없으면 붙이고, 있으면 그 번호를 낸다.
   list                         origin/main 기준 지금 있는 개발 목록을 JSON 한 줄로 낸다(#258).
                                번호마다 SRS 표 줄·원장 줄·Spec·`[DEV-xxx]` 이슈·하위 작업 이슈.
 
@@ -20,6 +21,10 @@
   0  성공 (stdout: next 는 `DEV-xxx`, 나머지는 JSON 한 줄)
   2  판정 불능(git·gh 실패 등). 통과나 위반으로 뭉개지 않는다. stdout JSON 에 사유.
   3  찜 안 함. 저장소 꼭대기에 `audit/ledger/` 가 없다(하네스 저장소 자신 포함).
+  4  확인 필요(#261). 새 제목이 origin/main SRS 의 기존 REQ 제목을 포함하거나 그 반대다.
+     이슈를 만들지도 번호를 붙이지도 않고, stdout JSON `{"status":"confirm","matches":[{"number","title"}],"title"}`.
+     기존 개발의 하위 작업이면 번호를 새로 받지 않는다. 새 개발이 맞다고 사람이 확인하면
+     `--confirmed-new` 를 붙여 다시 부른다. 새 번호를 붙일 때만 본다(이미 번호가 있는 이슈의 claim 은 안 본다).
 """
 from __future__ import annotations
 
@@ -33,6 +38,8 @@ from pathlib import Path
 EXIT_OK = 0
 EXIT_ERROR = 2
 EXIT_NO_LEDGER = 3
+EXIT_CONFIRM = 4
+MIN_TITLE_LEN = 4  # 이보다 짧은 제목(정규화 뒤)은 포함 비교에서 뺀다. 짧은 글자열이 우연히 들어 있는 오탐을 막는다.
 
 MAX_RECHECKS = 3
 TAG_RE = re.compile(r"^\s*\[DEV-(\d+)\]\s*")
@@ -49,6 +56,15 @@ class Undecidable(Exception):
 
 class NoLedger(Exception):
     """원장이 없는 저장소. 종료코드 3."""
+
+
+class NeedConfirm(Exception):
+    """새 제목이 기존 REQ 제목과 겹친다. 사람 확인이 필요하다. 종료코드 4."""
+
+    def __init__(self, title: str, matches: list[dict]):
+        super().__init__(title)
+        self.title = title
+        self.matches = matches
 
 
 def _run(cmd: list[str], cwd: str | None = None) -> str:
@@ -251,6 +267,29 @@ def main_snapshot(root: str) -> dict[int, dict]:
     return devs
 
 
+def _norm_title(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip().casefold()
+
+
+def check_title_overlap(root: str, core_title: str) -> None:
+    """origin/main SRS 의 REQ 제목과 포함 관계면 NeedConfirm. SRS 가 없으면 건너뛴다. 읽기 실패는 Undecidable."""
+    git(["fetch", "origin", "main"], root)
+    srs = _show_main(root, "docs/ssot/SRS.md")
+    if not srs:
+        return
+    new = _norm_title(core_title)
+    if len(new) < MIN_TITLE_LEN:
+        return
+    matches: list[dict] = []
+    for n, row in _table_rows(srs, REQ_ROW_RE):
+        title = _pick(row, "Title", "요구사항")
+        old = _norm_title(title or "")
+        if len(old) >= MIN_TITLE_LEN and (old in new or new in old):
+            matches.append({"number": format_number(n), "title": title})
+    if matches:
+        raise NeedConfirm(core_title, matches)
+
+
 def cmd_list(args: argparse.Namespace) -> dict:
     root = repo_root()
     require_ledger(root)
@@ -287,6 +326,8 @@ def cmd_reserve(args: argparse.Namespace) -> dict:
     core = strip_tag(args.title).strip()
     if not core:
         raise Undecidable("제목이 비어 있다.")
+    if not args.confirmed_new:
+        check_title_overlap(root, core)
     number = compute_next(root)
     cmd = ["issue", "create", "--title", f"[{format_number(number)}] {core}"]
     if args.body_file:
@@ -319,6 +360,8 @@ def cmd_claim(args: argparse.Namespace) -> dict:
         # 이미 찜된 이슈. 더 앞선 이슈와 겹치는지도 한 번 확인한다.
         final, first = settle(root, args.issue, core, existing)
         return _result(args.issue, final, first, core, info.get("url", ""))
+    if not args.confirmed_new:
+        check_title_overlap(root, core)
     number = compute_next(root, exclude_issue=args.issue)
     gh(["issue", "edit", str(args.issue), "--title", f"[{format_number(number)}] {core}"], root)
     final, first = settle(root, args.issue, core, number)
@@ -333,9 +376,11 @@ def main(argv: list[str] | None = None) -> int:
     p_res.add_argument("--title", required=True)
     p_res.add_argument("--body-file")
     p_res.add_argument("--label", action="append")
+    p_res.add_argument("--confirmed-new", action="store_true", help="기존 REQ 와 제목이 겹친다는 확인을 건너뛴다(사람이 새 개발이라고 확인한 뒤)")
     sub.add_parser("list")
     p_claim = sub.add_parser("claim")
     p_claim.add_argument("--issue", type=int, required=True)
+    p_claim.add_argument("--confirmed-new", action="store_true", help="기존 REQ 와 제목이 겹친다는 확인을 건너뛴다(사람이 새 개발이라고 확인한 뒤)")
     args = parser.parse_args(argv)
 
     handler = {"next": cmd_next, "reserve": cmd_reserve, "claim": cmd_claim, "list": cmd_list}[args.cmd]
@@ -344,6 +389,9 @@ def main(argv: list[str] | None = None) -> int:
     except NoLedger as exc:
         print(json.dumps({"status": "no_ledger", "message": str(exc)}, ensure_ascii=False))
         return EXIT_NO_LEDGER
+    except NeedConfirm as exc:
+        print(json.dumps({"status": "confirm", "matches": exc.matches, "title": exc.title}, ensure_ascii=False))
+        return EXIT_CONFIRM
     except Undecidable as exc:
         print(json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False))
         return EXIT_ERROR

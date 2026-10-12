@@ -1,8 +1,14 @@
 # SRS 는 docs/ssot/ 에 하나만 두고 이름을 고정한다. 필수 절은
 # templates/harness/SRS.md 의 `##` 제목에서 그대로 읽는다.
+# req_cross_reference 는 요구사항 상세 절(`### REQ-n`)이 다른 REQ·DEV 번호를 말하면
+# 그 절의 제목 아래에 `관계: 별개 — <이유>` 줄을 요구한다(한 개발이 REQ 둘로 쪼개지는 것을
+# 막는다). 제외_패턴은 번호 바로 앞에 이 정규식이 붙으면 옛 번호 표기로 보고 건너뛴다.
 템플릿: ../templates/harness/SRS.md
 관할: "docs/ssot/**"
 규칙:
   - 종류: filename
     패턴: '^SRS\.md$'
   - 종류: required_sections
+  - 종류: req_cross_reference
+    관계_접두어: "관계:"
+    제외_패턴: ['옛\s*$']

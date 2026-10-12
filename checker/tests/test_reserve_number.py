@@ -56,13 +56,13 @@ LEDGER = """# 프로그램
 """
 
 
-def make_repo(tmp_path: Path, *, ledger: bool = True) -> Path:
+def make_repo(tmp_path: Path, *, ledger: bool = True, srs: str = SRS) -> Path:
     origin = tmp_path / "origin.git"
     work = tmp_path / "work"
     subprocess.run(["git", "init", "--bare", "-b", "main", str(origin)], check=True, capture_output=True)
     subprocess.run(["git", "clone", str(origin), str(work)], check=True, capture_output=True)
     (work / "docs" / "ssot").mkdir(parents=True)
-    (work / "docs" / "ssot" / "SRS.md").write_text(SRS, encoding="utf-8")
+    (work / "docs" / "ssot" / "SRS.md").write_text(srs, encoding="utf-8")
     (work / "docs" / "spec").mkdir()
     (work / "docs" / "spec" / "DEV-002-요약.md").write_text("# DEV-002\n", encoding="utf-8")
     if ledger:
@@ -303,3 +303,116 @@ def test_list_원장이_없으면_3_gh_실패는_2(tmp_path, monkeypatch, capsys
     work2 = make_repo(tmp_path / "b")
     code, out = run(monkeypatch, capsys, work2, FakeGh(fail=True), ["list"])
     assert code == 2 and json.loads(out)["status"] == "error"
+
+
+SRS_TITLED = """# SRS
+
+## 요구사항
+
+| ID | Title | Status |
+|---|---|---|
+| REQ-001 | 판매오더 조회 앱 | New |
+| REQ-002 | AB | New |
+"""
+
+
+def _titled(tmp_path):
+    return make_repo(tmp_path, srs=SRS_TITLED)
+
+
+def test_새_제목이_기존_REQ_제목을_포함하면_4_이고_이슈를_안_만든다(tmp_path, monkeypatch, capsys):
+    work = _titled(tmp_path)
+    fake = FakeGh()
+    code, out = run(monkeypatch, capsys, work, fake, ["reserve", "--title", "[DEV-009] 판매오더 조회 앱 목록 필터 추가"])
+    assert code == 4
+    res = json.loads(out)
+    assert res["status"] == "confirm"
+    assert res["matches"] == [{"number": "DEV-001", "title": "판매오더 조회 앱"}]
+    assert res["title"] == "판매오더 조회 앱 목록 필터 추가"
+    assert fake.issues == {}
+
+
+def test_기존_REQ_제목이_새_제목을_포함해도_4(tmp_path, monkeypatch, capsys):
+    work = _titled(tmp_path)
+    fake = FakeGh()
+    code, out = run(monkeypatch, capsys, work, fake, ["reserve", "--title", "조회  앱"])
+    assert code == 4  # 공백 정리 뒤 "조회 앱" 은 "판매오더 조회 앱" 에 들어 있다
+    assert fake.issues == {}
+
+
+def test_반대_방향_포함은_4(tmp_path, monkeypatch, capsys):
+    work = _titled(tmp_path)
+    fake = FakeGh()
+    code, out = run(monkeypatch, capsys, work, fake, ["reserve", "--title", "판매오더 조회"])
+    assert code == 4
+    assert json.loads(out)["matches"][0]["number"] == "DEV-001"
+    assert fake.issues == {}
+
+
+def test_무관한_제목은_그대로_찜한다(tmp_path, monkeypatch, capsys):
+    work = _titled(tmp_path)
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["reserve", "--title", "구매요청 승인 흐름"])
+    assert code == 0
+    assert json.loads(out)["status"] == "ok"
+
+
+def test_confirmed_new_는_확인을_건너뛴다(tmp_path, monkeypatch, capsys):
+    work = _titled(tmp_path)
+    fake = FakeGh()
+    code, out = run(monkeypatch, capsys, work, fake, ["reserve", "--title", "판매오더 조회 앱 개편", "--confirmed-new"])
+    assert code == 0
+    assert json.loads(out)["number"] == "DEV-003"
+    assert len(fake.issues) == 1
+
+
+def test_짧은_제목은_포함_비교에서_뺀다(tmp_path, monkeypatch, capsys):
+    work = _titled(tmp_path)
+    # 기존 REQ-002 제목 "AB" 는 하한 미만이라 "AB 연동 개선" 이 걸리지 않는다. 새 제목이 짧을 때도 마찬가지.
+    code, _ = run(monkeypatch, capsys, work, FakeGh(), ["reserve", "--title", "AB 연동 개선"])
+    assert code == 0
+    code, _ = run(monkeypatch, capsys, work, FakeGh(), ["reserve", "--title", "조회"])
+    assert code == 0
+
+
+def test_claim_번호가_없는_이슈도_겹치면_4_이고_제목을_안_고친다(tmp_path, monkeypatch, capsys):
+    work = _titled(tmp_path)
+    fake = FakeGh([{"number": 12, "title": "판매오더 조회 앱 화면 개선"}])
+    code, out = run(monkeypatch, capsys, work, fake, ["claim", "--issue", "12"])
+    assert code == 4
+    assert json.loads(out)["status"] == "confirm"
+    assert fake.edits == []
+    code, out = run(monkeypatch, capsys, work, fake, ["claim", "--issue", "12", "--confirmed-new"])
+    assert code == 0
+    assert fake.edits and fake.edits[0][1].startswith("[DEV-003]")
+
+
+def test_claim_이미_번호가_있으면_겹쳐도_확인_안_함(tmp_path, monkeypatch, capsys):
+    work = _titled(tmp_path)
+    fake = FakeGh([{"number": 12, "title": "[DEV-001] 판매오더 조회 앱 화면 개선"}])
+    code, out = run(monkeypatch, capsys, work, fake, ["claim", "--issue", "12"])
+    assert code == 0 and json.loads(out)["number"] == "DEV-001"
+
+
+def test_SRS_가_없으면_확인_없이_기존_흐름(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    subprocess.run(["git", "rm", "-q", "docs/ssot/SRS.md"], cwd=work, check=True, capture_output=True)
+    _git(work, "commit", "-m", "rm srs")
+    _git(work, "push", "origin", "main")
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["reserve", "--title", "판매오더 조회 앱"])
+    assert code == 0
+
+
+def test_SRS_를_읽다_실패하면_2_이고_번호를_안_준다(tmp_path, monkeypatch, capsys):
+    work = _titled(tmp_path)
+    fake = FakeGh()
+    real = rn._show_main
+
+    def boom(root, path):
+        if path == "docs/ssot/SRS.md":
+            raise rn.Undecidable("SRS 읽기 실패(가짜)")
+        return real(root, path)
+
+    monkeypatch.setattr(rn, "_show_main", boom)
+    code, out = run(monkeypatch, capsys, work, fake, ["reserve", "--title", "구매요청 승인 흐름"])
+    assert code == 2
+    assert fake.issues == {}
