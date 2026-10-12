@@ -35,9 +35,24 @@ base directory>` 는 이 스킬이 로드될 때 위에 표시되는 경로다.
    만들라고 안내한다.
 2. 이번 Spec 이 다룰 REQ 하나를 정한다(요구사항 1건 = Spec 1건). 사용자가 REQ 번호를 직접 줬으면 그것을
    쓰되, 그 REQ 의 상태(Backlog Status)가 `Dropped` 나 `Duplicate` 면 Spec 을 만들지 않고 그렇다고
-   알린다. 번호를 안 줬으면 SRS 의 요구사항 표에서 상태가 `Dropped`·`Duplicate` 가 아니면서
+   알린다. `On Hold` 도 만들지 않고 보류 중이라고 알린다(사용자가 `/harness:srs` 로 상태를 바꾸면 진행).
+   그 REQ 의 `다음 단계` 열(SRS 요구사항 표)도 본다.
+   - `개발` — 그대로 진행한다.
+   - `미정` — 먼저 개발인지 설정인지 사용자에게 정하게 하고(모르면 멈춘다), `/harness:srs` 의 고치기대로 SRS 의
+     다음 단계(개발이면 RICEFW ID `DEV-xxx` 도)를 고치고 변경 기록(`audit/changes/`, 종류 "결정")을 남긴 뒤 진행한다.
+     `설정` 으로 정해지면 아래 `설정` 처럼 한다.
+   - `설정` — Spec 을 만들지 않고 이 요구사항은 설정이라 Spec 이 없다고 알린다. 진행 원장에 그 DEV 번호 줄이
+     없으면(방금 `미정` 에서 `설정` 으로 정한 경우 등) `/harness:srs` 의 "설정 요구사항" 대로 원장에
+     `| DEV-xxx | <제목> | 설정 | <담당> | 대기 |  |` 줄을 올린다. 원장 파일(프로그램)은 아래 프로그램 선택처럼
+     `audit/ledger/*.md` 목록에서 고르게 하고, 원장이 없는 저장소면 건너뛴다. 설정 내용은 SRS 상세 절의
+     `Configuration Considerations` 에 쓴다고 안내하고 여기서 끝낸다.
+   - 열이 없는 옛 SRS — 지금처럼 Spec 대상으로 보되, `/harness:srs` 로 `다음 단계` 열을 추가하자고 안내한다.
+
+   번호를 안 줬으면 SRS 의 요구사항 표에서 `다음 단계` 가 `개발` 이고 상태가 `On Hold`·`Dropped`·`Duplicate` 가
+   아니면서
    아직 어느 Spec 의 `## 근거 요구사항` 에도 적히지 않은 REQ(= 아직 Spec 이 없는 REQ)를 찾아 목록으로
-   보여 주고 고르게 한다. 상태 값은 Backlog Status(New / Planned / In Process / Done / On Hold /
+   보여 주고 고르게 한다. `미정` 인 REQ 가 있으면 목록 끝에 "다음 단계 미정 N건" 으로 따로 알려 준다(고르면 위 `미정`
+   처럼 먼저 정한다). `설정` 은 후보가 아니다. 상태 값은 Backlog Status(New / Planned / In Process / Done / On Hold /
    Dropped / Duplicate) 하나뿐이다 — 옛 `유효`·`변경됨`·`폐기` 로 적힌 SRS 면 `Dropped` 는 `폐기` 에 해당하고
    나머지는 Spec 대상으로 보되, 상태 값을 바꾸자는 안내는 `/harness:srs` 쪽 일이라고 알린다. 상세는 REQ 의
    `### REQ-xxx` 상세 절(Short Description, Acceptance Criteria …)에 있으니 함께 읽는다. 이 개발 건이 속할 프로그램(진행 원장 파일)도 함께
@@ -45,8 +60,9 @@ base directory>` 는 이 스킬이 로드될 때 위에 표시되는 경로다.
    `templates/harness/audit-ledger.md` 틀로 새 파일을 만든다.
 3. DEV 번호를 정한다. 2 의 REQ 번호가 있으면 그 숫자가 DEV 번호다(`REQ-003` →
    `DEV-003`). 그 번호가 `audit/ledger/*.md` 의 개발 건 표에 이미 있고 Spec 칸이
-   `-` 이면 그 줄을 이어받는다(2 의 프로그램 선택도 그 원장 파일로 정해진 것으로
-   보고 다시 묻지 않는다). 근거 REQ 가 없으면 브랜치 이름의 이슈 번호로 `gh issue view`
+   `-` 이면 그 줄을 이어받는다. Spec 칸이 `설정` 이어도 SRS 의 그 REQ 다음 단계가 `개발` 이면 막지 않고 `-` 처럼
+   취급해 이어받고, Spec 을 쓸 때 Spec 칸을 Spec 경로로 채운다. SRS 다음 단계가 `설정` 이면 설정 건이라 Spec 을 만들지
+   않는다(2 의 `설정`). (2 의 프로그램 선택도 그 원장 파일로 정해진 것으로 보고 다시 묻지 않는다.) 근거 REQ 가 없으면 브랜치 이름의 이슈 번호로 `gh issue view`
    해 읽은 이슈 제목의 `[DEV-xxx]`(또는 본문의 `진행 원장: DEV-xxx` 줄)를 쓴다.
    어디서도 번호를 못 찾으면 위 "Spec 번호" 대로 `claim` 으로 찜한다. 번호를 직접
    계산하지 않는다. 같은 번호의 Spec 이 이미 있으면 새로 만들지 않고 "고치기" 로

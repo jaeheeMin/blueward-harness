@@ -278,7 +278,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.49, public-cloud main 기준 (2026-10-12)</div>
+      <div class="note">harness 0.10.50, public-cloud main 기준 (2026-10-12)</div>
     </div>
   </nav>
 
@@ -495,7 +495,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
         <li><div>GitHub 이슈를 만들어 (제목 명사형, 본문은 <b>배경 / 해야 할 일 / 완료 조건</b>, 라벨 <code>type:feat</code> 등)</div></li>
         <li><div>개발 건(feat, fix)이면 이슈 제목 앞에 번호를 찜해. 예: <code>[DEV-003] 판매오더 조회 앱</code></div></li>
         <li><div>규칙에 맞는 브랜치를 만들고 이동해</div></li>
-        <li><div>진행 원장에 줄을 넣을지 물어봐 (넣으면 상태 "진행")</div></li>
+        <li><div>진행 원장에 이미 있는 건(예: SRS 에서 설정으로 올라간 건)은 묻지 않고 그 줄을 "진행" 으로 바꿔. 원장에 없는 새 건(feat, fix)이면 줄을 넣을지 물어봐 (넣으면 상태 "진행")</div></li>
       </ol>
     </section>
     <section class="box">
@@ -623,7 +623,8 @@ fix/31-broken-link</pre>
         <li>입력 자료를 Claude 에게 줘</li>
         <li>Claude 가 모아서 묻는 질문에 답해. 모르면 "미결 사항" 에 남겨도 돼</li>
         <li>누가·언제·왜 요청했는지 알려 줘. 요구사항마다 Short Description 첫 줄에 <code>요청: 홍길동(영업팀), 2026-10-12, 킥오프 회의록</code> 처럼 들어가</li>
-        <li>끝에 Claude 가 보여 주는 <b>찜한 번호 표</b>(REQ 번호 · 제목 · <code>[DEV-xxx]</code> 이슈)를 확인해</li>
+        <li><b>다음 단계 답하기.</b> 요구사항마다 "개발이야, 설정이야?" 를 물어봐. 코드를 짜면 <b>개발</b>, 설정만 하면 <b>설정</b>, 아직 모르면 <b>미정</b>이라고 해</li>
+        <li>끝에 Claude 가 보여 주는 <b>찜한 번호 표</b>(REQ 번호 · 제목 · 다음 단계 · <code>[DEV-xxx]</code> 이슈)를 확인해</li>
         <li>다 되면 <code>/harness:deliver</code> 로 PR 을 올려</li>
         <li>작성자가 아닌 승인자에게 Approve 를 받아</li>
       </ul>
@@ -645,7 +646,7 @@ fix/31-broken-link</pre>
         <p class="small" style="margin-bottom:6px">절</p>
         <p style="font-size:14.5px">배경과 목표 · 범위 · AS-IS/TO-BE · 요구사항 · 참조 · 미결 사항. 맨 위에 <code>버전: 0.1</code> 줄이 있고, 이 값이 엑셀 파일명의 버전이 돼.</p>
         <p class="small" style="margin:10px 0 6px">요구사항 표 열</p>
-        <p style="font-size:14.5px">ID, Title, LoB, Type, Status, Priority (PO), Development RICEFW ID, 출처. 양식 지도에 있는데 표에 빠진 열이 있으면 Claude 가 열을 더하고 채워.</p>
+        <p style="font-size:14.5px">ID, Title, LoB, Type, Status, Priority (PO), Development RICEFW ID, 출처, 다음 단계. 양식 지도에 있는데 표에 빠진 열이 있으면 Claude 가 열을 더하고 채워. 출처와 다음 단계는 마크다운에만 있고 엑셀에는 안 나가.</p>
       </div>
       <pre>### REQ-002 판매오더 조회
 #### Short Description
@@ -659,6 +660,20 @@ fix/31-broken-link</pre>
     <div class="pills">
       <span class="pill a">New</span><span class="pill">Planned</span><span class="pill">In Process</span><span class="pill g">Done</span><span class="pill w">On Hold</span><span class="pill r">Dropped</span><span class="pill r">Duplicate</span>
     </div>
+  </section>
+
+  <section class="box">
+    <h3>다음 단계에 따라 길이 갈라져</h3>
+    <p style="font-size:14.5px">요구사항이 SRS 다음에 어디로 가는지는 표의 <code>다음 단계</code> 열에 적어. 값은 셋뿐이야. <code>Development RICEFW ID</code> 가 빈칸이어도 이 열을 보면 "설정이라 비웠다" 인지 "아직 안 정했다" 인지 알 수 있어.</p>
+    <div class="tbl-wrap"><table>
+      <tr><th>다음 단계</th><th>RICEFW ID</th><th>그다음</th></tr>
+      <tr><td><b>개발</b></td><td><code>DEV-003</code> (REQ 와 같은 번호)</td><td>Spec 을 만들어 → 개발해 (<code>/harness:spec</code> → <code>/harness:start</code>)</td></tr>
+      <tr><td><b>설정</b></td><td>비움</td><td>Spec 없이 진행 원장에 올라가 → <code>[DEV-003]</code> 이슈로 시작하면 "진행" → 설정을 마치면 사람이 "완료". 무엇을 설정했는지는 SRS 의 Configuration Considerations 에 적어</td></tr>
+      <tr><td><b>미정</b></td><td>비움</td><td>미결 사항에 남겨 두고, Spec 을 만들려 할 때 개발인지 설정인지 먼저 정해</td></tr>
+      <tr><td>보류 · 취소</td><td>그대로</td><td>다음 단계가 아니라 Status 로 적어: <code>On Hold</code> · <code>Dropped</code> · <code>Duplicate</code> 면 Spec 도 안 만들고 멈춰. 원장에 줄이 있으면 지우지 않고 내용 앞에 <code>[보류]</code> · <code>[취소]</code> 만 붙여</td></tr>
+      <tr><td>설정 → 개발로 바뀜</td><td><code>DEV-003</code> 을 채움</td><td>원장의 설정 줄을 그대로 쓰고 Spec 칸만 "-" 로 되돌려. 그다음 <code>/harness:spec</code> 이 이어받아</td></tr>
+    </table></div>
+    <p class="small" style="margin-top:10px">다음 단계를 나중에 바꾸면(미정 → 설정, 개발 → 설정) 변경 기록에 종류 "결정" 으로 남아.</p>
   </section>
 
   <section class="box" style="border-color:var(--accent)">
@@ -760,7 +775,7 @@ fix/31-broken-link</pre>
 
   <section class="diagram">
     <div class="flow">
-      <div class="node"><b>SRS 의 REQ-002</b><span>Dropped · Duplicate 면 안 만듦</span></div><div class="arrow"></div>
+      <div class="node"><b>SRS 의 REQ-002</b><span>다음 단계가 개발인 것만 · On Hold · Dropped · Duplicate 는 건너뜀</span></div><div class="arrow"></div>
       <div class="node hl"><b>양식 고르기</b><span>쓰면 파일명 값을 먼저 물어봄</span></div><div class="arrow"></div>
       <div class="node hl"><b>Spec 작성</b><span>docs/spec/DEV-002-판매오더조회앱.md</span></div><div class="arrow"></div>
       <div class="node"><b>원장 등록</b><span>audit/ledger/</span></div><div class="arrow"></div>
@@ -773,7 +788,9 @@ fix/31-broken-link</pre>
     <section class="box">
       <h3>내가 할 일</h3>
       <ul class="todo">
-        <li>어떤 REQ 로 만들지 정해</li>
+        <li>어떤 REQ 로 만들지 정해. 후보로는 다음 단계가 <b>개발</b>인 것만 보여 줘</li>
+        <li>고른 REQ 가 <b>미정</b>이면 개발인지 설정인지 먼저 정해. Claude 가 SRS 를 고치고 변경 기록을 남긴 뒤 이어 가</li>
+        <li>고른 REQ 가 <b>설정</b>이면 Spec 은 안 만들어. 진행 원장에 설정 건으로 올려 주고 끝나. <b>On Hold</b>(보류)도 Spec 을 안 만들고 알려 줘 — 상태를 바꾸면 이어 가</li>
         <li>양식을 쓸지 골라. 고르면 파일명에 들어갈 값(개발 ID, 제목)을 먼저 물어보고, 산출될 이름을 보여 줘</li>
         <li>모르는 값은 Claude 가 추측하지 않아. 물어보면 답하고, 정말 없으면 "미정" 으로 둬</li>
         <li>저장하면 경비원이 Spec 생김새를 바로 검사해</li>
@@ -1628,6 +1645,7 @@ Closes #143</pre>
     <div class="term"><dt>SRS<span>요구사항정의서</span></dt><dd><b>고객 주문서.</b> 저장소에 하나뿐인 정본이야.</dd></div>
     <div class="term"><dt>SSOT</dt><dd><b>Single Source of Truth.</b> 진짜는 한 곳에만 둔다는 원칙.</dd></div>
     <div class="term"><dt>Spec<span>개발 Spec</span></dt><dd><b>레시피 카드.</b> 요구사항 하나를 어떻게 만들지 적은 설계.</dd></div>
+    <div class="term"><dt>다음 단계</dt><dd><b>요구사항이 SRS 다음에 가는 길.</b> 개발(→ Spec) · 설정(→ 진행 원장) · 미정(→ 먼저 정하기). 마크다운에만 있고 엑셀엔 안 나가.</dd></div>
     <div class="term"><dt>REQ · DEV 번호</dt><dd><b>같은 일의 번호표.</b> REQ-003 = DEV-003 = 이슈의 [DEV-003].</dd></div>
     <div class="term"><dt>진행 원장<span>Ledger</span></dt><dd><b>개발 건 현황판.</b> 대기 → 진행 → 리뷰 → 완료.</dd></div>
     <div class="term"><dt>Audit<span>변경 기록</span></dt><dd><b>"왜 바꿨는지" 일기장.</b> 한 기록에 파일 하나.</dd></div>

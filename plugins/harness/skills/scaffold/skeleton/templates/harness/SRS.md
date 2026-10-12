@@ -22,9 +22,9 @@
 
 ## 요구사항
 
-| ID | Title | Status | Priority (PO) | 출처 |
-|---|---|---|---|---|
-| REQ-001 |  | New |  |  |
+| ID | Title | Status | Priority (PO) | 출처 | 다음 단계 |
+|---|---|---|---|---|---|
+| REQ-001 |  | New |  |  | 미정 |
 
 요구사항 1건은 개발 또는 설정 1건이고 표의 1줄이다. 한 개발 안의 세부 기능은 줄을
 나누지 않고 그 요구사항의 상세 절에 쓴다. 번호(`REQ-001`)는 이슈 제목에 찜한 번호를
@@ -33,9 +33,14 @@
 문서·회의·질문 답에서 왔는지를 적는다.
 
 열은 고객사 양식 지도(`templates/forms/`)가 있으면 그 지도의 열을 따르고(`/harness:srs`
-가 읽는다), 없으면 위 다섯 열이 기본이다. 지도에 따라 `Development RICEFW ID` 같은 열이
-표에 더 들어간다 — 개발이면 REQ 와 같은 번호의 `DEV-001` 을 적고, 지도가 없을 땐 이 열은
-선택이다. 상태는 Backlog 의 Status 하나로 적는다 —
+가 읽는다), 없으면 위 여섯 열이 기본이다. 지도에 따라 `Development RICEFW ID` 같은 열이
+표에 더 들어간다 — 다음 단계가 개발이면 REQ 와 같은 번호의 `DEV-001` 을 적고, 설정·미정이면 비운다.
+지도가 없을 땐 이 열은 선택이다.
+
+`다음 단계` 는 이 요구사항이 SRS 다음에 어디로 가는지를 적는 md 전용 열이라 엑셀 양식에는 나가지 않는다.
+값은 `개발`(→ Spec 을 만든다) / `설정`(→ Spec 없이 진행 원장에서 관리한다) / `미정`(→ `## 미결 사항` 에 남기고
+정해지면 고친다) 셋뿐이다. 보류·취소는 이 열이 아니라 상태(On Hold / Dropped / Duplicate)로 적는다. 설정을 한
+내용은 상세 절 `#### Configuration Considerations` 에 적는다. 상태는 Backlog 의 Status 하나로 적는다 —
 New / Planned / In Process / Done / On Hold / Dropped / Duplicate. 없앤 요구사항은 줄을
 지우지 않고 Dropped 로 남기고, 다른 요구사항과 겹치면 Duplicate 로 둔다. 우선순위는
 Backlog 의 값(`1. Must-Have` …)을 쓴다. 양식에 드롭다운이 있는 열은 그 목록 안의 값만 쓴다.
