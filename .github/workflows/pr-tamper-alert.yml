@@ -1,0 +1,182 @@
+# 다른 계정이 PR 을 건드린 것을 알린다(#150). Project Repository 가 불러 쓰는 재사용 워크플로.
+#
+# 규칙(governance.md): 작성자 계정이 지금 gh 로그인 계정과 다른 PR 은 읽기만 한다. Claude 는
+# 훅(`pre-bash-git-guard.sh`)이 막지만, 사람이 웹이나 터미널에서 하는 일은 막지 못한다.
+# 무료 개인 계정이라 서버가 막지 못하므로(조직·유료 요금제로 옮기면 ruleset 으로 바꿀 자리),
+# 이 워크플로가 사후에 드러낸다. 알리는 것은 둘뿐이다(병합은 알리지 않는다 — 사용자 결정).
+#   (a) PR 작성자가 아닌 계정이 그 PR 브랜치에 push 했다(pull_request_target synchronize).
+#   (b) PR 작성자가 아닌 계정이 그 PR 의 리뷰를 해제했다(pull_request_review dismissed).
+# 행동한 계정이 그 저장소의 admin 이면 알리지 않는다(admin 은 남의 PR 도 제어할 수 있다).
+# 봇(sender.type == Bot: github-actions[bot], dependabot[bot] 등)의 행동도 알리지 않는다 —
+# 자동 갱신·자동 커밋이 오경보를 내기 때문이다. 사람이 PAT 로 한 일은 User 라 그대로 알린다.
+#
+# 부르는 쪽(caller)은 아래 두 이벤트로 이 워크플로를 부른다.
+#
+#   on:
+#     pull_request_target:
+#       types: [synchronize]
+#     pull_request_review:
+#       types: [dismissed]
+#
+# `pull_request_target` 은 PR head 코드를 checkout 하지 않는다(이 워크플로는 checkout 자체가
+# 없다). `pull_request_review` 는 PR 브랜치의 워크플로 정의로 돌아 PR 이 caller 를 바꿔 알림을
+# 끌 수 있다 — 막는 장치가 아니라 드러내는 장치이고, caller 변경은 PR diff 에 보인다.
+#
+# 판정 불능(작성자·행동한 계정을 못 읽음, admin 확인 실패)은 통과도 알림도 아니다(CLAUDE.md
+# 원칙 7). job 을 실패시켜 "검사를 못 했다" 를 드러낸다.
+#
+# Teams 알림은 선택이다. secret `TEAMS_PLUGIN_ALERT_WEBHOOK` 이 비어 있으면 건너뛴다(human-merge-alert
+# 와 같다). GitHub 이슈가 먼저 만들어지므로 Teams 전송이 실패해도 기록은 남는다.
+name: pr-tamper-alert
+
+on:
+  workflow_call:
+    secrets:
+      TEAMS_PLUGIN_ALERT_WEBHOOK:
+        description: Teams 알림 웹훅 URL(없으면 Teams 알림만 건너뜀)
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  alert:
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.action == 'synchronize')
+      || (github.event_name == 'pull_request_review' && github.event.action == 'dismissed')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 작성자가 아닌 계정의 행동인지 판정
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          SENDER: ${{ github.event.sender.login }}
+          SENDER_TYPE: ${{ github.event.sender.type }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if [ -z "$SENDER" ] || [ -z "$PR_AUTHOR" ]; then
+            echo "::error title=PR 변경 알림 판정 불능::행동한 계정이나 PR 작성자를 읽지 못했다. 통과로 보지 않는다."
+            exit 1
+          fi
+          sender_lc="$(printf '%s' "$SENDER" | tr '[:upper:]' '[:lower:]')"
+          author_lc="$(printf '%s' "$PR_AUTHOR" | tr '[:upper:]' '[:lower:]')"
+          if [ "$sender_lc" = "$author_lc" ]; then
+            echo "notify=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$SENDER_TYPE" = "Bot" ]; then
+            echo "::notice title=봇의 행동은 알리지 않음::${SENDER}"
+            echo "notify=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # 행동한 계정이 이 저장소의 admin 이면 알리지 않는다. 협력자 권한 API 의 permission 은
+          # admin·write·read·none 중 하나이고(role_name 은 maintain·triage 같은 세부 역할까지 담는다),
+          # admin 판정은 permission 으로 한다. 조회가 실패하면 판정 불능이다.
+          set +e
+          perm="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${SENDER}/permission" --jq .permission 2> perm_err.txt)"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] || [ -z "$perm" ]; then
+            cat perm_err.txt >&2 || true
+            echo "::error title=PR 변경 알림 판정 불능::${SENDER} 의 저장소 권한을 확인하지 못했다(종료코드 $rc). 통과로 보지 않는다."
+            exit 1
+          fi
+          if [ "$perm" = "admin" ]; then
+            echo "::notice title=admin 의 행동은 알리지 않음::${SENDER}"
+            echo "notify=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "notify=true" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub 이슈로 알리기
+        if: steps.decide.outputs.notify == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # checkout 이 없어 작업 폴더에 git 저장소가 없다. gh issue 가 저장소를 찾도록 명시한다.
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          SENDER: ${{ github.event.sender.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          REVIEWER: ${{ github.event.review.user.login }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request_review" ]; then
+            what="리뷰를 해제함(리뷰한 사람: ${REVIEWER})"
+          else
+            what="브랜치 ${HEAD_REF} 에 push 함"
+          fi
+          prefix="작성자 아닌 계정의 PR 변경: PR #${PR_NUMBER} "
+          title="${prefix}(${SENDER}: ${what})"
+          {
+            printf -- '- PR: %s (%s)\n- PR 작성자: %s\n- 행동한 계정: %s\n- 행동: %s\n\n' "$PR_URL" "$PR_TITLE" "$PR_AUTHOR" "$SENDER" "$what"
+            printf '작성자가 아닌 계정이 이 PR 을 건드렸다. 의도한 일인지 확인한다. 이 저장소의 admin 이 아닌 계정이 한 일이다.\n'
+          } > body.md
+
+          # 같은 PR 의 열린 알림 이슈가 있으면 새로 만들지 않고 코멘트만 남긴다.
+          found="$(gh issue list --state open --limit 100 --json number,title \
+            | jq -r --arg p "$prefix" '.[] | select(.title | startswith($p)) | .number' | head -n1)"
+          if [ -n "$found" ]; then
+            gh issue comment "$found" --body-file body.md
+            exit 0
+          fi
+
+          # 담당자는 PR 작성자. 담당자로 지정할 수 없는 계정(봇, 협력자가 아님)이면 담당자 없이 만든다.
+          if ! gh issue create --title "$title" --body-file body.md \
+              --label "type:chore" --assignee "$PR_AUTHOR"; then
+            echo "::warning title=담당자 지정 실패::${PR_AUTHOR} 를 담당자로 지정하지 못해 담당자 없이 만든다."
+            gh issue create --title "$title" --body-file body.md --label "type:chore"
+          fi
+
+      - name: Teams 로 알리기
+        if: steps.decide.outputs.notify == 'true'
+        shell: bash
+        env:
+          WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+          EVENT_NAME: ${{ github.event_name }}
+          SENDER: ${{ github.event.sender.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::notice title=Teams 알림 건너뜀::TEAMS_PLUGIN_ALERT_WEBHOOK 이 비어 있다."
+            exit 0
+          fi
+
+          if [ "$EVENT_NAME" = "pull_request_review" ]; then
+            heading="PR #${PR_NUMBER}: 작성자가 아닌 계정이 리뷰를 해제함"
+          else
+            heading="PR #${PR_NUMBER}: 작성자가 아닌 계정이 push 함"
+          fi
+          details="${PR_TITLE} — PR 작성자 ${PR_AUTHOR}, 행동한 계정 ${SENDER}."
+
+          jq -n --arg heading "$heading" --arg details "$details" --arg url "$PR_URL" '{
+            type: "message",
+            attachments: [{
+              contentType: "application/vnd.microsoft.card.adaptive",
+              contentUrl: null,
+              content: {
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                type: "AdaptiveCard",
+                version: "1.4",
+                body: [
+                  {type: "TextBlock", text: $heading, weight: "Bolder", size: "Medium", wrap: true},
+                  {type: "TextBlock", text: $details, wrap: true}
+                ],
+                actions: [{type: "Action.OpenUrl", title: "PR 열기", url: $url}]
+              }
+            }]
+          }' > payload.json
+
+          # 웹훅 URL 자체가 비밀이므로 출력하지 않는다. 2xx 가 아니면 실패시켜 눈에 띄게 한다.
+          curl -sS --fail-with-body -X POST -H "Content-Type: application/json" \
+            --data @payload.json "$WEBHOOK" > /dev/null

@@ -54,8 +54,16 @@ if ! command -v jq >/dev/null 2>&1; then
   # 보호가 사라진다. 다만 검사 대상이 git 명령이나 `gh pr merge` 이므로
   # 그 밖의 명령은 막지 않는다. `gh pr merge` 도 여기 넣은 이유는 아래
   # SRS 승인 검사가 이 훅 안에서 jq 로 결과를 읽기 때문이다(#49).
+  # 첫 관문은 일부러 느슨하다: pr 와 대상 하위 명령이 각각 낱말로 있으면 걸린다
+  # (gh -R o/r pr comment, gh pr -R o/r comment 처럼 사이에 옵션이 와도 놓치지 않으려고).
+  # 진짜 gh pr 호출인지는 엔진(checker.merge_command)이 가려낸다.
+  pr_word_re='(^|[^[:alnum:]_-])pr([^[:alnum:]_-]|$)'
+  pr_sub_re='(^|[^[:alnum:]_-])(merge|edit|close|reopen|comment|review|ready)([^[:alnum:]_-]|$)'
+  if [[ "$input" =~ $pr_word_re ]] && [[ "$input" =~ $pr_sub_re ]]; then
+    deny "jq 가 없어 gh pr 명령의 대상 PR 작성자를 확인하지 못했습니다. 검사할 수 없는 상태로 통과시키지 않습니다. 다음: 사람이 할 일 - PowerShell 에서 winget install --id jqlang.jq -e 를 실행해 jq 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오(macOS 는 brew install jq)."
+  fi
   case "$input" in
-    *git*|*"pr merge"*)
+    *git*|*pr*merge*)
       deny "jq 가 없어 git/gh 명령을 검사하지 못했습니다. 검사할 수 없는 상태로 통과시키지 않습니다. 다음: 사람이 할 일 - PowerShell 에서 winget install --id jqlang.jq -e 를 실행해 jq 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오(macOS 는 brew install jq)."
       ;;
     *)
@@ -169,6 +177,8 @@ check_one_merge() {
     */pull/*)
       pr_number="${prref##*/pull/}"
       pr_number="${pr_number%%/*}"
+      # 명령에서 온 값이 deny 문구에 들어가므로 " \ 백틱 $ 공백을 지운다.
+      pr_number="$(printf '%s' "$pr_number" | tr -d '"\\`$ ')"
       if [ -z "$repo" ]; then
         repo="$(printf '%s' "$prref" | sed -n 's#^https\{0,1\}://github\.com/\([^/]*/[^/]*\)/pull/.*#\1#p')"
       fi
@@ -333,7 +343,7 @@ $ssot_err"
         detail_raw="$ssot_err"
       fi
     fi
-    detail="$(printf '%s' "$detail_raw" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
+    detail="$(printf '%s' "$detail_raw" | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
     deny "PR #$pr_number 의 SRS 승인 여부를 확인하지 못해 merge 를 막습니다(종료코드 $ssot_rc). 확인되지 않는 상태로 통과시키지 않습니다. $next_retry 자세히: $detail"
   fi
 
@@ -376,7 +386,7 @@ $hm_err"
         hm_detail_raw="$hm_err"
       fi
     fi
-    hm_detail="$(printf '%s' "$hm_detail_raw" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
+    hm_detail="$(printf '%s' "$hm_detail_raw" | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
     deny "PR #$pr_number 가 사람이 merge 해야 하는 경로를 바꿨는지 확인하지 못해 merge 를 막습니다(종료코드 $hm_rc). 확인되지 않는 상태로 통과시키지 않습니다. $next_retry 자세히: $hm_detail"
   fi
 
@@ -428,10 +438,131 @@ $rg_err"
   fi
 }
 
+# 0-0) 작성자가 지금 gh 로그인 계정과 다른 PR 을 바꾸는 gh pr 명령을 거부한다(#150).
+#      대상은 merge·edit·close·reopen·comment·review·ready. 읽기(view·diff·checks·list·
+#      status·checkout)는 건드리지 않는다. 다른 계정의 PR 은 읽기만 하고 내 작업이 주는
+#      영향만 알리는 것이 규칙이다(governance.md). 무료 개인 계정이라 서버가 막지 못해
+#      Claude 쪽에서 막는 보조 관문이다 — 사람이 웹에서 하는 일은 막지 못하고, 그것은
+#      Actions(pr-tamper-alert)가 사후에 알린다.
+#
+#      명령 분해는 merge 와 같은 엔진 모듈(checker.merge_command --mutations)을 쓴다.
+#      따옴표·heredoc 본문의 글자를 명령으로 읽지 않고 조각마다 자기 -R 과 PR 지정을 짝짓기
+#      때문이다. 작성자는 gh pr view 로, 로그인 계정은 gh api user 로 얻어 대소문자 무시로
+#      비교한다. 얻지 못하면 통과도 거부(작성자 다름)도 아닌 검사 불능으로 거부한다.
+#      gh 호출은 timeout 이 있으면 30초로 끊는다. 이 검사는 아래 merge 검사보다 먼저 돈다.
+gh_tcmd=()
+command -v timeout >/dev/null 2>&1 && gh_tcmd=(timeout 30)
+
+# 지금 gh 로그인 계정을 login_now 에 얻는다(소문자). 얻지 못하면 거부한다.
+get_login_now() {
+  if ! command -v gh >/dev/null 2>&1; then
+    deny "gh 가 없어 PR 작성자와 지금 로그인 계정을 비교할 수 없습니다. 검사 불능이므로 통과시키지 않습니다. $next_install_gh"
+  fi
+  set +e
+  login_now="$(${gh_tcmd[@]+"${gh_tcmd[@]}"} gh api user --jq .login 2>/dev/null)"
+  login_rc=$?
+  set -e
+  login_now="$(printf '%s' "$login_now" | tr -d '\r"\\` $' | tr '[:upper:]' '[:lower:]')"
+  if [ "$login_rc" -ne 0 ] || [ -z "$login_now" ]; then
+    deny "지금 gh 로그인 계정을 확인하지 못해 PR 작성자와 비교할 수 없습니다(종료코드 $login_rc). 검사 불능이므로 통과시키지 않습니다. $next_retry"
+  fi
+}
+
+# 지금 로그인 계정이 대상 저장소의 admin 인지 본다. $1=저장소(빈 값이면 현재 저장소).
+# admin 이면 0, 아니면 1. 조회를 못 하면 통과도 거부(admin 아님)도 아닌 검사 불능으로 거부한다.
+viewer_is_admin() {
+  va_args=()
+  [ -n "$1" ] && va_args+=("$1")
+  set +e
+  va_perm="$(${gh_tcmd[@]+"${gh_tcmd[@]}"} gh repo view ${va_args[@]+"${va_args[@]}"} --json viewerPermission --jq .viewerPermission 2>/dev/null)"
+  va_rc=$?
+  set -e
+  va_perm="$(printf '%s' "$va_perm" | tr -d '\r"\\` $' | tr '[:lower:]' '[:upper:]')"
+  if [ "$va_rc" -ne 0 ] || [ -z "$va_perm" ]; then
+    deny "검사 불능: 다른 계정의 PR 인데 지금 계정의 저장소 권한(admin 여부)을 gh 로 확인하지 못했습니다(종료코드 $va_rc). 통과시키지 않습니다. $next_retry"
+  fi
+  [ "$va_perm" = "ADMIN" ]
+}
+
+# PR 한 건의 작성자를 확인한다. $1=하위 명령, $2=저장소(-R, 없으면 빈 값), $3=PR 지정(없으면 현재 브랜치).
+check_pr_author() {
+  ca_sub="$1"
+  ca_repo="$2"
+  ca_ref="$3"
+  # URL 로 지정하면 gh 가 저장소를 URL 에서 읽으므로 -R 을 붙이지 않는다.
+  # 권한 조회용 저장소는 URL 에서 뽑아 남긴다.
+  ca_is_url=0
+  case "$ca_ref" in
+    */pull/*)
+      ca_is_url=1
+      ca_repo="$(printf '%s' "$ca_ref" | sed -n 's#^https\{0,1\}://github\.com/\([^/]*/[^/]*\)/pull/.*#\1#p')"
+      ;;
+  esac
+  ca_args=()
+  [ -n "$ca_ref" ] && ca_args+=("$ca_ref")
+  [ -n "$ca_repo" ] && [ "$ca_is_url" -eq 0 ] && ca_args+=(-R "$ca_repo")
+  set +e
+  ca_author="$(${gh_tcmd[@]+"${gh_tcmd[@]}"} gh pr view ${ca_args[@]+"${ca_args[@]}"} --json author --jq .author.login 2>/dev/null)"
+  ca_rc=$?
+  set -e
+  ca_author="$(printf '%s' "$ca_author" | tr -d '\r"\\` $')"
+  if [ "$ca_rc" -ne 0 ] || [ -z "$ca_author" ]; then
+    deny "gh pr $ca_sub 의 대상 PR 작성자를 확인하지 못했습니다(종료코드 $ca_rc). 검사 불능이므로 통과시키지 않습니다. 다음: Claude 가 PR 번호를 붙여(예: gh pr $ca_sub 123) 다시 실행하십시오. 그래도 안 되면 gh auth status 로 로그인 상태를 확인하고, 로그인 안 됨이면 사람이 gh auth login 을 실행하십시오."
+  fi
+  ca_author_lc="$(printf '%s' "$ca_author" | tr '[:upper:]' '[:lower:]')"
+  # 작성자가 같으면 권한 조회를 하지 않는다(호출 줄이기). 다르면 admin 인지 본다.
+  if [ "$ca_author_lc" != "$login_now" ] && ! viewer_is_admin "$ca_repo"; then
+    deny "작성자 $ca_author 의 PR 이고 지금 gh 로그인 계정은 $login_now 입니다. admin 권한이 있는 계정만 남의 PR 을 고칠 수 있는데 이 계정은 admin 이 아닙니다. 다른 계정이 만든 PR 은 읽기만 하므로 gh pr $ca_sub 를 막습니다. 다음: 읽기(gh pr view, diff, checks)만 하고, 내 작업이 그 PR 에 주는 영향(충돌, 같은 파일, 검사 결과 변화)만 사용자에게 알리십시오. 병합, 수정, 닫기, 코멘트, 리뷰는 그 PR 작성자나 사용자가 직접 합니다."
+  fi
+}
+
+pr_word_re='(^|[^[:alnum:]_-])pr([^[:alnum:]_-]|$)'
+pr_sub_re='(^|[^[:alnum:]_-])(merge|edit|close|reopen|comment|review|ready)([^[:alnum:]_-]|$)'
+if [[ "$cmd" =~ $pr_word_re ]] && [[ "$cmd" =~ $pr_sub_re ]]; then
+  if ! command -v uvx >/dev/null 2>&1; then
+    deny "uvx 가 없어 이 명령이 다른 계정 PR 을 바꾸는지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. $next_install_uv"
+  fi
+  pm_err_file="$(mktemp 2>/dev/null)" || {
+    deny "임시 파일을 만들지 못해 이 명령의 대상 PR 을 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
+  }
+  set +e
+  pm_out="$(printf '%s' "$cmd" | uvx --from "$engine" python -m checker.merge_command --mutations 2>"$pm_err_file")"
+  pm_rc=$?
+  set -e
+  pm_err="$(cat "$pm_err_file" 2>/dev/null)" || pm_err=""
+  rm -f "$pm_err_file"
+
+  if ! printf '%s' "$pm_out" | jq -e . >/dev/null 2>&1; then
+    pm_detail="$(printf '%s\n%s' "$pm_out" "$pm_err" | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
+    deny "이 명령이 PR 을 바꾸는 gh pr 명령인지 확인하지 못해 막습니다(종료코드 $pm_rc). 검사 불능이므로 통과시키지 않습니다. $next_retry 자세히: $pm_detail"
+  fi
+  if [ "$pm_rc" -eq 2 ] && printf '%s' "$pm_out" | jq -e 'has("error")' >/dev/null 2>&1; then
+    pm_why="$(printf '%s' "$pm_out" | jq -r '.error // empty' 2>/dev/null | tr -d '\r"\\`$' | cut -c1-200)" || pm_why=""
+    deny "명령을 믿을 만하게 해석하지 못해 대상 PR 과 작성자를 확인할 수 없습니다($pm_why). 검사 불능이므로 통과시키지 않습니다. 다음: Claude 가 gh pr 명령을 한 명령에 하나씩, 다른 명령과 묶지 말고, PR 번호를 붙이고 알려진 옵션만 써서 다시 실행하십시오."
+  fi
+  if [ "$pm_rc" -ne 0 ] || ! printf '%s' "$pm_out" | jq -e '.mutations | type == "array"' >/dev/null 2>&1; then
+    deny "이 명령이 PR 을 바꾸는 gh pr 명령인지 확인하지 못해 막습니다(종료코드 $pm_rc). 검사 불능이므로 통과시키지 않습니다. 다음: Claude 가 gh pr 명령을 한 명령에 하나씩 다시 실행하십시오. $next_retry"
+  fi
+
+  # 한 줄에 한 건씩 "하위명령 저장소 PR지정". 빈 값은 "-" 자리표시자로 받아 되돌린다.
+  pm_lines="$(printf '%s' "$pm_out" | jq -r '.mutations[] | [.sub, ((.repo // "") | if . == "" then "-" else . end), ((.prref // "") | if . == "" then "-" else . end)] | join(" ")' | tr -d '\r')"
+  if [ -n "$pm_lines" ]; then
+    get_login_now
+    while IFS=' ' read -r pm_sub pm_repo pm_prref; do
+      [ -z "$pm_sub" ] && continue
+      [ "$pm_repo" = "-" ] && pm_repo=""
+      [ "$pm_prref" = "-" ] && pm_prref=""
+      check_pr_author "$pm_sub" "$pm_repo" "$pm_prref"
+    done <<EOF
+$pm_lines
+EOF
+  fi
+fi
+
 # 첫 관문: `pr merge` 글자가 명령에 없으면 merge 일 수 없으므로 엔진을 부르지
 # 않는다. 일반 명령마다 uvx 를 띄우면 느려서 사람들이 훅을 끄게 된다.
 case "$cmd" in
-  *"pr merge"*)
+  *pr*merge*)
     if ! command -v uvx >/dev/null 2>&1; then
       deny "uvx 가 없어 이 명령이 gh pr merge 인지, SRS 승인이 있는지 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_uv"
     fi
@@ -446,7 +577,7 @@ case "$cmd" in
     rm -f "$mc_err_file"
 
     if ! printf '%s' "$mc_out" | jq -e . >/dev/null 2>&1; then
-      mc_detail="$(printf '%s\n%s' "$mc_out" "$mc_err" | tr -d '"\\' | tr '\n' ' ' | cut -c1-300)"
+      mc_detail="$(printf '%s\n%s' "$mc_out" "$mc_err" | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
       deny "이 명령이 gh pr merge 인지 확인하지 못해 막습니다(종료코드 $mc_rc). 확인되지 않는 상태로 통과시키지 않습니다. $next_retry 자세히: $mc_detail"
     fi
     if [ "$mc_rc" -eq 2 ] && printf '%s' "$mc_out" | jq -e 'has("error")' >/dev/null 2>&1; then
@@ -727,10 +858,99 @@ if [ "$sub" = "push" ]; then
   fi
 fi
 
+# 2-3) 작성자가 지금 gh 로그인 계정과 다른 PR 의 브랜치로 가는 푸시를 거부한다(#150).
+#      DELIVER=1 로 통과할 푸시에만 건다(선언 없는 푸시는 아래 4) 에서 어차피 거부된다).
+#      푸시 대상은 refspec 의 도착 쪽(없으면 HEAD 의 현재 브랜치)이고, 그 브랜치에 열린
+#      PR 이 없으면 통과한다. 대상 브랜치나 gh 조회를 확정하지 못하면 검사 불능으로 거부한다.
+#      -R 이 푸시엔 없으므로 현재 저장소 기준이다. --head 는 브랜치 이름만 맞추므로 포크의
+#      같은 이름 브랜치 PR 도 걸릴 수 있다(보수적인 쪽).
+#      한계: 명령 앞쪽에서 먼저 나온 git 하위 명령이 push 가 아니면(sub 가 첫 git 명령이다)
+#      보지 않는다. 최종 방어선은 Actions 의 사후 알림이다.
+check_push_authors() {
+  pa_branches=()
+  pa_unresolved=""
+  while IFS= read -r pa_seg; do
+    case "$pa_seg" in *[![:space:]]*) ;; *) continue ;; esac
+    [ "$(git_subcommand "$pa_seg")" = "push" ] || continue
+    pa_after=0
+    pa_skip=0
+    pa_pos=()
+    set -f
+    for tok in $pa_seg; do
+      tok="${tok#\"}"; tok="${tok%\"}"
+      tok="${tok#\'}"; tok="${tok%\'}"
+      if [ "$pa_after" -eq 0 ]; then
+        [ "$tok" = "push" ] && pa_after=1
+        continue
+      fi
+      if [ "$pa_skip" -eq 1 ]; then pa_skip=0; continue; fi
+      case "$tok" in
+        --repo|-o|--push-option|--receive-pack|--exec) pa_skip=1 ;;
+        --all|--mirror) pa_unresolved="--all/--mirror 로 모든 브랜치를 한꺼번에 푸시" ;;
+        -*) : ;;
+        *) pa_pos+=("$tok") ;;
+      esac
+    done
+    set +f
+    # 첫 위치 인자는 원격 이름이고 나머지가 refspec 이다. refspec 이 없으면 현재 브랜치.
+    pa_specs=()
+    if [ "${#pa_pos[@]}" -gt 1 ]; then pa_specs=("${pa_pos[@]:1}"); fi
+    if [ "${#pa_specs[@]}" -eq 0 ]; then pa_specs=("HEAD"); fi
+    for spec in "${pa_specs[@]}"; do
+      spec="${spec#+}"
+      dst="${spec##*:}"
+      dst="${dst#refs/heads/}"
+      case "$dst" in
+        refs/*) continue ;; # 태그 등 브랜치가 아닌 대상
+        Q|'') pa_unresolved="푸시 대상을 읽을 수 없는 refspec 이 있음"; continue ;;
+        HEAD)
+          dst="$(git symbolic-ref --short -q HEAD 2>/dev/null | tr -d '\r' || true)"
+          if [ -z "$dst" ]; then pa_unresolved="HEAD 가 브랜치가 아님(detached)"; continue; fi
+          ;;
+      esac
+      pa_branches+=("$dst")
+    done
+  done <<EOF
+$(strip_for_scan "$cmd")
+EOF
+
+  if [ -n "$pa_unresolved" ]; then
+    deny "검사 불능: 푸시할 브랜치를 확정하지 못했습니다($pa_unresolved). 그 브랜치에 다른 계정이 만든 PR 이 있는지 확인할 수 없어 통과시키지 않습니다. 다음: Claude 가 브랜치 이름을 적어(예: git push -u origin 브랜치이름) 한 브랜치씩 다시 푸시하십시오."
+  fi
+  [ "${#pa_branches[@]}" -eq 0 ] && return 0
+
+  get_login_now
+  for br in "${pa_branches[@]}"; do
+    # 명령에서 온 값이 deny 문구에 들어가므로 " \ 백틱 $ 를 지운 사본을 문구에 쓴다.
+    br_safe="$(printf '%s' "$br" | tr -d '"\\`$')"
+    set +e
+    pa_authors="$(${gh_tcmd[@]+"${gh_tcmd[@]}"} gh pr list --head "$br" --state open --json author --jq '.[].author.login' 2>/dev/null)"
+    pa_rc=$?
+    set -e
+    if [ "$pa_rc" -ne 0 ]; then
+      deny "검사 불능: 브랜치 $br_safe 에 열린 PR 이 있는지 gh 로 확인하지 못했습니다(종료코드 $pa_rc). 다른 계정의 PR 인지 알 수 없어 통과시키지 않습니다. $next_retry"
+    fi
+    pa_authors="$(printf '%s' "$pa_authors" | tr -d '\r"\\`$')"
+    while IFS= read -r pa_author; do
+      pa_author="$(printf '%s' "$pa_author" | tr -d ' ')"
+      [ -z "$pa_author" ] && continue
+      pa_author_lc="$(printf '%s' "$pa_author" | tr '[:upper:]' '[:lower:]')"
+      if [ "$pa_author_lc" != "$login_now" ] && ! viewer_is_admin ""; then
+        deny "브랜치 $br_safe 에는 작성자 $pa_author 의 열린 PR 이 있고 지금 gh 로그인 계정은 $login_now 입니다. admin 권한이 있는 계정만 남의 PR 을 고칠 수 있는데 이 계정은 admin 이 아닙니다. 다른 계정이 만든 PR 의 브랜치로는 푸시하지 않습니다. 다음: 푸시하지 말고, 내 작업이 그 PR 에 주는 영향(충돌, 같은 파일, 검사 결과 변화)만 사용자에게 알리십시오. 내 작업은 새 브랜치에서 이어 가십시오."
+      fi
+    done <<EOF
+$pa_authors
+EOF
+  done
+}
+
 # 3) /harness:deliver 스킬이 절차를 따르고 있다는 선언이면 여기서 통과시킨다.
 #    위의 두 검사를 지난 뒤라 강제 푸시와 main 커밋은 이미 걸러져 있다.
 case "$cmd" in
   DELIVER=1*)
+    # 첫 git 하위 명령이 push 가 아니어도(DELIVER=1 git status && git push ...) 조각마다
+    # push 를 찾아 본다. push 조각이 없으면 gh 를 부르지 않는다.
+    check_push_authors
     finish_ok
     ;;
 esac

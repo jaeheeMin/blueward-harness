@@ -219,6 +219,9 @@ _HAS_BASH = _BASH is not None
 _HAS_JQ = shutil.which("jq") is not None
 
 
+_DEFAULT_FAKE_PRS = "5=me,51=me,100=me,123=me,200=me"
+
+
 def _run_guard(
     command: str, env: dict | None = None, cwd: str | None = None
 ) -> tuple[int, dict | None]:
@@ -226,7 +229,8 @@ def _run_guard(
     if cwd is not None:
         payload_obj["cwd"] = cwd
     payload = json.dumps(payload_obj)
-    full_env = {**os.environ, **(env or {})}
+    # 기존 merge 테스트가 쓰는 PR 번호는 내 PR 로 등록해 둔다(#150). 가짜 gh 는 등록 안 된 번호에 실패한다.
+    full_env = {**os.environ, "FAKE_GH_AUTHORS": _DEFAULT_FAKE_PRS, **(env or {})}
     done = subprocess.run(
         [_BASH, str(PLUGIN_ROOT / "hooks" / "pre-bash-git-guard.sh")],
         input=payload,
@@ -251,8 +255,15 @@ def test_선언_없는_push_는_막는다():
 
 @pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
 @pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
-def test_DELIVER_선언이_있으면_통과시킨다():
-    code, out = _run_guard("DELIVER=1 git push -u origin HEAD")
+def test_DELIVER_선언이_있으면_통과시킨다(tmp_path):
+    # #150: 푸시 브랜치의 PR 작성자를 gh 로 확인하므로 가짜 gh(열린 PR 없음)를 쓴다.
+    bin_dir = tmp_path / "gh-bin"
+    bin_dir.mkdir()
+    _add_fake_gh(bin_dir)
+    code, out = _run_guard(
+        "DELIVER=1 git push -u origin HEAD",
+        env={"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"},
+    )
     assert code == 0
     assert out is None
 
@@ -318,6 +329,7 @@ def _fake_uvx_prelude() -> str:
         "#!/usr/bin/env bash\n"
         'echo "$*" >> "${FAKE_UVX_LOG:-/dev/null}"\n'
         'case "$*" in\n'
+        f"  *checker.merge_command*--mutations*) exec '{py}' -m checker.merge_command --mutations ;;\n"
         f"  *checker.merge_command*) exec '{py}' -m checker.merge_command ;;\n"
         "esac\n"
     )
@@ -537,6 +549,42 @@ def _check(name: str, bucket: str, link: str = "https://example.com/run/9") -> d
     return {"name": name, "state": bucket.upper(), "bucket": bucket, "link": link}
 
 
+# 작성자 확인(#150)용 가짜 gh 답. 환경 변수로 시나리오를 정한다.
+#   FAKE_GH_LOGIN   지금 로그인 계정(기본 Me)
+#   FAKE_GH_AUTHOR  `pr view` 의 기본 작성자(기본 me — 로그인과 대소문자만 다르다)
+#   FAKE_GH_AUTHORS "번호=작성자,..." 번호별 작성자
+#   FAKE_GH_LIST    "브랜치=작성자,..." `pr list --head` 가 돌려줄 열린 PR 작성자
+#   FAKE_GH_FAIL    login / view / list 중 하나면 그 호출이 실패한다
+#   FAKE_GH_LOG     있으면 호출 인자를 기록한다
+#   FAKE_GH_PERM    `repo view --json viewerPermission` 의 답(기본 WRITE). FAKE_GH_FAIL=perm 이면 실패
+_FAKE_GH_AUTHOR_LINES = [
+    "  *'viewerPermission'*)",
+    '    echo "$*" >> "${FAKE_GH_LOG:-/dev/null}"',
+    '    [ "${FAKE_GH_FAIL:-}" = perm ] && exit 1',
+    '    echo "${FAKE_GH_PERM-WRITE}" ;;',
+    "  *'api user'*)",
+    '    echo "$*" >> "${FAKE_GH_LOG:-/dev/null}"',
+    '    [ "${FAKE_GH_FAIL:-}" = login ] && exit 1',
+    '    echo "${FAKE_GH_LOGIN-Me}" ;;',
+    "  *'pr view'*'--json author'*)",
+    '    echo "$*" >> "${FAKE_GH_LOG:-/dev/null}"',
+    '    [ "${FAKE_GH_FAIL:-}" = view ] && exit 1',
+    '    ref="${3:-}"; case "$ref" in -*) ref="" ;; esac',
+    '    author="${FAKE_GH_AUTHOR-me}"',
+    '    known=0',
+    '    for kv in ${FAKE_GH_AUTHORS//,/ }; do [ "${kv%%=*}" = "$ref" ] && { author="${kv#*=}"; known=1; }; done',
+    '    # 등록되지 않은 PR 지정은 실패한다(진짜 gh 가 없는 PR 에 하는 것처럼). 지정이 없으면(현재 브랜치) 기본 작성자.',
+    '    [ -n "$ref" ] && [ "$known" = 0 ] && { echo "no pull requests found" >&2; exit 1; }',
+    '    echo "$author" ;;',
+    "  *'pr list'*)",
+    '    echo "$*" >> "${FAKE_GH_LOG:-/dev/null}"',
+    '    [ "${FAKE_GH_FAIL:-}" = list ] && exit 1',
+    '    head=""; prev=""; for a in "$@"; do [ "$prev" = --head ] && head="$a"; prev="$a"; done',
+    '    for kv in ${FAKE_GH_LIST//,/ }; do [ "${kv%%=*}" = "$head" ] && echo "${kv#*=}"; done',
+    "    exit 0 ;;",
+]
+
+
 def _add_fake_gh(bin_dir: Path, checks: dict | None = None) -> None:
     """가짜 gh. `repo view` 는 own/repo 를, `pr checks <번호>` 는 번호별로 정한 답을 낸다(#120).
 
@@ -547,7 +595,9 @@ def _add_fake_gh(bin_dir: Path, checks: dict | None = None) -> None:
     번호가 없으면 모두 통과하는 검사를 낸다.
     """
     checks = checks or {}
-    lines = ["#!/usr/bin/env bash", 'case "$*" in', "  *'repo view'*) echo own/repo ;;"]
+    lines = ["#!/usr/bin/env bash", 'case "$*" in']
+    lines += _FAKE_GH_AUTHOR_LINES
+    lines += ["  *'repo view'*) echo own/repo ;;"]
     entries = list(checks.items()) + [("*", _PASS_CHECKS)]
     for num, spec in entries:
         rc = 0
