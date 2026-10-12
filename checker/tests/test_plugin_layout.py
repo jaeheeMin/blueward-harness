@@ -260,9 +260,13 @@ def test_DELIVER_선언이_있으면_통과시킨다(tmp_path):
     bin_dir = tmp_path / "gh-bin"
     bin_dir.mkdir()
     _add_fake_gh(bin_dir)
+    # CI 체크아웃은 detached HEAD 라 푸시 브랜치를 못 정해 검사 불능이 된다. 브랜치에 선 저장소에서 돌린다.
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "feat/1-work", str(repo)], check=True)
     code, out = _run_guard(
         "DELIVER=1 git push -u origin HEAD",
         env={"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"},
+        cwd=str(repo),
     )
     assert code == 0
     assert out is None
