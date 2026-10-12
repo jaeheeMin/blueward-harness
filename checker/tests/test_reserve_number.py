@@ -138,6 +138,19 @@ def test_main_만_있으면_main_최대_다음(tmp_path, monkeypatch, capsys):
     assert (code, out) == (0, "DEV-003")
 
 
+def test_한글_이름의_원장_Spec_번호도_계산에_든다(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    (work / "audit" / "ledger" / "판매오더조회.md").write_text(
+        LEDGER.replace("DEV-001", "DEV-007"), encoding="utf-8"
+    )
+    (work / "docs" / "spec" / "DEV-009-판매오더조회앱.md").write_text("# DEV-009\n", encoding="utf-8")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-m", "한글 파일")
+    _git(work, "push", "origin", "main")
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["next"])
+    assert (code, out) == (0, "DEV-010")
+
+
 def test_reserve_는_제목에_번호를_붙여_이슈를_만든다(tmp_path, monkeypatch, capsys):
     work = make_repo(tmp_path)
     fake = FakeGh([{"number": 5, "title": "[DEV-004] x"}])
@@ -209,3 +222,84 @@ def test_claim_번호가_없으면_붙인다(tmp_path, monkeypatch, capsys):
     assert code == 0
     assert json.loads(out)["number"] == "DEV-003"
     assert fake.issues[12]["title"] == "[DEV-003] 번호 없는 이슈"
+
+
+def test_제목_끝_DEV_는_번호_계산에_안_잡힌다(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    fake = FakeGh([
+        {"number": 5, "title": "Launchpad 타일 노출 (DEV-009)"},
+        {"number": 6, "title": "[DEV-004] 본 이슈 (DEV-008)"},
+    ])
+    assert rn.subtask_of("타일 노출 (DEV-002)") == 2
+    assert rn.issue_tag("타일 노출 (DEV-002)") is None
+    monkeypatch.chdir(work)
+    monkeypatch.setattr(rn, "gh", fake)
+    # main 최대 2, 찜 최대 4 → 5. 제목 끝 (DEV-009) 는 무시된다.
+    assert rn.compute_next(str(work)) == 5
+
+
+SRS_LIST = """# SRS
+
+## 요구사항
+
+| ID | LoB | Title | Status | 다음 단계 |
+|---|---|---|---|---|
+| REQ-001 | SD | 판매오더 | Done | 개발 |
+| REQ-002 | SD | 조회 앱 | New | 설정 |
+"""
+
+
+def test_list_는_번호별로_모아_낸다(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    (work / "docs" / "ssot" / "SRS.md").write_text(SRS_LIST, encoding="utf-8")
+    _git(work, "commit", "-am", "srs")
+    _git(work, "push", "origin", "main")
+    fake = FakeGh([
+        {"number": 5, "title": "[DEV-002] 조회 앱", "state": "OPEN"},
+        {"number": 6, "title": "타일 노출 (DEV-002)", "state": "OPEN"},
+        {"number": 7, "title": "엉뚱한 (DEV-099)", "state": "OPEN"},
+    ])
+    code, out = run(monkeypatch, capsys, work, fake, ["list"])
+    res = json.loads(out)
+    assert code == 0
+    devs = {d["number"]: d for d in res["devs"]}
+    assert set(devs) == {"DEV-001", "DEV-002"}
+    assert devs["DEV-001"]["req_title"] == "판매오더"
+    assert devs["DEV-001"]["lob"] == "SD" and devs["DEV-001"]["next_step"] == "개발"
+    assert devs["DEV-001"]["status"] == "Done"
+    assert devs["DEV-001"]["ledger"]["status"] == "완료"
+    assert devs["DEV-002"]["spec"].startswith("docs/spec/DEV-002")
+    assert [i["number"] for i in devs["DEV-002"]["issues"]] == [5]
+    assert [i["number"] for i in devs["DEV-002"]["subtasks"]] == [6]
+
+
+def test_list_는_열이_없으면_그_키를_생략한다(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["list"])
+    dev = {d["number"]: d for d in json.loads(out)["devs"]}["DEV-001"]
+    assert code == 0
+    assert "lob" not in dev and "next_step" not in dev
+    assert dev["req_title"] == "a"
+
+
+def test_list_는_한글_이름_원장의_줄도_담는다(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    (work / "audit" / "ledger" / "판매오더조회.md").write_text(
+        LEDGER.replace("DEV-001 | a | - | u | 완료", "DEV-002 | b | - | u | 진행"), encoding="utf-8"
+    )
+    _git(work, "add", "-A")
+    _git(work, "commit", "-m", "한글 원장")
+    _git(work, "push", "origin", "main")
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["list"])
+    dev = {d["number"]: d for d in json.loads(out)["devs"]}["DEV-002"]
+    assert code == 0
+    assert dev["ledger"]["status"] == "진행"
+
+
+def test_list_원장이_없으면_3_gh_실패는_2(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path, ledger=False)
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["list"])
+    assert code == 3 and json.loads(out)["status"] == "no_ledger"
+    work2 = make_repo(tmp_path / "b")
+    code, out = run(monkeypatch, capsys, work2, FakeGh(fail=True), ["list"])
+    assert code == 2 and json.loads(out)["status"] == "error"
