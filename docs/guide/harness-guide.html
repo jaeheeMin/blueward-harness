@@ -202,6 +202,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
   main { padding-block: 24px 60px; }
   .eli5 { grid-template-columns: minmax(0,1fr); gap: 6px; }
   .callout { grid-template-columns: minmax(0,1fr); gap: 2px; }
+  li code, p code { white-space: normal; overflow-wrap: anywhere; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .panel:not([hidden]) { animation: rise .25s ease-out; }
@@ -1306,12 +1307,24 @@ Closes #143</pre>
 
   <div class="when">
     <div><div class="lbl">이럴 때</div>고객사에 한 묶음을 전달할 때. 의미 있는 변경이 쌓였을 때.</div>
-    <div><div class="lbl">이렇게 말해</div><div class="say"><span>릴리즈 내줘</span><span class="cmd">/release</span></div></div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>릴리즈 하자</span><span>릴리즈 노트 만들어줘</span><span>이번 배포 정리해줘</span><span class="cmd">/release</span></div></div>
   </div>
 
   <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
     <p>잡지의 <b>호수</b>를 매기는 거야. "2026년 10월 12일 호" 처럼 날짜로 이름을 붙이고, 이번 호에 무엇이 실렸는지 목차를 써.</p>
+    <p>목차는 Claude 가 지난 호 이후에 실린 글(병합된 PR)을 모아서 초안을 잡아. 인쇄(발행)는 내가 "좋아" 해야 해.</p>
   </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>모으기</b><span>마지막 릴리즈 태그 이후 병합된 PR · 닫힌 이슈</span></div><div class="arrow"></div>
+      <div class="node hl"><b>노트 쓰기</b><span>추가 · 수정 · 문서 · 기타</span></div><div class="arrow"></div>
+      <div class="node"><b>버전 정하기</b><span>오늘 날짜</span></div><div class="arrow"></div>
+      <div class="node hl"><b>보여 주고 승인</b><span>"이 내용으로 발행할까?"</span></div><div class="arrow"></div>
+      <div class="node ok"><b>발행</b><span>GitHub Release</span></div>
+    </div>
+    <div class="cap">태그가 하나도 없으면 첫 커밋부터 모아. 데이터는 <code>gh</code> 로 GitHub 에서 가져와.</div>
+  </section>
 
   <div class="cols">
     <section class="box">
@@ -1327,8 +1340,43 @@ Closes #143</pre>
 ## 수정
 ## 문서
 ## 기타</pre>
-      <p class="small" style="margin-top:10px">항목 끝에 PR 번호를 붙여.</p>
+      <p class="small" style="margin-top:10px">항목 끝에 PR 번호를 붙여. 형식은 하네스 규칙(<code>issue-and-release.md</code>)을 따라.</p>
     </section>
+  </div>
+
+  <div class="cols">
+    <section class="box">
+      <h3>내가 할 일</h3>
+      <ul class="todo">
+        <li>Claude 가 보여 주는 노트를 읽고 빠지거나 잘못 분류된 PR 이 없는지 봐</li>
+        <li>괜찮으면 발행하라고 답해. 고칠 게 있으면 말해</li>
+        <li><code>gh</code> 에 로그인돼 있어야 해</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>만들어지는 것</h3>
+      <ul class="made">
+        <li>public-cloud 의 GitHub Release 하나 (이름은 버전, 본문은 노트)</li>
+      </ul>
+      <p class="small" style="margin-top:10px">CHANGELOG 파일이나 엑셀 같은 다른 산출물은 만들지 않아.</p>
+    </section>
+  </div>
+
+  <section class="box">
+    <h3>스킬에 안 적혀 있는 것</h3>
+    <p class="small" style="margin-bottom:8px">아래는 아직 정해진 게 없어. 필요하면 운영 담당에게 물어봐.</p>
+    <ul class="plain">
+      <li>누가 릴리즈를 내는지, 어떤 권한이 필요한지</li>
+      <li>git 태그를 따로 만드는지, Release 를 만들 때 따라 생기는지</li>
+      <li>발행이 실패했을 때 어떻게 하는지</li>
+      <li>고객사에 내는 엑셀 산출물(파일명 버전 <code>_v0.1</code>)과 릴리즈 버전(날짜)의 관계. 둘은 따로 매겨</li>
+    </ul>
+  </section>
+
+  <div class="callouts">
+    <div class="callout stop"><span class="k">승인 먼저</span><div>노트를 보여 주고 승인받기 전에는 발행하지 않아.</div></div>
+    <div class="callout warn"><span class="k">원격 없음</span><div>GitHub 에 연결이 안 돼 있으면 로컬 커밋 기록으로 초안만 만들고 발행은 안 해.</div></div>
+    <div class="callout warn"><span class="k">버전 표기</span><div>버전 앞에 <code>v</code> 를 붙이지 않아(<code>2026.10.12</code>). public-cloud README 예시의 <code>v2026.09.13</code> 은 규칙과 달라.</div></div>
   </div>
 
   <div class="next"><button data-go="scaffold">← 새 고객사 저장소 만들기</button><button data-go="blocked">다음: 막혔을 때 →</button></div>
