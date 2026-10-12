@@ -22,7 +22,7 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
    `--ssot-approver` 를 그 수만큼 반복한다.
 
    ```bash
-   uv run --no-project python "<이 스킬의 base directory>/harness:scaffold.py" \
+   uv run --no-project python "<이 스킬의 base directory>/scaffold.py" \
      --client "<고객사>" --project "<프로젝트>" \
      --ssot-approver "<GitHub 아이디>" --dry-run
    ```
