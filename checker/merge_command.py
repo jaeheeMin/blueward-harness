@@ -16,6 +16,9 @@ merge 가드(plugins/harness/hooks/pre-bash-git-guard.sh)는 예전에 명령 �
 owner/name 을 뽑는 일은 훅이 예전처럼 prref 로부터 한다(URL 은 prref 에 그대로
 남는다).
 
+`--mutations` 로 부르면 merge 뿐 아니라 edit·close·reopen·comment·review·ready 도 골라
+`{"mutations": [{"sub", "repo", "prref"}]}` 로 돌려준다(#150, 작성자가 다른 PR 을 막는 데 쓴다).
+
 한계(훅의 다른 검사와 같은 성격): 변수로 감춘 명령(`x=merge; gh pr $x`),
 큰따옴표 안의 `$(...)`·백틱 치환은 알아보지 못한다. 대신 확실히 나누지
 못하는 명령(따옴표 불균형)은 MergeCommandError 로 알려 훅이 막게 한다 —
@@ -141,61 +144,175 @@ def _basename(tok: str) -> str:
 _ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def _parse_segment(seg: list[str]) -> dict | None:
+# PR 을 바꾸는 gh pr 하위 명령(#150). merge 도 포함한다.
+MUTATING_SUBS = ("merge", "edit", "close", "reopen", "comment", "review", "ready")
+
+# 하위 명령별 옵션 표(gh 2.100.0 의 `gh pr <sub> --help` 기준). 같은 글자가 하위 명령마다
+# 뜻이 다르다(`merge -m` 은 값 없는 --merge, `edit -m` 은 값을 받는 --milestone,
+# `review -c` 는 값 없는 --comment, `close -c` 는 값을 받는 --comment). 그래서 표를 따로 둔다.
+# (값을 받는 옵션, 값 없는 옵션). 이름 앞의 대시를 포함한 긴 이름과 짧은 이름을 모두 적는다.
+_SUB_FLAGS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "merge": (
+        frozenset({"-A", "--author-email", "-b", "--body", "-F", "--body-file",
+                   "--match-head-commit", "-t", "--subject"}),
+        frozenset({"--admin", "--auto", "-d", "--delete-branch", "--disable-auto",
+                   "-m", "--merge", "-r", "--rebase", "-s", "--squash"}),
+    ),
+    "edit": (
+        frozenset({"--add-assignee", "--add-label", "--add-project", "--add-reviewer", "--attach",
+                   "-B", "--base", "-b", "--body", "-F", "--body-file", "-m", "--milestone",
+                   "--remove-assignee", "--remove-label", "--remove-project", "--remove-reviewer",
+                   "-t", "--title"}),
+        frozenset({"--remove-milestone"}),
+    ),
+    "close": (frozenset({"-c", "--comment"}), frozenset({"-d", "--delete-branch"})),
+    "reopen": (frozenset({"-c", "--comment"}), frozenset()),
+    "comment": (
+        frozenset({"--attach", "-b", "--body", "-F", "--body-file"}),
+        frozenset({"--create-if-none", "--delete-last", "--edit-last", "-e", "--editor",
+                   "-w", "--web", "--yes"}),
+    ),
+    "review": (
+        frozenset({"-b", "--body", "-F", "--body-file"}),
+        frozenset({"-a", "--approve", "-c", "--comment", "-r", "--request-changes"}),
+    ),
+    "ready": (frozenset(), frozenset({"--undo"})),
+}
+
+# 모든 하위 명령에 공통인 옵션.
+_COMMON_BOOL = frozenset({"--help", "-h", "--version", "--no-color"})
+_REPO_FLAGS = ("-R", "--repo")
+
+
+def _parse_segment(seg: list[str], subs: tuple[str, ...] = ("merge",)) -> dict | None:
     i = 0
+    repo = None
     while i < len(seg) and _ENV_ASSIGN.match(seg[i]):
+        name, _, value = seg[i].partition("=")
+        if name == "GH_REPO" and value:
+            repo = value  # 환경 변수로 정한 저장소. 아래 -R 이 있으면 -R 이 이긴다.
         i += 1
     if i >= len(seg) or _basename(seg[i]) != "gh":
         return None
     i += 1
 
-    # gh 뒤의 첫 두 비옵션 토큰이 pr, merge 여야 한다(옛 gh_is_pr_merge 와 같은 뜻).
-    want = ["pr", "merge"]
-    while want and i < len(seg):
+    # gh 뒤의 첫 두 비옵션 토큰이 pr, <하위 명령> 이어야 한다. 그 앞(gh 와 pr 사이, pr 와
+    # 하위 명령 사이)에 오는 -R/--repo 는 저장소로 읽는다. 그 밖의 해석 못 하는 옵션은
+    # 그 옵션이 값을 받는지 알 수 없어 PR 지정이 틀어질 수 있으므로, 대상 하위 명령으로
+    # 확인되면 MergeCommandError 로 알려 훅이 검사 불능으로 막게 한다.
+    stage = 0  # 0: pr 를 기다림, 1: 하위 명령을 기다림
+    sub = None
+    unknown_before = None
+    explicit_repo = None
+    while i < len(seg):
         tok = seg[i]
         i += 1
-        if tok.startswith("-"):
+        if tok in _REPO_FLAGS:
+            if i < len(seg):
+                explicit_repo = seg[i]
+                i += 1
             continue
-        if tok != want[0]:
+        if tok.startswith("--repo="):
+            explicit_repo = tok[len("--repo="):]
+            continue
+        if tok.startswith("-R="):
+            explicit_repo = tok[len("-R="):]
+            continue
+        if tok.startswith("-"):
+            if tok not in _COMMON_BOOL:
+                unknown_before = tok
+            continue
+        if stage == 0:
+            if tok != "pr":
+                return None
+            stage = 1
+            continue
+        if tok not in subs:
             return None
-        want.pop(0)
-    if want:
+        sub = tok
+        break
+    if sub is None:
         return None
+    if unknown_before is not None:
+        raise MergeCommandError(
+            f"gh 와 {sub} 사이에 해석할 수 없는 옵션 {unknown_before} 이 있어 대상 PR 을 확정할 수 없습니다"
+        )
 
-    repo = None
+    values, bools = _SUB_FLAGS[sub]
+    shorts = {f for f in values | bools if len(f) == 2}
     prref = None
     expect_repo = False
+    skip_value = False
+    unknown_flag = None
     for tok in seg[i:]:
         if expect_repo:
-            repo, expect_repo = tok, False
-        elif tok in ("-R", "--repo"):
+            explicit_repo, expect_repo = tok, False
+        elif skip_value:
+            skip_value = False
+        elif tok in _REPO_FLAGS:
             expect_repo = True
         elif tok.startswith("--repo="):
-            repo = tok[len("--repo="):]
+            explicit_repo = tok[len("--repo="):]
         elif tok.startswith("-R="):
-            repo = tok[len("-R="):]
-        elif tok.startswith("-"):
+            explicit_repo = tok[len("-R="):]
+        elif tok in values:
+            skip_value = True
+        elif tok in bools or tok in _COMMON_BOOL:
             continue
+        elif tok.startswith("--"):
+            if "=" in tok and tok.split("=", 1)[0] in values:
+                continue  # --body=값 처럼 값이 붙은 형태
+            unknown_flag = tok
+        elif tok.startswith("-") and len(tok) > 2:
+            # 묶인 짧은 옵션(-sd) 또는 값이 붙은 짧은 옵션(-bvalue). 글자마다 표에 있어야 한다.
+            ok = True
+            for k, ch in enumerate(tok[1:]):
+                flag = "-" + ch
+                if flag in values:
+                    if k == len(tok) - 2:
+                        skip_value = True  # 마지막 글자가 값을 받으면 값은 다음 토큰
+                    break  # 값을 받는 글자 뒤는 그 값이다
+                if flag not in shorts:
+                    ok = False
+                    break
+            if not ok:
+                unknown_flag = tok
+        elif tok.startswith("-"):
+            unknown_flag = tok
+        elif unknown_flag is not None:
+            # 해석 못 하는 옵션 뒤의 위치 인자는 그 옵션의 값일 수도 PR 지정일 수도 있다.
+            raise MergeCommandError(
+                f"옵션 {unknown_flag} 을 해석할 수 없어 뒤의 {tok} 가 PR 지정인지 확정할 수 없습니다"
+            )
         elif prref is None:
             prref = tok
-    return {"repo": repo or None, "prref": prref}
+    return {"sub": sub, "repo": explicit_repo or repo or None, "prref": prref}
 
 
-def find_merges(command: str) -> list[dict]:
-    """명령 안의 실제 `gh pr merge` 호출마다 `{"repo", "prref"}` 를 돌려준다."""
+def _find(command: str, subs: tuple[str, ...]) -> list[dict]:
     tokens = _tokenize(strip_heredocs(command))
-    merges: list[dict] = []
+    found_all: list[dict] = []
     seg: list[str] = []
     for tok in tokens + [";"]:
         if _is_punct(tok):
             if seg:
-                found = _parse_segment(seg)
+                found = _parse_segment(seg, subs)
                 if found is not None:
-                    merges.append(found)
+                    found_all.append(found)
             seg = []
         else:
             seg.append(tok)
-    return merges
+    return found_all
+
+
+def find_merges(command: str) -> list[dict]:
+    """명령 안의 실제 `gh pr merge` 호출마다 `{"repo", "prref"}` 를 돌려준다."""
+    return [{"repo": m["repo"], "prref": m["prref"]} for m in _find(command, ("merge",))]
+
+
+def find_pr_mutations(command: str) -> list[dict]:
+    """PR 을 바꾸는 `gh pr` 호출마다 `{"sub", "repo", "prref"}` 를 돌려준다(#150)."""
+    return _find(command, MUTATING_SUBS)
 
 
 def _force_utf8() -> None:
@@ -208,12 +325,16 @@ def _force_utf8() -> None:
 def main() -> int:
     _force_utf8()
     command = sys.stdin.read()
+    mutations_mode = "--mutations" in sys.argv[1:]
     try:
-        merges = find_merges(command)
+        if mutations_mode:
+            result = {"mutations": find_pr_mutations(command)}
+        else:
+            result = {"merges": find_merges(command)}
     except MergeCommandError as e:
         print(json.dumps({"error": str(e)}, ensure_ascii=False))
         return 2
-    print(json.dumps({"merges": merges}, ensure_ascii=False))
+    print(json.dumps(result, ensure_ascii=False))
     return 0
 
 

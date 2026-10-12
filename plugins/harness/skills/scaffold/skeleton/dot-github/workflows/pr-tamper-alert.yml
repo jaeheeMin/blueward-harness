@@ -1,0 +1,16 @@
+name: pr-tamper-alert
+on:
+  pull_request_target:
+    types: [synchronize]
+  pull_request_review:
+    types: [dismissed]
+
+jobs:
+  pr-tamper-alert:
+    uses: jaeheeMin/blueward-harness/.github/workflows/pr-tamper-alert.yml@main
+    secrets:
+      TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read

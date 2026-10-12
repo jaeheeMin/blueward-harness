@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from checker.tests.test_plugin_layout import _BASH, _HAS_BASH, _HAS_JQ
+from checker.tests.test_plugin_layout import _BASH, _HAS_BASH, _HAS_JQ, _add_fake_gh
 
 ENGINE_ROOT = Path(__file__).resolve().parents[2]
 PLUGIN_SRC = ENGINE_ROOT / "plugins" / "harness"
@@ -200,9 +200,15 @@ def test_git_저장소가_아니면_기록하지_않는다(hooks, tmp_path):
 
 def _guard(hooks, command, repo):
     payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(repo)}
+    # #150: DELIVER=1 푸시는 gh 로 PR 작성자를 확인하므로 가짜 gh(열린 PR 없음)를 PATH 앞에 둔다.
+    gh_bin = Path(repo).parent / "fake-gh-bin"
+    if not gh_bin.exists():
+        gh_bin.mkdir()
+        _add_fake_gh(gh_bin)
+    env = {**os.environ, "PATH": f"{gh_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
     done = subprocess.run(
         [_BASH, str(hooks / "pre-bash-git-guard.sh")], input=json.dumps(payload),
-        capture_output=True, text=True, encoding="utf-8", timeout=180,
+        capture_output=True, text=True, encoding="utf-8", timeout=180, env=env,
     )
     return json.loads(done.stdout) if done.stdout.strip() else None
 

@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from checker.merge_command import MergeCommandError, find_merges
+from checker.merge_command import MergeCommandError, find_merges, find_pr_mutations
 
 
 def _m(repo=None, prref=None):
@@ -121,6 +121,59 @@ def test_CLI_는_JSON_을_낸다():
     )
     assert done.returncode == 0
     assert json.loads(done.stdout) == {"merges": [_m("o/r", "5")]}
+
+
+# --- PR 을 바꾸는 하위 명령(#150) ---------------------------------------------
+
+
+def _mut(sub, repo=None, prref=None):
+    return {"sub": sub, "repo": repo, "prref": prref}
+
+
+@pytest.mark.parametrize("cmd,expected", [
+    ("gh pr merge -m 12", [_mut("merge", None, "12")]),              # -m 은 값 없는 --merge
+    ("gh pr merge -sd 12", [_mut("merge", None, "12")]),
+    ("gh pr merge --squash --subject 제목 12", [_mut("merge", None, "12")]),
+    ("gh pr review -c 5 -b hi", [_mut("review", None, "5")]),        # -c 는 값 없는 --comment
+    ("gh pr close -c 안녕 7", [_mut("close", None, "7")]),           # close -c 는 값을 받는다
+    ("gh pr edit -m 마일스톤 7 -R a/b", [_mut("edit", "a/b", "7")]),  # edit -m 은 값을 받는다
+    ("gh pr comment --body hi", [_mut("comment", None, None)]),
+    ("gh -R o/r pr comment 5", [_mut("comment", "o/r", "5")]),
+    ("gh pr -R o/r comment 5", [_mut("comment", "o/r", "5")]),
+    ("GH_REPO=o/r gh pr merge 5", [_mut("merge", "o/r", "5")]),
+    ("GH_REPO=o/r gh pr merge 5 -R x/y", [_mut("merge", "x/y", "5")]),
+    ("gh pr ready 3 --undo", [_mut("ready", None, "3")]),
+    ("gh pr view 3; gh pr reopen 4", [_mut("reopen", None, "4")]),
+    ("gh pr merge -bbody 9", [_mut("merge", None, "9")]),             # 값이 붙은 짧은 옵션
+])
+def test_pr_변경_명령의_대상을_하위_명령별_옵션_표로_짝짓는다(cmd, expected):
+    assert find_pr_mutations(cmd) == expected
+
+
+@pytest.mark.parametrize("cmd", [
+    "gh --weird pr comment 5",
+    "gh pr comment --weird 5",
+    "gh pr merge --squash=1 5",
+])
+def test_해석_못_하는_옵션이_PR_지정을_모호하게_하면_오류다(cmd):
+    with pytest.raises(MergeCommandError):
+        find_pr_mutations(cmd)
+
+
+def test_대상이_아닌_gh_명령은_해석_못_하는_옵션이_있어도_오류가_아니다():
+    assert find_pr_mutations("gh --weird pr view 5") == []
+    assert find_pr_mutations("gh issue comment --weird 5") == []
+
+
+def test_CLI_mutations_는_mutations_키로_답한다():
+    done = subprocess.run(
+        [sys.executable, "-m", "checker.merge_command", "--mutations"],
+        input="gh pr comment 5 -R o/r".encode("utf-8"),
+        capture_output=True,
+        timeout=60,
+    )
+    assert done.returncode == 0
+    assert json.loads(done.stdout) == {"mutations": [_mut("comment", "o/r", "5")]}
 
 
 def test_CLI_는_나누지_못하면_종료코드_2와_error_를_낸다():
