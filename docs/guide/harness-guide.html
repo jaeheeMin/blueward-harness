@@ -1,0 +1,1658 @@
+<title>하네스 작업 길잡이</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 왼쪽 전체 높이를 차지하는 액티비티 탭 레일 + 오른쪽 읽기 영역. 탭 하나 = 하려는 일 하나. */
+:root {
+  --bg: #F6F7F9;
+  --rail: #EDEFF3;
+  --surface: #FFFFFF;
+  --fg: #151B2C;
+  --muted: #586179;
+  --line: #D9DFEA;
+  --accent: #2C52CF;
+  --accent-soft: #E5EBFC;
+  --accent-ink: #FFFFFF;
+  --ok: #1D7650; --ok-soft: #E2F2EA;
+  --warn: #A9561A; --warn-soft: #FBEEE2;
+  --stop: #B3263A; --stop-soft: #FBE6E9;
+  --code-bg: #EEF1F7;
+  --display: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141518; --rail: #1A1C20; --surface: #1E2024; --fg: #E8E9EC; --muted: #9A9EA8; --line: #2E3138;
+    --accent: #8EA6FF; --accent-soft: #23283A; --accent-ink: #141518;
+    --ok: #6FD1A0; --ok-soft: #12301F; --warn: #F2A66E; --warn-soft: #3A2616; --stop: #FF8D9B; --stop-soft: #3B1922;
+    --code-bg: #17181C; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141518; --rail: #1A1C20; --surface: #1E2024; --fg: #E8E9EC; --muted: #9A9EA8; --line: #2E3138;
+  --accent: #8EA6FF; --accent-soft: #23283A; --accent-ink: #141518;
+  --ok: #6FD1A0; --ok-soft: #12301F; --warn: #F2A66E; --warn-soft: #3A2616; --stop: #FF8D9B; --stop-soft: #3B1922;
+  --code-bg: #17181C; color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15.5px; line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere; }
+* { box-sizing: border-box; }
+a { color: var(--accent); }
+b { font-weight: 600; }
+code, .mono { font-family: var(--mono); font-size: .86em; }
+code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+pre { font-family: var(--mono); font-size: 13.5px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 0; line-height: 1.6; }
+
+.app { display: grid; grid-template-columns: 290px minmax(0, 1fr); min-height: 100%; }
+
+/* ---------- 왼쪽 탭 레일 ---------- */
+.rail { background: var(--rail); border-right: 1px solid var(--line); position: sticky; top: env(safe-area-inset-top, 0px); height: 100dvh; overflow-y: auto; display: flex; flex-direction: column; padding: 22px 14px 18px; gap: 16px; }
+.brand { padding: 0 10px; }
+.brand .kicker { font-size: 11.5px; letter-spacing: .08em; color: var(--muted); font-weight: 500; font-family: var(--mono); }
+.brand h1 { font-family: var(--display); font-size: 23px; line-height: 1.25; margin: 4px 0 0; font-weight: 700; letter-spacing: -0.03em; }
+.brand .theme-btn { margin-top: 14px; }
+.tab-groups { display: flex; flex-direction: column; gap: 14px; }
+.group-label { font-size: 11.5px; letter-spacing: .08em; color: var(--muted); font-weight: 600; padding: 0 10px; margin-bottom: 4px; }
+.tabs { display: flex; flex-direction: column; gap: 1px; }
+.tab { all: unset; cursor: pointer; display: flex; flex-direction: column; padding: 7px 12px; border-radius: 9px; color: var(--fg); font-size: 14.5px; font-weight: 500; line-height: 1.35; }
+.tab small { display: block; font-size: 11.5px; color: var(--muted); font-weight: 400; font-family: var(--mono); margin-top: 1px; }
+.tab:hover { background: var(--surface); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+.tab[aria-selected="true"] small { color: var(--accent-ink); opacity: .85; }
+.rail-foot { margin-top: auto; padding: 0 10px; }
+.rail-foot .note { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.theme-btn { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; padding: 7px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); width: fit-content; }
+.theme-btn:focus-visible { outline: 2px solid var(--accent); }
+
+/* ---------- 본문 ---------- */
+main { padding-block: 40px 80px; padding-inline: clamp(16px, 4vw, 56px); min-width: 0; }
+.panel { max-width: 980px; display: flex; flex-direction: column; gap: 26px; }
+.panel[hidden] { display: none; }
+.panel-head .eyebrow { font-size: 12.5px; letter-spacing: .06em; color: var(--accent); font-weight: 600; }
+.panel-head h2 { font-family: var(--display); font-size: clamp(28px, 3.6vw, 38px); line-height: 1.25; margin: 6px 0 10px; font-weight: 700; letter-spacing: -0.03em; text-wrap: balance; }
+.panel-head .lead { font-size: 17px; color: var(--muted); max-width: 64ch; margin: 0; }
+h3 { font-family: var(--display); font-size: 20px; margin: 0 0 12px; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
+p { margin: 0; max-width: 70ch; }
+section { min-width: 0; }
+.small { font-size: 14px; color: var(--muted); }
+
+.when { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+@media (max-width: 900px) { .when { grid-template-columns: minmax(0,1fr); } }
+.when > div { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+.when .lbl { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .04em; margin-bottom: 6px; }
+.say { display: flex; flex-wrap: wrap; gap: 6px; }
+.say span { font-size: 13.5px; padding: 3px 11px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); border: 1px solid transparent; }
+.say span.cmd { font-family: var(--mono); font-size: 12.5px; background: var(--code-bg); color: var(--fg); border-color: var(--line); }
+
+.eli5 { display: grid; grid-template-columns: 64px minmax(0,1fr); gap: 18px; align-items: start; background: var(--accent-soft); border-radius: 14px; padding: 20px 22px; }
+.eli5 .tag { font-weight: 700; font-size: 13px; color: var(--accent); line-height: 1.3; padding-top: 3px; }
+.eli5 p { font-size: 16px; }
+.eli5 p + p { margin-top: 8px; }
+
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; overflow-x: auto; }
+.diagram .cap { font-size: 12.5px; color: var(--muted); margin-top: 12px; }
+
+/* 흐름 도식 */
+.flow { display: flex; align-items: stretch; gap: 0; }
+.flow .node { flex: 1 1 0; min-width: 112px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 4px; text-align: left; font: inherit; color: inherit; }
+.flow .node b { font-size: 14px; line-height: 1.35; }
+.flow .node span { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.flow .node code { white-space: normal; font-size: 11.5px; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .node.ok { background: var(--ok-soft); border-color: var(--ok); }
+.flow button.node { cursor: pointer; }
+.flow button.node:hover { border-color: var(--accent); }
+.flow button.node:focus-visible { outline: 2px solid var(--accent); }
+.flow .arrow { flex: 0 0 26px; display: grid; place-items: center; color: var(--muted); font-size: 18px; }
+.flow .arrow::before { content: "→"; }
+@media (max-width: 760px) {
+  .flow { flex-direction: column; }
+  .flow .arrow { flex-basis: 22px; }
+  .flow .arrow::before { content: "↓"; }
+}
+
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 20px; }
+@media (max-width: 900px) { .cols { grid-template-columns: minmax(0,1fr); } }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; min-width: 0; }
+
+.todo { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.todo li { position: relative; padding-left: 32px; }
+.todo li::before { content: ""; position: absolute; left: 0; top: 5px; width: 16px; height: 16px; border: 2px solid var(--accent); border-radius: 4px; box-sizing: border-box; }
+.made { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.made li { position: relative; padding-left: 32px; }
+.made li::before { content: "+"; position: absolute; left: 0; top: 4px; width: 18px; height: 18px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+.steps { list-style: none; padding: 0; margin: 0; counter-reset: s; display: flex; flex-direction: column; gap: 12px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 10px; align-items: start; }
+.steps li::before { content: counter(s); width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-family: var(--mono); font-size: 12px; display: grid; place-items: center; margin-top: 2px; }
+.plain { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+
+.callouts { display: flex; flex-direction: column; gap: 10px; }
+.callout { border-radius: 10px; padding: 12px 16px 12px 14px; display: grid; grid-template-columns: 78px minmax(0,1fr); gap: 12px; align-items: start; font-size: 14.5px; }
+.callout .k { font-size: 12px; font-weight: 700; letter-spacing: .03em; padding: 2px 0; }
+.callout.warn { background: var(--warn-soft); } .callout.warn .k { color: var(--warn); }
+.callout.stop { background: var(--stop-soft); } .callout.stop .k { color: var(--stop); }
+.callout.ok { background: var(--ok-soft); } .callout.ok .k { color: var(--ok); }
+
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12.5px; color: var(--muted); font-weight: 600; background: var(--bg); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill { white-space: nowrap; font-size: 12.5px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-weight: 500; }
+.pill.a { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.pill.g { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.pill.w { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.pill.r { background: var(--stop-soft); border-color: var(--stop); color: var(--stop); }
+
+.triad { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+@media (max-width: 760px) { .triad { grid-template-columns: minmax(0,1fr); } }
+.triad > div { border-radius: 12px; padding: 16px; border: 1px solid; }
+.triad .t-ok { background: var(--ok-soft); border-color: var(--ok); }
+.triad .t-bad { background: var(--stop-soft); border-color: var(--stop); }
+.triad .t-unk { background: var(--warn-soft); border-color: var(--warn); }
+.triad b { font-size: 18px; font-weight: 700; display: block; margin-bottom: 4px; }
+.triad p { font-size: 14px; }
+
+.next { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 18px; }
+.next button { all: unset; cursor: pointer; font-size: 14px; color: var(--accent); font-weight: 600; padding: 6px 2px; }
+.next button:focus-visible { outline: 2px solid var(--accent); }
+
+/* SVG 도식 색은 토큰에서 */
+svg text { font-family: var(--body); fill: var(--fg); }
+.s-zone { fill: var(--bg); stroke: var(--line); }
+.s-box { fill: var(--surface); stroke: var(--line); }
+.s-hl { fill: var(--accent-soft); stroke: var(--accent); }
+.s-ok { fill: var(--ok-soft); stroke: var(--ok); }
+.s-warn { fill: var(--warn-soft); stroke: var(--warn); }
+.s-line { stroke: var(--muted); fill: none; stroke-width: 1.6; }
+.s-acc { stroke: var(--accent); fill: none; stroke-width: 2.4; }
+.s-dot { fill: var(--accent); }
+.s-dot2 { fill: var(--muted); }
+.s-muted { fill: var(--muted); }
+.s-title { font-weight: 700; }
+.s-arrowhead { fill: var(--muted); }
+
+.glossary { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+@media (max-width: 900px) { .glossary { grid-template-columns: minmax(0,1fr); } }
+.term { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.term dt { font-weight: 700; font-size: 15px; }
+.term dt span { font-family: var(--mono); font-weight: 400; color: var(--muted); font-size: 12.5px; margin-left: 6px; }
+.term dd { margin: 4px 0 0; font-size: 14px; color: var(--muted); }
+.term dd b { color: var(--fg); font-weight: 500; }
+
+/* ---------- 좁은 화면: 레일이 위로 올라가 가로 탭 줄이 된다 ---------- */
+@media (max-width: 820px) {
+  .app { grid-template-columns: minmax(0,1fr); }
+  .rail { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; height: auto; padding: 12px 0 10px; gap: 8px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .brand { padding: 0 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .brand h1 { font-size: 18px; margin: 0; }
+  .brand .kicker, .group-label, .rail-foot { display: none; }
+  .brand .theme-btn { margin-top: 0; padding: 5px 10px; font-size: 12px; flex: none; }
+  .tab-groups { flex-direction: row; overflow-x: auto; gap: 4px; padding: 0 16px; scrollbar-width: thin; }
+  .tab-groups > div { display: contents; }
+  .tabs { flex-direction: row; gap: 4px; }
+  .tab { white-space: nowrap; padding: 7px 12px; font-size: 13.5px; }
+  .tab small { display: none; }
+  main { padding-block: 24px 60px; }
+  .eli5 { grid-template-columns: minmax(0,1fr); gap: 6px; }
+  .callout { grid-template-columns: minmax(0,1fr); gap: 2px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .panel:not([hidden]) { animation: rise .25s ease-out; }
+  @keyframes rise { from { opacity: .4; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+}
+</style>
+
+<div class="app">
+  <nav class="rail" aria-label="액티비티">
+    <div class="brand">
+      <div>
+        <div class="kicker">blueward-harness · public-cloud</div>
+        <h1>하네스 작업 길잡이</h1>
+      </div>
+      <button class="theme-btn" id="themeBtn" type="button" aria-label="화면 테마 바꾸기"><span id="themeIcon">☾</span><span id="themeLabel">다크 모드</span></button>
+    </div>
+    <div class="tab-groups" role="tablist" aria-orientation="vertical">
+      <div>
+        <div class="group-label">시작 전에</div>
+        <div class="tabs">
+          <button class="tab" role="tab" data-tab="overview">한눈에 보기<small>전체 그림</small></button>
+          <button class="tab" role="tab" data-tab="setup">처음 준비하기<small>설치 · 로그인</small></button>
+        </div>
+      </div>
+      <div>
+        <div class="group-label">작업 열기</div>
+        <div class="tabs">
+          <button class="tab" role="tab" data-tab="start">작업 시작하기<small>/harness:start</small></button>
+          <button class="tab" role="tab" data-tab="sync">최신으로 맞추기<small>/harness:sync</small></button>
+        </div>
+      </div>
+      <div>
+        <div class="group-label">문서 작업</div>
+        <div class="tabs">
+          <button class="tab" role="tab" data-tab="srs-new">SRS 만들기<small>/harness:srs</small></button>
+          <button class="tab" role="tab" data-tab="srs-edit">SRS 고치기<small>/harness:srs</small></button>
+          <button class="tab" role="tab" data-tab="spec-new">Spec 만들기<small>/harness:spec</small></button>
+          <button class="tab" role="tab" data-tab="spec-edit">Spec 고치기<small>/harness:spec</small></button>
+          <button class="tab" role="tab" data-tab="export">고객사 양식으로 산출하기<small>checker.export</small></button>
+        </div>
+      </div>
+      <div>
+        <div class="group-label">개발 작업</div>
+        <div class="tabs">
+          <button class="tab" role="tab" data-tab="sap">SAP 에서 개발하기<small>080 · 100 · CR 규칙</small></button>
+          <button class="tab" role="tab" data-tab="atc">ATC 돌리기<small>/harness:atc</small></button>
+        </div>
+      </div>
+      <div>
+        <div class="group-label">작업 닫기</div>
+        <div class="tabs">
+          <button class="tab" role="tab" data-tab="deliver">작업 올리기<small>/harness:deliver</small></button>
+          <button class="tab" role="tab" data-tab="gate">검사 · 승인 받기<small>GitHub Actions</small></button>
+          <button class="tab" role="tab" data-tab="merge">리뷰 · 병합하기<small>squash merge</small></button>
+          <button class="tab" role="tab" data-tab="wrapup">못 끝낸 일 남기기<small>/harness:wrapup</small></button>
+        </div>
+      </div>
+      <div>
+        <div class="group-label">운영 담당</div>
+        <div class="tabs">
+          <button class="tab" role="tab" data-tab="scaffold">새 고객사 저장소 만들기<small>/harness:scaffold</small></button>
+          <button class="tab" role="tab" data-tab="release">릴리즈 내기<small>/release</small></button>
+        </div>
+      </div>
+      <div>
+        <div class="group-label">곁에 두고 보기</div>
+        <div class="tabs">
+          <button class="tab" role="tab" data-tab="blocked">막혔을 때<small>훅이 거절하면</small></button>
+          <button class="tab" role="tab" data-tab="approval">승인이 필요할 때<small>Approve · 확인</small></button>
+          <button class="tab" role="tab" data-tab="rules">주의사항 총정리<small>하는 것 · 안 하는 것</small></button>
+          <button class="tab" role="tab" data-tab="glossary">용어 사전<small>쉬운 말 풀이</small></button>
+        </div>
+      </div>
+    </div>
+    <div class="rail-foot">
+      <div class="note">harness 0.10.47, public-cloud main 기준 (2026-10-12)</div>
+    </div>
+  </nav>
+
+  <main id="main">
+
+<!-- ================= 한눈에 보기 ================= -->
+<article class="panel" data-panel="overview" role="tabpanel">
+  <header class="panel-head">
+    <div class="eyebrow">시작 전에</div>
+    <h2>저장소 두 개, 검사관 두 명</h2>
+    <p class="lead">우리가 쓰는 건 두 저장소야. 하나는 일하는 곳(public-cloud), 하나는 일하는 법과 검사 도구를 담은 곳(blueward-harness).</p>
+  </header>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p><b>public-cloud</b>는 고객사 일을 하는 <b>작업장</b>이야. 문서와 코드, 그리고 "이 회사 문서는 이렇게 생겨야 해" 하는 기준표(<code>templates/</code>, <code>rules/</code>)가 같이 들어 있어.</p>
+    <p><b>blueward-harness</b>는 모든 작업장에 나눠 주는 <b>공구함</b>이야. 일을 대신 처리해 주는 단축 명령(Skill), 실수하면 문 앞에서 막는 경비원(Hook), 문서를 재는 자(검사 엔진)가 들어 있어.</p>
+  </div></div>
+
+  <section class="diagram" aria-label="전체 구조 도식">
+    <svg viewBox="0 -36 920 436" width="100%" style="min-width:720px" role="img" aria-label="내 PC, GitHub, SAP 의 관계">
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="s-arrowhead"/></marker></defs>
+      <rect x="10" y="10" width="300" height="380" rx="14" class="s-zone"/>
+      <text x="30" y="42" class="s-title" font-size="17">내 PC</text>
+      <text x="30" y="62" font-size="12" class="s-muted">Claude Code (Desktop · CLI)</text>
+      <rect x="30" y="80" width="260" height="78" rx="10" class="s-hl"/>
+      <text x="46" y="106" font-size="14" font-weight="600">Skill · 단축 명령</text>
+      <text x="46" y="128" font-size="12" class="s-muted">/harness:start · srs · spec · deliver</text>
+      <text x="46" y="146" font-size="12" class="s-muted">sync · wrapup · atc · scaffold</text>
+      <rect x="30" y="172" width="260" height="78" rx="10" class="s-warn"/>
+      <text x="46" y="198" font-size="14" font-weight="600">Hook · 문 앞 경비원</text>
+      <text x="46" y="220" font-size="12" class="s-muted">Claude 가 저장 · 커밋 · 푸시할 때</text>
+      <text x="46" y="238" font-size="12" class="s-muted">규칙에 어긋나면 그 자리에서 막음</text>
+      <rect x="30" y="264" width="260" height="104" rx="10" class="s-box"/>
+      <text x="46" y="290" font-size="14" font-weight="600">public-cloud 사본 (clone)</text>
+      <text x="46" y="312" font-size="12" class="s-muted">docs/ · src/ · audit/ ← 팀원이 고치는 곳</text>
+      <text x="46" y="330" font-size="12" class="s-muted">templates/ · rules/ ← 기준표</text>
+      <text x="46" y="348" font-size="12" class="s-muted">내 브랜치에서만 작업</text>
+
+      <rect x="380" y="10" width="300" height="380" rx="14" class="s-zone"/>
+      <text x="400" y="42" class="s-title" font-size="17">GitHub</text>
+      <rect x="400" y="62" width="260" height="96" rx="10" class="s-box"/>
+      <text x="416" y="88" font-size="14" font-weight="600">blueward-26/public-cloud</text>
+      <text x="416" y="110" font-size="12" class="s-muted">main = 완성본 진열대</text>
+      <text x="416" y="128" font-size="12" class="s-muted">PR 로만 바뀜 · 이슈 · 원장</text>
+      <rect x="400" y="172" width="260" height="96" rx="10" class="s-warn"/>
+      <text x="416" y="198" font-size="14" font-weight="600">Actions · 본사 검문소</text>
+      <text x="416" y="220" font-size="12" class="s-muted">PR 마다 자동 검사</text>
+      <text x="416" y="238" font-size="12" class="s-muted">문서 · 비밀정보 · 승인 · 위험도</text>
+      <text x="416" y="256" font-size="12" class="s-muted">사람이 직접 올린 것도 여기서 잡힘</text>
+      <rect x="400" y="282" width="260" height="86" rx="10" class="s-hl"/>
+      <text x="416" y="308" font-size="14" font-weight="600">jaeheeMin/blueward-harness</text>
+      <text x="416" y="330" font-size="12" class="s-muted">플러그인 · 검사 엔진 · 공통 워크플로</text>
+      <text x="416" y="348" font-size="12" class="s-muted">검사관 둘이 같은 엔진을 빌려 씀</text>
+
+      <rect x="750" y="10" width="160" height="380" rx="14" class="s-zone"/>
+      <text x="768" y="42" class="s-title" font-size="17">SAP</text>
+      <text x="768" y="62" font-size="12" class="s-muted">S/4HANA Cloud</text>
+      <rect x="766" y="80" width="128" height="110" rx="10" class="s-ok"/>
+      <text x="780" y="106" font-size="14" font-weight="600">080 개발</text>
+      <text x="780" y="128" font-size="12" class="s-muted">고치는 곳</text>
+      <text x="780" y="146" font-size="12" class="s-muted">/c080 로그인</text>
+      <text x="780" y="164" font-size="12" class="s-muted">쓰기 가능</text>
+      <rect x="766" y="206" width="128" height="110" rx="10" class="s-box"/>
+      <text x="780" y="232" font-size="14" font-weight="600">100 조회</text>
+      <text x="780" y="254" font-size="12" class="s-muted">보는 곳</text>
+      <text x="780" y="272" font-size="12" class="s-muted">/c100 로그인</text>
+      <text x="780" y="290" font-size="12" class="s-muted">쓰지 않음</text>
+
+      <path d="M290 316 L400 110" class="s-line" marker-end="url(#ah)"/>
+      <text x="318" y="196" font-size="12" class="s-muted">PR</text>
+      <path d="M400 330 C 350 330, 330 220, 292 214" class="s-line" marker-end="url(#ah)"/>
+      <text x="322" y="300" font-size="12" class="s-muted">엔진</text>
+      <path d="M530 268 L530 282" class="s-line"/>
+      <path d="M160 10 L160 -10 L830 -10 L830 8" class="s-acc" stroke-dasharray="5 5" marker-end="url(#ah)"/>
+      <text x="400" y="-18" font-size="12" class="s-muted">ADT MCP · Claude 가 SAP 에 직접 붙는 길</text>
+    </svg>
+    <div class="cap">내 PC 의 경비원(Hook)은 Claude 를 쓸 때만 서 있어. GitHub 검문소(Actions)는 누가 올리든 항상 서 있어.</div>
+  </section>
+
+  <section>
+    <h3>하려는 일에서 골라 들어가</h3>
+    <div class="diagram">
+      <div class="flow">
+        <button class="node hl" data-go="start"><b>작업 시작하기</b><span>이슈 + 브랜치</span></button><div class="arrow"></div>
+        <button class="node" data-go="srs-new"><b>SRS</b><span>만들기 · 고치기</span></button><div class="arrow"></div>
+        <button class="node" data-go="spec-new"><b>Spec</b><span>만들기 · 고치기</span></button><div class="arrow"></div>
+        <button class="node" data-go="sap"><b>SAP 개발</b><span>080 · ATC</span></button><div class="arrow"></div>
+        <button class="node hl" data-go="deliver"><b>작업 올리기</b><span>커밋 · PR</span></button><div class="arrow"></div>
+        <button class="node" data-go="gate"><b>검사 · 승인</b><span>Actions</span></button><div class="arrow"></div>
+        <button class="node ok" data-go="merge"><b>병합</b><span>main 반영</span></button>
+      </div>
+      <div class="cap">상자를 누르면 그 액티비티로 가. 문서만 고치는 날은 SAP 개발을 건너뛰고, 코드만 고치는 날은 SRS·Spec 을 건너뛰어도 돼. 어떤 일이든 처음은 <b>작업 시작하기</b>, 끝은 <b>작업 올리기</b>야.</div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>꼭 기억할 세 가지</h3>
+      <ol class="steps">
+        <li><div><b>main 에 직접 손대지 않는다.</b> 일은 <code>/harness:start</code> 로 만든 내 브랜치에서 해.</div></li>
+        <li><div><b>푸시는 <code>/harness:deliver</code> 로 한다.</b> 맨손 <code>git push</code> 는 경비원이 돌려보내.</div></li>
+        <li><div><b>"검사를 못 했다" 는 통과가 아니다.</b> 확인을 못 했으면 못 했다고 말해.</div></li>
+      </ol>
+    </section>
+    <section class="box">
+      <h3>Claude 와 일하는 방식</h3>
+      <p style="margin-bottom:10px">대화하는 Claude(메인 세션)가 무엇을 할지 정하고 결과를 판정해. 실제로 찾고 고치는 일은 보조 Claude(서브에이전트)가 나눠 맡아.</p>
+      <div class="tbl-wrap"><table>
+        <tr><th>보조</th><th>맡는 일</th></tr>
+        <tr><td><code>harness:researcher</code></td><td>읽고 조사만. 파일은 못 고침</td></tr>
+        <tr><td><code>harness:implementer</code></td><td>정해 준 범위만 고침. 커밋·푸시는 안 함</td></tr>
+        <tr><td><code>harness:reviewer</code></td><td>고친 걸 다른 눈으로 검토. 자기 결과는 승인 안 함</td></tr>
+      </table></div>
+    </section>
+  </div>
+
+  <div class="next"><span></span><button data-go="setup">다음: 처음 준비하기 →</button></div>
+</article>
+
+<!-- ================= 처음 준비 ================= -->
+<article class="panel" data-panel="setup" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">시작 전에</div>
+    <h2>처음 준비하기</h2>
+    <p class="lead">출입증을 받고 공구함을 챙기는 단계야. 한 번 해 두면 다음부터는 세션을 열 때 자동으로 점검돼.</p>
+  </header>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>작업장(public-cloud)을 내 PC 로 복사해 오고, 공구함(harness 플러그인)을 그 작업장에 꽂아 두는 거야. SAP 를 만질 사람은 SAP 출입증(로그인 쿠키)도 받아 둬.</p>
+  </div></div>
+
+  <section class="box">
+    <h3>순서대로 따라 하기</h3>
+    <ol class="steps">
+      <li><div><b>Git 설치</b> — <code>winget install --id Git.Git -e</code>, 그다음 이름과 이메일을 등록해.</div></li>
+      <li><div><b>저장소 받기</b> — GitHub 초대를 수락하고 <code>blueward-26/public-cloud</code> 를 clone 해. (예전 이름 <code>jaeheeMin/public-cloud</code> 에서 옮겨 왔어.)</div></li>
+      <li><div><b>Claude 에서 폴더 열기</b> — Claude Desktop 의 Code 탭 → Local 에서 받은 폴더를 열고 Trust 를 수락해.</div></li>
+      <li><div><b>플러그인 설치</b> — 설정 → 플러그인에서 마켓플레이스 <code>jaeheeMin/blueward-harness</code> 를 추가해. 목록의 설치 버튼은 누르지 말고, Claude 에게 이렇게 시켜:<pre style="margin-top:8px">claude plugin install harness@blueward-harness --scope project</pre><span class="small">설치 버튼으로 깔면 내 모든 폴더에 경비원이 서게 돼. <code>--scope project</code> 는 이 작업장에만 세워 둬.</span></div></li>
+      <li><div><b>GitHub 로그인</b> — 입력창에 <code>! gh auth login</code> 을 쳐서 로그인해.</div></li>
+      <li><div><b>도구 확인</b> — <code>uv</code>, <code>jq</code>, <code>gh</code>, <code>gitleaks</code> 가 필요해. Windows 는 세션을 열면 winget 으로 알아서 깔아 줘. 깔리면 Claude Code 를 <b>한 번 껐다 켜</b>.</div></li>
+      <li><div><b>SAP 를 쓸 사람만</b> — Node.js 22 이상과 Chrome 을 깔고, MCP 승인 창을 승인한 뒤 <code>/c080</code>(개발), <code>/c100</code>(조회)으로 로그인해. Chrome 이 열리면 본인 SAP 계정으로 들어가면 돼.</div></li>
+    </ol>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>터미널(CLI)로 쓰는 사람</h3>
+      <pre>/plugin marketplace add jaeheeMin/blueward-harness
+/plugin install harness@blueward-harness</pre>
+      <p class="small" style="margin-top:10px">저장소의 <code>.claude/settings.json</code> 에 마켓플레이스와 자동 업데이트가 적혀 있어서, 폴더를 열면 설치 안내가 떠.</p>
+    </section>
+    <section class="box">
+      <h3>세션을 열 때마다 자동으로</h3>
+      <ul class="made">
+        <li>필요한 도구가 있는지 보고, 없으면 설치</li>
+        <li>git hook(커밋·푸시 검사) 설치</li>
+        <li>GitHub 최신 내용을 받아 내 브랜치에 맞춤. 저장 안 한 변경이 있으면 건너뜀</li>
+        <li>공통 개발 규칙(CR-001~008) 요약을 보여 줌</li>
+        <li>지난 세션에 못 올린 변경이 있으면 알려 줌</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout stop"><span class="k">하지 마</span><div><b>GitHub Desktop 은 쓰지 않아.</b> 그 안의 git 에는 bash 가 없어서 경비원(<code>.githooks</code>)이 안 돌아. Claude 세션이나 Git Bash 를 써.</div></div>
+    <div class="callout warn"><span class="k">충돌 주의</span><div>내 개인 폴더(<code>~/.claude/skills</code>)에 <code>c080</code>, <code>c100</code> 이 따로 있거나 같은 이름의 MCP 서버가 있으면 포트가 겹쳐서 하나만 떠. 개인 쪽을 정리해.</div></div>
+    <div class="callout warn"><span class="k">도구 없음</span><div><code>jq</code> 가 없으면 git 명령이 전부 거절되고, <code>uv</code> 가 없으면 문서 검사가 "검사 불능" 으로 막혀. 둘 다 통과가 아니라 멈춤이야.</div></div>
+    <div class="callout ok"><span class="k">업데이트</span><div><code>Plugin updated … Run /reload-plugins</code> 알림이 뜨면 <code>/reload-plugins</code> 를 쳐. 이미 열린 세션은 처음 받은 버전을 계속 써.</div></div>
+  </div>
+
+  <div class="next"><button data-go="overview">← 한눈에 보기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
+</article>
+
+<!-- ================= 작업 시작하기 ================= -->
+<article class="panel" data-panel="start" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">작업 열기 · /harness:start</div>
+    <h2>작업 시작하기</h2>
+    <p class="lead">무엇을 할지 적고(이슈), 그 일만 하는 공간(브랜치)을 만들어. SRS 든 개발이든 모든 일은 여기서 시작해.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>새 개발, 새 문서 작업, 버그 수정을 시작할 때. 지금 main 에 있을 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>개발 시작할게</span><span>이거 작업 시작할게</span><span>이슈부터 만들자</span><span class="cmd">/harness:start</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p><b>main</b>은 가게 진열대야. 손님(고객사)이 보는 완성품만 올라가. 진열대 위에서 바로 만들다가 넘어뜨리면 큰일이니까, 뒤편에 <b>내 작업대(브랜치)</b>를 하나 펴고 거기서 만들어.</p>
+    <p><b>이슈</b>는 작업대 옆에 붙이는 작업지시서야. "왜, 무엇을, 언제 끝난 걸로 칠지" 가 적혀 있어.</p>
+  </div></div>
+
+  <section class="diagram" aria-label="브랜치 도식">
+    <svg viewBox="0 0 880 200" width="100%" style="min-width:640px" role="img" aria-label="main 에서 갈라져 PR 로 돌아오는 브랜치">
+      <line x1="30" y1="60" x2="850" y2="60" class="s-line" stroke-width="3"/>
+      <text x="30" y="36" class="s-title" font-size="15">main · 진열대</text>
+      <circle cx="80" cy="60" r="8" class="s-dot2"/><circle cx="200" cy="60" r="8" class="s-dot2"/><circle cx="760" cy="60" r="11" class="s-dot"/>
+      <path d="M200 60 C 250 60, 250 140, 300 140 L 640 140 C 700 140, 700 60, 760 60" class="s-acc"/>
+      <circle cx="360" cy="140" r="8" class="s-dot"/><circle cx="470" cy="140" r="8" class="s-dot"/><circle cx="580" cy="140" r="8" class="s-dot"/>
+      <text x="300" y="178" font-size="13">feat/143-sales-order-app · 내 작업대</text>
+      <text x="340" y="122" font-size="12" class="s-muted">커밋</text><text x="450" y="122" font-size="12" class="s-muted">커밋</text><text x="560" y="122" font-size="12" class="s-muted">커밋</text>
+      <text x="160" y="96" font-size="12" class="s-muted">start</text>
+      <text x="694" y="96" font-size="12" class="s-muted">PR 병합</text>
+      <text x="730" y="36" font-size="12" class="s-muted">squash 로 한 덩어리</text>
+    </svg>
+    <div class="cap">브랜치에서 여러 번 커밋해도, 병합할 때는 하나로 접혀서(squash) 진열대에 올라가.</div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>start 가 해 주는 일</h3>
+      <ol class="steps">
+        <li><div>저장 안 한 변경이 있으면 먼저 정리할지 물어봐</div></li>
+        <li><div>main 으로 가서 GitHub 최신 상태를 받아 와</div></li>
+        <li><div>GitHub 이슈를 만들어 (제목 명사형, 본문은 <b>배경 / 해야 할 일 / 완료 조건</b>, 라벨 <code>type:feat</code> 등)</div></li>
+        <li><div>개발 건(feat, fix)이면 이슈 제목 앞에 번호를 찜해. 예: <code>[DEV-003] 판매오더 조회 앱</code></div></li>
+        <li><div>규칙에 맞는 브랜치를 만들고 이동해</div></li>
+        <li><div>진행 원장에 줄을 넣을지 물어봐 (넣으면 상태 "진행")</div></li>
+      </ol>
+    </section>
+    <section class="box">
+      <h3>브랜치 이름 규칙</h3>
+      <pre>{타입}/{이슈번호}-{영문요약}
+feat/12-onboarding-doc
+fix/31-broken-link</pre>
+      <div class="pills" style="margin:12px 0 8px">
+        <span class="pill a">feat 새 기능</span><span class="pill a">fix 고침</span><span class="pill">docs 문서</span><span class="pill">refactor 구조 정리</span><span class="pill">chore 잡일</span><span class="pill">test 테스트</span>
+      </div>
+      <p class="small">영문 소문자·숫자·붙임표만 써. 한글, 대문자, 밑줄은 안 돼.</p>
+    </section>
+  </div>
+
+  <section>
+    <h3>번호 하나로 다 이어진다</h3>
+    <div class="diagram">
+      <div class="flow">
+        <div class="node"><b>REQ-003</b><span>SRS 의 요구사항 한 줄</span></div><div class="arrow"></div>
+        <div class="node hl"><b>[DEV-003]</b><span>이슈 제목에 찜한 번호</span></div><div class="arrow"></div>
+        <div class="node"><b>DEV-003-….md</b><span>개발 Spec 파일</span></div><div class="arrow"></div>
+        <div class="node"><b>원장의 DEV-003</b><span>진행 상황 한 줄</span></div>
+      </div>
+      <div class="cap">은행 번호표처럼, 새 번호는 지금까지 쓴 가장 큰 번호 + 1 이야. 두 사람이 동시에 같은 번호를 뽑으면 늦게 뽑은 쪽 번호가 자동으로 바뀌고 알림이 떠.</div>
+    </div>
+  </section>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">이슈 크기</span><div>이슈 하나는 한 번의 start 로 바로 손댈 수 있는 크기여야 해. 크면 나눠.</div></div>
+    <div class="callout warn"><span class="k">번호 구분</span><div><code>DEV-001</code>(우리 번호)과 고객사 양식의 개발 ID(<code>CO-006-01</code>)는 다른 거야. 섞지 마.</div></div>
+    <div class="callout ok"><span class="k">이름 실수</span><div>브랜치 이름을 잘못 지었으면 새로 만들지 말고 <code>git branch -m</code> 으로 고쳐.</div></div>
+  </div>
+
+  <div class="next"><button data-go="setup">← 처음 준비하기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
+</article>
+
+<!-- ================= sync ================= -->
+<article class="panel" data-panel="sync" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">작업 열기 · /harness:sync</div>
+    <h2>최신으로 맞추기</h2>
+    <p class="lead">다른 사람이 main 에 올린 걸 받아서, 내 브랜치를 그 위로 옮겨 놓아. 커밋이나 푸시는 하지 않아.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>작업 중에 동료 PR 이 병합됐을 때. 오랜만에 브랜치를 다시 열었을 때. 플러그인 새 버전이 나왔는지 궁금할 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>최신으로 맞춰줘</span><span>당겨받아줘</span><span>pull 해줘</span><span class="cmd">/harness:sync</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>내가 작업대에서 일하는 동안 진열대(main)에 새 물건이 올라왔어. 내 작업을 잠깐 들어 올려서, 새 진열대 상태를 깔고, 그 위에 내 작업을 다시 올려놓는 거야(rebase).</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>확인</b><span>다른 작업이 진행 중이면 멈춤</span></div><div class="arrow"></div>
+      <div class="node"><b>받아 오기</b><span>git fetch</span></div><div class="arrow"></div>
+      <div class="node hl"><b>저장 안 한 변경?</b><span>있으면 멈추고 물어봄</span></div><div class="arrow"></div>
+      <div class="node hl"><b>옮겨 놓기</b><span>git rebase</span></div><div class="arrow"></div>
+      <div class="node ok"><b>보고</b><span>새로 받은 커밋 · 플러그인 버전</span></div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>저장 안 한 변경이 있으면</h3>
+      <p class="small" style="margin-bottom:10px">셋 중 하나를 골라.</p>
+      <ol class="steps">
+        <li><div><b>먼저 올리기</b> — <code>/harness:deliver</code> 로 커밋·푸시부터</div></li>
+        <li><div><b>잠깐 묶어 두고 맞추기</b> — 임시 커밋 → 맞추기 → 다시 풀어 놓기 (main 에선 안 됨)</div></li>
+        <li><div><b>취소</b></div></li>
+      </ol>
+    </section>
+    <section class="box">
+      <h3>하지 않는 것</h3>
+      <ul class="plain">
+        <li><code>git stash</code> — 작업 공간끼리 공유돼서 남의 변경을 꺼낼 수 있어</li>
+        <li><code>reset --hard</code> — 내 변경이 날아가</li>
+        <li>푸시</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">충돌</span><div>맞추다 충돌이 나면 되돌려 놓고(rebase --abort) 어느 파일이 부딪혔는지 보고해. 어떻게 풀지는 내가 정해.</div></div>
+    <div class="callout ok"><span class="k">덤</span><div>마지막에 플러그인 버전 셋(지금 세션 / 내려받은 것 / 최신)을 비교해서 <code>/reload-plugins</code> 가 필요한지 알려 줘.</div></div>
+  </div>
+
+  <div class="next"><button data-go="start">← 작업 시작하기</button><button data-go="srs-new">다음: SRS 만들기 →</button></div>
+</article>
+
+<!-- ================= SRS 만들기 ================= -->
+<article class="panel" data-panel="srs-new" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">문서 작업 · /harness:srs</div>
+    <h2>SRS 만들기</h2>
+    <p class="lead">고객이 원하는 걸 요구사항정의서(SRS) 한 장에 처음 정리하는 일이야. 예전 이름 "PRD" 로 불러도 같은 스킬이 돌아.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>고객 요구사항을 처음 받았을 때. <code>docs/ssot/SRS.md</code> 가 빈 틀일 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>SRS 만들어줘</span><span>요구사항정의서 만들어줘</span><span>Backlog 양식으로 뽑아줘</span><span class="cmd">/harness:srs</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>SRS 는 식당의 <b>주문서</b>야. 주문서가 두 장이면 주방이 헷갈리니까, 정본은 <code>docs/ssot/SRS.md</code> <b>딱 하나</b>야(SSOT = 하나뿐인 진실).</p>
+    <p>고객사에 낼 때는 이 주문서를 고객사 양식(Backlog 엑셀)으로 옮겨 찍어. 그리고 "처음 썼다" 는 사실을 일기장(<code>audit/changes/</code>)에 남겨.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>고객 자료</b><span>회의록, 메일, 엑셀</span></div><div class="arrow"></div>
+      <div class="node hl"><b>질문 모아 묻기</b><span>모르는 건 한꺼번에</span></div><div class="arrow"></div>
+      <div class="node hl"><b>SRS.md 작성</b><span>요구사항마다 REQ 번호 · 상태 New</span></div><div class="arrow"></div>
+      <div class="node"><b>변경 기록</b><span>YYYYMMDD-SRS-최초작성.md</span></div><div class="arrow"></div>
+      <div class="node ok"><b>Backlog 엑셀 산출</b><span>docs/srs/ · 양식 지도가 있을 때</span></div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>내가 할 일</h3>
+      <ul class="todo">
+        <li>먼저 <code>/harness:start</code> 로 이슈와 브랜치를 열어 (예: <code>docs/…</code>)</li>
+        <li>입력 자료를 Claude 에게 줘</li>
+        <li>Claude 가 모아서 묻는 질문에 답해. 모르면 "미결 사항" 에 남겨도 돼</li>
+        <li>다 되면 <code>/harness:deliver</code> 로 PR 을 올려</li>
+        <li>작성자가 아닌 승인자에게 Approve 를 받아</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>만들어지는 것</h3>
+      <ul class="made">
+        <li><code>docs/ssot/SRS.md</code> — 정본</li>
+        <li><code>audit/changes/YYYYMMDD-SRS-최초작성.md</code> — 변경 기록</li>
+        <li><code>docs/srs/BW_Backlog List_v0.1.xlsx</code> — 고객사 양식 (양식 지도가 있을 때)</li>
+      </ul>
+    </section>
+  </div>
+
+  <section class="box">
+    <h3>SRS 의 생김새</h3>
+    <div class="cols" style="gap:16px">
+      <div>
+        <p class="small" style="margin-bottom:6px">절</p>
+        <p style="font-size:14.5px">배경과 목표 · 범위 · AS-IS/TO-BE · 요구사항 · 참조 · 미결 사항. 맨 위에 <code>버전: 0.1</code> 줄이 있고, 이 값이 엑셀 파일명의 버전이 돼.</p>
+        <p class="small" style="margin:10px 0 6px">요구사항 표 열</p>
+        <p style="font-size:14.5px">ID, Title, LoB, Type, Status, Priority (PO), 출처</p>
+      </div>
+      <pre>### REQ-002 판매오더 조회
+#### Short Description
+…</pre>
+    </div>
+    <p class="small" style="margin:14px 0 6px">상태(Status)는 이 일곱 가지뿐이야</p>
+    <div class="pills">
+      <span class="pill a">New</span><span class="pill">Planned</span><span class="pill">In Process</span><span class="pill g">Done</span><span class="pill w">On Hold</span><span class="pill r">Dropped</span><span class="pill r">Duplicate</span>
+    </div>
+  </section>
+
+  <section class="box" style="border-color:var(--accent)">
+    <h3>내 번호 알아 두기</h3>
+    <p style="font-size:14.5px">요구사항 한 줄에 번호 하나야. <code>REQ-003</code> 을 받으면 그 일의 이슈는 <code>[DEV-003]</code>, Spec 은 <code>DEV-003-….md</code>, 원장의 개발 건도 <code>DEV-003</code> 이야. 다음 단계는 다 이 번호로 말해.</p>
+    <ul class="plain">
+      <li>Spec 만들 때: "REQ-003 스펙 만들어줘"</li>
+      <li>요구사항이 바뀌거나 취소될 때: "REQ-003 취소됐어"</li>
+      <li>개발 시작할 때: <code>[DEV-003]</code> 이슈로 <code>/harness:start</code></li>
+    </ul>
+    <p class="small" style="margin-top:10px">잊었으면 <code>docs/ssot/SRS.md</code> 요구사항 표의 ID 열, 또는 GitHub 이슈 제목 앞의 <code>[DEV-xxx]</code> 에서 찾아. 고객사 양식의 개발 ID(<code>CO-006-01</code>)와는 다른 번호야.</p>
+  </section>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">번호</span><div>REQ 번호는 Claude 가 번호표 기계로 받아서 붙여. 마지막 번호에 손으로 1 을 더하지 않아.</div></div>
+    <div class="callout warn"><span class="k">옛 이름</span><div><code>docs/ssot/PRD.md</code> 만 있는 옛 구조면, 조용히 새로 만들지 않고 옮길지 먼저 물어봐.</div></div>
+    <div class="callout warn"><span class="k">승인 필요</span><div>SRS 를 바꾼 PR 은 작성자 말고 다른 승인자의 Approve 가 있어야 병합돼.</div></div>
+  </div>
+
+  <div class="next"><button data-go="sync">← 최신으로 맞추기</button><button data-go="srs-edit">다음: SRS 고치기 →</button></div>
+</article>
+
+<!-- ================= SRS 고치기 ================= -->
+<article class="panel" data-panel="srs-edit" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">문서 작업 · /harness:srs</div>
+    <h2>SRS 고치기</h2>
+    <p class="lead">고객이 요구사항을 바꾸거나, 더하거나, 취소했을 때 정본을 고치는 일이야.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>요구사항이 추가·변경·취소됐을 때. 우선순위나 상태가 바뀌었을 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>요구사항 바뀌었어</span><span>SRS 수정</span><span>REQ-002 취소됐어</span><span class="cmd">/harness:srs</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>주문서를 고칠 때는 지우개를 쓰지 않고 <b>줄을 그어</b>. 취소된 주문도 "취소" 라고 적어서 남겨 둬야 나중에 "그거 왜 없어졌어?" 에 답할 수 있어.</p>
+    <p>주문서를 고치면 그걸 보고 만들던 레시피(Spec)도 영향을 받아. 그래서 Claude 가 어떤 레시피가 걸리는지 같이 찾아 줘.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>근거 받기</b><span>누가, 언제, 왜</span></div><div class="arrow"></div>
+      <div class="node hl"><b>REQ 고치기</b><span>번호는 그대로</span></div><div class="arrow"></div>
+      <div class="node"><b>영향 찾기</b><span>걸리는 Spec · 원장 보여 줌</span></div><div class="arrow"></div>
+      <div class="node"><b>변경 기록</b><span>audit/changes/</span></div><div class="arrow"></div>
+      <div class="node hl"><b>버전 올리기</b><span>버전: 0.1 → 0.2</span></div><div class="arrow"></div>
+      <div class="node ok"><b>새 판 산출</b><span>_v0.2.xlsx · 이전 판 남음</span></div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>내가 할 일</h3>
+      <ul class="todo">
+        <li>바뀐 근거(메일, 회의록)를 같이 줘. 근거 없이는 안 고쳐</li>
+        <li>Claude 가 보여 주는 영향받는 Spec 목록을 확인해</li>
+        <li>Spec 반영은 따로 해 → <b>Spec 고치기</b></li>
+        <li><code>/harness:deliver</code> 로 올리고 승인을 받아</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>바뀌는 것</h3>
+      <ul class="made">
+        <li><code>docs/ssot/SRS.md</code> — 내용과 <code>버전:</code></li>
+        <li><code>audit/changes/YYYYMMDD-&lt;요약&gt;.md</code> — 종류 "요구사항 변경"</li>
+        <li><code>docs/srs/BW_Backlog List_v0.2.xlsx</code> — 새 판. 이전 판은 그대로</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout stop"><span class="k">지우지 마</span><div>없앤 요구사항은 행을 지우지 않고 <b>Dropped</b>, 겹치면 <b>Duplicate</b> 로 남겨. 이미 쓴 REQ 번호는 바꾸지 않아.</div></div>
+    <div class="callout warn"><span class="k">승인 다시</span><div>승인 받은 뒤에 커밋을 더 올리면 승인을 <b>다시</b> 받아야 해. 승인은 마지막 커밋에 찍힌 것만 쳐줘.</div></div>
+    <div class="callout warn"><span class="k">덮어쓰기</span><div>main 에 이미 있는 판(같은 파일명)은 덮어쓰지 않아. 그래서 버전을 꼭 올려.</div></div>
+  </div>
+
+  <div class="next"><button data-go="srs-new">← SRS 만들기</button><button data-go="spec-new">다음: Spec 만들기 →</button></div>
+</article>
+
+<!-- ================= Spec 만들기 ================= -->
+<article class="panel" data-panel="spec-new" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">문서 작업 · /harness:spec</div>
+    <h2>Spec 만들기</h2>
+    <p class="lead">SRS 의 요구사항 하나를 골라 개발 설계(Spec)를 쓰는 일이야. 요구사항 1건 = 개발 1건 = Spec 1장.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>개발에 들어가기 전, 무엇을 어떻게 만들지 정할 때. 고객사가 개발사양서를 달라고 할 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>스펙 만들어줘</span><span>REQ-002 개발 스펙</span><span class="cmd">/harness:spec</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>주문서(SRS)에 "판매오더를 조회하고 싶다" 가 있으면, 요리사가 보는 <b>레시피 카드(Spec)</b>를 한 장 써. 주문 번호가 REQ-002 면 레시피 번호도 DEV-002 야.</p>
+    <p>고객사가 자기 양식(개발사양서 엑셀)으로 달라고 하면, 레시피 카드를 그 양식에 옮겨 찍어 줘.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>SRS 의 REQ-002</b><span>Dropped · Duplicate 면 안 만듦</span></div><div class="arrow"></div>
+      <div class="node hl"><b>양식 고르기</b><span>쓰면 파일명 값을 먼저 물어봄</span></div><div class="arrow"></div>
+      <div class="node hl"><b>Spec 작성</b><span>docs/spec/DEV-002-판매오더조회앱.md</span></div><div class="arrow"></div>
+      <div class="node"><b>원장 등록</b><span>audit/ledger/</span></div><div class="arrow"></div>
+      <div class="node ok"><b>개발사양서 산출</b><span>docs/개발사양서/ · 고를 때만</span></div>
+    </div>
+    <div class="cap">SRS 가 빈 틀이면 Spec 을 만들지 않고 SRS 부터 만들자고 안내해.</div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>내가 할 일</h3>
+      <ul class="todo">
+        <li>어떤 REQ 로 만들지 정해</li>
+        <li>양식을 쓸지 골라. 고르면 파일명에 들어갈 값(개발 ID, 제목)을 먼저 물어보고, 산출될 이름을 보여 줘</li>
+        <li>모르는 값은 Claude 가 추측하지 않아. 물어보면 답하고, 정말 없으면 "미정" 으로 둬</li>
+        <li>저장하면 경비원이 Spec 생김새를 바로 검사해</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>만들어지는 것</h3>
+      <ul class="made">
+        <li><code>docs/spec/DEV-002-&lt;요약&gt;.md</code></li>
+        <li>원장 줄 — Spec 만 먼저 만들면 상태 "대기"</li>
+        <li><code>BW_개발사양서_&lt;개발ID&gt;_&lt;제목&gt;_v&lt;버전&gt;.xlsx</code> — 양식을 고를 때</li>
+      </ul>
+      <p class="small" style="margin-top:12px">Spec 의 절: 근거 요구사항 · 개요 · 상세 설계 · 완료 조건 · 참조 · 변경 이력. 양식을 쓰면 <code>## 양식 항목</code> 절이 더 붙어.</p>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">번호 구분</span><div>DEV 번호(<code>DEV-002</code>)와 양식의 개발 ID(<code>CO-006-01</code>)는 다른 체계야.</div></div>
+    <div class="callout warn"><span class="k">산출 ≠ 통과</span><div>엑셀을 뽑았다고 검사를 통과한 건 아니야. 엑셀 검사는 PR 을 올리면 GitHub Actions 가 해.</div></div>
+  </div>
+
+  <div class="next"><button data-go="srs-edit">← SRS 고치기</button><button data-go="spec-edit">다음: Spec 고치기 →</button></div>
+</article>
+
+<!-- ================= Spec 고치기 ================= -->
+<article class="panel" data-panel="spec-edit" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">문서 작업 · /harness:spec</div>
+    <h2>Spec 고치기</h2>
+    <p class="lead">SRS 가 바뀌어서 설계에 반영하거나, 설계 자체를 바꿀 때 하는 일이야.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>SRS 고치기를 끝낸 뒤 영향받는 Spec 이 있을 때. 개발하다 설계를 바꿔야 할 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>스펙 수정</span><span>SRS 바뀐 거 스펙에 반영해줘</span><span class="cmd">/harness:spec</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>레시피를 고칠 때는 카드 뒷면의 <b>수정 이력</b>에 한 줄 적고, 새 판 번호를 매겨. 손님에게 이미 드린 옛 판은 회수하지 않고 그대로 둬.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>바뀐 REQ 확인</b><span>SRS 변경 기록을 근거로</span></div><div class="arrow"></div>
+      <div class="node hl"><b>Spec 고치기</b><span>docs/spec/DEV-xxx-….md</span></div><div class="arrow"></div>
+      <div class="node hl"><b>변경 이력 한 줄</b><span>Spec 안의 표</span></div><div class="arrow"></div>
+      <div class="node"><b>변경 기록</b><span>종류 "설계 변경"</span></div><div class="arrow"></div>
+      <div class="node ok"><b>새 판 산출</b><span>양식을 쓰면 _v0.2.xlsx · 이전 판 남음</span></div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>내가 할 일</h3>
+      <ul class="todo">
+        <li>어떤 Spec 을 왜 고치는지 알려 줘 (SRS 의 어느 REQ 가 바뀌었는지)</li>
+        <li>바뀐 내용을 확인하고, 모르는 값은 답해 줘</li>
+        <li><code>/harness:deliver</code> 로 올려</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>바뀌는 것</h3>
+      <ul class="made">
+        <li>Spec 파일 내용과 변경 이력 표</li>
+        <li><code>audit/changes/YYYYMMDD-&lt;요약&gt;.md</code></li>
+        <li>새 버전 개발사양서 엑셀 (이전 판은 남음)</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">승인</span><div><code>docs/spec/</code> 은 위험 경로야. 이걸 바꾼 PR 은 작성자가 아닌 승인자의 Approve 가 있어야 통과해.</div></div>
+    <div class="callout stop"><span class="k">덮어쓰기</span><div>main 에 이미 있는 판은 덮어쓰지 않아. 변경 이력에 행을 더하고 버전을 올리면 새 파일이 생겨.</div></div>
+  </div>
+
+  <div class="next"><button data-go="spec-new">← Spec 만들기</button><button data-go="export">다음: 고객사 양식으로 산출하기 →</button></div>
+</article>
+
+<!-- ================= 산출 ================= -->
+<article class="panel" data-panel="export" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">문서 작업 · checker.export</div>
+    <h2>고객사 양식으로 산출하기</h2>
+    <p class="lead">마크다운 정본을 고객사 엑셀 양식에 옮겨 찍는 일이야. 보통은 SRS·Spec 스킬이 마지막에 알아서 해.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>고객사에 Backlog, 개발사양서를 엑셀로 내야 할 때. SRS·Spec 을 고쳐서 새 판이 필요할 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>Backlog 양식으로 뽑아줘</span><span>개발사양서로 산출해줘</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>고객사 양식은 <b>빈 틀</b>이고, 양식 지도(<code>templates/forms/*.yaml</code>)는 "이 칸엔 제목, 저 칸엔 상태" 하고 적어 둔 <b>안내도</b>야. 엔진은 안내도를 보고 정본의 내용을 틀에 찍어 내.</p>
+    <p>틀의 서식과 그림은 건드리지 않아. 내용 칸만 채워.</p>
+  </div></div>
+
+  <div class="tbl-wrap"><table>
+    <tr><th>양식 지도</th><th>원본</th><th>나오는 파일</th></tr>
+    <tr><td><code>Backlog.yaml</code></td><td>SRS</td><td><code>docs/srs/BW_Backlog List_v0.2.xlsx</code></td></tr>
+    <tr><td><code>개발사양서.yaml</code></td><td>Spec</td><td><code>docs/개발사양서/BW_개발사양서_CO-006-01_&lt;제목&gt;_v0.1.xlsx</code></td></tr>
+    <tr><td><code>인터페이스_매핑_스펙.yaml</code></td><td>Spec</td><td><code>docs/인터페이스/BW_인터페이스_매핑_스펙_&lt;IFID&gt;_&lt;업무내역&gt;_v0.1.xlsx</code></td></tr>
+  </table></div>
+
+  <section>
+    <h3>결과는 넷 중 하나야</h3>
+    <div class="tbl-wrap"><table>
+      <tr><th>결과</th><th>뜻</th><th>할 일</th></tr>
+      <tr><td><span class="pill g">ok</span></td><td>잘 찍혔어</td><td>PR 로 올려</td></tr>
+      <tr><td><span class="pill w">warning</span></td><td>찍혔지만 걸리는 게 있어 (드롭다운에 없는 값 등)</td><td>경고 내용을 보고 고쳐</td></tr>
+      <tr><td><span class="pill r">rejected</span></td><td>거절 (같은 이름의 판이 main 에 이미 있음 등)</td><td>버전을 올리고 다시</td></tr>
+      <tr><td><span class="pill r">error</span></td><td>오류로 못 찍음</td><td>메시지를 보고 사람에게</td></tr>
+    </table></div>
+    <p class="small" style="margin-top:10px">Claude 는 먼저 <code>--check</code> 로 미리 돌려 보고 진짜 산출을 해. 결과를 읽을 수 없으면 "산출 불능" 이라고 말해.</p>
+  </section>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">산출 ≠ 통과</span><div>엑셀이 나왔다고 문서 검사를 통과한 건 아니야. PR 을 올리면 Actions 의 doc-guard 가 시트와 표 머리를 검사해.</div></div>
+    <div class="callout warn"><span class="k">드롭다운</span><div>양식의 드롭다운 목록에 없는 값은 쓰지 않아. Claude 는 허용 값을 양식에서 읽어 와서 그 안에서만 골라.</div></div>
+    <div class="callout ok"><span class="k">직접 고친 엑셀</span><div>엑셀을 오피스로 직접 고쳐도 돼. 다만 경비원(Hook)은 그걸 못 보니까, PR 에서 Actions 가 처음 검사해.</div></div>
+  </div>
+
+  <div class="next"><button data-go="spec-edit">← Spec 고치기</button><button data-go="sap">다음: SAP 에서 개발하기 →</button></div>
+</article>
+
+<!-- ================= SAP ================= -->
+<article class="panel" data-panel="sap" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">개발 작업 · SAP ADT MCP</div>
+    <h2>SAP 에서 개발하기</h2>
+    <p class="lead">Claude 가 MCP 로 SAP 에 직접 붙어서 ABAP 오브젝트를 만들고 고치는 일이야. 080 에서 만들고, <code>src/</code> 는 나중에 찍어.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>Spec 이 정해졌고 실제 코드를 만들 때. 기존 ABAP 을 고칠 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>DEV-002 개발해줘</span><span>이 클래스 고쳐줘</span><span class="cmd">/c080</span><span class="cmd">/c100</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p><b>080</b>은 공사 현장이야. 실제로 벽을 세우고 고치는 곳. <b>100</b>은 견학 창문이야. 들여다보고 확인만 해.</p>
+    <p>저장소의 <code>src/</code> 는 현장을 찍은 <b>사진</b>이야. 사진을 먼저 고친다고 건물이 바뀌지 않으니까, 현장(080)을 먼저 고치고 나중에 사진을 다시 찍어.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>수정안 만들기</b><span>읽기 전용으로 문법 검사, 승인 받기</span></div><div class="arrow"></div>
+      <div class="node hl"><b>080 에 반영</b><span>잠금 → 반영 → 해제</span></div><div class="arrow"></div>
+      <div class="node hl"><b>활성화</b><span>activate 해야 진짜 적용</span></div><div class="arrow"></div>
+      <div class="node"><b>src/ 갱신</b><span>SAP 에서 다시 가져와 사진 교체</span></div><div class="arrow"></div>
+      <div class="node ok"><b>작업 올리기</b><span>/harness:deliver</span></div>
+    </div>
+    <div class="cap">필요하면 고치기 전과 후의 결과를 기록해 둬. 비교 근거가 돼.</div>
+  </section>
+
+  <div class="tbl-wrap"><table>
+    <tr><th>MCP 서버</th><th>클라이언트</th><th>용도</th><th>로그인</th><th>쓰기</th></tr>
+    <tr><td><code>abap-adt-z5u-dev</code></td><td>080 개발</td><td>오브젝트 만들기·고치기·활성화, ATC</td><td><code>/c080</code></td><td><span class="pill g">가능</span></td></tr>
+    <tr><td><code>abap-adt-z5u</code></td><td>100 커스터마이징</td><td>소스 조회, 문법 검사</td><td><code>/c100</code></td><td><span class="pill r">쓰지 않음</span></td></tr>
+  </table></div>
+
+  <section>
+    <h3>코드를 저장할 때 걸리는 규칙 (CR)</h3>
+    <div class="tbl-wrap"><table>
+      <tr><th>번호</th><th>규칙</th><th>누가 잡나</th></tr>
+      <tr><td><code>CR-001</code></td><td>이름(변수·클래스·필드)에 한글을 쓰지 않는다. 주석과 문자열은 괜찮아</td><td>Hook + Actions</td></tr>
+      <tr><td><code>CR-002</code></td><td>반복문 안에서 DB 를 조회하지 않는다. FOR ALL ENTRIES, JOIN, CDS 를 써</td><td>Hook + Actions</td></tr>
+      <tr><td><code>CR-003</code></td><td><code>SELECT *</code> 대신 필요한 필드만 조회한다</td><td>Hook + Actions</td></tr>
+      <tr><td><code>CR-004</code></td><td>비밀번호·토큰·접속 정보를 소스나 저장소에 두지 않는다. <b>예외 없음</b></td><td>gitleaks</td></tr>
+      <tr><td><code>CR-005</code></td><td>표준 객체를 직접 고치지 않고 Released API, Cloud BAdI 만 쓴다</td><td>Public Cloud 가 막음</td></tr>
+      <tr><td><code>CR-006</code></td><td>회사코드 같은 하드코딩 값은 설정이나 상수로 뺀다</td><td>사람</td></tr>
+      <tr><td><code>CR-007</code></td><td>오류를 조용히 삼키지 않는다. 빈 CATCH 금지</td><td>Hook + Actions</td></tr>
+      <tr><td><code>CR-008</code></td><td>이름 접두어와 네이밍은 프로젝트 <code>conventions/naming.md</code> 를 따른다</td><td>사람</td></tr>
+    </table></div>
+    <p class="small" style="margin-top:10px">꼭 예외가 필요하면 그 줄이나 바로 위에 <code>harness:allow CR-001 &lt;이유&gt;</code> 주석을 달아. 이유가 없으면 인정 안 돼.</p>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>로그인은 이렇게 돌아가</h3>
+      <p style="font-size:14.5px">SAP ADT 는 회사 SSO 로만 들어갈 수 있어. <code>/c080</code> 을 치면 Chrome 이 열리고, 본인 계정으로 로그인하면 그 출입증(세션 쿠키)을 프록시가 대신 들고 다녀. 출입증 파일(<code>cookie-*.txt</code>)은 비밀번호처럼 다루고 절대 커밋하지 않아.</p>
+    </section>
+    <section class="box">
+      <h3>활성화 관문</h3>
+      <p style="font-size:14.5px">080 에 썼는데 활성화를 안 한 오브젝트가 있으면, 경비원이 <b>푸시와 <code>src/</code> 쓰기를 막아</b>. 반쯤 지은 건물 사진을 올리지 못하게 하는 거야.</p>
+      <ul class="plain" style="margin-top:8px;font-size:14px">
+        <li>풀기: <code>activateObjects</code> 나 <code>activateByName</code> 으로 활성화</li>
+        <li>Eclipse 로 활성화했으면: <code>inactiveObjects</code> 로 기록을 서버에 맞춤</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout stop"><span class="k">하지 마</span><div><b>100 에는 쓰지 않아.</b> 100 에서 <code>S_DEVELOP</code> 403 이 나는 건 정상이야. 막혔다고 Claude 가 서버를 바꿔서 다시 시도하지 않아. 어디에 쓸지는 사람이 정해.</div></div>
+    <div class="callout stop"><span class="k">하지 마</span><div><code>src/</code> 를 SAP 보다 먼저 고치지 않아. 사진이 현장과 달라져.</div></div>
+    <div class="callout warn"><span class="k">데이터 조회</span><div>테이블 내용을 꺼내는 도구(<code>tableContents</code>, <code>runQuery</code>)는 쓰기 전에 되물어 봐. 고객 데이터가 화면에 나오기 때문이야.</div></div>
+    <div class="callout warn"><span class="k">이름 짓기</span><div>오브젝트 이름은 <code>conventions/naming.md</code>(사내 SAP Naming Guide)를 먼저 읽고 지어. ZLOCAL 계열 테스트 패키지는 트랜스포트를 만들지 않아.</div></div>
+    <div class="callout ok"><span class="k">세션 만료</span><div>401 이나 400 이 나면 <code>/c080</code> 이나 <code>/c100</code> 으로 다시 로그인해.</div></div>
+  </div>
+
+  <div class="next"><button data-go="export">← 고객사 양식으로 산출하기</button><button data-go="atc">다음: ATC 돌리기 →</button></div>
+</article>
+
+<!-- ================= ATC ================= -->
+<article class="panel" data-panel="atc" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">개발 작업 · /harness:atc</div>
+    <h2>ATC 돌리기</h2>
+    <p class="lead">SAP 의 코드 점검(ATC)을 돌려서 지적을 모으고, 처리 순서에 따라 고치는 일이야.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>개발을 마치고 올리기 전에. 트랜스포트를 막는 지적이 있을 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>ATC 돌려줘</span><span>ATC 지적 고쳐줘</span><span>ATC 결과 정리해줘</span><span class="cmd">/harness:atc</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>CR 규칙이 글을 쓰는 동안 빨간 줄을 그어 주는 맞춤법 검사기라면, <b>ATC</b>는 SAP 이 하는 정기 건강검진이야. 검진표(variant)에 적힌 항목대로 서버에서 검사해.</p>
+    <p>둘은 잡는 게 달라. 실제로 080 의 기본 검진표는 CR-002, CR-003 같은 문제를 못 잡았어. 그래서 둘 다 해.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>범위 정하기</b><span>가장 좁게 · 서버 · variant</span></div><div class="arrow"></div>
+      <div class="node hl"><b>실행</b><span>080 에서 ATC 수집</span></div><div class="arrow"></div>
+      <div class="node"><b>표로 보기</b><span>종류 · 우선순위별</span></div><div class="arrow"></div>
+      <div class="node"><b>분류</b><span>자동 / 확인 후 / 수동</span></div><div class="arrow"></div>
+      <div class="node hl"><b>승인된 것만 고침</b><span>잠금 → 반영 → 해제</span></div><div class="arrow"></div>
+      <div class="node ok"><b>다시 실행</b><span>전후 건수 비교표</span></div>
+    </div>
+    <div class="cap">검진표는 <code>env/adt-tiers.yaml</code> 에 적힌 <code>ABAP_CLOUD_DEVELOPMENT_DEFAULT</code> 를 써. 이 파일이 없는 저장소에서는 돌지 않아.</div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>내가 할 일</h3>
+      <ul class="todo">
+        <li>어디를 검사할지 알려 줘 (패키지, 클래스)</li>
+        <li>"확인 후" 로 분류된 묶음을 보고 고칠지 정해</li>
+        <li>면제(exemption)가 필요하면 근거를 보고 내가 승인해</li>
+        <li>고친 걸 저장소에 남기려면 <code>/harness:deliver</code></li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>분류 기준</h3>
+      <ul class="plain">
+        <li><b>자동</b> — 고치는 방법이 하나뿐이고 위험이 없음</li>
+        <li><b>확인 후</b> — 고칠 수 있지만 사람이 봐야 함. 애매하면 여기</li>
+        <li><b>수동</b> — 설계를 바꿔야 하거나 Claude 가 판단할 수 없음</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout stop"><span class="k">0건 ≠ 깨끗</span><div>도구 오류, 빈 결과, 읽기 실패는 "0건" 이 아니라 <b>검사 불능</b>이야. 결과가 최대 개수에 닿았으면 잘린 거라 전부가 아니야.</div></div>
+    <div class="callout warn"><span class="k">면제</span><div><code>"#EC</code> 주석이나 exemption 은 근거와 내 승인이 있을 때만 써. 면제 신청을 Claude 혼자 제출하지 않아.</div></div>
+    <div class="callout ok"><span class="k">범위 밖</span><div>ATC 스킬은 활성화와 커밋을 하지 않아. 활성화는 개발 흐름에서, 커밋은 deliver 로 해.</div></div>
+  </div>
+
+  <div class="next"><button data-go="sap">← SAP 에서 개발하기</button><button data-go="deliver">다음: 작업 올리기 →</button></div>
+</article>
+
+<!-- ================= deliver ================= -->
+<article class="panel" data-panel="deliver" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">작업 닫기 · /harness:deliver</div>
+    <h2>작업 올리기</h2>
+    <p class="lead">커밋, 원격과 맞추기, 푸시, PR 만들기를 한 번에 해. 문서든 코드든 마지막은 늘 이거야.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>작업을 다 했을 때. PR 에 수정분을 더 올릴 때. 세션을 마칠 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>다 했어</span><span>커밋하고 푸시해줘</span><span>PR 올려줘</span><span class="cmd">/harness:deliver</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>택배 보내기랑 같아. 물건을 상자에 담고(커밋), 받는 사람 주소가 바뀌진 않았는지 확인하고(fetch · rebase), 트럭에 싣고(push), 송장을 붙여(PR).</p>
+    <p>맨손 <code>git push</code> 는 창구를 안 거치고 트럭에 상자를 던지는 거야. 그래서 경비원이 막아.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>살펴보기</b><span>main 이면 거절 · 활성화 확인</span></div><div class="arrow"></div>
+      <div class="node"><b>맞추기</b><span>fetch → rebase</span></div><div class="arrow"></div>
+      <div class="node hl"><b>커밋</b><span>의미 하나에 커밋 하나</span></div><div class="arrow"></div>
+      <div class="node hl"><b>푸시</b><span>deliver 만 통과</span></div><div class="arrow"></div>
+      <div class="node"><b>PR</b><span>담당자는 나</span></div><div class="arrow"></div>
+      <div class="node ok"><b>원장 갱신</b><span>상태 "리뷰" + PR 번호</span></div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>커밋 메시지</h3>
+      <pre>&lt;type&gt;(&lt;scope&gt;): &lt;명사형 설명&gt;
+
+feat: 판매오더 조회 앱 추가
+fix(auth): 로그인 실패 안내 수정
+
+Refs #143</pre>
+      <p class="small" style="margin-top:10px">"추가한다" 가 아니라 "추가" 처럼 명사로 끝내.</p>
+    </section>
+    <section class="box">
+      <h3>PR 본문</h3>
+      <pre>## Summary
+## Changes
+## Review notes   (필요할 때)
+## 진행 원장      (개발 건이면)
+
+Closes #143</pre>
+      <p class="small" style="margin-top:10px">SRS 를 바꿨으면 Review notes 에 "SRS 변경: 사람 승인이 필요하다" 가 들어가.</p>
+    </section>
+  </div>
+
+  <section class="box">
+    <h3>팀원이 바꿀 수 있는 곳</h3>
+    <div class="flow" style="margin-top:4px;gap:8px">
+      <div class="node ok"><b>src/</b><span>ABAP 소스 사진</span></div>
+      <div class="node ok"><b>docs/</b><span>SRS · Spec · 산출물</span></div>
+      <div class="node ok"><b>audit/</b><span>변경 기록 · 원장</span></div>
+    </div>
+    <p style="margin-top:12px;font-size:14.5px">그 밖의 <code>.claude/</code>, <code>.github/</code>, <code>rules/</code>, <code>templates/</code>, <code>conventions/</code>, <code>env/</code>, <code>scripts/</code>, <code>CLAUDE.md</code>, <code>README.md</code> 는 운영 파일이야. 팀원이 이걸 바꾸면 푸시 전에 거절되고, PR 이 열려도 자동으로 닫혀. 바꿔야 하면 운영 담당(jaeheeMin)에게 이슈로 요청해.</p>
+  </section>
+
+  <div class="callouts">
+    <div class="callout stop"><span class="k">하지 마</span><div><code>--force</code> 는 금지야. 리베이스 뒤에는 deliver 가 알아서 <code>--force-with-lease</code> 를 써.</div></div>
+    <div class="callout warn"><span class="k">충돌</span><div>맞추다가 충돌이 나면 Claude 가 혼자 풀지 않고 보고해. 어떻게 할지는 내가 정해.</div></div>
+    <div class="callout ok"><span class="k">깜빡해도</span><div>저장 안 한 변경을 남기고 세션을 끝내면, 경비원이 알려 주고 사본을 따로 보관해 둬. 다음 세션에서 되살리는 방법을 알려 줘.</div></div>
+  </div>
+
+  <div class="next"><button data-go="atc">← ATC 돌리기</button><button data-go="gate">다음: 검사 · 승인 받기 →</button></div>
+</article>
+
+<!-- ================= gate ================= -->
+<article class="panel" data-panel="gate" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">작업 닫기 · GitHub Actions</div>
+    <h2>검사 · 승인 받기</h2>
+    <p class="lead">PR 을 올리면 GitHub 이 검사를 자동으로 돌려. 판정은 blueward-harness 에 있는 같은 엔진이 해.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>PR 을 올린 뒤. PR 에 빨간 불이 들어왔을 때. 승인이 필요하다는 댓글이 달렸을 때.</div>
+    <div><div class="lbl">어디서 봐</div>GitHub PR 화면 아래쪽 Checks, 그리고 doc-guard 가 남긴 댓글</div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>공항 보안 검색대야. 짐 검사, 금속 탐지, 여권 확인이 따로 있듯이 검색대마다 보는 게 달라. 하나라도 걸리면 비행기(병합)를 못 타.</p>
+    <p>내 PC 의 경비원(Hook)은 Claude 가 일할 때만 서 있어. 내가 오피스로 직접 만든 엑셀이나 손으로 고친 파일은 여기서 처음 잡혀. 그래서 <b>주 관문은 Actions</b> 야.</p>
+  </div></div>
+
+  <div class="tbl-wrap"><table>
+    <tr><th>검사</th><th>보는 것</th><th>걸리면</th></tr>
+    <tr><td><code>doc-guard</code></td><td>문서가 템플릿을 따르는지. 파일명, 위치, 필수 절, 엑셀 시트·표 머리, 다른 거래처 흔적</td><td>PR 에 댓글로 이유를 남김</td></tr>
+    <tr><td><code>gitleaks</code></td><td>비밀번호, 토큰, SAP 쿠키 같은 비밀정보 (CR-004)</td><td>값은 가려서 보여 줌</td></tr>
+    <tr><td><code>ssot-approval</code></td><td>SRS(<code>docs/ssot/</code>)를 바꿨으면 승인자의 Approve 가 있는지</td><td>승인 받으면 자동 재실행</td></tr>
+    <tr><td><code>risk-gate</code></td><td>PR 이 위험한지. 300줄 초과, 10파일 초과, 위험 경로, 비밀값 모양, 다른 검사 실패</td><td>위험하면 승인자 Approve 필요</td></tr>
+    <tr><td><code>ai-review</code></td><td>위험도가 낮은 PR 을 Claude 가 리뷰</td><td>의견 댓글</td></tr>
+    <tr><td><code>ops-guard</code></td><td>팀원이 운영 파일을 바꿨는지</td><td>PR 을 자동으로 닫음</td></tr>
+    <tr><td><code>notify-teams</code></td><td>병합된 PR</td><td>Teams 로 알림</td></tr>
+  </table></div>
+
+  <section>
+    <h3>결과는 셋 중 하나야. 섞지 않아</h3>
+    <div class="triad">
+      <div class="t-ok"><b>통과</b><p>기준에 맞아. 다음 단계로 가.</p></div>
+      <div class="t-bad"><b>위반</b><p>문서나 코드가 기준과 달라. <b>쓴 사람</b>이 고쳐.</p></div>
+      <div class="t-unk"><b>검사 불능</b><p>검사 자체를 못 했어(도구 없음, 설정 오류, 못 읽는 형식). <b>규칙·설정을 맡은 사람</b>이 봐야 해.</p></div>
+    </div>
+    <p style="margin-top:12px;font-size:14.5px">검사 불능을 "아마 괜찮겠지" 하고 통과로 치지 않아. 그렇다고 문서가 틀렸다고 하지도 않아. <code>.hwp</code>, <code>.pdf</code> 처럼 읽을 수 없는 형식도 검사 불능이야.</p>
+  </section>
+
+  <section>
+    <h3>승인이 필요한 위험 경로</h3>
+    <div class="pills">
+      <span class="pill w">docs/ssot/</span><span class="pill w">docs/spec/</span><span class="pill w">rules/</span><span class="pill w">templates/</span><span class="pill w">conventions/</span><span class="pill w">.github/</span><span class="pill w">.claude/</span><span class="pill w">CLAUDE.md</span>
+    </div>
+    <p class="small" style="margin-top:10px">이 경로를 건드린 PR 은 작성자가 아닌 승인자가 <b>마지막 커밋</b>에 Approve 해야 통과해. 승인자 명단은 <code>.github/ssot-approvers</code> 에 있어.</p>
+  </section>
+
+  <div class="callouts">
+    <div class="callout ok"><span class="k">빨간 불</span><div>검사가 실패하면 PR 댓글의 이유를 읽고 고친 다음, 다시 <code>/harness:deliver</code> 해. 같은 PR 이 갱신돼.</div></div>
+    <div class="callout warn"><span class="k">무료 요금제</span><div>GitHub 무료 요금제라 Merge 버튼 자체는 잠글 수 없어. 승인 없이 병합되면 나중에 자동으로 이슈가 열려서 알려 줘. 마지막 안전망은 사람이야.</div></div>
+  </div>
+
+  <div class="next"><button data-go="deliver">← 작업 올리기</button><button data-go="merge">다음: 리뷰 · 병합하기 →</button></div>
+</article>
+
+<!-- ================= merge ================= -->
+<article class="panel" data-panel="merge" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">작업 닫기 · squash merge</div>
+    <h2>리뷰 · 병합하기</h2>
+    <p class="lead">작성자가 아닌 사람이 한 번 이상 읽은 뒤에 병합해. 병합은 squash 로 해.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>검사가 다 초록불이고, 필요한 승인을 받았을 때.</div>
+    <div><div class="lbl">누가</div>기본은 사람. Claude 는 아래 조건을 모두 만족할 때만 혼자 병합해.</div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>내가 쓴 글의 오타는 내 눈에 안 보여. 그래서 <b>다른 사람</b>이 읽어. Claude 도 자기 결과를 스스로 승인하지 않아.</p>
+    <p><b>squash</b>는 작업 중에 붙인 메모 열 장을 깔끔한 한 장으로 정리해서 진열대에 붙이는 거야.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>리뷰</b><span>작성자가 아닌 사람</span></div><div class="arrow"></div>
+      <div class="node hl"><b>squash 병합</b><span>GitHub 의 Merge 버튼</span></div><div class="arrow"></div>
+      <div class="node"><b>Teams 알림</b><span>자동</span></div><div class="arrow"></div>
+      <div class="node ok"><b>원장 "완료"</b><span>사람이 직접 적음</span></div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>Claude 가 혼자 병합해도 되는 경우</h3>
+      <p style="font-size:14.5px;margin-bottom:8px">아래를 <b>모두</b> 만족할 때만이야. 하나라도 애매하면 사람이 해.</p>
+      <ul class="todo">
+        <li>바뀐 파일이 README 와 <code>docs/</code> 뿐 (<code>docs/ssot/</code>, <code>docs/spec/</code> 은 빼고)</li>
+        <li>코드, 규칙, 템플릿, 설정 파일은 하나도 안 바뀜</li>
+        <li>검사가 전부 성공이고 충돌 없음</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>병합 뒤 할 일</h3>
+      <ul class="todo">
+        <li>진행 원장 줄의 상태를 <b>완료</b>로 직접 바꿔. 자동으로 안 바뀌어</li>
+        <li>다음 일을 하기 전에 <code>/harness:sync</code> 로 최신 상태를 받아</li>
+        <li>못 끝낸 일이 있으면 <code>/harness:wrapup</code></li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout ok"><span class="k">사람이 Merge</span><div>운영 경로를 바꾼 PR 이나 SRS 변경 PR 은 Claude 의 <code>gh pr merge</code> 가 거절돼. 사람이 GitHub 화면에서 Merge 버튼을 눌러.</div></div>
+  </div>
+
+  <div class="next"><button data-go="gate">← 검사 · 승인 받기</button><button data-go="wrapup">다음: 못 끝낸 일 남기기 →</button></div>
+</article>
+
+<!-- ================= wrapup ================= -->
+<article class="panel" data-panel="wrapup" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">작업 닫기 · /harness:wrapup</div>
+    <h2>못 끝낸 일 남기기</h2>
+    <p class="lead">오늘 다 못 한 일을 GitHub 이슈로 남겨서, 다음 사람(또는 내일의 나)이 이어받게 하는 일이야.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>세션을 마치는데 남은 일이 있을 때. 하다가 다른 문제를 발견했을 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>여기까지 하자</span><span>남은 건 이슈로 남겨줘</span><span>나머지는 다음에</span><span class="cmd">/harness:wrapup</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>퇴근 전에 냉장고에 붙이는 <b>메모</b>야. "우유 사기, 세탁기 돌리기" 처럼 남은 일을 적어 두면 머릿속에서 지워도 안 잊어버려.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>남은 일 뽑기</b><span>대화 내용에서</span></div><div class="arrow"></div>
+      <div class="node hl"><b>초안 보여 주기</b><span>이슈 목록</span></div><div class="arrow"></div>
+      <div class="node hl"><b>내가 고르기</b><span>고른 것만</span></div><div class="arrow"></div>
+      <div class="node"><b>중복 확인</b><span>이미 있는 이슈인지</span></div><div class="arrow"></div>
+      <div class="node ok"><b>등록</b><span>이슈 번호 보고</span></div>
+    </div>
+  </section>
+
+  <div class="callouts">
+    <div class="callout ok"><span class="k">구분</span><div>일을 <b>다 끝내서</b> 올리는 거면 wrapup 이 아니라 <code>/harness:deliver</code> 야. 둘 다 할 거면 deliver 먼저, 남은 건 wrapup.</div></div>
+    <div class="callout warn"><span class="k">고른 것만</span><div>내가 고르지 않은 항목은 이슈로 만들지 않아.</div></div>
+  </div>
+
+  <div class="next"><button data-go="merge">← 리뷰 · 병합하기</button><button data-go="scaffold">다음: 새 고객사 저장소 만들기 →</button></div>
+</article>
+
+<!-- ================= scaffold ================= -->
+<article class="panel" data-panel="scaffold" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">운영 담당 · /harness:scaffold</div>
+    <h2>새 고객사 저장소 만들기</h2>
+    <p class="lead">새 고객사 프로젝트를 시작할 때, 빈 저장소에 표준 폴더와 검사 설정을 한 번에 깔아 주는 일이야. 팀원보다는 운영 담당이 해.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>GitHub 에 새 고객사 저장소를 막 만들었을 때. 세션을 열었는데 "/harness:scaffold 를 실행하라" 는 안내가 뜰 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>초기 세팅해줘</span><span>프로젝트 구조 만들어줘</span><span class="cmd">/harness:scaffold</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>새 가게를 열 때 <b>표준 인테리어 세트</b>를 들여놓는 거야. 진열대, 서랍, 경비실, 기준표가 다 같은 자리에 있으니까 어느 가게에 가도 헤매지 않아.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>물어보기</b><span>고객사 · 프로젝트 이름, SRS 승인자</span></div><div class="arrow"></div>
+      <div class="node hl"><b>미리 보기</b><span>--dry-run</span></div><div class="arrow"></div>
+      <div class="node hl"><b>만들기</b><span>있는 파일은 건너뜀</span></div><div class="arrow"></div>
+      <div class="node ok"><b>보고</b><span>만든 것 · 건너뛴 것 · 다음 할 일</span></div>
+    </div>
+  </section>
+
+  <div class="tbl-wrap"><table>
+    <tr><th>만드는 것</th><th>무엇</th></tr>
+    <tr><td><code>CLAUDE.md</code></td><td>이 저장소에서 Claude 가 지킬 규칙</td></tr>
+    <tr><td><code>docs/ssot/SRS.md</code> · <code>docs/spec/</code></td><td>빈 SRS 틀과 Spec 자리</td></tr>
+    <tr><td><code>templates/</code> · <code>rules/</code></td><td>하네스 기본 틀, 양식 자리, 검사 규칙</td></tr>
+    <tr><td><code>conventions/</code></td><td>네이밍 규칙 자리</td></tr>
+    <tr><td><code>audit/changes/</code> · <code>audit/ledger/</code></td><td>변경 기록, 진행 원장</td></tr>
+    <tr><td><code>env/</code></td><td>SAP 서버 설정 예시</td></tr>
+    <tr><td><code>.github/workflows/</code></td><td>doc-guard, ssot-approval, risk-gate, ai-review, gitleaks</td></tr>
+    <tr><td><code>.github/ssot-approvers</code> · <code>risk-gate.yaml</code></td><td>승인자 명단, 위험 기준</td></tr>
+    <tr><td><code>.claude/settings.json</code></td><td>플러그인 자동 설치 안내, 자동 업데이트</td></tr>
+  </table></div>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">승인자</span><div>승인자 명단에 작성자 말고 다른 사람이 없으면, 위험한 PR 을 승인으로 통과시킬 수 없어.</div></div>
+    <div class="callout stop"><span class="k">지우지 마</span><div><code>rules/*.yaml</code> 을 다 지우면 모든 문서 검사가 설정 오류(검사 불능)로 실패해.</div></div>
+    <div class="callout ok"><span class="k">AI 리뷰</span><div>ai-review 는 기본으로 꺼져 있어. 켜려면 시크릿 등록과 <code>risk-gate.yaml</code> 의 <code>ai_review: true</code> 둘 다 필요해.</div></div>
+  </div>
+
+  <div class="next"><button data-go="wrapup">← 못 끝낸 일 남기기</button><button data-go="release">다음: 릴리즈 내기 →</button></div>
+</article>
+
+<!-- ================= release ================= -->
+<article class="panel" data-panel="release" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">운영 담당 · /release</div>
+    <h2>릴리즈 내기</h2>
+    <p class="lead">그동안 병합된 변경을 묶어서 날짜 이름표를 붙이고, 무엇이 바뀌었는지 노트를 쓰는 일이야. public-cloud 저장소에 있는 스킬이야.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>고객사에 한 묶음을 전달할 때. 의미 있는 변경이 쌓였을 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>릴리즈 내줘</span><span class="cmd">/release</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>잡지의 <b>호수</b>를 매기는 거야. "2026년 10월 12일 호" 처럼 날짜로 이름을 붙이고, 이번 호에 무엇이 실렸는지 목차를 써.</p>
+  </div></div>
+
+  <div class="cols">
+    <section class="box">
+      <h3>버전 이름</h3>
+      <pre>YYYY.MM.DD
+2026.10.12
+2026.10.12.2   ← 같은 날 두 번째</pre>
+    </section>
+    <section class="box">
+      <h3>노트 형식</h3>
+      <pre>## 추가
+- 판매오더 조회 앱 추가 (#148)
+## 수정
+## 문서
+## 기타</pre>
+      <p class="small" style="margin-top:10px">항목 끝에 PR 번호를 붙여.</p>
+    </section>
+  </div>
+
+  <div class="next"><button data-go="scaffold">← 새 고객사 저장소 만들기</button><button data-go="blocked">다음: 막혔을 때 →</button></div>
+</article>
+
+<!-- ================= blocked ================= -->
+<article class="panel" data-panel="blocked" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">곁에 두고 보기</div>
+    <h2>막혔을 때</h2>
+    <p class="lead">훅이 거절하면 메시지에 "다음:" 이 적혀 있어. 그걸 따라 하고, 안 맞으면 사람에게 물어봐.</p>
+  </header>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>경비원이 "여기는 못 지나가요, 저쪽 문으로 가세요" 라고 하면 저쪽 문으로 가면 돼. 담을 넘는 방법(<code>--no-verify</code>, 검사 끄기)을 찾기 시작하면 경비원을 둔 의미가 없어져.</p>
+  </div></div>
+
+  <div class="tbl-wrap"><table>
+    <tr><th>이런 말이 나오면</th><th>왜</th><th>이렇게 해</th></tr>
+    <tr><td>main 에서 커밋 거절</td><td>진열대에서 직접 만들려고 함</td><td><code>/harness:start</code> 로 브랜치부터</td></tr>
+    <tr><td>맨손 <code>git push</code> 거절</td><td>창구를 안 거침</td><td><code>/harness:deliver</code></td></tr>
+    <tr><td><code>--force</code> 거절</td><td>남의 작업을 지울 수 있음</td><td>쓰지 않아. deliver 가 안전한 방법을 씀</td></tr>
+    <tr><td>브랜치 이름 형식 거절</td><td>규칙과 다름</td><td><code>git branch -m feat/12-new-name</code></td></tr>
+    <tr><td>문서 저장 거절</td><td>템플릿과 다름 (빠진 절, 틀린 파일명)</td><td>메시지의 사유대로 고쳐서 다시 저장</td></tr>
+    <tr><td>코드 저장 거절 (CR-00x)</td><td>공통 개발 규칙 위반</td><td>코드를 고쳐. 꼭 필요하면 이유를 단 <code>harness:allow</code> 주석</td></tr>
+    <tr><td>엔진을 못 받음 / <code>uv</code> 없음</td><td>검사 도구가 없어 검사 불능</td><td><code>winget install --id astral-sh.uv -e</code> 후 Claude Code 다시 열기</td></tr>
+    <tr><td>git 명령이 전부 거절</td><td><code>jq</code> 가 없음</td><td>jq 설치 후 다시 열기</td></tr>
+    <tr><td>커밋 시 비밀정보 발견</td><td>비밀값이 섞임 (CR-004)</td><td>값을 빼. 진짜 비밀값이었으면 폐기하고 새로 발급</td></tr>
+    <tr><td>활성화 안 된 오브젝트</td><td>080 에 반쯤 지은 게 있음</td><td>활성화하거나, 필요 없으면 지워</td></tr>
+    <tr><td><code>gh pr merge</code> 거절</td><td>승인 없음, 검사 실패·진행 중, 사람이 병합할 경로</td><td>승인 받기, 검사 고치기, 또는 사람이 Merge 버튼</td></tr>
+    <tr><td>PR 이 자동으로 닫힘</td><td>팀원이 운영 파일을 바꿈</td><td>그 파일을 빼고 다시 올려. 필요하면 운영 담당에게 이슈로</td></tr>
+    <tr><td>산출 rejected</td><td>같은 이름의 판이 main 에 있음</td><td>문서의 버전을 올리고 다시 산출</td></tr>
+    <tr><td>SAP 401 · 400</td><td>로그인 만료</td><td><code>/c080</code>, <code>/c100</code></td></tr>
+    <tr><td>SAP 503</td><td>다른 폴더의 프록시가 포트를 잡음</td><td><code>node scripts/adt-proxy/session.js status</code> 의 "프록시 폴더" 확인</td></tr>
+    <tr><td><code>.sh</code> 실행 실패 (Windows)</td><td>줄바꿈이 CRLF 로 남음</td><td>그 파일만 다시 checkout</td></tr>
+  </table></div>
+
+  <section class="box" style="border-color:var(--stop)">
+    <h3>이건 Claude 도, 나도 함부로 하지 않아</h3>
+    <ul class="plain">
+      <li><code>--no-verify</code> 로 git hook 건너뛰기</li>
+      <li><code>HARNESS_SKIP_SECRET_SCAN</code> 으로 비밀정보 검사 끄기 (사람만, 이유가 분명할 때만)</li>
+      <li><code>.gitleaks.toml</code> 에 예외 목록 추가하기 (사람만)</li>
+      <li><code>git stash</code> (작업 공간끼리 공유돼서 남의 변경을 꺼낼 수 있어)</li>
+      <li>훅의 오류 표식 파일 지우기 (사람이 확인한 뒤에)</li>
+    </ul>
+  </section>
+
+  <div class="next"><button data-go="release">← 릴리즈 내기</button><button data-go="approval">다음: 승인이 필요할 때 →</button></div>
+</article>
+
+<!-- ================= approval ================= -->
+<article class="panel" data-panel="approval" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">곁에 두고 보기</div>
+    <h2>승인이 필요할 때</h2>
+    <p class="lead">승인은 두 종류야. GitHub PR 에 찍는 <b>Approve</b>, 그리고 Claude 가 일하다 멈추고 나한테 받는 <b>확인</b>.</p>
+  </header>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p><b>Approve</b> 는 결재 도장이야. 내가 올린 서류에 <b>다른 사람</b>이 도장을 찍어야 해. 내 도장은 안 쳐줘.</p>
+    <p><b>확인</b>은 옆자리 동료(Claude)가 "이거 이렇게 바꿔도 돼?" 하고 묻는 거야. 대답은 내가 해.</p>
+  </div></div>
+
+  <section>
+    <h3>1. GitHub Approve 가 필요한 PR</h3>
+    <div class="tbl-wrap"><table>
+      <tr><th>이런 PR 이면</th><th>승인</th><th>검사</th></tr>
+      <tr><td>SRS(<code>docs/ssot/</code>)를 바꿨다</td><td><span class="pill r">항상 필요</span></td><td><code>ssot-approval</code></td></tr>
+      <tr><td>바뀐 줄이 300줄을 넘는다</td><td><span class="pill w">필요</span></td><td rowspan="6"><code>risk-gate</code></td></tr>
+      <tr><td>바뀐 파일이 10개를 넘는다</td><td><span class="pill w">필요</span></td></tr>
+      <tr><td>위험 경로를 건드렸다<br><span class="small"><code>docs/ssot/</code> <code>docs/spec/</code> <code>rules/</code> <code>templates/</code> <code>conventions/</code> <code>.github/</code> <code>.claude/</code> <code>CLAUDE.md</code></span></td><td><span class="pill w">필요</span></td></tr>
+      <tr><td>추가한 줄에 비밀값처럼 생긴 게 있다</td><td><span class="pill w">필요</span></td></tr>
+      <tr><td>다른 검사가 실패했거나 아직 도는 중이다</td><td><span class="pill w">필요</span></td></tr>
+      <tr><td>AI 리뷰가 심각한 지적을 했거나, AI 리뷰를 못 돌렸다</td><td><span class="pill w">필요</span></td></tr>
+      <tr><td>위 어디에도 안 걸린다</td><td><span class="pill g">검사는 안 요구해</span></td><td>—</td></tr>
+    </table></div>
+    <p class="small" style="margin-top:10px">그래서 Spec(<code>docs/spec/</code>)을 바꾼 PR 도 위험 경로라 승인이 필요해. 코드(<code>src/</code>)만 조금 바꾼 PR 은 검사가 승인을 요구하지 않아.</p>
+    <p class="small" style="margin-top:6px">검사가 Approve 를 요구하지 않는 PR 이라도 <b>작성자가 아닌 사람이 한 번 읽고 병합</b>하는 건 같아. 검사가 확인하는 건 Approve 를 눌렀는지뿐이고, 읽었는지는 사람끼리 지키는 규칙이야. Claude 가 연 PR 은 내가 읽고 Merge 를 누르는 게 그 "다른 사람" 이야.</p>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>누가 찍어</h3>
+      <ul class="plain">
+        <li>승인자 명단은 <code>.github/ssot-approvers</code> 에 있어</li>
+        <li>팀원이 올린 PR 은 운영 담당(jaeheeMin)이 찍어</li>
+        <li>운영 담당이 올린 PR 은 명단의 다른 사람이 찍어</li>
+        <li>작성자 본인의 Approve 는 안 쳐줘</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>도장이 무효가 되는 때</h3>
+      <ul class="plain">
+        <li>Approve 뒤에 커밋을 더 올리면 다시 받아야 해. <b>마지막 커밋</b>에 찍힌 것만 쳐줘</li>
+        <li>나중에 누가 Request changes 를 하면 앞선 Approve 가 취소돼</li>
+        <li>승인을 받으면 빨간 불이던 검사가 자동으로 다시 돌아. 내가 다시 올릴 필요 없어</li>
+      </ul>
+    </section>
+  </div>
+
+  <section class="diagram" aria-label="승인 없이 병합하려 할 때">
+    <div class="flow">
+      <div class="node"><b>승인 없음</b><span>PR 검사 빨간 불 + 댓글</span></div><div class="arrow"></div>
+      <div class="node"><b>Claude 가 병합 시도</b><span>훅이 거절</span></div><div class="arrow"></div>
+      <div class="node"><b>사람이 Merge 버튼</b><span>무료 요금제라 못 막음</span></div><div class="arrow"></div>
+      <div class="node ok"><b>병합되면</b><span>자동으로 이슈가 열림 · 승인자가 사후 검토</span></div>
+    </div>
+    <div class="cap">승인 없이 병합하려 하면 이렇게 돼. 마지막 안전망은 사람이야.</div>
+  </section>
+
+  <section>
+    <h3>2. Claude 가 멈추고 나한테 확인받는 일</h3>
+    <div class="tbl-wrap"><table>
+      <tr><th>일</th><th>Claude 가 하는 것</th><th>지키는 방식</th></tr>
+      <tr><td>SAP 데이터 조회(<code>tableContents</code>, <code>runQuery</code>)</td><td>조회 전에 확인 창이 떠</td><td><span class="pill a">훅이 물어봐</span></td></tr>
+      <tr><td>SAP 코드 수정</td><td>문법 검사를 통과시킨 뒤, 바꿀 코드를 보여 주고 승인받아</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>ATC 대상 고르기</td><td>패키지면 오브젝트 목록을 보여 주고 범위를 확인해. 검진표(variant) 이름은 짐작하지 않고 물어</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>ATC "자동" 수정</td><td>묶음마다 무엇을 바꿀지 보여 주고 확인받아</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>ATC "확인 후" 수정</td><td>동작·성능·의미가 바뀔 수 있는 건 한 건씩 확인받아</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>ATC 면제(<code>"#EC</code>, exemption)</td><td>근거를 보여 주고 승인받아. 면제 신청은 제안서까지만 만들고 제출은 사람이 해</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>SRS 작성 중 모르는 점</td><td>한 번에 묶어서 물어. 답이 없으면 짐작하지 않고 "미결 사항" 에 남겨</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>문서 버전 크게 올리기</td><td>보통은 0.1 씩 올리고, 크게 바뀌면 얼마나 올릴지 물어</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>고객사 양식으로 산출</td><td>어떤 양식으로 할지, 나올 파일명이 맞는지 확인받아</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>진행 원장 등록</td><td><code>/harness:start</code> 때 개발 건으로 올릴지 물어</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>올리기 전 정리 안 된 변경</td><td><code>/harness:sync</code> 가 멈추고 올릴지, 임시 커밋할지, 그만둘지 물어</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>리베이스 충돌</td><td>혼자 풀지 않아. 멈추고 알린 뒤 새 브랜치(<code>-v2</code>)로 옮길지 물어</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>못 끝낸 일을 이슈로</td><td><code>/harness:wrapup</code> 이 초안을 보여 주고, 내가 고른 것만 등록해</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>릴리즈 내기</td><td>릴리즈 노트를 보여 주고 승인받은 뒤에 발행해</td><td><span class="pill">약속</span></td></tr>
+    </table></div>
+    <p class="small" style="margin-top:10px"><b>훅이 물어봐</b>는 내 PC 의 경비원(Hook)이 확인 창을 띄우는 거야. <b>약속</b>은 스킬과 규칙에 적힌 대로 Claude 가 스스로 멈추는 거라, 장치로 막혀 있지는 않아.</p>
+  </section>
+
+  <section class="box" style="border-color:var(--stop)">
+    <h3>승인으로도 안 되는 것</h3>
+    <ul class="plain">
+      <li>SAP 100(조회용)에 쓰기. 쓰기는 080 에서만 해</li>
+      <li>팀원이 운영 파일(<code>.github/</code>, <code>rules/</code>, <code>templates/</code> …) 바꾸기. PR 이 자동으로 닫혀. 운영 담당에게 이슈로 요청해</li>
+      <li>비밀정보 검사 끄기나 예외 추가. 사람만, 이유가 분명할 때만 해. Claude 에게 시키지 않아</li>
+      <li>훅이 막은 걸 다른 명령으로 돌아가기(<code>--no-verify</code> 등)</li>
+    </ul>
+  </section>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">약속이 깨지면</span><div>Claude 가 묻지 않고 SAP 코드를 바꾸거나 면제를 신청하려 하면 그 자리에서 멈추라고 말해.</div></div>
+    <div class="callout ok"><span class="k">검사 불능</span><div>승인 여부를 확인할 수 없으면(네트워크, 도구 없음) 통과로 치지 않고 "검사 불능" 으로 멈춰.</div></div>
+  </div>
+
+  <div class="next"><button data-go="blocked">← 막혔을 때</button><button data-go="rules">다음: 주의사항 총정리 →</button></div>
+</article>
+
+<!-- ================= rules ================= -->
+<article class="panel" data-panel="rules" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">곁에 두고 보기</div>
+    <h2>주의사항 총정리</h2>
+    <p class="lead">한 장으로 보는 요약이야. 헷갈리면 여기부터 봐.</p>
+  </header>
+
+  <div class="cols">
+    <section class="box" style="border-color:var(--ok)">
+      <h3 style="color:var(--ok)">항상 해</h3>
+      <ul class="todo">
+        <li>새 일은 <code>/harness:start</code> 로 이슈와 브랜치부터</li>
+        <li>올릴 땐 <code>/harness:deliver</code></li>
+        <li>다른 사람 변경을 받을 땐 <code>/harness:sync</code></li>
+        <li>못 끝낸 일은 <code>/harness:wrapup</code> 으로 이슈에</li>
+        <li>문서 버전은 파일명에 (첫 판 <code>_v0.1.xlsx</code>, 고칠 때마다 0.1 씩), 이전 판도 남겨</li>
+        <li>이름 짓기 전에 <code>conventions/naming.md</code></li>
+        <li>SRS 를 바꾸면 다른 사람 승인</li>
+        <li>병합 뒤 원장을 "완료" 로</li>
+        <li>검사를 못 했으면 "검사 불능" 이라고 말해</li>
+      </ul>
+    </section>
+    <section class="box" style="border-color:var(--stop)">
+      <h3 style="color:var(--stop)">절대 하지 마</h3>
+      <ul class="todo">
+        <li>main 에 직접 커밋하거나 푸시</li>
+        <li>맨손 <code>git push</code>, <code>--force</code>, <code>--no-verify</code></li>
+        <li>비밀번호, 토큰, 쿠키 파일 커밋</li>
+        <li>SAP 100 에 쓰기</li>
+        <li><code>src/</code> 를 SAP 보다 먼저 고치기</li>
+        <li>팀원이 운영 파일(<code>.github/</code>, <code>rules/</code> …) 바꾸기</li>
+        <li>SRS 요구사항 행 지우기 (Dropped 로 남겨)</li>
+        <li>main 에 있는 판 덮어쓰기</li>
+        <li>GitHub Desktop 으로 커밋하기</li>
+      </ul>
+    </section>
+  </div>
+
+  <section>
+    <h3>어디에 무엇이 있나 (public-cloud)</h3>
+    <div class="tbl-wrap"><table>
+      <tr><th>폴더</th><th>담는 것</th><th>팀원이 고침</th></tr>
+      <tr><td><code>docs/ssot/SRS.md</code></td><td>요구사항 정본, 하나뿐</td><td>✓</td></tr>
+      <tr><td><code>docs/spec/</code></td><td>개발 Spec, 개발 건마다 한 파일</td><td>✓</td></tr>
+      <tr><td><code>docs/srs/</code> · <code>docs/개발사양서/</code> · <code>docs/인터페이스/</code></td><td>고객사 양식으로 산출한 엑셀</td><td>✓</td></tr>
+      <tr><td><code>audit/changes/</code></td><td>왜 바꿨는지 남기는 변경 기록</td><td>✓</td></tr>
+      <tr><td><code>audit/ledger/</code></td><td>진행 원장. 개발 건의 상태 (대기 · 진행 · 리뷰 · 완료)</td><td>✓</td></tr>
+      <tr><td><code>src/</code></td><td>SAP ABAP 소스 사진(abapGit 형식)</td><td>✓</td></tr>
+      <tr><td><code>templates/</code></td><td>회사·고객사 양식 원본, 양식 지도(<code>forms/*.yaml</code>)</td><td>운영</td></tr>
+      <tr><td><code>rules/</code></td><td>문서 검사 기준. 지우면 모든 검사가 멈춤</td><td>운영</td></tr>
+      <tr><td><code>conventions/</code></td><td>이 프로젝트의 네이밍·코딩 규칙</td><td>운영</td></tr>
+      <tr><td><code>env/</code></td><td>SAP 서버별 쓰기 허용, ATC 검진표</td><td>운영</td></tr>
+      <tr><td><code>.github/</code> · <code>.claude/</code> · <code>scripts/</code></td><td>검사 워크플로, 훅, SAP 프록시</td><td>운영</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h3>문서 파일명 규칙</h3>
+    <div class="tbl-wrap"><table>
+      <tr><th>문서</th><th>파일명</th></tr>
+      <tr><td>개발 Spec</td><td><code>DEV-002-판매오더조회앱.md</code></td></tr>
+      <tr><td>Backlog List (SRS 산출)</td><td><code>BW_Backlog List_v0.2.xlsx</code></td></tr>
+      <tr><td>개발사양서</td><td><code>BW_개발사양서_CO-006-01_&lt;제목&gt;_v0.1.xlsx</code></td></tr>
+      <tr><td>인터페이스 매핑 스펙</td><td><code>BW_인터페이스_매핑_스펙_&lt;IFID&gt;_&lt;업무내역&gt;_v0.1.xlsx</code></td></tr>
+      <tr><td>변경 기록</td><td><code>20261012-SRS-판매오더조회추가.md</code></td></tr>
+      <tr><td>진행 원장</td><td><code>판매오더조회.md</code> (프로그램 이름)</td></tr>
+    </table></div>
+  </section>
+
+  <div class="next"><button data-go="approval">← 승인이 필요할 때</button><button data-go="glossary">다음: 용어 사전 →</button></div>
+</article>
+
+<!-- ================= glossary ================= -->
+<article class="panel" data-panel="glossary" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">곁에 두고 보기</div>
+    <h2>용어 사전</h2>
+    <p class="lead">대화와 메시지에 나오는 말을 원래 이름 그대로 두고, 옆에 쉬운 말을 붙였어.</p>
+  </header>
+
+  <dl class="glossary">
+    <div class="term"><dt>Repository<span>저장소</span></dt><dd><b>프로젝트 폴더 + 모든 변경 기록.</b> 우리는 public-cloud(작업장)와 blueward-harness(공구함) 두 개를 써.</dd></div>
+    <div class="term"><dt>Project Repository</dt><dd><b>고객사마다 하나씩 생기는 작업장.</b> 산출물과 그 회사의 검사 기준이 같이 들어 있어.</dd></div>
+    <div class="term"><dt>Plugin<span>harness</span></dt><dd><b>Claude Code 에 꽂는 공구함.</b> Skill, Hook, 규칙, 보조 에이전트가 들어 있어.</dd></div>
+    <div class="term"><dt>Skill<span>/harness:…</span></dt><dd><b>여러 단계를 한 번에 해 주는 단축 명령.</b> 이름을 치거나 말로 부탁하면 돼.</dd></div>
+    <div class="term"><dt>Hook</dt><dd><b>문 앞 경비원.</b> Claude 가 저장·커밋·푸시하려는 순간 규칙을 보고 막거나 알려 줘.</dd></div>
+    <div class="term"><dt>GitHub Actions</dt><dd><b>본사 검문소.</b> PR 이 올라오면 GitHub 서버에서 자동으로 검사가 돌아.</dd></div>
+    <div class="term"><dt>main</dt><dd><b>완성본 진열대.</b> PR 로만 바뀌어.</dd></div>
+    <div class="term"><dt>Branch<span>브랜치</span></dt><dd><b>내 작업대.</b> main 을 복사해서 그 위에서 일해.</dd></div>
+    <div class="term"><dt>Issue<span>이슈</span></dt><dd><b>작업지시서.</b> 배경, 해야 할 일, 완료 조건을 적어.</dd></div>
+    <div class="term"><dt>Commit<span>커밋</span></dt><dd><b>저장 지점.</b> 의미 하나를 담은 변경 묶음이야.</dd></div>
+    <div class="term"><dt>Push<span>푸시</span></dt><dd><b>내 커밋을 GitHub 에 보내기.</b> 우리는 deliver 로만 해.</dd></div>
+    <div class="term"><dt>PR<span>Pull Request</span></dt><dd><b>"이거 진열대에 올려도 될까요?" 요청서.</b> 여기서 검사와 리뷰가 일어나.</dd></div>
+    <div class="term"><dt>fetch · rebase</dt><dd><b>남들이 바꾼 걸 받아서, 내 작업을 그 위로 옮겨 놓기.</b></dd></div>
+    <div class="term"><dt>squash merge</dt><dd><b>여러 커밋을 하나로 접어서 병합.</b> main 기록이 깔끔해져.</dd></div>
+    <div class="term"><dt>Approve<span>승인</span></dt><dd><b>리뷰어의 "좋아요" 도장.</b> 최신 커밋에 찍힌 것만 쳐줘.</dd></div>
+    <div class="term"><dt>SRS<span>요구사항정의서</span></dt><dd><b>고객 주문서.</b> 저장소에 하나뿐인 정본이야.</dd></div>
+    <div class="term"><dt>SSOT</dt><dd><b>Single Source of Truth.</b> 진짜는 한 곳에만 둔다는 원칙.</dd></div>
+    <div class="term"><dt>Spec<span>개발 Spec</span></dt><dd><b>레시피 카드.</b> 요구사항 하나를 어떻게 만들지 적은 설계.</dd></div>
+    <div class="term"><dt>REQ · DEV 번호</dt><dd><b>같은 일의 번호표.</b> REQ-003 = DEV-003 = 이슈의 [DEV-003].</dd></div>
+    <div class="term"><dt>진행 원장<span>Ledger</span></dt><dd><b>개발 건 현황판.</b> 대기 → 진행 → 리뷰 → 완료.</dd></div>
+    <div class="term"><dt>Audit<span>변경 기록</span></dt><dd><b>"왜 바꿨는지" 일기장.</b> 한 기록에 파일 하나.</dd></div>
+    <div class="term"><dt>Template · 양식 지도</dt><dd><b>고객사 양식 원본과, 그 양식의 어느 칸에 무엇을 넣을지 적은 안내도.</b></dd></div>
+    <div class="term"><dt>산출<span>export</span></dt><dd><b>마크다운 정본을 고객사 엑셀 양식에 옮겨 찍기.</b> 서식과 그림은 그대로 둬.</dd></div>
+    <div class="term"><dt>doc-guard</dt><dd><b>문서를 재는 자.</b> Hook 과 Actions 가 같은 엔진을 빌려 써.</dd></div>
+    <div class="term"><dt>검사 불능</dt><dd><b>재 보지도 못한 상태.</b> 통과도 위반도 아니야.</dd></div>
+    <div class="term"><dt>gitleaks</dt><dd><b>비밀번호 탐지기.</b> 커밋 전과 PR 에서 돌아.</dd></div>
+    <div class="term"><dt>MCP · ADT</dt><dd><b>Claude 가 SAP 개발 도구에 직접 붙는 연결선.</b> ADT 는 SAP 의 개발 창구야.</dd></div>
+    <div class="term"><dt>활성화<span>activate</span></dt><dd><b>SAP 에 저장한 코드를 실제로 켜기.</b> 안 켜면 저장만 된 상태야.</dd></div>
+    <div class="term"><dt>ATC</dt><dd><b>SAP 의 코드 건강검진.</b> variant 는 어떤 항목을 볼지 정한 검진표야.</dd></div>
+    <div class="term"><dt>Subagent<span>서브에이전트</span></dt><dd><b>Claude 가 일을 나눠 맡기는 보조 Claude.</b> 조사·구현·검토가 따로야.</dd></div>
+  </dl>
+
+  <div class="next"><button data-go="rules">← 주의사항 총정리</button><button data-go="overview">처음으로 ↺</button></div>
+</article>
+
+  </main>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById('themeBtn');
+  var label = document.getElementById('themeLabel');
+  var icon = document.getElementById('themeIcon');
+  var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function currentDark() {
+    var t = root.getAttribute('data-theme');
+    if (t) return t === 'dark';
+    return !!(mq && mq.matches);
+  }
+  function paint() {
+    var dark = currentDark();
+    label.textContent = dark ? '라이트 모드' : '다크 모드';
+    icon.textContent = dark ? '☀' : '☾';
+  }
+  var saved = load('hg-theme');
+  if (saved === 'dark' || saved === 'light') root.setAttribute('data-theme', saved);
+  paint();
+  if (mq && mq.addEventListener) mq.addEventListener('change', paint);
+  btn.addEventListener('click', function () {
+    var next = currentDark() ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    store('hg-theme', next);
+    paint();
+  });
+
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+  var panels = Array.prototype.slice.call(document.querySelectorAll('[data-panel]'));
+  var ids = panels.map(function (p) { return p.getAttribute('data-panel'); });
+  function show(id, scroll) {
+    if (ids.indexOf(id) < 0) id = 'overview';
+    panels.forEach(function (p) { p.hidden = p.getAttribute('data-panel') !== id; });
+    tabs.forEach(function (t) {
+      var on = t.getAttribute('data-tab') === id;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      if (on) { try { t.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch (e) {} }
+    });
+    store('hg-tab', id);
+    if (location.hash.slice(1) !== id) { try { history.replaceState(null, '', '#' + id); } catch (e) {} }
+    if (scroll) window.scrollTo(0, 0);
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () { show(t.getAttribute('data-tab'), true); });
+    t.addEventListener('keydown', function (e) {
+      var d = (e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : (e.key === 'ArrowUp' || e.key === 'ArrowLeft') ? -1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      var n = tabs[(i + d + tabs.length) % tabs.length];
+      n.focus(); show(n.getAttribute('data-tab'), false);
+    });
+  });
+  document.querySelectorAll('[data-go]').forEach(function (b) {
+    b.addEventListener('click', function () { show(b.getAttribute('data-go'), true); });
+  });
+  window.addEventListener('hashchange', function () { show(location.hash.slice(1), true); });
+  show(location.hash.slice(1) || load('hg-tab') || 'overview', false);
+})();
+</script>
