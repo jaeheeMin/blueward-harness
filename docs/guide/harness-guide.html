@@ -277,7 +277,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.47, public-cloud main 기준 (2026-10-12)</div>
+      <div class="note">harness 0.10.49, public-cloud main 기준 (2026-10-12)</div>
     </div>
   </nav>
 
@@ -490,7 +490,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       <h3>start 가 해 주는 일</h3>
       <ol class="steps">
         <li><div>저장 안 한 변경이 있으면 먼저 정리할지 물어봐</div></li>
-        <li><div>main 으로 가서 GitHub 최신 상태를 받아 와</div></li>
+        <li><div>main 으로 가서 GitHub 최신 상태를 받아 와. worktree 에서 열어 main 으로 못 옮기면 GitHub 의 최신 main(<code>origin/main</code>)에서 바로 브랜치를 따</div></li>
         <li><div>GitHub 이슈를 만들어 (제목 명사형, 본문은 <b>배경 / 해야 할 일 / 완료 조건</b>, 라벨 <code>type:feat</code> 등)</div></li>
         <li><div>개발 건(feat, fix)이면 이슈 제목 앞에 번호를 찜해. 예: <code>[DEV-003] 판매오더 조회 앱</code></div></li>
         <li><div>규칙에 맞는 브랜치를 만들고 이동해</div></li>
@@ -621,6 +621,8 @@ fix/31-broken-link</pre>
         <li>먼저 <code>/harness:start</code> 로 이슈와 브랜치를 열어 (예: <code>docs/…</code>)</li>
         <li>입력 자료를 Claude 에게 줘</li>
         <li>Claude 가 모아서 묻는 질문에 답해. 모르면 "미결 사항" 에 남겨도 돼</li>
+        <li>누가·언제·왜 요청했는지 알려 줘. 요구사항마다 Short Description 첫 줄에 <code>요청: 홍길동(영업팀), 2026-10-12, 킥오프 회의록</code> 처럼 들어가</li>
+        <li>끝에 Claude 가 보여 주는 <b>찜한 번호 표</b>(REQ 번호 · 제목 · <code>[DEV-xxx]</code> 이슈)를 확인해</li>
         <li>다 되면 <code>/harness:deliver</code> 로 PR 을 올려</li>
         <li>작성자가 아닌 승인자에게 Approve 를 받아</li>
       </ul>
@@ -642,10 +644,14 @@ fix/31-broken-link</pre>
         <p class="small" style="margin-bottom:6px">절</p>
         <p style="font-size:14.5px">배경과 목표 · 범위 · AS-IS/TO-BE · 요구사항 · 참조 · 미결 사항. 맨 위에 <code>버전: 0.1</code> 줄이 있고, 이 값이 엑셀 파일명의 버전이 돼.</p>
         <p class="small" style="margin:10px 0 6px">요구사항 표 열</p>
-        <p style="font-size:14.5px">ID, Title, LoB, Type, Status, Priority (PO), 출처</p>
+        <p style="font-size:14.5px">ID, Title, LoB, Type, Status, Priority (PO), Development RICEFW ID, 출처. 양식 지도에 있는데 표에 빠진 열이 있으면 Claude 가 열을 더하고 채워.</p>
       </div>
       <pre>### REQ-002 판매오더 조회
 #### Short Description
+요청: 홍길동(영업팀), 2026-10-12, 회의록
+판매오더를 기간별로 조회한다 (요약만)
+#### Acceptance Criteria
+- 세부 기능은 여기에
 …</pre>
     </div>
     <p class="small" style="margin:14px 0 6px">상태(Status)는 이 일곱 가지뿐이야</p>
@@ -662,11 +668,12 @@ fix/31-broken-link</pre>
       <li>요구사항이 바뀌거나 취소될 때: "REQ-003 취소됐어"</li>
       <li>개발 시작할 때: <code>[DEV-003]</code> 이슈로 <code>/harness:start</code></li>
     </ul>
-    <p class="small" style="margin-top:10px">잊었으면 <code>docs/ssot/SRS.md</code> 요구사항 표의 ID 열, 또는 GitHub 이슈 제목 앞의 <code>[DEV-xxx]</code> 에서 찾아. 고객사 양식의 개발 ID(<code>CO-006-01</code>)와는 다른 번호야.</p>
+    <p class="small" style="margin-top:10px">SRS 를 만들거나 고친 끝에 Claude 가 새로 찜한 번호를 표로 꼭 알려 줘. 잊었으면 <code>docs/ssot/SRS.md</code> 요구사항 표의 ID 열, 또는 GitHub 이슈 제목 앞의 <code>[DEV-xxx]</code> 에서 찾아. 고객사 양식의 개발 ID(<code>CO-006-01</code>)와는 다른 번호야.</p>
   </section>
 
   <div class="callouts">
     <div class="callout warn"><span class="k">번호</span><div>REQ 번호는 Claude 가 번호표 기계로 받아서 붙여. 마지막 번호에 손으로 1 을 더하지 않아.</div></div>
+    <div class="callout warn"><span class="k">긴 칸</span><div>Short Description 은 몇 줄짜리 요약으로 써. 엑셀 한 칸은 높이 한계(409pt)를 넘으면 잘려 보여. 세부 기능은 Acceptance Criteria 로 나눠. 산출 때 <code>cell-too-tall</code> 경고가 나오면 그 칸이 너무 긴 거야.</div></div>
     <div class="callout warn"><span class="k">옛 이름</span><div><code>docs/ssot/PRD.md</code> 만 있는 옛 구조면, 조용히 새로 만들지 않고 옮길지 먼저 물어봐.</div></div>
     <div class="callout warn"><span class="k">승인 필요</span><div>SRS 를 바꾼 PR 은 작성자 말고 다른 승인자의 Approve 가 있어야 병합돼.</div></div>
   </div>
@@ -874,7 +881,7 @@ fix/31-broken-link</pre>
     <div class="tbl-wrap"><table>
       <tr><th>결과</th><th>뜻</th><th>할 일</th></tr>
       <tr><td><span class="pill g">ok</span></td><td>잘 찍혔어</td><td>PR 로 올려</td></tr>
-      <tr><td><span class="pill w">warning</span></td><td>찍혔지만 걸리는 게 있어 (드롭다운에 없는 값 등)</td><td>경고 내용을 보고 고쳐</td></tr>
+      <tr><td><span class="pill w">warning</span></td><td>찍혔지만 걸리는 게 있어 (드롭다운에 없는 값, 너무 길어 잘릴 칸 <code>cell-too-tall</code> 등)</td><td>경고 내용을 보고 고쳐</td></tr>
       <tr><td><span class="pill r">rejected</span></td><td>거절 (같은 이름의 판이 main 에 이미 있음 등)</td><td>버전을 올리고 다시</td></tr>
       <tr><td><span class="pill r">error</span></td><td>오류로 못 찍음</td><td>메시지를 보고 사람에게</td></tr>
     </table></div>
