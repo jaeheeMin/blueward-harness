@@ -10,7 +10,11 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 
 1. 현재 브랜치가 main 이 아니고 미커밋 변경이 남아 있으면, 먼저 `/harness:deliver` 로
    정리할 것인지 사용자에게 확인한다.
-2. main 으로 이동하고 `fetch` 와 `pull --rebase` 를 실행한다.
+2. main 으로 이동하고 `fetch` 와 `pull --rebase` 를 실행한다. 세션이 worktree 에서
+   열려 main 이 다른 worktree 에 체크아웃돼 있으면 `git checkout main` 이
+   `'main' is already used by worktree` 로 실패한다. 이때는 그 main 을 건드리지 않고
+   `git fetch origin` 만 한 뒤, 4단계에서 브랜치를 `origin/main` 에서 바로 딴다
+   (`git checkout -b <브랜치> origin/main`).
 3. 사용자가 설명한 작업 내용으로 GitHub 이슈를 만든다. 제목과 본문과 라벨을
    `<이 스킬의 base directory>/../../rules/issue-and-release.md` 의 형식에
    맞춘다. `<이 스킬의 base directory>` 는 이 스킬이 로드될 때 위에 표시되는
