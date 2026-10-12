@@ -36,7 +36,8 @@
 
 `ssot.yaml` 외에 `audit-changes.yaml` 과 `audit-ledger.yaml` 과 `spec.yaml`
 도 이미 있다. `ssot.yaml` 은 `docs/ssot/SRS.md` 의 파일 이름과 필수 절
-(`templates/harness/SRS.md` 의 `##` 제목)을 검사하고, `audit-changes.yaml`
+(`templates/harness/SRS.md` 의 `##` 제목)을 검사하고 상세 절이 다른 REQ·DEV 번호를
+말하면 `관계: 별개 — <이유>` 줄을 요구하며(`req_cross_reference`), `audit-changes.yaml`
 과 `audit-ledger.yaml` 은 `audit/changes/` 와 `audit/ledger/` 에 쓰는 기록의
 파일 이름과 필수 절을 검사하고, `spec.yaml` 은 `docs/spec/` 에 쓰는 개발
 Spec 의 파일 이름(`DEV-001-<요약>.md`)과 필수 절(`templates/harness/spec.md`

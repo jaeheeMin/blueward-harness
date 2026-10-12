@@ -89,7 +89,7 @@ templates/harness/audit-change.md  변경 기록 템플릿
 templates/harness/audit-ledger.md  진행 원장 템플릿
 templates/forms/.gitkeep           양식 지도(고객사 양식의 시트·칸 위치)가 쌓일 자리
 rules/README.md                    규칙 작성법과 예시
-rules/ssot.yaml                    SRS 파일명·필수 절 규칙
+rules/ssot.yaml                    SRS 파일명·필수 절·번호 언급 규칙
 rules/spec.yaml                    Spec 파일명·필수 절 규칙
 rules/audit-changes.yaml           변경 기록의 파일명·필수 절 규칙
 rules/audit-ledger.yaml            진행 원장의 파일명·필수 절 규칙
