@@ -39,20 +39,15 @@ def _excluded(line: str, start: int, patterns: list[re.Pattern]) -> bool:
     return any(p.search(before) for p in patterns)
 
 
-@rule("req_cross_reference")
-def check(path: Path, params: dict) -> list[Violation]:
-    prefix = str(params.get("관계_접두어") or params.get("relation_prefix") or DEFAULT_PREFIX).strip()
-    raw = params.get("제외_패턴") or params.get("exclude_patterns") or DEFAULT_EXCLUDE
-    try:
-        excludes = [re.compile(p) for p in raw]
-    except (re.error, TypeError) as exc:
-        raise ConfigError(f"req_cross_reference 규칙의 '제외_패턴' 이 올바른 정규식 목록이 아니다: {exc}") from exc
+def parse_sections(text: str) -> list[tuple[str, list[str]]]:
+    """`### REQ-n` 상세 절을 (REQ-n, 제목 아래 줄들) 로 나눈다. 코드 펜스 안은 예시라 뺀다.
 
-    lines = _text(path).splitlines()
-    sections: list[tuple[str, list[str]]] = []  # (REQ-n, 제목 아래 줄들)
+    risk-gate 의 쪼개짐 의심 기준(#278)도 같은 파싱을 쓴다 — 두 벌로 만들지 않는다.
+    """
+    sections: list[tuple[str, list[str]]] = []
     cur: tuple[str, list[str]] | None = None
     fence: str | None = None  # 열린 펜스의 문자(` 또는 ~)
-    for line in lines:
+    for line in text.splitlines():
         fm = _FENCE.match(line)
         if fm:
             if fence is None:
@@ -72,34 +67,55 @@ def check(path: Path, params: dict) -> list[Violation]:
             continue
         if cur is not None:
             cur[1].append(line)
+    return sections
+
+
+def collect_mentions(
+    rid: str, body: list[str], prefix: str, excludes: list[re.Pattern]
+) -> tuple[list[str], bool, bool]:
+    """상세 절 본문에서 (다른 번호 언급, 관계 줄 인정 여부, 관계 줄이 소제목 아래라 거부됐는지)."""
+    own = rid.split("-")[1]
+    relation_ok = False
+    relation_misplaced = False
+    seen_h4 = False
+    others: list[str] = []
+    for line in body:
+        if _H4.match(line):
+            seen_h4 = True
+        stripped = line.strip().lstrip("-*").strip()
+        if stripped.startswith(prefix):
+            if stripped[len(prefix):].strip().lstrip("—–-:").strip():
+                if seen_h4:
+                    relation_misplaced = True
+                else:
+                    relation_ok = True
+            continue  # 관계 줄 안의 번호(이유)는 언급으로 세지 않는다
+        for m in _NUM.finditer(line):
+            kind, num = m.group(1), m.group(2)
+            if int(num) == int(own):  # 자기 번호(REQ-n, DEV-n)는 다른 번호가 아니다
+                continue
+            if _excluded(line, m.start(), excludes):
+                continue
+            label = f"{kind}-{num}"
+            if label not in others:
+                others.append(label)
+    return others, relation_ok, relation_misplaced
+
+
+@rule("req_cross_reference")
+def check(path: Path, params: dict) -> list[Violation]:
+    prefix = str(params.get("관계_접두어") or params.get("relation_prefix") or DEFAULT_PREFIX).strip()
+    raw = params.get("제외_패턴") or params.get("exclude_patterns") or DEFAULT_EXCLUDE
+    try:
+        excludes = [re.compile(p) for p in raw]
+    except (re.error, TypeError) as exc:
+        raise ConfigError(f"req_cross_reference 규칙의 '제외_패턴' 이 올바른 정규식 목록이 아니다: {exc}") from exc
+
+    sections = parse_sections(_text(path))
 
     violations: list[Violation] = []
     for rid, body in sections:
-        own = rid.split("-")[1]
-        relation_ok = False
-        relation_misplaced = False
-        seen_h4 = False
-        others: list[str] = []
-        for line in body:
-            if _H4.match(line):
-                seen_h4 = True
-            stripped = line.strip().lstrip("-*").strip()
-            if stripped.startswith(prefix):
-                if stripped[len(prefix):].strip().lstrip("—–-:").strip():
-                    if seen_h4:
-                        relation_misplaced = True
-                    else:
-                        relation_ok = True
-                continue  # 관계 줄 안의 번호(이유)는 언급으로 세지 않는다
-            for m in _NUM.finditer(line):
-                kind, num = m.group(1), m.group(2)
-                if int(num) == int(own):  # 자기 번호(REQ-n, DEV-n)는 다른 번호가 아니다
-                    continue
-                if _excluded(line, m.start(), excludes):
-                    continue
-                label = f"{kind}-{num}"
-                if label not in others:
-                    others.append(label)
+        others, relation_ok, relation_misplaced = collect_mentions(rid, body, prefix, excludes)
         if not others or relation_ok:
             continue
         hint = (

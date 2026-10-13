@@ -68,7 +68,10 @@ Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험�
 없으니 한 명 이상 적어 둔다.
 
 기준은 `.github/risk-gate.yaml`(`max_changed_lines`, `max_changed_files`, `high_risk_paths`,
-`secret_scan`, `require_checks_green`, `ai_review`, `approvers_file`)에서 고친다. 이 파일은
+`secret_scan`, `require_checks_green`, `ai_review`, `srs_split_hint`, `approvers_file`)에서 고친다.
+`srs_split_hint`(기본 `true`)는 SRS 에 새 요구사항이 생겼는데 기존 요구사항을 넓힌 것처럼 보일 때
+(상세 절의 다른 번호 언급, 범위 "하지 않는 것" 줄 변경, 제목 겹침) 근거를 위험 사유로 붙인다.
+막는 기준이 아니라 승인자가 확인하게 하는 표시다. 이 파일은
 기준 브랜치에서 읽으므로 고친 값은 병합된 뒤부터 적용되고, 파일을 지우면 게이트가 꺼진다.
 **blueward-harness 저장소 자신은 승인자가 한 명뿐이라 아직 이 파일을 두지 않아 게이트가
 꺼져 있다.**

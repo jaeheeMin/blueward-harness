@@ -278,7 +278,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.55, public-cloud main 기준 (2026-10-13)</div>
+      <div class="note">harness 0.10.56, public-cloud main 기준 (2026-10-13)</div>
     </div>
   </nav>
 
@@ -1172,7 +1172,7 @@ Closes #143</pre>
     <tr><td><code>doc-guard</code></td><td>문서가 템플릿을 따르는지. 파일명, 위치, 필수 절, 엑셀 시트·표 머리, 다른 거래처 흔적</td><td>PR 에 댓글로 이유를 남김</td></tr>
     <tr><td><code>gitleaks</code></td><td>비밀번호, 토큰, SAP 쿠키 같은 비밀정보 (CR-004)</td><td>값은 가려서 보여 줌</td></tr>
     <tr><td><code>ssot-approval</code></td><td>SRS(<code>docs/ssot/</code>)를 바꿨으면 승인자의 Approve 가 있는지</td><td>승인 받으면 자동 재실행</td></tr>
-    <tr><td><code>risk-gate</code></td><td>PR 이 위험한지. 300줄 초과, 10파일 초과, 위험 경로, 비밀값 모양, 다른 검사 실패</td><td>위험하면 승인자 Approve 필요</td></tr>
+    <tr><td><code>risk-gate</code></td><td>PR 이 위험한지. 300줄 초과, 10파일 초과, 위험 경로, 비밀값 모양, 다른 검사 실패. SRS 에 새 요구사항이 생겼는데 기존 요구사항을 넓힌 것처럼 보이면(다른 번호 언급, "하지 않는 것" 줄 변경, 제목 겹침) 그 근거를 사유로 붙임</td><td>위험하면 승인자 Approve 필요</td></tr>
     <tr><td><code>ai-review</code></td><td>위험도가 낮은 PR 을 Claude 가 리뷰</td><td>의견 댓글</td></tr>
     <tr><td><code>ops-guard</code></td><td>팀원이 운영 파일을 바꿨는지</td><td>PR 을 자동으로 닫음</td></tr>
     <tr><td><code>notify-teams</code></td><td>병합된 PR</td><td>Teams 로 알림</td></tr>
@@ -1505,6 +1505,7 @@ Closes #143</pre>
       <tr><td>위 어디에도 안 걸린다</td><td><span class="pill g">검사는 안 요구해</span></td><td>—</td></tr>
     </table></div>
     <p class="small" style="margin-top:10px">그래서 Spec(<code>docs/spec/</code>)을 바꾼 PR 도 위험 경로라 승인이 필요해. 코드(<code>src/</code>)만 조금 바꾼 PR 은 검사가 승인을 요구하지 않아.</p>
+    <p class="small" style="margin-top:6px">SRS 에 새 요구사항이 들어왔는데 기존 요구사항을 넓힌 것처럼 보이면 PR 에 근거가 붙어. 막는 게 아니라 승인자가 "정말 별개인가" 를 확인하라는 표시야.</p>
     <p class="small" style="margin-top:6px">검사가 Approve 를 요구하지 않는 PR 이라도 <b>작성자가 아닌 사람이 한 번 읽고 병합</b>하는 건 같아. 검사가 확인하는 건 Approve 를 눌렀는지뿐이고, 읽었는지는 사람끼리 지키는 규칙이야. Claude 가 연 PR 은 내가 읽고 Merge 를 누르는 게 그 "다른 사람" 이야.</p>
   </section>
 

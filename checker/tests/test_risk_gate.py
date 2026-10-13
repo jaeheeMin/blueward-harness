@@ -860,7 +860,7 @@ def test_main_인자를_해석한다(monkeypatch):
 
 def test_기준_등록부는_이름이_겹치지_않는다():
     names = [n for n, _ in rg.CRITERIA]
-    assert names == ["size", "paths", "secret", "checks", "ai_review"]
+    assert names == ["size", "paths", "secret", "split_hint", "checks", "ai_review"]
     assert len(names) == len(set(names))
 
 
@@ -934,3 +934,247 @@ def test_cmd_precheck_pr_판정_불가는_2(monkeypatch, capsys, exc):
 def test_main_precheck_pr_인자를_해석한다(monkeypatch):
     monkeypatch.setattr(rg, "precheck_pr", lambda c, r, p: {"enabled": True, "gate": True, "risky": False, "reasons": []})
     assert rg.main(["precheck-pr", "--repo", "o/r", "--pr", "5"]) == 0
+
+
+# --- SRS 쪼개짐 의심(#278) ----------------------------------------------------------
+
+SRS_BASE = """# SRS
+
+## 범위
+
+- 하는 것:
+  - 판매오더 조회 (REQ-002)
+- 하지 않는 것:
+  - 판매오더 생성·변경·삭제 (조회 전용)
+  - Fiori Launchpad 노출(IAM App, Business Catalog, Role)과 외부 소비용 API 서비스
+  - 개발사양서 xlsx 작성
+
+## 요구사항
+
+| ID | Title | Status |
+|---|---|---|
+| REQ-001 | 회계전표 Excel 업로드 일괄 전기 | New |
+| REQ-002 | 판매오더 조회 앱 | In Process |
+
+### REQ-002 판매오더 조회 앱
+
+#### Short Description
+
+조회 전용 앱.
+"""
+
+REQ3_ROW = "| REQ-003 | 판매오더 조회 앱 Fiori Launchpad 타일 노출 | New |"
+SRS_HEAD_INCIDENT = (
+    SRS_BASE.replace(
+        "  - Fiori Launchpad 노출(IAM App, Business Catalog, Role)과 외부 소비용 API 서비스",
+        "  - Fiori Launchpad 노출은 REQ-003 으로 따로 다룬다. 외부 소비용 API 서비스는 하지 않는다",
+    ).replace("| REQ-002 | 판매오더 조회 앱 | In Process |", "| REQ-002 | 판매오더 조회 앱 | In Process |\n" + REQ3_ROW)
+    + "\n### REQ-003 판매오더 조회 앱 Fiori Launchpad 타일 노출\n\n#### Short Description\n\n"
+    "판매오더 조회 앱(REQ-002)을 타일로 연다. DEV-002 개발 중 범위 밖으로 둔 항목.\n"
+)
+SRS_HEAD_SEPARATE = (
+    SRS_BASE.replace("| REQ-002 | 판매오더 조회 앱 | In Process |", "| REQ-002 | 판매오더 조회 앱 | In Process |\n| REQ-003 | 재고 이동 일괄 등록 | New |")
+    + "\n### REQ-003 재고 이동 일괄 등록\n\n#### Short Description\n\n창고 간 재고 이동을 엑셀로 올린다.\n"
+)
+SRS_HEAD_EDIT_ONLY = SRS_BASE.replace("조회 전용 앱.", "조회 전용 앱. 필터는 자재코드·수량·금액.").replace(
+    "| REQ-002 | 판매오더 조회 앱 | In Process |", "| REQ-002 | 판매오더 조회 앱 | Done |"
+)
+
+
+MERGE_BASE = "mmmmmmm0000"
+
+
+def _srs_client(head_text, *, patch_row=REQ3_ROW, config="", base_text=SRS_BASE, srs_status="modified", patch=True):
+    files = [_file("docs/ssot/SRS.md", 20, 1, patch=_patch(patch_row) if patch else None)]
+    files[0]["status"] = srs_status
+    client = _client(config=config, files=files)
+    client.responses[f"repos/o/r/compare/main...{HEAD}?per_page=1"] = {"merge_base_commit": {"sha": MERGE_BASE}}
+    if base_text is not None:
+        client.responses[f"repos/o/r/contents/docs/ssot/SRS.md?ref={MERGE_BASE}"] = _b64(base_text)
+    client.responses[f"repos/o/r/contents/docs/ssot/SRS.md?ref={HEAD}"] = _b64(head_text)
+    return client
+
+
+def _hint_reasons(result):
+    return [r for r in result["reasons"] if "SRS 새 요구사항" in r]
+
+
+def test_split_hint_는_기본으로_켜져_있다():
+    assert rg.load_config("")["srs_split_hint"] is True
+    assert rg.load_config("srs_split_hint: false")["srs_split_hint"] is False
+    with pytest.raises(rg.ConfigError):
+        rg.load_config("srs_split_hint: 1")
+
+
+def test_사건_재현_세_근거가_모두_나온다():
+    result = rg.decide_pr(_srs_client(SRS_HEAD_INCIDENT), "o/r", 5)
+    (reason,) = _hint_reasons(result)
+    assert "REQ-003" in reason and "확장 의심" in reason
+    assert "(a)" in reason and "REQ-002, DEV-002" in reason
+    assert "(b)" in reason and "Fiori Launchpad 노출(IAM App" in reason
+    assert "(c)" in reason and "REQ-002 '판매오더 조회 앱'" in reason
+    assert "승인자가 SRS diff" in result["next"]
+
+
+def test_기존_REQ_내용만_고치면_사유_없음():
+    result = rg.decide_pr(_srs_client(SRS_HEAD_EDIT_ONLY, patch_row="| REQ-002 | 판매오더 조회 앱 | Done |"), "o/r", 5)
+    assert _hint_reasons(result) == []
+
+
+def test_완전히_별개인_새_REQ_는_사유_없음():
+    result = rg.decide_pr(_srs_client(SRS_HEAD_SEPARATE, patch_row="| REQ-003 | 재고 이동 일괄 등록 | New |"), "o/r", 5)
+    assert _hint_reasons(result) == []
+
+
+def test_설정을_끄면_사유_없음():
+    result = rg.decide_pr(_srs_client(SRS_HEAD_INCIDENT, config="srs_split_hint: false\n"), "o/r", 5)
+    assert _hint_reasons(result) == []
+
+
+def test_SRS_patch_가_없으면_검사_불능_사유():
+    result = rg.decide_pr(_srs_client(SRS_HEAD_INCIDENT, patch=False), "o/r", 5)
+    (reason,) = _hint_reasons(result)
+    assert "검사 불능" in reason and "너무 커서" in reason
+
+
+def test_SRS_를_읽지_못하면_검사_불능_사유():
+    result = rg.decide_pr(_srs_client(SRS_HEAD_INCIDENT, base_text=None), "o/r", 5)
+    (reason,) = _hint_reasons(result)
+    assert "검사 불능" in reason and "갈라진 지점" in reason
+
+
+def test_SRS_를_새로_만드는_PR_은_기준_SRS_없이도_본다():
+    head = SRS_HEAD_INCIDENT
+    result = rg.decide_pr(_srs_client(head, base_text=None, srs_status="added"), "o/r", 5)
+    reasons = _hint_reasons(result)
+    assert reasons and all("검사 불능" not in r for r in reasons)
+
+
+def test_SRS_가_안_바뀌면_SRS_를_읽지도_않는다():
+    client = _client(files=[_file("src/a.py")])
+    rg.decide_pr(client, "o/r", 5)
+    assert not any("SRS.md" in p for p in client.asked)
+
+
+def test_하지_않는_것_목록은_머리말_아래_들여쓴_줄까지다():
+    lines = rg.scope_exclusions(SRS_BASE)
+    assert lines[0].startswith("- 하지 않는 것") and len(lines) == 4
+    assert rg.scope_exclusions("## 범위\n\n- 하지 않는 것: 일부러 뺀다\n- 다른 목록\n") == ["- 하지 않는 것: 일부러 뺀다"]
+
+
+def _scope_srs(scope_line):
+    return SRS_BASE.replace(
+        "- 하지 않는 것:\n  - 판매오더 생성·변경·삭제 (조회 전용)\n"
+        "  - Fiori Launchpad 노출(IAM App, Business Catalog, Role)과 외부 소비용 API 서비스\n"
+        "  - 개발사양서 xlsx 작성\n",
+        scope_line + "\n",
+    )
+
+
+SEP_ROW = "| REQ-003 | 재고 이동 일괄 등록 | New |"
+
+
+def _with_sep_req(text):
+    return text.replace(
+        "| REQ-002 | 판매오더 조회 앱 | In Process |", "| REQ-002 | 판매오더 조회 앱 | In Process |\n" + SEP_ROW
+    )
+
+
+def test_main_이_앞서가도_갈라진_지점_기준이라_오탐이_없다():
+    base = _with_sep_req(SRS_BASE)  # 분기 시점의 SRS 는 head 와 같은 하지 않는 것 목록
+    client = _srs_client(_with_sep_req(SRS_BASE), base_text=SRS_BASE, patch_row=SEP_ROW)
+    # main 의 끝은 그 뒤 다른 PR 이 "하지 않는 것" 줄을 지우고 REQ 를 넣은 상태다. 읽으면 오탐이 난다.
+    client.responses["repos/o/r/contents/docs/ssot/SRS.md?ref=main"] = _b64(
+        _scope_srs("- 하지 않는 것: 없음").replace("| REQ-002 | 판매오더 조회 앱 | In Process |", "| REQ-002 | 판매오더 조회 앱 | In Process |\n" + SEP_ROW)
+    )
+    result = rg.decide_pr(client, "o/r", 5)
+    assert _hint_reasons(result) == []
+    assert "repos/o/r/contents/docs/ssot/SRS.md?ref=main" not in client.asked
+    assert f"repos/o/r/contents/docs/ssot/SRS.md?ref={MERGE_BASE}" in client.asked
+    assert base != SRS_BASE
+
+
+def test_갈라진_지점을_못_구하면_검사_불능():
+    client = _srs_client(SRS_HEAD_INCIDENT)
+    client.responses[f"repos/o/r/compare/main...{HEAD}?per_page=1"] = {}
+    (reason,) = _hint_reasons(rg.decide_pr(client, "o/r", 5))
+    assert "검사 불능" in reason and "merge-base" in reason
+
+
+def test_한_줄_형태에_항목을_덧붙이거나_문장부호만_고치면_사유_없음():
+    base = _scope_srs("- 하지 않는 것: 판매오더 생성, 변경, 삭제")
+    for scope in (
+        "- 하지 않는 것: 판매오더 생성, 변경, 삭제, 이관",
+        "- 하지 않는 것: 판매오더 생성; 변경 、 삭제.",
+        "- 하지 않는 것: 판매오더 생성 · 변경 · 삭제",
+    ):
+        client = _srs_client(_with_sep_req(_scope_srs(scope)), base_text=base, patch_row=SEP_ROW)
+        assert _hint_reasons(rg.decide_pr(client, "o/r", 5)) == [], scope
+
+
+def test_한_줄_형태에서_항목을_지우면_바뀐_항목만_근거로_든다():
+    base = _scope_srs("- 하지 않는 것: 판매오더 생성, 변경, 삭제")
+    head = _with_sep_req(_scope_srs("- 하지 않는 것: 판매오더 생성, 삭제, 이관"))
+    (reason,) = _hint_reasons(rg.decide_pr(_srs_client(head, base_text=base, patch_row=SEP_ROW), "o/r", 5))
+    assert "(b)" in reason and '"변경"' in reason and "생성" not in reason and "이관" not in reason
+
+
+def test_괄호_안_쉼표는_항목을_쪼개지_않는다():
+    items = rg.scope_items("- 하지 않는 것: 노출(IAM App, Role), 외부 API")
+    assert list(items.values()) == ["노출(IAM App, Role)", "외부 API"]
+
+
+def test_번호만_바뀐_REQ_는_새_REQ_가_아니다():
+    base = _with_sep_req(SRS_BASE)
+    head = base.replace("REQ-003", "REQ-004")
+    client = _srs_client(head, base_text=base, patch_row="| REQ-004 | 재고 이동 일괄 등록 | New |")
+    assert _hint_reasons(rg.decide_pr(client, "o/r", 5)) == []
+
+
+@pytest.mark.parametrize("content", [{"content": ""}, {"content": "!!!"}, {"content": "//79"}])
+def test_head_SRS_가_비었거나_디코딩_실패면_검사_불능(content):
+    client = _srs_client(SRS_HEAD_INCIDENT)
+    client.responses[f"repos/o/r/contents/docs/ssot/SRS.md?ref={HEAD}"] = content
+    (reason,) = _hint_reasons(rg.decide_pr(client, "o/r", 5))
+    assert "검사 불능" in reason and "PR 의 SRS" in reason
+
+
+def test_SRS_경로가_디렉터리_응답이면_검사_불능():
+    client = _srs_client(SRS_HEAD_INCIDENT)
+    client.responses[f"repos/o/r/contents/docs/ssot/SRS.md?ref={HEAD}"] = [{"name": "x"}]
+    (reason,) = _hint_reasons(rg.decide_pr(client, "o/r", 5))
+    assert "검사 불능" in reason
+
+
+def test_decide_pr_는_읽는_함수와_ref_를_Context_에_넘긴다(monkeypatch):
+    seen = {}
+
+    def fake_evaluate(ctx):
+        seen["ctx"] = ctx
+        return []
+
+    monkeypatch.setattr(rg, "evaluate", fake_evaluate)
+    client = _srs_client(SRS_HEAD_INCIDENT)
+    rg.decide_pr(client, "o/r", 5)
+    ctx = seen["ctx"]
+    assert ctx.head_ref == HEAD and ctx.base_ref == "main"
+    assert ctx.merge_base() == MERGE_BASE
+    assert ctx.read_text(HEAD, "docs/ssot/SRS.md") == SRS_HEAD_INCIDENT
+    assert ctx.read_text("nope", "docs/ssot/SRS.md") is None
+
+
+def test_config_ref_로_부르면_그_ref_와_head_의_갈라진_지점을_쓴다(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(rg, "evaluate", lambda ctx: seen.setdefault("ctx", ctx) and [])
+    client = _srs_client(SRS_HEAD_INCIDENT, config="")
+    client.responses["repos/o/r/contents/.github/risk-gate.yaml?ref=parent1"] = _b64("")
+    client.responses["repos/o/r/contents/.github/human-merge-paths?ref=parent1"] = _b64("")
+    client.responses[f"repos/o/r/compare/parent1...{HEAD}?per_page=1"] = {"merge_base_commit": {"sha": "mb2"}}
+    rg.decide_pr(client, "o/r", 5, config_ref="parent1")
+    assert seen["ctx"].base_ref == "parent1" and seen["ctx"].merge_base() == "mb2"
+
+
+def test_다음_안내에_split_hint_문구가_들어간다():
+    findings = [rg.Finding("split_hint", "x")]
+    nxt = rg.build_next(findings, "missing", ".github/ssot-approvers")
+    assert "SRS diff" in nxt and "기존 REQ 의 범위를 넓히" in nxt

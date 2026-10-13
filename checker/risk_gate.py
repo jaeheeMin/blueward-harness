@@ -21,6 +21,9 @@
 - `checks`    이 PR 의 다른 검사(check run, commit status)가 실패했거나 진행 중인가.
               게이트 자신(`risk-gate`)과 같은 PR 에서 도는 `ssot-approval`, `alert` 는 뺀다.
               자신을 세면 "자기 자신이 끝나길 기다리는" 교착이 생기기 때문이다.
+- `split_hint` `srs_split_hint`(기본 켬)일 때, SRS 에 새 요구사항이 생겼고 기존 요구사항을 넓힌 것처럼
+              보이는 근거(상세 절의 다른 번호 언급, 범위 "하지 않는 것" 줄 변경, 제목 겹침)가 있는가(#278).
+              막는 기준이 아니라 승인자에게 근거를 보여 주는 사유다. SRS diff 를 못 읽으면 검사 불능 사유다.
 - `ai_review` 설정에서 켠 때만 본다. 이름이 `ai-review` 인 check run 의 결론을 읽는다
               (success 면 통과, 그 밖의 결론이면 실패). 그 check run 은 재사용 워크플로
               `ai-review.yml`(#125)이 만든다. 실패는 "심각한 지적" 일 수도, "AI 리뷰를 못 돌린
@@ -66,6 +69,7 @@ from typing import Callable
 
 import yaml
 
+from checker.rules.req_cross_reference import DEFAULT_EXCLUDE, DEFAULT_PREFIX, collect_mentions, parse_sections
 from checker.ssot_approval import (
     EXIT_NOT_APPROVED,
     EXIT_OK,
@@ -114,11 +118,12 @@ DEFAULT_CONFIG: dict = {
     "secret_scan": True,
     "require_checks_green": True,
     "ai_review": False,
+    "srs_split_hint": True,
     "approvers_file": ".github/ssot-approvers",
 }
 
 _INT_KEYS = ("max_changed_lines", "max_changed_files")
-_BOOL_KEYS = ("secret_scan", "require_checks_green", "ai_review")
+_BOOL_KEYS = ("secret_scan", "require_checks_green", "ai_review", "srs_split_hint")
 
 _MAX_LISTED = 5  # 사유에 이름을 나열하는 최대 개수
 
@@ -333,6 +338,165 @@ def ai_review_reasons(check_runs: list[dict]) -> tuple[list[str], list[str]]:
     return [], []
 
 
+# --- SRS 쪼개짐 의심(#278) ---------------------------------------------------------
+
+SRS_PATH = "docs/ssot/SRS.md"
+# SRS 범위 절의 "- 하지 않는 것:" 목록 머리말(`templates/harness/SRS.md` 의 틀). 이 줄과 그 아래로 더 들여쓴 줄이 목록이다.
+SCOPE_EXCLUDED_MARKER = "하지 않는 것"
+MIN_TITLE_LEN = 4  # 포함 비교에서 이보다 짧은 제목은 뺀다(`reserve_number.py` 와 같은 기준)
+
+_REQ_ROW = re.compile(r"^\s*\|\s*(REQ-\d+)\s*\|\s*([^|]*?)\s*\|")
+_FENCE_LINE = re.compile(r"^\s*(`{3,}|~{3,})")
+_SCOPE_HEAD = re.compile(r"^(\s*)[-*]\s*" + re.escape(SCOPE_EXCLUDED_MARKER))
+_SHORT = 60  # 사유에 인용하는 줄의 최대 길이
+
+
+def _unfenced(text: str) -> list[str]:
+    out: list[str] = []
+    fence: str | None = None
+    for line in text.splitlines():
+        fm = _FENCE_LINE.match(line)
+        if fm:
+            fence = fm.group(1)[0] if fence is None else (None if fm.group(1)[0] == fence else fence)
+            continue
+        if fence is None:
+            out.append(line)
+    return out
+
+
+def req_titles(text: str) -> dict[str, str]:
+    """요구사항 표의 `| REQ-nnn | 제목 |` 줄에서 {번호: 제목}."""
+    titles: dict[str, str] = {}
+    for line in _unfenced(text):
+        m = _REQ_ROW.match(line)
+        if m:
+            titles.setdefault(m.group(1), m.group(2))
+    return titles
+
+
+def scope_exclusions(text: str) -> list[str]:
+    """범위 "하지 않는 것" 목록의 줄들(머리말 줄과 그 아래로 더 들여쓴 줄, 공백 정리)."""
+    lines = _unfenced(text)
+    for i, line in enumerate(lines):
+        m = _SCOPE_HEAD.match(line)
+        if not m:
+            continue
+        indent = len(m.group(1))
+        out = [line.strip()]
+        for nxt in lines[i + 1:]:
+            if not nxt.strip():
+                continue
+            if len(nxt) - len(nxt.lstrip()) <= indent:
+                break
+            out.append(nxt.strip())
+        return out
+    return []
+
+
+def _norm_title(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip().casefold()
+
+
+def _cut(text: str) -> str:
+    return text if len(text) <= _SHORT else text[:_SHORT] + "…"
+
+
+_ITEM_SEP = ",、;；，"
+_ITEM_TRAIL = " \t.。,、;；，"
+_ITEM_HEAD = re.compile(r"^[-*]\s*" + re.escape(SCOPE_EXCLUDED_MARKER) + r"\s*[:：]?")
+_ITEM_BULLET = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
+
+
+def _split_items(text: str) -> list[str]:
+    """한 줄 형태의 항목을 `,`·`、`·`;`·` · ` 로 쪼갠다. 괄호 안은 쪼개지 않는다."""
+    parts: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    for i, ch in enumerate(text):
+        if ch in "(（[":
+            depth += 1
+        elif ch in ")）]":
+            depth = max(depth - 1, 0)
+        sep = depth == 0 and (ch in _ITEM_SEP or (ch == "·" and text[i - 1:i].isspace() and text[i + 1:i + 2].isspace()))
+        if sep:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    parts.append("".join(buf))
+    return parts
+
+
+def scope_items(text: str) -> dict[str, str]:
+    """"하지 않는 것" 목록의 항목 {정규화한 항목: 원문}. 머리말 줄에 이어 쓴 항목은 쪼개고, 들여쓴 줄은 줄마다 항목이다."""
+    items: dict[str, str] = {}
+
+    def add(raw: str) -> None:
+        shown = re.sub(r"\s+", " ", raw).strip(_ITEM_TRAIL).strip()
+        if shown:
+            items.setdefault(shown.casefold(), shown)
+
+    lines = scope_exclusions(text)
+    if not lines:
+        return items
+    for raw in _split_items(_ITEM_HEAD.sub("", lines[0], count=1)):
+        add(raw)
+    for line in lines[1:]:
+        add(_ITEM_BULLET.sub("", line, count=1))
+    return items
+
+
+def split_hint_evidence(base_text: str, head_text: str) -> dict[str, list[str]]:
+    """SRS 에 새로 생긴 REQ 마다 "기존 요구사항을 넓힌 것일 수 있다" 는 근거를 모은다. 근거가 없는 REQ 는 뺀다.
+
+    (a) 새 REQ 상세 절이 다른 REQ·DEV 번호를 말한다(`req_cross_reference` 와 같은 파싱, 관계 줄 유무와 무관).
+    (b) 같은 PR 에서 범위 "하지 않는 것" 항목이 지워지거나 바뀌었다(항목 단위 비교, 덧붙인 항목은 근거가 아니다).
+    (c) 새 제목이 기존 REQ 제목을 포함하거나 그 반대다.
+
+    `base_text` 는 PR 이 갈라진 지점(merge-base)의 SRS 여야 한다. 번호만 바뀐 REQ(head 에서 사라진
+    base 번호와 제목이 같은 새 번호)는 새 REQ 로 보지 않는다.
+    """
+    base_titles = req_titles(base_text)
+    head_titles = req_titles(head_text)
+    vanished = {_norm_title(t) for rid, t in base_titles.items() if rid not in head_titles}
+    new_ids = [
+        rid for rid, title in head_titles.items()
+        if rid not in base_titles and _norm_title(title) not in vanished
+    ]
+    if not new_ids:
+        return {}
+
+    head_scope = scope_items(head_text)
+    changed_scope = [orig for key, orig in scope_items(base_text).items() if key not in head_scope]
+    sections = dict(parse_sections(head_text))
+    excludes = [re.compile(p) for p in DEFAULT_EXCLUDE]
+
+    result: dict[str, list[str]] = {}
+    for rid in new_ids:
+        evidence: list[str] = []
+        if rid in sections:
+            others, _ok, _misplaced = collect_mentions(rid, sections[rid], DEFAULT_PREFIX, excludes)
+            if others:
+                evidence.append(f"(a) 상세 절이 다른 번호를 말함: {', '.join(others)}")
+        if changed_scope:
+            shown = "; ".join(f"\"{_cut(ln)}\"" for ln in changed_scope[:2])
+            more = f" 등 {len(changed_scope)}개" if len(changed_scope) > 2 else ""
+            evidence.append(f"(b) 범위 \"{SCOPE_EXCLUDED_MARKER}\" 항목이 지워지거나 바뀜: {shown}{more}")
+        new = _norm_title(head_titles[rid])
+        if len(new) >= MIN_TITLE_LEN:
+            overlaps = [
+                f"{old_id} '{old_title}'"
+                for old_id, old_title in base_titles.items()
+                if len(_norm_title(old_title)) >= MIN_TITLE_LEN
+                and (_norm_title(old_title) in new or new in _norm_title(old_title))
+            ]
+            if overlaps:
+                evidence.append(f"(c) 제목이 기존 요구사항과 겹침: {', '.join(overlaps)}")
+        if evidence:
+            result[rid] = evidence
+    return result
+
+
 # --- 기준 등록과 판정 흐름 --------------------------------------------------------
 
 
@@ -353,6 +517,12 @@ class Context:
     files: list[dict]
     prefixes: list[str]
     load_check_runs: Callable[[], list[dict]]
+    # (ref, 경로) -> 파일 내용. 없으면 None. SRS 전문이 필요한 기준(`split_hint`)만 쓴다.
+    read_text: Callable[[str, str], str | None] | None = None
+    base_ref: str = ""
+    head_ref: str = ""
+    # PR 이 갈라진 지점(merge-base) 커밋. 주면 `split_hint` 가 base_ref 대신 이것을 기준으로 읽는다.
+    merge_base: Callable[[], str | None] | None = None
     _check_runs: list[dict] | None = field(default=None, repr=False)
 
     @property
@@ -402,6 +572,54 @@ def _crit_secret(ctx: Context) -> list[Finding]:
     return findings
 
 
+def _split_hint_unknown(why: str) -> list[Finding]:
+    # 검사를 못 한 것을 안전하다고 뭉개지 않는다(원칙 7).
+    return [Finding("split_hint", f"SRS 새 요구사항이 기존 요구사항을 넓힌 것인지 검사 불능: {why}. 승인자가 SRS 변경을 직접 확인")]
+
+
+@criterion("split_hint")
+def _crit_split_hint(ctx: Context) -> list[Finding]:
+    if not ctx.cfg["srs_split_hint"]:
+        return []
+    entry = next((f for f in ctx.files if f.get("filename") == SRS_PATH), None)
+    if entry is None or entry.get("status") == "removed":
+        return []
+    if not entry.get("patch"):
+        if int(entry.get("additions") or 0) + int(entry.get("deletions") or 0) == 0:
+            return []
+        return _split_hint_unknown("변경이 너무 커서 SRS diff 를 못 읽음")
+    # 새 요구사항 표 줄이 추가되지 않았으면 쪼개질 일이 없다. 전문은 읽지 않는다.
+    if not any(_REQ_ROW.match(text) for _n, _l, text in added_lines([entry])):
+        return []
+    if ctx.read_text is None:
+        return _split_hint_unknown("SRS 전문을 읽는 방법이 없음")
+    try:
+        head = ctx.read_text(ctx.head_ref, SRS_PATH)
+    except (AttributeError, TypeError):  # 디렉터리 응답 등 파일이 아닌 응답
+        head = None
+    # 빈 문자열은 디코딩 실패나 1MB 초과(content 가 비어 옴)다. 새 REQ 행이 있는 SRS 가 비었을 리 없다.
+    # 패치에 새 REQ 행이 있는데 전문에서 REQ 행이 하나도 안 나오면 깨진 내용을 읽은 것이다.
+    if not head or not req_titles(head):
+        return _split_hint_unknown("PR 의 SRS 를 읽지 못함")
+    base_ref = ctx.merge_base() if ctx.merge_base is not None else ctx.base_ref
+    if not base_ref:
+        return _split_hint_unknown("PR 이 갈라진 지점(merge-base)을 구하지 못함")
+    try:
+        base = ctx.read_text(base_ref, entry.get("previous_filename") or SRS_PATH)
+    except (AttributeError, TypeError):
+        base = ""
+    if base is None:
+        if entry.get("status") != "added":
+            return _split_hint_unknown("PR 이 갈라진 지점의 SRS 를 읽지 못함")
+        base = ""
+    elif not base.strip() and entry.get("status") != "added":
+        return _split_hint_unknown("PR 이 갈라진 지점의 SRS 를 읽지 못함")
+    return [
+        Finding("split_hint", f"SRS 새 요구사항 {rid} 이 기존 요구사항을 넓힌 것일 수 있음(확장 의심, 승인자가 확인): {'; '.join(ev)}")
+        for rid, ev in split_hint_evidence(base, head).items()
+    ]
+
+
 @criterion("checks")
 def _crit_checks(ctx: Context) -> list[Finding]:
     if not ctx.cfg["require_checks_green"]:
@@ -440,6 +658,11 @@ def build_next(findings: list[Finding], approval: str, approvers_file: str) -> s
         steps.append(
             "Claude 가 추가된 비밀값을 코드에서 지우고 새 커밋을 올리십시오. 이미 원격에 올라간 "
             "키·토큰은 사람이 폐기하고 새로 발급해야 합니다"
+        )
+    if "split_hint" in kinds:
+        steps.append(
+            "승인자가 SRS diff 에서 새 요구사항이 기존 요구사항의 확장인지 확인하십시오. 같은 개발이면 "
+            "새 REQ 를 지우고 기존 REQ 의 범위를 넓히십시오"
         )
     waiting = any(f.waiting for f in findings)
     failing = any(f.criterion == "checks" and not f.waiting for f in findings)
@@ -488,6 +711,13 @@ def fetch_text(client: GhClient, repo: str, ref: str, path: str) -> str | None:
         return base64.b64decode(data.get("content", "") or "").decode("utf-8", errors="replace")
     except (ValueError, TypeError):
         return ""
+
+
+def fetch_merge_base(client: GhClient, repo: str, base: str, head: str) -> str | None:
+    """`base` 와 `head` 가 갈라진 지점(merge-base) 커밋 SHA. 못 구하면 None."""
+    data = client.get_json_or_none_404(f"repos/{repo}/compare/{base}...{head}?per_page=1")
+    sha = ((data or {}).get("merge_base_commit") or {}).get("sha") if isinstance(data, dict) else None
+    return sha or None
 
 
 def fetch_pr_file_entries(client: GhClient, repo: str, pr: int) -> list[dict]:
@@ -588,6 +818,12 @@ def decide_pr(client: GhClient, repo: str, pr: int, config_ref: str | None = Non
         files=fetch_pr_file_entries(client, repo, pr),
         prefixes=cfg["high_risk_paths"] + fetch_human_merge_paths(client, repo, ref),
         load_check_runs=lambda: fetch_check_runs(client, repo, head_sha),
+        read_text=lambda at, path: fetch_text(client, repo, at, path),
+        base_ref=ref,
+        head_ref=head_sha,
+        # `ref` 는 기준 브랜치의 지금 끝(또는 병합 직전 main)이라 PR 이 갈라진 뒤 main 이 앞서가면 PR 이
+        # 건드리지 않은 줄까지 달라 보인다. SRS 비교는 갈라진 지점을 기준으로 한다.
+        merge_base=lambda: fetch_merge_base(client, repo, ref, head_sha),
     )
     findings = evaluate(ctx)
     if not findings:
@@ -751,6 +987,9 @@ def decide_commit(
         files=[f for f in (commit.get("files") or []) if "filename" in f],
         prefixes=cfg["high_risk_paths"] + fetch_human_merge_paths(client, repo, ref),
         load_check_runs=lambda: fetch_check_runs(client, repo, sha),
+        read_text=lambda at, path: fetch_text(client, repo, at, path),
+        base_ref=ref,
+        head_ref=sha,
     )
     findings = [f for f in evaluate(ctx) if not f.waiting]
     if not findings:
