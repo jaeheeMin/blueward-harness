@@ -32,6 +32,11 @@ out_of_scope 로 빠지기 때문이다. 이 워크플로를 부르는 저장소
 `audit/ledger/` 경로가 하나라도 있으면 `checker.pairing` 을 돌려 리포트에 `pairing` 키로 합친다.
 같은 우선순위로 종료코드에 반영한다. `audit/ledger/` 가 없는 저장소는 대상이 아니라 키도 만들지
 않고 동작도 바뀌지 않는다.
+
+**Spec 간 객체 겹침 검사(#292)**: 바뀐 파일에 `docs/spec/` 경로가 있으면 `checker.overlap` 을 돌려
+`overlap` 키로 합친다. 경고만 하므로 위반은 없고 읽지 못한 Spec 이 있으면 검사 불능(2)이다.
+두 교차 검사는 `rules/cross-checks/switches.yaml`(`checker.cross_switches`)로 각각 끌 수 있고,
+파일이 없으면 둘 다 켠다. 그 파일이 잘못되면 `cross_checks` 키에 검사 불능을 싣고 종료코드 2 다.
 """
 from __future__ import annotations
 
@@ -45,7 +50,9 @@ from checker.code_rules import build_report as _build_code_report
 from checker.code_rules import exit_code_for as _code_exit_code
 from checker.code_rules import language_for_suffix
 from checker.model import ConfigError
-from checker.pairing import LEDGER_DIR, SKIPPED as PAIRING_SKIPPED, SPEC_DIR, SRS_PATH, check_pairing
+from checker.cross_switches import DISABLED, SwitchError, load_switches
+from checker.overlap import check_overlap
+from checker.pairing import CANNOT_CHECK, LEDGER_DIR, SKIPPED, SPEC_DIR, SRS_PATH, check_pairing
 from checker.pairing import exit_code_for as _pairing_exit_code
 
 EMPTY_REPORT = (
@@ -74,6 +81,11 @@ def touches_pairing_files(found: list[str]) -> bool:
         if p == SRS_PATH or p.startswith((SPEC_DIR + "/", LEDGER_DIR + "/")):
             return True
     return False
+
+
+def touches_spec_files(found: list[str]) -> bool:
+    """바뀐 파일에 Spec 경로가 있는지(객체 겹침 검사를 돌릴 조건)."""
+    return any(Path(name).as_posix().startswith(SPEC_DIR + "/") for name in found)
 
 
 def split_listing(text: str) -> tuple[list[str], list[str]]:
@@ -174,15 +186,36 @@ def main_entry(argv: list[str] | None = None) -> int:
         )
 
     pairing_result = None
-    if touches_pairing_files(found + missing):  # 지워진 경로도 트리거(목록에 들어온다면)
-        # SRS·Spec·원장 중 하나라도 바뀌었다. 번호 짝(#284)은 저장소 전체를 보므로 바뀐
-        # 파일과 무관한 기존 어긋남도 나온다. 원장이 없는 저장소는 skipped 라 건너뛴다.
-        result = check_pairing(Path.cwd())
-        if result["status"] != PAIRING_SKIPPED:
-            pairing_result = result
+    overlap_result = None
+    switch_error = None
+    wants_pairing = touches_pairing_files(found + missing)  # 지워진 경로도 트리거(목록에 들어온다면)
+    wants_overlap = touches_spec_files(found + missing)
+    if wants_pairing or wants_overlap:
+        try:
+            switches = load_switches(Path.cwd())
+        except SwitchError as exc:
+            # 스위치를 읽지 못하면 켜진 건지 꺼진 건지 모른다. 돌리지도 건너뛰지도 않고 검사 불능.
+            switch_error = {"status": CANNOT_CHECK, "message": str(exc)}
+            switches = {}
+        if wants_pairing and switches.get("번호_짝") is False:
+            pairing_result = {"status": DISABLED}
+        elif wants_pairing and switches.get("번호_짝"):
+            # SRS·Spec·원장 중 하나라도 바뀌었다. 번호 짝(#284)은 저장소 전체를 보므로 바뀐
+            # 파일과 무관한 기존 어긋남도 나온다. 원장이 없는 저장소는 skipped 라 건너뛴다.
+            result = check_pairing(Path.cwd())
+            if result["status"] != SKIPPED:
+                pairing_result = result
+        if wants_overlap and switches.get("객체_겹침") is False:
+            overlap_result = {"status": DISABLED}
+        elif wants_overlap and switches.get("객체_겹침"):
+            # Spec 이 바뀌었다. 객체 겹침(#292)도 Spec 전체를 본다. 경고만 하고 위반은 없다.
+            result = check_overlap(Path.cwd())
+            if result["status"] != SKIPPED:
+                overlap_result = result
 
-    if not code_files and pairing_result is None:
-        # 코드 파일도 짝 검사 대상도 없다. doc-guard 만 있던 예전 그대로 동작한다.
+    extras = [r for r in (pairing_result, overlap_result, switch_error) if r is not None]
+    if not code_files and not extras:
+        # 코드 파일도 교차 검사 대상도 없다. doc-guard 만 있던 예전 그대로 동작한다.
         return main(["--auto", *doc_files])
 
     try:
@@ -203,14 +236,18 @@ def main_entry(argv: list[str] | None = None) -> int:
         code_report = _build_code_report([Path(f) for f in code_files])
         code_exit = _code_exit_code(code_report)
         combined["code_rules"] = {"report": code_report, "exit": code_exit}
-    pairing_exit = _pairing_exit_code(pairing_result) if pairing_result else EXIT_PASS
     if pairing_result:
         combined["pairing"] = pairing_result
+    if overlap_result:
+        combined["overlap"] = overlap_result
+    if switch_error:
+        combined["cross_checks"] = switch_error
+    extra_exits = [_pairing_exit_code(r) for r in extras]  # 겹침은 위반이 없어 0 또는 2
     print(json.dumps(combined, ensure_ascii=False))
 
-    if code_exit == CODE_EXIT_CANNOT_CHECK or pairing_exit == EXIT_CONFIG_ERROR:
+    if code_exit == CODE_EXIT_CANNOT_CHECK or EXIT_CONFIG_ERROR in extra_exits:
         return EXIT_CONFIG_ERROR
-    if doc_report["summary"]["violations"] or code_exit == EXIT_VIOLATION or pairing_exit == EXIT_VIOLATION:
+    if doc_report["summary"]["violations"] or code_exit == EXIT_VIOLATION or EXIT_VIOLATION in extra_exits:
         return EXIT_VIOLATION
     return EXIT_PASS
 
