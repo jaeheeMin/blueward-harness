@@ -1,8 +1,10 @@
 # CLAUDE.md
 
-이 저장소에서 지킬 행동 규칙의 요약과 세부 문서 색인이다. 진행 이력과 미결
-사항은 [`docs/status.md`](docs/status.md) 에 있다 — 훅, Actions, 스캐폴드, 승인
-검사, 코드 검사 등을 건드리기 전에 관련 절을 읽는다.
+이 저장소에서 지킬 행동 규칙의 요약과 세부 문서 색인이다. 미결 사항과 현재
+요약은 [`docs/status.md`](docs/status.md), 작업별 진행 기록은 `docs/status/` 에
+있다 — 훅, Actions, 스캐폴드, 승인 검사, 코드 검사 등을 건드리기 전에 관련
+기록을 읽는다(이슈 번호로 파일을 찾거나 `grep -r`. 2026-10-13 까지 기록은
+`docs/status/archive-until-2026-10-13.md`).
 
 ## 이 저장소는 무엇인가
 
@@ -42,6 +44,9 @@
    `docs/guide/harness-guide.html` 의 해당 탭을 같은 PR 에서 고치고, 병합 뒤
    아티팩트에 다시 올린다(`docs/guide/README.md`). public-cloud 쪽 변경은 이
    저장소에 길잡이 갱신 이슈로 남긴다.
+10. **진행 기록은 `docs/status/<이슈번호>-<영문-요약>.md` 한 파일로 쓴다.**
+   `docs/status.md` 에 기록을 붙이지 않는다(PR 끼리 같은 자리 충돌이 난다).
+   `docs/status.md` 에는 기록 목록(색인)도 두지 않는다.
 
 ## 가장 중요한 세 가지
 

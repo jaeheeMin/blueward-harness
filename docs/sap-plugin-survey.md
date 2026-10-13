@@ -115,7 +115,7 @@ Clean Core A~D ↔ ATC 우선순위 표는 sap-docs 로 공식 확인된 것만 
 
 **선행 조건 진행(2026-10-05 기록)**
 
-- P2(080 실측): #85 에서 대부분 끝났다(`conventions/common.md` 의 ATC 절, `docs/status.md` #85).
+- P2(080 실측): #85 에서 대부분 끝났다(`conventions/common.md` 의 ATC 절, `docs/status/archive-until-2026-10-13.md` #85).
   variant `ABAP_CLOUD_DEVELOPMENT_DEFAULT`, Z 클래스 다섯 개 실행, `createAtcRun` 은 `atcCheckVariant`
   가 돌려준 ID 필요, priority 1·2 는 운송을 막고(`blockPriority`) 3 은 막지 않음(`allowTransports`).
   남은 것이던 금지 구문·빈 CATCH 는 2026-10-05 public-cloud 세션이 080 문법 검사(저장·활성화 없음, 대상

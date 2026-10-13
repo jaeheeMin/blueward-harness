@@ -186,7 +186,7 @@ MCP 서버의 모든 호출마다 훅(`uv` 기동)을 띄우는 비용 때문이
 **한계.** `git -C 다른곳 push` 나 `cd other && git push` 는 현재 worktree 의 기록만 본다. Bash 로 `src/` 에
 쓰는 경로(`cp`, 리다이렉션)는 막지 못한다(Write/Edit 만). 기록은 worktree 별이라 다른 worktree 에서 쓴 것은
 보지 못한다. PostToolUse 는 이미 끝난 호출을 막을 수 없어 관문을 푸시와 `src/` 쓰기에 건다. 설계 상세와 실측은
-`docs/status.md` 의 #190 절에 있다.
+`docs/status/archive-until-2026-10-13.md` 의 #190 절에 있다.
 
 ### 고객사 양식으로 Spec 쓰고 양식 파일 산출(#191·#192)
 
