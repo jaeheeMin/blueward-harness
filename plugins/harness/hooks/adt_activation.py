@@ -258,8 +258,10 @@ def targets_for(tool: str, tool_input: dict) -> list[dict]:
     elif tool == "createObject":
         objtype = tool_input.get("objtype", "")
         name = tool_input.get("name", "")
-        if isinstance(objtype, str) and objtype.upper().startswith("FUGR") and tool_input.get("parentName"):
-            name = tool_input["parentName"]  # 펑션 모듈·인클루드는 펑션 그룹으로 추적한다
+        if isinstance(objtype, str) and objtype.upper() in ("FUGR/FF", "FUGR/I") and tool_input.get("parentName"):
+            # 펑션 모듈·인클루드는 펑션 그룹으로 추적한다. 펑션 그룹(FUGR/F) 자신의 parentName 은 패키지다.
+            name = tool_input["parentName"]
+            objtype = "FUGR/F"
         out.append(key_from_type_name(objtype, name))
     elif tool == "activateObjects":
         items = _json_value(tool_input.get("objects"))

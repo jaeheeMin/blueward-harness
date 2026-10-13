@@ -166,6 +166,56 @@ def test_createObject_는_written_이고_deleteObject_는_지운다(hooks, repo)
     assert _gate(hooks, repo)[0] == 0
 
 
+# createObject 가 만들 수 있는 유형(abap-adt-api CreatableTypes)의 objtype·생성 이름·활성화 URL (#301).
+CREATABLE = [
+    ("MSAG/N", "ZMSG_X", "/sap/bc/adt/messageclass/zmsg_x"),
+    ("DEVC/K", "ZPK_X", "/sap/bc/adt/packages/zpk_x"),
+    ("DEVC/K", "$TMP_X", "/sap/bc/adt/packages/%24tmp_x"),
+    ("MSAG/N", "/ABC/MSG", "/sap/bc/adt/messageclass/%2fabc%2fmsg"),
+    ("DEVC/K", "/ABC/PK", "/sap/bc/adt/packages/%2FABC%2FPK"),
+    ("AUTH", "ZAUTH_X", "/sap/bc/adt/aps/iam/auth/zauth_x"),
+    ("SUSO/B", "ZSUSO_X", "/sap/bc/adt/aps/iam/suso/zsuso_x"),
+    ("DDLX/EX", "ZC_X", "/sap/bc/adt/ddic/ddlx/sources/zc_x"),
+    ("DCLS/DL", "ZC_X", "/sap/bc/adt/acm/dcl/sources/zc_x"),
+    ("DDLA/ADF", "ZA_X", "/sap/bc/adt/ddic/ddla/sources/za_x"),
+    ("TABL/DT", "ZT_X", "/sap/bc/adt/ddic/tables/zt_x"),
+    ("TABL/DS", "ZS_X", "/sap/bc/adt/ddic/structures/zs_x"),
+    ("DTEL/DE", "ZDE_X", "/sap/bc/adt/ddic/dataelements/zde_x"),
+    ("DOMA/DD", "ZDO_X", "/sap/bc/adt/ddic/domains/zdo_x"),
+    ("INTF/OI", "ZIF_X", "/sap/bc/adt/oo/interfaces/zif_x"),
+    ("SRVD/SRV", "ZSD_X", "/sap/bc/adt/ddic/srvd/sources/zsd_x"),
+    ("SRVB/SVB", "ZSB_X", "/sap/bc/adt/businessservices/bindings/zsb_x"),
+    ("DDLS/DF", "ZI_X", "/sap/bc/adt/ddic/ddl/sources/zi_x"),
+    ("CLAS/OC", "ZCL_X", "/sap/bc/adt/oo/classes/zcl_x"),
+    ("PROG/P", "ZP_X", "/sap/bc/adt/programs/programs/zp_x"),
+    ("PROG/I", "ZP_I", "/sap/bc/adt/programs/includes/zp_i"),
+    ("FUGR/F", "ZFG_X", "/sap/bc/adt/functions/groups/zfg_x"),
+]
+
+
+@pytest.mark.parametrize("objtype,name,url", CREATABLE)
+def test_createObject_로_만든_유형은_activateByName_으로_닫힌다(hooks, repo, objtype, name, url):
+    _post(hooks, repo, "createObject", {"objtype": objtype, "name": name, "parentName": "ZPK"})
+    assert _gate(hooks, repo)[0] == 1
+    _post(hooks, repo, "activateByName", {"objectName": name, "objectUrl": url}, _result(True))
+    assert _gate(hooks, repo)[0] == 0, "URL 이 유형 키로 못 떨어져 기록이 안 닫혔다"
+    rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
+    assert not any("|URL:" in k for k in rec)
+
+
+def test_펑션_모듈은_펑션_그룹으로_추적하고_그룹은_자기_이름으로_추적한다(hooks, repo):
+    _post(hooks, repo, "createObject", {"objtype": "FUGR/FF", "name": "ZFM_X", "parentName": "ZFG_X"})
+    rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
+    assert list(rec) == [f"{SERVER}|FUGR:ZFG_X"]
+
+
+def test_MSAG_메시지_클래스에_소스_쓰기도_같은_기록으로_모인다(hooks, repo):
+    _post(hooks, repo, "createObject", {"objtype": "MSAG/N", "name": "ZMSG_X", "parentName": "ZPK"})
+    _write(hooks, repo, "/sap/bc/adt/messageclass/zmsg_x/source/main")
+    rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
+    assert list(rec) == [f"{SERVER}|MSAG:ZMSG_X"]
+
+
 def test_깨진_기록은_검사_불능으로_막는다(hooks, repo):
     _record(repo).write_text("{ 깨진", encoding="utf-8")
     code, out = _gate(hooks, repo)
