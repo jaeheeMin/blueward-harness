@@ -80,8 +80,8 @@ plugins/harness/
 | `/harness:deliver` | 작업을 마무리한다. 커밋·동기화·푸시·PR 생성을 한 번에 |
 | `/harness:wrapup` | 세션에서 끝내지 못한 작업을 이슈로 남긴다 |
 | `/harness:scaffold` | 새 Project Repository 에 표준 구조를 만든다 |
-| `/harness:srs` | SRS(요구사항정의서)를 새로 쓰거나, 요구사항이 바뀌었을 때 고친다 |
-| `/harness:spec` | SRS 요구사항으로 개발 Spec 을 만들거나, SRS 가 바뀌어 고친다 |
+| `/harness:srs` | SRS(요구사항정의서)를 새로 쓰거나, 요구사항이 바뀌었을 때 고친다. 먼저 브랜치를 확인한다(main 이면 start 를 대신, 다른 작업 브랜치면 이어 쓸지 묻는다, #281) |
+| `/harness:spec` | SRS 요구사항으로 개발 Spec 을 만들거나, SRS 가 바뀌어 고친다. srs 와 같이 먼저 브랜치를 확인한다 |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다. 지금 세션의 플러그인 버전이 main 보다 낮으면 `/reload-plugins`·Update now 를 안내한다(#203) |
 | `/harness:atc` | SAP ATC 지적을 돌려 자동·확인 후·수동으로 나눠 처리하고 재실행해 증감을 보고한다(`env/adt-tiers.yaml` 이 있는 Project Repository 에서만. variant 는 서버 항목의 `atc_variant`) |
 

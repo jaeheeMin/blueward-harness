@@ -278,7 +278,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.56, public-cloud main 기준 (2026-10-13)</div>
+      <div class="note">harness 0.10.57, public-cloud main 기준 (2026-10-13)</div>
     </div>
   </nav>
 
@@ -483,7 +483,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
   </header>
 
   <div class="when">
-    <div><div class="lbl">이럴 때</div>새 개발, 새 문서 작업, 버그 수정을 시작할 때. 지금 main 에 있을 때.</div>
+    <div><div class="lbl">이럴 때</div>새 개발, 새 문서 작업, 버그 수정을 시작할 때. 지금 main 에 있을 때. (SRS·Spec 은 시작할 때 브랜치를 먼저 확인해서 main 이면 start 를 대신 해 줘.)</div>
     <div><div class="lbl">이렇게 말해</div><div class="say"><span>개발 시작할게</span><span>이거 작업 시작할게</span><span>이슈부터 만들자</span><span class="cmd">/harness:start</span></div></div>
   </div>
 
@@ -643,7 +643,7 @@ fix/31-broken-link</pre>
     <section class="box">
       <h3>내가 할 일</h3>
       <ul class="todo">
-        <li>먼저 <code>/harness:start</code> 로 이슈와 브랜치를 열어 (예: <code>docs/…</code>)</li>
+        <li>따로 <code>/harness:start</code> 를 안 불러도 돼. SRS 가 브랜치부터 확인해 줘 — main 이면 start 를 대신 해 주고(예: <code>docs/…</code> 브랜치), 다른 작업 브랜치면 이어서 할지 새로 시작할지 물어봐</li>
         <li>입력 자료를 Claude 에게 줘</li>
         <li>Claude 가 모아서 묻는 질문에 답해. 모르면 "미결 사항" 에 남겨도 돼</li>
         <li>누가·언제·왜 요청했는지 알려 줘. 요구사항마다 Short Description 첫 줄에 <code>요청: 홍길동(영업팀), 2026-10-12, 킥오프 회의록</code> 처럼 들어가</li>
@@ -815,6 +815,7 @@ fix/31-broken-link</pre>
     <section class="box">
       <h3>내가 할 일</h3>
       <ul class="todo">
+        <li>따로 <code>/harness:start</code> 를 안 불러도 돼. Spec 이 브랜치를 확인해 줘 — 어떤 개발인지 정해지면 main 일 때 "<code>… (DEV-xxx)</code>" 하위 작업 이슈로 브랜치를 열어(개발 본체 이슈 <code>[DEV-xxx]</code> 는 Spec 병합 뒤에도 열려 있어), 다른 작업 브랜치면 같은 일인지 보고 물어봐</li>
         <li>어떤 REQ 로 만들지 정해. 후보로는 다음 단계가 <b>개발</b>인 것만 보여 줘</li>
         <li>고른 REQ 가 <b>미정</b>이면 개발인지 설정인지 먼저 정해. Claude 가 SRS 를 고치고 변경 기록을 남긴 뒤 이어 가</li>
         <li>고른 REQ 가 <b>설정</b>이면 Spec 은 안 만들어. 진행 원장에 설정 건으로 올려 주고 끝나. <b>On Hold</b>(보류)도 Spec 을 안 만들고 알려 줘 — 상태를 바꾸면 이어 가</li>
