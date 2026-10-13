@@ -127,6 +127,32 @@ main 병합이 아니라 태그 기준이다 — 병합 뒤 `release-tag` 가 �
     제외_패턴: ['옛\s*$']     # 번호 앞 문맥에 이 정규식이 걸리면 건너뜀. 생략하면 이 값
 ```
 
+## `risk_gate` 의 `split_hint` — SRS 쪼개짐 의심을 승인자에게 보여 준다(#278)
+
+`req_cross_reference` 는 문서 규칙이라 PR 화면에 단서를 남기지 않는다. risk-gate 의 `split_hint` 기준이
+이를 보완한다. SRS(`docs/ssot/SRS.md`) 요구사항 표에 base 에 없던 REQ 가 생겼으면, 새 REQ 마다 아래를 본다.
+
+- (a) head 의 그 REQ 상세 절이 다른 REQ·DEV 번호를 말한다(`req_cross_reference` 의 `parse_sections`·`collect_mentions`
+  를 그대로 쓴다. 관계 줄이 있어도 근거로 보여 준다).
+- (b) 같은 PR 에서 base 범위 절의 "하지 않는 것" 목록(머리말 `SCOPE_EXCLUDED_MARKER` 줄과 그 아래로 더 들여쓴 줄)에서
+  항목이 지워지거나 바뀌었다. 항목 단위로 비교한다 — 한 줄 형태(`- 하지 않는 것: A, B`)는 `,`·`、`·`;`·` · `
+  (괄호 밖)로 쪼개고, 들여쓴 목록은 줄마다 항목이다. 공백·끝 문장부호를 정리하고 대소문자를 무시한다. base 항목 중
+  head 에 없는 것만 근거이고(사유에는 그 항목만 짧게), 덧붙인 항목이나 문장부호만 고친 것은 근거가 아니다.
+- (c) 새 제목이 base 의 기존 REQ 제목을 포함하거나 그 반대다(공백·대소문자 정리, 양쪽 4자 이상 — `reserve_number.py` 와 같은 기준).
+
+하나라도 걸리면 "SRS 새 요구사항 REQ-n 이 기존 요구사항을 넓힌 것일 수 있음(확장 의심, 승인자가 확인)" 사유에 걸린 근거를
+붙인다. 막지 않는다 — `high_risk_paths` 에 `docs/ssot/` 가 있으면 SRS 변경은 이미 위험 경로라 승인 대상이고, 사유
+문구만 늘어난다(없는 설정이면 이 기준이 새 사유를 만든다). 새 REQ 가 없거나 근거가 없으면 사유가 없다. head 에서
+사라진 base REQ 번호와 제목이 같은 새 번호는 번호만 바뀐 것이라 새 REQ 로 보지 않는다.
+
+base 는 기준 브랜치의 지금 끝이 아니라 PR 이 갈라진 지점(compare API 의 `merge_base_commit`)이다 — main 이 앞서가도
+PR 이 건드리지 않은 줄이 지워진 것으로 잡히지 않는다. 병합 뒤 감지(`config_ref` = 병합 직전 main)는 그 ref 와 PR head 의
+merge-base 를 쓴다. 갈라진 지점을 못 구하거나, SRS 의 patch 가 없어(너무 큰 diff) 읽지 못하거나, base·head SRS 를
+못 읽거나(없음·비어 옴·디코딩 실패·1MB 초과·디렉터리 응답) head 에 요구사항 표가 안 보이면 통과도 위반도 아닌
+"검사 불능" 사유로 낸다. (a) 는 관계 줄 접두어·제외 패턴의 기본값(`DEFAULT_PREFIX`, `DEFAULT_EXCLUDE`)을 쓴다 — 고객사가
+`rules/ssot.yaml` 에서 바꿨다면 `req_cross_reference` 와 어긋날 수 있다. `.github/risk-gate.yaml` 의 `srs_split_hint: false` 로 끈다(기본 켬).
+Project Repository 는 엔진이 배포된 뒤(`stable` 태그가 옮겨진 뒤) 이 키를 쓸 수 있다 — 모르는 키는 설정 오류다.
+
 ## 출력
 
 stdout 에 JSON 리포트를 낸다. 플러그인 훅 출력과 PR 코멘트가 같은 내용을 쓴다.
