@@ -7,3 +7,15 @@
   - 종류: filename
     패턴: '^DEV-\d{3,}-.+\.md$'
   - 종류: required_sections
+    # 사용 객체 절은 뒤에 생긴 절이라 없는 옛 Spec 도 통과해야 한다. 절을 쓴다면
+    # 아래 md_table 이 표 형식을 본다.
+    선택_섹션: [사용 객체]
+  # 이 규칙 종류는 엔진 배포 태그(v0.10.59 이상, stable)를 받게 된 뒤에 켠다.
+  - 종류: md_table
+    절: 사용 객체
+    열: [종류, 이름, 작업, 비고]
+    값:
+      종류: [Domain, Data Element, Structure, Database Table, CDS View, Metadata Extension, Behavior Definition, Service Definition, Service Binding, ABAP Class, AMDP Class, CDS Table Function, Message Class]
+      작업: [생성, 수정, 참조]
+    패턴:
+      이름: '(?:/[A-Za-z0-9_]+/)?[A-Za-z][A-Za-z0-9_]*'

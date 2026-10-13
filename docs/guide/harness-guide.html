@@ -278,7 +278,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.58, public-cloud main 기준 (2026-10-13)</div>
+      <div class="note">harness 0.10.59, public-cloud main 기준 (2026-10-13)</div>
     </div>
   </nav>
 
@@ -831,7 +831,7 @@ fix/31-broken-link</pre>
         <li>원장 줄 — Spec 만 먼저 만들면 상태 "대기"</li>
         <li><code>BW_개발사양서_&lt;개발ID&gt;_&lt;제목&gt;_v&lt;버전&gt;.xlsx</code> — 양식을 고를 때</li>
       </ul>
-      <p class="small" style="margin-top:12px">Spec 의 절: 근거 요구사항 · 개요 · 상세 설계 · 완료 조건 · 참조 · 변경 이력. 양식을 쓰면 <code>## 양식 항목</code> 절이 더 붙어.</p>
+      <p class="small" style="margin-top:12px">Spec 의 절: 근거 요구사항 · 개요 · 상세 설계 · 사용 객체 · 완료 조건 · 참조 · 변경 이력. <code>## 사용 객체</code> 는 이 개발이 만들고 고치고 읽는 SAP 객체를 <code>| 종류 | 이름 | 작업 | 비고 |</code> 표로 적는 절이야(작업은 생성·수정·참조). 선택 절이라 없는 옛 Spec 도 통과하고, 쓰면 표 형식을 검사해. 양식을 쓰면 <code>## 양식 항목</code> 절이 더 붙어.</p>
     </section>
   </div>
 
@@ -882,7 +882,7 @@ fix/31-broken-link</pre>
     <section class="box">
       <h3>바뀌는 것</h3>
       <ul class="made">
-        <li>Spec 파일 내용과 변경 이력 표</li>
+        <li>Spec 파일 내용과 변경 이력 표 (쓰는 객체가 달라지면 <code>## 사용 객체</code> 표도. 이 절이 없는 옛 Spec 은 넣을지 물어 봐)</li>
         <li><code>audit/changes/YYYYMMDD-&lt;요약&gt;.md</code></li>
         <li>새 버전 개발사양서 엑셀 (이전 판은 남음)</li>
       </ul>

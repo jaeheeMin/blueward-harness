@@ -17,6 +17,8 @@ checker/
     slide_layouts.py      공식 템플릿에서 시작했는지 (pptx)
     external_traces.py    다른 거래처 흔적이 남아 있는지 (오피스 전체)
     req_cross_reference.py  SRS 상세 절이 다른 REQ·DEV 번호를 말하면 관계 줄을 요구 (md, #261)
+    md_table.py     md 절 아래 표의 열 이름·열별 허용 값·값 패턴 (Spec `## 사용 객체`, #287).
+                    절 제목·열·값은 규칙 yaml 의 데이터이고 절이 없으면 통과(`필수: true` 로 바꿈)
   ooxml.py          오피스 파일의 본문이 아닌 자리를 읽는다
   cleaner.py        흔적을 걷어낸 새 파일을 만든다 (사람이 직접 부른다)
   ssot_approval.py  SRS(docs/ssot/) 변경 PR 의 승인 여부를 판정한다(#49).
