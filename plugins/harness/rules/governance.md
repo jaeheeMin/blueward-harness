@@ -105,6 +105,9 @@ Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험�
 | 이슈 등록 | `/harness:start`, `/harness:wrapup` |
 | 릴리즈 발행 | `/release` (아래 참조) |
 
+`/harness:srs` 와 `/harness:spec` 은 시작할 때 브랜치를 확인한다. main 이면 `/harness:start` 절차를 대신 수행하고,
+이전 작업 브랜치면 이어 쓸지 새로 시작할지 묻는다. 미커밋 변경이 있으면 `/harness:deliver` 로 먼저 정리할지 묻는다.
+
 이 작업들은 저장소의 이력과 다른 참여자의 작업에 직접 영향을 주기 때문에,
 정해진 절차를 거쳐 형식과 순서를 지키게 한다.
 
