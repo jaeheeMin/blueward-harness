@@ -132,11 +132,11 @@ jobs:
             1)
               # 문서(doc-guard)나 코드(공통 개발 규칙, #54) 어느 쪽이 위반인지는 이
               # 종료코드만으로 갈리지 않는다 — PR 코멘트가 절을 나눠 보여준다.
-              echo "::error title=harness 위반::문서 또는 코드가 규칙을 따르지 않습니다. PR 코멘트를 보십시오."
+              echo "::error title=harness 위반::문서, 코드, 또는 SRS·Spec·원장 번호 짝이 규칙을 따르지 않습니다. PR 코멘트를 보십시오."
               {
                 echo ""
                 echo "### harness 판정: ❌ 위반"
-                echo "문서 또는 코드를 고쳐야 합니다. 어느 쪽인지는 위 PR 코멘트를 보십시오."
+                echo "문서, 코드, 또는 SRS·Spec·원장의 번호를 고쳐야 합니다. 어느 쪽인지는 위 PR 코멘트를 보십시오."
               } >> "$GITHUB_STEP_SUMMARY"
               exit 1
               ;;
