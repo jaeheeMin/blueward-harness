@@ -33,7 +33,56 @@ def render(report: dict, code: int) -> str:
     code_rules = report.get("code_rules")
     if code_rules:
         text += "\n" + "\n".join(_render_code_rules(code_rules))
+    pairing = report.get("pairing")
+    if pairing:
+        text += "\n" + "\n".join(_render_pairing(pairing))
     return text
+
+
+def _render_pairing(result: dict) -> list[str]:
+    """SRS·Spec·원장 번호 짝 절(#284). `result` 는 `checker.pairing.check_pairing` 의 결과다."""
+    out = ["", "---", "", "## 번호 짝", ""]
+    status = result.get("status")
+    violations = result.get("violations") or []
+    warnings = result.get("warnings") or []
+
+    if status == "cannot_check":
+        out += [
+            "### ⚠️ 검사 불능",
+            "",
+            "```",
+            str(result.get("message") or "번호 짝을 맞춰 보지 못했습니다.").strip(),
+            "```",
+            "",
+            "SRS·Spec·원장을 읽지 못해 번호가 맞는지 확인하지 못했습니다. 통과도 위반도 아닙니다. "
+            "표 머리나 파일 형태를 고치거나, 문서 틀이 맞다면 검사 엔진 담당자에게 알리십시오.",
+        ]
+        return out
+
+    if violations:
+        out += [
+            "### ❌ 번호 짝이 어긋남",
+            "",
+            f"SRS·Spec·원장의 번호가 서로 맞지 않는 곳 **{len(violations)}건**입니다. **문서를 고쳐야 합니다.**",
+            "",
+            "| 파일 | 내용 |",
+            "|---|---|",
+        ]
+        for item in violations:
+            out.append(f"| `{item.get('file')}` | {_cell(item.get('message'))} |")
+        out.append("")
+    else:
+        out += ["SRS·Spec·원장의 번호가 서로 맞습니다.", ""]
+
+    if warnings:
+        out += ["### 참고 (통과에는 영향 없음)", "", "아직 작성 중이라 그럴 수 있는 것들입니다.", ""]
+        for item in warnings:
+            out.append(f"- `{item.get('file')}` — {item.get('message')}")
+    return out
+
+
+def _cell(text: object) -> str:
+    return str(text or "").replace("|", "\\|").replace("\n", " ")
 
 
 def _render_doc(report: dict, code: int) -> str:

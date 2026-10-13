@@ -278,7 +278,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.57, public-cloud main 기준 (2026-10-13)</div>
+      <div class="note">harness 0.10.58, public-cloud main 기준 (2026-10-13)</div>
     </div>
   </nav>
 
@@ -1171,6 +1171,7 @@ Closes #143</pre>
   <div class="tbl-wrap"><table>
     <tr><th>검사</th><th>보는 것</th><th>걸리면</th></tr>
     <tr><td><code>doc-guard</code></td><td>문서가 템플릿을 따르는지. 파일명, 위치, 필수 절, 엑셀 시트·표 머리, 다른 거래처 흔적</td><td>PR 에 댓글로 이유를 남김</td></tr>
+    <tr><td><code>번호 짝</code> (doc-guard 코멘트의 한 절)</td><td>진행 원장이 있는 저장소에서 SRS, Spec(<code>docs/spec/</code>), 원장의 개발 번호가 서로 맞는지. SRS·Spec·원장 중 하나라도 바꾼 PR 에서만 돌고, 저장소 전체를 봐. SRS 에 <code>다음 단계</code> 열이 없으면 모두 개발로 보고 맞춰 봐</td><td>RICEFW ID 가 다른 번호, 같은 DEV 중복, 깨진 Spec 링크 같은 확실한 어긋남은 빨간 불. 아직 작성 중인 것(Spec·원장 줄 없음)은 "참고" 로만 표시</td></tr>
     <tr><td><code>gitleaks</code></td><td>비밀번호, 토큰, SAP 쿠키 같은 비밀정보 (CR-004)</td><td>값은 가려서 보여 줌</td></tr>
     <tr><td><code>ssot-approval</code></td><td>SRS(<code>docs/ssot/</code>)를 바꿨으면 승인자의 Approve 가 있는지</td><td>승인 받으면 자동 재실행</td></tr>
     <tr><td><code>risk-gate</code></td><td>PR 이 위험한지. 300줄 초과, 10파일 초과, 위험 경로, 비밀값 모양, 다른 검사 실패. SRS 에 새 요구사항이 생겼는데 기존 요구사항을 넓힌 것처럼 보이면(다른 번호 언급, "하지 않는 것" 줄 변경, 제목 겹침) 그 근거를 사유로 붙임</td><td>위험하면 승인자 Approve 필요</td></tr>

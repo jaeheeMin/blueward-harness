@@ -127,6 +127,25 @@ main 병합이 아니라 태그 기준이다 — 병합 뒤 `release-tag` 가 �
     제외_패턴: ['옛\s*$']     # 번호 앞 문맥에 이 정규식이 걸리면 건너뜀. 생략하면 이 값
 ```
 
+## `pairing` — SRS·Spec·원장 번호 짝 맞추기(#284)
+
+규칙 종류가 아니라 저장소 전체를 보는 별도 검사다(`checker/pairing.py`). 개발 번호는 SRS 요구사항 표
+(`ID`·`다음 단계`·`Development RICEFW ID`), `docs/spec/DEV-n-*.md`(파일명과 `## 근거 요구사항`), 진행 원장
+`audit/ledger/*.md` 의 `## 개발 건` 표에 나뉘어 적히므로 셋을 숫자로 정규화해(`REQ-3` == `DEV-003`) 맞춰 본다.
+`scripts/check_changed.py` 가 바뀐 파일에 SRS·`docs/spec/`·`audit/ledger/` 가 있을 때만 돌려 리포트의 `pairing`
+키로 합치고, `audit/ledger/` 가 없는 저장소는 대상이 아니다.
+
+- 위반(종료코드 1): `개발` REQ 의 RICEFW ID 가 `DEV-<같은 번호>` 가 아님(열이 없거나 값이 비면 건너뜀), `설정`·`미정`
+  인데 RICEFW ID 가 있음, 같은 DEV 가 원장 여러 줄, 원장 Spec 칸 링크 대상 파일 없음 또는 다른 번호 파일, Spec 의
+  근거 REQ 번호 ≠ 파일명 DEV 번호.
+- 경고(통과 유지): 진행 중인 `개발` REQ 의 원장 줄·Spec 없음, `설정` REQ 의 원장 줄 없음, `개발` 인데 원장 Spec 칸이
+  `설정`, SRS 에 없는 원장 DEV·Spec. Status 가 On Hold·Dropped·Duplicate 면 대조하지 않는다. 원장 Spec 칸 `-` 는 "작성 전".
+- 검사 불능(종료코드 2): 읽지 못하는 파일, SRS `## 요구사항` 절이나 표의 `ID` 열이 없음, 원장 `## 개발 건` 표 머리가
+  없음. SRS 파일이 없거나 요구사항 표가 아직 없으면 SRS 대조만 건너뛴다.
+- `다음 단계` 열이 없는 SRS(Backlog 양식)는 spec 스킬과 같이 모든 REQ 를 `개발` 로 보고 대조하며 참고에 한 줄을 남긴다.
+  Spec 의 근거 REQ 는 `## 근거 요구사항` 첫 문단에서만 읽고 `REQ-001~013` 같은 범위 표기는 번호로 세지 않는다.
+  원장 Spec 칸의 외부 링크(`https://…`)는 파일 검사 없이 참고로만 남긴다.
+
 ## `risk_gate` 의 `split_hint` — SRS 쪼개짐 의심을 승인자에게 보여 준다(#278)
 
 `req_cross_reference` 는 문서 규칙이라 PR 화면에 단서를 남기지 않는다. risk-gate 의 `split_hint` 기준이

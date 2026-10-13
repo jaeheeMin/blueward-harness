@@ -27,6 +27,11 @@ out_of_scope 로 빠지기 때문이다. 이 워크플로를 부르는 저장소
 하나도 없어도(#24 가드) 검사 불능으로 끝내지 않는다. 그 가드는 문서에만 해당한다. 두
 검사의 리포트는 하나의 JSON 에 함께 담되(`code_rules` 키), 종료코드는 둘 중 더 나쁜
 쪽을 따른다 — 검사 불능(2) > 위반(1) > 통과(0).
+
+**SRS·Spec·원장 번호 짝 검사(#284)**: 바뀐 파일에 `docs/ssot/SRS.md`, `docs/spec/`,
+`audit/ledger/` 경로가 하나라도 있으면 `checker.pairing` 을 돌려 리포트에 `pairing` 키로 합친다.
+같은 우선순위로 종료코드에 반영한다. `audit/ledger/` 가 없는 저장소는 대상이 아니라 키도 만들지
+않고 동작도 바뀌지 않는다.
 """
 from __future__ import annotations
 
@@ -40,6 +45,8 @@ from checker.code_rules import build_report as _build_code_report
 from checker.code_rules import exit_code_for as _code_exit_code
 from checker.code_rules import language_for_suffix
 from checker.model import ConfigError
+from checker.pairing import LEDGER_DIR, SKIPPED as PAIRING_SKIPPED, SPEC_DIR, SRS_PATH, check_pairing
+from checker.pairing import exit_code_for as _pairing_exit_code
 
 EMPTY_REPORT = (
     '{"summary": {"scoped": 0, "passed": 0, "violations": 0, "skipped": 0,'
@@ -58,6 +65,15 @@ def split_by_language(found: list[str]) -> tuple[list[str], list[str]]:
     for name in found:
         (code_files if language_for_suffix(Path(name)) else doc_files).append(name)
     return doc_files, code_files
+
+
+def touches_pairing_files(found: list[str]) -> bool:
+    """바뀐 파일에 SRS·Spec·원장 경로가 하나라도 있는지(번호 짝 검사를 돌릴 조건)."""
+    for name in found:
+        p = Path(name).as_posix()
+        if p == SRS_PATH or p.startswith((SPEC_DIR + "/", LEDGER_DIR + "/")):
+            return True
+    return False
 
 
 def split_listing(text: str) -> tuple[list[str], list[str]]:
@@ -157,8 +173,16 @@ def main_entry(argv: list[str] | None = None) -> int:
             "`/scaffold` 로 구조를 만드십시오."
         )
 
-    if not code_files:
-        # 코드 파일이 없다. doc-guard 만 있던 예전 그대로 동작한다.
+    pairing_result = None
+    if touches_pairing_files(found + missing):  # 지워진 경로도 트리거(목록에 들어온다면)
+        # SRS·Spec·원장 중 하나라도 바뀌었다. 번호 짝(#284)은 저장소 전체를 보므로 바뀐
+        # 파일과 무관한 기존 어긋남도 나온다. 원장이 없는 저장소는 skipped 라 건너뛴다.
+        result = check_pairing(Path.cwd())
+        if result["status"] != PAIRING_SKIPPED:
+            pairing_result = result
+
+    if not code_files and pairing_result is None:
+        # 코드 파일도 짝 검사 대상도 없다. doc-guard 만 있던 예전 그대로 동작한다.
         return main(["--auto", *doc_files])
 
     try:
@@ -173,16 +197,20 @@ def main_entry(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         return config_error(str(exc))
 
-    code_report = _build_code_report([Path(f) for f in code_files])
-    code_exit = _code_exit_code(code_report)
-
     combined = dict(doc_report)
-    combined["code_rules"] = {"report": code_report, "exit": code_exit}
+    code_exit = EXIT_PASS
+    if code_files:
+        code_report = _build_code_report([Path(f) for f in code_files])
+        code_exit = _code_exit_code(code_report)
+        combined["code_rules"] = {"report": code_report, "exit": code_exit}
+    pairing_exit = _pairing_exit_code(pairing_result) if pairing_result else EXIT_PASS
+    if pairing_result:
+        combined["pairing"] = pairing_result
     print(json.dumps(combined, ensure_ascii=False))
 
-    if code_exit == CODE_EXIT_CANNOT_CHECK:
+    if code_exit == CODE_EXIT_CANNOT_CHECK or pairing_exit == EXIT_CONFIG_ERROR:
         return EXIT_CONFIG_ERROR
-    if doc_report["summary"]["violations"] or code_exit == EXIT_VIOLATION:
+    if doc_report["summary"]["violations"] or code_exit == EXIT_VIOLATION or pairing_exit == EXIT_VIOLATION:
         return EXIT_VIOLATION
     return EXIT_PASS
 
