@@ -246,8 +246,10 @@ def _run_guard(
 
 @pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
 @pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
-def test_선언_없는_push_는_막는다():
-    code, out = _run_guard("git push origin HEAD")
+def test_선언_없는_push_는_막는다(tmp_path):
+    # 진짜 gh 를 부르지 않도록 가짜 gh 와 임시 저장소에서 돌린다(#264).
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard("git push origin HEAD", env=env, cwd=repo)
     assert code == 0
     assert out is not None
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -269,6 +271,254 @@ def test_DELIVER_선언이_있으면_통과시킨다(tmp_path):
         cwd=str(repo),
     )
     assert code == 0
+    assert out is None
+
+
+# --- 묶인 push·commit 도 조각마다 판정한다(#264) ----------------------------
+#
+# 예전에는 명령에서 처음 나오는 git 하위 명령만 봐서 `git status && git push` 의 push 가
+# 가드를 지나갔다. 진짜 gh 는 부르지 않도록 가짜 gh 를 PATH 앞에 둔다.
+
+
+def _chain_env(tmp_path: Path, branch: str = "feat/1-work") -> tuple[dict, str]:
+    bin_dir = tmp_path / "gh-bin"
+    bin_dir.mkdir()
+    _add_fake_gh(bin_dir)
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", branch, str(repo)], check=True)
+    return {"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"}, str(repo)
+
+
+def _denied(out: dict | None) -> bool:
+    return out is not None and out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin feat/x",
+        "git status && git push origin feat/x",
+        "git add x; git push origin feat/x",
+        "git fetch || git push origin feat/x",
+        "git log | git push origin feat/x",
+        "git status\ngit push origin feat/x",
+        "echo hi && git -C . push origin feat/x",
+        "(git status; git push origin feat/x)",
+        'bash -c "git push origin feat/x"',
+    ],
+)
+def test_선언_없는_푸시는_다른_명령과_묶여도_막는다(tmp_path, command):
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard(command, env=env, cwd=repo)
+    assert code == 0
+    assert _denied(out)
+    assert "/harness:deliver" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git status && git push --force origin feat/x",
+        "git add x; git push -f origin feat/x",
+        "DELIVER=1 git status && git push -uf origin feat/x",
+        "git fetch || git push origin feat/x --force",
+        "DELIVER=1 git push --force origin feat/x",
+    ],
+)
+def test_묶인_강제_푸시는_선언이_있어도_막는다(tmp_path, command):
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard(command, env=env, cwd=repo)
+    assert code == 0
+    assert _denied(out)
+    assert "--force" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+def test_main_푸시도_묶이면_선언_없이는_막는다(tmp_path):
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard("git status && git push origin main", env=env, cwd=repo)
+    assert code == 0
+    assert _denied(out)
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+@pytest.mark.parametrize(
+    "command",
+    [
+        'gh issue create --title "git push 가 묶이면 샌다" --body "git push origin x"',
+        'git commit -m "git push 고침"',
+        "git log --grep push",
+        "git status && git log --oneline",
+        "echo 'git push origin x'",
+        "git status <<'EOF'\ngit push origin x\nEOF",
+    ],
+)
+def test_따옴표_안의_push_글자는_푸시로_읽지_않는다(tmp_path, command):
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard(command, env=env, cwd=repo)
+    assert code == 0
+    assert out is None
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "DELIVER=1 git push -u origin HEAD",
+        "DELIVER=1 git push --force-with-lease origin HEAD",
+        "DELIVER=1 git status && git push -u origin HEAD",
+    ],
+)
+def test_deliver_흐름의_푸시는_계속_통과한다(tmp_path, command):
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard(command, env=env, cwd=repo)
+    assert code == 0
+    assert out is None
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+def test_main_에서의_커밋은_다른_git_명령과_묶여도_막는다(tmp_path):
+    env, repo = _chain_env(tmp_path, branch="main")
+    code, out = _run_guard('git status && git commit -m "x"', env=env, cwd=repo)
+    assert code == 0
+    assert _denied(out)
+    assert "main" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"git" push origin feat/x',
+        'git "push" origin feat/x',
+        "git 'push' origin feat/x",
+        "echo `git push origin feat/x`",
+        'echo "$(git push origin feat/x)"',
+        "{ git status; git push origin feat/x; }",
+        "DELIVER=10 git push origin feat/x",
+        "DELIVER=1foo git push origin feat/x",
+    ],
+)
+def test_따옴표나_역따옴표로_감춘_푸시와_가짜_선언도_막는다(tmp_path, command):
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard(command, env=env, cwd=repo)
+    assert code == 0
+    assert _denied(out)
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+@pytest.mark.parametrize(
+    "command",
+    [
+        'bash -c "git push origin feat/x"',
+        "echo don't && git push origin feat/x",
+        "DELIVER=1 bash -c 'git push origin feat/x'",
+    ],
+)
+def test_따옴표를_해석할_수_없으면_검사_불능으로_이유를_밝혀_막는다(tmp_path, command):
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard(command, env=env, cwd=repo)
+    assert code == 0
+    assert _denied(out)
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "검사 불능" in reason and "따옴표를 해석할 수 없어" in reason and "다음:" in reason
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git stash push",
+        "git stash push -m wip",
+        "git remote set-url --push origin https://example.com/a/b.git",
+        "git config push.default current",
+        "git log --grep=push",
+        "git log --grep push --oneline",
+        'git log --grep="a\\"b" | grep push',
+        "git log --grep=push --author=O'Brien",
+        "git log --author=\"O'Brien\" --grep=push",
+        "git log --grep=\"it's\" | grep push",
+        'git commit -m "git push 고침"',
+        'git commit -m "$(cat <<\'EOF\'\nfix: git push guard\n\nbody mentions push and git\nEOF\n)"',
+        "git status | grep push",
+        "cat .git/config | grep push",
+        "echo 'git push origin x'",
+        'gh issue create --title "git push 가 샌다" --body "git push origin x"',
+        "git status <<'EOF'\ngit push origin x\nEOF",
+        "ls -la",
+    ],
+)
+def test_일상_명령은_push_낱말이_있어도_막지_않는다(tmp_path, command):
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard(command, env=env, cwd=repo)
+    assert code == 0
+    assert out is None
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+@pytest.mark.parametrize(
+    "command, scanned",
+    [
+        ("ls -la", False),
+        ("echo hello && cat README.md | head", False),
+        ("git status && git log --oneline", False),  # 따옴표 없는 단순 명령은 awk 없이 bash 로 나눈다
+        ('git log --grep="x"', True),
+        ("bash -c 'ls'", True),
+    ],
+)
+def test_스캔은_필요할_때만_awk_를_부른다(tmp_path, command, scanned):
+    # bash -x 의 실행 추적에 awk 호출이 남는지 본다(msys 는 /usr/bin 이 PATH 앞이라 가짜 awk 를 못 끼운다).
+    env, repo = _chain_env(tmp_path)
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": repo})
+    done = subprocess.run(
+        [_BASH, "-x", str(PLUGIN_ROOT / "hooks" / "pre-bash-git-guard.sh")],
+        input=payload, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env={**os.environ, **env}, timeout=180,
+    )
+    assert done.returncode == 0
+    assert done.stdout.strip() == ""
+    called = any(re.match(r"\++ awk ", line) for line in done.stderr.splitlines())
+    assert called is scanned
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+def test_awk_없이_나눈_단순_명령도_묶인_푸시를_막는다(tmp_path):
+    # 따옴표 없는 단순 명령은 awk 없이 bash 치환으로 나눈다. 그 경로에서도 묶인 푸시를 잡는다.
+    env, repo = _chain_env(tmp_path)
+    for command in ("git status && git push origin feat/x", "git add x; git push origin feat/x", "git log | git push origin feat/x"):
+        code, out = _run_guard(command, env=env, cwd=repo)
+        assert code == 0
+        assert _denied(out)
+
+
+@pytest.mark.xfail(reason="알려진 한계: 변수로 하위 명령을 감춘 형태는 알아채지 못한다. 최종 방어선은 pre-push 와 브랜치 보호", strict=True)
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+def test_알려진_한계_변수로_감춘_하위_명령(tmp_path):
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard("x=push; git $x origin feat/x", env=env, cwd=repo)
+    assert _denied(out)
+
+
+@pytest.mark.xfail(reason="알려진 한계: 따옴표 밖에 git·push 낱말이 따로 있으면 푸시로 읽어 막는다(echo git push)", strict=True)
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+@pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
+def test_알려진_한계_따옴표_없는_echo_는_푸시로_오인한다(tmp_path):
+    env, repo = _chain_env(tmp_path)
+    code, out = _run_guard("echo git push", env=env, cwd=repo)
     assert out is None
 
 

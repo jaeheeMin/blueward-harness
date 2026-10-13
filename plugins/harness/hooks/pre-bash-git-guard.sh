@@ -103,9 +103,10 @@ fi
 # 규칙이다. 이 훅은 그 앞에서 흔히 쓰는 형태를 걸러내는 첫 번째 방어선일
 # 뿐이다.
 git_subcommand() {
+  # 결과는 gs_sub 에 둔다(서브셸을 쓰지 않으려고 출력 대신 변수로 돌려준다 - 조각마다 불러도 빠르다).
+  local tok base found=0 skip_next=0
+  gs_sub=""
   set -f
-  found=0
-  skip_next=0
   for tok in $1; do
     # 셸이 벗겨 줄 따옴표가 문자열에는 남아 있으므로 여기서 벗긴다.
     tok="${tok#\"}"; tok="${tok%\"}"
@@ -113,31 +114,177 @@ git_subcommand() {
     if [ "$skip_next" -eq 1 ]; then skip_next=0; continue; fi
     if [ "$found" -eq 0 ]; then
       # Windows 는 `git.exe` 로 부르고 경로 구분자로 `\` 를 쓴다. `/` 와 `\`
-      # 양쪽 기준으로 마지막 경로 성분을 떼어 내고, 대소문자와 `.exe` 확장자
-      # 차이를 없앤 뒤에 git 인지 비교한다. bash 3.2 호환을 위해 `${var,,}`
-      # 대신 tr 을 쓴다.
+      # 양쪽 기준으로 마지막 경로 성분을 떼어 낸 뒤, 대소문자와 `.exe` 확장자
+      # 차이를 가리지 않고 git 인지 비교한다(bash 3.2 호환을 위해 `${var,,}` 대신 패턴).
       base="${tok##*/}"
       base="${base##*\\}"
-      base="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
       case "$base" in
-        *.exe) base="${base%.exe}" ;;
-      esac
-      case "$base" in
-        git) found=1 ;;
+        [Gg][Ii][Tt]|[Gg][Ii][Tt].[Ee][Xx][Ee]) found=1 ;;
       esac
       continue
     fi
     case "$tok" in
       -C|-c) skip_next=1 ;;
       -*) : ;;
-      *) set +f; printf '%s' "$tok"; return 0 ;;
+      *) set +f; gs_sub="$tok"; return 0 ;;
     esac
   done
   set +f
   return 0
 }
 
-sub="$(git_subcommand "$cmd")"
+# 명령을 조각으로 나눠 한 줄에 하나씩 낸다. 첫 줄은 #OPAQUE:0 또는 #OPAQUE:1 이다.
+# - heredoc 본문은 걷어 낸다.
+# - 따옴표 안 문자열은 Q 한 글자로 바꾼다. 다만 공백·특수문자 없는 한 낱말("git", push)은
+#   따옴표만 벗겨 낱말 그대로 둔다(`"git" push`, `git "push"` 를 놓치지 않으려고).
+# - 큰따옴표 안에 $( 나 역따옴표가 있으면 그 안은 실행되는 코드이므로 따옴표 없는 글처럼 읽는다.
+# - 역따옴표와 ( ) { } 는 공백으로 바꾼다. \" 와 \' 는 따옴표가 아닌 글자(E)로 바꾼다.
+# - ; | & 개행에서 조각을 나눈다.
+# - 닫히지 않은 따옴표는 끝까지를 Q 로 보되, 그 안에 git 과 push(또는 commit) 낱말이 있으면
+#   OPAQUE:1 이다(어차피 셸이 실행하지 못할 문법 오류인 경우가 대부분이다).
+strip_for_scan() {
+  printf '%s\n' "$1" \
+    | awk -v q="'" '
+        skip { t = $0; sub(/^[ \t]+/, "", t); if (t == w) skip = 0; next }
+        { buf = buf $0 "\n"
+          if (match($0, "(^|[^<])<<-?[ \t]*[\"" q "]?[A-Za-z_][A-Za-z0-9_]*")) {
+            s = substr($0, RSTART, RLENGTH)
+            sub(/^[^<]?<<-?[ \t]*/, "", s); sub("^[\"" q "]", "", s)
+            w = s; skip = 1
+          } }
+        function put(body) {
+          if (body ~ /^[A-Za-z0-9_.\/:+@%=,~][A-Za-z0-9_.\/:+@%=,~^-]*$/) seg = seg body
+          else seg = seg "Q"
+        }
+        function cut() { out = out seg "\n"; seg = "" }
+        END {
+          n = length(buf); opaque = 0; dyn_end = 0; seg = ""; out = ""
+          for (i = 1; i <= n; i++) {
+            c = substr(buf, i, 1)
+            if (i == dyn_end) { seg = seg " "; continue }
+            if (c == "\\") {
+              nc = substr(buf, i + 1, 1)
+              if (nc == "\"" || nc == q) { seg = seg "E"; i++ }
+              else if (nc == "\n") { seg = seg " "; i++ }
+              else seg = seg c
+              continue
+            }
+            if (c == "\"") {
+              j = i + 1
+              while (j <= n) {
+                d = substr(buf, j, 1)
+                if (d == "\\") { j += 2; continue }
+                if (d == "\"") break
+                j++
+              }
+              if (j > n) { tail = substr(buf, i + 1); unterminated(tail); seg = seg "Q"; break }
+              body = substr(buf, i + 1, j - i - 1)
+              if (index(body, "$(") || index(body, "`")) { dyn_end = j; seg = seg " "; continue }
+              put(body); i = j; continue
+            }
+            if (c == q) {
+              rest = substr(buf, i + 1); j = index(rest, q)
+              if (j == 0) { unterminated(rest); seg = seg "Q"; break }
+              put(substr(rest, 1, j - 1)); i = i + j; continue
+            }
+            if (c == "`" || c == "(" || c == ")" || c == "{" || c == "}") { seg = seg " "; continue }
+            if (c == ";" || c == "|" || c == "&" || c == "\n") { cut(); continue }
+            seg = seg c
+          }
+          cut()
+          printf "#OPAQUE:%d\n%s", opaque, out
+        }
+        function unterminated(t) {
+          if (t ~ /(^|[^A-Za-z0-9_-])git([^A-Za-z0-9_-]|$)/ && t ~ /(^|[^A-Za-z0-9_-])(push|commit)([^A-Za-z0-9_-]|$)/) opaque = 1
+        }'
+}
+
+# push·commit 판정은 첫 git 하위 명령이 아니라 조각(; && || | 개행)마다 한다(#264).
+# `git status && git push` 처럼 앞에 다른 git 명령이 붙어도 push 조각을 찾는다. 따옴표 안
+# 문자열(gh issue create --title "... git push ...")과 heredoc 본문은 걷어 낸 뒤 보므로
+# 명령으로 읽지 않는다. 결과: push_found, push_force, commit_found (1/0). 조각 목록은
+# scan_segs, 조각별 git 하위 명령은 scan_subs 에 남겨 아래 검사들(2-1, 2-3)이 함께 쓴다.
+#
+# 속도: 훅은 모든 Bash 명령마다 도는데 Windows 에서는 프로세스 하나가 0.1초 이상이다.
+# 그래서 명령에 git 낱말도 래퍼(bash, sh, eval, ssh, pwsh, cmd 등)도 없으면 스캔하지 않고,
+# 따옴표·역슬래시·$( ) { } 가 없는 단순한 명령은 awk 없이 bash 치환으로 나눈다.
+#
+# 조각으로 확실히 나눌 수 없는 경우는 원칙 7 에 따라 보수적으로 본다(OPAQUE 이면 명령 전체에
+# git 과 push 낱말이 있을 때 푸시로 치고 거부한다). OPAQUE 는 (a) 따옴표 문자열을 다시 셸이
+# 실행하는 래퍼(bash -c "git push", eval, ssh 등), (b) 닫히지 않은 따옴표 속에 git 과 push 가
+# 있는 경우다. 한계: 변수·$IFS 로 감춘 하위 명령, 래퍼의 인자가 아닌데 래퍼 낱말이 든 명령에서
+# 따옴표 밖에 git 과 push 낱말이 따로 있으면 거부될 수 있다.
+push_found=0
+push_force=0
+commit_found=0
+opaque_push=0
+scan_n=0
+scan_segs=()
+scan_subs=()
+scan_opaque=0
+force_re='(^|[[:space:]])(-[a-zA-Z]*f[a-zA-Z]*|--force)([[:space:]]|$)'
+git_word_re='(^|[^[:alnum:]_-])git([^[:alnum:]_-]|$)'
+wrapper_word_re='(^|[^[:alnum:]_-])(bash|sh|zsh|dash|ksh|eval|ssh|pwsh|powershell|cmd)([^[:alnum:]_-]|$)'
+slow_re='["'\''`\\$(){}]|<<'
+shopt -s nocasematch
+if [[ "$cmd" =~ $git_word_re ]] || [[ "$cmd" =~ $wrapper_word_re ]]; then
+  if [[ "$cmd" =~ $slow_re ]]; then
+    scan_text="$(strip_for_scan "$cmd")"
+  else
+    scan_text="$cmd"
+    scan_text="${scan_text//;/$'\n'}"
+    scan_text="${scan_text//|/$'\n'}"
+    scan_text="${scan_text//&/$'\n'}"
+    scan_text="#OPAQUE:0"$'\n'"$scan_text"
+  fi
+  scan_first=1
+  while IFS= read -r seg; do
+    if [ "$scan_first" -eq 1 ]; then
+      scan_first=0
+      if [ "$seg" = "#OPAQUE:1" ]; then scan_opaque=1; fi
+      continue
+    fi
+    case "$seg" in *[![:space:]]*) ;; *) continue ;; esac
+    git_subcommand "$seg"
+    scan_segs[$scan_n]="$seg"
+    scan_subs[$scan_n]="$gs_sub"
+    scan_n=$((scan_n + 1))
+    if [ "$gs_sub" = "push" ]; then
+      push_found=1
+      if [[ "$seg" =~ $force_re ]]; then push_force=1; fi
+    elif [ "$gs_sub" = "commit" ]; then
+      commit_found=1
+    fi
+    # 래퍼 판별: 앞의 VAR=값 을 건너뛴 첫 낱말이 래퍼이고 인자에 따옴표 문자열(Q)이 있으면 불투명.
+    if [[ "$seg" == *Q* ]]; then
+      seg_first=""
+      set -f
+      for tok in $seg; do
+        case "$tok" in [A-Za-z_]*=*) continue ;; esac
+        seg_first="${tok##*/}"; seg_first="${seg_first##*\\}"
+        break
+      done
+      set +f
+      seg_first="${seg_first%.[Ee][Xx][Ee]}"
+      case "$seg_first" in
+        bash|sh|zsh|dash|ksh|eval|pwsh|powershell|cmd|ssh) scan_opaque=1 ;;
+      esac
+    fi
+  done <<EOF
+$scan_text
+EOF
+  if [ "$scan_opaque" -eq 1 ] && [[ "$cmd" =~ $git_word_re ]]; then
+    push_word_re='(^|[^[:alnum:]_-])push([^[:alnum:]_-]|$)'
+    commit_word_re='(^|[^[:alnum:]_-])commit([^[:alnum:]_-]|$)'
+    if [[ "$cmd" =~ $push_word_re ]]; then
+      if [ "$push_found" -eq 0 ]; then opaque_push=1; fi
+      push_found=1
+      if [[ "$cmd" =~ $force_re ]]; then push_force=1; fi
+    fi
+    if [[ "$cmd" =~ $commit_word_re ]]; then commit_found=1; fi
+  fi
+fi
+shopt -u nocasematch
 
 # 0) gh pr merge 대상 PR 이 SRS(docs/ssot/) 를 바꿨는데 승인이 없으면 거부한다
 #    (#49). 별도 훅 프로세스를 새로 두지 않고 이 훅에 얹는 이유는, 이미
@@ -642,13 +789,14 @@ esac
 #    위해서다. 짧은 옵션은 -f 로도 -uf 로도 묶여 쓰이므로, 붙임표 하나로
 #    시작하는 토큰 안에 f 가 있으면 강제로 본다. --force-with-lease 는 붙임표
 #    둘로 시작하고 --force 뒤에 공백이 오지 않아 이 패턴에 걸리지 않는다.
-if [ "$sub" = "push" ] && [[ "$cmd" =~ (^|[[:space:]])(-[a-zA-Z]*f[a-zA-Z]*|--force)([[:space:]]|$) ]]; then
+#    push 조각마다 보므로(#264) `git status && git push -f` 도 걸린다.
+if [ "$push_force" -eq 1 ]; then
   deny "git push --force 는 이 저장소에서 금지되어 있습니다. 다음: --force 를 빼고 /harness:deliver 를 실행하십시오. 리베이스로 이력이 바뀐 경우의 --force-with-lease 푸시도 /harness:deliver 가 수행합니다."
 fi
 
 # 2) main 에서의 커밋도 선언 접두어와 무관하게 거부한다. 브랜치 규칙은
 #    /harness:deliver 의 절차가 아니라 이 저장소의 전제이기 때문이다.
-if [ "$sub" = "commit" ]; then
+if [ "$commit_found" -eq 1 ]; then
   branch="$(git symbolic-ref --short -q HEAD || echo 알수없음)"
   if [ "$branch" = "main" ]; then
     deny "main 브랜치에는 직접 커밋할 수 없습니다. 다음: /harness:start 를 실행해 이슈를 만들고 규칙에 맞는 브랜치로 옮긴 뒤 그 브랜치에서 다시 커밋하십시오."
@@ -685,23 +833,6 @@ finish_ok() {
   exit 0
 }
 
-# 명령에서 heredoc 본문과 따옴표 안 문자열을 걷어 낸다(따옴표 문자열은 Q 한 글자로 바꾼다).
-strip_for_scan() {
-  printf '%s\n' "$1" \
-    | awk -v q="'" '
-        skip { t = $0; sub(/^[ \t]+/, "", t); if (t == w) skip = 0; next }
-        { print
-          if (match($0, "(^|[^<])<<-?[ \t]*[\"" q "]?[A-Za-z_][A-Za-z0-9_]*")) {
-            s = substr($0, RSTART, RLENGTH)
-            sub(/^[^<]?<<-?[ \t]*/, "", s); sub("^[\"" q "]", "", s)
-            w = s; skip = 1
-          } }' \
-    | tr '\n' '\001' \
-    | sed -E "s/\"[^\"]*\"/Q/g; s/'[^']*'/Q/g" \
-    | tr '\001' '\n' \
-    | sed -E 's/(&&|\|\||;|\||&)/\n/g'
-}
-
 # gitleaks 실행 파일을 찾는다. 결과는 gl_bin. 찾는 차례: GITLEAKS_BIN(테스트·직접 지정),
 # PATH, 그리고 winget 이 설치한 자리(ensure-tools.sh 의 locate_tool 과 같은 곳).
 find_gitleaks() {
@@ -735,9 +866,12 @@ find_gitleaks() {
 # 못 바꾸는 읽기 전용(status, diff, log, show, rev-parse)만 예외로 둔다.
 commit_seg=""
 gl_prior_git=""
-while IFS= read -r seg; do
-  case "$seg" in *[![:space:]]*) ;; *) continue ;; esac
-  gl_sub="$(git_subcommand "$seg")"
+# 조각 목록은 위 스캔(scan_segs, scan_subs)을 그대로 쓴다.
+gl_i=0
+while [ "$gl_i" -lt "$scan_n" ]; do
+  seg="${scan_segs[$gl_i]}"
+  gl_sub="${scan_subs[$gl_i]}"
+  gl_i=$((gl_i + 1))
   if [ "$gl_sub" = "commit" ]; then
     commit_seg="$seg"
     break
@@ -746,9 +880,7 @@ while IFS= read -r seg; do
     ''|status|diff|log|show|rev-parse) ;;
     *) gl_prior_git="$gl_sub" ;;
   esac
-done <<EOF
-$(strip_for_scan "$cmd")
-EOF
+done
 
 if [ -n "$commit_seg" ]; then
   if [ "${HARNESS_SKIP_SECRET_SCAN:-}" = "1" ]; then
@@ -874,7 +1006,7 @@ fi
 #      않게 하기 위해서다. 기록 파일도 실패 표식도 없으면(대부분의 푸시) python 을 부르지 않는다.
 #      기록이 있는데 관문을 실행하지 못하면 통과가 아니라 검사 불능으로 거부한다.
 #      관문 출력(여러 줄, 따옴표 포함 가능)은 deny() 에 끼우지 않고 jq 로 JSON 인코딩한다.
-if [ "$sub" = "push" ]; then
+if [ "$push_found" -eq 1 ]; then
   act_git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null | tr -d '\r' || true)"
   if [ -n "$act_git_dir" ] && { [ -e "$act_git_dir/harness-adt-activation.json" ] || [ -e "$act_git_dir/harness-adt-activation.error" ]; }; then
     set +e
@@ -899,14 +1031,17 @@ fi
 #      PR 이 없으면 통과한다. 대상 브랜치나 gh 조회를 확정하지 못하면 검사 불능으로 거부한다.
 #      -R 이 푸시엔 없으므로 현재 저장소 기준이다. --head 는 브랜치 이름만 맞추므로 포크의
 #      같은 이름 브랜치 PR 도 걸릴 수 있다(보수적인 쪽).
-#      한계: 명령 앞쪽에서 먼저 나온 git 하위 명령이 push 가 아니면(sub 가 첫 git 명령이다)
-#      보지 않는다. 최종 방어선은 Actions 의 사후 알림이다.
+#      조각마다 push 를 찾으므로 앞에 다른 git 명령이 붙어도 본다. 최종 방어선은 Actions 의
+#      사후 알림이다.
 check_push_authors() {
   pa_branches=()
   pa_unresolved=""
-  while IFS= read -r pa_seg; do
-    case "$pa_seg" in *[![:space:]]*) ;; *) continue ;; esac
-    [ "$(git_subcommand "$pa_seg")" = "push" ] || continue
+  pa_i=0
+  while [ "$pa_i" -lt "$scan_n" ]; do
+    pa_seg="${scan_segs[$pa_i]}"
+    pa_sub="${scan_subs[$pa_i]}"
+    pa_i=$((pa_i + 1))
+    [ "$pa_sub" = "push" ] || continue
     pa_after=0
     pa_skip=0
     pa_pos=()
@@ -945,9 +1080,7 @@ check_push_authors() {
       esac
       pa_branches+=("$dst")
     done
-  done <<EOF
-$(strip_for_scan "$cmd")
-EOF
+  done
 
   if [ -n "$pa_unresolved" ]; then
     deny "검사 불능: 푸시할 브랜치를 확정하지 못했습니다($pa_unresolved). 그 브랜치에 다른 계정이 만든 PR 이 있는지 확인할 수 없어 통과시키지 않습니다. 다음: Claude 가 브랜치 이름을 적어(예: git push -u origin 브랜치이름) 한 브랜치씩 다시 푸시하십시오."
@@ -981,17 +1114,23 @@ EOF
 
 # 3) /harness:deliver 스킬이 절차를 따르고 있다는 선언이면 여기서 통과시킨다.
 #    위의 두 검사를 지난 뒤라 강제 푸시와 main 커밋은 이미 걸러져 있다.
-case "$cmd" in
-  DELIVER=1*)
-    # 첫 git 하위 명령이 push 가 아니어도(DELIVER=1 git status && git push ...) 조각마다
-    # push 를 찾아 본다. push 조각이 없으면 gh 를 부르지 않는다.
-    check_push_authors
-    finish_ok
-    ;;
-esac
+#    선언은 낱말 DELIVER=1 로 시작할 때만 인정한다(DELIVER=10, DELIVER=1foo 는 아니다). 선언이
+#    명령 맨 앞에 있으면 그 명령 전체(묶인 뒤쪽 푸시 포함)에 적용된다.
+#
+#    따옴표를 해석할 수 없어(래퍼 안, 닫히지 않은 따옴표) 푸시 여부나 푸시 대상을 확정하지 못하면
+#    선언이 있어도 통과시키지 않는다(원칙 7).
+if [ "$opaque_push" -eq 1 ]; then
+  deny "검사 불능: 따옴표를 해석할 수 없어 푸시 여부를 판정하지 못했습니다. 명령에 따옴표 문자열을 다시 실행하는 부분(bash -c, eval, ssh 등)이나 닫히지 않은 따옴표가 있고 git 과 push 낱말이 함께 있습니다. 푸시일 수 있어 통과시키지 않습니다. 다음: Claude 가 푸시를 따옴표나 래퍼 없이 별도 명령으로 풀어 다시 실행하십시오. 푸시는 /harness:deliver 가 수행하고, 그 절차를 따르는 중이면 명령 앞에 DELIVER=1 을 붙이십시오."
+fi
+if [[ "$cmd" =~ ^DELIVER=1[[:space:]] ]]; then
+  # 첫 git 하위 명령이 push 가 아니어도(DELIVER=1 git status && git push ...) 조각마다
+  # push 를 찾아 본다. push 조각이 없으면 gh 를 부르지 않는다.
+  check_push_authors
+  finish_ok
+fi
 
 # 4) 스킬을 거치지 않은 푸시를 거부한다.
-if [ "$sub" = "push" ]; then
+if [ "$push_found" -eq 1 ]; then
   deny "푸시는 /harness:deliver 스킬이 수행합니다. /harness:deliver 는 커밋과 fetch 와 rebase 와 푸시와 PR 생성을 한 번에 처리합니다. 다음: /harness:deliver 를 실행하십시오. 이미 그 스킬 절차를 따르는 중이라면 명령 앞에 DELIVER=1 을 붙여 다시 실행하십시오."
 fi
 

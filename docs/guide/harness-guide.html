@@ -1446,7 +1446,7 @@ Closes #143</pre>
   <div class="tbl-wrap"><table>
     <tr><th>이런 말이 나오면</th><th>왜</th><th>이렇게 해</th></tr>
     <tr><td>main 에서 커밋 거절</td><td>진열대에서 직접 만들려고 함</td><td><code>/harness:start</code> 로 브랜치부터</td></tr>
-    <tr><td>맨손 <code>git push</code> 거절</td><td>창구를 안 거침</td><td><code>/harness:deliver</code></td></tr>
+    <tr><td>맨손 <code>git push</code> 거절</td><td>창구를 안 거침(<code>git status &amp;&amp; git push</code> 처럼 다른 명령과 묶어도 마찬가지)</td><td><code>/harness:deliver</code></td></tr>
     <tr><td><code>--force</code> 거절</td><td>남의 작업을 지울 수 있음</td><td>쓰지 않아. deliver 가 안전한 방법을 씀</td></tr>
     <tr><td>브랜치 이름 형식 거절</td><td>규칙과 다름</td><td><code>git branch -m feat/12-new-name</code></td></tr>
     <tr><td>문서 저장 거절</td><td>템플릿과 다름 (빠진 절, 틀린 파일명)</td><td>메시지의 사유대로 고쳐서 다시 저장</td></tr>
