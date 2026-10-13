@@ -35,8 +35,74 @@ def render(report: dict, code: int) -> str:
         text += "\n" + "\n".join(_render_code_rules(code_rules))
     pairing = report.get("pairing")
     if pairing:
-        text += "\n" + "\n".join(_render_pairing(pairing))
+        text += "\n" + "\n".join(
+            _render_disabled("번호 짝") if pairing.get("status") == "disabled" else _render_pairing(pairing)
+        )
+    overlap = report.get("overlap")
+    if overlap:
+        text += "\n" + "\n".join(
+            _render_disabled("객체 겹침") if overlap.get("status") == "disabled" else _render_overlap(overlap)
+        )
+    cross = report.get("cross_checks")
+    if cross:
+        text += "\n" + "\n".join(_render_cross_checks(cross))
     return text
+
+
+def _render_disabled(name: str) -> list[str]:
+    """스위치로 꺼진 교차 검사. 조용히 빠지지 않게 한 줄을 남긴다."""
+    return ["", f"{name}: 이 저장소 설정(rules/cross-checks/switches.yaml)으로 꺼져 있음"]
+
+
+def _render_overlap(result: dict) -> list[str]:
+    """Spec 간 SAP 객체 겹침 절(#292). 경고만 하므로 위반 표는 없다."""
+    out = ["", "---", "", "## 객체 겹침", ""]
+    warnings = result.get("warnings") or []
+    cannot = result.get("cannot_check") or []
+
+    if cannot:
+        out += ["### ⚠️ 검사 불능", ""]
+        for item in cannot:
+            out.append(f"- `{item.get('file')}` — {item.get('message')}")
+        out += [
+            "",
+            "위 Spec 의 `## 사용 객체` 표를 읽지 못해 이 Spec 은 겹침을 확인하지 못했습니다. "
+            "통과도 위반도 아닙니다. 표 머리(종류 | 이름 | 작업 | 비고)와 작업 값(생성·수정·참조)을 확인하십시오.",
+            "",
+        ]
+
+    if warnings:
+        out += [
+            "### 참고 — 같은 객체를 둘 이상의 Spec 이 만들거나 고침 (통과에는 영향 없음)",
+            "",
+            f"**{len(warnings)}건**입니다. 같은 객체를 두 사람이 동시에 고치면 충돌할 수 있으니 담당을 확인하십시오.",
+            "",
+            "| 종류 | 이름 | Spec (작업) |",
+            "|---|---|---|",
+        ]
+        for w in warnings:
+            specs = ", ".join(f"`{s.get('file')}` ({s.get('work')})" for s in w.get("specs") or [])
+            out.append(f"| {_cell(w.get('kind'))} | `{_cell(w.get('name'))}` | {specs} |")
+        out.append("")
+    elif not cannot:
+        out += ["Spec 끼리 같은 객체를 만들거나 고치는 곳이 없습니다.", ""]
+
+    if result.get("no_table"):
+        out.append(f"`## 사용 객체` 표가 없는 Spec **{result['no_table']}건**은 비교에서 뺐습니다.")
+    if result.get("name_tbd"):
+        out.append(f"이름 미정 **{result['name_tbd']}건**(이름이 비었거나 영문자로 시작하지 않는 행)은 비교에서 뺐습니다.")
+    return out
+
+
+def _render_cross_checks(result: dict) -> list[str]:
+    """교차 검사 스위치 파일(`rules/cross-checks/switches.yaml`)을 읽지 못한 경우."""
+    return [
+        "", "---", "", "## 교차 검사 설정", "",
+        "### ⚠️ 검사 불능", "",
+        "```", str(result.get("message") or "스위치 파일을 읽지 못했습니다.").strip(), "```", "",
+        "번호 짝·객체 겹침을 돌릴지 알 수 없어 두 검사를 하지 않았습니다. 통과도 위반도 아닙니다. "
+        "설정 파일을 관리하는 담당자가 고쳐야 합니다.",
+    ]
 
 
 def _render_pairing(result: dict) -> list[str]:

@@ -148,6 +148,30 @@ main 병합이 아니라 태그 기준이다 — 병합 뒤 `release-tag` 가 �
   Spec 의 근거 REQ 는 `## 근거 요구사항` 첫 문단에서만 읽고 `REQ-001~013` 같은 범위 표기는 번호로 세지 않는다.
   원장 Spec 칸의 외부 링크(`https://…`)는 파일 검사 없이 참고로만 남긴다.
 
+## `overlap` — Spec 간 SAP 객체 겹침 경고(#292)
+
+규칙 종류가 아닌 별도 검사다(`checker/overlap.py`). `docs/spec/*.md` 마다 `## 사용 객체` 표(`종류 | 이름 | 작업 | 비고`)를
+읽어, 작업이 `생성`·`수정` 인 행의 `(종류, 이름 대문자)` 가 Spec 둘 이상에 나오면 경고한다. `참조` 행은 비교하지 않는다.
+`scripts/check_changed.py` 가 바뀐 파일에 `docs/spec/` 가 있을 때 돌려 리포트의 `overlap` 키로 합친다.
+
+- 경고만 한다(통과 유지, 위반 없음). 코멘트의 "객체 겹침" 절에 표로 나온다.
+- 표 절이 없는 Spec 은 비교에서 빼고 "표 없음 n건" 으로만 적는다. 이름이 비었거나 영문자(또는 `/`)로 시작하지 않는 행
+  (`미정`, `-`)도 빼고 "이름 미정 n건" 으로 적는다. 대상은 `DEV-` 로 시작하는 Spec 만이다.
+- 검사 불능(종료코드 2): Spec 을 읽지 못함, 절은 있는데 표가 없음, 표 머리·칸 수·작업 값이 틀려 읽을 수 없음.
+- `docs/spec/` 가 없는 저장소는 대상이 아니다(skipped).
+
+### 교차 검사 스위치
+
+`pairing` 과 `overlap` 은 Project Repository 의 `rules/cross-checks/switches.yaml` 로 각각 끈다(`checker/cross_switches.py`).
+
+```yaml
+번호_짝: true      # false 면 번호 짝 검사를 돌리지 않는다
+객체_겹침: true    # false 면 객체 겹침 검사를 돌리지 않는다
+```
+
+꺼져 있으면 리포트에 `{"status": "disabled"}` 를 싣고 코멘트에 "꺼져 있음" 한 줄이 남는다(종료코드 0). 파일이나 키가 없으면 켠다. 모르는 키나 불린이 아닌 값은 검사 불능(종료코드 2, 리포트 키 `cross_checks`)이다. 엔진 로더가
+`rules/` 최상위 `*.yaml` 을 모두 문서 규칙으로 읽기 때문에 하위 폴더 `cross-checks/` 에 둔다.
+
 ## `risk_gate` 의 `split_hint` — SRS 쪼개짐 의심을 승인자에게 보여 준다(#278)
 
 `req_cross_reference` 는 문서 규칙이라 PR 화면에 단서를 남기지 않는다. risk-gate 의 `split_hint` 기준이

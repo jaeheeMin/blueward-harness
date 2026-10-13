@@ -116,6 +116,22 @@ def _plain(cell: str) -> str:
     return cell[1:-1].strip() if len(cell) >= 2 and cell[0] == cell[-1] == "`" else cell
 
 
+def read_section_table(text: str, title: str) -> tuple[bool, tuple[list[str], list[list[str]]] | None]:
+    """`## title` 절의 첫 표를 읽는다. (절이 있는가, (머리, 본문 행들) 또는 표 없음).
+
+    규칙 밖에서(예: Spec 끼리 객체 겹침, `checker.overlap`) 같은 표 파서를 쓰게 공개한다.
+    칸은 앞뒤 공백이 없고, 백틱으로 감싼 이름은 `plain_cell` 로 벗길 수 있다.
+    """
+    lines = _section_lines(text, title)
+    if lines is None:
+        return False, None
+    return True, _first_table(lines)
+
+
+def plain_cell(cell: str) -> str:
+    return _plain(cell)
+
+
 @rule("md_table")
 def check(path: Path, params: dict) -> list[Violation]:
     title = _get(params, "절", "section")
