@@ -163,6 +163,21 @@ def test_DELIVER_푸시가_남의_PR_브랜치면_거부한다(bin_dir):
     assert "Other" in reason and "feat/x" in reason and "다음:" in reason
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "DELIVER=1 git status && git push origin feat/x",
+        "DELIVER=1 git status && (git push origin feat/x)",
+        "DELIVER=1 git status; { git push origin feat/x; }",
+    ],
+)
+def test_DELIVER_묶음의_푸시도_남의_PR_브랜치면_거부한다(bin_dir, command):
+    code, out = _guard(command, bin_dir, FAKE_GH_LIST="feat/x=Other")
+    assert code == 0
+    reason = _reason(out)
+    assert "Other" in reason and "feat/x" in reason
+
+
 def test_DELIVER_푸시_refspec_도착_브랜치를_본다(bin_dir):
     code, out = _guard(
         "DELIVER=1 git push origin HEAD:refs/heads/feat/y", bin_dir, FAKE_GH_LIST="feat/y=Other"
