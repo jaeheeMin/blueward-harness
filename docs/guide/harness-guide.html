@@ -280,7 +280,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.67, public-cloud main 기준 (2026-10-14)</div>
+      <div class="note">harness 0.10.68, public-cloud main 기준 (2026-10-14)</div>
     </div>
   </nav>
 
@@ -461,6 +461,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
         <li><b>열린 세션에서 바로</b> — <code>/reload-plugins</code> 를 쳐. 훅·MCP 서버가 새 판으로 바뀌어.</li>
         <li><b>손으로</b> — 터미널에서 순서대로. 폴더별로 깔았으니 그 작업장 폴더에서 해.<pre style="margin-top:8px">claude plugin marketplace update blueward-harness
 claude plugin update harness@blueward-harness --scope project</pre><span class="small">끝나면 "Restart to apply changes" 가 떠. Claude Code 를 다시 열거나 열린 세션에서 <code>/reload-plugins</code>.</span></li>
+        <li><b>작업 중에 새 판이 나오면</b> — 메시지를 보낼 때 Claude 가 한 번 알려 줘(세션당, 같은 판은 한 번). 갱신은 알려 준 방법으로 네가 직접 해. <code>HARNESS_NO_UPDATE_NOTICE=1</code> 로 끌 수 있어.</li>
         <li><b>지금 버전 확인</b> — 터미널에서 <code>claude plugin list</code>. <code>harness@blueward-harness</code> 아래 <code>Version</code> 이 지금 받아 둔 판이야. 이 가이드 레일 아래 "harness 0.10.xx 기준" 이 최신이라고 보면 돼.</li>
       </ul>
     </section>
@@ -468,6 +469,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
       <h3>새 판이 나오면</h3>
       <ul class="plain">
         <li>새 판이 배포되면 <b>Teams 에 알림</b>이 와. 어떤 변경이 들어갔는지 목록도 같이 와.</li>
+        <li>세션을 열어 둔 채 작업 중이어도 새 판이 나오면 <b>Claude 가 한 번 알려 줘</b>. 갱신은 직접 해.</li>
         <li>검사 엔진은 새 판이 나오는 즉시 <b>PR 검사(최종 판정)</b>에 쓰이지만, <b>내 PC 훅(미리 검사)</b>은 플러그인을 갱신해야 새 판을 써.</li>
         <li>그래서 갱신 전에는 <b>PC 훅과 PR 검사 결과가 다를 수 있어</b>. 그럴 땐 먼저 갱신하고, 그래도 다르면 <b>최종 판정은 PR 검사</b>를 따라.</li>
       </ul>

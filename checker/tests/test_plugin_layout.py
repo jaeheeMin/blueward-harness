@@ -82,6 +82,7 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
         "stop-deliver.sh",
         "mcp_source_guard.py",
         "mcp_activation_tracker.py",
+        "update_notice.py",
     }
 
     # 각 훅이 가리키는 파일이 실제로 플러그인 안에 있어야 한다.
@@ -92,6 +93,11 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
     assert "PreToolUse" in events
     assert "SessionStart" in events
     assert "Stop" in events
+    # #314: 옛 판 안내는 UserPromptSubmit, 짧은 타임아웃, 실패해도 프롬프트를 막지 않는다.
+    notice = events["UserPromptSubmit"][0]["hooks"][0]
+    assert notice["timeout"] <= 10
+    assert notice["async"] is True  # 프롬프트를 늦추지 않는다. 안내는 다음 턴에 Claude 에게 간다.
+    assert notice["command"].rstrip().endswith("|| exit 0")
 
     pre_matchers = {entry["matcher"] for entry in events["PreToolUse"]}
     assert pre_matchers == HOOK_MATCHERS
