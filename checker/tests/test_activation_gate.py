@@ -415,22 +415,21 @@ def test_기록에_실패하면_표식과_exit_2_로_알리고_관문이_막는�
 
 # --- Launchpad 타일 유형(#313) ------------------------------------------------
 
-# 생성 즉시 활성인지는 실측 전이라 created_active 에 넣지 않았다 — createObject 는 written 이다.
+# 2026-10-14 080 실측(#313): 생성 직후 inactiveObjects 에 나오지 않아 created_active 다.
 @pytest.mark.parametrize("objtype,name,url", [
-    ("SIA6", "ZUI_APP_X", "/sap/bc/adt/aps/cloud/iam/sia6/zui_app_x"),
+    ("SIA6", "ZUI_APP_X_EXT", "/sap/bc/adt/aps/cloud/iam/sia6/zui_app_x_ext"),
     ("SIA1", "ZUI_CAT_X", "/sap/bc/adt/aps/cloud/iam/sia1/zui_cat_x"),
     ("SIA7", "ZUI_CAT_X_0001", "/sap/bc/adt/aps/cloud/iam/sia7/zui_cat_x_0001"),
 ])
-def test_launchpad_유형은_생성하면_written_이고_activateByName_으로_닫힌다(hooks, repo, objtype, name, url):
+def test_launchpad_유형은_생성_즉시_활성이고_activateByName_도_같은_키로_모인다(hooks, repo, objtype, name, url):
     _post(hooks, repo, "createObject", {"objtype": objtype, "name": name, "parentName": "ZPK"})
-    assert _gate(hooks, repo)[0] == 1
+    assert _gate(hooks, repo)[0] == 0
     rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
-    assert rec[f"{SERVER}|{objtype}:{name.upper()}"]["status"] == "written"
+    assert rec[f"{SERVER}|{objtype}:{name.upper()}"]["status"] == "active"
     _post(hooks, repo, "activateByName", {"objectName": name, "objectUrl": url}, _result(True))
     assert _gate(hooks, repo)[0] == 0
     rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
     assert list(rec) == [f"{SERVER}|{objtype}:{name.upper()}"]
-    assert rec[f"{SERVER}|{objtype}:{name.upper()}"]["status"] == "active"
 
 
 def test_가장_긴_접두_매칭이_aps_iam_auth_와_aps_cloud_iam_을_가른다(hooks):

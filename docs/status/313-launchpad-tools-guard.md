@@ -18,3 +18,12 @@ public-cloud 080 MCP 래퍼 3단계의 새 도구 `deployUi5App`(UI5 BSP 업로�
 `test_mcp_source_guard`(두 도구 영문 통과·한글 CR-001 거절·이름 없음 검사 불능·`sourceDir` 무시), `test_adt_tiers`(쓰기 금지·모르는 서버 거절, 허용 서버에서 CR-001 이어짐, 매처가 두 도구를 잡음), `test_activation_gate`(SIA6·SIA1·SIA7 생성 후 activateByName 으로 닫힘, 접두 매칭, 새 두 도구 기록 안 됨), `test_plugin_layout`(매처 기대값 갱신).
 
 길잡이: MCP 도구 목록이 없어 레일 버전만 harness 0.10.68 로 고쳤다. `plugins/harness/README.md` 의 가로채는 도구 수(19→21개)를 고쳤다. Plugin version 0.10.67 → 0.10.68.
+
+## 실측 뒤 결정 (2026-10-14)
+
+public-cloud 세션이 080 에서 패키지 → deployUi5App → SIA6 → SIA1 → SIA7 → publishBusinessCatalog
+순서로 만들며 단계마다 inactiveObjects 를 봤다. BSP·UIAD·SIA6·SIA1·SIA7 모두 한 번도 비활성
+목록에 나오지 않았다. 그래서 SIA6·SIA1·SIA7 을 `created_active` 에 넣어 createObject 기록을
+처음부터 active 로 남긴다. deployUi5App·publishBusinessCatalog 는 그대로 기록 대상이 아니다
+(배포 즉시 활성). 참고: SIA6(EXT) 이름은 `_EXT` 로 끝나야 생성된다 — 래퍼가 미리 막는다.
+Plugin 0.10.70(같은 시각 열린 #322 가 0.10.69).

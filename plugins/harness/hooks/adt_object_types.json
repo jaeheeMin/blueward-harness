@@ -1,7 +1,7 @@
 {
   "_comment": "ADT URL 컬렉션 경로 -> 오브젝트 TYPE 표(#190). adt_activation.py 가 setObjectSource·activateByName·deleteObject 의 URL 에서 'TYPE:NAME' 키를 만들 때 쓴다. 경로는 /sap/bc/adt/ 뒤 소문자이고, 가장 긴 것이 먼저 맞는다. 표에 없는 URL 은 'URL:<루트 URL>' 키로 추적한다. createObject 로 만드는 유형은 abap-adt-api CreatableTypes 의 creationPath 와 맞춘다(#301). 새 오브젝트 종류가 나오면 여기에 한 줄만 더한다(CLAUDE.md 원칙 2).",
-  "_created_active_comment": "createObject 만으로 이미 활성인 유형(2026-10-14 080 실측, #301): DEVC 는 응답 activated:true 이고 직후 inactiveObjects 에 없다. MSAG 는 직후 inactiveObjects 에 없고 activateByName 은 '조회 권한이 없습니다' 로 실패한다. 이 유형은 createObject 기록을 written 이 아니라 active 로 남긴다. 이후 setObjectSource 로 쓰면 written 으로 돌아간다.",
-  "created_active": ["DEVC", "MSAG"],
+  "_created_active_comment": "createObject 만으로 이미 활성인 유형(2026-10-14 080 실측, #301): DEVC 는 응답 activated:true 이고 직후 inactiveObjects 에 없다. MSAG 는 직후 inactiveObjects 에 없고 activateByName 은 '조회 권한이 없습니다' 로 실패한다. 이 유형은 createObject 기록을 written 이 아니라 active 로 남긴다. SIA6·SIA1·SIA7(Launchpad 타일, #313)도 2026-10-14 080 실측에서 createObject 직후 inactiveObjects 에 한 번도 나오지 않았다. 이후 setObjectSource 로 쓰면 written 으로 돌아간다.",
+  "created_active": ["DEVC", "MSAG", "SIA6", "SIA1", "SIA7"],
   "collections": {
     "oo/classes": "CLAS",
     "oo/interfaces": "INTF",
