@@ -50,7 +50,7 @@ HOOK_MATCHERS = {
     "Bash|PowerShell",
     "mcp__.*__(setObjectSource|renamePreview|renameExecute|extractMethodPreview|extractMethodExecute|createObject"
     "|deleteObject|activateObjects|activateByName|createTransport|transportRelease|transportDelete"
-    "|publishServiceBinding|unPublishServiceBinding|runClass|gitPullRepo|pushRepo|tableContents|runQuery)",
+    "|publishServiceBinding|unPublishServiceBinding|deployUi5App|publishBusinessCatalog|runClass|gitPullRepo|pushRepo|tableContents|runQuery)",
 }
 
 

@@ -55,6 +55,8 @@ write_tools:
   - transportDelete
   - publishServiceBinding
   - unPublishServiceBinding
+  - deployUi5App
+  - publishBusinessCatalog
   - runClass
   - gitPullRepo
   - pushRepo

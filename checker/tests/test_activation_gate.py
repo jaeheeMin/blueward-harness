@@ -411,3 +411,65 @@ def test_기록에_실패하면_표식과_exit_2_로_알리고_관문이_막는�
     assert code == 1 and "검사 불능" in out and str(marker) in out
     marker.unlink()
     assert _gate(hooks, repo)[0] == 0
+
+
+# --- Launchpad 타일 유형(#313) ------------------------------------------------
+
+# 생성 즉시 활성인지는 실측 전이라 created_active 에 넣지 않았다 — createObject 는 written 이다.
+@pytest.mark.parametrize("objtype,name,url", [
+    ("SIA6", "ZUI_APP_X", "/sap/bc/adt/aps/cloud/iam/sia6/zui_app_x"),
+    ("SIA1", "ZUI_CAT_X", "/sap/bc/adt/aps/cloud/iam/sia1/zui_cat_x"),
+    ("SIA7", "ZUI_CAT_X_0001", "/sap/bc/adt/aps/cloud/iam/sia7/zui_cat_x_0001"),
+])
+def test_launchpad_유형은_생성하면_written_이고_activateByName_으로_닫힌다(hooks, repo, objtype, name, url):
+    _post(hooks, repo, "createObject", {"objtype": objtype, "name": name, "parentName": "ZPK"})
+    assert _gate(hooks, repo)[0] == 1
+    rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
+    assert rec[f"{SERVER}|{objtype}:{name.upper()}"]["status"] == "written"
+    _post(hooks, repo, "activateByName", {"objectName": name, "objectUrl": url}, _result(True))
+    assert _gate(hooks, repo)[0] == 0
+    rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
+    assert list(rec) == [f"{SERVER}|{objtype}:{name.upper()}"]
+    assert rec[f"{SERVER}|{objtype}:{name.upper()}"]["status"] == "active"
+
+
+def test_가장_긴_접두_매칭이_aps_iam_auth_와_aps_cloud_iam_을_가른다(hooks):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("adt_activation_t", hooks / "adt_activation.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(hooks))
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(hooks))
+    for url, key in [
+        ("/sap/bc/adt/aps/cloud/iam/sia6/zx", "SIA6:ZX"),
+        ("/sap/bc/adt/aps/cloud/iam/sia1/zx", "SIA1:ZX"),
+        ("/sap/bc/adt/aps/cloud/iam/sia7/zx_0001", "SIA7:ZX_0001"),
+        ("/sap/bc/adt/aps/iam/auth/zx", "AUTH:ZX"),
+        ("/sap/bc/adt/aps/iam/suso/zx", "SUSO:ZX"),
+    ]:
+        assert mod.key_from_url(url)["key"] == key
+
+
+# 배포·게시가 곧 활성인지는 실측 전이라 기록 대상에 넣지 않는다(#313). 넣으면 실측 전에 푸시를 막을 수 있다.
+@pytest.mark.parametrize("tool,tool_input", [
+    ("deployUi5App", {"name": "ZUI5_APP", "sourceDir": "dist"}),
+    ("publishBusinessCatalog", {"name": "ZUI_CAT_X"}),
+])
+def test_launchpad_도구는_활성화_기록을_남기지_않는다(hooks, repo, tool, tool_input):
+    _post(hooks, repo, tool, tool_input)
+    assert _gate(hooks, repo)[0] == 0
+    path = _record(repo)
+    entries = json.loads(path.read_text(encoding="utf-8")).get("entries", {}) if path.exists() else {}
+    assert entries == {}
+
+
+def test_활성화_기록_PostToolUse_매처에_launchpad_도구가_없다():
+    hooks_json = json.loads((PLUGIN_SRC / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    matchers = [
+        e["matcher"] for e in hooks_json["hooks"]["PostToolUse"]
+        for h in e["hooks"] if "mcp_activation_tracker.py" in h["command"]
+    ]
+    assert len(matchers) == 1
+    assert "deployUi5App" not in matchers[0] and "publishBusinessCatalog" not in matchers[0]
