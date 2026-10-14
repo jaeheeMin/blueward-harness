@@ -18,6 +18,9 @@
 #         contents: read
 #         pull-requests: write
 #         issues: write   # main push 실패를 이슈로 알리려면 필요하다
+#
+# pull-requests: write 는 읽기를 포함하므로, 열린 PR 끼리 판 번호가 겹치는지 보려고 다른 PR 의
+# 파일 목록을 읽는(#315) 데 권한을 더 줄 필요가 없다.
 
 name: doc-guard
 
@@ -74,10 +77,29 @@ jobs:
           echo "바뀐 파일:"; cat changed.txt
           if [ ! -s changed.txt ]; then echo "none=true" >> "$GITHUB_OUTPUT"; fi
 
+      - name: 열린 PR 의 판 번호 읽기
+        # 열린 PR 끼리 문서 판 번호가 겹치는지 보려고(#315) 다른 열린 PR 의 파일 목록과 SRS 버전을 읽는다.
+        # 읽는 권한은 부르는 쪽이 주는 pull-requests: write(읽기 포함)로 충분하다. 못 읽으면 이 스텝이
+        # 실패하지 않고 결과 파일에 검사 불능을 적어 두며, 검사 스텝이 그것을 검사 불능으로 알린다.
+        # 엔진이 옛 판이라 스크립트가 없으면 건너뛴다(옛 엔진은 이 검사를 모른다).
+        if: github.event_name == 'pull_request' && steps.changed.outputs.none != 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          script=.doc-guard-engine/scripts/fetch_open_prs.py
+          if [ -f "$script" ]; then
+            uv run --project .doc-guard-engine python "$script" "${{ github.event.pull_request.number }}" open-prs.json \
+              || echo "열린 PR 읽기 스크립트가 실패했습니다" >&2
+          fi
+
       - name: 검사
         if: steps.changed.outputs.none != 'true'
         id: check
         shell: bash
+        env:
+          DOC_GUARD_OPEN_PRS: ${{ github.event_name == 'pull_request' && 'open-prs.json' || '' }}
+          DOC_GUARD_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set +e
           uv run --project .doc-guard-engine python .doc-guard-engine/scripts/check_changed.py changed.txt > report.json 2> error.txt
