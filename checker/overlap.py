@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from checker.pairing import CANNOT_CHECK, PASS, SKIPPED, SPEC_DIR
+from checker.pairing import CANNOT_CHECK, PASS, SKIPPED, SPEC_DIR, number_titles, titled
 from checker.rules.md_table import plain_cell, read_section_table
 
 SECTION = "사용 객체"
@@ -35,6 +35,12 @@ _NAME_START = re.compile(r"[A-Za-z/]")
 def _dev_of(name: str) -> str:
     m = _DEV.match(name)
     return f"DEV-{int(m.group(1)):03d}" if m else Path(name).stem
+
+
+def _dev_label(dev: str, titles: dict[int, str]) -> str:
+    """메시지용 `DEV-002(제목)`(#308). 번호로 읽히지 않는 이름(`DEV-` 없는 파일명)은 그대로 둔다."""
+    m = _DEV.fullmatch(dev)
+    return titled("DEV", int(m.group(1)), titles) if m else dev
 
 
 def _objects(text: str) -> tuple[list[tuple[str, str, str]], int] | None:
@@ -101,15 +107,16 @@ def check_overlap(root: Path) -> dict:
             if work not in entry["works"]:
                 entry["works"].append(work)
 
+    titles = number_titles(root)
     warnings = []
     for (kind, name), specs in sorted(by_key.items()):
         if len(specs) < 2:
             continue
         items = [{"file": s["file"], "dev": s["dev"], "work": "·".join(s["works"])} for s in specs.values()]
-        who = ", ".join(f"{i['dev']}({i['work']})" for i in items)
+        who = "; ".join(f"{_dev_label(i['dev'], titles)} {i['work']}" for i in items)
         warnings.append({
             "kind": kind, "name": name, "specs": items,
-            "message": f"{kind} {name} — {who} 가 함께 만들거나 고칩니다",
+            "message": f"{kind} {name} — 같은 객체를 여러 Spec 이 다룹니다: {who}",
         })
 
     result = {

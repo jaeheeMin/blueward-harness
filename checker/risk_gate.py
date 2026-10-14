@@ -374,6 +374,23 @@ def req_titles(text: str) -> dict[str, str]:
     return titles
 
 
+_ID_NUM = re.compile(r"^(REQ|DEV)-(\d+)$")
+
+
+def titled_id(rid: str, *title_maps: dict[str, str]) -> str:
+    """`REQ-001` → `REQ-001(제목)`(#308). DEV 번호는 같은 숫자의 REQ 제목을 쓴다. 어느 표에도 없으면 `(제목 미확인)`."""
+    m = _ID_NUM.match(rid)
+    if not m:
+        return rid
+    n = int(m.group(2))
+    for titles in title_maps:
+        for key, title in titles.items():
+            km = _ID_NUM.match(key)
+            if km and int(km.group(2)) == n and title:
+                return f"{rid}({title})"
+    return f"{rid}(제목 미확인)"
+
+
 def scope_exclusions(text: str) -> list[str]:
     """범위 "하지 않는 것" 목록의 줄들(머리말 줄과 그 아래로 더 들여쓴 줄, 공백 정리)."""
     lines = _unfenced(text)
@@ -507,10 +524,11 @@ def split_hint_evidence(base_text: str, head_text: str) -> dict[str, list[str]]:
         if rid in sections:
             others, _ok, _misplaced = collect_mentions(rid, sections[rid], DEFAULT_PREFIX, excludes)
             if others:
-                evidence.append(f"(a) 상세 절이 다른 번호를 말함: {', '.join(others)}")
+                shown_ids = ", ".join(titled_id(o, head_titles, base_titles) for o in others)
+                evidence.append(f"(a) 상세 절이 다른 번호를 말함: {shown_ids}")
         if changed_scope:
             shown = "; ".join(
-                f"\"{_cut(ln)}\"" + (f" ({', '.join(reqs)} 의 {SCOPE_EXCLUDED_MARKER})" if reqs else "")
+                f"\"{_cut(ln)}\"" + (f" ({', '.join(titled_id(r, base_titles, head_titles) for r in reqs)} 의 {SCOPE_EXCLUDED_MARKER})" if reqs else "")
                 for ln, reqs in changed_scope[:2]
             )
             more = f" 등 {len(changed_scope)}개" if len(changed_scope) > 2 else ""
@@ -518,7 +536,7 @@ def split_hint_evidence(base_text: str, head_text: str) -> dict[str, list[str]]:
         new = _norm_title(head_titles[rid])
         if len(new) >= MIN_TITLE_LEN:
             overlaps = [
-                f"{old_id} '{old_title}'"
+                titled_id(old_id, base_titles)
                 for old_id, old_title in base_titles.items()
                 if len(_norm_title(old_title)) >= MIN_TITLE_LEN
                 and (_norm_title(old_title) in new or new in _norm_title(old_title))
@@ -648,7 +666,7 @@ def _crit_split_hint(ctx: Context) -> list[Finding]:
     elif not base.strip() and entry.get("status") != "added":
         return _split_hint_unknown("PR 이 갈라진 지점의 SRS 를 읽지 못함")
     return [
-        Finding("split_hint", f"SRS 새 요구사항 {rid} 이 기존 요구사항을 넓힌 것일 수 있음(확장 의심, 승인자가 확인): {'; '.join(ev)}")
+        Finding("split_hint", f"SRS 새 요구사항 {titled_id(rid, req_titles(head))} 이 기존 요구사항을 넓힌 것일 수 있음(확장 의심, 승인자가 확인): {'; '.join(ev)}")
         for rid, ev in split_hint_evidence(base, head).items()
     ]
 

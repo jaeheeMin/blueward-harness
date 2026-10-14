@@ -307,3 +307,56 @@ def test_DEV로_시작하지_않는_파일은_보지_않는다(tmp_path):
     _spec(tmp_path, "메모.md", [_row("CDS View", "ZI_A", "삭제")])  # 깨져 있어도 검사 불능이 아니다
     r = check_overlap(tmp_path)
     assert r["status"] == PASS and r["warnings"] == [] and r["no_table"] == 0
+
+
+def _srs_titles(tmp: Path, rows: dict[int, str]) -> None:
+    path = tmp / "docs" / "ssot" / "SRS.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "".join(f"| REQ-{n:03d} | {t} | New |\n" for n, t in rows.items())
+    path.write_text("# SRS\n\n## 요구사항\n\n| ID | Title | Status |\n|---|---|---|\n" + body + "\n", encoding="utf-8")
+
+
+def test_메시지의_DEV_번호_뒤에_SRS_제목을_붙인다(tmp_path):
+    _spec(tmp_path, "DEV-002-a.md", [_row("CDS View", "ZI_Order", "생성")])
+    _spec(tmp_path, "DEV-003-b.md", [_row("CDS View", "ZI_Order", "수정")])
+    _srs_titles(tmp_path, {2: "판매오더 조회 앱", 3: "판매오더 변경 앱"})
+    (w,) = check_overlap(tmp_path)["warnings"]
+    assert w["message"] == (
+        "CDS View ZI_ORDER — 같은 객체를 여러 Spec 이 다룹니다: DEV-002(판매오더 조회 앱) 생성; DEV-003(판매오더 변경 앱) 수정"
+    )
+    # 기계가 읽는 값은 번호 그대로다
+    assert {s["dev"] for s in w["specs"]} == {"DEV-002", "DEV-003"}
+
+
+def test_SRS에_없는_번호는_원장_내용으로_그것도_없으면_제목_미확인이다(tmp_path):
+    _spec(tmp_path, "DEV-002-a.md", [_row("CDS View", "ZI_Order", "생성")])
+    _spec(tmp_path, "DEV-003-b.md", [_row("CDS View", "ZI_Order", "수정")])
+    _srs_titles(tmp_path, {1: "다른 요구사항"})
+    ledger = tmp_path / "audit" / "ledger" / "p.md"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(
+        "# 원장\n\n## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |\n|---|---|---|---|---|---|\n"
+        "| DEV-002 | 원장에만 있는 내용 | - | 홍 | 진행 |  |\n",
+        encoding="utf-8",
+    )
+    (w,) = check_overlap(tmp_path)["warnings"]
+    assert "DEV-002(원장에만 있는 내용) 생성" in w["message"]
+    assert "DEV-003(제목 미확인) 수정" in w["message"]
+
+
+def test_SRS를_읽지_못해도_제목만_빠지고_검사_결과는_그대로다(tmp_path):
+    _spec(tmp_path, "DEV-002-a.md", [_row("CDS View", "ZI_Order", "생성")])
+    _spec(tmp_path, "DEV-003-b.md", [_row("CDS View", "ZI_Order", "수정")])
+    srs = tmp_path / "docs" / "ssot" / "SRS.md"
+    srs.parent.mkdir(parents=True)
+    srs.write_bytes(b"\xff\xfe\x00 \x80 not utf-8")  # 읽을 수 없는 SRS
+    r = check_overlap(tmp_path)
+    assert r["status"] == PASS and r["cannot_check"] == [] and len(r["warnings"]) == 1
+    assert "DEV-002(제목 미확인) 생성; DEV-003(제목 미확인) 수정" in r["warnings"][0]["message"]
+
+
+def test_SRS도_원장도_없으면_제목_미확인이고_파일명_요약을_제목으로_쓰지_않는다(tmp_path):
+    _spec(tmp_path, "DEV-002-a.md", [_row("CDS View", "ZI_Order", "생성")])
+    _spec(tmp_path, "DEV-003-b.md", [_row("CDS View", "ZI_Order", "수정")])
+    (w,) = check_overlap(tmp_path)["warnings"]
+    assert "DEV-002(제목 미확인) 생성; DEV-003(제목 미확인) 수정" in w["message"]

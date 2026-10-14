@@ -92,13 +92,13 @@ uv run --no-project python "<이 스킬의 base directory>/reserve_number.py" li
 ```
 
 결과는 JSON 한 줄이다. `devs[]` 마다 `number`, `req_title`, `lob`, `next_step`, `status`, `ledger`(원장 파일과
-그 줄의 내용·상태), `spec`, `issues`(제목 앞 `[DEV-xxx]` 이슈), `subtasks`(하위 작업 이슈)가 있고, SRS 표에 없는
-열은 키가 빠진다. 종료코드는 "번호 찜" 과 같다 — 3(원장 없음)이면 이 절을 건너뛰고, 2(판정 불능)면 사유를 알리고
+그 줄의 내용·상태), `spec`, `issues`(제목 앞 `[DEV-xxx]` 이슈), `subtasks`(하위 작업 이슈), 사람에게 보일 `label`(`DEV-002(제목)`, 제목을 모르면 `(제목 미확인)`)이 있고,
+SRS 표에 없는 열은 키가 빠진다. 종료코드는 "번호 찜" 과 같다 — 3(원장 없음)이면 이 절을 건너뛰고, 2(판정 불능)면 사유를 알리고
 멈춘다. 목록을 못 읽은 채 "새 개발" 로 넘어가지 않는다.
 
 `devs` 가 비면 묻지 않고 새 개발이다. 아니면 번호·제목·LoB·다음 단계·상태를 표로 보여 주고 `AskUserQuestion`
 으로 묻는다. 쉬운 말로, 보기마다 무엇이 달라지는지 적는다. 표는 제목 열이 있어 번호에 제목을 또 붙이지 않지만,
-`AskUserQuestion` 보기와 표 밖 문장에서 번호를 말할 때는 `DEV-002(판매오더 조회 앱)` 처럼 괄호로 제목을 붙인다
+`AskUserQuestion` 보기와 표 밖 문장에서 번호를 말할 때는 `label` 처럼 `DEV-002(판매오더 조회 앱)` 괄호로 제목을 붙인다
 (`<이 스킬의 base directory>/../../rules/issue-and-release.md` "REQ·DEV 번호를 말할 때"). 이슈 제목의 `[DEV-xxx]`·`(DEV-xxx)` 는 그대로 쓴다.
 
 - **기존 개발의 하위 작업이다**(어느 번호인지도 고르게 한다) — 새 번호도 새 원장 줄도 만들지 않고, 이미 있는 그
@@ -148,8 +148,8 @@ uv run --no-project python "<이 스킬의 base directory>/reserve_number.py" ne
   제목에 번호를 붙이지 않는다.
 - 종료코드 4 — 확인 필요(#261). 새 제목이 origin/main SRS 의 기존 REQ 제목을 포함하거나 그 반대라서, 이슈도 번호도
   만들지 않고 멈춘 것이다. 새 제목이 SRS 범위 `하지 않는 것` 항목과 포함 관계이거나 핵심 단어(2자 이상)가 둘 이상 겹칠 때도 같다(#304). stdout JSON
-  (`status: confirm`)의 `matches`(번호·제목)와 `excluded_matches`(`item`: 하지 않는 것 항목, `reqs`: 항목 끝 꼬리표
-  `(REQ-001)` 의 번호들)를 사용자에게 보여 준다. `reqs` 가 있으면 "REQ-001 에서 안 하기로 한 일", 비었으면 "이 프로젝트에서
+  (`status: confirm`)의 `matches`(번호·제목, 사람용 `label`)와 `excluded_matches`(`item`: 하지 않는 것 항목, `reqs`: 항목 끝 꼬리표
+  `(REQ-001)` 의 번호들, 사람용 `reqs_labeled`: `REQ-001(제목)`)를 사용자에게 보여 준다. `reqs` 가 있으면 "REQ-001 에서 안 하기로 한 일", 비었으면 "이 프로젝트에서
   안 하기로 한 일" 이라고 알린다. 그리고 "기존 개발의
   하위 작업인가, 새 개발인가" 를 `AskUserQuestion` 으로 묻는다(위 "기존 개발과의 관계" 와 같은 질문이다). 하위 작업이면
   그 절의 하위 작업 절차로 가고 `reserve`·`claim` 을 다시 부르지 않는다. 새 개발이 맞다고 하면 같은 명령에

@@ -336,3 +336,56 @@ def test_관계없는_파일만_바뀌면_짝_검사를_돌리지_않는다(tmp_
     monkeypatch.chdir(tmp_path)
     assert main_entry(["changed.txt"]) == EXIT_PASS
     assert "pairing" not in json.loads(capsys.readouterr().out)
+
+
+def test_메시지의_번호_뒤에_SRS_제목을_붙인다(tmp_path):
+    link = _spec(tmp_path, 1)
+    _srs(tmp_path, [_req(1, "개발", "DEV-001")])
+    _ledger(tmp_path, [_lrow(1, link)], name="a.md")
+    _ledger(tmp_path, [_lrow(1, link)], name="b.md")
+    _spec(tmp_path, 2, req=3)
+    msgs = {v["kind"]: v["message"] for v in check_pairing(tmp_path)["violations"]}
+    assert msgs["ledger_duplicate"].startswith("DEV-001(제목1) 가 원장에 2번")
+    # 파일명 번호 DEV-002 는 SRS·원장 어디에도 제목이 없고, 근거 REQ-003 도 없다. 추측하지 않는다
+    assert "파일명은 DEV-002(제목 미확인) 인데" in msgs["spec_req_mismatch"]
+    assert "REQ-003(제목 미확인)" in msgs["spec_req_mismatch"]
+
+
+def test_SRS에_없는_번호는_원장_내용으로_대신하고_둘_다_없으면_제목_미확인이다(tmp_path):
+    _spec(tmp_path, 7)
+    _spec(tmp_path, 8)
+    _srs(tmp_path, [_req(1, "미정")])
+    _ledger(tmp_path, [_lrow(7, content="원장 내용 7")])
+    warnings = check_pairing(tmp_path)["warnings"]
+    ledger_msgs = [w["message"] for w in warnings if w["kind"] == "ledger_without_req"]
+    assert ledger_msgs == ["원장의 DEV-007(원장 내용 7) 에 대응하는 SRS 요구사항 REQ-007(원장 내용 7) 가 없습니다."]
+    spec_msgs = [w["message"] for w in warnings if w["kind"] == "spec_without_req"]
+    assert "Spec DEV-008(제목 미확인) 에 대응하는 SRS 요구사항 REQ-008(제목 미확인) 가 없습니다." in spec_msgs
+
+
+def test_SRS_제목_칸이_대시나_빈_값이면_원장_내용_그것도_없으면_제목_미확인이다(tmp_path):
+    _srs(tmp_path, [
+        "| REQ-001 | - | New | High | 고객 | 미정 |  |",
+        "| REQ-002 | — | New | High | 고객 | 미정 |  |",
+        "| REQ-003 |  | New | High | 고객 | 미정 |  |",
+    ])
+    _ledger(tmp_path, [_lrow(1, content="원장 내용 1"), _lrow(2, content="-"), _lrow(2, content="-")], name="a.md")
+    _ledger(tmp_path, [_lrow(2, content="-")], name="b.md")
+    msg = next(v["message"] for v in check_pairing(tmp_path)["violations"] if v["kind"] == "ledger_duplicate")
+    assert msg.startswith("DEV-002(제목 미확인) 가 원장에")
+
+
+def test_SRS가_없으면_원장_내용으로_제목을_대신한다(tmp_path):
+    _ledger(tmp_path, [_lrow(1, content="원장 내용 1"), _lrow(1, content="원장 내용 1")])
+    (v,) = check_pairing(tmp_path)["violations"]
+    assert v["message"].startswith("DEV-001(원장 내용 1) 가 원장에 2번")
+
+
+def test_원장_Spec_칸과_RICEFW_메시지에도_제목이_붙는다(tmp_path):
+    _srs(tmp_path, [_req(1, "개발", "DEV-009"), _req(2, "개발", "DEV-002"), _req(3, "개발", "DEV-003")])
+    _ledger(tmp_path, [_lrow(2, "[x](../../docs/spec/DEV-002-없음.md)"), _lrow(3, "[x](../../docs/spec/DEV-004-a.md)")])
+    msgs = {v["kind"]: v["message"] for v in check_pairing(tmp_path)["violations"]}
+    assert msgs["ricefw_mismatch"].startswith("REQ-001(제목1) 는 다음 단계가 `개발`")
+    missing = [v["message"] for v in check_pairing(tmp_path)["violations"] if v["kind"] == "spec_link_missing"]
+    assert any(m.startswith("DEV-002(제목2) 의 Spec 칸 링크") for m in missing)
+    assert msgs["spec_link_mismatch"].startswith("DEV-003(제목3) 줄의 Spec 칸이")
