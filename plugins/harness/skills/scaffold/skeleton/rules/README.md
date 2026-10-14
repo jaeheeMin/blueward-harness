@@ -58,6 +58,14 @@ Spec 의 파일 이름(`DEV-001-<요약>.md`)과 필수 절(`templates/harness/s
 `md_table` 도 엔진 v0.10.59 이상(`stable`)을 받게 된 뒤에만 켤 수 있다 — 먼저 켜면 위와 같이
 설정 오류로 멈춘다.
 
+`spec.yaml` 은 `## Launchpad 노출` 표(`| 타일 제목 | 부제 | 아이콘 | 시맨틱 오브젝트 | 액션 | 파라미터 | 카탈로그 | 배치 |`)
+를 보는 `md_table` 을 하나 더 가진다. 시맨틱 오브젝트·액션의 문자 형식만 검사하고, 이 절도
+선택 절이라 없는 옛 Spec 은 통과한다. 사용 객체 `종류` 값에는 `IAM App`, `Business Catalog`,
+`Launchpad App Descriptor Item` 이 더해졌다. 새 규칙 종류가 아니라 같은 `md_table` 이라 엔진 판
+제약은 없다. 다만 새 절·새 종류는 이미 만들어진 Project Repository 의 `rules/spec.yaml` 과
+`templates/harness/spec.md` 에 자동으로 오지 않는다 — 엔진·스킬을 갱신한 뒤 각 저장소 rules 에 직접
+반영한다(그 전에는 옛 규칙대로 검사되고, 새 종류를 쓴 Spec 은 `종류` 허용 목록 위반이 된다).
+
 ## 교차 검사 스위치 — `cross-checks/switches.yaml`
 
 doc-guard 는 문서 하나씩 보는 규칙 말고도 여러 문서를 함께 보는 검사 셋을 돌린다.

@@ -280,7 +280,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.73, public-cloud main 기준 (2026-10-14)</div>
+      <div class="note">harness 0.10.74, public-cloud main 기준 (2026-10-14)</div>
     </div>
   </nav>
 
@@ -700,7 +700,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
         <li>원장 줄 — Spec 만 먼저 만들면 상태 "대기"</li>
         <li><code>BW_개발사양서_&lt;개발ID&gt;_&lt;제목&gt;_v&lt;버전&gt;.xlsx</code> — 양식을 고를 때</li>
       </ul>
-      <p class="small" style="margin-top:12px">Spec 의 절: 근거 요구사항 · 개요 · 상세 설계 · 사용 객체 · 완료 조건 · 참조 · 변경 이력. <code>## 사용 객체</code> 는 이 개발이 만들고 고치고 읽는 SAP 객체를 <code>| 종류 | 이름 | 작업 | 비고 |</code> 표로 적는 절이야(작업은 생성·수정·참조). 선택 절이라 없는 옛 Spec 도 통과하고, 쓰면 표 형식을 검사해. 양식을 쓰면 <code>## 양식 항목</code> 절이 더 붙어. 이 표는 PR 에서 다른 Spec 과도 비교해서, 같은 객체를 둘 이상의 Spec 이 만들거나 고치면 코멘트에 경고가 떠(막지는 않아).</p>
+      <p class="small" style="margin-top:12px">Spec 의 절: 근거 요구사항 · 개요 · 상세 설계 · 사용 객체 · Launchpad 노출 · 완료 조건 · 참조 · 변경 이력. <code>## 사용 객체</code> 는 이 개발이 만들고 고치고 읽는 SAP 객체를 <code>| 종류 | 이름 | 작업 | 비고 |</code> 표로 적는 절이야(작업은 생성·수정·참조). 종류에는 앱 디스크립터(<code>Launchpad App Descriptor Item</code>)·<code>IAM App</code>·<code>Business Catalog</code> 도 있어. <code>## Launchpad 노출</code> 은 이 개발을 Launchpad 타일로 띄울 때만 쓰는 선택 절이야. 타일마다 한 행씩 <code>| 타일 제목 | 부제 | 아이콘 | 시맨틱 오브젝트 | 액션 | 파라미터 | 카탈로그 | 배치 |</code> 로 적고, 개발할 때 Claude 가 이 표로 앱 디스크립터를 채워(모르는 값은 묻고 추측하지 않아). 시맨틱 오브젝트·액션은 글자 형식만 검사해. 선택 절이라 없는 옛 Spec 도 통과하고, 쓰면 표 형식을 검사해. 양식을 쓰면 <code>## 양식 항목</code> 절이 사용 객체·Launchpad 노출 다음에 더 붙어(순서: 상세 설계 → 사용 객체 → Launchpad 노출 → 양식 항목). 이 표는 PR 에서 다른 Spec 과도 비교해서, 같은 객체를 둘 이상의 Spec 이 만들거나 고치면 코멘트에 경고가 떠(막지는 않아).</p>
     </section>
   </div>
 
@@ -1713,6 +1713,7 @@ Closes #143</pre>
     <div class="term"><dt>SSOT</dt><dd><b>Single Source of Truth.</b> 진짜는 한 곳에만 둔다는 원칙.</dd></div>
     <div class="term"><dt>Spec<span>개발 Spec</span></dt><dd><b>레시피 카드.</b> 요구사항 하나를 어떻게 만들지 적은 설계.</dd></div>
     <div class="term"><dt>사용 객체<span>Spec 의 표</span></dt><dd><b>이 개발이 만들고 고치고 읽는 SAP 객체 목록.</b> 종류 · 이름 · 작업(생성 · 수정 · 참조) · 비고. 두 Spec 이 같은 객체를 고치면 PR 에 경고가 떠.</dd></div>
+    <div class="term"><dt>앱 디스크립터<span>Launchpad App Descriptor Item</span></dt><dd><b>앱을 Launchpad 타일로 보여 주는 설정 카드.</b> 타일 제목 · 아이콘 · 눌렀을 때 갈 곳을 적은 JSON. Spec 의 Launchpad 노출 표가 근거야.</dd></div>
     <div class="term"><dt>다음 단계</dt><dd><b>요구사항이 SRS 다음에 가는 길.</b> 개발(→ Spec) · 설정(→ 진행 원장) · 미정(→ 먼저 정하기). 마크다운에만 있고 엑셀엔 안 나가.</dd></div>
     <div class="term"><dt>REQ · DEV 번호</dt><dd><b>같은 일의 번호표.</b> REQ-003(구매요청 승인) = DEV-003 = 이슈의 [DEV-003].</dd></div>
     <div class="term"><dt>진행 원장<span>Ledger</span></dt><dd><b>개발 건 현황판.</b> 대기 → 진행 → 리뷰 → 완료.</dd></div>

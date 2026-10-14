@@ -27,8 +27,10 @@ REQ-012 ([SRS](../ssot/SRS.md))
 
 - 종류: Domain, Data Element, Structure, Database Table, CDS View, Metadata
   Extension, Behavior Definition, Service Definition, Service Binding, ABAP
-  Class, AMDP Class, CDS Table Function, Message Class 중 하나
-  (`conventions/naming.md` 의 표기)
+  Class, AMDP Class, CDS Table Function, Message Class, IAM App, Business
+  Catalog, Launchpad App Descriptor Item 중 하나(앞의 13종과 IAM App·Business
+  Catalog 는 `conventions/naming.md` 의 표기, Launchpad App Descriptor Item 은
+  ADT 가 앱 디스크립터에 쓰는 이름)
 - 이름: 영문자로 시작하는 객체 이름(예: `ZSD_UI_CUSTOMER`, 대소문자 무관).
   네임스페이스는 `/DMO/I_TRAVEL` 처럼 쓴다. 참조만 하는 SAP 표준 객체도 같다.
   공백·하이픈·한글은 쓸 수 없다. 이름을 모르면 추측으로 채우지 않는다
@@ -37,6 +39,27 @@ REQ-012 ([SRS](../ssot/SRS.md))
 | 종류 | 이름 | 작업 | 비고 |
 |---|---|---|---|
 |  |  |  |  |
+
+## Launchpad 노출
+
+이 개발 건을 Launchpad 타일로 띄우면 타일마다 한 행씩 표로 적는다. 개발 단계에서 앱
+디스크립터(`Launchpad App Descriptor Item`)를 만들 때 이 표를 그대로 읽는다. Launchpad 에
+띄우지 않는 개발이면 이 절을 지워도 된다. 값을 모르면 추측하거나 "미정" 으로 두지 말고
+사람에게 물어 채운다.
+
+- 타일 제목·부제·아이콘(`sap-icon://…`): 타일에 보이는 글자와 그림
+- 시맨틱 오브젝트: 영문자로 시작하고 영문자·숫자를 쓴다(밑줄도 허용, 예: `AnalyticQuery`)
+- 액션: 소문자로 시작하는 동사나 짧은 구, 공백 없음(예: `display`, `preview`).
+  영문자·숫자·밑줄만 쓴다
+- 파라미터: 이동할 때 넘기는 값(예: `query=ZMM_C_STOCKLEDGERQUERY`). 없으면 비워 둔다
+- 카탈로그: 타일이 들어갈 Business Catalog 이름(예: `ZMM_BC_AUTO1`)
+- 배치: 어느 페이지·영역에 놓는지(예: `MM AUTO1 페이지 · 재고원장 보고서 영역`)
+- 근거: SAP Help "Editing Launchpad App Descriptor Items" (검색 요약으로만 확인, 전문 미확인 —
+  첫 실제 Spec 에서 대조)
+
+| 타일 제목 | 부제 | 아이콘 | 시맨틱 오브젝트 | 액션 | 파라미터 | 카탈로그 | 배치 |
+|---|---|---|---|---|---|---|---|
+|  |  |  |  |  |  |  |  |
 
 ## 완료 조건
 
