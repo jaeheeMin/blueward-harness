@@ -466,7 +466,10 @@ def _sheet_paths(zf: zipfile.ZipFile) -> dict[str, str]:
         a = dict(_ATTR_RE.findall(m.group(0)))
         rid = a.get("r:id")
         if rid in targets:
-            out[unescape(a["name"], {"&quot;": '"', "&apos;": "'"})] = targets[rid]
+            name = norm(unescape(a["name"], {"&quot;": '"', "&apos;": "'"}))  # 지도의 시트 이름과 같은 정규화(NFC)
+            if name in out:
+                raise ExportError(f"템플릿에 정규화하면 같은 이름이 되는 시트가 둘 이상 있다: {name!r}")
+            out[name] = targets[rid]
     return out
 
 

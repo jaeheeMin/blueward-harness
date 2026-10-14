@@ -1379,3 +1379,22 @@ def test_작업본_양식_밖_항목이_여럿이면_모두_알리며_멈춘다_
     reason = report["problems"][0]["reason"]
     assert code == 2 and report["files"] == []
     assert "없는칸" in reason or "없는열" in reason
+
+
+def test_템플릿_시트_이름이_NFD여도_지도의_NFC_이름으로_찾아_산출한다(bproj, capsys):
+    import unicodedata
+
+    tpl = bproj / "templates" / "Backlog.xlsx"
+    parts = _read_parts(tpl)
+    nfd = unicodedata.normalize("NFD", "백로그")
+    assert nfd != "백로그"
+    parts["xl/workbook.xml"] = parts["xl/workbook.xml"].decode("utf-8").replace('name="Backlog"', f'name="{nfd}"').encode("utf-8")
+    with zipfile.ZipFile(tpl, "w", zipfile.ZIP_DEFLATED) as zo:
+        for n, data in parts.items():
+            zo.writestr(n, data)
+    mp = bproj / "templates" / "forms" / "Backlog.yaml"
+    mp.write_text(mp.read_text(encoding="utf-8").replace("  - 이름: Backlog\n", "  - 이름: 백로그\n"), encoding="utf-8")
+    code, report = _srs_run(bproj, capsys)
+    assert code == 0, report
+    ws = openpyxl.load_workbook(bproj / report["files"][0])[nfd]
+    assert ws["A4"].value == 2
