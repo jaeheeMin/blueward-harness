@@ -97,7 +97,9 @@ uv run --no-project python "<이 스킬의 base directory>/reserve_number.py" li
 멈춘다. 목록을 못 읽은 채 "새 개발" 로 넘어가지 않는다.
 
 `devs` 가 비면 묻지 않고 새 개발이다. 아니면 번호·제목·LoB·다음 단계·상태를 표로 보여 주고 `AskUserQuestion`
-으로 묻는다. 쉬운 말로, 보기마다 무엇이 달라지는지 적는다.
+으로 묻는다. 쉬운 말로, 보기마다 무엇이 달라지는지 적는다. 표는 제목 열이 있어 번호에 제목을 또 붙이지 않지만,
+`AskUserQuestion` 보기와 표 밖 문장에서 번호를 말할 때는 `DEV-002(판매오더 조회 앱)` 처럼 괄호로 제목을 붙인다
+(`<이 스킬의 base directory>/../../rules/issue-and-release.md` "REQ·DEV 번호를 말할 때"). 이슈 제목의 `[DEV-xxx]`·`(DEV-xxx)` 는 그대로 쓴다.
 
 - **기존 개발의 하위 작업이다**(어느 번호인지도 고르게 한다) — 새 번호도 새 원장 줄도 만들지 않고, 이미 있는 그
   개발에 붙는다. 그 개발의 Spec·원장 줄을 이어서 쓴다.
@@ -141,7 +143,7 @@ uv run --no-project python "<이 스킬의 base directory>/reserve_number.py" ne
 제목은 `[DEV-xxx]` 를 뺀 내용만 넘긴다.
 
 - 종료코드 0 — `number` 가 찜 번호다. `renumbered_from` 이 있으면 더 앞선 이슈와
-  번호가 겹쳐 바뀐 것이다. 사용자에게 "번호가 겹쳐 DEV-xxx 로 바꿨다" 고 알린다.
+  번호가 겹쳐 바뀐 것이다. 사용자에게 "번호가 겹쳐 DEV-xxx(<제목>) 로 바꿨다" 고 알린다.
 - 종료코드 3 — 원장이 없어 찜하지 않는다. 이슈는 `gh issue create` 로 만들고
   제목에 번호를 붙이지 않는다.
 - 종료코드 4 — 확인 필요(#261). 새 제목이 origin/main SRS 의 기존 REQ 제목을 포함하거나 그 반대라서, 이슈도 번호도

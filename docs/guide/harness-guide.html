@@ -108,7 +108,9 @@ section { min-width: 0; }
 .flow button.node:focus-visible { outline: 2px solid var(--accent); }
 .flow .arrow { flex: 0 0 26px; display: grid; place-items: center; color: var(--muted); font-size: 18px; }
 .flow .arrow::before { content: "→"; }
+.flow-steps { min-width: 880px; }
 @media (max-width: 760px) {
+  .flow-steps { min-width: 0; }
   .flow { flex-direction: column; }
   .flow .arrow { flex-basis: 22px; }
   .flow .arrow::before { content: "↓"; }
@@ -228,13 +230,6 @@ svg text { font-family: var(--body); fill: var(--fg); }
         </div>
       </div>
       <div>
-        <div class="group-label">작업 열기</div>
-        <div class="tabs">
-          <button class="tab" role="tab" data-tab="start">작업 시작하기<small>/harness:start</small></button>
-          <button class="tab" role="tab" data-tab="sync">최신으로 맞추기<small>/harness:sync</small></button>
-        </div>
-      </div>
-      <div>
         <div class="group-label">문서 작업</div>
         <div class="tabs">
           <button class="tab" role="tab" data-tab="srs-new">SRS 만들기<small>/harness:srs</small></button>
@@ -242,6 +237,13 @@ svg text { font-family: var(--body); fill: var(--fg); }
           <button class="tab" role="tab" data-tab="spec-new">Spec 만들기<small>/harness:spec</small></button>
           <button class="tab" role="tab" data-tab="spec-edit">Spec 고치기<small>/harness:spec</small></button>
           <button class="tab" role="tab" data-tab="export">고객사 양식으로 산출하기<small>checker.export</small></button>
+        </div>
+      </div>
+      <div>
+        <div class="group-label">개발 · 기타 작업 열기</div>
+        <div class="tabs">
+          <button class="tab" role="tab" data-tab="start">작업 시작하기<small>/harness:start</small></button>
+          <button class="tab" role="tab" data-tab="sync">최신으로 맞추기<small>/harness:sync</small></button>
         </div>
       </div>
       <div>
@@ -278,7 +280,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.65, public-cloud main 기준 (2026-10-14)</div>
+      <div class="note">harness 0.10.66, public-cloud main 기준 (2026-10-14)</div>
     </div>
   </nav>
 
@@ -305,7 +307,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       <text x="30" y="62" font-size="12" class="s-muted">Claude Code (Desktop · CLI)</text>
       <rect x="30" y="80" width="260" height="78" rx="10" class="s-hl"/>
       <text x="46" y="106" font-size="14" font-weight="600">Skill · 단축 명령</text>
-      <text x="46" y="128" font-size="12" class="s-muted">/harness:start · srs · spec · deliver</text>
+      <text x="46" y="128" font-size="12" class="s-muted">/harness:srs · spec · start · deliver</text>
       <text x="46" y="146" font-size="12" class="s-muted">sync · wrapup · atc · scaffold</text>
       <rect x="30" y="172" width="260" height="78" rx="10" class="s-warn"/>
       <text x="46" y="198" font-size="14" font-weight="600">Hook · 문 앞 경비원</text>
@@ -359,18 +361,19 @@ svg text { font-family: var(--body); fill: var(--fg); }
   </section>
 
   <section>
-    <h3>하려는 일에서 골라 들어가</h3>
+    <h3>처음이라면 이 순서로</h3>
     <div class="diagram">
-      <div class="flow">
-        <button class="node hl" data-go="start"><b>작업 시작하기</b><span>이슈 + 브랜치</span></button><div class="arrow"></div>
-        <button class="node" data-go="srs-new"><b>SRS</b><span>만들기 · 고치기</span></button><div class="arrow"></div>
-        <button class="node" data-go="spec-new"><b>Spec</b><span>만들기 · 고치기</span></button><div class="arrow"></div>
-        <button class="node" data-go="sap"><b>SAP 개발</b><span>080 · ATC</span></button><div class="arrow"></div>
-        <button class="node hl" data-go="deliver"><b>작업 올리기</b><span>커밋 · PR</span></button><div class="arrow"></div>
-        <button class="node" data-go="gate"><b>검사 · 승인</b><span>Actions</span></button><div class="arrow"></div>
-        <button class="node ok" data-go="merge"><b>병합</b><span>main 반영</span></button>
+      <div class="flow flow-steps">
+        <button class="node" data-go="setup"><b>⓪ 처음 준비하기</b><span>설치 · 로그인 (한 번만)</span></button><div class="arrow"></div>
+        <button class="node hl" data-go="srs-new"><b>① SRS</b><span>만들기 · 고치기</span></button><div class="arrow"></div>
+        <button class="node" data-go="spec-new"><b>② Spec</b><span>만들기 · 고치기</span></button><div class="arrow"></div>
+        <button class="node" data-go="start"><b>③ 작업 시작하기</b><span>개발 이슈 + 브랜치</span></button><div class="arrow"></div>
+        <button class="node" data-go="sap"><b>④ SAP 개발</b><span>080 · ATC</span></button><div class="arrow"></div>
+        <button class="node hl" data-go="deliver"><b>⑤ 작업 올리기</b><span>커밋 · PR</span></button><div class="arrow"></div>
+        <button class="node" data-go="gate"><b>⑥ 검사 · 승인</b><span>Actions</span></button><div class="arrow"></div>
+        <button class="node ok" data-go="merge"><b>⑦ 병합</b><span>main 반영</span></button>
       </div>
-      <div class="cap">상자를 누르면 그 액티비티로 가. 문서만 고치는 날은 SAP 개발을 건너뛰고, 코드만 고치는 날은 SRS·Spec 을 건너뛰어도 돼. 어떤 일이든 처음은 <b>작업 시작하기</b>, 끝은 <b>작업 올리기</b>야.</div>
+      <div class="cap">번호 순서대로 따라가면 돼. 상자를 누르면 그 액티비티로 가. 새 개발은 <b>SRS 만들기</b>부터야. SRS·Spec 스킬이 이슈와 브랜치를 알아서 만들어 줘서, 그 단계에선 <code>/harness:start</code> 를 따로 안 불러도 돼. start 는 Spec 이 끝나고 개발을 시작할 때, 또는 버그 수정·문서 손보기처럼 SRS·Spec 을 안 거치는 일을 시작할 때 써. 끝은 언제나 <b>작업 올리기</b>야.</div>
     </div>
   </section>
 
@@ -378,7 +381,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
     <section class="box">
       <h3>꼭 기억할 세 가지</h3>
       <ol class="steps">
-        <li><div><b>main 에 직접 손대지 않는다.</b> 일은 <code>/harness:start</code> 로 만든 내 브랜치에서 해.</div></li>
+        <li><div><b>main 에 직접 손대지 않는다.</b> 일은 SRS·Spec 스킬이나 <code>/harness:start</code> 가 만들어 주는 내 브랜치에서 해.</div></li>
         <li><div><b>푸시는 <code>/harness:deliver</code> 로 한다.</b> 맨손 <code>git push</code> 는 경비원이 돌려보내.</div></li>
         <li><div><b>"검사를 못 했다" 는 통과가 아니다.</b> 확인을 못 했으면 못 했다고 말해.</div></li>
       </ol>
@@ -471,144 +474,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     </section>
   </div>
 
-  <div class="next"><button data-go="overview">← 한눈에 보기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
-</article>
-
-<!-- ================= 작업 시작하기 ================= -->
-<article class="panel" data-panel="start" role="tabpanel" hidden>
-  <header class="panel-head">
-    <div class="eyebrow">작업 열기 · /harness:start</div>
-    <h2>작업 시작하기</h2>
-    <p class="lead">무엇을 할지 적고(이슈), 그 일만 하는 공간(브랜치)을 만들어. SRS 든 개발이든 모든 일은 여기서 시작해.</p>
-  </header>
-
-  <div class="when">
-    <div><div class="lbl">이럴 때</div>새 개발, 새 문서 작업, 버그 수정을 시작할 때. 지금 main 에 있을 때. (SRS·Spec 은 시작할 때 브랜치를 먼저 확인해서 main 이면 start 를 대신 해 줘.)</div>
-    <div><div class="lbl">이렇게 말해</div><div class="say"><span>개발 시작할게</span><span>이거 작업 시작할게</span><span>이슈부터 만들자</span><span class="cmd">/harness:start</span></div></div>
-  </div>
-
-  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
-    <p><b>main</b>은 가게 진열대야. 손님(고객사)이 보는 완성품만 올라가. 진열대 위에서 바로 만들다가 넘어뜨리면 큰일이니까, 뒤편에 <b>내 작업대(브랜치)</b>를 하나 펴고 거기서 만들어.</p>
-    <p><b>이슈</b>는 작업대 옆에 붙이는 작업지시서야. "왜, 무엇을, 언제 끝난 걸로 칠지" 가 적혀 있어.</p>
-  </div></div>
-
-  <section class="diagram" aria-label="브랜치 도식">
-    <svg viewBox="0 0 880 200" width="100%" style="min-width:640px" role="img" aria-label="main 에서 갈라져 PR 로 돌아오는 브랜치">
-      <line x1="30" y1="60" x2="850" y2="60" class="s-line" stroke-width="3"/>
-      <text x="30" y="36" class="s-title" font-size="15">main · 진열대</text>
-      <circle cx="80" cy="60" r="8" class="s-dot2"/><circle cx="200" cy="60" r="8" class="s-dot2"/><circle cx="760" cy="60" r="11" class="s-dot"/>
-      <path d="M200 60 C 250 60, 250 140, 300 140 L 640 140 C 700 140, 700 60, 760 60" class="s-acc"/>
-      <circle cx="360" cy="140" r="8" class="s-dot"/><circle cx="470" cy="140" r="8" class="s-dot"/><circle cx="580" cy="140" r="8" class="s-dot"/>
-      <text x="300" y="178" font-size="13">feat/143-sales-order-app · 내 작업대</text>
-      <text x="340" y="122" font-size="12" class="s-muted">커밋</text><text x="450" y="122" font-size="12" class="s-muted">커밋</text><text x="560" y="122" font-size="12" class="s-muted">커밋</text>
-      <text x="160" y="96" font-size="12" class="s-muted">start</text>
-      <text x="694" y="96" font-size="12" class="s-muted">PR 병합</text>
-      <text x="730" y="36" font-size="12" class="s-muted">squash 로 한 덩어리</text>
-    </svg>
-    <div class="cap">브랜치에서 여러 번 커밋해도, 병합할 때는 하나로 접혀서(squash) 진열대에 올라가.</div>
-  </section>
-
-  <div class="cols">
-    <section class="box">
-      <h3>start 가 해 주는 일</h3>
-      <ol class="steps">
-        <li><div>저장 안 한 변경이 있으면 먼저 정리할지 물어봐</div></li>
-        <li><div>main 으로 가서 GitHub 최신 상태를 받아 와. worktree 에서 열어 main 으로 못 옮기면 GitHub 의 최신 main(<code>origin/main</code>)에서 바로 브랜치를 따</div></li>
-        <li><div>GitHub 이슈를 만들어 (제목 명사형, 본문은 <b>배경 / 해야 할 일 / 완료 조건</b>, 라벨 <code>type:feat</code> 등)</div></li>
-        <li><div>개발 건(feat, fix)이면 먼저 지금 있는 개발 목록(번호·제목·LoB·다음 단계·상태)을 보여 주고 "기존 개발의 하위 작업이야, 새 개발이야?" 를 물어. 새 개발이면 이슈 제목 앞에 번호를 찜해. 예: <code>[DEV-003] 판매오더 조회 앱</code></div></li>
-        <li><div>하위 작업이면 번호를 새로 안 받아. 제목 <b>끝</b>에 붙여: <code>Launchpad 타일 노출 (DEV-002)</code>. 본문에는 "DEV-002 하위 작업" 과 대표 이슈 링크를 적어</div></li>
-        <li><div>규칙에 맞는 브랜치를 만들고 이동해</div></li>
-        <li><div>진행 원장에 이미 있는 건(예: SRS 에서 설정으로 올라간 건)은 묻지 않고 "대기" 줄을 "진행" 으로 바꿔 ("리뷰"·"완료" 줄이면 바꿀지 물어). 원장에 없는 새 건(feat, fix)이면 줄을 넣을지 물어봐 (넣으면 상태 "진행")</div></li>
-      </ol>
-    </section>
-    <section class="box">
-      <h3>브랜치 이름 규칙</h3>
-      <pre>{타입}/{이슈번호}-{영문요약}
-feat/12-onboarding-doc
-fix/31-broken-link</pre>
-      <div class="pills" style="margin:12px 0 8px">
-        <span class="pill a">feat 새 기능</span><span class="pill a">fix 고침</span><span class="pill">docs 문서</span><span class="pill">refactor 구조 정리</span><span class="pill">chore 잡일</span><span class="pill">test 테스트</span>
-      </div>
-      <p class="small">영문 소문자·숫자·붙임표만 써. 한글, 대문자, 밑줄은 안 돼.</p>
-    </section>
-  </div>
-
-  <section>
-    <h3>번호 하나로 다 이어진다</h3>
-    <div class="diagram">
-      <div class="flow">
-        <div class="node"><b>REQ-003</b><span>SRS 의 요구사항 한 줄</span></div><div class="arrow"></div>
-        <div class="node hl"><b>[DEV-003]</b><span>이슈 제목에 찜한 번호</span></div><div class="arrow"></div>
-        <div class="node"><b>DEV-003-….md</b><span>개발 Spec 파일</span></div><div class="arrow"></div>
-        <div class="node"><b>원장의 DEV-003</b><span>진행 상황 한 줄</span></div>
-      </div>
-      <div class="cap">은행 번호표처럼, 새 번호는 지금까지 쓴 가장 큰 번호 + 1 이야. 두 사람이 동시에 같은 번호를 뽑으면 늦게 뽑은 쪽 번호가 자동으로 바뀌고 알림이 떠.</div>
-    </div>
-  </section>
-
-  <div class="callouts">
-    <div class="callout warn"><span class="k">이슈 크기</span><div>이슈 하나는 한 번의 start 로 바로 손댈 수 있는 크기여야 해. 크면 나눠.</div></div>
-    <div class="callout warn"><span class="k">하위 작업 제목</span><div>맨 앞 <code>[DEV-xxx]</code> 는 "새 번호를 받은 이슈" 라는 표시라서, 하위 작업 제목 앞에 붙이면 다음 번호 계산에 잡혀 번호가 하나 낭비돼. 그래서 하위 작업은 제목 끝에 <code>(DEV-xxx)</code> 로 붙여. 원장에 새 줄은 안 생기고, 시작하면 그 개발의 줄이 "진행" 으로, 올리면 "리뷰" 로 바뀌어. 하위 작업이 그 요구사항의 범위를 넓히는 일이면 먼저 SRS 고치기로 범위부터 넓혀.</div></div>
-    <div class="callout warn"><span class="k">번호 구분</span><div><code>DEV-001</code>(우리 번호)과 고객사 양식의 개발 ID(<code>CO-006-01</code>)는 다른 거야. 섞지 마.</div></div>
-    <div class="callout ok"><span class="k">이름 실수</span><div>브랜치 이름을 잘못 지었으면 새로 만들지 말고 <code>git branch -m</code> 으로 고쳐.</div></div>
-  </div>
-
-  <div class="next"><button data-go="setup">← 처음 준비하기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
-</article>
-
-<!-- ================= sync ================= -->
-<article class="panel" data-panel="sync" role="tabpanel" hidden>
-  <header class="panel-head">
-    <div class="eyebrow">작업 열기 · /harness:sync</div>
-    <h2>최신으로 맞추기</h2>
-    <p class="lead">다른 사람이 main 에 올린 걸 받아서, 내 브랜치를 그 위로 옮겨 놓아. 커밋이나 푸시는 하지 않아.</p>
-  </header>
-
-  <div class="when">
-    <div><div class="lbl">이럴 때</div>작업 중에 동료 PR 이 병합됐을 때. 오랜만에 브랜치를 다시 열었을 때. 플러그인 새 버전이 나왔는지 궁금할 때.</div>
-    <div><div class="lbl">이렇게 말해</div><div class="say"><span>최신으로 맞춰줘</span><span>당겨받아줘</span><span>pull 해줘</span><span class="cmd">/harness:sync</span></div></div>
-  </div>
-
-  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
-    <p>내가 작업대에서 일하는 동안 진열대(main)에 새 물건이 올라왔어. 내 작업을 잠깐 들어 올려서, 새 진열대 상태를 깔고, 그 위에 내 작업을 다시 올려놓는 거야(rebase).</p>
-  </div></div>
-
-  <section class="diagram">
-    <div class="flow">
-      <div class="node"><b>확인</b><span>다른 작업이 진행 중이면 멈춤</span></div><div class="arrow"></div>
-      <div class="node"><b>받아 오기</b><span>git fetch</span></div><div class="arrow"></div>
-      <div class="node hl"><b>저장 안 한 변경?</b><span>있으면 멈추고 물어봄</span></div><div class="arrow"></div>
-      <div class="node hl"><b>옮겨 놓기</b><span>git rebase</span></div><div class="arrow"></div>
-      <div class="node ok"><b>보고</b><span>새로 받은 커밋 · 플러그인 버전</span></div>
-    </div>
-  </section>
-
-  <div class="cols">
-    <section class="box">
-      <h3>저장 안 한 변경이 있으면</h3>
-      <p class="small" style="margin-bottom:10px">셋 중 하나를 골라.</p>
-      <ol class="steps">
-        <li><div><b>먼저 올리기</b> — <code>/harness:deliver</code> 로 커밋·푸시부터</div></li>
-        <li><div><b>잠깐 묶어 두고 맞추기</b> — 임시 커밋 → 맞추기 → 다시 풀어 놓기 (main 에선 안 됨)</div></li>
-        <li><div><b>취소</b></div></li>
-      </ol>
-    </section>
-    <section class="box">
-      <h3>하지 않는 것</h3>
-      <ul class="plain">
-        <li><code>git stash</code> — 작업 공간끼리 공유돼서 남의 변경을 꺼낼 수 있어</li>
-        <li><code>reset --hard</code> — 내 변경이 날아가</li>
-        <li>푸시</li>
-      </ul>
-    </section>
-  </div>
-
-  <div class="callouts">
-    <div class="callout warn"><span class="k">충돌</span><div>맞추다 충돌이 나면 되돌려 놓고(rebase --abort) 어느 파일이 부딪혔는지 보고해. 어떻게 풀지는 내가 정해.</div></div>
-    <div class="callout ok"><span class="k">덤</span><div>마지막에 플러그인 버전 셋(지금 세션 / 내려받은 것 / 최신)을 비교해서 <code>/reload-plugins</code> 가 필요한지 알려 줘.</div></div>
-  </div>
-
-  <div class="next"><button data-go="start">← 작업 시작하기</button><button data-go="srs-new">다음: SRS 만들기 →</button></div>
+  <div class="next"><button data-go="overview">← 한눈에 보기</button><button data-go="srs-new">다음: SRS 만들기 →</button></div>
 </article>
 
 <!-- ================= SRS 만들기 ================= -->
@@ -616,11 +482,11 @@ fix/31-broken-link</pre>
   <header class="panel-head">
     <div class="eyebrow">문서 작업 · /harness:srs</div>
     <h2>SRS 만들기</h2>
-    <p class="lead">고객이 원하는 걸 요구사항정의서(SRS) 한 장에 처음 정리하는 일이야. 예전 이름 "PRD" 로 불러도 같은 스킬이 돌아.</p>
+    <p class="lead">고객이 원하는 걸 요구사항정의서(SRS, Software Requirements Specification) 한 장에 처음 정리하는 일이야. 예전 이름 "PRD" 로 불러도 같은 스킬이 돌아.</p>
   </header>
 
   <div class="when">
-    <div><div class="lbl">이럴 때</div>고객 요구사항을 처음 받았을 때. <code>docs/ssot/SRS.md</code> 가 빈 틀일 때.</div>
+    <div><div class="lbl">이럴 때</div>고객 요구사항을 처음 받았을 때. <code>docs/ssot/SRS.md</code> 가 빈 틀일 때. 새 프로젝트라면 여기가 첫 단계야.</div>
     <div><div class="lbl">이렇게 말해</div><div class="say"><span>SRS 만들어줘</span><span>요구사항정의서 만들어줘</span><span>Backlog 양식으로 뽑아줘</span><span class="cmd">/harness:srs</span></div></div>
   </div>
 
@@ -691,7 +557,7 @@ fix/31-broken-link</pre>
     <p style="font-size:14.5px">요구사항이 SRS 다음에 어디로 가는지는 표의 <code>다음 단계</code> 열에 적어. 값은 셋뿐이야. <code>Development RICEFW ID</code> 가 빈칸이어도 이 열을 보면 "설정이라 비웠다" 인지 "아직 안 정했다" 인지 알 수 있어.</p>
     <div class="tbl-wrap"><table>
       <tr><th>다음 단계</th><th>RICEFW ID</th><th>그다음</th></tr>
-      <tr><td><b>개발</b></td><td><code>DEV-003</code> (REQ 와 같은 번호)</td><td>Spec 을 만들어 → 개발해 (<code>/harness:spec</code> → <code>/harness:start</code>)</td></tr>
+      <tr><td><b>개발</b></td><td><code>DEV-003</code>(구매요청 승인, REQ 와 같은 번호)</td><td>Spec 을 만들어 → 개발해 (<code>/harness:spec</code> → <code>/harness:start</code>)</td></tr>
       <tr><td><b>설정</b></td><td>비움</td><td>Spec 없이 진행 원장에 올라가 → <code>[DEV-003]</code> 이슈로 시작하면 "진행" → 설정을 마치면 사람이 "완료". 무엇을 설정했는지는 SRS 의 Configuration Considerations 에 적어</td></tr>
       <tr><td><b>미정</b></td><td>비움</td><td>미결 사항에 남겨 두고, Spec 을 만들려 할 때 개발인지 설정인지 먼저 정해</td></tr>
       <tr><td>보류 · 취소</td><td>그대로</td><td>다음 단계가 아니라 Status 로 적어: <code>On Hold</code> · <code>Dropped</code> · <code>Duplicate</code> 면 Spec 도 안 만들고 멈춰. 원장에 줄이 있으면 지우지 않고 내용 앞에 <code>[보류]</code> · <code>[취소]</code> 만 붙여</td></tr>
@@ -702,10 +568,10 @@ fix/31-broken-link</pre>
 
   <section class="box" style="border-color:var(--accent)">
     <h3>내 번호 알아 두기</h3>
-    <p style="font-size:14.5px">요구사항 한 줄에 번호 하나야. <code>REQ-003</code> 을 받으면 그 일의 이슈는 <code>[DEV-003]</code>, Spec 은 <code>DEV-003-….md</code>, 원장의 개발 건도 <code>DEV-003</code> 이야. 다음 단계는 다 이 번호로 말해.</p>
+    <p style="font-size:14.5px">요구사항 한 줄에 번호 하나야. <code>REQ-003</code>(구매요청 승인)을 받으면 그 일의 이슈는 <code>[DEV-003]</code>, Spec 은 <code>DEV-003-….md</code>, 원장의 개발 건도 <code>DEV-003</code> 이야. 다음 단계는 다 이 번호로 말해. Claude 도 번호를 말할 때 늘 <code>REQ-003(구매요청 승인)</code> 처럼 제목을 괄호로 붙여서, 번호만 보고 무슨 일인지 헷갈리지 않게 해.</p>
     <ul class="plain">
-      <li>Spec 만들 때: "REQ-003 스펙 만들어줘"</li>
-      <li>요구사항이 바뀌거나 취소될 때: "REQ-003 취소됐어"</li>
+      <li>Spec 만들 때: "REQ-003(구매요청 승인) 스펙 만들어줘"</li>
+      <li>요구사항이 바뀌거나 취소될 때: "REQ-003(구매요청 승인) 취소됐어"</li>
       <li>개발 시작할 때: <code>[DEV-003]</code> 이슈로 <code>/harness:start</code></li>
     </ul>
     <p class="small" style="margin-top:10px">SRS 를 만들거나 고친 끝에 Claude 가 새로 찜한 번호를 표로 꼭 알려 줘. 잊었으면 <code>docs/ssot/SRS.md</code> 요구사항 표의 ID 열, 또는 GitHub 이슈 제목 앞의 <code>[DEV-xxx]</code> 에서 찾아. 고객사 양식의 개발 ID(<code>CO-006-01</code>)와는 다른 번호야.</p>
@@ -713,13 +579,13 @@ fix/31-broken-link</pre>
 
   <div class="callouts">
     <div class="callout warn"><span class="k">번호</span><div>REQ 번호는 Claude 가 번호표 기계로 받아서 붙여. 마지막 번호에 손으로 1 을 더하지 않아. 새 제목이 이미 있는 REQ 제목을 포함하거나 반대로 그 안에 들어 있으면 번호표 기계가 번호를 안 주고 "기존 개발의 하위 작업이야, 새 개발이야?" 를 물어봐. 하위 작업이면 새 줄 대신 그 REQ 를 넓히고, 정말 새 개발이면 확인했다는 표시를 붙여 다시 받아.</div></div>
-    <div class="callout warn"><span class="k">다른 번호 적기</span><div>상세 절에 다른 요구사항 번호(<code>REQ-002</code>, <code>DEV-002</code>)를 적으면 저장이 거절돼. 같은 개발이면 새 REQ 로 쪼개지 말고 그 REQ 의 범위를 넓혀. 정말 별개면 <code>### REQ-003</code> 제목 바로 아래, 첫 <code>####</code> 소제목 앞에 <code>관계: 별개 — 이유</code> 한 줄을 적어(이 자리는 엑셀로 안 나가). 자기 번호의 DEV 와 <code>옛 REQ-001</code> 처럼 앞에 "옛" 이 붙은 표기는 괜찮아.</div></div>
+    <div class="callout warn"><span class="k">다른 번호 적기</span><div>상세 절에 다른 요구사항 번호(<code>REQ-002</code>(판매오더 조회 앱), <code>DEV-002</code>)를 적으면 저장이 거절돼. 같은 개발이면 새 REQ 로 쪼개지 말고 그 REQ 의 범위를 넓혀. 정말 별개면 <code>### REQ-003</code> 제목 바로 아래, 첫 <code>####</code> 소제목 앞에 <code>관계: 별개 — 이유</code> 한 줄을 적어(이 자리는 엑셀로 안 나가). 자기 번호의 DEV 와 <code>옛 REQ-001</code> 처럼 앞에 "옛" 이 붙은 표기는 괜찮아.</div></div>
     <div class="callout warn"><span class="k">긴 칸</span><div>Short Description 은 몇 줄짜리 요약으로 써. 엑셀 한 칸은 높이 한계(409pt)를 넘으면 잘려 보여. 세부 기능은 Acceptance Criteria 로 나눠. 산출 때 <code>cell-too-tall</code> 경고가 나오면 그 칸이 너무 긴 거야.</div></div>
     <div class="callout warn"><span class="k">옛 이름</span><div><code>docs/ssot/PRD.md</code> 만 있는 옛 구조면, 조용히 새로 만들지 않고 옮길지 먼저 물어봐.</div></div>
     <div class="callout warn"><span class="k">승인 필요</span><div>SRS 를 바꾼 PR 은 작성자 말고 다른 승인자의 Approve 가 있어야 병합돼.</div></div>
   </div>
 
-  <div class="next"><button data-go="sync">← 최신으로 맞추기</button><button data-go="srs-edit">다음: SRS 고치기 →</button></div>
+  <div class="next"><button data-go="setup">← 처음 준비하기</button><button data-go="srs-edit">다음: SRS 고치기 →</button></div>
 </article>
 
 <!-- ================= SRS 고치기 ================= -->
@@ -732,7 +598,7 @@ fix/31-broken-link</pre>
 
   <div class="when">
     <div><div class="lbl">이럴 때</div>요구사항이 추가·변경·취소됐을 때. 우선순위나 상태가 바뀌었을 때.</div>
-    <div><div class="lbl">이렇게 말해</div><div class="say"><span>요구사항 바뀌었어</span><span>SRS 수정</span><span>REQ-002 취소됐어</span><span class="cmd">/harness:srs</span></div></div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>요구사항 바뀌었어</span><span>SRS 수정</span><span>REQ-002(판매오더 조회 앱) 취소됐어</span><span class="cmd">/harness:srs</span></div></div>
   </div>
 
   <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
@@ -793,7 +659,7 @@ fix/31-broken-link</pre>
 
   <div class="when">
     <div><div class="lbl">이럴 때</div>개발에 들어가기 전, 무엇을 어떻게 만들지 정할 때. 고객사가 개발사양서를 달라고 할 때.</div>
-    <div><div class="lbl">이렇게 말해</div><div class="say"><span>스펙 만들어줘</span><span>REQ-002 개발 스펙</span><span class="cmd">/harness:spec</span></div></div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>스펙 만들어줘</span><span>REQ-002(판매오더 조회 앱) 개발 스펙</span><span class="cmd">/harness:spec</span></div></div>
   </div>
 
   <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
@@ -839,6 +705,7 @@ fix/31-broken-link</pre>
   <div class="callouts">
     <div class="callout warn"><span class="k">번호 구분</span><div>DEV 번호(<code>DEV-002</code>)와 양식의 개발 ID(<code>CO-006-01</code>)는 다른 체계야.</div></div>
     <div class="callout warn"><span class="k">산출 ≠ 통과</span><div>엑셀을 뽑았다고 검사를 통과한 건 아니야. 엑셀 검사는 PR 을 올리면 GitHub Actions 가 해.</div></div>
+    <div class="callout ok"><span class="k">지금 켜짐</span><div>public-cloud 는 10-14 부터 사용 객체 표 검사가 켜졌어. 내 PC 에서 이 검사가 돌려면 플러그인이 0.10.59 이상이어야 해. 저장할 때 '모르는 규칙 종류' 가 나오면 <code>/reload-plugins</code> 를 쳐. 이름이 아직 안 정해진 객체는 추측해서 적지 말고 빼 둬.</div></div>
   </div>
 
   <div class="next"><button data-go="srs-edit">← SRS 고치기</button><button data-go="spec-edit">다음: Spec 고치기 →</button></div>
@@ -941,7 +808,144 @@ fix/31-broken-link</pre>
     <div class="callout ok"><span class="k">직접 고친 엑셀</span><div>엑셀을 오피스로 직접 고쳐도 돼. 다만 경비원(Hook)은 그걸 못 보니까, PR 에서 Actions 가 처음 검사해.</div></div>
   </div>
 
-  <div class="next"><button data-go="spec-edit">← Spec 고치기</button><button data-go="sap">다음: SAP 에서 개발하기 →</button></div>
+  <div class="next"><button data-go="spec-edit">← Spec 고치기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
+</article>
+
+<!-- ================= 작업 시작하기 ================= -->
+<article class="panel" data-panel="start" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">개발 · 기타 작업 열기 · /harness:start</div>
+    <h2>작업 시작하기</h2>
+    <p class="lead">무엇을 할지 적고(이슈), 그 일만 하는 공간(브랜치)을 만들어. SRS·Spec 이 끝나고 개발에 들어갈 때, 또는 SRS·Spec 을 안 거치는 일을 시작할 때 써.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>Spec 이 끝나고 개발을 시작할 때(<code>[DEV-xxx]</code> 이슈로). 버그 수정, 문서 손보기, 설정 건처럼 SRS·Spec 스킬을 안 거치는 일을 시작할 때. <b>SRS·Spec 을 만들거나 고칠 땐 부르지 않아도 돼</b> — 그 스킬이 브랜치부터 알아서 확인해.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>개발 시작할게</span><span>이거 작업 시작할게</span><span>이슈부터 만들자</span><span class="cmd">/harness:start</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p><b>main</b>은 가게 진열대야. 손님(고객사)이 보는 완성품만 올라가. 진열대 위에서 바로 만들다가 넘어뜨리면 큰일이니까, 뒤편에 <b>내 작업대(브랜치)</b>를 하나 펴고 거기서 만들어.</p>
+    <p><b>이슈</b>는 작업대 옆에 붙이는 작업지시서야. "왜, 무엇을, 언제 끝난 걸로 칠지" 가 적혀 있어.</p>
+  </div></div>
+
+  <section class="diagram" aria-label="브랜치 도식">
+    <svg viewBox="0 0 880 200" width="100%" style="min-width:640px" role="img" aria-label="main 에서 갈라져 PR 로 돌아오는 브랜치">
+      <line x1="30" y1="60" x2="850" y2="60" class="s-line" stroke-width="3"/>
+      <text x="30" y="36" class="s-title" font-size="15">main · 진열대</text>
+      <circle cx="80" cy="60" r="8" class="s-dot2"/><circle cx="200" cy="60" r="8" class="s-dot2"/><circle cx="760" cy="60" r="11" class="s-dot"/>
+      <path d="M200 60 C 250 60, 250 140, 300 140 L 640 140 C 700 140, 700 60, 760 60" class="s-acc"/>
+      <circle cx="360" cy="140" r="8" class="s-dot"/><circle cx="470" cy="140" r="8" class="s-dot"/><circle cx="580" cy="140" r="8" class="s-dot"/>
+      <text x="300" y="178" font-size="13">feat/143-sales-order-app · 내 작업대</text>
+      <text x="340" y="122" font-size="12" class="s-muted">커밋</text><text x="450" y="122" font-size="12" class="s-muted">커밋</text><text x="560" y="122" font-size="12" class="s-muted">커밋</text>
+      <text x="160" y="96" font-size="12" class="s-muted">start</text>
+      <text x="694" y="96" font-size="12" class="s-muted">PR 병합</text>
+      <text x="730" y="36" font-size="12" class="s-muted">squash 로 한 덩어리</text>
+    </svg>
+    <div class="cap">브랜치에서 여러 번 커밋해도, 병합할 때는 하나로 접혀서(squash) 진열대에 올라가.</div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>start 가 해 주는 일</h3>
+      <ol class="steps">
+        <li><div>저장 안 한 변경이 있으면 먼저 정리할지 물어봐</div></li>
+        <li><div>main 으로 가서 GitHub 최신 상태를 받아 와. worktree 에서 열어 main 으로 못 옮기면 GitHub 의 최신 main(<code>origin/main</code>)에서 바로 브랜치를 따</div></li>
+        <li><div>GitHub 이슈를 만들어 (제목 명사형, 본문은 <b>배경 / 해야 할 일 / 완료 조건</b>, 라벨 <code>type:feat</code> 등)</div></li>
+        <li><div>개발 건(feat, fix)이면 먼저 지금 있는 개발 목록(번호·제목·LoB·다음 단계·상태)을 보여 주고 "기존 개발의 하위 작업이야, 새 개발이야?" 를 물어. 새 개발이면 이슈 제목 앞에 번호를 찜해. 예: <code>[DEV-003] 구매요청 승인</code></div></li>
+        <li><div>하위 작업이면 번호를 새로 안 받아. 제목 <b>끝</b>에 붙여: <code>Launchpad 타일 노출 (DEV-002)</code>. 본문에는 "DEV-002 하위 작업" 과 대표 이슈 링크를 적어</div></li>
+        <li><div>규칙에 맞는 브랜치를 만들고 이동해</div></li>
+        <li><div>진행 원장에 이미 있는 건(예: SRS 에서 설정으로 올라간 건)은 묻지 않고 "대기" 줄을 "진행" 으로 바꿔 ("리뷰"·"완료" 줄이면 바꿀지 물어). 원장에 없는 새 건(feat, fix)이면 줄을 넣을지 물어봐 (넣으면 상태 "진행")</div></li>
+      </ol>
+    </section>
+    <section class="box">
+      <h3>브랜치 이름 규칙</h3>
+      <pre>{타입}/{이슈번호}-{영문요약}
+feat/12-onboarding-doc
+fix/31-broken-link</pre>
+      <div class="pills" style="margin:12px 0 8px">
+        <span class="pill a">feat 새 기능</span><span class="pill a">fix 고침</span><span class="pill">docs 문서</span><span class="pill">refactor 구조 정리</span><span class="pill">chore 잡일</span><span class="pill">test 테스트</span>
+      </div>
+      <p class="small">영문 소문자·숫자·붙임표만 써. 한글, 대문자, 밑줄은 안 돼.</p>
+    </section>
+  </div>
+
+  <section>
+    <h3>번호 하나로 다 이어진다</h3>
+    <div class="diagram">
+      <div class="flow">
+        <div class="node"><b>REQ-003</b><span>구매요청 승인 · SRS 의 요구사항 한 줄</span></div><div class="arrow"></div>
+        <div class="node hl"><b>[DEV-003]</b><span>이슈 제목에 찜한 번호</span></div><div class="arrow"></div>
+        <div class="node"><b>DEV-003-….md</b><span>개발 Spec 파일</span></div><div class="arrow"></div>
+        <div class="node"><b>원장의 DEV-003</b><span>진행 상황 한 줄</span></div>
+      </div>
+      <div class="cap">은행 번호표처럼, 새 번호는 지금까지 쓴 가장 큰 번호 + 1 이야. 두 사람이 동시에 같은 번호를 뽑으면 늦게 뽑은 쪽 번호가 자동으로 바뀌고 알림이 떠. Claude 가 사람에게 번호를 말할 때는 <code>REQ-003(판매오더 조회 앱)</code> 처럼 바로 뒤 괄호에 제목을 붙여 줘. 위 모양들(이슈 제목, 파일명)은 번호 계산 때문에 괄호 없이 그대로야.</div>
+    </div>
+  </section>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">이슈 크기</span><div>이슈 하나는 한 번의 start 로 바로 손댈 수 있는 크기여야 해. 크면 나눠.</div></div>
+    <div class="callout warn"><span class="k">하위 작업 제목</span><div>맨 앞 <code>[DEV-xxx]</code> 는 "새 번호를 받은 이슈" 라는 표시라서, 하위 작업 제목 앞에 붙이면 다음 번호 계산에 잡혀 번호가 하나 낭비돼. 그래서 하위 작업은 제목 끝에 <code>(DEV-xxx)</code> 로 붙여. 원장에 새 줄은 안 생기고, 시작하면 그 개발의 줄이 "진행" 으로, 올리면 "리뷰" 로 바뀌어. 하위 작업이 그 요구사항의 범위를 넓히는 일이면 먼저 SRS 고치기로 범위부터 넓혀.</div></div>
+    <div class="callout warn"><span class="k">번호 구분</span><div><code>DEV-001</code>(회계전표 Excel 업로드 일괄 전기, 우리 번호)과 고객사 양식의 개발 ID(<code>CO-006-01</code>)는 다른 거야. 섞지 마.</div></div>
+    <div class="callout ok"><span class="k">이름 실수</span><div>브랜치 이름을 잘못 지었으면 새로 만들지 말고 <code>git branch -m</code> 으로 고쳐.</div></div>
+  </div>
+
+  <div class="next"><button data-go="export">← 고객사 양식으로 산출하기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
+</article>
+
+<!-- ================= sync ================= -->
+<article class="panel" data-panel="sync" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">개발 · 기타 작업 열기 · /harness:sync</div>
+    <h2>최신으로 맞추기</h2>
+    <p class="lead">다른 사람이 main 에 올린 걸 받아서, 내 브랜치를 그 위로 옮겨 놓아. 커밋이나 푸시는 하지 않아.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>작업 중에 동료 PR 이 병합됐을 때. 오랜만에 브랜치를 다시 열었을 때. 플러그인 새 버전이 나왔는지 궁금할 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>최신으로 맞춰줘</span><span>당겨받아줘</span><span>pull 해줘</span><span class="cmd">/harness:sync</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>내가 작업대에서 일하는 동안 진열대(main)에 새 물건이 올라왔어. 내 작업을 잠깐 들어 올려서, 새 진열대 상태를 깔고, 그 위에 내 작업을 다시 올려놓는 거야(rebase).</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>확인</b><span>다른 작업이 진행 중이면 멈춤</span></div><div class="arrow"></div>
+      <div class="node"><b>받아 오기</b><span>git fetch</span></div><div class="arrow"></div>
+      <div class="node hl"><b>저장 안 한 변경?</b><span>있으면 멈추고 물어봄</span></div><div class="arrow"></div>
+      <div class="node hl"><b>옮겨 놓기</b><span>git rebase</span></div><div class="arrow"></div>
+      <div class="node ok"><b>보고</b><span>새로 받은 커밋 · 플러그인 버전</span></div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>저장 안 한 변경이 있으면</h3>
+      <p class="small" style="margin-bottom:10px">셋 중 하나를 골라.</p>
+      <ol class="steps">
+        <li><div><b>먼저 올리기</b> — <code>/harness:deliver</code> 로 커밋·푸시부터</div></li>
+        <li><div><b>잠깐 묶어 두고 맞추기</b> — 임시 커밋 → 맞추기 → 다시 풀어 놓기 (main 에선 안 됨)</div></li>
+        <li><div><b>취소</b></div></li>
+      </ol>
+    </section>
+    <section class="box">
+      <h3>하지 않는 것</h3>
+      <ul class="plain">
+        <li><code>git stash</code> — 작업 공간끼리 공유돼서 남의 변경을 꺼낼 수 있어</li>
+        <li><code>reset --hard</code> — 내 변경이 날아가</li>
+        <li>푸시</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">충돌</span><div>맞추다 충돌이 나면 되돌려 놓고(rebase --abort) 어느 파일이 부딪혔는지 보고해. 어떻게 풀지는 내가 정해.</div></div>
+    <div class="callout ok"><span class="k">덤</span><div>마지막에 플러그인 버전 셋(지금 세션 / 내려받은 것 / 최신)을 비교해서 <code>/reload-plugins</code> 가 필요한지 알려 줘.</div></div>
+  </div>
+
+  <div class="next"><button data-go="start">← 작업 시작하기</button><button data-go="sap">다음: SAP 에서 개발하기 →</button></div>
 </article>
 
 <!-- ================= SAP ================= -->
@@ -954,7 +958,7 @@ fix/31-broken-link</pre>
 
   <div class="when">
     <div><div class="lbl">이럴 때</div>Spec 이 정해졌고 실제 코드를 만들 때. 기존 ABAP 을 고칠 때.</div>
-    <div><div class="lbl">이렇게 말해</div><div class="say"><span>DEV-002 개발해줘</span><span>이 클래스 고쳐줘</span><span class="cmd">/c080</span><span class="cmd">/c100</span></div></div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>DEV-002(판매오더 조회 앱) 개발해줘</span><span>이 클래스 고쳐줘</span><span class="cmd">/c080</span><span class="cmd">/c100</span></div></div>
   </div>
 
   <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
@@ -978,6 +982,20 @@ fix/31-broken-link</pre>
     <tr><td><code>abap-adt-z5u-dev</code></td><td>080 개발</td><td>오브젝트 만들기·고치기·활성화, ATC</td><td><code>/c080</code></td><td><span class="pill g">가능</span></td></tr>
     <tr><td><code>abap-adt-z5u</code></td><td>100 커스터마이징</td><td>소스 조회, 문법 검사</td><td><code>/c100</code></td><td><span class="pill r">쓰지 않음</span></td></tr>
   </table></div>
+
+  <section>
+    <h3>080 에서 RAP 앱 만들기 (Eclipse 없이)</h3>
+    <p>080 서버(<code>abap-adt-z5u-dev</code>)는 이제 Claude 가 Behavior Definition(BDEF)과 OData V4 서비스 바인딩까지 만들고, V4 바인딩을 게시(publish)까지 할 수 있어. 예전엔 이 둘은 Eclipse 에서 손으로 만들어야 했어.</p>
+    <div class="diagram">
+      <div class="flow">
+        <div class="node"><b>① 기본 객체</b><span>CDS · 클래스 · 서비스 정의 만들기</span></div><div class="arrow"></div>
+        <div class="node hl"><b>② BDEF · 바인딩</b><span>BDEF, 서비스 바인딩(V4) 만들기</span></div><div class="arrow"></div>
+        <div class="node hl"><b>③ 활성화</b><span>BDEF 소스 넣고 전체 활성화(activateByName)</span></div><div class="arrow"></div>
+        <div class="node ok"><b>④ 게시</b><span>V4 바인딩 게시</span></div>
+      </div>
+    </div>
+    <p class="small" style="margin-top:10px">100 서버(<code>abap-adt-z5u</code>)는 그대로라 이 기능이 없어. 아직 안 되는 것: V4 게시 해제, 메시지 클래스·패키지 생성, UI5 앱 배포·권한(IAM)·카탈로그 — 이건 지금도 사람이 SAP 화면에서 해.</p>
+  </section>
 
   <section>
     <h3>코드를 저장할 때 걸리는 규칙 (CR)</h3>
@@ -1014,11 +1032,11 @@ fix/31-broken-link</pre>
     <div class="callout stop"><span class="k">하지 마</span><div><b>100 에는 쓰지 않아.</b> 100 에서 <code>S_DEVELOP</code> 403 이 나는 건 정상이야. 막혔다고 Claude 가 서버를 바꿔서 다시 시도하지 않아. 어디에 쓸지는 사람이 정해.</div></div>
     <div class="callout stop"><span class="k">하지 마</span><div><code>src/</code> 를 SAP 보다 먼저 고치지 않아. 사진이 현장과 달라져.</div></div>
     <div class="callout warn"><span class="k">데이터 조회</span><div>테이블 내용을 꺼내는 도구(<code>tableContents</code>, <code>runQuery</code>)는 쓰기 전에 되물어 봐. 고객 데이터가 화면에 나오기 때문이야.</div></div>
-    <div class="callout warn"><span class="k">이름 짓기</span><div>오브젝트 이름은 <code>conventions/naming.md</code>(사내 SAP Naming Guide)를 먼저 읽고 지어. ZLOCAL 계열 테스트 패키지는 트랜스포트를 만들지 않아.</div></div>
+    <div class="callout warn"><span class="k">이름 짓기</span><div>오브젝트 이름은 <code>conventions/naming.md</code>(사내 SAP Naming Guide)를 먼저 읽고 지어. ZLOCAL 계열 테스트 패키지는 트랜스포트를 만들지 않아. 판매오더 앱(DEV-002)은 패키지 <code>ZSD_TEST</code>, 접두어 <code>zsd_</code> 를 써.</div></div>
     <div class="callout ok"><span class="k">세션 만료</span><div>401 이나 400 이 나면 <code>/c080</code> 이나 <code>/c100</code> 으로 다시 로그인해.</div></div>
   </div>
 
-  <div class="next"><button data-go="export">← 고객사 양식으로 산출하기</button><button data-go="atc">다음: ATC 돌리기 →</button></div>
+  <div class="next"><button data-go="sync">← 최신으로 맞추기</button><button data-go="atc">다음: ATC 돌리기 →</button></div>
 </article>
 
 <!-- ================= ATC ================= -->
@@ -1447,7 +1465,7 @@ Closes #143</pre>
 
   <div class="tbl-wrap"><table>
     <tr><th>이런 말이 나오면</th><th>왜</th><th>이렇게 해</th></tr>
-    <tr><td>main 에서 커밋 거절</td><td>진열대에서 직접 만들려고 함</td><td><code>/harness:start</code> 로 브랜치부터</td></tr>
+    <tr><td>main 에서 커밋 거절</td><td>진열대에서 직접 만들려고 함</td><td>SRS·Spec 작업이면 그 스킬을 다시 불러 브랜치부터, 그 밖의 일은 <code>/harness:start</code></td></tr>
     <tr><td>맨손 <code>git push</code> 거절</td><td>창구를 안 거침(<code>git status &amp;&amp; git push</code> 처럼 다른 명령과 묶어도 마찬가지)</td><td><code>/harness:deliver</code></td></tr>
     <tr><td><code>--force</code> 거절</td><td>남의 작업을 지울 수 있음</td><td>쓰지 않아. deliver 가 안전한 방법을 씀</td></tr>
     <tr><td>브랜치 이름 형식 거절</td><td>규칙과 다름</td><td><code>git branch -m feat/12-new-name</code></td></tr>
@@ -1456,6 +1474,7 @@ Closes #143</pre>
     <tr><td>번호 찜이 멈추고 "겹치는 REQ" 를 보여 줌 (종료코드 4)</td><td>새 제목이 기존 REQ 제목과 겹치거나 범위 "하지 않는 것" 항목과 포함 또는 핵심 단어 둘 이상 겹침 ("REQ-001 에서 안 하기로 한 일" 이라고 보이면 꼬리표가 붙은 항목)</td><td>하위 작업이면 번호 없이 그 개발에 붙고(안 하기로 한 일을 하게 된 거라면 그 항목은 범위로 옮겨), 새 개발이 맞다고 답하면 확인 표시와 함께 다시 받아</td></tr>
     <tr><td>코드 저장 거절 (CR-00x)</td><td>공통 개발 규칙 위반</td><td>코드를 고쳐. 꼭 필요하면 이유를 단 <code>harness:allow</code> 주석</td></tr>
     <tr><td>엔진을 못 받음 / <code>uv</code> 없음</td><td>검사 도구가 없어 검사 불능. 또는 플러그인 버전의 엔진 태그(<code>v0.10.xx</code>)가 아직 안 붙음</td><td><code>winget install --id astral-sh.uv -e</code> 후 Claude Code 다시 열기. 태그 문제면 조금 뒤 다시, 계속되면 운영 담당에게</td></tr>
+    <tr><td>문서 저장이 "모르는 규칙 종류" 로 검사 불능</td><td>저장소가 새 검사 규칙(예: Spec 사용 객체 표 <code>md_table</code>, SRS <code>관계</code> 줄)을 켰는데 내 PC 플러그인이 옛 판</td><td><code>/reload-plugins</code> 로 플러그인을 갱신하고 다시 저장. 그래도 같으면 새 세션을 열어</td></tr>
     <tr><td>다른 사람이 만든 PR 에 병합·수정·댓글·리뷰 거절</td><td>작성자가 지금 로그인한 GitHub 계정과 다름. 작성자나 권한을 확인하지 못해도 검사 불능으로 거절. 저장소 admin 계정은 예외</td><td>하지 말고 그 PR 이 내 작업에 주는 영향(충돌, 같은 파일)만 작성자에게 알려</td></tr>
     <tr><td>git 명령이 전부 거절</td><td><code>jq</code> 가 없음</td><td>jq 설치 후 다시 열기</td></tr>
     <tr><td>커밋 시 비밀정보 발견</td><td>비밀값이 섞임 (CR-004)</td><td>값을 빼. 진짜 비밀값이었으면 폐기하고 새로 발급</td></tr>
@@ -1463,6 +1482,7 @@ Closes #143</pre>
     <tr><td><code>gh pr merge</code> 거절</td><td>승인 없음, 검사 실패·진행 중, 사람이 병합할 경로</td><td>승인 받기, 검사 고치기, 또는 사람이 Merge 버튼</td></tr>
     <tr><td>PR 이 자동으로 닫힘</td><td>팀원이 운영 파일을 바꿈</td><td>그 파일을 빼고 다시 올려. 필요하면 운영 담당에게 이슈로</td></tr>
     <tr><td>산출 rejected</td><td>같은 이름의 판이 main 에 있음</td><td>문서의 버전을 올리고 다시 산출</td></tr>
+    <tr><td><code>Unsupported object type</code> (BDEF·서비스 바인딩 만들 때)</td><td>080 이 아닌 서버(100)나 예전 MCP 설정으로 시도함</td><td>080 서버(<code>abap-adt-z5u-dev</code>)로 하는지 확인하고, 안 되면 <code>/reload-plugins</code> 후 다시. 계속되면 운영 담당에게</td></tr>
     <tr><td>SAP 401 · 400</td><td>로그인 만료</td><td><code>/c080</code>, <code>/c100</code></td></tr>
     <tr><td>SAP 503</td><td>다른 폴더의 프록시가 포트를 잡음</td><td><code>node scripts/adt-proxy/session.js status</code> 의 "프록시 폴더" 확인</td></tr>
     <tr><td><code>.sh</code> 실행 실패 (Windows)</td><td>줄바꿈이 CRLF 로 남음</td><td>그 파일만 다시 checkout</td></tr>
@@ -1521,6 +1541,8 @@ Closes #143</pre>
         <li>팀원이 올린 PR 은 운영 담당(jaeheeMin)이 찍어</li>
         <li>운영 담당이 올린 PR 은 명단의 다른 사람이 찍어</li>
         <li>작성자 본인의 Approve 는 안 쳐줘</li>
+        <li>Approve 는 PR 의 <b>Files changed</b> 탭 → 오른쪽 위 <b>Review changes</b>(새 화면은 <b>Submit review</b>) → <b>Approve</b> → Submit 으로 찍어. Conversation 탭에는 버튼이 없어</li>
+        <li>Claude 가 내 계정으로 연 PR 은 작성자가 나라서 나는 Approve 를 못 해. 승인자에게 리뷰를 요청해</li>
       </ul>
     </section>
     <section class="box">
@@ -1596,8 +1618,9 @@ Closes #143</pre>
     <section class="box" style="border-color:var(--ok)">
       <h3 style="color:var(--ok)">항상 해</h3>
       <ul class="todo">
-        <li>새 일은 <code>/harness:start</code> 로 이슈와 브랜치부터</li>
+        <li>새 일은 이슈와 브랜치부터. SRS·Spec 은 그 스킬이 알아서 만들어 주고, 그 밖의 일은 <code>/harness:start</code></li>
         <li>올릴 땐 <code>/harness:deliver</code></li>
+        <li>REQ·DEV 번호를 말할 땐 뒤에 괄호로 제목 — <code>REQ-002(판매오더 조회 앱)</code> (이슈 제목 <code>[DEV-xxx]</code>·파일명은 그대로)</li>
         <li>다른 사람 변경을 받을 땐 <code>/harness:sync</code></li>
         <li>못 끝낸 일은 <code>/harness:wrapup</code> 으로 이슈에</li>
         <li>문서 버전은 파일명에 (첫 판 <code>_v0.1.xlsx</code>, 고칠 때마다 0.1 씩), 이전 판도 남겨</li>
@@ -1682,11 +1705,12 @@ Closes #143</pre>
     <div class="term"><dt>fetch · rebase</dt><dd><b>남들이 바꾼 걸 받아서, 내 작업을 그 위로 옮겨 놓기.</b></dd></div>
     <div class="term"><dt>squash merge</dt><dd><b>여러 커밋을 하나로 접어서 병합.</b> main 기록이 깔끔해져.</dd></div>
     <div class="term"><dt>Approve<span>승인</span></dt><dd><b>리뷰어의 "좋아요" 도장.</b> 최신 커밋에 찍힌 것만 쳐줘.</dd></div>
-    <div class="term"><dt>SRS<span>요구사항정의서</span></dt><dd><b>고객 주문서.</b> 저장소에 하나뿐인 정본이야.</dd></div>
+    <div class="term"><dt>SRS<span>Software Requirements Specification · 요구사항정의서</span></dt><dd><b>고객 주문서.</b> 저장소에 하나뿐인 정본이야.</dd></div>
     <div class="term"><dt>SSOT</dt><dd><b>Single Source of Truth.</b> 진짜는 한 곳에만 둔다는 원칙.</dd></div>
     <div class="term"><dt>Spec<span>개발 Spec</span></dt><dd><b>레시피 카드.</b> 요구사항 하나를 어떻게 만들지 적은 설계.</dd></div>
+    <div class="term"><dt>사용 객체<span>Spec 의 표</span></dt><dd><b>이 개발이 만들고 고치고 읽는 SAP 객체 목록.</b> 종류 · 이름 · 작업(생성 · 수정 · 참조) · 비고. 두 Spec 이 같은 객체를 고치면 PR 에 경고가 떠.</dd></div>
     <div class="term"><dt>다음 단계</dt><dd><b>요구사항이 SRS 다음에 가는 길.</b> 개발(→ Spec) · 설정(→ 진행 원장) · 미정(→ 먼저 정하기). 마크다운에만 있고 엑셀엔 안 나가.</dd></div>
-    <div class="term"><dt>REQ · DEV 번호</dt><dd><b>같은 일의 번호표.</b> REQ-003 = DEV-003 = 이슈의 [DEV-003].</dd></div>
+    <div class="term"><dt>REQ · DEV 번호</dt><dd><b>같은 일의 번호표.</b> REQ-003(구매요청 승인) = DEV-003 = 이슈의 [DEV-003].</dd></div>
     <div class="term"><dt>진행 원장<span>Ledger</span></dt><dd><b>개발 건 현황판.</b> 대기 → 진행 → 리뷰 → 완료.</dd></div>
     <div class="term"><dt>Audit<span>변경 기록</span></dt><dd><b>"왜 바꿨는지" 일기장.</b> 한 기록에 파일 하나.</dd></div>
     <div class="term"><dt>Template · 양식 지도</dt><dd><b>고객사 양식 원본과, 그 양식의 어느 칸에 무엇을 넣을지 적은 안내도.</b></dd></div>
