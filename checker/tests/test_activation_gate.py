@@ -196,7 +196,8 @@ CREATABLE = [
 @pytest.mark.parametrize("objtype,name,url", CREATABLE)
 def test_createObject_로_만든_유형은_activateByName_으로_닫힌다(hooks, repo, objtype, name, url):
     _post(hooks, repo, "createObject", {"objtype": objtype, "name": name, "parentName": "ZPK"})
-    assert _gate(hooks, repo)[0] == 1
+    if objtype[:4] not in ("DEVC", "MSAG"):  # 이 둘은 생성 즉시 활성이라 아래 별도 테스트가 본다
+        assert _gate(hooks, repo)[0] == 1
     _post(hooks, repo, "activateByName", {"objectName": name, "objectUrl": url}, _result(True))
     assert _gate(hooks, repo)[0] == 0, "URL 이 유형 키로 못 떨어져 기록이 안 닫혔다"
     rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
@@ -207,6 +208,20 @@ def test_펑션_모듈은_펑션_그룹으로_추적하고_그룹은_자기_이�
     _post(hooks, repo, "createObject", {"objtype": "FUGR/FF", "name": "ZFM_X", "parentName": "ZFG_X"})
     rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
     assert list(rec) == [f"{SERVER}|FUGR:ZFG_X"]
+
+
+@pytest.mark.parametrize("objtype,name", [("DEVC/K", "ZPK_X"), ("MSAG/N", "ZMSG_X")])
+def test_DEVC_MSAG_는_생성_즉시_활성이라_관문이_막지_않는다(hooks, repo, objtype, name):
+    _post(hooks, repo, "createObject", {"objtype": objtype, "name": name, "parentName": "ZPK"})
+    assert _gate(hooks, repo)[0] == 0
+    rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
+    assert rec[f"{SERVER}|{objtype[:4]}:{name}"]["status"] == "active"
+
+
+def test_DEVC_MSAG_가_아닌_유형은_생성하면_여전히_written(hooks, repo):
+    _post(hooks, repo, "createObject", {"objtype": "CLAS/OC", "name": "zcl_y", "parentName": "ZPK"})
+    rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
+    assert rec[f"{SERVER}|CLAS:ZCL_Y"]["status"] == "written"
 
 
 def test_MSAG_메시지_클래스에_소스_쓰기도_같은_기록으로_모인다(hooks, repo):

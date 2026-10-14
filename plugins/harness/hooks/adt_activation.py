@@ -185,6 +185,12 @@ def _collections() -> list[tuple[list[str], str]]:
     return sorted(items, key=lambda it: -len(it[0]))
 
 
+def created_active_types() -> set[str]:
+    """createObject 만으로 이미 활성인 유형(표의 `created_active`)."""
+    table = json.loads(_TYPES_PATH.read_text(encoding="utf-8"))
+    return {str(t).upper() for t in table.get("created_active", [])}
+
+
 def key_from_url(url: str) -> dict | None:
     """URL -> 대상. 표에 없으면 type 은 'URL', name 은 루트 URL. ADT URL 이 아니면 None.
 
@@ -373,6 +379,7 @@ def apply_event(data: dict, server: str, tool: str, tool_input: dict, tool_respo
     if tool in ("setObjectSource", "createObject"):
         if isinstance(tool_response, dict) and tool_response.get("isError"):
             return
+        born_active = created_active_types() if tool == "createObject" else set()
         for t in targets:
             found = _find(entries, server, t)
             if found:
@@ -382,7 +389,7 @@ def apply_event(data: dict, server: str, tool: str, tool_input: dict, tool_respo
             else:
                 e = entries.setdefault(f"{server}|{t['key']}", {
                     "server": server, "type": t["type"], "name": t["name"], "key": t["key"], "root": t["root"]})
-            _set(e, "written", tool, session_id, [])
+            _set(e, ACTIVE if t["type"] in born_active else "written", tool, session_id, [])
         return
 
     if tool == "deleteObject":
