@@ -185,6 +185,12 @@ def _collections() -> list[tuple[list[str], str]]:
     return sorted(items, key=lambda it: -len(it[0]))
 
 
+def created_active_types() -> set[str]:
+    """createObject 만으로 이미 활성인 유형(표의 `created_active`)."""
+    table = json.loads(_TYPES_PATH.read_text(encoding="utf-8"))
+    return {str(t).upper() for t in table.get("created_active", [])}
+
+
 def key_from_url(url: str) -> dict | None:
     """URL -> 대상. 표에 없으면 type 은 'URL', name 은 루트 URL. ADT URL 이 아니면 None.
 
@@ -258,8 +264,10 @@ def targets_for(tool: str, tool_input: dict) -> list[dict]:
     elif tool == "createObject":
         objtype = tool_input.get("objtype", "")
         name = tool_input.get("name", "")
-        if isinstance(objtype, str) and objtype.upper().startswith("FUGR") and tool_input.get("parentName"):
-            name = tool_input["parentName"]  # 펑션 모듈·인클루드는 펑션 그룹으로 추적한다
+        if isinstance(objtype, str) and objtype.upper() in ("FUGR/FF", "FUGR/I") and tool_input.get("parentName"):
+            # 펑션 모듈·인클루드는 펑션 그룹으로 추적한다. 펑션 그룹(FUGR/F) 자신의 parentName 은 패키지다.
+            name = tool_input["parentName"]
+            objtype = "FUGR/F"
         out.append(key_from_type_name(objtype, name))
     elif tool == "activateObjects":
         items = _json_value(tool_input.get("objects"))
@@ -371,6 +379,7 @@ def apply_event(data: dict, server: str, tool: str, tool_input: dict, tool_respo
     if tool in ("setObjectSource", "createObject"):
         if isinstance(tool_response, dict) and tool_response.get("isError"):
             return
+        born_active = created_active_types() if tool == "createObject" else set()
         for t in targets:
             found = _find(entries, server, t)
             if found:
@@ -380,7 +389,7 @@ def apply_event(data: dict, server: str, tool: str, tool_input: dict, tool_respo
             else:
                 e = entries.setdefault(f"{server}|{t['key']}", {
                     "server": server, "type": t["type"], "name": t["name"], "key": t["key"], "root": t["root"]})
-            _set(e, "written", tool, session_id, [])
+            _set(e, ACTIVE if t["type"] in born_active else "written", tool, session_id, [])
         return
 
     if tool == "deleteObject":
