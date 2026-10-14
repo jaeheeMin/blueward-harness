@@ -43,6 +43,11 @@ def render(report: dict, code: int) -> str:
         text += "\n" + "\n".join(
             _render_disabled("객체 겹침") if overlap.get("status") == "disabled" else _render_overlap(overlap)
         )
+    version = report.get("version_overlap")
+    if version:
+        text += "\n" + "\n".join(
+            _render_disabled("판 번호 겹침") if version.get("status") == "disabled" else _render_version_overlap(version)
+        )
     cross = report.get("cross_checks")
     if cross:
         text += "\n" + "\n".join(_render_cross_checks(cross))
@@ -94,13 +99,39 @@ def _render_overlap(result: dict) -> list[str]:
     return out
 
 
+def _render_version_overlap(result: dict) -> list[str]:
+    """열린 PR 끼리 문서 판 번호 겹침 절(#315). 경고만 하므로 위반 표는 없다."""
+    out = ["", "---", "", "## 판 번호 겹침", ""]
+    if result.get("status") == "cannot_check":
+        out += [
+            "### ⚠️ 검사 불능", "",
+            "```", str(result.get("message") or "열린 PR 을 읽지 못했습니다.").strip(), "```", "",
+            "다른 열린 PR 과 판 번호가 겹치는지 확인하지 못했습니다. 통과도 위반도 아닙니다. "
+            "**문서의 문제가 아닙니다.** 위 문서 검사 결과는 그대로 유효합니다. "
+            + ("이 실행을 다시 돌려 보십시오(Re-run). 계속 같으면 저장소 담당자에게 알리십시오."
+               if result.get("read_failure") else "저장소 담당자에게 알리십시오."),
+        ]
+        return out
+    warnings = result.get("warnings") or []
+    if not warnings:
+        out.append(f"열린 PR {result.get('compared', 0)}건과 견주어 보았고 판 번호가 겹치는 곳이 없습니다.")
+        return out
+    out += [
+        "### 참고 — 같은 판 번호를 다른 열린 PR 도 씀 (통과에는 영향 없음)", "",
+        f"**{len(warnings)}건**입니다. 먼저 병합되는 쪽이 그 판을 갖습니다.", "",
+    ]
+    for w in warnings:
+        out.append(f"- {_cell(w.get('message'))}")
+    return out
+
+
 def _render_cross_checks(result: dict) -> list[str]:
     """교차 검사 스위치 파일(`rules/cross-checks/switches.yaml`)을 읽지 못한 경우."""
     return [
         "", "---", "", "## 교차 검사 설정", "",
         "### ⚠️ 검사 불능", "",
         "```", str(result.get("message") or "스위치 파일을 읽지 못했습니다.").strip(), "```", "",
-        "번호 짝·객체 겹침을 돌릴지 알 수 없어 두 검사를 하지 않았습니다. 통과도 위반도 아닙니다. "
+        "번호 짝·객체 겹침·판 번호 겹침을 돌릴지 알 수 없어 이 검사들을 하지 않았습니다. 통과도 위반도 아닙니다. "
         "설정 파일을 관리하는 담당자가 고쳐야 합니다.",
     ]
 
@@ -305,10 +336,35 @@ def _render_code_rules(section: dict) -> list[str]:
     return out
 
 
+def exit2_cause(report: dict) -> str:
+    """종료코드 2 의 원인이 "다시 돌리면 풀리는 읽기 실패" 뿐이면 `retry`, 아니면 `config`(규칙·설정·엔진).
+
+    판정 스텝이 안내 문구를 가르는 데 쓴다. `retry` 는 열린 PR 을 읽지 못해 판 번호 겹침만 확인하지 못한
+    경우다(`version_overlap.read_failure`). 다른 검사 불능이 하나라도 섞여 있으면 `config` 다.
+    """
+    version = report.get("version_overlap") or {}
+    if "summary" not in report or not (version.get("status") == "cannot_check" and version.get("read_failure")):
+        return "config"
+    code_rules = report.get("code_rules")
+    if code_rules and code_rules.get("exit") not in (0, 1):
+        return "config"
+    for key in ("pairing", "overlap"):
+        if (report.get(key) or {}).get("status") == "cannot_check":
+            return "config"
+    return "config" if report.get("cross_checks") else "retry"
+
+
 def main() -> int:
     reconfigure = getattr(sys.stdout, "reconfigure", None)
     if reconfigure is not None:
         reconfigure(encoding="utf-8")
+
+    if len(sys.argv) == 3 and sys.argv[1] == "--exit2-cause":
+        try:
+            print(exit2_cause(json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))))
+        except (OSError, ValueError):
+            print("config")
+        return 0
 
     if len(sys.argv) < 3:
         print("사용법: render_report.py <리포트 json> <종료코드>", file=sys.stderr)

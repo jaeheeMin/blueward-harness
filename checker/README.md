@@ -160,13 +160,33 @@ main 병합이 아니라 태그 기준이다 — 병합 뒤 `release-tag` 가 �
 - 검사 불능(종료코드 2): Spec 을 읽지 못함, 절은 있는데 표가 없음, 표 머리·칸 수·작업 값이 틀려 읽을 수 없음.
 - `docs/spec/` 가 없는 저장소는 대상이 아니다(skipped).
 
+## `version_overlap` — 열린 PR 끼리 문서 판 번호 겹침 경고(#315)
+
+규칙 종류가 아닌 별도 검사다(`checker/version_overlap.py`). 이 PR 이 **추가한** `_v<판>` 산출 파일(`…_v0.3.xlsx` 등,
+`templates/` 제외)의 경로가 다른 열린 PR 의 추가 파일과 같거나, 이 PR 이 `docs/ssot/SRS.md` 의 `버전:` 을 base 와 다른
+값으로 바꿨는데 다른 열린 PR 도 같은 값으로 바꿨으면 경고한다. 이미 있던 파일을 고친 것은 대상이 아니다.
+
+- 엔진은 네트워크를 쓰지 않는다. 워크플로가 `scripts/fetch_open_prs.py` 로 열린 PR 의 파일 목록과(SRS 를 바꾼 PR 만)
+  SRS 의 head·base `버전:` 을 GitHub API 로 읽어 `open-prs.json` 에 저장하고, `scripts/check_changed.py` 가 환경변수
+  `DOC_GUARD_OPEN_PRS`(그 경로)와 `DOC_GUARD_PR_NUMBER` 로 받아 리포트 키 `version_overlap` 에 합친다. 두 환경변수가 없으면
+  (push, 로컬 훅) 대상이 아니다. 이 PR 이 판 번호를 건드리지 않으면 다른 PR 을 읽지 않는다(`not_needed`).
+- 경고만 한다(통과 유지). 코멘트의 "판 번호 겹침" 절에 "먼저 병합되는 쪽이 v0.3 을 갖고, 다른 쪽은 sync 뒤 0.4 로 다시
+  산출해야 합니다" 로 나온다.
+- 검사 불능(종료코드 2): 열린 PR 목록을 못 읽음(권한·네트워크·API 오류·너무 많음), `open-prs.json` 이 없거나 깨짐, 이 PR 이
+  목록에 없음, 겹침 판정에 필요한 SRS 버전을 못 읽음(바뀐 SRS 의 head 가 404 이거나 `버전:` 줄이 없음. base 에 SRS 가
+  아직 없는 것만 정상), 120초 시간 예산 초과. 이 검사 불능은 `read_failure` 표시가 붙어 "규칙·설정 문제" 가 아니라 "다시
+  돌리십시오(Re-run)" 로 안내하고, 문서 위반과 함께 나와도 위반 표는 그대로다(종료코드는 2).
+- 이 PR 과 base 브랜치가 다른 열린 PR 은 비교에서 빼고, 초안 PR 은 넣는다. 다른 PR 제목은 백틱으로 감싸 60자로 자른다.
+- 스위치 `판_겹침` 으로 끈다.
+
 ### 교차 검사 스위치
 
-`pairing` 과 `overlap` 은 Project Repository 의 `rules/cross-checks/switches.yaml` 로 각각 끈다(`checker/cross_switches.py`).
+`pairing`·`overlap`·`version_overlap` 은 Project Repository 의 `rules/cross-checks/switches.yaml` 로 각각 끈다(`checker/cross_switches.py`).
 
 ```yaml
 번호_짝: true      # false 면 번호 짝 검사를 돌리지 않는다
 객체_겹침: true    # false 면 객체 겹침 검사를 돌리지 않는다
+판_겹침: true      # false 면 열린 PR 끼리 판 번호 겹침 검사를 돌리지 않는다
 ```
 
 꺼져 있으면 리포트에 `{"status": "disabled"}` 를 싣고 코멘트에 "꺼져 있음" 한 줄이 남는다(종료코드 0). 파일이나 키가 없으면 켠다. 모르는 키나 불린이 아닌 값은 검사 불능(종료코드 2, 리포트 키 `cross_checks`)이다. 엔진 로더가

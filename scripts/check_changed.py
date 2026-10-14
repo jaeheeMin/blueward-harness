@@ -37,10 +37,17 @@ out_of_scope 로 빠지기 때문이다. 이 워크플로를 부르는 저장소
 `overlap` 키로 합친다. 경고만 하므로 위반은 없고 읽지 못한 Spec 이 있으면 검사 불능(2)이다.
 두 교차 검사는 `rules/cross-checks/switches.yaml`(`checker.cross_switches`)로 각각 끌 수 있고,
 파일이 없으면 둘 다 켠다. 그 파일이 잘못되면 `cross_checks` 키에 검사 불능을 싣고 종료코드 2 다.
+
+**열린 PR 끼리 판 번호 겹침(#315)**: 환경변수 `DOC_GUARD_OPEN_PRS`(PR 이벤트에서 워크플로가
+`scripts/fetch_open_prs.py` 의 결과 JSON 경로로 채움)가 있고, 바뀐 파일에 SRS 나 `_v<판>` 산출 파일이 있으면
+`checker.version_overlap` 을 돌려 `version_overlap` 키로 합친다. 경고만 하고 위반은 없다. 열린 PR 정보를 못
+읽었으면(파일 없음·깨짐·API 실패) 검사 불능(2)이다. 환경변수가 없으면(push, 로컬) 대상이 아니라 키도 없다.
+스위치 `판_겹침` 으로 끌 수 있다.
 """
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -54,6 +61,10 @@ from checker.cross_switches import DISABLED, SwitchError, load_switches
 from checker.overlap import check_overlap
 from checker.pairing import CANNOT_CHECK, LEDGER_DIR, SKIPPED, SPEC_DIR, SRS_PATH, check_pairing
 from checker.pairing import exit_code_for as _pairing_exit_code
+from checker.version_overlap import NOT_NEEDED, check_version_overlap, read_failure, touches_version
+
+OPEN_PRS_ENV = "DOC_GUARD_OPEN_PRS"  # 열린 PR 정보 JSON 경로(PR 이벤트에서만 워크플로가 채움)
+PR_NUMBER_ENV = "DOC_GUARD_PR_NUMBER"
 
 EMPTY_REPORT = (
     '{"summary": {"scoped": 0, "passed": 0, "violations": 0, "skipped": 0,'
@@ -86,6 +97,25 @@ def touches_pairing_files(found: list[str]) -> bool:
 def touches_spec_files(found: list[str]) -> bool:
     """바뀐 파일에 Spec 경로가 있는지(객체 겹침 검사를 돌릴 조건)."""
     return any(Path(name).as_posix().startswith(SPEC_DIR + "/") for name in found)
+
+
+def _check_version_overlap(path: Path) -> dict | None:
+    """열린 PR 정보 파일(`fetch_open_prs.py` 가 씀)로 판 번호 겹침(#315)을 본다. 읽을 일이 없었으면 None.
+
+    파일이 없거나 깨졌거나 이 PR 번호를 모르면 검사 불능이다 — 조용히 넘어가지 않는다.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return read_failure(f"열린 PR 정보 {path} 를 읽지 못했습니다: {exc}")
+    if not isinstance(data, dict):
+        return read_failure(f"열린 PR 정보 {path} 의 모양이 사전이 아닙니다")
+    if data.get("status") == NOT_NEEDED:
+        return None
+    number = os.environ.get(PR_NUMBER_ENV, "")
+    if not number.isdigit():
+        return {"status": CANNOT_CHECK, "warnings": [], "message": f"이 PR 번호({PR_NUMBER_ENV})를 알 수 없습니다"}
+    return check_version_overlap(data, int(number))
 
 
 def split_listing(text: str) -> tuple[list[str], list[str]]:
@@ -187,10 +217,13 @@ def main_entry(argv: list[str] | None = None) -> int:
 
     pairing_result = None
     overlap_result = None
+    version_result = None
     switch_error = None
     wants_pairing = touches_pairing_files(found + missing)  # 지워진 경로도 트리거(목록에 들어온다면)
     wants_overlap = touches_spec_files(found + missing)
-    if wants_pairing or wants_overlap:
+    open_prs_path = os.environ.get(OPEN_PRS_ENV)  # PR 이벤트에서만 워크플로가 채운다. 없으면 이 검사는 대상이 아니다.
+    wants_version = bool(open_prs_path) and any(touches_version(n) for n in found + missing)
+    if wants_pairing or wants_overlap or wants_version:
         try:
             switches = load_switches(Path.cwd())
         except SwitchError as exc:
@@ -212,8 +245,12 @@ def main_entry(argv: list[str] | None = None) -> int:
             result = check_overlap(Path.cwd())
             if result["status"] != SKIPPED:
                 overlap_result = result
+        if wants_version and switches.get("판_겹침") is False:
+            version_result = {"status": DISABLED}
+        elif wants_version and switches.get("판_겹침"):
+            version_result = _check_version_overlap(Path(open_prs_path))
 
-    extras = [r for r in (pairing_result, overlap_result, switch_error) if r is not None]
+    extras = [r for r in (pairing_result, overlap_result, version_result, switch_error) if r is not None]
     if not code_files and not extras:
         # 코드 파일도 교차 검사 대상도 없다. doc-guard 만 있던 예전 그대로 동작한다.
         return main(["--auto", *doc_files])
@@ -240,6 +277,8 @@ def main_entry(argv: list[str] | None = None) -> int:
         combined["pairing"] = pairing_result
     if overlap_result:
         combined["overlap"] = overlap_result
+    if version_result:
+        combined["version_overlap"] = version_result
     if switch_error:
         combined["cross_checks"] = switch_error
     extra_exits = [_pairing_exit_code(r) for r in extras]  # 겹침은 위반이 없어 0 또는 2

@@ -136,17 +136,17 @@ def _switch(tmp: Path, text: str) -> None:
 
 
 def test_스위치_파일이_없으면_둘_다_켠다(tmp_path):
-    assert load_switches(tmp_path) == {"번호_짝": True, "객체_겹침": True}
+    assert load_switches(tmp_path) == {"번호_짝": True, "객체_겹침": True, "판_겹침": True}
 
 
 def test_스위치를_끄고_켠다(tmp_path):
     _switch(tmp_path, "번호_짝: false\n객체_겹침: true\n")
-    assert load_switches(tmp_path) == {"번호_짝": False, "객체_겹침": True}
+    assert load_switches(tmp_path) == {"번호_짝": False, "객체_겹침": True, "판_겹침": True}
 
 
 def test_파일에_없는_키는_켠다(tmp_path):
     _switch(tmp_path, "객체_겹침: false\n")
-    assert load_switches(tmp_path) == {"번호_짝": True, "객체_겹침": False}
+    assert load_switches(tmp_path) == {"번호_짝": True, "객체_겹침": False, "판_겹침": True}
 
 
 @pytest.mark.parametrize("text", ["번호_짝: 꺼짐\n", "번호_짝: 0\n", "객체_겹침: 'false'\n", "오타: true\n", "- a\n", "번호_짝: [\n"])
@@ -158,7 +158,7 @@ def test_잘못된_스위치는_검사_불능이다(tmp_path, text):
 
 def test_빈_스위치_파일은_둘_다_켠다(tmp_path):
     _switch(tmp_path, "# 비움\n")
-    assert load_switches(tmp_path) == {"번호_짝": True, "객체_겹침": True}
+    assert load_switches(tmp_path) == {"번호_짝": True, "객체_겹침": True, "판_겹침": True}
 
 
 def test_스위치_파일이_rules_로더를_깨지_않는다(tmp_path):
