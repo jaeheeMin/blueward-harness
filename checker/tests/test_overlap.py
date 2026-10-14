@@ -50,6 +50,14 @@ def test_둘이_같은_객체를_만들거나_고치면_경고한다(tmp_path):
     assert {s["file"] for s in w["specs"]} == {"docs/spec/DEV-002-a.md", "docs/spec/DEV-003-b.md"}
 
 
+def test_같은_Business_Catalog_를_둘이_수정하면_경고한다(tmp_path):
+    _spec(tmp_path, "DEV-002-a.md", [_row("Business Catalog", "ZMM_BC_AUTO1", "수정")])
+    _spec(tmp_path, "DEV-003-b.md", [_row("Business Catalog", "ZMM_BC_AUTO1", "수정")])
+    r = check_overlap(tmp_path)
+    assert r["status"] == PASS and len(r["warnings"]) == 1
+    assert (r["warnings"][0]["kind"], r["warnings"][0]["name"]) == ("Business Catalog", "ZMM_BC_AUTO1")
+
+
 def test_겹치는_객체가_없으면_경고가_없다(tmp_path):
     _spec(tmp_path, "DEV-002-a.md", [_row("CDS View", "ZI_A", "생성")])
     _spec(tmp_path, "DEV-003-b.md", [_row("CDS View", "ZI_B", "생성")])

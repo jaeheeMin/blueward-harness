@@ -205,6 +205,62 @@ def test_사용_객체_표가_틀리면_spec이_위반이다(tmp_path, capsys):
     assert {v["rule"] for v in out["files"][0]["violations"]} == {"md_table"}
 
 
+LP_HEAD = (
+    "| 타일 제목 | 부제 | 아이콘 | 시맨틱 오브젝트 | 액션 | 파라미터 | 카탈로그 | 배치 |\n"
+    "|---|---|---|---|---|---|---|---|\n"
+)
+LP_ROW = (
+    "| 기간별 재고 수불부 | 재고 수불 집계 | sap-icon://inventory | AnalyticQuery | preview | "
+    "query=ZMM_C_STOCKLEDGERQUERY | ZMM_BC_AUTO1 | MM AUTO1 페이지 · 재고원장 보고서 영역 |\n"
+)
+
+
+def _spec_with_lp(table: str) -> str:
+    return SPEC_VALID.replace("## 완료 조건", "## Launchpad 노출\n\n설명.\n\n" + table + "\n## 완료 조건")
+
+
+def test_올바른_launchpad_노출_표는_통과한다(tmp_path, capsys):
+    rows = LP_HEAD + LP_ROW + LP_ROW.replace("preview", "display").replace("기간별", "다른")
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with_lp(rows)))
+    assert code == EXIT_PASS, out
+
+
+def test_밑줄이_든_시맨틱_오브젝트는_통과한다(tmp_path, capsys):
+    row = LP_ROW.replace("AnalyticQuery", "Z_Stock_Ledger1")
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with_lp(LP_HEAD + row)))
+    assert code == EXIT_PASS, out
+
+
+def test_launchpad_노출_절이_없는_spec은_통과한다(tmp_path, capsys):
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with(None)))
+    assert code == EXIT_PASS, out
+
+
+@pytest.mark.parametrize("bad", [
+    LP_ROW.replace("preview", "Preview"),            # 액션 대문자 시작
+    LP_ROW.replace("preview", "pre view"),           # 액션 공백
+    LP_ROW.replace("AnalyticQuery", "Analytic Query"),  # 시맨틱 오브젝트 공백
+    LP_ROW.replace("AnalyticQuery", "1Query"),       # 숫자 시작
+    LP_ROW.replace("AnalyticQuery", ""),             # 빈 칸
+])
+def test_launchpad_노출_표가_틀리면_위반이다(tmp_path, capsys, bad):
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with_lp(LP_HEAD + bad)))
+    assert code == EXIT_VIOLATION
+    assert {v["rule"] for v in out["files"][0]["violations"]} == {"md_table"}
+
+
+def test_launchpad_노출_표_머리가_다르면_위반이다(tmp_path, capsys):
+    head = "| 타일 제목 | 액션 |\n|---|---|\n| X | preview |\n"
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with_lp(head)))
+    assert code == EXIT_VIOLATION
+
+
+@pytest.mark.parametrize("kind", ["IAM App", "Business Catalog", "Launchpad App Descriptor Item"])
+def test_새_종류_세_가지는_사용_객체에서_통과한다(tmp_path, capsys, kind):
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with(HEAD + f"| {kind} | ZMM_BC_AUTO1 | 수정 | |\n")))
+    assert code == EXIT_PASS, out
+
+
 # ---- 양식 산출은 새 절에 영향받지 않는다 ----
 
 FORM = """\
