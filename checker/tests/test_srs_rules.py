@@ -29,9 +29,9 @@ AS-IS: 종이 결재. TO-BE: 전자 결재.
 
 ## 요구사항
 
-| ID | 요구사항 | 우선순위 | 출처 | 상태 |
-|---|---|---|---|---|
-| REQ-001 | 기안자는 구매요청을 등록한다 | 상 | 요구사항정리.md | 유효 |
+| ID | Title | Status | Priority (PO) | 출처 | 다음 단계 |
+|---|---|---|---|---|---|
+| REQ-001 | 기안자는 구매요청을 등록한다 | New | 1. Must-Have | 요구사항정리.md | 개발 |
 
 ## 참조
 
@@ -114,7 +114,7 @@ def test_SRS_v2_처럼_파일명이_다르면_여전히_위반이다(tmp_path: P
 def test_스캐폴드_SRS_규칙이_다른_번호를_말하는_상세_절을_거절한다(tmp_path: Path, capsys):
     scaffold(tmp_path, "고객사", "테스트프로젝트", False)
     srs = tmp_path / "docs" / "ssot" / "SRS.md"
-    detail = "\n### REQ-002 구매요청 조회\n\n#### Short Description\n\nREQ-001 의 등록 화면에 붙인다.\n"
+    detail = "\n### REQ-002 구매요청 조회\n\n#### 설명\n\nREQ-001 의 등록 화면에 붙인다.\n"
     _write(srs, SRS_VALID.replace("## 참조", detail + "\n## 참조"))
 
     code, out = _run_auto(capsys, srs)
@@ -123,6 +123,6 @@ def test_스캐폴드_SRS_규칙이_다른_번호를_말하는_상세_절을_거
     violations = out["files"][0]["violations"]
     assert any(v["rule"] == "req_cross_reference" for v in violations)
 
-    _write(srs, SRS_VALID.replace("## 참조", detail.replace("\n#### Short", "\n관계: 별개 — 조회는 등록과 화면이 다르다\n\n#### Short") + "\n## 참조"))
+    _write(srs, SRS_VALID.replace("## 참조", detail.replace("\n#### 설명", "\n관계: 별개 — 조회는 등록과 화면이 다르다\n\n#### 설명") + "\n## 참조"))
     code, out = _run_auto(capsys, srs)
     assert code == EXIT_PASS

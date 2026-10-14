@@ -16,10 +16,11 @@ from checker.model import Violation
 from checker.readers import supported
 
 
-def test_규칙_종류_아홉이_등록된다():
+def test_규칙_종류_열이_등록된다():
     assert set(rule_registry.known()) == {
         "external_traces",
         "filename",
+        "form_columns",
         "location",
         "md_table",
         "req_cross_reference",

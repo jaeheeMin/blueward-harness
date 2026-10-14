@@ -66,6 +66,16 @@ Spec 의 파일 이름(`DEV-001-<요약>.md`)과 필수 절(`templates/harness/s
 `templates/harness/spec.md` 에 자동으로 오지 않는다 — 엔진·스킬을 갱신한 뒤 각 저장소 rules 에 직접
 반영한다(그 전에는 옛 규칙대로 검사되고, 새 종류를 쓴 Spec 은 `종류` 허용 목록 위반이 된다).
 
+`ssot.yaml` 의 `form_columns` 는 SRS 요구사항 표의 열과 상세 절 `####` 소제목이 양식 지도(`templates/forms/` 에서
+`원본: SRS` 인 지도)의 열 + md 전용 열 + `다음 단계` 밖이면 "양식 밖 열" 로 거절한다. 지도에 있는데 표에 빠진 열은
+허용한다. 지도가 없으면 `templates/harness/SRS.md` 의 열이 기준이고 `기본_소제목`(설명, 완료 조건)이 상세 절에 허용된다.
+`spec.yaml` 의 `form_columns`(`원본: 작업본`)는 Spec 의 `## 양식 항목` 이 지도에 없는 양식·시트·칸·표·열을 쓰면 거절한다.
+이 규칙 종류는 그 규칙이 든 엔진 배포 태그(v0.10.75 이상, `stable`)를 받게 된 뒤에만 켤 수 있다. 순서: 병합 → 엔진 태그
+`v0.10.75`·`stable` 이동 확인 → 팀원 플러그인 0.10.75 이상 → 각 Project Repository `rules/` 에 켜기. 먼저 켜면 규칙 파일을
+읽는 순간 설정 오류(종료코드 2)가 나서 *모든 문서 유형*이 검사 불능으로 멈춘다. 새 scaffold 는 `stable` 이 0.10.75 이상일 때만
+쓴다(아니면 `form_columns` 항목을 빼고 시작). `지도_폴더` 를 적었는데 폴더가 없으면 틀 기준으로 갈아타지 않고 검사 불능이다. 이미 만든 Project Repository 의 `rules/ssot.yaml`·`rules/spec.yaml` 에는
+자동으로 오지 않으니 직접 반영한다. 양식 지도를 못 읽으면 이 규칙은 통과도 위반도 아닌 검사 불능이다.
+
 ## 교차 검사 스위치 — `cross-checks/switches.yaml`
 
 doc-guard 는 문서 하나씩 보는 규칙 말고도 여러 문서를 함께 보는 검사 셋을 돌린다.

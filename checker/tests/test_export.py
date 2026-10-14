@@ -1349,3 +1349,33 @@ def test_check도_긴_셀을_경고하고_파일은_쓰지_않는다(bproj, caps
     code, report = _srs_run(bproj, capsys, _long_srs("x" * 300), "--check")
     assert code == 3 and report["dry_run"] is True and len(_tall(report)) == 1
     assert not (bproj / "docs" / "out").exists()
+
+
+def test_양식_밖_열이_여럿이면_하나도_빠뜨리지_않고_모두_알리며_멈춘다_316(bproj, capsys):
+    text = SRS_MD.replace("| 출처 |\n|---|---|---|---|---|---|---|", "| 출처 | 엉뚱 | Scope |\n|---|---|---|---|---|---|---|---|---|")
+    text = text.replace("| 회의록 |", "| 회의록 | a | b |").replace("| 메일 |", "| 메일 | c | d |")
+    code, report = _srs_run(bproj, capsys, text)
+    reason = report["problems"][0]["reason"]
+    assert code == 2 and report["files"] == []
+    assert "'엉뚱'" in reason and "'Scope'" in reason
+    assert "허용:" in reason and "Backlog ID" not in reason.split("허용:")[0] and "다음: 양식 지도" in reason
+    assert not (bproj / "docs").exists()  # 건너뛰고 산출하지 않는다
+
+
+def test_양식_밖_상세_소제목이_여럿이면_REQ별로_모두_알리며_멈춘다_316(bproj, capsys):
+    text = SRS_MD.replace("#### Short Description\n\n첫 줄", "#### Notes\n\n첫 줄").replace(
+        "#### Short Description\n\n보고서", "#### Memo\n\n보고서"
+    )
+    code, report = _srs_run(bproj, capsys, text)
+    reason = report["problems"][0]["reason"]
+    assert code == 2 and "REQ-002: `#### Notes`" in reason and "REQ-003: `#### Memo`" in reason
+    assert "다음: 양식 지도" in reason
+    assert not (bproj / "docs").exists()
+
+
+def test_작업본_양식_밖_항목이_여럿이면_모두_알리며_멈춘다_316(proj, capsys):
+    spec = SPEC.replace("| 수량 | 12 |", "| 없는칸 | 1 |").replace("| No | Text |", "| No | 없는열 |")
+    code, report = _run(proj, capsys, spec)
+    reason = report["problems"][0]["reason"]
+    assert code == 2 and report["files"] == []
+    assert "없는칸" in reason or "없는열" in reason
