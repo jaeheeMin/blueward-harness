@@ -1178,3 +1178,79 @@ def test_다음_안내에_split_hint_문구가_들어간다():
     findings = [rg.Finding("split_hint", "x")]
     nxt = rg.build_next(findings, "missing", ".github/ssot-approvers")
     assert "SRS diff" in nxt and "기존 REQ 의 범위를 넓히" in nxt
+
+
+# --- "하지 않는 것" 항목 꼬리표 `(REQ-xxx)` (#304) -----------------------------------------
+
+@pytest.mark.parametrize("raw, body, reqs", [
+    ("판매오더 생성 (REQ-002)", "판매오더 생성", ["REQ-002"]),
+    ("승인 워크플로 (REQ-001, REQ-003)", "승인 워크플로", ["REQ-001", "REQ-003"]),
+    ("승인 워크플로(REQ-001,REQ-003)", "승인 워크플로", ["REQ-001", "REQ-003"]),
+    ("승인 워크플로（REQ-001）", "승인 워크플로", ["REQ-001"]),
+    ("판매오더 생성 (조회 전용)", "판매오더 생성 (조회 전용)", []),  # REQ 번호가 아닌 괄호는 꼬리표가 아니다
+    ("REQ-002 로 따로 다룬다", "REQ-002 로 따로 다룬다", []),  # 항목 끝의 괄호만 꼬리표다
+    ("판매오더 생성 (REQ-002) 제외", "판매오더 생성 (REQ-002) 제외", []),
+])
+def test_꼬리표를_항목_끝에서_떼어_번호_목록으로_낸다(raw, body, reqs):
+    assert rg.split_excluded_tag(raw) == (body, reqs)
+
+
+def test_scope_items_는_꼬리표를_뗀_항목을_낸다():
+    items = rg.scope_items("- 하지 않는 것: 노출(IAM App, Role) (REQ-002), 외부 API\n  - 역분개·취소. (REQ-001)\n")
+    assert list(items.values()) == ["노출(IAM App, Role)", "외부 API", "역분개·취소"]
+
+
+def _tag_scope(*lines):
+    return _scope_srs("- 하지 않는 것:\n" + "\n".join(f"  - {ln}" for ln in lines))
+
+
+def test_꼬리표만_붙이거나_떼거나_바꾼_변경은_근거가_아니다():
+    plain = _tag_scope("판매오더 생성·변경·삭제", "개발사양서 xlsx 작성")
+    tagged = _tag_scope("판매오더 생성·변경·삭제 (REQ-002)", "개발사양서 xlsx 작성")
+    retagged = _tag_scope("판매오더 생성·변경·삭제 (REQ-002, REQ-005)", "개발사양서 xlsx 작성")
+    for base, head in ((plain, tagged), (tagged, plain), (tagged, retagged)):
+        client = _srs_client(_with_sep_req(head), base_text=base, patch_row=SEP_ROW)
+        assert _hint_reasons(rg.decide_pr(client, "o/r", 5)) == [], (base, head)
+
+
+def test_꼬리표_있는_항목을_지우면_어느_REQ_의_항목인지_적는다():
+    base = _tag_scope("판매오더 생성·변경·삭제 (REQ-002)", "개발사양서 xlsx 작성")
+    head = _with_sep_req(_tag_scope("개발사양서 xlsx 작성"))
+    (reason,) = _hint_reasons(rg.decide_pr(_srs_client(head, base_text=base, patch_row=SEP_ROW), "o/r", 5))
+    assert '(b)' in reason and '"판매오더 생성·변경·삭제" (REQ-002 의 하지 않는 것)' in reason
+    assert "(REQ-002)\"" not in reason
+
+
+def test_꼬리표_번호가_여럿이면_모두_적고_없는_항목은_표시를_안_붙인다():
+    base = _tag_scope("승인 워크플로 (REQ-001, REQ-002)", "외부 API 서비스")
+    head = _with_sep_req(_tag_scope("개발사양서 xlsx 작성"))
+    (reason,) = _hint_reasons(rg.decide_pr(_srs_client(head, base_text=base, patch_row=SEP_ROW), "o/r", 5))
+    assert '"승인 워크플로" (REQ-001, REQ-002 의 하지 않는 것)' in reason
+    assert '"외부 API 서비스"' in reason
+    assert '"외부 API 서비스" (' not in reason
+
+
+def test_꼬리표_없는_항목을_바꾸면_예전처럼_표시_없이_근거로_든다():
+    base = _tag_scope("판매오더 생성·변경·삭제", "개발사양서 xlsx 작성")
+    head = _with_sep_req(_tag_scope("개발사양서 xlsx 작성"))
+    (reason,) = _hint_reasons(rg.decide_pr(_srs_client(head, base_text=base, patch_row=SEP_ROW), "o/r", 5))
+    assert '"판매오더 생성·변경·삭제"' in reason and "의 하지 않는 것" not in reason
+
+
+def test_엑셀_산출은_범위_절의_꼬리표를_내보내지_않는다():
+    from checker import export
+
+    text = (
+        "# SRS\n\n버전: 0.1\n\n## 범위\n\n- 하지 않는 것:\n  - 회계전표 역분개 (REQ-001)\n\n"
+        "## 요구사항\n\n| ID | Title | Status |\n|---|---|---|\n| REQ-001 | 회계전표 업로드 | New |\n\n"
+        "### REQ-001 회계전표 업로드\n\n#### Short Description\n\n요약\n"
+    )
+    doc = export.parse_srs(text)
+    flat = [c for row in doc.rows for c in row] + [v for d in doc.details.values() for v in d.values()]
+    assert doc.rows == [["REQ-001", "회계전표 업로드", "New"]]
+    assert not any("역분개" in c or "(REQ-001)" in c for c in flat)
+
+
+def test_같은_본문이_다른_꼬리표로_두_번_나오면_번호를_합친다():
+    entries = rg._scope_entries("- 하지 않는 것:\n  - 승인 워크플로 (REQ-001)\n  - 승인 워크플로 (REQ-002, REQ-001)\n")
+    assert list(entries.values()) == [("승인 워크플로", ["REQ-001", "REQ-002"])]

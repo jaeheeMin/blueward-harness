@@ -416,3 +416,199 @@ def test_SRS_를_읽다_실패하면_2_이고_번호를_안_준다(tmp_path, mon
     code, out = run(monkeypatch, capsys, work, fake, ["reserve", "--title", "구매요청 승인 흐름"])
     assert code == 2
     assert fake.issues == {}
+
+
+# --- SRS 범위 "하지 않는 것" 항목 겹침(#304) ---------------------------------------------
+
+SRS_SCOPE = """# SRS
+
+## 범위
+
+- 하는 것: 조회
+- 하지 않는 것:
+  - 판매오더 생성·변경·삭제 (조회 전용)
+  - Fiori Launchpad 노출(IAM App, Role) (REQ-002)
+  - 회계전표 역분개·취소, 승인 워크플로 (REQ-001, REQ-003)
+  - 외부 API
+  - 취소
+
+## 요구사항
+
+| ID | Title | Status |
+|---|---|---|
+| REQ-001 | 회계전표 업로드 | New |
+| REQ-002 | 판매오더 조회 앱 | New |
+"""
+
+
+def _scoped(tmp_path):
+    return make_repo(tmp_path, srs=SRS_SCOPE)
+
+
+def test_하지_않는_것_항목이_꼬리표_없이_겹치면_4_이고_reqs_는_빈_목록(tmp_path, monkeypatch, capsys):
+    # 항목 "판매오더 생성·변경·삭제 (조회 전용)" 안에 새 제목 "판매오더 생성·변경" 이 들어 있다
+    fake = FakeGh()
+    code, out = run(monkeypatch, capsys, _scoped(tmp_path), fake, ["reserve", "--title", "판매오더 생성·변경"])
+    assert code == 4 and fake.issues == {}
+    assert json.loads(out)["matches"] == []
+    assert json.loads(out)["excluded_matches"] == [{"item": "판매오더 생성·변경·삭제 (조회 전용)", "reqs": []}]
+
+
+def test_꼬리표가_있으면_그_REQ_번호를_낸다(tmp_path, monkeypatch, capsys):
+    code, out = run(monkeypatch, capsys, _scoped(tmp_path), FakeGh(), ["reserve", "--title", "Fiori Launchpad 노출(IAM App, Role) 정리"])
+    assert code == 4
+    assert json.loads(out)["excluded_matches"] == [{"item": "Fiori Launchpad 노출(IAM App, Role)", "reqs": ["REQ-002"]}]
+
+
+def test_꼬리표에_번호가_여럿이면_모두_낸다(tmp_path, monkeypatch, capsys):
+    code, out = run(monkeypatch, capsys, _scoped(tmp_path), FakeGh(), ["reserve", "--title", "승인 워크플로"])
+    assert code == 4
+    # 들여쓴 줄은 줄마다 한 항목이라 쉼표 뒤까지 한 항목이다
+    assert json.loads(out)["excluded_matches"] == [
+        {"item": "회계전표 역분개·취소, 승인 워크플로", "reqs": ["REQ-001", "REQ-003"]}
+    ]
+
+
+def test_짧은_단어나_짧은_항목은_하지_않는_것_비교에서_뺀다(tmp_path, monkeypatch, capsys):
+    work = _scoped(tmp_path)
+    # 새 제목이 하한(4자) 미만이면 걸리지 않고, 정규화 뒤 4자 미만인 항목 "취소" 가 긴 제목에 들어 있어도 걸리지 않는다.
+    code, _ = run(monkeypatch, capsys, work, FakeGh(), ["reserve", "--title", "생성"])
+    assert code == 0
+    code, _ = run(monkeypatch, capsys, work, FakeGh(), ["reserve", "--title", "구매요청 취소 알림 배치"])
+    assert code == 0
+
+
+def test_기존_제목_겹침만_있으면_excluded_matches_는_빈_목록(tmp_path, monkeypatch, capsys):
+    code, out = run(monkeypatch, capsys, _titled(tmp_path), FakeGh(), ["reserve", "--title", "판매오더 조회 앱 개편"])
+    assert code == 4
+    res = json.loads(out)
+    assert res["matches"] and res["excluded_matches"] == []
+    assert set(res) == {"status", "matches", "excluded_matches", "title"}
+
+
+def test_하지_않는_것_과_겹치지_않으면_그대로_찜한다(tmp_path, monkeypatch, capsys):
+    code, out = run(monkeypatch, capsys, _scoped(tmp_path), FakeGh(), ["reserve", "--title", "구매요청 승인 흐름"])
+    assert code == 0 and json.loads(out)["status"] == "ok"
+
+
+def test_하지_않는_것_confirmed_new_는_건너뛴다(tmp_path, monkeypatch, capsys):
+    fake = FakeGh()
+    code, out = run(monkeypatch, capsys, _scoped(tmp_path), fake, ["reserve", "--title", "판매오더 생성·변경", "--confirmed-new"])
+    assert code == 0 and len(fake.issues) == 1
+
+
+def test_하지_않는_것_이_없는_SRS_는_기존_동작_그대로(tmp_path, monkeypatch, capsys):
+    code, out = run(monkeypatch, capsys, _titled(tmp_path), FakeGh(), ["reserve", "--title", "판매오더 생성"])
+    assert code == 0
+
+
+def test_제목_겹침과_하지_않는_것_겹침이_함께_나온다(tmp_path, monkeypatch, capsys):
+    srs = SRS_SCOPE.replace("| REQ-002 | 판매오더 조회 앱 | New |", "| REQ-002 | 판매오더 생성·변경 앱 | New |")
+    code, out = run(monkeypatch, capsys, make_repo(tmp_path, srs=srs), FakeGh(), ["reserve", "--title", "판매오더 생성·변경"])
+    assert code == 4
+    res = json.loads(out)
+    assert res["matches"][0]["number"] == "DEV-002" and res["excluded_matches"]
+
+
+def test_scope_excluded_items_파서(tmp_path):
+    items = rn.scope_excluded_items(SRS_SCOPE)
+    by_item = {i["item"]: i["reqs"] for i in items}
+    assert by_item["Fiori Launchpad 노출(IAM App, Role)"] == ["REQ-002"]
+    assert by_item["회계전표 역분개·취소, 승인 워크플로"] == ["REQ-001", "REQ-003"]
+    assert by_item["외부 API"] == []
+    # 머리말 줄에 이어 쓴 항목은 쪼개고, 꼬리표는 그 항목에만 붙는다
+    one_line = rn.scope_excluded_items("- 하지 않는 것: 노출(IAM App, Role), 외부 API (REQ-005), 이관.")
+    assert one_line == [
+        {"item": "노출(IAM App, Role)", "reqs": []},
+        {"item": "외부 API", "reqs": ["REQ-005"]},
+        {"item": "이관", "reqs": []},
+    ]
+    # 코드 펜스 안의 예시와 다른 목록은 보지 않는다
+    assert rn.scope_excluded_items("```\n- 하지 않는 것: 예시 (REQ-001)\n```\n") == []
+
+
+def test_꼬리표_정규식은_엔진과_같다():
+    from checker import risk_gate
+
+    assert rn.EXCLUDED_TAG_RE.pattern == risk_gate.EXCLUDED_TAG_RE.pattern
+    assert rn.SCOPE_EXCLUDED_MARKER == risk_gate.SCOPE_EXCLUDED_MARKER
+
+
+# 핵심 단어 겹침(#304): 포함 판정이 못 잡는 사건 항목. 사건 직전 public-cloud SRS 의 범위 절을 줄였다.
+SRS_INCIDENT = """# SRS
+
+## 범위
+
+- 하지 않는 것:
+  - 판매오더 생성·변경·삭제 (조회 전용)
+  - 커스텀 권한 규칙(DCL). 표준 접근 제어를 그대로 따른다
+  - Fiori Launchpad 노출(IAM App, Business Catalog, Role)과 외부 소비용 API 서비스
+  - 개발사양서 xlsx 작성
+
+## 요구사항
+
+| ID | Title | Status |
+|---|---|---|
+| REQ-002 | 판매오더 조회 앱 | In Process |
+"""
+
+
+@pytest.mark.parametrize("title", ["Launchpad 타일 노출", "launchpad  노출 타일", "타일 노출 Launchpad"])
+def test_핵심_단어가_둘_이상_겹치면_포함이_아니어도_4(tmp_path, monkeypatch, capsys, title):
+    work = make_repo(tmp_path, srs=SRS_INCIDENT)
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["reserve", "--title", title])
+    assert code == 4
+    res = json.loads(out)
+    assert res["matches"] == [] and res["excluded_matches"][0]["item"].startswith("Fiori Launchpad 노출(IAM App")
+
+
+@pytest.mark.parametrize("title", [
+    "구매요청 승인", "재고 조회 앱", "판매오더 엑셀 다운로드", "Launchpad 타일", "노출 보고서 출력 화면",
+    "Launchpad 노출 타일 신규 추가",  # 공유 2개지만 새 제목 토큰 5개의 2/3 미만
+])
+def test_핵심_단어가_하나만_겹치거나_비율이_모자라면_안_멈춘다(tmp_path, monkeypatch, capsys, title):
+    work = make_repo(tmp_path, srs=SRS_INCIDENT)
+    code, _ = run(monkeypatch, capsys, work, FakeGh(), ["reserve", "--title", title])
+    assert code == 0
+
+
+def test_토큰_겹침은_REQ_제목_비교에는_쓰지_않는다(tmp_path, monkeypatch, capsys):
+    srs = SRS_INCIDENT.replace("판매오더 조회 앱", "판매오더 조회 화면 개선")
+    code, _ = run(monkeypatch, capsys, make_repo(tmp_path, srs=srs), FakeGh(), ["reserve", "--title", "개선 조회 화면 추가"])
+    assert code == 0
+
+
+def test_토큰화는_구두점으로_나누고_짧은_토큰은_뺀다():
+    assert rn._tokens("Fiori Launchpad 노출(IAM App, Role)·a") == {"fiori", "launchpad", "노출", "iam", "app", "role"}
+
+
+@pytest.mark.parametrize("title", ["판매오더 조회", "판매오더 상세 조회", "조회 전용 화면"])
+def test_괄호_속_부연은_비교에서_빠져_핵심_기능_제목이_안_멈춘다(tmp_path, monkeypatch, capsys, title):
+    # 항목 "판매오더 생성·변경·삭제 (조회 전용)". REQ 제목 겹침이 끼지 않게 표의 제목은 다른 것으로 바꾼다.
+    work = make_repo(tmp_path, srs=SRS_INCIDENT.replace("판매오더 조회 앱", "재고 이동 등록"))
+    code, _ = run(monkeypatch, capsys, work, FakeGh(), ["reserve", "--title", title])
+    assert code == 0
+
+
+def test_경계_사례_판매오더_변경_이력은_멈춘다(tmp_path, monkeypatch, capsys):
+    # 변경을 안 하기로 한 항목과 핵심 단어 둘(판매오더·변경)이 겹친다. 멈춰도 질문 하나라 허용한다.
+    work = make_repo(tmp_path, srs=SRS_INCIDENT)
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["reserve", "--title", "판매오더 변경 이력"])
+    assert code == 4 and json.loads(out)["excluded_matches"][0]["item"].startswith("판매오더 생성")
+
+
+def test_괄호_속_내용을_빼도_사건_항목은_멈춘다():
+    body = rn._strip_parens("Fiori Launchpad 노출(IAM App, Business Catalog, Role)과 외부 소비용 API 서비스")
+    assert "iam" not in rn._tokens(body) and rn._token_overlap(rn._tokens("Launchpad 타일 노출"), rn._tokens(body))
+    assert rn._strip_parens("A (b (c)) D") .split() == ["A", "D"]
+
+
+def test_같은_본문의_항목이_다른_꼬리표로_두_번_나오면_번호를_합친다():
+    items = rn.scope_excluded_items("- 하지 않는 것:\n  - 승인 워크플로 (REQ-001)\n  - 승인 워크플로 (REQ-002, REQ-001)\n  - 승인 워크플로\n")
+    assert items == [{"item": "승인 워크플로", "reqs": ["REQ-001", "REQ-002"]}]
+
+
+@pytest.mark.parametrize("raw", ["항목 (REQ-001/REQ-002)", "항목 (REQ-001~002)", "항목 (req-001)", "항목 (REQ-001/ REQ-002)"])
+def test_꼬리표로_안_읽히는_표기(raw):
+    (item,) = rn.scope_excluded_items("- 하지 않는 것:\n  - " + raw + "\n")
+    assert item["reqs"] == []

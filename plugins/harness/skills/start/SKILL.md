@@ -145,7 +145,10 @@ uv run --no-project python "<이 스킬의 base directory>/reserve_number.py" ne
 - 종료코드 3 — 원장이 없어 찜하지 않는다. 이슈는 `gh issue create` 로 만들고
   제목에 번호를 붙이지 않는다.
 - 종료코드 4 — 확인 필요(#261). 새 제목이 origin/main SRS 의 기존 REQ 제목을 포함하거나 그 반대라서, 이슈도 번호도
-  만들지 않고 멈춘 것이다. stdout JSON(`status: confirm`)의 `matches`(번호·제목)를 사용자에게 보여 주고 "기존 개발의
+  만들지 않고 멈춘 것이다. 새 제목이 SRS 범위 `하지 않는 것` 항목과 포함 관계이거나 핵심 단어(2자 이상)가 둘 이상 겹칠 때도 같다(#304). stdout JSON
+  (`status: confirm`)의 `matches`(번호·제목)와 `excluded_matches`(`item`: 하지 않는 것 항목, `reqs`: 항목 끝 꼬리표
+  `(REQ-001)` 의 번호들)를 사용자에게 보여 준다. `reqs` 가 있으면 "REQ-001 에서 안 하기로 한 일", 비었으면 "이 프로젝트에서
+  안 하기로 한 일" 이라고 알린다. 그리고 "기존 개발의
   하위 작업인가, 새 개발인가" 를 `AskUserQuestion` 으로 묻는다(위 "기존 개발과의 관계" 와 같은 질문이다). 하위 작업이면
   그 절의 하위 작업 절차로 가고 `reserve`·`claim` 을 다시 부르지 않는다. 새 개발이 맞다고 하면 같은 명령에
   `--confirmed-new` 를 붙여 다시 부른다. 사용자 답 없이 `--confirmed-new` 를 붙이지 않는다. 번호를 새로 받을 때만

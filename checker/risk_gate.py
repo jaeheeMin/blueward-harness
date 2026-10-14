@@ -427,14 +427,37 @@ def _split_items(text: str) -> list[str]:
     return parts
 
 
-def scope_items(text: str) -> dict[str, str]:
-    """"하지 않는 것" 목록의 항목 {정규화한 항목: 원문}. 머리말 줄에 이어 쓴 항목은 쪼개고, 들여쓴 줄은 줄마다 항목이다."""
-    items: dict[str, str] = {}
+# 항목 끝의 꼬리표 `(REQ-001)`, `(REQ-001, REQ-002)` — 그 요구사항에서 뺀 일이라는 표기(#304).
+# `plugins/harness/skills/start/reserve_number.py` 의 EXCLUDED_TAG_RE 와 같은 식이어야 한다(테스트가 같은지 본다).
+EXCLUDED_TAG_RE = re.compile(r"\s*[(（]\s*(REQ-\d+(?:\s*[,，、]\s*REQ-\d+)*)\s*[)）]\s*$")
+
+
+def split_excluded_tag(item: str) -> tuple[str, list[str]]:
+    """항목 끝의 꼬리표를 떼어 (꼬리표 없는 항목, [REQ 번호…]) 로 돌려준다. 꼬리표가 없으면 번호 목록은 빈 목록."""
+    m = EXCLUDED_TAG_RE.search(item)
+    if not m:
+        return item, []
+    return item[:m.start()].rstrip(_ITEM_TRAIL).strip(), re.findall(r"REQ-\d+", m.group(1))
+
+
+def _scope_entries(text: str) -> dict[str, tuple[str, list[str]]]:
+    """"하지 않는 것" 목록의 항목 {정규화한 꼬리표 없는 항목: (꼬리표 없는 원문, REQ 번호 목록)}.
+
+    머리말 줄에 이어 쓴 항목은 쪼개고, 들여쓴 줄은 줄마다 항목이다. 키에 꼬리표가 들어가지 않으므로
+    꼬리표만 붙이거나 떼거나 바꾼 변경은 같은 항목이다(항목이 바뀐 근거로 세지 않는다).
+    """
+    items: dict[str, tuple[str, list[str]]] = {}
 
     def add(raw: str) -> None:
         shown = re.sub(r"\s+", " ", raw).strip(_ITEM_TRAIL).strip()
-        if shown:
-            items.setdefault(shown.casefold(), shown)
+        body, reqs = split_excluded_tag(shown)
+        if not body:
+            return
+        if body.casefold() in items:  # 같은 본문이 꼬리표만 달리 두 번 나오면 번호를 합친다
+            prev = items[body.casefold()][1]
+            prev += [r for r in reqs if r not in prev]
+        else:
+            items[body.casefold()] = (body, reqs)
 
     lines = scope_exclusions(text)
     if not lines:
@@ -444,6 +467,11 @@ def scope_items(text: str) -> dict[str, str]:
     for line in lines[1:]:
         add(_ITEM_BULLET.sub("", line, count=1))
     return items
+
+
+def scope_items(text: str) -> dict[str, str]:
+    """"하지 않는 것" 목록의 항목 {정규화한 항목: 원문}. 끝의 `(REQ-xxx)` 꼬리표는 뗀 항목이다."""
+    return {key: body for key, (body, _reqs) in _scope_entries(text).items()}
 
 
 def split_hint_evidence(base_text: str, head_text: str) -> dict[str, list[str]]:
@@ -466,8 +494,10 @@ def split_hint_evidence(base_text: str, head_text: str) -> dict[str, list[str]]:
     if not new_ids:
         return {}
 
-    head_scope = scope_items(head_text)
-    changed_scope = [orig for key, orig in scope_items(base_text).items() if key not in head_scope]
+    head_scope = _scope_entries(head_text)
+    changed_scope = [
+        (orig, reqs) for key, (orig, reqs) in _scope_entries(base_text).items() if key not in head_scope
+    ]
     sections = dict(parse_sections(head_text))
     excludes = [re.compile(p) for p in DEFAULT_EXCLUDE]
 
@@ -479,7 +509,10 @@ def split_hint_evidence(base_text: str, head_text: str) -> dict[str, list[str]]:
             if others:
                 evidence.append(f"(a) 상세 절이 다른 번호를 말함: {', '.join(others)}")
         if changed_scope:
-            shown = "; ".join(f"\"{_cut(ln)}\"" for ln in changed_scope[:2])
+            shown = "; ".join(
+                f"\"{_cut(ln)}\"" + (f" ({', '.join(reqs)} 의 {SCOPE_EXCLUDED_MARKER})" if reqs else "")
+                for ln, reqs in changed_scope[:2]
+            )
             more = f" 등 {len(changed_scope)}개" if len(changed_scope) > 2 else ""
             evidence.append(f"(b) 범위 \"{SCOPE_EXCLUDED_MARKER}\" 항목이 지워지거나 바뀜: {shown}{more}")
         new = _norm_title(head_titles[rid])
