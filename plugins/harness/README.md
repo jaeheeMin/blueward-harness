@@ -9,7 +9,7 @@ Skill 8개를 한 번에 제공한다.
 plugins/harness/
   .claude-plugin/plugin.json   플러그인 정의
   hooks/
-    hooks.json                 훅 6개를 선언
+    hooks.json                 훅 7개를 선언
     pre_write_guard.py         문서·코드 검사(doc-guard) — Write/Edit 직전에 막을지 정한다. src/ 쓰기는 활성화 관문도 건다
     pre-bash-git-guard.sh      git 가드 — 스킬을 거치지 않은 git push, 비밀정보가 든 커밋, 활성화 안 된 ABAP 오브젝트가 있는 푸시를 막는다
     mcp_source_guard.py        SAP ADT MCP 도구 가드 — 코드 규칙 검사, 테넌트별 쓰기 차단, 데이터 추출 되묻기
@@ -96,9 +96,9 @@ plugins/harness/
 | `harness:reviewer` | 읽기 전용 검토. 쓰기·편집 도구가 없고 자기 승인을 하지 않는다 |
 | `harness:implementer` | 범위를 정해 준 구현. 커밋·푸시는 하지 않는다 |
 
-### 훅 6개
+### 훅 7개
 
-`hooks.json` 이 선언하는 훅은 여섯 개다(아래 표의 `ensure-tools.sh` 는 선언된 훅이 아니라
+`hooks.json` 이 선언하는 훅은 일곱 개다(아래 표의 `ensure-tools.sh` 는 선언된 훅이 아니라
 `session-start-sync.sh` 가 부르는 도우미다).
 
 | 훅 | 시점 | 하는 일 |
@@ -108,6 +108,7 @@ plugins/harness/
 | `mcp_source_guard.py` | `PreToolUse` (SAP ADT MCP 도구 19개) | MCP 로 SAP 에 쓰거나 이름을 붙이는 경로의 코드 규칙 CR-001·CR-002·CR-003·CR-007 검사(#60, #61)와, `env/adt-tiers.yaml` 기준 테넌트별 쓰기 차단·데이터 추출 되묻기(#148). 아래 "테넌트별 쓰기 차단" 참고 |
 | `mcp_activation_tracker.py` | `PostToolUse` (SAP ADT MCP 도구 6개: `setObjectSource`·`createObject`·`deleteObject`·`activateObjects`·`activateByName`·`inactiveObjects`) | ADT MCP 로 쓴 ABAP 오브젝트와 활성화 결과를 `.git` 아래 기록 파일에 남긴다(#190, 아래 절). 기록하지 못하면 표식 파일을 남기고 exit 2 로 알린다 |
 | `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고, 지난 세션 기록을 원격 반영 뒤에 판정해 커밋되거나 병합된 것은 조용히 지우고 사라진 파일(`git restore --source=<사본>` 안내)과 push 안 한 커밋만 전한다(#224, 옛 형식 기록은 한 번 보여 주고 지운다). upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리). 저장소 안(꼭대기에서 3단계까지)에 `templates/` 와 `rules/` 를 함께 가진 폴더가 없으면 `/harness:scaffold` 를 안내한다(#128, 자동 실행은 하지 않는다. 플러그인 저장소(`.claude-plugin/marketplace.json` 이 꼭대기에 있다)와 git 저장소가 아닌 곳은 말하지 않고, `HARNESS_NO_SCAFFOLD_HINT=1` 로 끈다) |
+| `update_notice.py` | `UserPromptSubmit` | 이 세션의 플러그인 판이 원격 최신 `v*` 태그보다 낮으면 Claude 가 사용자에게 한 번 알리게 한다(#314). 원격은 `git ls-remote` 5초 제한, 10분 캐시(`${CLAUDE_PLUGIN_DATA}`), 같은 세션·같은 판은 한 번. 새 판을 이미 받았으면 `/reload-plugins`, 아니면 업데이트 명령을 안내하고 갱신은 사용자가 직접 한다. 실패하면 조용히 넘어가 프롬프트를 막지 않는다. 플러그인 저장소와 `HARNESS_NO_UPDATE_NOTICE=1` 에서는 말하지 않는다 |
 | `ensure-tools.sh` | `SessionStart` (session-start-sync.sh 가 부름) | uv·jq·gh·gitleaks 가 없으면 Windows 에서 winget 으로 설치하고 결과를 알린다(#116, gitleaks 는 #170). 아래 "도구 자동 설치" 참고 |
 | `stop-deliver.sh` | `Stop` | 커밋되지 않은 변경이 남았으면 `/harness:deliver` 를 안내한다. 대답마다 변경이 있으면 작업 사본을 임시 index 로 떠 `refs/harness/unfinished/<worktree>` 에 붙잡고(실제 index·작업 트리는 그대로, 새 파일 포함, `.gitignore`·`*handoff*.md`·`.superpowers/` 와 50MB 넘는 새 파일 제외, 변화가 없으면 다시 뜨지 않는다) 덮어쓰는 기록 파일(`<git-dir>/<repo>-unfinished`, 첫 줄 `format=2`)에 사본·push 안 된 커밋 정보를 남긴다(#224) |
 
