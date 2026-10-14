@@ -19,8 +19,8 @@
 #         pull-requests: write
 #         issues: write   # main push 실패를 이슈로 알리려면 필요하다
 #
-# pull-requests: write 는 읽기를 포함하므로, 열린 PR 끼리 판 번호가 겹치는지 보려고 다른 PR 의
-# 파일 목록을 읽는(#315) 데 권한을 더 줄 필요가 없다.
+# 열린 PR 끼리 판 번호가 겹치는지 보려고(#315) 다른 PR 의 파일 목록(pull-requests: write 가 읽기를 포함)과
+# SRS 내용(contents: read)을 읽는다. 위 permissions 로 충분하니 더 줄 것이 없다.
 
 name: doc-guard
 
@@ -163,12 +163,26 @@ jobs:
               exit 1
               ;;
             2)
-              echo "::error title=harness 검사 불능::규칙 파일이나 검사 엔진에 문제가 있어 검사할 수 없습니다. 담당자에게 알리십시오."
-              {
-                echo ""
-                echo "### harness 판정: ⚠️ 검사 불능"
-                echo "규칙·설정을 고쳐야 합니다. 문서나 코드의 문제가 아닙니다."
-              } >> "$GITHUB_STEP_SUMMARY"
+              # 열린 PR 을 읽지 못해 판 번호 겹침만 확인하지 못한 경우(GitHub 일시 오류 등)는
+              # 규칙·설정 문제가 아니라 다시 돌리면 풀리는 읽기 실패다. 문서 위반이 함께 있어도
+              # 위반 표는 PR 코멘트에 그대로 있다.
+              cause=$(uv run --project .doc-guard-engine python .doc-guard-engine/scripts/render_report.py \
+                --exit2-cause report.json 2>/dev/null || echo config)
+              if [ "$cause" = "retry" ]; then
+                echo "::error title=harness 검사 불능::다른 열린 PR 을 읽지 못해 판 번호 겹침을 확인하지 못했습니다(GitHub 일시 오류일 수 있음). 이 실행을 다시 돌리십시오."
+                {
+                  echo ""
+                  echo "### harness 판정: ⚠️ 검사 불능 (열린 PR 읽기 실패)"
+                  echo "다른 열린 PR 을 읽지 못했습니다. 이 실행을 다시 돌리십시오(Re-run). 문서 위반이 있으면 PR 코멘트의 위반 표를 먼저 고치십시오."
+                } >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "::error title=harness 검사 불능::규칙 파일이나 검사 엔진에 문제가 있어 검사할 수 없습니다. 담당자에게 알리십시오."
+                {
+                  echo ""
+                  echo "### harness 판정: ⚠️ 검사 불능"
+                  echo "규칙·설정을 고쳐야 합니다. 문서나 코드의 문제가 아닙니다."
+                } >> "$GITHUB_STEP_SUMMARY"
+              fi
               exit 1
               ;;
             *)

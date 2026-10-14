@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,6 +31,7 @@ from checker.version_overlap import NOT_NEEDED, added_artifacts, bumped, srs_ver
 
 PER_PAGE = 100
 MAX_PAGES = 30  # 파일 목록 API 의 상한(3000)과 같은 크기. 넘으면 일부만 본 것이므로 검사 불능.
+BUDGET_SECONDS = 120.0  # 열린 PR 을 읽는 데 쓸 전체 시간. 넘으면 일부만 본 것이므로 검사 불능.
 
 
 class FetchError(Exception):
@@ -75,9 +77,18 @@ def _record(
             base = get_text(SRS_PATH, pr["base"]["sha"])
         except FetchError as exc:
             rec["srs_error"] = str(exc)
-        else:
-            rec["srs_version"] = srs_version_of(head) if head is not None else None
-            rec["srs_base_version"] = srs_version_of(base) if base is not None else None
+            return rec
+        # 바뀐(추가·수정) SRS 가 head 에 없을 수는 없다. 404 나 `버전:` 줄 없음은 읽지 못한 것이다.
+        # 버전 없음(None)으로 두면 자기 PR 은 "판을 안 건드림", 다른 PR 은 "비교에서 조용히 빠짐" 이 된다.
+        if head is None:
+            rec["srs_error"] = f"PR #{number} 의 head({pr['head']['sha'][:7]})에서 {SRS_PATH} 를 읽지 못했습니다(404, 포크 PR 일 수 있음)"
+            return rec
+        rec["srs_version"] = srs_version_of(head)
+        if rec["srs_version"] is None:
+            rec["srs_error"] = f"PR #{number} 의 {SRS_PATH} 에서 `버전:` 줄을 찾지 못했습니다"
+            return rec
+        # base 에 SRS 가 아직 없으면(None) 정상이다 — 이 PR 이 처음 만드는 것이다.
+        rec["srs_base_version"] = srs_version_of(base) if base is not None else None
     return rec
 
 
@@ -86,8 +97,15 @@ def collect(
     get_text: Callable[[str, str], str | None],
     repo: str,
     self_number: int,
+    budget: float = BUDGET_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
 ) -> dict:
-    """저장할 JSON(dict). 읽지 못하면 cannot_check 로 답한다(예외를 밖으로 내지 않는다)."""
+    """저장할 JSON(dict). 읽지 못하면 cannot_check 로 답한다(예외를 밖으로 내지 않는다).
+
+    비교 대상은 이 PR 과 **같은 base 브랜치**로 들어가는 열린 PR 이다 — 판 번호 겹침은 같은 브랜치로
+    병합될 PR 끼리만 의미가 있다. 초안(draft) PR 은 뺀다고 판단하지 않았다: 초안도 같은 판을 만들 수 있다.
+    """
+    deadline = clock() + budget
     try:
         me = get_json(f"/repos/{repo}/pulls/{self_number}")
         if not isinstance(me, dict) or "number" not in me:
@@ -96,9 +114,15 @@ def collect(
         if not mine["added"] and bumped(mine) is None and not mine["srs_error"]:
             return {"status": NOT_NEEDED}
         records = [mine]
+        my_base = (me.get("base") or {}).get("ref")
         for pr in paged(get_json, f"/repos/{repo}/pulls?state=open"):
-            if pr.get("number") != self_number:
-                records.append(_record(get_json, get_text, repo, pr))
+            if pr.get("number") == self_number:
+                continue
+            if my_base is not None and (pr.get("base") or {}).get("ref") != my_base:
+                continue
+            if clock() > deadline:
+                raise FetchError(f"{budget:.0f}초 안에 열린 PR 을 다 읽지 못했습니다(시간 예산 초과)")
+            records.append(_record(get_json, get_text, repo, pr))
         return {"status": "ok", "prs": records}
     except FetchError as exc:
         return {"status": "cannot_check", "message": f"열린 PR 목록을 읽지 못했습니다: {exc}"}

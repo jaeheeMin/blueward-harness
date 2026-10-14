@@ -61,7 +61,7 @@ from checker.cross_switches import DISABLED, SwitchError, load_switches
 from checker.overlap import check_overlap
 from checker.pairing import CANNOT_CHECK, LEDGER_DIR, SKIPPED, SPEC_DIR, SRS_PATH, check_pairing
 from checker.pairing import exit_code_for as _pairing_exit_code
-from checker.version_overlap import NOT_NEEDED, check_version_overlap, touches_version
+from checker.version_overlap import NOT_NEEDED, check_version_overlap, read_failure, touches_version
 
 OPEN_PRS_ENV = "DOC_GUARD_OPEN_PRS"  # 열린 PR 정보 JSON 경로(PR 이벤트에서만 워크플로가 채움)
 PR_NUMBER_ENV = "DOC_GUARD_PR_NUMBER"
@@ -107,9 +107,9 @@ def _check_version_overlap(path: Path) -> dict | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return {"status": CANNOT_CHECK, "warnings": [], "message": f"열린 PR 정보 {path} 를 읽지 못했습니다: {exc}"}
+        return read_failure(f"열린 PR 정보 {path} 를 읽지 못했습니다: {exc}")
     if not isinstance(data, dict):
-        return {"status": CANNOT_CHECK, "warnings": [], "message": f"열린 PR 정보 {path} 의 모양이 사전이 아닙니다"}
+        return read_failure(f"열린 PR 정보 {path} 의 모양이 사전이 아닙니다")
     if data.get("status") == NOT_NEEDED:
         return None
     number = os.environ.get(PR_NUMBER_ENV, "")

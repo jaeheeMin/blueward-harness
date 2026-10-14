@@ -47,7 +47,7 @@ def test_산출_파일만_겹치면_파일_경고다():
     (w,) = r["warnings"]
     assert (w["kind"], w["version"], w["file"]) == ("file", "0.3", BACKLOG)
     assert w["prs"] == [{"number": 200, "title": "기간별 재고 수불부"}]
-    assert "이 판 번호(v0.3)를 열린 PR #200(기간별 재고 수불부) 도 씁니다" in w["message"]
+    assert "이 판 번호(v0.3)를 열린 PR #200(`기간별 재고 수불부`) 도 씁니다" in w["message"]
     assert "먼저 병합되는 쪽이 v0.3 을 갖고" in w["message"] and "sync 뒤 0.4 로 다시 산출" in w["message"]
 
 
@@ -78,7 +78,7 @@ def test_다른_PR이_여럿이면_모두_적는다():
     r = check_version_overlap(_ok(_pr(205, added=[BACKLOG]), _pr(200, "가", added=[BACKLOG]), _pr(210, "나", added=[BACKLOG])), 205)
     (w,) = r["warnings"]
     assert [p["number"] for p in w["prs"]] == [200, 210]
-    assert "#200(가), #210(나)" in w["message"]
+    assert "#200(`가`), #210(`나`)" in w["message"]
 
 
 def test_자기_PR은_비교에서_뺀다():
@@ -179,8 +179,8 @@ class FakeApi:
         return self.texts.get(ref)
 
 
-def _pull(n, title="t"):
-    return {"number": n, "title": title, "head": {"sha": f"h{n}"}, "base": {"sha": f"b{n}"}}
+def _pull(n, title="t", base_ref="main", draft=False):
+    return {"number": n, "title": title, "draft": draft, "head": {"sha": f"h{n}"}, "base": {"sha": f"b{n}", "ref": base_ref}}
 
 
 def test_읽기는_추가한_산출_파일과_SRS_버전을_모은다():
@@ -239,18 +239,94 @@ def test_SRS_내용을_못_읽으면_그_PR_에_오류를_남긴다():
     assert by[200]["srs_error"] and by[200]["srs_version"] is None
 
 
+_SRS_SELF = {205: [_file(BACKLOG), _file("docs/ssot/SRS.md", "modified")]}
+
+
+def test_다른_PR_의_head_SRS가_404면_그_PR_에_오류를_남긴다():
+    api = FakeApi(
+        files={**_SRS_SELF, 200: [_file("docs/ssot/SRS.md", "modified")]},
+        pulls=[_pull(200), _pull(205)],
+        texts={"h205": "버전: 0.3\n", "b205": "버전: 0.2\n", "b200": "버전: 0.2\n"},  # h200 은 get_text -> None
+    )
+    data = collect(api.get_json, api.get_text, "o/r", 205)
+    by = {p["number"]: p for p in data["prs"]}
+    assert by[200]["srs_error"] and "head" in by[200]["srs_error"]
+    result = check_version_overlap(data, 205)
+    assert result["status"] == CANNOT_CHECK and result["read_failure"]  # 조용히 비교에서 빠지지 않는다
+
+
+def test_이_PR_의_head_SRS가_404면_판을_안_건드린_것으로_보지_않고_검사_불능이다():
+    api = FakeApi(files={205: [_file("docs/ssot/SRS.md", "modified")]}, pulls=[_pull(205)], texts={"b205": "버전: 0.2\n"})
+    data = collect(api.get_json, api.get_text, "o/r", 205)
+    assert data["status"] == "ok"  # not_needed 가 아니다
+    assert data["prs"][0]["srs_error"]
+    assert check_version_overlap(data, 205)["status"] == CANNOT_CHECK
+
+
+def test_바뀐_SRS에_버전_줄이_없으면_검사_불능이다():
+    api = FakeApi(
+        files={**_SRS_SELF, 200: [_file("docs/ssot/SRS.md", "modified")]},
+        pulls=[_pull(200), _pull(205)],
+        texts={"h205": "버전: 0.3\n", "b205": "버전: 0.2\n", "h200": "# SRS\n본문만\n", "b200": "버전: 0.2\n"},
+    )
+    data = collect(api.get_json, api.get_text, "o/r", 205)
+    by = {p["number"]: p for p in data["prs"]}
+    assert "버전:" in by[200]["srs_error"]
+    assert check_version_overlap(data, 205)["status"] == CANNOT_CHECK
+
+
+def test_base에_SRS가_아직_없으면_정상이다():
+    api = FakeApi(
+        files={**_SRS_SELF, 200: []},
+        pulls=[_pull(200), _pull(205)],
+        texts={"h205": "버전: 0.1\n"},  # b205 없음 -> None
+    )
+    data = collect(api.get_json, api.get_text, "o/r", 205)
+    mine = next(p for p in data["prs"] if p["number"] == 205)
+    assert mine["srs_error"] is None and mine["srs_version"] == "0.1" and mine["srs_base_version"] is None
+
+
+def test_base_브랜치가_다른_PR은_비교에서_빼고_초안은_넣는다():
+    api = FakeApi(
+        files={205: [_file(BACKLOG)], 200: [_file(BACKLOG)], 201: [_file(BACKLOG)], 202: [_file(BACKLOG)]},
+        pulls=[_pull(200, base_ref="release"), _pull(201, draft=True), _pull(202), _pull(205)],
+        texts={},
+    )
+    data = collect(api.get_json, api.get_text, "o/r", 205)
+    assert sorted(p["number"] for p in data["prs"]) == [201, 202, 205]
+    assert not any("/pulls/200/" in c for c in api.calls)  # 뺀 PR 은 파일 목록도 부르지 않는다
+
+
+def test_시간_예산을_넘으면_검사_불능이다():
+    api = FakeApi(files={205: [_file(BACKLOG)], 200: [_file(BACKLOG)]}, pulls=[_pull(200), _pull(205)], texts={})
+    ticks = iter([0.0, 500.0, 500.0, 500.0])
+    data = collect(api.get_json, api.get_text, "o/r", 205, budget=120, clock=lambda: next(ticks))
+    assert data["status"] == "cannot_check" and "시간 예산" in data["message"]
+
+
 def test_쪽수_상한을_넘으면_검사_불능이다():
     with pytest.raises(FetchError):
         paged(lambda path: [{}] * 100, "/x")
 
 
+# --- 제목 이스케이프 ---------------------------------------------------------
+
+def test_다른_PR_제목의_멘션과_마크다운은_코드_조각으로_감싼다():
+    title = "@octocat 확인 `x` [링크](http://e) | 표\n둘째 줄 " + "가" * 80
+    r = check_version_overlap(_ok(_pr(205, added=[BACKLOG]), _pr(200, title, added=[BACKLOG])), 205)
+    msg = r["warnings"][0]["message"]
+    assert "(`@octocat 확인 'x' [링크](http://e) | 표 둘째 줄" in msg  # 백틱으로 감싸 멘션·링크가 동작하지 않는다
+    assert "\n" not in msg and "…`)" in msg  # 한 줄, 60자로 잘림
+
+
 # --- check_changed 통합 -----------------------------------------------------
 
-def _run(tmp, monkeypatch, capsys, open_prs, changed="docs/srs/BW_Backlog List_v0.3.xlsx\n", env=True, number="205"):
+def _run(tmp, monkeypatch, capsys, open_prs, changed="docs/srs/BW_Backlog List_v0.3.xlsx\n", env=True, number="205",
+         pattern=".*"):
     (tmp / "templates").mkdir(exist_ok=True)
     (tmp / "rules").mkdir(exist_ok=True)
     (tmp / "rules" / "메모.yaml").write_text(
-        '관할: "memo/**"\n규칙:\n  - 종류: filename\n    패턴: ".*"\n', encoding="utf-8"
+        f'관할: "memo/**"\n규칙:\n  - 종류: filename\n    패턴: "{pattern}"\n', encoding="utf-8"
     )
     (tmp / "docs" / "srs").mkdir(parents=True, exist_ok=True)
     (tmp / BACKLOG).write_bytes(b"x")
@@ -285,7 +361,7 @@ def test_겹치면_리포트에_합쳐지고_통과다(tmp_path, monkeypatch, ca
     assert code == EXIT_PASS
     assert len(report["version_overlap"]["warnings"]) == 1
     text = render(report, code)
-    assert "## 판 번호 겹침" in text and "#200(수불부)" in text and "sync 뒤 0.4" in text
+    assert "## 판 번호 겹침" in text and "#200(`수불부`)" in text and "sync 뒤 0.4" in text
 
 
 def test_겹침이_없으면_없다고_쓴다(tmp_path, monkeypatch, capsys):
@@ -372,3 +448,36 @@ def test_재사용_워크플로가_PR에서_열린_PR을_읽어_검사에_넘긴
     assert "pull_request" in fetch["if"] and "fetch_open_prs.py" in fetch["run"]
     assert fetch["env"]["GITHUB_TOKEN"]
     assert set(check["env"]) >= {"DOC_GUARD_OPEN_PRS", "DOC_GUARD_PR_NUMBER"}
+    verdict = steps[names.index("판정")]["run"]
+    assert "--exit2-cause" in verdict and "Re-run" in verdict
+
+
+# --- 문서 위반과 읽기 실패가 함께 --------------------------------------------
+
+def test_문서_위반과_읽기_실패가_함께면_종료코드_2이고_위반_표도_보인다(tmp_path, monkeypatch, capsys):
+    from render_report import exit2_cause
+
+    code, report = _run(
+        tmp_path, monkeypatch, capsys,
+        {"status": "cannot_check", "message": "GitHub API 503"},
+        changed="docs/srs/BW_Backlog List_v0.3.xlsx\nmemo/bad.md\n", pattern="^ok_.*",
+    )
+    assert code == EXIT_CONFIG_ERROR
+    assert report["summary"]["violations"] == 1
+    assert report["version_overlap"]["read_failure"] is True
+    text = render(report, code)
+    assert "템플릿 위반" in text and "memo/bad.md" in text  # 위반 표 그대로
+    assert "다시 돌려 보십시오" in text and "규칙·설정을 고쳐야" not in text
+    assert exit2_cause(report) == "retry"
+
+
+def test_읽기_실패_말고_다른_검사_불능이_섞이면_설정_문제로_본다():
+    from render_report import exit2_cause
+
+    base = {"summary": {"violations": 0}, "version_overlap": {"status": "cannot_check", "read_failure": True}}
+    assert exit2_cause(base) == "retry"
+    assert exit2_cause({**base, "cross_checks": {"status": "cannot_check"}}) == "config"
+    assert exit2_cause({**base, "pairing": {"status": "cannot_check"}}) == "config"
+    assert exit2_cause({**base, "code_rules": {"report": {}, "exit": 2}}) == "config"
+    assert exit2_cause({"message": "x"}) == "config"
+    assert exit2_cause({"summary": {}, "version_overlap": {"status": "cannot_check"}}) == "config"

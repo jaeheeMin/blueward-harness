@@ -107,7 +107,9 @@ def _render_version_overlap(result: dict) -> list[str]:
             "### ⚠️ 검사 불능", "",
             "```", str(result.get("message") or "열린 PR 을 읽지 못했습니다.").strip(), "```", "",
             "다른 열린 PR 과 판 번호가 겹치는지 확인하지 못했습니다. 통과도 위반도 아닙니다. "
-            "다시 실행해 보고 계속 같으면 저장소 담당자에게 알리십시오.",
+            "**문서의 문제가 아닙니다.** 위 문서 검사 결과는 그대로 유효합니다. "
+            + ("이 실행을 다시 돌려 보십시오(Re-run). 계속 같으면 저장소 담당자에게 알리십시오."
+               if result.get("read_failure") else "저장소 담당자에게 알리십시오."),
         ]
         return out
     warnings = result.get("warnings") or []
@@ -334,10 +336,35 @@ def _render_code_rules(section: dict) -> list[str]:
     return out
 
 
+def exit2_cause(report: dict) -> str:
+    """종료코드 2 의 원인이 "다시 돌리면 풀리는 읽기 실패" 뿐이면 `retry`, 아니면 `config`(규칙·설정·엔진).
+
+    판정 스텝이 안내 문구를 가르는 데 쓴다. `retry` 는 열린 PR 을 읽지 못해 판 번호 겹침만 확인하지 못한
+    경우다(`version_overlap.read_failure`). 다른 검사 불능이 하나라도 섞여 있으면 `config` 다.
+    """
+    version = report.get("version_overlap") or {}
+    if "summary" not in report or not (version.get("status") == "cannot_check" and version.get("read_failure")):
+        return "config"
+    code_rules = report.get("code_rules")
+    if code_rules and code_rules.get("exit") not in (0, 1):
+        return "config"
+    for key in ("pairing", "overlap"):
+        if (report.get(key) or {}).get("status") == "cannot_check":
+            return "config"
+    return "config" if report.get("cross_checks") else "retry"
+
+
 def main() -> int:
     reconfigure = getattr(sys.stdout, "reconfigure", None)
     if reconfigure is not None:
         reconfigure(encoding="utf-8")
+
+    if len(sys.argv) == 3 and sys.argv[1] == "--exit2-cause":
+        try:
+            print(exit2_cause(json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))))
+        except (OSError, ValueError):
+            print("config")
+        return 0
 
     if len(sys.argv) < 3:
         print("사용법: render_report.py <리포트 json> <종료코드>", file=sys.stderr)

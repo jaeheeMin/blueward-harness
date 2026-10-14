@@ -21,7 +21,10 @@ sync 뒤 다음 판으로 다시 산출하면 된다.
   이미 있던 파일을 고친 것은 추가가 아니라 대상이 아니다.
 - SRS 판 겹침: 이 PR 이 `docs/ssot/SRS.md` 의 `버전:` 을 바꿨고(base 와 다른 값), 다른 PR 도 바꿔 같은 값.
 - 읽지 못하면(목록, 이 PR 이 목록에 없음, 겹침 판정에 필요한 SRS 버전) **검사 불능**이다.
-  통과도 위반도 아니다.
+  통과도 위반도 아니다. 이 검사 불능은 `read_failure: true` 로 표시한다 — 규칙·설정 문제가 아니라
+  읽기 문제이므로 판정 스텝과 리포트가 "다시 돌리십시오" 로 안내한다.
+- 다른 PR 의 제목은 코드 조각(백틱)으로 감싸고 60자로 자른다(`@멘션`·마크다운이 알림이나 깨짐을 만들지 않게).
+- 비교 대상은 같은 base 브랜치의 열린 PR 이다(읽는 쪽에서 거른다). 초안 PR 도 포함한다.
 """
 from __future__ import annotations
 
@@ -83,12 +86,37 @@ def touches_version(path: str) -> bool:
     return posix == SRS_PATH or artifact_version(posix) is not None
 
 
+RETRY_HINT = (
+    "다음: 이 실행을 다시 돌리십시오(Actions 의 Re-run). 계속 같으면 부르는 workflow 의 permissions"
+    "(contents: read, pull-requests)를 확인하십시오."
+)
+
+
+def read_failure(detail: str) -> dict:
+    """다른 열린 PR 을 읽지 못한 검사 불능. 규칙·설정이 아니라 GitHub 읽기 문제라 `read_failure` 로 표시한다.
+
+    판정 스텝과 리포트가 이 표시를 보고 "규칙·설정을 고쳐야 합니다" 대신 다시 돌리라고 안내한다.
+    """
+    return {
+        "status": CANNOT_CHECK, "warnings": [], "read_failure": True,
+        "message": f"다른 열린 PR 을 읽지 못해 판 번호 겹침을 확인하지 못했습니다(GitHub 일시 오류일 수 있습니다). {detail}\n{RETRY_HINT}",
+    }
+
+
 def _cannot(message: str) -> dict:
     return {"status": CANNOT_CHECK, "warnings": [], "message": message}
 
 
+def _title(raw: object) -> str:
+    """다른 PR 제목을 코멘트에 넣을 수 있게 만든다. 코드 조각(백틱)에 넣어 `@멘션` 알림, 링크, 마크다운 깨짐을 막는다."""
+    text = " ".join(str(raw or "").split()).replace("`", "'")
+    if len(text) > 60:
+        text = text[:59] + "…"
+    return f"`{text}`" if text else "제목 없음"
+
+
 def _who(prs: list[dict]) -> str:
-    return ", ".join(f"#{p['number']}({p.get('title') or '제목 없음'})" for p in prs)
+    return ", ".join(f"#{p['number']}({_title(p.get('title'))})" for p in prs)
 
 
 def _tail(version: str) -> str:
@@ -101,14 +129,14 @@ def check_version_overlap(open_prs: dict, self_number: int) -> dict:
     """결과: pass(경고 포함)/cannot_check. 위반은 없다."""
     status = open_prs.get("status")
     if status == CANNOT_CHECK:
-        return _cannot(str(open_prs.get("message") or "열린 PR 목록을 읽지 못했습니다"))
+        return read_failure(str(open_prs.get("message") or "열린 PR 목록을 읽지 못했습니다"))
     if status != "ok" or not isinstance(open_prs.get("prs"), list):
-        return _cannot(f"열린 PR 정보의 모양을 읽을 수 없습니다(status: {status!r})")
+        return read_failure(f"열린 PR 정보의 모양을 읽을 수 없습니다(status: {status!r})")
 
     prs = open_prs["prs"]
     mine = next((p for p in prs if p.get("number") == self_number), None)
     if mine is None:
-        return _cannot(f"이 PR(#{self_number})이 읽어 온 열린 PR 목록에 없습니다")
+        return read_failure(f"이 PR(#{self_number})이 읽어 온 열린 PR 목록에 없습니다")
     others = [p for p in prs if p.get("number") != self_number]
 
     warnings: list[dict] = []
@@ -128,7 +156,7 @@ def check_version_overlap(open_prs: dict, self_number: int) -> dict:
 
     # SRS 버전: 둘 다 바꿔서 같은 값
     if mine.get("srs_error"):
-        return _cannot(f"이 PR 의 SRS 버전을 읽지 못했습니다: {mine['srs_error']}")
+        return read_failure(f"이 PR 의 SRS 버전을 읽지 못했습니다: {mine['srs_error']}")
     mine_version = bumped(mine)
     if mine_version is not None:
         clash = []
@@ -136,7 +164,7 @@ def check_version_overlap(open_prs: dict, self_number: int) -> dict:
             if not p.get("srs_changed"):
                 continue
             if p.get("srs_error"):
-                return _cannot(f"PR #{p['number']} 의 SRS 버전을 읽지 못했습니다: {p['srs_error']}")
+                return read_failure(f"PR #{p['number']} 의 SRS 버전을 읽지 못했습니다: {p['srs_error']}")
             if bumped(p) == mine_version:
                 clash.append(p)
         if clash:
