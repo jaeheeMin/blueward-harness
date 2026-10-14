@@ -7,3 +7,5 @@
 길잡이: "번호 하나로 다 이어진다", "내 번호 알아 두기", 주의사항 총정리 "항상 해", 용어 사전 "REQ · DEV 번호" 에 한 줄씩, 레일 harness 0.10.66. Plugin version 0.10.66(main 이 0.10.65(#305 병합)라 그다음).
 
 미결 — 코드가 사람에게 내는 메시지의 번호는 이번에 바꾸지 않았다: `checker/pairing.py`(원장 중복·Spec 칸·번호 불일치 등 `DEV-nnn`/`REQ-nnn` 메시지), `checker/overlap.py`(`DEV-nnn` 라벨), `checker/risk_gate.py`(번호 언급 위험 사유), `plugins/harness/skills/start/reserve_number.py`(출력 JSON 의 번호). 후속 이슈 #308.
+
+길잡이 원본 맞춤: public-cloud 세션이 길잡이 아티팩트를 직접 고쳐 올린 판(Version 26 근처 — 탭 순서를 SRS→Spec→작업 시작으로 바꿈, "처음이라면 이 순서로" 흐름, 080 RAP 앱 만들기 절, Approve 찍는 법, 번호 제목 표기 예시 등)이 저장소 원본에 없었다. 그 판에 #305 내용을 합쳐 아티팩트에 올리고(Version 27), 같은 내용을 이 PR 에서 `docs/guide/harness-guide.html` 원본으로 가져왔다. #307 의 길잡이 추가분 중 그 판에 이미 있는 것(내 번호 알아 두기, 용어 사전)은 겹치지 않게 뺐다.
