@@ -22,7 +22,10 @@
   2  판정 불능(git·gh 실패 등). 통과나 위반으로 뭉개지 않는다. stdout JSON 에 사유.
   3  찜 안 함. 저장소 꼭대기에 `audit/ledger/` 가 없다(하네스 저장소 자신 포함).
   4  확인 필요(#261). 새 제목이 origin/main SRS 의 기존 REQ 제목을 포함하거나 그 반대다.
-     이슈를 만들지도 번호를 붙이지도 않고, stdout JSON `{"status":"confirm","matches":[{"number","title"}],"title"}`.
+     #304: 범위 "하지 않는 것" 항목과 포함 관계이거나 핵심 단어(2자 이상 토큰)가 둘 이상 겹치고 새 제목 토큰의 2/3 이상이어도 같다. 항목 끝 `(REQ-001)` 꼬리표는 그 요구사항에서 뺀 일이라는 표기다.
+     이슈를 만들지도 번호를 붙이지도 않고, stdout JSON
+     `{"status":"confirm","matches":[{"number","title"}],"excluded_matches":[{"item","reqs"}],"title"}`
+     (`reqs` 가 빈 목록이면 프로젝트 전체에서 하지 않는 일).
      기존 개발의 하위 작업이면 번호를 새로 받지 않는다. 새 개발이 맞다고 사람이 확인하면
      `--confirmed-new` 를 붙여 다시 부른다. 새 번호를 붙일 때만 본다(이미 번호가 있는 이슈의 claim 은 안 본다).
 """
@@ -39,7 +42,10 @@ EXIT_OK = 0
 EXIT_ERROR = 2
 EXIT_NO_LEDGER = 3
 EXIT_CONFIRM = 4
-MIN_TITLE_LEN = 4  # 이보다 짧은 제목(정규화 뒤)은 포함 비교에서 뺀다. 짧은 글자열이 우연히 들어 있는 오탐을 막는다.
+MIN_TITLE_LEN = 4  # 이보다 짧은 제목·"하지 않는 것" 항목(정규화 뒤)은 포함 비교에서 뺀다. 짧은 글자열이 우연히 들어 있는 오탐을 막는다.
+SCOPE_EXCLUDED_MARKER = "하지 않는 것"  # SRS 범위 절 목록 머리말. 엔진 checker/risk_gate.py 와 같다(플러그인은 엔진을 import 못 해 파서가 따로 있다).
+# 항목 끝의 꼬리표 `(REQ-001)`, `(REQ-001, REQ-002)`. checker/risk_gate.py 의 EXCLUDED_TAG_RE 와 같은 식이어야 한다(테스트가 본다).
+EXCLUDED_TAG_RE = re.compile(r"\s*[(（]\s*(REQ-\d+(?:\s*[,，、]\s*REQ-\d+)*)\s*[)）]\s*$")
 
 MAX_RECHECKS = 3
 TAG_RE = re.compile(r"^\s*\[DEV-(\d+)\]\s*")
@@ -59,12 +65,13 @@ class NoLedger(Exception):
 
 
 class NeedConfirm(Exception):
-    """새 제목이 기존 REQ 제목과 겹친다. 사람 확인이 필요하다. 종료코드 4."""
+    """새 제목이 기존 REQ 제목이나 SRS 의 "하지 않는 것" 항목과 겹친다. 사람 확인이 필요하다. 종료코드 4."""
 
-    def __init__(self, title: str, matches: list[dict]):
+    def __init__(self, title: str, matches: list[dict], excluded_matches: list[dict] | None = None):
         super().__init__(title)
         self.title = title
         self.matches = matches
+        self.excluded_matches = excluded_matches or []
 
 
 def _run(cmd: list[str], cwd: str | None = None) -> str:
@@ -271,8 +278,116 @@ def _norm_title(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip().casefold()
 
 
+_FENCE_LINE = re.compile(r"^\s*(`{3,}|~{3,})")
+_SCOPE_HEAD = re.compile(r"^(\s*)[-*]\s*" + re.escape(SCOPE_EXCLUDED_MARKER))
+_ITEM_HEAD = re.compile(r"^[-*]\s*" + re.escape(SCOPE_EXCLUDED_MARKER) + r"\s*[:：]?")
+_ITEM_BULLET = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
+_ITEM_SEP = ",、;；，"
+_ITEM_TRAIL = " \t.。,、;；，"
+
+
+def _split_items(text: str) -> list[str]:
+    """한 줄 형태의 항목을 `,`·`、`·`;`·` · ` 로 쪼갠다. 괄호 안은 쪼개지 않는다."""
+    parts: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    for i, ch in enumerate(text):
+        if ch in "(（[":
+            depth += 1
+        elif ch in ")）]":
+            depth = max(depth - 1, 0)
+        if depth == 0 and (ch in _ITEM_SEP or (ch == "·" and text[i - 1:i].isspace() and text[i + 1:i + 2].isspace())):
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    parts.append("".join(buf))
+    return parts
+
+
+def scope_excluded_items(srs: str) -> list[dict]:
+    """SRS 범위 "하지 않는 것" 목록의 항목 [{"item": 꼬리표를 뗀 항목, "reqs": ["REQ-001", …]}]. 꼬리표가 없으면 reqs 는 빈 목록.
+
+    목록은 `- 하지 않는 것` 머리말 줄과 그 아래로 더 들여쓴 줄이다. 머리말에 이어 쓴 항목은 쪼개고 들여쓴 줄은
+    줄마다 항목이다. 코드 펜스 안은 보지 않는다. checker/risk_gate.py 의 같은 이름 파서와 규칙이 같다.
+    """
+    lines: list[str] = []
+    fence: str | None = None
+    for line in srs.splitlines():
+        fm = _FENCE_LINE.match(line)
+        if fm:
+            fence = fm.group(1)[0] if fence is None else (None if fm.group(1)[0] == fence else fence)
+            continue
+        if fence is None:
+            lines.append(line)
+    block: list[str] = []
+    for i, line in enumerate(lines):
+        m = _SCOPE_HEAD.match(line)
+        if not m:
+            continue
+        indent = len(m.group(1))
+        block = [line.strip()]
+        for nxt in lines[i + 1:]:
+            if not nxt.strip():
+                continue
+            if len(nxt) - len(nxt.lstrip()) <= indent:
+                break
+            block.append(nxt.strip())
+        break
+    if not block:
+        return []
+    raws = _split_items(_ITEM_HEAD.sub("", block[0], count=1)) + [_ITEM_BULLET.sub("", ln, count=1) for ln in block[1:]]
+    items: list[dict] = []
+    seen: dict[str, dict] = {}
+    for raw in raws:
+        shown = re.sub(r"\s+", " ", raw).strip(_ITEM_TRAIL).strip()
+        tag = EXCLUDED_TAG_RE.search(shown)
+        reqs: list[str] = []
+        if tag:
+            reqs = re.findall(r"REQ-\d+", tag.group(1))
+            shown = shown[:tag.start()].rstrip(_ITEM_TRAIL).strip()
+        if not shown:
+            continue
+        if shown.casefold() in seen:  # 같은 본문이 꼬리표만 달리 두 번 나오면 번호를 합친다
+            prev = seen[shown.casefold()]["reqs"]
+            prev += [r for r in reqs if r not in prev]
+            continue
+        seen[shown.casefold()] = entry = {"item": shown, "reqs": reqs}
+        items.append(entry)
+    return items
+
+
+_TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣]+")
+MIN_TOKEN_LEN = 2  # 이보다 짧은 토큰은 겹침에서 뺀다
+MIN_SHARED_TOKENS = 2  # 핵심 단어가 이만큼 이상 겹쳐야 한다
+SHARED_TOKEN_RATIO = (2, 3)  # 그리고 새 제목 토큰의 2/3 이상
+
+
+_PAREN_RE = re.compile(r"[(（\[][^()（）\[\]]*[)）\]]")
+
+
+def _strip_parens(text: str) -> str:
+    """괄호 `(…)` 안 내용을 공백으로 바꾼다(안쪽부터). 항목의 부연(`(조회 전용)`)이 비교에 끼는 오탐을 막는다."""
+    prev = None
+    while prev != text:
+        prev, text = text, _PAREN_RE.sub(" ", text)
+    return text
+
+
+def _tokens(text: str) -> set[str]:
+    """공백·구두점으로 나눈 토큰 집합. 영문은 소문자, 2자 미만은 뺀다(불용어 목록은 두지 않는다)."""
+    return {t for t in _TOKEN_RE.findall((text or "").casefold()) if len(t) >= MIN_TOKEN_LEN}
+
+
+def _token_overlap(new_tokens: set[str], item_tokens: set[str]) -> bool:
+    """"하지 않는 것" 항목 비교 전용. 포함 판정이 못 잡는 `Launchpad 타일 노출` vs `Fiori Launchpad 노출(…)` 을 잡는다(#304)."""
+    shared = len(new_tokens & item_tokens)
+    num, den = SHARED_TOKEN_RATIO
+    return shared >= MIN_SHARED_TOKENS and shared * den >= num * len(new_tokens)
+
+
 def check_title_overlap(root: str, core_title: str) -> None:
-    """origin/main SRS 의 REQ 제목과 포함 관계면 NeedConfirm. SRS 가 없으면 건너뛴다. 읽기 실패는 Undecidable."""
+    """origin/main SRS 의 REQ 제목이나 "하지 않는 것" 항목과 포함 관계면 NeedConfirm. SRS 가 없으면 건너뛴다. 읽기 실패는 Undecidable."""
     git(["fetch", "origin", "main"], root)
     srs = _show_main(root, "docs/ssot/SRS.md")
     if not srs:
@@ -286,8 +401,17 @@ def check_title_overlap(root: str, core_title: str) -> None:
         old = _norm_title(title or "")
         if len(old) >= MIN_TITLE_LEN and (old in new or new in old):
             matches.append({"number": format_number(n), "title": title})
-    if matches:
-        raise NeedConfirm(core_title, matches)
+    excluded: list[dict] = []
+    new_tokens = _tokens(core_title)
+    for entry in scope_excluded_items(srs):
+        body = _strip_parens(entry["item"])  # 괄호 속 부연은 비교에서 뺀다. 보여 주는 항목은 원문 그대로
+        old = _norm_title(body)
+        if len(old) >= MIN_TITLE_LEN and (old in new or new in old):
+            excluded.append(entry)
+        elif _token_overlap(new_tokens, _tokens(body)):
+            excluded.append(entry)
+    if matches or excluded:
+        raise NeedConfirm(core_title, matches, excluded)
 
 
 def cmd_list(args: argparse.Namespace) -> dict:
@@ -376,11 +500,11 @@ def main(argv: list[str] | None = None) -> int:
     p_res.add_argument("--title", required=True)
     p_res.add_argument("--body-file")
     p_res.add_argument("--label", action="append")
-    p_res.add_argument("--confirmed-new", action="store_true", help="기존 REQ 와 제목이 겹친다는 확인을 건너뛴다(사람이 새 개발이라고 확인한 뒤)")
+    p_res.add_argument("--confirmed-new", action="store_true", help="기존 REQ 제목이나 SRS 의 하지 않는 것 항목과 겹친다는 확인을 건너뛴다(사람이 새 개발이라고 확인한 뒤)")
     sub.add_parser("list")
     p_claim = sub.add_parser("claim")
     p_claim.add_argument("--issue", type=int, required=True)
-    p_claim.add_argument("--confirmed-new", action="store_true", help="기존 REQ 와 제목이 겹친다는 확인을 건너뛴다(사람이 새 개발이라고 확인한 뒤)")
+    p_claim.add_argument("--confirmed-new", action="store_true", help="기존 REQ 제목이나 SRS 의 하지 않는 것 항목과 겹친다는 확인을 건너뛴다(사람이 새 개발이라고 확인한 뒤)")
     args = parser.parse_args(argv)
 
     handler = {"next": cmd_next, "reserve": cmd_reserve, "claim": cmd_claim, "list": cmd_list}[args.cmd]
@@ -390,7 +514,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"status": "no_ledger", "message": str(exc)}, ensure_ascii=False))
         return EXIT_NO_LEDGER
     except NeedConfirm as exc:
-        print(json.dumps({"status": "confirm", "matches": exc.matches, "title": exc.title}, ensure_ascii=False))
+        print(json.dumps(
+            {"status": "confirm", "matches": exc.matches, "excluded_matches": exc.excluded_matches, "title": exc.title},
+            ensure_ascii=False,
+        ))
         return EXIT_CONFIRM
     except Undecidable as exc:
         print(json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False))
