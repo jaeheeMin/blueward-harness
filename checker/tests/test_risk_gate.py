@@ -1010,9 +1010,9 @@ def test_사건_재현_세_근거가_모두_나온다():
     result = rg.decide_pr(_srs_client(SRS_HEAD_INCIDENT), "o/r", 5)
     (reason,) = _hint_reasons(result)
     assert "REQ-003" in reason and "확장 의심" in reason
-    assert "(a)" in reason and "REQ-002, DEV-002" in reason
+    assert "(a)" in reason and "REQ-002(판매오더 조회 앱), DEV-002(판매오더 조회 앱)" in reason
     assert "(b)" in reason and "Fiori Launchpad 노출(IAM App" in reason
-    assert "(c)" in reason and "REQ-002 '판매오더 조회 앱'" in reason
+    assert "(c)" in reason and "REQ-002(판매오더 조회 앱)" in reason
     assert "승인자가 SRS diff" in result["next"]
 
 
@@ -1217,7 +1217,7 @@ def test_꼬리표_있는_항목을_지우면_어느_REQ_의_항목인지_적는
     base = _tag_scope("판매오더 생성·변경·삭제 (REQ-002)", "개발사양서 xlsx 작성")
     head = _with_sep_req(_tag_scope("개발사양서 xlsx 작성"))
     (reason,) = _hint_reasons(rg.decide_pr(_srs_client(head, base_text=base, patch_row=SEP_ROW), "o/r", 5))
-    assert '(b)' in reason and '"판매오더 생성·변경·삭제" (REQ-002 의 하지 않는 것)' in reason
+    assert '(b)' in reason and '"판매오더 생성·변경·삭제" (REQ-002(판매오더 조회 앱) 의 하지 않는 것)' in reason
     assert "(REQ-002)\"" not in reason
 
 
@@ -1225,7 +1225,7 @@ def test_꼬리표_번호가_여럿이면_모두_적고_없는_항목은_표시�
     base = _tag_scope("승인 워크플로 (REQ-001, REQ-002)", "외부 API 서비스")
     head = _with_sep_req(_tag_scope("개발사양서 xlsx 작성"))
     (reason,) = _hint_reasons(rg.decide_pr(_srs_client(head, base_text=base, patch_row=SEP_ROW), "o/r", 5))
-    assert '"승인 워크플로" (REQ-001, REQ-002 의 하지 않는 것)' in reason
+    assert '"승인 워크플로" (REQ-001(회계전표 Excel 업로드 일괄 전기), REQ-002(판매오더 조회 앱) 의 하지 않는 것)' in reason
     assert '"외부 API 서비스"' in reason
     assert '"외부 API 서비스" (' not in reason
 
@@ -1254,3 +1254,13 @@ def test_엑셀_산출은_범위_절의_꼬리표를_내보내지_않는다():
 def test_같은_본문이_다른_꼬리표로_두_번_나오면_번호를_합친다():
     entries = rg._scope_entries("- 하지 않는 것:\n  - 승인 워크플로 (REQ-001)\n  - 승인 워크플로 (REQ-002, REQ-001)\n")
     assert list(entries.values()) == [("승인 워크플로", ["REQ-001", "REQ-002"])]
+
+
+def test_titled_id_제목_있음_다른_표에서_찾음_둘_다_없음(tmp_path):
+    # 첫 표에 없으면 다음 표에서 찾고, DEV 번호는 같은 숫자의 REQ 제목을 쓴다
+    assert rg.titled_id("REQ-002", {"REQ-002": "판매오더 조회 앱"}) == "REQ-002(판매오더 조회 앱)"
+    assert rg.titled_id("REQ-2", {}, {"REQ-002": "판매오더 조회 앱"}) == "REQ-2(판매오더 조회 앱)"
+    assert rg.titled_id("DEV-002", {"REQ-002": "판매오더 조회 앱"}) == "DEV-002(판매오더 조회 앱)"
+    # 어느 표에도 없거나 제목이 비면 추측하지 않는다
+    assert rg.titled_id("REQ-009", {"REQ-002": "판매오더 조회 앱"}) == "REQ-009(제목 미확인)"
+    assert rg.titled_id("REQ-002", {"REQ-002": ""}) == "REQ-002(제목 미확인)"

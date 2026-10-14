@@ -271,6 +271,34 @@ def test_list_는_번호별로_모아_낸다(tmp_path, monkeypatch, capsys):
     assert devs["DEV-002"]["spec"].startswith("docs/spec/DEV-002")
     assert [i["number"] for i in devs["DEV-002"]["issues"]] == [5]
     assert [i["number"] for i in devs["DEV-002"]["subtasks"]] == [6]
+    # 사람용 표기(#308): SRS 제목
+    assert devs["DEV-001"]["label"] == "DEV-001(판매오더)" and devs["DEV-002"]["label"] == "DEV-002(조회 앱)"
+
+
+def test_list_label_은_SRS_에_없으면_원장_내용_이슈_제목_순으로_대신한다(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path, srs="# SRS\n\n## 요구사항\n\n아직 작성 전\n")
+    fake = FakeGh([{"number": 5, "title": "[DEV-099] 엉뚱한 일", "state": "OPEN"}])
+    code, out = run(monkeypatch, capsys, work, fake, ["list"])
+    devs = {d["number"]: d for d in json.loads(out)["devs"]}
+    assert code == 0
+    assert devs["DEV-001"]["label"] == "DEV-001(a)"  # 원장 내용
+    assert devs["DEV-099"]["label"] == "DEV-099(엉뚱한 일)"  # 이슈 제목
+    assert devs["DEV-002"]["label"] == "DEV-002(제목 미확인)"  # Spec 만 있고 어디에도 제목이 없다
+
+
+def test_list_label_은_대시_후보를_건너뛴다(tmp_path, monkeypatch, capsys):
+    srs = "# SRS\n\n## 요구사항\n\n| ID | Title | Status |\n|---|---|---|\n| REQ-001 | - | New |\n"
+    work = make_repo(tmp_path, srs=srs)
+    fake = FakeGh([{"number": 5, "title": "[DEV-001] 이슈에 쓴 제목", "state": "OPEN"}])
+    code, out = run(monkeypatch, capsys, work, fake, ["list"])
+    dev = {d["number"]: d for d in json.loads(out)["devs"]}["DEV-001"]
+    assert code == 0 and dev["label"] == "DEV-001(a)"  # SRS 제목 `-` 는 건너뛰고 원장 내용
+
+
+def test_titled_label_은_제목이_비면_추측하지_않는다():
+    assert rn.titled_label("DEV-005", "조회 앱") == "DEV-005(조회 앱)"
+    assert rn.titled_label("DEV-005", None) == "DEV-005(제목 미확인)"
+    assert rn.titled_label("DEV-005", "-") == "DEV-005(제목 미확인)"
 
 
 def test_list_는_열이_없으면_그_키를_생략한다(tmp_path, monkeypatch, capsys):
@@ -327,7 +355,7 @@ def test_새_제목이_기존_REQ_제목을_포함하면_4_이고_이슈를_안_
     assert code == 4
     res = json.loads(out)
     assert res["status"] == "confirm"
-    assert res["matches"] == [{"number": "DEV-001", "title": "판매오더 조회 앱"}]
+    assert res["matches"] == [{"number": "DEV-001", "title": "판매오더 조회 앱", "label": "DEV-001(판매오더 조회 앱)"}]
     assert res["title"] == "판매오더 조회 앱 목록 필터 추가"
     assert fake.issues == {}
 
@@ -451,13 +479,15 @@ def test_하지_않는_것_항목이_꼬리표_없이_겹치면_4_이고_reqs_�
     code, out = run(monkeypatch, capsys, _scoped(tmp_path), fake, ["reserve", "--title", "판매오더 생성·변경"])
     assert code == 4 and fake.issues == {}
     assert json.loads(out)["matches"] == []
-    assert json.loads(out)["excluded_matches"] == [{"item": "판매오더 생성·변경·삭제 (조회 전용)", "reqs": []}]
+    assert json.loads(out)["excluded_matches"] == [{"item": "판매오더 생성·변경·삭제 (조회 전용)", "reqs": [], "reqs_labeled": []}]
 
 
 def test_꼬리표가_있으면_그_REQ_번호를_낸다(tmp_path, monkeypatch, capsys):
     code, out = run(monkeypatch, capsys, _scoped(tmp_path), FakeGh(), ["reserve", "--title", "Fiori Launchpad 노출(IAM App, Role) 정리"])
     assert code == 4
-    assert json.loads(out)["excluded_matches"] == [{"item": "Fiori Launchpad 노출(IAM App, Role)", "reqs": ["REQ-002"]}]
+    assert json.loads(out)["excluded_matches"] == [
+        {"item": "Fiori Launchpad 노출(IAM App, Role)", "reqs": ["REQ-002"], "reqs_labeled": ["REQ-002(판매오더 조회 앱)"]}
+    ]
 
 
 def test_꼬리표에_번호가_여럿이면_모두_낸다(tmp_path, monkeypatch, capsys):
@@ -465,7 +495,9 @@ def test_꼬리표에_번호가_여럿이면_모두_낸다(tmp_path, monkeypatch
     assert code == 4
     # 들여쓴 줄은 줄마다 한 항목이라 쉼표 뒤까지 한 항목이다
     assert json.loads(out)["excluded_matches"] == [
-        {"item": "회계전표 역분개·취소, 승인 워크플로", "reqs": ["REQ-001", "REQ-003"]}
+        {"item": "회계전표 역분개·취소, 승인 워크플로", "reqs": ["REQ-001", "REQ-003"],
+         # REQ-003 은 SRS 표에 없어 제목을 추측하지 않는다
+         "reqs_labeled": ["REQ-001(회계전표 업로드)", "REQ-003(제목 미확인)"]}
     ]
 
 

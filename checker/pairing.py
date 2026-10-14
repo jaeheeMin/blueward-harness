@@ -48,6 +48,50 @@ def _fmt(n: int) -> str:
     return f"{n:03d}"
 
 
+TITLE_UNKNOWN = "제목 미확인"
+
+
+def titled(prefix: str, n: int, titles: dict[int, str]) -> str:
+    """사람에게 보이는 번호 표기 `DEV-002(판매오더 조회 앱)`(#308). 제목을 모르면 `(제목 미확인)` — 추측하지 않는다."""
+    return f"{prefix}-{_fmt(n)}({titles.get(n) or TITLE_UNKNOWN})"
+
+
+def _title_cell(value: str) -> str:
+    """제목 칸 값. `-`·`—`·`–`·빈 값은 제목 없음(빈 문자열)이다."""
+    value = value.strip()
+    return "" if value in EMPTY_VALUES else value
+
+
+def _ledger_contents(ledger: list[dict]) -> dict[int, str]:
+    out: dict[int, str] = {}
+    for r in ledger:
+        content = r.get("content", "").strip()
+        if content not in EMPTY_VALUES:
+            out.setdefault(r["id"], content)
+    return out
+
+
+def number_titles(root: Path) -> dict[int, str]:
+    """{번호: 제목}. SRS 요구사항 표의 제목이 먼저, SRS 에 없는 번호는 원장 `내용` 칸으로 채운다.
+
+    읽지 못하면 그 출처는 건너뛴다(메시지 꾸밈일 뿐이라 검사 결과를 바꾸지 않는다).
+    """
+    root = Path(root)
+    titles: dict[int, str] = {}
+    try:
+        reqs, _ = _load_srs(root)
+        titles.update({n: r["title"] for n, r in (reqs or {}).items() if r["title"]})
+    except CannotCheck:
+        pass
+    try:
+        if (root / LEDGER_DIR).is_dir():
+            for n, c in _ledger_contents(_load_ledgers(root)).items():
+                titles.setdefault(n, c)
+    except CannotCheck:
+        pass
+    return titles
+
+
 def _cells(line: str) -> list[str]:
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
@@ -139,6 +183,7 @@ def _load_srs(root: Path) -> tuple[dict[int, dict] | None, bool]:
         reqs.setdefault(int(m.group(1)), {
             "next": "개발" if no_step_column else row.get("다음 단계", ""),
             "status": status,
+            "title": _title_cell(row.get("Title") or row.get("요구사항") or ""),
             "ricefw": row.get("Development RICEFW ID") if "Development RICEFW ID" in header else None,
         })
     return reqs, no_step_column
@@ -191,7 +236,7 @@ def _load_ledgers(root: Path) -> list[dict]:
             m = _DEV_ID.match(row.get("ID", ""))
             if m:
                 rows.append({"file": rel, "id": int(m.group(1)), "spec": row.get("Spec", ""),
-                             "dir": path.parent})
+                             "content": row.get("내용", ""), "dir": path.parent})
     return rows
 
 
@@ -224,6 +269,13 @@ def check_pairing(root: Path) -> dict:
     except CannotCheck as exc:
         return {"status": CANNOT_CHECK, "violations": [], "warnings": [], "message": str(exc)}
 
+    titles = {n: r["title"] for n, r in (reqs or {}).items() if r["title"]}
+    for n, c in _ledger_contents(ledger).items():
+        titles.setdefault(n, c)
+
+    def t(prefix: str, n: int) -> str:
+        return titled(prefix, n, titles)
+
     if not (root / SRS_PATH).is_file():
         w("srs_missing", SRS_PATH, f"`{SRS_PATH}` 가 없어 SRS 와의 대조는 건너뛰었습니다.")
 
@@ -238,7 +290,7 @@ def check_pairing(root: Path) -> dict:
     for n, rs in sorted(by_dev.items()):
         if len(rs) > 1:
             where = ", ".join(f"`{r['file']}`" for r in rs)
-            v("ledger_duplicate", rs[0]["file"], f"DEV-{_fmt(n)} 가 원장에 {len(rs)}번 있습니다: {where}")
+            v("ledger_duplicate", rs[0]["file"], f"{t('DEV', n)} 가 원장에 {len(rs)}번 있습니다: {where}")
 
     # 원장 Spec 칸 링크.
     for r in ledger:
@@ -250,28 +302,28 @@ def check_pairing(root: Path) -> dict:
             continue
         if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", target):
             w("spec_link_external", r["file"],
-              f"DEV-{_fmt(r['id'])} 의 Spec 칸이 외부 링크라 파일 대조는 하지 않았습니다: `{target}`")
+              f"{t('DEV', r['id'])} 의 Spec 칸이 외부 링크라 파일 대조는 하지 않았습니다: `{target}`")
             continue
         path =(r["dir"] / target)
         if not path.is_file():
             v("spec_link_missing", r["file"],
-              f"DEV-{_fmt(r['id'])} 의 Spec 칸 링크 대상 파일이 없습니다: `{target}`")
+              f"{t('DEV', r['id'])} 의 Spec 칸 링크 대상 파일이 없습니다: `{target}`")
         m = _SPEC_NAME.match(Path(target).name)
         if m and int(m.group(1)) != r["id"]:
             v("spec_link_mismatch", r["file"],
-              f"DEV-{_fmt(r['id'])} 줄의 Spec 칸이 다른 번호의 파일을 가리킵니다: `{target}`")
+              f"{t('DEV', r['id'])} 줄의 Spec 칸이 다른 번호의 파일을 가리킵니다: `{target}`")
 
     # Spec 근거 요구사항.
     for n, items in sorted(specs.items()):
         for s in items:
             if s["reqs"] and s["reqs"] != {n}:
-                found = ", ".join(f"REQ-{_fmt(x)}" for x in sorted(s["reqs"]))
+                found = ", ".join(t("REQ", x) for x in sorted(s["reqs"]))
                 v("spec_req_mismatch", s["path"],
-                  f"파일명은 DEV-{_fmt(n)} 인데 `## 근거 요구사항` 의 번호가 {found} 입니다.")
+                  f"파일명은 {t('DEV', n)} 인데 `## 근거 요구사항` 의 번호가 {found} 입니다.")
 
     if reqs is not None:
         for n, req in sorted(reqs.items()):
-            label = f"REQ-{_fmt(n)}"
+            label = t("REQ", n)
             step = req["next"].strip()
             ricefw = req["ricefw"]
             if ricefw is not None:
@@ -298,7 +350,7 @@ def check_pairing(root: Path) -> dict:
                     w("no_ledger", SRS_PATH, f"{label} (개발): Spec 은 있으나 원장 줄이 없습니다.")
                 elif spec_cell == "설정":
                     w("spec_cell_config", rows[0]["file"],
-                      f"{label} 는 다음 단계가 `개발` 인데 원장 DEV-{_fmt(n)} 줄의 Spec 칸이 `설정` 입니다.")
+                      f"{label} 는 다음 단계가 `개발` 인데 원장 {t('DEV', n)} 줄의 Spec 칸이 `설정` 입니다.")
                 elif not has_spec:
                     if spec_cell in EMPTY_VALUES:
                         w("spec_not_yet", rows[0]["file"], f"{label} (개발): Spec 은 아직 작성 전입니다(원장 Spec 칸 `-`).")
@@ -308,10 +360,10 @@ def check_pairing(root: Path) -> dict:
 
         for n, rs in sorted(by_dev.items()):
             if n not in reqs:
-                w("ledger_without_req", rs[0]["file"], f"원장의 DEV-{_fmt(n)} 에 대응하는 SRS 요구사항 REQ-{_fmt(n)} 가 없습니다.")
+                w("ledger_without_req", rs[0]["file"], f"원장의 {t('DEV', n)} 에 대응하는 SRS 요구사항 {t('REQ', n)} 가 없습니다.")
         for n, items in sorted(specs.items()):
             if n not in reqs:
-                w("spec_without_req", items[0]["path"], f"Spec DEV-{_fmt(n)} 에 대응하는 SRS 요구사항 REQ-{_fmt(n)} 가 없습니다.")
+                w("spec_without_req", items[0]["path"], f"Spec {t('DEV', n)} 에 대응하는 SRS 요구사항 {t('REQ', n)} 가 없습니다.")
 
     return {"status": VIOLATION if violations else PASS, "violations": violations, "warnings": warnings}
 

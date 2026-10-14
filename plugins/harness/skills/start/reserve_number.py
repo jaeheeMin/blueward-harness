@@ -24,7 +24,8 @@
   4  확인 필요(#261). 새 제목이 origin/main SRS 의 기존 REQ 제목을 포함하거나 그 반대다.
      #304: 범위 "하지 않는 것" 항목과 포함 관계이거나 핵심 단어(2자 이상 토큰)가 둘 이상 겹치고 새 제목 토큰의 2/3 이상이어도 같다. 항목 끝 `(REQ-001)` 꼬리표는 그 요구사항에서 뺀 일이라는 표기다.
      이슈를 만들지도 번호를 붙이지도 않고, stdout JSON
-     `{"status":"confirm","matches":[{"number","title"}],"excluded_matches":[{"item","reqs"}],"title"}`
+     `{"status":"confirm","matches":[{"number","title","label"}],"excluded_matches":[{"item","reqs","reqs_labeled"}],"title"}`
+     (`label`·`reqs_labeled` 는 사람용 `DEV-002(제목)`·`REQ-001(제목)` 표기, 제목을 모르면 `(제목 미확인)`)
      (`reqs` 가 빈 목록이면 프로젝트 전체에서 하지 않는 일).
      기존 개발의 하위 작업이면 번호를 새로 받지 않는다. 새 개발이 맞다고 사람이 확인하면
      `--confirmed-new` 를 붙여 다시 부른다. 새 번호를 붙일 때만 본다(이미 번호가 있는 이슈의 claim 은 안 본다).
@@ -233,6 +234,15 @@ def _table_rows(text: str, id_re: re.Pattern) -> list[tuple[int, dict[str, str]]
     return rows
 
 
+TITLE_UNKNOWN = "제목 미확인"
+
+
+def titled_label(number: str, title: str | None) -> str:
+    """사람에게 보여 줄 `DEV-002(제목)`(#308). 제목을 모르면 `(제목 미확인)` 이고 추측하지 않는다."""
+    title = (title or "").strip()
+    return f"{number}({title if title and title not in ('-', '—', '–') else TITLE_UNKNOWN})"
+
+
 def _pick(row: dict[str, str], *names: str) -> str | None:
     for n in names:
         if row.get(n):
@@ -396,14 +406,20 @@ def check_title_overlap(root: str, core_title: str) -> None:
     if len(new) < MIN_TITLE_LEN:
         return
     matches: list[dict] = []
+    req_titles: dict[str, str | None] = {}
     for n, row in _table_rows(srs, REQ_ROW_RE):
         title = _pick(row, "Title", "요구사항")
+        req_titles.setdefault(f"REQ-{n:03d}", title)
         old = _norm_title(title or "")
         if len(old) >= MIN_TITLE_LEN and (old in new or new in old):
-            matches.append({"number": format_number(n), "title": title})
+            matches.append({"number": format_number(n), "title": title, "label": titled_label(format_number(n), title)})
     excluded: list[dict] = []
     new_tokens = _tokens(core_title)
     for entry in scope_excluded_items(srs):
+        # 사람에게 보일 `REQ-001(제목)` 목록. `reqs` 는 그대로 둔다(기계가 읽는 값).
+        entry["reqs_labeled"] = [
+            titled_label(r, req_titles.get(f"REQ-{int(r.split('-')[1]):03d}")) for r in entry["reqs"]
+        ]
         body = _strip_parens(entry["item"])  # 괄호 속 부연은 비교에서 뺀다. 보여 주는 항목은 원문 그대로
         old = _norm_title(body)
         if len(old) >= MIN_TITLE_LEN and (old in new or new in old):
@@ -435,6 +451,13 @@ def cmd_list(args: argparse.Namespace) -> dict:
     for n, subs in subtasks.items():
         if n in devs:
             devs[n]["subtasks"] = subs
+    for n, dev in devs.items():
+        # 사람용 표기. SRS 제목, 없으면 원장 내용, 그것도 없으면 이슈 제목(`[DEV-xxx]` 뗀 것), 그것도 없으면 제목 미확인.
+        issue_title = strip_tag(dev["issues"][0]["title"]).strip() if dev.get("issues") else None
+        candidates = [dev.get("req_title"), (dev.get("ledger") or {}).get("content"), issue_title]
+        # `-`·빈 값은 건너뛰고 다음 후보로 간다
+        title = next((c for c in candidates if c and c.strip() not in ("-", "—", "–")), None)
+        dev["label"] = titled_label(dev["number"], title)
     return {"status": "ok", "devs": [devs[n] for n in sorted(devs)]}
 
 
