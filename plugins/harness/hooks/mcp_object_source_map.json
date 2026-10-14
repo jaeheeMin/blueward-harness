@@ -1,5 +1,5 @@
 {
-  "_comment": "objectSourceUrl 패턴 -> 언어 확장자 매핑 데이터(#60, #72, #215). mcp_source_guard.py 가 이 파일로 ABAP/CDS/BDEF 를 판별한다. 코드에 조건문을 늘어놓지 않고 데이터로 두는 것이 CLAUDE.md 원칙 2다. checker/code_checks.yaml 이 아는 확장자(.abap, .cds, .asbdef)와 맞아야 한다. 패턴은 대소문자 구분 없이(re.IGNORECASE) 쿼리스트링을 뗀 URL 디코딩 경로에 순서대로 정규식 검색(re.search)한다. 새 ADT 오브젝트 종류가 나오면 여기에 패턴만 추가하면 된다.",
+  "_comment": "objectSourceUrl 패턴 -> 언어 확장자 매핑 데이터(#60, #72, #215). mcp_source_guard.py 가 이 파일로 ABAP/CDS/BDEF 를 판별한다. 코드에 조건문을 늘어놓지 않고 데이터로 두는 것이 CLAUDE.md 원칙 2다. checker/code_checks.yaml 이 아는 확장자(.abap, .cds, .asbdef)와 맞아야 한다. 패턴은 대소문자 구분 없이(re.IGNORECASE) 쿼리스트링을 뗀 URL 디코딩 경로에 순서대로 정규식 검색(re.search)한다. 새 ADT 오브젝트 종류가 나오면 여기에 패턴만 추가하면 된다. suffix 대신 \"check\": \"none\" 을 쓰면 코드가 아닌 소스(#327, UIAD 앱 디스크립터 JSON)라 코드 검사 엔진을 부르지 않는다(티어 가드는 그대로 거친다). 항목은 suffix 와 check 중 정확히 하나를 가져야 하고, 모르는 check 값이나 필드는 거부(fail-closed)된다. 080 실측으로 확인된 UIAD 경로만 열었다.",
   "patterns": [
     { "regex": "/sap/bc/adt/oo/classes/", "suffix": ".abap" },
     { "regex": "/sap/bc/adt/oo/interfaces/", "suffix": ".abap" },
@@ -14,6 +14,7 @@
     { "regex": "/sap/bc/adt/ddic/ddlx/sources/", "suffix": ".cds" },
     { "regex": "/sap/bc/adt/ddic/ddla/sources/", "suffix": ".cds" },
     { "regex": "/sap/bc/adt/ddic/srvd/sources/", "suffix": ".cds" },
-    { "regex": "/sap/bc/adt/bo/behaviordefinitions/", "suffix": ".asbdef" }
+    { "regex": "/sap/bc/adt/bo/behaviordefinitions/", "suffix": ".asbdef" },
+    { "regex": "^/sap/bc/adt/fiori/uiad/[A-Za-z0-9_]+/source/main/?\\Z", "check": "none" }
   ]
 }

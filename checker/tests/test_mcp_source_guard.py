@@ -475,3 +475,112 @@ def test_deployui5app_의_sourcedir_는_검사하지_않는다(installed_hook):
     payload["tool_input"]["sourceDir"] = "C:/작업/주문앱/dist"
     code, out = run_hook(installed_hook, payload, str(ENGINE_ROOT))
     assert code == 0 and out is None
+
+
+# --- 코드가 아닌 소스: UIAD 앱 디스크립터 JSON(#327) ---------------------------
+#
+# 맵의 `check: none` 항목은 코드 검사 엔진을 부르지 않고 통과시킨다. 엔진이 없는 곳을
+# 가리켜도 통과하면 엔진을 부르지 않은 것이다(부르면 엔진 없음으로 거절된다).
+
+UIAD_URL = "/sap/bc/adt/fiori/uiad/zmm_stockledger_app/source/main"
+UIAD_JSON = '{"sap.app": {"id": "zmm_stockledger_app"}, "한글": "라벨은 코드가 아니다"}'
+
+
+def test_uiad_json_소스는_엔진을_부르지_않고_통과시킨다(installed_hook, tmp_path):
+    missing_engine = str(tmp_path / "존재하지-않는-경로")
+    code, out = run_hook(installed_hook, _payload(UIAD_URL, UIAD_JSON), missing_engine)
+    assert code == 0 and out is None
+    code, out = run_hook(installed_hook, _payload(UIAD_URL + "?version=inactive", UIAD_JSON), missing_engine)
+    assert code == 0 and out is None
+
+
+@pytest.mark.parametrize("url", [
+    UIAD_URL + "?lockHandle=abc123&corrNr=Z5UK900001",
+    UIAD_URL.upper(),
+    "/SAP/BC/ADT/FIORI/UIAD/ZMM_STOCKLEDGER_APP/SOURCE/MAIN",
+    "https://my406740.s4hana.cloud.sap" + UIAD_URL,
+    "https://my406740.s4hana.cloud.sap" + UIAD_URL + "?corrNr=Z5UK900001",
+    UIAD_URL + "/",
+])
+def test_uiad_url_변형은_통과시킨다(installed_hook, tmp_path, url):
+    code, out = run_hook(installed_hook, _payload(url, UIAD_JSON), str(tmp_path / "x"))
+    assert code == 0 and out is None
+
+
+def test_uiad_빈_source는_거절한다(installed_hook, tmp_path):
+    code, out = run_hook(installed_hook, _payload(UIAD_URL, ""), str(tmp_path / "x"))
+    assert decision(out) == "deny"
+    assert "확인되지 않는 상태로 통과시키지 않습니다" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("url", [
+    "/sap/bc/adt/fiori/uipgtyp/zx/source/main",
+    "/sap/bc/adt/fiori/uisttop/zx/source/main",
+    "/sap/bc/adt/fiori/uiad/zx/source/other",
+    "/sap/bc/adt/fiori/uiad/zx/source/main/extra",
+    "/sap/bc/adt/fiori/uiad/zx/y/source/main",
+    "/sap/bc/adt/fiori/uiad/../source/main",
+    "/sap/bc/adt/fiori/uiad//source/main",
+    "/prefix/sap/bc/adt/fiori/uiad/zx/source/main",
+    "/sap/bc/adt/fiori/uiad/x%252f..%252foo%252fclasses%252fzcl/source/main",
+    "/sap/bc/adt/fiori/uiad/x%25y/source/main",
+    "/sap/bc/adt/fiori/uiad/zx/source/main\n",
+    "/sap/bc/adt/fiori/uiad/zx/source/main\r\n",
+    "/sap/bc/adt/fiori/uiad/x%0A/source/main",
+    "/sap/bc/adt/fiori/uiad/zx;y/source/main",
+    "/sap/bc/adt/fiori/uiad/zx\\y/source/main",
+    "/sap/bc/adt/fiori/uiad/x%2f..%2foo/source/main",
+])
+def test_uiad_와_비슷하지만_다른_경로는_판별_불능으로_거절한다(installed_hook, tmp_path, url):
+    code, out = run_hook(installed_hook, _payload(url, "{}"), str(tmp_path / "x"))
+    assert decision(out) == "deny"
+    assert "판별할 수 없" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_uiad_는_쓰기_금지_서버면_티어_가드가_거절한다(installed_hook, tmp_path):
+    repo = tmp_path / "proj"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "env").mkdir()
+    (repo / "env" / "adt-tiers.yaml").write_text(
+        "servers:\n  abap-adt-z5u:\n    client: \"100\"\n    role: customizing\n"
+        "    writes_allowed: false\n  abap-adt-z5u-dev:\n    client: \"080\"\n"
+        "    role: development\n    writes_allowed: true\n"
+        "write_tools:\n  - setObjectSource\n",
+        encoding="utf-8",
+    )
+
+    def run(server):
+        payload = _payload(UIAD_URL, UIAD_JSON, f"mcp__{server}__setObjectSource")
+        payload["cwd"] = str(repo)
+        return run_hook(installed_hook, payload, str(tmp_path / "x"))
+
+    code, out = run("abap-adt-z5u")
+    assert decision(out) == "deny"
+    assert "writes_allowed: false" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    code, out = run("abap-adt-z5u-dev")
+    assert code == 0 and out is None
+
+
+@pytest.mark.parametrize("item", [
+    {"regex": "/x/", "check": "skip"},
+    {"regex": "/x/", "check": "none", "suffix": ".abap"},
+    {"regex": "/x/"},
+    {"regex": "/x/", "suffix": "abap"},
+    {"regex": "/x/", "check": "none", "extra": 1},
+])
+def test_맵의_모르는_check_값은_통과가_아니라_거절한다(installed_hook, tmp_path, item):
+    # 설치본을 따로 복사해 맵을 망가뜨린다.
+    dest = tmp_path / "harness"
+    shutil.copytree(PLUGIN_SRC, dest)
+    map_path = dest / "hooks" / "mcp_object_source_map.json"
+    data = json.loads(map_path.read_text(encoding="utf-8"))
+    data["patterns"].insert(0, item)
+    map_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    hook = dest / "hooks" / "mcp_source_guard.py"
+    payload = _payload("/x/source/main", "{}")
+    code, out = run_hook(hook, payload, str(tmp_path / "x"))
+    assert decision(out) == "deny"
+    assert "확인되지 않는 상태로 통과시키지 않습니다" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    # 기존 ABAP 경로도 맵을 못 읽으면 통과하지 않는다.
+    code, out = run_hook(hook, _payload(ABAP_URL, "DATA lv_x TYPE vbeln.\n"), str(ENGINE_ROOT))
+    assert decision(out) == "deny"

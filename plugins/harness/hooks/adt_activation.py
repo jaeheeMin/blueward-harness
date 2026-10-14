@@ -43,7 +43,8 @@ ACTIVE = "active"
 PENDING_STATUSES = ("written", "failed", "unknown")
 
 NEXT_FIX = (
-    "다음: 위 오브젝트의 오류 메시지를 읽고 소스를 고친 뒤 activateObjects 또는 activateByName 으로 "
+    "다음: 활성화할 것이 없어 보이면(이미 활성인 오브젝트 등) inactiveObjects 로 확인하십시오 — "
+    "목록에 없으면 기록이 닫힙니다. 활성화 오류가 있으면 위 오브젝트의 오류 메시지를 읽고 소스를 고친 뒤 activateObjects 또는 activateByName 으로 "
     "다시 활성화하십시오. 다른 도구(Eclipse 등)로 이미 활성화했다면 inactiveObjects 를 호출해 "
     "기록을 맞추십시오. 오브젝트를 버릴 거면 deleteObject 로 지우십시오. ADT 호출이 401·세션 만료로 "
     "실패하면 그 서버에 다시 로그인(env/adt-tiers.yaml 의 login_skill)한 뒤 진행하십시오."
