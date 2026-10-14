@@ -23,6 +23,9 @@
     "messageclass": "MSAG",
     "packages": "DEVC",
     "aps/iam/auth": "AUTH",
-    "aps/iam/suso": "SUSO"
+    "aps/iam/suso": "SUSO",
+    "aps/cloud/iam/sia6": "SIA6",
+    "aps/cloud/iam/sia1": "SIA1",
+    "aps/cloud/iam/sia7": "SIA7"
   }
 }

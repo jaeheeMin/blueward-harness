@@ -476,7 +476,8 @@ def test_훅_허용_서버의_쓰기는_기존_cr_검사가_이어진다(hook, t
 _WRITE_TOOLS = [
     "setObjectSource", "createObject", "deleteObject", "activateObjects", "activateByName",
     "renameExecute", "extractMethodExecute", "createTransport", "transportRelease",
-    "transportDelete", "publishServiceBinding", "unPublishServiceBinding", "runClass",
+    "transportDelete", "publishServiceBinding", "unPublishServiceBinding", "deployUi5App",
+    "publishBusinessCatalog", "runClass",
     "gitPullRepo", "pushRepo",
 ]
 
@@ -493,7 +494,7 @@ def _matcher() -> str:
 
 @pytest.mark.parametrize("server", ["abap-adt", "abap-adt-z5u", "abap-adt-z5u-dev"])
 @pytest.mark.parametrize("tool", _WRITE_TOOLS + ["tableContents", "runQuery"])
-def test_매처가_public_cloud_의_쓰기_15개와_데이터_2개를_잡는다(server, tool):
+def test_매처가_public_cloud_의_쓰기_17개와_데이터_2개를_잡는다(server, tool):
     assert re.fullmatch(_matcher(), f"mcp__{server}__{tool}")
 
 
@@ -563,3 +564,42 @@ def test_세션_시작_파일이_있으면_안내하지_않는다(session_plugin
 def test_세션_시작_mcp_json_이_없는_저장소는_말하지_않는다(session_plugin_root, tmp_path):
     repo = _git_repo(tmp_path)
     assert "adt-tiers" not in _session_output(session_plugin_root, repo)
+
+
+# --- Launchpad 타일 도구(#313): deployUi5App, publishBusinessCatalog -----------
+
+_LAUNCHPAD_TOOLS = ["deployUi5App", "publishBusinessCatalog"]
+_LAUNCHPAD_YAML = TIERS_YAML.replace(
+    "  - runClass ", "  - deployUi5App\n  - publishBusinessCatalog\n  - runClass ", 1
+)
+
+
+def test_픽스처가_새_도구를_write_tools_에_넣었다():
+    assert "  - deployUi5App\n" in _LAUNCHPAD_YAML and "  - publishBusinessCatalog\n" in _LAUNCHPAD_YAML
+
+
+@pytest.mark.parametrize("tool", _LAUNCHPAD_TOOLS)
+def test_훅_쓰기_금지_서버의_launchpad_도구는_거절한다(hook, tmp_path, tool):
+    repo = _project(tmp_path, _LAUNCHPAD_YAML)
+    code, out = _run(hook, repo, f"mcp__abap-adt-z5u__{tool}", {"name": "ZUI5_APP", "sourceDir": "dist"})
+    assert code == 0 and _decision(out) == "deny"
+    assert "writes_allowed: false" in _reason(out)
+
+
+@pytest.mark.parametrize("tool", _LAUNCHPAD_TOOLS)
+def test_훅_모르는_서버의_launchpad_도구도_거절한다(hook, tmp_path, tool):
+    repo = _project(tmp_path, _LAUNCHPAD_YAML)
+    _, out = _run(hook, repo, f"mcp__brand-new__{tool}", {"name": "ZUI5_APP"})
+    assert _decision(out) == "deny" and "brand-new" in _reason(out)
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv 가 없으면 엔진을 받을 수 없다")
+@pytest.mark.parametrize("tool", _LAUNCHPAD_TOOLS)
+def test_훅_허용_서버의_launchpad_도구는_cr001_이름_검사가_이어진다(hook, tmp_path, tool):
+    repo = _project(tmp_path, _LAUNCHPAD_YAML)
+    engine = str(ENGINE_ROOT)
+    server = "mcp__abap-adt-z5u-dev__"
+    code, out = _run(hook, repo, server + tool, {"name": "주문앱", "sourceDir": "dist"}, engine)
+    assert _decision(out) == "deny" and "CR-001" in _reason(out)
+    code, out = _run(hook, repo, server + tool, {"name": "ZUI5_APP", "sourceDir": "dist"}, engine)
+    assert code == 0 and out is None

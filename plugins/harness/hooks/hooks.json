@@ -21,7 +21,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*__(setObjectSource|renamePreview|renameExecute|extractMethodPreview|extractMethodExecute|createObject|deleteObject|activateObjects|activateByName|createTransport|transportRelease|transportDelete|publishServiceBinding|unPublishServiceBinding|runClass|gitPullRepo|pushRepo|tableContents|runQuery)",
+        "matcher": "mcp__.*__(setObjectSource|renamePreview|renameExecute|extractMethodPreview|extractMethodExecute|createObject|deleteObject|activateObjects|activateByName|createTransport|transportRelease|transportDelete|publishServiceBinding|unPublishServiceBinding|deployUi5App|publishBusinessCatalog|runClass|gitPullRepo|pushRepo|tableContents|runQuery)",
         "hooks": [
           {
             "type": "command",
