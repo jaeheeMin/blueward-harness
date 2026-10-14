@@ -278,7 +278,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.65, public-cloud main 기준 (2026-10-14)</div>
+      <div class="note">harness 0.10.66, public-cloud main 기준 (2026-10-14)</div>
     </div>
   </nav>
 
@@ -542,7 +542,7 @@ fix/31-broken-link</pre>
         <div class="node"><b>DEV-003-….md</b><span>개발 Spec 파일</span></div><div class="arrow"></div>
         <div class="node"><b>원장의 DEV-003</b><span>진행 상황 한 줄</span></div>
       </div>
-      <div class="cap">은행 번호표처럼, 새 번호는 지금까지 쓴 가장 큰 번호 + 1 이야. 두 사람이 동시에 같은 번호를 뽑으면 늦게 뽑은 쪽 번호가 자동으로 바뀌고 알림이 떠.</div>
+      <div class="cap">은행 번호표처럼, 새 번호는 지금까지 쓴 가장 큰 번호 + 1 이야. 두 사람이 동시에 같은 번호를 뽑으면 늦게 뽑은 쪽 번호가 자동으로 바뀌고 알림이 떠. Claude 가 사람에게 번호를 말할 때는 <code>REQ-003(판매오더 조회 앱)</code> 처럼 바로 뒤 괄호에 제목을 붙여 줘. 위 모양들(이슈 제목, 파일명)은 번호 계산 때문에 괄호 없이 그대로야.</div>
     </div>
   </section>
 
@@ -708,6 +708,7 @@ fix/31-broken-link</pre>
       <li>요구사항이 바뀌거나 취소될 때: "REQ-003 취소됐어"</li>
       <li>개발 시작할 때: <code>[DEV-003]</code> 이슈로 <code>/harness:start</code></li>
     </ul>
+    <p class="small" style="margin-top:10px">Claude 는 번호를 말할 때 <code>REQ-003(판매오더 조회 앱)</code> 처럼 괄호로 제목을 붙여서 말해. 제목을 모르면 지어내지 않고 <code>(제목 미확인)</code> 이라고 써. 이슈 제목의 <code>[DEV-003]</code> 와 파일명은 괄호 없이 그대로야.</p>
     <p class="small" style="margin-top:10px">SRS 를 만들거나 고친 끝에 Claude 가 새로 찜한 번호를 표로 꼭 알려 줘. 잊었으면 <code>docs/ssot/SRS.md</code> 요구사항 표의 ID 열, 또는 GitHub 이슈 제목 앞의 <code>[DEV-xxx]</code> 에서 찾아. 고객사 양식의 개발 ID(<code>CO-006-01</code>)와는 다른 번호야.</p>
   </section>
 
@@ -1605,6 +1606,7 @@ Closes #143</pre>
         <li>SRS 를 바꾸면 다른 사람 승인</li>
         <li>병합 뒤 원장을 "완료" 로</li>
         <li>검사를 못 했으면 "검사 불능" 이라고 말해</li>
+        <li>REQ·DEV 번호를 말할 땐 뒤에 괄호로 제목 — <code>REQ-002(판매오더 조회 앱)</code> (이슈 제목 <code>[DEV-xxx]</code>·파일명은 그대로)</li>
       </ul>
     </section>
     <section class="box" style="border-color:var(--stop)">
@@ -1686,7 +1688,7 @@ Closes #143</pre>
     <div class="term"><dt>SSOT</dt><dd><b>Single Source of Truth.</b> 진짜는 한 곳에만 둔다는 원칙.</dd></div>
     <div class="term"><dt>Spec<span>개발 Spec</span></dt><dd><b>레시피 카드.</b> 요구사항 하나를 어떻게 만들지 적은 설계.</dd></div>
     <div class="term"><dt>다음 단계</dt><dd><b>요구사항이 SRS 다음에 가는 길.</b> 개발(→ Spec) · 설정(→ 진행 원장) · 미정(→ 먼저 정하기). 마크다운에만 있고 엑셀엔 안 나가.</dd></div>
-    <div class="term"><dt>REQ · DEV 번호</dt><dd><b>같은 일의 번호표.</b> REQ-003 = DEV-003 = 이슈의 [DEV-003].</dd></div>
+    <div class="term"><dt>REQ · DEV 번호</dt><dd><b>같은 일의 번호표.</b> REQ-003 = DEV-003 = 이슈의 [DEV-003]. 말할 때는 REQ-003(판매오더 조회 앱) 처럼 괄호로 제목을 붙여.</dd></div>
     <div class="term"><dt>진행 원장<span>Ledger</span></dt><dd><b>개발 건 현황판.</b> 대기 → 진행 → 리뷰 → 완료.</dd></div>
     <div class="term"><dt>Audit<span>변경 기록</span></dt><dd><b>"왜 바꿨는지" 일기장.</b> 한 기록에 파일 하나.</dd></div>
     <div class="term"><dt>Template · 양식 지도</dt><dd><b>고객사 양식 원본과, 그 양식의 어느 칸에 무엇을 넣을지 적은 안내도.</b></dd></div>

@@ -98,7 +98,10 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 `## Review notes` 를 덧붙인다. 본문 끝에 `Closes #{이슈번호}` 를 넣는다.
 
 관련 개발 건이 있으면 `## 진행 원장` 절을 추가해 그 개발 건이 등록된 진행
-원장 파일과 DEV 번호를 링크한다(예: `[DEV-003](audit/ledger/구매요청승인.md)`).
+원장 파일과 DEV 번호를 링크한다(예: `[DEV-003(구매요청 승인 앱)](audit/ledger/구매요청승인.md)`).
+번호 뒤 괄호에 제목을 붙이는 규칙은 `rules/issue-and-release.md` "REQ·DEV 번호를 말할 때" 를 따른다. 사용자에게
+하는 보고에서 번호를 말할 때도 같다. 이슈 제목(`[DEV-xxx] …`, 하위 작업 `… (DEV-xxx)`)과 파일명에는
+제목 괄호를 붙이지 않는다 — 번호 계산과 원장 찾기가 그 모양을 읽는다.
 `docs/ssot/` 아래 파일이 이번 변경에 포함되면(SRS 변경) `## Review notes` 에
 "SRS 변경: 사람 승인이 필요하다" 한 줄을 넣고, 이 브랜치에서 추가한
 `audit/changes/` 변경 기록 링크를 함께 적는다.

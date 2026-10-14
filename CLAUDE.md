@@ -63,7 +63,7 @@
 |---|---|
 | `branching.md` | 브랜치 이름 형식, main 직접 커밋·푸시 금지 |
 | `commit-and-pr.md` | 커밋·PR 형식, 푸시 전 fetch·rebase, `--force` 금지 |
-| `issue-and-release.md` | 이슈 제목·본문·라벨, 이슈 크기, 릴리즈 버전과 노트 |
+| `issue-and-release.md` | 이슈 제목·본문·라벨, 이슈 크기, 릴리즈 버전과 노트, REQ·DEV 번호 표기 |
 | `delegation.md` | 메인 세션과 서브에이전트 역할, 모델 고정, 자기 승인 금지 |
 | `governance.md` | 리뷰·병합, 스킬을 거쳐야 하는 작업, 훅이 막았을 때 대응 |
 
