@@ -19,7 +19,7 @@ plugins/harness/
     adt_object_types.json      ADT URL 로 오브젝트 TYPE 을 찾는 표
     adt_tiers.py               env/adt-tiers.yaml 해석(mcp_source_guard.py 가 씀)
     mcp_default_tools.json     adt-tiers.yaml 이 없을 때 쓰는 기본 데이터 추출 도구 목록
-    mcp_object_source_map.json objectSourceUrl 패턴으로 언어(ABAP·CDS·BDEF)를 가리는 표
+    mcp_object_source_map.json objectSourceUrl 패턴으로 언어(ABAP·CDS·BDEF)를 가리는 표(UIAD JSON 은 코드 검사 없는 갈래)
     gitleaks-harness.toml      하네스 기본 gitleaks 설정(checker/gitleaks/harness.toml 의 복사본)
     session-start-sync.sh      세션 시작 때 원격과 동기화하고 남은 경고를 전한다
     ensure-tools.sh            세션 시작 때 uv·jq·gh·gitleaks 가 있는지 보고 없으면 설치한다(session-start-sync.sh 가 부름)

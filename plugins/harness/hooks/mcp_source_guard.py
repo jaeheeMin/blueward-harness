@@ -182,12 +182,32 @@ def engine_hint() -> str:
         return ""
 
 
+# 맵 항목의 "check" 값. 지금은 "none"(코드가 아닌 소스 — 코드 검사 엔진을 부르지 않는다,
+# #327)만 안다. 모르는 값이나 suffix 와 check 가 함께/모두 없는 항목은 읽다가 ValueError 로
+# 끝나고, main() 이 그것을 거부로 바꾼다(조용히 통과시키지 않는다 — CLAUDE.md 원칙 7).
+NO_CODE_CHECK = "none"
+
+
 def _load_url_patterns() -> list[tuple[re.Pattern[str], str]]:
     raw = json.loads(_URL_MAP_PATH.read_text(encoding="utf-8"))
-    return [
-        (re.compile(item["regex"], re.IGNORECASE), item["suffix"])
-        for item in raw.get("patterns", [])
-    ]
+    patterns: list[tuple[re.Pattern[str], str]] = []
+    for item in raw.get("patterns", []):
+        regex = item.get("regex")
+        suffix = item.get("suffix")
+        check = item.get("check")
+        unknown = set(item) - {"regex", "suffix", "check"}
+        if not isinstance(regex, str) or unknown:
+            raise ValueError(f"{_URL_MAP_PATH.name} 항목을 해석할 수 없습니다: {item!r}")
+        if check is None and isinstance(suffix, str) and suffix.startswith("."):
+            value = suffix
+        elif check == NO_CODE_CHECK and suffix is None:
+            value = NO_CODE_CHECK
+        else:
+            raise ValueError(
+                f"{_URL_MAP_PATH.name} 항목의 suffix/check 값을 알 수 없습니다: {item!r}"
+            )
+        patterns.append((re.compile(regex, re.IGNORECASE), value))
+    return patterns
 
 
 def suffix_for_url(url: str) -> str | None:
@@ -195,8 +215,14 @@ def suffix_for_url(url: str) -> str | None:
 
     쿼리스트링을 떼고 URL 디코딩을 한 경로에 패턴을 검색한다 — 인코딩된 경로나
     끝에 `?version=active` 같은 것이 붙어도 판별이 흔들리지 않게 하기 위해서다.
-    아는 패턴이 없으면 None(=판별 못 함)이다.
+    아는 패턴이 없으면 None(=판별 못 함)이다. 코드가 아닌 소스(UIAD JSON 등,
+    맵의 `check: none`)면 `NO_CODE_CHECK` 를 돌려준다 — 확장자는 항상 "." 로 시작하니
+    섞이지 않는다.
     """
+    # urlsplit 은 줄바꿈·탭을 조용히 떼어 버리므로(`...main` 뒤의 개행이 사라진다) 제어문자·
+    # 공백이 든 URL 은 판별하지 않는다.
+    if re.search(r"[\x00-\x20\x7f]", url):
+        return None
     path = unquote(urlsplit(url).path or url)
     for pattern, suffix in _load_url_patterns():
         if pattern.search(path):
@@ -661,6 +687,11 @@ def _main() -> None:
                 "이슈로 요청하십시오(사람이 할 일). 경로를 잘못 넣은 것이라면 Claude 가 "
                 "올바른 objectSourceUrl 로 다시 호출하십시오."
             )
+
+        if suffix == NO_CODE_CHECK:
+            # 코드가 아닌 소스(#327, UIAD 앱 디스크립터 JSON). 티어 가드는 위 1단계에서 이미
+            # 거쳤고, 코드 규칙(CR)은 적용 대상이 아니라 엔진을 부르지 않는다.
+            allow()
 
         _check_code(url, source, suffix)
         return

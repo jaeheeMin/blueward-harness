@@ -472,3 +472,53 @@ def test_활성화_기록_PostToolUse_매처에_launchpad_도구가_없다():
     ]
     assert len(matchers) == 1
     assert "deployUi5App" not in matchers[0] and "publishBusinessCatalog" not in matchers[0]
+
+
+# --- UIAD 앱 디스크립터(#327) --------------------------------------------------
+# 쓴 뒤 활성화가 필요한지는 실측 전이라 created_active 가 아니라 written 으로 추적한다.
+
+UIAD_URL = "/sap/bc/adt/fiori/uiad/zmm_stockledger_app/source/main"
+
+
+def test_uiad_소스를_쓰면_written_이라_막고_activateByName_으로_닫힌다(hooks, repo):
+    _write(hooks, repo, UIAD_URL)
+    rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
+    assert rec[f"{SERVER}|UIAD:ZMM_STOCKLEDGER_APP"]["status"] == "written"
+    assert _gate(hooks, repo)[0] == 1
+    _post(hooks, repo, "activateByName",
+          {"objectName": "ZMM_STOCKLEDGER_APP", "objectUrl": "/sap/bc/adt/fiori/uiad/zmm_stockledger_app"},
+          _result(True))
+    assert _gate(hooks, repo)[0] == 0
+
+
+def test_uiad_는_inactiveObjects_에_없으면_닫히고_있으면_막는다(hooks, repo):
+    _write(hooks, repo, UIAD_URL)
+    rec = [{"object": {"adtcore:uri": "/sap/bc/adt/fiori/uiad/zmm_stockledger_app",
+                       "adtcore:type": "UIAD/TYP", "adtcore:name": "ZMM_STOCKLEDGER_APP"}}]
+    _post(hooks, repo, "inactiveObjects", {}, json.dumps(rec))
+    assert _gate(hooks, repo)[0] == 1
+    _post(hooks, repo, "inactiveObjects", {}, "[]")
+    assert _gate(hooks, repo)[0] == 0
+
+
+def test_uiad_는_활성화_실패_뒤_inactiveObjects_빈_목록으로_닫히고_안내가_먼저_알려_준다(hooks, repo):
+    _write(hooks, repo, UIAD_URL)
+    _post(hooks, repo, "activateByName",
+          {"objectName": "ZMM_STOCKLEDGER_APP", "objectUrl": "/sap/bc/adt/fiori/uiad/zmm_stockledger_app"},
+          _result(False, ["활성화할 수 없음"]))
+    code, out = _gate(hooks, repo)
+    assert code == 1
+    assert "이미 활성인 오브젝트" in out and out.index("inactiveObjects") < out.index("activateObjects")
+    _post(hooks, repo, "inactiveObjects", {}, "[]")
+    assert _gate(hooks, repo)[0] == 0
+
+
+@pytest.mark.parametrize("url", [
+    UIAD_URL + "?lockHandle=abc&corrNr=Z5UK900001",
+    UIAD_URL.upper(),
+    "https://my406740.s4hana.cloud.sap" + UIAD_URL + "?corrNr=Z5UK900001",
+])
+def test_uiad_url_변형도_같은_키로_모인다(hooks, repo, url):
+    _write(hooks, repo, url)
+    rec = json.loads(_record(repo).read_text(encoding="utf-8"))["entries"]
+    assert list(rec) == [f"{SERVER}|UIAD:ZMM_STOCKLEDGER_APP"]
