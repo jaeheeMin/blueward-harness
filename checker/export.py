@@ -73,6 +73,10 @@ class ExportError(Exception):
         self.reason, self.form, self.sheet, self.item = reason, form, sheet, item
 
 
+class SrsPartMissing(ExportError):
+    """SRS 에 `## 요구사항` 절이나 그 표가 없다. 필수 절 검사(required_sections)가 따로 말하는 일이다."""
+
+
 class CellTooLong(ExportError):
     """셀 하나에 못 담는 길이. 거부(종료코드 1)로 바꿔 알린다."""
 
@@ -80,8 +84,8 @@ class CellTooLong(ExportError):
 
 
 def norm(text: str) -> str:
-    """form-map.md 의 정규화: 앞뒤 공백 제거, 줄바꿈·연속 공백은 공백 하나로."""
-    return re.sub(r"\s+", " ", str(text)).strip()
+    """form-map.md 의 정규화: 앞뒤 공백 제거, 줄바꿈·연속 공백은 공백 하나로, 한글은 NFC(macOS 의 NFD 로 쓴 이름도 같게)."""
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", str(text))).strip()
 
 
 # ---------------------------------------------------------------- 열 문자
@@ -462,7 +466,10 @@ def _sheet_paths(zf: zipfile.ZipFile) -> dict[str, str]:
         a = dict(_ATTR_RE.findall(m.group(0)))
         rid = a.get("r:id")
         if rid in targets:
-            out[unescape(a["name"], {"&quot;": '"', "&apos;": "'"})] = targets[rid]
+            name = norm(unescape(a["name"], {"&quot;": '"', "&apos;": "'"}))  # 지도의 시트 이름과 같은 정규화(NFC)
+            if name in out:
+                raise ExportError(f"템플릿에 정규화하면 같은 이름이 되는 시트가 둘 이상 있다: {name!r}")
+            out[name] = targets[rid]
     return out
 
 
@@ -698,14 +705,14 @@ def parse_srs(text: str) -> SrsDoc:
             meta.setdefault(norm(m.group(1)), m.group(2).strip())
     start = next((i for i, l in enumerate(lines) if re.match(r"^##\s+요구사항\s*$", l) and not fenced[i]), None)
     if start is None:
-        raise ExportError("SRS 에 `## 요구사항` 절이 없다")
+        raise SrsPartMissing("SRS 에 `## 요구사항` 절이 없다")
     end = next((i for i in range(start + 1, len(lines)) if re.match(r"^##\s", lines[i]) and not fenced[i]), len(lines))
     body = lines[start + 1: end]
     body_fenced = fenced[start + 1: end]
     first_h3 = next((i for i, l in enumerate(body) if re.match(r"^###\s", l) and not body_fenced[i]), len(body))
     parsed = _parse_table(body[:first_h3], "SRS · 요구사항")
     if not parsed:
-        raise ExportError("SRS 의 `## 요구사항` 절에 표가 없다")
+        raise SrsPartMissing("SRS 의 `## 요구사항` 절에 표가 없다")
     header, rows, bad = parsed
 
     details: dict[str, dict[str, str]] = {}
@@ -1069,13 +1076,15 @@ def build_form(
         for item, reason in sec.issues:
             problem(sname, item, reason)
 
-        # 작업본이 가리키는 것이 지도에 있는지부터 본다(없으면 읽지 못함).
-        for name in sec.fields:
-            if name not in fields:
-                raise ExportError(f"작업본의 칸 {name!r} 이 양식 지도에 없다", form=form, sheet=sname, item=name)
-        for name in subs:
-            if name not in tables and name not in texts:
-                raise ExportError(f"작업본의 `#### {name}` 이 양식 지도의 표·서술에 없다", form=form, sheet=sname, item=name)
+        # 작업본이 가리키는 것이 지도에 있는지부터 본다(없으면 읽지 못함). 모두 모아 한 번에 알린다.
+        off = spec_offenders(sec, subs, smap)
+        if off:
+            raise ExportError(
+                f"작업본의 {sname} 시트에 양식 밖 항목이 있어 산출하지 않았다(엑셀에서 조용히 빠지는 일이 없게 멈춘다): "
+                + "; ".join(f"{kind} {name!r}(허용: {', '.join(ok)})" for kind, name, ok in off)
+                + f". {NEXT_FIX_MAP}",
+                form=form, sheet=sname, item=off[0][1],
+            )
 
         # 칸
         for name, f in fields.items():
@@ -1338,6 +1347,64 @@ def _md_table_rows(form, sname, tname, cols_by_name, subs, problem=None) -> list
     return [{L: _clean(v) for L, v in zip(letters, r)} for r in rows]
 
 
+def srs_table_names(t: dict) -> tuple[dict[str, str], set[str], str | None]:
+    """SRS 원본 표 지도 → ({정규화한 열 이름: 열 문자}, md 전용 이름들(엔진 기본 포함), 번호 열 이름)."""
+    cols = {norm(k): str(v) for k, v in (t.get("열") or {}).items()}
+    md_only = {norm(x) for x in (t.get("md_전용") or [])} | {SRS_NEXT_STEP_COL}
+    id_name = norm(t["번호_열"]) if t.get("번호_열") else None
+    return cols, md_only, id_name
+
+
+def srs_allowed(t: dict) -> tuple[list[str], list[str]]:
+    """지도 표 하나에서 (SRS 요구사항 표에 쓸 수 있는 열, 상세 절 `####` 에 쓸 수 있는 소제목).
+
+    표 열은 `ID` + 지도 `열` + md 전용(`md_전용`, 엔진 기본 `다음 단계`). 상세 절 소제목은 지도 `열`(번호 열 제외) +
+    md 전용. 빠진 열은 허용이다(#243) — 여기는 *쓸 수 있는* 이름만 정한다. 검사(`checker.rules.form_columns`)와 산출이
+    같은 목록을 쓰도록 한 곳에 둔다.
+    """
+    cols, md_only, id_name = srs_table_names(t)
+    extra = sorted(md_only - set(cols), key=lambda x: (x == SRS_NEXT_STEP_COL, x))
+    return ["ID"] + list(cols) + extra, [c for c in cols if c != id_name] + extra
+
+
+def srs_offenders(
+    srs: SrsDoc, header_ok: list[str], detail_ok: list[str]
+) -> tuple[list[str], dict[str, list[str]]]:
+    """SRS 의 (양식 밖 표 열들, {REQ: 양식 밖 상세 소제목들}). 이름은 parse_srs 가 이미 정규화했다."""
+    bad_header = list(dict.fromkeys(h for h in srs.header if h not in header_ok))
+    bad_detail = {}
+    for rid, fields in srs.details.items():
+        bad = [f for f in fields if f not in detail_ok]
+        if bad:
+            bad_detail[rid] = bad
+    return bad_header, bad_detail
+
+
+NEXT_FIX_MAP = "다음: 양식 지도에 있는 열 이름으로 고치거나, 지도에 정말 필요한 열이면 양식 지도(templates/forms/)를 먼저 고친다."
+
+
+def spec_offenders(sec: Section, subs: dict, smap: dict) -> list[tuple[str, str, list[str]]]:
+    """작업본 한 시트의 양식 밖 항목 → [(분류, 이름, 허용 이름들)]. 분류: 칸 / 표·서술 / `표 <이름> 의 열`.
+
+    표 머리글이 깨졌으면 ExportError(읽지 못함)를 그대로 올린다.
+    """
+    fields = [norm(f["항목"]) for f in smap.get("칸", []) or []]
+    tables = {norm(t["이름"]): t for t in smap.get("표", []) or []}
+    texts = [norm(n["이름"]) for n in smap.get("서술", []) or []]
+    out: list[tuple[str, str, list[str]]] = []
+    out += [("칸", n, fields) for n in sec.fields if n not in fields]
+    out += [("표·서술", n, list(tables) + texts) for n in subs if n not in tables and n not in texts]
+    for n, body in subs.items():
+        if n not in tables or not body:
+            continue
+        parsed = _parse_table(body, n)
+        if not parsed:
+            continue
+        ok = [norm(k) for k in (tables[n].get("열") or {})]
+        out += [(f"표 {n} 의 열", h, ok) for h in dict.fromkeys(parsed[0]) if h not in ok]
+    return out
+
+
 def _srs_table_rows(form, sname, tname, t, srs: SrsDoc, problem) -> tuple[list[dict[str, str]], list[str]]:
     """SRS 요구사항 표 + 상세 절 → ({열 문자: 값} 행들, 행 이름(REQ-xxx)들).
 
@@ -1345,26 +1412,22 @@ def _srs_table_rows(form, sname, tname, t, srs: SrsDoc, problem) -> tuple[list[d
     거나 지도 `md_전용` 에 적힌 열이다.
     상세 절 `#### <열 이름>` 은 지도 `열` 의 해당 칸 값이 된다. 그 밖의 이름은 읽지 못함(오타를 조용히 버리지 않는다).
     """
-    cols = {norm(k): str(v) for k, v in (t.get("열") or {}).items()}
-    md_only = {norm(x) for x in (t.get("md_전용") or [])} | {SRS_NEXT_STEP_COL}
-    id_name = norm(t["번호_열"]) if t.get("번호_열") else None
+    cols, md_only, id_name = srs_table_names(t)
     if id_name and id_name not in cols:
         raise ExportError(f"표 {tname!r} 의 번호_열 {id_name!r} 이 지도 열에 없다", form=form, sheet=sname, item=tname)
     if "ID" not in srs.header:
         raise ExportError("SRS 요구사항 표에 `ID` 열이 없다", form=form, sheet=sname, item=tname)
     if len(set(srs.header)) != len(srs.header):
         raise ExportError("SRS 요구사항 표에 같은 이름의 열이 둘 이상 있다", form=form, sheet=sname, item=tname)
-    letters: list[str | None] = []
-    for h in srs.header:
-        if h == "ID" or h in md_only:
-            letters.append(None)
-        elif h in cols:
-            letters.append(cols[h])
-        else:
-            raise ExportError(
-                f"SRS 요구사항 표의 열 {h!r} 이 양식 지도의 열에도 `md_전용` 에도 없다",
-                form=form, sheet=sname, item=h,
-            )
+    header_ok, detail_ok = srs_allowed(t)
+    bad_header, bad_detail = srs_offenders(srs, header_ok, detail_ok)
+    if bad_header:
+        raise ExportError(
+            f"SRS 요구사항 표에 양식 밖 열이 있어 산출하지 않았다(엑셀에서 조용히 빠지는 일이 없게 멈춘다): {', '.join(map(repr, bad_header))}. "
+            f"허용: {', '.join(header_ok)}. {NEXT_FIX_MAP}",
+            form=form, sheet=sname, item=bad_header[0],
+        )
+    letters: list[str | None] = [None if h == "ID" or h in md_only else cols[h] for h in srs.header]
     for n, cnt in srs.bad:
         problem(sname, tname, f"요구사항 표 {n}번째 행의 셀 수({cnt})가 머리글({len(srs.header)})과 다르다")
 
@@ -1372,11 +1435,12 @@ def _srs_table_rows(form, sname, tname, t, srs: SrsDoc, problem) -> tuple[list[d
     for rid, fields in srs.details.items():
         if rid not in all_ids:
             raise ExportError(f"`### {rid}` 상세 절에 해당하는 요구사항 표 행이 없다", form=form, sheet=sname, item=rid)
-        for fname in fields:
-            if fname not in md_only and (fname not in cols or fname == id_name):
-                raise ExportError(
-                    f"{rid} 상세 절의 `#### {fname}` 이 양식 지도의 열에 없다", form=form, sheet=sname, item=rid
-                )
+    if bad_detail:
+        found = "; ".join(f"{rid}: " + ", ".join(f"`#### {x}`" for x in bad) for rid, bad in bad_detail.items())
+        raise ExportError(
+            f"SRS 상세 절에 양식 밖 소제목이 있어 산출하지 않았다: {found}. 허용: {', '.join(detail_ok)}. {NEXT_FIX_MAP}",
+            form=form, sheet=sname, item=next(iter(bad_detail)),
+        )
 
     rows: list[dict[str, str]] = []
     labels: list[str] = []

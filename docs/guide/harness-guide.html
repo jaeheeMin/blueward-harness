@@ -280,7 +280,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.74, public-cloud main 기준 (2026-10-14)</div>
+      <div class="note">harness 0.10.75, public-cloud main 기준 (2026-10-14)</div>
     </div>
   </nav>
 
@@ -538,7 +538,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
         <p class="small" style="margin-bottom:6px">절</p>
         <p style="font-size:14.5px">배경과 목표 · 범위 · AS-IS/TO-BE · 요구사항 · 참조 · 미결 사항. 맨 위에 <code>버전: 0.1</code> 줄이 있고, 이 값이 엑셀 파일명의 버전이 돼.</p>
         <p class="small" style="margin:10px 0 6px">요구사항 표 열</p>
-        <p style="font-size:14.5px">ID, Title, LoB, Type, Status, Priority (PO), Development RICEFW ID, 출처, 다음 단계. 양식 지도에 있는데 표에 빠진 열이 있으면 Claude 가 열을 더하고 채워. 출처와 다음 단계는 마크다운에만 있고 엑셀에는 안 나가.</p>
+        <p style="font-size:14.5px">ID, Title, LoB, Type, Status, Priority (PO), Development RICEFW ID, 출처, 다음 단계. 양식 지도에 있는데 표에 빠진 열이 있으면 Claude 가 열을 더하고 채워. 출처와 다음 단계는 마크다운에만 있고 엑셀에는 안 나가. 이 밖의 이름(양식 지도에 없는 열, 오타 낸 열)은 쓸 수 없어 — 표 열과 상세 절 <code>####</code> 소제목 모두 저장할 때와 PR 에서 거절돼.</p>
       </div>
       <pre>### REQ-002 판매오더 조회
 #### Short Description
@@ -582,6 +582,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
   <div class="callouts">
     <div class="callout warn"><span class="k">번호</span><div>REQ 번호는 Claude 가 번호표 기계로 받아서 붙여. 마지막 번호에 손으로 1 을 더하지 않아. 새 제목이 이미 있는 REQ 제목을 포함하거나 반대로 그 안에 들어 있으면 번호표 기계가 번호를 안 주고 "기존 개발의 하위 작업이야, 새 개발이야?" 를 물어봐. 하위 작업이면 새 줄 대신 그 REQ 를 넓히고, 정말 새 개발이면 확인했다는 표시를 붙여 다시 받아.</div></div>
     <div class="callout warn"><span class="k">다른 번호 적기</span><div>상세 절에 다른 요구사항 번호(<code>REQ-002</code>(판매오더 조회 앱), <code>DEV-002</code>)를 적으면 저장이 거절돼. 같은 개발이면 새 REQ 로 쪼개지 말고 그 REQ 의 범위를 넓혀. 정말 별개면 <code>### REQ-003</code> 제목 바로 아래, 첫 <code>####</code> 소제목 앞에 <code>관계: 별개 — 이유</code> 한 줄을 적어(이 자리는 엑셀로 안 나가). 자기 번호의 DEV 와 <code>옛 REQ-001</code> 처럼 앞에 "옛" 이 붙은 표기는 괜찮아.</div></div>
+    <div class="callout warn"><span class="k">양식 밖 열</span><div>요구사항 표의 열과 상세 절 소제목(<code>#### …</code>)은 양식 지도의 열 이름, 지도의 md 전용 열(출처 등), <code>다음 단계</code> 만 쓸 수 있어. 열을 새로 만들거나 이름을 틀리게 쓰면 저장이 "양식 밖 열: X. 허용: …" 으로 거절되고, PR 의 doc-guard 도 같은 이유로 막고, 엑셀 산출도 멈춰(조용히 빠뜨리지 않아). 지도에 있는 열이 표에 빠진 건 괜찮아. 정말 필요한 열이면 열을 만들지 말고 양식 지도를 먼저 고쳐. 지도가 없는 저장소는 SRS 틀의 열(ID, Title, Status, Priority (PO), 출처, 다음 단계)과 소제목 <code>설명</code> · <code>완료 조건</code> 이 기준이야.</div></div>
     <div class="callout warn"><span class="k">긴 칸</span><div>Short Description 은 몇 줄짜리 요약으로 써. 엑셀 한 칸은 높이 한계(409pt)를 넘으면 잘려 보여. 세부 기능은 Acceptance Criteria 로 나눠. 산출 때 <code>cell-too-tall</code> 경고가 나오면 그 칸이 너무 긴 거야.</div></div>
     <div class="callout warn"><span class="k">옛 이름</span><div><code>docs/ssot/PRD.md</code> 만 있는 옛 구조면, 조용히 새로 만들지 않고 옮길지 먼저 물어봐.</div></div>
     <div class="callout warn"><span class="k">승인 필요</span><div>SRS 를 바꾼 PR 은 작성자 말고 다른 승인자의 Approve 가 있어야 병합돼.</div></div>
@@ -700,7 +701,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
         <li>원장 줄 — Spec 만 먼저 만들면 상태 "대기"</li>
         <li><code>BW_개발사양서_&lt;개발ID&gt;_&lt;제목&gt;_v&lt;버전&gt;.xlsx</code> — 양식을 고를 때</li>
       </ul>
-      <p class="small" style="margin-top:12px">Spec 의 절: 근거 요구사항 · 개요 · 상세 설계 · 사용 객체 · Launchpad 노출 · 완료 조건 · 참조 · 변경 이력. <code>## 사용 객체</code> 는 이 개발이 만들고 고치고 읽는 SAP 객체를 <code>| 종류 | 이름 | 작업 | 비고 |</code> 표로 적는 절이야(작업은 생성·수정·참조). 종류에는 앱 디스크립터(<code>Launchpad App Descriptor Item</code>)·<code>IAM App</code>·<code>Business Catalog</code> 도 있어. <code>## Launchpad 노출</code> 은 이 개발을 Launchpad 타일로 띄울 때만 쓰는 선택 절이야. 타일마다 한 행씩 <code>| 타일 제목 | 부제 | 아이콘 | 시맨틱 오브젝트 | 액션 | 파라미터 | 카탈로그 | 배치 |</code> 로 적고, 개발할 때 Claude 가 이 표로 앱 디스크립터를 채워(모르는 값은 묻고 추측하지 않아). 시맨틱 오브젝트·액션은 글자 형식만 검사해. 선택 절이라 없는 옛 Spec 도 통과하고, 쓰면 표 형식을 검사해. 양식을 쓰면 <code>## 양식 항목</code> 절이 사용 객체·Launchpad 노출 다음에 더 붙어(순서: 상세 설계 → 사용 객체 → Launchpad 노출 → 양식 항목). 이 표는 PR 에서 다른 Spec 과도 비교해서, 같은 객체를 둘 이상의 Spec 이 만들거나 고치면 코멘트에 경고가 떠(막지는 않아).</p>
+      <p class="small" style="margin-top:12px">Spec 의 절: 근거 요구사항 · 개요 · 상세 설계 · 사용 객체 · Launchpad 노출 · 완료 조건 · 참조 · 변경 이력. <code>## 사용 객체</code> 는 이 개발이 만들고 고치고 읽는 SAP 객체를 <code>| 종류 | 이름 | 작업 | 비고 |</code> 표로 적는 절이야(작업은 생성·수정·참조). 종류에는 앱 디스크립터(<code>Launchpad App Descriptor Item</code>)·<code>IAM App</code>·<code>Business Catalog</code> 도 있어. <code>## Launchpad 노출</code> 은 이 개발을 Launchpad 타일로 띄울 때만 쓰는 선택 절이야. 타일마다 한 행씩 <code>| 타일 제목 | 부제 | 아이콘 | 시맨틱 오브젝트 | 액션 | 파라미터 | 카탈로그 | 배치 |</code> 로 적고, 개발할 때 Claude 가 이 표로 앱 디스크립터를 채워(모르는 값은 묻고 추측하지 않아). 시맨틱 오브젝트·액션은 글자 형식만 검사해. 선택 절이라 없는 옛 Spec 도 통과하고, 쓰면 표 형식을 검사해. 양식을 쓰면 <code>## 양식 항목</code> 절이 사용 객체·Launchpad 노출 다음에 더 붙어(순서: 상세 설계 → 사용 객체 → Launchpad 노출 → 양식 항목). <code>## 양식 항목</code> 안의 시트·칸·<code>####</code> 표·서술·표 열은 양식 지도에 있는 이름만 쓸 수 있어. 지도에 없으면(오타 포함) 저장과 PR 이 "양식 밖" 으로 거절하고 산출도 멈춰. 이 표는 PR 에서 다른 Spec 과도 비교해서, 같은 객체를 둘 이상의 Spec 이 만들거나 고치면 코멘트에 경고가 떠(막지는 않아).</p>
     </section>
   </div>
 

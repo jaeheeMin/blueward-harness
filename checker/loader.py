@@ -101,6 +101,10 @@ def _build(name: str, body: dict, source: Path) -> DocType:
             except Exception as exc:
                 raise ConfigError(f"{where}: {kind} 규칙의 기대값을 템플릿에서 뽑지 못했다 — {exc}") from exc
 
+        # 규칙 파일이 있는 폴더. 같은 기준 폴더의 다른 데이터(양식 지도 등)를 상대 경로로 찾는 규칙이 쓴다.
+        # 훅은 검사할 문서만 임시 폴더로 옮겨 오므로 문서 경로로는 기준 폴더를 알 수 없다.
+        params["_rules_dir"] = str(source.parent)
+
         built.append(
             Rule(kind=kind, doc_type=name, template=str(template or ""), params=params)
         )

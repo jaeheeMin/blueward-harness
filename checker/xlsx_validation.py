@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import html
 import re
+import unicodedata
 from dataclasses import dataclass
 
 _ATTR_RE = re.compile(r'([\w:]+)="([^"]*)"')
@@ -83,7 +84,7 @@ class ListReader:
     """통합문서 하나에서 시트별 드롭다운 허용 값을 읽는다."""
 
     def __init__(self, raw: dict[str, bytes], paths: dict[str, str], wb_xml: str):
-        self.raw, self.paths = raw, paths
+        self.raw, self.paths = raw, paths  # paths 키는 export._sheet_paths 가 NFC 로 정규화한 시트 이름
         self._sst: list[str] | None = None
         self.sheet_order = [
             xml_text(dict(_ATTR_RE.findall(m.group(0))).get("name", ""))
@@ -107,7 +108,7 @@ class ListReader:
         return self._sst
 
     def _range_values(self, sheet: str, c1: int, r1: int, c2: int, r2: int) -> list[str]:
-        path = self.paths.get(sheet)
+        path = self.paths.get(unicodedata.normalize("NFC", sheet))
         if path is None or path not in self.raw:
             raise KeyError(f"시트 {sheet!r} 을 찾지 못했다")
         xml = self.raw[path].decode("utf-8-sig")
@@ -178,7 +179,7 @@ class ListReader:
 
     # -- 시트의 유효성
     def validations(self, sheet: str) -> list[Validation]:
-        path = self.paths.get(sheet)
+        path = self.paths.get(unicodedata.normalize("NFC", sheet))
         if path is None or path not in self.raw:
             return []
         xml = self.raw[path].decode("utf-8-sig")
