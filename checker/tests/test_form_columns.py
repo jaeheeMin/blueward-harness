@@ -444,6 +444,16 @@ def test_화면_그림의_이름_소절_표머리가_틀리면_위반이다(repo
     assert [v["actual"] for v in _violations(out)] == [actual]
 
 
+def test_화면_그림의_필수_값과_행_모양도_저장_PR_검사가_본다(repo, capsys):
+    _with_map(repo, SPEC_MAP_SCREEN, "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD.replace("| 기간 | Y |", "| 기간 | 예 |"))
+    assert code == EXIT_VIOLATION
+    assert [v["actual"] for v in _violations(out)] == ["화면 1 그림 · 조회 조건 '기간': 예"]
+    code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD.replace("| 기간 | Y |", "| 기간 | Y | 추가 |"))
+    assert code == EXIT_VIOLATION
+    assert [v["actual"] for v in _violations(out)] == ["화면 1 그림 · 조회 조건: 1번째 행의 셀 수 3"]
+
+
 def test_지도의_화면_값이_틀리면_검사_불능이다(repo, capsys):
     _with_map(repo, SPEC_MAP_SCREEN + "        칸_수: {라벨: 0}\n", "시험양식.yaml")
     code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD)

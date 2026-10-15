@@ -28,7 +28,7 @@ from typing import NamedTuple
 
 from checker.blank_template import RangeError, _hit, parse_range
 from checker.cell_style import StylesXml, merge_range, style_range, validate_style
-from checker.export import ExportError, SheetXml, _clean, _parse_table, col2n, n2col, norm, split_ref
+from checker.export import ExportError, SheetXml, _clean, _parse_table, col2n, is_srs_map, n2col, norm, split_ref
 
 DEFAULT_COUNTS = {"라벨": 2, "입력": 3, "버튼": 2, "열": 2, "간격": 1, "빈_행": 2}
 _COUNT_MIN = {"라벨": 1, "입력": 1, "버튼": 1, "열": 1, "간격": 0, "빈_행": 0}
@@ -65,22 +65,33 @@ def items(smap: dict) -> list[dict]:
 
 # ---------------------------------------------------------------- 지도 검증
 
-def _owned(s: dict) -> list[tuple[str, tuple[int, int, int, int]]]:
-    """지도가 이미 맡은 영역(칸·서술 위치, 표 데이터 영역, 유지). 화면 영역은 여기와 겹치면 안 된다."""
+def _owned(s: dict) -> tuple[list[tuple[str, tuple[int, int, int, int]]], list[tuple[str, str]]]:
+    """(지도가 이미 맡은 영역, 지도 오류). 맡은 영역: 칸·서술 위치, 표 데이터 영역, 유지. 화면 영역은 여기와 겹치면 안 된다."""
     owned: list[tuple[str, tuple[int, int, int, int]]] = []
-    for x in s.get("유지") or []:
+    bad: list[tuple[str, str]] = []
+    lists: dict[str, list] = {}
+    for key in ("유지", "칸", "서술", "표"):
+        v = s.get(key)
+        if v is None:
+            lists[key] = []
+        elif isinstance(v, list):
+            lists[key] = v
+        else:
+            lists[key] = []
+            bad.append(("map", f"시트 {s.get('이름')!r} 의 `{key}`(목록이어야 한다)"))
+    for x in lists["유지"]:
         try:
             owned.append((f"유지 {x}", parse_range(x)))
         except (RangeError, TypeError):
             pass
     for kind in ("칸", "서술"):
-        for it in s.get(kind) or []:
+        for it in lists[kind]:
             if isinstance(it, dict) and it.get("위치"):
                 try:
                     owned.append((f"{kind} {it.get('항목', it.get('이름'))!r} {it['위치']}", parse_range(it["위치"])))
                 except RangeError:
                     pass
-    for t in s.get("표") or []:
+    for t in lists["표"]:
         if not isinstance(t, dict) or not isinstance(t.get("열"), dict) or not isinstance(t.get("시작_행"), int):
             continue
         start = t["시작_행"]
@@ -89,7 +100,7 @@ def _owned(s: dict) -> list[tuple[str, tuple[int, int, int, int]]]:
             if isinstance(col, str) and re.fullmatch(r"[A-Z]{1,3}", col):
                 n = col2n(col)
                 owned.append((f"표 {t.get('이름')!r} 의 {col} 열", (n, start, n, end)))
-    return owned
+    return owned, bad
 
 
 def map_problems(fmap: dict) -> list[tuple[str, str]]:
@@ -103,8 +114,19 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
         if not isinstance(v, list):
             out.append(("map", f"시트 {sn!r} 의 `화면`(목록이어야 한다)"))
             continue
-        owned = _owned(s)
-        reserved = {norm(str(x.get("이름"))) for k in ("표", "서술") for x in s.get(k) or [] if isinstance(x, dict)}
+        try:
+            srs_map = is_srs_map(fmap)
+        except (TypeError, AttributeError):
+            srs_map = False
+        if srs_map:
+            out.append(("map", f"시트 {sn!r} 의 `화면` — 원본이 SRS 인 지도에는 화면 그림을 둘 수 없다(작업본 `## 양식 항목` 이 원본인 지도에만 쓴다)"))
+            continue
+        owned, owned_bad = _owned(s)
+        out += owned_bad
+        reserved = {
+            norm(str(x.get("이름")))
+            for k in ("표", "서술") if isinstance(s.get(k), list) for x in s[k] if isinstance(x, dict)
+        }
         seen: set[str] = set()
         rects: list[tuple[str, tuple[int, int, int, int]]] = []
         for it in v:
@@ -202,8 +224,18 @@ def offenders(item: dict, body: list[str]) -> list[tuple[str, str, list[str]]]:
         ok = [" | ".join(h) for h in SECTIONS[name]]
         if parsed is None:
             out.append(("화면 표 머리", f"{where} · {name}: (표 없음)", ok))
-        elif parsed[0] not in SECTIONS[name]:
-            out.append(("화면 표 머리", f"{where} · {name}: {' | '.join(parsed[0])}", ok))
+            continue
+        header, rows, wrong = parsed
+        if header not in SECTIONS[name]:
+            out.append(("화면 표 머리", f"{where} · {name}: {' | '.join(header)}", ok))
+            continue
+        for n, cnt in wrong:  # 값·행 모양 검사도 여기 둔다 — 저장 훅·PR(form_columns)과 --check·산출이 같은 검사를 한다
+            out.append(("화면 표 행", f"{where} · {name}: {n}번째 행의 셀 수 {cnt}", [f"머리글과 같은 {len(header)}칸"]))
+        if name == "조회 조건" and len(header) > 1:
+            for r in rows:
+                flag = _clean(r[1]).upper()
+                if flag not in ("Y", "N", ""):
+                    out.append(("화면 필수 값", f"{where} · 조회 조건 '{_clean(r[0])}': {r[1]}", ["Y", "N", "(빈칸)"]))
     return out
 
 
@@ -267,8 +299,8 @@ def layout(item: dict, conds: list[tuple[str, bool]], buttons: list[str], cols: 
 def _read(item: dict, body: list[str], sname: str, problem) -> tuple[list[tuple[str, bool]], list[str], list[str]] | None:
     """md 소절을 읽는다. 값 문제는 problem 으로 알리고 None."""
     where = md_name(item)
-    off = offenders(item, body)
-    if off:  # 보통 spec_offenders 가 먼저 막지만 단독으로 불러도 조용히 넘기지 않는다
+    off = offenders(item, body)  # 구조·머리글·행 모양·필수 값 (spec_offenders 와 같은 검사. 단독으로 불러도 조용히 넘기지 않는다)
+    if off:
         raise ExportError(f"{sname} 시트의 {where} 에 양식 밖 항목이 있다: " + "; ".join(f"{k} {n!r}" for k, n, _ in off), sheet=sname, item=where)
     tables, _ = _tables(body, where)
     bad = False
@@ -276,19 +308,15 @@ def _read(item: dict, body: list[str], sname: str, problem) -> tuple[list[tuple[
     buttons: list[str] = []
     cols: list[str] = []
     for sec, parsed in tables.items():
-        header, rows, wrong = parsed
-        for n, cnt in wrong:
-            problem(sname, where, f"{sec} 표 {n}번째 행의 셀 수({cnt})가 머리글({len(header)})과 다르다")
-            bad = True
-        for r in rows:
+        header, rows, _wrong = parsed
+        for k, r in enumerate(rows, start=1):
             name = _clean(r[0])
-            if not name:
+            if not name:  # 빈 행·`미정` 은 조용히 빼지 않고 거부한다
+                problem(sname, where, f"{sec} 표 {k}번째 행의 이름이 {'미정' if r[0].strip() == '미정' else '비어 있다'} — 이름을 적거나 행을 지운다")
+                bad = True
                 continue
             if sec == "조회 조건":
                 flag = _clean(r[1]).upper() if len(r) > 1 else ""
-                if flag not in ("Y", "N", ""):
-                    problem(sname, where, f"조회 조건 '{name}' 의 필수 값 {r[1]!r} 는 Y 또는 N(빈칸)이어야 한다")
-                    bad = True
                 conds.append((name, flag == "Y"))
             elif sec == "버튼":
                 buttons.append(name)
@@ -297,19 +325,19 @@ def _read(item: dict, body: list[str], sname: str, problem) -> tuple[list[tuple[
     return None if bad else (conds, buttons, cols)
 
 
-def draw(ed: SheetXml, styles: StylesXml, item: dict, body: list[str], sname: str, problem) -> int:
-    """한 화면을 그린다. 그린 칸 수를 낸다(거절하면 0). 영역을 넘치거나 영역 안에 값이 있으면 쓰지 않고 problem 으로 알린다."""
+def draw(ed: SheetXml, styles: StylesXml, item: dict, body: list[str], sname: str, problem) -> int | None:
+    """한 화면을 그린다. 그린 칸 수를 낸다(소절이 없거나 비어 0). 이름 빈칸·영역 초과·영역 안 값은 쓰지 않고 problem 으로 알리고 None."""
     where = md_name(item)
     read = _read(item, body, sname, problem)
     if read is None:
-        return 0
+        return None
     boxes, over = layout(item, *read)
     if over:
         problem(sname, where, (
             f"{where} 이 영역 {item['영역']} 를 넘는다 — 넘친 항목: {', '.join(over[:12])}{' …' if len(over) > 12 else ''}. "
             "영역을 넓히거나 항목을 줄이거나 지도의 `칸_수` 를 줄인다(자르지 않는다)"
         ))
-        return 0
+        return None
     c0, r0, c1, r1 = parse_range(item["영역"])
     taken = [r for r in ed.valued_refs() if c0 <= col2n(split_ref(r)[0]) <= c1 and r0 <= split_ref(r)[1] <= r1]
     if taken and boxes:
@@ -317,13 +345,13 @@ def draw(ed: SheetXml, styles: StylesXml, item: dict, body: list[str], sname: st
             f"영역 {item['영역']} 안에 이미 값이 있다({', '.join(taken[:5])}{' …' if len(taken) > 5 else ''}) — "
             "견본이 남은 자리에는 그리지 않는다. 지도 `비우기` 로 지운 빈 양식을 템플릿으로 쓴다"
         ))
-        return 0
+        return None
     saved = (ed._max_row, ed._max_col)  # 글자 쓰기가 자동 필터 범위를 늘리지 않게(dimension 은 set_style 이 넓힌다)
     try:
         for b in boxes:
             a, z = f"{n2col(b.col)}{b.row}", f"{n2col(b.col + b.width - 1)}{b.row}"
             if b.text:
-                ed.set(a, b.text)
+                ed.set(a, b.text, as_text=True)
             style_range(ed, styles, a, z, item["스타일"][b.kind], sname)
             if b.width > 1:
                 merge_range(ed, a, z, sname)

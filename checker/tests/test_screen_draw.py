@@ -309,10 +309,74 @@ def test_지도에_화면이_없으면_그림_절은_양식_밖이다(proj, caps
     assert "화면 1 그림" in report["problems"][0]["reason"]
 
 
-def test_필수_값이_Y_N_빈칸이_아니면_거절한다(proj, capsys):
-    code, report = _run(proj, capsys, screen(cond="| 이름 | 필수 |\n|---|---|\n| 기간 | 예 |\n"))
-    assert code == 1
-    assert "Y 또는 N" in report["problems"][0]["reason"]
+def test_필수_값이_Y_N_빈칸이_아니면_구조_검사에서_거절한다(proj, capsys):
+    body = screen(cond="| 이름 | 필수 |\n|---|---|\n| 기간 | 예 |\n")
+    for extra in ((), ("--check",)):
+        code, report = _run(proj, capsys, body, *extra)
+        assert code == 2 and "화면 필수 값" in report["problems"][0]["reason"]
+    # 저장 훅·PR 과 같은 검사(offenders)가 먼저 본다
+    item = screen_draw.items({"화면": [{"이름": "화면 1", "영역": "C7:S14"}]})[0]
+    off = screen_draw.offenders(item, body.splitlines()[2:])
+    assert [k for k, _, _ in off] == ["화면 필수 값"]
+
+
+def test_셀_수가_머리글과_다른_행도_구조_검사에서_거절한다(proj, capsys):
+    code, report = _run(proj, capsys, screen(cond="| 이름 | 필수 |\n|---|---|\n| 기간 | Y | 추가 |\n"))
+    assert code == 2 and "화면 표 행" in report["problems"][0]["reason"]
+    assert _nothing_written(proj)
+
+
+def test_이름_칸이_미정이거나_비면_거부한다(proj, capsys):
+    for bad, word in (("미정", "미정"), ("", "비어")):
+        code, report = _run(proj, capsys, screen(btn=f"| 이름 |\n|---|\n| 취소 |\n| {bad} |\n"))
+        assert code == 1, report
+        assert word in report["problems"][0]["reason"] and "2번째 행" in report["problems"][0]["reason"]
+        assert _nothing_written(proj)
+
+
+# ---------------------------------------------------------------- 그리지 않은 화면은 경고
+
+def _drawn_warnings(report: dict) -> list[dict]:
+    return [w for w in report["warnings"] if "그리지 않았다" in w["reason"]]
+
+
+def test_그림_절이_없으면_경고하되_거부하지_않는다(proj, capsys):
+    code, report = _run(proj, capsys, "")
+    assert code == 0
+    ws = _drawn_warnings(report)
+    assert len(ws) == 1 and ws[0]["item"] == "화면 1 그림" and ws[0]["sheet"] == "Screen" and "절이 없어" in ws[0]["reason"]
+
+
+def test_소절이_하나도_없는_그림_절도_경고한다(proj, capsys):
+    code, report = _run(proj, capsys, "#### 화면 1 그림\n\n")
+    assert code == 0, report
+    ws = _drawn_warnings(report)
+    assert len(ws) == 1 and "비어 있어" in ws[0]["reason"]
+    assert _merges(_sheet(proj, report)) == set()
+
+
+def test_시트가_해당_없음이거나_작업본에_없어도_같은_경고다(proj, capsys):
+    spec = proj / "spec.md"
+    for text in ("# D\n\n## 양식 항목\n\n### 시험양식 · Screen\n\n해당 없음\n", "# D\n\n## 양식 항목\n\n### 시험양식 · Other\n\n해당 없음\n"):
+        spec.write_text(text, encoding="utf-8")
+        code = export.main(["--spec", str(spec), "--root", str(proj), "--check"])
+        report = json.loads(capsys.readouterr().out)
+        assert len(_drawn_warnings(report)) == 1, report
+
+
+def test_그린_화면은_경고가_없다(proj, capsys):
+    _, report = _run(proj, capsys, screen())
+    assert _drawn_warnings(report) == []
+
+
+# ---------------------------------------------------------------- 그림 글자는 늘 문자열
+
+def test_숫자처럼_보이는_이름도_문자열_셀로_쓴다(proj, capsys):
+    code, report = _run(proj, capsys, screen(cond="| 이름 |\n|---|\n| 2026 |\n", btn="| 이름 |\n|---|\n| 10 |\n", res="| 열 |\n|---|\n| 3 |\n"))
+    assert code == 0, report
+    ws = _sheet(proj, report)
+    assert ws["C7"].value == "2026" and ws["C9"].value == "10" and ws["C10"].value == "3"
+    assert all(isinstance(ws[c].value, str) for c in ("C7", "C9", "C10"))
 
 
 # ---------------------------------------------------------------- 템플릿 상태
@@ -375,6 +439,19 @@ def test_화면_영역이_표_열과_겹치면_멈춘다():
     fmap = {"시트": [{"이름": "S", "표": [{"이름": "T", "시작_행": 9, "열": {"a": "D"}}],
                      "화면": [{"이름": "화면 1", "영역": "C7:S14"}]}]}
     assert any("표 'T'" in m for _, m in screen_draw.map_problems(fmap))
+
+
+def test_SRS_원본_지도에_화면이_있으면_지도_오류다():
+    fmap = {"시트": [{"이름": "S", "표": [{"이름": "T", "원본": "SRS", "시작_행": 4, "열": {"a": "A"}}],
+                     "화면": [{"이름": "화면 1", "영역": "C7:S14"}]}]}
+    assert any("원본이 SRS" in m for _, m in screen_draw.map_problems(fmap))
+
+
+@pytest.mark.parametrize("key", ["칸", "서술", "표", "유지"])
+def test_목록이_아닌_칸_표_서술_유지는_TypeError_없이_지도_오류다(key):
+    fmap = {"시트": [{"이름": "S", key: 5, "화면": [{"이름": "화면 1", "영역": "C7:S14"}]}]}
+    msgs = [m for _, m in screen_draw.map_problems(fmap)]
+    assert any(f"`{key}`(목록이어야 한다)" in m for m in msgs)
 
 
 def test_영역_문자열_오류는_range_종류다():

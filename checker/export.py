@@ -234,23 +234,23 @@ class SheetXml:
         self._max_row = max(self._max_row, n)
         self._max_col = max(self._max_col, col2n(col))
 
-    def _coerce(self, text: str, style: str | None) -> tuple[str, str]:
-        """(속성 t 값, 본문)을 낸다. 날짜·정수는 숫자로, 나머지는 inlineStr."""
-        if _DATE.match(text) and style in self.date_styles:
+    def _coerce(self, text: str, style: str | None, as_text: bool = False) -> tuple[str, str]:
+        """(속성 t 값, 본문)을 낸다. 날짜·정수는 숫자로, 나머지는 inlineStr. `as_text` 면 늘 inlineStr."""
+        if not as_text and _DATE.match(text) and style in self.date_styles:
             try:
                 d = dt.date.fromisoformat(text)
             except ValueError:
                 d = None
             if d:
                 return "", f"<v>{(d - self.base).days}</v>"
-        if _INT.match(text):
+        if not as_text and _INT.match(text):
             return "", f"<v>{text}</v>"
         safe = escape(text.replace("\r\n", "\n").replace("\r", "\n"))
         sp = ' xml:space="preserve"' if (safe != safe.strip() or "\n" in safe) else ""
         return "inlineStr", f"<is><t{sp}>{safe}</t></is>"
 
-    def set(self, ref: str, text: str, style: str | None = None, clone_row: int | None = None) -> int:
-        """셀에 쓴다. XML 에 못 넣는 문자는 지우고 지운 개수를 돌려준다."""
+    def set(self, ref: str, text: str, style: str | None = None, clone_row: int | None = None, as_text: bool = False) -> int:
+        """셀에 쓴다. XML 에 못 넣는 문자는 지우고 지운 개수를 돌려준다. `as_text` 면 숫자·날짜로 바꾸지 않고 문자열 셀로 쓴다."""
         cleaned = _CTRL.sub("", text)
         removed = len(text) - len(cleaned)
         text = cleaned
@@ -276,7 +276,7 @@ class SheetXml:
             )
         elif style is not None:
             cell.attrs = [(k, v) for k, v in cell.attrs if k != "s"] + [("s", style)]
-        t, body = self._coerce(text, cell.style)
+        t, body = self._coerce(text, cell.style, as_text)
         cell.attrs = [(k, v) for k, v in cell.attrs if k != "t"]
         if t:
             cell.attrs.append(("t", t))
@@ -1222,9 +1222,11 @@ def build_form(
         from checker.cell_style import StylesXml
 
         for sname, smap in map_sheets.items():
-            drawn = [(i, spec_sections[sname][1].get(screen_draw.md_name(i))) for i in screen_draw.items(smap)] if sname in spec_sections else []
-            for item, body in drawn:
+            subs_of = spec_sections[sname][1] if sname in spec_sections else {}  # 해당 없음·작업본에 시트 절이 없으면 비어 있다
+            for item in screen_draw.items(smap):
+                body = subs_of.get(screen_draw.md_name(item))
                 if body is None:
+                    warn(sname, screen_draw.md_name(item), f"{item['이름']} 은 작업본에 `#### {screen_draw.md_name(item)}` 절이 없어 그리지 않았다(영역 {item['영역']} 은 템플릿 그대로)")
                     continue
                 if styles_ed is None:
                     if "xl/styles.xml" not in raw:
@@ -1234,9 +1236,11 @@ def build_form(
                     except ExportError as e:
                         raise ExportError(e.reason, form=form, sheet=sname) from None
                 try:
-                    screen_draw.draw(editor(sname), styles_ed, item, body, sname, problem)
+                    drawn = screen_draw.draw(editor(sname), styles_ed, item, body, sname, problem)
                 except ExportError as e:
                     raise ExportError(e.reason, form=form, sheet=sname, item=e.item) from None
+                if drawn == 0:  # 거부(None)가 아니라 그릴 항목이 없는 경우
+                    warn(sname, screen_draw.md_name(item), f"{item['이름']} 의 그림 절이 비어 있어(소절이 없다) 그리지 않았다(영역 {item['영역']} 은 템플릿 그대로)")
 
     # 쓴 셀이 엑셀 행 높이 상한을 넘어 잘릴지 어림한다(type: cell-too-tall).
     styles_xml =raw["xl/styles.xml"].decode("utf-8-sig") if "xl/styles.xml" in raw else None
