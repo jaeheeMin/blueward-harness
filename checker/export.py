@@ -1105,8 +1105,8 @@ def build_form(
             if not val:
                 if f.get("필수"):
                     problem(sname, name, "필수 칸이 미정이거나 비어 있다")
-                elif f.get("예시") is not None:
-                    ed.clear(str(f["위치"]))
+                else:
+                    ed.clear(str(f["위치"]))  # 값이 없으면 견본을 비운다(빈 양식과 같은 모습: `fill_ranges`)
                 continue
             text = _BR.sub("\n", val)
             if f.get("형식"):
@@ -1282,6 +1282,42 @@ def build_form(
     return [(out_path, buf.getvalue())], [], warnings
 
 
+def table_template_last(ed: SheetXml, t: dict) -> int:
+    """표의 템플릿 데이터 영역 마지막 행. `최대_행` 이 있으면 그 범위 끝, 없으면 값이 이어지는 마지막 행(없으면 시작_행-1)."""
+    start = int(t["시작_행"])
+    if t.get("최대_행") is not None:
+        return start + int(t["최대_행"]) - 1
+    letters = [str(v) for v in (t.get("열") or {}).values()]
+    last = start - 1
+    while any(ed.has_value(f"{c}{last + 1}") for c in letters):
+        last += 1
+    return last
+
+
+def fill_ranges(ed: SheetXml, smap: dict) -> list[str]:
+    """지도가 '채울 자리' 로 정한 곳 중 산출이 값 없이 두면 비우는 범위들.
+
+    칸 `위치`(`자동` 칸은 산출이 건드리지 않으니 뺀다), 표 데이터 영역(머리글 행 제외, 열마다), 서술 `위치`(두 칸 `열` 이어도 범위 전체).
+    산출의 비우기와 빈 양식(`checker.blank_template`)이 같이 쓴다 — 빈 양식 = 산출이 아무 값도 안 넣었을 때의 모습.
+    """
+    out: list[str] = []
+    for f in smap.get("칸") or []:
+        if isinstance(f, dict) and f.get("위치") and not f.get("자동"):
+            out.append(str(f["위치"]))
+    for t in smap.get("표") or []:
+        if not isinstance(t, dict) or not isinstance(t.get("열"), dict) or t.get("시작_행") is None:
+            continue
+        start, last = int(t["시작_행"]), table_template_last(ed, t)
+        if last < start:
+            continue
+        for c in dict.fromkeys(str(v) for v in t["열"].values()):
+            out.append(f"{c}{start}:{c}{last}")
+    for n in smap.get("서술") or []:
+        if isinstance(n, dict) and n.get("위치"):
+            out.append(str(n["위치"]))
+    return out
+
+
 def _write_table(
     form, sname, tname, t, tables, subs, ed, md_values, problem, sheet_tops, put,
     srs_rows: tuple[list[dict[str, str]], list[str]] | None = None, check=None, row_check=None,
@@ -1333,12 +1369,7 @@ def _write_table(
 
     # 템플릿의 데이터 영역
     letters = list(cols.values())
-    if max_rows is not None:
-        tmpl_last = start + max_rows - 1
-    else:
-        tmpl_last = start - 1
-        while any(ed.has_value(f"{c}{tmpl_last + 1}") for c in letters):
-            tmpl_last += 1
+    tmpl_last = table_template_last(ed, t)
 
     last_row = start + len(out_rows) - 1
     if max_rows is None and last_row > tmpl_last:
