@@ -1398,3 +1398,50 @@ def test_템플릿_시트_이름이_NFD여도_지도의_NFC_이름으로_찾아_
     assert code == 0, report
     ws = openpyxl.load_workbook(bproj / report["files"][0])[nfd]
     assert ws["A4"].value == 2
+
+
+# ---------------------------------------------------------------- 지도 `비우기`·서술 두 칸(#335)
+
+def _edit_map(proj: Path, old: str, new: str) -> None:
+    p = proj / "templates" / "forms" / "시험양식.yaml"
+    text = p.read_text(encoding="utf-8")
+    assert old in text
+    p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def test_지도_비우기_범위를_지우고_공유문자열_본문도_비운다(proj, capsys):
+    from checker.blank_template import _SI_RE, _si_text
+    from checker.tests.test_blank_template import share_strings
+
+    share_strings(proj / "templates" / "시험.xlsx")
+    _edit_map(proj, "  - 이름: Info\n", "  - 이름: Info\n    비우기: [A20]\n")
+    code, report = _run(proj, capsys)
+    assert code == 0, report
+    out = _produced(proj, report)
+    assert openpyxl.load_workbook(out)["Info"]["A20"].value is None
+    with zipfile.ZipFile(out) as zf:
+        sst = [_si_text(m.group(0)) for m in _SI_RE.finditer(zf.read("xl/sharedStrings.xml").decode())]
+    assert "손대지 않을 칸" not in sst and "코드" in sst  # 다른 칸이 쓰는 문자열은 남는다
+
+
+def test_비우기가_지도_칸과_겹치면_읽지_못함_2(proj, capsys):
+    _edit_map(proj, "  - 이름: Info\n", "  - 이름: Info\n    비우기: [B2]\n")
+    code, report = _run(proj, capsys)
+    assert code == 2 and "겹친다" in report["problems"][0]["reason"]
+
+
+def test_서술_두_칸_구조는_제목과_설명_칸에_각각_쓴다(proj, capsys):
+    _edit_map(proj, "        위치: A14:A16\n", "        위치: A14:B16\n        열: {제목: A, 설명: B}\n")
+    text = SPEC.replace("1. 첫째\n2. 둘째", "1. 첫째 | 설명<br>둘째줄\n2. 제목만")
+    code, report = _run(proj, capsys, text)
+    assert code == 0, report
+    ws = openpyxl.load_workbook(_produced(proj, report))["Info"]
+    assert (ws["A14"].value, ws["B14"].value) == ("1. 첫째", "설명\n둘째줄")
+    assert (ws["A15"].value, ws["B15"].value) == ("2. 제목만", None)
+    assert (ws["A16"].value, ws["B16"].value) == (None, None)  # 남은 샘플은 비운다
+
+
+def test_서술_열이_위치_밖이면_지도_오류_2(proj, capsys):
+    _edit_map(proj, "        위치: A14:A16\n", "        위치: A14:A16\n        열: {제목: A, 설명: C}\n")
+    code, report = _run(proj, capsys)
+    assert code == 2 and "열 범위 밖" in report["problems"][0]["reason"]

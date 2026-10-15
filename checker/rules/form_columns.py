@@ -34,7 +34,7 @@ from pathlib import Path
 
 import yaml
 
-from checker import export
+from checker import blank_template, export
 from checker.model import ConfigError, Violation
 from checker.rules import prepare, rule
 from checker.rules.md_table import read_section_table
@@ -122,6 +122,12 @@ def _valid_map(data, path: Path) -> dict:
                 bad(f"표 {t['이름']!r} 의 `열`(이름: 열 문자 사전이어야 한다)")
             if t.get("md_전용") is not None and not isinstance(t["md_전용"], list):
                 bad(f"표 {t['이름']!r} 의 `md_전용`(목록이어야 한다)")
+    # 새 키(`비우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·서술 `열`)는 산출과 같은 검증으로 본다.
+    problems = blank_template.map_problems(data)
+    if problems:
+        raise ConfigError(
+            f"양식 지도 {path.name} 가 틀려 양식 밖 열을 검사할 수 없다: " + "; ".join(m for _, m in problems)
+        )
     return data
 
 
