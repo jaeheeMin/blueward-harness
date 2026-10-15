@@ -395,6 +395,35 @@ def test_alignment_override_keeps_protection_and_other_alignment_attrs():
     assert inner.count("<alignment") == 1 and inner.index("<alignment") < inner.index("<protection")
 
 
+def test_non_selfclosing_alignment_is_read_not_duplicated():
+    xml = STYLES_XML.replace('<alignment indent="2" horizontal="left"/>', '<alignment indent="2" horizontal="left"></alignment>')
+    st = StylesXml(xml)
+    n = st.derive(1, {"가로": "가운데"})
+    inner = cell_style._xf_parts(st.xfs.items[n])[1]
+    assert inner.count("<alignment") == 1 and 'horizontal="center"' in inner and 'indent="2"' in inner
+    # 읽지 못하는 alignment 는 하나 더 만들지 않고 멈춘다.
+    bad = StylesXml(STYLES_XML.replace('<alignment indent="2" horizontal="left"/>', '<alignment indent="2"><x/></alignment>'))
+    with pytest.raises(ExportError, match="alignment"):
+        bad.derive(1, {"가로": "가운데"})
+
+
+@pytest.mark.parametrize("broken", [
+    STYLES_XML.replace('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>', '<xf numFmtId="0" fontId="abc" fillId="0" borderId="0" xfId="0"/>'),
+    STYLES_XML.replace("</font>", ""),  # 닫히지 않은 font
+])
+def test_unexpected_styles_shape_rolls_back_and_raises_export_error(broken: str):
+    try:
+        st = StylesXml(broken)
+    except ExportError:
+        return  # 읽는 단계에서 이미 멈췄다
+    ed = _sheet(rows='<row r="1"><c r="A1"/></row>')
+    before = st.snapshot()
+    with pytest.raises(ExportError) as ei:
+        style_range(ed, st, "A1", "B1", {"굵게": True}, "화면")
+    assert ei.value.sheet == "화면"
+    assert st.snapshot() == before and not ed.dirty and ed.cell("B1") is None
+
+
 def test_style_range_is_atomic_on_failure():
     st = StylesXml(STYLES_XML)
     ed = _sheet(rows='<row r="1"><c r="A1" s="1"/></row>')

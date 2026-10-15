@@ -228,7 +228,11 @@ class StylesXml:
             attrs = _set_attr(attrs, "fontId", str(self.fonts.find_or_add(font)))
             attrs = _set_attr(attrs, "applyFont", "1")
         if any(k in d for k in ("가로", "세로", "줄바꿈")):
-            am = re.search(r"<alignment\b([^>]*?)/>", inner)
+            am = re.search(r"<alignment\b([^>]*?)(?:/>|>\s*</alignment>)", inner)
+            if am is None and "<alignment" in inner:
+                raise ExportError("xf 의 alignment 를 읽지 못해 덮어쓸 수 없다")
+            if am is not None and inner.count("<alignment") != 1:
+                raise ExportError("xf 에 alignment 가 둘 이상이라 덮어쓸 수 없다")
             al = _attrs(am.group(1), "xf 의 alignment") if am else []
             if "가로" in d:
                 al = _set_attr(al, "horizontal", _HORIZONTAL[d["가로"]])
@@ -321,6 +325,9 @@ def style_range(ed: SheetXml, styles: StylesXml, first: str, last: str | None, d
     except ExportError as exc:
         styles.rollback(snap)
         raise ExportError(exc.reason, sheet=sname) from None
+    except (ValueError, AttributeError, KeyError, IndexError) as exc:  # styles.xml 모양이 예상 밖(fontId="abc", 닫히지 않은 font 등)
+        styles.rollback(snap)
+        raise ExportError(f"styles.xml 을 읽지 못해 서식을 만들 수 없다: {type(exc).__name__} {exc}", sheet=sname) from None
     for ref, new in plan:  # 모든 칸의 서식이 정해진 뒤에만 시트를 바꾼다
         ed.set_style(ref, new)
     return len(plan)
