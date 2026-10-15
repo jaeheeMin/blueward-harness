@@ -183,6 +183,8 @@ class SheetXml:
         self.filter_change: tuple[str, str] | None = None
         self._max_row = 0
         self._max_col = 0
+        self._style_row = 0  # set_style 로 서식만 입힌 끝 행·열(dimension 만 넓힌다)
+        self._style_col = 0
         for rm in _ROW_RE.finditer(m.group(1) or ""):
             attrs = dict(_ATTR_RE.findall(rm.group(1)))
             num = int(attrs["r"])
@@ -312,6 +314,25 @@ class SheetXml:
         row.cells.insert(pos, _Cell(ref, [("r", ref), ("s", style)], ""))
         self._touch(row, ref)
 
+    def set_style(self, ref: str, style: str) -> None:
+        """셀의 서식(s)만 바꾼다. 행·셀이 없으면 만든다. 값·자동 필터 범위는 건드리지 않고 dimension 만 넓힌다."""
+        col, num = split_ref(ref)
+        row = self._row(num)
+        cell = self.cell(ref)
+        if cell is None:
+            cell = _Cell(ref, [("r", ref), ("s", style)], "")
+            pos = next((i for i, c in enumerate(row.cells) if c.col > col2n(col)), len(row.cells))
+            row.cells.insert(pos, cell)
+        elif any(k == "s" for k, _ in cell.attrs):
+            cell.attrs = [(k, style if k == "s" else v) for k, v in cell.attrs]
+        else:
+            cell.attrs = cell.attrs + [("s", style)]
+        cell.raw = None
+        row.raw = None
+        self.dirty = True
+        self._style_row = max(self._style_row, num)
+        self._style_col = max(self._style_col, col2n(col))
+
     def style_of(self, ref: str) -> str | None:
         c = self.cell(ref)
         return c.style if c else None
@@ -345,13 +366,13 @@ class SheetXml:
                 self.filter_change = (f"{c1}{r1}:{c2}{r2}", f"{c1}{r1}:{c2}{self._max_row}")
                 return f'{m.group(1)}{c1}{r1}:{c2}{self._max_row}"'
             post = re.sub(r'(<autoFilter\b[^>]*?\bref=")([A-Z]+)(\d+):([A-Z]+)(\d+)"', grow, post, count=1)
-        if self._max_row:
+        if self._max_row or self._style_row:
             def fix(m: re.Match) -> str:
                 a, b = m.group(1).split(":") if ":" in m.group(1) else (m.group(1), m.group(1))
                 c1, r1 = split_ref(a)
                 c2, r2 = split_ref(b)
-                c2 = n2col(max(col2n(c2), self._max_col))
-                r2 = max(r2, self._max_row)
+                c2 = n2col(max(col2n(c2), self._max_col, self._style_col))
+                r2 = max(r2, self._max_row, self._style_row)
                 return f'<dimension ref="{c1}{r1}:{c2}{r2}"/>'
             pre = re.sub(r'<dimension ref="([^"]+)"\s*/>', fix, pre, count=1)
         body = "".join(self.rows[n].render() for n in sorted(self.rows))
