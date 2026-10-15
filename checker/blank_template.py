@@ -8,7 +8,11 @@
     python -m checker.blank_template --root R --form <양식> --src <견본 xlsx> --out <빈 xlsx> [--check]
 
 지도 시트 항목의 키
-    비우기: [범위…]       값만 지운다(서식·병합 유지). 수식 셀은 지우지 않고 알린다.
+    (기본)                지도가 "채울 자리" 로 정한 곳의 견본 값을 지운다: 칸 `위치`(`자동` 칸 제외), 표 데이터 영역(머리글 행 제외),
+                          서술 범위. 산출(`checker.export`)이 값 없이 두면 비우는 곳과 같은 함수(`export.fill_ranges`)를 쓴다.
+                          라벨·머리글·작성 안내문은 지도가 맡지 않은 칸이라 그대로 둔다.
+    비우기: [범위…]       지도 밖 칸의 값을 지운다(서식·병합 유지). 수식 셀은 지우지 않고 알린다.
+    유효성_지우기: [범위…]  그 범위와 겹치는 데이터 유효성(드롭다운; 표준·x14)을 뺀다. 일부만 겹치면 sqref 에서 겹친 부분만 뺀다.
     그림_지우기: true     그 시트의 drawing(그림·도형)과 그것만 쓰던 media 를 지운다.
     유지: [범위…]         PR B(남은 견본 검사)가 쓴다. 이번엔 키만 인정한다.
 지도 최상위 키
@@ -81,7 +85,7 @@ def _hit(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
 # ---------------------------------------------------------------- 지도 검증(export·form_columns 가 같이 쓴다)
 
 def map_problems(fmap: dict) -> list[tuple[str, str]]:
-    """새 키(`비우기`·`그림_지우기`·`유지`·`외부_참조_지우기`)와 서술 `열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
+    """새 키(`비우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`)와 서술 `열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
     out: list[tuple[str, str]] = []
     top = fmap.get("외부_참조_지우기")
     if top is not None and not isinstance(top, bool):
@@ -104,6 +108,16 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                     keyed[key].append((x, parse_range(x)))
                 except RangeError as e:
                     out.append(("range", f"시트 {sn!r} 의 `{key}`: {e.reason}"))
+        v = s.get("유효성_지우기")
+        if v is not None:
+            if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+                out.append(("map", f"시트 {sn!r} 의 `유효성_지우기`(범위 문자열 목록이어야 한다)"))
+            else:
+                for x in v:
+                    try:
+                        parse_range(x)
+                    except RangeError as e:
+                        out.append(("range", f"시트 {sn!r} 의 `유효성_지우기`: {e.reason}"))
         g = s.get("그림_지우기")
         if g is not None and not isinstance(g, bool):
             out.append(("map", f"시트 {sn!r} 의 `그림_지우기` 는 true/false 여야 한다"))
@@ -196,6 +210,113 @@ def clear_ranges(ed: SheetXml, ranges: list[str], info: Cleared) -> None:
                 info.cells += 1
         ed.clear_range(f"{n2col(c1)}{r1}", f"{n2col(c2)}{r2}")
     ed._max_row, ed._max_col = saved
+
+
+# ---------------------------------------------------------------- 데이터 유효성 지우기
+
+_DV_STD = re.compile(r"<dataValidation\b([^>]*?)(?:/>|>.*?</dataValidation>)", re.S)
+_DV_X14 = re.compile(r"<(\w+:)dataValidation\b[^>]*>.*?</\1dataValidation>", re.S)
+_SQREF_ATTR = re.compile(r'(\bsqref=")([^"]*)(")')
+_SQREF_EL = re.compile(r"(<\w+:sqref>)(.*?)(</\w+:sqref>)", re.S)
+_DV_GROUP = re.compile(r"<((?:\w+:)?)dataValidations\b[^>]*>.*?</\1dataValidations>", re.S)
+
+
+def _subtract(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> list[tuple[int, int, int, int]]:
+    """직사각형 a 에서 b 와 겹친 부분을 뺀 나머지(최대 4개)."""
+    if not _hit(a, b):
+        return [a]
+    out = []
+    if a[1] < b[1]:
+        out.append((a[0], a[1], a[2], b[1] - 1))
+    if a[3] > b[3]:
+        out.append((a[0], b[3] + 1, a[2], a[3]))
+    top, bot = max(a[1], b[1]), min(a[3], b[3])
+    if a[0] < b[0]:
+        out.append((a[0], top, b[0] - 1, bot))
+    if a[2] > b[2]:
+        out.append((b[2] + 1, top, a[2], bot))
+    return out
+
+
+def _fmt(r: tuple[int, int, int, int]) -> str:
+    a, b = f"{n2col(r[0])}{r[1]}", f"{n2col(r[2])}{r[3]}"
+    return a if a == b else f"{a}:{b}"
+
+
+@dataclass
+class ValidationsCleared:
+    removed: int = 0  # 통째로 뺀 항목
+    trimmed: int = 0  # sqref 일부만 뺀 항목
+    unparsed: list[str] = field(default_factory=list)  # 해석하지 못해 그대로 둔 sqref 조각(열 전체 `A:A` 등)
+    hit: set[int] = field(default_factory=set)  # 실제로 어떤 유효성과 겹친 지도 범위의 번호
+
+
+def _trim_sqref(sqref: str, cuts: list[tuple[int, int, int, int]], res: ValidationsCleared) -> str:
+    """sqref 에서 cuts 와 겹친 부분을 뺀 새 sqref(전부 빠지면 빈 글자)."""
+    keep: list[str] = []
+    for tok in sqref.split():
+        if not _RANGE.match(tok):
+            keep.append(tok)
+            res.unparsed.append(tok)
+            continue
+        rects = [parse_range(tok)]
+        for i, c in enumerate(cuts):
+            if _hit(rects[0], c):
+                res.hit.add(i)
+        for c in cuts:
+            rects = [p for r in rects for p in _subtract(r, c)]
+        keep += [_fmt(r) for r in rects]
+    return " ".join(keep)
+
+
+def clear_validations(xml: str, ranges: list[str], res: ValidationsCleared) -> str:
+    """시트 XML 에서 `ranges` 와 겹치는 데이터 유효성(표준·x14)을 뺀다.
+
+    일부만 겹치면 그 항목의 sqref 에서 겹친 부분만 빼고 나머지(수식·종류)는 그대로 둔다. 항목이 다 빠진 묶음과
+    그 묶음만 담던 x14 `ext` 는 걷는다.
+    """
+    cuts = [parse_range(r) for r in ranges]
+
+    def edit(whole: str, pat: re.Pattern) -> str:
+        # 항목 여는 태그(표준) 또는 `<xm:sqref>` 요소(x14)의 sqref 만 고친다.
+        end = whole.find(">") + 1
+        head, rest = whole[:end], whole[end:]
+        if pat is _SQREF_ATTR:
+            if head.endswith("/>"):
+                head, rest = whole[:end - 2], whole[end - 2:]
+            target, base = head, 0
+        else:
+            target, base = rest, end
+        m = pat.search(target)
+        if not m:
+            return whole
+        new = _trim_sqref(m.group(2), cuts, res)
+        if new == m.group(2):
+            return whole
+        if not new:
+            res.removed += 1
+            return ""
+        res.trimmed += 1
+        a, b = m.start(2) + base, m.end(2) + base
+        return whole[:a] + new + whole[b:]
+
+    out = _DV_STD.sub(lambda m: edit(m.group(0), _SQREF_ATTR), xml)
+    out = _DV_X14.sub(lambda m: edit(m.group(0), _SQREF_EL), out)
+    if out == xml:
+        return xml
+
+    def group(m: re.Match) -> str:
+        whole = m.group(0)
+        n = len(re.findall(r"<(?:\w+:)?dataValidation\b", whole))
+        if n == 0:
+            return ""
+        i = whole.index(">") + 1
+        return re.sub(r'\bcount="\d+"', f'count="{n}"', whole[:i], count=1) + whole[i:]
+
+    out = _DV_GROUP.sub(group, out)
+    out = re.sub(r"<ext\b[^>]*>\s*</ext>", "", out)  # x14 묶음만 담던 ext
+    out = re.sub(r"<extLst>\s*</extLst>", "", out)
+    return out
 
 
 # ---------------------------------------------------------------- 공유 문자열
@@ -622,8 +743,11 @@ def scrub_doc_props(parts: dict[str, bytes]) -> list[str]:
     return cleared
 
 
-def review_notices(parts: dict[str, bytes], sheets: dict[str, str]) -> list[dict]:
-    """견본 여부를 엔진이 판정하지 않는 곳(PR B 범위)에 내용이 있으면 위치와 함께 알린다. 조용히 통과시키지 않는다."""
+def review_notices(parts: dict[str, bytes], sheets: dict[str, str], named: set[str] = frozenset()) -> list[dict]:
+    """견본 여부를 엔진이 판정하지 않는 곳(PR B 범위)에 내용이 있으면 위치와 함께 알린다. 조용히 통과시키지 않는다.
+
+    `named`: 지도 `시트` 의 이름 — 지도가 이름을 정한 시트는 견본이 아니라 시트 이름 알림에서 뺀다.
+    """
     out: list[dict] = []
 
     def add(kind: str, where: str, what: str) -> None:
@@ -645,8 +769,9 @@ def review_notices(parts: dict[str, bytes], sheets: dict[str, str]) -> list[dict
     for name in sorted(parts):
         if re.match(r"xl/(comments\d*\.xml|threadedComments/[^/]+\.xml)$", name):
             add("comments", name, "메모(주석)가")
-    if sheets:
-        add("sheet-names", "시트 이름: " + ", ".join(map(repr, sheets)), "시트 이름이")
+    unnamed = [n for n in sheets if n not in named]
+    if unnamed:
+        add("sheet-names", "시트 이름: " + ", ".join(map(repr, unnamed)), "시트 이름이")
     for part, fields in (("docProps/core.xml", ("dc:subject", "dc:description", "cp:keywords", "cp:category")),):
         if part in parts:
             xml = parts[part].decode("utf-8-sig", "replace")
@@ -690,29 +815,54 @@ def build_blank(root: Path, form: str, src: Path) -> Built:
     original = set(parts)
     wipe_ext = fmap.get("외부_참조_지우기") is True
     cleared = Cleared()
+    notices_dv: list[dict] = []
     per_sheet: dict[str, int] = {}
     pic_sheets: dict[str, str] = {}
+    dv_report: dict[str, dict] = {}
     for s in fmap["시트"]:
         sname = norm(s["이름"])
         want_clear, want_pic = s.get("비우기") or [], s.get("그림_지우기") is True
-        if not want_clear and not want_pic:
+        want_dv = s.get("유효성_지우기") or []
+        has_slots = any(s.get(k) for k in ("칸", "표", "서술"))
+        if not want_clear and not want_pic and not want_dv and not has_slots:
             continue
         if sname not in paths or paths[sname] not in parts:
             raise ExportError(f"견본에서 시트 {sname!r} 의 XML 을 찾지 못했다", form=form, sheet=sname)
         if want_pic:
             pic_sheets[sname] = paths[sname]
-        if want_clear:
+        if want_clear or want_dv or has_slots:
             xml, bom = _text(parts, paths[sname])
             ed = SheetXml(xml, set(), False)
+            # 지도가 채울 자리로 정한 곳(산출이 값 없이 두면 비우는 곳)과 `비우기`
+            ranges = export.fill_ranges(ed, s) + list(want_clear)
             before = cleared.cells
-            clear_ranges(ed, want_clear, cleared)
-            per_sheet[sname] = cleared.cells - before
-            if ed.dirty:
-                _set(parts, paths[sname], ed.render(), bom)
+            clear_ranges(ed, ranges, cleared)
+            if ranges:
+                per_sheet[sname] = cleared.cells - before
+            out_xml = ed.render() if ed.dirty else xml
+            if want_dv:
+                vres = ValidationsCleared()
+                out_xml = clear_validations(out_xml, want_dv, vres)
+                dv_report[sname] = {"removed": vres.removed, "trimmed": vres.trimmed}
+                miss = [r for i, r in enumerate(want_dv) if i not in vres.hit]
+                if miss:
+                    notices_dv.append({
+                        "type": "validation-unmatched",
+                        "sheet": sname,
+                        "ranges": miss,
+                        "reason": f"시트 {sname!r} 의 `유효성_지우기` {', '.join(miss)} 와 겹치는 데이터 유효성을 찾지 못해 아무것도 지우지 못했다 — 확인 필요",
+                    })
+                if vres.unparsed:
+                    notices_dv.append({
+                        "type": "validation-unparsed",
+                        "reason": f"시트 {sname!r} 의 데이터 유효성 범위 {', '.join(sorted(set(vres.unparsed)))} 는 해석하지 못해 그대로 뒀다 — 확인 필요",
+                    })
+            if out_xml != xml:
+                _set(parts, paths[sname], out_xml, bom)
     samples = set(cleared.texts) | sst_texts(parts, cleared.sst_ids)
     pics = remove_pictures(parts, pic_sheets) if pic_sheets else Pictures()
     samples |= pics.texts
-    notices: list[dict] = []
+    notices: list[dict] = list(notices_dv)
     ext = ExternalRemoval()
     ext_before = _external_links(parts)
     if wipe_ext:
@@ -741,7 +891,7 @@ def build_blank(root: Path, form: str, src: Path) -> Built:
         notices.append({"type": "drawing-shared", "parts": pics.kept_shared,
                         "reason": "다른 시트가 쓰는 drawing 은 남겼다(그 시트의 연결만 끊었다)"})
     props_cleared = scrub_doc_props(parts)
-    notices += review_notices(parts, paths)
+    notices += review_notices(parts, paths, {norm(s["이름"]) for s in fmap["시트"]})
     gone = [n for n in original if n not in parts]
     _content_types_drop(parts, gone)
     leftovers = find_leftovers(parts, samples)
@@ -752,6 +902,7 @@ def build_blank(root: Path, form: str, src: Path) -> Built:
                 zo.writestr(copy.copy(info), parts[info.filename])
     report = {
         "cleared": per_sheet,
+        "validations_cleared": dv_report,
         "strings_blanked": n_blank,
         "removed_parts": sorted(gone),
         "external_links": (

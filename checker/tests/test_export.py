@@ -1445,3 +1445,16 @@ def test_서술_열이_위치_밖이면_지도_오류_2(proj, capsys):
     _edit_map(proj, "        위치: A14:A16\n", "        위치: A14:A16\n        열: {제목: A, 설명: C}\n")
     code, report = _run(proj, capsys)
     assert code == 2 and "열 범위 밖" in report["problems"][0]["reason"]
+
+
+def test_값_없는_칸은_예시가_없어도_템플릿_견본을_비우고_자동_칸은_보존한다(proj, capsys):
+    """빈 양식(`blank_template`)과 같은 모습이 되도록, 예시 키가 없는 칸(수량)도 값이 없으면 견본을 비운다(#335 후속)."""
+    tpl = proj / "templates" / "시험.xlsx"
+    wb = openpyxl.load_workbook(tpl)
+    wb["Info"]["B6"] = "견본수량"  # 수량 칸에는 `예시` 가 없다
+    wb.save(tpl)
+    _, report = _run(proj, capsys, SPEC.replace("| 수량 | 12 |", "| 수량 |  |"))
+    ws = openpyxl.load_workbook(_produced(proj, report))["Info"]
+    assert ws["B6"].value is None  # 값이 없으면 비운다
+    assert ws["B4"].value == '=B2&"x"'  # 자동 칸은 그대로
+    assert ws["A20"].value == "손대지 않을 칸"

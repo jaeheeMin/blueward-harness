@@ -204,7 +204,7 @@ def _make_src(
 
 
 def _map(root: Path, *, clear=("B2:D3",), pics=("Pic1", "Pic2"), top=None, info_extra=None) -> None:
-    info = {"이름": "Info", "칸": [{"항목": "코드", "위치": "A1"}]}
+    info = {"이름": "Info", "칸": [{"항목": "코드", "위치": "F1"}]}  # 값 칸(F1). A1 은 라벨이라 지도가 맡지 않는다
     if clear:
         info["비우기"] = list(clear)
     info.update(info_extra or {})
@@ -357,7 +357,7 @@ def test_읽지_못한_견본은_2(root, capsys):
 
 
 def test_비우기가_지도_칸과_겹치면_지도_오류_2(root, capsys):
-    _map(root, clear=("A1:B2",))
+    _map(root, clear=("F1:G2",))
     code, rep = _run(root, capsys)
     assert code == 2 and "겹친다" in rep["problems"][0]["reason"]
 
@@ -470,7 +470,8 @@ def test_견본_판정을_안_하는_곳은_확인_필요로_알린다(tmp_path,
     code, rep = _run(tmp_path, capsys)
     assert code == 0, rep
     kinds = {n["kind"] for n in rep["notices"] if n["type"] == "review-needed"}
-    assert {"header-footer", "validation-literal", "comments", "sheet-names"} <= kinds
+    assert {"header-footer", "validation-literal", "comments"} <= kinds
+    assert "sheet-names" not in kinds  # 네 시트 모두 지도가 이름을 정했다
     assert all("확인 필요" in n["reason"] for n in rep["notices"] if n["type"] == "review-needed")
 
 
@@ -478,3 +479,207 @@ def test_family_같은_태그를_수식으로_오인하지_않는다():
     from checker import export
     assert not export.is_formula('<v>1</v><family val="2"/>')
     assert export.is_formula("<f>1+1</f><v></v>") and export.is_formula('<f t="shared" si="0"/>')
+
+
+# ---------------------------------------------------------------- 후속(#335): 채울 자리의 견본 지우기, 유효성 지우기, 시트 이름 알림
+
+def test_시트_이름_알림은_지도가_이름을_정한_시트를_뺀다(tmp_path, capsys):
+    (tmp_path / "templates").mkdir()
+    _make_src(tmp_path / "src.xlsx", review=True)
+    _map(tmp_path)
+    mp = tmp_path / "templates" / "forms" / "빈양식.yaml"
+    data = yaml.safe_load(mp.read_text(encoding="utf-8"))
+    data["시트"] = [x for x in data["시트"] if x["이름"] != "Drop"]  # Drop 은 지도가 이름을 정하지 않았다
+    mp.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    code, rep = _run(tmp_path, capsys)
+    assert code == 0, rep
+    note = next(n for n in rep["notices"] if n.get("kind") == "sheet-names")
+    assert "Drop" in note["where"] and "Info" not in note["where"] and "Pic1" not in note["where"]
+
+
+DV_STD = (
+    '<dataValidations count="3">'
+    '<dataValidation type="list" sqref="J1:J5"><formula1>"가,나"</formula1></dataValidation>'
+    '<dataValidation type="list" sqref="K1:K2"><formula1>"다,라"</formula1></dataValidation>'
+    '<dataValidation type="list" sqref="L1 L3"><formula1>"마"</formula1></dataValidation>'
+    "</dataValidations>"
+)
+X14_NS = (
+    'xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" '
+    'xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"'
+)
+
+
+def _x14(*items: tuple[str, str]) -> str:
+    body = "".join(
+        f'<x14:dataValidation type="list"><x14:formula1><xm:f>{f}</xm:f></x14:formula1><xm:sqref>{sq}</xm:sqref></x14:dataValidation>'
+        for f, sq in items
+    )
+    return (
+        f'<extLst><ext uri="{{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}}" {X14_NS}>'
+        f'<x14:dataValidations count="{len(items)}">{body}</x14:dataValidations></ext></extLst>'
+    )
+
+
+def _form_src(path: Path, x14_items=(("Drop!$A$1:$A$3", "M1:M3"), ("Drop!$A$1:$A$3", "N1:N4"))) -> None:
+    """양식 합성 견본. Info: 라벨(A1·A4·B4·F9·G9), 값 칸 B1, 자동 칸 B2(수식), 표 A5:B7, 서술 F10:G12, 지도 밖 H1·D4."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Info"
+    ws["A1"], ws["B1"], ws["A2"], ws["B2"] = "라벨", "견본값", "자동", "=1+1"
+    ws["A4"], ws["B4"], ws["D4"] = "이름", "값", "작성 안내문"
+    for i in range(3):
+        ws[f"A{5 + i}"], ws[f"B{5 + i}"] = f"견본이름{i}", f"견본값{i}"
+    ws["F9"], ws["G9"] = "제목", "설명"
+    for i in range(3):
+        ws[f"F{10 + i}"], ws[f"G{10 + i}"] = f"견본제목{i}", f"견본설명{i}"
+    ws["H1"] = "지도밖"
+    wb.create_sheet("Drop")["A1"] = "목록"
+    buf = io.BytesIO()
+    wb.save(buf)
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue())) as zi, zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zo:
+        for it in zi.infolist():
+            data = zi.read(it.filename)
+            if it.filename == "xl/worksheets/sheet1.xml":
+                data = data.replace(b"<pageMargins", DV_STD.encode(), 1)
+                if x14_items:
+                    data = data.replace(b"</worksheet>", _x14(*x14_items).encode() + b"</worksheet>")
+            zo.writestr(it.filename, data)
+
+
+FORM_MAP = {
+    "양식": "빈양식", "템플릿": "../src.xlsx", "산출": {"폴더": "out", "파일명": "x.xlsx"},
+    "시트": [
+        {
+            "이름": "Info",
+            "칸": [{"항목": "값칸", "위치": "B1"}, {"항목": "자동칸", "위치": "B2", "자동": True}],
+            "표": [{"이름": "목록", "머리글_행": 4, "시작_행": 5, "열": {"이름": "A", "값": "B"}}],
+            "서술": [{"이름": "설명", "위치": "F10:G12", "열": {"제목": "F", "설명": "G"}}],
+        },
+        {"이름": "Drop"},
+    ],
+}
+
+
+def _form_root(tmp_path: Path, **sheet_keys) -> Path:
+    (tmp_path / "templates" / "forms").mkdir(parents=True)
+    _form_src(tmp_path / "src.xlsx")
+    _form_src(tmp_path / "templates" / "src.xlsx")  # 산출(export)이 읽는 템플릿 — 같은 견본
+    data = json.loads(json.dumps(FORM_MAP))
+    data["시트"][0].update(sheet_keys)
+    (tmp_path / "templates" / "forms" / "빈양식.yaml").write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    return tmp_path
+
+
+def _cells(path: Path, sheet: str = "Info") -> dict[str, object]:
+    ws = openpyxl.load_workbook(path)[sheet]
+    return {c.coordinate: c.value for row in ws.iter_rows() for c in row if c.value is not None}
+
+
+def test_채울_자리의_견본은_지우고_라벨과_머리글은_남긴다(tmp_path, capsys):
+    root = _form_root(tmp_path)
+    code, rep = _run(root, capsys)
+    assert code == 0, rep
+    got = _cells(root / "templates" / "빈.xlsx")
+    # 라벨·머리글·작성 안내문·지도 밖 칸·자동 칸(수식)은 남는다
+    assert got == {
+        "A1": "라벨", "A2": "자동", "B2": "=1+1", "A4": "이름", "B4": "값", "D4": "작성 안내문",
+        "F9": "제목", "G9": "설명", "H1": "지도밖",
+    }
+    assert rep["cleared"]["Info"] == 1 + 6 + 6  # 값칸 B1, 표 A5:B7, 서술 F10:G12
+    assert rep["leftovers"] == []  # 지운 견본 글자가 공유 문자열 등에 다시 보이지 않는다
+
+
+def test_빈_양식은_산출이_아무_값도_안_넣었을_때와_같다(tmp_path, capsys):
+    from checker import export
+    root = _form_root(tmp_path)
+    code, _ = _run(root, capsys)
+    assert code == 0
+    files, problems, _ = export.build_form("빈양식", {}, root)
+    assert not problems and len(files) == 1
+    exported = root / "export.xlsx"
+    exported.write_bytes(files[0][1])
+    assert _cells(exported) == _cells(root / "templates" / "빈.xlsx")
+
+
+def test_fill_ranges는_자동_칸과_머리글_행을_뺀다(tmp_path):
+    from checker import export
+    root = _form_root(tmp_path)
+    ed = export.SheetXml(_parts(root / "src.xlsx")["xl/worksheets/sheet1.xml"].decode(), set(), False)
+    assert export.fill_ranges(ed, FORM_MAP["시트"][0]) == ["B1", "A5:A7", "B5:B7", "F10:G12"]
+
+
+def test_유효성_지우기는_표준과_x14에서_겹친_부분만_뺀다(tmp_path, capsys):
+    root = _form_root(tmp_path, 유효성_지우기=["J1:J2", "L1", "M1:M3", "N2"])
+    code, rep = _run(root, capsys)
+    assert code == 0, rep
+    xml = _parts(root / "templates" / "빈.xlsx")["xl/worksheets/sheet1.xml"].decode()
+    sq = re.findall(r'<dataValidation [^>]*sqref="([^"]*)"', xml)
+    assert sq == ["J3:J5", "K1:K2", "L3"]  # J 는 부분만, K 는 그대로, L1 만 빠지고 L3 남음
+    assert '<dataValidations count="3">' in xml
+    assert re.findall(r"<xm:sqref>(.*?)</xm:sqref>", xml) == ["N1 N3:N4"]  # M1:M3 항목은 통째로, N1:N4 는 N2 만 빠진다
+    assert 'x14:dataValidations count="1"' in xml
+    assert rep["validations_cleared"]["Info"] == {"removed": 1, "trimmed": 3}
+    _well_formed(_parts(root / "templates" / "빈.xlsx"))
+
+
+def test_유효성을_전부_빼면_묶음과_ext도_걷는다(tmp_path, capsys):
+    root = _form_root(tmp_path, 유효성_지우기=["J1:L5", "M1:N4"])
+    code, rep = _run(root, capsys)
+    assert code == 0, rep
+    xml = _parts(root / "templates" / "빈.xlsx")["xl/worksheets/sheet1.xml"].decode()
+    assert "dataValidation" not in xml and "<ext" not in xml and "extLst" not in xml
+    assert rep["validations_cleared"]["Info"]["removed"] == 5
+    _well_formed(_parts(root / "templates" / "빈.xlsx"))
+
+
+def test_유효성_지우기는_외부_이름을_쓰는_드롭다운을_먼저_빼서_외부_참조_지우기와_충돌하지_않는다(tmp_path, capsys):
+    root = _form_root(tmp_path, 유효성_지우기=["J1:J5"])
+    src = root / "src.xlsx"
+    with zipfile.ZipFile(src) as zi:
+        items = [(i.filename, zi.read(i.filename)) for i in zi.infolist()]
+    with zipfile.ZipFile(src, "w", zipfile.ZIP_DEFLATED) as zo:
+        for n, d in items:
+            if n == "xl/worksheets/sheet1.xml":
+                d = d.replace('sqref="J1:J5"><formula1>"가,나"</formula1>'.encode(), b'sqref="J1:J5"><formula1>Pri</formula1>')
+            elif n == "xl/workbook.xml":
+                if b"xmlns:r=" not in d:
+                    d = d.replace(b"<workbook ", b'<workbook xmlns:r="' + REL.rstrip("/").encode() + b'" ', 1)
+                d = d.replace(b"</sheets>", b'</sheets><externalReferences><externalReference r:id="rIdE1"/></externalReferences>'
+                              b'<definedNames><definedName name="Pri">[1]Defs!$A$1:$A$3</definedName></definedNames>', 1)
+            elif n == "xl/_rels/workbook.xml.rels":
+                d = d.replace(b"</Relationships>", f'<Relationship Id="rIdE1" Type="{REL}externalLink" Target="externalLinks/externalLink1.xml"/></Relationships>'.encode())
+            zo.writestr(n, d)
+        zo.writestr("xl/externalLinks/externalLink1.xml", b'<?xml version="1.0"?><externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>')
+    mp = root / "templates" / "forms" / "빈양식.yaml"
+    data = yaml.safe_load(mp.read_text(encoding="utf-8"))
+    data["외부_참조_지우기"] = True
+    mp.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    code, rep = _run(root, capsys)
+    assert code == 0, rep
+    assert rep["external_links"]["removed"] == 1
+    # `유효성_지우기` 를 빼면 그 드롭다운이 외부 이름을 써서 종료코드 2 다
+    data["시트"][0].pop("유효성_지우기")
+    mp.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    code, rep = _run(root, capsys, out="templates/빈2.xlsx")
+    assert code == 2 and "드롭다운" in rep["problems"][0]["reason"]
+
+
+def test_유효성_지우기_범위_오류는_거부_1(tmp_path, capsys):
+    root = _form_root(tmp_path, 유효성_지우기=["J1:"])
+    code, rep = _run(root, capsys)
+    assert code == 1 and "유효성_지우기" in rep["problems"][0]["reason"]
+
+
+def test_유효성_지우기가_아무것도_못_지우면_알린다(tmp_path, capsys):
+    root = _form_root(tmp_path, 유효성_지우기=["J1:J2", "Z50:Z60"])
+    code, rep = _run(root, capsys)
+    assert code == 0, rep
+    note = next(n for n in rep["notices"] if n["type"] == "validation-unmatched")
+    assert note["sheet"] == "Info" and note["ranges"] == ["Z50:Z60"]  # 겹친 J1:J2 는 알리지 않는다
+    # 겹치는 유효성이 하나도 없으면 범위 전부
+    (tmp_path / "b").mkdir()
+    root2 = _form_root(tmp_path / "b", 유효성_지우기=["Z50:Z60"])
+    code, rep = _run(root2, capsys)
+    assert code == 0 and next(n for n in rep["notices"] if n["type"] == "validation-unmatched")["ranges"] == ["Z50:Z60"]
+    assert rep["validations_cleared"]["Info"] == {"removed": 0, "trimmed": 0}
