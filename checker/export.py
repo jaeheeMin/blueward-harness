@@ -119,6 +119,14 @@ _CELL_RE = re.compile(r"<c\b([^>]*?)(?:/>|>(.*?)</c>)", re.S)
 _ATTR_RE = re.compile(r'([\w:]+)="([^"]*)"')
 
 
+_FORMULA_TAG = re.compile(r"<f[\s>/]")
+
+
+def is_formula(inner: str) -> bool:
+    """셀 본문에 수식 `<f>` 가 있는가(`<family>` 같은 다른 태그는 아니다)."""
+    return _FORMULA_TAG.search(inner) is not None
+
+
 @dataclass
 class _Cell:
     ref: str
@@ -135,7 +143,7 @@ class _Cell:
         return dict(self.attrs).get("s")
 
     def has_content(self) -> bool:
-        return any(tag in self.inner for tag in ("<v>", "<v ", "<is>", "<is ", "<f"))
+        return any(tag in self.inner for tag in ("<v>", "<v ", "<is>", "<is ")) or is_formula(self.inner)
 
     def render(self) -> str:
         if self.raw is not None:
@@ -257,7 +265,7 @@ class SheetXml:
                     pos = i
                     break
             row.cells.insert(pos, cell)
-        elif "<f" in cell.inner:
+        elif is_formula(cell.inner):
             raise ExportError(
                 f"{ref} 는 수식 셀이라 덮어쓸 수 없다. 지도에 `자동: true` 가 빠졌는지 확인한다"
             )
@@ -279,7 +287,7 @@ class SheetXml:
     def clear(self, ref: str) -> None:
         """값만 비운다. 내용이 없는 셀은 건드리지 않고, 수식 셀도 건드리지 않는다."""
         cell = self.cell(ref)
-        if cell is None or not cell.has_content() or "<f" in cell.inner:
+        if cell is None or not cell.has_content() or is_formula(cell.inner):
             return
         cell.attrs = [(k, v) for k, v in cell.attrs if k != "t"]
         cell.inner = ""
@@ -837,6 +845,9 @@ def load_map(root: Path, form: str) -> tuple[dict, Path]:
     for s in data["시트"]:
         if not isinstance(s, dict) or "이름" not in s:
             raise ExportError(f"양식 지도 {path} 의 시트에 `이름` 이 없다", form=form)
+    from checker import blank_template  # blank_template 이 export 를 불러 순환하므로 호출할 때 가져온다
+
+    blank_template.check_map(data, str(path), form)  # `비우기`·`그림_지우기`·`유지`·서술 `열` (form_columns 와 같은 검증)
     return data, path
 
 
@@ -1124,6 +1135,31 @@ def build_form(
                 continue
             c1, r1 = split_ref(first)
             _, r2 = split_ref(last)
+            if n.get("열"):
+                # 두 칸 구조(제목 칸 + 설명 칸): 줄마다 `제목 | 설명` 을 각 칸에 쓴다. 줄 안 `<br>` 는 셀 안 줄바꿈.
+                tcol, dcol = n["열"]["제목"], n["열"]["설명"]
+                pairs = []
+                for l in body:
+                    if not l.strip():
+                        continue
+                    title, _, desc = l.partition("|")
+                    pairs.append((_BR.sub("\n", title.strip()), _BR.sub("\n", desc.strip())))
+                if pairs in ([(UNDECIDED, "")], [(NOT_APPLICABLE, "")]):
+                    pairs = []
+                if not pairs:
+                    if n.get("필수"):
+                        problem(sname, name, "필수 서술이 미정이거나 비어 있다")
+                    ed.clear_range(first, last)
+                elif len(pairs) > r2 - r1 + 1:
+                    problem(sname, name, f"서술이 {len(pairs)}줄이라 범위 {n['위치']}({r2 - r1 + 1}행)를 넘는다")
+                else:
+                    ed.clear_range(first, last)
+                    for i, (title, desc) in enumerate(pairs):
+                        if title:
+                            put(name, f"{tcol}{r1 + i}", title)
+                        if desc:
+                            put(name, f"{dcol}{r1 + i}", desc)
+                continue
             if first == last:
                 ed.clear_range(first, last, keep=first)
                 text = "\n".join(l.rstrip() for l in _BR.sub("\n", "\n".join(body)).splitlines()).strip()
@@ -1146,6 +1182,14 @@ def build_form(
                 if left:
                     parts.append(f"값이 있는 셀 {len(left)}개: {', '.join(left[:5])}{' …' if len(left) > 5 else ''}")
                 warn(sname, "", f"템플릿 샘플({', '.join(parts)})이 남아 있다 — 엑셀에서 확인해 지우십시오")
+
+    # 지도 `비우기` 범위의 값을 지운다(템플릿이 이미 비어 있어도 안전망). 지도가 맡은 영역과는 겹치지 않는다(load_map 이 검사).
+    from checker import blank_template
+
+    cleared = blank_template.Cleared()
+    for sname, smap in map_sheets.items():
+        if smap.get("비우기"):
+            blank_template.clear_ranges(editor(sname), smap["비우기"], cleared)
 
     # 쓴 셀이 엑셀 행 높이 상한을 넘어 잘릴지 어림한다(type: cell-too-tall).
     styles_xml = raw["xl/styles.xml"].decode("utf-8-sig") if "xl/styles.xml" in raw else None
@@ -1215,6 +1259,14 @@ def build_form(
     for s_name, ed in editors.items():
         if ed.dirty and ed.filter_change:
             new_wb = _extend_filter_database(new_wb, s_name, *ed.filter_change)
+    extra: dict[str, bytes] = {}  # 지운 문자열의 공유 문자열 항목 비우기
+    if cleared.sst_ids:
+        view = dict(raw)
+        for path, text in rendered.items():
+            view[path] = (b"\xef\xbb\xbf" if raw[path].startswith(b"\xef\xbb\xbf") else b"") + text.encode("utf-8")
+        sst_path, n_blank, _ = blank_template.blank_strings(view, cleared)
+        if n_blank:
+            extra[sst_path] = view[sst_path]
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zo:
         for info in infos:
@@ -1222,6 +1274,8 @@ def build_form(
             if info.filename in changed:
                 bom = b"\xef\xbb\xbf" if data.startswith(b"\xef\xbb\xbf") else b""
                 data = bom + rendered[info.filename].encode("utf-8")
+            elif info.filename in extra:
+                data = extra[info.filename]
             elif info.filename == "xl/workbook.xml" and new_wb != wb_xml:
                 data = new_wb.encode("utf-8")
             zo.writestr(copy.copy(info), data)
