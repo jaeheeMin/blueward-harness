@@ -284,3 +284,144 @@ def test_mutated_package_opens_and_other_parts_identical(xlsx: Path):
     ws = openpyxl.load_workbook(out)["화면"]
     assert "E5:F5" in {str(r) for r in ws.merged_cells.ranges}
     assert ws["F6"].fill.fgColor.rgb == "FFDDEBF7"
+
+
+# ---------------------------------------------------------------- 검토 반영(C1 재검토)
+
+STYLES_XML = (
+    '<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    '<fonts count="1"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font></fonts>'
+    '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+    '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+    '<xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1" applyProtection="1">'
+    '<alignment indent="2" horizontal="left"/><protection locked="0"/></xf></cellXfs></styleSheet>'
+)
+
+
+def _sheet(body: str = "", rows: str = "", cols: str = "") -> SheetXml:
+    xml = f'<worksheet><dimension ref="A1:B2"/>{cols}<sheetData>{rows}</sheetData>{body}</worksheet>'
+    return SheetXml(xml, set(), False)
+
+
+def test_unreadable_existing_merge_stops_overlap_check():
+    for bad in ('<mergeCell ref="Zzz"/>', '<mergeCell ref="B2:C3x"/>', "<mergeCell/>"):
+        ed = _sheet(f'<mergeCells count="1">{bad}</mergeCells><pageMargins/>')
+        with pytest.raises(ExportError, match="검사할 수 없다"):
+            merge_range(ed, "E5", "F6", "화면")
+        assert bad in ed.post  # 쓰지 않았다
+    ed = _sheet('<mergeCells count="1"><mergeCell ref="A1:B2"/>junk</mergeCells>')
+    with pytest.raises(ExportError, match="읽지 못하는"):
+        merge_range(ed, "E5", "F6")
+
+
+def test_existing_cell_without_s_uses_xf0_not_column_style():
+    st = StylesXml(STYLES_XML)
+    col_xf = st.derive(0, {"채우기": "FFC000"})
+    ed = _sheet(rows='<row r="2"><c r="A2"><v>1</v></c></row>', cols=f'<cols><col min="1" max="2" width="9" style="{col_xf}"/></cols>')
+    style_range(ed, st, "A2", "B2", {"굵게": True})
+    fill_of = lambda ref: dict(cell_style._xf_parts(st.xfs.items[int(ed.cell(ref).style)])[0])["fillId"]  # noqa: E731
+    assert fill_of("A2") == "0"  # 셀 요소가 있고 s 가 없으면 서식 0 이다(열 서식을 따르지 않는다)
+    assert fill_of("B2") != "0"  # 새로 만든 셀은 열 기본 서식 위에 쓴다
+
+
+def test_new_cell_prefers_row_style_over_column_style():
+    st = StylesXml(STYLES_XML)
+    row_xf = st.derive(0, {"채우기": "112233"})
+    col_xf = st.derive(0, {"채우기": "445566"})
+    ed = _sheet(rows=f'<row r="3" s="{row_xf}" customFormat="1"/>', cols=f'<cols><col min="1" max="1" width="9" style="{col_xf}"/></cols>')
+    style_range(ed, st, "A3", None, {"굵게": True})
+    fill = dict(cell_style._xf_parts(st.xfs.items[int(ed.cell("A3").style)])[0])["fillId"]
+    assert "112233" in st.fills.items[int(fill)]
+
+
+def test_empty_selfclosing_mergecells_is_replaced_not_duplicated():
+    for tag in ('<mergeCells count="0"/>', "<mergeCells/>"):
+        ed = _sheet(f"{tag}<pageMargins/>")
+        assert merges_of(ed) == []
+        merge_range(ed, "A5", "B6")
+        assert ed.post.count("<mergeCells") == 1
+        assert ed.post.startswith('<mergeCells count="1"><mergeCell ref="A5:B6"/></mergeCells><pageMargins')
+        assert merges_of(ed) == ["A5:B6"]
+
+
+def test_unparsable_mergecells_tag_stops():
+    ed = _sheet("<mergeCells count='1'")  # 닫히지 않은 태그
+    with pytest.raises(ExportError, match="mergeCells"):
+        merge_range(ed, "A5", "B6")
+
+
+def test_merge_with_single_quoted_attrs():
+    ed = _sheet("<mergeCells count='1'><mergeCell ref='A1:B2'/></mergeCells>")
+    assert merges_of(ed) == ["A1:B2"]
+    with pytest.raises(ExportError, match="겹친다"):
+        merge_range(ed, "B2", "C3")
+    merge_range(ed, "E5", "F6")
+    assert merges_of(ed) == ["A1:B2", "E5:F6"] and ed.post.count("<mergeCells") == 1
+
+
+def test_single_quoted_xf_attributes_are_kept():
+    st = StylesXml(STYLES_XML.replace('numFmtId="14" fontId="0"', "numFmtId='14' fontId='0'"))
+    n = st.derive(1, {"굵게": True})
+    attrs = dict(cell_style._xf_parts(st.xfs.items[n])[0])
+    assert attrs["numFmtId"] == "14" and attrs["applyNumberFormat"] == "1" and attrs["fontId"] != "0"
+    # 속성을 읽지 못하면 말없이 버리지 않고 멈춘다.
+    bad = StylesXml(STYLES_XML.replace('numFmtId="14"', "numFmtId=14"))
+    with pytest.raises(ExportError, match="읽지 못했다"):
+        bad.derive(1, {"굵게": True})
+
+
+def test_merge_position_with_autofilter_cf_and_validations():
+    ed = _sheet('<autoFilter ref="A1:B2"/><conditionalFormatting sqref="A1"/><dataValidations count="0"/><pageMargins/>')
+    merge_range(ed, "A5", "B6")
+    assert re.search(r'<autoFilter[^>]*/><mergeCells count="1">.*?</mergeCells><conditionalFormatting', ed.post)
+    ed = _sheet('<sheetProtection sheet="1"/><dataValidations count="0"/>')
+    merge_range(ed, "A5", "B6")
+    assert re.search(r'<sheetProtection[^>]*/><mergeCells.*?</mergeCells><dataValidations', ed.post)
+    ed = _sheet('<sheetProtection sheet="1"/>')
+    merge_range(ed, "A5", "B6")
+    assert ed.post.endswith("</mergeCells></worksheet>") or ed.render().endswith("</mergeCells></worksheet>")
+
+
+def test_alignment_override_keeps_protection_and_other_alignment_attrs():
+    st = StylesXml(STYLES_XML)
+    n = st.derive(1, {"가로": "가운데", "줄바꿈": True})
+    attrs, inner = cell_style._xf_parts(st.xfs.items[n])
+    assert dict(attrs)["numFmtId"] == "14" and dict(attrs)["applyProtection"] == "1"
+    assert '<protection locked="0"/>' in inner
+    al = dict(cell_style._attrs(re.search(r"<alignment([^>]*?)/>", inner).group(1), "t"))
+    assert al == {"indent": "2", "horizontal": "center", "wrapText": "1"}
+    assert inner.count("<alignment") == 1 and inner.index("<alignment") < inner.index("<protection")
+
+
+def test_style_range_is_atomic_on_failure():
+    st = StylesXml(STYLES_XML)
+    ed = _sheet(rows='<row r="1"><c r="A1" s="1"/></row>')
+    before_xml, before_xfs = ed.render(), st.xf_count()
+    real = st.derive
+    calls = {"n": 0}
+
+    def flaky(base, defn):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise ExportError("깨짐")
+        return real(base, defn)
+
+    st.derive = flaky  # type: ignore[method-assign]
+    with pytest.raises(ExportError, match="깨짐") as ei:
+        style_range(ed, st, "A1", "C2", {"채우기": "112233"}, "화면")
+    assert ei.value.sheet == "화면"
+    assert ed.render() == before_xml and not ed.dirty
+    assert st.xf_count() == before_xfs and not st.dirty and st.render() == st.xml
+
+
+def test_cell_xfs_limit(monkeypatch):
+    monkeypatch.setattr(cell_style, "MAX_CELL_XFS", 3)
+    st = StylesXml(STYLES_XML)
+    st.derive(0, {"굵게": True})  # 3번째 xf
+    ed = _sheet()
+    with pytest.raises(ExportError, match="한도"):
+        style_range(ed, st, "A1", None, {"굵게": False, "채우기": "123456"}, "화면")
+    assert ed.cell("A1") is None and st.xf_count() == 3
+    st.derive(0, {"굵게": True})  # 이미 있는 xf 는 한도에 걸리지 않고 재사용된다

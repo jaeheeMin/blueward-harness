@@ -78,6 +78,7 @@ public-cloud 개발사양서 빈 양식을 만들었더니 지도의 칸·표·�
 - **시트**: `SheetXml.set_style(ref, s)`(행·셀이 없으면 열 순서대로 만들고 dimension 만 넓힌다. 값·자동 필터는 안 건드림), `cell_style.style_range(ed, styles, 첫칸, 끝칸, 정의, 시트이름)`(칸마다 기존 s, 없으면 행 기본·열 기본 서식 위에 덮어씀), `merge_range(ed, 첫칸, 끝칸, 시트이름)`(`mergeCells` 가 없으면 스키마 순서 자리에 만들고 count 갱신), `merges_of(ed)`.
 - **멈춤 규칙**: 새 병합이 기존·이전 병합과 한 칸이라도 겹치거나 한 칸짜리이거나 왼쪽 위 아닌 칸에 값이 있으면 `ExportError`(쓰지 않음).
 - 판단: 테두리는 범위의 **모든 칸 네 변**으로 시작(바깥선만 그리는 모드 없음). 병합 칸의 테두리를 바깥선으로 보이게 하려면 병합 범위 전체에 `style_range` 를 먼저 쓴다(엑셀도 병합 칸 전체에 서식을 둔다).
+- **검토 반영.** (1) 읽지 못하는 기존 병합(`ref` 없음·모양 오류·mergeCells 안 알 수 없는 내용·닫히지 않은 태그)이 있으면 겹침 검사를 건너뛰지 않고 검사 불능으로 `ExportError`. (2) 바탕 서식: 셀 요소가 이미 있으면 `s` 가 없어도 엑셀 규칙대로 xf 0 위에 덮어쓴다(열·행 기본 서식을 따르지 않음). 셀을 새로 만들 때만 행(`customFormat` + `s`) → 열 기본 서식 순이며 행이 우선이다. (3) `<mergeCells count="0"/>` 같은 self-closing 을 인식해 교체한다. (4) styles.xml 의 작은따옴표 속성도 읽고, 읽지 못한 속성 조각이 남으면 `ExportError`(말없이 버리지 않음). (5) `style_range` 는 모든 칸의 xf 를 먼저 정한 뒤에만 시트를 바꾸고, 실패하면 이번 호출이 덧붙인 styles 항목도 되돌린다(`StylesXml.snapshot/rollback`). cellXfs 가 엑셀 한도 64000 에 닿으면 `ExportError`.
 - 테스트: `checker/tests/test_cell_style.py`(xf 추가·재사용, 기존 xf 기반 덮어쓰기, 없는 행·셀 서식과 열 순서, 열 기본 서식 위 덮어쓰기, 병합 추가·mergeCells 생성 위치·겹침·값 있는 칸 거절, 잘못된 정의 거절 17종, 결과 xlsx 를 openpyxl 로 열어 서식·병합 확인, 다른 파트 바이트 동일).
 - 확인하지 못한 것: 엑셀로 열어 복구 창 여부(openpyxl 로 열림과 XML well-formed 만 확인). 행 단위 서식(`<row s customFormat>`)은 새 셀의 바탕으로만 읽고 쓰지 않는다. 테마 색·인덱스 색은 쓰지 않는다(RRGGBB 만).
 - 남은 일(C2): 화면 md 문법 해석, 지도 `화면:` 절(스타일 이름 → 정의, 영역 초과 검사), export 연결, 서술 키 `위치` 와 겹치는 영역 처리.

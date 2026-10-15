@@ -36,7 +36,20 @@ _HORIZONTAL = {"왼쪽": "left", "가운데": "center", "오른쪽": "right"}
 _VERTICAL = {"위": "top", "가운데": "center", "아래": "bottom"}
 STYLE_KEYS = ("채우기", "테두리", "테두리_색", "굵게", "글꼴_크기", "글꼴_색", "가로", "세로", "줄바꿈")
 
-_ATTR = re.compile(r'([\w:]+)="([^"]*)"')
+_ATTR = re.compile(r"""([\w:]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+MAX_CELL_XFS = 64000  # 엑셀 cellXfs 한도
+
+
+def _attrs(text: str, what: str) -> list[tuple[str, str]]:
+    """속성 문자열을 읽는다(큰따옴표·작은따옴표). 못 읽는 조각이 남으면 말없이 버리지 않고 ExportError."""
+    found = [(m.group(1), m.group(2) if m.group(2) is not None else m.group(3)) for m in _ATTR.finditer(text)]
+    if _ATTR.sub("", text).strip().rstrip("/").strip():
+        raise ExportError(f"{what} 의 속성을 모두 읽지 못했다: {text.strip()[:80]}")
+    return found
+
+
+def _q(value: str) -> str:
+    return value.replace('"', "&quot;")
 # CT_Font 자식 순서(엑셀은 이 순서를 요구한다).
 _FONT_ORDER = ("b", "i", "strike", "condense", "extend", "outline", "shadow", "u", "vertAlign", "sz", "color", "name", "family", "charset", "scheme")
 
@@ -126,7 +139,7 @@ class _Section:
     def render(self) -> str:
         attrs = self.attrs
         if re.search(r"\bcount=", attrs):
-            attrs = re.sub(r'\bcount="\d+"', f'count="{len(self.items)}"', attrs, count=1)
+            attrs = re.sub(r"""\bcount=(["'])\d+\1""", f'count="{len(self.items)}"', attrs, count=1)
         else:
             attrs = f' count="{len(self.items)}"' + attrs
         return f"<{self.tag}{attrs}>{''.join(self.items)}</{self.tag}>"
@@ -134,7 +147,7 @@ class _Section:
 
 def _xf_parts(xf: str) -> tuple[list[tuple[str, str]], str]:
     m = re.match(r"<xf\b([^>]*?)(/?)>", xf)
-    attrs = _ATTR.findall(m.group(1))
+    attrs = _attrs(m.group(1), "cellXfs 의 xf")
     inner = "" if m.group(2) else xf[m.end(): xf.rindex("</xf>")]
     return attrs, inner
 
@@ -159,6 +172,15 @@ class StylesXml:
     @property
     def dirty(self) -> bool:
         return any(len(s.items) != s.original for s in (self.fonts, self.fills, self.borders, self.xfs))
+
+    def snapshot(self) -> tuple[int, ...]:
+        return tuple(len(s.items) for s in (self.fonts, self.fills, self.borders, self.xfs))
+
+    def rollback(self, snap: tuple[int, ...]) -> None:
+        """snapshot 뒤에 덧붙인 항목을 되돌린다(실패한 일괄 적용이 styles.xml 을 어지럽히지 않게)."""
+        for sec, n in zip((self.fonts, self.fills, self.borders, self.xfs), snap):
+            del sec.items[n:]
+        self._cache.clear()
 
     def xf_count(self) -> int:
         return len(self.xfs.items)
@@ -207,18 +229,20 @@ class StylesXml:
             attrs = _set_attr(attrs, "applyFont", "1")
         if any(k in d for k in ("가로", "세로", "줄바꿈")):
             am = re.search(r"<alignment\b([^>]*?)/>", inner)
-            al = _ATTR.findall(am.group(1)) if am else []
+            al = _attrs(am.group(1), "xf 의 alignment") if am else []
             if "가로" in d:
                 al = _set_attr(al, "horizontal", _HORIZONTAL[d["가로"]])
             if "세로" in d:
                 al = _set_attr(al, "vertical", _VERTICAL[d["세로"]])
             if "줄바꿈" in d:
                 al = [(k, v) for k, v in al if k != "wrapText"] + ([("wrapText", "1")] if d["줄바꿈"] else [])
-            tag = "<alignment" + "".join(f' {k}="{v}"' for k, v in al) + "/>" if al else ""
+            tag = "<alignment" + "".join(f' {k}="{_q(v)}"' for k, v in al) + "/>" if al else ""
             inner = tag + (inner[: am.start()] + inner[am.end():] if am else inner)
             attrs = _set_attr(attrs, "applyAlignment", "1")
 
-        xf = "<xf" + "".join(f' {k}="{v}"' for k, v in attrs) + (f">{inner}</xf>" if inner else "/>")
+        xf = "<xf" + "".join(f' {k}="{_q(v)}"' for k, v in attrs) + (f">{inner}</xf>" if inner else "/>")
+        if xf not in self.xfs.items and len(self.xfs.items) >= MAX_CELL_XFS:
+            raise ExportError(f"cellXfs 가 엑셀 한도 {MAX_CELL_XFS}개에 닿아 서식을 더 만들 수 없다")
         number = self.xfs.find_or_add(xf)
         self._cache[memo] = number
         return number
@@ -255,9 +279,10 @@ class StylesXml:
 # ---------------------------------------------------------------- 시트 XML
 
 def _base_style(ed: SheetXml, ref: str) -> str | None:
+    """덮어쓸 바탕 서식. 셀 요소가 이미 있으면 그 s(없으면 엑셀 규칙대로 0). 셀을 새로 만들 때만 행 → 열 기본 서식(행이 우선)."""
     cell = ed.cell(ref)
-    if cell is not None and cell.style is not None:
-        return cell.style
+    if cell is not None:
+        return cell.style or "0"
     col, num = ref_split(ref)
     row = ed.rows.get(num)
     if row is not None:
@@ -286,17 +311,23 @@ def style_range(ed: SheetXml, styles: StylesXml, first: str, last: str | None, d
         raise ExportError("스타일 정의가 틀렸다: " + "; ".join(problems), sheet=sname)
     if (c2 - c1 + 1) * (r2 - r1 + 1) > MAX_STYLED_CELLS:
         raise ExportError(f"서식을 입힐 범위가 {MAX_STYLED_CELLS}칸을 넘는다", sheet=sname)
-    count = 0
-    for r in range(r1, r2 + 1):
-        for c in range(c1, c2 + 1):
-            ref = f"{n2col(c)}{r}"
-            new = styles.derive(_base_style(ed, ref), defn)
-            ed.set_style(ref, str(new))
-            count += 1
-    return count
+    plan: list[tuple[str, str]] = []
+    snap = styles.snapshot()
+    try:
+        for r in range(r1, r2 + 1):
+            for c in range(c1, c2 + 1):
+                ref = f"{n2col(c)}{r}"
+                plan.append((ref, str(styles.derive(_base_style(ed, ref), defn))))
+    except ExportError as exc:
+        styles.rollback(snap)
+        raise ExportError(exc.reason, sheet=sname) from None
+    for ref, new in plan:  # 모든 칸의 서식이 정해진 뒤에만 시트를 바꾼다
+        ed.set_style(ref, new)
+    return len(plan)
 
 
-_MERGES = re.compile(r"<mergeCells\b([^>]*)>(.*?)</mergeCells>", re.S)
+_MERGES = re.compile(r"<mergeCells\b([^>]*?)(?:/>|>(.*?)</mergeCells>)", re.S)
+_MERGE_EL = re.compile(r"<mergeCell\b[^>]*?/>")
 _AFTER_MERGE = re.compile(
     r"<(?:phoneticPr|conditionalFormatting|dataValidations|hyperlinks|printOptions|pageMargins|pageSetup|headerFooter|rowBreaks|"
     r"colBreaks|customProperties|cellWatches|ignoredErrors|smartTags|drawing|legacyDrawing|legacyDrawingHF|drawingHF|picture|"
@@ -304,9 +335,27 @@ _AFTER_MERGE = re.compile(
 )
 
 
-def merges_of(ed: SheetXml) -> list[str]:
+def _merge_block(ed: SheetXml, sname: str = "") -> tuple[re.Match | None, list[str]]:
+    """(mergeCells 블록, 기존 병합 요소들). 블록이 있는데 읽지 못하면 검사 불능이라 ExportError."""
     m = _MERGES.search(ed.post)
-    return [dict(_ATTR.findall(el)).get("ref", "") for el in re.findall(r"<mergeCell\b[^>]*?/>", m.group(2))] if m else []
+    if m is None:
+        if re.search(r"<mergeCells\b", ed.post):
+            raise ExportError("시트의 mergeCells 를 읽지 못해 병합 겹침을 검사할 수 없다", sheet=sname)
+        return None, []
+    inner = m.group(2) or ""
+    if _MERGE_EL.sub("", inner).strip():
+        raise ExportError("시트의 mergeCells 안에 읽지 못하는 내용이 있어 병합 겹침을 검사할 수 없다", sheet=sname)
+    return m, _MERGE_EL.findall(inner)
+
+
+def merges_of(ed: SheetXml, sname: str = "") -> list[str]:
+    out = []
+    for el in _merge_block(ed, sname)[1]:
+        ref = dict(_attrs(el[len("<mergeCell"):-2], "mergeCell")).get("ref")
+        if not ref:
+            raise ExportError("ref 가 없는 mergeCell 이 있어 병합 겹침을 검사할 수 없다", sheet=sname)
+        out.append(ref)
+    return out
 
 
 def merge_range(ed: SheetXml, first: str, last: str, sname: str = "") -> str:
@@ -322,11 +371,11 @@ def merge_range(ed: SheetXml, first: str, last: str, sname: str = "") -> str:
     ref = f"{n2col(c1)}{r1}:{n2col(c2)}{r2}"
     if rect[0] == rect[2] and rect[1] == rect[3]:
         raise ExportError(f"병합 {ref} 는 한 칸이라 병합할 수 없다", sheet=sname)
-    for other in merges_of(ed):
+    for other in merges_of(ed, sname):
         try:
             o = parse_range(other)
         except ExportError:
-            continue
+            raise ExportError(f"기존 병합 {other!r} 를 읽지 못해 겹침을 검사할 수 없다", sheet=sname) from None
         if c1 <= o[2] and o[0] <= c2 and r1 <= o[3] and o[1] <= r2:
             raise ExportError(f"시트 {sname!r} 의 병합 {ref} 가 기존 병합 {other} 와 겹친다", sheet=sname)
     for n in ed.rows_with_content(r1, r2):
@@ -334,10 +383,10 @@ def merge_range(ed: SheetXml, first: str, last: str, sname: str = "") -> str:
             if c1 <= cell.col <= c2 and cell.ref != f"{n2col(c1)}{r1}" and cell.has_content():
                 raise ExportError(f"시트 {sname!r} 의 병합 {ref} 안 {cell.ref} 에 값이 있다 — 병합하면 엑셀이 버리는 값이다", sheet=sname)
     el = f'<mergeCell ref="{ref}"/>'
-    m = _MERGES.search(ed.post)
+    m, existing = _merge_block(ed, sname)
     if m:
-        items = re.findall(r"<mergeCell\b[^>]*?/>", m.group(2)) + [el]
-        attrs = re.sub(r'\s*\bcount="\d+"', "", m.group(1))
+        items = existing + [el]
+        attrs = re.sub(r"""\s*\bcount=(["'])\d+\1""", "", m.group(1)).rstrip("/").rstrip()
         ed.post = ed.post[: m.start()] + f'<mergeCells count="{len(items)}"{attrs}>{"".join(items)}</mergeCells>' + ed.post[m.end():]
     else:
         block = f'<mergeCells count="1">{el}</mergeCells>'
