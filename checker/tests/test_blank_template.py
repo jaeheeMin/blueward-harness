@@ -683,3 +683,108 @@ def test_유효성_지우기가_아무것도_못_지우면_알린다(tmp_path, c
     code, rep = _run(root2, capsys)
     assert code == 0 and next(n for n in rep["notices"] if n["type"] == "validation-unmatched")["ranges"] == ["Z50:Z60"]
     assert rep["validations_cleared"]["Info"] == {"removed": 0, "trimmed": 0}
+
+
+# ---------------------------------------------------------------- 서식 지우기(#335 후속): 견본 표의 테두리·채우기·병합
+
+def _fmt_root(tmp_path: Path, fmt=("B2:E4",), extra_merge=None, formula=False, **sheet_keys) -> Path:
+    """Info 시트: B2:E4 가 견본 목업 표(테두리·하늘색 채우기·값, B2:C2 병합, E2 회색 버튼), D열은 기본 서식(노란 채우기),
+    G2·G3:H3 은 범위 밖(서식 유지)."""
+    from openpyxl.styles import Border, PatternFill, Side
+
+    thin = Side(style="thin")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+    sky, gray, yellow = (PatternFill("solid", fgColor=c) for c in ("87CEEB", "BBBBBB", "FFFF00"))
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Info"
+    ws["A1"] = "라벨"
+    for r in range(2, 5):
+        for c in "BCDE":
+            ws[f"{c}{r}"] = f"목업{c}{r}"
+            ws[f"{c}{r}"].border = box
+            ws[f"{c}{r}"].fill = sky
+    ws["E2"].fill = gray
+    ws.merge_cells("B2:C2")
+    ws.column_dimensions["D"].fill = yellow  # 열 기본 서식
+    ws["G2"], ws["G3"] = "밖", "밖병합"
+    ws["G2"].border, ws["G2"].fill = box, sky
+    ws.merge_cells("G3:H3")
+    if extra_merge:
+        ws.merge_cells(extra_merge)
+    if formula:
+        ws["C4"] = "=1+1"
+    ws.conditional_formatting.add("B3:B4", openpyxl.formatting.rule.CellIsRule(operator="equal", formula=["1"], fill=gray))
+    ws.conditional_formatting.add("D4:G4", openpyxl.formatting.rule.CellIsRule(operator="equal", formula=["2"], fill=gray))
+    (tmp_path / "templates" / "forms").mkdir(parents=True)
+    wb.save(tmp_path / "src.xlsx")
+    data = {
+        "양식": "빈양식", "템플릿": "../src.xlsx", "산출": {"폴더": "out", "파일명": "x.xlsx"},
+        "시트": [{"이름": "Info", "서식_지우기": list(fmt), **sheet_keys}],
+    }
+    (tmp_path / "templates" / "forms" / "빈양식.yaml").write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    return tmp_path
+
+
+def _styles_of(path: Path) -> dict[str, str | None]:
+    xml = _parts(path)["xl/worksheets/sheet1.xml"].decode()
+    return {m.group(1): dict(re.findall(r'(\w+)="([^"]*)"', m.group(0))).get("s") for m in re.finditer(r'<c r="([A-Z]+\d+)"[^>]*?/?>', xml)}
+
+
+def test_서식_지우기는_값과_서식을_열_기본_서식으로_되돌리고_병합을_푼다(tmp_path, capsys):
+    root = _fmt_root(tmp_path)
+    src_styles = _styles_of(root / "src.xlsx")
+    code, rep = _run(root, capsys)
+    assert code == 0, rep
+    out = root / "templates" / "빈.xlsx"
+    st = _styles_of(out)
+    col_d = re.search(r'<col [^>]*min="4"[^>]*style="(\d+)"|<col [^>]*style="(\d+)"[^>]*min="4"', _parts(out)["xl/worksheets/sheet1.xml"].decode())
+    d_style = next(g for g in col_d.groups() if g)
+    for ref in ("B2", "C3", "E2", "E4", "B4"):
+        assert st[ref] is None, ref  # 열 기본 서식이 없는 열 → s 없음(0)
+    assert st["D2"] == st["D3"] == st["D4"] == d_style  # D 열은 열 기본 서식
+    assert st["G2"] == src_styles["G2"] and st["G2"] not in (None, "0")  # 범위 밖은 그대로
+    ws = openpyxl.load_workbook(out)["Info"]
+    assert ws["B2"].value is None and ws["E4"].value is None and ws["A1"].value == "라벨" and ws["G2"].value == "밖"
+    assert ws["B2"].border.left.style is None and ws["B2"].fill.fill_type is None
+    assert [str(r) for r in ws.merged_cells.ranges] == ["G3:H3"]  # B2:C2 병합은 풀리고 범위 밖 병합은 남는다
+    info = rep["formats_reset"]["Info"]
+    assert info["merges_removed"] == ["B2:C2"] and info["cells"] >= 11
+    # 조건부 서식: 통째로 든 B3:B4 는 빼고, 일부만 겹친 D4:G4 는 그대로 두고 알린다
+    assert info["conditional_formatting_removed"] == ["B3:B4"]
+    note = next(n for n in rep["notices"] if n["type"] == "conditional-format-overlap")
+    assert note["ranges"] == ["D4:G4"]
+    xml = _parts(out)["xl/worksheets/sheet1.xml"].decode()
+    assert 'sqref="D4:G4"' in xml and 'sqref="B3:B4"' not in xml
+    _well_formed(_parts(out))
+
+
+def test_서식_지우기는_styles_xml을_건드리지_않는다(tmp_path, capsys):
+    root = _fmt_root(tmp_path)
+    code, _ = _run(root, capsys)
+    assert code == 0
+    assert _parts(root / "templates" / "빈.xlsx")["xl/styles.xml"] == _parts(root / "src.xlsx")["xl/styles.xml"]
+
+
+def test_서식_지우기가_병합과_일부만_겹치면_2(tmp_path, capsys):
+    root = _fmt_root(tmp_path, fmt=("B2:B4",))  # B2:C2 병합의 왼쪽 열만
+    code, rep = _run(root, capsys)
+    assert code == 2 and "B2:C2" in rep["problems"][0]["reason"] and "일부만" in rep["problems"][0]["reason"]
+    assert not (root / "templates" / "빈.xlsx").exists()
+
+
+def test_서식_지우기_범위에_수식_셀이_있으면_2(tmp_path, capsys):
+    root = _fmt_root(tmp_path, formula=True)
+    code, rep = _run(root, capsys)
+    assert code == 2 and "C4" in rep["problems"][0]["reason"] and "수식" in rep["problems"][0]["reason"]
+
+
+def test_서식_지우기는_유지와_겹치면_지도_오류_비우기와는_같이_쓴다(tmp_path, capsys):
+    root = _fmt_root(tmp_path, 유지=["E4"])
+    code, rep = _run(root, capsys)
+    assert code == 2 and "서식_지우기" in rep["problems"][0]["reason"] and "겹친다" in rep["problems"][0]["reason"]
+    (tmp_path / "b").mkdir()
+    root2 = _fmt_root(tmp_path / "b", 비우기=["B2:E4"])
+    code, rep = _run(root2, capsys)
+    assert code == 0, rep  # 서식 지우기가 값 지우기를 포함하므로 같이 써도 된다
+    assert _cells(root2 / "templates" / "빈.xlsx").get("B2") is None

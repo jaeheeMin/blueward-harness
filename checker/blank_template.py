@@ -12,6 +12,7 @@
                           서술 범위. 산출(`checker.export`)이 값 없이 두면 비우는 곳과 같은 함수(`export.fill_ranges`)를 쓴다.
                           라벨·머리글·작성 안내문은 지도가 맡지 않은 칸이라 그대로 둔다.
     비우기: [범위…]       지도 밖 칸의 값을 지운다(서식·병합 유지). 수식 셀은 지우지 않고 알린다.
+    서식_지우기: [범위…]  값과 함께 셀 서식(테두리·채우기 등)을 그 열의 기본 서식으로 되돌리고 범위 안 병합을 푼다(견본 표 모양 지우기).
     유효성_지우기: [범위…]  그 범위와 겹치는 데이터 유효성(드롭다운; 표준·x14)을 뺀다. 일부만 겹치면 sqref 에서 겹친 부분만 뺀다.
     그림_지우기: true     그 시트의 drawing(그림·도형)과 그것만 쓰던 media 를 지운다.
     유지: [범위…]         PR B(남은 견본 검사)가 쓴다. 이번엔 키만 인정한다.
@@ -85,7 +86,7 @@ def _hit(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
 # ---------------------------------------------------------------- 지도 검증(export·form_columns 가 같이 쓴다)
 
 def map_problems(fmap: dict) -> list[tuple[str, str]]:
-    """새 키(`비우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`)와 서술 `열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
+    """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`)와 서술 `열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
     out: list[tuple[str, str]] = []
     top = fmap.get("외부_참조_지우기")
     if top is not None and not isinstance(top, bool):
@@ -95,7 +96,7 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
             continue
         sn = s.get("이름")
         keyed: dict[str, list[tuple[str, tuple[int, int, int, int]]]] = {}
-        for key in ("비우기", "유지"):
+        for key in ("비우기", "서식_지우기", "유지"):
             v = s.get(key)
             keyed[key] = []
             if v is None:
@@ -142,10 +143,11 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                 if isinstance(col, str) and re.fullmatch(r"[A-Z]{1,3}", col):
                     n = col2n(col)
                     owned.append((f"표 {t.get('이름')!r} 의 {col} 열", (n, start, n, end)))
-        for x, rect in keyed["비우기"]:
-            for label, orect in owned:
-                if _hit(rect, orect):
-                    out.append(("map", f"시트 {sn!r} 의 `비우기` {x} 가 {label} 와 겹친다 — 지도가 맡은 칸·표·서술·유지 범위는 비우기에 넣을 수 없다"))
+        for key in ("비우기", "서식_지우기"):
+            for x, rect in keyed[key]:
+                for label, orect in owned:
+                    if _hit(rect, orect):
+                        out.append(("map", f"시트 {sn!r} 의 `{key}` {x} 가 {label} 와 겹친다 — 지도가 맡은 칸·표·서술·유지 범위는 {key}에 넣을 수 없다"))
         for n in s.get("서술") or []:
             if not isinstance(n, dict) or n.get("열") is None:
                 continue
@@ -209,6 +211,121 @@ def clear_ranges(ed: SheetXml, ranges: list[str], info: Cleared) -> None:
                     info.texts.add(_si_text(c.inner))
                 info.cells += 1
         ed.clear_range(f"{n2col(c1)}{r1}", f"{n2col(c2)}{r2}")
+    ed._max_row, ed._max_col = saved
+
+
+# ---------------------------------------------------------------- 서식 지우기
+
+_COL_EL = re.compile(r"<col\b[^>]*?/?>")
+_MERGES = re.compile(r"<mergeCells\b[^>]*>(.*?)</mergeCells>", re.S)
+_CF_STD = re.compile(r"<conditionalFormatting\b([^>]*)>.*?</conditionalFormatting>", re.S)
+_CF_X14 = re.compile(r"<(\w+:)conditionalFormatting\b[^>]*>.*?</\1conditionalFormatting>", re.S)
+Rect = tuple[int, int, int, int]
+
+
+@dataclass
+class FormatsReset:
+    cells: int = 0
+    merges: list[str] = field(default_factory=list)  # 푼 병합
+    cf_removed: list[str] = field(default_factory=list)  # 범위 안에 통째로 들어 뺀 조건부 서식(sqref)
+    cf_overlap: list[str] = field(default_factory=list)  # 일부만 겹쳐 그대로 둔 조건부 서식(sqref) — 확인 필요
+
+
+def _inside(a: Rect, b: Rect) -> bool:
+    return b[0] <= a[0] and a[2] <= b[2] and b[1] <= a[1] and a[3] <= b[3]
+
+
+def _col_style(pre: str, col: int) -> str | None:
+    """`<cols>` 의 열 기본 서식(style). 없거나 0 이면 None."""
+    for m in _COL_EL.finditer(pre):
+        a = dict(_ATTR.findall(m.group(0)))
+        if a.get("min", "").isdigit() and a.get("max", "").isdigit() and int(a["min"]) <= col <= int(a["max"]):
+            st = a.get("style")
+            return st if st and st != "0" else None
+    return None
+
+
+def reset_formats(ed: SheetXml, ranges: list[str], res: FormatsReset, sname: str) -> None:
+    """범위 셀의 서식(s)을 열 기본 서식으로 되돌리고 범위 안 병합을 푼다. 값은 `clear_ranges` 가 지운다.
+
+    수식 셀이 있거나 병합이 범위와 일부만 겹치면 ExportError(2). 조건부 서식은 범위 안에 통째로 들면 빼고, 일부만 겹치면
+    상대 참조가 틀어질 수 있어 고치지 않고 `cf_overlap` 으로 알린다. styles.xml 은 건드리지 않는다.
+    """
+    rects = [parse_range(r) for r in ranges]
+    if not rects:
+        return
+    lo, hi = min(r[1] for r in rects), max(r[3] for r in rects)
+
+    def inside_any(c) -> bool:
+        n = int(re.sub(r"[A-Z]+", "", c.ref))
+        return any(r[0] <= c.col <= r[2] and r[1] <= n <= r[3] for r in rects)
+
+    for n in ed.rows_with_content(lo, hi):
+        for c in ed.rows[n].cells:
+            if inside_any(c) and export.is_formula(c.inner):
+                raise ExportError(f"시트 {sname!r} 의 셀 {c.ref} 는 수식이라 `서식_지우기` 범위에 둘 수 없다", sheet=sname)
+    post = ed.post
+    m = _MERGES.search(post)
+    if m:
+        keep, dropped = [], []
+        for el in re.findall(r"<mergeCell\b[^>]*?/>", m.group(1)):
+            ref = dict(_ATTR.findall(el)).get("ref", "")
+            try:
+                mr = parse_range(ref)
+            except RangeError:
+                keep.append(el)
+                continue
+            if any(_inside(mr, r) for r in rects):
+                dropped.append(ref)
+            elif any(_hit(mr, r) for r in rects):
+                raise ExportError(
+                    f"시트 {sname!r} 의 병합 {ref} 가 `서식_지우기` 범위와 일부만 겹친다 — 병합이 통째로 들어오게 범위를 고친다", sheet=sname
+                )
+            else:
+                keep.append(el)
+        if dropped:
+            res.merges += dropped
+            whole = m.group(0)
+            head = whole[: whole.index(">") + 1]
+            new = "" if not keep else re.sub(r'\bcount="\d+"', f'count="{len(keep)}"', head, count=1) + "".join(keep) + "</mergeCells>"
+            post = post[: m.start()] + new + post[m.end():]
+
+    def cf_std(mm: re.Match) -> str:
+        sq = re.search(r'\bsqref="([^"]*)"', mm.group(1))
+        toks = sq.group(1).split() if sq else []
+        rs = [parse_range(t) for t in toks if _RANGE.match(t)]
+        if not rs or not any(_hit(r, c) for r in rs for c in rects):
+            return mm.group(0)
+        if len(rs) == len(toks) and all(any(_inside(r, c) for c in rects) for r in rs):
+            res.cf_removed.append(sq.group(1))
+            return ""
+        res.cf_overlap.append(sq.group(1))
+        return mm.group(0)
+
+    def cf_x14(mm: re.Match) -> str:
+        sq = re.search(r"<\w+:sqref>(.*?)</\w+:sqref>", mm.group(0), re.S)
+        rs = [parse_range(t) for t in sq.group(1).split() if _RANGE.match(t)] if sq else []
+        if any(_hit(r, c) for r in rs for c in rects):
+            res.cf_overlap.append(sq.group(1))
+        return mm.group(0)
+
+    post = _CF_STD.sub(cf_std, post)
+    _CF_X14.sub(cf_x14, post)
+    if post != ed.post:
+        ed.post = post
+        ed.dirty = True
+    saved = (ed._max_row, ed._max_col)
+    for n in ed.rows_with_content(lo, hi):
+        for c in ed.rows[n].cells:
+            if not inside_any(c):
+                continue
+            want = _col_style(ed.pre, c.col)
+            if (c.style or "0") == (want or "0"):
+                continue
+            c.attrs = [(k, v) for k, v in c.attrs if k != "s"] + ([("s", want)] if want else [])
+            c.raw = None
+            ed._touch(ed.rows[n], c.ref)
+            res.cells += 1
     ed._max_row, ed._max_col = saved
 
 
@@ -819,22 +936,37 @@ def build_blank(root: Path, form: str, src: Path) -> Built:
     per_sheet: dict[str, int] = {}
     pic_sheets: dict[str, str] = {}
     dv_report: dict[str, dict] = {}
+    fmt_report: dict[str, dict] = {}
     for s in fmap["시트"]:
         sname = norm(s["이름"])
         want_clear, want_pic = s.get("비우기") or [], s.get("그림_지우기") is True
         want_dv = s.get("유효성_지우기") or []
+        want_fmt = s.get("서식_지우기") or []
         has_slots = any(s.get(k) for k in ("칸", "표", "서술"))
-        if not want_clear and not want_pic and not want_dv and not has_slots:
+        if not want_clear and not want_pic and not want_dv and not want_fmt and not has_slots:
             continue
         if sname not in paths or paths[sname] not in parts:
             raise ExportError(f"견본에서 시트 {sname!r} 의 XML 을 찾지 못했다", form=form, sheet=sname)
         if want_pic:
             pic_sheets[sname] = paths[sname]
-        if want_clear or want_dv or has_slots:
+        if want_clear or want_dv or want_fmt or has_slots:
             xml, bom = _text(parts, paths[sname])
             ed = SheetXml(xml, set(), False)
             # 지도가 채울 자리로 정한 곳(산출이 값 없이 두면 비우는 곳)과 `비우기`
-            ranges = export.fill_ranges(ed, s) + list(want_clear)
+            ranges = export.fill_ranges(ed, s) + list(want_clear) + list(want_fmt)  # 서식 지우기는 값 지우기를 포함한다
+            if want_fmt:
+                fres = FormatsReset()
+                reset_formats(ed, want_fmt, fres, sname)
+                fmt_report[sname] = {
+                    "cells": fres.cells, "merges_removed": fres.merges, "conditional_formatting_removed": fres.cf_removed,
+                }
+                if fres.cf_overlap:
+                    notices_dv.append({
+                        "type": "conditional-format-overlap",
+                        "sheet": sname,
+                        "ranges": fres.cf_overlap,
+                        "reason": f"시트 {sname!r} 의 조건부 서식 {', '.join(fres.cf_overlap)} 가 `서식_지우기` 범위와 일부만 겹쳐 고치지 않았다 — 확인 필요",
+                    })
             before = cleared.cells
             clear_ranges(ed, ranges, cleared)
             if ranges:
@@ -903,6 +1035,7 @@ def build_blank(root: Path, form: str, src: Path) -> Built:
     report = {
         "cleared": per_sheet,
         "validations_cleared": dv_report,
+        "formats_reset": fmt_report,
         "strings_blanked": n_blank,
         "removed_parts": sorted(gone),
         "external_links": (
