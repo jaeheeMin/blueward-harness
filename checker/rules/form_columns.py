@@ -122,7 +122,7 @@ def _valid_map(data, path: Path) -> dict:
                 bad(f"표 {t['이름']!r} 의 `열`(이름: 열 문자 사전이어야 한다)")
             if t.get("md_전용") is not None and not isinstance(t["md_전용"], list):
                 bad(f"표 {t['이름']!r} 의 `md_전용`(목록이어야 한다)")
-    # 새 키(`비우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·서술 `열`)는 산출과 같은 검증으로 본다.
+    # 새 키(`비우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·`견본_검사`·서술 `열`)는 산출과 같은 검증으로 본다.
     problems = blank_template.map_problems(data)
     if problems:
         raise ConfigError(

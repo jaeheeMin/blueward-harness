@@ -240,7 +240,7 @@ stdout 의 JSON 한 줄이다. stdout 이 JSON 으로 읽히지 않으면(uvx �
   서식이 양식대로인지 확인하라고 사용자에게 권한다. 이 확인은 사람 몫이다.
   `warnings` 가 있으면 항목별 내용을 그대로 사용자에게 보여 준다(예: 해당 없음 시트에 템플릿
   샘플 그림·셀이 남아 있다, 제어 문자를 지웠다). 지도 밖 샘플은 산출이 지우지 않으므로
-  지도의 `비우기`·`그림_지우기` 로 지운다. `#### 화면 N 그림` 이 영역을 넘어 거부되면(`problems` 에 넘친 항목) 항목을 줄이거나 지도의 영역을 넓히게 한다(빈 양식 만들기: `form-map.md` 의 `checker.blank_template`). `rejected`·`error` 에서도 `warnings` 는 보여 준다.
+  지도의 `비우기`·`그림_지우기` 로 지운다. 지도에 `견본_검사: true` 가 있으면 남은 견본은 경고가 아니라 거부(`problems` 의 `type: leftover-sample`)다 — 빈 양식 만들기로 템플릿을 비우거나, 고정 문구면 지도 `유지:` 에 넣게 한다(`form-map.md` "남은 견본 검사"). `type: leftover-review` 경고(머리글·바닥글, 직접 적은 드롭다운 목록)는 통과가 아니니 사람이 확인하게 한다. `#### 화면 N 그림` 이 영역을 넘어 거부되면(`problems` 에 넘친 항목) 항목을 줄이거나 지도의 영역을 넓히게 한다(빈 양식 만들기: `form-map.md` 의 `checker.blank_template`). `rejected`·`error` 에서도 `warnings` 는 보여 준다.
 - `status: warning` (3) — 파일은 만들었지만 표 값이 양식의 드롭다운 목록 밖이거나(`type: dropdown`), 허용 값을 읽지 못해
   검사하지 못한 열이 있다(`type: dropdown-unchecked` — 통과가 아니니 그렇다고 알린다). `warnings` 의 `type: dropdown`
   항목(행·열·값·허용 값)을 그대로 보여 주고 허용 값 중에서 고치게 한다. 고친 뒤 다시 산출하려면 방금 만든 파일을
