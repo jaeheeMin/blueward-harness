@@ -340,6 +340,32 @@ class SheetXml:
         c = self.cell(ref)
         return c.style if c else None
 
+    def reset_style(self, ref: str, default: str | None) -> None:
+        """있는 셀의 서식(s)을 default(열 기본 서식, 없으면 None)로 되돌린다. 셀이 없으면 만들지 않는다."""
+        c = self.cell(ref)
+        if c is None or (c.style or "0") == (default or "0"):
+            return
+        c.attrs = [(k, v) for k, v in c.attrs if k != "s"] + ([("s", default)] if default else [])
+        c.raw = None
+        self.rows[split_ref(ref)[1]].raw = None
+        self.dirty = True
+
+    def row_format_attrs(self, num: int) -> list[tuple[str, str]]:
+        """행의 서식 속성(s, customFormat). 높이·숨김은 뺀다."""
+        row = self.rows.get(num)
+        return [(k, v) for k, v in row.attrs if k in ("s", "customFormat")] if row else []
+
+    def set_row_format(self, num: int, attrs: list[tuple[str, str]]) -> None:
+        """행의 서식 속성(s, customFormat)을 attrs 로 바꾼다. 행이 없으면 만들지 않는다."""
+        row = self.rows.get(num)
+        if row is None:
+            return
+        if sorted(self.row_format_attrs(num)) == sorted(attrs):
+            return
+        row.attrs = [(k, v) for k, v in row.attrs if k not in ("s", "customFormat")] + attrs
+        row.raw = None
+        self.dirty = True
+
     def unhide(self, num: int) -> None:
         """쓰는 행에 숨김 속성이 있으면 지운다(양식에서 숨겨진 행에 쓰면 산출물에서 안 보인다)."""
         row = self.rows.get(num)
@@ -1351,6 +1377,21 @@ def table_template_last(ed: SheetXml, t: dict) -> int:
     return last
 
 
+def _block_roles(rows: list[dict[str, str]], group_col: str, counts: list[int] | None = None) -> list[str]:
+    """산출 행마다 묶음 안 위치(`서식_행` 키)를 낸다. `rows` 는 펼치기 전 md 행이고 `counts[k]` 는 md 행 k 가 펼쳐진 산출 행 수
+    (기본 1)다. 묶음_열에 값이 있는 md 행에서 묶음이 시작하고, 첫 행에 값이 없으면 첫 행부터 첫 시작 전까지가 한 묶음이다.
+    한 md 행에서 나온 줄은 늘 한 묶음이다. 한 행짜리는 `한_행`, 아니면 `첫`·`중간`…·`끝`."""
+    if not rows:
+        return []
+    counts = counts or [1] * len(rows)
+    bounds = sorted({i for i, r in enumerate(rows) if r.get(group_col)} | {0}) + [len(rows)]
+    roles: list[str] = []
+    for a, b in zip(bounds, bounds[1:]):
+        n = sum(counts[a:b])
+        roles += ["한_행"] if n == 1 else ["첫"] + ["중간"] * (n - 2) + ["끝"]
+    return roles
+
+
 def fill_ranges(ed: SheetXml, smap: dict) -> list[str]:
     """지도가 '채울 자리' 로 정한 곳 중 산출이 값 없이 두면 비우는 범위들.
 
@@ -1405,6 +1446,7 @@ def _write_table(
     # 행 펼치기
     out_rows: list[dict[str, str]] = []
     out_labels: list[str] = []
+    out_counts: list[int] = []  # md 행 하나가 펼쳐진 산출 행 수(묶음 경계는 펼치기 전 md 행 단위)
     split_rows = t.get("여러_줄") == "행"
     for k, r in enumerate(md_rows):
         label = labels[k] if labels else ""
@@ -1414,9 +1456,11 @@ def _write_table(
             for i in range(h):
                 out_rows.append({c: (v[i].strip() if i < len(v) else "") for c, v in lines.items()})
                 out_labels.append(label)
+            out_counts.append(h)
         else:
             out_rows.append({c: _BR.sub("\n", v) for c, v in r.items()})
             out_labels.append(label)
+            out_counts.append(1)
     header_of = {}
     for name, letter in cols.items():
         header_of.setdefault(letter, name)
@@ -1440,15 +1484,48 @@ def _write_table(
             return
 
     clone = tmpl_last if tmpl_last >= start else None
+    # 빈 양식(견본 값을 지운 템플릿)은 값이 없어 tmpl_last 가 시작_행-1 이다. 그래도 늘어난 행이 서식 없이 만들어지지
+    # 않게 시작 행의 서식을 복제 원본으로 쓴다. 이미 있는 셀은 건드리지 않는다(템플릿에 남은 행 서식을 지키려고).
+    blank_clone = clone is None and any(ed.style_of(f"{c}{start}") for c in letters)
+    if blank_clone:
+        clone = start
+
+    # 지도 `서식_행`·`묶음_열`: 묶음마다 템플릿의 그 서식 행을 복제한다(견본이 이벤트마다 테두리로 상자를 친 모양).
+    # 쓰다 보면 서식 행 자체가 바뀌므로 먼저 읽어 둔다.
+    role_style: dict[str, dict[str, str]] = {}
+    role_attrs: dict[str, list[tuple[str, str]]] = {}
+    roles: list[str] = []
+    style_last = tmpl_last
+    if t.get("서식_행"):
+        fmt_rows = {str(k): int(v) for k, v in t["서식_행"].items()}
+        for role, fr in fmt_rows.items():
+            role_style[role] = {}
+            for c in dict.fromkeys(letters):
+                s = ed.style_of(f"{c}{fr}")
+                if not s:
+                    raise ExportError(
+                        f"표 {tname!r} 의 `서식_행` {role}({fr}행) 의 {c} 칸이 템플릿에 없거나 서식이 없어 서식을 복제할 수 없다",
+                        form=form, sheet=sname, item=tname,
+                    )
+                role_style[role][c] = s
+            role_attrs[role] = ed.row_format_attrs(fr)
+        roles = _block_roles(md_rows, str(t["묶음_열"]), out_counts)
+        style_last = max(tmpl_last, *fmt_rows.values())
     # 이름(열 머리글) → md 열 문자
     for i, row in enumerate(out_rows):
         rn = start + i
         new_row = max_rows is None and rn > tmpl_last
+        fmt = role_style.get(roles[i]) if roles else None
         for c in letters:
             ref = f"{c}{rn}"
             val = row.get(c, "")
             if val:
-                style = ed.style_of(f"{c}{clone}") if (new_row and clone) else None
+                if fmt:
+                    style = fmt[c]
+                elif new_row and clone:
+                    style = None if blank_clone and ed.cell(ref) else ed.style_of(f"{c}{clone}")
+                else:
+                    style = None
                 put(tname, ref, val, label=out_labels[i], header=header_of.get(c, c),
                     style=style, clone_row=clone if new_row else None)
                 if check:
@@ -1457,15 +1534,28 @@ def _write_table(
                 ed.clear(ref)
             elif clone:
                 ed.blank(ref, ed.style_of(f"{c}{clone}"), clone)
+            if fmt:
+                ed.set_style(ref, fmt[c])  # 값이 빈 칸에도 같은 서식(상자 테두리)을 입힌다
+        if fmt:
+            ed.set_row_format(rn, role_attrs[roles[i]])
         ed.unhide(rn)
         if any(row.get(c) for c in letters):
             if srs_rows is not None:
                 ed.autofit(rn)  # 여러 줄 칸이 템플릿의 고정 줄 높이에 잘리지 않게
             if row_check:
                 row_check(tname, out_labels[i] or f"{rn}행", rn, [c for c in letters if row.get(c)])
-    for rn in range(start + len(out_rows), tmpl_last + 1):
+    for rn in range(start + len(out_rows), style_last + 1):
         for c in letters:
             ed.clear(f"{c}{rn}")
+    if role_style:
+        # 템플릿 행보다 산출 행이 적으면 남는 템플릿 행의 서식(상자 테두리 등)을 열 기본 서식으로 되돌리고 행 서식(색·테두리)도
+        # 지운다(`서식_지우기` 와 같은 결과; 높이·숨김은 그대로).
+        from checker import blank_template
+
+        for rn in range(start + len(out_rows), style_last + 1):
+            ed.set_row_format(rn, [])
+            for c in dict.fromkeys(letters):
+                ed.reset_style(f"{c}{rn}", blank_template._col_style(ed.pre, col2n(c)))
 
 
 def _md_table_rows(form, sname, tname, cols_by_name, subs, problem=None) -> list[dict[str, str]]:

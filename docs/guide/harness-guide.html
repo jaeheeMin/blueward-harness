@@ -280,7 +280,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.75, public-cloud main 기준 (2026-10-14)</div>
+      <div class="note">harness 0.10.80, public-cloud main 기준 (2026-10-16)</div>
     </div>
   </nav>
 
@@ -783,7 +783,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
 
   <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
     <p>고객사 양식은 <b>빈 틀</b>이고, 양식 지도(<code>templates/forms/*.yaml</code>)는 "이 칸엔 제목, 저 칸엔 상태" 하고 적어 둔 <b>안내도</b>야. 엔진은 안내도를 보고 정본의 내용을 틀에 찍어 내.</p>
-    <p>틀의 서식과 그림은 건드리지 않아. 내용 칸만 채워. 다만 개발사양서 화면 시트는 지도에 <code>화면:</code> 영역이 있으면 Spec 의 <code>#### 화면 N 그림</code>(필터 바·액션·결과 테이블)을 그 영역에 셀과 색으로 그려 넣어. 영역을 넘으면 자르지 않고 거절해.</p>
+    <p>틀의 서식과 그림은 건드리지 않아. 내용 칸만 채워. 다만 개발사양서 화면 시트는 지도에 <code>화면:</code> 영역이 있으면 Spec 의 <code>#### 화면 N 그림</code>(필터 바·액션·결과 테이블)을 그 영역에 셀과 색으로 그려 넣어. 영역을 넘으면 자르지 않고 거절해. 표가 샘플보다 길어져도 지도에 <code>서식_행</code>·<code>묶음_열</code> 이 있으면(예: Public Logic) 이벤트 묶음마다 샘플의 테두리 모양(첫·중간·끝·한 행)을 그대로 복제하고, 안 쓴 샘플 행의 테두리는 지워.</p>
   </div></div>
 
   <div class="tbl-wrap"><table>

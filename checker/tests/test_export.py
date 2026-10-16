@@ -1458,3 +1458,260 @@ def test_값_없는_칸은_예시가_없어도_템플릿_견본을_비우고_자
     assert ws["B6"].value is None  # 값이 없으면 비운다
     assert ws["B4"].value == '=B2&"x"'  # 자동 칸은 그대로
     assert ws["A20"].value == "손대지 않을 칸"
+
+
+# ---------------------------------------------------------------- 표 `서식_행`·`묶음_열`: 묶음마다 템플릿 서식 행 복제(#335)
+
+BOX_MAP = """\
+양식: 박스양식
+설명: 시험용
+템플릿: ../박스.xlsx
+산출:
+  폴더: docs/out
+  파일명: "Box_v0.1.xlsx"
+시트:
+  - 이름: Box
+    표:
+      - 이름: 이벤트
+        머리글_행: 1
+        시작_행: 2
+        열:
+          Screen: A
+          Event: B
+          Desc: C
+{extra}"""
+
+BOX_FORMAT = "        서식_행: {첫: 2, 중간: 3, 끝: 4, 한_행: 5}\n        묶음_열: B\n"
+
+BOX_SPEC = """\
+# DEV-001 시험
+
+## 근거 요구사항
+
+REQ-001
+
+## 양식 항목
+
+### 박스양식 · Box
+
+#### 이벤트
+
+| Screen | Event | Desc |
+|---|---|---|
+{rows}
+## 변경 이력
+"""
+
+# 블록: [E1 + 설명 둘] 3행 / [E2] 1행 / [E3 + 설명] 2행 → 첫·중간·끝 / 한_행 / 첫·끝
+BOX_ROWS = ["| S1 | E1 | d1 |", "|  |  | d2 |", "|  |  | d3 |", "| S2 | E2 | d4 |", "| S3 | E3 | d5 |", "|  |  | d6 |"]
+BOX_ROLES = ["첫", "중간", "끝", "한_행", "첫", "끝"]
+
+_SIDES = {"첫": "lrt", "중간": "lr", "끝": "lrb", "한_행": "lrtb"}
+
+
+def _make_box_template(path: Path, sample: bool) -> None:
+    """2~5행이 서식 행: 첫(왼·오·위) / 중간(왼·오) / 끝(왼·오·아래) / 한 행(네 변). 행 서식도 역할마다 다르게 둔다."""
+    from openpyxl.styles import Border, Side
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Box"
+    for c, h in zip("ABC", ["Screen", "Event", "Desc"]):
+        ws[f"{c}1"] = h
+    thin = Side(style="thin")
+    for r, role in zip((2, 3, 4, 5), ("첫", "중간", "끝", "한_행")):
+        for c in "ABC":
+            cell = ws[f"{c}{r}"]
+            sides = _SIDES[role]
+            cell.border = Border(
+                left=thin if "l" in sides else Side(), right=thin if "r" in sides else Side(),
+                top=thin if "t" in sides else Side(), bottom=thin if "b" in sides else Side(),
+            )
+            if sample:
+                cell.value = f"샘플{r}{c}"
+    ws.row_dimensions[2].fill = PatternFill("solid", fgColor="FFFF00")  # 행 서식(s + customFormat)
+    ws.row_dimensions[5].fill = PatternFill("solid", fgColor="00FF00")
+    wb.save(path)
+
+
+def _box_proj(tmp_path: Path, *, sample: bool = True, extra: str = BOX_FORMAT) -> Path:
+    (tmp_path / "templates" / "forms").mkdir(parents=True)
+    (tmp_path / "templates" / "forms" / "박스양식.yaml").write_text(BOX_MAP.format(extra=extra), encoding="utf-8")
+    _make_box_template(tmp_path / "templates" / "박스.xlsx", sample)
+    return tmp_path
+
+
+def _box_run(proj: Path, capsys, rows: list[str] = BOX_ROWS):
+    return _run(proj, capsys, BOX_SPEC.format(rows="\n".join(rows) + "\n"))
+
+
+def _sides(cell) -> str:
+    b = cell.border
+    return "".join(k for k, side in (("l", b.left), ("r", b.right), ("t", b.top), ("b", b.bottom)) if side and side.style)
+
+
+def _row_style(path: Path, row: int) -> str | None:
+    with zipfile.ZipFile(path) as zf:
+        xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    m = re.search(rf'<row r="{row}"([^>]*)>', xml)
+    assert m, f"{row}행이 없다"
+    s = re.search(r'\bs="(\d+)"', m.group(1))
+    return s.group(1) if s else None
+
+
+@pytest.mark.parametrize("sample", [True, False], ids=["견본_있음", "빈_양식"])
+def test_서식_행은_묶음_경계마다_첫_중간_끝_한_행_서식을_복제한다(tmp_path, capsys, sample):
+    proj = _box_proj(tmp_path, sample=sample)
+    code, report = _box_run(proj, capsys)
+    assert code == 0, report
+    out = _produced(proj, report)
+    ws = openpyxl.load_workbook(out)["Box"]
+    assert ws["B2"].value == "E1" and ws["C7"].value == "d6"
+    for i, role in enumerate(BOX_ROLES):  # 템플릿 행 수(4)보다 늘어난 6·7행(새 행)도 같다
+        for c in "ABC":  # 값이 빈 칸(A3·B3 등)에도 입힌다
+            assert _sides(ws[f"{c}{2 + i}"]) == _SIDES[role], (c, 2 + i, role)
+    # 행 서식(s + customFormat)도 서식 행에서 가져온다: 첫 행끼리, 한 행끼리 같다.
+    assert _row_style(out, 2) == _row_style(out, 6) is not None
+    assert _row_style(out, 5) != _row_style(out, 2)
+
+
+def test_첫_행에_묶음_값이_없으면_첫_행부터_첫_시작_전까지가_한_블록(tmp_path, capsys):
+    proj = _box_proj(tmp_path)
+    rows = ["|  |  | x1 |", "|  |  | x2 |", "| S1 | E1 | d1 |", "|  |  | d2 |", "| S2 | E2 | d3 |"]
+    code, report = _box_run(proj, capsys, rows)
+    assert code == 0, report
+    ws = openpyxl.load_workbook(_produced(proj, report))["Box"]
+    got = [_sides(ws[f"B{r}"]) for r in range(2, 7)]
+    assert got == [_SIDES["첫"], _SIDES["끝"], _SIDES["첫"], _SIDES["끝"], _SIDES["한_행"]]
+
+
+def test_산출_행이_템플릿_행보다_적으면_남는_템플릿_행의_서식과_값을_지운다(tmp_path, capsys):
+    proj = _box_proj(tmp_path)
+    code, report = _box_run(proj, capsys, ["| S1 | E1 | d1 |", "|  |  | d2 |"])  # 한 묶음 두 행
+    assert code == 0, report
+    ws = openpyxl.load_workbook(_produced(proj, report))["Box"]
+    assert [_sides(ws[f"B{r}"]) for r in (2, 3)] == [_SIDES["첫"], _SIDES["끝"]]
+    for r in (4, 5):  # 안 쓴 템플릿 행: 값도 상자 테두리도 남지 않는다
+        for c in "ABC":
+            assert ws[f"{c}{r}"].value is None and _sides(ws[f"{c}{r}"]) == "", (c, r)
+    out = proj / report["files"][0]
+    assert _row_style(out, 5) is None  # 템플릿 5행의 행 서식(녹색)도 남지 않는다
+    assert _row_style(out, 2) is not None
+
+
+def test_산출_행이_없으면_템플릿_행의_서식이_모두_지워진다(tmp_path, capsys):
+    proj = _box_proj(tmp_path)
+    code, report = _box_run(proj, capsys, [])
+    assert code == 0, report
+    ws = openpyxl.load_workbook(_produced(proj, report))["Box"]
+    assert all(_sides(ws[f"{c}{r}"]) == "" and ws[f"{c}{r}"].value is None for c in "ABC" for r in range(2, 6))
+
+
+def test_서식_행이_없는_표는_예전_동작_그대로(tmp_path, capsys):
+    proj = _box_proj(tmp_path, extra="")
+    code, report = _box_run(proj, capsys)
+    assert code == 0, report
+    ws = openpyxl.load_workbook(_produced(proj, report))["Box"]
+    # 견본이 있는 템플릿: 데이터 영역은 2~5행, 새 행(6·7)은 마지막 템플릿 행(5행, 네 변)의 서식을 복제, 기존 행은 그대로.
+    assert [_sides(ws[f"B{r}"]) for r in range(2, 8)] == [_SIDES["첫"], _SIDES["중간"], _SIDES["끝"], _SIDES["한_행"]] + [_SIDES["한_행"]] * 2
+
+
+def test_빈_양식에서도_늘어난_행이_서식_없이_만들어지지_않는다(tmp_path, capsys):
+    """견본 값을 지운 템플릿은 값 기준 마지막 행이 없다 — 새 행의 서식·행 속성 복제 원본을 시작 행으로 둔다."""
+    proj = _box_proj(tmp_path, sample=False, extra="")
+    code, report = _box_run(proj, capsys)
+    assert code == 0, report
+    out = _produced(proj, report)
+    ws = openpyxl.load_workbook(out)["Box"]
+    # 이미 있는 템플릿 행(2~5)은 자기 서식을 지킨다.
+    assert [_sides(ws[f"B{r}"]) for r in range(2, 6)] == [_SIDES["첫"], _SIDES["중간"], _SIDES["끝"], _SIDES["한_행"]]
+    # 새 행(6·7)은 시작 행(2행)의 서식·행 서식을 복제한다.
+    assert [_sides(ws[f"{c}{r}"]) for c in "ABC" for r in (6, 7)] == [_SIDES["첫"]] * 6
+    assert _row_style(out, 6) == _row_style(out, 2) is not None
+
+
+@pytest.mark.parametrize(
+    "extra, msg",
+    [
+        ("        서식_행: {첫: 2, 중간: 3, 끝: 4, 한_행: 5}\n", "같이 써야"),
+        ("        묶음_열: B\n", "같이 써야"),
+        ("        서식_행: {첫: 2, 중간: 3, 끝: 4}\n        묶음_열: B\n", "네 키"),
+        ("        서식_행: {첫: 2, 중간: x, 끝: 4, 한_행: 5}\n        묶음_열: B\n", "정수"),
+        ("        서식_행: {첫: 2, 중간: 3.5, 끝: 4, 한_행: 5}\n        묶음_열: B\n", "정수"),
+        ("        서식_행: {첫: 1, 중간: 3, 끝: 4, 한_행: 5}\n        묶음_열: B\n", "앞이다"),
+        ("        최대_행: 4\n        서식_행: {첫: 2, 중간: 3, 끝: 4, 한_행: 6}\n        묶음_열: B\n", "범위"),
+        ("        서식_행: [2, 3, 4, 5]\n        묶음_열: B\n", "네 키"),
+        ("        서식_행: {첫: 2, 중간: 3, 끝: 4, 한_행: 5}\n        묶음_열: Z\n", "열 문자"),
+        ("        서식_행: {첫: 2, 중간: 3, 끝: 4, 한_행: 5}\n        묶음_열: Event\n", "열 문자"),
+    ],
+)
+def test_서식_행_묶음_열이_틀리면_지도_오류_2(tmp_path, capsys, extra, msg):
+    proj = _box_proj(tmp_path, extra=extra)
+    code, report = _box_run(proj, capsys)
+    assert code == 2, report
+    assert msg in json.dumps(report, ensure_ascii=False)
+
+
+def test_서식_행_셀이_템플릿에_없거나_서식이_없으면_멈춘다(tmp_path, capsys):
+    proj = _box_proj(tmp_path, extra="        서식_행: {첫: 2, 중간: 3, 끝: 4, 한_행: 9}\n        묶음_열: B\n")
+    code, report = _box_run(proj, capsys)
+    assert code == 2, report
+    assert "서식_행" in json.dumps(report, ensure_ascii=False) and "9행" in json.dumps(report, ensure_ascii=False)
+    assert not (proj / "docs" / "out").exists() or not list((proj / "docs" / "out").iterdir())
+
+
+def test_form_columns_와_산출이_서식_행_검증을_같이_쓴다():
+    from checker.blank_template import map_problems
+
+    bad = {"시트": [{"이름": "S", "표": [{"이름": "T", "시작_행": 2, "열": {"A": "A"}, "서식_행": {"첫": 2}, "묶음_열": "A"}]}]}
+    assert any("네 키" in m for _, m in map_problems(bad))
+    ok = {"시트": [{"이름": "S", "표": [{"이름": "T", "시작_행": 2, "열": {"A": "A"}, "서식_행": {"첫": 2, "중간": 3, "끝": 4, "한_행": 5}, "묶음_열": "A"}]}]}
+    assert map_problems(ok) == []
+
+
+def test_묶음_역할은_경계만으로_정해진다():
+    r = export._block_roles
+    assert r([], "B") == []
+    assert r([{"B": "x"}], "B") == ["한_행"]
+    assert r([{"B": "x"}, {}, {"B": "y"}], "B") == ["첫", "끝", "한_행"]
+    assert r([{}, {}, {"B": "y"}], "B") == ["첫", "끝", "한_행"]
+    assert r([{"B": "x"}, {}, {}, {}], "B") == ["첫", "중간", "중간", "끝"]
+    assert r([{"B": "x"}, {"B": "y"}], "B", [3, 1]) == ["첫", "중간", "끝", "한_행"]
+
+
+def test_묶음_열_칸에_br이_있어도_한_md_행은_한_묶음(tmp_path, capsys):
+    """`여러_줄: 행` 으로 펼친 줄의 묶음_열 칸이 채워져도 블록 경계는 펼치기 전 md 행 단위다."""
+    proj = _box_proj(tmp_path, extra=BOX_FORMAT + "        여러_줄: 행\n")
+    rows = ["| S1 | E1<br>E1b | d1<br>d2<br>d3 |", "| S2 | E2 | d4 |"]
+    code, report = _box_run(proj, capsys, rows)
+    assert code == 0, report
+    ws = openpyxl.load_workbook(_produced(proj, report))["Box"]
+    assert [ws[f"B{r}"].value for r in (2, 3, 4, 5)] == ["E1", "E1b", None, "E2"]
+    # E1 묶음 3행(첫·중간·끝), E2 묶음 1행(한 행) — E1b 줄이 새 묶음을 시작하지 않는다.
+    assert [_sides(ws[f"B{r}"]) for r in (2, 3, 4, 5)] == [_SIDES["첫"], _SIDES["중간"], _SIDES["끝"], _SIDES["한_행"]]
+
+
+def test_서식_행_정리_범위가_표_아래_다른_항목에_걸리면_지도_오류_2(tmp_path, capsys):
+    proj = _box_proj(tmp_path, extra="        서식_행: {첫: 2, 중간: 3, 끝: 4, 한_행: 20}\n        묶음_열: B\n")
+    mp = proj / "templates" / "forms" / "박스양식.yaml"
+    text = mp.read_text(encoding="utf-8")
+    mp.write_text(text.replace("    표:\n", "    칸:\n      - 항목: 메모\n        위치: A20\n    표:\n", 1), encoding="utf-8")
+    code, report = _box_run(proj, capsys)
+    assert code == 2 and "겹친다" in json.dumps(report, ensure_ascii=False), report
+    assert not (proj / "docs" / "out").exists() or not list((proj / "docs" / "out").iterdir())
+
+
+def test_서식_행_정리_범위_겹침_판정은_map_problems_에서_열과_행으로_본다():
+    from checker.blank_template import map_problems
+
+    fr = {"첫": 2, "중간": 3, "끝": 4, "한_행": 9}
+    tab = {"이름": "T", "시작_행": 2, "열": {"A": "A", "B": "B"}, "서식_행": fr, "묶음_열": "A"}
+    mk = lambda *extra, **kw: {"시트": [{"이름": "S", "표": [{**tab, **kw}], **dict(extra)}]}
+    below_same_cols = mk(("칸", [{"항목": "x", "위치": "B9"}]))
+    assert any("겹친다" in m for _, m in map_problems(below_same_cols))
+    other_cols = mk(("칸", [{"항목": "x", "위치": "E9"}]))  # 열이 겹치지 않으면 괜찮다
+    assert map_problems(other_cols) == []
+    bounded = mk(("칸", [{"항목": "x", "위치": "B9"}]), 최대_행=8, 서식_행={**fr, "한_행": 5})  # 최대_행 이 있으면 그 범위가 한도
+    assert map_problems(bounded) == []
+    screen = mk(("화면", [{"이름": "g", "영역": "A8:B12"}]))
+    assert any("화면" in m and "겹친다" in m for _, m in map_problems(screen))

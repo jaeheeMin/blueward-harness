@@ -85,8 +85,80 @@ def _hit(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
 
 # ---------------------------------------------------------------- 지도 검증(export·form_columns 가 같이 쓴다)
 
+FORMAT_ROLES = ("첫", "중간", "끝", "한_행")
+
+
+def _table_format_problems(t: dict) -> list[str]:
+    """표의 `서식_행`·`묶음_열` 오류. 둘은 같이 있어야 한다. 템플릿 안에 그 행·셀이 있는지는 산출이 본다."""
+    fr, gc = t.get("서식_행"), t.get("묶음_열")
+    if fr is None and gc is None:
+        return []
+    out: list[str] = []
+    if fr is None or gc is None:
+        out.append("`서식_행` 과 `묶음_열` 은 같이 써야 한다")
+    if fr is not None:
+        start = t.get("시작_행")
+        end = start + t["최대_행"] - 1 if isinstance(start, int) and isinstance(t.get("최대_행"), int) else None
+        if not isinstance(fr, dict) or set(fr) != set(FORMAT_ROLES):
+            out.append(f"`서식_행` 은 {{{', '.join(FORMAT_ROLES)}}} 네 키의 사전이어야 한다")
+        else:
+            for role, n in fr.items():
+                if isinstance(n, bool) or not isinstance(n, int):
+                    out.append(f"`서식_행` 의 {role} 는 행 번호(정수)여야 한다")
+                elif isinstance(start, int) and n < start:
+                    out.append(f"`서식_행` 의 {role}({n}) 가 시작_행({start}) 보다 앞이다")
+                elif end is not None and n > end:
+                    out.append(f"`서식_행` 의 {role}({n}) 가 표 범위(최대_행 {t['최대_행']}, {end}행까지) 밖이다")
+    if gc is not None:
+        letters = [v for v in (t.get("열") or {}).values()] if isinstance(t.get("열"), dict) else []
+        if not isinstance(gc, str) or gc not in letters:
+            out.append(f"`묶음_열`({gc!r}) 은 표 `열` 에 있는 열 문자여야 한다")
+    return out
+
+
+def _format_row_overlaps(s: dict, t: dict) -> list[str]:
+    """`최대_행` 이 없는 표의 `서식_행` 정리 범위(시작_행 ~ 서식 행 최대값 × 표 열)에 같은 시트의 다른 칸·서술·표·화면 영역이
+    걸리는가. 서식 행 번호 오타로 정리 범위가 표 아래 다른 항목까지 번져 값이 지워지는 것을 막는다."""
+    fr, start, cols = t.get("서식_행"), t.get("시작_행"), t.get("열")
+    if (
+        not isinstance(fr, dict) or not isinstance(start, int) or isinstance(t.get("최대_행"), int)
+        or not isinstance(cols, dict) or not fr or not all(isinstance(n, int) and not isinstance(n, bool) for n in fr.values())
+    ):
+        return []
+    letters = [col2n(v) for v in cols.values() if isinstance(v, str) and re.fullmatch(r"[A-Z]{1,3}", v)]
+    if not letters:
+        return []
+    mine = (min(letters), start, max(letters), max(max(fr.values()), start))
+
+    def rect_of(loc) -> tuple[int, int, int, int] | None:
+        try:
+            return parse_range(loc)
+        except RangeError:
+            return None
+
+    others: list[tuple[str, tuple[int, int, int, int] | None]] = []
+    for kind, key in (("칸", "위치"), ("서술", "위치")):
+        for it in s.get(kind) or []:
+            if isinstance(it, dict) and it.get(key):
+                others.append((f"{kind} {it.get('항목', it.get('이름'))!r}", rect_of(it[key])))
+    for it in s.get("화면") or []:
+        if isinstance(it, dict) and it.get("영역"):
+            others.append((f"화면 {it.get('이름')!r}", rect_of(it["영역"])))
+    for o in s.get("표") or []:
+        if o is t or not isinstance(o, dict) or not isinstance(o.get("열"), dict) or not isinstance(o.get("시작_행"), int):
+            continue
+        ol = [col2n(v) for v in o["열"].values() if isinstance(v, str) and re.fullmatch(r"[A-Z]{1,3}", v)]
+        if ol:
+            last = o["시작_행"] + o["최대_행"] - 1 if isinstance(o.get("최대_행"), int) else o["시작_행"]
+            others.append((f"표 {o.get('이름')!r}", (min(ol), o["시작_행"], max(ol), last)))
+    return [
+        f"`서식_행` 의 정리 범위({start}~{mine[3]}행)가 {label} 와 겹친다 — 행 번호를 고치거나 `최대_행` 을 둔다"
+        for label, r in others if r is not None and _hit(mine, r)
+    ]
+
+
 def map_problems(fmap: dict) -> list[tuple[str, str]]:
-    """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·`화면`)와 서술 `열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
+    """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·`화면`)와 서술 `열`, 표 `서식_행`·`묶음_열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
     out: list[tuple[str, str]] = []
     top = fmap.get("외부_참조_지우기")
     if top is not None and not isinstance(top, bool):
@@ -143,6 +215,9 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                 if isinstance(col, str) and re.fullmatch(r"[A-Z]{1,3}", col):
                     n = col2n(col)
                     owned.append((f"표 {t.get('이름')!r} 의 {col} 열", (n, start, n, end)))
+        for t in s.get("표") or []:
+            if isinstance(t, dict):
+                out += [("map", f"시트 {sn!r} 표 {t.get('이름')!r} 의 {m}") for m in _table_format_problems(t) + _format_row_overlaps(s, t)]
         for key in ("비우기", "서식_지우기"):
             for x, rect in keyed[key]:
                 for label, orect in owned:
