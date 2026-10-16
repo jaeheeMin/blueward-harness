@@ -15,12 +15,33 @@ ROOT = Path(__file__).resolve().parents[2]
 LOOP = ROOT / "scripts" / "ledger_complete_loop.sh"
 REPO = "o/r"
 
+def _find_bash() -> str | None:
+    """진짜 bash 를 찾는다. Windows 에서는 PATH 의 System32 bash.exe(WSL 실행기)를 피하고 Git for Windows 의 것을 쓴다."""
+    if os.name == "nt":
+        candidates = [
+            Path(os.environ.get(key, default)) / "Git" / "bin" / "bash.exe"
+            for key, default in (("ProgramFiles", r"C:\Program Files"), ("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+        ]
+        git = shutil.which("git")
+        if git:  # git.exe 가 있는 설치 폴더(…/cmd/git.exe → …/bin/bash.exe)
+            root = Path(git).resolve().parent.parent
+            candidates += [root / "bin" / "bash.exe", root / "usr" / "bin" / "bash.exe"]
+        for c in candidates:
+            if c.is_file():
+                return str(c)
+        found = shutil.which("bash")
+        return found if found and "system32" not in found.lower() else None
+    return shutil.which("bash")
+
+
+_BASH = _find_bash()
+
 pytestmark = pytest.mark.skipif(
-    shutil.which("bash") is None or shutil.which("jq") is None or shutil.which("git") is None,
-    reason="bash, jq, git 이 필요하다",
+    _BASH is None or shutil.which("jq") is None or shutil.which("git") is None,
+    reason="bash(WSL 실행기 제외), jq, git 이 필요하다",
 )
 
-FAKE_APPLY = """#!/usr/bin/env bash
+FAKE_APPLY = """#!/bin/bash
 # 가짜 apply: 인자를 기록하고, MODE 에 따라 동작한다.
 echo "$@" >> "$FAKE_DIR/args.txt"
 n=$(( $(cat "$FAKE_DIR/count.txt" 2>/dev/null || echo 0) + 1 ))
@@ -79,6 +100,7 @@ def env(tmp_path):
     script = fake / "apply.sh"
     with open(script, "w", encoding="utf-8", newline="\n") as f:
         f.write(FAKE_APPLY)
+    script.chmod(0o755)
     return {"work": work, "remote": remote, "fake": fake, "script": script, "base": base, "second": second}
 
 
@@ -86,10 +108,10 @@ def _loop(env: dict, mode: str, before: str = "", attempts: str = "5", sha: str 
     e = dict(os.environ)
     e.update({
         "REPO": REPO, "SHA": sha or env["second"], "BEFORE": before, "ATTEMPTS": attempts, "RETRY_SLEEP_MAX": "0",
-        "APPLY_CMD": f"bash {env['script'].as_posix()}", "FAKE_DIR": env["fake"].as_posix(), "MODE": mode,
+        "APPLY_CMD": env["script"].as_posix(), "FAKE_DIR": env["fake"].as_posix(), "MODE": mode,
         "GITHUB_OUTPUT": (env["fake"] / "out.txt").as_posix(),
     })
-    return subprocess.run(["bash", str(LOOP)], cwd=env["work"], env=e, capture_output=True, text=True, encoding="utf-8")
+    return subprocess.run([_BASH, str(LOOP)], cwd=env["work"], env=e, capture_output=True, text=True, encoding="utf-8")
 
 
 def _outcome(env: dict) -> str:
