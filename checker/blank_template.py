@@ -116,6 +116,47 @@ def _table_format_problems(t: dict) -> list[str]:
     return out
 
 
+def _format_row_overlaps(s: dict, t: dict) -> list[str]:
+    """`최대_행` 이 없는 표의 `서식_행` 정리 범위(시작_행 ~ 서식 행 최대값 × 표 열)에 같은 시트의 다른 칸·서술·표·화면 영역이
+    걸리는가. 서식 행 번호 오타로 정리 범위가 표 아래 다른 항목까지 번져 값이 지워지는 것을 막는다."""
+    fr, start, cols = t.get("서식_행"), t.get("시작_행"), t.get("열")
+    if (
+        not isinstance(fr, dict) or not isinstance(start, int) or isinstance(t.get("최대_행"), int)
+        or not isinstance(cols, dict) or not fr or not all(isinstance(n, int) and not isinstance(n, bool) for n in fr.values())
+    ):
+        return []
+    letters = [col2n(v) for v in cols.values() if isinstance(v, str) and re.fullmatch(r"[A-Z]{1,3}", v)]
+    if not letters:
+        return []
+    mine = (min(letters), start, max(letters), max(max(fr.values()), start))
+
+    def rect_of(loc) -> tuple[int, int, int, int] | None:
+        try:
+            return parse_range(loc)
+        except RangeError:
+            return None
+
+    others: list[tuple[str, tuple[int, int, int, int] | None]] = []
+    for kind, key in (("칸", "위치"), ("서술", "위치")):
+        for it in s.get(kind) or []:
+            if isinstance(it, dict) and it.get(key):
+                others.append((f"{kind} {it.get('항목', it.get('이름'))!r}", rect_of(it[key])))
+    for it in s.get("화면") or []:
+        if isinstance(it, dict) and it.get("영역"):
+            others.append((f"화면 {it.get('이름')!r}", rect_of(it["영역"])))
+    for o in s.get("표") or []:
+        if o is t or not isinstance(o, dict) or not isinstance(o.get("열"), dict) or not isinstance(o.get("시작_행"), int):
+            continue
+        ol = [col2n(v) for v in o["열"].values() if isinstance(v, str) and re.fullmatch(r"[A-Z]{1,3}", v)]
+        if ol:
+            last = o["시작_행"] + o["최대_행"] - 1 if isinstance(o.get("최대_행"), int) else o["시작_행"]
+            others.append((f"표 {o.get('이름')!r}", (min(ol), o["시작_행"], max(ol), last)))
+    return [
+        f"`서식_행` 의 정리 범위({start}~{mine[3]}행)가 {label} 와 겹친다 — 행 번호를 고치거나 `최대_행` 을 둔다"
+        for label, r in others if r is not None and _hit(mine, r)
+    ]
+
+
 def map_problems(fmap: dict) -> list[tuple[str, str]]:
     """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·`화면`)와 서술 `열`, 표 `서식_행`·`묶음_열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
     out: list[tuple[str, str]] = []
@@ -176,7 +217,7 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                     owned.append((f"표 {t.get('이름')!r} 의 {col} 열", (n, start, n, end)))
         for t in s.get("표") or []:
             if isinstance(t, dict):
-                out += [("map", f"시트 {sn!r} 표 {t.get('이름')!r} 의 {m}") for m in _table_format_problems(t)]
+                out += [("map", f"시트 {sn!r} 표 {t.get('이름')!r} 의 {m}") for m in _table_format_problems(t) + _format_row_overlaps(s, t)]
         for key in ("비우기", "서식_지우기"):
             for x, rect in keyed[key]:
                 for label, orect in owned:

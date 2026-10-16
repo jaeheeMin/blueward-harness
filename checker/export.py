@@ -1377,15 +1377,18 @@ def table_template_last(ed: SheetXml, t: dict) -> int:
     return last
 
 
-def _block_roles(rows: list[dict[str, str]], group_col: str) -> list[str]:
-    """행마다 묶음 안 위치(`서식_행` 키)를 낸다. 묶음_열에 값이 있는 행에서 묶음이 시작하고, 첫 행에 값이 없으면
-    첫 행부터 첫 시작 전까지가 한 묶음이다. 한 행짜리는 `한_행`, 아니면 `첫`·`중간`…·`끝`."""
+def _block_roles(rows: list[dict[str, str]], group_col: str, counts: list[int] | None = None) -> list[str]:
+    """산출 행마다 묶음 안 위치(`서식_행` 키)를 낸다. `rows` 는 펼치기 전 md 행이고 `counts[k]` 는 md 행 k 가 펼쳐진 산출 행 수
+    (기본 1)다. 묶음_열에 값이 있는 md 행에서 묶음이 시작하고, 첫 행에 값이 없으면 첫 행부터 첫 시작 전까지가 한 묶음이다.
+    한 md 행에서 나온 줄은 늘 한 묶음이다. 한 행짜리는 `한_행`, 아니면 `첫`·`중간`…·`끝`."""
     if not rows:
         return []
+    counts = counts or [1] * len(rows)
     bounds = sorted({i for i, r in enumerate(rows) if r.get(group_col)} | {0}) + [len(rows)]
     roles: list[str] = []
     for a, b in zip(bounds, bounds[1:]):
-        roles += ["한_행"] if b - a == 1 else ["첫"] + ["중간"] * (b - a - 2) + ["끝"]
+        n = sum(counts[a:b])
+        roles += ["한_행"] if n == 1 else ["첫"] + ["중간"] * (n - 2) + ["끝"]
     return roles
 
 
@@ -1443,6 +1446,7 @@ def _write_table(
     # 행 펼치기
     out_rows: list[dict[str, str]] = []
     out_labels: list[str] = []
+    out_counts: list[int] = []  # md 행 하나가 펼쳐진 산출 행 수(묶음 경계는 펼치기 전 md 행 단위)
     split_rows = t.get("여러_줄") == "행"
     for k, r in enumerate(md_rows):
         label = labels[k] if labels else ""
@@ -1452,9 +1456,11 @@ def _write_table(
             for i in range(h):
                 out_rows.append({c: (v[i].strip() if i < len(v) else "") for c, v in lines.items()})
                 out_labels.append(label)
+            out_counts.append(h)
         else:
             out_rows.append({c: _BR.sub("\n", v) for c, v in r.items()})
             out_labels.append(label)
+            out_counts.append(1)
     header_of = {}
     for name, letter in cols.items():
         header_of.setdefault(letter, name)
@@ -1503,7 +1509,7 @@ def _write_table(
                     )
                 role_style[role][c] = s
             role_attrs[role] = ed.row_format_attrs(fr)
-        roles = _block_roles(out_rows, str(t["묶음_열"]))
+        roles = _block_roles(md_rows, str(t["묶음_열"]), out_counts)
         style_last = max(tmpl_last, *fmt_rows.values())
     # 이름(열 머리글) → md 열 문자
     for i, row in enumerate(out_rows):
@@ -1542,10 +1548,12 @@ def _write_table(
         for c in letters:
             ed.clear(f"{c}{rn}")
     if role_style:
-        # 템플릿 행보다 산출 행이 적으면 남는 템플릿 행의 서식(상자 테두리 등)을 열 기본 서식으로 되돌린다(`서식_지우기` 와 같은 결과).
+        # 템플릿 행보다 산출 행이 적으면 남는 템플릿 행의 서식(상자 테두리 등)을 열 기본 서식으로 되돌리고 행 서식(색·테두리)도
+        # 지운다(`서식_지우기` 와 같은 결과; 높이·숨김은 그대로).
         from checker import blank_template
 
         for rn in range(start + len(out_rows), style_last + 1):
+            ed.set_row_format(rn, [])
             for c in dict.fromkeys(letters):
                 ed.reset_style(f"{c}{rn}", blank_template._col_style(ed.pre, col2n(c)))
 

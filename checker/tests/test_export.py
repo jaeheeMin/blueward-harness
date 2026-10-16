@@ -1594,6 +1594,9 @@ def test_산출_행이_템플릿_행보다_적으면_남는_템플릿_행의_서
     for r in (4, 5):  # 안 쓴 템플릿 행: 값도 상자 테두리도 남지 않는다
         for c in "ABC":
             assert ws[f"{c}{r}"].value is None and _sides(ws[f"{c}{r}"]) == "", (c, r)
+    out = proj / report["files"][0]
+    assert _row_style(out, 5) is None  # 템플릿 5행의 행 서식(녹색)도 남지 않는다
+    assert _row_style(out, 2) is not None
 
 
 def test_산출_행이_없으면_템플릿_행의_서식이_모두_지워진다(tmp_path, capsys):
@@ -1673,3 +1676,42 @@ def test_묶음_역할은_경계만으로_정해진다():
     assert r([{"B": "x"}, {}, {"B": "y"}], "B") == ["첫", "끝", "한_행"]
     assert r([{}, {}, {"B": "y"}], "B") == ["첫", "끝", "한_행"]
     assert r([{"B": "x"}, {}, {}, {}], "B") == ["첫", "중간", "중간", "끝"]
+    assert r([{"B": "x"}, {"B": "y"}], "B", [3, 1]) == ["첫", "중간", "끝", "한_행"]
+
+
+def test_묶음_열_칸에_br이_있어도_한_md_행은_한_묶음(tmp_path, capsys):
+    """`여러_줄: 행` 으로 펼친 줄의 묶음_열 칸이 채워져도 블록 경계는 펼치기 전 md 행 단위다."""
+    proj = _box_proj(tmp_path, extra=BOX_FORMAT + "        여러_줄: 행\n")
+    rows = ["| S1 | E1<br>E1b | d1<br>d2<br>d3 |", "| S2 | E2 | d4 |"]
+    code, report = _box_run(proj, capsys, rows)
+    assert code == 0, report
+    ws = openpyxl.load_workbook(_produced(proj, report))["Box"]
+    assert [ws[f"B{r}"].value for r in (2, 3, 4, 5)] == ["E1", "E1b", None, "E2"]
+    # E1 묶음 3행(첫·중간·끝), E2 묶음 1행(한 행) — E1b 줄이 새 묶음을 시작하지 않는다.
+    assert [_sides(ws[f"B{r}"]) for r in (2, 3, 4, 5)] == [_SIDES["첫"], _SIDES["중간"], _SIDES["끝"], _SIDES["한_행"]]
+
+
+def test_서식_행_정리_범위가_표_아래_다른_항목에_걸리면_지도_오류_2(tmp_path, capsys):
+    proj = _box_proj(tmp_path, extra="        서식_행: {첫: 2, 중간: 3, 끝: 4, 한_행: 20}\n        묶음_열: B\n")
+    mp = proj / "templates" / "forms" / "박스양식.yaml"
+    text = mp.read_text(encoding="utf-8")
+    mp.write_text(text.replace("    표:\n", "    칸:\n      - 항목: 메모\n        위치: A20\n    표:\n", 1), encoding="utf-8")
+    code, report = _box_run(proj, capsys)
+    assert code == 2 and "겹친다" in json.dumps(report, ensure_ascii=False), report
+    assert not (proj / "docs" / "out").exists() or not list((proj / "docs" / "out").iterdir())
+
+
+def test_서식_행_정리_범위_겹침_판정은_map_problems_에서_열과_행으로_본다():
+    from checker.blank_template import map_problems
+
+    fr = {"첫": 2, "중간": 3, "끝": 4, "한_행": 9}
+    tab = {"이름": "T", "시작_행": 2, "열": {"A": "A", "B": "B"}, "서식_행": fr, "묶음_열": "A"}
+    mk = lambda *extra, **kw: {"시트": [{"이름": "S", "표": [{**tab, **kw}], **dict(extra)}]}
+    below_same_cols = mk(("칸", [{"항목": "x", "위치": "B9"}]))
+    assert any("겹친다" in m for _, m in map_problems(below_same_cols))
+    other_cols = mk(("칸", [{"항목": "x", "위치": "E9"}]))  # 열이 겹치지 않으면 괜찮다
+    assert map_problems(other_cols) == []
+    bounded = mk(("칸", [{"항목": "x", "위치": "B9"}]), 최대_행=8, 서식_행={**fr, "한_행": 5})  # 최대_행 이 있으면 그 범위가 한도
+    assert map_problems(bounded) == []
+    screen = mk(("화면", [{"이름": "g", "영역": "A8:B12"}]))
+    assert any("화면" in m and "겹친다" in m for _, m in map_problems(screen))
