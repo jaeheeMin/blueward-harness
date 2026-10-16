@@ -85,8 +85,39 @@ def _hit(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
 
 # ---------------------------------------------------------------- 지도 검증(export·form_columns 가 같이 쓴다)
 
+FORMAT_ROLES = ("첫", "중간", "끝", "한_행")
+
+
+def _table_format_problems(t: dict) -> list[str]:
+    """표의 `서식_행`·`묶음_열` 오류. 둘은 같이 있어야 한다. 템플릿 안에 그 행·셀이 있는지는 산출이 본다."""
+    fr, gc = t.get("서식_행"), t.get("묶음_열")
+    if fr is None and gc is None:
+        return []
+    out: list[str] = []
+    if fr is None or gc is None:
+        out.append("`서식_행` 과 `묶음_열` 은 같이 써야 한다")
+    if fr is not None:
+        start = t.get("시작_행")
+        end = start + t["최대_행"] - 1 if isinstance(start, int) and isinstance(t.get("최대_행"), int) else None
+        if not isinstance(fr, dict) or set(fr) != set(FORMAT_ROLES):
+            out.append(f"`서식_행` 은 {{{', '.join(FORMAT_ROLES)}}} 네 키의 사전이어야 한다")
+        else:
+            for role, n in fr.items():
+                if isinstance(n, bool) or not isinstance(n, int):
+                    out.append(f"`서식_행` 의 {role} 는 행 번호(정수)여야 한다")
+                elif isinstance(start, int) and n < start:
+                    out.append(f"`서식_행` 의 {role}({n}) 가 시작_행({start}) 보다 앞이다")
+                elif end is not None and n > end:
+                    out.append(f"`서식_행` 의 {role}({n}) 가 표 범위(최대_행 {t['최대_행']}, {end}행까지) 밖이다")
+    if gc is not None:
+        letters = [v for v in (t.get("열") or {}).values()] if isinstance(t.get("열"), dict) else []
+        if not isinstance(gc, str) or gc not in letters:
+            out.append(f"`묶음_열`({gc!r}) 은 표 `열` 에 있는 열 문자여야 한다")
+    return out
+
+
 def map_problems(fmap: dict) -> list[tuple[str, str]]:
-    """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·`화면`)와 서술 `열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
+    """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·`화면`)와 서술 `열`, 표 `서식_행`·`묶음_열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
     out: list[tuple[str, str]] = []
     top = fmap.get("외부_참조_지우기")
     if top is not None and not isinstance(top, bool):
@@ -143,6 +174,9 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                 if isinstance(col, str) and re.fullmatch(r"[A-Z]{1,3}", col):
                     n = col2n(col)
                     owned.append((f"표 {t.get('이름')!r} 의 {col} 열", (n, start, n, end)))
+        for t in s.get("표") or []:
+            if isinstance(t, dict):
+                out += [("map", f"시트 {sn!r} 표 {t.get('이름')!r} 의 {m}") for m in _table_format_problems(t)]
         for key in ("비우기", "서식_지우기"):
             for x, rect in keyed[key]:
                 for label, orect in owned:
