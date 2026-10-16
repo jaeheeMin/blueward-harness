@@ -167,8 +167,9 @@
 개발사양서의 화면 시트에 Spec 의 화면 구성(필터 바·액션·결과 테이블)을 셀·테두리·채우기·병합으로 그린다.
 영역·칸 수·색은 코드가 아니라 지도(데이터)가 정한다. 엔진 코드에는 시트 이름이 없다 — 어느 시트에 그릴지는 지도의 `화면:` 이 정한다.
 
-**어느 시트에 쓰나.** 목록 조회 앱(List Report)은 화면 한 장(Display Screen 의 `화면 1`)에 필터 바·액션·결과 테이블을 그린다. Initial Screen 은 객체 1건으로
-바로 들어가는 앱(Initial Page)일 때만 쓰고, 그 밖에는 시트를 `해당 없음` 으로 둔다. 근거(SAP 공식): Fiori Design Guidelines 의 List Report 는 한 페이지에
+**어느 시트에 쓰나.** 목록 조회 앱(List Report)은 화면 한 장(Display Screen 의 `화면 1`)에 필터 바·액션·결과 테이블을 그린다. Initial Screen 은 설계자가 요청할 때만
+그린다(예: 단건 진입 앱 — SAP Initial Page floorplan). 요청이 없으면 Spec 의 Initial Screen 절은 `해당 없음` 으로 두고 산출물에는 빈 양식을 그대로 둔다.
+안 쓰는 시트나 영역(예: 화면 2)도 숨기거나 지우지 않고 그대로 둔다. 근거(SAP 공식): Fiori Design Guidelines 의 List Report 는 한 페이지에
 필터 바(header)와 테이블(content)이 같이 있고 버튼은 테이블 위 table toolbar 의 액션이다. Initial Page floorplan 은 객체 1건으로 바로 들어가는 용도라
 목록이 나오면 쓰지 말라고 돼 있다. Public Cloud(ABAP Cloud)의 UI 는 SAP Fiori 뿐이라 ALV 를 쓰지 않는다. 용어는 한국어 공식 번역("스마트 필터 바", "액션",
 "테이블")을 따른다. 첫 진입 조회는 live(권장, 필터를 바꾸면 바로 조회)와 manual(Go 버튼) 두 가지다.
