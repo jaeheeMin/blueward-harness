@@ -8,27 +8,35 @@ PR 에서 미리 **경고**한다. 막지 않는다(#315 와 같은 방침).
 입력(`info`):
 
     {"status": "ok", "main_version": "0.10.82", "my_version": "0.10.83",
-     "prs": [{"number": 200, "title": "...", "version": "0.10.83"}, ...]}   # 같은 base 의 다른 열린 PR
+     "prs": [{"number": 200, "title": "...", "version": "0.10.83"},        # 같은 base 의 다른 열린 PR
+             {"number": 201, "title": "...", "version": null, "error": "..."}, ...]}   # 그 PR 만 읽지 못함
     {"status": "cannot_check", "message": "..."}                            # 읽지 못함
     {"status": "not_needed"}                                                # 이 PR 이 version 을 안 올려 읽지 않음
 
 - 겹침: 이 PR 의 version 이 main 과 다르고(올렸고), 다른 열린 PR 의 head version 이 같은 값이다.
   version 을 바꾸지 않은 PR 은 main 의 값과 같으므로 이 PR 이 올린 값과 겹칠 수 없다 — 비교 대상이 아니다.
-- 읽지 못하면 검사 불능이다. 통과도 위반도 아니다(원칙 7).
+- 목록이나 이 PR 의 version 을 읽지 못하면 검사 불능이다. 통과도 위반도 아니다(원칙 7).
+- 다른 PR 한 건의 version 만 못 읽으면(404, 깨진 JSON, 포크) 검사 불능으로 막지 않는다. 겹침과 무관한 이유로
+  병합이 막히지 않게, 그 PR 만 `unchecked` 로 남기고 나머지를 비교한다. 이때 "겹침 없음" 이라 말하지 않는다.
+- 비교는 `checker.plugin_version.parse_version` 의 정수 튜플로 한다(`0.10.9 < 0.10.17`).
 """
 from __future__ import annotations
 
 from checker.pairing import CANNOT_CHECK, PASS
+from checker.plugin_version import parse_version
 from checker.version_overlap import NOT_NEEDED, RETRY_HINT, _title
 
 __all__ = ["NOT_NEEDED", "check_plugin_version_overlap", "next_patch"]
 
 
 def next_patch(version: str) -> str:
-    """`0.10.83` -> `0.10.84`. 마지막 마디를 1 올린다."""
-    parts = version.split(".")
-    parts[-1] = str(int(parts[-1]) + 1)
-    return ".".join(parts)
+    """`0.10.83` -> `0.10.84`. 마지막 마디를 1 올린다. 정수 마디가 아니면 None."""
+    try:
+        parts = list(parse_version(version))
+    except ValueError:
+        return None
+    parts[-1] += 1
+    return ".".join(str(p) for p in parts)
 
 
 def _cannot(detail: str) -> dict:
@@ -50,22 +58,34 @@ def check_plugin_version_overlap(info: dict, self_number: int) -> dict:
         return _cannot(f"열린 PR 정보의 모양을 읽을 수 없습니다(status: {status!r})")
 
     mine, main = info.get("my_version"), info.get("main_version")
-    if not mine or not main:
-        return _cannot("이 PR 이나 main 의 plugin.json version 을 알 수 없습니다")
-    if mine == main:
+    try:
+        mine_t, main_t = parse_version(mine), parse_version(main)
+    except ValueError as exc:
+        return _cannot(f"이 PR 이나 main 의 plugin.json version 을 알 수 없습니다: {exc}")
+    if mine_t == main_t:
         return {"status": NOT_NEEDED, "warnings": []}
 
     others = [p for p in prs if p.get("number") != self_number]
-    clash = [p for p in others if p.get("version") == mine]
+    unchecked, clash = [], []
+    for p in others:
+        try:
+            same = parse_version(p.get("version")) == mine_t
+        except ValueError:
+            unchecked.append({"number": p.get("number"), "title": p.get("title") or "", "error": p.get("error") or "version 을 읽지 못함"})
+            continue
+        if same:
+            clash.append(p)
     warnings = []
     if clash:
         who = ", ".join(f"#{p['number']}({_title(p.get('title'))})" for p in clash)
+        nxt = next_patch(mine)
+        again = f"version 을 {nxt} 처럼 한 칸 더 올려야" if nxt else "version 을 한 칸 더 올려야"
         warnings.append({
             "version": mine,
             "prs": [{"number": p["number"], "title": p.get("title") or ""} for p in clash],
             "message": (
                 f"plugin.json version {mine} 을 열린 PR {who} 도 씁니다. 먼저 병합되는 쪽이 v{mine} 태그를 갖고, "
-                f"다른 쪽은 그 뒤 sync 해서 version 을 {next_patch(mine)} 처럼 한 칸 더 올려야 배포됩니다."
+                f"다른 쪽은 그 뒤 sync 해서 {again} 배포됩니다."
             ),
         })
-    return {"status": PASS, "warnings": warnings, "compared": len(others)}
+    return {"status": PASS, "warnings": warnings, "compared": len(others) - len(unchecked), "unchecked": unchecked}

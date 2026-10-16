@@ -130,7 +130,25 @@ def collect(
         return {"status": "cannot_check", "message": f"열린 PR 정보의 모양이 예상과 다릅니다: {exc!r}"}
 
 
-def _http(token: str, api_url: str) -> tuple[Callable[[str], object], Callable[[str, str], str | None]]:
+RETRIES = 3  # 5xx 와 네트워크 오류는 이만큼 시도한다(첫 시도 포함). 4xx 는 다시 해도 같으므로 재시도하지 않는다.
+BACKOFF_SECONDS = 1.0  # 시도 사이 대기. 1초, 2초로 늘린다.
+
+
+def _forbidden_hint(exc: urllib.error.HTTPError) -> str:
+    """401·403 의 안내. 레이트 리밋(남은 횟수 0, 429, 본문의 rate limit)은 권한 문제와 따로 말한다."""
+    headers = getattr(exc, "headers", None)
+    remaining = headers.get("X-RateLimit-Remaining") if headers is not None else None
+    if exc.code == 429 or remaining == "0":
+        return " (GitHub API 호출 한도에 걸렸습니다 — 잠시 뒤 이 실행을 다시 돌리십시오)"
+    return " (토큰에 pull-requests 읽기 권한이 없을 수 있습니다 — 부르는 쪽 workflow 의 permissions 를 확인하십시오)"
+
+
+def _http(
+    token: str,
+    api_url: str,
+    opener: Callable[..., object] = urllib.request.urlopen,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[Callable[[str], object], Callable[[str, str], str | None]]:
     def request(url: str, accept: str) -> bytes | None:
         req = urllib.request.Request(url, headers={
             "Authorization": f"Bearer {token}",
@@ -138,19 +156,24 @@ def _http(token: str, api_url: str) -> tuple[Callable[[str], object], Callable[[
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "doc-guard-fetch-open-prs",
         })
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return resp.read()
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                return None
-            hint = (
-                " (토큰에 pull-requests 읽기 권한이 없을 수 있습니다 — 부르는 쪽 workflow 의 permissions 를 확인하십시오)"
-                if exc.code in (401, 403) else ""
-            )
-            raise FetchError(f"GitHub API {exc.code} {exc.reason}{hint}: {url}") from exc
-        except (urllib.error.URLError, OSError, TimeoutError) as exc:
-            raise FetchError(f"GitHub API 에 닿지 못했습니다: {exc}") from exc
+        for attempt in range(1, RETRIES + 1):
+            try:
+                with opener(req, timeout=30) as resp:
+                    return resp.read()
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    return None
+                if exc.code >= 500 and attempt < RETRIES:
+                    sleep(BACKOFF_SECONDS * attempt)
+                    continue
+                hint = _forbidden_hint(exc) if exc.code in (401, 403, 429) else ""
+                raise FetchError(f"GitHub API {exc.code} {exc.reason}{hint}: {url}") from exc
+            except (urllib.error.URLError, OSError, TimeoutError) as exc:
+                if attempt < RETRIES:
+                    sleep(BACKOFF_SECONDS * attempt)
+                    continue
+                raise FetchError(f"GitHub API 에 닿지 못했습니다: {exc}") from exc
+        raise FetchError(f"GitHub API 를 읽지 못했습니다: {url}")  # 도달하지 않는다
 
     def get_json(path: str) -> object:
         raw = request(api_url + path, "application/vnd.github+json")
