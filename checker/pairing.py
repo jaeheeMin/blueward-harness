@@ -110,30 +110,35 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-def _section(text: str, heading: str) -> list[str] | None:
-    """`## heading` 아래 줄들(다음 `## ` 전까지). 코드 펜스 안의 `##` 는 제목이 아니다."""
-    lines: list[str] = []
-    found = False
+def section_span(text: str, heading: str) -> tuple[int, int] | None:
+    """`## heading` 아래 본문의 (시작, 끝) 줄 번호(`text.splitlines()` 기준, 끝은 제외). 없으면 None.
+
+    다음 `## ` 전까지다. 코드 펜스 안의 `##` 는 제목이 아니다.
+    """
+    start: int | None = None
     fence = False
-    for line in text.splitlines():
+    for i, line in enumerate(text.splitlines()):
         if line.lstrip().startswith(("```", "~~~")):
             fence = not fence
         if not fence and re.match(r"^##\s+", line):
-            if found:
-                break
+            if start is not None:
+                return start, i
             if line[2:].strip() == heading:
-                found = True
-            continue
-        if found:
-            lines.append(line)
-    return lines if found else None
+                start = i + 1
+    return None if start is None else (start, len(text.splitlines()))
 
 
-def _table(lines: list[str]) -> tuple[list[str], list[list[str]]] | None:
-    """첫 번째 표(머리줄 첫 칸이 `ID`)의 (머리, 본문 줄 칸들). 표가 없으면 None."""
+def _section(text: str, heading: str) -> list[str] | None:
+    """`## heading` 아래 줄들(다음 `## ` 전까지). 코드 펜스 안의 `##` 는 제목이 아니다."""
+    span = section_span(text, heading)
+    return None if span is None else text.splitlines()[span[0]:span[1]]
+
+
+def table_indexed(lines: list[str]) -> tuple[list[str], list[tuple[int, list[str]]]] | None:
+    """첫 번째 표(머리줄 첫 칸이 `ID`)의 (머리, [(줄 번호, 칸들)]). 표가 없으면 None."""
     header: list[str] | None = None
-    rows: list[list[str]] = []
-    for line in lines:
+    rows: list[tuple[int, list[str]]] = []
+    for i, line in enumerate(lines):
         if not line.lstrip().startswith("|"):
             if header is not None:
                 break
@@ -145,8 +150,14 @@ def _table(lines: list[str]) -> tuple[list[str], list[list[str]]] | None:
             continue
         if all(re.fullmatch(r":?-{2,}:?", c) for c in cells if c):
             continue
-        rows.append(cells)
+        rows.append((i, cells))
     return (header, rows) if header is not None else None
+
+
+def _table(lines: list[str]) -> tuple[list[str], list[list[str]]] | None:
+    """첫 번째 표(머리줄 첫 칸이 `ID`)의 (머리, 본문 줄 칸들). 표가 없으면 None."""
+    found = table_indexed(lines)
+    return None if found is None else (found[0], [cells for _, cells in found[1]])
 
 
 def _row(header: list[str], cells: list[str]) -> dict[str, str]:
