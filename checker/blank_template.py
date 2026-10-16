@@ -15,9 +15,11 @@
     서식_지우기: [범위…]  값과 함께 셀 서식(테두리·채우기 등)을 그 열의 기본 서식으로 되돌리고 범위 안 병합을 푼다(견본 표 모양 지우기).
     유효성_지우기: [범위…]  그 범위와 겹치는 데이터 유효성(드롭다운; 표준·x14)을 뺀다. 일부만 겹치면 sqref 에서 겹친 부분만 뺀다.
     그림_지우기: true     그 시트의 drawing(그림·도형)과 그것만 쓰던 media 를 지운다.
-    유지: [범위…]         PR B(남은 견본 검사)가 쓴다. 이번엔 키만 인정한다.
+    유지: [범위…]         빈 양식 만들기는 이 범위를 건드리지 않는다(비우기·서식_지우기 와 겹치면 지도 오류). 최상위 `견본_검사: true` 일 때
+                          산출(`checker.export`)의 남은 견본 검사가 이 범위의 값·그림·메모를 고정 요소로 허용한다(`checker.leftover`).
 지도 최상위 키
     외부_참조_지우기: true  externalLinks 파트와 그것을 가리키던 workbook 항목·이름 정의를 지운다.
+    견본_검사: true         빈 양식 만들기는 보지 않는다. 산출(`checker.export`)이 쓰는 키다 — 템플릿 견본이 남으면 산출을 거부한다.
 
 쓰기는 openpyxl 을 쓰지 않는다(x14 드롭다운·도형 소실). zip 수준에서 바뀐 파트만 다시 쓰고 나머지는 바이트 그대로 복사한다.
 
@@ -158,11 +160,14 @@ def _format_row_overlaps(s: dict, t: dict) -> list[str]:
 
 
 def map_problems(fmap: dict) -> list[tuple[str, str]]:
-    """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·`화면`)와 서술 `열`, 표 `서식_행`·`묶음_열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
+    """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·`견본_검사`·`화면`)와 서술 `열`, 표 `서식_행`·`묶음_열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
     out: list[tuple[str, str]] = []
     top = fmap.get("외부_참조_지우기")
     if top is not None and not isinstance(top, bool):
         out.append(("map", "`외부_참조_지우기` 는 true/false 여야 한다"))
+    top = fmap.get("견본_검사")
+    if top is not None and not isinstance(top, bool):
+        out.append(("map", "`견본_검사` 는 true/false 여야 한다"))
     for s in fmap.get("시트") or []:
         if not isinstance(s, dict):
             continue
@@ -938,7 +943,8 @@ def scrub_doc_props(parts: dict[str, bytes]) -> list[str]:
 
 
 def review_notices(parts: dict[str, bytes], sheets: dict[str, str], named: set[str] = frozenset()) -> list[dict]:
-    """견본 여부를 엔진이 판정하지 않는 곳(PR B 범위)에 내용이 있으면 위치와 함께 알린다. 조용히 통과시키지 않는다.
+    """견본 여부를 빈 양식 만들기가 판정하지 않는 곳에 내용이 있으면 위치와 함께 알린다. 조용히 통과시키지 않는다.
+    (산출 때의 판정은 `checker.leftover`, 지도 `견본_검사: true`.)
 
     `named`: 지도 `시트` 의 이름 — 지도가 이름을 정한 시트는 견본이 아니라 시트 이름 알림에서 뺀다.
     """

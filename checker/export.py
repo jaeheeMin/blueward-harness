@@ -188,6 +188,7 @@ class SheetXml:
         self._max_col = 0
         self._style_row = 0  # set_style 로 서식만 입힌 끝 행·열(dimension 만 넓힌다)
         self._style_col = 0
+        self.written: set[str] = set()  # `set` 으로 쓴 셀(남은 견본 검사가 "이번 산출이 쓴 값" 을 가린다)
         for rm in _ROW_RE.finditer(m.group(1) or ""):
             attrs = dict(_ATTR_RE.findall(rm.group(1)))
             num = int(attrs["r"])
@@ -282,6 +283,7 @@ class SheetXml:
             cell.attrs.append(("t", t))
         cell.inner = body
         cell.raw = None
+        self.written.add(ref)
         self._touch(row, ref)
         return removed
 
@@ -996,6 +998,7 @@ def build_form(
         warnings.append({"form": form, "sheet": sheet, "item": item, "reason": reason})
 
     map_sheets = {norm(s["이름"]): s for s in fmap["시트"]}
+    check_leftover = fmap.get("견본_검사") is True  # 남은 견본 검사(#335 B). 끈 양식은 예전 동작 그대로
     if srs is not None:
         for s in fmap["시트"]:
             if s.get("칸") or s.get("서술") or any(
@@ -1222,7 +1225,8 @@ def build_form(
                     put(name, f"{c1}{r1 + i}", line)
 
         # 해당 없음·작업본에 없는 시트에 지도 밖 템플릿 샘플이 남으면 알린다(지우지 않는다).
-        if na:
+        # `견본_검사: true` 인 양식은 아래 남은 견본 검사(모든 시트, 거부)가 이것을 대신한다.
+        if na and not check_leftover:
             pics = _drawing_count(raw, paths[sname])
             left = ed.valued_refs()
             if pics or left:
@@ -1270,6 +1274,14 @@ def build_form(
                     raise ExportError(e.reason, form=form, sheet=sname, item=e.item) from None
                 if drawn == 0:  # 거부(None)가 아니라 그릴 항목이 없는 경우
                     warn(sname, screen_draw.md_name(item), f"{item['이름']} 의 그림 절이 비어 있어(소절이 없다) 그리지 않았다(영역 {item['영역']} 은 템플릿 그대로)")
+
+    # 남은 견본 검사(#335 B): 이번 산출이 쓰지 않은 템플릿 값·그림·메모가 지도 `유지` 밖에 있으면 거부한다. 쓰기가 다 끝난 뒤에 본다.
+    if check_leftover:
+        from checker import leftover
+
+        lp, lw = leftover.check(form, fmap, raw, paths, wb_xml, editor)
+        problems += lp
+        warnings += lw
 
     # 쓴 셀이 엑셀 행 높이 상한을 넘어 잘릴지 어림한다(type: cell-too-tall).
     styles_xml =raw["xl/styles.xml"].decode("utf-8-sig") if "xl/styles.xml" in raw else None
@@ -1910,7 +1922,11 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
             "files": [],
             "problems": problems,
             "warnings": warnings,
-            "next": "다음: 아래 항목을 채우거나 고쳐 작업본을 갱신한 뒤 다시 산출한다. 아무 파일도 만들지 않았다.",
+            "next": (
+                "다음: 템플릿에 견본이 남아 있다(`type: leftover-sample`) — 빈 양식 만들기(`python -m checker.blank_template`)로 템플릿을 비우거나, "
+                "견본이 아니라 고정 문구·안내문이면 양식 지도의 그 시트 `유지:` 범위에 넣는다. "
+                if any(p.get("type") == "leftover-sample" for p in problems) else "다음: "
+            ) + "아래 항목을 채우거나 고쳐 작업본을 갱신한 뒤 다시 산출한다. 아무 파일도 만들지 않았다.",
         }
     names = [p for p, _ in writes]
     if len(set(names)) != len(names):
@@ -1918,8 +1934,9 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
     outside = any(w.get("type") == "dropdown" for w in warnings)
     unchecked = any(w.get("type") == "dropdown-unchecked" for w in warnings)
     tall = any(w.get("type") == "cell-too-tall" for w in warnings)
-    flagged = outside or unchecked or tall
-    note = _warning_note(outside, unchecked, tall)
+    review = any(w.get("type") == "leftover-review" for w in warnings)
+    flagged = outside or unchecked or tall or review
+    note = _warning_note(outside, unchecked, tall, review)
     # 이 브랜치에서 만든 판을 같은 버전으로 덮어쓰는 경우의 표시(덮어쓸 파일이 없으면 빈 dict)
     rp = {"replaced": True, "replaced_files": replaced} if replaced else {}
     rp_note = " 이 브랜치에서 만든 판(origin/main 에 없음)은 같은 버전으로 덮어썼다." if replaced else ""
@@ -1960,7 +1977,7 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
     }
 
 
-def _warning_note(outside: bool, unchecked: bool, tall: bool = False) -> str:
+def _warning_note(outside: bool, unchecked: bool, tall: bool = False, review: bool = False) -> str:
     parts = []
     if outside:
         parts.append("`type: dropdown` 경고의 값이 템플릿 드롭다운 목록 밖이다 — 허용 값 중에서 고른다.")
@@ -1968,6 +1985,8 @@ def _warning_note(outside: bool, unchecked: bool, tall: bool = False) -> str:
         parts.append("허용 값을 읽지 못해 검사하지 못한 열이 있다(`type: dropdown-unchecked`) — 통과가 아니니 그 열의 값을 사람이 확인한다.")
     if tall:
         parts.append("엑셀에서 잘릴 것으로 보이는 긴 셀이 있다(`type: cell-too-tall`, 어림값) — 요약만 남기고 세부는 다른 열로 나눈다.")
+    if review:
+        parts.append("머리글·바닥글이나 직접 적은 드롭다운 목록이 견본인지 엔진이 가르지 못했다(`type: leftover-review`) — 통과가 아니니 사람이 확인한다.")
     return " ".join(parts)
 
 
