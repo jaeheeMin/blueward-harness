@@ -127,16 +127,16 @@ def test_시안과_같은_좌표_병합_글자(proj, capsys):
     assert _merges(ws) == {
         # 필터 바 3개: 라벨 2칸 + 입력 3칸, 묶음 사이 1칸
         "C7:D7", "E7:G7", "I7:J7", "K7:M7", "O7:P7", "Q7:S7",
-        # 액션 2개(2칸, 사이 1칸): 필터 바 뒤 빈 줄 한 줄(8행) 다음 9행, 영역 오른쪽 끝(S열)에 붙여 오른쪽 정렬
-        "O9:P9", "R9:S9",
+        # 액션 2개(2칸, 사이 1칸): 필터 바 뒤 빈 줄 한 줄(8행) 다음 9행, 결과 테이블(C~J열)의 오른쪽 끝(J열)에 맞춰 오른쪽 정렬
+        "F9:G9", "I9:J9",
         # 결과 테이블: 머리글(바로 아래 10행) + 빈 행 2줄, 열마다 2칸
         "C10:D10", "E10:F10", "G10:H10", "I10:J10",
         "C11:D11", "E11:F11", "G11:H11", "I11:J11",
         "C12:D12", "E12:F12", "G12:H12", "I12:J12",
     }
-    got = {c: ws[c].value for c in ("C7", "I7", "O7", "O9", "R9", "C10", "E10", "G10", "I10")}
+    got = {c: ws[c].value for c in ("C7", "I7", "O7", "F9", "I9", "C10", "E10", "G10", "I10")}
     assert got == {
-        "C7": "판매 조직 *", "I7": "기간 *", "O7": "판매처", "O9": "취소", "R9": "일괄 취소",
+        "C7": "판매 조직 *", "I7": "기간 *", "O7": "판매처", "F9": "취소", "I9": "일괄 취소",
         "C10": "판매문서", "E10": "품목", "G10": "수량", "I10": "상태",
     }
     assert ws["C8"].value is None  # 견본 글자는 비우기로 지워졌고 그림이 그 뒤에 그려졌다
@@ -147,7 +147,7 @@ def test_시안과_같은_좌표_병합_글자(proj, capsys):
 def test_서식은_시안과_같다(proj, capsys):
     _, report = _run(proj, capsys, screen())
     ws = _sheet(proj, report)
-    label, field, button, head, row = ws["C7"], ws["E7"], ws["O9"], ws["C10"], ws["C11"]
+    label, field, button, head, row = ws["C7"], ws["E7"], ws["F9"], ws["C10"], ws["C11"]
     assert label.fill.fgColor.rgb == "FFD9E1F2" and label.font.b and label.border.left.style == "thin"
     assert field.fill.fgColor.rgb == "FFFFFFFF" and field.border.top.style == "thin"
     assert button.fill.fgColor.rgb == "FFD9D9D9" and button.alignment.horizontal == "center"
@@ -157,8 +157,8 @@ def test_서식은_시안과_같다(proj, capsys):
     # 병합 칸은 범위 전체에 같은 서식이 있다(오른쪽 칸 테두리도 보인다). openpyxl 은 병합된 칸의 서식을 안 읽어 XML 로 본다.
     with zipfile.ZipFile(proj / report["files"][0]) as z:
         xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
-    s = {ref: re.search(rf'<c r="{ref}"[^>]*?\bs="(\d+)"', xml).group(1) for ref in ("C7", "D7", "E7", "G7", "O9", "P9")}
-    assert s["C7"] == s["D7"] != s["E7"] == s["G7"] != s["O9"] == s["P9"]
+    s = {ref: re.search(rf'<c r="{ref}"[^>]*?\bs="(\d+)"', xml).group(1) for ref in ("C7", "D7", "E7", "G7", "F9", "G9")}
+    assert s["C7"] == s["D7"] != s["E7"] == s["G7"] != s["F9"] == s["G9"]
 
 
 def test_조건이_한_줄을_넘으면_다음_줄로_줄바꿈한다(proj, capsys):
@@ -170,7 +170,7 @@ def test_조건이_한_줄을_넘으면_다음_줄로_줄바꿈한다(proj, caps
     assert ws["C8"].value == "조건4"  # 4번째는 다음 줄 첫 자리
     assert "C8:D8" in _merges(ws) and "E8:G8" in _merges(ws)
     # 필터 바가 두 줄이면 빈 줄 하나(9행) 뒤에 액션(10행, 오른쪽 정렬), 바로 아래 결과 테이블(11행)
-    assert ws["O10"].value == "취소" and ws["R10"].value == "일괄 취소" and ws["C11"].value == "판매문서"
+    assert ws["F10"].value == "취소" and ws["I10"].value == "일괄 취소" and ws["C11"].value == "판매문서"
 
 
 def test_결과_테이블만_있으면_영역_맨_위부터_그린다(proj, capsys):
@@ -209,6 +209,23 @@ def test_액션_한_개는_마지막_열에서_끝난다(proj, capsys):
     assert _merges(ws) == {"R7:S7"} and ws["R7"].value == "열기"
 
 
+def test_액션이_테이블보다_넓으면_영역_오른쪽_끝_기준으로_바꾼다(proj, capsys):
+    res = "| 열 |\n|---|\n| 하나 |\n"  # 결과 테이블 C~D(2칸) < 액션 묶음 5칸
+    code, report = _run(proj, capsys, screen(cond=None, res=res))
+    assert code == 0, report
+    ws = _sheet(proj, report)
+    assert ws["O7"].value == "취소" and ws["R7"].value == "일괄 취소" and "R7:S7" in _merges(ws)
+    assert ws["C8"].value == "하나"
+
+
+def test_액션이_테이블_오른쪽_끝에_맞고_들어맞으면_테이블_기준이다(proj, capsys):
+    res = "| 열 |\n|---|\n| 하나 |\n| 둘 |\n| 셋 |\n"  # C~H, 액션 5칸은 D~H
+    code, report = _run(proj, capsys, screen(cond=None, res=res))
+    assert code == 0, report
+    ws = _sheet(proj, report)
+    assert ws["D7"].value == "취소" and ws["G7"].value == "일괄 취소" and "G7:H7" in _merges(ws)
+
+
 def test_액션이_영역_너비보다_많으면_거부한다(proj, capsys):
     btn = "| 이름 |\n|---|\n" + "".join(f"| 액션{i} |\n" for i in range(1, 8))  # 7개 x 3칸 - 1 = 20칸 > 17칸
     code, report = _run(proj, capsys, screen(cond=None, res=None, btn=btn))
@@ -227,7 +244,7 @@ def test_Go_조회는_필터_바_마지막_줄_오른쪽_끝에_Go_액션을_그
     ws = _sheet(proj, report)
     assert ws["R7"].value == "Go" and "R7:S7" in _merges(ws)
     assert ws["R7"].fill.fgColor.rgb == "FFD9D9D9"  # 액션 스타일
-    assert ws["O9"].value == "취소" and ws["C10"].value == "판매문서"  # 필터 바 뒤 빈 줄(8행) 그대로
+    assert ws["F9"].value == "취소" and ws["C10"].value == "판매문서"  # 필터 바 뒤 빈 줄(8행) 그대로
 
 
 def test_Go_자리가_없으면_다음_줄_오른쪽_끝(proj, capsys):
@@ -236,7 +253,7 @@ def test_Go_자리가_없으면_다음_줄_오른쪽_끝(proj, capsys):
     assert code == 0, report
     ws = _sheet(proj, report)
     assert ws["R7"].value is None and ws["R8"].value == "Go" and "R8:S8" in _merges(ws)
-    assert ws["O10"].value == "취소"  # 빈 줄(9행) 다음 줄
+    assert ws["F10"].value == "취소"  # 빈 줄(9행) 다음 줄
 
 
 def test_Go만_있고_필터_바가_없으면_영역_맨_위_오른쪽(proj, capsys):
@@ -253,6 +270,15 @@ def test_Go가_영역을_넘으면_거부한다(proj, capsys):
     cond = "| 이름 |\n|---|\n| 가 |\n| 나 |\n| 다 |\n| 라 |\n| 마 |\n| 바 |\n"  # 8행도 꽉 참 → Go 가 9행
     code, report = _run(proj, capsys, screen(cond=cond, btn=None, res=None, settings=SET_GO), "--check")
     assert code == 1 and "Go 액션(행)" in report["problems"][0]["reason"]
+
+
+def test_조회_표를_소절_뒤에_두면_위치를_알려_거부한다(proj, capsys):
+    body = screen().replace("##### 액션\n", "##### 액션\n\n" + SET_GO.rstrip("\n") + "\n\n", 1)
+    for extra in ((), ("--check",)):
+        code, report = _run(proj, capsys, body, *extra)
+        assert code == 2, report
+        assert "첫 소절 앞" in report["problems"][0]["reason"]
+    assert _nothing_written(proj)
 
 
 def test_조회_자동은_기본이고_표시해도_Go를_그리지_않는다(proj, capsys):
@@ -475,8 +501,8 @@ def test_숫자처럼_보이는_이름도_문자열_셀로_쓴다(proj, capsys):
     code, report = _run(proj, capsys, screen(cond="| 이름 |\n|---|\n| 2026 |\n", btn="| 이름 |\n|---|\n| 10 |\n", res="| 열 |\n|---|\n| 3 |\n"))
     assert code == 0, report
     ws = _sheet(proj, report)
-    assert ws["C7"].value == "2026" and ws["R9"].value == "10" and ws["C10"].value == "3"
-    assert all(isinstance(ws[c].value, str) for c in ("C7", "R9", "C10"))
+    assert ws["C7"].value == "2026" and ws["C9"].value == "10" and ws["C10"].value == "3"
+    assert all(isinstance(ws[c].value, str) for c in ("C7", "C9", "C10"))
 
 
 # ---------------------------------------------------------------- 템플릿 상태
@@ -570,4 +596,4 @@ def test_layout_좌표():
     assert [(b.col, b.row, b.width, b.kind, b.text) for b in boxes][:3] == [
         (3, 7, 2, "라벨", "a *"), (5, 7, 3, "입력", ""), (9, 7, 2, "라벨", "b"),
     ]
-    assert (18, 9, 2, "액션", "취소") in boxes and (3, 10, 2, "머리글", "x") in boxes and (3, 12, 2, "행", "") in boxes
+    assert (3, 9, 2, "액션", "취소") in boxes and (3, 10, 2, "머리글", "x") in boxes and (3, 12, 2, "행", "") in boxes

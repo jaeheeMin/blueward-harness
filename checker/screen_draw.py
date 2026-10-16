@@ -22,7 +22,8 @@ Spec 작업본 `## 양식 항목` 의 `### <양식> · <시트>` 아래에 `####
 
 배치: 영역 왼쪽 위부터. 필터 바는 (라벨 + 입력) 묶음을 간격 한 칸씩 띄워 한 줄에 들어가는 만큼 놓고 넘치면 다음 줄로,
 뒤에 빈 줄 한 줄. `조회: Go` 면 필터 바 마지막 줄의 영역 오른쪽 끝에 `Go` 액션을 놓고(자리가 없으면 다음 줄 오른쪽 끝), 그 뒤에 빈 줄 한 줄.
-액션은 결과 테이블 머리글 바로 윗줄(테이블 툴바)에 영역 오른쪽 끝에 붙여 오른쪽 정렬한다(간격 한 칸). 결과 테이블이 없으면 그 자리(빈 줄 다음 줄)에 둔다.
+액션은 결과 테이블 머리글 바로 윗줄(테이블 툴바)에 결과 테이블의 오른쪽 끝에 맞춰 오른쪽 정렬한다(간격 한 칸). 액션이 테이블보다 넓어 영역 왼쪽을
+넘으면 영역 오른쪽 끝 기준으로 바꾼다. 결과 테이블이 없으면 영역 오른쪽 끝 기준으로 그 자리(빈 줄 다음 줄)에 둔다.
 결과 테이블은 열마다 머리글 칸과 빈 행 `빈_행` 줄(이어 붙음).
 """
 from __future__ import annotations
@@ -257,6 +258,9 @@ def offenders(item: dict, body: list[str]) -> list[tuple[str, str, list[str]]]:
                     out.append(("화면 항목 값", f"{where} · {key}: {val or '(빈칸)'}", SETTINGS[key]))
                 seen.add(key)
     for name, parsed in tables.items():
+        if parsed is not None and parsed[0] == SETTINGS_HEADER:  # 설정 표가 소절 뒤에 있으면 소절 표로 오인하지 않는다
+            out.append(("화면 항목 표 위치", f"{where} · {name}: 설정 표(조회)는 그림 절 바로 아래, 첫 소절 앞에 둔다", ["첫 소절 앞"]))
+            continue
         if name not in SECTIONS:
             out.append(("화면 소절", f"{where} · {name}", list(SECTIONS)))
             continue
@@ -334,8 +338,12 @@ def layout(item: dict, conds: list[tuple[str, bool]], actions: list[str], cols: 
         last = line
     if last is not None:
         row = last + 2  # 필터 바 뒤 빈 줄 하나
-    if actions:  # 테이블 툴바: 결과 테이블 머리글 바로 윗줄, 영역 오른쪽 끝에 붙여 오른쪽 정렬
-        start = c1 - (len(actions) * act_w + (len(actions) - 1) * gap) + 1
+    if actions:  # 테이블 툴바: 결과 테이블 머리글 바로 윗줄. 테이블의 오른쪽 끝에 맞춰 오른쪽 정렬(테이블이 없거나 액션이 더 넓으면 영역 오른쪽 끝 기준)
+        total = len(actions) * act_w + (len(actions) - 1) * gap
+        end = min(c0 + len(cols) * col_w - 1, c1) if cols else c1
+        if end - total + 1 < c0:
+            end = c1
+        start = end - total + 1
         for i, name in enumerate(actions):
             put(start + i * (act_w + gap), row, act_w, "액션", name, f"액션 '{name}'")
         row += 1
