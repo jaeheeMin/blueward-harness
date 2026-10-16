@@ -43,7 +43,9 @@
 바꾸면 version 을 올린다: `plugins/harness/` 전부, 엔진 `checker/`(시험 `checker/tests/` 와 안의
 `*.md` 문서는 제외), `pyproject.toml`, `uv.lock`, `scripts/`, 그리고 Project Repository 가 부르는
 재사용 워크플로(`workflow_call` 을 가진 `.github/workflows/*.yml`). PR 검사(`checker/plugin_version.py`)가
-확인한다.
+확인한다. 같은 version 으로 올린 열린 PR 이 또 있으면 이 저장소의 PR 검사(`checker` 워크플로)가
+경고한다 — 먼저 병합되는 쪽이 `v{version}` 태그를 갖고, 다른 쪽은 그 뒤 sync 해서 version 을 한 칸 더
+올려야 배포된다(#324).
 
 main 에 version 이 바뀐 plugin.json 이 병합되면 Actions(`release-tag.yml`)가 그 커밋에
 `v{version}` 태그를 붙이고 움직이는 태그 `stable` 을 그 커밋으로 옮긴다. 사람이 따로 배포를
