@@ -408,3 +408,71 @@ def test_NFD로_쓴_한글_이름도_같은_이름으로_본다(repo, capsys):
     body = SPEC_OK.replace("| 제목 | 가 |", "| " + unicodedata.normalize("NFD", "제목") + " | 가 |")
     code, out = _spec_check(repo, capsys, body)
     assert code == EXIT_PASS, out
+
+
+# ---------------------------------------------------------------- 화면 그림 (#335 C2)
+
+SPEC_MAP_SCREEN = SPEC_MAP + "    화면:\n      - 이름: 화면 1\n        영역: D20:P30\n"
+SCREEN_MD = (
+    "\n#### 화면 1 그림\n\n##### 필터 바\n\n| 이름 | 필수 |\n|---|---|\n| 기간 | Y |\n\n"
+    "##### 액션\n\n| 이름 |\n|---|\n| 취소 |\n\n##### 결과 테이블\n\n| 열 |\n|---|\n| 품목 |\n"
+)
+
+
+def test_지도에_화면이_있으면_화면_그림_소제목을_허용한다(repo, capsys):
+    _with_map(repo, SPEC_MAP_SCREEN, "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD)
+    assert code == EXIT_PASS, out
+
+
+def test_지도에_화면이_없으면_화면_그림_소제목은_양식_밖이다(repo, capsys):
+    _with_map(repo, SPEC_MAP, "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD)
+    assert code == EXIT_VIOLATION
+    assert [v["actual"] for v in _violations(out)] == ["화면 1 그림"]
+
+
+@pytest.mark.parametrize("old,new,actual", [
+    ("#### 화면 1 그림", "#### 화면 2 그림", "화면 2 그림"),
+    ("##### 액션", "##### 필터", "화면 1 그림 · 필터"),
+    ("| 이름 | 필수 |", "| 이름 | 비고 |", "화면 1 그림 · 필터 바: 이름 | 비고"),
+])
+def test_화면_그림의_이름_소절_표머리가_틀리면_위반이다(repo, capsys, old, new, actual):
+    _with_map(repo, SPEC_MAP_SCREEN, "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD.replace(old, new))
+    assert code == EXIT_VIOLATION
+    assert [v["actual"] for v in _violations(out)] == [actual]
+
+
+def test_화면_그림의_필수_값과_행_모양도_저장_PR_검사가_본다(repo, capsys):
+    _with_map(repo, SPEC_MAP_SCREEN, "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD.replace("| 기간 | Y |", "| 기간 | 예 |"))
+    assert code == EXIT_VIOLATION
+    assert [v["actual"] for v in _violations(out)] == ["화면 1 그림 · 필터 바 '기간': 예"]
+    code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD.replace("| 기간 | Y |", "| 기간 | Y | 추가 |"))
+    assert code == EXIT_VIOLATION
+    assert [v["actual"] for v in _violations(out)] == ["화면 1 그림 · 필터 바: 1번째 행의 셀 수 3"]
+
+
+def test_화면_그림의_조회_표를_저장_PR_검사가_본다(repo, capsys):
+    _with_map(repo, SPEC_MAP_SCREEN, "시험양식.yaml")
+    ok = SCREEN_MD.replace("##### 필터 바", "| 항목 | 값 |\n|---|---|\n| 조회 | Go |\n\n##### 필터 바", 1)
+    code, out = _spec_check(repo, capsys, SPEC_OK + ok)
+    assert code == EXIT_PASS, out
+    code, out = _spec_check(repo, capsys, SPEC_OK + ok.replace("| 조회 | Go |", "| 조회 | 수동 |"))
+    assert code == EXIT_VIOLATION
+    assert [v["actual"] for v in _violations(out)] == ["화면 1 그림 · 조회: 수동"]
+    code, out = _spec_check(repo, capsys, SPEC_OK + ok.replace("| 조회 | Go |", "| 모드 | Go |"))
+    assert [v["actual"] for v in _violations(out)] == ["화면 1 그림: 모드"]
+
+
+def test_지도의_화면_값이_틀리면_검사_불능이다(repo, capsys):
+    _with_map(repo, SPEC_MAP_SCREEN + "        칸_수: {라벨: 0}\n", "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD)
+    assert code == EXIT_CONFIG_ERROR and "칸_수" in out["message"]
+
+
+def test_화면_영역이_지도의_칸과_겹치면_검사_불능이다(repo, capsys):
+    _with_map(repo, SPEC_MAP + "    화면:\n      - 이름: 화면 1\n        영역: A10:C16\n", "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD)
+    assert code == EXIT_CONFIG_ERROR and "겹친다" in out["message"]

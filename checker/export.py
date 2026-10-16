@@ -19,6 +19,9 @@ zip 수준에서 바뀐 시트의 XML 만 고치고 나머지 항목은 같은 �
        쓴 셀이 엑셀 행 높이 상한(409pt)을 넘어 잘릴 것으로 추정되면 `type: cell-too-tall` 경고(행·열·REQ·추정
        줄 수)를 내고 종료코드는 3 이다(내용이 잘려 보이는 건 산출물 품질 문제라 파일은 쓰되 고치라고 알린다).
 
+화면 그림(#335 C2, `checker.screen_draw`): 지도 시트의 `화면:` 영역에 작업본 `#### <화면> 그림` 을 셀·병합으로 그린다.
+그림이 영역을 넘거나 영역 안에 값이 남아 있으면 거부(1), 지도에 없는 그림 이름·소절·표 머리와 병합 겹침은 읽지 못함(2).
+
 원본이 SRS 인 지도(표에 `원본: SRS`)는 `## 양식 항목` 이 아니라 SRS.md 의 `## 요구사항` 표와
 `### REQ-xxx` 상세 절을 읽는다(`--form <지도>` 와 `--spec <SRS.md>`). `--check` 는 파일을 쓰지 않고
 같은 보고만 낸다. `--list-values` 는 지도 템플릿의 드롭다운 허용 값을 열별로 JSON 으로 낸다.
@@ -231,23 +234,23 @@ class SheetXml:
         self._max_row = max(self._max_row, n)
         self._max_col = max(self._max_col, col2n(col))
 
-    def _coerce(self, text: str, style: str | None) -> tuple[str, str]:
-        """(속성 t 값, 본문)을 낸다. 날짜·정수는 숫자로, 나머지는 inlineStr."""
-        if _DATE.match(text) and style in self.date_styles:
+    def _coerce(self, text: str, style: str | None, as_text: bool = False) -> tuple[str, str]:
+        """(속성 t 값, 본문)을 낸다. 날짜·정수는 숫자로, 나머지는 inlineStr. `as_text` 면 늘 inlineStr."""
+        if not as_text and _DATE.match(text) and style in self.date_styles:
             try:
                 d = dt.date.fromisoformat(text)
             except ValueError:
                 d = None
             if d:
                 return "", f"<v>{(d - self.base).days}</v>"
-        if _INT.match(text):
+        if not as_text and _INT.match(text):
             return "", f"<v>{text}</v>"
         safe = escape(text.replace("\r\n", "\n").replace("\r", "\n"))
         sp = ' xml:space="preserve"' if (safe != safe.strip() or "\n" in safe) else ""
         return "inlineStr", f"<is><t{sp}>{safe}</t></is>"
 
-    def set(self, ref: str, text: str, style: str | None = None, clone_row: int | None = None) -> int:
-        """셀에 쓴다. XML 에 못 넣는 문자는 지우고 지운 개수를 돌려준다."""
+    def set(self, ref: str, text: str, style: str | None = None, clone_row: int | None = None, as_text: bool = False) -> int:
+        """셀에 쓴다. XML 에 못 넣는 문자는 지우고 지운 개수를 돌려준다. `as_text` 면 숫자·날짜로 바꾸지 않고 문자열 셀로 쓴다."""
         cleaned = _CTRL.sub("", text)
         removed = len(text) - len(cleaned)
         text = cleaned
@@ -273,7 +276,7 @@ class SheetXml:
             )
         elif style is not None:
             cell.attrs = [(k, v) for k, v in cell.attrs if k != "s"] + [("s", style)]
-        t, body = self._coerce(text, cell.style)
+        t, body = self._coerce(text, cell.style, as_text)
         cell.attrs = [(k, v) for k, v in cell.attrs if k != "t"]
         if t:
             cell.attrs.append(("t", t))
@@ -1212,8 +1215,38 @@ def build_form(
         if smap.get("비우기"):
             blank_template.clear_ranges(editor(sname), smap["비우기"], cleared)
 
+    # 화면 그림(#335 C2): 지도 `화면:` 영역에 작업본 `#### <화면> 그림` 을 그린다. `비우기` 뒤에 그려야 지워지지 않는다.
+    styles_ed = None
+    if srs is None:
+        from checker import screen_draw
+        from checker.cell_style import StylesXml
+
+        for sname, smap in map_sheets.items():
+            subs_of = spec_sections[sname][1] if sname in spec_sections else {}  # 해당 없음·작업본에 시트 절이 없으면 비어 있다
+            for item in screen_draw.items(smap):
+                body = subs_of.get(screen_draw.md_name(item))
+                if body is None:
+                    # 위 `na`(시트 절이 없어도 해당 없음으로 침)와 달리 여기는 명시한 해당 없음만 의도된 생략으로 본다 — 시트 절 자체가 없으면 빠뜨렸을 수 있어 경고한다.
+                    if sname in spec_sections and spec_sections[sname][0].na:
+                        continue  # 시트를 해당 없음으로 둔 것은 의도된 생략이다(예: 객체 1건으로 바로 들어가는 앱이 아닐 때의 Initial Screen)
+                    warn(sname, screen_draw.md_name(item), f"{item['이름']} 은 작업본에 `#### {screen_draw.md_name(item)}` 절이 없어 그리지 않았다(영역 {item['영역']} 은 템플릿 그대로)")
+                    continue
+                if styles_ed is None:
+                    if "xl/styles.xml" not in raw:
+                        raise ExportError("템플릿에 styles.xml 이 없어 화면 서식을 그릴 수 없다", form=form, sheet=sname)
+                    try:
+                        styles_ed = StylesXml(raw["xl/styles.xml"].decode("utf-8-sig"))
+                    except ExportError as e:
+                        raise ExportError(e.reason, form=form, sheet=sname) from None
+                try:
+                    drawn = screen_draw.draw(editor(sname), styles_ed, item, body, sname, problem)
+                except ExportError as e:
+                    raise ExportError(e.reason, form=form, sheet=sname, item=e.item) from None
+                if drawn == 0:  # 거부(None)가 아니라 그릴 항목이 없는 경우
+                    warn(sname, screen_draw.md_name(item), f"{item['이름']} 의 그림 절이 비어 있어(소절이 없다) 그리지 않았다(영역 {item['영역']} 은 템플릿 그대로)")
+
     # 쓴 셀이 엑셀 행 높이 상한을 넘어 잘릴지 어림한다(type: cell-too-tall).
-    styles_xml = raw["xl/styles.xml"].decode("utf-8-sig") if "xl/styles.xml" in raw else None
+    styles_xml =raw["xl/styles.xml"].decode("utf-8-sig") if "xl/styles.xml" in raw else None
     estimators: dict[str, TallEstimator] = {}
     for sname, ed, item, ref, text, label, header in written:
         est = estimators.get(sname)
@@ -1288,6 +1321,9 @@ def build_form(
         sst_path, n_blank, _ = blank_template.blank_strings(view, cleared)
         if n_blank:
             extra[sst_path] = view[sst_path]
+    if styles_ed is not None and styles_ed.dirty:  # 화면 서식이 덧붙인 styles.xml(시트들이 하나를 공유한다)
+        bom = b"\xef\xbb\xbf" if raw["xl/styles.xml"].startswith(b"\xef\xbb\xbf") else b""
+        extra["xl/styles.xml"] = bom + styles_ed.render().encode("utf-8")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zo:
         for info in infos:
@@ -1497,9 +1533,15 @@ def spec_offenders(sec: Section, subs: dict, smap: dict) -> list[tuple[str, str,
     fields = [norm(f["항목"]) for f in smap.get("칸", []) or []]
     tables = {norm(t["이름"]): t for t in smap.get("표", []) or []}
     texts = [norm(n["이름"]) for n in smap.get("서술", []) or []]
+    from checker import screen_draw  # screen_draw 가 이 모듈을 불러 순환하므로 호출할 때 가져온다
+
+    screens = {screen_draw.md_name(i): i for i in screen_draw.items(smap)}  # `#### 화면 1 그림` (지도에 `화면:` 이 있을 때만)
     out: list[tuple[str, str, list[str]]] = []
     out += [("칸", n, fields) for n in sec.fields if n not in fields]
-    out += [("표·서술", n, list(tables) + texts) for n in subs if n not in tables and n not in texts]
+    out += [("표·서술", n, list(tables) + texts + list(screens)) for n in subs if n not in tables and n not in texts and n not in screens]
+    for n, body in subs.items():
+        if n in screens:
+            out += screen_draw.offenders(screens[n], body)
     for n, body in subs.items():
         if n not in tables or not body:
             continue

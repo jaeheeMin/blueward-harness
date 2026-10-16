@@ -86,7 +86,7 @@ def _hit(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
 # ---------------------------------------------------------------- 지도 검증(export·form_columns 가 같이 쓴다)
 
 def map_problems(fmap: dict) -> list[tuple[str, str]]:
-    """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`)와 서술 `열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
+    """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·`화면`)와 서술 `열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
     out: list[tuple[str, str]] = []
     top = fmap.get("외부_참조_지우기")
     if top is not None and not isinstance(top, bool):
@@ -165,7 +165,9 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                 continue
             if not all(c1 <= col2n(v) <= c2 for v in cols.values()):
                 out.append(("map", f"시트 {sn!r} 서술 {n.get('이름')!r} 의 `열` 이 위치 {n['위치']} 의 열 범위 밖이다"))
-    return out
+    from checker import screen_draw  # screen_draw 가 이 모듈을 불러 순환하므로 호출할 때 가져온다
+
+    return out + screen_draw.map_problems(fmap)  # 시트 `화면:` (#335 C2)
 
 
 def check_map(fmap: dict, label: str, form: str = "") -> None:
