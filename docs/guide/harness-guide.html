@@ -560,7 +560,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     <div class="tbl-wrap"><table>
       <tr><th>다음 단계</th><th>RICEFW ID</th><th>그다음</th></tr>
       <tr><td><b>개발</b></td><td><code>DEV-003</code>(구매요청 승인, REQ 와 같은 번호)</td><td>Spec 을 만들어 → 개발해 (<code>/harness:spec</code> → <code>/harness:start</code>)</td></tr>
-      <tr><td><b>설정</b></td><td>비움</td><td>Spec 없이 진행 원장에 올라가 → <code>[DEV-003]</code> 이슈로 시작하면 "진행" → 설정을 마치면 사람이 "완료". 무엇을 설정했는지는 SRS 의 Configuration Considerations 에 적어</td></tr>
+      <tr><td><b>설정</b></td><td>비움</td><td>Spec 없이 진행 원장에 올라가 → <code>[DEV-003]</code> 이슈로 시작하면 "진행" → 설정을 마치면 그 이슈를 닫는 PR 이 병합될 때 자동으로 "완료". 무엇을 설정했는지는 SRS 의 Configuration Considerations 에 적어</td></tr>
       <tr><td><b>미정</b></td><td>비움</td><td>미결 사항에 남겨 두고, Spec 을 만들려 할 때 개발인지 설정인지 먼저 정해</td></tr>
       <tr><td>보류 · 취소</td><td>그대로</td><td>다음 단계가 아니라 Status 로 적어: <code>On Hold</code> · <code>Dropped</code> · <code>Duplicate</code> 면 Spec 도 안 만들고 멈춰. 원장에 줄이 있으면 지우지 않고 내용 앞에 <code>[보류]</code> · <code>[취소]</code> 만 붙여</td></tr>
       <tr><td>설정 → 개발로 바뀜</td><td><code>DEV-003</code> 을 채움</td><td>원장의 설정 줄을 그대로 쓰고 Spec 칸만 "-" 로 되돌려. 그다음 <code>/harness:spec</code> 이 이어받아</td></tr>
@@ -1204,6 +1204,7 @@ Closes #143</pre>
     <tr><td><code>ops-guard</code></td><td>팀원이 운영 파일을 바꿨는지</td><td>PR 을 자동으로 닫음</td></tr>
     <tr><td><code>notify-teams</code></td><td>병합된 PR</td><td>Teams 로 알림</td></tr>
     <tr><td><code>pr-tamper-alert</code></td><td>작성자가 아닌 계정이 그 PR 브랜치에 push 했거나 리뷰를 해제했는지 (병합·봇·저장소 admin 은 제외)</td><td>이슈와 Teams 로 알림. 막지는 못해</td></tr>
+    <tr><td><code>ledger-complete</code></td><td>main 에 병합된 PR 이 대표 <code>[DEV-xxx]</code> 이슈를 <code>Closes</code> 했는지</td><td>진행 원장을 "완료" 로 바꿔 main 에 커밋. 못 하면 이슈로 알림</td></tr>
   </table></div>
 
   <section>
@@ -1256,7 +1257,7 @@ Closes #143</pre>
       <div class="node"><b>리뷰</b><span>작성자가 아닌 사람</span></div><div class="arrow"></div>
       <div class="node hl"><b>squash 병합</b><span>GitHub 의 Merge 버튼</span></div><div class="arrow"></div>
       <div class="node"><b>Teams 알림</b><span>자동</span></div><div class="arrow"></div>
-      <div class="node ok"><b>원장 "완료"</b><span>사람이 직접 적음</span></div>
+      <div class="node ok"><b>원장 "완료"</b><span>Actions 가 자동으로 바꿈</span></div>
     </div>
   </section>
 
@@ -1273,7 +1274,7 @@ Closes #143</pre>
     <section class="box">
       <h3>병합 뒤 할 일</h3>
       <ul class="todo">
-        <li>진행 원장 줄의 상태를 <b>완료</b>로 직접 바꿔. 자동으로 안 바뀌어</li>
+        <li>진행 원장 줄은 대표 <code>[DEV-xxx]</code> 이슈를 <code>Closes</code> 한 PR 이면 Actions 가 <b>완료</b>로 바꿔. 하위 작업만 병합했거나 대표 이슈를 안 닫았으면 그대로니까 그때만 직접 바꿔. 못 바꾸면 이슈가 열려</li>
         <li>다음 일을 하기 전에 <code>/harness:sync</code> 로 최신 상태를 받아</li>
         <li>못 끝낸 일이 있으면 <code>/harness:wrapup</code></li>
       </ul>
@@ -1631,7 +1632,7 @@ Closes #143</pre>
         <li>문서 버전은 파일명에 (첫 판 <code>_v0.1.xlsx</code>, 고칠 때마다 0.1 씩), 이전 판도 남겨</li>
         <li>이름 짓기 전에 <code>conventions/naming.md</code></li>
         <li>SRS 를 바꾸면 다른 사람 승인</li>
-        <li>병합 뒤 원장을 "완료" 로</li>
+        <li>병합 뒤 원장 "완료" 는 대표 이슈를 닫은 PR 이면 자동 (아니면 직접)</li>
         <li>검사를 못 했으면 "검사 불능" 이라고 말해</li>
       </ul>
     </section>

@@ -387,7 +387,7 @@ PR 에서 막혀도 원격으로 올리는 순간 비밀값은 이미 GitHub 에
 `/harness:spec` · `/harness:deliver` Skill 이 이 형식으로 기록을 남기고, 사람이
 직접 적어도 된다(#173: feat·fix 작업을 start 하면 원장에 개발 건 줄이 `진행` 으로
 생기고 Spec 칸은 `-` 다. spec 이 같은 번호로 Spec 칸을 채우고, deliver 가 `리뷰`
-로 바꾸며, `완료` 는 사람이 쓴다). 형식에 맞지 않는 기록(파일 이름, 필수 절)은
+로 바꾸고, `완료` 는 대표 `[DEV-xxx]` 이슈를 Closes 하는 PR 이 병합되면 Actions 가 쓴다. 하위 작업만 병합되면 사람이 쓴다. #346). 형식에 맞지 않는 기록(파일 이름, 필수 절)은
 `rules/audit-changes.yaml` 과 `rules/audit-ledger.yaml` 이 doc-guard 로
 검사한다.
 

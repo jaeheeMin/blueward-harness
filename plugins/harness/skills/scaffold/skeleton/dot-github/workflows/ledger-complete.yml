@@ -1,0 +1,14 @@
+# main 에 PR 이 병합되면 진행 원장(audit/ledger)의 해당 개발 건을 `완료` 로 바꿔 main 에 커밋한다(#346).
+# PR 이 대표 `[DEV-xxx]` 이슈를 Closes 할 때만 바꾼다. 판정 로직은 blueward-harness 저장소에서
+# 그때그때 내려받아 쓴다 — doc-guard.yml 과 같은 사정이다.
+name: ledger-complete
+on:
+  push:
+    branches: [main]
+jobs:
+  ledger-complete:
+    uses: jaeheeMin/blueward-harness/.github/workflows/ledger-complete.yml@stable
+    permissions:
+      contents: write   # 원장 변경을 main 에 직접 커밋한다(추가 PR 을 만들지 않는다)
+      pull-requests: read
+      issues: write   # 못 바꿨을 때 손으로 고쳐 달라는 이슈를 연다

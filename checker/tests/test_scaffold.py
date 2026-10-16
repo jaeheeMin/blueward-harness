@@ -75,6 +75,7 @@ EXPECTED_FILES = {
     ".github/workflows/ai-review.yml",
     ".github/workflows/gitleaks.yml",
     ".github/workflows/pr-tamper-alert.yml",
+    ".github/workflows/ledger-complete.yml",
     ".claude/settings.json",
 }
 

@@ -76,6 +76,9 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
    - `.github/workflows/pr-tamper-alert.yml` 은 PR 작성자가 아닌 계정(저장소 admin·봇 제외)이 그 PR 브랜치에
      push 하거나 리뷰를 해제하면 이슈(담당자는 PR 작성자)와 Teams 로 알린다(#150). 병합은 알리지 않는다.
      Teams 는 secret `TEAMS_PLUGIN_ALERT_WEBHOOK` 이 있을 때만 보낸다.
+   - `.github/workflows/ledger-complete.yml` 은 main 에 PR 이 병합되면 그 PR 이 Closes 한 대표 `[DEV-xxx]` 이슈의
+     진행 원장 행을 `완료` 로 바꿔 main 에 직접 커밋한다(#346). 하위 작업 이슈만 닫았거나 대표 이슈를 안 닫은 PR 은
+     그대로 둔다(그땐 사람이 바꾼다). 못 바꾸면 이슈가 열린다.
    - SRS 는 `/harness:srs` Skill 로 만든다. 지금은 `docs/ssot/SRS.md` 가
      빈 스텁으로만 있다.
 
@@ -112,6 +115,7 @@ env/adt-tiers.example.yaml         SAP MCP 서버별 쓰기 허용 표 예시(#1
 .github/workflows/ai-review.yml    위험도 낮은 PR 에만 Claude AI 리뷰를 돌리는 워크플로(#125). 기본 꺼짐
 .github/workflows/gitleaks.yml     PR·main 커밋마다 비밀정보(CR-004)를 gitleaks 로 검사하는 워크플로(#159)
 .github/workflows/pr-tamper-alert.yml 작성자가 아닌 계정이 PR 에 push 하거나 리뷰를 해제하면 이슈·Teams 로 알리는 워크플로(#150)
+.github/workflows/ledger-complete.yml 대표 [DEV-xxx] 이슈를 닫는 PR 이 병합되면 진행 원장을 완료로 바꿔 커밋하는 워크플로(#346)
 .claude/settings.json              harness Plugin 자동 설치 안내(#89). 이미 있으면 두 항목만 합친다
 ```
 
