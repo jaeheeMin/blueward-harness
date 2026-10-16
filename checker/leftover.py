@@ -19,7 +19,20 @@
     - 머리글/바닥글 글자와 직접 적은 드롭다운 목록은 견본인지 고정값인지 엔진이 가를 수 없다 — 거부하지 않고 경고(`leftover-review`)로
       알린다. 직접 적은 목록은 그 범위가 `유지` 안이면 알리지 않는다.
 
-검사하지 못하면(시트 XML 을 못 읽음 등) 통과로 두지 않고 거부 사유(`leftover-unchecked`)로 알린다.
+검사하지 못하면 통과로 두지 않고 거부 사유(`leftover-unchecked`)로 알린다: 시트 XML·그림·메모 파트를 못 읽음, 값이 있다고 표시된
+셀의 값을 못 읽음(공유 문자열 번호가 범위 밖이거나 sharedStrings 가 없음, `<v>` 모양이 낯섦), 차트 시트(지원 안 함),
+데이터 유효성을 읽다 예외가 남. 메모 시트의 VML 에 메모가 아닌 개체(ClientData ObjectType 이 Note 가 아님)가 있으면 견본(개체)이다.
+읽을 수 있었지만 목록 항목이 해석되지 않은 유효성(범위 없음·formula1 없음)은 경고(`leftover-review`)다.
+
+검사하지 않는 곳 (경고도 내지 않는다)
+    - 이름 정의(definedNames): Print_Area·_FilterDatabase 같은 이름이 양식 원본에 늘 있어 경고하면 늘 뜨는 소음이다. 외부 파일을 가리키는 이름은
+      `외부_참조_지우기`(빈 양식 만들기)가 다룬다. 이름이 견본 범위를 가리켜도 산출물 값은 아니다.
+    - 시트 이름: 지도가 이름을 정한 시트는 견본이 아니고, 지도에 없는 시트는 값이 있으면 이미 거부된다.
+    - 문서 속성(docProps): 양식 원본의 값(제목·작성자·회사)이 늘 들어 있어 경고하면 소음이다. 빈 양식 만들기가 제목·작성자·
+      마지막 수정자·Company·Manager 를 비운다. 그 밖 속성(subject·description·keywords·category)은 빈 양식 만들기 `notices` 가 알린다.
+    - 차트 안 글자와 캐시 값, 텍스트 상자·도형 안 글자: 개체 단위로만 판정한다. 앵커가 `유지` 밖이면 개체째 거부하고, `유지` 안이면
+      작성자가 고정 요소로 선언한 것이라 안의 글자는 보지 않는다.
+    - 외부 참조(externalLinks)·조건부 서식·셀 서식·병합 같은 서식 요소.
 """
 from __future__ import annotations
 
@@ -29,7 +42,7 @@ from typing import Callable
 
 from checker import blank_template
 from checker.export import ExportError, SheetXml, col2n, is_formula, n2col, norm
-from checker.xlsx_validation import ListReader
+from checker.xlsx_validation import _VALIDATION_RE, ListReader
 
 Rect = tuple[int, int, int, int]
 
@@ -47,6 +60,7 @@ _THREADED = re.compile(r"<threadedComment\b([^>]*)>(.*?)</threadedComment>", re.
 _HF = re.compile(r"<(?:\w+:)?headerFooter\b[^>]*>(.*?)</(?:\w+:)?headerFooter>", re.S)
 _HF_PART = re.compile(r"<(?:\w+:)?(odd|even|first)(Header|Footer)\b[^>]*>(.*?)</(?:\w+:)?\1\2>", re.S)
 _HF_CODE = re.compile(r'&"[^"]*"|&K[0-9A-Fa-f]{6}|&\d{1,3}|&[LCRBIUSXYEGPNDTFAZOH+\-]')
+_OBJECT_TYPE = re.compile(r"""<(?:\w+:)?ClientData\b[^>]*?\bObjectType\s*=\s*["']([^"']*)["']""")
 _SI = re.compile(r"<si\b[^>]*?(?:/>|>.*?</si>)", re.S)
 
 
@@ -63,15 +77,19 @@ def _unesc(text: str) -> str:
     return blank_template._unesc(text)
 
 
-def _shared_strings(raw: dict[str, bytes]) -> list[str]:
+def _shared_strings(raw: dict[str, bytes]) -> list[str] | None:
     data = raw.get("xl/sharedStrings.xml")
     if not data:
-        return []
+        return None
     return [blank_template._si_text(m.group(0)) for m in _SI.finditer(data.decode("utf-8-sig"))]
 
 
-def _cell_text(cell, sst: list[str]) -> str:
-    """셀의 눈에 보이는 값(수식은 `=식`). 값이 비어 있으면 빈 문자열."""
+class _Unreadable(Exception):
+    """값이 있다고 표시된 셀의 값을 읽지 못했다(통과도 위반도 아니다)."""
+
+
+def _cell_text(cell, sst: list[str] | None) -> str:
+    """셀의 눈에 보이는 값(수식은 `=식`). 값이 비어 있으면 빈 문자열. 값이 있다고 표시됐는데 읽지 못하면 _Unreadable."""
     inner = cell.inner
     if is_formula(inner):
         m = re.search(r"<f\b[^>]*>(.*?)</f>", inner, re.S)
@@ -79,15 +97,18 @@ def _cell_text(cell, sst: list[str]) -> str:
     t = dict(cell.attrs).get("t", "")
     if t == "inlineStr":
         return blank_template._si_text(inner)
-    v = re.search(r"<v>(.*?)</v>", inner, re.S)
+    v = re.search(r"<v\b[^>]*?(?:/>|>(.*?)</v>)", inner, re.S)
     if v is None:
-        return ""
+        raise _Unreadable("값 요소(<v>)의 모양을 읽지 못했다")
+    body = v.group(1) or ""
     if t == "s":
+        if sst is None:
+            raise _Unreadable("공유 문자열 파트(sharedStrings)가 없다")
         try:
-            return sst[int(v.group(1))]
+            return sst[int(body)]
         except (ValueError, IndexError):
-            return ""
-    return _unesc(v.group(1)).strip()
+            raise _Unreadable(f"공유 문자열 번호 {body.strip()!r} 를 읽지 못했다(범위 밖이거나 숫자가 아니다)") from None
+    return _unesc(body).strip()
 
 
 def _preview(text: str, n: int = PREVIEW) -> str:
@@ -202,6 +223,10 @@ def check(
     for sname, spath in paths.items():
         smap = map_sheets.get(sname, {})
         keep = keep_rects(smap)
+        head = raw.get(spath, b"")[:4096].decode("utf-8-sig", "replace")
+        if re.search(r"<(?:\w+:)?(?:chartsheet|dialogsheet)\b", head):
+            problem(sname, "검사 불능", "leftover-unchecked", f"시트 {sname} 는 차트 시트(또는 대화 시트)라 지원하지 않는다 — 남은 견본을 검사하지 못했다(통과도 위반도 아니다)")
+            continue
         try:
             ed = editor(sname)
             sheet_xml = raw[spath].decode("utf-8-sig", "replace")
@@ -219,15 +244,23 @@ def check(
             if isinstance(f, dict) and f.get("자동") and f.get("위치"):
                 auto.append(blank_template.parse_range(f["위치"]))
         left: list[tuple[str, str]] = []
+        unreadable: list[tuple[str, str]] = []
         for n in sorted(ed.rows):
             if n in header_rows:
                 continue
             for c in ed.rows[n].cells:
                 if not c.has_content() or c.ref in ed.written or _in(keep, c.col, n) or _in(auto, c.col, n):
                     continue
-                text = _cell_text(c, sst)
+                try:
+                    text = _cell_text(c, sst)
+                except _Unreadable as e:
+                    unreadable.append((c.ref, str(e)))
+                    continue
                 if text.strip():
                     left.append((c.ref, text))
+        if unreadable:
+            shown = ", ".join(f"{ref}({why})" for ref, why in unreadable[:MAX_LISTED]) + (f" … 외 {len(unreadable) - MAX_LISTED}칸" if len(unreadable) > MAX_LISTED else "")
+            problem(sname, "검사 불능", "leftover-unchecked", f"시트 {sname} 의 값이 있다고 표시된 셀 {len(unreadable)}칸을 읽지 못해 남은 견본을 검사하지 못했다(통과도 위반도 아니다): {shown}", count=len(unreadable))
         if left:
             shown = ", ".join(f"{ref} {_preview(v)!r}" for ref, v in left[:MAX_LISTED]) + (f" … 외 {len(left) - MAX_LISTED}칸" if len(left) > MAX_LISTED else "")
             problem(
@@ -278,8 +311,21 @@ def check(
                 ("컨트롤", r"<controls\b"),
             ) if re.search(pat, sheet_xml)
         ]
-        if not has_notes and re.search(r"<legacyDrawing\b", sheet_xml):
-            odd.append("옛 형식 개체(legacyDrawing)")
+        if re.search(r"<legacyDrawing\b", sheet_xml):
+            if not has_notes:
+                odd.append("옛 형식 개체(legacyDrawing)")
+            else:  # 메모 시트의 VML 도형 가운데 메모(Note)가 아닌 것(버튼·컨트롤·그림)은 견본이다
+                for kind, target in _rels(raw, spath):
+                    if kind != "vmlDrawing":
+                        continue
+                    vml = raw.get(target)
+                    if vml is None:
+                        problem(sname, "검사 불능", "leftover-unchecked", f"시트 {sname} 의 VML 파트 {target} 가 없어 메모 시트의 개체를 검사하지 못했다(통과도 위반도 아니다)")
+                        continue
+                    kinds = _OBJECT_TYPE.findall(vml.decode("utf-8-sig", "replace"))
+                    other = sorted({k for k in kinds if k != "Note"})
+                    if other:
+                        odd.append(f"메모가 아닌 VML 개체({', '.join(other)})")
         if odd:
             problem(
                 sname, "견본 남음(개체)", "leftover-sample",
@@ -296,7 +342,17 @@ def check(
 
         # -- 직접 적은 드롭다운 목록
         try:
-            for v in reader.validations(sname):
+            vals = reader.validations(sname)
+            listed = sum(1 for m in _VALIDATION_RE.finditer(sheet_xml) if dict(_ATTR.findall(m.group(2))).get("type") == "list")
+            if listed > len(vals):
+                warnings.append({
+                    "form": form, "sheet": sname, "item": "드롭다운 목록", "type": "leftover-review",
+                    "reason": (
+                        f"시트 {sname} 의 목록형 데이터 유효성 {listed}개 가운데 {listed - len(vals)}개는 적용 범위나 목록 수식이 없어 해석하지 못했다"
+                        "(통과 아님) — 템플릿에서 확인한다"
+                    ),
+                })
+            for v in vals:
                 if not v.formula.lstrip("=").startswith('"'):
                     continue
                 if all(any(k[0] <= c1 and c2 <= k[2] and k[1] <= r1 and r2 <= k[3] for k in keep) for c1, r1, c2, r2 in v.ranges):
@@ -308,9 +364,6 @@ def check(
                         "엔진이 가르지 못한다(통과 아님). 고정 선택지면 그 범위를 지도 `유지` 에 넣고, 견본이면 `유효성_지우기` 로 빈 양식을 만든다"
                     ),
                 })
-        except Exception as e:  # 유효성 XML 이 예상과 다르면 검사 불능으로 알린다
-            warnings.append({
-                "form": form, "sheet": sname, "item": "드롭다운 목록", "type": "leftover-review",
-                "reason": f"시트 {sname} 의 데이터 유효성을 읽지 못해 직접 적은 목록을 검사하지 못했다(통과 아님): {type(e).__name__}: {e}",
-            })
+        except Exception as e:  # 유효성 XML 이 예상과 다르면 읽지 못한 파트다 — 통과로 두지 않고 거부한다
+            problem(sname, "검사 불능", "leftover-unchecked", f"시트 {sname} 의 데이터 유효성을 읽지 못해 직접 적은 목록을 검사하지 못했다(통과도 위반도 아니다): {type(e).__name__}: {e}")
     return problems, warnings

@@ -348,6 +348,8 @@ def test_산출물_바이트는_견본_검사_여부와_상관없다(tmp_path, c
     a = _ok_setup(tmp_path / "a")
     _, ra = _run(a, capsys)
     b = _setup(tmp_path / "b", top="", main=KEEP_MAIN, other=KEEP_OTHER)
+    # openpyxl 은 docProps/core.xml 에 저장 시각(초 단위)을 쓴다 — 템플릿을 따로 만들면 초가 바뀔 때 바이트가 달라져 간헐 실패한다. 같은 템플릿을 쓴다.
+    (b / "templates" / "시험.xlsx").write_bytes((a / "templates" / "시험.xlsx").read_bytes())
     _, rb = _run(b, capsys)
     assert (a / ra["files"][0]).read_bytes() == (b / rb["files"][0]).read_bytes()
 
@@ -382,3 +384,99 @@ def test_form_columns_도_견본_검사_값_오류를_검사_불능으로_본다
     assert form_columns._valid_map(ok, Path("m.yaml")) is ok
     with pytest.raises(ConfigError, match="견본_검사"):
         form_columns._valid_map({"견본_검사": "예", "시트": [{"이름": "S"}]}, Path("m.yaml"))
+
+
+# ---------------------------------------------------------------- 읽지 못한 것은 통과가 아니다
+
+def _mutate(path: Path, edits: dict[str, object], add: dict[str, bytes] | None = None) -> None:
+    """zip 안의 파트를 이름(접미사)으로 골라 고친다. edits 값은 bytes -> bytes 함수이거나 None(삭제)."""
+    with zipfile.ZipFile(path) as zi:
+        items = [(i.filename, zi.read(i.filename)) for i in zi.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zo:
+        for name, data in items:
+            hit = next((k for k in edits if name.endswith(k)), None)
+            if hit is not None:
+                if edits[hit] is None:
+                    continue
+                data = edits[hit](data)
+            zo.writestr(name, data)
+        for name, data in (add or {}).items():
+            zo.writestr(name, data)
+
+
+def _tpl(root: Path) -> Path:
+    return root / "templates" / "시험.xlsx"
+
+
+def test_공유_문자열_번호가_범위_밖이면_검사_불능으로_거부한다(tmp_path, capsys):
+    root = _ok_setup(tmp_path, extra={"D9": "x"})
+    _mutate(_tpl(root), {"worksheets/sheet1.xml": lambda d: d.replace(b'<c r="D9" t="inlineStr"><is><t>x</t></is></c>', b'<c r="D9" t="s"><v>999</v></c>')},
+            add={"xl/sharedStrings.xml": b'<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1"><si><t>a</t></si></sst>'})
+    code, rep = _run(root, capsys)
+    assert code == 1
+    bad = [p for p in rep["problems"] if p["type"] == "leftover-unchecked"]
+    assert bad and bad[0]["sheet"] == "Main" and "D9" in bad[0]["reason"] and "999" in bad[0]["reason"]
+    assert not _leftovers(rep)  # 위반으로 뭉개지도, 통과로 넘기지도 않는다
+
+
+def test_sharedStrings_가_없는데_공유_문자열_셀이_있으면_검사_불능이다(tmp_path, capsys):
+    root = _ok_setup(tmp_path, extra={"D9": "x"})
+    _mutate(_tpl(root), {"worksheets/sheet1.xml": lambda d: d.replace(b'<c r="D9" t="inlineStr"><is><t>x</t></is></c>', b'<c r="D9" t="s"><v>0</v></c>')})
+    code, rep = _run(root, capsys)
+    assert code == 1 and any(p["type"] == "leftover-unchecked" and "sharedStrings" in p["reason"] for p in rep["problems"])
+
+
+def test_v_요소에_속성이_붙은_값도_읽는다(tmp_path, capsys):
+    root = _ok_setup(tmp_path, extra={"D9": "x"})
+    _mutate(_tpl(root), {"worksheets/sheet1.xml": lambda d: d.replace(b'<c r="D9" t="inlineStr"><is><t>x</t></is></c>', b'<c r="D9"><v xml:space="preserve">77</v></c>')})
+    code, rep = _run(root, capsys)
+    assert code == 1
+    assert {c["cell"]: c["value"] for p in _leftovers(rep) for c in p.get("cells", [])} == {"D9": "77"}
+
+
+def test_메모_시트의_VML_에_메모가_아닌_개체가_있으면_견본이다(tmp_path, capsys):
+    root = _ok_setup(tmp_path, comment_at="D3")
+    _mutate(_tpl(root), {".vml": lambda d: d.replace(b"</xml>", b'<v:shape><x:ClientData ObjectType="Button"/></v:shape></xml>')})
+    _write_map(root, main="    유지: [A1, D3]\n", other=KEEP_OTHER)  # 메모는 허용해도 버튼은 못 지나간다
+    code, rep = _run(root, capsys)
+    assert code == 1 and any(p["kind"] == "objects" and "Button" in p["reason"] for p in _leftovers(rep)), rep["problems"]
+
+
+def test_메모만_있는_VML_은_개체로_보지_않는다(tmp_path, capsys):
+    root = _ok_setup(tmp_path, comment_at="D3")
+    _write_map(root, main="    유지: [A1, D3]\n", other=KEEP_OTHER)
+    code, rep = _run(root, capsys)
+    assert code == 0, rep
+
+
+def test_차트_시트는_지원하지_않는다는_사유로_거부한다(tmp_path, capsys):
+    root = _ok_setup(tmp_path)
+    _mutate(
+        _tpl(root),
+        {
+            "xl/workbook.xml": lambda d: d.replace(b"</sheets>", b'<sheet name="Chart1" sheetId="9" r:id="rIdChart"/></sheets>'),
+            "xl/_rels/workbook.xml.rels": lambda d: d.replace(b"</Relationships>", f'<Relationship Id="rIdChart" Type="{REL}chartsheet" Target="chartsheets/sheet1.xml"/></Relationships>'.encode()),
+        },
+        add={"xl/chartsheets/sheet1.xml": b'<?xml version="1.0"?><chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>'},
+    )
+    code, rep = _run(root, capsys)
+    assert code == 1
+    bad = [p for p in rep["problems"] if p["sheet"] == "Chart1"]
+    assert bad and bad[0]["type"] == "leftover-unchecked" and "차트 시트" in bad[0]["reason"] and "sheetData" not in bad[0]["reason"]
+
+
+def test_해석되지_않은_목록_유효성은_경고하고_읽다_예외가_나면_거부한다(tmp_path, capsys, monkeypatch):
+    root = _ok_setup(tmp_path)
+    _mutate(_tpl(root), {"worksheets/sheet1.xml": lambda d: d.replace(b"</worksheet>", b'<dataValidations count="1"><dataValidation type="list"><formula1>"A,B"</formula1></dataValidation></dataValidations></worksheet>')})
+    code, rep = _run(root, capsys)
+    assert code == 3 and any(w["type"] == "leftover-review" and "해석하지 못했다" in w["reason"] for w in rep["warnings"]), rep
+
+    from checker import leftover
+
+    def boom(self, sheet):
+        raise ValueError("깨진 유효성")
+
+    monkeypatch.setattr(leftover.ListReader, "validations", boom)
+    code, rep = _run(root, capsys)
+    assert code == 1 and any(p["type"] == "leftover-unchecked" and "깨진 유효성" in p["reason"] for p in rep["problems"])
+    assert not [w for w in rep["warnings"] if w.get("type") == "leftover-review"]
