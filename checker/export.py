@@ -1226,6 +1226,8 @@ def build_form(
             for item in screen_draw.items(smap):
                 body = subs_of.get(screen_draw.md_name(item))
                 if body is None:
+                    if sname in spec_sections and spec_sections[sname][0].na:
+                        continue  # 시트를 해당 없음으로 둔 것은 의도된 생략이다(예: 객체 1건으로 바로 들어가는 앱이 아닐 때의 Initial Screen)
                     warn(sname, screen_draw.md_name(item), f"{item['이름']} 은 작업본에 `#### {screen_draw.md_name(item)}` 절이 없어 그리지 않았다(영역 {item['영역']} 은 템플릿 그대로)")
                     continue
                 if styles_ed is None:
