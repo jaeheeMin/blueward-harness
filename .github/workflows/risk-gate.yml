@@ -275,10 +275,12 @@ jobs:
           sha_short="${GITHUB_SHA:0:7}"
           title="승인 없이 위험한 변경이 main 에 들어왔다: $sha_short"
 
-          # 같은 커밋에 이미 이슈가 열려 있으면 다시 만들지 않는다.
-          existing_titles="$(gh issue list --state open --limit 200 --json title --jq '.[].title' || true)"
-          if printf '%s\n' "$existing_titles" | grep -qxF "$title"; then
-            echo "이미 이슈가 있다: $title"
+          # 같은 커밋에 이미 이슈가 열려 있으면 다시 만들지 않는다. 제목이나 본문 마커 중 하나만 맞아도 본다.
+          marker="<!-- risk-gate:${GITHUB_SHA} -->"
+          found="$(gh issue list --state open --limit 200 --json number,title,body \
+            | jq -r --arg t "$title" --arg m "$marker" '[.[] | select(.title == $t or ((.body // "") | contains($m)))][0].number // empty' || true)"
+          if [ -n "$found" ]; then
+            echo "이미 이슈가 있다: #$found $title"
             exit 0
           fi
 
@@ -292,12 +294,31 @@ jobs:
             printf '위험한 이유:\n%s\n\n' "$reasons"
             printf '연관된 PR: %s\n\n' "$prs"
             printf '%s\n' "$next"
-            printf '할 일: 승인자가 사후 검토하고, 필요하면 되돌린다.\n'
+            printf '할 일: 승인자가 사후 검토하고, 필요하면 되돌린다.\n\n'
+            printf '%s\n' "$marker"
           } > body.md
 
-          # type:fix 라벨이나 소유자 배정이 안 되는 저장소(라벨 없음, 조직 소유)에서도 기록은 남긴다.
-          gh issue create --title "$title" --body-file body.md --label "type:fix" --assignee "$OWNER" \
-            || gh issue create --title "$title" --body-file body.md
+          # 이슈는 한 번만 만든다. 라벨·담당자는 만든 뒤에 따로 붙이고, 실패해도 경고만 남긴다.
+          # (create 에 --assignee 를 묶으면 담당자 지정 실패 때 이슈가 이미 만들어진 채 명령이 실패해 재시도가 중복 이슈를 만든다.)
+          if ! url="$(gh issue create --title "$title" --body-file body.md)"; then
+            echo "::error title=알림 이슈 생성 실패::승인 없이 들어온 변경의 알림 이슈를 열지 못했다."
+            exit 1
+          fi
+          num="${url##*/}"
+          if [ -z "$num" ]; then
+            echo "::error title=알림 이슈 번호 불명::이슈 생성 출력에서 번호를 읽지 못했다: $url"
+            exit 1
+          fi
+          echo "이슈를 열었다: $url"
+          gh api -X POST "repos/${GH_REPO}/issues/${num}/labels" -f "labels[]=type:fix" >/dev/null \
+            || echo "::warning title=라벨 지정 실패::type:fix 라벨을 붙이지 못했다(라벨이 없는 저장소일 수 있다)."
+          owner_type="$(gh api "repos/${GH_REPO}" --jq '.owner.type' 2>/dev/null || true)"
+          if [ "$owner_type" = "User" ]; then
+            gh api -X POST "repos/${GH_REPO}/issues/${num}/assignees" -f "assignees[]=${OWNER}" >/dev/null \
+              || echo "::warning title=담당자 지정 실패::${OWNER} 를 담당자로 지정하지 못했다."
+          else
+            echo "저장소 소유자($OWNER)가 사용자가 아니어서(${owner_type:-확인 불능}) 담당자를 지정하지 않는다."
+          fi
 
       - name: 판정 불능이면 실패
         if: steps.decide.outputs.exit-code != '0' && steps.decide.outputs.exit-code != '1'

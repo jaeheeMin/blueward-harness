@@ -128,12 +128,22 @@ jobs:
             exit 0
           fi
 
-          # 담당자는 PR 작성자. 담당자로 지정할 수 없는 계정(봇, 협력자가 아님)이면 담당자 없이 만든다.
-          if ! gh issue create --title "$title" --body-file body.md \
-              --label "type:chore" --assignee "$PR_AUTHOR"; then
-            echo "::warning title=담당자 지정 실패::${PR_AUTHOR} 를 담당자로 지정하지 못해 담당자 없이 만든다."
-            gh issue create --title "$title" --body-file body.md --label "type:chore"
+          # 이슈는 한 번만 만든다. 라벨·담당자(PR 작성자)는 만든 뒤에 따로 붙이고, 실패해도 경고만 남긴다.
+          # 담당자로 지정할 수 없는 계정(봇, 협력자가 아님)이면 담당자 없이 둔다.
+          if ! url="$(gh issue create --title "$title" --body-file body.md)"; then
+            echo "::error title=알림 이슈 생성 실패::PR 변경 알림 이슈를 열지 못했다."
+            exit 1
           fi
+          num="${url##*/}"
+          if [ -z "$num" ]; then
+            echo "::error title=알림 이슈 번호 불명::이슈 생성 출력에서 번호를 읽지 못했다: $url"
+            exit 1
+          fi
+          echo "이슈를 열었다: $url"
+          gh api -X POST "repos/${GH_REPO}/issues/${num}/labels" -f "labels[]=type:chore" >/dev/null \
+            || echo "::warning title=라벨 지정 실패::type:chore 라벨을 붙이지 못했다."
+          gh api -X POST "repos/${GH_REPO}/issues/${num}/assignees" -f "assignees[]=${PR_AUTHOR}" >/dev/null \
+            || echo "::warning title=담당자 지정 실패::${PR_AUTHOR} 를 담당자로 지정하지 못해 담당자 없이 둔다."
 
       - name: Teams 로 알리기
         if: steps.decide.outputs.notify == 'true'
