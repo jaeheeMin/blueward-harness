@@ -132,8 +132,26 @@ jobs:
             } > body.md
           fi
 
-          gh issue create --title "$title" --body-file body.md \
-            --label "type:chore" --assignee "$OWNER"
+          # 이슈는 한 번만 만든다. 라벨·담당자는 만든 뒤에 따로 붙이고, 실패해도 경고만 남긴다.
+          if ! url="$(gh issue create --title "$title" --body-file body.md)"; then
+            echo "::error title=알림 이슈 생성 실패::사람 확인 알림 이슈를 열지 못했다."
+            exit 1
+          fi
+          num="${url##*/}"
+          if [ -z "$num" ]; then
+            echo "::error title=알림 이슈 번호 불명::이슈 생성 출력에서 번호를 읽지 못했다: $url"
+            exit 1
+          fi
+          echo "이슈를 열었다: $url"
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${num}/labels" -f "labels[]=type:chore" >/dev/null \
+            || echo "::warning title=라벨 지정 실패::type:chore 라벨을 붙이지 못했다."
+          owner_type="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.owner.type' 2>/dev/null || true)"
+          if [ "$owner_type" = "User" ]; then
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${num}/assignees" -f "assignees[]=${OWNER}" >/dev/null \
+              || echo "::warning title=담당자 지정 실패::${OWNER} 를 담당자로 지정하지 못했다."
+          else
+            echo "저장소 소유자($OWNER)가 사용자가 아니어서(${owner_type:-확인 불능}) 담당자를 지정하지 않는다."
+          fi
 
       - name: Teams 로 알리기
         if: steps.decide.outputs.notify == 'true'

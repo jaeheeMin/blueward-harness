@@ -346,7 +346,7 @@ def test_release_tag_는_실패하거나_건너뛰면_owner_에게_이슈를_만
     assert "failure()" in notify["if"] and "steps.tag.outputs.problem" in notify["if"]
     assert notify["env"]["GH_REPO"] == "${{ github.repository }}"
     assert notify["env"]["OWNER"] == "${{ github.repository_owner }}"
-    assert '--assignee "$OWNER"' in notify["run"]
+    assert "issues/${num}/assignees" in notify["run"] and "assignees[]=${OWNER}" in notify["run"]
     assert "gh issue comment" in notify["run"]  # 열린 알림 이슈가 있으면 코멘트만
 
 
