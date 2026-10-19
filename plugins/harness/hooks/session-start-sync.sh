@@ -420,7 +420,7 @@ case "$fetch_state" in
   ok | none) judge_carryover ;;
   *)
     # 원격 상태를 모르면 병합·삭제 여부를 판정할 수 없다. 통과시키지 않고 기록을 남긴다.
-    if [ -f "$CARRYOVER" ] && [ "$(head -n1 "$CARRYOVER" | tr -d '')" = "format=2" ]; then
+    if [ -f "$CARRYOVER" ] && [ "$(head -n1 "$CARRYOVER" | tr -d '\r')" = "format=2" ]; then
       add "원격을 가져오지 못해 지난 작업을 판정하지 못했습니다(지난 작업 확인 불능). 기록은 남겨 두었으니 원격 연결을 확인한 뒤 다음 세션에서 다시 판정합니다."
     fi
     ;;
@@ -435,6 +435,55 @@ if [ -n "$changed" ]; then
     add "... 외 $((total - 20))개"
   fi
   add "작업을 마칠 때 /harness:deliver 로 커밋과 푸시와 PR 까지 정리하십시오."
+fi
+
+# 내 열린 PR 의 상태와 병합 순서(#370). 엔진(checker.pr_queue)이 GitHub 에서 한 번 계산한다.
+# 내 PR 이 없으면 아무것도 내지 않는다. 읽지 못하면 "확인 불능" 한 줄만 남기고 통과·문제없음으로
+# 말하지 않는다(원칙 7). 세션 시작을 오래 붙들지 않게 시간을 제한하고, 어떤 경우에도 exit 0 이다.
+if [ "$fetch_state" = "ok" ] && git remote get-url origin 2>/dev/null | grep -q "github\.com"; then
+  pr_note=""
+  pr_rc=0
+  pr_out=""
+  pr_engine=""
+  pr_skip=""
+  pr_timeout="${HARNESS_PR_TIMEOUT:-20}"
+  if ! command -v uvx >/dev/null 2>&1 || ! command -v gh >/dev/null 2>&1; then
+    pr_rc=127
+    pr_note="uvx 나 gh 가 없음"
+  elif ! command -v timeout >/dev/null 2>&1; then
+    # 시간 제한 없이 엔진을 부르면 첫 엔진 받기가 세션 시작을 오래 붙들 수 있다. 건너뛴다.
+    pr_skip="PR 상태 확인을 건너뜁니다(timeout 명령이 없어 시간을 제한할 수 없음). 다음: /harness:prs 로 확인하십시오."
+  elif [ -n "${DOC_GUARD_ENGINE:-}" ]; then
+    pr_engine="$DOC_GUARD_ENGINE"
+  else
+    pr_engine="$(uv run --no-project python "${plugin_root}/hooks/engine_spec.py" 2>/dev/null | tr -d '\r')" || pr_engine=""
+    if [ -z "$pr_engine" ]; then
+      pr_rc=1
+      pr_note="검사 엔진의 판을 정하지 못함"
+    fi
+  fi
+  if [ -n "$pr_engine" ]; then
+    pr_out="$(timeout "$pr_timeout" uvx --from "$pr_engine" python -m checker.pr_queue --mine --quiet-empty --max-rows 10 2>/dev/null)" || pr_rc=$?
+    pr_out="$(printf '%s' "$pr_out" | tr -d '\r')"
+    if [ "$pr_rc" -eq 124 ]; then
+      # 첫 엔진 받기가 오래 걸린 것이다. 같은 엔진 판을 백그라운드로 받아 두어 다음 세션이 빠르게 한다.
+      pr_skip="PR 상태 확인이 오래 걸려 건너뜀 — /harness:prs 로 확인하십시오."
+      (uvx --from "$pr_engine" python -c "pass" </dev/null >/dev/null 2>&1 &) >/dev/null 2>&1 || true
+    elif [ "$pr_rc" -ne 0 ] && [ -z "$pr_note" ]; then
+      pr_note="$(printf '%s' "$pr_out" | head -n1)"
+      pr_note="${pr_note:-종료코드 $pr_rc}"
+    fi
+  fi
+  if [ -n "$pr_skip" ]; then
+    add "$pr_skip"
+  elif [ "$pr_rc" -eq 2 ] && [ -n "$pr_out" ]; then
+    add "$(printf '%s' "$pr_out" | head -n1) 다음: /harness:prs 로 다시 확인하십시오."
+  elif [ "$pr_rc" -ne 0 ]; then
+    add "PR 상태 확인 불능(${pr_note:-알 수 없음}) - /harness:prs 로 다시 확인하십시오."
+  elif [ -n "$pr_out" ]; then
+    add "$pr_out"
+    add "자세한 상태와 다음 할 일은 /harness:prs 로 봅니다."
+  fi
 fi
 
 # 공통 개발 규칙 요약(#53). 목록은 common.md 의 `## CR-` 헤딩에서 파싱해

@@ -80,6 +80,7 @@
 | `/harness:srs` | SRS(요구사항정의서) 만들기·고치기 |
 | `/harness:spec` | SRS 요구사항으로 개발 Spec 만들기·고치기 |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받기 |
+| `/harness:prs` | 내 열린 PR 의 상태와 병합 순서 확인(세션 시작에도 알린다) |
 | `/harness:atc` | SAP ATC 지적 실행·분류·처리(`env/adt-tiers.yaml` 이 있는 Project Repository 에서) |
 
 `/release`, `/intake` 는 필요해지면 `jaeheeMin/public-cloud` 에서 가져온다.
