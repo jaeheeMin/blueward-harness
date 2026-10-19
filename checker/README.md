@@ -18,7 +18,9 @@ checker/
     external_traces.py    다른 거래처 흔적이 남아 있는지 (오피스 전체)
     req_cross_reference.py  SRS 상세 절이 다른 REQ·DEV 번호를 말하면 관계 줄을 요구 (md, #261)
     md_table.py     md 절 아래 표의 열 이름·열별 허용 값·값 패턴 (Spec `## 사용 객체`, #287).
-                    절 제목·열·값은 규칙 yaml 의 데이터이고 절이 없으면 통과(`필수: true` 로 바꿈)
+                    절 제목·열·값은 규칙 yaml 의 데이터이고 절이 없으면 통과(`필수: true` 로 바꿈).
+                    `조건_필수`(엔진 v0.10.85 이상)는 다른 열이 어떤 값(`""` 는 빈 칸)일 때 이 열을 채우게 한다
+                    (Spec `## 권한` 의 비고, #361)
     form_columns.py 원본 md(SRS, Spec `## 양식 항목`)의 열·소제목이 양식 지도 밖이면 거절 (#316)
   ooxml.py          오피스 파일의 본문이 아닌 자리를 읽는다
   cleaner.py        흔적을 걷어낸 새 파일을 만든다 (사람이 직접 부른다)
@@ -27,15 +29,16 @@ checker/
                     훅(`uvx` 로 `python -m checker.ssot_approval` 을 부른다)이
                     같은 판정 로직을 쓴다
   code_rules.py     공통 개발 규칙 CR-001(한글 이름), CR-002(반복문 안 DB
-                    조회)를 코드(ABAP, JS/TS, CDS, BDEF)에서 검사한다(#54,
-                    #72). BDEF 는 반복문이 없어 CR-001 만 적용한다. 문서
+                    조회), CR-003, CR-007, CR-009(권한 전부 허용, 경고)를
+                    코드(ABAP, JS/TS, CDS, BDEF)에서 검사한다(#54,
+                    #72, #361). BDEF 는 반복문이 없어 CR-001 만 적용한다. 문서
                     검사(engine.py)와 관할이 다르다 — 기준 폴더(`templates/`
                     와 `rules/` 를 함께 가진 폴더)를 요구하지 않고 모듈
                     하나에 CLI 까지 담는다.
                     `pre_write_guard.py` 훅과 `scripts/check_changed.py` 가
                     같은 함수(`build_report`)를 쓴다
   code_checks.yaml  code_rules.py 의 설정. 언어별 확장자와, 그 언어에 어느
-                    CR 을 적용할지가 데이터로 있다
+                    CR 을 적용할지, 그 CR 이 위반(`violation`)인지 경고(`warn`)인지(`level`)가 데이터로 있다
   readers/          형식별 본문 추출 (md, docx, xlsx, pptx)
   tests/
     make_fixtures.py  픽스처 생성. 결과물은 커밋하지 않는다
@@ -246,6 +249,24 @@ merge-base 를 쓴다. 갈라진 지점을 못 구하거나, SRS 의 patch 가 �
 "검사 불능" 사유로 낸다. (a) 는 관계 줄 접두어·제외 패턴의 기본값(`DEFAULT_PREFIX`, `DEFAULT_EXCLUDE`)을 쓴다 — 고객사가
 `rules/ssot.yaml` 에서 바꿨다면 `req_cross_reference` 와 어긋날 수 있다. `.github/risk-gate.yaml` 의 `srs_split_hint: false` 로 끈다(기본 켬).
 Project Repository 는 엔진이 배포된 뒤(`stable` 태그가 옮겨진 뒤) 이 키를 쓸 수 있다 — 모르는 키는 설정 오류다.
+
+## CR-009 와 `risk_gate` 의 `write_auth` — 데이터를 바꾸는 앱의 권한 검사(#361)
+
+RAP behavior pool 의 `FOR GLOBAL AUTHORIZATION`/`FOR INSTANCE AUTHORIZATION` 메서드가 `auth-allowed` 만 대입하고(`auth-unauthorized`
+없음) 같은 파일에 `AUTHORITY-CHECK` 가 없으면 `code_rules.py` 가 CR-009 로 경고한다(`_scan_abap_cr009`, 마스킹된 소스를 봐서 주석·
+문자열 속 AUTHORITY-CHECK 는 세지 않는다). 심각도는 `code_checks.yaml` 규칙 항목의 `level` 이 데이터로 정한다 — `violation`(기본,
+종료코드 1) 또는 `warn`(리포트에는 나오지만 종료코드·`status` 를 바꾸지 않는다). CR-009 는 `warn` 이다. 발견마다 `level` 이 붙고
+요약에 `warnings` 가 더해진다. 그 밖의 `level` 값은 설정 오류라 그 파일이 `error`(검사 불능, 종료코드 2)다. `level` 은 같은
+`code_checks.yaml` 과 같은 엔진 판에서만 읽는다 — 옛 엔진(0.10.84 이하)은 `level` 키를 보지 않고 CR-009 도 모르므로, 새 yaml 은
+새 엔진과 함께 배포되는 이 저장소 파일이라 어긋나지 않는다. 훅은 `warn` 발견으로 막지 않고 `allow_with_notice`(`additionalContext`)로 경고를 알려 주며(위반이 있어 막을 때는 거절 사유에 같이 붙인다),
+PR 코멘트(`scripts/render_report.py`)는 위반과 따로 "경고" 절에 나열한다. CR-009 는 권한 메서드의 `auth-allowed` 대입만 있거나 본문이 빈 경우를
+그 클래스 구현 범위의 `AUTHORITY-CHECK` 유무로 가른다(`METHODS:` 체인 선언 포함).
+
+risk-gate 의 `write_auth` 기준은 PR 이 바꾼(삭제 제외) `.abap` 파일의 head 내용에 CR-009 경고(예외 처리된 것 제외)가 있으면
+"쓰기 앱인데 권한 검사 없음: <파일>" 사유를 낸다. 설정 키가 없다 — 게이트가 켜져 있으면(`.github/risk-gate.yaml` 이 있으면) 항상 본다.
+옛 설정 파일이 모르는 키 때문에 검사 불능이 되지 않게 하려는 것이다. 파일을 못 읽거나(없음·비어 옴·1MB 초과) 코드 검사 설정이 잘못되면
+통과로 보지 않고 "확인하지 못함" 사유를 낸다. `decide_pr` 의 사유 목록을 그대로 쓰므로 병합 뒤 감지(`after-merge`)와 알림 이슈에도
+같은 줄이 찍힌다. `precheck-pr` 은 `PRECHECK_CRITERIA` 밖이라 이 기준을 보지 않는다.
 
 ## 출력
 

@@ -177,13 +177,13 @@ def test_스킬이_저장소_루트_기준_규칙_경로를_쓰지_않는다(nam
     assert not broken, f"{skill_md} 에 저장소 루트 기준 rules/ 경로가 남아 있다: {broken}"
 
 
-def test_공통_개발_규칙_문서에_CR_001부터_008까지_있다():
-    """#53 — common.md 가 CR-001 ~ CR-008 여덟 개 헤딩을 모두 가지고 있는가."""
+def test_공통_개발_규칙_문서에_CR_001부터_009까지_있다():
+    """#53 — common.md 가 CR-001 ~ CR-009 아홉 개 헤딩을 모두 가지고 있는가."""
     common_md = PLUGIN_ROOT / "conventions" / "common.md"
     assert common_md.is_file(), f"{common_md} 가 없다"
 
     text = common_md.read_text(encoding="utf-8")
-    for n in range(1, 9):
+    for n in range(1, 10):
         assert re.search(rf"^## CR-{n:03d}\b", text, re.MULTILINE), f"CR-{n:03d} 헤딩이 없다"
 
 

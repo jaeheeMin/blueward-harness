@@ -10,6 +10,10 @@ params (한글 키, 영문 키도 받는다):
   값 / values       {열: [허용 값...]}. 칸은 이 중 하나와 정확히 같아야 한다
   패턴 / patterns   {열: 정규식}. 칸 전체가 맞아야 한다
   필수 / required   true 면 절이 없는 것도 위반. 기본 false (선택 절 — 절이 없으면 통과)
+  조건_필수 / required_if
+                    [{열: 칸을 채워야 하는 열, 조건: {다른 열: [값...]}}...]. 행의 조건 열 값(백틱 벗김)이
+                    목록 중 하나이고(조건 열이 여럿이면 모두) `열` 의 칸이 비었으면 위반. 값에 ""
+                    를 넣으면 "비어 있을 때" 를 뜻한다. 예: 검사 방식이 `검사 안 함` 이면 비고 필수(#361)
 
 판단:
 - 절이 없다 → `필수` 가 아니면 통과. 템플릿에서 새로 생긴 절이라도 이미 쓰인 문서를 깨지 않는다.
@@ -31,7 +35,10 @@ from checker.rules import rule
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 _H2 = re.compile(r"^##\s+(.*?)\s*#*\s*$")
 _SEPARATOR = re.compile(r":?-{2,}:?")
-_ALLOWED = {"절", "section", "열", "columns", "값", "values", "패턴", "patterns", "필수", "required"}
+_ALLOWED = {
+    "절", "section", "열", "columns", "값", "values", "패턴", "patterns", "필수", "required",
+    "조건_필수", "required_if",
+}
 
 
 def _get(params: dict, *names: str):
@@ -142,12 +149,13 @@ def check(path: Path, params: dict) -> list[Violation]:
     values = _get(params, "값", "values") or {}
     patterns = _get(params, "패턴", "patterns") or {}
     required = bool(_get(params, "필수", "required"))
+    required_if = _get(params, "조건_필수", "required_if") or []
 
     stray = [k for k in params if k not in _ALLOWED and not str(k).startswith("_")]
     if stray:
         raise ConfigError(
             f"md_table 규칙에 모르는 키가 있다: {', '.join(map(str, stray))} "
-            f"(쓸 수 있는 키: 절, 열, 값, 패턴, 필수)"
+            f"(쓸 수 있는 키: 절, 열, 값, 패턴, 필수, 조건_필수)"
         )
     if not isinstance(columns, list):
         raise ConfigError("md_table 규칙의 '열' 은 목록이어야 한다")
@@ -163,6 +171,7 @@ def check(path: Path, params: dict) -> list[Violation]:
     unknown = [c for c in list(values) + list(patterns) if c not in columns]
     if unknown:
         raise ConfigError(f"md_table 규칙의 값·패턴이 '열' 에 없는 열을 가리킨다: {', '.join(unknown)}")
+    conditions = _parse_required_if(required_if, columns)
     try:
         compiled = {c: re.compile(p) for c, p in patterns.items()}
     except re.error as exc:
@@ -204,7 +213,33 @@ def check(path: Path, params: dict) -> list[Violation]:
             elif col in compiled and not compiled[col].fullmatch(cell):
                 out.append(_v(f"{col}: {patterns[col]}", cell or "빈 칸",
                               f"'{title}' 표 {i}번째 행의 '{col}' 값이 형식에 맞지 않는다"))
+        by_col = dict(zip(columns, (_plain(c) for c in cells)))
+        reported: set[str] = set()  # 같은 칸을 여러 조건이 가리켜도 한 번만 알린다
+        for target, when in conditions:
+            if target not in reported and not by_col[target] and all(by_col[c] in vals for c, vals in when.items()):
+                reported.add(target)
+                shown = " 이고 ".join(f"'{c}' 가 {' / '.join(repr(v) if v else '빈 칸' for v in vals)}"
+                                      for c, vals in when.items())
+                out.append(_v(f"{target}: 내용", "빈 칸",
+                              f"'{title}' 표 {i}번째 행은 {shown} 이라 '{target}' 칸을 채워야 한다"))
     return out
+
+
+def _parse_required_if(raw, columns: list[str]) -> list[tuple[str, dict[str, list[str]]]]:
+    if not isinstance(raw, list):
+        raise ConfigError("md_table 규칙의 '조건_필수' 는 목록이어야 한다")
+    parsed = []
+    for item in raw:
+        target = _get(item, "열", "column") if isinstance(item, dict) else None
+        when = _get(item, "조건", "when") if isinstance(item, dict) else None
+        if not target or not isinstance(when, dict) or not when:
+            raise ConfigError("md_table 규칙의 '조건_필수' 항목에는 '열' 과 '조건'({열: [값...]}) 이 있어야 한다")
+        if target not in columns or any(c not in columns for c in when):
+            raise ConfigError("md_table 규칙의 '조건_필수' 가 '열' 에 없는 열을 가리킨다")
+        if not all(isinstance(v, list) for v in when.values()):
+            raise ConfigError("md_table 규칙의 '조건_필수' 조건 값은 목록이어야 한다")
+        parsed.append((target, {c: ["" if v is None else str(v) for v in vals] for c, vals in when.items()}))
+    return parsed
 
 
 def _v(expected, actual, message: str) -> Violation:

@@ -135,6 +135,19 @@ def allow() -> None:
     sys.exit(ALLOW)
 
 
+def allow_with_notice(notice: str) -> None:
+    """쓰기는 허용하되 경고를 Claude 에게 보여 준다(`pre_write_guard.py` 와 같다, #361)."""
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": notice,
+        }
+    }
+    json.dump(payload, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    sys.exit(0)
+
+
 def deny(reason: str) -> None:
     """쓰기를 막고 사유를 사람과 Claude 에게 보여준다.
 
@@ -241,7 +254,7 @@ def format_code_violations(report: dict) -> str:
         if entry.get("status") != "violation":
             continue
         for f in entry.get("findings", []):
-            if f.get("allowed"):
+            if f.get("allowed") or f.get("level") == "warn":  # 경고(CR-009)는 막는 이유가 아니다
                 continue
             lines.append(
                 f"  - [{f.get('rule')}] {entry.get('file')}:{f.get('line')}:{f.get('col')} {f.get('message')}"
@@ -250,6 +263,33 @@ def format_code_violations(report: dict) -> str:
             if fix:
                 lines.append(f"      고치기: {fix}")
     return "\n".join(lines)
+
+
+def format_code_warnings(report: dict) -> str:
+    """`level: warn` 발견(CR-009)을 안내문으로 바꾼다. 예외 처리된 것은 뺀다."""
+    lines = []
+    for entry in report.get("files", []):
+        for f in entry.get("findings", []):
+            if f.get("allowed") or f.get("level") != "warn":
+                continue
+            lines.append(
+                f"  - [{f.get('rule')}] {entry.get('file')}:{f.get('line')}:{f.get('col')} {f.get('message')}"
+            )
+            fix = f.get("fix")
+            if fix:
+                lines.append(f"      고치기: {fix}")
+    return "\n".join(lines)
+
+
+def _warning_notice(report: dict) -> str:
+    text = format_code_warnings(report)
+    if not text:
+        return ""
+    return (
+        "harness 경고(막지 않음): 공통 개발 규칙 경고가 있습니다(conventions/common.md).\n"
+        + text
+        + "\n의도한 것이면 `METHOD` 줄이나 바로 위 줄에 `harness:allow CR-009 <이유와 결정자>` 를 남기십시오."
+    )
 
 
 def _engine_command(staged: Path) -> list[str]:
@@ -294,6 +334,15 @@ def _check_code(url: str, content: str, suffix: str) -> None:
             )
 
     if done.returncode == 0:
+        try:
+            ok_report = json.loads(done.stdout)
+        except json.JSONDecodeError:
+            allow()
+        for entry in ok_report.get("files", []):
+            entry["file"] = url
+        notice = _warning_notice(ok_report)
+        if notice:
+            allow_with_notice(notice)
         allow()
 
     try:
@@ -320,6 +369,7 @@ def _check_code(url: str, content: str, suffix: str) -> None:
             + format_code_violations(report)
             + "\n\n다음: Claude 가 위 항목을 고쳐 다시 쓰십시오. 정말 예외라면 같은 줄이나 "
               "바로 위 줄에 주석으로 `harness:allow CR-00N <이유>` 를 남기고 다시 쓰십시오."
+            + (("\n\n" + _warning_notice(report)) if format_code_warnings(report) else "")
         )
 
     if done.returncode == 2:
@@ -372,7 +422,7 @@ def _filter_report_to_rules(report: dict, keep_rules: set[str]) -> bool:
     for entry in report.get("files", []):
         kept = [f for f in entry.get("findings", []) if f.get("rule") in keep_rules]
         entry["findings"] = kept
-        has_violation = any(not f.get("allowed") for f in kept)
+        has_violation = any(not f.get("allowed") and f.get("level") != "warn" for f in kept)
         entry["status"] = "violation" if has_violation else "pass"
         if has_violation:
             still_violation = True

@@ -860,8 +860,102 @@ def test_main_인자를_해석한다(monkeypatch):
 
 def test_기준_등록부는_이름이_겹치지_않는다():
     names = [n for n, _ in rg.CRITERIA]
-    assert names == ["size", "paths", "secret", "split_hint", "checks", "ai_review"]
+    assert names == ["size", "paths", "secret", "split_hint", "write_auth", "checks", "ai_review"]
     assert len(names) == len(set(names))
+
+
+# --- write_auth: 쓰기 앱인데 권한 검사 없음(#361) ----------------------------------------
+
+POOL_PATH = "src/zbp_x.clas.locals_imp.abap"
+POOL_ALLOW_ALL = (
+    "CLASS lhc DEFINITION INHERITING FROM cl_abap_behavior_handler.\n"
+    "  PRIVATE SECTION.\n"
+    "    METHODS get_global_authorizations FOR GLOBAL AUTHORIZATION\n"
+    "      IMPORTING REQUEST requested_authorizations FOR Upload RESULT result.\n"
+    "ENDCLASS.\n"
+    "CLASS lhc IMPLEMENTATION.\n"
+    "  METHOD get_global_authorizations.\n"
+    "    result-%create = if_abap_behv=>auth-allowed.\n"
+    "  ENDMETHOD.\n"
+    "ENDCLASS.\n"
+)
+POOL_WITH_CHECK = POOL_ALLOW_ALL.replace(
+    "    result-%create = if_abap_behv=>auth-allowed.\n",
+    "    AUTHORITY-CHECK OBJECT 'ZPLANT' ID 'ACTVT' FIELD '02'.\n"
+    "    IF sy-subrc = 0.\n      result-%create = if_abap_behv=>auth-allowed.\n    ENDIF.\n",
+)
+
+
+def _pool_client(text, *, config="", status="modified", path=POOL_PATH):
+    f = _file(path)
+    f["status"] = status
+    client = _client(config=config, files=[f])
+    if text is not None:
+        client.responses[f"repos/o/r/contents/{path}?ref={HEAD}"] = _b64(text)
+    return client
+
+
+def _auth_reasons(result):
+    return [r for r in result["reasons"] if "권한" in r]
+
+
+def test_권한_전부_허용만_하는_behavior_pool_은_위험으로_판정한다():
+    result = rg.decide_pr(_pool_client(POOL_ALLOW_ALL), "o/r", 5)
+    assert result["requires_approval"] is True
+    assert _auth_reasons(result) == [f"쓰기 앱인데 권한 검사 없음: {POOL_PATH}"]
+    assert "AUTHORITY-CHECK" in result["next"]
+
+
+def test_AUTHORITY_CHECK_가_있으면_사유_없음():
+    result = rg.decide_pr(_pool_client(POOL_WITH_CHECK), "o/r", 5)
+    assert _auth_reasons(result) == [] and result["requires_approval"] is False
+
+
+def test_harness_allow_CR_009_가_있으면_사유_없음():
+    text = POOL_ALLOW_ALL.replace(
+        "  METHOD get_global_authorizations.\n",
+        '  " harness:allow CR-009 표준 BO 가 검사한다(홍길동 2026-10-19)\n  METHOD get_global_authorizations.\n',
+    )
+    assert _auth_reasons(rg.decide_pr(_pool_client(text), "o/r", 5)) == []
+
+
+def test_지워진_파일과_abap_가_아닌_파일은_읽지_않는다():
+    client = _pool_client(None, status="removed")
+    assert _auth_reasons(rg.decide_pr(client, "o/r", 5)) == []
+    client = _pool_client(None, path="src/a.py")
+    assert _auth_reasons(rg.decide_pr(client, "o/r", 5)) == []
+    assert not any("contents/src" in p for p in client.asked)
+
+
+def test_abap_파일을_읽지_못하면_판정_불능_사유():
+    result = rg.decide_pr(_pool_client(None), "o/r", 5)
+    (reason,) = _auth_reasons(result)
+    assert "확인하지 못함" in reason and POOL_PATH in reason
+    assert result["requires_approval"] is True
+
+
+def test_권한_기준에_새_설정_키가_필요하지_않다():
+    # 옛 risk-gate.yaml 도 그대로 읽힌다: 모르는 키가 없어 판정 불능이 되지 않는다.
+    assert "write_auth" not in rg.DEFAULT_CONFIG
+    rg.decide_pr(_pool_client(POOL_ALLOW_ALL, config="max_changed_lines: 300\n"), "o/r", 5)
+
+
+def test_병합_뒤_감지의_사유에도_권한_줄이_찍힌다():
+    client = _commit_client(
+        prs=[{"number": 5, "merged_at": "2026-01-01", "html_url": "u"}],
+        files=[{**_file(POOL_PATH), "status": "modified"}],
+    )
+    client.responses[f"repos/o/r/contents/{POOL_PATH}?ref={HEAD}"] = _b64(POOL_ALLOW_ALL)
+    result = rg.decide_commit(client, "o/r", "m1")
+    assert result["approved"] is False
+    assert f"쓰기 앱인데 권한 검사 없음: {POOL_PATH}" in result["reasons"]
+
+
+def test_PR_없이_main_에_들어온_pool_도_권한_줄이_찍힌다():
+    client = _commit_client(prs=[], files=[{**_file(POOL_PATH), "status": "modified"}])
+    client.responses[f"repos/o/r/contents/{POOL_PATH}?ref=m1"] = _b64(POOL_ALLOW_ALL)
+    result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
+    assert f"쓰기 앱인데 권한 검사 없음: {POOL_PATH}" in result["reasons"]
 
 
 # --- precheck-pr(#125) ---------------------------------------------------------------
