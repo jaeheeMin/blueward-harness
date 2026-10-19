@@ -50,7 +50,7 @@ Actions 는 팀원 PC 에 설치된 플러그인을 쓸 수 없다. 엔진을 `p
   자세한 것은 [`plugins/harness/README.md`](plugins/harness/README.md).
 - **재사용 워크플로(`.github/workflows/`).** Project Repository 가 불러 쓴다. `doc-guard.yml`(문서·코드 검사),
   `ssot-approval.yml`(SRS 변경 승인), `risk-gate.yml`(위험한 PR 승인), `gitleaks.yml`(비밀정보),
-  `ai-review.yml`(위험한 PR 포함 모든 PR 의 AI 리뷰, 기본 꺼짐), `pr-tamper-alert.yml`(작성자가 아닌 계정의 push·리뷰 해제 알림), `ledger-complete.yml`(병합 뒤 진행 원장 완료 표시). `/harness:scaffold` 가 호출 쪽 파일을 만든다. `checker.yml`(테스트, plugin.json version 올림과 열린 PR 끼리 version 겹침 확인) 과
+  `ai-review.yml`(위험한 PR 포함 모든 PR 의 AI 리뷰, 기본 꺼짐. 새 줄에 비밀값 패턴이 보이면 diff 를 AI 에 보내지 않고 검사 불능으로 실패), `pr-tamper-alert.yml`(작성자가 아닌 계정의 push·리뷰 해제 알림), `ledger-complete.yml`(병합 뒤 진행 원장 완료 표시). `/harness:scaffold` 가 호출 쪽 파일을 만든다. `checker.yml`(테스트, plugin.json version 올림과 열린 PR 끼리 version 겹침 확인) 과
   `human-merge-alert.yml` 은 이 저장소 자신이 쓴다.
 - **양식 기반 문서.** 고객사 양식을 읽는 양식 지도(`templates/forms/*.yaml`) → `/harness:spec` 이 쓰는
   작업본(`## 양식 항목`) → 양식 xlsx 산출. 오피스 파일의 검사는 Actions 가 맡는다.

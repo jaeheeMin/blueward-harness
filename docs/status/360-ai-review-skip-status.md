@@ -15,7 +15,7 @@ public-cloud 의 위험 PR(#235 5619줄, #241)은 `risk_gate.py precheck-pr` 가
 - Claude 단계에 `timeout-minutes: 15`(job 20분보다 짧게). job timeout 이 먼저 오면 `always()` 단계가 돌지 못해 코멘트 없이 cancelled 로 끝난다. step timeout 이면 outcome 이 failure 라 결과 정리가 "검사 불능(시간 초과일 수 있음)" 을 코멘트로 남긴다. (job timeout 이면 `always()` 단계가 돌지 못할 수 있어 코멘트를 남기지 못한다 — risk-gate 가 cancelled·timed_out 으로 구분해 적는다.)
 - 취소된 run 이 코멘트를 덮어쓰지 않게 "PR 코멘트 갱신" 의 조건을 `always() && …` 에서 `!cancelled() && …` 로 바꿨다. `always()` 는 concurrency 취소 때도 단계를 돌릴 수 있어(실제로 돌았는지 Actions 에서 확인하지는 못했다), 낡은 run 의 "검사 불능" 이 새 run 의 코멘트를 덮을 위험이 있었다. 결과 정리·판정 단계는 파일과 종료코드만 다뤄 부작용이 없으므로 `always()` 그대로다.
 
-**코멘트 표식.** ai-review 코멘트 끝에 `<!-- ai-review-result {"sha","status","serious","findings"(serious 만 최대 5),"unreviewed"} -->` 를 붙인다(기존 `<!-- ai-review -->` 유지). status 는 pass|fail|partial|unavailable|skip. JSON 은 `ensure_ascii` 로 쓰고 `-->` 를 `-->` 로 이스케이프해 HTML 주석이 일찍 닫히지 않는다. job 요약에는 표식을 싣지 않는다. 위험 PR 이면 코멘트 맨 위에 "위험 PR - 승인자 Approve 도 필요합니다: 사유" 한 줄(precheck 의 `risky`·`reasons` 를 쓴다).
+**코멘트 표식.** ai-review 코멘트 끝에 `<!-- ai-review-result {"sha","status","serious","findings"(serious 만 최대 5),"unreviewed"} -->` 를 붙인다(기존 `<!-- ai-review -->` 유지). status 는 pass|fail|partial|unavailable|skip|secret(비밀값 의심, 아래 예외). JSON 은 `ensure_ascii` 로 쓰고 `-->` 를 `-->` 로 이스케이프해 HTML 주석이 일찍 닫히지 않는다. job 요약에는 표식을 싣지 않는다. 위험 PR 이면 코멘트 맨 위에 "위험 PR - 승인자 Approve 도 필요합니다: 사유" 한 줄(precheck 의 `risky`·`reasons` 를 쓴다).
 
 **risk-gate 가 결과를 구분(`ai_review_reasons`).** 최신 run(`filter=latest`)의 결론별:
 - success → 통과. 단 같은 head sha 의 표식이 pass 가 아니면(partial·fail·unavailable·skip) 보수적으로 사유를 올린다("검사 결론은 success 였으나 결과 코멘트가 다름"). 정상 흐름에서는 일어나지 않는 모순이라, 둘 중 어느 쪽이 맞는지 모르는 채 통과로 가리는 것보다 승인자가 보게 한다. 표식이 없거나 sha 가 다르거나 pass 면 통과(표식을 믿어 통과를 뒤집지는 않고, 코멘트는 누구나 쓸 수 있으므로 사유를 더하는 쪽으로만 쓴다).
@@ -36,9 +36,25 @@ public-cloud 의 위험 PR(#235 5619줄, #241)은 `risk_gate.py precheck-pr` 가
 
 **설정 키 그대로.** `risk-gate.yaml` 키를 바꾸지 않았다. public-cloud 는 caller(`ai-review.yml`·`risk-gate.yml`)나 `risk-gate.yaml` 을 바꿀 필요가 없다. `@stable` 로 재사용 워크플로와 엔진을 받으므로 0.10.86 이 stable 이 되면 따라온다. 옛 판의 `precheck-pr` 는 위험 PR 에 3을 냈지만 새 워크플로는 새 엔진과 함께 받으므로 어긋나지 않는다.
 
-**precheck.** 종료코드 3 은 설정 없음·`ai_review: false` 에만 쓴다. 위험하면 0 이고 `risky`·`reasons` 는 출력에 남는다. `size`·`paths`·`secret` 만 평가하는 것은 그대로(`checks`·`ai_review` 는 교착 방지로 뺀다).
+**precheck.** 종료코드 3 은 설정 없음·`ai_review: false` 에만 쓰고, 4 는 비밀값이 보인 PR(아래 예외)에만 쓴다. 그 밖에 위험하면 0 이고 `risky`·`reasons` 는 출력에 남는다. `size`·`paths`·`secret` 만 평가하는 것은 그대로(`checks`·`ai_review` 는 교착 방지로 뺀다).
 
 **`skip` 은 여전히 성공.** 설정 없음·꺼짐뿐이고 그때 risk-gate 의 `ai_review` 기준도 평가되지 않는다(둘 다 base 의 같은 설정을 읽는다). 그래서 이 skip 은 "검사를 못 함" 이 아니라 "검사 대상이 아님" 이다.
+
+## 예외: 비밀값이 보이는 PR 은 리뷰를 돌리지 않는다 (사용자, A안)
+
+위험한 PR 도 리뷰하되, **새로 들어온 줄에 비밀값 패턴(`SECRET_PATTERNS`)이 실제로 보인 PR 만** AI 리뷰를 돌리지 않는다. 이유: 진짜 키·토큰이 들어 있는 diff 가 외부 API(Claude)로 나가지 않게 하기 위해서다. 돌리지 않는 대신 통과로 보이지 않게 `ai-review` 를 실패(빨간불)시키고 "검사 불능 - 비밀값으로 보이는 문자열이 있어 AI 에 보내지 않음(<패턴 이름들>), 승인자가 직접 확인" 이라고 밝힌다. **값**은 어디에도 남지 않는다(`secret_reasons` 의 사유는 패턴 이름과 `파일:줄` 만 담는다). 위치(파일:줄)는 risk-gate 사유처럼 precheck JSON 의 `reasons` 로 job 로그(`cat precheck.json`)에 남는다(승인자가 위치를 알아야 하므로 그대로 둔다). ai-review 코멘트·표식에는 패턴 이름만 적는다.
+
+- **`unscanned`(변경이 너무 커서 비밀값 검사를 못 한 파일)는 이 예외에 넣지 않았다.** 큰 PR 이 이번 이슈의 핵심이라 계속 리뷰해야 한다. 검사를 못 한 것은 "비밀값이 보였다" 가 아니다. 그래서 `precheck_pr` 출력에 `secret_found`(bool)·`secret_patterns`(이름 목록)를 두고, `_crit_secret` 의 사유와 별도로 `secret_pattern_names(added_lines(...))` 로 계산한다(`secret_scan: false` 면 항상 false).
+- **한계: 너무 커서 patch 가 없는 파일(unscanned)은 비밀값 검사를 못 했으므로 그 안의 비밀값은 AI 리뷰로 나갈 수 있다.** 검사하지 못한 것을 "비밀값 없음" 으로 보지 않지만, 보내지 않을 근거도 없어 계속 리뷰하기로 한 대가다.
+- **새 워크플로 + 옛 엔진.** 종료코드 0 인데 precheck JSON 에 `secret_found` 키가 없으면(`engine-ref` 가 옛 판) 사전 판정 단계가 `exit-code` 출력을 2(판정 불능)로 바꿔 Claude 단계를 돌리지 않고 "검사 불능 — 엔진이 비밀값 확인 결과를 내지 않음" 으로 실패시킨다. 비밀값 확인 없이 diff 가 나가는 것을 막기 위해서다.
+- **구분 방법: 새 종료코드 4(`EXIT_SECRET`)를 골랐다.** `secret_found` 필드만 두고 0 을 유지하면 옛 워크플로가 필드를 모른 채 리뷰를 돌려 비밀값 diff 가 AI 로 나간다. 종료코드 4 는 옛 워크플로가 "0 도 3 도 아님 = 판정 불능" 으로 읽어 토큰·Claude 단계를 건너뛰고 검사 불능으로 실패하므로 실패 쪽으로 안전하다(재사용 워크플로와 엔진은 둘 다 `@stable`/`engine-ref: stable` 이라 같은 태그로 같이 움직이지만, 어긋나도 안전하다). 필드(`secret_found`, `secret_patterns`)도 함께 둬 새 워크플로가 이름을 읽고 테스트가 구분을 본다.
+- **상태 이름: `secret` 을 새로 뒀다.** `unavailable` 재사용도 가능했지만 표식 status 만으로 risk-gate 가 사유를 "비밀값 의심이라 AI 리뷰를 돌리지 않음(diff 를 외부 AI 에 보내지 않기 위해) — 승인자가 직접 확인" 으로 적을 수 있고, 시크릿 토큰 누락·Claude 실패 같은 "서비스를 못 돌림" 과 "의도적으로 안 보냄" 이 갈린다. 옛 risk-gate 엔진이 `secret` 표식을 만나면 `_marker_reason` 이 None 이라 일반 문구로 간다(판정은 그대로 실패).
+- 워크플로: `pre` 단계 종료코드가 4 이면 `token`/`PR head`/`claude` 단계는 `exit-code == '0'` 조건이라 돌지 않는다. 결과 정리가 `secret` 상태로 코멘트를 만들고(skip 과 달리 코멘트를 만든다), 판정 단계가 `exit 1`.
+- 코멘트는 이 경우 "위험 PR" 줄을 덧붙이지 않는다(사유 줄에 파일:줄이 들어 있어 퍼뜨리지 않으려는 뜻).
+
+## 길잡이에 빠졌던 것 보충
+
+`docs/guide/harness-guide.html` 에 앞선 수정이 반영 안 된 두 가지를 더했다: 리뷰 결과는 `github-actions` 봇 코멘트만 읽는다, 큰 PR 에서 AI 의 "전체를 봤다(coverage full)" 는 자기 신고라 확인되지 않는다.
 
 ## 바뀐 파일
 

@@ -56,15 +56,20 @@
 일수록 AI 가 한 번이라도 보는 안전망이 필요하다. 위험 PR 은 AI 리뷰에 더해 승인자 Approve 도
 필요하다(승인 판정은 그대로). `ai-review.yml` 이 리뷰를 돌리기 전에 이 하위 명령으로 설정을 확인하고,
 base 의 기준 가운데 `size`·`paths`·`secret` 을 평가해 `risky`·`reasons` 로 출력한다(코멘트에
-"위험 PR" 안내를 적는 데 쓴다. 리뷰를 막지 않는다). `checks`·`ai_review` 는 뺀다 — `checks` 는 이 AI
-리뷰 자신을 기다리는 교착을 만들고, `ai_review` 는 이 리뷰의 결과를 읽는 기준이기 때문이다.
-종료코드: 0 AI 리뷰를 돌려도 됨(설정이 있고 `ai_review: true`; 위험 여부와 무관), 3 돌리지
-않음(설정 없음, `ai_review: false` — 사유를 출력), 2 판정 불가. 1 은 쓰지 않는다.
+"위험 PR" 안내를 적는 데 쓴다. 크기·경로 위험은 리뷰를 막지 않는다). `checks`·`ai_review` 는 뺀다 —
+`checks` 는 이 AI 리뷰 자신을 기다리는 교착을 만들고, `ai_review` 는 이 리뷰의 결과를 읽는 기준이기 때문이다.
+**유일한 예외는 비밀값이다.** 새로 들어온 줄에 `SECRET_PATTERNS` 가 실제로 보이면(`secret_found`, 패턴 이름은
+`secret_patterns`) diff 를 외부 AI 에 보내지 않도록 리뷰를 돌리지 않는다. 대신 `ai-review` 검사를 실패시켜
+통과로 보이지 않게 하고, "검사 불능 — 승인자가 직접 확인" 이라고 밝힌다. "변경이 너무 커서 비밀값 검사를 못 함"
+(`unscanned_files`)은 여기에 넣지 않는다 — 큰 PR 은 계속 리뷰한다.
+종료코드: 0 AI 리뷰를 돌려도 됨(설정이 있고 `ai_review: true`; 크기·경로 위험과 무관), 3 돌리지
+않음(설정 없음, `ai_review: false` — 사유를 출력), 4 비밀값이 보여 돌리지 않음(실패 처리), 2 판정 불가.
+1 은 쓰지 않는다. 4 는 새 코드라 옛 워크플로는 "판정 불능"(2 와 같은 쪽)으로 읽고 역시 리뷰를 돌리지 않는다.
 
 **AI 리뷰 결과 읽기(`ai_review_reasons`, #360).** `ai-review` check run 의 결론을 구분해 사유를
 적는다 — success 는 통과, failure 는 같은 head sha 의 PR 코멘트 표식
 (`<!-- ai-review-result {...} -->`)을 읽어 심각한 지적·일부만 봄·검사 불능을 가르고(표식이 없거나
-sha 가 다르면 일반 문구), cancelled·timed_out·skipped·neutral 은 "검사하지 못함" 이다. 표식을 못 읽어도
+sha 가 다르면 일반 문구; 비밀값 의심으로 리뷰를 건너뛴 표식 `secret` 은 "승인자가 직접 확인"), cancelled·timed_out·skipped·neutral 은 "검사하지 못함" 이다. 표식을 못 읽어도
 (코멘트 조회 실패 포함) 판정 불능으로 뭉개지 않고 일반 문구로 둔다. 다른 검사(`checks`)의 `_run_state` 는 그대로다.
 """
 from __future__ import annotations
@@ -215,7 +220,7 @@ def path_reasons(files: list[str], prefixes: list[str]) -> list[str]:
     return [f"위험 경로를 바꿈: {shown}{more}"]
 
 
-# 비밀값 패턴. 이름만 보고되고 값은 어디에도 남지 않는다.
+# 비밀값 패턴. 값은 어디에도 남지 않고 패턴 이름과 위치(파일:줄)만 보고된다.
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("비공개 키 블록", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
     ("AWS 액세스 키 ID", re.compile(r"AKIA[0-9A-Z]{16}")),
@@ -282,6 +287,14 @@ def secret_reasons(lines: list[tuple[str, int, str]]) -> list[str]:
         more = f" 등 {len(places)}곳" if len(places) > _MAX_LISTED else ""
         reasons.append(f"비밀값으로 보이는 줄이 추가됨({label}): {shown}{more}")
     return reasons
+
+
+def secret_pattern_names(lines: list[tuple[str, int, str]]) -> list[str]:
+    """추가된 줄에서 보인 비밀값 패턴의 이름만(중복 없이 패턴 정의 순서로). 값·위치는 돌려주지 않는다.
+
+    ai-review 코멘트·표식에 쓰인다. 위치(파일:줄)는 `secret_reasons` 사유로 job 로그에 따로 남는다.
+    """
+    return [label for label, pattern in SECRET_PATTERNS if any(pattern.search(text) for _n, _l, text in lines)]
 
 
 def unscanned_files(files: list[dict]) -> list[str]:
@@ -419,6 +432,8 @@ def _marker_reason(marker: dict) -> str | None:
         return f"AI 리뷰가 일부만 봄({left}) — 승인자가 나머지를 확인"
     if status == "unavailable":
         return "AI 리뷰 검사 불능 — 이 PR 의 코드 문제가 아니라 AI 리뷰를 돌리지 못함, ai-review 결과 코멘트를 확인하고 다시 실행"
+    if status == "secret":
+        return "비밀값 의심이라 AI 리뷰를 돌리지 않음(diff 를 외부 AI 에 보내지 않기 위해) — 승인자가 직접 확인"
     if status == "skip":
         return "AI 리뷰가 돌지 않음(표식 skip) — 검사하지 못함"
     return None
@@ -1102,6 +1117,7 @@ def decide_pr_waiting(
 PRECHECK_CRITERIA = frozenset({"size", "paths", "secret"})
 
 EXIT_SKIP = 3  # precheck-pr: AI 리뷰를 돌리지 않는다(설정 없음·꺼짐). 위험한 PR 도 돌린다(#360)
+EXIT_SECRET = 4  # precheck-pr: 새 줄에 비밀값 패턴이 보여 diff 를 AI 에 보내지 않는다(#360)
 
 
 def precheck_pr(client: GhClient, repo: str, pr: int) -> dict:
@@ -1131,6 +1147,10 @@ def precheck_pr(client: GhClient, repo: str, pr: int) -> dict:
     for name, fn in CRITERIA:
         if name in PRECHECK_CRITERIA:
             findings.extend(fn(ctx))
+    # 비밀값 패턴이 새 줄에서 실제로 보였는지. `_crit_secret` 의 "너무 커서 검사 못 함"(unscanned)은 여기에 넣지
+    # 않는다 — 큰 PR 은 계속 리뷰한다(그 파일 안의 비밀값은 AI 리뷰로 나갈 수 있다). secret_patterns 는 패턴 이름만
+    # 담는다. 위치(파일:줄)는 `reasons` 에 있다.
+    patterns = secret_pattern_names(added_lines(ctx.files)) if cfg["secret_scan"] else []
     return {
         "enabled": True,
         "gate": True,
@@ -1138,6 +1158,8 @@ def precheck_pr(client: GhClient, repo: str, pr: int) -> dict:
         "reasons": [f.message for f in findings],
         # 사유를 낸 기준 이름(size·paths·secret). 워크플로가 사유 문자열 대신 이걸로 크기 위험을 구분한다.
         "criteria": list(dict.fromkeys(f.criterion for f in findings)),
+        "secret_found": bool(patterns),
+        "secret_patterns": patterns,
     }
 
 
@@ -1328,7 +1350,11 @@ def cmd_precheck_pr(args: argparse.Namespace) -> int:
         _print({"enabled": None, "gate": None, "risky": None, "reasons": [reason]})
         return EXIT_UNKNOWN
     _print(result)
-    return EXIT_OK if result["enabled"] else EXIT_SKIP
+    if not result["enabled"]:
+        return EXIT_SKIP
+    # 비밀값이 보이면 diff 를 외부 AI 에 보내지 않도록 리뷰를 멈춘다. 옛 워크플로는 이 코드를 모르고 "판정 불능" 으로
+    # 읽어 역시 리뷰를 돌리지 않는다(실패 쪽으로 안전하다).
+    return EXIT_SECRET if result.get("secret_found") else EXIT_OK
 
 
 def cmd_check_commit(args: argparse.Namespace) -> int:

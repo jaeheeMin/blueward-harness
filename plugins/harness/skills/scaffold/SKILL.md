@@ -66,7 +66,8 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
      **기본은 꺼짐**이라 아무것도 하지 않는다. 켜려면 (1) `claude setup-token` 으로 만든 토큰을
      `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 (2)
      `.github/risk-gate.yaml` 의 `ai_review` 를 `true` 로 바꾼다. 켰는데 시크릿이 없으면
-     통과가 아니라 검사 불능으로 실패하니 사용자에게 두 단계를 함께 안내한다.
+     통과가 아니라 검사 불능으로 실패하니 사용자에게 두 단계를 함께 안내한다. 새 줄에 비밀값 패턴이 보이는
+     PR 은 diff 를 외부 AI 에 보내지 않으려고 리뷰를 돌리지 않고 "검사 불능 - 비밀값 의심" 으로 실패한다.
    - `.github/workflows/gitleaks.yml` 은 PR·main 커밋마다 비밀정보(CR-004)를 gitleaks 로 검사한다(#159).
      PR 이 더한 커밋만 훑고 값은 가려서 출력한다. 저장소 꼭대기에 `.gitleaks.toml` 이 없으면 하네스 기본
      설정(gitleaks 기본 규칙 + SAP 쿠키·비밀번호 규칙)을 쓴다. 오탐을 허용 목록에 올리려고 `.gitleaks.toml` 을

@@ -284,6 +284,12 @@ def test_ai_review_failure_일부만_봄과_검사_불능():
     assert flagged[0].startswith("AI 리뷰 검사 불능 —")
 
 
+def test_ai_review_failure_비밀값_의심으로_건너뛴_표식():
+    flagged, waiting = _reasons("failure", [_ai_comment("secret")])
+    assert waiting == [] and len(flagged) == 1
+    assert "비밀값 의심이라 AI 리뷰를 돌리지 않음" in flagged[0] and "승인자가 직접 확인" in flagged[0]
+
+
 def test_ai_review_failure_표식이_없거나_sha_가_다르면_일반_문구():
     for comments in ([], [{"body": "그냥 코멘트"}], [_ai_comment("fail", sha="b" * 40, serious=1)],
                      [{"body": "<!-- ai-review -->\n<!-- ai-review-result {깨짐 -->"}]):
@@ -1122,7 +1128,8 @@ def test_precheck_ai_review_가_꺼져_있으면_돌리지_않는다():
 
 def test_precheck_위험하지_않으면_돌려도_된다():
     result = rg.precheck_pr(_client(config="ai_review: true\n"), "o/r", 5)
-    assert result == {"enabled": True, "gate": True, "risky": False, "reasons": [], "criteria": []}
+    assert result == {"enabled": True, "gate": True, "risky": False, "reasons": [], "criteria": [],
+                      "secret_found": False, "secret_patterns": []}
 
 
 @pytest.mark.parametrize(
@@ -1133,11 +1140,32 @@ def test_precheck_위험하지_않으면_돌려도_된다():
         ([_file("a.py", 1, 0, patch=_patch(AWS_KEY))], ["secret"]),
     ],
 )
-def test_precheck_크기_경로_비밀값이_위험이어도_리뷰는_돌린다(files, criteria):
+def test_precheck_크기_경로_비밀값이_위험이어도_enabled_는_true(files, criteria):
     result = rg.precheck_pr(_client(config="ai_review: true\n", files=files), "o/r", 5)
     # 위험 여부와 사유는 코멘트 안내용으로 남기되 enabled 는 true 다(#360). 기준 이름도 출력한다.
     assert result["enabled"] is True and result["risky"] is True and result["reasons"]
     assert result["criteria"] == criteria
+
+
+def test_precheck_새_줄에_비밀값_패턴이_보이면_secret_found_와_패턴_이름만_낸다():
+    files = [_file("a.py", 1, 0, patch=_patch(AWS_KEY))]
+    result = rg.precheck_pr(_client(config="ai_review: true\n", files=files), "o/r", 5)
+    assert result["secret_found"] is True and result["secret_patterns"] == ["AWS 액세스 키 ID"]
+    assert AWS_KEY not in json.dumps(result, ensure_ascii=False)  # 값은 어디에도 남지 않는다
+
+
+def test_precheck_크기만_커서_비밀값_검사를_못_한_파일은_secret_found_가_아니다():
+    # patch 가 없는 큰 파일: `_crit_secret` 은 "검사 못 함" 사유를 내지만 비밀값이 보인 것은 아니다 — 리뷰는 계속 돈다.
+    files = [_file("big.py", 5000, 0, patch=None)]
+    result = rg.precheck_pr(_client(config="ai_review: true\n", files=files), "o/r", 5)
+    assert result["risky"] is True and "secret" in result["criteria"]
+    assert result["secret_found"] is False and result["secret_patterns"] == []
+
+
+def test_precheck_secret_scan_이_꺼져_있으면_secret_found_가_아니다():
+    files = [_file("a.py", 1, 0, patch=_patch(AWS_KEY))]
+    result = rg.precheck_pr(_client(config="ai_review: true\nsecret_scan: false\n", files=files), "o/r", 5)
+    assert result["secret_found"] is False
 
 
 def test_precheck_는_checks_와_ai_review_기준을_평가하지_않는다():
@@ -1159,6 +1187,10 @@ def test_cmd_precheck_pr_종료코드(monkeypatch, capsys):
         ({"enabled": True, "gate": True, "risky": True, "reasons": ["x"]}, 0),
         ({"enabled": False, "gate": True, "risky": False, "reasons": ["꺼짐"]}, 3),
         ({"enabled": False, "gate": False, "risky": False, "reasons": ["없음"]}, 3),
+        ({"enabled": True, "gate": True, "risky": True, "reasons": ["x"], "secret_found": True,
+          "secret_patterns": ["AWS 액세스 키 ID"]}, 4),
+        ({"enabled": True, "gate": True, "risky": True, "reasons": ["x"], "secret_found": False,
+          "secret_patterns": []}, 0),
     ]:
         monkeypatch.setattr(rg, "precheck_pr", lambda *a, _r=result: _r)
         assert rg.cmd_precheck_pr(_PreArgs()) == code

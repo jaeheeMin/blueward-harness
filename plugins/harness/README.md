@@ -316,6 +316,10 @@ Project Repository 의 CLAUDE.md 에 짧게 적어 둬야 세션이 매번 상�
 `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 `.github/risk-gate.yaml`
 의 `ai_review` 를 `true` 로 바꾼다. 심각한 지적이 나오거나 큰 PR 을 일부만 봤으면 `ai-review`
 검사가 실패해 risk gate 가 "승인 필요" 로 판정한다(위험한 PR 은 AI 리뷰에 더해 승인자 Approve 도 필요).
+단 새로 들어온 줄에 비밀값 패턴이 보이면 diff 를 외부 AI 에 보내지 않으려고 리뷰를 돌리지 않고, `ai-review`
+를 "검사 불능 - 비밀값 의심" 으로 실패시킨다(**값**은 어디에도 남지 않는다. 위치(파일:줄)는 risk-gate 사유처럼 job 로그에 남고 코멘트·표식에는 패턴 이름만
+적는다. 승인자가 직접 확인). 변경이 너무 커서 비밀값 검사를 못 한 경우는 이 예외가 아니라 리뷰가 그대로 돈다
+(그 파일 안의 비밀값은 AI 리뷰로 나갈 수 있다). 엔진이 옛 판이라 비밀값 확인 결과를 내지 않으면 검사 불능으로 실패한다.
 `.claude/settings.json` 도 함께 만들어, 이 저장소 폴더를 여는 팀원이 별도
 설치 없이 blueward-harness 마켓플레이스와 harness Plugin 설치 안내를 받게
 한다(#89) — 이미 그 파일이 있으면 통째로 덮어쓰지 않고 없는 두 항목만
