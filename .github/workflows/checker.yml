@@ -9,6 +9,10 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   test:
     strategy:
@@ -58,3 +62,13 @@ jobs:
         if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'
         shell: bash
         run: uv run python scripts/check_plugin_version.py --base "${{ github.event.pull_request.base.sha }}"
+
+      # 같은 version 으로 올린 열린 PR 이 또 있으면 경고한다(#324). 먼저 병합되는 쪽이 v{version} 태그를
+      # 가져가고 다른 쪽은 배포되지 못한다. 막지 않는다. 열린 PR 목록을 못 읽으면 검사 불능(빨간 불)이고,
+      # 다른 PR 한 건만 못 읽으면 그 PR 만 건너뛰며 경고한다. 이 PR 이 version 을 안 올렸으면 네트워크를 쓰지 않는다. 이 저장소 전용 스텝이라 고객사 PR 검사엔 닿지 않는다.
+      - name: 열린 PR 끼리 plugin version 겹침 확인
+        if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uv run python scripts/check_plugin_version_overlap.py "${{ github.event.pull_request.number }}" "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.base.ref }}"
