@@ -76,11 +76,22 @@ Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험�
 **blueward-harness 저장소 자신은 승인자가 한 명뿐이라 아직 이 파일을 두지 않아 게이트가
 꺼져 있다.**
 
-`ai_review` 는 기본 `false` 다. 켜면 위험도가 낮은 PR 에만 Claude AI 리뷰(`ai-review` 검사,
-`.github/workflows/ai-review.yml`)가 돌고, 심각한 지적이 나오거나 AI 리뷰를 돌리지 못하면(검사
-불능) 그 검사가 실패해 PR 이 위험으로 판정된다. 켜려면 `claude setup-token` 으로 만든 토큰을
-`gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 `ai_review` 를 `true` 로
-바꾼다. 시크릿이 없으면 통과가 아니라 검사 불능이다.
+`ai_review` 는 기본 `false` 다. 켜면 **위험한 PR 을 포함한 모든 PR** 에 Claude AI 리뷰(`ai-review`
+검사, `.github/workflows/ai-review.yml`)가 돈다. 위험한 PR 은 AI 리뷰에 더해 승인자 Approve 도
+필요하다(승인 판정은 그대로). 심각한 지적이 나오거나, 큰 PR 이라 일부만 봤거나, AI 리뷰를 돌리지
+못하면(검사 불능·취소·시간 초과) 그 검사가 실패해 PR 이 위험으로 판정되고, risk-gate 사유가 이
+경우들을 나눠 적는다(심각한 지적은 파일:줄과 요약까지). 켜려면 `claude setup-token` 으로 만든
+토큰을 `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 `ai_review` 를 `true`
+로 바꾼다. 시크릿이 없으면 통과가 아니라 검사 불능이다.
+
+단 **새로 들어온 줄에 비밀값 패턴이 실제로 보이는 PR 은 AI 리뷰를 돌리지 않는다** — diff 를 외부
+AI 에 보내지 않기 위해서다. 대신 `ai-review` 를 "검사 불능 - 비밀값 의심" 으로 실패시켜 통과로 보이지
+않게 하고, 승인자가 직접 확인한다. **값**은 어디에도 남지 않는다. 위치(파일:줄)는 risk-gate 사유처럼 job
+로그에 남고, ai-review 코멘트·표식에는 패턴 이름만 적는다.
+"변경이 너무 커서 비밀값 검사를 못 함" 은 이 예외가 아니다 — 큰 PR 은 계속 리뷰한다. 한계: 너무 커서 patch 가
+없는 파일(unscanned)은 비밀값 검사를 못 했으므로 그 안의 비밀값은 AI 리뷰로 나갈 수 있다.
+엔진이 옛 판이라 비밀값 확인 결과(`secret_found`)를 내지 않으면 리뷰를 돌리지 않고 "검사 불능" 으로 실패한다.
+리뷰 결과는 `github-actions` 봇이 쓴 코멘트만 읽고, 큰 PR 의 "전체를 봤다" 는 AI 가 스스로 적은 말이라 확인되지 않는다.
 
 ## 스킬 없이 직접 해도 되는 것
 

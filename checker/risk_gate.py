@@ -29,9 +29,9 @@
               들어오는 것을 승인자가 보게 한다. 설정 키가 없다: 게이트가 켜져 있으면 항상 본다(옛 설정
               파일이 모르는 키로 판정 불능이 되지 않게). 파일을 못 읽으면 판정 불능 사유다.
 - `ai_review` 설정에서 켠 때만 본다. 이름이 `ai-review` 인 check run 의 결론을 읽는다
-              (success 면 통과, 그 밖의 결론이면 실패). 그 check run 은 재사용 워크플로
-              `ai-review.yml`(#125)이 만든다. 실패는 "심각한 지적" 일 수도, "AI 리뷰를 못 돌린
-              검사 불능" 일 수도 있어 사유가 둘을 뭉개지 않고 PR 코멘트를 보라고 안내한다.
+              (success 면 통과, 그 밖의 결론이면 결론별 사유 — `ai_review_reasons`). 그 check run 은
+              재사용 워크플로 `ai-review.yml`(#125)이 만든다. 심각한 지적, 일부만 봄, 검사 불능,
+              취소, 시간 초과, 돌지 않음을 뭉개지 않고 나눠 적는다(#360).
               없거나 끝나지 않았으면 대기로 본다.
 
 위험한 PR 은 승인자 목록(`approvers_file`, 기본 `.github/ssot-approvers`)에서 **그 PR 작성자에게
@@ -52,12 +52,25 @@
 주면 사유가 "다른 검사가 아직 진행 중" 뿐일 때 그 검사가 끝날 때까지 정해진 시간 안에서
 기다렸다가 다시 판정한다. 그래서 검사 순서 때문에 게이트가 헛되이 빨간불이 되지 않는다.
 
-**AI 리뷰 사전 판정(`precheck-pr`, #125).** AI 리뷰는 위험도가 낮은 PR 에만 돌린다(위험한 PR
-은 어차피 사람이 본다). `ai-review.yml` 이 리뷰를 돌리기 전에 이 하위 명령으로 base 의 기준
-가운데 `size`·`paths`·`secret` 만 평가한다. `checks`·`ai_review` 는 뺀다 — `checks` 는 이 AI
-리뷰 자신을 기다리는 교착을 만들고, `ai_review` 는 이 리뷰의 결과를 읽는 기준이기 때문이다.
-종료코드: 0 AI 리뷰를 돌려도 됨(설정이 있고 `ai_review: true` 이며 위험하지 않음), 3 돌리지
-않음(설정 없음, `ai_review: false`, 이미 위험함 — 사유를 출력), 2 판정 불가. 1 은 쓰지 않는다.
+**AI 리뷰 사전 판정(`precheck-pr`, #125, #360).** AI 리뷰는 위험한 PR 에도 돌린다 — 위험한 PR
+일수록 AI 가 한 번이라도 보는 안전망이 필요하다. 위험 PR 은 AI 리뷰에 더해 승인자 Approve 도
+필요하다(승인 판정은 그대로). `ai-review.yml` 이 리뷰를 돌리기 전에 이 하위 명령으로 설정을 확인하고,
+base 의 기준 가운데 `size`·`paths`·`secret` 을 평가해 `risky`·`reasons` 로 출력한다(코멘트에
+"위험 PR" 안내를 적는 데 쓴다. 크기·경로 위험은 리뷰를 막지 않는다). `checks`·`ai_review` 는 뺀다 —
+`checks` 는 이 AI 리뷰 자신을 기다리는 교착을 만들고, `ai_review` 는 이 리뷰의 결과를 읽는 기준이기 때문이다.
+**유일한 예외는 비밀값이다.** 새로 들어온 줄에 `SECRET_PATTERNS` 가 실제로 보이면(`secret_found`, 패턴 이름은
+`secret_patterns`) diff 를 외부 AI 에 보내지 않도록 리뷰를 돌리지 않는다. 대신 `ai-review` 검사를 실패시켜
+통과로 보이지 않게 하고, "검사 불능 — 승인자가 직접 확인" 이라고 밝힌다. "변경이 너무 커서 비밀값 검사를 못 함"
+(`unscanned_files`)은 여기에 넣지 않는다 — 큰 PR 은 계속 리뷰한다.
+종료코드: 0 AI 리뷰를 돌려도 됨(설정이 있고 `ai_review: true`; 크기·경로 위험과 무관), 3 돌리지
+않음(설정 없음, `ai_review: false` — 사유를 출력), 4 비밀값이 보여 돌리지 않음(실패 처리), 2 판정 불가.
+1 은 쓰지 않는다. 4 는 새 코드라 옛 워크플로는 "판정 불능"(2 와 같은 쪽)으로 읽고 역시 리뷰를 돌리지 않는다.
+
+**AI 리뷰 결과 읽기(`ai_review_reasons`, #360).** `ai-review` check run 의 결론을 구분해 사유를
+적는다 — success 는 통과, failure 는 같은 head sha 의 PR 코멘트 표식
+(`<!-- ai-review-result {...} -->`)을 읽어 심각한 지적·일부만 봄·검사 불능을 가르고(표식이 없거나
+sha 가 다르면 일반 문구; 비밀값 의심으로 리뷰를 건너뛴 표식 `secret` 은 "승인자가 직접 확인"), cancelled·timed_out·skipped·neutral 은 "검사하지 못함" 이다. 표식을 못 읽어도
+(코멘트 조회 실패 포함) 판정 불능으로 뭉개지 않고 일반 문구로 둔다. 다른 검사(`checks`)의 `_run_state` 는 그대로다.
 """
 from __future__ import annotations
 
@@ -207,7 +220,7 @@ def path_reasons(files: list[str], prefixes: list[str]) -> list[str]:
     return [f"위험 경로를 바꿈: {shown}{more}"]
 
 
-# 비밀값 패턴. 이름만 보고되고 값은 어디에도 남지 않는다.
+# 비밀값 패턴. 값은 어디에도 남지 않고 패턴 이름과 위치(파일:줄)만 보고된다.
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("비공개 키 블록", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
     ("AWS 액세스 키 ID", re.compile(r"AKIA[0-9A-Z]{16}")),
@@ -276,6 +289,14 @@ def secret_reasons(lines: list[tuple[str, int, str]]) -> list[str]:
     return reasons
 
 
+def secret_pattern_names(lines: list[tuple[str, int, str]]) -> list[str]:
+    """추가된 줄에서 보인 비밀값 패턴의 이름만(중복 없이 패턴 정의 순서로). 값·위치는 돌려주지 않는다.
+
+    ai-review 코멘트·표식에 쓰인다. 위치(파일:줄)는 `secret_reasons` 사유로 job 로그에 따로 남는다.
+    """
+    return [label for label, pattern in SECRET_PATTERNS if any(pattern.search(text) for _n, _l, text in lines)]
+
+
 def unscanned_files(files: list[dict]) -> list[str]:
     """바뀐 줄이 있는데 patch 가 없어(너무 큰 diff) 비밀값 검사를 못 한 파일."""
     return [
@@ -332,15 +353,147 @@ def checks_reasons(check_runs: list[dict], skip_ai_review: bool = False) -> tupl
     return fail_reasons, wait_reasons
 
 
-def ai_review_reasons(check_runs: list[dict]) -> tuple[list[str], list[str]]:
-    """`ai-review` check run 을 읽어 (지적 사유, 대기 사유) 를 돌려준다."""
+AI_REVIEW_RESULT_MARKER = re.compile(r"<!--\s*ai-review-result\s+(\{.*?\})\s*-->", re.DOTALL)
+AI_REVIEW_COMMENT_MARKER = "<!-- ai-review -->"
+_AI_SUMMARY_LIMIT = 100  # 사유에 인용하는 AI 지적 요약의 최대 길이
+_AI_FINDINGS_SHOWN = 3
+_AI_GENERIC_FAIL = "AI 리뷰 검사가 실패함(심각한 지적 또는 AI 리뷰 검사 불능 — ai-review 결과 코멘트를 확인)"
+
+
+AI_REVIEW_COMMENT_AUTHOR = "github-actions[bot]"
+_AI_FILE_LIMIT = 200  # 사유에 인용하는 파일 경로의 최대 길이
+
+
+def _is_ai_review_author(comment: dict) -> bool:
+    """ai-review 코멘트를 쓴 계정인지. 워크플로가 `github.token` 으로 쓰므로 github-actions 봇이다.
+
+    `type == "Bot"` 만으로는 어떤 GitHub App 이든 통과해서 login 도 함께 본다. 누구나 PR 에 코멘트를 쓸 수
+    있으므로, 사람이 쓴 가짜 표식이 사유(와 `build_next` 안내)에 섞이지 않게 막는다.
+    """
+    user = comment.get("user")
+    return isinstance(user, dict) and user.get("type") == "Bot" and user.get("login") == AI_REVIEW_COMMENT_AUTHOR
+
+
+def _defuse(text: object, limit: int) -> str:
+    """사유에 넣을 외부 문자열: 한 줄로 줄이고 길이를 자르고 `@` 멘션을 무력화한다."""
+    text = " ".join(str(text).split()).replace("@", "@​")
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def parse_ai_review_marker(comments: list[dict], head_sha: str) -> dict | None:
+    """PR 코멘트에서 `head_sha` 와 같은 sha 의 ai-review 결과 표식을 찾아 돌려준다. 없으면 None.
+
+    봇(`github-actions[bot]`)이 쓴 ai-review 코멘트(마커 `<!-- ai-review -->`)의 표식만 읽는다. 코멘트
+    하나에 표식 모양이 여럿이면 마지막 것을 쓴다(진짜 표식은 항상 본문 맨 끝에 붙는다). 코멘트가 여럿이면
+    마지막 코멘트의 것을 쓴다. 표식의 JSON 이 깨졌거나 sha 가 다르면(낡은 결과) 없는 것으로 본다.
+    """
+    found = None
+    for c in comments:
+        if not isinstance(c, dict) or not _is_ai_review_author(c):
+            continue
+        body = c.get("body") or ""
+        if AI_REVIEW_COMMENT_MARKER not in body:
+            continue
+        matches = AI_REVIEW_RESULT_MARKER.findall(body)
+        if not matches:
+            continue
+        try:
+            data = json.loads(matches[-1])
+        except ValueError:
+            continue
+        if isinstance(data, dict) and head_sha and data.get("sha") == head_sha:
+            found = data
+    return found
+
+
+def _marker_reason(marker: dict) -> str | None:
+    """표식 하나를 사유 문장으로. 사유로 쓸 수 없는 표식(pass 등)이면 None."""
+    status = marker.get("status")
+    if status == "fail":
+        items = [i for i in (marker.get("findings") or []) if isinstance(i, dict)]
+        shown = []
+        for i in items[:_AI_FINDINGS_SHOWN]:
+            summary = _defuse(i.get("summary") or "", _AI_SUMMARY_LIMIT)
+            file = _defuse(i.get("file") or "?", _AI_FILE_LIMIT)
+            shown.append(f"{file}:{i.get('line') or '?'} {summary}".rstrip())
+        count = marker.get("serious")
+        count = count if isinstance(count, int) and not isinstance(count, bool) else len(items)
+        text = f"AI 리뷰 심각한 지적 {count}건"
+        if shown:
+            text += ": " + "; ".join(shown) + (" 등" if count > len(shown) else "")
+        left = marker.get("unreviewed")
+        if isinstance(left, int) and not isinstance(left, bool) and left > 0:
+            text += f" (일부만 봄: 못 본 파일 {left}개)"
+        return text
+    if status == "partial":
+        n = marker.get("unreviewed")
+        n = n if isinstance(n, int) and not isinstance(n, bool) else 0
+        left = f"못 본 파일 {n}개" if n else "못 본 파일 목록 없음"
+        return f"AI 리뷰가 일부만 봄({left}) — 승인자가 나머지를 확인"
+    if status == "unavailable":
+        return "AI 리뷰 검사 불능 — 이 PR 의 코드 문제가 아니라 AI 리뷰를 돌리지 못함, ai-review 결과 코멘트를 확인하고 다시 실행"
+    if status == "secret":
+        return "비밀값 의심이라 AI 리뷰를 돌리지 않음(diff 를 외부 AI 에 보내지 않기 위해) — 승인자가 직접 확인"
+    if status == "skip":
+        return "AI 리뷰가 돌지 않음(표식 skip) — 검사하지 못함"
+    return None
+
+
+def ai_review_reasons(
+    check_runs: list[dict],
+    load_comments: Callable[[], list[dict]] | None = None,
+    head_sha: str = "",
+) -> tuple[list[str], list[str]]:
+    """`ai-review` check run 을 읽어 (지적 사유, 대기 사유) 를 돌려준다.
+
+    결론마다 사유를 나눈다(#360). failure·success 는 `load_comments` 로 PR 코멘트를 읽어 같은 `head_sha` 의
+    결과 표식으로 보강한다. 코멘트를 못 읽거나 표식이 없거나 sha 가 다르면 표식 없음으로 둔다.
+    """
     runs = [r for r in check_runs if _check_group(r.get("name") or "") == AI_REVIEW_CHECK_NAME]
     if not runs:
         return [], ["AI 리뷰 결과(ai-review 검사)가 아직 없음"]
-    states = [_run_state(r) for r in runs]
-    if "fail" in states:
-        return ["AI 리뷰 검사가 실패함(심각한 지적 또는 AI 리뷰 검사 불능 — ai-review 결과 코멘트를 확인)"], []
-    if "pending" in states:
+
+    marker_cache: list[dict | None] = []
+
+    def marker() -> dict | None:
+        if not marker_cache:
+            found = None
+            if load_comments is not None:
+                try:
+                    found = parse_ai_review_marker(load_comments(), head_sha)
+                except Exception:  # noqa: BLE001 - 코멘트를 못 읽는 것이 판정 불능이 되면 안 된다(일반 문구로 둔다)
+                    found = None
+            marker_cache.append(found)
+        return marker_cache[0]
+
+    reasons: list[str] = []
+    pending = False
+    for run in runs:
+        if _run_state(run) == "pending":
+            pending = True
+            continue
+        conclusion = run.get("conclusion") or ""
+        if conclusion == "success":
+            # 성공인데 같은 sha 의 표식이 다른 결과를 말하면 표식을 믿지 않고 check 결론을 따르는 대신,
+            # 보수적으로 승인자가 보게 사유로 올린다(통과로 가린 실패보다 불필요한 사유가 낫다).
+            m = marker()
+            reason = _marker_reason(m) if m else None
+            if reason:
+                reasons.append(reason + " (검사 결론은 success 였으나 결과 코멘트가 다름)")
+        elif conclusion == "failure":
+            m = marker()
+            reasons.append((_marker_reason(m) if m else None) or _AI_GENERIC_FAIL)
+        elif conclusion == "cancelled":
+            reasons.append("AI 리뷰가 취소돼 검사하지 못함 — ai-review 를 다시 실행")
+        elif conclusion == "timed_out":
+            reasons.append("AI 리뷰가 시간 초과로 검사하지 못함 — 다시 실행")
+        elif conclusion in ("skipped", "neutral"):
+            reasons.append(f"AI 리뷰가 돌지 않음(결론 {conclusion}) — 검사하지 못함")
+        else:
+            reasons.append(f"AI 리뷰 검사 불능 — 알 수 없는 결론({conclusion or '없음'}), ai-review 를 다시 실행")
+    if reasons:
+        return list(dict.fromkeys(reasons)), []
+    if pending:
         return [], ["AI 리뷰가 아직 끝나지 않음"]
     return [], []
 
@@ -581,6 +734,8 @@ class Context:
     head_ref: str = ""
     # PR 이 갈라진 지점(merge-base) 커밋. 주면 `split_hint` 가 base_ref 대신 이것을 기준으로 읽는다.
     merge_base: Callable[[], str | None] | None = None
+    # PR 코멘트 목록. `ai_review` 기준이 ai-review 결과 표식을 읽는 데만 쓴다(#360). 없으면 표식 없음으로 본다.
+    load_comments: Callable[[], list[dict]] | None = None
     _check_runs: list[dict] | None = field(default=None, repr=False)
 
     @property
@@ -723,7 +878,7 @@ def _crit_checks(ctx: Context) -> list[Finding]:
 def _crit_ai_review(ctx: Context) -> list[Finding]:
     if not ctx.cfg["ai_review"]:
         return []
-    flagged, waiting = ai_review_reasons(ctx.check_runs())
+    flagged, waiting = ai_review_reasons(ctx.check_runs(), ctx.load_comments, ctx.head_ref)
     return [Finding("ai_review", r) for r in flagged] + [Finding("ai_review", r, waiting=True) for r in waiting]
 
 
@@ -768,8 +923,9 @@ def build_next(findings: list[Finding], approval: str, approvers_file: str) -> s
         steps.append("진행 중인 검사가 끝난 뒤 PR 의 risk-gate 검사를 다시 실행하십시오")
     if any(f.criterion == "ai_review" and not f.waiting for f in findings):
         steps.append(
-            "PR 의 ai-review 결과 코멘트를 확인해, 심각한 지적이면 고치고 AI 리뷰 검사 불능이면 "
-            "원인(시크릿·토큰 등)을 해결한 뒤 ai-review 검사를 다시 실행하십시오"
+            "PR 의 ai-review 결과 코멘트를 확인해, 심각한 지적이면 고치고, 일부만 봤으면 승인자가 못 본 "
+            "파일을 확인하고, 검사 불능·취소·시간 초과·돌지 않음이면 원인(시크릿·토큰 등)을 해결한 뒤 "
+            "ai-review 검사를 다시 실행하십시오"
         )
 
     split = " 또는 PR 을 나눠 기준 이하로 줄이십시오" if kinds & {"size", "paths"} else ""
@@ -818,6 +974,10 @@ def fetch_merge_base(client: GhClient, repo: str, base: str, head: str) -> str |
 
 def fetch_pr_file_entries(client: GhClient, repo: str, pr: int) -> list[dict]:
     return [e for e in client.get_all(f"repos/{repo}/pulls/{pr}/files") if "filename" in e]
+
+
+def fetch_pr_comments(client: GhClient, repo: str, pr: int) -> list[dict]:
+    return [c for c in client.get_all(f"repos/{repo}/issues/{pr}/comments") if isinstance(c, dict)]
 
 
 def fetch_check_runs(client: GhClient, repo: str, sha: str) -> list[dict]:
@@ -917,6 +1077,7 @@ def decide_pr(client: GhClient, repo: str, pr: int, config_ref: str | None = Non
         read_text=lambda at, path: fetch_text(client, repo, at, path),
         base_ref=ref,
         head_ref=head_sha,
+        load_comments=lambda: fetch_pr_comments(client, repo, pr),
         # `ref` 는 기준 브랜치의 지금 끝(또는 병합 직전 main)이라 PR 이 갈라진 뒤 main 이 앞서가면 PR 이
         # 건드리지 않은 줄까지 달라 보인다. SRS 비교는 갈라진 지점을 기준으로 한다.
         merge_base=lambda: fetch_merge_base(client, repo, ref, head_sha),
@@ -952,14 +1113,18 @@ def decide_pr_waiting(
         sleep(interval)
 
 
-# AI 리뷰 사전 판정에서 평가하는 기준. 나머지(checks, ai_review)는 이름으로 거른다.
+# AI 리뷰 사전 판정에서 평가하는 기준(위험 안내용). 나머지(checks, ai_review)는 이름으로 거른다.
 PRECHECK_CRITERIA = frozenset({"size", "paths", "secret"})
 
-EXIT_SKIP = 3  # precheck-pr: AI 리뷰를 돌리지 않는다(설정 없음·꺼짐·이미 위험)
+EXIT_SKIP = 3  # precheck-pr: AI 리뷰를 돌리지 않는다(설정 없음·꺼짐). 위험한 PR 도 돌린다(#360)
+EXIT_SECRET = 4  # precheck-pr: 새 줄에 비밀값 패턴이 보여 diff 를 AI 에 보내지 않는다(#360)
 
 
 def precheck_pr(client: GhClient, repo: str, pr: int) -> dict:
-    """AI 리뷰를 돌려도 되는 PR 인지 가린다(#125). `size`·`paths`·`secret` 기준만 평가한다."""
+    """AI 리뷰를 돌려도 되는 PR 인지 가린다(#125). 위험한 PR 도 돌린다(#360) — `risky`·`reasons` 는 코멘트 안내용이다.
+
+    `size`·`paths`·`secret` 기준만 평가한다.
+    """
     info = fetch_pr_info(client, repo, pr)
     ref = (info.get("base") or {}).get("ref") or "main"
     cfg_text = fetch_text(client, repo, ref, CONFIG_PATH)
@@ -982,11 +1147,19 @@ def precheck_pr(client: GhClient, repo: str, pr: int) -> dict:
     for name, fn in CRITERIA:
         if name in PRECHECK_CRITERIA:
             findings.extend(fn(ctx))
+    # 비밀값 패턴이 새 줄에서 실제로 보였는지. `_crit_secret` 의 "너무 커서 검사 못 함"(unscanned)은 여기에 넣지
+    # 않는다 — 큰 PR 은 계속 리뷰한다(그 파일 안의 비밀값은 AI 리뷰로 나갈 수 있다). secret_patterns 는 패턴 이름만
+    # 담는다. 위치(파일:줄)는 `reasons` 에 있다.
+    patterns = secret_pattern_names(added_lines(ctx.files)) if cfg["secret_scan"] else []
     return {
         "enabled": True,
         "gate": True,
         "risky": bool(findings),
         "reasons": [f.message for f in findings],
+        # 사유를 낸 기준 이름(size·paths·secret). 워크플로가 사유 문자열 대신 이걸로 크기 위험을 구분한다.
+        "criteria": list(dict.fromkeys(f.criterion for f in findings)),
+        "secret_found": bool(patterns),
+        "secret_patterns": patterns,
     }
 
 
@@ -1177,7 +1350,11 @@ def cmd_precheck_pr(args: argparse.Namespace) -> int:
         _print({"enabled": None, "gate": None, "risky": None, "reasons": [reason]})
         return EXIT_UNKNOWN
     _print(result)
-    return EXIT_OK if result["enabled"] and not result["risky"] else EXIT_SKIP
+    if not result["enabled"]:
+        return EXIT_SKIP
+    # 비밀값이 보이면 diff 를 외부 AI 에 보내지 않도록 리뷰를 멈춘다. 옛 워크플로는 이 코드를 모르고 "판정 불능" 으로
+    # 읽어 역시 리뷰를 돌리지 않는다(실패 쪽으로 안전하다).
+    return EXIT_SECRET if result.get("secret_found") else EXIT_OK
 
 
 def cmd_check_commit(args: argparse.Namespace) -> int:
@@ -1217,7 +1394,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     precheck = sub.add_parser(
         "precheck-pr",
-        help="AI 리뷰를 돌려도 되는 PR 인지 가린다. 종료코드 0 돌려도 됨, 3 돌리지 않음(사유 출력), 2 판정 불가",
+        help="AI 리뷰를 돌려도 되는 PR 인지 가린다. 종료코드 0 돌려도 됨(위험한 PR 도), 3 돌리지 않음(설정 없음·꺼짐, 사유 출력), 2 판정 불가",
     )
     precheck.add_argument("--repo", required=True, help="owner/repo")
     precheck.add_argument("--pr", required=True, type=int, help="PR 번호")

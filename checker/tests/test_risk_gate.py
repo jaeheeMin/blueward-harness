@@ -250,6 +250,136 @@ def test_ai_review_성공_실패_대기_없음():
     assert flagged == [] and "아직 없음" in waiting[0]
 
 
+BOT = {"login": "github-actions[bot]", "type": "Bot"}
+
+
+def _ai_comment(status, sha=None, **extra):
+    marker = {"sha": sha or HEAD, "status": status, "serious": 0, "findings": [], "unreviewed": 0, **extra}
+    body = "<!-- ai-review -->\n## ai-review\n\n**x**\n\n<!-- ai-review-result " + json.dumps(marker) + " -->\n"
+    return {"body": body, "user": BOT}
+
+
+def _reasons(conclusion, comments=None, status="completed"):
+    return rg.ai_review_reasons([_run("ai-review", status=status, conclusion=conclusion)], lambda: comments or [], HEAD)
+
+
+def test_ai_review_failure_는_표식으로_심각한_지적을_가른다():
+    findings = [{"file": f"f{i}.py", "line": i, "summary": f"문제 {i}"} for i in range(1, 6)]
+    flagged, waiting = _reasons("failure", [_ai_comment("fail", serious=5, findings=findings)])
+    assert waiting == [] and len(flagged) == 1
+    assert flagged[0].startswith("AI 리뷰 심각한 지적 5건: f1.py:1 문제 1; f2.py:2 문제 2; f3.py:3 문제 3 등")
+    assert "f4.py" not in flagged[0]
+
+
+def test_ai_review_심각한_지적_요약은_길면_자른다():
+    findings = [{"file": "a.py", "line": 1, "summary": "가" * 500}]
+    flagged, _ = _reasons("failure", [_ai_comment("fail", serious=1, findings=findings)])
+    assert len(flagged[0]) < 200 and flagged[0].endswith("...")
+
+
+def test_ai_review_failure_일부만_봄과_검사_불능():
+    flagged, _ = _reasons("failure", [_ai_comment("partial", unreviewed=7)])
+    assert flagged == ["AI 리뷰가 일부만 봄(못 본 파일 7개) — 승인자가 나머지를 확인"]
+    flagged, _ = _reasons("failure", [_ai_comment("unavailable")])
+    assert flagged[0].startswith("AI 리뷰 검사 불능 —")
+
+
+def test_ai_review_failure_비밀값_의심으로_건너뛴_표식():
+    flagged, waiting = _reasons("failure", [_ai_comment("secret")])
+    assert waiting == [] and len(flagged) == 1
+    assert "비밀값 의심이라 AI 리뷰를 돌리지 않음" in flagged[0] and "승인자가 직접 확인" in flagged[0]
+
+
+def test_ai_review_failure_표식이_없거나_sha_가_다르면_일반_문구():
+    for comments in ([], [{"body": "그냥 코멘트"}], [_ai_comment("fail", sha="b" * 40, serious=1)],
+                     [{"body": "<!-- ai-review -->\n<!-- ai-review-result {깨짐 -->"}]):
+        flagged, _ = _reasons("failure", comments)
+        assert flagged == [rg._AI_GENERIC_FAIL]
+
+
+def test_ai_review_코멘트_조회가_실패해도_일반_문구로_둔다():
+    def boom():
+        raise GhError("권한 없음")
+
+    flagged, waiting = rg.ai_review_reasons([_run("ai-review", conclusion="failure")], boom, HEAD)
+    assert flagged == [rg._AI_GENERIC_FAIL] and waiting == []
+
+
+def test_ai_review_여러_코멘트면_마지막_표식을_쓴다():
+    flagged, _ = _reasons("failure", [_ai_comment("unavailable"), _ai_comment("partial", unreviewed=2)])
+    assert "일부만 봄" in flagged[0]
+
+
+def test_ai_review_봇이_아닌_작성자의_표식은_무시한다():
+    for user in ({"login": "someone", "type": "User"}, {"login": "github-actions[bot]", "type": "User"},
+                 {"login": "evil-app[bot]", "type": "Bot"}, None):
+        c = _ai_comment("partial", unreviewed=2)
+        c["user"] = user
+        assert rg.parse_ai_review_marker([c], HEAD) is None
+        flagged, _ = _reasons("failure", [c])
+        assert flagged == [rg._AI_GENERIC_FAIL]
+    c = _ai_comment("pass")
+    c["user"] = {"login": "someone", "type": "User"}
+    assert _reasons("success", [c]) == ([], [])
+    # 사람의 가짜 표식이 뒤에 있어도 봇의 표식이 남는다.
+    fake = _ai_comment("pass")
+    fake["user"] = {"login": "someone", "type": "User"}
+    assert rg.parse_ai_review_marker([_ai_comment("partial", unreviewed=2), fake], HEAD)["status"] == "partial"
+
+
+def test_ai_review_한_코멘트에_표식이_여럿이면_마지막을_쓴다():
+    fake = '<!-- ai-review-result {"sha": "%s", "status": "pass"} -->\n' % HEAD
+    real = _ai_comment("fail", serious=1, findings=[{"file": "a.py", "line": 1, "summary": "x"}])
+    real["body"] = real["body"].replace("**x**", "**x**\n" + fake)
+    assert rg.parse_ai_review_marker([real], HEAD)["status"] == "fail"
+
+
+def test_ai_review_사유의_파일_이름과_요약은_멘션을_무력화하고_길이를_자른다():
+    findings = [{"file": "@octo/" + "d" * 500 + ".py", "line": 1, "summary": "@someone 확인"}]
+    flagged, _ = _reasons("failure", [_ai_comment("fail", serious=1, findings=findings)])
+    assert "@octo" not in flagged[0] and "@someone" not in flagged[0]
+    assert "@​octo/" in flagged[0] and "@​someone" in flagged[0]
+    assert len(flagged[0]) < 400
+
+
+@pytest.mark.parametrize(
+    "conclusion, expected",
+    [
+        ("cancelled", "AI 리뷰가 취소돼 검사하지 못함 — ai-review 를 다시 실행"),
+        ("timed_out", "AI 리뷰가 시간 초과로 검사하지 못함 — 다시 실행"),
+        ("skipped", "AI 리뷰가 돌지 않음(결론 skipped) — 검사하지 못함"),
+        ("neutral", "AI 리뷰가 돌지 않음(결론 neutral) — 검사하지 못함"),
+    ],
+)
+def test_ai_review_취소_시간_초과_돌지_않음은_통과가_아니다(conclusion, expected):
+    flagged, waiting = _reasons(conclusion)
+    assert flagged == [expected] and waiting == []
+
+
+def test_ai_review_그_밖의_결론은_결론_이름을_넣은_검사_불능():
+    flagged, _ = _reasons("action_required")
+    assert len(flagged) == 1 and "검사 불능" in flagged[0] and "action_required" in flagged[0]
+
+
+def test_ai_review_success_에_같은_sha_의_다른_표식이_있으면_보수적으로_사유를_올린다():
+    flagged, _ = _reasons("success", [_ai_comment("partial", unreviewed=3)])
+    assert len(flagged) == 1 and "일부만 봄" in flagged[0] and "success" in flagged[0]
+    flagged, _ = _reasons("success", [_ai_comment("fail", serious=1, findings=[{"file": "a", "line": 1, "summary": "x"}])])
+    assert "심각한 지적 1건" in flagged[0]
+
+
+def test_ai_review_success_는_표식이_pass_이거나_없거나_낡았으면_통과():
+    assert _reasons("success", [_ai_comment("pass")]) == ([], [])
+    assert _reasons("success", []) == ([], [])
+    assert _reasons("success", [_ai_comment("partial", sha="b" * 40)]) == ([], [])
+
+
+def test_ai_review_다른_검사의_run_state_는_그대로다():
+    # cancelled·skipped 를 다르게 읽는 것은 ai-review 뿐이다.
+    assert rg._run_state(_run("x", conclusion="skipped")) == "pass"
+    assert rg._run_state(_run("x", conclusion="cancelled")) == "fail"
+
+
 # --- decide_pr (가짜 클라이언트) ----------------------------------------------------
 
 
@@ -306,6 +436,7 @@ def _client(
     author="bob",
     base="main",
     head=HEAD,
+    comments=None,
 ):
     r = {
         "repos/o/r/pulls/5": {"user": {"login": author}, "base": {"ref": base}, "head": {"sha": head}},
@@ -314,6 +445,8 @@ def _client(
         f"repos/o/r/commits/{head}/check-runs*": {"check_runs": check_runs or []},
         f"repos/o/r/commits/{head}/status*": {"statuses": statuses or []},
     }
+    if comments is not None:
+        r["repos/o/r/issues/5/comments"] = comments
     if config is not None:
         r[f"repos/o/r/contents/.github/risk-gate.yaml?ref={base}"] = _b64(config)
     if approvers is not None:
@@ -522,6 +655,28 @@ def test_ai_review_를_켜면_결과를_읽는다():
     assert "ai-review 결과 코멘트" in bad["next"] and "검사 불능" in bad["next"]
     pending = rg.decide_pr(_client(config=cfg), "o/r", 5)
     assert pending["risk"] == "high" and pending["waiting_on_checks"] is True
+
+
+def test_decide_pr_는_ai_review_표식으로_사유를_가른다():
+    cfg = "ai_review: true\n"
+    comments = [_ai_comment("fail", serious=1, findings=[{"file": "a.py", "line": 3, "summary": "널 참조"}])]
+    result = rg.decide_pr(_client(config=cfg, check_runs=[_run("ai-review", conclusion="failure")],
+                                  comments=comments), "o/r", 5)
+    assert result["reasons"] == ["AI 리뷰 심각한 지적 1건: a.py:3 널 참조"]
+    assert "일부만 봤으면" in result["next"] and "취소" in result["next"]
+    cancelled = rg.decide_pr(_client(config=cfg, check_runs=[_run("ai-review", conclusion="cancelled")]), "o/r", 5)
+    assert cancelled["reasons"] == ["AI 리뷰가 취소돼 검사하지 못함 — ai-review 를 다시 실행"]
+    # 위험 PR 도 마찬가지로 AI 지적이 사유에 붙고 승인자가 필요하다.
+    risky = rg.decide_pr(_client(config=cfg, files=[_file("rules/a.yaml")],
+                                 check_runs=[_run("ai-review", conclusion="failure")], comments=comments), "o/r", 5)
+    assert any("AI 리뷰 심각한 지적 1건" in r for r in risky["reasons"]) and risky["requires_approval"] is True
+
+
+def test_decide_pr_코멘트_조회가_실패해도_판정_불능이_되지_않는다():
+    # FakeClient 는 모르는 경로에 KeyError 를 던진다 — 코멘트를 못 읽는 경우와 같다.
+    result = rg.decide_pr(_client(config="ai_review: true\n", check_runs=[_run("ai-review", conclusion="failure")]),
+                          "o/r", 5)
+    assert result["reasons"] == [rg._AI_GENERIC_FAIL]
 
 
 def test_head_를_모르면_통과시키지_않고_판정_불가():
@@ -973,20 +1128,44 @@ def test_precheck_ai_review_가_꺼져_있으면_돌리지_않는다():
 
 def test_precheck_위험하지_않으면_돌려도_된다():
     result = rg.precheck_pr(_client(config="ai_review: true\n"), "o/r", 5)
-    assert result == {"enabled": True, "gate": True, "risky": False, "reasons": []}
+    assert result == {"enabled": True, "gate": True, "risky": False, "reasons": [], "criteria": [],
+                      "secret_found": False, "secret_patterns": []}
 
 
 @pytest.mark.parametrize(
-    "files",
+    "files, criteria",
     [
-        [_file("src/a.py", 500, 0)],
-        [_file("rules/a.yaml")],
-        [_file("a.py", 1, 0, patch=_patch(AWS_KEY))],
+        ([_file("src/a.py", 500, 0)], ["size"]),
+        ([_file("rules/a.yaml")], ["paths"]),
+        ([_file("a.py", 1, 0, patch=_patch(AWS_KEY))], ["secret"]),
     ],
 )
-def test_precheck_크기_경로_비밀값이_위험이면_돌리지_않는다(files):
+def test_precheck_크기_경로_비밀값이_위험이어도_enabled_는_true(files, criteria):
     result = rg.precheck_pr(_client(config="ai_review: true\n", files=files), "o/r", 5)
+    # 위험 여부와 사유는 코멘트 안내용으로 남기되 enabled 는 true 다(#360). 기준 이름도 출력한다.
     assert result["enabled"] is True and result["risky"] is True and result["reasons"]
+    assert result["criteria"] == criteria
+
+
+def test_precheck_새_줄에_비밀값_패턴이_보이면_secret_found_와_패턴_이름만_낸다():
+    files = [_file("a.py", 1, 0, patch=_patch(AWS_KEY))]
+    result = rg.precheck_pr(_client(config="ai_review: true\n", files=files), "o/r", 5)
+    assert result["secret_found"] is True and result["secret_patterns"] == ["AWS 액세스 키 ID"]
+    assert AWS_KEY not in json.dumps(result, ensure_ascii=False)  # 값은 어디에도 남지 않는다
+
+
+def test_precheck_크기만_커서_비밀값_검사를_못_한_파일은_secret_found_가_아니다():
+    # patch 가 없는 큰 파일: `_crit_secret` 은 "검사 못 함" 사유를 내지만 비밀값이 보인 것은 아니다 — 리뷰는 계속 돈다.
+    files = [_file("big.py", 5000, 0, patch=None)]
+    result = rg.precheck_pr(_client(config="ai_review: true\n", files=files), "o/r", 5)
+    assert result["risky"] is True and "secret" in result["criteria"]
+    assert result["secret_found"] is False and result["secret_patterns"] == []
+
+
+def test_precheck_secret_scan_이_꺼져_있으면_secret_found_가_아니다():
+    files = [_file("a.py", 1, 0, patch=_patch(AWS_KEY))]
+    result = rg.precheck_pr(_client(config="ai_review: true\nsecret_scan: false\n", files=files), "o/r", 5)
+    assert result["secret_found"] is False
 
 
 def test_precheck_는_checks_와_ai_review_기준을_평가하지_않는다():
@@ -1005,9 +1184,13 @@ class _PreArgs:
 def test_cmd_precheck_pr_종료코드(monkeypatch, capsys):
     for result, code in [
         ({"enabled": True, "gate": True, "risky": False, "reasons": []}, 0),
-        ({"enabled": True, "gate": True, "risky": True, "reasons": ["x"]}, 3),
+        ({"enabled": True, "gate": True, "risky": True, "reasons": ["x"]}, 0),
         ({"enabled": False, "gate": True, "risky": False, "reasons": ["꺼짐"]}, 3),
         ({"enabled": False, "gate": False, "risky": False, "reasons": ["없음"]}, 3),
+        ({"enabled": True, "gate": True, "risky": True, "reasons": ["x"], "secret_found": True,
+          "secret_patterns": ["AWS 액세스 키 ID"]}, 4),
+        ({"enabled": True, "gate": True, "risky": True, "reasons": ["x"], "secret_found": False,
+          "secret_patterns": []}, 0),
     ]:
         monkeypatch.setattr(rg, "precheck_pr", lambda *a, _r=result: _r)
         assert rg.cmd_precheck_pr(_PreArgs()) == code
