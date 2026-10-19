@@ -3,7 +3,7 @@
 고객사 Project Repository 에 설치해 쓰는 Blueward 하네스다. 새 저장소의 표준
 구조를 만들고, 문서가 템플릿을 따르는지 검사하고(doc-guard), 협업 규칙과
 `/harness:start` · `/harness:deliver` · `/harness:wrapup` · `/harness:sync` 를 비롯한
-Skill 8개를 한 번에 제공한다.
+Skill 9개를 한 번에 제공한다.
 
 ```
 plugins/harness/
@@ -32,6 +32,7 @@ plugins/harness/
     srs/SKILL.md               /harness:srs — SRS 작성·수정
     spec/SKILL.md              /harness:spec — 개발 Spec 작성·수정(양식 지도: form-map.md)
     sync/SKILL.md              /harness:sync — 원격 최신 상태를 로컬 브랜치로 당겨받기
+    prs/SKILL.md               /harness:prs — 내 열린 PR 의 상태와 병합 순서 확인
     atc/SKILL.md               /harness:atc — SAP ATC 지적 실행·분류·처리
   agents/
     researcher.md              harness:researcher — 조회 전용 조사(sonnet, 쓰기 도구 없음)
@@ -70,7 +71,7 @@ plugins/harness/
 
 ## 제공하는 것
 
-### Skill 8개
+### Skill 9개
 
 플러그인 스킬은 이름 앞에 플러그인 이름이 붙으므로 아래 이름으로 나타난다.
 
@@ -83,6 +84,7 @@ plugins/harness/
 | `/harness:srs` | SRS(요구사항정의서)를 새로 쓰거나, 요구사항이 바뀌었을 때 고친다. 먼저 브랜치를 확인한다(main 이면 start 를 대신, 다른 작업 브랜치면 이어 쓸지 묻는다, #281) |
 | `/harness:spec` | SRS 요구사항으로 개발 Spec 을 만들거나, SRS 가 바뀌어 고친다. srs 와 같이 먼저 브랜치를 확인한다 |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다. 지금 세션의 플러그인 버전이 main 보다 낮으면 `/reload-plugins`·Update now 를 안내한다(#203) |
+| `/harness:prs` | 내 열린 PR 의 상태(초안·충돌·검사 실패·검사 중·승인 대기·병합 가능)와 병합 순서를 GitHub 에서 계산해 보여 주고 다음 할 일을 알려 준다. `--all` 이면 저장소 전체. 읽기만 한다(#370) |
 | `/harness:atc` | SAP ATC 지적을 돌려 자동·확인 후·수동으로 나눠 처리하고 재실행해 증감을 보고한다(`env/adt-tiers.yaml` 이 있는 Project Repository 에서만. variant 는 서버 항목의 `atc_variant`) |
 
 ### 서브에이전트 3개(#139)
@@ -107,7 +109,7 @@ plugins/harness/
 | `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 SRS 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120). `git commit` 은 staged 변경을 gitleaks 로 검사해 비밀값이 있으면 막는다(#170, 아래 "비밀정보 검사" 참고). `git push` 는 080 에 쓴 ABAP 오브젝트 중 활성화 안 된 것이 있어도 막는다(활성화 관문, #190, 아래 절) |
 | `mcp_source_guard.py` | `PreToolUse` (SAP ADT MCP 도구 21개) | MCP 로 SAP 에 쓰거나 이름을 붙이는 경로의 코드 규칙 CR-001·CR-002·CR-003·CR-007 검사(#60, #61)와, `env/adt-tiers.yaml` 기준 테넌트별 쓰기 차단·데이터 추출 되묻기(#148). 아래 "테넌트별 쓰기 차단" 참고 |
 | `mcp_activation_tracker.py` | `PostToolUse` (SAP ADT MCP 도구 6개: `setObjectSource`·`createObject`·`deleteObject`·`activateObjects`·`activateByName`·`inactiveObjects`) | ADT MCP 로 쓴 ABAP 오브젝트와 활성화 결과를 `.git` 아래 기록 파일에 남긴다(#190, 아래 절). 기록하지 못하면 표식 파일을 남기고 exit 2 로 알린다 |
-| `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고, 지난 세션 기록을 원격 반영 뒤에 판정해 커밋되거나 병합된 것은 조용히 지우고 사라진 파일(`git restore --source=<사본>` 안내)과 push 안 한 커밋만 전한다(#224, 옛 형식 기록은 한 번 보여 주고 지운다). upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리). 저장소 안(꼭대기에서 3단계까지)에 `templates/` 와 `rules/` 를 함께 가진 폴더가 없으면 `/harness:scaffold` 를 안내한다(#128, 자동 실행은 하지 않는다. 플러그인 저장소(`.claude-plugin/marketplace.json` 이 꼭대기에 있다)와 git 저장소가 아닌 곳은 말하지 않고, `HARNESS_NO_SCAFFOLD_HINT=1` 로 끈다) |
+| `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고, 지난 세션 기록을 원격 반영 뒤에 판정해 커밋되거나 병합된 것은 조용히 지우고 사라진 파일(`git restore --source=<사본>` 안내)과 push 안 한 커밋만 전한다(#224, 옛 형식 기록은 한 번 보여 주고 지운다). upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리). 내 열린 PR 이 있으면 상태와 병합 순서를 `checker.pr_queue` 로 20초 안에 읽어 알리고, 읽지 못하면 "PR 상태 확인 불능" 한 줄만 남긴다(#370, GitHub 원격일 때만, 훅은 항상 exit 0). 저장소 안(꼭대기에서 3단계까지)에 `templates/` 와 `rules/` 를 함께 가진 폴더가 없으면 `/harness:scaffold` 를 안내한다(#128, 자동 실행은 하지 않는다. 플러그인 저장소(`.claude-plugin/marketplace.json` 이 꼭대기에 있다)와 git 저장소가 아닌 곳은 말하지 않고, `HARNESS_NO_SCAFFOLD_HINT=1` 로 끈다) |
 | `update_notice.py` | `UserPromptSubmit` | 이 세션의 플러그인 판이 원격 최신 `v*` 태그보다 낮으면 Claude 가 사용자에게 한 번 알리게 한다(#314). 원격은 `git ls-remote` 5초 제한, 10분 캐시(`${CLAUDE_PLUGIN_DATA}`), 같은 세션·같은 판은 한 번. 새 판을 이미 받았으면 `/reload-plugins`, 아니면 업데이트 명령을 안내하고 갱신은 사용자가 직접 한다. 실패하면 조용히 넘어가 프롬프트를 막지 않는다. 플러그인 저장소와 `HARNESS_NO_UPDATE_NOTICE=1` 에서는 말하지 않는다 |
 | `ensure-tools.sh` | `SessionStart` (session-start-sync.sh 가 부름) | uv·jq·gh·gitleaks 가 없으면 Windows 에서 winget 으로 설치하고 결과를 알린다(#116, gitleaks 는 #170). 아래 "도구 자동 설치" 참고 |
 | `stop-deliver.sh` | `Stop` | 커밋되지 않은 변경이 남았으면 `/harness:deliver` 를 안내한다. 대답마다 변경이 있으면 작업 사본을 임시 index 로 떠 `refs/harness/unfinished/<worktree>` 에 붙잡고(실제 index·작업 트리는 그대로, 새 파일 포함, `.gitignore`·`*handoff*.md`·`.superpowers/` 와 50MB 넘는 새 파일 제외, 변화가 없으면 다시 뜨지 않는다) 덮어쓰는 기록 파일(`<git-dir>/<repo>-unfinished`, 첫 줄 `format=2`)에 사본·push 안 된 커밋 정보를 남긴다(#224) |

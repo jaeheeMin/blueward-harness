@@ -44,7 +44,7 @@ Actions 는 팀원 PC 에 설치된 플러그인을 쓸 수 없다. 엔진을 `p
 - **검사 엔진(`checker/`).** 문서 검사(파일명·위치·필수 절·필수 시트·표 헤더·슬라이드 레이아웃·외부 흔적)와
   코드 규칙 검사(CR-001·002·003·007), `check` CLI(`doc-guard`)가 동작한다. 작업본 md 를 고객사 양식 xlsx 로
   뽑는 `python -m checker.export` 도 있다. 자세한 것은 [`checker/README.md`](checker/README.md).
-- **플러그인(`plugins/harness/`).** Skill 8개(start·deliver·wrapup·scaffold·srs·spec·sync·atc), 훅 6개
+- **플러그인(`plugins/harness/`).** Skill 9개(start·deliver·wrapup·scaffold·srs·spec·sync·prs·atc), 훅 6개
   (문서·코드 저장 검사, git 가드, SAP ADT MCP 가드, 활성화 기록, 세션 시작·종료), 서브에이전트 3개
   (researcher·reviewer·implementer), 협업 규칙 5개와 공통 개발 규칙을 담는다. 이 저장소가 마켓플레이스다.
   자세한 것은 [`plugins/harness/README.md`](plugins/harness/README.md).
@@ -105,6 +105,7 @@ Claude> 커밋했습니다. origin/main 을 rebase 했습니다. 푸시했습니
 | `/harness:scaffold` | 새 Project Repository 에 표준 구조를 만들 때 |
 | `/harness:srs` | SRS(요구사항정의서)를 만들거나 고칠 때 |
 | `/harness:spec` | SRS 로 개발 Spec 을 만들거나 고칠 때(고객사 양식 지원) |
+| `/harness:prs` | 내 열린 PR 의 상태와 병합 순서를 볼 때 |
 | `/harness:atc` | SAP ATC 지적을 돌려 분류·처리할 때 |
 
 main 에 직접 커밋하거나 맨손 `git push` 하면 훅이 거부한다. 훅이 막으면

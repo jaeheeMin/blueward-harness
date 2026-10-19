@@ -244,6 +244,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
         <div class="tabs">
           <button class="tab" role="tab" data-tab="start">작업 시작하기<small>/harness:start</small></button>
           <button class="tab" role="tab" data-tab="sync">최신으로 맞추기<small>/harness:sync</small></button>
+          <button class="tab" role="tab" data-tab="prs">내 PR 확인하기<small>/harness:prs</small></button>
         </div>
       </div>
       <div>
@@ -280,7 +281,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.86, public-cloud main 기준 (2026-10-19)</div>
+      <div class="note">harness 0.10.88, public-cloud main 기준 (2026-10-19)</div>
     </div>
   </nav>
 
@@ -949,7 +950,59 @@ fix/31-broken-link</pre>
     <div class="callout ok"><span class="k">덤</span><div>마지막에 플러그인 버전 셋(지금 세션 / 내려받은 것 / 최신)을 비교해서 <code>/reload-plugins</code> 가 필요한지 알려 줘.</div></div>
   </div>
 
-  <div class="next"><button data-go="start">← 작업 시작하기</button><button data-go="sap">다음: SAP 에서 개발하기 →</button></div>
+  <div class="next"><button data-go="start">← 작업 시작하기</button><button data-go="prs">다음: 내 PR 확인하기 →</button></div>
+</article>
+
+<!-- ================= 내 PR 확인하기 ================= -->
+<article class="panel" data-panel="prs" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">개발 · 기타 작업 열기 · /harness:prs</div>
+    <h2>내 PR 확인하기</h2>
+    <p class="lead">내 PR 이 지금 어디까지 왔는지, 무엇부터 병합해야 하는지를 GitHub 에서 계산해서 보여 줘. 읽기만 하고 아무것도 바꾸지 않아.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>PR 을 여러 개 올려 놓고 어떤 게 막혔는지 모르겠을 때. 다른 세션에서 만든 PR 까지 한눈에 보고 싶을 때. 병합 순서를 정해야 할 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>내 PR 어때?</span><span>PR 상태</span><span>뭐부터 병합해?</span><span class="cmd">/harness:prs</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>계산대 앞에 줄 선 손님들을 한 번에 보여 주는 전광판이야. 누가 지금 계산할 수 있고, 누가 서류(승인)를 기다리고, 누가 앞사람을 기다려야 하는지 적혀 있어. 세션을 열 때도 내 PR 이 있으면 자동으로 띄워 줘.</p>
+  </div></div>
+
+  <div class="cols">
+    <section class="box">
+      <h3>상태는 이렇게 읽어</h3>
+      <ul class="plain">
+        <li><b>초안</b> — 아직 준비 중인 PR</li>
+        <li><b>충돌</b> — main 과 부딪혀. <code>/harness:sync</code> 로 받아서 풀어</li>
+        <li><b>검사 실패 / 검사 중</b> — 어떤 검사인지 이름을 같이 보여 줘</li>
+        <li><b>검사 시작 전</b> — 푸시 직후라 검사가 아직 안 붙었어. 조금 뒤 다시 봐</li>
+        <li><b>승인 대기</b> — 누구의 승인이 필요한지 알려 줘. 승인한 뒤 새 커밋을 올렸으면 "낡은 승인" 이라 다시 받아야 해</li>
+        <li><b>risk-gate: 사유</b> — 승인 말고 다른 이유(예: AI 리뷰 검사 못 함)로 risk-gate 가 막았어. 사유는 PR 의 risk-gate 코멘트에 있어</li>
+        <li><b>base 보다 뒤처짐 / 병합 막힘 / 검사 불안정</b> — GitHub 가 아직 병합을 막는 상태야. 뒤처졌으면 <code>/harness:sync</code> 로 받아</li>
+        <li><b>충돌 여부 확인 중</b> — GitHub 가 계산 중이야. 충돌이 없다는 뜻이 아니니 조금 뒤 다시 봐</li>
+        <li><b>병합 가능</b> — 앞에 기다릴 PR 이 없으면 바로 병합. 위험한 경로를 건드렸으면 "사람이 GitHub 에서" 병합해</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>병합 순서는 이렇게 정해</h3>
+      <ol class="steps">
+        <li><div>다른 PR 위에 쌓은 PR(기준 브랜치가 그 PR 의 브랜치)은 그 PR 뒤</div></li>
+        <li><div>PR 본문의 <code>먼저: #12</code> 줄이 가리키는 PR 뒤. <code>/harness:deliver</code> 가 PR 을 만들 때 적어 줘</div></li>
+        <li><div>같은 DEV 번호면 SRS → Spec → 개발 순</div></li>
+        <li><div>하네스 저장소는 plugin.json 판이 낮은 PR 먼저</div></li>
+      </ol>
+      <p class="small">서로 앞이라고 가리키면 "순서 판정 불능(순환)" 이라고 하고 순서를 지어내지 않아. 같은 파일을 고친 PR 쌍은 순서는 그대로 두고 "다시 맞춰야 할 수 있음" 이라고만 알려 줘.</p>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">못 읽으면</span><div>GitHub 를 못 읽으면 "PR 상태 확인 불능" 이라고 하고 사유를 보여 줘. PR 이 없다거나 문제없다고 말하지 않아.</div></div>
+    <div class="callout ok"><span class="k">전체 보기</span><div><code>/harness:prs --all</code> 이면 내 PR 뿐 아니라 저장소의 열린 PR 전부를 순서대로 보여 줘.</div></div>
+  </div>
+
+  <div class="next"><button data-go="sync">← 최신으로 맞추기</button><button data-go="sap">다음: SAP 에서 개발하기 →</button></div>
 </article>
 
 <!-- ================= SAP ================= -->
@@ -1042,7 +1095,7 @@ fix/31-broken-link</pre>
     <div class="callout ok"><span class="k">세션 만료</span><div>401 이나 400 이 나면 <code>/c080</code> 이나 <code>/c100</code> 으로 다시 로그인해.</div></div>
   </div>
 
-  <div class="next"><button data-go="sync">← 최신으로 맞추기</button><button data-go="atc">다음: ATC 돌리기 →</button></div>
+  <div class="next"><button data-go="prs">← 내 PR 확인하기</button><button data-go="atc">다음: ATC 돌리기 →</button></div>
 </article>
 
 <!-- ================= ATC ================= -->
