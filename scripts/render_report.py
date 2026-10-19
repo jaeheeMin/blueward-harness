@@ -297,11 +297,14 @@ def _render_code_rules(section: dict) -> list[str]:
     violations = summary.get("violations", 0)
     allowed = summary.get("allowed", 0)
 
+    warn_lines = _render_code_warnings(inner)
+
     if violations == 0:
         line = f"코드 {checked}건을 검사했고 모두 공통 개발 규칙(CR-001, CR-002)을 지켰습니다."
         if allowed:
             line += f" / 예외로 인정된 발견 {allowed}건"
         out += [line]
+        out += warn_lines
         return out
 
     out += [
@@ -316,7 +319,7 @@ def _render_code_rules(section: dict) -> list[str]:
             continue
         out += [f"### `{entry.get('file')}`", ""]
         for f in entry.get("findings", []):
-            if f.get("allowed"):
+            if f.get("allowed") or f.get("level") == "warn":  # 경고는 아래 경고 절에 따로 나온다
                 continue
             out.append(f"- [{f.get('rule')}] {f.get('line')}:{f.get('col')} {f.get('message')}")
             fix = f.get("fix")
@@ -333,6 +336,36 @@ def _render_code_rules(section: dict) -> list[str]:
         "정말 예외라면 같은 줄이나 바로 위 줄에 `harness:allow CR-00N <이유>` 주석을 "
         "남기고 다시 올리십시오(이유는 반드시 적어야 합니다).",
     ]
+    out += warn_lines
+    return out
+
+
+def _render_code_warnings(inner: dict) -> list[str]:
+    """`level: warn` 인 발견(CR-009)을 위반과 따로 보인다. 종료코드와 병합을 막지 않는다."""
+    items = []
+    for entry in inner.get("files", []):
+        for f in entry.get("findings", []):
+            if f.get("allowed") or f.get("level") != "warn":
+                continue
+            items.append((entry.get("file"), f))
+    if not items:
+        return []
+    out = [
+        "",
+        "### ⚠️ 경고 (병합을 막지는 않습니다)",
+        "",
+        f"공통 개발 규칙 경고 **{len(items)}건**입니다. 의도한 것이면 `harness:allow` 로 이유를 남기고, "
+        "아니면 고치십시오.",
+        "",
+    ]
+    for file, f in items:
+        out.append(f"- [{f.get('rule')}] `{file}` {f.get('line')}:{f.get('col')} {f.get('message')}")
+        fix = f.get("fix")
+        if fix:
+            out.append(f"  - 고치기: {fix}")
+        note = f.get("note")
+        if note:
+            out.append(f"  - 참고: {note}")
     return out
 
 

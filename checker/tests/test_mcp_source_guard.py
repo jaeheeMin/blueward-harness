@@ -117,6 +117,37 @@ def test_빈_catch가_있는_abap_소스는_cr007로_막는다(installed_hook):
     assert "CR-007" in reason
 
 
+_AUTH_POOL = (
+    "CLASS lhc DEFINITION INHERITING FROM cl_abap_behavior_handler.\n"
+    "  PRIVATE SECTION.\n"
+    "    METHODS get_global_authorizations FOR GLOBAL AUTHORIZATION\n"
+    "      IMPORTING REQUEST requested_authorizations FOR Upload RESULT result.\n"
+    "ENDCLASS.\n"
+    "CLASS lhc IMPLEMENTATION.\n"
+    "  METHOD get_global_authorizations.\n"
+    "    result-%create = if_abap_behv=>auth-allowed.\n"
+    "  ENDMETHOD.\n"
+    "ENDCLASS.\n"
+)
+
+
+def test_cr009_경고는_막지_않고_알림으로_보여_준다(installed_hook):
+    code, out = run_hook(installed_hook, _payload(ABAP_URL, _AUTH_POOL), str(ENGINE_ROOT))
+    assert code == 0 and out is not None
+    assert "permissionDecision" not in out["hookSpecificOutput"]
+    notice = out["hookSpecificOutput"]["additionalContext"]
+    assert "CR-009" in notice and "막지 않음" in notice and ABAP_URL in notice
+
+
+def test_cr009_경고가_있어도_위반이_있으면_막고_경고도_같이_보여_준다(installed_hook):
+    code, out = run_hook(
+        installed_hook, _payload(ABAP_URL, _AUTH_POOL + "DATA 주문번호 TYPE vbeln.\n"), str(ENGINE_ROOT)
+    )
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "CR-001" in reason and "CR-009" in reason
+
+
 def test_규칙을_지킨_abap_소스는_통과시킨다(installed_hook):
     code, out = run_hook(
         installed_hook, _payload(ABAP_URL, "DATA lv_order TYPE vbeln.\n"), str(ENGINE_ROOT)

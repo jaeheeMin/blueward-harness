@@ -40,3 +40,10 @@ rules:
     title: "오류를 조용히 삼키지 않는다(빈 CATCH 를 두지 않는다)"
     languages: [abap, js]
     fix: "예외를 기록하거나 사용자에게 알린다. 정말 무시해도 된다면 harness:allow 로 이유를 남긴다."
+  CR-009:
+    # level: warn 은 리포트에는 나오지만 종료코드를 바꾸지 않는다(기본은 violation).
+    # 값은 violation 또는 warn 뿐이고 그 밖은 설정 오류(검사 불능)다.
+    title: "데이터를 바꾸는 앱은 권한을 검사한다"
+    level: warn
+    languages: [abap]
+    fix: "권한 객체를 만들어 behavior pool 에서 AUTHORITY-CHECK 로 검사한다. 정말 검사하지 않기로 했다면 harness:allow 로 이유와 결정자를 남긴다."

@@ -221,6 +221,53 @@ def test_코드도_통과하면_코드_절도_통과로_보인다():
     assert "예외로 인정된 발견 1건" in text
 
 
+_WARN_FINDING = {
+    "rule": "CR-009", "level": "warn", "line": 7, "col": 3,
+    "message": "권한 메서드 get_global_authorizations 가 auth-allowed 만 대입한다.",
+    "fix": "AUTHORITY-CHECK 로 검사한다.", "allowed": False,
+}
+
+
+def test_경고만_있으면_경고_절이_나오고_위반_절은_없다():
+    report = _report(1, 0)
+    report["code_rules"] = _code_section(0, {
+        "summary": {"checked": 1, "violations": 0, "warnings": 1, "allowed": 0, "skipped": 0},
+        "files": [{"file": "src/zbp_x.clas.locals_imp.abap", "language": "abap", "status": "pass",
+                   "findings": [_WARN_FINDING]}],
+    })
+    text = render(report, 0)
+    assert "### ❌ 공통 개발 규칙 위반" not in text
+    assert "### ⚠️ 경고" in text and "병합을 막지는 않습니다" in text
+    assert "[CR-009]" in text and "zbp_x.clas.locals_imp.abap" in text
+    assert "고치기: AUTHORITY-CHECK" in text
+
+
+def test_경고는_위반과_함께_있어도_위반_목록에_섞이지_않는다():
+    report = _report(1, 0)
+    report["code_rules"] = _code_section(1, {
+        "summary": {"checked": 1, "violations": 1, "warnings": 1, "allowed": 0, "skipped": 0},
+        "files": [{"file": "src/z.abap", "language": "abap", "status": "violation", "findings": [
+            {"rule": "CR-001", "level": "violation", "line": 1, "col": 1, "message": "이름 문제",
+             "fix": "영문으로.", "allowed": False},
+            _WARN_FINDING,
+        ]}],
+    })
+    text = render(report, 1)
+    violation_part, warn_part = text.split("### ⚠️ 경고")
+    assert "[CR-001]" in violation_part and "[CR-009]" not in violation_part
+    assert "[CR-009]" in warn_part
+
+
+def test_예외로_인정된_경고는_보이지_않는다():
+    report = _report(1, 0)
+    report["code_rules"] = _code_section(0, {
+        "summary": {"checked": 1, "violations": 0, "warnings": 0, "allowed": 1, "skipped": 0},
+        "files": [{"file": "src/z.abap", "language": "abap", "status": "pass",
+                   "findings": [{**_WARN_FINDING, "allowed": True}]}],
+    })
+    assert "경고" not in render(report, 0)
+
+
 def test_예외로_인정된_발견은_따로_보이지_않는다():
     report = _report(1, 0)
     report["code_rules"] = _code_section(1, {

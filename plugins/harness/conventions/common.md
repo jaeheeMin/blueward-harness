@@ -224,3 +224,58 @@ Z, Y 같은 이름 접두어와 그 프로젝트만의 네이밍 규칙은 공�
 오브젝트는 Z 로 시작한다" 를 적는다.
 
 **기계 검사**: 문서로만.
+
+## CR-009 데이터를 바꾸는 앱은 권한을 검사한다
+
+생성·변경·삭제·전기·액션처럼 데이터를 바꾸는 RAP 앱은 behavior pool 에서
+권한을 실제로 검사한다. BDEF 의 `authorization master ( global | instance )`
+가 가리키는 권한 메서드(`FOR GLOBAL AUTHORIZATION`, `FOR INSTANCE
+AUTHORIZATION`)가 모든 요청에 `if_abap_behv=>auth-allowed` 만 돌려주면 앱
+사용 권한이 있는 사람은 누구나 모든 데이터를 바꿀 수 있다. 검사 방식과 이유는
+Spec 의 `## 권한` 절에 적는다.
+
+**왜**: 앱 사용 권한(IAM App)은 앱을 열 수 있느냐만 정한다. 어느 플랜트의
+재고를 전기해도 되는지 같은 데이터 단위 권한은 behavior pool 이 검사해야 한다.
+SAP 가이드의 전부 허용 예시는 권한 객체가 아직 없을 때 쓰는 시뮬레이션이며
+운영에서 쓰지 말라고 안내한다. 검사 없이 배포하면 의도하지 않은 사람이 재고·
+전표를 바꿀 수 있다.
+
+**나쁜 예 (ABAP)**
+```abap
+METHOD get_global_authorizations.
+  result-%create = if_abap_behv=>auth-allowed.
+  result-%update = if_abap_behv=>auth-allowed.
+ENDMETHOD.
+```
+
+**좋은 예 (ABAP)** — 구조는 SAP RAP 가이드(Implementing Global/Instance
+Authorization)를 따른다. 권한 객체 이름(`ZPP_PLANT`)은 예시다.
+```abap
+METHOD get_global_authorizations.
+  IF requested_authorizations-%create = if_abap_behv=>mk-on.
+    AUTHORITY-CHECK OBJECT 'ZPP_PLANT' ID 'ACTVT' FIELD '01'.
+    result-%create = COND #( WHEN sy-subrc = 0
+                             THEN if_abap_behv=>auth-allowed
+                             ELSE if_abap_behv=>auth-unauthorized ).
+  ENDIF.
+ENDMETHOD.
+```
+플랜트처럼 데이터 값에 따라 달라지는 권한은 `instance` 권한 메서드에서 인스턴스의
+필드 값으로 `ID 'WERKS' FIELD ...` 를 검사한다(create 와 static action 은
+instance 권한을 쓸 수 없다). 권한을 다른 곳(표준 BO, CDS 접근 제어(DCL))에
+위임한 것이면 `harness:allow CR-009 <이유>` 로 그 사실과 근거를 남긴다.
+
+**기계 검사**: 경고만 한다(`level: warn` — 코드 저장과 PR 검사를 막지는 않는다. 훅은
+저장 때 경고를 알려 주고 PR 코멘트에 "경고" 로 나온다). ABAP 소스에서 `FOR GLOBAL
+AUTHORIZATION` 또는 `FOR INSTANCE AUTHORIZATION` 메서드(`METHODS:` 콜론 체인 선언 포함)의
+구현이 (a) `auth-allowed` 만 대입하고(`auth-unauthorized` 가 없다) 그 **클래스 구현**
+(`CLASS ... IMPLEMENTATION` ~ `ENDCLASS`) 안에 `AUTHORITY-CHECK` 가 없거나, (b) 본문이
+비었거나 주석뿐이면(비어 있을 때 실제로 무엇을 허용하는지 확인하지 못했으므로
+"권한 메서드가 비어 있음 — 확인 필요") 경고한다. 권한 확인을 같은 클래스의 다른 메서드로
+빼도 AUTHORITY-CHECK 가 그 클래스에 있으면 경고하지 않는다(주석·문자열 속은 세지 않는다).
+못 잡는 것과 한계: 메서드 정의가 다른 파일(`locals_def`)에 있는 경우, 검사는 있지만
+틀린 권한 객체·필드를 쓴 경우는 못 잡는다. AUTHORITY-CHECK 가 같은 파일의 다른(헬퍼) 클래스나
+다른 파일에 있으면 경고가 나온다 — 오탐이니 `harness:allow` 로 남긴다. 또 위험 판정(risk-gate)이
+바꾼 `.abap` 파일에 이 경고가 있으면 "쓰기 앱인데 권한 검사 없음" 사유로 승인을 요구한다. 의도한
+것이면 `METHOD <이름>.` 구현 줄이나 바로 위 줄에 `harness:allow CR-009 <이유와 결정자>` 를 남긴다 —
+이유 없이는 예외로 인정하지 않는다.

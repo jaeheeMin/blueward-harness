@@ -921,3 +921,213 @@ def test_규칙_설정에_없는_언어는_그_규칙을_적용하지_않는다(
     """CDS 는 CR-002(반복문) 설정에 없다 — 반복문 개념이 없는 언어라서다."""
     cfg = code_rules._load_config()
     assert "cds" not in (cfg["rules"]["CR-002"].get("languages") or [])
+
+
+# --- CR-009: 권한 메서드가 전부 허용만 한다(#361, 경고) ------------------------------------
+
+_POOL_DEF = (
+    "CLASS lhc_upload DEFINITION INHERITING FROM cl_abap_behavior_handler.\n"
+    "  PRIVATE SECTION.\n"
+    "    METHODS get_global_authorizations FOR GLOBAL AUTHORIZATION\n"
+    "      IMPORTING REQUEST requested_authorizations FOR Upload RESULT result.\n"
+    "ENDCLASS.\n"
+)
+
+
+def _pool(body: str, extra: str = "") -> str:
+    return (
+        _POOL_DEF
+        + "CLASS lhc_upload IMPLEMENTATION.\n"
+        + "  METHOD get_global_authorizations.\n"
+        + body
+        + "  ENDMETHOD.\n"
+        + extra
+        + "ENDCLASS.\n"
+    )
+
+
+_ALLOW_ALL = (
+    "    IF requested_authorizations-%create = if_abap_behv=>mk-on.\n"
+    "      result-%create = if_abap_behv=>auth-allowed.\n"
+    "    ENDIF.\n"
+)
+
+
+def _cr009(text: str, name: str = "zbp_x.clas.locals_imp.abap") -> list[dict]:
+    return _rules(check_source(name, text), "CR-009")
+
+
+def test_cr009_전부_허용만_하고_AUTHORITY_CHECK_가_없으면_경고():
+    hits = _cr009(_pool(_ALLOW_ALL))
+    assert len(hits) == 1
+    assert hits[0]["level"] == "warn" and hits[0]["allowed"] is False
+    assert "get_global_authorizations" in hits[0]["message"]
+    assert hits[0]["line"] == 7  # METHOD 문 줄
+
+
+def test_cr009_instance_권한_메서드도_본다():
+    text = (
+        "CLASS lhc DEFINITION INHERITING FROM cl_abap_behavior_handler.\n"
+        "  PRIVATE SECTION.\n"
+        "    METHODS get_instance_authorizations FOR INSTANCE AUTHORIZATION\n"
+        "      IMPORTING keys REQUEST requested_authorizations FOR Doc RESULT result.\n"
+        "ENDCLASS.\n"
+        "CLASS lhc IMPLEMENTATION.\n"
+        "  METHOD get_instance_authorizations.\n"
+        "    result = VALUE #( FOR k IN keys ( %tky = k-%tky %update = if_abap_behv=>auth-allowed ) ).\n"
+        "  ENDMETHOD.\n"
+        "ENDCLASS.\n"
+    )
+    assert len(_cr009(text)) == 1
+
+
+def test_cr009_같은_파일에_AUTHORITY_CHECK_가_있으면_다른_메서드여도_경고_아님():
+    check = (
+        "  METHOD check_plant.\n"
+        "    AUTHORITY-CHECK OBJECT 'ZPLANT' ID 'WERKS' FIELD iv_plant ID 'ACTVT' FIELD '02'.\n"
+        "  ENDMETHOD.\n"
+    )
+    assert _cr009(_pool(_ALLOW_ALL, extra=check)) == []
+
+
+def test_cr009_주석_속_AUTHORITY_CHECK_는_무시한다():
+    commented = _ALLOW_ALL + '    " AUTHORITY-CHECK OBJECT 는 나중에\n'
+    assert len(_cr009(_pool(commented))) == 1
+    star = _pool(_ALLOW_ALL, extra="* AUTHORITY-CHECK OBJECT 'ZX'.\n")
+    assert len(_cr009(star)) == 1
+
+
+def test_cr009_문자열_속_AUTHORITY_CHECK_도_무시한다():
+    body = _ALLOW_ALL + "    DATA(lv_text) = 'AUTHORITY-CHECK'.\n"
+    assert len(_cr009(_pool(body))) == 1
+
+
+def test_cr009_unauthorized_를_쓰는_본문은_경고_아님():
+    body = (
+        "    IF lv_ok = abap_true.\n"
+        "      result-%create = if_abap_behv=>auth-allowed.\n"
+        "    ELSE.\n"
+        "      result-%create = if_abap_behv=>auth-unauthorized.\n"
+        "    ENDIF.\n"
+    )
+    assert _cr009(_pool(body)) == []
+
+
+def test_cr009_본문이_비었거나_주석뿐이면_확인_필요_경고():
+    for body in ("", '    " 권한은 표준 BO 가 검사한다.\n'):
+        (hit,) = _cr009(_pool(body))
+        assert hit["level"] == "warn" and "비어 있음" in hit["message"] and "확인 필요" in hit["message"]
+
+
+def test_cr009_빈_본문도_harness_allow_로_예외를_남긴다():
+    text = _pool('    " 표준 BO 가 검사한다.\n').replace(
+        "  METHOD get_global_authorizations.\n",
+        '  " harness:allow CR-009 표준 BO 위임(홍길동 2026-10-19)\n  METHOD get_global_authorizations.\n',
+    )
+    (hit,) = _cr009(text)
+    assert hit["allowed"] is True
+
+
+def test_cr009_콜론_체인_선언도_권한_메서드로_읽는다():
+    text = (
+        "CLASS lhc DEFINITION INHERITING FROM cl_abap_behavior_handler.\n"
+        "  PRIVATE SECTION.\n"
+        "    METHODS: get_instance_features FOR INSTANCE FEATURES\n"
+        "               IMPORTING keys REQUEST requested_features FOR Doc RESULT result,\n"
+        "             get_global_authorizations FOR GLOBAL AUTHORIZATION\n"
+        "               IMPORTING REQUEST requested_authorizations FOR Doc RESULT result.\n"
+        "ENDCLASS.\n"
+        "CLASS lhc IMPLEMENTATION.\n"
+        "  METHOD get_global_authorizations.\n"
+        "    result-%create = if_abap_behv=>auth-allowed.\n"
+        "  ENDMETHOD.\n"
+        "  METHOD get_instance_features.\n"
+        "    result-%create = if_abap_behv=>auth-allowed.\n"
+        "  ENDMETHOD.\n"
+        "ENDCLASS.\n"
+    )
+    (hit,) = _cr009(text)
+    assert "get_global_authorizations" in hit["message"]
+
+
+def test_cr009_다른_클래스의_AUTHORITY_CHECK_는_경고를_끄지_않는다():
+    other = (
+        "CLASS lcl_helper IMPLEMENTATION.\n"
+        "  METHOD check.\n"
+        "    AUTHORITY-CHECK OBJECT 'ZX' ID 'ACTVT' FIELD '02'.\n"
+        "  ENDMETHOD.\n"
+        "ENDCLASS.\n"
+    )
+    assert len(_cr009(_pool(_ALLOW_ALL) + other)) == 1
+    assert _cr009(_pool(_ALLOW_ALL, extra=other.replace("CLASS lcl_helper IMPLEMENTATION.\n", "").replace("ENDCLASS.\n", ""))) == []
+
+
+def test_cr009_권한_메서드_정의가_없으면_경고_아님():
+    text = "CLASS lhc IMPLEMENTATION.\n  METHOD foo.\n    x = if_abap_behv=>auth-allowed.\n  ENDMETHOD.\nENDCLASS.\n"
+    assert _cr009(text) == []
+
+
+def test_cr009_harness_allow_로_예외를_남긴다():
+    allow = _pool(_ALLOW_ALL).replace(
+        "  METHOD get_global_authorizations.\n",
+        '  " harness:allow CR-009 표준 구매오더 BO 가 검사한다(홍길동 2026-10-19)\n'
+        "  METHOD get_global_authorizations.\n",
+    )
+    (hit,) = _cr009(allow)
+    assert hit["allowed"] is True
+    no_reason = allow.replace(" 표준 구매오더 BO 가 검사한다(홍길동 2026-10-19)", "")
+    (hit,) = _cr009(no_reason)
+    assert hit["allowed"] is False and "이유" in hit["note"]
+
+
+def test_cr009_ABAP_가_아닌_언어에는_적용하지_않는다():
+    assert _rules(check_source("a.js", "const x = 'FOR GLOBAL AUTHORIZATION auth-allowed';\n"), "CR-009") == []
+
+
+def test_cr009_경고는_종료코드를_바꾸지_않고_요약에_센다(tmp_path: Path, capsys):
+    target = tmp_path / "zbp_x.clas.locals_imp.abap"
+    target.write_text(_pool(_ALLOW_ALL), encoding="utf-8")
+    code = main([str(target)])
+    assert code == EXIT_PASS
+    report = _read_report(capsys)
+    assert report["files"][0]["status"] == "pass"
+    assert report["summary"]["violations"] == 0
+    assert report["summary"]["warnings"] == 1
+    assert report["files"][0]["findings"][0]["level"] == "warn"
+
+
+def test_cr009_경고와_위반이_같이_있으면_위반만_종료코드를_올린다(tmp_path: Path, capsys):
+    target = tmp_path / "zbp_x.clas.locals_imp.abap"
+    target.write_text(_pool(_ALLOW_ALL + "    DATA lv_금액 TYPE i.\n"), encoding="utf-8")
+    assert main([str(target)]) == EXIT_VIOLATION
+    report = _read_report(capsys)
+    assert report["files"][0]["status"] == "violation"
+    assert report["summary"]["warnings"] == 1
+
+
+def test_기존_규칙의_level_은_violation_이다():
+    (hit,) = _rules(check_source("t.abap", "DATA lv_금액 TYPE i.\n"), "CR-001")
+    assert hit["level"] == "violation"
+
+
+def test_알_수_없는_level_은_설정_오류로_검사_불능(tmp_path: Path, capsys, monkeypatch):
+    from checker.model import ConfigError
+
+    cfg = {
+        "languages": {"abap": {"suffixes": [".abap"]}},
+        "rules": {"CR-001": {"languages": ["abap"], "level": "warning"}},
+    }
+    monkeypatch.setattr(code_rules, "_load_config", lambda: cfg)
+    with pytest.raises(ConfigError):
+        check_source("t.abap", "DATA a TYPE i.\n")
+    target = tmp_path / "t.abap"
+    target.write_text("DATA a TYPE i.\n", encoding="utf-8")
+    assert main([str(target)]) == EXIT_CANNOT_CHECK
+    report = _read_report(capsys)
+    assert report["files"][0]["status"] == "error"
+    assert "level" in report["files"][0]["reason"]
+
+
+def test_code_checks_의_CR_009_는_경고다():
+    rule = code_rules._load_config()["rules"]["CR-009"]
+    assert rule["level"] == "warn" and rule["languages"] == ["abap"]

@@ -1,6 +1,6 @@
 """공통 개발 규칙 CR-001(이름에 한글 금지), CR-002(반복문 안 DB 조회 금지),
-CR-003(SELECT * 금지), CR-007(빈 CATCH 금지)을 코드에서 기계로 검사한다
-(#54, #81, `plugins/harness/conventions/common.md`).
+CR-003(SELECT * 금지), CR-007(빈 CATCH 금지), CR-009(권한 검사, 경고)를 코드에서 기계로
+검사한다(#54, #81, #361, `plugins/harness/conventions/common.md`).
 
 문서 검사(`checker.engine`)와는 관할이 다르다. 문서 쪽은 템플릿과 규칙 파일을 요구하지만,
 이 두 규칙은 어느 Project Repository, 어느 기준 폴더(`templates/` 와 `rules/` 를 함께
@@ -14,6 +14,10 @@ CLI 까지 둔다. 다만 "규칙은 코드가 아니라 데이터" 라는 원�
 않음, 디코딩 실패) 언어를 모르면(확장자 불명) 그것을 "위반 없음" 으로 답하지 않는다.
 읽지 못한 파일은 종료코드 2(검사 불능)로 끝나 절대 0(통과)이 되지 않고, 확장자를 모르는
 파일은 "skipped" 로 따로 세어 통과 판정과 섞이지 않는다.
+
+**심각도(`level`).** 규칙마다 `code_checks.yaml` 의 `level` 이 `violation`(기본, 종료코드 1)
+이나 `warn`(리포트에는 나오지만 종료코드를 바꾸지 않는다)을 정한다. 발견마다 `level` 이 붙는다.
+그 밖의 값은 설정 오류라 해당 파일이 `error`(검사 불능, 종료코드 2)가 된다.
 
 **예외(`harness:allow`).** 규칙마다 오탐이 있을 수 있으므로, 같은 줄이나 바로 위 줄의
 주석에 `harness:allow CR-001 <이유>` 처럼 이유와 함께 적으면 그 발견은 위반이 아니라
@@ -67,6 +71,26 @@ def _suffix_language_map(cfg: dict) -> dict[str, str]:
         for suffix in (info or {}).get("suffixes") or []:
             mapping[str(suffix).lower()] = lang
     return mapping
+
+
+LEVEL_VIOLATION = "violation"
+LEVEL_WARN = "warn"
+_LEVELS = (LEVEL_VIOLATION, LEVEL_WARN)
+
+
+def _rule_level(rules_cfg: dict, rule: str) -> str:
+    """규칙의 심각도. `code_checks.yaml` 의 `level` 이고, 없으면 위반(`violation`)이다."""
+    return (rules_cfg.get(rule) or {}).get("level", LEVEL_VIOLATION)
+
+
+def _validate_levels(cfg: dict) -> None:
+    """모르는 `level` 값은 설정 오류다 — 경고로도 위반으로도 짐작하지 않는다(원칙 7)."""
+    for rule, info in (cfg.get("rules") or {}).items():
+        level = (info or {}).get("level", LEVEL_VIOLATION)
+        if level not in _LEVELS:
+            raise ConfigError(
+                f"code_checks.yaml 의 {rule}.level 은 {' 또는 '.join(_LEVELS)} 여야 한다(지금 값: {level!r})"
+            )
 
 
 def language_for_suffix(path: Path, cfg: dict | None = None) -> str | None:
@@ -910,6 +934,118 @@ def _scan_js_cr007(masked: str) -> list[tuple[str, int, str]]:
     return findings
 
 
+# --- CR-009 (ABAP): 권한 메서드가 전부 허용만 한다(#361, 경고) --------------------
+#
+# RAP behavior pool 의 `FOR GLOBAL AUTHORIZATION` / `FOR INSTANCE AUTHORIZATION` 메서드가
+# `auth-allowed` 만 대입하고, 같은 파일 어디에도 `AUTHORITY-CHECK` 가 없으면 권한을 실제로는
+# 검사하지 않는 것이다(SAP 공식 예시는 권한 객체가 없을 때만 쓰는 시뮬레이션이며 운영에서
+# 쓰지 말라고 한다). 권한 확인을 같은 클래스의 다른 메서드로 빼 둬도 그 클래스 구현
+# (`CLASS ... IMPLEMENTATION` ~ `ENDCLASS`) 안에 AUTHORITY-CHECK 가 있으면 경고하지 않는다 —
+# 오탐을 줄이려는 것이다. 본문이 비었거나 주석뿐인 것도 경고한다: 비어 있을 때 실제로 무엇을
+# 허용하는지 확인하지 못했으므로 안전한 쪽(경고)으로 둔다. 선언은 `METHODS x FOR ...` 와
+# 콜론 체인 `METHODS: x FOR ..., y FOR ...` 모두 읽는다.
+# 놓치는 것: 메서드 정의가 다른 파일(locals_def)에 있는 경우, AUTHORITY-CHECK 가 다른 클래스(같은 파일의
+# 헬퍼 클래스 포함)나 다른 파일에 있는 경우(후자는 오탐 경고 — harness:allow 로 남긴다), 검사는 있지만
+# 틀린 권한 객체·필드를 쓴 경우.
+
+_ABAP_AUTH_DECL_RE = re.compile(
+    r"^\s*([A-Za-z_][\w~]*)\b.*?\bFOR\s+(?:GLOBAL|INSTANCE)\s+AUTHORIZATION\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_ABAP_CLASS_IMPL_RE = re.compile(r"^\s*CLASS\s+[\w~]+\s+IMPLEMENTATION\s*\.", re.IGNORECASE)
+_ABAP_AUTHORITY_CHECK_RE = re.compile(r"\bAUTHORITY-CHECK\b", re.IGNORECASE)
+_ABAP_AUTH_ALLOWED_RE = re.compile(r"\bauth-allowed\b", re.IGNORECASE)
+_ABAP_AUTH_UNAUTHORIZED_RE = re.compile(r"\bauth-unauthorized\b", re.IGNORECASE)
+_ABAP_METHOD_NAME_RE = re.compile(r"\s*METHOD\s+([A-Za-z_][\w~]*)\s*\.", re.IGNORECASE)
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    parts, depth, last = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(depth - 1, 0)
+        elif ch == "," and depth == 0:
+            parts.append(text[last:i])
+            last = i + 1
+    parts.append(text[last:])
+    return parts
+
+
+def _scan_abap_cr009(masked: str) -> list[tuple[str, int, str]]:
+    statements = []  # (keyword, 시작, 끝)
+    for start, end in _abap_statements(masked):
+        km = _ABAP_KEYWORD_RE.match(masked[start:end])
+        statements.append((km.group(2).upper() if km else "", start, end))
+
+    auth_methods: set[str] = set()
+    for keyword, start, end in statements:
+        if keyword != "METHODS":
+            continue
+        rest = masked[start:end].lstrip()[len("METHODS"):].lstrip()
+        if rest.startswith(":"):
+            rest = rest[1:]
+        for piece in _split_top_level_commas(rest.rstrip().rstrip(".")):
+            m = _ABAP_AUTH_DECL_RE.match(piece)
+            if m:
+                auth_methods.add(m.group(1).lower())
+    if not auth_methods:
+        return []
+
+    # 클래스 구현 범위. 구현 문이 하나도 없으면 파일 전체를 한 범위로 본다.
+    spans: list[tuple[int, int]] = []
+    open_at: int | None = None
+    for keyword, start, end in statements:
+        if keyword == "CLASS" and _ABAP_CLASS_IMPL_RE.match(masked[start:end]):
+            open_at = start
+        elif keyword == "ENDCLASS" and open_at is not None:
+            spans.append((open_at, end))
+            open_at = None
+    if open_at is not None:
+        spans.append((open_at, len(masked)))
+    if not spans:
+        spans = [(0, len(masked))]
+
+    def has_check(offset: int) -> bool:
+        for lo, hi in spans:
+            if lo <= offset < hi:
+                return bool(_ABAP_AUTHORITY_CHECK_RE.search(masked, lo, hi))
+        return bool(_ABAP_AUTHORITY_CHECK_RE.search(masked))
+
+    findings: list[tuple[str, int, str]] = []
+    current: tuple[str, int] | None = None  # (이름, METHOD 문 오프셋)
+    body_start = 0
+    for keyword, start, end in statements:
+        segment = masked[start:end]
+        if keyword == "METHOD":
+            nm = _ABAP_METHOD_NAME_RE.match(segment)
+            if nm and nm.group(1).lower() in auth_methods:
+                km = _ABAP_KEYWORD_RE.match(segment)
+                current = (nm.group(1), start + (len(km.group(1)) if km else 0))
+                body_start = end
+            continue
+        if keyword == "ENDMETHOD" and current is not None:
+            body = masked[body_start:start]
+            name, offset = current
+            current = None
+            if has_check(offset):
+                continue
+            if not body.strip():
+                findings.append((
+                    "CR-009", offset,
+                    f"권한 메서드 {name} 가 비어 있음 — 실제로 무엇을 허용하는지 확인 필요. "
+                    "다른 곳(표준 BO, CDS DCL)에 위임했다면 harness:allow CR-009 로 이유를 남긴다.",
+                ))
+            elif _ABAP_AUTH_ALLOWED_RE.search(body) and not _ABAP_AUTH_UNAUTHORIZED_RE.search(body):
+                findings.append((
+                    "CR-009", offset,
+                    f"권한 메서드 {name} 가 auth-allowed 만 대입하고 이 클래스에 AUTHORITY-CHECK 가 없다. "
+                    "데이터를 바꾸는 앱이면 권한을 실제로 검사한다.",
+                ))
+    return findings
+
+
 # --- 예외: harness:allow --------------------------------------------------------
 
 _ALLOW_RE = re.compile(r"harness:allow\s+(CR-\d{3})(.*)", re.IGNORECASE)
@@ -947,6 +1083,7 @@ def check_source(path_str: str, text: str, language: str | None = None) -> list[
     대상이 아니다" 이다. 호출부(CLI, 훅)가 언어 판정과 검사 대상 여부를 따로 다룬다.
     """
     cfg = _load_config()
+    _validate_levels(cfg)
     if language is None:
         language = language_for_suffix(Path(path_str), cfg)
     if language is None:
@@ -983,6 +1120,11 @@ def check_source(path_str: str, text: str, language: str | None = None) -> list[
         elif language == "js":
             raw_findings.extend(_scan_js_cr007(masked))
 
+    cr009 = rules_cfg.get("CR-009") or {}
+    if language in (cr009.get("languages") or []):
+        if language == "abap":
+            raw_findings.extend(_scan_abap_cr009(masked))
+
     line_starts = _line_starts(text)
     raw_lines = text.split("\n")
 
@@ -992,6 +1134,7 @@ def check_source(path_str: str, text: str, language: str | None = None) -> list[
         allowed, note = _check_allow(rule, line, raw_lines)
         finding = {
             "rule": rule,
+            "level": _rule_level(rules_cfg, rule),
             "line": line,
             "col": col,
             "message": message,
@@ -1044,8 +1187,18 @@ def _check_file(path: Path) -> dict:
             "findings": [],
         }
 
-    findings = check_source(str(path), text, language=language)
-    has_violation = any(not f["allowed"] for f in findings)
+    try:
+        findings = check_source(str(path), text, language=language)
+    except ConfigError as exc:
+        # 설정을 못 읽은 것은 통과도 위반도 아니다(CLAUDE.md 원칙 7).
+        return {
+            "file": path.as_posix(),
+            "language": language,
+            "status": "error",
+            "reason": f"검사 설정 오류: {exc}",
+            "findings": [],
+        }
+    has_violation = any(not f["allowed"] and f["level"] == LEVEL_VIOLATION for f in findings)
     return {
         "file": path.as_posix(),
         "language": language,
@@ -1071,11 +1224,16 @@ def build_report(paths: list[Path]) -> dict:
         1 for f in files for finding in f["findings"] if finding["allowed"]
     )
     skipped = sum(1 for f in files if f["status"] == "skipped")
+    warnings = sum(
+        1 for f in files for finding in f["findings"]
+        if not finding["allowed"] and finding["level"] == LEVEL_WARN
+    )
 
     return {
         "summary": {
             "checked": checked,
             "violations": violation_files,
+            "warnings": warnings,
             "allowed": allowed_findings,
             "skipped": skipped,
         },
@@ -1099,7 +1257,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m checker.code_rules",
         description=(
             "공통 개발 규칙 CR-001(한글 이름), CR-002(반복문 안 DB 조회), "
-            "CR-003(SELECT *), CR-007(빈 CATCH)을 검사한다."
+            "CR-003(SELECT *), CR-007(빈 CATCH), CR-009(권한 전부 허용, 경고)를 검사한다."
         ),
     )
     parser.add_argument("--json", action="store_true", help="이 도구는 항상 JSON 을 낸다. 명시하고 싶을 때 쓴다")

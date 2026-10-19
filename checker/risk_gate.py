@@ -24,6 +24,10 @@
 - `split_hint` `srs_split_hint`(기본 켬)일 때, SRS 에 새 요구사항이 생겼고 기존 요구사항을 넓힌 것처럼
               보이는 근거(상세 절의 다른 번호 언급, 범위 "하지 않는 것" 줄 변경, 제목 겹침)가 있는가(#278).
               막는 기준이 아니라 승인자에게 근거를 보여 주는 사유다. SRS diff 를 못 읽으면 검사 불능 사유다.
+- `write_auth` 바뀐 `.abap` 파일(head 내용)에 CR-009 경고가 있는가 — behavior pool 의 권한 메서드가
+              `auth-allowed` 만 대입하고 파일에 `AUTHORITY-CHECK` 가 없다(#361). 쓰기 앱이 권한 검사 없이
+              들어오는 것을 승인자가 보게 한다. 설정 키가 없다: 게이트가 켜져 있으면 항상 본다(옛 설정
+              파일이 모르는 키로 판정 불능이 되지 않게). 파일을 못 읽으면 판정 불능 사유다.
 - `ai_review` 설정에서 켠 때만 본다. 이름이 `ai-review` 인 check run 의 결론을 읽는다
               (success 면 통과, 그 밖의 결론이면 실패). 그 check run 은 재사용 워크플로
               `ai-review.yml`(#125)이 만든다. 실패는 "심각한 지적" 일 수도, "AI 리뷰를 못 돌린
@@ -65,10 +69,13 @@ import sys
 import time
 import traceback
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Callable
 
 import yaml
 
+from checker.code_rules import check_source, language_for_suffix
+from checker.model import ConfigError as CodeConfigError
 from checker.rules.req_cross_reference import DEFAULT_EXCLUDE, DEFAULT_PREFIX, collect_mentions, parse_sections
 from checker.ssot_approval import (
     EXIT_NOT_APPROVED,
@@ -671,6 +678,39 @@ def _crit_split_hint(ctx: Context) -> list[Finding]:
     ]
 
 
+def _write_auth_unknown(path: str, why: str) -> Finding:
+    # 검사를 못 한 것을 안전하다고 뭉개지 않는다(원칙 7).
+    return Finding("write_auth", f"권한 검사 여부를 확인하지 못함({why}): {path}. 승인자가 직접 확인")
+
+
+@criterion("write_auth")
+def _crit_write_auth(ctx: Context) -> list[Finding]:
+    findings: list[Finding] = []
+    for entry in ctx.files:
+        path = entry.get("filename") or ""
+        if entry.get("status") == "removed" or language_for_suffix(PurePosixPath(path)) != "abap":
+            continue
+        if ctx.read_text is None:
+            findings.append(_write_auth_unknown(path, "파일을 읽는 방법이 없음"))
+            continue
+        try:
+            text = ctx.read_text(ctx.head_ref, path)
+        except (AttributeError, TypeError):  # 디렉터리 응답 등 파일이 아닌 응답
+            text = None
+        if not text:
+            # 빈 문자열은 디코딩 실패나 1MB 초과(content 가 비어 옴)다.
+            findings.append(_write_auth_unknown(path, "파일을 읽지 못함"))
+            continue
+        try:
+            found = check_source(path, text, language="abap")
+        except CodeConfigError as exc:  # code_checks.yaml 설정 오류 — 통과로 뭉개지 않는다
+            findings.append(_write_auth_unknown(path, f"검사 오류: {exc}"))
+            continue
+        if any(f["rule"] == "CR-009" and not f["allowed"] for f in found):
+            findings.append(Finding("write_auth", f"쓰기 앱인데 권한 검사 없음: {path}"))
+    return findings
+
+
 @criterion("checks")
 def _crit_checks(ctx: Context) -> list[Finding]:
     if not ctx.cfg["require_checks_green"]:
@@ -714,6 +754,11 @@ def build_next(findings: list[Finding], approval: str, approvers_file: str) -> s
         steps.append(
             "승인자가 SRS diff 에서 새 요구사항이 기존 요구사항의 확장인지 확인하십시오. 같은 개발이면 "
             "새 REQ 를 지우고 기존 REQ 의 범위를 넓히십시오"
+        )
+    if "write_auth" in kinds:
+        steps.append(
+            "Claude 가 behavior pool 에 AUTHORITY-CHECK 를 넣거나, 검사하지 않기로 한 것이면 Spec 권한 절과 "
+            "harness:allow CR-009 에 이유·결정자를 남기고, 승인자가 그 결정을 확인하십시오"
         )
     waiting = any(f.waiting for f in findings)
     failing = any(f.criterion == "checks" and not f.waiting for f in findings)

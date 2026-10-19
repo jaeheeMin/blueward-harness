@@ -38,7 +38,7 @@ plugins/harness/
     reviewer.md                harness:reviewer — 읽기 전용 검토(sonnet, 쓰기 도구 없음)
     implementer.md             harness:implementer — 구현(sonnet)
   rules/                       위 Skill 이 참조하는 협업 규칙 5개
-  conventions/common.md        어느 저장소에서나 같은 공통 개발 규칙(CR-001 ~ CR-008)
+  conventions/common.md        어느 저장소에서나 같은 공통 개발 규칙(CR-001 ~ CR-009)
 ```
 
 플러그인 이름은 `harness` 지만, 문서 검사 기능 자체는 여전히 **doc-guard** 라고
@@ -246,10 +246,10 @@ gitleaks(`Gitleaks.Gitleaks`, #170)를 쓴다. 세션을 시작할 때 넷이 �
 
 ### 공통 개발 규칙
 
-`conventions/common.md` 에 CR-001 ~ CR-008 여덟 개 규칙(한글 이름 금지,
+`conventions/common.md` 에 CR-001 ~ CR-009 아홉 개 규칙(한글 이름 금지,
 반복문 안 DB 조회 금지, SELECT * 금지, 비밀정보 금지, 표준 객체 직접 수정
 금지, 하드코딩 금지, 오류 삼키기 금지, 이름 접두어는 프로젝트 conventions
-로)을 담는다. 어느 Project Repository 에서나 같은 규칙이고, 프로젝트마다
+로, 데이터를 바꾸는 앱은 권한 검사)을 담는다. 어느 Project Repository 에서나 같은 규칙이고, 프로젝트마다
 다른 규칙(이름 접두어, SAP naming rule 등)은 그 저장소 `conventions/` 에
 둔다. 두 규칙이 부딪히면 프로젝트 Convention 이 이기지만, CR-004(비밀
 정보)만은 예외 없이 지킨다.
@@ -260,7 +260,11 @@ Plugin 은 세션에 상시 로드되는 지침을 넣을 수 없으므로, `ses
 링크한다.
 
 CR-001(한글 등 비ASCII 이름), CR-002(반복문 안 DB 조회), CR-003(SELECT *, ABAP 만),
-CR-007(빈 CATCH, ABAP·JS/TS)은 기계로도 검사한다(#54, #81). 검사 엔진은
+CR-007(빈 CATCH, ABAP·JS/TS)은 기계로도 검사한다(#54, #81). CR-009(데이터를 바꾸는 앱의
+권한 검사, #361)는 ABAP 에서 경고만 한다 — behavior pool 의 `FOR GLOBAL/INSTANCE AUTHORIZATION` 메서드가
+`auth-allowed` 만 대입하거나 비어 있고 그 클래스에 `AUTHORITY-CHECK` 가 없을 때다. 훅은 막지 않고 저장 때
+경고를 알려 주며(`allow_with_notice`), PR 코멘트에 경고로 나오고, risk-gate 가 "쓰기 앱인데 권한 검사 없음" 사유로 승인을 요구한다.
+Spec 의 선택 절 `## 권한` 표가 검사 방식·권한 객체·활동·검사 기준 필드를 미리 정하게 한다. 검사 엔진은
 `checker/code_rules.py` 이고, `pre_write_guard.py` 훅이 코드를 저장할 때,
 MCP ADT 도구 경로는 `mcp_source_guard.py` 가, `.github/workflows/doc-guard.yml` 이
 PR 마다 각각 부른다 — doc-guard 와 같은 엔진 저장소, 같은 관문 구조를 그대로 쓴다.

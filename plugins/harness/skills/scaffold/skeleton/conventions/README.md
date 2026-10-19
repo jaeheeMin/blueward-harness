@@ -6,7 +6,7 @@
 
 어느 프로젝트에서나 같은 규칙은 여기 두지 않는다. 그런 규칙은 harness
 Plugin 의 [공통 개발 규칙](https://github.com/jaeheeMin/blueward-harness/blob/main/plugins/harness/conventions/common.md)
-(CR-001 ~ CR-008)에 있다. 세션 시작 훅이 그 목록을 매번 요약해 보여 준다.
+(CR-001 ~ CR-009)에 있다. 세션 시작 훅이 그 목록을 매번 요약해 보여 준다.
 
 두 규칙이 부딪히면 이 폴더의 Convention 이 이긴다. 다만 공통 규칙의
 CR-004(비밀정보)만은 예외 없이 지킨다 — 이 폴더의 어떤 파일로도 뒤집지

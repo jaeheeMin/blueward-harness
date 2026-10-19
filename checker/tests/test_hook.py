@@ -309,6 +309,39 @@ def test_설치본에서도_규칙을_지킨_코드는_통과시킨다(installed
     assert code == 0 and out is None
 
 
+_AUTH_POOL = (
+    "CLASS lhc DEFINITION INHERITING FROM cl_abap_behavior_handler.\n"
+    "  PRIVATE SECTION.\n"
+    "    METHODS get_global_authorizations FOR GLOBAL AUTHORIZATION\n"
+    "      IMPORTING REQUEST requested_authorizations FOR Upload RESULT result.\n"
+    "ENDCLASS.\n"
+    "CLASS lhc IMPLEMENTATION.\n"
+    "  METHOD get_global_authorizations.\n"
+    "    result-%create = if_abap_behv=>auth-allowed.\n"
+    "  ENDMETHOD.\n"
+    "ENDCLASS.\n"
+)
+
+
+def test_CR_009_경고는_막지_않고_알림으로_보여_준다(installed_hook, tmp_path):
+    target = tmp_path / "zbp_x.clas.locals_imp.abap"
+    code, out = run_hook(installed_hook, _write_payload(target, _AUTH_POOL), str(ENGINE_ROOT))
+    assert code == 0 and out is not None
+    assert "permissionDecision" not in out["hookSpecificOutput"]
+    notice = out["hookSpecificOutput"]["additionalContext"]
+    assert "CR-009" in notice and "막지 않음" in notice and "get_global_authorizations" in notice
+
+
+def test_CR_009_경고가_있어도_위반이_있으면_막고_경고도_같이_보여_준다(installed_hook, tmp_path):
+    target = tmp_path / "zbp_x.clas.locals_imp.abap"
+    code, out = run_hook(
+        installed_hook, _write_payload(target, _AUTH_POOL + "DATA 주문번호 TYPE vbeln.\n"), str(ENGINE_ROOT)
+    )
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "CR-001" in reason and "CR-009" in reason
+
+
 def test_기준_폴더가_없어도_공통_개발_규칙은_적용된다(installed_hook, tmp_path):
     """CR-001/CR-002 는 doc-guard 와 달리 `templates`/`rules` 를 요구하지 않는다.
 

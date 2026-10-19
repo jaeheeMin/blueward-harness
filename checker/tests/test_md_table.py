@@ -255,6 +255,102 @@ def test_launchpad_노출_표_머리가_다르면_위반이다(tmp_path, capsys)
     assert code == EXIT_VIOLATION
 
 
+# ---- 권한 표(#361) ----
+
+AU_HEAD = (
+    "| 동작 | 검사 방식 | 권한 객체 | 활동 | 검사 기준 필드 | 비고 |\n"
+    "|---|---|---|---|---|---|\n"
+)
+AU_ROW = "| 생산실적 전기 | instance | ZPP_PLANT | 01, 02 | 플랜트 | |\n"
+
+
+def _spec_with_au(table: str) -> str:
+    return SPEC_VALID.replace("## 완료 조건", "## 권한\n\n설명.\n\n" + table + "\n## 완료 조건")
+
+
+def _au(tmp_path, capsys, rows: str):
+    return _run_auto(capsys, _put(tmp_path, _spec_with_au(AU_HEAD + rows)))
+
+
+def test_올바른_권한_표는_통과한다(tmp_path, capsys):
+    rows = (
+        AU_ROW
+        + "| 삭제 | global, instance | ZPP_PLANT | 06 | 플랜트 | |\n"
+        + "| 승인 | update 위임 | ZPP_PLANT | - | 플랜트 | update 와 같음 |\n"
+    )
+    code, out = _au(tmp_path, capsys, rows)
+    assert code == EXIT_PASS, out
+
+
+def test_권한_절이_없는_기존_spec은_통과한다(tmp_path, capsys):
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with(None)))
+    assert code == EXIT_PASS, out
+
+
+def test_검사_안_함은_비고가_비면_위반이다(tmp_path, capsys):
+    code, out = _au(tmp_path, capsys, "| 전기 | 검사 안 함 | - | - | - | |\n")
+    assert code == EXIT_VIOLATION
+    (v,) = out["files"][0]["violations"]
+    assert v["rule"] == "md_table" and "비고" in v["message"] and "검사 안 함" in v["message"]
+
+
+def test_검사_안_함도_비고에_이유를_적으면_통과한다(tmp_path, capsys):
+    row = "| 전기 | 검사 안 함 | - | - | - | 표준 BO 가 검사한다. 홍길동 2026-10-19 |\n"
+    code, out = _au(tmp_path, capsys, row)
+    assert code == EXIT_PASS, out
+
+
+@pytest.mark.parametrize("field", ["-", ""])
+def test_검사_기준_필드가_없으면_비고가_필요하다(tmp_path, capsys, field):
+    row = f"| 전기 | global | ZPP_APP | 01 | {field} | |\n"
+    code, out = _au(tmp_path, capsys, row)
+    assert code == EXIT_VIOLATION
+    assert "검사 기준 필드" in out["files"][0]["violations"][0]["message"]
+    ok = f"| 전기 | global | ZPP_APP | 01 | {field} | 앱 사용 권한만 본다. 홍길동 2026-10-19 |\n"
+    assert _au(tmp_path, capsys, ok)[0] == EXIT_PASS
+
+
+@pytest.mark.parametrize("bad", [
+    AU_ROW.replace("instance", "Instance"),      # 검사 방식 허용 밖
+    AU_ROW.replace("instance", "전부 허용"),
+    AU_ROW.replace("01, 02", "1"),               # 활동 형식
+    AU_ROW.replace("01, 02", "일부"),
+    AU_ROW.replace("01, 02", ""),                # 활동 빈 칸
+])
+def test_권한_표가_틀리면_위반이다(tmp_path, capsys, bad):
+    code, out = _au(tmp_path, capsys, bad)
+    assert code == EXIT_VIOLATION
+    assert {v["rule"] for v in out["files"][0]["violations"]} == {"md_table"}
+
+
+def test_권한_표_머리가_다르면_위반이다(tmp_path, capsys):
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with_au("| 동작 | 비고 |\n|---|---|\n| x | y |\n")))
+    assert code == EXIT_VIOLATION
+
+
+def test_조건_필수_조건_열이_여럿이면_모두_맞을_때만_본다(tmp_path):
+    params = {
+        "절": "사용 객체", "열": ["종류", "이름", "작업", "비고"],
+        "조건_필수": [{"열": "비고", "조건": {"종류": ["CDS View"], "작업": ["수정"]}}],
+    }
+    p = tmp_path / "a.md"
+    p.write_text(doc(HEAD + "| CDS View | ZA | 수정 | |\n| CDS View | ZB | 생성 | |\n"), encoding="utf-8")
+    out = check(p, params)
+    assert len(out) == 1 and "1번째" in out[0].message
+
+
+@pytest.mark.parametrize("bad", [
+    "x",
+    [{"열": "비고"}],
+    [{"열": "없는열", "조건": {"종류": ["a"]}}],
+    [{"열": "비고", "조건": {"없는열": ["a"]}}],
+    [{"열": "비고", "조건": {"종류": "a"}}],
+])
+def test_조건_필수가_잘못되면_설정_오류(tmp_path, bad):
+    with pytest.raises(ConfigError):
+        run(tmp_path, doc(HEAD), 조건_필수=bad)
+
+
 @pytest.mark.parametrize("kind", ["IAM App", "Business Catalog", "Launchpad App Descriptor Item"])
 def test_새_종류_세_가지는_사용_객체에서_통과한다(tmp_path, capsys, kind):
     code, out = _run_auto(capsys, _put(tmp_path, _spec_with(HEAD + f"| {kind} | ZMM_BC_AUTO1 | 수정 | |\n")))
