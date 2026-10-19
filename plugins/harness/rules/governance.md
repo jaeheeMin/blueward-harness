@@ -76,11 +76,13 @@ Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험�
 **blueward-harness 저장소 자신은 승인자가 한 명뿐이라 아직 이 파일을 두지 않아 게이트가
 꺼져 있다.**
 
-`ai_review` 는 기본 `false` 다. 켜면 위험도가 낮은 PR 에만 Claude AI 리뷰(`ai-review` 검사,
-`.github/workflows/ai-review.yml`)가 돌고, 심각한 지적이 나오거나 AI 리뷰를 돌리지 못하면(검사
-불능) 그 검사가 실패해 PR 이 위험으로 판정된다. 켜려면 `claude setup-token` 으로 만든 토큰을
-`gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 `ai_review` 를 `true` 로
-바꾼다. 시크릿이 없으면 통과가 아니라 검사 불능이다.
+`ai_review` 는 기본 `false` 다. 켜면 **위험한 PR 을 포함한 모든 PR** 에 Claude AI 리뷰(`ai-review`
+검사, `.github/workflows/ai-review.yml`)가 돈다. 위험한 PR 은 AI 리뷰에 더해 승인자 Approve 도
+필요하다(승인 판정은 그대로). 심각한 지적이 나오거나, 큰 PR 이라 일부만 봤거나, AI 리뷰를 돌리지
+못하면(검사 불능·취소·시간 초과) 그 검사가 실패해 PR 이 위험으로 판정되고, risk-gate 사유가 이
+경우들을 나눠 적는다(심각한 지적은 파일:줄과 요약까지). 켜려면 `claude setup-token` 으로 만든
+토큰을 `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 `ai_review` 를 `true`
+로 바꾼다. 시크릿이 없으면 통과가 아니라 검사 불능이다.
 
 ## 스킬 없이 직접 해도 되는 것
 

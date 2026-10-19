@@ -62,7 +62,7 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
      병합된다. **승인자 목록에 작성자가 아닌 사람이 한 명도 없으면 위험한 PR 을
      승인으로 통과시킬 수 없다** — 사용자에게 승인자를 꼭 넣도록 안내한다. 기준은
      `.github/risk-gate.yaml` 에서 고치고(주석 참고), 파일을 지우면 게이트가 꺼진다.
-   - `.github/workflows/ai-review.yml` 은 위험도가 낮은 PR 에만 Claude AI 리뷰를 돌린다(#125).
+   - `.github/workflows/ai-review.yml` 은 위험한 PR 을 포함한 모든 PR 에 Claude AI 리뷰를 돌린다(#125, #360).
      **기본은 꺼짐**이라 아무것도 하지 않는다. 켜려면 (1) `claude setup-token` 으로 만든 토큰을
      `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 (2)
      `.github/risk-gate.yaml` 의 `ai_review` 를 `true` 로 바꾼다. 켰는데 시크릿이 없으면
@@ -112,7 +112,7 @@ env/adt-tiers.example.yaml         SAP MCP 서버별 쓰기 허용 표 예시(#1
 .github/ssot-approvers             SRS 변경 PR 을 승인할 수 있는 GitHub 아이디 목록
 .github/workflows/risk-gate.yml    PR·main 커밋마다 PR 위험도를 판정하는 워크플로(#102)
 .github/risk-gate.yaml             위험도 기준(크기·위험 경로·비밀값·검사 통과). 위험한 PR 만 승인자가 Approve 해야 통과
-.github/workflows/ai-review.yml    위험도 낮은 PR 에만 Claude AI 리뷰를 돌리는 워크플로(#125). 기본 꺼짐
+.github/workflows/ai-review.yml    위험한 PR 포함 모든 PR 에 Claude AI 리뷰를 돌리는 워크플로(#125, #360). 기본 꺼짐
 .github/workflows/gitleaks.yml     PR·main 커밋마다 비밀정보(CR-004)를 gitleaks 로 검사하는 워크플로(#159)
 .github/workflows/pr-tamper-alert.yml 작성자가 아닌 계정이 PR 에 push 하거나 리뷰를 해제하면 이슈·Teams 로 알리는 워크플로(#150)
 .github/workflows/ledger-complete.yml 대표 [DEV-xxx] 이슈를 닫는 PR 이 병합되면 진행 원장을 완료로 바꿔 커밋하는 워크플로(#346)
