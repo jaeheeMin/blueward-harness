@@ -99,6 +99,9 @@ def _shim_dir(tmp_path: Path, *, timeout: bool = True, gh: bool = True, uvx: boo
         (bin_dir / "uvx").write_text(FAKE_UVX, encoding="utf-8", newline="\n")
     if uv is not None:
         (bin_dir / "uv").write_text(uv, encoding="utf-8", newline="\n")
+    # Linux 에서는 실행 권한이 없으면 PATH 의 shim 을 부를 수 없다(Windows bash 는 권한을 보지 않는다).
+    for shim in bin_dir.iterdir():
+        shim.chmod(0o755)
     return bin_dir
 
 
