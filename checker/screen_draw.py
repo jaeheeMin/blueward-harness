@@ -44,7 +44,8 @@ DEFAULT_STYLES = {
     "머리글": {"채우기": "1F4E78", "글꼴_색": "FFFFFF", "굵게": True, "테두리": "얇게", "가로": "가운데"},
     "행": {"테두리": "얇게"},
 }
-_ITEM_KEYS = ("이름", "영역", "칸_수", "스타일", "설명")
+_ITEM_KEYS = ("이름", "영역", "칸_수", "스타일", "설명", "캡처")
+_CAPTURE_KEYS = ("영역", "설명")
 # 소절 이름 → 허용하는 표 머리글(앞의 것이 기본). 필터 바의 `필수` 열은 생략할 수 있다.
 SECTIONS: dict[str, list[list[str]]] = {
     "필터 바": [["이름", "필수"], ["이름"]],
@@ -67,8 +68,17 @@ def items(smap: dict) -> list[dict]:
     for it in smap.get("화면") or []:
         counts = {**DEFAULT_COUNTS, **{norm(k): v for k, v in (it.get("칸_수") or {}).items()}}
         styles = {**DEFAULT_STYLES, **{norm(k): v for k, v in (it.get("스타일") or {}).items()}}
-        out.append({"이름": norm(it["이름"]), "영역": str(it["영역"]).strip(), "칸_수": counts, "스타일": styles})
+        cap = it.get("캡처")
+        capture = None
+        if cap is not None:  # 영역을 생략하면 그 화면의 영역을 쓴다
+            capture = {"영역": str(cap.get("영역") or it["영역"]).strip(), "설명": str(cap["설명"]).strip()}
+        out.append({"이름": norm(it["이름"]), "영역": str(it["영역"]).strip(), "칸_수": counts, "스타일": styles, "캡처": capture})
     return out
+
+
+def capture_name(item: dict) -> str:
+    """작업본 `####` 소제목: `<화면 이름> 캡처`."""
+    return f"{item['이름']} 캡처"
 
 
 # ---------------------------------------------------------------- 지도 검증
@@ -137,6 +147,7 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
         }
         seen: set[str] = set()
         rects: list[tuple[str, tuple[int, int, int, int]]] = []
+        mine: list[tuple[str, str, tuple[int, int, int, int], str]] = []  # (화면, 종류, 범위, 적힌 글) — 영역·캡처 영역·캡처 설명
         for it in v:
             if not isinstance(it, dict) or not isinstance(it.get("이름"), str) or not it["이름"].strip():
                 out.append(("map", f"시트 {sn!r} 의 `화면` 항목에는 문자열 `이름` 이 있어야 한다"))
@@ -159,6 +170,29 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                 except RangeError as e:
                     out.append(("range", f"{where} 의 `영역`: {e.reason}"))
             seen.add(name)
+            if rect is not None:
+                mine.append((name, "영역", rect, str(it["영역"])))
+            if f"{name} 캡처" in reserved:
+                out.append(("map", f"{where}: `{name} 캡처` 는 같은 시트의 표·서술 이름과 같아 구분할 수 없다"))
+            cap = it.get("캡처")
+            if cap is not None:
+                if not isinstance(cap, dict):
+                    out.append(("map", f"{where}: `캡처` 는 `영역`·`설명` 목록이어야 한다"))
+                else:
+                    for k in cap:
+                        if k not in _CAPTURE_KEYS:
+                            out.append(("map", f"{where}: 캡처의 모르는 키 {k!r} — 가능한 키: {', '.join(_CAPTURE_KEYS)}"))
+                    if cap.get("설명") is None:
+                        out.append(("map", f"{where}: 캡처에 `설명` 범위가 없다 — 번호별 설명을 쓸 칸 범위를 적는다"))
+                    for k in _CAPTURE_KEYS:
+                        if cap.get(k) is None:
+                            continue
+                        try:
+                            r = parse_range(cap[k])
+                        except RangeError as e:
+                            out.append(("range", f"{where} 의 캡처 `{k}`: {e.reason}"))
+                            continue
+                        mine.append((name, "캡처 영역" if k == "영역" else "캡처 설명", r, str(cap[k])))
             counts = it.get("칸_수")
             if counts is not None:
                 if not isinstance(counts, dict):
@@ -187,6 +221,26 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                     if _hit(rect, orect):
                         out.append(("map", f"{where} 영역 {it['영역']} 가 화면 {other!r} 영역과 겹친다"))
                 rects.append((name, rect))
+        out += _capture_overlaps(sn, owned, mine)
+    return out
+
+
+def _capture_overlaps(sname, owned, mine) -> list[tuple[str, str]]:
+    """캡처 영역·설명 범위의 겹침. 지도가 맡은 칸·표·서술·유지, 다른 화면의 모든 범위, 같은 화면의 설명 범위와 겹치면 안 된다.
+    같은 화면의 그림 영역과 캡처 영역이 겹치는 것은 지도 오류가 아니다(둘 중 하나만 쓰면 되므로) — 산출이 둘 다 쓴 작업본에서만 멈춘다.
+    그림 영역끼리와 그림 영역·표·서술은 위 본 검사가 이미 한다."""
+    out: list[tuple[str, str]] = []
+    for i, (name, kind, rect, text) in enumerate(mine):
+        if kind != "영역":
+            for label, orect in owned:
+                if _hit(rect, orect):
+                    out.append(("map", f"시트 {sname!r} 화면 {name!r} 의 {kind} {text} 가 {label} 와 겹친다 — 캡처 범위는 지도가 맡은 칸·표·서술·유지 범위 밖이어야 한다"))
+        for oname, okind, orect, otext in mine[i + 1:]:
+            if kind == okind == "영역" or not _hit(rect, orect):
+                continue
+            if name == oname and {kind, okind} == {"영역", "캡처 영역"}:
+                continue
+            out.append(("map", f"시트 {sname!r} 화면 {name!r} 의 {kind} {text} 가 화면 {oname!r} 의 {okind} {otext} 와 겹친다"))
     return out
 
 
@@ -279,6 +333,86 @@ def offenders(item: dict, body: list[str]) -> list[tuple[str, str, list[str]]]:
                 flag = _clean(r[1]).upper()
                 if flag not in ("Y", "N", ""):
                     out.append(("화면 필수 값", f"{where} · 필터 바 '{_clean(r[0])}': {r[1]}", ["Y", "N", "(빈칸)"]))
+    return out
+
+
+# ---------------------------------------------------------------- 캡처 절(`#### <화면> 캡처`)
+
+CAPTURE_HEADER = ["번호", "설명"]
+_IMAGE_LINE = re.compile(r"^!\[([^\]]*)\]\(([^()\s]*)\)\s*$")
+
+
+def parse_capture(body: list[str], where: str) -> tuple[list[tuple[int, str, str]], list[str], list[str], list[str]]:
+    """`#### … 캡처` 본문 → (그림 줄들 [(줄 순서, 대체 글, 경로)], 표 줄들, 그 밖의 글 줄들, 순서 문제들). 빈 줄은 건너뛴다."""
+    imgs: list[tuple[int, str, str]] = []
+    table: list[str] = []
+    stray: list[str] = []
+    order: list[str] = []
+    for n, line in enumerate(body):
+        if not line.strip():
+            continue
+        m = _IMAGE_LINE.match(line.strip())
+        if m:
+            if table:
+                order.append(f"{where}: 그림 줄이 표 뒤에 있다 — 그림 한 줄이 먼저, 그다음 표")
+            imgs.append((n, m.group(1), m.group(2)))
+        elif line.lstrip().startswith("|"):
+            table.append(line)
+        else:
+            stray.append(line.strip())
+    return imgs, table, stray, order
+
+
+def capture_path_problem(path: str) -> str | None:
+    """그림 경로가 저장소 루트 기준 상대 경로 `….png` 가 아니면 사유."""
+    if not path:
+        return "경로가 비어 있다"
+    if not path.lower().endswith(".png"):
+        return "PNG(`.png`) 파일만 쓴다"
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*:", path) or path.startswith(("/", "\\", "~")) or "\\" in path:
+        return "저장소 루트 기준 상대 경로(`docs/spec/img/…png`)만 쓴다 — 주소(URL)·절대 경로·역슬래시는 안 된다"
+    if ".." in path.split("/") or "." in path.split("/"):
+        return "경로에 `.` `..` 조각이 들어 있다 — 저장소 루트 기준 상대 경로를 그대로 적는다"
+    return None
+
+
+def capture_rows(body: list[str], where: str) -> list[tuple[str, str]]:
+    """표의 (번호, 설명) 행들. 구조가 맞는지는 `capture_offenders` 가 먼저 본다."""
+    parsed = _parse_table(parse_capture(body, where)[1], where)
+    return [(norm(r[0]), r[1].strip()) for r in parsed[1]] if parsed else []
+
+
+def capture_offenders(item: dict, body: list[str]) -> list[tuple[str, str, list[str]]]:
+    """한 `#### … 캡처` 절의 양식 밖 항목 → [(분류, 이름, 허용 이름들)]. 표 구조가 깨졌으면 ExportError."""
+    where = capture_name(item)
+    imgs, table, stray, order = parse_capture(body, where)
+    out: list[tuple[str, str, list[str]]] = []
+    for line in stray[:1]:
+        out.append(("화면 캡처의 그림·표 밖 글", f"{where}: {line[:30]}", ["![설명](docs/spec/img/…_v0.1.png) 한 줄", "| 번호 | 설명 | 표"]))
+    for why in order[:1]:
+        out.append(("화면 캡처 순서", why, ["그림 한 줄 → 표"]))
+    if len(imgs) != 1:
+        out.append(("화면 캡처 그림", f"{where}: 그림 {len(imgs)}개", ["![설명](저장소 루트 기준 .png 경로) 정확히 한 줄"]))
+    for _, _, path in imgs[:1]:
+        why = capture_path_problem(path)
+        if why:
+            out.append(("화면 캡처 그림 경로", f"{where}: {path or '(빈 경로)'} — {why}", ["저장소 루트 기준 상대 경로의 .png"]))
+    parsed = _parse_table(table, where) if table else None
+    if parsed is None:
+        out.append(("화면 캡처 표 머리", f"{where}: (표 없음)", [" | ".join(CAPTURE_HEADER)]))
+        return out
+    header, rows, wrong = parsed
+    if header != CAPTURE_HEADER:
+        out.append(("화면 캡처 표 머리", f"{where}: {' | '.join(header)}", [" | ".join(CAPTURE_HEADER)]))
+        return out
+    for n, cnt in wrong:
+        out.append(("화면 캡처 표 행", f"{where}: {n}번째 행의 셀 수 {cnt}", [f"머리글과 같은 {len(header)}칸"]))
+    if not rows:
+        out.append(("화면 캡처 표 행", f"{where}: 행이 없다", ["번호 1부터 한 행 이상"]))
+    for k, r in enumerate(rows, start=1):
+        if norm(r[0]) != str(k):
+            out.append(("화면 캡처 번호", f"{where}: {k}번째 행의 번호 {norm(r[0]) or '(빈칸)'}", [f"1부터 연속한 정수({k} 여야 한다)"]))
+            break
     return out
 
 

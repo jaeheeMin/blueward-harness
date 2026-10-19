@@ -22,6 +22,9 @@ zip 수준에서 바뀐 시트의 XML 만 고치고 나머지 항목은 같은 �
 화면 그림(#335 C2, `checker.screen_draw`): 지도 시트의 `화면:` 영역에 작업본 `#### <화면> 그림` 을 셀·병합으로 그린다.
 그림이 영역을 넘거나 영역 안에 값이 남아 있으면 거부(1), 지도에 없는 그림 이름·소절·표 머리와 병합 겹침은 읽지 못함(2).
 
+화면 캡처(#348, `checker.screen_capture`): 지도 `화면:` 의 `캡처:` 영역에 작업본 `#### <화면> 캡처` 의 PNG 를 비율대로 넣고 번호별 설명을 설명 칸에 쓴다.
+그림 파일이 없거나 옛 판이거나 너무 줄여야 하거나 설명 칸이 모자라면 거부(1). 그림 파트는 zip 조립 단계에서 붙인다.
+
 원본이 SRS 인 지도(표에 `원본: SRS`)는 `## 양식 항목` 이 아니라 SRS.md 의 `## 요구사항` 표와
 `### REQ-xxx` 상세 절을 읽는다(`--form <지도>` 와 `--spec <SRS.md>`). `--check` 는 파일을 쓰지 않고
 같은 보고만 낸다. `--list-values` 는 지도 템플릿의 드롭다운 허용 값을 열별로 JSON 으로 낸다.
@@ -1247,6 +1250,7 @@ def build_form(
 
     # 화면 그림(#335 C2): 지도 `화면:` 영역에 작업본 `#### <화면> 그림` 을 그린다. `비우기` 뒤에 그려야 지워지지 않는다.
     styles_ed = None
+    captured: list[tuple[str, object]] = []  # 넣을 화면 캡처 그림(시트 이름, screen_capture.Placement)
     if srs is None:
         from checker import screen_draw
         from checker.cell_style import StylesXml
@@ -1259,6 +1263,8 @@ def build_form(
                     # 위 `na`(시트 절이 없어도 해당 없음으로 침)와 달리 여기는 명시한 해당 없음만 의도된 생략으로 본다 — 시트 절 자체가 없으면 빠뜨렸을 수 있어 경고한다.
                     if sname in spec_sections and spec_sections[sname][0].na:
                         continue  # 시트를 해당 없음으로 둔 것은 의도된 생략이다(예: 객체 1건으로 바로 들어가는 앱이 아닐 때의 Initial Screen)
+                    if item["캡처"] and screen_draw.capture_name(item) in subs_of:
+                        continue  # 셀로 그리는 대신 캡처 그림을 쓴 화면이다(#348)
                     warn(sname, screen_draw.md_name(item), f"{item['이름']} 은 작업본에 `#### {screen_draw.md_name(item)}` 절이 없어 그리지 않았다(영역 {item['영역']} 은 템플릿 그대로)")
                     continue
                 if styles_ed is None:
@@ -1274,6 +1280,34 @@ def build_form(
                     raise ExportError(e.reason, form=form, sheet=sname, item=e.item) from None
                 if drawn == 0:  # 거부(None)가 아니라 그릴 항목이 없는 경우
                     warn(sname, screen_draw.md_name(item), f"{item['이름']} 의 그림 절이 비어 있어(소절이 없다) 그리지 않았다(영역 {item['영역']} 은 템플릿 그대로)")
+
+        # 화면 캡처(#348): 지도 `화면:` 의 `캡처:` 영역에 작업본 `#### <화면> 캡처` 의 PNG 를 넣고 설명 칸을 채운다. 그림 파트는 맨 끝(zip 조립)에서 붙인다.
+        from checker import screen_capture
+
+        for sname, smap in map_sheets.items():
+            subs_of = spec_sections[sname][1] if sname in spec_sections else {}
+            for item in screen_draw.items(smap):
+                if not item["캡처"]:
+                    continue
+                cname = screen_draw.capture_name(item)
+                body = subs_of.get(cname)
+                if body is None:
+                    if sname in spec_sections and spec_sections[sname][0].na:
+                        continue
+                    warn(sname, cname, f"{item['이름']} 은 작업본에 `#### {cname}` 절이 없어 캡처를 넣지 않았다(영역 {item['캡처']['영역']} 은 템플릿 그대로)")
+                    continue
+                ed = editor(sname)
+                rels_raw = raw.get(paths[sname].rpartition("/")[0] + "/_rels/" + paths[sname].rpartition("/")[2] + ".rels")
+                existing = screen_capture.has_drawing(ed.pre + ed.post, rels_raw.decode("utf-8", "replace") if rels_raw else None)
+                try:
+                    placed = screen_capture.plan(
+                        item, body, sname, ed, root, form, problem, make_put(sname, ed),
+                        picture_drawn=screen_draw.md_name(item) in subs_of, existing_drawing=existing,
+                    )
+                except ExportError as e:
+                    raise ExportError(e.reason, form=form, sheet=sname, item=e.item or cname) from None
+                if placed is not None:
+                    captured.append((sname, placed))
 
     # 남은 견본 검사(#335 B): 이번 산출이 쓰지 않은 템플릿 값·그림·메모가 지도 `유지` 밖에 있으면 거부한다. 쓰기가 다 끝난 뒤에 본다.
     if check_leftover:
@@ -1307,6 +1341,15 @@ def build_form(
 
     # 파일명
     out_name = _file_name(form, fmap, map_sheets, spec_sections, md_values, problem, srs.meta if srs else None)
+    if captured and out_name:  # 캡처 그림 파일 이름의 판이 이 산출 판과 같아야 한다(옛 판 캡처를 조용히 넣지 않는다, #348)
+        from checker import screen_capture
+
+        want = screen_capture.file_version(out_name)
+        for sname, p in captured:
+            if want is None:
+                problem(sname, p.label, f"산출 파일 이름 {out_name!r} 에서 판 번호(`_v0.1`)를 찾지 못해 캡처 {p.path} 의 판을 대조하지 못한다(검사 불능이라 넣지 않는다)")
+            elif p.version != want:
+                problem(sname, p.label, f"캡처 {p.path} 는 v{p.version} 판인데 이번 산출은 v{want} 다 — 캡처가 옛 판이다. 지금 화면을 다시 캡처해 파일 이름을 `_v{want}` 로 하고 경로를 고친다")
     out_path = None
     if out_name:
         bad = [c for c in FORBIDDEN_NAME_CHARS if c in out_name]
@@ -1362,6 +1405,18 @@ def build_form(
     if styles_ed is not None and styles_ed.dirty:  # 화면 서식이 덧붙인 styles.xml(시트들이 하나를 공유한다)
         bom = b"\xef\xbb\xbf" if raw["xl/styles.xml"].startswith(b"\xef\xbb\xbf") else b""
         extra["xl/styles.xml"] = bom + styles_ed.render().encode("utf-8")
+    new_parts: dict[str, bytes] = {}  # 화면 캡처 그림이 더하는 새 파트(drawing·media·rels). 남은 견본 검사 뒤에 붙으므로 견본으로 오인되지 않는다(#348)
+    if captured:
+        from checker import screen_capture
+
+        by_sheet: dict[str, list] = {}
+        for sname, p in captured:
+            by_sheet.setdefault(sname, []).append(p)
+        try:
+            cap_changed, new_parts = screen_capture.assemble(raw, paths, rendered, by_sheet)
+        except ExportError as e:
+            raise ExportError(e.reason, form=form) from None
+        extra.update(cap_changed)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zo:
         for info in infos:
@@ -1374,6 +1429,10 @@ def build_form(
             elif info.filename == "xl/workbook.xml" and new_wb != wb_xml:
                 data = new_wb.encode("utf-8")
             zo.writestr(copy.copy(info), data)
+        for name, data in new_parts.items():
+            zi = zipfile.ZipInfo(name, date_time=infos[0].date_time if infos else (1980, 1, 1, 0, 0, 0))
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            zo.writestr(zi, data)
     return [(out_path, buf.getvalue())], [], warnings
 
 
@@ -1637,13 +1696,18 @@ def spec_offenders(sec: Section, subs: dict, smap: dict) -> list[tuple[str, str,
     texts = [norm(n["이름"]) for n in smap.get("서술", []) or []]
     from checker import screen_draw  # screen_draw 가 이 모듈을 불러 순환하므로 호출할 때 가져온다
 
-    screens = {screen_draw.md_name(i): i for i in screen_draw.items(smap)}  # `#### 화면 1 그림` (지도에 `화면:` 이 있을 때만)
+    screen_items = screen_draw.items(smap)
+    screens = {screen_draw.md_name(i): i for i in screen_items}  # `#### 화면 1 그림` (지도에 `화면:` 이 있을 때만)
+    captures = {screen_draw.capture_name(i): i for i in screen_items if i["캡처"]}  # `#### 화면 1 캡처` (지도 `화면:` 항목에 `캡처:` 가 있을 때만, #348)
+    allowed = list(tables) + texts + list(screens) + list(captures)
     out: list[tuple[str, str, list[str]]] = []
     out += [("칸", n, fields) for n in sec.fields if n not in fields]
-    out += [("표·서술", n, list(tables) + texts + list(screens)) for n in subs if n not in tables and n not in texts and n not in screens]
+    out += [("표·서술", n, allowed) for n in subs if n not in tables and n not in texts and n not in screens and n not in captures]
     for n, body in subs.items():
         if n in screens:
             out += screen_draw.offenders(screens[n], body)
+        elif n in captures:
+            out += screen_draw.capture_offenders(captures[n], body)
     for n, body in subs.items():
         if n not in tables or not body:
             continue
