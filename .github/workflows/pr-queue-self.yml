@@ -24,3 +24,4 @@ jobs:
       issues: write
       statuses: write
       checks: read
+      actions: read
