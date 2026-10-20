@@ -77,7 +77,7 @@ plugins/harness/
 
 | Skill | 하는 일 |
 |---|---|
-| `/harness:start` | 작업을 시작한다. 이슈를 만들고 규칙에 맞는 브랜치를 만든다 |
+| `/harness:start` | 작업을 시작한다. 이슈를 만들고 규칙에 맞는 브랜치를 만든다. 먼저 병합할 수 있는 내 PR 이 있으면 알린다(막지 않음, #370) |
 | `/harness:deliver` | 작업을 마무리한다. 커밋·동기화·푸시·PR 생성을 한 번에 |
 | `/harness:wrapup` | 세션에서 끝내지 못한 작업을 이슈로 남긴다 |
 | `/harness:scaffold` | 새 Project Repository 에 표준 구조를 만든다 |
@@ -106,7 +106,7 @@ plugins/harness/
 | 훅 | 시점 | 하는 일 |
 |---|---|---|
 | `pre_write_guard.py` | `PreToolUse` (Write\|Edit) | 문서가 템플릿을 벗어나면 저장을 막는다(doc-guard). 코드(`.abap`, `.js`/`.ts`, `.cds`, `.asbdef`)는 공통 개발 규칙 CR-001·CR-002·CR-003·CR-007 을 어기면 막는다(#54, #72, #81. BDEF 는 CR-001 만, CR-003·CR-007 은 ABAP·JS/TS 만). 저장소 루트 `src/` 아래에 쓸 때는 활성화 안 된 ABAP 오브젝트가 있으면 막는다(활성화 관문, #190, 아래 절) |
-| `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 SRS 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120). `git commit` 은 staged 변경을 gitleaks 로 검사해 비밀값이 있으면 막는다(#170, 아래 "비밀정보 검사" 참고). `git push` 는 080 에 쓴 ABAP 오브젝트 중 활성화 안 된 것이 있어도 막는다(활성화 관문, #190, 아래 절) |
+| `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. `gh pr merge` 대상 PR 이 SRS 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120). 먼저 병합해야 하는 PR(base 브랜치가 그 PR 의 브랜치, 본문 `먼저: #n`, 같은 DEV 의 SRS→Spec→개발 순, 하네스 저장소의 plugin.json version 순)이 아직 열려 있으면 `checker.pr_queue --pr` 로 확인해 막고, 순서를 정하지 못해도(순환·GitHub 못 읽음·엔진 실패) 통과시키지 않는다(#370, 사람이 GitHub 화면에서 하는 병합은 막지 못한다). `git commit` 은 staged 변경을 gitleaks 로 검사해 비밀값이 있으면 막는다(#170, 아래 "비밀정보 검사" 참고). `git push` 는 080 에 쓴 ABAP 오브젝트 중 활성화 안 된 것이 있어도 막는다(활성화 관문, #190, 아래 절) |
 | `mcp_source_guard.py` | `PreToolUse` (SAP ADT MCP 도구 21개) | MCP 로 SAP 에 쓰거나 이름을 붙이는 경로의 코드 규칙 CR-001·CR-002·CR-003·CR-007 검사(#60, #61)와, `env/adt-tiers.yaml` 기준 테넌트별 쓰기 차단·데이터 추출 되묻기(#148). 아래 "테넌트별 쓰기 차단" 참고 |
 | `mcp_activation_tracker.py` | `PostToolUse` (SAP ADT MCP 도구 6개: `setObjectSource`·`createObject`·`deleteObject`·`activateObjects`·`activateByName`·`inactiveObjects`) | ADT MCP 로 쓴 ABAP 오브젝트와 활성화 결과를 `.git` 아래 기록 파일에 남긴다(#190, 아래 절). 기록하지 못하면 표식 파일을 남기고 exit 2 로 알린다 |
 | `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고, 지난 세션 기록을 원격 반영 뒤에 판정해 커밋되거나 병합된 것은 조용히 지우고 사라진 파일(`git restore --source=<사본>` 안내)과 push 안 한 커밋만 전한다(#224, 옛 형식 기록은 한 번 보여 주고 지운다). upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리). 내 열린 PR 이 있으면 상태와 병합 순서를 `checker.pr_queue` 로 20초 안에 읽어 알리고, 읽지 못하면 "PR 상태 확인 불능" 한 줄만 남긴다(#370, GitHub 원격일 때만, 훅은 항상 exit 0). 저장소 안(꼭대기에서 3단계까지)에 `templates/` 와 `rules/` 를 함께 가진 폴더가 없으면 `/harness:scaffold` 를 안내한다(#128, 자동 실행은 하지 않는다. 플러그인 저장소(`.claude-plugin/marketplace.json` 이 꼭대기에 있다)와 git 저장소가 아닌 곳은 말하지 않고, `HARNESS_NO_SCAFFOLD_HINT=1` 로 끈다) |

@@ -25,7 +25,16 @@
 
 롤업을 검사 이름별 최신 실행으로 줄이지 않아, 다시 돌린 검사의 앞 실행(취소)이 남은 PR 을 "검사 실패" 로 보여 줬다(public-cloud #248~#264). 이제 같은 검사(워크플로+이름, 커밋 status 는 context)는 시작 시각이 가장 늦은 실행 하나만 본다. 같은 검사 가운데 시각을 모르는 실행이 있으면 줄이지 않는다(실패를 통과로 바꾸지 않음).
 
+## 2단계 (0.10.90)
+
+- 엔진 `--pr N [--json]`(`compute_before`): 그 PR 보다 먼저 병합해야 하는 **열린** PR 의 직접 선행(`reduce_edges`)과 이유(`after_reasons`)만 묻는다. 종료코드 0 앞 PR 없음, 1 있음, 2 확인 불능. 상태 판정(승인·risk-gate 코멘트 조회)은 하지 않아 `compute` 보다 gh 호출이 적다(`gh pr list` 한 번 + plugin.json 을 바꾼 PR 의 version 조회).
+- 확인 불능(2)인 경우: GitHub 읽기 실패, 그 PR 이 열린 목록에 없음, 열린 PR 이 100개 이상, 그 PR 이 순환에 들었거나 순환 뒤에 기다림, 그 PR 이 plugin.json 을 바꿨는데 열린 PR 의 version 을 못 읽음. 순환이 다른 PR 에만 있으면 무관한 PR 은 막지 않는다. 같은 파일 경고는 막지 않는다.
+- 훅 `pre-bash-git-guard.sh` `check_one_merge`: `gh pr checks` 검사(-1)와 `uvx` 확인 다음, SRS 승인 검사 앞에 둔다(`engine_spec` 으로 정한 엔진 판 + `uvx`). 앞 PR 이 열려 있으면 "#m(제목) - 이유: …" 와 "먼저 #m 을 병합 / 순서가 틀렸으면 본문의 `먼저:` 줄을 고쳐라 / /harness:prs" 로 거부한다. 종료코드 2·JSON 아님·`status` 가 ok 가 아님·ok 인데 종료코드가 0/1 이 아님은 모두 사유와 함께 거부한다(원칙 7). 위치를 앞쪽에 둔 이유: 순서가 틀린 PR 은 어차피 병합할 수 없으니 승인·위험도 조회(gh 여러 번)를 헛되이 하지 않게 하려는 것이다. 비용은 병합 한 번에 엔진 호출 한 번 더.
+- 한계: 사람이 GitHub 화면에서 병합하는 것은 막을 수 없다(무료 요금제). 훅은 Claude 의 `gh pr merge` 만 막는다. 엔진 판 태그가 아직 없으면 이 검사도 "확인 불능" 으로 거부한다(다른 엔진 검사와 같다).
+- `/harness:start`: 이슈·브랜치를 만든 뒤 `--mine --max-rows 5 --quiet-empty` 로 내 PR 을 알린다(병합 가능한 것, 승인 대기·검사 실패 한 줄 요약). 막지 않고, 엔진 실패는 "PR 상태 확인 불능" 한 줄만 말하고 계속한다.
+- 테스트: `test_pr_queue.py`(`--pr` 열림·없음·체인·version·경고만·순환·무관 순환·읽기 실패·목록에 없음·version 못 읽음·100개), `test_plugin_layout.py`(가짜 uvx 의 `checker.pr_queue` 응답으로 통과·거부·확인 불능·JSON 아님). 가짜 uvx 의 기본 응답은 "앞 PR 없음" 이다.
+- 문서: governance.md, plugins/harness/README.md, 길잡이 "작업 시작하기"·"리뷰·병합하기"·"내 PR 확인하기".
+
 ## 남은 일
 
-- 2단계: merge 훅이 병합 순서를 어기면 알림, start 가 새 작업 시작 때 열린 PR 상황 알림.
 - 3단계: Actions 로 PR 코멘트·체크에 병합 순서 표시.

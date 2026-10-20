@@ -591,6 +591,10 @@ def _fake_uvx_prelude() -> str:
         'case "$*" in\n'
         f"  *checker.merge_command*--mutations*) exec '{py}' -m checker.merge_command --mutations ;;\n"
         f"  *checker.merge_command*) exec '{py}' -m checker.merge_command ;;\n"
+        # 병합 순서 검사(#370). 기본은 "앞 PR 없음". FAKE_PRQ_B64/FAKE_PRQ_RC 로 시나리오를 정한다.
+        "  *checker.pr_queue*)\n"
+        '    if [ -n "${FAKE_PRQ_B64:-}" ]; then printf \'%s\' "$FAKE_PRQ_B64" | base64 -d; exit "${FAKE_PRQ_RC:-0}"; fi\n'
+        '    printf \'%s\' \'{"status":"ok","pr":0,"before":[]}\'; exit 0 ;;\n'
         "esac\n"
     )
 
@@ -1857,3 +1861,69 @@ def test_plugin_json_에_agents_키가_없다():
         (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
     )
     assert "agents" not in plugin_json
+
+
+# --- 병합 가드: 먼저 병합해야 하는 PR 이 열려 있으면 거부(#370) --------------------
+#
+# 가짜 uvx 는 checker.pr_queue 호출에 FAKE_PRQ_B64(base64 로 담은 stdout)와 FAKE_PRQ_RC 로 답한다.
+
+
+def _merge_with_queue(tmp_path: Path, stdout: str | None, rc: int = 0, command: str = "gh pr merge 123 -R owner/repo"):
+    payload = json.dumps({"requires_human": False, "paths": [], "pr": 1, "repo": "x/y"})
+    bin_dir = _make_dispatch_uvx(tmp_path, payload, 0)
+    log = tmp_path / "uvx.log"
+    env = {"FAKE_UVX_LOG": str(log), "FAKE_PRQ_RC": str(rc)}
+    if stdout is not None:
+        env["FAKE_PRQ_B64"] = base64.b64encode(stdout.encode("utf-8")).decode("ascii")
+    code, out = _run_guard_with_fake_uvx(command, bin_dir, env)
+    assert code == 0
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return out, lines
+
+
+@_needs_hook_env
+def test_앞_PR_이_없으면_순서_검사를_통과하고_엔진을_PR_번호로_부른다(tmp_path):
+    out, log = _merge_with_queue(tmp_path, None)
+    assert out is None
+    assert any("checker.pr_queue --repo owner/repo --pr 123 --json" in ln for ln in log)
+
+
+@_needs_hook_env
+def test_앞_PR_이_열려_있으면_이유와_함께_거부한다(tmp_path):
+    payload = json.dumps({
+        "status": "ok", "pr": 123,
+        "before": [{"number": 120, "title": "먼저 할 일", "reasons": ["본문의 먼저: 줄"]}],
+    }, ensure_ascii=False)
+    out, log = _merge_with_queue(tmp_path, payload, 1)
+    reason = _reason(out)
+    assert "#120(먼저 할 일)" in reason
+    assert "본문의 먼저: 줄" in reason
+    assert "먼저 #120 을 병합" in reason
+    assert "먼저:" in reason and "/harness:prs" in reason
+    # 순서 검사에서 막히면 뒤의 승인·위험도 검사는 부르지 않는다.
+    assert not any("check-pr" in ln or "check-human-merge" in ln or "checker.risk_gate" in ln for ln in log)
+
+
+@_needs_hook_env
+def test_순서를_정하지_못하면_통과시키지_않고_사유를_보인다(tmp_path):
+    payload = json.dumps({"status": "cannot_check", "message": "PR 상태 확인 불능 — PR #123 는 순서 판정 불능(순환)"},
+                         ensure_ascii=False)
+    out, _ = _merge_with_queue(tmp_path, payload, 2)
+    reason = _reason(out)
+    assert "확인하지 못해 merge 를 막습니다" in reason
+    assert "순환" in reason
+    assert "/harness:prs" in reason
+
+
+@_needs_hook_env
+def test_순서_검사_엔진이_JSON_아닌_출력으로_실패해도_거부한다(tmp_path):
+    out, _ = _merge_with_queue(tmp_path, "Traceback: 엔진 오류", 1)
+    reason = _reason(out)
+    assert "확인하지 못해 merge 를 막습니다" in reason
+    assert "Traceback" in reason
+
+
+@_needs_hook_env
+def test_순서_검사가_ok_인데_종료코드가_이상하면_거부한다(tmp_path):
+    out, _ = _merge_with_queue(tmp_path, json.dumps({"status": "ok", "pr": 123, "before": []}), 3)
+    assert "확인하지 못해" in _reason(out)

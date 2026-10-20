@@ -281,7 +281,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.88, public-cloud main 기준 (2026-10-19)</div>
+      <div class="note">harness 0.10.90, public-cloud main 기준 (2026-10-19)</div>
     </div>
   </nav>
 
@@ -860,6 +860,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
         <li><div>개발 건(feat, fix)이면 먼저 지금 있는 개발 목록(번호·제목·LoB·다음 단계·상태)을 보여 주고 "기존 개발의 하위 작업이야, 새 개발이야?" 를 물어. 새 개발이면 이슈 제목 앞에 번호를 찜해. 예: <code>[DEV-003] 구매요청 승인</code></div></li>
         <li><div>하위 작업이면 번호를 새로 안 받아. 제목 <b>끝</b>에 붙여: <code>Launchpad 타일 노출 (DEV-002)</code>. 본문에는 "DEV-002 하위 작업" 과 대표 이슈 링크를 적어</div></li>
         <li><div>규칙에 맞는 브랜치를 만들고 이동해</div></li>
+        <li><div>내 열린 PR 이 있으면 "먼저 병합할 수 있는 내 PR: #n" 을 알려 주고, 승인 대기·검사 실패인 PR 은 한 줄로 요약해. 알려 주기만 하고 시작은 막지 않아. 상태를 못 읽으면 "PR 상태 확인 불능" 한 줄만 말하고 계속해</div></li>
         <li><div>진행 원장에 이미 있는 건(예: SRS 에서 설정으로 올라간 건)은 묻지 않고 "대기" 줄을 "진행" 으로 바꿔 ("리뷰"·"완료" 줄이면 바꿀지 물어). 원장에 없는 새 건(feat, fix)이면 줄을 넣을지 물어봐 (넣으면 상태 "진행")</div></li>
       </ol>
     </section>
@@ -994,6 +995,7 @@ fix/31-broken-link</pre>
         <li><div>하네스 저장소는 plugin.json 판이 낮은 PR 먼저</div></li>
       </ol>
       <p class="small">서로 앞이라고 가리키면 "순서 판정 불능(순환)" 이라고 하고 순서를 지어내지 않아. 같은 파일을 고친 PR 쌍은 순서는 그대로 두고 "다시 맞춰야 할 수 있음" 이라고만 알려 줘.</p>
+      <p class="small">이 순서는 병합할 때도 지켜져. 앞 PR 이 열려 있으면 Claude 의 <code>gh pr merge</code> 가 거절돼(사람이 GitHub 화면에서 하는 병합은 못 막아). 새 작업을 <code>/harness:start</code> 로 열 때도 먼저 병합할 수 있는 내 PR 을 알려 줘.</p>
     </section>
   </div>
 
@@ -1338,6 +1340,7 @@ Closes #143</pre>
 
   <div class="callouts">
     <div class="callout ok"><span class="k">사람이 Merge</span><div>운영 경로를 바꾼 PR 이나 SRS 변경 PR 은 Claude 의 <code>gh pr merge</code> 가 거절돼. 사람이 GitHub 화면에서 Merge 버튼을 눌러.</div></div>
+    <div class="callout warn"><span class="k">병합 순서</span><div>먼저 병합해야 하는 PR(다른 PR 위에 쌓은 것, 본문 <code>먼저: #n</code>, 같은 DEV 의 SRS → Spec → 개발 순, 하네스는 plugin.json 판 순)이 아직 열려 있으면 Claude 의 <code>gh pr merge</code> 가 거절돼. 거절 메시지가 앞 PR 과 이유를 알려 줘. 앞 PR 부터 병합하거나, 순서가 틀렸으면 PR 본문의 <code>먼저:</code> 줄을 고쳐. 순서를 못 정하거나(순환, GitHub 못 읽음) 때도 통과시키지 않아. 사람이 GitHub 화면에서 병합하는 것은 막을 수 없으니 <code>/harness:prs</code> 로 순서를 보고 지켜.</div></div>
     <div class="callout warn"><span class="k">남의 PR</span><div>작성자가 지금 로그인한 계정과 다른 PR 은 Claude 가 병합·수정·댓글하지 않아. 읽고 내 작업에 주는 영향만 알려. 사람이 웹이나 터미널에서 하면 훅이 못 막아서, 작성자가 아닌 계정의 push 와 리뷰 해제를 나중에 이슈·Teams 로 알려 줘.</div></div>
   </div>
 
