@@ -75,7 +75,11 @@ jobs:
       pull-requests: write
       issues: write
       statuses: write
+      checks: read
 ```
+
+- `checks: read` 는 0.10.92(#383)에서 더했다. public-cloud #315 의 첫 실행이 열린 PR 의 check run 을 읽지 못해
+  `Resource not accessible by integration` 으로 실패했다(이 저장소는 열린 PR 이 #384 하나라 드러나지 않았다).
 
 - 필요한 secret: `TEAMS_PLUGIN_ALERT_WEBHOOK`(이미 pr-tamper-alert·human-merge-alert 가 쓰는 것. 없으면 Teams 만 건너뜀). 새 secret 은 없다.
 - 이 파일은 `.github/` 아래라 risk-gate 위험 경로다(승인자 Approve 필요, human-merge-paths 에 걸리면 사람이 병합).

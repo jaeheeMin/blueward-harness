@@ -34,6 +34,7 @@
 #         pull-requests: write
 #         issues: write
 #         statuses: write
+#         checks: read
 
 name: pr-queue
 

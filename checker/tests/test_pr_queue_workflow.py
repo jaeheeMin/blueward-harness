@@ -10,7 +10,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "pr-queue.yml"
 CALLER = (
     ROOT / "plugins" / "harness" / "skills" / "scaffold" / "skeleton" / "dot-github" / "workflows" / "pr-queue.yml"
 )
-PERMISSIONS = {"contents": "read", "pull-requests": "write", "issues": "write", "statuses": "write"}
+PERMISSIONS = {"contents": "read", "pull-requests": "write", "issues": "write", "statuses": "write", "checks": "read"}
 
 
 def _load(path: Path) -> dict:
