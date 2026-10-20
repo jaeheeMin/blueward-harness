@@ -1,6 +1,6 @@
 """열린 PR 의 상태와 병합 순서를 GitHub 에서 한 번 계산해 보여 준다(#370).
 
-    python -m checker.pr_queue --repo owner/repo [--mine | --all] [--json] [--quiet-empty]
+    python -m checker.pr_queue --repo owner/repo [--mine | --all] [--json] [--quiet-empty] [--verbose]
 
 팀원이 자기 PR 이 어디까지 왔는지, 무엇부터 병합해야 하는지 모른다. 여러 세션에서 PR 을 만들면
 세션끼리도 모른다. 세션 시작 훅과 `/harness:prs` 와 deliver 가 이 모듈 한 곳에서 같은 계산을 받는다.
@@ -389,6 +389,29 @@ def _dev_numbers(raw: dict) -> set[int]:
     return nums
 
 
+def _primary_dev(raw: dict) -> int | None:
+    """PR 하나가 속한 DEV 번호 하나(줄기 묶기용, #390). `_dev_numbers` 는 본문에서 스쳐 지나간 번호까지 모으므로(결함 PR 이
+    "DEV-007 과 같은 결함" 이라 적는 식) 가장 작은 번호를 쓰면 틀린다. 우선순위: 제목 끝 `(DEV-xxx)` > 제목 맨 앞 번호 >
+    브랜치 > 바꾼 Spec 파일 `docs/spec/DEV-xxx-*.md`(여럿이면 작은 번호) > 본문에서 처음 나온 번호."""
+    title = raw.get("title") or ""
+    end = _title_end_devs(title)
+    if end:
+        return end[0][0]
+    for text in (title, raw.get("headRefName") or ""):
+        found = _DEV_REF.findall(text)
+        if found:
+            return int(found[0])
+    specs = []
+    for f in raw.get("files") or []:
+        sm = _SPEC_FILE.match(f.get("path") or "")
+        if sm:
+            specs.append(int(sm.group(1)))
+    if specs:
+        return min(specs)
+    found = _DEV_REF.findall(raw.get("body") or "")
+    return int(found[0]) if found else None
+
+
 def _stage(raw: dict) -> int | None:
     """0 SRS, 1 Spec, 2 개발. DEV 단계가 아닌 PR 은 None."""
     paths = [f.get("path") or "" for f in raw.get("files") or []]
@@ -666,6 +689,8 @@ def compute(client: GhClient, repo: str, login: str | None = None, mine: bool = 
                 "after": sorted(direct.get(n, ())),
                 "after_reasons": why.get(n, []),
                 "version": versions.get(n),
+                "devs": sorted(_dev_numbers(raw)),
+                "dev": _primary_dev(raw),
             }
         )
     items.sort(key=lambda it: (it["order"] is None, it["order"] or 0, it["number"]))
@@ -729,24 +754,252 @@ def pr_link(repo: str, number: int, url: str = "") -> str:
     return f"[#{number}]({pr_url(repo, number, url)})"
 
 
-def render(result: dict, mine: bool, max_rows: int | None = None) -> str:
-    """사람이 읽는 표. `max_rows` 를 주면 PR 을 그 수까지만 싣고 나머지는 "외 n개" 로 줄인다(훅용)."""
-    prs = result["prs"]
+# 할 일 분류(#390). 기존 state 문자열에서 옮길 뿐 새 상태를 만들지 않는다.
+TODO_MERGE = "병합하기"
+TODO_FIX = "고치기"
+TODO_WAIT = "기다리기"
+_TODO_ORDER = {TODO_MERGE: 0, TODO_FIX: 1, TODO_WAIT: 2}
+SYMBOLS = {
+    MERGEABLE: "✅",
+    WAITING_APPROVAL: "⏳",
+    CHECKING: "⏳",
+    NOT_STARTED: "⏳",
+    MERGE_UNKNOWN: "⏳",
+    CHECK_FAILED: "❌",
+    CONFLICT: "❌",
+    BEHIND: "❌",
+    DRAFT: "📝",
+    BLOCKED: "❓",
+    UNSTABLE: "❓",
+    UNKNOWN: "❓",
+}
+UNJUDGEABLE_SYMBOL = "❓"
+NO_CHAIN = "줄기 없음"
+
+
+def _symbol(it: dict) -> str:
+    if it["order"] is None:  # 순환이거나 순환 뒤에 기다려 순서를 정하지 못함
+        return UNJUDGEABLE_SYMBOL
+    return SYMBOLS.get(it["state"], UNJUDGEABLE_SYMBOL)
+
+
+def _approvers_short(detail: str) -> str:
+    """승인 대기 사유("a, b 의 승인 필요 — …")에서 승인자 이름만 짧게."""
+    if " 의 승인 필요" in detail:
+        names = "·".join(n.strip() for n in detail.split(" 의 승인 필요")[0].split(",") if n.strip())
+        out = f"{_clip(names, 60)} 승인"
+        return out + "(새 커밋 뒤 재승인)" if "낡은 승인" in detail else out
+    if "승인할 사람이 정해져" in detail:
+        return "승인할 사람 미지정"
+    return "승인 대기"
+
+
+def _todo(it: dict, link) -> tuple[str, str]:
+    """(할 일, 짧은 사유). 병합하기 = 병합 가능이고 앞 PR 없음, 고치기 = 사람이 손볼 것(검사 실패·충돌·판정 불능 등),
+    기다리기 = 시간이나 남이 해결(승인·검사 중·앞 PR·초안)."""
+    state, detail = it["state"], it["detail"]
+    if it["order"] is None:
+        notes = [n for n in it["notes"] if n.startswith((CYCLE_NOTE, BEHIND_ORDER_NOTE))]
+        return TODO_FIX, "; ".join(notes) or "순서 판정 불능"
+    if state == MERGEABLE:
+        if it["after"]:
+            return TODO_WAIT, "앞 " + ", ".join(link(n) for n in it["after"]) + " 대기"
+        return TODO_MERGE, "사람이 GitHub 에서 병합" if it["human_merge"] else ""
+    fixes = {
+        CONFLICT: "충돌",
+        BEHIND: "base 보다 뒤처짐",
+        BLOCKED: "병합 막힘",
+        UNSTABLE: "검사 불안정",
+    }
+    if state == CHECK_FAILED:
+        return TODO_FIX, "검사 실패: " + _clip(detail, 50)
+    if state in fixes:
+        return TODO_FIX, fixes[state]
+    waits = {CHECKING: "검사 중", NOT_STARTED: "검사 시작 전", MERGE_UNKNOWN: "충돌 여부 확인 중", DRAFT: "초안"}
+    if state == WAITING_APPROVAL:
+        return TODO_WAIT, _approvers_short(detail)
+    if state in waits:
+        return TODO_WAIT, waits[state]
+    return TODO_FIX, f"{state}: {_clip(detail, 40)}" if detail else state
+
+
+def _extra_notes(it: dict) -> str:
+    """순서 판정 불능 말고 상태 판정에 붙은 주의(예: 사람이 병합할 경로인지 확인 불능). 표에서 빠지면 안 된다."""
+    notes = [n for n in it["notes"] if not n.startswith((CYCLE_NOTE, BEHIND_ORDER_NOTE))]
+    return "".join(f" / {_clip(n, 60)}" for n in notes)
+
+
+def _components(prs: list[dict]) -> list[list[dict]]:
+    """`after` 로 이어진 PR 묶음(약하게 연결된 성분). 번호 오름차순으로 낸다."""
+    by_number = {it["number"]: it for it in prs}
+    neighbors: dict[int, set[int]] = {n: set() for n in by_number}
+    for it in prs:
+        for d in it["after"]:
+            if d in by_number:
+                neighbors[it["number"]].add(d)
+                neighbors[d].add(it["number"])
+    seen: set[int] = set()
+    comps: list[list[dict]] = []
+    for n in sorted(by_number):
+        if n in seen:
+            continue
+        stack, comp = [n], []
+        seen.add(n)
+        while stack:
+            cur = stack.pop()
+            comp.append(by_number[cur])
+            for m in neighbors[cur]:
+                if m not in seen:
+                    seen.add(m)
+                    stack.append(m)
+        comps.append(sorted(comp, key=lambda it: it["number"]))
+    return comps
+
+
+_TITLE_END_DEV = re.compile(
+    r"[(\[]\s*((?:DEV|REQ)-0*\d+(?:\s*[,/·]\s*(?:DEV|REQ)-0*\d+)*)\s*[)\]]\s*[.。]?\s*$", re.IGNORECASE
+)
+
+
+def _title_end_devs(title: str) -> tuple[list[int], int] | None:
+    """제목 끝의 `(DEV-004)`·`[DEV-004]`·`(DEV-004, DEV-005)` 의 번호들(적힌 순서)과 그 괄호가 시작하는 위치. 뒤의 `.` 는 허용."""
+    m = _TITLE_END_DEV.search(title or "")
+    if not m:
+        return None
+    return [int(n) for n in _DEV_REF.findall(m.group(1))], m.start()
+_TYPE_PREFIX = re.compile(r"^\s*\w+(\([^)]*\))?!?\s*:\s*")
+_NAME_CUTS = (" Spec", " SRS", "·", " 에 ")
+_SPEC_LEAD = re.compile(r"^(?:Spec|SRS)\b")
+CHAIN_NAME_LIMIT = 24
+
+
+def _dev_of(it: dict) -> int | None:
+    """PR 의 DEV 번호. 제목 끝의 `(DEV-xxx)`·`[DEV-xxx]`, 없으면 제목 맨 앞의 번호, 없으면 브랜치에서 읽은 번호를 우선한다.
+    그것도 없으면 엔진이 본문·Spec 파일까지 읽어 둔 `devs` 중 가장 작은 번호다. 둘 이상이어도 하나만 쓴다."""
+    if "dev" in it:  # compute 가 제목·브랜치·Spec 파일·본문 순으로 이미 정했다(_primary_dev)
+        return it["dev"]
+    title = it["title"] or ""
+    end = _title_end_devs(title)
+    if end:
+        return end[0][0]
+    for text in (title, it.get("head") or ""):
+        found = _DEV_REF.findall(text)
+        if found:
+            return int(found[0])
+    devs = it.get("devs") or []
+    return min(devs) if devs else None
+
+
+def _groups(pool: list[dict]) -> list[tuple[int | None, list[dict]]]:
+    """줄기 후보 [(DEV 번호 또는 None, PR 들)]. 번호가 같은 PR 이 한 줄기다. 번호 없는 PR 은 번호 없는 PR 끼리 앞 PR
+    관계로 이은 묶음 단위로 보고, 그 묶음이 닿는 DEV 줄기가 하나뿐이면 전부 그 줄기에 넣는다. 둘 이상에 닿거나 하나도
+    안 닿으면 따로 둔다. 가장 작은 PR 번호 순."""
+    by_dev: dict[int, list[dict]] = {}
+    free: list[dict] = []
+    dev_of: dict[int, int] = {}
+    for it in pool:
+        dev = _dev_of(it)
+        if dev is None:
+            free.append(it)
+        else:
+            by_dev.setdefault(dev, []).append(it)
+            dev_of[it["number"]] = dev
+    neighbors: dict[int, set[int]] = {}
+    for it in pool:
+        for d in it["after"]:
+            neighbors.setdefault(it["number"], set()).add(d)
+            neighbors.setdefault(d, set()).add(it["number"])
+    alone: list[dict] = []
+    for comp in _components(free):
+        touched = {dev_of[n] for it in comp for n in neighbors.get(it["number"], ()) if n in dev_of}
+        if len(touched) == 1:
+            by_dev[next(iter(touched))].extend(comp)
+        else:
+            alone.extend(comp)
+    groups: list[tuple[int | None, list[dict]]] = [
+        (dev, sorted(members, key=lambda it: it["number"])) for dev, members in by_dev.items()
+    ]
+    groups += [(None, comp) for comp in _components(alone)]
+    groups.sort(key=lambda g: g[1][0]["number"])
+    return groups
+
+
+def _pr_cell(it: dict, mine_nums: set[int], link, group_of: dict[int, int]) -> str:
+    """`**[#n](url)** ⏳(앞: [#m](url))` — 내 PR 은 굵게, 다른 줄기에 있는 앞 PR 은 꼬리표로."""
+    text = link(it["number"])
+    if it["number"] in mine_nums:
+        text = f"**{text}**"
+    outside = [d for d in it["after"] if group_of.get(d, group_of[it["number"]]) != group_of[it["number"]]]
+    tail = f"(앞: {', '.join(link(d) for d in outside)})" if outside else ""
+    warn = "⚠" if it["notes"] else ""  # 상태에 붙은 주의는 표 아래 "주의:" 줄에 있다
+    return f"{text} {_symbol(it)}{warn}{tail}"
+
+
+def _chain_name(dev: int | None, members: list[dict]) -> str:
+    """`DEV-007(제목)`. 제목: ① 제목 끝이 `(DEV-xxx)` 인 PR 의 제목에서 `feat: ` 같은 접두어와 `(DEV-xxx)` 를 뗀 것,
+    ② 없으면 `DEV-xxx` 뒤 문구를 ` Spec`·` SRS`·`·`·` 에 ` 앞에서 자른 것, ③ 없으면 줄기에서 가장 먼저인 PR 의 제목(접두어 뗌),
+    ④ 그것도 비면 번호만. 번호 없는 줄기는 맨 앞 PR 제목."""
+    ordered = sorted(members, key=lambda it: (it["order"] is None, it["order"] or 0, it["number"]))
+    if dev is None:
+        return _clip(ordered[0]["title"], 28)
+    label = f"DEV-{dev:03d}"
+    def without_end(title: str) -> str:
+        end = _title_end_devs(title)
+        return title[: end[1]] if end else title
+
+    own_number = re.compile(rf"^[(\[]?(?:DEV|REQ)-0*{dev}\b[\])]?\s*[:：\-–—]*\s*", re.IGNORECASE)  # 이름에 번호가 겹치지 않게
+    for it in ordered:
+        end = _title_end_devs(it["title"] or "")
+        if end and dev in end[0]:
+            title = own_number.sub("", _TYPE_PREFIX.sub("", without_end(it["title"])).strip())
+            if title and not _SPEC_LEAD.match(title):  # `DEV-004 Spec 에 …` 는 이름이 아니라 문서 종류다
+                return f"{label}({_clip(title, CHAIN_NAME_LIMIT)})"
+    pattern = re.compile(rf"(?:DEV|REQ)-0*{dev}\b[\]\)]*\s*[:：\-–—]*\s*(.*)$", re.IGNORECASE)
+    for it in ordered:
+        m = pattern.search(without_end(it["title"] or ""))
+        if not m:
+            continue
+        rest = m.group(1)
+        if _SPEC_LEAD.match(rest):
+            continue
+        cut = min((rest.find(c) for c in _NAME_CUTS if rest.find(c) >= 0), default=len(rest))
+        title = rest[:cut].strip(" ]):：-–—,.")
+        if title:
+            return f"{label}({_clip(title, CHAIN_NAME_LIMIT)})"
+    first = own_number.sub("", _TYPE_PREFIX.sub("", without_end(ordered[0]["title"] or "")).strip())
+    return f"{label}({_clip(first, CHAIN_NAME_LIMIT)})" if first else label
+
+
+def _chain_cell(comp: list[dict], mine_nums: set[int], link, group_of: dict[int, int]) -> str:
+    """줄기 안에서만 위상 순서의 깊이(앞 PR 을 거친 가장 긴 길이)가 같은 PR 을 한 칸으로 묶어 `→` 로 잇는다.
+    갈래는 `(#a, #b)`. 줄기 밖의 앞 PR 은 줄을 합치지 않고 그 PR 뒤에 `(앞: …)` 꼬리표로만 단다."""
+
+    def cell(it: dict) -> str:
+        return _pr_cell(it, mine_nums, link, group_of)
+
+    ordered = sorted((it for it in comp if it["order"] is not None), key=lambda it: (it["order"], it["number"]))
+    depth: dict[int, int] = {}
+    layers: dict[int, list[dict]] = {}
+    for it in ordered:
+        ds = [depth[d] for d in it["after"] if d in depth]
+        depth[it["number"]] = 1 + max(ds) if ds else 0
+        layers.setdefault(depth[it["number"]], []).append(it)
+    groups = [layers[k] for k in sorted(layers)]
+    unordered = sorted((it for it in comp if it["order"] is None), key=lambda it: it["number"])
+    if unordered:
+        groups.append(unordered)  # 순환·순환 뒤 대기는 순서를 못 정했으니 끝에 따로
+    parts = []
+    for group in groups:
+        cells = [cell(it) for it in sorted(group, key=lambda it: it["number"])]
+        parts.append(cells[0] if len(cells) == 1 else "(" + ", ".join(cells) + ")")
+    return " → ".join(parts)
+
+
+def _render_detail(result: dict, mine: bool, urls: dict[int, str], note_limit: int) -> list[str]:
+    """`--verbose` 일 때 표 아래에 덧붙이는 예전 형식(상태 사유 전문, 다음 할 일, 같은 파일 주의)."""
     repo = result["repo"]
-    urls = {it["number"]: it.get("url") or "" for it in prs}
-    shown_prs = prs if max_rows is None else prs[:max_rows]
-    note_limit = 10 if max_rows is None else MAX_ROWS_NOTE_LIMIT
-    lines: list[str] = []
-    scope = "내 PR" if mine else "열린 PR"
-    count = result.get("mine_count", len(prs)) if mine else len(prs)
-    lines.append(f"{result['repo']} {scope} {count}개 상태와 병합 순서")
-    if not prs:
-        lines.append("열린 PR 이 없다.")
-        return "\n".join(lines)
-    lines.append("")
-    lines.append("| 순서 | PR | 상태 | 다음 할 일 | 먼저 병합할 PR |")
-    lines.append("|---|---|---|---|---|")
-    for it in shown_prs:
+    lines = ["", "## 자세히(--verbose)", "", "| 순서 | PR | 상태 | 다음 할 일 | 먼저 병합할 PR |", "|---|---|---|---|---|"]
+    for it in result["prs"]:
         order = str(it["order"]) if it["order"] is not None else "?"
         who = "" if (not mine or it.get("mine")) else f" (@{it['author']})"
         state = it["state"]
@@ -760,8 +1013,6 @@ def render(result: dict, mine: bool, max_rows: int | None = None) -> str:
         after = ", ".join(pr_link(repo, n, urls.get(n, "")) for n in it["after"]) or "-"
         me = pr_link(repo, it["number"], it.get("url") or "")
         lines.append(f"| {order} | {me} {_clip(it['title'])}{who} | {state} | {nxt} | {after} |")
-    if len(prs) > len(shown_prs):
-        lines.append(f"외 {len(prs) - len(shown_prs)}개 — /harness:prs")
     for w in result["shared_files"][:note_limit]:
         sample = ", ".join(w["files"][:2]) + (" 등" if len(w["files"]) > 2 else "")
         lines.append(
@@ -770,6 +1021,91 @@ def render(result: dict, mine: bool, max_rows: int | None = None) -> str:
         )
     if len(result["shared_files"]) > note_limit:
         lines.append(f"주의: 같은 파일을 고친 PR 쌍이 {len(result['shared_files']) - note_limit}개 더 있음")
+    return lines
+
+
+def render(
+    result: dict,
+    mine: bool,
+    max_rows: int | None = None,
+    verbose: bool = False,
+    full: dict | None = None,
+) -> str:
+    """사람이 읽는 출력(#390): 내가 지금 할 일 표(--mine) + 줄기 표.
+
+    `result` 는 보여 줄 PR(--mine 이면 내 PR 과 그 앞 PR)이고, `full` 은 저장소의 열린 PR 전체다. 줄기는
+    `full` 로 묶어 내 PR 이 든 줄기는 내 뒤에 병합될 남의 PR 까지 보인다(없으면 `result` 로 묶는다).
+    `max_rows` 는 줄기 표의 줄기 수 제한이다("… 외 n개 줄기", 훅용). `verbose` 면 사유 전문과 같은 파일 주의를 덧붙인다.
+    """
+    prs = result["prs"]
+    repo = result["repo"]
+    pool = (full or result)["prs"]
+    urls = {it["number"]: it.get("url") or "" for it in pool}
+    note_limit = 10 if max_rows is None else MAX_ROWS_NOTE_LIMIT
+
+    def link(n: int) -> str:
+        return pr_link(repo, n, urls.get(n, ""))
+
+    lines: list[str] = []
+    scope = "내 PR" if mine else "열린 PR"
+    count = result.get("mine_count", len(prs)) if mine else len(prs)
+    lines.append(f"{repo} {scope} {count}개")
+    if not prs:
+        lines.append("내 열린 PR 이 없다." if mine else "열린 PR 이 없다.")
+        return "\n".join(lines)
+
+    mine_nums = {it["number"] for it in prs if it.get("mine")} if mine else set()
+
+    if mine:
+        todos = [(_todo(it, link), it) for it in prs if it["number"] in mine_nums]
+        todos.sort(key=lambda t: (_TODO_ORDER[t[0][0]], t[1]["number"]))
+        lines.append("")
+        lines.append("## 내가 지금 할 수 있는 일")
+        if not any(t[0][0] != TODO_WAIT for t in todos):
+            lines.append("지금 할 수 있는 일: 없음(모두 기다리는 중)")
+        if todos:
+            lines.append("")
+            lines.append("| 할 일 | PR |")
+            lines.append("|---|---|")
+            for (kind, why), it in todos:
+                text = f"{link(it['number'])} {_clip(it['title'])}"
+                if why:
+                    text += f" — {why}"
+                lines.append(f"| {kind} | {text}{_extra_notes(it)} |")
+
+    groups = _groups(pool)
+    group_of = {it["number"]: i for i, (_, members) in enumerate(groups) for it in members}
+    chains = [g for g in groups if len(g[1]) > 1 and (not mine or any(it["number"] in mine_nums for it in g[1]))]
+    singles = sorted(
+        (g[1][0] for g in groups if len(g[1]) == 1 and (not mine or g[1][0]["number"] in mine_nums)),
+        key=lambda it: it["number"],
+    )
+    shown = chains if max_rows is None else chains[:max_rows]
+    lines.append("")
+    lines.append("## 내 PR 과 그 줄기" if mine else "## 열린 PR 과 줄기")
+    lines.append("")
+    lines.append("| 줄기 | 순서 |")
+    lines.append("|---|---|")
+    for dev, members in shown:
+        lines.append(f"| {_chain_name(dev, members)} | {_chain_cell(members, mine_nums, link, group_of)} |")
+    if singles:
+        cells = [_pr_cell(it, mine_nums, link, group_of) for it in singles]
+        lines.append(f"| {NO_CHAIN} | {' · '.join(cells)} |")
+    if len(chains) > len(shown):
+        lines.append(f"… 외 {len(chains) - len(shown)}개 줄기 — /harness:prs")
+    # 상태에 붙은 주의(예: 사람이 병합할 경로인지 확인 불능)는 --verbose 가 없어도 표 바로 아래에 낸다(원칙 7).
+    # 표에서 잘린 줄기와 남의 PR 도 포함한다.
+    noted = [it for _, members in chains for it in members] + singles
+    noted = sorted((it for it in noted if it["notes"]), key=lambda it: it["number"])
+    note_lines = [f"주의: {link(it['number'])} {note}" for it in noted for note in it["notes"]]
+    lines.extend(note_lines[:note_limit])
+    if len(note_lines) > note_limit:
+        lines.append(f"주의: PR 주의가 {len(note_lines) - note_limit}건 더 있음")
+    lines.append("")
+    lines.append("✅ 병합 가능 · ⏳ 기다리는 중 · ❌ 고쳐야 함 · 📝 초안 · ❓ 판정 불능 · ⚠ 주의 있음(아래 줄)")
+
+    if verbose:
+        lines.extend(_render_detail(result, mine, urls, note_limit))
     for warning in result["warnings"][:note_limit]:
         lines.append(f"주의: {warning}")
     if len(result["warnings"]) > note_limit:
@@ -805,7 +1141,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="이 PR 보다 먼저 병합해야 하는 열린 PR 만 묻는다(병합 직전 검사용). 종료코드 0 앞 PR 없음, 1 있음, 2 확인 불능",
     )
-    parser.add_argument("--max-rows", type=int, help="표에 싣는 PR 을 이 수까지로 줄인다(나머지는 '외 n개')")
+    parser.add_argument("--max-rows", type=int, help="줄기 표에 싣는 줄기를 이 수까지로 줄인다(나머지는 '외 n개 줄기')")
+    parser.add_argument("--verbose", action="store_true", help="승인 사유 전문·다음 할 일·같은 파일 주의를 표 아래에 덧붙인다")
     parser.add_argument("--quiet-empty", action="store_true", help="--mine 에서 내 PR 이 없으면 아무것도 내지 않는다")
     return parser
 
@@ -833,7 +1170,8 @@ def run(args: argparse.Namespace, client: GhClient | None = None) -> tuple[int, 
             code = EXIT_CANNOT_CHECK if res["status"] != "ok" else (EXIT_BEFORE_OPEN if res["before"] else EXIT_OK)
             return code, json.dumps(res, ensure_ascii=False) if args.json else render_before(res)
         login = _login(client) if args.mine else None
-        result = compute(client, repo, login, mine=args.mine)
+        full = compute(client, repo, login, mine=False)
+        result = filter_mine(full, login or "") if args.mine else full
     except GhError as exc:
         res = cannot_check(str(exc))
         return EXIT_CANNOT_CHECK, json.dumps(res, ensure_ascii=False) if args.json else res["message"]
@@ -844,7 +1182,7 @@ def run(args: argparse.Namespace, client: GhClient | None = None) -> tuple[int, 
         return EXIT_OK, ""
     if args.json:
         return EXIT_OK, json.dumps(result, ensure_ascii=False)
-    return EXIT_OK, render(result, args.mine, max_rows=args.max_rows)
+    return EXIT_OK, render(result, args.mine, max_rows=args.max_rows, verbose=args.verbose, full=full)
 
 
 def main(argv: list[str] | None = None) -> int:
