@@ -33,6 +33,7 @@ plugins/harness/
     spec/SKILL.md              /harness:spec — 개발 Spec 작성·수정(양식 지도: form-map.md)
     sync/SKILL.md              /harness:sync — 원격 최신 상태를 로컬 브랜치로 당겨받기
     prs/SKILL.md               /harness:prs — 내 열린 PR 의 상태와 병합 순서 확인
+    approvals/SKILL.md         /harness:approvals — 내 승인을 기다리는 PR 을 병합 순서대로 확인
     atc/SKILL.md               /harness:atc — SAP ATC 지적 실행·분류·처리
   agents/
     researcher.md              harness:researcher — 조회 전용 조사(sonnet, 쓰기 도구 없음)
@@ -85,6 +86,7 @@ plugins/harness/
 | `/harness:spec` | SRS 요구사항으로 개발 Spec 을 만들거나, SRS 가 바뀌어 고친다. srs 와 같이 먼저 브랜치를 확인한다 |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다. 지금 세션의 플러그인 버전이 main 보다 낮으면 `/reload-plugins`·Update now 를 안내한다(#203) |
 | `/harness:prs` | 내 열린 PR 의 상태(초안·충돌·검사 실패·검사 중·승인 대기·병합 가능)와 병합 순서를 GitHub 에서 계산해 보여 주고 다음 할 일을 알려 준다. `--all` 이면 저장소 전체. 읽기만 한다(#370) |
+| `/harness:approvals` | 내 Approve 를 기다리는 남의 PR 을 병합 순서대로 한 표로 보여 준다(사유·다른 승인자·낡은 승인·앞 PR). 승인자 파일이 없으면 작성자 아닌 누구든 승인 가능으로 본다. 읽기만 하고 Approve 는 사람이 GitHub 에서 한다(#391) |
 | `/harness:atc` | SAP ATC 지적을 돌려 자동·확인 후·수동으로 나눠 처리하고 재실행해 증감을 보고한다(`env/adt-tiers.yaml` 이 있는 Project Repository 에서만. variant 는 서버 항목의 `atc_variant`) |
 
 ### 서브에이전트 3개(#139)
