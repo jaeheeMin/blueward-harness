@@ -83,6 +83,7 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
         "mcp_source_guard.py",
         "mcp_activation_tracker.py",
         "update_notice.py",
+        "pr_table_notice.py",
     }
 
     # 각 훅이 가리키는 파일이 실제로 플러그인 안에 있어야 한다.
@@ -98,6 +99,12 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
     assert notice["timeout"] <= 10
     assert notice["async"] is True  # 프롬프트를 늦추지 않는다. 안내는 다음 턴에 Claude 에게 간다.
     assert notice["command"].rstrip().endswith("|| exit 0")
+    # #389: 뒤에서 만든 PR 표는 같은 턴에 컨텍스트에 들어가야 하므로 async 가 아니다.
+    pr_table = events["UserPromptSubmit"][1]["hooks"][0]
+    assert "pr_table_notice.py" in pr_table["command"]
+    assert pr_table["timeout"] <= 10
+    assert "async" not in pr_table
+    assert pr_table["command"].rstrip().endswith("|| exit 0")
 
     pre_matchers = {entry["matcher"] for entry in events["PreToolUse"]}
     assert pre_matchers == HOOK_MATCHERS

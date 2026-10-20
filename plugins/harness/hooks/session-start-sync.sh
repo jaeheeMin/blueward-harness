@@ -438,21 +438,24 @@ if [ -n "$changed" ]; then
 fi
 
 # 내 열린 PR 의 상태와 병합 순서(#370). 엔진(checker.pr_queue)이 GitHub 에서 한 번 계산한다.
-# 내 PR 이 없으면 아무것도 내지 않는다. 읽지 못하면 "확인 불능" 한 줄만 남기고 통과·문제없음으로
-# 말하지 않는다(원칙 7). 세션 시작을 오래 붙들지 않게 시간을 제한하고, 어떤 경우에도 exit 0 이다.
+# 엔진을 처음 받는 세션은 받기·설치만으로 오래 걸리므로(#389) 기다리지 않고 뒤에서 돌려 결과를
+# 세션별 파일에 쓴다. 첫 프롬프트에 pr_table_notice.py(UserPromptSubmit)가 그 파일을 읽어 한 번
+# 내고 지운다. 파일 첫 줄은 `rc=<종료코드>`, 나머지는 엔진 stdout 이다. 다 쓴 뒤에 mv 로 최종
+# 이름을 붙이므로 `.tmp` 만 있으면 아직 진행 중이다. 엔진을 부르기 전에 알 수 있는 불능(uvx·gh
+# 없음, 엔진 판 결정 실패)은 여기서 바로 "확인 불능" 으로 낸다(원칙 7: 통과·문제없음으로 뭉개지 않는다).
+# 어떤 경우에도 exit 0 이다.
 if [ "$fetch_state" = "ok" ] && git remote get-url origin 2>/dev/null | grep -q "github\.com"; then
   pr_note=""
   pr_rc=0
-  pr_out=""
   pr_engine=""
-  pr_skip=""
-  pr_timeout="${HARNESS_PR_TIMEOUT:-20}"
+  pr_timeout="${HARNESS_PR_TIMEOUT:-300}"
   if ! command -v uvx >/dev/null 2>&1 || ! command -v gh >/dev/null 2>&1; then
     pr_rc=127
     pr_note="uvx 나 gh 가 없음"
   elif ! command -v timeout >/dev/null 2>&1; then
-    # 시간 제한 없이 엔진을 부르면 첫 엔진 받기가 세션 시작을 오래 붙들 수 있다. 건너뛴다.
-    pr_skip="PR 상태 확인을 건너뜁니다(timeout 명령이 없어 시간을 제한할 수 없음). 다음: /harness:prs 로 확인하십시오."
+    # 시간 제한 없이 뒤에서 돌리면 끝나지 않는 프로세스가 남을 수 있다. 건너뛰고 불능으로 알린다.
+    pr_rc=1
+    pr_note="timeout 명령이 없어 시간을 제한할 수 없음"
   elif [ -n "${DOC_GUARD_ENGINE:-}" ]; then
     pr_engine="$DOC_GUARD_ENGINE"
   else
@@ -463,26 +466,43 @@ if [ "$fetch_state" = "ok" ] && git remote get-url origin 2>/dev/null | grep -q 
     fi
   fi
   if [ -n "$pr_engine" ]; then
-    pr_out="$(timeout "$pr_timeout" uvx --from "$pr_engine" python -m checker.pr_queue --mine --quiet-empty --max-rows 10 2>/dev/null)" || pr_rc=$?
-    pr_out="$(printf '%s' "$pr_out" | tr -d '\r')"
-    if [ "$pr_rc" -eq 124 ]; then
-      # 첫 엔진 받기가 오래 걸린 것이다. 같은 엔진 판을 백그라운드로 받아 두어 다음 세션이 빠르게 한다.
-      pr_skip="PR 상태 확인이 오래 걸려 건너뜀 — /harness:prs 로 확인하십시오."
-      (uvx --from "$pr_engine" python -c "pass" </dev/null >/dev/null 2>&1 &) >/dev/null 2>&1 || true
-    elif [ "$pr_rc" -ne 0 ] && [ -z "$pr_note" ]; then
-      pr_note="$(printf '%s' "$pr_out" | head -n1)"
-      pr_note="${pr_note:-종료코드 $pr_rc}"
+    pr_gitdir="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
+    pr_sid=""
+    if command -v jq >/dev/null 2>&1; then
+      pr_sid="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)"
+    else
+      pr_sid="$(printf '%s' "$input" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"session_id"[[:space:]]*:[[:space:]]*"([^"]*)"/\1/' || true)"
+    fi
+    # 파일 이름에 쓰므로 안전한 글자만 남긴다. pr_table_notice.py 도 같은 규칙으로 이름을 만든다.
+    pr_sid="$(printf '%s' "$pr_sid" | tr -cd 'A-Za-z0-9_-')"
+    if [ -z "$pr_sid" ]; then
+      # 첫 프롬프트 훅이 같은 이름을 찾을 방법이 없으므로 뒤 실행을 하지 않고 바로 불능으로 낸다.
+      pr_rc=1
+      pr_note="세션 ID 를 받지 못함"
+    elif [ -z "$pr_gitdir" ] || [ ! -d "$pr_gitdir" ]; then
+      pr_rc=1
+      pr_note="git 폴더를 찾지 못함"
+    else
+      pr_file="${pr_gitdir}/harness-pr-table.${pr_sid}"
+      # 하루 넘은 옛 파일(끝난 세션이 남긴 것)을 치운다.
+      find "$pr_gitdir" -maxdepth 1 -name 'harness-pr-table.*' -mmin +1440 -exec rm -f {} + >/dev/null 2>&1 || true
+      rm -f "$pr_file" "${pr_file}.tmp"
+      pr_wrap=()
+      if command -v nohup >/dev/null 2>&1; then pr_wrap=(nohup); fi
+      pr_wrap=(${pr_wrap[@]+"${pr_wrap[@]}"} timeout "$pr_timeout")
+      # 모든 fd 를 닫아 훅이 끝나도 백그라운드가 훅 실행기의 파이프를 붙들지 않게 한다.
+      (
+        pr_bg_rc=0
+        pr_bg_out="$(${pr_wrap[@]+"${pr_wrap[@]}"} uvx --from "$pr_engine" python -m checker.pr_queue --mine --quiet-empty --max-rows 10 2>/dev/null </dev/null)" || pr_bg_rc=$?
+        pr_bg_out="$(printf '%s' "$pr_bg_out" | tr -d '\r')"
+        { printf 'rc=%s\n' "$pr_bg_rc"; if [ -n "$pr_bg_out" ]; then printf '%s\n' "$pr_bg_out"; fi; } > "${pr_file}.tmp"
+        mv -f "${pr_file}.tmp" "$pr_file"
+      ) </dev/null >/dev/null 2>&1 &
+      add "내 PR 상태를 뒤에서 확인하는 중입니다. 결과는 첫 프롬프트 뒤에 나오고, 내 열린 PR 이 없으면 나오지 않습니다. 궁금하면 /harness:prs 로 바로 봅니다."
     fi
   fi
-  if [ -n "$pr_skip" ]; then
-    add "$pr_skip"
-  elif [ "$pr_rc" -eq 2 ] && [ -n "$pr_out" ]; then
-    add "$(printf '%s' "$pr_out" | head -n1) 다음: /harness:prs 로 다시 확인하십시오."
-  elif [ "$pr_rc" -ne 0 ]; then
+  if [ "$pr_rc" -ne 0 ]; then
     add "PR 상태 확인 불능(${pr_note:-알 수 없음}) - /harness:prs 로 다시 확인하십시오."
-  elif [ -n "$pr_out" ]; then
-    add "$pr_out"
-    add "자세한 상태와 다음 할 일은 /harness:prs 로 봅니다."
   fi
 fi
 

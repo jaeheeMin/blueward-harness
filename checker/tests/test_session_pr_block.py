@@ -1,4 +1,6 @@
-"""세션 시작 훅의 "내 PR 상태" 블록(#370)과 지난 세션 기록 판정 테스트.
+"""세션 시작 훅의 "내 PR 상태" 블록(#370, #389)과 지난 세션 기록 판정 테스트.
+
+PR 표는 뒤에서 만들어 `.git/harness-pr-table.<session_id>` 에 쓰고, 첫 프롬프트에 `pr_table_notice.py` 가 낸다.
 
 `session-start-sync.sh` 를 임시 저장소에서 직접 돌린다. 엔진(`uvx --from … python -m checker.pr_queue`)은
 가짜 `uvx` 로 바꾸고, `gh`·`uv`·`timeout` 의 있고 없음은 PATH 를 shim 폴더 하나로 좁혀 만든다.
@@ -23,8 +25,9 @@ HOOK = PLUGIN_ROOT / "hooks" / "session-start-sync.sh"
 # 훅이 부르는 명령. shim 폴더에 이것들만 둬서 gh·uvx·timeout 의 유무를 정한다.
 _TOOLS = (
     "git cat head tail tr grep sed wc basename dirname rm mv mkdir sort uniq date cut awk jq ls touch "
-    "env sleep cp"
+    "env sleep cp find"
 ).split()
+SID = "sess-1"
 
 FAKE_UVX = """#!/bin/sh
 case "$*" in
@@ -131,7 +134,7 @@ def _start(tmp_path: Path, repo: Path, bin_dir: Path, fake: Path | None = None, 
     started = time.monotonic()
     done = subprocess.run(
         [_BASH, str(root / "hooks" / "session-start-sync.sh")],
-        input=json.dumps({"cwd": str(repo)}), capture_output=True, text=True, encoding="utf-8",
+        input=json.dumps({"cwd": str(repo), "session_id": SID}), capture_output=True, text=True, encoding="utf-8",
         env=env, timeout=120,
     )
     assert done.returncode == 0, done.stderr
@@ -192,71 +195,114 @@ def test_non_format2_record_with_failed_fetch_is_not_reported_as_cannot_judge(tm
 # --- PR 블록 -------------------------------------------------------------------
 
 
-def test_pr_block_shows_engine_output_and_passes_row_limit(tmp_path):
+def _result_file(repo: Path, sid: str = SID) -> Path:
+    return repo / ".git" / f"harness-pr-table.{sid}"
+
+
+def _wait_result(repo: Path, sid: str = SID, seconds: float = 20) -> str:
+    """뒤에서 돈 엔진이 최종 파일을 쓸 때까지 기다려 내용을 돌려준다."""
+    deadline = time.monotonic() + seconds
+    path = _result_file(repo, sid)
+    while time.monotonic() < deadline:
+        if path.exists():
+            return path.read_text(encoding="utf-8")
+        time.sleep(0.2)
+    raise AssertionError(f"결과 파일이 생기지 않았다: {sorted(p.name for p in (repo / '.git').iterdir())}")
+
+
+def test_pr_block_runs_in_background_and_writes_result_file(tmp_path):
     repo = _repo(tmp_path, "github")
     fake = _fake(tmp_path, out="o/r 내 PR 1개 상태와 병합 순서\n\n| 순서 | PR |\n| 1 | #5 제목 |\n", rc=0)
     out, _ = _start(tmp_path, repo, _shim_dir(tmp_path), fake)
-    assert "o/r 내 PR 1개 상태와 병합 순서" in out and "#5 제목" in out
-    assert "자세한 상태와 다음 할 일은 /harness:prs 로 봅니다." in out
+    # 세션 시작 출력에는 표가 없고 "뒤에서 확인 중" 한 줄만 있다. 없음·문제없음으로 읽히는 말은 없다.
+    assert "내 PR 상태를 뒤에서 확인하는 중입니다" in out
+    assert "#5 제목" not in out and "문제없" not in out and "확인 불능" not in out
+    text = _wait_result(repo)
+    assert text.startswith("rc=0\n")
+    assert "o/r 내 PR 1개 상태와 병합 순서" in text and "#5 제목" in text
+    assert not (repo / ".git" / f"harness-pr-table.{SID}.tmp").exists()
     calls = _calls(fake)
     assert len(calls) == 1
     assert "--from fake-engine python -m checker.pr_queue --mine --quiet-empty --max-rows 10" in calls[0]
 
 
-def test_pr_block_silent_when_no_open_pr(tmp_path):
+def test_pr_block_does_not_wait_for_engine(tmp_path):
+    repo = _repo(tmp_path, "github")
+    # 엔진이 20초 걸려도 훅은 먼저 끝난다. Windows 에서는 git 프로세스 기동만으로 몇 초가 걸리므로
+    # 한계를 엔진 시간보다 한참 아래로 잡는다(기다렸다면 20초를 넘는다).
+    fake = _fake(tmp_path, out="o/r 내 PR 1개\n", rc=0, sleep=20)
+    out, elapsed = _start(tmp_path, repo, _shim_dir(tmp_path), fake)
+    assert "내 PR 상태를 뒤에서 확인하는 중입니다" in out
+    assert elapsed < 15, f"훅이 엔진을 기다렸다: {elapsed:.1f}초"
+    assert not _result_file(repo).exists()  # 아직 진행 중
+    assert _wait_result(repo, seconds=40).startswith("rc=")
+
+
+def test_pr_block_empty_output_is_recorded_as_rc0_without_body(tmp_path):
     repo = _repo(tmp_path, "github")
     fake = _fake(tmp_path, out="", rc=0)
-    out, _ = _start(tmp_path, repo, _shim_dir(tmp_path), fake)
-    assert "/harness:prs" not in out and "PR 상태" not in out
-    assert len(_calls(fake)) == 1  # 엔진은 불렀다
+    _start(tmp_path, repo, _shim_dir(tmp_path), fake)
+    assert _wait_result(repo) == "rc=0\n"
 
 
-def test_pr_block_engine_rc2_shows_engine_message(tmp_path):
-    repo = _repo(tmp_path, "github")
-    fake = _fake(tmp_path, out="PR 상태 확인 불능 — 네트워크 실패\n", rc=2)
-    out, _ = _start(tmp_path, repo, _shim_dir(tmp_path), fake)
-    assert "PR 상태 확인 불능 — 네트워크 실패 다음: /harness:prs 로 다시 확인하십시오." in out
-
-
-def test_pr_block_engine_rc1_is_cannot_check_not_pass(tmp_path):
+def test_pr_block_records_engine_failure_code_and_output(tmp_path):
     repo = _repo(tmp_path, "github")
     fake = _fake(tmp_path, out="Traceback boom\n", rc=1)
-    out, _ = _start(tmp_path, repo, _shim_dir(tmp_path), fake)
-    assert "PR 상태 확인 불능(Traceback boom)" in out
+    _start(tmp_path, repo, _shim_dir(tmp_path), fake)
+    assert _wait_result(repo) == "rc=1\nTraceback boom\n"
 
 
-def test_pr_block_engine_rc1_without_output_shows_exit_code(tmp_path):
-    repo = _repo(tmp_path, "github")
-    fake = _fake(tmp_path, rc=1)
-    out, _ = _start(tmp_path, repo, _shim_dir(tmp_path), fake)
-    assert "PR 상태 확인 불능(종료코드 1)" in out
-
-
-def test_pr_block_timeout_skips_with_one_line_and_warms_engine_in_background(tmp_path):
+def test_pr_block_timeout_is_recorded_as_rc124(tmp_path):
     repo = _repo(tmp_path, "github")
     fake = _fake(tmp_path, sleep=30)
-    out, elapsed = _start(tmp_path, repo, _shim_dir(tmp_path), fake, HARNESS_PR_TIMEOUT="1")
-    assert "PR 상태 확인이 오래 걸려 건너뜀 — /harness:prs 로 확인하십시오." in out
-    assert "확인 불능" not in out
-    assert elapsed < 25
-    deadline = time.monotonic() + 15
-    warm: list[str] = []
-    while time.monotonic() < deadline:
-        warm = [c for c in _calls(fake) if c.startswith("warm:")]
-        if warm:
-            break
-        time.sleep(0.3)
-    assert warm and "--from fake-engine python" in warm[0]
-    assert "checker.pr_queue" not in warm[0]
+    _, elapsed = _start(tmp_path, repo, _shim_dir(tmp_path), fake, HARNESS_PR_TIMEOUT="1")
+    assert elapsed < 15
+    assert _wait_result(repo).startswith("rc=124\n")
 
 
-def test_pr_block_without_timeout_command_skips_with_one_line(tmp_path):
+def test_pr_block_without_timeout_command_is_cannot_check(tmp_path):
     repo = _repo(tmp_path, "github")
     fake = _fake(tmp_path, out="o/r 내 PR 1개\n", rc=0)
     out, _ = _start(tmp_path, repo, _shim_dir(tmp_path, timeout=False), fake, hide_timeout=True)
-    assert "PR 상태 확인을 건너뜁니다(timeout 명령이 없어" in out
-    assert "o/r 내 PR 1개" not in out
+    assert ("PR 상태 확인 불능(timeout 명령이 없어 시간을 제한할 수 없음) - /harness:prs 로 다시 확인하십시오."
+            in out)
+    assert "뒤에서 확인하는 중" not in out
     assert _calls(fake) == []
+    assert not list((repo / ".git").glob("harness-pr-table.*"))
+
+
+def test_pr_block_without_session_id_is_cannot_check_and_runs_nothing(tmp_path):
+    repo = _repo(tmp_path, "github")
+    fake = _fake(tmp_path, out="o/r 내 PR 1개\n", rc=0)
+    shim = _shim_dir(tmp_path)
+    root = tmp_path / "plugin-root" / "harness"
+    (root / "hooks").mkdir(parents=True)
+    (root / "hooks" / "session-start-sync.sh").write_bytes(HOOK.read_bytes().replace(b"\r\n", b"\n"))
+    env = {"PATH": str(shim), "HOME": str(tmp_path), "HARNESS_NO_SCAFFOLD_HINT": "1", "CLAUDE_PLUGIN_ROOT": str(root),
+           "FAKE_DIR": fake.as_posix(), "DOC_GUARD_ENGINE": "fake-engine"}
+    done = subprocess.run([_BASH, str(root / "hooks" / "session-start-sync.sh")], input=json.dumps({"cwd": str(repo)}),
+                          capture_output=True, text=True, encoding="utf-8", env=env, timeout=120)
+    assert done.returncode == 0, done.stderr
+    # 첫 프롬프트 훅이 찾을 이름이 없으므로 뒤 실행을 하지 않고 바로 불능으로 낸다.
+    assert "PR 상태 확인 불능(세션 ID 를 받지 못함)" in done.stdout
+    assert "뒤에서 확인하는 중" not in done.stdout
+    assert not list((repo / ".git").glob("harness-pr-table.*"))
+    assert _calls(fake) == []
+
+
+def test_pr_block_removes_result_files_older_than_a_day(tmp_path):
+    repo = _repo(tmp_path, "github")
+    old = repo / ".git" / "harness-pr-table.old-session"
+    old.write_text("rc=0\n", encoding="utf-8")
+    fresh = repo / ".git" / "harness-pr-table.fresh-session"
+    fresh.write_text("rc=0\n", encoding="utf-8")
+    two_days_ago = time.time() - 2 * 86400
+    os.utime(old, (two_days_ago, two_days_ago))
+    fake = _fake(tmp_path, out="", rc=0)
+    _start(tmp_path, repo, _shim_dir(tmp_path), fake)
+    _wait_result(repo)
+    assert not old.exists()
+    assert fresh.exists()
 
 
 def test_pr_block_without_gh_is_cannot_check(tmp_path):
@@ -265,6 +311,7 @@ def test_pr_block_without_gh_is_cannot_check(tmp_path):
     out, _ = _start(tmp_path, repo, _shim_dir(tmp_path, gh=False), fake)
     assert "PR 상태 확인 불능(uvx 나 gh 가 없음)" in out
     assert _calls(fake) == []
+    assert not _result_file(repo).exists()
 
 
 def test_pr_block_without_uvx_is_cannot_check(tmp_path):
@@ -279,6 +326,7 @@ def test_pr_block_skipped_for_non_github_origin(tmp_path):
     out, _ = _start(tmp_path, repo, _shim_dir(tmp_path), fake)
     assert "PR 상태" not in out and "o/r 내 PR 1개" not in out
     assert _calls(fake) == []
+    assert not list((repo / ".git").glob("harness-pr-table.*"))
 
 
 def test_pr_block_engine_spec_failure_is_cannot_check(tmp_path):
