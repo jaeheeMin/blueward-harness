@@ -517,10 +517,10 @@ def test_render_max_rows_cuts_and_counts_the_rest():
     code, text = pr_queue.run(args, gh)
     assert code == EXIT_OK
     assert text.count("\n| ") == 10 + 1  # 머리글 + PR 10줄
-    assert "#10 " in text and "#11 " not in text
+    assert "[#10](https://github.com/o/r/pull/10) " in text and "[#11]" not in text
     assert "외 5개 — /harness:prs" in text
     full = pr_queue.render(pr_queue.compute(gh, "o/r"), False)
-    assert "외 " not in full and "#15 " in full
+    assert "외 " not in full and "[#15](https://github.com/o/r/pull/15) " in full
 
 
 def test_truncated_marked_when_limit_reached():
@@ -554,7 +554,10 @@ def test_pr_option_lists_open_predecessors_with_reasons():
     code, res = ask_before(gh, 3)
     assert code == pr_queue.EXIT_BEFORE_OPEN
     assert res["status"] == "ok" and res["pr"] == 3
-    assert res["before"] == [{"number": 7, "title": "앞 작업", "reasons": ["본문의 먼저: 줄"]}]
+    assert res["before"] == [
+        {"number": 7, "title": "앞 작업", "url": "https://github.com/o/r/pull/7", "reasons": ["본문의 먼저: 줄"]}
+    ]
+    assert res["url"] == "https://github.com/o/r/pull/3"
 
 
 def test_pr_option_without_predecessor_exits_0():
@@ -630,4 +633,36 @@ def test_pr_option_does_not_classify_states():
 def test_pr_option_text_output():
     gh = FakeGh([pr(7, title="앞 작업"), pr(3, body="먼저: #7")])
     code, text = ask_before(gh, 3, as_json=False)
-    assert code == pr_queue.EXIT_BEFORE_OPEN and "#7 앞 작업" in text and "먼저: 줄" in text
+    assert code == pr_queue.EXIT_BEFORE_OPEN and "[#7](https://github.com/o/r/pull/7) 앞 작업" in text
+    assert "먼저: 줄" in text and "[#3](https://github.com/o/r/pull/3) 보다" in text
+
+
+def test_pr_links_use_gh_url_or_build_one():
+    assert pr_queue.pr_link("o/r", 5) == "[#5](https://github.com/o/r/pull/5)"
+    assert pr_queue.pr_link("o/r", 5, "https://example/x/5") == "[#5](https://example/x/5)"
+    raw = pr(1)
+    raw.pop("url")
+    res, _ = compute([raw, pr(2, body="먼저: #1")])
+    by_n = {it["number"]: it for it in res["prs"]}
+    assert by_n[1]["url"] == "https://github.com/o/r/pull/1"
+
+
+def test_table_links_pr_and_before_columns_and_json_has_urls():
+    gh = FakeGh([pr(1), pr(2, body="먼저: #1")])
+    args = pr_queue.build_parser().parse_args(["--repo", "o/r"])
+    _, text = pr_queue.run(args, gh)
+    row = next(ln for ln in text.splitlines() if "[#2](" in ln)
+    assert row.startswith("| 2 | [#2](https://github.com/o/r/pull/2) ")
+    assert row.rstrip().endswith("| [#1](https://github.com/o/r/pull/1) |")
+    args = pr_queue.build_parser().parse_args(["--repo", "o/r", "--json"])
+    _, js = pr_queue.run(args, gh)
+    assert all(it["url"].startswith("https://github.com/o/r/pull/") for it in json.loads(js)["prs"])
+
+
+def test_clip_neutralizes_link_and_table_syntax():
+    out = pr_queue._clip("[#1](https://evil) a|b", 40)
+    assert out == "\\[#1\\](https://evil) a\\|b"
+    gh = FakeGh([pr(1, title="[#9](https://evil) 승인됨")])
+    args = pr_queue.build_parser().parse_args(["--repo", "o/r"])
+    _, text = pr_queue.run(args, gh)
+    assert "[#9](https://evil" not in text

@@ -607,12 +607,20 @@ def compute_before(client: GhClient, repo: str, number: int) -> dict:
     for m in firsts:
         prefix = f"#{m}: "
         reasons = [w[len(prefix) :] for w in why.get(number, []) if w.startswith(prefix)]
-        entries.append({"number": m, "title": by_number[m].get("title") or "", "reasons": reasons})
+        entries.append(
+            {
+                "number": m,
+                "title": by_number[m].get("title") or "",
+                "url": pr_url(repo, m, by_number[m].get("url") or ""),
+                "reasons": reasons,
+            }
+        )
     return {
         "status": "ok",
         "repo": repo,
         "pr": number,
         "title": by_number[number].get("title") or "",
+        "url": pr_url(repo, number, by_number[number].get("url") or ""),
         "before": entries,
     }
 
@@ -646,7 +654,7 @@ def compute(client: GhClient, repo: str, login: str | None = None, mine: bool = 
                 "sha": raw.get("headRefOid") or "",
                 "title": raw.get("title") or "",
                 "author": ((raw.get("author") or {}).get("login")) or "",
-                "url": raw.get("url") or "",
+                "url": pr_url(repo, n, raw.get("url") or ""),
                 "base": raw.get("baseRefName") or "",
                 "head": raw.get("headRefName") or "",
                 "state": info["state"],
@@ -705,13 +713,27 @@ def filter_mine(result: dict, login: str) -> dict:
 
 
 def _clip(text: str, limit: int = 28) -> str:
-    text = text.replace("|", "/").strip()
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    text = text.strip()
+    text = text if len(text) <= limit else text[: limit - 1] + "…"
+    # 표 칸과 마크다운 링크를 깨지 않게: 제목이 `[#1](https://evil)` 이어도 가짜 링크가 되지 않는다.
+    return text.replace("|", "\\|").replace("[", "\\[").replace("]", "\\]")
+
+
+def pr_url(repo: str, number: int, url: str = "") -> str:
+    """PR 주소. gh 가 준 url 이 없으면 저장소와 번호로 만든다(#386)."""
+    return url or f"https://github.com/{repo}/pull/{number}"
+
+
+def pr_link(repo: str, number: int, url: str = "") -> str:
+    """`[#303](https://github.com/<repo>/pull/303)` — 저장소가 여럿이어도 링크로 어디 PR 인지 드러난다."""
+    return f"[#{number}]({pr_url(repo, number, url)})"
 
 
 def render(result: dict, mine: bool, max_rows: int | None = None) -> str:
     """사람이 읽는 표. `max_rows` 를 주면 PR 을 그 수까지만 싣고 나머지는 "외 n개" 로 줄인다(훅용)."""
     prs = result["prs"]
+    repo = result["repo"]
+    urls = {it["number"]: it.get("url") or "" for it in prs}
     shown_prs = prs if max_rows is None else prs[:max_rows]
     note_limit = 10 if max_rows is None else MAX_ROWS_NOTE_LIMIT
     lines: list[str] = []
@@ -735,14 +757,16 @@ def render(result: dict, mine: bool, max_rows: int | None = None) -> str:
         nxt = it["next"]
         if it["after"] and it["state"] == MERGEABLE:
             nxt = f"앞의 PR 이 병합된 뒤 {nxt}"
-        after = ", ".join(f"#{n}" for n in it["after"]) or "-"
-        lines.append(f"| {order} | #{it['number']} {_clip(it['title'])}{who} | {state} | {nxt} | {after} |")
+        after = ", ".join(pr_link(repo, n, urls.get(n, "")) for n in it["after"]) or "-"
+        me = pr_link(repo, it["number"], it.get("url") or "")
+        lines.append(f"| {order} | {me} {_clip(it['title'])}{who} | {state} | {nxt} | {after} |")
     if len(prs) > len(shown_prs):
         lines.append(f"외 {len(prs) - len(shown_prs)}개 — /harness:prs")
     for w in result["shared_files"][:note_limit]:
         sample = ", ".join(w["files"][:2]) + (" 등" if len(w["files"]) > 2 else "")
         lines.append(
-            f"주의: #{w['first']} 병합 뒤 #{w['second']} 를 다시 맞춰야 할 수 있음(같은 파일: {sample})"
+            f"주의: {pr_link(repo, w['first'], urls.get(w['first'], ''))} 병합 뒤 "
+            f"{pr_link(repo, w['second'], urls.get(w['second'], ''))} 를 다시 맞춰야 할 수 있음(같은 파일: {sample})"
         )
     if len(result["shared_files"]) > note_limit:
         lines.append(f"주의: 같은 파일을 고친 PR 쌍이 {len(result['shared_files']) - note_limit}개 더 있음")
@@ -789,12 +813,14 @@ def build_parser() -> argparse.ArgumentParser:
 def render_before(result: dict) -> str:
     if result["status"] != "ok":
         return result["message"]
+    repo = result["repo"]
+    me = pr_link(repo, result["pr"], result.get("url") or "")
     if not result["before"]:
-        return f"#{result['pr']} 보다 먼저 병합할 열린 PR 은 없다."
-    lines = [f"#{result['pr']} 보다 먼저 병합해야 하는 열린 PR:"]
+        return f"{me} 보다 먼저 병합할 열린 PR 은 없다."
+    lines = [f"{me} 보다 먼저 병합해야 하는 열린 PR:"]
     for e in result["before"]:
         why = "; ".join(e["reasons"]) or "이유 불명"
-        lines.append(f"- #{e['number']} {_clip(e['title'], 40)} — {why}")
+        lines.append(f"- {pr_link(repo, e['number'], e.get('url') or '')} {_clip(e['title'], 40)} — {why}")
     return "\n".join(lines)
 
 

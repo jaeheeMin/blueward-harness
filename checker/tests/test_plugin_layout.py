@@ -1914,13 +1914,19 @@ def test_앞_PR_이_없으면_순서_검사를_통과하고_엔진을_PR_번호�
 def test_앞_PR_이_열려_있으면_이유와_함께_거부한다(tmp_path):
     payload = json.dumps({
         "status": "ok", "pr": 123,
-        "before": [{"number": 120, "title": "먼저 할 일", "reasons": ["본문의 먼저: 줄"]}],
+        "before": [
+            {"number": 120, "title": "먼저 할 일", "url": "https://github.com/owner/repo/pull/120",
+             "reasons": ["본문의 먼저: 줄"]},
+            {"number": 121, "title": "url 없는 PR", "reasons": []},  # url 이 없으면 저장소와 번호로 만든다
+        ],
     }, ensure_ascii=False)
     out, log = _merge_with_queue(tmp_path, payload, 1)
     reason = _reason(out)
-    assert "#120(먼저 할 일)" in reason
+    assert "[#120](https://github.com/owner/repo/pull/120) 먼저 할 일" in reason
+    assert "[#121](https://github.com/owner/repo/pull/121) url 없는 PR" in reason
+    assert "[PR #123](https://github.com/owner/repo/pull/123) 보다" in reason
     assert "본문의 먼저: 줄" in reason
-    assert "먼저 #120 을 병합" in reason
+    assert "먼저 [#120](https://github.com/owner/repo/pull/120) 을 병합" in reason
     assert "먼저:" in reason and "/harness:prs" in reason
     # 순서 검사에서 막히면 뒤의 승인·위험도 검사는 부르지 않는다.
     assert not any("check-pr" in ln or "check-human-merge" in ln or "checker.risk_gate" in ln for ln in log)

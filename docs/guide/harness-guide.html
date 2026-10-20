@@ -281,7 +281,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.92, public-cloud main 기준 (2026-10-20)</div>
+      <div class="note">harness 0.10.93, public-cloud main 기준 (2026-10-20)</div>
     </div>
   </nav>
 
@@ -1001,6 +1001,7 @@ fix/31-broken-link</pre>
 
   <div class="callouts">
     <div class="callout warn"><span class="k">못 읽으면</span><div>GitHub 를 못 읽으면 "PR 상태 확인 불능" 이라고 하고 사유를 보여 줘. PR 이 없다거나 문제없다고 말하지 않아.</div></div>
+    <div class="callout ok"><span class="k">PR 링크</span><div>표와 알림, 병합 거절 메시지, PR 코멘트, Teams 알림 어디서든 PR 은 <code>[#303](https://github.com/owner/repo/pull/303)</code> 처럼 번호가 링크로 나와. 저장소가 여럿이어도 링크를 누르면 어느 저장소의 PR 인지 바로 알 수 있어.</div></div>
     <div class="callout ok"><span class="k">전체 보기</span><div><code>/harness:prs --all</code> 이면 내 PR 뿐 아니라 저장소의 열린 PR 전부를 순서대로 보여 줘.</div></div>
     <div class="callout ok"><span class="k">Claude 없이도</span><div>PR 화면에 <code>pr-queue</code> 코멘트가 붙어서 "몇 번째 / 앞에 병합할 PR / 지금 상태 / 다음 할 일" 을 알려 주고, <code>merge-order</code> 검사가 앞 PR 이 있으면 빨간불로 보여 줘. 무료 요금제라 Merge 버튼은 안 잠기니 빨간불이면 앞 PR 부터 병합해. 코멘트는 PR·리뷰·main 이벤트가 있을 때 갱신돼서 검사 결과는 다음 이벤트까지 낡을 수 있어 — 정확한 지금 상태는 <code>/harness:prs</code> 로 봐. 앞 PR 이 병합돼 내 차례가 되면 PR 에 나를 멘션하는 코멘트가 달리고, 저장소에 Teams 알림이 설정돼 있으면 Teams 로도 와. 기존 저장소는 <code>pr-queue.yml</code> 호출 파일을 넣어야 받아.</div></div>
   </div>
