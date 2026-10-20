@@ -98,7 +98,7 @@ def test_comment_body_has_order_before_pr_state_and_next():
     body = gh.store[2][0]["body"]
     assert qa.MARKER in body
     assert "**2번째** (열린 PR 2개 중)" in body
-    assert "#1 제목 1 — 본문의 먼저: 줄" in body
+    assert "[#1](https://github.com/o/r/pull/1) 제목 1 — 본문의 먼저: 줄" in body
     assert "지금 상태: 병합 가능" in body
     assert "다음 할 일: 앞의 PR 이 병합된 뒤 병합하기" in body
     first = gh.store[1][0]["body"]
@@ -187,10 +187,15 @@ def test_turn_notice_when_the_pr_before_is_merged():
     _, report, sent = run_apply(gh, webhook="https://hook")
     mention = [c for c in gh.store[2] if qa.TURN_MARKER in c["body"]]
     assert len(mention) == 1
-    assert mention[0]["body"].splitlines()[1].startswith("@kim 이제 #2 이 병합할 차례")
-    assert "#1(제목 1)" in mention[0]["body"]
+    assert mention[0]["body"].splitlines()[1].startswith(
+        "@kim 이제 [#2](https://github.com/o/r/pull/2) 이 병합할 차례"
+    )
+    assert "[#1](https://github.com/o/r/pull/1)(제목 1)" in mention[0]["body"]
     assert len(sent) == 1
-    assert "PR #2: 이제 병합할 차례" in json.dumps(sent[0], ensure_ascii=False)
+    card = json.dumps(sent[0], ensure_ascii=False)
+    assert "PR [#2](https://github.com/o/r/pull/2): 이제 병합할 차례" in card
+    assert "[#1](https://github.com/o/r/pull/1)" in card  # 병합된 앞 PR
+    assert sent[0]["attachments"][0]["content"]["actions"][0]["url"] == "https://github.com/o/r/pull/2"
     assert report.notified and "Teams" in report.notified[0]
     # 마커 코멘트는 갱신돼 앞 PR 이 비었다
     marker = [c for c in gh.store[2] if qa.MARKER in c["body"]][0]
@@ -465,10 +470,22 @@ def test_untrusted_strings_are_defused_in_the_comment():
 
 def test_turn_body_defuses_titles_and_next():
     item = {"number": 2, "author": "kim", "state": "병합 가능", "detail": "@a <i>", "next": "@b `c`"}
-    text = qa.turn_body(item, [1], {1: "@evil <u>t</u>"})
+    text = qa.turn_body(item, [1], {1: "@evil <u>t</u>"}, REPO)
     assert "@evil" not in text and "@a" not in text and "@b" not in text
     assert "<u>" not in text and "<i>" not in text
     assert text.splitlines()[1].startswith("@kim ")
+
+
+def test_titles_cannot_forge_links():
+    title = "[#1](https://evil.example) 승인됨"
+    item = {"number": 2, "author": "kim", "state": "병합 가능", "detail": "[d](https://evil.example)",
+            "next": "[n](https://evil.example)", "title": title}
+    text = qa.turn_body(item, [1], {1: title}, REPO)
+    assert "[#1](https://evil" not in text and "[d](https://evil" not in text and "[n](https://evil" not in text
+    assert "\\[#1\\]" in text
+    details = qa.teams_payload(item, [1], REPO)["attachments"][0]["content"]["body"][1]["text"]
+    assert "[#1](https://evil" not in details and "[d](https://evil" not in details
+    assert "[n](https://evil" not in details and "\\[#1\\]" in details
 
 
 def test_dependabot_event_writes_nothing(tmp_path):

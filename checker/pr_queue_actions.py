@@ -62,8 +62,9 @@ READ_ONLY_ACTORS = frozenset({"dependabot[bot]"})  # 이 계정이 일으킨 실
 
 
 def _safe(text: object, limit: int = 200) -> str:
-    """코멘트에 넣는 비신뢰 문자열(PR 제목·검사 이름·detail): 한 줄로 줄이고 `@` 멘션과 HTML·백틱을 무력화한다."""
-    return _defuse(text, limit).replace("<", "&lt;").replace(">", "&gt;").replace("`", "\\`")
+    """코멘트에 넣는 비신뢰 문자열(PR 제목·검사 이름·detail): 한 줄로 줄이고 `@` 멘션과 HTML·백틱·대괄호(가짜 링크)를 무력화한다."""
+    out = _defuse(text, limit).replace("<", "&lt;").replace(">", "&gt;").replace("`", "\\`")
+    return out.replace("[", "\\[").replace("]", "\\]")
 
 
 def _clip(text: str, limit: int) -> str:
@@ -91,14 +92,15 @@ def decide_status(item: dict, result: dict) -> tuple[str, str]:
     return "success", "앞에 병합할 PR 없음"
 
 
-def _after_lines(item: dict, by_number: dict[int, dict]) -> list[str]:
+def _after_lines(item: dict, by_number: dict[int, dict], repo: str) -> list[str]:
     lines = []
     for m in item["after"]:
         other = by_number.get(m, {})
         prefix = f"#{m}: "
         reasons = [r[len(prefix):] for r in item["after_reasons"] if r.startswith(prefix)]
         why = _safe("; ".join(reasons) or "이유 불명", 300)
-        lines.append(f"  - #{m} {_safe(other.get('title', ''), 50)} — {why}")
+        link = pr_queue.pr_link(repo, m, other.get("url") or "")
+        lines.append(f"  - {link} {_safe(other.get('title', ''), 50)} — {why}")
     return lines
 
 
@@ -121,7 +123,7 @@ def render_comment(item: dict, result: dict, after_mark: str | None = None) -> s
         lines.append(f"- 병합 순서: **{item['order']}번째** (열린 PR {total}개 중)")
     if item["after"]:
         lines.append("- 앞에 병합할 PR:")
-        lines.extend(_after_lines(item, by_number))
+        lines.extend(_after_lines(item, by_number, result["repo"]))
     elif item["order"] is not None:
         lines.append("- 앞에 병합할 PR: 없음")
     state = item["state"] + (f": {_safe(item['detail'], 300)}" if item["detail"] else "")
@@ -169,12 +171,13 @@ def _marker_comment(comments: list[dict]) -> dict | None:
 # --- 알림 ---------------------------------------------------------------------
 
 
-def turn_body(item: dict, merged: list[int], titles: dict[int, str]) -> str:
-    done = ", ".join(f"#{m}({_safe(titles.get(m, ''), 30)})" for m in merged)
+def turn_body(item: dict, merged: list[int], titles: dict[int, str], repo: str) -> str:
+    done = ", ".join(f"{pr_queue.pr_link(repo, m)}({_safe(titles.get(m, ''), 30)})" for m in merged)
     tag = _turn_tag(merged)
     state = item["state"] + (f": {_safe(item['detail'], 300)}" if item["detail"] else "")
+    me = pr_queue.pr_link(repo, item["number"], item.get("url") or "")
     return (
-        f"{tag}\n@{item['author']} 이제 #{item['number']} 이 병합할 차례입니다. 앞에 있던 {done} 이 병합됐습니다.\n"
+        f"{tag}\n@{item['author']} 이제 {me} 이 병합할 차례입니다. 앞에 있던 {done} 이 병합됐습니다.\n"
         f"지금 상태: {state}\n다음 할 일: {_safe(item['next'], 300)}"
     )
 
@@ -183,12 +186,13 @@ def _turn_tag(merged: list[int]) -> str:
     return f"<!-- {TURN_MARKER}:{','.join(str(m) for m in merged)} -->"
 
 
-def teams_payload(item: dict, merged: list[int]) -> dict:
-    heading = f"PR #{item['number']}: 이제 병합할 차례"
-    state = item["state"] + (f": {item['detail']}" if item["detail"] else "")
+def teams_payload(item: dict, merged: list[int], repo: str) -> dict:
+    heading = f"PR {pr_queue.pr_link(repo, item['number'], item.get('url') or '')}: 이제 병합할 차례"
+    state = item["state"] + (f": {_safe(item['detail'], 300)}" if item["detail"] else "")
+    done = ", ".join(pr_queue.pr_link(repo, m) for m in merged)
     details = (
-        f"{item['title']} — 작성자 {item['author']}. 앞의 {', '.join('#' + str(m) for m in merged)} 이 병합됐다. "
-        f"지금 상태: {state}. 다음 할 일: {item['next']}"
+        f"{_safe(item['title'], 200)} — 작성자 {item['author']}. 앞의 {done} 이 병합됐다. "
+        f"지금 상태: {state}. 다음 할 일: {_safe(item['next'], 300)}"
     )
     body = [
         {"type": "TextBlock", "text": heading, "weight": "Bolder", "size": "Medium", "wrap": True},
@@ -398,7 +402,7 @@ def _notify_turn(
     tag = _turn_tag(merged)
     if _bot_comments_with(comments, tag):
         return True  # 같은 알림을 이미 했다(Teams 가 빠졌으면 _retry_teams 가 다시 보낸다)
-    body = turn_body(item, merged, titles) + "\n" + (TEAMS_NA if not webhook else "")
+    body = turn_body(item, merged, titles, repo) + "\n" + (TEAMS_NA if not webhook else "")
     body = body.rstrip("\n")
     try:
         out = client.run(["api", "-X", "POST", f"repos/{repo}/issues/{n}/comments", "-f", f"body={body}"])
@@ -407,7 +411,7 @@ def _notify_turn(
         return False
     sent = ["PR 코멘트"]
     if webhook:
-        if _send_teams(item, merged, webhook, teams, report):
+        if _send_teams(item, merged, webhook, teams, report, repo):
             sent.append("Teams")
             _mark_teams_sent(client, repo, n, out, body, tag, report)
     else:
@@ -421,9 +425,11 @@ def _bot_comments_with(comments: list[dict], tag: str) -> list[dict]:
     return [c for c in comments if ((c.get("user") or {}).get("login")) == BOT_LOGIN and tag in (c.get("body") or "")]
 
 
-def _send_teams(item: dict, merged: list[int], webhook: str, teams: Callable[[str, dict], None], report: Report) -> bool:
+def _send_teams(
+    item: dict, merged: list[int], webhook: str, teams: Callable[[str, dict], None], report: Report, repo: str = ""
+) -> bool:
     try:
-        teams(webhook, teams_payload(item, merged))
+        teams(webhook, teams_payload(item, merged, repo))
         return True
     except Exception as exc:  # noqa: BLE001 - Teams 실패는 코멘트 알림이 남은 뒤의 일이라 경고로만 두고 다음 실행에서 다시 보낸다
         report.skipped.append(f"#{item['number']} Teams 전송 실패({_teams_failure_reason(exc)}), 다음 실행에서 다시 시도")
@@ -471,7 +477,7 @@ def _retry_teams(
         if not m or c.get("id") is None:
             continue
         merged = [int(x) for x in m.group(1).split(",") if x]
-        if _send_teams(item, merged, webhook, teams, report):
+        if _send_teams(item, merged, webhook, teams, report, repo):
             report.notified.append(f"#{n} @{item['author']} (Teams 재전송)")
             _mark_teams_sent(client, repo, n, json.dumps({"id": c["id"]}), body, _turn_tag(merged), report)
 

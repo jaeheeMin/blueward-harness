@@ -496,9 +496,13 @@ check_one_merge() {
   if [ "$pq_status" = ok ] && [ "$pq_rc" -eq 0 ]; then
     : # 먼저 병합할 열린 PR 이 없다. 통과시키고 나머지 검사를 계속한다.
   elif [ "$pq_status" = ok ] && [ "$pq_rc" -eq 1 ]; then
-    pq_list="$(printf '%s' "$pq_out" | jq -r '[.before[] | "#\(.number)(\(.title))" + (if (.reasons | length) > 0 then " - 이유: " + (.reasons | join("; ")) else "" end)] | join(" / ")' 2>/dev/null | tr -d '\r"\\`$')" || pq_list=""
-    pq_first="$(printf '%s' "$pq_out" | jq -r '.before[0].number // empty' 2>/dev/null | tr -d '\r')" || pq_first=""
-    deny "PR #$pr_number 보다 먼저 병합해야 하는 PR 이 아직 열려 있어 merge 를 막습니다. 먼저 병합할 PR: $pq_list 다음: 먼저 #${pq_first:-앞 PR} 을 병합하십시오(/harness:prs 로 순서와 상태 확인). 순서가 틀렸다면 이 PR 본문의 '먼저:' 줄을 고치십시오."
+    # PR 은 번호만이 아니라 링크로 보인다(#386). 엔진이 준 url 이 없으면 저장소와 번호로 만든다.
+    # 링크에 들어가는 저장소 이름($repo, 사용자 입력에서 옴)과 엔진 출력은 모두 tr 로 따옴표·역슬래시·백틱·달러를 지운 뒤
+    # 메시지에 넣으므로 JSON 을 깨지 않는다.
+    pq_repo="$(printf '%s' "$repo" | tr -d '\r"\\`$')"
+    pq_list="$(printf '%s' "$pq_out" | jq -r --arg repo "$pq_repo" '[.before[] | "[#\(.number)](\(.url // ("https://github.com/" + $repo + "/pull/" + (.number | tostring)))) \(.title)" + (if (.reasons | length) > 0 then " - 이유: " + (.reasons | join("; ")) else "" end)] | join(" / ")' 2>/dev/null | tr -d '\r"\\`$')" || pq_list=""
+    pq_first="$(printf '%s' "$pq_out" | jq -r --arg repo "$pq_repo" '.before[0] // empty | "[#\(.number)](\(.url // ("https://github.com/" + $repo + "/pull/" + (.number | tostring))))"' 2>/dev/null | tr -d '\r"\\`$')" || pq_first=""
+    deny "[PR #$pr_number](https://github.com/$pq_repo/pull/$pr_number) 보다 먼저 병합해야 하는 PR 이 아직 열려 있어 merge 를 막습니다. 먼저 병합할 PR: $pq_list 다음: 먼저 ${pq_first:-앞 PR} 을 병합하십시오(/harness:prs 로 순서와 상태 확인). 순서가 틀렸다면 이 PR 본문의 '먼저:' 줄을 고치십시오."
   else
     pq_msg=""
     if [ -n "$pq_status" ]; then
