@@ -337,7 +337,8 @@ Cloud & BTP 이름 규칙, `cap-ui5.md` — CAP·SAPUI5 개발 표준)를 기본
 status `merge-order` 를 단다(앞 PR 이 열려 있으면 failure, 없으면 success, 순서를 정하지 못하면 error).
 앞 PR 이 병합돼 차례가 된 PR 은 작성자를 멘션하고, `TEAMS_PLUGIN_ALERT_WEBHOOK` secret 이 있으면 Teams 로도
 알린다(없으면 건너뜀). 무료 요금제라 빨간불이어도 Merge 버튼은 잠기지 않는다. 호출 쪽 permissions 는
-`contents: read`, `pull-requests: write`, `issues: write`, `statuses: write`. GitHub 를 못 읽으면 job 이 실패한다.
+`contents: read`, `pull-requests: write`, `issues: write`, `statuses: write`, `checks: read`, `actions: read`(열린 PR 의 검사 결과와 그 워크플로 실행을
+읽는다 — 없으면 "Resource not accessible by integration" 으로 실패). GitHub 를 못 읽으면 job 이 실패한다.
 기존 Project Repository 는 호출 파일을 새로 넣어야 받는다.
 
 ## 비밀정보 검사(#159)

@@ -28,3 +28,7 @@ jobs:
       pull-requests: write
       issues: write
       statuses: write
+      # 열린 PR 의 검사 결과(check run)와 그 검사를 돌린 워크플로 실행을 읽는다. 둘 중 하나라도 없으면 GraphQL 이
+      # "Resource not accessible by integration" 으로 실패한다.
+      checks: read
+      actions: read

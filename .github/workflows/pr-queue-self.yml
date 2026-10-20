@@ -1,0 +1,27 @@
+# 이 저장소 자신의 열린 PR 에 병합 순서 코멘트와 커밋 status `merge-order` 를 단다(#383, #370).
+# 이 저장소에서는 열린 PR 끼리 plugin.json version 이 낮은 것부터 병합해야 해서 그 순서를 GitHub 화면에
+# 드러낸다. Project Repository 의 caller(스캐폴드 `skeleton/dot-github/workflows/pr-queue.yml`)와 같은
+# 트리거·권한이고, 재사용 워크플로를 같은 커밋의 사본으로 부른다. 엔진은 재사용 워크플로의 기본
+# `engine-ref`(stable)에서 받는다. job id 는 `pr-queue` 로 둔다(다른 검사가 이 job 을 순서 표시로 알아보고
+# 검사 실패에서 뺀다).
+name: pr-queue
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed, edited]
+  pull_request_review:
+    types: [submitted, dismissed]
+  push:
+    branches: [main]
+
+jobs:
+  pr-queue:
+    uses: ./.github/workflows/pr-queue.yml
+    secrets:
+      TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      statuses: write
+      checks: read
+      actions: read
