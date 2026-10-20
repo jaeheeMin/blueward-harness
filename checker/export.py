@@ -885,6 +885,29 @@ def _in_origin_main(root: Path, rel: str) -> tuple[bool | None, str]:
     return bool(ls.stdout.strip()), ""
 
 
+def _origin_main_text(root: Path, rel: str) -> tuple[str, str]:
+    """origin/main 의 rel 파일 내용. ("first", "") 면 main 에 그 파일이 없는 첫 판, ("text", 내용), ("unreadable", 사유) 면 읽지 못해 비교 불능.
+    fetch 는 하지 않는다(`_in_origin_main` 과 같은 git 호출)."""
+    in_main, why = _in_origin_main(root, rel)
+    if in_main is None:
+        return "unreadable", why
+    if not in_main:
+        return "first", ""
+    try:
+        shown = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "-C", str(root), "show", f"origin/main:{rel}"],
+            capture_output=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return "unreadable", f"git show 가 실패했다: {e}"
+    if shown.returncode != 0:
+        return "unreadable", f"origin/main 의 {rel} 를 읽지 못했다: {shown.stderr.decode('utf-8', 'replace').strip()}"
+    try:
+        return "text", shown.stdout.decode("utf-8")
+    except UnicodeDecodeError as e:
+        return "unreadable", f"origin/main 의 {rel} 가 UTF-8 이 아니다: {e}"
+
+
 def load_map(root: Path, form: str) -> tuple[dict, Path]:
     _check_form_name(form)
     path = _inside(root, root / "templates" / "forms" / f"{form}.yaml", "양식 지도", form)
@@ -978,11 +1001,13 @@ def is_srs_map(fmap: dict) -> bool:
 
 
 def build_form(
-    form: str, spec_sections: dict, root: Path, srs: SrsDoc | None = None, replaced: list | None = None
+    form: str, spec_sections: dict, root: Path, srs: SrsDoc | None = None, replaced: list | None = None,
+    spec_rel: str | None = None,
 ) -> tuple[list[tuple[Path, bytes]], list[dict], list[dict]]:
     """한 양식을 산출한다. (쓸 파일, 거부 사유들, 경고들) 을 낸다. 못 읽으면 ExportError.
 
     `srs` 가 있으면 지도의 `원본: SRS` 표를 SRS.md 요구사항 표·상세 절로 채운다(작업본 `## 양식 항목` 은 쓰지 않는다).
+    `spec_rel` 은 작업본의 root 기준 상대 경로다. 화면 그림이 있으면 origin/main 의 같은 경로 작업본과 비교해 바뀐 곳을 표시한다(#347).
     """
     fmap, map_path = load_map(root, form)
     if is_srs_map(fmap) != (srs is not None):
@@ -1250,6 +1275,27 @@ def build_form(
 
     # 화면 그림(#335 C2): 지도 `화면:` 영역에 작업본 `#### <화면> 그림` 을 그린다. `비우기` 뒤에 그려야 지워지지 않는다.
     styles_ed = None
+    previous: dict[str, object] = {}  # 지난 판(origin/main)의 작업본. 화면을 그릴 때 처음 한 번만 읽는다(#347)
+
+    def previous_forms() -> dict | None:
+        """origin/main 의 같은 작업본을 읽은 {양식: {시트: (Section, 소절들)}}. 첫 판이면 None. 읽지 못하면 비교 불능이라 ExportError."""
+        if "forms" not in previous:
+            if spec_rel is None:
+                raise ExportError("작업본이 저장소(--root) 밖에 있어 지난 판(origin/main)과 비교하지 못했다 — 저장소 안의 작업본으로 다시 산출한다(검사 불능, 통과 아님)", form=form)
+            state, got = _origin_main_text(root, spec_rel)
+            if state == "unreadable":
+                raise ExportError(f"{spec_rel} 의 지난 판과 비교하지 못했다 — git fetch 뒤 다시 산출한다(검사 불능, 통과 아님): {got}", form=form)
+            if state == "first":
+                previous["forms"] = None
+            elif not re.search(r"(?m)^##\s+양식 항목\s*$", got):
+                previous["forms"] = {}  # 지난 판에 양식 항목 절이 없다 — 화면 그림 절도 없다
+            else:
+                try:
+                    previous["forms"] = parse_spec(got)
+                except ExportError as e:
+                    raise ExportError(f"{spec_rel} 의 지난 판(origin/main)을 읽지 못해 비교하지 못했다(검사 불능, 통과 아님): {e.reason}", form=form) from None
+        return previous["forms"]  # type: ignore[return-value]
+
     captured: list[tuple[str, object]] = []  # 넣을 화면 캡처 그림(시트 이름, screen_capture.Placement)
     if srs is None:
         from checker import screen_draw
@@ -1274,8 +1320,14 @@ def build_form(
                         styles_ed = StylesXml(raw["xl/styles.xml"].decode("utf-8-sig"))
                     except ExportError as e:
                         raise ExportError(e.reason, form=form, sheet=sname) from None
+                old_body = None  # 첫 판이거나 지난 판에 그림 절이 없으면 표시 없이 그린다
+                old_forms = previous_forms()
+                if old_forms is not None:
+                    old_body = old_forms.get(form, {}).get(sname, (None, {}))[1].get(screen_draw.md_name(item))
+                    if old_body is None:
+                        warn(sname, screen_draw.md_name(item), f"{item['이름']} 은 지난 판(origin/main)에 그림 절이 없어 변경 표시를 하지 않았다")
                 try:
-                    drawn = screen_draw.draw(editor(sname), styles_ed, item, body, sname, problem)
+                    drawn = screen_draw.draw(editor(sname), styles_ed, item, body, sname, problem, old_body)
                 except ExportError as e:
                     raise ExportError(e.reason, form=form, sheet=sname, item=e.item) from None
                 if drawn == 0:  # 거부(None)가 아니라 그릴 항목이 없는 경우
@@ -1971,12 +2023,16 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
             forms = {only_form: forms[only_form]}
         jobs = list(forms.items())
 
+    try:
+        spec_rel: str | None = spec.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        spec_rel = None
     writes: list[tuple[Path, bytes]] = []
     problems: list[dict] = []
     warnings: list[dict] = []
     replaced: list[dict] = []
     for form, sections in jobs:
-        w, p, wa = build_form(form, sections, root, srs, replaced)
+        w, p, wa = build_form(form, sections, root, srs, replaced, spec_rel)
         writes += w
         problems += p
         warnings += wa

@@ -9,6 +9,7 @@
     테두리: 얇게 | 중간 | 굵게 | 없음   네 변 모두. 범위에 쓰면 범위의 모든 칸에 그린다(바깥선만이 아니다).
     테두리_색: "000000"               테두리 색(RRGGBB). 안 적으면 자동. `테두리` 가 선 종류일 때만 쓴다.
     굵게: true | false
+    취소선: true | false
     글꼴_크기: 9                      pt (0 초과 409 이하 숫자)
     글꼴_색: "000000"                 RRGGBB
     가로: 왼쪽 | 가운데 | 오른쪽
@@ -34,7 +35,7 @@ _HEX = re.compile(r"^[0-9A-Fa-f]{6}$")
 _BORDER_STYLES = {"얇게": "thin", "중간": "medium", "굵게": "thick", "없음": None}
 _HORIZONTAL = {"왼쪽": "left", "가운데": "center", "오른쪽": "right"}
 _VERTICAL = {"위": "top", "가운데": "center", "아래": "bottom"}
-STYLE_KEYS = ("채우기", "테두리", "테두리_색", "굵게", "글꼴_크기", "글꼴_색", "가로", "세로", "줄바꿈")
+STYLE_KEYS = ("채우기", "테두리", "테두리_색", "굵게", "취소선", "글꼴_크기", "글꼴_색", "가로", "세로", "줄바꿈")
 
 _ATTR = re.compile(r"""([\w:]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 MAX_CELL_XFS = 64000  # 엑셀 cellXfs 한도
@@ -96,7 +97,7 @@ def validate_style(defn) -> list[str]:
         b = d.get("테두리")
         if "테두리" not in d or (isinstance(b, str) and _BORDER_STYLES.get(_key(b), "x") is None):
             out.append("테두리_색은 테두리가 얇게·중간·굵게일 때만 쓸 수 있다")
-    for key in ("굵게", "줄바꿈"):
+    for key in ("굵게", "취소선", "줄바꿈"):
         if key in d and not isinstance(d[key], bool):
             out.append(f"{key} {d[key]!r} 는 true 또는 false 여야 한다")
     if "글꼴_크기" in d:
@@ -220,7 +221,7 @@ class StylesXml:
                 border = f"<border>{side('left')}{side('right')}{side('top')}{side('bottom')}<diagonal/></border>"
             attrs = _set_attr(attrs, "borderId", str(self.borders.find_or_add(border)))
             attrs = _set_attr(attrs, "applyBorder", "1")
-        if any(k in d for k in ("굵게", "글꼴_크기", "글꼴_색")):
+        if any(k in d for k in ("굵게", "취소선", "글꼴_크기", "글꼴_색")):
             font_id = int(dict(attrs).get("fontId", "0") or 0)
             if not 0 <= font_id < len(self.fonts.items):
                 raise ExportError(f"글꼴 번호 {font_id} 가 fonts 밖이다")
@@ -264,6 +265,11 @@ class StylesXml:
                 parts["b"] = "<b/>"
             else:
                 parts.pop("b", None)
+        if "취소선" in d:
+            if d["취소선"]:
+                parts["strike"] = "<strike/>"
+            else:
+                parts.pop("strike", None)
         if "글꼴_크기" in d:
             size = d["글꼴_크기"]
             parts["sz"] = f'<sz val="{int(size) if float(size).is_integer() else size}"/>'
