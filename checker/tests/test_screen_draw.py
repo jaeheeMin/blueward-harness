@@ -596,4 +596,4 @@ def test_layout_좌표():
     assert [(b.col, b.row, b.width, b.kind, b.text) for b in boxes][:3] == [
         (3, 7, 2, "라벨", "a *"), (5, 7, 3, "입력", ""), (9, 7, 2, "라벨", "b"),
     ]
-    assert (3, 9, 2, "액션", "취소") in boxes and (3, 10, 2, "머리글", "x") in boxes and (3, 12, 2, "행", "") in boxes
+    assert (3, 9, 2, "액션", "취소", "") in boxes and (3, 10, 2, "머리글", "x", "") in boxes and (3, 12, 2, "행", "", "") in boxes

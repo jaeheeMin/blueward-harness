@@ -454,3 +454,26 @@ def test_cell_xfs_limit(monkeypatch):
         style_range(ed, st, "A1", None, {"굵게": False, "채우기": "123456"}, "화면")
     assert ed.cell("A1") is None and st.xf_count() == 3
     st.derive(0, {"굵게": True})  # 이미 있는 xf 는 한도에 걸리지 않고 재사용된다
+
+
+def test_취소선_스타일(xlsx: Path):
+    """`취소선: true` 는 글꼴에 strike 를 켜고 false 는 끈다. 글꼴의 나머지(굵게·기울임·이름)는 유지된다(#347)."""
+    assert validate_style({"취소선": True}) == []
+    assert any("true 또는 false" in why for why in validate_style({"취소선": "예"}))
+    ed, st = _load(xlsx)
+    base = int(ed.cell("A1").style)
+    on = st.derive(base, {"취소선": True})
+    ed.set_style("A1", str(on))
+    ed.set("D4", "x", as_text=True)
+    ed.set_style("D4", str(st.derive(0, {"취소선": True, "글꼴_색": "808080"})))
+    out = _save(xlsx, xlsx.with_name("strike.xlsx"), ed, st)
+    ws = openpyxl.load_workbook(out)["화면"]
+    assert ws["A1"].font.strike and ws["A1"].font.b and ws["A1"].font.i
+    assert ws["D4"].font.strike and ws["D4"].font.color.rgb == "FF808080"
+    # 이미 취소선인 글꼴에 false 를 덮으면 꺼진다.
+    ed2, st2 = _load(out)
+    off = st2.derive(int(ed2.cell("A1").style), {"취소선": False})
+    ed2.set_style("A1", str(off))
+    ws2 = openpyxl.load_workbook(_save(out, xlsx.with_name("strike2.xlsx"), ed2, st2))["화면"]
+    assert not ws2["A1"].font.strike and ws2["A1"].font.b
+

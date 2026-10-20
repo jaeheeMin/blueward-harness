@@ -249,7 +249,9 @@ Bash 도구로 실행한다(Windows Git Bash 에서도 같다). 엔진 판은 �
 `templates/forms/` 안의 지도 파일이어야 한다. 없는 파일이면 종료코드 2). 같은 이름 산출 파일이 이미 있으면
 엔진이 그 파일이 `origin/main` 에 있는지 본다 — 없으면(이 브랜치에서 만든 판) 같은 버전으로 다시 산출하고
 결과 JSON 에 `replaced: true` 가 붙는다. 엔진은 fetch 하지 않으므로 산출 전에 `/harness:sync` 나 `git fetch origin` 으로
-`origin/main` 을 최신으로 맞춘다. 결과는
+`origin/main` 을 최신으로 맞춘다. 새 판이면 이 fetch 를 산출 전에 꼭 한다 — 화면 그림(`#### … 그림`)이 있으면 엔진이 `origin/main` 의 같은
+Spec 과 비교해 바뀐 화면 항목에 번호·색을 자동으로 표시하고 지도 `변경:` 의 변경 내용 표를 채운다(`form-map.md` "화면 변경 표시").
+"지난 판과 비교하지 못했다" 로 멈추면(검사 불능, 통과 아님) `git fetch origin` 뒤 다시 산출한다. 결과는
 stdout 의 JSON 한 줄이다. stdout 이 JSON 으로 읽히지 않으면(uvx 실패, 엔진 못 받음 등)
 종료코드와 무관하게 "산출 불능" 이라고 알린다. 거부(rejected)로 취급하지 않고 통과로도 넘기지 않는다.
 

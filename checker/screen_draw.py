@@ -20,6 +20,9 @@ Spec 작업본 `## 양식 항목` 의 `### <양식> · <시트>` 아래에 `####
     ##### 결과 테이블    | 열 |
 각 소절은 없으면 건너뛴다. `#### 화면 N 그림` 절이 없으면 그 영역은 그리지 않고 템플릿 그대로 둔다.
 
+지난 판 비교(#347): 산출은 origin/main 의 같은 Spec 과 그림 절을 비교해(`screen_diff`) 추가·수정·삭제를 번호와 표시 스타일(`추가`·`수정`·`삭제`, 상자 스타일 위에
+덮어쓴다)로 그리고, 지도 `변경: {시작_행, 최대_행, 열: {번호, 구분, 대상, 내용}}` 의 변경 내용 표를 채운다. 지난 판을 못 읽으면 `export` 가 검사 불능으로 멈춘다.
+
 배치: 영역 왼쪽 위부터. 필터 바는 (라벨 + 입력) 묶음을 간격 한 칸씩 띄워 한 줄에 들어가는 만큼 놓고 넘치면 다음 줄로,
 뒤에 빈 줄 한 줄. `조회: Go` 면 필터 바 마지막 줄의 영역 오른쪽 끝에 `Go` 액션을 놓고(자리가 없으면 다음 줄 오른쪽 끝), 그 뒤에 빈 줄 한 줄.
 액션은 결과 테이블 머리글 바로 윗줄(테이블 툴바)에 결과 테이블의 오른쪽 끝에 맞춰 오른쪽 정렬한다(간격 한 칸). 액션이 테이블보다 넓어 영역 왼쪽을
@@ -32,6 +35,7 @@ import re
 from typing import NamedTuple
 
 from checker.blank_template import RangeError, _hit, parse_range
+from checker import screen_diff
 from checker.cell_style import StylesXml, merge_range, style_range, validate_style
 from checker.export import ExportError, SheetXml, _clean, _parse_table, col2n, is_srs_map, n2col, norm, split_ref
 
@@ -44,8 +48,17 @@ DEFAULT_STYLES = {
     "머리글": {"채우기": "1F4E78", "글꼴_색": "FFFFFF", "굵게": True, "테두리": "얇게", "가로": "가운데"},
     "행": {"테두리": "얇게"},
 }
-_ITEM_KEYS = ("이름", "영역", "칸_수", "스타일", "설명", "캡처")
+# 지난 판과 달라진 항목의 표시(#347). 기존 상자 스타일 위에 덮어쓰는 겹침이다(최종 = {**상자 스타일, **표시 스타일}).
+DEFAULT_MARK_STYLES = {
+    "추가": {"채우기": "FFFF00"},
+    "수정": {"채우기": "FFFF00"},
+    "삭제": {"채우기": "D9D9D9", "글꼴_색": "808080", "취소선": True},
+}
+STYLE_NAMES = (*DEFAULT_STYLES, *DEFAULT_MARK_STYLES)
+_ITEM_KEYS = ("이름", "영역", "칸_수", "스타일", "설명", "캡처", "변경")
 _CAPTURE_KEYS = ("영역", "설명")
+_CHANGE_KEYS = ("시작_행", "최대_행", "열")
+CHANGE_COLS = ("번호", "구분", "대상", "내용")
 # 소절 이름 → 허용하는 표 머리글(앞의 것이 기본). 필터 바의 `필수` 열은 생략할 수 있다.
 SECTIONS: dict[str, list[list[str]]] = {
     "필터 바": [["이름", "필수"], ["이름"]],
@@ -67,12 +80,16 @@ def items(smap: dict) -> list[dict]:
     out = []
     for it in smap.get("화면") or []:
         counts = {**DEFAULT_COUNTS, **{norm(k): v for k, v in (it.get("칸_수") or {}).items()}}
-        styles = {**DEFAULT_STYLES, **{norm(k): v for k, v in (it.get("스타일") or {}).items()}}
+        styles = {**DEFAULT_STYLES, **DEFAULT_MARK_STYLES, **{norm(k): v for k, v in (it.get("스타일") or {}).items()}}
         cap = it.get("캡처")
         capture = None
         if cap is not None:  # 영역을 생략하면 그 화면의 영역을 쓴다
             capture = {"영역": str(cap.get("영역") or it["영역"]).strip(), "설명": str(cap["설명"]).strip()}
-        out.append({"이름": norm(it["이름"]), "영역": str(it["영역"]).strip(), "칸_수": counts, "스타일": styles, "캡처": capture})
+        chg = it.get("변경")
+        change = None
+        if chg is not None:
+            change = {"시작_행": chg["시작_행"], "최대_행": chg["최대_행"], "열": {norm(k): str(v).strip() for k, v in chg["열"].items()}}
+        out.append({"이름": norm(it["이름"]), "영역": str(it["영역"]).strip(), "칸_수": counts, "스타일": styles, "캡처": capture, "변경": change})
     return out
 
 
@@ -209,10 +226,14 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                     out.append(("map", f"{where}: `스타일` 은 이름: 스타일 정의 목록이어야 한다"))
                 else:
                     for k, defn in styles.items():
-                        if norm(str(k)) not in DEFAULT_STYLES:
-                            out.append(("map", f"{where}: 스타일 이름 {k!r} 는 모른다 — 가능한 이름: {', '.join(DEFAULT_STYLES)}"))
+                        if norm(str(k)) not in STYLE_NAMES:
+                            out.append(("map", f"{where}: 스타일 이름 {k!r} 는 모른다 — 가능한 이름: {', '.join(STYLE_NAMES)}"))
                         else:
                             out += [("map", f"{where}: 스타일 {k}: {why}") for why in validate_style(defn)]
+            if it.get("변경") is not None:
+                why, crects = _change_problems(it["변경"])
+                out += [("map", f"{where}: {w}") for w in why]
+                mine += [(name, "변경 표", r, text) for r, text in crects]
             if rect is not None:
                 for label, orect in owned:
                     if _hit(rect, orect):
@@ -223,6 +244,53 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                 rects.append((name, rect))
         out += _capture_overlaps(sn, owned, mine)
     return out
+
+
+def _change_problems(chg) -> tuple[list[str], list[tuple[tuple[int, int, int, int], str]]]:
+    """`변경:` 의 오류 사유들과, 쓰는 칸(열마다 시작_행~시작_행+최대_행-1)의 [(범위, 적을 글)]."""
+    if not isinstance(chg, dict):
+        return ["`변경` 은 `시작_행`·`최대_행`·`열` 목록이어야 한다"], []
+    why: list[str] = []
+    for k in chg:
+        if k not in _CHANGE_KEYS:
+            why.append(f"변경의 모르는 키 {k!r} — 가능한 키: {', '.join(_CHANGE_KEYS)}")
+    ints: dict[str, int] = {}
+    for k in ("시작_행", "최대_행"):
+        v = chg.get(k)
+        if v is None:
+            why.append(f"변경에 `{k}` 가 없다")
+        elif isinstance(v, bool) or not isinstance(v, int) or v < 1:
+            why.append(f"변경의 {k} 는 1 이상의 정수여야 한다(받은 값 {v!r})")
+        else:
+            ints[k] = v
+    cols = chg.get("열")
+    letters: dict[str, str] = {}
+    if cols is None:
+        why.append(f"변경에 `열` 이 없다 — {'·'.join(CHANGE_COLS)} 열 문자를 적는다")
+    elif not isinstance(cols, dict):
+        why.append("변경의 `열` 은 이름: 열 문자 목록이어야 한다")
+    else:
+        for k, v in cols.items():
+            if norm(str(k)) not in CHANGE_COLS:
+                why.append(f"변경 열 이름 {k!r} 는 모른다 — 가능한 이름: {', '.join(CHANGE_COLS)}")
+            elif not (isinstance(v, str) and re.fullmatch(r"[A-Z]{1,3}", v.strip())):
+                why.append(f"변경 열 {k} 의 {v!r} 는 열 문자(A~XFD)가 아니다")
+            else:
+                letters[norm(str(k))] = v.strip()
+        for k in CHANGE_COLS:
+            if k not in {norm(str(x)) for x in cols}:
+                why.append(f"변경 열에 `{k}` 항목이 없다 — {'·'.join(CHANGE_COLS)} 네 열 모두 필요하다")
+    rects: list[tuple[tuple[int, int, int, int], str]] = []
+    if len(ints) == 2:
+        start = ints["시작_행"]
+        end = start + ints["최대_행"] - 1
+        if end > 1048576:
+            why.append("변경 표가 엑셀 마지막 행(1048576)을 넘는다")
+        else:
+            for col in letters.values():
+                n = col2n(col)
+                rects.append(((n, start, n, end), f"{col}{start}:{col}{end}"))
+    return why, rects
 
 
 def _capture_overlaps(sname, owned, mine) -> list[tuple[str, str]]:
@@ -328,6 +396,16 @@ def offenders(item: dict, body: list[str]) -> list[tuple[str, str, list[str]]]:
             continue
         for n, cnt in wrong:  # 값·행 모양 검사도 여기 둔다 — 저장 훅·PR(form_columns)과 --check·산출이 같은 검사를 한다
             out.append(("화면 표 행", f"{where} · {name}: {n}번째 행의 셀 수 {cnt}", [f"머리글과 같은 {len(header)}칸"]))
+        counts: dict[str, int] = {}
+        for r in rows:
+            if _clean(r[0]):
+                counts[_clean(r[0])] = counts.get(_clean(r[0]), 0) + 1
+        go_on = name == "액션" and settings is not None and settings[0] == SETTINGS_HEADER and any(
+            norm(r[0]) == "조회" and norm(r[1]) == "Go" for r in settings[1]
+        )
+        for nm, c in counts.items():  # 지난 판과 이름으로 짝지으므로 소절 안 이름이 겹치면 비교가 흐려진다(#347)
+            if c > 1 or (go_on and nm == "Go"):
+                out.append(("화면 항목 중복", f"{where} · {name}: '{nm}'" + (" (조회: Go 가 이미 Go 액션을 그린다)" if c == 1 else f" ({c}번)"), ["소절 안에서 이름이 겹치지 않게"]))
         if name == "필터 바" and len(header) > 1:
             for r in rows:
                 flag = _clean(r[1]).upper()
@@ -424,23 +502,44 @@ class Box(NamedTuple):
     width: int
     kind: str  # 라벨 입력 액션 머리글 행
     text: str
+    mark: str = ""  # 이 칸에 겹쳐 쓸 표시 스타일 이름(추가·수정·삭제). 없으면 빈 문자열
 
 
-def layout(item: dict, conds: list[tuple[str, bool]], actions: list[str], cols: list[str], go: bool = False) -> tuple[list[Box], list[str]]:
-    """(그릴 칸들, 영역을 넘친 항목들). 넘친 항목이 있으면 그리지 않고 거절한다. `go` 면 필터 바 오른쪽 끝에 Go 액션을 둔다."""
+def layout(
+    item: dict, conds: list[tuple[str, bool]], actions: list[str], cols: list[str], go: bool = False,
+    marks: dict[tuple[str, str], tuple[str, int]] | None = None,
+) -> tuple[list[Box], list[str]]:
+    """(그릴 칸들, 영역을 넘친 항목들). 넘친 항목이 있으면 그리지 않고 거절한다. `go` 면 필터 바 오른쪽 끝에 Go 액션을 둔다.
+
+    `marks` 는 지난 판과 달라진 항목 {(소절, 이름): (구분, 번호)}(`screen_diff`). 표시한 칸은 글자 앞에 번호를 붙이고 `Box.mark` 를 단다.
+    필터 바는 추가·삭제면 라벨·입력 둘 다, 수정이면 라벨만. 결과 테이블은 추가면 머리글만, 삭제면 머리글과 빈 행 모두.
+    """
     c0, r0, c1, r1 = parse_range(item["영역"])
     n = item["칸_수"]
     label_w, field_w, gap, act_w, col_w, empty = (n[k] for k in ("라벨", "입력", "간격", "액션", "열", "빈_행"))
     boxes: list[Box] = []
     over: list[str] = []
+    marks = marks or {}
 
-    def put(col: int, row: int, width: int, kind: str, text: str, what: str) -> None:
+    def put(col: int, row: int, width: int, kind: str, text: str, what: str, key: tuple[str, str] | None = None, role: str = "") -> None:
+        """key: 표시 키. role: 번호를 붙이고 늘 표시하는 칸(`head`) / 입력 칸(`extra`, 수정이면 표시하지 않는다) / 빈 행(`row`, 삭제일 때만 표시)."""
+        mark = ""
+        got = marks.get(key) if key else None
+        if got:
+            kind_of_change, num = got
+            if role == "head":
+                mark = kind_of_change
+                text = f"{screen_diff.circled(num)} {text}"
+            elif role == "extra" and kind_of_change != "수정":
+                mark = kind_of_change
+            elif role == "row" and kind_of_change == "삭제":
+                mark = kind_of_change
         if col < c0 or col + width - 1 > c1:
             what += "(열)"
         elif row > r1:
             what += "(행)"
         else:
-            boxes.append(Box(col, row, width, kind, text))
+            boxes.append(Box(col, row, width, kind, text, mark))
             return
         if what not in over:
             over.append(what)
@@ -461,14 +560,14 @@ def layout(item: dict, conds: list[tuple[str, bool]], actions: list[str], cols: 
             col = c0 + (i % per) * pair
             last = max(last, line)
             last_end = col + label_w + field_w - 1 if line == last else last_end
-            put(col, line, label_w, "라벨", f"{name} *" if required else name, what)
-            put(col + label_w, line, field_w, "입력", "", what)
+            put(col, line, label_w, "라벨", f"{name} *" if required else name, what, ("필터 바", name), "head")
+            put(col + label_w, line, field_w, "입력", "", what, ("필터 바", name), "extra")
     if go:
         go_col = c1 - act_w + 1  # 영역 오른쪽 끝
         line = r0 if last is None else last
         if last is not None and go_col < last_end + 1 + gap:  # 그 줄에 자리가 없으면 다음 줄 오른쪽 끝
             line = last + 1
-        put(go_col, line, act_w, "액션", "Go", "Go 액션")
+        put(go_col, line, act_w, "액션", "Go", "Go 액션", screen_diff.GO_KEY, "head")
         last = line
     if last is not None:
         row = last + 2  # 필터 바 뒤 빈 줄 하나
@@ -479,13 +578,13 @@ def layout(item: dict, conds: list[tuple[str, bool]], actions: list[str], cols: 
             end = c1
         start = end - total + 1
         for i, name in enumerate(actions):
-            put(start + i * (act_w + gap), row, act_w, "액션", name, f"액션 '{name}'")
+            put(start + i * (act_w + gap), row, act_w, "액션", name, f"액션 '{name}'", ("액션", name), "head")
         row += 1
     for i, name in enumerate(cols):
         what = f"결과 테이블 '{name}'"
-        put(c0 + i * col_w, row, col_w, "머리글", name, what)
+        put(c0 + i * col_w, row, col_w, "머리글", name, what, ("결과 테이블", name), "head")
         for k in range(1, empty + 1):
-            put(c0 + i * col_w, row + k, col_w, "행", "", what)
+            put(c0 + i * col_w, row + k, col_w, "행", "", what, ("결과 테이블", name), "row")
     return boxes, over
 
 
@@ -519,13 +618,70 @@ def _read(item: dict, body: list[str], sname: str, problem) -> tuple[list[tuple[
     return None if bad else (conds, actions, cols, go)
 
 
-def draw(ed: SheetXml, styles: StylesXml, item: dict, body: list[str], sname: str, problem) -> int | None:
-    """한 화면을 그린다. 그린 칸 수를 낸다(소절이 없거나 비어 0). 이름 빈칸·영역 초과·영역 안 값은 쓰지 않고 problem 으로 알리고 None."""
+def read_previous(item: dict, body: list[str], sname: str) -> tuple[list[tuple[str, bool]], list[str], list[str], bool]:
+    """지난 판(origin/main)의 `#### … 그림` 본문을 느슨하게 읽는다. main 은 고칠 수 없고 그 모양을 고치는 PR 도 비교가 돼야 하므로
+    표 밖 글, 빈 이름·`미정` 행, 소절 안 중복 이름(처음 것만), 모르는 설정 키·값(`조회` 기본값)은 무시한다.
+    소절 머리글이 틀렸거나 표를 읽을 수 없을 때만 비교하지 못하므로 ExportError(검사 불능)."""
+    where = md_name(item)
+
+    def unreadable(why: str) -> ExportError:
+        return ExportError(
+            f"지난 판(origin/main)의 {where} 를 읽을 수 없어 변경을 비교하지 못했다(검사 불능, 통과 아님): {why} — main 의 해당 그림 절을 먼저 고친다",
+            sheet=sname, item=where,
+        )
+
+    try:
+        tables, _stray, settings = _tables(body, where)
+    except ExportError as e:
+        raise unreadable(e.reason) from None
+    go = False
+    if settings is not None and settings[0] == SETTINGS_HEADER:
+        for r in settings[1]:
+            if norm(r[0]) == "조회":
+                go = norm(r[1]) == "Go"
+                break
+    conds: list[tuple[str, bool]] = []
+    actions: list[str] = []
+    cols: list[str] = []
+    for sec, parsed in tables.items():
+        if sec not in SECTIONS or parsed is None:
+            continue  # 모르는 소절·표 없는 소절은 무시한다
+        header, rows, _wrong = parsed
+        if header not in SECTIONS[sec]:
+            raise unreadable(f"{sec} 표 머리글이 {' | '.join(header)} 이다(허용: {' 또는 '.join(' | '.join(h) for h in SECTIONS[sec])})")
+        seen: set[str] = set()
+        for r in rows:
+            name = _clean(r[0])
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            if sec == "필터 바":
+                conds.append((name, len(header) > 1 and _clean(r[1]).upper() == "Y"))
+            elif sec == "액션":
+                actions.append(name)
+            else:
+                cols.append(name)
+    return conds, actions, cols, go
+
+
+def draw(
+    ed: SheetXml, styles: StylesXml, item: dict, body: list[str], sname: str, problem,
+    old_body: list[str] | None = None,
+) -> int | None:
+    """한 화면을 그린다. 그린 칸 수를 낸다(소절이 없거나 비어 0). 이름 빈칸·영역 초과·영역 안 값은 쓰지 않고 problem 으로 알리고 None.
+
+    `old_body` 가 있으면 지난 판의 같은 그림 절과 비교해(`screen_diff`) 달라진 항목에 번호와 표시 스타일을 겹쳐 쓰고,
+    지도 `변경:` 의 변경 내용 표를 채운다. 없으면(첫 판 등) 표시 없이 그린다.
+    """
     where = md_name(item)
     read = _read(item, body, sname, problem)
     if read is None:
         return None
-    boxes, over = layout(item, *read)
+    merged = None
+    if old_body is not None:
+        merged = screen_diff.merge(read_previous(item, old_body, sname), read)
+        read = (merged.conds, merged.actions, merged.cols, merged.go)
+    boxes, over = layout(item, *read, marks=merged.marks if merged else None)
     if over:
         problem(sname, where, (
             f"{where} 이 영역 {item['영역']} 를 넘는다 — 넘친 항목: {', '.join(over[:12])}{' …' if len(over) > 12 else ''}. "
@@ -540,17 +696,49 @@ def draw(ed: SheetXml, styles: StylesXml, item: dict, body: list[str], sname: st
             "견본이 남은 자리에는 그리지 않는다. 지도 `비우기` 로 지운 빈 양식을 템플릿으로 쓴다"
         ))
         return None
+    changes = merged.changes if merged else []
+    table = _change_table(ed, item, changes, where, sname, problem) if changes else []
+    if changes and table is None:
+        return None
     saved = (ed._max_row, ed._max_col)  # 글자 쓰기가 자동 필터 범위를 늘리지 않게(dimension 은 set_style 이 넓힌다)
     try:
         for b in boxes:
             a, z = f"{n2col(b.col)}{b.row}", f"{n2col(b.col + b.width - 1)}{b.row}"
             if b.text:
                 ed.set(a, b.text, as_text=True)
-            style_range(ed, styles, a, z, item["스타일"][b.kind], sname)
+            style = {**item["스타일"][b.kind], **item["스타일"][b.mark]} if b.mark else item["스타일"][b.kind]
+            style_range(ed, styles, a, z, style, sname)
             if b.width > 1:
                 merge_range(ed, a, z, sname)
+        for ref, text in table:
+            ed.set(ref, text, as_text=True)
     except ExportError as e:
         raise ExportError(f"{where}: {e.reason}", sheet=sname, item=where) from None
     finally:
         ed._max_row, ed._max_col = saved
     return len(boxes)
+
+
+def _change_table(ed: SheetXml, item: dict, changes: list, where: str, sname: str, problem) -> list[tuple[str, str]] | None:
+    """변경 내용 표에 쓸 [(칸, 글)]. 자리가 없거나 모자라거나 쓸 칸에 값이 남아 있으면 problem 으로 알리고 None(자르지 않는다)."""
+    spot = item["변경"]
+    if spot is None:
+        problem(sname, where, f"변경 {len(changes)}건이 있는데 변경 내용 표 자리가 지도에 없다 — 지도 `화면:` 에 `변경:` 을 적는다")
+        return None
+    if len(changes) > spot["최대_행"]:
+        problem(sname, where, f"변경 {len(changes)}건이 변경 내용 표의 최대_행 {spot['최대_행']} 을 넘는다 — 지도의 `변경:` 최대_행(과 양식의 표)을 늘린다(자르지 않는다)")
+        return None
+    cols = spot["열"]
+    start = spot["시작_행"]
+    cells: list[tuple[str, str]] = []
+    for i, ch in enumerate(changes):
+        for key, text in zip(CHANGE_COLS, (screen_diff.circled(ch.number), ch.kind, ch.target, ch.content)):
+            cells.append((f"{cols[key]}{start + i}", text))
+    taken = [r for r in ed.valued_refs() if r in {ref for ref, _ in cells}]
+    if taken:
+        problem(sname, where, (
+            f"변경 내용 표를 쓸 칸에 이미 값이 있다({', '.join(taken[:5])}{' …' if len(taken) > 5 else ''}) — "
+            "견본이 남은 자리에는 쓰지 않는다. 지도 `비우기` 로 지운 빈 양식을 템플릿으로 쓴다"
+        ))
+        return None
+    return cells
