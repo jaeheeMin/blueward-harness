@@ -155,6 +155,29 @@ def _norm_check(entry: dict) -> dict:
     }
 
 
+def _latest_runs(entries: list[dict]) -> list[dict]:
+    """같은 검사(워크플로+이름, 커밋 status 는 context)는 가장 최근 실행 하나만 남긴다(#375).
+
+    다시 돌린 검사의 앞 실행(취소 등)이 롤업에 남아 실패로 세지는 것을 막는다. 같은 검사 가운데
+    시작·끝 시각을 모르는 실행이 있으면 어느 것이 최신인지 알 수 없으니 그 검사는 줄이지 않는다.
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for e in entries:
+        if "context" in e and "name" not in e:
+            key = ("status", e.get("context") or "")
+        else:
+            key = ("check", e.get("workflowName") or "", e.get("name") or "")
+        groups.setdefault(key, []).append(e)
+    kept: list[dict] = []
+    for group in groups.values():
+        times = [e.get("startedAt") or e.get("completedAt") or "" for e in group]
+        if len(group) == 1 or not all(times):
+            kept.extend(group)
+            continue
+        kept.append(group[max(range(len(group)), key=lambda i: times[i])])
+    return kept
+
+
 def _short_names(runs: list[dict], limit: int = 3) -> str:
     names = [r["name"] or "이름 없는 검사" for r in runs]
     return ", ".join(names[:limit]) + (f" 등 {len(names)}개" if len(names) > limit else "")
@@ -276,7 +299,7 @@ def _approval_result(
 def classify(ctx: _Context, raw: dict) -> dict:
     """PR 하나의 상태를 정한다. {"state", "detail", "next", "notes", "human_merge"}."""
     author = ((raw.get("author") or {}).get("login")) or ""
-    checks = [_norm_check(e) for e in (raw.get("statusCheckRollup") or [])]
+    checks = [_norm_check(e) for e in _latest_runs(raw.get("statusCheckRollup") or [])]
     mergeable = (raw.get("mergeable") or "").upper()
     merge_state = (raw.get("mergeStateStatus") or "").upper()
     notes: list[str] = []

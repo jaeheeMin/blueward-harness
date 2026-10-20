@@ -162,6 +162,37 @@ def test_pending_check():
     assert by_number(res)[1]["state"] == CHECKING
 
 
+def _at(entry, started, workflow="ai-review"):
+    return {**entry, "startedAt": started, "workflowName": workflow}
+
+
+def test_cancelled_then_passed_rerun_counts_latest_only():
+    # #375: public-cloud #248 처럼 앞 실행이 취소되고 다시 돈 실행이 통과하면 통과다.
+    cancelled = {**bad("ai-review / review"), "conclusion": "CANCELLED"}
+    checks = [_at(cancelled, "2026-10-19T01:02:51Z"), _at(ok("ai-review / review"), "2026-10-19T01:03:32Z")]
+    res, _ = compute([pr(1, checks=checks)])
+    assert by_number(res)[1]["state"] != CHECK_FAILED
+
+
+def test_passed_then_failed_rerun_is_failed():
+    checks = [_at(ok("doc-guard / check"), "2026-10-19T01:00:00Z"), _at(bad("doc-guard / check"), "2026-10-19T02:00:00Z")]
+    res, _ = compute([pr(1, checks=checks)])
+    assert by_number(res)[1]["state"] == CHECK_FAILED
+
+
+def test_rerun_without_times_stays_conservative():
+    # 어느 것이 최신인지 모르면 줄이지 않는다 — 실패를 통과로 바꾸지 않는다.
+    cancelled = {**bad("ai-review / review"), "conclusion": "CANCELLED"}
+    res, _ = compute([pr(1, checks=[cancelled, ok("ai-review / review")])])
+    assert by_number(res)[1]["state"] == CHECK_FAILED
+
+
+def test_same_name_in_different_workflows_both_count():
+    checks = [_at(bad("check"), "2026-10-19T01:00:00Z", "doc-guard"), _at(ok("check"), "2026-10-19T02:00:00Z", "other")]
+    res, _ = compute([pr(1, checks=checks)])
+    assert by_number(res)[1]["state"] == CHECK_FAILED
+
+
 def test_alert_and_gate_do_not_count_as_failed_check():
     # alert 실패는 검사 실패로 세지 않는다. 게이트 실패는 승인 판정으로 간다.
     res, _ = compute([pr(1, checks=[bad("pr-tamper-alert / alert"), ok("doc-guard / check")])], approvers="")
