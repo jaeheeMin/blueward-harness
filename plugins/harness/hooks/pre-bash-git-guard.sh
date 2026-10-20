@@ -466,6 +466,49 @@ check_one_merge() {
     deny "uvx 가 없어 SRS 승인 여부를 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_uv"
   fi
 
+  # -1-1) 먼저 병합해야 하는 열린 PR 이 있으면 거부한다(#370). 앞 PR 은 base 브랜치가 그 PR 의
+  #       브랜치이거나, 본문의 `먼저: #n` 줄, 같은 DEV 의 SRS→Spec→개발 순, 하네스 저장소의
+  #       plugin.json version 순으로 정해진다(checker.pr_queue --pr). 같은 파일을 고친 PR 은
+  #       경고일 뿐 막지 않는다. 엔진이 한 번 gh 로 열린 PR 을 읽는 값싼 검사이므로 승인·위험도
+  #       검사(여러 번 읽음)보다 먼저 두었다. 순서를 정하지 못하면(순환, 읽기 실패, 엔진 실행
+  #       실패) 통과가 아니라 거부다. 사람이 GitHub 화면에서 병합하는 것은 막지 못한다.
+  pq_err_file="$(mktemp 2>/dev/null)" || {
+    deny "임시 파일을 만들지 못해 PR #$pr_number 보다 먼저 병합할 PR 이 있는지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
+  }
+  set +e
+  pq_out="$(uvx --from "$engine" python -m checker.pr_queue --repo "$repo" --pr "$pr_number" --json 2>"$pq_err_file")"
+  pq_rc=$?
+  set -e
+  pq_err="$(cat "$pq_err_file" 2>/dev/null)" || pq_err=""
+  rm -f "$pq_err_file"
+  pq_out="$(printf '%s' "$pq_out" | tr -d '\r')"
+
+  pq_status=""
+  if printf '%s' "$pq_out" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    pq_status="$(printf '%s' "$pq_out" | jq -r '.status // empty' 2>/dev/null | tr -d '\r')" || pq_status=""
+  fi
+
+  if [ "$pq_status" = ok ] && [ "$pq_rc" -eq 0 ]; then
+    : # 먼저 병합할 열린 PR 이 없다. 통과시키고 나머지 검사를 계속한다.
+  elif [ "$pq_status" = ok ] && [ "$pq_rc" -eq 1 ]; then
+    pq_list="$(printf '%s' "$pq_out" | jq -r '[.before[] | "#\(.number)(\(.title))" + (if (.reasons | length) > 0 then " - 이유: " + (.reasons | join("; ")) else "" end)] | join(" / ")' 2>/dev/null | tr -d '\r"\\`$')" || pq_list=""
+    pq_first="$(printf '%s' "$pq_out" | jq -r '.before[0].number // empty' 2>/dev/null | tr -d '\r')" || pq_first=""
+    deny "PR #$pr_number 보다 먼저 병합해야 하는 PR 이 아직 열려 있어 merge 를 막습니다. 먼저 병합할 PR: $pq_list 다음: 먼저 #${pq_first:-앞 PR} 을 병합하십시오(/harness:prs 로 순서와 상태 확인). 순서가 틀렸다면 이 PR 본문의 '먼저:' 줄을 고치십시오."
+  else
+    pq_msg=""
+    if [ -n "$pq_status" ]; then
+      pq_msg="$(printf '%s' "$pq_out" | jq -r '.message // empty' 2>/dev/null | tr -d '\r"\\`$')" || pq_msg=""
+    fi
+    if [ -z "$pq_msg" ]; then
+      pq_detail_raw="$pq_out"
+      if [ -n "$pq_err" ]; then
+        pq_detail_raw="$pq_detail_raw $pq_err"
+      fi
+      pq_msg="$(printf '%s' "$pq_detail_raw" | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
+    fi
+    deny "PR #$pr_number 보다 먼저 병합할 PR 이 있는지 확인하지 못해 merge 를 막습니다(종료코드 $pq_rc). 확인되지 않는 상태로 통과시키지 않습니다. 사유: $pq_msg 다음: /harness:prs 로 PR 상태와 순서를 확인하십시오. 순환이면 PR 본문의 '먼저:' 줄을 고치십시오. $next_retry"
+  fi
+
   # stdout 과 stderr 를 나눠 받는다(#63). uv 가 엔진을 캐시 없이 새로 빌드할 때
   # "Building doc-guard-checker ...", "Installed N packages ..." 같은 진행
   # 로그를 stderr 로 낸다. 예전에는 `2>&1` 로 합쳐 받아 그 로그가 JSON 앞뒤에

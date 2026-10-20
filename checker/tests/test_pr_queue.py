@@ -517,3 +517,96 @@ def test_render_table_and_json_roundtrip():
     args = pr_queue.build_parser().parse_args(["--repo", "o/r", "--json"])
     code, text = pr_queue.run(args, gh)
     assert json.loads(text)["prs"][0]["number"] == 1
+
+
+# --- --pr: 병합 직전에 앞 PR 만 묻기(#370) ----------------------------------------
+
+
+def ask_before(gh, number, as_json=True):
+    argv = ["--repo", "o/r", "--pr", str(number)] + (["--json"] if as_json else [])
+    code, text = pr_queue.run(pr_queue.build_parser().parse_args(argv), gh)
+    return code, (json.loads(text) if as_json else text)
+
+
+def test_pr_option_lists_open_predecessors_with_reasons():
+    gh = FakeGh([pr(7, title="앞 작업"), pr(3, body="먼저: #7")])
+    code, res = ask_before(gh, 3)
+    assert code == pr_queue.EXIT_BEFORE_OPEN
+    assert res["status"] == "ok" and res["pr"] == 3
+    assert res["before"] == [{"number": 7, "title": "앞 작업", "reasons": ["본문의 먼저: 줄"]}]
+
+
+def test_pr_option_without_predecessor_exits_0():
+    gh = FakeGh([pr(7), pr(3)])
+    code, res = ask_before(gh, 3)
+    assert code == EXIT_OK and res["before"] == []
+
+
+def test_pr_option_lists_only_direct_predecessor_in_a_chain():
+    gh = FakeGh([pr(1), pr(2, body="먼저: #1"), pr(3, body="먼저: #2, #1")])
+    _, res = ask_before(gh, 3)
+    assert [e["number"] for e in res["before"]] == [2]
+
+
+def test_pr_option_orders_by_plugin_version():
+    gh = FakeGh([pr(20, files=(PJ,)), pr(21, files=(PJ,))], versions={"sha20": "0.10.9", "sha21": "0.10.10"})
+    code, res = ask_before(gh, 21)
+    assert code == pr_queue.EXIT_BEFORE_OPEN and res["before"][0]["number"] == 20
+    assert "version" in res["before"][0]["reasons"][0]
+    assert ask_before(gh, 20)[0] == EXIT_OK
+
+
+def test_pr_option_same_file_warning_is_not_a_predecessor():
+    gh = FakeGh([pr(1, files=("y.md",)), pr(2, files=("y.md",))])
+    assert ask_before(gh, 2)[0] == EXIT_OK
+
+
+def test_pr_option_cycle_is_cannot_check():
+    gh = FakeGh([pr(1, body="먼저: #2"), pr(2, body="먼저: #1"), pr(3, body="먼저: #2")])
+    for n in (1, 3):
+        code, res = ask_before(gh, n)
+        assert code == EXIT_CANNOT_CHECK and res["status"] == "cannot_check"
+    assert "순환" in ask_before(gh, 1)[1]["message"]
+    assert "순서 판정 불능" in ask_before(gh, 3)[1]["message"]
+
+
+def test_pr_option_cycle_elsewhere_does_not_block_unrelated_pr():
+    gh = FakeGh([pr(1, body="먼저: #2"), pr(2, body="먼저: #1"), pr(4)])
+    assert ask_before(gh, 4)[0] == EXIT_OK
+
+
+def test_pr_option_read_failure_is_cannot_check():
+    code, res = ask_before(FakeGh([], fail="네트워크 실패"), 3)
+    assert code == EXIT_CANNOT_CHECK and "네트워크 실패" in res["message"]
+
+
+def test_pr_option_pr_not_open_is_cannot_check():
+    code, res = ask_before(FakeGh([pr(1)]), 99)
+    assert code == EXIT_CANNOT_CHECK and "#99" in res["message"]
+
+
+def test_pr_option_unread_version_of_plugin_pr_is_cannot_check():
+    gh = FakeGh([pr(20, files=(PJ,)), pr(21, files=(PJ,))], versions={"sha21": "0.10.10"})
+    code, res = ask_before(gh, 21)
+    assert code == EXIT_CANNOT_CHECK and "#20" in res["message"]
+    # plugin.json 을 안 바꾼 PR 은 version 순서와 무관하다.
+    gh = FakeGh([pr(20, files=(PJ,)), pr(5)], versions={})
+    assert ask_before(gh, 5)[0] == EXIT_OK
+
+
+def test_pr_option_too_many_open_prs_is_cannot_check():
+    prs = [pr(n) for n in range(1, pr_queue.PR_LIMIT + 1)]
+    code, res = ask_before(FakeGh(prs), 1)
+    assert code == EXIT_CANNOT_CHECK and "앞 PR" in res["message"]
+
+
+def test_pr_option_does_not_classify_states():
+    gh = FakeGh([pr(1, checks=[bad("x")]), pr(2)])
+    ask_before(gh, 2)
+    assert not any("/pulls/" in c[0] or "/issues/" in c[0] for c in gh.calls if c and c[0] != "pr")
+
+
+def test_pr_option_text_output():
+    gh = FakeGh([pr(7, title="앞 작업"), pr(3, body="먼저: #7")])
+    code, text = ask_before(gh, 3, as_json=False)
+    assert code == pr_queue.EXIT_BEFORE_OPEN and "#7 앞 작업" in text and "먼저: 줄" in text

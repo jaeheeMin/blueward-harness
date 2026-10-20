@@ -27,6 +27,9 @@ PR 상태(우선순위대로 하나만 고르고, 나머지는 보조로 덧붙�
 그 뒤에 기다리는 PR 은 "앞 PR 순서 판정 불능 #…" 으로 남긴다.
 같은 파일을 고친 PR 쌍은 순서를 바꾸지 않고 경고만 한다.
 
+`--pr N` 은 PR 한 건보다 먼저 병합해야 하는 열린 PR 만 묻는다(병합 직전 훅용, 상태 판정은 하지 않는다).
+종료코드 0 앞 PR 없음, 1 있음, 2 확인 불능(순환·순서 판정 불능 포함).
+
 GitHub 를 읽지 못하면 "PR 상태 확인 불능" 이고 종료코드 2 다(통과도 문제없음도 아니다, 원칙 7).
 PR 한 건의 승인·version 만 못 읽으면 그 PR 만 "확인 불능" 으로 두고 나머지는 계산한다. 예상 못 한
 예외도 "확인 불능(예상 못 한 오류 <종류>)" 종료코드 2 로 낸다.
@@ -54,6 +57,7 @@ from checker.ssot_approval import (
 )
 
 EXIT_OK = 0
+EXIT_BEFORE_OPEN = 1  # --pr: 먼저 병합해야 하는 열린 PR 이 있다
 EXIT_CANNOT_CHECK = 2
 
 PR_LIMIT = 100
@@ -551,22 +555,68 @@ def shared_file_warnings(prs: list[dict], position: dict[int, int | None]) -> li
 # --- 계산 전체 ----------------------------------------------------------------
 
 
-def compute(client: GhClient, repo: str, login: str | None = None, mine: bool = False) -> dict:
-    """열린 PR 을 읽어 상태·순서를 계산한다. GitHub 를 읽지 못하면 GhError 를 던진다."""
-    raws = _load_prs(client, repo)
-    truncated = len(raws) >= PR_LIMIT
-    ctx = _Context(client, repo)
-    warnings: list[str] = []
-
+def _read_versions(client: GhClient, repo: str, raws: list[dict]) -> tuple[dict[int, str], list[int], list[str]]:
+    """plugin.json 을 바꾼 PR 의 head version. (version, 못 읽은 PR 번호, 경고)."""
     versions: dict[int, str] = {}
-    version_unread: list[int] = []
+    unread: list[int] = []
+    warnings: list[str] = []
     for raw in raws:
         if any(f.get("path") == PLUGIN_JSON for f in raw.get("files") or []) and raw.get("headRefOid"):
             try:
                 versions[raw["number"]] = _head_plugin_version(client, repo, raw["headRefOid"])
             except GhError as exc:
-                version_unread.append(raw["number"])
+                unread.append(raw["number"])
                 warnings.append(f"#{raw['number']} 의 plugin.json version 을 읽지 못해 version 순서에서 뺐다({exc})")
+    return versions, unread, warnings
+
+
+def compute_before(client: GhClient, repo: str, number: int) -> dict:
+    """PR 하나보다 먼저 병합해야 하는 열린 PR 을 낸다(병합 직전 검사용, #370).
+
+    상태 판정(승인·검사 조회)은 하지 않아 `compute` 보다 싸다. 순서를 확정할 수 없으면
+    ("status": "cannot_check") 앞 PR 이 없다고 말하지 않는다. 확정할 수 없는 경우: 그 PR 이 열린
+    목록에 없음, 열린 PR 이 PR_LIMIT 개 이상, 순환에 들었거나 순환 뒤에 기다림, 그 PR 이
+    plugin.json 을 바꿨는데 열린 PR 의 version 을 못 읽음.
+    """
+    raws = _load_prs(client, repo)
+    by_number = {r["number"]: r for r in raws}
+    if number not in by_number:
+        return cannot_check(f"PR #{number} 가 열린 PR 목록에 없다(이미 닫혔거나 병합됐거나 목록이 잘림)")
+    if len(raws) >= PR_LIMIT:
+        return cannot_check(f"열린 PR 이 {PR_LIMIT}개 이상이라 앞 PR 을 모두 확인하지 못한다")
+    versions, unread, _ = _read_versions(client, repo, raws)
+    touches_plugin = any(f.get("path") == PLUGIN_JSON for f in by_number[number].get("files") or [])
+    if touches_plugin and unread:
+        names = ", ".join(f"#{n}" for n in unread)
+        return cannot_check(f"{names} 의 plugin.json version 을 읽지 못해 version 순서를 정하지 못한다")
+    before, why = build_order(raws, versions)
+    _, cyclic, blocked = topo_order([r["number"] for r in raws], before)
+    if number in cyclic:
+        return cannot_check(f"PR #{number} 는 {CYCLE_NOTE} — 먼저: 줄·base 브랜치·version 이 서로 앞서라고 한다")
+    if number in blocked:
+        deps = ", ".join(f"#{d}" for d in blocked[number])
+        return cannot_check(f"PR #{number} 는 {BEHIND_ORDER_NOTE} {deps} 뒤에 있다")
+    firsts = sorted(reduce_edges(before).get(number, ()))
+    entries = []
+    for m in firsts:
+        prefix = f"#{m}: "
+        reasons = [w[len(prefix) :] for w in why.get(number, []) if w.startswith(prefix)]
+        entries.append({"number": m, "title": by_number[m].get("title") or "", "reasons": reasons})
+    return {
+        "status": "ok",
+        "repo": repo,
+        "pr": number,
+        "title": by_number[number].get("title") or "",
+        "before": entries,
+    }
+
+
+def compute(client: GhClient, repo: str, login: str | None = None, mine: bool = False) -> dict:
+    """열린 PR 을 읽어 상태·순서를 계산한다. GitHub 를 읽지 못하면 GhError 를 던진다."""
+    raws = _load_prs(client, repo)
+    truncated = len(raws) >= PR_LIMIT
+    ctx = _Context(client, repo)
+    versions, version_unread, warnings = _read_versions(client, repo, raws)
 
     before, why = build_order(raws, versions)
     ordered, cyclic, blocked = topo_order([r["number"] for r in raws], before)
@@ -718,15 +768,36 @@ def build_parser() -> argparse.ArgumentParser:
     scope.add_argument("--mine", action="store_true", help="내 PR 과 그 앞에 병합돼야 하는 PR 만")
     scope.add_argument("--all", action="store_true", help="저장소의 열린 PR 전체(기본)")
     parser.add_argument("--json", action="store_true", help="구조화된 출력")
+    parser.add_argument(
+        "--pr",
+        type=int,
+        help="이 PR 보다 먼저 병합해야 하는 열린 PR 만 묻는다(병합 직전 검사용). 종료코드 0 앞 PR 없음, 1 있음, 2 확인 불능",
+    )
     parser.add_argument("--max-rows", type=int, help="표에 싣는 PR 을 이 수까지로 줄인다(나머지는 '외 n개')")
     parser.add_argument("--quiet-empty", action="store_true", help="--mine 에서 내 PR 이 없으면 아무것도 내지 않는다")
     return parser
+
+
+def render_before(result: dict) -> str:
+    if result["status"] != "ok":
+        return result["message"]
+    if not result["before"]:
+        return f"#{result['pr']} 보다 먼저 병합할 열린 PR 은 없다."
+    lines = [f"#{result['pr']} 보다 먼저 병합해야 하는 열린 PR:"]
+    for e in result["before"]:
+        why = "; ".join(e["reasons"]) or "이유 불명"
+        lines.append(f"- #{e['number']} {_clip(e['title'], 40)} — {why}")
+    return "\n".join(lines)
 
 
 def run(args: argparse.Namespace, client: GhClient | None = None) -> tuple[int, str]:
     client = client or GhClient()
     try:
         repo = args.repo or _default_repo(client)
+        if args.pr is not None:
+            res = compute_before(client, repo, args.pr)
+            code = EXIT_CANNOT_CHECK if res["status"] != "ok" else (EXIT_BEFORE_OPEN if res["before"] else EXIT_OK)
+            return code, json.dumps(res, ensure_ascii=False) if args.json else render_before(res)
         login = _login(client) if args.mine else None
         result = compute(client, repo, login, mine=args.mine)
     except GhError as exc:
