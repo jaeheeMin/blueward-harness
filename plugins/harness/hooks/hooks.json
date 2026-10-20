@@ -64,6 +64,15 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project python \"${CLAUDE_PLUGIN_ROOT}/hooks/pr_table_notice.py\" || exit 0",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "Stop": [
