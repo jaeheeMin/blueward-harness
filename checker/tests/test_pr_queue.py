@@ -199,6 +199,27 @@ def test_alert_and_gate_do_not_count_as_failed_check():
     assert by_number(res)[1]["state"] != CHECK_FAILED
 
 
+def status_ctx(context, state):
+    return {"__typename": "StatusContext", "context": context, "state": state}
+
+
+def test_merge_order_status_and_pr_queue_job_do_not_count():
+    # 앞 PR 이 있어 merge-order 가 FAILURE 이면 GitHub 는 UNSTABLE 이라 하는데, 그것은 검사 불안정이 아니다.
+    checks = [ok("doc-guard / check"), status_ctx("merge-order", "FAILURE"), bad("pr-queue / queue")]
+    res, _ = compute([pr(1, checks=checks, mergeStateStatus="UNSTABLE")])
+    assert by_number(res)[1]["state"] == MERGEABLE
+
+
+def test_merge_order_alone_is_not_a_started_check():
+    res, _ = compute([pr(1, checks=[status_ctx("merge-order", "SUCCESS")])])
+    assert by_number(res)[1]["state"] == NOT_STARTED
+
+
+def test_unstable_without_merge_order_failure_stays_unstable():
+    res, _ = compute([pr(1, checks=[ok("doc-guard / check"), status_ctx("merge-order", "SUCCESS")], mergeStateStatus="UNSTABLE")])
+    assert by_number(res)[1]["state"] == UNSTABLE
+
+
 def test_waiting_approval_names_approvers():
     res, gh = compute(
         [pr(1, checks=[bad("risk-gate / check")])],

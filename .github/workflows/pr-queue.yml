@@ -1,0 +1,97 @@
+# 열린 PR 의 병합 순서를 GitHub 화면에 남기는 재사용 워크플로(#370).
+#
+# Claude 를 안 쓰는 사람도 "내 PR 이 몇 번째이고 무엇이 먼저 병합돼야 하는지" 를 받게 한다. 엔진
+# (`checker.pr_queue_actions`)이 열린 PR 전체의 상태·순서를 한 번 계산해, 열린 PR 마다
+#   - 코멘트 하나(마커 `<!-- pr-queue -->`)를 만들거나 갱신하고(내용이 같으면 쓰지 않는다),
+#   - 커밋 status `merge-order` 를 단다(앞 PR 이 열려 있으면 failure, 없으면 success, 순서를 정하지
+#     못하면 error),
+#   - 앞 PR 이 병합돼 이제 앞이 하나도 없게 된 PR 이 있으면 작성자를 @멘션하고(새 코멘트), Teams
+#     웹훅(`TEAMS_PLUGIN_ALERT_WEBHOOK`)이 있으면 Teams 로도 알린다.
+# 위 이벤트(PR·리뷰·main)가 올 때만 갱신한다. 검사 결과가 바뀐 것만으로는 돌지 않아 코멘트의 검사 상태는 다음
+# 이벤트까지 낡을 수 있다(정확한 지금 상태는 `/harness:prs`). 닫힌 PR 은 건드리지 않는다. 무료 요금제는 빨간불이어도 Merge 버튼을 잠그지 못하므로 `merge-order`
+# 는 막는 것이 아니라 드러내는 것이고, Claude 의 `gh pr merge` 는 훅이 막는다.
+#
+# GitHub 를 읽지 못하면 통과도 위반도 아니다(CLAUDE.md 원칙 7). job 을 실패시키고 사유를 job 요약에
+# 남긴다. 포크에서 온 PR 의 이벤트는 토큰이 읽기 전용이라 쓰지 않고 요약만 남긴다.
+#
+# 부르는 쪽은 아래 이벤트와 권한을 명시해야 한다(재사용 워크플로는 호출한 쪽의 권한을 넘지 못한다).
+# job 에는 permissions 를 적지 않아 부르는 쪽 권한을 그대로 받는다(risk-gate.yml 과 같다).
+#
+#   on:
+#     pull_request:
+#       types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed, edited]  # edited: 본문 `먼저:` 줄
+#     pull_request_review:
+#       types: [submitted, dismissed]
+#     push:
+#       branches: [main]
+#   jobs:
+#     pr-queue:
+#       uses: jaeheeMin/blueward-harness/.github/workflows/pr-queue.yml@stable
+#       secrets:
+#         TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+#       permissions:
+#         contents: read
+#         pull-requests: write
+#         issues: write
+#         statuses: write
+
+name: pr-queue
+
+on:
+  workflow_call:
+    inputs:
+      engine-ref:
+        description: 순서 계산 로직을 가져올 blueward-harness 의 ref
+        type: string
+        default: stable
+    secrets:
+      TEAMS_PLUGIN_ALERT_WEBHOOK:
+        description: Teams 알림 웹훅 URL(없으면 Teams 알림만 건너뜀)
+        required: false
+
+jobs:
+  queue:
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 모든 실행이 열린 PR 전체를 처음부터 다시 계산하므로, 이전 실행은 낡았다. 취소하고 최신으로 한다.
+    # (차례 알림은 이벤트가 아니라 직전 코멘트와의 차이로 정해 취소돼도 사라지지 않는다.)
+    concurrency:
+      group: pr-queue-${{ github.repository }}
+      cancel-in-progress: true
+    steps:
+      - name: 계산 엔진 가져오기
+        uses: actions/checkout@v4
+        with:
+          repository: jaeheeMin/blueward-harness
+          ref: ${{ inputs.engine-ref }}
+          path: .harness-engine
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: 병합 순서 계산과 코멘트·status·알림
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+        run: |
+          set +e
+          uv run --project .harness-engine python .harness-engine/scripts/pr_queue_actions.py \
+            --repo "$GITHUB_REPOSITORY" --event-path "$GITHUB_EVENT_PATH" --summary-file "$GITHUB_STEP_SUMMARY"
+          code=$?
+          set -e
+          case "$code" in
+            0)
+              ;;
+            1)
+              echo "::error title=병합 순서 쓰기 실패::코멘트나 status 를 쓰지 못한 PR 이 있다. 사유는 job 요약에 있다. caller 의 permissions(pull-requests·issues·statuses: write)를 확인한다."
+              exit 1
+              ;;
+            *)
+              echo "::error title=병합 순서 확인 불능::GitHub 를 읽지 못해 순서를 계산하지 못했거나 처리 중 예상 못 한 오류가 났다(종료코드 $code). 통과로 보지 않는다. 사유는 job 요약에 있다."
+              exit 1
+              ;;
+          esac

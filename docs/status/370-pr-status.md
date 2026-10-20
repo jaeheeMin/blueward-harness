@@ -35,6 +35,48 @@
 - 테스트: `test_pr_queue.py`(`--pr` 열림·없음·체인·version·경고만·순환·무관 순환·읽기 실패·목록에 없음·version 못 읽음·100개), `test_plugin_layout.py`(가짜 uvx 의 `checker.pr_queue` 응답으로 통과·거부·확인 불능·JSON 아님). 가짜 uvx 의 기본 응답은 "앞 PR 없음" 이다.
 - 문서: governance.md, plugins/harness/README.md, 길잡이 "작업 시작하기"·"리뷰·병합하기"·"내 PR 확인하기".
 
-## 남은 일
+## 3단계 (0.10.91)
 
-- 3단계: Actions 로 PR 코멘트·체크에 병합 순서 표시.
+Claude 를 안 쓰는 사람도 같은 정보를 받게 Actions 로 옮겼다.
+
+- 재사용 워크플로 `.github/workflows/pr-queue.yml`(`workflow_call`, 입력 `engine-ref` 기본 stable, 선택 secret `TEAMS_PLUGIN_ALERT_WEBHOOK`)이 `scripts/pr_queue_actions.py` → `checker/pr_queue_actions.py` 를 부른다. 엔진 체크아웃·uv 실행은 risk-gate.yml 과 같다. job 에 permissions 를 적지 않고(부르는 쪽 권한 그대로), concurrency `pr-queue-<저장소>` cancel-in-progress.
+- 한 번에 `compute` 로 열린 PR 전체를 계산하고 열린 PR 마다: (1) 코멘트 하나(github-actions 봇, 마커 `<!-- pr-queue -->`) 만들기·갱신 — 시각 같은 값이 없어 같은 내용이면 쓰지 않는다. (2) 커밋 status `merge-order`: 앞 PR 열림 failure("#m 먼저 병합", 140자), 없음 success, 순환 등 순서 판정 불능 error(통과로 두지 않음), 열린 PR 100개 이상이거나 plugin.json version 을 못 읽은 PR 이 순서에 걸리면 앞 PR 이 없다고 말하지 않고 error. 이미 같은 state·description 이 달려 있으면 쓰지 않는다(commit·context 당 status 한도). 닫힌 PR 은 건드리지 않는다.
+- 쓰기 횟수: 실행 한 번에 PR 마다 읽기(코멘트 목록, 현재 status) 2회, 쓰기는 내용이 바뀐 것만(코멘트 최대 1회, status 최대 1회). 변화가 없는 실행의 쓰기는 0회. 상태가 바뀐 PR(예: 검사 중 → 병합 가능)은 코멘트 갱신이 생긴다.
+- 차례 알림: 이벤트가 병합인지에 기대지 않고, 코멘트에 숨겨 둔 직전 앞 PR 목록(`<!-- pr-queue:after=… -->`)과 비교한다. 앞 PR 이 있었는데 이제 없고(order 가 정해짐), 사라진 앞 PR 이 모두 병합(`pulls/<n>.merged`)이면 알린다. 닫기만 한 경우는 알리지 않는다. 이렇게 한 까닭: 병합이 만드는 main push 실행이 병합 실행을 concurrency 로 취소하면 이벤트 기반 알림이 사라진다. 알림은 마커 코멘트 갱신으로는 푸시 알림이 안 가서 `@작성자` 가 든 짧은 새 코멘트(`<!-- pr-queue-turn:… -->`, 같은 앞 PR 집합이면 한 번만) 하나와 Teams. Teams 는 pr-tamper-alert·human-merge-alert 와 같은 secret `TEAMS_PLUGIN_ALERT_WEBHOOK` 의 Adaptive Card 방식이고, 비어 있으면 건너뛴다고 job 요약에만 남긴다. Teams 전송 실패는 PR 코멘트가 이미 남은 뒤라 경고(job 요약)로만 두고 웹훅 URL 은 출력하지 않는다. 이전 코멘트가 없는 첫 실행은 알리지 않는다.
+- 실패: 열린 PR 을 못 읽으면 "PR 순서 확인 불능" 을 job 요약에 쓰고 종료코드 2 → job 실패(통과 아님). 한 PR 의 코멘트 목록을 못 읽어도 2. 코멘트·status 쓰기 실패는 종료코드 1 → job 실패, 요약에 사유와 caller permissions 안내. 포크에서 온 PR 의 이벤트는 토큰이 읽기 전용이라 쓰지 않고 계산표만 요약에 남긴다(ssot-approval 도 포크 PR 을 범위 밖으로 둔다).
+- `merge-order` 를 다른 판정에서 뺐다: `checker/risk_gate.py` `EXCLUDED_CHECK_GROUPS`(`merge-order`, 그 워크플로 job `pr-queue / …`), `checker/pr_queue.py` 의 검사 판정(실패·진행 중 제외, `merge-order` 가 failure 라 UNSTABLE 이 된 것은 검사 불안정으로 말하지 않음, 그것만 있으면 "검사 시작 전"), 훅 `pre-bash-git-guard.sh` (-1) 의 `gh pr checks` 판정(순서는 바로 다음 -1-1 이 정확한 메시지로 막는다). `pr-queue / …` job 도 같이 뺀 까닭: 저장소 하나에 concurrency 그룹이라 다른 PR 의 실행이 이 실행을 취소하면 그 PR 커밋에 취소된 검사가 남아 병합 훅이 "검사 실패" 로 막기 때문이다.
+- scaffold caller `skeleton/dot-github/workflows/pr-queue.yml`(이벤트 PR opened·synchronize·reopened·ready_for_review·closed·edited, 리뷰 submitted·dismissed, main push; 권한 contents read, pull-requests·issues·statuses write; job id `pr-queue`)과 SKILL.md·test_scaffold 목록.
+- 이 저장소 자신의 caller: 필요하다(plugin.json version 순서가 이 저장소의 병합 순서 문제다). 다만 이 저장소는 자기 재사용 워크플로를 부르는 caller 를 하나도 두지 않았고(checker.yml 만 직접 돈다), caller 가 `@stable` 을 쓰면 0.10.91 태그가 붙기 전에는 엔진에 `pr_queue_actions` 가 없어 모든 PR 에서 빨갛게 실패한다. 그래서 이번 PR 에서는 넣지 않고, 0.10.91 병합으로 `stable` 이 붙은 뒤 후속으로 `.github/workflows/pr-queue-self.yml`(`uses: ./.github/workflows/pr-queue.yml`)을 넣는다. human-merge-paths 는 그대로.
+- 검토 반영: (1) 차례 알림 코멘트를 못 남기거나 앞 PR 병합 여부를 못 읽으면 마커 `after=` 를 이전 값으로 두어 다음 실행에서 다시 시도한다. Teams 전송 여부는 알림 코멘트의 표식(`<!-- pr-queue-teams:sent -->`, 웹훅이 없었으면 `:na`)으로 남기고, 코멘트는 있는데 표식이 없으면(웹훅이 있을 때) Teams 만 다시 보낸다. (2) `post_teams` 는 어떤 예외든 메시지 없이 종류(HTTP 면 상태코드)만 남겨 웹훅 값이 요약에 안 나간다. (3) 트리거 한계: 코멘트는 PR·리뷰·main 이벤트 때 갱신될 뿐 검사 결과가 바뀐 것만으로는 돌지 않아 검사 상태가 다음 이벤트까지 낡을 수 있다(정확한 지금 상태는 `/harness:prs`). 트리거에 `converted_to_draft` 추가. (4) 턴 표식 중복 확인은 봇(`github-actions[bot]`) 코멘트만 본다. (5) 코멘트에 넣는 PR 제목·검사 이름·detail·참고는 `@` 무력화(risk_gate `_defuse`)에 더해 `<`·`>`·백틱을 escape 한다. (6) Dependabot(`sender.login`/`GITHUB_ACTOR` 가 `dependabot[bot]`)이 일으킨 실행은 토큰이 읽기 전용이라 포크 PR 처럼 쓰기를 건너뛰고 요약만 남긴다. (7) `apply` 안 예상 못 한 예외는 "PR 순서 처리 중 예상 못 한 오류 <종류>" + 종료코드 2(쓰기 실패 1 과 구분).
+- 알려진 한계(이름 기반 제외): `merge-order`·`pr-queue` 를 다른 검사 판정에서 빼는 것은 이름으로 거른다. 다른 워크플로가 같은 이름의 검사를 달면 위조가 가능하다. 기존 `ssot-approval` 제외와 같은 한계이고, 이 저장소는 무료 요금제라 서버 강제로 막지 못한다.
+- 테스트: `test_pr_queue_actions.py`(코멘트 본문, 변경 없으면 쓰기 0, 같은 코멘트 갱신, status 상태·140자·순환 error·version 못 읽음·100개, 차례 알림 대상·중복 방지·닫기만 한 경우·Teams 없음/실패, 읽기 실패·쓰기 실패·포크), `test_pr_queue_workflow.py`(트리거·권한·concurrency·engine-ref), `test_pr_queue.py`·`test_risk_gate.py`·`test_plugin_layout.py`(merge-order 제외), `test_scaffold.py`.
+
+### public-cloud 에 넣을 것
+
+재사용 워크플로는 `@stable` 로 받으므로 0.10.91 병합 뒤 자동으로 받지만, caller 가 없으면 아무 일도 안 한다. public-cloud 에 `.github/workflows/pr-queue.yml` 을 새로 넣는다(스캐폴드 caller 와 같은 내용).
+
+```yaml
+name: pr-queue
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed, edited]
+  pull_request_review:
+    types: [submitted, dismissed]
+  push:
+    branches: [main]
+
+jobs:
+  pr-queue:
+    uses: jaeheeMin/blueward-harness/.github/workflows/pr-queue.yml@stable
+    secrets:
+      TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      statuses: write
+```
+
+- 필요한 secret: `TEAMS_PLUGIN_ALERT_WEBHOOK`(이미 pr-tamper-alert·human-merge-alert 가 쓰는 것. 없으면 Teams 만 건너뜀). 새 secret 은 없다.
+- 이 파일은 `.github/` 아래라 risk-gate 위험 경로다(승인자 Approve 필요, human-merge-paths 에 걸리면 사람이 병합).
+- 한계: 무료 요금제라 `merge-order` 빨간불로 Merge 버튼이 잠기지 않는다(훅은 Claude 의 `gh pr merge` 만 막는다). 조직·유료로 옮기면 `merge-order` 를 required status 로 바꿀 자리다.

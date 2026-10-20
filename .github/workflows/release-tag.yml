@@ -46,6 +46,7 @@ on:
       - .github/workflows/doc-guard.yml
       - .github/workflows/gitleaks.yml
       - .github/workflows/ledger-complete.yml
+      - .github/workflows/pr-queue.yml
       - .github/workflows/pr-tamper-alert.yml
       - .github/workflows/risk-gate.yml
       - .github/workflows/ssot-approval.yml

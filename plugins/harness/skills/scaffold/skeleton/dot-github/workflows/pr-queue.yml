@@ -1,0 +1,30 @@
+# 열린 PR 의 병합 순서를 PR 코멘트와 커밋 status `merge-order` 로 보여 주고, 앞 PR 이 병합돼 내 차례가
+# 되면 작성자를 멘션(Teams 웹훅이 있으면 Teams 로도)한다(#370). Claude 를 안 쓰는 사람도 같은 정보를 받는다.
+#
+# 순서는 PR 본문의 `먼저: #번호` 줄, base 브랜치가 다른 PR 의 브랜치인 관계, 같은 DEV 의
+# SRS → Spec → 개발 순으로 정해진다. 무료 요금제는 `merge-order` 가 빨간불이어도 Merge 버튼을 잠그지
+# 못하므로 이 검사는 막는 것이 아니라 드러내는 것이다.
+#
+# PR·리뷰·main 이벤트마다 열린 PR 전체를 다시 계산하므로 concurrency 는 재사용 워크플로 안에 있다.
+# 검사 결과가 바뀐 것만으로는 돌지 않아 코멘트의 검사 상태는 다음 이벤트까지 낡을 수 있다(정확한 지금
+# 상태는 `/harness:prs`). job id 는
+# `pr-queue` 로 둔다(다른 검사가 이 job 을 순서 표시로 알아보고 검사 실패에서 뺀다).
+name: pr-queue
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed, edited]
+  pull_request_review:
+    types: [submitted, dismissed]
+  push:
+    branches: [main]
+
+jobs:
+  pr-queue:
+    uses: jaeheeMin/blueward-harness/.github/workflows/pr-queue.yml@stable
+    secrets:
+      TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      statuses: write

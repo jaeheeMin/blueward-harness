@@ -432,8 +432,13 @@ check_one_merge() {
     # name) 마다 가장 늦게 시작한 것만 본다. 진행 중은 아직 startedAt 이 비어 있을 수
     # 있으니 가장 최신으로 친다.
     # 건너뜀(skipping)은 같은 그룹에 다른 결과가 있으면 후보에서 뺀다 — 옛 실패를 가리면 안 된다. 시작 시각이 같거나 없으면 모두 남겨 예전처럼 판정한다.
+    # `merge-order`(병합 순서 status)와 `pr-queue / …`(그것을 다는 워크플로 job)는 pr-queue 워크플로가
+    # 남기는 것이다(#370). 순서는 바로 아래 -1-1 검사가 정확한 메시지("먼저 #m")로 막으니 여기서 빼고,
+    # 그대로 두면 순서 문제가 "검사 실패" 로 둔갑한다. job 은 다른 PR 의 실행에 취소돼 이 PR 에 취소 기록이
+    # 남을 수 있어 같이 뺀다.
     ck_latest="$(printf '%s' "$ck_out" | jq -c '
-      group_by([.workflow // "", .name])
+      map(select(((.name // "") | split(" / ")[0]) as $g | $g != "merge-order" and $g != "pr-queue" and (.workflow // "") != "pr-queue"))
+      | group_by([.workflow // "", .name])
       | map(
           . as $all
           | (map(select(.bucket != "skipping")) | if length > 0 then . else $all end) as $cand

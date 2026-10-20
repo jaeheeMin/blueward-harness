@@ -330,6 +330,16 @@ Cloud & BTP 이름 규칙, `cap-ui5.md` — CAP·SAPUI5 개발 표준)를 기본
 둔다(#187). 고객사 표준이 정해지면 그 파일을 고치고, 이미 있는 파일은 덮어쓰지
 않는다. 자세한 절차는 `skills/scaffold/SKILL.md` 를 읽는다.
 
+`.github/workflows/pr-queue.yml` 은 Claude 를 안 쓰는 사람도 병합 순서를 알게 하는 호출 워크플로다(#370).
+이벤트(PR 열림·갱신·초안 전환·닫힘·본문 수정, 리뷰, main push)마다 열린 PR 전체를 한 번 계산해(검사 결과가 바뀐 것만으로는 돌지
+않아 코멘트의 검사 상태는 다음 이벤트까지 낡을 수 있다 — 정확한 지금 상태는 `/harness:prs`), PR 마다 순서·앞에
+병합할 PR·상태·다음 할 일을 담은 코멘트 하나(`<!-- pr-queue -->`)를 갱신하고(내용이 같으면 쓰지 않는다) 커밋
+status `merge-order` 를 단다(앞 PR 이 열려 있으면 failure, 없으면 success, 순서를 정하지 못하면 error).
+앞 PR 이 병합돼 차례가 된 PR 은 작성자를 멘션하고, `TEAMS_PLUGIN_ALERT_WEBHOOK` secret 이 있으면 Teams 로도
+알린다(없으면 건너뜀). 무료 요금제라 빨간불이어도 Merge 버튼은 잠기지 않는다. 호출 쪽 permissions 는
+`contents: read`, `pull-requests: write`, `issues: write`, `statuses: write`. GitHub 를 못 읽으면 job 이 실패한다.
+기존 Project Repository 는 호출 파일을 새로 넣어야 받는다.
+
 ## 비밀정보 검사(#159)
 
 CR-004 는 `.github/workflows/gitleaks.yml` 재사용 워크플로가 PR·main 커밋마다 gitleaks 로
