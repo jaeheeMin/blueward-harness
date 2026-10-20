@@ -229,6 +229,15 @@ def test_게이트_자신과_보조_검사는_세지_않는다():
     assert rg.checks_reasons(runs) == ([], [])
 
 
+def test_병합_순서_status_와_pr_queue_job_은_세지_않는다():
+    runs = [
+        _run("merge-order", conclusion="failure"),
+        _run("pr-queue / queue", conclusion="cancelled"),
+        _run("pr-queue / queue", status="in_progress", conclusion=None),
+    ]
+    assert rg.checks_reasons(runs) == ([], [])
+
+
 def test_이름이_비슷할_뿐인_검사는_세지_않는_것이_아니다():
     assert rg.checks_reasons([_run("risk-gate-docs", conclusion="failure")])[0]
     assert rg.checks_reasons([_run("alerting", conclusion="failure")])[0]

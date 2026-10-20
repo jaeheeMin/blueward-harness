@@ -982,6 +982,28 @@ def test_검사가_실패한_PR_의_병합은_이름과_링크와_다음_할_일
 
 
 @_needs_hook_env
+def test_merge_order_와_pr_queue_job_은_실패해도_진행_중이어도_검사로_세지_않는다(tmp_path):
+    # 순서는 바로 다음 순서 검사(checker.pr_queue --pr)가 정확한 메시지로 막는다(#370).
+    checks = {123: ([
+        _check("test (ubuntu-latest)", "pass"),
+        _check("merge-order", "fail"),
+        _check("pr-queue / queue", "cancel"),
+        _check("pr-queue / queue", "pending"),
+    ], 1)}
+    out, log = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", checks)
+    assert out is None
+    assert any("check-pr" in line for line in log)  # 검사 단계를 지나 기존 uvx 검사까지 갔다
+
+
+@_needs_hook_env
+def test_merge_order_가_빨간불이어도_다른_검사_실패는_그대로_거부한다(tmp_path):
+    checks = {123: ([_check("merge-order", "fail"), _check("build", "fail")], 1)}
+    out, _ = _merge_with_checks(tmp_path, "gh pr merge 123 -R owner/repo", checks)
+    reason = _reason(out)
+    assert "build" in reason and "merge-order" not in reason
+
+
+@_needs_hook_env
 def test_취소된_검사도_실패처럼_거부한다(tmp_path):
     out, _ = _merge_with_checks(
         tmp_path, "gh pr merge 123 -R owner/repo", {123: ([_check("build", "cancel")], 1)}

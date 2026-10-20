@@ -116,7 +116,15 @@ OWN_CHECK_NAME = "risk-gate"
 # 같은 PR 에서 함께 도는 보조 검사. `ssot-approval` 은 SRS 승인 여부를, `alert` 는
 # human-merge-alert 의 알림 job 이다. 둘은 이 게이트의 사유(경로·승인)와 겹치거나 검사
 # 결과가 아니라 알림이므로 "검사 실패" 로 세지 않는다.
-EXCLUDED_CHECK_GROUPS = frozenset({OWN_CHECK_NAME, "ssot-approval"})
+# `merge-order` 는 pr-queue 워크플로가 다는 병합 순서 커밋 status(#370)다. 앞 PR 이 열려 있으면
+# failure 인데, 그것은 이 PR 의 위험도나 검사 결과가 아니라 병합 시점의 문제이므로 같은 사유를
+# 두 번 쌓거나 승인 판정을 오염시키지 않게 세지 않는다.
+# 같은 이유로 그 워크플로의 job(`pr-queue / queue`)도 뺀다. 저장소 전체에 하나의 concurrency 그룹이라
+# 다른 PR 의 실행이 이 실행을 취소하면 그 PR 의 커밋에 취소된 검사가 남아, 병합 순서와 무관한 PR 이
+# "검사 실패" 로 보이기 때문이다. 이 job 이 실패한 사유(GitHub 를 못 읽음)는 PR 의 문제가 아니다.
+MERGE_ORDER_CHECK = "merge-order"
+PR_QUEUE_CHECK = "pr-queue"
+EXCLUDED_CHECK_GROUPS = frozenset({OWN_CHECK_NAME, "ssot-approval", MERGE_ORDER_CHECK, PR_QUEUE_CHECK})
 EXCLUDED_CHECK_NAMES = frozenset({"alert"})
 AI_REVIEW_CHECK_NAME = "ai-review"
 
