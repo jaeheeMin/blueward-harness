@@ -1206,10 +1206,11 @@ fix/31-broken-link</pre>
       <div class="node"><b>살펴보기</b><span>main 이면 거절 · 활성화 확인</span></div><div class="arrow"></div>
       <div class="node"><b>맞추기</b><span>fetch → rebase</span></div><div class="arrow"></div>
       <div class="node hl"><b>커밋</b><span>의미 하나에 커밋 하나</span></div><div class="arrow"></div>
-      <div class="node hl"><b>푸시</b><span>deliver 만 통과</span></div><div class="arrow"></div>
-      <div class="node"><b>PR</b><span>담당자는 나</span></div><div class="arrow"></div>
-      <div class="node ok"><b>원장 갱신</b><span>상태 "리뷰" + PR 번호</span></div>
+      <div class="node ok"><b>원장 갱신</b><span>상태 "리뷰" + 예측한 PR 번호</span></div><div class="arrow"></div>
+      <div class="node hl"><b>푸시 한 번</b><span>deliver 만 통과</span></div><div class="arrow"></div>
+      <div class="node"><b>PR</b><span>담당자는 나 · 번호 확인</span></div>
     </div>
+    <p class="small" style="margin-top:10px">원장을 PR 뒤에 고치면 푸시가 두 번 나가서 Actions 검사가 두 번 돌아. 그래서 다음 PR 번호를 미리 계산해 푸시 전에 적고, PR 을 만든 뒤 번호가 다를 때만 한 번 더 올려.</p>
   </section>
 
   <div class="cols">
