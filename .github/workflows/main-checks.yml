@@ -1,0 +1,713 @@
+# Project Repository 가 가져다 쓰는 재사용 워크플로(#419). main 에 병합된 뒤의 읽기 전용 검사를 job 하나로 합친다.
+#
+# 왜 합쳤나(#412): main 병합 1번에 run 이 5개(doc-guard·gitleaks·risk-gate after-merge·ssot-approval
+# after-merge·ledger-complete) 뜨고 각각 1분씩 깎인다. 읽기 전용 넷에 pr-queue 를 한 job(`check`)의 단계로 옮겨
+# 엔진 checkout·uv 설치도 한 번만 하고 1분만 쓴다. 병합 1번이 5 → 2(이 job + ledger-complete)가 된다. 이 파일이
+# 다음 옛 워크플로의 `push: main` 경로를 대체한다(옛 파일은 public-cloud 의 옛 caller 가 `@stable` 로 부르니
+# 한 판 동안 남기고 로직이 둘인 것을 감수한다. 교체는 #420).
+#
+#   gitleaks.yml, doc-guard.yml, risk-gate.yml(after-merge job), ssot-approval.yml(after-merge job), pr-queue.yml
+#
+# ledger-complete.yml 은 합치지 않고 따로 둔다. 진행 원장을 main 에 직접 커밋·push 하려면 `contents: write` 가
+# 필요한데, 이 job 은 gitleaks 를 위해 외부 바이너리를 받아 실행한다. 쓰기 토큰을 외부 바이너리를 받는 단계와
+# 한 job 에 두지 않으려는 것이다. 그래서 이 파일의 caller 예시에 `contents: write` 는 없고, 있어서도 안 된다
+# (시험이 본다). 재시도 루프(`scripts/ledger_complete_loop.sh`)와 "concurrency 로 줄 세우지 않는다" 원칙도
+# ledger-complete 쪽에 그대로 있다.
+#
+# 단계 순서: 바뀐 파일 목록 → gitleaks → doc-guard(→ 실패 이슈) → risk-gate(→ 이슈) → ssot-approval(→ 이슈)
+# → pr-queue → 종합. 단계 규칙은 pr-checks.yml 과 같다(그쪽 머리 주석을 본다). 검사 단계 넷은
+# `continue-on-error` 이고 `outputs.status` 를 pass·fail·unknown 으로 내며, 마지막 "종합" 단계가 fail·unknown
+# 이 하나라도 있으면 job 을 실패시키고 단계별로 `::error title=` 를 따로 낸다. pr-queue 는 `continue-on-error`
+# 로 돌고 종합에서 뺀다. 이슈를 여는 단계(옛 파일의 "승인 없이 들어왔으면 이슈를 연다"·"main push 실패를 이슈로
+# 알리기")도 단계 안의 내용은 옛 파일 그대로이고, 이슈를 열지 못하면 종합이 `::error` 로 job 을 실패시킨다.
+# 옛 파일에서 "판정 불능이면 실패" 단계였던 것은 종합이 대신한다(불능은 통과도 위반도 아니다, 원칙 7).
+#
+# commit status 는 PR 이 아니라 push 된 main 커밋(`github.sha`)에 옛 이름 그대로 `gitleaks`·`doc-guard`·
+# `risk-gate`·`ssot-approval` 로 단다. 엔진과 훅이 읽는 것은 아니고(PR head 의 status 를 읽는다), 병합된 커밋
+# 화면에서 사람이 결과를 보게 하려는 것이다. 다니 `statuses: write` 가 필요하다.
+#
+# doc-guard 의 paths 는 트리거가 아니라 단계 `if` 다. push 이전·이후 커밋(`github.event.before`..`github.sha`)
+# 사이 바뀐 파일을 `gh api compare` 로 한 번 받아 pr-checks.yml 과 같은 `DOC_GUARD_PATHS` 로 평가한다. 목록을 못
+# 받으면(이전 커밋이 사라진 강제 push, 파일 300개 이상으로 API 가 잘림 등) `unknown` 이고 건너뛰지 않고 돌린다.
+# gitleaks·risk-gate·ssot-approval 은 옛 push 경로처럼 paths 없이 항상 돈다.
+#
+# concurrency 는 두지 않는다. 병합 뒤 감시는 취소되면 안 된다(옛 after-merge job 과 같다).
+#
+# job 에는 permissions 를 적지 않아 부르는 쪽 권한을 그대로 받는다. 부르는 쪽은 아래를 명시해야 한다.
+#
+# 부르는 쪽 예:
+#
+#   on:
+#     push:
+#       branches: [main]
+#   jobs:
+#     main-checks:
+#       uses: jaeheeMin/blueward-harness/.github/workflows/main-checks.yml@stable
+#       secrets:
+#         TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+#       permissions:
+#         contents: read
+#         pull-requests: read
+#         issues: write
+#         statuses: write
+#         checks: read
+
+name: main-checks
+
+on:
+  workflow_call:
+    inputs:
+      engine-ref:
+        description: 검사 엔진을 가져올 blueward-harness 의 ref
+        type: string
+        default: stable
+    secrets:
+      TEAMS_PLUGIN_ALERT_WEBHOOK:
+        description: Teams 알림 웹훅 URL(없으면 Teams 알림만 건너뜀)
+        required: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # concurrency 는 두지 않는다 — 병합 뒤 감시는 취소되면 안 된다(머리 주석).
+    # permissions 는 적지 않는다 — 부르는 쪽이 준 권한을 그대로 쓴다(머리 주석).
+    steps:
+      # 저장소를 엔진보다 먼저 받는다(checkout 은 작업 폴더의 추적 안 되는 파일을 지운다).
+      # fetch-depth 0 은 gitleaks 의 커밋 범위 검사와 doc-guard 의 이전 커밋 비교가 둘 다 필요로 한다.
+      - name: 저장소 가져오기
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 검사 엔진 가져오기
+        uses: actions/checkout@v4
+        with:
+          repository: jaeheeMin/blueward-harness
+          ref: ${{ inputs.engine-ref }}
+          path: .harness-engine
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # push 범위의 바뀐 파일 목록을 한 번 받아 doc-guard 단계의 `if` 가 쓴다.
+      # DOC_GUARD_PATHS 는 pr-checks.yml 의 것, scaffold 의 doc-guard caller 의 paths 와 같아야 한다(시험이 비교한다).
+      # 이름이 바뀐 파일은 옛 경로도 센다. compare API 는 파일 300개까지만 주므로 그 이상이면 unknown 이다.
+      - name: 바뀐 파일 목록 받기
+        id: changed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          DOC_GUARD_PATHS: |
+            docs/**
+            templates/**
+            rules/**
+            audit/**
+            **/*.abap
+            **/*.js
+            **/*.ts
+            **/*.mjs
+            **/*.cjs
+            **/*.cds
+            **/*.asbdef
+            **/*_v*.xlsx
+            **/*_v*.docx
+            **/*_v*.pptx
+        run: |
+          set +e
+          : > "$RUNNER_TEMP/push-files.txt"
+          if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "::warning title=바뀐 파일 목록을 받지 못함::push 이전 커밋이 없어 비교할 수 없다. doc-guard 단계는 건너뛰지 않고 돌린다."
+            echo "FAILED" > "$RUNNER_TEMP/push-files-failed"
+          elif ! gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE_SHA...$AFTER_SHA" \
+              --jq '.files[] | "F\t" + .filename, (if .previous_filename then "P\t" + .previous_filename else empty end)' \
+              > "$RUNNER_TEMP/push-files.txt" 2> "$RUNNER_TEMP/push-files-err.txt"; then
+            echo "::warning title=바뀐 파일 목록을 받지 못함::$(head -c 200 "$RUNNER_TEMP/push-files-err.txt" | tr '\n' ' ') doc-guard 단계는 건너뛰지 않고 돌린다."
+            : > "$RUNNER_TEMP/push-files.txt"
+            echo "FAILED" > "$RUNNER_TEMP/push-files-failed"
+          fi
+          python3 - <<'PY'
+          import os, re
+
+          def to_re(glob):
+              out, i = [], 0
+              while i < len(glob):
+                  if glob.startswith("**/", i):
+                      out.append("(?:.*/)?"); i += 3
+                  elif glob.startswith("**", i):
+                      out.append(".*"); i += 2
+                  elif glob[i] == "*":
+                      out.append("[^/]*"); i += 1
+                  elif glob[i] == "?":
+                      out.append("[^/]"); i += 1
+                  else:
+                      out.append(re.escape(glob[i])); i += 1
+              return re.compile("^" + "".join(out) + "$")
+
+          temp = os.environ["RUNNER_TEMP"]
+          failed = os.path.exists(os.path.join(temp, "push-files-failed"))
+          files, entries = [], 0
+          with open(os.path.join(temp, "push-files.txt"), encoding="utf-8") as fh:
+              for line in fh:
+                  line = line.rstrip("\n")
+                  if "\t" in line:
+                      kind, name = line.split("\t", 1)
+                      files.append(name)
+                      entries += kind == "F"
+          truncated = entries >= 300
+
+          def verdict(env_name):
+              if failed or truncated:
+                  return "unknown"
+              patterns = [to_re(p.strip()) for p in os.environ[env_name].splitlines() if p.strip()]
+              return "true" if any(p.match(f) for p in patterns for f in files) else "false"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"has_doc_guard={verdict('DOC_GUARD_PATHS')}\n")
+          print(f"바뀐 파일 {entries}개, 목록 받기 {'실패' if failed else ('잘림' if truncated else '성공')}")
+          PY
+          exit 0
+
+      # ── gitleaks (옛 gitleaks.yml, push 경로) ────────────────────────────────
+      - name: gitleaks 검사
+        id: gitleaks
+        continue-on-error: true
+        shell: bash
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          GITLEAKS_BIN: ${{ runner.temp }}/gitleaks-bin/gitleaks
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          REPORT_PATH: ${{ runner.temp }}/gitleaks-report.json
+        run: |
+          set +e
+          scan_out="$RUNNER_TEMP/gitleaks-scan.out"
+          : > "$scan_out"
+          # 릴리즈 바이너리를 버전과 sha256 으로 고정해 받는다. 버전을 올릴 때는 GITLEAKS_VERSION 과
+          # GITLEAKS_SHA256 을 함께 고친다(gitleaks.yml·pr-checks.yml 과 같은 값).
+          (
+            set -euo pipefail
+            tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/$tarball" \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+            echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+            mkdir -p "$RUNNER_TEMP/gitleaks-bin"
+            tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP/gitleaks-bin" gitleaks
+            "$RUNNER_TEMP/gitleaks-bin/gitleaks" version
+          )
+          if [ $? -ne 0 ]; then
+            echo "gitleaks 바이너리를 받지 못했다. 통과로 보지 않는다."
+            echo "status=unknown" >> "$GITHUB_OUTPUT"
+            echo "reason=gitleaks 바이너리를 받지 못해 검사하지 못했다. 비밀값이 발견됐다는 뜻이 아니다." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # 판정 셸은 결과를 GITHUB_OUTPUT 에 result=clean|leak|error 로 적는다. 임시 파일로 받아 읽는다.
+          GITHUB_OUTPUT="$scan_out" bash .harness-engine/scripts/gitleaks_scan.sh
+          result="$(sed -n 's/^result=//p' "$scan_out" | tail -n 1)"
+          case "$result" in
+            clean)
+              echo "status=pass" >> "$GITHUB_OUTPUT"
+              ;;
+            leak)
+              echo "status=fail" >> "$GITHUB_OUTPUT"
+              echo "reason=main 에 들어온 커밋에서 비밀값 모양이 발견됐다. 위치는 job 로그와 gitleaks-report 아티팩트에 있다(값은 가려져 있다)." >> "$GITHUB_OUTPUT"
+              echo "leak=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "status=unknown" >> "$GITHUB_OUTPUT"
+              echo "reason=gitleaks 검사를 하지 못했다. 비밀값이 발견됐다는 뜻이 아니다. 사유는 job 로그를 본다." >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          exit 0
+
+      - name: gitleaks status 달기
+        id: gitleaks-status
+        if: steps.gitleaks.outcome != 'skipped'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          RESULT: ${{ steps.gitleaks.outputs.status }}
+          REASON: ${{ steps.gitleaks.outputs.reason }}
+          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          result="${RESULT:-unknown}"
+          desc="${REASON:-}"
+          if [ -z "$desc" ]; then
+            if [ "$result" = "pass" ]; then desc="비밀값이 발견되지 않았다"; else desc="단계가 결과를 내지 못했다"; fi
+          fi
+          uv run --project .harness-engine python .harness-engine/scripts/step_status.py \
+            --repo "$GITHUB_REPOSITORY" --sha "$SHA" --context gitleaks --result "$result" \
+            --description "$desc" --target-url "$TARGET_URL"
+
+      - name: gitleaks 리포트 올리기(값은 가려져 있다)
+        if: always() && steps.gitleaks.outputs.leak == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: ${{ runner.temp }}/gitleaks-report.json
+          retention-days: 14
+
+      # ── doc-guard (옛 doc-guard.yml, push 경로) ──────────────────────────────
+      # 옛 파일의 "바뀐 문서 찾기"·"검사"·"결과 정리"·"판정" 을 한 단계로 묶었다. push 에는 PR 코멘트도, 열린 PR 의
+      # 판 번호 읽기도 없다.
+      - name: doc-guard 검사
+        id: doc-guard
+        if: steps.changed.outputs.has_doc_guard != 'false'
+        continue-on-error: true
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set +e
+          status=unknown
+          reason="doc-guard 검사기가 결과를 내지 못했다. job 로그를 본다."
+
+          # push 는 직전 커밋과 비교한다. 지워진 파일은 검사할 수 없으므로 뺀다(--diff-filter=d).
+          # core.quotepath=false 가 없으면 git 이 비ASCII 경로를 따옴표와 8진수로 감싸 검사기가 없는 경로를 받는다.
+          git -c core.quotepath=false diff --name-only --diff-filter=d "$BEFORE_SHA" HEAD > changed.txt || git -c core.quotepath=false ls-files > changed.txt
+          echo "바뀐 파일:"; cat changed.txt
+
+          if [ ! -s changed.txt ]; then
+            echo "검사할 바뀐 파일이 없다."
+            status=pass
+            reason=""
+          else
+            uv run --project .harness-engine python .harness-engine/scripts/check_changed.py changed.txt > report.json 2> doc-guard-error.txt
+            code=$?
+            cat doc-guard-error.txt >&2 || true
+
+            if uv run --project .harness-engine python .harness-engine/scripts/render_report.py report.json "$code" > comment.md; then
+              cat comment.md >> "$GITHUB_STEP_SUMMARY"
+              cat comment.md
+            else
+              echo "결과 정리(render_report)가 실패했다." >&2
+              code=render-failed
+            fi
+
+            case "$code" in
+              0)
+                status=pass
+                reason=""
+                ;;
+              1)
+                status=fail
+                reason="문서, 코드, 또는 SRS·Spec·원장 번호 짝이 규칙을 따르지 않는다. job 요약을 본다."
+                ;;
+              2)
+                cause=$(uv run --project .harness-engine python .harness-engine/scripts/render_report.py \
+                  --exit2-cause report.json 2>/dev/null || echo config)
+                status=unknown
+                if [ "$cause" = "retry" ]; then
+                  reason="다른 열린 PR 을 읽지 못해 판 번호 겹침을 확인하지 못했다(GitHub 일시 오류일 수 있다). 이 실행을 다시 돌린다."
+                else
+                  reason="규칙 파일이나 검사 엔진에 문제가 있어 검사할 수 없다. 담당자에게 알린다."
+                fi
+                ;;
+              render-failed)
+                status=unknown
+                reason="검사 결과를 정리하지 못했다. 담당자에게 알린다."
+                ;;
+              *)
+                status=unknown
+                reason="검사기가 예상치 못한 코드 $code 로 끝났다. 담당자에게 알린다."
+                ;;
+            esac
+          fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: doc-guard status 달기
+        id: doc-guard-status
+        if: steps.doc-guard.outcome != 'skipped'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          RESULT: ${{ steps.doc-guard.outputs.status }}
+          REASON: ${{ steps.doc-guard.outputs.reason }}
+          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          result="${RESULT:-unknown}"
+          desc="${REASON:-}"
+          if [ -z "$desc" ]; then
+            if [ "$result" = "pass" ]; then desc="통과"; else desc="단계가 결과를 내지 못했다"; fi
+          fi
+          uv run --project .harness-engine python .harness-engine/scripts/step_status.py \
+            --repo "$GITHUB_REPOSITORY" --sha "$SHA" --context doc-guard --result "$result" \
+            --description "$desc" --target-url "$TARGET_URL"
+
+      - name: main push 실패를 이슈로 알리기
+        id: doc-guard-issue
+        if: steps.doc-guard.outcome != 'skipped' && steps.doc-guard.outputs.status != 'pass' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          # 이 저장소는 개인 비공개 Project Repository 라 branch protection 을 걸 수
+          # 없다(doc-guard.yml 과 같은 사정). PR 검사가 실패한 채로 병합됐을 수 있으니,
+          # main 에서마저 실패하면 최소한 이슈로 남겨 놓친 채 지나가지 않게 한다. 이 단계는
+          # 판정을 되돌리지 않는다 — 종합이 doc-guard 단계의 결과로 job 을 실패시킨다.
+          sha_short="${GITHUB_SHA:0:7}"
+          prefix="main 의 doc-guard 검사 실패:"
+          title="$prefix $sha_short"
+          body="커밋: ${GITHUB_SHA} ($COMMIT_URL)
+          워크플로 실행: $RUN_URL
+
+          병합 전 PR 검사가 실패한 채 병합됐을 수 있다. 원인을 고친 PR 을 올린다."
+
+          # 같은 원인으로 이미 열려 있는 이슈가 있으면 새로 만들지 않고 코멘트만
+          # 남긴다(제목 접두어로 판단 — 커밋마다 sha 가 달라 제목 전체는 못 맞춘다).
+          existing_number="$(gh issue list --state open --json number,title \
+            --jq ".[] | select(.title | startswith(\"$prefix\")) | .number" | head -n1)"
+          if [ -n "$existing_number" ]; then
+            gh issue comment "$existing_number" --body "$body"
+            exit 0
+          fi
+
+          # 라벨이 없는 저장소에서도 실패하지 않게, 있을 때만 붙인다.
+          if gh label list --json name --jq '.[].name' 2>/dev/null | grep -qxF "type:fix"; then
+            gh issue create --title "$title" --body "$body" --label "type:fix"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
+
+      # ── risk-gate after-merge (옛 risk-gate.yml 의 after-merge job) ──────────
+      - name: risk-gate merge 뒤 위험도·승인 확인
+        id: risk-gate
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set +e
+          uv run --project .harness-engine python .harness-engine/scripts/risk_gate.py \
+            check-commit --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" \
+            > risk-result.json 2> risk-error.txt
+          code=$?
+          echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+          cat risk-error.txt >&2 || true
+          cat risk-result.json || true
+          case "$code" in
+            0)
+              echo "status=pass" >> "$GITHUB_OUTPUT"
+              ;;
+            1)
+              echo "status=fail" >> "$GITHUB_OUTPUT"
+              echo "reason=승인 없이 위험한 변경이 main 에 들어왔다. 알림 이슈를 열었다." >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "status=unknown" >> "$GITHUB_OUTPUT"
+              echo "reason=merge 뒤 위험도를 판정하지 못했다(종료코드 $code). 통과로 보지 않는다." >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          exit 0
+
+      - name: risk-gate status 달기
+        id: risk-gate-status
+        if: steps.risk-gate.outcome != 'skipped'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          RESULT: ${{ steps.risk-gate.outputs.status }}
+          REASON: ${{ steps.risk-gate.outputs.reason }}
+          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          result="${RESULT:-unknown}"
+          desc="${REASON:-}"
+          if [ -z "$desc" ]; then
+            if [ "$result" = "pass" ]; then desc="통과"; else desc="단계가 결과를 내지 못했다"; fi
+          fi
+          uv run --project .harness-engine python .harness-engine/scripts/step_status.py \
+            --repo "$GITHUB_REPOSITORY" --sha "$SHA" --context risk-gate --result "$result" \
+            --description "$desc" --target-url "$TARGET_URL"
+
+      - name: 승인 없이 위험한 변경이 들어왔으면 이슈를 연다
+        id: risk-gate-issue
+        if: steps.risk-gate.outputs.exit-code == '1'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          sha_short="${GITHUB_SHA:0:7}"
+          title="승인 없이 위험한 변경이 main 에 들어왔다: $sha_short"
+
+          # 같은 커밋에 이미 이슈가 열려 있으면 다시 만들지 않는다. 제목이나 본문 마커 중 하나만 맞아도 본다.
+          marker="<!-- risk-gate:${GITHUB_SHA} -->"
+          found="$(gh issue list --state open --limit 200 --json number,title,body \
+            | jq -r --arg t "$title" --arg m "$marker" '[.[] | select(.title == $t or ((.body // "") | contains($m)))][0].number // empty' || true)"
+          if [ -n "$found" ]; then
+            echo "이미 이슈가 있다: #$found $title"
+            exit 0
+          fi
+
+          reasons="$(jq -r '(.reasons // []) | map("- " + .) | join("\n")' risk-result.json 2>/dev/null || true)"
+          prs="$(jq -r '(.prs // []) | map(if type=="object" then "#\(.pr) (\(.url))" else "#\(.)" end) | join(", ")' risk-result.json 2>/dev/null || true)"
+          if [ -z "$prs" ]; then prs="없음(PR 없이 직접 push)"; fi
+          next="$(jq -r '.next // empty' risk-result.json 2>/dev/null || true)"
+
+          {
+            printf '이 커밋(%s)이 승인 없이 main 에 들어왔다.\n\n' "$GITHUB_SHA"
+            printf '위험한 이유:\n%s\n\n' "$reasons"
+            printf '연관된 PR: %s\n\n' "$prs"
+            printf '%s\n' "$next"
+            printf '할 일: 승인자가 사후 검토하고, 필요하면 되돌린다.\n\n'
+            printf '%s\n' "$marker"
+          } > body.md
+
+          # 이슈는 한 번만 만든다. 라벨·담당자는 만든 뒤에 따로 붙이고, 실패해도 경고만 남긴다.
+          # (create 에 --assignee 를 묶으면 담당자 지정 실패 때 이슈가 이미 만들어진 채 명령이 실패해 재시도가 중복 이슈를 만든다.)
+          if ! url="$(gh issue create --title "$title" --body-file body.md)"; then
+            echo "::error title=알림 이슈 생성 실패::승인 없이 들어온 변경의 알림 이슈를 열지 못했다."
+            exit 1
+          fi
+          num="${url##*/}"
+          if [ -z "$num" ]; then
+            echo "::error title=알림 이슈 번호 불명::이슈 생성 출력에서 번호를 읽지 못했다: $url"
+            exit 1
+          fi
+          echo "이슈를 열었다: $url"
+          gh api -X POST "repos/${GH_REPO}/issues/${num}/labels" -f "labels[]=type:fix" >/dev/null \
+            || echo "::warning title=라벨 지정 실패::type:fix 라벨을 붙이지 못했다(라벨이 없는 저장소일 수 있다)."
+          owner_type="$(gh api "repos/${GH_REPO}" --jq '.owner.type' 2>/dev/null || true)"
+          if [ "$owner_type" = "User" ]; then
+            gh api -X POST "repos/${GH_REPO}/issues/${num}/assignees" -f "assignees[]=${OWNER}" >/dev/null \
+              || echo "::warning title=담당자 지정 실패::${OWNER} 를 담당자로 지정하지 못했다."
+          else
+            echo "저장소 소유자($OWNER)가 사용자가 아니어서(${owner_type:-확인 불능}) 담당자를 지정하지 않는다."
+          fi
+
+      # ── ssot-approval after-merge (옛 ssot-approval.yml 의 after-merge job) ──
+      - name: ssot-approval merge 뒤 승인 여부 확인
+        id: ssot-approval
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set +e
+          uv run --project .harness-engine python .harness-engine/scripts/ssot_approval.py \
+            check-commit --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" \
+            > ssot-result.json 2> ssot-error.txt
+          code=$?
+          echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+          cat ssot-error.txt >&2 || true
+          cat ssot-result.json || true
+          case "$code" in
+            0)
+              echo "status=pass" >> "$GITHUB_OUTPUT"
+              ;;
+            1)
+              echo "status=fail" >> "$GITHUB_OUTPUT"
+              echo "reason=승인 없이 SRS 변경이 main 에 들어왔다. 알림 이슈를 열었다." >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "status=unknown" >> "$GITHUB_OUTPUT"
+              echo "reason=merge 뒤 SRS 승인 여부를 확인하지 못했다(종료코드 $code). 통과로 보지 않는다." >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          exit 0
+
+      - name: ssot-approval status 달기
+        id: ssot-approval-status
+        if: steps.ssot-approval.outcome != 'skipped'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          RESULT: ${{ steps.ssot-approval.outputs.status }}
+          REASON: ${{ steps.ssot-approval.outputs.reason }}
+          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          result="${RESULT:-unknown}"
+          desc="${REASON:-}"
+          if [ -z "$desc" ]; then
+            if [ "$result" = "pass" ]; then desc="통과"; else desc="단계가 결과를 내지 못했다"; fi
+          fi
+          uv run --project .harness-engine python .harness-engine/scripts/step_status.py \
+            --repo "$GITHUB_REPOSITORY" --sha "$SHA" --context ssot-approval --result "$result" \
+            --description "$desc" --target-url "$TARGET_URL"
+
+      - name: 승인 없이 들어왔으면 이슈를 연다
+        id: ssot-approval-issue
+        if: steps.ssot-approval.outputs.exit-code != '' && steps.ssot-approval.outputs.exit-code != '0'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CODE: ${{ steps.ssot-approval.outputs.exit-code }}
+        run: |
+          sha_short="${GITHUB_SHA:0:7}"
+          if [ "$CODE" = "1" ]; then
+            title="승인 없이 SRS 변경이 main 에 들어왔다: $sha_short"
+          else
+            title="SRS 승인 확인 불능: $sha_short"
+          fi
+
+          # 같은 커밋에 이미 이슈가 열려 있으면 다시 만들지 않는다.
+          existing_titles="$(gh issue list --state open --json title --jq '.[].title' || true)"
+          if printf '%s\n' "$existing_titles" | grep -qxF "$title"; then
+            echo "이미 이슈가 있다: $title"
+            exit 0
+          fi
+
+          reason="$(jq -r '.reason // "확인 불가"' ssot-result.json 2>/dev/null || echo 확인 불가)"
+          prs="$(jq -r '(.prs // []) | map(if type=="object" then "#\(.pr) (\(.url))" else "#\(.)" end) | join(", ")' ssot-result.json 2>/dev/null || true)"
+          if [ -z "$prs" ]; then prs="없음(PR 없이 직접 push)"; fi
+
+          body="이 커밋(${GITHUB_SHA})이 승인 없이 main 에 들어왔다.
+          사유: $reason
+          연관된 PR: $prs
+          할 일: 승인자가 사후 검토하고, 필요하면 되돌린다."
+
+          gh issue create --title "$title" --body "$body"
+
+      # ── pr-queue (옛 pr-queue.yml, push 경로) ────────────────────────────────
+      # main 이 움직이면 앞 PR 이 병합돼 차례가 온 PR 이 생길 수 있어 항상 돈다. 종합에서 뺀다.
+      - name: pr-queue 병합 순서 계산과 코멘트·status·알림
+        id: pr-queue
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+        run: |
+          set +e
+          uv run --project .harness-engine python .harness-engine/scripts/pr_queue_actions.py \
+            --repo "$GITHUB_REPOSITORY" --event-path "$GITHUB_EVENT_PATH" --summary-file "$GITHUB_STEP_SUMMARY"
+          code=$?
+          set -e
+          case "$code" in
+            0)
+              ;;
+            1)
+              echo "::warning title=병합 순서 쓰기 실패::코멘트나 status 를 쓰지 못한 PR 이 있다. 사유는 job 요약에 있다. caller 의 permissions(pull-requests·issues·statuses: write)를 확인한다."
+              exit 1
+              ;;
+            *)
+              echo "::warning title=병합 순서 확인 불능::GitHub 를 읽지 못해 순서를 계산하지 못했거나 처리 중 예상 못 한 오류가 났다(종료코드 $code). 사유는 job 요약에 있다."
+              exit 1
+              ;;
+          esac
+
+      # ── 종합 ─────────────────────────────────────────────────────────────────
+      # 검사 단계 넷의 결과를 표로 쓰고, fail·unknown 이 하나라도 있으면 단계별 ::error 를 내고 job 을 실패시킨다.
+      # 이슈를 열지 못한 것도 실패다(알림이 안 나간 채 지나가면 안 된다). pr-queue 는 판정에 넣지 않고 경고만 낸다.
+      # 대상이 아닌 단계(paths 에 안 걸린 doc-guard)만 "건너뜀" 이고, 대상인데 결과를 내지 못한 단계는 검사 불능이다(원칙 7).
+      - name: 종합
+        if: always()
+        shell: bash
+        env:
+          HAS_DOC_GUARD: ${{ steps.changed.outputs.has_doc_guard }}
+          S_GITLEAKS: ${{ steps.gitleaks.outputs.status }}
+          R_GITLEAKS: ${{ steps.gitleaks.outputs.reason }}
+          S_DOC_GUARD: ${{ steps.doc-guard.outputs.status }}
+          R_DOC_GUARD: ${{ steps.doc-guard.outputs.reason }}
+          S_RISK: ${{ steps.risk-gate.outputs.status }}
+          R_RISK: ${{ steps.risk-gate.outputs.reason }}
+          S_SSOT: ${{ steps.ssot-approval.outputs.status }}
+          R_SSOT: ${{ steps.ssot-approval.outputs.reason }}
+          OUTCOME_PRQ: ${{ steps.pr-queue.outcome }}
+          OUTCOME_ST_GITLEAKS: ${{ steps.gitleaks-status.outcome }}
+          OUTCOME_ST_DOC_GUARD: ${{ steps.doc-guard-status.outcome }}
+          OUTCOME_ST_RISK: ${{ steps.risk-gate-status.outcome }}
+          OUTCOME_ST_SSOT: ${{ steps.ssot-approval-status.outcome }}
+          OUTCOME_ISSUE_DG: ${{ steps.doc-guard-issue.outcome }}
+          OUTCOME_ISSUE_RISK: ${{ steps.risk-gate-issue.outcome }}
+          OUTCOME_ISSUE_SSOT: ${{ steps.ssot-approval-issue.outcome }}
+        run: |
+          set +e
+          fail=0
+
+          {
+            echo "## main-checks"
+            echo ""
+            echo "| 단계 | 결과 | 사유 |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          judge() {
+            local name="$1" status="$2" reason="$3" na="$4" label
+            if [ "$na" = "true" ]; then
+              label="건너뜀(대상 아님)"
+              reason=""
+            else
+              if [ -z "$status" ]; then
+                status=unknown
+                reason="단계가 결과를 내지 못했다. 앞 단계의 실패일 수 있다. job 로그를 본다."
+              fi
+              case "$status" in
+                pass)
+                  label="통과"
+                  reason=""
+                  ;;
+                fail)
+                  label="위반"
+                  echo "::error title=$name 위반::$reason"
+                  fail=1
+                  ;;
+                *)
+                  label="검사 불능"
+                  echo "::error title=$name 검사 불능::$reason"
+                  fail=1
+                  ;;
+              esac
+            fi
+            echo "| $name | $label | $reason |" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          judge "gitleaks" "$S_GITLEAKS" "$R_GITLEAKS" false
+          dg_na=false; [ "$HAS_DOC_GUARD" = "false" ] && dg_na=true
+          judge "doc-guard" "$S_DOC_GUARD" "$R_DOC_GUARD" "$dg_na"
+          judge "risk-gate" "$S_RISK" "$R_RISK" false
+          judge "ssot-approval" "$S_SSOT" "$R_SSOT" false
+
+          # 알림 이슈를 열지 못하면 위반이 아무에게도 알려지지 않으므로 실패로 센다.
+          issue_failed() {
+            echo "::error title=$1 알림 이슈 실패::main 에 들어온 문제를 알리는 이슈를 열지 못했다. job 로그를 본다. caller 의 permissions 에 issues: write 가 있는지 본다."
+            printf '\n- ❌ %s 알림 이슈를 열지 못했다.\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+            fail=1
+          }
+          [ "$OUTCOME_ISSUE_DG" = "failure" ] && issue_failed "doc-guard"
+          [ "$OUTCOME_ISSUE_RISK" = "failure" ] && issue_failed "risk-gate"
+          [ "$OUTCOME_ISSUE_SSOT" = "failure" ] && issue_failed "ssot-approval"
+
+          # 판정에 넣지 않는 것: pr-queue 단계, status 달기 단계. 경고로만 남긴다.
+          warn() {
+            echo "::warning title=$1::$2"
+            printf '\n- ⚠️ %s: %s\n' "$1" "$2" >> "$GITHUB_STEP_SUMMARY"
+          }
+          if [ "$OUTCOME_PRQ" = "failure" ]; then
+            warn "pr-queue 실패" "병합 순서 코멘트·status 를 쓰지 못했다. 판정에는 넣지 않는다. 순서 판정 불능이면 merge-order status 가 error 로 남는다."
+          fi
+
+          # status 는 병합된 커밋 화면에서 사람이 보는 용도다. 달지 못해도 판정은 바꾸지 않고 경고만 남긴다.
+          [ "$OUTCOME_ST_GITLEAKS" = "failure" ] && warn "gitleaks status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
+          [ "$OUTCOME_ST_DOC_GUARD" = "failure" ] && warn "doc-guard status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
+          [ "$OUTCOME_ST_RISK" = "failure" ] && warn "risk-gate status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
+          [ "$OUTCOME_ST_SSOT" = "failure" ] && warn "ssot-approval status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
+
+          exit "$fail"
