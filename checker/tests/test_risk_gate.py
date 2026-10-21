@@ -248,6 +248,35 @@ def test_병합_순서_status_와_pr_queue_job_은_세지_않는다():
     assert rg.checks_reasons(runs) == ([], [])
 
 
+def test_합친_job_pr_checks_pr_review_main_checks_는_세지_않는다():
+    # 합친 job 안에서 risk-gate 가 돌므로 세면 자기가 끝나길 기다리는 교착이 된다(#417, #419).
+    runs = [
+        _run("pr-checks / check", conclusion="failure"),
+        _run("pr-checks / check", status="in_progress", conclusion=None),
+        _run("pr-review / review", status="in_progress", conclusion=None),
+        _run("main-checks / check", conclusion="cancelled"),
+    ]
+    assert rg.checks_reasons(runs) == ([], [])
+
+
+def test_옛_이름_commit_status_는_실패로_센다():
+    # pr-checks 단계가 옛 이름으로 단 status(StatusContext: context/state)는 지금처럼 센다.
+    statuses = [
+        {"context": "doc-guard", "state": "failure"},
+        {"context": "gitleaks", "state": "error"},  # 검사 불능(error)도 실패로 센다
+        {"context": "ssot-approval", "state": "failure"},  # 제외 대상은 그대로 뺀다
+    ]
+    runs = [r for r in rg.fetch_check_runs(_client(statuses=statuses), "o/r", HEAD)]
+    failed, waiting = rg.checks_reasons(runs)
+    assert "doc-guard" in failed[0] and "gitleaks" in failed[0] and "ssot-approval" not in failed[0]
+    assert waiting == []
+
+
+def test_옛_이름_commit_status_가_진행_중이면_기다린다():
+    runs = rg.fetch_check_runs(_client(statuses=[{"context": "doc-guard", "state": "pending"}]), "o/r", HEAD)
+    assert rg.checks_reasons(runs)[1]
+
+
 def test_이름이_비슷할_뿐인_검사는_세지_않는_것이_아니다():
     assert rg.checks_reasons([_run("risk-gate-docs", conclusion="failure")])[0]
     assert rg.checks_reasons([_run("alerting", conclusion="failure")])[0]
