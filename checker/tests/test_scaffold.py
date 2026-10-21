@@ -138,7 +138,8 @@ def test_위험도_게이트_기준_파일과_워크플로를_만든다(tmp_path
     # 기준 파일은 엔진이 그대로 읽히고, 값은 엔진 기본값과 같다(스켈레톤과 엔진이 어긋나지 않게).
     text = (tmp_path / ".github" / "risk-gate.yaml").read_text(encoding="utf-8")
     assert "{{" not in text
-    assert load_config(text) == DEFAULT_CONFIG
+    # 단 ai_review_paths 는 scaffold 가 호출 워크플로 ai-review.yml 의 `paths: ['src/**']` 와 맞춰 `[src/]` 로 둔다(#411).
+    assert load_config(text) == {**DEFAULT_CONFIG, "ai_review_paths": ["src/"]}
 
     # 호출 워크플로의 job id 는 게이트가 자기 check run 을 알아보는 이름과 같아야 교착이 없다.
     workflow = (tmp_path / ".github" / "workflows" / "risk-gate.yml").read_text(encoding="utf-8")

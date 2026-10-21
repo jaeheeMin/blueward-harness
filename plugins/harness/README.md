@@ -317,8 +317,8 @@ Project Repository 의 CLAUDE.md 에 짧게 적어 둬야 세션이 매번 상�
 구조 — 저장소 루트의 `templates/` 와 `rules/`, `docs/ssot/SRS.md`,
 `conventions/`, `audit/`, `env/`, 그리고 PR·main 커밋마다 doc-guard 를
 부르는 `.github/workflows/doc-guard.yml` — 를 한 번에 만들어 준다.
-`.github/workflows/ai-review.yml` 은 위험한 PR 을 포함한 모든 PR 에 Claude AI 리뷰를 돌리는
-호출 워크플로로, **기본은 꺼짐**이다(#125, #360). 켜려면 `claude setup-token` 으로 만든 토큰을
+`.github/workflows/ai-review.yml` 은 위험한 PR 을 포함해 코드(`src/`)를 바꾼 PR 에 Claude AI 리뷰를 돌리는
+호출 워크플로로(`paths: ['src/**']`, `risk-gate.yaml` 의 `ai_review_paths` 와 짝, #411), **기본은 꺼짐**이다(#125, #360). 켜려면 `claude setup-token` 으로 만든 토큰을
 `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 `.github/risk-gate.yaml`
 의 `ai_review` 를 `true` 로 바꾼다. 심각한 지적이 나오거나 큰 PR 을 일부만 봤으면 `ai-review`
 검사가 실패해 risk gate 가 "승인 필요" 로 판정한다(위험한 PR 은 AI 리뷰에 더해 승인자 Approve 도 필요).

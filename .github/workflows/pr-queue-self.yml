@@ -7,7 +7,7 @@
 name: pr-queue
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed, edited]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
   pull_request_review:
     types: [submitted, dismissed]
   push:

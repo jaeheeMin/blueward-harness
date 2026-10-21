@@ -21,7 +21,8 @@ PR 본문의 `먼저:` 줄을 고친다. 순서를 정하지 못할 때(순환, 
 Actions `pr-queue` 가 Claude 를 안 쓰는 사람에게도 같은 정보를 준다. 열린 PR 마다 병합 순서 코멘트(`<!-- pr-queue -->`) 하나를
 갱신하고, 커밋 status `merge-order` 를 달아 앞 PR 이 열려 있으면 GitHub 화면에서 노란 대기로 보인다(순서를 정하지 못하면 error,
 통과로 두지 않는다). 코멘트는 PR·리뷰·main 이벤트 때 갱신되어 검사 결과는 다음 이벤트까지 낡을 수 있으니, 정확한 지금
-상태는 `/harness:prs` 로 본다. 무료 요금제라 Merge 버튼은 잠기지 않으니 노란 대기는 막는 것이 아니라 드러내는 것이다. 앞 PR 이 병합돼 내
+상태는 `/harness:prs` 로 본다. 본문 `먼저:` 줄을 고치거나 draft 로 바꿔도 코멘트는 바로 갱신되지 않고(`edited`·
+`converted_to_draft` 로는 돌지 않는다, #411) 다음 PR·리뷰·main 이벤트까지 낡는다. 무료 요금제라 Merge 버튼은 잠기지 않으니 노란 대기는 막는 것이 아니라 드러내는 것이다. 앞 PR 이 병합돼 내
 PR 의 차례가 되면 작성자를 멘션하고(Teams 웹훅이 있으면 Teams 로도) 알린다. `merge-order`·`pr-queue` 는 다른 검사(risk-gate
 의 "다른 검사 실패", 병합 훅의 검사 실패 판정)에서 뺀다 — 순서 문제는 위 병합 직전 확인이 정확한 메시지로 막는다.
 
@@ -93,8 +94,10 @@ Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험�
 **blueward-harness 저장소 자신은 승인자가 한 명뿐이라 아직 이 파일을 두지 않아 게이트가
 꺼져 있다.**
 
-`ai_review` 는 기본 `false` 다. 켜면 **위험한 PR 을 포함한 모든 PR** 에 Claude AI 리뷰(`ai-review`
-검사, `.github/workflows/ai-review.yml`)가 돈다. 위험한 PR 은 AI 리뷰에 더해 승인자 Approve 도
+`ai_review` 는 기본 `false` 다. 켜면 **위험한 PR 을 포함해 코드(`src/`)를 바꾼 PR** 에 Claude AI 리뷰(`ai-review`
+검사, `.github/workflows/ai-review.yml`)가 돈다. 호출 워크플로의 `paths: ['src/**']` 가 문서·Spec 만 바꾼 PR 에는
+검사를 띄우지 않고, `risk-gate.yaml` 의 `ai_review_paths`(기본 `[]` = 모든 PR 이 대상, scaffold 는 `[src/]`)가 같은
+범위를 말해 그 PR 은 "AI 리뷰 결과 없음" 대기가 아니라 "대상 아님" 으로 통과한다(#411). 위험한 PR 은 AI 리뷰에 더해 승인자 Approve 도
 필요하다(승인 판정은 그대로). 심각한 지적이 나오거나, 큰 PR 이라 일부만 봤거나, AI 리뷰를 돌리지
 못하면(검사 불능·취소·시간 초과) 그 검사가 실패해 PR 이 위험으로 판정되고, risk-gate 사유가 이
 경우들을 나눠 적는다(심각한 지적은 파일:줄과 요약까지). 켜려면 `claude setup-token` 으로 만든
