@@ -134,12 +134,12 @@ def test_closed_prs_are_not_touched():
     assert all("/issues/2" not in w[1] for w in gh.writes)
 
 
-def test_status_failure_when_a_pr_is_before_success_otherwise():
+def test_status_pending_when_a_pr_is_before_success_otherwise():
     gh = ActionsGh(two_prs())
     run_apply(gh)
     assert gh.statuses["sha1"] == [{"context": "merge-order", "state": "success", "description": "앞에 병합할 PR 없음"}]
-    assert gh.statuses["sha2"][0]["state"] == "failure"
-    assert gh.statuses["sha2"][0]["description"].startswith("#1 먼저 병합")
+    assert gh.statuses["sha2"][0]["state"] == "pending"  # 앞 PR 대기는 결함이 아니라 노란 대기(#401)
+    assert gh.statuses["sha2"][0]["description"].startswith("#1 병합 대기")
     posted = [w for w in status_writes(gh) if w[1].endswith("/sha2")][0]
     assert posted[2]["context"] == "merge-order"
 

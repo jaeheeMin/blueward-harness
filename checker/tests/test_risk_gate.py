@@ -232,6 +232,7 @@ def test_게이트_자신과_보조_검사는_세지_않는다():
 def test_병합_순서_status_와_pr_queue_job_은_세지_않는다():
     runs = [
         _run("merge-order", conclusion="failure"),
+        _run("merge-order", status="in_progress", conclusion=None),  # 앞 PR 대기 pending(#401)
         _run("pr-queue / queue", conclusion="cancelled"),
         _run("pr-queue / queue", status="in_progress", conclusion=None),
     ]

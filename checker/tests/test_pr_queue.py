@@ -210,6 +210,13 @@ def test_merge_order_status_and_pr_queue_job_do_not_count():
     assert by_number(res)[1]["state"] == MERGEABLE
 
 
+def test_merge_order_pending_unstable_is_mergeable_not_checks_running():
+    # 앞 PR 대기(#401)는 pending 이고 GitHub 는 이것도 UNSTABLE 로 본다. 검사 진행 중이 아니다.
+    checks = [ok("doc-guard / check"), status_ctx("merge-order", "PENDING")]
+    res, _ = compute([pr(1, checks=checks, mergeStateStatus="UNSTABLE")])
+    assert by_number(res)[1]["state"] == MERGEABLE
+
+
 def test_merge_order_alone_is_not_a_started_check():
     res, _ = compute([pr(1, checks=[status_ctx("merge-order", "SUCCESS")])])
     assert by_number(res)[1]["state"] == NOT_STARTED

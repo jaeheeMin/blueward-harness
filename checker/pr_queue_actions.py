@@ -7,8 +7,8 @@
 
 1. 코멘트 하나(github-actions 봇, 마커 `<!-- pr-queue -->`)를 만들거나 갱신한다. 시각 같은 흔들리는 값을
    넣지 않아, 내용이 같으면 쓰지 않는다.
-2. 커밋 status `merge-order` 를 head 커밋에 단다. 앞 PR 이 열려 있으면 failure, 없으면 success, 순서를
-   판정하지 못하면(순환 등) error 다 — 판정 불능을 success 로 두지 않는다(원칙 7). 이미 같은 상태·설명이
+2. 커밋 status `merge-order` 를 head 커밋에 단다. 앞 PR 이 열려 있으면 pending(노란 대기, PR 의 결함이
+   아니라 순서 정보다), 없으면 success, 순서를 판정하지 못하면(순환 등) error 다 — 판정 불능을 success 로 두지 않는다(원칙 7). 이미 같은 상태·설명이
    달려 있으면 쓰지 않는다(커밋·context 당 status 수에 한도가 있다).
 3. 차례 알림. 코멘트 안에 직전에 계산한 "앞 PR" 목록을 숨겨 두고(`<!-- pr-queue:after=… -->`), 이번에
    앞 PR 이 하나도 없게 됐고 그 앞 PR 이 모두 병합됐으면 "이제 #n 차례" 를 알린다. 이벤트가 병합인지에
@@ -73,7 +73,7 @@ def _clip(text: str, limit: int) -> str:
 
 
 def decide_status(item: dict, result: dict) -> tuple[str, str]:
-    """(status state, description). state 는 success / failure / error."""
+    """(status state, description). state 는 success / pending(앞 PR 대기, 결함 아님) / error(판정 불능)."""
     n = item["number"]
     if item["order"] is None:
         why = "; ".join(x for x in item["notes"] if x.startswith(CYCLE_NOTE) or x.startswith(BEHIND_ORDER_NOTE))
@@ -83,7 +83,7 @@ def decide_status(item: dict, result: dict) -> tuple[str, str]:
         by_number = {it["number"]: it for it in result["prs"]}
         first = by_number.get(item["after"][0], {})
         suffix = f" ({_clip(first.get('title', ''), 40)})" if len(item["after"]) == 1 and first else ""
-        return "failure", _clip(f"{firsts} 먼저 병합{suffix}", DESCRIPTION_LIMIT)
+        return "pending", _clip(f"{firsts} 병합 대기{suffix}", DESCRIPTION_LIMIT)
     unread = set(result.get("unread_versions") or [])
     if unread and (item.get("version") is not None or n in unread):
         return "error", "병합 순서 판정 불능: plugin.json version 을 읽지 못함"

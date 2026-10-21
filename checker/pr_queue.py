@@ -317,10 +317,10 @@ def classify(ctx: _Context, raw: dict) -> dict:
         return out(CONFLICT, "", "/harness:sync 로 base 를 당겨받아 충돌을 풀고 다시 푸시")
 
     # `merge-order` status(pr-queue 워크플로, #370)는 순서 표시일 뿐이라 검사 상태로 세지 않는다.
-    # 앞 PR 이 열려 있어 failure 이면 GitHub 가 mergeStateStatus 를 UNSTABLE 로 보이는데, 그것도 같은 사유다.
+    # 앞 PR 이 열려 있어 pending(#401 전엔 failure)이면 GitHub 가 mergeStateStatus 를 UNSTABLE 로 보이는데, 그것도 같은 사유다.
     merge_order = [c for c in checks if _check_group(c["name"]) == MERGE_ORDER_CHECK]
     checks = [c for c in checks if _check_group(c["name"]) not in (MERGE_ORDER_CHECK, PR_QUEUE_CHECK)]
-    if merge_state == "UNSTABLE" and any(_run_state(c) == "fail" for c in merge_order):
+    if merge_state == "UNSTABLE" and any(_run_state(c) in ("fail", "pending") for c in merge_order):
         merge_state = "CLEAN"
     if not checks:
         return out(NOT_STARTED, "아직 시작된 검사가 없음", "검사가 시작될 때까지 기다리기(오래 걸리면 다시 푸시)")
