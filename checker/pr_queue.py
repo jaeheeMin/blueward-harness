@@ -20,7 +20,8 @@ PR 상태(우선순위대로 하나만 고르고, 나머지는 보조로 덧붙�
   (b) 본문의 `먼저: #n, #m` 줄에 적은 열린 PR 뒤.
   (c) 같은 DEV 번호면 SRS → Spec → 개발 순. SRS PR 은 `docs/ssot/SRS.md` 를 바꾼 PR, Spec PR 은
       `docs/spec/DEV-xxx-*.md` 를 바꾼 PR, 개발 PR 은 제목·브랜치에 DEV 번호가 있는 그 밖의 PR 이다.
-      DEV 번호는 제목·브랜치·본문(과 Spec 파일 이름)의 `DEV-n`·`REQ-n` 에서 읽는다(REQ-n == DEV-n).
+      DEV 번호는 제목(끝 `(DEV-n, DEV-m)` 포함)·브랜치·바꾼 Spec 파일 이름의 `DEV-n`·`REQ-n` 에서 읽고(REQ-n == DEV-n),
+      모두 비면 본문에서 처음 나온 번호 하나만 쓴다(#407. 본문에 스쳐 지나간 번호로 묶으면 상관없는 DEV 가 막힌다).
       SRS 파일의 diff 는 읽지 않는다.
   (d) plugin.json 을 바꾼 PR 끼리(하네스 저장소)는 head 의 version 이 낮은 쪽 먼저.
 위상 정렬하고 동률은 PR 번호 오름차순이다. 실제 순환(강연결 성분)의 구성원만 "순서 판정 불능(순환)" 이고,
@@ -389,6 +390,27 @@ def _dev_numbers(raw: dict) -> set[int]:
     return nums
 
 
+def _order_devs(raw: dict) -> set[int]:
+    """순서 계산용으로 PR 이 실제로 속한 DEV 번호들(#407). 제목 끝 `(DEV-xxx, DEV-yyy)` 전부, 제목·브랜치의 번호, 바꾼 Spec
+    파일 번호. 모두 비면 본문에서 처음 나온 번호 하나만 쓴다. 본문에 스쳐 지나간 번호("main 의 REQ-001~004 는 그대로")로
+    묶으면 상관없는 DEV 의 PR 이 앞 PR 로 잡히기 때문이다."""
+    title = raw.get("title") or ""
+    nums: set[int] = set()
+    end = _title_end_devs(title)
+    if end:
+        nums.update(end[0])
+    nums.update(int(m) for m in _DEV_REF.findall(title + " " + (raw.get("headRefName") or "")))
+    for f in raw.get("files") or []:
+        sm = _SPEC_FILE.match(f.get("path") or "")
+        if sm:
+            nums.add(int(sm.group(1)))
+    if not nums:
+        found = _DEV_REF.findall(raw.get("body") or "")
+        if found:
+            nums.add(int(found[0]))
+    return nums
+
+
 def _primary_dev(raw: dict) -> int | None:
     """PR 하나가 속한 DEV 번호 하나(줄기 묶기용, #390). `_dev_numbers` 는 본문에서 스쳐 지나간 번호까지 모으므로(결함 PR 이
     "DEV-007 과 같은 결함" 이라 적는 식) 가장 작은 번호를 쓰면 틀린다. 우선순위: 제목 끝 `(DEV-xxx)` > 제목 맨 앞 번호 >
@@ -450,7 +472,7 @@ def build_order(prs: list[dict], versions: dict[int, str]) -> tuple[dict[int, se
             for m in _PR_REF.findall(line):
                 link(int(m), n, "본문의 먼저: 줄")
 
-    infos = {p["number"]: (_stage(p), _dev_numbers(p)) for p in prs}
+    infos = {p["number"]: (_stage(p), _order_devs(p)) for p in prs}
     for a in prs:
         for b in prs:
             sa, da = infos[a["number"]]

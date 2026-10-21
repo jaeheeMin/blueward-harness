@@ -1012,7 +1012,7 @@ fix/31-broken-link</pre>
       <ol class="steps">
         <li><div>다른 PR 위에 쌓은 PR(기준 브랜치가 그 PR 의 브랜치)은 그 PR 뒤</div></li>
         <li><div>PR 본문의 <code>먼저: #12</code> 줄이 가리키는 PR 뒤. <code>/harness:deliver</code> 가 PR 을 만들 때 적어 줘</div></li>
-        <li><div>같은 DEV 번호면 SRS → Spec → 개발 순</div></li>
+        <li><div>같은 DEV 번호면 SRS → Spec → 개발 순. PR 이 어느 DEV 인지는 제목·브랜치·바꾼 Spec 파일로 정하고, 거기에 번호가 없을 때만 본문의 첫 번호 하나를 써(본문에 스치듯 적은 번호로는 묶지 않아)</div></li>
         <li><div>하네스 저장소는 plugin.json 판이 낮은 PR 먼저</div></li>
       </ol>
       <p class="small">서로 앞이라고 가리키면 "순서 판정 불능(순환)" 이라고 하고 순서를 지어내지 않아. 같은 파일을 고친 PR 쌍은 순서는 그대로 두고 "다시 맞춰야 할 수 있음" 이라고만 알려 줘.</p>
