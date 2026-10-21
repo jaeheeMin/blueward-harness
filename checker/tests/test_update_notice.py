@@ -74,11 +74,51 @@ def test_뒤처졌고_새_판을_안_받았으면_업데이트_명령을_안내�
     assert "/reload-plugins" in ctx
 
 
-def test_뒤처졌고_새_판_폴더가_이미_있으면_reload_만_안내한다(env):
+def _installed(e, tmp_path, *entries):
+    """CLAUDE_CONFIG_DIR 아래에 installed_plugins.json 을 쓰고 env 에 건다."""
+    cfg = tmp_path / "cfg"
+    (cfg / "plugins").mkdir(parents=True, exist_ok=True)
+    (cfg / "plugins" / "installed_plugins.json").write_text(
+        json.dumps({"version": 2, "plugins": {"harness@blueward-harness": list(entries)}}), encoding="utf-8"
+    )
+    e["env"]["CLAUDE_CONFIG_DIR"] = str(cfg)
+
+
+def _entry(path, version, scope="project"):
+    return {"scope": scope, "projectPath": str(path), "version": version}
+
+
+def test_뒤처졌고_이_폴더_설치가_이미_새_판이면_reload_만_안내한다(env, tmp_path):
     (env["root"].parent / "0.10.61").mkdir()
+    _installed(env, tmp_path, _entry(env["payload"]["cwd"], "0.10.61"))
     ctx = _context(_go(env, Remote(_tags("0.10.61"))))
     assert "/reload-plugins" in ctx
     assert "뒤에도 판이 그대로면" in ctx
+
+
+def test_새_판_폴더가_있어도_이_폴더_설치가_옛_판이면_업데이트를_안내한다(env, tmp_path):
+    """#404 — 다른 폴더의 project 설치가 새 판을 캐시에 받아 둔 경우. 폴더가 있다는 것만으로
+    이 폴더에 reload 가 새 판을 싣는다고 말하면 틀린다."""
+    (env["root"].parent / "0.10.61").mkdir()
+    _installed(
+        env, tmp_path,
+        _entry(env["payload"]["cwd"], "0.10.60"),
+        _entry(tmp_path / "other", "0.10.61"),
+    )
+    ctx = _context(_go(env, Remote(_tags("0.10.61"))))
+    assert "/harness:update" in ctx
+    assert "이미 새 판" not in ctx
+    assert "claude plugin update harness@blueward-harness --scope project" in ctx
+
+
+def test_이_폴더_설치_항목이_없으면_업데이트를_안내한다(env, tmp_path):
+    (env["root"].parent / "0.10.61").mkdir()
+    _installed(env, tmp_path, _entry(tmp_path / "other", "0.10.61"))
+    assert "이미 새 판" not in _context(_go(env, Remote(_tags("0.10.61"))))
+
+
+def test_갱신_안내에_harness_update_가_들어_있다(env):
+    assert "/harness:update" in _context(_go(env, Remote(_tags("0.10.61"))))
 
 
 def test_최신이면_말하지_않는다(env):
