@@ -336,9 +336,9 @@ Cloud & BTP 이름 규칙, `cap-ui5.md` — CAP·SAPUI5 개발 표준)를 기본
 이벤트(PR 열림·갱신·초안 전환·닫힘·본문 수정, 리뷰, main push)마다 열린 PR 전체를 한 번 계산해(검사 결과가 바뀐 것만으로는 돌지
 않아 코멘트의 검사 상태는 다음 이벤트까지 낡을 수 있다 — 정확한 지금 상태는 `/harness:prs`), PR 마다 순서·앞에
 병합할 PR·상태·다음 할 일을 담은 코멘트 하나(`<!-- pr-queue -->`)를 갱신하고(내용이 같으면 쓰지 않는다) 커밋
-status `merge-order` 를 단다(앞 PR 이 열려 있으면 failure, 없으면 success, 순서를 정하지 못하면 error).
+status `merge-order` 를 단다(앞 PR 이 열려 있으면 pending 노란 대기, 없으면 success, 순서를 정하지 못하면 error).
 앞 PR 이 병합돼 차례가 된 PR 은 작성자를 멘션하고, `TEAMS_PLUGIN_ALERT_WEBHOOK` secret 이 있으면 Teams 로도
-알린다(없으면 건너뜀). 무료 요금제라 빨간불이어도 Merge 버튼은 잠기지 않는다. 호출 쪽 permissions 는
+알린다(없으면 건너뜀). 무료 요금제라 노란 대기여도 Merge 버튼은 잠기지 않는다. 호출 쪽 permissions 는
 `contents: read`, `pull-requests: write`, `issues: write`, `statuses: write`, `checks: read`, `actions: read`(열린 PR 의 검사 결과와 그 워크플로 실행을
 읽는다 — 없으면 "Resource not accessible by integration" 으로 실패). GitHub 를 못 읽으면 job 이 실패한다.
 기존 Project Repository 는 호출 파일을 새로 넣어야 받는다.

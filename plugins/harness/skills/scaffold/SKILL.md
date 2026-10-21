@@ -78,9 +78,9 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
      push 하거나 리뷰를 해제하면 이슈(담당자는 PR 작성자)와 Teams 로 알린다(#150). 병합은 알리지 않는다.
      Teams 는 secret `TEAMS_PLUGIN_ALERT_WEBHOOK` 이 있을 때만 보낸다.
    - `.github/workflows/pr-queue.yml` 은 열린 PR 마다 병합 순서·상태 코멘트 하나와 커밋 status `merge-order`
-     (앞 PR 이 열려 있으면 빨간불, 순서를 못 정하면 error)를 달고, 앞 PR 이 병합돼 차례가 된 PR 의 작성자를
+     (앞 PR 이 열려 있으면 노란 대기, 순서를 못 정하면 error)를 달고, 앞 PR 이 병합돼 차례가 된 PR 의 작성자를
      멘션한다(#370). Teams 웹훅(`TEAMS_PLUGIN_ALERT_WEBHOOK`)이 있으면 Teams 로도 알린다. 무료 요금제는
-     빨간불이어도 Merge 버튼이 잠기지 않는다. 순서는 PR 본문의 `먼저: #번호` 줄 등으로 정해진다.
+     노란 대기여도 Merge 버튼이 잠기지 않는다. 순서는 PR 본문의 `먼저: #번호` 줄 등으로 정해진다.
    - `.github/workflows/ledger-complete.yml` 은 main 에 PR 이 병합되면 그 PR 이 Closes 한 대표 `[DEV-xxx]` 이슈의
      진행 원장 행을 `완료` 로 바꿔 main 에 직접 커밋한다(#346). 하위 작업 이슈만 닫았거나 대표 이슈를 안 닫은 PR 은
      그대로 둔다(그땐 사람이 바꾼다). 못 바꾸면 이슈가 열린다.
