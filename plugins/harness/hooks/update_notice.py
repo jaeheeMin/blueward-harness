@@ -3,7 +3,8 @@
 Claude Code 자동 업데이트는 세션 첫 메시지 뒤에 한 번만 확인하므로, 오래 열어 둔 세션은
 그 뒤에 나온 판을 모른다. 타이머 이벤트가 없어 `UserPromptSubmit` 에서 확인한다. 이 이벤트의
 출력은 사용자 화면이 아니라 Claude 컨텍스트로 가므로 `additionalContext` 로 "사용자에게
-알려라" 고 시킨다. 갱신은 사용자가 스스로 결정한다 — 훅도 Claude 도 대신 실행하지 않는다.
+알려라" 고 시킨다. 갱신은 사용자가 스스로 결정한다 — 훅도 Claude 도 대신 실행하지 않는다
+(사용자가 `/harness:update` 를 직접 부르면 그 스킬이 실행한다, #404).
 
 - 현재 판: `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` 의 version.
 - 최신 판: 원격의 `v*` 태그 중 가장 큰 것(`git ls-remote --tags`, 5초 제한). 결과(실패 포함)는
@@ -137,27 +138,45 @@ def _data_dir(env: dict) -> Path:
     return Path(data) if data else Path(tempfile.gettempdir()) / "harness-update-notice"
 
 
-def _message(current: str, latest: str, plugin_root: Path) -> str:
-    # 캐시 폴더는 .../<marketplace>/harness/<version> 이라 부모에 판별 폴더가 나란히 있다.
-    downloaded = (plugin_root.parent / latest).is_dir()
-    if downloaded:
+def _project_has_latest(latest: str, cwd: str | None, env: dict) -> bool:
+    """현재 폴더의 설치 항목(installed_plugins.json)이 이미 최신 판인지.
+
+    캐시 폴더 `.../harness/<latest>` 가 있다는 것만으로는 알 수 없다 — 다른 폴더의 project 범위
+    설치가 먼저 받아 둔 것일 수 있어, 그 폴더가 아닌 이 폴더에는 `/reload-plugins` 가 새 판을 싣지 못한다(#404).
+    항목을 못 읽거나 없으면 False(갱신 명령을 안내한다).
+    """
+    if not cwd:
+        return False
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import installed_version  # noqa: PLC0415 - 같은 폴더의 모듈
+
+        return installed_version.check(cwd, latest, env)["state"] == "current"
+    except Exception:  # noqa: BLE001 - 안내일 뿐이다
+        return False
+
+
+def _message(current: str, latest: str, has_latest: bool) -> str:
+    if has_latest:
         how = (
-            "새 판은 이미 내려받아 두었으니 `/reload-plugins` 를 입력하면 된다. "
-            "`/reload-plugins` 뒤에도 판이 그대로면 업데이트 명령 "
+            "이 폴더의 설치는 이미 새 판이라 `/reload-plugins` 를 입력하면 된다. "
+            "`/reload-plugins` 뒤에도 판이 그대로면 `/harness:update` 를 입력하거나 업데이트 명령 "
             "(`claude plugin marketplace update blueward-harness` 와 "
             "`claude plugin update harness@blueward-harness --scope project`)을 실행한다."
         )
     else:
         how = (
-            "터미널에서 `claude plugin marketplace update blueward-harness` 와 "
-            "`claude plugin update harness@blueward-harness --scope project` 를 차례로 실행한 뒤 "
-            "`/reload-plugins` 를 입력하면 된다."
+            "`/harness:update` 를 입력하면 현재 폴더 기준으로 갱신하고 확인한다. 또는 터미널에서 "
+            "`claude plugin marketplace update blueward-harness` 와 "
+            "`claude plugin update harness@blueward-harness --scope project` 를 차례로 실행한다"
+            "(project 범위 설치가 여러 폴더에 있으면 다른 폴더가 갱신될 수 있어 `claude plugin list` 로 "
+            "이 폴더의 판을 확인한다). 어느 쪽이든 끝나면 `/reload-plugins` 를 입력한다."
         )
     return (
         f"[harness 플러그인 갱신 안내] 새 판 {latest} 이(가) 나왔고 지금 세션은 {current} 판이다. "
         "이번 답변의 첫 줄에, 사용자에게 이 사실과 갱신 방법을 한 번만 짧게 알려라: "
         f"{how} "
-        "갱신할지는 사용자가 직접 정한다. 대신 실행하지 말고, 사용자가 묻기 전에는 다시 꺼내지 마라."
+        "갱신할지는 사용자가 직접 정한다. 사용자가 `/harness:update` 를 부르기 전에는 대신 실행하지 말고, 묻기 전에는 다시 꺼내지 마라."
     )
 
 
@@ -218,7 +237,7 @@ def run(
     return json.dumps(
         {"hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": _message(current, latest, plugin_root),
+            "additionalContext": _message(current, latest, _project_has_latest(latest, payload.get("cwd"), env)),
         }},
         ensure_ascii=False,
     )
