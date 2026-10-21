@@ -53,7 +53,10 @@ def _caller_example() -> dict:
             continue
         else:
             break
-    return yaml.safe_load("\n".join(block))
+    data = yaml.safe_load("\n".join(block))
+    if True in data:  # YAML 1.1 에서 `on` 은 True 로 읽힌다.
+        data["on"] = data.pop(True)
+    return data
 
 
 def test_입력과_Teams_secret():
@@ -174,7 +177,7 @@ def test_종합은_항상_돌고_네_검사만_판정하며_pr_queue_는_경고�
     assert "::error title=$name 위반::" in run and "::error title=$name 검사 불능::" in run
     for line in run.splitlines():
         if "pr-queue" in line:
-            assert "warn " in line or line.lstrip().startswith("#")
+            assert "warn " in line or line.lstrip().startswith(("#", "printf"))  # 판정(judge)에는 안 나온다
     # 결과 표의 세 갈래 + 건너뜀.
     for label in ("통과", "위반", "검사 불능", "건너뜀(대상 아님)"):
         assert label in run
