@@ -20,7 +20,8 @@ from checker.tests.test_plugin_layout import _BASH, _HAS_BASH
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "gitleaks_scan.sh"
 WORKFLOW = REPO / ".github" / "workflows" / "gitleaks.yml"
-SKELETON_WORKFLOW = REPO / "plugins" / "harness" / "skills" / "scaffold" / "skeleton" / "dot-github" / "workflows" / "gitleaks.yml"
+SKELETON_MAIN_WORKFLOW = REPO / "plugins" / "harness" / "skills" / "scaffold" / "skeleton" / "dot-github" / "workflows" / "main-checks.yml"
+SKELETON_WORKFLOW = REPO / "plugins" / "harness" / "skills" / "scaffold" / "skeleton" / "dot-github" / "workflows" / "pr-checks.yml"
 HARNESS_CONFIG = REPO / "checker" / "gitleaks" / "harness.toml"
 HARNESS_CONFIG_REL = ".harness-engine/checker/gitleaks/harness.toml"
 
@@ -43,11 +44,16 @@ def test_재사용_워크플로는_바이너리를_버전과_해시로_고정하
 
 
 def test_호출_워크플로는_스켈레톤에_있고_재사용_워크플로를_한_줄로_부른다():
+    # #420 부터 gitleaks 는 pr-checks(PR)·main-checks(main push) 의 단계다. 옛 gitleaks caller 는 scaffold 가 내지 않는다.
     data = yaml.safe_load(SKELETON_WORKFLOW.read_text(encoding="utf-8"))
-    job = data["jobs"]["gitleaks"]
-    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/gitleaks.yml@stable"
-    assert job["permissions"] == {"contents": "read"}
-    assert set(data[True]) == {"pull_request", "push"}
+    job = data["jobs"]["pr-checks"]
+    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/pr-checks.yml@stable"
+    assert job["permissions"]["contents"] == "read"
+    assert set(data[True]) == {"pull_request"}
+    main = yaml.safe_load(SKELETON_MAIN_WORKFLOW.read_text(encoding="utf-8"))
+    assert main["jobs"]["main-checks"]["uses"] == "jaeheeMin/blueward-harness/.github/workflows/main-checks.yml@stable"
+    assert main["jobs"]["main-checks"]["permissions"]["contents"] == "read"
+    assert set(main[True]) == {"push"}
 
 
 def test_기본_설정은_기본_규칙을_이어받고_SAP_규칙을_더한다():
