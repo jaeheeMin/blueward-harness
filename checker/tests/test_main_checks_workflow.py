@@ -10,9 +10,6 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "main-checks.yml"
 LEDGER = ROOT / ".github" / "workflows" / "ledger-complete.yml"
 PR_CHECKS = ROOT / ".github" / "workflows" / "pr-checks.yml"
-DOC_GUARD_CALLER = (
-    ROOT / "plugins" / "harness" / "skills" / "scaffold" / "skeleton" / "dot-github" / "workflows" / "doc-guard.yml"
-)
 CHECKS = ["gitleaks", "doc-guard", "risk-gate", "ssot-approval"]
 PERMISSIONS = {
     "contents": "read",
@@ -108,13 +105,12 @@ def test_gitleaks_는_push_범위를_본다():
     assert env["HEAD_SHA"] == "${{ github.sha }}"
 
 
-def test_doc_guard_paths_는_단계_if_이고_pr_checks_와_scaffold_caller_와_같다():
+def test_doc_guard_paths_는_단계_if_이고_pr_checks_와_같다():
     assert _step("doc-guard")["if"] == "steps.changed.outputs.has_doc_guard != 'false'"
     changed = _step("changed")
     assert '"unknown"' in changed["run"]  # 목록을 못 받으면 unknown 이라 건너뛰지 않는다
     assert "compare/$BEFORE_SHA...$AFTER_SHA" in changed["run"]
     paths = changed["env"]["DOC_GUARD_PATHS"].split()
-    assert paths == _load(DOC_GUARD_CALLER)["on"]["push"]["paths"]
     pr_checks = next(s for s in _load(PR_CHECKS)["jobs"]["check"]["steps"] if s.get("id") == "changed")
     assert paths == pr_checks["env"]["DOC_GUARD_PATHS"].split()
 

@@ -2,6 +2,8 @@
 
 Actions 분을 아끼려고 PR 내용과 무관하게 매번 돌던 검사를 파일 범위로 좁혔다. 좁힌 범위에서 검사 대상이
 빠지면 검사가 안 돌고 통과처럼 보이므로(원칙 7), doc-guard 의 paths 가 엔진이 실제로 보는 범위를 덮는지 본다.
+#420 부터 doc-guard·ssot-approval 의 paths 는 caller 가 아니라 `pr-checks.yml`·`main-checks.yml` 의 "바뀐 파일 목록
+받기" 단계 env(`DOC_GUARD_PATHS`·`SSOT_PATHS`)에 있다. 이 시험은 그 정의를 본다.
 """
 from __future__ import annotations
 
@@ -43,6 +45,15 @@ def _matches(pattern: str, path: str) -> bool:
     return re.fullmatch(regex, path) is not None
 
 
+def _changed_env(workflow: str) -> dict:
+    steps = _load(REUSABLE / workflow)["jobs"]["check"]["steps"]
+    return next(s for s in steps if s.get("id") == "changed")["env"]
+
+
+def _doc_guard_paths() -> list[str]:
+    return _changed_env("pr-checks.yml")["DOC_GUARD_PATHS"].split()
+
+
 def _triggered(paths: list[str], path: str) -> bool:
     return any(_matches(p, path) for p in paths)
 
@@ -50,26 +61,22 @@ def _triggered(paths: list[str], path: str) -> bool:
 # --- ssot-approval ------------------------------------------------------------
 
 
-def test_ssot_approval_caller_는_SRS_를_바꾼_PR_에만_뜨고_리뷰와_push_는_그대로():
-    on = _load(CALLERS / "ssot-approval.yml")["on"]
-    assert on["pull_request"]["paths"] == ["docs/ssot/**"]
-    assert "paths" not in on["pull_request_review"]
-    assert on["push"] == {"branches": ["main"]}
-    assert _triggered(on["pull_request"]["paths"], "docs/ssot/SRS.md")
-    assert not _triggered(on["pull_request"]["paths"], "docs/spec/DEV-001-a.md")
+def test_ssot_approval_은_SRS_를_바꾼_PR_에서만_돈다():
+    paths = _changed_env("pr-checks.yml")["SSOT_PATHS"].split()
+    assert paths == ["docs/ssot/**"]
+    assert _triggered(paths, "docs/ssot/SRS.md")
+    assert not _triggered(paths, "docs/spec/DEV-001-a.md")
 
 
 # --- doc-guard ----------------------------------------------------------------
 
 
 def test_doc_guard_paths_는_PR_과_push_가_같다():
-    on = _load(CALLERS / "doc-guard.yml")["on"]
-    assert on["pull_request"]["paths"] == on["push"]["paths"]
-    assert on["push"]["branches"] == ["main"]
+    assert _doc_guard_paths() == _changed_env("main-checks.yml")["DOC_GUARD_PATHS"].split()
 
 
 def test_doc_guard_paths_는_엔진이_보는_파일을_덮는다():
-    paths = _load(CALLERS / "doc-guard.yml")["on"]["pull_request"]["paths"]
+    paths = _doc_guard_paths()
     # 문서·양식·규칙·진행 원장·교차 검사
     for f in (
         "docs/ssot/SRS.md", "docs/spec/DEV-001-a.md", "templates/forms/개발사양서.xlsx",
@@ -88,13 +95,13 @@ def test_doc_guard_paths_는_엔진이_보는_파일을_덮는다():
 
 
 def test_doc_guard_paths_는_검사_대상이_아닌_파일만_바뀐_PR_에서는_안_뜬다():
-    paths = _load(CALLERS / "doc-guard.yml")["on"]["pull_request"]["paths"]
+    paths = _doc_guard_paths()
     for f in ("README.md", ".github/risk-gate.yaml", "package.json", "src/logo.png", "env/README.md"):
         assert not _triggered(paths, f), f
 
 
 def test_skeleton_rules_의_관할은_doc_guard_paths_안에_있다():
-    paths = _load(CALLERS / "doc-guard.yml")["on"]["pull_request"]["paths"]
+    paths = _doc_guard_paths()
     for rule in (SKELETON / "rules").glob("*.yaml"):
         data = yaml.safe_load(rule.read_text(encoding="utf-8"))
         scope = data.get("관할")

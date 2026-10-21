@@ -50,14 +50,17 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
    - 그 Template 을 대조할 규칙을 `rules/` 에 추가한다(`rules/README.md`
      예시 참고).
    - 환경별 접속 URL 을 `env/` 에 적는다.
-   - `.github/workflows/doc-guard.yml` 이 이제부터 이 저장소의 PR 과 main
-     커밋에서 검사 대상 파일(문서·양식·규칙·코드)이 바뀔 때 검사를 돌린다(#411, paths 목록은 파일 주석).
-     `.github/workflows/ssot-approval.yml` 은 같은
-     자리에서 SRS 변경 PR 의 승인 여부를 검사한다(#49). SRS 를 안 바꾼 PR 에는 뜨지 않는다.
+   - `.github/workflows/pr-checks.yml` 이 이제부터 이 저장소의 PR 마다 검사 다섯(gitleaks·doc-guard·
+     ssot-approval·risk-gate·pr-queue)을 job 하나(`pr-checks`)의 단계로 돌린다(#412, #420). 검사 대상 파일(문서·양식·규칙·코드)이
+     바뀌었는지, SRS 를 바꿨는지는 재사용 워크플로의 단계 조건이 가리므로 caller 에 paths 가 없다.
+     결과는 옛 이름(`doc-guard`·`ssot-approval` 등)의 commit status 로도 달린다. SRS 변경 PR 의 승인 여부 검사(#49)도 이 안에 있다.
+     `.github/workflows/pr-review.yml` 은 리뷰(승인)가 달리거나 취소될 때 승인 여부만 다시 판정하고 낡은 빨간 `pr-checks` 를
+     다시 돌린다. `.github/workflows/main-checks.yml` 은 main 에 병합된 뒤 읽기 전용 검사를 돌린다.
+     셋 모두 workflow 이름과 job id 가 파일 이름(`pr-checks`·`pr-review`·`main-checks`)과 같아야 한다 — 바꾸면 다시 돌리기와 교착 방지가 깨진다.
    - 승인자를 나중에 추가·변경하려면 `.github/ssot-approvers` 를 직접 고친다.
      비어 있으면(주석뿐이면) 작성자가 아닌 누구의 승인이든 인정한다. 작성자별로 승인자를
      나누려면 `<PR 작성자>: <승인자> ...` 줄을 적는다(파일 주석에 형식과 예시가 있다).
-   - `.github/workflows/risk-gate.yml` 과 `.github/risk-gate.yaml` 은 PR 위험도에 따라
+   - `.github/risk-gate.yaml` 은 `pr-checks` 의 risk-gate 단계(#102)가 읽는 기준으로, PR 위험도에 따라
      승인을 요구한다(#102). 위험한 PR(크기·위험 경로·비밀값·검사 실패)만 승인자 목록
      (`.github/ssot-approvers`)의 사람이 Approve 해야 통과하고 나머지는 승인 없이
      병합된다. **승인자 목록에 작성자가 아닌 사람이 한 명도 없으면 위험한 PR 을
@@ -70,7 +73,7 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
      `.github/risk-gate.yaml` 의 `ai_review` 를 `true` 로 바꾼다. 켰는데 시크릿이 없으면
      통과가 아니라 검사 불능으로 실패하니 사용자에게 두 단계를 함께 안내한다. 새 줄에 비밀값 패턴이 보이는
      PR 은 diff 를 외부 AI 에 보내지 않으려고 리뷰를 돌리지 않고 "검사 불능 - 비밀값 의심" 으로 실패한다.
-   - `.github/workflows/gitleaks.yml` 은 PR·main 커밋마다 비밀정보(CR-004)를 gitleaks 로 검사한다(#159).
+   - `pr-checks`·`main-checks` 의 gitleaks 단계는 PR·main 커밋마다 비밀정보(CR-004)를 gitleaks 로 검사한다(#159).
      PR 이 더한 커밋만 훑고 값은 가려서 출력한다. 저장소 꼭대기에 `.gitleaks.toml` 이 없으면 하네스 기본
      설정(gitleaks 기본 규칙 + SAP 쿠키·비밀번호 규칙)을 쓴다. 오탐을 허용 목록에 올리려고 `.gitleaks.toml` 을
      만들면 하네스 규칙이 빠지므로 `[extend] path = ".harness-engine/checker/gitleaks/harness.toml"` 로
@@ -79,7 +82,7 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
    - `.github/workflows/pr-tamper-alert.yml` 은 PR 작성자가 아닌 계정(저장소 admin·봇 제외)이 그 PR 브랜치에
      push 하거나 리뷰를 해제하면 이슈(담당자는 PR 작성자)와 Teams 로 알린다(#150). 병합은 알리지 않는다.
      Teams 는 secret `TEAMS_PLUGIN_ALERT_WEBHOOK` 이 있을 때만 보낸다.
-   - `.github/workflows/pr-queue.yml` 은 열린 PR 마다 병합 순서·상태 코멘트 하나와 커밋 status `merge-order`
+   - `pr-checks` 의 pr-queue 단계는 열린 PR 마다 병합 순서·상태 코멘트 하나와 커밋 status `merge-order`
      (앞 PR 이 열려 있으면 노란 대기, 순서를 못 정하면 error)를 달고, 앞 PR 이 병합돼 차례가 된 PR 의 작성자를
      멘션한다(#370). Teams 웹훅(`TEAMS_PLUGIN_ALERT_WEBHOOK`)이 있으면 Teams 로도 알린다. 무료 요금제는
      노란 대기여도 Merge 버튼이 잠기지 않는다. 순서는 PR 본문의 `먼저: #번호` 줄 등으로 정해진다.
@@ -114,15 +117,13 @@ audit/changes/.gitkeep             변경 기록이 쌓일 자리
 audit/ledger/.gitkeep              진행 원장이 쌓일 자리
 env/README.md                      환경별 접속 URL(Credential 은 안 둠)
 env/adt-tiers.example.yaml         SAP MCP 서버별 쓰기 허용 표 예시(#148). 훅은 읽지 않는다 — 복사해 env/adt-tiers.yaml 로 고쳐 쓴다
-.github/workflows/doc-guard.yml    검사 대상 파일이 바뀐 PR·main 커밋에서 doc-guard 를 부르는 워크플로
-.github/workflows/ssot-approval.yml SRS 를 바꾼 PR 과 main 커밋의 SRS 변경 승인을 검사하는 워크플로(#49)
+.github/workflows/pr-checks.yml    PR 마다 gitleaks·doc-guard·ssot-approval·risk-gate·pr-queue 를 job 하나로 돌리는 워크플로(#412, #420)
+.github/workflows/pr-review.yml    승인(리뷰)이 달리거나 취소되면 승인 여부를 다시 판정하는 워크플로(#419, #420)
+.github/workflows/main-checks.yml  main 에 병합된 뒤 읽기 전용 검사를 돌리고 위반을 이슈로 알리는 워크플로(#419, #420)
 .github/ssot-approvers             SRS 변경 PR 을 승인할 수 있는 GitHub 아이디 목록
-.github/workflows/risk-gate.yml    PR·main 커밋마다 PR 위험도를 판정하는 워크플로(#102)
 .github/risk-gate.yaml             위험도 기준(크기·위험 경로·비밀값·검사 통과). 위험한 PR 만 승인자가 Approve 해야 통과
 .github/workflows/ai-review.yml    위험한 PR 포함 코드(src/)를 바꾼 PR 에 Claude AI 리뷰를 돌리는 워크플로(#125, #360, #411). 기본 꺼짐
-.github/workflows/gitleaks.yml     PR·main 커밋마다 비밀정보(CR-004)를 gitleaks 로 검사하는 워크플로(#159)
 .github/workflows/pr-tamper-alert.yml 작성자가 아닌 계정이 PR 에 push 하거나 리뷰를 해제하면 이슈·Teams 로 알리는 워크플로(#150)
-.github/workflows/pr-queue.yml     열린 PR 의 병합 순서를 코멘트와 merge-order status 로 보이고 차례가 되면 알리는 워크플로(#370)
 .github/workflows/ledger-complete.yml 대표 [DEV-xxx] 이슈를 닫는 PR 이 병합되면 진행 원장을 완료로 바꿔 커밋하는 워크플로(#346)
 .claude/settings.json              harness Plugin 자동 설치 안내(#89). 이미 있으면 두 항목만 합친다
 ```

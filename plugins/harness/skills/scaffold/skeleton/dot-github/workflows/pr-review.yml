@@ -1,0 +1,26 @@
+# 이 저장소(Project Repository)에서 리뷰(승인)가 달리거나 취소될 때 승인 여부를 다시 판정한다(#419).
+# ssot-approval·risk-gate 재판정, 승인 전에 실패한 `pr-checks` 실행 다시 돌리기, pr-queue 를 job 하나
+# (`pr-review`)로 합친 재사용 워크플로를 부른다. 승인하면 곧바로 초록불이 된다.
+#
+# workflow `name:` 은 `pr-checks`·`main-checks` 와 함께 이 이름(`pr-review`)으로 둔다. 엔진이 이 이름들로 자기
+# 검사를 알아보고 PR 의 검사 실패에서 뺀다. 다시 돌리는 단계는 이 저장소의 `pr-checks` 실행을 이름으로 찾는다.
+#
+# 권한: actions write 는 낡은 빨간 `pr-checks` 실행을 다시 돌려 PR 화면에서 없애는 용도다(없으면 경고만 내고
+# 판정은 그대로 돈다). statuses write 는 승인으로 풀린 status 를 초록으로 덮어쓰는 용도다.
+name: pr-review
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+jobs:
+  pr-review:
+    uses: jaeheeMin/blueward-harness/.github/workflows/pr-review.yml@stable
+    secrets:
+      TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      statuses: write
+      checks: read
+      actions: write

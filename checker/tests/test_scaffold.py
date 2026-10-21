@@ -67,15 +67,13 @@ EXPECTED_FILES = {
     "audit/ledger/.gitkeep",
     "env/README.md",
     "env/adt-tiers.example.yaml",
-    ".github/workflows/doc-guard.yml",
-    ".github/workflows/ssot-approval.yml",
+    ".github/workflows/pr-checks.yml",
+    ".github/workflows/pr-review.yml",
+    ".github/workflows/main-checks.yml",
     ".github/ssot-approvers",
     ".github/risk-gate.yaml",
-    ".github/workflows/risk-gate.yml",
     ".github/workflows/ai-review.yml",
-    ".github/workflows/gitleaks.yml",
     ".github/workflows/pr-tamper-alert.yml",
-    ".github/workflows/pr-queue.yml",
     ".github/workflows/ledger-complete.yml",
     ".claude/settings.json",
 }
@@ -89,7 +87,7 @@ def test_예상하는_파일을_모두_만들고_치환한다(tmp_path: Path):
     assert result["dry_run"] is False
 
     # dot-github 는 실제로 만들 때 .github 로 바뀐다.
-    assert (tmp_path / ".github" / "workflows" / "doc-guard.yml").is_file()
+    assert (tmp_path / ".github" / "workflows" / "pr-checks.yml").is_file()
     assert not (tmp_path / "dot-github").exists()
 
     for rel in EXPECTED_FILES:
@@ -131,7 +129,7 @@ def test_승인자를_주면_ssot_approvers_파일에_한_줄씩_적는다(tmp_p
 
 def test_위험도_게이트_기준_파일과_워크플로를_만든다(tmp_path: Path):
     """#102: 새 Project Repository 에 위험도 게이트가 기본으로 들어간다."""
-    from checker.risk_gate import DEFAULT_CONFIG, OWN_CHECK_NAME, load_config
+    from checker.risk_gate import DEFAULT_CONFIG, load_config
 
     scaffold(tmp_path, "고객사", "프로젝트", False)
 
@@ -141,19 +139,55 @@ def test_위험도_게이트_기준_파일과_워크플로를_만든다(tmp_path
     # 단 ai_review_paths 는 scaffold 가 호출 워크플로 ai-review.yml 의 `paths: ['src/**']` 와 맞춰 `[src/]` 로 둔다(#411).
     assert load_config(text) == {**DEFAULT_CONFIG, "ai_review_paths": ["src/"]}
 
-    # 호출 워크플로의 job id 는 게이트가 자기 check run 을 알아보는 이름과 같아야 교착이 없다.
-    workflow = (tmp_path / ".github" / "workflows" / "risk-gate.yml").read_text(encoding="utf-8")
-    assert f"\n  {OWN_CHECK_NAME}:\n    uses: jaeheeMin/blueward-harness/.github/workflows/risk-gate.yml@stable" in workflow
-    for trigger in ("pull_request:", "pull_request_review:", "push:"):
-        assert trigger in workflow
-    for permission in ("contents: read", "pull-requests: write", "issues: write", "checks: read", "statuses: read", "actions: write"):
-        assert permission in workflow
+    # 옛 caller 다섯(doc-guard·gitleaks·ssot-approval·risk-gate·pr-queue)은 더 내지 않는다(#420).
+    for old in ("doc-guard", "gitleaks", "ssot-approval", "risk-gate", "pr-queue"):
+        assert not (tmp_path / ".github" / "workflows" / f"{old}.yml").exists(), old
 
+
+PR_PERMISSIONS = {
+    "contents": "read", "pull-requests": "write", "issues": "write", "statuses": "write", "checks": "read",
+    "actions": "read"}
+NEW_CALLERS = {
+    # name == job id == 재사용 워크플로 파일 이름. pr-review 의 rerun 단계가 `.name == "pr-checks"` 로 run 을 찾고,
+    # 엔진의 EXCLUDED_CHECK_GROUPS 가 이 이름들을 본다.
+    "pr-checks": (
+        {"pull_request": {"types": ["opened", "synchronize", "reopened", "ready_for_review", "closed"]}},
+        PR_PERMISSIONS),
+    "pr-review": (
+        {"pull_request_review": {"types": ["submitted", "dismissed"]}},
+        {**PR_PERMISSIONS, "actions": "write"}),
+    "main-checks": (
+        {"push": {"branches": ["main"]}},
+        {"contents": "read", "pull-requests": "read", "issues": "write", "statuses": "write", "checks": "read"}),
+}
+
+
+@pytest.mark.parametrize("name", sorted(NEW_CALLERS))
+def test_새_caller_셋은_이름_job_id_권한_트리거가_재사용_워크플로와_맞는다(tmp_path: Path, name: str):
+    """#420: pr-checks·pr-review·main-checks caller. 이름이 어긋나면 rerun 이 run 을 못 찾고 교착한다."""
     import yaml
 
-    ssot = yaml.safe_load((tmp_path / ".github" / "workflows" / "ssot-approval.yml").read_text(encoding="utf-8"))
-    assert ssot["jobs"]["ssot-approval"]["permissions"] == {
-        "contents": "read", "pull-requests": "write", "issues": "write", "actions": "write"}
+    scaffold(tmp_path, "고객사", "프로젝트", False)
+
+    text = (tmp_path / ".github" / "workflows" / f"{name}.yml").read_text(encoding="utf-8")
+    assert not _PLACEHOLDER.search(text)
+    data = yaml.safe_load(text)
+    on = data.get("on", data.get(True))
+    events, permissions = NEW_CALLERS[name]
+    assert data["name"] == name
+    assert on == events  # paths 가 없다: 바뀐 파일 범위는 재사용 워크플로의 단계 if 가 맡는다
+    assert list(data["jobs"]) == [name]
+    job = data["jobs"][name]
+    assert job["uses"] == f"jaeheeMin/blueward-harness/.github/workflows/{name}.yml@stable"
+    assert job["permissions"] == permissions
+    assert job["secrets"] == {"TEAMS_PLUGIN_ALERT_WEBHOOK": "${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}"}
+
+
+def test_새_caller_의_이름은_엔진이_제외하는_검사_그룹과_같다():
+    from checker.risk_gate import EXCLUDED_CHECK_GROUPS
+
+    for name in NEW_CALLERS:
+        assert name in EXCLUDED_CHECK_GROUPS, name
 
 
 def test_ai_review_호출_워크플로를_만들고_기본은_꺼져_있다(tmp_path: Path):

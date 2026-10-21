@@ -1,0 +1,33 @@
+# 이 저장소(Project Repository)의 PR 마다 검사를 돌린다. gitleaks(비밀정보)·doc-guard(문서·코드 규칙)·
+# ssot-approval(SRS 승인)·risk-gate(위험도)·pr-queue(병합 순서)를 job 하나(`pr-checks`)의 단계로 합친
+# 재사용 워크플로를 부른다(#412). Actions 는 job 개수로 과금하므로 PR 푸시 1번에 5분이 나가던 것을 1분으로 줄인다.
+# 판정 로직은 blueward-harness 저장소에서 그때그때 내려받아 쓴다.
+#
+# 검사 대상 파일이 바뀌었는지(옛 doc-guard caller 의 paths)는 이 caller 가 아니라 재사용 워크플로의 단계 `if` 가
+# 가린다. 한 job 이라 트리거 paths 를 못 쓰기 때문이다. 그래서 여기엔 paths 가 없다.
+# 결과는 옛 이름(`gitleaks`·`doc-guard`·`ssot-approval`·`risk-gate`·`merge-order`)의 commit status 로도 남는다.
+#
+# workflow `name:` 과 job id 는 반드시 `pr-checks` 로 둔다. 승인 뒤 pr-review 가 이 이름으로 실패한 실행을 찾아
+# 다시 돌리고, risk-gate 판정이 다른 검사를 기다릴 때 이 이름으로 자기 자신을 알아본다(바꾸면 교착한다).
+#
+# 권한: pull-requests·issues write 는 PR 코멘트와 main 실패 알림용, statuses write 는 옛 이름 status 를 다는 용도,
+# checks·actions read 는 열린 PR 의 검사 결과와 그 검사를 돌린 실행을 읽는 용도다(없으면 GraphQL 이
+# "Resource not accessible by integration" 으로 실패한다). PR 을 열고 닫는 모든 이벤트에서 돈다.
+# edited·converted_to_draft 는 뺐다(#411).
+name: pr-checks
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+
+jobs:
+  pr-checks:
+    uses: jaeheeMin/blueward-harness/.github/workflows/pr-checks.yml@stable
+    secrets:
+      TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      statuses: write
+      checks: read
+      actions: read

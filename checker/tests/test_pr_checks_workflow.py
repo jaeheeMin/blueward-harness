@@ -8,9 +8,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "pr-checks.yml"
-DOC_GUARD_CALLER = (
-    ROOT / "plugins" / "harness" / "skills" / "scaffold" / "skeleton" / "dot-github" / "workflows" / "doc-guard.yml"
-)
 CHECKS = ["gitleaks", "doc-guard", "ssot-approval", "risk-gate"]
 PERMISSIONS = {
     "contents": "read",
@@ -117,10 +114,13 @@ def test_doc_guard_와_ssot_는_바뀐_파일_목록이_아니라고_할_때만_
     assert '"unknown"' in _step("changed")["run"]
 
 
-def test_doc_guard_경로는_scaffold_caller_의_paths_와_같다():
+def test_doc_guard_경로는_pr_checks_안의_단일_정의이고_main_checks_와_같다():
+    # #420: scaffold doc-guard caller 가 없어져 이 env 가 유일한 정의다. main-checks 가 같은 목록을 써야 한다.
     env = _step("changed")["env"]["DOC_GUARD_PATHS"].split()
-    caller = _load(DOC_GUARD_CALLER)["on"]["pull_request"]["paths"]
-    assert env == caller
+    assert env and len(env) == len(set(env))
+    main_steps = _load(ROOT / ".github" / "workflows" / "main-checks.yml")["jobs"]["check"]["steps"]
+    main_env = next(s for s in main_steps if s.get("id") == "changed")["env"]["DOC_GUARD_PATHS"].split()
+    assert env == main_env
     assert _step("changed")["env"]["SSOT_PATHS"].split() == ["docs/ssot/**"]
 
 

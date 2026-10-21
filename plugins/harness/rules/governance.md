@@ -18,7 +18,7 @@ PR 본문의 `먼저:` 줄을 고친다. 순서를 정하지 못할 때(순환, 
 거부한다. 같은 파일을 고친 PR 은 경고만 하고 막지 않는다. 사람이 GitHub 화면에서 병합하는 것은 막을 수 없다
 (무료 요금제는 서버에서 강제하지 못한다) — 그래서 사람도 `/harness:prs` 나 PR 본문 `## 병합 순서` 를 보고 순서를 지킨다.
 
-Actions `pr-queue` 가 Claude 를 안 쓰는 사람에게도 같은 정보를 준다. 열린 PR 마다 병합 순서 코멘트(`<!-- pr-queue -->`) 하나를
+Actions 의 `pr-checks`(승인·취소 뒤에는 `pr-review`, 병합 뒤에는 `main-checks`) 안 pr-queue 단계가 Claude 를 안 쓰는 사람에게도 같은 정보를 준다. 열린 PR 마다 병합 순서 코멘트(`<!-- pr-queue -->`) 하나를
 갱신하고, 커밋 status `merge-order` 를 달아 앞 PR 이 열려 있으면 GitHub 화면에서 노란 대기로 보인다(순서를 정하지 못하면 error,
 통과로 두지 않는다). 코멘트는 PR·리뷰·main 이벤트 때 갱신되어 검사 결과는 다음 이벤트까지 낡을 수 있으니, 정확한 지금
 상태는 `/harness:prs` 로 본다. 본문 `먼저:` 줄을 고치거나 draft 로 바꿔도 코멘트는 바로 갱신되지 않고(`edited`·
@@ -75,13 +75,17 @@ PR 의 차례가 되면 작성자를 멘션하고(Teams 웹훅이 있으면 Team
 
 ### 위험도에 따른 승인(#102)
 
+PR 검사는 이름이 `pr-checks` 인 job 하나이고, 비밀정보·문서·SRS 승인·위험도·병합 순서가 그 안의 단계다(#412).
+결과는 옛 이름(`gitleaks`·`doc-guard`·`ssot-approval`·`risk-gate`·`merge-order`) commit status 로도 달려 `gh pr checks` 와
+훅이 이름으로 읽는다. 승인(리뷰)이 달리면 `pr-review` 가 승인 여부만 다시 판정하고, 병합 뒤 감시는 `main-checks` 가 한다.
+
 Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험도를 판정한다. 바뀐 줄이
 300 을 넘거나 파일이 10개를 넘을 때, 위험 경로(`docs/ssot/`, `rules/`, `.github/` 등과
 `.github/human-merge-paths`)를 바꿀 때, 추가된 줄에 비밀값 모양이 있을 때, 다른 검사가
 실패했거나 진행 중일 때 그 PR 은 위험하다. 위험하지 않은 PR 은 승인 없이 병합할 수 있고,
 위험한 PR 은 `.github/ssot-approvers` 의 사람 가운데 **작성자가 아닌 사람이 PR 의 마지막
-커밋에 Approve** 해야 한다. 승인이 없으면 PR 검사(`risk-gate`)가 빨간불이 되고 이유와 다음
-할 일이 PR 코멘트에 남으며, Claude 의 `gh pr merge` 는 훅이 거부한다. 승인 없이 병합됐으면
+커밋에 Approve** 해야 한다. 승인이 없으면 PR 검사 `pr-checks` 가 빨간불이 되고(그 안의 risk-gate
+단계가 실패하고 commit status `risk-gate` 도 빨갛다) 이유와 다음 할 일이 PR 코멘트에 남으며, Claude 의 `gh pr merge` 는 훅이 거부한다. 승인 없이 병합됐으면
 병합 뒤 이슈가 열린다. 승인자 목록에 작성자 말고 사람이 없으면 위험한 PR 은 승인으로 풀 수
 없으니 한 명 이상 적어 둔다.
 

@@ -1,3 +1,7 @@
+# 대체됨(#412·#420): 이 파일은 `pr-checks.yml`(PR)·`pr-review.yml`(승인)·`main-checks.yml`(main push)로 대체됐다.
+# public-cloud 의 옛 caller 가 `@stable` 로 이 파일을 아직 부르는 동안 한 판만 남기며, 다음 판에서 지운다.
+# 새 저장소는 scaffold 가 새 caller 만 낸다. 고치지 말고 새 파일을 고친다.
+#
 # Project Repository 가 가져다 쓰는 재사용 워크플로(#49).
 #
 # docs/ssot/ (SRS) 를 바꾼 PR 은 작성자가 아닌 사람의 Approve 가 있어야 한다.
