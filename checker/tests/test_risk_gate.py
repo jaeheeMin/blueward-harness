@@ -55,6 +55,12 @@ def test_설정이_비어_있으면_기본값이다():
     assert "docs/ssot/" in cfg["high_risk_paths"] and "CLAUDE.md" in cfg["high_risk_paths"]
 
 
+def test_ai_review_paths_기본은_빈_목록이고_설정이_덮는다():
+    assert rg.load_config(None)["ai_review_paths"] == []
+    assert rg.load_config("ai_review_paths:\n  - src/\n")["ai_review_paths"] == ["src/"]
+    assert rg.load_config("ai_review_paths:\n")["ai_review_paths"] == []  # 값 없음 = 빈 목록
+
+
 def test_설정에_적은_값이_기본값을_덮는다_나머지는_기본값():
     cfg = rg.load_config("max_changed_lines: 50\nsecret_scan: false\nhigh_risk_paths:\n  - src/\n")
     assert cfg["max_changed_lines"] == 50
@@ -76,6 +82,9 @@ def test_기본값_목록을_바꿔도_다음_설정에_새지_않는다():
         "max_changed_lines: -1\n",
         "secret_scan: 'yes'\n",
         "high_risk_paths: docs/\n",
+        "ai_review_paths: src/\n",  # 목록이 아니면 오류
+        "ai_review_paths: [1]\n",
+        "ai_review_path: [src/]\n",  # 키 오타는 모르는 키 오류
         "secret_scna: false\n",  # 오타는 조용히 넘기지 않는다
         "- a\n- b\n",
         "a: [unclosed\n",
@@ -1121,6 +1130,51 @@ def test_PR_없이_main_에_들어온_pool_도_권한_줄이_찍힌다():
     client.responses[f"repos/o/r/contents/{POOL_PATH}?ref=m1"] = _b64(POOL_ALLOW_ALL)
     result = rg.decide_commit(client, "o/r", "m1", sleep=_NOSLEEP)
     assert f"쓰기 앱인데 권한 검사 없음: {POOL_PATH}" in result["reasons"]
+
+
+# --- AI 리뷰 대상 경로(#411) ---------------------------------------------------------------
+
+
+def test_ai_review_target_목록이_비면_모든_PR_이_대상():
+    assert rg.ai_review_target(["docs/a.md"], []) is True
+    assert rg.ai_review_target([], []) is True
+
+
+def test_ai_review_target_접두어_아래_파일이_하나라도_있어야_대상():
+    assert rg.ai_review_target(["docs/a.md", "src/app/a.ts"], ["src/"]) is True
+    assert rg.ai_review_target(["docs/a.md", "rules/x.yaml"], ["src/"]) is False
+    assert rg.ai_review_target([], ["src/"]) is False
+    assert rg.ai_review_target(["srcx/a.ts"], ["src/"]) is False  # 접두어 매칭이지 부분 문자열이 아니다
+
+
+def test_ai_review_대상_아닌_PR_은_결과가_없어도_대기하지_않는다():
+    cfg = "ai_review: true\nai_review_paths:\n  - src/\n"
+    docs_only = rg.decide_pr(_client(config=cfg, files=[_file("docs/a.md")]), "o/r", 5)
+    assert docs_only["risk"] == "low" and not docs_only.get("waiting_on_checks")
+    # 코드를 바꾼 PR 은 전과 같이 결과를 기다린다.
+    code = rg.decide_pr(_client(config=cfg, files=[_file("src/a.ts")]), "o/r", 5)
+    assert code["risk"] == "high" and code["waiting_on_checks"] is True
+
+
+def test_ai_review_paths_가_비어_있으면_문서만_바꾼_PR_도_전과_같이_기다린다():
+    result = rg.decide_pr(_client(config="ai_review: true\n", files=[_file("docs/a.md")]), "o/r", 5)
+    assert result["risk"] == "high" and result["waiting_on_checks"] is True
+
+
+def test_대상_아닌_PR_이어도_위험_사유는_그대로다():
+    cfg = "ai_review: true\nai_review_paths:\n  - src/\n"
+    result = rg.decide_pr(_client(config=cfg, files=[_file("rules/a.yaml")]), "o/r", 5)
+    assert result["risk"] == "high" and any("위험 경로" in r for r in result["reasons"])
+    assert not any("AI 리뷰" in r for r in result["reasons"])
+
+
+def test_precheck_대상_아니면_돌리지_않는다():
+    cfg = "ai_review: true\nai_review_paths:\n  - src/\n"
+    result = rg.precheck_pr(_client(config=cfg, files=[_file("docs/a.md")]), "o/r", 5)
+    assert result["enabled"] is False and result["risky"] is False
+    assert "AI 리뷰 대상 아님" in result["reasons"][0]
+    on = rg.precheck_pr(_client(config=cfg, files=[_file("src/a.ts")]), "o/r", 5)
+    assert on["enabled"] is True
 
 
 # --- precheck-pr(#125) ---------------------------------------------------------------

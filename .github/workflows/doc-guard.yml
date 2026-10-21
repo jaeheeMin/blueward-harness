@@ -11,6 +11,12 @@
 #
 # 문서 저장소 쪽에서는 이렇게 부른다.
 #
+#   on:
+#     pull_request:
+#       paths: [...]   # 검사 대상 파일이 바뀐 PR 만 돈다(#411). 목록과 이유는 scaffold 의 caller 주석을 본다
+#     push:
+#       branches: [main]
+#       paths: [...]   # 같은 paths. 병합된 PR 의 검사 실패를 이슈로 알리는 안전망이라 남긴다
 #   jobs:
 #     doc-guard:
 #       uses: jaeheeMin/blueward-harness/.github/workflows/doc-guard.yml@stable
@@ -39,6 +45,11 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # 새 커밋이 오면 이전 PR 검사는 낡은 것이므로 취소한다(#411). main push 는 PR 번호가 없어 sha 로 갈라
+    # 서로 겹치지 않고, 취소하지도 않는다 — 병합 뒤 감시(실패 이슈)가 끊기면 안 된다.
+    concurrency:
+      group: doc-guard-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: 문서 저장소 가져오기
         uses: actions/checkout@v4

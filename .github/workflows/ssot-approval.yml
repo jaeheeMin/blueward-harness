@@ -25,6 +25,14 @@
 # 문서 저장소 쪽에서는 이렇게 부른다. 이 워크플로 자체는 권한을 선언하지
 # 않으므로(재사용 워크플로 관행) 부르는 쪽이 아래를 명시해야 한다.
 #
+#   on:
+#     pull_request:
+#       types: [opened, synchronize, reopened]
+#       paths: ['docs/ssot/**']   # SRS 를 바꾼 PR 만 돈다. 리뷰 이벤트는 paths 를 못 걸어 그대로 돈다(#411)
+#     pull_request_review:
+#       types: [submitted, dismissed]
+#     push:
+#       branches: [main]
 #   jobs:
 #     ssot-approval:
 #       uses: jaeheeMin/blueward-harness/.github/workflows/ssot-approval.yml@stable
@@ -56,6 +64,11 @@ jobs:
   check:
     if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
     runs-on: ubuntu-latest
+    # 새 커밋·리뷰가 오면 이전 판정은 낡은 것이므로 취소하고 최신으로 다시 판정한다(#411). push(after-merge)
+    # 는 이 job 을 타지 않는다 — 병합 뒤 감시는 취소되면 안 된다.
+    concurrency:
+      group: ssot-approval-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - name: 판정 엔진 가져오기
         uses: actions/checkout@v4

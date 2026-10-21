@@ -32,7 +32,8 @@
               (success 면 통과, 그 밖의 결론이면 결론별 사유 — `ai_review_reasons`). 그 check run 은
               재사용 워크플로 `ai-review.yml`(#125)이 만든다. 심각한 지적, 일부만 봄, 검사 불능,
               취소, 시간 초과, 돌지 않음을 뭉개지 않고 나눠 적는다(#360).
-              없거나 끝나지 않았으면 대기로 본다.
+              없거나 끝나지 않았으면 대기로 본다. 단 `ai_review_paths` 가 비어 있지 않은데 PR 이 바꾼
+              파일 가운데 그 접두어 아래가 하나도 없으면 AI 리뷰 대상이 아니라 대기 없이 통과로 본다(#411).
 
 위험한 PR 은 승인자 목록(`approvers_file`, 기본 `.github/ssot-approvers`)에서 **그 PR 작성자에게
 정해진 승인자(작성자 본인 제외)가 PR 의 마지막 커밋에 Approve** 해야 통과한다. 목록은
@@ -63,7 +64,7 @@ base 의 기준 가운데 `size`·`paths`·`secret` 을 평가해 `risky`·`reas
 통과로 보이지 않게 하고, "검사 불능 — 승인자가 직접 확인" 이라고 밝힌다. "변경이 너무 커서 비밀값 검사를 못 함"
 (`unscanned_files`)은 여기에 넣지 않는다 — 큰 PR 은 계속 리뷰한다.
 종료코드: 0 AI 리뷰를 돌려도 됨(설정이 있고 `ai_review: true`; 크기·경로 위험과 무관), 3 돌리지
-않음(설정 없음, `ai_review: false` — 사유를 출력), 4 비밀값이 보여 돌리지 않음(실패 처리), 2 판정 불가.
+않음(설정 없음, `ai_review: false`, `ai_review_paths` 에 걸린 파일 없음 — 사유를 출력), 4 비밀값이 보여 돌리지 않음(실패 처리), 2 판정 불가.
 1 은 쓰지 않는다. 4 는 새 코드라 옛 워크플로는 "판정 불능"(2 와 같은 쪽)으로 읽고 역시 리뷰를 돌리지 않는다.
 
 **AI 리뷰 결과 읽기(`ai_review_reasons`, #360).** `ai-review` check run 의 결론을 구분해 사유를
@@ -146,12 +147,17 @@ DEFAULT_CONFIG: dict = {
     "secret_scan": True,
     "require_checks_green": True,
     "ai_review": False,
+    # AI 리뷰 대상 경로(접두어). 비어 있으면 모든 PR 이 대상이다. 비어 있지 않으면 PR 이 바꾼 파일 가운데 이
+    # 접두어 아래가 하나라도 있어야 대상이다. `high_risk_paths` 와 같은 접두어 매칭이라 `src/` 는 호출
+    # 워크플로의 `paths: ['src/**']` 와 같은 뜻이다(#411).
+    "ai_review_paths": [],
     "srs_split_hint": True,
     "approvers_file": ".github/ssot-approvers",
 }
 
 _INT_KEYS = ("max_changed_lines", "max_changed_files")
 _BOOL_KEYS = ("secret_scan", "require_checks_green", "ai_review", "srs_split_hint")
+_LIST_KEYS = ("high_risk_paths", "ai_review_paths")
 
 _MAX_LISTED = 5  # 사유에 이름을 나열하는 최대 개수
 
@@ -191,11 +197,11 @@ def load_config(text: str | None) -> dict:
         elif key in _BOOL_KEYS:
             if not isinstance(value, bool):
                 raise ConfigError(f"{CONFIG_PATH} 의 {key} 는 true 또는 false 여야 한다")
-        elif key == "high_risk_paths":
+        elif key in _LIST_KEYS:
             if value is None:
                 value = []
             if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
-                raise ConfigError(f"{CONFIG_PATH} 의 high_risk_paths 는 문자열 목록이어야 한다")
+                raise ConfigError(f"{CONFIG_PATH} 의 {key} 는 문자열 목록이어야 한다")
         elif key == "approvers_file":
             if not isinstance(value, str) or not value.strip():
                 raise ConfigError(f"{CONFIG_PATH} 의 approvers_file 은 경로 문자열이어야 한다")
@@ -215,6 +221,15 @@ def size_reasons(files: list[dict], cfg: dict) -> list[str]:
     if len(files) > cfg["max_changed_files"]:
         reasons.append(f"바뀐 파일이 {len(files)}개로 기준({cfg['max_changed_files']}개)을 넘음")
     return reasons
+
+
+def ai_review_target(files: list[str], prefixes: list[str]) -> bool:
+    """이 PR 이 AI 리뷰 대상인가(#411). 접두어 목록이 비면 모든 PR 이 대상이고, 아니면 바뀐 파일 중 하나라도
+    접두어 아래여야 한다. 매칭은 `path_reasons` 와 같다."""
+    normalized = [_normalize(p) for p in prefixes if _normalize(p)]
+    if not normalized:
+        return True
+    return bool(human_merge_hits(files, normalized))
 
 
 def path_reasons(files: list[str], prefixes: list[str]) -> list[str]:
@@ -886,6 +901,8 @@ def _crit_checks(ctx: Context) -> list[Finding]:
 def _crit_ai_review(ctx: Context) -> list[Finding]:
     if not ctx.cfg["ai_review"]:
         return []
+    if not ai_review_target(ctx.filenames, ctx.cfg["ai_review_paths"]):
+        return []  # 대상 아님: ai-review 가 돌지 않는 PR 이라 결과를 기다리지 않는다(#411)
     flagged, waiting = ai_review_reasons(ctx.check_runs(), ctx.load_comments, ctx.head_ref)
     return [Finding("ai_review", r) for r in flagged] + [Finding("ai_review", r, waiting=True) for r in waiting]
 
@@ -1141,13 +1158,17 @@ def precheck_pr(client: GhClient, repo: str, pr: int) -> dict:
     cfg = load_config(cfg_text)
     if not cfg["ai_review"]:
         return {"enabled": False, "gate": True, "risky": False, "reasons": ["ai_review 가 꺼져 있음"]}
+    entries = fetch_pr_file_entries(client, repo, pr)
+    if not ai_review_target([e.get("filename") or "" for e in entries], cfg["ai_review_paths"]):
+        return {"enabled": False, "gate": True, "risky": False,
+                "reasons": ["AI 리뷰 대상 아님(ai_review_paths 에 걸린 파일 없음)"]}
 
     def _no_check_runs() -> list[dict]:
         raise AssertionError("precheck 는 다른 검사의 결과를 읽지 않는다")
 
     ctx = Context(
         cfg=cfg,
-        files=fetch_pr_file_entries(client, repo, pr),
+        files=entries,
         prefixes=cfg["high_risk_paths"] + fetch_human_merge_paths(client, repo, ref),
         load_check_runs=_no_check_runs,
     )

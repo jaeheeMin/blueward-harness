@@ -1,10 +1,15 @@
 # 이 저장소(Project Repository)의 PR 과 main 커밋마다 docs/ssot(SRS) 변경의
 # 승인 여부를 검사한다(#49). 판정 로직은 blueward-harness 저장소에서 그때그때
 # 내려받아 쓴다 — doc-guard.yml 과 같은 사정이다.
+#
+# SRS 를 바꾼 PR 만 돈다(#411). 리뷰 이벤트는 paths 를 못 걸어 그대로 돈다. SRS 를 안 바꾼 PR 에는 이 검사가
+# 뜨지 않는데, 승인이 필요 없는 PR 이라 "없는 것" 이 곧 "해당 없음" 이다(다른 검사는 이 검사가 있어야 한다고
+# 요구하지 않는다).
 name: ssot-approval
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    paths: ['docs/ssot/**']
   pull_request_review:
     types: [submitted, dismissed]
   push:

@@ -1,11 +1,51 @@
 # 이 저장소(Project Repository)의 PR 과 main 커밋마다 doc-guard 검사를 돌린다.
 # 검사 엔진은 blueward-harness 저장소에서 그때그때 내려받아 쓴다.
 # issues: write 는 main push 가 실패했을 때 이슈를 열기 위해 필요하다(#95).
+#
+# 검사 대상 파일이 바뀐 PR·push 에서만 돈다(#411). paths 는 엔진이 실제로 보는 범위와 맞춘 것이다.
+#   docs/** templates/** rules/** audit/**   rules/*.yaml 의 관할(docs/ssot, docs/spec, audit/changes,
+#                                            audit/ledger), 양식, 규칙, 번호 짝·객체 겹침 교차 검사
+#   **/*.abap .js .ts .mjs .cjs .cds .asbdef  공통 개발 규칙(CR-001~)이 보는 코드. 폴더와 무관하게 확장자로
+#                                            고른다(checker/code_checks.yaml 의 languages 와 같아야 한다)
+#   **/*_v*.xlsx .docx .pptx                 판 번호 겹침 검사가 보는 판 있는 산출 파일
+# 검사 대상인데 여기서 빠지면 검사가 안 돌고 통과처럼 보이므로, rules/ 에 `docs/` `audit/` 밖을 관할하는 규칙을
+# 더하거나 code_checks.yaml 에 확장자가 늘면 이 목록도 함께 고친다. main push 는 병합된 PR 의 검사가 실패한 채
+# 들어왔을 때 이슈로 알리는 안전망이라 남겨 두되, 같은 paths 로 줄였다.
 name: doc-guard
 on:
   pull_request:
+    paths:
+      - 'docs/**'
+      - 'templates/**'
+      - 'rules/**'
+      - 'audit/**'
+      - '**/*.abap'
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.mjs'
+      - '**/*.cjs'
+      - '**/*.cds'
+      - '**/*.asbdef'
+      - '**/*_v*.xlsx'
+      - '**/*_v*.docx'
+      - '**/*_v*.pptx'
   push:
     branches: [main]
+    paths:
+      - 'docs/**'
+      - 'templates/**'
+      - 'rules/**'
+      - 'audit/**'
+      - '**/*.abap'
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.mjs'
+      - '**/*.cjs'
+      - '**/*.cds'
+      - '**/*.asbdef'
+      - '**/*_v*.xlsx'
+      - '**/*_v*.docx'
+      - '**/*_v*.pptx'
 jobs:
   doc-guard:
     uses: jaeheeMin/blueward-harness/.github/workflows/doc-guard.yml@stable

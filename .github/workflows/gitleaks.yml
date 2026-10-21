@@ -56,6 +56,11 @@ jobs:
   gitleaks:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # 새 커밋이 오면 이전 PR 검사는 낡은 것이므로 취소한다(#411). main push 는 PR 번호가 없어 sha 로 갈라
+    # 서로 겹치지 않고, 취소하지도 않는다.
+    concurrency:
+      group: gitleaks-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
     env:

@@ -51,9 +51,8 @@ def test_엔진은_engine_ref_로_받아_scripts_진입점을_부른다():
 def test_caller_는_이벤트와_권한과_stable_을_정한다():
     caller = _load(CALLER)
     on = caller["on"]
-    assert on["pull_request"]["types"] == [
-        "opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft", "closed", "edited"
-    ]
+    # edited·converted_to_draft 는 Actions 분을 아끼려고 뺐다(#411). 본문 `먼저:` 를 고쳐도 다음 이벤트까지 낡는다.
+    assert on["pull_request"]["types"] == ["opened", "synchronize", "reopened", "ready_for_review", "closed"]
     assert on["pull_request_review"]["types"] == ["submitted", "dismissed"]
     assert on["push"]["branches"] == ["main"]
     job = caller["jobs"]["pr-queue"]

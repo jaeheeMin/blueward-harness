@@ -8,7 +8,8 @@
 #   - 앞 PR 이 병합돼 이제 앞이 하나도 없게 된 PR 이 있으면 작성자를 @멘션하고(새 코멘트), Teams
 #     웹훅(`TEAMS_PLUGIN_ALERT_WEBHOOK`)이 있으면 Teams 로도 알린다.
 # 위 이벤트(PR·리뷰·main)가 올 때만 갱신한다. 검사 결과가 바뀐 것만으로는 돌지 않아 코멘트의 검사 상태는 다음
-# 이벤트까지 낡을 수 있다(정확한 지금 상태는 `/harness:prs`). 닫힌 PR 은 건드리지 않는다. 무료 요금제는 노란 대기여도 Merge 버튼을 잠그지 못하므로 `merge-order`
+# 이벤트까지 낡을 수 있다(정확한 지금 상태는 `/harness:prs`). 본문 `먼저:` 줄을 고쳐도(`edited`) 바로 갱신되지
+# 않고 다음 PR·리뷰·main 이벤트에 반영된다(#411). 닫힌 PR 은 건드리지 않는다. 무료 요금제는 노란 대기여도 Merge 버튼을 잠그지 못하므로 `merge-order`
 # 는 막는 것이 아니라 드러내는 것이고, Claude 의 `gh pr merge` 는 훅이 막는다.
 #
 # GitHub 를 읽지 못하면 통과도 위반도 아니다(CLAUDE.md 원칙 7). job 을 실패시키고 사유를 job 요약에
@@ -19,7 +20,7 @@
 #
 #   on:
 #     pull_request:
-#       types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed, edited]  # edited: 본문 `먼저:` 줄
+#       types: [opened, synchronize, reopened, ready_for_review, closed]   # edited·converted_to_draft 는 뺐다(#411)
 #     pull_request_review:
 #       types: [submitted, dismissed]
 #     push:
