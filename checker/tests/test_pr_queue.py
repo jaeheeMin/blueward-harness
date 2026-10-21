@@ -398,6 +398,41 @@ def test_different_dev_numbers_not_linked():
     assert by_number(res)[2]["after"] == []
 
 
+def test_srs_pr_mentioning_other_dev_in_body_does_not_block_it():
+    # #407: DEV-005 SRS PR 본문에 스쳐 지나간 REQ-004 때문에 DEV-004 의 Spec PR 이 막히면 안 된다
+    body = "main 의 REQ-001~004, 006 내용은 그대로.\nREQ-004 와 REQ-006 사이에 추가."
+    prs = [
+        pr(208, files=("docs/ssot/SRS.md", "docs/spec/DEV-005-x.md"), title="feat: G/L 속성 조회 앱 추가 (DEV-005)", body=body),
+        pr(211, files=("docs/spec/DEV-004-x.md",), title="docs: 스펙 (DEV-004)"),
+        pr(212, files=("docs/spec/DEV-005-y.md",), title="docs: 스펙 (DEV-005)"),
+    ]
+    res, _ = compute(prs)
+    items = by_number(res)
+    assert items[211]["after"] == []
+    assert items[212]["after"] == [208]
+
+
+def test_body_only_dev_uses_first_number():
+    prs = [
+        pr(1, files=("docs/ssot/SRS.md",), title="docs: SRS 갱신", body="DEV-007 관련. DEV-009 와는 무관"),
+        pr(2, files=("src/a.py",), title="feat [DEV-007]"),
+        pr(3, files=("src/b.py",), title="feat [DEV-009]"),
+    ]
+    res, _ = compute(prs)
+    items = by_number(res)
+    assert items[2]["after"] == [1]
+    assert items[3]["after"] == []
+
+
+def test_order_devs_sources():
+    from checker.pr_queue import _order_devs
+
+    assert _order_devs(pr(1, title="feat: x (DEV-003, DEV-004)", body="DEV-009")) == {3, 4}
+    assert _order_devs(pr(1, head="feat/DEV-006-a", files=("docs/spec/DEV-007-a.md",), body="DEV-009")) == {6, 7}
+    assert _order_devs(pr(1, body="REQ-002 그리고 DEV-005")) == {2}
+    assert _order_devs(pr(1)) == set()
+
+
 def test_order_by_plugin_version():
     prs = [pr(20, files=(PJ,)), pr(21, files=(PJ,)), pr(22, files=(PJ,))]
     res, _ = compute(prs, versions={"sha20": "0.10.9", "sha21": "0.10.17", "sha22": "0.10.8"})
