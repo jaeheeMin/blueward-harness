@@ -511,16 +511,22 @@ def test_unexpected_exception_is_cannot_check_exit_2():
     assert code == EXIT_CANNOT_CHECK and json.loads(text)["status"] == "cannot_check"
 
 
-def test_render_max_rows_cuts_and_counts_the_rest():
-    gh = FakeGh([pr(n) for n in range(1, 16)])
-    args = pr_queue.build_parser().parse_args(["--repo", "o/r", "--max-rows", "10"])
+def test_render_max_rows_cuts_chains_and_counts_the_rest():
+    # 줄기 5개(PR 2개씩) + 혼자 1개. --max-rows 3 이면 줄기 3줄만 싣고 "외 2개 줄기".
+    prs = []
+    for k in range(5):
+        a, b = 10 * k + 1, 10 * k + 2
+        prs += [pr(a), pr(b, body=f"먼저: #{a}")]
+    prs.append(pr(99))
+    gh = FakeGh(prs)
+    args = pr_queue.build_parser().parse_args(["--repo", "o/r", "--max-rows", "3"])
     code, text = pr_queue.run(args, gh)
     assert code == EXIT_OK
-    assert text.count("\n| ") == 10 + 1  # 머리글 + PR 10줄
-    assert "[#10](https://github.com/o/r/pull/10) " in text and "[#11]" not in text
-    assert "외 5개 — /harness:prs" in text
+    assert "[#22](" in text and "[#32](" not in text
+    assert "… 외 2개 줄기 — /harness:prs" in text
+    assert "[#99](https://github.com/o/r/pull/99)" in text  # 혼자인 PR 줄은 줄기 수 제한과 무관
     full = pr_queue.render(pr_queue.compute(gh, "o/r"), False)
-    assert "외 " not in full and "[#15](https://github.com/o/r/pull/15) " in full
+    assert "개 줄기" not in full and "[#42](https://github.com/o/r/pull/42)" in full
 
 
 def test_truncated_marked_when_limit_reached():
@@ -530,14 +536,392 @@ def test_truncated_marked_when_limit_reached():
     assert "일부만 읽었다" in pr_queue.render(res, False)
 
 
-def test_render_table_and_json_roundtrip():
+def test_render_all_json_roundtrip():
     gh = FakeGh([pr(1), pr(2, mergeable="CONFLICTING")])
-    args = pr_queue.build_parser().parse_args(["--repo", "o/r"])
+    args = pr_queue.build_parser().parse_args(["--repo", "o/r", "--all"])
     code, text = pr_queue.run(args, gh)
-    assert code == EXIT_OK and "| 순서 | PR | 상태 |" in text and "충돌" in text
+    assert code == EXIT_OK and "| 줄기 | 순서 |" in text and "줄기 없음" in text
     args = pr_queue.build_parser().parse_args(["--repo", "o/r", "--json"])
     code, text = pr_queue.run(args, gh)
     assert json.loads(text)["prs"][0]["number"] == 1
+
+
+# --- 사람용 출력: 할 일 표 + 줄기 표(#390) -------------------------------------------
+
+
+def link(n):
+    return f"[#{n}](https://github.com/o/r/pull/{n})"
+
+
+def run_text(prs, *argv, login="me", **kw):
+    gh = FakeGh(prs, login=login, **kw)
+    code, text = pr_queue.run(pr_queue.build_parser().parse_args(["--repo", "o/r", *argv]), gh)
+    assert code == EXIT_OK
+    return text
+
+
+def todo_rows(text):
+    """'## 내가 지금 할 수 있는 일' 표의 (할 일, PR 칸) 목록."""
+    rows, on = [], False
+    for ln in text.splitlines():
+        if ln.startswith("## "):
+            on = ln == "## 내가 지금 할 수 있는 일"
+        elif on and ln.startswith("| ") and not ln.startswith(("| 할 일", "|---")):
+            kind, cell = ln.strip("| ").split(" | ", 1)
+            rows.append((kind, cell))
+    return rows
+
+
+def chain_rows(text):
+    """줄기 표의 (줄기 이름, 순서 칸) 목록."""
+    rows, on = [], False
+    for ln in text.splitlines():
+        if ln.startswith("## "):
+            on = ln.startswith(("## 내 PR 과", "## 열린 PR 과"))
+        elif on and ln.startswith("| ") and not ln.startswith(("| 줄기 | 순서", "|---")):
+            name, cell = ln.strip("| ").split(" | ", 1)
+            rows.append((name, cell.rstrip(" |")))
+    return rows
+
+
+def test_todo_three_kinds_and_their_boundaries():
+    prs = [
+        pr(1),  # 병합 가능, 앞 없음 -> 병합하기
+        pr(2, files=("plugins/x.md",)),  # 사람이 병합 -> 병합하기 + 그 말
+        pr(3, checks=[bad("ai-review / review")]),  # 검사 실패 -> 고치기
+        pr(4, mergeable="CONFLICTING", mergeStateStatus="DIRTY"),  # 충돌 -> 고치기
+        pr(5, checks=[running("doc-guard / check")]),  # 검사 중 -> 기다리기
+        pr(6, isDraft=True),  # 초안 -> 기다리기
+        pr(7, body="먼저: #1"),  # 병합 가능이지만 앞 PR -> 기다리기
+        pr(8, body="먼저: #9"),
+        pr(9, body="먼저: #8"),  # 순환 -> 고치기
+        pr(10, checks=[bad("risk-gate / check")]),  # 승인 대기 -> 기다리기
+    ]
+    text = run_text(
+        prs,
+        "--mine",
+        human="plugins/\n",
+        approvers="*: blueward-huiseong csh-dot123\n",
+        comments={10: [gate_comment(NEED_APPROVAL)]},
+    )
+    rows = {int(c.split("](")[0][2:]): (k, c) for k, c in todo_rows(text)}
+    assert rows[1][0] == "병합하기" and " — " not in rows[1][1]
+    assert rows[2][0] == "병합하기" and rows[2][1].endswith("— 사람이 GitHub 에서 병합")
+    assert rows[3][0] == "고치기" and "— 검사 실패: ai-review / review" in rows[3][1]
+    assert rows[4][0] == "고치기" and "— 충돌" in rows[4][1]
+    assert rows[5] == ("기다리기", f"{link(5)} 제목 5 — 검사 중")
+    assert rows[6][0] == "기다리기" and rows[6][1].endswith("— 초안")
+    assert rows[7][0] == "기다리기" and f"앞 {link(1)} 대기" in rows[7][1]
+    assert rows[8][0] == "고치기" and "순환" in rows[8][1] and rows[9][0] == "고치기"
+    assert rows[10][0] == "기다리기" and rows[10][1].endswith("— blueward-huiseong·csh-dot123 승인")
+    kinds = [k for k, _ in todo_rows(text)]
+    assert kinds == sorted(kinds, key=["병합하기", "고치기", "기다리기"].index)
+    # 긴 승인 사유는 표에 없다(--verbose 에만).
+    assert "변경이 큼" not in text
+
+
+def test_todo_none_actionable_says_all_waiting():
+    text = run_text([pr(1, checks=[running("doc-guard / check")])], "--mine")
+    assert "지금 할 수 있는 일: 없음(모두 기다리는 중)" in text
+    assert todo_rows(text)[0][0] == "기다리기"
+    text = run_text([pr(1)], "--mine")
+    assert "없음(모두 기다리는 중)" not in text
+
+
+def test_symbols_map_from_existing_states():
+    cases = {
+        MERGEABLE: pr(1),
+        WAITING_APPROVAL: pr(2, checks=[bad("ssot-approval / check")]),
+        CHECKING: pr(3, checks=[running("doc-guard / check")]),
+        NOT_STARTED: pr(4, checks=[]),
+        MERGE_UNKNOWN: pr(5, mergeable="UNKNOWN", mergeStateStatus="UNKNOWN"),
+        CHECK_FAILED: pr(6, checks=[bad("doc-guard / check")]),
+        CONFLICT: pr(7, mergeable="CONFLICTING", mergeStateStatus="DIRTY"),
+        BEHIND: pr(8, mergeStateStatus="BEHIND"),
+        DRAFT: pr(9, isDraft=True),
+        BLOCKED: pr(10, mergeStateStatus="BLOCKED"),
+        UNSTABLE: pr(11, mergeStateStatus="UNSTABLE"),
+    }
+    expect = {MERGEABLE: "✅", WAITING_APPROVAL: "⏳", CHECKING: "⏳", NOT_STARTED: "⏳", MERGE_UNKNOWN: "⏳",
+              CHECK_FAILED: "❌", CONFLICT: "❌", BEHIND: "❌", DRAFT: "📝", BLOCKED: "❓", UNSTABLE: "❓"}
+    text = run_text(list(cases.values()), "--mine", approvers="*: boss\n")
+    (_, cell), = [r for r in chain_rows(text) if r[0] == "줄기 없음"]
+    got = {}
+    for part in cell.split(" · "):
+        n = int(part.split("](")[0].lstrip("*[#"))
+        got[n] = part.rsplit(" ", 1)[1]
+    for state, raw in cases.items():
+        assert got[raw["number"]] == expect[state], state
+    # 순환은 상태와 상관없이 ❓
+    text = run_text([pr(1, body="먼저: #2"), pr(2, body="먼저: #1")], "--mine")
+    assert "❓" in chain_rows(text)[0][1] and "✅" not in chain_rows(text)[0][1]
+    # UNKNOWN(승인 여부를 못 읽음)도 ❓
+    assert pr_queue.SYMBOLS[UNKNOWN] == "❓"
+
+
+def test_chain_of_seven_in_one_row_with_names_and_bold():
+    prs = [pr(244, title="docs: SRS REQ-007 반복제조 자재출고 추가", files=("docs/ssot/SRS.md",), author="x")]
+    prev = 244
+    for n in (248, 252, 260, 261, 270, 271):
+        prs.append(pr(n, body=f"먼저: #{prev}", title=f"feat: 개발 DEV-007 {n}", author="me" if n == 252 else "x"))
+        prev = n
+    text = run_text(prs, "--mine")
+    (name, cell), = chain_rows(text)
+    assert name == "DEV-007(반복제조 자재출고 추가)"
+    assert cell == " → ".join(
+        (f"**{link(n)}**" if n == 252 else link(n)) + " ✅" for n in (244, 248, 252, 260, 261, 270, 271)
+    )
+
+
+def test_chain_fork_groups_branches_and_loner_row():
+    prs = [
+        pr(1, title="기반 작업"),
+        pr(2, body="먼저: #1"),
+        pr(3, body="먼저: #1"),
+        pr(4, body="먼저: #2, #3"),
+        pr(20),
+        pr(21),
+    ]
+    text = run_text(prs, "--all")
+    rows = chain_rows(text)
+    assert rows[0] == ("기반 작업", f"{link(1)} ✅ → ({link(2)} ✅, {link(3)} ✅) → {link(4)} ✅")
+    assert rows[-1] == ("줄기 없음", f"{link(20)} ✅ · {link(21)} ✅")
+    assert len(rows) == 2
+    assert "할 수 있는 일" not in text  # --all 은 할 일 표가 없다
+    assert "**" not in text  # --all 은 누가 내 것인지 모른다
+
+
+def test_chain_name_without_dev_uses_first_title_clipped():
+    long_title = "가" * 40
+    text = run_text([pr(1, title=long_title), pr(2, body="먼저: #1")], "--mine")
+    assert chain_rows(text)[0][0] == "가" * 27 + "…"
+
+
+def names_of(*titles):
+    """같은 DEV 번호(제목에 든 번호)의 PR 둘 이상으로 줄기를 만들어 그 이름을 본다."""
+    prs = [pr(n, title=t) for n, t in enumerate(titles, 1)]
+    return [name for name, _ in chain_rows(run_text(prs, "--all"))]
+
+
+def test_chain_name_rules():
+    # ① 제목 끝이 (DEV-xxx) 인 PR: 접두어와 (DEV-xxx) 를 뗀다.
+    assert names_of("feat: 판매문서 일괄 취소 요청 BO 골격 추가 (DEV-004)", "docs: x DEV-004") == [
+        "DEV-004(판매문서 일괄 취소 요청 BO 골격 추가)"
+    ]
+    # 24자를 넘으면 자른다.
+    assert names_of("fix: " + "가" * 30 + " [DEV-004]", "DEV-004 b") == ["DEV-004(" + "가" * 23 + "…)"]
+    # ② 끝 표기가 없으면 DEV-xxx 뒤 문구를 ` Spec`·` SRS`·`·`·` 에 ` 앞에서 자른다.
+    assert names_of("docs: DEV-009 생산오더 실적 엑셀 업로드 Spec 최종", "feat: DEV-009 b") == [
+        "DEV-009(생산오더 실적 엑셀 업로드)"
+    ]
+    assert names_of("docs: DEV-009 입고·출고 정리", "x DEV-009") == ["DEV-009(입고)"]
+    assert names_of("docs: DEV-009 자재 SRS 에 추가", "x DEV-009") == ["DEV-009(자재)"]
+    # ③ 문구가 비면 번호만.
+    assert names_of("DEV-003", "[DEV-003]") == ["DEV-003"]
+
+
+def test_dev_number_of_a_pr_with_two_numbers_or_only_in_branch():
+    assert pr_queue._dev_of({"title": "REQ-004 와 (DEV-005)", "head": "feat/x"}) == 5  # 제목 끝
+    assert pr_queue._dev_of({"title": "DEV-006 에서 DEV-007 로", "head": ""}) == 6  # 맨 앞
+    assert pr_queue._dev_of({"title": "x", "head": "feat/DEV-009-a"}) == 9  # 브랜치
+    assert pr_queue._dev_of({"title": "x", "head": "feat/x"}) is None
+
+
+def test_two_devs_linked_by_first_line_stay_two_rows_with_tail():
+    prs = [
+        pr(1, title="a (DEV-007)"),
+        pr(2, title="b (DEV-007)", body="먼저: #1"),
+        pr(4, title="c (DEV-009)"),
+        pr(5, title="d (DEV-009)", body="먼저: #4, #1"),  # DEV-007 의 #1 이 앞
+    ]
+    rows = chain_rows(run_text(prs, "--all"))
+    assert rows == [
+        ("DEV-007(a)", f"{link(1)} ✅ → {link(2)} ✅"),
+        ("DEV-009(c)", f"{link(4)} ✅ → {link(5)} ✅(앞: {link(1)})"),
+    ]
+
+
+def test_unnumbered_prs_touching_one_dev_group_join_it_transitively():
+    prs = [
+        pr(1, title="a (DEV-007)"),
+        pr(2, title="번호 없음", body="먼저: #1"),
+        pr(3, title="번호 없음 둘", body="먼저: #2"),  # #1 과 직접 이어지지 않아도 같은 묶음이라 합류
+        pr(10, title="자기들끼리"),
+        pr(11, title="자기들끼리 뒤", body="먼저: #10"),
+    ]
+    rows = chain_rows(run_text(prs, "--all"))
+    assert rows == [
+        ("DEV-007(a)", f"{link(1)} ✅ → {link(2)} ✅ → {link(3)} ✅"),
+        ("자기들끼리", f"{link(10)} ✅ → {link(11)} ✅"),
+    ]
+
+
+def test_unnumbered_pr_touching_two_dev_groups_goes_to_no_chain_with_tail():
+    prs = [
+        pr(1, title="a (DEV-007)"),
+        pr(2, title="b (DEV-008)"),
+        pr(3, title="둘 다 뒤", body="먼저: #1, #2"),
+    ]
+    rows = chain_rows(run_text(prs, "--all"))
+    assert rows == [("줄기 없음", f"{link(1)} ✅ · {link(2)} ✅ · {link(3)} ✅(앞: {link(1)}, {link(2)})")]
+
+
+def test_chain_name_boundaries_period_two_numbers_and_spec_lead():
+    # 제목 끝 (DEV-004) 뒤의 마침표.
+    assert names_of("feat: 판매문서 취소 (DEV-004).", "x DEV-004") == ["DEV-004(판매문서 취소)"]
+    # (DEV-004, DEV-005): 앞의 번호가 줄기 번호이고 괄호는 이름에서 빠진다.
+    assert pr_queue._primary_dev({"title": "a (DEV-004, DEV-005)", "headRefName": ""}) == 4
+    assert names_of("feat: 두 번호 (DEV-004, DEV-005)", "x (DEV-004)") == ["DEV-004(두 번호)"]
+    # `DEV-004 Spec 에 …` 로 시작하는 제목은 이름으로 쓰지 않고 다음 PR 의 제목을 쓴다(①).
+    assert names_of("docs: DEV-004 Spec 에 반영 (DEV-004)", "feat: 취소 요청 추가 (DEV-004)") == ["DEV-004(취소 요청 추가)"]
+    # ② 도 Spec 으로 시작하면 버리고 ③ 첫 PR 제목으로 간다(`(Spec)` 이 이름이 되지 않는다).
+    assert names_of("docs: DEV-004 Spec 에 반영", "x DEV-004") == ["DEV-004(Spec 에 반영)"]
+    # ② 앞머리의 `.` 는 떼고 이름으로 삼지 않는다.
+    assert names_of("docs: DEV-004. 결과 반영", "x DEV-004") == ["DEV-004(결과 반영)"]
+
+
+def test_req_number_groups_like_dev_and_shows_as_dev():
+    assert names_of("docs: 자재출고 요구 추가 (REQ-004)", "feat: x (DEV-004)") == ["DEV-004(자재출고 요구 추가)"]
+
+
+def test_notes_show_warning_mark_and_line_without_verbose():
+    class NoHumanPaths(FakeGh):
+        def get_json_or_none_404(self, path):
+            if ".github/human-merge-paths" in path:
+                raise GhError("권한 없음")
+            return super().get_json_or_none_404(path)
+
+    prs = [
+        pr(1, title="a (DEV-007)", author="other"),
+        pr(2, title="b (DEV-007)", body="먼저: #1", author="me"),
+    ]
+    for argv in (["--all"], ["--mine"]):
+        gh = NoHumanPaths(prs, login="me")
+        code, text = pr_queue.run(pr_queue.build_parser().parse_args(["--repo", "o/r", *argv]), gh)
+        assert code == EXIT_OK
+        lines = text.splitlines()
+        assert f"{link(1)} ✅⚠" in text, argv  # 남의 PR 도
+        want = f"주의: {link(1)} 사람이 병합할 경로인지 확인 불능(권한 없음)"
+        assert want in lines, argv
+        row = max(i for i, ln in enumerate(lines) if ln.startswith("| DEV-007"))
+        assert lines[row + 1].startswith("주의: ") and lines[row + 2].startswith("주의: ")  # 표 바로 아래
+        assert any("⚠ 주의 있음(아래 줄)" in ln for ln in lines)
+    # 주의가 없으면 ⚠ 도 주의 줄도 없다.
+    text = run_text(prs, "--all")
+    assert "⚠ 주의 있음" in text and "✅⚠" not in text and "\n주의:" not in text
+
+
+def test_dev_number_from_body_or_spec_file_groups_prs():
+    prs = [
+        pr(244, title="docs: SRS 반영", body="진행 원장: DEV-007"),
+        pr(248, title="docs: 스펙 작성", files=("docs/spec/DEV-007-x.md",), body="먼저: #244"),
+        pr(252, title="feat: 반복제조 자재출고 업로드", body="DEV-007 하위 작업\n먼저: #248"),
+        pr(260, title="무관", body="DEV-006 결함"),
+    ]
+    res, _ = compute(prs)
+    assert by_number(res)[248]["devs"] == [7] and by_number(res)[260]["devs"] == [6]
+    rows = chain_rows(run_text(prs, "--all"))
+    assert rows == [
+        ("DEV-007(SRS 반영)", f"{link(244)} ✅ → {link(248)} ✅ → {link(252)} ✅"),
+        ("줄기 없음", f"{link(260)} ✅"),
+    ]
+
+
+def test_primary_dev_priority_title_branch_spec_file_then_first_body_mention():
+    raw = {"title": "x", "headRefName": "feat/x", "files": [], "body": ""}
+    assert pr_queue._primary_dev({**raw, "title": "x (DEV-005)", "body": "DEV-003"}) == 5
+    assert pr_queue._primary_dev({**raw, "headRefName": "feat/DEV-009-a", "body": "DEV-003"}) == 9
+    # 결함 PR 이 "DEV-006 과 같은 결함" 이라 적어도, 바꾼 Spec 이 DEV-007 이면 7.
+    spec7 = [{"path": "docs/spec/DEV-007-x.md"}, {"path": "docs/manual/DEV-006-m.md"}]
+    assert pr_queue._primary_dev({**raw, "files": spec7, "body": "DEV-006 과 DEV-007"}) == 7
+    assert pr_queue._primary_dev({**raw, "body": "DEV-006(앱)에 DEV-007 과 같은 결함"}) == 6
+    assert pr_queue._primary_dev(raw) is None
+
+
+def test_dev_of_prefers_title_and_branch_then_smallest_body_number():
+    assert pr_queue._dev_of({"title": "x (DEV-005)", "head": "", "devs": [3, 5]}) == 5
+    assert pr_queue._dev_of({"title": "x", "head": "feat/DEV-009-a", "devs": [3, 9]}) == 9
+    assert pr_queue._dev_of({"title": "x", "head": "feat/x", "devs": [7, 4]}) == 4
+    assert pr_queue._dev_of({"title": "x", "head": "feat/x", "devs": []}) is None
+
+
+def test_chain_name_falls_back_to_first_pr_title():
+    prs = [
+        pr(1, title="feat: 첫 작업 제목", body="DEV-007"),
+        pr(2, title="fix: 둘째", body="DEV-007\n먼저: #1"),
+    ]
+    assert [n for n, _ in chain_rows(run_text(prs, "--all"))] == ["DEV-007(첫 작업 제목)"]
+
+
+def test_mine_with_no_prs_says_so_not_just_no_open_prs():
+    text = run_text([pr(1, author="other")], "--mine")
+    assert text.splitlines() == ["o/r 내 PR 0개", "내 열린 PR 이 없다."]
+
+
+def test_mine_shows_only_chains_with_my_pr_but_whole_chain():
+    prs = [
+        pr(1, author="a"),
+        pr(2, author="me", body="먼저: #1"),
+        pr(3, author="b", body="먼저: #2"),  # 내 뒤에 올 남의 PR 도 줄기 안이라 보인다
+        pr(10, author="a"),
+        pr(11, author="b", body="먼저: #10"),  # 내 PR 이 없는 줄기
+        pr(30, author="a"),  # 남의 혼자 PR
+        pr(31, author="me"),
+    ]
+    text = run_text(prs, "--mine")
+    rows = chain_rows(text)
+    assert [n for n, _ in rows] == ["제목 1", "줄기 없음"]
+    assert rows[0][1] == f"{link(1)} ✅ → **{link(2)}** ✅ → {link(3)} ✅"
+    assert rows[1][1] == f"**{link(31)}** ✅"
+    assert "[#10]" not in text and "[#30]" not in text
+    assert [k for k, _ in todo_rows(text)] == ["병합하기", "기다리기"]  # 내 PR 2(앞 1 대기)·31 만, 남의 PR 은 할 일 표에 없다
+    assert text.splitlines()[0] == "o/r 내 PR 2개"
+
+
+def test_all_lists_whole_repo_chains_loners_last():
+    prs = [pr(30), pr(1), pr(2, body="먼저: #1"), pr(10), pr(11, body="먼저: #10")]
+    rows = chain_rows(run_text(prs, "--all"))
+    assert [n for n, _ in rows] == ["제목 1", "제목 10", "줄기 없음"]
+    assert rows[-1][1] == f"{link(30)} ✅"
+
+
+def test_verbose_adds_reasons_and_shared_file_warning_only_then():
+    prs = [pr(1, files=("y.md",), checks=[bad("risk-gate / check")]), pr(2, files=("y.md",), author="me")]
+    kw = dict(approvers="*: boss\n", comments={1: [gate_comment(NEED_APPROVAL)]})
+    plain = run_text(prs, "--mine", **kw)
+    assert "변경이 큼" not in plain and "같은 파일" not in plain and "자세히" not in plain
+    verbose = run_text(prs, "--mine", "--verbose", **kw)
+    assert "## 자세히(--verbose)" in verbose and "| 순서 | PR | 상태 | 다음 할 일 | 먼저 병합할 PR |" in verbose
+    assert "변경이 큼(600줄) 외 1건" in verbose and "같은 파일: y.md" in verbose
+
+
+def test_warnings_and_truncation_stay_without_verbose():
+    res = {"status": "ok", "repo": "o/r", "login": None, "truncated": True, "prs": [], "shared_files": [],
+           "warnings": ["w1"], "unread_versions": []}
+    assert pr_queue.render(res, False) == "o/r 열린 PR 0개\n열린 PR 이 없다."
+    text = run_text([pr(n) for n in range(1, pr_queue.PR_LIMIT + 1)], "--all")
+    assert "일부만 읽었다" in text
+    prs = [pr(20, files=(PJ,)), pr(21, files=(PJ,))]
+    assert "#20 의 plugin.json version 을 읽지 못해" in run_text(prs, "--all", versions={"sha21": "0.10.17"})
+
+
+def test_json_and_pr_outputs_unchanged_by_render_change():
+    prs = [pr(1, author="other"), pr(2, author="me", body="먼저: #1"), pr(3, author="other", body="먼저: #2")]
+    gh = FakeGh(prs)
+    parse = pr_queue.build_parser().parse_args
+    _, js = pr_queue.run(parse(["--repo", "o/r", "--mine", "--json"]), gh)
+    expected = pr_queue.compute(gh, "o/r", "me", mine=True)
+    assert json.loads(js) == json.loads(json.dumps(expected))
+    assert [it["number"] for it in json.loads(js)["prs"]] == [1, 2]  # 내 뒤의 남의 PR(#3)은 JSON 에 없다
+    # 기존 필드는 그대로이고 `devs` 만 늘었다(#390).
+    old_keys = {"number", "sha", "title", "author", "url", "base", "head", "state", "detail", "next", "notes",
+                "human_merge", "order", "after", "after_reasons", "version", "mine"}
+    for it in json.loads(js)["prs"]:
+        assert set(it) == old_keys | {"devs", "dev"} and it["dev"] is None and it["devs"] == []
+    _, js_all = pr_queue.run(parse(["--repo", "o/r", "--json"]), gh)
+    assert [it["number"] for it in json.loads(js_all)["prs"]] == [1, 2, 3]
+    code, text = pr_queue.run(parse(["--repo", "o/r", "--pr", "2"]), gh)
+    assert code == pr_queue.EXIT_BEFORE_OPEN and text.startswith(f"{link(2)} 보다 먼저 병합해야 하는 열린 PR:")
 
 
 # --- --pr: 병합 직전에 앞 PR 만 묻기(#370) ----------------------------------------
@@ -647,13 +1031,14 @@ def test_pr_links_use_gh_url_or_build_one():
     assert by_n[1]["url"] == "https://github.com/o/r/pull/1"
 
 
-def test_table_links_pr_and_before_columns_and_json_has_urls():
+def test_tables_link_prs_and_json_has_urls():
     gh = FakeGh([pr(1), pr(2, body="먼저: #1")])
-    args = pr_queue.build_parser().parse_args(["--repo", "o/r"])
+    args = pr_queue.build_parser().parse_args(["--repo", "o/r", "--mine"])
     _, text = pr_queue.run(args, gh)
-    row = next(ln for ln in text.splitlines() if "[#2](" in ln)
-    assert row.startswith("| 2 | [#2](https://github.com/o/r/pull/2) ")
-    assert row.rstrip().endswith("| [#1](https://github.com/o/r/pull/1) |")
+    assert "| 병합하기 | [#1](https://github.com/o/r/pull/1) 제목 1 |" in text
+    assert "| 기다리기 | [#2](https://github.com/o/r/pull/2) 제목 2 — 앞 [#1](https://github.com/o/r/pull/1) 대기 |" in text
+    assert "| 제목 1 | [#1](https://github.com/o/r/pull/1) ✅ → **[#2]" not in text  # 둘 다 내 PR 이라 #1 도 굵게
+    assert "**[#1](https://github.com/o/r/pull/1)** ✅ → **[#2](https://github.com/o/r/pull/2)** ✅" in text
     args = pr_queue.build_parser().parse_args(["--repo", "o/r", "--json"])
     _, js = pr_queue.run(args, gh)
     assert all(it["url"].startswith("https://github.com/o/r/pull/") for it in json.loads(js)["prs"])
@@ -663,6 +1048,6 @@ def test_clip_neutralizes_link_and_table_syntax():
     out = pr_queue._clip("[#1](https://evil) a|b", 40)
     assert out == "\\[#1\\](https://evil) a\\|b"
     gh = FakeGh([pr(1, title="[#9](https://evil) 승인됨")])
-    args = pr_queue.build_parser().parse_args(["--repo", "o/r"])
+    args = pr_queue.build_parser().parse_args(["--repo", "o/r", "--mine"])
     _, text = pr_queue.run(args, gh)
-    assert "[#9](https://evil" not in text
+    assert "\\[#9\\](https://evil) 승인됨" in text and "[#9](https://evil" not in text
