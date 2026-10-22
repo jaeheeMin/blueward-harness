@@ -20,7 +20,8 @@
               보고에는 파일:줄과 패턴 이름만 담고 값은 절대 담지 않는다.
 - `checks`    이 PR 의 다른 검사(check run, commit status)가 실패했거나 진행 중인가.
               게이트 자신(`risk-gate`)과 같은 PR 에서 도는 `ssot-approval`, `alert` 는 뺀다.
-              자신을 세면 "자기 자신이 끝나길 기다리는" 교착이 생기기 때문이다.
+              자신을 세면 "자기 자신이 끝나길 기다리는" 교착이 생기기 때문이다. 합친 job `pr-checks`·`pr-review`·`main-checks` 도
+              같은 이유로 뺀다(#417) — 그 안의 단계 결과는 옛 이름의 commit status 로 센다.
 - `split_hint` `srs_split_hint`(기본 켬)일 때, SRS 에 새 요구사항이 생겼고 기존 요구사항을 넓힌 것처럼
               보이는 근거(상세 절의 다른 번호 언급, 범위 "하지 않는 것" 줄 변경, 제목 겹침)가 있는가(#278).
               막는 기준이 아니라 승인자에게 근거를 보여 주는 사유다. SRS diff 를 못 읽으면 검사 불능 사유다.
@@ -125,7 +126,18 @@ OWN_CHECK_NAME = "risk-gate"
 # "검사 실패" 로 보이기 때문이다. 이 job 이 실패한 사유(GitHub 를 못 읽음)는 PR 의 문제가 아니다.
 MERGE_ORDER_CHECK = "merge-order"
 PR_QUEUE_CHECK = "pr-queue"
-EXCLUDED_CHECK_GROUPS = frozenset({OWN_CHECK_NAME, "ssot-approval", MERGE_ORDER_CHECK, PR_QUEUE_CHECK})
+# `pr-checks` 는 PR 검사를 한 job 으로 합친 워크플로의 job(`pr-checks / check`)이다(#412, #417).
+# risk-gate 단계가 그 안에서 돌므로, 이 job 을 `checks` 기준이 세면 게이트가 자기가 든 job 이
+# 끝나길 기다리는 교착이 된다. job 의 실패는 단계가 옛 이름(`gitleaks`·`doc-guard`·…)으로 단
+# commit status 로 이미 세어진다.
+# `pr-review`(리뷰 이벤트의 재판정)와 `main-checks`(main push 의 병합 뒤 감지)도 risk-gate 를
+# 안에서 돌리는 합친 job 이라 같은 이유로 뺀다(#419).
+PR_CHECKS_JOB = "pr-checks"
+PR_REVIEW_JOB = "pr-review"
+MAIN_CHECKS_JOB = "main-checks"
+EXCLUDED_CHECK_GROUPS = frozenset(
+    {OWN_CHECK_NAME, "ssot-approval", MERGE_ORDER_CHECK, PR_QUEUE_CHECK, PR_CHECKS_JOB, PR_REVIEW_JOB, MAIN_CHECKS_JOB}
+)
 EXCLUDED_CHECK_NAMES = frozenset({"alert"})
 AI_REVIEW_CHECK_NAME = "ai-review"
 
