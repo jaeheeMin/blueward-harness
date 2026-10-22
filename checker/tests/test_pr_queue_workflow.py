@@ -1,4 +1,4 @@
-"""재사용 워크플로 `pr-queue.yml`(#370)과 scaffold caller 의 구조 검사."""
+"""재사용 워크플로 `pr-queue.yml`(#370)의 구조 검사. caller 는 #420 에서 없어졌다(새 caller 는 test_scaffold.py)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,10 +7,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "pr-queue.yml"
-CALLER = (
-    ROOT / "plugins" / "harness" / "skills" / "scaffold" / "skeleton" / "dot-github" / "workflows" / "pr-queue.yml"
-)
-PERMISSIONS = {"contents": "read", "pull-requests": "write", "issues": "write", "statuses": "write", "checks": "read", "actions": "read"}
 
 
 def _load(path: Path) -> dict:
@@ -46,16 +42,3 @@ def test_엔진은_engine_ref_로_받아_scripts_진입점을_부른다():
     # 읽기 불능(2)과 쓰기 실패(1)는 job 실패다.
     assert run["run"].count("exit 1") == 2
     assert (ROOT / "scripts" / "pr_queue_actions.py").is_file()
-
-
-def test_caller_는_이벤트와_권한과_stable_을_정한다():
-    caller = _load(CALLER)
-    on = caller["on"]
-    # edited·converted_to_draft 는 Actions 분을 아끼려고 뺐다(#411). 본문 `먼저:` 를 고쳐도 다음 이벤트까지 낡는다.
-    assert on["pull_request"]["types"] == ["opened", "synchronize", "reopened", "ready_for_review", "closed"]
-    assert on["pull_request_review"]["types"] == ["submitted", "dismissed"]
-    assert on["push"]["branches"] == ["main"]
-    job = caller["jobs"]["pr-queue"]
-    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/pr-queue.yml@stable"
-    assert job["permissions"] == PERMISSIONS
-    assert job["secrets"] == {"TEAMS_PLUGIN_ALERT_WEBHOOK": "${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}"}

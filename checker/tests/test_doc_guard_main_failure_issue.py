@@ -9,8 +9,8 @@
   `gh issue create` 를 쓰는지
 - 그 스텝이 같은 원인의 이슈를 중복으로 만들지 않고 기존 이슈에 코멘트를
   남기는지
-- 스캐폴딩 템플릿(`plugins/harness/skills/scaffold/skeleton/dot-github/workflows/doc-guard.yml`)이
-  그 이슈를 열 수 있도록 `issues: write` 권한을 부르는 쪽에서 주는지
+- 스캐폴딩 템플릿(`plugins/harness/skills/scaffold/skeleton/dot-github/workflows/main-checks.yml`,
+  #420 부터 doc-guard 의 main push 경로는 이 caller 가 부른다)이 그 이슈를 열 수 있도록 `issues: write` 권한을 부르는 쪽에서 주는지
 
 를 확인한다. 실제로 이슈가 열리는지(엔드투엔드)는 여기서 검증하지 않는다 —
 GitHub Actions 러너와 실제 저장소가 필요해 이 테스트 스위트의 범위 밖이다.
@@ -32,7 +32,7 @@ SKELETON_DOC_GUARD_WORKFLOW = (
     / "skeleton"
     / "dot-github"
     / "workflows"
-    / "doc-guard.yml"
+    / "main-checks.yml"
 )
 
 
@@ -71,5 +71,5 @@ def test_이슈_알림_스텝은_라벨이_없어도_실패하지_않는다():
 
 def test_스캐폴딩_템플릿이_issues_write_권한을_준다():
     workflow = yaml.safe_load(SKELETON_DOC_GUARD_WORKFLOW.read_text(encoding="utf-8"))
-    permissions = workflow["jobs"]["doc-guard"]["permissions"]
+    permissions = workflow["jobs"]["main-checks"]["permissions"]
     assert permissions.get("issues") == "write"

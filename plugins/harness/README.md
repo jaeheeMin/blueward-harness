@@ -46,7 +46,7 @@ plugins/harness/
 
 플러그인 이름은 `harness` 지만, 문서 검사 기능 자체는 여전히 **doc-guard** 라고
 부른다. 훅 스크립트 이름(`pre_write_guard.py`), 검사 메시지("doc-guard: ..."),
-문서 저장소가 불러 쓰는 재사용 워크플로(`.github/workflows/doc-guard.yml`),
+문서 저장소가 불러 쓰는 재사용 워크플로(`.github/workflows/pr-checks.yml` 안의 doc-guard 단계. 옛 `doc-guard.yml` 은 한 판만 남는다, #420),
 검사 엔진의 CLI 이름(`doc-guard`)은 이름을 바꾸지 않았다. 바뀐 것은 이
 플러그인 자체의 이름뿐이다.
 
@@ -220,7 +220,7 @@ MCP 서버의 모든 호출마다 훅(`uv` 기동)을 띄우는 비용 때문이
   템플릿 드롭다운 허용 값(`--list-values`)을 읽어 SRS 요구사항 표·상세 절을 쓰고, `docs/ssot/SRS.md` 를 직접 읽어
   xlsx 를 산출한다. 목록 밖 값은 종료코드 3(`warning`)과 행·열·값·허용 값으로 알린다. 형식은
   [`skills/spec/form-map.md`](skills/spec/form-map.md) 의 "원본이 SRS 인 지도".
-- **xlsx 검사는 Actions 몫.** 훅은 바이너리를 못 보므로 산출한 xlsx 는 PR 에서 `doc-guard.yml` 이 `검사_규칙` 으로 검사한다.
+- **xlsx 검사는 Actions 몫.** 훅은 바이너리를 못 보므로 산출한 xlsx 는 PR 에서 `pr-checks` 의 doc-guard 단계가 `검사_규칙` 으로 검사한다.
 
 ### 도구 자동 설치(#116)
 
@@ -272,7 +272,7 @@ CR-007(빈 CATCH, ABAP·JS/TS)은 기계로도 검사한다(#54, #81). CR-009(�
 경고를 알려 주며(`allow_with_notice`), PR 코멘트에 경고로 나오고, risk-gate 가 "쓰기 앱인데 권한 검사 없음" 사유로 승인을 요구한다.
 Spec 의 선택 절 `## 권한` 표가 검사 방식·권한 객체·활동·검사 기준 필드를 미리 정하게 한다. 검사 엔진은
 `checker/code_rules.py` 이고, `pre_write_guard.py` 훅이 코드를 저장할 때,
-MCP ADT 도구 경로는 `mcp_source_guard.py` 가, `.github/workflows/doc-guard.yml` 이
+MCP ADT 도구 경로는 `mcp_source_guard.py` 가, `pr-checks` 의 doc-guard 단계가
 PR 마다 각각 부른다 — doc-guard 와 같은 엔진 저장소, 같은 관문 구조를 그대로 쓴다.
 CR-005(표준 객체 수정)는 기본 대상인 Public Cloud(ABAP Cloud)에서 플랫폼이
 막으므로 하네스가 검사하지 않는다. CR-004 는 아래 gitleaks 가 잡고, 나머지 CR-006, CR-008 은 사람이
@@ -308,15 +308,15 @@ Project Repository 의 CLAUDE.md 에 짧게 적어 둬야 세션이 매번 상�
 | Bash 로 `cp`, `mv`, 리다이렉션을 쓸 때 | 안 돈다 |
 
 **그래서 이 훅만으로는 절반이다.** 나머지는 GitHub Actions 가 커밋 시점에
-잡는다. 문서 저장소 쪽에서 `.github/workflows/doc-guard.yml` 로 재사용
+잡는다. 문서 저장소 쪽에서 `.github/workflows/pr-checks.yml` 로 재사용
 워크플로를 부른다.
 
 ## Skill: /harness:scaffold
 
 새 고객사 Project Repository 를 처음 만들었을 때, 검사기가 기대하는 표준
 구조 — 저장소 루트의 `templates/` 와 `rules/`, `docs/ssot/SRS.md`,
-`conventions/`, `audit/`, `env/`, 그리고 PR·main 커밋마다 doc-guard 를
-부르는 `.github/workflows/doc-guard.yml` — 를 한 번에 만들어 준다.
+`conventions/`, `audit/`, `env/`, 그리고 PR 검사(`pr-checks.yml`)·승인 재판정(`pr-review.yml`)·
+병합 뒤 검사(`main-checks.yml`)를 부르는 호출 워크플로 셋 — 를 한 번에 만들어 준다(#420).
 `.github/workflows/ai-review.yml` 은 위험한 PR 을 포함해 코드(`src/`)를 바꾼 PR 에 Claude AI 리뷰를 돌리는
 호출 워크플로로(`paths: ['src/**']`, `risk-gate.yaml` 의 `ai_review_paths` 와 짝, #411), **기본은 꺼짐**이다(#125, #360). 켜려면 `claude setup-token` 으로 만든 토큰을
 `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R <owner/repo>` 로 등록하고 `.github/risk-gate.yaml`
@@ -334,20 +334,20 @@ Cloud & BTP 이름 규칙, `cap-ui5.md` — CAP·SAPUI5 개발 표준)를 기본
 둔다(#187). 고객사 표준이 정해지면 그 파일을 고치고, 이미 있는 파일은 덮어쓰지
 않는다. 자세한 절차는 `skills/scaffold/SKILL.md` 를 읽는다.
 
-`.github/workflows/pr-queue.yml` 은 Claude 를 안 쓰는 사람도 병합 순서를 알게 하는 호출 워크플로다(#370).
+`pr-checks` 의 pr-queue 단계는 Claude 를 안 쓰는 사람도 병합 순서를 알게 한다(#370, 별도 호출 워크플로는 #420 에서 없어졌다).
 이벤트(PR 열림·갱신·초안 전환·닫힘·본문 수정, 리뷰, main push)마다 열린 PR 전체를 한 번 계산해(검사 결과가 바뀐 것만으로는 돌지
 않아 코멘트의 검사 상태는 다음 이벤트까지 낡을 수 있다 — 정확한 지금 상태는 `/harness:prs`), PR 마다 순서·앞에
 병합할 PR·상태·다음 할 일을 담은 코멘트 하나(`<!-- pr-queue -->`)를 갱신하고(내용이 같으면 쓰지 않는다) 커밋
 status `merge-order` 를 단다(앞 PR 이 열려 있으면 pending 노란 대기, 없으면 success, 순서를 정하지 못하면 error).
 앞 PR 이 병합돼 차례가 된 PR 은 작성자를 멘션하고, `TEAMS_PLUGIN_ALERT_WEBHOOK` secret 이 있으면 Teams 로도
-알린다(없으면 건너뜀). 무료 요금제라 노란 대기여도 Merge 버튼은 잠기지 않는다. 호출 쪽 permissions 는
+알린다(없으면 건너뜀). 무료 요금제라 노란 대기여도 Merge 버튼은 잠기지 않는다. 호출 쪽(`pr-checks.yml` caller) permissions 는
 `contents: read`, `pull-requests: write`, `issues: write`, `statuses: write`, `checks: read`, `actions: read`(열린 PR 의 검사 결과와 그 워크플로 실행을
 읽는다 — 없으면 "Resource not accessible by integration" 으로 실패). GitHub 를 못 읽으면 job 이 실패한다.
-기존 Project Repository 는 호출 파일을 새로 넣어야 받는다.
+기존 Project Repository 는 옛 호출 파일 다섯을 지우고 새 호출 파일 셋을 넣어야 받는다.
 
 ## 비밀정보 검사(#159)
 
-CR-004 는 `.github/workflows/gitleaks.yml` 재사용 워크플로가 PR·main 커밋마다 gitleaks 로
+CR-004 는 `pr-checks`·`main-checks` 의 gitleaks 단계가 PR·main 커밋마다 gitleaks 로
 검사한다(`/harness:scaffold` 가 호출 워크플로를 만든다). gitleaks-action 은 조직 계정에 라이선스
 키가 필요해 쓰지 않고, 릴리즈 바이너리를 버전과 sha256 으로 고정해 받는다. PR 은 base..head 커밋
 범위만, main push 는 그 push 범위만 훑고, 값은 `--redact` 로 가려서 출력한다. 위험도 검사
@@ -425,10 +425,10 @@ CODEOWNERS 를 강제할 수 없으므로(무료 요금제 한계), 이 규칙�
 세 곳 모두 같은 판정 로직(`checker.ssot_approval`)을 부르므로 "승인됐다" 의
 의미가 갈라지지 않는다.
 
-1. **PR 검사** — `.github/workflows/ssot-approval.yml`(`/harness:scaffold`
-   가 만든다)이 `pull_request` 와 `pull_request_review` 마다 판정하고, 승인이
+1. **PR 검사** — `pr-checks.yml`(PR 을 열거나 고칠 때)과 `pr-review.yml`(리뷰가 달릴 때)의
+   ssot-approval 단계(`/harness:scaffold` 가 호출 파일을 만든다)가 판정하고, 승인이
    없으면 job 을 실패시키고 PR 코멘트로 사유를 알린다.
-2. **merge 뒤 감지** — 같은 워크플로가 `push` 마다 그 커밋의 PR 을 찾아, SRS
+2. **merge 뒤 감지** — `main-checks.yml` 이 `push` 마다 그 커밋의 PR 을 찾아, SRS
    를 바꿨는데 승인이 없었으면 이슈를 연다. PR 없이 main 에 직접 push 된
    경우도 잡는다.
 3. **harness 훅** — `pre-bash-git-guard.sh` 가 `gh pr merge` 명령을 가로채,
