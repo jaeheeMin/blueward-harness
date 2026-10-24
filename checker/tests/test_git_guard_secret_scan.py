@@ -52,7 +52,7 @@ def _token() -> str:
 
 
 def _sap_cookie_line() -> str:
-    return "SAP_SESSION" + "ID_Z5U_080=" + "abcdEFGH1234567890abcd"
+    return "SAP_SESSION" + "ID_XXX_080=" + "abcdEFGH1234567890abcd"
 
 
 @pytest.fixture

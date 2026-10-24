@@ -28,7 +28,7 @@ secretGroup = 1
 keywords = ["mysapsso2"]
 tags = ["sap", "cookie"]
 
-# SAP 세션 쿠키. 이름에 시스템 ID 와 클라이언트가 붙는다(SAP_SESSIONID_Z5U_080).
+# SAP 세션 쿠키. 이름에 시스템 ID 와 클라이언트가 붙는다(SAP_SESSIONID_XXX_080).
 [[rules]]
 id = "sap-sessionid-cookie"
 description = "SAP 세션 쿠키(SAP_SESSIONID_<SID>_<client>) 값"
