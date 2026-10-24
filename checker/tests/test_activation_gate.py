@@ -514,9 +514,9 @@ def test_uiad_는_활성화_실패_뒤_inactiveObjects_빈_목록으로_닫히�
 
 
 @pytest.mark.parametrize("url", [
-    UIAD_URL + "?lockHandle=abc&corrNr=Z5UK900001",
+    UIAD_URL + "?lockHandle=abc&corrNr=XXXK900001",
     UIAD_URL.upper(),
-    "https://my406740.s4hana.cloud.sap" + UIAD_URL + "?corrNr=Z5UK900001",
+    "https://my000001.s4hana.cloud.sap" + UIAD_URL + "?corrNr=XXXK900001",
 ])
 def test_uiad_url_변형도_같은_키로_모인다(hooks, repo, url):
     _write(hooks, repo, url)

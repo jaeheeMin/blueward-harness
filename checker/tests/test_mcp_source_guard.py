@@ -526,11 +526,11 @@ def test_uiad_json_소스는_엔진을_부르지_않고_통과시킨다(installe
 
 
 @pytest.mark.parametrize("url", [
-    UIAD_URL + "?lockHandle=abc123&corrNr=Z5UK900001",
+    UIAD_URL + "?lockHandle=abc123&corrNr=XXXK900001",
     UIAD_URL.upper(),
     "/SAP/BC/ADT/FIORI/UIAD/ZMM_STOCKLEDGER_APP/SOURCE/MAIN",
-    "https://my406740.s4hana.cloud.sap" + UIAD_URL,
-    "https://my406740.s4hana.cloud.sap" + UIAD_URL + "?corrNr=Z5UK900001",
+    "https://my000001.s4hana.cloud.sap" + UIAD_URL,
+    "https://my000001.s4hana.cloud.sap" + UIAD_URL + "?corrNr=XXXK900001",
     UIAD_URL + "/",
 ])
 def test_uiad_url_변형은_통과시킨다(installed_hook, tmp_path, url):
