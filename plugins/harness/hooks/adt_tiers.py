@@ -6,7 +6,7 @@
 
 **입력 파일.** Project Repository 의 `env/adt-tiers.yaml`. 읽는 키:
 
-    system: Z5U                       # 선택, 안내문에만 쓴다
+    system: XXX                       # 선택, 안내문에만 쓴다
     servers:
       <MCP 서버 이름>:
         client: "100"                 # 선택, 안내문에만 쓴다

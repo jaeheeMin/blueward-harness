@@ -161,3 +161,5 @@ git config --get core.hooksPath
 - 브랜치 보호 규칙은 위 사유로 걸지 않았다.
 - Teams 알림 워크플로는 옮기지 않았다. 붙이려면 이 저장소에 웹훅 시크릿
   `TEAMS_WEBHOOK_URL` 을 따로 등록해야 한다.
+
+라이선스: 사내 전용([LICENSE](LICENSE))

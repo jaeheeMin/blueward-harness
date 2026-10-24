@@ -27,13 +27,13 @@ import adt_tiers  # noqa: E402
 
 TIERS_YAML = """\
 # 예시
-system: Z5U
+system: XXX
 
 servers:
   abap-adt-z5u:
     client: "100"
     role: customizing          # 커스터마이징
-    host: my406600.s4hana.cloud.sap
+    host: my000002.s4hana.cloud.sap
     proxy_port: 3299
     tier: read-only
     writes_allowed: false
@@ -263,7 +263,7 @@ def test_mcp_도구가_아니면_통과한다():
 
 def test_public_cloud_형식을_그대로_읽는다():
     t = _tiers()
-    assert t.system == "Z5U"
+    assert t.system == "XXX"
     assert t.servers["abap-adt-z5u"]["writes_allowed"] is False
     assert t.servers["abap-adt-z5u"]["client"] == "100"
     assert t.servers["abap-adt-z5u-dev"]["writes_allowed"] is True
