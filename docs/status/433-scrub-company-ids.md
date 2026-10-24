@@ -14,7 +14,7 @@
 | 테넌트 호스트 `my406600…` | `test_adt_tiers.py` | `my000002.s4hana.cloud.sap` |
 | 트랜스포트 `Z5UK900001` | `test_activation_gate.py`, `test_mcp_source_guard.py` | `XXXK900001` |
 | 시스템 ID `Z5U` | `test_adt_tiers.py`(YAML 예시와 단언), `plugins/harness/hooks/adt_tiers.py` 독스트링 | `XXX` |
-| 쿠키 이름 `SAP_SESSIONID_Z5U_080` | `checker/gitleaks/harness.toml`·`plugins/harness/hooks/gitleaks-harness.toml` 주석, `test_gitleaks_scan.py`, `test_git_guard_secret_scan.py` | `SAP_SESSIONID_XXX_080` (규칙 정규식은 `[A-Z0-9]{3}` 라 모양이 같다) |
+| 쿠키 이름 `SAP_SESSIONID_Z5U_080` | `checker/gitleaks/harness.toml`·`plugins/harness/hooks/gitleaks-harness.toml` 주석, `test_git_guard_secret_scan.py`(가짜 쿠키 고정값은 아래 "유지") | `SAP_SESSIONID_XXX_080` (규칙 정규식은 `[A-Z0-9]{3}` 라 모양이 같다) |
 | 계정 ID `CB99…` | 없음 | - |
 | 회사 이메일·도메인, Teams 웹훅 | 없음. `test_risk_gate.py` 의 `logic.azure.com` 은 가짜 주소(`sig=Zx9_…`)이고 `t@example.com` 류는 예시 | 유지 |
 
@@ -27,6 +27,7 @@
 | MCP 서버 이름 `abap-adt-z5u`, `abap-adt-z5u-dev` (시험, README, 길잡이, `docs/status/`) | 훅이 `mcp__<서버>__<도구>` 이름을 읽는 동작 식별자다. 바꾸면 시험과 길잡이가 실제 `.mcp.json` 과 어긋난다 |
 | `jaeheeMin`, `blueward-harness`, `blueward-26`, `public-cloud`, GitHub 아이디, 회사명 블루워드 | 저장소 주소·승인자 예시·브랜드. 바꾸면 동작이 깨진다 |
 | 클라이언트 번호 `080`·`100` | 회사 식별 값이 아니다 |
+| `test_gitleaks_scan.py` 의 가짜 쿠키 고정값 `SAP_SESSIONID_Z5U_080=…` | 이 줄을 바꾸면 커밋 전 비밀값 검사가 가짜 값을 새 변경으로 잡아 커밋을 막는다. 허용 목록(`.gitleaks.toml`)은 사람만 정하므로 그대로 두기로 사용자가 정했다(2026-10-24). 시스템 ID 세 글자만 남는다 |
 
 ## 재발 방지 판단 (구현하지 않음)
 
