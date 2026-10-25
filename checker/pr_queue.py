@@ -32,6 +32,9 @@ PR 상태(우선순위대로 하나만 고르고, 나머지는 보조로 덧붙�
 `--pr N` 은 PR 한 건보다 먼저 병합해야 하는 열린 PR 만 묻는다(병합 직전 훅용, 상태 판정은 하지 않는다).
 종료코드 0 앞 PR 없음, 1 있음, 2 확인 불능(순환·순서 판정 불능 포함).
 
+`--mine` 은 내 PR 중 대표 `[DEV-xxx]` 이슈를 Closes 하는데 head 의 원장 행이 `완료` 가 아닌 것을 `⚠` 줄로 알리고
+(판정 불능은 `❓` 줄), `--json` 항목의 `ledger` 에 담는다(#454, checker/ledger_stale.py).
+
 GitHub 를 읽지 못하면 "PR 상태 확인 불능" 이고 종료코드 2 다(통과도 문제없음도 아니다, 원칙 7).
 PR 한 건의 승인·version 만 못 읽으면 그 PR 만 "확인 불능" 으로 두고 나머지는 계산한다. 예상 못 한
 예외도 "확인 불능(예상 못 한 오류 <종류>)" 종료코드 2 로 낸다.
@@ -44,6 +47,8 @@ import re
 import sys
 from typing import Any
 
+from checker import ledger_stale
+from checker.ledger_complete import closing_issues
 from checker.plugin_version import PLUGIN_JSON, parse_version
 from checker.risk_gate import MERGE_ORDER_CHECK, PR_QUEUE_CHECK, _check_group, _is_excluded_check, _run_state, fetch_pr_comments
 from checker.ssot_approval import (
@@ -714,6 +719,8 @@ def compute(client: GhClient, repo: str, login: str | None = None, mine: bool = 
                 "version": versions.get(n),
                 "devs": sorted(_dev_numbers(raw)),
                 "dev": _primary_dev(raw),
+                "closes": closing_issues(raw.get("body")),
+                "ledger": [],  # --mine 일 때 ledger_stale.annotate 가 채운다(#454)
             }
         )
     items.sort(key=lambda it: (it["order"] is None, it["order"] or 0, it["number"]))
@@ -954,7 +961,7 @@ def _pr_cell(it: dict, mine_nums: set[int], link, group_of: dict[int, int]) -> s
         text = f"**{text}**"
     outside = [d for d in it["after"] if group_of.get(d, group_of[it["number"]]) != group_of[it["number"]]]
     tail = f"(앞: {', '.join(link(d) for d in outside)})" if outside else ""
-    warn = "⚠" if it["notes"] else ""  # 상태에 붙은 주의는 표 아래 "주의:" 줄에 있다
+    warn = "⚠" if (it["notes"] or it.get("ledger")) else ""  # 상태·원장 주의는 표 아래 줄에 있다
     return f"{text} {_symbol(it)}{warn}{tail}"
 
 
@@ -1047,6 +1054,29 @@ def _render_detail(result: dict, mine: bool, urls: dict[int, str], note_limit: i
     return lines
 
 
+LEDGER_ASK = "원장 고쳐서 다시 올려줘"  # pr_table_notice.py 가 이 문구로 Claude 에게 제안 안내를 덧붙인다
+
+
+def ledger_lines(prs: list[dict], link) -> list[str]:
+    """내 PR 의 원장 미완료(#454) 알림 줄. 완료이거나 대표 이슈를 안 닫는 PR 은 없다. 판정 불능은 따로 ❓ 로 낸다."""
+    out: list[str] = []
+    for it in sorted(prs, key=lambda x: x["number"]):
+        for f in it.get("ledger") or []:
+            name = f["dev"] + (f"({_clip(f['title'], 24)})" if f.get("title") else "")
+            if f["status"] == ledger_stale.PENDING:
+                out.append(
+                    f"⚠ {link(it['number'])} 원장 {name} 이 '{f['state'] or '빈 칸'}' 야 — 병합 전에 '완료' 로 고쳐야 해. "
+                    f"Claude 에게 '{LEDGER_ASK}' 라고 하면 돼"
+                )
+            elif f.get("issue"):
+                out.append(f"❓ {link(it['number'])} 이 닫는 이슈 #{f['issue']} 을 읽지 못해 원장 확인 불능 — {_clip(f['reason'], 120)}")
+            elif not f["dev"]:
+                out.append(f"❓ {link(it['number'])} 원장 확인 불능 — {_clip(f['reason'], 120)}")
+            else:
+                out.append(f"❓ {link(it['number'])} 원장 {name} 이 '완료' 인지 판정 불능 — {_clip(f['reason'], 120)}")
+    return out
+
+
 def render(
     result: dict,
     mine: bool,
@@ -1124,6 +1154,7 @@ def render(
     lines.extend(note_lines[:note_limit])
     if len(note_lines) > note_limit:
         lines.append(f"주의: PR 주의가 {len(note_lines) - note_limit}건 더 있음")
+    lines.extend(ledger_lines(prs, link))
     lines.append("")
     lines.append("✅ 병합 가능 · ⏳ 기다리는 중 · ❌ 고쳐야 함 · 📝 초안 · ❓ 판정 불능 · ⚠ 주의 있음(아래 줄)")
 
@@ -1169,6 +1200,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--team", action="store_true", help="팀원별 진행·막힘·오래 머문 일·맡은 개발 건(저장소 전체, #438)")
     parser.add_argument("--days", type=int, default=7, help="--team: 병합한 PR 을 볼 최근 일수(기본 7)")
     parser.add_argument("--stale-days", type=int, default=3, help="--team: 열린 PR 이 이 일수를 넘게 움직임이 없으면 오래 머문 일(기본 3)")
+    parser.add_argument("--no-ledger", action="store_true", help="--mine 에서 원장 미완료 판정(이슈·원장 조회, #454)을 끈다(시간이 제한된 호출용)")
     parser.add_argument("--quiet-empty", action="store_true", help="--mine 에서 내 PR 이 없으면 아무것도 내지 않는다")
     return parser
 
@@ -1203,6 +1235,8 @@ def run(args: argparse.Namespace, client: GhClient | None = None) -> tuple[int, 
         login = _login(client) if args.mine else None
         full = compute(client, repo, login, mine=False)
         result = filter_mine(full, login or "") if args.mine else full
+        if args.mine and not args.no_ledger:
+            ledger_stale.annotate(client, repo, result["prs"])
     except GhError as exc:
         res = cannot_check(str(exc))
         return EXIT_CANNOT_CHECK, json.dumps(res, ensure_ascii=False) if args.json else res["message"]

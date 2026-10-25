@@ -39,10 +39,11 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 **시작을 막지 않는다.** GitHub 원격이 아니거나 `gh` 가 안 되면 이 절을 건너뛴다.
 
 ```bash
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] && timeout 30 uvx --from "$e" python -m checker.pr_queue --mine --max-rows 5 --quiet-empty
+e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] && timeout 30 uvx --from "$e" python -m checker.pr_queue --mine --no-ledger --max-rows 5 --quiet-empty
 ```
 
 `timeout` 은 처음 엔진을 받느라 시작이 오래 붙들리지 않게 하려는 것이다. `timeout` 명령이 없는 환경이면 이 절을 건너뛴다.
+`--no-ledger` 는 PR 마다 이슈·원장을 읽는 원장 미완료 판정(#454)을 끈다. 시간이 제한된 이 호출이 그것 때문에 늦어지지 않게 하려는 것이고, 그 판정은 세션 시작 알림과 `/harness:prs` 가 한다.
 
 - 출력이 비면(내 열린 PR 이 없음) 아무 말도 하지 않는다.
 - 출력의 "내가 지금 할 수 있는 일" 표에 `병합하기` 가 있으면 "먼저 병합할 수 있는 내 PR: [#n](링크) 제목 …" 을 알린다.

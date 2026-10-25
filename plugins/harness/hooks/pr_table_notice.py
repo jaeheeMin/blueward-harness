@@ -26,6 +26,15 @@ from typing import Callable
 FILE_PREFIX = "harness-pr-table."
 FOOTER = "자세한 상태와 다음 할 일은 /harness:prs 로 봅니다."
 RETRY = "다음: /harness:prs 로 다시 확인하십시오."
+# 엔진(checker.pr_queue.LEDGER_ASK)이 원장 미완료 PR 줄에 넣는 문구. 이 문구가 있으면 Claude 가 먼저 제안한다(#454).
+LEDGER_ASK = "원장 고쳐서 다시 올려줘"
+LEDGER_GUIDE = (
+    "위 ⚠ 원장 줄이 있으면 표를 보여 준 뒤 사용자에게 '그 PR 의 원장을 완료로 고쳐 다시 올릴까?' 를 쉬운 말로 먼저 묻는다. "
+    "그 PR 이 이미 승인(Approved)됐으면 커밋을 올리는 순간 main 규칙 때문에 승인이 취소돼 다시 승인받아야 하고 검사도 다시 돈다는 "
+    "것을 먼저 알린다(그래도 병합 전에 고치는 걸 추천한다). "
+    "사용자가 응하면 그 PR 의 브랜치에서 /harness:deliver 를 부른다(deliver 가 원장 행만 완료·PR 번호로 고쳐 푸시한다). "
+    "지금 브랜치가 그 PR 의 브랜치가 아니면 브랜치를 옮겨야 하고, 미커밋 변경이 있으면 옮기기 전에 먼저 묻는다."
+)
 
 
 def safe_session_id(value: object) -> str:
@@ -90,6 +99,8 @@ def run(payload: dict, emit: Callable[[str], None] | None = None) -> str | None:
             "[harness 내 PR 상태] 세션 시작 때 뒤에서 확인한 결과다. 이번 답변의 첫머리에 아래 내용을 "
             "고치지 말고 그대로 사용자에게 보여 줘라. 이 안내는 한 번만 나온다.\n" + text
         )
+        if LEDGER_ASK in text:
+            context += "\n" + LEDGER_GUIDE
         out = json.dumps(
             {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}},
             ensure_ascii=False,
