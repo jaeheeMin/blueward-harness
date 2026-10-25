@@ -185,3 +185,9 @@ def test_CLI_는_나누지_못하면_종료코드_2와_error_를_낸다():
     )
     assert done.returncode == 2
     assert "error" in json.loads(done.stdout)
+
+
+def test_auto_와_admin_옵션은_있을_때만_표시한다():
+    assert find_merges("gh pr merge 5 --auto --squash") == [{**_m(None, "5"), "auto": True}]
+    assert find_merges("gh pr merge 5 --admin") == [{**_m(None, "5"), "admin": True}]
+    assert find_merges('gh pr merge 5 --body "--auto"') == [_m(None, "5")]

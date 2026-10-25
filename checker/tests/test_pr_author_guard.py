@@ -358,3 +358,69 @@ def test_푸시에서_권한_조회가_실패하면_검사_불능으로_거부�
     code, out = _guard("DELIVER=1 git push origin feat/x", bin_dir, FAKE_GH_LIST="feat/x=Other", FAKE_GH_FAIL="perm")
     assert code == 0
     assert "검사 불능" in _reason(out)
+
+
+# --- 자동 병합 예약(--auto)과 --admin (#437) ------------------------------------
+
+
+def _failing_checks_gh(bin_dir: Path) -> None:
+    _add_fake_gh(bin_dir, checks={12: [{"name": "pr-checks / check", "state": "FAILURE", "bucket": "fail", "link": "https://example.com/r"}]})
+
+
+def test_auto_병합은_검사가_실패_중이어도_예약을_허용한다(bin_dir):
+    _failing_checks_gh(bin_dir)
+    code, out = _guard("gh pr merge 12 --auto --squash", bin_dir, FAKE_GH_AUTHORS="12=me")
+    assert code == 0
+    assert out is None
+
+
+def test_auto_없는_병합은_검사가_실패_중이면_여전히_거부한다(bin_dir):
+    _failing_checks_gh(bin_dir)
+    code, out = _guard("gh pr merge 12 --squash", bin_dir, FAKE_GH_AUTHORS="12=me")
+    assert code == 0
+    assert "검사가 실패" in _reason(out)
+
+
+def test_auto_라도_남의_PR_은_거부한다(bin_dir):
+    code, out = _guard("gh pr merge 12 --auto --squash", bin_dir, FAKE_GH_AUTHORS="12=Other")
+    assert code == 0
+    assert "Other" in _reason(out)
+
+
+def test_auto_는_앞_PR_대기_판정을_건너뛴다(bin_dir):
+    prq = base64.b64encode(json.dumps({"status": "ok", "pr": 12, "before": [{"number": 7, "title": "앞", "reasons": []}]}).encode()).decode()
+    code, out = _guard("gh pr merge 12 --auto --squash", bin_dir, FAKE_GH_AUTHORS="12=me", FAKE_PRQ_B64=prq, FAKE_PRQ_RC="1")
+    assert code == 0
+    assert out is None
+    code, out = _guard("gh pr merge 12 --squash", bin_dir, FAKE_GH_AUTHORS="12=me", FAKE_PRQ_B64=prq, FAKE_PRQ_RC="1")
+    assert "먼저 병합해야 하는" in _reason(out)
+
+
+@pytest.mark.parametrize("cmd", ["gh pr merge 12 --admin --squash", "gh pr merge 12 --auto --admin"])
+def test_admin_병합은_내_PR_이어도_거부한다(bin_dir, cmd):
+    code, out = _guard(cmd, bin_dir, FAKE_GH_AUTHORS="12=me")
+    assert code == 0
+    assert "--admin" in _reason(out)
+
+
+def test_본문_안의_auto_글자는_예약으로_읽지_않는다(bin_dir):
+    _failing_checks_gh(bin_dir)
+    code, out = _guard('gh pr merge 12 --squash --body "--auto"', bin_dir, FAKE_GH_AUTHORS="12=me")
+    assert "검사가 실패" in _reason(out)
+
+
+def test_auto_라도_사람_병합_경로를_바꾼_PR_은_거부한다(tmp_path):
+    human = json.dumps({"requires_human": True, "paths": ["plugins/harness/x.md"], "pr": 123, "repo": "own/repo"})
+    d = _make_dispatch_uvx(tmp_path, human, 1)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 --auto --squash", d, {"FAKE_GH_AUTHORS": "123=me"})
+    assert code == 0
+    reason = _reason(out)
+    assert "자동 병합을 걸 수 없어요" in reason and "plugins/harness/x.md" in reason
+
+
+def test_auto_이고_사람_병합_경로가_아니면_허용한다(tmp_path):
+    human = json.dumps({"requires_human": False, "paths": [], "pr": 123, "repo": "own/repo"})
+    d = _make_dispatch_uvx(tmp_path, human, 0)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 --auto --squash", d, {"FAKE_GH_AUTHORS": "123=me"})
+    assert code == 0
+    assert out is None

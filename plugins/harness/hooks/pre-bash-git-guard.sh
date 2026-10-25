@@ -351,6 +351,9 @@ resolve_engine() {
 check_one_merge() {
   repo="$1"
   prref="$2"
+  # 3번째 인자가 auto 면 자동 병합 예약이다(#437). 서버가 기다려 주는 판정(검사·앞 PR·SRS 승인·위험도)은 건너뛰고
+  # 사람 병합 경로만 본다.
+  auto="${3:-}"
 
   # URL 형태(.../pull/123)면 번호와 저장소를 URL 에서 바로 뽑는다.
   case "$prref" in
@@ -398,6 +401,7 @@ check_one_merge() {
     deny "gh pr merge 의 대상 PR 을 확인하지 못해 SRS 승인 여부를 판정할 수 없습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. 다음: Claude 가 PR 번호를 붙여(예: gh pr merge 123) 다시 실행하십시오. 그래도 안 되면 gh auth status 로 로그인 상태를 확인하고, 로그인 안 됨이면 사람이 gh auth login 을 실행하십시오."
   fi
 
+  if [ "$auto" != auto ]; then
   # -1) 대상 PR 의 검사(status checks)가 실패했거나 아직 진행 중이면 거부한다(#120).
   #     무료 요금제는 빨간불이어도 Merge 버튼을 잠그지 못하므로, 적어도 Claude 의
   #     `gh pr merge` 는 여기서 막는다(사람의 웹 Merge 버튼은 범위 밖). 싼 gh 호출
@@ -468,10 +472,13 @@ check_one_merge() {
     fi
   fi
 
+  fi
+
   if ! command -v uvx >/dev/null 2>&1; then
     deny "uvx 가 없어 SRS 승인 여부를 확인하지 못했습니다. 확인되지 않는 상태로 merge 를 허용하지 않습니다. $next_install_uv"
   fi
 
+  if [ "$auto" != auto ]; then
   # -1-1) 먼저 병합해야 하는 열린 PR 이 있으면 거부한다(#370). 앞 PR 은 base 브랜치가 그 PR 의
   #       브랜치이거나, 본문의 `먼저: #n` 줄, 같은 DEV 의 SRS→Spec→개발 순, 하네스 저장소의
   #       plugin.json version 순으로 정해진다(checker.pr_queue --pr). 같은 파일을 고친 PR 은
@@ -580,6 +587,8 @@ $ssot_err"
     deny "PR #$pr_number 의 SRS 승인 여부를 확인하지 못해 merge 를 막습니다(종료코드 $ssot_rc). 확인되지 않는 상태로 통과시키지 않습니다. $next_retry 자세히: $detail"
   fi
 
+  fi
+
   # 0-1) Plugin·엔진처럼 사람이 직접 merge 해야 하는 경로(.github/human-merge-paths)
   #      를 바꾼 PR 이면 거부한다(#104). Claude 세션은 소유자의 GitHub 계정으로
   #      동작해 GitHub 가 사람과 구분하지 못하므로, 여기서 Claude 의 `gh pr merge`
@@ -608,6 +617,9 @@ $ssot_err"
     if [ "${hm_total:-0}" -gt 5 ] 2>/dev/null; then
       hm_paths="$hm_paths 등 ${hm_total}개"
     fi
+    if [ "$auto" = auto ]; then
+      deny "이 PR 은 사람이 직접 병합하는 경로($hm_paths)를 바꿔서 자동 병합을 걸 수 없어요. GitHub 에서 사람이 병합하거나 자동 병합을 켜 주세요."
+    fi
     deny "PR #$pr_number 은 사람이 직접 merge 해야 하는 경로($hm_paths)를 바꿨습니다. Claude 는 이 PR 을 merge 할 수 없습니다. 다음: 사람이 할 일 - 사용자에게 이 PR 의 GitHub 화면(PR 페이지 아래쪽)에서 Merge 버튼을 눌러 병합해 달라고 요청하십시오."
   else
     hm_detail_raw="$hm_out"
@@ -623,6 +635,7 @@ $hm_err"
     deny "PR #$pr_number 가 사람이 merge 해야 하는 경로를 바꿨는지 확인하지 못해 merge 를 막습니다(종료코드 $hm_rc). 확인되지 않는 상태로 통과시키지 않습니다. $next_retry 자세히: $hm_detail"
   fi
 
+  if [ "$auto" != auto ]; then
   # 0-2) PR 위험도(크기·위험 경로·비밀값·다른 검사)가 높은데 최신 커밋에 대한 승인이 없으면
   #      거부한다(#102). 기준은 대상 저장소의 .github/risk-gate.yaml 이고 없으면 게이트가
   #      꺼진 것이라 통과(종료코드 0)다. 위와 같은 이유로 stdout/stderr 를 나눠 받고, 판정
@@ -668,6 +681,7 @@ $rg_err"
     fi
     rg_detail="$(printf '%s' "$rg_detail_raw" | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
     deny "PR #$pr_number 의 위험도를 확인하지 못해 merge 를 막습니다(종료코드 $rg_rc). 검사 불능이므로 통과시키지 않습니다. $next_retry 자세히: $rg_detail"
+  fi
   fi
 }
 
@@ -825,12 +839,19 @@ case "$cmd" in
     # 한 줄에 한 건씩 "저장소 PR지정". 윈도우 jq 의 CRLF 는 벗긴다. 공백 구분
     # read 는 빈 앞칸을 삼켜 저장소 없음과 PR 지정 없음을 헷갈리므로, 빈 값은
     # "-" 자리표시자로 받아 되돌린다(저장소·PR 지정에 "-" 만 오는 일은 없다).
-    mc_lines="$(printf '%s' "$mc_out" | jq -r '.merges[] | [((.repo // "") | if . == "" then "-" else . end), ((.prref // "") | if . == "" then "-" else . end)] | join(" ")' | tr -d '\r')"
-    while IFS=' ' read -r mc_repo mc_prref; do
+    mc_lines="$(printf '%s' "$mc_out" | jq -r '.merges[] | [((.repo // "") | if . == "" then "-" else . end), ((.prref // "") | if . == "" then "-" else . end), (if .admin == true then "admin" elif .auto == true then "auto" else "-" end)] | join(" ")' | tr -d '\r')"
+    while IFS=' ' read -r mc_repo mc_prref mc_mode; do
       [ -z "$mc_repo" ] && continue
       [ "$mc_repo" = "-" ] && mc_repo=""
       [ "$mc_prref" = "-" ] && mc_prref=""
-      check_one_merge "$mc_repo" "$mc_prref"
+      # --admin 은 보호 규칙(필수 검사·승인)을 우회한다. 어떤 PR 에도 허용하지 않는다(#437).
+      if [ "$mc_mode" = "admin" ]; then
+        deny "gh pr merge --admin 은 보호 규칙과 필수 검사를 건너뛰는 병합이라 막습니다. 다음: --admin 을 빼고 실행하십시오. 검사나 승인이 모자라 못 합치는 거라면 그 사유를 해결하십시오(자동 병합 예약은 gh pr merge 번호 --auto --squash)."
+      fi
+      # --auto 는 병합을 예약만 한다. 필수 검사와 승인이 끝나야 GitHub 서버가 합치므로
+      # 검사 진행 중·앞 PR 대기·SRS 승인·위험도 판정은 건너뛰고, 사람 병합 경로는 그대로 막는다(#437).
+      # 남의 PR 금지는 위 0-0 관문이 이미 merge 에 적용했다.
+      check_one_merge "$mc_repo" "$mc_prref" "$mc_mode"
     done <<EOF
 $mc_lines
 EOF
