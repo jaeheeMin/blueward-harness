@@ -281,7 +281,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.110, public-cloud main 기준 (2026-10-25)</div>
+      <div class="note">harness 0.10.112, public-cloud main 기준 (2026-10-25)</div>
     </div>
   </nav>
 
@@ -1148,7 +1148,7 @@ fix/31-broken-link</pre>
       <div class="node"><b>범위 정하기</b><span>가장 좁게 · 서버 · variant</span></div><div class="arrow"></div>
       <div class="node hl"><b>실행</b><span>080 에서 ATC 수집</span></div><div class="arrow"></div>
       <div class="node"><b>표로 보기</b><span>종류 · 우선순위별</span></div><div class="arrow"></div>
-      <div class="node"><b>분류</b><span>자동 / 확인 후 / 수동</span></div><div class="arrow"></div>
+      <div class="node"><b>분류</b><span>자동 / 확인 후 / 수동 / 지적 부적절</span></div><div class="arrow"></div>
       <div class="node hl"><b>승인된 것만 고침</b><span>잠금 → 반영 → 해제</span></div><div class="arrow"></div>
       <div class="node ok"><b>다시 실행</b><span>전후 건수 비교표</span></div>
     </div>
@@ -1160,7 +1160,8 @@ fix/31-broken-link</pre>
       <h3>내가 할 일</h3>
       <ul class="todo">
         <li>어디를 검사할지 알려 줘 (패키지, 클래스)</li>
-        <li>"확인 후" 로 분류된 묶음을 보고 고칠지 정해</li>
+        <li>"확인 후" 로 분류된 묶음을 보고 고칠지 정해 (화면에 보이는 하드코딩 문구를 Message Class 로 옮기는 것도 여기)</li>
+        <li>"지적 부적절" 로 분류된 건의 근거를 보고 면제로 넘길지 정해</li>
         <li>면제(exemption)가 필요하면 근거를 보고 내가 승인해</li>
         <li>고친 걸 저장소에 남기려면 <code>/harness:deliver</code></li>
       </ul>
@@ -1170,13 +1171,15 @@ fix/31-broken-link</pre>
       <ul class="plain">
         <li><b>자동</b> — 고치는 방법이 하나뿐이고 위험이 없음</li>
         <li><b>확인 후</b> — 고칠 수 있지만 사람이 봐야 함. 애매하면 여기</li>
-        <li><b>수동</b> — 설계를 바꿔야 하거나 Claude 가 판단할 수 없음</li>
+        <li><b>수동</b> — 설계를 바꿔야 하거나 Claude 가 판단할 수 없음 (CVA 알림 같은 정보성 지적도 대개 여기)</li>
+        <li><b>지적 부적절</b> — 지적이 이 맥락에서 틀림(예: 정규식·필드명 같은 기술 문자열에 텍스트 요소를 요구). 고치지 않고 근거만 적고, 내가 승인하면 면제(<code>"#EC</code>·exemption 제안서)로 넘김</li>
       </ul>
     </section>
   </div>
 
   <div class="callouts">
-    <div class="callout stop"><span class="k">0건 ≠ 깨끗</span><div>도구 오류, 빈 결과, 읽기 실패는 "0건" 이 아니라 <b>검사 불능</b>이야. 결과가 최대 개수에 닿았으면 잘린 거라 전부가 아니야.</div></div>
+    <div class="callout stop"><span class="k">0건 ≠ 깨끗</span><div>도구 오류, 빈 결과, 읽기 실패는 "0건" 이 아니라 <b>검사 불능</b>이야. 결과가 최대 개수에 닿았으면 잘린 거라 전부가 아니야. 세션이 만료되면 400 이나 401 이 와서 그 서버에 다시 로그인해야 해.</div></div>
+    <div class="callout ok"><span class="k">요약해서 보여줌</span><div>ATC 결과 원문은 커(15건에 약 12KB). 우선순위·검사 종류·메시지·줄 번호·자동수정 유무만 뽑아 표로 보여 줘.</div></div>
     <div class="callout warn"><span class="k">면제</span><div><code>"#EC</code> 주석이나 exemption 은 근거와 내 승인이 있을 때만 써. 면제 신청을 Claude 혼자 제출하지 않아.</div></div>
     <div class="callout ok"><span class="k">범위 밖</span><div>ATC 스킬은 활성화와 커밋을 하지 않아. 활성화는 개발 흐름에서, 커밋은 deliver 로 해.</div></div>
   </div>
