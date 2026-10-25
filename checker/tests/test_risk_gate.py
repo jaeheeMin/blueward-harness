@@ -61,6 +61,12 @@ def test_ai_review_paths_기본은_빈_목록이고_설정이_덮는다():
     assert rg.load_config("ai_review_paths:\n")["ai_review_paths"] == []  # 값 없음 = 빈 목록
 
 
+def test_size_warn_only_paths_기본은_빈_목록이고_설정이_덮는다():
+    assert rg.load_config(None)["size_warn_only_paths"] == []
+    assert rg.load_config("size_warn_only_paths:\n  - src/\n")["size_warn_only_paths"] == ["src/"]
+    assert rg.load_config("size_warn_only_paths:\n")["size_warn_only_paths"] == []
+
+
 def test_설정에_적은_값이_기본값을_덮는다_나머지는_기본값():
     cfg = rg.load_config("max_changed_lines: 50\nsecret_scan: false\nhigh_risk_paths:\n  - src/\n")
     assert cfg["max_changed_lines"] == 50
@@ -85,6 +91,9 @@ def test_기본값_목록을_바꿔도_다음_설정에_새지_않는다():
         "ai_review_paths: src/\n",  # 목록이 아니면 오류
         "ai_review_paths: [1]\n",
         "ai_review_path: [src/]\n",  # 키 오타는 모르는 키 오류
+        "size_warn_only_paths: src/\n",  # 목록이 아니면 오류(#436)
+        "size_warn_only_paths: [1]\n",
+        "size_warn_only_path: [src/]\n",  # 키 오타
         "secret_scna: false\n",  # 오타는 조용히 넘기지 않는다
         "- a\n- b\n",
         "a: [unclosed\n",
@@ -536,6 +545,78 @@ def test_크기가_크면_위험하고_승인이_없으면_1():
     assert result["next"].startswith("다음: 사람이 할 일 - 승인자(.github/ssot-approvers 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)")
     assert "PR 을 나눠" in result["next"]
     assert rg._exit_for(result) == 1
+
+
+SRC_ONLY = "size_warn_only_paths:\n  - src/\n"
+
+
+def test_소스만_바꾼_큰_PR_은_크기가_승인_사유가_아니라_참고다():
+    client = _client(config=SRC_ONLY, files=[_file("src/a.py", 400, 0), _file("src/b.py", 10, 0)])
+    result = rg.decide_pr(client, "o/r", 5)
+    assert result["risk"] == "low" and result["requires_approval"] is False
+    assert result["reasons"] == [] and result["approved"] is None and result["next"] == ""
+    assert len(result["notes"]) == 1
+    assert "410줄" in result["notes"][0] and "승인은 필요 없음(경고)" in result["notes"][0]
+    assert rg._exit_for(result) == 0
+
+
+def test_소스와_Spec_을_함께_바꾼_큰_PR_은_위험():
+    client = _client(config=SRC_ONLY, files=[_file("src/a.py", 400, 0), _file("docs/spec/DEV-001.md", 3, 0)])
+    result = rg.decide_pr(client, "o/r", 5)
+    assert result["risk"] == "high" and result["requires_approval"] is True
+    assert any("바뀐 줄이 403줄" in r for r in result["reasons"])
+    assert result["notes"] == []
+    assert rg._exit_for(result) == 1
+
+
+def test_소스_밖_일반_파일이_하나라도_끼면_크기는_승인_사유():
+    client = _client(config=SRC_ONLY, files=[_file("src/a.py", 400, 0), _file("ops/run.sh", 1, 0)])
+    result = rg.decide_pr(client, "o/r", 5)
+    assert result["requires_approval"] is True and result["notes"] == []
+    assert "401줄" in result["reasons"][0]
+
+
+def test_size_warn_only_paths_가_비면_소스만이어도_전과_같이_위험():
+    result = rg.decide_pr(_client(files=[_file("src/a.py", 400, 0)]), "o/r", 5)
+    assert result["risk"] == "high" and "400줄" in result["reasons"][0]
+    assert result["notes"] == []
+    result = rg.decide_pr(_client(config="size_warn_only_paths: []\n", files=[_file("src/a.py", 400, 0)]), "o/r", 5)
+    assert result["requires_approval"] is True
+
+
+def test_소스만_바꿔도_크기_기준을_넘지_않으면_참고도_없다():
+    result = rg.decide_pr(_client(config=SRC_ONLY, files=[_file("src/a.py", 10, 0)]), "o/r", 5)
+    assert result["requires_approval"] is False and result["notes"] == []
+
+
+def test_소스만_바꿔도_비밀값_모양이_있으면_위험이고_참고는_그대로_남는다():
+    client = _client(config=SRC_ONLY, files=[_file("src/a.py", 400, 0, patch=_patch(f"KEY = '{AWS_KEY}'"))])
+    result = rg.decide_pr(client, "o/r", 5)
+    assert result["requires_approval"] is True
+    assert any("비밀값" in r for r in result["reasons"]) and not any("줄로 기준" in r for r in result["reasons"])
+    assert len(result["notes"]) == 1
+    assert AWS_KEY not in json.dumps(result, ensure_ascii=False)
+
+
+def test_소스만_바꿔도_다른_검사가_실패하면_위험():
+    client = _client(config=SRC_ONLY, files=[_file("src/a.py", 400, 0)], check_runs=[_run("test", conclusion="failure")])
+    result = rg.decide_pr(client, "o/r", 5)
+    assert result["requires_approval"] is True and "다른 검사가 실패함" in result["reasons"][0]
+    assert len(result["notes"]) == 1
+
+
+def test_precheck_는_참고를_위험으로_세지_않는다():
+    client = _client(config="ai_review: true\nsize_warn_only_paths:\n  - src/\n", files=[_file("src/a.py", 400, 0)])
+    result = rg.precheck_pr(client, "o/r", 5)
+    assert result["risky"] is False and result["reasons"] == [] and result["criteria"] == []
+    assert len(result["notes"]) == 1
+
+
+def test_size_기준의_참고_Finding_은_note_표시가_붙는다():
+    ctx = rg.Context(cfg=rg.load_config(SRC_ONLY), files=[_file("src/a.py", 400, 0)], prefixes=[],
+                     load_check_runs=lambda: [])
+    findings = [f for f in rg.evaluate(ctx) if f.criterion == "size"]
+    assert [f.note for f in findings] == [True]
 
 
 def test_위험_경로를_바꾸면_위험():
@@ -1221,7 +1302,7 @@ def test_precheck_ai_review_가_꺼져_있으면_돌리지_않는다():
 
 def test_precheck_위험하지_않으면_돌려도_된다():
     result = rg.precheck_pr(_client(config="ai_review: true\n"), "o/r", 5)
-    assert result == {"enabled": True, "gate": True, "risky": False, "reasons": [], "criteria": [],
+    assert result == {"enabled": True, "gate": True, "risky": False, "reasons": [], "notes": [], "criteria": [],
                       "secret_found": False, "secret_patterns": []}
 
 

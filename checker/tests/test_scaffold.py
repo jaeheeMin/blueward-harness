@@ -137,7 +137,8 @@ def test_위험도_게이트_기준_파일과_워크플로를_만든다(tmp_path
     text = (tmp_path / ".github" / "risk-gate.yaml").read_text(encoding="utf-8")
     assert "{{" not in text
     # 단 ai_review_paths 는 scaffold 가 호출 워크플로 ai-review.yml 의 `paths: ['src/**']` 와 맞춰 `[src/]` 로 둔다(#411).
-    assert load_config(text) == {**DEFAULT_CONFIG, "ai_review_paths": ["src/"]}
+    # size_warn_only_paths 도 `[src/]` 로 둔다 — 소스만 바꾼 PR 은 크기를 경고로만 낸다(#436).
+    assert load_config(text) == {**DEFAULT_CONFIG, "ai_review_paths": ["src/"], "size_warn_only_paths": ["src/"]}
 
     # 옛 caller 다섯(doc-guard·gitleaks·ssot-approval·risk-gate·pr-queue)은 더 내지 않는다(#420).
     for old in ("doc-guard", "gitleaks", "ssot-approval", "risk-gate", "pr-queue"):

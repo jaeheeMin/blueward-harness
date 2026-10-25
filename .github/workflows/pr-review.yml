@@ -340,16 +340,21 @@ jobs:
             let result = {};
             try { result = JSON.parse(fs.readFileSync('risk-result.json', 'utf8')); } catch (e) {}
             const reasons = (result.reasons || []).map(r => `- ${r}`).join('\n');
+            // 참고(note): 보여 주기만 하고 승인을 요구하지 않는 사유(#436). 위험 사유(reasons)와 섞지 않는다.
+            const notes = (result.notes || []).map(r => `- ${r}`).join('\n');
+            const noteSection = notes ? `\n\n참고(승인 필요 없음):\n${notes}` : '';
 
             let body;
             if (code === '0' && (!result.enabled || !result.requires_approval)) {
-              // 게이트가 꺼져 있거나 위험하지 않은 PR 이다. 코멘트를 달지 않고, 이전에 위험하다고
-              // 남긴 코멘트가 있으면(새 커밋으로 위험이 풀린 경우) 지운다.
-              body = null;
+              // 게이트가 꺼져 있거나 위험하지 않은 PR 이다. 참고(note)만 있으면 짧은 참고 코멘트를 남기고,
+              // 없으면 코멘트를 달지 않는다. 이전에 위험하다고 남긴 코멘트가 있으면(새 커밋으로 위험이 풀린 경우) 지운다.
+              body = (result.enabled && notes)
+                ? `${marker}\n## risk-gate\n\nℹ️ 참고 — 이 PR 은 위험하지 않아 승인은 필요 없습니다.${noteSection}`
+                : null;
             } else if (code === '0') {
-              body = `${marker}\n## risk-gate\n\n✅ 위험도 높음 — 승인됨 (${result.approval_note || ''})\n\n이유:\n${reasons}`;
+              body = `${marker}\n## risk-gate\n\n✅ 위험도 높음 — 승인됨 (${result.approval_note || ''})\n\n이유:\n${reasons}${noteSection}`;
             } else if (code === '1') {
-              body = `${marker}\n## risk-gate\n\n⚠️ 위험도 높음 — 사람의 승인이 필요합니다.\n\n이유:\n${reasons}\n\n승인 상태: ${result.approval_note || '승인이 없다.'}\n\n${result.next || ''}`;
+              body = `${marker}\n## risk-gate\n\n⚠️ 위험도 높음 — 사람의 승인이 필요합니다.\n\n이유:\n${reasons}\n\n승인 상태: ${result.approval_note || '승인이 없다.'}\n\n${result.next || ''}${noteSection}`;
             } else {
               let errText = '';
               try { errText = fs.readFileSync('risk-error.txt', 'utf8'); } catch (e) {}

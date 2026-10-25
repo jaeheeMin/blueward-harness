@@ -1612,8 +1612,8 @@ Closes #143</pre>
     <div class="tbl-wrap"><table>
       <tr><th>이런 PR 이면</th><th>승인</th><th>검사</th></tr>
       <tr><td>SRS(<code>docs/ssot/</code>)를 바꿨다</td><td><span class="pill r">항상 필요</span></td><td><code>ssot-approval</code></td></tr>
-      <tr><td>바뀐 줄이 300줄을 넘는다</td><td><span class="pill w">필요</span></td><td rowspan="7"><code>risk-gate</code></td></tr>
-      <tr><td>바뀐 파일이 10개를 넘는다</td><td><span class="pill w">필요</span></td></tr>
+      <tr><td>바뀐 줄이 300줄을 넘는다<br><span class="small">단, 소스(<code>src/</code>)만 바꾼 PR 은 경고만 붙고 승인은 필요 없어(설정한 저장소)</span></td><td><span class="pill w">필요</span></td><td rowspan="7"><code>risk-gate</code></td></tr>
+      <tr><td>바뀐 파일이 10개를 넘는다<br><span class="small">이것도 소스만 바꾼 PR 이면 경고만(설정한 저장소). Spec 같은 다른 파일이 하나라도 끼면 그대로 필요해</span></td><td><span class="pill w">필요</span></td></tr>
       <tr><td>위험 경로를 건드렸다<br><span class="small"><code>docs/ssot/</code> <code>docs/spec/</code> <code>rules/</code> <code>templates/</code> <code>conventions/</code> <code>.github/</code> <code>.claude/</code> <code>CLAUDE.md</code></span></td><td><span class="pill w">필요</span></td></tr>
       <tr><td>추가한 줄에 비밀값처럼 생긴 게 있다</td><td><span class="pill w">필요</span></td></tr>
       <tr><td>다른 검사가 실패했거나 아직 도는 중이다</td><td><span class="pill w">필요</span></td></tr>
