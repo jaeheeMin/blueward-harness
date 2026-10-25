@@ -1,4 +1,4 @@
-"""호출 워크플로의 트리거 `paths` 와 PR 검사 concurrency 를 검증한다(#411).
+"""호출 워크플로의 트리거 `paths` 를 검증한다(#411). concurrency 는 워크플로별 시험이 본다(#452 에서 옛 파일 시험을 옮겼다).
 
 Actions 분을 아끼려고 PR 내용과 무관하게 매번 돌던 검사를 파일 범위로 좁혔다. 좁힌 범위에서 검사 대상이
 빠지면 검사가 안 돌고 통과처럼 보이므로(원칙 7), doc-guard 의 paths 가 엔진이 실제로 보는 범위를 덮는지 본다.
@@ -127,23 +127,3 @@ def test_scaffold_risk_gate_yaml_은_엔진이_읽을_수_있다():
 
     text = (SKELETON / "dot-github" / "risk-gate.yaml").read_text(encoding="utf-8")
     assert risk_gate.load_config(text)["ai_review_paths"] == ["src/"]
-
-
-# --- concurrency --------------------------------------------------------------
-
-
-def test_PR_검사는_PR_번호_단위로_앞_실행을_취소한다():
-    ssot = _load(REUSABLE / "ssot-approval.yml")["jobs"]["check"]
-    assert ssot["concurrency"] == {
-        "group": "ssot-approval-${{ github.event.pull_request.number }}", "cancel-in-progress": True}
-    # push(after-merge) 에는 concurrency 를 두지 않는다 — 병합 뒤 감시는 취소되면 안 된다.
-    assert "concurrency" not in _load(REUSABLE / "ssot-approval.yml")["jobs"]["after-merge"]
-
-
-def test_PR_과_push_를_같이_받는_검사는_push_를_취소하지_않는다():
-    for name, job_id in (("doc-guard", "check"), ("gitleaks", "gitleaks")):
-        job = _load(REUSABLE / f"{name}.yml")["jobs"][job_id]
-        assert job["concurrency"] == {
-            "group": f"{name}-${{{{ github.event.pull_request.number || github.sha }}}}",
-            "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
-        }

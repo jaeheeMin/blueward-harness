@@ -1,7 +1,7 @@
 # main 에 PR 이 병합되면, 그 PR 이 대표 `[DEV-xxx]` 이슈를 Closes 했는데 진행 원장(audit/ledger)의
 # 해당 개발 건이 `완료` 가 아닌지 본다(#346, #445). 파일은 쓰지 않는다 — 원장 `완료` 는 /harness:deliver 가
 # 그 PR 에 처음부터 담는다. 완료가 아니면 이슈가 열린다. 판정 로직은 blueward-harness 저장소에서
-# 그때그때 내려받아 쓴다 — doc-guard.yml 과 같은 사정이다.
+# 그때그때 내려받아 쓴다 — pr-checks.yml 의 doc-guard 단계와 같은 사정이다.
 name: ledger-complete
 on:
   push:

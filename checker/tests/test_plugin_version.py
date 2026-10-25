@@ -56,7 +56,7 @@ def test_빌드_설정과_scripts_를_바꾸고_version_이_같으면_실패한�
 
 
 def test_재사용_워크플로를_바꾸고_version_이_같으면_실패한다():
-    wf = ".github/workflows/doc-guard.yml"
+    wf = ".github/workflows/pr-checks.yml"
     assert judge([wf], "0.10.17", "0.10.17", frozenset({wf})).code == 1
     assert judge([wf], "0.10.17", "0.10.18", frozenset({wf})).code == 0
 
@@ -64,7 +64,7 @@ def test_재사용_워크플로를_바꾸고_version_이_같으면_실패한다(
 def test_이_저장소_전용_워크플로는_배포물이_아니다():
     wf = ".github/workflows/checker.yml"
     assert judge([wf], "0.10.17", "0.10.17", frozenset()).code == 0
-    assert judge([wf], "0.10.17", "0.10.17", frozenset({".github/workflows/doc-guard.yml"})).code == 0
+    assert judge([wf], "0.10.17", "0.10.17", frozenset({".github/workflows/pr-checks.yml"})).code == 0
 
 
 def test_checker_안의_md_문서는_배포물이_아니다():
@@ -211,7 +211,7 @@ def test_스크립트가_모듈_진입점을_부른다(repo):
 
 
 def test_진입점_재사용_워크플로를_바꾸고_version_을_안_올리면_1(repo):
-    _write(repo, ".github/workflows/doc-guard.yml", "on:\n  workflow_call:\n")
+    _write(repo, ".github/workflows/pr-checks.yml", "on:\n  workflow_call:\n")
     _commit(repo)
     assert main(["--base", "main"]) == 1
 

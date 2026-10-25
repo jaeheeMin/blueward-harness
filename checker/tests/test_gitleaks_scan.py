@@ -19,7 +19,8 @@ from checker.tests.test_plugin_layout import _BASH, _HAS_BASH
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "gitleaks_scan.sh"
-WORKFLOW = REPO / ".github" / "workflows" / "gitleaks.yml"
+PR_CHECKS = REPO / ".github" / "workflows" / "pr-checks.yml"
+MAIN_CHECKS = REPO / ".github" / "workflows" / "main-checks.yml"
 SKELETON_MAIN_WORKFLOW = REPO / "plugins" / "harness" / "skills" / "scaffold" / "skeleton" / "dot-github" / "workflows" / "main-checks.yml"
 SKELETON_WORKFLOW = REPO / "plugins" / "harness" / "skills" / "scaffold" / "skeleton" / "dot-github" / "workflows" / "pr-checks.yml"
 HARNESS_CONFIG = REPO / "checker" / "gitleaks" / "harness.toml"
@@ -30,17 +31,29 @@ needs_bash = pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 스크
 
 # ---- 워크플로·설정 파일의 모양 ----
 
-def test_재사용_워크플로는_바이너리를_버전과_해시로_고정하고_gitleaks_action_을_쓰지_않는다():
-    text = WORKFLOW.read_text(encoding="utf-8")
+@pytest.mark.parametrize("workflow", [PR_CHECKS, MAIN_CHECKS], ids=["pr-checks", "main-checks"])
+def test_재사용_워크플로는_바이너리를_버전과_해시로_고정하고_gitleaks_action_을_쓰지_않는다(workflow):
+    # #452: 옛 gitleaks.yml 을 지웠다. gitleaks 는 pr-checks·main-checks 의 `check` job 단계다.
+    text = workflow.read_text(encoding="utf-8")
     data = yaml.safe_load(text)
     assert "workflow_call" in data[True]
-    env = data["jobs"]["gitleaks"]["env"]
+    step = next(s for s in data["jobs"]["check"]["steps"] if s.get("id") == "gitleaks")
+    env = step["env"]
     assert str(env["GITLEAKS_VERSION"]).count(".") == 2
     assert len(env["GITLEAKS_SHA256"]) == 64
-    assert "sha256sum -c" in text
+    assert "sha256sum -c" in step["run"]
     assert "gitleaks/gitleaks-action" not in text
     assert "fetch-depth: 0" in text
-    assert "scripts/gitleaks_scan.sh" in text
+    assert "scripts/gitleaks_scan.sh" in step["run"]
+
+
+def test_pr_checks_와_main_checks_는_같은_gitleaks_바이너리를_고정한다():
+    envs = []
+    for workflow in (PR_CHECKS, MAIN_CHECKS):
+        data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        step = next(s for s in data["jobs"]["check"]["steps"] if s.get("id") == "gitleaks")
+        envs.append((step["env"]["GITLEAKS_VERSION"], step["env"]["GITLEAKS_SHA256"]))
+    assert envs[0] == envs[1]
 
 
 def test_호출_워크플로는_스켈레톤에_있고_재사용_워크플로를_한_줄로_부른다():

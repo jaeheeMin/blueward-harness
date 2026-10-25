@@ -2,9 +2,8 @@
 #
 # 왜 합쳤나(#412): Actions 는 job 개수로 과금한다. gitleaks·doc-guard·ssot-approval·risk-gate·pr-queue 는
 # 평균 13~46초짜리인데 job 마다 1분씩 깎여, PR 푸시 1번에 5분이 나간다. 이 다섯을 한 job(`check`)의
-# 단계로 옮겨 엔진 checkout·uv 설치도 한 번만 하고 1분만 쓴다. 이 파일이 다음 옛 워크플로 다섯을 대체한다
-# (옛 파일은 public-cloud 의 옛 caller 가 `@stable` 로 부르니 한 판 동안 남기고 로직이 둘인 것을 감수한다.
-# 재사용 워크플로는 job 단위로만 부를 수 있어 옛 파일의 단계를 가져다 쓸 수 없다. 교체는 #420).
+# 단계로 옮겨 엔진 checkout·uv 설치도 한 번만 하고 1분만 쓴다. 이 파일이 다음 옛 워크플로 다섯을 대체했고
+# 옛 파일은 #452 에서 지웠다(아래 "옛 ○○.yml" 은 단계가 어디서 왔는지 적은 이력이다).
 #
 #   gitleaks.yml, doc-guard.yml, ssot-approval.yml(check job), risk-gate.yml(check job), pr-queue.yml
 #

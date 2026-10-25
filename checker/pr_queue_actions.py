@@ -2,7 +2,7 @@
 
     python -m checker.pr_queue_actions --repo owner/repo [--event-path 이벤트.json] [--summary-file 요약.md]
 
-재사용 워크플로 `pr-queue.yml` 이 부른다. Claude 를 안 쓰는 사람도 같은 정보를 받게 하려는 것이다.
+`pr-checks.yml`·`pr-review.yml`·`main-checks.yml` 의 pr-queue 단계와 이 저장소의 `pr-queue-self.yml` 이 부른다. Claude 를 안 쓰는 사람도 같은 정보를 받게 하려는 것이다.
 `checker.pr_queue.compute` 로 열린 PR 전체를 한 번 계산하고, 열린 PR 마다 다음을 한다(닫힌 PR 은 건드리지 않는다).
 
 1. 코멘트 하나(github-actions 봇, 마커 `<!-- pr-queue -->`)를 만들거나 갱신한다. 시각 같은 흔들리는 값을

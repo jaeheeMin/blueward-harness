@@ -365,7 +365,7 @@ doc-guard --clean <파일...> [--out-dir <곳>]
 | 껍데기 | 언제 | 무엇을 막나 | 어디에 |
 |---|---|---|---|
 | 플러그인 훅 | 팀원 PC 에서 문서를 저장할 때 | 텍스트 문서 | `plugins/harness/hooks/` |
-| GitHub Actions | 커밋해서 올릴 때 | 모든 형식 | `.github/workflows/doc-guard.yml` |
+| GitHub Actions | 커밋해서 올릴 때 | 모든 형식 | `.github/workflows/pr-checks.yml`(PR)·`main-checks.yml`(main push)의 doc-guard 단계 |
 
 둘이 하는 일은 같다 — 기준 폴더를 찾고, 엔진을 부르고, 종료코드로 분기한다. 끝만 다르다.
 훅은 저장을 막고 Actions 는 job 을 실패시키며 PR 에 결과를 남긴다.

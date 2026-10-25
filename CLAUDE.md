@@ -14,7 +14,8 @@
 - `checker/` — 검사 엔진. 문서·코드를 읽어 규칙 위반 목록을 낸다.
 - `plugins/harness/` — 엔진을 부르는 훅과 협업 Skill·규칙을 담은 Claude Code
   플러그인. 엔진은 들어 있지 않다. 이 저장소 자체가 마켓플레이스다.
-- `.github/workflows/doc-guard.yml` — Project Repository 가 불러 쓰는 재사용 워크플로.
+- `.github/workflows/pr-checks.yml`·`pr-review.yml`·`main-checks.yml` — Project Repository 가 불러 쓰는
+  재사용 워크플로(PR 검사·승인 재판정·main push 검사. gitleaks·doc-guard·ssot-approval·risk-gate·pr-queue 가 단계로 들어 있다).
 
 **Project Repository** 는 고객사 프로젝트마다 따로 생기며, 산출물과 함께 검사
 기준(`templates/`, `rules/`)을 담는다. 검사는 거기서 PR 을 열 때 걸리고, 엔진만

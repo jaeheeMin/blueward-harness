@@ -48,9 +48,10 @@ Actions 는 팀원 PC 에 설치된 플러그인을 쓸 수 없다. 엔진을 `p
   (문서·코드 저장 검사, git 가드, SAP ADT MCP 가드, 활성화 기록, 세션 시작·종료), 서브에이전트 3개
   (researcher·reviewer·implementer), 협업 규칙 5개와 공통 개발 규칙을 담는다. 이 저장소가 마켓플레이스다.
   자세한 것은 [`plugins/harness/README.md`](plugins/harness/README.md).
-- **재사용 워크플로(`.github/workflows/`).** Project Repository 가 불러 쓴다. `doc-guard.yml`(문서·코드 검사),
-  `ssot-approval.yml`(SRS 변경 승인), `risk-gate.yml`(위험한 PR 승인), `gitleaks.yml`(비밀정보),
-  `ai-review.yml`(위험한 PR 포함 모든 PR 의 AI 리뷰, 기본 꺼짐. 새 줄에 비밀값 패턴이 보이면 diff 를 AI 에 보내지 않고 검사 불능으로 실패), `pr-tamper-alert.yml`(작성자가 아닌 계정의 push·리뷰 해제 알림), `ledger-complete.yml`(병합 뒤 진행 원장이 완료인지 확인, 아니면 이슈), `pr-queue.yml`(열린 PR 의 병합 순서를 PR 코멘트와 `merge-order` status 로 보이고 차례가 되면 알림). `/harness:scaffold` 가 호출 쪽 파일을 만든다. `checker.yml`(테스트, plugin.json version 올림과 열린 PR 끼리 version 겹침 확인) 과
+- **재사용 워크플로(`.github/workflows/`).** Project Repository 가 불러 쓴다. `pr-checks.yml`(PR 마다: 비밀정보 gitleaks,
+  문서·코드 검사 doc-guard, SRS 변경 승인 ssot-approval, 위험한 PR 승인 risk-gate, 병합 순서 pr-queue 를 한 job 의 단계로),
+  `pr-review.yml`(승인이 들어오면 ssot-approval·risk-gate 를 다시 판정하고 옛 실패 실행을 다시 돌림), `main-checks.yml`(main push 때 같은 검사와 병합 뒤 감지),
+  `ai-review.yml`(위험한 PR 포함 모든 PR 의 AI 리뷰, 기본 꺼짐. 새 줄에 비밀값 패턴이 보이면 diff 를 AI 에 보내지 않고 검사 불능으로 실패), `pr-tamper-alert.yml`(작성자가 아닌 계정의 push·리뷰 해제 알림), `ledger-complete.yml`(병합 뒤 진행 원장이 완료인지 확인, 아니면 이슈), `pr-checks.yml` 등의 pr-queue 단계(열린 PR 의 병합 순서를 PR 코멘트와 `merge-order` status 로 보이고 차례가 되면 알림). `/harness:scaffold` 가 호출 쪽 파일을 만든다. `checker.yml`(테스트, plugin.json version 올림과 열린 PR 끼리 version 겹침 확인), `pr-queue-self.yml`(이 저장소 자신의 병합 순서)과
   `human-merge-alert.yml` 은 이 저장소 자신이 쓴다.
 - **양식 기반 문서.** 고객사 양식을 읽는 양식 지도(`templates/forms/*.yaml`) → `/harness:spec` 이 쓰는
   작업본(`## 양식 항목`) → 양식 xlsx 산출. 오피스 파일의 검사는 Actions 가 맡는다.
@@ -115,7 +116,7 @@ main 에 직접 커밋하거나 맨손 `git push` 하면 훅이 거부한다. �
 자세한 규칙은 `plugins/harness/rules/` 가 정본이다. 요약은 `CLAUDE.md` 에 있다.
 
 **위험한 PR 만 승인을 요구한다(#102).** 고객사 Project Repository 에는 `/harness:scaffold` 가
-`.github/risk-gate.yaml`(기준)과 `.github/workflows/risk-gate.yml`(PR 검사·병합 뒤 감지)을
+`.github/risk-gate.yaml`(기준)과 `.github/workflows/pr-checks.yml`·`main-checks.yml`(PR 검사·병합 뒤 감지)을
 넣는다. 크기, 위험 경로, 비밀값, 다른 검사 결과 중 하나라도 걸리면 승인자 목록의 사람(작성자
 제외)이 마지막 커밋에 Approve 해야 통과하고, Claude 병합 훅도 같은 판정(`checker.risk_gate`)으로
 거부한다. 기준은 `.github/risk-gate.yaml` 에서 고치고 파일을 지우면 꺼진다. 이 저장소

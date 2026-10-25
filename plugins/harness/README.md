@@ -47,7 +47,7 @@ plugins/harness/
 
 플러그인 이름은 `harness` 지만, 문서 검사 기능 자체는 여전히 **doc-guard** 라고
 부른다. 훅 스크립트 이름(`pre_write_guard.py`), 검사 메시지("doc-guard: ..."),
-문서 저장소가 불러 쓰는 재사용 워크플로(`.github/workflows/pr-checks.yml` 안의 doc-guard 단계. 옛 `doc-guard.yml` 은 한 판만 남는다, #420),
+문서 저장소가 불러 쓰는 재사용 워크플로(`.github/workflows/pr-checks.yml` 안의 doc-guard 단계. 옛 `doc-guard.yml` 은 #452 에서 지웠다),
 검사 엔진의 CLI 이름(`doc-guard`)은 이름을 바꾸지 않았다. 바뀐 것은 이
 플러그인 자체의 이름뿐이다.
 

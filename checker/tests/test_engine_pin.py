@@ -330,7 +330,7 @@ def test_release_tag_paths_가_PR_검사의_배포_범위와_같다():
     samples = [
         "plugins/harness/skills/start/SKILL.md", "plugins/harness/.claude-plugin/plugin.json",
         "checker/engine.py", "checker/README.md", "checker/tests/test_x.py", "checker/sub/NOTES.md",
-        "pyproject.toml", "uv.lock", "scripts/risk_gate.py", ".github/workflows/doc-guard.yml",
+        "pyproject.toml", "uv.lock", "scripts/risk_gate.py", ".github/workflows/pr-checks.yml",
         ".github/workflows/checker.yml", ".github/workflows/release-tag.yml", "docs/status.md", "README.md",
     ]
     for f in samples:

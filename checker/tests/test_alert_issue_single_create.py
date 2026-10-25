@@ -16,8 +16,15 @@ import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 # 라벨·담당자를 붙이던 알림 워크플로들.
-ALERTS = ["risk-gate.yml", "human-merge-alert.yml", "pr-tamper-alert.yml", "release-tag.yml"]
-RISK_STEP = "승인 없이 위험한 변경이 들어왔으면 이슈를 연다"
+# risk-gate 알림은 옛 risk-gate.yml 이 아니라 main-checks.yml 의 `risk-gate-issue` 단계다(#452). 이 이름은 그 단계의 run 을 가리킨다.
+RISK = "main-checks.yml#risk-gate-issue"
+ALERTS = [RISK, "human-merge-alert.yml", "pr-tamper-alert.yml", "release-tag.yml"]
+
+
+def _text(name: str) -> str:
+    if name == RISK:
+        return _risk_run()
+    return (WORKFLOWS / name).read_text(encoding="utf-8")
 
 
 def _logical_lines(text: str) -> list[str]:
@@ -35,17 +42,17 @@ def _rest_calls(text: str) -> list[str]:
 
 
 def _risk_run() -> str:
-    wf = yaml.safe_load((WORKFLOWS / "risk-gate.yml").read_text(encoding="utf-8"))
+    wf = yaml.safe_load((WORKFLOWS / "main-checks.yml").read_text(encoding="utf-8"))
     for job in wf["jobs"].values():
         for step in job["steps"]:
-            if step.get("name") == RISK_STEP:
+            if step.get("id") == "risk-gate-issue":
                 return step["run"]
-    raise AssertionError(f"step 을 찾지 못했다: {RISK_STEP}")
+    raise AssertionError("main-checks.yml 에서 risk-gate-issue 단계를 찾지 못했다")
 
 
 @pytest.mark.parametrize("name", ALERTS)
 def test_create_는_한_번만_부르고_재시도하지_않는다(name):
-    text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    text = _text(name)
     cmds = _create_commands(text)
     assert len(cmds) == 1, cmds
     assert "||" not in cmds[0]
@@ -54,14 +61,14 @@ def test_create_는_한_번만_부르고_재시도하지_않는다(name):
 
 @pytest.mark.parametrize("name", ALERTS)
 def test_create_에_담당자와_라벨을_묶지_않는다(name):
-    text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    text = _text(name)
     cmd = _create_commands(text)[0]
     assert "--assignee" not in cmd and "--label" not in cmd
 
 
 @pytest.mark.parametrize("name", ALERTS)
 def test_라벨과_담당자는_REST_로_따로_붙이고_실패는_경고만_남긴다(name):
-    text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    text = _text(name)
     calls = _rest_calls(text)
     kinds = {("labels" if "/labels" in c else "assignees") for c in calls}
     assert kinds == {"labels", "assignees"}, calls
@@ -72,9 +79,9 @@ def test_라벨과_담당자는_REST_로_따로_붙이고_실패는_경고만_�
     assert "gh issue edit" not in text
 
 
-@pytest.mark.parametrize("name", ["risk-gate.yml", "human-merge-alert.yml", "release-tag.yml"])
+@pytest.mark.parametrize("name", [RISK, "human-merge-alert.yml", "release-tag.yml"])
 def test_담당자는_소유자가_사용자일_때만_지정한다(name):
-    text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    text = _text(name)
     assert ".owner.type" in text
     m = re.search(r'if \[ "\$owner_type" = "User" \]; then\n(.*?)\n\s*else\n', text, re.S)
     assert m, "owner_type 분기 블록이 없다"
@@ -86,7 +93,7 @@ def test_담당자는_소유자가_사용자일_때만_지정한다(name):
 
 @pytest.mark.parametrize("name", ALERTS)
 def test_create_가_실패하거나_번호가_비면_조용히_넘어가지_않는다(name):
-    text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    text = _text(name)
     assert re.search(r'if ! url="\$\(gh issue create[^\n]*\)"; then\s*\n\s*echo "::error[^\n]*\n\s*exit 1', text)
     assert re.search(r'if \[ -z "\$num" \]; then\s*\n\s*echo "::error[^\n]*\n\s*exit 1', text)
 

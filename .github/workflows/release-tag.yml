@@ -43,16 +43,11 @@ on:
       - uv.lock
       - scripts/**
       - .github/workflows/ai-review.yml
-      - .github/workflows/doc-guard.yml
-      - .github/workflows/gitleaks.yml
       - .github/workflows/ledger-complete.yml
       - .github/workflows/main-checks.yml
       - .github/workflows/pr-checks.yml
-      - .github/workflows/pr-queue.yml
       - .github/workflows/pr-review.yml
       - .github/workflows/pr-tamper-alert.yml
-      - .github/workflows/risk-gate.yml
-      - .github/workflows/ssot-approval.yml
   workflow_dispatch:
 
 # 태그 push 에 contents: write, 실패 알림 이슈에 issues: write. 그 밖의 권한은 주지 않는다.
