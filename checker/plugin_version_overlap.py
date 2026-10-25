@@ -1,8 +1,12 @@
-"""열린 PR 끼리 plugin.json version 이 겹치는지 본다(#324).
+"""열린 PR 끼리 plugin.json version 이 겹치는지 본다(#324, 실패로 바꿈 #470).
 
 두 PR 이 main 의 같은 version 에서 출발해 둘 다 같은 값(0.10.81)으로 올리면 git 은 충돌 없이 병합한다.
-먼저 병합된 쪽이 `v{version}` 태그를 가져가고 다른 쪽은 태그가 이미 있어 배포되지 못한다(#319/#317, #351/#353).
-PR 에서 미리 **경고**한다. 막지 않는다(#315 와 같은 방침).
+먼저 병합된 쪽이 `v{version}` 태그를 가져가고 다른 쪽은 태그가 이미 있어 배포되지 못한다(#319/#317, #351/#353,
+#462/#464 가 0.10.115 로 겹쳐 병합됨). 경고만 하면 체크가 초록이라 병합 판단에서 놓쳤다(#470) —
+겹치면 **위반(실패)** 이다.
+
+규칙: 검사가 도는 순간 같은 version 을 쓰는 다른 열린 PR 이 있으면 지금 PR 이 실패한다(먼저 차지한 쪽이 이긴다).
+상대 PR 의 체크는 다시 돌지 않으므로 늦게 검사받는 쪽이 올려야 한다. 메시지에 올릴 다음 값을 적는다.
 
 네트워크를 쓰지 않는 판정이다. 읽는 일은 `scripts/check_plugin_version_overlap.py` 가 한다.
 입력(`info`):
@@ -22,7 +26,7 @@ PR 에서 미리 **경고**한다. 막지 않는다(#315 와 같은 방침).
 """
 from __future__ import annotations
 
-from checker.pairing import CANNOT_CHECK, PASS
+from checker.pairing import CANNOT_CHECK, PASS, VIOLATION
 from checker.plugin_version import parse_version
 from checker.version_overlap import NOT_NEEDED, RETRY_HINT, _title
 
@@ -47,7 +51,7 @@ def _cannot(detail: str) -> dict:
 
 
 def check_plugin_version_overlap(info: dict, self_number: int) -> dict:
-    """결과: pass(경고 포함)/cannot_check/not_needed. 위반은 없다."""
+    """결과: pass/violation(겹침)/cannot_check/not_needed. 한 건을 못 읽은 PR 은 `unchecked` 에 남는다."""
     status = info.get("status")
     if status == NOT_NEEDED:
         return {"status": NOT_NEEDED, "warnings": []}
@@ -75,17 +79,31 @@ def check_plugin_version_overlap(info: dict, self_number: int) -> dict:
             continue
         if same:
             clash.append(p)
-    warnings = []
     if clash:
         who = ", ".join(f"#{p['number']}({_title(p.get('title'))})" for p in clash)
-        nxt = next_patch(mine)
-        again = f"version 을 {nxt} 처럼 한 칸 더 올려야" if nxt else "version 을 한 칸 더 올려야"
-        warnings.append({
-            "version": mine,
-            "prs": [{"number": p["number"], "title": p.get("title") or ""} for p in clash],
-            "message": (
-                f"plugin.json version {mine} 을 열린 PR {who} 도 씁니다. 먼저 병합되는 쪽이 v{mine} 태그를 갖고, "
-                f"다른 쪽은 그 뒤 sync 해서 {again} 배포됩니다."
-            ),
-        })
-    return {"status": PASS, "warnings": warnings, "compared": len(others) - len(unchecked), "unchecked": unchecked}
+        # main·이 PR·다른 열린 PR 의 version 을 모두 넘는 다음 값. 읽은 PR 만 안다.
+        seen = [mine, main] + [p.get("version") for p in others]
+        top = max((v for v in seen if _ok(v)), key=parse_version)
+        nxt = next_patch(top)
+        raise_to = f"{nxt} 로" if nxt else "한 칸 더"
+        return {
+            "status": VIOLATION, "warnings": [],
+            "violations": [{
+                "version": mine, "next": nxt,
+                "prs": [{"number": p["number"], "title": p.get("title") or ""} for p in clash],
+                "message": (
+                    f"이 PR 의 version {mine} 을 열린 PR {who} 이 이미 씁니다. 이 PR 의 version 을 {raise_to} 올려 다시 푸시하세요"
+                    f"(먼저 병합되는 쪽만 v{mine} 태그를 받아 배포됩니다)."
+                ),
+            }],
+            "compared": len(others) - len(unchecked), "unchecked": unchecked,
+        }
+    return {"status": PASS, "warnings": [], "violations": [], "compared": len(others) - len(unchecked), "unchecked": unchecked}
+
+
+def _ok(version) -> bool:
+    try:
+        parse_version(version)
+    except ValueError:
+        return False
+    return True
