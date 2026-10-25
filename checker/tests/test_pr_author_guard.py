@@ -21,7 +21,9 @@ from checker.tests.test_plugin_layout import (
     REPO_ROOT,
     _add_fake_gh,
     _fake_uvx_prelude,
+    _make_dispatch_uvx,
     _run_guard,
+    _run_guard_with_fake_uvx,
 )
 
 pytestmark = [
