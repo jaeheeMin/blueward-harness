@@ -281,7 +281,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.115, public-cloud main 기준 (2026-10-25)</div>
+      <div class="note">harness 0.10.117, public-cloud main 기준 (2026-10-26)</div>
     </div>
   </nav>
 
@@ -460,11 +460,11 @@ svg text { font-family: var(--body); fill: var(--fg); }
       <ul class="plain">
         <li><b>자동</b> — Project Repository 의 <code>.claude/settings.json</code> 에 자동 업데이트(<code>autoUpdate: true</code>)가 켜져 있어서, Claude Code 를 쓰다가 첫 메시지를 보낸 뒤 <b>최대 10분 안</b>에 새 판을 받아 둬. 열려 있는 세션은 처음 받은 버전을 계속 쓰고, 새 판은 <b>다음에 열 때부터</b> 적용돼. 켜 두지 않으면 자동으로는 안 받아져(<code>/plugin</code> → Marketplaces → Enable auto-update).</li>
         <li><b>열린 세션에서 바로</b> — <code>/reload-plugins</code> 를 쳐. 훅·MCP 서버가 새 판으로 바뀌어.</li>
-        <li><b>한 번에 (<code>/harness:update</code>)</b> — 터미널 없이 Claude 에 <code>/harness:update</code> 를 입력해. 마켓플레이스 새로고침 → 업데이트를 대신 실행하고, <b>지금 폴더</b>의 설치 판이 실제로 올라갔는지 확인해(폴더마다 설치 기록이 따로라 다른 폴더가 갱신되는 일이 있었어). 이 폴더에 설치 기록이 없거나 안 올랐으면 이 폴더에 다시 설치해. 끝나면 <code>/reload-plugins</code> 를 네가 직접 입력해. 판을 확인하지 못하면 "갱신 확인 불능" 이라고 알려 줘.</li>
+        <li><b>한 번에 (<code>/harness:update</code>)</b> — 터미널 없이 Claude 에 <code>/harness:update</code> 를 입력해. 마켓플레이스 새로고침 → 업데이트를 대신 실행하고, <b>이 세션에 실제로 실린 판</b>이 최신인지로 확인해(같은 저장소의 작업장마다 설치 기록이 따로라 다른 작업장 기록이 갱신되거나 세션이 그 판을 싣는 일이 있었어). 업데이트 뒤에도 이 세션은 reload 전까지 옛 판이라, <code>/reload-plugins</code> 를 네가 직접 입력하고 <code>/harness:update</code> (또는 <code>/harness:version</code>)를 한 번 더 입력해서 확인해. reload 뒤에도 최신이 아니면 "갱신 확인 불능" 이라고 알려 주니 새 세션을 열어. <b><code>claude plugin uninstall</code> 은 하지 마</b> — 묻지 않고 공유 <code>.claude/settings.json</code> 의 <code>enabledPlugins</code> 를 비워서, 커밋되면 팀원 전체의 harness 가 꺼져.</li>
         <li><b>손으로</b> — 터미널에서 순서대로. 폴더별로 깔았으니 그 작업장 폴더에서 해.<pre style="margin-top:8px">claude plugin marketplace update blueward-harness
 claude plugin update harness@blueward-harness --scope project</pre><span class="small">끝나면 "Restart to apply changes" 가 떠. Claude Code 를 다시 열거나 열린 세션에서 <code>/reload-plugins</code>.</span></li>
         <li><b>작업 중에 새 판이 나오면</b> — 메시지를 보낼 때 Claude 가 한 번 알려 줘(세션당, 같은 판은 한 번). 갱신은 알려 준 방법(<code>/harness:update</code> 포함)으로 네가 직접 해. <code>HARNESS_NO_UPDATE_NOTICE=1</code> 로 끌 수 있어.</li>
-        <li><b>이 폴더 판 확인 (<code>/harness:version</code>)</b> — 설치된 플러그인마다 <b>지금 폴더</b>에서 쓰는 판, 받아 둔 최신 판, 상태(최신 / 갱신 있음 / 이 폴더에 설치 없음 / 최신 판 확인 불가)를 표로 보여 줘. 폴더마다 설치 기록이 따로라 <code>claude plugin list</code> 로는 어느 줄이 이 폴더 것인지 헷갈리는 걸 풀어 줘. 보기만 하고 갱신은 안 해 — 갱신이 필요하면 <code>/harness:update</code>.</li>
+        <li><b>이 폴더 판 확인 (<code>/harness:version</code>)</b> — 설치된 플러그인마다 <b>지금 폴더</b>에서 쓰는 판, harness 는 <b>이 세션에 실린 판</b>, 받아 둔 최신 판, 상태(최신 / 갱신 있음 / 이 폴더에 설치 없음 / 최신 판 확인 불가)를 표로 보여 줘. harness 의 상태는 설치 기록이 아니라 실린 판으로 정해. 이 폴더에서 안 쓰는 플러그인 줄은 빼고(harness 는 남겨), 다 보려면 <code>--all-entries</code>. 폴더마다 설치 기록이 따로라 <code>claude plugin list</code> 로는 어느 줄이 이 폴더 것인지 헷갈리는 걸 풀어 줘. 보기만 하고 갱신은 안 해 — 갱신이 필요하면 <code>/harness:update</code>.</li>
         <li><b>지금 버전 확인</b> — 터미널에서 <code>claude plugin list</code>. <code>harness@blueward-harness</code> 아래 <code>Version</code> 이 지금 받아 둔 판이야. 이 가이드 레일 아래 "harness 0.10.xx 기준" 이 최신이라고 보면 돼.</li>
       </ul>
     </section>
@@ -1590,6 +1590,7 @@ Closes #143</pre>
     <tr><th>이런 말이 나오면</th><th>왜</th><th>이렇게 해</th></tr>
     <tr><td>main 에서 커밋 거절</td><td>진열대에서 직접 만들려고 함</td><td>SRS·Spec 작업이면 그 스킬을 다시 불러 브랜치부터, 그 밖의 일은 <code>/harness:start</code></td></tr>
     <tr><td>맨손 <code>git push</code> 거절</td><td>창구를 안 거침(<code>git status &amp;&amp; git push</code> 처럼 다른 명령과 묶어도 마찬가지)</td><td><code>/harness:deliver</code></td></tr>
+    <tr><td><code>.claude/settings.json</code> 커밋·푸시 거절: "enabledPlugins 에서 harness 가 빠지거나 꺼진다"</td><td><code>claude plugin uninstall</code> 같은 게 공유 설정에서 harness 를 지웠음. 올라가면 팀원 전체의 harness 가 꺼짐. 파일을 못 읽어도 검사 불능으로 거절</td><td><code>git restore --staged --worktree .claude/settings.json</code> 로 되돌려(푸시 단계면 메시지의 <code>--source</code> 명령). 끄는 게 진짜 의도면 사람이 정해</td></tr>
     <tr><td><code>--force</code> 거절</td><td>남의 작업을 지울 수 있음</td><td>쓰지 않아. deliver 가 안전한 방법을 씀</td></tr>
     <tr><td>브랜치 이름 형식 거절</td><td>규칙과 다름</td><td><code>git branch -m feat/12-new-name</code></td></tr>
     <tr><td>문서 저장 거절</td><td>템플릿과 다름 (빠진 절, 틀린 파일명)</td><td>메시지의 사유대로 고쳐서 다시 저장</td></tr>
