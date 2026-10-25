@@ -1,14 +1,16 @@
-"""PR 이 main 에 병합되면 진행 원장(`audit/ledger/*.md`)의 개발 건을 `완료` 로 바꾼다(#346).
+"""main 에 병합된 PR 이 대표 `[DEV-xxx]` 이슈를 닫았는데 진행 원장(`audit/ledger/*.md`)의 그 행이
+`완료` 가 아니면 알린다(#346, #445). 파일을 쓰지 않는 검사기다.
 
-재사용 워크플로 `.github/workflows/ledger-complete.yml` 이 main 에 push 가 들어올 때마다
-`apply` 를 부른다. 병합된 PR 본문의 `Closes #N` 이 가리키는 이슈 중 제목이 `[DEV-xxx]` 로
-시작하는 대표 이슈만 대상이다(`... (DEV-xxx)` 하위 작업 이슈와 DEV 번호 없는 이슈는 아니다).
-원장의 그 행 상태 칸을 `완료`, 마지막 PR 칸을 `#<PR>` 로 바꾸고 파일에 쓴다. 커밋과 push 는
-워크플로가 한다.
+원장 `완료` 는 `/harness:deliver` 가 대표 이슈를 `Closes` 하는 PR 에 처음부터 담아 PR 과 함께
+병합된다. main 이 보호 규칙(PR 필수) 아래 있으면 Actions 가 직접 push 할 수 없고, push 용 deploy
+key secret 은 브랜치 push 워크플로로 새어 나가 규칙을 우회하는 뒷문이 되므로(#445) 쓰지 않는다.
+재사용 워크플로 `.github/workflows/ledger-complete.yml` 이 main 에 push 가 들어올 때마다 `check` 를
+부른다. 병합된 PR 본문의 `Closes #N` 이 가리키는 이슈 중 제목이 `[DEV-xxx]` 로 시작하는 대표
+이슈만 대상이다(`... (DEV-xxx)` 하위 작업 이슈와 DEV 번호 없는 이슈는 아니다).
 
-**판정 불능(종료 2)은 아무 파일도 바꾸지 않는다(CLAUDE.md 원칙 7).** gh 호출 실패, 원장 파일은
-있는데 그 ID 행이 없거나 둘 이상, 표 형식을 못 읽음, 이슈 본문이 가리킨 파일이 없음. 위반(종료 1)
-이라는 개념은 없다 — 할 일이 없거나(0) 못 정하거나(2) 둘 중 하나다.
+종료 0 은 통과(모두 완료이거나 볼 것 없음), 1 은 위반(`완료` 아닌 행이 있다), 2 는 **판정 불능**이다
+(CLAUDE.md 원칙 7). gh 호출 실패, 원장 파일은 있는데 그 ID 행이 없거나 둘 이상, 표 형식을 못 읽음,
+이슈 본문이 가리킨 파일이 없음은 통과도 위반도 아니다.
 
 GitHub 호출은 `checker.ssot_approval.GhClient` 를 그대로 쓴다. 표 파싱은 `checker.pairing` 의
 것을 재사용한다.
@@ -25,10 +27,10 @@ from checker.pairing import LEDGER_DIR, section_span, table_indexed
 from checker.ssot_approval import GhClient, GhError, _force_utf8
 
 EXIT_OK = 0
+EXIT_VIOLATION = 1
 EXIT_UNKNOWN = 2
 
 DONE = "완료"
-OWN_COMMIT_SUBJECT = "docs: 진행 원장 완료 표시"
 SECTION = "개발 건"
 
 _CLOSES = re.compile(r"\b(?:closes?|closed|fixes|fix|fixed|resolves?|resolved)\s*:?\s+#(\d+)", re.IGNORECASE)
@@ -39,7 +41,7 @@ _DEV_NUM = re.compile(r"^DEV-(\d+)$", re.IGNORECASE)
 
 
 class Unknown(Exception):
-    """판정 불능. 종료코드 2 로 이어지고, 파일은 아무것도 바꾸지 않는다."""
+    """판정 불능. 종료코드 2 로 이어진다."""
 
 
 _INLINE_CODE = re.compile(r"`[^`\n]*`")
@@ -102,86 +104,42 @@ def _same_dev(a: str, b: str) -> bool:
     return na is not None and na == nb
 
 
-def _split_line(line: str) -> tuple[str, str]:
-    """(줄 내용, 줄 끝 문자)."""
-    content = line.splitlines()[0] if line.splitlines() else ""
-    return content, line[len(content):]
-
-
-def _raw_cells(content: str) -> tuple[list[str], str, str, bool]:
-    """표 줄을 칸 원문(공백 포함)으로 나눈다. (칸들, 앞 공백, 뒤 공백, 끝이 `|` 인가)."""
-    lead = content[: len(content) - len(content.lstrip())]
-    trail = content[len(content.rstrip()):]
-    core = content.strip()
-    parts = _UNESCAPED_PIPE.split(core)
-    # core 는 `|` 로 시작하므로 parts[0] 는 빈 문자열이다.
-    closed = core.endswith("|") and len(parts) > 1
-    return (parts[1:-1] if closed else parts[1:]), lead, trail, closed
-
-
-def _with_value(raw: str, value: str) -> str:
-    """칸 원문의 앞뒤 공백을 살려 값만 바꾼다. 공백이 없던 칸은 한 칸씩 둔다."""
-    if not raw.strip():
-        return f" {value} "
-    lead = raw[: len(raw) - len(raw.lstrip())] or " "
-    trail = raw[len(raw.rstrip()):] or " "
-    return f"{lead}{value}{trail}"
-
-
-def _find_rows(path: Path, rel: str, dev: str, *, skip_without_section: bool) -> tuple[list[str], list[dict]]:
-    """원장 파일 한 개에서 `dev` 행을 찾는다. (줄들(줄 끝 포함), [{line, header, cells}]).
+def _find_rows(path: Path, rel: str, dev: str, *, skip_without_section: bool) -> list[dict]:
+    """원장 파일 한 개에서 `dev` 행을 찾는다. [{line, state}] (`line` 은 0부터).
 
     `## 개발 건` 절이 아예 없는 파일은 `skip_without_section` 이면 원장이 아닌 것으로 보고 건너뛴다(빈 결과).
     절은 있는데 표를 못 읽으면 항상 Unknown 이다.
     """
     try:
-        # 줄 끝 문자를 그대로 두려고 newline="" 로 읽는다(read_text 는 CRLF 를 LF 로 바꾼다).
-        # BOM 은 utf-8 로 읽으면 첫 줄 앞에 남아 그대로 다시 써진다.
         with open(path, encoding="utf-8", newline="") as f:
             text = f.read()
     except (OSError, UnicodeDecodeError) as exc:
         raise Unknown(f"`{rel}` 를 읽지 못했다: {exc}") from exc
-    lines = text.splitlines(keepends=True)
-    parse = text[1:] if text.startswith("﻿") else text
+    parse = text[1:] if text.startswith("﻿") else text  # BOM
     span = section_span(parse, SECTION)
     if span is None:
         if skip_without_section:
-            return lines, []
+            return []
         raise Unknown(f"`{rel}` 에서 `## {SECTION}` 절을 찾지 못했다(표 형식을 못 읽음).")
     start, end = span
     table = table_indexed(parse.splitlines()[start:end])
     if table is None:
         raise Unknown(f"`{rel}` 의 개발 건 표 머리(`ID` 열)를 찾지 못했다(표 형식을 못 읽음).")
     header, rows = table
-    for col in ("상태", "마지막 PR"):
-        if col not in header:
-            raise Unknown(f"`{rel}` 의 개발 건 표 머리에 `{col}` 열이 없다(표 형식을 못 읽음).")
+    if "상태" not in header:
+        raise Unknown(f"`{rel}` 의 개발 건 표 머리에 `상태` 열이 없다(표 형식을 못 읽음).")
+    col = header.index("상태")
+    body = parse.splitlines()
     found = []
     for offset, cells in rows:
         if cells and _same_dev(cells[0], dev):
-            found.append({"line": start + offset, "header": header, "cells": cells})
-    return lines, found
-
-
-def _rewrite_row(rel: str, line: str, header: list[str], pr: int) -> tuple[str, bool]:
-    """행 한 줄의 상태·마지막 PR 칸을 바꾼 새 줄과 바뀌었는지."""
-    for col in ("상태", "마지막 PR"):
-        if col not in header:
-            raise Unknown(f"`{rel}` 의 개발 건 표 머리에 `{col}` 열이 없다(표 형식을 못 읽음).")
-    content, ending = _split_line(line)
-    raw, lead, trail, closed = _raw_cells(content)
-    if len(raw) != len(header):
-        raise Unknown(f"`{rel}` 의 행 `{content.strip()}` 의 칸 수가 표 머리와 다르다(표 형식을 못 읽음).")
-    new = list(raw)
-    changed = False
-    for col, value in (("상태", DONE), ("마지막 PR", f"#{pr}")):
-        i = header.index(col)
-        if raw[i].strip() != value:
-            new[i] = _with_value(raw[i], value)
-            changed = True
-    if not changed:
-        return line, False
-    return f"{lead}|{'|'.join(new)}{'|' if closed else ''}{trail}{ending}", True
+            # pairing 의 칸 나누기는 `\|` 도 칸 경계로 세므로, 이 줄은 이스케이프를 살려 다시 나눈다.
+            line = body[start + offset].strip()
+            raw = [c.strip() for c in _UNESCAPED_PIPE.split(line.strip("|"))]
+            if len(raw) <= col:
+                raise Unknown(f"`{rel}` 의 {dev} 행에 `상태` 칸이 없다(표 형식을 못 읽음).")
+            found.append({"line": start + offset, "state": raw[col]})
+    return found
 
 
 _SQUASH_PR = re.compile(r"\(#(\d+)\)\s*$")
@@ -216,27 +174,47 @@ def _merged_prs(client: GhClient, repo: str, sha: str, subject: str) -> list[dic
     return sorted(merged, key=lambda p: p.get("merged_at") or "")
 
 
-def apply(client: GhClient, repo: str, shas: list[str], root: Path) -> dict:
-    """원장을 고쳐 쓰고 결과를 돌려준다. 판정 불능이면 `Unknown` 이나 `GhError` 를 올리고 아무것도 쓰지 않는다.
+def expand_shas(root: Path, sha: str, before: str | None) -> list[str]:
+    """push 한 번에 커밋이 여럿이면 `before..sha` 를 오래된 것부터 전부, 아니면 `[sha]`.
 
-    한 push 에 커밋이 여럿일 수 있어 SHA 를 여럿 받는다. 각 커밋의 병합 PR 을 순서대로 모두 처리하고,
-    같은 DEV 가 여러 번 나오면 마지막 PR 기준이다.
+    `before` 가 비었거나 전부 0(새 브랜치)이거나 히스토리에 없으면 `[sha]` 하나로 본다.
+    """
+    if not before or set(before) == {"0"}:
+        return [sha]
+    try:
+        have = subprocess.run(["git", "-C", str(root), "cat-file", "-e", f"{before}^{{commit}}"],
+                              capture_output=True, timeout=30)
+        if have.returncode != 0:
+            return [sha]
+        done = subprocess.run(["git", "-C", str(root), "rev-list", "--reverse", f"{before}..{sha}"],
+                              capture_output=True, text=True, encoding="utf-8", timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Unknown(f"커밋 범위 {before[:7]}..{sha[:7]} 를 읽지 못했다: {exc}") from exc
+    if done.returncode != 0:
+        raise Unknown(f"커밋 범위 {before[:7]}..{sha[:7]} 를 읽지 못했다: {done.stderr.strip()}")
+    return done.stdout.split() or [sha]
+
+
+def check(client: GhClient, repo: str, shas: list[str], root: Path) -> dict:
+    """병합 PR 이 닫은 대표 [DEV-xxx] 이슈의 원장 행이 `완료` 인지 본다. 아무 파일도 쓰지 않는다.
+
+    판정 불능이면 `Unknown` 이나 `GhError` 를 올린다. 한 push 에 커밋이 여럿일 수 있어 SHA 를 여럿 받고,
+    각 커밋의 병합 PR 을 모두 본다. 같은 DEV 를 여러 PR 이 닫았으면 마지막 PR 기준이다.
+    status: ok(모두 완료) / skipped(볼 것 없음) / violation(완료가 아닌 행이 있다).
     """
     root = Path(root)
     ledger_dir = root / LEDGER_DIR
     if not ledger_dir.is_dir():
-        return {"status": "skipped", "prs": [], "changed": [], "reason": "audit/ledger 가 없다(원장을 쓰지 않는 저장소)"}
+        return {"status": "skipped", "prs": [], "pending": [], "reason": "audit/ledger 가 없다(원장을 쓰지 않는 저장소)"}
 
     prs: list[dict] = []
     for sha in shas:
         subject = _commit_subject(root, sha)
-        if subject == OWN_COMMIT_SUBJECT:  # 이 워크플로가 만든 커밋은 건너뛴다
-            continue
         for pr in _merged_prs(client, repo, sha, subject):
             if all(int(pr["number"]) != int(q["number"]) for q in prs):
                 prs.append(pr)
     if not prs:
-        return {"status": "skipped", "prs": [], "changed": [], "reason": "병합 PR 없음"}
+        return {"status": "skipped", "prs": [], "pending": [], "reason": "병합 PR 없음"}
 
     # DEV -> (PR 번호, 이슈). 나중 PR 이 앞선 것을 덮는다.
     targets: dict[str, tuple[int, dict]] = {}
@@ -247,13 +225,11 @@ def apply(client: GhClient, repo: str, shas: list[str], root: Path) -> dict:
             if dev:
                 targets[dev] = (int(pr["number"]), issue)
     if not targets:
-        return {"status": "skipped", "prs": [], "changed": [],
-                "reason": "완료 대상 아님(대표 [DEV-xxx] 이슈를 닫지 않았다)"}
+        return {"status": "skipped", "prs": [], "pending": [],
+                "reason": "확인 대상 아님(대표 [DEV-xxx] 이슈를 닫지 않았다)"}
 
-    # 먼저 전부 계산하고, 하나라도 못 정하면 아무것도 쓰지 않는다.
-    new_text: dict[str, list[str]] = {}
-    changed: list[str] = []
-    unchanged: list[str] = []
+    pending: list[dict] = []
+    done: list[str] = []
     used_prs: list[int] = []
     for dev, (pr_no, issue) in targets.items():
         hint = ledger_file_hint(issue.get("body"), dev)
@@ -264,64 +240,61 @@ def apply(client: GhClient, repo: str, shas: list[str], root: Path) -> dict:
             candidates = [hint_path]
         else:
             candidates = sorted(ledger_dir.glob("*.md"))
-        hits: list[tuple[str, list[str], dict]] = []
+        hits: list[tuple[str, dict]] = []
         for path in candidates:
             rel = path.resolve().relative_to(root.resolve()).as_posix()
-            lines, found = _find_rows(path, rel, dev, skip_without_section=not hint)
-            lines = new_text.get(rel, lines)
-            for row in found:
-                hits.append((rel, lines, row))
+            for row in _find_rows(path, rel, dev, skip_without_section=not hint):
+                hits.append((rel, row))
         if not hits:
             where = f"`{hint}`" if hint else "`audit/ledger/*.md`"
             raise Unknown(f"{dev} 행을 {where} 에서 찾지 못했다.")
         if len(hits) > 1:
-            places = ", ".join(f"`{rel}`:{row['line'] + 1}" for rel, _, row in hits)
-            raise Unknown(f"{dev} 행이 둘 이상이다({places}). 어느 것을 바꿀지 정할 수 없다.")
-        rel, lines, row = hits[0]
-        lines = list(lines)
-        lines[row["line"]], did = _rewrite_row(rel, lines[row["line"]], row["header"], pr_no)
-        new_text[rel] = lines
-        if did:
-            changed.append(dev)
+            places = ", ".join(f"`{rel}`:{row['line'] + 1}" for rel, row in hits)
+            raise Unknown(f"{dev} 행이 둘 이상이다({places}). 어느 것을 볼지 정할 수 없다.")
+        rel, row = hits[0]
+        if row["state"] == DONE:
+            done.append(dev)
+        else:
+            pending.append({"dev": dev, "pr": pr_no, "file": rel, "state": row["state"]})
             if pr_no not in used_prs:
                 used_prs.append(pr_no)
-        else:
-            unchanged.append(dev)
 
-    for rel, lines in new_text.items():
-        # 줄 끝 문자를 그대로 두려고 newline="" 로 쓴다.
-        with open(root / rel, "w", encoding="utf-8", newline="") as f:
-            f.write("".join(lines))
-    status = "changed" if changed else "unchanged"
-    reason = "원장을 고쳤다" if changed else "이미 완료로 표시돼 있어 바꿀 것이 없다"
-    return {"status": status, "prs": used_prs, "changed": changed, "unchanged": unchanged, "reason": reason}
+    if pending:
+        names = ", ".join(f"{p['dev']}(PR #{p['pr']}, 상태 `{p['state'] or '빈 칸'}`)" for p in pending)
+        return {"status": "violation", "prs": used_prs, "pending": pending, "done": done,
+                "reason": f"대표 이슈를 닫은 PR 이 병합됐는데 원장 행이 `{DONE}` 이 아니다: {names}"}
+    return {"status": "ok", "prs": [], "pending": [], "done": done, "reason": "원장 행이 모두 완료다"}
 
 
 def _print(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False))
 
 
-def cmd_apply(args: argparse.Namespace) -> int:
+def cmd_check(args: argparse.Namespace) -> int:
+    root = Path(args.root)
     try:
-        result = apply(GhClient(), args.repo, args.sha, Path(args.root))
+        shas = args.sha if len(args.sha) > 1 else expand_shas(root, args.sha[0], args.before)
+        result = check(GhClient(), args.repo, shas, root)
     except (GhError, Unknown) as exc:
-        _print({"status": "unknown", "prs": [], "changed": [], "reason": f"판정 불능: {exc}"})
+        _print({"status": "unknown", "prs": [], "pending": [], "reason": f"판정 불능: {exc}"})
         return EXIT_UNKNOWN
     _print(result)
-    return EXIT_OK
+    return EXIT_VIOLATION if result["status"] == "violation" else EXIT_OK
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ledger_complete",
-        description="병합된 PR 이 닫은 대표 [DEV-xxx] 이슈의 진행 원장 행을 완료로 바꾼다.",
+        description="병합된 PR 이 닫은 대표 [DEV-xxx] 이슈의 진행 원장 행이 완료인지 본다.",
     )
     sub = parser.add_subparsers(dest="mode", required=True)
-    ap = sub.add_parser("apply", help="main 에 들어온 커밋들에 대해 원장을 고쳐 쓴다")
-    ap.add_argument("--repo", required=True, help="owner/repo")
-    ap.add_argument("--sha", required=True, action="append", help="main 에 들어온 커밋 SHA(여러 번 줄 수 있다. 오래된 것부터)")
-    ap.add_argument("--root", required=True, help="Project Repository 작업 트리")
-    ap.set_defaults(func=cmd_apply)
+    ck = sub.add_parser("check", help="main 에 들어온 커밋들의 병합 PR 이 닫은 대표 이슈의 원장 행을 본다")
+    ck.add_argument("--repo", required=True, help="owner/repo")
+    ck.add_argument("--sha", required=True, action="append",
+                    help="main 에 들어온 커밋 SHA(여러 번 줄 수 있다. 오래된 것부터)")
+    ck.add_argument("--before", help="push 직전의 main 커밋. --sha 가 하나일 때 before..sha 의 모든 커밋을 본다")
+    ck.add_argument("--root", required=True, help="Project Repository 작업 트리")
+    ck.set_defaults(func=cmd_check)
     return parser
 
 

@@ -87,10 +87,10 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
      멘션한다(#370). Teams 웹훅(`TEAMS_PLUGIN_ALERT_WEBHOOK`)이 있으면 Teams 로도 알린다. 무료 요금제는
      노란 대기여도 Merge 버튼이 잠기지 않는다. 순서는 PR 본문의 `먼저: #번호` 줄 등으로 정해진다.
    - `.github/workflows/ledger-complete.yml` 은 main 에 PR 이 병합되면 그 PR 이 Closes 한 대표 `[DEV-xxx]` 이슈의
-     진행 원장 행을 `완료` 로 바꿔 main 에 직접 커밋한다(#346). 하위 작업 이슈만 닫았거나 대표 이슈를 안 닫은 PR 은
-     그대로 둔다(그땐 사람이 바꾼다). 못 바꾸면 이슈가 열린다. main 에 보호 규칙(ruleset, PR 필수)을 켰다면 이
-     push 가 막히므로, 쓰기 권한 deploy key 를 만들어 ruleset bypass 에 Deploy keys 로 넣고 비밀키를 Actions
-     secret `LEDGER_DEPLOY_KEY` 로 등록한다(#445). 규칙이 없으면 필요 없다.
+     진행 원장 행이 `완료` 인지 확인만 한다(#346, #445). 원장은 쓰지 않는다 — 대표 이슈를 닫는 PR 에는
+     `/harness:deliver` 가 처음부터 `완료` 를 담는다. `완료` 가 아니거나 확인을 못 했으면 이슈가 열린다. 하위 작업
+     이슈만 닫았거나 대표 이슈를 안 닫은 PR 은 확인하지 않는다(그땐 사람이 PR 로 바꾼다). caller 권한은 `contents: read`
+     면 된다. main 보호 규칙(PR 필수)을 켜도 deploy key 같은 push 용 secret 은 필요 없다.
    - SRS 는 `/harness:srs` Skill 로 만든다. 지금은 `docs/ssot/SRS.md` 가
      빈 스텁으로만 있다.
 
@@ -126,7 +126,7 @@ env/adt-tiers.example.yaml         SAP MCP 서버별 쓰기 허용 표 예시(#1
 .github/risk-gate.yaml             위험도 기준(크기·위험 경로·비밀값·검사 통과). 위험한 PR 만 승인자가 Approve 해야 통과
 .github/workflows/ai-review.yml    위험한 PR 포함 코드(src/)를 바꾼 PR 에 Claude AI 리뷰를 돌리는 워크플로(#125, #360, #411). 기본 꺼짐
 .github/workflows/pr-tamper-alert.yml 작성자가 아닌 계정이 PR 에 push 하거나 리뷰를 해제하면 이슈·Teams 로 알리는 워크플로(#150)
-.github/workflows/ledger-complete.yml 대표 [DEV-xxx] 이슈를 닫는 PR 이 병합되면 진행 원장을 완료로 바꿔 커밋하는 워크플로(#346)
+.github/workflows/ledger-complete.yml 대표 [DEV-xxx] 이슈를 닫는 PR 이 병합되면 진행 원장이 완료인지 확인하고 아니면 이슈를 여는 워크플로(#346, #445)
 .claude/settings.json              harness Plugin 자동 설치 안내(#89). 이미 있으면 두 항목만 합친다
 ```
 

@@ -8,11 +8,9 @@
 #
 #   gitleaks.yml, doc-guard.yml, risk-gate.yml(after-merge job), ssot-approval.yml(after-merge job), pr-queue.yml
 #
-# ledger-complete.yml 은 합치지 않고 따로 둔다. 진행 원장을 main 에 직접 커밋·push 하려면 `contents: write` 가
-# 필요한데, 이 job 은 gitleaks 를 위해 외부 바이너리를 받아 실행한다. 쓰기 토큰을 외부 바이너리를 받는 단계와
-# 한 job 에 두지 않으려는 것이다. 그래서 이 파일의 caller 예시에 `contents: write` 는 없고, 있어서도 안 된다
-# (시험이 본다). 재시도 루프(`scripts/ledger_complete_loop.sh`)와 "concurrency 로 줄 세우지 않는다" 원칙도
-# ledger-complete 쪽에 그대로 있다.
+# ledger-complete.yml 은 합치지 않고 따로 둔다. 예전에는 진행 원장을 main 에 직접 커밋·push 하느라 `contents: write`
+# 가 필요했고(지금은 원장을 쓰지 않는 검사기라 읽기만 한다, #445), 이 job 은 gitleaks 를 위해 외부 바이너리를 받아
+# 실행한다. 이 파일의 caller 예시에 `contents: write` 는 없고, 있어서도 안 된다(시험이 본다).
 #
 # 단계 순서: 바뀐 파일 목록 → gitleaks → doc-guard(→ 실패 이슈) → risk-gate(→ 이슈) → ssot-approval(→ 이슈)
 # → pr-queue → 종합. 단계 규칙은 pr-checks.yml 과 같다(그쪽 머리 주석을 본다). 검사 단계 넷은

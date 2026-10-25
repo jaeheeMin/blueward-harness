@@ -183,8 +183,8 @@ def test_caller_예시는_push_main_과_읽기_권한만_정한다():
     assert job["secrets"] == {"TEAMS_PLUGIN_ALERT_WEBHOOK": "${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}"}
 
 
-def test_쓰기_토큰은_ledger_complete_에만_있다():
-    # main-checks 의 caller 예시에는 contents: write 가 없고, ledger-complete 는 따로 남아 있다.
+def test_ledger_complete_도_쓰기_토큰이_없다():
+    # 원장을 쓰지 않는 검사기라 읽기만 한다(#445). main-checks 와 별도 파일로 남아 있다.
     ledger = _load(LEDGER)
-    assert ledger["jobs"]["complete"]["permissions"]["contents"] == "write"
+    assert ledger["jobs"]["complete"]["permissions"]["contents"] == "read"
     assert "gitleaks" not in LEDGER.read_text(encoding="utf-8").split("jobs:", 1)[1]
