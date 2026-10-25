@@ -618,7 +618,7 @@ $ssot_err"
       hm_paths="$hm_paths 등 ${hm_total}개"
     fi
     if [ "$auto" = auto ]; then
-      deny "이 PR 은 사람이 직접 병합하는 경로($hm_paths)를 바꿔서 자동 병합을 걸 수 없어요. GitHub 에서 사람이 병합하거나 자동 병합을 켜 주세요."
+      deny "이 PR 은 사람이 직접 병합하는 경로($hm_paths)를 바꿔서 자동 병합을 걸 수 없어요. 다음: 사람이 GitHub 화면에서 병합하거나, 사람이 그 PR 에 자동 병합을 켜 주세요."
     fi
     deny "PR #$pr_number 은 사람이 직접 merge 해야 하는 경로($hm_paths)를 바꿨습니다. Claude 는 이 PR 을 merge 할 수 없습니다. 다음: 사람이 할 일 - 사용자에게 이 PR 의 GitHub 화면(PR 페이지 아래쪽)에서 Merge 버튼을 눌러 병합해 달라고 요청하십시오."
   else
