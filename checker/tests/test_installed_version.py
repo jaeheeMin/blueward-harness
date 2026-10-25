@@ -257,9 +257,14 @@ def test_all_표와_JSON_출력(tmp_path):
         env={**__import__("os").environ, **env}, check=True,
     ).stdout
     table = run()
-    assert "| 플러그인 | 범위 | 이 폴더 판 | 이 세션에 실린 판 | 받아 둔 최신 판 | 상태 | 다른 폴더 설치 |" in table
-    assert f"| {PID} | project | 0.10.96 | - | 0.10.98 | 갱신 있음 | 1곳 |" in table
-    assert "| x@m | user | 1.0.0 | - | 1.0.0 | 최신 | - |" in table
+    assert "| 플러그인 | 판 | 최신 판 | 상태 |" in table and "범위" not in table.split("\n- ")[0]
+    assert f"| {PID} | 0.10.96 | 0.10.98 | 갱신 있음 |" in table
+    assert "| x@m | 1.0.0 | 1.0.0 | 최신 |" in table
+    assert "--all-entries" in table  # 갱신 있음이라 안내 줄이 붙는다
+    full = run("--all-entries")
+    assert "| 플러그인 | 범위 | 이 폴더 판 | 이 세션에 실린 판 | 받아 둔 최신 판 | 상태 | 다른 폴더 설치 |" in full
+    assert f"| {PID} | project | 0.10.96 | - | 0.10.98 | 갱신 있음 | 1곳 |" in full
+    assert "| x@m | user | 1.0.0 | - | 1.0.0 | 최신 | - |" in full
     data = json.loads(run("--json"))
     assert {r["plugin"]: r["state"] for r in data["rows"]} == {PID: "stale", "x@m": "current"}
 
@@ -397,7 +402,7 @@ def test_all_이_폴더에서_안_쓰는_플러그인_줄은_기본으로_빼고
     rows = _rows(r)
     assert set(rows) == {PID, "used@m", "here@m"}
     assert rows[PID]["state"] == "missing" and rows[PID]["other_project_entries"] == 0
-    assert r["hidden"] == 2 and "2개는 뺐다" in iv.render_table(r) and "--all-entries" in iv.render_table(r)
+    assert r["hidden"] == 2
     full = iv.all_plugins(str(tmp_path / "w"), env, all_entries=True)
     assert set(_rows(full)) == {PID, "used@m", "here@m", "elsewhere@m", "ghost@m"} and full["hidden"] == 0
     assert _rows(full)["elsewhere@m"]["other_project_entries"] == 1
@@ -413,7 +418,8 @@ def test_all_같은_저장소_worktree_에만_설치된_플러그인은_남긴�
     rows = _rows(r)
     assert set(rows) == {"sib@m", PID}
     assert rows["sib@m"]["same_repo_entries"] == [{"folder": "main", "version": "1.0.0"}]
-    assert "같은 저장소: main 1.0.0" in iv.render_table(r)
+    assert "같은 저장소" not in iv.render_table(r)
+    assert "같은 저장소: main 1.0.0" in iv.render_table(r, all_entries=True)
 
 
 def test_all_harness_상태는_실린_판으로_정한다(tmp_path):
@@ -423,11 +429,28 @@ def test_all_harness_상태는_실린_판으로_정한다(tmp_path):
     r = iv.all_plugins(str(tmp_path / "w"), env, loaded_root=_loaded(tmp_path, "0.10.115"))
     row = _rows(r)[PID]
     assert (row["installed"], row["loaded"], row["state"]) == ("0.10.113", "0.10.115", "current")
-    assert f"| {PID} | project | 0.10.113 | 0.10.115 | 0.10.115 | 최신 |" in iv.render_table(r)
+    assert f"| {PID} | project | 0.10.113 | 0.10.115 | 0.10.115 | 최신 |" in iv.render_table(r, all_entries=True)
+    # 기본 4칸 표는 실린 판만 보이고, 최신이면 안내 줄이 없다
+    table = iv.render_table(r)
+    assert f"| {PID} | 0.10.115 | 0.10.115 | 최신 |" in table
+    assert "0.10.113" not in table and "--all-entries" not in table
     # 실린 판이 낮으면 설치 항목이 최신이어도 갱신 있음
     env = _install(tmp_path, {PID: [_e(tmp_path / "w", "0.10.115")]})
     r = iv.all_plugins(str(tmp_path / "w"), env, loaded_root=_loaded(tmp_path, "0.10.113", "old"))
     assert _rows(r)[PID]["state"] == "stale"
+    assert f"| {PID} | 0.10.113 | 0.10.115 | 갱신 있음 |" in iv.render_table(r)
+    assert "--all-entries" in iv.render_table(r)
+
+
+def test_all_다른_플러그인은_설치_판을_보이고_갱신_있음이면_안내_줄이_붙는다(tmp_path):
+    _mk(tmp_path, "w")
+    env = _install(tmp_path, {"x@m": [_e(tmp_path / "w", "1.0.0")]})
+    _market(tmp_path, "m", [("x", "1.1.0")])
+    table = iv.render_table(iv.all_plugins(str(tmp_path / "w"), env))
+    assert "| x@m | 1.0.0 | 1.1.0 | 갱신 있음 |" in table and "--all-entries" in table
+    env = _install(tmp_path, {"y@n": [_e(tmp_path / "w", "1.0.0")]})
+    _market(tmp_path, "n", [("y", "1.0.0")])
+    assert "--all-entries" not in iv.render_table(iv.all_plugins(str(tmp_path / "w"), env))
 
 
 def test_all_실린_판을_못_읽으면_harness_는_확인_불가이고_사유가_표에_나온다(tmp_path):
@@ -436,7 +459,8 @@ def test_all_실린_판을_못_읽으면_harness_는_확인_불가이고_사유�
     _market(tmp_path, "blueward-harness", [("harness", "0.10.115")])
     r = iv.all_plugins(str(tmp_path / "w"), env, loaded_root=str(tmp_path / "nowhere"))
     assert _rows(r)[PID]["state"] == "unknown" and r["loaded_error"]
-    assert "실린 판을 읽지 못했다" in iv.render_table(r)
+    assert "실린 판을 읽지 못했다" in iv.render_table(r) and "--all-entries" in iv.render_table(r)
+    assert f"| {PID} | 0.10.115 | 0.10.115 | 최신 판 확인 불가 |" in iv.render_table(r)
 
 
 def test_all_entries_는_all_없이_쓰면_오류():
