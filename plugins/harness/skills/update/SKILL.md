@@ -60,5 +60,7 @@ uv run --no-project python "<이 스킬의 base directory>/../../hooks/installed
   `installed_plugins.json` 직접 수정은 하지 않는다.
 - `claude plugin ...` 가 거부되거나 실패하면(훅이 막은 경우 포함) 우회하지 말고 멈춰 사유를 알린다.
 - 판을 확인하지 못한 것(`unknown`, `unreadable`)을 "최신" 이나 "갱신 실패" 로 뭉개지 않는다. 확인 불능이라고 말한다.
+- `install` 이 `.claude/settings.json` 의 키 순서만 바꿔 저장할 수 있다. 내용(JSON 값)이 같으면 그대로 둬도
+  훅이 미커밋으로 세지 않는다. 원하면 `git restore .claude/settings.json` 으로 되돌린다(스킬이 대신 하지 않는다).
 - `CLAUDE_CONFIG_DIR` 이 설정돼 있으면(Orca 같은 프로필 환경) 그 아래 `plugins/installed_plugins.json` 을 읽는다.
   스크립트가 알아서 하므로 `~/.claude` 를 직접 읽지 않는다.

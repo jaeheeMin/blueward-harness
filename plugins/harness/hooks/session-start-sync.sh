@@ -372,6 +372,15 @@ fi
 # 있어서, 그런 경우 자동 동기화 자체를 건너뛴다(자동 stash·자동 커밋 금지).
 changed="$(git status --porcelain --untracked-files=all | grep -Ev '^.. "?((.*/)?\.superpowers/|.*handoff.*\.md"?$)' || true)"
 
+# install 이 .claude/settings.json 의 키 순서만 바꿔 저장했으면(JSON 값이 HEAD 와 같으면)
+# 변경으로 세지 않는다(#448). 판정은 Stop 훅과 같은 json_same_as_head.py. 못 하면 센다.
+# 상태는 ` M`(작업 트리만)·`M `(인덱스만)일 때만 본다 — `MM` 은 스테이징된 값 변경을 놓칠 수 있어 센다.
+if printf '%s\n' "$changed" | grep -qE '^( M|M ) \.claude/settings\.json$' \
+   && command -v uv >/dev/null 2>&1 \
+   && uv run --no-project python "$(dirname "${BASH_SOURCE[0]}")/json_same_as_head.py" .claude/settings.json </dev/null >/dev/null 2>&1; then
+  changed="$(printf '%s\n' "$changed" | grep -vE '^.. \.claude/settings\.json$' || true)"
+fi
+
 # 이미 진행 중인 리베이스나 병합이 있으면 자동 동기화를 시도하지 않는다. 그
 # 위에 또 리베이스를 걸면 실패하거나, 진행 중이던 것과 뒤섞여 저장소를 더
 # 꼬아 놓을 수 있다.

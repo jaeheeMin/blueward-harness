@@ -91,6 +91,17 @@ is_excluded_path() {
   return 1
 }
 
+# install 이 .claude/settings.json 의 키 순서만 바꿔 저장한 경우는 변경으로 세지 않는다(#448).
+# HEAD 판과 JSON 값이 같을 때만 건너뛰고, 판정 못 하면 변경으로 센다. 파일은 고치지 않는다.
+# 세션 시작 훅(session-start-sync.sh)도 같은 json_same_as_head.py 를 쓴다.
+settings_order_only() {
+  [ "$2" = ".claude/settings.json" ] || return 1
+  # MM 은 인덱스와 작업 트리가 서로 달라 작업 트리만 HEAD 와 비교하면 스테이징된 변경을 놓친다 — 변경으로 센다.
+  case "$1" in ".M" | "M.") ;; *) return 1 ;; esac
+  command -v uv >/dev/null 2>&1 || return 1
+  uv run --no-project python "$(dirname "${BASH_SOURCE[0]}")/json_same_as_head.py" "$2" </dev/null >/dev/null 2>&1  # 상태 읽는 루프의 stdin 을 먹지 않게
+}
+
 # git status --porcelain=v2 -z 한 번으로 브랜치·HEAD·upstream·앞선 커밋 수와 바뀐 파일을 읽는다.
 # 채우는 값: s_branch s_oid s_upstream s_ahead s_has_ab changed(= "상태 경로" 줄들)
 #           untracked_arr tracked_arr (사본에서 뺀 경로 제외) sig_status
@@ -140,6 +151,7 @@ scan_status() {
           *) strip_tokens "$entry" 10 ;;
         esac
         is_excluded_path "$tok_rest" && continue
+        settings_order_only "$xy" "$tok_rest" && continue
         changed="${changed}${xy} ${tok_rest}"$'\n'
         tracked_arr+=("$tok_rest")
         sig_status="${sig_status}${xy} ${tok_rest}"$'\n'
@@ -415,7 +427,8 @@ reused=0
 cur_ref=""
 if [ -n "$r_snap_commit" ] && [ -f "$git_common/$SNAP_REF" ]; then
   IFS= read -r cur_ref < "$git_common/$SNAP_REF" || true
-  cur_ref="${cur_ref%$''}"
+  cur_ref="${cur_ref%$'
+'}"
 fi
 if [ -n "$sig" ] && [ "$sig" = "$r_sig" ] && [ -z "$r_snap_failed" ] \
    && { [ -z "$r_snap_commit" ] || [ "$cur_ref" = "$r_snap_commit" ]; }; then
