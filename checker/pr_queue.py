@@ -1,6 +1,7 @@
 """열린 PR 의 상태와 병합 순서를 GitHub 에서 한 번 계산해 보여 준다(#370).
 
     python -m checker.pr_queue --repo owner/repo [--mine | --all] [--json] [--quiet-empty] [--verbose]
+    python -m checker.pr_queue --repo owner/repo --team [--days N] [--stale-days N] [--json]   # 팀원별 현황(#438, checker/pr_team.py)
 
 팀원이 자기 PR 이 어디까지 왔는지, 무엇부터 병합해야 하는지 모른다. 여러 세션에서 PR 을 만들면
 세션끼리도 모른다. 세션 시작 훅과 `/harness:prs` 와 deliver 가 이 모듈 한 곳에서 같은 계산을 받는다.
@@ -1165,6 +1166,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max-rows", type=int, help="줄기 표에 싣는 줄기를 이 수까지로 줄인다(나머지는 '외 n개 줄기')")
     parser.add_argument("--verbose", action="store_true", help="승인 사유 전문·다음 할 일·같은 파일 주의를 표 아래에 덧붙인다")
+    parser.add_argument("--team", action="store_true", help="팀원별 진행·막힘·오래 머문 일·맡은 개발 건(저장소 전체, #438)")
+    parser.add_argument("--days", type=int, default=7, help="--team: 병합한 PR 을 볼 최근 일수(기본 7)")
+    parser.add_argument("--stale-days", type=int, default=3, help="--team: 열린 PR 이 이 일수를 넘게 움직임이 없으면 오래 머문 일(기본 3)")
     parser.add_argument("--quiet-empty", action="store_true", help="--mine 에서 내 PR 이 없으면 아무것도 내지 않는다")
     return parser
 
@@ -1191,6 +1195,11 @@ def run(args: argparse.Namespace, client: GhClient | None = None) -> tuple[int, 
             res = compute_before(client, repo, args.pr)
             code = EXIT_CANNOT_CHECK if res["status"] != "ok" else (EXIT_BEFORE_OPEN if res["before"] else EXIT_OK)
             return code, json.dumps(res, ensure_ascii=False) if args.json else render_before(res)
+        if args.team:
+            from checker import pr_team
+
+            team = pr_team.compute_team(client, repo, days=args.days, stale_days=args.stale_days)
+            return EXIT_OK, json.dumps(team, ensure_ascii=False) if args.json else pr_team.render_team(team)
         login = _login(client) if args.mine else None
         full = compute(client, repo, login, mine=False)
         result = filter_mine(full, login or "") if args.mine else full
@@ -1209,7 +1218,10 @@ def run(args: argparse.Namespace, client: GhClient | None = None) -> tuple[int, 
 
 def main(argv: list[str] | None = None) -> int:
     _force_utf8()
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.team and (args.mine or args.pr is not None):
+        parser.error("--team 은 저장소 전체를 보는 보기라 --mine·--pr 과 함께 쓰지 않는다")
     code, text = run(args)
     if text:
         print(text)

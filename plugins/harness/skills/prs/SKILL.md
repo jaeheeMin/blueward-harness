@@ -1,6 +1,6 @@
 ---
 name: prs
-description: 내 열린 PR 의 상태와 병합 순서를 GitHub 에서 계산해 보여 주고, 다음에 할 일을 알려 준다. 사용자가 "내 PR 어때?", "PR 상태", "뭐부터 병합해?", "PR 순서 알려줘", "내 PR 지금 어디까지 왔어?" 라고 말할 때 사용한다. `--all` 을 주면 저장소의 열린 PR 전체를 본다. 이럴 땐 쓰지 않는다 — PR 을 새로 만들거나 갱신하는 말이면 deliver 스킬로, 원격 변경을 로컬로 받는 말이면 sync 스킬로, 새 작업의 이슈와 브랜치면 start 스킬로.
+description: 내 열린 PR 의 상태와 병합 순서를 GitHub 에서 계산해 보여 주고, 다음에 할 일을 알려 준다. 사용자가 "내 PR 어때?", "PR 상태", "뭐부터 병합해?", "PR 순서 알려줘", "내 PR 지금 어디까지 왔어?" 라고 말할 때 사용한다. `--all` 을 주면 저장소의 열린 PR 전체를 본다. "팀원별로 보여 줘", "팀 현황", "누가 막혔어?" 라고 하면 `--team` 으로 팀원별 진행·막힘·오래 머문 일을 본다. 이럴 땐 쓰지 않는다 — PR 을 새로 만들거나 갱신하는 말이면 deliver 스킬로, 원격 변경을 로컬로 받는 말이면 sync 스킬로, 새 작업의 이슈와 브랜치면 start 스킬로.
 compatibility: GitHub CLI(gh, 로그인 상태)와 uv 가 필요하다. 읽기만 하며 PR·브랜치·파일을 바꾸지 않는다.
 ---
 
@@ -13,6 +13,7 @@ GitHub 에서 한 번에 하고, 세션을 시작할 때 나오는 "내 PR" 알�
 인자: 없으면 내 PR 만(`--mine`), `--all` 이면 저장소의 열린 PR 전체를 본다.
 `--verbose` 를 더하면 표 아래에 긴 승인 사유·다음 할 일·"같은 파일" 주의를 예전 표 형식으로 덧붙인다.
 `--max-rows N` 은 줄기 표의 줄 수를 줄인다(세션 시작 알림용).
+`--team` 은 팀원별 현황이다(아래 "팀원별 현황"). "팀원별로 보여 줘", "팀 현황", "누가 막혔어?" 라고 하면 이 옵션으로 부른다.
 
 ## 절차
 
@@ -54,6 +55,47 @@ GitHub 에서 한 번에 하고, 세션을 시작할 때 나오는 "내 PR" 알�
      쓴다(저장소가 여럿이라 링크가 어느 저장소의 PR 인지 보여 준다).
 4. 순서 판정의 근거(base 브랜치, 본문 `먼저:` 줄, 같은 DEV 의 SRS→Spec→개발, plugin.json version)가 궁금하다고 하면
    `--json` 으로 다시 불러 `after_reasons` 를 보여 준다.
+
+## 팀원별 현황(`--team`)
+
+어드민이 팀원 각자의 진행·막힘·오류를 판단하는 보기다. 저장소 전체를 보므로 `--mine`·`--pr` 과 함께 쓰지 않는다(`--all` 은 붙여도 된다).
+절차 1 의 명령에서 `--mine` 대신 `--team` 을 쓴다: `python -m checker.pr_queue --team [--days N] [--stale-days N] [--json]`.
+`--days` 는 병합한 PR 을 볼 최근 일수(기본 7), `--stale-days` 는 열린 PR 이 이 일수를 **넘게** 움직임이 없으면 "오래 머문 일"
+로 보는 기준(기본 3)이다. 담당 이슈는 14일을 넘게 움직임이 없을 때다. 시각은 KST 로 나온다.
+"움직임" 은 **사람이 마지막으로 손댄 때**다(봇 갱신에 흔들리는 `updatedAt` 은 쓰지 않는다). PR 은 마지막 커밋·열린 때·사람(봇 제외)의 마지막 코멘트·리뷰·리뷰 코멘트 중 가장 늦은 것, 이슈는 사람의 마지막 코멘트(없으면 생성 시각)다. 라벨·담당자 변경은 읽지 않는다. 출력은 "n일 움직임 없음(마지막 커밋/코멘트/리뷰 … 시각)" 으로 근거를 보인다. 코멘트가 많아 사람 활동을 다 읽지 못했거나 커밋 시각이 없어 단정할 수 없으면 "판정 불능" 이다(정체 아님이 아니다).
+
+출력 순서: 확인 불능 목록 → **공통 원인**(같은 사유로 PR 둘 이상에서 실패한 것. 사유가 구체적이면 검사가 달라도 한 건으로 묶고 검사 이름을 목록으로 붙이며, `exit code N` 이 든 문구나 20자 미만의 흔한 문구는 같은 검사끼리만 묶는다. 사람별 칸에는 "공통 원인 ①" 만 적힌다) →
+팀원 요약 표 → 팀원별 상세(진행: 병합한 PR·열린 PR 의 마지막 커밋 시각, 막힘: PR 한 건에 한 줄로 검사 실패(검사 이름과 사유)·충돌·리뷰·승인 대기·앞 PR 대기를 이어 붙임, 요약 표의 "막힌 PR" 은 PR 수,
+오래 머문 PR·이슈, 맡은 개발 건 DEV 번호(제목)·상태·마지막 PR) → 담당자 없는 열린 이슈.
+
+- 맡은 개발 건은 **저장소 기본 브랜치**(조회한 값, main 이 아닐 수 있다)의 `audit/ledger/*.md` 에서 읽는다. 기본 브랜치에 원장 디렉터리가 실제로 없을 때만 "원장 없음" 으로 건너뛴다(확인 불능이 아니다).
+  기본 브랜치를 못 읽거나 원장을 읽지 못하면 "확인 불능" 이다. `담당` 칸에 적힌 사람은 이번 기간에 활동이 없어도 팀원 칸에 나온다.
+- **팀 별칭 파일**: 원장 `담당` 칸에 실명이 적혀 같은 사람이 두 칸으로 갈릴 때, 원장을 고치지 않고 Project Repository 의 기본 브랜치에 `.github/harness-team.yaml` 을 두어 이름을 GitHub 아이디로 잇는다(`.github/ssot-approvers` 같은 저장소 데이터 파일 위치). 형식(예시 값):
+
+  ```yaml
+  별칭:
+    홍길동: hong-gd    # 원장에 적힌 이름 → GitHub 아이디
+  ```
+
+  원장 담당에 먼저 적용한 뒤 사람 칸을 배정한다(이름 대소문자는 구분하지 않는다). 적용한 내용은 출력 맨 끝 `별칭 적용: 홍길동 → hong-gd(DEV-003)` 한 줄과 JSON `aliases_applied` 에 나온다. 파일이 없으면(404) 별칭 없음이고 경고도 없다. 읽기 실패·형식 오류·값이 GitHub 아이디 형식이 아닌 별칭은 "주의" 로 알리고 그 부분만 빼고 계속한다(사람 묶기를 확인 불능으로 만들지 않는다). 별칭이 적용된 담당은 "GitHub 아이디 형식이 아니다" 경고에서 빠진다.
+- 열린 이슈·병합 PR 이 읽는 한도(이슈 500개, 병합 100개)를 넘으면 "오래 머문 이슈" 는 "확인 불능(부분)" 이고 병합 수는 "n+ (부분)" 으로 나온다. 갱신 시각을 읽지 못한 열린 PR 은 "판정 불능" 이지 정체 아님이 아니다.
+- **"확인 불능" 으로 적힌 칸은 없다거나 정상이라고 말하지 않는다.** 사유를 그대로 전한다. 검사 실패 사유 문구가 비어 있으면 "사유 문구 없음" 이다.
+- 사람마다 "누가 잘하고 못하는지" 평가하지 않는다. 숫자와 막힌 이유를 전하고, 막힘은 공통 원인부터 말한다.
+
+`--json` 키(안정):
+
+| 위치 | 키 |
+|---|---|
+| 최상위 | `status`(`ok`; 열린 PR 을 못 읽으면 `cannot_check`+`message`), `repo`, `generated_at`(UTC), `days`, `stale_days`, `issue_stale_days`, `common_causes`, `people`, `unassigned_issues`, `ledger`, `truncated`, `unknown`, `warnings` |
+| `common_causes[]` | `id`, `mark`(①…), `checks[]`(해당 검사 이름 목록), `reason`(전체 문구, 300자를 넘으면 문장 끝에서 자르고 `…`), `prs[]`(`number`,`title`,`url`,`author`) |
+| `people[]` | `login`, `progress`, `blocked`, `stale`, `dev_items` |
+| `progress` | `merged[]`(`number`,`title`,`url`,`merged_at`), `merged_count`, `open[]`(`number`,`title`,`url`,`state`,`last_commit_at`,`last_activity_at`,`last_activity_kind`(`commit`·`opened`·`comment`·`review`·`review_comment`; 판정 불능이면 둘 다 null)) |
+| `blocked[]` | 막힌 PR 하나당 한 항목: `pr`,`title`,`url`,`author`,`reasons[]`. `reasons[]` 항목은 `kind`(`check_failed`·`conflict`·`approval`·`after`·`other`·`unknown`),`state`,`detail`, 그리고 `checks[]`(`name`,`reason`,`reason_status`(`ok`·`no_text`·`unknown`),`common_cause`(공통 원인 `id` 또는 null),`unknown_reason`은 `unknown` 일 때만) 또는 `after[]`(앞 PR 번호); 검사 실패 항목에는 `checks_truncated`(검사가 너무 많아 일부를 읽지 못했으면 true) |
+| `stale` | `unknown_prs[]`·`unknown_issues[]`(사람 활동 시각을 다 읽지 못해 정체 여부를 판정하지 못한 번호), `prs[]`(`number`,`title`,`url`,`state`,`last_activity_at`,`last_activity_kind`,`idle_days`), `issues[]`(`number`,`title`,`url`,`last_activity_at`,`last_activity_kind`(`comment`·`created`),`idle_days`) |
+| `dev_items[]` | `id`(DEV-007), `title`, `owner`(원장 `담당` 칸, 비면 마지막 PR 작성자로 배정했다는 뜻으로 빈 문자열), `status`, `last_pr`, `file` |
+| 그 밖 | `unassigned_issues[]`(`number`,`title`,`url`,`created_at`), `aliases_applied[]`(`name`,`login`,`items`: 원장 담당 이름이 어느 GitHub 아이디로 합쳐졌는지), `truncated`(`open_prs`·`merged`·`issues`: 쪽수·개수 제한으로 일부만 읽었으면 true), `ledger`(`status`(`ok`·`none`·`unknown`),`reason`,`branch`(저장소 기본 브랜치),`files`,`unowned[]` 담당을 못 정한 개발 건), `unknown[]`(`item`,`reason`), `warnings[]` |
+
+읽지 못한 칸의 값은 `null`(빈 목록이 아니다)이고 `unknown[]` 에 사유가 있다. 병합·시각·이슈·원장이 각각 따로 확인 불능이 될 수 있다.
 
 ## 하지 않는 것
 
