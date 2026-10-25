@@ -83,6 +83,7 @@
 | `/harness:prs` | 내 열린 PR 의 상태와 병합 순서 확인(세션 시작에도 알린다) |
 | `/harness:approvals` | 내 승인을 기다리는 PR 보기(승인은 GitHub 에서 사람이) |
 | `/harness:update` | 플러그인 갱신 + 현재 폴더 판 확인(사용자가 직접 부를 때만) |
+| `/harness:version` | 설치된 플러그인의 이 폴더 판과 받아 둔 최신 판을 표로 보기(읽기만) |
 | `/harness:atc` | SAP ATC 지적 실행·분류·처리(`env/adt-tiers.yaml` 이 있는 Project Repository 에서) |
 
 `/release`, `/intake` 는 필요해지면 `jaeheeMin/public-cloud` 에서 가져온다.

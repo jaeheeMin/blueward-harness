@@ -17,6 +17,17 @@ JSON 한 줄을 낸다. `state`:
 - `unknown`  최신 판을 알 수 없어 비교하지 못했다(항목 판은 `installed` 에 있다)
 - `unreadable` installed_plugins.json 을 읽지 못했다
 
+`--all` 은 설치된 **모든 플러그인**의 표를 낸다(#461, `/harness:version`). 위 단일 판정과 별개의 모드다.
+`[--cwd DIR] [--all [--json] [--remote]]` — 마크다운 표(`--json` 이면 JSON). 항목마다:
+- 이 폴더 판: project·local 항목 중 projectPath 가 cwd(또는 상위)와 맞는 것. 없으면 user 항목.
+  둘 다 있으면 project·local 을 고른다 — 공식 문서(plugins/loading)는 `enabledPlugins` 켜짐 여부의 우선순위
+  (user < project < local)만 밝히고, 같은 플러그인이 두 범위에 설치됐을 때 어느 설치본이 실리는지는 적지 않았다.
+  그래서 설정 우선순위를 따라 project·local 을 고르고, user 판은 `user_version` 으로 함께 보인다.
+- 받아 둔 최신 판: 로컬 marketplace 사본(`known_marketplaces.json` 의 installLocation, 없으면
+  `plugins/marketplaces/<이름>`)의 marketplace.json(+상대경로 source 의 plugin.json). 원격이 아니다.
+  `--remote` 면 harness 만 원격 `v*` 태그로 바꾼다(실패하면 캐시 판).
+- state: current / stale / missing(이 폴더에 설치 없음) / unknown(최신 판 또는 설치 판을 읽지 못함).
+
 stdlib 만 쓴다.
 """
 from __future__ import annotations
@@ -150,6 +161,93 @@ def check(cwd: str, latest: str | None, env=None, plugin_id: str = PLUGIN_ID) ->
     return result
 
 
+# --- 모든 플러그인 표(#461) ---------------------------------------------------
+
+
+def _read_json(path: Path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def known_latest(plugin_id: str, env=None) -> str | None:
+    """로컬 marketplace 사본에 적힌 플러그인 판. 읽지 못하면 None(최신이라고 하지 않는다)."""
+    name, _, market = plugin_id.partition("@")
+    if not name or not market:
+        return None
+    root = config_dir(env) / "plugins" / "marketplaces" / market
+    known = _read_json(config_dir(env) / "plugins" / "known_marketplaces.json")
+    loc = known.get(market, {}).get("installLocation") if isinstance(known, dict) and isinstance(known.get(market), dict) else None
+    if isinstance(loc, str) and loc:
+        root = Path(loc)
+    manifest = _read_json(root / ".claude-plugin" / "marketplace.json")
+    plugins = manifest.get("plugins") if isinstance(manifest, dict) else None
+    entry = next((p for p in plugins if isinstance(p, dict) and p.get("name") == name), None) if isinstance(plugins, list) else None
+    if entry is None:
+        return None
+    if isinstance(entry.get("version"), str):
+        return entry["version"]
+    if isinstance(entry.get("source"), str):
+        pj = _read_json(root / entry["source"] / ".claude-plugin" / "plugin.json")
+        if isinstance(pj, dict) and isinstance(pj.get("version"), str):
+            return pj["version"]
+    return None
+
+
+def all_plugins(cwd: str, env=None, remote_latest: str | None = None) -> dict:
+    """{"cwd", "config_file", "rows": [...], "error": 사유 또는 None}. 행은 플러그인마다 하나."""
+    out = {"cwd": str(cwd), "config_file": str(installed_plugins_path(env)), "rows": [], "error": None}
+    data = read_installed(env)
+    if data is None:
+        out["error"] = "installed_plugins.json 을 읽지 못했다"
+        return out
+    for pid in sorted(data["plugins"]):
+        found = find_entries(data, pid, cwd)
+        entry = found["project"] or found["user"]
+        latest, source = known_latest(pid, env), "cache"
+        if pid == PLUGIN_ID and remote_latest:
+            latest, source = remote_latest, "remote"
+        row = {
+            "plugin": pid,
+            "scope": None if entry is None else ("user" if entry is found["user"] else entry.get("scope")),
+            "installed": entry.get("version") if entry else None,
+            "latest": latest,
+            "latest_source": source if latest else None,
+            "user_version": found["user"].get("version") if found["user"] and found["project"] else None,
+            "other_project_entries": found["others"],
+        }
+        have, want = parse_version(row["installed"]), parse_version(latest)
+        if entry is None:
+            row["state"] = "missing"
+        elif have is None or want is None:
+            row["state"] = "unknown"
+        else:
+            row["state"] = "current" if have >= want else "stale"
+        out["rows"].append(row)
+    return out
+
+
+_STATE_TEXT = {"current": "최신", "stale": "갱신 있음", "missing": "이 폴더에 설치 없음", "unknown": "최신 판 확인 불가"}
+
+
+def render_table(result: dict) -> str:
+    lines = [f"기준 폴더: {result['cwd']}", f"설치 목록: {result['config_file']}", ""]
+    if result["error"]:
+        return "\n".join(lines + [f"확인 불능: {result['error']}"])
+    lines += ["| 플러그인 | 범위 | 이 폴더 판 | 받아 둔 최신 판 | 상태 | 다른 폴더 설치 |", "|---|---|---|---|---|---|"]
+    for r in result["rows"]:
+        scope = r["scope"] or "-"
+        if r["user_version"]:
+            scope += f" (user {r['user_version']} 도 있음)"
+        latest = (r["latest"] or "?") + (" (원격)" if r["latest_source"] == "remote" else "")
+        others = f"{r['other_project_entries']}곳" if r["other_project_entries"] else "-"
+        lines.append(f"| {r['plugin']} | {scope} | {r['installed'] or '-'} | {latest} | {_STATE_TEXT[r['state']]} | {others} |")
+    lines += ["", '- "받아 둔 최신 판" 은 마지막 `claude plugin marketplace update` 때 내려받은 사본의 판이다(원격 최신과 다를 수 있다).',
+              "- 이 세션이 쓰는 판은 설치 뒤 `/reload-plugins` 를 해야 바뀐다."]
+    return "\n".join(lines)
+
+
 def _remote_latest() -> str | None:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import update_notice  # noqa: PLC0415 - 같은 폴더의 훅 모듈
@@ -161,12 +259,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--cwd", default=os.getcwd())
     parser.add_argument("--plugin", default=PLUGIN_ID)
+    parser.add_argument("--all", action="store_true", help="설치된 모든 플러그인의 표(#461)")
+    parser.add_argument("--json", action="store_true", help="--all 의 출력을 JSON 으로")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--latest", help="비교할 최신 판(예: 0.10.99)")
     group.add_argument("--remote", action="store_true", help="원격 v* 태그 중 가장 큰 판과 비교")
     args = parser.parse_args(argv)
+    if args.json and not args.all:
+        parser.error("--json 은 --all 과 함께 쓴다")
+    if args.all and args.latest:
+        parser.error("--all 은 --latest 와 함께 쓰지 않는다")
     for stream in (sys.stdout,):
         stream.reconfigure(encoding="utf-8")
+    if args.all:
+        result = all_plugins(args.cwd, remote_latest=_remote_latest() if args.remote else None)
+        sys.stdout.write((json.dumps(result, ensure_ascii=False) if args.json else render_table(result)) + "\n")
+        return 0
     latest = args.latest
     if args.remote:
         latest = _remote_latest()

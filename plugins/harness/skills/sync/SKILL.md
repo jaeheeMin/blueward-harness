@@ -102,11 +102,11 @@ auto-update runs"). 그 차이를 알려 준다. 플러그인을 이 스킬이 �
 
 1. **세션 버전**: `<이 스킬의 base directory>/../../.claude-plugin/plugin.json`
    의 `version`. 지금 세션에 올라온 플러그인이다.
-2. **내려받은 버전**: `~/.claude/plugins/installed_plugins.json` 의
-   `plugins["harness@blueward-harness"]` 항목 중 `projectPath` 가 지금 저장소
-   루트(`git rev-parse --show-toplevel`)와 같은 것의 `version`. 경로는
-   대소문자와 `/`·`\` 차이를 무시하고 비교한다. 같은 항목이 없으면 `scope` 가
-   `user` 인 항목을 쓴다. 파일이나 항목이 없으면 "모름" 으로 둔다.
+2. **내려받은 버전**: 저장소 루트에서
+   `uv run --no-project python "<이 스킬의 base directory>/../../hooks/installed_version.py"`
+   를 실행해 JSON 의 `installed`(이 폴더 항목의 판, 경로 비교는 스크립트가 한다)를
+   쓴다. `state` 가 `missing`·`unreadable` 이거나 실행이 안 되면 "모름" 으로 둔다.
+   모든 플러그인의 판을 표로 보려면 `/harness:version` 을 안내한다.
 3. **최신 버전**: GitHub main 의 `plugins/harness/.claude-plugin/plugin.json`
    `version`.
    `gh api repos/jaeheeMin/blueward-harness/contents/plugins/harness/.claude-plugin/plugin.json --jq .content`
