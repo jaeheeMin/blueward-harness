@@ -88,7 +88,9 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
      노란 대기여도 Merge 버튼이 잠기지 않는다. 순서는 PR 본문의 `먼저: #번호` 줄 등으로 정해진다.
    - `.github/workflows/ledger-complete.yml` 은 main 에 PR 이 병합되면 그 PR 이 Closes 한 대표 `[DEV-xxx]` 이슈의
      진행 원장 행을 `완료` 로 바꿔 main 에 직접 커밋한다(#346). 하위 작업 이슈만 닫았거나 대표 이슈를 안 닫은 PR 은
-     그대로 둔다(그땐 사람이 바꾼다). 못 바꾸면 이슈가 열린다.
+     그대로 둔다(그땐 사람이 바꾼다). 못 바꾸면 이슈가 열린다. main 에 보호 규칙(ruleset, PR 필수)을 켰다면 이
+     push 가 막히므로, 쓰기 권한 deploy key 를 만들어 ruleset bypass 에 Deploy keys 로 넣고 비밀키를 Actions
+     secret `LEDGER_DEPLOY_KEY` 로 등록한다(#445). 규칙이 없으면 필요 없다.
    - SRS 는 `/harness:srs` Skill 로 만든다. 지금은 `docs/ssot/SRS.md` 가
      빈 스텁으로만 있다.
 

@@ -18,10 +18,18 @@
 # 모든 커밋의 병합 PR 을 한 번에 처리하므로, 어느 실행이 먼저 끝나도 누락이 없다. 루프는
 # scripts/ledger_complete_loop.sh 에 있다(시험이 실제 git 저장소에서 돌려 본다).
 #
-# 원장 쓰기는 GITHUB_TOKEN 의 push 라 다른 워크플로를 다시 부르지 않는다. 그래도 이중 안전장치로
-# 엔진이 처리 대상 커밋 중 제목이 `docs: 진행 원장 완료 표시` 인 것(이 워크플로가 만든 커밋)은 건너뛴다.
-# `commits/{sha}/pulls` 가 비어 오면 squash 병합 제목 끝의 `(#N)` 으로 PR 을 직접 조회한다. 유료 요금제로 main 을 잠그면(브랜치 보호) 이
-# job 의 push 만 예외로 열어 줘야 한다.
+# GITHUB_TOKEN 의 push 는 다른 워크플로를 다시 부르지 않지만, deploy key(아래) 로 push 하면 main push
+# 워크플로(main-checks, 이 워크플로)가 한 번 더 돈다. 그래서 엔진이 처리 대상 커밋 중 제목이
+# `docs: 진행 원장 완료 표시` 인 것(이 워크플로가 만든 커밋)은 건너뛰어 되풀이를 막는다.
+# `commits/{sha}/pulls` 가 비어 오면 squash 병합 제목 끝의 `(#N)` 으로 PR 을 직접 조회한다.
+#
+# main 을 ruleset 으로 잠그면(PR 필수) GITHUB_TOKEN push 가 막히고, github-actions 는 ruleset bypass 에
+# 넣을 수 없다. 그래서 쓰기 권한 deploy key 를 만들어 ruleset bypass 에 DeployKey 를 넣고, 비밀키를
+# LEDGER_DEPLOY_KEY secret 으로 넘긴다(#445). 비어 있으면 checkout 이 토큰을 그대로 쓴다.
+#   1. ssh-keygen -t ed25519 -N "" -f ledger_key
+#   2. ledger_key.pub 을 저장소 Settings → Deploy keys 에 "Allow write access" 로 등록
+#   3. ledger_key 를 Actions secret LEDGER_DEPLOY_KEY 로 등록
+#   4. main ruleset 의 bypass list 에 Deploy keys 추가
 #
 # 문서 저장소 쪽에서는 이렇게 부른다. 이 워크플로 자체는 권한을 선언하지 않으므로(재사용 워크플로
 # 관행) 부르는 쪽이 아래를 명시해야 한다.
@@ -36,6 +44,8 @@
 #         contents: write
 #         pull-requests: read
 #         issues: write
+#       secrets:
+#         LEDGER_DEPLOY_KEY: ${{ secrets.LEDGER_DEPLOY_KEY }}
 
 name: ledger-complete
 
@@ -46,6 +56,10 @@ on:
         description: 판정 로직을 가져올 blueward-harness 의 ref
         type: string
         default: stable
+    secrets:
+      LEDGER_DEPLOY_KEY:
+        required: false
+        description: main ruleset bypass 에 등록한 쓰기 권한 deploy key 의 비밀키. 없으면 GITHUB_TOKEN 으로 push 한다
 
 jobs:
   complete:
@@ -62,6 +76,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          ssh-key: ${{ secrets.LEDGER_DEPLOY_KEY }}
 
       - name: 판정 엔진 가져오기
         uses: actions/checkout@v4

@@ -1301,7 +1301,7 @@ Closes #143</pre>
     <tr><td><code>notify-teams</code></td><td>병합된 PR</td><td>Teams 로 알림</td></tr>
     <tr><td><code>pr-tamper-alert</code></td><td>작성자가 아닌 계정이 그 PR 브랜치에 push 했거나 리뷰를 해제했는지 (병합·봇·저장소 admin 은 제외)</td><td>이슈와 Teams 로 알림. 막지는 못해</td></tr>
     <tr><td><code>pr-queue</code> · <code>merge-order</code></td><td>열린 PR 마다 병합 순서를 계산해 코멘트 하나를 갱신하고, <code>merge-order</code> 상태를 달아. 앞에 병합할 PR 이 열려 있으면 노란 대기, 없으면 초록불, 순서를 못 정하면(순환 등) 빨간불(오류). GitHub 를 못 읽으면 이 검사가 실패해(통과로 보지 않아). 위험도·병합 전 확인에서는 "다른 검사 실패" 로 세지 않아</td><td>막지는 못해(Merge 버튼은 안 잠겨). 앞 PR 부터 병합</td></tr>
-    <tr><td><code>ledger-complete</code></td><td>main 에 병합된 PR 이 대표 <code>[DEV-xxx]</code> 이슈를 <code>Closes</code> 했는지</td><td>진행 원장을 "완료" 로 바꿔 main 에 커밋. 못 하면 이슈로 알림</td></tr>
+    <tr><td><code>ledger-complete</code></td><td>main 에 병합된 PR 이 대표 <code>[DEV-xxx]</code> 이슈를 <code>Closes</code> 했는지</td><td>진행 원장을 "완료" 로 바꿔 main 에 커밋. 못 하면 이슈로 알림. main 에 보호 규칙(PR 필수)을 켠 저장소는 쓰기 권한 deploy key 를 bypass 에 넣고 비밀키를 <code>LEDGER_DEPLOY_KEY</code> secret 으로 넘겨야 push 가 돼</td></tr>
   </table></div>
 
   <section>

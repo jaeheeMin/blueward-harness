@@ -12,3 +12,6 @@ jobs:
       contents: write   # 원장 변경을 main 에 직접 커밋한다(추가 PR 을 만들지 않는다)
       pull-requests: read
       issues: write   # 못 바꿨을 때 손으로 고쳐 달라는 이슈를 연다
+    secrets:
+      # main 보호 규칙(ruleset)을 켰으면 필요하다. bypass 에 넣은 쓰기 권한 deploy key 의 비밀키. 규칙이 없으면 비워도 된다(#445)
+      LEDGER_DEPLOY_KEY: ${{ secrets.LEDGER_DEPLOY_KEY }}
