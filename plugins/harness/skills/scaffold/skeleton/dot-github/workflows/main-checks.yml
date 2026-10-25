@@ -6,8 +6,8 @@
 # doc-guard 를 돌릴지(옛 caller 의 paths)는 재사용 워크플로의 단계 `if` 가 가린다. 그래서 여기엔 paths 가 없다.
 # 병합된 main 커밋에도 옛 이름 commit status 를 달아 화면에서 결과를 볼 수 있게 한다.
 #
-# 권한: contents 는 read 뿐이다. 진행 원장을 main 에 쓰는 ledger-complete 와 한 job 에 두지 않으려고 따로 둔다
-# (쓰기 토큰을 외부 바이너리를 받는 gitleaks 와 한 job 에 두지 않는다). issues write 는 위반 알림 이슈용,
+# 권한: contents 는 read 뿐이다. ledger-complete 는 원장 완료 여부만 확인하는 별도 워크플로다(#445).
+# issues write 는 위반 알림 이슈용,
 # statuses write 는 main 커밋에 status 를 다는 용도다.
 name: main-checks
 on:

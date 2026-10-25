@@ -1,10 +1,13 @@
-"""`checker.ledger_complete` 와 재사용 워크플로 `ledger-complete.yml` 을 검증한다(#346).
+"""`checker.ledger_complete` 와 재사용 워크플로 `ledger-complete.yml` 을 검증한다(#346, #445).
 
+병합 PR 이 대표 `[DEV-xxx]` 이슈를 닫았는데 원장 행이 `완료` 가 아니면 위반(1), 판정 불능은 2, 그 밖은 0 이다.
 GitHub 호출은 `GhClient` 를 fake 로 갈아 끼워 네트워크 없이 확인하고, 원장은 tmp_path 에 만든다.
+검사기는 파일을 쓰지 않으므로 모든 시험이 원장이 그대로인지도 본다.
 """
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -77,7 +80,7 @@ def _pr(body: str, number: int = 50, merged: bool = True, base: str = "main", at
 def _run(monkeypatch, root: Path, client: FakeGh, capsys, shas: list[str] | None = None) -> tuple[int, dict]:
     monkeypatch.setattr(mod, "GhClient", lambda: client)
     shas = shas or [SHA]
-    code = mod.main(["apply", "--repo", REPO, *[a for s in shas for a in ("--sha", s)], "--root", str(root)])
+    code = mod.main(["check", "--repo", REPO, *[a for s in shas for a in ("--sha", s)], "--root", str(root)])
     out = capsys.readouterr().out.strip().splitlines()
     return code, json.loads(out[-1])
 
@@ -85,142 +88,128 @@ def _run(monkeypatch, root: Path, client: FakeGh, capsys, shas: list[str] | None
 ROW1 = "| DEV-001 | 구매요청 승인 | [Spec](../../docs/spec/DEV-001.md) | alice | 리뷰 | #40 |"
 ROW2 = "| DEV-002 | 타일 노출 | - | bob | 진행 |  |"
 DONE1 = "| DEV-001 | 구매요청 승인 | [Spec](../../docs/spec/DEV-001.md) | alice | 완료 | #50 |"
+DONE2 = "| DEV-002 | 타일 노출 | - | bob | 완료 | #50 |"
 
 
 def _rep(n: int, dev: str = "DEV-001", body: str = "") -> dict:
     return {"title": f"[{dev}] 제목", "body": body}
 
 
-def test_대표_이슈를_Closes_하면_완료와_PR_번호를_쓴다(tmp_path, monkeypatch, capsys):
-    path = _write(tmp_path, "app.md", _ledger(ROW1, ROW2))
-    client = FakeGh([_pr("본문\n\nCloses #7")], {7: _rep(7)})
-    code, res = _run(monkeypatch, tmp_path, client, capsys)
-    assert code == 0 and res["status"] == "changed" and res["changed"] == ["DEV-001"] and res["prs"] == [50]
-    assert _read(path) == _ledger(DONE1, ROW2)
+def test_대표_이슈를_닫고_원장이_완료면_아무것도_안_한다(tmp_path, monkeypatch, capsys):
+    text = _ledger(DONE1, ROW2)
+    path = _write(tmp_path, "app.md", text)
+    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("본문\n\nCloses #7")], {7: _rep(7)}), capsys)
+    assert code == 0 and res["status"] == "ok" and res["pending"] == [] and res["done"] == ["DEV-001"]
+    assert _read(path) == text
 
 
-def test_다른_칸과_다른_행_줄_끝_문자를_보존한다(tmp_path, monkeypatch, capsys):
-    row = "|DEV-001|  구매요청  | 링크 | alice|리뷰|#40|"
-    path = _write(tmp_path, "app.md", _ledger(row, ROW2), newline="\r\n")
-    client = FakeGh([_pr("fixes #7")], {7: _rep(7)})
-    code, _ = _run(monkeypatch, tmp_path, client, capsys)
-    assert code == 0
-    after = _read(path)
-    assert after == _ledger("|DEV-001|  구매요청  | 링크 | alice| 완료 | #50 |", ROW2).replace("\n", "\r\n")
-    assert "\r\n" in after and "\n" not in after.replace("\r\n", "")
+def test_대표_이슈를_닫았는데_원장이_리뷰면_위반이고_원장은_그대로(tmp_path, monkeypatch, capsys):
+    text = _ledger(ROW1, ROW2)
+    path = _write(tmp_path, "app.md", text)
+    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
+    assert code == 1 and res["status"] == "violation" and res["prs"] == [50]
+    assert res["pending"] == [{"dev": "DEV-001", "pr": 50, "file": "audit/ledger/app.md", "state": "리뷰"}]
+    assert "DEV-001" in res["reason"] and "리뷰" in res["reason"]
+    assert _read(path) == text
 
 
-def test_하위_작업_이슈만_닫으면_바꾸지_않는다(tmp_path, monkeypatch, capsys):
+def test_상태_칸이_비어_있어도_위반이다(tmp_path, monkeypatch, capsys):
+    row = "| DEV-001 | x | - | alice |  |  |"
+    code, res = _run(monkeypatch, tmp_path_with(tmp_path, row), FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
+    assert code == 1 and "빈 칸" in res["reason"]
+
+
+def tmp_path_with(root: Path, row: str) -> Path:
+    _write(root, "app.md", _ledger(row))
+    return root
+
+
+def test_하위_작업_이슈만_닫으면_확인하지_않는다(tmp_path, monkeypatch, capsys):
     text = _ledger(ROW1)
     path = _write(tmp_path, "app.md", text)
     client = FakeGh([_pr("Closes #8")], {8: {"title": "Launchpad 타일 노출 (DEV-001)", "body": ""}})
     code, res = _run(monkeypatch, tmp_path, client, capsys)
-    assert code == 0 and res["status"] == "skipped" and "완료 대상 아님" in res["reason"]
+    assert code == 0 and res["status"] == "skipped" and "확인 대상 아님" in res["reason"]
     assert _read(path) == text
 
 
 def test_DEV_번호_없는_이슈는_대상이_아니다(tmp_path, monkeypatch, capsys):
-    text = _ledger(ROW1)
-    path = _write(tmp_path, "app.md", text)
+    path = _write(tmp_path, "app.md", _ledger(ROW1))
     client = FakeGh([_pr("Closes #9")], {9: {"title": "문서 정리", "body": ""}})
     code, res = _run(monkeypatch, tmp_path, client, capsys)
     assert code == 0 and res["status"] == "skipped"
-    assert _read(path) == text
+    assert "리뷰" in _read(path)
 
 
-def test_Closes_가_없으면_바꾸지_않는다(tmp_path, monkeypatch, capsys):
-    text = _ledger(ROW1)
-    path = _write(tmp_path, "app.md", text)
-    client = FakeGh([_pr("Refs #7")], {7: _rep(7)})
-    code, res = _run(monkeypatch, tmp_path, client, capsys)
+def test_Closes_가_없으면_확인하지_않는다(tmp_path, monkeypatch, capsys):
+    _write(tmp_path, "app.md", _ledger(ROW1))
+    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Refs #7")], {7: _rep(7)}), capsys)
     assert code == 0 and res["status"] == "skipped"
-    assert _read(path) == text
 
 
-def test_이미_완료이고_같은_PR_이면_변경_없음(tmp_path, monkeypatch, capsys):
-    text = _ledger(DONE1)
-    path = _write(tmp_path, "app.md", text)
-    client = FakeGh([_pr("Closes #7")], {7: _rep(7)})
-    code, res = _run(monkeypatch, tmp_path, client, capsys)
-    assert code == 0 and res["status"] == "unchanged" and res["changed"] == []
-    assert _read(path) == text
+def test_완료인데_마지막_PR_이_달라도_통과한다(tmp_path, monkeypatch, capsys):
+    # deliver 가 예측한 PR 번호가 실제와 달라도 완료 여부만 본다.
+    _write(tmp_path, "app.md", _ledger(DONE1.replace("#50", "#30")))
+    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
+    assert code == 0 and res["status"] == "ok"
 
 
-def test_완료인데_마지막_PR_이_다르면_PR_만_바꾼다(tmp_path, monkeypatch, capsys):
-    path = _write(tmp_path, "app.md", _ledger(DONE1.replace("#50", "#30")))
-    client = FakeGh([_pr("Closes #7")], {7: _rep(7)})
-    code, res = _run(monkeypatch, tmp_path, client, capsys)
-    assert code == 0 and res["status"] == "changed"
-    assert _read(path) == _ledger(DONE1)
-
-
-def test_이슈_본문이_가리킨_원장_파일을_쓴다(tmp_path, monkeypatch, capsys):
-    a = _write(tmp_path, "a.md", _ledger(ROW1))
-    b = _write(tmp_path, "b.md", _ledger(ROW1))  # 같은 ID 가 다른 파일에도 있어도 지정한 파일만 본다
+def test_이슈_본문이_가리킨_원장_파일만_본다(tmp_path, monkeypatch, capsys):
+    _write(tmp_path, "a.md", _ledger(ROW1))  # 같은 ID 가 다른 파일에 리뷰로 있어도 지정한 파일만 본다
+    _write(tmp_path, "b.md", _ledger(DONE1))
     body = "배경\n\n진행 원장: DEV-001 (audit/ledger/b.md)\n"
-    client = FakeGh([_pr("Closes #7")], {7: _rep(7, body=body)})
-    code, res = _run(monkeypatch, tmp_path, client, capsys)
-    assert code == 0 and res["changed"] == ["DEV-001"]
-    assert _read(a) == _ledger(ROW1)
-    assert _read(b) == _ledger(DONE1)
+    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7, body=body)}), capsys)
+    assert code == 0 and res["status"] == "ok"
+    body = "진행 원장: DEV-001 (audit/ledger/a.md)"
+    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7, body=body)}), capsys)
+    assert code == 1 and res["pending"][0]["file"] == "audit/ledger/a.md"
 
 
 def test_이슈_본문이_가리킨_파일이_없으면_2(tmp_path, monkeypatch, capsys):
-    text = _ledger(ROW1)
-    path = _write(tmp_path, "a.md", text)
+    _write(tmp_path, "a.md", _ledger(DONE1))
     body = "진행 원장: DEV-001 (audit/ledger/none.md)"
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7, body=body)}), capsys)
     assert code == 2 and res["status"] == "unknown" and "none.md" in res["reason"]
-    assert _read(path) == text
 
 
 def test_원장_폴더_밖을_가리키면_2(tmp_path, monkeypatch, capsys):
-    _write(tmp_path, "a.md", _ledger(ROW1))
-    (tmp_path / "README.md").write_text(_ledger(ROW1), encoding="utf-8")
+    _write(tmp_path, "a.md", _ledger(DONE1))
+    (tmp_path / "README.md").write_text(_ledger(DONE1), encoding="utf-8")
     body = "진행 원장: DEV-001 (audit/ledger/../../README.md)"
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7, body=body)}), capsys)
     assert code == 2
 
 
-def test_원장에_그_행이_없으면_2이고_파일은_그대로(tmp_path, monkeypatch, capsys):
-    text = _ledger(ROW2)
-    path = _write(tmp_path, "app.md", text)
+def test_원장에_그_행이_없으면_2(tmp_path, monkeypatch, capsys):
+    _write(tmp_path, "app.md", _ledger(ROW2))
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
-    assert code == 2 and "DEV-001" in res["reason"]
-    assert _read(path) == text
+    assert code == 2 and res["status"] == "unknown" and "DEV-001" in res["reason"]
 
 
 def test_행이_둘_이상이면_2(tmp_path, monkeypatch, capsys):
-    t1, t2 = _ledger(ROW1), _ledger(ROW1)
-    p1 = _write(tmp_path, "a.md", t1)
-    p2 = _write(tmp_path, "b.md", t2)
+    _write(tmp_path, "a.md", _ledger(DONE1))
+    _write(tmp_path, "b.md", _ledger(DONE1))
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
     assert code == 2 and "둘 이상" in res["reason"]
-    assert _read(p1) == t1 and _read(p2) == t2
 
 
 def test_한_파일_안에서_행이_중복이어도_2(tmp_path, monkeypatch, capsys):
-    text = _ledger(ROW1, ROW1)
-    path = _write(tmp_path, "a.md", text)
+    _write(tmp_path, "a.md", _ledger(DONE1, DONE1))
     code, _ = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
     assert code == 2
-    assert _read(path) == text
 
 
 def test_개발_건_절이_없는_파일은_건너뛴다(tmp_path, monkeypatch, capsys):
-    other = "# 원장 아님\n\n## 메모\n\n없음\n"
-    skipped = _write(tmp_path, "a.md", other)
-    path = _write(tmp_path, "b.md", _ledger(ROW1))
+    _write(tmp_path, "a.md", "# 원장 아님\n\n## 메모\n\n없음\n")
+    _write(tmp_path, "b.md", _ledger(DONE1))
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
-    assert code == 0 and res["changed"] == ["DEV-001"]
-    assert _read(skipped) == other and _read(path) == _ledger(DONE1)
+    assert code == 0 and res["status"] == "ok"
 
 
 def test_어느_파일에서도_행을_못_찾으면_2(tmp_path, monkeypatch, capsys):
-    path = _write(tmp_path, "a.md", "# 원장 아님\n\n## 메모\n\n없음\n")
+    _write(tmp_path, "a.md", "# 원장 아님\n\n## 메모\n\n없음\n")
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
     assert code == 2 and "찾지 못했다" in res["reason"]
-    assert "없음" in _read(path)
 
 
 def test_지정한_파일에_개발_건_절이_없으면_2(tmp_path, monkeypatch, capsys):
@@ -231,44 +220,50 @@ def test_지정한_파일에_개발_건_절이_없으면_2(tmp_path, monkeypatch
 
 
 def test_절은_있는데_표_머리가_깨졌으면_2(tmp_path, monkeypatch, capsys):
-    text = "## 개발 건\n\n| 번호 | 내용 |\n|---|---|\n| DEV-001 | x |\n"
-    path = _write(tmp_path, "a.md", text)
+    _write(tmp_path, "a.md", "## 개발 건\n\n| 번호 | 내용 |\n|---|---|\n| DEV-001 | x |\n")
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
     assert code == 2 and "표 형식" in res["reason"]
-    assert _read(path) == text
 
 
-def test_main_으로_병합된_PR_만_쓴다(tmp_path, monkeypatch, capsys):
-    text = _ledger(ROW1)
-    path = _write(tmp_path, "a.md", text)
+def test_표에_상태_열이_없으면_2(tmp_path, monkeypatch, capsys):
+    _write(tmp_path, "a.md", "## 개발 건\n\n| ID | 내용 | Spec | 담당 |\n|---|---|---|---|\n| DEV-001 | x | - | a |\n")
+    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
+    assert code == 2 and "상태" in res["reason"]
+
+
+def test_행에_상태_칸이_모자라면_2(tmp_path, monkeypatch, capsys):
+    _write(tmp_path, "a.md", _ledger("| DEV-001 | x | - | alice"))
+    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
+    assert code == 2 and "상태" in res["reason"]
+
+
+def test_main_으로_병합된_PR_만_본다(tmp_path, monkeypatch, capsys):
+    _write(tmp_path, "a.md", _ledger(ROW1))
     other = _pr("Closes #7", base="release")
     code, res = _run(monkeypatch, tmp_path, FakeGh([other], {7: _rep(7)}), capsys)
     assert code == 0 and res["status"] == "skipped" and "병합 PR 없음" in res["reason"]
-    assert _read(path) == text
     code, res = _run(monkeypatch, tmp_path, FakeGh([other, _pr("Closes #7", number=51)], {7: _rep(7)}), capsys)
-    assert res["prs"] == [51]
+    assert code == 1 and res["prs"] == [51]
 
 
 def test_코드_펜스_인라인_코드_주석_인용_안의_Closes_는_무시한다(tmp_path, monkeypatch, capsys):
-    text = _ledger(ROW1)
-    path = _write(tmp_path, "a.md", text)
+    _write(tmp_path, "a.md", _ledger(ROW1))
     body = "예시:\n```\nCloses #7\n```\n`Closes #7` 와 <!-- Closes #7 -->\n> Closes #7\n~~~\nFixes #7\n~~~\n"
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr(body)], {7: _rep(7)}), capsys)
     assert code == 0 and res["status"] == "skipped"
-    assert _read(path) == text
     assert mod.closing_issues(body + "\nCloses #8") == [8]
 
 
-def test_push_의_여러_커밋을_모두_처리하고_같은_DEV_는_마지막_PR_기준(tmp_path, monkeypatch, capsys):
-    path = _write(tmp_path, "a.md", _ledger(ROW1, ROW2))
+def test_push_의_여러_커밋을_모두_보고_같은_DEV_는_마지막_PR_기준(tmp_path, monkeypatch, capsys):
+    _write(tmp_path, "a.md", _ledger(ROW1, ROW2))
     prs = {
         "s1": [_pr("Closes #7", number=50, at="2026-10-16T01:00:00Z")],
         "s2": [_pr("Closes #7 Closes #8", number=51, at="2026-10-16T02:00:00Z")],
     }
     client = FakeGh(prs, {7: _rep(7), 8: _rep(8, "DEV-002")})
     code, res = _run(monkeypatch, tmp_path, client, capsys, shas=["s1", "s2"])
-    assert code == 0 and res["prs"] == [51] and res["changed"] == ["DEV-001", "DEV-002"]
-    assert _read(path) == _ledger(DONE1.replace("#50", "#51"), "| DEV-002 | 타일 노출 | - | bob | 완료 | #51 |")
+    assert code == 1 and res["prs"] == [51]
+    assert [(p["dev"], p["pr"]) for p in res["pending"]] == [("DEV-001", 51), ("DEV-002", 51)]
 
 
 def test_서로_다른_PR_이_각각_다른_DEV_를_닫으면_PR_번호를_모두_낸다(tmp_path, monkeypatch, capsys):
@@ -276,54 +271,35 @@ def test_서로_다른_PR_이_각각_다른_DEV_를_닫으면_PR_번호를_모�
     prs = {"s1": [_pr("Closes #7", number=50)], "s2": [_pr("Closes #8", number=51, at="2026-10-16T02:00:00Z")]}
     client = FakeGh(prs, {7: _rep(7), 8: _rep(8, "DEV-002")})
     code, res = _run(monkeypatch, tmp_path, client, capsys, shas=["s1", "s2"])
-    assert code == 0 and res["prs"] == [50, 51]
+    assert code == 1 and res["prs"] == [50, 51]
 
 
-def test_BOM_붙은_원장도_BOM_을_보존한다(tmp_path, monkeypatch, capsys):
-    path = _write(tmp_path, "a.md", "﻿" + _ledger(ROW1))
-    code, _ = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
-    assert code == 0
-    assert _read(path) == "﻿" + _ledger(DONE1)
+def test_BOM_붙은_원장도_읽는다(tmp_path, monkeypatch, capsys):
+    path = _write(tmp_path, "a.md", "﻿" + _ledger(DONE1))
+    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
+    assert code == 0 and res["status"] == "ok"
     assert path.read_bytes().startswith(b"\xef\xbb\xbf# ")
 
 
 def test_BOM_뒤가_바로_개발_건_절이어도_읽는다(tmp_path, monkeypatch, capsys):
-    text = "﻿## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |\n|---|---|---|---|---|---|\n" + ROW1 + "\n"
-    path = _write(tmp_path, "a.md", text)
-    code, _ = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
-    assert code == 0 and "| 완료 | #50 |" in _read(path)
-
-
-def test_칸_안의_이스케이프된_파이프를_칸_경계로_세지_않는다(tmp_path, monkeypatch, capsys):
-    row = "| DEV-001 | a \\| b | - | alice | 진행 |  |"
-    path = _write(tmp_path, "a.md", _ledger(row))
-    code, _ = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
-    assert code == 0
-    assert _read(path) == _ledger("| DEV-001 | a \\| b | - | alice | 완료 | #50 |")
-
-
-def test_파이프_두_개로_끝나는_행도_고친다(tmp_path, monkeypatch, capsys):
-    row = "| DEV-001 | x | - | alice | 리뷰 ||"
-    path = _write(tmp_path, "a.md", _ledger(row))
-    code, _ = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
-    assert code == 0
-    assert _read(path) == _ledger("| DEV-001 | x | - | alice | 완료 | #50 |")
-
-
-def test_표에_상태_열이_없으면_2(tmp_path, monkeypatch, capsys):
-    text = "## 개발 건\n\n| ID | 내용 | Spec | 담당 |\n|---|---|---|---|\n| DEV-001 | x | - | a |\n"
-    path = _write(tmp_path, "a.md", text)
+    text = "﻿## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |\n|---|---|---|---|---|---|\n" + DONE1 + "\n"
+    _write(tmp_path, "a.md", text)
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
-    assert code == 2 and "상태" in res["reason"]
-    assert _read(path) == text
+    assert code == 0 and res["status"] == "ok"
+
+
+def test_CRLF_원장과_이스케이프된_파이프_칸도_읽는다(tmp_path, monkeypatch, capsys):
+    row = "| DEV-001 | a \\| b | - | alice | 완료 | #50 |"
+    _write(tmp_path, "a.md", _ledger(row), newline="\r\n")
+    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
+    assert code == 0 and res["status"] == "ok"
 
 
 def test_gh_호출이_실패하면_2(tmp_path, monkeypatch, capsys):
-    text = _ledger(ROW1)
+    text = _ledger(DONE1)
     path = _write(tmp_path, "a.md", text)
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}, fail="/pulls"), capsys)
     assert code == 2 and res["status"] == "unknown" and "판정 불능" in res["reason"]
-    assert _read(path) == text
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}, fail="/issues/7"), capsys)
     assert code == 2
     assert _read(path) == text
@@ -335,38 +311,36 @@ def test_원장_폴더가_없으면_0(tmp_path, monkeypatch, capsys):
 
 
 def test_병합_PR_이_없으면_0(tmp_path, monkeypatch, capsys):
-    text = _ledger(ROW1)
-    path = _write(tmp_path, "a.md", text)
+    _write(tmp_path, "a.md", _ledger(ROW1))
     for prs in ([], [_pr("Closes #7", merged=False)]):
         code, res = _run(monkeypatch, tmp_path, FakeGh(prs, {7: _rep(7)}), capsys)
         assert code == 0 and res["status"] == "skipped" and "병합 PR 없음" in res["reason"]
-    assert _read(path) == text
 
 
-def test_여러_DEV_를_Closes_하면_모두_표시한다(tmp_path, monkeypatch, capsys):
-    path = _write(tmp_path, "app.md", _ledger(ROW1, ROW2))
+def test_여러_DEV_를_닫으면_완료_아닌_것만_위반으로_낸다(tmp_path, monkeypatch, capsys):
+    _write(tmp_path, "app.md", _ledger(DONE1, ROW2))
     client = FakeGh([_pr("Closes #7\nResolves #8, closes #9")], {
         7: _rep(7), 8: _rep(8, "DEV-002"), 9: {"title": "하위 (DEV-002)", "body": ""}})
     code, res = _run(monkeypatch, tmp_path, client, capsys)
-    assert code == 0 and res["changed"] == ["DEV-001", "DEV-002"]
-    assert _read(path) == _ledger(DONE1, "| DEV-002 | 타일 노출 | - | bob | 완료 | #50 |")
+    assert code == 1 and res["done"] == ["DEV-001"]
+    assert [p["dev"] for p in res["pending"]] == ["DEV-002"]
+    _write(tmp_path, "app.md", _ledger(DONE1, DONE2))
+    code, res = _run(monkeypatch, tmp_path, client, capsys)
+    assert code == 0 and res["status"] == "ok" and res["done"] == ["DEV-001", "DEV-002"]
 
 
-def test_하나라도_판정_불능이면_다른_건도_쓰지_않는다(tmp_path, monkeypatch, capsys):
-    text = _ledger(ROW1)  # DEV-002 행이 없다
-    path = _write(tmp_path, "app.md", text)
+def test_하나라도_판정_불능이면_2다(tmp_path, monkeypatch, capsys):
+    _write(tmp_path, "app.md", _ledger(ROW1))  # DEV-002 행이 없다. DEV-001 은 위반이지만 판정이 우선이다
     client = FakeGh([_pr("Closes #7 Closes #8")], {7: _rep(7), 8: _rep(8, "DEV-002")})
-    code, _ = _run(monkeypatch, tmp_path, client, capsys)
-    assert code == 2
-    assert _read(path) == text
+    code, res = _run(monkeypatch, tmp_path, client, capsys)
+    assert code == 2 and res["status"] == "unknown"
 
 
 def test_번호_자릿수가_달라도_같은_개발_건이다(tmp_path, monkeypatch, capsys):
-    path = _write(tmp_path, "app.md", _ledger(ROW1))
+    _write(tmp_path, "app.md", _ledger(DONE1))
     client = FakeGh([_pr("Closes #7")], {7: {"title": "[DEV-1] 제목", "body": ""}})
     code, res = _run(monkeypatch, tmp_path, client, capsys)
-    assert code == 0 and res["status"] == "changed"
-    assert _read(path) == _ledger(DONE1)
+    assert code == 0 and res["status"] == "ok"
 
 
 def test_순수_함수들():
@@ -395,40 +369,39 @@ def _load(path: Path) -> dict:
     return data
 
 
-def test_재사용_워크플로는_workflow_call_이고_engine_ref_기본은_stable():
+def test_재사용_워크플로는_workflow_call_이고_engine_ref_기본은_stable_이며_secret_이_없다():
     wf = _load(WORKFLOW)
-    assert wf["on"]["workflow_call"]["inputs"]["engine-ref"]["default"] == "stable"
+    call = wf["on"]["workflow_call"]
+    assert call["inputs"]["engine-ref"]["default"] == "stable"
+    assert "secrets" not in call  # deploy key 같은 쓰기용 secret 은 우회로가 되므로 받지 않는다(#445)
 
 
-def test_job_권한과_동시성_없음():
+def test_job_권한은_읽기와_이슈_쓰기뿐이다():
     job = _load(WORKFLOW)["jobs"]["complete"]
-    assert job["permissions"] == {"contents": "write", "pull-requests": "read", "issues": "write"}
-    # 대기 중인 실행이 조용히 취소되면 완료 표시가 빠지므로 concurrency 를 쓰지 않는다(재시도 루프가 맡는다).
-    assert "concurrency" not in job and "concurrency" not in _load(WORKFLOW)
-    # 작성자 가드 대신 엔진이 제목으로 자기 커밋을 건너뛴다.
-    assert "if" not in job
+    assert job["permissions"] == {"contents": "read", "pull-requests": "read", "issues": "write"}
 
 
 def test_Project_Repository_를_main_으로_받고_엔진은_그_뒤에_받는다():
     steps = _load(WORKFLOW)["jobs"]["complete"]["steps"]
     uses = [s for s in steps if str(s.get("uses", "")).startswith("actions/checkout")]
     assert uses[0]["with"]["ref"] == "main" and uses[0]["with"]["fetch-depth"] == 0
-    assert "repository" not in uses[0]["with"]
+    assert "repository" not in uses[0]["with"] and "ssh-key" not in uses[0]["with"]
     assert uses[1]["with"]["path"] == ".harness-engine"  # 앞 checkout 이 지우지 않게 뒤에 받는다
 
 
-def test_반복_push_와_실패_알림이_있다():
+def test_워크플로는_쓰지_않고_확인한_뒤_이슈를_연다():
     text = WORKFLOW.read_text(encoding="utf-8")
-    loop = (ROOT / "scripts" / "ledger_complete_loop.sh").read_text(encoding="utf-8")
-    assert "scripts/ledger_complete_loop.sh" in text
-    assert 'ATTEMPTS="${ATTEMPTS:-5}"' in loop
-    assert "git reset --hard origin/main" in loop
-    assert "git push origin HEAD:main" in loop
-    assert "41898283+github-actions[bot]@users.noreply.github.com" in loop
-    assert "ledger-complete: 진행 원장 완료 표시를 못 했다" in text
-    assert "gh issue comment" in text and "gh issue create" in text
-    assert "--limit 500" in text
-    assert "github.event.before" in text
+    body = text.split("jobs:", 1)[1]
+    assert "ledger_complete.py check" in body and "--before" in body
+    assert "git push" not in body and "git commit" not in body and "ssh-key" not in body
+    assert "LEDGER_DEPLOY_KEY" not in body
+    assert "ledger-complete: 진행 원장이 완료로 표시돼 있지 않다" in body
+    assert "gh issue comment" in body and "gh issue create" in body
+    assert "--limit 500" in body
+    assert "github.event.before" in body
+    # 종료 0 이어도 status 가 ok·skipped 가 아니면 통과로 넘기지 않는다.
+    assert '"$status" = "ok"' in body and '"$status" = "skipped"' in body
+    assert not (ROOT / "scripts" / "ledger_complete_loop.sh").exists()  # push 재시도 루프는 없다
 
 
 def test_스캐폴드_caller_모양():
@@ -436,38 +409,34 @@ def test_스캐폴드_caller_모양():
     assert wf["on"] == {"push": {"branches": ["main"]}}
     job = wf["jobs"]["ledger-complete"]
     assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/ledger-complete.yml@stable"
-    assert job["permissions"] == {"contents": "write", "pull-requests": "read", "issues": "write"}
+    assert job["permissions"] == {"contents": "read", "pull-requests": "read", "issues": "write"}
+    assert "secrets" not in job
 
 
 def test_pulls_가_비면_squash_제목의_PR_번호로_직접_조회한다(tmp_path, monkeypatch, capsys, subjects):
-    path = _write(tmp_path, "a.md", _ledger(ROW1))
+    _write(tmp_path, "a.md", _ledger(ROW1))
     subjects[SHA] = "feat: 구매요청 승인 (#50)"
     client = FakeGh([], {7: _rep(7)})
     client.pulls[50] = _pr("Closes #7")
     code, res = _run(monkeypatch, tmp_path, client, capsys)
-    assert code == 0 and res["prs"] == [50]
-    assert _read(path) == _ledger(DONE1)
+    assert code == 1 and res["prs"] == [50]
 
 
 def test_직접_조회한_PR_이_병합_안_됐거나_main_이_아니면_건너뛴다(tmp_path, monkeypatch, capsys, subjects):
-    text = _ledger(ROW1)
-    path = _write(tmp_path, "a.md", text)
+    _write(tmp_path, "a.md", _ledger(ROW1))
     subjects[SHA] = "feat: x (#50)"
     for pr in (_pr("Closes #7", merged=False), _pr("Closes #7", base="release")):
         client = FakeGh([], {7: _rep(7)})
         client.pulls[50] = pr
         code, res = _run(monkeypatch, tmp_path, client, capsys)
         assert code == 0 and res["status"] == "skipped"
-    assert _read(path) == text
 
 
 def test_직접_조회가_실패하면_2(tmp_path, monkeypatch, capsys, subjects):
-    text = _ledger(ROW1)
-    path = _write(tmp_path, "a.md", text)
+    _write(tmp_path, "a.md", _ledger(ROW1))
     subjects[SHA] = "feat: x (#50)"
     code, res = _run(monkeypatch, tmp_path, FakeGh([], {7: _rep(7)}, fail="/pulls/50"), capsys)
     assert code == 2 and res["status"] == "unknown"
-    assert _read(path) == text
 
 
 def test_pulls_도_비고_제목에_번호도_없으면_건너뛴다(tmp_path, monkeypatch, capsys, subjects):
@@ -478,37 +447,38 @@ def test_pulls_도_비고_제목에_번호도_없으면_건너뛴다(tmp_path, m
 
 
 def test_pulls_가_있으면_제목의_번호로_조회하지_않는다(tmp_path, monkeypatch, capsys, subjects):
-    _write(tmp_path, "a.md", _ledger(ROW1))
+    _write(tmp_path, "a.md", _ledger(DONE1))
     subjects[SHA] = "feat: x (#99)"  # pulls/99 는 FakeGh 에 없어 조회하면 KeyError
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
-    assert code == 0 and res["prs"] == [50]
+    assert code == 0 and res["status"] == "ok"
 
 
-def test_이_워크플로가_만든_커밋은_건너뛴다(tmp_path, monkeypatch, capsys, subjects):
-    text = _ledger(ROW1)
-    path = _write(tmp_path, "a.md", text)
-    subjects[SHA] = "docs: 진행 원장 완료 표시"
-    code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
-    assert code == 0 and res["status"] == "skipped"
-    assert _read(path) == text
-    # 다른 커밋과 같이 들어오면 그 커밋만 처리한다.
-    subjects["other"] = "feat: y"
-    client = FakeGh({SHA: [_pr("Closes #8", number=60)], "other": [_pr("Closes #7")]}, {7: _rep(7), 8: _rep(8, "DEV-002")})
-    code, res = _run(monkeypatch, tmp_path, client, capsys, shas=[SHA, "other"])
-    assert res["changed"] == ["DEV-001"] and res["prs"] == [50]
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(root), "-c", "user.email=a@a", "-c", "user.name=a", *args],
+                          check=True, capture_output=True, text=True).stdout.strip()
 
 
 def test_커밋_제목을_git_에서_읽는다(tmp_path):
-    import subprocess
-
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.email=a@a", "-c", "user.name=a", "commit", "-q",
-                    "--allow-empty", "-m", "feat: 제목 (#12)"], check=True)
-    sha = subprocess.run(["git", "-C", str(tmp_path), "rev-parse", "HEAD"], check=True, capture_output=True,
-                         text=True).stdout.strip()
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "feat: 제목 (#12)")
+    sha = _git(tmp_path, "rev-parse", "HEAD")
     assert _REAL_SUBJECT(tmp_path, sha) == "feat: 제목 (#12)"
     with pytest.raises(mod.Unknown):
         _REAL_SUBJECT(tmp_path, "f" * 40)
+
+
+def test_push_의_커밋_범위를_오래된_것부터_푼다(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    shas = []
+    for i in range(3):
+        _git(tmp_path, "commit", "-q", "--allow-empty", "-m", f"c{i}")
+        shas.append(_git(tmp_path, "rev-parse", "HEAD"))
+    assert mod.expand_shas(tmp_path, shas[2], shas[0]) == shas[1:]
+    assert mod.expand_shas(tmp_path, shas[2], None) == [shas[2]]
+    assert mod.expand_shas(tmp_path, shas[2], "") == [shas[2]]
+    assert mod.expand_shas(tmp_path, shas[2], "0" * 40) == [shas[2]]  # 새 브랜치
+    assert mod.expand_shas(tmp_path, shas[2], "f" * 40) == [shas[2]]  # 히스토리에 없는 before
+    assert mod.expand_shas(tmp_path, shas[2], shas[2]) == [shas[2]]  # 빈 범위
 
 
 def test_Closes_전처리는_주석을_먼저_지우고_들여쓴_코드_블록도_걷는다():

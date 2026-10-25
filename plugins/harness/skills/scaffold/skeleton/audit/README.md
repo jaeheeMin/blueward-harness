@@ -37,10 +37,11 @@ Spec 칸에 그 파일 링크를 적는다 — 원장의 ID 로 Spec 을 곧장 
 - `/harness:spec` — start 가 만든 줄이 있으면 같은 번호로 Spec 을 만들고 그 줄의
   Spec 칸을 링크로 채운다. 줄이 없으면(start 를 거치지 않았으면) 근거 REQ 의 번호
   (없으면 찜한 번호)로 줄을 만들고 상태는 `대기` 다.
-- `/harness:deliver` — PR 을 올린 뒤 상태를 `리뷰`, 마지막 PR 을 `#번호` 로 바꾼다.
-- `완료` — 대표 `[DEV-xxx]` 이슈를 Closes 하는 PR 이 병합되면 Actions(`ledger-complete.yml`)가 상태를 `완료`, 마지막
-  PR 을 그 PR 번호로 바꿔 main 에 직접 커밋한다. 하위 작업 PR 만 병합됐거나 대표 이슈를 안 닫았으면 그대로이니 그때는
-  사람이 손으로 쓴다. Actions 가 못 바꾸면 이슈가 열린다.
+- `/harness:deliver` — PR 을 올리기 전에 상태를 `리뷰`, 마지막 PR 을 `#번호` 로 바꾼다.
+- `완료` — 대표 `[DEV-xxx]` 이슈를 Closes 하는 PR 이면 `/harness:deliver` 가 처음부터 상태를 `완료`, 마지막 PR 을
+  그 PR 번호로 써서 PR 에 담는다(병합되면 main 원장도 완료가 된다). 하위 작업 PR 은 `리뷰` 이고 대표 이슈를 안 닫은
+  PR 도 그대로이니 그때 `완료` 는 사람이 PR 로 쓴다. 병합 뒤 Actions(`ledger-complete.yml`)는 원장을 쓰지 않고, 대표
+  이슈를 닫은 PR 이 병합됐는데 그 행이 `완료` 가 아니면 이슈를 열어 알린다.
 
 번호: 요구사항(`REQ-003`)·Spec(`DEV-003`)·원장의 개발 건(`DEV-003`)은 한 번호를 쓴다.
 번호는 작업을 시작할 때 GitHub 이슈 제목에 `[DEV-003]` 로 찜한다(`/harness:start`,

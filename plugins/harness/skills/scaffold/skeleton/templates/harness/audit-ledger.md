@@ -19,7 +19,7 @@ ID 칸은 `docs/spec/` 의 Spec 파일, 그 근거 요구사항(`REQ-001`)과 �
 Spec 칸에 `설정` 이라고 적는다. 상태는 대기 / 진행 / 리뷰 / 완료 가운데 하나로
 적는다 — 진행은 `/harness:start` 가, 대기는 `/harness:spec` 이 Spec 만
 단독으로 만들 때나 `/harness:srs`·`/harness:spec` 이 설정 요구사항을 올릴 때, 리뷰는 `/harness:deliver` 가 쓰고,
-완료는 대표 `[DEV-xxx]` 이슈를 Closes 하는 PR 이 병합되면 Actions 가 쓴다(하위 작업만 병합되면 사람이 쓴다). 보류(On Hold)·취소(Dropped·Duplicate)된 요구사항의 줄은 지우지 않고 상태도 그대로 둔 채
+완료는 대표 `[DEV-xxx]` 이슈를 Closes 하는 PR 이면 `/harness:deliver` 가 처음부터 써서 PR 에 담는다(하위 작업 PR 은 리뷰이고 완료는 사람이 쓴다). 보류(On Hold)·취소(Dropped·Duplicate)된 요구사항의 줄은 지우지 않고 상태도 그대로 둔 채
 내용 칸 앞에 `[보류]` 또는 `[취소]` 를 붙인다. 설정 건이 개발로 바뀌면 Spec 칸을 `-` 로 되돌린다.
 
 ## 메모
