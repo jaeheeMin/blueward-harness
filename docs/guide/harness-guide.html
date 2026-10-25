@@ -281,7 +281,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.106, public-cloud main 기준 (2026-10-22)</div>
+      <div class="note">harness 0.10.109, public-cloud main 기준 (2026-10-22)</div>
     </div>
   </nav>
 
@@ -1213,6 +1213,17 @@ fix/31-broken-link</pre>
     <p class="small" style="margin-top:10px">원장을 PR 뒤에 고치면 푸시가 두 번 나가서 Actions 검사가 두 번 돌아. 그래서 다음 PR 번호를 미리 계산해 푸시 전에 적고, PR 을 만든 뒤 번호가 다를 때만 한 번 더 올려.</p>
   </section>
 
+  <section class="box">
+    <h3>커밋한 뒤 deliver 가 먼저 물어봐 — 세 갈래</h3>
+    <p style="font-size:14.5px;margin-bottom:8px">PR 을 바로 낼지는 deliver 가 상황을 보고 <b>추천 하나</b>를 말해 줘. 내가 "네" 하거나 다른 걸 고르면 돼. 기준은 외울 필요 없어.</p>
+    <ul class="todo">
+      <li><b>PR 내기</b> — 한 개발의 한 단계(SRS / Spec / 개발)가 끝났을 때. 지금까지 하던 대로 올려.</li>
+      <li><b>브랜치에만 올리기</b> — 080 묶음이 아직 안 끝났거나, 앞 PR 이 아직 열려 있을 때. 저장만 해 두고 PR 은 안 내(그래서 검사도 아직 안 돌아). "아직 080 묶음이 끝나지 않았어요. 지금은 저장만 해 두고, 다 끝나면 PR 을 낼게요." 다음에 다시 <code>/harness:deliver</code> 하면 이어서 판단해.</li>
+      <li><b>나눠서 올리기</b> — 서로 다른 개발이나 문서 단계(SRS · Spec · 개발)가 한 덩어리로 섞였을 때. 어떤 파일을 어느 PR 로 나눌지 제안해 줘. 그대로 올려도 되는데, 그러면 이유가 PR 에 적혀.</li>
+    </ul>
+    <p class="small" style="margin-top:10px">이미 승인받은 PR 에 더 고치려 하면 "그 PR 은 먼저 합치고, 이번 건은 새 PR 로" 를 추천해. 승인은 새로 고친 내용을 본 게 아니거든. PR 을 낸 뒤 저장소가 자동 병합을 허용하고 필수 검사가 걸려 있으면, 승인과 검사가 끝나는 순간 알아서 합쳐지게 예약도 걸어 줘(조건이 안 되면 "자동 병합은 아직 꺼져 있어요" 라고 알려 주고 안 걸어).</p>
+  </section>
+
   <div class="cols">
     <section class="box">
       <h3>커밋 메시지</h3>
@@ -1365,6 +1376,18 @@ Closes #143</pre>
       </ul>
     </section>
   </div>
+
+  <section class="box">
+    <h3>자동 병합 — 내 승인이 곧 병합 결정이야</h3>
+    <ul class="todo">
+      <li>PR 은 <b>한 개발의 한 단계</b>만 담아. 섞이면 deliver 가 나누자고 해.</li>
+      <li>끝난 PR 은 승인과 검사가 모두 끝나는 순간 GitHub 가 알아서 합쳐(자동 병합). 그때까지 기다리면 돼.</li>
+      <li>개발 PR 은 다른 PR 위에 쌓지 않아. 앞 PR 이 열려 있으면 브랜치에만 올려 두고, 앞 PR 이 합쳐지면 다시 deliver 해서 PR 을 내.</li>
+      <li>Spec PR 은 설계가 정해지면 합쳐. 개발하다 알게 된 건 원장·변경 기록에 적고, 설계가 바뀌면 새 판으로 새 PR 을 내.</li>
+      <li>이미 승인된 PR 에 더 고치고 싶으면 먼저 합치고 새 PR 을 내.</li>
+    </ul>
+    <p class="small" style="margin-top:10px">검사를 건너뛰는 병합(<code>--admin</code>)은 쓰지 않아. 필수 검사가 아직 없는 저장소에서는 자동 병합을 걸지 않아(걸면 검사 없이 바로 합쳐지니까).</p>
+  </section>
 
   <div class="callouts">
     <div class="callout ok"><span class="k">사람이 Merge</span><div>운영 경로를 바꾼 PR 이나 SRS 변경 PR 은 Claude 의 <code>gh pr merge</code> 가 거절돼. 사람이 GitHub 화면에서 Merge 버튼을 눌러.</div></div>

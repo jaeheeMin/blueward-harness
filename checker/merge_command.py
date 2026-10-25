@@ -244,7 +244,16 @@ def _parse_segment(seg: list[str], subs: tuple[str, ...] = ("merge",)) -> dict |
     expect_repo = False
     skip_value = False
     unknown_flag = None
+    auto = False
+    admin = False
     for tok in seg[i:]:
+        if skip_value:
+            skip_value = False
+            continue
+        if tok == "--auto":
+            auto = True
+        elif tok == "--admin":
+            admin = True
         if expect_repo:
             explicit_repo, expect_repo = tok, False
         elif skip_value:
@@ -286,7 +295,12 @@ def _parse_segment(seg: list[str], subs: tuple[str, ...] = ("merge",)) -> dict |
             )
         elif prref is None:
             prref = tok
-    return {"sub": sub, "repo": explicit_repo or repo or None, "prref": prref}
+    found = {"sub": sub, "repo": explicit_repo or repo or None, "prref": prref}
+    if auto:
+        found["auto"] = True
+    if admin:
+        found["admin"] = True
+    return found
 
 
 def _find(command: str, subs: tuple[str, ...]) -> list[dict]:
@@ -307,7 +321,10 @@ def _find(command: str, subs: tuple[str, ...]) -> list[dict]:
 
 def find_merges(command: str) -> list[dict]:
     """명령 안의 실제 `gh pr merge` 호출마다 `{"repo", "prref"}` 를 돌려준다."""
-    return [{"repo": m["repo"], "prref": m["prref"]} for m in _find(command, ("merge",))]
+    return [
+        {"repo": m["repo"], "prref": m["prref"], **{k: True for k in ("auto", "admin") if m.get(k)}}
+        for m in _find(command, ("merge",))
+    ]
 
 
 def find_pr_mutations(command: str) -> list[dict]:
