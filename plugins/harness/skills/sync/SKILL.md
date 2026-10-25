@@ -100,12 +100,14 @@ git 을 맞춰도 Claude Code 플러그인(훅·스킬)은 따로 갱신된다. 
 auto-update runs"). 그 차이를 알려 준다. 플러그인을 이 스킬이 대신 갱신하지는
 않는다 — 아래 명령은 사람이 친다.
 
-1. **세션 버전**: `<이 스킬의 base directory>/../../.claude-plugin/plugin.json`
-   의 `version`. 지금 세션에 올라온 플러그인이다.
+1. **세션 버전**: `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`
+   의 `version`. 지금 세션에 **실제로 실린** 플러그인이다(스킬 본문의
+   `${CLAUDE_PLUGIN_ROOT}` 는 로드될 때 실린 판 폴더로 치환된다). 이것이 판정의 기준이다(#471).
 2. **내려받은 버전**: 저장소 루트에서
-   `uv run --no-project python "<이 스킬의 base directory>/../../hooks/installed_version.py"`
+   `uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/installed_version.py" --loaded-root "${CLAUDE_PLUGIN_ROOT}"`
    를 실행해 JSON 의 `installed`(이 폴더 항목의 판, 경로 비교는 스크립트가 한다)를
-   쓴다. `state` 가 `missing`·`unreadable` 이거나 실행이 안 되면 "모름" 으로 둔다.
+   참고로 쓴다. 같은 저장소의 worktree 가 여럿이면 세션이 다른 worktree 항목의 판을 싣기도 하므로
+   이 값만으로 stale 이라고 판정하지 않는다. `installed` 가 null 이거나 실행이 안 되면 "모름" 으로 둔다.
    모든 플러그인의 판을 표로 보려면 `/harness:version` 을 안내한다.
 3. **최신 버전**: GitHub main 의 `plugins/harness/.claude-plugin/plugin.json`
    `version`.
