@@ -1,6 +1,6 @@
 # #452 옛 재사용 검사 워크플로 5개 삭제 (2026-10-25)
 
-`.github/workflows/` 의 `doc-guard.yml`·`gitleaks.yml`·`ssot-approval.yml`·`risk-gate.yml`·`pr-queue.yml` 을 지웠다. 기능은 이미 `pr-checks.yml`(PR)·`pr-review.yml`(승인)·`main-checks.yml`(main push)의 단계로 합쳐져 있다(#412·#417~#420). #428 의 마지막 항목이다. Plugin version 0.10.114.
+`.github/workflows/` 의 `doc-guard.yml`·`gitleaks.yml`·`ssot-approval.yml`·`risk-gate.yml`·`pr-queue.yml` 을 지웠다. 기능은 이미 `pr-checks.yml`(PR)·`pr-review.yml`(승인)·`main-checks.yml`(main push)의 단계로 합쳐져 있다(#412·#417~#420). #428 의 마지막 항목이다. Plugin version 0.10.115.
 
 **호출하는 곳 확인.** public-cloud 는 새 caller 셋으로 교체를 마쳤다. `jaeheeMin/client-docs` 는 옛 `doc-guard.yml` 을 아직 부르지만 쓰지 않는 저장소라 깨져도 된다고 사용자가 정했다(이 PR 이후 그 저장소의 Actions 는 실패한다. 고치지 않는다). 이 저장소 안에서는 `pr-queue-self.yml` 만 옛 파일(`pr-queue.yml`)을 불렀다.
 
@@ -21,4 +21,4 @@
 
 **문서.** CLAUDE.md, README.md, checker/README.md, scaffold skeleton CLAUDE.md, docs/sap-plugin-survey.md, plugins/harness/README.md, 엔진·scripts docstring, gitleaks 설정 주석, `release-tag.yml` 의 paths(지운 5개 제거)를 새 구성에 맞게 고쳤다. 길잡이(`docs/guide/harness-guide.html`)에는 옛 파일명 언급이 없어 고치지 않았다. 과거 기록(`docs/status/`)과 새 워크플로 안의 "옛 ○○.yml" 이력 주석은 그대로 뒀다.
 
-**미결.** client-docs 의 옛 caller 정리는 하지 않는다(사용자 결정). 병합 뒤 `release-tag` 가 `v0.10.114` 와 `stable` 을 붙이는지 확인한다.
+**미결.** client-docs 의 옛 caller 정리는 하지 않는다(사용자 결정). 병합 뒤 `release-tag` 가 `v0.10.115` 와 `stable` 을 붙이는지 확인한다.
