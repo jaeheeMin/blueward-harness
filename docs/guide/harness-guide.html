@@ -1027,7 +1027,7 @@ fix/31-broken-link</pre>
     <div class="callout ok"><span class="k">PR 링크</span><div>표와 알림, 병합 거절 메시지, PR 코멘트, Teams 알림 어디서든 PR 은 <code>[#303](https://github.com/owner/repo/pull/303)</code> 처럼 번호가 링크로 나와. 저장소가 여럿이어도 링크를 누르면 어느 저장소의 PR 인지 바로 알 수 있어.</div></div>
     <div class="callout ok"><span class="k">전체 보기</span><div><code>/harness:prs --all</code> 이면 할 일 표 없이, 저장소의 열린 PR 전부를 줄기 표로 보여 줘(혼자인 PR 은 맨 아래 "줄기 없음").</div></div>
     <div class="callout ok"><span class="k">내가 승인할 PR</span><div>승인자라면 <code>/harness:approvals</code> ("승인 대기 PR 보여줘", "승인할 거 있어?") 로 <b>내 Approve 를 기다리는 남의 PR</b> 을 병합 순서대로 한 표로 볼 수 있어. PR 링크·왜 승인이 필요한지(위험 경로, 줄 수, SRS 변경 등)·다른 승인자·내 승인만 남았는지·낡은 승인(새 커밋 뒤 다시 승인 필요)·앞 PR 이 나와. 승인은 Claude 가 대신 하지 않아 — 표의 링크를 열어 GitHub 에서 사람이 눌러. 이 저장소의 승인자가 아니면 "승인자가 아님", 읽지 못하면 "확인 불능" 이라고 말해(승인할 PR 없음과 구분). 내 PR 상태는 <code>/harness:prs</code> 로 봐.</div></div>
-    <div class="callout ok"><span class="k">Claude 없이도</span><div>PR 화면에 <code>pr-queue</code> 코멘트가 붙어서 "몇 번째 / 앞에 병합할 PR / 지금 상태 / 다음 할 일" 을 알려 주고, <code>merge-order</code> 검사가 앞 PR 이 열려 있으면 노란 대기로, 앞 PR 이 병합되면 초록으로, 순서를 못 정하면 빨간불로 보여 줘. 무료 요금제라 Merge 버튼은 안 잠기니 노란 대기면 앞 PR 부터 병합해. 코멘트는 PR·리뷰·main 이벤트가 있을 때 갱신돼서 검사 결과는 다음 이벤트까지 낡을 수 있어. 본문 <code>먼저:</code> 줄을 고치거나 draft 로 바꿔도 바로 갱신되지 않고 다음 PR·리뷰·main 이벤트까지 낡아 — 정확한 지금 상태는 <code>/harness:prs</code> 로 봐. 앞 PR 이 병합돼 내 차례가 되면 PR 에 나를 멘션하는 코멘트가 달리고, 저장소에 Teams 알림이 설정돼 있으면 Teams 로도 와. 기존 저장소는 옛 호출 파일 다섯을 지우고 새 호출 파일 셋(<code>pr-checks.yml</code>·<code>pr-review.yml</code>·<code>main-checks.yml</code>)을 넣어야 받아.</div></div>  </div>
+    <div class="callout ok"><span class="k">Claude 없이도</span><div>PR 화면에 <code>pr-queue</code> 코멘트가 붙어서 "몇 번째 / 앞에 병합할 PR / 지금 상태 / 다음 할 일" 을 알려 주고, <code>merge-order</code> 검사가 앞 PR 이 열려 있으면 노란 대기로, 앞 PR 이 병합되면 초록으로, 순서를 못 정하면 빨간불로 보여 줘. <code>merge-order</code> 는 필수 검사가 아니라서 노란 대기여도 Merge 버튼은 안 잠겨. 그러니 노란 대기면 앞 PR 부터 병합해. 코멘트는 PR·리뷰·main 이벤트가 있을 때 갱신돼서 검사 결과는 다음 이벤트까지 낡을 수 있어. 본문 <code>먼저:</code> 줄을 고치거나 draft 로 바꿔도 바로 갱신되지 않고 다음 PR·리뷰·main 이벤트까지 낡아 — 정확한 지금 상태는 <code>/harness:prs</code> 로 봐. 앞 PR 이 병합돼 내 차례가 되면 PR 에 나를 멘션하는 코멘트가 달리고, 저장소에 Teams 알림이 설정돼 있으면 Teams 로도 와. 새 호출 파일 셋(<code>pr-checks.yml</code>·<code>pr-review.yml</code>·<code>main-checks.yml</code>)을 쓰는 저장소가 받아. public-cloud 는 이미 바꿨고, 옛 호출 파일 다섯을 쓰던 다른 기존 저장소는 그 다섯을 지우고 새 셋을 넣어야 해.</div></div>  </div>
 
   <div class="next"><button data-go="sync">← 최신으로 맞추기</button><button data-go="sap">다음: SAP 에서 개발하기 →</button></div>
 </article>
@@ -1303,7 +1303,7 @@ Closes #143</pre>
     <tr><td><code>ops-guard</code></td><td>팀원이 운영 파일을 바꿨는지</td><td>PR 을 자동으로 닫음</td></tr>
     <tr><td><code>notify-teams</code></td><td>병합된 PR</td><td>Teams 로 알림</td></tr>
     <tr><td><code>pr-tamper-alert</code></td><td>작성자가 아닌 계정이 그 PR 브랜치에 push 했거나 리뷰를 해제했는지 (병합·봇·저장소 admin 은 제외)</td><td>이슈와 Teams 로 알림. 막지는 못해</td></tr>
-    <tr><td><code>pr-queue</code> · <code>merge-order</code></td><td>열린 PR 마다 병합 순서를 계산해 코멘트 하나를 갱신하고, <code>merge-order</code> 상태를 달아. 앞에 병합할 PR 이 열려 있으면 노란 대기, 없으면 초록불, 순서를 못 정하면(순환 등) 빨간불(오류). GitHub 를 못 읽으면 이 검사가 실패해(통과로 보지 않아). 위험도·병합 전 확인에서는 "다른 검사 실패" 로 세지 않아</td><td>막지는 못해(Merge 버튼은 안 잠겨). 앞 PR 부터 병합</td></tr>
+    <tr><td><code>pr-queue</code> · <code>merge-order</code></td><td>열린 PR 마다 병합 순서를 계산해 코멘트 하나를 갱신하고, <code>merge-order</code> 상태를 달아. 앞에 병합할 PR 이 열려 있으면 노란 대기, 없으면 초록불, 순서를 못 정하면(순환 등) 빨간불(오류). GitHub 를 못 읽으면 이 검사가 실패해(통과로 보지 않아). 위험도·병합 전 확인에서는 "다른 검사 실패" 로 세지 않아</td><td>필수 검사가 아니라 Merge 버튼은 안 잠겨. 앞 PR 부터 병합</td></tr>
     <tr><td><code>ledger-complete</code></td><td>main 에 병합된 PR 이 대표 <code>[DEV-xxx]</code> 이슈를 <code>Closes</code> 했는지</td><td>원장을 쓰지 않고 확인만 해. 닫은 대표 이슈의 원장 줄이 "완료" 가 아니면(또는 확인을 못 하면) 이슈로 알리고 job 이 실패해</td></tr>
   </table></div>
 
@@ -1328,7 +1328,7 @@ Closes #143</pre>
   <div class="callouts">
     <div class="callout ok"><span class="k">빨간 불</span><div>검사가 실패하면 PR 댓글의 이유를 읽고 고친 다음, 다시 <code>/harness:deliver</code> 해. 같은 PR 이 갱신돼.</div></div>
     <div class="callout ok"><span class="k">엔진 판</span><div>Actions 는 엔진을 main 이 아니라 배포 태그 <code>stable</code> 로 받아. harness 쪽 검사 변경은 새 판이 배포돼 <code>stable</code> 이 옮겨질 때 내 PR 검사에 반영돼, main 에 병합된 순간이 아니야. 새 검사 규칙을 켜는 것도 그 뒤에 해.</div></div>
-    <div class="callout warn"><span class="k">무료 요금제</span><div>GitHub 무료 요금제라 Merge 버튼 자체는 잠글 수 없어. 승인 없이 병합되면 나중에 자동으로 이슈가 열려서 알려 줘. 마지막 안전망은 사람이야.</div></div>
+    <div class="callout ok"><span class="k">main 규칙(ruleset)</span><div>조직이 GitHub Team 요금제로 바뀌어서 public-cloud 의 main 에 규칙이 걸렸어. main 은 PR 로만 바뀌고, 필수 검사 <code>pr-checks / check</code> 가 통과해야 Merge 버튼이 열려. 새 커밋이 오면 이전 승인은 취소되고, 강제 푸시와 브랜치 삭제는 막혀. 예외(bypass)는 Owner 만 돼. 승인 수는 서버에 걸지 않았어 — 승인이 필요한지는 <code>risk-gate</code> 가 판단하고, 필요한 PR 은 승인 전까지 <code>pr-checks</code> 가 빨간 불이라 병합이 막혀. 다만 <code>merge-order</code> 는 필수 검사가 아니라서 Merge 버튼을 잠그지 않아. 그래도 승인 없이 병합된 일이 생기면 <code>main-checks</code> 가 나중에 이슈를 열어 알려 줘.</div></div>
   </div>
 
   <div class="next"><button data-go="deliver">← 작업 올리기</button><button data-go="merge">다음: 리뷰 · 병합하기 →</button></div>
@@ -1390,7 +1390,7 @@ Closes #143</pre>
       <li>Spec PR 은 설계가 정해지면 합쳐. 개발하다 알게 된 건 원장·변경 기록에 적고, 설계가 바뀌면 새 판으로 새 PR 을 내.</li>
       <li>이미 승인된 PR 에 더 고치고 싶으면 먼저 합치고 새 PR 을 내.</li>
     </ul>
-    <p class="small" style="margin-top:10px">검사를 건너뛰는 병합(<code>--admin</code>)은 쓰지 않아. 필수 검사가 아직 없는 저장소에서는 자동 병합을 걸지 않아(걸면 검사 없이 바로 합쳐지니까).</p>
+    <p class="small" style="margin-top:10px">검사를 건너뛰는 병합(<code>--admin</code>)은 쓰지 않아. 필수 검사가 아직 없는 저장소에서는 자동 병합을 걸지 않아(걸면 검사 없이 바로 합쳐지니까). public-cloud 는 저장소 설정에서 자동 병합이 켜졌고 main 규칙에 필수 검사 <code>pr-checks / check</code> 가 걸려 있어.</p>
   </section>
 
   <div class="callouts">
@@ -1679,8 +1679,8 @@ Closes #143</pre>
     <div class="flow">
       <div class="node"><b>승인 없음</b><span>PR 검사 빨간 불 + 댓글</span></div><div class="arrow"></div>
       <div class="node"><b>Claude 가 병합 시도</b><span>훅이 거절</span></div><div class="arrow"></div>
-      <div class="node"><b>사람이 Merge 버튼</b><span>무료 요금제라 못 막음</span></div><div class="arrow"></div>
-      <div class="node ok"><b>병합되면</b><span>자동으로 이슈가 열림 · 승인자가 사후 검토</span></div>
+      <div class="node"><b>사람이 Merge 버튼</b><span>필수 검사가 빨간 불이면 버튼이 안 열림 (예외는 Owner 만)</span></div><div class="arrow"></div>
+      <div class="node ok"><b>그래도 병합되면</b><span>자동으로 이슈가 열림 · 승인자가 사후 검토</span></div>
     </div>
     <div class="cap">승인 없이 병합하려 하면 이렇게 돼. 마지막 안전망은 사람이야.</div>
   </section>
@@ -1746,6 +1746,7 @@ Closes #143</pre>
         <li>문서 버전은 파일명에 (첫 판 <code>_v0.1.xlsx</code>, 고칠 때마다 0.1 씩), 이전 판도 남겨</li>
         <li>이름 짓기 전에 <code>conventions/naming.md</code></li>
         <li>SRS 를 바꾸면 다른 사람 승인</li>
+        <li>병합은 필수 검사 <code>pr-checks / check</code> 가 초록일 때만 열려. 빨간 불이면 이유를 읽고 고쳐</li>
         <li>원장 "완료" 는 대표 이슈를 닫는 PR 이면 deliver 가 PR 에 담아 줌 (하위 작업 PR 이면 직접)</li>
         <li>검사를 못 했으면 "검사 불능" 이라고 말해</li>
       </ul>
@@ -1816,7 +1817,9 @@ Closes #143</pre>
     <div class="term"><dt>Skill<span>/harness:…</span></dt><dd><b>여러 단계를 한 번에 해 주는 단축 명령.</b> 이름을 치거나 말로 부탁하면 돼.</dd></div>
     <div class="term"><dt>Hook</dt><dd><b>문 앞 경비원.</b> Claude 가 저장·커밋·푸시하려는 순간 규칙을 보고 막거나 알려 줘.</dd></div>
     <div class="term"><dt>GitHub Actions</dt><dd><b>본사 검문소.</b> PR 이 올라오면 GitHub 서버에서 자동으로 검사가 돌아.</dd></div>
-    <div class="term"><dt>main</dt><dd><b>완성본 진열대.</b> PR 로만 바뀌어.</dd></div>
+    <div class="term"><dt>main</dt><dd><b>완성본 진열대.</b> PR 로만 바뀌어. public-cloud 는 ruleset 으로 서버에서도 막아.</dd></div>
+    <div class="term"><dt>Ruleset</dt><dd><b>main 의 출입 규칙.</b> 필수 검사가 통과해야 Merge 버튼이 열리고, 강제 푸시·브랜치 삭제는 막혀. 예외는 Owner 만.</dd></div>
+    <div class="term"><dt>자동 병합<span>auto-merge</span></dt><dd><b>"조건이 다 되면 알아서 합쳐 줘" 예약.</b> 승인과 필수 검사가 끝나는 순간 GitHub 가 병합해.</dd></div>
     <div class="term"><dt>Branch<span>브랜치</span></dt><dd><b>내 작업대.</b> main 을 복사해서 그 위에서 일해.</dd></div>
     <div class="term"><dt>Issue<span>이슈</span></dt><dd><b>작업지시서.</b> 배경, 해야 할 일, 완료 조건을 적어.</dd></div>
     <div class="term"><dt>Commit<span>커밋</span></dt><dd><b>저장 지점.</b> 의미 하나를 담은 변경 묶음이야.</dd></div>
