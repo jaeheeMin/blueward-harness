@@ -3,7 +3,7 @@
 고객사 Project Repository 에 설치해 쓰는 Blueward 하네스다. 새 저장소의 표준
 구조를 만들고, 문서가 템플릿을 따르는지 검사하고(doc-guard), 협업 규칙과
 `/harness:start` · `/harness:deliver` · `/harness:wrapup` · `/harness:sync` 를 비롯한
-Skill 11개를 한 번에 제공한다.
+Skill 12개를 한 번에 제공한다.
 
 ```
 plugins/harness/
@@ -36,6 +36,7 @@ plugins/harness/
     approvals/SKILL.md         /harness:approvals — 내 승인을 기다리는 PR 을 병합 순서대로 확인
     atc/SKILL.md               /harness:atc — SAP ATC 지적 실행·분류·처리
     update/SKILL.md            /harness:update — 플러그인 갱신과 현재 폴더 판 확인
+    version/SKILL.md           /harness:version — 설치된 플러그인의 이 폴더 판 표(읽기만)
   agents/
     researcher.md              harness:researcher — 조회 전용 조사(sonnet, 쓰기 도구 없음)
     reviewer.md                harness:reviewer — 읽기 전용 검토(sonnet, 쓰기 도구 없음)
@@ -73,7 +74,7 @@ plugins/harness/
 
 ## 제공하는 것
 
-### Skill 11개
+### Skill 12개
 
 플러그인 스킬은 이름 앞에 플러그인 이름이 붙으므로 아래 이름으로 나타난다.
 
@@ -85,10 +86,11 @@ plugins/harness/
 | `/harness:scaffold` | 새 Project Repository 에 표준 구조를 만든다 |
 | `/harness:srs` | SRS(요구사항정의서)를 새로 쓰거나, 요구사항이 바뀌었을 때 고친다. 먼저 브랜치를 확인한다(main 이면 start 를 대신, 다른 작업 브랜치면 이어 쓸지 묻는다, #281) |
 | `/harness:spec` | SRS 요구사항으로 개발 Spec 을 만들거나, SRS 가 바뀌어 고친다. srs 와 같이 먼저 브랜치를 확인한다 |
-| `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다. 지금 세션의 플러그인 버전이 main 보다 낮으면 `/reload-plugins`·Update now 를 안내한다(#203) |
+| `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다. 지금 세션의 플러그인 버전이 main 보다 낮으면 `/reload-plugins`·Update now 를 안내한다(#203). 이 폴더의 설치 판은 `installed_version.py` 로 읽고, 전체 표는 `/harness:version` 으로 안내한다 |
 | `/harness:prs` | 내 열린 PR 의 상태(초안·충돌·검사 실패·검사 중·승인 대기·병합 가능)와 병합 순서를 GitHub 에서 계산해 보여 주고 다음 할 일을 알려 준다. `--all` 이면 저장소 전체. 읽기만 한다(#370) |
 | `/harness:approvals` | 내 Approve 를 기다리는 남의 PR 을 병합 순서대로 한 표로 보여 준다(사유·다른 승인자·낡은 승인·앞 PR). 승인자 파일이 없으면 작성자 아닌 누구든 승인 가능으로 본다. 읽기만 하고 Approve 는 사람이 GitHub 에서 한다(#391) |
 | `/harness:update` | 플러그인을 갱신하고 `installed_plugins.json` 의 **현재 폴더(projectPath) 항목** 판으로 반영을 확인한다. 항목이 없거나 안 올랐으면 현재 폴더에 설치하고, 그래도 못 맞추면 "갱신 확인 불능" 으로 알린다. 사용자가 직접 부를 때만 실행하고 끝나면 `/reload-plugins` 입력을 안내한다(#404) |
+| `/harness:version` | 설치된 모든 플러그인의 범위·**이 폴더 판**·받아 둔 최신 판·상태(최신 / 갱신 있음 / 이 폴더에 설치 없음 / 최신 판 확인 불가)·다른 폴더 설치 수를 표로 보여 준다. `hooks/installed_version.py --all`(`--remote` 는 harness 만 원격 태그, `--json`). 읽기만 하며 갱신은 `/harness:update` 로 안내한다. project·local 과 user 가 함께 있으면 project·local 쪽 판을 보인다(#461) |
 | `/harness:atc` | SAP ATC 지적을 돌려 자동·확인 후·수동으로 나눠 처리하고 재실행해 증감을 보고한다(`env/adt-tiers.yaml` 이 있는 Project Repository 에서만. variant 는 서버 항목의 `atc_variant`) |
 
 ### 서브에이전트 3개(#139)

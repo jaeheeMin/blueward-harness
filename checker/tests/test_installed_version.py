@@ -143,3 +143,126 @@ def test_스킬이_이_스크립트와_갱신_명령_순서를_가리킨다():
     assert "갱신 확인 불능" in text
     # 스킬이 대신 실행하는 명령에 uninstall 이 없다(사용자 몫으로만 언급)
     assert not re.search(r"^\s*claude plugin uninstall", text, re.MULTILINE)
+
+
+# --- #461 모든 플러그인 표(--all) ---
+
+
+def _install(tmp_path, plugins):
+    cfg = tmp_path / "cfg"
+    (cfg / "plugins").mkdir(parents=True, exist_ok=True)
+    (cfg / "plugins" / "installed_plugins.json").write_text(
+        json.dumps({"version": 2, "plugins": plugins}), encoding="utf-8"
+    )
+    return {"CLAUDE_CONFIG_DIR": str(cfg)}
+
+
+def _market(tmp_path, market, plugins, versions=None):
+    """로컬 marketplace 사본. plugins: [(name, 항목 version 또는 None)], versions: {name: plugin.json version}."""
+    root = tmp_path / "cfg" / "plugins" / "marketplaces" / market
+    (root / ".claude-plugin").mkdir(parents=True)
+    entries = []
+    for name, ver in plugins:
+        e = {"name": name, "source": f"./plugins/{name}"}
+        if ver:
+            e["version"] = ver
+        entries.append(e)
+        if versions and name in versions:
+            (root / "plugins" / name / ".claude-plugin").mkdir(parents=True)
+            (root / "plugins" / name / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"version": versions[name]}), encoding="utf-8"
+            )
+    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": entries}), encoding="utf-8")
+
+
+def _rows(result):
+    return {r["plugin"]: r for r in result["rows"]}
+
+
+def test_all_여러_폴더_설치_중_현재_폴더_판을_고르고_갱신_있음(tmp_path):
+    env = _install(tmp_path, {PID: [_e(tmp_path / "a", "0.10.94"), _e(tmp_path / "w", "0.10.96"), _e(tmp_path / "b", "0.10.98")]})
+    _market(tmp_path, "blueward-harness", [("harness", None)], {"harness": "0.10.98"})
+    r = _rows(iv.all_plugins(str(tmp_path / "w"), env))[PID]
+    assert (r["installed"], r["latest"], r["state"], r["scope"]) == ("0.10.96", "0.10.98", "stale", "project")
+    assert r["other_project_entries"] == 2
+
+
+def test_all_user_와_project_가_함께_있으면_project_를_고르고_user_판도_보인다(tmp_path):
+    env = _install(tmp_path, {PID: [{"scope": "user", "version": "0.10.90"}, _e(tmp_path / "w", "0.10.98")]})
+    _market(tmp_path, "blueward-harness", [("harness", "0.10.98")])
+    r = _rows(iv.all_plugins(str(tmp_path / "w"), env))[PID]
+    assert (r["scope"], r["installed"], r["user_version"], r["state"]) == ("project", "0.10.98", "0.10.90", "current")
+    # 다른 폴더에서는 user 항목이 이 폴더 판이다
+    r = _rows(iv.all_plugins(str(tmp_path / "x"), env))[PID]
+    assert (r["scope"], r["installed"], r["user_version"]) == ("user", "0.10.90", None)
+
+
+def test_all_이_폴더에_설치_없음(tmp_path):
+    env = _install(tmp_path, {PID: [_e(tmp_path / "other", "0.10.98")]})
+    _market(tmp_path, "blueward-harness", [("harness", "0.10.98")])
+    r = _rows(iv.all_plugins(str(tmp_path / "w"), env))[PID]
+    assert (r["state"], r["installed"], r["scope"]) == ("missing", None, None)
+
+
+@pytest.mark.parametrize("how", ["none", "broken", "no_entry", "no_version"])
+def test_all_marketplace_사본을_못_읽으면_확인_불가이고_최신이_아니다(tmp_path, how):
+    env = _install(tmp_path, {PID: [_e(tmp_path / "w", "0.10.98")]})
+    if how == "broken":
+        _market(tmp_path, "blueward-harness", [])
+        (tmp_path / "cfg" / "plugins" / "marketplaces" / "blueward-harness" / ".claude-plugin" / "marketplace.json").write_text("{x", encoding="utf-8")
+    elif how == "no_entry":
+        _market(tmp_path, "blueward-harness", [("other", "1.0.0")])
+    elif how == "no_version":
+        _market(tmp_path, "blueward-harness", [("harness", None)])  # plugin.json 없음
+    r = _rows(iv.all_plugins(str(tmp_path / "w"), env))[PID]
+    assert (r["state"], r["latest"], r["installed"]) == ("unknown", None, "0.10.98")
+
+
+def test_all_설치_판_문자열이_이상하면_확인_불가(tmp_path):
+    env = _install(tmp_path, {PID: [_e(tmp_path / "w", "abc123")]})
+    _market(tmp_path, "blueward-harness", [("harness", "0.10.98")])
+    assert _rows(iv.all_plugins(str(tmp_path / "w"), env))[PID]["state"] == "unknown"
+
+
+def test_all_installed_plugins_가_없으면_error(tmp_path):
+    r = iv.all_plugins(str(tmp_path), {"CLAUDE_CONFIG_DIR": str(tmp_path / "none")})
+    assert r["rows"] == [] and r["error"]
+    assert "확인 불능" in iv.render_table(r)
+
+
+def test_all_remote_판은_harness_만_바꾼다(tmp_path):
+    env = _install(tmp_path, {PID: [_e(tmp_path / "w", "0.10.98")], "x@m": [{"scope": "user", "version": "1.0.0"}]})
+    _market(tmp_path, "blueward-harness", [("harness", "0.10.98")])
+    _market(tmp_path, "m", [("x", "1.0.0")])
+    rows = _rows(iv.all_plugins(str(tmp_path / "w"), env, remote_latest="0.10.120"))
+    assert (rows[PID]["latest"], rows[PID]["latest_source"], rows[PID]["state"]) == ("0.10.120", "remote", "stale")
+    assert (rows["x@m"]["latest"], rows["x@m"]["latest_source"]) == ("1.0.0", "cache")
+
+
+def test_all_표와_JSON_출력(tmp_path):
+    env = _install(tmp_path, {PID: [_e(tmp_path / "w", "0.10.96"), _e(tmp_path / "o", "0.10.98")], "x@m": [{"scope": "user", "version": "1.0.0"}]})
+    _market(tmp_path, "blueward-harness", [("harness", "0.10.98")])
+    _market(tmp_path, "m", [("x", "1.0.0")])
+    base = [sys.executable, str(PLUGIN_ROOT / "hooks" / "installed_version.py"), "--cwd", str(tmp_path / "w"), "--all"]
+    run = lambda *extra: subprocess.run(  # noqa: E731
+        base + list(extra), capture_output=True, text=True, encoding="utf-8",
+        env={**__import__("os").environ, **env}, check=True,
+    ).stdout
+    table = run()
+    assert "| 플러그인 | 범위 | 이 폴더 판 | 받아 둔 최신 판 | 상태 | 다른 폴더 설치 |" in table
+    assert f"| {PID} | project | 0.10.96 | 0.10.98 | 갱신 있음 | 1곳 |" in table
+    assert "| x@m | user | 1.0.0 | 1.0.0 | 최신 | - |" in table
+    data = json.loads(run("--json"))
+    assert {r["plugin"]: r["state"] for r in data["rows"]} == {PID: "stale", "x@m": "current"}
+
+
+def test_all_옵션_조합_오류():
+    script = str(PLUGIN_ROOT / "hooks" / "installed_version.py")
+    for args in (["--json"], ["--all", "--latest", "0.1.0"]):
+        assert subprocess.run([sys.executable, script, *args], capture_output=True).returncode == 2
+
+
+def test_version_스킬이_스크립트와_update_안내를_가리킨다():
+    text = (PLUGIN_ROOT / "skills" / "version" / "SKILL.md").read_text(encoding="utf-8")
+    assert "hooks/installed_version.py" in text and "--all" in text and "/harness:update" in text
+    assert not re.search(r"^\s*claude plugin (install|update|uninstall)", text, re.MULTILINE)
