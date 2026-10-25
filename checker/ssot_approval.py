@@ -6,8 +6,8 @@ merge 하는 것을 막을 방법이 없으므로, 이 모듈은 "막는다" 대
 넘어가면 반드시 드러나고 기록에 남는다" 를 만든다. 세 곳이 이 모듈의 같은
 판정 함수를 부른다.
 
-- `.github/workflows/ssot-approval.yml` 의 `check` job — PR 을 검사해 실패시킨다.
-- 같은 워크플로의 `after-merge` job — main 에 승인 없이 들어온 것을 잡아 이슈를 연다.
+- `.github/workflows/pr-checks.yml`·`pr-review.yml` 의 ssot-approval 단계 — PR 을 검사해 실패시킨다.
+- `.github/workflows/main-checks.yml` 의 ssot-approval 단계 — main 에 승인 없이 들어온 것을 잡아 이슈를 연다.
 - `plugins/harness/hooks/pre-bash-git-guard.sh` — `gh pr merge` 를 거부한다.
 
 같은 방식으로 "사람이 직접 merge 해야 하는 경로(`.github/human-merge-paths`)를

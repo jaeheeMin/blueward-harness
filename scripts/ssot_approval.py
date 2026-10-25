@@ -1,4 +1,4 @@
-"""GitHub Actions 재사용 워크플로(`ssot-approval.yml`)가 부르는 얇은 진입점.
+"""GitHub Actions 워크플로의 ssot-approval 단계(`pr-checks.yml`·`pr-review.yml`·`main-checks.yml`)가 부르는 얇은 진입점.
 
 판정 로직은 전부 `checker.ssot_approval` 에 있다. 그 모듈이 `checker` 패키지
 안에 사는 이유(훅이 `uvx` 로 같은 코드를 부르기 위해서)는 그 파일의 docstring을

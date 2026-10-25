@@ -43,8 +43,8 @@
 (`ssot_approval.parse_approvers`). 이 판정은 `ssot_approval.evaluate_approval`(#119)을 그대로
 쓴다. 작성자를 뺀 승인 가능한 사람이 하나도 없으면 승인으로 풀 수 없다고 사유와 다음 할 일을 밝힌다.
 
-세 곳이 같은 `decide_pr` 를 부른다 — PR 검사 workflow(`risk-gate.yml` 의 `check`), 병합 뒤
-감지(`after-merge`, `decide_commit`), Claude 병합 Hook. 셋이 같은 코드로 같은 판정을 내려야
+세 곳이 같은 `decide_pr` 를 부른다 — PR 검사 workflow(`pr-checks.yml`·`pr-review.yml` 의 risk-gate 단계), 병합 뒤
+감지(`main-checks.yml` 의 risk-gate 단계, `decide_commit`), Claude 병합 Hook. 셋이 같은 코드로 같은 판정을 내려야
 "위험하다" 의 뜻이 갈라지지 않는다.
 
 **종료코드.** 0 통과(게이트 꺼짐, 위험하지 않음, 위험하지만 최신 커밋에 승인됨), 1 승인
@@ -122,7 +122,7 @@ OWN_CHECK_NAME = "risk-gate"
 # `merge-order` 는 pr-queue 워크플로가 다는 병합 순서 커밋 status(#370)다. 앞 PR 이 열려 있으면
 # pending(#401 전엔 failure)인데, 그것은 이 PR 의 위험도나 검사 결과가 아니라 병합 시점의 문제이므로 같은 사유를
 # 두 번 쌓거나 승인 판정을 오염시키지 않게 세지 않는다.
-# 같은 이유로 그 워크플로의 job(`pr-queue / queue`)도 뺀다. 저장소 전체에 하나의 concurrency 그룹이라
+# 같은 이유로 이 저장소 자신의 `pr-queue-self.yml` job(`pr-queue / queue`)도 뺀다. 저장소 전체에 하나의 concurrency 그룹이라
 # 다른 PR 의 실행이 이 실행을 취소하면 그 PR 의 커밋에 취소된 검사가 남아, 병합 순서와 무관한 PR 이
 # "검사 실패" 로 보이기 때문이다. 이 job 이 실패한 사유(GitHub 를 못 읽음)는 PR 의 문제가 아니다.
 MERGE_ORDER_CHECK = "merge-order"

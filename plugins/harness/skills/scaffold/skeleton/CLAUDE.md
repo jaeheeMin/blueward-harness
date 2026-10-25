@@ -16,7 +16,7 @@ Project Repository 다. 이 프로젝트의 최종 산출물과, 그 산출물�
 | `audit/changes/` | 변경 기록. 무엇이 왜 바뀌었는지, 기록 하나에 파일 하나 |
 | `audit/ledger/` | 진행 원장. 프로그램 하나에 파일 하나 |
 | `env/` | 환경별 접속 URL |
-| `.github/workflows/doc-guard.yml` | PR 과 main 커밋마다 doc-guard 검사를 돌리는 워크플로 |
+| `.github/workflows/pr-checks.yml`·`pr-review.yml`·`main-checks.yml` | PR 과 main 커밋마다 doc-guard 등 검사를 돌리는 워크플로 |
 
 ## 규칙
 

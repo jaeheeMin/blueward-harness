@@ -40,7 +40,7 @@ public-cloud 쪽 선행 작업은 끝났다: PR jaeheeMin/public-cloud#111 (병�
 **할 일**: 플러그인 버전과 같은 git 태그(예: `@v0.10.17`)로 고정하고, 릴리즈
 절차에 "plugin.json version 과 태그를 같이 올린다" 를 넣는다. 세 곳이 같은 값을
 쓰도록 한 곳에서 읽게 하면 더 좋다. `DOC_GUARD_ENGINE` 환경변수 덮어쓰기는 유지.
-`.github/workflows/doc-guard.yml` 등 Actions 쪽 `@main` 참조도 같이 본다.
+`.github/workflows/pr-checks.yml` 등 Actions 쪽 `@main` 참조도 같이 본다.
 
 **결정 필요(사용자)**: 엔진 수정이 태그 전까지 반영 안 되는 트레이드오프 수용 여부.
 

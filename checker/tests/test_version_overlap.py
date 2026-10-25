@@ -439,17 +439,14 @@ def test_잘못된_스위치면_검사_불능이다(tmp_path, monkeypatch, capsy
 def test_재사용_워크플로가_PR에서_열린_PR을_읽어_검사에_넘긴다():
     import yaml
 
-    wf = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github" / "workflows" / "doc-guard.yml").read_text(encoding="utf-8"))
-    steps = wf["jobs"]["check"]["steps"]
-    names = [s.get("name") for s in steps]
-    fetch = steps[names.index("열린 PR 의 판 번호 읽기")]
-    check = steps[names.index("검사")]
-    assert names.index("열린 PR 의 판 번호 읽기") < names.index("검사")
-    assert "pull_request" in fetch["if"] and "fetch_open_prs.py" in fetch["run"]
-    assert fetch["env"]["GITHUB_TOKEN"]
-    assert set(check["env"]) >= {"DOC_GUARD_OPEN_PRS", "DOC_GUARD_PR_NUMBER"}
-    verdict = steps[names.index("판정")]["run"]
-    assert "--exit2-cause" in verdict and "Re-run" in verdict
+    # #420 부터 doc-guard 는 pr-checks.yml 의 한 단계다(옛 doc-guard.yml 은 #452 에서 지웠다).
+    wf = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github" / "workflows" / "pr-checks.yml").read_text(encoding="utf-8"))
+    step = next(s for s in wf["jobs"]["check"]["steps"] if s.get("id") == "doc-guard")
+    run = step["run"]
+    assert "fetch_open_prs.py" in run and "DOC_GUARD_OPEN_PRS=open-prs.json" in run
+    assert run.index("fetch_open_prs.py") < run.index("check_changed.py")
+    assert step["env"]["GITHUB_TOKEN"] and step["env"]["DOC_GUARD_PR_NUMBER"]
+    assert "--exit2-cause" in run and "retry" in run
 
 
 # --- 문서 위반과 읽기 실패가 함께 --------------------------------------------

@@ -4,8 +4,8 @@
 병합될 수 있다. main 에 push 된 커밋마저 doc-guard 에 실패하면 최소한 이슈로
 남아야 아무도 놓치지 않는다. 이 테스트는 그 장치가:
 
-- 재사용 워크플로(`.github/workflows/doc-guard.yml`)의 `check` job 에
-  `failure() && push && refs/heads/main` 조건으로만 도는 스텝으로 있고
+- 재사용 워크플로(`.github/workflows/main-checks.yml`, 옛 `doc-guard.yml` 은 #452 에서 지웠다)의 `check` job 에
+  doc-guard 가 통과하지 못했고 `refs/heads/main` 일 때만 도는 스텝(`doc-guard-issue`)으로 있고
   `gh issue create` 를 쓰는지
 - 그 스텝이 같은 원인의 이슈를 중복으로 만들지 않고 기존 이슈에 코멘트를
   남기는지
@@ -22,7 +22,7 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DOC_GUARD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "doc-guard.yml"
+DOC_GUARD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "main-checks.yml"
 SKELETON_DOC_GUARD_WORKFLOW = (
     REPO_ROOT
     / "plugins"
@@ -43,16 +43,17 @@ def _check_job_steps() -> list[dict]:
 
 def _issue_alert_step() -> dict:
     steps = _check_job_steps()
-    candidates = [s for s in steps if "gh issue create" in s.get("run", "")]
-    assert candidates, "gh issue create 를 쓰는 스텝이 없다"
-    return candidates[-1]
+    candidates = [s for s in steps if s.get("id") == "doc-guard-issue"]
+    assert candidates, "doc-guard-issue 스텝이 없다"
+    assert "gh issue create" in candidates[0]["run"]
+    return candidates[0]
 
 
 def test_main_push_실패시에만_이슈_알림_스텝이_돈다():
     condition = _issue_alert_step().get("if", "")
-    assert "failure()" in condition
-    assert "github.event_name == 'push'" in condition
-    assert "refs/heads/main" in condition
+    assert "steps.doc-guard.outcome != 'skipped'" in condition
+    assert "steps.doc-guard.outputs.status != 'pass'" in condition
+    assert "github.ref == 'refs/heads/main'" in condition
 
 
 def test_이슈_알림_스텝은_중복_생성_대신_코멘트를_남긴다():
