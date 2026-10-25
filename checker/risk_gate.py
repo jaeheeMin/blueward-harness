@@ -14,7 +14,8 @@
 
 기준(`CRITERIA`):
 
-- `size`      바뀐 줄(추가+삭제)과 파일 수가 기준을 넘는가.
+- `size`      바뀐 줄(추가+삭제)과 파일 수가 기준을 넘는가. `size_warn_only_paths` 가 비어 있지 않고 PR 이 바꾼
+              파일이 모두 그 접두어 아래면 승인 사유가 아니라 참고(note)로만 낸다(#436, 결과의 `notes`).
 - `paths`     `high_risk_paths` 와 `.github/human-merge-paths` 의 경로를 바꿨는가.
 - `secret`    추가된 줄에 토큰·키·비밀번호·웹훅 주소 모양이 있는가(CR-004 의 기계 검사).
               보고에는 파일:줄과 패턴 이름만 담고 값은 절대 담지 않는다.
@@ -163,13 +164,15 @@ DEFAULT_CONFIG: dict = {
     # 접두어 아래가 하나라도 있어야 대상이다. `high_risk_paths` 와 같은 접두어 매칭이라 `src/` 는 호출
     # 워크플로의 `paths: ['src/**']` 와 같은 뜻이다(#411).
     "ai_review_paths": [],
+    # 비어 있지 않으면, PR 이 바꾼 파일이 모두 이 접두어 아래일 때 `size` 기준을 승인 사유 대신 참고(note)로 낸다(#436).
+    "size_warn_only_paths": [],
     "srs_split_hint": True,
     "approvers_file": ".github/ssot-approvers",
 }
 
 _INT_KEYS = ("max_changed_lines", "max_changed_files")
 _BOOL_KEYS = ("secret_scan", "require_checks_green", "ai_review", "srs_split_hint")
-_LIST_KEYS = ("high_risk_paths", "ai_review_paths")
+_LIST_KEYS = ("high_risk_paths", "ai_review_paths", "size_warn_only_paths")
 
 _MAX_LISTED = 5  # 사유에 이름을 나열하는 최대 개수
 
@@ -242,6 +245,14 @@ def ai_review_target(files: list[str], prefixes: list[str]) -> bool:
     if not normalized:
         return True
     return bool(human_merge_hits(files, normalized))
+
+
+def all_under(files: list[str], prefixes: list[str]) -> bool:
+    """접두어 목록이 비어 있지 않고, 바뀐 파일이 있고, 그 모두가 접두어 아래인가(#436). 매칭은 `path_reasons` 와 같다."""
+    normalized = [_normalize(p) for p in prefixes if _normalize(p)]
+    if not normalized or not files:
+        return False
+    return len(human_merge_hits(files, normalized)) == len(files)
 
 
 def path_reasons(files: list[str], prefixes: list[str]) -> list[str]:
@@ -748,11 +759,13 @@ def split_hint_evidence(base_text: str, head_text: str) -> dict[str, list[str]]:
 
 @dataclass
 class Finding:
-    """기준 하나가 낸 사유. `waiting` 이면 시간이 지나면 풀릴 수 있는 사유(진행 중인 검사)다."""
+    """기준 하나가 낸 사유. `waiting` 이면 시간이 지나면 풀릴 수 있는 사유(진행 중인 검사)다.
+    `note` 면 보여 주기만 하고 승인을 요구하지 않는 참고다(#436)."""
 
     criterion: str
     message: str
     waiting: bool = False
+    note: bool = False
 
 
 @dataclass
@@ -798,7 +811,10 @@ def criterion(name: str):
 
 @criterion("size")
 def _crit_size(ctx: Context) -> list[Finding]:
-    return [Finding("size", r) for r in size_reasons(ctx.files, ctx.cfg)]
+    reasons = size_reasons(ctx.files, ctx.cfg)
+    if reasons and all_under(ctx.filenames, ctx.cfg["size_warn_only_paths"]):
+        return [Finding("size", f"{r} — 소스만 바뀐 PR 이라 승인은 필요 없음(경고)", note=True) for r in reasons]
+    return [Finding("size", r) for r in reasons]
 
 
 @criterion("paths")
@@ -1050,6 +1066,7 @@ def _disabled_result() -> dict:
         "enabled": False,
         "risk": "low",
         "reasons": ["risk-gate 설정 없음"],
+        "notes": [],
         "requires_approval": False,
         "approved": None,
         "stale_approvers": [],
@@ -1060,13 +1077,15 @@ def _disabled_result() -> dict:
 
 
 def _result_from(findings: list[Finding], approval_state: str, approved: bool | None, note: str,
-                 stale: list[str], approvers_file: str) -> dict:
+                 stale: list[str], approvers_file: str, notes: list[str] | None = None) -> dict:
+    """`findings` 는 위험 사유만(note 아님). 참고(note)는 `notes` 문구로 따로 받아 `reasons` 와 섞지 않는다(#436)."""
     high = bool(findings)
     waiting_only = high and approved is not True and all(f.waiting for f in findings)
     return {
         "enabled": True,
         "risk": "high" if high else "low",
         "reasons": [f.message for f in findings],
+        "notes": list(notes or []),
         "requires_approval": high,
         "approved": approved,
         "stale_approvers": stale,
@@ -1119,16 +1138,18 @@ def decide_pr(client: GhClient, repo: str, pr: int, config_ref: str | None = Non
         # 건드리지 않은 줄까지 달라 보인다. SRS 비교는 갈라진 지점을 기준으로 한다.
         merge_base=lambda: fetch_merge_base(client, repo, ref, head_sha),
     )
-    findings = evaluate(ctx)
+    evaluated = evaluate(ctx)
+    findings = [f for f in evaluated if not f.note]
+    notes = [f.message for f in evaluated if f.note]
     if not findings:
-        return _result_from([], "none", None, "", [], cfg["approvers_file"])
+        return _result_from([], "none", None, "", [], cfg["approvers_file"], notes)
 
     author = (info.get("user") or {}).get("login", "")
     approvers = parse_approvers(fetch_text(client, repo, ref, cfg["approvers_file"]))
     state, approved, note, stale = _judge_approval(
         author, fetch_pr_reviews(client, repo, pr), approvers, head_sha
     )
-    return _result_from(findings, state, approved, note, stale, cfg["approvers_file"])
+    return _result_from(findings, state, approved, note, stale, cfg["approvers_file"], notes)
 
 
 def decide_pr_waiting(
@@ -1184,10 +1205,12 @@ def precheck_pr(client: GhClient, repo: str, pr: int) -> dict:
         prefixes=cfg["high_risk_paths"] + fetch_human_merge_paths(client, repo, ref),
         load_check_runs=_no_check_runs,
     )
-    findings = []
+    evaluated = []
     for name, fn in CRITERIA:
         if name in PRECHECK_CRITERIA:
-            findings.extend(fn(ctx))
+            evaluated.extend(fn(ctx))
+    findings = [f for f in evaluated if not f.note]  # 참고(note)는 위험이 아니다(#436)
+    notes = [f.message for f in evaluated if f.note]
     # 비밀값 패턴이 새 줄에서 실제로 보였는지. `_crit_secret` 의 "너무 커서 검사 못 함"(unscanned)은 여기에 넣지
     # 않는다 — 큰 PR 은 계속 리뷰한다(그 파일 안의 비밀값은 AI 리뷰로 나갈 수 있다). secret_patterns 는 패턴 이름만
     # 담는다. 위치(파일:줄)는 `reasons` 에 있다.
@@ -1197,6 +1220,7 @@ def precheck_pr(client: GhClient, repo: str, pr: int) -> dict:
         "gate": True,
         "risky": bool(findings),
         "reasons": [f.message for f in findings],
+        "notes": notes,
         # 사유를 낸 기준 이름(size·paths·secret). 워크플로가 사유 문자열 대신 이걸로 크기 위험을 구분한다.
         "criteria": list(dict.fromkeys(f.criterion for f in findings)),
         "secret_found": bool(patterns),
@@ -1301,7 +1325,7 @@ def decide_commit(
         base_ref=ref,
         head_ref=sha,
     )
-    findings = [f for f in evaluate(ctx) if not f.waiting]
+    findings = [f for f in evaluate(ctx) if not f.waiting and not f.note]
     if not findings:
         return _commit_result(True, "low", True, [], [], "")
     reasons = ["PR 없이 main 에 직접 들어옴"] + [f.message for f in findings]
@@ -1340,6 +1364,7 @@ def _unknown(exc: Exception) -> dict:
         "enabled": None,
         "risk": None,
         "reasons": [f"판정 불가: {exc}"],
+        "notes": [],
         "requires_approval": None,
         "approved": None,
         "stale_approvers": [],
