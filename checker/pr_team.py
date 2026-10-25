@@ -333,7 +333,7 @@ def read_issues(client: GhClient, budget: _Budget, repo: str) -> tuple[list[dict
 
 
 _CHECK_FIELDS = (
-    "__typename ... on CheckRun{name status conclusion title summary annotations(first:3){nodes{message}}} "
+    "__typename ... on CheckRun{name status conclusion title summary annotations(first:10){nodes{message annotationLevel}}} "
     "... on StatusContext{context state description}"
 )
 
@@ -383,14 +383,26 @@ def is_generic_reason(reason: str) -> bool:
 
 
 def _reason_of(node: dict) -> str | None:
-    """check run 의 실패 사유 문구. annotations 첫 메시지 > title > summary 첫 줄. 모두 비면 None(사유 문구 없음)."""
+    """check run 의 실패 사유 문구. 실패 등급 annotation(구체적인 문구 우선) > title > summary 첫 줄. 모두 비면 None(사유 문구 없음).
+
+    경고·알림 등급(예: "Node.js 20 is deprecated")은 실패 이유가 아니라서 쓰지 않는다(#457). 등급이 없으면 실패로 본다.
+    """
     if node.get("__typename") == "StatusContext":
         return _clean(node.get("description") or "") or None
     notes = ((node.get("annotations") or {}).get("nodes")) or []
+    texts = []
     for note in notes:
+        if (note or {}).get("annotationLevel") not in (None, "FAILURE"):
+            continue
         text = _first_line((note or {}).get("message"))
         if text:
-            return _clean(text)
+            texts.append(_clean(text))
+    # "Process completed with exit code 1." 같은 흔한 문구보다 구체적인 실패 문구를 먼저 쓴다(#457).
+    for text in texts:
+        if not is_generic_reason(text):
+            return text
+    if texts:
+        return texts[0]
     for text in (node.get("title"), _first_line(node.get("summary"))):
         if text and text.strip():
             return _clean(text)

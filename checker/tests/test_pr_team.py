@@ -235,6 +235,27 @@ def test_failure_reason_comes_from_annotation_then_title():
     assert a["common_cause"] is None
 
 
+def test_warning_annotation_is_not_a_failure_reason():
+    warn = {"message": "Node.js 20 is deprecated. The following actions target Node.js 20", "annotationLevel": "WARNING"}
+    fail = {"message": "린트 오류 3건", "annotationLevel": "FAILURE"}
+    only_warn = check_node("doc-guard / lint", None)
+    only_warn["annotations"]["nodes"] = [warn]
+    only_warn["title"] = "검사 실패"
+    both = check_node("doc-guard / test", None)
+    both["annotations"]["nodes"] = [warn, fail]
+    assert pr_team._reason_of(only_warn) == "검사 실패"  # 경고는 건너뛰고 title
+    assert pr_team._reason_of(both) == "린트 오류 3건"
+    only_warn["title"] = None
+    assert pr_team._reason_of(only_warn) is None  # 사유 문구 없음
+    generic = {"message": "Process completed with exit code 1.", "annotationLevel": "FAILURE"}
+    specific = {"message": "AI 리뷰가 큰 변경 일부만 봤다. 통과로 보지 않는다.", "annotationLevel": "FAILURE"}
+    mixed = check_node("ai-review / review", None)
+    mixed["annotations"]["nodes"] = [generic, specific]
+    assert pr_team._reason_of(mixed) == "AI 리뷰가 큰 변경 일부만 봤다. 통과로 보지 않는다."
+    mixed["annotations"]["nodes"] = [generic]
+    assert pr_team._reason_of(mixed) == "Process completed with exit code 1."
+
+
 def test_same_reason_on_two_prs_becomes_one_common_cause():
     msg = "The job was not started because recent account payments have failed"
     gh = TeamGh(
