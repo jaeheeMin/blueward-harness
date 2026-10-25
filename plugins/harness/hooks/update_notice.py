@@ -6,7 +6,9 @@ Claude Code 자동 업데이트는 세션 첫 메시지 뒤에 한 번만 확인
 알려라" 고 시킨다. 갱신은 사용자가 스스로 결정한다 — 훅도 Claude 도 대신 실행하지 않는다
 (사용자가 `/harness:update` 를 직접 부르면 그 스킬이 실행한다, #404).
 
-- 현재 판: `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` 의 version.
+- 현재 판: `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` 의 version — 이 세션에 실제로 실린 판이다.
+  뒤처졌는지는 설치 항목(cwd 의 projectPath)이 아니라 이 판으로 정한다(#471). 설치 항목은 안내 문구를
+  고르는 참고로만 쓴다.
 - 최신 판: 원격의 `v*` 태그 중 가장 큰 것(`git ls-remote --tags`, 5초 제한). 결과(실패 포함)는
   `${CLAUDE_PLUGIN_DATA}` 에 캐시해 10분에 한 번만 묻는다.
 - 같은 세션에서 같은 최신 판은 한 번만 알린다.
@@ -169,8 +171,9 @@ def _message(current: str, latest: str, has_latest: bool) -> str:
             "`/harness:update` 를 입력하면 현재 폴더 기준으로 갱신하고 확인한다. 또는 터미널에서 "
             "`claude plugin marketplace update blueward-harness` 와 "
             "`claude plugin update harness@blueward-harness --scope project` 를 차례로 실행한다"
-            "(project 범위 설치가 여러 폴더에 있으면 다른 폴더가 갱신될 수 있어 `claude plugin list` 로 "
-            "이 폴더의 판을 확인한다). 어느 쪽이든 끝나면 `/reload-plugins` 를 입력한다."
+            "(같은 저장소의 worktree 가 여러 개면 다른 worktree 의 항목이 갱신될 수 있어, 갱신됐는지는 "
+            "설치 목록이 아니라 `/reload-plugins` 뒤 이 세션에 실린 판으로 본다 — `/harness:update` 가 그렇게 확인한다, #471). "
+            "어느 쪽이든 끝나면 `/reload-plugins` 를 입력한다."
         )
     return (
         f"[harness 플러그인 갱신 안내] 새 판 {latest} 이(가) 나왔고 지금 세션은 {current} 판이다. "

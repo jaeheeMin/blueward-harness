@@ -1075,6 +1075,38 @@ if [ -n "$commit_seg" ]; then
   fi
 fi
 
+# 2-1b) 공유 .claude/settings.json 의 enabledPlugins 에서 harness 가 빠지거나 꺼지는 변경을 막는다(#471).
+#      claude plugin uninstall 이 묻지 않고 이 항목을 비운 일이 있어, 커밋되면 팀원 전체의 harness 가
+#      꺼진다. 커밋은 staged 변경을, 푸시는 origin 기준 범위를 본다. 판정은 enabled_plugin_guard.py
+#      (종료코드 0 통과, 1 거절, 2 검사 불능). 그 파일을 건드린 적이 없으면 python 을 부르지 않는다.
+#      세션 cwd 가 저장소 하위 폴더여도 저장소 루트의 파일을 본다(:(top) 경로, 판정 쪽은 git -C 루트).
+#      푸시는 HEAD 만 본다 — `git push origin 다른브랜치:대상` 처럼 HEAD 가 아닌 refspec 이면 그 refspec 의
+#      내용은 보지 못한다(기존 푸시 대상 파싱은 도착 브랜치만 뽑는다).
+#      HARNESS_SKIP_SECRET_SCAN 은 비밀정보 검사 전용이라 여기에는 듣지 않는다.
+enabled_guard() {
+  local mode="$1" what="$2" out rc
+  set +e
+  out="$(PYTHONIOENCODING=utf-8 uv run --no-project python "$hook_dir/enabled_plugin_guard.py" "$mode" 2>&1)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] && return 0
+  out="$(printf '%s' "$out" | tr -d '\r')"
+  if [ "$rc" -ne 1 ] && [ "$rc" -ne 2 ]; then
+    out="검사 불능: enabledPlugins 검사를 실행하지 못했습니다(종료코드 $rc). 검사하지 못한 상태로 통과시키지 않습니다. 사유: $out 다음: uv 가 있는지 확인하고 같은 명령을 다시 시도하십시오. $next_install_uv"
+  fi
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' \
+    "$(printf '%s' "$what 를 막습니다. $out" | jq -Rs .)"
+  exit 0
+}
+if [ -n "$commit_seg" ] && git rev-parse --show-toplevel >/dev/null 2>&1; then
+  if ! git diff --cached --quiet -- ':(top).claude/settings.json' >/dev/null 2>&1; then
+    enabled_guard staged "커밋"
+  fi
+fi
+if [ "$push_found" -eq 1 ] && [ -n "$(git log -1 --format=%H -- ':(top).claude/settings.json' 2>/dev/null || true)" ]; then
+  enabled_guard push "푸시"
+fi
+
 # 2-2) 푸시 전에 080 에 쓴 ABAP 오브젝트가 모두 활성화됐는지 본다(#190). 선언
 #      접두어(DELIVER=1)보다 먼저 검사한다 — 접두어가 이 관문을 여는 문이 되지
 #      않게 하기 위해서다. 기록 파일도 실패 표식도 없으면(대부분의 푸시) python 을 부르지 않는다.
