@@ -115,6 +115,11 @@ def _find_rows(path: Path, rel: str, dev: str, *, skip_without_section: bool) ->
             text = f.read()
     except (OSError, UnicodeDecodeError) as exc:
         raise Unknown(f"`{rel}` 를 읽지 못했다: {exc}") from exc
+    return find_rows_text(text, rel, dev, skip_without_section=skip_without_section)
+
+
+def find_rows_text(text: str, rel: str, dev: str, *, skip_without_section: bool) -> list[dict]:
+    """`_find_rows` 의 본문. 파일이 아니라 이미 읽은 원장 텍스트에서 찾는다(열린 PR 의 head 원장, #454)."""
     parse = text[1:] if text.startswith("﻿") else text  # BOM
     span = section_span(parse, SECTION)
     if span is None:
