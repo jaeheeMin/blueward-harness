@@ -12,8 +12,12 @@
 """
 from __future__ import annotations
 
+import argparse
 import base64
+import json
 import re
+import sys
+from pathlib import Path
 from urllib.parse import quote
 
 from checker.ledger_complete import (
@@ -25,7 +29,7 @@ from checker.ledger_complete import (
     representative_id,
 )
 from checker.pairing import LEDGER_DIR
-from checker.ssot_approval import GhError
+from checker.ssot_approval import GhClient, GhError, _force_utf8
 
 PENDING = "pending"
 UNKNOWN = "unknown"
@@ -119,6 +123,98 @@ def judge(client, repo: str, closes: list[int], sha: str) -> list[dict]:
         if found:
             out.append({"dev": dev, "issue": None, "title": title, **found})
     return out
+
+
+MARKER = "<!-- ledger-ready -->"
+EXIT_OK = 0
+EXIT_VIOLATION = 1
+EXIT_UNKNOWN = 2
+
+
+def check_pr(client, repo: str, pr: int) -> dict:
+    """병합 전 관문(#479). PR 하나의 본문·head 를 API 로 읽어 `judge` 를 부른다.
+
+    status: ok(통과: 대표 이슈 없음·원장 없는 저장소·모두 완료) / violation(pending 이 있다) / unknown(판정 불능만 있다).
+    pending 과 unknown 이 섞이면 violation 이다(고쳐야 할 것이 확실히 있다). GhError 는 부른 쪽이 unknown 으로 다룬다.
+    """
+    data = client.get_json(f"repos/{repo}/pulls/{pr}")
+    head = data.get("head") if isinstance(data, dict) else None
+    sha = head.get("sha") if isinstance(head, dict) else None
+    if not isinstance(data, dict) or not sha:
+        raise GhError("PR 응답을 읽지 못했다(본문이나 head 커밋이 없다)")
+    closes = closing_issues(data.get("body"))
+    items = judge(client, repo, closes, sha) if closes else []
+    if any(i["status"] == PENDING for i in items):
+        status = "violation"
+    elif items:
+        status = "unknown"
+    else:
+        status = "ok"
+    return {"status": status, "items": items}
+
+
+def render_markdown(result: dict) -> str:
+    """PR 코멘트·job 요약 본문. 통과이면 빈 문자열(코멘트를 달지 않고 있던 것은 지운다)."""
+    if result["status"] == "ok":
+        return ""
+    lines = [MARKER, "## ledger-ready", ""]
+    pending = [i for i in result["items"] if i["status"] == PENDING]
+    unknown = [i for i in result["items"] if i["status"] == UNKNOWN]
+    if pending:
+        lines.append("⚠️ 진행 원장이 아직 완료가 아니라 병합할 수 없습니다.")
+        lines.append("")
+        for i in pending:
+            lines.append(f"- 이 PR 은 {i['dev']}({i['title']}) 을 끝내는 PR 인데 진행 원장(`{i['file']}`)이 "
+                         f"아직 '{i['state']}' 입니다. 병합 전에 '{DONE}'·#PR 번호로 고쳐야 합니다.")
+        lines += ["", "Claude 에게 '원장 고쳐서 다시 올려줘' 라고 하면 됩니다. 원장을 고쳐 푸시하면 이 검사가 다시 돕니다.",
+                  "PR 본문의 `Closes` 만 고친 경우에는 자동으로 다시 돌지 않으니, 새 커밋을 푸시하거나 이 검사를 다시 실행하세요."]
+    if unknown:
+        if pending:
+            lines.append("")
+        lines.append("⚠️ 원장 검사 불능 — 통과도 위반도 아닙니다. 아래 사유를 보고 다시 실행하거나 담당자에게 알리세요.")
+        lines.append("")
+        for i in unknown:
+            who = f"{i['dev']}({i['title']})" if i["dev"] else (f"이슈 #{i['issue']}" if i.get("issue") else "대표 이슈")
+            lines.append(f"- {who}: {i['reason']}")
+    return "\n".join(lines) + "\n"
+
+
+def cmd_check_pr(args) -> int:
+    def unknown(reason: str) -> dict:
+        return {"status": "unknown", "items": [{"dev": "", "issue": None, "title": "", "status": UNKNOWN,
+                                                "state": "", "file": "", "reason": reason}]}
+
+    # 위반(종료 1)은 pending 판정일 때만이다. 파이썬이 예외로 죽으면 종료코드가 1 이라 위반처럼 보이므로 모두 잡는다.
+    try:
+        result = check_pr(GhClient(), args.repo, args.pr)
+    except GhError as exc:
+        result = unknown(f"GitHub 를 읽지 못했다: {exc}")
+    except Exception as exc:  # noqa: BLE001 — 뜻밖의 오류도 통과·위반이 아닌 판정 불능이다(원칙 7)
+        result = unknown(f"뜻밖의 오류로 원장을 확인하지 못했다(이 PR 의 문제가 아니다): {type(exc).__name__}: {exc}")
+    print(json.dumps(result, ensure_ascii=False))
+    if args.markdown_file:
+        try:
+            Path(args.markdown_file).write_text(render_markdown(result), encoding="utf-8")
+        except OSError as exc:
+            print(f"코멘트 본문을 쓰지 못했다: {exc}", file=sys.stderr)
+    return {"ok": EXIT_OK, "violation": EXIT_VIOLATION}.get(result["status"], EXIT_UNKNOWN)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="ledger_stale", description="병합 전: 대표 이슈를 닫는 PR 의 원장 행이 완료인지 본다.")
+    sub = parser.add_subparsers(dest="mode", required=True)
+    ck = sub.add_parser("check-pr", help="PR 하나의 원장 완료 여부")
+    ck.add_argument("--repo", required=True, help="owner/repo")
+    ck.add_argument("--pr", required=True, type=int)
+    ck.add_argument("--markdown-file", help="코멘트·요약 본문을 쓸 파일(통과이면 빈 파일)")
+    ck.set_defaults(func=cmd_check_pr)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    _force_utf8()
+    args = build_parser().parse_args(argv)
+    return args.func(args)
 
 
 def annotate(client, repo: str, items: list[dict]) -> None:
