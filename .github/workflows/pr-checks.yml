@@ -7,11 +7,11 @@
 #
 #   gitleaks.yml, doc-guard.yml, ssot-approval.yml(check job), risk-gate.yml(check job), pr-queue.yml
 #
-# 단계 순서: 바뀐 파일 목록 → gitleaks → doc-guard → ssot-approval → risk-gate → pr-queue → 종합.
-# 단계마다 동작은 옛 워크플로와 같다(코멘트 마커 `<!-- doc-guard -->`·`<!-- ssot-approval -->`·
+# 단계 순서: 바뀐 파일 목록 → gitleaks → doc-guard → ssot-approval → ledger-ready(#479, 새 단계) → risk-gate → pr-queue → 종합.
+# 옛 워크플로에서 옮겨 온 단계마다 동작은 옛 워크플로와 같다(ledger-ready 는 옛 워크플로가 없는 새 단계라 예외다)(코멘트 마커 `<!-- doc-guard -->`·`<!-- ssot-approval -->`·
 # `<!-- risk-gate -->`·pr-queue 마커도 그대로). 달라진 점은 아래 셋이다.
 #
-#   1. 검사 단계 넷은 `continue-on-error` 이고 `outputs.status` 를 pass·fail·unknown 으로 낸다. 앞 단계가
+#   1. 검사 단계 넷(과 새 ledger-ready)은 `continue-on-error` 이고 `outputs.status` 를 pass·fail·unknown 으로 낸다. 앞 단계가
 #      검사 불능이어도 뒤 단계를 건너뛰지 않는다(CLAUDE.md 원칙 7: 모르면 검사한다). 마지막 "종합" 단계가
 #      fail·unknown 이 하나라도 있으면 job 을 실패시키고, 단계별로 `::error title=` 를 따로 낸다.
 #   2. 각 검사 단계 직후에 그 PR head sha 에 옛 이름(`gitleaks`·`doc-guard`·`ssot-approval`·`risk-gate`)의
@@ -503,6 +503,73 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
 
+      # ── ledger-ready (#479, 새 단계) ─────────────────────────────────────────
+      # PR 본문이 대표 `[DEV-xxx]` 이슈를 Closes 하는데 PR head 의 원장 행이 `완료` 가 아니면 위반이다. 옛 판으로
+      # 만든 PR 이 그대로 병합되면 ledger-complete 가 병합 뒤 이슈를 여는 것(public-cloud #377)을 병합 전에 막는다.
+      # 판정은 checker.ledger_stale.check_pr 다. 대표 이슈 없음·하위 작업만·원장 없는 저장소·완료는 통과, 읽지 못하면 unknown.
+      # commit status 는 달지 않는다(읽는 곳이 없다). 종합에 들어가므로 필수 검사 `pr-checks / check` 가 곧 이 관문이다.
+      # 한계: 트리거에 `edited` 가 없어(#411) 본문의 Closes 만 고친 경우는 다시 판정되지 않는다. 원장을 고쳐 푸시하면
+      # synchronize 로 다시 돈다. 필요한 권한은 contents·issues 읽기와 PR 코멘트 쓰기뿐이라 caller 권한은 그대로다.
+      - name: ledger-ready 판정
+        id: ledger-ready
+        if: github.event.action != 'closed'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          uv run --project .harness-engine python .harness-engine/scripts/ledger_ready.py \
+            check-pr --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --markdown-file ledger-ready.md \
+            > ledger-ready-result.json 2> ledger-ready-error.txt
+          code=$?
+          cat ledger-ready-error.txt >&2 || true
+          cat ledger-ready-result.json || true
+          case "$code" in
+            0)
+              echo "status=pass" >> "$GITHUB_OUTPUT"
+              ;;
+            1)
+              echo "status=fail" >> "$GITHUB_OUTPUT"
+              echo "reason=대표 이슈를 닫는 PR 인데 진행 원장이 아직 완료가 아니다. 고칠 내용은 PR 코멘트와 job 요약에 있다." >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "status=unknown" >> "$GITHUB_OUTPUT"
+              echo "reason=진행 원장이 완료인지 확인하지 못했다(종료코드 $code). 사유는 PR 코멘트와 job 요약에 있다." >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          exit 0
+
+      - name: ledger-ready 요약과 PR 코멘트 갱신
+        id: ledger-ready-comment
+        if: github.event.action != 'closed' && steps.ledger-ready.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- ledger-ready -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            let body = '';
+            try { body = fs.readFileSync('ledger-ready.md', 'utf8'); } catch (e) {}
+            body = body.trim() ? body : null;
+            if (body !== null) {
+              await core.summary.addRaw(body.replace(marker + '\n', ''), true).write();
+            }
+            const existing = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+            const mine = existing.data.find(c => c.body.includes(marker));
+            if (body === null) {
+              if (mine) await github.rest.issues.deleteComment({ owner, repo, comment_id: mine.id });
+              return;
+            }
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
       # ── risk-gate (옛 risk-gate.yml 의 check job) ────────────────────────────
       # 앞 단계가 이미 단 gitleaks·doc-guard·ssot-approval status 를 API 로 읽으니 기다릴 일은 job 밖의
       # 검사(ai-review 등)뿐이다. 이 job 자신(pr-checks)은 기다리는 대상에서 빠진다(교착 방지).
@@ -664,6 +731,9 @@ jobs:
           R_DOC_GUARD: ${{ steps.doc-guard.outputs.reason }}
           S_SSOT: ${{ steps.ssot-approval.outputs.status }}
           R_SSOT: ${{ steps.ssot-approval.outputs.reason }}
+          S_LEDGER: ${{ steps.ledger-ready.outputs.status }}
+          R_LEDGER: ${{ steps.ledger-ready.outputs.reason }}
+          OUTCOME_COMMENT_LEDGER: ${{ steps.ledger-ready-comment.outcome }}
           S_RISK: ${{ steps.risk-gate.outputs.status }}
           R_RISK: ${{ steps.risk-gate.outputs.reason }}
           OUTCOME_PRQ: ${{ steps.pr-queue.outcome }}
@@ -722,6 +792,7 @@ jobs:
           judge "doc-guard" "$S_DOC_GUARD" "$R_DOC_GUARD" "$dg_na"
           ss_na=$closed; [ "$HAS_SSOT" = "false" ] && ss_na=true
           judge "ssot-approval" "$S_SSOT" "$R_SSOT" "$ss_na"
+          judge "ledger-ready" "$S_LEDGER" "$R_LEDGER" "$closed"
           judge "risk-gate" "$S_RISK" "$R_RISK" "$closed"
 
           # 판정에 넣지 않는 것: pr-queue 단계, 코멘트 갱신 단계, status 달기 단계. 경고로만 남긴다.
@@ -734,6 +805,7 @@ jobs:
           fi
           [ "$OUTCOME_COMMENT_DG" = "failure" ] && warn "doc-guard 코멘트 실패" "PR 코멘트를 쓰지 못했다. 결과는 job 요약에 있다."
           [ "$OUTCOME_COMMENT_SSOT" = "failure" ] && warn "ssot-approval 코멘트 실패" "PR 코멘트를 갱신하지 못했다."
+          [ "$OUTCOME_COMMENT_LEDGER" = "failure" ] && warn "ledger-ready 코멘트 실패" "PR 코멘트를 갱신하지 못했다. 결과는 job 요약에 있다."
           [ "$OUTCOME_COMMENT_RISK" = "failure" ] && warn "risk-gate 코멘트 실패" "PR 코멘트를 갱신하지 못했다."
 
           # status 를 달지 못하면 훅·엔진이 옛 이름 검사를 못 읽는다. 판정은 바꾸지 않고 경고만 남긴다.

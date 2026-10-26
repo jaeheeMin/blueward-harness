@@ -77,7 +77,7 @@ def test_job_은_하나이고_permissions_를_적지_않고_PR_단위_취소형�
 
 def test_단계_순서():
     ids = [s["id"] for s in _steps() if "id" in s]
-    order = ["changed", "gitleaks", "doc-guard", "ssot-approval", "risk-gate", "pr-queue"]
+    order = ["changed", "gitleaks", "doc-guard", "ssot-approval", "ledger-ready", "risk-gate", "pr-queue"]
     positions = [ids.index(i) for i in order]
     assert positions == sorted(positions)
     # 종합은 맨 마지막이다.
@@ -154,6 +154,26 @@ def test_risk_gate_는_wait_checks_로_판정한다():
     step = _step("risk-gate")
     assert "check-pr" in step["run"] and '--wait-checks "$WAIT_CHECKS"' in step["run"]
     assert step["env"]["WAIT_CHECKS"] == "${{ inputs.wait-checks }}"
+
+
+def test_ledger_ready_는_원장_완료를_판정하고_종합에_들어간다():
+    step = _step("ledger-ready")
+    assert step["continue-on-error"] is True
+    assert "github.event.action != 'closed'" in step["if"]
+    assert ".harness-engine/scripts/ledger_ready.py" in step["run"] and "check-pr" in step["run"]
+    for token in ("status=pass", "status=fail", "status=unknown"):
+        assert token in step["run"]
+    assert (ROOT / "scripts" / "ledger_ready.py").is_file()
+    # 코멘트는 마커로 갱신하고, 새 commit status 는 달지 않는다(종합이 곧 필수 검사 pr-checks / check 다).
+    assert _step("ledger-ready-comment")["continue-on-error"] is True
+    assert "<!-- ledger-ready -->" in WORKFLOW.read_text(encoding="utf-8")
+    assert not any(s.get("id") == "ledger-ready-status" for s in _steps())
+    run = _steps()[-1]["run"]
+    assert 'judge "ledger-ready" "$S_LEDGER" "$R_LEDGER" "$closed"' in run
+    env = _steps()[-1]["env"]
+    assert env["S_LEDGER"] == "${{ steps.ledger-ready.outputs.status }}"
+    # 읽기 권한만 쓴다. caller 권한(PERMISSIONS)은 늘리지 않는다.
+    assert _caller_example()["jobs"]["pr-checks"]["permissions"] == PERMISSIONS
 
 
 def test_pr_queue_는_closed_에서도_돌고_실패해도_계속한다():
