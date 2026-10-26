@@ -28,11 +28,12 @@
 
 종료코드: 0 결과를 냈다(full 이든 partial 이든), 2 검사 불능.
 
-**비신뢰 입력 방어.** PR 의 diff·코드는 프롬프트 인젝션을 담을 수 있다. 모델이 Read 로 환경 변수
-(`/proc/self/environ`)나 `.git/config` 의 토큰을 읽어 지적 문장에 실어 PR 코멘트로 내보내는 길을 겹겹이 막는다.
-(1) 도구를 Read·Glob·Grep 으로만 제한(`--tools`), (2) 민감 경로 읽기 거부(`--settings` 의 `permissions.deny`),
-(3) 체크아웃의 `.claude/`·`.mcp.json`·`CLAUDE.md` 제거(`--scrub-config`), (4) 자식 프로세스 환경 변수를 허용 목록으로,
-(5) 결과를 쓰기 전에 비밀값으로 보이는 문자열이 있으면 검사 불능(`scan_leaks`).
+**비신뢰 입력 방어.** PR 의 diff·코드는 프롬프트 인젝션을 담을 수 있다. 모델이 파일을 읽어 환경 변수
+(`/proc/self/environ`)나 `.git/config` 의 토큰을 지적 문장에 실어 PR 코멘트로 내보내는 길을 겹겹이 막는다.
+(1) **claude 에게 도구를 아예 주지 않는다**(`--tools ""` + `--disallowedTools`) — 읽기 거부 목록(`Read(...)` deny)은
+시험에서 저장소 밖 경로(`../x`, `C:/Windows/win.ini`)를 막지 못했다. 그래서 모델은 프롬프트에 실린 diff(바뀐 줄과 앞뒤
+40줄)만 보고 저장소 파일을 읽지 못한다. (2) 체크아웃의 `.claude/`·`.mcp.json`·`CLAUDE.md` 제거(`--scrub-config`), (3) 자식 프로세스 환경 변수를 허용 목록으로,
+(4) 결과를 쓰기 전에 비밀값으로 보이는 문자열이 있으면 검사 불능(`scan_leaks`).
 """
 from __future__ import annotations
 
@@ -49,12 +50,12 @@ import traceback
 from typing import Callable
 
 DEFAULT_MODEL = "sonnet"
-DEFAULT_MAX_TURNS = 15
+DEFAULT_MAX_TURNS = 3  # 도구가 없다. 구조화 출력(--json-schema) 한 번과 스키마가 안 맞을 때의 재시도 정도만 쓴다
 DEFAULT_MAX_BATCHES = 8
 DEFAULT_BATCH_CHARS = 60000
 DEFAULT_BATCH_TIMEOUT = 300
 DEFAULT_TOTAL_TIMEOUT = 780
-DIFF_CONTEXT = 20
+DIFF_CONTEXT = 40
 
 UNAVAILABLE_FILE = "ai-review-unavailable.json"
 RESULT_FILE = "ai-review.json"
@@ -91,14 +92,17 @@ FINDINGS_SCHEMA = {
     "required": ["findings"],
 }
 
+# [무엇을 지적하나]의 serious 예시 중 권한 검사 누락은 공통 규칙 CR-009("데이터를 바꾸는 앱은 권한을 검사한다",
+# checker/code_checks.yaml)와 맞춘 것이다. 그 규칙은 ABAP 소스를 정적으로 보는 경고이고, 여기서는 언어와 관계없이
+# 같은 원칙(권한 검사 누락·fail-open)을 AI 리뷰의 serious 기준으로 삼는다.
 PROMPT_HEAD = """당신은 이 저장소의 PR 코드 리뷰어다. 아래 규칙을 지켜 리뷰하라.
 
 [범위]
 - 아래 diff 가 이번 묶음의 전부다. diff 에서 바뀐 줄(+/-)만 리뷰한다. 변경하지 않은 코드의 문제는 다루지 않는다.
-- 맥락이 필요하면 Read, Glob, Grep 으로 저장소 파일을 읽어도 된다. 다른 도구는 쓰지 않는다.
+- 주어진 diff(바뀐 줄과 앞뒤 문맥)만으로 판단한다. 저장소의 다른 파일을 읽을 수 없다. 보이지 않는 코드에 대해 추측하지 않는다.
 
 [무엇을 지적하나]
-- 정확성 버그, 보안 취약점, 데이터 손실처럼 병합 전에 반드시 고쳐야 하는 심각한 문제만 severity 를 "serious" 로 적는다.
+- 병합 전에 반드시 고쳐야 하는 심각한 문제만 severity 를 "serious" 로 적는다. 예: 데이터를 바꾸는 동작의 권한 검사 누락, 권한 검사가 실패해도 통과시키는 처리(fail-open), 정확성 버그, 보안 취약점, 데이터 손실.
 - 그보다 가벼운 지적은 "minor" 로 적는다.
 - 코드 스타일, 이름 짓기, 포맷, 취향 문제는 적지 않는다.
 - 확신이 없는 추측은 "serious" 로 적지 않는다.
@@ -306,26 +310,19 @@ def build_prompt(batch: dict) -> str:
     return PROMPT_HEAD + batch["text"]
 
 
-# Read 거부 경로. 문법은 gitignore 식이고 `//` 로 시작하면 파일 시스템 루트 기준 절대 경로, `~/` 는 홈 기준이다
-# (https://code.claude.com/docs/en/permissions.md). 홈 전체(`~/**`)는 막지 않는다 — 러너의 작업 폴더가 홈 아래다.
-DENY_READ = [
-    "Read(//proc/**)", "Read(//sys/**)", "Read(//etc/**)", "Read(//root/**)", "Read(//run/**)", "Read(//var/**)",
-    "Read(//**/.git/**)", "Read(//**/.git-credentials)", "Read(//**/_temp/**)",
-    "Read(~/.ssh/**)", "Read(~/.aws/**)", "Read(~/.config/**)", "Read(~/.docker/**)", "Read(~/.gnupg/**)",
-    "Read(~/.claude/**)", "Read(~/.claude.json)", "Read(~/.netrc)", "Read(~/.npmrc)", "Read(~/.local/**)",
-]
+# 내장 도구 이름. `--tools ""` 가 도구를 모두 끈다(`claude --help`: 'Use "" to disable all tools'). 그래도 빈 값이
+# 기본값으로 읽히는 판이 있을 때를 대비해 `--disallowedTools` 로 한 번 더 막는다(없는 이름은 시작 경고만 낸다).
+DISALLOWED_TOOLS = "Bash,PowerShell,Edit,Write,Read,Glob,Grep,NotebookEdit,WebFetch,WebSearch,Task,Agent"
 
 
 def build_command(claude: str, model: str, max_turns: int) -> list[str]:
-    # --tools: 쓸 수 있는 도구 자체를 읽기 셋으로 줄인다(Bash·Write 등은 아예 없다). --allowedTools 는 그 셋을 묻지 않고 허용한다.
-    # --settings: 민감 경로 읽기를 거부한다. --setting-sources "" 여도 --settings 는 적용된다.
+    # --tools "": 도구를 아예 주지 않는다. --allowedTools 는 넘기지 않는다(허용할 도구가 없다).
     # --strict-mcp-config: 저장소의 .mcp.json 서버를 띄우지 않는다(비신뢰 입력, #144).
     # --setting-sources "": 저장소의 .claude/settings.json 같은 설정을 읽지 않는다.
-    # --permission-prompts none: 허용 도구 밖의 요청은 물어보지 않고 거절한다(CI 에는 답할 사람이 없다).
+    # --permission-prompts none: 물어봐야 하는 요청은 답 없이 거절한다(CI 에는 답할 사람이 없다).
     return [
         claude, "-p", "--output-format", "json", "--json-schema", json.dumps(FINDINGS_SCHEMA, separators=(",", ":")),
-        "--tools", "Read,Glob,Grep", "--allowedTools", "Read,Glob,Grep",
-        "--settings", json.dumps({"permissions": {"deny": DENY_READ}}, separators=(",", ":")),
+        "--tools", "", "--disallowedTools", DISALLOWED_TOOLS,
         "--max-turns", str(max_turns), "--model", model,
         "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence", "--permission-prompts", "none",
     ]

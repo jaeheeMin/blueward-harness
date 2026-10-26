@@ -35,7 +35,7 @@
 - 묶음 성공 = 종료코드 0, 결과 JSON 이 오류가 아님, `structured_output` 이 스키마에 맞음. 실패한 묶음의 파일은 `unreviewed`(사유: 종료코드, 시간 초과, 형식 오류). 묶음 밖 파일의 지적은 버리지 않고 `outside_batch` 로 표시한다.
 - 성공한 묶음이 하나도 없으면 `ai-review.json` 을 쓰지 않고 `ai-review-unavailable.json`(사유)을 남긴 채 종료코드 2. 결과 정리 단계가 검사 불능으로 읽고 사유를 코멘트에 적는다. 대상 코드가 0개면 full + 지적 없음 + `no_code_to_review`.
 - 묶음당 timeout 300초, 전체 780초(워크플로 단계 timeout 15분보다 짧게). 전체 시간이 모자라면 남은 묶음은 못 본 것으로 적는다.
-- 허용 도구는 `Read,Glob,Grep` 뿐이고 `--permission-prompts none` 으로 그 밖의 요청은 거절한다. `--strict-mcp-config`, `--setting-sources ""`, `--no-session-persistence`.
+- **Claude 에게 도구를 주지 않는다**(`--tools ""` + `--disallowedTools` 로 한 번 더). `claude --help` 의 `--tools` 설명: `Use "" to disable all tools, "default" to use the default set`. 모델은 프롬프트에 실린 diff(바뀐 줄과 앞뒤 `-U40` 줄)만 보고 저장소 파일을 읽지 못한다. `--allowedTools`·`--settings`(Read 거부 목록)는 넘기지 않는다 — 허용할 도구가 없고, 거부 목록은 아래 시험처럼 저장소 밖 경로를 못 막았다. 묶음당 턴은 3(구조화 출력 한 번과 재시도 정도). `--permission-prompts none`, `--strict-mcp-config`, `--setting-sources ""`, `--no-session-persistence`.
 - 정책 유지: AI 리뷰를 못 돌리면(검사 불능·일부만 봄) 통과로 보지 않고 승인이 필요하다(원칙 7). 마커, status 문자열, risk-gate 가 읽는 job id `ai-review` 는 그대로다.
 - `id-token: write` 는 더 이상 필요 없다. 재사용 워크플로와 스캐폴드 예시에서 뺐다. public-cloud 의 호출 워크플로에 남아 있어도 동작에는 영향이 없다(그 저장소는 고치지 않았다).
 - PR 코멘트: 제외 파일은 "AI 리뷰 대상 아님 - 코드가 아닌 파일 N개" 한 줄(예시 3개), partial 사유는 묶음 상한과 묶음 실패로 나눠 적는다.
@@ -45,7 +45,15 @@
 - 구독 OAuth 토큰은 `claude setup-token` 을 실행한 사람의 구독에 묶인다. 사용량도 그 구독에서 나간다. 이 점은 액션을 쓰던 때와 같은 조건이다. 여러 사람이 쓰는 저장소는 토큰을 만든 사람의 한도에 걸릴 수 있으니, 공용이면 API 키 쓰기를 검토한다(지금 워크플로는 API 키를 비워 구독 토큰만 쓰므로 API 키로 바꾸려면 워크플로를 고쳐야 한다).
 - **프롬프트 인젝션으로 토큰이 새는 길(검토에서 나온 심각한 위험).** PR 의 diff 는 비신뢰 입력이다. 거기에 심은 지시를 따라 Claude 가 `Read` 로 `/proc/self/environ`(`CLAUDE_CODE_OAUTH_TOKEN`)이나 `.git/config`(체크아웃이 남긴 `GITHUB_TOKEN` extraheader)를 읽고, 지적 문장(`summary`)에 실으면 PR 코멘트로 새어 나간다. 겹겹이 막았다.
   1. 두 checkout 모두 `persist-credentials: false` — `.git/config` 에 토큰이 남지 않는다.
-  2. `--tools Read,Glob,Grep` 으로 도구 자체를 읽기 셋으로 줄이고(Bash·Write 없음), `--settings` 의 `permissions.deny` 로 `/proc`·`/sys`·`/etc`·`.git`·`_temp`·`~/.ssh`·`~/.claude*` 등 읽기를 거부한다(경로 문법은 permissions 문서의 gitignore 식, `//` 절대 경로, `~/` 홈). 홈 전체는 러너 작업 폴더가 홈 아래라 막지 않는다.
+  2. ~~읽기 거부 목록~~ → **도구 제거.** 처음엔 `--tools Read,Glob,Grep` + `--settings` 의 `permissions.deny`(`/proc`·`/etc`·`.git`·`~/.ssh` 등)로 막으려 했다. 직접 시험에서 이 방식은 저장소 밖 파일을 막지 못했다.
+
+     | 시험한 경로 | 결과 |
+     |---|---|
+     | `../x` (저장소 밖 상대 경로) | 막지 못함 — Read 로 읽혀 `summary` 에 실림 |
+     | `C:/Windows/win.ini` (Windows 절대 경로) | 막지 못함 — Read 로 읽혀 `summary` 에 실림 |
+     | 그 밖의 deny 목록 경로(`/proc`, `.git` 등) | 이 작업에서는 시험하지 못했다 |
+
+     그래서 도구를 아예 주지 않기로 했다(위 결정). 거부 목록과 `--allowedTools` 는 지웠다.
   3. `--scrub-config` 로 리뷰 전에 체크아웃의 `.claude/`, `.mcp.json`, `CLAUDE.md`, `.claude.json` 을 지운다(`--setting-sources ""` 가 안 먹어도 PR 이 심은 훅·MCP·지시가 없게). 로컬에선 기본 꺼짐이다.
   4. 자식 프로세스 환경 변수는 허용 목록(PATH, HOME, LANG/LC_*, TMPDIR 류, `CLAUDE_CODE_OAUTH_TOKEN`, `DISABLE_UPDATES`, Windows 로컬용 최소 몇 개)만 넘긴다. `GITHUB_TOKEN`·`ACTIONS_*`·`RUNNER_*` 는 빠진다.
   5. 마지막 관문: 결과를 쓰기 전에 지적 문장과 실패 사유에 (a) env 의 `CLAUDE_CODE_OAUTH_TOKEN`·`GITHUB_TOKEN` 실제 값(8자 이상) (b) 토큰 모양(기존 `risk_gate.SECRET_PATTERNS` + `sk-ant-`·`gh*_`·`github_pat_`·`Authorization: basic`·긴 base64)이 있으면 `ai-review.json` 을 쓰지 않고 검사 불능("결과에 비밀값으로 보이는 문자열")으로 끝낸다. 값은 어디에도 출력하지 않는다. 비교용 `GITHUB_TOKEN` 은 리뷰 단계 env 로 넘기지만 자식 환경에는 안 넘어간다.
@@ -65,3 +73,11 @@
 - 막힌 9개 PR 의 ai-review 재실행은 사용자 확인 뒤에 한다.
 - 병합 뒤 길잡이 아티팩트에 다시 올린다(`docs/guide/README.md`).
 - public-cloud 호출 워크플로의 `id-token: write` 제거는 그쪽 저장소에서 따로(영향 없음).
+
+## 추가 결정 (도구 제거 이후)
+
+- **문맥 줄 40(`-U40`).** 도구가 없으니 앞뒤 문맥은 diff 에 실린 만큼이 전부다. 최근 8개 커밋 범위(39개 파일)로 `--dry-run` 을 비교하면 글자 수가 288,029(-U20) → 327,864(-U40)로 약 14% 늘지만 묶음은 6개로 같다. `batch-chars` 60000 은 그대로 둔다(묶음이 늘어 `max-batches` 8 에 가까워지면 올리는 것을 검토).
+- **serious 기준.** `PROMPT_HEAD` 의 `[무엇을 지적하나]` 첫 줄에 예시를 넣었다: 데이터를 바꾸는 동작의 권한 검사 누락, 권한 검사가 실패해도 통과시키는 처리(fail-open), 정확성 버그, 보안 취약점, 데이터 손실. 권한 검사 누락은 공통 규칙 CR-009("데이터를 바꾸는 앱은 권한을 검사한다")와 맞춘 것이다. CR-009 는 ABAP 소스를 정적으로 보는 경고(`warn`)이고, AI 리뷰는 같은 원칙을 언어와 관계없이 serious 로 본다.
+- 프롬프트에서 "Read/Grep/Glob 으로 읽어도 된다" 를 지우고 "주어진 diff 만으로 판단한다. 보이지 않는 코드에 대해 추측하지 않는다" 로 바꿨다.
+- 겹 방어는 그대로다: `--scrub-config`, 환경 변수 허용 목록, `persist-credentials: false`, 결과 쓰기 전 `scan_leaks`.
+- 확인하지 못한 것: `--tools ""` 가 이 판(2.1.310)에서 실제로 도구를 모두 끄는지, `--json-schema` 의 구조화 출력이 도구 없이 3턴 안에 나오는지는 `claude --help` 문구로만 확인했다. 실제 실행으로 확인해야 한다.

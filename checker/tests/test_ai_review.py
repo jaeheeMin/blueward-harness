@@ -173,7 +173,7 @@ def _result(structured, **extra):
 
 
 def _go(runner, **kw):
-    return ar.run_batch(BATCH, repo=".", claude="claude", model="sonnet", max_turns=15, timeout=300,
+    return ar.run_batch(BATCH, repo=".", claude="claude", model="sonnet", max_turns=3, timeout=300,
                         runner=runner, env={"PATH": "x"}, **kw)
 
 
@@ -185,8 +185,8 @@ def test_성공한_묶음은_지적과_턴_시간_비용을_기록한다():
     cmd = rec["cmd"]
     assert cmd[:2] == ["claude", "-p"] and cmd[cmd.index("--output-format") + 1] == "json"
     assert json.loads(cmd[cmd.index("--json-schema") + 1])["required"] == ["findings"]
-    assert cmd[cmd.index("--allowedTools") + 1] == "Read,Glob,Grep"
-    assert cmd[cmd.index("--max-turns") + 1] == "15" and cmd[cmd.index("--model") + 1] == "sonnet"
+    assert "--allowedTools" not in cmd and "--settings" not in cmd
+    assert cmd[cmd.index("--max-turns") + 1] == "3" and cmd[cmd.index("--model") + 1] == "sonnet"
     assert cmd[cmd.index("--setting-sources") + 1] == "" and cmd[cmd.index("--permission-prompts") + 1] == "none"
     assert "--strict-mcp-config" in cmd and "--no-session-persistence" in cmd and "--bare" not in cmd
     assert rec["stdin"].decode("utf-8").endswith("diff")  # 프롬프트는 stdin 으로, diff 가 맨 끝
@@ -405,12 +405,39 @@ def test_프롬프트가_번호_사용과_지적_범위를_안내한다():
 # --- 비신뢰 입력 방어 -----------------------------------------------------------------------------
 
 
-def test_명령은_도구를_읽기로_줄이고_민감_경로_읽기를_거부한다():
-    cmd = ar.build_command("claude", "sonnet", 15)
-    assert cmd[cmd.index("--tools") + 1] == "Read,Glob,Grep"
-    deny = json.loads(cmd[cmd.index("--settings") + 1])["permissions"]["deny"]
-    assert "Read(//proc/**)" in deny and "Read(//**/.git/**)" in deny and "Read(~/.claude.json)" in deny
-    assert "Read(~/**)" not in deny  # 러너의 작업 폴더가 홈 아래라 홈 전체는 막지 않는다
+def test_명령은_도구를_아예_주지_않는다():
+    cmd = ar.build_command("claude", "sonnet", 3)
+    i = cmd.index("--tools")
+    assert cmd[i + 1] == ""  # 빈 값 = 도구 없음(claude --help: Use "" to disable all tools)
+    assert "--allowedTools" not in cmd and "--settings" not in cmd  # 허용할 도구도, 읽기 거부 목록도 필요 없다
+    blocked = set(cmd[cmd.index("--disallowedTools") + 1].split(","))
+    assert {"Bash", "Edit", "Write", "Read", "Glob", "Grep", "WebFetch", "Task", "Agent"} <= blocked  # 겹 방어
+
+
+def test_프롬프트는_파일을_읽게_하지_않고_diff_만으로_판단하게_한다():
+    p = ar.PROMPT_HEAD
+    assert "Read" not in p and "Glob" not in p and "Grep" not in p
+    assert "주어진 diff(바뀐 줄과 앞뒤 문맥)만으로 판단한다" in p and "보이지 않는 코드에 대해 추측하지 않는다" in p
+
+
+def test_serious_예시에_권한_검사_누락과_fail_open_이_든다():
+    first = next(line for line in ar.PROMPT_HEAD.splitlines() if line.startswith("- 병합 전에 반드시"))
+    for word in ("데이터를 바꾸는 동작의 권한 검사 누락", "권한 검사가 실패해도 통과시키는 처리(fail-open)", "정확성 버그",
+                 "보안 취약점", "데이터 손실"):
+        assert word in first
+
+
+def test_문맥_줄은_40줄과_기본_턴은_3():
+    assert ar.DIFF_CONTEXT == 40 and ar.DEFAULT_MAX_TURNS == 3
+
+
+def test_파일_diff_를_앞뒤_40줄_문맥으로_뽑는다(repo, monkeypatch):
+    r, base, head = repo
+    seen = []
+    real = ar._git
+    monkeypatch.setattr(ar, "_git", lambda repo_, args: (seen.append(args), real(repo_, args))[1])
+    d = ar.file_diff(str(r), base, head, "src/keep.py")
+    assert "-U40" in seen[0] and "|" in d  # 줄 번호도 붙는다
 
 
 def test_자식_환경은_허용_목록만_남긴다():

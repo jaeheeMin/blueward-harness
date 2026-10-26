@@ -48,7 +48,7 @@ def test_workflow_call_입력과_시크릿(wf):
     assert inputs["engine-ref"]["default"] == "stable"
     assert inputs["model"]["default"] == "sonnet"
     # max-turns 는 묶음 하나가 쓰는 턴이다(#460).
-    assert inputs["max-turns"]["type"] == "number" and inputs["max-turns"]["default"] == 15
+    assert inputs["max-turns"]["type"] == "number" and inputs["max-turns"]["default"] == 3
     assert inputs["max-batches"]["type"] == "number" and inputs["max-batches"]["default"] == 8
     assert inputs["batch-chars"]["type"] == "number" and inputs["batch-chars"]["default"] == 60000
     assert inputs["claude-code-version"]["type"] == "string"
@@ -183,9 +183,8 @@ def test_저장소_MCP_서버를_띄우지_않는다():
     # PR 저장소의 .mcp.json 이 러너에서 SAP MCP 서버를 띄우지 않게 한다(#144). 명령은 엔진이 만든다.
     from checker import ai_review
 
-    cmd = ai_review.build_command("claude", "sonnet", 15)
+    cmd = ai_review.build_command("claude", "sonnet", 3)
     assert "--strict-mcp-config" in cmd
-    assert cmd[cmd.index("--allowedTools") + 1] == "Read,Glob,Grep"
 
 
 def test_프롬프트는_주입_방지를_담고_coverage_를_묻지_않는다():
