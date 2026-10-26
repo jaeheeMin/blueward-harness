@@ -130,10 +130,15 @@ def test_secret_found_키가_있으면_종료코드를_그대로_둔다(wf, tmp_
 
 
 def test_pr_head_checkout_은_엔진_폴더를_지우지_않는다(wf):
+    # 작업 폴더 바로 아래에 받으면 checkout 이 폴더 내용을 지워 .harness-engine 이 사라졌다(#490).
+    # clean: false 로는 막히지 않으므로 하위 폴더에 받고, 엔진 폴더와 겹치지 않아야 한다.
     step = _named(wf, "PR head 가져오기")
+    engine = _steps(wf)[0]
     assert step["with"]["fetch-depth"] == 0
-    assert step["with"]["clean"] is False
     assert step["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
+    assert step["with"]["path"] == "pr"
+    assert step["with"]["path"] != engine["with"]["path"]
+    assert '--repo "$GITHUB_WORKSPACE/pr"' in _step(wf, "claude")["run"]
 
 
 def test_액션_대신_엔진의_ai_review_를_직접_부른다(wf):
