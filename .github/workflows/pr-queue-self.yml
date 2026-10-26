@@ -30,6 +30,9 @@ on:
 jobs:
   pr-queue:
     name: pr-queue / queue
+    # 병합으로 닫힌 PR 은 건너뛴다(#482). 같은 순간 뜨는 push(main) 실행이 같은 계산을 하고, 둘이 아래
+    # concurrency 로 서로 취소해 병합된 PR 에 취소(실패)가 남았다. 병합 없이 닫힌 PR 은 push 가 없어 그대로 돈다.
+    if: ${{ !(github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
