@@ -26,7 +26,9 @@ JSON 한 줄을 낸다. `state`:
 - `unreadable` installed_plugins.json(`--loaded-root` 면 실린 판의 plugin.json, 사유는 `loaded_error`)을 읽지 못했다
 
 `--all` 은 설치된 **모든 플러그인**의 표를 낸다(#461, `/harness:version`). 위 단일 판정과 별개의 모드다.
-`[--cwd DIR] [--all [--json] [--remote] [--loaded-root DIR] [--all-entries]]` — 마크다운 표(`--json` 이면 JSON). 항목마다:
+`[--cwd DIR] [--all [--json] [--remote] [--loaded-root DIR] [--all-entries]]` — 마크다운 표(`--json` 이면 JSON).
+기본 표는 `플러그인 | 판 | 최신 판 | 상태` 4칸이다(#476). 판은 실린 판을 아는 harness 행이면 실린 판, 그 외는 설치 판.
+`--all-entries` 는 이 폴더 판·다른 폴더 설치 칸까지 모두 내고 숨긴 줄도 보인다. 항목마다:
 - 이 폴더 판: project·local 항목 중 projectPath 가 cwd(또는 상위)와 맞는 것. 없으면 user 항목.
   둘 다 있으면 project·local 을 고른다 — 공식 문서(plugins/loading)는 `enabledPlugins` 켜짐 여부의 우선순위
   (user < project < local)만 밝히고, 같은 플러그인이 두 범위에 설치됐을 때 어느 설치본이 실리는지는 적지 않았다.
@@ -37,7 +39,7 @@ JSON 한 줄을 낸다. `state`:
 - state: current / stale / missing(이 폴더에 설치 없음) / unknown(최신 판 또는 설치 판을 읽지 못함).
   `--loaded-root` 가 있으면 harness 행은 "이 세션에 실린 판" 으로 state 를 정한다(#471).
 - 기본 표에서는 이 폴더에서 쓰이지 않는 플러그인(user 항목도, 이 폴더·같은 저장소 project 항목도 없는 것)을 뺀다.
-  harness 는 설치가 없어도 남긴다(경고). 빠진 것까지 보려면 `--all-entries`.
+  harness 는 설치가 없어도 남긴다(경고). 빠진 것까지 보려면 `--all-entries`(`--json` 은 이 구분 없이 같은 구조).
 - projectPath 폴더가 디스크에 없는 항목은 "다른 폴더 설치" 개수에서 뺀다.
 
 stdlib 만 쓴다.
@@ -347,10 +349,28 @@ def all_plugins(
 _STATE_TEXT = {"current": "최신", "stale": "갱신 있음", "missing": "이 폴더에 설치 없음", "unknown": "최신 판 확인 불가"}
 
 
-def render_table(result: dict) -> str:
+def _latest_text(r: dict) -> str:
+    return (r["latest"] or "?") + (" (원격)" if r["latest_source"] == "remote" else "")
+
+
+def render_table(result: dict, all_entries: bool = False) -> str:
+    """기본은 4칸(플러그인·판·최신 판·상태, #476). `all_entries` 면 칸 전부와 숨겼던 줄까지 낸다."""
     lines = [f"기준 폴더: {result['cwd']}", f"설치 목록: {result['config_file']}", ""]
     if result["error"]:
         return "\n".join(lines + [f"확인 불능: {result['error']}"])
+    if not all_entries:
+        lines += ["| 플러그인 | 판 | 최신 판 | 상태 |", "|---|---|---|---|"]
+        for r in result["rows"]:
+            # harness 는 실린 판을 아는 행이면 실린 판, 그 외는 설치 판
+            version = r["loaded"] or r["installed"] or "-"
+            lines.append(f"| {r['plugin']} | {version} | {_latest_text(r)} | {_STATE_TEXT[r['state']]} |")
+        lines += ["", '- "최신 판" 은 마지막 `claude plugin marketplace update` 때 내려받은 사본의 판이다(원격 최신과 다를 수 있다).',
+                  "- harness 의 판은 지금 세션이 실제로 쓰는 판이다. 설치 뒤 `/reload-plugins` 를 해야 바뀐다."]
+        if result.get("loaded_error"):
+            lines.append(f"- 실린 판을 읽지 못했다: {result['loaded_error']}")
+        if result.get("loaded_error") or any(r["state"] == "stale" for r in result["rows"]):
+            lines.append("- 자세히 보려면 `--all-entries` 를 붙인다.")
+        return "\n".join(lines)
     lines += [
         "| 플러그인 | 범위 | 이 폴더 판 | 이 세션에 실린 판 | 받아 둔 최신 판 | 상태 | 다른 폴더 설치 |",
         "|---|---|---|---|---|---|---|",
@@ -359,7 +379,7 @@ def render_table(result: dict) -> str:
         scope = r["scope"] or "-"
         if r["user_version"]:
             scope += f" (user {r['user_version']} 도 있음)"
-        latest = (r["latest"] or "?") + (" (원격)" if r["latest_source"] == "remote" else "")
+        latest = _latest_text(r)
         others = f"{r['other_project_entries']}곳" if r["other_project_entries"] else "-"
         if r["same_repo_entries"]:
             same = ", ".join(f"{e['folder']} {e['version'] or '?'}" for e in r["same_repo_entries"])
@@ -373,8 +393,6 @@ def render_table(result: dict) -> str:
     lines += ["", '- "받아 둔 최신 판" 은 마지막 `claude plugin marketplace update` 때 내려받은 사본의 판이다(원격 최신과 다를 수 있다).',
               '- "이 세션에 실린 판" 은 지금 세션이 실제로 쓰는 harness 판이고, harness 의 상태는 이것으로 정한다. "이 폴더 판" 은 설치 항목이라 참고다(#471).',
               "- 이 세션이 쓰는 판은 설치 뒤 `/reload-plugins` 를 해야 바뀐다."]
-    if result["hidden"]:
-        lines.append(f"- 이 폴더에서 쓰이지 않는 플러그인 {result['hidden']}개는 뺐다(`--all-entries` 로 모두 본다).")
     if result.get("loaded_error"):
         lines.append(f"- 실린 판을 읽지 못했다: {result['loaded_error']}")
     return "\n".join(lines)
@@ -412,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
             loaded_root=args.loaded_root,
             all_entries=args.all_entries,
         )
-        sys.stdout.write((json.dumps(result, ensure_ascii=False) if args.json else render_table(result)) + "\n")
+        sys.stdout.write((json.dumps(result, ensure_ascii=False) if args.json else render_table(result, args.all_entries)) + "\n")
         return 0
     latest = args.latest
     if args.remote:
