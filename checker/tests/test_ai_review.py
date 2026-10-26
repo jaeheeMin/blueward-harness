@@ -502,3 +502,92 @@ def test_main_누출이면_종료코드_2_이고_사유_파일에_값이_없다(
     text = (out / "ai-review-unavailable.json").read_text(encoding="utf-8")
     assert "비밀값으로 보이는 문자열" in text and "ghp_" not in text
     assert "ghp_" not in capsys.readouterr().err and not (out / "ai-review.json").exists()
+
+
+# --- 시작 시점 의존 확인 / 예상 못 한 예외 ---------------------------------------------------------
+
+
+def test_비밀값_패턴을_못_불러오면_claude_를_부르기_전에_검사_불능(repo, tmp_path, monkeypatch):
+    r, base, head = repo
+    monkeypatch.setitem(sys.modules, "checker.risk_gate", None)  # import 가 ImportError 를 낸다(yaml 이 없는 환경과 같다)
+    called = []
+
+    def runner(*a):
+        called.append(1)
+        return 0, _result({"findings": []}), ""
+
+    with pytest.raises(ar.Unavailable, match="비밀값 패턴을 불러오지 못했다"):
+        ar.run(str(r), base, head, str(tmp_path / "o"), runner=runner, env={})
+    assert called == []  # 비용을 쓰기 전에 멈췄다
+
+
+def test_main_의존_모듈이_없으면_종료코드_2_와_사유_파일(repo, tmp_path, monkeypatch, capsys):
+    r, base, head = repo
+    out = tmp_path / "o"
+    monkeypatch.setitem(sys.modules, "checker.risk_gate", None)
+    monkeypatch.setattr(ar, "_default_runner", lambda *a: (_ for _ in ()).throw(AssertionError("호출 금지")))
+    assert ar.main(["run", "--repo", str(r), "--base", base, "--head", head, "--out", str(out)]) == 2
+    assert "불러오지 못했다" in json.loads((out / "ai-review-unavailable.json").read_text(encoding="utf-8"))["reason"]
+    assert not (out / "ai-review.json").exists()
+
+
+def test_main_예상_못_한_예외도_검사_불능으로_남기고_트레이스백은_stderr_에만(repo, tmp_path, monkeypatch, capsys):
+    r, base, head = repo
+    out = tmp_path / "o"
+    out.mkdir()
+    (out / "ai-review.json").write_text("{}", encoding="utf-8")  # 낡은 결과는 지운다
+
+    def boom(*a, **k):
+        raise RuntimeError("내부 값 abc")
+
+    monkeypatch.setattr(ar, "collect", boom)
+    assert ar.main(["run", "--repo", str(r), "--base", base, "--head", head, "--out", str(out)]) == 2
+    reason = json.loads((out / "ai-review-unavailable.json").read_text(encoding="utf-8"))["reason"]
+    assert reason == "예상하지 못한 오류(RuntimeError)" and "abc" not in reason
+    assert "Traceback" in capsys.readouterr().err and not (out / "ai-review.json").exists()
+
+
+# --- 권한 거부 기록 -------------------------------------------------------------------------------
+
+
+def test_묶음_기록에_권한_거부와_턴을_남기되_내용은_싣지_않는다():
+    denials = [
+        {"tool_name": "Read", "tool_use_id": "t1", "tool_input": {"file_path": "/proc/self/environ", "limit": 5}},
+        {"tool_name": "Grep", "tool_input": {"pattern": "TOKEN", "path": "/etc", "output_mode": "content"}},
+        {"tool_name": "Bash", "tool_input": {"command": "cat /etc/passwd"}},  # 경로 필드가 없으면 대상은 비운다
+        "이상한 항목",
+    ]
+    out = _result({"findings": []}, permission_denials=denials)
+    r = _go(_runner(out=out))
+    assert r["ok"] and r["num_turns"] == 3
+    assert r["permission_denials"] == [
+        {"tool": "Read", "target": "/proc/self/environ"},
+        {"tool": "Grep", "target": "/etc"},
+        {"tool": "Bash", "target": ""},
+    ]
+    assert "cat /etc/passwd" not in json.dumps(r) and "output_mode" not in json.dumps(r)
+
+
+def test_결과_파일의_batches_에_permission_denials_가_들어간다(repo, tmp_path):
+    r, base, head = repo
+    out = _result({"findings": []}, permission_denials=[{"tool_name": "Read", "tool_input": {"file_path": "/etc/hosts"}}])
+    merged = ar.run(str(r), base, head, str(tmp_path / "o"), runner=_runner(out=out), env={})
+    batch = merged["batches"][0]
+    assert batch["permission_denials"] == [{"tool": "Read", "target": "/etc/hosts"}] and batch["num_turns"] == 3
+    saved = json.loads((tmp_path / "o" / "ai-review.json").read_text(encoding="utf-8"))
+    assert saved["batches"][0]["permission_denials"] == batch["permission_denials"]
+
+
+def test_실패한_묶음도_권한_거부를_남긴다():
+    out = json.dumps({"subtype": "error_max_turns", "is_error": True, "num_turns": 15,
+                      "permission_denials": [{"tool_name": "Read", "tool_input": {"file_path": "/proc/1/environ"}}]})
+    r = _go(_runner(out=out))
+    assert not r["ok"] and r["permission_denials"] == [{"tool": "Read", "target": "/proc/1/environ"}]
+
+
+def test_권한_거부_대상에_비밀값이_있어도_결과를_쓰지_않는다(repo, tmp_path):
+    r, base, head = repo
+    out = _result({"findings": []}, permission_denials=[
+        {"tool_name": "Read", "tool_input": {"file_path": "/tmp/ghp_" + "w" * 30}}])
+    with pytest.raises(ar.Unavailable, match="비밀값으로 보이는 문자열"):
+        ar.run(str(r), base, head, str(tmp_path / "o"), runner=_runner(out=out), env={})

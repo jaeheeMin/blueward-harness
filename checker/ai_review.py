@@ -19,7 +19,8 @@
 
     {"coverage": "full"|"partial", "unreviewed": [경로...], "serious": N, "findings": [...],
      "reviewed": [...], "excluded": [{"file", "reason"}...], "deleted": [...], "no_code_to_review": bool,
-     "batches": [{"files", "ok", "reason", "num_turns", "duration_ms", "total_cost_usd", "chars"}...],
+     "batches": [{"files", "ok", "reason", "num_turns", "duration_ms", "total_cost_usd", "chars",
+                  "permission_denials": [{"tool", "target"}...]}...],
      "unreviewed_reasons": {경로: 사유}}
 
 묶음이 하나도 성공하지 못했으면 `ai-review.json` 을 쓰지 않고 `<out>/ai-review-unavailable.json` 에 사유를 남긴
@@ -44,6 +45,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from typing import Callable
 
 DEFAULT_MODEL = "sonnet"
@@ -358,16 +360,27 @@ _EXTRA_LEAK_PATTERNS = [
 ]
 
 
-def scan_leaks(texts: list[str], env: dict | None = None) -> bool:
+def load_secret_patterns() -> list[re.Pattern]:
+    """비밀값 패턴(기존 `risk_gate.SECRET_PATTERNS` + 추가분). `risk_gate` 는 yaml 등을 불러오므로, 못 불러오면 검사 불능이다.
+
+    `run` 이 시작할 때 부른다 — claude 를 부른 뒤에야 알게 되면 비용만 쓰고 결과를 못 낸다.
+    """
+    try:
+        from checker.risk_gate import SECRET_PATTERNS
+    except Exception as exc:  # ImportError 외에 모듈 초기화 오류도 같은 취급
+        raise Unavailable(f"비밀값 패턴을 불러오지 못했다({type(exc).__name__}). 리뷰 전에 멈춘다") from exc
+    return [p for _label, p in SECRET_PATTERNS] + _EXTRA_LEAK_PATTERNS
+
+
+def scan_leaks(texts: list[str], env: dict | None = None, patterns: list[re.Pattern] | None = None) -> bool:
     """문자열들에 비밀값으로 보이는 것이 있는가. (a) env 의 토큰 실제 값(8자 이상) (b) 토큰 모양 패턴.
 
-    값은 돌려주지도 출력하지도 않는다. 기존 `checker.risk_gate.SECRET_PATTERNS` 를 그대로 쓴다.
+    값은 돌려주지도 출력하지도 않는다. `patterns` 를 안 주면 `load_secret_patterns()` 로 불러온다(못 불러오면 Unavailable).
     """
-    from checker.risk_gate import SECRET_PATTERNS
-
     src = os.environ if env is None else env
     values = [v.strip() for name in LEAK_ENV_NAMES if (v := src.get(name)) and len(v.strip()) >= 8]
-    patterns = [p for _label, p in SECRET_PATTERNS] + _EXTRA_LEAK_PATTERNS
+    if patterns is None:
+        patterns = load_secret_patterns()
     for text in texts:
         if any(v in text for v in values) or any(p.search(text) for p in patterns):
             return True
@@ -431,6 +444,21 @@ def parse_findings(data) -> list[dict]:
     return out
 
 
+def summarize_denials(data: dict) -> list[dict]:
+    """결과 JSON 의 `permission_denials` 에서 도구 이름과 대상 경로·패턴만 뽑는다(내용·값은 싣지 않는다)."""
+    raw = data.get("permission_denials")
+    out: list[dict] = []
+    if not isinstance(raw, list):
+        return out
+    for d in raw[:50]:
+        if not isinstance(d, dict):
+            continue
+        tool_input = d.get("tool_input") if isinstance(d.get("tool_input"), dict) else {}
+        target = next((tool_input[k] for k in ("file_path", "path", "pattern") if isinstance(tool_input.get(k), str)), "")
+        out.append({"tool": str(d.get("tool_name", ""))[:50], "target": " ".join(target.split())[:200]})
+    return out
+
+
 def run_batch(batch: dict, *, repo: str, claude: str, model: str, max_turns: int, timeout: float,
               runner: Runner | None = None, env: dict | None = None) -> dict:
     """묶음 하나를 리뷰한다. 성공 = 종료코드 0, 결과 JSON 이 오류가 아니고 `structured_output` 이 스키마에 맞음.
@@ -438,7 +466,8 @@ def run_batch(batch: dict, *, repo: str, claude: str, model: str, max_turns: int
     반환: `{"files", "chars", "ok", "reason", "findings", "num_turns", "duration_ms", "total_cost_usd"}`.
     """
     res: dict = {"files": list(batch["files"]), "chars": batch["chars"], "ok": False, "reason": "",
-                 "findings": [], "num_turns": None, "duration_ms": None, "total_cost_usd": None}
+                 "findings": [], "num_turns": None, "duration_ms": None, "total_cost_usd": None,
+                 "permission_denials": []}
     run = runner or _default_runner
     try:
         code, out, err = run(build_command(claude, model, max_turns), build_prompt(batch).encode("utf-8"),
@@ -456,6 +485,7 @@ def run_batch(batch: dict, *, repo: str, claude: str, model: str, max_turns: int
     if isinstance(data, dict):
         for key in ("num_turns", "duration_ms", "total_cost_usd"):
             res[key] = data.get(key)
+        res["permission_denials"] = summarize_denials(data)
     if code != 0:
         tail = (err.strip().splitlines() or [""])[-1][:200]
         res["reason"] = f"종료코드 {code}" + (f": {tail}" if tail else "")
@@ -515,6 +545,7 @@ def merge_results(targets: list[str], excluded: list[dict], deleted: list[str], 
         "reviewed": reviewed,
         "no_code_to_review": False,
         "batches": [{k: r[k] for k in ("files", "chars", "ok", "reason", "num_turns", "duration_ms", "total_cost_usd")}
+                 | {"permission_denials": r.get("permission_denials", [])}
                     for r in results],
         "unreviewed_reasons": {f: reasons_by_file[f] for f in unreviewed},
         **base,
@@ -552,6 +583,8 @@ def run(repo: str, base: str, head: str, out: str, *, model: str = DEFAULT_MODEL
         total_timeout: float = DEFAULT_TOTAL_TIMEOUT, runner: Runner | None = None, env: dict | None = None,
         clock: Callable[[], float] = time.monotonic, scrub: bool = False, secret_env: dict | None = None) -> dict:
     """리뷰를 돌려 결과를 `out` 에 쓰고 결과 dict 를 돌려준다. 검사 불능이면 `Unavailable`."""
+    # 마지막 관문에 쓸 패턴을 먼저 불러온다 — claude 를 부른 뒤에야 못 불러온 걸 알면 비용만 쓰고 결과를 못 낸다.
+    patterns = load_secret_patterns()
     info = collect(repo, base, head, batch_chars, max_batches)
     plan = info["plan"]
     started = clock()
@@ -565,14 +598,16 @@ def run(repo: str, base: str, head: str, out: str, *, model: str = DEFAULT_MODEL
             if remaining <= 1:
                 results.append({"files": list(batch["files"]), "chars": batch["chars"], "ok": False,
                                 "reason": "전체 시간 상한", "findings": [], "num_turns": None,
-                                "duration_ms": None, "total_cost_usd": None})
+                                "duration_ms": None, "total_cost_usd": None,
+                                "permission_denials": []})
                 continue
             results.append(run_batch(batch, repo=repo, claude=exe, model=model, max_turns=max_turns,
                                      timeout=min(batch_timeout, remaining), runner=runner, env=env))
     merged = merge_results(info["targets"], info["excluded"], info["deleted"], plan["dropped"], results)
     # 마지막 관문: 지적 문장·실패 사유에 비밀값이 섞였으면 결과를 쓰지 않는다(인젝션으로 토큰이 코멘트에 실리는 길).
     texts = [json.dumps(f, ensure_ascii=False) for f in merged["findings"]] + [b["reason"] for b in merged["batches"]]
-    if scan_leaks(texts, secret_env):
+    texts += [d["tool"] + " " + d["target"] for b in merged["batches"] for d in b["permission_denials"]]
+    if scan_leaks(texts, secret_env, patterns):
         raise Unavailable(LEAK_REASON)
     os.makedirs(out, exist_ok=True)
     stale = os.path.join(out, UNAVAILABLE_FILE)
@@ -639,6 +674,12 @@ def main(argv: list[str] | None = None) -> int:
         if not args.dry_run:
             _write_unavailable(args.out, str(exc))
         print(f"검사 불능: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:  # 예상 못 한 예외도 트레이스백으로 죽지 않고 검사 불능(2)으로 남긴다(원칙 7)
+        traceback.print_exc()  # 트레이스백은 stderr 에만. 사유 파일에는 예외 종류만 적는다
+        if not args.dry_run:
+            _write_unavailable(args.out, f"예상하지 못한 오류({type(exc).__name__})")
+        print(f"검사 불능: 예상하지 못한 오류({type(exc).__name__})", file=sys.stderr)
         return 2
     print(f"coverage={merged['coverage']} serious={merged['serious']} "
           f"reviewed={len(merged['reviewed'])} unreviewed={len(merged['unreviewed'])} "

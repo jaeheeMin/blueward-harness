@@ -50,6 +50,8 @@
   4. 자식 프로세스 환경 변수는 허용 목록(PATH, HOME, LANG/LC_*, TMPDIR 류, `CLAUDE_CODE_OAUTH_TOKEN`, `DISABLE_UPDATES`, Windows 로컬용 최소 몇 개)만 넘긴다. `GITHUB_TOKEN`·`ACTIONS_*`·`RUNNER_*` 는 빠진다.
   5. 마지막 관문: 결과를 쓰기 전에 지적 문장과 실패 사유에 (a) env 의 `CLAUDE_CODE_OAUTH_TOKEN`·`GITHUB_TOKEN` 실제 값(8자 이상) (b) 토큰 모양(기존 `risk_gate.SECRET_PATTERNS` + `sk-ant-`·`gh*_`·`github_pat_`·`Authorization: basic`·긴 base64)이 있으면 `ai-review.json` 을 쓰지 않고 검사 불능("결과에 비밀값으로 보이는 문자열")으로 끝낸다. 값은 어디에도 출력하지 않는다. 비교용 `GITHUB_TOKEN` 은 리뷰 단계 env 로 넘기지만 자식 환경에는 안 넘어간다.
   - **남는 위험:** 구독 토큰은 같은 프로세스 환경에 남는다(claude 가 인증에 써야 하므로). 2)~5) 로 읽기·유출 길을 막았을 뿐이다. 거부 경로 목록이 빠진 경로를 읽는 우회, 토큰을 인코딩해 싣는 우회(base64 패턴은 40자 이상만 본다)는 이론상 남는다. 토큰이 새어 나갔다고 의심되면 `claude setup-token` 으로 새로 만들어 시크릿을 바꾼다.
+- 마지막 관문이 쓰는 비밀값 패턴(`checker.risk_gate`, yaml 등을 불러온다)은 `run` 시작 때 먼저 불러온다. 못 불러오면 claude 를 부르기 전에 검사 불능(종료코드 2)이다. 예상 못 한 예외도 `main` 이 검사 불능(2)과 사유 파일(예외 종류만)로 남기고 트레이스백은 stderr 에만 낸다.
+- 묶음 기록(`batches`)에 `num_turns` 와 `permission_denials`(도구 이름과 대상 경로·패턴만, 내용은 싣지 않음)를 남긴다. 결과 JSON 에서 도구 호출 횟수를 얻는 필드는 확인하지 못해 싣지 않았다. 거부 기록은 인젝션 시도를 알아보는 단서다.
 - 묶음마다 모델을 따로 부르므로 큰 PR 은 호출 수가 는다(최대 `max-batches` 번). 비용·턴은 `ai-review.json` 의 `batches` 에 묶음별로 남는다.
 - 설치 스크립트(`claude.ai/install.sh`)는 러너에서 내려받아 실행한다. 판을 입력으로 고정하고 설치 뒤 판을 확인하지만 스크립트 자체를 검증하지는 않는다.
 
