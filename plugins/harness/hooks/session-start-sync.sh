@@ -502,7 +502,7 @@ if [ "$fetch_state" = "ok" ] && git remote get-url origin 2>/dev/null | grep -q 
       # 모든 fd 를 닫아 훅이 끝나도 백그라운드가 훅 실행기의 파이프를 붙들지 않게 한다.
       (
         pr_bg_rc=0
-        pr_bg_out="$(${pr_wrap[@]+"${pr_wrap[@]}"} uvx --from "$pr_engine" python -m checker.pr_queue --mine --quiet-empty --max-rows 10 2>/dev/null </dev/null)" || pr_bg_rc=$?
+        pr_bg_out="$(${pr_wrap[@]+"${pr_wrap[@]}"} uvx --from "$pr_engine" python -P -m checker.pr_queue --mine --quiet-empty --max-rows 10 2>/dev/null </dev/null)" || pr_bg_rc=$?
         pr_bg_out="$(printf '%s' "$pr_bg_out" | tr -d '\r')"
         { printf 'rc=%s\n' "$pr_bg_rc"; if [ -n "$pr_bg_out" ]; then printf '%s\n' "$pr_bg_out"; fi; } > "${pr_file}.tmp"
         mv -f "${pr_file}.tmp" "$pr_file"

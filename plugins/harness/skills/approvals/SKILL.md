@@ -21,13 +21,13 @@ compatibility: GitHub CLI(gh, 로그인 상태)와 uv 가 필요하다. 읽기�
 
    ```bash
    e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "승인 대기 PR 확인 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" python -m checker.pr_approvals
+   uvx --from "$e" python -P -m checker.pr_approvals
    ```
 
    첫 줄이 실패하거나 빈 값이면 `uvx` 로 넘어가지 말고 멈춰서 사유를 알리고 "승인 대기 PR 확인 불능" 이라고
    말한다. `@main` 이나 다른 판으로 대신 받지 않는다. PowerShell 도구는 `$e = uv run --no-project python
    "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py"; if ($LASTEXITCODE -ne 0 -or -not $e) { throw "승인 대기 PR 확인 불능" }`
-   로 정한 뒤 `uvx --from $e python -m checker.pr_approvals` 로 부른다. 다른 저장소를 보려면
+   로 정한 뒤 `uvx --from $e python -P -m checker.pr_approvals` 로 부른다. 다른 저장소를 보려면
    `--repo owner/repo` 를 더한다(없으면 현재 폴더의 저장소).
 2. 종료코드가 2 이거나 출력이 "승인 대기 PR 확인 불능" 으로 시작하면 **그 문구와 사유를 그대로 전하고 멈춘다.**
    "승인할 PR 이 없다" 로 말하지 않는다. 다음 할 일은 `gh auth status` 확인, 네트워크 확인, 다시 시도다.

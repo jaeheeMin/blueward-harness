@@ -235,7 +235,7 @@ Spec 을 만들거나 고친 뒤 사용자가 양식 파일을 원할 때("양�
 ```bash
 e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
 uvx --from "$e" \
-  python -m checker.export --spec docs/spec/DEV-001-<요약>.md --root "$(git rev-parse --show-toplevel)"
+  python -P -m checker.export --spec docs/spec/DEV-001-<요약>.md --root "$(git rev-parse --show-toplevel)"
 ```
 
 Bash 도구로 실행한다(Windows Git Bash 에서도 같다). 엔진 판은 플러그인 판과 같은 태그(`v{version}`)이고
@@ -243,7 +243,7 @@ Bash 도구로 실행한다(Windows Git Bash 에서도 같다). 엔진 판은 �
 플러그인 설치가 깨져 판을 정하지 못함) `uvx` 로 넘어가지 말고 거기서 멈춰 사유(`engine_spec.py` 가 낸 stderr)를
 알리고 "산출 불능" 이라고 말한다. `@main` 이나 다른 판으로 대신 받지 않는다. PowerShell 도구는 `$e = uv run --no-project python
 "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py"; if ($LASTEXITCODE -ne 0 -or -not $e) { throw "산출 불능: 엔진 판을 정하지 못했다" }`
-로 정한 뒤 `uvx --from $e python -m checker.export --spec … --root …` 로 부른다.
+로 정한 뒤 `uvx --from $e python -P -m checker.export --spec … --root …` 로 부른다.
 양식이 여럿이면 모두 만들고, 하나만 만들려면 `--form <양식 이름 또는 지도 파일 경로>` 를 더한다
 (`--form Backlog` 와 `--form templates/forms/Backlog.yaml` 은 같다. 경로는 `--root` 기준 상대 또는 절대이고
 `templates/forms/` 안의 지도 파일이어야 한다. 없는 파일이면 종료코드 2). 같은 이름 산출 파일이 이미 있으면

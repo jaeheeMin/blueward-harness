@@ -39,7 +39,7 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 **시작을 막지 않는다.** GitHub 원격이 아니거나 `gh` 가 안 되면 이 절을 건너뛴다.
 
 ```bash
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] && timeout 30 uvx --from "$e" python -m checker.pr_queue --mine --no-ledger --max-rows 5 --quiet-empty
+e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] && timeout 30 uvx --from "$e" python -P -m checker.pr_queue --mine --no-ledger --max-rows 5 --quiet-empty
 ```
 
 `timeout` 은 처음 엔진을 받느라 시작이 오래 붙들리지 않게 하려는 것이다. `timeout` 명령이 없는 환경이면 이 절을 건너뛴다.

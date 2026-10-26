@@ -489,7 +489,7 @@ check_one_merge() {
     deny "임시 파일을 만들지 못해 PR #$pr_number 보다 먼저 병합할 PR 이 있는지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
   }
   set +e
-  pq_out="$(uvx --from "$engine" python -m checker.pr_queue --repo "$repo" --pr "$pr_number" --json 2>"$pq_err_file")"
+  pq_out="$(uvx --from "$engine" python -P -m checker.pr_queue --repo "$repo" --pr "$pr_number" --json 2>"$pq_err_file")"
   pq_rc=$?
   set -e
   pq_err="$(cat "$pq_err_file" 2>/dev/null)" || pq_err=""
@@ -539,7 +539,7 @@ check_one_merge() {
   trap 'rm -f "$ssot_err_file"' EXIT
 
   set +e
-  ssot_out="$(uvx --from "$engine" python -m checker.ssot_approval check-pr --repo "$repo" --pr "$pr_number" 2>"$ssot_err_file")"
+  ssot_out="$(uvx --from "$engine" python -P -m checker.ssot_approval check-pr --repo "$repo" --pr "$pr_number" 2>"$ssot_err_file")"
   ssot_rc=$?
   set -e
   ssot_err="$(cat "$ssot_err_file" 2>/dev/null)" || ssot_err=""
@@ -598,7 +598,7 @@ $ssot_err"
     deny "임시 파일을 만들지 못해 PR #$pr_number 가 사람이 merge 해야 하는 경로를 바꿨는지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
   }
   set +e
-  hm_out="$(uvx --from "$engine" python -m checker.ssot_approval check-human-merge --repo "$repo" --pr "$pr_number" 2>"$hm_err_file")"
+  hm_out="$(uvx --from "$engine" python -P -m checker.ssot_approval check-human-merge --repo "$repo" --pr "$pr_number" 2>"$hm_err_file")"
   hm_rc=$?
   set -e
   hm_err="$(cat "$hm_err_file" 2>/dev/null)" || hm_err=""
@@ -644,7 +644,7 @@ $hm_err"
     deny "임시 파일을 만들지 못해 PR #$pr_number 의 위험도를 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
   }
   set +e
-  rg_out="$(uvx --from "$engine" python -m checker.risk_gate check-pr --repo "$repo" --pr "$pr_number" 2>"$rg_err_file")"
+  rg_out="$(uvx --from "$engine" python -P -m checker.risk_gate check-pr --repo "$repo" --pr "$pr_number" 2>"$rg_err_file")"
   rg_rc=$?
   set -e
   rg_err="$(cat "$rg_err_file" 2>/dev/null)" || rg_err=""
@@ -774,7 +774,7 @@ if [[ "$cmd" =~ $pr_word_re ]] && [[ "$cmd" =~ $pr_sub_re ]]; then
     deny "임시 파일을 만들지 못해 이 명령의 대상 PR 을 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
   }
   set +e
-  pm_out="$(printf '%s' "$cmd" | uvx --from "$engine" python -m checker.merge_command --mutations 2>"$pm_err_file")"
+  pm_out="$(printf '%s' "$cmd" | uvx --from "$engine" python -P -m checker.merge_command --mutations 2>"$pm_err_file")"
   pm_rc=$?
   set -e
   pm_err="$(cat "$pm_err_file" 2>/dev/null)" || pm_err=""
@@ -819,7 +819,7 @@ case "$cmd" in
       deny "임시 파일을 만들지 못해 이 명령이 gh pr merge 인지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
     }
     set +e
-    mc_out="$(printf '%s' "$cmd" | uvx --from "$engine" python -m checker.merge_command 2>"$mc_err_file")"
+    mc_out="$(printf '%s' "$cmd" | uvx --from "$engine" python -P -m checker.merge_command 2>"$mc_err_file")"
     mc_rc=$?
     set -e
     mc_err="$(cat "$mc_err_file" 2>/dev/null)" || mc_err=""

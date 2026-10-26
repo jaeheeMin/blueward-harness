@@ -297,7 +297,7 @@ def _check_code(path: Path, content: str) -> None:
         staged.write_text(content, encoding="utf-8")
 
         cmd = [
-            "uvx", "--from", engine_spec(), "python", "-m", "checker.code_rules",
+            "uvx", "--from", engine_spec(), "python", "-P", "-m", "checker.code_rules",
             "--json", str(staged),
         ]
         env = {**os.environ, "PYTHONIOENCODING": "utf-8"}

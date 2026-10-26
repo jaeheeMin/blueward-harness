@@ -223,7 +223,7 @@ def test_pr_block_runs_in_background_and_writes_result_file(tmp_path):
     assert not (repo / ".git" / f"harness-pr-table.{SID}.tmp").exists()
     calls = _calls(fake)
     assert len(calls) == 1
-    assert "--from fake-engine python -m checker.pr_queue --mine --quiet-empty --max-rows 10" in calls[0]
+    assert "--from fake-engine python -P -m checker.pr_queue --mine --quiet-empty --max-rows 10" in calls[0]
 
 
 def test_pr_block_does_not_wait_for_engine(tmp_path):
