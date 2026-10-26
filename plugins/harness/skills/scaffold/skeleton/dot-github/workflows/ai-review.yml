@@ -14,6 +14,9 @@
 # 영원히 "AI 리뷰 결과 없음" 대기가 되지 않도록 `.github/risk-gate.yaml` 의 `ai_review_paths` 가 같은 범위를 말한다
 # (`src/` 와 `src/**` 는 같은 뜻). 코드 폴더를 바꾸려면 이 paths 와 `ai_review_paths` 를 함께 고친다.
 #
+# Claude CLI 를 재사용 워크플로가 직접 부르므로 `id-token: write` 권한은 필요 없다(#460). 이전에 만든 저장소의 호출
+# 워크플로에 남아 있어도 동작에는 영향이 없다.
+#
 # job id 는 반드시 `ai-review` 로 둔다. risk-gate 가 이 이름의 check run 의 결론을 읽는다
 # (바꾸면 AI 리뷰 결과를 못 찾고 계속 대기로 본다).
 name: ai-review
@@ -31,4 +34,3 @@ jobs:
       contents: read
       pull-requests: write
       issues: read
-      id-token: write
