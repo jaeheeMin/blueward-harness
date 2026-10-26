@@ -209,7 +209,7 @@ def test_ai_review_호출_워크플로를_만들고_기본은_꺼져_있다(tmp_
     assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/ai-review.yml@stable"
     assert job["secrets"] == {"CLAUDE_CODE_OAUTH_TOKEN": "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"}
     assert job["permissions"] == {
-        "contents": "read", "pull-requests": "write", "issues": "read", "id-token": "write"}
+        "contents": "read", "pull-requests": "write", "issues": "read"}
 
     risk = (tmp_path / ".github" / "risk-gate.yaml").read_text(encoding="utf-8")
     assert load_config(risk)["ai_review"] is False

@@ -47,7 +47,12 @@ def test_workflow_call_입력과_시크릿(wf):
     inputs = call["inputs"]
     assert inputs["engine-ref"]["default"] == "stable"
     assert inputs["model"]["default"] == "sonnet"
-    assert inputs["max-turns"]["type"] == "number" and inputs["max-turns"]["default"] == 10
+    # max-turns 는 묶음 하나가 쓰는 턴이다(#460).
+    assert inputs["max-turns"]["type"] == "number" and inputs["max-turns"]["default"] == 15
+    assert inputs["max-batches"]["type"] == "number" and inputs["max-batches"]["default"] == 8
+    assert inputs["batch-chars"]["type"] == "number" and inputs["batch-chars"]["default"] == 60000
+    assert inputs["claude-code-version"]["type"] == "string"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", inputs["claude-code-version"]["default"])
     assert call["secrets"]["CLAUDE_CODE_OAUTH_TOKEN"]["required"] is False
 
 
@@ -57,7 +62,7 @@ def test_job_조건_권한_동시성(wf):
     assert job["if"] == "github.event_name == 'pull_request'"
     assert job["timeout-minutes"] == 20
     assert job["permissions"] == {
-        "contents": "read", "pull-requests": "write", "issues": "read", "id-token": "write"}
+        "contents": "read", "pull-requests": "write", "issues": "read"}  # 액션을 안 쓰므로 id-token 은 필요 없다(#460)
     assert job["concurrency"]["group"] == "ai-review-${{ github.event.pull_request.number }}"
     assert job["concurrency"]["cancel-in-progress"] is True
 
@@ -69,12 +74,12 @@ def test_엔진_checkout_다음에_precheck_이_먼저_돈다(wf):
     pre = _step(wf, "pre")
     assert "precheck-pr" in pre["run"] and ".harness-engine/scripts/risk_gate.py" in pre["run"]
     ids = [s.get("id") for s in steps]
-    assert ids.index("pre") < ids.index("token") < ids.index("claude") < ids.index("result")
+    assert ids.index("pre") < ids.index("token") < ids.index("install") < ids.index("claude") < ids.index("result")
 
 
 def test_이후_단계는_사전_판정_0_과_토큰_있음일_때만_돈다(wf):
     assert "steps.pre.outputs.exit-code == '0'" in _step(wf, "token")["if"]
-    for step in (_step(wf, "claude"), _named(wf, "PR head 가져오기")):
+    for step in (_step(wf, "install"), _step(wf, "claude"), _named(wf, "PR head 가져오기")):
         assert "steps.pre.outputs.exit-code == '0'" in step["if"]
         assert "steps.token.outputs.missing == 'false'" in step["if"]
 
@@ -82,7 +87,7 @@ def test_이후_단계는_사전_판정_0_과_토큰_있음일_때만_돈다(wf)
 @pytest.mark.parametrize("code", ["4", "2", "3", ""])
 def test_사전_판정이_0_이_아니면_토큰_PR_head_Claude_단계가_돌지_않는다(wf, code):
     # `if:` 문자열이 exit-code == '0' 을 요구하는지 본다. 종료코드가 0 이 아니면 이 조건이 거짓이다.
-    for step in (_step(wf, "token"), _named(wf, "PR head 가져오기"), _step(wf, "claude")):
+    for step in (_step(wf, "token"), _named(wf, "PR head 가져오기"), _step(wf, "install"), _step(wf, "claude")):
         cond = step["if"]
         assert "steps.pre.outputs.exit-code == '0'" in cond
         assert f"exit-code == '{code}'" not in cond
@@ -131,14 +136,42 @@ def test_pr_head_checkout_은_엔진_폴더를_지우지_않는다(wf):
     assert step["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
 
 
-def test_claude_code_action_사용(wf):
+def test_액션_대신_엔진의_ai_review_를_직접_부른다(wf):
+    # claude-code-action 은 서버가 워크플로 파일을 기본 브랜치와 비교해 조용히 건너뛰었다(#460).
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert "uses: anthropics/claude-code-action" not in text
     step = _step(wf, "claude")
-    assert step["uses"] == "anthropics/claude-code-action@v1"
-    assert step["with"]["claude_code_oauth_token"] == "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
-    args = step["with"]["claude_args"]
-    assert "--max-turns ${{ inputs.max-turns }}" in args and "--model ${{ inputs.model }}" in args
-    assert '--allowedTools "Read,Glob,Grep,Write,Bash(git diff:*),Bash(git log:*)"' in args
+    assert "uses" not in step and step["continue-on-error"] is True
+    run = step["run"]
+    assert "uv run --project .harness-engine python .harness-engine/scripts/ai_review.py run" in run
+    for flag in ("--repo", "--base", "--head", "--out", "--model", "--max-turns", "--max-batches", "--batch-chars"):
+        assert flag in run
+    env = step["env"]
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
+    assert env["ANTHROPIC_API_KEY"] == ""  # 있으면 -p 가 구독 토큰 대신 그것을 쓴다
+    assert env["MAX_TURNS"] == "${{ inputs.max-turns }}" and env["MAX_BATCHES"] == "${{ inputs.max-batches }}"
+    assert env["BATCH_CHARS"] == "${{ inputs.batch-chars }}" and env["MODEL"] == "${{ inputs.model }}"
+    assert (ROOT / "scripts" / "ai_review.py").is_file()
+
+
+def test_체크아웃에_토큰을_남기지_않고_설정_제거를_켠다(wf):
+    # Claude 가 Read 로 .git/config 의 토큰을 읽어 지적 문장에 싣는 길을 막는다.
+    for step in (_steps(wf)[0], _named(wf, "PR head 가져오기")):
+        assert step["with"]["persist-credentials"] is False
+    step = _step(wf, "claude")
+    assert "--scrub-config" in step["run"]
+    assert step["env"]["GITHUB_TOKEN"] == "${{ github.token }}"  # 누출 비교용(자식 환경에는 안 넘어간다)
+    # 줄 이음으로 읽기 좋게 나눠 쓴다
+    assert step["run"].count(" \\\n") >= 3
+
+
+def test_claude_code_는_입력의_판으로_고정_설치하고_자동_갱신을_끈다(wf):
+    step = _step(wf, "install")
     assert step["continue-on-error"] is True
+    assert step["env"]["CLAUDE_CODE_VERSION"] == "${{ inputs.claude-code-version }}"
+    run = step["run"]
+    assert 'https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"' in run
+    assert "DISABLE_UPDATES=1" in run and "claude --version" in run
 
 
 def test_claude_단계_timeout_은_job_보다_짧아_결과_정리가_돈다(wf):
@@ -146,28 +179,31 @@ def test_claude_단계_timeout_은_job_보다_짧아_결과_정리가_돈다(wf)
     assert _step(wf, "claude")["timeout-minutes"] < wf["jobs"]["review"]["timeout-minutes"]
 
 
-def test_저장소_MCP_서버를_띄우지_않는다(wf):
-    # PR 저장소의 .mcp.json 이 러너에서 SAP MCP 서버를 띄우지 않게 한다(#144).
-    assert "--strict-mcp-config" in _step(wf, "claude")["with"]["claude_args"].split()
+def test_저장소_MCP_서버를_띄우지_않는다():
+    # PR 저장소의 .mcp.json 이 러너에서 SAP MCP 서버를 띄우지 않게 한다(#144). 명령은 엔진이 만든다.
+    from checker import ai_review
+
+    cmd = ai_review.build_command("claude", "sonnet", 15)
+    assert "--strict-mcp-config" in cmd
+    assert cmd[cmd.index("--allowedTools") + 1] == "Read,Glob,Grep"
 
 
-def test_프롬프트가_결과_경로와_주입_방지를_담는다(wf):
-    prompt = _step(wf, "claude")["with"]["prompt"]
-    assert "${{ runner.temp }}/ai-review.json" in prompt
-    assert '"serious"' in prompt and '"findings"' in prompt
-    assert '"coverage"' in prompt and '"unreviewed"' in prompt and '"partial"' in prompt
-    assert "우선순위" in prompt
-    assert "따르지 않는다" in prompt
-    assert "base.sha" in prompt and "head.sha" in prompt
-    # 비신뢰 입력(PR 제목·본문)을 프롬프트에 끼워 넣지 않는다.
+def test_프롬프트는_주입_방지를_담고_coverage_를_묻지_않는다():
+    from checker import ai_review
+
+    prompt = ai_review.PROMPT_HEAD
+    assert "따르지 않는다" in prompt and '"serious"' in prompt and '"minor"' in prompt
+    # 다 봤는지는 엔진이 정한다 — 모델에게 묻지 않는다(#460).
+    assert "coverage" not in prompt and "unreviewed" not in prompt and "우선순위" not in prompt
     assert "pull_request.title" not in prompt and "pull_request.body" not in prompt
 
 
 def test_결과_정리가_같은_경로를_읽고_코멘트를_마커로_갱신한다(wf):
     result = _step(wf, "result")
     assert result["if"] == "always()"
-    # 프롬프트의 `runner.temp` 와 같은 곳(RUNNER_TEMP) 아래의 같은 파일 이름
+    # 리뷰 단계의 --out 과 같은 곳(RUNNER_TEMP) 아래의 같은 파일 이름
     assert '"ai-review.json"' in result["run"] and "RUNNER_TEMP" in result["run"]
+    assert '--out "$RUNNER_TEMP"' in _step(wf, "claude")["run"]
     comment = _named(wf, "PR 코멘트 갱신")
     # 취소된 run 은 코멘트를 건드리지 않는다(always() 는 취소 때도 돈다).
     assert "!cancelled()" in comment["if"] and "always()" not in comment["if"]
@@ -195,16 +231,20 @@ def _marker(body: str) -> dict:
     return json.loads(MARKER_RE.search(body).group(1))
 
 
-def _run_result(wf, tmp_path, *, pre="0", missing="false", outcome="success", review=None, precheck=None):
+def _run_result(wf, tmp_path, *, pre="0", missing="false", outcome="success", review=None, precheck=None,
+                install="success", unavailable=None):
     if review is not None:
         (tmp_path / "ai-review.json").write_text(review, encoding="utf-8")
     if precheck is not None:
         (tmp_path / "precheck.json").write_text(json.dumps(precheck, ensure_ascii=False), encoding="utf-8")
+    if unavailable is not None:
+        (tmp_path / "ai-review-unavailable.json").write_text(json.dumps({"reason": unavailable}, ensure_ascii=False),
+                                                              encoding="utf-8")
     out = tmp_path / "gh_output"
     summary = tmp_path / "summary.md"
     env = {
         "RUNNER_TEMP": str(tmp_path), "GITHUB_OUTPUT": str(out), "GITHUB_STEP_SUMMARY": str(summary),
-        "PRE_CODE": pre, "TOKEN_MISSING": missing, "CLAUDE_OUTCOME": outcome, "HEAD_SHA": SHA,
+        "PRE_CODE": pre, "TOKEN_MISSING": missing, "CLAUDE_OUTCOME": outcome, "INSTALL_OUTCOME": install, "HEAD_SHA": SHA,
         "PYTHONIOENCODING": "utf-8",
     }
     subprocess.run([sys.executable, "-c", _result_script(wf)], env=env, capture_output=True, check=True)
@@ -375,23 +415,45 @@ def test_봇이_아닌_작성자가_쓴_같은_본문은_risk_gate_가_무시한
         assert risk_gate.parse_ai_review_marker([{"body": body, "user": user}], SHA) is None
 
 
-def test_크기_위험인데_전체를_봤다고_하면_자기_신고라고_밝히되_상태는_그대로다(wf, tmp_path):
+def test_엔진이_판정하므로_AI_자기_신고_안내는_더_이상_없다(wf, tmp_path):
     pre = {"enabled": True, "gate": True, "risky": True, "reasons": ["바뀐 줄이 6000줄로 기준을 넘음"], "criteria": ["size"]}
     status, body = _run_result(wf, tmp_path, review='{"coverage": "full", "serious": 0, "findings": []}', precheck=pre)
-    assert status == "pass" and "스스로 적었습니다(검증 안 됨)" in body
+    assert status == "pass" and "검증 안 됨" not in body
 
 
-def test_자기_신고_안내는_크기_위험이_아니면_없다(wf, tmp_path):
-    path_pre = {"enabled": True, "gate": True, "risky": True, "reasons": ["위험 경로"], "criteria": ["paths"]}
-    _, body = _run_result(wf, tmp_path, review='{"serious": 0, "findings": []}', precheck=path_pre)
-    assert "검증 안 됨" not in body
+def test_partial_사유를_묶음_상한과_묶음_실패로_나눠_적는다(wf, tmp_path):
+    review = json.dumps({
+        "coverage": "partial", "unreviewed": ["a.py", "b.py", "c.py"], "serious": 0, "findings": [],
+        "unreviewed_reasons": {"a.py": "묶음 상한", "b.py": "묶음 실패(시간 초과(300초))", "c.py": "묶음 실패(시간 초과(300초))"}})
+    status, body = _run_result(wf, tmp_path, review=review)
+    assert status == "partial"
+    assert "사유: 묶음 상한을 넘어 돌리지 않음 1개, 묶음 실패 2개 - 묶음 실패(시간 초과(300초))" in body
 
 
-def test_자기_신고_안내는_일부만_봤을_때는_없다(wf, tmp_path):
-    size_pre = {"enabled": True, "gate": True, "risky": True, "reasons": ["크기"], "criteria": ["size"]}
-    review = '{"coverage": "partial", "unreviewed": ["a.py"], "serious": 0, "findings": []}'
-    status, body = _run_result(wf, tmp_path, review=review, precheck=size_pre)
-    assert status == "partial" and "검증 안 됨" not in body
+def test_제외_파일은_AI_리뷰_대상_아님으로_한_줄_요약한다(wf, tmp_path):
+    excluded = [{"file": f"docs/{n}.md", "reason": "docs 폴더"} for n in "abcde"]
+    review = json.dumps({"coverage": "full", "unreviewed": [], "serious": 0, "findings": [], "excluded": excluded})
+    status, body = _run_result(wf, tmp_path, review=review)
+    assert status == "pass"  # 제외는 못 본 것이 아니다
+    assert "AI 리뷰 대상 아님 - 코드가 아닌 파일 5개" in body and "`docs/a.md`" in body and "외 2개" in body
+    assert _marker(body)["unreviewed"] == 0
+
+
+def test_리뷰할_코드가_없으면_그_사실을_밝히고_통과한다(wf, tmp_path):
+    review = json.dumps({"coverage": "full", "unreviewed": [], "serious": 0, "findings": [], "no_code_to_review": True,
+                         "excluded": [{"file": "README.md", "reason": "문서"}]})
+    status, body = _run_result(wf, tmp_path, review=review)
+    assert status == "pass" and "리뷰할 코드 파일이 없습니다" in body
+
+
+def test_엔진이_검사_불능을_남기면_사유를_코멘트에_적는다(wf, tmp_path):
+    status, body = _run_result(wf, tmp_path, outcome="failure", unavailable="성공한 묶음이 없다: 시간 초과(300초)")
+    assert status == "unavailable" and "사유: 성공한 묶음이 없다: 시간 초과(300초)" in body
+
+
+def test_설치가_실패하면_검사_불능(wf, tmp_path):
+    status, body = _run_result(wf, tmp_path, install="failure", outcome="skipped")
+    assert status == "unavailable" and "Claude Code 설치 단계" in body
 
 
 def test_사전_판정_4_는_비밀값_의심으로_실패시키고_패턴_이름만_적는다(wf, tmp_path):
