@@ -22,7 +22,7 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 
    ```bash
    e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "원장 확인 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" python -m checker.pr_queue --mine --json
+   uvx --from "$e" python -P -m checker.pr_queue --mine --json
    ```
 
    결과의 `prs` 에서 **`head` 가 지금 브랜치인 항목**을 고르고(그 항목의 `number` 가 이 PR 번호다), 그 항목의 `ledger`
@@ -216,7 +216,7 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 
    ```bash
    e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "병합 순서 확인 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" python -m checker.pr_queue --all --json
+   uvx --from "$e" python -P -m checker.pr_queue --all --json
    ```
 
    첫 줄이 실패하거나 종료코드가 2(`status` 가 `cannot_check`)면 `uvx` 로 넘어가지 말고 "병합 순서 확인 불능"
@@ -228,7 +228,7 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
      엔진이 `after_reasons` 에 "같은 DEV-003 의 SRS 단계" 처럼 적어 준다.
 3. 고른 PR 이 있으면 본문에 `## 병합 순서` 절을 넣고 `먼저: #n, #m` 줄을 적는다(PR 번호 앞에 이유를 한 줄씩
    덧붙여도 된다). 없으면 절을 넣지 않는다. 이미 있는 PR 을 갱신하는 경우 앞 PR 이 병합돼 열려 있지 않으면 그 번호는 뺀다.
-4. 이 PR 을 만든 뒤 `uvx --from "$e" python -m checker.pr_queue --mine` 을 불러 이 PR 의 순서와 앞 PR 을
+4. 이 PR 을 만든 뒤 `uvx --from "$e" python -P -m checker.pr_queue --mine` 을 불러 이 PR 의 순서와 앞 PR 을
    확인하고 13단계에서 알린다. "먼저:" 줄이 서로를 가리켜 순환이면 엔진이 "순서 판정 불능(순환)" 이라고 하니, 그대로 알리고
    본문을 고치게 한다.
 

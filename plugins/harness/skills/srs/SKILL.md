@@ -173,7 +173,7 @@ SRS 를 쓰기 전에 고객사 산출물 양식(예: Backlog List)이 있는지
    ```bash
    e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
    uvx --from "$e" \
-     python -m checker.export --root "$(git rev-parse --show-toplevel)" --form <지도 이름> --list-values
+     python -P -m checker.export --root "$(git rev-parse --show-toplevel)" --form <지도 이름> --list-values
    ```
 
    첫 줄이 실패하거나 빈 값이면 `uvx` 로 넘어가지 말고 멈춰 사유를 알린다("산출 불능", `@main` 으로 대신 받지 않는다).
@@ -285,7 +285,7 @@ SRS 를 쓰기 전에 고객사 산출물 양식(예: Backlog List)이 있는지
    ```bash
    e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
    uvx --from "$e" \
-     python -m checker.export --spec docs/ssot/SRS.md --root "$(git rev-parse --show-toplevel)" --form <지도 이름> --check
+     python -P -m checker.export --spec docs/ssot/SRS.md --root "$(git rev-parse --show-toplevel)" --form <지도 이름> --check
    ```
 
 2. 문제가 없으면 `--check` 를 빼고 같은 명령으로 산출한다. 명령 실행 방법(PowerShell 이면 `$e = uv run --no-project python

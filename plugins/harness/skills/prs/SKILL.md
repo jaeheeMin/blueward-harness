@@ -21,13 +21,13 @@ GitHub 에서 한 번에 하고, 세션을 시작할 때 나오는 "내 PR" 알�
 
    ```bash
    e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "PR 상태 확인 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" python -m checker.pr_queue --mine      # --all 이면 --mine 대신 --all
+   uvx --from "$e" python -P -m checker.pr_queue --mine      # --all 이면 --mine 대신 --all
    ```
 
    첫 줄이 실패하거나 빈 값이면 `uvx` 로 넘어가지 말고 멈춰서 사유를 알리고 "PR 상태 확인 불능" 이라고
    말한다. `@main` 이나 다른 판으로 대신 받지 않는다. PowerShell 도구는 `$e = uv run --no-project python
    "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py"; if ($LASTEXITCODE -ne 0 -or -not $e) { throw "PR 상태 확인 불능" }`
-   로 정한 뒤 `uvx --from $e python -m checker.pr_queue --mine` 으로 부른다. 다른 저장소를 보려면
+   로 정한 뒤 `uvx --from $e python -P -m checker.pr_queue --mine` 으로 부른다. 다른 저장소를 보려면
    `--repo owner/repo` 를 더한다(없으면 현재 폴더의 저장소).
 2. 종료코드가 2 이거나 출력이 "PR 상태 확인 불능" 으로 시작하면 **그 문구와 사유를 그대로 전하고 멈춘다.**
    "PR 이 없다", "문제없다" 로 말하지 않는다. 다음 할 일은 `gh auth status` 확인, 네트워크 확인, 다시 시도다.
@@ -66,7 +66,7 @@ GitHub 에서 한 번에 하고, 세션을 시작할 때 나오는 "내 PR" 알�
 ## 팀원별 현황(`--team`)
 
 어드민이 팀원 각자의 진행·막힘·오류를 판단하는 보기다. 저장소 전체를 보므로 `--mine`·`--pr` 과 함께 쓰지 않는다(`--all` 은 붙여도 된다).
-절차 1 의 명령에서 `--mine` 대신 `--team` 을 쓴다: `python -m checker.pr_queue --team [--days N] [--stale-days N] [--json]`.
+절차 1 의 명령에서 `--mine` 대신 `--team` 을 쓴다: `python -P -m checker.pr_queue --team [--days N] [--stale-days N] [--json]`.
 `--days` 는 병합한 PR 을 볼 최근 일수(기본 7), `--stale-days` 는 열린 PR 이 이 일수를 **넘게** 움직임이 없으면 "오래 머문 일"
 로 보는 기준(기본 3)이다. 담당 이슈는 14일을 넘게 움직임이 없을 때다. 시각은 KST 로 나온다.
 "움직임" 은 **사람이 마지막으로 손댄 때**다(봇 갱신에 흔들리는 `updatedAt` 은 쓰지 않는다). PR 은 마지막 커밋·열린 때·사람(봇 제외)의 마지막 코멘트·리뷰·리뷰 코멘트 중 가장 늦은 것, 이슈는 사람의 마지막 코멘트(없으면 생성 시각)다. 라벨·담당자 변경은 읽지 않는다. 출력은 "n일 움직임 없음(마지막 커밋/코멘트/리뷰 … 시각)" 으로 근거를 보인다. 코멘트가 많아 사람 활동을 다 읽지 못했거나 커밋 시각이 없어 단정할 수 없으면 "판정 불능" 이다(정체 아님이 아니다).

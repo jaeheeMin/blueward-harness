@@ -296,7 +296,7 @@ def _engine_command(staged: Path) -> list[str]:
     """검사 엔진을 부르는 명령을 짓는다. `setObjectSource` 경로와 이름만 보는
     경로가 함께 쓴다(설계: "엔진 호출은 같은 훅에서 공유한다")."""
     return [
-        "uvx", "--from", engine_spec(), "python", "-m", "checker.code_rules",
+        "uvx", "--from", engine_spec(), "python", "-P", "-m", "checker.code_rules",
         "--json", str(staged),
     ]
 
