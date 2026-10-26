@@ -102,6 +102,7 @@ PROMPT_HEAD = """당신은 이 저장소의 PR 코드 리뷰어다. 아래 규�
 - 주어진 diff(바뀐 줄과 앞뒤 문맥)만으로 판단한다. 저장소의 다른 파일을 읽을 수 없다. 보이지 않는 코드에 대해 추측하지 않는다.
 
 [무엇을 지적하나]
+- 데이터를 바꾸는 동작(생성·변경·삭제·전기·액션)이 diff 에 있으면, 권한 검사가 있는지와 권한 검사가 실패했을 때(결과 행이 없거나 실패 테이블에 있거나 sy-subrc 가 0 이 아닐 때) 막는지를 반드시 확인한다. 없거나 막지 않으면 serious 다.
 - 병합 전에 반드시 고쳐야 하는 심각한 문제만 severity 를 "serious" 로 적는다. 예: 데이터를 바꾸는 동작의 권한 검사 누락, 권한 검사가 실패해도 통과시키는 처리(fail-open), 정확성 버그, 보안 취약점, 데이터 손실.
 - 그보다 가벼운 지적은 "minor" 로 적는다.
 - 코드 스타일, 이름 짓기, 포맷, 취향 문제는 적지 않는다.
@@ -352,9 +353,26 @@ _EXTRA_LEAK_PATTERNS = [
     re.compile(r"sk-ant-[A-Za-z0-9_\-]{4,}"),
     re.compile(r"(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{8,}"),
     re.compile(r"authorization:\s*(?:basic|bearer)\s+\S{8,}", re.IGNORECASE),
-    # 길고 대소문자·숫자가 섞인 base64 모양(경로·식별자와 구분하려고 셋 다 요구한다)
-    re.compile(r"(?=[A-Za-z0-9+/]*\d)(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[A-Z])[A-Za-z0-9+/]{40,}={0,2}"),
 ]
+
+# 길고 대소문자·숫자가 섞인 base64 모양. 긴 파일 경로(`src/ui5/zppu0010/webapp/ext/QueuedRefresh`)와 식별자가 걸리지 않게
+# `_looks_like_name` 으로 걸러낸다(진짜 base64 토큰에도 `/` 가 들어갈 수 있어 `/` 를 문자 클래스에서 빼지는 않는다).
+_BASE64_LIKE = re.compile(r"(?=[A-Za-z0-9+/]*\d)(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[A-Z])[A-Za-z0-9+/]{40,}={0,2}")
+# 영어 단어·낱말 이어 붙임(camelCase)·대문자 약어 + 끝의 숫자. 숫자가 낱말 사이에 끼면(`Ab1Cd2`) 식별자로 보지 않는다.
+_NAME_PIECE = re.compile(r"(?:[A-Z]?[a-z]+|[A-Z]+)(?:[A-Z][a-z]+)*[0-9]*")
+_SHORT_PIECE = 8  # 경로 조각이 이 길이 이하면 낱말 모양이 아니어도(`i18n`) 경로의 일부로 본다
+
+
+def _looks_like_name(match: str) -> bool:
+    """매치가 경로나 식별자 모양인가. `/` 가 없으면 통째로 낱말 모양이어야 하고, 있으면 조각마다 낱말 모양이거나 짧아야 한다."""
+    pieces = [p for p in match.rstrip("=").split("/") if p]
+    if len(pieces) == 1:
+        return bool(_NAME_PIECE.fullmatch(pieces[0]))
+    return all(_NAME_PIECE.fullmatch(p) or len(p) <= _SHORT_PIECE for p in pieces)
+
+
+def _has_base64_token(text: str) -> bool:
+    return any(not _looks_like_name(m.group(0)) for m in _BASE64_LIKE.finditer(text))
 
 
 def load_secret_patterns() -> list[re.Pattern]:
@@ -369,8 +387,11 @@ def load_secret_patterns() -> list[re.Pattern]:
     return [p for _label, p in SECRET_PATTERNS] + _EXTRA_LEAK_PATTERNS
 
 
-def scan_leaks(texts: list[str], env: dict | None = None, patterns: list[re.Pattern] | None = None) -> bool:
+def scan_leaks(texts: list[str], env: dict | None = None, patterns: list[re.Pattern] | None = None,
+               value_only: list[str] | None = None) -> bool:
     """문자열들에 비밀값으로 보이는 것이 있는가. (a) env 의 토큰 실제 값(8자 이상) (b) 토큰 모양 패턴.
+
+    `value_only` 는 (a) 만 본다 — 지적의 `file` 필드처럼 경로가 들어 있어 토큰 모양 패턴이 오탐하는 문자열이다.
 
     값은 돌려주지도 출력하지도 않는다. `patterns` 를 안 주면 `load_secret_patterns()` 로 불러온다(못 불러오면 Unavailable).
     """
@@ -378,8 +399,10 @@ def scan_leaks(texts: list[str], env: dict | None = None, patterns: list[re.Patt
     values = [v.strip() for name in LEAK_ENV_NAMES if (v := src.get(name)) and len(v.strip()) >= 8]
     if patterns is None:
         patterns = load_secret_patterns()
+    if any(v in text for text in value_only or [] for v in values):
+        return True
     for text in texts:
-        if any(v in text for v in values) or any(p.search(text) for p in patterns):
+        if any(v in text for v in values) or any(p.search(text) for p in patterns) or _has_base64_token(text):
             return True
     return False
 
@@ -602,9 +625,10 @@ def run(repo: str, base: str, head: str, out: str, *, model: str = DEFAULT_MODEL
                                      timeout=min(batch_timeout, remaining), runner=runner, env=env))
     merged = merge_results(info["targets"], info["excluded"], info["deleted"], plan["dropped"], results)
     # 마지막 관문: 지적 문장·실패 사유에 비밀값이 섞였으면 결과를 쓰지 않는다(인젝션으로 토큰이 코멘트에 실리는 길).
-    texts = [json.dumps(f, ensure_ascii=False) for f in merged["findings"]] + [b["reason"] for b in merged["batches"]]
+    # 지적의 file 은 경로라 토큰 모양 패턴에서 빼고(오탐), env 실제 값 일치만 본다.
+    texts = [f["summary"] for f in merged["findings"]] + [b["reason"] for b in merged["batches"]]
     texts += [d["tool"] + " " + d["target"] for b in merged["batches"] for d in b["permission_denials"]]
-    if scan_leaks(texts, secret_env, patterns):
+    if scan_leaks(texts, secret_env, patterns, value_only=[f["file"] for f in merged["findings"]]):
         raise Unavailable(LEAK_REASON)
     os.makedirs(out, exist_ok=True)
     stale = os.path.join(out, UNAVAILABLE_FILE)

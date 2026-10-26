@@ -485,8 +485,11 @@ def test_run_은_scrub_를_켜면_claude_를_부르기_전에_설정을_지운�
 
 
 LEAKS = [
-    "sk-ant-oat01-abcdefghijklmnop", "ghp_" + "a" * 30, "ghs_" + "B" * 20, "github_pat_" + "c" * 30,
+    "sk-ant-oat01-abcdefghijklmnop", "ghp_FAKE" + "a" * 30, "ghs_" + "B" * 20, "github_pat_" + "c" * 30,
     "Authorization: basic dXNlcjpwYXNzd29yZA==", "x" * 3 + "Ab1" * 20,
+    "kJ8sT2pQ9xV4mN7bC1zR5wE3yU6iO0aLdFgH2jK8sT",  # 슬래시 없는 40자 이상 진짜 base64 모양
+    "kJ8sT2pQ9xV4mN7b/C1zR5wE3yU6iO0aLdFgH2jK8sT9qW",  # 슬래시가 든 base64 모양
+    "aB3dE5/fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5bC7dE9fG1hJ3",
     'password = "hunter2hunter2"', "-----BEGIN RSA PRIVATE KEY-----",
 ]
 
@@ -618,3 +621,53 @@ def test_권한_거부_대상에_비밀값이_있어도_결과를_쓰지_않는�
         {"tool_name": "Read", "tool_input": {"file_path": "/tmp/ghp_" + "w" * 30}}])
     with pytest.raises(ar.Unavailable, match="비밀값으로 보이는 문자열"):
         ar.run(str(r), base, head, str(tmp_path / "o"), runner=_runner(out=out), env={})
+
+
+# --- 경로·식별자 오탐(#347·#350) --------------------------------------------------------------------
+
+PATHS = [
+    "src/ui5/zppu0010/webapp/ext/QueuedRefresh.js",
+    "src/ui5/zsdu0020/webapp/controller/CustomerList.controller.js",
+    "src/ui5/zppu0010/webapp/ext/fragment/QueuedRefreshDialogController.fragment.xml",
+    "ZCL_PP_REMCONF_UPLOAD_HANDLER", "zbp_pp_r_remconfupload.clas.locals_imp.abap",
+    "src/zbp_pp_r_remconfupload/zbp_pp_r_remconfupload.clas.locals_imp.abap",
+    "GetCustomerListItemsByFilterAndSortOrderForProduction",
+    "src/i18n/i18n_ko.properties", "webapp/model/formatter/StatusFormatter",
+]
+
+
+@pytest.mark.parametrize("text", PATHS)
+def test_흔한_UI5_ABAP_경로와_이름은_누출로_보지_않는다(text):
+    assert ar.scan_leaks([f"지적: {text} 에서 권한 검사가 없다"], env={}) is False
+
+
+def test_file_필드는_토큰_모양_패턴에서_빼고_env_값_일치만_본다():
+    long_path = "src/ui5/zppu0010/webapp/ext/QueuedRefresh.js"
+    assert ar.scan_leaks([], env={}, value_only=[long_path]) is False
+    fake = "tok-" + "12345678"  # 가짜 값. 비밀값 검사가 잡지 않게 조각을 이어 만든다(test_risk_gate 와 같다)
+    assert ar.scan_leaks([], env={"GITHUB" + "_TOKEN": fake}, value_only=[f"a/{fake}/b.js"]) is True
+
+
+def test_run_은_긴_UI5_경로의_지적을_검사_불능으로_보지_않는다(repo, tmp_path):
+    r, base, head = repo
+    long_path = "src/ui5/zppu0010/webapp/ext/QueuedRefresh.js"
+    out = _result({"findings": [{"severity": "minor", "file": long_path, "line": 3,
+                                 "summary": f"{long_path} 의 새로고침이 권한을 확인하지 않는다"}]})
+    merged = ar.run(str(r), base, head, str(tmp_path / "o"), runner=_runner(out=out), env={})
+    assert merged["findings"][0]["file"] == long_path and (tmp_path / "o" / "ai-review.json").exists()
+
+
+def test_file_필드에_env_토큰_값이_있으면_여전히_검사_불능(repo, tmp_path):
+    r, base, head = repo
+    fake = "tok-" + "abcdef123456"  # 가짜 값. 조각을 이어 만든다
+    out = _result({"findings": [{"severity": "minor", "file": f"src/{fake}.js", "line": 1, "summary": "x"}]})
+    with pytest.raises(ar.Unavailable):
+        ar.run(str(r), base, head, str(tmp_path / "o"), runner=_runner(out=out), env={},
+               secret_env={"GITHUB" + "_TOKEN": fake})
+
+
+def test_프롬프트가_데이터_변경_동작의_권한_검사와_실패_시_차단을_확인시킨다():
+    line = next(x for x in ar.PROMPT_HEAD.splitlines() if x.startswith("- 데이터를 바꾸는 동작(생성·변경·삭제·전기·액션)이"))
+    for word in ("권한 검사가 있는지", "결과 행이 없거나 실패 테이블에 있거나 sy-subrc 가 0 이 아닐 때", "막는지를 반드시 확인한다",
+                 "없거나 막지 않으면 serious 다"):
+        assert word in line
