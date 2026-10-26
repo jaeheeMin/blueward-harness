@@ -1,4 +1,4 @@
-"""열린 PR 끼리 plugin.json version 겹침 경고(#324)."""
+"""열린 PR 끼리 plugin.json version 겹침 검사(#324, 경고에서 실패로 #470)."""
 from __future__ import annotations
 
 import json
@@ -15,7 +15,7 @@ import fetch_open_prs  # noqa: E402
 from fetch_open_prs import FetchError  # noqa: E402
 
 import checker.plugin_version_overlap as overlap  # noqa: E402
-from checker.pairing import CANNOT_CHECK, PASS  # noqa: E402
+from checker.pairing import CANNOT_CHECK, PASS, VIOLATION  # noqa: E402
 from checker.plugin_version import PLUGIN_JSON  # noqa: E402
 from checker.plugin_version_overlap import NOT_NEEDED, check_plugin_version_overlap, next_patch  # noqa: E402
 
@@ -34,13 +34,21 @@ def _bad(number, title="포크"):
 
 # --- 판정 -------------------------------------------------------------------
 
-def test_같은_version_을_쓰는_PR_이_있으면_경고한다():
-    r = check_plugin_version_overlap(_info("0.10.83", "0.10.82", _p(10, "0.10.83", "다른 작업"), _p(11, "0.10.84")), 12)
-    assert r["status"] == PASS
-    (w,) = r["warnings"]
-    assert w["version"] == "0.10.83" and [p["number"] for p in w["prs"]] == [10]
-    assert "#10(`다른 작업`)" in w["message"]
-    assert "v0.10.83 태그" in w["message"] and "0.10.84" in w["message"]
+def test_같은_version_을_쓰는_PR_이_있으면_위반이다():
+    r = check_plugin_version_overlap(_info("0.10.83", "0.10.82", _p(10, "0.10.83", "다른 작업")), 12)
+    assert r["status"] == VIOLATION and r["warnings"] == []
+    (v,) = r["violations"]
+    assert v["version"] == "0.10.83" and [p["number"] for p in v["prs"]] == [10]
+    assert v["message"] == (
+        "이 PR 의 version 0.10.83 을 열린 PR #10(`다른 작업`) 이 이미 씁니다. 이 PR 의 version 을 0.10.84 로 올려 다시 푸시하세요"
+        "(먼저 병합되는 쪽만 v0.10.83 태그를 받아 배포됩니다)."
+    )
+
+
+def test_올릴_다음_값은_열린_PR_의_version_도_넘는다():
+    r = check_plugin_version_overlap(_info("0.10.83", "0.10.82", _p(10, "0.10.83"), _p(11, "0.10.86")), 12)
+    assert r["status"] == VIOLATION and r["violations"][0]["next"] == "0.10.87"
+    assert "0.10.87 로 올려" in r["violations"][0]["message"]
 
 
 def test_다른_PR_이_version_을_안_바꿨으면_무시한다():
@@ -76,7 +84,7 @@ def test_모르는_모양이거나_version_이_없으면_검사_불능이다():
 
 def test_제목의_멘션은_코드_조각으로_감싼다():
     r = check_plugin_version_overlap(_info("0.10.83", "0.10.82", _p(10, "0.10.83", "@someone 확인")), 12)
-    assert "`@someone 확인`" in r["warnings"][0]["message"]
+    assert "`@someone 확인`" in r["violations"][0]["message"]
 
 
 def test_다음_patch():
@@ -87,7 +95,7 @@ def test_다음_patch():
 def test_version_은_정수_튜플로_비교한다():
     # 앞의 0 은 같은 값이다(문자열 비교였다면 겹침을 놓친다).
     r = check_plugin_version_overlap(_info("0.10.17", "0.10.9", _p(10, "0.10.017")), 12)
-    assert r["warnings"]
+    assert r["status"] == VIOLATION
 
 
 def test_이_PR_의_version_이_형식_밖이면_검사_불능이다():
@@ -98,13 +106,13 @@ def test_이_PR_의_version_이_형식_밖이면_검사_불능이다():
 def test_다음_patch_를_못_구하면_문구를_대체한다(monkeypatch):
     monkeypatch.setattr(overlap, "next_patch", lambda v: None)
     r = check_plugin_version_overlap(_info("0.10.83", "0.10.82", _p(10, "0.10.83")), 12)
-    msg = r["warnings"][0]["message"]
-    assert "한 칸 더 올려야" in msg and "None" not in msg
+    msg = r["violations"][0]["message"]
+    assert "한 칸 더 올려" in msg and "None" not in msg
 
 
 def test_다른_PR_한_건을_못_읽으면_그_PR_만_빼고_비교한다():
     r = check_plugin_version_overlap(_info("0.10.83", "0.10.82", _bad(11), _p(10, "0.10.83")), 12)
-    assert r["status"] == PASS and len(r["warnings"]) == 1
+    assert r["status"] == VIOLATION and len(r["violations"]) == 1
     assert r["compared"] == 1 and [u["number"] for u in r["unchecked"]] == [11]
 
 
@@ -158,7 +166,7 @@ def test_읽기는_같은_base_의_다른_PR_version_을_모은다_초안도_포
     assert info["status"] == "ok" and info["main_version"] == "0.10.82"
     assert {p["number"]: p["version"] for p in info["prs"]} == {10: "0.10.83", 11: "0.10.82"}  # 13(다른 base)·12(자기) 제외
     assert "h13abcdef" not in api.calls and "h12abcdef" not in api.calls
-    assert check_plugin_version_overlap(info, 12)["warnings"]
+    assert check_plugin_version_overlap(info, 12)["status"] == VIOLATION
 
 
 def test_이_PR_이_version_을_안_올렸으면_네트워크를_쓰지_않는다():
@@ -181,7 +189,7 @@ def test_다른_PR_head_를_못_읽으면_그_PR_만_오류로_남긴다():
     by = {p["number"]: p for p in info["prs"]}
     assert by[10]["version"] is None and "#10" in by[10]["error"] and by[11]["version"] == "0.10.83"
     r = check_plugin_version_overlap(info, 12)
-    assert r["status"] == PASS and len(r["warnings"]) == 1 and [u["number"] for u in r["unchecked"]] == [10]
+    assert r["status"] == VIOLATION and len(r["violations"]) == 1 and [u["number"] for u in r["unchecked"]] == [10]
 
 
 def test_깨진_plugin_json_도_그_PR_만_오류다():
@@ -320,15 +328,24 @@ def test_base_version_을_git_에서_못_읽으면_검사_불능이다(monkeypat
     assert script.main(["12", "sha", "main"]) == 2
 
 
-def test_겹침은_종료코드_0이고_주석과_요약에_보인다_제목의_특수문자는_이스케이프된다(monkeypatch, capsys, tmp_path):
+def test_겹침은_종료코드_1이고_error_주석과_요약에_보인다_제목의_특수문자는_이스케이프된다(monkeypatch, capsys, tmp_path):
     summary = _env(monkeypatch, tmp_path)
     _fake_collect(monkeypatch, _info("0.10.83", "0.10.82", _p(10, "0.10.83", "100% %0A :: 끝")))
-    assert script.main(["12", "sha", "main"]) == 0
+    assert script.main(["12", "sha", "main"]) == 1
     out = capsys.readouterr().out
-    ann = next(line for line in out.splitlines() if line.startswith("::warning"))
+    assert "::warning" not in out
+    ann = next(line for line in out.splitlines() if line.startswith("::error title=plugin version 겹침::"))
     assert "100%25 %250A ::" in ann  # 제목의 % 는 %25 로, 리터럴 %0A 는 %250A 로
     assert "\n" not in ann
     assert "#10" in open(summary, encoding="utf-8").read()
+
+
+def test_겹침이_없으면_종료코드_0이다(monkeypatch, capsys, tmp_path):
+    _env(monkeypatch, tmp_path)
+    _fake_collect(monkeypatch, _info("0.10.83", "0.10.82", _p(10, "0.10.84")))
+    assert script.main(["12", "sha", "main"]) == 0
+    out = capsys.readouterr().out
+    assert "겹침 없음" in out and "::error" not in out and "::warning" not in out
 
 
 def test_일부_PR_을_못_읽으면_경고와_요약에_남기고_종료코드_0이다(monkeypatch, capsys, tmp_path):

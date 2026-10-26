@@ -1,4 +1,4 @@
-"""열린 PR 끼리 plugin.json version 이 겹치면 경고한다(#324). 이 저장소 자신의 PR 검사(`checker.yml`)가 부른다.
+"""열린 PR 끼리 plugin.json version 이 겹치면 실패한다(#324, 경고에서 실패로 #470). 이 저장소 자신의 PR 검사(`checker.yml`)가 부른다.
 
 사용법: check_plugin_version_overlap.py <이 PR 번호> <base sha> <base ref>
 환경변수: GITHUB_TOKEN, GITHUB_REPOSITORY(필수), GITHUB_API_URL(선택), GITHUB_STEP_SUMMARY(선택)
@@ -11,8 +11,10 @@ API 호출을 하게 된다. 그래서 판정(`checker/plugin_version_overlap.py
 - main 의 version 은 체크아웃된 git(`git show <base sha>:plugin.json`)에서 읽고 base ref 는 이벤트 페이로드로 받는다.
   이 PR 이 version 을 올리지 않았으면(main 과 같으면) 네트워크를 전혀 쓰지 않는다 — 일시 장애로 빨개지지 않게.
 - 다른 열린 PR 한 건의 head plugin.json 을 못 읽으면 그 PR 만 건너뛴다. "N건 중 M건 확인 못 함" 을 경고와 요약에
-  남기고 종료코드 0 이다(겹침과 무관한 이유로 병합이 막히지 않게). "겹침 없음" 이라고 말하지 않는다.
-- 겹침은 경고다. 종료코드 0, GitHub 주석(`::warning::`)과 실행 요약(step summary)에 보인다.
+  남기고 막지 않는다(겹침과 무관한 이유로 병합이 막히지 않게. 읽은 PR 에서 겹침이 있으면 위반이다). "겹침 없음" 이라고 말하지 않는다.
+- 겹침은 위반이다. 종료코드 1, GitHub 주석(`::error::`)과 실행 요약(step summary)에 올릴 다음 version 이 보인다.
+  경고만 하면 체크가 초록이라 #462·#464 가 같은 0.10.115 로 병합됐다. 검사가 도는 순간 같은 version 의 다른 열린 PR 이
+  있으면 지금 PR 이 실패한다(상대 PR 의 체크는 다시 돌지 않는다).
 - 이 PR 자신의 version 이나 열린 PR 목록을 읽지 못하면 검사 불능이다. 종료코드 2(통과로 뭉개지 않는다).
 """
 from __future__ import annotations
@@ -29,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fetch_open_prs import BUDGET_SECONDS, FetchError, _http, paged  # noqa: E402
 
-from checker.pairing import CANNOT_CHECK  # noqa: E402
+from checker.pairing import CANNOT_CHECK, VIOLATION  # noqa: E402
 from checker.plugin_version import PLUGIN_JSON  # noqa: E402
 from checker.plugin_version_overlap import NOT_NEEDED, check_plugin_version_overlap  # noqa: E402
 
@@ -119,13 +121,13 @@ def render(result: dict) -> str:
         return "plugin version 겹침: 이 PR 이 plugin.json version 을 올리지 않아 확인하지 않는다."
     if status == CANNOT_CHECK:
         return f"plugin version 겹침 검사 불능: {result['message']}"
-    lines = [f"경고: {w['message']}" for w in result["warnings"]]
+    lines = [f"위반: {v['message']}" for v in result.get("violations", [])]
     note = unchecked_message(result)
     if not lines and not note:
         return f"plugin version 겹침 없음(다른 열린 PR {result['compared']}건 확인)."
     if note:
         lines.append(f"확인 못 함: {note}")
-        if not result["warnings"]:
+        if not lines[:-1]:
             lines.append(f"읽은 {result['compared']}건에서는 겹침이 없습니다.")
     return "\n".join(lines)
 
@@ -159,8 +161,8 @@ def main(argv: list[str] | None = None) -> int:
 
     text = render(result)
     print(text, file=sys.stderr if result["status"] == CANNOT_CHECK else sys.stdout)
-    for w in result["warnings"]:
-        print(f"::warning title=plugin version 겹침::{escape_annotation(w['message'])}")
+    for v in result.get("violations", []):
+        print(f"::error title=plugin version 겹침::{escape_annotation(v['message'])}")
     note = unchecked_message(result) if result["status"] != CANNOT_CHECK else None
     if note:
         print(f"::warning title=plugin version 겹침 일부 확인 못 함::{escape_annotation(note)}")
@@ -168,7 +170,9 @@ def main(argv: list[str] | None = None) -> int:
     if summary and result["status"] != NOT_NEEDED:
         with open(summary, "a", encoding="utf-8") as f:
             f.write(f"### plugin version 겹침\n\n{text}\n")
-    return 2 if result["status"] == CANNOT_CHECK else 0
+    if result["status"] == CANNOT_CHECK:
+        return 2
+    return 1 if result["status"] == VIOLATION else 0
 
 
 if __name__ == "__main__":
