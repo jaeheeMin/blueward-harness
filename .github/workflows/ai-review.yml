@@ -165,15 +165,16 @@ jobs:
             echo "missing=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # 엔진 checkout 은 작업 폴더 안(.harness-engine)에 있으므로 clean 을 끈다. 켜 두면 PR checkout 이
-      # 추적되지 않는 .harness-engine 을 지운다.
+      # PR head 는 하위 폴더(pr)에 받는다(#490). 작업 폴더 바로 아래에 받으면 actions/checkout 이 그 폴더가 같은
+      # 저장소가 아니라며 내용을 통째로 지워(`Deleting the contents of ...`) 먼저 받은 .harness-engine 도 사라진다.
+      # clean: false 는 이 삭제를 막지 못한다.
       - name: PR head 가져오기
         if: steps.pre.outputs.exit-code == '0' && steps.token.outputs.missing == 'false'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
           fetch-depth: 0
-          clean: false
           # .git/config 에 토큰(extraheader)을 남기지 않는다. 파일을 읽을 수 있으면 지적 문장에 실을 수 있다(지금은 Claude 에게 도구가 없지만 겹 방어로 둔다).
           persist-credentials: false
 
@@ -221,7 +222,7 @@ jobs:
           BATCH_CHARS: ${{ inputs.batch-chars }}
         run: |
           uv run --project .harness-engine python .harness-engine/scripts/ai_review.py run \
-            --repo "$GITHUB_WORKSPACE" --base "$BASE_SHA" --head "$HEAD_SHA" --out "$RUNNER_TEMP" \
+            --repo "$GITHUB_WORKSPACE/pr" --base "$BASE_SHA" --head "$HEAD_SHA" --out "$RUNNER_TEMP" \
             --model "$MODEL" --max-turns "$MAX_TURNS" --max-batches "$MAX_BATCHES" --batch-chars "$BATCH_CHARS" \
             --total-timeout 780 --scrub-config
 
