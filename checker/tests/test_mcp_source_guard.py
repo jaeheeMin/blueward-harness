@@ -476,14 +476,14 @@ def test_테이블_소스의_한글_필드명은_cr001로_막는다(installed_ho
 
 # --- Launchpad 타일 도구(#313): 이름(`name`)만 CR-001 로 본다 --------------------
 
-@pytest.mark.parametrize("tool", ["deployUi5App", "publishBusinessCatalog"])
+@pytest.mark.parametrize("tool", ["deployUi5App", "undeployUi5App", "publishBusinessCatalog"])
 def test_launchpad_도구는_영문_이름을_통과시킨다(installed_hook, tool):
     payload = _create_object_payload(f"mcp__abap-adt-z5u-dev__{tool}", "ZUI5_APP")
     code, out = run_hook(installed_hook, payload, str(ENGINE_ROOT))
     assert code == 0 and out is None
 
 
-@pytest.mark.parametrize("tool", ["deployUi5App", "publishBusinessCatalog"])
+@pytest.mark.parametrize("tool", ["deployUi5App", "undeployUi5App", "publishBusinessCatalog"])
 def test_launchpad_도구는_한글_이름을_cr001로_막는다(installed_hook, tool):
     payload = _create_object_payload(f"mcp__abap-adt-z5u-dev__{tool}", KOREAN_NAME)
     code, out = run_hook(installed_hook, payload, str(ENGINE_ROOT))
@@ -492,7 +492,7 @@ def test_launchpad_도구는_한글_이름을_cr001로_막는다(installed_hook,
     assert "CR-001" in reason and KOREAN_NAME in reason and tool in reason
 
 
-@pytest.mark.parametrize("tool", ["deployUi5App", "publishBusinessCatalog"])
+@pytest.mark.parametrize("tool", ["deployUi5App", "undeployUi5App", "publishBusinessCatalog"])
 def test_launchpad_도구는_이름이_없으면_검사_불능으로_거절한다(installed_hook, tool):
     payload = _create_object_payload(f"mcp__abap-adt-z5u-dev__{tool}", None)
     code, out = run_hook(installed_hook, payload, str(ENGINE_ROOT))

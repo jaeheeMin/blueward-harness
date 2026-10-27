@@ -477,7 +477,7 @@ _WRITE_TOOLS = [
     "setObjectSource", "createObject", "deleteObject", "activateObjects", "activateByName",
     "renameExecute", "extractMethodExecute", "createTransport", "transportRelease",
     "transportDelete", "publishServiceBinding", "unPublishServiceBinding", "deployUi5App",
-    "publishBusinessCatalog", "runClass",
+    "undeployUi5App", "publishBusinessCatalog", "runClass",
     "gitPullRepo", "pushRepo",
 ]
 
@@ -494,7 +494,7 @@ def _matcher() -> str:
 
 @pytest.mark.parametrize("server", ["abap-adt", "abap-adt-z5u", "abap-adt-z5u-dev"])
 @pytest.mark.parametrize("tool", _WRITE_TOOLS + ["tableContents", "runQuery"])
-def test_매처가_public_cloud_의_쓰기_17개와_데이터_2개를_잡는다(server, tool):
+def test_매처가_public_cloud_의_쓰기_18개와_데이터_2개를_잡는다(server, tool):
     assert re.fullmatch(_matcher(), f"mcp__{server}__{tool}")
 
 
@@ -568,14 +568,15 @@ def test_세션_시작_mcp_json_이_없는_저장소는_말하지_않는다(sess
 
 # --- Launchpad 타일 도구(#313): deployUi5App, publishBusinessCatalog -----------
 
-_LAUNCHPAD_TOOLS = ["deployUi5App", "publishBusinessCatalog"]
+_LAUNCHPAD_TOOLS = ["deployUi5App", "undeployUi5App", "publishBusinessCatalog"]
 _LAUNCHPAD_YAML = TIERS_YAML.replace(
-    "  - runClass ", "  - deployUi5App\n  - publishBusinessCatalog\n  - runClass ", 1
+    "  - runClass ",
+    "  - deployUi5App\n  - undeployUi5App\n  - publishBusinessCatalog\n  - runClass ", 1
 )
 
 
 def test_픽스처가_새_도구를_write_tools_에_넣었다():
-    assert "  - deployUi5App\n" in _LAUNCHPAD_YAML and "  - publishBusinessCatalog\n" in _LAUNCHPAD_YAML
+    assert "  - deployUi5App\n  - undeployUi5App\n" in _LAUNCHPAD_YAML and "  - publishBusinessCatalog\n" in _LAUNCHPAD_YAML
 
 
 @pytest.mark.parametrize("tool", _LAUNCHPAD_TOOLS)
