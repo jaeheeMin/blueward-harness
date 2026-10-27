@@ -1307,7 +1307,7 @@ Closes #143</pre>
     <tr><td><code>ai-review</code></td><td>위험한 PR 을 포함해 코드(<code>src/</code>)를 바꾼 PR 을 Claude 가 리뷰(켠 저장소만). 바뀐 파일 중 <b>코드 파일만</b> 보고, 문서(<code>*.md</code>, <code>docs/</code> 아래)·오피스·PDF·이미지는 "AI 리뷰 대상 아님" 으로 코멘트에 한 줄만 남겨. 코드 diff 를 일정 크기 묶음으로 나눠 묶음마다 Claude 를 따로 부르고, <b>다 봤는지는 AI 가 아니라 워크플로가 판정해</b>(대상 코드가 전부 성공한 묶음에 들어야 "다 봄"). AI 는 바뀐 코드와 앞뒤 40줄만 보고, 저장소 파일을 직접 읽지 않아(도구를 안 줘). 심각한 지적(serious)은 데이터를 바꾸는 동작의 권한 검사 누락, 권한 검사가 실패해도 통과시키는 처리(fail-open), 정확성 버그, 보안 취약점, 데이터 손실이야. 시간 초과·실패·묶음 개수 상한으로 못 본 파일이 있으면 "일부만 봄" 으로 실패하고 사유를 나눠 적어. 문서·Spec 만 바꾼 PR 은 리뷰 없이 "대상 아님" 으로 통과해</td><td>의견 댓글</td></tr>
     <tr><td><code>ops-guard</code></td><td>팀원이 운영 파일을 바꿨는지</td><td>PR 을 자동으로 닫음</td></tr>
     <tr><td><code>notify-teams</code></td><td>병합된 PR</td><td>Teams 로 알림</td></tr>
-    <tr><td><code>pr-tamper-alert</code></td><td>작성자가 아닌 계정이 그 PR 브랜치에 push 했거나 리뷰를 해제했는지 (병합·봇·저장소 admin 은 제외)</td><td>이슈와 Teams 로 알림. 막지는 못해</td></tr>
+    <tr><td><code>pr-tamper-alert</code></td><td>작성자가 아닌 계정이 그 PR 브랜치에 push 했거나 리뷰를 해제했는지 (병합·봇·저장소 admin 은 제외. 작성자 본인이나 봇의 push 는 job 을 아예 띄우지 않아 Actions 분을 쓰지 않아)</td><td>이슈와 Teams 로 알림. 막지는 못해</td></tr>
     <tr><td><code>pr-queue</code> · <code>merge-order</code></td><td>열린 PR 마다 병합 순서를 계산해 코멘트 하나를 갱신하고, <code>merge-order</code> 상태를 달아. 앞에 병합할 PR 이 열려 있으면 노란 대기, 없으면 초록불, 순서를 못 정하면(순환 등) 빨간불(오류). GitHub 를 못 읽으면 이 검사가 실패해(통과로 보지 않아). 위험도·병합 전 확인에서는 "다른 검사 실패" 로 세지 않아</td><td>필수 검사가 아니라 Merge 버튼은 안 잠겨. 앞 PR 부터 병합</td></tr>
     <tr><td><code>ledger-complete</code></td><td>main 에 병합된 PR 이 대표 <code>[DEV-xxx]</code> 이슈를 <code>Closes</code> 했는지</td><td>원장을 쓰지 않고 확인만 해. 닫은 대표 이슈의 원장 줄이 "완료" 가 아니면(또는 확인을 못 하면) 이슈로 알리고 job 이 실패해</td></tr>
   </table></div>
