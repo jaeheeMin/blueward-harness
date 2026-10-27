@@ -42,6 +42,7 @@ Claude 가 ADT MCP 서버(예: npm `mcp-abap-abap-adt-api`)의 도구로 오브�
 | `extractMethodExecute` | 이름 필드 없음 — `refactoring` 을 JSON.parse 한 `.affectedObjects[].textReplaceDeltas[].contentNew` | JSON 문자열(방어적으로 객체도 받는다) |
 | `createObject` | `name` | 문자열 |
 | `deployUi5App` | `name` (`sourceDir` 내용은 검사 안 함) | 문자열 |
+| `undeployUi5App` | `name` (삭제할 BSP 이름) | 문자열 |
 | `publishBusinessCatalog` | `name` | 문자열 |
 
 모양이 예상과 다르면(필드가 없거나, JSON 파싱이 안 되거나, 이름이 빈 문자열이거나
@@ -91,7 +92,7 @@ ENGINE_TIMEOUT_SECONDS = 110
 _TOOL_NAME_RE = re.compile(
     r"^mcp__.*__"
     r"(setObjectSource|renamePreview|renameExecute"
-    r"|extractMethodPreview|extractMethodExecute|createObject|deployUi5App|publishBusinessCatalog)$"
+    r"|extractMethodPreview|extractMethodExecute|createObject|deployUi5App|undeployUi5App|publishBusinessCatalog)$"
 )
 
 # 이름만 보는 도구들 중 새 이름이 `{필드}.{키}` 에 있고, 그 필드가 객체 또는 JSON
@@ -105,7 +106,9 @@ _NAME_FIELD_BY_TOOL_KIND = {
 
 # `name` 이 바로 문자열인 도구들(#313). `deployUi5App` 의 `sourceDir` 파일 내용은 UI5 소스라
 # 검사하지 않고, `publishBusinessCatalog` 도 이름만 본다.
-_DIRECT_NAME_TOOLS = frozenset({"createObject", "deployUi5App", "publishBusinessCatalog"})
+_DIRECT_NAME_TOOLS = frozenset(
+    {"createObject", "deployUi5App", "undeployUi5App", "publishBusinessCatalog"}
+)
 
 _URL_MAP_PATH = Path(__file__).with_name("mcp_object_source_map.json")
 
@@ -751,7 +754,7 @@ def _main() -> None:
         return
 
     # renamePreview, renameExecute, extractMethodPreview, createObject, deployUi5App,
-    # publishBusinessCatalog — 새
+    # undeployUi5App, publishBusinessCatalog — 새
     # 이름 하나만 CR-001 로 본다(#61, 모듈 docstring).
     name = _extract_name(tool, tool_kind, tool_input)
     _check_name(tool, name)

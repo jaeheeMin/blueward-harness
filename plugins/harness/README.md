@@ -113,7 +113,7 @@ plugins/harness/
 |---|---|---|
 | `pre_write_guard.py` | `PreToolUse` (Write\|Edit) | 문서가 템플릿을 벗어나면 저장을 막는다(doc-guard). 코드(`.abap`, `.js`/`.ts`, `.cds`, `.asbdef`)는 공통 개발 규칙 CR-001·CR-002·CR-003·CR-007 을 어기면 막는다(#54, #72, #81. BDEF 는 CR-001 만, CR-003·CR-007 은 ABAP·JS/TS 만). 저장소 루트 `src/` 아래에 쓸 때는 활성화 안 된 ABAP 오브젝트가 있으면 막는다(활성화 관문, #190, 아래 절) |
 | `pre-bash-git-guard.sh` | `PreToolUse` (Bash\|PowerShell) | 스킬을 거치지 않은 `git push` 와 main 직접 커밋을 막는다. 공유 `.claude/settings.json` 의 `enabledPlugins` 에서 `harness@blueward-harness` 가 빠지거나 꺼지는 변경은 커밋(staged)·푸시(origin 기준 범위) 모두 막는다 — 키 순서만 바뀐 것과 원래 없던 경우는 통과하고 JSON 을 못 읽으면 검사 불능으로 막는다(`enabled_plugin_guard.py`, #471). `gh pr merge` 대상 PR 이 SRS 를 바꿨는데 승인이 없어도 막는다(#49). `.github/human-merge-paths` 에 적힌 경로를 바꾼 PR 의 `gh pr merge` 도 막는다(#104). 대상 PR 의 검사가 실패·진행 중이거나 상태를 확인할 수 없어도 막는다(#120). 먼저 병합해야 하는 PR(base 브랜치가 그 PR 의 브랜치, 본문 `먼저: #n`, 같은 DEV 의 SRS→Spec→개발 순, 하네스 저장소의 plugin.json version 순)이 아직 열려 있으면 `checker.pr_queue --pr` 로 확인해 막고, 순서를 정하지 못해도(순환·GitHub 못 읽음·엔진 실패) 통과시키지 않는다(#370, 사람이 GitHub 화면에서 하는 병합은 막지 못한다). `git commit` 은 staged 변경을 gitleaks 로 검사해 비밀값이 있으면 막는다(#170, 아래 "비밀정보 검사" 참고). `git push` 는 080 에 쓴 ABAP 오브젝트 중 활성화 안 된 것이 있어도 막는다(활성화 관문, #190, 아래 절) |
-| `mcp_source_guard.py` | `PreToolUse` (SAP ADT MCP 도구 21개) | MCP 로 SAP 에 쓰거나 이름을 붙이는 경로의 코드 규칙 CR-001·CR-002·CR-003·CR-007 검사(#60, #61)와, `env/adt-tiers.yaml` 기준 테넌트별 쓰기 차단·데이터 추출 되묻기(#148). 아래 "테넌트별 쓰기 차단" 참고 |
+| `mcp_source_guard.py` | `PreToolUse` (SAP ADT MCP 도구 22개) | MCP 로 SAP 에 쓰거나 이름을 붙이는 경로의 코드 규칙 CR-001·CR-002·CR-003·CR-007 검사(#60, #61)와, `env/adt-tiers.yaml` 기준 테넌트별 쓰기 차단·데이터 추출 되묻기(#148). 아래 "테넌트별 쓰기 차단" 참고 |
 | `mcp_activation_tracker.py` | `PostToolUse` (SAP ADT MCP 도구 6개: `setObjectSource`·`createObject`·`deleteObject`·`activateObjects`·`activateByName`·`inactiveObjects`) | ADT MCP 로 쓴 ABAP 오브젝트와 활성화 결과를 `.git` 아래 기록 파일에 남긴다(#190, 아래 절). 기록하지 못하면 표식 파일을 남기고 exit 2 로 알린다 |
 | `session-start-sync.sh` | `SessionStart` | 원격과 동기화하고, 지난 세션 기록을 원격 반영 뒤에 판정해 커밋되거나 병합된 것은 조용히 지우고 사라진 파일(`git restore --source=<사본>` 안내)과 push 안 한 커밋만 전한다(#224, 옛 형식 기록은 한 번 보여 주고 지운다). upstream 이 있으면 그것을, 없으면 origin/main 을 기준으로 리베이스하고(#87), 미커밋 변경이 있거나 이미 리베이스·병합이 진행 중이면 자동 동기화를 건너뛴다(자동 stash·자동 커밋은 하지 않는다 — `/harness:sync` 로 직접 처리). 내 열린 PR 이 있으면 상태와 병합 순서를 `checker.pr_queue` 로 20초 안에 읽어 알리고, 읽지 못하면 "PR 상태 확인 불능" 한 줄만 남긴다(#370, GitHub 원격일 때만, 훅은 항상 exit 0). 저장소 안(꼭대기에서 3단계까지)에 `templates/` 와 `rules/` 를 함께 가진 폴더가 없으면 `/harness:scaffold` 를 안내한다(#128, 자동 실행은 하지 않는다. 플러그인 저장소(`.claude-plugin/marketplace.json` 이 꼭대기에 있다)와 git 저장소가 아닌 곳은 말하지 않고, `HARNESS_NO_SCAFFOLD_HINT=1` 로 끈다) |
 | `update_notice.py` | `UserPromptSubmit` | 이 세션의 플러그인 판이 원격 최신 `v*` 태그보다 낮으면 Claude 가 사용자에게 한 번 알리게 한다(#314). 원격은 `git ls-remote` 5초 제한, 10분 캐시(`${CLAUDE_PLUGIN_DATA}`), 같은 세션·같은 판은 한 번. **이 폴더의 설치 항목**(`installed_plugins.json` 의 현재 projectPath, `installed_version.py`)이 이미 새 판이면 `/reload-plugins`, 아니면 `/harness:update` 또는 업데이트 명령을 안내한다(다른 폴더가 받아 둔 캐시 폴더만 보면 틀린다, #404). 뒤처졌는지의 기준은 설치 항목이 아니라 이 세션에 실린 판(`CLAUDE_PLUGIN_ROOT`)이다(#471). 갱신은 사용자가 직접 하거나 `/harness:update` 를 부른다. 실패하면 조용히 넘어가 프롬프트를 막지 않는다. 플러그인 저장소와 `HARNESS_NO_UPDATE_NOTICE=1` 에서는 말하지 않는다 |
@@ -155,12 +155,12 @@ data_tools: [tableContents, runQuery]
 거절한다. 도구 이름은 `mcp__<서버>__<도구>` 에서 마지막 `__` 를 기준으로 나눈다.
 scaffold 는 `env/adt-tiers.example.yaml`(예시, 훅은 읽지 않음)을 만든다.
 
-**한계.** 훅 매처(`hooks.json`)는 이름 목록 정규식이라 목록에 있는 21개 도구만
+**한계.** 훅 매처(`hooks.json`)는 이름 목록 정규식이라 목록에 있는 22개 도구만
 가로챈다 — 코드 규칙 검사 6개(`setObjectSource`, `renamePreview`, `renameExecute`,
-`extractMethodPreview`, `extractMethodExecute`, `createObject`), 쓰기 13개(`deleteObject`,
+`extractMethodPreview`, `extractMethodExecute`, `createObject`), 쓰기 14개(`deleteObject`,
 `activateObjects`, `activateByName`, `createTransport`, `transportRelease`,
 `transportDelete`, `publishServiceBinding`, `unPublishServiceBinding`, `deployUi5App`,
-`publishBusinessCatalog`, `runClass`, `gitPullRepo`, `pushRepo`), 데이터 2개. **`write_tools` 나
+`undeployUi5App`, `publishBusinessCatalog`, `runClass`, `gitPullRepo`, `pushRepo`), 데이터 2개. **`write_tools` 나
 `data_tools` 에 새 이름을 적어도 매처에 없으면 훅이 불리지 않아 막히지 않는다** — 이름을
 늘리려면 매처도 함께 고쳐야 한다. 모든 MCP 도구(`mcp__.*__.*`)를 잡지 않은 것은 ADT 가 아닌
 MCP 서버의 모든 호출마다 훅(`uv` 기동)을 띄우는 비용 때문이다. 플러그인이 번들한 MCP 서버
