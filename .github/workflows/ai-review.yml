@@ -115,14 +115,14 @@ jobs:
       issues: read
     steps:
       - name: 판정 엔진 가져오기
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: jaeheeMin/blueward-harness
           ref: ${{ inputs.engine-ref }}
           path: .harness-engine
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -170,7 +170,7 @@ jobs:
       # clean: false 는 이 삭제를 막지 못한다.
       - name: PR head 가져오기
         if: steps.pre.outputs.exit-code == '0' && steps.token.outputs.missing == 'false'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr
@@ -486,7 +486,7 @@ jobs:
       # 결과 정리·판정 단계는 파일과 종료코드만 다뤄 부작용이 없으므로 그대로 `always()` 다.
       - name: PR 코멘트 갱신
         if: ${{ !cancelled() && steps.result.outputs.status != '' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           STATUS: ${{ steps.result.outputs.status }}
         with:

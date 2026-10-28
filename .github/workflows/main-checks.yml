@@ -88,18 +88,18 @@ jobs:
       # 저장소를 엔진보다 먼저 받는다(checkout 은 작업 폴더의 추적 안 되는 파일을 지운다).
       # fetch-depth 0 은 gitleaks 의 커밋 범위 검사와 doc-guard 의 이전 커밋 비교가 둘 다 필요로 한다.
       - name: 저장소 가져오기
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: 검사 엔진 가져오기
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: jaeheeMin/blueward-harness
           ref: ${{ inputs.engine-ref }}
           path: .harness-engine
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -260,7 +260,7 @@ jobs:
 
       - name: gitleaks 리포트 올리기(값은 가려져 있다)
         if: always() && steps.gitleaks.outputs.leak == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: gitleaks-report
           path: ${{ runner.temp }}/gitleaks-report.json

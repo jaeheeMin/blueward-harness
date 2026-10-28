@@ -65,7 +65,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # 태그 비교와 조상 확인에 전체 이력과 태그가 필요하다.
           fetch-depth: 0

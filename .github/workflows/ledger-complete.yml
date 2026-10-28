@@ -53,19 +53,19 @@ jobs:
       # Project Repository 를 먼저 받는다. checkout 은 작업 폴더의 추적 안 되는 파일을 지우므로
       # 엔진(.harness-engine)을 그 뒤에 받는다.
       - name: Project Repository 받기
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 0
 
       - name: 판정 엔진 가져오기
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: jaeheeMin/blueward-harness
           ref: ${{ inputs.engine-ref }}
           path: .harness-engine
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
