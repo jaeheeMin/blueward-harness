@@ -63,7 +63,7 @@ _STATE_CHANGING = {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
 
 NO_APPROVER_FOR_AUTHOR = (
     "이 작성자의 PR 을 승인할 사람이 .github/ssot-approvers 에 없다(작성자 본인은 제외). "
-    "다음: 사람이 할 일 - 이 작성자 줄이나 `*:` 줄에 작성자가 아닌 승인자의 GitHub 아이디를 "
+    "다음: 🚨 직접 해 주세요: 이 작성자 줄이나 `*:` 줄에 작성자가 아닌 승인자의 GitHub 아이디를 "
     "추가하십시오(이 파일은 기준 브랜치에서 읽으므로 따로 먼저 반영해야 합니다)."
 )
 
@@ -236,7 +236,7 @@ def evaluate_approval(
         commits = ", ".join(sorted({_short(e["commit"]) for e in stale}))
         reason = (
             f"승인자 {who} 의 승인은 이전 커밋({commits})에 대한 것이고, 그 뒤 새 커밋이 "
-            "올라와 다시 승인이 필요합니다. 다음: 사람이 할 일 - 승인자에게 최신 커밋을 보고 "
+            "올라와 다시 승인이 필요합니다. 다음: 🚨 직접 해 주세요: 승인자에게 최신 커밋을 보고 "
             "이 PR 을 다시 Approve 해 달라고 요청하십시오."
         )
         return False, reason, stale

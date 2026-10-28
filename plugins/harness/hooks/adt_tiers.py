@@ -347,7 +347,7 @@ def decide(
                 f"파일에 있는 서버: {known}\n\n"
                 + _next_for_writable(tiers, extra=(
                     f"{server!r} 가 맞는 서버라면 env/adt-tiers.yaml 의 servers 에 추가하고 "
-                    "writes_allowed 를 정하십시오(사람이 할 일)."
+                    "writes_allowed 를 정하십시오(🚨 직접 해 주세요)."
                 ))
             ))
         if info["writes_allowed"] is not True:
@@ -366,7 +366,7 @@ def decide(
                 f"도구 {tool} 를 부를 수 없습니다(env/adt-tiers.yaml). 이 서버의 테이블 데이터는 "
                 "대화에 싣지 않습니다.\n\n"
                 "다음: 멈추고 사람에게 알리십시오. 이 서버에서 데이터를 꺼내야 하는지, 필요하면 "
-                "data_access 를 바꿀지는 사람이 정합니다(사람이 할 일). 사람이 정하기 전에는 다른 "
+                "data_access 를 바꿀지는 사람이 정합니다(🚨 직접 해 주세요). 사람이 정하기 전에는 다른 "
                 "서버로 옮겨 다시 시도하지 마십시오."
             ))
         reason = (
@@ -396,14 +396,14 @@ def _next_for_writable(tiers: Tiers, exclude: str | None = None, extra: str | No
     if writable:
         text = (
             "다음: 멈추고 사람에게 알리십시오. 다른 서버(쓰기 허용: " + ", ".join(writable)
-            + ")에서 해야 하는 작업인지는 사람이 정합니다(사람이 할 일). 사람이 정하기 전에는 "
+            + ")에서 해야 하는 작업인지는 사람이 정합니다(🚨 직접 해 주세요). 사람이 정하기 전에는 "
             "다른 서버로 옮겨 다시 시도하지 마십시오."
         )
     else:
         text = (
             "다음: 멈추고 사람에게 알리십시오. env/adt-tiers.yaml 에 writes_allowed: true 인 "
             "서버가 없습니다. 쓰기가 필요하면 사람이 파일을 확인해 개발 서버의 writes_allowed 를 "
-            "정하십시오(사람이 할 일)."
+            "정하십시오(🚨 직접 해 주세요)."
         )
     if extra:
         text += "\n" + extra

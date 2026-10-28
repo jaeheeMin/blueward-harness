@@ -185,13 +185,13 @@ for tool in uv jq gh gitleaks; do
       if [ "$is_windows" != "1" ]; then
         missing_for_brew="$missing_for_brew $tool"
       elif [ -z "$winget_bin" ]; then
-        say "$tool 가 없고 winget 도 찾지 못해 자동으로 설치하지 못했습니다. 다음: 사람이 할 일 - $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오(winget 이 없으면 Microsoft Store 의 '앱 설치 관리자' 를 먼저 설치)."
+        say "$tool 가 없고 winget 도 찾지 못해 자동으로 설치하지 못했습니다. 다음: 🚨 직접 해 주세요: $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오(winget 이 없으면 Microsoft Store 의 '앱 설치 관리자' 를 먼저 설치)."
       elif [ "${HARNESS_NO_AUTO_INSTALL:-}" = "1" ]; then
-        say "$tool 가 없습니다. HARNESS_NO_AUTO_INSTALL=1 이라 자동으로 설치하지 않았습니다. 다음: 사람이 할 일 - $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
+        say "$tool 가 없습니다. HARNESS_NO_AUTO_INSTALL=1 이라 자동으로 설치하지 않았습니다. 다음: 🚨 직접 해 주세요: $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
       elif recent_failure "$tool"; then
-        say "$tool 가 없습니다. 최근에 자동 설치가 실패해 24시간 동안 다시 시도하지 않습니다. 다음: 사람이 할 일 - $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
+        say "$tool 가 없습니다. 최근에 자동 설치가 실패해 24시간 동안 다시 시도하지 않습니다. 다음: 🚨 직접 해 주세요: $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
       elif [ "$(budget_left)" -le 0 ]; then
-        say "$tool 가 없지만 도구 설치에 쓸 시간(${TOOLS_BUDGET}초)을 넘겨 설치하지 않았습니다. 다음: 다음 세션을 열면 자동으로 다시 시도합니다. 급하면 사람이 할 일 - $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
+        say "$tool 가 없지만 도구 설치에 쓸 시간(${TOOLS_BUDGET}초)을 넘겨 설치하지 않았습니다. 다음: 다음 세션을 열면 자동으로 다시 시도합니다. 급하면 🚨 직접 해 주세요: $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
       else
         ok=0
         over=0
@@ -226,7 +226,7 @@ for tool in uv jq gh gitleaks; do
           fi
         elif [ "$over" = "1" ] || { [ "$rc" = "124" ] && [ "$budget_hit" = "1" ]; }; then
           # 상한에 걸린 것은 실패가 아니라 미완료다. 기록하지 않아 다음 세션에 바로 다시 시도한다.
-          say "$tool 설치가 도구 설치 시간 상한(${TOOLS_BUDGET}초)에 걸려 끝나지 않았습니다. 설치됐는지 판단하지 못했습니다. 다음: 다음 세션을 열면 자동으로 다시 시도합니다. 급하면 사람이 할 일 - $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
+          say "$tool 설치가 도구 설치 시간 상한(${TOOLS_BUDGET}초)에 걸려 끝나지 않았습니다. 설치됐는지 판단하지 못했습니다. 다음: 다음 세션을 열면 자동으로 다시 시도합니다. 급하면 🚨 직접 해 주세요: $(manual_cmd "$tool") 로 설치한 뒤 Claude Code 를 새로 여십시오."
         else
           record_failure "$tool"
           if [ "$rc" = "124" ]; then
@@ -234,7 +234,7 @@ for tool in uv jq gh gitleaks; do
           else
             reason="winget 종료 코드 $rc, 실행 파일이 생기지 않음"
           fi
-          say "$tool 를 winget 으로 설치하지 못했습니다($reason). 권한이나 회사 정책에 막혔을 수 있습니다. 다음: 사람이 할 일 - $(manual_cmd "$tool") 를 직접 실행한 뒤 Claude Code 를 새로 여십시오. 24시간 동안은 자동 설치를 다시 시도하지 않습니다."
+          say "$tool 를 winget 으로 설치하지 못했습니다($reason). 권한이나 회사 정책에 막혔을 수 있습니다. 다음: 🚨 직접 해 주세요: $(manual_cmd "$tool") 를 직접 실행한 뒤 Claude Code 를 새로 여십시오. 24시간 동안은 자동 설치를 다시 시도하지 않습니다."
         fi
       fi
       ;;
@@ -247,14 +247,14 @@ for tool in uv jq gh gitleaks; do
 done
 
 if [ -n "$missing_for_brew" ]; then
-  say "이 컴퓨터는 Windows 가 아니라 자동으로 설치하지 않습니다. 없는 도구:$missing_for_brew. 다음: 사람이 할 일 - 터미널에서 brew install$missing_for_brew 를 실행한 뒤 Claude Code 를 새로 여십시오."
+  say "이 컴퓨터는 Windows 가 아니라 자동으로 설치하지 않습니다. 없는 도구:$missing_for_brew. 다음: 🚨 직접 해 주세요: 터미널에서 brew install$missing_for_brew 를 실행한 뒤 Claude Code 를 새로 여십시오."
 fi
 
 if [ -n "$gh_bin" ]; then
   tcmd=()
   [ "$have_timeout" = "1" ] && tcmd=(timeout "$AUTH_TIMEOUT")
   if ! "${tcmd[@]}" "$gh_bin" auth status < /dev/null > /dev/null 2>&1; then
-    say "gh 에 GitHub 로그인이 되어 있지 않습니다. 다음: 사람이 할 일 - gh auth login 을 실행해 GitHub 에 로그인하십시오."
+    say "gh 에 GitHub 로그인이 되어 있지 않습니다. 다음: 🚨 직접 해 주세요: gh auth login 을 실행해 GitHub 에 로그인하십시오."
   fi
 fi
 

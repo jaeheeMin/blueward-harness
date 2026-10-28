@@ -99,7 +99,7 @@ def test_쓰기_금지_서버의_쓰기_도구는_거절하고_허용_서버를_
     assert "writes_allowed: false" in d.reason
     assert "abap-adt-z5u-dev" in d.reason  # 파일에서 읽은 허용 서버
     assert "다음: 멈추고 사람에게 알리십시오" in d.reason
-    assert "(사람이 할 일)" in d.reason
+    assert "(🚨 직접 해 주세요)" in d.reason
     _지시_없음(d.reason)
 
 
@@ -108,7 +108,7 @@ def test_허용_서버가_없으면_사람이_파일을_확인하라고만_안�
     d = adt_tiers.decide("mcp__abap-adt-z5u__deleteObject", {}, _tiers(no_writable), DEFAULTS)
     assert d.kind == "deny"
     assert "writes_allowed: true 인 서버가 없습니다" in d.reason
-    assert "(사람이 할 일)" in d.reason
+    assert "(🚨 직접 해 주세요)" in d.reason
     _지시_없음(d.reason)
 
 
@@ -153,7 +153,7 @@ def test_data_access_deny_서버의_데이터_도구는_거절한다(tool):
     assert d.kind == "deny"
     assert "data_access: deny" in d.reason and tool in d.reason
     assert "다음: 멈추고 사람에게 알리십시오" in d.reason
-    assert "(사람이 할 일)" in d.reason
+    assert "(🚨 직접 해 주세요)" in d.reason
     assert "abap-adt-z5u-dev" not in d.reason  # 다른 서버를 안내하지 않는다
     _지시_없음(d.reason)
 

@@ -18,6 +18,10 @@ from checker.tests.test_plugin_layout import PLUGIN_ROOT
 _spec = importlib.util.spec_from_file_location("update_notice", PLUGIN_ROOT / "hooks" / "update_notice.py")
 un = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(un)
+_ua = importlib.util.spec_from_file_location("user_action", PLUGIN_ROOT / "hooks" / "user_action.py")
+_ua_mod = importlib.util.module_from_spec(_ua)
+_ua.loader.exec_module(_ua_mod)
+USER_ACTION = _ua_mod.USER_ACTION
 
 
 def _tags(*versions: str) -> str:
@@ -72,6 +76,28 @@ def test_뒤처졌고_새_판을_안_받았으면_업데이트_명령을_안내�
     assert "0.10.61" in ctx and "0.10.60" in ctx
     assert "claude plugin update harness@blueward-harness --scope project" in ctx
     assert "/reload-plugins" in ctx
+
+
+def test_사용자_화면용_systemMessage_가_표시로_시작하고_additionalContext_도_유지된다(env):
+    """#505 — 사람이 해야 하는 갱신 안내는 화면에 바로 뜨고, Claude 용 안내도 그대로다."""
+    data = json.loads(_go(env, Remote(_tags("0.10.61"))))
+    msg = data["systemMessage"]
+    assert msg.startswith(USER_ACTION) and USER_ACTION == "🚨 직접 해 주세요:"
+    assert "0.10.61" in msg and "/harness:update" in msg and "/reload-plugins" in msg
+    assert "\n" not in msg
+    assert "새 판 0.10.61" in data["hookSpecificOutput"]["additionalContext"]
+
+
+def test_이미_새_판이_설치된_폴더의_systemMessage_는_reload_만_안내한다(env, tmp_path):
+    (env["root"].parent / "0.10.61").mkdir()
+    _installed(env, tmp_path, _entry(env["payload"]["cwd"], "0.10.61"))
+    msg = json.loads(_go(env, Remote(_tags("0.10.61"))))["systemMessage"]
+    assert msg.startswith(USER_ACTION) and "/reload-plugins" in msg and "/harness:update" not in msg
+
+
+def test_같은_세션에서_같은_판은_systemMessage_도_한_번만(env):
+    assert _go(env, Remote(_tags("0.10.61"))) is not None
+    assert _go(env, Remote(_tags("0.10.61"))) is None
 
 
 def _installed(e, tmp_path, *entries):

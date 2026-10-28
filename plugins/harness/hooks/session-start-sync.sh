@@ -422,7 +422,7 @@ elif git remote get-url origin >/dev/null 2>&1; then
   fi
 else
   fetch_state="none"
-  add "원격 저장소가 연결되어 있지 않습니다. 푸시와 PR 과 이슈 관련 동작은 원격을 연결한 뒤에 가능합니다. 다음: 사람이 할 일 - 프로젝트의 GitHub 저장소 주소를 확인해 git remote add origin 주소 로 연결하십시오."
+  add "원격 저장소가 연결되어 있지 않습니다. 푸시와 PR 과 이슈 관련 동작은 원격을 연결한 뒤에 가능합니다. 다음: 🚨 직접 해 주세요: 프로젝트의 GitHub 저장소 주소를 확인해 git remote add origin 주소 로 연결하십시오."
 fi
 
 case "$fetch_state" in

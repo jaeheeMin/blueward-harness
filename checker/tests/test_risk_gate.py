@@ -542,7 +542,7 @@ def test_크기가_크면_위험하고_승인이_없으면_1():
     assert result["risk"] == "high" and result["requires_approval"] is True
     assert result["approved"] is False
     assert "500줄" in result["reasons"][0]
-    assert result["next"].startswith("다음: 사람이 할 일 - 승인자(.github/ssot-approvers 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)")
+    assert result["next"].startswith("다음: 🚨 직접 해 주세요: 승인자(.github/ssot-approvers 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)")
     assert "PR 을 나눠" in result["next"]
     assert rg._exit_for(result) == 1
 

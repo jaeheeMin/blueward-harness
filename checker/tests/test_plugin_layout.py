@@ -1210,14 +1210,14 @@ def test_위험하고_승인이_없으면_이유와_다음_할_일로_거부한�
         "enabled": True, "risk": "high",
         "reasons": ["바뀐 줄이 500줄로 기준(300줄)을 넘음", "위험 경로를 바꿈: rules/a.yaml"],
         "requires_approval": True, "approved": False,
-        "next": "다음: 사람이 할 일 - 승인자(.github/ssot-approvers 의 사람, 작성자 제외)에게 최신 커밋을 보고 Approve 를 요청하십시오. 또는 PR 을 나눠 기준 이하로 줄이십시오.",
+        "next": "다음: 🚨 직접 해 주세요: 승인자(.github/ssot-approvers 의 사람, 작성자 제외)에게 최신 커밋을 보고 Approve 를 요청하십시오. 또는 PR 을 나눠 기준 이하로 줄이십시오.",
     })
     code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", _make_risk_uvx(tmp_path, payload, 1))
     assert code == 0
     reason = _reason(out)
     assert "PR #123" in reason and "위험도가 높" in reason
     assert "500줄" in reason and "rules/a.yaml" in reason
-    assert "다음: 사람이 할 일" in reason and "Approve" in reason
+    assert "다음: 🚨 직접 해 주세요" in reason and "Approve" in reason
     assert reason.count("다음:") == 1  # 엔진이 준 안내 하나만
 
 
@@ -1225,7 +1225,7 @@ def test_위험하고_승인이_없으면_이유와_다음_할_일로_거부한�
 def test_위험도_사유는_다섯_개까지만_보이고_따옴표는_지운다(tmp_path):
     reasons = [f"사유 번호 {i} 큰따옴표\"포함" for i in range(8)]
     payload = json.dumps({"enabled": True, "risk": "high", "reasons": reasons,
-                          "requires_approval": True, "approved": False, "next": "다음: 사람이 할 일 - 승인 요청"})
+                          "requires_approval": True, "approved": False, "next": "다음: 🚨 직접 해 주세요: 승인 요청"})
     code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", _make_risk_uvx(tmp_path, payload, 1))
     assert code == 0
     reason = _reason(out)  # JSON 이 깨지지 않고 파싱됐다
@@ -1239,7 +1239,7 @@ def test_엔진이_다음_안내를_안_주면_기본_안내를_붙인다(tmp_pa
                           "approved": False, "next": ""})
     code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", _make_risk_uvx(tmp_path, payload, 1))
     assert code == 0
-    assert "다음: 사람이 할 일" in _reason(out)
+    assert "다음: 🚨 직접 해 주세요" in _reason(out)
 
 
 @_needs_hook_env
