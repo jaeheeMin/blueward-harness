@@ -283,10 +283,26 @@ jobs:
 
           # push 는 직전 커밋과 비교한다. 지워진 파일은 검사할 수 없으므로 뺀다(--diff-filter=d).
           # core.quotepath=false 가 없으면 git 이 비ASCII 경로를 따옴표와 8진수로 감싸 검사기가 없는 경로를 받는다.
-          git -c core.quotepath=false diff --name-only --diff-filter=d "$BEFORE_SHA" HEAD > changed.txt || git -c core.quotepath=false ls-files > changed.txt
+          # 목록을 못 구하면(직전 커밋이 비었거나 0 으로만 된 첫 푸시 포함) 전체 파일로 넘어가지 않고 검사 불능으로 끝낸다(#518, 원칙 7).
+          diff_ok=true
+          if [ -z "$BEFORE_SHA" ] || [ -z "${BEFORE_SHA//0/}" ]; then
+            diff_ok=false
+            echo "push 이전 커밋(BEFORE_SHA)이 비었거나 0 으로만 되어 있다." > changed-err.txt
+            cat changed-err.txt >&2
+            : > changed.txt
+          elif ! git -c core.quotepath=false diff --name-only --diff-filter=d "$BEFORE_SHA" HEAD > changed.txt 2> changed-err.txt; then
+            diff_ok=false
+            cat changed-err.txt >&2
+            : > changed.txt
+          fi
           echo "바뀐 파일:"; cat changed.txt
 
-          if [ ! -s changed.txt ]; then
+          if [ "$diff_ok" != true ]; then
+            err=$(head -c 200 changed-err.txt | tr '\r\n' '  ')
+            status=unknown
+            reason="바뀐 파일 목록을 구하지 못해 검사하지 못했다. git diff ${BEFORE_SHA:-<빈 값>} HEAD 오류: ${err}"
+            echo "$reason" >&2
+          elif [ ! -s changed.txt ]; then
             echo "검사할 바뀐 파일이 없다."
             status=pass
             reason=""

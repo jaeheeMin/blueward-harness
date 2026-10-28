@@ -297,3 +297,16 @@ def test_doc_guard_바뀐_파일은_갈라진_지점부터_세_점으로_구하�
     assert '"$base" HEAD' not in run
     fetch_lines = [line for line in run.splitlines() if line.strip().startswith("git fetch")]
     assert fetch_lines and all("--depth" not in line for line in fetch_lines)
+
+
+def test_doc_guard_바뀐_파일을_못_구하면_전체_파일로_넘어가지_않고_검사_불능이다():
+    # #518: `|| git ls-files` 는 "바뀐 파일을 못 구함" 을 "전부 바뀜" 으로 바꿔 검사했다(원칙 7 위반).
+    run = _step("doc-guard")["run"]
+    assert "ls-files" not in run
+    assert 'diff --name-only --diff-filter=d "$base"...HEAD > changed.txt 2> changed-err.txt' in run
+    assert 'if [ "$diff_ok" != true ]; then' in run
+    branch = run.split('if [ "$diff_ok" != true ]; then', 1)[1].split("elif", 1)[0]
+    assert "status=unknown" in branch
+    assert "git diff ${base}...HEAD" in branch  # 사유에 실패한 명령과 오류 메시지를 담는다
+    assert "${err}" in branch
+    assert "check_changed.py" not in branch

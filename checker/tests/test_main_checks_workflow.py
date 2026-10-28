@@ -200,3 +200,16 @@ def test_ledger_complete_도_쓰기_토큰이_없다():
     ledger = _load(LEDGER)
     assert ledger["jobs"]["complete"]["permissions"]["contents"] == "read"
     assert "gitleaks" not in LEDGER.read_text(encoding="utf-8").split("jobs:", 1)[1]
+
+
+def test_doc_guard_직전_커밋을_못_구하거나_비교가_실패하면_전체_파일로_넘어가지_않고_검사_불능이다():
+    # #518: BEFORE_SHA 가 비었거나 0 으로만 된 첫 푸시도, git diff 실패도 `ls-files` 대체 없이 검사 불능이다.
+    run = _step("doc-guard")["run"]
+    assert "ls-files" not in run
+    assert '[ -z "${BEFORE_SHA//0/}" ]' in run
+    assert 'diff --name-only --diff-filter=d "$BEFORE_SHA" HEAD > changed.txt 2> changed-err.txt' in run
+    branch = run.split('if [ "$diff_ok" != true ]; then', 1)[1].split("elif", 1)[0]
+    assert "status=unknown" in branch
+    assert "git diff ${BEFORE_SHA" in branch
+    assert "${err}" in branch
+    assert "check_changed.py" not in branch
