@@ -148,7 +148,7 @@ def test_종료코드_2_는_유출로_거부하고_값이_아니라_규칙과_�
     assert "github-pat a.txt:3" in reason
     assert "값은 가려서" in reason
     assert "다음:" in reason and "폐기" in reason
-    assert ".gitleaks.toml" in reason and "[allowlist]" in reason and "사람이 할 일" in reason
+    assert ".gitleaks.toml" in reason and "[allowlist]" in reason and "🚨 직접 해 주세요" in reason
 
 
 @pytest.mark.parametrize("rc", [1, 126, 127])
@@ -175,7 +175,7 @@ def test_gitleaks_가_없으면_검사_불능으로_거부하고_설치를_안�
     code, out = _guard(repo, "git commit -m x", PATH=_path_without_gitleaks(), LOCALAPPDATA=str(empty))
     reason = _reason(out)
     assert "검사 불능" in reason and "gitleaks 가 없어" in reason
-    assert "winget install --id Gitleaks.Gitleaks -e" in reason and "사람이 할 일" in reason
+    assert "winget install --id Gitleaks.Gitleaks -e" in reason and "🚨 직접 해 주세요" in reason
     assert "비밀값 발견" not in reason
 
 

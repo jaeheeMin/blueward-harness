@@ -71,14 +71,14 @@ ALLOW = 0  # 통과. 아무것도 출력하지 않으면 통과다.
 # 팀원에게 전한다 — Claude 가 스스로 못 하는 일(프로그램 설치, 로그인)은 "사람이 할 일" 로
 # 밝히고 명령을 그대로 적는다. 아래 두 문구를 여러 거부에서 같이 쓴다.
 NEXT_ENGINE_FAIL = (
-    "다음: 사람이 할 일 — uv 가 없다면 PowerShell 에서 `winget install --id astral-sh.uv -e` "
+    "다음: 🚨 직접 해 주세요: uv 가 없다면 PowerShell 에서 `winget install --id astral-sh.uv -e` "
     "로 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오. 이미 설치돼 있다면 네트워크"
     "(엔진을 처음 받을 때 필요)를 확인하고 같은 작업을 다시 시도하십시오. 계속되면 위 사유를 "
     "붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
 )
 NEXT_RETRY = (
     "다음: 같은 작업을 한 번 더 시도하십시오. 계속되면 위 내용을 붙여 "
-    "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일)."
+    "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(🚨 직접 해 주세요)."
 )
 
 
@@ -179,7 +179,7 @@ def engine_spec() -> str:
             "harness 가 검사 엔진의 판을 정하지 못해 검사할 수 없었습니다.\n"
             f"사유: {exc}\n"
             "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
-            "다음: 사람이 할 일 — 플러그인 설치가 깨졌을 수 있습니다. 플러그인을 다시 설치하거나 "
+            "다음: 🚨 직접 해 주세요: 플러그인 설치가 깨졌을 수 있습니다. 플러그인을 다시 설치하거나 "
             "갱신하십시오. 계속되면 위 사유를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 "
             "알리십시오."
         )
@@ -362,7 +362,7 @@ def _check_code(path: Path, content: str) -> None:
             + "\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
             "다음: 위 사유가 코드 내용(문법, 인코딩)의 문제라면 Claude 가 고쳐 다시 저장하십시오. "
             "그렇지 않으면 같은 작업을 한 번 더 시도하고, 계속되면 위 내용을 붙여 "
-            "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일)."
+            "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(🚨 직접 해 주세요)."
         )
 
     # 0, 1, 2 는 checker.code_rules 가 약속한 종료코드다. 그 밖은 계약에 없다.
@@ -450,7 +450,7 @@ def _main() -> None:
                 "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
                 "다음: Claude 가 파일 경로를 확인해 정확한 경로로 다시 저장하십시오. 같은 "
                 "현상이 계속되면 그 경로를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 "
-                "알리십시오(사람이 할 일)."
+                "알리십시오(🚨 직접 해 주세요)."
             )
         content = proposed_content(tool, tool_input, path)
         if content is None:
@@ -473,7 +473,7 @@ def _main() -> None:
             "판단할 수 없습니다.\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
             "다음: Claude 가 문서 경로를 확인해 정확한 경로로 다시 저장하십시오. 같은 "
             "현상이 계속되면 그 경로를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 "
-            "알리십시오(사람이 할 일)."
+            "알리십시오(🚨 직접 해 주세요)."
         )
 
     standards_root = find_standards_root(path)
@@ -554,7 +554,7 @@ def _main() -> None:
             "doc-guard 규칙 파일에 문제가 있어 검사할 수 없습니다.\n"
             f"{report.get('message', '')}\n\n"
             "이것은 문서의 문제가 아닙니다.\n"
-            "다음: 사람이 할 일 — 이 Project Repository 의 rules/ 파일을 고칠 수 있는 담당자"
+            "다음: 🚨 직접 해 주세요: 이 Project Repository 의 rules/ 파일을 고칠 수 있는 담당자"
             "(저장소 소유자)에게 위 메시지를 그대로 전달해 rules/ 를 고치게 하십시오. 고쳐질 "
             "때까지 이 문서는 저장할 수 없습니다. 엔진 쪽 문제로 보이면 "
             "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."

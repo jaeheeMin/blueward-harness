@@ -118,19 +118,19 @@ ALLOW = 0
 # 원인과 다음 할 일 함께 안내). `pre_write_guard.py` 의 같은 이름 문구와 맞춘다 —
 # Claude 가 스스로 못 하는 일(프로그램 설치)은 "사람이 할 일" 로 밝힌다.
 NEXT_ENGINE_FAIL = (
-    "다음: 사람이 할 일 — uv 가 없다면 PowerShell 에서 `winget install --id astral-sh.uv -e` "
+    "다음: 🚨 직접 해 주세요: uv 가 없다면 PowerShell 에서 `winget install --id astral-sh.uv -e` "
     "로 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오. 이미 설치돼 있다면 네트워크"
     "(엔진을 처음 받을 때 필요)를 확인하고 같은 작업을 다시 시도하십시오. 계속되면 위 사유를 "
     "붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
 )
 NEXT_RETRY = (
     "다음: 같은 작업을 한 번 더 시도하십시오. 계속되면 위 내용을 붙여 "
-    "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일)."
+    "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(🚨 직접 해 주세요)."
 )
 NEXT_FIX_INPUT = (
     "다음: Claude 가 이 MCP 호출의 입력을 확인해 올바른 형태로 다시 호출하십시오. 같은 "
     "현상이 계속되면 호출 내용을 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 "
-    "알리십시오(사람이 할 일)."
+    "알리십시오(🚨 직접 해 주세요)."
 )
 
 
@@ -184,7 +184,7 @@ def engine_spec() -> str:
             "harness 가 검사 엔진의 판을 정하지 못해 검사할 수 없었습니다.\n"
             f"사유: {exc}\n"
             "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
-            "다음: 사람이 할 일 — 플러그인 설치가 깨졌을 수 있습니다. 플러그인을 다시 설치하거나 "
+            "다음: 🚨 직접 해 주세요: 플러그인 설치가 깨졌을 수 있습니다. 플러그인을 다시 설치하거나 "
             "갱신하십시오. 계속되면 위 사유를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 "
             "알리십시오."
         )
@@ -384,7 +384,7 @@ def _check_code(url: str, content: str, suffix: str) -> None:
             + "\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
             "다음: 위 사유가 코드 내용(문법, 인코딩)의 문제라면 Claude 가 고쳐 다시 쓰십시오. "
             "그렇지 않으면 같은 작업을 한 번 더 시도하고, 계속되면 위 내용을 붙여 "
-            "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일)."
+            "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(🚨 직접 해 주세요)."
         )
 
     # 0, 1, 2 는 checker.code_rules 가 약속한 종료코드다. 그 밖은 계약에 없다.
@@ -491,7 +491,7 @@ def _run_engine_and_get_violations(tool: str, content: str, suffix: str, context
             + "\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
             "다음: 위 사유가 입력 내용의 문제라면 Claude 가 고쳐 다시 호출하십시오. 그렇지 "
             "않으면 같은 작업을 한 번 더 시도하고, 계속되면 위 내용을 붙여 "
-            "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일)."
+            "jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(🚨 직접 해 주세요)."
         )
 
     if done.returncode != 1:
@@ -737,7 +737,7 @@ def _main() -> None:
                 "다음: 이 경로가 실제로 ABAP 이나 CDS 라면 "
                 f"{_URL_MAP_PATH.name} 에 패턴을 추가하십시오({_URL_MAP_PATH}). 패턴 추가는 "
                 "harness Plugin 을 고치는 일이므로 jaeheeMin/blueward-harness 저장소에 "
-                "이슈로 요청하십시오(사람이 할 일). 경로를 잘못 넣은 것이라면 Claude 가 "
+                "이슈로 요청하십시오(🚨 직접 해 주세요). 경로를 잘못 넣은 것이라면 Claude 가 "
                 "올바른 objectSourceUrl 로 다시 호출하십시오."
             )
 

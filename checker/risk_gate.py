@@ -984,17 +984,17 @@ def build_next(findings: list[Finding], approval: str, approvers_file: str) -> s
     split = " 또는 PR 을 나눠 기준 이하로 줄이십시오" if kinds & {"size", "paths"} else ""
     if approval == "no_approvers":
         steps.append(
-            f"사람이 할 일 - {approvers_file} 에 이 PR 작성자가 아닌 승인자의 GitHub 아이디를 추가하십시오"
+            f"🚨 직접 해 주세요: {approvers_file} 에 이 PR 작성자가 아닌 승인자의 GitHub 아이디를 추가하십시오"
             f"(이 파일은 기준 브랜치에서 읽으므로 따로 먼저 반영해야 합니다).{split}"
         )
     elif approval == "stale":
         steps.append(
-            f"사람이 할 일 - 승인자({approvers_file} 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)에게 "
+            f"🚨 직접 해 주세요: 승인자({approvers_file} 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)에게 "
             "최신 커밋을 보고 다시 Approve 를 요청하십시오"
         )
     else:
         steps.append(
-            f"사람이 할 일 - 승인자({approvers_file} 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)에게 "
+            f"🚨 직접 해 주세요: 승인자({approvers_file} 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)에게 "
             f"최신 커밋을 보고 Approve 를 요청하십시오.{split}"
         )
     steps = [s.rstrip(".") for s in steps]
@@ -1329,7 +1329,7 @@ def decide_commit(
     if not findings:
         return _commit_result(True, "low", True, [], [], "")
     reasons = ["PR 없이 main 에 직접 들어옴"] + [f.message for f in findings]
-    nxt = "다음: 사람이 할 일 - 소유자가 이 커밋을 사후 검토하고 필요하면 되돌리십시오. 앞으로는 PR 로만 반영하십시오."
+    nxt = "다음: 🚨 직접 해 주세요: 소유자가 이 커밋을 사후 검토하고 필요하면 되돌리십시오. 앞으로는 PR 로만 반영하십시오."
     return _commit_result(True, "high", False, reasons, [], nxt)
 
 

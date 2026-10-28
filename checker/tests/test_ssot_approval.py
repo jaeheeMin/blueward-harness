@@ -214,7 +214,7 @@ def test_옛_커밋에_대한_승인만_있으면_낡아서_미승인이다():
     assert "reviewer" in reason
     assert "이전 커밋(aaaaaaa)" in reason
     assert "새 커밋이 올라와 다시 승인이 필요합니다" in reason
-    assert "다음: 사람이 할 일" in reason
+    assert "다음: 🚨 직접 해 주세요" in reason
 
 
 def test_head_를_안_주면_커밋을_보지_않는다():

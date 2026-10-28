@@ -224,7 +224,7 @@ def test_설치가_실패하면_수동_명령을_안내하고_실패를_기록�
     out = env.run(FAKE_WINGET_MODE="fail")
 
     assert "uv 를 winget 으로 설치하지 못했습니다" in out
-    assert "다음: 사람이 할 일 - PowerShell 에서 winget install --id astral-sh.uv -e" in out
+    assert "다음: 🚨 직접 해 주세요: PowerShell 에서 winget install --id astral-sh.uv -e" in out
     assert "설치했습니다" not in out
     state = (env.data / "tool-install-failures").read_text(encoding="utf-8")
     assert state.startswith("uv ")
@@ -326,7 +326,7 @@ def test_gh_가_있어도_로그인이_안_돼_있으면_로그인을_안내한�
     out = env.run(FAKE_GH_LOGIN="0")
 
     assert env.winget_calls() == []
-    assert "다음: 사람이 할 일 - gh auth login 을 실행해 GitHub 에 로그인하십시오." in out
+    assert "다음: 🚨 직접 해 주세요: gh auth login 을 실행해 GitHub 에 로그인하십시오." in out
 
 
 def test_세션_시작_요약에_설치_결과가_실린다(env):

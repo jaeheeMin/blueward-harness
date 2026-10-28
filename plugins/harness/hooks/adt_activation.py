@@ -477,7 +477,7 @@ def gate(cwd: str | os.PathLike) -> tuple[bool, str]:
         return False, (
             "활성화 기록을 읽지 못해 ABAP 오브젝트의 활성화 성공을 확인할 수 없습니다(검사 불능).\n"
             f"사유: {exc}\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
-            "다음: 사람이 할 일 — 기록 파일을 확인하십시오. 오브젝트가 모두 활성화된 것이 확실하면 "
+            "다음: 🚨 직접 해 주세요: 기록 파일을 확인하십시오. 오브젝트가 모두 활성화된 것이 확실하면 "
             "파일을 지우고 inactiveObjects 로 다시 확인한 뒤 같은 작업을 시도하십시오."
         )
     pend = pending_entries(data)

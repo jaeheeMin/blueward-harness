@@ -11,7 +11,8 @@ Claude Code 자동 업데이트는 세션 첫 메시지 뒤에 한 번만 확인
   고르는 참고로만 쓴다.
 - 최신 판: 원격의 `v*` 태그 중 가장 큰 것(`git ls-remote --tags`, 5초 제한). 결과(실패 포함)는
   `${CLAUDE_PLUGIN_DATA}` 에 캐시해 10분에 한 번만 묻는다.
-- 같은 세션에서 같은 최신 판은 한 번만 알린다.
+- 같은 안내를 `systemMessage`(🚨 직접 해 주세요: 로 시작, #505)로도 내 사용자 화면에 바로 띄운다.
+- 같은 세션에서 같은 최신 판은 한 번만 알린다(systemMessage 도 같이 한 번).
 - 이 안내는 검사가 아니다. 네트워크·git·파싱·권한 등 무엇이 실패하든 출력 없이 exit 0 으로
   끝내 프롬프트를 막거나 늦추지 않는다.
 - 플러그인 저장소 자신(꼭대기에 `.claude-plugin/marketplace.json`)과
@@ -183,6 +184,20 @@ def _message(current: str, latest: str, has_latest: bool) -> str:
     )
 
 
+def _system_message(latest: str, has_latest: bool) -> str:
+    """사용자 화면에 바로 뜨는 한두 줄. 표시로 시작한다(#505)."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from user_action import USER_ACTION  # noqa: PLC0415 - 같은 폴더의 모듈
+    except Exception:  # noqa: BLE001 - 안내일 뿐이다
+        USER_ACTION = "🚨 직접 해 주세요:"
+    if has_latest:
+        how = "`/reload-plugins` 를 입력하세요."
+    else:
+        how = "`/harness:update` 를 입력하고, 끝나면 `/reload-plugins` 를 입력하세요."
+    return f"{USER_ACTION} harness 새 판 {latest} 이(가) 나왔습니다. {how}"
+
+
 def run(
     payload: dict,
     env: dict | None = None,
@@ -237,11 +252,15 @@ def run(
     state["notified"] = dict(list(notified.items())[-MAX_NOTIFIED:])
     _write_state(state_path, state)
 
+    has_latest = _project_has_latest(latest, payload.get("cwd"), env)
     return json.dumps(
-        {"hookSpecificOutput": {
-            "hookEventName": "UserPromptSubmit",
-            "additionalContext": _message(current, latest, _project_has_latest(latest, payload.get("cwd"), env)),
-        }},
+        {
+            "systemMessage": _system_message(latest, has_latest),
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": _message(current, latest, has_latest),
+            },
+        },
         ensure_ascii=False,
     )
 

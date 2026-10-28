@@ -45,8 +45,8 @@ deny() {
 # 전하므로, Claude 가 스스로 못 하는 일(설치, 로그인)은 "사람이 할 일" 로 밝히고 명령을
 # 그대로 적는다. deny() 에 그대로 끼워 넣는 문자열이라 큰따옴표·역슬래시·백틱·달러
 # 기호를 쓰지 않는다.
-next_install_uv="다음: 사람이 할 일 - PowerShell 에서 winget install --id astral-sh.uv -e 를 실행해 uv 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오."
-next_install_gh="다음: 사람이 할 일 - PowerShell 에서 winget install --id GitHub.cli -e 로 GitHub CLI 를 설치하고 gh auth login 으로 로그인한 뒤 Claude Code 를 새 터미널에서 다시 여십시오."
+next_install_uv="다음: 🚨 직접 해 주세요: PowerShell 에서 winget install --id astral-sh.uv -e 를 실행해 uv 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오."
+next_install_gh="다음: 🚨 직접 해 주세요: PowerShell 에서 winget install --id GitHub.cli -e 로 GitHub CLI 를 설치하고 gh auth login 으로 로그인한 뒤 Claude Code 를 새 터미널에서 다시 여십시오."
 next_retry="다음: 네트워크를 확인하고 잠시 뒤 같은 명령을 다시 시도하십시오. gh auth status 가 로그인 안 됨을 보이면 사람이 gh auth login 을 실행해야 합니다. 계속되면 이 메시지 전체를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -60,11 +60,11 @@ if ! command -v jq >/dev/null 2>&1; then
   pr_word_re='(^|[^[:alnum:]_-])pr([^[:alnum:]_-]|$)'
   pr_sub_re='(^|[^[:alnum:]_-])(merge|edit|close|reopen|comment|review|ready)([^[:alnum:]_-]|$)'
   if [[ "$input" =~ $pr_word_re ]] && [[ "$input" =~ $pr_sub_re ]]; then
-    deny "jq 가 없어 gh pr 명령의 대상 PR 작성자를 확인하지 못했습니다. 검사할 수 없는 상태로 통과시키지 않습니다. 다음: 사람이 할 일 - PowerShell 에서 winget install --id jqlang.jq -e 를 실행해 jq 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오(macOS 는 brew install jq)."
+    deny "jq 가 없어 gh pr 명령의 대상 PR 작성자를 확인하지 못했습니다. 검사할 수 없는 상태로 통과시키지 않습니다. 다음: 🚨 직접 해 주세요: PowerShell 에서 winget install --id jqlang.jq -e 를 실행해 jq 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오(macOS 는 brew install jq)."
   fi
   case "$input" in
     *git*|*pr*merge*)
-      deny "jq 가 없어 git/gh 명령을 검사하지 못했습니다. 검사할 수 없는 상태로 통과시키지 않습니다. 다음: 사람이 할 일 - PowerShell 에서 winget install --id jqlang.jq -e 를 실행해 jq 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오(macOS 는 brew install jq)."
+      deny "jq 가 없어 git/gh 명령을 검사하지 못했습니다. 검사할 수 없는 상태로 통과시키지 않습니다. 다음: 🚨 직접 해 주세요: PowerShell 에서 winget install --id jqlang.jq -e 를 실행해 jq 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오(macOS 는 brew install jq)."
       ;;
     *)
       exit 0
@@ -335,7 +335,7 @@ resolve_engine() {
   engine="$(printf '%s' "$engine" | tr -d '\r')"
   if [ "$es_rc" -ne 0 ] || [ -z "$engine" ]; then
     engine=""
-    deny "검사 엔진의 판을 정하지 못했습니다(종료코드 $es_rc). 플러그인 설치가 깨졌거나 uv 를 실행하지 못한 것입니다. 검사 불능이므로 통과시키지 않습니다. 사유: $es_detail 다음: 사람이 할 일 - 플러그인을 다시 설치하거나 갱신하십시오. uv 가 없다면 PowerShell 에서 winget install --id astral-sh.uv -e 로 설치하십시오. 계속되면 이 메시지 전체를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
+    deny "검사 엔진의 판을 정하지 못했습니다(종료코드 $es_rc). 플러그인 설치가 깨졌거나 uv 를 실행하지 못한 것입니다. 검사 불능이므로 통과시키지 않습니다. 사유: $es_detail 다음: 🚨 직접 해 주세요: 플러그인을 다시 설치하거나 갱신하십시오. uv 가 없다면 PowerShell 에서 winget install --id astral-sh.uv -e 로 설치하십시오. 계속되면 이 메시지 전체를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
   fi
   # 태그 고정이면 그 태그가 아직 없을 수 있다는 단서를 재시도 안내에 덧붙인다.
   case "$engine" in
@@ -566,7 +566,7 @@ check_one_merge() {
         deny "SRS(docs/ssot) 를 바꾼 PR #$pr_number 인데 현재 최신 커밋에 대한 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 그 뒤 다음: Approve 가 최신 커밋에 달리면 Claude 가 gh pr merge 를 다시 실행합니다."
         ;;
       *)
-        deny "SRS(docs/ssot) 를 바꾼 PR #$pr_number 인데 작성자가 아닌 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 다음: 사람이 할 일 - .github/ssot-approvers 에서 이 PR 작성자에게 정해진 승인자(작성자 본인 제외)에게 이 PR 의 리뷰에서 Approve 를 요청하십시오. Approve 가 달린 뒤 Claude 가 gh pr merge 를 다시 실행합니다."
+        deny "SRS(docs/ssot) 를 바꾼 PR #$pr_number 인데 작성자가 아닌 승인자의 Approve 가 없어 merge 를 막습니다. 사유: $reason 다음: 🚨 직접 해 주세요: .github/ssot-approvers 에서 이 PR 작성자에게 정해진 승인자(작성자 본인 제외)에게 이 PR 의 리뷰에서 Approve 를 요청하십시오. Approve 가 달린 뒤 Claude 가 gh pr merge 를 다시 실행합니다."
         ;;
     esac
   else
@@ -620,7 +620,7 @@ $ssot_err"
     if [ "$auto" = auto ]; then
       deny "이 PR 은 사람이 직접 병합하는 경로($hm_paths)를 바꿔서 자동 병합을 걸 수 없어요. 다음: 사람이 GitHub 화면에서 병합하거나, 사람이 그 PR 에 자동 병합을 켜 주세요."
     fi
-    deny "PR #$pr_number 은 사람이 직접 merge 해야 하는 경로($hm_paths)를 바꿨습니다. Claude 는 이 PR 을 merge 할 수 없습니다. 다음: 사람이 할 일 - 사용자에게 이 PR 의 GitHub 화면(PR 페이지 아래쪽)에서 Merge 버튼을 눌러 병합해 달라고 요청하십시오."
+    deny "PR #$pr_number 은 사람이 직접 merge 해야 하는 경로($hm_paths)를 바꿨습니다. Claude 는 이 PR 을 merge 할 수 없습니다. 다음: 🚨 직접 해 주세요: 사용자에게 이 PR 의 GitHub 화면(PR 페이지 아래쪽)에서 Merge 버튼을 눌러 병합해 달라고 요청하십시오."
   else
     hm_detail_raw="$hm_out"
     if [ -n "$hm_err" ]; then
@@ -666,7 +666,7 @@ $hm_err"
     next_risk="$(printf '%s' "$rg_out" | jq -r '.next // empty' 2>/dev/null | tr -d '\r"\\`$')" || true
     case "$next_risk" in
       *"다음:"*) : ;;
-      *) next_risk="다음: 사람이 할 일 - .github/ssot-approvers 에서 이 PR 작성자에게 정해진 승인자(작성자 본인 제외)에게 최신 커밋을 보고 Approve 를 요청하십시오." ;;
+      *) next_risk="다음: 🚨 직접 해 주세요: .github/ssot-approvers 에서 이 PR 작성자에게 정해진 승인자(작성자 본인 제외)에게 최신 커밋을 보고 Approve 를 요청하십시오." ;;
     esac
     deny "PR #$pr_number 은 위험도가 높은데 최신 커밋에 대한 승인자의 Approve 가 없어 merge 를 막습니다. 이유: $rg_reasons $next_risk Approve 가 달리면 Claude 가 gh pr merge 를 다시 실행합니다."
   else
@@ -1010,14 +1010,14 @@ if [ -n "$commit_seg" ]; then
       if [ "$gl_staged" -eq 1 ]; then
         find_gitleaks
         if [ -z "$gl_bin" ]; then
-          deny "검사 불능: gitleaks 가 없어 비밀정보 검사를 하지 못했습니다. 검사하지 못한 상태로 커밋을 통과시키지 않습니다. 다음: 사람이 할 일 - PowerShell 에서 winget install --id Gitleaks.Gitleaks -e 를 실행해 gitleaks 를 설치한 뒤 Claude Code 를 새로 여십시오(세션을 다시 시작하면 자동 설치도 다시 시도합니다)."
+          deny "검사 불능: gitleaks 가 없어 비밀정보 검사를 하지 못했습니다. 검사하지 못한 상태로 커밋을 통과시키지 않습니다. 다음: 🚨 직접 해 주세요: PowerShell 에서 winget install --id Gitleaks.Gitleaks -e 를 실행해 gitleaks 를 설치한 뒤 Claude Code 를 새로 여십시오(세션을 다시 시작하면 자동 설치도 다시 시도합니다)."
         fi
 
         gl_tmp="$(mktemp -d 2>/dev/null)" || deny "검사 불능: 임시 폴더를 만들지 못해 비밀정보 검사를 하지 못했습니다. 검사하지 못한 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
         mkdir -p "$gl_tmp/.harness-engine/checker/gitleaks"
         if ! cp "$hook_dir/gitleaks-harness.toml" "$gl_tmp/.harness-engine/checker/gitleaks/harness.toml" 2>/dev/null; then
           rm -rf "$gl_tmp"
-          deny "검사 불능: 하네스 기본 gitleaks 설정(hooks/gitleaks-harness.toml)을 읽지 못해 비밀정보 검사를 하지 못했습니다. 검사하지 못한 상태로 통과시키지 않습니다. 다음: 사람이 할 일 - harness 플러그인을 다시 설치하거나 갱신하십시오. 계속되면 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
+          deny "검사 불능: 하네스 기본 gitleaks 설정(hooks/gitleaks-harness.toml)을 읽지 못해 비밀정보 검사를 하지 못했습니다. 검사하지 못한 상태로 통과시키지 않습니다. 다음: 🚨 직접 해 주세요: harness 플러그인을 다시 설치하거나 갱신하십시오. 계속되면 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오."
         fi
 
         # 설정: 저장소의 .gitleaks.toml 이 있으면 그것, 없으면 하네스 기본 설정. 설정 안의
@@ -1058,7 +1058,7 @@ if [ -n "$commit_seg" ]; then
               /^File:/   { f = $0; sub(/^File:[ \t]*/, "", f) }
               /^Line:/   { n++; if (n <= 5) printf "%s%s %s:%s", (n > 1 ? ", " : ""), r, f, $2 }
               END { if (n > 5) printf " 등 %d건", n }' | tr -d '"\\`$')"
-            deny "비밀값 발견: 커밋에 들어갈 staged 변경에서 비밀정보 모양이 발견되어 커밋을 막습니다(값은 가려서 표시하지 않습니다). 발견: $gl_summary 다음: Claude 가 해당 줄을 파일에서 빼고 git add 로 다시 올린 뒤 커밋하십시오. 진짜 비밀값이면 이미 노출된 것으로 보고 폐기하고 새로 발급해 교체해야 하므로 사람에게 알리십시오. 오탐이면 사람이 할 일 - 저장소의 .gitleaks.toml 의 [allowlist] 에 해당 경로나 정규식을 추가하십시오(Claude 가 스스로 추가하지 않습니다)."
+            deny "비밀값 발견: 커밋에 들어갈 staged 변경에서 비밀정보 모양이 발견되어 커밋을 막습니다(값은 가려서 표시하지 않습니다). 발견: $gl_summary 다음: Claude 가 해당 줄을 파일에서 빼고 git add 로 다시 올린 뒤 커밋하십시오. 진짜 비밀값이면 이미 노출된 것으로 보고 폐기하고 새로 발급해 교체해야 하므로 사람에게 알리십시오. 오탐이면 🚨 직접 해 주세요: 저장소의 .gitleaks.toml 의 [allowlist] 에 해당 경로나 정규식을 추가하십시오(Claude 가 스스로 추가하지 않습니다)."
             ;;
           *)
             if [ "$gl_rc" -eq 124 ]; then
@@ -1067,7 +1067,7 @@ if [ -n "$commit_seg" ]; then
               gl_detail="$(printf '%s\n' "$gl_out" | grep -E 'FTL|ERR' | head -n 3 | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
               [ -z "$gl_detail" ] && gl_detail="출력 없음"
             fi
-            deny "검사 불능: gitleaks 가 오류로 끝나(종료코드 $gl_rc) 비밀정보 검사를 하지 못했습니다. 이것은 비밀값이 발견됐다는 뜻이 아니며, 검사하지 못한 상태로 통과시키지도 않습니다. 사유: $gl_detail 다음: gitleaks 가 동작하는지, 저장소의 .gitleaks.toml 이 올바른 TOML 이고 [extend] path 가 .harness-engine/checker/gitleaks/harness.toml 인지 확인하고 같은 커밋을 다시 시도하십시오. 계속되면 사람이 할 일 - 원인을 해결하십시오(급하면 HARNESS_SKIP_SECRET_SCAN=1 을 환경에 설정하고 Claude Code 를 새로 여십시오. 이 변수는 사람만 켜고 Claude 는 켜지 않습니다)."
+            deny "검사 불능: gitleaks 가 오류로 끝나(종료코드 $gl_rc) 비밀정보 검사를 하지 못했습니다. 이것은 비밀값이 발견됐다는 뜻이 아니며, 검사하지 못한 상태로 통과시키지도 않습니다. 사유: $gl_detail 다음: gitleaks 가 동작하는지, 저장소의 .gitleaks.toml 이 올바른 TOML 이고 [extend] path 가 .harness-engine/checker/gitleaks/harness.toml 인지 확인하고 같은 커밋을 다시 시도하십시오. 계속되면 🚨 직접 해 주세요: 원인을 해결하십시오(급하면 HARNESS_SKIP_SECRET_SCAN=1 을 환경에 설정하고 Claude Code 를 새로 여십시오. 이 변수는 사람만 켜고 Claude 는 켜지 않습니다)."
             ;;
         esac
       fi

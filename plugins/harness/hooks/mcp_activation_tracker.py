@@ -42,8 +42,8 @@ def _fail(cwd, tool: str, reason: str) -> None:
         "harness: ABAP 오브젝트의 활성화 기록을 남기지 못했다(PostToolUse 훅은 이미 끝난 호출을 막을 수 없다). "
         f"도구: {tool}. 사유: {reason}. {where}\n"
         "이 표식이 있는 동안 푸시와 src/ 쓰기는 검사 불능으로 막힌다.\n"
-        "다음: inactiveObjects 로 서버의 비활성 오브젝트를 확인해 남은 것이 없음을 본 뒤, 사람이 표식 파일을 "
-        "지우십시오. 계속되면 위 사유를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(사람이 할 일).",
+        "다음: inactiveObjects 로 서버의 비활성 오브젝트를 확인해 남은 것이 없음을 본 뒤, 🚨 직접 해 주세요: 표식 파일을 "
+        "지우십시오. 계속되면 위 사유를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(🚨 직접 해 주세요).",
         file=sys.stderr,
     )
     sys.exit(2)
