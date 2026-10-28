@@ -1096,7 +1096,7 @@ fix/31-broken-link</pre>
       <tr><td><code>CR-006</code></td><td>회사코드 같은 하드코딩 값은 설정이나 상수로 뺀다</td><td>사람</td></tr>
       <tr><td><code>CR-007</code></td><td>오류를 조용히 삼키지 않는다. 빈 CATCH 금지</td><td>Hook + Actions</td></tr>
       <tr><td><code>CR-008</code></td><td>이름 접두어와 네이밍은 프로젝트 <code>conventions/naming.md</code> 를 따른다</td><td>사람</td></tr>
-      <tr><td><code>CR-009</code></td><td>데이터를 바꾸는 앱은 권한을 검사한다. behavior pool 의 권한 메서드가 <code>auth-allowed</code> 만 대입하고 <code>AUTHORITY-CHECK</code> 가 없으면 <b>경고</b>(막지는 않고 PR 코멘트에 나와)</td><td>Actions 경고 + risk-gate</td></tr>
+      <tr><td><code>CR-009</code></td><td>데이터를 바꾸는 앱은 권한을 검사한다. behavior pool 의 권한 메서드가 <code>auth-allowed</code> 만 대입하고 <code>AUTHORITY-CHECK</code> 가 없으면 <b>경고</b>(막지는 않고 PR 코멘트에 나와). 권한을 전부 허용으로 두고 EML 을 <code>PRIVILEGED</code> 로 부르면 표준 BO 의 권한 검사가 건너뛰어질 수 있어 따로 경고(<code>harness:allow CR-009 &lt;이유&gt;</code> 로 예외)</td><td>Actions 경고 + risk-gate</td></tr>
     </table></div>
     <p class="small" style="margin-top:10px">꼭 예외가 필요하면 그 줄이나 바로 위에 <code>harness:allow CR-001 &lt;이유&gt;</code> 주석을 달아. 이유가 없으면 인정 안 돼.</p>
   </section>
