@@ -19,7 +19,7 @@
 - `HEAD^1` 은 병합 ref 가 아닌 HEAD(PR 이 병합 커밋이 아니게 checkout 된 경우)에서 틀리므로 쓰지 않았다.
 - 다른 곳: `main-checks.yml`(push)은 `BEFORE_SHA`→HEAD 로 같은 브랜치의 앞뒤 커밋을 비교해 병합 ref 문제가 없다. `ai-review.yml` 은 PR 의 base.sha·head.sha 를 고정 SHA 로 써서 해당 없다. 스크립트·엔진·scaffold 의 skeleton 워크플로에는 바뀐 파일 계산이 없다(재사용 워크플로를 부른다). `deliver` 스킬의 `origin/{base}...HEAD` 는 이미 세 점이다.
 - 시험: `test_pr_checks_workflow.py` 에 세 점 사용·`--depth` 없음 확인.
-- plugin version 0.10.129.
+- plugin version 0.10.130.
 
 ## 제안만 (바꾸지 않음)
 
