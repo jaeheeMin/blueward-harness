@@ -41,11 +41,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # pull_request_target 의 기본 checkout 은 base 다. head 를 받지 않는다.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 

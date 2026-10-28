@@ -91,13 +91,13 @@ jobs:
     # permissions 는 적지 않는다 — 부르는 쪽이 준 권한을 그대로 쓴다(머리 주석).
     steps:
       - name: 검사 엔진 가져오기
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: jaeheeMin/blueward-harness
           ref: ${{ inputs.engine-ref }}
           path: .harness-engine
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -221,7 +221,7 @@ jobs:
         if: steps.ssot-approval.outcome != 'skipped'
         id: ssot-approval-comment
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           EXIT_CODE: ${{ steps.ssot-approval.outputs.exit-code }}
         with:
@@ -326,7 +326,7 @@ jobs:
         if: steps.risk-gate.outcome != 'skipped'
         id: risk-gate-comment
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           EXIT_CODE: ${{ steps.risk-gate.outputs.exit-code }}
         with:

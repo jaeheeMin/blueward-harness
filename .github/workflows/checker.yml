@@ -21,14 +21,14 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # version 검사(아래)가 base 와의 공통 조상을 찾으려면 PR 이력이 필요하다. 이력이 필요한
           # 것은 PR 때뿐이라 push 는 얕게 받는다. 0 을 문자열로 쓴다 — 식에서 숫자 0 은 거짓이라
           # `조건 && 0 || 1` 은 늘 1 이 된다.
           fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
