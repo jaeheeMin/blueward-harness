@@ -526,3 +526,110 @@ def test_compute_gives_head_sha_and_unread_versions():
     result = qa.pr_queue.compute(gh, REPO)
     assert by_number(result)[2]["after"] == [1] and by_number(result)[2]["sha"] == "sha2"
     assert result["unread_versions"] == []
+
+
+# --- 읽기 병렬화(#515) --------------------------------------------------------
+
+
+class SlowGh(ActionsGh):
+    """PR 번호가 클수록 먼저 끝나게 읽어, 완료 순서가 PR 순서와 거꾸로 되게 한다."""
+
+    def get_all(self, path):
+        import time
+
+        if "/issues/" in path and path.endswith("/comments"):
+            n = int(path.split("/issues/")[1].split("/")[0])
+            time.sleep(0.02 * (6 - n))
+        return super().get_all(path)
+
+
+def _five_prs():
+    return [pr(1), pr(2, body="먼저: #1"), pr(3, body="먼저: #2"), pr(4), pr(5, body="먼저: #4")]
+
+
+def test_parallel_reads_give_same_writes_and_report_as_sequential(monkeypatch):
+    outcomes = []
+    for workers in (1, 6):
+        monkeypatch.setattr(qa, "READ_WORKERS", workers)
+        gh = SlowGh(_five_prs())
+        _, report, _ = run_apply(gh)
+        outcomes.append((gh.writes, report.rows, report.comments, report.statuses, report.exit_code()))
+    assert outcomes[0] == outcomes[1]
+    assert outcomes[0][4] == qa.EXIT_OK
+    # 쓰기는 PR 번호 순서대로 한 건씩 나간다.
+    paths = [w[1] for w in outcomes[1][0] if w[1].endswith("/comments")]
+    assert paths == [f"repos/{REPO}/issues/{n}/comments" for n in range(1, 6)]
+
+
+def test_one_failing_comment_read_keeps_per_pr_failure_and_exit_2():
+    gh = SlowGh(_five_prs())
+    original = gh.get_all
+
+    def get_all(path):
+        if "/issues/3/comments" in path:
+            raise GhError("코멘트 읽기 실패")
+        return original(path)
+
+    gh.get_all = get_all
+    _, report, _ = run_apply(gh)
+    assert report.exit_code() == qa.EXIT_CANNOT_READ
+    assert len(report.read_errors) == 1 and report.read_errors[0].startswith("#3 의 코멘트를 읽지 못함")
+    # 나머지 PR 은 그대로 쓴다. 실패한 PR 은 코멘트도 status 도 쓰지 않는다.
+    written = {w[1].split("/issues/")[1].split("/")[0] for w in gh.writes if w[1].endswith("/comments")}
+    assert written == {"1", "2", "4", "5"}
+    assert not any(w[1].endswith("/sha3") for w in status_writes(gh))
+    assert len(status_writes(gh)) == 4
+
+
+def test_failing_status_read_still_writes_status():
+    gh = ActionsGh(two_prs())
+    original = gh.get_json
+
+    def get_json(path):
+        if path.endswith("/status"):
+            raise GhError("status 읽기 실패")
+        return original(path)
+
+    gh.get_json = get_json
+    _, report, _ = run_apply(gh)
+    assert report.statuses["written"] == 2 and not report.write_errors and report.exit_code() == qa.EXIT_OK
+
+
+def test_read_retries_rate_limit_then_succeeds():
+    attempts, slept = [], []
+
+    def flaky():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise GhError("gh api 가 종료코드 1 로 실패했다: You have exceeded a secondary rate limit (HTTP 403)", status=403)
+        return "ok"
+
+    assert qa._read_with_retry(flaky, sleep=slept.append) == "ok"
+    assert len(attempts) == 3 and slept == [1.0, 2.0]
+
+
+def test_read_gives_up_after_retries_and_skips_non_rate_limit():
+    slept = []
+
+    def always():
+        raise GhError("API rate limit exceeded (HTTP 429)", status=429)
+
+    try:
+        qa._read_with_retry(always, sleep=slept.append)
+        raise AssertionError("예외가 나와야 한다")
+    except GhError:
+        pass
+    assert len(slept) == qa.RATE_LIMIT_RETRIES
+
+    calls = []
+
+    def forbidden():
+        calls.append(1)
+        raise GhError("Resource not accessible by integration (HTTP 403)", status=403)
+
+    try:
+        qa._read_with_retry(forbidden, sleep=slept.append)
+        raise AssertionError("예외가 나와야 한다")
+    except GhError:
+        pass
+    assert calls == [1]  # 권한 부족은 다시 하지 않는다

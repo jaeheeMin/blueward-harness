@@ -26,3 +26,13 @@ def _no_previous_spec(monkeypatch):
     from checker import export
 
     monkeypatch.setattr(export, "_origin_main_text", lambda root, rel: ("first", ""))
+
+
+@pytest.fixture(autouse=True)
+def _clear_xlsx_cache():
+    """xlsx 리더가 열어 둔 통합문서는 프로세스 단위로 재사용된다(#515). 시험끼리 섞이지 않게, 그리고 Windows 에서 임시 파일을 지울 수 있게 매번 닫는다."""
+    from checker.readers import xlsx
+
+    xlsx.clear_cache()
+    yield
+    xlsx.clear_cache()
