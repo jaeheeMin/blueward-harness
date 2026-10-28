@@ -14,7 +14,7 @@ from render_report import render  # noqa: E402
 
 from checker.cli import EXIT_CONFIG_ERROR, EXIT_PASS, EXIT_VIOLATION  # noqa: E402
 from checker.cross_switches import SwitchError, load_switches  # noqa: E402
-from checker.overlap import check_overlap  # noqa: E402
+from checker.overlap import check_overlap, load_shared_kinds  # noqa: E402
 from checker.pairing import CANNOT_CHECK, PASS, SKIPPED  # noqa: E402
 
 HEAD = "| 종류 | 이름 | 작업 | 비고 |\n|---|---|---|---|\n"
@@ -368,3 +368,129 @@ def test_SRS도_원장도_없으면_제목_미확인이고_파일명_요약을_�
     _spec(tmp_path, "DEV-003-b.md", [_row("CDS View", "ZI_Order", "수정")])
     (w,) = check_overlap(tmp_path)["warnings"]
     assert "DEV-002(제목 미확인) 생성; DEV-003(제목 미확인) 수정" in w["message"]
+
+
+# --- 이 PR 의 Spec 과 공용 객체로 좁히기(#503) ------------------------------
+
+def _shared(tmp: Path, text: str) -> None:
+    path = tmp / "rules" / "cross-checks" / "shared-objects.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _three(tmp: Path) -> None:
+    """DEV-002·003 이 CDS View ZI_A 를, DEV-004·005 가 ZI_B 를 겹쳐 쓰고, 모두 Message Class ZPP 를 쓴다."""
+    _spec(tmp, "DEV-002-a.md", [_row("CDS View", "ZI_A", "생성"), _row("Message Class", "ZPP", "수정")])
+    _spec(tmp, "DEV-003-b.md", [_row("CDS View", "ZI_A", "수정"), _row("Message Class", "ZPP", "수정")])
+    _spec(tmp, "DEV-004-c.md", [_row("CDS View", "ZI_B", "생성")])
+    _spec(tmp, "DEV-005-d.md", [_row("CDS View", "ZI_B", "수정")])
+
+
+def test_바뀐_Spec이_낀_겹침만_경고하고_나머지는_센다(tmp_path):
+    _three(tmp_path)
+    r = check_overlap(tmp_path, ["docs/spec/DEV-002-a.md"])
+    assert r["status"] == PASS
+    assert [(w["kind"], w["name"]) for w in r["warnings"]] == [("CDS View", "ZI_A")]
+    assert r["unrelated"] == 1  # ZI_B
+    assert r["shared"] == 1 and r["shared_kinds"] == ["Message Class"]  # ZPP
+
+
+def test_바뀐_Spec_목록이_None_이면_전부_본다(tmp_path):
+    _three(tmp_path)
+    r = check_overlap(tmp_path)
+    assert {w["name"] for w in r["warnings"]} == {"ZI_A", "ZI_B"}
+    assert r["unrelated"] == 0 and r["shared"] == 1
+
+
+def test_바뀐_Spec_목록이_비면_모두_무관하다(tmp_path):
+    _three(tmp_path)
+    r = check_overlap(tmp_path, [])
+    assert r["warnings"] == [] and r["unrelated"] == 3 and r["shared"] == 0
+
+
+def test_바뀐_Spec_경로는_앞의_점_슬래시를_무시한다(tmp_path):
+    _three(tmp_path)
+    r = check_overlap(tmp_path, ["./docs/spec/DEV-004-c.md"])
+    assert [w["name"] for w in r["warnings"]] == ["ZI_B"]
+
+
+def test_공용_종류_파일이_없으면_Message_Class_가_기본이다(tmp_path):
+    assert load_shared_kinds(tmp_path) == ["Message Class"]
+
+
+def test_공용_종류_키가_없으면_기본값이다(tmp_path):
+    _shared(tmp_path, "# 비움\n")
+    assert load_shared_kinds(tmp_path) == ["Message Class"]
+
+
+def test_공용_종류를_파일로_지정하면_기본값을_대체한다(tmp_path):
+    _three(tmp_path)
+    _shared(tmp_path, "공용_종류:\n  - CDS View\n")
+    r = check_overlap(tmp_path)
+    assert {w["kind"] for w in r["warnings"]} == {"Message Class"}
+    assert r["shared"] == 2 and r["shared_kinds"] == ["CDS View"]
+
+
+def test_공용_종류가_빈_목록이면_제외가_없다(tmp_path):
+    _three(tmp_path)
+    _shared(tmp_path, "공용_종류: []\n")
+    r = check_overlap(tmp_path)
+    assert {w["name"] for w in r["warnings"]} == {"ZI_A", "ZI_B", "ZPP"} and r["shared"] == 0
+
+
+def test_공용_종류_비교는_대소문자와_앞뒤_공백을_무시한다(tmp_path):
+    _three(tmp_path)
+    _shared(tmp_path, '공용_종류: ["  message class "]\n')
+    r = check_overlap(tmp_path)
+    assert {w["name"] for w in r["warnings"]} == {"ZI_A", "ZI_B"} and r["shared"] == 1
+
+
+@pytest.mark.parametrize("text", ["오타: [a]\n", "공용_종류: Message Class\n", "공용_종류: [1]\n", "공용_종류: [\n", "- a\n"])
+def test_잘못된_공용_종류_설정은_검사_불능이고_경로가_남는다(tmp_path, text):
+    _three(tmp_path)
+    _shared(tmp_path, text)
+    r = check_overlap(tmp_path)
+    assert r["status"] == CANNOT_CHECK and r["warnings"] == []
+    assert "rules/cross-checks/shared-objects.yaml" in r["message"]
+
+
+def test_공용_종류_파일이_rules_로더를_깨지_않는다(tmp_path):
+    from checker.loader import load
+
+    _std_root(tmp_path)
+    _shared(tmp_path, "공용_종류: []\n")
+    assert len(load(tmp_path / "rules")) == 1
+
+
+def test_check_changed_는_바뀐_Spec_만_넘긴다(tmp_path, monkeypatch, capsys):
+    _std_root(tmp_path)
+    _three(tmp_path)
+    code, report = _run(tmp_path, monkeypatch, capsys, changed="docs/spec/DEV-004-c.md\n")
+    ov = report["overlap"]
+    assert code == EXIT_PASS and [w["name"] for w in ov["warnings"]] == ["ZI_B"]
+    assert ov["unrelated"] == 2 and ov["shared"] == 0  # ZI_A, ZPP 는 DEV-004 와 무관
+
+
+def test_check_changed_공용_종류_설정이_깨지면_종료코드_2다(tmp_path, monkeypatch, capsys):
+    _std_root(tmp_path)
+    _three(tmp_path)
+    _shared(tmp_path, "오타: 1\n")
+    code, report = _run(tmp_path, monkeypatch, capsys)
+    assert code == EXIT_CONFIG_ERROR and report["overlap"]["status"] == CANNOT_CHECK
+    assert "shared-objects.yaml" in render(report, 2)
+
+
+def test_렌더는_새_문구와_경고하지_않은_개수를_적는다(tmp_path, monkeypatch, capsys):
+    _std_root(tmp_path)
+    _three(tmp_path)
+    _, report = _run(tmp_path, monkeypatch, capsys)
+    text = render(report, 0)
+    assert "한 개발이 DEV 둘로 나뉜 것은 아닌지 확인하십시오" in text
+    assert "동시에 고치면" not in text
+    assert "이 PR 과 무관한 기존 겹침 1건, 공용 객체(Message Class) 겹침 1건은 경고하지 않았습니다." in text
+
+
+def test_렌더는_경고하지_않은_것이_없으면_그_줄을_안_쓴다(tmp_path, monkeypatch, capsys):
+    _two_specs(tmp_path)
+    _, report = _run(tmp_path, monkeypatch, capsys)
+    assert "경고하지 않았습니다" not in render(report, 0)

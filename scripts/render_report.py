@@ -64,6 +64,16 @@ def _render_overlap(result: dict) -> list[str]:
     out = ["", "---", "", "## 객체 겹침", ""]
     warnings = result.get("warnings") or []
     cannot = result.get("cannot_check") or []
+    config_error = result.get("config_error")
+
+    if config_error:
+        out += [
+            "### ⚠️ 검사 불능", "",
+            f"- {config_error}", "",
+            "공용 객체 종류 설정을 읽지 못해 겹침을 확인하지 못했습니다. 통과도 위반도 아닙니다. "
+            "`rules/cross-checks/shared-objects.yaml` 의 `공용_종류` 가 문자열 목록인지 확인하십시오.",
+            "",
+        ]
 
     if cannot:
         out += ["### ⚠️ 검사 불능", ""]
@@ -80,7 +90,8 @@ def _render_overlap(result: dict) -> list[str]:
         out += [
             "### 참고 — 같은 객체를 둘 이상의 Spec 이 만들거나 고침 (통과에는 영향 없음)",
             "",
-            f"**{len(warnings)}건**입니다. 같은 객체를 두 사람이 동시에 고치면 충돌할 수 있으니 담당을 확인하십시오.",
+            f"**{len(warnings)}건**입니다. 이 PR 이 바꾼 Spec 이 다른 Spec 과 같은 객체를 만들거나 고칩니다. "
+            "한 개발이 DEV 둘로 나뉜 것은 아닌지 확인하십시오. 따로 할 일이 맞으면 그대로 두어도 됩니다.",
             "",
             "| 종류 | 이름 | Spec (작업) |",
             "|---|---|---|",
@@ -89,8 +100,17 @@ def _render_overlap(result: dict) -> list[str]:
             specs = ", ".join(f"`{s.get('file')}` ({s.get('work')})" for s in w.get("specs") or [])
             out.append(f"| {_cell(w.get('kind'))} | `{_cell(w.get('name'))}` | {specs} |")
         out.append("")
-    elif not cannot:
-        out += ["Spec 끼리 같은 객체를 만들거나 고치는 곳이 없습니다.", ""]
+    elif not cannot and not config_error:
+        out += ["이 PR 이 바꾼 Spec 이 다른 Spec 과 같은 객체를 만들거나 고치는 곳이 없습니다.", ""]
+
+    skipped = []
+    if result.get("unrelated"):
+        skipped.append(f"이 PR 과 무관한 기존 겹침 {result['unrelated']}건")
+    if result.get("shared"):
+        kinds = ", ".join(result.get("shared_kinds") or [])
+        skipped.append(f"공용 객체({kinds}) 겹침 {result['shared']}건")
+    if skipped:
+        out += [", ".join(skipped) + "은 경고하지 않았습니다.", ""]
 
     if result.get("no_table"):
         out.append(f"`## 사용 객체` 표가 없는 Spec **{result['no_table']}건**은 비교에서 뺐습니다.")
