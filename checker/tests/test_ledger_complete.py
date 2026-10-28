@@ -356,10 +356,11 @@ def test_순수_함수들():
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "ledger-complete.yml"
-CALLER = (
+SKELETON_WORKFLOWS = (
     ROOT / "plugins" / "harness" / "skills" / "scaffold" / "skeleton" / "dot-github" / "workflows"
-    / "ledger-complete.yml"
 )
+CALLER = SKELETON_WORKFLOWS / "ledger-complete.yml"
+MAIN_CHECKS = ROOT / ".github" / "workflows" / "main-checks.yml"
 
 
 def _load(path: Path) -> dict:
@@ -404,13 +405,35 @@ def test_워크플로는_쓰지_않고_확인한_뒤_이슈를_연다():
     assert not (ROOT / "scripts" / "ledger_complete_loop.sh").exists()  # push 재시도 루프는 없다
 
 
-def test_스캐폴드_caller_모양():
-    wf = _load(CALLER)
-    assert wf["on"] == {"push": {"branches": ["main"]}}
-    job = wf["jobs"]["ledger-complete"]
-    assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/ledger-complete.yml@stable"
-    assert job["permissions"] == {"contents": "read", "pull-requests": "read", "issues": "write"}
-    assert "secrets" not in job
+def test_스캐폴드는_ledger_complete_caller_를_더_만들지_않고_main_checks_가_켠다():
+    # #508: job 을 줄이려 main-checks 의 단계로 옮겼다. 둘 다 있으면 이슈가 두 번 열린다.
+    assert not CALLER.exists()
+    wf = _load(SKELETON_WORKFLOWS / "main-checks.yml")
+    assert wf["jobs"]["main-checks"]["with"] == {"ledger-complete": True}
+
+
+def test_main_checks_의_ledger_단계는_옛_워크플로와_같은_판정과_이슈를_쓴다():
+    wf = _load(MAIN_CHECKS)
+    assert wf["on"]["workflow_call"]["inputs"]["ledger-complete"] == {
+        "description": wf["on"]["workflow_call"]["inputs"]["ledger-complete"]["description"],
+        "type": "boolean",
+        "default": False,
+    }
+    steps = {s["id"]: s for s in wf["jobs"]["check"]["steps"] if "id" in s}
+    step, issue = steps["ledger-complete"], steps["ledger-complete-issue"]
+    assert step["if"] == "inputs.ledger-complete" and step["continue-on-error"] is True
+    run = step["run"]
+    assert "ledger_complete.py check" in run and "--before" in run and "--root ." in run
+    assert '"$st" = "ok"' in run and '"$st" = "skipped"' in run  # 0 이어도 ok·skipped 아니면 통과가 아니다
+    assert '"$code" = "1"' in run and "status=fail" in run and "status=unknown" in run
+    assert "steps.ledger-complete.outputs.status != 'pass'" in issue["if"]
+    assert "steps.ledger-complete.outcome != 'skipped'" in issue["if"]
+    assert issue["continue-on-error"] is True
+    old = _load(WORKFLOW)["jobs"]["complete"]["steps"][-2]["run"]
+    for text in ("ledger-complete: 진행 원장이 완료로 표시돼 있지 않다", "gh issue comment", "gh issue create", "--limit 500"):
+        assert text in old and text in issue["run"]
+    final = wf["jobs"]["check"]["steps"][-1]["run"]
+    assert 'judge "ledger-complete"' in final and 'issue_failed "ledger-complete"' in final
 
 
 def test_pulls_가_비면_squash_제목의_PR_번호로_직접_조회한다(tmp_path, monkeypatch, capsys, subjects):

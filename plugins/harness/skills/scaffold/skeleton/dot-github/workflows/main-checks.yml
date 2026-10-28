@@ -1,13 +1,14 @@
 # 이 저장소(Project Repository)의 main 에 병합된 뒤 읽기 전용 검사를 돌린다(#419). gitleaks·doc-guard·
-# risk-gate·ssot-approval after-merge 와 pr-queue 를 job 하나(`main-checks`)로 합친 재사용 워크플로를 부른다.
-# 승인 없이 들어온 위험 PR 이나 실패한 채 병합된 문서는 이슈로 알린다(#95). 병합 1번에 run 이 5개 뜨던 것이 2개
-# (이 워크플로 + ledger-complete)가 된다.
+# risk-gate·ssot-approval after-merge 와 진행 원장 완료 확인(ledger-complete)을 job 하나(`main-checks`)로 합친
+# 재사용 워크플로를 부른다. 승인 없이 들어온 위험 PR 이나 실패한 채 병합된 문서는 이슈로 알린다(#95). 병합 1번에
+# run 이 2개(이 워크플로 + pr-checks 의 closed 실행)만 뜬다(#508). 병합 순서·차례 알림(pr-queue)은 PR 이 닫힐 때 도는
+# pr-checks 가 맡는다.
 #
 # doc-guard 를 돌릴지(옛 caller 의 paths)는 재사용 워크플로의 단계 `if` 가 가린다. 그래서 여기엔 paths 가 없다.
 # 병합된 main 커밋에도 옛 이름 commit status 를 달아 화면에서 결과를 볼 수 있게 한다.
 #
-# 권한: contents 는 read 뿐이다. ledger-complete 는 원장 완료 여부만 확인하는 별도 워크플로다(#445).
-# issues write 는 위반 알림 이슈용,
+# 권한: contents 는 read 뿐이다. ledger-complete 는 원장 완료 여부만 읽어 확인한다(#445).
+# issues write 는 위반 알림 이슈용(원장이 완료가 아닐 때도 포함),
 # statuses write 는 main 커밋에 status 를 다는 용도다.
 name: main-checks
 on:
@@ -17,6 +18,8 @@ on:
 jobs:
   main-checks:
     uses: jaeheeMin/blueward-harness/.github/workflows/main-checks.yml@stable
+    with:
+      ledger-complete: true
     secrets:
       TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
     permissions:

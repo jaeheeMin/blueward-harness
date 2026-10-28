@@ -1,23 +1,29 @@
 # Project Repository 가 가져다 쓰는 재사용 워크플로(#419). main 에 병합된 뒤의 읽기 전용 검사를 job 하나로 합친다.
 #
 # 왜 합쳤나(#412): main 병합 1번에 run 이 5개(doc-guard·gitleaks·risk-gate after-merge·ssot-approval
-# after-merge·ledger-complete) 뜨고 각각 1분씩 깎인다. 읽기 전용 넷에 pr-queue 를 한 job(`check`)의 단계로 옮겨
-# 엔진 checkout·uv 설치도 한 번만 하고 1분만 쓴다. 병합 1번이 5 → 2(이 job + ledger-complete)가 된다. 이 파일이
+# after-merge·ledger-complete) 뜨고 각각 1분씩 깎인다. 읽기 전용 넷을 한 job(`check`)의 단계로 옮겨
+# 엔진 checkout·uv 설치도 한 번만 하고 1분만 쓴다. 이 파일이
 # 다음 옛 워크플로의 `push: main` 경로를 대체한다(옛 파일은 public-cloud 의 옛 caller 가 `@stable` 로 부르니
 # 한 판 동안 남기고 로직이 둘인 것을 감수한다. 교체는 #420).
 #
-#   gitleaks.yml, doc-guard.yml, risk-gate.yml(after-merge job), ssot-approval.yml(after-merge job), pr-queue.yml
+#   gitleaks.yml, doc-guard.yml, risk-gate.yml(after-merge job), ssot-approval.yml(after-merge job)
 #
-# ledger-complete.yml 은 합치지 않고 따로 둔다. 예전에는 진행 원장을 main 에 직접 커밋·push 하느라 `contents: write`
-# 가 필요했고(지금은 원장을 쓰지 않는 검사기라 읽기만 한다, #445), 이 job 은 gitleaks 를 위해 외부 바이너리를 받아
-# 실행한다. 이 파일의 caller 예시에 `contents: write` 는 없고, 있어서도 안 된다(시험이 본다).
+# pr-queue 단계는 뺐다(#508). 병합 순서 계산·차례 알림은 PR 이 닫힐 때 도는 pr-checks.yml 의 pr-queue 단계가 같은
+# 계산을 하고(`closed` 에서도 돈다), 이 단계는 main push 에서 같은 일을 한 번 더 하면서 caller 권한 부족
+# (Resource not accessible)으로 매번 실패했다. 한계: 포크·Dependabot 이 일으킨 closed 이벤트는 토큰이 읽기 전용이라
+# pr-queue 가 쓰지 못하는데, 예전에는 이 push 실행이 그 빈틈을 메웠다. 이제는 다음 PR 이벤트가 바로잡는다.
+#
+# ledger-complete 는 입력 `ledger-complete: true` 를 줄 때만 단계로 돈다(#508). 따로 부르던 ledger-complete.yml
+# 은 그대로 두니(아직 그걸 부르는 caller 가 있다) 둘을 함께 켜면 이슈가 두 번 열린다 — 옮길 때 그 caller 파일을
+# 지운다. 예전에는 진행 원장을 main 에 직접 커밋·push 하느라 `contents: write` 가 필요했고(지금은 원장을 쓰지 않는
+# 검사기라 읽기만 한다, #445), 이 파일의 caller 예시에 `contents: write` 는 없고, 있어서도 안 된다(시험이 본다).
 #
 # 단계 순서: 바뀐 파일 목록 → gitleaks → doc-guard(→ 실패 이슈) → risk-gate(→ 이슈) → ssot-approval(→ 이슈)
-# → pr-queue → 종합. 단계 규칙은 pr-checks.yml 과 같다(그쪽 머리 주석을 본다). 검사 단계 넷은
-# `continue-on-error` 이고 `outputs.status` 를 pass·fail·unknown 으로 내며, 마지막 "종합" 단계가 fail·unknown
-# 이 하나라도 있으면 job 을 실패시키고 단계별로 `::error title=` 를 따로 낸다. pr-queue 는 `continue-on-error`
-# 로 돌고 종합에서 뺀다. 이슈를 여는 단계(옛 파일의 "승인 없이 들어왔으면 이슈를 연다"·"main push 실패를 이슈로
-# 알리기")도 단계 안의 내용은 옛 파일 그대로이고, 이슈를 열지 못하면 종합이 `::error` 로 job 을 실패시킨다.
+# → ledger-complete(→ 이슈, 입력이 true 일 때) → 종합. 단계 규칙은 pr-checks.yml 과 같다(그쪽 머리 주석을 본다).
+# 검사 단계 다섯은 `continue-on-error` 이고 `outputs.status` 를 pass·fail·unknown 으로 내며, 마지막 "종합" 단계가
+# fail·unknown 이 하나라도 있으면 job 을 실패시키고 단계별로 `::error title=` 를 따로 낸다. 이슈를 여는 단계
+# (옛 파일의 "승인 없이 들어왔으면 이슈를 연다"·"main push 실패를 이슈로 알리기")도 단계 안의 내용은 옛 파일 그대로이고,
+# 이슈를 열지 못하면 종합이 `::error` 로 job 을 실패시킨다.
 # 옛 파일에서 "판정 불능이면 실패" 단계였던 것은 종합이 대신한다(불능은 통과도 위반도 아니다, 원칙 7).
 #
 # commit status 는 PR 이 아니라 push 된 main 커밋(`github.sha`)에 옛 이름 그대로 `gitleaks`·`doc-guard`·
@@ -41,8 +47,10 @@
 #   jobs:
 #     main-checks:
 #       uses: jaeheeMin/blueward-harness/.github/workflows/main-checks.yml@stable
+#       with:
+#         ledger-complete: true   # 따로 부르던 ledger-complete.yml caller 를 지운 저장소만
 #       secrets:
-#         TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+#         TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}   # 이제 쓰이지 않는다(받기만 한다)
 #       permissions:
 #         contents: read
 #         pull-requests: read
@@ -59,9 +67,15 @@ on:
         description: 검사 엔진을 가져올 blueward-harness 의 ref
         type: string
         default: stable
+      ledger-complete:
+        description: 진행 원장 완료 확인 단계를 돌릴지(따로 부르는 ledger-complete.yml caller 가 없을 때만 true)
+        type: boolean
+        default: false
     secrets:
+      # pr-queue 단계를 뺀 뒤로 이 파일은 이 secret 을 쓰지 않는다. 그래도 선언은 남긴다 — 선언하지 않은 secret 을
+      # 넘기는 caller 는 오류가 나기 때문이다(옛 caller 가 아직 넘긴다).
       TEAMS_PLUGIN_ALERT_WEBHOOK:
-        description: Teams 알림 웹훅 URL(없으면 Teams 알림만 건너뜀)
+        description: 쓰이지 않음(호환용으로만 받는다)
         required: false
 
 jobs:
@@ -581,39 +595,79 @@ jobs:
 
           gh issue create --title "$title" --body "$body"
 
-      # ── pr-queue (옛 pr-queue.yml, push 경로) ────────────────────────────────
-      # main 이 움직이면 앞 PR 이 병합돼 차례가 온 PR 이 생길 수 있어 항상 돈다. 종합에서 뺀다.
-      - name: pr-queue 병합 순서 계산과 코멘트·status·알림
-        id: pr-queue
-        if: ${{ !cancelled() }}
+      # ── ledger-complete (ledger-complete.yml, 입력 ledger-complete 가 true 일 때만) ──────
+      # 병합된 PR 이 대표 [DEV-xxx] 이슈를 닫았는데 진행 원장의 그 행이 `완료` 가 아닌지 본다. 원장을 쓰지 않는다.
+      # 종료코드 0 통과(ok·skipped), 1 완료가 아님(위반), 2 와 그 밖은 판정 불능(통과도 위반도 아니다, 원칙 7).
+      # 저장소는 위에서 push 커밋으로 받았고 fetch-depth 0 이라 before..sha 범위를 그대로 쓴다.
+      - name: 진행 원장 완료 확인
+        id: ledger-complete
+        if: inputs.ledger-complete
         continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set +e
-          uv run --project .harness-engine python .harness-engine/scripts/pr_queue_actions.py \
-            --repo "$GITHUB_REPOSITORY" --event-path "$GITHUB_EVENT_PATH" --summary-file "$GITHUB_STEP_SUMMARY"
+          uv run --project .harness-engine python .harness-engine/scripts/ledger_complete.py check \
+            --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --before "$BEFORE" --root . \
+            > ledger-result.json 2> ledger-error.txt
           code=$?
-          set -e
-          case "$code" in
-            0)
-              ;;
-            1)
-              echo "::warning title=병합 순서 쓰기 실패::코멘트나 status 를 쓰지 못한 PR 이 있다. 사유는 job 요약에 있다. caller 의 permissions(pull-requests·issues·statuses: write)를 확인한다."
-              exit 1
-              ;;
-            *)
-              echo "::warning title=병합 순서 확인 불능::GitHub 를 읽지 못해 순서를 계산하지 못했거나 처리 중 예상 못 한 오류가 났다(종료코드 $code). 사유는 job 요약에 있다."
-              exit 1
-              ;;
-          esac
+          cat ledger-error.txt >&2 || true
+          cat ledger-result.json || true
+          st="$(jq -r '.status // empty' ledger-result.json 2>/dev/null)"
+          reason="$(jq -r '.reason // empty' ledger-result.json 2>/dev/null)"
+          if [ "$code" = "0" ] && { [ "$st" = "ok" ] || [ "$st" = "skipped" ]; }; then
+            status=pass
+          elif [ "$code" = "1" ]; then
+            status=fail
+          else
+            status=unknown
+            # 종료 0 인데 출력을 못 읽거나 알 수 없는 종료코드면 통과로 넘기지 않는다(검사 불능).
+            [ -n "$reason" ] || reason="ledger_complete.py 가 종료코드 $code 로 끝났고 출력을 읽지 못했다: $(head -c 500 ledger-error.txt)"
+          fi
+          [ -n "$reason" ] || reason="진행 원장이 완료로 표시돼 있지 않다."
+          # 사유에 섞인 줄바꿈이 워크플로 명령으로 읽히지 않게 한 줄로 편다.
+          reason="$(printf '%s' "$reason" | tr '\r\n' '  ')"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: 완료가 아니거나 못 봤으면 이슈를 연다
+        id: ledger-complete-issue
+        if: steps.ledger-complete.outcome != 'skipped' && steps.ledger-complete.outputs.status != 'pass'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REASON: ${{ steps.ledger-complete.outputs.reason }}
+        run: |
+          # ledger-complete.yml 과 같은 제목·본문이다(이미 열린 이슈에 코멘트만 달리게).
+          title="ledger-complete: 진행 원장이 완료로 표시돼 있지 않다"
+          reason="${REASON:-확인 단계가 결과를 내지 못했다. 원장 문제인지 알 수 없다}"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="$(printf '%s\n' \
+            "main 에 병합된 커밋 ${GITHUB_SHA} 의 진행 원장 완료 여부를 확인하지 못했거나 완료가 아니다." \
+            "" \
+            "- 실행: ${run_url}" \
+            "- 사유: ${reason}" \
+            "" \
+            "원장(audit/ledger/*.md)을 PR 로 고쳐 달라. 해당 개발 건의 상태를 \`완료\`, 마지막 PR 을 병합한 PR 번호로 바꾸면 된다. 이 워크플로는 원장을 쓰지 않는다.")"
+
+          # 같은 제목의 열린 이슈가 있으면 새로 만들지 않고 코멘트만 단다.
+          number="$(gh issue list --state open --limit 500 --json number,title \
+            | jq -r --arg t "$title" '[.[] | select(.title == $t)][0].number // empty')"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
 
       # ── 종합 ─────────────────────────────────────────────────────────────────
-      # 검사 단계 넷의 결과를 표로 쓰고, fail·unknown 이 하나라도 있으면 단계별 ::error 를 내고 job 을 실패시킨다.
-      # 이슈를 열지 못한 것도 실패다(알림이 안 나간 채 지나가면 안 된다). pr-queue 는 판정에 넣지 않고 경고만 낸다.
+      # 검사 단계의 결과를 표로 쓰고, fail·unknown 이 하나라도 있으면 단계별 ::error 를 내고 job 을 실패시킨다.
+      # 이슈를 열지 못한 것도 실패다(알림이 안 나간 채 지나가면 안 된다). status 달기 단계는 판정에 넣지 않고 경고만 낸다.
       # 대상이 아닌 단계(paths 에 안 걸린 doc-guard)만 "건너뜀" 이고, 대상인데 결과를 내지 못한 단계는 검사 불능이다(원칙 7).
       - name: 종합
         if: always()
@@ -628,7 +682,10 @@ jobs:
           R_RISK: ${{ steps.risk-gate.outputs.reason }}
           S_SSOT: ${{ steps.ssot-approval.outputs.status }}
           R_SSOT: ${{ steps.ssot-approval.outputs.reason }}
-          OUTCOME_PRQ: ${{ steps.pr-queue.outcome }}
+          LEDGER_ENABLED: ${{ inputs.ledger-complete }}
+          S_LEDGER: ${{ steps.ledger-complete.outputs.status }}
+          R_LEDGER: ${{ steps.ledger-complete.outputs.reason }}
+          OUTCOME_ISSUE_LEDGER: ${{ steps.ledger-complete-issue.outcome }}
           OUTCOME_ST_GITLEAKS: ${{ steps.gitleaks-status.outcome }}
           OUTCOME_ST_DOC_GUARD: ${{ steps.doc-guard-status.outcome }}
           OUTCOME_ST_RISK: ${{ steps.risk-gate-status.outcome }}
@@ -682,6 +739,9 @@ jobs:
           judge "doc-guard" "$S_DOC_GUARD" "$R_DOC_GUARD" "$dg_na"
           judge "risk-gate" "$S_RISK" "$R_RISK" false
           judge "ssot-approval" "$S_SSOT" "$R_SSOT" false
+          # 입력을 켜지 않은 저장소는 따로 부르는 ledger-complete.yml 이 맡으니 대상이 아니다.
+          lg_na=false; [ "$LEDGER_ENABLED" != "true" ] && lg_na=true
+          judge "ledger-complete" "$S_LEDGER" "$R_LEDGER" "$lg_na"
 
           # 알림 이슈를 열지 못하면 위반이 아무에게도 알려지지 않으므로 실패로 센다.
           issue_failed() {
@@ -692,15 +752,13 @@ jobs:
           [ "$OUTCOME_ISSUE_DG" = "failure" ] && issue_failed "doc-guard"
           [ "$OUTCOME_ISSUE_RISK" = "failure" ] && issue_failed "risk-gate"
           [ "$OUTCOME_ISSUE_SSOT" = "failure" ] && issue_failed "ssot-approval"
+          [ "$OUTCOME_ISSUE_LEDGER" = "failure" ] && issue_failed "ledger-complete"
 
-          # 판정에 넣지 않는 것: pr-queue 단계, status 달기 단계. 경고로만 남긴다.
+          # 판정에 넣지 않는 것: status 달기 단계. 경고로만 남긴다.
           warn() {
             echo "::warning title=$1::$2"
             printf '\n- ⚠️ %s: %s\n' "$1" "$2" >> "$GITHUB_STEP_SUMMARY"
           }
-          if [ "$OUTCOME_PRQ" = "failure" ]; then
-            warn "pr-queue 실패" "병합 순서 코멘트·status 를 쓰지 못했다. 판정에는 넣지 않는다. 순서 판정 불능이면 merge-order status 가 error 로 남는다."
-          fi
 
           # status 는 병합된 커밋 화면에서 사람이 보는 용도다. 달지 못해도 판정은 바꾸지 않고 경고만 남긴다.
           [ "$OUTCOME_ST_GITLEAKS" = "failure" ] && warn "gitleaks status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."

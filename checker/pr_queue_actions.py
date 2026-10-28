@@ -502,13 +502,13 @@ def fork_reason(event_path: str | None, repo: str) -> str | None:
     sender = event.get("sender")
     actor = (sender.get("login") if isinstance(sender, dict) else None) or os.environ.get("GITHUB_ACTOR") or ""
     if str(actor).lower() in READ_ONLY_ACTORS:
-        return f"{actor} 가 일으킨 실행이라 토큰이 읽기 전용이다. 코멘트·status 는 다음 이벤트(main push 등)에서 갱신된다"
+        return f"{actor} 가 일으킨 실행이라 토큰이 읽기 전용이다. 코멘트·status 는 다음 PR 이벤트(이 PR 의 다음 푸시나 다른 PR 의 열기·닫기)에서 갱신된다"
     pr = event.get("pull_request")
     if not isinstance(pr, dict):
         return None
     head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
     if head_repo is None or head_repo.lower() != repo.lower():
-        return "포크에서 온 PR 의 이벤트라 토큰이 읽기 전용이다. 코멘트·status 는 다음 이벤트(main push 등)에서 갱신된다"
+        return "포크에서 온 PR 의 이벤트라 토큰이 읽기 전용이다. 코멘트·status 는 다음 PR 이벤트(이 PR 의 다음 푸시나 다른 PR 의 열기·닫기)에서 갱신된다"
     return None
 
 

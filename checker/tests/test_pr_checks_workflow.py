@@ -62,6 +62,7 @@ def test_입력과_Teams_secret():
     assert call["inputs"]["wait-checks"]["default"] == 600
     assert call["inputs"]["comment"]["default"] is True
     assert call["secrets"]["TEAMS_PLUGIN_ALERT_WEBHOOK"]["required"] is False
+    assert call["secrets"]["TEAMS_MERGE_WEBHOOK_URL"]["required"] is False  # #508: 없으면 병합 알림만 건너뛴다
 
 
 def test_job_은_하나이고_permissions_를_적지_않고_PR_단위_취소형이다():
@@ -185,6 +186,30 @@ def test_pr_queue_는_closed_에서도_돌고_실패해도_계속한다():
     assert ".harness-engine/scripts/pr_queue_actions.py" in step["run"]
 
 
+def test_병합_Teams_알림은_기본_브랜치로_병합된_closed_에서만_secret_이_있을_때_보낸다():
+    step = _step("merge-notify")
+    cond = step["if"]
+    for part in ("github.event.action == 'closed'", "github.event.pull_request.merged == true",
+                 "github.event.pull_request.base.ref == github.event.repository.default_branch"):
+        assert part in cond
+    assert step["continue-on-error"] is True  # 이미 병합된 PR 의 필수 검사를 붉게 만들지 않는다
+    assert step["env"]["TEAMS_MERGE_WEBHOOK_URL"] == "${{ secrets.TEAMS_MERGE_WEBHOOK_URL }}"
+    assert "secrets." not in cond  # secret 은 step if 에서 못 쓴다 — 안에서 가린다
+    run = step["run"]
+    assert '[ -z "${TEAMS_MERGE_WEBHOOK_URL:-}" ]' in run and "::notice" in run and "result=skipped" in run
+    assert "application/vnd.microsoft.card.adaptive" in run and "PR이 main에 병합되었습니다" in run
+    assert "curl -sS -f" in run
+    assert _index("pr-queue") < _index("merge-notify") < len(_steps()) - 1
+
+
+def test_병합_알림_실패는_종합이_판정에는_넣지_않고_경고로_남긴다():
+    run = _steps()[-1]["run"]
+    assert "OUTCOME_MERGE_NOTIFY" in run
+    assert 'judge "merge-notify"' not in run
+    line = next(ln for ln in run.splitlines() if "OUTCOME_MERGE_NOTIFY" in ln and "warn" in ln)
+    assert "병합 Teams 알림 실패" in line
+
+
 def test_종합은_항상_돌고_네_검사만_판정하며_pr_queue_는_경고뿐이다():
     final = _steps()[-1]
     assert final["if"] == "always()"
@@ -212,4 +237,5 @@ def test_caller_예시는_이벤트와_권한과_stable_을_정한다():
     assert job["uses"] == "jaeheeMin/blueward-harness/.github/workflows/pr-checks.yml@stable"
     assert job["permissions"] == PERMISSIONS
     assert job["permissions"]["statuses"] == "write"
-    assert job["secrets"] == {"TEAMS_PLUGIN_ALERT_WEBHOOK": "${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}"}
+    assert job["secrets"]["TEAMS_PLUGIN_ALERT_WEBHOOK"] == "${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}"
+    assert job["secrets"]["TEAMS_MERGE_WEBHOOK_URL"] == "${{ secrets.TEAMS_WEBHOOK_URL }}"
