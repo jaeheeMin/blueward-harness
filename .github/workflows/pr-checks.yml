@@ -297,11 +297,14 @@ jobs:
           reason="doc-guard 검사기가 결과를 내지 못했다. job 로그를 본다."
           has_report=false
 
-          # 기준 브랜치와 비교한다. 지워진 파일은 검사할 수 없으므로 뺀다(--diff-filter=d).
+          # 기준 브랜치와 갈라진 지점부터 비교한다(세 점 `...`). HEAD 는 PR 병합 ref(그때의 기준 브랜치 + PR)라서,
+          # 그 뒤 기준 브랜치에 새로 들어온 변경이 두 점(`$base HEAD`) 차이에 반대 방향으로 섞여 들어온다(#504).
+          # 지워진 파일은 검사할 수 없으므로 뺀다(--diff-filter=d).
           # core.quotepath=false 가 없으면 git 이 비ASCII 경로를 따옴표와 8진수로 감싸 검사기가 없는 경로를 받는다.
+          # fetch 에 --depth 를 주지 않는다: checkout 의 전체 이력 위에 얕은 경계가 생기면 갈라진 지점을 못 찾는다.
           base="origin/$BASE_REF"
-          git fetch origin "$BASE_REF" --depth=1 -q
-          git -c core.quotepath=false diff --name-only --diff-filter=d "$base" HEAD > changed.txt || git -c core.quotepath=false ls-files > changed.txt
+          git fetch origin "$BASE_REF" -q
+          git -c core.quotepath=false diff --name-only --diff-filter=d "$base"...HEAD > changed.txt || git -c core.quotepath=false ls-files > changed.txt
           echo "바뀐 파일:"; cat changed.txt
 
           if [ ! -s changed.txt ]; then

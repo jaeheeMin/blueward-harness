@@ -239,3 +239,13 @@ def test_caller_예시는_이벤트와_권한과_stable_을_정한다():
     assert job["permissions"]["statuses"] == "write"
     assert job["secrets"]["TEAMS_PLUGIN_ALERT_WEBHOOK"] == "${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}"
     assert job["secrets"]["TEAMS_MERGE_WEBHOOK_URL"] == "${{ secrets.TEAMS_WEBHOOK_URL }}"
+
+
+def test_doc_guard_바뀐_파일은_갈라진_지점부터_세_점으로_구하고_얕게_받지_않는다():
+    # #504: 병합 ref(HEAD) 와 최신 기준 브랜치의 두 점 차이에는 기준 브랜치의 새 변경이 섞인다.
+    # `--depth=1` 로 받으면 전체 이력 위에 얕은 경계가 생겨 세 점 비교가 갈라진 지점을 못 찾는다.
+    run = _step("doc-guard")["run"]
+    assert 'diff --name-only --diff-filter=d "$base"...HEAD' in run
+    assert '"$base" HEAD' not in run
+    fetch_lines = [line for line in run.splitlines() if line.strip().startswith("git fetch")]
+    assert fetch_lines and all("--depth" not in line for line in fetch_lines)
