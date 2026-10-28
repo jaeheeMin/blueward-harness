@@ -125,30 +125,78 @@ def test_doc_guard_경로는_pr_checks_안의_단일_정의이고_main_checks_�
     assert _step("changed")["env"]["SSOT_PATHS"].split() == ["docs/ssot/**"]
 
 
-@pytest.mark.parametrize("name", CHECKS)
-def test_각_검사_단계_바로_뒤에_옛_이름으로_status_를_단다(name):
+EARLY = ["gitleaks", "doc-guard", "ssot-approval"]
+
+
+def test_앞_검사_셋의_status_는_한_단계에서_옛_이름으로_달고_risk_gate_보다_앞이다():
+    step = _step("early-status")
+    assert step["continue-on-error"] is True
+    assert step["if"] == "github.event.action != 'closed'"
+    assert step["env"]["SHA"] == "${{ github.event.pull_request.head.sha }}"
+    run = step["run"]
+    for name, key in (("gitleaks", "GITLEAKS"), ("doc-guard", "DOC_GUARD"), ("ssot-approval", "SSOT")):
+        assert f"post_status {name} " in run
+        assert step["env"][f"OUTCOME_{key}"] == f"${{{{ steps.{name}.outcome }}}}"
+        assert step["env"][f"RESULT_{key}"] == f"${{{{ steps.{name}.outputs.status }}}}"
+    # uv 를 띄우지 않고 표준 라이브러리만 쓰는 같은 스크립트를 부른다(#515).
+    assert "uv run" not in run
+    assert "python3 .harness-engine/scripts/step_status.py" in run and step["env"]["PYTHONPATH"] == ".harness-engine"
+    assert '--sha "$SHA"' in run and "--target-url" in run
+    # 건너뛴 검사의 status 는 달지 않고, 못 단 이름은 failed 출력에 남기며 마지막에 실패 코드로 끝낸다.
+    assert '[ "$outcome" = "skipped" ] && return 0' in run
+    assert 'echo "failed=$failed" >> "$GITHUB_OUTPUT"' in run and run.rstrip().endswith('[ -z "$failed" ]')
+    for dropped in ("gitleaks-status", "doc-guard-status", "ssot-approval-status"):
+        assert not any(s.get("id") == dropped for s in _steps())
+    # risk-gate 가 앞 검사 status 를 API 로 읽으므로 그 앞에 와야 한다. 판정 단계들은 모두 이 단계보다 앞이다.
+    assert _index("ssot-approval") < _index("ledger-ready") < _index("early-status") < _index("risk-gate")
+
+
+def test_risk_gate_status_는_risk_gate_바로_뒤에서_옛_이름으로_단다():
     steps = _steps()
-    i = _index(name)
+    i = _index("risk-gate")
     status = steps[i + 1]
-    assert status["id"] == f"{name}-status"
+    assert status["id"] == "risk-gate-status"
     assert status["continue-on-error"] is True
     assert "github.event.action != 'closed'" in status["if"]
     assert status["env"]["SHA"] == "${{ github.event.pull_request.head.sha }}"
-    assert status["env"]["RESULT"] == f"${{{{ steps.{name}.outputs.status }}}}"
+    assert status["env"]["RESULT"] == "${{ steps.risk-gate.outputs.status }}"
     run = status["run"]
-    assert ".harness-engine/scripts/step_status.py" in run
-    assert f"--context {name} " in run
-    assert '--sha "$SHA"' in run and "--target-url" in run
+    assert "python3 .harness-engine/scripts/step_status.py" in run and "uv run" not in run
+    assert "--context risk-gate " in run and '--sha "$SHA"' in run and "--target-url" in run
 
 
 def test_코멘트_단계는_옛_마커를_그대로_쓴다():
     text = WORKFLOW.read_text(encoding="utf-8")
-    for marker in ("<!-- doc-guard -->", "<!-- ssot-approval -->", "<!-- risk-gate -->"):
+    for marker in ("<!-- doc-guard -->", "<!-- ssot-approval -->", "<!-- risk-gate -->", "<!-- ledger-ready -->"):
         assert marker in text
-    # doc-guard 코멘트만 comment 입력으로 끈다.
-    assert "inputs.comment" in _step("doc-guard-comment")["if"]
-    for step_id in ("doc-guard-comment", "ssot-approval-comment", "risk-gate-comment"):
-        assert _step(step_id)["continue-on-error"] is True
+    # 앞 검사 셋과 ledger-ready 의 코멘트는 한 단계다. doc-guard 코멘트만 comment 입력으로 끈다.
+    step = _step("early-comments")
+    assert step["continue-on-error"] is True
+    assert "inputs.comment" in step["if"] and "inputs.comment" in step["env"]["RUN_DOC_GUARD"]
+    assert "github.event.action != 'closed'" in step["if"]
+    for dropped in ("doc-guard-comment", "ssot-approval-comment", "ledger-ready-comment"):
+        assert not any(s.get("id") == dropped for s in _steps())
+    script = step["with"]["script"]
+    # 하나가 실패해도 나머지를 계속하고 이름을 출력으로 남기며, 지울 코멘트(body null)와 요약 쓰기는 예전과 같다.
+    assert "core.setOutput('failed'" in script and "core.setFailed(" in script
+    assert "deleteComment" in script and "core.summary.addRaw" in script
+    assert _step("risk-gate-comment")["continue-on-error"] is True
+
+
+def test_종합은_앞_검사_status_코멘트_실패를_이름별로_경고한다():
+    final = _steps()[-1]
+    run = final["run"]
+    env = final["env"]
+    assert env["OUTCOME_ST_EARLY"] == "${{ steps.early-status.outcome }}"
+    assert env["FAILED_ST_EARLY"] == "${{ steps.early-status.outputs.failed }}"
+    assert env["OUTCOME_COMMENTS_EARLY"] == "${{ steps.early-comments.outcome }}"
+    assert env["FAILED_COMMENTS_EARLY"] == "${{ steps.early-comments.outputs.failed }}"
+    for title in ("gitleaks status 못 담", "doc-guard status 못 담", "ssot-approval status 못 담",
+                  "doc-guard 코멘트 실패", "ssot-approval 코멘트 실패", "ledger-ready 코멘트 실패"):
+        line = next(ln for ln in run.splitlines() if f'warn "{title}"' in ln)
+        assert "early_failed" in line
+    # 이름을 못 남기고 단계만 실패했으면 셋 다 경고한다(원인을 모르므로 조용히 넘기지 않는다).
+    assert '[ -z "$names" ] && return 0' in run
 
 
 def test_risk_gate_는_wait_checks_로_판정한다():
@@ -166,7 +214,7 @@ def test_ledger_ready_는_원장_완료를_판정하고_종합에_들어간다()
         assert token in step["run"]
     assert (ROOT / "scripts" / "ledger_ready.py").is_file()
     # 코멘트는 마커로 갱신하고, 새 commit status 는 달지 않는다(종합이 곧 필수 검사 pr-checks / check 다).
-    assert _step("ledger-ready-comment")["continue-on-error"] is True
+    assert _step("early-comments")["continue-on-error"] is True  # ledger-ready 코멘트도 이 단계에서 갱신한다(#515)
     assert "<!-- ledger-ready -->" in WORKFLOW.read_text(encoding="utf-8")
     assert not any(s.get("id") == "ledger-ready-status" for s in _steps())
     run = _steps()[-1]["run"]

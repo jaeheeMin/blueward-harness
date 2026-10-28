@@ -14,8 +14,9 @@
 #   1. 검사 단계 넷(과 새 ledger-ready)은 `continue-on-error` 이고 `outputs.status` 를 pass·fail·unknown 으로 낸다. 앞 단계가
 #      검사 불능이어도 뒤 단계를 건너뛰지 않는다(CLAUDE.md 원칙 7: 모르면 검사한다). 마지막 "종합" 단계가
 #      fail·unknown 이 하나라도 있으면 job 을 실패시키고, 단계별로 `::error title=` 를 따로 낸다.
-#   2. 각 검사 단계 직후에 그 PR head sha 에 옛 이름(`gitleaks`·`doc-guard`·`ssot-approval`·`risk-gate`)의
-#      commit status 를 단다(success / failure / error). 엔진(`risk_gate` 의 checks 기준,
+#   2. 검사 단계가 끝나면 그 PR head sha 에 옛 이름(`gitleaks`·`doc-guard`·`ssot-approval`·`risk-gate`)의
+#      commit status 를 단다(success / failure / error). 앞 셋은 한 단계(`early-status`)에서 달고(#515), risk-gate 는
+#      자기 판정 뒤에 단다. 코멘트 갱신도 앞 셋과 ledger-ready 를 한 단계(`early-comments`)에서 한다. 엔진(`risk_gate` 의 checks 기준,
 #      `pr_queue.GATE_GROUPS`, `pr_approvals`)과 훅이 읽는 이름이 그대로 살아 있게 하려는 것이다. status 는
 #      job 이 아니라 과금이 없다. risk-gate 단계는 앞 단계가 단 status 를 API 로 읽는다. GitHub 에는 job
 #      `pr-checks / check` 하나가 뜨고 엔진은 그 job 을 기다리지 않는다(risk_gate.EXCLUDED_CHECK_GROUPS).
@@ -251,27 +252,6 @@ jobs:
           esac
           exit 0
 
-      - name: gitleaks status 달기
-        id: gitleaks-status
-        if: github.event.action != 'closed' && steps.gitleaks.outcome != 'skipped'
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-          RESULT: ${{ steps.gitleaks.outputs.status }}
-          REASON: ${{ steps.gitleaks.outputs.reason }}
-          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          result="${RESULT:-unknown}"
-          desc="${REASON:-}"
-          if [ -z "$desc" ]; then
-            if [ "$result" = "pass" ]; then desc="비밀값이 발견되지 않았다"; else desc="단계가 결과를 내지 못했다"; fi
-          fi
-          uv run --project .harness-engine python .harness-engine/scripts/step_status.py \
-            --repo "$GITHUB_REPOSITORY" --sha "$SHA" --context gitleaks --result "$result" \
-            --description "$desc" --target-url "$TARGET_URL"
-
       - name: gitleaks 리포트 올리기(값은 가려져 있다)
         if: always() && steps.gitleaks.outputs.leak == 'true'
         uses: actions/upload-artifact@v4
@@ -369,49 +349,6 @@ jobs:
           echo "has_report=$has_report" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: doc-guard status 달기
-        id: doc-guard-status
-        if: github.event.action != 'closed' && steps.doc-guard.outcome != 'skipped'
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-          RESULT: ${{ steps.doc-guard.outputs.status }}
-          REASON: ${{ steps.doc-guard.outputs.reason }}
-          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          result="${RESULT:-unknown}"
-          desc="${REASON:-}"
-          if [ -z "$desc" ]; then
-            if [ "$result" = "pass" ]; then desc="통과"; else desc="단계가 결과를 내지 못했다"; fi
-          fi
-          uv run --project .harness-engine python .harness-engine/scripts/step_status.py \
-            --repo "$GITHUB_REPOSITORY" --sha "$SHA" --context doc-guard --result "$result" \
-            --description "$desc" --target-url "$TARGET_URL"
-
-      - name: doc-guard PR 에 남기기
-        if: inputs.comment && github.event.action != 'closed' && steps.doc-guard.outputs.has_report == 'true'
-        id: doc-guard-comment
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync('comment.md', 'utf8');
-            const marker = '<!-- doc-guard -->';
-            const { owner, repo } = context.repo;
-            const issue_number = context.issue.number;
-            const existing = await github.rest.issues.listComments({ owner, repo, issue_number });
-            const mine = existing.data.find(c => c.body.includes(marker));
-            // 새 코멘트를 쌓지 않고 하나를 고쳐 쓴다. PR 하나에 코멘트가 줄줄이
-            // 달리면 무엇이 최신인지 알기 어렵다.
-            if (mine) {
-              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body });
-            }
-
       # ── ssot-approval (옛 ssot-approval.yml 의 check job) ────────────────────
       # 승인 뒤 옛 실패 실행을 다시 돌리는 단계는 pull_request_review 전용이라 pr-review.yml(#419)에 있다.
       - name: ssot-approval 판정
@@ -446,74 +383,6 @@ jobs:
               ;;
           esac
           exit 0
-
-      - name: ssot-approval status 달기
-        id: ssot-approval-status
-        if: github.event.action != 'closed' && steps.ssot-approval.outcome != 'skipped'
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-          RESULT: ${{ steps.ssot-approval.outputs.status }}
-          REASON: ${{ steps.ssot-approval.outputs.reason }}
-          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          result="${RESULT:-unknown}"
-          desc="${REASON:-}"
-          if [ -z "$desc" ]; then
-            if [ "$result" = "pass" ]; then desc="통과"; else desc="단계가 결과를 내지 못했다"; fi
-          fi
-          uv run --project .harness-engine python .harness-engine/scripts/step_status.py \
-            --repo "$GITHUB_REPOSITORY" --sha "$SHA" --context ssot-approval --result "$result" \
-            --description "$desc" --target-url "$TARGET_URL"
-
-      - name: ssot-approval PR 코멘트 갱신
-        if: github.event.action != 'closed' && steps.ssot-approval.outcome != 'skipped'
-        id: ssot-approval-comment
-        continue-on-error: true
-        uses: actions/github-script@v7
-        env:
-          EXIT_CODE: ${{ steps.ssot-approval.outputs.exit-code }}
-        with:
-          script: |
-            const fs = require('fs');
-            const marker = '<!-- ssot-approval -->';
-            const { owner, repo } = context.repo;
-            const issue_number = context.payload.pull_request.number;
-            const code = process.env.EXIT_CODE;
-
-            let result = {};
-            try { result = JSON.parse(fs.readFileSync('ssot-result.json', 'utf8')); } catch (e) {}
-
-            let body;
-            if (code === '0' && !result.touches_ssot) {
-              // docs/ssot 를 바꾸지 않은 PR 이다. 이 검사와 무관하니 코멘트를
-              // 달지도, 이미 있는 것을 지우지도 않는다 — 무관한 PR 에 코멘트가
-              // 남으면 소음이다.
-              body = null;
-            } else if (code === '0') {
-              body = `${marker}\n## ssot-approval\n\n✅ SRS 변경 승인됨 (${result.reason || ''})`;
-            } else if (code === '1') {
-              body = `${marker}\n## ssot-approval\n\n⚠️ SRS 변경 승인 필요 — docs/ssot 를 바꾼 PR 은 작성자가 아닌 승인자의 Approve 가 있어야 한다. 승인자: \`.github/ssot-approvers\` 에서 이 PR 작성자에게 정해진 사람(작성자 본인 제외, 파일이 비어 있으면 누구든)\n\n사유: ${result.reason || '승인이 없다.'}`;
-            } else {
-              let errText = '';
-              try { errText = fs.readFileSync('ssot-error.txt', 'utf8'); } catch (e) {}
-              const detail = (result.reason || errText).slice(0, 1000);
-              body = `${marker}\n## ssot-approval\n\n⚠️ SRS 승인 검사 불능 — 이것은 이 PR 의 문제가 아니다. 저장소 관리자에게 알려야 한다.\n\n\`\`\`\n${detail}\n\`\`\``;
-            }
-
-            const existing = await github.rest.issues.listComments({ owner, repo, issue_number });
-            const mine = existing.data.find(c => c.body.includes(marker));
-            if (body === null) {
-              if (mine) await github.rest.issues.deleteComment({ owner, repo, comment_id: mine.id });
-              return;
-            }
-            if (mine) {
-              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body });
-            }
 
       # ── ledger-ready (#479, 새 단계) ─────────────────────────────────────────
       # PR 본문이 대표 `[DEV-xxx]` 이슈를 Closes 하는데 PR head 의 원장 행이 `완료` 가 아니면 위반이다. 옛 판으로
@@ -553,34 +422,149 @@ jobs:
           esac
           exit 0
 
-      - name: ledger-ready 요약과 PR 코멘트 갱신
-        id: ledger-ready-comment
-        if: github.event.action != 'closed' && steps.ledger-ready.outcome != 'skipped'
+      # ── 앞 검사 셋의 status·코멘트 한 번에 (#515) ────────────────────────────
+      # 예전에는 검사 단계마다 status 단계(uv 로 파이썬을 띄움)와 코멘트 단계(github-script)가 따로 있어, 단계 시작
+      # 비용이 검사 수만큼 들었다. 이제 gitleaks·doc-guard·ssot-approval 의 옛 이름 status 를 한 단계에서 달고
+      # (uv 없이 `python3` 로 같은 step_status.py 를 부른다 — 표준 라이브러리만 쓴다), 코멘트도 한 단계에서 갱신한다.
+      # ledger-ready 의 코멘트도 여기서 같이 한다(판정은 위에서 끝났다). risk-gate 는 이 status 를 API 로 읽으니 그 앞에 와야 한다.
+      # 단계가 건너뛰어졌으면(대상 아님) 그 검사의 status 는 달지 않는다 — 예전 status 단계의 `outcome != 'skipped'` 조건과 같다.
+      # 어느 하나를 못 달아도 나머지는 계속하고, 못 단 이름을 `failed` 출력에 남겨 종합이 경고로 알린다(판정에는 안 넣는다).
+      - name: 앞 검사 status 달기
+        id: early-status
+        if: github.event.action != 'closed'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: .harness-engine
+          SHA: ${{ github.event.pull_request.head.sha }}
+          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OUTCOME_GITLEAKS: ${{ steps.gitleaks.outcome }}
+          RESULT_GITLEAKS: ${{ steps.gitleaks.outputs.status }}
+          REASON_GITLEAKS: ${{ steps.gitleaks.outputs.reason }}
+          OUTCOME_DOC_GUARD: ${{ steps.doc-guard.outcome }}
+          RESULT_DOC_GUARD: ${{ steps.doc-guard.outputs.status }}
+          REASON_DOC_GUARD: ${{ steps.doc-guard.outputs.reason }}
+          OUTCOME_SSOT: ${{ steps.ssot-approval.outcome }}
+          RESULT_SSOT: ${{ steps.ssot-approval.outputs.status }}
+          REASON_SSOT: ${{ steps.ssot-approval.outputs.reason }}
+        run: |
+          set +e
+          failed=""
+          post_status() {
+            local context="$1" outcome="$2" result="${3:-unknown}" desc="${4:-}" pass_desc="$5"
+            [ "$outcome" = "skipped" ] && return 0
+            if [ -z "$desc" ]; then
+              if [ "$result" = "pass" ]; then desc="$pass_desc"; else desc="단계가 결과를 내지 못했다"; fi
+            fi
+            python3 .harness-engine/scripts/step_status.py \
+              --repo "$GITHUB_REPOSITORY" --sha "$SHA" --context "$context" --result "$result" \
+              --description "$desc" --target-url "$TARGET_URL" || failed="${failed}${context},"
+          }
+          post_status gitleaks "$OUTCOME_GITLEAKS" "$RESULT_GITLEAKS" "$REASON_GITLEAKS" "비밀값이 발견되지 않았다"
+          post_status doc-guard "$OUTCOME_DOC_GUARD" "$RESULT_DOC_GUARD" "$REASON_DOC_GUARD" "통과"
+          post_status ssot-approval "$OUTCOME_SSOT" "$RESULT_SSOT" "$REASON_SSOT" "통과"
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          [ -z "$failed" ]
+
+      - name: 앞 검사 PR 코멘트 갱신
+        id: early-comments
+        if: github.event.action != 'closed' && ((inputs.comment && steps.doc-guard.outputs.has_report == 'true') || steps.ssot-approval.outcome != 'skipped' || steps.ledger-ready.outcome != 'skipped')
         continue-on-error: true
         uses: actions/github-script@v7
+        env:
+          RUN_DOC_GUARD: ${{ inputs.comment && steps.doc-guard.outputs.has_report == 'true' }}
+          RUN_SSOT: ${{ steps.ssot-approval.outcome != 'skipped' }}
+          RUN_LEDGER: ${{ steps.ledger-ready.outcome != 'skipped' }}
+          EXIT_CODE_SSOT: ${{ steps.ssot-approval.outputs.exit-code }}
         with:
           script: |
             const fs = require('fs');
-            const marker = '<!-- ledger-ready -->';
             const { owner, repo } = context.repo;
             const issue_number = context.payload.pull_request.number;
-            let body = '';
-            try { body = fs.readFileSync('ledger-ready.md', 'utf8'); } catch (e) {}
-            body = body.trim() ? body : null;
-            if (body !== null) {
-              await core.summary.addRaw(body.replace(marker + '\n', ''), true).write();
+
+            // 코멘트 목록은 한 번만 받는다. 마커가 서로 달라 한 검사의 쓰기가 다른 검사의 조회를 바꾸지 않는다.
+            let listing = null;
+            const findMine = async (marker) => {
+              if (!listing) listing = github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+              const existing = await listing;
+              return existing.data.find(c => c.body.includes(marker));
+            };
+            // body 가 null 이면 이미 있는 코멘트만 지운다. 아니면 새 코멘트를 쌓지 않고 하나를 고쳐 쓴다.
+            // PR 하나에 코멘트가 줄줄이 달리면 무엇이 최신인지 알기 어렵다.
+            const upsert = async (marker, body) => {
+              const mine = await findMine(marker);
+              if (body === null) {
+                if (mine) await github.rest.issues.deleteComment({ owner, repo, comment_id: mine.id });
+                return;
+              }
+              if (mine) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              }
+            };
+
+            const docGuard = async () => {
+              const body = fs.readFileSync('comment.md', 'utf8');
+              await upsert('<!-- doc-guard -->', body);
+            };
+
+            const ssotApproval = async () => {
+              const marker = '<!-- ssot-approval -->';
+              const code = process.env.EXIT_CODE_SSOT;
+
+              let result = {};
+              try { result = JSON.parse(fs.readFileSync('ssot-result.json', 'utf8')); } catch (e) {}
+
+              let body;
+              if (code === '0' && !result.touches_ssot) {
+                // docs/ssot 를 바꾸지 않은 PR 이다. 이 검사와 무관하니 코멘트를
+                // 달지도, 이미 있는 것을 지우지도 않는다 — 무관한 PR 에 코멘트가
+                // 남으면 소음이다.
+                body = null;
+              } else if (code === '0') {
+                body = `${marker}\n## ssot-approval\n\n✅ SRS 변경 승인됨 (${result.reason || ''})`;
+              } else if (code === '1') {
+                body = `${marker}\n## ssot-approval\n\n⚠️ SRS 변경 승인 필요 — docs/ssot 를 바꾼 PR 은 작성자가 아닌 승인자의 Approve 가 있어야 한다. 승인자: \`.github/ssot-approvers\` 에서 이 PR 작성자에게 정해진 사람(작성자 본인 제외, 파일이 비어 있으면 누구든)\n\n사유: ${result.reason || '승인이 없다.'}`;
+              } else {
+                let errText = '';
+                try { errText = fs.readFileSync('ssot-error.txt', 'utf8'); } catch (e) {}
+                const detail = (result.reason || errText).slice(0, 1000);
+                body = `${marker}\n## ssot-approval\n\n⚠️ SRS 승인 검사 불능 — 이것은 이 PR 의 문제가 아니다. 저장소 관리자에게 알려야 한다.\n\n\`\`\`\n${detail}\n\`\`\``;
+              }
+              await upsert(marker, body);
+            };
+
+            const ledgerReady = async () => {
+              const marker = '<!-- ledger-ready -->';
+              let body = '';
+              try { body = fs.readFileSync('ledger-ready.md', 'utf8'); } catch (e) {}
+              body = body.trim() ? body : null;
+              if (body !== null) {
+                await core.summary.addRaw(body.replace(marker + '\n', ''), true).write();
+              }
+              await upsert(marker, body);
+            };
+
+            // 하나가 실패해도 나머지는 계속한다. 실패한 이름은 출력으로 남겨 종합이 경고한다.
+            const failed = [];
+            const parts = [
+              ['doc-guard', process.env.RUN_DOC_GUARD, docGuard],
+              ['ssot-approval', process.env.RUN_SSOT, ssotApproval],
+              ['ledger-ready', process.env.RUN_LEDGER, ledgerReady],
+            ];
+            for (const [name, run, part] of parts) {
+              if (run !== 'true') continue;
+              try {
+                await part();
+              } catch (e) {
+                core.warning(`${name} 코멘트를 갱신하지 못했다: ${e.message}`);
+                failed.push(name);
+              }
             }
-            const existing = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
-            const mine = existing.data.find(c => c.body.includes(marker));
-            if (body === null) {
-              if (mine) await github.rest.issues.deleteComment({ owner, repo, comment_id: mine.id });
-              return;
-            }
-            if (mine) {
-              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body });
-            }
+            core.setOutput('failed', failed.join(','));
+            if (failed.length) core.setFailed(`PR 코멘트를 갱신하지 못한 검사: ${failed.join(', ')}`);
 
       # ── risk-gate (옛 risk-gate.yml 의 check job) ────────────────────────────
       # 앞 단계가 이미 단 gitleaks·doc-guard·ssot-approval status 를 API 로 읽으니 기다릴 일은 job 밖의
@@ -626,6 +610,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: .harness-engine
           SHA: ${{ github.event.pull_request.head.sha }}
           RESULT: ${{ steps.risk-gate.outputs.status }}
           REASON: ${{ steps.risk-gate.outputs.reason }}
@@ -636,7 +621,7 @@ jobs:
           if [ -z "$desc" ]; then
             if [ "$result" = "pass" ]; then desc="통과"; else desc="단계가 결과를 내지 못했다"; fi
           fi
-          uv run --project .harness-engine python .harness-engine/scripts/step_status.py \
+          python3 .harness-engine/scripts/step_status.py \
             --repo "$GITHUB_REPOSITORY" --sha "$SHA" --context risk-gate --result "$result" \
             --description "$desc" --target-url "$TARGET_URL"
 
@@ -819,17 +804,15 @@ jobs:
           R_SSOT: ${{ steps.ssot-approval.outputs.reason }}
           S_LEDGER: ${{ steps.ledger-ready.outputs.status }}
           R_LEDGER: ${{ steps.ledger-ready.outputs.reason }}
-          OUTCOME_COMMENT_LEDGER: ${{ steps.ledger-ready-comment.outcome }}
           S_RISK: ${{ steps.risk-gate.outputs.status }}
           R_RISK: ${{ steps.risk-gate.outputs.reason }}
           OUTCOME_PRQ: ${{ steps.pr-queue.outcome }}
           OUTCOME_MERGE_NOTIFY: ${{ steps.merge-notify.outcome }}
-          OUTCOME_ST_GITLEAKS: ${{ steps.gitleaks-status.outcome }}
-          OUTCOME_ST_DOC_GUARD: ${{ steps.doc-guard-status.outcome }}
-          OUTCOME_ST_SSOT: ${{ steps.ssot-approval-status.outcome }}
+          OUTCOME_ST_EARLY: ${{ steps.early-status.outcome }}
+          FAILED_ST_EARLY: ${{ steps.early-status.outputs.failed }}
           OUTCOME_ST_RISK: ${{ steps.risk-gate-status.outcome }}
-          OUTCOME_COMMENT_DG: ${{ steps.doc-guard-comment.outcome }}
-          OUTCOME_COMMENT_SSOT: ${{ steps.ssot-approval-comment.outcome }}
+          OUTCOME_COMMENTS_EARLY: ${{ steps.early-comments.outcome }}
+          FAILED_COMMENTS_EARLY: ${{ steps.early-comments.outputs.failed }}
           OUTCOME_COMMENT_RISK: ${{ steps.risk-gate-comment.outcome }}
         run: |
           set +e
@@ -891,15 +874,24 @@ jobs:
             warn "pr-queue 실패" "병합 순서 코멘트·status 를 쓰지 못했다. 판정에는 넣지 않는다. GitHub 를 못 읽어 계산하지 못했으면 status 를 쓰기 전에 끝나 merge-order status 는 이전 값 그대로다."
           fi
           [ "$OUTCOME_MERGE_NOTIFY" = "failure" ] && warn "병합 Teams 알림 실패" "Teams 로 병합 알림을 보내지 못했다(웹훅 URL 만료·오류 가능). 이미 병합된 PR 이라 판정에는 넣지 않는다. TEAMS_MERGE_WEBHOOK_URL secret 을 확인한다."
-          [ "$OUTCOME_COMMENT_DG" = "failure" ] && warn "doc-guard 코멘트 실패" "PR 코멘트를 쓰지 못했다. 결과는 job 요약에 있다."
-          [ "$OUTCOME_COMMENT_SSOT" = "failure" ] && warn "ssot-approval 코멘트 실패" "PR 코멘트를 갱신하지 못했다."
-          [ "$OUTCOME_COMMENT_LEDGER" = "failure" ] && warn "ledger-ready 코멘트 실패" "PR 코멘트를 갱신하지 못했다. 결과는 job 요약에 있다."
+          # 앞 검사의 코멘트·status 는 한 단계에서 달기 때문에, 못 단 이름은 그 단계의 `failed` 출력에 있다.
+          # 단계가 실패했는데 이름을 못 남겼으면(단계 자체가 죽음) 원인을 모르므로 셋 다 경고한다.
+          early_failed() {
+            local outcome="$1" names="$2" name="$3"
+            [ "$outcome" = "failure" ] || return 1
+            [ -z "$names" ] && return 0
+            case ",$names," in *",$name,"*) return 0 ;; esac
+            return 1
+          }
+          early_failed "$OUTCOME_COMMENTS_EARLY" "$FAILED_COMMENTS_EARLY" doc-guard && warn "doc-guard 코멘트 실패" "PR 코멘트를 쓰지 못했다. 결과는 job 요약에 있다."
+          early_failed "$OUTCOME_COMMENTS_EARLY" "$FAILED_COMMENTS_EARLY" ssot-approval && warn "ssot-approval 코멘트 실패" "PR 코멘트를 갱신하지 못했다."
+          early_failed "$OUTCOME_COMMENTS_EARLY" "$FAILED_COMMENTS_EARLY" ledger-ready && warn "ledger-ready 코멘트 실패" "PR 코멘트를 갱신하지 못했다. 결과는 job 요약에 있다."
           [ "$OUTCOME_COMMENT_RISK" = "failure" ] && warn "risk-gate 코멘트 실패" "PR 코멘트를 갱신하지 못했다."
 
           # status 를 달지 못하면 훅·엔진이 옛 이름 검사를 못 읽는다. 판정은 바꾸지 않고 경고만 남긴다.
-          [ "$OUTCOME_ST_GITLEAKS" = "failure" ] && warn "gitleaks status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
-          [ "$OUTCOME_ST_DOC_GUARD" = "failure" ] && warn "doc-guard status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
-          [ "$OUTCOME_ST_SSOT" = "failure" ] && warn "ssot-approval status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
+          early_failed "$OUTCOME_ST_EARLY" "$FAILED_ST_EARLY" gitleaks && warn "gitleaks status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
+          early_failed "$OUTCOME_ST_EARLY" "$FAILED_ST_EARLY" doc-guard && warn "doc-guard status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
+          early_failed "$OUTCOME_ST_EARLY" "$FAILED_ST_EARLY" ssot-approval && warn "ssot-approval status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
           [ "$OUTCOME_ST_RISK" = "failure" ] && warn "risk-gate status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
 
           if [ "$closed" = "true" ]; then

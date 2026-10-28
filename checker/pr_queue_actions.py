@@ -30,8 +30,10 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable
 
 from checker import pr_queue
@@ -48,6 +50,9 @@ TEAMS_ENV = "TEAMS_PLUGIN_ALERT_WEBHOOK"
 EXIT_OK = 0
 EXIT_WRITE_FAILED = 1
 EXIT_CANNOT_READ = 2
+READ_WORKERS = 6  # PR 별 읽기(코멘트·status)를 동시에 보내는 수(#515). 쓰기는 순서와 2차 속도 제한 때문에 하나씩 한다
+RATE_LIMIT_RETRIES = 3
+RATE_LIMIT_BACKOFF = (1.0, 2.0, 4.0)  # 재시도 전에 기다리는 초
 EXIT_UNEXPECTED = 2  # 처리 중 예상 못 한 오류. 쓰기 실패(1)와 달리 어디까지 썼는지 모르므로 읽기 불능과 같은 코드를 쓴다
 
 _AFTER_MARK = re.compile(r"<!--\s*pr-queue:after=([0-9,?]*)\s*-->")
@@ -257,9 +262,49 @@ def _write_comment(client: Any, repo: str, number: int, body: str, existing: dic
     return "created"
 
 
-def _write_status(client: Any, repo: str, sha: str, state: str, description: str) -> str:
+def _is_rate_limit(exc: GhError) -> bool:
+    """403·429 이면서 메시지에 속도 제한이 적힌 읽기 실패. 권한 부족(403)과 구분한다."""
+    return exc.status in (403, 429) and "rate limit" in str(exc).lower()
+
+
+def _read_with_retry(fn: Callable[..., Any], *args: Any, sleep: Callable[[float], None] | None = None) -> Any:
+    """읽기 한 건. 속도 제한(2차 포함)이면 기다렸다가 몇 번 다시 한다. 그 밖의 실패는 그대로 올린다."""
+    sleep = sleep or time.sleep
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        try:
+            return fn(*args)
+        except GhError as exc:
+            if attempt >= RATE_LIMIT_RETRIES or not _is_rate_limit(exc):
+                raise
+            sleep(RATE_LIMIT_BACKOFF[min(attempt, len(RATE_LIMIT_BACKOFF) - 1)])
+
+
+def _prefetch(client: Any, repo: str, prs: list[dict]) -> tuple[dict[int, Future], dict[int, Future]]:
+    """열린 PR 마다 코멘트와 head 커밋 status 를 미리 읽는다(#515). 결과는 `.result()` 를 부르는 자리에서 예외로 나온다.
+
+    예전에는 PR 하나씩 읽고 쓰는 순서였다. 읽기는 서로 독립이고 이 단계의 쓰기가 다른 PR 의 코멘트·status 를 바꾸지 않아
+    먼저 동시에 읽어도 결과가 같다. 판정과 쓰기는 호출한 쪽이 원래 순서대로 한다.
+    """
+    comments: dict[int, Future] = {}
+    statuses: dict[int, Future] = {}
+    with ThreadPoolExecutor(max_workers=READ_WORKERS) as pool:
+        for item in prs:
+            n = item["number"]
+            comments[n] = pool.submit(_read_with_retry, fetch_pr_comments, client, repo, n)
+            if item.get("sha"):
+                statuses[n] = pool.submit(_read_with_retry, _read_combined_status, client, repo, item["sha"])
+    return comments, statuses  # with 를 빠져나오면 모든 읽기가 끝나 있다
+
+
+def _read_combined_status(client: Any, repo: str, sha: str) -> dict:
+    return client.get_json(f"repos/{repo}/commits/{sha}/status") or {}
+
+
+def _write_status(
+    client: Any, repo: str, sha: str, state: str, description: str, combined_future: Future | None = None
+) -> str:
     try:
-        combined = client.get_json(f"repos/{repo}/commits/{sha}/status") or {}
+        combined = combined_future.result() if combined_future is not None else _read_combined_status(client, repo, sha)
         for s in combined.get("statuses") or []:
             if s.get("context") == STATUS_CONTEXT and s.get("state") == state and (s.get("description") or "") == description:
                 return "unchanged"
@@ -331,6 +376,7 @@ def apply(
     by_number = {it["number"]: it for it in prs}
     titles = {it["number"]: it["title"] for it in prs}
     merged_cache: dict[int, bool] = {}
+    comment_reads, status_reads = _prefetch(client, repo, prs) if write else ({}, {})
 
     def is_merged(m: int) -> bool:
         if m not in merged_cache:
@@ -347,7 +393,7 @@ def apply(
         if not write:
             continue
         try:
-            comments = fetch_pr_comments(client, repo, n)
+            comments = comment_reads[n].result()
         except GhError as exc:
             report.read_errors.append(f"#{n} 의 코멘트를 읽지 못함: {exc}")
             continue
@@ -380,7 +426,7 @@ def apply(
             report.write_errors.append(f"#{n} status: head 커밋을 읽지 못함")
             continue
         try:
-            report.statuses[_write_status(client, repo, sha, state, description)] += 1
+            report.statuses[_write_status(client, repo, sha, state, description, status_reads.get(n))] += 1
         except GhError as exc:
             report.write_errors.append(f"#{n} status: {exc}")
     return report
