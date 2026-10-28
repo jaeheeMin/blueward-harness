@@ -912,8 +912,11 @@ def _crit_write_auth(ctx: Context) -> list[Finding]:
         except CodeConfigError as exc:  # code_checks.yaml 설정 오류 — 통과로 뭉개지 않는다
             findings.append(_write_auth_unknown(path, f"검사 오류: {exc}"))
             continue
-        if any(f["rule"] == "CR-009" and not f["allowed"] for f in found):
+        open_hits = [f for f in found if f["rule"] == "CR-009" and not f["allowed"]]
+        if any("PRIVILEGED" not in f["message"] for f in open_hits):
             findings.append(Finding("write_auth", f"쓰기 앱인데 권한 검사 없음: {path}"))
+        if any("PRIVILEGED" in f["message"] for f in open_hits):
+            findings.append(Finding("write_auth", f"권한을 표준에 맡기고 EML 을 PRIVILEGED 로 부름: {path}"))
     return findings
 
 

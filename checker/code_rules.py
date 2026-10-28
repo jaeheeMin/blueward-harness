@@ -947,6 +947,22 @@ def _scan_js_cr007(masked: str) -> list[tuple[str, int, str]]:
 # 놓치는 것: 메서드 정의가 다른 파일(locals_def)에 있는 경우, AUTHORITY-CHECK 가 다른 클래스(같은 파일의
 # 헬퍼 클래스 포함)나 다른 파일에 있는 경우(후자는 오탐 경고 — harness:allow 로 남긴다), 검사는 있지만
 # 틀린 권한 객체·필드를 쓴 경우.
+#
+# PRIVILEGED 추가 경고(#524): 권한 메서드가 전부 허용(또는 빈 본문)이고 AUTHORITY-CHECK 도 없는
+# 파일에서, EML 문(MODIFY/READ/COMMIT ENTITIES 등)에 `PRIVILEGED`(`FORWARDING PRIVILEGED` 포함)가
+# 있으면 별도 경고를 낸다. 권한을 표준 BO 에 맡긴다고 해 놓고 그 BO 를 privileged 로 부르면
+# 표준 BO 의 권한 검사가 건너뛰어질 수 있어 위임이 성립하지 않기 때문이다(privileged 접근은 권한
+# 검사를 건너뛸 수 있다 — ABAP Keyword Documentation, EML PRIVILEGED). 위치는 PRIVILEGED 가 나온 줄이고
+# harness:allow CR-009 <이유> 로 예외를 남긴다. 권한 메서드 중 하나라도 실제 검사를 하거나
+# AUTHORITY-CHECK 가 있으면(=전부 허용이 아니면) PRIVILEGED 만으로는 경고하지 않는다 — 스스로
+# 권한을 검사한 뒤 쓰는 privileged 호출은 정당한 사용이라 오탐을 피하려는 것이다.
+
+_ABAP_EML_PRIVILEGED_RE = re.compile(r"\bPRIVILEGED\b", re.IGNORECASE)
+_ABAP_EML_ENTITIES_RE = re.compile(r"\bENTITIES\b", re.IGNORECASE)
+_PRIVILEGED_MESSAGE = (
+    "권한을 표준에 맡긴다면 EML 을 PRIVILEGED 로 부르지 않는다 — 표준 BO 의 권한 검사가 건너뛰어질 수 "
+    "있다. 꼭 필요하면 harness:allow CR-009 에 privileged 가 필요한 이유와 결정자를 남긴다."
+)
 
 _ABAP_AUTH_DECL_RE = re.compile(
     r"^\s*([A-Za-z_][\w~]*)\b.*?\bFOR\s+(?:GLOBAL|INSTANCE)\s+AUTHORIZATION\b",
@@ -1014,6 +1030,8 @@ def _scan_abap_cr009(masked: str) -> list[tuple[str, int, str]]:
         return bool(_ABAP_AUTHORITY_CHECK_RE.search(masked))
 
     findings: list[tuple[str, int, str]] = []
+    seen_auth_methods = 0
+    flagged_auth_methods = 0
     current: tuple[str, int] | None = None  # (이름, METHOD 문 오프셋)
     body_start = 0
     for keyword, start, end in statements:
@@ -1029,20 +1047,33 @@ def _scan_abap_cr009(masked: str) -> list[tuple[str, int, str]]:
             body = masked[body_start:start]
             name, offset = current
             current = None
+            seen_auth_methods += 1
             if has_check(offset):
                 continue
             if not body.strip():
+                flagged_auth_methods += 1
                 findings.append((
                     "CR-009", offset,
                     f"권한 메서드 {name} 가 비어 있음 — 실제로 무엇을 허용하는지 확인 필요. "
                     "다른 곳(표준 BO, CDS DCL)에 위임했다면 harness:allow CR-009 로 이유를 남긴다.",
                 ))
             elif _ABAP_AUTH_ALLOWED_RE.search(body) and not _ABAP_AUTH_UNAUTHORIZED_RE.search(body):
+                flagged_auth_methods += 1
                 findings.append((
                     "CR-009", offset,
                     f"권한 메서드 {name} 가 auth-allowed 만 대입하고 이 클래스에 AUTHORITY-CHECK 가 없다. "
                     "데이터를 바꾸는 앱이면 권한을 실제로 검사한다.",
                 ))
+
+    # 권한 메서드가 전부 허용이면 PRIVILEGED EML 을 따로 경고한다(위 설명).
+    if seen_auth_methods and flagged_auth_methods == seen_auth_methods:
+        for keyword, start, end in statements:
+            segment = masked[start:end]
+            if keyword not in ("MODIFY", "READ", "COMMIT", "GET", "SET") or not _ABAP_EML_ENTITIES_RE.search(segment):
+                continue
+            pm = _ABAP_EML_PRIVILEGED_RE.search(segment)
+            if pm:
+                findings.append(("CR-009", start + pm.start(), _PRIVILEGED_MESSAGE))
     return findings
 
 

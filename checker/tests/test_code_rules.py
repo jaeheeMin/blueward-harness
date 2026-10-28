@@ -1131,3 +1131,63 @@ def test_알_수_없는_level_은_설정_오류로_검사_불능(tmp_path: Path,
 def test_code_checks_의_CR_009_는_경고다():
     rule = code_rules._load_config()["rules"]["CR-009"]
     assert rule["level"] == "warn" and rule["languages"] == ["abap"]
+
+
+# --- CR-009: 권한을 맡긴다면서 EML 을 PRIVILEGED 로 부름(#524) -------------------------------
+
+_EML_PRIV = (
+    "    MODIFY ENTITIES OF i_supplierinvoicetp FORWARDING PRIVILEGED\n"
+    "      ENTITY SupplierInvoice EXECUTE Create FROM lt_create\n"
+    "      FAILED DATA(failed).\n"
+)
+
+
+def _priv_hits(text: str) -> list[dict]:
+    return [h for h in _cr009(text) if "PRIVILEGED" in h["message"]]
+
+
+def test_cr009_전부_허용이고_forwarding_privileged_면_별도_경고():
+    text = _pool(_ALLOW_ALL, extra="  METHOD save.\n" + _EML_PRIV + "  ENDMETHOD.\n")
+    assert len(_cr009(text)) == 2
+    (hit,) = _priv_hits(text)
+    assert hit["level"] == "warn" and hit["allowed"] is False
+    assert hit["line"] == text.split("\n").index(_EML_PRIV.split("\n")[0]) + 1
+    assert "harness:allow CR-009" in hit["message"]
+
+
+def test_cr009_privileged_없으면_기존_경고만():
+    assert len(_cr009(_pool(_ALLOW_ALL))) == 1
+    assert _priv_hits(_pool(_ALLOW_ALL)) == []
+
+
+def test_cr009_privileged_단독_키워드와_소문자도_본다():
+    eml = "    read entities of i_x privileged entity A all fields with lt_k result DATA(r).\n"
+    assert len(_priv_hits(_pool(_ALLOW_ALL, extra="  METHOD m.\n" + eml + "  ENDMETHOD.\n"))) == 1
+
+
+def test_cr009_AUTHORITY_CHECK_가_있으면_privileged_만으로_경고하지_않는다():
+    check = "  METHOD chk.\n    AUTHORITY-CHECK OBJECT 'ZX' ID 'ACTVT' FIELD '02'.\n" + _EML_PRIV + "  ENDMETHOD.\n"
+    assert _cr009(_pool(_ALLOW_ALL, extra=check)) == []
+
+
+def test_cr009_주석과_문자열_속_privileged_는_무시한다():
+    extra = (
+        "  METHOD m.\n"
+        '    " MODIFY ENTITIES OF i_x FORWARDING PRIVILEGED\n'
+        "* MODIFY ENTITIES OF i_x PRIVILEGED\n"
+        "    DATA(t) = 'MODIFY ENTITIES PRIVILEGED'.\n"
+        "  ENDMETHOD.\n"
+    )
+    assert _priv_hits(_pool(_ALLOW_ALL, extra=extra)) == []
+
+
+def test_cr009_privileged_도_harness_allow_이유가_있으면_allowed():
+    eml = _EML_PRIV.replace("    MODIFY", '    " harness:allow CR-009 시뮬레이션 호출에 필요(홍길동 2026-10-28)\n    MODIFY', 1)
+    (hit,) = _priv_hits(_pool(_ALLOW_ALL, extra="  METHOD m.\n" + eml + "  ENDMETHOD.\n"))
+    assert hit["allowed"] is True
+
+
+def test_cr009_privileged_allow_이유가_없으면_인정하지_않는다():
+    eml = _EML_PRIV.replace("    MODIFY", '    " harness:allow CR-009\n    MODIFY', 1)
+    (hit,) = _priv_hits(_pool(_ALLOW_ALL, extra="  METHOD m.\n" + eml + "  ENDMETHOD.\n"))
+    assert hit["allowed"] is False
