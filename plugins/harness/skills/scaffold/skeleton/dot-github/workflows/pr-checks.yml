@@ -14,6 +14,10 @@
 # checks·actions read 는 열린 PR 의 검사 결과와 그 검사를 돌린 실행을 읽는 용도다(없으면 GraphQL 이
 # "Resource not accessible by integration" 으로 실패한다). PR 을 열고 닫는 모든 이벤트에서 돈다.
 # edited·converted_to_draft 는 뺐다(#411).
+#
+# PR 이 병합될 때 Teams 로도 알리려면 아래 secrets 에 한 줄을 더한다(#508). Teams 수신 웹훅 URL 을 저장소 secret 으로
+# 넣고 그 이름을 적는다. 없으면 병합 알림만 건너뛴다.
+#   TEAMS_MERGE_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
 name: pr-checks
 on:
   pull_request:

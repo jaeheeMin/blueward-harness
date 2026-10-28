@@ -60,7 +60,10 @@ def _caller_example() -> dict:
 def test_입력과_Teams_secret():
     call = _load(WORKFLOW)["on"]["workflow_call"]
     assert call["inputs"]["engine-ref"]["default"] == "stable"
+    # pr-queue 단계를 뺀 뒤로 쓰이지 않지만, 옛 caller 가 넘겨도 오류가 나지 않게 선언은 남긴다(#508).
     assert call["secrets"]["TEAMS_PLUGIN_ALERT_WEBHOOK"]["required"] is False
+    assert call["inputs"]["ledger-complete"]["type"] == "boolean"
+    assert call["inputs"]["ledger-complete"]["default"] is False  # 따로 부르는 ledger-complete.yml 과 이슈가 겹치지 않게
 
 
 def test_job_은_하나이고_concurrency_도_permissions_도_없다():
@@ -75,7 +78,7 @@ def test_job_은_하나이고_concurrency_도_permissions_도_없다():
 def test_단계_순서():
     ids = [s["id"] for s in _steps() if "id" in s]
     order = ["changed", "gitleaks", "doc-guard", "doc-guard-issue", "risk-gate", "risk-gate-issue",
-             "ssot-approval", "ssot-approval-issue", "pr-queue"]
+             "ssot-approval", "ssot-approval-issue", "ledger-complete", "ledger-complete-issue"]
     positions = [ids.index(i) for i in order]
     assert positions == sorted(positions)
     assert _steps()[-1]["name"] == "종합"
@@ -147,27 +150,35 @@ def test_risk_gate_와_ssot_approval_은_merge_뒤_판정이고_이슈를_연다
     assert "status=unknown" in _step("risk-gate")["run"] and "status=unknown" in _step("ssot-approval")["run"]
 
 
-def test_pr_queue_는_항상_돌고_실패해도_계속한다():
-    step = _step("pr-queue")
+def test_pr_queue_단계는_없다_closed_pr_checks_가_맡는다():
+    # #508: 같은 계산을 PR 이 닫힐 때 pr-checks 가 하고, 여기서는 권한 부족으로 매번 실패했다.
+    assert not any(s.get("id") == "pr-queue" for s in _steps())
+    assert "pr_queue_actions.py" not in WORKFLOW.read_text(encoding="utf-8").split("jobs:", 1)[1]
+    assert any(s.get("id") == "pr-queue" for s in _load(PR_CHECKS)["jobs"]["check"]["steps"])
+
+
+def test_ledger_complete_는_입력이_true_일_때만_돌고_종합이_판정한다():
+    step = _step("ledger-complete")
+    assert step["if"] == "inputs.ledger-complete"
     assert step["continue-on-error"] is True
-    assert "!cancelled()" in step["if"]
-    assert step["env"]["TEAMS_PLUGIN_ALERT_WEBHOOK"] == "${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}"
+    assert "status=pass" in step["run"] and "status=fail" in step["run"] and "status=unknown" in step["run"]
+    assert _index("ledger-complete-issue") == _index("ledger-complete") + 1
+    run = _steps()[-1]["run"]
+    assert 'LEDGER_ENABLED" != "true"' in run  # 입력이 꺼져 있으면 건너뜀
+    assert 'judge "ledger-complete"' in run
 
 
-def test_종합은_항상_돌고_네_검사만_판정하며_pr_queue_는_경고뿐이다():
+def test_종합은_항상_돌고_다섯_검사를_판정한다():
     final = _steps()[-1]
     assert final["if"] == "always()"
     run = final["run"]
     for name in CHECKS:
         assert f'judge "{name}"' in run
-    assert 'judge "pr-queue"' not in run
+    assert "pr-queue" not in run and "OUTCOME_PRQ" not in run
     assert 'exit "$fail"' in run
     assert "::error title=$name 위반::" in run and "::error title=$name 검사 불능::" in run
     # 이슈를 열지 못한 것은 실패로 센다.
     assert "issue_failed" in run
-    for line in run.splitlines():
-        if "pr-queue" in line:
-            assert "warn " in line or line.lstrip().startswith(("#", "printf"))
     for label in ("통과", "위반", "검사 불능", "건너뜀(대상 아님)"):
         assert label in run
 
@@ -181,6 +192,7 @@ def test_caller_예시는_push_main_과_읽기_권한만_정한다():
     assert job["permissions"]["contents"] == "read"
     assert "write" not in {job["permissions"].get("contents"), job["permissions"].get("pull-requests")}
     assert job["secrets"] == {"TEAMS_PLUGIN_ALERT_WEBHOOK": "${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}"}
+    assert job["with"] == {"ledger-complete": True}
 
 
 def test_ledger_complete_도_쓰기_토큰이_없다():

@@ -86,8 +86,12 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
      (앞 PR 이 열려 있으면 노란 대기, 순서를 못 정하면 error)를 달고, 앞 PR 이 병합돼 차례가 된 PR 의 작성자를
      멘션한다(#370). Teams 웹훅(`TEAMS_PLUGIN_ALERT_WEBHOOK`)이 있으면 Teams 로도 알린다. 무료 요금제는
      노란 대기여도 Merge 버튼이 잠기지 않는다. 순서는 PR 본문의 `먼저: #번호` 줄 등으로 정해진다.
-   - `.github/workflows/ledger-complete.yml` 은 main 에 PR 이 병합되면 그 PR 이 Closes 한 대표 `[DEV-xxx]` 이슈의
-     진행 원장 행이 `완료` 인지 확인만 한다(#346, #445). 원장은 쓰지 않는다 — 대표 이슈를 닫는 PR 에는
+     차례 알림은 PR 이 닫힐 때 도는 이 단계가 맡는다(main-checks 에는 pr-queue 단계가 없다, #508).
+   - PR 병합 Teams 알림은 `pr-checks.yml` caller 에 `TEAMS_MERGE_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}` 를 더하면 켜진다
+     (선택, #508). secret 이 없으면 건너뛴다.
+   - `main-checks.yml` 의 ledger-complete 단계(caller 의 `with: ledger-complete: true`, #508)는 main 에 PR 이 병합되면 그 PR 이 Closes 한 대표 `[DEV-xxx]` 이슈의
+     진행 원장 행이 `완료` 인지 확인만 한다(#346, #445). 예전에는 따로 `ledger-complete.yml` caller 를 뒀으나 job 을 줄이려
+     main-checks 안으로 옮겼다. 옛 caller 가 남은 저장소는 `with: ledger-complete: true` 를 켜고 그 파일을 지운다(둘 다 두면 이슈가 두 번 열린다). 원장은 쓰지 않는다 — 대표 이슈를 닫는 PR 에는
      `/harness:deliver` 가 처음부터 `완료` 를 담는다. `완료` 가 아니거나 확인을 못 했으면 이슈가 열린다. 하위 작업
      이슈만 닫았거나 대표 이슈를 안 닫은 PR 은 확인하지 않는다(그땐 사람이 PR 로 바꾼다). caller 권한은 `contents: read`
      면 된다. main 보호 규칙(PR 필수)을 켜도 deploy key 같은 push 용 secret 은 필요 없다.
@@ -121,12 +125,11 @@ env/README.md                      환경별 접속 URL(Credential 은 안 둠)
 env/adt-tiers.example.yaml         SAP MCP 서버별 쓰기 허용 표 예시(#148). 훅은 읽지 않는다 — 복사해 env/adt-tiers.yaml 로 고쳐 쓴다
 .github/workflows/pr-checks.yml    PR 마다 gitleaks·doc-guard·ssot-approval·risk-gate·pr-queue 를 job 하나로 돌리는 워크플로(#412, #420)
 .github/workflows/pr-review.yml    승인(리뷰)이 달리거나 취소되면 승인 여부를 다시 판정하는 워크플로(#419, #420)
-.github/workflows/main-checks.yml  main 에 병합된 뒤 읽기 전용 검사를 돌리고 위반을 이슈로 알리는 워크플로(#419, #420)
+.github/workflows/main-checks.yml  main 에 병합된 뒤 읽기 전용 검사(진행 원장 완료 확인 포함)를 돌리고 위반을 이슈로 알리는 워크플로(#419, #420, #508)
 .github/ssot-approvers             SRS 변경 PR 을 승인할 수 있는 GitHub 아이디 목록
 .github/risk-gate.yaml             위험도 기준(크기·위험 경로·비밀값·검사 통과). 위험한 PR 만 승인자가 Approve 해야 통과
 .github/workflows/ai-review.yml    위험한 PR 포함 코드(src/)를 바꾼 PR 에 Claude AI 리뷰를 돌리는 워크플로(#125, #360, #411). 기본 꺼짐
 .github/workflows/pr-tamper-alert.yml 작성자가 아닌 계정이 PR 에 push 하거나 리뷰를 해제하면 이슈·Teams 로 알리는 워크플로(#150)
-.github/workflows/ledger-complete.yml 대표 [DEV-xxx] 이슈를 닫는 PR 이 병합되면 진행 원장이 완료인지 확인하고 아니면 이슈를 여는 워크플로(#346, #445)
 .claude/settings.json              harness Plugin 자동 설치 안내(#89). 이미 있으면 두 항목만 합친다
 ```
 

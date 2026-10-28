@@ -24,8 +24,13 @@
 #      두 단계 모두 `unknown` 으로 두고 건너뛰지 않고 돌린다.
 #
 # pr-queue 단계는 `closed` 를 포함해 항상 돌고 `continue-on-error` 이며 종합에서 뺀다. 실패는 job 요약의
-# 경고로만 남는다. 순서 판정 불능은 지금처럼 `merge-order` status 의 error 로 드러난다. 나머지 네 단계는
-# `closed` 에서는 돌지 않는다(그 job 은 지금 pr-queue 1분과 같다).
+# 경고로만 남는다. GitHub 를 못 읽어 순서를 계산하지 못하면(종료코드 2) status 를 쓰기 전에 끝나므로 `merge-order`
+# status 는 이전 값 그대로 남고 job 은 초록이다(경고만 남는다). 순환 등으로 순서를 정하지 못한 것만 status error 다.
+# 나머지 네 단계는 `closed` 에서는 돌지 않는다(그 job 은 pr-queue 와 병합 알림만 돌아 1분이다).
+# main 병합 뒤의 차례 알림은 main-checks.yml 이 아니라 여기 `closed` 실행이 맡는다(#508).
+#
+# 병합 Teams 알림(#508): 기본 브랜치로 병합된 `closed` 에서 secret `TEAMS_MERGE_WEBHOOK_URL` 이 있으면 Adaptive Card
+# 를 보낸다. 없으면 건너뛰고, 보내기에 실패하면 종합이 경고로 남긴다(판정에는 넣지 않는다).
 #
 # concurrency 는 PR 단위 cancel-in-progress 다(risk-gate 방식). 옛 pr-queue 는 저장소 전체를 한 그룹으로
 # 줄 세웠는데 그것은 버렸다(#412 결정 8). 한계: 다른 PR 의 실행이 동시에 다른 PR 의 순서 코멘트를 쓸 수
@@ -49,6 +54,7 @@
 #       uses: jaeheeMin/blueward-harness/.github/workflows/pr-checks.yml@stable
 #       secrets:
 #         TEAMS_PLUGIN_ALERT_WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
+#         TEAMS_MERGE_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}   # 선택. 있으면 PR 병합 때 Teams 로 알린다(#508)
 #       permissions:
 #         contents: read
 #         pull-requests: write
@@ -77,6 +83,9 @@ on:
     secrets:
       TEAMS_PLUGIN_ALERT_WEBHOOK:
         description: Teams 알림 웹훅 URL(없으면 Teams 알림만 건너뜀)
+        required: false
+      TEAMS_MERGE_WEBHOOK_URL:
+        description: PR 병합 Teams 알림 웹훅 URL(없으면 병합 알림만 건너뜀, #508)
         required: false
 
 jobs:
@@ -714,6 +723,80 @@ jobs:
               ;;
           esac
 
+      # ── PR 병합 Teams 알림(#508, public-cloud 의 notify-teams-on-merge.yml 을 옮겼다) ──────
+      # 기본 브랜치로 병합된 closed 이벤트에서만, 그리고 secret TEAMS_MERGE_WEBHOOK_URL 이 있을 때만 보낸다.
+      # secret 은 단계 `if` 에서 못 쓰니 env 로 받아 안에서 가린다. 비어 있으면 알림만 건너뛴다(notice).
+      # 보내기에 실패하면 단계가 실패하지만 `continue-on-error` 이고 종합 판정에서 빠진다 — 이미 병합된 PR 의 필수
+      # 검사를 붉게 만들어 봐야 되돌릴 것이 없다. 그래도 조용히 초록으로 두지 않고 종합이 ::warning 과 요약에 남긴다.
+      - name: PR 병합 Teams 알림
+        id: merge-notify
+        if: ${{ !cancelled() && github.event.action == 'closed' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == github.event.repository.default_branch }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TEAMS_MERGE_WEBHOOK_URL: ${{ secrets.TEAMS_MERGE_WEBHOOK_URL }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TEAMS_MERGE_WEBHOOK_URL:-}" ]; then
+            echo "::notice title=병합 Teams 알림 건너뜀::secret TEAMS_MERGE_WEBHOOK_URL 이 없어 알림을 보내지 않는다."
+            echo "result=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # jq --arg 로 특수문자(따옴표, 개행 등)를 안전하게 이스케이프해서
+          # PR 제목에 따옴표가 들어 있어도 JSON이 깨지지 않게 한다.
+          payload=$(jq -n \
+            --arg title "$PR_TITLE" \
+            --arg author "$PR_AUTHOR" \
+            --arg url "$PR_URL" \
+            --arg number "$PR_NUMBER" \
+            '{
+              type: "message",
+              attachments: [
+                {
+                  contentType: "application/vnd.microsoft.card.adaptive",
+                  content: {
+                    type: "AdaptiveCard",
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    version: "1.4",
+                    body: [
+                      {
+                        type: "TextBlock",
+                        text: "PR이 main에 병합되었습니다",
+                        weight: "bolder",
+                        size: "medium"
+                      },
+                      {
+                        type: "TextBlock",
+                        text: ($title + " (#" + $number + ")"),
+                        wrap: true
+                      },
+                      {
+                        type: "FactSet",
+                        facts: [
+                          { title: "작성자", value: $author }
+                        ]
+                      }
+                    ],
+                    actions: [
+                      { type: "Action.OpenUrl", title: "PR 보기", url: $url }
+                    ]
+                  }
+                }
+              ]
+            }')
+
+          curl -sS -f --max-time 10 \
+            -H 'Content-Type: application/json' \
+            -d "$payload" \
+            "$TEAMS_MERGE_WEBHOOK_URL"
+          echo "result=sent" >> "$GITHUB_OUTPUT"
+
       # ── 종합 ─────────────────────────────────────────────────────────────────
       # 검사 단계 넷의 결과를 표로 쓰고, fail·unknown 이 하나라도 있으면 단계별 ::error 를 내고 job 을 실패시킨다.
       # pr-queue 는 판정에 넣지 않고 경고만 낸다. 대상이 아닌 단계(closed, paths 에 안 걸림)만 "건너뜀" 이고,
@@ -737,6 +820,7 @@ jobs:
           S_RISK: ${{ steps.risk-gate.outputs.status }}
           R_RISK: ${{ steps.risk-gate.outputs.reason }}
           OUTCOME_PRQ: ${{ steps.pr-queue.outcome }}
+          OUTCOME_MERGE_NOTIFY: ${{ steps.merge-notify.outcome }}
           OUTCOME_ST_GITLEAKS: ${{ steps.gitleaks-status.outcome }}
           OUTCOME_ST_DOC_GUARD: ${{ steps.doc-guard-status.outcome }}
           OUTCOME_ST_SSOT: ${{ steps.ssot-approval-status.outcome }}
@@ -801,8 +885,9 @@ jobs:
             printf '\n- ⚠️ %s: %s\n' "$1" "$2" >> "$GITHUB_STEP_SUMMARY"
           }
           if [ "$OUTCOME_PRQ" = "failure" ]; then
-            warn "pr-queue 실패" "병합 순서 코멘트·status 를 쓰지 못했다. 판정에는 넣지 않는다. 순서 판정 불능이면 merge-order status 가 error 로 남는다."
+            warn "pr-queue 실패" "병합 순서 코멘트·status 를 쓰지 못했다. 판정에는 넣지 않는다. GitHub 를 못 읽어 계산하지 못했으면 status 를 쓰기 전에 끝나 merge-order status 는 이전 값 그대로다."
           fi
+          [ "$OUTCOME_MERGE_NOTIFY" = "failure" ] && warn "병합 Teams 알림 실패" "Teams 로 병합 알림을 보내지 못했다(웹훅 URL 만료·오류 가능). 이미 병합된 PR 이라 판정에는 넣지 않는다. TEAMS_MERGE_WEBHOOK_URL secret 을 확인한다."
           [ "$OUTCOME_COMMENT_DG" = "failure" ] && warn "doc-guard 코멘트 실패" "PR 코멘트를 쓰지 못했다. 결과는 job 요약에 있다."
           [ "$OUTCOME_COMMENT_SSOT" = "failure" ] && warn "ssot-approval 코멘트 실패" "PR 코멘트를 갱신하지 못했다."
           [ "$OUTCOME_COMMENT_LEDGER" = "failure" ] && warn "ledger-ready 코멘트 실패" "PR 코멘트를 갱신하지 못했다. 결과는 job 요약에 있다."
@@ -815,6 +900,6 @@ jobs:
           [ "$OUTCOME_ST_RISK" = "failure" ] && warn "risk-gate status 못 담" "commit status 를 달지 못했다. caller 의 permissions 에 statuses: write 가 있는지 본다."
 
           if [ "$closed" = "true" ]; then
-            printf '\n닫힌 PR 이라 검사 단계는 돌지 않았다(pr-queue 만 돈다).\n' >> "$GITHUB_STEP_SUMMARY"
+            printf '\n닫힌 PR 이라 검사 단계는 돌지 않았다(pr-queue 와 병합 알림만 돈다).\n' >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$fail"

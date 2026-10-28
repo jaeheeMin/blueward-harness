@@ -112,7 +112,7 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
      --json title --jq .title` 로 제목을 본다. 판정 기준은 엔진 `checker.ledger_complete` 의 `closing_issues`·
      `representative_id` 와 같다) 상태를 `리뷰` 대신 처음부터 `완료` 로 쓴다. PR 이 병합되면 main 원장이 함께 `완료`
      가 되고, 병합되지 않으면 main 은 그대로다. main 보호 규칙(PR 필수) 아래서는 병합 뒤 Actions 가 원장을 쓸 수
-     없고, 병합 뒤 `ledger-complete.yml` 은 이 행이 `완료` 인지 확인만 한다(아니면 이슈를 연다).
+     없고, 병합 뒤 Actions 의 ledger-complete 확인(`main-checks.yml` 의 단계)은 이 행이 `완료` 인지 확인만 한다(아니면 이슈를 연다).
    - **하위 작업 PR**(`... (DEV-xxx)` 이슈를 닫거나 대표 이슈를 안 닫는 PR)은 `리뷰` 다. 대표 이슈를 닫는 PR 이
      따로 올 때까지 `완료` 는 사람이 쓴다. 대표 이슈를 닫을지 확실하지 않으면 `리뷰` 로 쓰고 사용자에게 묻는다
      (병합 뒤 `완료` 로 고치는 일은 PR 한 번이 더 든다).

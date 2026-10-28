@@ -40,7 +40,7 @@ Spec 칸에 그 파일 링크를 적는다 — 원장의 ID 로 Spec 을 곧장 
 - `/harness:deliver` — PR 을 올리기 전에 상태를 `리뷰`, 마지막 PR 을 `#번호` 로 바꾼다.
 - `완료` — 대표 `[DEV-xxx]` 이슈를 Closes 하는 PR 이면 `/harness:deliver` 가 처음부터 상태를 `완료`, 마지막 PR 을
   그 PR 번호로 써서 PR 에 담는다(병합되면 main 원장도 완료가 된다). 하위 작업 PR 은 `리뷰` 이고 대표 이슈를 안 닫은
-  PR 도 그대로이니 그때 `완료` 는 사람이 PR 로 쓴다. 병합 뒤 Actions(`ledger-complete.yml`)는 원장을 쓰지 않고, 대표
+  PR 도 그대로이니 그때 `완료` 는 사람이 PR 로 쓴다. 병합 뒤 Actions(`main-checks.yml` 의 ledger-complete 단계)는 원장을 쓰지 않고, 대표
   이슈를 닫은 PR 이 병합됐는데 그 행이 `완료` 가 아니면 이슈를 열어 알린다.
 
 번호: 요구사항(`REQ-003`)·Spec(`DEV-003`)·원장의 개발 건(`DEV-003`)은 한 번호를 쓴다.

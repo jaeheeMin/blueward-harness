@@ -344,7 +344,9 @@ status `merge-order` 를 단다(앞 PR 이 열려 있으면 pending 노란 대�
 앞 PR 이 병합돼 차례가 된 PR 은 작성자를 멘션하고, `TEAMS_PLUGIN_ALERT_WEBHOOK` secret 이 있으면 Teams 로도
 알린다(없으면 건너뜀). 무료 요금제라 노란 대기여도 Merge 버튼은 잠기지 않는다. 호출 쪽(`pr-checks.yml` caller) permissions 는
 `contents: read`, `pull-requests: write`, `issues: write`, `statuses: write`, `checks: read`, `actions: read`(열린 PR 의 검사 결과와 그 워크플로 실행을
-읽는다 — 없으면 "Resource not accessible by integration" 으로 실패). GitHub 를 못 읽으면 job 이 실패한다.
+읽는다 — 없으면 "Resource not accessible by integration" 으로 실패). GitHub 를 못 읽으면 순서를 계산하지 못해 status 를 쓰기
+전에 끝나므로 `merge-order` status 는 이전 값 그대로 남고, job 은 초록이며 경고만 남는다(이 단계는 판정에 넣지 않는다).
+main 병합 뒤의 차례 알림은 PR 이 닫힐 때 도는 이 단계가 맡는다(`main-checks` 에는 이 단계가 없다, #508).
 기존 Project Repository 는 옛 호출 파일 다섯을 지우고 새 호출 파일 셋을 넣어야 받는다.
 
 ## 비밀정보 검사(#159)
