@@ -242,7 +242,11 @@ def main_entry(argv: list[str] | None = None) -> int:
             overlap_result = {"status": DISABLED}
         elif wants_overlap and switches.get("객체_겹침"):
             # Spec 이 바뀌었다. 객체 겹침(#292)도 Spec 전체를 본다. 경고만 하고 위반은 없다.
-            result = check_overlap(Path.cwd())
+            # 이 PR 이 바꾼 Spec 이 낀 겹침만 경고한다(#503). 지워진 Spec 은 비교 대상이 아니라 found 만 넘긴다.
+            changed_specs = [
+                Path(n).as_posix() for n in found if Path(n).as_posix().startswith(SPEC_DIR + "/")
+            ]
+            result = check_overlap(Path.cwd(), changed_specs)
             if result["status"] != SKIPPED:
                 overlap_result = result
         if wants_version and switches.get("판_겹침") is False:

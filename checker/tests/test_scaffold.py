@@ -59,6 +59,7 @@ EXPECTED_FILES = {
     "rules/audit-changes.yaml",
     "rules/audit-ledger.yaml",
     "rules/cross-checks/switches.yaml",
+    "rules/cross-checks/shared-objects.yaml",
     "conventions/README.md",
     "conventions/naming.md",
     "conventions/cap-ui5.md",
