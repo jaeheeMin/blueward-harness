@@ -43,9 +43,17 @@ permissions:
 
 jobs:
   alert:
+    # 작성자 본인·봇의 행동은 알리지 않으므로(아래 판정 단계와 같다) job 자체를 건너뛰어 runner 를
+    # 띄우지 않는다(건너뛴 job 은 과금되지 않는다, #496). 두 계정 중 하나라도 비어 있으면 건너뛰지
+    # 않고 돌려 판정 단계의 판정 불능(실패)이 그대로 나오게 한다. 판정 단계의 비교는 안전망으로 둔다.
+    # 식의 문자열 `==`·`!=` 는 대소문자를 구분하지 않아 판정 단계(소문자로 바꿔 비교)와 맞는다.
     if: >-
-      (github.event_name == 'pull_request_target' && github.event.action == 'synchronize')
-      || (github.event_name == 'pull_request_review' && github.event.action == 'dismissed')
+      ((github.event_name == 'pull_request_target' && github.event.action == 'synchronize')
+      || (github.event_name == 'pull_request_review' && github.event.action == 'dismissed'))
+      && (github.event.sender.login == ''
+      || github.event.pull_request.user.login == ''
+      || (github.event.sender.login != github.event.pull_request.user.login
+      && github.event.sender.type != 'Bot'))
     runs-on: ubuntu-latest
     steps:
       - name: 작성자가 아닌 계정의 행동인지 판정

@@ -41,6 +41,64 @@ def test_알리는_이벤트는_push_와_리뷰_해제_둘뿐이다():
     assert "closed" not in cond and "merged" not in cond
 
 
+class _S(str):
+    """GitHub 식의 문자열 비교처럼 대소문자를 구분하지 않는다."""
+
+    def __eq__(self, other):
+        return str.lower(self) == str.lower(other)
+
+    def __ne__(self, other):
+        return not self == other
+
+    __hash__ = str.__hash__
+
+
+def _job_if(**ctx: str) -> bool:
+    """job 의 `if` 식을 `==`·`!=`·`&&`·`||` 만 쓴다는 전제로 파이썬으로 옮겨 평가한다."""
+    import re
+
+    expr = " ".join(_load(WORKFLOW)["jobs"]["alert"]["if"].split())
+    expr = re.sub(r"'([^']*)'", lambda m: f"_S({m.group(1)!r})", expr)
+    expr = re.sub(r"github\.[a-z_.]+", lambda m: f"_c[{m.group(0)!r}]", expr)
+    expr = expr.replace("&&", " and ").replace("||", " or ")
+    base = {
+        "github.event_name": "pull_request_target",
+        "github.event.action": "synchronize",
+        "github.event.sender.login": "other",
+        "github.event.sender.type": "User",
+        "github.event.pull_request.user.login": "me",
+    }
+    base.update({k.replace("__", "."): v for k, v in ctx.items()})
+    return bool(eval(expr, {"_S": _S, "_c": {k: _S(v) for k, v in base.items()}}))  # noqa: S307
+
+
+def test_job_if_작성자_본인의_push_는_job_을_건너뛴다():
+    assert _job_if(github__event__sender__login="me") is False
+    assert _job_if(github__event__sender__login="ME") is False  # 대소문자 무시
+
+
+def test_job_if_다른_계정의_push_는_job_을_돌린다():
+    assert _job_if() is True
+
+
+def test_job_if_봇의_행동은_job_을_건너뛴다():
+    assert _job_if(github__event__sender__login="dependabot[bot]", github__event__sender__type="Bot") is False
+
+
+def test_job_if_계정_값이_비면_건너뛰지_않고_돌려_판정_불능이_나오게_한다():
+    assert _job_if(github__event__sender__login="") is True
+    assert _job_if(github__event__pull_request__user__login="") is True
+    assert _job_if(github__event__sender__login="", github__event__pull_request__user__login="") is True
+    assert _job_if(github__event__sender__login="", github__event__sender__type="Bot") is True
+
+
+def test_job_if_다른_이벤트는_계속_돌리지_않는다():
+    assert _job_if(github__event_name="pull_request", github__event__action="opened") is False
+    assert _job_if(github__event__action="opened") is False
+    assert _job_if(github__event_name="pull_request_review", github__event__action="dismissed") is True
+    assert _job_if(github__event_name="pull_request_review", github__event__action="submitted") is False
+
+
 def test_caller_는_기존_caller_처럼_main_을_부른다():
     caller = _load(CALLER)
     assert caller["on"]["pull_request_target"]["types"] == ["synchronize"]
