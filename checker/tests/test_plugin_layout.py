@@ -48,6 +48,7 @@ def test_마켓플레이스_항목이_harness_를_가리킨다():
 HOOK_MATCHERS = {
     "Write|Edit",
     "Bash|PowerShell",
+    "Agent|Task",
     "mcp__.*__(setObjectSource|renamePreview|renameExecute|extractMethodPreview|extractMethodExecute|createObject"
     "|deleteObject|activateObjects|activateByName|createTransport|transportRelease|transportDelete"
     "|publishServiceBinding|unPublishServiceBinding|deployUi5App|undeployUi5App|publishBusinessCatalog|runClass|gitPullRepo|pushRepo|tableContents|runQuery)",
@@ -81,6 +82,7 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
         "session-start-sync.sh",
         "stop-deliver.sh",
         "mcp_source_guard.py",
+        "agent_delegation_guard.py",
         "mcp_activation_tracker.py",
         "update_notice.py",
         "pr_table_notice.py",
