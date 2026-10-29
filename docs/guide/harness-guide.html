@@ -1723,7 +1723,7 @@ Closes #143</pre>
         <li><b>승인</b> — <code>/harness:approvals</code> 로 내 Approve 를 기다리는 PR 을 순서대로 보고 GitHub 에서 Approve 해. 새 commit 이 오면 승인이 취소돼</li>
         <li><b>병합</b> — <code>/harness:prs --all</code> 로 순서를 보고 검사가 다 초록인 PR 만 병합해. auto-merge 가 걸린 PR 은 GitHub 가 합쳐</li>
         <li><b>알림 이슈 정리</b> — <code>human-merge-alert</code>(승인 없이 병합) · <code>pr-tamper-alert</code>(남의 PR 브랜치 수정) · <code>ledger-complete</code>(원장 미완료) · <code>release-tag</code>(배포 태그 실패)</li>
-        <li><b>운영 파일 반영</b> — 팀원은 <code>src/</code> · <code>docs/</code> · <code>audit/</code> 만 올릴 수 있어(ops-guard). 팀원이 <code>git format-patch</code> 결과를 이슈 댓글로 주면 관리자가 <code>git am</code> 으로 적용해 PR 을 열어. commit 작성자는 팀원으로 남아</li>
+        <li><b>운영 파일 대신 올리기</b> — 팀원은 <code>src/</code> · <code>docs/</code> · <code>audit/</code> 만 올릴 수 있어(ops-guard). 설정 파일을 고쳐야 하면 팀원이 Claude 에게 "이 변경 patch 로 이슈에 올려 줘" 라고 하고, 관리자는 Claude 에게 "이슈 #n 의 patch 로 PR 열어 줘" 라고 해. 명령(<code>git format-patch</code> · <code>git am</code>)은 Claude 가 실행하고, commit 작성자는 팀원으로 남아</li>
         <li><b>Plugin 판 맞추기</b> — 새 판 Teams 알림이 오면 <code>/harness:version</code> 으로 보고 <code>/harness:update</code> 로 갱신해</li>
       </ul>
     </section>
