@@ -14,7 +14,8 @@
 
 기준(`CRITERIA`):
 
-- `size`      바뀐 줄(추가+삭제)과 파일 수가 기준을 넘는가. `size_warn_only_paths` 가 비어 있지 않고 PR 이 바꾼
+- `size`      바뀐 줄(추가+삭제)과 파일 수가 기준을 넘는가. `size_exclude_paths` 아래 파일은 합계에서 빼고, 뺀 것까지
+              합칠 때만 넘는 부분은 참고(note)로 낸다(#534). `size_warn_only_paths` 가 비어 있지 않고 PR 이 바꾼
               파일이 모두 그 접두어 아래면 승인 사유가 아니라 참고(note)로만 낸다(#436, 결과의 `notes`).
 - `paths`     `high_risk_paths` 와 `.github/human-merge-paths` 의 경로를 바꿨는가.
 - `secret`    추가된 줄에 토큰·키·비밀번호·웹훅 주소 모양이 있는가(CR-004 의 기계 검사).
@@ -166,13 +167,16 @@ DEFAULT_CONFIG: dict = {
     "ai_review_paths": [],
     # 비어 있지 않으면, PR 이 바꾼 파일이 모두 이 접두어 아래일 때 `size` 기준을 승인 사유 대신 참고(note)로 낸다(#436).
     "size_warn_only_paths": [],
+    # 비어 있지 않으면 이 접두어 아래 파일은 `size` 의 줄·파일 수 합계에서 뺀다. 남은 파일만으로 기준을 판정하고, 뺀 것까지
+    # 합치면 넘는 부분은 참고(note)로만 낸다(#534). 비어 있으면 모든 파일을 센다.
+    "size_exclude_paths": [],
     "srs_split_hint": True,
     "approvers_file": ".github/ssot-approvers",
 }
 
 _INT_KEYS = ("max_changed_lines", "max_changed_files")
 _BOOL_KEYS = ("secret_scan", "require_checks_green", "ai_review", "srs_split_hint")
-_LIST_KEYS = ("high_risk_paths", "ai_review_paths", "size_warn_only_paths")
+_LIST_KEYS = ("high_risk_paths", "ai_review_paths", "size_warn_only_paths", "size_exclude_paths")
 
 _MAX_LISTED = 5  # 사유에 이름을 나열하는 최대 개수
 
@@ -227,15 +231,30 @@ def load_config(text: str | None) -> dict:
 # --- 기준별 순수 함수 -----------------------------------------------------------
 
 
+def _size_exceeded(files: list[dict], cfg: dict) -> dict[str, str]:
+    """종류(`lines`·`files`)별로 기준을 넘은 사유."""
+    lines = sum(int(f.get("additions") or 0) + int(f.get("deletions") or 0) for f in files)
+    out: dict[str, str] = {}
+    if lines > cfg["max_changed_lines"]:
+        out["lines"] = f"바뀐 줄이 {lines}줄로 기준({cfg['max_changed_lines']}줄)을 넘음"
+    if len(files) > cfg["max_changed_files"]:
+        out["files"] = f"바뀐 파일이 {len(files)}개로 기준({cfg['max_changed_files']}개)을 넘음"
+    return out
+
+
 def size_reasons(files: list[dict], cfg: dict) -> list[str]:
     """바뀐 줄·파일 수가 기준을 넘으면 사유를 돌려준다. `files` 는 PR files API 의 항목."""
-    lines = sum(int(f.get("additions") or 0) + int(f.get("deletions") or 0) for f in files)
-    reasons: list[str] = []
-    if lines > cfg["max_changed_lines"]:
-        reasons.append(f"바뀐 줄이 {lines}줄로 기준({cfg['max_changed_lines']}줄)을 넘음")
-    if len(files) > cfg["max_changed_files"]:
-        reasons.append(f"바뀐 파일이 {len(files)}개로 기준({cfg['max_changed_files']}개)을 넘음")
-    return reasons
+    return list(_size_exceeded(files, cfg).values())
+
+
+def size_excluded_split(files: list[dict], prefixes: list[str]) -> tuple[list[dict], list[dict]]:
+    """`files` 를 (센 파일, 뺀 파일)로 나눈다(#534). 매칭은 `path_reasons` 와 같다. 접두어가 없으면 모두 센다."""
+    normalized = [_normalize(p) for p in prefixes if _normalize(p)]
+    if not normalized:
+        return list(files), []
+    excluded_names = set(human_merge_hits([f.get("filename") or "" for f in files], normalized))
+    counted = [f for f in files if (f.get("filename") or "") not in excluded_names]
+    return counted, [f for f in files if (f.get("filename") or "") in excluded_names]
 
 
 def ai_review_target(files: list[str], prefixes: list[str]) -> bool:
@@ -811,10 +830,23 @@ def criterion(name: str):
 
 @criterion("size")
 def _crit_size(ctx: Context) -> list[Finding]:
-    reasons = size_reasons(ctx.files, ctx.cfg)
-    if reasons and all_under(ctx.filenames, ctx.cfg["size_warn_only_paths"]):
-        return [Finding("size", f"{r} — 소스만 바뀐 PR 이라 승인은 필요 없음(경고)", note=True) for r in reasons]
-    return [Finding("size", r) for r in reasons]
+    cfg = ctx.cfg
+    counted, excluded = size_excluded_split(ctx.files, cfg["size_exclude_paths"])
+    over = _size_exceeded(counted, cfg)
+    findings: list[Finding] = []
+    # 뺀 파일까지 합치면 넘는데 센 파일만으로는 안 넘는 종류는 참고로만 낸다(#534).
+    if excluded:
+        for kind, msg in _size_exceeded(ctx.files, cfg).items():
+            if kind not in over:
+                findings.append(Finding("size", f"{msg} — 제외 경로({', '.join(cfg['size_exclude_paths'])}) 포함 합계라 승인은 필요 없음(참고)", note=True))
+    # `size_warn_only_paths`(#436)는 그대로 둔다 — 센 파일이 모두 그 아래면 남은 사유도 참고로 낸다.
+    warn_only = bool(over) and all_under([f.get("filename") or "" for f in counted], cfg["size_warn_only_paths"])
+    for msg in over.values():
+        if warn_only:
+            findings.append(Finding("size", f"{msg} — 소스만 바뀐 PR 이라 승인은 필요 없음(경고)", note=True))
+        else:
+            findings.append(Finding("size", msg))
+    return findings
 
 
 @criterion("paths")
