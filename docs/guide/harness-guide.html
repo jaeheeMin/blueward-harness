@@ -265,6 +265,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       <div>
         <div class="group-label">문서 작업</div>
         <div class="tabs">
+          <button class="tab" role="tab" data-tab="ouroboros">무엇을 만들지 정하기<small>Ouroboros · ooo</small></button>
           <button class="tab" role="tab" data-tab="srs-new">SRS 만들기<small>/harness:srs</small></button>
           <button class="tab" role="tab" data-tab="srs-edit">SRS 고치기<small>/harness:srs</small></button>
           <button class="tab" role="tab" data-tab="spec-new">Spec 만들기<small>/harness:spec</small></button>
@@ -301,6 +302,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
         <div class="tabs">
           <button class="tab" role="tab" data-tab="scaffold">새 고객사 저장소 만들기<small>/harness:scaffold</small></button>
           <button class="tab" role="tab" data-tab="release">릴리즈 내기<small>/release</small></button>
+          <button class="tab" role="tab" data-tab="admin">GitHub 관리자<small>현황 메일 · 승인 · 병합</small></button>
         </div>
       </div>
       <div>
@@ -513,7 +515,71 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     </section>
   </div>
 
-  <div class="next"><button data-go="overview">← 한눈에 보기</button><button data-go="srs-new">다음: SRS 만들기 →</button></div>
+  <div class="next"><button data-go="overview">← 한눈에 보기</button><button data-go="ouroboros">다음: 무엇을 만들지 정하기 →</button></div>
+</article>
+
+<!-- ================= Ouroboros ================= -->
+<article class="panel" data-panel="ouroboros" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">문서 작업 · Ouroboros</div>
+    <h2>무엇을 만들지 정하기</h2>
+    <p class="lead">아이디어가 아직 흐릿할 때, 코드를 짜기 전에 "무엇을 만들지" 를 질문으로 확정하는 플러그인이야. 이름은 Ouroboros(<code>ouroboros@ouroboros</code>, 지금 0.54.4)고, 명령은 <code>ooo</code> 로 시작해.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>요구가 한두 줄뿐이라 범위가 안 잡힐 때. "이거 만들어 줘" 를 받고 완료 조건이 안 보일 때. 기획서(PRD)를 먼저 써 보고 싶을 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>이 아이디어 좀 다듬어 줘</span><span>PRD 로 정리해 줘</span><span class="cmd">ooo interview</span><span class="cmd">ooo pm</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>Ouroboros 는 <b>질문을 계속 던져 애매함을 줄이는</b> 도구야. 애매함 점수가 0.2 이하가 될 때까지 묻고, 답을 모아 실행할 수 있는 명세(Seed)를 만들어.</p>
+    <p>harness 는 <b>일을 어떻게 진행하고 올리는지</b>를 맡아. 그래서 순서는 Ouroboros 로 무엇을 만들지 정하고 → harness 로 SRS · Spec · 개발 · PR 을 진행하는 거야.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node hl"><b>인터뷰</b><span>질문으로 요구를 구체화</span></div><div class="arrow"></div>
+      <div class="node"><b>Seed</b><span>실행할 수 있는 명세</span></div><div class="arrow"></div>
+      <div class="node"><b>실행</b><span>명세대로 만들기</span></div><div class="arrow"></div>
+      <div class="node"><b>평가</b><span>명세를 만족하는지 3단계 검증</span></div><div class="arrow"></div>
+      <div class="node ok"><b>진화</b><span>평가 결과로 명세를 다시 다듬기</span></div>
+    </div>
+    <div class="cap">평가 → 명세 반영을 되풀이하는 것을 진화 루프라고 불러. 처음엔 인터뷰와 PRD 정도만 써도 돼.</div>
+  </section>
+
+  <section>
+    <h3>명령표</h3>
+    <div class="tbl-wrap"><table>
+      <tr><th>명령</th><th>하는 일</th></tr>
+      <tr><td><code>ooo interview</code></td><td>애매한 요구사항을 질문으로 구체화</td></tr>
+      <tr><td><code>ooo pm</code></td><td>기획자 관점 인터뷰 → PRD(제품 요구 문서) 작성</td></tr>
+      <tr><td><code>ooo seed</code></td><td>인터뷰 결과를 실행 가능한 명세(Seed)로</td></tr>
+      <tr><td><code>ooo run</code></td><td>명세대로 실행</td></tr>
+      <tr><td><code>ooo evaluate</code></td><td>결과가 명세를 만족하는지 3단계 검증</td></tr>
+      <tr><td><code>ooo evolve</code></td><td>평가 → 명세 반영을 반복</td></tr>
+      <tr><td><code>ooo unstuck</code></td><td>반대론자 · 단순화 같은 다른 관점(페르소나)으로 막힌 곳 돌파</td></tr>
+      <tr><td><code>/ouroboros:help</code> · <code>/ouroboros:tutorial</code></td><td>전체 명령 설명 · 따라 하며 배우기</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h3>harness 와 나누기</h3>
+    <div class="tbl-wrap"><table>
+      <tr><th>할 일</th><th>쓰는 것</th></tr>
+      <tr><td>아이디어가 흐릿할 때 혼자 다듬기</td><td>Ouroboros — <code>ooo interview</code> · <code>ooo pm</code></td></tr>
+      <tr><td>고객 요구사항 정본</td><td><code>/harness:srs</code> — 정본은 <code>docs/ssot/SRS.md</code> 하나뿐</td></tr>
+      <tr><td>개발 설계</td><td><code>/harness:spec</code></td></tr>
+      <tr><td>작업 시작 · 이슈 · 브랜치</td><td><code>/harness:start</code></td></tr>
+      <tr><td>올리기 · PR</td><td><code>/harness:deliver</code></td></tr>
+    </table></div>
+  </section>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">정본 아님</span><div><code>ooo pm</code> 이 만든 PRD 는 <b>참고 자료</b>야. 프로젝트의 요구사항 정본은 <code>docs/ssot/SRS.md</code> 하나뿐이라, PRD 내용은 <code>/harness:srs</code> 로 SRS 에 옮겨야 검사 · 승인 흐름을 탄다.</div></div>
+    <div class="callout warn"><span class="k">연결 필요</span><div>인터뷰 · 실행은 ouroboros MCP 서버가 연결돼야 돌아. <code>/mcp</code> 로 연결 상태를 봐. 연결이 안 되면(<code>CONNECT_TIMEOUT</code>) 세션을 다시 열고, 그래도 안 되면 <code>uv</code> · <code>uvx</code> 가 PATH 에 잡히는지 확인해. winget 으로 설치한 뒤에는 터미널 프로그램 자체를 다시 켜야 반영된 일이 있었어.</div></div>
+  </div>
+
+  <div class="next"><button data-go="setup">← 처음 준비하기</button><button data-go="srs-new">다음: SRS 만들기 →</button></div>
 </article>
 
 <!-- ================= SRS 만들기 ================= -->
@@ -625,7 +691,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     <div class="callout warn"><span class="k">승인 필요</span><div>SRS 를 바꾼 PR 은 작성자 말고 다른 승인자의 Approve 가 있어야 병합돼.</div></div>
   </div>
 
-  <div class="next"><button data-go="setup">← 처음 준비하기</button><button data-go="srs-edit">다음: SRS 고치기 →</button></div>
+  <div class="next"><button data-go="ouroboros">← 무엇을 만들지 정하기</button><button data-go="srs-edit">다음: SRS 고치기 →</button></div>
 </article>
 
 <!-- ================= SRS 고치기 ================= -->
@@ -1606,7 +1672,81 @@ Closes #143</pre>
     <div class="callout warn"><span class="k">버전 표기</span><div>버전 앞에 <code>v</code> 를 붙이지 않아(<code>2026.10.12</code>). public-cloud README 예시의 <code>v2026.09.13</code> 은 규칙과 달라.</div></div>
   </div>
 
-  <div class="next"><button data-go="scaffold">← 새 고객사 저장소 만들기</button><button data-go="blocked">다음: 막혔을 때 →</button></div>
+  <div class="next"><button data-go="scaffold">← 새 고객사 저장소 만들기</button><button data-go="admin">다음: GitHub 관리자 →</button></div>
+</article>
+
+<!-- ================= GitHub 관리자 ================= -->
+<article class="panel" data-panel="admin" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">운영 담당 · GitHub 관리자</div>
+    <h2>GitHub 관리자</h2>
+    <p class="lead">팀원이 막힌 곳을 먼저 찾고, 승인 · 병합 · 운영 파일은 관리자가 마무리해. 관리자는 매일 아침 현황 메일로 보고, Skill 로 확인하고, GitHub 에서 처리해.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>매일 아침 현황 메일이 왔을 때. 승인 요청이나 알림 이슈가 생겼을 때. 팀원이 운영 파일 patch 를 이슈에 올렸을 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>팀 현황 보여 줘</span><span>내가 승인할 거 있어?</span><span>병합 순서 알려 줘</span><span class="cmd">/harness:prs --team</span><span class="cmd">/harness:approvals</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>관리자는 public-cloud 의 Owner 야. 팀원 PR 의 승인과 병합, Actions 가 연 알림 이슈, 팀원이 직접 못 올리는 운영 파일을 맡아.</p>
+    <p>남의 PR 을 대신 고치지는 않아. 막힌 이유를 찾아 주인에게 알려 주는 게 관리자 몫이야.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node hl"><b>현황 메일</b><span>매일 아침 · 막힘 · 정체 · 승인 대기</span></div><div class="arrow"></div>
+      <div class="node"><b>팀원별 확인</b><span><code>/harness:prs --team</code></span></div><div class="arrow"></div>
+      <div class="node"><b>승인</b><span><code>/harness:approvals</code> → GitHub 에서 Approve</span></div><div class="arrow"></div>
+      <div class="node"><b>병합</b><span><code>/harness:prs --all</code> 순서대로</span></div><div class="arrow"></div>
+      <div class="node ok"><b>알림 이슈 정리</b><span>Actions 가 연 이슈</span></div>
+    </div>
+  </section>
+
+  <section class="box">
+    <h3>매일 아침 현황 메일</h3>
+    <p style="margin-bottom:10px">관리자 개인 도구(코워크)의 예약 작업이 public-cloud 를 읽기 전용으로 점검하고, Power Automate 가 "GB 사업부 AI" 계정으로 보내. harness 기능이 아니라 관리자 쪽 예약이야.</p>
+    <div class="tbl-wrap"><table>
+      <tr><th>메일 부분</th><th>내용</th></tr>
+      <tr><td>제목</td><td><code>[팀 PR 현황] 10-29 — 관리자 할 일 4 · 막힘 3 · 정체 0</code> (예시)</td></tr>
+      <tr><td>숫자</td><td>열린 PR · 막힘 · 3일+ 정체 · 내 승인 대기 · 최근 7일 병합</td></tr>
+      <tr><td>팀원별 표</td><td>미완료 · 지연 · 완료(7일) · 진행 중 개발 건</td></tr>
+      <tr><td>표시</td><td>🔴 막힘 · 3일+ 정체 · 🟡 승인 · 앞 PR 대기 · 🟢 이상 없음</td></tr>
+    </table></div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>관리자가 할 일</h3>
+      <ul class="todo">
+        <li><b>막힌 팀원 찾기</b> — <code>/harness:prs --team</code> 으로 팀원별 진행 · 막힘 · 오래 머문 일을 보고, 검사 실패면 주인에게 알려</li>
+        <li><b>승인</b> — <code>/harness:approvals</code> 로 내 Approve 를 기다리는 PR 을 순서대로 보고 GitHub 에서 Approve 해. 새 commit 이 오면 승인이 취소돼</li>
+        <li><b>병합</b> — <code>/harness:prs --all</code> 로 순서를 보고 검사가 다 초록인 PR 만 병합해. auto-merge 가 걸린 PR 은 GitHub 가 합쳐</li>
+        <li><b>알림 이슈 정리</b> — <code>human-merge-alert</code>(승인 없이 병합) · <code>pr-tamper-alert</code>(남의 PR 브랜치 수정) · <code>ledger-complete</code>(원장 미완료) · <code>release-tag</code>(배포 태그 실패)</li>
+        <li><b>운영 파일 반영</b> — 팀원은 <code>src/</code> · <code>docs/</code> · <code>audit/</code> 만 올릴 수 있어(ops-guard). 팀원이 <code>git format-patch</code> 결과를 이슈 댓글로 주면 관리자가 <code>git am</code> 으로 적용해 PR 을 열어. commit 작성자는 팀원으로 남아</li>
+        <li><b>Plugin 판 맞추기</b> — 새 판 Teams 알림이 오면 <code>/harness:version</code> 으로 보고 <code>/harness:update</code> 로 갱신해</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>관리자를 새로 둘 때 바꿀 곳</h3>
+      <ul class="made">
+        <li>blueward-26 조직의 <b>Owner</b> 로 추가 — main ruleset 의 bypass 는 Owner 만 돼</li>
+        <li>승인자 명단 <code>.github/ssot-approvers</code></li>
+        <li>운영 파일 owner 목록 <code>.github/ops-guard.json</code></li>
+        <li>현황 메일 받는 사람과 메일 속 "관리자 =" 표기</li>
+        <li>관리자 PC 의 <code>gh auth</code> 로그인 계정</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout stop"><span class="k">남의 PR</span><div>다른 계정의 PR 에 push · 리베이스 · 검사 재실행 · 병합을 하지 않아. 영향만 알리고 주인이 하게 해.</div></div>
+    <div class="callout stop"><span class="k">자기 승인</span><div>관리자도 자기 PR 을 자기가 승인하지 않아. 작성자가 아닌 승인자가 Approve 해.</div></div>
+    <div class="callout warn"><span class="k">우회</span><div>ruleset bypass 는 검사가 고장 나 막혔을 때만 써. 쓰면 왜 썼는지 이슈에 남겨.</div></div>
+    <div class="callout warn"><span class="k">검사 불능</span><div>Actions 분이 바닥나거나 검사가 못 돈 건 통과가 아니야. 다시 돌려 결과를 확인한 뒤 병합해.</div></div>
+  </div>
+
+  <div class="next"><button data-go="release">← 릴리즈 내기</button><button data-go="blocked">다음: 막혔을 때 →</button></div>
 </article>
 
 <!-- ================= blocked ================= -->
@@ -1658,7 +1798,7 @@ Closes #143</pre>
     </ul>
   </section>
 
-  <div class="next"><button data-go="release">← 릴리즈 내기</button><button data-go="approval">다음: 승인이 필요할 때 →</button></div>
+  <div class="next"><button data-go="admin">← GitHub 관리자</button><button data-go="approval">다음: 승인이 필요할 때 →</button></div>
 </article>
 
 <!-- ================= approval ================= -->
