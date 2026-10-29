@@ -275,6 +275,11 @@ risk-gate 의 `write_auth` 기준은 PR 이 바꾼(삭제 제외) `.abap` 파일
 통과로 보지 않고 "확인하지 못함" 사유를 낸다. `decide_pr` 의 사유 목록을 그대로 쓰므로 병합 뒤 감지(`after-merge`)와 알림 이슈에도
 같은 줄이 찍힌다. `precheck-pr` 은 `PRECHECK_CRITERIA` 밖이라 이 기준을 보지 않는다.
 
+`write_auth` 는 head 내용만 보므로 같은 PR 에서 예외 주석을 넣으면 사유가 사라진다. 그래서 `allow` 기준(#545)이 따로
+PR 이 바꾼 `.abap` 파일의 diff 추가 줄에 `harness:allow CR-0NN` 이 있으면 "코드 예외 주석(harness:allow CR-0NN)을 넣거나 바꿈: <파일>"
+사유를 낸다. base 와 같은 주석과 지운 주석은 사유가 아니고, 이유만 바꾸거나 옮긴 주석은 사유다. patch 가 없을 만큼 큰 diff 면
+"확인하지 못함" 사유를 낸다. 이 기준도 설정 키가 없다.
+
 ## 출력
 
 stdout 에 JSON 리포트를 낸다. 플러그인 훅 출력과 PR 코멘트가 같은 내용을 쓴다.

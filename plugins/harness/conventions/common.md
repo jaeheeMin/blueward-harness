@@ -278,4 +278,5 @@ AUTHORIZATION` 또는 `FOR INSTANCE AUTHORIZATION` 메서드(`METHODS:` 콜론 �
 다른 파일에 있으면 경고가 나온다 — 오탐이니 `harness:allow` 로 남긴다. 또 위험 판정(risk-gate)이
 바꾼 `.abap` 파일에 이 경고가 있으면 "쓰기 앱인데 권한 검사 없음" 사유로 승인을 요구한다. 의도한
 것이면 `METHOD <이름>.` 구현 줄이나 바로 위 줄에 `harness:allow CR-009 <이유와 결정자>` 를 남긴다 —
-이유 없이는 예외로 인정하지 않는다.
+이유 없이는 예외로 인정하지 않는다. 이 주석을 새로 넣거나 바꾸는 PR 도 risk-gate 가 승인을 요구한다 —
+예외 결정 자체를 승인자가 보게 하려는 것이다.

@@ -1228,7 +1228,7 @@ def test_main_인자를_해석한다(monkeypatch):
 
 def test_기준_등록부는_이름이_겹치지_않는다():
     names = [n for n, _ in rg.CRITERIA]
-    assert names == ["size", "paths", "secret", "split_hint", "write_auth", "checks", "ai_review"]
+    assert names == ["size", "paths", "secret", "split_hint", "write_auth", "allow", "checks", "ai_review"]
     assert len(names) == len(set(names))
 
 
@@ -1799,3 +1799,66 @@ def test_titled_id_제목_있음_다른_표에서_찾음_둘_다_없음(tmp_path
     # 어느 표에도 없거나 제목이 비면 추측하지 않는다
     assert rg.titled_id("REQ-009", {"REQ-002": "판매오더 조회 앱"}) == "REQ-009(제목 미확인)"
     assert rg.titled_id("REQ-002", {"REQ-002": ""}) == "REQ-002(제목 미확인)"
+
+
+# --- allow: 예외 주석을 넣거나 바꾸면 승인(#545) ----------------------------------------
+
+ALLOW_LINE = '  " harness:allow CR-009 표준 BO 가 검사한다(홍길동 2026-10-19)'
+POOL_ALLOWED = POOL_ALLOW_ALL.replace(
+    "  METHOD get_global_authorizations.\n", ALLOW_LINE + "\n  METHOD get_global_authorizations.\n"
+)
+
+
+def _allow_reasons(result):
+    return [r for r in result["reasons"] if "harness:allow" in r]
+
+
+def _allow_client(patch, *, text=POOL_ALLOWED, status="modified", path=POOL_PATH, additions=1):
+    f = _file(path, additions=additions, patch=patch)
+    f["status"] = status
+    client = _client(files=[f])
+    client.responses[f"repos/o/r/contents/{path}?ref={HEAD}"] = _b64(text)
+    return client
+
+
+def test_같은_PR_에서_넣은_harness_allow_는_권한_사유를_지워도_승인을_요구한다():
+    result = rg.decide_pr(_allow_client(_patch(ALLOW_LINE)), "o/r", 5)
+    assert _auth_reasons(result) == []  # 주석이 권한 사유를 지운다
+    assert _allow_reasons(result) == [f"코드 예외 주석(harness:allow CR-009)을 넣거나 바꿈: {POOL_PATH}"]
+    assert result["requires_approval"] is True
+    assert "harness:allow" in result["next"]
+
+
+def test_이유만_바꾼_주석도_사유다():
+    patch = "@@ -7,1 +7,1 @@\n" + '-  " harness:allow CR-009 옛 이유\n+' + ALLOW_LINE
+    assert _allow_reasons(rg.decide_pr(_allow_client(patch), "o/r", 5)) == [
+        f"코드 예외 주석(harness:allow CR-009)을 넣거나 바꿈: {POOL_PATH}"
+    ]
+
+
+def test_base_와_같은_주석은_사유가_아니다():
+    result = rg.decide_pr(_allow_client(_patch("    DATA lv TYPE i.")), "o/r", 5)
+    assert _allow_reasons(result) == [] and result["requires_approval"] is False
+
+
+def test_주석을_지우기만_하면_사유가_아니다():
+    patch = "@@ -7,2 +7,1 @@\n" + '-  " harness:allow CR-009 옛 이유\n   METHOD get_global_authorizations.'
+    result = rg.decide_pr(_allow_client(patch, text=POOL_WITH_CHECK), "o/r", 5)
+    assert _allow_reasons(result) == [] and result["requires_approval"] is False
+
+
+def test_새_abap_파일의_주석도_사유다():
+    result = rg.decide_pr(_allow_client(_patch(ALLOW_LINE), status="added"), "o/r", 5)
+    assert len(_allow_reasons(result)) == 1
+
+
+def test_abap_가_아닌_파일의_주석은_보지_않는다():
+    f = _file("docs/a.md", patch=_patch("harness:allow CR-009 예시"))
+    assert _allow_reasons(rg.decide_pr(_client(files=[f]), "o/r", 5)) == []
+
+
+def test_diff_를_못_읽으면_판정_불능_사유():
+    result = rg.decide_pr(_allow_client(None, additions=900), "o/r", 5)
+    (reason,) = [r for r in result["reasons"] if "harness:allow" in r]
+    assert "확인하지 못함" in reason and POOL_PATH in reason
+    assert result["requires_approval"] is True
