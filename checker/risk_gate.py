@@ -31,6 +31,10 @@
               `auth-allowed` 만 대입하고 파일에 `AUTHORITY-CHECK` 가 없다(#361). 쓰기 앱이 권한 검사 없이
               들어오는 것을 승인자가 보게 한다. 설정 키가 없다: 게이트가 켜져 있으면 항상 본다(옛 설정
               파일이 모르는 키로 판정 불능이 되지 않게). 파일을 못 읽으면 판정 불능 사유다.
+- `allow`     바뀐 `.abap` 파일의 추가된 줄에 `harness:allow CR-0NN` 예외 주석이 있는가(#545). 주석을 새로
+              넣거나 바꾸면 그 규칙 경고가 사라져 `write_auth` 같은 기준이 조용히 풀리므로, 예외 결정 자체를
+              승인자가 보게 한다. diff 의 추가 줄로 보니 base 와 같은 주석은 사유가 아니고, 지운 주석은 검사가
+              다시 걸리므로 사유가 아니다. diff 가 너무 커 못 읽으면 판정 불능 사유다. 설정 키가 없다.
 - `ai_review` 설정에서 켠 때만 본다. 이름이 `ai-review` 인 check run 의 결론을 읽는다
               (success 면 통과, 그 밖의 결론이면 결론별 사유 — `ai_review_reasons`). 그 check run 은
               재사용 워크플로 `ai-review.yml`(#125)이 만든다. 심각한 지적, 일부만 봄, 검사 불능,
@@ -952,6 +956,29 @@ def _crit_write_auth(ctx: Context) -> list[Finding]:
     return findings
 
 
+_ALLOW_MARK = re.compile(r"harness:allow\s+(CR-\d{3})", re.IGNORECASE)
+
+
+@criterion("allow")
+def _crit_allow(ctx: Context) -> list[Finding]:
+    findings: list[Finding] = []
+    for entry in ctx.files:
+        path = entry.get("filename") or ""
+        if entry.get("status") == "removed" or language_for_suffix(PurePosixPath(path)) != "abap":
+            continue
+        if not entry.get("patch"):
+            if int(entry.get("additions") or 0) + int(entry.get("deletions") or 0) > 0:
+                # 검사를 못 한 것을 안전하다고 뭉개지 않는다(원칙 7).
+                findings.append(Finding(
+                    "allow", f"예외 주석(harness:allow)을 넣었는지 확인하지 못함(변경이 너무 커서 diff 를 못 읽음): {path}. 승인자가 직접 확인"
+                ))
+            continue
+        rules = sorted({m.group(1).upper() for _f, _n, text in added_lines([entry]) if (m := _ALLOW_MARK.search(text))})
+        if rules:
+            findings.append(Finding("allow", f"코드 예외 주석(harness:allow {', '.join(rules)})을 넣거나 바꿈: {path}"))
+    return findings
+
+
 @criterion("checks")
 def _crit_checks(ctx: Context) -> list[Finding]:
     if not ctx.cfg["require_checks_green"]:
@@ -1002,6 +1029,11 @@ def build_next(findings: list[Finding], approval: str, approvers_file: str) -> s
         steps.append(
             "Claude 가 behavior pool 에 AUTHORITY-CHECK 를 넣거나, 검사하지 않기로 한 것이면 Spec 권한 절과 "
             "harness:allow CR-009 에 이유·결정자를 남기고, 승인자가 그 결정을 확인하십시오"
+        )
+    if "allow" in kinds:
+        steps.append(
+            "승인자가 새로 넣거나 바꾼 harness:allow 주석의 이유·결정자가 맞는지 확인하십시오. 예외가 아니면 "
+            "Claude 가 주석을 지우고 지적을 고치십시오"
         )
     waiting = any(f.waiting for f in findings)
     failing = any(f.criterion == "checks" and not f.waiting for f in findings)
