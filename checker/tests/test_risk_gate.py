@@ -67,6 +67,12 @@ def test_size_warn_only_paths_기본은_빈_목록이고_설정이_덮는다():
     assert rg.load_config("size_warn_only_paths:\n")["size_warn_only_paths"] == []
 
 
+def test_size_exclude_paths_기본은_빈_목록이고_설정이_덮는다():
+    assert rg.load_config(None)["size_exclude_paths"] == []
+    assert rg.load_config("size_exclude_paths: [src/, audit/]\n")["size_exclude_paths"] == ["src/", "audit/"]
+    assert rg.load_config("size_exclude_paths:\n")["size_exclude_paths"] == []
+
+
 def test_설정에_적은_값이_기본값을_덮는다_나머지는_기본값():
     cfg = rg.load_config("max_changed_lines: 50\nsecret_scan: false\nhigh_risk_paths:\n  - src/\n")
     assert cfg["max_changed_lines"] == 50
@@ -94,6 +100,9 @@ def test_기본값_목록을_바꿔도_다음_설정에_새지_않는다():
         "size_warn_only_paths: src/\n",  # 목록이 아니면 오류(#436)
         "size_warn_only_paths: [1]\n",
         "size_warn_only_path: [src/]\n",  # 키 오타
+        "size_exclude_paths: src/\n",  # 목록이 아니면 오류(#534)
+        "size_exclude_paths: [1]\n",
+        "size_exclude_path: [src/]\n",  # 키 오타
         "secret_scna: false\n",  # 오타는 조용히 넘기지 않는다
         "- a\n- b\n",
         "a: [unclosed\n",
@@ -617,6 +626,81 @@ def test_size_기준의_참고_Finding_은_note_표시가_붙는다():
                      load_check_runs=lambda: [])
     findings = [f for f in rg.evaluate(ctx) if f.criterion == "size"]
     assert [f.note for f in findings] == [True]
+
+
+EXCL = "size_exclude_paths: [src/, audit/]\n"
+
+
+def test_제외_경로가_비면_섞인_PR_도_전체를_센다_전과_같다():
+    files = [_file("src/a.py", 400, 0), _file("ops/run.sh", 1, 0)]
+    result = rg.decide_pr(_client(files=files), "o/r", 5)
+    assert result["requires_approval"] is True and "401줄" in result["reasons"][0]
+
+
+def test_섞인_PR_은_src_줄을_빼고_센다():
+    client = _client(config=EXCL, files=[_file("src/a.py", 400, 0), _file("ops/run.sh", 5, 0)])
+    result = rg.decide_pr(client, "o/r", 5)
+    assert result["requires_approval"] is False and result["reasons"] == []
+    assert len(result["notes"]) == 1 and "405줄" in result["notes"][0] and "참고" in result["notes"][0]
+
+
+def test_src_와_audit_만_바꾼_PR_은_참고만():
+    client = _client(config=EXCL, files=[_file("src/a.py", 200, 0), _file("audit/x.md", 200, 0)])
+    result = rg.decide_pr(client, "o/r", 5)
+    assert result["requires_approval"] is False and len(result["notes"]) == 1
+
+
+def test_밖만_바꾼_PR_은_지금처럼_기준을_넘으면_승인_사유():
+    result = rg.decide_pr(_client(config=EXCL, files=[_file("ops/run.sh", 301, 0)]), "o/r", 5)
+    assert result["requires_approval"] is True and "301줄" in result["reasons"][0] and result["notes"] == []
+    result = rg.decide_pr(_client(config=EXCL, files=[_file("ops/run.sh", 20, 0)]), "o/r", 5)
+    assert result["requires_approval"] is False and result["notes"] == []
+
+
+def test_뺀_뒤에도_밖이_기준을_넘으면_승인_사유이고_뺀_부분_초과는_참고로_따로_난다():
+    client = _client(config=EXCL, files=[_file("src/a.py", 400, 0), _file("ops/run.sh", 301, 0)])
+    result = rg.decide_pr(client, "o/r", 5)
+    assert result["requires_approval"] is True
+    assert len(result["reasons"]) == 1 and "301줄" in result["reasons"][0]
+    assert result["notes"] == []  # 줄은 이미 사유라 같은 종류 참고는 없다
+
+
+def test_밖의_파일_수만_기준을_넘으면_파일_수가_사유():
+    files = [_file(f"ops/{i}.sh", 1, 0) for i in range(11)] + [_file("src/a.py", 400, 0)]
+    result = rg.decide_pr(_client(config=EXCL, files=files), "o/r", 5)
+    assert result["requires_approval"] is True
+    assert len(result["reasons"]) == 1 and "11개" in result["reasons"][0]
+    assert len(result["notes"]) == 1 and "411줄" in result["notes"][0]
+
+
+def test_센_파일이_정확히_기준이면_사유_없고_하나_넘으면_사유():
+    big = _file("src/a.py", 400, 0)
+    r = rg.decide_pr(_client(config=EXCL, files=[big, _file("ops/run.sh", 300, 0)]), "o/r", 5)
+    assert r["requires_approval"] is False and r["reasons"] == []
+    r = rg.decide_pr(_client(config=EXCL, files=[big, _file("ops/run.sh", 301, 0)]), "o/r", 5)
+    assert r["requires_approval"] is True and "301줄" in r["reasons"][0]
+    files = [_file(f"ops/{i}.sh", 1, 0) for i in range(10)] + [big]
+    r = rg.decide_pr(_client(config=EXCL, files=files), "o/r", 5)
+    assert r["requires_approval"] is False and r["reasons"] == []
+    files = [_file(f"ops/{i}.sh", 1, 0) for i in range(11)] + [big]
+    r = rg.decide_pr(_client(config=EXCL, files=files), "o/r", 5)
+    assert r["requires_approval"] is True and "11개" in r["reasons"][0]
+
+
+def test_제외_접두어_src_는_srcx_를_빼지_않는다():
+    cfg = "size_exclude_paths: [src/]\n"
+    r = rg.decide_pr(_client(config=cfg, files=[_file("srcx/a.txt", 301, 0)]), "o/r", 5)
+    assert r["requires_approval"] is True and "301줄" in r["reasons"][0]
+
+
+def test_두_키를_함께_쓰면_제외가_먼저_적용되고_warn_only_는_남은_사유에_그대로_적용된다():
+    cfg = "size_exclude_paths: [audit/]\nsize_warn_only_paths: [src/]\n"
+    # 센 파일이 모두 warn_only 아래 → 남은 사유도 참고
+    r = rg.decide_pr(_client(config=cfg, files=[_file("src/a.py", 400, 0), _file("audit/x.md", 5, 0)]), "o/r", 5)
+    assert r["requires_approval"] is False and len(r["notes"]) == 1
+    # 센 파일에 warn_only 밖(ops)이 있으면 사유
+    r = rg.decide_pr(_client(config=cfg, files=[_file("src/a.py", 400, 0), _file("ops/run.sh", 1, 0)]), "o/r", 5)
+    assert r["requires_approval"] is True
 
 
 def test_위험_경로를_바꾸면_위험():

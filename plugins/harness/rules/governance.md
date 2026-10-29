@@ -104,10 +104,15 @@ Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험�
 없으니 한 명 이상 적어 둔다.
 
 기준은 `.github/risk-gate.yaml`(`max_changed_lines`, `max_changed_files`, `high_risk_paths`,
-`secret_scan`, `require_checks_green`, `ai_review`, `size_warn_only_paths`, `srs_split_hint`, `approvers_file`)에서 고친다.
-`size_warn_only_paths`(기본 비어 있음, #436)에 접두어(예 `src/`)를 적으면, 바뀐 파일이 **모두** 그 아래인 PR 은
-줄·파일 수가 기준을 넘어도 승인 사유가 아니라 경고(결과의 `notes`, PR 코멘트의 "참고(승인 필요 없음)")로만 낸다.
-하나라도 그 밖의 파일을 바꾸면 크기도 지금처럼 승인 사유다. 비밀값·CR-009·AI 리뷰·다른 검사 실패는 소스만 바꿔도
+`secret_scan`, `require_checks_green`, `ai_review`, `size_exclude_paths`, `size_warn_only_paths`, `srs_split_hint`, `approvers_file`)에서 고친다.
+`size_exclude_paths`(기본 비어 있음 = 모든 파일을 센다, #534)에 접두어(예 `src/`, `audit/`)를 적으면, 그 아래 파일은 줄·파일 수 합계에서
+빼고 **남은 파일만으로** `max_changed_*` 를 판정한다. 남은 부분이 기준을 넘으면 승인 사유이고, 뺀 것까지 합쳐야 넘는 부분은 경고
+(결과의 `notes`, PR 코멘트의 "참고(승인 필요 없음)")로만 낸다. 그래서 `src/` 와 Spec 을 같이 고쳐도 `src/` 줄은 승인 사유가 되지 않는다.
+다른 기준(위험 경로·비밀값·AI 리뷰·다른 검사 실패)은 그대로다. 두 키를 함께 쓰면 `size_exclude_paths` 를 먼저 적용하고,
+`size_warn_only_paths` 는 **센 파일**이 모두 그 아래일 때 남은 사유를 경고로 바꾼다.
+`size_warn_only_paths`(기본 비어 있음, #436)에 접두어(예 `src/`)를 적으면, **센 파일**(`size_exclude_paths` 를 쓰면 그 아래를 뺀 나머지, 안 쓰면 바뀐 파일 전부)이
+**모두** 그 아래인 PR 은 줄·파일 수가 기준을 넘어도 승인 사유가 아니라 경고(결과의 `notes`, PR 코멘트의 "참고(승인 필요 없음)")로만 낸다.
+센 파일 중 하나라도 그 밖이면 크기도 지금처럼 승인 사유다. 두 키의 접두어는 `/` 로 끝낸다(`src/` — `src` 라고 적으면 `srcx/` 도 걸릴 수 있다). 비밀값·CR-009·AI 리뷰·다른 검사 실패는 소스만 바꿔도
 그대로 승인 사유다.
 `srs_split_hint`(기본 `true`)는 SRS 에 새 요구사항이 생겼는데 기존 요구사항을 넓힌 것처럼 보일 때
 (상세 절의 다른 번호 언급, 범위 "하지 않는 것" 줄 변경, 제목 겹침) 근거를 위험 사유로 붙인다.
