@@ -417,10 +417,11 @@ def _order_devs(raw: dict) -> set[int]:
     return nums
 
 
-def _primary_dev(raw: dict) -> int | None:
+def _primary_dev(raw: dict, use_body: bool = True) -> int | None:
     """PR 하나가 속한 DEV 번호 하나(줄기 묶기용, #390). `_dev_numbers` 는 본문에서 스쳐 지나간 번호까지 모으므로(결함 PR 이
     "DEV-007 과 같은 결함" 이라 적는 식) 가장 작은 번호를 쓰면 틀린다. 우선순위: 제목 끝 `(DEV-xxx)` > 제목 맨 앞 번호 >
-    브랜치 > 바꾼 Spec 파일 `docs/spec/DEV-xxx-*.md`(여럿이면 작은 번호) > 본문에서 처음 나온 번호."""
+    브랜치 > 바꾼 Spec 파일 `docs/spec/DEV-xxx-*.md`(여럿이면 작은 번호) > 본문에서 처음 나온 번호.
+    `use_body=False` 면 본문 근거를 쓰지 않는다(본문에 스쳐 지나간 언급으로 담당을 추정하지 않으려고, #535)."""
     title = raw.get("title") or ""
     end = _title_end_devs(title)
     if end:
@@ -436,6 +437,8 @@ def _primary_dev(raw: dict) -> int | None:
             specs.append(int(sm.group(1)))
     if specs:
         return min(specs)
+    if not use_body:
+        return None
     found = _DEV_REF.findall(raw.get("body") or "")
     return int(found[0]) if found else None
 
@@ -719,6 +722,7 @@ def compute(client: GhClient, repo: str, login: str | None = None, mine: bool = 
                 "version": versions.get(n),
                 "devs": sorted(_dev_numbers(raw)),
                 "dev": _primary_dev(raw),
+                "dev_strong": _primary_dev(raw, use_body=False),  # 본문 언급을 뺀 근거로 정해진 번호(팀 현황의 담당 추정용, #535)
                 "closes": closing_issues(raw.get("body")),
                 "ledger": [],  # --mine 일 때 ledger_stale.annotate 가 채운다(#454)
             }

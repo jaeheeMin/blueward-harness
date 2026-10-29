@@ -70,9 +70,9 @@ REQ-031
 
 ## 개발 건
 
-| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |
-|---|---|---|---|---|---|
-| DEV-1 | 결재단계 추가 | docs/spec/구매요청.md | 김개발 | 진행 | #50 |
+| ID | 내용 | Spec | 담당 | 상태 |
+|---|---|---|---|---|
+| DEV-1 | 결재단계 추가 | docs/spec/구매요청.md | 김개발 | 진행 |
 
 ## 메모
 
@@ -149,7 +149,7 @@ def test_형식에_맞는_진행_원장은_통과한다(tmp_path: Path, capsys):
 def test_스펙_칸이_대시인_start_등록_줄도_통과하고_스캐폴드_템플릿_자체도_통과한다(tmp_path: Path, capsys):
     scaffold(tmp_path, "고객사", "프로젝트", False)
     ledger = tmp_path / "audit" / "ledger" / "구매요청승인.md"
-    _write(ledger, LEDGER_VALID.replace("docs/spec/구매요청.md", "-").replace("| 진행 | #50 |", "| 진행 |  |"))
+    _write(ledger, LEDGER_VALID.replace("docs/spec/구매요청.md", "-"))
 
     code, out = _run_auto(capsys, ledger)
 

@@ -73,10 +73,11 @@ GitHub 에서 한 번에 하고, 세션을 시작할 때 나오는 "내 PR" 알�
 
 출력 순서: 확인 불능 목록 → **공통 원인**(같은 사유로 PR 둘 이상에서 실패한 것. 사유가 구체적이면 검사가 달라도 한 건으로 묶고 검사 이름을 목록으로 붙이며, `exit code N` 이 든 문구나 20자 미만의 흔한 문구는 같은 검사끼리만 묶는다. 사람별 칸에는 "공통 원인 ①" 만 적힌다) →
 팀원 요약 표 → 팀원별 상세(진행: 병합한 PR·열린 PR 의 마지막 커밋 시각, 막힘: PR 한 건에 한 줄로 검사 실패(검사 이름과 사유)·충돌·리뷰·승인 대기·앞 PR 대기를 이어 붙임, 요약 표의 "막힌 PR" 은 PR 수,
-오래 머문 PR·이슈, 맡은 개발 건 DEV 번호(제목)·상태·마지막 PR) → 담당자 없는 열린 이슈.
+오래 머문 PR·이슈, 맡은 개발 건 DEV 번호(제목)·상태·최근 PR) → 담당자 없는 열린 이슈.
 
 - 맡은 개발 건은 **저장소 기본 브랜치**(조회한 값, main 이 아닐 수 있다)의 `audit/ledger/*.md` 에서 읽는다. 기본 브랜치에 원장 디렉터리가 실제로 없을 때만 "원장 없음" 으로 건너뛴다(확인 불능이 아니다).
   기본 브랜치를 못 읽거나 원장을 읽지 못하면 "확인 불능" 이다. `담당` 칸에 적힌 사람은 이번 기간에 활동이 없어도 팀원 칸에 나온다.
+  **최근 PR 은 원장에 적지 않고 GitHub 에서 찾는다(#535).** 열린 PR 과 최근 병합 PR 중 제목 끝 `(DEV-xxx)`·브랜치·바꾼 Spec 파일명·본문으로 그 DEV 를 가리키는 가장 큰 번호의 PR 이다. 못 찾았을 때 병합 PR 목록을 못 읽었거나 일부만 읽었으면 "없음" 이 아니라 "확인 불능" 으로 보인다. `none` 은 읽은 범위(열린 PR·최근 N일 병합, 기본 7일)에 없다는 뜻이지 그 DEV 의 PR 이 없다는 뜻이 아니다. 담당 칸이 빈 줄의 담당 추정은 제목 끝 번호·브랜치·Spec 파일명으로 DEV 가 정해진 PR 만 쓰고 본문 언급만으로 잡힌 PR 은 쓰지 않는다. 옛 원장에 `마지막 PR` 칸이 남아 있어도 읽지 않는다.
 - **팀 별칭 파일**: 원장 `담당` 칸에 실명이 적혀 같은 사람이 두 칸으로 갈릴 때, 원장을 고치지 않고 Project Repository 의 기본 브랜치에 `.github/harness-team.yaml` 을 두어 이름을 GitHub 아이디로 잇는다(`.github/ssot-approvers` 같은 저장소 데이터 파일 위치). 형식(예시 값):
 
   ```yaml
@@ -99,7 +100,7 @@ GitHub 에서 한 번에 하고, 세션을 시작할 때 나오는 "내 PR" 알�
 | `progress` | `merged[]`(`number`,`title`,`url`,`merged_at`), `merged_count`, `open[]`(`number`,`title`,`url`,`state`,`last_commit_at`,`last_activity_at`,`last_activity_kind`(`commit`·`opened`·`comment`·`review`·`review_comment`; 판정 불능이면 둘 다 null)) |
 | `blocked[]` | 막힌 PR 하나당 한 항목: `pr`,`title`,`url`,`author`,`reasons[]`. `reasons[]` 항목은 `kind`(`check_failed`·`conflict`·`approval`·`after`·`other`·`unknown`),`state`,`detail`, 그리고 `checks[]`(`name`,`reason`,`reason_status`(`ok`·`no_text`·`unknown`),`common_cause`(공통 원인 `id` 또는 null),`unknown_reason`은 `unknown` 일 때만) 또는 `after[]`(앞 PR 번호); 검사 실패 항목에는 `checks_truncated`(검사가 너무 많아 일부를 읽지 못했으면 true) |
 | `stale` | `unknown_prs[]`·`unknown_issues[]`(사람 활동 시각을 다 읽지 못해 정체 여부를 판정하지 못한 번호), `prs[]`(`number`,`title`,`url`,`state`,`last_activity_at`,`last_activity_kind`,`idle_days`), `issues[]`(`number`,`title`,`url`,`last_activity_at`,`last_activity_kind`(`comment`·`created`),`idle_days`) |
-| `dev_items[]` | `id`(DEV-007), `title`, `owner`(원장 `담당` 칸, 비면 마지막 PR 작성자로 배정했다는 뜻으로 빈 문자열), `status`, `last_pr`, `file` |
+| `dev_items[]` | `id`(DEV-007), `title`, `owner`(원장 `담당` 칸, 비면 그 DEV 의 최근 PR 작성자로 배정했다는 뜻으로 빈 문자열), `status`, `recent_pr`(`status` 가 `found` 면 `number`·`url`·`state`(`open`·`merged`), `none`(읽은 범위에 없음, `days` 가 조회한 병합 일수), `unknown` 이면 `reason`), `file` |
 | 그 밖 | `unassigned_issues[]`(`number`,`title`,`url`,`created_at`), `aliases_applied[]`(`name`,`login`,`items`: 원장 담당 이름이 어느 GitHub 아이디로 합쳐졌는지), `truncated`(`open_prs`·`merged`·`issues`: 쪽수·개수 제한으로 일부만 읽었으면 true), `ledger`(`status`(`ok`·`none`·`unknown`),`reason`,`branch`(저장소 기본 브랜치),`files`,`unowned[]` 담당을 못 정한 개발 건), `unknown[]`(`item`,`reason`), `warnings[]` |
 
 읽지 못한 칸의 값은 `null`(빈 목록이 아니다)이고 `unknown[]` 에 사유가 있다. 병합·시각·이슈·원장이 각각 따로 확인 불능이 될 수 있다.

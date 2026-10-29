@@ -22,7 +22,7 @@ REPO = "o/r"
 
 HEADER = (
     "# 원장\n\n## 관련 요구사항\n\n| REQ | 내용 |\n|---|---|\n| REQ-001 | x |\n\n"
-    "## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |\n|---|---|---|---|---|---|\n"
+    "## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 |\n|---|---|---|---|---|\n"
 )
 
 
@@ -85,10 +85,10 @@ def _run(monkeypatch, root: Path, client: FakeGh, capsys, shas: list[str] | None
     return code, json.loads(out[-1])
 
 
-ROW1 = "| DEV-001 | 구매요청 승인 | [Spec](../../docs/spec/DEV-001.md) | alice | 리뷰 | #40 |"
-ROW2 = "| DEV-002 | 타일 노출 | - | bob | 진행 |  |"
-DONE1 = "| DEV-001 | 구매요청 승인 | [Spec](../../docs/spec/DEV-001.md) | alice | 완료 | #50 |"
-DONE2 = "| DEV-002 | 타일 노출 | - | bob | 완료 | #50 |"
+ROW1 = "| DEV-001 | 구매요청 승인 | [Spec](../../docs/spec/DEV-001.md) | alice | 리뷰 |"
+ROW2 = "| DEV-002 | 타일 노출 | - | bob | 진행 |"
+DONE1 = "| DEV-001 | 구매요청 승인 | [Spec](../../docs/spec/DEV-001.md) | alice | 완료 |"
+DONE2 = "| DEV-002 | 타일 노출 | - | bob | 완료 |"
 
 
 def _rep(n: int, dev: str = "DEV-001", body: str = "") -> dict:
@@ -282,14 +282,14 @@ def test_BOM_붙은_원장도_읽는다(tmp_path, monkeypatch, capsys):
 
 
 def test_BOM_뒤가_바로_개발_건_절이어도_읽는다(tmp_path, monkeypatch, capsys):
-    text = "﻿## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |\n|---|---|---|---|---|---|\n" + DONE1 + "\n"
+    text = "﻿## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 |\n|---|---|---|---|---|\n" + DONE1 + "\n"
     _write(tmp_path, "a.md", text)
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
     assert code == 0 and res["status"] == "ok"
 
 
 def test_CRLF_원장과_이스케이프된_파이프_칸도_읽는다(tmp_path, monkeypatch, capsys):
-    row = "| DEV-001 | a \\| b | - | alice | 완료 | #50 |"
+    row = "| DEV-001 | a \\| b | - | alice | 완료 |"
     _write(tmp_path, "a.md", _ledger(row), newline="\r\n")
     code, res = _run(monkeypatch, tmp_path, FakeGh([_pr("Closes #7")], {7: _rep(7)}), capsys)
     assert code == 0 and res["status"] == "ok"

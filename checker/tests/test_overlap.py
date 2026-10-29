@@ -261,7 +261,7 @@ def test_스위치_파일이_없으면_둘_다_돈다(tmp_path, monkeypatch, cap
     _two_specs(tmp_path)
     ledger = tmp_path / "audit" / "ledger" / "판매.md"
     ledger.parent.mkdir(parents=True)
-    ledger.write_text("# x\n\n## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |\n|---|---|---|---|---|---|\n", encoding="utf-8")
+    ledger.write_text("# x\n\n## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 |\n|---|---|---|---|---|\n", encoding="utf-8")
     _, report = _run(tmp_path, monkeypatch, capsys)
     assert "overlap" in report and "pairing" in report
 
@@ -343,8 +343,8 @@ def test_SRS에_없는_번호는_원장_내용으로_그것도_없으면_제목_
     ledger = tmp_path / "audit" / "ledger" / "p.md"
     ledger.parent.mkdir(parents=True)
     ledger.write_text(
-        "# 원장\n\n## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |\n|---|---|---|---|---|---|\n"
-        "| DEV-002 | 원장에만 있는 내용 | - | 홍 | 진행 |  |\n",
+        "# 원장\n\n## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 |\n|---|---|---|---|---|\n"
+        "| DEV-002 | 원장에만 있는 내용 | - | 홍 | 진행 |\n",
         encoding="utf-8",
     )
     (w,) = check_overlap(tmp_path)["warnings"]

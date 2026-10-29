@@ -10,7 +10,7 @@ from checker.ssot_approval import GhError
 REPO = "o/r"
 SHA = "headsha1"
 HEAD = (
-    "# 원장\n\n## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |\n|---|---|---|---|---|---|\n"
+    "# 원장\n\n## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 |\n|---|---|---|---|---|\n"
 )
 
 
@@ -19,7 +19,7 @@ def ledger(*rows: str) -> str:
 
 
 def row(dev: str, state: str) -> str:
-    return f"| {dev} | 내용 | - | me | {state} | #1 |"
+    return f"| {dev} | 내용 | - | me | {state} |"
 
 
 def _content(text: str) -> dict:

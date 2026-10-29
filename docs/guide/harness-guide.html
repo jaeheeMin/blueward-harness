@@ -1312,14 +1312,14 @@ fix/31-broken-link</pre>
       <div class="node"><b>살펴보기</b><span>main 이면 거절 · 활성화 확인</span></div><div class="arrow"></div>
       <div class="node"><b>맞추기</b><span>fetch → rebase</span></div><div class="arrow"></div>
       <div class="node hl"><b>커밋</b><span>의미 하나에 커밋 하나</span></div><div class="arrow"></div>
-      <div class="node ok"><b>원장 갱신</b><span>상태 "리뷰" + 예측한 PR 번호</span></div><div class="arrow"></div>
+      <div class="node ok"><b>원장 갱신</b><span>상태 "리뷰" (PR 번호는 안 적어)</span></div><div class="arrow"></div>
       <div class="node hl"><b>푸시 한 번</b><span>deliver 만 통과</span></div><div class="arrow"></div>
       <div class="node"><b>PR</b><span>담당자는 나 · 번호 확인</span></div>
     </div>
-    <p class="small" style="margin-top:10px">원장을 PR 뒤에 고치면 푸시가 두 번 나가서 Actions 검사가 두 번 돌아. 그래서 다음 PR 번호를 미리 계산해 푸시 전에 적고, PR 을 만든 뒤 번호가 다를 때만 한 번 더 올려.</p>
+    <p class="small" style="margin-top:10px">원장을 PR 뒤에 고치면 푸시가 두 번 나가서 Actions 검사가 두 번 돌아. 그래서 원장은 푸시 전에 고쳐. 원장 줄에는 PR 번호를 적지 않아(같은 개발 건의 PR 이 여럿 열려도 그 줄에서 충돌하지 않게). 개발 건별 최근 PR 은 "팀원별 현황" 이 GitHub 에서 찾아 보여 줘. 옛 원장에 "마지막 PR" 칸이 남아 있어도 읽지도 고치지도 않아.</p>
   </section>
 
-  <p class="small">고친 게 없어도 멈추지 않는 경우가 하나 있어. 지금 브랜치의 열린 PR 이 대표 <code>[DEV-xxx]</code> 이슈를 닫는데 진행 원장이 <code>완료</code> 가 아니면(옛 판으로 만든 PR), deliver 가 원장 행만 <code>완료</code> · 그 PR 번호로 고쳐 커밋하고 한 번 푸시해. "내 PR 확인하기" 의 원장 줄을 보고 Claude 가 먼저 제안해. 이미 승인받은 PR 이면 새 커밋 때문에 승인이 취소돼 다시 받아야 해서, Claude 가 그 점을 먼저 말하고 물어봐.</p>
+  <p class="small">고친 게 없어도 멈추지 않는 경우가 하나 있어. 지금 브랜치의 열린 PR 이 대표 <code>[DEV-xxx]</code> 이슈를 닫는데 진행 원장이 <code>완료</code> 가 아니면(옛 판으로 만든 PR), deliver 가 원장 행만 <code>완료</code> 로 고쳐 커밋하고 한 번 푸시해. "내 PR 확인하기" 의 원장 줄을 보고 Claude 가 먼저 제안해. 이미 승인받은 PR 이면 새 커밋 때문에 승인이 취소돼 다시 받아야 해서, Claude 가 그 점을 먼저 말하고 물어봐.</p>
 
   <section class="box">
     <h3>커밋한 뒤 deliver 가 먼저 물어봐 — 세 갈래</h3>

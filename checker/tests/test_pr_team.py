@@ -19,11 +19,17 @@ def ago(**kw) -> str:
 
 
 LEDGER = (
+    "# 프로그램\n\n## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 |\n|---|---|---|---|---|\n"
+    "| DEV-001 | 자재 출고 | - | alice | 진행 |\n"
+    "| DEV-002 | 입고 | - |  | 대기 |\n"
+    "| DEV-003 | 재고 | - | carol | 완료 |\n"
+    "|  |  |  |  | 대기 |\n\n## 메모\n"
+)
+# #535 이전의 원장: `마지막 PR` 칸이 아직 남아 있다. 엔진은 그 칸을 무시한다.
+OLD_LEDGER = (
     "# 프로그램\n\n## 개발 건\n\n| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |\n|---|---|---|---|---|---|\n"
-    "| DEV-001 | 자재 출고 | - | alice | 진행 | #11 |\n"
-    "| DEV-002 | 입고 | - |  | 대기 | #12 |\n"
-    "| DEV-003 | 재고 | - | carol | 완료 | #5 |\n"
-    "|  |  |  |  | 대기 |  |\n\n## 메모\n"
+    "| DEV-001 | 자재 출고 | - | alice | 진행 | #99 |\n"
+    "| DEV-002 | 입고 | - |  | 대기 | #98 |\n"
 )
 
 
@@ -340,18 +346,90 @@ def test_stale_issue_boundary_14_days_and_unassigned():
 # --- 원장 ---------------------------------------------------------------------
 
 
-def test_ledger_items_by_owner_and_last_pr_author():
+def test_ledger_items_by_owner_and_recent_pr_author():
     gh = TeamGh(
-        [pr(11, author="alice"), pr(12, author="bob")], meta={},
-        merged=[merged_pr(5, "carol", ago(days=1))],
+        [pr(11, author="alice", title="자재 출고 (DEV-001)"), pr(12, author="bob", title="입고 (DEV-002)")], meta={},
+        merged=[merged_pr(5, "carol", ago(days=1), title="재고 (DEV-003)")],
         ledger={"audit/ledger/prog.md": LEDGER},
     )
     res = team(gh)
     assert res["ledger"]["status"] == "ok"
     assert [d["id"] for d in person(res, "alice")["dev_items"]] == ["DEV-001"]
-    assert [d["id"] for d in person(res, "bob")["dev_items"]] == ["DEV-002"]  # 담당 칸이 비면 마지막 PR 작성자
+    assert [d["id"] for d in person(res, "bob")["dev_items"]] == ["DEV-002"]  # 담당 칸이 비면 그 DEV 의 최근 PR 작성자
     carol = person(res, "carol")["dev_items"][0]
-    assert (carol["id"], carol["status"], carol["last_pr"], carol["title"]) == ("DEV-003", "완료", "#5", "재고")
+    assert (carol["id"], carol["status"], carol["title"]) == ("DEV-003", "완료", "재고")
+    assert carol["recent_pr"] == {"status": "found", "number": 5, "url": "https://github.com/o/r/pull/5", "state": "merged"}
+    assert person(res, "alice")["dev_items"][0]["recent_pr"]["state"] == "open"
+
+
+def test_recent_pr_is_highest_number_among_open_and_merged_and_uses_branch_or_body():
+    merged = [
+        merged_pr(20, "alice", ago(days=2), title="앞 단계"),
+        merged_pr(30, "alice", ago(days=1), title="본문으로 찾기"),
+    ]
+    merged[0]["headRefName"] = "feat/20-DEV-001-앞"  # 제목에 번호가 없으면 브랜치에서 찾는다
+    merged[1]["body"] = "## 진행 원장\n[DEV-001(자재 출고)](audit/ledger/prog.md)"  # 제목·브랜치에도 없으면 본문에서 처음 나온 번호
+    gh = TeamGh([pr(25, author="alice", title="중간 (DEV-001)")], meta={}, merged=merged, ledger={"audit/ledger/prog.md": LEDGER})
+    item = person(team(gh), "alice")["dev_items"][0]
+    assert item["recent_pr"]["number"] == 30 and item["recent_pr"]["state"] == "merged"
+    gh = TeamGh([pr(35, author="alice", title="가장 새것 (DEV-001)")], meta={}, merged=merged, ledger={"audit/ledger/prog.md": LEDGER})
+    assert person(team(gh), "alice")["dev_items"][0]["recent_pr"]["number"] == 35
+
+
+def test_recent_pr_none_vs_unknown_are_distinguished():
+    # 읽었는데 없다: "없음"
+    gh = TeamGh([pr(1, author="alice", title="딴 일 (DEV-009)")], meta={}, ledger={"audit/ledger/prog.md": LEDGER})
+    res = team(gh)
+    item = person(res, "alice")["dev_items"][0] if res["people"] and person(res, "alice")["dev_items"] else res["ledger"]["unowned"][0]
+    assert item["recent_pr"] == {"status": "none", "days": 7}
+    assert "최근 PR 없음" in pr_team.render_team(res)
+    # 병합 목록을 못 읽었다: 없음이 아니라 확인 불능
+    gh = TeamGh([pr(1, author="alice", title="딴 일 (DEV-009)")], meta={}, ledger={"audit/ledger/prog.md": LEDGER}, fail_on=("search(",))
+    res = team(gh)
+    item = person(res, "alice")["dev_items"][0]
+    assert item["recent_pr"]["status"] == "unknown" and "병합" in item["recent_pr"]["reason"]
+    text = pr_team.render_team(res)
+    assert "최근 PR 확인 불능" in text and "최근 PR 없음" not in text
+    # 못 읽어도 열린 PR 에서 찾았으면 찾은 것이다
+    gh = TeamGh([pr(1, author="alice", title="자재 출고 (DEV-001)")], meta={}, ledger={"audit/ledger/prog.md": LEDGER}, fail_on=("search(",))
+    assert person(team(gh), "alice")["dev_items"][0]["recent_pr"]["status"] == "found"
+
+
+def test_old_ledger_last_pr_column_is_ignored():
+    gh = TeamGh([pr(7, author="dave", title="입고 (DEV-002)")], meta={}, ledger={"audit/ledger/prog.md": OLD_LEDGER})
+    res = team(gh)
+    assert res["ledger"]["status"] == "ok"
+    assert [d["id"] for d in person(res, "dave")["dev_items"]] == ["DEV-002"]  # 옛 칸의 #98 이 아니라 GitHub 의 PR 로 배정
+    alice = person(res, "alice")["dev_items"][0]
+    assert alice["recent_pr"] == {"status": "none", "days": 7} and "last_pr" not in alice
+
+
+def test_truncated_merged_file_list_makes_unfound_dev_unknown_not_none():
+    partial = merged_pr(40, "alice", ago(days=1), title="파일이 많은 PR")
+    partial["files"] = {"totalCount": 31, "nodes": [{"path": f"src/f{i}.py"} for i in range(30)]}  # 30개에서 잘림
+    gh = TeamGh([], meta={}, merged=[partial], ledger={"audit/ledger/prog.md": LEDGER})
+    res = team(gh)
+    items = person(res, "alice")["dev_items"] + res["ledger"]["unowned"]
+    assert items and all(d["recent_pr"]["status"] == "unknown" and "병합 PR #40 파일 일부만 읽음" in d["recent_pr"]["reason"] for d in items)
+    # 30개를 다 읽었으면(totalCount 가 같으면) 잘린 것이 아니다
+    full = merged_pr(41, "alice", ago(days=1), title="파일 30개")
+    full["files"] = {"totalCount": 30, "nodes": [{"path": f"src/f{i}.py"} for i in range(30)]}
+    res = team(TeamGh([], meta={}, merged=[full], ledger={"audit/ledger/prog.md": LEDGER}))
+    assert all(d["recent_pr"]["status"] == "none" for d in person(res, "alice")["dev_items"] + res["ledger"]["unowned"])
+
+
+def test_owner_guess_ignores_prs_matched_only_by_body_mention():
+    body_only = merged_pr(50, "eve", ago(days=1), title="딴 일")
+    body_only["body"] = "DEV-002 와 같은 결함"  # 본문 언급만
+    gh = TeamGh([], meta={}, merged=[body_only], ledger={"audit/ledger/prog.md": LEDGER})
+    res = team(gh)
+    assert person(res, "eve")["dev_items"] == []  # eve 가 DEV-002 담당으로 잡히지 않는다
+    dev2 = next(d for d in res["ledger"]["unowned"] if d["id"] == "DEV-002")
+    assert dev2["recent_pr"]["status"] == "found" and dev2["recent_pr"]["number"] == 50  # 최근 PR 표시에는 본문 근거도 쓴다
+    by_branch = merged_pr(51, "frank", ago(days=1), title="딴 일")
+    by_branch["headRefName"] = "feat/51-DEV-002-입고"
+    res = team(TeamGh([], meta={}, merged=[body_only, by_branch], ledger={"audit/ledger/prog.md": LEDGER}))
+    assert [d["id"] for d in person(res, "frank")["dev_items"]] == ["DEV-002"]
 
 
 def test_no_ledger_is_skipped_not_unknown():
@@ -456,7 +534,7 @@ def test_json_keys_are_stable():
     assert set(p["blocked"][0]) == {"pr", "title", "url", "author", "reasons"}
     assert set(p["blocked"][0]["reasons"][0]) == {"kind", "state", "detail", "checks", "checks_truncated"}
     assert set(p["blocked"][0]["reasons"][0]["checks"][0]) == {"name", "reason", "reason_status", "common_cause"}
-    assert set(p["dev_items"][0]) == {"id", "title", "owner", "status", "last_pr", "file"}
+    assert set(p["dev_items"][0]) == {"id", "title", "owner", "status", "recent_pr", "file"}
     assert set(res["ledger"]) == {"status", "reason", "branch", "files", "unowned"}
     assert set(res["unassigned_issues"][0]) == {"number", "title", "url", "created_at"}
 
