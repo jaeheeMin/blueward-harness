@@ -181,6 +181,35 @@ td code { white-space: nowrap; }
 .next button { all: unset; cursor: pointer; font-size: 16px; color: var(--accent); font-weight: 600; padding: 6px 2px; }
 .next button:focus-visible { outline: 2px solid var(--accent); }
 
+
+/* 두 저장소 연결 도식: 왼쪽 harness · 가운데 오가는 것 · 오른쪽 Project Repository */
+.lk { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .9fr) minmax(0, 1fr); gap: 10px 0; align-items: stretch; }
+.lk-h { font-size: 15px; font-weight: 700; padding-bottom: 4px; border-bottom: 2px solid var(--line); }
+.lk-h.l { color: var(--accent); } .lk-h.m { color: var(--muted); text-align: center; } .lk-h.r { color: var(--ok); text-align: right; }
+.lk-n { border-radius: 12px; padding: 10px 14px; border: 2px solid; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
+.lk-n b { font-size: 17px; line-height: 1.3; }
+.lk-n small { font-family: var(--mono); font-size: 12.5px; color: var(--muted); line-height: 1.4; overflow-wrap: anywhere; }
+.lk-n.l { border-color: var(--accent); background: var(--accent-soft); }
+.lk-n.r { border-color: var(--ok); background: var(--ok-soft); }
+.lk-n.pc { border-color: var(--stop); background: var(--stop-soft); }
+.lk-n.chk { border-color: var(--warn); background: var(--warn-soft); }
+.lk-w { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0 10px; text-align: center; font-size: 15px; line-height: 1.35; }
+.lk-w .line { width: 100%; height: 2px; background: var(--accent); position: relative; margin: 4px 0; }
+.lk-w .line::after { content: ""; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left: 9px solid var(--accent); border-right: 0; }
+.lk-w.back .line { background: var(--ok); }
+.lk-w.back .line::after { right: auto; left: -2px; border-left: 0; border-right: 9px solid var(--ok); }
+.lk-w .no { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 13px; font-weight: 700; margin-right: 4px; }
+.lk-w.back .no { background: var(--ok); }
+.lk-w code { white-space: nowrap; }
+@media (max-width: 760px) {
+  .lk { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .lk-h.m, .lk-h.r { display: none; }
+  .lk-w { padding: 2px 0 10px; }
+  .lk-w .line { display: none; }
+  .lk-w::before { content: "↓"; color: var(--muted); }
+  .lk-n.r, .lk-n.pc, .lk-n.chk { margin-bottom: 14px; }
+}
+
 /* SVG 도식 색은 토큰에서 */
 svg text { font-family: var(--body); fill: var(--fg); }
 .s-zone { fill: var(--bg); stroke: var(--line); }
@@ -259,6 +288,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
         <div class="group-label">시작 전에</div>
         <div class="tabs">
           <button class="tab" role="tab" data-tab="overview">한눈에 보기<small>전체 그림</small></button>
+          <button class="tab" role="tab" data-tab="links">두 저장소의 연결<small>Plugin ↔ Project Repository</small></button>
           <button class="tab" role="tab" data-tab="setup">처음 준비하기<small>설치 · 로그인</small></button>
         </div>
       </div>
@@ -435,7 +465,66 @@ svg text { font-family: var(--body); fill: var(--fg); }
     </section>
   </div>
 
-  <div class="next"><span></span><button data-go="setup">다음: 처음 준비하기 →</button></div>
+  <div class="next"><span></span><button data-go="links">다음: 두 저장소의 연결 →</button></div>
+</article>
+
+<!-- ================= 두 저장소의 연결 ================= -->
+<article class="panel" data-panel="links" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">시작 전에</div>
+    <h2>두 저장소의 연결</h2>
+    <p class="lead">harness Plugin 이 들어 있는 blueward-harness(Plugin Repository)와 고객사 일을 하는 public-cloud(Project Repository)는 파일 몇 개로 연결돼. 이 연결을 알면 "왜 갱신해야 하지?", "검사 기준은 어디서 바꾸지?" 가 풀려.</p>
+  </header>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>Plugin · 검사 엔진 · 공통 검사 workflow 는 <b>blueward-harness 한 곳</b>에서 만들어 모든 Project Repository 에 나눠 줘.</p>
+    <p>고객사 Template · Rule · 산출물은 <b>Project Repository 에만</b> 있어. 검사 엔진은 검사할 때마다 그 기준을 Project Repository 에서 읽어.</p>
+  </div></div>
+
+  <section class="diagram" aria-label="두 저장소 연결 도식">
+    <div class="lk">
+      <div class="lk-h l">blueward-harness · Plugin Repository</div><div class="lk-h m">무엇이 오가나</div><div class="lk-h r">public-cloud · Project Repository</div>
+
+      <div class="lk-n l"><b>harness Plugin</b><small>plugins/harness · Skill · Hook</small></div>
+      <div class="lk-w"><span><i class="no">1</i>Marketplace 로 설치 · 자동 갱신</span><span class="line"></span></div>
+      <div class="lk-n r"><b>.claude/settings.json</b><small>enabledPlugins: harness@blueward-harness · autoUpdate</small></div>
+
+      <div class="lk-n l"><b>검사 엔진 · 판 태그</b><small>checker/ @ v{판}</small></div>
+      <div class="lk-w"><span><i class="no">2</i>Hook 이 <code>uvx</code> 로 같은 판을 받음</span><span class="line"></span></div>
+      <div class="lk-n pc"><b>팀원 PC(Personal Computer) 의 Hook</b><small>plugin.json version = 엔진 태그</small></div>
+
+      <div class="lk-n l"><b>재사용 workflow</b><small>pr-checks · pr-review · main-checks · ai-review · pr-tamper-alert</small></div>
+      <div class="lk-w"><span><i class="no">3</i><code>uses: …@stable</code> 로 호출</span><span class="line"></span></div>
+      <div class="lk-n r"><b>.github/workflows/ 5개</b><small>caller workflow · PR(Pull Request) 마다 실행</small></div>
+
+      <div class="lk-n l"><b>release-tag</b><small>병합하면 v{판} 태그 · stable 이동</small></div>
+      <div class="lk-w"><span><i class="no">4</i>stable 이 옮겨지면 다음 PR 부터 새 검사</span><span class="line"></span></div>
+      <div class="lk-n chk"><b>PR 검사 결과</b><small>필수 검사 pr-checks / check</small></div>
+
+      <div class="lk-n l"><b>엔진이 읽는 기준</b><small>검사할 때마다 Project Repository 에서 읽음</small></div>
+      <div class="lk-w back"><span><i class="no">5</i>기준은 Project Repository 에만 있다</span><span class="line"></span></div>
+      <div class="lk-n r"><b>rules/ · templates/ · conventions/</b><small>.github/risk-gate.yaml · ssot-approvers · env/adt-tiers.yaml</small></div>
+    </div>
+    <div class="cap">1 · 3 은 Project Repository 안의 파일이 harness 를 가리키는 연결이고, 5 는 반대로 harness 엔진이 Project Repository 의 기준을 읽는 연결이야. 오른쪽 연결 파일은 <code>/harness:scaffold</code> 가 처음 한 번 만들어 줘.</div>
+  </section>
+
+  <section>
+    <h3>연결 파일 자세히</h3>
+    <div class="tbl-wrap"><table>
+      <tr><th>연결</th><th>무엇을 하나</th><th>지우거나 바꾸면</th></tr>
+      <tr><td><code>.claude/settings.json</code></td><td>harness Plugin 을 켜고 Marketplace 위치를 알려 줘. 이 폴더를 열면 Plugin 이 설치되고 autoUpdate 로 새 판을 받아</td><td>팀원 PC 에 Skill · Hook 이 안 실려. <code>claude plugin uninstall</code> 이 <code>enabledPlugins</code> 를 비우는 일이 있어 커밋 전에 확인해</td></tr>
+      <tr><td>엔진 판 태그</td><td>Hook 은 <code>git+https://github.com/jaeheeMin/blueward-harness</code> 의 <code>v{판}</code> 태그로 엔진을 받아. Plugin 판과 엔진 판이 늘 같은 짝이야</td><td>Plugin 을 갱신하기 전 PC 는 옛 엔진을 그대로 써서, PC 결과와 PR 검사 결과가 다를 수 있어. 최종 판정은 PR 검사</td></tr>
+      <tr><td><code>.github/workflows/</code> 5개</td><td><code>pr-checks</code> · <code>pr-review</code> · <code>main-checks</code> · <code>ai-review</code> · <code>pr-tamper-alert</code> 가 harness 의 재사용 workflow 를 <code>@stable</code> 로 불러</td><td>PR 검사가 안 돌아. harness 쪽 검사가 바뀌어도 이 파일은 고칠 필요가 없어</td></tr>
+      <tr><td><code>stable</code> 태그</td><td>harness main 에 version 이 바뀐 병합이 들어오면 <code>release-tag</code> 가 <code>v{판}</code> 을 붙이고 <code>stable</code> 을 옮겨</td><td>harness 에 병합된 순간이 아니라 태그가 옮겨진 뒤부터 PR 검사에 반영돼</td></tr>
+      <tr><td>검사 기준</td><td>엔진은 검사할 때 <code>rules/</code> · <code>templates/</code> · <code>conventions/</code> · <code>.github/risk-gate.yaml</code> · <code>.github/ssot-approvers</code> · <code>env/adt-tiers.yaml</code> 를 읽어</td><td><code>rules/</code> 를 지우면 모든 문서 검사가 멈춰. 기준을 바꾸는 PR 은 승인자의 Approve 가 필요해</td></tr>
+    </table></div>
+  </section>
+
+  <div class="callouts">
+    <div class="callout ok"><span class="k">기억</span><div>도구(Plugin · 엔진 · 공통 workflow)는 blueward-harness 에서 고치고, 기준과 산출물은 public-cloud 에서 고쳐. 고객사가 바뀌면 Project Repository 만 하나 더 생기고 harness 는 그대로 같이 써.</div></div>
+  </div>
+
+  <div class="next"><button data-go="overview">← 한눈에 보기</button><button data-go="setup">다음: 처음 준비하기 →</button></div>
 </article>
 
 <!-- ================= 처음 준비 ================= -->
@@ -515,7 +604,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     </section>
   </div>
 
-  <div class="next"><button data-go="overview">← 한눈에 보기</button><button data-go="ouroboros">다음: 무엇을 만들지 정하기 →</button></div>
+  <div class="next"><button data-go="links">← 두 저장소의 연결</button><button data-go="ouroboros">다음: 무엇을 만들지 정하기 →</button></div>
 </article>
 
 <!-- ================= Ouroboros ================= -->
@@ -1723,7 +1812,7 @@ Closes #143</pre>
         <li><b>승인</b> — <code>/harness:approvals</code> 로 내 Approve 를 기다리는 PR 을 순서대로 보고 GitHub 에서 Approve 해. 새 commit 이 오면 승인이 취소돼</li>
         <li><b>병합</b> — <code>/harness:prs --all</code> 로 순서를 보고 검사가 다 초록인 PR 만 병합해. auto-merge 가 걸린 PR 은 GitHub 가 합쳐</li>
         <li><b>알림 이슈 정리</b> — <code>human-merge-alert</code>(승인 없이 병합) · <code>pr-tamper-alert</code>(남의 PR 브랜치 수정) · <code>ledger-complete</code>(원장 미완료) · <code>release-tag</code>(배포 태그 실패)</li>
-        <li><b>운영 파일 반영</b> — 팀원은 <code>src/</code> · <code>docs/</code> · <code>audit/</code> 만 올릴 수 있어(ops-guard). 팀원이 <code>git format-patch</code> 결과를 이슈 댓글로 주면 관리자가 <code>git am</code> 으로 적용해 PR 을 열어. commit 작성자는 팀원으로 남아</li>
+        <li><b>운영 파일 대신 올리기</b> — 팀원은 <code>src/</code> · <code>docs/</code> · <code>audit/</code> 만 올릴 수 있어(ops-guard). 설정 파일을 고쳐야 하면 팀원이 Claude 에게 "이 변경 patch 로 이슈에 올려 줘" 라고 하고, 관리자는 Claude 에게 "이슈 #n 의 patch 로 PR 열어 줘" 라고 해. 명령(<code>git format-patch</code> · <code>git am</code>)은 Claude 가 실행하고, commit 작성자는 팀원으로 남아</li>
         <li><b>Plugin 판 맞추기</b> — 새 판 Teams 알림이 오면 <code>/harness:version</code> 으로 보고 <code>/harness:update</code> 로 갱신해</li>
       </ul>
     </section>
