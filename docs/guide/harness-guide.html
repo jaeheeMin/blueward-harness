@@ -1049,6 +1049,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
         <li><div>main 으로 가서 GitHub 최신 상태를 받아 와. worktree 에서 열어 main 으로 못 옮기면 GitHub 의 최신 main(<code>origin/main</code>)에서 바로 브랜치를 따</div></li>
         <li><div>GitHub 이슈를 만들어 (제목 명사형, 본문은 <b>배경 / 해야 할 일 / 완료 조건</b>, 라벨 <code>type:feat</code> 등)</div></li>
         <li><div>개발 건(feat, fix)이면 먼저 지금 있는 개발 목록(번호·제목·LoB·다음 단계·상태)을 보여 주고 "기존 개발의 하위 작업이야, 새 개발이야?" 를 물어. 새 개발이면 이슈 제목 앞에 번호를 찜해. 예: <code>[DEV-003] 구매요청 승인</code></div></li>
+        <li><div>기능이 여럿인 개발은 하위 작업으로 쪼개 시작해. 하위 작업 하나가 PR(Pull Request) 하나라서, 앱 통째로 PR 하나가 되지 않게 이번에는 기능 하나만 이슈 범위로 잡아</div></li>
         <li><div>하위 작업이면 번호를 새로 안 받아. 제목 <b>끝</b>에 붙여: <code>Launchpad 타일 노출 (DEV-002)</code>. 본문에는 "DEV-002(DEV = Development) 하위 작업" 과 대표 이슈 링크를 적어</div></li>
         <li><div>규칙에 맞는 브랜치를 만들고 이동해</div></li>
         <li><div>내 열린 PR(Pull Request) 이 있으면 "먼저 병합할 수 있는 내 PR: #n" 을 알려 주고, 승인 대기·검사 실패인 PR 은 한 줄로 요약해. 알려 주기만 하고 시작은 막지 않아. 상태를 못 읽으면 "PR 상태 확인 불능" 한 줄만 말하고 계속해</div></li>
@@ -1414,9 +1415,10 @@ fix/31-broken-link</pre>
     <h3>커밋한 뒤 deliver 가 먼저 물어봐 — 세 갈래</h3>
     <p style="font-size:14.5px;margin-bottom:8px">PR 을 바로 낼지는 deliver 가 상황을 보고 <b>추천 하나</b>를 말해 줘. 내가 "네" 하거나 다른 걸 고르면 돼. 기준은 외울 필요 없어.</p>
     <ul class="todo">
-      <li><b>PR 내기</b> — 한 개발의 한 단계(SRS(Software Requirements Specification) / Spec(Specification) / 개발)가 끝났을 때. 지금까지 하던 대로 올려.</li>
+      <li><b>PR 내기</b> — 하위 작업 하나가 끝났을 때. 지금까지 하던 대로 올려. PR 은 <b>하위 작업 이슈 하나에 하나</b>야. 같은 개발의 Spec(Specification, 결과 기록)을 같이 고친 건 섞임이 아니야.</li>
+      <li><b>여기까지를 PR 로 내기</b> — 개발하다 <code>src/</code> 변경이 1,000줄을 넘으면(저장소 <code>.github/branch-growth.yaml</code> 의 <code>notify_src_lines</code> 로 바꿀 수 있어) "변경이 커지고 있어요. 여기까지를 PR 로 내고 나머지는 하위 작업으로 뺄까요?" 하고 물어. 막는 건 아니라서 "그대로 PR 내기" 를 골라도 돼. 아직 안 끝난 개발이어도 줄 수는 세서, 그때는 "끝난 기능만 하위 작업으로 떼어 PR 내기" 를 보기에 더해 줘. 줄 수를 못 세면 "변경 크기를 확인하지 못했어요" 라고 알려 줘(통과로 넘기지 않아).</li>
       <li><b>브랜치에만 올리기</b> — 080 묶음이 아직 안 끝났거나, 앞 PR 이 아직 열려 있을 때. 저장만 해 두고 PR 은 안 내(그래서 검사도 아직 안 돌아). "아직 080 묶음이 끝나지 않았어요. 지금은 저장만 해 두고, 다 끝나면 PR 을 낼게요." 다음에 다시 <code>/harness:deliver</code> 하면 이어서 판단해.</li>
-      <li><b>나눠서 올리기</b> — 서로 다른 개발이나 문서 단계(SRS · Spec · 개발)가 한 덩어리로 섞였을 때. 어떤 파일을 어느 PR 로 나눌지 제안해 줘. 그대로 올려도 되는데, 그러면 이유가 PR 에 적혀.</li>
+      <li><b>나눠서 올리기</b> — 서로 다른 개발이 섞였거나, SRS 와 개발이 한 덩어리로 섞였을 때(개발과 그 개발의 Spec, SRS 와 Spec 은 같이 올려도 돼). 어떤 파일을 어느 PR 로 나눌지 제안해 줘. 그대로 올려도 되는데, 그러면 이유가 PR 에 적혀.</li>
     </ul>
     <p class="small" style="margin-top:10px">이미 승인받은 PR 에 더 고치려 하면 "그 PR 은 먼저 합치고, 이번 건은 새 PR 로" 를 추천해. 승인은 새로 고친 내용을 본 게 아니거든. PR 을 낸 뒤 저장소가 자동 병합을 허용하고 필수 검사가 걸려 있으면, 승인과 검사가 끝나는 순간 알아서 합쳐지게 예약도 걸어 줘(조건이 안 되면 "자동 병합은 아직 꺼져 있어요" 라고 알려 주고 안 걸어).</p>
   </section>
@@ -1578,7 +1580,7 @@ Closes #143</pre>
   <section class="box">
     <h3>자동 병합 — 내 승인이 곧 병합 결정이야</h3>
     <ul class="todo">
-      <li>PR 은 <b>한 개발의 한 단계</b>만 담아. 섞이면 deliver 가 나누자고 해.</li>
+      <li>PR 은 <b>하위 작업 이슈 하나</b>만 담아. 다른 개발이 섞이거나 SRS 와 개발이 같이 있으면 deliver 가 나누자고 해(같은 개발의 Spec 은 같이 올려도 돼).</li>
       <li>끝난 PR 은 승인과 검사가 모두 끝나는 순간 GitHub 가 알아서 합쳐(자동 병합). 그때까지 기다리면 돼.</li>
       <li>개발 PR 은 다른 PR 위에 쌓지 않아. 앞 PR 이 열려 있으면 브랜치에만 올려 두고, 앞 PR 이 합쳐지면 다시 deliver 해서 PR 을 내.</li>
       <li>Spec(Specification) PR 은 설계가 정해지면 합쳐. 개발하다 알게 된 건 원장·변경 기록에 적고, 설계가 바뀌면 새 판으로 새 PR 을 내.</li>
