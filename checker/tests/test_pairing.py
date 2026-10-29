@@ -14,7 +14,7 @@ from checker.cli import EXIT_CONFIG_ERROR, EXIT_PASS, EXIT_VIOLATION  # noqa: E4
 from checker.pairing import CANNOT_CHECK, PASS, SKIPPED, VIOLATION, check_pairing  # noqa: E402
 
 SRS_HEAD = "| ID | Title | Status | Priority (PO) | 출처 | 다음 단계 | Development RICEFW ID |\n|---|---|---|---|---|---|---|\n"
-LEDGER_HEAD = "| ID | 내용 | Spec | 담당 | 상태 | 마지막 PR |\n|---|---|---|---|---|---|\n"
+LEDGER_HEAD = "| ID | 내용 | Spec | 담당 | 상태 |\n|---|---|---|---|---|\n"
 
 
 def _srs(tmp: Path, rows: list[str], head: str = SRS_HEAD) -> None:
@@ -34,7 +34,7 @@ def _ledger(tmp: Path, rows: list[str], name: str = "판매.md") -> None:
 
 
 def _lrow(n: int, spec: str = "-", content: str = "내용") -> str:
-    return f"| DEV-{n:03d} | {content} | {spec} | 홍길동 | 대기 |  |"
+    return f"| DEV-{n:03d} | {content} | {spec} | 홍길동 | 대기 |"
 
 
 def _spec(tmp: Path, n: int, req: int | None = None, name: str = "요약") -> str:
@@ -65,7 +65,7 @@ def test_모두_맞으면_통과이고_경고도_없다(tmp_path):
 
 def test_숫자_정규화로_비교한다(tmp_path):
     _srs(tmp_path, [_req(3, "개발", "DEV-3")])
-    _ledger(tmp_path, ["| DEV-3 | x | - | a | 대기 |  |"])
+    _ledger(tmp_path, ["| DEV-3 | x | - | a | 대기 |"])
     r = check_pairing(tmp_path)
     assert r["violations"] == []
 

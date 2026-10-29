@@ -243,7 +243,7 @@ def judge_pr(meta: dict, now: datetime, days: int) -> dict:
 
 _MERGED = """
 query($q:String!){search(query:$q,type:ISSUE,first:100){issueCount nodes{
- ... on PullRequest{number title url mergedAt author{login __typename}}}}}
+ ... on PullRequest{number title url mergedAt headRefName body files(first:30){totalCount nodes{path}} author{login __typename}}}}}
 """
 
 
@@ -261,8 +261,18 @@ def read_merged(client: GhClient, budget: _Budget, repo: str, since: datetime) -
         if merged is None or merged < since:
             continue
         login = _login(n.get("author"))
+        raw = {
+            "title": n.get("title") or "",
+            "headRefName": n.get("headRefName") or "",
+            "body": n.get("body") or "",
+            "files": [{"path": f.get("path") or ""} for f in ((n.get("files") or {}).get("nodes") or []) if f],
+        }
+        files_total = (n.get("files") or {}).get("totalCount")
         out.append(
             {
+                "dev": pr_queue._primary_dev(raw),  # 열린 PR 의 `dev` 와 같은 판정(원장 줄과 PR 을 잇는다, #535)
+                "dev_strong": pr_queue._primary_dev(raw, use_body=False),  # 본문 언급을 뺀 판정(담당 추정용)
+                "files_partial": isinstance(files_total, int) and files_total > len(raw["files"]),  # 파일이 30개를 넘어 일부만 읽음
                 "number": n["number"],
                 "title": n.get("title") or "",
                 "url": pr_queue.pr_url(repo, n["number"], n.get("url") or ""),
@@ -525,7 +535,6 @@ def parse_ledger(text: str, path: str) -> list[dict]:
                 "title": row.get("내용", "").strip(),
                 "owner": row.get("담당", "").strip().lstrip("@"),
                 "status": row.get("상태", "").strip(),
-                "last_pr": row.get("마지막 PR", "").strip().strip("-—–"),
                 "file": path,
             }
         )
@@ -860,15 +869,53 @@ def compute_team(
         if issue_unknown:
             miss("이슈 활동 시각(정체 판정 불능)", "; ".join(issue_unknown))
 
-    last_author = {n["number"]: n["author"] for n in open_prs}
-    last_author.update({m_pr["number"]: m_pr["author"] for m_pr in merged or []})
+    # DEV 별 최근 PR(#535). 원장에 PR 번호를 적지 않으므로 열린 PR 과 최근 병합 PR 에서 찾는다. 가장 큰 PR 번호가 최근이다.
+    # 담당 추정은 제목 끝 번호·브랜치·Spec 파일명으로 DEV 가 정해진 PR 만 쓴다(`strong`: 본문 언급만으로 잡힌 PR 은 제외).
+    recent: dict[int, dict] = {}
+    recent_strong: dict[int, dict] = {}
+
+    def note(dev: int | None, strong: int | None, entry: dict) -> None:
+        if dev is not None:
+            cur = recent.get(dev)
+            if cur is None or entry["number"] > cur["number"]:
+                recent[dev] = entry
+        if strong is not None:
+            cur = recent_strong.get(strong)
+            if cur is None or entry["number"] > cur["number"]:
+                recent_strong[strong] = entry
+
+    for it in open_prs:
+        note(it.get("dev"), it.get("dev_strong"), {"number": it["number"], "url": it["url"], "state": "open", "author": it["author"]})
+    for m_pr in merged or []:
+        if not m_pr["bot"]:
+            note(m_pr["dev"], m_pr["dev_strong"], {"number": m_pr["number"], "url": m_pr["url"], "state": "merged", "author": m_pr["author"]})
+    not_read = []  # 못 찾았을 때 "없음" 이라 단정하지 못하는 사유
+    if merged is None:
+        not_read.append(f"최근 {days}일 병합한 PR 을 읽지 못함")
+    if truncated["merged"]:
+        not_read.append("병합한 PR 을 100개까지만 읽음")
+    if truncated["open_prs"]:
+        not_read.append("열린 PR 을 일부만 읽음")
+    # 파일 목록이 잘린 병합 PR 은 안 읽은 파일이 Spec 파일이었을 수 있다: 그 PR 때문에 못 찾은 DEV 는 없음이 아니라 확인 불능이다.
+    for m_pr in merged or []:
+        if m_pr["files_partial"] and m_pr["dev_strong"] is None:
+            not_read.append(f"병합 PR #{m_pr['number']} 파일 일부만 읽음")
+
+    def recent_pr_of(dev_id: str) -> dict:
+        hit = recent.get(int(dev_id.split("-")[1]))
+        if hit:
+            return {"status": "found", "number": hit["number"], "url": hit["url"], "state": hit["state"]}
+        if not_read:
+            return {"status": "unknown", "reason": "; ".join(not_read)}
+        return {"status": "none", "days": days}
+
     ledger_unowned: list[dict] | None = [] if ledger["status"] != "unknown" else None
     lower = {k.lower(): k for k in people}
     if ledger["status"] == "unknown":
         ledger_unowned = None
     elif ledger["status"] == "ok":
         for item in ledger["items"]:
-            m = re.search(r"#(\d+)", item["last_pr"])
+            hit = recent_strong.get(int(item["id"].split("-")[1]))
             if item["owner"]:
                 # 담당이 적혀 있으면 이번 기간에 활동이 없어도 그 사람 칸을 만들어 배정한다.
                 alias = aliases.get(item["owner"].lower())
@@ -882,11 +929,12 @@ def compute_team(
                 owner = lower.get(item["owner"].lower()) or item["owner"]
                 lower[owner.lower()] = owner
             else:
-                owner = last_author.get(int(m.group(1))) if m else None
+                owner = hit["author"] if hit else None  # 담당 칸이 비면 그 DEV 의 최근 PR 작성자
+            shown = {**{k: item[k] for k in ("id", "title", "owner", "status")}, "recent_pr": recent_pr_of(item["id"]), "file": item["file"]}
             if owner:
-                person(owner)["dev_items"].append({k: item[k] for k in ("id", "title", "owner", "status", "last_pr", "file")})
+                person(owner)["dev_items"].append(shown)
             else:
-                ledger_unowned.append({k: item[k] for k in ("id", "title", "owner", "status", "last_pr", "file")})
+                ledger_unowned.append(shown)
 
     # 읽지 못한 칸은 비어 있는 것과 구별되게 null 로 둔다(원칙 7). 늦게 생긴 사람까지 모두 거친 뒤에 채운다.
     for p in people.values():
@@ -935,6 +983,14 @@ _BLOCK_LABEL = {K_CHECK: "검사 실패", K_CONFLICT: "충돌", K_APPROVAL: "리
 
 def _link(repo: str, n: int, url: str = "") -> str:
     return pr_queue.pr_link(repo, n, url)
+
+
+def _recent_pr_text(repo: str, rp: dict, days: int) -> str:
+    if rp["status"] == "found":
+        return f"최근 PR {_link(repo, rp['number'], rp['url'])}({'열림' if rp['state'] == 'open' else '병합'})"
+    if rp["status"] == "unknown":
+        return f"최근 PR 확인 불능({rp['reason']})"
+    return f"최근 PR 없음(열린 PR·최근 {days}일 병합 중)"
 
 
 def _count(value: list | None) -> str:
@@ -1063,7 +1119,7 @@ def render_team(res: dict) -> str:
             lines.append("- 맡은 개발 건: 확인 불능")
         elif devs:
             for d in devs:
-                lines.append(f"- 개발 건 {d['id']}({clip(d['title'], 30) or '제목 없음'}) — 담당 @{d['owner'] or p['login']}, {d['status'] or '상태 없음'}, 마지막 PR {d['last_pr'] or '없음'}")
+                lines.append(f"- 개발 건 {d['id']}({clip(d['title'], 30) or '제목 없음'}) — 담당 @{d['owner'] or p['login']}, {d['status'] or '상태 없음'}, {_recent_pr_text(repo, d['recent_pr'], res['days'])}")
 
     lines += ["", "## 담당자 없는 열린 이슈"]
     if res["unassigned_issues"] is None:
@@ -1076,7 +1132,7 @@ def render_team(res: dict) -> str:
         lines += [f"- [#{i['number']}]({i['url']}) {clip(i['title'], 50)}" for i in res["unassigned_issues"]]
     if led["unowned"]:
         lines += ["", "## 담당이 정해지지 않은 개발 건(원장)"]
-        lines += [f"- {d['id']}({clip(d['title'], 30)}) — {d['status']}, 마지막 PR {d['last_pr'] or '없음'}" for d in led["unowned"]]
+        lines += [f"- {d['id']}({clip(d['title'], 30)}) — {d['status']}, {_recent_pr_text(repo, d['recent_pr'], res['days'])}" for d in led["unowned"]]
     for w in res["warnings"]:
         lines.append(f"주의: {w}")
     if res["aliases_applied"]:

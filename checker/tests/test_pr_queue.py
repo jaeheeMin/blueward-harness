@@ -959,7 +959,7 @@ def test_json_and_pr_outputs_unchanged_by_render_change():
     old_keys = {"number", "sha", "title", "author", "url", "base", "head", "state", "detail", "next", "notes",
                 "human_merge", "order", "after", "after_reasons", "version", "mine"}
     for it in json.loads(js)["prs"]:
-        assert set(it) == old_keys | {"devs", "dev", "closes", "ledger"} and it["dev"] is None and it["devs"] == []
+        assert set(it) == old_keys | {"devs", "dev", "dev_strong", "closes", "ledger"} and it["dev"] is None and it["devs"] == []
     _, js_all = pr_queue.run(parse(["--repo", "o/r", "--json"]), gh)
     assert [it["number"] for it in json.loads(js_all)["prs"]] == [1, 2, 3]
     code, text = pr_queue.run(parse(["--repo", "o/r", "--pr", "2"]), gh)
