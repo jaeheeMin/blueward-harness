@@ -13,6 +13,9 @@ import os
 import sys
 import uuid
 
+sys.stdin.reconfigure(encoding="utf-8")  # Windows 기본(cp949)이면 한글이 깨진다
+sys.stdout.reconfigure(encoding="utf-8")
+
 args = sys.argv[1:]
 sid = args[args.index("--resume") + 1] if "--resume" in args else "fake-" + uuid.uuid4().hex[:8]
 port = int(os.environ["HARNESS_CONSOLE_PORT"])

@@ -27,6 +27,8 @@ sys.path.insert(0, str(CONSOLE))
 
 import analysis  # noqa: E402
 import gitstate  # noqa: E402
+import hook_post  # noqa: E402
+import session_start_hook  # noqa: E402
 import managed  # noqa: E402
 from hooks_api import Hooks, permission_reply  # noqa: E402
 import open as console_open  # noqa: E402
@@ -294,6 +296,40 @@ def test_body_size_limit(console):
         sock.close()
 
 
+def raw_post(port, path, headers, body=b"", declared=None, timeout=15):
+    """실제 소켓으로 POST 를 보내 상태 줄만 읽는다. 연결이 RST 로 끊기면 예외가 그대로 난다."""
+    head = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
+    n = len(body) if declared is None else declared
+    sock = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+    try:
+        sock.sendall(f"POST {path} HTTP/1.0\r\n{head}Content-Length: {n}\r\n\r\n".encode() + body)
+        data = b""
+        while b"\r\n" not in data:
+            chunk = sock.recv(4096)
+            assert chunk, "응답 없이 연결이 닫혔습니다."
+            data += chunk
+        return int(data.split(b" ", 2)[1])
+    finally:
+        sock.close()
+
+
+def test_rejection_with_unread_body_always_gets_its_response(console):
+    body = json.dumps({"x": "y" * 300_000}).encode()  # 헤더와 함께 버퍼에 들어가는 크기를 넘겨야 소켓에 안 읽은 데이터가 남는다
+    for _ in range(30):
+        assert raw_post(console.port, "/hooks/event", {"Host": "evil.example.com", "Content-Type": "application/json"}, body) == 403
+    for _ in range(30):
+        assert raw_post(console.port, "/api/folders/validate",
+                        {"Host": f"127.0.0.1:{console.port}", "Content-Type": "application/json"}, body) == 401
+
+
+def test_rejection_does_not_wait_forever_for_a_body_that_never_comes(console):
+    started = time.monotonic()
+    status = raw_post(console.port, "/api/folders/validate",
+                      {"Host": f"127.0.0.1:{console.port}", "Content-Type": "application/json"}, b"", declared=500_000)
+    assert status == 401
+    assert time.monotonic() - started < 5
+
+
 def test_static_headers_and_spa_paths(console, tmp_path):
     # static/ 은 다른 작업자가 만든다. 있으면 CSP 를 확인하고 없으면 404 인 것만 확인한다.
     status, _, resp = console.call("GET", "/", cookie=False)
@@ -320,10 +356,12 @@ def test_fs_blocks_escape_and_symlinks(authed, tmp_path):
         symlinks = True
     except OSError:
         symlinks = False  # Windows 에서 권한이 없으면 링크를 못 만든다
-    root = str(authed.work)
+    root = urllib.parse.quote(str(authed.work), safe="")
+    outside_q = urllib.parse.quote(str(outside), safe="")
+    root_raw = str(authed.work)
     # 고르지 않은 폴더는 열 수 없다
     assert authed.call("GET", f"/api/fs?root={root}")[0] == 403
-    assert authed.call("POST", "/api/folders/validate", {"path": root})[1]["ok"]
+    assert authed.call("POST", "/api/folders/validate", {"path": root_raw})[1]["ok"]
     status, body, _ = authed.call("GET", f"/api/fs?root={root}")
     names = {e["name"]: e for e in body["entries"]}
     assert status == 200 and names["sub"]["kind"] == "dir" and names["a.txt"]["size"] == 1
@@ -333,9 +371,9 @@ def test_fs_blocks_escape_and_symlinks(authed, tmp_path):
         assert authed.call("GET", f"/api/fs?root={root}&dir=link")[0] == 403
     assert authed.call("GET", f"/api/fs?root={root}&dir=..")[0] == 403
     assert authed.call("GET", f"/api/fs?root={root}&dir=sub/../..")[0] == 403
-    assert authed.call("GET", f"/api/fs?root={root}&dir={outside}")[0] == 403
+    assert authed.call("GET", f"/api/fs?root={root}&dir={outside_q}")[0] == 403
     assert authed.call("GET", f"/api/fs?root={root}&dir=sub")[1]["entries"][0]["name"] == "b.txt"
-    assert authed.call("GET", f"/api/fs?root={outside}")[0] == 403  # 고르지 않은 다른 폴더
+    assert authed.call("GET", f"/api/fs?root={outside_q}")[0] == 403  # 고르지 않은 다른 폴더
 
 
 def test_validate_folder(authed):
@@ -1307,7 +1345,7 @@ def test_open_starts_detached_server_and_stop(tmp_path, monkeypatch):
 
 def run_start_hook(stdin, env_port, timeout=10):
     t0 = time.monotonic()
-    done = subprocess.run([sys.executable, str(CONSOLE / "session_start_hook.py")], input=stdin, capture_output=True, text=True,
+    done = subprocess.run([sys.executable, str(CONSOLE / "session_start_hook.py")], input=stdin, capture_output=True, text=True, encoding="utf-8",
                           env=dict(os.environ, HARNESS_CONSOLE_PORT=str(env_port)), timeout=timeout)
     return done, time.monotonic() - t0
 
@@ -1317,8 +1355,11 @@ def test_session_start_hook_always_succeeds_when_server_is_down():
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
     sock.close()
+    t0 = time.monotonic()
+    subprocess.run([sys.executable, "-c", "pass"], check=True)
+    startup = time.monotonic() - t0  # 바쁜 PC 에서는 프로세스 기동만 몇 초 걸릴 수 있어 빼고 잰다
     done, took = run_start_hook('{"session_id":"s"}', port)
-    assert done.returncode == 0 and done.stdout == "" and took < 3
+    assert done.returncode == 0 and done.stdout == "" and took - startup < 3
     assert run_start_hook("", port)[0].returncode == 0
     assert run_start_hook("not json at all \xff", port)[0].returncode == 0
 
@@ -1351,7 +1392,7 @@ def test_hooks_json_has_console_events_and_keeps_existing_hooks():
                 assert h["type"] == "command", "http 훅은 서버가 꺼져 있을 때 대화형 화면에 오류 줄을 남기므로 쓰지 않는다"
                 m = re.search(r'console/hook_post\.py" (\w+) (\d+) \|\| true$', h["command"])
                 if m:
-                    assert h["timeout"] == int(m.group(2))
+                    assert h["timeout"] >= int(m.group(2))  # 스크립트 자체 제한이 훅 제한 안에 들어야 한다
                     urls.setdefault(event, []).append((entry.get("matcher"), m.group(1), h["timeout"]))
     # 상태만 모으는 이벤트는 async, 응답을 쓰는 이벤트(승인·질문·Stop·SessionEnd)는 동기로 둔다.
     is_async = {(event, entry.get("matcher")): h.get("async") is True
@@ -1366,7 +1407,7 @@ def test_hooks_json_has_console_events_and_keeps_existing_hooks():
     assert urls["Stop"] == [(None, "stop", 5)]
     for event in ("UserPromptSubmit", "UserPromptExpansion", "PostToolUse", "SubagentStart", "SubagentStop", "Notification", "PreCompact"):
         assert urls[event] == [(None, "event", 3)], event
-    assert urls["SessionEnd"] == [(None, "event", 1)]  # SessionEnd 는 공유 제한 1.5초 안에 끝나야 한다
+    assert urls["SessionEnd"] == [(None, "event", 5)]  # SessionEnd 기본 공유 제한은 1.5초지만 훅 timeout 을 늘리면 그만큼 늘어난다(Windows 는 uv 기동만 0.5~0.9초)
     commands = [h["command"] for entries in hooks.values() for e in entries for h in e["hooks"] if h["type"] == "command"]
     for old in ("pre_write_guard.py", "pre-bash-git-guard.sh", "agent_delegation_guard.py", "mcp_source_guard.py",
                 "mcp_activation_tracker.py", "session-start-sync.sh", "update_notice.py", "pr_table_notice.py", "stop-deliver.sh"):
@@ -1431,6 +1472,92 @@ def test_hook_post_is_silent_when_server_is_down():
     sock.close()
     r = _run_hook_post(["event", "1"], b'{"session_id":"x"}', port)
     assert r.returncode == 0 and r.stdout == b"" and r.stderr == b""
+
+
+class _FakeSock:
+    def __init__(self):
+        self.timeouts = []
+
+    def settimeout(self, value):
+        self.timeouts.append(value)
+
+    def sendall(self, data):
+        pass
+
+
+def _fake_connection(log, connect_error=None):
+    class Conn:
+        def __init__(self, host, port, timeout=None):
+            log["init_timeout"] = timeout
+            self.sock = None
+
+        def connect(self):
+            log["connect_timeout"] = log["init_timeout"]
+            if connect_error:
+                raise connect_error
+            self.sock = _FakeSock()
+            log["sock"] = self.sock
+
+        def request(self, *a, **k):
+            log["requested"] = True
+
+        def getresponse(self):
+            class R:
+                status = 200
+
+                def read(self):
+                    return b'{"ok":true}'
+            return R()
+
+        def close(self):
+            pass
+    return Conn
+
+
+class _FakeStdin:
+    def __init__(self, data):
+        import io
+        self.buffer = io.BytesIO(data)
+
+
+def test_hook_post_limits_connect_to_half_second_then_restores_socket_limit(monkeypatch, capfd):
+    log = {}
+    monkeypatch.setattr(hook_post.http.client, "HTTPConnection", _fake_connection(log))
+    monkeypatch.setattr(hook_post.sys, "stdin", _FakeStdin(b'{"session_id":"x"}'))
+    assert hook_post.main(["permission", "86400"]) == 0
+    assert log["connect_timeout"] == 0.5
+    assert log["sock"].timeouts == [86400.0] and log["requested"]
+    assert capfd.readouterr().out == '{"ok":true}'
+
+
+def test_hook_post_connect_failure_is_silent_and_sends_nothing(monkeypatch, capfd):
+    log = {}
+    monkeypatch.setattr(hook_post.http.client, "HTTPConnection", _fake_connection(log, ConnectionRefusedError()))
+    monkeypatch.setattr(hook_post.sys, "stdin", _FakeStdin(b'{"session_id":"x"}'))
+    assert hook_post.main(["permission", "86400"]) == 0
+    assert log["connect_timeout"] == 0.5 and "requested" not in log
+    assert capfd.readouterr().out == ""
+
+
+def test_session_start_hook_limits_connect_then_restores_socket_limit(monkeypatch):
+    log = {}
+    monkeypatch.setattr(session_start_hook.http.client, "HTTPConnection", _fake_connection(log))
+    session_start_hook.post(b"{}", 4873)
+    assert log["connect_timeout"] == 0.5 and log["sock"].timeouts == [0.8] and log["requested"]
+
+
+def test_open_main_gives_api_open_a_long_timeout(monkeypatch):
+    import inspect
+    assert inspect.signature(console_open.ensure_server).parameters["wait"].default == 20.0
+    calls = []
+    monkeypatch.setattr(console_open, "ensure_server", lambda port: None)
+
+    def fake_request(port, method, path, body=None, timeout=3.0):
+        calls.append((path, timeout))
+        return 200, {}
+    monkeypatch.setattr(console_open, "request", fake_request)
+    assert console_open.main([]) == 0
+    assert calls == [("/api/open", 30)]
 
 
 def test_hook_post_forwards_body_and_prints_response(browser):
