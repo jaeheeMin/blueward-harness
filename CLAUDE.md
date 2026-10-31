@@ -78,6 +78,7 @@
 | `/harness:deliver` | 작업 마무리 — 커밋, 동기화, 푸시, PR |
 | `/harness:wrapup` | 못 끝낸 작업을 이슈로 |
 | `/harness:handoff` | 하던 일을 새 세션이 이어 가게 인계 파일을 메모리에 저장 |
+| `/harness:open` | 로컬 웹 콘솔 열기 — 세션 상태 보기, 승인·질문에 답하기, 새 작업 시작(콘솔 훅이 함께 걸린다. 상태 수집은 async, 승인·질문·Stop 은 동기) |
 | `/harness:scaffold` | Project Repository 표준 구조 만들기 |
 | `/harness:srs` | SRS(요구사항정의서) 만들기·고치기 |
 | `/harness:spec` | SRS 요구사항으로 개발 Spec 만들기·고치기 |

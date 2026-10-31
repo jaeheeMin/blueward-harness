@@ -103,6 +103,7 @@ Claude> 커밋했습니다. origin/main 을 rebase 했습니다. 푸시했습니
 | `/harness:deliver` | 작업 마무리. 커밋·동기화·푸시·PR 을 한 번에 |
 | `/harness:wrapup` | 못 끝낸 작업을 이슈로 남길 때 |
 | `/harness:handoff` | 하던 일을 새 세션이 이어 가게 인계할 때 |
+| `/harness:open` | 로컬 웹 콘솔을 열어 세션 상태를 보고 승인·질문에 답할 때(콘솔 훅이 함께 걸린다) |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받을 때 |
 | `/harness:scaffold` | 새 Project Repository 에 표준 구조를 만들 때 |
 | `/harness:srs` | SRS(요구사항정의서)를 만들거나 고칠 때 |
