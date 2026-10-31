@@ -12,8 +12,8 @@
 | `skills/open/SKILL.md` (신규) | `/harness:open`. `open.py` 를 실행하고 결과를 한 줄로만 알린다 |
 | `hooks/hooks.json` | 콘솔 훅 추가. 전부 command(`console/hook_post.py`)이다. 상태만 모으는 `UserPromptSubmit`·`UserPromptExpansion`·`PreToolUse *`·`PostToolUse`·`SubagentStart`·`SubagentStop`·`Notification`·`PreCompact` 는 `async: true`, `PermissionRequest`·`PreToolUse AskUserQuestion`·`Stop`·`SessionEnd` 는 동기. `SessionStart` 는 `session_start_hook.py`. 기존 훅은 그대로 |
 | `docs/design/web-console.md` | 구현을 읽어 달라진 곳을 반영 |
-| `docs/guide/harness-guide.html` | "처음 준비하기" 탭에 `/harness:open` 과 추가된 훅 설명, 레일 기준 판 0.10.142 |
-| `plugins/harness/.claude-plugin/plugin.json` | version 0.10.141 → 0.10.142 |
+| `docs/guide/harness-guide.html` | "처음 준비하기" 탭에 `/harness:open` 과 추가된 훅 설명, 레일 기준 판 0.10.146 |
+| `plugins/harness/.claude-plugin/plugin.json` | version 0.10.142 → 0.10.146 |
 
 ## 결정
 
@@ -21,7 +21,7 @@
 - 포트는 기본 4873 이다. 환경변수 `HARNESS_CONSOLE_PORT` 는 시험용 임시 포트 용도이고, 훅(`hook_post.py`)도 같은 변수를 읽는다.
 - 상태 수집 훅은 `async: true`(아래 지연 수치). 비동기라 도착 순서가 뒤바뀔 수 있어 `hook_post.py` 가 뜬 시각(`X-Hook-Ts`)을 보내고 서버가 Stop·SessionEnd 이전에 뜬 늦은 이벤트로 상태를 되돌리지 않는다(설계 문서 5장).
 - 권한 우회 모드(`bypassPermissions`) 세션은 승인 요청이 없어서 화면에 그렇게 표시한다.
-- 버전은 origin/main 0.10.141 보다 큰 0.10.142 로 잡았다(rebase 시점에 plugin.json 을 바꾸는 열린 PR 은 없었다).
+- 버전은 0.10.146 으로 잡았다. origin/main 이 0.10.142 이고, 열린 PR 셋(#570·#572·#574)이 0.10.143~145 를 쓰고 있어 겹치지 않게 했다.
 
 ## 통합 시험 결과 (macOS, `claude` 2.1.309, 모델 haiku, 2026-10-31)
 
