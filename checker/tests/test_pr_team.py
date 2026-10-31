@@ -513,7 +513,10 @@ def test_kst_display():
     assert "10-25 00:30 KST" in pr_team.render_team(team(gh))
 
 
-def test_json_keys_are_stable():
+def test_json_keys_are_stable(monkeypatch):
+    # pr_queue.run 은 now 없이 부르므로 실제 시각으로 최근 N일을 자른다 — 가짜 데이터의 기준 NOW 로 고정한다(#553).
+    real = pr_team.compute_team
+    monkeypatch.setattr(pr_team, "compute_team", lambda *a, **kw: real(*a, now=NOW, **kw))
     gh = TeamGh(
         [_failing(1, "alice", [("doc-guard / x", None)])], failures={1: [check_node("doc-guard / x", "깨짐")]},
         meta={1: (ago(days=5), ago(days=5))}, merged=[merged_pr(9, "alice", ago(days=1))],
