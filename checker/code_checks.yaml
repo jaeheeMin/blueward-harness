@@ -12,8 +12,12 @@ languages:
     # CAP(Cloud Application Programming) 서비스 구현 등 JS/TS.
     suffixes: [".js", ".ts", ".mjs", ".cjs"]
   cds:
-    # CDS(Core Data Services) 정의.
-    suffixes: [".cds"]
+    # CDS(Core Data Services) 정의. `.cds` 는 CAP·훅으로 ADT 에 쓸 때의 이름이고,
+    # abapGit 형식(`<name>.ddls.asddls` 등)의 확장자는 DDLS `.asddls`, DDLX `.asddlxs`,
+    # SRVD `.srvdsrv`, DCLS `.asdcls`, TABL `.astabldt` 다(#565). `Path.suffix` 는 마지막 점
+    # 뒤만 보므로 이 꼴이다. TABL(`define table`)도 CDS DDL 과 같은 주석(`//`, `/* */`)·
+    # 문자열(`'...'`) 문법이라 같은 마스킹을 쓴다.
+    suffixes: [".cds", ".asddls", ".asddlxs", ".srvdsrv", ".asdcls", ".astabldt"]
   bdef:
     # RAP 동작 정의(Behavior Definition). abapGit 형식(`<name>.bdef.asbdef`)의
     # 확장자는 `.asbdef` 다(#72). 반복문 개념이 없어 CR-002 대상이 아니다.
