@@ -6,7 +6,7 @@
 맞는지는 이 모듈이 저장소 전체를 보고 따로 확인한다. 번호는 숫자로 정규화해 비교한다
 (`REQ-3` == `DEV-003`).
 
-- **위반**: 확실히 어긋난 경우(RICEFW ID 불일치, 같은 DEV 중복, 깨진 Spec 링크 …).
+- **위반**: 확실히 어긋난 경우(`다음 단계` 값이 허용 값 밖, RICEFW ID 불일치, 같은 DEV 중복, 깨진 Spec 링크 …).
 - **경고**: 진행 중이라 그럴 수 있는 경우. 통과를 유지하고 코멘트에만 싣는다.
 - **검사 불능**: 표 머리를 찾지 못하거나 파일을 읽지 못한 경우. 통과도 위반도 아니다.
 - **skipped**: `audit/ledger/` 가 없는 저장소는 대상이 아니다.
@@ -31,6 +31,8 @@ SKIPPED = "skipped"
 
 EXEMPT_STATUSES = {"on hold", "dropped", "duplicate", "폐기"}
 EMPTY_VALUES = {"", "-", "—", "–"}
+# SRS 요구사항 표 `다음 단계` 열의 허용 값(#567). 고객사 양식이 아니라 하네스가 정한 말이라 규칙 데이터가 아니라 여기에 둔다.
+NEXT_STEPS = ("개발", "설정", "미정")
 
 _REQ_ID = re.compile(r"^REQ-(\d+)$")
 _DEV_ID = re.compile(r"^DEV-(\d+)$")
@@ -336,6 +338,13 @@ def check_pairing(root: Path) -> dict:
         for n, req in sorted(reqs.items()):
             label = t("REQ", n)
             step = req["next"].strip()
+            if not no_step_column and step not in NEXT_STEPS:
+                # 값을 모르면 이 요구사항의 RICEFW·원장·Spec 대조는 할 수 없다. 건너뛴 사실을 위반 하나로 드러낸다.
+                shown = f"`{step}`" if step else "빈 칸"
+                v("next_step_invalid", SRS_PATH,
+                  f"{label} 의 `다음 단계` 가 {shown} 입니다. SRS 요구사항 표의 그 칸을 "
+                  f"{' / '.join(f'`{x}`' for x in NEXT_STEPS)} 중 하나로 고치십시오.")
+                continue
             ricefw = req["ricefw"]
             if ricefw is not None:
                 value = ricefw.strip()

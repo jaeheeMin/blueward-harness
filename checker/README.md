@@ -169,7 +169,8 @@ Project Repository `rules/ssot.yaml`·`rules/spec.yaml` 에 켠다. 먼저 켜�
 `scripts/check_changed.py` 가 바뀐 파일에 SRS·`docs/spec/`·`audit/ledger/` 가 있을 때만 돌려 리포트의 `pairing`
 키로 합치고, `audit/ledger/` 가 없는 저장소는 대상이 아니다.
 
-- 위반(종료코드 1): `개발` REQ 의 RICEFW ID 가 `DEV-<같은 번호>` 가 아님(열이 없거나 값이 비면 건너뜀), `설정`·`미정`
+- 위반(종료코드 1): `다음 단계` 열이 있는데 값이 `개발`·`설정`·`미정` 밖이거나 빈 칸(`next_step_invalid`, #567 — 그 REQ 의
+  나머지 대조는 건너뛴다), `개발` REQ 의 RICEFW ID 가 `DEV-<같은 번호>` 가 아님(열이 없거나 값이 비면 건너뜀), `설정`·`미정`
   인데 RICEFW ID 가 있음, 같은 DEV 가 원장 여러 줄, 원장 Spec 칸 링크 대상 파일 없음 또는 다른 번호 파일, Spec 의
   근거 REQ 번호 ≠ 파일명 DEV 번호.
 - 경고(통과 유지): 진행 중인 `개발` REQ 의 원장 줄·Spec 없음, `설정` REQ 의 원장 줄 없음, `개발` 인데 원장 Spec 칸이
