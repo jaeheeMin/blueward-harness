@@ -395,6 +395,10 @@ doc-guard --clean <파일...> [--out-dir <곳>]
 python -m checker.export --spec docs/spec/DEV-001-요약.md --root <Project Repository 루트> [--form <양식>]
 ```
 
+지도의 `템플릿` 이 `.pptx` 이면 `export_pptx.py`(python-pptx)가 쓴다(#561). 읽기·파일명·버전·덮어쓰기 방지·종료코드는 xlsx 와 공통이고,
+지도가 도형을 예시 글자 앞부분으로 가리킨다. 글 넘침·겹침은 화면 없이 확인할 수 없어 산출은 항상 `layout-unchecked` 경고(종료코드 3, 검사 불능)를 낸다.
+양식의 도형 목록은 `python -m checker.export_pptx --dump <양식.pptx>` 로 본다(쓰기 없음). 지도 형식은 `form-map.md` 의 "pptx 지도".
+
 stdout 에 JSON 한 줄 `{"status": "ok|rejected|error", "files": [...], "problems": [{"form", "sheet", "item", "reason"}], "warnings": [...], "next": "..."}`
 을 낸다. 종료코드는 0 산출함, 1 거부(필수 `미정`·`최대_행` 초과·짝 행 수 불일치·같은 이름 파일 존재
 등, 아무것도 쓰지 않음), 2 읽지 못함(작업본·지도·템플릿 못 읽음, 지도에 없는 항목, 경로가 루트 밖,

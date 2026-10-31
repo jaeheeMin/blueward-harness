@@ -172,7 +172,10 @@ def _srs_tables(params: dict) -> tuple[str, list[dict]] | None:
         return None
     found: dict[str, dict] = {}
     for f in sorted(folder.glob("*.yaml")):
-        data = _valid_map(_read_yaml(f, "양식 지도"), f)
+        raw_map = _read_yaml(f, "양식 지도")
+        if isinstance(raw_map, dict) and str(raw_map.get("템플릿", "")).lower().endswith(".pptx"):
+            continue  # pptx 지도(`쪽`)는 원본이 SRS 일 수 없다(#561)
+        data = _valid_map(raw_map, f)
         if export.is_srs_map(data):
             found[f.stem] = data
     want = _get(params, "양식", "form")
@@ -273,7 +276,23 @@ def _check_spec(text: str, params: dict) -> list[Violation]:
                 f"다음: 지도가 있는 양식 이름으로 고치거나, 지도를 먼저 만든다.",
             ))
             continue
-        fmap = _valid_map(_read_yaml(map_path, "양식 지도"), map_path)
+        raw_map = _read_yaml(map_path, "양식 지도")
+        if isinstance(raw_map, dict) and str(raw_map.get("템플릿", "")).lower().endswith(".pptx"):
+            # pptx 지도(`쪽`)는 시트·표 열이 없다. 산출과 같은 함수로 쪽·칸·소제목을 지도와 대조한다(#561).
+            from checker import export_pptx
+
+            try:
+                export_pptx.validate_map(raw_map, str(map_path), form)
+            except export.ExportError as exc:
+                raise ConfigError(f"양식 지도 {map_path.name} 를 읽지 못해 양식 밖 항목을 검사할 수 없다: {exc.reason}") from exc
+            try:
+                export_pptx.normalize_sections(raw_map, sheets, form)
+            except export.ExportError as exc:
+                out.append(_v(None, exc.item or exc.sheet or form,
+                              f"양식 밖 항목: {form}. {exc.reason}. "
+                              "다음: 양식 지도(templates/forms/)에 있는 쪽·항목 이름으로 고치거나, 지도에 정말 필요하면 지도를 먼저 고친다."))
+            continue
+        fmap = _valid_map(raw_map, map_path)
         if export.is_srs_map(fmap):
             out.append(_v("원본이 Spec 인 양식", form,
                           f"양식 밖 양식: {form} 은 원본이 SRS 인 지도라 Spec 의 `## 양식 항목` 에 쓸 수 없다. "
