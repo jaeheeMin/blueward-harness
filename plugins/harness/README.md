@@ -28,6 +28,7 @@ plugins/harness/
     start/SKILL.md             /harness:start — 이슈와 브랜치 생성
     deliver/SKILL.md           /harness:deliver — 커밋·동기화·푸시·PR
     wrapup/SKILL.md            /harness:wrapup — 남은 작업의 이슈화
+    handoff/SKILL.md           /harness:handoff — 새 세션으로 인계 파일 저장
     scaffold/                  /harness:scaffold — Project Repository 표준 구조 생성
     srs/SKILL.md               /harness:srs — SRS 작성·수정
     spec/SKILL.md              /harness:spec — 개발 Spec 작성·수정(양식 지도: form-map.md)
@@ -83,6 +84,7 @@ plugins/harness/
 | `/harness:start` | 작업을 시작한다. 이슈를 만들고 규칙에 맞는 브랜치를 만든다. 먼저 병합할 수 있는 내 PR 이 있으면 알린다(막지 않음, #370) |
 | `/harness:deliver` | 작업을 마무리한다. 커밋·동기화·푸시·PR 생성을 한 번에 |
 | `/harness:wrapup` | 세션에서 끝내지 못한 작업을 이슈로 남긴다 |
+| `/harness:handoff` | 하던 일을 새 세션이 되묻지 않고 이어 가게 인계 파일을 메모리에 저장하고 붙여 넣을 프롬프트를 준다(#546) |
 | `/harness:scaffold` | 새 Project Repository 에 표준 구조를 만든다 |
 | `/harness:srs` | SRS(요구사항정의서)를 새로 쓰거나, 요구사항이 바뀌었을 때 고친다. 먼저 브랜치를 확인한다(main 이면 start 를 대신, 다른 작업 브랜치면 이어 쓸지 묻는다, #281) |
 | `/harness:spec` | SRS 요구사항으로 개발 Spec 을 만들거나, SRS 가 바뀌어 고친다. srs 와 같이 먼저 브랜치를 확인한다 |

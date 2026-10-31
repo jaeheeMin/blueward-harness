@@ -325,6 +325,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
           <button class="tab" role="tab" data-tab="gate">검사 · 승인 받기<small>GitHub Actions</small></button>
           <button class="tab" role="tab" data-tab="merge">리뷰 · 병합하기<small>squash merge</small></button>
           <button class="tab" role="tab" data-tab="wrapup">못 끝낸 일 남기기<small>/harness:wrapup</small></button>
+          <button class="tab" role="tab" data-tab="handoff">새 세션에 인계하기<small>/harness:handoff</small></button>
         </div>
       </div>
       <div>
@@ -1630,7 +1631,42 @@ Closes #143</pre>
     <div class="callout warn"><span class="k">고른 것만</span><div>내가 고르지 않은 항목은 이슈로 만들지 않아.</div></div>
   </div>
 
-  <div class="next"><button data-go="merge">← 리뷰 · 병합하기</button><button data-go="scaffold">다음: 새 고객사 저장소 만들기 →</button></div>
+  <div class="next"><button data-go="merge">← 리뷰 · 병합하기</button><button data-go="handoff">다음: 새 세션에 인계하기 →</button></div>
+</article>
+
+<!-- ================= handoff ================= -->
+<article class="panel" data-panel="handoff" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">작업 닫기 · /harness:handoff</div>
+    <h2>새 세션에 인계하기</h2>
+    <p class="lead">대화가 길어졌거나 작업 성격이 바뀌었을 때, 하던 일을 새 세션이 되묻지 않고 이어 가게 인계 파일을 남기는 일이야.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>대화가 길어져서 새 세션으로 갈아타고 싶을 때. 오늘 하던 일을 내일 새 세션에서 이어 가고 싶을 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>인계해 줘</span><span>핸즈오프해 줘</span><span>새 세션에서 이어서 하게</span><span>인계 파일 만들어 줘</span><span class="cmd">/harness:handoff</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>교대 근무 때 쓰는 <b>인수인계 노트</b>야. 다음 사람은 내 머릿속을 볼 수 없으니, 무엇을 정했고 어디까지 했고 뭐가 남았는지 노트에 적어 둬야 다시 물어보지 않고 이어 가.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>인계할 게 있나</b><span>없으면 만들지 않고 물어봐</span></div><div class="arrow"></div>
+      <div class="node hl"><b>인계 파일 쓰기</b><span>메모리 폴더에 handoff-날짜-요약.md</span></div><div class="arrow"></div>
+      <div class="node hl"><b>목차에 한 줄</b><span>MEMORY.md</span></div><div class="arrow"></div>
+      <div class="node ok"><b>프롬프트 받기</b><span>새 세션에 붙여 넣기</span></div>
+    </div>
+  </section>
+
+  <div class="callouts">
+    <div class="callout ok"><span class="k">구분</span><div>못 끝낸 일을 <b>이슈로</b> 남기는 거면 <code>/harness:wrapup</code>, 커밋·PR 로 올리는 거면 <code>/harness:deliver</code> 야. handoff 는 같은 일을 <b>다음 세션이 바로 이어 가게</b> 하는 인계야.</div></div>
+    <div class="callout warn"><span class="k">직접 해야 해</span><div>새 세션을 열거나 지금 세션을 <code>/clear</code> 하는 건 스킬이 하지 않아. 나온 프롬프트를 <code>/clear</code> 뒤에 붙여 넣거나 새 세션 창에 붙여 넣어. 인계한 뒤 이 세션은 그 일을 더 하지 않아(두 세션이 같은 파일을 덮어쓰지 않게).</div></div>
+    <div class="callout warn"><span class="k">비밀은 안 넣어</span><div>토큰 · 쿠키 · 비밀번호는 인계 파일에 쓰지 않아. 메모리 기능이 꺼져 있으면 파일 대신 붙여 넣을 인계문을 그대로 줘.</div></div>
+  </div>
+
+  <div class="next"><button data-go="wrapup">← 못 끝낸 일 남기기</button><button data-go="scaffold">다음: 새 고객사 저장소 만들기 →</button></div>
 </article>
 
 <!-- ================= scaffold ================= -->
@@ -1678,7 +1714,7 @@ Closes #143</pre>
     <div class="callout ok"><span class="k">AI(Artificial Intelligence) 리뷰</span><div>ai-review 는 기본으로 꺼져 있어. 켜려면 시크릿 등록과 <code>risk-gate.yaml</code> 의 <code>ai_review: true</code> 둘 다 필요해. 켜면 코드(<code>src/</code>)를 바꾼 PR 은 위험한 PR 도 AI 가 리뷰하고(문서·Spec 만 바꾼 PR 은 <code>ai_review_paths</code> 에 안 걸려 대기 없이 통과), 위험한 PR 은 승인자 Approve 도 따로 필요해. 리뷰는 코드 파일만 묶음으로 나눠 보고(문서는 대상 아님), 못 본 파일이 있으면 "일부만 봄" 으로 실패해서 통과로 보이지 않아. 다 봤는지는 AI 의 말이 아니라 워크플로가 직접 판정해. Claude 는 판을 고정해 설치하고 구독 토큰으로만 돌려(구독 토큰은 토큰을 만든 사람의 구독에 묶여 있어. 이전 방식과 같은 조건이야). 다만 새로 들어온 줄에 비밀값(키·토큰·비밀번호) 모양이 보이면 그 diff 를 외부 AI 에 보내지 않으려고 리뷰를 아예 돌리지 않고, "검사 불능 - 비밀값 의심" 으로 실패시켜서 승인자가 직접 확인하게 해. 값은 어디에도 남지 않고, 위치(파일:줄)는 risk-gate 사유처럼 job 로그에 남고, ai-review 코멘트에는 패턴 이름만 적혀. 변경이 너무 커서 비밀값 검사를 못 한 경우는 여기 해당 안 되고 리뷰는 그대로 돌아(그 파일 안의 비밀값은 AI 리뷰로 나갈 수 있어). 엔진이 옛 판이라 비밀값 확인 결과를 못 내면 그것도 검사 불능으로 실패해. 리뷰 결과는 github-actions 봇이 쓴 코멘트만 읽어.</div></div>
   </div>
 
-  <div class="next"><button data-go="wrapup">← 못 끝낸 일 남기기</button><button data-go="release">다음: 릴리즈 내기 →</button></div>
+  <div class="next"><button data-go="handoff">← 새 세션에 인계하기</button><button data-go="release">다음: 릴리즈 내기 →</button></div>
 </article>
 
 <!-- ================= release ================= -->
