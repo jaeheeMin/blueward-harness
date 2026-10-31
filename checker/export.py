@@ -66,7 +66,7 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _INT = re.compile(r"^(0|-?[1-9]\d{0,14})$")
 _CTRL = re.compile("[" + chr(0) + "-" + chr(8) + chr(0xB) + chr(0xC) + chr(0xE) + "-" + chr(0x1F) + chr(0xFFFE) + chr(0xFFFF) + chr(0xD800) + "-" + chr(0xDFFF) + "]")  # XML 1.0 에 못 넣는 문자
 MAX_CELL_CHARS = 32767
-SRS_NEXT_STEP_COL = "다음 단계"  # SRS 요구사항 표의 엔진 기본 md 전용 열(개발/설정/미정). 엑셀로 쓰지 않고 값도 여기서 검사하지 않는다.
+SRS_NEXT_STEP_COL = "다음 단계"  # SRS 요구사항 표의 엔진 기본 md 전용 열(개발/설정/미정). 다음 단계 값은 엑셀로 쓰지 않는다. 값 검사는 `checker/pairing.py` 의 `NEXT_STEPS` 가 한다(#567).
 
 
 class ExportError(Exception):
