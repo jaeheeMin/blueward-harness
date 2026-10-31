@@ -184,7 +184,7 @@
     if (es) { es.close(); es = null; }
     clearTimeout(retryTimer);
     try { es = new EventSource('/api/events'); } catch (e) { return scheduleRetry(); }
-    es.onopen = function () { retry = 0; setConn('ok'); loadSessions().catch(function () {}); };
+    es.onopen = function () { retry = 0; setConn('ok'); loadSessions().catch(function (e) { console.warn('세션 목록을 불러오지 못했습니다', e); }); };
     es.addEventListener('session', function (ev) {
       var d = parse(ev.data); if (!d) return;
       d = d.session || d;
@@ -271,7 +271,7 @@
     view = v || null;
     if (v && v.tick) tick = setInterval(v.tick, 15000);
     scheduleSide();
-    document.title = (v && v.title ? v.title() + ' · ' : '') + 'Blueward Harness';
+    setTitle(v && v.title ? v.title() : '');
   }
   function setTitle(t) { document.title = (t ? t + ' · ' : '') + 'Blueward Harness'; }
 
@@ -1086,7 +1086,7 @@
       else if (step === 'failed') drawFailed(page);
       else drawReview(page);
       root.appendChild(page);
-      if (keepFocus) { var f = document.getElementById(keepFocus); if (f && f !== document.activeElement) { f.focus(); try { if (selStart != null) f.setSelectionRange(selStart, selStart); } catch (e) {} } }
+      if (keepFocus) { var f = document.getElementById(keepFocus); if (f && f !== document.activeElement) { f.focus(); try { if (selStart != null) f.setSelectionRange(selStart, selStart); } catch (e) { console.debug('커서 위치를 되돌리지 못했습니다', e); } } }
     }
     function folderBar(page) {
       page.appendChild(h('div', { class: 'folder-bar' },

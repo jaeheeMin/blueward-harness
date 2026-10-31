@@ -1,7 +1,6 @@
 """OS 차이를 한 곳에 모은다(web-console.md §1).
 
 분기가 있는 함수는 `os_name` 을 인자로 받는다. 시험이 Windows 값을 넣어 분기 로직만 확인할 수 있게 하려는 것이다.
-이 파일의 Windows 분기는 Windows 에서 실행해 보지 않았다.
 """
 from __future__ import annotations
 
@@ -151,7 +150,7 @@ def open_in_browser(url: str, opener: Callable[[str], bool] = webbrowser.open) -
 def same_path(a: str | os.PathLike, b: str | os.PathLike, os_name: str | None = None) -> bool:
     if (os_name or current_os()) == "windows":  # 경로 구분자와 대소문자를 구별하지 않는다
         return ntpath.normcase(ntpath.normpath(str(a))) == ntpath.normcase(ntpath.normpath(str(b)))
-    return os.path.normcase(str(a)) == os.path.normcase(str(b))
+    return str(a) == str(b)
 
 
 def clean_user_path(raw: str) -> str:

@@ -32,6 +32,8 @@ REQUEST_TIMEOUT = 30.0  # 요청을 읽는 동안의 소켓 timeout. 본문을 �
 TOKEN_TTL = 60.0
 API_BODY_LIMIT = 1 << 20
 HOOK_BODY_LIMIT = 32 << 20
+DRAIN_LIMIT = 1 << 20   # 오류 응답 전에 버려 읽는 본문의 상한
+DRAIN_SECONDS = 1.0     # 버려 읽는 데 쓰는 총 시간
 HEARTBEAT = 10.0
 HIDDEN_SKILLS = {"update", "scaffold", "open"}
 # Windows 레지스트리의 MIME 설정에 영향받지 않게 직접 매핑한다(CSP 가 script 를 막는 일 방지).
@@ -479,7 +481,31 @@ class Handler(BaseHTTPRequestHandler):
         body = b"" if data is None else json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send(status, body)
 
+    def drain_body(self) -> None:
+        """오류 응답 전에 안 읽은 요청 본문을 비운다. 남기면 Windows 가 연결을 RST 로 닫아 클라이언트가 응답을 못 받는다."""
+        if getattr(self, "body_touched", False):
+            return
+        self.body_touched = True
+        try:
+            header = (self.headers.get("Content-Length") or "0").strip()
+            if not header.isascii() or not header.isdigit():
+                return
+            remaining = min(int(header), DRAIN_LIMIT)
+            deadline = time.monotonic() + DRAIN_SECONDS
+            while remaining > 0:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return
+                self.connection.settimeout(left)
+                chunk = self.rfile.read1(min(remaining, 65536)) if hasattr(self.rfile, "read1") else self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    return
+                remaining -= len(chunk)
+        except Exception:  # 비우지 못해도 응답은 그대로 보낸다
+            return
+
     def read_json(self, limit: int) -> dict:
+        self.body_touched = True
         header = (self.headers.get("Content-Length") or "0").strip()
         if not header.isascii() or not header.isdigit():  # 음수·숫자 아님·부호가 붙은 값은 거부한다
             raise HttpError(400, "Content-Length 가 올바르지 않습니다.")
@@ -509,14 +535,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self): self.route()
 
     def route(self) -> None:
+        self.body_touched = False  # 요청마다 초기화한다(핸들러 하나가 연결 하나를 다루지만 keep-alive 로 바뀌어도 안전하게)
         try:
             self.dispatch()
         except HttpError as e:
+            self.drain_body()
             self.send_json(e.status, {"error": e.message})
         except (BrokenPipeError, ConnectionError, TimeoutError):
             pass
         except Exception as e:  # 한 요청의 오류로 서버가 죽지 않게 한다
             try:
+                self.drain_body()
                 self.send_json(500, {"error": f"서버 오류: {type(e).__name__}"})
             except OSError:
                 pass
