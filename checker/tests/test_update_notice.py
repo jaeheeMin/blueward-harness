@@ -295,5 +295,5 @@ def test_git_이_없어도_스크립트는_exit_0_에_출력_없음이다(env, t
 
 def test_hooks_json_에_UserPromptSubmit_으로_등록돼_있다():
     hooks = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-    commands = [h["command"] for e in hooks["UserPromptSubmit"] for h in e["hooks"]]
+    commands = [h.get("command", "") for e in hooks["UserPromptSubmit"] for h in e["hooks"]]
     assert any("update_notice.py" in c for c in commands)

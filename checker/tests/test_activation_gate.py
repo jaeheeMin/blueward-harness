@@ -468,7 +468,7 @@ def test_활성화_기록_PostToolUse_매처에_launchpad_도구가_없다():
     hooks_json = json.loads((PLUGIN_SRC / "hooks" / "hooks.json").read_text(encoding="utf-8"))
     matchers = [
         e["matcher"] for e in hooks_json["hooks"]["PostToolUse"]
-        for h in e["hooks"] if "mcp_activation_tracker.py" in h["command"]
+        for h in e["hooks"] if "mcp_activation_tracker.py" in h.get("command", "")
     ]
     assert len(matchers) == 1
     assert "deployUi5App" not in matchers[0] and "publishBusinessCatalog" not in matchers[0]
