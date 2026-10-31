@@ -240,6 +240,7 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import re
 
           temp = os.environ["RUNNER_TEMP"]
           code = os.environ.get("PRE_CODE", "")
@@ -249,14 +250,29 @@ jobs:
           head_sha = os.environ.get("HEAD_SHA", "")
           MARKER_FINDINGS = 5
           UNREVIEWED_SHOWN = 20
+          FINDINGS_BUDGET = 45000
+          BODY_LIMIT = 60000
 
 
-          def clean(text, limit=300):
+          def clean(text, limit=600):
               # 모델이 쓴 문장이다. 멘션이 되지 않게 하고, HTML 주석을 열고 닫는 `<!--`·`-->` 를 깨서(가짜 표식이
-              # 보이는 본문에 못 들어가게) 한 줄로 줄이며 길이를 자른다.
+              # 보이는 본문에 못 들어가게) 한 줄로 줄이며 길이를 자른다. 자를 때는 `…`(공백 포함 2자)까지 합쳐
+              # 한도 안에 들도록, 마지막 문장 끝에서, 없으면 마지막 단어 경계에서 자르고(둘 다 없으면 글자 수로) 붙인다.
               text = " ".join(str(text).split()).replace("@", "@​")
               text = text.replace("<!--", "<!​--").replace("-->", "--​>")
-              return text if len(text) <= limit else text[:limit] + "..."
+              if len(text) <= limit:
+                  return text
+              cut = limit - 2
+              head = text[:cut]
+              # 문장 끝은 `.`·`?`·`!` 바로 뒤가 공백이거나 따옴표·괄호를 닫는 자리다(`a.b`·`1.5` 는 끝이 아니다).
+              ends = [m.end() for m in re.finditer(r"[.?!][)\]\"'”’]*(?=\s)", text[:cut + 1])]
+              ends = [e for e in ends if limit // 3 <= e <= cut]
+              if ends:
+                  return text[:ends[-1]] + " …"
+              space = head.rfind(" ")
+              if space >= limit // 3:
+                  return head[:space] + " …"
+              return text[:limit - 1] + "…"
 
 
           def read_precheck():
@@ -340,6 +356,7 @@ jobs:
 
           status, lines = "pass", []
           serious_count, marker_findings, unreviewed_count = 0, [], 0
+          finding_lines, tail_lines, omitted_total = [], [], 0
           risky, risky_reasons, risky_criteria = (False, [], [])
           if code == "0":
               risky, risky_reasons, risky_criteria = read_precheck()
@@ -441,17 +458,32 @@ jobs:
                       lines.append(f"AI 리뷰 대상 아님 - 코드가 아닌 파일 {len(ex)}개(문서·이미지 등): " + sample
                                    + (f" 외 {len(ex) - 3}개" if len(ex) > 3 else ""))
                       lines.append("")
-                  for item in findings:
+                  # 심각을 먼저, 경미는 그다음(sorted 는 안정 정렬이라 같은 등급 안은 모델이 준 순서 그대로).
+                  # severity 는 parse_review 가 둘 중 하나로 확인했지만, 모르는 값이 와도 맨 뒤로 가게 둔다.
+                  rank = {"serious": 0, "minor": 1}
+                  ordered = sorted(findings, key=lambda i: rank.get(i["severity"], 2))
+                  all_finding_lines = []
+                  for item in ordered:
                       mark = "심각" if item["severity"] == "serious" else "경미"
-                      lines.append(f"- [{mark}] `{clean(item['file'], 200)}:{item['line']}` {clean(item['summary'])}")
+                      all_finding_lines.append(f"- [{mark}] `{clean(item['file'], 200)}:{item['line']}` {clean(item['summary'])}")
+                  # GitHub 코멘트는 65,536자까지다. 지적 개수에 상한이 없어서, 넘치면 뒤(덜 중요한 쪽)를 줄이고 개수를 알린다.
+                  shown_lines, used = [], 0
+                  for text in all_finding_lines:
+                      if used + len(text) + 1 > FINDINGS_BUDGET:
+                          break
+                      shown_lines.append(text)
+                      used += len(text) + 1
+                  finding_lines = shown_lines
+                  omitted_total = len(all_finding_lines) - len(shown_lines)
                   if serious > 0:
-                      lines += ["", "다음: Claude 가 지적을 고쳐 새 커밋을 올리면 AI 리뷰가 다시 돕니다."]
+                      tail_lines = ["", "다음: Claude 가 지적을 고쳐 새 커밋을 올리면 AI 리뷰가 다시 돕니다."]
                   elif partial:
-                      lines += ["", "다음: 승인자가 못 본 파일을 직접 확인하거나, 시간 초과 같은 일시 실패라면 ai-review 검사를 "
+                      tail_lines = ["", "다음: 승인자가 못 본 파일을 직접 확인하거나, 시간 초과 같은 일시 실패라면 ai-review 검사를 "
                                     "다시 실행하십시오. 이 검사는 일부만 본 채로 통과시키지 않습니다."]
 
+          head_lines = lines
           if risky:
-              lines = ["위험 PR - 승인자 Approve 도 필요합니다: " + "; ".join(clean(r, 200) for r in risky_reasons), ""] + lines
+              head_lines = ["위험 PR - 승인자 Approve 도 필요합니다: " + "; ".join(clean(r, 200) for r in risky_reasons), ""] + lines
 
           title = {
               "pass": "AI 리뷰 통과",
@@ -461,14 +493,28 @@ jobs:
               "skip": "AI 리뷰 건너뜀",
               "secret": "AI 리뷰 검사 불능 - 비밀값 의심",
           }[status]
-          visible = "## ai-review\n\n**" + title + "**\n\n" + "\n".join(lines) + "\n"
           # risk-gate 가 읽는 숨은 표식. 같은 head sha 의 결과만 쓰인다. JSON 안 `-->` 는 HTML 주석을 닫으므로 이스케이프한다.
           marker = json.dumps(
               {"sha": head_sha, "status": status, "serious": serious_count, "findings": marker_findings,
                "unreviewed": unreviewed_count},
               ensure_ascii=True, separators=(", ", ": "),
           ).replace("-->", "--\\u003e")
-          body = "<!-- ai-review -->\n" + visible + "\n<!-- ai-review-result " + marker + " -->\n"
+
+          def assemble(n):
+              all_lines = head_lines + finding_lines[:n]
+              omitted = omitted_total + len(finding_lines) - n
+              if omitted:
+                  all_lines.append(f"- 코멘트 길이 제한으로 나머지 지적 {omitted}건은 적지 않았습니다.")
+              vis = "## ai-review\n\n**" + title + "**\n\n" + "\n".join(all_lines + tail_lines) + "\n"
+              return vis, "<!-- ai-review -->\n" + vis + "\n<!-- ai-review-result " + marker + " -->\n"
+
+          # 마커(한글은 \u 이스케이프라 6배)·못 본 파일 목록·위험 사유는 지적 예산 밖이라, 최종 본문 길이를 다시 확인해
+          # 한도를 넘으면 뒤쪽 지적부터 더 줄이고 생략 건수를 맞춘다.
+          shown_n = len(finding_lines)
+          visible, body = assemble(shown_n)
+          while len(body) > BODY_LIMIT and shown_n > 0:
+              shown_n -= 1
+              visible, body = assemble(shown_n)
 
           with open(os.path.join(temp, "ai-review-comment.md"), "w", encoding="utf-8") as f:
               f.write(body)

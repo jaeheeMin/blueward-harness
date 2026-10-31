@@ -277,6 +277,90 @@ def test_serious_가_있으면_실패하고_지적을_보인다(wf, tmp_path):
     assert "@someone" not in body  # 멘션이 되지 않게 막는다
 
 
+def test_지적은_심각이_먼저고_같은_등급_안은_준_순서를_지킨다(wf, tmp_path):
+    kinds = ["minor", "serious", "minor", "serious", "minor", "serious"]
+    review = json.dumps({"serious": 3, "findings": [
+        {"severity": k, "file": f"f{n}.py", "line": n, "summary": f"지적 {n}"} for n, k in enumerate(kinds)]})
+    status, body = _run_result(wf, tmp_path, review=review)
+    order = [int(m) for m in re.findall(r"`f(\d)\.py:", body)]
+    assert status == "fail" and order == [1, 3, 5, 0, 2, 4]
+    # 숨은 표식의 findings(serious 만, 준 순서)는 그대로다.
+    assert [f["line"] for f in _marker(body)["findings"]] == [1, 3, 5]
+
+
+def test_긴_요약은_문장_끝에서_자르고_말줄임을_붙인다(wf, tmp_path):
+    summary = ("권한 검사가 빠져 있어 누구나 데이터를 바꿀 수 있다. " * 30).strip()
+    assert len(summary) > 600
+    review = json.dumps({"serious": 1, "findings": [{"severity": "serious", "file": "a.py", "line": 1, "summary": summary}]})
+    _, body = _run_result(wf, tmp_path, review=review)
+    line = next(ln for ln in body.splitlines() if "a.py:1" in ln and ln.startswith("- ["))
+    text = line.split("` ", 1)[1]
+    assert text.endswith("다. …") and len(text) <= 600
+    # 문장 끝이 없으면 단어 경계에서 자른다.
+    review = json.dumps({"serious": 0, "findings": [{"severity": "minor", "file": "b.py", "line": 1, "summary": "word " * 200}]})
+    (tmp_path / "second").mkdir()
+    _, body = _run_result(wf, tmp_path / "second", review=review)
+    line = next(ln for ln in body.splitlines() if "b.py:1" in ln and ln.startswith("- ["))
+    assert line.endswith("word …")
+
+
+def _summary_text(wf, tmp_path, summary):
+    review = json.dumps({"serious": 0, "findings": [{"severity": "minor", "file": "b.py", "line": 1, "summary": summary}]})
+    _, body = _run_result(wf, tmp_path, review=review)
+    return next(ln for ln in body.splitlines() if ln.startswith("- [")).split("` ", 1)[1]
+
+
+@pytest.mark.parametrize(
+    "summary, expected_end",
+    [
+        ("앞 문장이 길다. " * 3 + "버전은 1.5 이고 " + "가나다라 " * 20 + "v0.10.143 에서 " + "마바 " * 150, None),
+        ("가" * 250 + " 값은 1.5 이다. " + "나다 " * 200, "다. …"),  # 소수점 뒤에서는 끊지 않고 문장 끝에서 끊는다
+        ("가" * 250 + " 판은 v0.10.143 입니다. " + "나다 " * 200, "입니다. …"),
+        ("가" * 250 + " 파일 a/b.c 를 본다. " + "나다 " * 200, "본다. …"),
+        ("가" * 250 + ' 이를 "고쳐야 한다." ' + "나다 " * 200, '한다." …'),  # 따옴표 뒤 문장 끝
+        ("가" * 250 + " 이는 (문제다.) " + "나다 " * 200, "문제다.) …"),  # 괄호 뒤 문장 끝
+    ],
+)
+def test_요약_자르기는_숫자_버전_경로를_끊지_않고_한도를_지킨다(wf, tmp_path, summary, expected_end):
+    text = _summary_text(wf, tmp_path, summary)
+    assert len(text) <= 600 and text.endswith("…")
+    if expected_end:
+        assert text.endswith(expected_end)
+    for frag in ("1.", "v0.", "a/b."):  # 토큰 중간에서 끊긴 흔적이 없어야 한다
+        assert not text.removesuffix(" …").endswith(frag)
+
+
+def test_문장_끝이_한도의_삼분의일_앞이면_단어_경계에서_자른다(wf, tmp_path):
+    # 문장 끝이 199(< 600 // 3 = 200) 이면 쓰지 않는다. 200 이면 쓴다.
+    early = "가" * 197 + "다. " + "나다 " * 300
+    text = _summary_text(wf, tmp_path, early)
+    assert text.endswith("다 …") and len(text) > 500
+    (tmp_path / "b").mkdir()
+    edge = "가" * 198 + "다. " + "나다 " * 300
+    assert _summary_text(wf, tmp_path / "b", edge) == "가" * 198 + "다. …"
+
+
+def test_지적이_너무_많으면_코멘트_길이_안에서_뒤를_줄이고_개수를_알린다(wf, tmp_path):
+    findings = [{"severity": "minor", "file": "f.py", "line": n, "summary": "가" * 590} for n in range(120)]
+    review = json.dumps({"serious": 0, "findings": findings})
+    _, body = _run_result(wf, tmp_path, review=review)
+    assert len(body) < 65536 and "나머지 지적" in body
+
+
+def test_한글_경로_요약과_큰_표식과_못_본_파일_목록이_있어도_본문은_한도_안이고_심각이_남는다(wf, tmp_path):
+    path = "가" * 200
+    findings = [{"severity": "serious", "file": path, "line": n, "summary": "나" * 200} for n in range(8)]
+    findings += [{"severity": "minor", "file": path, "line": n, "summary": "다" * 590} for n in range(120)]
+    unreviewed = ["라" * 200 + f"{n}.py" for n in range(40)]
+    review = json.dumps({"coverage": "partial", "unreviewed": unreviewed, "serious": 8, "findings": findings})
+    status, body = _run_result(wf, tmp_path, review=review,
+                               precheck={"enabled": True, "gate": True, "risky": True, "reasons": ["마" * 200] * 5})
+    assert status == "fail" and len(body) <= 60000
+    assert body.count("[심각]") == 8 and "나머지 지적" in body
+    omitted = int(re.search(r"나머지 지적 (\d+)건", body).group(1))
+    assert omitted == 120 - body.count("[경미]")
+
+
 @pytest.mark.parametrize(
     "review",
     [None, "not json", "[]", '{"serious": "1", "findings": []}', '{"serious": true, "findings": []}',
