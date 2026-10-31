@@ -2,7 +2,7 @@
 
 `/harness:open` 을 실행하면 로컬 서버와 웹페이지가 뜬다. 웹에서 모든 Claude Code 세션의 상태와 결과를 보고, 승인과 질문에 답하고, 스킬을 실행하고, 새 작업을 시작한다. 사용자는 터미널을 모르는 컨설턴트이고 Windows 와 macOS 모두 지원한다.
 
-표기: **[시험]** 은 CLI 2.1.309, macOS 에서 실제로 확인한 동작이다. Windows 는 어느 항목도 시험하지 않았다.
+표기: **[시험]** 은 CLI 2.1.309, macOS 에서 실제로 확인한 동작이다. Windows 는 CLI 2.1.316, Windows 10 에서 주요 흐름을 시험했고 결과는 `docs/status/558-web-console.md` 에 있다. 아래 **[시험]** 표기는 macOS 기준이다.
 
 ## 1. 원칙
 
@@ -72,7 +72,7 @@ plugins/harness/
 | PermissionRequest | command (`hook_post.py permission 86400`). **동기** | `/hooks/permission` |
 | PreToolUse `AskUserQuestion` | command (`hook_post.py question 86400`). **동기** | `/hooks/question` |
 | Stop | command (`hook_post.py stop 5`). **동기** | `/hooks/stop` |
-| SessionEnd | command (`hook_post.py event 1`). **동기**(공유 제한 1.5초) | `/hooks/event` |
+| SessionEnd | command (`hook_post.py event 3`). **동기**(공유 제한 1.5초, 훅 timeout 5초로 늘림) | `/hooks/event` |
 | UserPromptSubmit, UserPromptExpansion, PreToolUse `*`, PostToolUse, SubagentStart, SubagentStop, Notification, PreCompact | command (`hook_post.py event 3`) + **`"async": true`** | `/hooks/event` |
 
 모든 콘솔 훅은 `type: "command"` 이고 `uv run --no-project python console/hook_post.py <경로> <제한 초> || true` 이다. 서버가 꺼져 있으면 연결 거부를 삼키고 아무것도 출력하지 않고 exit 0 이라 화면에 훅 오류 줄이 남지 않는다. http 훅은 서버가 꺼져 있으면 대화형 화면에 오류 줄이 남아서 쓰지 않는다 **[시험]**.
@@ -145,8 +145,8 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 - stdin 메시지는 다중 턴이 된다. `/스킬` 은 확장된다. 실행 중 보낸 메시지는 큐잉돼 같은 턴에 합쳐진다. 중단은 `control_request{subtype:"interrupt"}` 를 쓴다. 전부 **[시험]**.
 - 띄우자마자 임시 id(`m-…`)로 등록하고, stdout 이벤트의 `session_id` 가 오면 실제 id 로 바꾼다(훅이 먼저 실제 id 로 등록했으면 합친다). 임시 id 로는 `--resume` 할 수 없다. `result` 이벤트의 `result` 글은 Stop 훅이 보고를 못 채웠을 때만 결과 보고로 쓴다.
 - session_id 는 이벤트의 `session_id`(`hook_started`, `system/init` 등)에서 얻는다. 종료된 세션은 `--resume` 으로 다시 띄운다 **[시험]**.
-- 종료: stdin 닫기. 안 끝나면 `platform_compat.terminate`(POSIX SIGTERM, Windows `terminate()`).
-- `claude` 실행 파일은 `shutil.which` 로 찾는다. Windows 의 `.cmd` 는 직접 실행할 수 없으면 `cmd /c` 로 감싸되 인자는 사용자 입력을 넣지 않는다. 사용자 입력은 stdin 으로만 넘긴다.
+- 종료: stdin 닫기. 안 끝나면 `platform_compat.terminate`(POSIX SIGTERM, Windows `taskkill /PID <pid> /T /F` 로 자식까지 끄고, 실패하면 `proc.terminate()`).
+- `claude` 실행 파일은 `shutil.which` 로 찾는다. Windows 는 `claude.exe` 를 먼저 찾고, `.cmd`·`.bat`·`.ps1` 이면 옆 `node_modules/@anthropic-ai/claude-code` 의 exe 또는 `node` + `cli.js` 를 직접 실행한다. `cmd /c` 는 공백·한글 경로와 JSON 인자에서 깨져 쓰지 않는다. 뒤에 붙는 인자는 고정 값뿐이다. 사용자 입력은 stdin 으로만 넘긴다.
 
 ### 새 작업
 
