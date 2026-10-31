@@ -389,3 +389,53 @@ def test_원장_Spec_칸과_RICEFW_메시지에도_제목이_붙는다(tmp_path)
     missing = [v["message"] for v in check_pairing(tmp_path)["violations"] if v["kind"] == "spec_link_missing"]
     assert any(m.startswith("DEV-002(제목2) 의 Spec 칸 링크") for m in missing)
     assert msgs["spec_link_mismatch"].startswith("DEV-003(제목3) 줄의 Spec 칸이")
+
+
+def test_다음_단계가_오타거나_빈_칸이면_위반이고_그_요구사항의_다른_대조는_건너뛴다(tmp_path):
+    _srs(tmp_path, [_req(1, "개발함", "DEV-009"), _req(2, "", "DEV-009"), _req(3, "개발", "DEV-003")])
+    _ledger(tmp_path, [_lrow(3)])
+    r = check_pairing(tmp_path)
+    assert r["status"] == VIOLATION
+    assert _kinds(r["violations"]) == {"next_step_invalid"}  # RICEFW 불일치는 따로 나오지 않는다
+    msgs = [x["message"] for x in r["violations"]]
+    assert len(msgs) == 2
+    assert "REQ-001(제목1)" in msgs[0] and "`개발함`" in msgs[0] and "`개발` / `설정` / `미정`" in msgs[0]
+    assert "REQ-002(제목2)" in msgs[1] and "빈 칸" in msgs[1]
+    assert r["violations"][0]["file"] == "docs/ssot/SRS.md"
+
+
+def test_다음_단계가_잘못된_REQ에_Spec과_원장이_있어도_위반은_하나뿐이다(tmp_path):
+    _srs(tmp_path, [_req(1, "개발함", "DEV-001")])
+    _ledger(tmp_path, [_lrow(1, _spec(tmp_path, 1))])
+    r = check_pairing(tmp_path)
+    assert r["status"] == VIOLATION
+    assert [v["kind"] for v in r["violations"]] == ["next_step_invalid"]
+    assert not {"spec_without_req", "ledger_without_req"} & _kinds(r["warnings"])
+
+
+def test_다음_단계는_세_값이고_앞뒤_공백은_통과한다(tmp_path):
+    _srs(tmp_path, [_req(1, "개발", "DEV-001"), _req(2, "  설정 "), _req(3, "미정")])
+    _ledger(tmp_path, [_lrow(1), _lrow(2, "설정")])
+    r = check_pairing(tmp_path)
+    assert "next_step_invalid" not in _kinds(r["violations"])
+    assert r["violations"] == []
+
+
+def test_다음_단계_열이_없으면_값_검사를_하지_않고_개발로_본다(tmp_path):
+    head = "| ID | Title | Status |\n|---|---|---|\n"
+    _srs(tmp_path, ["| REQ-001 | t | New |"], head=head)
+    _ledger(tmp_path, [_lrow(1)])
+    r = check_pairing(tmp_path)
+    assert r["violations"] == []
+    assert "srs_no_next_step" in _kinds(r["warnings"])
+
+
+def test_다음_단계가_잘못되면_짝_검사가_종료코드_1로_막는다(tmp_path, monkeypatch, capsys):
+    _std_root(tmp_path)
+    _srs(tmp_path, [_req(1, "개발함")])
+    _ledger(tmp_path, [_lrow(1)])
+    (tmp_path / "changed.txt").write_text("docs/ssot/SRS.md\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main_entry(["changed.txt"]) == EXIT_VIOLATION
+    report = json.loads(capsys.readouterr().out)
+    assert report["pairing"]["violations"][0]["kind"] == "next_step_invalid"
