@@ -946,7 +946,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     <section class="box">
       <h3>바뀌는 것</h3>
       <ul class="made">
-        <li>Spec 파일 내용과 변경 이력 표 (쓰는 객체가 달라지면 <code>## 사용 객체</code> 표도. 이 절이 없는 옛 Spec 은 넣을지 물어 봐)</li>
+        <li>Spec 파일 내용과 변경 이력 표 (쓰는 객체가 달라지면 <code>## 사용 객체</code> 표도. 이 절이 없는 옛 Spec 은 넣을지 물어 봐. 설계가 바뀔 때만 고쳐. 개발 결과는 Spec 대신 <code>audit/changes/</code> 에 적어)</li>
         <li><code>audit/changes/YYYYMMDD-&lt;요약&gt;.md</code></li>
         <li>새 버전 개발사양서 엑셀 (이전 판은 남음)</li>
       </ul>
@@ -1416,7 +1416,7 @@ fix/31-broken-link</pre>
     <h3>커밋한 뒤 deliver 가 먼저 물어봐 — 세 갈래</h3>
     <p style="font-size:14.5px;margin-bottom:8px">PR 을 바로 낼지는 deliver 가 상황을 보고 <b>추천 하나</b>를 말해 줘. 내가 "네" 하거나 다른 걸 고르면 돼. 기준은 외울 필요 없어.</p>
     <ul class="todo">
-      <li><b>PR 내기</b> — 하위 작업 하나가 끝났을 때. 지금까지 하던 대로 올려. PR 은 <b>하위 작업 이슈 하나에 하나</b>야. 같은 개발의 Spec(Specification, 결과 기록)을 같이 고친 건 섞임이 아니야.</li>
+      <li><b>PR 내기</b> — 하위 작업 하나가 끝났을 때. 지금까지 하던 대로 올려. PR 은 <b>하위 작업 이슈 하나에 하나</b>야. 같은 개발의 Spec(Specification)을 같이 고친 건 섞임이 아니야. 다만 개발 결과 기록은 Spec 이 아니라 <code>audit/changes/</code> 에 적어(종류 "구현 결과"). Spec 을 고치면 승인이 필요해.</li>
       <li><b>여기까지를 PR 로 내기</b> — 개발하다 <code>src/</code> 변경이 1,000줄을 넘으면(저장소 <code>.github/branch-growth.yaml</code> 의 <code>notify_src_lines</code> 로 바꿀 수 있어) "변경이 커지고 있어요. 여기까지를 PR 로 내고 나머지는 하위 작업으로 뺄까요?" 하고 물어. 막는 건 아니라서 "그대로 PR 내기" 를 골라도 돼. 아직 안 끝난 개발이어도 줄 수는 세서, 그때는 "끝난 기능만 하위 작업으로 떼어 PR 내기" 를 보기에 더해 줘. 줄 수를 못 세면 "변경 크기를 확인하지 못했어요" 라고 알려 줘(통과로 넘기지 않아).</li>
       <li><b>브랜치에만 올리기</b> — 080 묶음이 아직 안 끝났거나, 앞 PR 이 아직 열려 있을 때. 저장만 해 두고 PR 은 안 내(그래서 검사도 아직 안 돌아). "아직 080 묶음이 끝나지 않았어요. 지금은 저장만 해 두고, 다 끝나면 PR 을 낼게요." 다음에 다시 <code>/harness:deliver</code> 하면 이어서 판단해.</li>
       <li><b>나눠서 올리기</b> — 서로 다른 개발이 섞였거나, SRS 와 개발이 한 덩어리로 섞였을 때(개발과 그 개발의 Spec, SRS 와 Spec 은 같이 올려도 돼). 어떤 파일을 어느 PR 로 나눌지 제안해 줘. 그대로 올려도 되는데, 그러면 이유가 PR 에 적혀.</li>
