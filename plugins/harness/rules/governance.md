@@ -30,7 +30,7 @@ PR 의 차례가 되면 작성자를 멘션하고(Teams 웹훅이 있으면 Team
 
 1. 한 PR = 하위 작업 이슈 하나. 기능이 여럿인 개발은 `/harness:start` 에서 하위 작업으로 쪼갠다. DEV 가 둘 이상이거나
    SRS 와 개발이 함께면 섞임이라 나누자고 제안한다. 개발 PR 이 같은 DEV 의 Spec 을 같이 고치는 것, SRS 와 Spec 을
-   함께 올리는 것은 섞임이 아니다. 개발 중 `src/` 변경이 기준(기본 1,000줄)을 넘으면 deliver 가 나누기를 묻는다(막지 않는다). 안 끝난 개발이어도 센다.
+   함께 올리는 것은 섞임이 아니다. 단 개발 결과 기록은 Spec 이 아니라 `audit/changes/` 에 적는다(Spec 을 고치면 `docs/spec/` 위험 경로라 승인 대상, #552). 개발 중 `src/` 변경이 기준(기본 1,000줄)을 넘으면 deliver 가 나누기를 묻는다(막지 않는다). 안 끝난 개발이어도 센다.
 2. 안 끝난 개발은 PR 없이 브랜치에만 올린다. 하위 작업 하나가 080 에서 활성화된 뒤 그 PR 을 낸다.
 3. 끝난 PR 은 GitHub 자동 병합으로 승인·검사가 끝나는 순간 합친다. **사람의 승인이 곧 병합 결정**이다.
 4. 개발 PR 은 쌓지 않는다. 앞 PR 이 열려 있으면 브랜치에만 올리고, 병합되면 main 에서 다시 찍어 PR 을 낸다.
@@ -109,7 +109,7 @@ Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험�
 `secret_scan`, `require_checks_green`, `ai_review`, `size_exclude_paths`, `size_warn_only_paths`, `srs_split_hint`, `approvers_file`)에서 고친다.
 `size_exclude_paths`(기본 비어 있음 = 모든 파일을 센다, #534)에 접두어(예 `src/`, `audit/`)를 적으면, 그 아래 파일은 줄·파일 수 합계에서
 빼고 **남은 파일만으로** `max_changed_*` 를 판정한다. 남은 부분이 기준을 넘으면 승인 사유이고, 뺀 것까지 합쳐야 넘는 부분은 경고
-(결과의 `notes`, PR 코멘트의 "참고(승인 필요 없음)")로만 낸다. 그래서 `src/` 와 Spec 을 같이 고쳐도 `src/` 줄은 승인 사유가 되지 않는다.
+(결과의 `notes`, PR 코멘트의 "참고(승인 필요 없음)")로만 낸다. 그래서 `src/` 와 Spec 을 같이 고쳐도 `src/` 줄은 승인 사유가 되지 않는다(Spec 은 위험 경로라 별도 사유다. 개발 결과는 Spec 대신 `audit/changes/` 에 적어 이 사유를 피한다, #552).
 다른 기준(위험 경로·비밀값·AI 리뷰·다른 검사 실패)은 그대로다. 두 키를 함께 쓰면 `size_exclude_paths` 를 먼저 적용하고,
 `size_warn_only_paths` 는 **센 파일**이 모두 그 아래일 때 남은 사유를 경고로 바꾼다.
 `size_warn_only_paths`(기본 비어 있음, #436)에 접두어(예 `src/`)를 적으면, **센 파일**(`size_exclude_paths` 를 쓰면 그 아래를 뺀 나머지, 안 쓰면 바뀐 파일 전부)이

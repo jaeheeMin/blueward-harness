@@ -68,7 +68,8 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
    - 이번 브랜치 변경: `git diff --name-only origin/{base}...HEAD`. DEV 번호는 엔진 `pr_queue._order_devs` 와 같은
      근거로 센다 — 바꾼 `docs/spec/DEV-xxx-*.md` 파일명, 이슈·PR 제목 끝 `(DEV-xxx)`, 브랜치 이름, 원장 행.
    - 단계: `docs/ssot/` 변경은 SRS, `docs/spec/` 변경은 Spec, 그 밖의 소스(`src/` 등)는 개발. 개발 PR 이 **같은 DEV 의**
-     Spec(`docs/spec/DEV-xxx-*.md`, 결과 기록)을 같이 고치는 것은 섞임이 아니다. SRS 와 Spec 이 함께인 것도 섞임이 아니다.
+     Spec(`docs/spec/DEV-xxx-*.md`)을 같이 고치는 것은 섞임이 아니다. 다만 개발 결과 기록은 Spec 이 아니라 `audit/changes/` 에 적고,
+     Spec 을 고치면 설계 변경이라 승인이 필요하다(#552). SRS 와 Spec 이 함께인 것도 섞임이 아니다.
    - 하위 작업: 이 브랜치의 이슈가 "기존 개발의 하위 작업"(본문 `DEV-xxx 하위 작업`)인지 본다. 기능이 여럿인 개발인데
      하위 작업으로 쪼개지 않고 한 이슈에 몰아 둔 것으로 보이면 "기능마다 하위 작업으로 나누면 PR 이 작아져요" 라고 한 줄
      안내한다(`/harness:start` 의 "기존 개발의 하위 작업").
@@ -93,7 +94,8 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 
    **판단 순서.**
    1. **섞임 → 추천 "나눠서 올리기".** DEV 번호가 둘 이상이거나, SRS 와 개발이 함께면. (같은 DEV 의 Spec 을 개발과 같이
-      고치는 것, SRS 와 Spec 을 함께 올리는 것은 섞임이 아니다.)
+      고치는 것, SRS 와 Spec 을 함께 올리는 것은 섞임이 아니다. 단 개발 결과는 Spec 이 아니라 `audit/changes/` 에 적고,
+      Spec 을 고치면 승인 대상이다.)
       어떤 파일을 어느 PR 로 나눌지 한 줄씩 제안하고 확인받은 뒤 브랜치를 나눈다(새 브랜치에서 해당 파일만 가져와
       각각 커밋하고, 원래 브랜치는 나머지만 남긴다. 파일을 지우거나 되돌릴 때는 사용자 확인 없이 하지 않는다).
       사용자가 "그대로 올릴게요" 하면 올리되 PR 본문 `## Review notes` 에 섞은 이유를 적는다.
