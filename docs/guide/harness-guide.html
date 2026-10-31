@@ -347,7 +347,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.141, public-cloud main 기준 (2026-10-31)</div>
+      <div class="note">harness 0.10.142, public-cloud main 기준 (2026-10-31)</div>
     </div>
   </nav>
 
@@ -604,6 +604,20 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
       </ul>
     </section>
   </div>
+
+  <section class="box">
+    <h3>웹 콘솔 열기 (<code>/harness:open</code>)</h3>
+    <p style="margin-bottom:10px">Claude 세션이 여러 개일 때 한 화면에서 보는 브라우저 페이지야. 터미널 창을 오가지 않고 각 세션이 뭘 하는지, 끝난 결과가 뭔지 보고, 승인·질문에 답하고, 새 일을 맡길 수 있어. 내 PC 안에서만 열려(<code>127.0.0.1:4873</code>), 밖에서는 못 들어와.</p>
+    <ul class="plain">
+      <li><b>여는 법</b> — Claude 에 <code>/harness:open</code> 을 입력해. 서버가 꺼져 있으면 띄우고 기본 브라우저를 열어. 결과는 한 줄로만 알려 줘. 서버를 끌 때는 <code>uv run --no-project python &lt;플러그인 폴더&gt;/console/open.py --stop</code>. <code>uv</code> 가 필요해.</li>
+      <li><b>보는 것</b> — 세션을 <code>내가 할 일</code>(승인·질문 대기, 다음 스킬 차례), <code>Claude가 하는 일</code>, <code>쉬는 중</code> 으로 나눠 보여 줘. 세션마다 지금 스킬과 행동, 결과 보고, 바뀐 파일, PR 링크, 로그가 나와. "다음 스킬 차례" 는 브랜치·변경·PR 로 판단하는데, <code>gh</code> 로 PR 을 못 보면 "확인 불가" 로 표시해.</li>
+      <li><b>답하는 것</b> — Claude 가 도구 사용 허락을 구하면 웹에서 허용·이 세션에서 다시 묻지 않기·거부를 고를 수 있고, 질문(AskUserQuestion)에도 답할 수 있어. 터미널에서 먼저 답하면 웹의 요청은 "터미널에서 처리됨" 으로 닫혀. 터미널 세션인데 브라우저가 열려 있지 않으면 평소처럼 터미널에 물어봐.</li>
+      <li><b>새 일 맡기기</b> — 작업 폴더와 요청 글을 넣으면 Claude 가 읽기만 해서 관련 파일을 추려 줘. 확인하고 시작하면 콘솔이 새 세션을 띄우고, git 저장소면 <code>/harness:start</code> 로 시작해. 콘솔이 띄운 세션은 터미널 창이 없어서, 이어서 요청·스킬 실행·중단이 웹에서 돼. 서버를 끄면 이 세션도 같이 끝나.</li>
+      <li><b>쉬는 터미널 세션은 못 움직여</b> — 이미 열려 있는 터미널 세션이 쉬는 중이면 바깥에서 새 턴을 시작할 수 없어서 입력칸이 막혀. 일하는 중이면 턴이 끝날 때 이어서 전달돼.</li>
+      <li><b>권한 확인을 건너뛰는 모드(bypassPermissions)</b> 로 도는 세션은 승인 요청이 안 와서 웹에서 답할 일이 없어. 화면에 그렇게 표시해.</li>
+    </ul>
+    <p class="small" style="margin-top:10px"><b>훅이 늘었어.</b> 이 플러그인을 켜면 도구 호출 전후·프롬프트·턴 끝·서브에이전트·세션 시작과 끝 같은 이벤트를 <code>127.0.0.1:4873</code> 으로 알려 주는 훅과, 승인(<code>PermissionRequest</code>)·질문(<code>AskUserQuestion</code>)을 웹에 물어보는 훅이 같이 걸려. 상태만 알리는 훅은 <code>async</code> 로 돌아서 세션을 기다리게 하지 않고, 승인·질문·턴 끝·세션 끝 훅만 동기야. 콘솔이 꺼져 있으면 연결 실패를 조용히 넘겨서 오류 줄 없이 세션이 막히지 않고 평소대로 터미널에서 물어봐. 콘솔이 켜진 채 브라우저를 열어 두면 그 동안 터미널 세션의 질문은 웹에서 최대 5분 기다린 뒤 터미널로 넘어가. Windows 에서는 아직 시험하지 못했어(macOS 에서만 확인).</p>
+  </section>
 
   <div class="next"><button data-go="links">← 두 저장소의 연결</button><button data-go="ouroboros">다음: 무엇을 만들지 정하기 →</button></div>
 </article>
