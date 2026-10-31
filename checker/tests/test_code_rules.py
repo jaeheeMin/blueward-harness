@@ -1191,3 +1191,37 @@ def test_cr009_privileged_allow_이유가_없으면_인정하지_않는다():
     eml = _EML_PRIV.replace("    MODIFY", '    " harness:allow CR-009\n    MODIFY', 1)
     (hit,) = _priv_hits(_pool(_ALLOW_ALL, extra="  METHOD m.\n" + eml + "  ENDMETHOD.\n"))
     assert hit["allowed"] is False
+
+
+# --- abapGit CDS 계열 확장자(#565) ----------------------------------------------
+
+CDS_ABAPGIT_SUFFIXES = [".asddls", ".asddlxs", ".srvdsrv", ".asdcls", ".astabldt"]
+
+
+@pytest.mark.parametrize("suffix", CDS_ABAPGIT_SUFFIXES)
+def test_abapgit_cds_계열_확장자는_cds_로_분류된다(suffix):
+    assert code_rules.language_for_suffix(Path(f"zi_order.x{suffix}")) == "cds"
+
+
+@pytest.mark.parametrize("suffix", CDS_ABAPGIT_SUFFIXES)
+def test_abapgit_cds_계열은_한글_이름만_위반이고_주석_문자열은_괜찮다(suffix):
+    name = f"t{suffix}"
+    hits = _rules(check_source(name, "define table 주문 {\n}\n"), "CR-001")
+    assert len(hits) == 1
+    ok = (
+        "// 한글 주석\n/* 한글 블록 */\n@EndUserText.label : '한글 라벨'\n"
+        "define table zt_order {\n}\n"
+    )
+    assert _rules(check_source(name, ok), "CR-001") == []
+
+
+def test_훅_CODE_SUFFIXES_는_code_checks_yaml_의_모든_확장자를_덮는다():
+    """훅은 엔진 설정을 못 읽어 사본을 둔다(pre_write_guard.py 주석). 어긋나면 저장 훅이 그 확장자를 건너뛴다."""
+    import importlib.util
+
+    hook = Path(__file__).resolve().parents[2] / "plugins" / "harness" / "hooks" / "pre_write_guard.py"
+    spec = importlib.util.spec_from_file_location("pre_write_guard_suffix_t", hook)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    yaml_suffixes = set(code_rules._suffix_language_map(code_rules._load_config()))
+    assert yaml_suffixes == set(mod.CODE_SUFFIXES)

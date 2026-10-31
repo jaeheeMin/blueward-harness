@@ -124,6 +124,11 @@ jobs:
             **/*.mjs
             **/*.cjs
             **/*.cds
+            **/*.asddls
+            **/*.asddlxs
+            **/*.srvdsrv
+            **/*.asdcls
+            **/*.astabldt
             **/*.asbdef
             **/*_v*.xlsx
             **/*_v*.docx
