@@ -486,7 +486,7 @@ def _matcher() -> str:
     hooks_json = json.loads((HOOKS_DIR / "hooks.json").read_text(encoding="utf-8"))
     found = [
         e["matcher"] for e in hooks_json["hooks"]["PreToolUse"]
-        for h in e["hooks"] if "mcp_source_guard.py" in h["command"]
+        for h in e["hooks"] if "mcp_source_guard.py" in h.get("command", "")
     ]
     assert len(found) == 1
     return found[0]
