@@ -81,7 +81,7 @@ def start_server(port: int) -> None:
     subprocess.Popen(args, **kwargs)
 
 
-def ensure_server(port: int, wait: float = 8.0) -> str | None:
+def ensure_server(port: int, wait: float = 20.0) -> str | None:
     """서버가 떠 있게 한다. 실패하면 이유를, 성공하면 None 을 돌려준다."""
     state = probe(port)
     if state == "ours":
@@ -131,7 +131,7 @@ def main(argv: list[str]) -> int:
     if why:
         print(why)
         return 1
-    status, data = request(port, "POST", "/api/open", {})
+    status, data = request(port, "POST", "/api/open", {}, timeout=30)  # 바쁜 PC 에서 브라우저가 뜨는 동안 끊기지 않게
     if status != 200:
         print("웹 콘솔 서버는 떠 있지만 브라우저를 열지 못했습니다. 이 명령을 다시 실행해 보십시오.")
         return 1

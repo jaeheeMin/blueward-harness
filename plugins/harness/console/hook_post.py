@@ -19,6 +19,8 @@ import sys
 import threading
 import time
 
+CONNECT_LIMIT = 0.5
+
 
 def main(argv: list[str]) -> int:
     started = time.time()  # 비동기 훅은 도착 순서가 뒤바뀔 수 있다. 서버가 순서를 가리도록 훅이 뜬 시각을 함께 보낸다.
@@ -39,8 +41,10 @@ def main(argv: list[str]) -> int:
             port = 4873
         if not body.strip():
             return 0
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=limit)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=CONNECT_LIMIT)
         try:
+            conn.connect()  # Windows 는 닫힌 포트 거부에 약 2초 걸려서 연결 단계에만 짧은 제한을 둔다
+            conn.sock.settimeout(limit)
             conn.request("POST", "/hooks/" + argv[0], body=body, headers={"Content-Type": "application/json", "X-Hook-Ts": f"{started:.6f}"})
             resp = conn.getresponse()
             data = resp.read()

@@ -10,11 +10,14 @@ import sys
 import threading
 
 LIMIT = 1.0
+CONNECT_LIMIT = 0.5
 
 
 def post(body: bytes, port: int) -> None:
-    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=0.8)
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=CONNECT_LIMIT)
     try:
+        conn.connect()  # Windows 는 닫힌 포트 거부에 약 2초 걸려서 연결 단계에만 짧은 제한을 둔다
+        conn.sock.settimeout(0.8)
         conn.request("POST", "/hooks/event", body=body, headers={"Content-Type": "application/json"})
         conn.getresponse().read()
     finally:

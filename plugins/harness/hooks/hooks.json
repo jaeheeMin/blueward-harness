@@ -230,8 +230,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project python \"${CLAUDE_PLUGIN_ROOT}/console/hook_post.py\" event 1 || true",
-            "timeout": 1
+            "command": "uv run --no-project python \"${CLAUDE_PLUGIN_ROOT}/console/hook_post.py\" event 3 || true",
+            "timeout": 5
           }
         ]
       }
