@@ -1004,6 +1004,8 @@ def _content_types_drop(parts: dict[str, bytes], gone: list[str]) -> None:
 
 def build_blank(root: Path, form: str, src: Path) -> Built:
     fmap, map_path = export.load_map(root, form)  # 지도 오류(겹침·모양)는 여기서 올라온다
+    if "쪽" in fmap and "시트" not in fmap:
+        raise export.ExportError("pptx 지도는 빈 양식 만들기 대상이 아니다(고객 양식 pptx 는 지도가 가리키는 도형만 산출이 바꾼다)", form=form)
     try:
         with zipfile.ZipFile(src) as zf:
             infos = zf.infolist()

@@ -271,6 +271,9 @@ stdout 의 JSON 한 줄이다. stdout 이 JSON 으로 읽히지 않으면(uvx �
   검사하지 못한 열이 있다(`type: dropdown-unchecked` — 통과가 아니니 그렇다고 알린다). `warnings` 의 `type: dropdown`
   항목(행·열·값·허용 값)을 그대로 보여 주고 허용 값 중에서 고치게 한다. 고친 뒤 다시 산출하려면 방금 만든 파일을
   (아직 커밋 전이면) 지우거나 `--check` 로 먼저 확인한 뒤 산출한다.
+  pptx 지도(`템플릿` 이 .pptx)의 산출은 `type: layout-unchecked` 경고만 있으면 이 항목(3)이어도 위처럼 고쳐 다시 산출하는 일이 아니다 —
+  산출은 됐고, 글 넘침·겹침·그림 위치는 화면 없이 확인하지 못했다(검사 불능, 통과 아님). 파일 경로와 함께 그렇게 알리고 PowerPoint 로 열어
+  쪽마다 사람이 확인하게 한다. `format-merged`·`animation-removed`·`pages-split`·`slide-dropped` 경고도 항목대로 그대로 보여 준다.
 - `status: rejected` (1) — 아무 파일도 만들지 않았다. `problems` 의 양식·시트·항목·
   사유를 그대로 보여 주고 작업본을 고친 뒤 다시 돌린다. 값을 추측해 채우지 않고
   모르는 값은 사용자에게 묻는다. 같은 이름 파일이 이미 있어 거부된 것이면 아래 "버전 올리기".

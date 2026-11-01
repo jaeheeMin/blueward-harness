@@ -915,11 +915,17 @@ def load_map(root: Path, form: str) -> tuple[dict, Path]:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError, UnicodeDecodeError) as e:
         raise ExportError(f"양식 지도 {path} 를 읽지 못했다: {e}", form=form) from None
-    if not isinstance(data, dict) or not data.get("템플릿") or not isinstance(data.get("시트"), list):
-        raise ExportError(f"양식 지도 {path} 에 `템플릿`·`시트` 가 없다", form=form)
+    pptx = isinstance(data, dict) and str(data.get("템플릿", "")).lower().endswith(".pptx")  # 템플릿 확장자로 분기(#561)
+    if not isinstance(data, dict) or not data.get("템플릿") or not isinstance(data.get("쪽" if pptx else "시트"), list):
+        raise ExportError(f"양식 지도 {path} 에 " + ("`템플릿`·`쪽` 이 없다" if pptx else "`템플릿`·`시트` 가 없다"), form=form)
     out = data.get("산출")
     if not isinstance(out, dict) or not out.get("폴더") or not out.get("파일명"):
         raise ExportError(f"양식 지도 {path} 에 `산출.폴더`·`산출.파일명` 이 없다", form=form)
+    if pptx:
+        from checker import export_pptx  # export_pptx 가 export 를 불러 순환하므로 호출할 때 가져온다
+
+        export_pptx.validate_map(data, str(path), form)
+        return data, path
     for s in data["시트"]:
         if not isinstance(s, dict) or "이름" not in s:
             raise ExportError(f"양식 지도 {path} 의 시트에 `이름` 이 없다", form=form)
@@ -995,14 +1001,14 @@ def is_srs_map(fmap: dict) -> bool:
     """표 하나라도 `원본: SRS` 면 SRS.md 의 요구사항 표를 원본으로 하는 지도다."""
     return any(
         isinstance(t, dict) and norm(str(t.get("원본", ""))).upper() == "SRS"
-        for s in fmap["시트"] if isinstance(s, dict)
+        for s in fmap.get("시트") or [] if isinstance(s, dict)
         for t in (s.get("표") or [])
     )
 
 
 def build_form(
     form: str, spec_sections: dict, root: Path, srs: SrsDoc | None = None, replaced: list | None = None,
-    spec_rel: str | None = None,
+    spec_rel: str | None = None, meta: dict[str, str] | None = None,
 ) -> tuple[list[tuple[Path, bytes]], list[dict], list[dict]]:
     """한 양식을 산출한다. (쓸 파일, 거부 사유들, 경고들) 을 낸다. 못 읽으면 ExportError.
 
@@ -1010,6 +1016,8 @@ def build_form(
     `spec_rel` 은 작업본의 root 기준 상대 경로다. 화면 그림이 있으면 origin/main 의 같은 경로 작업본과 비교해 바뀐 곳을 표시한다(#347).
     """
     fmap, map_path = load_map(root, form)
+    if "쪽" in fmap and "시트" not in fmap:
+        return _build_pptx(form, fmap, map_path, spec_sections, root, replaced, meta)
     if is_srs_map(fmap) != (srs is not None):
         raise ExportError(
             "이 지도는 원본이 SRS 다 — SRS.md 를 `--spec` 으로 주고 `--form` 으로 이 지도를 고른다"
@@ -1402,30 +1410,7 @@ def build_form(
                 problem(sname, p.label, f"산출 파일 이름 {out_name!r} 에서 판 번호(`_v0.1`)를 찾지 못해 캡처 {p.path} 의 판을 대조하지 못한다(검사 불능이라 넣지 않는다)")
             elif p.version != want:
                 problem(sname, p.label, f"캡처 {p.path} 는 v{p.version} 판인데 이번 산출은 v{want} 다 — 캡처가 옛 판이다. 지금 화면을 다시 캡처해 파일 이름을 `_v{want}` 로 하고 경로를 고친다")
-    out_path = None
-    if out_name:
-        bad = [c for c in FORBIDDEN_NAME_CHARS if c in out_name]
-        pattern = _filename_pattern(fmap, map_path, root, form)
-        folder = _inside(root, root / str(fmap["산출"]["폴더"]), "산출.폴더", form)
-        if bad:
-            problem("", "파일명", f"파일 이름 {out_name!r} 에 쓸 수 없는 문자 {' '.join(bad)} 가 있다")
-        elif pattern and not re.search(pattern, out_name):
-            problem("", "파일명", f"파일 이름 {out_name!r} 이 검사 규칙의 파일명 패턴 {pattern} 과 맞지 않는다")
-        else:
-            out_path = folder / out_name
-            if out_path.exists():
-                rel = out_path.relative_to(root.resolve()).as_posix()
-                in_main, why = _in_origin_main(root, rel)
-                if in_main is False:
-                    # 이 브랜치에서 만든 판(main 에 아직 없다) — 같은 버전으로 다시 산출한다.
-                    if replaced is not None:
-                        replaced.append({"file": rel, "reason": f"{rel} 는 origin/main 에 없는 판(이 브랜치에서 만든 판)이라 같은 버전으로 덮어쓴다"})
-                elif in_main:
-                    problem("", "파일명", f"{rel} 가 이미 있고 main 에 이미 있는 판이다. 이전 판은 덮어쓰지 않는다 — 버전을 올려 새 판으로 산출한다")
-                    out_path = None
-                else:
-                    problem("", "파일명", f"{rel} 가 이미 있는데 main 에 있는 판인지 판단하지 못해 덮어쓰지 않는다(검사 불능, 통과 아님): {why}")
-                    out_path = None
+    out_path = _out_path(form, fmap, map_path, root, out_name, problem, replaced) if out_name else None
 
     unique: list[dict] = []
     for p in problems:
@@ -1907,6 +1892,73 @@ def _file_name(form, fmap, map_sheets, spec_sections, md_values, problem, meta=N
     return name if ok else None
 
 
+def _out_path(form, fmap, map_path, root, out_name, problem, replaced) -> Path | None:
+    """산출 파일의 최종 경로. 금지 문자·파일명 패턴·이미 있는 판(main 에 있으면 덮지 않음)이면 problem 을 내고 None."""
+    bad = [c for c in FORBIDDEN_NAME_CHARS if c in out_name]
+    pattern = _filename_pattern(fmap, map_path, root, form)
+    folder = _inside(root, root / str(fmap["산출"]["폴더"]), "산출.폴더", form)
+    if bad:
+        problem("", "파일명", f"파일 이름 {out_name!r} 에 쓸 수 없는 문자 {' '.join(bad)} 가 있다")
+        return None
+    if pattern and not re.search(pattern, out_name):
+        problem("", "파일명", f"파일 이름 {out_name!r} 이 검사 규칙의 파일명 패턴 {pattern} 과 맞지 않는다")
+        return None
+    out_path = folder / out_name
+    if out_path.exists():
+        rel = out_path.relative_to(root.resolve()).as_posix()
+        in_main, why = _in_origin_main(root, rel)
+        if in_main is False:
+            # 이 브랜치에서 만든 판(main 에 아직 없다) — 같은 버전으로 다시 산출한다.
+            if replaced is not None:
+                replaced.append({"file": rel, "reason": f"{rel} 는 origin/main 에 없는 판(이 브랜치에서 만든 판)이라 같은 버전으로 덮어쓴다"})
+        elif in_main:
+            problem("", "파일명", f"{rel} 가 이미 있고 main 에 이미 있는 판이다. 이전 판은 덮어쓰지 않는다 — 버전을 올려 새 판으로 산출한다")
+            return None
+        else:
+            problem("", "파일명", f"{rel} 가 이미 있는데 main 에 있는 판인지 판단하지 못해 덮어쓰지 않는다(검사 불능, 통과 아님): {why}")
+            return None
+    return out_path
+
+
+def _build_pptx(form, fmap, map_path, spec_sections, root, replaced, meta):
+    """지도의 `템플릿` 이 pptx 인 양식을 산출한다(#561). 읽기·파일명·덮어쓰기 방지는 xlsx 와 같고 쓰기만 export_pptx 가 한다."""
+    from checker import export_pptx
+
+    problems: list[dict] = []
+
+    def problem(sheet: str, item: str, reason: str) -> None:
+        problems.append({"form": form, "sheet": sheet, "item": item, "reason": reason})
+
+    sections = export_pptx.normalize_sections(fmap, spec_sections, form)
+    pages = {norm(p["이름"]): p for p in fmap["쪽"]}
+    out_name = _file_name(form, fmap, pages, sections, {}, problem, meta)
+    tpl = _inside(root, map_path.parent / str(fmap["템플릿"]), "템플릿", form)
+    data, rp, warnings = export_pptx.render(form, fmap, tpl, sections, root)
+    problems += rp
+    out_path = _out_path(form, fmap, map_path, root, out_name, problem, replaced) if out_name else None
+    unique: list[dict] = []
+    for p in problems:
+        if p not in unique:
+            unique.append(p)
+    if unique or out_path is None or data is None:
+        return [], unique, warnings
+    return [(out_path, data)], [], warnings
+
+
+def _head_meta(text: str) -> dict[str, str]:
+    """문서 머리(첫 `##` 앞)의 `이름: 값` 줄. 원본이 작업본(md)인 pptx 지도의 파일명 `메타` 자리가 쓴다."""
+    meta: dict[str, str] = {}
+    for l in re.split(r"\r\n|\n|\r", text):
+        if re.match(r"^##\s", l):
+            break
+        if l.lstrip().startswith("#"):
+            continue
+        m = _META_LINE.match(l)
+        if m and m.group(2):
+            meta.setdefault(norm(m.group(1)), m.group(2).strip())
+    return meta
+
+
 def _field_value(spec_sections, sname, name) -> str:
     sec = spec_sections.get(sname, (Section(), {}))[0]
     return _clean(sec.fields.get(name))
@@ -2032,7 +2084,7 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
     warnings: list[dict] = []
     replaced: list[dict] = []
     for form, sections in jobs:
-        w, p, wa = build_form(form, sections, root, srs, replaced, spec_rel)
+        w, p, wa = build_form(form, sections, root, srs, replaced, spec_rel, _head_meta(text))
         writes += w
         problems += p
         warnings += wa
@@ -2055,8 +2107,14 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
     unchecked = any(w.get("type") == "dropdown-unchecked" for w in warnings)
     tall = any(w.get("type") == "cell-too-tall" for w in warnings)
     review = any(w.get("type") == "leftover-review" for w in warnings)
-    flagged = outside or unchecked or tall or review
-    note = _warning_note(outside, unchecked, tall, review)
+    layout = any(w.get("type") == "layout-unchecked" for w in warnings)  # pptx: 글 넘침·겹침은 화면 없이 확인 못 한다(#561)
+    flagged = outside or unchecked or tall or review or layout
+    note = _warning_note(outside, unchecked, tall, review, layout)
+    only_layout = layout and not (outside or unchecked or tall or review)  # pptx: 고칠 것이 아니라 사람이 눈으로 볼 일만 남은 경우
+    layout_next = (
+        "산출은 됐다. 글 넘침·겹침·그림 위치는 화면 없이 확인하지 못했다(`type: layout-unchecked`, 검사 불능 — 통과 아님). "
+        "PowerPoint 로 열어 쪽마다 사람이 확인한다."
+    )
     # 이 브랜치에서 만든 판을 같은 버전으로 덮어쓰는 경우의 표시(덮어쓸 파일이 없으면 빈 dict)
     rp = {"replaced": True, "replaced_files": replaced} if replaced else {}
     rp_note = " 이 브랜치에서 만든 판(origin/main 에 없음)은 같은 버전으로 덮어썼다." if replaced else ""
@@ -2071,7 +2129,8 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
             "warnings": warnings,
             "next": (
                 "다음: 확인만 했고 파일은 만들지 않았다. "
-                + (note + " 고친 뒤 다시 확인한다." if flagged else "문제가 없으면 --check 없이 다시 실행해 산출한다.")
+                + ("--check 없이 다시 실행하면 산출한다. 산출한 뒤 사람이 눈으로 확인할 일이 남는다 — " + note if only_layout else
+                   note + " 고친 뒤 다시 확인한다." if flagged else "문제가 없으면 --check 없이 다시 실행해 산출한다.")
             ),
         }
     written = _commit(writes, root, frozenset(root / r["file"] for r in replaced))
@@ -2083,6 +2142,7 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
             "problems": [],
             "warnings": warnings,
             "next": (
+                "다음: " + layout_next if only_layout else
                 f"다음: 파일은 만들었지만 {note} "
                 "고쳐 다시 산출한다(같은 이름 파일이 있으면 덮지 않으므로 방금 만든 파일을 지우거나 버전을 올린다)."
             ),
@@ -2097,8 +2157,10 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
     }
 
 
-def _warning_note(outside: bool, unchecked: bool, tall: bool = False, review: bool = False) -> str:
+def _warning_note(outside: bool, unchecked: bool, tall: bool = False, review: bool = False, layout: bool = False) -> str:
     parts = []
+    if layout:
+        parts.append("pptx 의 글 넘침·겹침·그림 위치를 화면 없이 확인하지 못했다(`type: layout-unchecked`, 검사 불능 — 통과 아님). PowerPoint 로 열어 쪽마다 눈으로 확인한다.")
     if outside:
         parts.append("`type: dropdown` 경고의 값이 템플릿 드롭다운 목록 밖이다 — 허용 값 중에서 고른다.")
     if unchecked:
@@ -2118,6 +2180,8 @@ def list_values(root: Path, form: str) -> dict:
     form = resolve_form(root, form)
     _check_form_name(form)
     fmap, map_path = load_map(root, form)
+    if "쪽" in fmap and "시트" not in fmap:
+        raise ExportError("pptx 지도에는 드롭다운 허용 값이 없다", form=form)
     infos, raw, paths, _, wb_xml = _read_template(root, map_path, fmap, form)
     reader = ListReader(raw, paths, wb_xml)
     sheets: list[dict] = []
