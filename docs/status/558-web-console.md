@@ -12,8 +12,8 @@
 | `skills/open/SKILL.md` (신규) | `/harness:open`. `open.py` 를 실행하고 결과를 한 줄로만 알린다 |
 | `hooks/hooks.json` | 콘솔 훅 추가. 전부 command(`console/hook_post.py`)이다. 상태만 모으는 `UserPromptSubmit`·`UserPromptExpansion`·`PreToolUse *`·`PostToolUse`·`SubagentStart`·`SubagentStop`·`Notification`·`PreCompact` 는 `async: true`, `PermissionRequest`·`PreToolUse AskUserQuestion`·`Stop`·`SessionEnd` 는 동기. `SessionStart` 는 `session_start_hook.py`. 기존 훅은 그대로 |
 | `docs/design/web-console.md` | 구현을 읽어 달라진 곳을 반영 |
-| `docs/guide/harness-guide.html` | "처음 준비하기" 탭에 `/harness:open` 과 추가된 훅 설명, 레일 기준 판 0.10.146 |
-| `plugins/harness/.claude-plugin/plugin.json` | version 0.10.142 → 0.10.146 |
+| `docs/guide/harness-guide.html` | "처음 준비하기" 탭에 `/harness:open` 과 추가된 훅 설명, 레일 기준 판 0.10.147 |
+| `plugins/harness/.claude-plugin/plugin.json` | version 0.10.142 → 0.10.147 |
 
 ## 결정
 
@@ -21,7 +21,7 @@
 - 포트는 기본 4873 이다. 환경변수 `HARNESS_CONSOLE_PORT` 는 시험용 임시 포트 용도이고, 훅(`hook_post.py`)도 같은 변수를 읽는다.
 - 상태 수집 훅은 `async: true`(아래 지연 수치). 비동기라 도착 순서가 뒤바뀔 수 있어 `hook_post.py` 가 뜬 시각(`X-Hook-Ts`)을 보내고 서버가 Stop·SessionEnd 이전에 뜬 늦은 이벤트로 상태를 되돌리지 않는다(설계 문서 5장).
 - 권한 우회 모드(`bypassPermissions`) 세션은 승인 요청이 없어서 화면에 그렇게 표시한다.
-- 버전은 0.10.146 으로 잡았다. origin/main 이 0.10.142 이고, 열린 PR 셋(#570·#572·#574)이 0.10.143~145 를 쓰고 있어 겹치지 않게 했다.
+- 버전은 0.10.147 로 잡았다. origin/main 이 0.10.142 이고, 열린 PR 셋(#570·#572·#574)이 0.10.143~145 를 쓰고 있어 겹치지 않게 했다. Windows 실기 수정 때 0.10.146 으로 올렸고 이번 기능 추가분으로 한 번 더 올렸다.
 
 ## 통합 시험 결과 (macOS, `claude` 2.1.309, 모델 haiku, 2026-10-31)
 
@@ -105,3 +105,37 @@
 ### 원인을 확정하지 못한 것
 
 첫 실행 때 기본 포트 서버가 몇 분 뒤 응답을 멈췄다. pid 파일이 남아 정상 종료는 아니었다. 그 실행은 PC 부하가 높아 `/api/open` 이 3초 제한에 걸린 때였고 Bash 명령도 제한 시간을 넘겨 백그라운드로 밀렸다. 같은 조건을 흉내 낸 임시 포트 3번과 기본 포트 15분 관찰에서 재현되지 않았다.
+
+## 첫 PR 에 들어간 화면·기능 추가 (2026-11-01)
+
+설계는 `docs/design/web-console.md` 의 3·4·8·9장에 반영했다.
+
+| 기능 | 내용 |
+|---|---|
+| 서버를 창 없이 띄움 (Windows) | 콘솔 창이 뜨지 않게 base 인터프리터 옆 `pythonw.exe` 로 서버를 띄운다. 없으면 `sys.executable` + `CREATE_NO_WINDOW`. `pythonw` 는 stderr 가 없어 서버가 stderr 쓰기 전에 있는지 본다. 거절 응답이 사라지던 문제(본문 비우기)와 훅 지연은 위 "Windows 에서 찾아 고친 문제" |
+| Blueward 밝은 테마와 로고 | 로고 글자색 `#004696` 기준의 밝은 테마 `blueward` 를 테마에 더했다(`static/theme.js`, 이제 11개). 로고는 `static/blueward-logo.png`, 화면 이름은 "Blueward Harness" |
+| 상단 주소 표시 제거 | 화면 위쪽의 서버 주소 표시를 없앴다 |
+| 폴더 찾아보기 | `POST /api/folders/pick`. 서버를 돌리는 컴퓨터에 OS 폴더 선택 창(Windows PowerShell, macOS `osascript`)을 띄워 고른 경로를 돌려준다. 취소는 `{cancelled:true}`, 창을 이미 열었으면 409, 못 띄우거나 10분 넘으면 503 이고 경로를 직접 적으라고 안내한다 |
+| 모델·에포트 고르기 | 새 작업 화면에서 모델과 에포트(생각의 깊이)를 고른다. 분석과 작업 세션이 같은 값을 쓰고, 이어서(`--resume`) 띄울 때도 기억한 값을 쓴다. 선택지는 `GET /api/models` |
+| 권한 모드 고르기 | 기본(플래그 없음) / `acceptEdits` / `plan` 세 가지만. `launch`·`resume` 이 `--permission-mode` 를 붙인다. 작업을 진행하는 세션에만 적용하고 분석에는 적용하지 않는다. `bypassPermissions`·`dontAsk`·`auto` 는 화면에도 서버에도 없다(400) |
+| 스킬 버튼 줄과 `/` 자동완성 | `GET /api/skills`(플러그인 이름과 스킬 이름·설명). `open`·`update`·`scaffold` 는 숨긴다. 입력칸에서 `/` 를 치면 스킬 후보가 뜬다 |
+| `@` 파일 멘션 | `GET /api/files?root=&q=`. 서버가 아는 작업 폴더(최근 폴더·세션 `cwd`)만 보고 그 밖은 403, 결과는 50개, 탐색은 2만 파일에서 멈추고 `truncated` 를 돌려준다. `.git`·`node_modules` 등 큰 폴더와 작업 폴더 밖을 가리키는 링크는 뺀다 |
+| 화면 문구 | 사용자에게 보이는 "Claude" 문구를 "Claude Code" 로 맞췄다 |
+| 세션 도중 권한 모드 바꾸기 | `PUT /api/sessions/:id/permission`. 살아 있으면 `control_request(set_permission_mode)` 로 바꾸고, 끝난 세션이면 다음 `--resume` 에 붙일 값만 갱신한다. 세션 화면에 권한 모드 고르개와 기록 "권한 모드: A → B". 실제 `claude` 2.1.316 에서 success·invalid_mode error·plan/acceptEdits 동작 확인 |
+| 서브에이전트 진행 | PreToolUse(Agent·Task)의 맡은 일을 SubagentStart 와 짝지어 붙이고, `agent_id` 가 실린 PreToolUse 로 지금 동작·도구 횟수를, SubagentStop 으로 걸린 시간을 적는다. 세션 화면에 실행 중(강조)·끝난 것(접힘) 영역, 사이드 목록에 "서브에이전트 N개 실행 중" |
+
+### 마지막 시험
+
+`uv run --with pytest python -m pytest checker/tests/test_web_console.py checker/tests/test_plugin_layout.py -q` → 483 통과, 0 실패, 2 건너뜀, 2 xfailed.
+
+### 확인하지 못한 것
+
+- 브라우저에서 `/`·`@` 자동완성의 키 조작(방향키·Enter·Esc)을 직접 확인하지 않았다.
+- 폴더 찾아보기 창이 브라우저 뒤에 깔려 안 보일 수 있다. 이때 창을 이미 연 것으로 보여 다시 누르면 409 안내가 뜬다.
+- `@` 경로에 공백이 있으면 멘션이 거기서 끊긴다(자동완성이 넣는 `@경로 ` 의 구분이 공백이라서).
+
+### 남은 일 (다음 PR)
+
+- 홈 화면(내 세션 한눈에)과 갈래별 하네스 순서 막대.
+- 다음 갈래로 넘어갈 때 자동 handoff 후 새 세션을 띄우고, 새 세션마다 sync·update·`/reload-plugins`·version 을 알린다.
+- 권한·CTS 양식은 개발이 끝난 뒤 단계다(준비 중).

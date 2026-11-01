@@ -26,7 +26,7 @@ plugins/harness/
     gitstate.py             브랜치·변경·PR 로 `이번 차례` 판단
     platform_compat.py      프로세스 분리, 종료, 경로, claude 실행 파일 찾기
     session_start_hook.py   SessionStart command 훅
-    static/                 index.html, app.css, app.js (순수 JS, 빌드 없음)
+    static/                 index.html, app.css, app.js, theme.js, blueward-logo.png (순수 JS, 빌드 없음)
   hooks/hooks.json          훅 추가
 ```
 
@@ -37,9 +37,9 @@ plugins/harness/
 - 주소는 기본 `127.0.0.1:4873` 이다. 훅이 command 라서 환경변수로 바꿀 수 있지만 사용자는 바꾸지 않는 것을 기본으로 한다. 포트를 다른 프로그램이 쓰고 있으면 `/api/health` 응답으로 구별해 원인을 보고한다.
 - `ThreadingHTTPServer` 를 쓴다. 훅 요청이 응답을 오래 붙들기 때문이다. 화면 갱신은 SSE(`/api/events`)로 보낸다.
 - 상태 폴더: `CLAUDE_PLUGIN_DATA` → 없으면 `<CLAUDE_CONFIG_DIR 또는 ~/.claude>/harness-console`. `sessions.json` 은 원자적으로 저장한다. 대기 중인 요청은 저장하지 않는다.
-- 띄운 프로세스가 끝나도 서버는 살아 있어야 한다. POSIX 는 `start_new_session=True` **[시험]**, Windows 는 `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`.
+- 띄운 프로세스가 끝나도 서버는 살아 있어야 한다. POSIX 는 `start_new_session=True` **[시험]**, Windows 는 콘솔 창이 뜨지 않게 base 인터프리터(`sys._base_executable`) 옆의 `pythonw.exe` 로 `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` 을 줘 띄운다. `pythonw.exe` 가 없으면 지금 인터프리터에 `CREATE_NO_WINDOW` 를 준다. `pythonw.exe` 는 stdout·stderr 가 없으므로 서버는 stderr 가 있을 때만 쓴다.
 - 끄기: `open.py --stop`. 상태 폴더의 `server.pid`(PID 와 포트)를 읽되, `/api/health` 가 우리 서버라고 답할 때만 종료 신호를 보낸다(옛 기록이 다른 프로세스를 가리킬 수 있어서). 서버가 SIGTERM·SIGINT 를 받으면 세션 저장을 마치고, 콘솔이 띄운 `claude` 프로세스도 stdin 을 닫아 끝낸다(5초 안에 안 끝나면 terminate, 다시 5초 뒤 kill). 서버를 끄면 콘솔이 띄운 세션도 함께 끝난다.
-- 환경변수: `HARNESS_CONSOLE_PORT`(기본 4873, 범위 밖이거나 숫자가 아니면 기본값)는 서버·`open.py`·`session_start_hook.py` 가 읽는다. 시험용 임시 포트를 위한 것이다. 훅(`hook_post.py`)도 같은 변수를 읽으므로 Claude Code 를 띄우는 환경에 같은 값이 있어야 훅이 서버에 닿는다. `HARNESS_CONSOLE_MODEL` 은 서버가 띄우는 모든 `claude`(콘솔 세션·새 작업 분석)에 `--model` 로 넘긴다. 비어 있으면 넘기지 않는다.
+- 환경변수: `HARNESS_CONSOLE_PORT`(기본 4873, 범위 밖이거나 숫자가 아니면 기본값)는 서버·`open.py`·`session_start_hook.py` 가 읽는다. 시험용 임시 포트를 위한 것이다. 훅(`hook_post.py`)도 같은 변수를 읽으므로 Claude Code 를 띄우는 환경에 같은 값이 있어야 훅이 서버에 닿는다. `HARNESS_CONSOLE_MODEL`·`HARNESS_CONSOLE_EFFORT` 는 서버가 띄우는 모든 `claude`(콘솔 세션·새 작업 분석)에 `--model`·`--effort` 의 기본값으로 넘긴다. 비어 있으면 넘기지 않는다. 새 작업 화면에서 고른 값이 있으면 그것이 우선한다(§6 새 작업).
 
 ## 4. 인증과 보안
 
@@ -49,7 +49,8 @@ plugins/harness/
 - 브라우저 인증: `POST /api/open` 을 받으면 서버가 일회용 토큰(60초 만료)을 만들어 **서버 프로세스에서 직접** 브라우저를 연다. 토큰은 응답 본문과 stdout 에 절대 넣지 않는다. `/auth?t=` 가 토큰을 소비하고 `HttpOnly; SameSite=Strict` 쿠키를 준 뒤 리다이렉트한다.
 - `/api/*` 는 쿠키를 요구한다(`/api/open`, `/api/health` 제외). 변경 요청은 `Origin` 이 있으면 자기 주소여야 하고 `Content-Type: application/json` 이어야 한다.
 - `/hooks/*`, `/api/open` 은 쿠키 없이 `POST` 로만 받고(그 밖의 메서드는 405) `Origin` 헤더가 있으면 거부하며 JSON 객체만 받는다. 본문 상한은 `/hooks/*` 32MB, 그 밖의 API 1MB(초과 413). `/auth` 의 토큰이 없거나 만료됐으면 403 이다. 이 경로로는 요청을 **만들 수만** 있고 답할 수 없다.
-- 파일 탐색 `/api/fs?root=&dir=` 는 `root` 가 최근 작업 폴더 목록이나 세션의 `cwd` 중 하나여야 하고(아니면 403), `dir` 은 그 안이어야 한다. `realpath` 로 벗어남을 검사하고 심볼릭 링크 탈출을 막는다.
+- 파일 탐색 `/api/fs?root=&dir=` 와 `@` 멘션용 `/api/files?root=&q=` 는 `root` 가 최근 작업 폴더 목록이나 세션의 `cwd` 중 하나여야 하고(아니면 403), `dir` 은 그 안이어야 한다. `realpath` 로 벗어남을 검사하고 심볼릭 링크 탈출을 막는다. `/api/files` 는 결과를 50개, 탐색을 2만 파일로 제한하고(넘으면 `truncated`), `.git`·`node_modules` 같은 큰 폴더는 건너뛰며 `q` 는 200자로 자른다.
+- `POST /api/folders/pick` 은 서버를 돌리는 컴퓨터에 OS 폴더 선택 창을 띄운다(§8). 쿠키로 인증한 사용자만 부르고, 창은 한 번에 하나만 연다(이미 열려 있으면 409).
 - 요청 본문 크기를 제한한다. 화면은 세션 내용을 `textContent` 로만 넣어 XSS 를 막고 CSP 를 건다.
 - 한계(문서에 명시): 같은 OS 사용자로 도는 프로세스를 완전히 막지는 못한다.
 - 한계(문서에 명시): 세션이 Bash 권한으로 서버를 죽이고 4873 에 가짜 서버를 띄우면 승인을 위조할 수 있다. Claude Code 가 훅이 접속하는 상대를 검증하지 않아 공유 비밀로도 막지 못한다. 다만 이미 그 Bash 권한이 있는 세션은 사용자 권한으로 다른 일도 할 수 있으므로 콘솔이 새로 여는 위험은 아니다.
@@ -62,6 +63,7 @@ plugins/harness/
 - 터미널 세션은 마지막 훅 신호 뒤 10분이 지나면 쉬는 상태로 보고 `canSend` 를 끈다(터미널에서 Esc 로 끊으면 Stop 이 오지 않는다). 승인 대기가 있으면 계속 일하는 것으로 본다. Stop 이 예약 항목을 꺼낸 뒤 응답 전송에 실패하면 항목을 되돌린다.
 - 새 작업의 `@경로`: 존재하는 작업 폴더 안의 파일만 받고, 줄바꿈·제어문자·`@`·따옴표·역슬래시가 든 경로는 후보에서 제외하며 사유를 화면에 보인다. 구분자는 `/` 로 통일한다. 공백이 든 파일은 `@"a b.txt"` 형식으로 넘긴다(claude 2.1.309 + haiku 로 1회 확인). 지원하지 않는 버전이면 `analysis.SPACE_MENTION_SUPPORTED` 를 끄면 후보에서 제외된다. git 폴더가 아니어서 `/harness:start` 를 안 붙일 때 사용자 글이 `/` 나 `@` 로 시작하면 첫 줄에 안내 문장을 앞세워 슬래시 명령으로 읽히지 않게 한다.
 - 새 작업 분석용 `claude -p` 는 `--settings '{"disableAllHooks":true}'` 로 훅을 끈다. 켜 두면 분석 세션이 콘솔에 유령 세션과 승인 요청을 만든다.
+- 권한 모드는 새 작업에서 세 가지만 고를 수 있다: 기본(`--permission-mode` 를 붙이지 않음, 그때그때 확인), `acceptEdits`(파일 고치기는 자동 허용), `plan`(계획만 세우기). 서버(`PERMISSION_OPTIONS`)가 허용 목록을 쥐고 그 밖의 값은 400 이다. `bypassPermissions`·`dontAsk`·`auto` 는 승인 요청이 웹까지 오지 않거나 사람이 아닌 쪽이 판단하게 되어, 사람이 웹에서 승인한다는 콘솔의 전제와 맞지 않아 화면에도 서버에도 두지 않는다. 고른 값은 `permissionChoice` 로 세션에 저장되어 `--resume` 때 같은 값으로 다시 띄운다. 세션 도중에도 `PUT /api/sessions/:id/permission` 으로 바꾼다. 살아 있는 세션에는 stdin 으로 `control_request{subtype:"set_permission_mode", mode}` 를 보내 `control_response` 를 기다린 뒤(8초) `permissionChoice` 를 갱신하고, 기본으로 되돌릴 때는 `mode:"default"` 를 보낸다. 끝난 세션이면 `permissionChoice` 만 바꿔 다음 `--resume` 에 새 값이 붙는다. 바꿀 때마다 세션 기록에 "권한 모드: A → B" 를 남긴다. 실제 `claude`(2.1.316) 로 확인했다 **[시험]**: 허용 값이면 `control_response{success, response:{mode}}` 와 `system/status{permissionMode}` 가 오고, 모르는 값은 `control_response{error, error_code:"invalid_mode"}` 가 오며, `plan` 으로 바꾼 뒤 파일 쓰기는 계획 파일만 쓰고 요청한 파일은 만들지 않았고 `acceptEdits` 로 바꾼 뒤에는 승인 없이 Write 가 됐다. 턴이 도는 중에 바꾸는 경우는 시험하지 않았다. 권한 모드는 작업을 진행하는 세션에만 적용하고 읽기 전용 분석에는 적용하지 않는다.
 - 권한 우회 모드는 콘솔에서 제공하지 않는다. 그 모드(`permission_mode` 가 `bypassPermissions`)의 세션에는 `PermissionRequest` 가 발화하지 않으므로 세션 모델의 `bypassPermissions` 를 참으로 내려 화면이 표시하게 한다 **[시험]**.
 
 ## 5. 훅
@@ -86,6 +88,7 @@ PreToolUse `*`(async)와 PreToolUse `AskUserQuestion`(동기)은 질문 도구�
 - 늦게 온 PostToolUse·UserPromptSubmit 은 그 시각까지 만들어진 요청만 닫는다(그 뒤에 같은 도구·입력으로 새로 생긴 승인 요청을 닫지 않게).
 - 같은 세션의 PreToolUse 가 뒤바뀌어 오면 더 늦게 뜬 것의 현재 작업을 남긴다.
 - SubagentStop 이 SubagentStart 보다 먼저 오면 끝난 것으로 남기고, 뒤늦은 시작이 다시 running 으로 만들지 않는다.
+- **서브에이전트 진행.** 메인 세션의 PreToolUse(`Agent`·`Task`, `agent_id` 없음)에서 `description`·`subagent_type`·프롬프트 첫 줄(120자)·`run_in_background` 를 대기 목록(`pendingAgents`, 50개 상한)에 둔다. SubagentStart 가 오면 `tool_use_id` 가 같은 항목, 없으면 같은 종류 중 가장 오래된 항목과 짝지어 서브에이전트 항목에 `description`·`prompt`·`background`·`startedAt` 을 붙인다. 서브에이전트 안에서 난 PreToolUse 는 훅 입력에 `agent_id`·`agent_type` 이 실려 와서 그 항목의 `currentAction`·`tools`(횟수)만 갱신하고 메인 세션의 현재 동작은 덮지 않는다. SubagentStop 은 `endedAt`·`durationSec` 을 적는다. 화면은 실행 중인 서브에이전트를 위에 강조하고(종류·맡은 일·지금 동작·경과), 끝난 것은 접힌 목록에 둔다. 사이드 목록은 "서브에이전트 N개 실행 중" 을 덧붙인다. 실제 `claude`(2.1.316) 로 `agent_id` 가 서브에이전트 안 PreToolUse 에 오고 SubagentStart 에는 `tool_use_id` 가 없음을 확인했다 **[시험]**. 이 버전에서 Agent 의 PostToolUse 는 10ms 뒤에 와서(서브에이전트는 계속 돈다) `run_in_background` 를 주지 않아도 비동기로 보인다. 그래서 `background` 는 도구 입력에 `run_in_background: true` 가 있을 때만 켠다.
 - 헤더가 없거나 숫자가 아니면(옛 호출자) 도착 순서를 그대로 믿는다.
 
 **[시험]** SessionStart 는 http 를 지원하지 않는다. 86400 은 로딩 오류가 없을 뿐 상한은 미확인이고 660초 대기까지만 확인했다. Notification 은 관측했다(관리 세션 승인 대기 때 "Claude needs your permission" 알림).
@@ -150,9 +153,9 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 ### 새 작업
 
-1. `POST /api/new {text, cwd}`: `claude -p --permission-mode plan --output-format json --json-schema <스키마> --no-session-persistence` 로 읽기 전용 분석을 돌린다. 승인 없이 끝난다 **[시험]**. 요청 글은 stdin 으로 넘긴다. 180초 안에 끝나지 않으면 실패로 처리하고, 분석 작업은 메모리에만 있어 서버를 다시 띄우면 사라진다.
+1. `POST /api/new {text, cwd, model?, effort?}`: `claude -p --permission-mode plan --output-format json --json-schema <스키마> --no-session-persistence` 로 읽기 전용 분석을 돌린다. 승인 없이 끝난다 **[시험]**. 요청 글은 stdin 으로 넘긴다. 180초 안에 끝나지 않으면 실패로 처리하고, 분석 작업은 메모리에만 있어 서버를 다시 띄우면 사라진다.
 2. 스키마: `understood`, `candidates[{path, reason}]`, `extraQuestions[{question, options[]}]`. 결과의 `path` 는 작업 폴더 안인지 서버가 다시 검사한다.
-3. `POST /api/new/:id/start {picked[], extraAnswers, note}`: 세션을 띄우고 첫 메시지로 요청 글과 `@경로`(**[시험]** 파일 내용이 주입된다), 답, 메모를 보낸다. 작업 폴더가 git 저장소면 앞에 `/harness:start` 를 붙인다. 화면 미리보기와 실제 메시지는 같은 함수로 만든다.
+3. `POST /api/new/:id/start {picked[], extraAnswers, note, model?, effort?, permission?}`: 세션을 띄우고 첫 메시지로 요청 글과 `@경로`(**[시험]** 파일 내용이 주입된다), 답, 메모를 보낸다. 작업 폴더가 git 저장소면 앞에 `/harness:start` 를 붙인다. 화면 미리보기와 실제 메시지는 같은 함수로 만든다.
 
 ## 7. `이번 차례` 규칙 (`gitstate.py`)
 
@@ -164,7 +167,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 4. 열린 PR 이 있다 → `prs`
 5. 그 밖 → `start`
 
-스킬 목록은 플러그인의 `skills/*/SKILL.md` frontmatter 에서 읽는다. `update`, `scaffold`, `open` 은 버튼으로 내지 않는다. 실행 중에는 스킬 흐름에서 현재 스킬을 `진행 중` 으로 표시한다.
+스킬 목록은 플러그인의 `skills/*/SKILL.md` frontmatter 의 `name`·`description` 에서 읽는다. `update`, `scaffold`, `open` 은 버튼과 `/` 자동완성에서 숨긴다(`HIDDEN_SKILLS`). 실행 중에는 스킬 흐름에서 현재 스킬을 `진행 중` 으로 표시한다.
 
 ## 8. API
 
@@ -179,6 +182,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 | POST | `/api/sessions/:id/skills/:skill/run` | 스킬 실행. 본문 `{args?}`, 보내는 글은 `/harness:<skill> <args>` |
 | PUT, DELETE | `/api/sessions/:id/skills/:skill/reservation` | 예약 |
 | POST | `/api/sessions/:id/interrupt` | 콘솔이 띄운 세션 중단 |
+| PUT | `/api/sessions/:id/permission` | 세션 도중 권한 모드 바꾸기. body `{mode}`, 허용 3종(`""`·`acceptEdits`·`plan`) 밖은 400, 터미널 세션은 409, claude 가 거절하거나 답이 없으면 502 |
 | GET | `/api/requests/:rid` | 승인·질문 내용. 요청 모델에 `sessionTitle`, `suggestions` 가 더해진다 |
 | POST | `/api/requests/:rid/answer` | 승인 `{decision: allow / allow_session / deny, reason?}`, 질문 `{answers:{질문:답}}` |
 | POST | `/api/new` | 분석 시작 |
@@ -187,6 +191,10 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 | GET | `/api/new/:id/preview` | 첫 메시지 미리보기. 쿼리: `picked`(반복), `extraAnswers`(JSON 문자열), `note` |
 | GET | `/api/folders/recent` | 최근 작업 폴더 |
 | POST | `/api/folders/validate` | `{path}` |
+| POST | `/api/folders/pick` | 서버 컴퓨터에 OS 폴더 선택 창(Windows PowerShell, macOS `osascript`)을 띄운다. 응답 `{path}`, 취소하면 `{cancelled:true}`. 창이 이미 열려 있으면 409, 못 띄우거나 10분을 넘기면 503(경로를 직접 적으라는 안내). 그 밖의 OS 는 503 |
+| GET | `/api/models` | 모델·에포트·권한 모드 선택지: `options`, `default`, `effortOptions`, `defaultEffort`, `customPattern`, `permissionOptions` |
+| GET | `/api/skills` | `{plugin, skills[{name, description}]}`. `update`·`scaffold`·`open` 은 빠진다. 스킬 버튼 줄과 `/` 자동완성이 쓴다 |
+| GET | `/api/files` | `@` 멘션용 파일 찾기. 쿼리 `root`(아는 작업 폴더, 아니면 403), `q`(경로에 든 글, 대소문자 무시). 응답 `{root, files[], truncated}`. 결과 50개, 탐색 2만 파일 상한, 큰 폴더와 밖을 가리키는 링크는 뺀다 |
 | GET | `/api/fs` | 쿼리 `root`, `dir`. 응답 `{root(realpath), dir, entries[{name, kind: dir/file, size}]}`. `dir` 은 요청 값의 앞뒤 슬래시만 뗀 것, 폴더가 앞이고 이름순, `.git` 과 작업 폴더 밖을 가리키는 링크는 뺀다, 최대 2000개, 폴더의 size 는 0 |
 
 세션 모델: `id, title, cwd, repo, branch, managed, status(starting/running/waiting/idle/ended), group, permissionMode, bypassPermissions, currentSkill, currentAction, startedAt, updatedAt, log[{time,text}], report, changedFiles[], prLinks[], subagents[], flow[{skill,state,reserved,disabledReason?}], turnSkill, turnUnknown, pendingRequestIds[], canSend, cannotSendReason`.
@@ -204,10 +212,13 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 디자인은 시안(`design-canvas/project/`)을 그대로 옮긴다. 경로: `/`, `/s/:id`, `/r/:rid`, `/new`, `/settings`. 한 페이지 앱이고 서버는 이 경로 모두에 `index.html` 을 준다.
 
-- 사이드바: `내가 할 일`, `Claude가 하는 일`, `쉬는 중`. `[` 키로 접는다(입력칸에 포커스가 있으면 동작하지 않는다). 접힌 상태를 기억한다.
+- 이름과 문구: 화면 이름은 "Blueward Harness" 이고 로고(`static/blueward-logo.png`)를 사이드바 위에 둔다. 화면 문구는 "Claude" 대신 "Claude Code" 로 쓴다. 상단의 서버 주소 표시는 두지 않는다.
+- 사이드바: `내가 할 일`, `Claude Code가 하는 일`, `쉬는 중`. `[` 키로 접는다(입력칸에 포커스가 있으면 동작하지 않는다). 접힌 상태를 기억한다.
 - 세션 화면: 현재 스킬과 행동, 경과 시간(실제 계산), 스킬 버튼 흐름, **결과 보고**(마크다운을 안전하게 표시), 변경 파일, PR 링크, 로그, 이어서 요청 입력칸, `기술 정보 보기`. 쉬는 터미널 세션은 막는 이유를 보여 준다.
 - 승인, 질문, 새 작업(입력 → 분석 중 → 자료 확인), 설정: 시안대로. 처리된 요청은 "터미널에서 처리됨" 처럼 결과를 보여 준다.
-- 테마 10개와 글자 크기 3단계는 `localStorage` (`bh-theme`, `bh-scale`)에 저장한다. 접근이 막혀도 기본값으로 동작한다. 테마 표는 한 곳에만 둔다.
+- 새 작업 입력: 작업 폴더는 최근 폴더에서 고르거나 경로를 적거나 `폴더 찾아보기`(`POST /api/folders/pick`)로 고른다. 모델, 에포트(생각의 깊이), 권한 모드(기본 / 파일 고치기 자동 허용 / 계획만)를 고른다. 모델·에포트는 분석과 작업 세션이 같이 쓰고 권한 모드는 작업 세션에만 쓴다.
+- 입력칸 보조: 스킬 버튼 줄(`GET /api/skills`)이 있고, 입력칸에서 `/` 를 치면 스킬, `@` 를 치면 작업 폴더의 파일(`GET /api/files`) 후보가 뜬다. `@` 경로에 공백이 있으면 후보 삽입 뒤 멘션이 공백에서 끊긴다(알려진 한계).
+- 테마 11개(Blueward 밝은 테마 포함)와 글자 크기 3단계는 `localStorage` (`bh-theme`, `bh-scale`)에 저장한다. 접근이 막혀도 기본값으로 동작한다. 테마 표는 한 곳에만 둔다.
 - 금지: 그라데이션 배경, 유리 효과, Pulse 복제, 터미널 버튼. 시안의 샘플 데이터를 코드에 남기지 않는다. 빈 상태 화면을 만든다.
 
 ## 10. 범위 밖
