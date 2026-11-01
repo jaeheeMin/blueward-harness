@@ -1017,7 +1017,7 @@ def build_form(
     """
     fmap, map_path = load_map(root, form)
     if "쪽" in fmap and "시트" not in fmap:
-        return _build_pptx(form, fmap, map_path, spec_sections, root, replaced, meta)
+        return _build_pptx(form, fmap, map_path, spec_sections, root, replaced, meta, spec_rel)
     if is_srs_map(fmap) != (srs is not None):
         raise ExportError(
             "이 지도는 원본이 SRS 다 — SRS.md 를 `--spec` 으로 주고 `--form` 으로 이 지도를 고른다"
@@ -1927,7 +1927,66 @@ def _out_path(form, fmap, map_path, root, out_name, problem, replaced) -> Path |
     return out_path
 
 
-def _build_pptx(form, fmap, map_path, spec_sections, root, replaced, meta):
+_WIN_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def _bad_folder_piece(v: str) -> str | None:
+    """폴더 조각으로 쓸 수 없는 값이면 사유, 쓸 수 있으면 None. 자리 값 하나가 아니라 자리로 채운 조각 전체를 본다."""
+    if not v or not v.strip():
+        return "비어 있다"
+    if any(ord(c) < 32 or ord(c) == 127 for c in v):
+        return "제어 문자가 있다"
+    bad = [c for c in FORBIDDEN_NAME_CHARS if c in v]
+    if bad:
+        return f"쓸 수 없는 문자 {' '.join(bad)} 가 있다"
+    if set(v) <= {"."}:
+        return "점만 있다(`.`·`..` 는 폴더 이름이 아니다)"
+    if v.endswith((".", " ")):
+        return "끝이 점이나 공백이다(Windows 가 떼어 내 다른 폴더가 된다)"
+    if v.split(".")[0].strip().upper() in _WIN_RESERVED:
+        return "Windows 예약어(CON·PRN·AUX·NUL·COM1-9·LPT1-9)다"
+    return None
+
+
+def _slot_folder(form, fmap, tpl, pages, sections, meta, spec_rel, problem) -> str | None:
+    """`산출.폴더` 의 `{자리}` 를 채운다(#564). 쓸 수 없는 값이면 `산출.폴더 {자리}` 항목으로 사유를 내고 None.
+
+    일반 규칙: 자리로 채운 폴더는 작업본이 있는 폴더와 대소문자까지 같아야 한다(산출물이 작업본 옆에 놓이고,
+    `Production` 과 `production` 처럼 다른 폴더가 생기지 않게 한다). 지도에 양식 글자를 적지 않는다.
+    """
+    if "\\" in tpl:
+        raise ExportError(f"양식 지도의 `산출.폴더` 템플릿 {tpl!r} 에 역슬래시가 있다 — 폴더 구분은 `/` 로 쓴다(값 탓이 아니라 지도 오류)", form=form, item="산출.폴더")
+
+    def folder_problem(sheet, item, reason):
+        problem(sheet, item.replace("파일명", "산출.폴더", 1), reason.replace("파일 이름", "산출 폴더", 1))
+
+    folder = _file_name(form, {**fmap, "산출": {**fmap["산출"], "파일명": tpl}}, pages, sections, {}, folder_problem, meta)
+    if folder is None:
+        return None
+    t_parts, f_parts = tpl.split("/"), folder.split("/")
+    if len(t_parts) != len(f_parts):
+        problem("", "산출.폴더", f"산출 폴더 {folder!r} 가 자리 값에 `/` 가 있어 경로 모양이 바뀌었다(값에 `/` 를 쓸 수 없다)")
+        return None
+    ok = True
+    for tp, fp in zip(t_parts, f_parts):
+        if "{" not in tp:
+            continue
+        why = _bad_folder_piece(fp)
+        if why:
+            names = " ".join(re.findall(r"\{[^{}]+\}", tp))
+            problem("", f"산출.폴더 {names}", f"산출 폴더 조각 {fp!r} 을 쓸 수 없다: {why}")
+            ok = False
+    if not ok:
+        return None
+    if spec_rel is not None:
+        here = Path(spec_rel).parent.as_posix()
+        if folder != here:
+            problem("", "산출.폴더", f"자리로 채운 산출 폴더 {folder!r} 가 작업본이 있는 폴더 {here!r} 와 대소문자까지 같지 않다 — 작업본을 그 폴더로 옮기거나 자리 값을 폴더 이름에 맞춘다")
+            return None
+    return folder
+
+
+def _build_pptx(form, fmap, map_path, spec_sections, root, replaced, meta, spec_rel=None):
     """지도의 `템플릿` 이 pptx 인 양식을 산출한다(#561). 읽기·파일명·덮어쓰기 방지는 xlsx 와 같고 쓰기만 export_pptx 가 한다."""
     from checker import export_pptx
 
@@ -1939,10 +1998,19 @@ def _build_pptx(form, fmap, map_path, spec_sections, root, replaced, meta):
     sections = export_pptx.normalize_sections(fmap, spec_sections, form)
     pages = {norm(p["이름"]): p for p in fmap["쪽"]}
     out_name = _file_name(form, fmap, pages, sections, {}, problem, meta)
+    out_map = fmap
+    folder_tpl = str(fmap["산출"]["폴더"])
+    if "{" in folder_tpl:
+        folder = _slot_folder(form, fmap, folder_tpl, pages, sections, meta, spec_rel, problem)
+        if folder is None:
+            # 폴더를 못 정하면 쪽을 채우지 않는다(제어 문자 같은 값은 채우다 죽을 수 있고, 사유는 폴더 쪽이 먼저다).
+            return [], [p for i, p in enumerate(problems) if p not in problems[:i]], []
+        else:
+            out_map = {**fmap, "산출": {**fmap["산출"], "폴더": folder}}
     tpl = _inside(root, map_path.parent / str(fmap["템플릿"]), "템플릿", form)
     data, rp, warnings = export_pptx.render(form, fmap, tpl, sections, root)
     problems += rp
-    out_path = _out_path(form, fmap, map_path, root, out_name, problem, replaced) if out_name else None
+    out_path = _out_path(form, out_map, map_path, root, out_name, problem, replaced) if out_name else None
     unique: list[dict] = []
     for p in problems:
         if p not in unique:

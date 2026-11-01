@@ -301,6 +301,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
           <button class="tab" role="tab" data-tab="spec-new">Spec 만들기<small>/harness:spec</small></button>
           <button class="tab" role="tab" data-tab="spec-edit">Spec 고치기<small>/harness:spec</small></button>
           <button class="tab" role="tab" data-tab="export">고객사 양식으로 산출하기<small>checker.export</small></button>
+          <button class="tab" role="tab" data-tab="manual">사용자 매뉴얼 만들기<small>/harness:manual</small></button>
         </div>
       </div>
       <div>
@@ -1021,7 +1022,66 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     <div class="callout ok"><span class="k">직접 고친 엑셀</span><div>엑셀을 오피스로 직접 고쳐도 돼. 다만 경비원(Hook)은 그걸 못 보니까, PR 에서 Actions 가 처음 검사해.</div></div>
   </div>
 
-  <div class="next"><button data-go="spec-edit">← Spec 고치기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
+  <div class="next"><button data-go="spec-edit">← Spec 고치기</button><button data-go="manual">다음: 사용자 매뉴얼 만들기 →</button></div>
+</article>
+
+<!-- ================= 사용자 매뉴얼 ================= -->
+<article class="panel" data-panel="manual" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">문서 작업 · /harness:manual</div>
+    <h2>사용자 매뉴얼 만들기</h2>
+    <p class="lead">화면 캡처와 설명을 담은 작업본(마크다운)을 쓰고, 고객사 매뉴얼 양식(pptx)으로 뽑는 일이야. 매뉴얼은 업무 영역(LoB(Line of Business))별 폴더에 업무 제목마다 파일 하나씩 둬.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>개발이 끝나 사용자에게 줄 매뉴얼이 필요할 때. 예전에 마크다운으로 쓴 매뉴얼을 고객사 양식으로 옮길 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>매뉴얼 만들어줘</span><span>생산계획 보드 매뉴얼 pptx 로 뽑아줘</span><span class="cmd">/harness:manual</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>가전제품 사용설명서를 만드는 일이야. 제품(개발 건)마다 설명서를 따로 쓰지 않고, <b>쓰는 사람 입장의 업무</b>(예: 생산계획 보드) 하나에 설명서 한 부를 쓰고, 그 안에 관련 개발 건 번호를 적어 둬.</p>
+    <p>화면 위의 빨간 네모와 번호는 캡처 도구가 그림에 직접 그려 줘. 이 스킬은 그림 파일의 <b>경로만</b> 받아서 양식의 그림 자리에 넣어.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>묻기</b><span>LoB · 업무 제목 · 묶을 DEV</span></div><div class="arrow"></div>
+      <div class="node"><b>Spec 읽기</b><span>상세 설계 · Launchpad 노출 · 권한</span></div><div class="arrow"></div>
+      <div class="node hl"><b>작업본 쓰기</b><span>docs/manual/&lt;LoB&gt;/1.&lt;업무 제목&gt;.md</span></div><div class="arrow"></div>
+      <div class="node hl"><b>--check</b><span>캡처 없는 화면 목록</span></div><div class="arrow"></div>
+      <div class="node ok"><b>pptx 산출</b><span>docs/manual/&lt;LoB&gt;/</span></div>
+    </div>
+    <div class="cap">지도(<code>templates/forms/*.yaml</code> 의 pptx 지도)가 없으면 만들지 않고 멈춰서, 지도 만드는 법을 안내해.</div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>내가 할 일</h3>
+      <ul class="todo">
+        <li>LoB, 업무 제목, 묶을 개발 건(DEV(Development) 번호)을 알려 줘</li>
+        <li>화면마다 캡처 파일(PNG(Portable Network Graphics))을 캡처 도구로 찍어 경로를 줘. <b>캡처가 없는 화면은 빈칸으로 통과시키지 않고</b> 어느 화면이 빠졌는지 목록으로 알려 줘</li>
+        <li>산출된 pptx 는 PowerPoint 로 열어 쪽마다 눈으로 확인해. 글이 넘치거나 겹치는지는 화면 없이 확인할 수 없어서 엔진이 "검사 불능" 으로 알려 줘</li>
+        <li>내용이 바뀌면 작업본 머리의 <code>버전:</code> 을 올리고 다시 뽑아. 이전 판 pptx 는 지우지 않고 남아</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>만들어지는 것</h3>
+      <ul class="made">
+        <li><code>docs/manual/&lt;LoB&gt;/&lt;번호&gt;.&lt;업무 제목&gt;.md</code> — 작업본</li>
+        <li><code>docs/manual/&lt;LoB&gt;/사용자매뉴얼_&lt;LoB&gt;_&lt;제목&gt;_v&lt;버전&gt;.pptx</code> — 양식 지도의 파일명 규칙대로</li>
+      </ul>
+      <p class="small" style="margin-top:12px">작업본은 머리의 <code>버전: 0.1</code>, <code>## 묶은 개발 건</code> 표(<code>| DEV | 제목 |</code>), <code>## 양식 항목</code> 순서야. <code>## 양식 항목</code> 아래 <code>### &lt;양식&gt; · 표지</code> · 목차 · 끝은 한 소절씩, 본문은 <code>### &lt;양식&gt; · 본문 · &lt;화면 이름&gt;</code> 소절을 화면마다 하나씩 써. 본문 소절에는 <code>| 항목 | 값 |</code> 표(업무명·화면 제목·기능 설명), <code>#### 그림</code>(저장소 루트 기준 PNG 경로), <code>#### 번호 설명</code>(<code>1. 글</code> 목록)이 들어가. 쪽 이름과 항목 이름은 양식 지도에서 읽으니 양식이 바뀌면 지도의 이름을 따라. 지도에 없는 쪽·항목은 저장할 때와 PR 이 "양식 밖" 으로 거절하고, 파일 이름(<code>^\d+\..+\.md$</code>)과 묶은 개발 건 표도 <code>rules/manual.yaml</code> 이 검사해. 산출 폴더와 파일 이름의 <code>{LoB}</code> 같은 자리는 작업본 값으로 채워져.</p>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">산출 ≠ 통과</span><div>pptx 가 나왔다고 문서 검사를 통과한 건 아니야. 파일 이름은 PR(Pull Request) 의 doc-guard 단계가 <code>rules/manual-output.yaml</code> 로 검사해.</div></div>
+    <div class="callout warn"><span class="k">그림 이름</span><div>그림 파일 이름 끝에 판(<code>_v0.1</code>)을 붙이길 권하지만, pptx 산출은 이 이름을 검사하지 않아. 판을 올릴 때 캡처를 다시 찍었는지는 사람이 챙겨.</div></div>
+    <div class="callout warn"><span class="k">예시 글자</span><div>양식에 예시 글(날짜, "예시:" 안내)이 있는 쪽은 지도가 가리킨 것만 바뀌어. 지도의 <code>칸</code> 이나 <code>지우기</code> 에 넣지 않은 글은 산출물에 그대로 남으니 PowerPoint 확인 때 같이 봐.</div></div>
+    <div class="callout ok"><span class="k">옛 매뉴얼</span><div>예전 <code>docs/manual/DEV-xxx-….md</code> 는 화면 단위로 잘라 새 작업본으로 옮겨 줘. 화면에 묶이지 않는 글(자주 묻는 질문 등)은 목록으로 알려 주고, 옛 파일은 네가 정할 때까지 지우지 않아.</div></div>
+  </div>
+
+  <div class="next"><button data-go="export">← 고객사 양식으로 산출하기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
 </article>
 
 <!-- ================= 작업 시작하기 ================= -->
@@ -1105,7 +1165,7 @@ fix/31-broken-link</pre>
     <div class="callout ok"><span class="k">이름 실수</span><div>브랜치 이름을 잘못 지었으면 새로 만들지 말고 <code>git branch -m</code> 으로 고쳐.</div></div>
   </div>
 
-  <div class="next"><button data-go="export">← 고객사 양식으로 산출하기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
+  <div class="next"><button data-go="manual">← 사용자 매뉴얼 만들기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
 </article>
 
 <!-- ================= sync ================= -->
