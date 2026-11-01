@@ -113,7 +113,7 @@ docs/manual/img/Production/조회조건_v0.1.png
    적는다. 시험하지 못한 동작은 Spec·`audit/changes/` 에 확인했다고 적힌 만큼만 쓴다.
 3. **양식 지도를 찾는다.** `templates/forms/*.yaml` 중 `템플릿` 이 `.pptx` 인 지도(`쪽` 목록이 있다)를 모두 읽는다.
    - 지도 폴더가 없거나 pptx 지도가 하나도 없으면 **멈추고** 지도가 없다고 알린다. 안내만 한다: 양식 pptx 를 `templates/` 에 넣고
-     `python -m checker.export_pptx --dump <양식.pptx>`(엔진 호출은 아래 "산출" 과 같은 `uvx`)로 쪽마다 도형의 글자·위치와 `찾기` 가
+     `python -P -m checker.export_pptx --dump <양식.pptx>`(엔진 호출은 아래 "산출" 과 같은 `uvx`)로 쪽마다 도형의 글자·위치와 `찾기` 가
      유일한지 본 뒤 `form-map.md` "pptx 지도" 대로 지도를 쓴다. 지도를 이 스킬이 대신 추측해 만들지 않는다.
    - 읽지 못한 지도(파싱 오류, `쪽` 없음)가 있으면 목록에서 조용히 빼지 않고 어느 파일이 왜 안 읽히는지 알리고 멈춘다.
    - pptx 지도가 여럿이면 `양식`·`설명` 을 보여 주고 고르게 한다. 하나면 그것으로 한다.
