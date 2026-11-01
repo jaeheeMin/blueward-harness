@@ -247,7 +247,7 @@ class Store:
                 self._make_room()
                 s = {
                     "id": sid, "title": "", "title_rank": 0, "cwd": cwd, "repo": "", "branch": "", "managed": False,
-                    "permissionMode": "", "currentSkill": "", "currentAction": "", "startedAt": now, "updatedAt": now,
+                    "permissionMode": "", "model": "", "currentSkill": "", "currentAction": "", "startedAt": now, "updatedAt": now,
                     "log": [], "report": "", "changedFiles": [], "prLinks": [], "subagents": [], "skillStates": {},
                     "pending_stop": [], "turn_running": False, "ended": False, "managed_alive": False,
                     "turn": {"skill": None, "unknown": False},
@@ -459,6 +459,8 @@ def public_session(store: Store, s: dict, skills: list[str]) -> dict:
         return {
             "id": s["id"], "title": s["title"], "cwd": s["cwd"], "repo": s["repo"], "branch": s["branch"],
             "managed": s["managed"], "status": status, "group": group, "permissionMode": s["permissionMode"],
+            "model": s.get("model", ""), "modelChoice": s.get("modelChoice", ""),
+            "effortChoice": s.get("effortChoice", ""), "permissionChoice": s.get("permissionChoice", ""),
             "currentSkill": s["currentSkill"], "currentAction": s["currentAction"],
             "startedAt": s["startedAt"], "updatedAt": s["updatedAt"], "log": list(s["log"]), "report": s["report"],
             "changedFiles": list(s["changedFiles"]), "prLinks": list(s["prLinks"]), "subagents": list(s["subagents"]),

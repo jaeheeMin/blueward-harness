@@ -3,6 +3,7 @@
 stdin 의 user 메시지 내용에 따라 움직인다.
   ask      /hooks/question 에 AskUserQuestion 을 보내고 답이 올 때까지 기다린다
   perm     /hooks/permission 에 Bash 승인을 보내고 답이 올 때까지 기다린다
+  control_request(set_permission_mode)  모드를 바꾸고 success 와 status 를 낸다. 모르는 값은 error
   garbage  stdout 에 깨진 줄을 섞는다
   그 밖    echo 로 답한다
 각 턴이 끝날 때 /hooks/stop 도 부른다(진짜 Stop 훅처럼).
@@ -38,10 +39,23 @@ def hook(path, body):
 
 
 out({"type": "system", "subtype": "hook_started", "session_id": sid})
-out({"type": "system", "subtype": "init", "session_id": sid, "permissionMode": "default", "args": args})
+model = args[args.index("--model") + 1] if "--model" in args else "fake-default-model"  # 진짜 init 처럼 실제 모델 이름을 싣는다
+mode = args[args.index("--permission-mode") + 1] if "--permission-mode" in args else "default"
+out({"type": "system", "subtype": "init", "session_id": sid, "model": model, "permissionMode": mode, "args": args})
 for line in sys.stdin:
     msg = json.loads(line)
     if msg.get("type") == "control_request":
+        request = msg.get("request") or {}
+        if request.get("subtype") == "set_permission_mode":  # 진짜 claude 처럼 허용 값이면 success·status, 아니면 error 로 답한다
+            wanted = request.get("mode")
+            if wanted in ("acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"):
+                mode = wanted
+                out({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"], "response": {"mode": mode}}})
+                out({"type": "system", "subtype": "status", "status": None, "permissionMode": mode, "session_id": sid})
+            else:
+                out({"type": "control_response", "response": {"subtype": "error", "request_id": msg["request_id"],
+                                                                "error": "Cannot set permission mode", "error_code": "invalid_mode"}})
+            continue
         out({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"]}})
         continue
     text = msg["message"]["content"]

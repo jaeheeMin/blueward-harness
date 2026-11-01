@@ -9,6 +9,7 @@ import http.client
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -1065,10 +1066,14 @@ def test_turn_state_is_refreshed_on_stop(tmp_path, monkeypatch):
 
 # ---- platform_compat (OS 값을 주입해 분기만 시험, Windows 실행 아님) ----
 
+DETACHED, NEW_GROUP, NO_WINDOW, BREAKAWAY = 0x00000008, 0x00000200, 0x08000000, 0x01000000
+
+
 def test_detach_kwargs_per_os():
-    assert platform_compat.detach_kwargs("posix") == {"start_new_session": True}
-    flags = platform_compat.detach_kwargs("windows")["creationflags"]
-    assert flags == 0x00000008 | 0x00000200
+    assert platform_compat.popen_detached_kwargs("posix") == {"start_new_session": True}
+    assert platform_compat.popen_detached_kwargs("posix", False, False) == {"start_new_session": True}
+    flags = platform_compat.popen_detached_kwargs("windows", True, False)["creationflags"]
+    assert flags == DETACHED | NEW_GROUP
 
 
 def test_find_claude_windows_prefers_exe_and_never_uses_cmd_c():
@@ -1099,12 +1104,16 @@ def test_claude_missing_message_reaches_analysis_job():
 
 
 def test_popen_kwargs_merge_creationflags_once_on_windows():
+    # pythonw.exe(콘솔 없음): DETACHED_PROCESS + 새 프로세스 그룹 + breakaway
     kw = platform_compat.popen_detached_kwargs("windows")
-    assert kw["creationflags"] == 0x00000008 | 0x00000200 | 0x08000000
+    assert kw["creationflags"] == DETACHED | NEW_GROUP | BREAKAWAY
+    # 콘솔용 인터프리터: DETACHED_PROCESS 와 같이 주면 CREATE_NO_WINDOW 가 무시되므로 둘을 같이 쓰지 않는다
+    flags = platform_compat.popen_detached_kwargs("windows", windowless=False)["creationflags"]
+    assert flags == NO_WINDOW | NEW_GROUP | BREAKAWAY and not flags & DETACHED
     assert platform_compat.popen_detached_kwargs("posix") == {"start_new_session": True}
     # 옛 방식(두 dict 를 풀어 넣기)은 Windows 값에서 TypeError 였다 -> 실제로 호출해 터지는지 확인
     with pytest.raises(TypeError):
-        dict(a=1, **platform_compat.detach_kwargs("windows"), **platform_compat.hidden_window_kwargs("windows"))
+        dict(a=1, **kw, **platform_compat.hidden_window_kwargs("windows"))
 
 
 def test_open_server_popen_args_with_injected_windows():
@@ -1115,6 +1124,53 @@ def test_open_server_popen_args_with_injected_windows():
         fake(args, **kwargs)
         assert captured["env"]["HARNESS_CONSOLE_PORT"] == "4999"
         assert ("creationflags" in captured) == (os_name == "windows")
+
+
+def test_windows_server_uses_pythonw_next_to_base_interpreter(monkeypatch):
+    monkeypatch.setattr(sys, "_base_executable", r"C:\Python312\python.exe", raising=False)
+    monkeypatch.setattr(sys, "executable", r"C:\proj\.venv\Scripts\python.exe")
+    args, kwargs = console_open.server_popen_args(4999, "windows", exists=lambda p: p == r"C:\Python312\pythonw.exe")
+    assert args[0] == r"C:\Python312\pythonw.exe"  # venv 런처(.venv\Scripts\python.exe)를 거치지 않는다
+    assert kwargs["creationflags"] == DETACHED | NEW_GROUP | BREAKAWAY
+
+
+def test_windows_server_falls_back_to_no_window_without_pythonw(monkeypatch):
+    monkeypatch.setattr(sys, "_base_executable", r"C:\Python312\python.exe", raising=False)
+    monkeypatch.setattr(sys, "executable", r"C:\proj\.venv\Scripts\python.exe")
+    args, kwargs = console_open.server_popen_args(4999, "windows", exists=lambda p: False)
+    assert args[0] == r"C:\proj\.venv\Scripts\python.exe"
+    assert kwargs["creationflags"] == NO_WINDOW | NEW_GROUP | BREAKAWAY
+
+
+def test_posix_server_keeps_sys_executable_and_new_session(monkeypatch):
+    monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
+    args, kwargs = console_open.server_popen_args(4999, "posix")
+    assert args[0] == "/usr/bin/python3" and kwargs["start_new_session"] is True and "creationflags" not in kwargs
+
+
+def test_launch_server_retries_without_breakaway_when_job_denies_it():
+    calls = []
+
+    def popen(args, **k):
+        calls.append(k["creationflags"])
+        if k["creationflags"] & BREAKAWAY:
+            raise PermissionError(5, "Access is denied")
+        return "proc"
+
+    assert console_open.launch_server(4999, "windows", popen, lambda p: True) == "proc"
+    assert calls == [DETACHED | NEW_GROUP | BREAKAWAY, DETACHED | NEW_GROUP]
+
+
+def test_launch_server_first_try_keeps_breakaway_and_posix_does_not_retry():
+    calls = []
+    assert console_open.launch_server(4999, "windows", lambda a, **k: calls.append(k["creationflags"]) or "p", lambda p: True) == "p"
+    assert calls == [DETACHED | NEW_GROUP | BREAKAWAY]
+
+    def boom(args, **k):
+        raise FileNotFoundError("x")
+
+    with pytest.raises(FileNotFoundError):
+        console_open.launch_server(4999, "posix", boom)
 
 
 def test_terminate_windows_uses_taskkill_tree_hidden():
@@ -1690,6 +1746,58 @@ def test_approval_screen_shows_full_input_and_rules():
     assert ".scroll" in css and "max-height" in css
 
 
+_MD_NODE = r"""
+function node(t) { return {t: t, kids: [], cls: '', style: {}, tx: null,
+  appendChild(c) { this.kids.push(c); return c; },
+  set textContent(v) { this.tx = v; }, set className(v) { this.cls = v; }, set href(v) { this.h = v; }, set target(v) {}, set rel(v) {} }; }
+global.window = {};
+global.document = { createElement: node, createTextNode: (s) => ({text: s}) };
+global.URL = URL;
+function ser(n) {
+  if (n.text !== undefined) return n.text;
+  return '<' + n.t + (n.cls ? '.' + n.cls : '') + '>' + (n.tx !== null ? n.tx : n.kids.map(ser).join('')) + '</' + n.t + '>';
+}
+require(process.argv[2]);
+process.stdout.write(ser(window.BHMarkdown.render(process.argv[3])));
+"""
+
+
+def _render_md(tmp_path, src):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node 없음")
+    js = tmp_path / "md_run.js"
+    js.write_text(_MD_NODE, encoding="utf-8")
+    out = subprocess.run([node, str(js), str(CONSOLE / "static" / "md.js"), src], capture_output=True, text=True, encoding="utf-8")
+    assert out.returncode == 0, out.stderr
+    return out.stdout
+
+
+def test_markdown_renders_gfm_table(tmp_path):
+    src = "앞 글\n\n| 파일 | 크기(바이트) | 줄 수 |\n|---|:---:|---:|\n| `a|b.py` | **12** | 3 |\n| x | y |\n\n뒤 글"
+    html = _render_md(tmp_path, src)
+    assert "<div.md-table><table>" in html
+    assert "<thead><tr><th>파일</th><th>크기(바이트)</th><th>줄 수</th></tr></thead>" in html
+    assert "<td><code>a|b.py</code></td><td><strong>12</strong></td><td>3</td>" in html
+    assert "<td>y</td><td></td></tr>" in html  # 모자란 칸은 빈 칸
+    assert "|---|" not in html and "<p>앞 글</p>" in html and "<p>뒤 글</p>" in html
+
+
+def test_markdown_table_escapes_html_and_ignores_non_table(tmp_path):
+    html = _render_md(tmp_path, "| a |\n|---|\n| <script>alert(1)</script> |")
+    assert "<td><script>alert(1)</script></td>" in html  # 직렬화 표기일 뿐 실제로는 텍스트 노드(innerHTML 안 씀)
+    assert "innerHTML" not in (CONSOLE / "static" / "md.js").read_text(encoding="utf-8").replace("모든 글자는", "")
+    plain = _render_md(tmp_path, "a | b\n그냥 글")
+    assert "<table>" not in plain
+
+
+def test_session_headline_is_short_and_full_action_has_own_line():
+    js = (CONSOLE / "static" / "app.js").read_text(encoding="utf-8")
+    assert "HEADLINE_MAX" in js and "shortAction(s.currentAction)" in js and "action-line" in js
+    css = (CONSOLE / "static" / "app.css").read_text(encoding="utf-8")
+    assert ".action-line" in css and "text-overflow: ellipsis" in css and "line-clamp: 2" in css
+
+
 def test_mention_path_rules(tmp_path):
     (tmp_path / "ok.md").write_text("x")
     (tmp_path / "a b.txt").write_text("x")
@@ -2150,3 +2258,777 @@ def test_question_and_pre_tool_use_star_overlap_does_not_break_answer(browser):
     assert st == 200
     h["t"].join(5)
     assert h["r"][1]["hookSpecificOutput"]["updatedInput"]["answers"] == {"색은?": "Red"}
+
+
+# ---- 폴더 찾아보기(#558) ----
+
+class PickDone:
+    def __init__(self, returncode=0, stdout=b""):
+        self.returncode, self.stdout = returncode, stdout
+
+
+def b64_utf8(text):
+    import base64
+    return base64.b64encode(text.encode("utf-8"))
+
+
+def test_pick_folder_windows_command_shape_and_korean_path():
+    import base64
+    seen = {}
+
+    def runner(cmd, **kw):
+        seen["cmd"], seen["kw"] = cmd, kw
+        return PickDone(0, b64_utf8("C:\\Users\\민재희\\작업 폴더"))
+
+    assert platform_compat.pick_folder("windows", runner) == "C:\\Users\\민재희\\작업 폴더"
+    cmd, kw = seen["cmd"], seen["kw"]
+    assert cmd[:4] == ["powershell", "-NoProfile", "-NonInteractive", "-STA"] and cmd[4] == "-EncodedCommand"
+    script = base64.b64decode(cmd[5]).decode("utf-16-le")
+    assert "IFileOpenDialog" in script and "0x20 | 0x40" in script and "작업 폴더 고르기" in script  # 탐색기식 창
+    assert "FolderBrowserDialog" in script and "TopMost = $true" in script and "ShowDialog($owner)" in script  # 대체 경로
+    assert "SetForegroundWindow" in script and "AllowSetForegroundWindow" in script
+    assert kw["creationflags"] == 0x08000000 and kw["timeout"] == platform_compat.PICK_TIMEOUT
+    assert "shell" not in kw
+
+
+def test_pick_folder_windows_start_folder_goes_by_env_not_script():
+    import base64
+    seen = []
+
+    def runner(cmd, **kw):
+        seen.append((cmd, kw))
+        return PickDone(0, b"")
+
+    evil = r"C:\Users\민재희\작업 폴더'; calc; '"
+    assert platform_compat.pick_folder("windows", runner, start=evil) is None
+    platform_compat.pick_folder("windows", runner)
+    (cmd, kw), (cmd2, kw2) = seen
+    script = base64.b64decode(cmd[5]).decode("utf-16-le")
+    assert script == platform_compat.WINDOWS_PICK_SCRIPT and "calc" not in script and "작업 폴더'" not in script
+    assert base64.b64decode(kw["env"]["HARNESS_PICK_START"]).decode("utf-8") == evil
+    assert kw2["env"]["HARNESS_PICK_START"] == ""  # 시작 폴더가 없으면 스크립트가 사용자 홈을 쓴다
+    assert "HARNESS_PICK_START" in script
+
+
+def test_pick_script_falls_back_to_old_dialog_when_com_fails():
+    script = platform_compat.WINDOWS_PICK_SCRIPT
+    com = script.index("[HarnessPick]::Pick(")
+    assert script.index("} catch {", com) < script.index("if (-not $done)") < script.index("New-Object System.Windows.Forms.FolderBrowserDialog")
+
+
+def test_pick_folder_windows_cancel_failure_and_garbage():
+    assert platform_compat.pick_folder("windows", lambda cmd, **k: PickDone(0, b"")) is None  # 취소는 아무것도 출력하지 않는다
+    with pytest.raises(platform_compat.PickUnavailable):
+        platform_compat.pick_folder("windows", lambda cmd, **k: PickDone(1, b""))
+    with pytest.raises(platform_compat.PickUnavailable):
+        platform_compat.pick_folder("windows", lambda cmd, **k: PickDone(0, b"not base64 !!"))
+
+    def missing(cmd, **k):
+        raise FileNotFoundError("powershell")
+
+    def slow(cmd, **k):
+        raise subprocess.TimeoutExpired(cmd, 1)
+
+    for bad in (missing, slow):
+        with pytest.raises(platform_compat.PickUnavailable) as e:
+            platform_compat.pick_folder("windows", bad)
+        assert "직접 적어" in str(e.value)
+
+
+def test_pick_folder_macos_and_other_os():
+    seen = {}
+
+    def runner(cmd, **kw):
+        seen["cmd"], seen["kw"] = cmd, kw
+        return PickDone(0, "/Users/me/프로젝트/\n".encode("utf-8"))
+
+    assert platform_compat.pick_folder("macos", runner) == "/Users/me/프로젝트"
+    assert seen["cmd"] == ["osascript", "-e", "POSIX path of (choose folder)"] and "creationflags" not in seen["kw"]
+    assert platform_compat.pick_folder("macos", lambda cmd, **k: PickDone(0, b"/\n")) == "/"
+    assert platform_compat.pick_folder("macos", lambda cmd, **k: PickDone(1, b"")) is None  # 취소는 종료코드 1
+    with pytest.raises(platform_compat.PickUnavailable):
+        platform_compat.pick_folder("macos", lambda cmd, **k: PickDone(2, b""))
+    with pytest.raises(platform_compat.PickUnavailable) as e:
+        platform_compat.pick_folder("linux", lambda cmd, **k: pytest.fail("실행하면 안 된다"))
+    assert "직접 적어" in str(e.value)
+
+
+def test_pick_route_requires_cookie_and_json(console):
+    assert console.call("POST", "/api/folders/pick", {}, cookie=False)[0] == 401
+    console.login()
+    assert console.call("POST", "/api/folders/pick", raw=b"{}", json_type=False)[0] == 415
+    assert console.call("POST", "/api/folders/pick", {}, headers={"Origin": "http://evil.example"})[0] == 403
+
+
+def test_pick_route_success_cancel_unavailable(authed):
+    answers = [str(authed.work), None, platform_compat.PickUnavailable("띄울 수 없습니다. 경로를 직접 적어 주세요.")]
+
+    def picker(start=None):
+        a = answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return a
+
+    authed.app.folder_picker = picker
+    assert authed.call("POST", "/api/folders/pick", {})[1] == {"path": str(authed.work)}
+    assert authed.call("POST", "/api/folders/pick", {})[1] == {"cancelled": True}
+    status, body, _ = authed.call("POST", "/api/folders/pick", {})
+    assert status == 503 and "직접 적어" in body["error"]
+
+
+def test_pick_route_second_call_while_open_is_409(authed):
+    opened, release = threading.Event(), threading.Event()
+
+    def picker(start=None):
+        opened.set()
+        release.wait(10)
+        return None
+
+    authed.app.folder_picker = picker
+    first = {}
+    t = threading.Thread(target=lambda: first.update(r=authed.call("POST", "/api/folders/pick", {})), daemon=True)
+    t.start()
+    assert opened.wait(10)
+    status, body, _ = authed.call("POST", "/api/folders/pick", {})
+    assert status == 409 and "이미 열려" in body["error"]
+    release.set()
+    t.join(10)
+    assert first["r"][0] == 200 and first["r"][1] == {"cancelled": True}
+    authed.app.folder_picker = lambda start=None: None  # 끝난 뒤에는 다시 열 수 있다
+    assert authed.call("POST", "/api/folders/pick", {})[0] == 200
+
+
+def test_pick_route_passes_start_only_for_real_folder(authed):
+    seen = []
+
+    def picker(start=None):
+        seen.append(start)
+        return None
+
+    authed.app.folder_picker = picker
+    for body in ({"path": str(authed.work)}, {"path": str(authed.work / "없는폴더")}, {"path": 5},
+                 {"path": "x" * 2000}, {"path": ""}, {}):
+        assert authed.call("POST", "/api/folders/pick", body)[0] == 200
+    assert seen == [str(authed.work), None, None, None, None, None]
+
+
+# ---- 모델 고르기(#558) ----
+
+def test_models_route_lists_allowed_options_and_env_default(authed):
+    status, body, _ = authed.call("GET", "/api/models")
+    assert status == 200 and body["default"] == ""
+    assert [o["value"] for o in body["options"]] == ["", "fable", "opus", "sonnet", "haiku"]
+    authed.app.default_model = "claude-opus-4-1"
+    body = authed.call("GET", "/api/models")[1]
+    assert body["default"] == "claude-opus-4-1" and body["options"][-1]["value"] == "claude-opus-4-1"
+
+
+@pytest.mark.parametrize("bad", ["gpt-4", "OPUS", "opus --dangerously-skip-permissions", 5, ["opus"], {"a": 1}])
+def test_new_and_start_reject_models_outside_the_allow_list(tmp_path, monkeypatch, bad):
+    c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
+    try:
+        c.login()
+        assert c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work), "model": bad})[0] == 400
+        jid = c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work), "model": "haiku"})[1]["id"]
+        assert c.call("POST", f"/api/new/{jid}/start", {"model": bad})[0] == 400
+    finally:
+        c.close()
+
+
+def test_analysis_command_model_argument():
+    a = analysis.Analyses(lambda: ["claude"], model="sonnet")
+    assert a.command()[a.command().index("--model") + 1] == "sonnet"  # 안 고르면 서버 기본값
+    assert a.command("haiku")[a.command("haiku").index("--model") + 1] == "haiku"
+    assert "--model" not in a.command("")  # 기본값을 고르면 --model 을 붙이지 않는다
+    assert "--model" not in analysis.Analyses(lambda: ["claude"]).command()
+
+
+def test_new_job_remembers_chosen_model(tmp_path, monkeypatch):
+    c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
+    try:
+        c.login()
+        jid = c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work), "model": "opus"})[1]["id"]
+        assert c.app.analyses.get(jid)["model"] == "opus"
+        jid = c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work)})[1]["id"]
+        assert c.app.analyses.get(jid)["model"] is None
+    finally:
+        c.close()
+
+
+def test_managed_command_model_argument_and_resume_keeps_it():
+    m = managed.Manager(Store(None), lambda: ["claude"], "/plug", model="sonnet")
+    assert m.command()[m.command().index("--model") + 1] == "sonnet"
+    assert m.command(model="haiku")[m.command(model="haiku").index("--model") + 1] == "haiku"
+    assert "--model" not in m.command(model="")
+    args = m.command("sid-1", "opus")
+    assert args[args.index("--model") + 1] == "opus" and args[args.index("--resume") + 1] == "sid-1"
+
+
+def test_managed_launch_records_choice_and_init_model_and_resume_reuses_it(mconsole):
+    c = mconsole
+    sid = c.app.manager.launch(str(c.work), "a", model="haiku")
+    real = wait_for(lambda: (c.app.store.resolve_id(sid) != sid) and c.app.store.resolve_id(sid))
+    s = c.app.store.get(real)
+    wait_for(lambda: s["model"] == "haiku")  # 가짜 claude 가 받은 --model 을 init 에 싣는다
+    assert s["modelChoice"] == "haiku"
+    pub = c.call("GET", f"/api/sessions/{real}")[1]
+    assert pub["model"] == "haiku" and pub["modelChoice"] == "haiku"
+    wait_for(lambda: s["report"] == "echo: a")
+    c.app.manager.close(c.app.manager.proc_for(real))
+    wait_for(lambda: c.call("GET", f"/api/sessions/{real}")[1]["status"] == "ended")
+    s["model"] = ""
+    assert c.call("POST", f"/api/sessions/{real}/messages", {"text": "again"})[0] == 202
+    wait_for(lambda: s["report"] == "echo: again")
+    assert s["model"] == "haiku"  # 다시 띄울 때도 같은 --model 이 붙었다
+
+
+def test_managed_launch_without_choice_has_no_model_flag_and_shows_init_model(mconsole):
+    c = mconsole
+    real = launch(c, "a")
+    s = c.app.store.get(real)
+    wait_for(lambda: s["model"] == "fake-default-model")
+    assert s["modelChoice"] == ""
+
+
+def test_start_route_uses_model_from_request_or_analysis(mconsole):
+    c = mconsole
+    jid = c.call("POST", "/api/new", {"text": "계획", "cwd": str(c.work), "model": "sonnet"})[1]["id"]
+    wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+    sid = c.call("POST", f"/api/new/{jid}/start", {})[1]["id"]
+    wait_for(lambda: c.app.store.get(sid)["model"] == "sonnet")  # 분석 때 고른 모델
+    jid = c.call("POST", "/api/new", {"text": "계획2", "cwd": str(c.work), "model": "sonnet"})[1]["id"]
+    wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+    sid = c.call("POST", f"/api/new/{jid}/start", {"model": "opus"})[1]["id"]
+    wait_for(lambda: c.app.store.get(sid)["model"] == "opus")  # 시작 때 다시 고른 모델이 우선
+
+
+def test_hook_model_is_shown_only_when_present(browser):
+    browser.event("t-1", "UserPromptSubmit", prompt="hi")
+    assert browser.call("GET", "/api/sessions/t-1")[1]["model"] == ""  # 지어내지 않는다
+    browser.event("t-1", "SessionStart", model="claude-opus-4-1")
+    assert browser.call("GET", "/api/sessions/t-1")[1]["model"] == "claude-opus-4-1"
+
+
+def test_old_sessions_json_without_model_fields_still_loads(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    old = {"id": "old-1", "title": "옛 세션", "cwd": "", "repo": "", "branch": "", "managed": True, "permissionMode": "default",
+           "currentSkill": "", "currentAction": "", "startedAt": 1, "updatedAt": 1, "log": [], "report": "", "changedFiles": [],
+           "prLinks": [], "subagents": [], "skillStates": {}, "pending_stop": [], "turn_running": False, "ended": True,
+           "title_rank": 0, "turn": {"skill": None, "unknown": False}}
+    (state / "sessions.json").write_text(json.dumps({"sessions": [old], "folders": []}, ensure_ascii=False), encoding="utf-8")
+    store = Store(state)
+    from store import public_session
+    pub = public_session(store, store.get("old-1"), [])
+    assert pub["model"] == "" and pub["modelChoice"] == "" and pub["effortChoice"] == ""
+    m = managed.Manager(store, lambda: ["claude"], "/plug", model="sonnet", effort="low")
+    assert m.remembered_model("old-1") is None  # 기억이 없으면 서버 기본값을 따른다
+    assert m.remembered_effort("old-1") is None
+    store.save(force=True)
+    assert "old-1" in (state / "sessions.json").read_text(encoding="utf-8")
+
+
+# ---- 모델 보기 넓힘과 에포트(#558) ----
+
+def test_models_route_lists_effort_options_and_default(authed):
+    body = authed.call("GET", "/api/models")[1]
+    assert [o["value"] for o in body["effortOptions"]] == ["", "low", "medium", "high", "xhigh", "max"]
+    assert [o["label"] for o in body["effortOptions"]] == ["기본값", "낮음", "보통", "높음", "아주 높음", "최대"]
+    assert body["defaultEffort"] == ""
+    authed.app.default_effort = "high"
+    assert authed.call("GET", "/api/models")[1]["defaultEffort"] == "high"
+
+
+def test_env_effort_default_accepts_only_allowed_values(tmp_path):
+    ok = console_server.App(0, None, Path(console_server.__file__).resolve().parent.parent, effort="xhigh")
+    assert ok.default_effort == "xhigh" and ok.manager.effort == "xhigh" and ok.analyses.effort == "xhigh"
+    bad = console_server.App(0, None, Path(console_server.__file__).resolve().parent.parent, effort="extreme")
+    assert bad.default_effort == "" and bad.manager.effort == "" and bad.analyses.effort == ""
+
+
+@pytest.mark.parametrize("good", ["", "fable", "opus", "sonnet", "haiku", "claude-opus-4-1", "claude-sonnet-4-5-20250929",
+                                  "claude-opus-4-1[1m]", "claude-x.y-z"])
+def test_new_accepts_alias_and_full_model_names(tmp_path, monkeypatch, good):
+    c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
+    try:
+        c.login()
+        status, body, _ = c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work), "model": good})
+        assert status == 202 and c.app.analyses.get(body["id"])["model"] == good
+    finally:
+        c.close()
+
+
+@pytest.mark.parametrize("bad", ["-x", "--model", "claude-opus 4", "claude-opus;rm", "claude-", "claude-" + "a" * 70, "Claude-opus",
+                                 " claude-opus-4-1", "claude-opus-4-1\n", "x" * 200, "claude-opus-4-1[1m]x"])
+def test_new_rejects_unsafe_model_names(tmp_path, monkeypatch, bad):
+    c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
+    try:
+        c.login()
+        assert c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work), "model": bad})[0] == 400
+        jid = c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work)})[1]["id"]
+        assert c.call("POST", f"/api/new/{jid}/start", {"model": bad})[0] == 400
+    finally:
+        c.close()
+
+
+@pytest.mark.parametrize("good", ["", "low", "medium", "high", "xhigh", "max"])
+def test_new_accepts_every_effort_level(tmp_path, monkeypatch, good):
+    c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
+    try:
+        c.login()
+        status, body, _ = c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work), "effort": good})
+        assert status == 202 and c.app.analyses.get(body["id"])["effort"] == good
+    finally:
+        c.close()
+
+
+@pytest.mark.parametrize("bad", ["ultra", "HIGH", "high --x", "-high", 3, ["low"], {"a": 1}])
+def test_new_and_start_reject_efforts_outside_the_allow_list(tmp_path, monkeypatch, bad):
+    c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
+    try:
+        c.login()
+        assert c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work), "effort": bad})[0] == 400
+        jid = c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work), "effort": "low"})[1]["id"]
+        assert c.call("POST", f"/api/new/{jid}/start", {"effort": bad})[0] == 400
+    finally:
+        c.close()
+
+
+def test_new_without_effort_leaves_job_effort_unset(tmp_path, monkeypatch):
+    c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
+    try:
+        c.login()
+        jid = c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work)})[1]["id"]
+        assert c.app.analyses.get(jid)["effort"] is None
+    finally:
+        c.close()
+
+
+def test_analysis_command_effort_argument():
+    a = analysis.Analyses(lambda: ["claude"], effort="medium")
+    cmd = a.command()
+    assert cmd[cmd.index("--effort") + 1] == "medium"  # 안 고르면 서버 기본값
+    cmd = a.command(effort="max")
+    assert cmd[cmd.index("--effort") + 1] == "max"
+    assert "--effort" not in a.command(effort="")  # 기본값을 고르면 붙이지 않는다
+    assert "--effort" not in analysis.Analyses(lambda: ["claude"]).command()
+
+
+def test_managed_command_effort_argument():
+    m = managed.Manager(Store(None), lambda: ["claude"], "/plug", effort="low")
+    cmd = m.command()
+    assert cmd[cmd.index("--effort") + 1] == "low"
+    cmd = m.command("sid-1", "opus", "xhigh")
+    assert cmd[cmd.index("--effort") + 1] == "xhigh" and cmd[cmd.index("--resume") + 1] == "sid-1"
+    assert "--effort" not in m.command(effort="")
+    assert "--effort" not in managed.Manager(Store(None), lambda: ["claude"], "/plug").command()
+
+
+def test_resume_reuses_remembered_effort_and_explicit_value_wins(tmp_path):
+    seen = []
+
+    def popen(args, **kw):
+        seen.append(args)
+        raise OSError("stop")
+
+    store = Store(None)
+    with store.lock:
+        s = store.ensure("sid-1", str(tmp_path))
+        s["effortChoice"] = "max"
+        s["modelChoice"] = "haiku"
+    m = managed.Manager(store, lambda: ["claude"], "/plug", effort="low", popen=popen)
+    assert m.launch(str(tmp_path), "hi", resume="sid-1") is None
+    args = seen[-1]
+    assert args[args.index("--effort") + 1] == "max" and args[args.index("--resume") + 1] == "sid-1"
+    assert m.launch(str(tmp_path), "hi", resume="sid-1", effort="high") is None
+    assert seen[-1][seen[-1].index("--effort") + 1] == "high"
+    with store.lock:
+        store.ensure("sid-2", str(tmp_path))["effortChoice"] = ""
+    assert m.launch(str(tmp_path), "hi", resume="sid-2") is None
+    assert "--effort" not in seen[-1]  # 기본값을 골랐던 세션은 서버 기본값(low)도 아니라 아무것도 안 붙인다
+
+
+def test_managed_launch_records_effort_choice_in_public_session(mconsole):
+    c = mconsole
+    sid = c.app.manager.launch(str(c.work), "a", effort="high")
+    real = wait_for(lambda: (c.app.store.resolve_id(sid) != sid) and c.app.store.resolve_id(sid))
+    assert c.call("GET", f"/api/sessions/{real}")[1]["effortChoice"] == "high"
+    real2 = launch(c, "b")
+    assert c.call("GET", f"/api/sessions/{real2}")[1]["effortChoice"] == ""
+
+
+def test_start_route_passes_effort_from_request_or_analysis(tmp_path, monkeypatch):
+    seen = []
+    c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
+    try:
+        c.login()
+        orig = c.app.manager.launch
+        c.app.manager.launch = lambda *a, **kw: (seen.append(kw.get("effort")), None)[1]
+        jid = c.call("POST", "/api/new", {"text": "계획", "cwd": str(c.work), "effort": "low"})[1]["id"]
+        wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+        c.call("POST", f"/api/new/{jid}/start", {})
+        c.call("POST", f"/api/new/{jid}/start", {"effort": "max"})
+        assert seen == ["low", "max"]  # 분석 때 고른 값, 시작 때 다시 고른 값이 우선
+        c.app.manager.launch = orig
+    finally:
+        c.close()
+
+
+# ---- 스킬 버튼, @ 파일 멘션, 권한 모드(#558) ----
+
+def test_skills_route_lists_names_with_descriptions_and_hides_open(authed):
+    status, body, _ = authed.call("GET", "/api/skills")
+    assert status == 200 and body["plugin"] == "harness"
+    names = [s["name"] for s in body["skills"]]
+    assert names == ["deliver", "prs", "start"]  # update, scaffold, open 은 숨긴다
+    assert all(set(s) == {"name", "description"} for s in body["skills"])
+
+
+def test_skill_info_reads_description_from_real_plugin():
+    items = {i["name"]: i["description"] for i in console_server.load_skill_info(PLUGIN)}
+    assert "open" not in items and items["start"].startswith("작업을 시작한다")
+    assert all(items.values())
+
+
+def test_skills_route_needs_login(console):
+    assert console.call("GET", "/api/skills")[0] == 401
+
+
+def make_tree(base: Path) -> Path:
+    for rel in ("a.txt", "docs/guide.md", "docs/deep/한글 파일.md", ".git/config", "node_modules/pkg/index.js", ".venv/lib/x.py"):
+        f = base / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("x", encoding="utf-8")
+    return base
+
+
+def files_for(c, root, q=""):
+    return c.call("GET", f"/api/files?root={urllib.parse.quote(str(root))}&q={urllib.parse.quote(q)}")
+
+
+def test_files_route_searches_known_root_and_skips_big_dirs(authed):
+    make_tree(authed.work)
+    assert authed.call("POST", "/api/folders/validate", {"path": str(authed.work)})[1]["ok"]
+    status, body, _ = files_for(authed, authed.work)
+    assert status == 200 and not body["truncated"]
+    assert sorted(body["files"]) == ["a.txt", "docs/deep/한글 파일.md", "docs/guide.md"]
+    assert files_for(authed, authed.work, "GUIDE")[1]["files"] == ["docs/guide.md"]
+    assert files_for(authed, authed.work, "한글")[1]["files"] == ["docs/deep/한글 파일.md"]
+    assert sorted(files_for(authed, authed.work, "docs/")[1]["files"]) == ["docs/deep/한글 파일.md", "docs/guide.md"]
+
+
+def test_files_route_rejects_unknown_roots(authed, tmp_path):
+    make_tree(authed.work)
+    other = make_tree(tmp_path / "other")
+    assert files_for(authed, other)[0] == 403  # 서버가 모르는 폴더
+    assert files_for(authed, "")[0] == 403
+    authed.call("POST", "/api/folders/validate", {"path": str(authed.work)})
+    assert files_for(authed, authed.work / "docs")[0] == 403  # 아는 폴더의 하위 폴더는 root 로 받지 않는다
+    assert files_for(authed, str(authed.work) + os.sep + ".." + os.sep + "other")[0] == 403
+
+
+def test_files_route_accepts_session_cwd_as_root(authed):
+    make_tree(authed.work)
+    authed.event("s-files", "SessionStart")
+    status, body, _ = files_for(authed, authed.work, "a.t")
+    assert status == 200 and body["files"] == ["a.txt"]
+
+
+def test_files_route_excludes_links_that_escape_the_root(authed, tmp_path):
+    make_tree(authed.work)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("s", encoding="utf-8")
+    try:
+        os.symlink(outside / "secret.txt", authed.work / "link.txt")
+        os.symlink(outside, authed.work / "linkdir", target_is_directory=True)
+    except (OSError, NotImplementedError) as e:
+        pytest.skip(f"심볼릭 링크를 만들 수 없는 환경: {e}")
+    authed.call("POST", "/api/folders/validate", {"path": str(authed.work)})
+    names = files_for(authed, authed.work)[1]["files"]
+    assert "link.txt" not in names and not any(n.startswith("linkdir") or "secret" in n for n in names)
+    assert "a.txt" in names
+
+
+def test_files_route_limits_results_and_scan(authed, monkeypatch):
+    for i in range(7):
+        (authed.work / f"f{i}.txt").write_text("x", encoding="utf-8")
+    authed.call("POST", "/api/folders/validate", {"path": str(authed.work)})
+    monkeypatch.setattr(console_server, "FILE_RESULT_LIMIT", 3)
+    body = files_for(authed, authed.work)[1]
+    assert len(body["files"]) == 3 and body["truncated"]
+    monkeypatch.setattr(console_server, "FILE_RESULT_LIMIT", 50)
+    monkeypatch.setattr(console_server, "FILE_SCAN_LIMIT", 4)
+    body = files_for(authed, authed.work, "f6")[1]  # 4개까지만 훑으므로 7번째 파일은 못 찾는다
+    assert body["files"] == [] and body["truncated"]
+
+
+def test_models_route_lists_only_three_permission_modes(authed):
+    options = authed.call("GET", "/api/models")[1]["permissionOptions"]
+    assert [o["value"] for o in options] == ["", "acceptEdits", "plan"]
+    assert not {"bypassPermissions", "dontAsk", "auto"} & {o["value"] for o in options}
+
+
+@pytest.mark.parametrize("bad", ["bypassPermissions", "dontAsk", "auto", "default", "ACCEPTEDITS", "plan --x", 3, ["plan"]])
+def test_start_rejects_permission_modes_outside_the_three(tmp_path, monkeypatch, bad):
+    c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
+    try:
+        c.login()
+        jid = c.call("POST", "/api/new", {"text": "요청", "cwd": str(c.work)})[1]["id"]
+        assert c.call("POST", f"/api/new/{jid}/start", {"permission": bad})[0] == 400
+    finally:
+        c.close()
+
+
+def test_managed_command_permission_argument():
+    m = managed.Manager(Store(None), lambda: ["claude"], "/plug")
+    for mode in ("acceptEdits", "plan"):
+        cmd = m.command(permission=mode)
+        assert cmd[cmd.index("--permission-mode") + 1] == mode
+    cmd = m.command("sid-1", permission="plan")
+    assert cmd[cmd.index("--permission-mode") + 1] == "plan" and cmd[cmd.index("--resume") + 1] == "sid-1"
+    assert "--permission-mode" not in m.command()
+    assert "--permission-mode" not in m.command(permission="")
+
+
+def test_resume_reuses_remembered_permission_and_explicit_value_wins(tmp_path):
+    seen = []
+
+    def popen(args, **kw):
+        seen.append(args)
+        raise OSError("stop")
+
+    store = Store(None)
+    with store.lock:
+        store.ensure("sid-1", str(tmp_path))["permissionChoice"] = "acceptEdits"
+        store.ensure("sid-2", str(tmp_path))["permissionChoice"] = ""
+        store.ensure("sid-old", str(tmp_path))
+    m = managed.Manager(store, lambda: ["claude"], "/plug", popen=popen)
+    assert m.launch(str(tmp_path), "hi", resume="sid-1") is None
+    assert seen[-1][seen[-1].index("--permission-mode") + 1] == "acceptEdits"
+    assert m.launch(str(tmp_path), "hi", resume="sid-1", permission="plan") is None
+    assert seen[-1][seen[-1].index("--permission-mode") + 1] == "plan"
+    assert m.launch(str(tmp_path), "hi", resume="sid-2") is None
+    assert "--permission-mode" not in seen[-1]
+    assert m.launch(str(tmp_path), "hi", resume="sid-old") is None
+    assert "--permission-mode" not in seen[-1]
+
+
+def test_resume_of_hook_only_session_uses_server_defaults(tmp_path):
+    seen = []
+
+    def popen(args, **kw):
+        seen.append(args)
+        raise OSError("stop")
+
+    store = Store(None)
+    with store.lock:
+        s = store.ensure("sid-hook", str(tmp_path))  # 훅으로만 생긴 세션: 기억 키가 없다
+        assert "modelChoice" not in s and "effortChoice" not in s and "permissionChoice" not in s
+        store.ensure("sid-blank", str(tmp_path)).update(modelChoice="", effortChoice="", permissionChoice="")
+    m = managed.Manager(store, lambda: ["claude"], "/plug", model="sonnet", effort="low", popen=popen)
+    assert m.remembered_model("sid-hook") is None and m.remembered_effort("sid-hook") is None
+    assert m.launch(str(tmp_path), "hi", resume="sid-hook") is None
+    assert seen[-1][seen[-1].index("--model") + 1] == "sonnet"  # 기억이 없으면 서버 기본값
+    assert seen[-1][seen[-1].index("--effort") + 1] == "low"
+    assert m.launch(str(tmp_path), "hi", resume="sid-blank") is None
+    assert "--model" not in seen[-1] and "--effort" not in seen[-1]  # 사용자가 기본을 골랐으면 붙이지 않는다
+
+
+def test_command_drops_remembered_values_outside_allowed_sets(tmp_path):
+    store = Store(None)
+    with store.lock:
+        store.ensure("sid-bad", str(tmp_path)).update(modelChoice="--evil", effortChoice="turbo", permissionChoice="bypassPermissions")
+    m = managed.Manager(store, lambda: ["claude"], "/plug")
+    seen = []
+    m.popen = lambda args, **kw: (seen.append(args), (_ for _ in ()).throw(OSError("stop")))[1]
+    assert m.launch(str(tmp_path), "hi", resume="sid-bad") is None
+    cmd = seen[-1]
+    assert "--model" not in cmd and "--effort" not in cmd and "--permission-mode" not in cmd
+    assert "bypassPermissions" not in cmd and "--evil" not in cmd
+    assert any("bypassPermissions" in e["text"] for e in store.get("sid-bad")["log"])  # 뺀 사실을 기록에 남긴다
+    ok = m.command(model="claude-opus-4-1", effort="max", permission="acceptEdits")
+    assert ok[ok.index("--model") + 1] == "claude-opus-4-1" and ok[ok.index("--effort") + 1] == "max"
+    assert ok[ok.index("--permission-mode") + 1] == "acceptEdits"
+    assert "--permission-mode" not in m.command(permission="dontAsk")
+
+
+def test_managed_launch_records_permission_choice_and_passes_it_to_claude(mconsole):
+    c = mconsole
+    sid = c.app.manager.launch(str(c.work), "a", permission="plan")
+    real = wait_for(lambda: (c.app.store.resolve_id(sid) != sid) and c.app.store.resolve_id(sid))
+    assert c.call("GET", f"/api/sessions/{real}")[1]["permissionChoice"] == "plan"
+    assert wait_for(lambda: c.call("GET", f"/api/sessions/{real}")[1]["permissionMode"] == "plan")  # 가짜 claude 가 받은 인자를 init 에 싣는다
+    assert c.call("GET", f"/api/sessions/{launch(c, 'b')}")[1]["permissionChoice"] == ""
+
+
+def test_start_route_passes_permission_to_launch(tmp_path, monkeypatch):
+    seen = []
+    c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
+    try:
+        c.login()
+        c.app.manager.launch = lambda *a, **kw: (seen.append(kw.get("permission")), None)[1]
+        jid = c.call("POST", "/api/new", {"text": "계획", "cwd": str(c.work)})[1]["id"]
+        wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+        c.call("POST", f"/api/new/{jid}/start", {})
+        c.call("POST", f"/api/new/{jid}/start", {"permission": "acceptEdits"})
+        c.call("POST", f"/api/new/{jid}/start", {"permission": ""})
+        assert seen == [None, "acceptEdits", ""]
+    finally:
+        c.close()
+
+
+# ---- 세션 도중 권한 모드 바꾸기 ----
+
+def logs(c, sid):
+    return [entry["text"] for entry in c.app.store.get(sid)["log"]]
+
+
+def test_permission_change_on_live_session_sends_control_request(mconsole):
+    c = mconsole
+    sid = launch(c, "a")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: a")
+    status, body, _ = c.call("PUT", f"/api/sessions/{sid}/permission", {"mode": "plan"})
+    assert status == 200 and body["live"] is True and body["mode"] == "plan"
+    assert c.app.store.get(sid)["permissionChoice"] == "plan"
+    assert "권한 모드: 기본(그때그때 확인) → 계획만 세우기" in logs(c, sid)
+    wait_for(lambda: c.app.store.get(sid)["permissionMode"] == "plan")  # 가짜 claude 가 status 로 알린 실제 반영
+    assert body["session"]["permissionChoice"] == "plan"
+    assert c.call("PUT", f"/api/sessions/{sid}/permission", {"mode": ""})[1]["mode"] == ""  # 기본으로 되돌리기도 control_request(default)
+    wait_for(lambda: c.app.store.get(sid)["permissionMode"] == "default")
+    assert c.app.store.get(sid)["permissionChoice"] == ""
+
+
+def test_permission_change_ended_session_applies_on_resume(mconsole):
+    c = mconsole
+    sid = launch(c, "a")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: a")
+    c.app.manager.close(c.app.manager.proc_for(sid))
+    wait_for(lambda: c.call("GET", f"/api/sessions/{sid}")[1]["status"] == "ended")
+    status, body, _ = c.call("PUT", f"/api/sessions/{sid}/permission", {"mode": "acceptEdits"})
+    assert status == 200 and body["live"] is False
+    assert any(t.startswith("권한 모드: 기본(그때그때 확인) → 파일 고치기는 자동 허용") for t in logs(c, sid))
+    assert c.call("POST", f"/api/sessions/{sid}/messages", {"text": "again"})[0] == 202
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: again")
+    assert c.app.store.get(sid)["permissionMode"] == "acceptEdits"  # 새 프로세스가 --permission-mode acceptEdits 로 떴다
+
+
+@pytest.mark.parametrize("mode", ["bypassPermissions", "dontAsk", "auto", "bogus", 3, None, ["plan"]])
+def test_permission_change_rejects_values_outside_allowed_set(mconsole, mode):
+    c = mconsole
+    sid = launch(c, "a")
+    assert c.call("PUT", f"/api/sessions/{sid}/permission", {"mode": mode})[0] == 400
+    assert c.call("PUT", f"/api/sessions/{sid}/permission", {})[0] == 400
+    assert c.app.store.get(sid)["permissionChoice"] == ""
+
+
+def test_permission_change_guards(mconsole):
+    c = mconsole
+    c.event("term", "SessionStart")
+    assert c.call("PUT", "/api/sessions/term/permission", {"mode": "plan"})[0] == 409  # 터미널 세션
+    assert c.call("PUT", "/api/sessions/none/permission", {"mode": "plan"})[0] == 404
+    sid = launch(c, "a")
+    assert c.call("PUT", f"/api/sessions/{sid}/permission", {"mode": "plan"}, cookie=False)[0] == 401
+    assert c.call("PUT", f"/api/sessions/{sid}/permission", {"mode": "plan"}, headers={"Origin": "http://evil.example"})[0] == 403
+
+
+def test_permission_change_reports_error_from_claude(tmp_path):
+    store = Store(None)
+    m = managed.Manager(store, lambda: None, "/p")
+    store.ensure("s1", str(tmp_path))["managed"] = True
+    written = []
+
+    class ErrorProc(FakeProc):
+        def write(self, text):
+            written.append(json.loads(text))
+            threading.Timer(0.05, lambda: m.on_event(self, {"type": "control_response", "response": {
+                "subtype": "error", "request_id": written[-1]["request_id"], "error": "invalid_mode"}})).start()
+            return True
+
+    m.procs["s1"] = ErrorProc()
+    result = m.set_permission("s1", "plan")
+    assert written[0]["request"] == {"subtype": "set_permission_mode", "mode": "plan"}
+    assert result["ok"] is False and "invalid_mode" in result["error"]
+    assert store.get("s1").get("permissionChoice", "") == ""  # 실패하면 기억한 값을 바꾸지 않는다
+
+
+# ---- 서브에이전트 진행 ----
+
+def agent_call(c, sid, tool_use_id=None, **tool_input):
+    extra = {"tool_use_id": tool_use_id} if tool_use_id else {}
+    return c.event(sid, "PreToolUse", tool_name="Agent", tool_input=dict(
+        {"description": "목록 보기", "subagent_type": "general-purpose", "prompt": "첫 줄 지시\n둘째 줄"}, **tool_input), **extra)
+
+
+def subs_of(c, sid):
+    return c.call("GET", f"/api/sessions/{sid}")[1]["subagents"]
+
+
+def test_subagent_start_is_paired_with_agent_call_description(browser):
+    agent_call(browser, "g1")
+    browser.event("g1", "SubagentStart", agent_id="a1", agent_type="general-purpose")
+    (a,) = subs_of(browser, "g1")
+    assert a["description"] == "목록 보기" and a["prompt"] == "첫 줄 지시" and a["type"] == "general-purpose"
+    assert a["state"] == "running" and a["startedAt"] == browser.clock.t and a["background"] is False
+    assert browser.app.store.get("g1")["pendingAgents"] == []
+
+
+def test_pairing_uses_oldest_same_type_or_tool_use_id(browser):
+    agent_call(browser, "g2", "u1", description="첫째")
+    agent_call(browser, "g2", "u2", description="둘째", subagent_type="Explore", run_in_background=True)
+    agent_call(browser, "g2", "u3", description="셋째")
+    browser.event("g2", "SubagentStart", agent_id="a1", agent_type="general-purpose")
+    browser.event("g2", "SubagentStart", agent_id="a2", agent_type="Explore")
+    browser.event("g2", "SubagentStart", agent_id="a3", agent_type="general-purpose", tool_use_id="u3")
+    got = {a["id"]: (a["description"], a["background"]) for a in subs_of(browser, "g2")}
+    assert got == {"a1": ("첫째", False), "a2": ("둘째", True), "a3": ("셋째", False)}
+
+
+def test_subagent_start_without_agent_call_has_no_description(browser):
+    browser.event("g3", "SubagentStart", agent_id="a1", agent_type="Explore")
+    assert "description" not in subs_of(browser, "g3")[0]
+
+
+def test_task_tool_name_also_counts_and_text_is_clipped(browser):
+    browser.event("g4", "PreToolUse", tool_name="Task", tool_input={"description": "d" * 500, "subagent_type": "x" * 500, "prompt": "p" * 500})
+    browser.event("g4", "SubagentStart", agent_id="a1", agent_type="x" * 500)
+    (a,) = subs_of(browser, "g4")
+    assert len(a["description"]) == 200 and len(a["prompt"]) == 120 and len(a["type"]) == 200
+
+
+def test_pending_agent_calls_are_capped(browser):
+    for i in range(60):
+        agent_call(browser, "g5", f"u{i}")
+    assert len(browser.app.store.get("g5")["pendingAgents"]) == 50
+
+
+def test_tool_calls_with_agent_id_update_that_subagent_only(browser):
+    browser.event("g6", "PreToolUse", tool_name="Bash", tool_input={"command": "main work"})
+    agent_call(browser, "g6")
+    browser.event("g6", "SubagentStart", agent_id="a1", agent_type="general-purpose")
+    browser.event("g6", "PreToolUse", tool_name="Bash", tool_input={"command": "ls"}, agent_id="a1", agent_type="general-purpose")
+    browser.event("g6", "PreToolUse", tool_name="Read", tool_input={"file_path": "x.md"}, agent_id="a1")
+    s = browser.call("GET", "/api/sessions/g6")[1]
+    assert s["subagents"][0]["currentAction"] == "Read: x.md" and s["subagents"][0]["tools"] == 2
+    assert s["currentAction"].startswith("Agent")  # 서브에이전트 안의 호출이 메인 세션 동작을 덮지 않는다
+    browser.event("g6", "PreToolUse", tool_name="Bash", tool_input={"command": "ls"}, agent_id="unknown")  # 모르는 id 는 무시
+    assert subs_of(browser, "g6")[0]["tools"] == 2
+
+
+def test_subagent_stop_records_end_time_and_duration(browser):
+    agent_call(browser, "g7", run_in_background=True)
+    browser.event("g7", "SubagentStart", agent_id="a1", agent_type="general-purpose")
+    browser.event("g7", "PreToolUse", tool_name="Bash", tool_input={"command": "ls"}, agent_id="a1")
+    browser.clock.t += 42
+    browser.event("g7", "SubagentStop", agent_id="a1", agent_type="general-purpose")
+    (a,) = subs_of(browser, "g7")
+    assert a["state"] == "done" and a["durationSec"] == 42 and a["endedAt"] == browser.clock.t
+    assert a["currentAction"] == "" and a["background"] is True
+    browser.event("g7", "PreToolUse", tool_name="Bash", tool_input={"command": "late"}, agent_id="a1")  # 끝난 뒤 늦은 호출은 되살리지 않는다
+    assert subs_of(browser, "g7")[0]["currentAction"] == ""
+
+
+def test_subagent_cap_still_holds_with_new_fields(browser):
+    for i in range(205):
+        browser.event("g8", "SubagentStart", agent_id=f"a{i}", agent_type="x")
+    assert len(subs_of(browser, "g8")) == 200

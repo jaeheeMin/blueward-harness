@@ -36,6 +36,40 @@
     if (last < src.length) parent.appendChild(text(src.slice(last)));
   }
 
+  // GFM 표: 머리줄 + 구분줄(---, 정렬 콜론은 무시) + 본문줄. 셀은 `코드` 안의 | 와 \| 를 나누지 않는다.
+  var TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+  function splitRow(line) {
+    var s = line.trim(), cells = [], cur = '', tick = false;
+    if (s.charAt(0) === '|') s = s.slice(1);
+    for (var k = 0; k < s.length; k++) {
+      var ch = s.charAt(k);
+      if (ch === '\\' && s.charAt(k + 1) === '|') { cur += '|'; k++; continue; }
+      if (ch === '`') tick = !tick;
+      if (ch === '|' && !tick) { cells.push(cur.trim()); cur = ''; continue; }
+      cur += ch;
+    }
+    if (cur.trim() !== '' || s.charAt(s.length - 1) !== '|') cells.push(cur.trim());
+    return cells;
+  }
+  function isTableStart(lines, i) {
+    return i + 1 < lines.length && lines[i].indexOf('|') >= 0 && lines[i + 1].indexOf('-') >= 0
+      && TABLE_SEP.test(lines[i + 1]) && (lines[i + 1].indexOf('|') >= 0 || lines[i].indexOf('|') >= 0)
+      && splitRow(lines[i]).length === splitRow(lines[i + 1]).length;
+  }
+  function buildTable(head, rows) {
+    var wrap = el('div', 'md-table'), t = el('table'), th = el('thead'), tr = el('tr');
+    head.forEach(function (c) { var x = el('th'); inline(x, c); tr.appendChild(x); });
+    th.appendChild(tr); t.appendChild(th);
+    var tb = el('tbody');
+    rows.forEach(function (r) {
+      var row = el('tr');
+      for (var k = 0; k < head.length; k++) { var td = el('td'); inline(td, r[k] || ''); row.appendChild(td); }
+      tb.appendChild(row);
+    });
+    t.appendChild(tb); wrap.appendChild(t);
+    return wrap;
+  }
+
   function render(src) {
     var root = el('div', 'md');
     var lines = String(src == null ? '' : src).replace(/\r\n?/g, '\n').split('\n');
@@ -82,6 +116,13 @@
         var q = el('blockquote'), qb = [];
         while (i < lines.length && (m = /^>\s?(.*)$/.exec(lines[i]))) { qb.push(m[1]); i++; }
         inline(q, qb.join(' ')); root.appendChild(q);
+        continue;
+      }
+      if (isTableStart(lines, i)) {
+        flush();
+        var thead = splitRow(line), trows = []; i += 2;
+        while (i < lines.length && lines[i].indexOf('|') >= 0 && !/^\s*$/.test(lines[i])) { trows.push(splitRow(lines[i])); i++; }
+        root.appendChild(buildTable(thead, trows));
         continue;
       }
       if (/^\s*$/.test(line)) { flush(); i++; continue; }

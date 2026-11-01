@@ -12,6 +12,10 @@ from store import (MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_
 QUESTION_WAIT = 300.0
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 EDIT_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+AGENT_TOOLS = {"Agent", "Task"}  # 서브에이전트를 띄우는 도구(버전에 따라 이름이 다르다)
+MAX_PENDING_AGENTS = 50  # 아직 SubagentStart 와 짝을 못 지은 Agent 호출
+MAX_AGENT_TEXT = 200  # description·type 글자 상한
+MAX_AGENT_PROMPT = 120  # 프롬프트는 첫 줄만, 이만큼까지
 
 Reply = tuple[int, "dict | None"]  # (HTTP 상태, 본문). 본문 None 은 빈 2xx
 
@@ -64,6 +68,9 @@ class Hooks:
             mode = body.get("permission_mode")
             if isinstance(mode, str):
                 s["permissionMode"] = mode
+            model = body.get("model")  # 훅 입력에 있을 때만 쓴다(없으면 표시하지 않는다)
+            if isinstance(model, str) and model:
+                s["model"] = model
             if not waits:
                 return self.stop(s, body, undo, ts) if name == "stop" else self.event(s, body, ts)
         return self.permission(s, body, alive) if name == "permission" else self.question(s, body, alive)
@@ -208,28 +215,40 @@ class Hooks:
         elif name == "PreToolUse":
             tool = str(body.get("tool_name", ""))
             tool_input = body.get("tool_input")
+            agent_id = body.get("agent_id")
+            if tool in AGENT_TOOLS and agent_id is None:
+                self._agent_called(s, body, tool_input)
+            if agent_id is not None:  # 서브에이전트 안에서 난 호출. 메인 세션의 현재 동작을 덮어쓰지 않고 그 서브에이전트 항목에 적는다.
+                self._subagent_tool(s, agent_id, _action(tool, tool_input))
             if not late:
                 s["turn_running"], s["ended"] = True, False
-                if ts is None or ts >= s.get("actionTs", 0.0):  # 도구를 잇달아 부르면 먼저 뜬 이벤트가 늦게 올 수 있다
+                if agent_id is None and (ts is None or ts >= s.get("actionTs", 0.0)):  # 도구를 잇달아 부르면 먼저 뜬 이벤트가 늦게 올 수 있다
                     s["currentAction"] = _action(tool, tool_input)
                     if ts is not None:
                         s["actionTs"] = ts
-                if tool == "Skill" and isinstance(tool_input, dict):
+                if tool == "Skill" and isinstance(tool_input, dict) and agent_id is None:
                     self._skill_started(s, tool_input.get("skill"))
         elif name == "PostToolUse":
             self._post_tool_use(s, body, ts)
         elif name == "SubagentStart":
-            if not any(a.get("id") == body.get("agent_id") and body.get("agent_id") is not None for a in s["subagents"]):
-                s["subagents"].append({"id": body.get("agent_id"), "type": body.get("agent_type"), "state": "running"})
+            aid = body.get("agent_id")
+            if not any(a.get("id") == aid and aid is not None for a in s["subagents"]):
+                entry = {"id": aid, "type": _clip(body.get("agent_type"), MAX_AGENT_TEXT), "state": "running",
+                         "startedAt": self.clock(), "tools": 0, "currentAction": ""}
+                entry.update(self._take_pending_agent(s, body))
+                s["subagents"].append(entry)
                 del s["subagents"][:-MAX_SUBAGENTS]
             store.add_log(s, "서브에이전트 시작" + (f": {body['agent_type']}" if body.get("agent_type") else ""))
         elif name == "SubagentStop":
             found = False
             for a in s["subagents"]:
                 if a.get("id") == body.get("agent_id"):
-                    a["state"], found = "done", True
+                    self._subagent_done(a)
+                    found = True
             if not found and body.get("agent_id") is not None:  # 끝 이벤트가 시작보다 먼저 왔다. 나중에 올 시작이 다시 running 으로 만들지 못하게 남긴다.
-                s["subagents"].append({"id": body.get("agent_id"), "type": body.get("agent_type"), "state": "done"})
+                entry = {"id": body.get("agent_id"), "type": _clip(body.get("agent_type"), MAX_AGENT_TEXT), "state": "running", "tools": 0}
+                self._subagent_done(entry)
+                s["subagents"].append(entry)
                 del s["subagents"][:-MAX_SUBAGENTS]
             store.add_log(s, "서브에이전트 끝" + (f": {body['agent_type']}" if body.get("agent_type") else ""))
         elif name == "Notification":
@@ -245,6 +264,46 @@ class Hooks:
             store.flush()
         store.touch(s)
         return 200, None
+
+    def _agent_called(self, s: dict, body: dict, tool_input) -> None:
+        """Agent·Task 호출의 맡은 일을 적어 둔다. 곧 오는 SubagentStart 와 짝을 맞춘다."""
+        if not isinstance(tool_input, dict):
+            return
+        pending = s.setdefault("pendingAgents", [])
+        use_id = body.get("tool_use_id") if isinstance(body.get("tool_use_id"), str) else ""
+        if use_id and any(p.get("toolUseId") == use_id for p in pending):
+            return
+        prompt = tool_input.get("prompt") if isinstance(tool_input.get("prompt"), str) else ""
+        pending.append({"toolUseId": use_id, "type": _clip(tool_input.get("subagent_type"), MAX_AGENT_TEXT),
+                        "description": _clip(tool_input.get("description"), MAX_AGENT_TEXT),
+                        "prompt": _clip(prompt.strip().split("\n", 1)[0], MAX_AGENT_PROMPT),
+                        "background": tool_input.get("run_in_background") is True})
+        del pending[:-MAX_PENDING_AGENTS]
+
+    def _take_pending_agent(self, s: dict, body: dict) -> dict:
+        """SubagentStart 와 짝이 되는 대기 항목을 꺼낸다. tool_use_id 가 같은 것, 없으면 같은 종류 중 가장 오래된 것."""
+        pending = s.get("pendingAgents") or []
+        use_id = body.get("tool_use_id") if isinstance(body.get("tool_use_id"), str) else ""
+        kind = _clip(body.get("agent_type"), MAX_AGENT_TEXT)
+        hit = next((p for p in pending if use_id and p.get("toolUseId") == use_id), None)
+        if hit is None:
+            hit = next((p for p in pending if p.get("type") == kind or not p.get("type")), None)
+        if hit is None:
+            return {}
+        pending.remove(hit)
+        return {"description": hit["description"], "prompt": hit["prompt"], "background": hit["background"]}
+
+    def _subagent_tool(self, s: dict, agent_id, action: str) -> None:
+        for a in s["subagents"]:
+            if a.get("id") == agent_id and a.get("state") == "running":
+                a["currentAction"] = _clip(action, MAX_AGENT_TEXT)
+                a["tools"] = a.get("tools", 0) + 1
+
+    def _subagent_done(self, a: dict) -> None:
+        now = self.clock()
+        a["state"], a["currentAction"], a["endedAt"] = "done", "", now
+        if isinstance(a.get("startedAt"), (int, float)):
+            a["durationSec"] = max(0.0, now - a["startedAt"])
 
     def _skill_started(self, s: dict, command) -> None:
         if not isinstance(command, str) or not command:
@@ -277,6 +336,10 @@ class Hooks:
         for url in PR_URL.findall(text or ""):
             if url not in s["prLinks"] and len(s["prLinks"]) < MAX_PR_LINKS:
                 s["prLinks"].append(url)
+
+
+def _clip(value, limit: int) -> str:
+    return value[:limit] if isinstance(value, str) else ""
 
 
 def _action(tool: str, tool_input) -> str:

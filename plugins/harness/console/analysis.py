@@ -132,15 +132,17 @@ def first_message(text: str, picked: list[str], extra_answers: dict, note: str, 
 
 class Analyses:
     def __init__(self, claude_cmd: Callable[[], list[str] | None], model: str = "", timeout: float = 180.0,
-                 spawn: Callable[[Callable[[], None]], None] | None = None):
+                 spawn: Callable[[Callable[[], None]], None] | None = None, effort: str = ""):
         self.claude_cmd = claude_cmd
         self.model = model
+        self.effort = effort
         self.timeout = timeout
         self.jobs: dict[str, dict] = {}
         self.lock = threading.Lock()
         self.spawn = spawn or (lambda fn: threading.Thread(target=fn, daemon=True).start())
 
-    def command(self) -> list[str] | None:
+    def command(self, model: str | None = None, effort: str | None = None) -> list[str] | None:
+        """model·effort 가 None 이면 서버 기본값, 빈 문자열이면 --model·--effort 를 붙이지 않는다."""
         base = self.claude_cmd()
         if not base:
             return None
@@ -148,13 +150,17 @@ class Analyses:
                 "--no-session-persistence",
                 # 분석용 claude 에 훅이 붙으면 콘솔에 유령 세션과 승인 요청이 생긴다
                 "--settings", json.dumps({"disableAllHooks": True})]
-        if self.model:
-            args += ["--model", self.model]
+        chosen = self.model if model is None else model
+        if chosen:
+            args += ["--model", chosen]
+        level = self.effort if effort is None else effort
+        if level:
+            args += ["--effort", level]
         return args
 
-    def start(self, text: str, cwd: str) -> str:
+    def start(self, text: str, cwd: str, model: str | None = None, effort: str | None = None) -> str:
         job_id = uuid.uuid4().hex[:12]
-        job = {"id": job_id, "status": "running", "text": text, "cwd": cwd, "result": None, "error": "",
+        job = {"id": job_id, "status": "running", "text": text, "cwd": cwd, "model": model, "effort": effort, "result": None, "error": "",
                "start_lock": threading.Lock(), "session_id": None}
         with self.lock:
             self.jobs[job_id] = job
@@ -162,7 +168,7 @@ class Analyses:
         return job_id
 
     def _run(self, job: dict) -> None:
-        args = self.command()
+        args = self.command(job.get("model"), job.get("effort"))
         if args is None:
             job.update(status="failed", error=CLAUDE_MISSING)
             return

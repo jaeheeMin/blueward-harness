@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
+import sys
 import threading
 import uuid
 from typing import Callable
@@ -13,6 +15,21 @@ from store import RequestLimit, Store, TITLE_PROMPT
 
 FLAGS = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
          "--permission-prompt-tool", "stdio"]
+# 별칭 말고 정식 이름을 직접 적을 때 받는 모양. 인자로만 넘기고 셸을 거치지 않으며, 맨 앞이 영문·숫자라 옵션으로 읽히지 않는다.
+MODEL_NAME = re.compile(r"^claude-[a-z0-9][a-z0-9.\-]{0,62}(\[1m\])?$")
+# 화면에서 고를 수 있는 모델(claude --model 별칭). 빈 값은 Claude Code 설정을 따른다는 뜻이다.
+MODEL_OPTIONS = [("", "기본값(Claude Code 설정을 따름)"), ("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")]
+MODEL_ALIASES = {v for v, _ in MODEL_OPTIONS if v}
+# claude --effort 가 받는 단계. 빈 값은 플래그를 붙이지 않는다는 뜻이다. (값, 쉬운 이름)
+EFFORT_OPTIONS = [("", "기본값"), ("low", "낮음"), ("medium", "보통"), ("high", "높음"), ("xhigh", "아주 높음"), ("max", "최대")]
+EFFORT_VALUES = {v for v, _ in EFFORT_OPTIONS}
+# claude --permission-mode 로 고를 수 있는 값. bypassPermissions·dontAsk·auto 는 화면에도 서버에도 두지 않는다. 빈 값은 플래그를 붙이지 않는다.
+PERMISSION_OPTIONS = [("", "기본(그때그때 확인)"), ("acceptEdits", "파일 고치기는 자동 허용"), ("plan", "계획만 세우기")]
+PERMISSION_VALUES = {v for v, _ in PERMISSION_OPTIONS}
+PERMISSION_LABELS = dict(PERMISSION_OPTIONS)
+# 살아 있는 세션에 set_permission_mode 를 보내고 control_response 를 기다리는 시간(초). 빈 값(기본)은 claude 쪽 이름 default 로 보낸다.
+MODE_REPLY_WAIT = 8.0
+DEFAULT_MODE_NAME = "default"
 
 
 def parse_line(line: str):
@@ -77,11 +94,12 @@ class Proc:
 
 class Manager:
     def __init__(self, store: Store, claude_cmd: Callable[[], list[str] | None], plugin_dir: str,
-                 model: str = "", popen=subprocess.Popen, stderr_log=None):
+                 model: str = "", popen=subprocess.Popen, stderr_log=None, effort: str = ""):
         self.store = store
         self.claude_cmd = claude_cmd
         self.plugin_dir = plugin_dir
         self.model = model
+        self.effort = effort
         self.popen = popen
         self.procs: dict[str, Proc] = {}  # 현재 id(임시 또는 실제) -> Proc
         # 잠금 순서: 세션 잠금 -> store.lock. manager.lock 은 procs/세션 잠금 표만 지키는 잎(leaf) 잠금이라
@@ -89,25 +107,77 @@ class Manager:
         self.lock = threading.Lock()
         self.session_locks: dict[str, threading.RLock] = {}
         self.stderr_log = stderr_log
+        self.mode_waits: dict[str, dict] = {}  # request_id -> {"event", "response"}. manager.lock 으로 지킨다
 
     # ---- 시작 ----
-    def command(self, resume: str | None = None) -> list[str] | None:
+    def command(self, resume: str | None = None, model: str | None = None, effort: str | None = None,
+                permission: str | None = None) -> list[str] | None:
+        """model·effort 가 None 이면 서버 기본값, 빈 문자열이면 --model·--effort 를 붙이지 않는다.
+        permission 은 None 이거나 빈 문자열이면 --permission-mode 를 붙이지 않는다(기본값은 서버 쪽에 없다)."""
         base = self.claude_cmd()
         if not base:
             return None
         args = [*base, *FLAGS, "--plugin-dir", self.plugin_dir]
-        if self.model:
-            args += ["--model", self.model]
+        chosen = self.model if model is None else model
+        # 저장된 값이 상태 파일에서 어긋났을 수 있어 여기서 한 번 더 검사하고, 어긋나면 그 플래그만 뺀다.
+        if chosen and chosen != self.model and chosen not in MODEL_ALIASES and not MODEL_NAME.fullmatch(chosen):
+            self._warn(resume, f"모델 값이 허용 형식이 아니라 --model 을 뺐다: {chosen[:60]!r}")
+            chosen = ""
+        if chosen:
+            args += ["--model", chosen]
+        level = self.effort if effort is None else effort
+        if level and level not in EFFORT_VALUES:
+            self._warn(resume, f"에포트 값이 허용 단계가 아니라 --effort 를 뺐다: {level[:60]!r}")
+            level = ""
+        if level:
+            args += ["--effort", level]
+        if permission and permission not in PERMISSION_VALUES:
+            self._warn(resume, f"권한 모드 값이 허용 집합이 아니라 --permission-mode 를 뺐다: {permission[:60]!r}")
+            permission = ""
+        if permission:
+            args += ["--permission-mode", permission]
         if resume:
             args += ["--resume", resume]
         return args
+
+    def _warn(self, sid: str | None, text: str) -> None:
+        """세션 기록에 남긴다. 세션이 아직 없으면 표준 오류로 낸다."""
+        with self.store.lock:
+            s = self.store.get(sid) if sid else None
+            if s is not None:
+                self.store.add_log(s, text)
+                return
+        print("[console] " + text, file=sys.stderr)
 
     def session_lock(self, key: str):
         with self.lock:
             return self.session_locks.setdefault(key, threading.RLock())
 
-    def launch(self, cwd: str, first_message: str | None, resume: str | None = None, title: str = "") -> str | None:
+    def remembered_model(self, sid: str) -> str | None:
+        """세션에 기억된 모델 별칭. 기억이 없는 옛 세션이면 None(서버 기본값을 따른다)."""
+        with self.store.lock:
+            s = self.store.get(sid)
+            value = s.get("modelChoice") if s is not None else None
+        return value if isinstance(value, str) else None
+
+    def remembered_effort(self, sid: str) -> str | None:
+        """세션에 기억된 에포트. 기억이 없는 옛 세션이면 None(서버 기본값을 따른다)."""
+        with self.store.lock:
+            s = self.store.get(sid)
+            value = s.get("effortChoice") if s is not None else None
+        return value if isinstance(value, str) else None
+
+    def remembered_permission(self, sid: str) -> str | None:
+        """세션에 기억된 권한 모드. 기억이 없는 옛 세션이면 None(아무것도 안 붙인다)."""
+        with self.store.lock:
+            s = self.store.get(sid)
+            value = s.get("permissionChoice") if s is not None else None
+        return value if isinstance(value, str) else None
+
+    def launch(self, cwd: str, first_message: str | None, resume: str | None = None, title: str = "",
+               model: str | None = None, effort: str | None = None, permission: str | None = None) -> str | None:
         """세션을 띄우고 첫 메시지를 보낸다. 세션 id(임시 또는 실제)를 돌려준다. 못 띄우면 None.
+        model 은 --model 별칭이다. 이어서 띄울 때(resume) 안 주면 그 세션에 기억된 모델을 쓴다.
         같은 세션을 다시 띄우는 요청(resume)은 세션 단위로 직렬화하고, 이미 살아 있으면 새로 띄우지 않고 메시지만 보낸다."""
         if resume:
             with self.session_lock(resume):
@@ -115,11 +185,18 @@ class Manager:
                     if first_message and not self.send(resume, first_message):
                         return None
                     return self.store.resolve_id(resume)
-                return self._launch(cwd, first_message, resume, title)
-        return self._launch(cwd, first_message, resume, title)
+                return self._launch(cwd, first_message, resume, title, model, effort, permission)
+        return self._launch(cwd, first_message, resume, title, model, effort, permission)
 
-    def _launch(self, cwd: str, first_message: str | None, resume: str | None, title: str) -> str | None:
-        args = self.command(resume)
+    def _launch(self, cwd: str, first_message: str | None, resume: str | None, title: str, model: str | None,
+                effort: str | None = None, permission: str | None = None) -> str | None:
+        if model is None and resume:
+            model = self.remembered_model(resume)
+        if effort is None and resume:
+            effort = self.remembered_effort(resume)
+        if permission is None and resume:
+            permission = self.remembered_permission(resume)
+        args = self.command(resume, model, effort, permission)
         if args is None:
             return None
         try:
@@ -132,6 +209,9 @@ class Manager:
         with self.store.lock:
             s = self.store.ensure(temp, cwd)
             s.update(managed=True, starting=True, ended=False, managed_alive=True)
+            s["modelChoice"] = self.model if model is None else model
+            s["effortChoice"] = self.effort if effort is None else effort
+            s["permissionChoice"] = permission or ""
             if title:
                 self.store.set_title(s, title, TITLE_PROMPT)
         proc = Proc(self, temp, p)
@@ -173,6 +253,47 @@ class Manager:
                 s["interrupted"] = True
         return proc.write(json.dumps(req) + "\n")
 
+    def set_permission(self, sid: str, mode: str) -> dict:
+        """세션 도중 권한 모드를 바꾼다. mode 는 PERMISSION_VALUES 안의 값이어야 한다(호출한 쪽이 400 으로 거른다).
+        살아 있으면 control_request(set_permission_mode) 를 보내 응답을 기다리고, 끝난 세션이면 다음 resume 때 쓸 값만 갱신한다.
+        돌려주는 dict: ok, live, previous, mode / 실패면 ok=False 와 error."""
+        proc = self.proc_for(sid)
+        real = self.store.resolve_id(sid)
+        previous = self.remembered_permission(real) or ""
+        live = bool(proc and proc.alive())
+        if live:
+            request_id = uuid.uuid4().hex[:8]
+            wait = {"event": threading.Event(), "response": None}
+            with self.lock:
+                self.mode_waits[request_id] = wait
+            req = {"type": "control_request", "request_id": request_id,
+                   "request": {"subtype": "set_permission_mode", "mode": mode or DEFAULT_MODE_NAME}}
+            try:
+                if not proc.write(json.dumps(req) + "\n"):
+                    return {"ok": False, "live": True, "error": "실행 중인 프로세스에 보내지 못했습니다."}
+                if not wait["event"].wait(MODE_REPLY_WAIT):
+                    return {"ok": False, "live": True, "error": "세션이 권한 모드 변경에 답하지 않았습니다."}
+            finally:
+                with self.lock:
+                    self.mode_waits.pop(request_id, None)
+            response = wait["response"] or {}
+            if response.get("subtype") != "success":
+                detail = str(response.get("error") or "알 수 없는 오류")[:200]
+                self._warn(real, f"권한 모드를 바꾸지 못함: {detail}")
+                return {"ok": False, "live": True, "error": detail}
+        with self.store.lock:
+            s = self.store.get(real)
+            if s is None:
+                return {"ok": False, "live": live, "error": "없는 세션입니다."}
+            s["permissionChoice"] = mode
+            if live:
+                s["permissionMode"] = mode or DEFAULT_MODE_NAME
+            if mode != previous:
+                self.store.add_log(s, f"권한 모드: {PERMISSION_LABELS.get(previous, previous)} → {PERMISSION_LABELS.get(mode, mode)}"
+                                   + ("" if live else " (다음에 이어서 띄울 때 적용)"))
+        self.store.touch(s)
+        return {"ok": True, "live": live, "previous": previous, "mode": mode}
+
     def alive(self, sid: str) -> bool:
         proc = self.proc_for(sid)
         return bool(proc and proc.alive())
@@ -204,6 +325,13 @@ class Manager:
                 self.store.add_log(s, text)
 
     def on_event(self, proc: Proc, e: dict) -> None:
+        if e.get("type") == "control_response":
+            response = e.get("response") if isinstance(e.get("response"), dict) else {}
+            with self.lock:
+                wait = self.mode_waits.get(response.get("request_id"))
+            if wait is not None:
+                wait["response"] = response
+                wait["event"].set()
         sid = e.get("session_id")
         if isinstance(sid, str) and sid and proc.session_id != sid:
             proc.session_id = sid
@@ -219,10 +347,14 @@ class Manager:
             s.update(managed=True, managed_alive=True)
             s["lastSignalAt"] = self.store.clock()
             kind = e.get("type")
+            if kind == "system" and e.get("subtype") == "status" and isinstance(e.get("permissionMode"), str):
+                s["permissionMode"] = e["permissionMode"]  # 도중에 바꾼 모드가 실제로 반영됐다는 알림
             if kind == "system" and e.get("subtype") == "init":
                 s["starting"] = False
                 if isinstance(e.get("permissionMode"), str):
                     s["permissionMode"] = e["permissionMode"]
+                if isinstance(e.get("model"), str) and e["model"]:
+                    s["model"] = e["model"]
             elif kind == "assistant":
                 for block in (e.get("message") or {}).get("content") or []:
                     if not isinstance(block, dict):
@@ -230,7 +362,7 @@ class Manager:
                     if block.get("type") == "tool_use":
                         s["currentAction"] = summarize_tool(str(block.get("name", "")), block.get("input"))
                     elif block.get("type") == "text" and block.get("text"):
-                        self.store.add_log(s, "Claude: " + str(block["text"]).strip().split("\n", 1)[0][:200])
+                        self.store.add_log(s, "Claude Code: " +str(block["text"]).strip().split("\n", 1)[0][:200])
             elif kind == "result":
                 s["currentAction"] = ""
                 s["turn_running"] = False

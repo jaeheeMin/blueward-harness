@@ -350,6 +350,8 @@
     var q = r.questions || (r.toolInput && r.toolInput.questions) || (r.tool_input && r.tool_input.questions) || (r.input && r.input.questions);
     return Array.isArray(q) ? q : [];
   }
+  function runningSubagents(s) { return (s.subagents || []).filter(function (a) { return a && a.state === 'running'; }); }
+  function subagentSummary(s) { var n = runningSubagents(s).length; return n ? ' · 서브에이전트 ' + n + '개 실행 중' : ''; }
   function sideData() {
     var todo = [], run = [], idle = [];
     sessions.forEach(function (s) {
@@ -367,7 +369,7 @@
           todo.push({ href: '/s/' + encodeURIComponent(s.id), verb: s.turnSkill ? skillLabel(s.turnSkill) : '확인하기', title: title, sub: sub, t: s.updatedAt });
         }
       } else if (g === 'running') {
-        run.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: s.currentAction || (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중'), t: s.updatedAt });
+        run.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: (s.currentAction || (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중')) + subagentSummary(s), t: s.updatedAt });
       } else {
         idle.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: s.status === 'ended' ? '끝난 세션' : sub, t: s.updatedAt });
       }
@@ -384,7 +386,7 @@
     var nav = h('nav', { class: 'nav', 'aria-label': '작업 목록' });
     var navHead = h('div', { class: 'nav-head' }), navList = h('div', { class: 'nav-list' }), navFoot = h('div', { class: 'nav-foot' });
     nav.appendChild(navHead); nav.appendChild(navList); nav.appendChild(navFoot);
-    navHead.appendChild(link('/', { class: 'brand' }, icon('brand', 20), h('b', null, 'Blueward ', h('span', { text: 'Harness' }))));
+    navHead.appendChild(link('/', { class: 'brand', 'aria-label': 'Blueward Harness' }, h('img', { class: 'brand-logo', src: '/static/blueward-logo.png', alt: 'Blueward' }), h('b', null, h('span', { text: 'Harness' }))));
     navHead.appendChild(link('/new', { class: 'newbtn', text: '새 작업' }));
     function group(title, items, cls, first, emptyText, withVerb) {
       navList.appendChild(h('h2', { class: 'grp-h' + (cls ? ' ' + cls : '') + (first ? ' first' : '') }, title, h('span', { text: String(items.length) })));
@@ -393,11 +395,11 @@
         navList.appendChild(link(it.href, { class: 'item', 'aria-current': cur === it.href ? 'page' : null },
           withVerb ? h('span', { class: 'verb', text: it.verb }) : null,
           h('span', { class: 'ttl', text: it.title }),
-          h('span', { class: 'sub', text: it.sub })));
+          h('span', { class: 'sub', title: it.sub, text: it.sub })));
       });
     }
     group('내가 할 일', d.todo, 'attn', true, '지금 할 일이 없습니다.', true);
-    group('Claude가 하는 일', d.run, '', false, '일하는 세션이 없습니다.', false);
+    group('Claude Code가 하는 일', d.run, '', false, '일하는 세션이 없습니다.', false);
     group('쉬는 중', d.idle, '', false, '쉬는 세션이 없습니다.', false);
     navFoot.appendChild(link('/settings', { class: 'side-link', 'aria-current': cur === '/settings' ? 'page' : null }, icon('settings', 16), '설정'));
     navFoot.appendChild(h('button', { type: 'button', class: 'fold', 'aria-keyshortcuts': '[', 'aria-label': '목록 접기', onClick: function () { setCollapsed(true); } },
@@ -424,7 +426,7 @@
 
   /* ---------- 공통 조각 ---------- */
   function topline(left) {
-    return h('div', { class: 'topline' }, left ? h('span', { class: 'wrap-any', text: left }) : null, h('span', { class: 'url', text: location.host + location.pathname }));
+    return h('div', { class: 'topline' }, left ? h('span', { class: 'wrap-any', text: left }) : null);
   }
   function backToSession(sid, label) {
     return sid ? link('/s/' + encodeURIComponent(sid), { class: 'linkbtn', text: label || '세션으로 돌아가기' }) : link('/', { class: 'linkbtn', text: '처음 화면으로' });
@@ -448,7 +450,7 @@
       page.appendChild(h('div', { class: 'eyebrow ' + (n ? 'tone-attn' : 'tone-sec') }, h('i'), n ? '내가 할 일이 있습니다' : total ? '지금은 기다릴 일이 없습니다' : '연결된 세션이 없습니다'));
       page.appendChild(h('h1', { class: 'big', text: n ? '내가 할 일이 ' + n + '건 있습니다' : total ? '내가 할 일은 없습니다' : '아직 보이는 세션이 없습니다' }));
       page.appendChild(h('p', { class: 'lede', text: total
-        ? (n ? '왼쪽 목록의 \'내가 할 일\'에서 하나를 열어 주세요.' : 'Claude가 일하는 중이거나 쉬는 세션 ' + total + '개가 있습니다. 왼쪽 목록에서 열어 볼 수 있습니다.')
+        ? (n ? '왼쪽 목록의 \'내가 할 일\'에서 하나를 열어 주세요.' : 'Claude Code가 일하는 중이거나 쉬는 세션 ' + total + '개가 있습니다. 왼쪽 목록에서 열어 볼 수 있습니다.')
         : 'Claude Code 세션을 시작하면 여기에 나타납니다. 지금 바로 맡길 일이 있으면 새 작업으로 시작하세요.' }));
       page.appendChild(h('div', { class: 'mt-32' }, link('/new', { class: 'btn primary', text: '새 작업 시작' })));
       root.appendChild(page);
@@ -460,7 +462,7 @@
   /* ---------- 세션 ---------- */
   function sessionView(root) {
     var id = route.id, detail = null, errored = null, fetching = false, timer = null;
-    var regions = {}, followVal = '', followNote = '', reserved = {}, othersOpen = false, pendingSkill = null, reportOpen = false, logAll = false, built = false, interruptAsk = false;
+    var regions = {}, followVal = '', followNote = '', reserved = {}, othersOpen = false, pendingSkill = null, reportOpen = false, logAll = false, built = false, interruptAsk = false, permBusy = false, permNote = '';
 
     function cur() { return sessions.get(id) || {}; }
     function fetchDetail() {
@@ -489,22 +491,83 @@
       var tl = topline(' ');
       regions.title = tl.firstChild;
       page.appendChild(tl);
-      ['head', 'notices', 'report', 'follow', 'flow', 'files', 'log', 'tech'].forEach(function (k) {
+      ['head', 'notices', 'subs', 'perm', 'report', 'follow', 'flow', 'files', 'log', 'tech'].forEach(function (k) {
         regions[k] = h('div', { 'data-r': k });
         page.appendChild(regions[k]);
       });
       root.appendChild(page);
       // 이어서 요청 입력칸은 다시 그리지 않는다.
-      var input = h('input', { id: 'follow', class: 'input lg', placeholder: '예: 표의 항목 순서를 바꿔 주세요', autocomplete: 'off',
+      var followAssist = null;
+      var input = h('input', { id: 'follow', class: 'input lg', placeholder: '예: 표의 항목 순서를 바꿔 주세요  (/ 로 스킬, @ 로 파일)', autocomplete: 'off',
         onInput: function (e) { followVal = e.target.value; followNote = ''; paintFollowNote(); },
-        onKeydown: function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendFollow(); } } });
+        onKeydown: function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && !(followAssist && followAssist.isOpen())) { e.preventDefault(); sendFollow(); } } });
+      followAssist = withAssist(input, function () { return cur().cwd; });
       var btn = h('button', { type: 'button', class: 'btn', text: '보내기', onClick: sendFollow });
       regions.follow.appendChild(h('section', { class: 'mt-44' },
         h('label', { for: 'follow', class: 'label', text: '이 작업에 이어서 요청' }),
-        h('div', { class: 'row' }, h('div', { class: 'grow' }, input), h('div', { class: 'fixed' }, btn)),
+        skillBar(input),
+        h('div', { class: 'row' }, h('div', { class: 'grow' }, followAssist.wrap), h('div', { class: 'fixed' }, btn)),
         h('p', { class: 'note-accent', 'data-note': '1', role: 'status' }),
         h('p', { class: 'note-muted', 'data-why': '1' })));
       regions.followInput = input; regions.followBtn = btn;
+      // 권한 모드 고르개도 다시 그리지 않는다(열린 목록이 닫히지 않게).
+      var sel = h('select', { id: 'perm-mode', class: 'input', 'aria-describedby': 'perm-note', onChange: changePermission },
+        permissionOptions().map(function (o) { return h('option', { value: o.value, text: o.label }); }));
+      regions.permSelect = sel;
+      regions.perm.appendChild(h('section', { class: 'mt-32', 'data-perm': '1' },
+        h('label', { for: 'perm-mode', class: 'label', text: '권한 모드' }), sel,
+        h('p', { class: 'note-muted', id: 'perm-note', role: 'status', 'data-perm-note': '1' })));
+    }
+
+    function paintPerm(s) {
+      var box = regions.perm.querySelector('[data-perm]');
+      if (!box) return;
+      box.hidden = !s.managed;
+      if (!s.managed) return;
+      if (!permBusy) regions.permSelect.value = s.permissionChoice || '';
+      regions.permSelect.disabled = permBusy;
+      var live = s.permissionMode ? '지금 적용된 모드: ' + permissionLabel(s.permissionMode === 'default' ? '' : s.permissionMode) : '';
+      var note = regions.perm.querySelector('[data-perm-note]');
+      note.textContent = [permNote, live].filter(Boolean).join(' · ');
+    }
+
+    function changePermission(e) {
+      var mode = e.target.value;
+      permBusy = true; permNote = '권한 모드를 바꾸는 중입니다.'; paintPerm(cur());
+      api('PUT', '/api/sessions/' + encodeURIComponent(id) + '/permission', { mode: mode }).then(function (d) {
+        permNote = d && d.live === false ? '다음에 이어서 띄울 때 적용됩니다.' : '권한 모드를 바꿨습니다.';
+      }, function (err) { permNote = '바꾸지 못했습니다: ' + err.message; }).then(function () {
+        permBusy = false; paintPerm(cur()); refetchSoon();
+      });
+    }
+
+    function elapsedText(sec) {
+      if (typeof sec !== 'number' || sec < 0) return '';
+      if (sec < 60) return Math.floor(sec) + '초';
+      var m = Math.floor(sec / 60);
+      return m < 60 ? m + '분 ' + Math.floor(sec % 60) + '초' : Math.floor(m / 60) + '시간 ' + (m % 60) + '분';
+    }
+
+    function subRow(a, running) {
+      var span = running ? (Date.now() / 1000 - a.startedAt) : a.durationSec;
+      var meta = [a.state === 'done' ? '끝남' : '실행 중', elapsedText(span), a.background ? '백그라운드' : '', a.tools ? '도구 ' + a.tools + '회' : ''].filter(Boolean).join(' · ');
+      return h('li', { class: running ? 'sub-run' : 'sub-done', 'data-sub': a.id },
+        h('div', { class: 'sub-top' }, h('b', { text: a.type || '서브에이전트' }), h('span', { class: 'd', text: meta, 'data-sub-meta': running ? '1' : null })),
+        a.description ? h('div', { class: 'sub-desc', text: a.description }) : null,
+        running && a.currentAction ? h('div', { class: 'sub-act mono wrap-any', text: a.currentAction }) : null);
+    }
+
+    function paintSubs(s) {
+      var all = (s.subagents || []).filter(function (a) { return a && typeof a === 'object'; });
+      var runningList = all.filter(function (a) { return a.state === 'running'; });
+      var doneList = all.filter(function (a) { return a.state === 'done'; }).reverse();
+      var open = regions.subs.querySelector('details') ? regions.subs.querySelector('details').open : false;
+      var out = [];
+      if (runningList.length) out.push(h('section', { class: 'mt-32 subs-run' }, h('h2', { class: 'label', text: '서브에이전트 ' + runningList.length + '개 실행 중' }),
+        h('ul', { class: 'plain-list sub-list' }, runningList.map(function (a) { return subRow(a, true); }))));
+      if (doneList.length) out.push(h('details', { class: 'tech mt-16', open: open }, h('summary', { text: '끝난 서브에이전트 ' + doneList.length + '개' }),
+        h('ul', { class: 'plain-list sub-list' }, doneList.map(function (a) { return subRow(a, false); }))));
+      regions.subs.replaceChildren.apply(regions.subs, out);
     }
 
     function paintFollowNote() {
@@ -554,16 +617,38 @@
       if (s.turnSkill) return ['attn', '작업을 마치고 기다리는 중'];
       return ['sec', '쉬는 중'];
     }
+    // 큰 제목에는 도구 이름 + 앞부분만, 전체는 아래 작은 한 줄(actionLine)에 둔다
+    var HEADLINE_MAX = 40;
+    function shortAction(a) {
+      var t = String(a).replace(/\s+/g, ' ').trim();
+      return t.length > HEADLINE_MAX ? t.slice(0, HEADLINE_MAX).replace(/\s+$/, '') + '…' : t;
+    }
+    function actionLine(s) {
+      if (s.status !== 'running' || !s.currentAction || (s.pendingRequestIds || []).length) return null;
+      var full = String(s.currentAction);
+      if (shortAction(full) === full.trim()) return null;
+      return h('p', { class: 'action-line mono', title: full, text: full.replace(/\s+/g, ' ') });
+    }
     function headlineFor(s) {
       var pend = (s.pendingRequestIds || []).length;
-      if (pend) return 'Claude가 내 확인을 기다리고 있습니다';
-      if (s.status === 'running') return s.currentAction || (s.currentSkill ? skillLabel(s.currentSkill) + ' 진행 중' : '작업하는 중입니다');
+      if (pend) return 'Claude Code가 내 확인을 기다리고 있습니다';
+      if (s.status === 'running') return s.currentAction ? shortAction(s.currentAction) : (s.currentSkill ? skillLabel(s.currentSkill) + ' 진행 중' : '작업하는 중입니다');
       if (s.status === 'starting') return '세션을 시작하고 있습니다';
       if (s.status === 'ended') return '세션이 끝났습니다';
       if (s.turnSkill) return '이제 ' + skillLabel(s.turnSkill, flowItem(s, s.turnSkill)) + ' 차례예요.';
       return '다음 요청을 기다리고 있습니다';
     }
     function flowItem(s, skill) { return (s.flow || []).filter(function (f) { return f.skill === skill; })[0]; }
+
+    function modelLine(s) {
+      var m = '';
+      if (s.model) m = '모델: ' + s.model;
+      else if (s.managed) m = '모델: ' + (s.modelChoice ? s.modelChoice + '(고른 값)' : '기본값');
+      if (!m) return '';
+      // 에포트는 init 에 실제 값이 없어 고른 값만 보인다(콘솔이 띄운 세션에서만)
+      return s.managed ? m + ' · 에포트: ' + (s.effortChoice ? s.effortChoice + '(고른 값)' : '기본값')
+        + ' · 권한: ' + (s.permissionChoice ? permissionLabel(s.permissionChoice) + '(고른 값)' : '기본') : m;
+    }
 
     function paint(s) {
       var tt = s.title || baseName(s.cwd) || '세션';
@@ -575,6 +660,8 @@
         h('div', { class: 'l' },
           h('div', { class: 'eyebrow tone-' + eb[0] }, h('i'), eb[1]),
           h('h1', { class: 'big', text: headlineFor(s) }),
+          actionLine(s),
+          modelLine(s) ? h('p', { class: 'note-muted', 'data-model': '1', text: modelLine(s) }) : null,
           (s.managed && (s.status === 'running') ? (interruptAsk
             ? h('div', { class: 'confirm' }, h('span', { text: '진행 중인 작업을 멈출까요?' }), h('button', { type: 'button', class: 'btn sm', text: '중단', onClick: interrupt }), h('button', { type: 'button', class: 'btn sm', text: '취소', onClick: function () { interruptAsk = false; draw(); } }))
             : h('div', { class: 'mt-16' }, h('button', { type: 'button', class: 'btn sm', text: '작업 중단', onClick: function () { interruptAsk = true; draw(); } }))) : null)),
@@ -595,6 +682,8 @@
       }
       regions.notices.replaceChildren.apply(regions.notices, notices);
 
+      paintSubs(s);
+      paintPerm(s);
       paintReport(s);
       paintFlow(s);
       paintFollow(s);
@@ -609,7 +698,7 @@
       var sec = h('section', { class: 'report', 'aria-labelledby': 'rep-h' });
       sec.appendChild(h('div', { class: 'report-h' }, h('h2', { id: 'rep-h', text: '결과 보고' }), when ? h('span', { text: clock(when) + ' 기준' }) : null));
       if (!String(text).trim()) {
-        sec.appendChild(h('p', { class: 'report-empty', text: s.status === 'running' ? '이번 차례가 끝나면 Claude의 결과 보고가 여기에 나타납니다.' : '아직 결과 보고가 없습니다.' }));
+        sec.appendChild(h('p', { class: 'report-empty', text: s.status === 'running' ? '이번 차례가 끝나면 Claude Code의 결과 보고가 여기에 나타납니다.' : '아직 결과 보고가 없습니다.' }));
       } else {
         var long = String(text).split('\n').length > 28 || String(text).length > 2200;
         var body = h('div', { class: 'report-body' + (long && !reportOpen ? ' clip' : ''), tabindex: long ? '0' : null });
@@ -724,11 +813,11 @@
 
     function paintTech(s) {
       var open = regions.tech.querySelector('details') ? regions.tech.querySelector('details').open : false;
-      var subs = (s.subagents || []).map(function (a) { return typeof a === 'string' ? a : [a.model || a.name || a.type, a.task || a.description || a.status].filter(Boolean).join(' · '); });
+      var subs = (s.subagents || []).map(function (a) { return typeof a === 'string' ? a : [a.model || a.name || a.type, a.task || a.description || a.state || a.status].filter(Boolean).join(' · '); });
       var rows = [
         ['저장소', [s.repo, s.branch].filter(Boolean).join(' / ')],
         ['작업 폴더', s.cwd], ['현재 동작', s.currentAction], ['현재 스킬', s.currentSkill], ['상태', s.status],
-        ['권한 모드', s.permissionMode], ['세션 ID', s.id], ['실행 방식', s.managed ? '콘솔이 띄운 세션' : '터미널 세션'],
+        ['권한 모드', s.permissionMode], ['모델', modelLine(s).replace(/^모델: /, '').replace(/ · 에포트: /, ' · 에포트 ')], ['세션 ID', s.id], ['실행 방식', s.managed ? '콘솔이 띄운 세션' : '터미널 세션'],
         ['서브에이전트', subs.length ? subs.join('\n') : '돌고 있는 서브에이전트 없음']
       ].filter(function (r) { return r[1]; });
       var dl = h('dl', { class: 'kv' });
@@ -749,6 +838,7 @@
         var el = regions.head && regions.head.querySelector('[data-elapsed]');
         var parts = elapsedParts(cur().startedAt);
         if (el && parts) { clear(el); parts.forEach(function (p) { add(el, p[0]); if (p[1]) el.appendChild(h('span', { text: p[1] })); }); }
+        if (regions.subs && runningSubagents(cur()).length) paintSubs(cur());  // 서브에이전트 경과 시간
       },
       destroy: function () { clearTimeout(timer); }
     };
@@ -819,7 +909,7 @@
       var page = h('div', { class: 'page w-820' });
       head(page, false);
       var tool = req.toolName || req.tool_name || '도구', input = req.toolInput || req.tool_input || req.input || {};
-      page.appendChild(h('h1', { class: 'big', text: req.title || 'Claude가 ' + tool + ' 도구를 쓰려고 합니다. 허용할까요?' }));
+      page.appendChild(h('h1', { class: 'big', text: req.title || 'Claude Code가 ' + tool + ' 도구를 쓰려고 합니다. 허용할까요?' }));
       var risk = req.risk || req.riskNote || req.warning;
       if (risk) page.appendChild(h('p', { class: 'lede attn', text: typeof risk === 'string' ? risk : (risk.text || risk.message || '') }));
       if (req.description) page.appendChild(h('p', { class: 'lede', text: req.description }));
@@ -857,7 +947,7 @@
           sugg.length ? h('ul', { class: 'sugg-l' }, sugg.map(function (x) { return h('li', { class: 'mono', text: x }); }))
             : h('p', { class: 'sub', text: '규칙 내용을 읽지 못했습니다. 아래 원문을 확인하십시오.' }),
           req.suggestions ? h('pre', { class: 'box scroll', tabindex: '0', text: JSON.stringify(req.suggestions, null, 2) }) : null));
-        page.appendChild(h('label', { for: 'why', class: 'field-label mt-32', text: '거부 이유 (거부할 때만 Claude에게 전달됩니다)' }));
+        page.appendChild(h('label', { for: 'why', class: 'field-label mt-32', text: '거부 이유 (거부할 때만 Claude Code에게 전달됩니다)' }));
         page.appendChild(h('input', { id: 'why', class: 'input', value: why, placeholder: '예: 리뷰가 끝난 뒤에 해 주세요', autocomplete: 'off', onInput: function (e) { why = e.target.value; } }));
         if (sendErr) page.appendChild(h('p', { class: 'note-attn', role: 'alert', text: sendErr }));
         page.appendChild(h('div', { class: 'btn-row mt-24' },
@@ -968,18 +1058,185 @@
     };
   }
 
+  /* ---------- 입력창 보조: 스킬 버튼, / 자동완성, @ 파일 멘션 ---------- */
+  var ASSIST_MAX_ITEMS = 8;
+  var ASSIST_FILE_DELAY = 150;
+  var ASSIST_HINT_LENGTH = 60;
+  var MENTION_QUOTE = '"';  /* 공백 든 경로는 @"경로" 로 감싼다(Claude Code 의 @ 멘션 형식) */
+  var QUOTED_MENTION = /(^|\s)@"([^"]*)$/;
+  var DEFAULT_PLUGIN = 'harness';
+  var CARET_KEYS = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+  var skillInfo = null, skillWaiters = [], skillLoading = false;
+  function withSkills(cb) {
+    if (skillInfo) { cb(skillInfo); return; }
+    skillWaiters.push(cb);
+    if (skillLoading) return;
+    skillLoading = true;
+    api('GET', '/api/skills').then(function (d) {
+      skillInfo = { plugin: (d && d.plugin) || DEFAULT_PLUGIN, skills: listOf(d, 'skills') };
+    }, function (e) { console.warn('스킬 목록을 불러오지 못했습니다', e); }).then(function () {
+      skillLoading = false;
+      var info = skillInfo || { plugin: DEFAULT_PLUGIN, skills: [] }; // 못 불러왔으면 비워 두고 다음에 다시 시도한다
+      var w = skillWaiters; skillWaiters = [];
+      w.forEach(function (f) { f(info); });
+    });
+  }
+  function setFieldValue(field, value, caret) {
+    field.value = value;
+    field.focus();
+    if (field.setSelectionRange) field.setSelectionRange(caret, caret);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  function skillCommand(info, name) { return '/' + info.plugin + ':' + name + ' '; }
+  function skillBar(field) {
+    var bar = h('div', { class: 'skill-bar', role: 'group', 'aria-label': '스킬 바로 넣기' });
+    withSkills(function (info) {
+      info.skills.forEach(function (sk) {
+        bar.appendChild(h('button', { type: 'button', class: 'chip skill-chip', title: sk.description || sk.name, text: '/' + sk.name, onClick: function () {
+          var cmd = skillCommand(info, sk.name), rest = field.value.replace(/^\/\S*\s*/, '');
+          setFieldValue(field, cmd + rest, cmd.length);
+        } }));
+      });
+    });
+    return bar;
+  }
+  /* 입력칸을 감싸 / 와 @ 자동완성 목록을 붙인다. getRoot 는 @ 로 찾을 작업 폴더를 돌려준다. */
+  function withAssist(field, getRoot) {
+    var box = h('ul', { class: 'assist', role: 'listbox', hidden: true });
+    var state = { items: [], index: 0, token: null, seq: 0 }, timer = null;
+    function isOpen() { return !box.hidden; }
+    function close() { clearTimeout(timer); state.seq++; state.items = []; state.token = null; box.hidden = true; }
+    function render() {
+      clear(box);
+      state.items.forEach(function (it, i) {
+        box.appendChild(h('li', { role: 'option', class: 'assist-item', 'aria-selected': String(i === state.index), onMousedown: function (e) { e.preventDefault(); pick(i); } },
+          h('span', { class: 'nm', text: it.label }), it.hint ? h('span', { class: 'hint', text: it.hint }) : null));
+      });
+      box.hidden = !state.items.length;
+    }
+    function show(items) { state.items = items; state.index = 0; render(); }
+    function pick(i) {
+      var it = state.items[i], t = state.token;
+      if (!it || !t) return;
+      var next = field.value.slice(0, t.start) + it.insert + field.value.slice(t.end);
+      close();
+      setFieldValue(field, next, t.start + it.insert.length);
+    }
+    function tokenAt() {
+      var pos = field.selectionStart;
+      if (pos == null) return null;
+      var before = field.value.slice(0, pos);
+      var quoted = QUOTED_MENTION.exec(before);  /* @" 로 시작하면 닫는 따옴표 전까지(공백 포함)가 검색어 */
+      if (quoted) return { kind: '@', query: quoted[2], start: pos - quoted[2].length - 2, end: pos };
+      var m = /(^|\s)([\/@])([^\s]*)$/.exec(before);
+      return m ? { kind: m[2], query: m[3], start: pos - m[3].length - 1, end: pos } : null;
+    }
+    function fileInsert(path) {
+      return /\s/.test(path) ? '@' + MENTION_QUOTE + path + MENTION_QUOTE + ' ' : '@' + path + ' ';
+    }
+    function skillItems(info, query) {
+      /* 이름(start) 과 접두를 붙인 이름(harness:start) 둘 다 받는다. /h, /ha 는 이름에 든 글자로만 거른다. */
+      var q = query.toLowerCase(), pre = info.plugin.toLowerCase() + ':';
+      if (q.indexOf(pre) === 0) q = q.slice(pre.length);
+      else if (q === info.plugin.toLowerCase()) q = '';
+      var hits = info.skills.filter(function (sk) { return sk.name.toLowerCase().indexOf(q) >= 0; });
+      hits.sort(function (a, b) { return (a.name.toLowerCase().indexOf(q) === 0 ? 0 : 1) - (b.name.toLowerCase().indexOf(q) === 0 ? 0 : 1); });
+      return hits.slice(0, ASSIST_MAX_ITEMS).map(function (sk) {
+        var d = sk.description || '';
+        return { label: '/' + sk.name, hint: d.length > ASSIST_HINT_LENGTH ? d.slice(0, ASSIST_HINT_LENGTH) + '…' : d, insert: skillCommand(info, sk.name) };
+      });
+    }
+    function update() {
+      var t = tokenAt();
+      if (!t) { close(); return; }
+      clearTimeout(timer);
+      var mine = ++state.seq;
+      state.token = t;
+      if (t.kind === '/') {
+        withSkills(function (info) { if (mine === state.seq) show(skillItems(info, t.query)); });
+        return;
+      }
+      var root = getRoot();
+      if (!root) { show([]); return; }
+      timer = setTimeout(function () {
+        api('GET', '/api/files' + qs({ root: root, q: t.query })).then(function (d) {
+          if (mine !== state.seq || !document.body.contains(field)) return;
+          show(listOf(d, 'files').slice(0, ASSIST_MAX_ITEMS * 2).map(function (p) { return { label: p, hint: '', insert: fileInsert(p) }; }));
+        }, function (e) { console.warn('파일을 찾지 못했습니다', e); if (mine === state.seq) show([]); });
+      }, ASSIST_FILE_DELAY);
+    }
+    field.addEventListener('input', update);
+    field.addEventListener('click', update);
+    field.addEventListener('blur', close);
+    field.addEventListener('keyup', function (e) { if (CARET_KEYS.indexOf(e.key) >= 0) update(); });
+    field.addEventListener('keydown', function (e) {
+      if (!isOpen() || e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        state.index = (state.index + (e.key === 'ArrowDown' ? 1 : state.items.length - 1)) % state.items.length;
+        render();
+      } else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(state.index); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    });
+    return { wrap: h('div', { class: 'assist-wrap' }, field, box), isOpen: isOpen };
+  }
+
   /* ---------- 새 작업 ---------- */
-  var draft = { text: '', cwd: '', note: '', answers: {}, picked: null, extraPaths: [] };
+  var PERMISSION_FALLBACK = [{ value: '', label: '기본(그때그때 확인)' }, { value: 'acceptEdits', label: '파일 고치기는 자동 허용' }, { value: 'plan', label: '계획만 세우기' }];
+  var draft = { text: '', cwd: '', note: '', answers: {}, picked: null, extraPaths: [], model: null, modelCustom: false, customName: '', effort: null, permission: null };
+  var CUSTOM_MODEL = '__custom__';
+  var MODEL_NAME = /^claude-[a-z0-9][a-z0-9.\-]{0,62}(\[1m\])?$/;
+  var MODEL_FALLBACK = [{ value: '', label: '기본값(Claude Code 설정을 따름)' }, { value: 'fable', label: 'Fable' }, { value: 'opus', label: 'Opus' }, { value: 'sonnet', label: 'Sonnet' }, { value: 'haiku', label: 'Haiku' }];
+  var EFFORT_FALLBACK = [{ value: '', label: '기본값' }, { value: 'low', label: '낮음' }, { value: 'medium', label: '보통' }, { value: 'high', label: '높음' }, { value: 'xhigh', label: '아주 높음' }, { value: 'max', label: '최대' }];
+  var modelInfo = null;
+  function modelOptions() { return (modelInfo && modelInfo.options) || MODEL_FALLBACK; }
+  function effortOptions() { return (modelInfo && modelInfo.effortOptions) || EFFORT_FALLBACK; }
+  function permissionOptions() { return (modelInfo && modelInfo.permissionOptions) || PERMISSION_FALLBACK; }
+  function permissionLabel(v) {
+    var hit = permissionOptions().filter(function (o) { return o.value === v; })[0];
+    return hit ? hit.label : v;
+  }
+  function permissionChoice() {
+    if (draft.permission == null) {
+      var saved = window.BH.read('bh-permission');
+      draft.permission = saved != null && permissionOptions().some(function (o) { return o.value === saved; }) ? saved : '';
+    }
+    return draft.permission;
+  }
+  function effortLabel(o) { return o.value ? o.label + ' (' + o.value + ')' : o.label; }
+  function customOk() { return MODEL_NAME.test(draft.customName.trim()); }
+  function modelChoice() {
+    if (draft.model == null) {
+      var saved = window.BH.read('bh-model');
+      var known = function (v) { return modelOptions().some(function (o) { return o.value === v; }); };
+      if (saved != null && known(saved)) draft.model = saved;
+      else if (saved != null && MODEL_NAME.test(saved)) { draft.model = ''; draft.modelCustom = true; draft.customName = saved; }
+      else draft.model = (modelInfo && modelInfo.default) || '';
+    }
+    return draft.modelCustom ? draft.customName.trim() : draft.model;
+  }
+  function effortChoice() {
+    if (draft.effort == null) {
+      var saved = window.BH.read('bh-effort');
+      var known = function (v) { return effortOptions().some(function (o) { return o.value === v; }); };
+      draft.effort = saved != null && known(saved) ? saved : ((modelInfo && modelInfo.defaultEffort) || '');
+    }
+    return draft.effort;
+  }
   function newView(root) {
     var step = 'write', aid = null, data = null, err = '', textErr = false;
     var recent = null, picking = false, custom = '', customMsg = '', customBusy = false;
     var browsing = false, dir = '', fsRows = null, fsErr = '', pollTimer = null, previewText = '', previewOpen = false, previewTimer = null;
-    var starting = false, startedId = null, startErr = '', alive = true;
+    var starting = false, startedId = null, startErr = '', alive = true, browseBusy = false, modelErr = false;
 
     function res() { return (data && data.result) || data || {}; }
     function candidates() { return listOf(res(), 'candidates').map(function (c) { return typeof c === 'string' ? { path: c } : c; }).filter(function (c) { return c && c.path; }); }
     function extraQs() { return listOf(res(), 'extraQuestions').map(function (q) { return typeof q === 'string' ? { question: q, options: [] } : q; }).filter(function (q) { return q && q.question; }); }
 
+    function loadModels() {
+      if (modelInfo) return;
+      api('GET', '/api/models').then(function (d) { modelInfo = d && Array.isArray(d.options) ? d : null; }, function () { modelInfo = null; }).then(function () { if (alive) draw(); });
+    }
     function loadRecent() {
       api('GET', '/api/folders/recent').then(function (d) {
         recent = listOf(d, 'folders').map(function (f) { return typeof f === 'string' ? { path: f } : f; }).filter(function (f) { return f && f.path; });
@@ -992,9 +1249,10 @@
     /* 분석 상태 */
     function begin() {
       if (!draft.text.trim()) { textErr = true; draw(); return; }
+      if (draft.modelCustom && !customOk()) { modelErr = true; draw(); return; }
       if (!draft.cwd) { picking = true; err = ''; draw(); return; }
       step = 'analyzing'; err = ''; draw();
-      api('POST', '/api/new', { text: draft.text.trim(), cwd: draft.cwd }).then(function (d) {
+      api('POST', '/api/new', { text: draft.text.trim(), cwd: draft.cwd, model: modelChoice(), effort: effortChoice() }).then(function (d) {
         aid = d && (d.id || d.analysisId); if (!aid) throw new ApiError(0, '분석을 시작하지 못했습니다.');
         history.replaceState(null, '', '/new?id=' + encodeURIComponent(aid));
         data = d; poll();
@@ -1043,7 +1301,7 @@
 
     function start() {
       starting = true; startErr = ''; draw();
-      api('POST', '/api/new/' + encodeURIComponent(aid) + '/start', { picked: pickedAll(), extraAnswers: answerMap(), note: draft.note.trim() }).then(function (d) {
+      api('POST', '/api/new/' + encodeURIComponent(aid) + '/start', { picked: pickedAll(), extraAnswers: answerMap(), note: draft.note.trim(), model: modelChoice(), effort: effortChoice(), permission: permissionChoice() }).then(function (d) {
         startedId = (d && (d.id || d.sessionId || (d.session && d.session.id))) || '';
         if (startedId) { mergeSession({ id: startedId }); }
         history.replaceState(null, '', '/new');
@@ -1060,6 +1318,19 @@
         if (ok) { custom = ''; useFolder(d.path || d.realpath || p); }
         else customMsg = (d && (d.error || d.reason || d.message)) || '이 폴더를 사용할 수 없습니다.';
       }, function (e) { customMsg = e.message; }).then(function () { customBusy = false; if (alive) draw(); });
+    }
+    function browseFolder() {
+      if (browseBusy) return;
+      browseBusy = true; customMsg = ''; draw();
+      api('POST', '/api/folders/pick', { path: draft.cwd || '' }).then(function (d) {
+        if (d && d.cancelled) return null;
+        var p = d && d.path;
+        if (!p) { customMsg = '고른 폴더를 받지 못했습니다. 경로를 직접 적어 주세요.'; return null; }
+        return api('POST', '/api/folders/validate', { path: p }).then(function (v) {
+          if (v && (v.ok === true || v.valid === true)) useFolder(v.path || v.realpath || p);
+          else customMsg = (v && (v.error || v.reason || v.message)) || '이 폴더를 사용할 수 없습니다.';
+        });
+      }).then(null, function (e) { customMsg = e.message; }).then(function () { browseBusy = false; if (alive) draw(); });
     }
     function loadFs() {
       fsRows = null; fsErr = ''; draw();
@@ -1101,18 +1372,49 @@
       box.appendChild(h('label', { for: 'custom', class: 'field-label', text: '다른 폴더 경로' }));
       box.appendChild(h('div', { class: 'inline-row' },
         h('input', { id: 'custom', class: 'input', value: custom, placeholder: 'C:\\Work\\project  또는  /Users/me/project', autocomplete: 'off', onInput: function (e) { custom = e.target.value; }, onKeydown: function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); validateCustom(); } } }),
-        h('button', { type: 'button', class: 'btn sm', disabled: customBusy, text: customBusy ? '확인 중' : '사용', onClick: validateCustom })));
+        h('button', { type: 'button', class: 'btn sm', disabled: customBusy, text: customBusy ? '확인 중' : '사용', onClick: validateCustom }),
+        h('button', { type: 'button', class: 'btn sm', disabled: browseBusy, text: browseBusy ? '창 여는 중' : '폴더 찾아보기', onClick: browseFolder })));
+      if (browseBusy) box.appendChild(h('p', { class: 'note-muted', role: 'status', text: '폴더 선택 창을 열었어요. 창이 보이지 않으면 작업 표시줄을 확인해 주세요. 고르면 이 화면에 자동으로 적용됩니다.' }));
       box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: customMsg, hidden: !customMsg }));
       page.appendChild(box);
     }
     function drawWrite(page) {
       page.appendChild(h('h1', { class: 'big mt-44', text: '어떤 일을 맡길까요?' }));
-      page.appendChild(h('p', { class: 'lede', text: '평소 말하듯 적어 주세요. Claude가 살펴본 뒤 필요한 자료를 골라 확인을 요청합니다.' }));
+      page.appendChild(h('p', { class: 'lede', text: '평소 말하듯 적어 주세요. Claude Code가 살펴본 뒤 필요한 자료를 골라 확인을 요청합니다.' }));
       page.appendChild(h('label', { for: 'brief', class: 'label mt-32', text: '요청 내용' }));
-      page.appendChild(h('textarea', { id: 'brief', class: 'textarea xl', rows: '8', value: draft.text, placeholder: '예: 구매요청을 올리면 팀장에게 승인 메일이 가면 좋겠어요',
-        onInput: function (e) { draft.text = e.target.value; if (textErr) { textErr = false; var m = root.querySelector('[data-terr]'); if (m) m.hidden = true; } } }));
+      var brief = h('textarea', { id: 'brief', class: 'textarea xl', rows: '8', value: draft.text, placeholder: '예: 구매요청을 올리면 팀장에게 승인 메일이 가면 좋겠어요  (/ 로 스킬, @ 로 파일)',
+        onInput: function (e) { draft.text = e.target.value; if (textErr) { textErr = false; var m = root.querySelector('[data-terr]'); if (m) m.hidden = true; } } });
+      page.appendChild(skillBar(brief));
+      page.appendChild(withAssist(brief, function () { return draft.cwd; }).wrap);
       folderBar(page);
       page.appendChild(h('p', { class: 'note-attn', 'data-terr': '1', role: 'alert', text: '어떤 일인지 한 줄이라도 적어 주세요.', hidden: !textErr }));
+      modelChoice(); effortChoice(); permissionChoice();
+      page.appendChild(h('div', { class: 'field-pair' },
+        h('div', { class: 'field' },
+          h('label', { for: 'model', class: 'field-label', text: '모델' }),
+          h('select', { id: 'model', class: 'input', onChange: function (e) {
+            if (e.target.value === CUSTOM_MODEL) { draft.modelCustom = true; modelErr = false; }
+            else { draft.modelCustom = false; draft.model = e.target.value; window.BH.write('bh-model', draft.model); }
+            draw();
+          } },
+          modelOptions().map(function (o) { return h('option', { value: o.value, selected: !draft.modelCustom && o.value === draft.model, text: o.label }); })
+            .concat([h('option', { value: CUSTOM_MODEL, selected: draft.modelCustom, text: '정식 이름 직접 입력' })]))),
+        h('div', { class: 'field' },
+          h('label', { for: 'effort', class: 'field-label', text: '에포트' }),
+          h('select', { id: 'effort', class: 'input', onChange: function (e) { draft.effort = e.target.value; window.BH.write('bh-effort', draft.effort); } },
+            effortOptions().map(function (o) { return h('option', { value: o.value, selected: o.value === draft.effort, text: effortLabel(o) }); })))));
+      if (draft.modelCustom) {
+        page.appendChild(h('label', { for: 'model-custom', class: 'field-label', text: '모델 정식 이름' }));
+        page.appendChild(h('input', { id: 'model-custom', class: 'input', type: 'text', value: draft.customName, placeholder: '예: claude-opus-4-1', autocomplete: 'off', spellcheck: 'false',
+          onInput: function (e) { draft.customName = e.target.value; modelErr = false; var m = root.querySelector('[data-merr]'); if (m) m.hidden = true; if (customOk()) window.BH.write('bh-model', draft.customName.trim()); } }));
+        page.appendChild(h('p', { class: 'note-attn', 'data-merr': '1', role: 'alert', text: '이름은 claude- 로 시작하고 영문 소문자, 숫자, 점, 하이픈만 쓸 수 있어요.', hidden: !modelErr }));
+      }
+      page.appendChild(h('div', { class: 'field-pair' },
+        h('div', { class: 'field' },
+          h('label', { for: 'permission', class: 'field-label', text: '권한 모드' }),
+          h('select', { id: 'permission', class: 'input', onChange: function (e) { draft.permission = e.target.value; window.BH.write('bh-permission', draft.permission); } },
+            permissionOptions().map(function (o) { return h('option', { value: o.value, selected: o.value === draft.permission, text: o.label }); })))));
+      page.appendChild(h('p', { class: 'note-muted', text: '요청을 살펴볼 때와 작업을 진행할 때 같은 모델과 에포트(생각의 깊이)를 씁니다. 권한 모드는 작업을 진행하는 Claude Code 세션에만 적용됩니다.' }));
       page.appendChild(h('div', { class: 'btn-row mt-24' }, h('button', { type: 'button', class: 'btn primary', text: '다음', onClick: begin })));
       if (startedId !== null) page.appendChild(h('div', { class: 'started', role: 'status' }, h('span', { text: '이전 작업을 시작했습니다.' }), link(startedId ? '/s/' + encodeURIComponent(startedId) : '/', { text: '작업 화면으로 이동' })));
     }
@@ -1125,7 +1427,7 @@
     }
     function drawFailed(page) {
       page.appendChild(h('div', { class: 'eyebrow tone-attn' }, h('i'), '분석하지 못했습니다'));
-      page.appendChild(h('h1', { class: 'big', text: 'Claude가 요청을 살펴보지 못했어요' }));
+      page.appendChild(h('h1', { class: 'big', text: 'Claude Code가 요청을 살펴보지 못했어요' }));
       page.appendChild(h('p', { class: 'lede', text: err || '알 수 없는 오류입니다.' }));
       page.appendChild(h('div', { class: 'btn-row mt-32' },
         h('button', { type: 'button', class: 'btn', text: '요청 고치기', onClick: function () { step = 'write'; history.replaceState(null, '', '/new'); draw(); } }),
@@ -1138,7 +1440,7 @@
 
       var cands = candidates(), cp = cands.map(function (c) { return c.path; });
       var sec = h('section', { class: 'mt-40' });
-      sec.appendChild(h('h2', { class: 'grp-h' }, 'Claude가 고른 자료', h('span', { text: draft.picked.length + '개 선택' })));
+      sec.appendChild(h('h2', { class: 'grp-h' }, 'Claude Code가 고른 자료', h('span', { text: draft.picked.length + '개 선택' })));
       var ul = h('ul', { class: 'cand' });
       cands.forEach(function (c) {
         var on = draft.picked.indexOf(c.path) >= 0;
@@ -1166,7 +1468,7 @@
         if (opts.length) qsec.appendChild(h('div', { class: 'chips', role: 'group', 'aria-label': q.question }, opts.map(function (o) {
           return h('button', { type: 'button', class: 'chip', 'aria-pressed': String(draft.answers[q.question] === o), text: o, onClick: function () { draft.answers[q.question] = draft.answers[q.question] === o ? '' : o; draw(); schedulePreview(); } });
         })));
-        qsec.appendChild(h('input', { id: id, class: 'input lg' + (opts.length ? ' mt-16' : ''), value: draft.answers[q.question] || '', placeholder: opts.length ? '직접 입력' : '몰라도 괜찮습니다. 비워 두면 Claude가 다시 묻습니다.', autocomplete: 'off',
+        qsec.appendChild(h('input', { id: id, class: 'input lg' + (opts.length ? ' mt-16' : ''), value: draft.answers[q.question] || '', placeholder: opts.length ? '직접 입력' : '몰라도 괜찮습니다. 비워 두면 Claude Code가 다시 묻습니다.', autocomplete: 'off',
           onInput: function (e) { draft.answers[q.question] = e.target.value; schedulePreview(); }, onChange: function () { if (opts.length) draw(); } }));
       });
       qsec.appendChild(h('label', { for: 'note', class: 'sect-h mt-24', text: '그 밖에 알아 두면 좋은 내용이 있나요?' }));
@@ -1212,8 +1514,8 @@
         var st = norm(d.status);
         if (st === 'ready') enterReview(); else if (st === 'failed') { step = 'failed'; err = d.error || d.message || '분석에 실패했습니다.'; draw(); } else poll();
         loadRecent();
-      }, function () { aid = null; step = 'write'; history.replaceState(null, '', '/new'); draw(); loadRecent(); });
-    } else { draw(); loadRecent(); }
+      }, function () { aid = null; step = 'write'; history.replaceState(null, '', '/new'); draw(); loadRecent(); loadModels(); });
+    } else { draw(); loadRecent(); loadModels(); }
     return {
       title: function () { return '새 작업'; },
       destroy: function () { alive = false; clearTimeout(pollTimer); clearTimeout(previewTimer); if (startedId !== null) draft = { text: '', cwd: draft.cwd, note: '', answers: {}, picked: null, extraPaths: [] }; }

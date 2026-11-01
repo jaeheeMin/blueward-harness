@@ -44,14 +44,6 @@ def state_dir(env: Mapping[str, str] | None = None, home: Path | None = None) ->
     return root / "harness-console"
 
 
-def detach_kwargs(os_name: str | None = None) -> dict:
-    """띄운 서버가 부모(Claude 세션의 Bash)가 끝나도 살아 있게 하는 Popen 인자."""
-    if (os_name or current_os()) == "windows":
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-        return {"creationflags": flags}
-    return {"start_new_session": True}
-
-
 def hidden_window_kwargs(os_name: str | None = None) -> dict:
     """Windows 에서 자식 프로세스의 콘솔 창이 뜨지 않게 한다. POSIX 는 필요 없다."""
     if (os_name or current_os()) == "windows":
@@ -131,12 +123,30 @@ def terminate_pid(pid: int, os_name: str | None = None, runner=subprocess.run) -
         return False
 
 
-def popen_detached_kwargs(os_name: str | None = None) -> dict:
-    """서버를 띄우는 Popen 인자. 분리 플래그에 창 숨김을 하나의 creationflags 로 합친다(키워드 중복 방지)."""
-    kw = detach_kwargs(os_name)
-    if "creationflags" in kw:
-        kw["creationflags"] |= hidden_window_kwargs(os_name).get("creationflags", 0)
-    return kw
+def windows_server_python(exists: Callable[[str], bool] = os.path.exists) -> tuple[str, bool]:
+    """Windows 에서 서버를 띄울 (인터프리터, 콘솔 없는 인터프리터인지).
+    venv 의 python.exe 는 진짜 python 을 자식으로 다시 띄우는 런처라 콘솔 창이 생기고 프로세스가 둘이 된다.
+    그래서 base 인터프리터(sys._base_executable)와 같은 폴더의 pythonw.exe 를 쓴다. 서버는 표준 라이브러리만 쓴다.
+    pythonw.exe 가 없으면 지금 인터프리터로 돌아간다(이때 창은 CREATE_NO_WINDOW 로 막는다)."""
+    base = getattr(sys, "_base_executable", None) or sys.executable
+    pyw = ntpath.join(ntpath.dirname(base), "pythonw.exe")
+    if exists(pyw):
+        return pyw, True
+    return sys.executable, False
+
+
+def popen_detached_kwargs(os_name: str | None = None, windowless: bool = True, breakaway: bool = True) -> dict:
+    """서버를 띄우는 Popen 인자. Windows 는 하나의 creationflags 로 합친다(키워드 중복 방지).
+    windowless=True(pythonw.exe): DETACHED_PROCESS. False(콘솔용 인터프리터): DETACHED_PROCESS 와 같이 주면
+    CREATE_NO_WINDOW 가 무시되므로 DETACHED_PROCESS 대신 CREATE_NO_WINDOW 를 쓴다.
+    breakaway: 부모 Job Object 에 묶여 같이 정리되지 않게 한다(부모 Job 이 허용하지 않으면 호출한 쪽이 빼고 다시 시도한다)."""
+    if (os_name or current_os()) != "windows":
+        return {"start_new_session": True}
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008) if windowless else getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    if breakaway:
+        flags |= getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+    return {"creationflags": flags}
 
 
 def open_in_browser(url: str, opener: Callable[[str], bool] = webbrowser.open) -> bool:
@@ -145,6 +155,181 @@ def open_in_browser(url: str, opener: Callable[[str], bool] = webbrowser.open) -
         return bool(opener(url))
     except Exception:
         return False
+
+
+PICK_TIMEOUT = 600.0  # 사람이 폴더를 고르는 동안 기다리는 시간(초). 넘으면 프로세스를 끝낸다
+PICK_FALLBACK = "경로를 직접 적어 주세요."
+# 고정 스크립트. 사용자 입력을 넣지 않는다. 시작 폴더는 환경변수 HARNESS_PICK_START(UTF-8 base64)로 받는다.
+# 탐색기식 창(IFileOpenDialog + FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)을 Add-Type 한 작은 C# 로 띄우고,
+# COM 이 실패하면 옛 FolderBrowserDialog 로 대신한다.
+# TopMost 소유 폼을 쓰는 이유: 서버가 창 없이 돌아서 대화상자가 다른 창 뒤에 숨기 쉽다.
+# 고르면 UTF-8 경로를 base64 로 한 줄 출력하고, 취소하면 아무것도 출력하지 않고 0 으로 끝난다(한글 경로가 콘솔 코드페이지에 깨지지 않게).
+WINDOWS_PICK_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$start = [Environment]::GetFolderPath('UserProfile')
+try {
+  $given = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:HARNESS_PICK_START))
+  if ($given -and (Test-Path -LiteralPath $given -PathType Container)) { $start = $given }
+} catch {}
+$title = '작업 폴더 고르기'
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.FormBorderStyle = 'None'
+$owner.Opacity = 0
+$owner.Size = New-Object System.Drawing.Size(1, 1)
+$owner.StartPosition = 'CenterScreen'
+$owner.Show()
+$owner.Activate()
+$picked = $null
+$done = $false
+try {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class HarnessPick {
+  [ComImport, Guid("DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7")] class FileOpenDialogCom {}
+  [ComImport, Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IShellItem {
+    void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+    void GetParent(out IShellItem ppsi);
+    void GetDisplayName(uint sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
+    void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+    void Compare(IShellItem psi, uint hint, out int piOrder);
+  }
+  [ComImport, Guid("d57c7288-d4ad-4768-be02-9d969532d960"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IFileOpenDialog {
+    [PreserveSig] int Show(IntPtr hwndOwner);
+    void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+    void SetFileTypeIndex(uint iFileType);
+    void GetFileTypeIndex(out uint piFileType);
+    void Advise(IntPtr pfde, out uint pdwCookie);
+    void Unadvise(uint dwCookie);
+    void SetOptions(uint fos);
+    void GetOptions(out uint pfos);
+    void SetDefaultFolder(IShellItem psi);
+    void SetFolder(IShellItem psi);
+    void GetFolder(out IShellItem ppsi);
+    void GetCurrentSelection(out IShellItem ppsi);
+    void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+    void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+    void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+    void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+    void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+    void GetResult(out IShellItem ppsi);
+    void AddPlace(IShellItem psi, int fdap);
+    void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+    void Close(int hr);
+    void SetClientGuid(ref Guid guid);
+    void ClearClientData();
+    void SetFilter(IntPtr pFilter);
+    void GetResults(out IntPtr ppenum);
+    void GetSelectedItems(out IntPtr ppsai);
+  }
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+  static extern void SHCreateItemFromParsingName(string path, IntPtr pbc, ref Guid riid, out IShellItem item);
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int dwProcessId);
+  [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  // 고른 경로를 돌려준다. 취소하면 "". COM 이 실패하면 예외를 던진다(호출한 쪽이 대체 창을 띄운다).
+  public static string Pick(IntPtr owner, string start, string title) {
+    Guid shellItem = new Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe");
+    var dlg = (IFileOpenDialog)new FileOpenDialogCom();
+    try {
+      dlg.SetOptions(0x20 | 0x40 | 0x800);  // PICKFOLDERS | FORCEFILESYSTEM | PATHMUSTEXIST
+      dlg.SetTitle(title);
+      IShellItem folder;
+      SHCreateItemFromParsingName(start, IntPtr.Zero, ref shellItem, out folder);
+      dlg.SetFolder(folder);
+      AllowSetForegroundWindow(-1);
+      keybd_event(0x12, 0, 0, UIntPtr.Zero);  // Alt 를 한 번 눌러 포그라운드 잠금을 풀어 준다
+      keybd_event(0x12, 0, 2, UIntPtr.Zero);
+      SetForegroundWindow(owner);
+      int hr = dlg.Show(owner);
+      if (hr == unchecked((int)0x800704C7)) return "";  // ERROR_CANCELLED
+      if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+      IShellItem item;
+      dlg.GetResult(out item);
+      string path;
+      item.GetDisplayName(0x80058000, out path);  // SIGDN_FILESYSPATH
+      return path ?? "";
+    } finally { Marshal.ReleaseComObject(dlg); }
+  }
+}
+'@
+  $picked = [HarnessPick]::Pick($owner.Handle, $start, $title)
+  $done = $true
+} catch {
+  $done = $false
+}
+if (-not $done) {
+  $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+  $dlg.Description = '작업 폴더를 골라 주세요.'
+  $dlg.ShowNewFolderButton = $true
+  $dlg.SelectedPath = $start
+  if ($dlg.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { $picked = $dlg.SelectedPath }
+}
+if ($picked) {
+  [Console]::Out.Write([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($picked)))
+}
+$owner.Dispose()
+exit 0
+"""
+
+
+class PickUnavailable(Exception):
+    """폴더 선택 창을 띄우지 못했다. 메시지는 화면에 그대로 보여 준다."""
+
+
+def _windows_pick_command() -> list[str]:
+    import base64
+    encoded = base64.b64encode(WINDOWS_PICK_SCRIPT.encode("utf-16-le")).decode("ascii")
+    return ["powershell", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", encoded]
+
+
+def pick_folder(os_name: str | None = None, runner=subprocess.run, timeout: float = PICK_TIMEOUT,
+                start: str | None = None) -> str | None:
+    """OS 의 폴더 선택 창을 띄워 고른 경로를 돌려준다. 취소하면 None. 띄우지 못하면 PickUnavailable.
+    runner 는 subprocess.run 과 같은 모양이다(시험이 가짜를 넣는다). 셸을 거치지 않고 인자 목록으로만 부른다.
+    start 는 Windows 창의 시작 폴더(없거나 폴더가 아니면 사용자 홈). 스크립트 본문이 아니라 환경변수로만 넘긴다."""
+    name = os_name or current_os()
+    extra: dict = {}
+    if name == "windows":
+        cmd, cancel_code = _windows_pick_command(), None
+        import base64
+        extra["env"] = {**os.environ, "HARNESS_PICK_START": base64.b64encode((start or "").encode("utf-8")).decode("ascii")}
+    elif name == "macos" or (name == "posix" and sys.platform == "darwin"):
+        cmd, cancel_code = ["osascript", "-e", "POSIX path of (choose folder)"], 1
+    else:
+        raise PickUnavailable("이 컴퓨터에서는 폴더 선택 창을 열 수 없습니다. " + PICK_FALLBACK)
+    try:
+        done = runner(cmd, capture_output=True, timeout=timeout, **extra, **hidden_window_kwargs(name))
+    except subprocess.TimeoutExpired:
+        raise PickUnavailable("폴더 선택 창이 너무 오래 열려 있어 닫았습니다. " + PICK_FALLBACK)
+    except (OSError, subprocess.SubprocessError):
+        raise PickUnavailable("폴더 선택 창을 열지 못했습니다. " + PICK_FALLBACK)
+    code = getattr(done, "returncode", 1)
+    raw = getattr(done, "stdout", b"") or b""
+    if code != 0:
+        if code == cancel_code:
+            return None
+        raise PickUnavailable("폴더 선택 창이 정상적으로 끝나지 않았습니다. " + PICK_FALLBACK)
+    text = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+    text = text.strip()
+    if not text:
+        return None  # 취소(Windows 는 아무것도 출력하지 않는다)
+    if name == "windows":
+        import base64
+        import binascii
+        try:
+            text = base64.b64decode(text, validate=True).decode("utf-8")
+        except (binascii.Error, ValueError):
+            raise PickUnavailable("고른 폴더 경로를 읽지 못했습니다. " + PICK_FALLBACK)
+    elif len(text) > 1:
+        text = text.rstrip("/") or "/"
+    return text
 
 
 def same_path(a: str | os.PathLike, b: str | os.PathLike, os_name: str | None = None) -> bool:

@@ -22,7 +22,8 @@ import analysis
 import gitstate
 import platform_compat
 from hooks_api import Hooks, permission_reply, question_reply
-from managed import Manager
+from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
+                     PERMISSION_VALUES, Manager)
 from store import MAX_PENDING_STOP, Store, public_session, can_send
 
 APP_NAME = "harness-console"
@@ -36,6 +37,12 @@ DRAIN_LIMIT = 1 << 20   # 오류 응답 전에 버려 읽는 본문의 상한
 DRAIN_SECONDS = 1.0     # 버려 읽는 데 쓰는 총 시간
 HEARTBEAT = 10.0
 HIDDEN_SKILLS = {"update", "scaffold", "open"}
+# 모델 이름 형식·에포트·권한 모드 허용 값은 managed.py 에 있다(띄울 때도 한 번 더 검사한다).
+# @ 파일 찾기 한도와 건너뛰는 큰 폴더
+FILE_RESULT_LIMIT = 50
+FILE_SCAN_LIMIT = 20000
+FILE_QUERY_MAX = 200
+SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", ".vscode", "dist", "build", ".mypy_cache", ".pytest_cache"}
 # Windows 레지스트리의 MIME 설정에 영향받지 않게 직접 매핑한다(CSP 가 script 를 막는 일 방지).
 STATIC_TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".html": "text/html",
                 ".svg": "image/svg+xml", ".json": "application/json", ".map": "application/json"}
@@ -57,42 +64,54 @@ def plugin_info(plugin_root: Path) -> tuple[str, str]:
         return "harness", ""
 
 
-def load_skills(plugin_root: Path) -> list[str]:
-    """skills/*/SKILL.md 의 frontmatter name 에서 읽는다. update, scaffold, open 은 버튼으로 내지 않는다."""
-    names = []
+def load_skill_info(plugin_root: Path) -> list[dict]:
+    """skills/*/SKILL.md 의 frontmatter name·description 에서 읽는다. update, scaffold, open 은 버튼으로 내지 않는다."""
+    items = []
     for f in sorted((plugin_root / "skills").glob("*/SKILL.md")):
-        name = f.parent.name
+        name, description = f.parent.name, ""
         try:
             head = f.read_text(encoding="utf-8").split("---", 2)
             for line in head[1].splitlines() if len(head) > 2 else []:
                 if line.startswith("name:"):
                     name = line.split(":", 1)[1].strip()
-        except OSError:
-            pass
+                elif line.startswith("description:"):
+                    description = line.split(":", 1)[1].strip().strip("\"'")
+        except OSError as e:
+            print(f"스킬 파일을 읽지 못했습니다({f.name}): {e}", file=sys.stderr)
         if name not in HIDDEN_SKILLS:
-            names.append(name)
-    return names
+            items.append({"name": name, "description": description})
+    return items
+
+
+def load_skills(plugin_root: Path) -> list[str]:
+    return [i["name"] for i in load_skill_info(plugin_root)]
 
 
 class App:
     def __init__(self, port: int, state_dir: Path | None, plugin_root: Path, clock=time.time,
                  browser_open=webbrowser.open, claude_cmd=None, git_inspect=gitstate.inspect,
                  model: str = "", poll: float = 0.5, question_wait: float = 300.0, sync_spawn: bool = False,
-                 popen=subprocess.Popen, request_timeout: float = REQUEST_TIMEOUT):
+                 popen=subprocess.Popen, request_timeout: float = REQUEST_TIMEOUT, folder_picker=platform_compat.pick_folder,
+                 effort: str = ""):
         self.port = port
+        self.default_model = model
+        self.default_effort = effort if effort in EFFORT_VALUES else ""
+        self.folder_picker = folder_picker
+        self.pick_lock = threading.Lock()  # 폴더 선택 창은 한 번에 하나만 연다
         self.request_timeout = request_timeout
         self.clock = clock
         self.plugin_root = Path(plugin_root)
         self.plugin_name, self.version = plugin_info(self.plugin_root)
-        self.skills = load_skills(self.plugin_root)
+        self.skill_info = load_skill_info(self.plugin_root)
+        self.skills = [i["name"] for i in self.skill_info]
         self.browser_open = browser_open
         self.git_inspect = git_inspect
         self.sync_spawn = sync_spawn
         self.static_dir = Path(__file__).resolve().parent / "static"
         self.store = Store(state_dir, clock)
         claude_cmd = claude_cmd or platform_compat.find_claude
-        self.manager = Manager(self.store, claude_cmd, str(self.plugin_root), model=model, popen=popen)
-        self.analyses = analysis.Analyses(claude_cmd, model=model, spawn=self.spawn)
+        self.manager = Manager(self.store, claude_cmd, str(self.plugin_root), model=model, popen=popen, effort=self.default_effort)
+        self.analyses = analysis.Analyses(claude_cmd, model=model, spawn=self.spawn, effort=self.default_effort)
         self.hooks = Hooks(self.store, clock, poll, question_wait, refresh_git=self.refresh_git)
         self.tokens: dict[str, float] = {}
         self.cookies: dict[str, float] = {}  # 쿠키 값 -> 만료 시각(서버 쪽에서도 COOKIE_MAX_AGE 를 지킨다)
@@ -271,6 +290,18 @@ class App:
             raise HttpError(409, "실행 중인 프로세스가 없습니다.")
         return 200, {"ok": True}
 
+    def a_permission(self, g, q, b):
+        s = self.get_session(g[0])
+        mode = b.get("mode")
+        if not isinstance(mode, str) or mode not in PERMISSION_VALUES:
+            raise HttpError(400, "고를 수 없는 권한 모드입니다.")
+        if not s["managed"]:
+            raise HttpError(409, "콘솔이 띄운 세션만 권한 모드를 바꿀 수 있습니다.")
+        result = self.manager.set_permission(s["id"], mode)
+        if not result["ok"]:
+            raise HttpError(502, "권한 모드를 바꾸지 못했습니다: " + str(result.get("error", "")))
+        return 200, dict(result, session=self.model_of(s))
+
     def a_request(self, g, q, b):
         r = self.store.get_request(g[0])
         if r is None:
@@ -321,16 +352,88 @@ class App:
             result[q] = value
         return result
 
+    # 모델
+    def model_options(self) -> list[dict]:
+        options = [{"value": v, "label": label} for v, label in MODEL_OPTIONS]
+        if self.default_model and all(o["value"] != self.default_model for o in options):
+            options.append({"value": self.default_model, "label": self.default_model})  # 서버를 켠 쪽이 정한 값도 고를 수 있게
+        return options
+
+    def a_models(self, g, q, b):
+        return 200, {"options": self.model_options(), "default": self.default_model,
+                     "effortOptions": [{"value": v, "label": label} for v, label in EFFORT_OPTIONS],
+                     "defaultEffort": self.default_effort, "customPattern": MODEL_NAME.pattern,
+                     "permissionOptions": [{"value": v, "label": label} for v, label in PERMISSION_OPTIONS]}
+
+    def a_skills(self, g, q, b):
+        return 200, {"plugin": self.plugin_name, "skills": self.skill_info}
+
+    def a_files(self, g, q, b):
+        """@ 멘션용 파일 찾기. 서버가 아는 작업 폴더 안만 보고, 큰 폴더는 건너뛰며, 결과·탐색 수에 상한이 있다."""
+        raw_root = platform_compat.clean_user_path(q.get("root", [""])[0])
+        root = os.path.realpath(os.path.expanduser(raw_root))
+        if not raw_root or not any(platform_compat.same_path(root, r) for r in self.known_roots()):
+            raise HttpError(403, "고른 작업 폴더가 아닙니다.")
+        needle = q.get("q", [""])[0][:FILE_QUERY_MAX].replace("\\", "/").lower()
+        results, scanned, truncated = [], 0, False
+        for cur, dirs, files in os.walk(root):
+            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+            for name in sorted(files):
+                scanned += 1
+                if scanned > FILE_SCAN_LIMIT:
+                    truncated = True
+                    break
+                full = os.path.join(cur, name)
+                rel = os.path.relpath(full, root).replace("\\", "/")
+                if needle not in rel.lower() or not platform_compat.is_within(full, root):
+                    continue  # 링크가 작업 폴더 밖을 가리키면 내지 않는다
+                results.append(rel)
+                if len(results) >= FILE_RESULT_LIMIT:
+                    truncated = True
+                    break
+            if truncated:
+                break
+        return 200, {"root": root, "files": results, "truncated": truncated}
+
+    def requested_permission(self, b: dict) -> str | None:
+        """요청에 permission 이 없으면 None(세션에 기억된 값 또는 기본). 있으면 허용 3종 안의 값만 받는다."""
+        if "permission" not in b or b["permission"] is None:
+            return None
+        value = b["permission"]
+        if not isinstance(value, str) or value not in PERMISSION_VALUES:
+            raise HttpError(400, "고를 수 없는 권한 모드입니다.")
+        return value
+
+    def requested_model(self, b: dict) -> str | None:
+        """요청에 model 이 없으면 None(서버 기본값). 있으면 허용 별칭이거나 안전한 정식 이름만 받는다."""
+        if "model" not in b or b["model"] is None:
+            return None
+        value = b["model"]
+        if not isinstance(value, str) or not (value in {o["value"] for o in self.model_options()} or MODEL_NAME.fullmatch(value)):
+            raise HttpError(400, "고를 수 없는 모델입니다.")
+        return value
+
+    def requested_effort(self, b: dict) -> str | None:
+        """요청에 effort 가 없으면 None(서버 기본값). 있으면 허용 목록 안의 값만 받는다."""
+        if "effort" not in b or b["effort"] is None:
+            return None
+        value = b["effort"]
+        if not isinstance(value, str) or value not in EFFORT_VALUES:
+            raise HttpError(400, "고를 수 없는 에포트입니다.")
+        return value
+
     # 새 작업
     def a_new(self, g, q, b):
         text, cwd = b.get("text"), b.get("cwd")
         if not isinstance(text, str) or not text.strip():
             raise HttpError(400, "요청 글이 비어 있습니다.")
+        model = self.requested_model(b)
+        effort = self.requested_effort(b)
         folder = self.folder_info(cwd)
         if not folder["ok"]:
             raise HttpError(400, folder["error"])
         self.store.add_folder(folder["path"])
-        return 202, {"id": self.analyses.start(text.strip(), folder["path"])}
+        return 202, {"id": self.analyses.start(text.strip(), folder["path"], model, effort)}
 
     def get_job(self, jid):
         job = self.analyses.get(jid)
@@ -367,11 +470,18 @@ class App:
 
     def a_start(self, g, q, b):
         job = self.get_job(g[0])
+        model = self.requested_model(b)
+        if model is None:
+            model = job.get("model")  # 분석 때 고른 모델을 그대로 쓴다
+        effort = self.requested_effort(b)
+        if effort is None:
+            effort = job.get("effort")
+        permission = self.requested_permission(b)
         message = self.preview_text(job, b.get("picked") or [], b.get("extraAnswers") or {}, b.get("note") or "")
         with job["start_lock"]:  # 시작 버튼을 두 번 눌러도 세션은 하나만 뜬다
             sid = job.get("session_id")
             if sid is None:
-                sid = self.manager.launch(job["cwd"], message, title=job["text"].split("\n", 1)[0])
+                sid = self.manager.launch(job["cwd"], message, title=job["text"].split("\n", 1)[0], model=model, effort=effort, permission=permission)
                 if sid is None:
                     raise HttpError(502, "claude 세션을 띄우지 못했습니다. " + platform_compat.CLAUDE_MISSING)
                 job["session_id"] = sid
@@ -396,6 +506,23 @@ class App:
         with self.store.lock:
             paths = [p for p in self.store.folders if os.path.isdir(p)]
         return 200, [{"path": p, "name": os.path.basename(p) or p} for p in paths]
+
+    def a_pick(self, g, q, b):
+        """서버를 돌리는 컴퓨터에 OS 폴더 선택 창을 띄운다. 쿠키로 인증한 로컬 사용자만 부를 수 있다."""
+        if not self.pick_lock.acquire(blocking=False):
+            raise HttpError(409, "폴더 선택 창이 이미 열려 있습니다. 열린 창에서 고르거나 닫아 주세요.")
+        start = b.get("path")
+        start = start if isinstance(start, str) and 0 < len(start) <= 1024 and os.path.isdir(start) else None
+        try:
+            try:
+                path = self.folder_picker(start=start) if start else self.folder_picker()
+            except platform_compat.PickUnavailable as e:
+                raise HttpError(503, str(e))
+        finally:
+            self.pick_lock.release()
+        if path is None:
+            return 200, {"cancelled": True}
+        return 200, {"path": path}
 
     def a_validate(self, g, q, b):
         info = self.folder_info(b.get("path"))
@@ -440,6 +567,7 @@ ROUTES = [
     ("PUT", re.compile(rf"/api/sessions/{S}/skills/{S}/reservation"), App.a_reserve),
     ("DELETE", re.compile(rf"/api/sessions/{S}/skills/{S}/reservation"), App.a_unreserve),
     ("POST", re.compile(rf"/api/sessions/{S}/interrupt"), App.a_interrupt),
+    ("PUT", re.compile(rf"/api/sessions/{S}/permission"), App.a_permission),
     ("GET", re.compile(rf"/api/requests/{S}"), App.a_request),
     ("POST", re.compile(rf"/api/requests/{S}/answer"), App.a_answer),
     ("POST", re.compile(r"/api/new"), App.a_new),
@@ -448,7 +576,11 @@ ROUTES = [
     ("GET", re.compile(rf"/api/new/{S}/preview"), App.a_preview),
     ("GET", re.compile(r"/api/folders/recent"), App.a_recent),
     ("POST", re.compile(r"/api/folders/validate"), App.a_validate),
+    ("POST", re.compile(r"/api/folders/pick"), App.a_pick),
+    ("GET", re.compile(r"/api/models"), App.a_models),
     ("GET", re.compile(r"/api/fs"), App.a_fs),
+    ("GET", re.compile(r"/api/skills"), App.a_skills),
+    ("GET", re.compile(r"/api/files"), App.a_files),
 ]
 
 
@@ -700,12 +832,14 @@ def main(argv: list[str] | None = None) -> int:
     port = platform_compat.port_from_env()
     state = platform_compat.state_dir()
     plugin_root = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolve().parent.parent)
-    app = App(port, state, plugin_root, model=os.environ.get("HARNESS_CONSOLE_MODEL", ""))
+    app = App(port, state, plugin_root, model=os.environ.get("HARNESS_CONSOLE_MODEL", ""),
+              effort=os.environ.get("HARNESS_CONSOLE_EFFORT", ""))
     try:
         server = make_server(app)
     except OSError as e:
         reason = f"포트 {port} 를 열지 못했습니다: {type(e).__name__} {getattr(e, 'winerror', None) or e.errno or ''} {e.strerror or ''}".strip()
-        print(reason, file=sys.stderr)
+        if sys.stderr is not None:  # pythonw.exe 로 뜨면 stderr 가 없다
+            print(reason, file=sys.stderr)
         write_error_file(state, reason)
         return 1
     state.mkdir(parents=True, exist_ok=True)

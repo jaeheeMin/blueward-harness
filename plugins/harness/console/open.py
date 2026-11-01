@@ -52,13 +52,30 @@ def probe(port: int) -> str:
     return "ours" if isinstance(data, dict) and data.get("app") == APP_NAME else "other"
 
 
-def server_popen_args(port: int, os_name: str | None = None) -> tuple[list[str], dict]:
-    """서버를 띄우는 Popen 의 (명령, 키워드 인자). creationflags 는 하나로 합쳐 한 번만 넣는다."""
+def server_popen_args(port: int, os_name: str | None = None, breakaway: bool = True,
+                      exists=os.path.exists) -> tuple[list[str], dict]:
+    """서버를 띄우는 Popen 의 (명령, 키워드 인자). creationflags 는 하나로 합쳐 한 번만 넣는다.
+    Windows 는 콘솔 창이 없는 pythonw.exe 로 띄운다(없으면 sys.executable + CREATE_NO_WINDOW)."""
     env = dict(os.environ, HARNESS_CONSOLE_PORT=str(port))
     server = Path(__file__).resolve().parent / "server.py"
+    python, windowless = sys.executable, True
+    if (os_name or platform_compat.current_os()) == "windows":
+        python, windowless = platform_compat.windows_server_python(exists)
     kwargs = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
-                  **platform_compat.popen_detached_kwargs(os_name))
-    return [sys.executable, str(server)], kwargs
+                  **platform_compat.popen_detached_kwargs(os_name, windowless, breakaway))
+    return [python, str(server)], kwargs
+
+
+def launch_server(port: int, os_name: str | None = None, popen=subprocess.Popen, exists=os.path.exists):
+    """서버를 띄운다. 부모 Job 이 breakaway 를 막아 OSError 가 나면 그 플래그를 빼고 한 번 더 시도한다."""
+    args, kwargs = server_popen_args(port, os_name, True, exists)
+    if "creationflags" not in kwargs:
+        return popen(args, **kwargs)
+    try:
+        return popen(args, **kwargs)
+    except OSError:
+        args, kwargs = server_popen_args(port, os_name, False, exists)
+        return popen(args, **kwargs)
 
 
 def err_path() -> Path:
@@ -77,8 +94,7 @@ def start_server(port: int) -> None:
         err_path().unlink()  # 이전 실행의 실패 이유가 남아 있지 않게 한다
     except OSError:
         pass
-    args, kwargs = server_popen_args(port)
-    subprocess.Popen(args, **kwargs)
+    launch_server(port)
 
 
 def ensure_server(port: int, wait: float = 20.0) -> str | None:
