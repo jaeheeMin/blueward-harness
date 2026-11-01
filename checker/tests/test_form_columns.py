@@ -476,3 +476,10 @@ def test_화면_영역이_지도의_칸과_겹치면_검사_불능이다(repo, c
     _with_map(repo, SPEC_MAP + "    화면:\n      - 이름: 화면 1\n        영역: A10:C16\n", "시험양식.yaml")
     code, out = _spec_check(repo, capsys, SPEC_OK + SCREEN_MD)
     assert code == EXIT_CONFIG_ERROR and "겹친다" in out["message"]
+
+
+def test_Spec_머리의_버전_줄은_양식_밖_검사에_걸리지_않는다(repo, capsys):
+    _with_map(repo, SPEC_MAP, "시험양식.yaml")
+    text = _spec(SPEC_OK).replace("# DEV-001 시험\n", "# DEV-001 시험\n\n버전: 0.1\n", 1)
+    code, out = _check(repo, capsys, text, "docs/spec/DEV-001-시험.md")
+    assert code == EXIT_PASS, out

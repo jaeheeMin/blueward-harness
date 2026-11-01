@@ -1715,3 +1715,43 @@ def test_서식_행_정리_범위_겹침_판정은_map_problems_에서_열과_�
     assert map_problems(bounded) == []
     screen = mk(("화면", [{"이름": "g", "영역": "A8:B12"}]))
     assert any("화면" in m and "겹친다" in m for _, m in map_problems(screen))
+
+
+# ---------------------------------------------------------------- 작업본 머리 버전(#576)
+
+def _head_version_map(proj: Path) -> None:
+    text = MAP.replace("버전: {표: 이력, 열: Ver, 행: 마지막}", "버전: {메타: 버전}")
+    assert text != MAP
+    (proj / "templates" / "forms" / "시험양식.yaml").write_text(text, encoding="utf-8")
+
+
+def _with_head(line: str) -> str:
+    return SPEC.replace("# DEV-001 시험\n", f"# DEV-001 시험\n\n{line}\n", 1) if line else SPEC
+
+
+def test_xlsx_작업본_머리_버전으로_파일명_버전을_붙인다(proj, capsys):
+    _head_version_map(proj)
+    code, report = _run(proj, capsys, _with_head("버전: 0.1"))
+    assert code == 0, report
+    assert report["files"] == ["docs/out/T_01_시험 건 1_v0.1.xlsx"]
+    assert (proj / report["files"][0]).is_file()
+
+
+def test_xlsx_작업본_머리_버전의_v는_뗀다(proj, capsys):
+    _head_version_map(proj)
+    code, report = _run(proj, capsys, _with_head("버전: v0.2"))
+    assert code == 0 and report["files"] == ["docs/out/T_01_시험 건 1_v0.2.xlsx"]
+
+
+@pytest.mark.parametrize("line", ["", "버전: ", "버전: 미정", "버전: 1", "버전: 0.1.2"])
+def test_xlsx_작업본_머리_버전이_없거나_형식이_틀리면_거부한다(proj, capsys, line):
+    _head_version_map(proj)
+    code, report = _run(proj, capsys, _with_head(line))
+    assert code == 1
+    assert any("파일 이름에 들어갈 버전 값이 없다" in p["reason"] for p in report["problems"])
+    assert _nothing_written(proj)
+
+
+def test_xlsx_표_버전_자리는_머리_버전과_상관없이_그대로다(proj, capsys):
+    code, report = _run(proj, capsys, _with_head("버전: 9.9"))
+    assert code == 0 and report["files"] == ["docs/out/T_01_시험 건 1_v1.1.xlsx"]

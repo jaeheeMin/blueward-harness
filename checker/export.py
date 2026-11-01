@@ -1400,7 +1400,14 @@ def build_form(
             })
 
     # 파일명
-    out_name = _file_name(form, fmap, map_sheets, spec_sections, md_values, problem, srs.meta if srs else None)
+    if srs is not None:
+        head = srs.meta
+    else:
+        # 작업본 머리의 `버전: x.y` 줄(#576). 형식이 틀리면 없는 것으로 보아 빈 버전 파일명을 거부한다.
+        head = dict(meta or {})
+        if not re.fullmatch(r"[vV]?\d+\.\d+", head.get("버전", "")):
+            head.pop("버전", None)
+    out_name = _file_name(form, fmap, map_sheets, spec_sections, md_values, problem, head)
     if captured and out_name:  # 캡처 그림 파일 이름의 판이 이 산출 판과 같아야 한다(옛 판 캡처를 조용히 넣지 않는다, #348)
         from checker import screen_capture
 
