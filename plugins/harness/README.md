@@ -9,7 +9,7 @@ Skill 12개를 한 번에 제공한다.
 plugins/harness/
   .claude-plugin/plugin.json   플러그인 정의
   hooks/
-    hooks.json                 훅 8개를 선언
+    hooks.json                 훅 8개와 웹 콘솔 훅(console/hook_post.py)을 선언
     pre_write_guard.py         문서·코드 검사(doc-guard) — Write/Edit 직전에 막을지 정한다. src/ 쓰기는 활성화 관문도 건다
     pre-bash-git-guard.sh      git 가드 — 스킬을 거치지 않은 git push, 비밀정보가 든 커밋, 활성화 안 된 ABAP 오브젝트가 있는 푸시를 막는다
     mcp_source_guard.py        SAP ADT MCP 도구 가드 — 코드 규칙 검사, 테넌트별 쓰기 차단, 데이터 추출 되묻기
@@ -38,6 +38,8 @@ plugins/harness/
     atc/SKILL.md               /harness:atc — SAP ATC 지적 실행·분류·처리
     update/SKILL.md            /harness:update — 플러그인 갱신과 현재 폴더 판 확인
     version/SKILL.md           /harness:version — 설치된 플러그인의 이 폴더 판 표(읽기만)
+    open/SKILL.md              /harness:open — 로컬 웹 콘솔을 열어 세션 상태 보기·승인과 질문에 답하기
+  console/                     로컬 웹 콘솔(127.0.0.1:4873). server.py·store.py·hooks_api.py·hook_post.py·static/ 등(설계: docs/design/web-console.md)
   agents/
     researcher.md              harness:researcher — 조회 전용 조사(sonnet, 쓰기 도구 없음)
     reviewer.md                harness:reviewer — 읽기 전용 검토(sonnet, 쓰기 도구 없음)
@@ -122,6 +124,20 @@ plugins/harness/
 | `update_notice.py` | `UserPromptSubmit` | 이 세션의 플러그인 판이 원격 최신 `v*` 태그보다 낮으면 Claude 가 사용자에게 한 번 알리게 한다(#314). 원격은 `git ls-remote` 5초 제한, 10분 캐시(`${CLAUDE_PLUGIN_DATA}`), 같은 세션·같은 판은 한 번. **이 폴더의 설치 항목**(`installed_plugins.json` 의 현재 projectPath, `installed_version.py`)이 이미 새 판이면 `/reload-plugins`, 아니면 `/harness:update` 또는 업데이트 명령을 안내한다(다른 폴더가 받아 둔 캐시 폴더만 보면 틀린다, #404). 뒤처졌는지의 기준은 설치 항목이 아니라 이 세션에 실린 판(`CLAUDE_PLUGIN_ROOT`)이다(#471). 갱신은 사용자가 직접 하거나 `/harness:update` 를 부른다. 실패하면 조용히 넘어가 프롬프트를 막지 않는다. 플러그인 저장소와 `HARNESS_NO_UPDATE_NOTICE=1` 에서는 말하지 않는다 |
 | `ensure-tools.sh` | `SessionStart` (session-start-sync.sh 가 부름) | uv·jq·gh·gitleaks 가 없으면 Windows 에서 winget 으로 설치하고 결과를 알린다(#116, gitleaks 는 #170). 아래 "도구 자동 설치" 참고 |
 | `stop-deliver.sh` | `Stop` | 커밋되지 않은 변경이 남았으면 `/harness:deliver` 를 안내한다. 대답마다 변경이 있으면 작업 사본을 임시 index 로 떠 `refs/harness/unfinished/<worktree>` 에 붙잡고(실제 index·작업 트리는 그대로, 새 파일 포함, `.gitignore`·`*handoff*.md`·`.superpowers/` 와 50MB 넘는 새 파일 제외, 변화가 없으면 다시 뜨지 않는다) 덮어쓰는 기록 파일(`<git-dir>/<repo>-unfinished`, 첫 줄 `format=2`)에 사본·push 안 된 커밋 정보를 남긴다(#224) |
+
+### 웹 콘솔 훅(#558)
+
+위 8개와 별개로 `hooks.json` 에는 웹 콘솔(`/harness:open`)에 상태를 알리는 훅이 있다. 전부 command 이고
+`console/hook_post.py` 를 부른다. 서버가 꺼져 있으면 아무것도 출력하지 않고 exit 0 이라 세션을 막지도 오류 줄을 남기지도 않는다.
+
+| 훅 | 시점 | 방식 |
+|---|---|---|
+| `hook_post.py event 3` | `UserPromptSubmit`, `UserPromptExpansion`, `PreToolUse` (`*`), `PostToolUse`, `SubagentStart`, `SubagentStop`, `Notification`, `PreCompact` | `async: true`. 상태만 모으고 세션을 기다리게 하지 않는다 |
+| `hook_post.py permission 86400` | `PermissionRequest` | 동기. 웹에서 답하면 터미널 승인 프롬프트를 대신한다 |
+| `hook_post.py question 86400` | `PreToolUse` (`AskUserQuestion`) | 동기. 웹에서 답한 내용을 도구 입력으로 돌려준다 |
+| `hook_post.py stop 5` | `Stop` | 동기. 결과 보고를 저장하고 콘솔에서 예약한 요청을 이어서 실행시킨다 |
+| `hook_post.py event 1` | `SessionEnd` | 동기 |
+| `session_start_hook.py` | `SessionStart` | 동기, 자체 제한 1초 |
 
 ### 테넌트별 쓰기 차단과 데이터 추출 되묻기(#148)
 

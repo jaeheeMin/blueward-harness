@@ -1,0 +1,141 @@
+# #558 로컬 웹 콘솔 `/harness:open` (2026-10-31)
+
+## 배경
+
+세션이 여러 개이면 터미널 창을 오가며 각 세션의 상태와 결과를 보고 승인·질문에 답해야 한다. 터미널을 잘 모르는 컨설턴트가 한 화면에서 보고 답하고 새 작업을 맡기도록 로컬 웹 콘솔을 넣는다. 설계는 `docs/design/web-console.md` 이다.
+
+## 바뀐 것
+
+| 곳 | 내용 |
+|---|---|
+| `plugins/harness/console/` (신규) | 표준 라이브러리만 쓰는 로컬 서버(`127.0.0.1:4873`). `server.py`(라우팅·인증·SSE), `store.py`(세션·요청 상태, `sessions.json` 저장), `hooks_api.py`(`/hooks/*` 판단), `managed.py`(콘솔이 띄운 `claude -p` 세션), `analysis.py`(새 작업 읽기 전용 분석), `gitstate.py`(`이번 차례`), `platform_compat.py`(OS 차이), `open.py`, `session_start_hook.py`, `static/`(순수 JS 화면) |
+| `skills/open/SKILL.md` (신규) | `/harness:open`. `open.py` 를 실행하고 결과를 한 줄로만 알린다 |
+| `hooks/hooks.json` | 콘솔 훅 추가. 전부 command(`console/hook_post.py`)이다. 상태만 모으는 `UserPromptSubmit`·`UserPromptExpansion`·`PreToolUse *`·`PostToolUse`·`SubagentStart`·`SubagentStop`·`Notification`·`PreCompact` 는 `async: true`, `PermissionRequest`·`PreToolUse AskUserQuestion`·`Stop`·`SessionEnd` 는 동기. `SessionStart` 는 `session_start_hook.py`. 기존 훅은 그대로 |
+| `docs/design/web-console.md` | 구현을 읽어 달라진 곳을 반영 |
+| `docs/guide/harness-guide.html` | "처음 준비하기" 탭에 `/harness:open` 과 추가된 훅 설명, 레일 기준 판 0.10.147 |
+| `plugins/harness/.claude-plugin/plugin.json` | version 0.10.142 → 0.10.147 |
+
+## 결정
+
+- 훅은 서버가 꺼져 있으면 연결 실패를 조용히 삼키고 세션을 막지 않으며 오류 줄도 남기지 않는다. 검사를 못 한 것을 승인으로 처리하지 않는다(터미널 프롬프트가 처리한다).
+- 포트는 기본 4873 이다. 환경변수 `HARNESS_CONSOLE_PORT` 는 시험용 임시 포트 용도이고, 훅(`hook_post.py`)도 같은 변수를 읽는다.
+- 상태 수집 훅은 `async: true`(아래 지연 수치). 비동기라 도착 순서가 뒤바뀔 수 있어 `hook_post.py` 가 뜬 시각(`X-Hook-Ts`)을 보내고 서버가 Stop·SessionEnd 이전에 뜬 늦은 이벤트로 상태를 되돌리지 않는다(설계 문서 5장).
+- 권한 우회 모드(`bypassPermissions`) 세션은 승인 요청이 없어서 화면에 그렇게 표시한다.
+- 버전은 0.10.147 로 잡았다. origin/main 이 0.10.142 이고, 열린 PR 셋(#570·#572·#574)이 0.10.143~145 를 쓰고 있어 겹치지 않게 했다. Windows 실기 수정 때 0.10.146 으로 올렸고 이번 기능 추가분으로 한 번 더 올렸다.
+
+## 통합 시험 결과 (macOS, `claude` 2.1.309, 모델 haiku, 2026-10-31)
+
+시험 증거(시험 폴더 `console-final/`)는 저장소에 넣지 않았다. 아래는 그 요약이다.
+
+| 시험 | 결과 |
+|---|---|
+| 관리 세션(콘솔이 띄운 `claude -p`) 새 작업 분석 → 시작 → 결과 보고 | 통과 |
+| 관리 세션 Bash 승인 허용, 파일이 실제로 만들어짐 | 통과 |
+| 관리 세션 `AskUserQuestion` 에 웹에서 답, 그 답이 Claude 의 결과 보고에 반영됨(PreToolUse `*` async 와 `AskUserQuestion` 동기가 겹침) | 통과 |
+| 관리 세션 스킬 버튼(`/harness:version`) → 현재 스킬 표시 → 승인 요청 4건 웹 허용 → 끝나면 스킬 `done`, 쉬는 상태 | 통과 |
+| PTY 터미널 세션 등록(SessionStart) | 통과(`terminal`, 쉬는 상태 `canSend=false`) |
+| 터미널에서 먼저 허용하면 웹 요청이 "터미널에서 처리됨"으로 닫힘(async PostToolUse) | 통과 |
+| 턴 끝 예약 실행: 실행 중 `version` 예약 → Stop 이 `block` 으로 스킬 실행 → 웹 승인 → 끝 | 통과 |
+| 턴이 끝난 터미널 세션이 쉬는 상태로 남음(늦은 async 이벤트로 `running` 이 되지 않음), 쉬는 세션에 입력 불가 안내 | 통과 |
+| 서버를 끈 PTY 세션: 오류 줄 없음, 터미널 승인 프롬프트가 바로 뜸 | 통과(화면에 error 문자열 0건, `claude -p` stderr 0바이트) |
+| 보안 수정 화면 캡처(헤드리스 Chrome, 별도 프로파일): 승인 화면의 입력 전체, `.sugg` 규칙 안내, Bash 위험 값 행(샌드박스·백그라운드), 긴 입력 스크롤(높이 320 / 내용 1685), 새 작업의 제외됨 줄 | 통과, 깨진 곳 없음 |
+| 자동 시험 `checker/tests/test_web_console.py` | 통과(늦게 온 이벤트 회귀 시험 포함) |
+
+- 관리 세션 승인 시험에서 `changedFiles` 는 비었다. `touch` 는 파일 편집 도구가 아니라서 정상이다.
+- 화면 캡처 시험의 승인·질문 요청은 터미널 세션을 흉내 낸 훅 호출(가짜 `claude` 분석 포함)로 만들었다. 실제 `claude` 로 만든 요청 화면은 위 관리·PTY 시험에서 API 로만 확인했다.
+
+## 훅 지연 (macOS, 이 머신 한 대)
+
+| 측정 | 값 |
+|---|---|
+| `hook_post.py` 1회(uv 경유) 20회, 서버 꺼짐 | 중앙 131ms, 최대 135ms |
+| 같은 측정, 서버 켜짐 | 중앙 131ms, 최대 133ms |
+| 첫 실행 | 132ms(서버 꺼짐), 133ms(켜짐). uv 캐시가 이미 데워진 뒤라 진짜 콜드 비용은 재지 못했다 |
+| 비교: `uv run --no-project python -c pass` | 중앙 115ms. 훅 한 번의 대부분이 uv 기동이다 |
+| 비교: `python3 hook_post.py` 직접 | 중앙 28ms(서버 켜짐 29ms). Windows 의 `python3` 부재 때문에 uv 를 유지했다 |
+| 도구 호출이 끝난 뒤 다음 모델 요청까지 간격(PostToolUse 훅 대기 포함), `claude -p` Bash 8회 × 5번, 서버 꺼짐, 40건 | 콘솔 훅 동기 중앙 145ms, **async 중앙 34ms**, 콘솔 훅 없음 중앙 32ms |
+| 같은 시험의 전체 시간 중앙 | 동기 20.7s, async 14.2s, 훅 없음 18.9s. 모델 응답 편차가 커서(async 11.9~18.5s) 비교 지표로 쓰지 않는다 |
+
+도구 호출 하나에 PreToolUse 와 PostToolUse 가 각각 한 번이라, 동기 상태에서는 서버를 쓰지 않는 사용자도 호출마다 약 0.25초를 더 기다렸다. async 로 바꾸고 콘솔 훅 없음과 구별되지 않는 수준(+2ms)이 되었다. 앞쪽(PreToolUse) 대기는 따로 재지 않았고 같은 크기로 추정한다.
+
+## 이번에 고친 것
+
+- 상태 수집 훅 8개 이벤트를 `async: true` 로 바꿨다(위 표). 공식 문서는 이벤트별 제한을 적지 않았고, 실제로 UserPromptSubmit, PreToolUse, PostToolUse, SubagentStart·Stop, Notification 이 도착했다. UserPromptExpansion 과 PreCompact 은 이번에 발화를 관측하지 못했다.
+- 늦게 도착한 async 이벤트가 상태를 되돌리는 문제: Stop 뒤에 도착한 PreToolUse·UserPromptSubmit·UserPromptExpansion 이 `turn_running` 을 다시 켜거나 스킬을 진행 중으로 남길 수 있었고, 늦은 PostToolUse·UserPromptSubmit 이 그 뒤에 만든 같은 입력의 승인 요청을 닫을 수 있었다. `X-Hook-Ts` 로 시각을 보내 서버가 가린다. 회귀 시험 12건을 추가했다.
+- SubagentStop 이 SubagentStart 보다 먼저 오면 서브에이전트가 `running` 으로 남던 문제.
+- `test_control_request_permission_is_bridged_with_hook_request` 가 부하에서 한 번 실패했다는 보고가 있었다. 원인을 재현하지 못했다(이 시험만 스레드 전환 간격 1µs 로 400회, CPU 점유 프로세스 14개를 띄운 채 전체 파일 2회 실행: 모두 통과). 대기·join 제한이 짧아 부하에서 시간 초과가 났을 가능성이 가장 커서 제한을 5초·10초에서 60초로 늘리고 스레드 종료를 단언으로 확인하게 했다. 근본 원인 확정은 아니다.
+
+## 알려진 한계
+
+- `--plugin-dir` 로 띄운 세션과 같은 이름의 설치본이 함께 있을 때의 이름 충돌은 시험하지 못했다(문서상 `--plugin-dir` 쪽이 교체한다고 되어 있다). 이번 PTY·관리 시험은 `--plugin-dir` 만 썼고 훅이 이중으로 걸리는 현상은 보지 못했다.
+- 86400초 대기는 시험하지 못했다. 660초 대기까지만 확인했다.
+- 서버를 재시작하면 쿠키가 서버 메모리에만 있어 브라우저는 `/harness:open` 을 다시 실행해야 한다.
+- SIGKILL 로 죽은 터미널 세션은 SessionEnd 가 오지 않아 목록에 남는다(10분 뒤 쉬는 상태로 보인다).
+- 쉬는 터미널 세션에는 콘솔에서 입력할 수 없다(터미널에서 직접 이어 가야 한다).
+- 서버가 꺼진 동안의 훅 이벤트는 유실된다. 서버가 켜진 뒤 처음 온 `session_id` 는 자동 등록된다.
+- Windows 훅 지연은 다른 세션이 PC 를 쓰는 상태에서 잰 값이라 대략값이다.
+- `claude -p` 로 도는 세션에서는 async 훅이 종료 시점에 정리되어 마지막 이벤트가 유실될 수 있다(공식 문서). 콘솔이 띄운 세션은 stream-json 으로 오래 사는 프로세스라 문제 되지 않았다.
+
+## Windows 실기 시험 결과 (Windows 10, `claude` 2.1.316, 모델 haiku, 2026-10-31)
+
+| 항목 | 결과 |
+|---|---|
+| `uv` 0.12.15 확인, `open.py` 실행 → 브라우저 열림, 화면 표시 | 통과. 콘솔 오류 0건 |
+| 서버 종료 | `open.py --stop` 은 정상 종료, pid 파일 삭제, 자식 `claude` 종료. `Stop-Process -Force` 로 강제 종료하면 pid 파일이 남지만 자식 `claude` 는 끝나고, 다시 `open.py` 를 실행하면 새 서버가 떠서 pid 파일을 덮어쓴다 |
+| 4873 제외 범위 | 이 PC 는 제외 범위(5357, 5678, 5679, 25468)에 들지 않음. 포트를 못 여는 경우의 안내는 실기로 보지 못했다(자동 시험만) |
+| 설치 형태·한글 경로 | `claude.exe` 네이티브 설치, 사용자 폴더·작업 폴더 이름에 한글과 공백이 있어도 새 작업 분석·시작 통과. npm(`.cmd`) 설치는 실기로 보지 못했다 |
+| 따옴표 붙은 경로 | 통과. 따옴표가 벗겨져 폴더로 인식 |
+| 한글 파일명 표시 | 통과. `결과.txt` 가 바뀐 파일과 승인 화면에 깨지지 않고 표시 |
+| 관리 세션 승인 | Write 승인 요청이 웹에 오고, 허용하면 파일이 실제로 만들어지고 결과 보고가 표시됨 |
+| 서버 재시작 뒤 이어서 요청 | `--resume` 으로 새 `claude` 가 뜨고 요청이 전달되어 "작업하는 중" 으로 표시됨. 강제 종료 시험을 위해 그 턴을 끝까지 기다리지 않았다 |
+| `uv` 없는 PATH | 명령 수준 확인: `hook_post.py` 훅 명령은 `\|\| true` 로 종료 코드 0, `session_start_hook.py` 훅 명령은 127. SessionStart 는 exit 2 가 아니면 세션을 막지 않는다. `uv` 없이 실제 세션을 열어 보지는 않았다 |
+| 서버 생존 | 15분 동안 살아 있음 |
+
+자동 시험: Windows 에서 `test_web_console.py` 와 `test_plugin_layout.py` 396 통과, 1 건너뜀, 2 xfail, 실패 0.
+
+### Windows 에서 찾아 고친 문제
+
+- 닫힌 127.0.0.1 포트 연결 거부가 Windows 에서 약 2초 걸려, 서버가 꺼져 있으면 `hook_post.py` 훅이 uv 경유 약 2.9초 걸렸다. 연결 단계에만 0.5초 제한을 둬 약 1.5초로 줄었다(uv 기동만 약 0.65초, 다른 세션이 PC 를 쓰는 상태라 대략값).
+- `/api/open` 호출 제한이 3초라 PC 가 바쁘면 브라우저를 여는 중에 끊겨 거짓 실패를 냈다. 30초로 늘렸다. 서버 기동 대기도 8초에서 20초로 늘렸다.
+- 서버가 본문을 읽지 않고 요청을 거절하면 Windows 가 연결을 RST 로 닫아 거절 응답(403·401)이 사라졌다. 응답 전에 본문을 상한 1 MiB, 1초 안에서 비운다.
+- SessionEnd 콘솔 훅이 제한 1초라 uv 기동(0.55~0.92초)만으로 거의 다 썼다. `event 3`, `timeout: 5` 로 바꿨다(공식 문서: SessionEnd 공유 제한 1.5초, 훅별 timeout 이 더 길면 최대 60초까지 늘어남).
+- `same_path` 의 posix 분기가 Windows 에서 돌면 대소문자를 무시해 시험이 실패했다. 문자열 비교로 바꿨다.
+- 시험 쪽: 한글 임시 경로의 URL 인코딩, `fake_claude.py` 입출력 UTF-8, 시작 훅 시험의 인코딩과 시간 비교.
+
+### 원인을 확정하지 못한 것
+
+첫 실행 때 기본 포트 서버가 몇 분 뒤 응답을 멈췄다. pid 파일이 남아 정상 종료는 아니었다. 그 실행은 PC 부하가 높아 `/api/open` 이 3초 제한에 걸린 때였고 Bash 명령도 제한 시간을 넘겨 백그라운드로 밀렸다. 같은 조건을 흉내 낸 임시 포트 3번과 기본 포트 15분 관찰에서 재현되지 않았다.
+
+## 첫 PR 에 들어간 화면·기능 추가 (2026-11-01)
+
+설계는 `docs/design/web-console.md` 의 3·4·8·9장에 반영했다.
+
+| 기능 | 내용 |
+|---|---|
+| 서버를 창 없이 띄움 (Windows) | 콘솔 창이 뜨지 않게 base 인터프리터 옆 `pythonw.exe` 로 서버를 띄운다. 없으면 `sys.executable` + `CREATE_NO_WINDOW`. `pythonw` 는 stderr 가 없어 서버가 stderr 쓰기 전에 있는지 본다. 거절 응답이 사라지던 문제(본문 비우기)와 훅 지연은 위 "Windows 에서 찾아 고친 문제" |
+| Blueward 밝은 테마와 로고 | 로고 글자색 `#004696` 기준의 밝은 테마 `blueward` 를 테마에 더했다(`static/theme.js`, 이제 11개). 로고는 `static/blueward-logo.png`, 화면 이름은 "Blueward Harness" |
+| 상단 주소 표시 제거 | 화면 위쪽의 서버 주소 표시를 없앴다 |
+| 폴더 찾아보기 | `POST /api/folders/pick`. 서버를 돌리는 컴퓨터에 OS 폴더 선택 창(Windows PowerShell, macOS `osascript`)을 띄워 고른 경로를 돌려준다. 취소는 `{cancelled:true}`, 창을 이미 열었으면 409, 못 띄우거나 10분 넘으면 503 이고 경로를 직접 적으라고 안내한다 |
+| 모델·에포트 고르기 | 새 작업 화면에서 모델과 에포트(생각의 깊이)를 고른다. 분석과 작업 세션이 같은 값을 쓰고, 이어서(`--resume`) 띄울 때도 기억한 값을 쓴다. 선택지는 `GET /api/models` |
+| 권한 모드 고르기 | 기본(플래그 없음) / `acceptEdits` / `plan` 세 가지만. `launch`·`resume` 이 `--permission-mode` 를 붙인다. 작업을 진행하는 세션에만 적용하고 분석에는 적용하지 않는다. `bypassPermissions`·`dontAsk`·`auto` 는 화면에도 서버에도 없다(400) |
+| 스킬 버튼 줄과 `/` 자동완성 | `GET /api/skills`(플러그인 이름과 스킬 이름·설명). `open`·`update`·`scaffold` 는 숨긴다. 입력칸에서 `/` 를 치면 스킬 후보가 뜬다 |
+| `@` 파일 멘션 | `GET /api/files?root=&q=`. 서버가 아는 작업 폴더(최근 폴더·세션 `cwd`)만 보고 그 밖은 403, 결과는 50개, 탐색은 2만 파일에서 멈추고 `truncated` 를 돌려준다. `.git`·`node_modules` 등 큰 폴더와 작업 폴더 밖을 가리키는 링크는 뺀다 |
+| 화면 문구 | 사용자에게 보이는 "Claude" 문구를 "Claude Code" 로 맞췄다 |
+| 세션 도중 권한 모드 바꾸기 | `PUT /api/sessions/:id/permission`. 살아 있으면 `control_request(set_permission_mode)` 로 바꾸고, 끝난 세션이면 다음 `--resume` 에 붙일 값만 갱신한다. 세션 화면에 권한 모드 고르개와 기록 "권한 모드: A → B". 실제 `claude` 2.1.316 에서 success·invalid_mode error·plan/acceptEdits 동작 확인 |
+| 서브에이전트 진행 | PreToolUse(Agent·Task)의 맡은 일을 SubagentStart 와 짝지어 붙이고, `agent_id` 가 실린 PreToolUse 로 지금 동작·도구 횟수를, SubagentStop 으로 걸린 시간을 적는다. 세션 화면에 실행 중(강조)·끝난 것(접힘) 영역, 사이드 목록에 "서브에이전트 N개 실행 중" |
+
+### 마지막 시험
+
+`uv run --with pytest python -m pytest checker/tests/test_web_console.py checker/tests/test_plugin_layout.py -q` → 483 통과, 0 실패, 2 건너뜀, 2 xfailed.
+
+### 확인하지 못한 것
+
+- 브라우저에서 `/`·`@` 자동완성의 키 조작(방향키·Enter·Esc)을 직접 확인하지 않았다.
+- 폴더 찾아보기 창이 브라우저 뒤에 깔려 안 보일 수 있다. 이때 창을 이미 연 것으로 보여 다시 누르면 409 안내가 뜬다.
+- `@` 경로에 공백이 있으면 멘션이 거기서 끊긴다(자동완성이 넣는 `@경로 ` 의 구분이 공백이라서).
+
+### 남은 일 (다음 PR)
+
+- 홈 화면(내 세션 한눈에)과 갈래별 하네스 순서 막대.
+- 다음 갈래로 넘어갈 때 자동 handoff 후 새 세션을 띄우고, 새 세션마다 sync·update·`/reload-plugins`·version 을 알린다.
+- 권한·CTS 양식은 개발이 끝난 뒤 단계다(준비 중).

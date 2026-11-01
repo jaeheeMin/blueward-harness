@@ -66,6 +66,8 @@ def _hook_file_refs(hooks_json: dict) -> list[str]:
     for entries in hooks_json["hooks"].values():
         for entry in entries:
             for hook in entry["hooks"]:
+                if "/console/" in hook["command"]:  # 웹 콘솔 훅은 hooks/ 밖이다(#558, test_web_console.py 가 본다)
+                    continue
                 match = re.search(r"hooks/([A-Za-z0-9_.\-]+)", hook["command"])
                 assert match, f"훅 command 에서 파일을 못 찾았다: {hook['command']}"
                 refs.append(match.group(1))
@@ -108,11 +110,12 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
     assert "async" not in pr_table
     assert pr_table["command"].rstrip().endswith("|| exit 0")
 
-    pre_matchers = {entry["matcher"] for entry in events["PreToolUse"]}
+    # 웹 콘솔 훅(console/hook_post.py: AskUserQuestion, *)은 기존 command 훅 매처와 따로 본다(#558)
+    pre_matchers = {entry["matcher"] for entry in events["PreToolUse"] if "/console/" not in entry["hooks"][0]["command"]}
     assert pre_matchers == HOOK_MATCHERS
 
     # #190: 활성화 기록 훅은 PostToolUse 한 곳에 둔다.
-    post_matchers = {entry["matcher"] for entry in events["PostToolUse"]}
+    post_matchers = {entry["matcher"] for entry in events["PostToolUse"] if "/console/" not in entry["hooks"][0]["command"]}
     assert post_matchers == POST_HOOK_MATCHERS
 
 
@@ -133,7 +136,7 @@ def _mcp_source_guard_matcher() -> str:
         entry["matcher"]
         for entry in hooks_json["hooks"]["PreToolUse"]
         for hook in entry["hooks"]
-        if "mcp_source_guard.py" in hook["command"]
+        if "mcp_source_guard.py" in hook.get("command", "")
     ]
     assert len(matchers) == 1
     return matchers[0]
