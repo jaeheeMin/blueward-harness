@@ -6,8 +6,9 @@ import re
 import time
 from typing import Callable
 
-from store import (MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
-                   TITLE_PROMPT, TITLE_SESSION)
+import flows
+from store import (CHECK_DONE, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
+                   TITLE_PROMPT, TITLE_SESSION, mark_check)
 
 QUESTION_WAIT = 300.0
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
@@ -155,12 +156,14 @@ class Hooks:
             s["report"] = text
         s["turn_running"] = False
         s["currentAction"] = ""
+        asking = any(r.kind == "question" for r in self.store.pending_for(s["id"]))  # 질문 대기 중의 Stop 은 스킬 끝이 아니다(아래에서 닫기 전에 본다)
         if not s["managed"]:
             self.store.close_session(s["id"], "터미널에서 처리됨")
         for name, state in list(s["skillStates"].items()):
             if state == "active":
                 s["skillStates"][name] = "done"
         s["currentSkill"] = ""
+        flows.turn_ended(s, asking=asking)
         self.refresh_git(s["id"])
         queue_ = s["pending_stop"]
         if queue_:
@@ -200,6 +203,7 @@ class Hooks:
                 store.set_title(s, title, TITLE_SESSION)
             self.refresh_git(s["id"])
             store.add_log(s, "세션 시작")
+            store.touch_peers(s)
         elif name == "UserPromptSubmit":
             if not late:
                 s["turn_running"], s["ended"] = True, False
@@ -261,6 +265,7 @@ class Hooks:
             s["ended"], s["turn_running"], s["currentAction"] = True, False, ""
             store.close_session(s["id"], "세션이 끝나서 닫힘")
             store.add_log(s, "세션 끝")
+            store.touch_peers(s)
             store.flush()
         store.touch(s)
         return 200, None
@@ -317,6 +322,8 @@ class Hooks:
                 del s["skillStates"][old]
         s["skillStates"][skill] = "active"
         s["currentSkill"] = skill
+        flows.skill_started(s, skill)
+        mark_check(s, skill, CHECK_DONE)  # 새 세션 점검(sync, version, update)이면 했음으로
         self.store.add_log(s, f"스킬 시작: {skill}")
 
     def _post_tool_use(self, s: dict, body: dict, ts: float | None = None) -> None:
