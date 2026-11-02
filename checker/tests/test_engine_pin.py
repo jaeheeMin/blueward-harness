@@ -113,7 +113,7 @@ def test_훅에_main_엔진_주소가_남아_있지_않다(name):
     assert "engine_spec" in text
 
 
-@pytest.mark.parametrize("name", ["srs", "spec", "manual", "cts"])
+@pytest.mark.parametrize("name", ["srs", "spec", "manual", "cts", "role"])
 def test_스킬이_main_엔진_주소를_쓰지_않고_engine_spec_을_부른다(name):
     text = (PLUGIN_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
     assert "blueward-harness@main" not in text

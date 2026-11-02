@@ -337,7 +337,7 @@ def _check_spec(text: str, params: dict, name: str = "") -> list[Violation]:
                               f"양식 밖 시트: {form} · {sname}. 허용: {', '.join(map_sheets)}. {export.NEXT_FIX_MAP}"))
                 continue
             try:
-                off = export.spec_offenders(sec, subs, smap)
+                off = export.spec_offenders(sec, subs, smap, sheets)
             except (KeyError, TypeError, AttributeError, ValueError) as exc:
                 raise ConfigError(f"양식 지도 {map_path.name} 의 시트 {sname!r} 정의를 읽지 못해 검사할 수 없다: {exc!r}") from exc
             except export.ExportError as exc:

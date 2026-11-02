@@ -303,6 +303,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
           <button class="tab" role="tab" data-tab="export">고객사 양식으로 산출하기<small>checker.export</small></button>
           <button class="tab" role="tab" data-tab="manual">사용자 매뉴얼 만들기<small>/harness:manual</small></button>
           <button class="tab" role="tab" data-tab="cts">CTS 관리대장 쓰기<small>/harness:cts</small></button>
+          <button class="tab" role="tab" data-tab="role">Role 매핑 쓰기<small>/harness:role</small></button>
         </div>
       </div>
       <div>
@@ -349,7 +350,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.151, public-cloud main 기준 (2026-11-02)</div>
+      <div class="note">harness 0.10.152, public-cloud main 기준 (2026-11-02)</div>
     </div>
   </nav>
 
@@ -1145,8 +1146,68 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     <div class="callout ok"><span class="k">처음 쓸 때</span><div>Project Repository 에 <code>rules/cts.yaml</code>, <code>rules/cts-output.yaml</code>, <code>templates/harness/cts.md</code> 가 없으면 스킬이 복사할 파일을 알려 줘. 규칙을 바꾸는 PR 은 승인자의 Approve 가 필요해.</div></div>
   </div>
 
-  <div class="next"><button data-go="manual">← 사용자 매뉴얼 만들기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
+  <div class="next"><button data-go="manual">← 사용자 매뉴얼 만들기</button><button data-go="role">다음: Role 매핑 쓰기 →</button></div>
 </article>
+
+<!-- ================= Role 매핑 ================= -->
+<article class="panel" data-panel="role" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">문서 작업 · /harness:role</div>
+    <h2>Role 매핑 쓰기</h2>
+    <p class="lead">사용자 권한 관리(User Role Mapping) 양식을 채우는 일이야. Role 목록과 Role 별 Launchpad 메뉴 배정을 작업본(마크다운)에 적고, 고객사 양식(엑셀)으로 뽑아. Role 은 엑셀에서 가로 열로 늘어나고, 배정한 칸에는 <code>O</code> 가 찍혀.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>새 Role 을 정리해야 할 때. 개발 건의 앱(카탈로그)을 어느 Role 에 배정할지 적어야 할 때. 고객사에 권한 관리 엑셀을 줘야 할 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>Role 정리해줘</span><span>메뉴 배정 추가해줘</span><span>빠진 카탈로그 없어?</span><span>Role 엑셀로 뽑아줘</span><span class="cmd">/harness:role</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>학교 급식 신청표 같은 거야. 가로로 반(Role)이 늘어서 있고, 세로로 메뉴(앱)가 있어서 그 반이 먹는 메뉴에 동그라미를 쳐. 반 이름은 한 번만 적어 두면 표 위에 알아서 붙어.</p>
+    <p>학생 명단(사번·이름)은 이 저장소에 두지 않아. 명단 칸은 비워서 내보내고, 고객사 담당자가 채워.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>Role 정리</b><span>Role 개요 표</span></div><div class="arrow"></div>
+      <div class="node hl"><b>메뉴 배정</b><span>Spec 의 Launchpad 노출로 초안</span></div><div class="arrow"></div>
+      <div class="node hl"><b>Spec 대조</b><span>빠진 카탈로그 알림</span></div><div class="arrow"></div>
+      <div class="node hl"><b>버전 올리기</b><span>버전: 0.1 → 0.2</span></div><div class="arrow"></div>
+      <div class="node ok"><b>xlsx 산출</b><span>사용자권한관리_User_Role Mapping_v0.2.xlsx</span></div>
+    </div>
+    <div class="cap">작업본은 <code>docs/권한관리/사용자권한관리_User_Role Mapping.md</code> 하나야. 양식 지도(<code>templates/forms/사용자권한관리.yaml</code>)가 없거나 Role 열 설정(<code>펼침</code>)이 없으면 만들지 않고 멈춰.</div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>내가 할 일</h3>
+      <ul class="todo">
+        <li>Role 마다 Role ID, 설명, 주요 권한, 사용 대상자, 조직 레벨을 알려 줘. 모르는 값은 지어내지 않고 되물어</li>
+        <li>메뉴 배정은 Spec 에서 만든 초안을 보고 맞는 줄만 확인해. 어느 Role 에 배정할지 Spec 에 없으면 네가 알려 줘</li>
+        <li>"Spec 에 있는데 작업본에 빠진 카탈로그" 목록이 나오면 어느 Role 에 넣을지 정해 줘</li>
+        <li>엑셀이 나오면 열어서 Role 머리글과 O 표시 위치를 눈으로 확인해</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>만들어지는 것</h3>
+      <ul class="made">
+        <li><code>docs/권한관리/사용자권한관리_User_Role Mapping.md</code> — 작업본 (파일 하나)</li>
+        <li><code>docs/권한관리/사용자권한관리_User_Role Mapping_v&lt;버전&gt;.xlsx</code> — 산출한 엑셀 (판마다 파일 하나)</li>
+      </ul>
+      <p class="small" style="margin-top:12px">작업본의 메뉴 배정 표에는 양식에 없는 <code>Role</code> 열이 있어. 거기에 Role ID 를 쉼표로 적으면 그 Role 열에 O 가 찍혀. Role 개요에 없는 ID 를 적으면 저장할 때와 PR 에서 거절돼. Role 이 양식의 열 수(48개)보다 많으면 엑셀을 만들지 않아.</p>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">사람 행은 비어 있어</span><div><code>ID-Role Mapping</code> 시트는 Role 머리글만 채워져. 사원 번호·이름·SAP ID 줄은 비워서 나가고, 알려 줘도 작업본에 적지 않아. 고객사 담당자가 엑셀에서 채워.</div></div>
+    <div class="callout warn"><span class="k">버전 올리기</span><div>한 번 main 에 병합된 엑셀은 같은 이름으로 다시 만들 수 없어. 새로 뽑으려면 작업본 머리의 <code>버전:</code> 을 0.1 올려. 이전 판 엑셀은 지우지 않고 남아.</div></div>
+    <div class="callout warn"><span class="k">대조는 이름만 봐</span><div>Spec 대조는 카탈로그 이름이 작업본에 있는지만 봐. SAP 에 실제로 배정돼 있는지는 보지 않고, PR 검사도 하지 않아. 스킬을 부를 때 확인해.</div></div>
+    <div class="callout ok"><span class="k">처음 쓸 때</span><div>Project Repository 에 <code>rules/role.yaml</code>, <code>rules/role-output.yaml</code>, <code>templates/harness/role.md</code> 가 없으면 스킬이 복사할 파일을 알려 줘. 규칙을 바꾸는 PR 은 승인자의 Approve 가 필요해.</div></div>
+  </div>
+
+  <div class="next"><button data-go="cts">← CTS 관리대장 쓰기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
+</article>
+
 
 <!-- ================= 작업 시작하기 ================= -->
 <article class="panel" data-panel="start" role="tabpanel" hidden>
@@ -1229,7 +1290,7 @@ fix/31-broken-link</pre>
     <div class="callout ok"><span class="k">이름 실수</span><div>브랜치 이름을 잘못 지었으면 새로 만들지 말고 <code>git branch -m</code> 으로 고쳐.</div></div>
   </div>
 
-  <div class="next"><button data-go="cts">← CTS 관리대장 쓰기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
+  <div class="next"><button data-go="role">← Role 매핑 쓰기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
 </article>
 
 <!-- ================= sync ================= -->

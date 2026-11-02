@@ -17,7 +17,7 @@
     - 셀 메모(comments, threaded 포함): `유지` 범위 안 셀의 메모만 허용한다.
     - 시트 배경 그림·머리글 그림·삽입 개체·컨트롤: 위치를 판정할 수 없어 견본으로 보고 막는다(이런 템플릿은 `견본_검사` 를 켜지 않는다).
     - 머리글/바닥글 글자와 직접 적은 드롭다운 목록은 견본인지 고정값인지 엔진이 가를 수 없다 — 거부하지 않고 경고(`leftover-review`)로
-      알린다. 직접 적은 목록은 그 범위가 `유지` 안이면 알리지 않는다.
+      알린다. 머리글·바닥글은 시트의 지도 `머리글_유지: [문구…]` 에 적은 문구와 같으면(공백 정규화 뒤) 고정 문구로 보고 알리지 않는다. 직접 적은 목록은 그 범위가 `유지` 안이면 알리지 않는다.
 
 검사하지 못하면 통과로 두지 않고 거부 사유(`leftover-unchecked`)로 알린다: 시트 XML·그림·메모 파트를 못 읽음, 값이 있다고 표시된
 셀의 값을 못 읽음(공유 문자열 번호가 범위 밖이거나 sharedStrings 가 없음, `<v>` 모양이 낯섦), 차트 시트(지원 안 함),
@@ -193,7 +193,7 @@ def _header_footer_texts(sheet_xml: str) -> list[str]:
         for pm in _HF_PART.finditer(hm.group(1)):
             text = _HF_CODE.sub("", _unesc(pm.group(3))).replace("&&", "&").strip()
             if re.search(r"\w", text):  # 쪽 번호 코드 사이의 구분 기호(`/`)뿐인 것은 글자가 아니다
-                out.append(_preview(text, 40))
+                out.append(text)
     return out
 
 
@@ -334,7 +334,11 @@ def check(
             )
 
         # -- 머리글/바닥글: 엔진이 견본인지 가를 수 없다
+        fixed = {norm(x) for x in smap.get("머리글_유지") or [] if isinstance(x, str)}  # 지도가 고정 문구라고 선언한 머리글·바닥글
         for text in _header_footer_texts(sheet_xml):
+            if norm(text) in fixed:
+                continue
+            text = _preview(text, 40)
             warnings.append({
                 "form": form, "sheet": sname, "item": "머리글·바닥글", "type": "leftover-review",
                 "reason": f"시트 {sname} 의 머리글·바닥글에 글자 {text!r} 가 있다 — 고정 문구인지 견본인지 엔진이 가르지 못한다(통과 아님). 견본이면 템플릿에서 지운다",

@@ -161,6 +161,8 @@ def _format_row_overlaps(s: dict, t: dict) -> list[str]:
 
 def map_problems(fmap: dict) -> list[tuple[str, str]]:
     """새 키(`비우기`·`서식_지우기`·`유효성_지우기`·`그림_지우기`·`유지`·`외부_참조_지우기`·`견본_검사`·`화면`)와 서술 `열`, 표 `서식_행`·`묶음_열` 의 오류 → [(종류, 사유)]. 종류: range / map."""
+    from checker import expand  # expand 가 export 를 불러 순환하므로 호출할 때 가져온다
+
     out: list[tuple[str, str]] = []
     top = fmap.get("외부_참조_지우기")
     if top is not None and not isinstance(top, bool):
@@ -196,6 +198,9 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                         parse_range(x)
                     except RangeError as e:
                         out.append(("range", f"시트 {sn!r} 의 `유효성_지우기`: {e.reason}"))
+        hf = s.get("머리글_유지")
+        if hf is not None and not (isinstance(hf, list) and all(isinstance(x, str) and x.strip() for x in hf)):
+            out.append(("map", f"시트 {sn!r} 의 `머리글_유지`(머리글·바닥글 문구 문자열 목록이어야 한다)"))
         g = s.get("그림_지우기")
         if g is not None and not isinstance(g, bool):
             out.append(("map", f"시트 {sn!r} 의 `그림_지우기` 는 true/false 여야 한다"))
@@ -222,7 +227,8 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                     owned.append((f"표 {t.get('이름')!r} 의 {col} 열", (n, start, n, end)))
         for t in s.get("표") or []:
             if isinstance(t, dict):
-                out += [("map", f"시트 {sn!r} 표 {t.get('이름')!r} 의 {m}") for m in _table_format_problems(t) + _format_row_overlaps(s, t)]
+                out += [("map", f"시트 {sn!r} 표 {t.get('이름')!r} 의 {m}") for m in _table_format_problems(t) + _format_row_overlaps(s, t) + expand.map_problems(t, fmap)]
+                owned += expand.owned_rects(t)  # 표 오른쪽으로 펼치는 열이 맡은 머리글·표시 영역
         for key in ("비우기", "서식_지우기"):
             for x, rect in keyed[key]:
                 for label, orect in owned:
