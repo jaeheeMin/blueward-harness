@@ -15,7 +15,8 @@ zip 수준에서 바뀐 시트의 XML 만 고치고 나머지 항목은 같은 �
        검사 불능이지 통과도 위반도 아니다.
     3  산출했으나 경고가 있다(#228). 표 값이 템플릿 드롭다운 목록 밖이다. 파일은 썼고 stdout 의
        `status` 는 `warning`, `warnings` 에서 `type: dropdown` 이 목록 밖 값이다(행·열·값·허용 값).
-       허용 값을 읽지 못해 검사하지 못한 칸은 `type: dropdown-unchecked` 경고로만 알리고 종료코드는 0 이다.
+       허용 값을 읽지 못해 검사하지 못한 칸은 `type: dropdown-unchecked` 경고로 알리고 종료코드는 3 이다.
+       날짜 서식 칸에 YYYY-MM-DD 가 아닌 값이 글자로 들어가면 `type: date-text` 경고(칸·값)를 내고 종료코드는 3 이다(#577).
        쓴 셀이 엑셀 행 높이 상한(409pt)을 넘어 잘릴 것으로 추정되면 `type: cell-too-tall` 경고(행·열·REQ·추정
        줄 수)를 내고 종료코드는 3 이다(내용이 잘려 보이는 건 산출물 품질 문제라 파일은 쓰되 고치라고 알린다).
 
@@ -63,6 +64,16 @@ NOT_APPLICABLE = "해당 없음"
 
 _BR = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _is_iso_date(text: str) -> bool:
+    if not _DATE.match(text):
+        return False
+    try:
+        dt.date.fromisoformat(text)
+    except ValueError:
+        return False
+    return True
 _INT = re.compile(r"^(0|-?[1-9]\d{0,14})$")
 _CTRL = re.compile("[" + chr(0) + "-" + chr(8) + chr(0xB) + chr(0xC) + chr(0xE) + "-" + chr(0x1F) + chr(0xFFFE) + chr(0xFFFF) + chr(0xD800) + "-" + chr(0xDFFF) + "]")  # XML 1.0 에 못 넣는 문자
 MAX_CELL_CHARS = 32767
@@ -1077,6 +1088,14 @@ def build_form(
                 raise ExportError(e.reason, form=form, sheet=sname, item=item) from None
             if removed:
                 warn(sname, item, f"{ref} 에 쓸 값에서 XML 에 넣을 수 없는 제어 문자 {removed}개를 지웠다")
+            cell = ed.cell(ref)
+            if (not kw.get("as_text") and text.strip() and cell is not None and cell.style in ed.date_styles
+                    and not _is_iso_date(text.strip())):
+                # 날짜 서식 칸에 날짜가 아닌 글자가 들어가면 엑셀에서 날짜로 셀 수 없다(#577). 막지는 않고 고치게 알린다.
+                warnings.append({
+                    "form": form, "sheet": sname, "item": label or item, "type": "date-text", "cell": ref, "value": text,
+                    "reason": f"{ref} 는 날짜 서식 칸인데 값 {text!r} 가 YYYY-MM-DD 날짜가 아니라 글자로 들어갔다",
+                })
             written.append((sname, ed, item, ref, text, label, header))
         return put
 
@@ -2183,9 +2202,10 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
     tall = any(w.get("type") == "cell-too-tall" for w in warnings)
     review = any(w.get("type") == "leftover-review" for w in warnings)
     layout = any(w.get("type") == "layout-unchecked" for w in warnings)  # pptx: 글 넘침·겹침은 화면 없이 확인 못 한다(#561)
-    flagged = outside or unchecked or tall or review or layout
-    note = _warning_note(outside, unchecked, tall, review, layout)
-    only_layout = layout and not (outside or unchecked or tall or review)  # pptx: 고칠 것이 아니라 사람이 눈으로 볼 일만 남은 경우
+    date_text = any(w.get("type") == "date-text" for w in warnings)
+    flagged = outside or unchecked or tall or review or layout or date_text
+    note = _warning_note(outside, unchecked, tall, review, layout, date_text)
+    only_layout = layout and not (outside or unchecked or tall or review or date_text)  # pptx: 고칠 것이 아니라 사람이 눈으로 볼 일만 남은 경우
     layout_next = (
         "산출은 됐다. 글 넘침·겹침·그림 위치는 화면 없이 확인하지 못했다(`type: layout-unchecked`, 검사 불능 — 통과 아님). "
         "PowerPoint 로 열어 쪽마다 사람이 확인한다."
@@ -2232,7 +2252,8 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
     }
 
 
-def _warning_note(outside: bool, unchecked: bool, tall: bool = False, review: bool = False, layout: bool = False) -> str:
+def _warning_note(outside: bool, unchecked: bool, tall: bool = False, review: bool = False, layout: bool = False,
+                  date_text: bool = False) -> str:
     parts = []
     if layout:
         parts.append("pptx 의 글 넘침·겹침·그림 위치를 화면 없이 확인하지 못했다(`type: layout-unchecked`, 검사 불능 — 통과 아님). PowerPoint 로 열어 쪽마다 눈으로 확인한다.")
@@ -2244,6 +2265,8 @@ def _warning_note(outside: bool, unchecked: bool, tall: bool = False, review: bo
         parts.append("엑셀에서 잘릴 것으로 보이는 긴 셀이 있다(`type: cell-too-tall`, 어림값) — 요약만 남기고 세부는 다른 열로 나눈다.")
     if review:
         parts.append("머리글·바닥글이나 직접 적은 드롭다운 목록이 견본인지 엔진이 가르지 못했다(`type: leftover-review`) — 통과가 아니니 사람이 확인한다.")
+    if date_text:
+        parts.append("날짜 서식 칸에 날짜가 아닌 값이 글자로 들어갔다(`type: date-text`) — 작업본에서 YYYY-MM-DD 로 고친다.")
     return " ".join(parts)
 
 

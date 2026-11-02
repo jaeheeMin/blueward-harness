@@ -302,6 +302,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
           <button class="tab" role="tab" data-tab="spec-edit">Spec 고치기<small>/harness:spec</small></button>
           <button class="tab" role="tab" data-tab="export">고객사 양식으로 산출하기<small>checker.export</small></button>
           <button class="tab" role="tab" data-tab="manual">사용자 매뉴얼 만들기<small>/harness:manual</small></button>
+          <button class="tab" role="tab" data-tab="cts">CTS 관리대장 쓰기<small>/harness:cts</small></button>
         </div>
       </div>
       <div>
@@ -348,7 +349,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.149, public-cloud main 기준 (2026-11-02)</div>
+      <div class="note">harness 0.10.150, public-cloud main 기준 (2026-11-02)</div>
     </div>
   </nav>
 
@@ -1085,7 +1086,66 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     <div class="callout ok"><span class="k">옛 매뉴얼</span><div>예전 <code>docs/manual/DEV-xxx-….md</code> 는 화면 단위로 잘라 새 작업본으로 옮겨 줘. 화면에 묶이지 않는 글(자주 묻는 질문 등)은 목록으로 알려 주고, 옛 파일은 네가 정할 때까지 지우지 않아.</div></div>
   </div>
 
-  <div class="next"><button data-go="export">← 고객사 양식으로 산출하기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
+  <div class="next"><button data-go="export">← 고객사 양식으로 산출하기</button><button data-go="cts">다음: CTS 관리대장 쓰기 →</button></div>
+</article>
+
+<!-- ================= CTS 관리대장 ================= -->
+<article class="panel" data-panel="cts" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">문서 작업 · /harness:cts</div>
+    <h2>CTS 관리대장 쓰기</h2>
+    <p class="lead">트랜스포트 요청(CTS(Change and Transport System)) 한 건을 한 줄로 적어 두는 관리대장이야. 요청 건과 Error 내역을 작업본(마크다운)에 쌓고, 고객사 양식(엑셀)으로 뽑아. 대장은 Configuration 용과 CBO(Custom Business Object) 용 두 가지야.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>트랜스포트 요청을 만들었거나 처리해서 관리대장에 남겨야 할 때. CTS 처리 중 Error 가 나서 조치를 적어 둬야 할 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>CTS 관리대장에 추가해줘</span><span>Error 내역 추가해줘</span><span>관리대장 엑셀로 뽑아줘</span><span class="cmd">/harness:cts</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>택배 접수 장부 같은 거야. 요청이 들어올 때마다 한 줄씩 적고, 장부가 두꺼워지면 "2권" 으로 새로 묶되 1권은 그대로 서랍에 둬.</p>
+    <p>이 스킬은 네가 알려 준 값만 받아 적어. 트랜스포트 번호를 SAP 에서 자동으로 가져오는 건 아직 없어(이슈 #563 에서 따로 해).</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>종류 고르기</b><span>Configuration · CBO</span></div><div class="arrow"></div>
+      <div class="node"><b>요청 건 묻기</b><span>NO 는 이어서 매김</span></div><div class="arrow"></div>
+      <div class="node hl"><b>행 더하기</b><span>docs/CTS관리대장/CTS관리대장_&lt;종류&gt;.md</span></div><div class="arrow"></div>
+      <div class="node hl"><b>버전 올리기</b><span>버전: 0.1 → 0.2</span></div><div class="arrow"></div>
+      <div class="node ok"><b>xlsx 산출</b><span>CTS관리대장_&lt;종류&gt;_v0.2.xlsx</span></div>
+    </div>
+    <div class="cap">양식 지도(<code>templates/forms/CTS_관리대장_*.yaml</code>)가 없으면 만들지 않고 멈춰. 이전 판 엑셀은 지우지 않고 남아.</div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>내가 할 일</h3>
+      <ul class="todo">
+        <li>Configuration 인지 CBO 인지 알려 줘</li>
+        <li>요청 건마다 오픈단계, 요청일, 모듈, CTS 유형, 대상 시스템, 요청 번호(Request NO), 설명, 요청자를 알려 줘. 모르는 값은 지어내지 않고 되물어</li>
+        <li>처리 결과(처리일자·처리자·결과·승인)는 처리가 끝난 뒤 알려 주면 <b>그 요청의 줄</b>을 채워. 새 줄을 만들지 않아</li>
+        <li>엑셀이 나오면 열어서 머리글과 서식이 양식대로인지, 날짜 칸이 맞는지 눈으로 확인해</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>만들어지는 것</h3>
+      <ul class="made">
+        <li><code>docs/CTS관리대장/CTS관리대장_&lt;종류&gt;.md</code> — 작업본 (종류마다 파일 하나)</li>
+        <li><code>docs/CTS관리대장/CTS관리대장_&lt;종류&gt;_v&lt;버전&gt;.xlsx</code> — 산출한 엑셀 (판마다 파일 하나)</li>
+      </ul>
+      <p class="small" style="margin-top:12px">작업본은 머리의 <code>버전: 0.1</code> 과 <code>## 양식 항목</code> 으로 이뤄져. 그 아래 <code>### &lt;양식&gt; · &lt;시트&gt;</code> 소절마다 <code>#### &lt;표 이름&gt;</code> 과 표가 하나씩이고, 표의 열 이름은 양식 지도의 이름 그대로야(양식 머리글의 오타 <code>모둘</code> 도 그대로). 지도에 없는 시트·열은 저장할 때와 PR 이 "양식 밖" 으로 거절하고, 파일 이름(<code>CTS관리대장_Configuration.md</code> 같은 모양)도 <code>rules/cts.yaml</code> 이 검사해. 요청일 같은 날짜는 <code>YYYY-MM-DD</code> 로 적어.</p>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">버전 올리기</span><div>한 번 main 에 병합된 엑셀은 같은 이름으로 다시 만들 수 없어. 줄을 더하거나 값을 고쳐 새로 뽑으려면 작업본 머리의 <code>버전:</code> 을 0.1 올려. 병합 전에 이 브랜치에서 만든 판은 올리지 않아도 다시 뽑혀.</div></div>
+    <div class="callout warn"><span class="k">산출 ≠ 통과</span><div>엑셀이 나왔다고 문서 검사를 통과한 건 아니야. 파일 이름은 PR(Pull Request) 의 doc-guard 단계가 <code>rules/cts-output.yaml</code> 로 검사해.</div></div>
+    <div class="callout warn"><span class="k">자동 채우기 없음</span><div>트랜스포트 요청 번호·설명·대상 시스템을 SAP 에서 읽어 오지 않아. 네가 알려 준 값만 적어. 자동으로 채우는 일은 이슈 #563 이야.</div></div>
+    <div class="callout ok"><span class="k">처음 쓸 때</span><div>Project Repository 에 <code>rules/cts.yaml</code>, <code>rules/cts-output.yaml</code>, <code>templates/harness/cts.md</code> 가 없으면 스킬이 복사할 파일을 알려 줘. 규칙을 바꾸는 PR 은 승인자의 Approve 가 필요해.</div></div>
+  </div>
+
+  <div class="next"><button data-go="manual">← 사용자 매뉴얼 만들기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
 </article>
 
 <!-- ================= 작업 시작하기 ================= -->
@@ -1169,7 +1229,7 @@ fix/31-broken-link</pre>
     <div class="callout ok"><span class="k">이름 실수</span><div>브랜치 이름을 잘못 지었으면 새로 만들지 말고 <code>git branch -m</code> 으로 고쳐.</div></div>
   </div>
 
-  <div class="next"><button data-go="manual">← 사용자 매뉴얼 만들기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
+  <div class="next"><button data-go="cts">← CTS 관리대장 쓰기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
 </article>
 
 <!-- ================= sync ================= -->

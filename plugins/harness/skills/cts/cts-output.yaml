@@ -1,0 +1,9 @@
+# CTS 관리대장 xlsx 산출물의 파일 이름 규칙. 양식 지도의 `산출.파일명`(CTS관리대장_<종류>_v{버전}.xlsx)과 같은 모양이다.
+# 지도에 `검사_규칙` 이 없어 산출이 이 파일을 읽어 대조하지는 않는다 — PR 을 열 때 Actions(doc-guard)가 이 관할의 xlsx 를 본다.
+# 양식이 바뀌어 파일명 모양이 바뀌면 이 패턴도 같이 고친다. "첫 판은 0.1", "0.1 씩 올림" 은 어느 검사도 강제하지 않는다.
+# 이 파일은 Project Repository 의 rules/cts-output.yaml 로 복사해 쓴다(/harness:cts 가 안내한다).
+관할: "docs/CTS관리대장/*.xlsx"
+
+규칙:
+  - 종류: filename
+    패턴: '^CTS관리대장_(Configuration|CBO)_v\d+\.\d+\.xlsx$'
