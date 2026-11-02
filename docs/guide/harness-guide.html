@@ -433,9 +433,9 @@ svg text { font-family: var(--body); fill: var(--fg); }
     <div class="diagram">
       <div class="flow flow-steps">
         <button class="node" data-go="setup"><b>⓪ 처음 준비하기</b><span>설치 · 로그인 (한 번만)</span></button><div class="arrow"></div>
-        <button class="node hl" data-go="srs-new"><b>① SRS(Software Requirements Specification)</b><span>만들기 · 고치기</span></button><div class="arrow"></div>
-        <button class="node" data-go="spec-new"><b>② Spec(Specification)</b><span>만들기 · 고치기</span></button><div class="arrow"></div>
-        <button class="node" data-go="start"><b>③ 작업 시작하기</b><span>개발 이슈 + 브랜치</span></button><div class="arrow"></div>
+        <button class="node hl" data-go="srs-new"><b>① SRS(Software Requirements Specification)</b><span>만들기 · 고치기 (이슈 · 브랜치도)</span></button><div class="arrow"></div>
+        <button class="node" data-go="spec-new"><b>② Spec(Specification)</b><span>만들기 · 고치기 (이슈 · 브랜치도)</span></button><div class="arrow"></div>
+        <button class="node" data-go="start"><b>③ 개발 시작하기</b><span>DEV 이슈 골라 브랜치</span></button><div class="arrow"></div>
         <button class="node" data-go="sap"><b>④ SAP(Systems, Applications and Products) 개발</b><span>080 · ATC(ABAP Test Cockpit)</span></button><div class="arrow"></div>
         <button class="node hl" data-go="deliver"><b>⑤ 작업 올리기</b><span>커밋 · PR(Pull Request)</span></button><div class="arrow"></div>
         <button class="node" data-go="gate"><b>⑥ 검사 · 승인</b><span>Actions</span></button><div class="arrow"></div>
@@ -678,9 +678,9 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     <div class="tbl-wrap"><table>
       <tr><th>할 일</th><th>쓰는 것</th></tr>
       <tr><td>아이디어가 흐릿할 때 혼자 다듬기</td><td>Ouroboros — <code>ooo interview</code> · <code>ooo pm</code></td></tr>
-      <tr><td>고객 요구사항 정본</td><td><code>/harness:srs</code> — 정본은 <code>docs/ssot/SRS.md</code> 하나뿐</td></tr>
-      <tr><td>개발 설계</td><td><code>/harness:spec</code></td></tr>
-      <tr><td>작업 시작 · 이슈 · 브랜치</td><td><code>/harness:start</code></td></tr>
+      <tr><td>고객 요구사항 정본 (작업 이슈 · <code>docs/…</code> 브랜치, 개발할 REQ 마다 <code>[DEV-xxx]</code> 이슈)</td><td><code>/harness:srs</code> — 정본은 <code>docs/ssot/SRS.md</code> 하나뿐</td></tr>
+      <tr><td>개발 설계 (하위 작업 이슈 · <code>feat/…</code> 브랜치)</td><td><code>/harness:spec</code></td></tr>
+      <tr><td>개발 · 작은 수정 시작 (<code>[DEV-xxx]</code> 이슈를 골라 브랜치, 작은 수정은 새 이슈)</td><td><code>/harness:start</code></td></tr>
       <tr><td>올리기 · PR</td><td><code>/harness:deliver</code></td></tr>
     </table></div>
   </section>
