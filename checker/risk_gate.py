@@ -1012,9 +1012,10 @@ def evaluate(ctx: Context) -> list[Finding]:
 # --- 다음 할 일 -----------------------------------------------------------------
 
 
-def build_next(findings: list[Finding], approval: str, approvers_file: str) -> str:
+def build_next(findings: list[Finding], approval: str, approvers_file: str, admin_only: bool = False) -> str:
     """사유에 맞춘 "다음:" 안내를 만든다(#113 형식). `approval` 은
-    "ok" | "missing" | "stale" | "no_approvers" | "none"(위험하지 않음) 이다."""
+    "ok" | "missing" | "stale" | "no_approvers" | "none"(위험하지 않음) 이다.
+    `admin_only` 는 승인자 파일이 없거나 비어 저장소 admin 이 승인자인 경우다(#586). 안내 문구만 바꾼다."""
     if approval in ("ok", "none"):
         return ""
     kinds = {f.criterion for f in findings}
@@ -1059,15 +1060,19 @@ def build_next(findings: list[Finding], approval: str, approvers_file: str) -> s
             f"(이 파일은 기준 브랜치에서 읽으므로 따로 먼저 반영해야 합니다).{split}"
         )
     elif approval == "stale":
-        steps.append(
-            f"🚨 직접 해 주세요: 승인자({approvers_file} 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)에게 "
-            "최신 커밋을 보고 다시 Approve 를 요청하십시오"
+        who = (
+            "저장소 관리자(admin, 작성자 제외)"
+            if admin_only
+            else f"승인자({approvers_file} 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)"
         )
+        steps.append(f"🚨 직접 해 주세요: {who}에게 최신 커밋을 보고 다시 Approve 를 요청하십시오")
     else:
-        steps.append(
-            f"🚨 직접 해 주세요: 승인자({approvers_file} 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)에게 "
-            f"최신 커밋을 보고 Approve 를 요청하십시오.{split}"
+        who = (
+            "저장소 관리자(admin, 작성자 제외)"
+            if admin_only
+            else f"승인자({approvers_file} 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)"
         )
+        steps.append(f"🚨 직접 해 주세요: {who}에게 최신 커밋을 보고 Approve 를 요청하십시오.{split}")
     steps = [s.rstrip(".") for s in steps]
     if len(steps) == 1:
         return f"다음: {steps[0]}."
@@ -1148,7 +1153,8 @@ def _disabled_result() -> dict:
 
 
 def _result_from(findings: list[Finding], approval_state: str, approved: bool | None, note: str,
-                 stale: list[str], approvers_file: str, notes: list[str] | None = None) -> dict:
+                 stale: list[str], approvers_file: str, notes: list[str] | None = None,
+                 admin_only: bool = False) -> dict:
     """`findings` 는 위험 사유만(note 아님). 참고(note)는 `notes` 문구로 따로 받아 `reasons` 와 섞지 않는다(#436)."""
     high = bool(findings)
     waiting_only = high and approved is not True and all(f.waiting for f in findings)
@@ -1162,7 +1168,7 @@ def _result_from(findings: list[Finding], approval_state: str, approved: bool | 
         "stale_approvers": stale,
         "waiting_on_checks": waiting_only,
         "approval_note": note,
-        "next": build_next(findings, approval_state, approvers_file),
+        "next": build_next(findings, approval_state, approvers_file, admin_only),
     }
 
 
@@ -1232,7 +1238,9 @@ def decide_pr(client: GhClient, repo: str, pr: int, config_ref: str | None = Non
     state, approved, note, stale = _judge_approval(
         author, fetch_pr_reviews(client, repo, pr), approvers, head_sha, AdminChecker(client, repo)
     )
-    return _result_from(findings, state, approved, note, stale, cfg["approvers_file"], notes)
+    return _result_from(
+        findings, state, approved, note, stale, cfg["approvers_file"], notes, admin_only=not approvers.has_entries
+    )
 
 
 def decide_pr_waiting(

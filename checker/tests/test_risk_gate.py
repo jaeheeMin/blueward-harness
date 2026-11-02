@@ -822,6 +822,32 @@ def test_승인자_파일이_없거나_비면_저장소_admin_의_승인만_인�
     assert rg.decide_pr(own, "o/r", 5)["approved"] is False
 
 
+@pytest.mark.parametrize("approvers", [None, ""])
+def test_승인자_파일이_없거나_비면_다음_안내도_저장소_관리자에게_요청하라고_한다(approvers):
+    missing = rg.decide_pr(_client(files=[_file("rules/a.yaml")], approvers=approvers), "o/r", 5)
+    assert missing["approved"] is False
+    assert "저장소 관리자(admin, 작성자 제외)에게 최신 커밋을 보고 Approve 를 요청" in missing["next"]
+    assert ".github/ssot-approvers" not in missing["next"]
+
+    big = rg.decide_pr(_client(files=[_file("src/a.py", 500, 0)], approvers=approvers), "o/r", 5)
+    assert "저장소 관리자(admin, 작성자 제외)" in big["next"] and "PR 을 나눠" in big["next"]
+
+
+def test_build_next_stale_는_admin_only_일_때만_저장소_관리자를_가리킨다():
+    # 파일이 없으면 낡은 승인자는 권한을 묻지 않아 판정에선 잘 안 나오지만, 문구는 같은 기준을 따른다.
+    admin = rg.build_next([], "stale", ".github/ssot-approvers", True)
+    assert "저장소 관리자(admin, 작성자 제외)에게 최신 커밋을 보고 다시 Approve 를 요청" in admin
+    assert ".github/ssot-approvers" not in admin
+    listed = rg.build_next([], "stale", ".github/ssot-approvers")
+    assert "승인자(.github/ssot-approvers 에서" in listed and "저장소 관리자" not in listed
+
+
+def test_승인자_파일이_있으면_다음_안내는_승인자_목록을_가리킨다():
+    result = rg.decide_pr(_client(files=[_file("rules/a.yaml")]), "o/r", 5)
+    assert "승인자(.github/ssot-approvers 에서 이 PR 작성자에게 정해진 사람, 작성자 제외)" in result["next"]
+    assert "저장소 관리자" not in result["next"]
+
+
 def test_승인자_파일이_없을_때_권한을_못_읽으면_검사_불능이다():
     client = _client(files=[_file("rules/a.yaml")], approvers=None,
                      reviews=[_review("alice", "APPROVED", HEAD)])
