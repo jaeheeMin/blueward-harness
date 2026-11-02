@@ -148,6 +148,7 @@ class App:
         self.sync_spawn = sync_spawn
         self.static_dir = Path(__file__).resolve().parent / "static"
         self.store = Store(state_dir, clock)
+        self.store.flow_data = self.flow_data
         claude_cmd = claude_cmd or platform_compat.find_claude
         self.manager = Manager(self.store, claude_cmd, str(self.plugin_root), model=model, popen=popen, effort=self.default_effort)
         self.analyses = analysis.Analyses(claude_cmd, model=model, spawn=self.spawn, effort=self.default_effort,

@@ -125,6 +125,7 @@ class Store:
         self.aliases: dict[str, str] = {}
         self.requests: dict[str, Request] = {}
         self.folders: list[str] = []
+        self.flow_data: dict | None = None  # 서버가 읽어 둔 갈래 정의. 화면에는 현재 이름·설명으로 내보낸다
         self.subscribers: list[Subscriber] = []
         self._dirty = False
         self._last_save = 0.0
@@ -490,7 +491,7 @@ def public_session(store: Store, s: dict, skills: list[str]) -> dict:
             group = "running"
         else:
             group = "idle"
-        return dict(flows.public_fields(s), **{
+        return dict(flows.public_fields(s, self.flow_data), **{
             "id": s["id"], "title": s["title"], "cwd": s["cwd"], "repo": s["repo"], "branch": s["branch"],
             "managed": s["managed"], "status": status, "group": group, "permissionMode": s["permissionMode"],
             "model": s.get("model", ""), "modelChoice": s.get("modelChoice", ""),

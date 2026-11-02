@@ -3799,6 +3799,37 @@ def test_dev_flow_ends_pointing_at_the_disabled_permission_form(tmp_path):
     assert flows.compute_next(data, flows.flow_def(data, "fix"), str(tmp_path)) is None
 
 
+def test_public_fields_shows_current_step_names_for_a_session_saved_before_the_rename():
+    data, _ = flows.load(FLOWS_FILE)
+    flow = flows.flow_def(data, "srs")
+    state = flows.new_state(flow, "", 1.0, lambda name: False)
+    old = {"flowState": json.loads(json.dumps(state))}
+    old["flowState"]["name"] = "옛 갈래 이름"
+    old["flowState"]["steps"][1].update(name="커밋·푸시·PR", hint="옛 설명")
+    shown = flows.public_fields(old, data)
+    assert shown["flowName"] == flow["name"]
+    assert shown["flowSteps"][1]["name"] == flow["steps"][1]["name"] != "커밋·푸시·PR"
+    assert shown["flowSteps"][1]["hint"] == flow["steps"][1].get("hint", "")
+    assert old["flowState"]["steps"][1]["name"] == "커밋·푸시·PR"  # 저장 상태는 그대로
+    assert flows.public_fields(old)["flowSteps"][1]["name"] == "커밋·푸시·PR"  # 정의를 안 주면 저장값
+    store = Store(None)
+    store.ensure("s1", "/w")["flowState"] = old["flowState"]
+    assert store_mod.public_session(store, store.get("s1"), [])["flowSteps"][1]["name"] == "커밋·푸시·PR"  # 정의 없이는 저장값
+    store.flow_data = data
+    assert store_mod.public_session(store, store.get("s1"), [])["flowSteps"][1]["name"] == flow["steps"][1]["name"]
+
+
+def test_public_fields_keeps_saved_values_when_the_definition_is_gone():
+    data, _ = flows.load(FLOWS_FILE)
+    state = flows.new_state(flows.flow_def(data, "srs"), "", 1.0, lambda name: False)
+    state["steps"][1].update(id="removed-step", name="없어진 단계", hint="저장된 설명")
+    shown = flows.public_fields({"flowState": state}, data)
+    assert shown["flowSteps"][1]["name"] == "없어진 단계" and shown["flowSteps"][1]["hint"] == "저장된 설명"
+    state["id"], state["name"] = "gone-flow", "없어진 갈래"
+    shown = flows.public_fields({"flowState": state}, data)
+    assert shown["flowName"] == "없어진 갈래" and shown["flowSteps"][0]["name"] == state["steps"][0]["name"]
+
+
 def test_srs_next_flow_cannot_be_decided_without_a_readable_srs(tmp_path):
     data, _ = flows.load(FLOWS_FILE)
     srs = flows.flow_def(data, "srs")

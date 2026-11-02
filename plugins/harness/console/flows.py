@@ -261,14 +261,28 @@ def allowed_skills(s: dict) -> set[str] | None:
     return {x for x in (st["skill"] if st["kind"] == "skill" else None, st.get("helperSkill")) if x}
 
 
-def public_fields(s: dict) -> dict:
+def public_fields(s: dict, data: dict | None = None) -> dict:
+    """화면용 갈래 상태. `data`(현재 갈래 정의)를 주면 같은 갈래·단계 id 의 이름·설명을 현재 값으로 내보낸다
+    (개편 전에 저장된 세션의 옛 이름이 남지 않게). 정의에서 못 찾으면 저장된 값 그대로다. 저장 상태는 바꾸지 않는다."""
     state = s.get("flowState")
     if not state:
         return {"flowId": None, "flowName": "", "flowReason": "", "stepIndex": 0, "flowSteps": [], "flowFinished": False,
                 "flowUnknown": [], "flowPr": None, "nextFlow": None}
     keep = ("id", "name", "kind", "skill", "helperSkill", "hint", "onlyIf", "state", "reason")
-    return {"flowId": state["id"], "flowName": state["name"], "flowReason": state["reason"], "stepIndex": state["stepIndex"],
-            "flowSteps": [{k: st.get(k) for k in keep} for st in state["steps"]], "flowFinished": bool(state["finished"]),
+    flow = flow_def(data, state["id"]) if data else None
+    current_steps = {x.get("id"): x for x in (flow or {}).get("steps", []) if isinstance(x, dict)}
+
+    def view(st: dict) -> dict:
+        out = {k: st.get(k) for k in keep}
+        cur = current_steps.get(st.get("id"))
+        if cur:
+            out["name"] = cur.get("name", st.get("id"))
+            out["hint"] = cur.get("hint", "")
+        return out
+
+    flow_name = flow.get("name", state["id"]) if flow else state["name"]
+    return {"flowId": state["id"], "flowName": flow_name, "flowReason": state["reason"], "stepIndex": state["stepIndex"],
+            "flowSteps": [view(st) for st in state["steps"]], "flowFinished": bool(state["finished"]),
             "flowUnknown": list(state["unknown"]), "flowPr": state.get("pr"), "nextFlow": state.get("next")}
 
 
