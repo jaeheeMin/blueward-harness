@@ -777,7 +777,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
       <tr><th>다음 단계</th><th>RICEFW ID</th><th>그다음</th></tr>
       <tr><td><b>개발</b></td><td><code>DEV-003</code>(구매요청 승인, REQ 와 같은 번호)</td><td>Spec(Specification) 을 만들어 → 개발해 (<code>/harness:spec</code> → <code>/harness:start</code>)</td></tr>
       <tr><td><b>설정</b></td><td>비움</td><td>Spec 없이 진행 원장에 올라가 → <code>[DEV-003]</code> 이슈로 시작하면 "진행" → 설정을 마치면 그 이슈를 닫는 PR 에 deliver 가 처음부터 "완료" 로 담아. 무엇을 설정했는지는 SRS 의 Configuration Considerations 에 적어</td></tr>
-      <tr><td><b>미정</b></td><td>비움</td><td>미결 사항에 남겨 두고, Spec 을 만들려 할 때 개발인지 설정인지 먼저 정해</td></tr>
+      <tr><td><b>미정</b></td><td>비움</td><td>미결 사항에 남겨 두고(<code>/harness:srs</code>), 정해지면 이 열을 고쳐. 바로 Spec 을 만들고 싶으면 <code>/harness:spec</code> 이 그 자리에서 개발인지 설정인지 정해</td></tr>
       <tr><td>보류 · 취소</td><td>그대로</td><td>다음 단계가 아니라 Status 로 적어: <code>On Hold</code> · <code>Dropped</code> · <code>Duplicate</code> 면 Spec 도 안 만들고 멈춰. 원장에 줄이 있으면 지우지 않고 내용 앞에 <code>[보류]</code> · <code>[취소]</code> 만 붙여</td></tr>
       <tr><td>설정 → 개발로 바뀜</td><td><code>DEV-003</code> 을 채움</td><td>원장의 설정 줄을 그대로 쓰고 Spec 칸만 "-" 로 되돌려. 그다음 <code>/harness:spec</code> 이 이어받아</td></tr>
     </table></div>
@@ -1255,7 +1255,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
         <li><div>하위 작업이면 번호를 새로 안 받아. 제목 <b>끝</b>에 붙여: <code>Launchpad 타일 노출 (DEV-002)</code>. 본문에는 "DEV-002(DEV = Development) 하위 작업" 과 대표 이슈 링크를 적어</div></li>
         <li><div>규칙에 맞는 브랜치를 만들고 이동해</div></li>
         <li><div>내 열린 PR(Pull Request) 이 있으면 "먼저 병합할 수 있는 내 PR: #n" 을 알려 주고, 승인 대기·검사 실패인 PR 은 한 줄로 요약해. 알려 주기만 하고 시작은 막지 않아. 상태를 못 읽으면 "PR 상태 확인 불능" 한 줄만 말하고 계속해</div></li>
-        <li><div>진행 원장에 이미 있는 건(예: SRS 에서 설정으로 올라간 건)은 묻지 않고 "대기" 줄을 "진행" 으로 바꿔 ("리뷰"·"완료" 줄이면 바꿀지 물어). 원장에 없는 새 건(feat, fix)이면 줄을 넣을지 물어봐 (넣으면 상태 "진행")</div></li>
+        <li><div>진행 원장에 이미 있는 건(예: SRS 에서 설정으로 올라간 건)은 묻지 않고 "대기" 줄을 "진행" 으로 바꿔 ("완료" 줄이면 바꿀지 물어. "리뷰" 줄은 GitHub PR 로 이유를 확인해서, 이미 합쳐진 Spec PR 때문이고 같은 개발의 열린 PR 이 없으면 묻지 않고 "진행" 으로 바꿔. 열린 PR 이 있거나 확인하지 못하면 물어). 원장에 없는 새 건(feat, fix)이면 줄을 넣을지 물어봐 (넣으면 상태 "진행")</div></li>
       </ol>
     </section>
     <section class="box">
@@ -1737,7 +1737,7 @@ Closes #143</pre>
   <header class="panel-head">
     <div class="eyebrow">작업 닫기 · squash merge</div>
     <h2>리뷰 · 병합하기</h2>
-    <p class="lead">작성자가 아닌 사람이 한 번 이상 읽은 뒤에 병합해. 병합은 squash 로 해.</p>
+    <p class="lead">위험하지 않은 PR 은 검사가 통과하면 자동으로 합쳐지고, 위험한 PR 은 작성자가 아닌 승인자가 Approve 해야 합쳐져. 병합은 squash 로 해.</p>
   </header>
 
   <div class="when">
@@ -1780,10 +1780,10 @@ Closes #143</pre>
   </div>
 
   <section class="box">
-    <h3>자동 병합 — 내 승인이 곧 병합 결정이야</h3>
+    <h3>자동 병합 — 위험한 PR 은 승인이 곧 병합 결정이야</h3>
     <ul class="todo">
       <li>PR 은 <b>하위 작업 이슈 하나</b>만 담아. 다른 개발이 섞이거나 SRS 와 개발이 같이 있으면 deliver 가 나누자고 해(같은 개발의 Spec 은 같이 올려도 돼).</li>
-      <li>끝난 PR 은 승인과 검사가 모두 끝나는 순간 GitHub 가 알아서 합쳐(자동 병합). 그때까지 기다리면 돼.</li>
+      <li>끝난 PR 은 조건이 갖춰지는 순간 GitHub 가 알아서 합쳐(자동 병합). 위험하지 않은 PR 은 검사 통과, 위험한 PR 은 승인자 Approve 까지야. <code>.github/human-merge-paths</code> 경로를 바꾼 PR 은 자동 병합을 안 걸고 사람이 GitHub 에서 직접 합쳐. 그때까지 기다리면 돼.</li>
       <li>개발 PR 은 다른 PR 위에 쌓지 않아. 앞 PR 이 열려 있으면 브랜치에만 올려 두고, 앞 PR 이 합쳐지면 다시 deliver 해서 PR 을 내.</li>
       <li>Spec(Specification) PR 은 설계가 정해지면 합쳐. 개발하다 알게 된 건 원장·변경 기록에 적고, 설계가 바뀌면 새 판으로 새 PR 을 내.</li>
       <li>이미 승인된 PR 에 더 고치고 싶으면 먼저 합치고 새 PR 을 내.</li>
@@ -2158,7 +2158,7 @@ Closes #143</pre>
     </table></div>
     <p class="small" style="margin-top:10px">그래서 Spec(<code>docs/spec/</code>)을 바꾼 PR 도 위험 경로라 승인이 필요해. 코드(<code>src/</code>)만 조금 바꾼 PR 은 검사가 승인을 요구하지 않아.</p>
     <p class="small" style="margin-top:6px">SRS 에 새 요구사항이 들어왔는데 기존 요구사항을 넓힌 것처럼 보이면 PR 에 근거가 붙어. 막는 게 아니라 승인자가 "정말 별개인가" 를 확인하라는 표시야.</p>
-    <p class="small" style="margin-top:6px">검사가 Approve 를 요구하지 않는 PR 이라도 <b>작성자가 아닌 사람이 한 번 읽고 병합</b>하는 건 같아. 검사가 확인하는 건 Approve 를 눌렀는지뿐이고, 읽었는지는 사람끼리 지키는 규칙이야. Claude 가 연 PR 은 내가 읽고 Merge 를 누르는 게 그 "다른 사람" 이야.</p>
+    <p class="small" style="margin-top:6px">Approve 를 요구하지 않는 위험하지 않은 PR 은 검사가 통과하면 자동으로 합쳐져(<code>.github/human-merge-paths</code> 경로를 바꾼 PR 은 사람이 직접 합쳐). risk-gate 설정이 없는 저장소(하네스 저장소 포함)는 자동 병합 대상이 아니라서 <b>작성자가 아닌 사람이 읽고 직접 병합</b>해. Claude 가 연 PR 은 내가 읽고 Merge 를 누르는 게 그 "다른 사람" 이야.</p>
   </section>
 
   <div class="cols">
