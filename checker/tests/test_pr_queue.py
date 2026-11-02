@@ -835,6 +835,23 @@ def test_chain_name_boundaries_period_two_numbers_and_spec_lead():
     assert names_of("docs: DEV-004. 결과 반영", "x DEV-004") == ["DEV-004(결과 반영)"]
 
 
+def test_title_end_devs_reads_shortened_numbers_after_the_first():
+    for title in ("fix: x (DEV-006·007·009)", "fix: x (DEV-006/007/009)", "fix: x [DEV-006, 007, 009]", "fix: x (DEV-006, DEV-007, 009)."):
+        end = pr_queue._title_end_devs(title)
+        assert end and end[0] == [6, 7, 9], title
+        assert title[: end[1]] == "fix: x ", title
+    assert pr_queue._title_end_devs("a (DEV-004, DEV-005)")[0] == [4, 5]
+    assert pr_queue._title_end_devs("a (REQ-002·003)")[0] == [2, 3]
+    # 첫 번호가 DEV-/REQ- 로 시작하지 않는 괄호는 잡지 않는다.
+    assert pr_queue._title_end_devs("a (2026)") is None
+    assert pr_queue._title_end_devs("a (006·007)") is None
+    assert pr_queue._title_end_devs("a (2026, DEV-006)") is None
+    # 줄임 표기여도 줄기 번호는 첫 번호, 속한 개발 건은 전부.
+    raw = {"title": "fix: x (DEV-006·007·009)", "headRefName": "", "body": "DEV-011"}
+    assert pr_queue._primary_dev(raw) == 6
+    assert pr_queue._order_devs(raw) == {6, 7, 9}
+
+
 def test_req_number_groups_like_dev_and_shows_as_dev():
     assert names_of("docs: 자재출고 요구 추가 (REQ-004)", "feat: x (DEV-004)") == ["DEV-004(자재출고 요구 추가)"]
 
@@ -972,7 +989,7 @@ def test_json_and_pr_outputs_unchanged_by_render_change():
     old_keys = {"number", "sha", "title", "author", "url", "base", "head", "state", "detail", "next", "notes",
                 "human_merge", "order", "after", "after_reasons", "version", "mine"}
     for it in json.loads(js)["prs"]:
-        assert set(it) == old_keys | {"devs", "dev", "dev_strong", "closes", "ledger"} and it["dev"] is None and it["devs"] == []
+        assert set(it) == old_keys | {"devs", "dev", "dev_all", "dev_strong", "closes", "ledger"} and it["dev"] is None and it["devs"] == []
     _, js_all = pr_queue.run(parse(["--repo", "o/r", "--json"]), gh)
     assert [it["number"] for it in json.loads(js_all)["prs"]] == [1, 2, 3]
     code, text = pr_queue.run(parse(["--repo", "o/r", "--pr", "2"]), gh)

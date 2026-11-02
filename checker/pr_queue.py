@@ -725,6 +725,7 @@ def compute(client: GhClient, repo: str, login: str | None = None, mine: bool = 
                 "version": versions.get(n),
                 "devs": sorted(_dev_numbers(raw)),
                 "dev": _primary_dev(raw),
+                "dev_all": sorted(_order_devs(raw)),  # PR 이 속한 개발 건 전부(팀 현황의 최근 PR 용, #549)
                 "dev_strong": _primary_dev(raw, use_body=False),  # 본문 언급을 뺀 근거로 정해진 번호(팀 현황의 담당 추정용, #535)
                 "closes": closing_issues(raw.get("body")),
                 "ledger": [],  # --mine 일 때 ledger_stale.annotate 가 채운다(#454)
@@ -894,16 +895,18 @@ def _components(prs: list[dict]) -> list[list[dict]]:
 
 
 _TITLE_END_DEV = re.compile(
-    r"[(\[]\s*((?:DEV|REQ)-0*\d+(?:\s*[,/·]\s*(?:DEV|REQ)-0*\d+)*)\s*[)\]]\s*[.。]?\s*$", re.IGNORECASE
+    r"[(\[]\s*((?:DEV|REQ)-0*\d+(?:\s*[,/·]\s*(?:(?:DEV|REQ)-)?0*\d+)*)\s*[)\]]\s*[.。]?\s*$", re.IGNORECASE
 )
+_END_NUMBER = re.compile(r"(?:(?:DEV|REQ)-)?0*(\d+)", re.IGNORECASE)
 
 
 def _title_end_devs(title: str) -> tuple[list[int], int] | None:
-    """제목 끝의 `(DEV-004)`·`[DEV-004]`·`(DEV-004, DEV-005)` 의 번호들(적힌 순서)과 그 괄호가 시작하는 위치. 뒤의 `.` 는 허용."""
+    """제목 끝의 `(DEV-004)`·`[DEV-004]`·`(DEV-004, DEV-005)` 의 번호들(적힌 순서)과 그 괄호가 시작하는 위치. 뒤의 `.` 는 허용.
+    첫 번호만 `DEV-`/`REQ-` 가 있으면 되고, 뒤 번호는 줄여 써도 읽는다(`(DEV-006·007·009)`, `(DEV-006/007)`, `(DEV-006, 007)`, #549)."""
     m = _TITLE_END_DEV.search(title or "")
     if not m:
         return None
-    return [int(n) for n in _DEV_REF.findall(m.group(1))], m.start()
+    return [int(n) for n in _END_NUMBER.findall(m.group(1))], m.start()
 _TYPE_PREFIX = re.compile(r"^\s*\w+(\([^)]*\))?!?\s*:\s*")
 _NAME_CUTS = (" Spec", " SRS", "·", " 에 ")
 _SPEC_LEAD = re.compile(r"^(?:Spec|SRS)\b")
