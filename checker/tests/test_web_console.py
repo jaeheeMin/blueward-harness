@@ -560,7 +560,8 @@ def test_question_times_out_after_300_seconds_with_injected_clock(browser):
     time.sleep(0.2)
     assert req.status == "pending"
     browser.clock.t += 2
-    h["t"].join(5)
+    h["t"].join(30)  # 느린 러너(windows)에서 5초로는 응답 전에 끝나 KeyError 'r' 가 났다(#597)
+    assert "r" in h, "질문 훅 응답이 30초 안에 오지 않았다"
     assert h["r"][1] is None and req.status == "closed" and req.outcome == "터미널로 넘어감"
 
 
