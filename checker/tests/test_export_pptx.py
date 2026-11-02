@@ -206,8 +206,9 @@ def _write_map(proj: Path, text: str) -> None:
     (proj / "templates" / "forms" / "시험매뉴얼.yaml").write_text(text, encoding="utf-8")
 
 
-def _run(proj: Path, capsys, spec: str = SPEC, *extra: str):
-    p = proj / "docs" / "spec" / "DEV-001.md"
+def _run(proj: Path, capsys, spec: str = SPEC, *extra: str, rel: str = "docs/spec/DEV-001.md"):
+    p = proj / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(spec, encoding="utf-8")
     code = export.main(["--spec", str(p), "--root", str(proj), *extra])
     out = capsys.readouterr().out
@@ -634,3 +635,133 @@ def test_blank_template_은_pptx_지도를_종료_2로_거절(proj, capsys):
     code = blank_template.main(["--root", str(proj), "--form", "시험매뉴얼", "--src", str(src), "--out", str(proj / "x.xlsx")])
     out = json.loads(capsys.readouterr().out)
     assert code == 2 and "pptx 지도는 빈 양식" in out["problems"][0]["reason"]
+
+
+# ---------------------------------------------------------------- 매뉴얼 작업본 경로 (#564)
+
+MANUAL_SKILL = Path(__file__).resolve().parents[2] / "plugins" / "harness" / "skills" / "manual"
+# 스킬이 안내하는 규칙·틀을 그대로 쓴다. 시험이 따로 만든 규칙으로 통과하지 않게 한다.
+
+MANUAL_REL = "docs/manual/Production/1.생산계획 보드.md"
+
+BUNDLE = "## 묶은 개발 건\n\n| DEV | 제목 |\n|---|---|\n| DEV-001 | 시험 |\n\n"
+
+
+def _manual_proj(proj: Path) -> Path:
+    (proj / "templates" / "harness").mkdir(parents=True)
+    (proj / "templates" / "harness" / "manual.md").write_text(
+        (MANUAL_SKILL / "manual-template.md").read_text(encoding="utf-8"), encoding="utf-8")
+    for src, dst in (("manual.yaml", "manual.yaml"), ("manual-output.yaml", "manual-output.yaml")):
+        (proj / "rules" / dst).write_text((MANUAL_SKILL / src).read_text(encoding="utf-8"), encoding="utf-8")
+    (proj / "rules" / "test.yaml").unlink()
+    _write_map(proj, MAP.replace("검사_규칙: ../../rules/test.yaml", "검사_규칙: ../../rules/manual-output.yaml")
+               .replace("폴더: docs/out", "폴더: docs/manual/{LoB}")
+               .replace('"M_{LoB}_{제목}_v{버전}.pptx"', '"사용자매뉴얼_{LoB}_{제목}_v{버전}.pptx"'))
+    (proj / "docs" / "manual" / "Production").mkdir(parents=True)
+    return proj
+
+
+def _manual_text(spec: str = SPEC) -> str:
+    spec = spec.replace("Production(생산)", "Production")
+    return spec.replace("## 양식 항목", BUNDLE + "## 양식 항목", 1)
+
+
+def _manual_check(proj: Path, rel: str, text: str) -> dict:
+    from checker import engine, loader
+
+    p = proj / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+    types = loader.load(proj / "rules")
+    return engine.check([(p, rel)], types)["files"][0]
+
+
+def test_매뉴얼_작업본_경로에서_양식_밖_항목이_걸린다(proj):
+    _manual_proj(proj)
+    rel = "docs/manual/Production/1.생산계획 보드.md"
+    assert _manual_check(proj, rel, _manual_text())["status"] == "pass"
+    bad = _manual_text().replace("#### 번호 설명\n\n1. 하나", "#### 낙서\n\nx\n\n#### 번호 설명\n\n1. 하나")
+    res = _manual_check(proj, rel, bad)
+    assert res["status"] == "violation" and any("양식 밖 항목" in v["message"] for v in res["violations"])
+    res = _manual_check(proj, rel, _manual_text().replace("### 시험매뉴얼 · 목차", "### 시험매뉴얼 · 없는쪽"))
+    assert res["status"] == "violation" and any("없는쪽" in v["message"] for v in res["violations"])
+
+
+def test_매뉴얼_작업본_파일명과_묶은_개발_건을_강제한다(proj):
+    _manual_proj(proj)
+    res = _manual_check(proj, "docs/manual/Production/생산계획 보드.md", _manual_text())
+    assert res["status"] == "violation" and any(v["rule"] == "filename" for v in res["violations"])
+    res = _manual_check(proj, "docs/manual/Production/1.생산계획 보드.md", _manual_text().replace("DEV-001", "개발1"))
+    assert res["status"] == "violation" and any(v["rule"] == "md_table" for v in res["violations"])
+    res = _manual_check(proj, "docs/manual/Production/2.다른.md", SPEC.replace("Production(생산)", "Production"))
+    assert res["status"] == "violation" and any(v["rule"] == "md_table" for v in res["violations"])  # 절이 없다
+
+
+def test_산출_폴더의_자리는_작업본_값으로_채워진다(proj, capsys):
+    _manual_proj(proj)
+    code, rep = _run(proj, capsys, _manual_text(), rel=MANUAL_REL)
+    assert code == 3 and rep["files"] == ["docs/manual/Production/사용자매뉴얼_Production_생산계획 보드_v0.1.pptx"], rep
+    assert (proj / rep["files"][0]).is_file()
+    # 산출물은 md 규칙(form_columns)이 아니라 pptx 규칙 유형으로 잡혀 파일명 패턴만 본다
+    from checker import engine, loader
+
+    res = engine.check([(proj / rep["files"][0], rep["files"][0])], loader.load(proj / "rules"))["files"][0]
+    assert res["status"] == "pass" and res["type"] != _manual_check(proj, "docs/manual/Production/1.a.md", _manual_text())["type"], res
+
+
+def _with_lob(lob: str) -> str:
+    text = _manual_text()
+    old = "#### LoB\n\nProduction\n"
+    assert old in text
+    return text.replace(old, "#### LoB\n\n" + lob + "\n")
+
+
+@pytest.mark.parametrize("lob", ["production", "Prod", "PRODUCTION"])
+def test_자리로_채운_폴더가_작업본_폴더와_대소문자까지_다르면_거부(proj, capsys, lob):
+    _manual_proj(proj)
+    code, rep = _run(proj, capsys, _with_lob(lob), rel=MANUAL_REL)
+    assert code == 1 and rep["files"] == [], rep
+    assert any(p["item"] == "산출.폴더" and "대소문자까지 같지 않다" in p["reason"] for p in rep["problems"]), rep["problems"]
+
+
+def test_폴더가_자리를_안_쓰면_작업본_위치와_상관없다(proj, capsys):
+    code, rep = _run(proj, capsys)  # docs/out, 작업본은 docs/spec
+    assert code == 3 and rep["files"][0].startswith("docs/out/")
+
+
+@pytest.mark.parametrize("lob,why", [
+    ("..", "점만"), (".", "점만"), ("...", "점만"), ("a.", "끝이 점"),
+    ("a\x07b", "제어 문자"), ("CON", "예약어"), ("con", "예약어"), ("NUL.txt", "예약어"), ("COM1", "예약어"), ("lpt9.x", "예약어"),
+    ("a/b", "`/`"), ("a:b", "쓸 수 없는 문자"), ("a\\b", "쓸 수 없는 문자"), ("../밖", "`/`"),
+])
+def test_폴더_자리_값이_쓸_수_없으면_폴더_항목으로_거부(proj, capsys, lob, why):
+    _manual_proj(proj)
+    code, rep = _run(proj, capsys, _with_lob(lob), rel=MANUAL_REL)
+    assert code == 1 and rep["files"] == [], (lob, rep)
+    folder_items = [p for p in rep["problems"] if p["item"].startswith("산출.폴더")]
+    assert folder_items and any(why in p["reason"] for p in folder_items), (lob, rep["problems"])
+    assert not (proj / "docs" / "밖").exists()
+
+
+def test_빈_LoB_는_산출_폴더_항목과_폴더_사유로_알린다(proj, capsys):
+    _manual_proj(proj)
+    code, rep = _run(proj, capsys, _with_lob(""), rel=MANUAL_REL)
+    assert code == 1
+    assert any(p["item"] == "산출.폴더 {LoB}" and "산출 폴더" in p["reason"] and "파일 이름" not in p["reason"] for p in rep["problems"]), rep["problems"]
+
+
+def test_폴더_템플릿에_역슬래시가_있으면_지도_오류(proj, capsys):
+    _manual_proj(proj)
+    mp = proj / "templates" / "forms" / "시험매뉴얼.yaml"
+    mp.write_text(mp.read_text(encoding="utf-8").replace("docs/manual/{LoB}", "docs\\manual\\{LoB}"), encoding="utf-8")
+    code, rep = _run(proj, capsys, _manual_text(), rel=MANUAL_REL)
+    assert code == 2 and rep["status"] == "error" and "역슬래시" in json.dumps(rep, ensure_ascii=False) and "지도 오류" in json.dumps(rep, ensure_ascii=False), rep
+
+
+def test_캡처가_없는_화면은_빈칸으로_통과하지_않고_화면별로_알린다(proj, capsys):
+    _manual_proj(proj)
+    text = _manual_text().replace("#### 그림\n\ndocs/img/a.png\n\n", "").replace("docs/img/b.png", "docs/img/없음.png")
+    code, rep = _run(proj, capsys, text, rel=MANUAL_REL)
+    assert code == 1 and rep["status"] == "rejected" and rep["files"] == []
+    miss = {p["sheet"] for p in rep["problems"] if p["item"] == "그림"}
+    assert miss == {"본문 · 첫째 화면", "본문 · 둘째 화면"}, rep["problems"]
