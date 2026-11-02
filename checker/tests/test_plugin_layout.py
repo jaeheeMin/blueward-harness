@@ -47,6 +47,8 @@ def test_마켓플레이스_항목이_harness_를_가리킨다():
 
 HOOK_MATCHERS = {
     "Write|Edit",
+    "Write|Edit|NotebookEdit",  # #601 서브에이전트 편집 직전 해시
+
     "Bash|PowerShell",
     "Agent|Task",
     "mcp__.*__(setObjectSource|renamePreview|renameExecute|extractMethodPreview|extractMethodExecute|createObject"
@@ -57,6 +59,8 @@ HOOK_MATCHERS = {
 
 POST_HOOK_MATCHERS = {
     "mcp__.*__(setObjectSource|createObject|deleteObject|activateObjects|activateByName|inactiveObjects)",
+    "Write|Edit|NotebookEdit",  # #601 서브에이전트 편집 기록
+    "Agent|Task",  # #601 경고를 메인 세션에 전달
 }
 
 
@@ -88,6 +92,7 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
         "mcp_activation_tracker.py",
         "update_notice.py",
         "pr_table_notice.py",
+        "subagent_edit_guard.py",  # #601
     }
 
     # 각 훅이 가리키는 파일이 실제로 플러그인 안에 있어야 한다.
