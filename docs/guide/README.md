@@ -5,7 +5,7 @@ blueward-harness 를 처음 쓰는 팀원이 액티비티(하려는 일)별로 �
 기능을 한눈에 보는 페이지다.
 
 - 원본: [`harness-guide.html`](harness-guide.html)
-- 게시 위치: claude.ai 아티팩트 <https://claude.ai/artifact/HD5TUKWCEbaAkYE9vSUkR8>
+- 게시 위치: claude.ai 아티팩트 <https://claude.ai/artifact/XcbPn4JkPkeLGgVKBG4yEi>
   - 비공개로 시작했다. 공유는 소유자가 페이지의 Share 메뉴로 한다.
 
 ## 다시 올리는 법

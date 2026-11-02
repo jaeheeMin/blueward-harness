@@ -205,7 +205,7 @@ jobs:
           WEBHOOK: ${{ secrets.TEAMS_PLUGIN_ALERT_WEBHOOK }}
           TAGGED: ${{ steps.tag.outputs.tagged }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          GUIDE_URL: https://claude.ai/artifact/HD5TUKWCEbaAkYE9vSUkR8
+          GUIDE_URL: https://claude.ai/artifact/XcbPn4JkPkeLGgVKBG4yEi
         run: |
           if [ -z "$WEBHOOK" ]; then
             echo "::notice title=Teams 알림 건너뜀::TEAMS_PLUGIN_ALERT_WEBHOOK 이 비어 있다."

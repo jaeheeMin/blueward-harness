@@ -560,7 +560,8 @@ def test_question_times_out_after_300_seconds_with_injected_clock(browser):
     time.sleep(0.2)
     assert req.status == "pending"
     browser.clock.t += 2
-    h["t"].join(5)
+    h["t"].join(30)  # 느린 러너(windows)에서 5초로는 응답 전에 끝나 KeyError 'r' 가 났다(#597)
+    assert "r" in h, "질문 훅 응답이 30초 안에 오지 않았다"
     assert h["r"][1] is None and req.status == "closed" and req.outcome == "터미널로 넘어감"
 
 
@@ -3797,6 +3798,37 @@ def test_dev_flow_ends_pointing_at_the_disabled_permission_form(tmp_path):
     nxt = flows.compute_next(data, flows.flow_def(data, "dev"), str(tmp_path))
     assert nxt["options"] == [{"flow": None, "name": "권한·CTS 양식(준비 중)", "label": "권한·CTS 양식(준비 중)", "disabled": True}]
     assert flows.compute_next(data, flows.flow_def(data, "fix"), str(tmp_path)) is None
+
+
+def test_public_fields_shows_current_step_names_for_a_session_saved_before_the_rename():
+    data, _ = flows.load(FLOWS_FILE)
+    flow = flows.flow_def(data, "srs")
+    state = flows.new_state(flow, "", 1.0, lambda name: False)
+    old = {"flowState": json.loads(json.dumps(state))}
+    old["flowState"]["name"] = "옛 갈래 이름"
+    old["flowState"]["steps"][1].update(name="커밋·푸시·PR", hint="옛 설명")
+    shown = flows.public_fields(old, data)
+    assert shown["flowName"] == flow["name"]
+    assert shown["flowSteps"][1]["name"] == flow["steps"][1]["name"] != "커밋·푸시·PR"
+    assert shown["flowSteps"][1]["hint"] == flow["steps"][1].get("hint", "")
+    assert old["flowState"]["steps"][1]["name"] == "커밋·푸시·PR"  # 저장 상태는 그대로
+    assert flows.public_fields(old)["flowSteps"][1]["name"] == "커밋·푸시·PR"  # 정의를 안 주면 저장값
+    store = Store(None)
+    store.ensure("s1", "/w")["flowState"] = old["flowState"]
+    assert store_mod.public_session(store, store.get("s1"), [])["flowSteps"][1]["name"] == "커밋·푸시·PR"  # 정의 없이는 저장값
+    store.flow_data = data
+    assert store_mod.public_session(store, store.get("s1"), [])["flowSteps"][1]["name"] == flow["steps"][1]["name"]
+
+
+def test_public_fields_keeps_saved_values_when_the_definition_is_gone():
+    data, _ = flows.load(FLOWS_FILE)
+    state = flows.new_state(flows.flow_def(data, "srs"), "", 1.0, lambda name: False)
+    state["steps"][1].update(id="removed-step", name="없어진 단계", hint="저장된 설명")
+    shown = flows.public_fields({"flowState": state}, data)
+    assert shown["flowSteps"][1]["name"] == "없어진 단계" and shown["flowSteps"][1]["hint"] == "저장된 설명"
+    state["id"], state["name"] = "gone-flow", "없어진 갈래"
+    shown = flows.public_fields({"flowState": state}, data)
+    assert shown["flowName"] == "없어진 갈래" and shown["flowSteps"][0]["name"] == state["steps"][0]["name"]
 
 
 def test_srs_next_flow_cannot_be_decided_without_a_readable_srs(tmp_path):
