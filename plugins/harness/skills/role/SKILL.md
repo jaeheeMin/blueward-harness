@@ -62,7 +62,7 @@ SAP 에서 Role·카탈로그가 실제로 어떻게 배정돼 있는지는 이 
 
 - **머리.** 첫 `##` 앞의 `버전: 0.1` 줄이 산출 파일명의 버전(`v0.1`)이 된다. 처음은 0.1, 올릴 때 0.1 씩이다. 줄이 없거나 `x.y`
   모양이 아니면 산출이 거부한다.
-- **Role 개요 표.** Role 목록의 원본이다. 이 표의 `Role ID` 순서가 펼쳐지는 열의 순서이고, 같은 `Role ID` 가 둘이면 산출이 거부한다.
+- **Role 개요 표.** Role 목록의 원본이다. 이 표가 없거나 행이 없으면 펼칠 열을 정하지 못해 산출이 거부한다. 이 표의 `Role ID` 순서가 펼쳐지는 열의 순서이고, 같은 `Role ID` 가 둘이면 산출이 거부한다.
   `조직 레벨` 같은 열은 작업본에만 있고 엑셀 열로는 가지 않는다(메뉴 배정 머리글 칸으로만 간다). 지도 `펼침.머리글` 이 읽는 열 이름이
   이 표에 있는지 지도에서 확인한다.
 - **메뉴 배정 표.** 행 하나가 메뉴 한 줄이다. `Space`·`Page`·`Section`·`Fiori App`·`Catalog` 는 양식의 계층 열이고, **`Role` 열은
@@ -116,7 +116,7 @@ SAP 에서 Role·카탈로그가 실제로 어떻게 배정돼 있는지는 이 
 e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "대조 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
 uvx --from "$e" \
   python -P -m checker.role_check --workbook "docs/권한관리/사용자권한관리_User_Role Mapping.md" --form 사용자권한관리 \
-  --sheet "Role to Area Menu" --table "메뉴 배정" --column Catalog --spec-dir docs/spec
+  --sheet "Role to Area Menu" --table "메뉴 배정" --column Catalog --root "$(git rev-parse --show-toplevel)" --spec-dir docs/spec
 ```
 
 `--sheet`·`--table`·`--column` 은 지도에서 읽은 시트·메뉴 배정 표·카탈로그 열 이름이다(위는 public-cloud 지도 값). 한 Spec 만 보려면
@@ -126,8 +126,9 @@ uvx --from "$e" \
   Spec)을 알린다.
 - `1` `status: missing` — `missing` 의 Spec·타일 제목·카탈로그를 **Spec 별 목록**으로 알린다. 작업본이 틀린 것이 아니라 Role 배정이 안 된
   카탈로그다. 어느 Role 에 배정할지 사용자에게 묻고, 정해진 줄만 메뉴 배정 표에 더한다. 배정하지 않기로 한 카탈로그는 그대로 두고 알린다.
-- `2` `status: error` — 작업본이나 Spec 을 읽지 못했다(`unchecked` 의 파일과 사유). **대조를 못 한 것**이라고 알린다. 통과도 빠짐도
-  아니다. 읽은 Spec 의 결과(`missing`)는 함께 보인다. stdout 이 JSON 으로 읽히지 않아도(uvx 실패, 엔진 못 받음) "대조 불능" 이다.
+- `2` `status: error` — 작업본이나 Spec 을 읽지 못했거나, 넘긴 시트·표·열 이름이 양식 지도에 없거나(오타), 대조한 Spec 이 하나도 없거나,
+  카탈로그 칸에서 이름을 뽑지 못한 줄이 있다(`unchecked` 의 파일과 사유). **대조를 못 한 것**이라고 알린다. 통과도 빠짐도
+  아니다. 읽은 Spec 의 결과(`missing`)는 함께 보인다. 이름을 뽑지 못한 칸은 Spec 의 카탈로그 칸 표기를 사람에게 묻는다. stdout 이 JSON 으로 읽히지 않아도(uvx 실패, 엔진 못 받음) "대조 불능" 이다.
 
 이 대조는 카탈로그 이름만 본다. Role 배정이 SAP 에 실제로 돼 있는지는 보지 않는다. 저장·PR 의 doc-guard 도 이 대조를 하지 않는다 —
 스킬을 부를 때 사람이 챙긴다.

@@ -77,7 +77,7 @@ MAP = """\
 """
 
 
-def _template(path: Path, header: bool = True) -> None:
+def _template(path: Path, header: bool = True, header_text: str = HEADER_TEXT, sample_marks: bool = False) -> None:
     """Role 개요 / Role to Area Menu(7행에 COUNTA) / ID-Role Mapping(6행에 COUNTA). 데이터 칸은 테두리 서식이 있다."""
     wb = openpyxl.Workbook()
     thin = Side(style="thin")
@@ -90,17 +90,22 @@ def _template(path: Path, header: bool = True) -> None:
         for r in range(3, 8):
             ws.cell(r, 3 + i).border = box
     if header:
-        ws.oddHeader.center.text = HEADER_TEXT
+        ws.oddHeader.center.text = header_text
     menu = wb.create_sheet("Role to Area Menu")
     for i, n in enumerate(MENU_COLS):
         menu.cell(7, 1 + i, n)
     menu["A2"] = "Role Description"
+    for c in "ABCDEF":
+        for r in range(8, 18):
+            menu[f"{c}{r}"].border = box
     for c in "GHIJ":
         menu[f"{c}7"] = f"=COUNTA({c}8:{c}17)"
         for r in range(3, 7):
             menu[f"{c}{r}"].border = box
         for r in range(8, 18):
             menu[f"{c}{r}"].border = box
+            if sample_marks and c in "GH":
+                menu[f"{c}{r}"] = "O"  # 견본에 남은 표시(산출이 지워야 한다)
     idm = wb.create_sheet("ID-Role Mapping")
     idm["A5"], idm["B5"], idm["O2"] = "사원 번호", "이름 1", "SAP Role ID"
     for c in "PQRS":
@@ -223,15 +228,104 @@ def test_표시가_없는_펼침은_머리글만_쓴다(proj, capsys):
     assert all(c.value is None for row in ws.iter_rows(min_row=8, min_col=7, max_col=10) for c in row)
 
 
-def test_Role_개요가_비면_펼친_머리글이_모두_비고_표시가_있으면_거부된다(proj, capsys):
+def test_Role_개요가_비면_펼칠_열을_정하지_못해_거부한다(proj, capsys):
     _write(proj, _worknote(roles=[], menus=[]))
     code, report = _export(proj, capsys)
-    assert code == 0, report
-    ws = openpyxl.load_workbook(_xlsx(proj))["Role to Area Menu"]
-    assert all(ws.cell(r, c).value is None for r in (3, 4, 5, 6) for c in (7, 8, 9, 10))
+    assert code == 1 and any("비어 있다" in p["reason"] for p in report["problems"]), report
+    assert not _xlsx(proj).exists()
+    # 표시가 있으면 Role 이 모두 목록에 없는 값이라 양식 밖으로 멈춘다
     _write(proj, _worknote(roles=[], menus=MENUS))
     code, report = _export(proj, capsys)
     assert code == 2 and "Z_PP_100" in json.dumps(report, ensure_ascii=False)
+
+
+def test_원본_시트_소절이_작업본에_없으면_거부한다(proj, capsys):
+    text = _worknote(menus=[])
+    cut = text.index(f"### {FORM} · Role 개요")
+    end = text.index(f"### {FORM} · Role to Area Menu")
+    _write(proj, text[:cut] + text[end:])
+    code, report = _export(proj, capsys)
+    assert code == 1 and any("없거나 비어 있다" in p["reason"] for p in report["problems"]), report
+    assert not _xlsx(proj).exists()
+
+
+def test_원본_표에_Role_ID_열이_없으면_거부한다(proj, capsys):
+    text = _worknote(menus=[]).replace(_table(R_COLS, ROLES), "| Description | 주요 권한 |\n|---|---|\n| a | b |\n")
+    _write(proj, text)
+    code, report = _export(proj, capsys)
+    assert code == 1 and any("Role ID 열이 없다" in p["reason"] for p in report["problems"]), report
+    assert not _xlsx(proj).exists()
+
+
+OLD_SRC = "원본: {시트: Role 개요, 표: Role 개요, 열: Role ID}\n          시작_열: G"
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        (OLD_SRC, OLD_SRC.replace("시트: Role 개요", "시트: 없는 시트")),
+        (OLD_SRC, OLD_SRC.replace("표: Role 개요", "표: 없는 표")),
+        (OLD_SRC, OLD_SRC.replace("열: Role ID", "열: 없는 열")),
+        ("머리글: {3: Role ID, 4: Description, 5: 주요 권한, 6: 조직 레벨}", "머리글: {3: Role ID, 4: 없는 열}"),
+    ],
+)
+def test_펼침_원본이_지도에_없으면_지도_오류로_멈춘다(proj, capsys, old, new):
+    assert old in MAP
+    (proj / "templates" / "forms" / f"{FORM}.yaml").write_text(MAP.replace(old, new, 1), encoding="utf-8")
+    _write(proj, _worknote())
+    code, report = _export(proj, capsys)
+    assert code == 2 and "펼침" in json.dumps(report, ensure_ascii=False), report
+
+
+def test_SRS_원본_표에_펼침을_달면_지도_오류다():
+    from checker import blank_template
+
+    fmap = yaml.safe_load(MAP)
+    fmap["시트"][1]["표"][0]["원본"] = "SRS"
+    probs = blank_template.map_problems(fmap)
+    assert any("SRS" in m and "펼침" in m for _, m in probs)
+
+
+def test_미정인_Role_값은_빈칸으로_본다(proj, capsys):
+    menus = [dict(MENUS[0], Role="미정"), dict(MENUS[1], Role="Z_PP_100, 미정")]
+    _write(proj, _worknote(menus=menus))
+    code, report = _export(proj, capsys)
+    assert code == 0, report
+    ws = openpyxl.load_workbook(_xlsx(proj))["Role to Area Menu"]
+    marks = {(c.row, c.column) for row in ws.iter_rows(min_row=8, min_col=7, max_col=10) for c in row if c.value == "O"}
+    assert marks == {(9, 7)}
+    code, out = _check_rules(capsys, proj / "docs" / "권한관리" / f"{OUT_NAME}.md")
+    assert code == EXIT_PASS, out
+
+
+def test_Role만_있고_메뉴_정보가_없는_행은_거부한다(proj, capsys):
+    menus = [dict(MENUS[0]), {"Role": "Z_PP_100"}]
+    _write(proj, _worknote(menus=menus))
+    code, report = _export(proj, capsys)
+    assert code == 1 and any("작업본 전용 열" in p["reason"] and "2번째" in p["reason"] for p in report["problems"]), report
+
+
+def test_템플릿보다_행이_늘어나면_펼친_열에도_서식이_복제된다(proj, capsys):
+    (proj / "templates" / "forms" / f"{FORM}.yaml").write_text(
+        MAP.replace("        최대_행: 10\n        열: {Space: A", "        열: {Space: A", 1), encoding="utf-8")
+    menus = [dict(MENUS[0], Role="Z_PP_100", **{"Fiori App(한글)": f"앱 {n}"}) for n in range(12)]  # 8~19행, 템플릿 서식은 17행까지
+    _write(proj, _worknote(menus=menus))
+    code, report = _export(proj, capsys)
+    assert code == 0, report
+    ws = openpyxl.load_workbook(_xlsx(proj))["Role to Area Menu"]
+    assert ws["G19"].value == "O" and ws["G19"].border.left.style == "thin"
+    assert ws["H19"].value is None and ws["H19"].border.left.style == "thin"  # 표시가 없는 펼친 열도 서식이 이어진다
+    assert ws["G7"].value == "=COUNTA(G8:G17)"  # 수식 범위는 건드리지 않는다
+
+
+def test_견본에_남은_O_표시는_행이_줄면_지워진다(proj, capsys):
+    _template(proj / "templates" / "role_form.xlsx", sample_marks=True)
+    _write(proj, _worknote(menus=MENUS[2:3]))  # 한 줄만, Role 은 Z_MM_100(I열)
+    code, report = _export(proj, capsys)
+    assert code == 0, report
+    ws = openpyxl.load_workbook(_xlsx(proj))["Role to Area Menu"]
+    marks = {(c.row, c.column) for row in ws.iter_rows(min_row=8, min_col=7, max_col=10) for c in row if c.value == "O"}
+    assert marks == {(8, 9)}
 
 
 def test_양식_열보다_Role이_많으면_산출을_거부한다(proj, capsys):
@@ -337,6 +431,13 @@ def test_머리글_유지가_없으면_머리글_바닥글_경고가_난다(proj
     assert any(w.get("type") == "leftover-review" and HEADER_TEXT in w["reason"] for w in report["warnings"])
 
 
+def test_머리글_유지_문구에_앞뒤_글자가_붙어_있으면_경고를_유지한다(proj, capsys):
+    _template(proj / "templates" / "role_form.xlsx", header_text=HEADER_TEXT + " 2차")
+    _write(proj, _worknote())
+    code, report = _export(proj, capsys)
+    assert code == 3 and any(w.get("type") == "leftover-review" and "2차" in w["reason"] for w in report["warnings"])
+
+
 def test_머리글_유지와_다른_문구는_여전히_경고한다(proj, capsys):
     (proj / "templates" / "forms" / f"{FORM}.yaml").write_text(
         MAP.replace("[ERP 시스템 사용자 권한 Master]", "[다른 문구]"), encoding="utf-8")
@@ -422,7 +523,7 @@ SPEC = """\
 def _role_check(capsys, proj: Path, *extra: str):
     code = role_check.main([
         "--workbook", str(proj / "docs" / "권한관리" / f"{OUT_NAME}.md"), "--form", FORM,
-        "--sheet", "Role to Area Menu", "--table", "메뉴 배정", "--column", "Catalog", *extra,
+        "--sheet", "Role to Area Menu", "--table", "메뉴 배정", "--column", "Catalog", "--root", str(proj), *extra,
     ])
     out = capsys.readouterr().out
     assert out.count("\n") == 1
@@ -446,11 +547,46 @@ def test_모두_있으면_ok_이고_Launchpad_절이_없는_Spec은_건너뛴다
     assert code == 0 and rep["status"] == "ok" and rep["skipped"] == ["DEV-013-b.md"] and rep["missing"] == []
 
 
-def test_작업본이_비어도_카탈로그는_모두_빠진_것이다(proj, capsys):
-    _write(proj, _worknote(menus=[]))
+def test_작업본에_소절이_아직_없으면_카탈로그는_모두_빠진_것이다(proj, capsys):
+    _write(proj, "# 사용자권한관리\n\n버전: 0.1\n\n## 양식 항목\n")
     (proj / "docs" / "spec" / "DEV-012-a.md").write_text(SPEC, encoding="utf-8")
     code, rep = _role_check(capsys, proj, "--spec", str(proj / "docs" / "spec" / "DEV-012-a.md"))
     assert code == 1 and {m["catalog"] for m in rep["missing"]} == {"ZPP_BC_PRODPLANBOARD", "ZPP_BC_LINEGROUP", "ZPP_BC_NEW"}
+    _write(proj, _worknote(menus=[]))  # 표는 있고 행이 없다
+    code, rep = _role_check(capsys, proj, "--spec", str(proj / "docs" / "spec" / "DEV-012-a.md"))
+    assert code == 1 and len(rep["missing"]) == 3
+
+
+@pytest.mark.parametrize("flag, value", [("--sheet", "Role to Area Menu 오타"), ("--table", "메뉴배정"), ("--column", "Catalogue"), ("--form", "사용자권한")])
+def test_지도에_없는_이름은_검사_불능이다(proj, capsys, flag, value):
+    _write(proj, _worknote())
+    (proj / "docs" / "spec" / "DEV-012-a.md").write_text(SPEC, encoding="utf-8")
+    names = {"--form": FORM, "--sheet": "Role to Area Menu", "--table": "메뉴 배정", "--column": "Catalog", flag: value}
+    code = role_check.main([
+        "--workbook", str(proj / "docs" / "권한관리" / f"{OUT_NAME}.md"), "--root", str(proj),
+        "--spec", str(proj / "docs" / "spec" / "DEV-012-a.md"),
+        *[x for k, v in names.items() for x in (k, v)],
+    ])
+    rep = json.loads(capsys.readouterr().out)
+    assert code == 2 and rep["status"] == "error" and rep["missing"] == [], rep
+
+
+def test_대조한_Spec이_없으면_ok가_아니라_검사_불능이다(proj, capsys):
+    _write(proj, _worknote())
+    code, rep = _role_check(capsys, proj, "--spec-dir", str(proj / "docs" / "spec"))  # Spec 이 하나도 없다
+    assert code == 2 and rep["status"] == "error" and "하나도 없다" in rep["unchecked"][0]["reason"]
+    (proj / "docs" / "spec" / "DEV-013-b.md").write_text("# DEV-013\n\n## 개요\n", encoding="utf-8")  # 모두 Launchpad 절이 없다
+    code, rep = _role_check(capsys, proj, "--spec-dir", str(proj / "docs" / "spec"))
+    assert code == 2 and rep["skipped"] == ["DEV-013-b.md"]
+
+
+def test_이름을_뽑지_못한_카탈로그_칸은_unchecked로_올린다(proj, capsys):
+    _write(proj, _worknote())
+    spec = SPEC.replace("| 새 타일 | - | ZPP_BC_NEW | 아직 |", "| 새 타일 | - | 카탈로그 미배정 안내문 | 아직 |").replace("`ZPP_BC_PRODPLANBOARD`", "미정")
+    (proj / "docs" / "spec" / "DEV-012-a.md").write_text(spec, encoding="utf-8")
+    code, rep = _role_check(capsys, proj, "--spec-dir", str(proj / "docs" / "spec"))
+    assert code == 2 and rep["status"] == "error"
+    assert len(rep["unchecked"]) == 1 and "새 타일" in rep["unchecked"][0]["reason"]  # `미정`·`없음`·`-` 칸은 카탈로그 없는 줄이다
 
 
 def test_읽지_못한_Spec이나_작업본은_검사_불능이다(proj, capsys):

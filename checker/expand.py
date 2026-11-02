@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 
-from checker.export import _clean, _parse_table, col2n, n2col, norm
+from checker.export import UNDECIDED, _clean, _parse_table, col2n, n2col, norm
 
 _COL = re.compile(r"[A-Z]{1,3}")
 _KEYS = {"원본", "시작_열", "끝_열", "머리글", "표시"}
@@ -56,8 +56,33 @@ def extra_names(t: dict) -> list[str]:
     return names
 
 
-def map_problems(t: dict) -> list[str]:
-    """표 하나의 `펼침`·`md_전용` 오류(지도 오류)."""
+def _source_problems(ex: dict, fmap: dict) -> list[str]:
+    """`원본`·`머리글` 이 가리키는 시트·표·열이 지도에 있는지(같은 양식 지도 안에서)."""
+    src = ex.get("원본")
+    if not isinstance(src, dict):
+        return []
+    sheets = {norm(str(s.get("이름"))): s for s in fmap.get("시트") or [] if isinstance(s, dict)}
+    sheet = sheets.get(norm(str(src.get("시트", ""))))
+    if sheet is None:
+        return [f"`펼침.원본.시트` {src.get('시트')!r} 이 지도에 없다(시트: {', '.join(sheets)})"]
+    tabs = {norm(str(t.get("이름"))): t for t in sheet.get("표") or [] if isinstance(t, dict)}
+    tab = tabs.get(norm(str(src.get("표", ""))))
+    if tab is None:
+        return [f"`펼침.원본.표` {src.get('표')!r} 이 시트 {src.get('시트')!r} 에 없다(표: {', '.join(tabs) or '없음'})"]
+    known = [norm(str(k)) for k in (tab.get("열") or {})] + (
+        [norm(str(x)) for x in tab["md_전용"]] if isinstance(tab.get("md_전용"), list) else [])
+    out = []
+    if norm(str(src.get("열", ""))) not in known:
+        out.append(f"`펼침.원본.열` {src.get('열')!r} 이 원본 표의 `열`·`md_전용` 에 없다(있는 열: {', '.join(known)})")
+    head = ex.get("머리글")
+    if isinstance(head, dict):
+        out += [f"`펼침.머리글` {r}행의 원본 열 {c!r} 이 원본 표의 `열`·`md_전용` 에 없다" for r, c in head.items()
+                if isinstance(c, str) and norm(c) not in known]
+    return out
+
+
+def map_problems(t: dict, fmap: dict | None = None) -> list[str]:
+    """표 하나의 `펼침`·`md_전용` 오류(지도 오류). `fmap` 이 있으면 원본 시트·표·열이 지도에 있는지도 본다."""
     out: list[str] = []
     if t.get("md_전용") is not None and not (isinstance(t["md_전용"], list) and all(isinstance(x, str) for x in t["md_전용"])):
         out.append("`md_전용` 은 열 이름 목록이어야 한다")
@@ -66,6 +91,8 @@ def map_problems(t: dict) -> list[str]:
     ex = t["펼침"]
     if not isinstance(ex, dict):
         return out + ["`펼침` 은 사전이어야 한다"]
+    if norm(str(t.get("원본", ""))).upper() == "SRS":
+        out.append("원본이 SRS 인 표에는 `펼침` 을 쓸 수 없다(작업본 표 전용이다)")
     stray = [str(k) for k in ex if k not in _KEYS]
     if stray:
         out.append(f"`펼침` 에 모르는 키가 있다: {', '.join(stray)}(쓸 수 있는 키: {', '.join(sorted(_KEYS))})")
@@ -102,6 +129,8 @@ def map_problems(t: dict) -> list[str]:
         for name, letter in t["열"].items():
             if isinstance(letter, str) and _COL.fullmatch(letter) and c1 <= col2n(letter) <= c2:
                 out.append(f"`펼침` 범위 {cols[0]}~{cols[1]} 가 표 `열` 의 {name!r}({letter})와 겹친다")
+    if fmap is not None:
+        out += _source_problems(ex, fmap)
     return out
 
 
@@ -130,30 +159,31 @@ def fill_ranges(t: dict, start: int, last: int) -> list[str]:
     return out
 
 
-def source_rows(sections: dict, src: dict) -> list[dict[str, str]]:
-    """같은 작업본 양식의 원본 표 → [{열 이름: 값}]. 시트·표가 작업본에 없거나 비었으면 빈 목록. 표 구조가 깨졌으면 ExportError."""
+def source_table(sections: dict, src: dict) -> tuple[list[str], list[dict[str, str]]] | None:
+    """같은 작업본 양식의 원본 표 → (머리글, [{열 이름: 값}]). 시트·표가 작업본에 없거나 비었으면 None. 표 구조가 깨졌으면 ExportError."""
     sheet = sections.get(norm(src["시트"]))
     if sheet is None:
-        return []
+        return None
     body = sheet[1].get(norm(src["표"]))
     if not body:
-        return []
+        return None
     parsed = _parse_table(body, f"{src['시트']} · {src['표']}")
     if not parsed:
-        return []
+        return None
     header, rows, _ = parsed
-    return [{h: _clean(v) for h, v in zip(header, r)} for r in rows]
+    return header, [{h: _clean(v) for h, v in zip(header, r)} for r in rows]
 
 
 def keys_of(sections: dict, ex: dict) -> list[str]:
-    """펼친 열의 순서대로 원본 `열` 값(빈 값은 건너뛴다)."""
+    """펼친 열의 순서대로 원본 `열` 값(빈 값은 건너뛴다). 원본 표가 없거나 그 열이 없으면 빈 목록."""
+    got = source_table(sections, ex["원본"])
     key = norm(ex["원본"]["열"])
-    return [r[key] for r in source_rows(sections, ex["원본"]) if r.get(key)]
+    return [r[key] for r in got[1] if r.get(key)] if got else []
 
 
 def split_values(text: str) -> list[str]:
     """표시 열 한 칸의 값을 쉼표·줄바꿈(`<br>`)으로 나눈다."""
-    return [x.strip() for x in re.split(r"[,\n]|<br\s*/?>", text or "", flags=re.I) if x.strip()]
+    return [x.strip() for x in re.split(r"[,\n]|<br\s*/?>", _clean(text), flags=re.I) if x.strip() and x.strip() != UNDECIDED]
 
 
 def unknown_marks(sections: dict, t: dict, header: list[str], rows: list[list[str]]) -> tuple[str, list[str], list[str]] | None:
@@ -174,10 +204,20 @@ def shown(allowed: list[str]) -> list[str]:
     return allowed if len(allowed) <= MAX_SHOWN else allowed[:MAX_SHOWN] + [f"… (전체 {len(allowed)}개)"]
 
 
-def write(form, sname, tname, t, sections, extras: list[str], start: int, last_row: int, ed, put, problem) -> None:
-    """펼친 머리글과 표시를 쓴다. `extras[i]` 는 i 번째 데이터 행의 표시 열 값(없으면 빈 글자)이다."""
+def write(form, sname, tname, t, sections, extras: list[str], start: int, last_row: int, ed, put, problem,
+          clone: int | None = None, tmpl_last: int | None = None) -> None:
+    """펼친 머리글과 표시를 쓴다. `extras[i]` 는 i 번째 데이터 행의 표시 열 값(없으면 빈 글자)이다.
+
+    `clone`·`tmpl_last` 는 표 본문이 템플릿 데이터 행(`tmpl_last`)보다 늘어난 새 행에 `clone` 행의 서식을 복제하는 데 쓴다."""
     ex = spec_of(t)
     src = ex["원본"]
+    got = source_table(sections, src)
+    if got is None or not got[1]:
+        problem(sname, tname, f"펼칠 목록의 원본 표 {src['시트']} · {src['표']} 가 작업본에 없거나 비어 있다 — 펼칠 열을 정하지 못해 산출하지 않는다")
+        return
+    if norm(src["열"]) not in got[0]:
+        problem(sname, tname, f"펼칠 목록의 원본 표 {src['표']} 에 {src['열']} 열이 없다(머리글: {', '.join(got[0])})")
+        return
     keys = keys_of(sections, ex)
     dup = [k for k in dict.fromkeys(keys) if keys.count(k) > 1]
     if dup:
@@ -188,9 +228,8 @@ def write(form, sname, tname, t, sections, extras: list[str], start: int, last_r
     if len(keys) > cap:
         problem(sname, tname, f"펼칠 목록({src['표']} 의 {src['열']})이 {len(keys)}개라 양식의 {ex['시작_열']}~{ex['끝_열']}({cap}열)을 넘는다 — 양식에 열을 더하거나 목록을 줄인다")
         return
-    rows = source_rows(sections, src)
     keycol = norm(src["열"])
-    items = [r for r in rows if r.get(keycol)]
+    items = [r for r in got[1] if r.get(keycol)]
     head = {int(r): norm(c) for r, c in ex["머리글"].items()}
     for r in head:
         ed.clear_range(f"{n2col(c1)}{r}", f"{n2col(c2)}{r}")
@@ -203,8 +242,15 @@ def write(form, sname, tname, t, sections, extras: list[str], start: int, last_r
         return
     ed.clear_range(f"{n2col(c1)}{start}", f"{n2col(c2)}{max(last_row, start)}")
     for i, text in enumerate(extras):
+        rn = start + i
+        new_row = clone is not None and tmpl_last is not None and rn > tmpl_last  # 템플릿보다 늘어난 행: 서식을 복제한다
+        if new_row:
+            for j in range(len(keys)):
+                ed.blank(f"{n2col(c1 + j)}{rn}", ed.style_of(f"{n2col(c1 + j)}{clone}"), clone)
         for v in split_values(text):
             if v not in keys:  # 위 unknown_marks 가 먼저 멈추지만 안전망
                 problem(sname, tname, f"{i + 1}번째 행의 {mk['열']} 값 {v!r} 이 펼친 목록에 없다")
                 continue
-            put(tname, f"{n2col(c1 + keys.index(v))}{start + i}", str(mk["값"]), header=str(mk["열"]))
+            col = n2col(c1 + keys.index(v))
+            kw = {"style": ed.style_of(f"{col}{clone}"), "clone_row": clone} if new_row else {}
+            put(tname, f"{col}{rn}", str(mk["값"]), header=str(mk["열"]), **kw)

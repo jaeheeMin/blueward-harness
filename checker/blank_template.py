@@ -227,7 +227,7 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                     owned.append((f"표 {t.get('이름')!r} 의 {col} 열", (n, start, n, end)))
         for t in s.get("표") or []:
             if isinstance(t, dict):
-                out += [("map", f"시트 {sn!r} 표 {t.get('이름')!r} 의 {m}") for m in _table_format_problems(t) + _format_row_overlaps(s, t) + expand.map_problems(t)]
+                out += [("map", f"시트 {sn!r} 표 {t.get('이름')!r} 의 {m}") for m in _table_format_problems(t) + _format_row_overlaps(s, t) + expand.map_problems(t, fmap)]
                 owned += expand.owned_rects(t)  # 표 오른쪽으로 펼치는 열이 맡은 머리글·표시 영역
         for key in ("비우기", "서식_지우기"):
             for x, rect in keyed[key]:

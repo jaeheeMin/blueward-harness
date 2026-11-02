@@ -1699,7 +1699,12 @@ def _write_table(
 
         mk = expand.mark_column(t)
         extras = [row.get(EXTRA_PREFIX + mk, "") for row in out_rows] if mk else []
-        expand.write(form, sname, tname, t, sections or {}, extras, start, max(tmpl_last, start + len(out_rows) - 1), ed, put, problem)
+        for i, row in enumerate(out_rows):  # 엑셀 열에 쓸 값이 없고 작업본 전용 열에만 값이 있는 행은 빈 행으로 나가므로 거부한다
+            only = [k[len(EXTRA_PREFIX):] for k, v in row.items() if k.startswith(EXTRA_PREFIX) and v]
+            if only and not any(row.get(c) for c in letters):
+                problem(sname, tname, f"{i + 1}번째 행은 엑셀 열에 쓸 값이 없고 작업본 전용 열({', '.join(only)})에만 값이 있다 — 메뉴 정보를 채우거나 행을 지운다")
+        expand.write(form, sname, tname, t, sections or {}, extras, start, max(tmpl_last, start + len(out_rows) - 1), ed, put, problem,
+                     clone=clone, tmpl_last=tmpl_last)
 
 
 def _md_table_rows(form, sname, tname, cols_by_name, subs, problem=None, extra=()) -> list[dict[str, str]]:
