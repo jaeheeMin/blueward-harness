@@ -10,6 +10,10 @@ params (한글 키, 영문 키도 받는다):
   지도_폴더 / maps      양식 지도 폴더. 규칙 파일이 있는 폴더 기준. 기본 `../templates/forms`
   양식 / form           (SRS) 지도가 둘 이상일 때 쓸 지도 이름(파일 이름의 stem)
   기본_소제목 / details (SRS) 양식 지도가 없는 저장소에서 상세 절에 허용할 소제목 (예: 설명, 완료 조건)
+  파일명_양식 / form_from_name
+                        (작업본) 작업본 파일 이름이 정하는 양식만 쓰게 한다(#577). `{패턴: <정규식, 이름 그룹>, 양식: <틀>}`.
+                        예 `{패턴: '^CTS관리대장_(?P<종류>.+)[.]md$', 양식: 'CTS_관리대장_{종류}'}` — 다른 양식의 소절이 있거나
+                        파일 이름이 패턴에 맞지 않으면 위반이다. `--form` 으로 고른 산출이 다른 양식 소절을 조용히 빼는 것을 막는다.
 
 `원본: SRS` — `## 요구사항` 표 머리글과 `### REQ-n` 아래 `#### <소제목>` 을 본다.
 - 허용 표 열 = `ID` + 지도 `열` + 지도 `md_전용` + 엔진 기본 md 전용 `다음 단계`.
@@ -41,6 +45,7 @@ from checker.rules.md_table import read_section_table
 
 _ALLOWED = {
     "원본", "source", "지도_폴더", "maps", "양식", "form", "기본_소제목", "details",
+    "파일명_양식", "form_from_name",
 }
 DEFAULT_MAPS = "../templates/forms"
 NEXT_FIX_TEMPLATE = (
@@ -70,7 +75,7 @@ def _check_keys(params: dict) -> None:
     if stray:
         raise ConfigError(
             f"form_columns 규칙에 모르는 키가 있다: {', '.join(map(str, stray))} "
-            f"(쓸 수 있는 키: 원본, 지도_폴더, 양식, 기본_소제목)"
+            f"(쓸 수 있는 키: 원본, 지도_폴더, 양식, 기본_소제목, 파일명_양식)"
         )
 
 
@@ -160,7 +165,28 @@ def check(path: Path, params: dict) -> list[Violation]:
     text = _read_text(path)
     if _source(params) == "SRS":
         return _check_srs(text, params)
-    return _check_spec(text, params)
+    return _check_spec(text, params, path.name)
+
+
+def _form_from_name(params: dict, name: str) -> tuple[str | None, list[Violation]]:
+    """`파일명_양식` 이 있으면 (파일 이름이 정한 양식, 위반) 을 낸다. 키가 없으면 (None, [])."""
+    spec = _get(params, "파일명_양식", "form_from_name")
+    if spec is None:
+        return None, []
+    if not isinstance(spec, dict) or not spec.get("패턴") or not spec.get("양식"):
+        raise ConfigError("form_columns 규칙의 '파일명_양식' 은 {패턴: <정규식>, 양식: <틀>} 이어야 한다")
+    try:
+        pat = re.compile(str(spec["패턴"]))
+    except re.error as exc:
+        raise ConfigError(f"form_columns 규칙의 '파일명_양식' 패턴이 정규식이 아니다: {exc}") from exc
+    m = pat.match(name)
+    if not m:
+        return None, [_v(str(spec["패턴"]), name,
+                         f"파일 이름 {name} 에서 양식을 정하지 못했다(패턴 {spec['패턴']}). 다음: 파일 이름을 규칙의 모양으로 고친다.")]
+    try:
+        return str(spec["양식"]).format(**m.groupdict()), []
+    except (KeyError, IndexError) as exc:
+        raise ConfigError(f"form_columns 규칙의 '파일명_양식' 틀이 패턴에 없는 이름 그룹을 쓴다: {exc}") from exc
 
 
 # ---------------------------------------------------------------- SRS
@@ -249,19 +275,24 @@ def _check_srs(text: str, params: dict) -> list[Violation]:
 
 # ---------------------------------------------------------------- 작업본(Spec)
 
-def _check_spec(text: str, params: dict) -> list[Violation]:
+def _check_spec(text: str, params: dict, name: str = "") -> list[Violation]:
+    expected, out = _form_from_name(params, name)
     if not re.search(r"^##\s+양식 항목\s*$", text, re.M):
-        return []  # 양식을 쓰지 않는 Spec
+        return out  # 양식을 쓰지 않는 Spec
     try:
         forms = export.parse_spec(text)
     except export.ExportError as exc:
-        return [_v(None, None, f"`## 양식 항목` 구조가 깨져 열을 검사하지 못했다: {exc.reason}")]
+        return out + [_v(None, None, f"`## 양식 항목` 구조가 깨져 열을 검사하지 못했다: {exc.reason}")]
 
     folder = _maps_folder(params)
     if not folder.is_dir():
         raise ConfigError(f"양식 지도 폴더 {folder} 가 없어 Spec 의 `## 양식 항목` 을 검사할 수 없다")
-    out: list[Violation] = []
     for form, sheets in forms.items():
+        if expected is not None and form != expected:
+            out.append(_v(expected, form,
+                          f"양식 밖 양식: 이 작업본({name})에는 {expected} 만 쓸 수 있는데 `### {form} · …` 이 있다. "
+                          f"다음: 그 소절을 {form} 작업본으로 옮기거나 양식 이름을 {expected} 로 고친다."))
+            continue
         where = f"`### {form} · …`"
         try:
             export._check_form_name(form)
