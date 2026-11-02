@@ -91,10 +91,34 @@
     }
     return '요청을 처리하지 못했습니다 (' + status + ')';
   }
+  /* 브라우저는 한 서버에 HTTP/1.x 연결을 6개까지만 연다(SSE 가 1개씩 차지한다). 읽기(GET)는 동시에 MAX_GETS 개까지만 보내고
+     나머지는 줄 세워, 느린 응답 몇 개가 연결을 다 쓰고 다른 요청을 막지 않게 한다. 쓰기(POST 등)는 줄 세우지 않는다. */
+  var MAX_GETS = 3, getsActive = 0, getsWaiting = [], GET_TIMEOUT_MS = 45000;
   function api(method, path, body) {
+    if (method !== 'GET') return send(method, path, body);
+    return new Promise(function (resolve, reject) {
+      function go() {
+        getsActive++;
+        send(method, path, body).then(resolve, reject).then(function () {
+          getsActive--;
+          var next = getsWaiting.shift();
+          if (next) next();
+        });
+      }
+      if (getsActive < MAX_GETS) go(); else getsWaiting.push(go);
+    });
+  }
+  function send(method, path, body) {
     var opts = { method: method, credentials: 'same-origin', cache: 'no-store', headers: {} };
     if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    var timer = null;
+    if (method === 'GET' && typeof AbortController === 'function') {  // 끝나지 않는 읽기가 줄을 영영 막지 않게 한다
+      var ac = new AbortController();
+      opts.signal = ac.signal;
+      timer = setTimeout(function () { ac.abort(); }, GET_TIMEOUT_MS);
+    }
     return fetch(path, opts).then(function (res) {
+      clearTimeout(timer);
       if (res.status === 401) { setConn('auth'); throw new ApiError(401, '콘솔을 다시 여세요.'); }
       setConn('ok');
       return res.text().then(function (t) {
@@ -104,6 +128,7 @@
         return data;
       });
     }, function () {
+      clearTimeout(timer);
       setConn('down');
       throw new ApiError(0, '서버에 연결할 수 없습니다.');
     });
@@ -183,6 +208,7 @@
   function connectEvents() {
     if (es) { es.close(); es = null; }
     clearTimeout(retryTimer);
+    if (document.hidden) { eventsPaused = true; return; }  // 숨겨진 탭은 붙지 않는다(보이면 붙는다)
     try { es = new EventSource('/api/events'); } catch (e) { return scheduleRetry(); }
     es.onopen = function () { retry = 0; setConn('ok'); loadSessions().catch(function (e) { console.warn('세션 목록을 불러오지 못했습니다', e); }); };
     es.addEventListener('session', function (ev) {
@@ -222,6 +248,18 @@
       loadSessions().then(connectEvents, function (e) { if (e.status === 401) return; scheduleRetry(); });
     }, Math.min(1000 * Math.pow(2, retry - 1), 15000));
   }
+  /* 숨겨진 탭은 SSE 를 닫는다. 탭을 여러 개 열어 둬도 브라우저의 서버당 연결 6개를 SSE 가 다 차지하지 않는다. 다시 보이면 붙는다. */
+  var eventsPaused = false;
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      eventsPaused = true;
+      if (es) { es.close(); es = null; }
+      clearTimeout(retryTimer);
+    } else if (eventsPaused) {
+      eventsPaused = false;
+      connectEvents();
+    }
+  });
   function parse(s) { try { return JSON.parse(s); } catch (e) { return null; } }
 
   /* ---------- 라우팅 ---------- */

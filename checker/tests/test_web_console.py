@@ -3339,6 +3339,76 @@ def test_approvals_gh_failure_in_github_repository_stays_unknown(tmp_path, monke
         c.close()
 
 
+def slow_gh_run(gate, started):
+    """gh 만 gate 가 열릴 때까지 붙드는 가짜 실행기(느린 gh 흉내). 실행 횟수는 started 에 센다."""
+    base = approvals_run([{"number": 3, "title": "t", "url": "u", "author": {"login": "kim"}, "isDraft": False, "headRefOid": "a", "latestReviews": []}])
+
+    def run(args, cwd):
+        if args[0] == "gh":
+            started.append(args[1])
+            gate.wait(30)
+        return base(args, cwd)
+
+    return run
+
+
+def test_approvals_does_not_hold_request_while_gh_is_slow(tmp_path, monkeypatch):
+    gate, started = threading.Event(), []
+    c = flow_console(tmp_path, monkeypatch, run=slow_gh_run(gate, started))
+    c.app.sync_spawn = False  # 실제 서버처럼 계산은 요청 스레드 밖에서
+    try:
+        c.event("p5", "SessionStart")
+        q = "/api/approvals?cwd=" + urllib.parse.quote(str(c.work))
+        t0 = time.monotonic()
+        status, body, _ = c.call("GET", q)
+        assert status == 200 and body["loading"] is True and body["state"] == "unknown" and body["items"] == []
+        status, body, _ = c.call("GET", q)  # 계산 중에 또 불러도 즉시 답하고 gh 를 더 띄우지 않는다
+        assert status == 200 and body["loading"] is True
+        assert time.monotonic() - t0 < 3
+        assert wait_for(lambda: len(started) == 1) and len(started) == 1
+        gate.set()
+        assert wait_for(lambda: not c.call("GET", q)[1].get("loading"))
+        body = c.call("GET", q)[1]
+        assert body["state"] == "yes" and [i["number"] for i in body["items"]] == [3]
+        c.clock.t += 61  # 기억이 낡으면 이전 값을 바로 주고 뒤에서 다시 읽는다
+        gate.clear()
+        stale = c.call("GET", q)[1]
+        assert stale["loading"] is True and stale["state"] == "yes" and [i["number"] for i in stale["items"]] == [3]
+    finally:
+        gate.set()
+        c.close()
+
+
+def test_concurrent_requests_do_not_block_each_other_while_gh_is_slow(tmp_path, monkeypatch):
+    gate, started = threading.Event(), []
+    c = flow_console(tmp_path, monkeypatch, run=slow_gh_run(gate, started))
+    c.app.sync_spawn = False
+    try:
+        c.event("p6", "SessionStart")
+        q = urllib.parse.quote(str(c.work))
+        paths = [f"/api/approvals?cwd={q}", f"/api/flows?cwd={q}", "/api/sessions", f"/api/approvals?cwd={q}", f"/api/flows?cwd={q}", "/api/health"]
+        done: dict[int, tuple[int, float]] = {}
+
+        def go(i, path):
+            t = time.monotonic()
+            done[i] = (c.call("GET", path)[0], time.monotonic() - t)
+
+        threads = [threading.Thread(target=go, args=(i, p), daemon=True) for i, p in enumerate(paths)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
+        assert sorted(done) == list(range(len(paths)))  # 하나도 붙들리지 않았다
+        assert all(status == 200 and took < 5 for status, took in done.values())
+        flows_body = c.call("GET", f"/api/flows?cwd={q}")[1]
+        assert flows_body["loading"] is True and flows_body["conditions"]["approver"]["state"] == "unknown"
+        assert next(t for t in flows_body["tools"] if t["id"] == "approvals")["exposure"]["visible"] is True  # 읽는 중이라고 숨기지 않는다
+        assert wait_for(lambda: len(started) >= 1)
+    finally:
+        gate.set()
+        c.close()
+
+
 def test_analysis_schema_and_prompt_carry_flows_only_when_given():
     plain = analysis.Analyses(lambda: ["claude"]).command()
     assert "flow" not in json.loads(plain[plain.index("--json-schema") + 1])["properties"]

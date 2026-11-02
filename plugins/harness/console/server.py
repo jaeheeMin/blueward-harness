@@ -44,6 +44,7 @@ HEARTBEAT = 10.0
 CACHE_SECONDS = 60.0  # 승인자 판정과 승인 대기 PR 목록은 gh 를 자주 부르지 않게 이만큼 기억한다
 MAX_ADVANCE_ROUNDS = 4  # 갈래 진행 판정에서 증거를 읽고 다시 판정하는 최대 횟수(증거 종류가 둘뿐이라 넉넉하다)
 COND_YES, COND_NO, COND_UNKNOWN = "yes", "no", "unknown"
+LOADING_REASON = "GitHub 에서 읽는 중입니다."
 HIDDEN_SKILLS = {"update", "scaffold", "open"}
 # 모델 이름 형식·에포트·권한 모드 허용 값은 managed.py 에 있다(띄울 때도 한 번 더 검사한다).
 # @ 파일 찾기 한도와 건너뛰는 큰 폴더
@@ -139,6 +140,8 @@ class App:
         self.jobs: dict[str, dict] = {}  # 다음 갈래 넘기기 작업(메모리에만 둔다)
         self.reload_queue: set[str] = set()  # 턴이 끝나기를 기다리는 다시 불러오기
         self.cache: dict = {}
+        self.last: dict = {}      # 마지막으로 읽은 값(못 읽은 것 포함). 새로 읽는 동안 이전 값으로 보여 준다
+        self.inflight: dict = {}  # 지금 계산 중인 key -> Event
         self.flow_data, self.flow_error = self.load_flows(flows_path)
         self.browser_open = browser_open
         self.git_inspect = git_inspect
@@ -250,20 +253,49 @@ class App:
         extra = (flows.flow_skills(self.flow_data) | flows.tool_skills(self.flow_data)) if self.flow_data else set()
         return set(self.skills) | extra
 
-    def cached(self, key, fn):
+    def cached(self, key, fn, wait: bool = True):
+        """fn(gh·git 호출) 결과를 CACHE_SECONDS 기억한다. 같은 key 는 동시에 한 번만 계산한다(single-flight).
+        wait=False(요청 스레드)면 계산이 끝나기를 기다리지 않는다: 계산은 백그라운드에서 하고, 지금은 이전 값(loading 표시)
+        또는 읽는 중 값을 즉시 돌려준다. 잠금은 맵을 만질 때만 쥐고 fn 은 잠금 밖에서 부른다."""
         now = self.clock()
         with self.lock:
             hit = self.cache.get(key)
-        if hit and now - hit[0] < CACHE_SECONDS:
-            return hit[1]
-        value = fn()
-        if value.get("state") != COND_UNKNOWN:  # 못 읽은 결과는 기억하지 않는다
-            with self.lock:
-                self.cache[key] = (now, value)
-        return value
+            if hit and now - hit[0] < CACHE_SECONDS:
+                return hit[1]
+            done = self.inflight.get(key)
+            owner = done is None
+            if owner:
+                done = self.inflight[key] = threading.Event()
 
-    def cond_state(self, name: str, cwd: str) -> dict:
-        """조건 하나의 판정. {"state": yes/no/unknown, "reason", "label"}. 못 읽으면 unknown 이고 없음(no)으로 두지 않는다."""
+        def compute():
+            try:
+                value = fn()
+                with self.lock:
+                    self.last[key] = value
+                    if value.get("state") != COND_UNKNOWN:  # 못 읽은 결과는 기억하지 않는다(화면에 보여 주려고 last 에만 둔다)
+                        self.cache[key] = (now, value)
+            finally:
+                with self.lock:
+                    self.inflight.pop(key, None)
+                done.set()
+
+        if wait:
+            if owner:
+                compute()
+            else:
+                done.wait()
+        elif owner:
+            self.spawn(compute)
+        with self.lock:
+            value = self.last.get(key)
+            running = key in self.inflight
+        if value is None:
+            return {"state": COND_UNKNOWN, "reason": LOADING_REASON, "login": "", "items": [], "loading": True}
+        return dict(value, loading=True) if running else value
+
+    def cond_state(self, name: str, cwd: str, wait: bool = True) -> dict:
+        """조건 하나의 판정. {"state": yes/no/unknown, "reason", "label"}. 못 읽으면 unknown 이고 없음(no)으로 두지 않는다.
+        wait=False 는 gh 결과를 기다리지 않는다(읽는 중이면 unknown + loading)."""
         spec = self.require_flows()["conditions"][name]
         label = spec.get("label", name)
         if spec["type"] == "file":
@@ -274,11 +306,14 @@ class App:
             found = os.path.isfile(os.path.join(root, *spec["path"].split("/")))
             return {"state": COND_YES if found else COND_NO, "label": label, "reason": "" if found else f"{spec['path']} 이 없습니다."}
         key = ("approver", os.path.normcase(os.path.realpath(cwd)))
-        got = self.cached(key, lambda: gitstate.approver_state(self.run, cwd, spec["file"], spec.get("whenNoFile", gitstate.WHEN_NO_FILE_ADMIN)))
-        return {"state": got["state"], "label": label, "reason": got["reason"]}
+        got = self.cached(key, lambda: gitstate.approver_state(self.run, cwd, spec["file"], spec.get("whenNoFile", gitstate.WHEN_NO_FILE_ADMIN)), wait)
+        out = {"state": got["state"], "label": label, "reason": got["reason"]}
+        if got.get("loading"):
+            out["loading"] = True
+        return out
 
-    def cond_fn(self, cwd: str):
-        return lambda name: {COND_YES: True, COND_NO: False}.get(self.cond_state(name, cwd)["state"])
+    def cond_fn(self, cwd: str, wait: bool = True):
+        return lambda name: {COND_YES: True, COND_NO: False}.get(self.cond_state(name, cwd, wait)["state"])
 
     def cond_snapshot(self, cwd: str, state: dict | None = None, flow: dict | None = None):
         """갈래 상태·정의가 쓰는 조건(onlyIf)을 지금 읽어 둔 값으로 답하는 함수. git·gh 는 여기서만 부르므로 store.lock 밖에서 만든다.
@@ -365,7 +400,7 @@ class App:
         data = self.flow_data
         if data is None:
             return {}
-        cond = self.cond_fn(cwd)
+        cond = self.cond_fn(cwd, wait=False)  # 요청 스레드는 gh 를 기다리지 않는다(읽는 중이면 판정 불능이라 둔다)
         return {fid: f for fid, f in self.flow_catalog().items()
                 if not (flows.flow_def(data, fid).get("requires") and cond(flows.flow_def(data, fid)["requires"]) is False)}
 
@@ -552,28 +587,36 @@ class App:
                      "permissionOptions": [{"value": v, "label": label} for v, label in PERMISSION_OPTIONS]}
 
     # 갈래
-    def flow_exposure(self, requires, cwd) -> dict:
+    def flow_exposure(self, requires, state_of) -> dict:
         if not requires:
             return {"visible": True, "state": COND_YES, "reason": ""}
-        got = self.cond_state(requires, cwd)
+        got = state_of(requires)
         return {"visible": got["state"] != COND_NO, "state": got["state"], "reason": got["reason"]}  # 판정 불능은 숨기지 않는다
 
     def a_flows(self, g, q, b):
         """갈래·단계·도구 데이터. cwd(아는 작업 폴더)를 주면 그 폴더·이 사용자 기준의 노출 여부(exposure)를 더한다."""
         data = self.require_flows()
         cwd = self.known_root(q["cwd"][0]) if q.get("cwd") else None
+        states: dict[str, dict] = {}
+
+        def state_of(name):  # 이 요청 안에서 조건마다 한 번만 읽고, gh 결과는 기다리지 않는다
+            if name not in states:
+                states[name] = self.cond_state(name, cwd, wait=False)
+            return states[name]
+
         out_flows = []
         for f in data["flows"]:
             item = {k: f.get(k) for k in ("id", "name", "description", "requires", "next")}
-            item["steps"] = [dict(st, **({"exposure": self.flow_exposure(st["onlyIf"], cwd)} if cwd and st.get("onlyIf") else {}))
+            item["steps"] = [dict(st, **({"exposure": self.flow_exposure(st["onlyIf"], state_of)} if cwd and st.get("onlyIf") else {}))
                              for st in f["steps"]]
             if cwd:
-                item["exposure"] = self.flow_exposure(f.get("requires"), cwd)
+                item["exposure"] = self.flow_exposure(f.get("requires"), state_of)
             out_flows.append(item)
-        tools = [dict(t, **({"exposure": self.flow_exposure(t.get("requires"), cwd)} if cwd else {})) for t in data["tools"]]
+        tools = [dict(t, **({"exposure": self.flow_exposure(t.get("requires"), state_of)} if cwd else {})) for t in data["tools"]]
         result = {"version": data.get("version"), "flows": out_flows, "tools": tools, "evidence": data.get("evidence", {})}
         if cwd:
-            result["conditions"] = {name: self.cond_state(name, cwd) for name in data["conditions"]}
+            result["conditions"] = {name: state_of(name) for name in data["conditions"]}
+            result["loading"] = any(c.get("loading") for c in result["conditions"].values())
         return 200, result
 
     def a_approvals(self, g, q, b):
@@ -583,8 +626,8 @@ class App:
         cwd = self.known_root(q["cwd"][0])
         spec = (self.flow_data or {}).get("conditions", {}).get("approver", {})
         file_rel, when_no_file = spec.get("file", ".github/ssot-approvers"), spec.get("whenNoFile", gitstate.WHEN_NO_FILE_ADMIN)
-        got = self.cached(("approvals", os.path.normcase(cwd)), lambda: gitstate.approval_prs(self.run, cwd, file_rel, when_no_file))
-        return 200, got
+        got = self.cached(("approvals", os.path.normcase(cwd)), lambda: gitstate.approval_prs(self.run, cwd, file_rel, when_no_file), wait=False)
+        return 200, got  # 읽는 중이면 loading: true 와 이전 값(없으면 state unknown)을 바로 준다
 
     def a_flow_set(self, g, q, b):
         s = self.get_session(g[0])

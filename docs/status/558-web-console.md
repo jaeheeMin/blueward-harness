@@ -170,14 +170,17 @@
 4. **xlsx 날짜가 일련번호(`44986`)로 보임.** `styles.xml` 의 서식 번호(내장 날짜 서식, 사용자 서식의 y·d·h)로 날짜 칸을 찾아 `YYYY-MM-DD`(시간이 있으면 `HH:MM`)로 바꾼다. `date1904` 반영.
 5. **`open.py --stop` 직후 `open.py` 가 `OSError 10048` 로 실패.** `--stop` 이 포트가 풀릴 때까지(최대 10초) 기다리고, 시작 쪽도 사용 중이면 3초 재시도한다.
 6. **화면 문구의 git 용어.** 단계 이름·갈래 설명을 쉬운 말로 바꾸되, srs·spec·start 스킬이 **각각** 시작할 때 이슈와 브랜치를 만든다고 정확히 적었다.
+7. **화면이 굳는 것처럼 보임.** 승인·갈래 조회가 요청 스레드에서 gh 를 기다려(느린 gh 6초에 approvals 24.7초) 브라우저의 호스트당 연결 6개가 SSE 와 함께 찼다. 느린 조회는 백그라운드에서 한 번만 계산하고 요청은 이전 값이나 `loading` 으로 바로 답한다. 화면은 GET 을 동시 3개로 제한하고(45초 끊기), 숨겨진 탭은 SSE 를 닫는다. 고친 뒤 실기에서 `/api/health`·`/api/sessions` 가 3ms 안팎.
+8. **검토 지적.** 인계 글은 화면에서 확인·수정한 뒤에만 새 세션을 띄운다(4000자 상한). 문서 XML 의 DTD 는 전체 바이트에서 찾아 거절하고 미리보기 크기 상한을 둔다. git 실행 불능은 판정 불능으로 남긴다. `.xlsm`·`.xls`·`.svg` 는 위치 보기만. start 단계는 작업 브랜치가 생겨야 끝난다.
 
 ### 시험
 
-`uv run --with pytest python -m pytest checker/tests/test_web_console.py checker/tests/test_web_console_ui.py -q -p no:cacheprovider` → 400 통과, 0 실패, 3 건너뜀.
+`uv run --with pytest python -m pytest checker/tests/test_web_console.py checker/tests/test_web_console_ui.py -q -p no:cacheprovider` → 416 통과, 3 건너뜀, 1 실패(`test_question_times_out_after_300_seconds_with_injected_clock`, 단독 재실행 통과 — 전체 실행 때만 나는 간헐 실패로 보고 PR 의 Actions 로 다시 확인).
 
 ### 확인하지 못한 것
 
 - 날짜 서식 중 `[$-411]ggge"年"` 같은 로케일·연호 서식은 y·d 만 보고 날짜로 읽는다(표시는 `YYYY-MM-DD`).
 - Windows 이외(macOS·Linux)에서 이번 변경을 실기로 확인하지 않았다.
-EOF
+- 이 기능 전에 갈래를 지정한 세션은 단계 이름이 옛 문구로 저장돼 있다(새 세션부터 새 문구).
+- 인계 확인 창은 화면 시험(node DOM)으로만 확인했고 브라우저에서 직접 누르지 않았다.
 

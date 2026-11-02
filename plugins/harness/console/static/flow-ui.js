@@ -3,6 +3,8 @@
   'use strict';
 
   var CACHE_MS = 30000;
+  var LOADING_POLL_MS = 2000;  // 서버가 gh 를 읽는 중(loading)이라고 할 때 다시 묻는 간격
+  var LOADING_POLL_MAX = 15;
   var JOB_POLL_MS = 1000;
   var JOB_POLL_MAX = 180;
   var DOCS_REFETCH_MS = 4000;
@@ -25,17 +27,28 @@
       if (e && NOT_READY_STATUS.indexOf(e.status) >= 0) return (what ? what + ': ' : '') + NOT_READY;
       return (what ? what + ': ' : '') + (e && e.message ? e.message : '요청을 처리하지 못했어요.');
     }
-    function cached(store, key, url) {
+    /* 같은 주소는 CACHE_MS 안에 한 번만 부른다(진행 중인 요청도 같이 쓴다). 서버가 loading 을 주면 gh 가 아직 읽는 중이다:
+       wait 면 그동안 가벼운 재요청으로 끝나기를 기다리고, 아니면 받은 값을 바로 쓰고 캐시만 짧게 둔다. */
+    function cached(store, key, url, wait) {
       var hit = store[key], now = Date.now();
       if (hit && now - hit.at < CACHE_MS) return hit.promise;
-      var p = api('GET', url).then(function (d) { return { ok: true, data: d }; }, function (e) { return { ok: false, error: e }; });
+      function once(n) {
+        return api('GET', url).then(function (d) {
+          if (d && d.loading) {
+            if (wait && n < LOADING_POLL_MAX) return new Promise(function (ok) { setTimeout(ok, LOADING_POLL_MS); }).then(function () { return once(n + 1); });
+            if (store[key] && store[key].promise === p) store[key].at = now - CACHE_MS + LOADING_POLL_MS;
+          }
+          return { ok: true, data: d };
+        }, function (e) { return { ok: false, error: e }; });
+      }
+      var p = once(0);
       store[key] = { at: now, promise: p };
       return p;
     }
-    function flowsFor(cwd) { return cached(cache.flows, cwd || '', '/api/flows' + kit.qs({ cwd: cwd })); }
+    function flowsFor(cwd) { return cached(cache.flows, cwd || '', '/api/flows' + kit.qs({ cwd: cwd }), false); }
     function approvalsFor(cwd) {
       if (!cwd) return Promise.resolve({ ok: false, error: null });
-      return cached(cache.approvals, cwd, '/api/approvals' + kit.qs({ cwd: cwd }));
+      return cached(cache.approvals, cwd, '/api/approvals' + kit.qs({ cwd: cwd }), true);
     }
     function sid(s) { return encodeURIComponent(s.id); }
     function sessionList() { return Array.from(kit.sessions.values()); }

@@ -83,7 +83,7 @@ def inspect(cwd: str, run: Runner = run_command) -> dict:
 
 
 # ---- 갈래 진행 판정과 승인자 판정에 쓰는 gh 조회. 실패는 "unknown" 으로 돌려주고 없음·통과로 뭉개지 않는다 ----
-GH_TIMEOUT = 15.0
+GH_TIMEOUT = 20.0
 PR_LIST_LIMIT = 100
 PR_FIELDS = "number,state,url,title,mergedAt,statusCheckRollup"
 FAILED_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
