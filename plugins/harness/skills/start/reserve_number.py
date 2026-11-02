@@ -16,6 +16,8 @@
                                이슈에 번호가 없으면 붙이고, 있으면 그 번호를 낸다.
   list                         origin/main 기준 지금 있는 개발 목록을 JSON 한 줄로 낸다(#258).
                                번호마다 SRS 표 줄·원장 줄·Spec·`[DEV-xxx]` 이슈·하위 작업 이슈.
+  review-reason --dev DEV-xxx  원장 상태가 `리뷰` 인 DEV 를 묻지 않고 `진행` 으로 이어도 되는지 낸다(#600).
+                               JSON `verdict` 가 `proceed`(열린 같은 DEV PR 없음 + Spec PR 병합됨) 또는 `ask`.
 
 종료코드
   0  성공 (stdout: next 는 `DEV-xxx`, 나머지는 JSON 한 줄)
@@ -461,6 +463,67 @@ def cmd_list(args: argparse.Namespace) -> dict:
     return {"status": "ok", "devs": [devs[n] for n in sorted(devs)]}
 
 
+def _list_prs(root: str, state: str, extra: list[str] | None = None) -> list[dict]:
+    fields = "number,title,body,files,closingIssuesReferences"
+    out = gh(["pr", "list", "--state", state, "--limit", ISSUE_LIMIT, "--json", fields, *(extra or [])], root)
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError as exc:
+        raise Undecidable(f"gh pr list 출력을 읽지 못했다: {exc}") from exc
+
+
+def _is_spec_file(path: str, number: int) -> bool:
+    m = SPEC_NAME_RE.search(path)
+    return bool(m and int(m.group(1)) == number and path.startswith("docs/spec/"))
+
+
+def _touches_spec(pr: dict, number: int) -> bool:
+    return any(_is_spec_file(f.get("path", ""), number) for f in pr.get("files") or [])
+
+
+def cmd_review_reason(args: argparse.Namespace) -> dict:
+    """원장 상태가 `리뷰` 인 DEV 를 개발로 이어 시작해도 되는지(#600).
+
+    열린 PR 이 같은 DEV 를 다루면(본문·제목의 번호, 그 DEV 이슈·하위 작업을 닫는 PR, Spec 수정)
+    개발 PR 이 검토 중일 수 있어 `ask`. 열린 PR 이 없고 그 DEV 의 Spec 을 담아 병합된 PR 이 있으면서
+    그 PR 들이 모두 Spec 만 바꿨으면 `리뷰` 는 Spec PR 때문이라 `proceed`. Spec 밖 파일도 바꾼 병합 PR(개발 PR)이 있으면 `ask`. 그 밖은 이유를 모르니 `ask`. gh 실패는 종료코드 2.
+    """
+    root = repo_root()
+    require_ledger(root)
+    m = re.fullmatch(r"(?:DEV-)?(\d+)", args.dev.strip())
+    if not m:
+        raise Undecidable(f"DEV 번호를 읽지 못했다: {args.dev!r}")
+    n = int(m.group(1))
+    tag = format_number(n)
+    issue_nums = {
+        i["number"] for i in list_issues(root) if issue_tag(i["title"]) == n or subtask_of(i["title"]) == n
+    }
+    mention = re.compile(rf"{re.escape(tag)}(?!\d)")
+
+    def related(pr: dict) -> bool:
+        if mention.search(f"{pr.get('title') or ''}\n{pr.get('body') or ''}") or _touches_spec(pr, n):
+            return True
+        return any(r.get("number") in issue_nums for r in pr.get("closingIssuesReferences") or [])
+
+    open_prs = [p for p in _list_prs(root, "open") if related(p)]
+    merged = [p for p in _list_prs(root, "merged", ["--search", tag]) if _touches_spec(p, n)]
+    # 병합 PR 은 제목·본문에 번호가 있어야 검색에 걸린다. 그중 Spec 밖 파일도 바꾼 PR 은 개발 PR 이다.
+    merged_dev = [p for p in merged if any(not _is_spec_file(f.get("path", ""), n) for f in p.get("files") or [])]
+    brief = lambda prs: [{"number": p["number"], "title": p.get("title", "")} for p in prs]  # noqa: E731
+    if open_prs:
+        verdict, reason = "ask", "open_pr"
+    elif merged_dev:
+        verdict, reason = "ask", "merged_dev_pr"
+    elif merged:
+        verdict, reason = "proceed", "merged_spec_only"
+    else:
+        verdict, reason = "ask", "no_merged_spec"
+    return {
+        "status": "ok", "dev": tag, "verdict": verdict, "reason": reason,
+        "open_prs": brief(open_prs), "merged_spec_prs": brief(merged),
+    }
+
+
 def cmd_next(args: argparse.Namespace) -> dict:
     root = repo_root()
     require_ledger(root)
@@ -525,12 +588,15 @@ def main(argv: list[str] | None = None) -> int:
     p_res.add_argument("--label", action="append")
     p_res.add_argument("--confirmed-new", action="store_true", help="기존 REQ 제목이나 SRS 의 하지 않는 것 항목과 겹친다는 확인을 건너뛴다(사람이 새 개발이라고 확인한 뒤)")
     sub.add_parser("list")
+    p_rr = sub.add_parser("review-reason")
+    p_rr.add_argument("--dev", required=True, help="원장 상태가 리뷰인 DEV 번호(DEV-005 또는 5)")
     p_claim = sub.add_parser("claim")
     p_claim.add_argument("--issue", type=int, required=True)
     p_claim.add_argument("--confirmed-new", action="store_true", help="기존 REQ 제목이나 SRS 의 하지 않는 것 항목과 겹친다는 확인을 건너뛴다(사람이 새 개발이라고 확인한 뒤)")
     args = parser.parse_args(argv)
 
-    handler = {"next": cmd_next, "reserve": cmd_reserve, "claim": cmd_claim, "list": cmd_list}[args.cmd]
+    handler = {"next": cmd_next, "reserve": cmd_reserve, "claim": cmd_claim, "list": cmd_list,
+               "review-reason": cmd_review_reason}[args.cmd]
     try:
         res = handler(args)
     except NoLedger as exc:
