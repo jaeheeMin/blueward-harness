@@ -34,6 +34,7 @@ plugins/harness/
     spec/SKILL.md              /harness:spec — 개발 Spec 작성·수정(양식 지도: form-map.md)
     manual/SKILL.md            /harness:manual — 사용자 매뉴얼 작업본 작성·수정과 pptx 산출(규칙·틀 사본 포함)
     cts/SKILL.md               /harness:cts — CTS 관리대장 작업본 행 추가와 xlsx 산출(규칙·틀 사본 포함)
+    role/SKILL.md              /harness:role — User Role Mapping 작업본(Role 목록·메뉴 배정)과 xlsx 산출, Spec 카탈로그 대조(규칙·틀 사본 포함)
     sync/SKILL.md              /harness:sync — 원격 최신 상태를 로컬 브랜치로 당겨받기
     prs/SKILL.md               /harness:prs — 내 열린 PR 의 상태와 병합 순서 확인
     approvals/SKILL.md         /harness:approvals — 내 승인을 기다리는 PR 을 병합 순서대로 확인
@@ -94,6 +95,7 @@ plugins/harness/
 | `/harness:spec` | SRS 요구사항으로 개발 Spec 을 만들거나, SRS 가 바뀌어 고친다. srs 와 같이 먼저 브랜치를 확인한다 |
 | `/harness:manual` | `docs/manual/<LoB>/<번호>.<업무 제목>.md` 작업본(묶은 DEV, 화면별 그림 경로·번호 설명)을 Spec·기존 매뉴얼에서 쓰고 고객 양식 pptx 지도로 산출한다. 캡처 없는 화면은 목록으로 알리고 산출하지 않는다. 먼저 브랜치를 확인한다(#564) |
 | `/harness:cts` | `docs/CTS관리대장/CTS관리대장_<종류>.md` 작업본(Configuration·CBO)에 사람이 알려 준 요청 건·Error 내역을 행으로 더하고, 버전을 올려 고객 양식 xlsx 로 산출한다. 이전 판 파일은 지우지 않는다. 트랜스포트에서 값을 자동으로 채우는 일은 하지 않는다(#563). 먼저 브랜치를 확인한다(#577) |
+| `/harness:role` | `docs/권한관리/사용자권한관리_User_Role Mapping.md` 작업본에 Role 개요와 Role 별 메뉴 배정을 쓰고, Spec 의 `## Launchpad 노출` 카탈로그가 작업본에 빠졌는지 대조해 알리고(`checker.role_check`), 버전을 올려 고객 양식 xlsx 로 산출한다. Role 은 가로 열로 펼쳐지고(지도 `펼침`), 사람(사번·이름) 행은 비워 산출한다. 먼저 브랜치를 확인한다(#562) |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다. 지금 세션의 플러그인 버전이 main 보다 낮으면 `/reload-plugins`·Update now 를 안내한다(#203). 판정은 실제로 실린 판(`${CLAUDE_PLUGIN_ROOT}`)이 기준이고 이 폴더의 설치 항목 판은 `installed_version.py --loaded-root` 로 참고만 한다. 전체 표는 `/harness:version` 으로 안내한다 |
 | `/harness:prs` | 내 열린 PR 의 상태(초안·충돌·검사 실패·검사 중·승인 대기·병합 가능)와 병합 순서를 GitHub 에서 계산해 보여 주고 다음 할 일을 알려 준다. `--all` 이면 저장소 전체. 읽기만 한다(#370) |
 | `/harness:approvals` | 내 Approve 를 기다리는 남의 PR 을 병합 순서대로 한 표로 보여 준다(사유·다른 승인자·낡은 승인·앞 PR). 승인자 파일이 없거나 비면 저장소 관리자(admin)만 승인 가능으로 본다. 읽기만 하고 Approve 는 사람이 GitHub 에서 한다(#391) |

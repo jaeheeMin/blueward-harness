@@ -77,6 +77,7 @@ def _is_iso_date(text: str) -> bool:
 _INT = re.compile(r"^(0|-?[1-9]\d{0,14})$")
 _CTRL = re.compile("[" + chr(0) + "-" + chr(8) + chr(0xB) + chr(0xC) + chr(0xE) + "-" + chr(0x1F) + chr(0xFFFE) + chr(0xFFFF) + chr(0xD800) + "-" + chr(0xDFFF) + "]")  # XML 1.0 에 못 넣는 문자
 MAX_CELL_CHARS = 32767
+EXTRA_PREFIX = "@"  # 작업본에만 있는 열(`md_전용`·펼침 `표시.열`)의 행 키 접두어. 엑셀 열 문자(A~ZZZ)와 겹치지 않는다
 SRS_NEXT_STEP_COL = "다음 단계"  # SRS 요구사항 표의 엔진 기본 md 전용 열(개발/설정/미정). 다음 단계 값은 엑셀로 쓰지 않는다. 값 검사는 `checker/pairing.py` 의 `NEXT_STEPS` 가 한다(#567).
 
 
@@ -1196,7 +1197,7 @@ def build_form(
             problem(sname, item, reason)
 
         # 작업본이 가리키는 것이 지도에 있는지부터 본다(없으면 읽지 못함). 모두 모아 한 번에 알린다.
-        off = spec_offenders(sec, subs, smap)
+        off = spec_offenders(sec, subs, smap, spec_sections)
         if off:
             raise ExportError(
                 f"작업본의 {sname} 시트에 양식 밖 항목이 있어 산출하지 않았다(엑셀에서 조용히 빠지는 일이 없게 멈춘다): "
@@ -1227,7 +1228,7 @@ def build_form(
         for tname, t in tables.items():
             chk, rchk = make_check(sname)
             _write_table(form, sname, tname, t, tables, subs, ed, md_values, problem, sheet_tops, put,
-                         check=chk, row_check=rchk)
+                         check=chk, row_check=rchk, sections=spec_sections)
 
         # 서술: 한 셀이면 줄바꿈 포함 한 셀, 범위면 줄마다 범위 첫 열의 한 행씩
         for name, n in texts.items():
@@ -1540,6 +1541,9 @@ def fill_ranges(ed: SheetXml, smap: dict) -> list[str]:
         if not isinstance(t, dict) or not isinstance(t.get("열"), dict) or t.get("시작_행") is None:
             continue
         start, last = int(t["시작_행"]), table_template_last(ed, t)
+        from checker import expand  # expand 가 이 모듈을 불러 순환하므로 호출할 때 가져온다
+
+        out += expand.fill_ranges(t, start, last)  # 표 오른쪽으로 펼치는 열(머리글 행·표시 영역)
         if last < start:
             continue
         for c in dict.fromkeys(str(v) for v in t["열"].values()):
@@ -1552,7 +1556,7 @@ def fill_ranges(ed: SheetXml, smap: dict) -> list[str]:
 
 def _write_table(
     form, sname, tname, t, tables, subs, ed, md_values, problem, sheet_tops, put,
-    srs_rows: tuple[list[dict[str, str]], list[str]] | None = None, check=None, row_check=None,
+    srs_rows: tuple[list[dict[str, str]], list[str]] | None = None, check=None, row_check=None, sections=None,
 ) -> None:
     """표를 쓴다. `srs_rows` 가 있으면 (행들, 행 이름들)을 그대로 쓰고 작업본 표는 읽지 않는다."""
     cols = {norm(k): str(v) for k, v in (t.get("열") or {}).items()}
@@ -1566,11 +1570,11 @@ def _write_table(
     if srs_rows is not None:
         md_rows, labels = srs_rows
     else:
-        md_rows = _md_table_rows(form, sname, tname, cols, subs, problem)
+        md_rows = _md_table_rows(form, sname, tname, cols, subs, problem, extra=_extra_names(t))
         if partner is None:
             md_rows = [r for r in md_rows if any(v for v in r.values())]
         else:
-            pr = _md_table_rows(form, sname, partner, {norm(k): v for k, v in (tables[partner].get("열") or {}).items()}, subs)
+            pr = _md_table_rows(form, sname, partner, {norm(k): v for k, v in (tables[partner].get("열") or {}).items()}, subs, extra=_extra_names(tables[partner]))
             if len(pr) != len(md_rows) and tname < partner:
                 problem(sname, tname, f"짝 표 {partner!r} 와 행 수가 다르다({len(md_rows)}행 대 {len(pr)}행)")
     md_values.setdefault("tables", {})[tname] = [r for r in md_rows if any(v for v in r.values())]
@@ -1690,10 +1694,18 @@ def _write_table(
             ed.set_row_format(rn, [])
             for c in dict.fromkeys(letters):
                 ed.reset_style(f"{c}{rn}", blank_template._col_style(ed.pre, col2n(c)))
+    if t.get("펼침"):
+        from checker import expand  # expand 가 이 모듈을 불러 순환하므로 호출할 때 가져온다
+
+        mk = expand.mark_column(t)
+        extras = [row.get(EXTRA_PREFIX + mk, "") for row in out_rows] if mk else []
+        expand.write(form, sname, tname, t, sections or {}, extras, start, max(tmpl_last, start + len(out_rows) - 1), ed, put, problem)
 
 
-def _md_table_rows(form, sname, tname, cols_by_name, subs, problem=None) -> list[dict[str, str]]:
-    """작업본의 `#### <표>` 표를 {열 문자: 값} 행들로 바꾼다. 열 이름이 지도에 없으면 읽지 못함."""
+def _md_table_rows(form, sname, tname, cols_by_name, subs, problem=None, extra=()) -> list[dict[str, str]]:
+    """작업본의 `#### <표>` 표를 {열 문자: 값} 행들로 바꾼다. 열 이름이 지도에 없으면 읽지 못함.
+
+    `extra` 는 작업본에만 있는 열 이름들(`md_전용`, 펼침 `표시.열`)이다. 엑셀 열이 아니라 `@이름` 키로 담는다."""
     body = subs.get(tname)
     if not body:
         return []
@@ -1707,9 +1719,12 @@ def _md_table_rows(form, sname, tname, cols_by_name, subs, problem=None) -> list
     # cols_by_name: {정규화한 머리글: 열 문자}
     letters = []
     for h in header:
-        if h not in cols_by_name:
+        if h in cols_by_name:
+            letters.append(cols_by_name[h])
+        elif h in extra:
+            letters.append(EXTRA_PREFIX + h)
+        else:
             raise ExportError(f"작업본 표 {tname!r} 의 열 {h!r} 이 양식 지도에 없다", form=form, sheet=sname, item=tname)
-        letters.append(cols_by_name[h])
     return [{L: _clean(v) for L, v in zip(letters, r)} for r in rows]
 
 
@@ -1749,8 +1764,18 @@ def srs_offenders(
 NEXT_FIX_MAP = "다음: 양식 지도에 있는 열 이름으로 고치거나, 지도에 정말 필요한 열이면 양식 지도(templates/forms/)를 먼저 고친다."
 
 
-def spec_offenders(sec: Section, subs: dict, smap: dict) -> list[tuple[str, str, list[str]]]:
-    """작업본 한 시트의 양식 밖 항목 → [(분류, 이름, 허용 이름들)]. 분류: 칸 / 표·서술 / `표 <이름> 의 열`.
+def _extra_names(t: dict) -> list[str]:
+    from checker import expand  # expand 가 이 모듈을 불러 순환하므로 호출할 때 가져온다
+
+    return expand.extra_names(t)
+
+
+def spec_offenders(
+    sec: Section, subs: dict, smap: dict, sections: dict | None = None
+) -> list[tuple[str, str, list[str]]]:
+    """작업본 한 시트의 양식 밖 항목 → [(분류, 이름, 허용 이름들)]. 분류: 칸 / 표·서술 / `표 <이름> 의 열` / `표 <이름> 의 <표시 열> 값`.
+
+    `sections` 는 같은 양식의 {시트: (Section, 소절들)} 이다. 있으면 펼침 `표시` 열의 값이 원본 목록에 있는지도 본다.
 
     표 머리글이 깨졌으면 ExportError(읽지 못함)를 그대로 올린다.
     """
@@ -1777,8 +1802,15 @@ def spec_offenders(sec: Section, subs: dict, smap: dict) -> list[tuple[str, str,
         parsed = _parse_table(body, n)
         if not parsed:
             continue
-        ok = [norm(k) for k in (tables[n].get("열") or {})]
+        ok = [norm(k) for k in (tables[n].get("열") or {})] + [x for x in _extra_names(tables[n]) if x not in tables[n].get("열", {})]
         out += [(f"표 {n} 의 열", h, ok) for h in dict.fromkeys(parsed[0]) if h not in ok]
+        if sections is not None:
+            from checker import expand
+
+            bad = expand.unknown_marks(sections, tables[n], parsed[0], parsed[1])
+            if bad:
+                mk, values, allowed = bad
+                out += [(f"표 {n} 의 {mk} 값", v, expand.shown(allowed)) for v in values]
     return out
 
 
