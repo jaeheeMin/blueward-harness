@@ -432,6 +432,22 @@ def test_owner_guess_ignores_prs_matched_only_by_body_mention():
     assert [d["id"] for d in person(res, "frank")["dev_items"]] == ["DEV-002"]
 
 
+def test_pr_with_several_devs_is_recent_pr_of_each_but_owner_guess_uses_first_only():
+    multi = merged_pr(60, "eve", ago(days=1), title="fix: 묶음 수정 (DEV-001·002·003)")
+    gh = TeamGh([], meta={}, merged=[multi], ledger={"audit/ledger/prog.md": LEDGER})
+    res = team(gh)
+    want = {"status": "found", "number": 60, "url": "https://github.com/o/r/pull/60", "state": "merged"}
+    assert person(res, "alice")["dev_items"][0]["recent_pr"] == want  # 첫 번호
+    assert person(res, "carol")["dev_items"][0]["recent_pr"] == want  # 줄임 표기의 뒤 번호
+    dev2 = next(d for d in res["ledger"]["unowned"] if d["id"] == "DEV-002")
+    assert dev2["recent_pr"] == want  # 담당이 비어도 최근 PR 은 붙는다
+    assert person(res, "eve")["dev_items"] == []  # 담당 추정은 첫 번호(담당이 있는 DEV-001)만 보고 DEV-002 로 넓히지 않는다
+    # 열린 PR 도 같다
+    res = team(TeamGh([pr(61, author="eve", title="fix: 묶음 (DEV-002/003)")], meta={}, ledger={"audit/ledger/prog.md": LEDGER}))
+    assert person(res, "carol")["dev_items"][0]["recent_pr"]["number"] == 61
+    assert [d["id"] for d in person(res, "eve")["dev_items"]] == ["DEV-002"]  # 첫 번호는 담당 추정에 쓰인다
+
+
 def test_no_ledger_is_skipped_not_unknown():
     res = team(TeamGh([pr(1, author="alice")], meta={}, ledger=None))
     assert res["ledger"]["status"] == "none"

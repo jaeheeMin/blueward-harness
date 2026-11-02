@@ -271,6 +271,7 @@ def read_merged(client: GhClient, budget: _Budget, repo: str, since: datetime) -
         out.append(
             {
                 "dev": pr_queue._primary_dev(raw),  # 열린 PR 의 `dev` 와 같은 판정(원장 줄과 PR 을 잇는다, #535)
+                "dev_all": sorted(pr_queue._order_devs(raw)),  # 이 PR 이 속한 개발 건 전부(최근 PR 용, #549)
                 "dev_strong": pr_queue._primary_dev(raw, use_body=False),  # 본문 언급을 뺀 판정(담당 추정용)
                 "files_partial": isinstance(files_total, int) and files_total > len(raw["files"]),  # 파일이 30개를 넘어 일부만 읽음
                 "number": n["number"],
@@ -874,8 +875,11 @@ def compute_team(
     recent: dict[int, dict] = {}
     recent_strong: dict[int, dict] = {}
 
-    def note(dev: int | None, strong: int | None, entry: dict) -> None:
-        if dev is not None:
+    # 최근 PR(`recent`)은 PR 이 속한 개발 건 전부에 붙인다(`devs`, #549: 제목 `(DEV-006·007·009)` 이면 셋 다).
+    # 담당 추정(`recent_strong`)은 첫 번호 하나(`strong`)만 쓴다: 여러 개발 건을 고친 PR 의 작성자를 다른 개발 건의 담당으로까지
+    # 넓게 추정하지 않는다(#549 결정).
+    def note(devs: list[int], strong: int | None, entry: dict) -> None:
+        for dev in devs:
             cur = recent.get(dev)
             if cur is None or entry["number"] > cur["number"]:
                 recent[dev] = entry
@@ -885,10 +889,10 @@ def compute_team(
                 recent_strong[strong] = entry
 
     for it in open_prs:
-        note(it.get("dev"), it.get("dev_strong"), {"number": it["number"], "url": it["url"], "state": "open", "author": it["author"]})
+        note(it.get("dev_all") or [], it.get("dev_strong"), {"number": it["number"], "url": it["url"], "state": "open", "author": it["author"]})
     for m_pr in merged or []:
         if not m_pr["bot"]:
-            note(m_pr["dev"], m_pr["dev_strong"], {"number": m_pr["number"], "url": m_pr["url"], "state": "merged", "author": m_pr["author"]})
+            note(m_pr["dev_all"], m_pr["dev_strong"], {"number": m_pr["number"], "url": m_pr["url"], "state": "merged", "author": m_pr["author"]})
     not_read = []  # 못 찾았을 때 "없음" 이라 단정하지 못하는 사유
     if merged is None:
         not_read.append(f"최근 {days}일 병합한 PR 을 읽지 못함")
