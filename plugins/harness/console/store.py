@@ -491,7 +491,7 @@ def public_session(store: Store, s: dict, skills: list[str]) -> dict:
             group = "running"
         else:
             group = "idle"
-        return dict(flows.public_fields(s, self.flow_data), **{
+        return dict(flows.public_fields(s, store.flow_data), **{
             "id": s["id"], "title": s["title"], "cwd": s["cwd"], "repo": s["repo"], "branch": s["branch"],
             "managed": s["managed"], "status": status, "group": group, "permissionMode": s["permissionMode"],
             "model": s.get("model", ""), "modelChoice": s.get("modelChoice", ""),
