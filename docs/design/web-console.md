@@ -23,7 +23,9 @@ plugins/harness/
     hooks_api.py            /hooks/* 판단 로직
     managed.py              콘솔이 띄운 claude -p 세션 관리
     analysis.py             새 작업 읽기 전용 분석
-    gitstate.py             브랜치·변경·PR 로 `이번 차례` 판단
+    gitstate.py             브랜치·변경·PR 로 `이번 차례` 판단, 갈래 진행·승인자 판정용 gh 조회
+    flows.json              갈래·단계·도구·노출 조건 데이터(코드가 아니라 데이터다)
+    flows.py                flows.json 읽기·검사, 세션의 갈래 진행 상태, 다음 갈래 계산
     platform_compat.py      프로세스 분리, 종료, 경로, claude 실행 파일 찾기
     session_start_hook.py   SessionStart command 훅
     static/                 index.html, app.css, app.js, theme.js, blueward-logo.png (순수 JS, 빌드 없음)
@@ -38,7 +40,7 @@ plugins/harness/
 - `ThreadingHTTPServer` 를 쓴다. 훅 요청이 응답을 오래 붙들기 때문이다. 화면 갱신은 SSE(`/api/events`)로 보낸다.
 - 상태 폴더: `CLAUDE_PLUGIN_DATA` → 없으면 `<CLAUDE_CONFIG_DIR 또는 ~/.claude>/harness-console`. `sessions.json` 은 원자적으로 저장한다. 대기 중인 요청은 저장하지 않는다.
 - 띄운 프로세스가 끝나도 서버는 살아 있어야 한다. POSIX 는 `start_new_session=True` **[시험]**, Windows 는 콘솔 창이 뜨지 않게 base 인터프리터(`sys._base_executable`) 옆의 `pythonw.exe` 로 `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` 을 줘 띄운다. `pythonw.exe` 가 없으면 지금 인터프리터에 `CREATE_NO_WINDOW` 를 준다. `pythonw.exe` 는 stdout·stderr 가 없으므로 서버는 stderr 가 있을 때만 쓴다.
-- 끄기: `open.py --stop`. 상태 폴더의 `server.pid`(PID 와 포트)를 읽되, `/api/health` 가 우리 서버라고 답할 때만 종료 신호를 보낸다(옛 기록이 다른 프로세스를 가리킬 수 있어서). 서버가 SIGTERM·SIGINT 를 받으면 세션 저장을 마치고, 콘솔이 띄운 `claude` 프로세스도 stdin 을 닫아 끝낸다(5초 안에 안 끝나면 terminate, 다시 5초 뒤 kill). 서버를 끄면 콘솔이 띄운 세션도 함께 끝난다.
+- 끄기: `open.py --stop`. 상태 폴더의 `server.pid`(PID 와 포트)를 읽되, `/api/health` 가 우리 서버라고 답할 때만 종료 신호를 보낸다(옛 기록이 다른 프로세스를 가리킬 수 있어서). 서버가 SIGTERM·SIGINT 를 받으면 세션 저장을 마치고, 콘솔이 띄운 `claude` 프로세스도 stdin 을 닫아 끝낸다(5초 안에 안 끝나면 terminate, 다시 5초 뒤 kill). 서버를 끄면 콘솔이 띄운 세션도 함께 끝난다. `--stop` 은 서버가 응답을 멈춘 뒤에도 포트가 실제로 풀릴 때까지(같은 방식으로 bind 해 보며, 최대 10초) 기다린 다음에야 "껐습니다" 를 낸다. 곧바로 `open.py` 를 다시 실행해도 `OSError 10048` 로 실패하지 않게 하려는 것이다. 시작 쪽도 포트가 사용 중이면 최대 3초 재시도한 뒤 서버를 띄운다(끝내 안 풀리면 서버가 남기는 원인을 보여 준다).
 - 환경변수: `HARNESS_CONSOLE_PORT`(기본 4873, 범위 밖이거나 숫자가 아니면 기본값)는 서버·`open.py`·`session_start_hook.py` 가 읽는다. 시험용 임시 포트를 위한 것이다. 훅(`hook_post.py`)도 같은 변수를 읽으므로 Claude Code 를 띄우는 환경에 같은 값이 있어야 훅이 서버에 닿는다. `HARNESS_CONSOLE_MODEL`·`HARNESS_CONSOLE_EFFORT` 는 서버가 띄우는 모든 `claude`(콘솔 세션·새 작업 분석)에 `--model`·`--effort` 의 기본값으로 넘긴다. 비어 있으면 넘기지 않는다. 새 작업 화면에서 고른 값이 있으면 그것이 우선한다(§6 새 작업).
 
 ## 4. 인증과 보안
@@ -169,6 +171,72 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 스킬 목록은 플러그인의 `skills/*/SKILL.md` frontmatter 의 `name`·`description` 에서 읽는다. `update`, `scaffold`, `open` 은 버튼과 `/` 자동완성에서 숨긴다(`HIDDEN_SKILLS`). 실행 중에는 스킬 흐름에서 현재 스킬을 `진행 중` 으로 표시한다.
 
+## 7a. 갈래와 단계 (`flows.json`, `flows.py`)
+
+"하고 싶은 일 → 하네스 갈래 → 그 순서대로만 진행" 이다. 갈래와 단계는 코드가 아니라 `console/flows.json` 이 정한다(저장소 원칙 "규칙은 데이터"). 서버는 뜰 때 이 파일을 읽고 `flows.validate` 로 검사한다. 모든 스킬이 `skills/*/SKILL.md` 에 있어야 하고, 가리키는 갈래·조건·증거가 정의돼 있어야 한다. 틀리면 갈래 기능만 끄고(`GET /api/flows` 와 갈래 지정이 503, 사유는 서버 stderr) 콘솔은 그대로 뜬다. 갈래가 없는 세션은 예전처럼 스킬 제한이 없다.
+
+| 갈래 id | 이름 | 단계 |
+|---|---|---|
+| `new-customer` | 새 고객사 시작 | scaffold → (사람) 양식을 `templates/` 에 넣기 → 다음 갈래 `srs` |
+| `srs` | 요구사항 만들기·바꾸기 | srs → deliver → 승인·병합 기다리기 → 다음 갈래는 SRS 의 `다음 단계` 값에 따라 갈림 |
+| `spec` | 개발 Spec | spec → deliver → 승인·병합 기다리기 → 다음 갈래 `dev` |
+| `dev` | 개발하기 | start → 구현 → atc(`env/adt-tiers.yaml` 이 있을 때만) → deliver → 병합 기다리기 → 다음 "권한·CTS 양식"(준비 중, 비활성) |
+| `fix` | 작은 수정 | start → 고치기 → deliver → 병합 기다리기 |
+| `atc` | ATC 지적 고치기 | atc → 고치기 → deliver (`env/adt-tiers.yaml` 이 있을 때만 쓸 수 있다) |
+| `review` | 병합 기다리기 | prs → 사람 승인·병합 |
+
+**SRS 다음 갈래.** `srs` 갈래가 끝나면 `docs/ssot/SRS.md` 의 요구사항 표에서 `다음 단계` 열을 읽어 값별로 센다(Status 가 `Dropped`·`Duplicate` 인 줄은 뺀다). `개발` → `spec`, `설정` → `dev`(Spec 없이 `[DEV-xxx]` 설정 작업), `미정` → 끝(미결 사항). 값이 섞여 있으면 선택지를 값별 개수·ID 와 함께 모두 내려보낸다. 파일을 못 읽거나 열·값을 못 찾으면 `unknown` 사유를 넣고 선택지를 비운다(끝으로 두지 않는다).
+
+**단계 종류와 완료 판정.** 단계는 `kind`(`skill` 스킬 실행 / `work` Claude Code 와 하는 작업 / `human` 사람이 하는 일 / `wait` 밖에서 일어나길 기다림)와 `done`(증거 목록, 모두 맞아야 끝)을 가진다. 증거:
+
+| 증거 | 뜻 | 판정에 쓰는 것 |
+|---|---|---|
+| `skill_done` | 그 스킬이 시작된 뒤 턴이 끝났다 | Skill 이벤트(`PreToolUse` Skill, `UserPromptExpansion`)로 `진행`, Stop 으로 끝 표시 |
+| `has_changes` | 커밋 안 된 변경이나 원격보다 앞선 커밋이 있다 | `gitstate.inspect` 의 `changedFiles`·`ahead` |
+| `on_work_branch` | 지금 브랜치가 기본 브랜치가 아니다(start 단계: 새 작업 브랜치가 생겼다) | `gitstate.inspect` 의 `onBase` |
+
+`skill_done` 은 질문(AskUserQuestion)이 답을 기다리는 중의 Stop 에서는 표시하지 않는다. 중간에 묻는 스킬(start·srs·spec)이 첫 응답에서 끝난 것으로 보이지 않게, start 는 `on_work_branch`, srs·spec 은 `has_changes` 를 함께 요구한다. 조건(`onlyIf`)을 판정하지 못하면 그 단계를 건너뛰지도 끝내지도 않는다(판정 불능, `flowUnknown`). git·gh 는 `store.lock` 밖에서 부르고 그 값만 잠금 안에 넘긴다.
+| `pr_exists` | 이 브랜치의 PR 이 있다 | `gh pr list --head <브랜치> --state all` |
+| `pr_merged` | 그 PR 이 병합됐다 | 같은 조회, 한 번 본 PR 은 번호로 `gh pr view` (브랜치를 옮겨도 본다) |
+| `manual` | 사람이 화면에서 끝났다고 눌렀다 | `POST .../flow/done` |
+
+단계 상태는 `pending`(대기) / `active`(진행) / `done`(끝) / `skipped`(건너뜀 + 이유) 이다. 스킬 단계는 그 스킬이 시작되면 `active`, 그 밖의 단계는 지금 단계가 되면 바로 `active` 다. 단계에 `onlyIf`(조건 이름)가 있고 조건이 거짓이면 이유("조건에 맞지 않아 건너뜀")와 함께 자동으로 건너뛴다. 판정은 Stop·SessionStart 의 git 갱신 때, `flow/refresh` 때, 갈래를 지정할 때 돈다. **gh 로 근거를 못 읽으면 끝으로도 아님으로도 두지 않고** 단계를 그대로 둔 채 `flowUnknown` 에 사유를 넣는다("판정 불능"). 조건 판정도 같다 — 못 읽은 조건은 `unknown` 이고 숨기지 않는다.
+
+**순서.** 갈래가 있는 세션은 지금 단계의 스킬(`wait` 단계는 `helperSkill`)만 `POST .../skills/:skill/run`·예약으로 실행할 수 있고, 다른 스킬은 409 다. 단계를 건너뛰려면 `POST .../flow/skip {reason}` 이 필요하고 이유가 없으면 400 이다. 이유는 단계와 세션 로그에 남는다. **도구**(`tools`: version, sync, update, handoff, wrapup, prs, approvals, reload)는 갈래와 상관없이 언제나 실행된다. `reload`(콘솔 세션 전용)의 동작은 §7b 다. 버튼에 안 내는 `scaffold`·`update` 도 갈래·도구 데이터에 있으면 실행된다.
+
+**노출 조건.** `conditions` 가 이름으로 정의한다.
+- `adt-tiers` (`file`): 저장소 꼭대기에 `env/adt-tiers.yaml` 이 있는가. 없으면 `atc` 갈래와 `dev` 의 atc 단계를 숨긴다(`GET /api/flows` 의 `exposure.visible=false`, 갈래 지정은 409).
+- `approver`: 이 저장소에서 내가 승인자인가(`approvals` 도구를 보일지). `gh api user` 로 내 아이디를 읽고 `.github/ssot-approvers` 를 `checker.ssot_approval` 과 같은 형식으로 읽는다. 내용이 있으면 거기 든 사람만 승인자다. **파일이 없거나 비어 있으면** `whenNoFile` 에 따라 `admin`(`gh repo view` 의 `viewerPermission` 이 ADMIN 일 때만) 또는 `anyone`(작성자 아닌 누구든)이다. 지금 값은 `admin` 이다. 파일은 작업 폴더의 것을 읽는다(엔진은 기준 브랜치에서 읽는다). gh 가 실패하면 `unknown` 으로 두고 도구를 숨기지 않는다. 폴더가 GitHub 저장소(`git remote -v` 에 `github.com`)가 아니면 gh 를 부르지 않고 `no`(이유 "GitHub 저장소가 아님")로 두어 도구와 홈의 승인 칸을 숨긴다. 결과는 60초 기억하고, 못 읽은 결과는 기억하지 않는다.
+
+**분류(분석).** `POST /api/new` 의 분석 스키마에 선택 속성 `flow {id(갈래 id 목록 중 하나), reason, confident, alternativeId}` 가 더해진다(이 폴더에서 쓸 수 있는 갈래만 프롬프트·스키마에 든다. `required` 에는 넣지 않아 없어도 결과가 유효하다). 서버는 id 가 목록에 있는지 다시 검사해 결과에 `flow {id, name, reason, confident, alternativeId, alternativeName}` 와 `flowError` 를 넣는다. 확신이 없고(`confident=false`) 후보가 둘이면 `extraQuestions` 맨 앞에 두 갈래를 묻는 질문(`flowChoice: [id, id]`)을 끼운다. 시작할 때 `flow` 를 주지 않으면 확신한 분류를 쓰고, 첫 메시지는 갈래의 첫 스킬(`/harness:<skill>`)로 시작한다. 첫 단계가 스킬이 아니면 그대로 둔다.
+
+**끝난 뒤.** 갈래가 끝나면 세션의 `nextFlow {options[{flow, name, label, disabled, value?, count?, ids?}], hint, unknown?}` 에 다음 갈래를 넣는다. "새 세션으로 시작하십시오." 힌트와 함께 내려보내고, 사람이 고르면 `POST .../flow/next` 가 자동 인계와 새 세션 띄우기를 한다(§7c).
+
+## 7b. 플러그인 다시 불러오기, 만든 문서 보기, 같은 폴더
+
+**플러그인 다시 불러오기** (`POST /api/sessions/:id/reload`, 콘솔이 띄운 세션만). stdin 에 `control_request{subtype:"reload_plugins"}` 를 보내 `control_response.response.plugins[{name,path,source,version}]`·`error_count` 를 받는다(claude 2.1.316 실측, 모델 비용 없음). 거절당하거나 20초 안에 답이 없으면 user 메시지 `/reload-plugins` 로 대신하고(`method:"message"`, 합성 응답 `Reloaded: N plugins · M errors` 를 읽는다. 이 경우 판 목록은 알던 값 그대로) 둘 다 안 되면 502 다. 응답 `{ok, method("control"|"message"), plugins[{name,version}], errorCount, harnessVersion, message?}`. 터미널 세션과 끝난 세션은 409. 세션이 턴 진행 중이면(턴 실행 중이거나 띄우는 중) 끝날 때까지 기다렸다가 하고(최대 10분, 같은 세션은 한 번만 대기) 바로 `202 {queued:true}` 로 답한다. 결과는 세션 로그와 `pluginVersions` 에 남는다. `POST /api/reload-all` 은 살아 있는 콘솔 세션 전부에 같은 일을 하고 `{results:[{sessionId, title, ok, ...위 응답 또는 error / queued}]}` 를 돌려준다. 세션 필드 `pluginVersions[{name,version}]` 는 `system/init` 의 `plugins`(판이 없으면 알던 판을 지킨다)와 다시 불러오기 결과로 갱신한다.
+
+**새 세션 점검.** 콘솔이 새로 띄운 세션(새 작업 시작·다음 갈래 넘기기)은 `startChecks[{id, state}]` (`sync`, `version`, `update`, `reload`; state `pending`/`done`/`skipped`)를 가진다. `sync`·`version`·`update` 는 그 스킬의 Skill 이벤트(`PreToolUse` Skill, `UserPromptExpansion`)가 오면, `reload` 는 다시 불러오기가 성공하면 `done` 이 된다. `POST /api/sessions/:id/checks/:id/skip` 이 `skipped` 로 바꾼다(대기 중인 항목만. 모르는 항목은 404). 이어서 띄운 세션과 터미널 세션은 빈 목록이다.
+
+**만든 문서 보기.** 세션의 작업 폴더(`cwd`) 기준이다.
+- `GET /api/sessions/:id/files` → `{files:[{path(cwd 기준 '/' 상대 경로), kind(md/xlsx/pptx/docx/pdf/image/other), size, mtime(epoch 초), changed, versions[]}]}`. 훅이 모은 `changedFiles` 와 `git status --porcelain -z -uall` 의 바뀐·새 파일 중 작업 폴더 안의 실제 파일만 낸다(`.git`·`node_modules` 같은 큰 폴더와 `~$` 잠금 파일은 뺀다. 최신 수정 순, 최대 300개). 판 이름(`이름_v0.1.xlsx`)이면 같은 폴더의 같은 이름 판을 모두 찾아 `versions[{path, version, size, mtime, changed}]` 에 최신 판부터 담고(숫자로 비교: 0.10 > 0.2) 항목의 `path`·`size`·`mtime` 은 가장 높은 판의 것, `changed` 는 어느 판이든 바뀌었으면 참이다. 판 이름이 아니면 `versions` 는 빈 배열이다. **`versions` 는 대표(최신) 판 자신도 담는 계약이다.** 화면은 "이전 판" 목록에서 `path` 가 대표 파일과 같은 항목을 뺀다(판 이름 파일이 하나뿐이면 이전 판이 없다).
+- `GET .../files/preview?path=` → md: `{kind:"md", text, truncated}`(200KB), xlsx(xlsm): `{kind:"table", sheets:[{name, rows[[값…]](200행×40열, 값만), truncated}]}`(날짜 서식 칸은 일련번호가 아니라 `YYYY-MM-DD`, 시간이 있으면 `YYYY-MM-DD HH:MM`, 시간만 있는 서식은 `HH:MM` 으로 낸다. `styles.xml` 의 `cellXfs` 서식 번호로 판정한다: 내장 14-17·22·18-21·45-47, 사용자 `numFmts` 중 y·d·h(또는 `mmm`)가 든 서식. `workbookPr date1904` 면 1904 날짜 체계. 바꿀 수 없는 값은 원래 글자 그대로), pptx: `{kind:"slides", slides:[{index, texts[]}]}`(슬라이드 번호 순, 문단마다 한 줄), 이미지: `{kind:"image", url}`, 그 밖 `{kind:"none"}`. 표준 라이브러리(`zipfile`+`xml.etree`)만 쓰며 openpyxl 은 쓰지 않는다. 깨졌거나, 부분 **전체**에 `<!DOCTYPE`·`<!ENTITY` 선언이 있거나(긴 주석 뒤에 숨긴 것도 찾는다), UTF-16/32 이거나 UTF-8 이 아닌 인코딩을 선언했거나, 부분 하나가 16MB 를 넘거나 미리보기 한 번에 푸는 합이 64MB 를 넘으면 읽지 않고 422 다. 모든 부분을 `iterparse` 로 읽는다. `GET .../files` 는 git 을 읽지 못하면 `unknown:true, reason` 을 더해 내고 화면이 "바뀐 문서를 확인하지 못했어요" 를 보인다(빈 목록과 구분).
+- `GET .../files/raw?path=` → 이미지(png jpg jpeg gif webp bmp svg)만 내려준다(아니면 403, 20MB 넘으면 413). SVG 안의 스크립트가 돌지 못하게 `Content-Security-Policy: sandbox` 를 붙인다.
+- `POST .../files/open {path, mode:"open"|"reveal"}` → 서버를 돌리는 컴퓨터에서 연다. Windows 는 `open` 이 `os.startfile`, `reveal` 이 `explorer /select,"경로"`(셸 없이, explorer 가 요구하는 한 줄), macOS 는 `open` / `open -R`, 그 밖은 `xdg-open`(reveal 은 폴더). **안전:** 경로는 `realpath` 후 작업 폴더 안만(밖이면 403, 없으면 404). `open` 은 확장자 허용 목록(md txt csv xlsx pptx docx pdf png jpg jpeg gif; 매크로를 담을 수 있는 xlsm·xls 와 스크립트를 담을 수 있는 svg 는 위치 보기만)만 되고 `.bat .cmd .exe .ps1 .js .vbs .lnk` 같은 것은 403 이다. 요청한 경로와 링크를 푼 실제 경로의 확장자가 둘 다 목록에 있어야 한다. `reveal` 은 위치만 보여 주므로 허용한다. 열기에 실패하면 502.
+
+**같은 폴더.** 세션 필드 `sameFolder` 는 같은 작업 폴더(대소문자·구분자 차이를 같게 비교)에서 살아 있는 다른 세션 id 목록이다(끝난 세션, 프로세스가 죽은 콘솔 세션, 다음 세션으로 넘어간 세션(`handedOffTo`)은 뺀다). 세션이 뜨거나 끝나면 같은 폴더의 다른 세션 화면에도 `session` 이벤트가 간다. `POST /api/folders/worktree {cwd}` 는 아는 작업 폴더가 git 저장소의 맨 위 폴더일 때(아니면 400, 모르는 폴더 403) `git fetch origin` 뒤 `git worktree add --detach <부모>/<저장소이름>-wt-<6자리 id> origin/<기본 브랜치>` 로 작업용 폴더를 만들어 아는 폴더에 더하고 `{path}` 를 돌려준다. 기본 브랜치는 `origin/HEAD` 에서 읽는다. 브랜치는 만들지 않는다(start·srs·spec 스킬이 자기 이슈·브랜치를 만든다). 실패하면 502 와 git 오류 끝 300자를 돌려준다.
+
+## 7c. 다음 갈래로 넘어가기 (`handoff.py`)
+
+`POST /api/sessions/:id/flow/next {flowId}` → `202 {jobId}`. 콘솔이 띄운 세션만 된다(터미널 세션은 콘솔이 `/harness:handoff` 를 보낼 수 없어 409 와 안내. 없는 갈래·숫자 아닌 flowId 400, 이 폴더에서 못 쓰는 갈래 409, 같은 세션에 진행 중인 작업이 있으면 409). 뒤에서 이렇게 한다.
+1. 지금 턴이 끝나기를 기다린다(최대 10분).
+2. 그 세션에 `/harness:handoff` 를 보내 그 턴의 `result` 를 기다린다(최대 10분). 결과 글의 **마지막 코드 블록**(백틱 3개 이상 울타리, 비어 있지 않은 것)을 새 세션용 프롬프트로 뽑는다. 못 뽑거나 4000자를 넘으면 사유와 함께 멈추고 새 세션을 띄우지 않는다.
+3. **사람이 확인한다.** job 을 `confirm`(확인 대기, `prompt` 포함)으로 두고 화면이 그 글을 보여 준다. 사람이 [이대로 새 세션 시작] / [고쳐서 시작](글을 고칠 수 있다) / [취소] 를 고른다. 시작은 `POST /api/jobs/:id/confirm {prompt?}`(없으면 뽑은 글 그대로, 비었거나 4000자 넘으면 400, `confirm` 이 아니면 409), 취소는 `POST /api/jobs/:id/cancel`. 확인 없이는 새 세션을 띄우지 않는다. 같은 세션에서 새로 넘기면 잊힌 확인 대기 job 은 취소된다.
+4. 같은 폴더에서 새 콘솔 세션을 띄운다. 모델·에포트는 이전 세션 값을, 권한 모드는 허용 집합(기본·`acceptEdits`·`plan`) 안의 값만 이어받는다. 첫 메시지는 `새 세션 시작 점검: /harness:sync 로 최신을 받고, 플러그인 판(/harness:version)을 확인해 낡았으면 알려 줘(갱신은 사용자 버튼으로 한다). 그다음 인계 내용을 이어서: <뽑은 프롬프트>` 뒤에 그 갈래의 첫 단계 안내를 붙인다. 새 세션에는 그 갈래를 지정한다(실패하면 `warning`).
+5. 새 세션 프로세스가 `init` 이벤트를 낸 것을 확인한 뒤에만(60초 안에 못 받으면 `failed`, 이전 세션은 닫지 않는다) 이전 세션에 `handedOffTo: <새 세션 id>` 를 적고(세션 화면에 "다음 세션으로 넘어감 → 새 세션 링크") 그 `claude` 프로세스는 stdin 을 닫아 정상 종료한다. 넘어간 세션은 `sameFolder` 계산에서 빠져 새 세션 화면에 "다른 세션이 일하고 있어요" 경고가 뜨지 않는다.
+
+`GET /api/jobs/:jobId` → `{id, kind:"flowNext", status("handoff"/"confirm"/"starting"/"started"/"failed"/"canceled"), fromSession, flowId, prompt(confirm 일 때), sessionId(started 일 때 새 세션 id), error, warning}`. 작업은 메모리에만 있다(서버를 다시 띄우면 사라진다). 실패는 이전 세션 로그에도 남는다. 예외가 나도 job 은 `failed`(사유)로 끝나 세션이 '넘기는 중' 에 갇히지 않는다.
+
 ## 8. API
 
 | 메서드 | 경로 | 용도 |
@@ -182,6 +250,22 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 | POST | `/api/sessions/:id/skills/:skill/run` | 스킬 실행. 본문 `{args?}`, 보내는 글은 `/harness:<skill> <args>` |
 | PUT, DELETE | `/api/sessions/:id/skills/:skill/reservation` | 예약 |
 | POST | `/api/sessions/:id/interrupt` | 콘솔이 띄운 세션 중단 |
+| PUT | `/api/sessions/:id/flow` | 갈래 지정·변경. 본문 `{flowId, reason?}`, `flowId: null` 이면 해제. 없는 갈래 400, `requires` 조건이 거짓이면 409, 데이터를 못 쓰면 503. 응답은 세션 모델 |
+| POST | `/api/sessions/:id/flow/skip` | 지금 단계 건너뛰기. 본문 `{reason}` 필수(없으면 400, 갈래가 없으면 409). 이유는 단계와 로그에 남는다 |
+| POST | `/api/sessions/:id/flow/done` | 사람이 지금 단계를 끝냈다고 누름. `manual` 이 든 단계만 되고(아니면 409), 같은 단계의 다른 근거(변경 등)가 안 맞으면 409 |
+| POST | `/api/sessions/:id/flow/refresh` | 병합처럼 세션 밖에서 일어난 일을 지금 다시 읽어 판정 |
+| POST | `/api/sessions/:id/flow/next` | 다음 갈래로 넘어가기. 본문 `{flowId}`. `202 {jobId}` (§7c) |
+| GET | `/api/jobs/:jobId` | 다음 갈래 넘기기 진행 상태 (§7c) |
+| POST | `/api/sessions/:id/reload` | 플러그인 다시 불러오기(콘솔 세션만). `200 {ok, method, plugins, errorCount, harnessVersion}` / 턴 중 `202 {queued:true}` / 터미널·끝난 세션 409 / 실패 502 (§7b) |
+| POST | `/api/reload-all` | 콘솔 세션 전부에 같은 일. `{results[]}` |
+| POST | `/api/sessions/:id/checks/:cid/skip` | 새 세션 점검 항목(`sync`/`version`/`update`/`reload`)을 건너뜀으로 |
+| GET | `/api/sessions/:id/files` | 만든 문서 목록(`{files[]}`, 판 묶음 `versions`) (§7b) |
+| GET | `/api/sessions/:id/files/preview` | 쿼리 `path`. md·표·슬라이드·이미지·none 미리보기 |
+| GET | `/api/sessions/:id/files/raw` | 쿼리 `path`. 이미지 원본만 |
+| POST | `/api/sessions/:id/files/open` | `{path, mode:"open"/"reveal"}`. 작업 폴더 안·허용 확장자만 |
+| POST | `/api/folders/worktree` | `{cwd}` → `{path}`. `git worktree add --detach` 로 작업용 폴더 만들기 |
+| GET | `/api/flows` | 갈래·단계·도구·증거 설명 데이터. 쿼리 `cwd`(아는 작업 폴더, 아니면 403)를 주면 갈래·단계·도구마다 `exposure {visible, state(yes/no/unknown), reason}` 와 `conditions` 를 더한다 |
+| GET | `/api/approvals` | 쿼리 `cwd` 필수. `{state(yes/no/unknown), reason, login, items[{number, title, url, author, staleApproval}]}`. 내가 승인자이고, 작성자가 내가 아니고, 초안이 아니고, 최신 커밋을 내가 아직 승인하지 않은 열린 PR(번호순, 병합 순서는 계산하지 않는다). 60초 기억. GitHub 저장소가 아닌 폴더는 `no`. 홈은 세션 폴더를 저장소별로 묶어 부르고, 전부 `no` 면 칸을 안 보이며 gh 자체 실패(`unknown`)만 "판정 불능" 으로 보인다 |
 | PUT | `/api/sessions/:id/permission` | 세션 도중 권한 모드 바꾸기. body `{mode}`, 허용 3종(`""`·`acceptEdits`·`plan`) 밖은 400, 터미널 세션은 409, claude 가 거절하거나 답이 없으면 502 |
 | GET | `/api/requests/:rid` | 승인·질문 내용. 요청 모델에 `sessionTitle`, `suggestions` 가 더해진다 |
 | POST | `/api/requests/:rid/answer` | 승인 `{decision: allow / allow_session / deny, reason?}`, 질문 `{answers:{질문:답}}` |
@@ -197,7 +281,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 | GET | `/api/files` | `@` 멘션용 파일 찾기. 쿼리 `root`(아는 작업 폴더, 아니면 403), `q`(경로에 든 글, 대소문자 무시). 응답 `{root, files[], truncated}`. 결과 50개, 탐색 2만 파일 상한, 큰 폴더와 밖을 가리키는 링크는 뺀다 |
 | GET | `/api/fs` | 쿼리 `root`, `dir`. 응답 `{root(realpath), dir, entries[{name, kind: dir/file, size}]}`. `dir` 은 요청 값의 앞뒤 슬래시만 뗀 것, 폴더가 앞이고 이름순, `.git` 과 작업 폴더 밖을 가리키는 링크는 뺀다, 최대 2000개, 폴더의 size 는 0 |
 
-세션 모델: `id, title, cwd, repo, branch, managed, status(starting/running/waiting/idle/ended), group, permissionMode, bypassPermissions, currentSkill, currentAction, startedAt, updatedAt, log[{time,text}], report, changedFiles[], prLinks[], subagents[], flow[{skill,state,reserved,disabledReason?}], turnSkill, turnUnknown, pendingRequestIds[], canSend, cannotSendReason`.
+세션 모델: `id, title, cwd, repo, branch, managed, status(starting/running/waiting/idle/ended), group, permissionMode, bypassPermissions, currentSkill, currentAction, startedAt, updatedAt, log[{time,text}], report, changedFiles[], prLinks[], subagents[], flow[{skill,state,reserved,disabledReason?}], turnSkill, turnUnknown, pendingRequestIds[], canSend, cannotSendReason`, 갈래 필드 `flowId, flowName, flowReason, stepIndex, flowSteps[{id, name, kind, skill, helperSkill, hint, onlyIf, state, reason}], flowFinished, flowUnknown[], flowPr {number, state, url, title, checks(pass/fail/pending/none)}, nextFlow`(갈래가 없으면 `flowId: null`), 그 밖에 `pluginVersions[{name,version}], sameFolder[], handedOffTo(다음 세션으로 넘어갔으면 새 세션 id, 아니면 null), startChecks[{id,state}]`(§7b·§7c).
 
 - 시간 값(`startedAt`, `updatedAt`, 로그의 `time`, 요청의 `createdAt`·`answeredAt`)은 epoch **초**(소수 포함)다. 화면이 경과 시간을 계산한다.
 - `turnSkill` 은 `이번 차례`(§7)의 `start`/`deliver`/`prs`/없음, `turnUnknown` 은 `gh` 로 PR 을 보지 못해 판단이 불완전했다는 뜻이다. `bypassPermissions` 는 `permissionMode == "bypassPermissions"` 다.
@@ -214,10 +298,14 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 - 이름과 문구: 화면 이름은 "Blueward Harness" 이고 로고(`static/blueward-logo.png`)를 사이드바 위에 둔다. 화면 문구는 "Claude" 대신 "Claude Code" 로 쓴다. 상단의 서버 주소 표시는 두지 않는다.
 - 사이드바: `내가 할 일`, `Claude Code가 하는 일`, `쉬는 중`. `[` 키로 접는다(입력칸에 포커스가 있으면 동작하지 않는다). 접힌 상태를 기억한다.
-- 세션 화면: 현재 스킬과 행동, 경과 시간(실제 계산), 스킬 버튼 흐름, **결과 보고**(마크다운을 안전하게 표시), 변경 파일, PR 링크, 로그, 이어서 요청 입력칸, `기술 정보 보기`. 쉬는 터미널 세션은 막는 이유를 보여 준다.
+- 홈(`/`): 세션 카드(갈래 이름·순서 막대·지금 하는 일·PR 상태), 내가 승인할 PR 카드(GitHub 저장소가 있고 내가 승인자일 때만. gh 실패는 "판정 불능"), 세션 요약. 갈래를 고르지 않은 세션은 "정해진 갈래 없음" 으로 보인다.
+- 세션 화면: 현재 스킬과 행동, 경과 시간(실제 계산), **갈래 순서 막대와 방향별 다음 단계 버튼**(지금 단계의 스킬만 누를 수 있고, 건너뛰려면 이유가 필요하며, "끝났어요" 는 git·gh 근거를 확인한다. 끝나면 SRS "다음 단계" 열 값에 따라 방향별 버튼이 나온다), **항상 열린 도구 줄**(판 보기·최신 받기·플러그인 갱신·인계·남은 일·내 PR·다시 불러오기·내가 승인할 PR; 갈래와 상관없이 쓴다), **결과 보고**(마크다운을 안전하게 표시), **만든 문서**(목록·이전 판·md/xlsx/pptx 미리보기·열기·위치 보기), 변경 파일, PR 링크, 로그, 이어서 요청 입력칸, `기술 정보 보기`. 쉬는 터미널 세션은 막는 이유를 보여 준다.
+- 새 세션 점검: 콘솔이 새로 띄운 세션에는 최신 받기·판 확인·갱신·다시 불러오기 체크리스트가 뜨고(건너뛸 수 있다), 하나씩 `done` 이 된다.
+- 같은 폴더 알림: 같은 폴더에서 다른 세션이 일하고 있으면 알리고 "이 작업용 폴더 따로 만들기" 를 준다. 다음 세션으로 넘어간 세션은 알림에서 빠지고, 그 세션 화면에는 "다음 세션으로 넘어감 → 새 세션 링크" 가 뜬다.
+- 쉬운 말: 화면에서는 git 용어를 숨긴다(이슈 = 작업 기록, 브랜치 = 작업 공간, 커밋·푸시·PR = 올리고 검토 요청하기, 병합 = 합쳐지기). 다만 srs·spec·start 스킬은 **각각** 시작할 때 이슈와 브랜치를 만든다고 단계 설명에 정확히 적는다.
 - 승인, 질문, 새 작업(입력 → 분석 중 → 자료 확인), 설정: 시안대로. 처리된 요청은 "터미널에서 처리됨" 처럼 결과를 보여 준다.
 - 새 작업 입력: 작업 폴더는 최근 폴더에서 고르거나 경로를 적거나 `폴더 찾아보기`(`POST /api/folders/pick`)로 고른다. 모델, 에포트(생각의 깊이), 권한 모드(기본 / 파일 고치기 자동 허용 / 계획만)를 고른다. 모델·에포트는 분석과 작업 세션이 같이 쓰고 권한 모드는 작업 세션에만 쓴다.
-- 입력칸 보조: 스킬 버튼 줄(`GET /api/skills`)이 있고, 입력칸에서 `/` 를 치면 스킬, `@` 를 치면 작업 폴더의 파일(`GET /api/files`) 후보가 뜬다. `@` 경로에 공백이 있으면 후보 삽입 뒤 멘션이 공백에서 끊긴다(알려진 한계).
+- 입력칸 보조: 예전의 스킬 버튼 줄은 없다(위 순서 막대·도구 줄이 대신한다). 스킬 이름은 `GET /api/skills` 로 받아 입력칸에서 `/` 를 치면 스킬, `@` 를 치면 작업 폴더의 파일(`GET /api/files`) 후보가 뜬다. `@` 경로에 공백이 있으면 후보 삽입 뒤 멘션이 공백에서 끊긴다(알려진 한계).
 - 테마 11개(Blueward 밝은 테마 포함)와 글자 크기 3단계는 `localStorage` (`bh-theme`, `bh-scale`)에 저장한다. 접근이 막혀도 기본값으로 동작한다. 테마 표는 한 곳에만 둔다.
 - 금지: 그라데이션 배경, 유리 효과, Pulse 복제, 터미널 버튼. 시안의 샘플 데이터를 코드에 남기지 않는다. 빈 상태 화면을 만든다.
 
