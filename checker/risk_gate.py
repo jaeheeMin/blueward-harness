@@ -47,6 +47,8 @@
 `<작성자>: <승인자> ...` 줄(작성자 전용)과 `*:` 줄·옛 형식 줄(전용 줄이 없는 작성자 모두)로 적는다
 (`ssot_approval.parse_approvers`). 이 판정은 `ssot_approval.evaluate_approval`(#119)을 그대로
 쓴다. 작성자를 뺀 승인 가능한 사람이 하나도 없으면 승인으로 풀 수 없다고 사유와 다음 할 일을 밝힌다.
+목록 파일이 없거나 비어 있으면(#586) 저장소 admin 권한을 가진 사람(작성자 제외)만 승인자다. admin 여부는
+GitHub 에서 읽고, 읽지 못하면 통과도 위반도 아닌 판정 불가(종료코드 2)다.
 
 세 곳이 같은 `decide_pr` 를 부른다 — PR 검사 workflow(`pr-checks.yml`·`pr-review.yml` 의 risk-gate 단계), 병합 뒤
 감지(`main-checks.yml` 의 risk-gate 단계, `decide_commit`), Claude 병합 Hook. 셋이 같은 코드로 같은 판정을 내려야
@@ -102,6 +104,7 @@ from checker.ssot_approval import (
     EXIT_NOT_APPROVED,
     EXIT_OK,
     EXIT_UNKNOWN,
+    AdminChecker,
     GhClient,
     GhError,
     ParsedApprovers,
@@ -112,6 +115,7 @@ from checker.ssot_approval import (
     fetch_pr_info,
     fetch_pr_reviews,
     human_merge_hits,
+    judge_admin_only,
     approvers_for,
     parse_approvers,
 )
@@ -1162,8 +1166,20 @@ def _result_from(findings: list[Finding], approval_state: str, approved: bool | 
     }
 
 
-def _judge_approval(author: str, reviews: list[dict], approvers: ParsedApprovers, head_sha: str) -> tuple[str, bool, str, list[str]]:
-    """(상태, 승인 여부, 설명, 낡은 승인자) 를 돌려준다. 승인자는 이 작성자에게 정해진 사람이다."""
+def _judge_approval(
+    author: str, reviews: list[dict], approvers: ParsedApprovers, head_sha: str, is_admin: Callable[[str], bool]
+) -> tuple[str, bool, str, list[str]]:
+    """(상태, 승인 여부, 설명, 낡은 승인자) 를 돌려준다. 승인자는 이 작성자에게 정해진 사람이다.
+
+    승인자 파일이 없거나 비면 저장소 admin 만 승인자다(#586). 권한을 못 읽으면 GhError(검사 불능).
+    """
+    if not approvers.has_entries:
+        approved, note, stale = judge_admin_only(author, reviews, head_sha, is_admin)
+        if approved:
+            return "ok", True, note, []
+        if stale:
+            return "stale", False, note, [e["login"] for e in stale]
+        return "missing", False, note, []
     eligible = approvers_for(approvers, author)
     if not eligible:
         return "no_approvers", False, "승인자 목록이 비어 있거나 이 작성자 외에 승인할 수 있는 사람이 없음", []
@@ -1214,7 +1230,7 @@ def decide_pr(client: GhClient, repo: str, pr: int, config_ref: str | None = Non
     author = (info.get("user") or {}).get("login", "")
     approvers = parse_approvers(fetch_text(client, repo, ref, cfg["approvers_file"]))
     state, approved, note, stale = _judge_approval(
-        author, fetch_pr_reviews(client, repo, pr), approvers, head_sha
+        author, fetch_pr_reviews(client, repo, pr), approvers, head_sha, AdminChecker(client, repo)
     )
     return _result_from(findings, state, approved, note, stale, cfg["approvers_file"], notes)
 

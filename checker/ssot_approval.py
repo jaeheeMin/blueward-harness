@@ -47,9 +47,10 @@ import json
 import re
 import subprocess
 import sys
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 SSOT_PREFIX = "docs/ssot/"
+ADMIN_PERMISSION = "admin"
 
 EXIT_OK = 0
 EXIT_NOT_APPROVED = 1
@@ -65,6 +66,12 @@ NO_APPROVER_FOR_AUTHOR = (
     "이 작성자의 PR 을 승인할 사람이 .github/ssot-approvers 에 없다(작성자 본인은 제외). "
     "다음: 🚨 직접 해 주세요: 이 작성자 줄이나 `*:` 줄에 작성자가 아닌 승인자의 GitHub 아이디를 "
     "추가하십시오(이 파일은 기준 브랜치에서 읽으므로 따로 먼저 반영해야 합니다)."
+)
+
+NO_ADMIN_APPROVAL = (
+    "승인자 파일(.github/ssot-approvers)이 없거나 비어 저장소 관리자(admin)만 승인자로 본다. "
+    "작성자 외 관리자의 승인이 없다. 다음: 🚨 직접 해 주세요: 저장소 관리자에게 이 PR 을 Approve 해 달라고 "
+    "요청하십시오."
 )
 
 
@@ -185,6 +192,25 @@ def _short(sha: str | None) -> str:
     return (sha or "")[:7] or "알 수 없는 커밋"
 
 
+def _latest_states(reviews: list[dict]) -> dict[str, tuple[str, str | None]]:
+    """리뷰어(소문자 로그인)별 최신 상태(APPROVED/CHANGES_REQUESTED/DISMISSED)와 그 리뷰의 커밋."""
+
+    def _key(review: dict) -> str:
+        return review.get("submitted_at") or ""
+
+    latest: dict[str, tuple[str, str | None]] = {}
+    for review in sorted(reviews, key=_key):
+        user = (review.get("user") or {}).get("login")
+        if not user:
+            continue
+        state = (review.get("state") or "").upper()
+        if state not in _STATE_CHANGING:
+            # COMMENTED 등은 상태를 바꾸지 않는다.
+            continue
+        latest[user.strip().lower()] = (state, review.get("commit_id"))
+    return latest
+
+
 def evaluate_approval(
     author: str, reviews: list[dict], approvers: set[str], head_sha: str | None = None
 ) -> tuple[bool, str, list[dict]]:
@@ -201,20 +227,7 @@ def evaluate_approval(
     미승인으로 친다. 새 커밋에 다시 Approve 하면 그 리뷰가 최신이라 인정된다.
     """
     author_l = (author or "").strip().lower()
-
-    def _key(review: dict) -> str:
-        return review.get("submitted_at") or ""
-
-    latest: dict[str, tuple[str, str | None]] = {}
-    for review in sorted(reviews, key=_key):
-        user = (review.get("user") or {}).get("login")
-        if not user:
-            continue
-        state = (review.get("state") or "").upper()
-        if state not in _STATE_CHANGING:
-            # COMMENTED 등은 상태를 바꾸지 않는다.
-            continue
-        latest[user.strip().lower()] = (state, review.get("commit_id"))
+    latest = _latest_states(reviews)
 
     approving: list[str] = []
     stale: list[dict] = []
@@ -372,16 +385,76 @@ def fetch_approvers(client: GhClient, repo: str, ref: str) -> set[str]:
     return fetch_approver_rules(client, repo, ref).everyone()
 
 
+# `gh api` 가 stderr 에 내는 `gh: <login> is not a user (HTTP 404)` 의 서버 메시지.
+_NOT_A_USER = re.compile(r"\bis not a user\b", re.IGNORECASE)
+
+
+class AdminChecker:
+    """저장소 admin 권한 여부를 GitHub 에서 읽어 로그인별로 캐시한다(#586).
+
+    `GET repos/{repo}/collaborators/{login}/permission` 의 `permission` 이 `admin` 인지 본다.
+    계정이 없다는 답(404 `<login> is not a user`, 삭제된 계정)만 "admin 아님" 이다 — 없는 계정은 admin 일 수
+    없다는 확인된 사실이다. 그 밖에 읽지 못하면(다른 404·403·5xx·네트워크·예상 못 한 응답) 아니라고
+    답하지 않고 GhError 를 던진다 — "권한을 못 읽음" 을 "admin 아님" 으로 뭉개면 안 된다(원칙 7).
+    """
+
+    def __init__(self, client: GhClient, repo: str):
+        self.client = client
+        self.repo = repo
+        self._cache: dict[str, bool] = {}
+
+    def __call__(self, login: str) -> bool:
+        key = (login or "").strip().lower()
+        if key not in self._cache:
+            try:
+                data = self.client.get_json(f"repos/{self.repo}/collaborators/{key}/permission")
+            except GhError as exc:
+                if exc.status == 404 and _NOT_A_USER.search(str(exc)):
+                    self._cache[key] = False
+                    return False
+                raise
+            permission = data.get("permission") if isinstance(data, dict) else None
+            if not isinstance(permission, str):
+                raise GhError(f"{key} 의 저장소 권한을 응답에서 읽지 못했다")
+            self._cache[key] = permission.lower() == ADMIN_PERMISSION
+        return self._cache[key]
+
+
+def judge_admin_only(
+    author: str, reviews: list[dict], head_sha: str | None, is_admin: Callable[[str], bool]
+) -> tuple[bool, str, list[dict]]:
+    """승인자 파일이 없거나 비었을 때: 저장소 admin(작성자 제외)의 승인만 인정한다(#586).
+
+    권한은 "작성자가 아니고, 최신 리뷰 상태가 APPROVED 이며 그 승인이 최신 커밋(head_sha) 기준인" 사람에게만
+    묻는다. 낡은 승인·이후 CHANGES_REQUESTED 로 바뀐 사람·과거 승인자는 묻지 않는다.
+    묻다가 GhError 가 나면 그대로 올린다(검사 불능).
+    """
+    author_l = (author or "").strip().lower()
+    reviewers = {
+        login
+        for login, (state, commit_id) in _latest_states(reviews).items()
+        if state == "APPROVED" and (head_sha is None or commit_id == head_sha)
+    } - {"", author_l}
+    admins = {login for login in sorted(reviewers) if is_admin(login)}
+    if not admins:
+        return False, NO_ADMIN_APPROVAL, []
+    return evaluate_approval(author, reviews, admins, head_sha)
+
+
 def judge_by_rules(
-    author: str, reviews: list[dict], rules: ParsedApprovers, head_sha: str | None
+    author: str,
+    reviews: list[dict],
+    rules: ParsedApprovers,
+    head_sha: str | None,
+    is_admin: Callable[[str], bool],
 ) -> tuple[bool, str, list[dict]]:
     """작성자에게 정해진 승인자로 `evaluate_approval` 을 부른다.
 
-    파일에 내용이 없으면 "누구든" 이다. 내용은 있는데 이 작성자의 PR 을 승인할 사람이
-    (작성자 본인을 빼면) 없으면, "누구든" 으로 풀지 않고 미승인으로 답한다.
+    파일에 내용이 없으면 저장소 admin 만 승인자다(`is_admin` 으로 묻는다, #586). 내용은 있는데
+    이 작성자의 PR 을 승인할 사람이 (작성자 본인을 빼면) 없으면, admin 으로 풀지 않고 미승인으로 답한다.
     """
     if not rules.has_entries:
-        return evaluate_approval(author, reviews, set(), head_sha)
+        return judge_admin_only(author, reviews, head_sha, is_admin)
     eligible = approvers_for(rules, author)
     if not eligible:
         return False, NO_APPROVER_FOR_AUTHOR, []
@@ -427,7 +500,7 @@ def decide_pr(client: GhClient, repo: str, pr: int) -> dict:
     head_sha = (info.get("head") or {}).get("sha")
     if not head_sha:
         raise GhError(f"PR #{pr} 의 head 커밋을 응답에서 찾지 못했다")
-    approved, reason, stale = judge_by_rules(author, reviews, rules, head_sha)
+    approved, reason, stale = judge_by_rules(author, reviews, rules, head_sha, AdminChecker(client, repo))
     result = {"touches_ssot": True, "approved": approved, "reason": reason}
     if stale:
         result["stale_approvers"] = [e["login"] for e in stale]

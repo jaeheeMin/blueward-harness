@@ -96,7 +96,7 @@ plugins/harness/
 | `/harness:cts` | `docs/CTS관리대장/CTS관리대장_<종류>.md` 작업본(Configuration·CBO)에 사람이 알려 준 요청 건·Error 내역을 행으로 더하고, 버전을 올려 고객 양식 xlsx 로 산출한다. 이전 판 파일은 지우지 않는다. 트랜스포트에서 값을 자동으로 채우는 일은 하지 않는다(#563). 먼저 브랜치를 확인한다(#577) |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받는다. 지금 세션의 플러그인 버전이 main 보다 낮으면 `/reload-plugins`·Update now 를 안내한다(#203). 판정은 실제로 실린 판(`${CLAUDE_PLUGIN_ROOT}`)이 기준이고 이 폴더의 설치 항목 판은 `installed_version.py --loaded-root` 로 참고만 한다. 전체 표는 `/harness:version` 으로 안내한다 |
 | `/harness:prs` | 내 열린 PR 의 상태(초안·충돌·검사 실패·검사 중·승인 대기·병합 가능)와 병합 순서를 GitHub 에서 계산해 보여 주고 다음 할 일을 알려 준다. `--all` 이면 저장소 전체. 읽기만 한다(#370) |
-| `/harness:approvals` | 내 Approve 를 기다리는 남의 PR 을 병합 순서대로 한 표로 보여 준다(사유·다른 승인자·낡은 승인·앞 PR). 승인자 파일이 없으면 작성자 아닌 누구든 승인 가능으로 본다. 읽기만 하고 Approve 는 사람이 GitHub 에서 한다(#391) |
+| `/harness:approvals` | 내 Approve 를 기다리는 남의 PR 을 병합 순서대로 한 표로 보여 준다(사유·다른 승인자·낡은 승인·앞 PR). 승인자 파일이 없거나 비면 저장소 관리자(admin)만 승인 가능으로 본다. 읽기만 하고 Approve 는 사람이 GitHub 에서 한다(#391) |
 | `/harness:update` | 플러그인을 갱신하고 **이 세션에 실제로 실린 판**(`${CLAUDE_PLUGIN_ROOT}` 의 plugin.json)이 최신인지 확인한다. 같은 저장소의 worktree 마다 설치 항목이 따로 있으면 update 가 다른 worktree 항목을 갱신하고 세션도 그 판을 싣기도 해서 설치 항목은 참고로만 본다(#471). 갱신 뒤 `/reload-plugins` 를 입력하고 다시 부르게 안내하며, reload 뒤에도 최신이 아니면 "갱신 확인 불능" 으로 멈추고 새 세션을 안내한다. `install` 은 "not installed" 로 실패할 때만 하고 `uninstall` 은 하지도 안내하지도 않는다(공유 `.claude/settings.json` 의 `enabledPlugins` 를 묻지 않고 비운다). 사용자가 직접 부를 때만 실행한다(#404) |
 | `/harness:version` | 설치된 플러그인의 범위·**이 폴더 판**·**이 세션에 실린 판**·받아 둔 최신 판·상태(최신 / 갱신 있음 / 이 폴더에 설치 없음 / 최신 판 확인 불가)·다른 폴더 설치 수를 표로 보여 준다. harness 의 상태는 실린 판으로 정한다(#471). `hooks/installed_version.py --all --loaded-root "${CLAUDE_PLUGIN_ROOT}"`(`--remote` 는 harness 만 원격 태그, `--json`). 이 폴더에서 쓰이지 않는 플러그인 줄은 기본으로 빼고(harness 는 남김) `--all-entries` 로 모두 본다. 디스크에 없는 폴더의 항목은 "다른 폴더 설치" 에서 뺀다. 읽기만 하며 갱신은 `/harness:update` 로 안내한다. project·local 과 user 가 함께 있으면 project·local 쪽 판을 보인다(#461) |
 | `/harness:atc` | SAP ATC 지적을 돌려 자동·확인 후·수동으로 나눠 처리하고 재실행해 증감을 보고한다(`env/adt-tiers.yaml` 이 있는 Project Repository 에서만. variant 는 서버 항목의 `atc_variant`) |
@@ -474,7 +474,8 @@ jaeheeMin: CSH-DOT123 Blueward-Huiseong
 *: jaeheeMin
 ```
 
-파일이 비어 있으면(주석뿐이면) 작성자가 아닌 누구의 승인이든 인정한다. 내용이 있는데 어떤
+파일이 없거나 비어 있으면(주석뿐이면) 저장소 관리자(admin, 작성자 제외)만 승인자로 본다(#586.
+권한은 `collaborators/{login}/permission` 으로 읽고, 못 읽으면 검사 불능이다). 내용이 있는데 어떤
 작성자의 PR 을 승인할 사람이 없으면 그 작성자의 PR 은 미승인이다.
 
 승인은 PR 의 **현재 최신 커밋**에 대한 것일 때만 인정한다(#119). 승인한 뒤 새

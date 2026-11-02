@@ -146,7 +146,7 @@ def _dest_relative(src_relative: Path) -> Path:
 def _render(text: str, client: str, project: str, today: str, ssot_approvers: list[str]) -> str:
     # 승인자가 없으면 빈 문자열로 치환한다 — `.github/ssot-approvers` 는 그러면
     # 주석과 빈 줄만 남고, 그것을 `checker.ssot_approval.parse_approvers` 가
-    # "누구든 승인할 수 있다" 로 읽는다. 아이디를 한 줄씩 넣으면 옛 형식 줄이라
+    # "저장소 admin 만 승인자" 로 읽는다. 아이디를 한 줄씩 넣으면 옛 형식 줄이라
     # `*:` 줄과 같다(작성자별 줄은 사용자가 나중에 파일에 직접 적는다).
     approvers_block = "\n".join(ssot_approvers)
     return (
@@ -175,7 +175,7 @@ def scaffold(
 
     `dry_run` 이면 만들 목록만 셈하고 아무것도 쓰지 않는다. `ssot_approvers`
     는 `.github/ssot-approvers` 에 한 줄씩 적어 넣을 GitHub 아이디 목록이다
-    — 비워 두면(기본값) 그 파일은 누구든 승인할 수 있다는 뜻으로 남는다.
+    — 비워 두면(기본값) 그 파일은 저장소 관리자(admin)만 승인한다는 뜻으로 남는다.
     """
     today = date.today().isoformat()
     approvers = list(ssot_approvers or [])
@@ -253,8 +253,8 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         metavar="GITHUB_ID",
         help="docs/ssot(SRS) 변경 PR 을 승인할 수 있는 GitHub 아이디. 여러 번 줄 수 있다. "
-        "생략하면 .github/ssot-approvers 를 비워 두고, 그러면 작성자가 아닌 누구의 "
-        "승인이든 인정한다",
+        "생략하면 .github/ssot-approvers 를 비워 두고, 그러면 저장소 관리자(admin)만 "
+        "승인자로 본다",
     )
     args = parser.parse_args(argv)
 

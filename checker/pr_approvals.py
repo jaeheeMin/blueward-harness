@@ -8,8 +8,9 @@
 
 내 승인이 필요하다 = 상태가 승인 대기이고, 작성자가 내가 아니고, 승인자 설정이 나를 그 작성자의 승인자로
 정했고, 내 승인이 head 커밋 기준으로 없다(없거나 낡았다). 승인자 설정은 `ssot_approval.judge_by_rules` 와
-같이 읽는다: `.github/ssot-approvers` 가 없거나 비어 있으면 작성자가 아닌 누구든 승인할 수 있다(나도 승인자).
-내용이 있는데 내 이름이 어느 작성자 줄에도 없을 때만 "승인자가 아님" 이다. 승인 규칙·낡은 승인 판정은
+같이 읽는다: `.github/ssot-approvers` 가 없거나 비어 있으면 저장소 admin 만 승인할 수 있다(#586. 내가 admin 이면 승인자).
+내용이 있는데 내 이름이 어느 작성자 줄에도 없을 때, 또는 파일이 없는데 내가 admin 이 아닐 때 "승인자가 아님" 이다.
+권한을 읽지 못하면 "승인자가 아님" 이 아니라 확인 불능이다. 승인 규칙·낡은 승인 판정은
 `pr_queue._approval_state` 가 한다.
 
 결과 구분(원칙 7):
@@ -54,7 +55,7 @@ from checker.ssot_approval import GhClient, GhError, ParsedApprovers, approvers_
 
 NOT_APPROVER = "이 저장소에서 나는 승인자가 아님"
 NONE_WAITING = "승인 대기 상태인 PR 중에는 내 승인을 기다리는 PR 없음"
-ANYONE_NOTE = "승인자 파일이 없어 작성자 아닌 누구든 승인할 수 있다"
+ADMIN_ONLY_NOTE = "승인자 파일이 없거나 비어 저장소 관리자(admin)만 승인할 수 있다"
 SRS_REASON = "SRS 변경(docs/ssot)"
 ONLY_ME = "내 승인만 남음"
 # 아직 승인 대기까지 오지 못한 상태. 이 상태의 PR 도 내 승인이 필요할 수 있다.
@@ -86,12 +87,29 @@ def _read_rules(ctx: _Context, base: str) -> ParsedApprovers:
     return rules
 
 
-def _may_approve(rules: ParsedApprovers, login_l: str, author: str) -> bool:
-    """이 작성자의 PR 을 내가 승인할 수 있는가. 파일이 비면 작성자 아닌 누구든."""
+def _i_am_admin(ctx: _Context) -> bool:
+    """내가 이 저장소의 admin 인가. 본인 권한은 `viewerPermission` 으로 읽는다(한 번만).
+
+    collaborators API 는 호출자에게 push 권한이 없으면 403 일 수 있어 본인 판정에는 쓰지 않는다.
+    읽지 못하거나 값이 비면 GhError(검사 불능).
+    """
+    cached = getattr(ctx, "_me_admin", None)
+    if cached is None:
+        out = ctx.client.run(["repo", "view", ctx.repo, "--json", "viewerPermission", "--jq", ".viewerPermission"])
+        permission = (out or "").strip()
+        if not permission:
+            raise GhError("gh repo view 에서 내 저장소 권한(viewerPermission)을 읽지 못했다")
+        cached = permission.upper() == "ADMIN"
+        ctx._me_admin = cached
+    return cached
+
+
+def _may_approve(ctx: _Context, rules: ParsedApprovers, login_l: str, author: str) -> bool:
+    """이 작성자의 PR 을 내가 승인할 수 있는가. 파일이 없거나 비면 저장소 admin 만(#586, 못 읽으면 GhError)."""
     if author.lower() == login_l:
         return False
     if not rules.has_entries:
-        return True
+        return _i_am_admin(ctx)
     return login_l in approvers_for(rules, author)
 
 
@@ -137,8 +155,10 @@ def compute(client: GhClient, repo: str, login: str) -> dict:
     urls = {it["number"]: it.get("url") or "" for it in queue["prs"]}
 
     rules_by_base = {base: _read_rules(ctx, base) for base in _bases(loaded)}
-    anyone = any(not r.has_entries for r in rules_by_base.values())
-    is_approver = anyone or any(login_l in r.everyone() for r in rules_by_base.values())
+    admin_only = any(not r.has_entries for r in rules_by_base.values())
+    is_approver = any(login_l in r.everyone() for r in rules_by_base.values()) or (
+        admin_only and _i_am_admin(ctx)
+    )
     warnings = list(queue["warnings"])
     if queue["truncated"]:
         warnings.append(f"열린 PR 이 {pr_queue.PR_LIMIT}개 이상이라 일부만 읽었다. 목록이 완전하지 않다.")
@@ -147,7 +167,7 @@ def compute(client: GhClient, repo: str, login: str) -> dict:
         "repo": repo,
         "login": login,
         "approver": is_approver,
-        "anyone": anyone,
+        "admin_only": admin_only,
         "prs": [],
         "not_yet": [],
         "not_yet_unreadable": False,
@@ -161,7 +181,7 @@ def compute(client: GhClient, repo: str, login: str) -> dict:
     for it in queue["prs"]:
         author = it["author"]
         rules = rules_by_base.get(it["base"] or "main") or _read_rules(ctx, it["base"] or "main")
-        if not _may_approve(rules, login_l, author):
+        if not _may_approve(ctx, rules, login_l, author):
             continue  # 내 PR 이거나 내 몫이 아닌 작성자의 PR
         number = it["number"]
         raw = raws.get(number)
@@ -204,7 +224,7 @@ def compute(client: GhClient, repo: str, login: str) -> dict:
                 "after": it["after"],
                 "why": _why(ctx, raw),
                 "other_approvers": others,
-                "other_anyone": appr["anyone"],
+                "other_admin_only": appr["admin_only"],
                 "other_stale": [s for s in stale if s != login_l],
                 "my_stale": login_l in stale,
                 "only_me": not remaining,
@@ -229,10 +249,14 @@ def render(result: dict) -> str:
     lines: list[str] = []
     prs = result["prs"]
     if not result["approver"]:
-        lines.append(f"{repo}: {NOT_APPROVER}(.github/ssot-approvers 에 내용이 있는데 {result['login']} 가 없음)")
+        if result["admin_only"]:
+            why = f".github/ssot-approvers 가 없거나 비어 저장소 admin 만 승인자인데 {result['login']} 는 admin 이 아님"
+        else:
+            why = f".github/ssot-approvers 에 내용이 있는데 {result['login']} 가 없음"
+        lines.append(f"{repo}: {NOT_APPROVER}({why})")
     else:
-        if result["anyone"]:
-            lines.append(f"{repo}: {ANYONE_NOTE}.")
+        if result["admin_only"]:
+            lines.append(f"{repo}: {ADMIN_ONLY_NOTE}.")
         if not prs:
             lines.append(f"{repo}: {NONE_WAITING}")
         else:
@@ -244,8 +268,8 @@ def render(result: dict) -> str:
                 order = str(it["order"]) if it["order"] is not None else "?"
                 me = pr_link(repo, it["number"], it["url"])
                 others = ", ".join(it["other_approvers"])
-                if it["other_anyone"]:
-                    others = "누구든(작성자 제외)"
+                if it["other_admin_only"]:
+                    others = "저장소 관리자(admin, 작성자 제외)"
                 others = others or "없음(나만)"
                 left = ONLY_ME if it["only_me"] else "내 승인 외에 남음: " + " · ".join(it["remaining"])
                 if it["human_merge"]:

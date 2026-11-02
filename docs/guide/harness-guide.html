@@ -349,7 +349,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.150, public-cloud main 기준 (2026-11-02)</div>
+      <div class="note">harness 0.10.151, public-cloud main 기준 (2026-11-02)</div>
     </div>
   </nav>
 
@@ -1849,7 +1849,7 @@ Closes #143</pre>
   </table></div>
 
   <div class="callouts">
-    <div class="callout warn"><span class="k">승인자</span><div>승인자 명단에 작성자 말고 다른 사람이 없으면, 위험한 PR 을 승인으로 통과시킬 수 없어.</div></div>
+    <div class="callout warn"><span class="k">승인자</span><div>승인자 명단에 작성자 말고 다른 사람이 없으면, 위험한 PR 을 승인으로 통과시킬 수 없어. 명단 파일이 없거나 비어 있으면 저장소 관리자(admin)만 승인자로 봐(권한을 읽지 못하면 "검사 불능" 이야).</div></div>
     <div class="callout stop"><span class="k">지우지 마</span><div><code>rules/*.yaml</code> 을 다 지우면 모든 문서 검사가 설정 오류(검사 불능)로 실패해.</div></div>
     <div class="callout ok"><span class="k">AI(Artificial Intelligence) 리뷰</span><div>ai-review 는 기본으로 꺼져 있어. 켜려면 시크릿 등록과 <code>risk-gate.yaml</code> 의 <code>ai_review: true</code> 둘 다 필요해. 켜면 코드(<code>src/</code>)를 바꾼 PR 은 위험한 PR 도 AI 가 리뷰하고(문서·Spec 만 바꾼 PR 은 <code>ai_review_paths</code> 에 안 걸려 대기 없이 통과), 위험한 PR 은 승인자 Approve 도 따로 필요해. 리뷰는 코드 파일만 묶음으로 나눠 보고(문서는 대상 아님), 못 본 파일이 있으면 "일부만 봄" 으로 실패해서 통과로 보이지 않아. 다 봤는지는 AI 의 말이 아니라 워크플로가 직접 판정해. Claude 는 판을 고정해 설치하고 구독 토큰으로만 돌려(구독 토큰은 토큰을 만든 사람의 구독에 묶여 있어. 이전 방식과 같은 조건이야). 다만 새로 들어온 줄에 비밀값(키·토큰·비밀번호) 모양이 보이면 그 diff 를 외부 AI 에 보내지 않으려고 리뷰를 아예 돌리지 않고, "검사 불능 - 비밀값 의심" 으로 실패시켜서 승인자가 직접 확인하게 해. 값은 어디에도 남지 않고, 위치(파일:줄)는 risk-gate 사유처럼 job 로그에 남고, ai-review 코멘트에는 패턴 이름만 적혀. 변경이 너무 커서 비밀값 검사를 못 한 경우는 여기 해당 안 되고 리뷰는 그대로 돌아(그 파일 안의 비밀값은 AI 리뷰로 나갈 수 있어). 엔진이 옛 판이라 비밀값 확인 결과를 못 내면 그것도 검사 불능으로 실패해. 리뷰 결과는 github-actions 봇이 쓴 코멘트만 읽어.</div></div>
   </div>

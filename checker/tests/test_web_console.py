@@ -3259,6 +3259,25 @@ def test_approvals_tool_exposure_follows_approver_state(tmp_path, monkeypatch, t
         c.close()
 
 
+def test_approver_condition_when_no_file_is_admin_same_as_engine():
+    """#586: 승인자 파일이 없거나 비면 콘솔도 엔진(checker.ssot_approval)도 저장소 admin 만 승인자로 본다."""
+    from checker import ssot_approval
+
+    data, _ = flows.load()
+    cond = data["conditions"]["approver"]
+    assert cond["file"] == ".github/ssot-approvers" and cond["whenNoFile"] == "admin"
+    assert not hasattr(gitstate, "WHEN_NO_FILE_ANYONE")
+    # flows.json 검증: whenNoFile 은 "admin" 만 허용한다.
+    bad = json.loads(json.dumps(data))
+    bad["conditions"]["approver"]["whenNoFile"] = "anyone"
+    assert any("whenNoFile" in e for e in flows.validate(bad, set(REAL_SKILLS)))
+    # 엔진: 빈 파일이면 admin 의 승인만, 아니면 미승인.
+    rules = ssot_approval.parse_approvers("# 비어 있음\n")
+    review = [{"user": {"login": "me"}, "state": "APPROVED", "commit_id": "h", "submitted_at": "t"}]
+    assert ssot_approval.judge_by_rules("kim", review, rules, "h", lambda login: True)[0] is True
+    assert ssot_approval.judge_by_rules("kim", review, rules, "h", lambda login: False)[0] is False
+
+
 def approvals_run(prs, **over):
     table = {"gh_api_user": (0, "me\n"), "gh_repo_view": (0, "ADMIN\n"), "gh_pr_list": (0, json.dumps(prs))}
     table.update(over)

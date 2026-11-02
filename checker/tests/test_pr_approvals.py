@@ -33,14 +33,47 @@ def test_not_approver_when_login_not_listed():
     assert code == EXIT_OK and NOT_APPROVER in text and NONE_WAITING not in text
 
 
-def test_no_approvers_file_means_anyone_non_author_can_approve():
+def test_no_approvers_file_means_only_repo_admin_can_approve():
     prs = [waiting(1), waiting(2, author=ME)]
     comments = {n: [gate_comment(NEED_APPROVAL)] for n in (1, 2)}
     for approvers in (None, "# 주석뿐\n\n"):
-        code, text, _ = run(prs, approvers=approvers, comments=comments)
+        code, text, _ = run(prs, approvers=approvers, comments=comments, admins=[ME])
         assert code == EXIT_OK and NOT_APPROVER not in text
-        assert text.splitlines()[0].endswith("작성자 아닌 누구든 승인할 수 있다.")
-        assert "[#1]" in text and "[#2]" not in text and "누구든(작성자 제외)" in text
+        assert text.splitlines()[0].endswith("저장소 관리자(admin)만 승인할 수 있다.")
+        assert "[#1]" in text and "[#2]" not in text and "저장소 관리자(admin, 작성자 제외)" in text
+
+
+def test_no_approvers_file_and_i_am_not_admin_is_not_approver():
+    comments = {1: [gate_comment(NEED_APPROVAL)]}
+    for approvers in (None, "# 주석뿐\n"):
+        code, text, _ = run([waiting(1)], approvers=approvers, comments=comments, admins=["someone"])
+        assert code == EXIT_OK and NOT_APPROVER in text and "[#1]" not in text
+
+
+def test_no_approvers_file_and_permission_unreadable_is_cannot_check():
+    code, text, _ = run([waiting(1)], approvers=None, comments={1: [gate_comment(NEED_APPROVAL)]}, perm_fail="HTTP 403")
+    assert code == EXIT_CANNOT_CHECK and "승인 대기 PR 확인 불능" in text and NOT_APPROVER not in text
+
+
+def test_my_admin_permission_is_read_from_viewer_permission_not_collaborators_api():
+    comments = {1: [gate_comment(NEED_APPROVAL)]}
+    code, text, gh = run([waiting(1)], approvers=None, comments=comments, admins=[ME])
+    assert code == EXIT_OK and "[#1]" in text
+    flat = [" ".join(c) for c in gh.calls]
+    assert any("viewerPermission" in c for c in flat)
+    assert not any(f"/collaborators/{ME}/" in c for c in flat)
+
+
+def test_viewer_permission_empty_is_cannot_check():
+    class Empty(FakeGh):
+        def run(self, args):
+            if args[:2] == ["repo", "view"] and "viewerPermission" in args:
+                return "\n"
+            return super().run(args)
+
+    gh = Empty([waiting(1)], login=ME, approvers=None, comments={1: [gate_comment(NEED_APPROVAL)]})
+    code, text = pr_approvals.run(pr_approvals.build_parser().parse_args(["--repo", "o/r"]), gh)
+    assert code == EXIT_CANNOT_CHECK and NOT_APPROVER not in text
 
 
 def test_approvers_file_unreadable_is_cannot_check_not_non_approver():

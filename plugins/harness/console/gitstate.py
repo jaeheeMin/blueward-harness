@@ -90,7 +90,6 @@ FAILED_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "STARTUP_FAI
 PASSED_CONCLUSIONS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
 ADMIN_PERMISSION = "ADMIN"
 WHEN_NO_FILE_ADMIN = "admin"
-WHEN_NO_FILE_ANYONE = "anyone"
 
 
 def gh_runner() -> Runner:
@@ -273,8 +272,6 @@ def _approver_rules(run: Runner, cwd: str, rel_file: str, when_no_file: str) -> 
         yes = login in everyone
         return dict(base, state="yes" if yes else "no",
                     reason="" if yes else f"{rel_file} 의 승인자에 {login} 가 없습니다.")
-    if when_no_file == WHEN_NO_FILE_ANYONE:
-        return dict(base, state="yes", reason=f"{rel_file} 이 없거나 비어 작성자 아닌 누구든 승인할 수 있습니다.")
     rc, out = run(["gh", "repo", "view", "--json", "viewerPermission", "--jq", ".viewerPermission"], cwd)
     if rc != 0 or not out.strip():
         return dict(base, state="unknown", reason="gh 로 저장소 권한을 읽지 못했습니다(gh 로그인·네트워크 확인).")
