@@ -367,3 +367,32 @@ def socket_closed(sock: socket.socket) -> bool:
         return sock.recv(1, socket.MSG_PEEK) == b""
     except (OSError, ValueError):
         return True
+
+
+def opener_os() -> str:
+    if sys.platform.startswith("win"):
+        return "windows"
+    return "macos" if sys.platform == "darwin" else "linux"
+
+
+def open_path(path: str, mode: str, os_name: str | None = None, popen=subprocess.Popen, startfile=None) -> str:
+    """파일을 기본 앱으로 열거나(open) 탐색기·Finder 에서 위치를 보여 준다(reveal). 성공이면 "", 실패면 사유 문장.
+    셸을 거치지 않고 인자 목록(Windows 의 reveal 만 explorer 가 요구하는 /select,"경로" 한 줄)으로 부른다.
+    호출한 쪽이 path 가 작업 폴더 안의 존재하는 파일이고 열어도 되는 확장자인지 이미 검사해야 한다."""
+    name = os_name or opener_os()
+    if '"' in path or "\0" in path:
+        return "경로에 쓸 수 없는 문자가 들어 있습니다."
+    quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    try:
+        if name == "windows":
+            if mode == "reveal":
+                popen(f'explorer /select,"{path}"', **quiet)
+            else:
+                (startfile or os.startfile)(path)
+        elif name == "macos":
+            popen(["open", "-R", path] if mode == "reveal" else ["open", path], **quiet)
+        else:
+            popen(["xdg-open", os.path.dirname(path) if mode == "reveal" else path], **quiet)
+    except OSError as e:
+        return f"열지 못했습니다: {e}"
+    return ""

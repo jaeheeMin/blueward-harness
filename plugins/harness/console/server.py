@@ -1,4 +1,4 @@
-"""HTTP 서버, 라우팅, 인증, SSE(web-console.md §3, §4, §8)."""
+"""HTTP 서버, 라우팅, 인증, SSE, 갈래·인계(web-console.md §3, §4, §7a-7c, §8)."""
 from __future__ import annotations
 
 import json
@@ -12,19 +12,24 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import analysis
+import docfiles
+import flows
 import gitstate
+import handoff
 import platform_compat
 from hooks_api import Hooks, permission_reply, question_reply
 from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
                      PERMISSION_VALUES, Manager)
-from store import MAX_PENDING_STOP, Store, public_session, can_send
+from store import CHECK_SKIPPED, MAX_PENDING_STOP, START_CHECK_IDS, Store, mark_check, public_session, can_send
 
 APP_NAME = "harness-console"
 COOKIE = "harness_console"
@@ -36,12 +41,28 @@ HOOK_BODY_LIMIT = 32 << 20
 DRAIN_LIMIT = 1 << 20   # 오류 응답 전에 버려 읽는 본문의 상한
 DRAIN_SECONDS = 1.0     # 버려 읽는 데 쓰는 총 시간
 HEARTBEAT = 10.0
+CACHE_SECONDS = 60.0  # 승인자 판정과 승인 대기 PR 목록은 gh 를 자주 부르지 않게 이만큼 기억한다
+MAX_ADVANCE_ROUNDS = 4  # 갈래 진행 판정에서 증거를 읽고 다시 판정하는 최대 횟수(증거 종류가 둘뿐이라 넉넉하다)
+COND_YES, COND_NO, COND_UNKNOWN = "yes", "no", "unknown"
 HIDDEN_SKILLS = {"update", "scaffold", "open"}
 # 모델 이름 형식·에포트·권한 모드 허용 값은 managed.py 에 있다(띄울 때도 한 번 더 검사한다).
 # @ 파일 찾기 한도와 건너뛰는 큰 폴더
 FILE_RESULT_LIMIT = 50
 FILE_SCAN_LIMIT = 20000
 FILE_QUERY_MAX = 200
+# 플러그인 다시 불러오기·다음 갈래 넘기기의 기다림(초). 폴링 간격은 App.wait_poll 이다.
+RELOAD_QUEUE_WAIT = 600.0   # 턴이 끝나기를 기다렸다가 다시 불러온다
+RELOAD_ALL_WORKERS = 8
+HANDOFF_IDLE_WAIT = 600.0   # 인계를 보내기 전에 지금 턴이 끝나기를 기다리는 시간
+HANDOFF_WAIT = 600.0        # 인계 턴이 끝나기를 기다리는 시간(최대 10분)
+NEW_SESSION_ID_WAIT = 8.0   # 새 세션이 실제 id 를 얻을 때까지
+NEW_SESSION_INIT_WAIT = 60.0  # 새 세션이 init 이벤트를 낼 때까지(이 뒤에야 이전 세션을 닫는다)
+MAX_NEXT_PROMPT = 4000      # 새 세션 첫 메시지로 보낼 인계 프롬프트의 최대 글자 수
+MAX_JOBS = 50
+JOB_ACTIVE = ("handoff", "starting")
+WAIT_POLL = 0.2
+HANDOFF_GUIDE = ("터미널 세션에는 콘솔이 /harness:handoff 를 보낼 수 없습니다. 터미널에서 /harness:handoff 를 실행해 인계 프롬프트를 받고, "
+                 "콘솔의 새 작업으로 시작하십시오.")
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", ".vscode", "dist", "build", ".mypy_cache", ".pytest_cache"}
 # Windows 레지스트리의 MIME 설정에 영향받지 않게 직접 매핑한다(CSP 가 script 를 막는 일 방지).
 STATIC_TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".html": "text/html",
@@ -54,6 +75,13 @@ CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';
 class HttpError(Exception):
     def __init__(self, status: int, message: str):
         self.status, self.message = status, message
+
+
+class Raw:
+    """JSON 이 아닌 본문으로 답하는 API 의 반환값(이미지 원본)."""
+
+    def __init__(self, body: bytes, ctype: str, headers: dict | None = None):
+        self.body, self.ctype, self.headers = body, ctype, headers or {}
 
 
 def plugin_info(plugin_root: Path) -> tuple[str, str]:
@@ -92,7 +120,7 @@ class App:
                  browser_open=webbrowser.open, claude_cmd=None, git_inspect=gitstate.inspect,
                  model: str = "", poll: float = 0.5, question_wait: float = 300.0, sync_spawn: bool = False,
                  popen=subprocess.Popen, request_timeout: float = REQUEST_TIMEOUT, folder_picker=platform_compat.pick_folder,
-                 effort: str = ""):
+                 effort: str = "", flows_path=None, run=None, opener=None, wait_poll: float = WAIT_POLL):
         self.port = port
         self.default_model = model
         self.default_effort = effort if effort in EFFORT_VALUES else ""
@@ -104,6 +132,14 @@ class App:
         self.plugin_name, self.version = plugin_info(self.plugin_root)
         self.skill_info = load_skill_info(self.plugin_root)
         self.skills = [i["name"] for i in self.skill_info]
+        self.run = run or gitstate.gh_runner()  # gh·git 조회(갈래 진행·승인자 판정). 시험이 바꿔 끼운다
+        self.slow_run = run or (lambda args, cwd: gitstate.run_command(args, cwd, gitstate.SLOW_GIT_TIMEOUT, merge_stderr=True))
+        self.opener = opener or platform_compat.open_path  # 파일 열기·위치 보기. 시험이 바꿔 끼운다
+        self.wait_poll = wait_poll
+        self.jobs: dict[str, dict] = {}  # 다음 갈래 넘기기 작업(메모리에만 둔다)
+        self.reload_queue: set[str] = set()  # 턴이 끝나기를 기다리는 다시 불러오기
+        self.cache: dict = {}
+        self.flow_data, self.flow_error = self.load_flows(flows_path)
         self.browser_open = browser_open
         self.git_inspect = git_inspect
         self.sync_spawn = sync_spawn
@@ -111,7 +147,8 @@ class App:
         self.store = Store(state_dir, clock)
         claude_cmd = claude_cmd or platform_compat.find_claude
         self.manager = Manager(self.store, claude_cmd, str(self.plugin_root), model=model, popen=popen, effort=self.default_effort)
-        self.analyses = analysis.Analyses(claude_cmd, model=model, spawn=self.spawn, effort=self.default_effort)
+        self.analyses = analysis.Analyses(claude_cmd, model=model, spawn=self.spawn, effort=self.default_effort,
+                                          flows=self.flow_catalog())
         self.hooks = Hooks(self.store, clock, poll, question_wait, refresh_git=self.refresh_git)
         self.tokens: dict[str, float] = {}
         self.cookies: dict[str, float] = {}  # 쿠키 값 -> 만료 시각(서버 쪽에서도 COOKIE_MAX_AGE 를 지킨다)
@@ -181,9 +218,156 @@ class App:
                 s["turn"] = {"skill": info["skill"], "unknown": info["unknown"]}
                 if info["isRepo"]:
                     s["changedFiles"] = info["changedFiles"]
+            self.advance_flow(s, info)
             self.store.touch(s)
 
         self.spawn(work)
+
+    # ---- 갈래(flows.json) ----
+    def load_flows(self, path) -> tuple[dict | None, str]:
+        """데이터를 읽고 모든 스킬이 skills/ 에 있는지 본다. 틀리면 갈래 기능을 끄고 사유를 남긴다(콘솔 전체는 계속 뜬다)."""
+        data, error = flows.load(path or flows.DATA_FILE)
+        if data is not None:
+            names = {f.parent.name for f in (self.plugin_root / "skills").glob("*/SKILL.md")}
+            problems = flows.validate(data, names)
+            if problems:
+                data, error = None, "갈래 데이터가 맞지 않습니다: " + "; ".join(problems[:5])
+        if error:
+            print(error, file=sys.stderr)
+        return data, error
+
+    def flow_catalog(self) -> dict:
+        return {f["id"]: {"name": f.get("name", f["id"]), "description": f.get("description", "")}
+                for f in (self.flow_data or {}).get("flows", [])}
+
+    def require_flows(self) -> dict:
+        if self.flow_data is None:
+            raise HttpError(503, self.flow_error or "갈래 데이터를 쓸 수 없습니다.")
+        return self.flow_data
+
+    def runnable_skills(self) -> set[str]:
+        """버튼에 안 내는 스킬(scaffold, update)도 갈래·도구 데이터에 있으면 실행할 수 있다."""
+        extra = (flows.flow_skills(self.flow_data) | flows.tool_skills(self.flow_data)) if self.flow_data else set()
+        return set(self.skills) | extra
+
+    def cached(self, key, fn):
+        now = self.clock()
+        with self.lock:
+            hit = self.cache.get(key)
+        if hit and now - hit[0] < CACHE_SECONDS:
+            return hit[1]
+        value = fn()
+        if value.get("state") != COND_UNKNOWN:  # 못 읽은 결과는 기억하지 않는다
+            with self.lock:
+                self.cache[key] = (now, value)
+        return value
+
+    def cond_state(self, name: str, cwd: str) -> dict:
+        """조건 하나의 판정. {"state": yes/no/unknown, "reason", "label"}. 못 읽으면 unknown 이고 없음(no)으로 두지 않는다."""
+        spec = self.require_flows()["conditions"][name]
+        label = spec.get("label", name)
+        if spec["type"] == "file":
+            root, failed = gitstate.repo_root_checked(self.run, cwd)
+            if failed:  # git 을 실행하지 못했다 = 파일이 없다는 뜻이 아니다
+                return {"state": COND_UNKNOWN, "label": label, "reason": f"git 을 실행하지 못해 {spec['path']} 이 있는지 확인하지 못했습니다."}
+            root = root or cwd
+            found = os.path.isfile(os.path.join(root, *spec["path"].split("/")))
+            return {"state": COND_YES if found else COND_NO, "label": label, "reason": "" if found else f"{spec['path']} 이 없습니다."}
+        key = ("approver", os.path.normcase(os.path.realpath(cwd)))
+        got = self.cached(key, lambda: gitstate.approver_state(self.run, cwd, spec["file"], spec.get("whenNoFile", gitstate.WHEN_NO_FILE_ADMIN)))
+        return {"state": got["state"], "label": label, "reason": got["reason"]}
+
+    def cond_fn(self, cwd: str):
+        return lambda name: {COND_YES: True, COND_NO: False}.get(self.cond_state(name, cwd)["state"])
+
+    def cond_snapshot(self, cwd: str, state: dict | None = None, flow: dict | None = None):
+        """갈래 상태·정의가 쓰는 조건(onlyIf)을 지금 읽어 둔 값으로 답하는 함수. git·gh 는 여기서만 부르므로 store.lock 밖에서 만든다.
+        읽어 둔 적 없는 이름은 None(판정 불능)이다."""
+        steps = (state or {}).get("steps") or (flow or {}).get("steps") or []
+        values = {name: self.cond_fn(cwd)(name) for name in {st["onlyIf"] for st in steps if st.get("onlyIf")}}
+        return lambda name: values.get(name)
+
+    def advance_flow(self, s: dict, info: dict | None = None) -> None:
+        """갈래의 지금 단계가 끝났는지 git·gh 증거로 판정한다. gh 는 잠금 밖에서 부르고(느리다), 증거를 읽을 때마다 다시 판정한다."""
+        state = s.get("flowState")
+        if not state or state["finished"] or not s["cwd"] or self.flow_data is None:
+            return
+        cwd, memo = s["cwd"], {}
+        cond = self.cond_snapshot(cwd, state)
+        for _ in range(MAX_ADVANCE_ROUNDS):
+            missing: set[str] = set()
+
+            def fetch(kind):
+                if kind in memo:
+                    return memo[kind]
+                missing.add(kind)
+                return None
+
+            with self.store.lock:
+                flows.evaluate(state, fetch, cond, self.clock())
+            if not missing:
+                break
+            for kind in missing:
+                memo[kind] = self.read_evidence(s, kind, info)
+        if state["finished"] and state.get("next") is None:
+            flow = flows.flow_def(self.flow_data, state["id"])
+            state["next"] = flows.compute_next(self.flow_data, flow, gitstate.repo_root(self.run, cwd) or cwd) if flow else None
+
+    def read_evidence(self, s: dict, kind: str, info: dict | None) -> dict:
+        state = s["flowState"]
+        if kind == "changes":
+            got = info if info is not None else self.git_inspect(s["cwd"])
+            if not got["isRepo"]:
+                return {"state": "unknown", "reason": "git 저장소가 아니어서 변경을 확인하지 못했습니다."}
+            return {"state": "ok", "value": bool(got["changedFiles"] or got.get("ahead"))}
+        if kind == "branch":
+            got = info if info is not None else self.git_inspect(s["cwd"])
+            if not got["isRepo"]:
+                return {"state": "unknown", "reason": "git 저장소가 아니어서 브랜치를 확인하지 못했습니다."}
+            return {"state": "ok", "value": not got.get("onBase", False)}
+        branch = (info or {}).get("branch") or s["branch"]
+        return gitstate.pr_status(self.run, s["cwd"], branch, state.get("prNumber"))
+
+    def assign_flow(self, s: dict, fid, reason: str) -> None:
+        data = self.require_flows()
+        flow = flows.flow_def(data, fid)
+        if flow is None:
+            raise HttpError(400, "없는 갈래입니다.")
+        if flow.get("requires") and self.cond_fn(s["cwd"])(flow["requires"]) is False:
+            raise HttpError(409, f"이 폴더에서는 쓸 수 없는 갈래입니다: {data['conditions'][flow['requires']].get('label', flow['requires'])}")
+        cond = self.cond_snapshot(s["cwd"], flow=flow)  # git·gh 는 잠금 밖에서 읽는다
+        with self.store.lock:
+            s["flowState"] = flows.new_state(flow, reason, self.clock(), cond)
+            self.store.add_log(s, f"갈래 지정: {flow['name']}")
+        self.store.touch(s)
+        self.refresh_git(s["id"])
+
+    def check_flow_order(self, s: dict, skill: str) -> None:
+        """갈래가 있는 세션은 지금 단계의 스킬(과 도구)만 실행할 수 있다. 도구는 언제나 허용한다."""
+        if self.flow_data is not None and skill in flows.tool_skills(self.flow_data):
+            return
+        allowed = flows.allowed_skills(s)
+        if allowed is None or skill in allowed:
+            return
+        cur = flows.current(s.get("flowState"))
+        where = f"지금 단계는 '{cur['name']}' 입니다." if cur else "이 갈래는 이미 끝났습니다."
+        raise HttpError(409, f"갈래 순서에 맞지 않는 스킬입니다. {where} 단계를 건너뛰려면 이유를 적어 건너뛰기를 하십시오.")
+
+    def known_root(self, raw) -> str:
+        cwd = platform_compat.clean_user_path(raw) if isinstance(raw, str) else ""
+        root = os.path.realpath(os.path.expanduser(cwd)) if cwd else ""
+        if not root or not any(platform_compat.same_path(root, r) for r in self.known_roots()):
+            raise HttpError(403, "고른 작업 폴더가 아닙니다.")
+        return root
+
+    def available_flows(self, cwd: str) -> dict:
+        """이 폴더에서 쓸 수 있는 갈래(조건이 없음으로 판정된 것만 뺀다. 판정 불능이면 둔다)."""
+        data = self.flow_data
+        if data is None:
+            return {}
+        cond = self.cond_fn(cwd)
+        return {fid: f for fid, f in self.flow_catalog().items()
+                if not (flows.flow_def(data, fid).get("requires") and cond(flows.flow_def(data, fid)["requires"]) is False)}
 
     def model_of(self, s: dict) -> dict:
         """잠금 순서: manager.lock(잎) 은 store.lock 을 쥔 채 잡지 않는다. 그래서 살아 있는지부터 묻고 나서 store.lock 을 잡는다."""
@@ -235,8 +419,9 @@ class App:
     def a_run(self, g, q, b):
         s = self.get_session(g[0])
         skill = g[1]
-        if skill not in self.skills:
+        if skill not in self.runnable_skills():
             raise HttpError(404, "없는 스킬입니다.")
+        self.check_flow_order(s, skill)
         args = b.get("args") if isinstance(b.get("args"), str) else ""
         text = f"/{self.plugin_name}:{skill}" + (f" {args.strip()}" if args.strip() else "")
         return self.deliver(s, text, {"kind": "skill", "skill": skill, "args": args.strip()})
@@ -262,8 +447,9 @@ class App:
 
     def a_reserve(self, g, q, b):
         s = self.get_session(g[0])
-        if g[1] not in self.skills:
+        if g[1] not in self.runnable_skills():
             raise HttpError(404, "없는 스킬입니다.")
+        self.check_flow_order(s, g[1])
         with self.store.lock:
             ok, why = can_send(s, self.store)
             if not ok:
@@ -365,6 +551,447 @@ class App:
                      "defaultEffort": self.default_effort, "customPattern": MODEL_NAME.pattern,
                      "permissionOptions": [{"value": v, "label": label} for v, label in PERMISSION_OPTIONS]}
 
+    # 갈래
+    def flow_exposure(self, requires, cwd) -> dict:
+        if not requires:
+            return {"visible": True, "state": COND_YES, "reason": ""}
+        got = self.cond_state(requires, cwd)
+        return {"visible": got["state"] != COND_NO, "state": got["state"], "reason": got["reason"]}  # 판정 불능은 숨기지 않는다
+
+    def a_flows(self, g, q, b):
+        """갈래·단계·도구 데이터. cwd(아는 작업 폴더)를 주면 그 폴더·이 사용자 기준의 노출 여부(exposure)를 더한다."""
+        data = self.require_flows()
+        cwd = self.known_root(q["cwd"][0]) if q.get("cwd") else None
+        out_flows = []
+        for f in data["flows"]:
+            item = {k: f.get(k) for k in ("id", "name", "description", "requires", "next")}
+            item["steps"] = [dict(st, **({"exposure": self.flow_exposure(st["onlyIf"], cwd)} if cwd and st.get("onlyIf") else {}))
+                             for st in f["steps"]]
+            if cwd:
+                item["exposure"] = self.flow_exposure(f.get("requires"), cwd)
+            out_flows.append(item)
+        tools = [dict(t, **({"exposure": self.flow_exposure(t.get("requires"), cwd)} if cwd else {})) for t in data["tools"]]
+        result = {"version": data.get("version"), "flows": out_flows, "tools": tools, "evidence": data.get("evidence", {})}
+        if cwd:
+            result["conditions"] = {name: self.cond_state(name, cwd) for name in data["conditions"]}
+        return 200, result
+
+    def a_approvals(self, g, q, b):
+        """내 승인을 기다리는 열린 PR. gh 로 읽고 60초 기억한다. state: yes(승인자) / no(승인자 아님) / unknown(판정 불능)."""
+        if not q.get("cwd"):
+            raise HttpError(400, "cwd 가 필요합니다.")
+        cwd = self.known_root(q["cwd"][0])
+        spec = (self.flow_data or {}).get("conditions", {}).get("approver", {})
+        file_rel, when_no_file = spec.get("file", ".github/ssot-approvers"), spec.get("whenNoFile", gitstate.WHEN_NO_FILE_ADMIN)
+        got = self.cached(("approvals", os.path.normcase(cwd)), lambda: gitstate.approval_prs(self.run, cwd, file_rel, when_no_file))
+        return 200, got
+
+    def a_flow_set(self, g, q, b):
+        s = self.get_session(g[0])
+        if "flowId" not in b:
+            raise HttpError(400, "flowId 가 필요합니다(비우려면 null).")
+        if b["flowId"] is None:
+            with self.store.lock:
+                s["flowState"] = None
+                self.store.add_log(s, "갈래 해제")
+            self.store.touch(s)
+            return 200, self.model_of(s)
+        if not isinstance(b["flowId"], str):
+            raise HttpError(400, "flowId 가 문자열이 아닙니다.")
+        reason = b.get("reason") if isinstance(b.get("reason"), str) and b["reason"].strip() else "사용자가 고름"
+        self.assign_flow(s, b["flowId"], reason)
+        return 200, self.model_of(s)
+
+    def flow_session(self, g) -> dict:
+        s = self.get_session(g[0])
+        if not s.get("flowState"):
+            raise HttpError(409, "갈래가 지정되지 않은 세션입니다.")
+        return s
+
+    def a_flow_skip(self, g, q, b):
+        s = self.flow_session(g)
+        cond = self.cond_snapshot(s["cwd"], s["flowState"])  # git·gh 는 잠금 밖에서 읽는다
+        with self.store.lock:
+            cur = flows.current(s["flowState"])
+            name = cur["name"] if cur else ""
+            why = flows.skip(s, b.get("reason"), self.clock(), cond)
+            if why:
+                raise HttpError(400 if cur else 409, why)
+            self.store.add_log(s, f"단계 건너뜀: {name} - {b['reason'].strip()[:200]}")
+        self.advance_flow(s)
+        self.store.touch(s)
+        return 200, self.model_of(s)
+
+    def a_flow_done(self, g, q, b):
+        """사람이 '끝났다' 고 누른다. manual 이 든 단계만 되고, 같은 단계의 다른 근거(변경 등)가 안 맞으면 409."""
+        s = self.flow_session(g)
+        with self.store.lock:
+            cur = flows.current(s["flowState"])
+            name = cur["name"] if cur else ""
+            why = flows.confirm(s)
+            if why:
+                raise HttpError(409, why)
+        self.advance_flow(s)
+        if flows.current(s["flowState"]) is cur:
+            with self.store.lock:
+                cur["confirmed"] = False  # 다른 근거가 아직 안 맞으면 누른 것을 무르고 알린다
+            raise HttpError(409, " ".join(s["flowState"]["unknown"]) or "이 단계의 다른 완료 근거(변경 등)가 아직 맞지 않습니다.")
+        with self.store.lock:
+            self.store.add_log(s, f"단계 끝냄(사람 확인): {name}")
+        self.store.touch(s)
+        return 200, self.model_of(s)
+
+    def a_flow_refresh(self, g, q, b):
+        """병합처럼 세션 밖에서 일어난 일을 지금 다시 읽어 판정한다."""
+        s = self.flow_session(g)
+        self.advance_flow(s)
+        self.store.touch(s)
+        return 200, self.model_of(s)
+
+    # ---- 플러그인 다시 불러오기 ----
+    def busy(self, s: dict) -> bool:
+        with self.store.lock:
+            return bool(s["turn_running"] or s.get("starting"))
+
+    def wait_until(self, cond, timeout: float) -> bool:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if cond():
+                return True
+            time.sleep(self.wait_poll)
+        return cond()
+
+    def reload_body(self, got: dict) -> dict:
+        plugins = got["plugins"]
+        body = {"ok": True, "method": got["method"], "plugins": plugins, "errorCount": got["errorCount"],
+                "harnessVersion": next((p["version"] for p in plugins if p["name"] == self.plugin_name), "")}
+        if got.get("message"):
+            body["message"] = got["message"]
+        return body
+
+    def reload_session(self, s: dict) -> tuple[int, dict]:
+        """콘솔이 띄운 세션의 플러그인을 다시 불러온다. 턴 도중이면 끝나기를 기다렸다가 하고 바로 202 {queued:true} 로 답한다."""
+        sid = s["id"]
+        if self.busy(s):
+            with self.lock:
+                already = sid in self.reload_queue
+                self.reload_queue.add(sid)
+            if not already:
+                threading.Thread(target=self.queued_reload, args=(sid,), daemon=True).start()
+            return 202, {"queued": True}
+        got = self.manager.reload_plugins(sid)
+        if not got["ok"]:
+            raise HttpError(502, "플러그인을 다시 불러오지 못했습니다: " + got["error"])
+        return 200, self.reload_body(got)
+
+    def queued_reload(self, sid: str) -> None:
+        try:
+            s = self.store.get(sid)
+            if s is None or not self.wait_until(lambda: not self.busy(s), RELOAD_QUEUE_WAIT):
+                self.manager._warn(sid, "플러그인 다시 불러오기: 턴이 끝나지 않아 실행하지 못했습니다.")
+                return
+            got = self.manager.reload_plugins(sid)  # 성공하면 Manager 가 로그와 점검 표시를 남긴다
+            if not got["ok"]:
+                self.manager._warn(sid, "플러그인 다시 불러오기 실패: " + got["error"])
+        finally:
+            with self.lock:
+                self.reload_queue.discard(sid)
+
+    def console_session(self, sid: str) -> dict:
+        s = self.get_session(sid)
+        if not s["managed"]:
+            raise HttpError(409, "콘솔이 띄운 세션만 플러그인을 다시 불러올 수 있습니다. 터미널 세션은 터미널에서 /reload-plugins 를 실행하십시오.")
+        if not self.manager.alive(s["id"]):
+            raise HttpError(409, "끝난 세션입니다. 이어서 띄우면 최신 플러그인으로 시작합니다.")
+        return s
+
+    def a_reload(self, g, q, b):
+        return self.reload_session(self.console_session(g[0]))
+
+    def a_reload_all(self, g, q, b):
+        with self.store.lock:
+            targets = [s for s in self.store.sessions.values() if s["managed"]]
+        targets = [s for s in targets if self.manager.alive(s["id"])]
+
+        def one(s: dict) -> dict:
+            item = {"sessionId": s["id"], "title": s["title"]}
+            try:
+                _, data = self.reload_session(s)
+            except HttpError as e:
+                return dict(item, ok=False, error=e.message)
+            return dict(item, **data)
+
+        with ThreadPoolExecutor(max_workers=RELOAD_ALL_WORKERS) as pool:
+            return 200, {"results": list(pool.map(one, targets))}
+
+    def a_check_skip(self, g, q, b):
+        s = self.get_session(g[0])
+        if g[1] not in START_CHECK_IDS:
+            raise HttpError(404, "없는 점검 항목입니다.")
+        with self.store.lock:
+            mark_check(s, g[1], CHECK_SKIPPED)
+        self.store.touch(s)
+        return 200, self.model_of(s)
+
+    # ---- 만든 문서 보기 ----
+    def file_session_cwd(self, sid: str) -> tuple[dict, str]:
+        s = self.get_session(sid)
+        cwd = s["cwd"]
+        if not cwd or not os.path.isdir(cwd):
+            raise HttpError(409, "세션의 작업 폴더가 없습니다.")
+        return s, cwd
+
+    def file_target(self, sid: str, raw) -> tuple[str, str, str]:
+        _, cwd = self.file_session_cwd(sid)
+        try:
+            real, rel = docfiles.resolve(cwd, raw)
+        except docfiles.PathRefused as e:
+            raise HttpError(e.status, e.message)
+        return cwd, real, rel
+
+    def a_session_files(self, g, q, b):
+        s, cwd = self.file_session_cwd(g[0])
+        with self.store.lock:
+            hooked = list(s["changedFiles"])
+        paths, why = gitstate.status_paths(self.run, cwd)
+        out = {"files": docfiles.collect(cwd, hooked + paths)}
+        if why:  # git 을 못 읽었다 = 바뀐 문서가 없다는 뜻이 아니다. 훅이 모은 목록만으로 보여 주고 화면이 알리게 한다
+            out.update(unknown=True, reason=why)
+        return 200, out
+
+    def a_file_preview(self, g, q, b):
+        _, real, rel = self.file_target(g[0], q.get("path", [""])[0])
+        try:
+            return 200, docfiles.preview(real, rel, f"/api/sessions/{quote(g[0], safe='')}/files/raw?path={quote(rel, safe='/')}")
+        except docfiles.PreviewError as e:
+            raise HttpError(422, str(e))
+        except OSError as e:
+            raise HttpError(500, f"파일을 읽지 못했습니다: {type(e).__name__}")
+
+    def a_file_raw(self, g, q, b):
+        _, real, rel = self.file_target(g[0], q.get("path", [""])[0])
+        ext = docfiles.ext_of(real)
+        if docfiles.kind_of(real) != "image" or ext not in docfiles.IMAGE_MIME:
+            raise HttpError(403, "이미지 파일만 내려줍니다.")
+        try:
+            if os.path.getsize(real) > docfiles.MAX_RAW_BYTES:
+                raise HttpError(413, "이미지가 너무 큽니다.")
+            with open(real, "rb") as fh:
+                body = fh.read()
+        except OSError as e:
+            raise HttpError(500, f"파일을 읽지 못했습니다: {type(e).__name__}")
+        # SVG 안의 스크립트가 이 출처에서 돌지 못하게 한다
+        return 200, Raw(body, docfiles.IMAGE_MIME[ext], {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox"})
+
+    def a_file_open(self, g, q, b):
+        mode = b.get("mode")
+        if mode not in ("open", "reveal"):
+            raise HttpError(400, "mode 는 open 또는 reveal 이어야 합니다.")
+        _, real, rel = self.file_target(g[0], b.get("path"))
+        if mode == "open" and not {docfiles.ext_of(real), docfiles.ext_of(rel)} <= docfiles.OPEN_EXTS:
+            raise HttpError(403, "이 형식은 열 수 없습니다. 실행 파일이나 스크립트일 수 있어 위치 보기만 됩니다.")
+        error = self.opener(real, mode)
+        if error:
+            raise HttpError(502, error)
+        with self.store.lock:
+            self.store.add_log(self.get_session(g[0]), ("파일 열기: " if mode == "open" else "파일 위치 보기: ") + rel)
+        return 200, {"ok": True}
+
+    # ---- 작업용 폴더(worktree) ----
+    def a_worktree(self, g, q, b):
+        root = self.known_root(b.get("cwd"))
+        top = gitstate.repo_root(self.run, root)
+        if not top:
+            raise HttpError(400, "git 저장소가 아닌 폴더입니다.")
+        if not platform_compat.same_path(os.path.realpath(top), root):
+            raise HttpError(400, "저장소의 맨 위 폴더에서만 작업용 폴더를 만들 수 있습니다.")
+        for _ in range(5):
+            path = gitstate.worktree_path(root, uuid.uuid4().hex[:6])
+            if not os.path.exists(path):
+                break
+        else:
+            raise HttpError(502, "작업용 폴더 이름을 정하지 못했습니다.")
+        error = gitstate.add_worktree(self.run, self.slow_run, root, path)
+        if error:
+            raise HttpError(502, error)
+        self.store.add_folder(path)
+        return 200, {"path": path}
+
+    # ---- 다음 갈래로 넘어가기(자동 인계 + 새 세션) ----
+    def a_flow_next(self, g, q, b):
+        s = self.get_session(g[0])
+        fid = b.get("flowId")
+        if not isinstance(fid, str):
+            raise HttpError(400, "flowId 가 필요합니다.")
+        data = self.require_flows()
+        flow = flows.flow_def(data, fid)
+        if flow is None:
+            raise HttpError(400, "없는 갈래입니다.")
+        if not s["managed"]:
+            raise HttpError(409, HANDOFF_GUIDE)
+        if not s["cwd"] or not os.path.isdir(s["cwd"]):
+            raise HttpError(409, "세션의 작업 폴더가 없습니다.")
+        if flow.get("requires") and self.cond_fn(s["cwd"])(flow["requires"]) is False:
+            raise HttpError(409, f"이 폴더에서는 쓸 수 없는 갈래입니다: {data['conditions'][flow['requires']].get('label', flow['requires'])}")
+        with self.lock:
+            if any(j["fromSession"] == s["id"] and j["status"] in JOB_ACTIVE for j in self.jobs.values()):
+                raise HttpError(409, "이 세션은 이미 다음 갈래로 넘기는 중입니다.")
+            for j in self.jobs.values():  # 확인을 기다리다 잊힌 이전 요청은 새 요청이 대신한다
+                if j["fromSession"] == s["id"] and j["status"] == "confirm":
+                    j.update(status="canceled", prompt="")
+            job = {"id": uuid.uuid4().hex[:12], "kind": "flowNext", "status": "handoff", "fromSession": s["id"], "flowId": fid,
+                   "sessionId": None, "error": "", "warning": ""}
+            self.jobs[job["id"]] = job
+            for old in [j["id"] for j in self.jobs.values() if j["status"] not in JOB_ACTIVE + ("confirm",)][:-MAX_JOBS]:
+                self.jobs.pop(old, None)
+        threading.Thread(target=self.run_next, args=(job, s["id"], flow), daemon=True).start()
+        return 202, {"jobId": job["id"]}
+
+    def a_job(self, g, q, b):
+        with self.lock:
+            job = self.jobs.get(g[0])
+            if job is None:
+                raise HttpError(404, "없는 작업입니다.")
+            return 200, dict(job)
+
+    def next_failed(self, job: dict, sid: str, why: str) -> None:
+        job.update(status="failed", error=why)
+        s = self.store.get(sid)
+        if s is not None:
+            with self.store.lock:
+                self.store.add_log(s, "다음 갈래로 넘기기 실패: " + why)
+            self.store.touch(s)
+
+    def run_next(self, job: dict, sid: str, flow: dict) -> None:
+        """예외가 나도 job 을 failed 로 바꾸고 JOB_ACTIVE 에서 풀어 준다(그렇지 않으면 그 세션은 영영 '넘기는 중' 으로 남는다)."""
+        try:
+            self.run_handoff(job, sid, flow)
+        except Exception as e:  # noqa: BLE001 - 어떤 예외든 job 을 끝낸다
+            print(f"[console] 다음 갈래 인계 중 예외: {type(e).__name__}: {e}", file=sys.stderr)
+            self.next_failed(job, sid, f"예기치 못한 오류로 멈췄습니다({type(e).__name__}).")
+
+    def run_handoff(self, job: dict, sid: str, flow: dict) -> None:
+        """이 세션에 /harness:handoff 를 보내 끝나기를 기다리고 마지막 코드 블록을 뽑아, 사람이 확인할 수 있게 job 을 confirm 으로 둔다.
+        인계를 못 받으면 사유와 함께 멈춘다. 새 세션은 사람이 확인(confirm)해야 띄운다."""
+        s = self.store.get(sid)
+        if s is None or not self.wait_until(lambda: not self.busy(s), HANDOFF_IDLE_WAIT):
+            return self.next_failed(job, sid, "진행 중인 턴이 끝나지 않아 인계를 보내지 못했습니다.")
+        marker = self.manager.result_marker(sid)
+        try:
+            self.deliver(s, f"/{self.plugin_name}:{handoff.HANDOFF_SKILL}", {"kind": "skill", "skill": handoff.HANDOFF_SKILL, "args": ""})
+        except HttpError as e:
+            return self.next_failed(job, sid, "인계를 보내지 못했습니다: " + e.message)
+        result = [False, "", False, ""]
+
+        def finished() -> bool:
+            result[:] = self.manager.result_after(sid, marker)
+            return result[0] or bool(result[3])
+
+        if not self.wait_until(finished, HANDOFF_WAIT):
+            return self.next_failed(job, sid, "인계가 10분 안에 끝나지 않아 새 세션을 띄우지 않았습니다.")
+        done, text, is_error, why = result
+        if not done:
+            return self.next_failed(job, sid, "인계 도중 " + why)
+        if is_error:
+            return self.next_failed(job, sid, "인계가 오류로 끝났습니다: " + text.strip()[:200])
+        prompt = handoff.last_code_block(text)
+        if not prompt:
+            return self.next_failed(job, sid, "인계 결과에서 새 세션용 프롬프트(마지막 코드 블록)를 찾지 못해 새 세션을 띄우지 않았습니다.")
+        if len(prompt) > MAX_NEXT_PROMPT:
+            return self.next_failed(job, sid, f"인계 프롬프트가 너무 깁니다({len(prompt)}자, 최대 {MAX_NEXT_PROMPT}자). 새 세션을 띄우지 않았습니다.")
+        with self.lock:
+            job.update(status="confirm", prompt=prompt)  # 사람이 보고 [이대로 시작] [고쳐서 시작] [취소] 를 고른다
+
+    def a_job_confirm(self, g, q, b):
+        """확인 대기 중인 job 의 새 세션을 띄운다. 본문의 prompt(고친 글)를 쓰고, 없으면 인계가 만든 글을 그대로 쓴다."""
+        with self.lock:
+            job = self.jobs.get(g[0])
+            if job is None:
+                raise HttpError(404, "없는 작업입니다.")
+            if job["status"] != "confirm":
+                raise HttpError(409, "확인을 기다리는 작업이 아닙니다.")
+            prompt = b.get("prompt", job.get("prompt"))
+            if not isinstance(prompt, str) or not prompt.strip():
+                raise HttpError(400, "새 세션에 보낼 글이 비어 있습니다.")
+            if len(prompt) > MAX_NEXT_PROMPT:
+                raise HttpError(400, f"글이 너무 깁니다(최대 {MAX_NEXT_PROMPT}자).")
+            job["status"] = "starting"  # 두 번 눌러도 새 세션이 둘 뜨지 않게 이 잠금 안에서 바꾼다
+            flow = flows.flow_def(self.flow_data or {}, job["flowId"])
+        if flow is None:
+            self.next_failed(job, job["fromSession"], "갈래 데이터가 바뀌어 새 세션을 띄우지 못했습니다.")
+            raise HttpError(409, job["error"])
+        threading.Thread(target=self.start_next, args=(job, flow, prompt), daemon=True).start()
+        return 202, {"jobId": job["id"]}
+
+    def a_job_cancel(self, g, q, b):
+        with self.lock:
+            job = self.jobs.get(g[0])
+            if job is None:
+                raise HttpError(404, "없는 작업입니다.")
+            if job["status"] != "confirm":
+                raise HttpError(409, "확인을 기다리는 작업이 아닙니다.")
+            job.update(status="canceled", prompt="")
+        s = self.store.get(job["fromSession"])
+        if s is not None:
+            with self.store.lock:
+                self.store.add_log(s, "다음 갈래로 넘기기 취소")
+            self.store.touch(s)
+        return 200, dict(job)
+
+    def start_next(self, job: dict, flow: dict, prompt: str) -> None:
+        try:
+            self.launch_next(job, flow, prompt)
+        except Exception as e:  # noqa: BLE001
+            print(f"[console] 새 세션 시작 중 예외: {type(e).__name__}: {e}", file=sys.stderr)
+            self.next_failed(job, job["fromSession"], f"예기치 못한 오류로 멈췄습니다({type(e).__name__}).")
+
+    def launch_next(self, job: dict, flow: dict, prompt: str) -> None:
+        """같은 폴더에서 새 콘솔 세션을 그 갈래로 띄운다. 이전 세션은 새 세션이 시작 신호(init)를 낸 것을 확인한 뒤에만 닫는다."""
+        s = self.store.get(job["fromSession"])
+        if s is None:
+            return self.next_failed(job, job["fromSession"], "이전 세션이 없어졌습니다.")
+        with self.store.lock:
+            choices = {k: s.get(k) if isinstance(s.get(k), str) else None for k in ("modelChoice", "effortChoice", "permissionChoice")}
+        if choices["permissionChoice"] not in PERMISSION_VALUES:  # 허용 집합(""·acceptEdits·plan) 밖의 모드는 승계하지 않는다
+            choices["permissionChoice"] = None
+        message = handoff.new_session_message(prompt, flow, self.plugin_name)
+        new = self.manager.launch(s["cwd"], message, title=f"{flow.get('name', flow['id'])} (이어서)", model=choices["modelChoice"],
+                                  effort=choices["effortChoice"], permission=choices["permissionChoice"])
+        if new is None:
+            return self.next_failed(job, s["id"], "새 claude 세션을 띄우지 못했습니다. " + platform_compat.CLAUDE_MISSING)
+        end = time.monotonic() + NEW_SESSION_ID_WAIT
+        while time.monotonic() < end and self.store.resolve_id(new) == new and new.startswith("m-"):
+            time.sleep(0.05)
+        real = self.store.resolve_id(new)
+        started = self.wait_until(lambda: self.new_session_started(real), NEW_SESSION_INIT_WAIT)
+        if not started:
+            job["sessionId"] = real
+            return self.next_failed(job, s["id"], "새 세션이 시작 신호를 보내지 않아 이전 세션을 닫지 않았습니다. 새 세션 상태를 확인해 주세요.")
+        try:
+            self.assign_flow(self.get_session(real), flow["id"], "이전 세션에서 이어서 시작")
+        except HttpError as e:
+            job["warning"] = "새 세션은 떴지만 갈래를 지정하지 못했습니다: " + e.message
+        self.mark_handed_off(s, real)
+        with self.lock:
+            job.update(status="started", sessionId=real)
+        proc = self.manager.proc_for(s["id"])  # 새 세션이 떴으니 이전 세션은 정상 종료(stdin 닫기)한다
+        if proc is not None and proc.alive():
+            self.manager.close(proc)
+
+    def new_session_started(self, sid: str) -> bool:
+        """새 세션 프로세스가 init 이벤트를 냈는가(managed 의 init 처리가 starting 을 내린다)."""
+        with self.store.lock:
+            n = self.store.get(sid)
+            return bool(n is not None and n.get("managed") and not n.get("starting"))
+
+    def mark_handed_off(self, old: dict, new_id: str) -> None:
+        """이전 세션에 넘어간 곳을 적는다. 같은 폴더 경고(sameFolder)에서는 넘어간 세션이 빠진다."""
+        with self.store.lock:
+            old["handedOffTo"] = new_id
+            self.store.add_log(old, "다음 세션으로 넘어감")
+        self.store.touch(old)
+        self.store.publish("session", {"id": new_id})  # 새 세션 화면이 sameFolder 를 다시 받는다
+
     def a_skills(self, g, q, b):
         return 200, {"plugin": self.plugin_name, "skills": self.skill_info}
 
@@ -433,7 +1060,7 @@ class App:
         if not folder["ok"]:
             raise HttpError(400, folder["error"])
         self.store.add_folder(folder["path"])
-        return 202, {"id": self.analyses.start(text.strip(), folder["path"], model, effort)}
+        return 202, {"id": self.analyses.start(text.strip(), folder["path"], model, effort, self.available_flows(folder["path"]))}
 
     def get_job(self, jid):
         job = self.analyses.get(jid)
@@ -445,7 +1072,19 @@ class App:
         j = self.get_job(g[0])
         return 200, {k: j[k] for k in ("id", "status", "text", "cwd", "result", "error")}
 
-    def preview_text(self, job, picked, extra, note) -> str:
+    def chosen_flow(self, job, b: dict) -> tuple[str | None, str]:
+        """시작 때 쓸 갈래와 이유. 요청이 고른 갈래가 먼저고, 없으면 분석이 확신한 분류를 쓴다."""
+        fid = b.get("flow")
+        found = (job.get("result") or {}).get("flow") or {}
+        if fid is not None:
+            if not isinstance(fid, str) or flows.flow_def(self.require_flows(), fid) is None:
+                raise HttpError(400, "없는 갈래입니다.")
+            return fid, str(b.get("flowReason") or (found.get("reason") if found.get("id") == fid else "") or "사용자가 고름")[:flows.MAX_REASON]
+        if found and found.get("confident"):
+            return found["id"], found.get("reason", "")
+        return None, ""
+
+    def preview_text(self, job, picked, extra, note, flow_id=None) -> str:
         if not isinstance(picked, list) or not all(isinstance(p, str) for p in picked):
             raise HttpError(400, "picked 형식이 맞지 않습니다.")
         clean = []
@@ -458,7 +1097,12 @@ class App:
         if not isinstance(extra, dict):
             extra = {}
         is_git = self.git_inspect(job["cwd"])["isRepo"]
-        return analysis.first_message(job["text"], picked, extra, note if isinstance(note, str) else "", is_git)
+        first = None
+        if flow_id and self.flow_data is not None:
+            flow = flows.flow_def(self.flow_data, flow_id)
+            step = flow["steps"][0] if flow else None
+            first = step["skill"] if step and step["kind"] == "skill" else None
+        return analysis.first_message(job["text"], picked, extra, note if isinstance(note, str) else "", is_git, first)
 
     def a_preview(self, g, q, b):
         job = self.get_job(g[0])
@@ -466,7 +1110,10 @@ class App:
             extra = json.loads(q.get("extraAnswers", ["{}"])[0])
         except ValueError:
             raise HttpError(400, "extraAnswers 가 JSON 이 아닙니다.")
-        return 200, {"message": self.preview_text(job, q.get("picked", []), extra, q.get("note", [""])[0])}
+        flow_id = q.get("flow", [""])[0] or None
+        if flow_id and (self.flow_data is None or flows.flow_def(self.flow_data, flow_id) is None):
+            raise HttpError(400, "없는 갈래입니다.")
+        return 200, {"message": self.preview_text(job, q.get("picked", []), extra, q.get("note", [""])[0], flow_id)}
 
     def a_start(self, g, q, b):
         job = self.get_job(g[0])
@@ -477,7 +1124,8 @@ class App:
         if effort is None:
             effort = job.get("effort")
         permission = self.requested_permission(b)
-        message = self.preview_text(job, b.get("picked") or [], b.get("extraAnswers") or {}, b.get("note") or "")
+        flow_id, flow_reason = self.chosen_flow(job, b)
+        message = self.preview_text(job, b.get("picked") or [], b.get("extraAnswers") or {}, b.get("note") or "", flow_id)
         with job["start_lock"]:  # 시작 버튼을 두 번 눌러도 세션은 하나만 뜬다
             sid = job.get("session_id")
             if sid is None:
@@ -489,8 +1137,11 @@ class App:
         while time.monotonic() < deadline and self.store.resolve_id(sid) == sid and sid.startswith("m-"):
             time.sleep(0.05)
         real = self.store.resolve_id(sid)
-        self.refresh_git(real)
-        return 202, {"id": real}
+        if flow_id:
+            self.assign_flow(self.get_session(real), flow_id, flow_reason)  # 안에서 refresh_git 도 한다
+        else:
+            self.refresh_git(real)
+        return 202, {"id": real, "flowId": flow_id}
 
     # 폴더
     def folder_info(self, path) -> dict:
@@ -568,6 +1219,24 @@ ROUTES = [
     ("DELETE", re.compile(rf"/api/sessions/{S}/skills/{S}/reservation"), App.a_unreserve),
     ("POST", re.compile(rf"/api/sessions/{S}/interrupt"), App.a_interrupt),
     ("PUT", re.compile(rf"/api/sessions/{S}/permission"), App.a_permission),
+    ("PUT", re.compile(rf"/api/sessions/{S}/flow"), App.a_flow_set),
+    ("POST", re.compile(rf"/api/sessions/{S}/flow/skip"), App.a_flow_skip),
+    ("POST", re.compile(rf"/api/sessions/{S}/flow/done"), App.a_flow_done),
+    ("POST", re.compile(rf"/api/sessions/{S}/flow/refresh"), App.a_flow_refresh),
+    ("POST", re.compile(rf"/api/sessions/{S}/flow/next"), App.a_flow_next),
+    ("POST", re.compile(r"/api/jobs/([^/]+)/confirm"), App.a_job_confirm),
+    ("POST", re.compile(r"/api/jobs/([^/]+)/cancel"), App.a_job_cancel),
+    ("GET", re.compile(rf"/api/jobs/{S}"), App.a_job),
+    ("POST", re.compile(rf"/api/sessions/{S}/reload"), App.a_reload),
+    ("POST", re.compile(r"/api/reload-all"), App.a_reload_all),
+    ("POST", re.compile(rf"/api/sessions/{S}/checks/{S}/skip"), App.a_check_skip),
+    ("GET", re.compile(rf"/api/sessions/{S}/files"), App.a_session_files),
+    ("GET", re.compile(rf"/api/sessions/{S}/files/preview"), App.a_file_preview),
+    ("GET", re.compile(rf"/api/sessions/{S}/files/raw"), App.a_file_raw),
+    ("POST", re.compile(rf"/api/sessions/{S}/files/open"), App.a_file_open),
+    ("POST", re.compile(r"/api/folders/worktree"), App.a_worktree),
+    ("GET", re.compile(r"/api/flows"), App.a_flows),
+    ("GET", re.compile(r"/api/approvals"), App.a_approvals),
     ("GET", re.compile(rf"/api/requests/{S}"), App.a_request),
     ("POST", re.compile(rf"/api/requests/{S}/answer"), App.a_answer),
     ("POST", re.compile(r"/api/new"), App.a_new),
@@ -736,6 +1405,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.events()
             body = self.read_json(API_BODY_LIMIT) if method != "GET" else {}
             status, data = app.api(method, path, query, body)
+            if isinstance(data, Raw):
+                return self.send(status, data.body, data.ctype, data.headers)
             return self.send_json(status, data)
 
         if method != "GET":

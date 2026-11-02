@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+import flows
 import platform_compat
 
 LOG_LIMIT = 200
@@ -27,6 +28,9 @@ SUBSCRIBER_MAXSIZE = 1000
 TERMINAL_IDLE_SECONDS = 600.0  # 터미널 세션은 이만큼 신호가 없으면 쉬는 상태로 본다(Esc 로 끊으면 Stop 이 오지 않는다)
 REPLACE_RETRIES = 5
 REPLACE_RETRY_DELAY = 0.05
+# 새 세션 점검 항목(sync, version, update, reload). 상태: pending(대기) / done(했음) / skipped(건너뜀)
+START_CHECK_IDS = ("sync", "version", "update", "reload")
+CHECK_PENDING, CHECK_DONE, CHECK_SKIPPED = "pending", "done", "skipped"
 
 # 제목 우선순위: SessionStart 의 session_title > 첫 요청 글 > 폴더 이름
 TITLE_FOLDER, TITLE_PROMPT, TITLE_SESSION = 1, 2, 3
@@ -250,7 +254,7 @@ class Store:
                     "permissionMode": "", "model": "", "currentSkill": "", "currentAction": "", "startedAt": now, "updatedAt": now,
                     "log": [], "report": "", "changedFiles": [], "prLinks": [], "subagents": [], "skillStates": {},
                     "pending_stop": [], "turn_running": False, "ended": False, "managed_alive": False,
-                    "turn": {"skill": None, "unknown": False},
+                    "turn": {"skill": None, "unknown": False}, "flowState": None,
                 }
                 self.sessions[sid] = s
                 if cwd:
@@ -323,6 +327,13 @@ class Store:
         self.publish("removed", {"kind": "session", "id": old})
         self.publish("session", {"id": new})
         return target
+
+    def touch_peers(self, s: dict) -> None:
+        """같은 폴더의 다른 세션 화면이 sameFolder 를 다시 받게 알린다(저장하지는 않는다)."""
+        with self.lock:
+            ids = same_folder_ids(self, s)
+        for sid in ids:
+            self.publish("session", {"id": sid})
 
     # ---- 폴더 ----
     def add_folder(self, path: str) -> None:
@@ -399,6 +410,29 @@ class Store:
             return self.requests.get(rid)
 
 
+def new_start_checks() -> list[dict]:
+    return [{"id": cid, "state": CHECK_PENDING} for cid in START_CHECK_IDS]
+
+
+def mark_check(s: dict, cid: str, state: str = CHECK_DONE) -> bool:
+    """새 세션 점검 한 항목을 대기에서 바꾼다. 이미 했거나 건너뛴 항목, 없는 항목은 그대로 둔다. 바뀌었으면 True."""
+    for item in s.get("startChecks") or []:
+        if item["id"] == cid and item["state"] == CHECK_PENDING:
+            item["state"] = state
+            return True
+    return False
+
+
+def same_folder_ids(store: "Store", s: dict) -> list[str]:
+    """같은 폴더(정규화해 비교)에서 살아 있는 다른 세션 id. 끝난 세션과 프로세스가 죽은 콘솔 세션은 뺀다."""
+    if not s["cwd"] or s.get("handedOffTo"):  # 넘어간 세션 자신도 경고를 받지 않는다
+        return []
+    with store.lock:
+        return [o["id"] for o in store.sessions.values()
+                if o is not s and o["cwd"] and not o["ended"] and not o.get("handedOffTo") and (o.get("managed_alive") or not o["managed"])
+                and platform_compat.same_path(o["cwd"], s["cwd"])]
+
+
 CANNOT_SEND_IDLE = "쉬는 터미널 세션에는 바깥에서 새 턴을 시작할 수 없습니다. 터미널에서 직접 이어 가십시오."
 CANNOT_SEND_ENDED = "끝난 터미널 세션입니다."
 
@@ -456,7 +490,7 @@ def public_session(store: Store, s: dict, skills: list[str]) -> dict:
             group = "running"
         else:
             group = "idle"
-        return {
+        return dict(flows.public_fields(s), **{
             "id": s["id"], "title": s["title"], "cwd": s["cwd"], "repo": s["repo"], "branch": s["branch"],
             "managed": s["managed"], "status": status, "group": group, "permissionMode": s["permissionMode"],
             "model": s.get("model", ""), "modelChoice": s.get("modelChoice", ""),
@@ -467,4 +501,7 @@ def public_session(store: Store, s: dict, skills: list[str]) -> dict:
             "flow": flow, "turnSkill": turn_skill, "turnUnknown": bool(s["turn"].get("unknown")),
             "pendingRequestIds": pending, "canSend": ok, "cannotSendReason": why,
             "bypassPermissions": s["permissionMode"] == "bypassPermissions",
-        }
+            "pluginVersions": [dict(p) for p in s.get("pluginVersions") or []],
+            "sameFolder": same_folder_ids(store, s), "handedOffTo": s.get("handedOffTo") or None,
+            "startChecks": [dict(c) for c in s.get("startChecks") or []],
+        })

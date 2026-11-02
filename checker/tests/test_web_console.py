@@ -27,6 +27,7 @@ FAKE = Path(__file__).with_name("fake_claude.py")
 sys.path.insert(0, str(CONSOLE))
 
 import analysis  # noqa: E402
+import flows  # noqa: E402
 import gitstate  # noqa: E402
 import hook_post  # noqa: E402
 import session_start_hook  # noqa: E402
@@ -59,11 +60,11 @@ def wait_for(cond, timeout=10.0, step=0.02):
 class Console:
     """임시 포트로 뜬 서버와 호출 도우미."""
 
-    def __init__(self, tmp_path, monkeypatch, claude_cmd=None, git_inspect=None):
+    def __init__(self, tmp_path, monkeypatch, claude_cmd=None, git_inspect=None, skills=None, flows_path=None, run=None, app_kw=None):
         plugin = tmp_path / "plugin"
         (plugin / ".claude-plugin").mkdir(parents=True)
         (plugin / ".claude-plugin" / "plugin.json").write_text('{"name":"harness","version":"9.9.9"}', encoding="utf-8")
-        for name in ("start", "deliver", "prs", "update", "scaffold", "open"):
+        for name in skills or ("start", "deliver", "prs", "update", "scaffold", "open"):
             d = plugin / "skills" / name
             d.mkdir(parents=True)
             (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: x\n---\n", encoding="utf-8")
@@ -75,7 +76,8 @@ class Console:
         inspect = git_inspect or (lambda cwd: {"isRepo": False, "repo": "", "branch": "", "changedFiles": [], "skill": None, "unknown": False})
         self.app = console_server.App(0, self.state, plugin, clock=self.clock, browser_open=lambda u: self.opened.append(u) or True,
                                       claude_cmd=claude_cmd or (lambda: None), git_inspect=inspect, poll=0.02,
-                                      question_wait=300.0, sync_spawn=True)
+                                      question_wait=300.0, sync_spawn=True, run=run or (lambda args, cwd: (127, "")),
+                                      flows_path=flows_path or tmp_path / "no-flows.json", **(app_kw or {}))
         self.server = console_server.make_server(self.app, 0)
         self.port = self.server.server_address[1]
         self.app.set_port(self.port)
@@ -88,7 +90,7 @@ class Console:
         self.app.shutdown()
         self.server.server_close()
 
-    def call(self, method, path, body=None, headers=None, host=None, raw=None, cookie=True, json_type=True):
+    def call(self, method, path, body=None, headers=None, host=None, raw=None, cookie=True, json_type=True, binary=False):
         h = {"Host": host if host is not None else f"127.0.0.1:{self.port}"}
         if cookie and self.cookie:
             h["Cookie"] = f"harness_console={self.cookie}"
@@ -105,8 +107,11 @@ class Console:
         conn.putheader("Content-Length", str(len(data or b"")))
         conn.endheaders(data or b"")
         resp = conn.getresponse()
-        text = resp.read().decode("utf-8")
+        data_back = resp.read()
         conn.close()
+        if binary:
+            return resp.status, data_back, resp
+        text = data_back.decode("utf-8")
         try:
             parsed = json.loads(text) if text else None
         except ValueError:
@@ -923,6 +928,9 @@ def test_parse_line_and_stream_messages():
 class FakeProc:
     session_id = "s1"
     temp_id = "s1"
+    results = 0
+    last_result = ""
+    last_error = False
 
     def __init__(self):
         self.written = []
@@ -1376,6 +1384,46 @@ def test_open_main_end_to_end_prints_one_line_without_token(console, monkeypatch
     out = capsys.readouterr().out
     assert len(out.strip().splitlines()) == 1
     assert console.opened[-1].split("t=")[1] not in out
+
+
+def test_stop_waits_until_port_is_released_and_start_retries_while_in_use(tmp_path, monkeypatch):
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]  # 응답은 하지 않지만 포트는 잡고 있다(막 끈 서버가 소켓을 늦게 놓는 상황)
+    assert console_open.probe(port) == "free" and not console_open.port_bindable(port)
+    timer = threading.Timer(0.5, sock.close)
+    timer.start()
+    started = time.monotonic()
+    assert console_open.wait_port_released(port, 10) is True
+    assert 0.3 < time.monotonic() - started < 5
+    timer.join()
+    assert console_open.port_bindable(port)
+    # 끝내 안 풀리면 시간이 다 된 뒤 False
+    hold = socket.socket()
+    hold.bind(("127.0.0.1", 0))
+    try:
+        assert console_open.wait_port_released(hold.getsockname()[1], 0.3) is False
+    finally:
+        hold.close()
+    # 시작 쪽: 포트가 풀리기를 기다린 뒤에 서버를 띄운다
+    checks, started_after = [], []
+    answers = iter([False, False, True])
+
+    def bindable(p):
+        checks.append(p)
+        return next(answers)
+
+    def fake_start(p):
+        started_after.append(len(checks))
+        launched.append(True)
+
+    launched: list[bool] = []
+    monkeypatch.setattr(console_open, "port_bindable", bindable)
+    monkeypatch.setattr(console_open, "start_server", fake_start)
+    monkeypatch.setattr(console_open, "read_server_error", lambda: "")
+    monkeypatch.setattr(console_open, "probe", lambda p: "ours" if launched else "free")
+    assert console_open.ensure_server(port, wait=2) is None
+    assert started_after == [3]  # 포트가 세 번째 확인에서 풀린 뒤에야 띄웠다
 
 
 def test_open_starts_detached_server_and_stop(tmp_path, monkeypatch):
@@ -3032,3 +3080,1396 @@ def test_subagent_cap_still_holds_with_new_fields(browser):
     for i in range(205):
         browser.event("g8", "SubagentStart", agent_id=f"a{i}", agent_type="x")
     assert len(subs_of(browser, "g8")) == 200
+
+
+# ---- 갈래(flows.json)와 단계 진행(#558) ----
+
+FAKE_ANALYSIS_FLOW = Path(__file__).with_name("fake_claude_analysis_flow.py")
+FLOWS_FILE = CONSOLE / "flows.json"
+REAL_SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md"))
+FLOW_IDS = ["new-customer", "srs", "spec", "dev", "fix", "atc", "review"]
+BRANCH = "docs/1-x"
+PR_URL = "https://github.com/o/r/pull/7"
+GIT_INFO = {"isRepo": True, "repo": "r", "branch": BRANCH, "changedFiles": [], "skill": None, "unknown": False, "ahead": 0}
+SRS_TABLE = ("| ID | Title | Status | 다음 단계 |\n|---|---|---|---|\n| REQ-001 | a | Open | 개발 |\n| REQ-002 | b | Open | 개발 |\n"
+             "| REQ-003 | c | Open | 설정 |\n| REQ-004 | d | Open | 미정 |\n| REQ-005 | e | Dropped | 개발 |\n")
+
+
+class FakeRun:
+    """git·gh 조회를 흉내 낸다. table 은 명령 앞부분(공백은 _ 로 쓴다) -> (종료코드, 출력) 또는 호출 가능 객체. 없는 명령은 실행 불능(127)이다."""
+
+    def __init__(self, **table):
+        self.table = {"git symbolic-ref": (0, "origin/main\n")}
+        self.table.update({k.replace("_", " "): v for k, v in table.items()})
+        self.calls: list[str] = []
+
+    def __call__(self, args, cwd):
+        key = " ".join(args).replace("-c core.quotepath=false ", "")
+        self.calls.append(key)
+        for prefix, value in self.table.items():
+            if key.startswith(prefix):
+                return value(args) if callable(value) else value
+        return 127, ""
+
+
+def pr_json(state="OPEN", checks=None):
+    return {"number": 7, "state": state, "url": PR_URL, "title": "t", "mergedAt": None,
+            "statusCheckRollup": checks if checks is not None else [{"status": "COMPLETED", "conclusion": "SUCCESS"}]}
+
+
+def flow_console(tmp_path, monkeypatch, run=None, info=None, claude_cmd=None):
+    """실제 flows.json 과 실제 스킬 이름으로 뜬 콘솔. c.git 을 바꾸면 git 상태가 바뀐다."""
+    state = dict(GIT_INFO, **(info or {}))
+    c = Console(tmp_path, monkeypatch, claude_cmd=claude_cmd, git_inspect=lambda cwd: dict(state, changedFiles=list(state["changedFiles"])),
+                skills=REAL_SKILLS, flows_path=FLOWS_FILE,
+                run=run or FakeRun(**{"git rev-parse --show-toplevel": (128, "")}))  # 기본은 git 은 되는데 저장소가 아닌 폴더
+    c.git = state
+    c.login()
+    return c
+
+
+def turn(c, sid):
+    """세션을 만들고 턴이 도는 중으로 둔다(터미널 세션은 돌 때만 스킬을 받는다)."""
+    c.event(sid, "SessionStart")
+    c.event(sid, "UserPromptSubmit", prompt="x")
+
+
+def stop(c, sid):
+    assert c.hook("stop", {"session_id": sid, "cwd": str(c.work), "last_assistant_message": "r"})[0] == 200
+
+
+def skill_event(c, sid, skill):
+    c.event(sid, "PreToolUse", tool_name="Skill", tool_input={"skill": f"harness:{skill}"})
+
+
+def sess(c, sid):
+    return c.call("GET", f"/api/sessions/{sid}")[1]
+
+
+def set_flow(c, sid, flow, **kw):
+    return c.call("PUT", f"/api/sessions/{sid}/flow", dict({"flowId": flow}, **kw))
+
+
+def states(model):
+    return [st["state"] for st in model["flowSteps"]]
+
+
+def test_flows_data_is_valid_and_every_skill_exists():
+    data, err = flows.load(FLOWS_FILE)
+    assert err == "" and flows.validate(data, set(REAL_SKILLS)) == []
+    assert (flows.flow_skills(data) | flows.tool_skills(data)) <= set(REAL_SKILLS)
+    assert [f["id"] for f in data["flows"]] == FLOW_IDS
+    assert [t["id"] for t in data["tools"]] == ["version", "sync", "update", "handoff", "wrapup", "prs", "reload", "approvals"]
+    assert next(f for f in data["flows"] if f["id"] == "atc")["requires"] == "adt-tiers"
+    assert next(t for t in data["tools"] if t["id"] == "approvals")["requires"] == "approver"
+
+
+def test_flows_validate_catches_bad_data():
+    import copy
+    base, _ = flows.load(FLOWS_FILE)
+
+    def broken(edit):
+        data = copy.deepcopy(base)
+        edit(data)
+        return " ".join(flows.validate(data, set(REAL_SKILLS)))
+
+    assert "nope" in broken(lambda d: d["flows"][1]["steps"][0].update(skill="nope"))
+    assert "ghost" in broken(lambda d: d["flows"][0].update(next={"flow": "ghost"}))
+    assert "magic" in broken(lambda d: d["flows"][1]["steps"][0].update(done=["magic"]))
+    assert "onlyIf" in broken(lambda d: d["flows"][3]["steps"][2].update(onlyIf="missing"))
+    assert "nope" in broken(lambda d: d["tools"][0].update(skill="nope"))
+    assert "skill_done" in broken(lambda d: d["flows"][1]["steps"][2].update(done=["skill_done"]))
+
+
+def test_app_without_valid_flows_keeps_console_up_but_refuses_flow_features(console):
+    console.login()
+    assert console.call("GET", "/api/flows")[0] == 503
+    console.event("n1", "SessionStart")
+    assert set_flow(console, "n1", "srs")[0] == 503
+    assert sess(console, "n1")["flowId"] is None
+    assert console.app.flow_error
+
+
+def test_flows_api_without_cwd_has_no_exposure(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        status, body, _ = c.call("GET", "/api/flows")
+        assert status == 200 and [f["id"] for f in body["flows"]] == FLOW_IDS and len(body["tools"]) == 8
+        assert "exposure" not in body["flows"][0] and "conditions" not in body
+        assert body["flows"][3]["steps"][0]["done"] == ["skill_done", "on_work_branch"]
+    finally:
+        c.close()
+
+
+def test_exposure_hides_atc_without_adt_tiers_and_shows_it_with(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        c.event("e1", "SessionStart")
+        q = "/api/flows?cwd=" + urllib.parse.quote(str(c.work))
+        body = c.call("GET", q)[1]
+        atc = next(f for f in body["flows"] if f["id"] == "atc")
+        assert atc["exposure"]["visible"] is False and "env/adt-tiers.yaml" in atc["exposure"]["reason"]
+        dev_atc_step = next(f for f in body["flows"] if f["id"] == "dev")["steps"][2]
+        assert dev_atc_step["exposure"]["visible"] is False
+        assert next(f for f in body["flows"] if f["id"] == "srs")["exposure"]["visible"] is True
+        (c.work / "env").mkdir()
+        (c.work / "env" / "adt-tiers.yaml").write_text("x", encoding="utf-8")
+        body = c.call("GET", q)[1]
+        assert next(f for f in body["flows"] if f["id"] == "atc")["exposure"]["visible"] is True
+        assert body["conditions"]["adt-tiers"]["state"] == "yes"
+    finally:
+        c.close()
+
+
+def test_flows_and_approvals_reject_folders_the_server_does_not_know(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        other = tmp_path / "other"
+        other.mkdir()
+        assert c.call("GET", "/api/flows?cwd=" + urllib.parse.quote(str(other)))[0] == 403
+        assert c.call("GET", "/api/approvals?cwd=" + urllib.parse.quote(str(other)))[0] == 403
+        assert c.call("GET", "/api/approvals")[0] == 400
+    finally:
+        c.close()
+
+
+@pytest.mark.parametrize("table,file_text,state,visible", [
+    ({}, None, "unknown", True),  # gh 가 안 된다 -> 판정 불능이고 숨기지 않는다
+    ({"gh_api_user": (0, "me\n")}, "other\n", "no", False),
+    ({"gh_api_user": (0, "me\n")}, "# 승인자\n@ME\n", "yes", True),
+    ({"gh_api_user": (0, "me\n")}, "dev: other\n*: me\n", "yes", True),
+    ({"gh_api_user": (0, "me\n"), "gh_repo_view": (0, "ADMIN\n")}, None, "yes", True),  # 파일이 없으면 저장소 admin
+    ({"gh_api_user": (0, "me\n"), "gh_repo_view": (0, "WRITE\n")}, None, "no", False),
+    ({"gh_api_user": (0, "me\n"), "gh_repo_view": (1, "")}, None, "unknown", True),
+    ({"gh_api_user": (0, "me\n"), "gh_repo_view": (0, "WRITE\n")}, "# 비어 있음\n", "no", False),
+])
+def test_approvals_tool_exposure_follows_approver_state(tmp_path, monkeypatch, table, file_text, state, visible):
+    c = flow_console(tmp_path, monkeypatch, run=FakeRun(**table))
+    try:
+        c.event("a1", "SessionStart")
+        if file_text is not None:
+            (c.work / ".github").mkdir()
+            (c.work / ".github" / "ssot-approvers").write_text(file_text, encoding="utf-8")
+        body = c.call("GET", "/api/flows?cwd=" + urllib.parse.quote(str(c.work)))[1]
+        tool = next(t for t in body["tools"] if t["id"] == "approvals")
+        assert tool["exposure"]["state"] == state and tool["exposure"]["visible"] is visible
+        assert state == "yes" or tool["exposure"]["reason"]  # 아니거나 못 읽었으면 이유를 말한다
+        assert all(t["exposure"]["visible"] for t in body["tools"] if t["id"] != "approvals")  # 나머지 도구는 늘 보인다
+    finally:
+        c.close()
+
+
+def approvals_run(prs, **over):
+    table = {"gh_api_user": (0, "me\n"), "gh_repo_view": (0, "ADMIN\n"), "gh_pr_list": (0, json.dumps(prs))}
+    table.update(over)
+    return FakeRun(**table)
+
+
+def test_approvals_lists_prs_waiting_for_me_and_caches_60_seconds(tmp_path, monkeypatch):
+    prs = [
+        {"number": 5, "title": "남의 것", "url": "u5", "author": {"login": "Kim"}, "isDraft": False, "headRefOid": "a", "latestReviews": []},
+        {"number": 3, "title": "낡은 승인", "url": "u3", "author": {"login": "lee"}, "isDraft": False, "headRefOid": "new",
+         "latestReviews": [{"author": {"login": "me"}, "state": "APPROVED", "commit": {"oid": "old"}}]},
+        {"number": 4, "title": "이미 승인", "url": "u4", "author": {"login": "lee"}, "isDraft": False, "headRefOid": "x",
+         "latestReviews": [{"author": {"login": "me"}, "state": "APPROVED", "commit": {"oid": "x"}}]},
+        {"number": 6, "title": "내 PR", "url": "u6", "author": {"login": "me"}, "isDraft": False, "headRefOid": "y", "latestReviews": []},
+        {"number": 8, "title": "초안", "url": "u8", "author": {"login": "kim"}, "isDraft": True, "headRefOid": "z", "latestReviews": []},
+    ]
+    run = approvals_run(prs)
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    try:
+        c.event("p1", "SessionStart")
+        q = "/api/approvals?cwd=" + urllib.parse.quote(str(c.work))
+        status, body, _ = c.call("GET", q)
+        assert status == 200 and body["state"] == "yes" and body["login"] == "me"
+        assert [(i["number"], i["staleApproval"]) for i in body["items"]] == [(3, True), (5, False)]
+        n = len(run.calls)
+        c.call("GET", q)
+        assert len(run.calls) == n  # 60초 안에는 gh 를 다시 부르지 않는다
+        c.clock.t += 61
+        c.call("GET", q)
+        assert len(run.calls) > n
+    finally:
+        c.close()
+
+
+def test_approvals_not_approver_and_gh_failure_are_not_hidden_as_empty(tmp_path, monkeypatch):
+    for run, state in [(approvals_run([], gh_repo_view=(0, "WRITE\n")), "no"), (FakeRun(), "unknown"),
+                       (approvals_run([], gh_pr_list=(1, "")), "unknown")]:
+        c = flow_console(tmp_path / f"{state}-{len(run.table)}", monkeypatch, run=run)
+        try:
+            c.event("p2", "SessionStart")
+            body = c.call("GET", "/api/approvals?cwd=" + urllib.parse.quote(str(c.work)))[1]
+            assert body["state"] == state and body["items"] == [] and body["reason"]
+        finally:
+            c.close()
+
+
+@pytest.mark.parametrize("remote,state", [
+    ((0, "origin\thttps://github.com/o/r.git (fetch)\norigin\thttps://github.com/o/r.git (push)\n"), "yes"),
+    ((0, "origin\tgit@github.com:o/r.git (fetch)\n"), "yes"),
+    ((0, "origin\thttps://gitlab.example.com/o/r.git (fetch)\n"), "no"),  # GitHub 가 아닌 원격
+    ((0, ""), "no"),  # 원격이 없다
+    ((128, "fatal: not a git repository"), "no"),  # 저장소가 아닌 폴더
+])
+def test_approvals_only_judged_for_github_repositories(tmp_path, monkeypatch, remote, state):
+    run = approvals_run([], git_remote=remote)
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    try:
+        c.event("p3", "SessionStart")
+        body = c.call("GET", "/api/approvals?cwd=" + urllib.parse.quote(str(c.work)))[1]
+        assert body["state"] == state
+        if state == "no":
+            assert body["items"] == [] and "GitHub" in body["reason"]
+            assert not any(call.startswith("gh ") for call in run.calls)  # GitHub 저장소가 아니면 gh 를 부르지 않는다
+        tool = next(t for t in c.call("GET", "/api/flows?cwd=" + urllib.parse.quote(str(c.work)))[1]["tools"] if t["id"] == "approvals")
+        assert tool["exposure"]["visible"] is (state == "yes")
+    finally:
+        c.close()
+
+
+def test_approvals_gh_failure_in_github_repository_stays_unknown(tmp_path, monkeypatch):
+    run = FakeRun(git_remote=(0, "origin\thttps://github.com/o/r.git (fetch)\n"), gh_api_user=(1, "not logged in"))
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    try:
+        c.event("p4", "SessionStart")
+        body = c.call("GET", "/api/approvals?cwd=" + urllib.parse.quote(str(c.work)))[1]
+        assert body["state"] == "unknown" and body["reason"]
+    finally:
+        c.close()
+
+
+def test_analysis_schema_and_prompt_carry_flows_only_when_given():
+    plain = analysis.Analyses(lambda: ["claude"]).command()
+    assert "flow" not in json.loads(plain[plain.index("--json-schema") + 1])["properties"]
+    a = analysis.Analyses(lambda: ["claude"], flows={"srs": {"name": "요구사항", "description": "d"}})
+    cmd = a.command()
+    schema = json.loads(cmd[cmd.index("--json-schema") + 1])
+    assert schema["required"] == ["understood", "candidates", "extraQuestions"]  # flow 는 선택이라 없어도 결과가 유효하다
+    assert schema["properties"]["flow"]["properties"]["id"]["enum"] == ["srs"]
+    assert "- srs: 요구사항 - d" in a.prompt() and a.prompt().endswith("요청 글:\n") and a.prompt({}) == analysis.PROMPT
+
+
+def test_analysis_classifies_flow_and_filters_flows_by_folder(tmp_path, monkeypatch):
+    prompt_file = tmp_path / "prompt.txt"
+    monkeypatch.setenv("FAKE_PROMPT_FILE", str(prompt_file))
+    c = flow_console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS_FLOW)])
+    try:
+        def analyse(text):
+            jid = c.call("POST", "/api/new", {"text": text, "cwd": str(c.work)})[1]["id"]
+            return wait_for(lambda: (lambda j: j if j["status"] != "running" else None)(c.call("GET", f"/api/new/{jid}")[1]))
+
+        job = analyse("SRS 바꿔줘")
+        assert job["status"] == "done"
+        assert job["result"]["flow"] == {"id": "srs", "name": "요구사항 만들기·바꾸기", "reason": "요구사항을 바꾸는 일이다",
+                                         "confident": True, "alternativeId": None, "alternativeName": ""}
+        text = prompt_file.read_text(encoding="utf-8")
+        assert "- srs:" in text and "- atc:" not in text  # adt-tiers 가 없는 폴더에는 atc 갈래를 묻지 않는다
+        (c.work / "env").mkdir()
+        (c.work / "env" / "adt-tiers.yaml").write_text("x", encoding="utf-8")
+        analyse("SRS 바꿔줘")
+        assert "- atc:" in prompt_file.read_text(encoding="utf-8")
+
+        unsure = analyse("헷갈리는 일")["result"]
+        assert unsure["flow"]["confident"] is False and unsure["flow"]["alternativeId"] == "dev"
+        assert unsure["extraQuestions"][0] == {"question": analysis.FLOW_QUESTION, "options": ["작은 수정", "개발하기"], "flowChoice": ["fix", "dev"]}
+
+        odd = analyse("엉뚱한 일")["result"]
+        assert odd["flow"] is None and odd["flowError"]
+    finally:
+        c.close()
+
+
+def test_start_saves_flow_on_session_and_first_message_uses_its_first_skill(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS_FLOW)])
+    try:
+        c.event("sx", "SessionStart")
+        sent = []
+        c.app.manager.launch = lambda cwd, message, **kw: (sent.append(message), "sx")[1]
+
+        def job(text):
+            jid = c.call("POST", "/api/new", {"text": text, "cwd": str(c.work)})[1]["id"]
+            wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+            return jid
+
+        jid = job("SRS 바꿔줘")
+        assert c.call("GET", f"/api/new/{jid}/preview?flow=fix")[1]["message"].splitlines()[0] == "/harness:start"
+        assert c.call("GET", f"/api/new/{jid}/preview?flow=review")[1]["message"].splitlines()[0] == "/harness:prs"
+        assert c.call("GET", f"/api/new/{jid}/preview?flow=ghost")[0] == 400
+        status, body, _ = c.call("POST", f"/api/new/{jid}/start", {})
+        assert status == 202 and body["flowId"] == "srs" and sent[-1].splitlines()[0] == "/harness:srs"
+        model = sess(c, "sx")
+        assert model["flowId"] == "srs" and model["flowReason"] == "요구사항을 바꾸는 일이다" and len(model["flowSteps"]) == 3
+        # 사용자가 다른 갈래를 고르면 그것이 우선한다
+        other = job("SRS 바꿔줘")
+        assert c.call("POST", f"/api/new/{other}/start", {"flow": "new-customer"})[1]["flowId"] == "new-customer"
+        assert sent[-1].splitlines()[0] == "/harness:scaffold" and sess(c, "sx")["flowId"] == "new-customer"
+        assert c.call("POST", f"/api/new/{other}/start", {"flow": "ghost"})[0] == 400
+        # 분류가 목록 밖이면 갈래 없이 시작한다
+        c.call("PUT", "/api/sessions/sx/flow", {"flowId": None})
+        bad = job("엉뚱한 일")
+        assert c.call("POST", f"/api/new/{bad}/start", {})[1]["flowId"] is None and sess(c, "sx")["flowId"] is None
+    finally:
+        c.close()
+
+
+def test_sessions_without_flow_have_empty_flow_fields(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        c.event("z1", "SessionStart")
+        m = sess(c, "z1")
+        assert m["flowId"] is None and m["flowSteps"] == [] and m["nextFlow"] is None and m["flowFinished"] is False
+        assert m["flow"] and isinstance(m["flow"], list)  # 기존 스킬 목록 필드는 그대로다
+    finally:
+        c.close()
+
+
+def test_set_flow_validates_and_atc_needs_adt_tiers(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        c.event("v1", "SessionStart")
+        assert c.call("PUT", "/api/sessions/v1/flow", {})[0] == 400
+        assert c.call("PUT", "/api/sessions/v1/flow", {"flowId": 3})[0] == 400
+        assert set_flow(c, "v1", "ghost")[0] == 400
+        assert set_flow(c, "v1", "atc")[0] == 409
+        (c.work / "env").mkdir()
+        (c.work / "env" / "adt-tiers.yaml").write_text("x", encoding="utf-8")
+        status, body, _ = set_flow(c, "v1", "atc", reason="ATC 를 돌린다고 해서")
+        assert status == 200 and body["flowId"] == "atc" and body["flowReason"] == "ATC 를 돌린다고 해서"
+        assert set_flow(c, "v1", "review")[1]["flowId"] == "review"  # 갈래는 바꿀 수 있다
+        assert any("갈래 지정" in e["text"] for e in sess(c, "v1")["log"])
+    finally:
+        c.close()
+
+
+def test_flow_state_is_saved_with_the_session(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        c.event("w1", "SessionStart")
+        set_flow(c, "w1", "fix")
+        c.app.store.flush()
+        loaded = Store(c.state).get("w1")["flowState"]
+        assert loaded["id"] == "fix" and [st["id"] for st in loaded["steps"]] == ["start", "fix", "deliver", "merge"]
+    finally:
+        c.close()
+
+
+def test_out_of_order_skill_is_409_but_tools_are_always_allowed(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        turn(c, "o1")
+
+        def run(skill):
+            return c.call("POST", f"/api/sessions/o1/skills/{skill}/run", {})[0]
+
+        assert run("deliver") == 202  # 갈래가 없으면 제한이 없다
+        set_flow(c, "o1", "srs")
+        status, body, _ = c.call("POST", "/api/sessions/o1/skills/deliver/run", {})
+        assert status == 409 and "SRS 쓰기" in body["error"]
+        assert run("spec") == 409 and run("start") == 409
+        assert run("srs") == 202
+        for tool in ("version", "sync", "update", "handoff", "wrapup", "prs", "approvals"):
+            assert run(tool) == 202, tool  # 도구는 갈래와 상관없이 언제나 된다
+        assert run("nope") == 404
+        assert c.call("PUT", "/api/sessions/o1/skills/deliver/reservation", {})[0] == 409  # 예약도 같은 순서를 따른다
+        # 버튼에 안 내는 scaffold 도 갈래의 지금 단계면 실행된다
+        set_flow(c, "o1", "new-customer")
+        assert run("scaffold") == 202 and run("srs") == 409
+    finally:
+        c.close()
+
+
+def test_skip_needs_a_reason_and_records_it(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        c.event("k1", "SessionStart")
+        assert c.call("POST", "/api/sessions/k1/flow/skip", {"reason": "x"})[0] == 409  # 갈래가 없다
+        set_flow(c, "k1", "fix")
+        for body in ({}, {"reason": "   "}, {"reason": 3}):
+            assert c.call("POST", "/api/sessions/k1/flow/skip", body)[0] == 400
+        assert states(sess(c, "k1"))[0] == "pending"
+        status, m, _ = c.call("POST", "/api/sessions/k1/flow/skip", {"reason": "이미 이슈와 브랜치가 있다"})
+        assert status == 200 and m["stepIndex"] == 1
+        assert m["flowSteps"][0]["state"] == "skipped" and m["flowSteps"][0]["reason"] == "이미 이슈와 브랜치가 있다"
+        assert m["flowSteps"][1]["state"] == "active"  # 사람·작업 단계는 오면 진행 중이다
+        assert any("이미 이슈와 브랜치가 있다" in e["text"] for e in m["log"])
+        assert set_flow(c, "k1", "fix")[1]["flowSteps"][0]["reason"] == ""
+    finally:
+        c.close()
+
+
+def test_skip_makes_the_next_skill_runnable(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        turn(c, "k2")
+        set_flow(c, "k2", "srs")
+        assert c.call("POST", "/api/sessions/k2/skills/deliver/run", {})[0] == 409
+        c.call("POST", "/api/sessions/k2/flow/skip", {"reason": "SRS 는 이미 고쳐 뒀다"})
+        assert c.call("POST", "/api/sessions/k2/skills/deliver/run", {})[0] == 202
+        assert c.call("POST", "/api/sessions/k2/skills/srs/run", {})[0] == 409
+    finally:
+        c.close()
+
+
+def drive_srs_to_deliver(c, sid):
+    """srs 갈래를 SRS 쓰기 단계까지 끝내 deliver 단계에 둔다."""
+    turn(c, sid)
+    set_flow(c, sid, "srs")
+    skill_event(c, sid, "srs")
+    assert states(sess(c, sid))[0] == "active"
+    stop(c, sid)
+    m = sess(c, sid)
+    assert m["stepIndex"] == 0 and states(m)[0] == "active"  # 스킬은 끝났지만 변경이 아직 없다 -> 끝으로 보지 않는다
+    c.git["changedFiles"] = ["docs/ssot/SRS.md"]
+    c.event(sid, "UserPromptSubmit", prompt="y")
+    stop(c, sid)
+    m = sess(c, sid)
+    assert m["stepIndex"] == 1 and states(m) == ["done", "pending", "pending"]
+    return m
+
+
+def test_srs_flow_follows_git_and_pr_evidence_to_the_end(tmp_path, monkeypatch):
+    listed = {"data": []}
+    run = FakeRun(gh_pr_list=lambda a: (0, json.dumps(listed["data"])), gh_pr_view=lambda a: (0, json.dumps(listed["data"][0])))
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    try:
+        drive_srs_to_deliver(c, "s1")
+        c.git["changedFiles"] = []
+        c.git["ahead"] = 1
+        assert c.call("POST", "/api/sessions/s1/flow/refresh", {})[1]["stepIndex"] == 1  # PR 이 아직 없다
+        listed["data"] = [pr_json("OPEN")]
+        m = c.call("POST", "/api/sessions/s1/flow/refresh", {})[1]
+        assert m["stepIndex"] == 2 and states(m) == ["done", "done", "active"] and m["flowFinished"] is False
+        assert m["flowPr"]["number"] == 7 and m["flowPr"]["checks"] == "pass" and m["flowUnknown"] == []
+        listed["data"] = [pr_json("OPEN", [{"status": "COMPLETED", "conclusion": "FAILURE"}])]
+        assert c.call("POST", "/api/sessions/s1/flow/refresh", {})[1]["flowPr"]["checks"] == "fail"
+        (c.work / "docs" / "ssot").mkdir(parents=True)
+        (c.work / "docs" / "ssot" / "SRS.md").write_text(SRS_TABLE, encoding="utf-8")
+        c.git["branch"] = "main"  # 병합 뒤 main 으로 옮겨도 PR 번호로 다시 본다
+        listed["data"] = [pr_json("MERGED")]
+        m = c.call("POST", "/api/sessions/s1/flow/refresh", {})[1]
+        assert m["flowFinished"] is True and states(m) == ["done", "done", "done"]
+        opts = {o["value"]: o for o in m["nextFlow"]["options"]}
+        assert opts["개발"]["flow"] == "spec" and opts["개발"]["ids"] == ["REQ-001", "REQ-002"]  # Dropped 는 세지 않는다
+        assert opts["설정"]["flow"] == "dev" and opts["설정"]["count"] == 1
+        assert opts["미정"]["flow"] is None and opts["미정"]["ids"] == ["REQ-004"]
+        assert "새 세션" in m["nextFlow"]["hint"]
+        assert any("gh pr view 7" in call for call in run.calls)
+        c.event("s1", "UserPromptSubmit", prompt="z")
+        assert c.call("POST", "/api/sessions/s1/skills/deliver/run", {})[0] == 409  # 끝난 갈래에서도 도구만 된다
+        assert c.call("POST", "/api/sessions/s1/skills/prs/run", {})[0] == 202
+    finally:
+        c.close()
+
+
+def test_unreadable_gh_keeps_the_step_and_says_unknown(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch, run=FakeRun())  # gh 실행 불능
+    try:
+        drive_srs_to_deliver(c, "u1")
+        m = c.call("POST", "/api/sessions/u1/flow/refresh", {})[1]
+        assert m["stepIndex"] == 1 and states(m)[1] == "pending"
+        assert m["flowUnknown"] and "PR" in m["flowUnknown"][0]  # 통과도 위반도 아닌 판정 불능
+        assert m["flowFinished"] is False and m["flowPr"] is None
+    finally:
+        c.close()
+
+
+def test_gh_failure_for_pr_view_after_merge_is_unknown_not_merged(tmp_path, monkeypatch):
+    listed = {"data": []}
+    run = FakeRun(gh_pr_list=lambda a: (0, json.dumps(listed["data"])), gh_pr_view=(1, ""))
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    try:
+        drive_srs_to_deliver(c, "u2")
+        listed["data"] = [pr_json("OPEN")]
+        m = c.call("POST", "/api/sessions/u2/flow/refresh", {})[1]
+        assert m["stepIndex"] == 2
+        m = c.call("POST", "/api/sessions/u2/flow/refresh", {})[1]  # 이제 번호로 보는데 gh 가 실패한다
+        assert m["stepIndex"] == 2 and m["flowFinished"] is False and "PR #7" in m["flowUnknown"][0]
+    finally:
+        c.close()
+
+
+def test_manual_step_needs_confirmation_and_other_evidence(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        turn(c, "m1")
+        set_flow(c, "m1", "srs")
+        assert c.call("POST", "/api/sessions/m1/flow/done", {})[0] == 409  # 사람이 누르는 단계가 아니다
+        set_flow(c, "m1", "fix")
+        c.call("POST", "/api/sessions/m1/flow/skip", {"reason": "이슈 있음"})
+        status, body, _ = c.call("POST", "/api/sessions/m1/flow/done", {})  # 변경이 없다
+        assert status == 409 and body["error"]
+        assert sess(c, "m1")["stepIndex"] == 1
+        c.git["changedFiles"] = ["a.py"]
+        status, m, _ = c.call("POST", "/api/sessions/m1/flow/done", {})
+        assert status == 200 and m["stepIndex"] == 2 and states(m)[1] == "done"
+        assert c.call("POST", "/api/sessions/nope/flow/done", {})[0] == 404
+    finally:
+        c.close()
+
+
+def test_new_customer_flow_waits_for_a_person_then_points_to_srs(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        turn(c, "n1")
+        set_flow(c, "n1", "new-customer")
+        skill_event(c, "n1", "scaffold")
+        stop(c, "n1")
+        m = sess(c, "n1")
+        assert m["stepIndex"] == 1 and m["flowSteps"][1]["kind"] == "human" and m["flowSteps"][1]["state"] == "active"
+        m = c.call("POST", "/api/sessions/n1/flow/done", {})[1]
+        assert m["flowFinished"] is True
+        assert m["nextFlow"]["options"] == [{"flow": "srs", "name": "요구사항 만들기·바꾸기", "label": "요구사항 만들기", "disabled": False}]
+    finally:
+        c.close()
+
+
+def test_dev_flow_skips_atc_without_adt_tiers_and_runs_it_with(tmp_path, monkeypatch):
+    for has_tiers in (False, True):
+        c = flow_console(tmp_path / str(has_tiers), monkeypatch)
+        try:
+            if has_tiers:
+                (c.work / "env").mkdir()
+                (c.work / "env" / "adt-tiers.yaml").write_text("x", encoding="utf-8")
+            turn(c, "d1")
+            set_flow(c, "d1", "dev")
+            skill_event(c, "d1", "start")
+            stop(c, "d1")
+            assert sess(c, "d1")["stepIndex"] == 1
+            c.git["changedFiles"] = ["a.abap"]
+            m = c.call("POST", "/api/sessions/d1/flow/done", {})[1]
+            if has_tiers:
+                assert m["stepIndex"] == 2 and m["flowSteps"][2]["state"] == "pending"
+                c.event("d1", "UserPromptSubmit", prompt="z")
+                assert c.call("POST", "/api/sessions/d1/skills/atc/run", {})[0] == 202
+            else:
+                assert m["stepIndex"] == 3 and m["flowSteps"][2]["state"] == "skipped" and "adt-tiers" in m["flowSteps"][2]["reason"]
+        finally:
+            c.close()
+
+
+def test_start_step_needs_a_work_branch_and_ignores_stop_while_asking(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch, run=FakeRun(**{"git rev-parse --show-toplevel": (128, "")}))
+    try:
+        turn(c, "b1")
+        set_flow(c, "b1", "dev")
+        skill_event(c, "b1", "start")
+        c.git["onBase"] = True  # 첫 응답에서 질문만 하고 끝났다: 아직 기본 브랜치다
+        stop(c, "b1")
+        m = sess(c, "b1")
+        assert m["stepIndex"] == 0 and states(m)[0] == "active"
+        c.git["onBase"] = False  # 이슈·브랜치를 만든 뒤
+        m = c.call("POST", "/api/sessions/b1/flow/refresh", {})[1]
+        assert m["stepIndex"] == 1
+        # 질문이 답을 기다리는 동안의 Stop 은 스킬이 끝난 것이 아니다
+        set_flow(c, "b1", "dev")
+        skill_event(c, "b1", "start")
+        req, _ = c.app.store.add_request(c.app.store.resolve_id("b1"), "question", "AskUserQuestion", {"questions": []}, None, "k")
+        stop(c, "b1")
+        assert sess(c, "b1")["stepIndex"] == 0
+        c.app.store.close(req.rid, "답함")
+        stop(c, "b1")
+        assert sess(c, "b1")["stepIndex"] == 1
+    finally:
+        c.close()
+
+
+def test_unreadable_git_makes_conditions_unknown_and_keeps_atc_step(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch, run=FakeRun())  # git 을 실행할 수 없다(127)
+    try:
+        turn(c, "u1")
+        body = c.call("GET", "/api/flows?cwd=" + urllib.parse.quote(str(c.work)))[1]
+        assert body["conditions"]["adt-tiers"]["state"] == "unknown" and "git" in body["conditions"]["adt-tiers"]["reason"]
+        assert next(f for f in body["flows"] if f["id"] == "atc")["exposure"]["visible"] is True  # 판정 불능은 숨기지 않는다
+        set_flow(c, "u1", "dev")
+        skill_event(c, "u1", "start")
+        stop(c, "u1")
+        c.git["changedFiles"] = ["a.abap"]
+        m = c.call("POST", "/api/sessions/u1/flow/done", {})[1]
+        assert m["stepIndex"] == 2 and m["flowSteps"][2]["state"] != "skipped"  # ATC 를 건너뜀으로 확정하지 않는다
+        assert any("adt-tiers" in x for x in m["flowUnknown"])
+    finally:
+        c.close()
+
+
+def test_session_files_reports_unknown_when_git_cannot_run(tmp_path, monkeypatch, request):
+    c = Console(tmp_path, monkeypatch, run=FakeRun())
+    request.addfinalizer(c.close)
+    c.login()
+    c.event("s1", "SessionStart")
+    (c.work / "메모.md").write_text("x", encoding="utf-8")
+    c.event("s1", "PostToolUse", tool_name="Write", tool_input={"file_path": str(c.work / "메모.md")})
+    status, body, _ = c.call("GET", "/api/sessions/s1/files")
+    assert status == 200 and body["unknown"] is True and body["reason"] and [f["path"] for f in body["files"]] == ["메모.md"]
+
+
+def test_dev_flow_ends_pointing_at_the_disabled_permission_form(tmp_path):
+    data, _ = flows.load(FLOWS_FILE)
+    nxt = flows.compute_next(data, flows.flow_def(data, "dev"), str(tmp_path))
+    assert nxt["options"] == [{"flow": None, "name": "권한·CTS 양식(준비 중)", "label": "권한·CTS 양식(준비 중)", "disabled": True}]
+    assert flows.compute_next(data, flows.flow_def(data, "fix"), str(tmp_path)) is None
+
+
+def test_srs_next_flow_cannot_be_decided_without_a_readable_srs(tmp_path):
+    data, _ = flows.load(FLOWS_FILE)
+    srs = flows.flow_def(data, "srs")
+    missing = flows.compute_next(data, srs, str(tmp_path))
+    assert missing["options"] == [] and "SRS.md" in missing["unknown"]  # 없다고 끝으로 두지 않고 판정 불능으로 말한다
+    (tmp_path / "docs" / "ssot").mkdir(parents=True)
+    (tmp_path / "docs" / "ssot" / "SRS.md").write_text("| ID | Title |\n|---|---|\n| REQ-001 | a |\n", encoding="utf-8")
+    assert "다음 단계" in flows.compute_next(data, srs, str(tmp_path))["unknown"]
+    (tmp_path / "docs" / "ssot" / "SRS.md").write_text(SRS_TABLE.replace("| 미정 |", "| 몰라 |"), encoding="utf-8")
+    opts = flows.compute_next(data, srs, str(tmp_path))["options"]
+    assert opts[-1]["disabled"] is True and opts[-1]["ids"] == ["REQ-004"]  # 정해진 값 밖은 따로 알린다
+
+
+def test_gitstate_pr_status_and_checks_summary():
+    def status(table, **kw):
+        return gitstate.pr_status(fake_runner(table), "/w", kw.pop("branch", "feat/1-a"), **kw)
+
+    ok_head = {"git symbolic-ref": (0, "origin/main\n")}
+    assert status(dict(ok_head, **{"gh pr list": (0, "[]")})) == {"state": "ok", "pr": None, "reason": ""}
+    got = status(dict(ok_head, **{"gh pr list": (0, json.dumps([pr_json("MERGED"), pr_json("OPEN")]))}))
+    assert got["pr"]["state"] == "OPEN" and got["pr"]["number"] == 7
+    assert status(dict(ok_head, **{"gh pr list": (127, "")}))["state"] == "unknown"
+    assert status(dict(ok_head, **{"gh pr list": (0, "not json")}))["state"] == "unknown"
+    assert status(ok_head, branch="main") == {"state": "ok", "pr": None, "reason": ""}  # 기본 브랜치는 PR 을 묻지 않는다
+    assert status({"gh pr view": (0, json.dumps(pr_json("MERGED")))}, number=7)["pr"]["state"] == "MERGED"
+    assert status({"gh pr view": (1, "")}, number=7)["state"] == "unknown"
+    assert gitstate.summarize_checks(None) == "none" and gitstate.summarize_checks([]) == "none"
+    assert gitstate.summarize_checks([{"status": "COMPLETED", "conclusion": "SUCCESS"}, {"status": "COMPLETED", "conclusion": "SKIPPED"}]) == "pass"
+    assert gitstate.summarize_checks([{"status": "IN_PROGRESS", "conclusion": ""}]) == "pending"
+    assert gitstate.summarize_checks([{"status": "COMPLETED", "conclusion": "SUCCESS"}, {"status": "COMPLETED", "conclusion": "FAILURE"}]) == "fail"
+
+
+def test_gitstate_inspect_reports_commits_ahead(tmp_path):
+    info = gitstate.inspect(str(tmp_path), fake_runner(git_table(**{"git rev-list --count @{u}": (0, "3\n")})))
+    assert info["ahead"] == 3 and info["skill"] == "deliver"
+
+
+# ---- 서버 기능 넷: 플러그인 다시 불러오기, 만든 문서 보기, 같은 폴더·작업용 폴더, 다음 갈래 넘기기 ----
+import zipfile  # noqa: E402
+
+import docfiles  # noqa: E402
+import handoff  # noqa: E402
+
+XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def make_xlsx(path, big_sheet_rows=0, shared_extra=""):
+    shared = (f'{XML_HEAD}<sst xmlns="{MAIN_NS}">{shared_extra}<si><t>이름</t></si><si><r><t>수</t></r><r><t>량</t></r></si>'
+              f'<si><t>a b</t></si><si><r><t>보임</t></r><rPh><t>안보임</t></rPh></si></sst>')
+    sheet1 = (f'{XML_HEAD}<worksheet xmlns="{MAIN_NS}"><sheetData>'
+              '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="AR1"><v>9</v></c></row>'
+              '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>3</v></c><c r="D2" t="inlineStr"><is><t>인라인</t></is></c></row>'
+              '<row r="3"><c r="B3" t="b"><v>1</v></c><c r="C3" t="s"><v>3</v></c></row></sheetData></worksheet>')
+    rows = "".join(f'<row r="{i}"><c r="A{i}"><v>{i}</v></c></row>' for i in range(1, big_sheet_rows + 1))
+    sheet2 = f'{XML_HEAD}<worksheet xmlns="{MAIN_NS}"><sheetData>{rows}</sheetData></worksheet>'
+    book = (f'{XML_HEAD}<workbook xmlns="{MAIN_NS}" xmlns:r="{REL_NS}"><sheets><sheet name="첫 시트" sheetId="1" r:id="rId1"/>'
+            '<sheet name="두번째" sheetId="2" r:id="rId2"/></sheets></workbook>')
+    rels = ('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="x" Target="worksheets/sheet1.xml"/>'
+            '<Relationship Id="rId2" Type="x" Target="/xl/worksheets/sheet9.xml"/></Relationships>')
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("xl/workbook.xml", book)
+        zf.writestr("xl/_rels/workbook.xml.rels", rels)
+        zf.writestr("xl/sharedStrings.xml", shared)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet1)
+        zf.writestr("xl/worksheets/sheet9.xml", sheet2)
+
+
+def make_pptx(path):
+    ns = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+
+    def slide(*paragraphs):
+        body = "".join(f"<a:p>{''.join(f'<a:r><a:t>{t}</a:t></a:r>' for t in runs)}</a:p>" for runs in paragraphs)
+        return f"{XML_HEAD}<p:sld {ns}><p:cSld><p:spTree><p:sp><p:txBody>{body}</p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("ppt/slides/slide10.xml", slide(["열번째"]))
+        zf.writestr("ppt/slides/slide2.xml", slide(["둘째"], []))
+        zf.writestr("ppt/slides/slide1.xml", slide(["제목", " 이어서"], ["본문 한 줄"]))
+        zf.writestr("ppt/slideLayouts/slideLayout1.xml", slide(["레이아웃은 아님"]))
+
+
+def files_console(tmp_path, monkeypatch, request, status="", opener=None, **kw):
+    """git status 출력을 holder 로 바꿀 수 있는 가짜 실행기로 뜬 콘솔. 세션 s1 은 작업 폴더에서 시작해 있다."""
+    work = tmp_path / "work"
+    holder = {"status": status}
+    run = FakeRun(**{"git rev-parse --show-toplevel": (0, str(work) + "\n"), "git status": lambda a: (0, holder["status"])})
+    app_kw = {"opener": opener} if opener else None
+    c = Console(tmp_path, monkeypatch, run=run, app_kw=app_kw, **kw)
+    request.addfinalizer(c.close)
+    c.login()
+    c.holder = holder
+    c.event("s1", "SessionStart")
+    return c
+
+
+def quoted(path):
+    return urllib.parse.quote(path)
+
+
+def test_xlsx_preview_resolves_shared_inline_bool_and_relationship_targets(tmp_path):
+    make_xlsx(tmp_path / "a.xlsx", big_sheet_rows=205)
+    got = docfiles.read_xlsx(str(tmp_path / "a.xlsx"))
+    assert got["kind"] == "table" and [s["name"] for s in got["sheets"]] == ["첫 시트", "두번째"]
+    first, second = got["sheets"]
+    assert first["rows"][0][:2] == ["이름", "수량"] and len(first["rows"][0]) <= docfiles.MAX_COLS  # AR 열(44번째)은 40열 상한 밖
+    assert first["truncated"] is True
+    assert first["rows"][1] == ["a b", "3", "", "인라인"]
+    assert first["rows"][2] == ["", "TRUE", "보임"]  # 읽기 힌트(rPh) 글은 빠진다
+    assert len(second["rows"]) == docfiles.MAX_ROWS == 200 and second["truncated"] is True  # 절대 경로(/xl/...)로 가리킨 시트도 읽는다
+
+
+def make_date_xlsx(path, date1904=False):
+    """cellXfs: 0 일반, 1 내장 14(날짜), 2 내장 22(날짜+시간), 3 사용자 yyyy"년"m"월", 4 사용자 숫자(0.00), 5 내장 20(시간), 6 사용자 [Red]hh:mm"""
+    styles = (f'{XML_HEAD}<styleSheet xmlns="{MAIN_NS}"><numFmts count="3">'
+              '<numFmt numFmtId="164" formatCode="yyyy&quot;년&quot;m&quot;월&quot;"/><numFmt numFmtId="165" formatCode="0.00&quot;d&quot;"/>'
+              '<numFmt numFmtId="166" formatCode="[Red]hh:mm"/></numFmts>'
+              '<cellStyleXfs count="1"><xf numFmtId="14"/></cellStyleXfs>'
+              '<cellXfs count="7"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="22"/><xf numFmtId="164"/><xf numFmtId="165"/>'
+              '<xf numFmtId="20"/><xf numFmtId="166"/></cellXfs></styleSheet>')
+    cells = ('<row r="1"><c r="A1" s="1"><v>44986</v></c><c r="B1" s="2"><v>44986.5625</v></c><c r="C1" s="2"><v>44986</v></c>'
+             '<c r="D1" s="3"><v>44986</v></c><c r="E1" s="4"><v>44986</v></c><c r="F1"><v>44986</v></c>'
+             '<c r="G1" s="5"><v>0.5</v></c><c r="H1" s="6"><v>0.75</v></c><c r="I1" s="1" t="s"><v>0</v></c><c r="J1" s="1"><v>-5</v></c>'
+             '<c r="K1" s="1"><v>1</v></c><c r="L1" s="1"><v>61</v></c></row>')
+    sheet = f'{XML_HEAD}<worksheet xmlns="{MAIN_NS}"><sheetData>{cells}</sheetData></worksheet>'
+    book = (f'{XML_HEAD}<workbook xmlns="{MAIN_NS}" xmlns:r="{REL_NS}"><workbookPr{" date1904=" + chr(34) + "1" + chr(34) if date1904 else ""}/>'
+            '<sheets><sheet name="날짜" sheetId="1" r:id="rId1"/></sheets></workbook>')
+    rels = ('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="x" Target="worksheets/sheet1.xml"/></Relationships>')
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("xl/workbook.xml", book)
+        zf.writestr("xl/_rels/workbook.xml.rels", rels)
+        zf.writestr("xl/sharedStrings.xml", f'{XML_HEAD}<sst xmlns="{MAIN_NS}"><si><t>텍스트</t></si></sst>')
+        zf.writestr("xl/styles.xml", styles)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet)
+
+
+def test_xlsx_preview_shows_date_cells_as_dates(tmp_path):
+    make_date_xlsx(tmp_path / "d.xlsx")
+    row = docfiles.read_xlsx(str(tmp_path / "d.xlsx"))["sheets"][0]["rows"][0]
+    assert row[0] == "2023-03-01"  # 내장 14
+    assert row[1] == "2023-03-01 13:30"  # 내장 22 + 시간
+    assert row[2] == "2023-03-01"  # 시간이 0 이면 날짜만
+    assert row[3] == "2023-03-01"  # 사용자 서식 yyyy"년"m"월"
+    assert row[4] == "44986" and row[5] == "44986"  # 날짜 서식이 아닌 숫자, 서식 없는 숫자
+    assert row[6] == "12:00" and row[7] == "18:00"  # 시간만 있는 서식
+    assert row[8] == "텍스트" and row[9] == "-5"  # 글자 셀과 범위 밖 숫자는 그대로
+    assert row[10] == "1900-01-01" and row[11] == "1900-03-01"
+
+
+def test_xlsx_preview_honors_1904_date_system(tmp_path):
+    make_date_xlsx(tmp_path / "d.xlsx", date1904=True)
+    row = docfiles.read_xlsx(str(tmp_path / "d.xlsx"))["sheets"][0]["rows"][0]
+    assert row[0] == "2027-03-02"  # 44986 + 1462일
+    assert row[10] == "1904-01-02"
+
+
+def test_pptx_preview_orders_slides_numerically_and_skips_layouts(tmp_path):
+    make_pptx(tmp_path / "a.pptx")
+    got = docfiles.read_pptx(str(tmp_path / "a.pptx"))
+    assert got == {"kind": "slides", "slides": [{"index": 1, "texts": ["제목 이어서", "본문 한 줄"]},
+                                                 {"index": 2, "texts": ["둘째"]}, {"index": 10, "texts": ["열번째"]}]}
+
+
+@pytest.mark.parametrize("make", [lambda p: p.write_bytes(b"not a zip"), lambda p: make_xlsx(p, shared_extra="<!DOCTYPE x [<!ENTITY a 'b'>]>")])
+def test_broken_or_entity_documents_are_not_parsed(tmp_path, make):
+    make(tmp_path / "a.xlsx")
+    with pytest.raises(docfiles.PreviewError):
+        docfiles.read_xlsx(str(tmp_path / "a.xlsx"))
+
+
+def zip_with_shared(path, shared: bytes):
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("xl/workbook.xml", f'{XML_HEAD}<workbook xmlns="{MAIN_NS}"><sheets/></workbook>')
+        zf.writestr("xl/sharedStrings.xml", shared)
+
+
+@pytest.mark.parametrize("shared", [
+    ('<?xml version="1.0"?><!--' + "x" * 6000 + '--><!DOCTYPE sst [<!ENTITY a "b">]><sst/>').encode("utf-8"),  # 앞 4096바이트 밖의 선언
+    '<?xml version="1.0"?><!DOCTYPE sst><sst/>'.encode("utf-16"),  # BOM 이 있는 UTF-16
+    '<?xml version="1.0" encoding="utf-16"?><!DOCTYPE sst><sst/>'.encode("utf-16-le"),  # BOM 이 없는 UTF-16
+    '<?xml version="1.0" encoding="cp037"?><sst/>'.encode("utf-8"),  # 다른 인코딩 선언
+])
+def test_open_part_scans_whole_part_and_refuses_other_encodings(tmp_path, shared):
+    zip_with_shared(tmp_path / "a.xlsx", shared)
+    with pytest.raises(docfiles.PreviewError):
+        docfiles.read_xlsx(str(tmp_path / "a.xlsx"))
+
+
+def test_open_part_limits_part_size_and_total_bytes(tmp_path, monkeypatch):
+    zip_with_shared(tmp_path / "a.xlsx", f'{XML_HEAD}<sst xmlns="{MAIN_NS}"><si><t>가</t></si></sst>'.encode("utf-8"))
+    assert docfiles.read_xlsx(str(tmp_path / "a.xlsx"))["kind"] == "table"
+    assert docfiles.MAX_PART_BYTES == 16 << 20 and docfiles.MAX_TOTAL_BYTES == 64 << 20
+    monkeypatch.setattr(docfiles, "MAX_PART_BYTES", 50)
+    with pytest.raises(docfiles.PreviewError, match="너무 커서"):
+        docfiles.read_xlsx(str(tmp_path / "a.xlsx"))
+    monkeypatch.setattr(docfiles, "MAX_PART_BYTES", 1 << 20)
+    monkeypatch.setattr(docfiles, "MAX_TOTAL_BYTES", 200)  # 부분마다는 작아도 합이 넘으면 읽지 않는다
+    with pytest.raises(docfiles.PreviewError, match="문서가 너무 커서"):
+        docfiles.read_xlsx(str(tmp_path / "a.xlsx"))
+
+
+def test_files_list_groups_versions_and_marks_changes(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request)
+    docs = c.work / "개발 문서"
+    docs.mkdir()
+    for v in ("0.1", "0.2", "0.10"):
+        (docs / f"개발사양서_v{v}.xlsx").write_bytes(b"x" * 3)
+    (c.work / "메모 1.md").write_text("# 메모", encoding="utf-8")
+    (c.work / "old.md").write_text("old", encoding="utf-8")
+    (c.work / "새 문서.pptx").write_bytes(b"p")
+    (c.work / "~$새 문서.pptx").write_bytes(b"lock")
+    (c.work / "node_modules").mkdir()
+    (c.work / "node_modules" / "x.md").write_text("x", encoding="utf-8")
+    c.event("s1", "PostToolUse", tool_name="Write", tool_input={"file_path": str(c.work / "메모 1.md")})
+    c.event("s1", "PostToolUse", tool_name="Write", tool_input={"file_path": str(tmp_path / "밖.md")})  # 작업 폴더 밖
+    c.holder["status"] = " M 개발 문서/개발사양서_v0.2.xlsx\0?? 새 문서.pptx\0?? ~$새 문서.pptx\0?? node_modules/x.md\0 D 지운.md\0"
+    status, body, _ = c.call("GET", "/api/sessions/s1/files")
+    assert status == 200
+    by_path = {f["path"]: f for f in body["files"]}
+    assert set(by_path) == {"개발 문서/개발사양서_v0.10.xlsx", "메모 1.md", "새 문서.pptx"}
+    sheet = by_path["개발 문서/개발사양서_v0.10.xlsx"]
+    assert sheet["kind"] == "xlsx" and sheet["size"] == 3 and sheet["changed"] is True and isinstance(sheet["mtime"], float)
+    assert [(v["version"], v["changed"]) for v in sheet["versions"]] == [("0.10", False), ("0.2", True), ("0.1", False)]  # 숫자로 비교, 최신 먼저
+    assert sheet["versions"][0]["path"] == sheet["path"]
+    assert by_path["메모 1.md"]["kind"] == "md" and by_path["메모 1.md"]["versions"] == [] and by_path["새 문서.pptx"]["kind"] == "pptx"
+    assert c.call("GET", "/api/sessions/nope/files")[0] == 404
+
+
+def test_status_paths_parse_z_output_rename_and_delete():
+    out = " M a b.md\0R  new.md\0old.md\0?? 새 폴더/c.md\0 D gone.md\0"
+    run = FakeRun(**{"git rev-parse --show-toplevel": (0, "/r\n"), "git status": (0, out)})
+    paths, why = gitstate.status_paths(run, "/r")
+    assert [p.replace("\\", "/") for p in paths] == ["/r/a b.md", "/r/new.md", "/r/새 폴더/c.md"] and why == ""
+    assert gitstate.status_paths(FakeRun(**{"git rev-parse --show-toplevel": (128, "")}), "/r") == ([], "")  # 저장소가 아니다 = 사유 없음
+    assert gitstate.status_paths(FakeRun(), "/r") == ([], "git 을 실행하지 못했습니다.")  # git 실행 불능은 빈 목록과 구분한다
+    assert gitstate.status_paths(FakeRun(**{"git rev-parse --show-toplevel": (0, "/r\n"), "git status": (1, "")}), "/r") == ([], "git status 가 실패했습니다.")
+
+
+def test_file_preview_kinds_and_limits(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request)
+    (c.work / "n.md").write_bytes("# 제목\n본문".encode("utf-8"))  # write_text 는 Windows 에서 줄바꿈을 바꾼다
+    (c.work / "큰 글.md").write_bytes(("가" * 100000).encode("utf-8"))
+    make_xlsx(c.work / "표.xlsx")
+    make_pptx(c.work / "장.pptx")
+    (c.work / "d.docx").write_bytes(b"x")
+    (c.work / "사진.png").write_bytes(b"\x89PNG\r\n")
+    (c.work / "bad.xlsx").write_bytes(b"nope")
+
+    def view(rel):
+        return c.call("GET", f"/api/sessions/s1/files/preview?path={quoted(rel)}")
+
+    assert view("n.md")[1] == {"kind": "md", "text": "# 제목\n본문", "truncated": False}
+    big = view("큰 글.md")[1]
+    assert big["truncated"] is True and len(big["text"].encode("utf-8")) <= docfiles.TEXT_LIMIT and "�" not in big["text"]
+    assert view("표.xlsx")[1]["sheets"][0]["rows"][0][:2] == ["이름", "수량"]
+    assert view("장.pptx")[1]["slides"][0] == {"index": 1, "texts": ["제목 이어서", "본문 한 줄"]}
+    assert view("d.docx")[1] == {"kind": "none"}
+    image = view("사진.png")[1]
+    assert image == {"kind": "image", "url": "/api/sessions/s1/files/raw?path=" + quote_path("사진.png")}
+    status, body, _ = view("bad.xlsx")
+    assert status == 422 and "엑셀" in body["error"]  # 못 읽은 것은 빈 표나 통과로 뭉개지 않는다
+
+
+def quote_path(rel):
+    return urllib.parse.quote(rel, safe="/")
+
+
+def test_file_raw_serves_images_only_with_sandbox_headers(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request)
+    (c.work / "사진 1.png").write_bytes(b"\x89PNG-data")
+    (c.work / "x.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>", encoding="utf-8")
+    (c.work / "n.md").write_text("글", encoding="utf-8")
+    status, data, resp = c.call("GET", f"/api/sessions/s1/files/raw?path={quoted('사진 1.png')}", binary=True)
+    assert data == b"\x89PNG-data"
+    assert status == 200 and resp.getheader("Content-Type") == "image/png" and resp.getheader("X-Content-Type-Options") == "nosniff"
+    svg_status, _, svg = c.call("GET", "/api/sessions/s1/files/raw?path=x.svg")
+    assert svg_status == 200 and svg.getheader("Content-Type") == "image/svg+xml" and "sandbox" in svg.getheader("Content-Security-Policy")
+    assert c.call("GET", "/api/sessions/s1/files/raw?path=n.md")[0] == 403  # 이미지가 아니면 내려주지 않는다
+    assert c.call("GET", "/api/sessions/s1/files/raw", cookie=False)[0] == 401
+
+
+def test_file_routes_refuse_paths_outside_cwd_and_missing_files(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request)
+    (tmp_path / "밖.md").write_text("비밀", encoding="utf-8")
+    (c.work / "sub").mkdir()
+    for rel in ("../밖.md", str(tmp_path / "밖.md"), "sub/../../밖.md"):
+        assert c.call("GET", f"/api/sessions/s1/files/preview?path={quoted(rel)}")[0] == 403, rel
+        assert c.call("GET", f"/api/sessions/s1/files/raw?path={quoted(rel)}")[0] == 403, rel
+        assert c.call("POST", "/api/sessions/s1/files/open", {"path": rel, "mode": "reveal"})[0] == 403, rel
+    assert c.call("GET", f"/api/sessions/s1/files/preview?path={quoted('없음.md')}")[0] == 404
+    assert c.call("GET", "/api/sessions/s1/files/preview?path=sub")[0] == 404  # 폴더는 파일이 아니다
+    assert c.call("GET", "/api/sessions/s1/files/preview")[0] == 400
+    try:
+        os.symlink(tmp_path / "밖.md", c.work / "link.md")
+    except (OSError, NotImplementedError):
+        return  # 링크를 만들 권한이 없는 환경
+    assert c.call("GET", "/api/sessions/s1/files/preview?path=link.md")[0] == 403  # 링크로 작업 폴더를 빠져나가지 못한다
+
+
+def test_file_open_calls_opener_with_real_path_and_mode(tmp_path, monkeypatch, request):
+    calls = []
+    c = files_console(tmp_path, monkeypatch, request, opener=lambda p, m: calls.append((p, m)) or "")
+    (c.work / "문서 1.xlsx").write_bytes(b"x")
+    assert c.call("POST", "/api/sessions/s1/files/open", {"path": "문서 1.xlsx", "mode": "open"})[:2] == (200, {"ok": True})
+    assert c.call("POST", "/api/sessions/s1/files/open", {"path": "문서 1.xlsx", "mode": "reveal"})[0] == 200
+    assert calls == [(os.path.realpath(c.work / "문서 1.xlsx"), "open"), (os.path.realpath(c.work / "문서 1.xlsx"), "reveal")]
+    assert c.call("POST", "/api/sessions/s1/files/open", {"path": "문서 1.xlsx", "mode": "run"})[0] == 400
+    assert c.call("POST", "/api/sessions/s1/files/open", {"path": "문서 1.xlsx"})[0] == 400
+    assert c.call("POST", "/api/sessions/s1/files/open", {"path": "없음.md", "mode": "open"})[0] == 404
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("name", ["x.bat", "x.cmd", "x.exe", "x.ps1", "x.js", "x.vbs", "x.lnk", "x.PY", "noext", "x.md.exe", "x.xlsm", "x.xls", "x.svg"])
+def test_file_open_blocks_executable_extensions_but_reveal_is_allowed(tmp_path, monkeypatch, request, name):
+    calls = []
+    c = files_console(tmp_path, monkeypatch, request, opener=lambda p, m: calls.append((p, m)) or "")
+    (c.work / name).write_bytes(b"x")
+    status, body, _ = c.call("POST", "/api/sessions/s1/files/open", {"path": name, "mode": "open"})
+    assert status == 403 and calls == []
+    assert c.call("POST", "/api/sessions/s1/files/open", {"path": name, "mode": "reveal"})[0] == 200 and calls[-1][1] == "reveal"
+
+
+def test_file_open_blocks_a_link_that_hides_an_executable(tmp_path, monkeypatch, request):
+    calls = []
+    c = files_console(tmp_path, monkeypatch, request, opener=lambda p, m: calls.append((p, m)) or "")
+    (c.work / "run.bat").write_bytes(b"x")
+    try:
+        os.symlink(c.work / "run.bat", c.work / "보고서.md")
+    except (OSError, NotImplementedError):
+        pytest.skip("링크를 만들 수 없는 환경")
+    assert c.call("POST", "/api/sessions/s1/files/open", {"path": "보고서.md", "mode": "open"})[0] == 403 and calls == []
+
+
+def test_file_open_opener_failure_is_502(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request, opener=lambda p, m: "열지 못했습니다: 없음")
+    (c.work / "a.md").write_text("x", encoding="utf-8")
+    status, body, _ = c.call("POST", "/api/sessions/s1/files/open", {"path": "a.md", "mode": "open"})
+    assert status == 502 and "열지 못했습니다" in body["error"]
+
+
+def test_open_path_commands_per_os():
+    seen = []
+
+    def popen(args, **kw):
+        seen.append(args)
+
+    path = "C:\\내 문서\\a b.md"
+    started = []
+    assert platform_compat.open_path(path, "open", "windows", popen, started.append) == "" and started == [path] and seen == []
+    assert platform_compat.open_path(path, "reveal", "windows", popen, started.append) == ""
+    assert seen[-1] == 'explorer /select,"C:\\내 문서\\a b.md"'  # 셸 없이 한 줄로(explorer 가 요구하는 모양)
+    platform_compat.open_path("/u/a b.md", "open", "macos", popen)
+    platform_compat.open_path("/u/a b.md", "reveal", "macos", popen)
+    platform_compat.open_path("/u/a b.md", "open", "linux", popen)
+    platform_compat.open_path("/u/a b.md", "reveal", "linux", popen)
+    assert seen[1:] == [["open", "/u/a b.md"], ["open", "-R", "/u/a b.md"], ["xdg-open", "/u/a b.md"], ["xdg-open", "/u"]]
+    assert "쓸 수 없는" in platform_compat.open_path('a"b', "open", "linux", popen)
+
+    def boom(args, **kw):
+        raise OSError("no such")
+
+    assert "열지 못했습니다" in platform_compat.open_path("/u/a", "open", "linux", boom)
+
+
+# ---- 작업용 폴더 ----
+
+def worktree_console(tmp_path, monkeypatch, request, root_out=None, **table):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    repo = tmp_path / "내 저장소"
+    repo.mkdir()
+    run = FakeRun(**dict({"git rev-parse --show-toplevel": (0, (root_out or str(repo)) + "\n"), "git fetch": (0, ""), "git worktree add": (0, "")}, **table))
+    c = Console(tmp_path, monkeypatch, run=run)
+    request.addfinalizer(c.close)
+    c.login()
+    assert c.call("POST", "/api/folders/validate", {"path": str(repo)})[1]["ok"]
+    c.repo, c.run = repo, run
+    return c
+
+
+def test_worktree_fetches_then_adds_detached_worktree_and_remembers_folder(tmp_path, monkeypatch, request):
+    c = worktree_console(tmp_path, monkeypatch, request)
+    status, body, _ = c.call("POST", "/api/folders/worktree", {"cwd": str(c.repo)})
+    assert status == 200
+    path = body["path"]
+    assert os.path.realpath(Path(path).parent) == os.path.realpath(c.repo.parent) and re.fullmatch(r"내 저장소-wt-[0-9a-f]{6}", Path(path).name)
+    calls = [k for k in c.run.calls if k.startswith(("git fetch", "git worktree"))]
+    assert calls == ["git fetch origin", f"git worktree add --detach {path} origin/main"]  # 브랜치를 만들지 않는다(--detach)
+    assert path in c.app.store.folders
+    assert not any(" branch" in k or "checkout" in k for k in c.run.calls)
+
+
+def test_worktree_uses_origin_head_branch(tmp_path, monkeypatch, request):
+    c = worktree_console(tmp_path, monkeypatch, request, **{"git symbolic-ref": (0, "origin/develop\n")})
+    path = c.call("POST", "/api/folders/worktree", {"cwd": str(c.repo)})[1]["path"]
+    assert f"git worktree add --detach {path} origin/develop" in c.run.calls
+
+
+def test_worktree_refusals_and_git_failures(tmp_path, monkeypatch, request):
+    c = worktree_console(tmp_path, monkeypatch, request)
+    assert c.call("POST", "/api/folders/worktree", {"cwd": str(tmp_path / "모르는 폴더")})[0] == 403
+    assert c.call("POST", "/api/folders/worktree", {})[0] == 403
+    assert not any(k.startswith("git worktree") for k in c.run.calls)
+    sub = worktree_console(tmp_path / "x", monkeypatch, request, root_out=str(tmp_path))  # 저장소 맨 위가 아닌 하위 폴더
+    assert sub.call("POST", "/api/folders/worktree", {"cwd": str(sub.repo)})[0] == 400
+    plain = worktree_console(tmp_path / "y", monkeypatch, request, **{"git rev-parse --show-toplevel": (128, "")})
+    assert plain.call("POST", "/api/folders/worktree", {"cwd": str(plain.repo)})[0] == 400
+    fetch = worktree_console(tmp_path / "z", monkeypatch, request, **{"git fetch": (1, "fatal: unable to access 'https://x/'\n")})
+    status, body, _ = fetch.call("POST", "/api/folders/worktree", {"cwd": str(fetch.repo)})
+    assert status == 502 and "unable to access" in body["error"] and not any(k.startswith("git worktree") for k in fetch.run.calls)
+    add = worktree_console(tmp_path / "w", monkeypatch, request, **{"git worktree add": (128, "fatal: invalid reference: origin/main\n")})
+    status, body, _ = add.call("POST", "/api/folders/worktree", {"cwd": str(add.repo)})
+    assert status == 502 and "invalid reference" in body["error"] and not any("-wt-" in f for f in add.app.store.folders)
+
+
+# ---- 같은 폴더 알림과 새 세션 점검 ----
+
+def test_same_folder_lists_other_live_sessions_in_the_same_cwd(authed):
+    c = authed
+    sub = str(c.work / "다른 폴더")
+    for sid, cwd in (("a", str(c.work)), ("b", str(c.work)), ("c", sub)):
+        c.hook("event", {"session_id": sid, "cwd": cwd, "hook_event_name": "SessionStart"})
+    model = lambda sid: c.call("GET", f"/api/sessions/{sid}")[1]  # noqa: E731
+    assert model("a")["sameFolder"] == ["b"] and model("b")["sameFolder"] == ["a"] and model("c")["sameFolder"] == []
+    if platform_compat.current_os() == "windows":  # 대소문자·구분자 차이는 같은 폴더로 본다
+        c.hook("event", {"session_id": "e", "cwd": str(c.work).upper().replace("\\", "/"), "hook_event_name": "SessionStart"})
+        assert "e" in model("a")["sameFolder"]
+    c.hook("event", {"session_id": "b", "cwd": str(c.work), "hook_event_name": "SessionEnd"})
+    assert "b" not in model("a")["sameFolder"]  # 끝난 세션은 뺀다
+
+
+def test_same_folder_event_is_published_to_peers(authed):
+    c = authed
+    c.hook("event", {"session_id": "a", "cwd": str(c.work), "hook_event_name": "SessionStart"})
+    conn, resp = c.connect_browser()
+    try:
+        c.hook("event", {"session_id": "b", "cwd": str(c.work), "hook_event_name": "SessionStart"})
+        seen = set()
+        while len(seen) < 2:
+            line = resp.fp.readline().decode("utf-8")
+            if line.startswith("data:"):
+                seen.add(json.loads(line[5:])["id"])
+        assert seen == {"a", "b"}  # 같은 폴더의 먼저 있던 세션 화면도 새 소식을 받는다
+    finally:
+        conn.close()
+
+
+def test_start_checks_follow_skill_events_and_can_be_skipped(mconsole):
+    c = mconsole
+    sid = launch(c, "점검")
+    ids = ["sync", "version", "update", "reload"]
+    got = c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"]
+    assert got == [{"id": i, "state": "pending"} for i in ids]
+    c.event(sid, "PreToolUse", tool_name="Skill", tool_input={"skill": "harness:sync"})
+    c.event(sid, "UserPromptExpansion", command_name="harness:version")
+    states_ = {x["id"]: x["state"] for x in c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"]}
+    assert states_ == {"sync": "done", "version": "done", "update": "pending", "reload": "pending"}
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/checks/update/skip", {})
+    assert status == 200 and {x["id"]: x["state"] for x in body["startChecks"]}["update"] == "skipped"
+    c.event(sid, "PreToolUse", tool_name="Skill", tool_input={"skill": "harness:update"})  # 건너뛴 것은 다시 바뀌지 않는다
+    assert {x["id"]: x["state"] for x in c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"]}["update"] == "skipped"
+    assert c.call("POST", f"/api/sessions/{sid}/checks/bogus/skip", {})[0] == 404
+    c.event("terminal-1", "SessionStart")
+    assert c.call("GET", "/api/sessions/terminal-1")[1]["startChecks"] == []  # 콘솔이 새로 띄운 세션만 점검 목록을 가진다
+
+
+def test_new_work_start_gives_start_checks(mconsole):
+    c = mconsole
+    jid = c.call("POST", "/api/new", {"text": "계획 세워줘", "cwd": str(c.work)})[1]["id"]
+    wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+    sid = c.call("POST", f"/api/new/{jid}/start", {})[1]["id"]
+    assert [x["id"] for x in c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"]] == ["sync", "version", "update", "reload"]
+
+
+# ---- 플러그인 다시 불러오기 ----
+
+def plugin_versions(c, sid):
+    return {p["name"]: p["version"] for p in c.call("GET", f"/api/sessions/{sid}")[1]["pluginVersions"]}
+
+
+def test_reload_uses_control_request_and_records_versions(mconsole):
+    c = mconsole
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    assert plugin_versions(c, sid) == {"harness": ""}  # init 이벤트의 plugins(판이 없으면 빈 칸)
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/reload", {})
+    assert status == 200 and body == {"ok": True, "method": "control", "errorCount": 0, "harnessVersion": "1.2.3",
+                                      "plugins": [{"name": "harness", "version": "1.2.3"}, {"name": "other", "version": "0.4"}]}
+    model = c.call("GET", f"/api/sessions/{sid}")[1]
+    assert plugin_versions(c, sid) == {"harness": "1.2.3", "other": "0.4"}
+    assert {x["id"]: x["state"] for x in model["startChecks"]}["reload"] == "done"
+    assert any("플러그인 다시 불러옴(control)" in x["text"] for x in model["log"])
+    assert model["report"] == "echo: 시작"  # 제어 요청은 모델을 부르지 않아 대화에 남지 않는다
+
+
+def test_reload_falls_back_to_slash_command_message(mconsole, monkeypatch):
+    monkeypatch.setenv("FAKE_NO_RELOAD_CONTROL", "1")
+    c = mconsole
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/reload", {})
+    assert status == 200 and body["method"] == "message" and body["errorCount"] == 0
+    assert body["message"] == "Reloaded: 2 plugins · 0 errors" and body["plugins"] == [{"name": "harness", "version": ""}]
+    wait_for(lambda: not c.app.store.get(sid)["turn_running"])
+    assert any("보냄: /reload-plugins" in x["text"] for x in c.app.store.get(sid)["log"])
+
+
+def test_reload_fails_with_502_when_neither_way_works(mconsole, monkeypatch):
+    monkeypatch.setenv("FAKE_NO_RELOAD_CONTROL", "1")
+    monkeypatch.setenv("FAKE_NO_RELOAD_MESSAGE", "1")
+    c = mconsole
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/reload", {})
+    assert status == 502 and "Unsupported control request" in body["error"] and "/reload-plugins" in body["error"]
+    assert {x["id"]: x["state"] for x in c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"]}["reload"] == "pending"  # 실패를 했음으로 적지 않는다
+
+
+def test_reload_refusals(mconsole):
+    c = mconsole
+    c.event("term", "SessionStart")
+    assert c.call("POST", "/api/sessions/term/reload", {})[0] == 409  # 터미널 세션
+    assert c.call("POST", "/api/sessions/nope/reload", {})[0] == 404
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    c.app.manager.close(c.app.manager.proc_for(sid))
+    wait_for(lambda: c.app.store.get(sid)["ended"])
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/reload", {})
+    assert status == 409 and "끝난 세션" in body["error"]
+
+
+def test_reload_waits_for_the_running_turn_then_runs(mconsole, monkeypatch, tmp_path):
+    gate = tmp_path / "gate"
+    monkeypatch.setenv("FAKE_GATE", str(gate))
+    c = mconsole
+    c.app.wait_poll = 0.05
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    assert c.call("POST", f"/api/sessions/{sid}/messages", {"text": "slow 작업"})[0] == 202
+    wait_for(lambda: c.app.store.get(sid)["turn_running"])
+    assert c.call("POST", f"/api/sessions/{sid}/reload", {}) [:2] == (202, {"queued": True})
+    assert c.call("POST", f"/api/sessions/{sid}/reload", {})[:2] == (202, {"queued": True})  # 두 번 눌러도 한 번만 대기한다
+    time.sleep(0.3)
+    assert plugin_versions(c, sid) == {"harness": ""}  # 턴이 도는 동안은 실행하지 않는다
+    gate.write_text("go", encoding="utf-8")
+    wait_for(lambda: plugin_versions(c, sid).get("harness") == "1.2.3")
+    logs = [x["text"] for x in c.app.store.get(sid)["log"]]
+    assert sum("플러그인 다시 불러옴(control)" in t for t in logs) == 1
+    assert not c.app.reload_queue
+
+
+def test_reload_all_reports_each_console_session(mconsole):
+    c = mconsole
+    a, b = launch(c, "하나"), launch(c, "둘")
+    c.event("term", "SessionStart")
+    for sid in (a, b):
+        wait_for(lambda: c.app.store.get(sid)["report"].startswith("echo:"))
+    status, body, _ = c.call("POST", "/api/reload-all", {})
+    assert status == 200
+    results = {r["sessionId"]: r for r in body["results"]}
+    assert set(results) == {a, b}  # 터미널 세션은 대상이 아니다
+    assert all(r["ok"] and r["method"] == "control" and r["harnessVersion"] == "1.2.3" for r in results.values())
+    assert plugin_versions(c, a)["harness"] == plugin_versions(c, b)["harness"] == "1.2.3"
+
+
+def test_init_event_plugin_versions_keep_known_versions():
+    store = Store(None)
+    m = managed.Manager(store, lambda: None, "/p")
+    s = store.ensure("s1", "/w")
+    s["pluginVersions"] = [{"name": "harness", "version": "1.0"}]
+
+    class P:
+        session_id = None
+        temp_id = "s1"
+        results = 0
+
+    m.on_event(P(), {"type": "system", "subtype": "init", "session_id": "s1", "plugins": [{"name": "harness"}, {"name": "x", "version": 2}]})
+    assert s["pluginVersions"] == [{"name": "harness", "version": "1.0"}, {"name": "x", "version": "2"}]
+    assert managed.plugin_list("nope") == [] and managed.plugin_list([1, {"name": ""}, {"version": "1"}]) == []
+
+
+# ---- 다음 갈래로 넘어가기 ----
+
+def next_console(tmp_path, monkeypatch, request):
+    c = flow_console(tmp_path, monkeypatch, claude_cmd=fake_cmd)
+    request.addfinalizer(c.close)
+    c.app.wait_poll = 0.05
+    return c
+
+
+def finished_job(c, job_id):
+    return wait_for(lambda: (lambda j: j if j["status"] in ("started", "failed", "canceled") else None)(c.call("GET", f"/api/jobs/{job_id}")[1]))
+
+
+def confirm_job(c, job_id, **body):
+    """인계가 끝나 사람 확인을 기다리는 job 을 확인해 새 세션을 시작시키고 끝난 job 을 돌려준다."""
+    wait_for(lambda: c.call("GET", f"/api/jobs/{job_id}")[1]["status"] in ("confirm", "failed"))
+    status, answer, _ = c.call("POST", f"/api/jobs/{job_id}/confirm", body)
+    assert status == 202, answer
+    return finished_job(c, job_id)
+
+
+def test_last_code_block_extraction():
+    assert handoff.last_code_block("앞\n```\n첫째\n```\n뒤\n```text\n둘째 줄1\n줄2\n```\n끝") == "둘째 줄1\n줄2"
+    assert handoff.last_code_block("```\n빈\n```\n```\n\n```") == "빈"  # 비어 있는 마지막 블록은 건너뛴다
+    assert handoff.last_code_block("````\n안에 ``` 가 있다\n````") == "안에 ``` 가 있다"
+    assert handoff.last_code_block("블록 없음") == "" and handoff.last_code_block("") == ""
+
+
+def test_flow_next_hands_off_then_starts_new_session_with_checks(tmp_path, monkeypatch, request):
+    c = next_console(tmp_path, monkeypatch, request)
+    sid = c.app.manager.launch(str(c.work), "첫 작업", model="haiku", effort="low", permission="plan")
+    sid = wait_for(lambda: (c.app.store.resolve_id(sid) != sid) and c.app.store.resolve_id(sid))
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫 작업")
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})
+    assert status == 202
+    waiting = wait_for(lambda: (lambda j: j if j["status"] == "confirm" else None)(c.call("GET", f"/api/jobs/{body['jobId']}")[1]))
+    assert waiting["prompt"] == "앞선 작업: SRS 를 끝냈다. 이어서 Spec 을 만든다."  # 사람이 보기 전에는 새 세션을 띄우지 않는다
+    time.sleep(0.2)
+    assert len(c.call("GET", "/api/sessions")[1]) == 1 and c.app.manager.proc_for(sid).alive()
+    job = confirm_job(c, body["jobId"])
+    assert job["status"] == "started" and job["fromSession"] == sid and job["flowId"] == "spec" and job["error"] == ""
+    new = job["sessionId"]
+    assert new != sid
+    first = wait_for(lambda: (lambda r: r if r.startswith("echo: ") else None)(c.app.store.get(new)["report"]))
+    assert first.startswith("echo: 새 세션 시작 점검: /harness:sync 로 최신을 받고, 플러그인 판(/harness:version)을 확인해 낡았으면 알려 줘")
+    assert "그다음 인계 내용을 이어서: 앞선 작업: SRS 를 끝냈다. 이어서 Spec 을 만든다." in first
+    assert "/harness:spec" in first  # 그 갈래의 첫 스킬 지시
+    model = c.call("GET", f"/api/sessions/{new}")[1]
+    assert model["managed"] and model["cwd"] == str(c.work) and model["flowId"] == "spec"
+    assert (model["modelChoice"], model["effortChoice"], model["permissionChoice"]) == ("haiku", "low", "plan")  # 이전 세션 값을 승계
+    assert [x["id"] for x in model["startChecks"]] == ["sync", "version", "update", "reload"]
+    assert model["model"] == "haiku" and model["sameFolder"] == []  # 넘어간 이전 세션은 같은 폴더 경고에서 빠진다
+    old = wait_for(lambda: (lambda m: m if m["status"] == "ended" else None)(c.call("GET", f"/api/sessions/{sid}")[1]))  # stdin 을 닫아 정상 종료
+    assert old["handedOffTo"] == new and old["sameFolder"] == [] and model["handedOffTo"] is None
+    old_log = " ".join(x["text"] for x in c.app.store.get(sid)["log"])
+    assert "보냄: /harness:handoff" in old_log and "다음 세션으로 넘어감" in old_log
+
+
+def test_flow_next_stops_without_new_session_when_handoff_has_no_code_block(tmp_path, monkeypatch, request):
+    monkeypatch.setenv("FAKE_HANDOFF", "none")
+    c = next_console(tmp_path, monkeypatch, request)
+    sid = launch(c, "첫 작업")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫 작업")
+    body = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[1]
+    job = finished_job(c, body["jobId"])
+    assert job["status"] == "failed" and "마지막 코드 블록" in job["error"] and job["sessionId"] is None
+    assert len(c.call("GET", "/api/sessions")[1]) == 1  # 새 세션을 띄우지 않았다
+    assert any("다음 갈래로 넘기기 실패" in x["text"] for x in c.app.store.get(sid)["log"])
+    # 실패한 뒤에는 다시 시도할 수 있다
+    assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[0] == 202
+
+
+def test_flow_next_refusals(tmp_path, monkeypatch, request):
+    c = next_console(tmp_path, monkeypatch, request)
+    c.event("term", "SessionStart")
+    status, body, _ = c.call("POST", "/api/sessions/term/flow/next", {"flowId": "spec"})
+    assert status == 409 and "/harness:handoff" in body["error"]  # 터미널 세션은 인계를 보낼 수 없다
+    sid = launch(c, "첫 작업")
+    assert c.call("POST", f"/api/sessions/{sid}/flow/next", {})[0] == 400
+    assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": 3})[0] == 400
+    assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "nope"})[0] == 400
+    assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "atc"})[0] == 409  # env/adt-tiers.yaml 이 없는 폴더
+    assert c.call("POST", "/api/sessions/nope/flow/next", {"flowId": "spec"})[0] == 404
+    assert c.call("GET", "/api/jobs/nope")[0] == 404
+    assert len(c.call("GET", "/api/sessions")[1]) == 2  # 거절한 요청은 세션을 늘리지 않는다
+
+
+def test_flow_next_waits_for_running_turn_and_rejects_a_second_job(tmp_path, monkeypatch, request):
+    gate = tmp_path / "gate"
+    monkeypatch.setenv("FAKE_GATE", str(gate))
+    c = next_console(tmp_path, monkeypatch, request)
+    sid = launch(c, "첫 작업")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫 작업")
+    c.call("POST", f"/api/sessions/{sid}/messages", {"text": "slow 작업"})
+    wait_for(lambda: c.app.store.get(sid)["turn_running"])
+    job_id = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[1]["jobId"]
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "dev"})
+    assert status == 409 and "이미" in body["error"]
+    assert c.call("GET", f"/api/jobs/{job_id}")[1]["status"] == "handoff"
+    time.sleep(0.3)
+    assert not any("보냄: /harness:handoff" in x["text"] for x in c.app.store.get(sid)["log"])  # 턴이 도는 동안은 인계를 보내지 않는다
+    gate.write_text("go", encoding="utf-8")
+    assert confirm_job(c, job_id)["status"] == "started"
+
+
+def test_flow_next_confirm_edits_prompt_and_cancel_and_double_confirm(tmp_path, monkeypatch, request):
+    c = next_console(tmp_path, monkeypatch, request)
+    sid = launch(c, "첫 작업")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫 작업")
+    # 취소: 새 세션을 띄우지 않고 이전 세션은 그대로 둔다
+    job_id = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[1]["jobId"]
+    wait_for(lambda: c.call("GET", f"/api/jobs/{job_id}")[1]["status"] == "confirm")
+    assert c.call("POST", f"/api/jobs/{job_id}/cancel", {})[1]["status"] == "canceled"
+    assert c.call("POST", f"/api/jobs/{job_id}/confirm", {})[0] == 409  # 취소한 job 은 시작할 수 없다
+    assert len(c.call("GET", "/api/sessions")[1]) == 1 and c.app.manager.proc_for(sid).alive()
+    # 고쳐서 시작: 고친 글이 새 세션 첫 메시지에 들어간다. 빈 글·긴 글은 거절하고 job 은 확인 대기로 남는다
+    job_id = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[1]["jobId"]
+    wait_for(lambda: c.call("GET", f"/api/jobs/{job_id}")[1]["status"] == "confirm")
+    assert c.call("POST", f"/api/jobs/{job_id}/confirm", {"prompt": "  "})[0] == 400
+    assert c.call("POST", f"/api/jobs/{job_id}/confirm", {"prompt": "가" * 4001})[0] == 400
+    assert c.call("POST", f"/api/jobs/{job_id}/confirm", {"prompt": 3})[0] == 400
+    assert c.call("GET", f"/api/jobs/{job_id}")[1]["status"] == "confirm"
+    job = confirm_job(c, job_id, prompt="내가 고친 인계 글")
+    assert job["status"] == "started"
+    first = wait_for(lambda: (lambda r: r if r.startswith("echo: ") else None)(c.app.store.get(job["sessionId"])["report"]))
+    assert "내가 고친 인계 글" in first and "SRS 를 끝냈다" not in first
+    assert c.call("POST", f"/api/jobs/{job_id}/confirm", {})[0] == 409  # 이미 시작한 job
+    assert c.call("POST", "/api/jobs/nope/confirm", {})[0] == 404 and c.call("POST", "/api/jobs/nope/cancel", {})[0] == 404
+
+
+def test_flow_next_fails_when_handoff_prompt_is_too_long(tmp_path, monkeypatch, request):
+    monkeypatch.setenv("FAKE_HANDOFF", "long")
+    c = next_console(tmp_path, monkeypatch, request)
+    sid = launch(c, "첫 작업")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫 작업")
+    job_id = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[1]["jobId"]
+    job = finished_job(c, job_id)
+    assert job["status"] == "failed" and "너무 깁니다" in job["error"] and len(c.call("GET", "/api/sessions")[1]) == 1
+
+
+def test_flow_next_keeps_only_allowed_permission_and_closes_old_after_init(tmp_path, monkeypatch, request):
+    c = next_console(tmp_path, monkeypatch, request)
+    sid = launch(c, "첫 작업")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫 작업")
+    with c.app.store.lock:
+        c.app.store.get(sid)["permissionChoice"] = "bypassPermissions"  # 허용 집합 밖의 값은 승계하지 않는다
+    seen, closed_when = [], []
+    real_launch, real_close = c.app.manager.launch, c.app.manager.close
+    c.app.manager.launch = lambda *a, **kw: seen.append(kw.get("permission")) or real_launch(*a, **kw)
+
+    def spy_close(proc, *a, **kw):  # 이전 세션을 닫는 순간 새 세션이 시작 신호(init)를 냈는지 기록한다
+        with c.app.store.lock:
+            closed_when.append([s.get("starting") for s in c.app.store.sessions.values() if s["id"] != sid and s.get("managed")])
+        return real_close(proc, *a, **kw)
+
+    c.app.manager.close = spy_close
+    job_id = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[1]["jobId"]
+    job = confirm_job(c, job_id)
+    assert job["status"] == "started" and seen == [None]
+    assert closed_when == [[False]]
+
+
+def test_flow_next_run_exception_fails_job_and_frees_the_session(tmp_path, monkeypatch, request):
+    c = next_console(tmp_path, monkeypatch, request)
+    sid = launch(c, "첫 작업")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫 작업")
+    c.app.deliver = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("터짐"))
+    job_id = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[1]["jobId"]
+    job = finished_job(c, job_id)
+    assert job["status"] == "failed" and "RuntimeError" in job["error"]
+    del c.app.deliver  # 시험용 대체를 걷어 내면 같은 세션이 다시 넘길 수 있다(JOB_ACTIVE 가 풀렸다)
+    assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[0] == 202
+
+
+def test_flow_next_needs_flow_data(tmp_path, monkeypatch, request):
+    c = Console(tmp_path, monkeypatch, claude_cmd=fake_cmd)
+    request.addfinalizer(c.close)
+    c.login()
+    sid = launch(c, "첫 작업")
+    assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[0] == 503

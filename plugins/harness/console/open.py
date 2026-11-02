@@ -15,6 +15,7 @@ for _stream in (sys.stdout, sys.stderr):  # Windows 콘솔 기본 코드페이�
 import http.client
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -78,6 +79,35 @@ def launch_server(port: int, os_name: str | None = None, popen=subprocess.Popen,
         return popen(args, **kwargs)
 
 
+STOP_PORT_WAIT = 10.0   # --stop 이 포트가 풀리기를 기다리는 최대 시간(초)
+START_PORT_WAIT = 3.0   # 시작할 때 포트가 사용 중이면 풀리기를 기다리는 시간(초)
+
+
+def port_bindable(port: int) -> bool:
+    """서버가 열 때와 같은 방식으로 이 포트를 열 수 있는가."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if platform_compat.current_os() != "windows":  # server.py 의 Server.allow_reuse_address 와 같다
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def wait_port_released(port: int, seconds: float) -> bool:
+    """우리 서버가 응답하지 않고 포트도 열 수 있게 될 때까지 기다린다. 시간 안에 풀리면 True."""
+    end = time.monotonic() + seconds
+    while True:
+        if probe(port) == "free" and port_bindable(port):
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.1)
+
+
 def err_path() -> Path:
     return platform_compat.state_dir() / "server.err"
 
@@ -104,6 +134,10 @@ def ensure_server(port: int, wait: float = 20.0) -> str | None:
         return None
     if state == "other":
         return f"포트 {port} 를 다른 프로그램이 쓰고 있어 웹 콘솔을 띄울 수 없습니다."
+    wait_port_released(port, START_PORT_WAIT)  # 방금 끈 서버의 포트가 풀리기를 잠깐 기다린다. 끝내 안 풀려도 띄워 원인을 남기게 한다
+    state = probe(port)
+    if state == "ours":
+        return None
     start_server(port)
     end = time.monotonic() + wait
     while time.monotonic() < end:
@@ -131,10 +165,8 @@ def stop_server(port: int) -> str:
     status, _ = request(port, "POST", "/api/shutdown", {})  # 정상 종료 절차를 먼저 요청한다
     if status != 200:
         platform_compat.terminate_pid(pid)  # 위에서 /api/health 로 우리 서버임을 확인했다
-    for _ in range(50):
-        if probe(port) == "free":
-            return "웹 콘솔 서버를 껐습니다."
-        time.sleep(0.1)
+    if wait_port_released(port, STOP_PORT_WAIT):  # 서버가 응답을 멈춘 뒤에도 소켓이 잠시 남는다 -> 바로 다시 띄우면 열지 못한다
+        return "웹 콘솔 서버를 껐습니다."
     return "웹 콘솔 서버가 아직 꺼지지 않았습니다."
 
 

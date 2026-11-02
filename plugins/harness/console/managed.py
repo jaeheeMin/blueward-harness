@@ -6,12 +6,13 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from typing import Callable
 
 import platform_compat
 from hooks_api import tool_key
-from store import RequestLimit, Store, TITLE_PROMPT
+from store import CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, mark_check, new_start_checks
 
 FLAGS = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
          "--permission-prompt-tool", "stdio"]
@@ -30,6 +31,14 @@ PERMISSION_LABELS = dict(PERMISSION_OPTIONS)
 # 살아 있는 세션에 set_permission_mode 를 보내고 control_response 를 기다리는 시간(초). 빈 값(기본)은 claude 쪽 이름 default 로 보낸다.
 MODE_REPLY_WAIT = 8.0
 DEFAULT_MODE_NAME = "default"
+# 플러그인 다시 불러오기: control_request(reload_plugins) 가 안 되면 user 메시지 /reload-plugins 로 대신한다(모델 비용 없는 합성 응답).
+RELOAD_SUBTYPE = "reload_plugins"
+RELOAD_COMMAND = "/reload-plugins"
+RELOAD_REPLY_WAIT = 20.0
+RELOAD_MESSAGE_WAIT = 60.0
+RELOAD_POLL = 0.05
+RELOADED = re.compile(r"Reloaded:\s*\d+\s+plugins?", re.IGNORECASE)
+RELOAD_ERRORS = re.compile(r"(\d+)\s+errors?", re.IGNORECASE)
 
 
 def parse_line(line: str):
@@ -56,6 +65,14 @@ def summarize_tool(name: str, tool_input) -> str:
     return name
 
 
+def plugin_list(raw) -> list[dict]:
+    """claude 가 알려 준 플러그인 목록을 [{name, version}] 으로 줄인다. 모양이 다르면 빈 목록."""
+    if not isinstance(raw, list):
+        return []
+    return [{"name": p["name"], "version": str(p["version"]) if p.get("version") is not None else ""}
+            for p in raw if isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"]]
+
+
 class Proc:
     """프로세스 하나와 읽기 스레드."""
 
@@ -63,6 +80,10 @@ class Proc:
         self.manager, self.temp_id, self.p = manager, temp_id, popen
         self.session_id: str | None = None
         self.write_lock = threading.Lock()
+        self.reload_lock = threading.Lock()
+        self.results = 0  # 받은 result 이벤트 수. 보낸 메시지의 턴이 끝났는지 이 수가 늘었는지로 안다
+        self.last_result = ""
+        self.last_error = False
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
 
@@ -212,6 +233,8 @@ class Manager:
             s["modelChoice"] = self.model if model is None else model
             s["effortChoice"] = self.effort if effort is None else effort
             s["permissionChoice"] = permission or ""
+            if not resume:
+                s["startChecks"] = new_start_checks()  # 새 세션 점검 체크리스트(이어서 띄운 세션에는 새로 만들지 않는다)
             if title:
                 self.store.set_title(s, title, TITLE_PROMPT)
         proc = Proc(self, temp, p)
@@ -221,6 +244,7 @@ class Manager:
         if first_message:
             self.send(temp, first_message)
         self.store.touch(s)
+        self.store.touch_peers(s)
         return temp
 
     # ---- 보내기 ----
@@ -298,6 +322,105 @@ class Manager:
         proc = self.proc_for(sid)
         return bool(proc and proc.alive())
 
+    def result_marker(self, sid: str):
+        """(프로세스, 지금까지 받은 result 수). 이 뒤에 보낸 메시지의 턴이 끝났는지 result_after 로 본다."""
+        proc = self.proc_for(sid)
+        return proc, (proc.results if proc is not None else 0)
+
+    def result_after(self, sid: str, marker) -> tuple[bool, str, bool, str]:
+        """(끝났는가, 결과 글, 오류인가, 못 기다리는 사유). 사유가 있으면 더 기다려도 소용없다(프로세스가 끝남).
+        프로세스가 새로 떴으면(이어서 띄움) 그 프로세스의 첫 result 부터 센다."""
+        proc0, before = marker
+        proc = self.proc_for(sid)
+        if proc is None:
+            return False, "", False, "세션 프로세스가 없습니다."
+        base = before if proc is proc0 else 0
+        if proc.results > base:
+            return True, proc.last_result, proc.last_error, ""
+        if not proc.alive():
+            return False, "", False, "세션 프로세스가 끝났습니다."
+        return False, "", False, ""
+
+    # ---- 플러그인 다시 불러오기 ----
+    def control_call(self, proc: Proc, request: dict, wait_seconds: float) -> dict:
+        """control_request 를 보내고 control_response 를 기다린다. {"ok", "response"(성공 때 본문 dict), "error"}."""
+        request_id = uuid.uuid4().hex[:8]
+        wait = {"event": threading.Event(), "response": None}
+        with self.lock:
+            self.mode_waits[request_id] = wait
+        try:
+            if not proc.write(json.dumps({"type": "control_request", "request_id": request_id, "request": request}) + "\n"):
+                return {"ok": False, "error": "실행 중인 프로세스에 보내지 못했습니다."}
+            if not wait["event"].wait(wait_seconds):
+                return {"ok": False, "error": "세션이 답하지 않았습니다."}
+        finally:
+            with self.lock:
+                self.mode_waits.pop(request_id, None)
+        response = wait["response"] or {}
+        if response.get("subtype") != "success":
+            return {"ok": False, "error": str(response.get("error") or "알 수 없는 오류")[:200]}
+        inner = response.get("response")
+        return {"ok": True, "response": inner if isinstance(inner, dict) else {}}
+
+    def reload_plugins(self, sid: str) -> dict:
+        """세션이 이미 띄운 플러그인을 디스크의 최신 판으로 다시 불러온다. 턴 도중이면 부르지 않는다(호출한 쪽이 끝날 때까지 기다린다).
+        {"ok", "method"("control"|"message"), "plugins"[{name,version}], "errorCount", "message"?} 또는 {"ok": False, "error", "dead"?}."""
+        proc = self.proc_for(sid)
+        real = self.store.resolve_id(sid)
+        if proc is None or not proc.alive():
+            return {"ok": False, "dead": True, "error": "세션 프로세스가 끝났습니다."}
+        with proc.reload_lock:
+            got = self.control_call(proc, {"subtype": RELOAD_SUBTYPE}, RELOAD_REPLY_WAIT)
+            if got["ok"]:
+                count = got["response"].get("error_count")
+                result = {"ok": True, "method": "control", "plugins": plugin_list(got["response"].get("plugins")),
+                          "errorCount": count if isinstance(count, int) and not isinstance(count, bool) else 0}
+            else:
+                fallback = self._reload_by_message(proc, real)
+                if not fallback["ok"]:
+                    error = f"control_request: {got['error']}; {RELOAD_COMMAND}: {fallback['error']}"
+                    self._warn(real, "플러그인 다시 불러오기 실패: " + error)
+                    return {"ok": False, "error": error}
+                result = fallback
+        self._record_reload(real, result)
+        return result
+
+    def _reload_by_message(self, proc: Proc, real: str) -> dict:
+        before = proc.results
+        with self.store.lock:
+            s = self.store.get(real)
+            if s is not None:
+                s["turn_running"] = True
+        if not self.send(real, RELOAD_COMMAND):
+            return {"ok": False, "error": "메시지를 보내지 못했습니다."}
+        deadline = time.monotonic() + RELOAD_MESSAGE_WAIT
+        while proc.results <= before:
+            if not proc.alive():
+                return {"ok": False, "error": "세션 프로세스가 끝났습니다."}
+            if time.monotonic() > deadline:
+                return {"ok": False, "error": "답이 오지 않았습니다."}
+            time.sleep(RELOAD_POLL)
+        text = proc.last_result
+        if proc.last_error or not RELOADED.search(text):
+            return {"ok": False, "error": ("이 판은 지원하지 않는 듯합니다: " + text.strip()[:100]) if text.strip() else "빈 응답입니다."}
+        errors = RELOAD_ERRORS.search(text)
+        with self.store.lock:
+            s = self.store.get(real)
+            known = [dict(p) for p in (s.get("pluginVersions") or [])] if s is not None else []
+        return {"ok": True, "method": "message", "plugins": known, "errorCount": int(errors.group(1)) if errors else 0,
+                "message": text.strip()[:200]}
+
+    def _record_reload(self, real: str, result: dict) -> None:
+        with self.store.lock:
+            s = self.store.get(real)
+            if s is None:
+                return
+            if result["plugins"]:
+                s["pluginVersions"] = [dict(p) for p in result["plugins"]]
+            mark_check(s, "reload", CHECK_DONE)
+            self.store.add_log(s, f"플러그인 다시 불러옴({result['method']}): {len(result['plugins'])}개, 오류 {result['errorCount']}개")
+        self.store.touch(s)
+
     def resume(self, sid: str, text: str) -> bool:
         """끝난 세션을 --resume 으로 다시 띄우고 메시지를 보낸다."""
         with self.store.lock:
@@ -325,6 +448,10 @@ class Manager:
                 self.store.add_log(s, text)
 
     def on_event(self, proc: Proc, e: dict) -> None:
+        if e.get("type") == "result":
+            proc.last_result = e["result"] if isinstance(e.get("result"), str) else ""
+            proc.last_error = bool(e.get("is_error"))
+            proc.results += 1
         if e.get("type") == "control_response":
             response = e.get("response") if isinstance(e.get("response"), dict) else {}
             with self.lock:
@@ -355,6 +482,10 @@ class Manager:
                     s["permissionMode"] = e["permissionMode"]
                 if isinstance(e.get("model"), str) and e["model"]:
                     s["model"] = e["model"]
+                plugins = plugin_list(e.get("plugins"))
+                if plugins:  # init 에 판이 안 실려 있으면 알던 판을 지키고, 실려 있으면 새로 적는다
+                    old = {p["name"]: p["version"] for p in s.get("pluginVersions") or []}
+                    s["pluginVersions"] = [dict(p, version=p["version"] or old.get(p["name"], "")) for p in plugins]
             elif kind == "assistant":
                 for block in (e.get("message") or {}).get("content") or []:
                     if not isinstance(block, dict):
@@ -440,6 +571,7 @@ class Manager:
             self.store.close_session(s["id"], "세션이 끝나서 닫힘")
             self.store.add_log(s, "세션 프로세스가 끝남")
         self.store.touch(s)
+        self.store.touch_peers(s)
 
     # ---- 종료 ----
     def close(self, proc: Proc, wait: float = 5.0) -> None:
