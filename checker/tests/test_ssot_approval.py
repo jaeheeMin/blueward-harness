@@ -99,8 +99,9 @@ def _reviews(login):
     return [_review(login, "APPROVED", "2026-01-01T00:00:00Z", "head1")]
 
 
-def _judge(author, text, reviewer):
-    return mod.judge_by_rules(author, _reviews(reviewer), mod.parse_approvers(text), "head1")
+def _judge(author, text, reviewer, admins=("boss",)):
+    is_admin = lambda login: login.lower() in admins  # noqa: E731
+    return mod.judge_by_rules(author, _reviews(reviewer), mod.parse_approvers(text), "head1", is_admin)
 
 
 @pytest.mark.parametrize("author, reviewer, ok", [
@@ -114,9 +115,116 @@ def test_사용자_예시_형식의_판정(author, reviewer, ok):
     assert _judge(author, USER_FORMAT, reviewer)[0] is ok
 
 
-def test_내용이_없는_파일은_누구든_승인할_수_있다():
+def test_내용이_없는_파일은_저장소_admin_만_승인할_수_있다():
     for text in (None, "", "# 주석뿐\n"):
-        assert _judge("author", text, "anyone")[0] is True
+        assert _judge("author", text, "boss")[0] is True  # admin 승인
+        approved, reason, _ = _judge("author", text, "anyone")  # admin 이 아닌 사람의 승인
+        assert approved is False and "관리자(admin)" in reason
+        assert _judge("boss", text, "boss")[0] is False  # 작성자 본인은 admin 이어도 제외
+
+
+def test_내용이_없는_파일에서_권한을_못_읽으면_통과도_위반도_아니고_GhError():
+    def boom(login):
+        raise GhError("HTTP 403")
+
+    with pytest.raises(GhError):
+        mod.judge_by_rules("author", _reviews("boss"), mod.parse_approvers(None), "head1", boom)
+    # 승인 리뷰가 없으면 권한을 물을 사람이 없으니 읽기 실패와 무관하게 미승인이다.
+    assert mod.judge_by_rules("author", [], mod.parse_approvers(None), "head1", boom)[0] is False
+
+
+def test_내용이_있는_파일은_권한을_묻지_않는다():
+    def boom(login):
+        raise AssertionError("파일에 내용이 있으면 admin 조회를 하지 않는다")
+
+    assert mod.judge_by_rules("jaeheeMin", _reviews("CSH-DOT123"), mod.parse_approvers(USER_FORMAT), "head1", boom)[0]
+
+
+class _PermClient:
+    def __init__(self, perms, fail=False):
+        self.perms, self.fail, self.calls = perms, fail, []
+
+    def get_json(self, path):
+        self.calls.append(path)
+        if self.fail:
+            raise GhError("HTTP 500")
+        login = path.split("/collaborators/")[1].split("/")[0]
+        return self.perms[login]
+
+
+def test_AdminChecker_는_permission_이_admin_일_때만_참이고_결과를_캐시한다():
+    client = _PermClient({"boss": {"permission": "admin"}, "dev": {"permission": "write"}, "x": {"permission": "none"}})
+    check = mod.AdminChecker(client, "o/r")
+    assert check("Boss") is True and check("boss") is True
+    assert check("dev") is False and check("x") is False
+    assert client.calls.count("repos/o/r/collaborators/boss/permission") == 1
+
+
+def test_AdminChecker_는_읽지_못하거나_응답이_이상하면_GhError():
+    with pytest.raises(GhError):
+        mod.AdminChecker(_PermClient({}, fail=True), "o/r")("boss")
+    with pytest.raises(GhError):
+        mod.AdminChecker(_PermClient({"boss": {}}), "o/r")("boss")
+
+
+class _ErrClient:
+    def __init__(self, exc):
+        self.exc = exc
+
+    def get_json(self, path):
+        raise self.exc
+
+
+def test_AdminChecker_404_계정_없음은_admin_아님이고_캐시한다():
+    exc = GhError("gh api ... 실패: gh: ghost is not a user (HTTP 404)", status=404)
+    client = _ErrClient(exc)
+    check = mod.AdminChecker(client, "o/r")
+    assert check("ghost") is False
+    client.exc = AssertionError("캐시되어야 한다")
+    assert check("Ghost") is False
+
+
+@pytest.mark.parametrize("exc", [
+    GhError("gh: Not Found (HTTP 404)", status=404),
+    GhError("gh: ghost is not a user (HTTP 403)", status=403),
+    GhError("gh: Resource not accessible (HTTP 403)", status=403),
+    GhError("gh: Server Error (HTTP 500)", status=500),
+    GhError("gh 실행에 실패했다: timeout"),
+])
+def test_AdminChecker_계정_없음_말고_못_읽으면_검사_불능(exc):
+    with pytest.raises(GhError):
+        mod.AdminChecker(_ErrClient(exc), "o/r")("boss")
+
+
+def test_삭제된_계정의_승인은_통과도_검사_불능도_아닌_승인_불인정():
+    check = mod.AdminChecker(_ErrClient(GhError("gh: ghost is not a user (HTTP 404)", status=404)), "o/r")
+    approved, reason, _ = mod.judge_admin_only("author", _reviews("ghost"), "head1", check)
+    assert approved is False and reason == mod.NO_ADMIN_APPROVAL
+
+
+def test_judge_admin_only_는_최신_상태가_현재_커밋_APPROVED_인_사람만_조회한다():
+    asked = []
+
+    def is_admin(login):
+        asked.append(login)
+        if login == "bad":
+            raise GhError("HTTP 500")
+        return login == "boss"
+
+    reviews = [
+        _review("boss", "APPROVED", "2026-01-01T00:00:00Z", "head1"),
+        _review("bad", "APPROVED", "2026-01-01T00:00:00Z", "head1"),
+        _review("bad", "CHANGES_REQUESTED", "2026-01-02T00:00:00Z", "head1"),  # 이후 바뀜
+        _review("old", "APPROVED", "2026-01-01T00:00:00Z", "head0"),  # 낡은 커밋
+        _review("author", "APPROVED", "2026-01-01T00:00:00Z", "head1"),  # 작성자
+        _review("note", "COMMENTED", "2026-01-01T00:00:00Z", "head1"),
+    ]
+    old_bad = lambda login: (_ for _ in ()).throw(GhError("HTTP 500")) if login in ("old", "bad") else is_admin(login)  # noqa: E731
+    approved, _, _ = mod.judge_admin_only("author", reviews, "head1", old_bad)
+    assert approved is True
+    asked.clear()
+    approved, _, _ = mod.judge_admin_only("author", reviews, "head1", is_admin)
+    assert approved is True and asked == ["boss"]
 
 
 def test_내용은_있는데_이_작성자의_승인자가_없으면_누구든이_아니라_미승인():
@@ -128,7 +236,7 @@ def test_내용은_있는데_이_작성자의_승인자가_없으면_누구든�
 
 
 def test_옛_형식에서_목록에_작성자뿐이어도_예전처럼_미승인():
-    assert _judge("author", "author\n", "anyone")[0] is False
+    assert _judge("author", "author\n", "boss")[0] is False
     assert _judge("author", "author\nbob\n", "bob")[0] is True
     assert _judge("author", "author\nbob\n", "anyone")[0] is False
 
@@ -418,6 +526,7 @@ def test_decide_pr_는_fetch_함수들을_조합한다(monkeypatch):
         lambda c, r, n: [_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "head1")],
     )
     monkeypatch.setattr(mod, "fetch_approver_rules", lambda c, r, ref: mod.parse_approvers(None))
+    monkeypatch.setattr(mod, "AdminChecker", lambda c, r: lambda login: login == "reviewer")
 
     result = mod.decide_pr(mod.GhClient(), "owner/repo", 1)
     assert result == {"touches_ssot": True, "approved": True, "reason": "reviewer 가 승인했다"}
@@ -487,12 +596,54 @@ def _client_for_pr(reviews, head_sha="bbbbbbb1111"):
             "repos/o/r/pulls/7/files": [{"filename": "docs/ssot/SRS.md"}],
             "repos/o/r/pulls/7/reviews": reviews,
             "repos/o/r/contents/.github/ssot-approvers?ref=main": None,
+            "repos/o/r/collaborators/reviewer/permission": {"permission": "admin"},
         }
     )
 
 
-def test_decide_pr_는_옛_커밋_승인이면_stale_approvers_를_담아_미승인으로_답한다():
+def test_decide_pr_는_승인자_파일이_없으면_admin_이_아닌_사람의_승인을_인정하지_않는다():
+    client = _client_for_pr([_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "bbbbbbb1111")])
+    client.responses["repos/o/r/collaborators/reviewer/permission"] = {"permission": "write"}
+    result = mod.decide_pr(client, "o/r", 7)
+    assert result["touches_ssot"] is True and result["approved"] is False
+    assert "관리자(admin)" in result["reason"]
+
+
+def test_decide_pr_는_승인자_파일이_없고_권한을_못_읽으면_GhError_로_검사_불능():
+    client = _client_for_pr([_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "bbbbbbb1111")])
+    del client.responses["repos/o/r/collaborators/reviewer/permission"]  # KeyError 대신 GhError 를 던지게 바꾼다
+    orig = client.get_json
+
+    def fail(path):
+        if "/collaborators/" in path:
+            raise GhError("HTTP 403")
+        return orig(path)
+
+    client.get_json = fail
+    with pytest.raises(GhError):
+        mod.decide_pr(client, "o/r", 7)
+
+
+def _with_approvers_file(client, text="reviewer\n"):
+    import base64
+
+    client.responses["repos/o/r/contents/.github/ssot-approvers?ref=main"] = {
+        "content": base64.b64encode(text.encode("utf-8")).decode()
+    }
+    return client
+
+
+def test_decide_pr_는_파일이_없을_때_옛_커밋_승인자는_권한을_묻지_않고_미승인():
     client = _client_for_pr([_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "aaaaaaa9999")])
+    del client.responses["repos/o/r/collaborators/reviewer/permission"]
+    result = mod.decide_pr(client, "o/r", 7)  # 권한을 물었다면 KeyError/GhError
+    assert result["approved"] is False and "관리자(admin)" in result["reason"]
+
+
+def test_decide_pr_는_옛_커밋_승인이면_stale_approvers_를_담아_미승인으로_답한다():
+    client = _with_approvers_file(
+        _client_for_pr([_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "aaaaaaa9999")])
+    )
     result = mod.decide_pr(client, "o/r", 7)
     assert result["touches_ssot"] is True
     assert result["approved"] is False
@@ -520,7 +671,9 @@ def test_decide_pr_는_head_를_모르면_통과시키지_않고_판정_불가�
 
 def test_decide_commit_는_merge_시점_head_에_대한_승인만_인정한다():
     # merge 된 PR 의 head.sha 는 merge 시점의 마지막 커밋이다.
-    client = _client_for_pr([_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "aaaaaaa9999")])
+    client = _with_approvers_file(
+        _client_for_pr([_review("reviewer", "APPROVED", "2026-01-01T00:00:00Z", "aaaaaaa9999")])
+    )
     client.responses["repos/o/r/commits/msha/pulls"] = [
         {"number": 7, "merged_at": "2026-01-03T00:00:00Z", "html_url": "https://x/7"}
     ]

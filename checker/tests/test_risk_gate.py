@@ -503,14 +503,19 @@ def _client(
     base="main",
     head=HEAD,
     comments=None,
+    admins=(),
 ):
+    # 권한 조회: 따로 admin 으로 준 사람 말고는 write(= admin 아님). 값이 예외면 조회 실패를 흉내 낸다.
     r = {
+        "repos/o/r/collaborators/*": {"permission": "write"},
         "repos/o/r/pulls/5": {"user": {"login": author}, "base": {"ref": base}, "head": {"sha": head}},
         "repos/o/r/pulls/5/files": files if files is not None else [_file("src/a.py")],
         "repos/o/r/pulls/5/reviews": reviews or [],
         f"repos/o/r/commits/{head}/check-runs*": {"check_runs": check_runs or []},
         f"repos/o/r/commits/{head}/status*": {"statuses": statuses or []},
     }
+    for login in admins:
+        r[f"repos/o/r/collaborators/{login}/permission"] = {"permission": "admin"}
     if comments is not None:
         r["repos/o/r/issues/5/comments"] = comments
     if config is not None:
@@ -789,15 +794,40 @@ def test_작성자_자신의_승인은_인정하지_않는다():
     assert rg.decide_pr(client, "o/r", 5)["approved"] is False
 
 
-@pytest.mark.parametrize("approvers", [None, "", "# 주석뿐\n", "bob\n"])
-def test_승인자_목록이_비었거나_작성자뿐이면_승인으로_풀_수_없다고_밝힌다(approvers):
-    client = _client(files=[_file("rules/a.yaml")], approvers=approvers,
+def test_승인자_목록이_작성자뿐이면_승인으로_풀_수_없다고_밝힌다():
+    client = _client(files=[_file("rules/a.yaml")], approvers="bob\n",
                      reviews=[_review("alice", "APPROVED", HEAD)])
     result = rg.decide_pr(client, "o/r", 5)
     assert result["approved"] is False
     assert "비어 있" in result["approval_note"]
     assert "승인자의 GitHub 아이디를 추가" in result["next"]
     assert rg._exit_for(result) == 1
+
+
+@pytest.mark.parametrize("approvers", [None, "", "# 주석뿐\n"])
+def test_승인자_파일이_없거나_비면_저장소_admin_의_승인만_인정한다(approvers):
+    def gate(reviewer, admins):
+        client = _client(files=[_file("rules/a.yaml")], approvers=approvers, admins=admins,
+                         reviews=[_review(reviewer, "APPROVED", HEAD)])
+        return rg.decide_pr(client, "o/r", 5)
+
+    ok = gate("alice", ("alice",))
+    assert ok["approved"] is True and rg._exit_for(ok) == 0
+    no = gate("alice", ())  # 비admin 의 승인
+    assert no["approved"] is False and "관리자(admin)" in no["approval_note"]
+    assert rg._exit_for(no) == 1
+    # 작성자(bob) 본인은 admin 이어도 자기 PR 을 승인할 수 없다.
+    own = _client(files=[_file("rules/a.yaml")], approvers=approvers, admins=("bob",),
+                  reviews=[_review("bob", "APPROVED", HEAD)])
+    assert rg.decide_pr(own, "o/r", 5)["approved"] is False
+
+
+def test_승인자_파일이_없을_때_권한을_못_읽으면_검사_불능이다():
+    client = _client(files=[_file("rules/a.yaml")], approvers=None,
+                     reviews=[_review("alice", "APPROVED", HEAD)])
+    client.responses["repos/o/r/collaborators/alice/permission"] = GhError("HTTP 403")
+    with pytest.raises(GhError):
+        rg.decide_pr(client, "o/r", 5)
 
 
 _USER_FORMAT = "# 형식: <PR 작성자>: <승인자> <승인자> ...\njaeheeMin: CSH-DOT123 Blueward-Huiseong\n*: jaeheeMin\n"

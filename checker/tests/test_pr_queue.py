@@ -60,9 +60,12 @@ def pr(number, author="me", base="main", head=None, files=("a.py",), checks=None
 
 class FakeGh:
     def __init__(
-        self, prs, login="me", approvers=None, human=None, reviews=None, versions=None, fail=None, comments=None
+        self, prs, login="me", approvers=None, human=None, reviews=None, versions=None, fail=None, comments=None,
+        admins=(), perm_fail=None,
     ):
         self.prs = prs
+        self.admins = {a.lower() for a in admins}  # 승인자 파일이 없거나 빌 때 승인자가 되는 저장소 admin(#586)
+        self.perm_fail = perm_fail
         self.comments = comments or {}
         self.login = login
         self.approvers = approvers
@@ -78,12 +81,22 @@ class FakeGh:
             raise GhError(self.fail)
         if args[:2] == ["pr", "list"]:
             return json.dumps(self.prs)
+        if args[:2] == ["repo", "view"] and "viewerPermission" in args:
+            # 내 권한은 collaborators API 가 아니라 viewerPermission 으로 읽는다(#586)
+            if self.perm_fail:
+                raise GhError(self.perm_fail)
+            return ("ADMIN" if self.login.lower() in self.admins else "WRITE") + "\n"
         raise AssertionError(args)
 
     def get_json(self, path):
         self.calls.append([path])
         if path == "user":
             return {"login": self.login}
+        if "/collaborators/" in path and path.endswith("/permission"):
+            if self.perm_fail:
+                raise GhError(self.perm_fail)
+            who = path.split("/collaborators/")[1].split("/")[0].lower()
+            return {"permission": "admin" if who in self.admins else "write"}
         raise AssertionError(path)
 
     def get_all(self, path):

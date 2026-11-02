@@ -103,7 +103,8 @@ Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험�
 커밋에 Approve** 해야 한다. 승인이 없으면 PR 검사 `pr-checks` 가 빨간불이 되고(그 안의 risk-gate
 단계가 실패하고 commit status `risk-gate` 도 빨갛다) 이유와 다음 할 일이 PR 코멘트에 남으며, Claude 의 `gh pr merge` 는 훅이 거부한다. 승인 없이 병합됐으면
 병합 뒤 이슈가 열린다. 승인자 목록에 작성자 말고 사람이 없으면 위험한 PR 은 승인으로 풀 수
-없으니 한 명 이상 적어 둔다.
+없으니 한 명 이상 적어 둔다. 승인자 파일이 없거나 비어 있으면 저장소 관리자(admin)만 승인자로 본다
+(작성자 제외, 권한을 읽지 못하면 검사 불능).
 
 기준은 `.github/risk-gate.yaml`(`max_changed_lines`, `max_changed_files`, `high_risk_paths`,
 `secret_scan`, `require_checks_green`, `ai_review`, `size_exclude_paths`, `size_warn_only_paths`, `srs_split_hint`, `approvers_file`)에서 고친다.

@@ -36,6 +36,8 @@ def validate(data: dict, skill_names: set[str]) -> list[str]:
     for name, cond in conditions.items():
         if not isinstance(cond, dict) or cond.get("type") not in CONDITION_TYPES:
             errors.append(f"조건 {name}: 종류가 {sorted(CONDITION_TYPES)} 중 하나여야 합니다.")
+        elif cond.get("type") == "approver" and cond.get("whenNoFile", "admin") != "admin":
+            errors.append(f"조건 {name}: whenNoFile 은 \"admin\" 만 쓸 수 있습니다(엔진과 같은 판정).")
     flows = data.get("flows")
     if not isinstance(flows, list) or not flows:
         return errors + ["flows 가 비어 있습니다."]

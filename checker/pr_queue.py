@@ -53,6 +53,7 @@ from checker.plugin_version import PLUGIN_JSON, parse_version
 from checker.risk_gate import MERGE_ORDER_CHECK, PR_QUEUE_CHECK, _check_group, _is_excluded_check, _run_state, fetch_pr_comments
 from checker.ssot_approval import (
     NO_APPROVER_FOR_AUTHOR,
+    AdminChecker,
     GhClient,
     GhError,
     approvers_for,
@@ -202,6 +203,8 @@ class _Context:
         self.repo = repo
         self._rules: dict[str, Any] = {}
         self._human: dict[str, list[str]] = {}
+        # 승인자 파일이 없거나 비면 저장소 admin 만 승인자다(#586). 못 읽으면 GhError.
+        self.is_admin = AdminChecker(client, repo)
 
     def rules(self, base: str):
         if base not in self._rules:
@@ -222,7 +225,7 @@ def _approval_state(ctx: _Context, raw: dict, author: str) -> dict:
         raise GhError("PR 의 head 커밋을 읽지 못했다")
     rules = ctx.rules(base)
     reviews = fetch_pr_reviews(ctx.client, ctx.repo, raw["number"])
-    approved, reason, stale = judge_by_rules(author, reviews, rules, head)
+    approved, reason, stale = judge_by_rules(author, reviews, rules, head, ctx.is_admin)
     if approved:
         return {"approved": True}
     if rules.has_entries:
@@ -233,7 +236,7 @@ def _approval_state(ctx: _Context, raw: dict, author: str) -> dict:
         "approved": False,
         "reason": reason,
         "eligible": eligible,
-        "anyone": not rules.has_entries,
+        "admin_only": not rules.has_entries,
         "stale": [s["login"] for s in stale],
         "no_approver": reason == NO_APPROVER_FOR_AUTHOR,
     }
@@ -297,7 +300,7 @@ def _approval_result(
         who = "이 작성자의 PR 을 승인할 사람이 정해져 있지 않음"
         nxt = "사람이 .github/ssot-approvers 를 확인"
     else:
-        names = "누구든(작성자 제외)" if appr["anyone"] else ", ".join(appr["eligible"])
+        names = "저장소 관리자(admin)" if appr["admin_only"] else ", ".join(appr["eligible"])
         who = f"{names} 의 승인 필요"
         if appr["stale"]:
             who += f" — 낡은 승인 포함({', '.join(appr['stale'])}: 새 커밋 뒤 다시 승인 필요)"
