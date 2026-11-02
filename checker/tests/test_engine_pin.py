@@ -379,7 +379,7 @@ def test_Teams_알림은_사용자_입력을_run_에_직접_넣지_않고_JSON_�
     assert "${{" not in step["run"]  # 모든 값은 env 로 받는다
     assert "jq -n" in step["run"]
     assert "application/vnd.microsoft.card.adaptive" in step["run"]
-    assert "https://claude.ai/artifact/HD5TUKWCEbaAkYE9vSUkR8" in step["env"]["GUIDE_URL"]
+    assert "https://claude.ai/artifact/XcbPn4JkPkeLGgVKBG4yEi" in step["env"]["GUIDE_URL"]
     assert "/reload-plugins" in step["run"]
     assert "git log --first-parent" in step["run"]
 
@@ -565,7 +565,7 @@ class TestReleaseTagScript:
         return subprocess.run(
             [_BASH, str(self.tmp / "teams.sh")], cwd=self.work, capture_output=True, text=True, encoding="utf-8",
             env={**os.environ, "BASH_ENV": fake.as_posix(), "RUN_URL": "https://example.com/run",
-                 "GUIDE_URL": "https://claude.ai/artifact/HD5TUKWCEbaAkYE9vSUkR8", **env_vars},
+                 "GUIDE_URL": "https://claude.ai/artifact/XcbPn4JkPkeLGgVKBG4yEi", **env_vars},
             timeout=120)
 
     @pytest.mark.skipif(shutil.which("jq") is None, reason="jq 가 없으면 카드를 만들어 볼 수 없다")
