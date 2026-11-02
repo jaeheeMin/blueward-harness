@@ -5,7 +5,7 @@
 - `checker/manual_capture.py`: 캡처 엔진·CLI. 찍을 화면 목록(`*.capture.yaml`) 검증, 판정(`judge`), 그리기 위치(`plan_marks`), 작업본 갱신(`update_workbook`), 탭 고르기.
 - `checker/cdp_client.py`: Chrome 디버깅 포트(CDP)에 붙는 최소 웹소켓 클라이언트(표준 라이브러리). `127.0.0.1` 만 허용한다(`localhost`·다른 PC·`/json/list` 가 돌려준 다른 호스트의 웹소켓 주소도 거부).
 - `checker/manual_capture_js.py`: 페이지에 주입하는 스크립트(UI5 준비 확인, 요소 찾기, 열 스크롤, 입력 포커스, 덮개 그리기).
-- `/harness:manual` SKILL.md 에 "캡처" 절(새 스킬을 만들지 않고 기존 스킬에 둠 — 같은 작업본을 읽고 쓰고, 목록·그림 이름 규칙이 한 곳에 있어야 해서). plugin.json 0.10.154(main 0.10.152, 열린 PR #595 가 0.10.153).
+- `/harness:manual` SKILL.md 에 "캡처" 절(새 스킬을 만들지 않고 기존 스킬에 둠 — 같은 작업본을 읽고 쓰고, 목록·그림 이름 규칙이 한 곳에 있어야 해서). plugin.json 0.10.157(열린 #608 이 0.10.154 를 먼저 써 올림)(main 0.10.152, 열린 PR #595 가 0.10.153).
 - README·CLAUDE.md 스킬 표 문구, `form-map.md` 매뉴얼 절에 캡처 연결, `checker/README.md`, 길잡이 매뉴얼 탭(안내·보안·못 하는 것).
 - 시험 `checker/tests/test_manual_capture.py`.
 
