@@ -82,7 +82,7 @@
 | `/harness:scaffold` | Project Repository 표준 구조 만들기 |
 | `/harness:srs` | SRS(요구사항정의서) 만들기·고치기 |
 | `/harness:spec` | SRS 요구사항으로 개발 Spec 만들기·고치기 |
-| `/harness:manual` | 사용자 매뉴얼 작업본 쓰기·고치기, 고객 양식 pptx 산출 |
+| `/harness:manual` | 사용자 매뉴얼 작업본 쓰기·고치기, 화면 자동 캡처, 고객 양식 pptx 산출 |
 | `/harness:cts` | CTS 관리대장 작업본에 요청 건·Error 내역 더하기, 고객 양식 xlsx 산출 |
 | `/harness:role` | User Role Mapping 작업본에 Role·메뉴 배정 쓰기, Spec 카탈로그 대조, 고객 양식 xlsx 산출(사람 행은 비움) |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받기 |
