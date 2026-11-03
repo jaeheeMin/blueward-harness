@@ -370,6 +370,126 @@ def test_session_screen_has_no_skill_button_row_and_keeps_slash_assist():
     assert "withAssist(" in app and "skillItems" in app  # / 자동완성은 그대로
 
 
+_THEME_NODE = r"""
+const assert = require('assert');
+const [file, seed] = process.argv.slice(1);
+const store = seed ? JSON.parse(seed) : {};
+global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+const attrs = {}, props = {};
+global.window = {};
+global.document = { documentElement: { style: { setProperty: (k, v) => { props[k] = v; }, removeProperty: k => { delete props[k]; } }, setAttribute: (k, v) => { attrs[k] = v; } } };
+require(file);
+const BH = window.BH;
+const out = { first: BH.getDesign(), attr: attrs['data-design'], bg: props['--bg'] || null };
+BH.setDesign('b');
+out.afterB = [BH.getDesign(), store['bh-design'], attrs['data-design'], attrs['data-tone'], props['--bg'] || null];
+BH.setDesign('a');
+out.afterA = [store['bh-design'], attrs['data-tone']];
+BH.setDesign('nonsense');
+out.afterBad = [store['bh-design'], attrs['data-design'], props['--bg'] || null];
+BH.setTheme('blueward');
+out.themeBack = [attrs['data-tone'], props['--bg']];
+out.ids = BH.DESIGNS.map(d => d[0]).join(',');
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def _theme_run(seed: dict | None = None) -> dict:
+    import json
+    out = subprocess.run([NODE, "-e", _THEME_NODE, str(STATIC / "theme.js"), json.dumps(seed or {})], capture_output=True, text=True, encoding="utf-8")
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_design_default_is_base_and_choice_is_saved_and_applied():
+    r = _theme_run()
+    assert r["first"] == "base" and r["attr"] == "base" and r["bg"]  # 기존 디자인은 테마 색을 인라인으로 넣는다
+    assert r["ids"] == "base,a,b,c"
+    assert r["afterB"][:4] == ["b", "b", "b", "dark"] and r["afterB"][4] is None  # 새 디자인은 인라인 색을 비워 스타일시트가 정한다
+    assert r["afterA"] == ["a", "light"]
+    assert r["afterBad"] == ["base", "base", r["afterBad"][2]] and r["afterBad"][2]  # 모르는 값은 기존으로
+    assert r["themeBack"][0] == "light" and r["themeBack"][1]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_saved_design_is_applied_on_load_and_garbage_falls_back():
+    r = _theme_run({"bh-design": "c"})
+    assert r["first"] == "c" and r["attr"] == "c" and r["bg"] is None
+    r = _theme_run({"bh-design": "zzz"})
+    assert r["first"] == "base" and r["attr"] == "base" and r["bg"]
+
+
+def test_design_switch_ui_wired_in_topline_and_settings():
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "design-quick" in app and "'aria-pressed': String(d[0] === cur)" in app and "data-design-id" in app
+    assert "text: '디자인'" in app and "BH.DESIGNS.forEach" in app
+    assert re.search(r"function topline\(left\)\s*\{\s*return h\('div', \{ class: 'topline' \}, left \? h\('span'[^\n]*designQuick\(\)\)", app)
+
+
+def _lum(hex_color: str) -> float:
+    c = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    c = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in c]
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def _ratio(a: str, b: str) -> float:
+    x, y = sorted((_lum(a), _lum(b)), reverse=True)
+    return (x + 0.05) / (y + 0.05)
+
+
+def _design_vars(css: str, design: str) -> dict:
+    block = re.search(r':root\[data-design="%s"\] \{(.*?)\n\}' % design, css, re.S).group(1)
+    return dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{6})", block))
+
+
+# 글자와 바탕으로 같이 쓰이는 짝. 밝은 바탕의 회색 글씨도 포함한다.
+_TEXT_PAIRS = [("text", "bg"), ("text", "surface"), ("sec", "bg"), ("sec", "surface"), ("muted", "bg"), ("muted", "surface"),
+               ("accent", "bg"), ("accent", "surface"), ("attn", "bg"), ("attn", "surface"), ("btnink", "btn"),
+               ("text", "st-now-bg"), ("st-now", "st-now-bg"), ("muted", "st-now-bg"), ("st-done", "surface"), ("st-done", "st-done-bg"),
+               ("st-turn", "st-turn-bg"), ("sec", "st-turn-bg"), ("muted", "st-turn-bg"), ("text", "st-turn-bg"), ("st-turn-ink", "st-turn-btn"),
+               ("st-fail-ink", "st-fail-bg"), ("st-fail-ink", "surface"), ("st-unk-ink", "st-unk-bg"), ("st-unk-ink", "surface")]
+
+
+@pytest.mark.parametrize("design", ["a", "b", "c"])
+def test_design_text_contrast_is_at_least_4_5(design):
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    v = _design_vars(css, design)
+    low = [(f, b, round(_ratio(v[f], v[b]), 2)) for f, b in _TEXT_PAIRS if _ratio(v[f], v[b]) < 4.5]
+    assert not low, low
+    assert _ratio(v["edge"], v["surface"]) >= 3 and _ratio(v["edge"], v["bg"]) >= 3  # 입력·버튼 테두리
+    assert v["brand"].lower() == "#004696"  # 브랜드 색은 그대로
+
+
+def test_design_colors_are_neutral_and_scoped():
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    # 중립색: 바탕·면·글자 회색에 파란 기운(B 가 R·G 보다 큼)이 없다. 파랑은 지금 단계·주 버튼·로고 쪽 토큰에만 있다.
+    for design in ("a", "b", "c"):
+        v = _design_vars(css, design)
+        for k in ("bg", "surface", "text", "sec", "muted", "line", "edge"):
+            if k not in v:
+                continue
+            r, g, b = (int(v[k][i:i + 2], 16) for i in (1, 3, 5))
+            assert b <= max(r, g) + 2, (design, k, v[k])
+        assert design == "b" or v["btn"] == "#004696"
+    # 초록 계열(G 가 R·B 보다 확실히 큰 색)은 쓰지 않는다
+    for hexv in re.findall(r"#[0-9a-fA-F]{6}", css[css.index("디자인 A·B·C"):]):
+        r, g, b = (int(hexv[i:i + 2], 16) for i in (1, 3, 5))
+        assert not (g > r + 20 and g > b + 20), hexv
+    # 새 규칙은 모두 data-design 범위 안에 있다 — 기존 디자인 규칙은 이 표식 앞에서 끝난다
+    tail = css[css.index("*/", css.index("디자인 A·B·C")) + 2:]
+    for line in tail.splitlines():
+        if line and line[0] not in " /}":  # 들여쓰기 없는 줄은 규칙의 첫 줄(선택자)이다
+            assert line.startswith(":root[data-design"), line
+    assert css.count("@font-face") == 2 and css.index("@font-face") < css.index(":root {")
+
+
+def test_design_states_have_shape_cues_not_only_color():
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    for needle in ("\\2713", "\\2715", "content: '!", "content: '?'", "dashed", "\\25CF"):
+        assert needle in css, needle
+
+
 def test_new_ui_copy_says_claude_code_not_claude():
     for name in ("flow-ui.js", "flow-logic.js"):
         text = (STATIC / name).read_text(encoding="utf-8")

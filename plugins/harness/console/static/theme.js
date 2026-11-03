@@ -25,6 +25,13 @@
   var KEYS = ['bg', 'surface', 'text', 'sec', 'muted', 'accent', 'attn', 'btn', 'btnink'];
   var SCALES = [['보통', '1.15'], ['크게', '1.3'], ['아주 크게', '1.45']];
   var DEFAULT_SCALE = '1.15';
+  // [id, 이름, 빠른 전환 글자, 밝은지(1)]. 기존이 아니면 색은 app.css 의 :root[data-design] 가 정하고 테마 표는 쓰지 않는다.
+  var DESIGNS = [
+    ['base', '기존', '기존', 0],
+    ['a', 'A 밝은 정돈형', 'A', 1],
+    ['b', 'B 어두운 집중형', 'B', 0],
+    ['c', 'C 따뜻한 카드형', 'C', 1]
+  ];
 
   function read(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
   function write(key, value) {
@@ -37,21 +44,45 @@
     for (var i = 0; i < SCALES.length; i++) if (SCALES[i][1] === v) return v;
     return DEFAULT_SCALE;
   }
+  function getDesign() {
+    var id = read('bh-design');
+    for (var i = 0; i < DESIGNS.length; i++) if (DESIGNS[i][0] === id) return id;
+    return 'base';
+  }
+  function designRow(id) {
+    for (var i = 0; i < DESIGNS.length; i++) if (DESIGNS[i][0] === id) return DESIGNS[i];
+    return DESIGNS[0];
+  }
   function apply(id) {
-    var t = THEMES[id] || THEMES.obsidian, r = document.documentElement.style, c = t[9] ? '0,0,0' : '255,255,255';
+    var root = document.documentElement, r = root.style, design = getDesign();
+    root.setAttribute('data-design', design);
+    if (design !== 'base') {
+      // 색은 스타일시트가 정한다. 테마가 인라인으로 넣은 값을 비워야 덮이지 않는다.
+      var names = KEYS.concat(['line', 'line2', 'soft']);
+      for (var j = 0; j < names.length; j++) r.removeProperty('--' + names[j]);
+      var light = designRow(design)[3];
+      r.colorScheme = light ? 'light' : 'dark';
+      root.setAttribute('data-tone', light ? 'light' : 'dark');
+      return;
+    }
+    var t = THEMES[id] || THEMES.obsidian, c = t[9] ? '0,0,0' : '255,255,255';
     for (var i = 0; i < KEYS.length; i++) r.setProperty('--' + KEYS[i], t[i]);
     r.setProperty('--line', 'rgba(' + c + ',.1)');
     r.setProperty('--line2', 'rgba(' + c + ',.18)');
     r.setProperty('--soft', 'rgba(' + c + ',.07)');
     r.colorScheme = t[9] ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-tone', t[9] ? 'light' : 'dark');
+    root.setAttribute('data-tone', t[9] ? 'light' : 'dark');
   }
   function applyScale(v) { document.documentElement.style.zoom = v; }
 
   window.BH = {
-    THEMES: THEMES, NAMES: NAMES, SCALES: SCALES,
-    getTheme: getTheme, getScale: getScale,
+    THEMES: THEMES, NAMES: NAMES, SCALES: SCALES, DESIGNS: DESIGNS,
+    getTheme: getTheme, getScale: getScale, getDesign: getDesign,
     setTheme: function (id) { write('bh-theme', id); apply(id); },
+    setDesign: function (id) {
+      var v = designRow(id)[0];
+      write('bh-design', v); apply(getTheme());
+    },
     setScale: function (v) { write('bh-scale', v); applyScale(v); },
     read: read, write: write
   };
