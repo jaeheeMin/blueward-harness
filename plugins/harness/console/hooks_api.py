@@ -8,7 +8,7 @@ from typing import Callable
 
 import flows
 from store import (CHECK_DONE, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
-                   TITLE_PROMPT, TITLE_SESSION, mark_check)
+                   TITLE_PROMPT, TITLE_SESSION, mark_check, remember_touched)
 
 QUESTION_WAIT = 300.0
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
@@ -155,6 +155,7 @@ class Hooks:
         text = body.get("last_assistant_message")
         if isinstance(text, str) and text.strip():
             s["report"] = text
+            s["reportFresh"] = True  # 이번 턴에 받은 보고(askedInText 는 이것만 본다)
         s["turn_running"] = False
         s["currentAction"] = ""
         asking = any(r.kind == "question" for r in self.store.pending_for(s["id"]))  # 질문 대기 중의 Stop 은 스킬 끝이 아니다(아래에서 닫기 전에 본다)
@@ -208,6 +209,7 @@ class Hooks:
         elif name == "UserPromptSubmit":
             if not late:
                 s["turn_running"], s["ended"] = True, False
+                s["reportFresh"] = False  # 새 턴이 시작됐다. 이전 보고는 화면에 남아도 질문 판정에는 쓰지 않는다
             prompt = body.get("prompt") if isinstance(body.get("prompt"), str) else ""
             if not s["managed"]:
                 store.close_session(s["id"], "터미널에서 처리됨", before=ts)  # 늦게 온 프롬프트가 그 뒤의 새 요청을 닫지 않게 한다
@@ -339,6 +341,7 @@ class Hooks:
             path = tool_input.get("file_path") or tool_input.get("notebook_path")
             if isinstance(path, str) and path not in s["changedFiles"] and len(s["changedFiles"]) < MAX_CHANGED_FILES:
                 s["changedFiles"].append(path)
+            remember_touched(s, [path])
         response = body.get("tool_response")
         text = response if isinstance(response, str) else json.dumps(response, ensure_ascii=False, default=str)
         for url in PR_URL.findall(text or ""):

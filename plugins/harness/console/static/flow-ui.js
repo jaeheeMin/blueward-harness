@@ -427,7 +427,7 @@
       function fetchFiles(s) {
         if (loading) return;
         loading = true; st.at = Date.now();
-        api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { st.files = L.docList(kit.listOf(d, 'files')); st.error = null; st.unknown = d && d.unknown ? String(d.reason || '') : null; },
+        api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { st.files = L.docList(kit.listOf(d, 'files')); st.error = null; st.unknown = d && d.unknown ? String(d.reason || '') : null; st.truncated = !!(d && d.truncated); },
           function (e) { st.error = e; }).then(function () { loading = false; if (alive) drawList(); });
       }
       function selectFile(f) {
@@ -447,14 +447,16 @@
         var picked = st.selected === f.path;
         return h('button', { type: 'button', class: 'docitem' + (picked ? ' on' : '') + (sub ? ' sub' : ''), 'aria-pressed': String(picked), 'data-path': f.path, onClick: function () { selectFile(f); } },
           h('span', { class: 'badge', text: L.kindBadge(f) }),
-          h('span', { class: 'dn' }, h('span', { class: 'nm', text: kit.baseName(f.path) }),
-            h('span', { class: 'dm', text: [f.size != null ? kit.fmtSize(f.size) : '', f.mtime ? kit.clock(f.mtime) : '', f.changed ? '바뀜' : ''].filter(Boolean).join(' · ') })));
+          h('span', { class: 'dn' }, h('span', { class: 'nm', text: f.path }),
+            h('span', { class: 'dm', text: [f.size != null ? kit.fmtSize(f.size) : '', f.mtime ? kit.clock(f.mtime) : '', st.unknown != null ? '' : f.changed ? '아직 커밋 안 됨' : '지금 바뀐 것 없음(git 기준)'].filter(Boolean).join(' · ') })));
       }
       function drawList() {
         clear(listBox);
         if (st.error && !st.files) { listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.error, '문서 목록') })); return; }
         if (!st.files) { listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' })); return; }
         if (st.unknown != null) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '바뀐 문서를 확인하지 못했어요.' + (st.unknown ? ' (' + st.unknown + ')' : '') + ' 아래 목록에 빠진 문서가 있을 수 있어요.' }));
+        if (st.truncated) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '문서가 너무 많아 목록이 잘렸어요. 더 있을 수 있어요.' }));
+        listBox.appendChild(h('p', { class: 'note-muted', text: '이 세션에서 쓴 파일과 시작 뒤 새로 바뀐 파일이에요. 같은 폴더의 다른 세션이 바꾼 파일이 섞일 수 있어요.' }));
         if (!st.files.length) { listBox.appendChild(h('p', { class: 'note-muted', text: st.unknown != null ? '확인된 문서가 없어요.' : '아직 만든 문서가 없어요.' })); return; }
         st.files.forEach(function (f) {
           listBox.appendChild(item(f, false));
@@ -641,7 +643,7 @@
         h('span', { class: 'scard-folder', title: s.cwd || null }, kit.icon('folder', 14), h('span', { text: folderName(s) }))));
       card.appendChild(h('p', { class: 'scard-flow' + (s.flowId ? '' : ' none'), text: s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음' }));
       if (s.flowId && (s.flowSteps || []).length) card.appendChild(stepBar(s, false));
-      var doing = s.status === 'ended' ? '끝난 세션' : s.currentAction || (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todo ? '내 차례예요' : s.status === 'running' ? '작업하는 중' : '쉬는 중');
+      var doing = s.status === 'ended' ? '끝난 세션' : s.currentAction || (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todo ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : s.status === 'running' ? '작업하는 중' : '쉬는 중');
       card.appendChild(h('p', { class: 'scard-doing', title: doing, text: doing }));
       var subs = L.runningSubCount(s);
       var meta = h('div', { class: 'scard-meta' }, subs ? h('span', { class: 'meta', text: '서브에이전트 ' + subs + '개 실행 중' }) : null, prChip(s));

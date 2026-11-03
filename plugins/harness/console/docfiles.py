@@ -79,27 +79,40 @@ def _entry(cwd: str, rel: str, changed: bool) -> dict | None:
     return {"path": rel, "kind": kind_of(rel), "size": st.st_size, "mtime": st.st_mtime, "changed": changed}
 
 
-def collect(cwd: str, changed_paths: list[str]) -> list[dict]:
-    """바뀐 파일(훅이 모은 목록과 git status)을 작업 폴더 기준 상대 경로로 모은다. 같은 이름의 `_v0.1`, `_v0.2` 판은 하나로 묶어
-    versions(최신 먼저)에 담고, 묶인 항목의 path·size·mtime 은 가장 높은 판의 것이다. 판 이름이 아닌 파일은 versions 가 빈 목록이다."""
+def _rel_key(cwd: str, real_cwd: str, raw) -> tuple[str, str] | None:
+    """목록에 넣을 수 있는 파일이면 (normcase 상대 경로, 상대 경로). 밖이거나 없거나 건너뛸 폴더·잠금 파일이면 None."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    full = raw if os.path.isabs(raw) else os.path.join(cwd, raw)
+    if not is_within(full, cwd) or not os.path.isfile(full):
+        return None
+    rel = os.path.relpath(os.path.realpath(full), real_cwd).replace("\\", "/")
+    parts = rel.split("/")
+    if any(p in SKIP_DIRS for p in parts[:-1]) or parts[-1].startswith("~$"):
+        return None
+    return os.path.normcase(rel), rel
+
+
+def collect(cwd: str, changed_paths: list[str], current_paths: list[str] | None = None) -> list[dict]:
+    """이 세션이 만든·바꾼 파일(changed_paths)을 작업 폴더 기준 상대 경로로 모은다. 같은 이름의 `_v0.1`, `_v0.2` 판은 하나로 묶어
+    versions(최신 먼저)에 담고, 묶인 항목의 path·size·mtime 은 가장 높은 판의 것이다. 판 이름이 아닌 파일은 versions 가 빈 목록이다.
+    current_paths 는 지금 git status 에 있는 파일이며, 주어지면 거기 있는 것만 changed(커밋 안 된 변경)로 표시한다. None 이면 모두 changed."""
     real_cwd = os.path.realpath(cwd)
     changed: dict[str, str] = {}  # normcase 상대 경로 -> 상대 경로
     for raw in changed_paths:
-        if not isinstance(raw, str) or not raw:
-            continue
-        full = raw if os.path.isabs(raw) else os.path.join(cwd, raw)
-        if not is_within(full, cwd) or not os.path.isfile(full):
-            continue
-        rel = os.path.relpath(os.path.realpath(full), real_cwd).replace("\\", "/")
-        parts = rel.split("/")
-        if any(p in SKIP_DIRS for p in parts[:-1]) or parts[-1].startswith("~$"):
-            continue
-        changed.setdefault(os.path.normcase(rel), rel)
+        got = _rel_key(cwd, real_cwd, raw)
+        if got:
+            changed.setdefault(got[0], got[1])
+    if current_paths is None:
+        dirty = changed
+    else:
+        dirty = {k for k in (_rel_key(cwd, real_cwd, raw) for raw in current_paths) if k}
+        dirty = {k[0] for k in dirty}
     items, grouped = [], {}
     for key, rel in changed.items():
         m = VERSIONED.match(posixpath.basename(rel))
         if not m:
-            e = _entry(cwd, rel, True)
+            e = _entry(cwd, rel, key in dirty)
             if e:
                 e["versions"] = []
                 items.append(e)
@@ -117,7 +130,7 @@ def collect(cwd: str, changed_paths: list[str]) -> list[dict]:
             if not m or m["stem"].lower() != stem.lower() or m["ext"].lower() != ext.lower():
                 continue
             rel = posixpath.join(folder, name) if folder else name
-            e = _entry(cwd, rel, os.path.normcase(rel) in changed)
+            e = _entry(cwd, rel, os.path.normcase(rel) in dirty)
             if e and os.path.isfile(os.path.join(cwd, *rel.split("/"))):
                 e["version"] = m["ver"]
                 versions.append(e)
