@@ -372,7 +372,7 @@
   }
   function groupOf(s) {
     if (s.group === 'todo' || s.group === 'running' || s.group === 'idle') return s.group;
-    if ((s.pendingRequestIds || []).length || s.turnSkill) return 'todo';
+    if ((s.pendingRequestIds || []).length || s.turnSkill || s.askedInText) return 'todo';
     return s.status === 'running' || s.status === 'starting' ? 'running' : 'idle';
   }
   function requestTitle(r) {
@@ -404,7 +404,7 @@
             todo.push({ href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : kindOf(r) === 'question' ? '답하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
           });
         } else {
-          todo.push({ href: '/s/' + encodeURIComponent(s.id), verb: s.turnSkill ? skillLabel(s.turnSkill) : '확인하기', title: title, sub: sub, t: s.updatedAt });
+          todo.push({ href: '/s/' + encodeURIComponent(s.id), verb: s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기', title: title, sub: sub, t: s.updatedAt });
         }
       } else if (g === 'running') {
         run.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: (s.currentAction || (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중')) + subagentSummary(s), t: s.updatedAt });
@@ -640,6 +640,7 @@
       if (s.status === 'running') return ['accent', '지금 하는 일'];
       if (s.status === 'starting') return ['accent', '시작하는 중'];
       if (s.status === 'ended') return ['sec', '끝난 세션'];
+      if (s.askedInText) return ['attn', '내 답을 기다리는 중(추정)'];
       if (s.turnSkill) return ['attn', '작업을 마치고 기다리는 중'];
       return ['sec', '쉬는 중'];
     }
@@ -661,8 +662,15 @@
       if (s.status === 'running') return s.currentAction ? shortAction(s.currentAction) : (s.currentSkill ? skillLabel(s.currentSkill) + ' 진행 중' : '작업하는 중입니다');
       if (s.status === 'starting') return '세션을 시작하고 있습니다';
       if (s.status === 'ended') return '세션이 끝났습니다';
+      if (s.askedInText) return '내 답을 기다리는 듯해요(추정).';
       if (s.turnSkill) return '이제 ' + skillLabel(s.turnSkill, flowItem(s, s.turnSkill)) + ' 차례예요.';
       return '다음 요청을 기다리고 있습니다';
+    }
+    // 글로 물은 것으로 추정할 때, git 상태로 짐작한 차례는 제목에서 내려 참고 한 줄로만 보인다
+    function askedNote(s) {
+      if (!s.askedInText || (s.pendingRequestIds || []).length || s.status === 'running' || s.status === 'ended') return null;
+      var tail = s.turnSkill ? ' 참고로 git 상태로는 ' + skillLabel(s.turnSkill, flowItem(s, s.turnSkill)) + ' 차례로 보여요.' : '';
+      return h('p', { class: 'note-muted', 'data-asked': '1', text: '마지막 보고가 물음표로 끝나서 질문으로 추정했어요(틀릴 수 있어요).' + tail });
     }
     function flowItem(s, skill) { return (s.flow || []).filter(function (f) { return f.skill === skill; })[0]; }
 
@@ -687,6 +695,7 @@
           h('div', { class: 'eyebrow tone-' + eb[0] }, h('i'), eb[1]),
           h('h1', { class: 'big', text: headlineFor(s) }),
           actionLine(s),
+          askedNote(s),
           modelLine(s) ? h('p', { class: 'note-muted', 'data-model': '1', text: modelLine(s) }) : null,
           (s.managed && (s.status === 'running') ? (interruptAsk
             ? h('div', { class: 'confirm' }, h('span', { text: '진행 중인 작업을 멈출까요?' }), h('button', { type: 'button', class: 'btn sm', text: '중단', onClick: interrupt }), h('button', { type: 'button', class: 'btn sm', text: '취소', onClick: function () { interruptAsk = false; draw(); } }))
@@ -885,7 +894,7 @@
       function row(k, v, mono, scroll) { if (v == null || v === '') return; rows.appendChild(h('dt', { text: k })); rows.appendChild(h('dd', { class: (mono ? 'mono' : '') + (scroll ? ' scroll' : ''), tabindex: scroll ? '0' : null, text: v })); }
       row('도구', tool, true);
       var f = TOOL_FIELDS[tool];
-      if (f && input && input[f[1]] != null) row(f[0], str(input[f[1]]), true);
+      if (f && input && input[f[1]] != null) row(f[0], str(input[f[1]]), true, tool === 'Bash');  // 여러 줄 명령(heredoc)의 줄바꿈을 그대로 보인다
       if (input && input.description) row('설명', str(input.description));
       /* 위험을 바꾸는 값은 기본으로 보인다. 긴 값은 말줄임 없이 스크롤로 끝까지 볼 수 있다. */
       if (input && input.dangerouslyDisableSandbox) rows.appendChild(h('dt', { text: '샌드박스' })), rows.appendChild(h('dd', { class: 'attn-text', text: '샌드박스를 끄고 실행합니다(dangerouslyDisableSandbox)' }));

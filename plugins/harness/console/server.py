@@ -29,12 +29,13 @@ import platform_compat
 from hooks_api import Hooks, permission_reply, question_reply
 from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
                      PERMISSION_VALUES, Manager)
-from store import CHECK_SKIPPED, MAX_PENDING_STOP, START_CHECK_IDS, Store, mark_check, public_session, can_send
+from store import CHECK_SKIPPED, MAX_PENDING_STOP, START_CHECK_IDS, Store, mark_check, public_session, can_send, remember_touched, set_baseline
 
 APP_NAME = "harness-console"
 COOKIE = "harness_console"
 COOKIE_MAX_AGE = 30 * 24 * 3600
 REQUEST_TIMEOUT = 30.0  # 요청을 읽는 동안의 소켓 timeout. 본문을 다 읽은 훅 연결은 timeout 을 풀고 오래 기다린다
+GAP_NOTICE_SECONDS = 1800.0  # git 상태를 못 읽은 일을 만든 문서 목록에서 알리는 시간(그 뒤엔 사라진다)
 TOKEN_TTL = 60.0
 API_BODY_LIMIT = 1 << 20
 HOOK_BODY_LIMIT = 32 << 20
@@ -246,7 +247,16 @@ class App:
 
         def work():
             info = self.git_inspect(s["cwd"])
+            try:
+                seen, why = gitstate.status_paths(self.run, s["cwd"])  # 커밋 전에 만든 파일을 쌓아 둔다(만든 문서 목록용)
+            except Exception as e:
+                seen, why = [], f"git 상태를 읽다 오류가 났습니다({type(e).__name__})."
             with self.store.lock:
+                if why:  # 못 읽은 동안 커밋된 파일은 목록에서 빠질 수 있다. 빈 목록을 '바뀐 것 없음' 으로 읽지 않게 시각과 함께 표시를 남긴다
+                    s["touchedGap"] = {"reason": why, "at": self.store.clock()}
+                else:
+                    set_baseline(s, seen)  # 처음 본 때 이미 바뀌어 있던 파일은 이 세션 것으로 치지 않는다
+                    remember_touched(s, seen, from_status=True)
                 s["repo"], s["branch"] = info["repo"], info["branch"]
                 s["turn"] = {"skill": info["skill"], "unknown": info["unknown"]}
                 if info["isRepo"]:
@@ -540,6 +550,7 @@ class App:
                 raise HttpError(502, "세션에 보내지 못했습니다.")
             with self.store.lock:
                 s["turn_running"] = True
+                s["reportFresh"] = False
             self.store.touch(s)
             return 202, {"queued": False, "sent": True}
         with self.store.lock:
@@ -866,12 +877,26 @@ class App:
 
     def a_session_files(self, g, q, b):
         s, cwd = self.file_session_cwd(g[0])
+        root, failed = gitstate.repo_root_checked(self.run, cwd)
+        not_repo = not root and not failed  # 저장소가 아니면 git status 가 비어도 '바뀐 것 없음' 이 아니다
+        paths, why = ([], "") if not_repo else gitstate.status_paths(self.run, cwd)
+        now = self.store.clock()
         with self.store.lock:
-            hooked = list(s["changedFiles"])
-        paths, why = gitstate.status_paths(self.run, cwd)
-        out = {"files": docfiles.collect(cwd, hooked + paths)}
+            if why:
+                s["touchedGap"] = {"reason": why, "at": now}
+            elif not not_repo:
+                remember_touched(s, paths, from_status=True)  # 커밋하면 git status 에서 사라지므로 이 세션이 만든 파일은 따로 쌓아 둔다
+            touched = list(s.get("touchedFiles") or [])
+            truncated, gap = bool(s.get("touchedTruncated")), s.get("touchedGap")
+        out = {"files": docfiles.collect(cwd, touched, None if (why or not_repo) else paths)}
+        if truncated:
+            out["truncated"] = True  # 쌓아 두는 상한에 닿아 더 있는 문서가 빠졌다
         if why:  # git 을 못 읽었다 = 바뀐 문서가 없다는 뜻이 아니다. 훅이 모은 목록만으로 보여 주고 화면이 알리게 한다
             out.update(unknown=True, reason=why)
+        elif not_repo:
+            out.update(unknown=True, reason="git 저장소가 아니라 커밋 여부를 알 수 없어요.")
+        elif isinstance(gap, dict) and now - gap.get("at", 0) <= GAP_NOTICE_SECONDS:  # 못 읽은 동안 커밋된 문서가 빠졌을 수 있다. 영구 경고는 피하려 일정 시간만 알린다
+            out.update(unknown=True, reason=f"{time.strftime('%H:%M', time.localtime(gap['at']))} 에 git 상태를 읽지 못해 그 사이 커밋된 문서가 빠졌을 수 있어요.")
         return 200, out
 
     def a_file_preview(self, g, q, b):

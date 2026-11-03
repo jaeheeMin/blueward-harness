@@ -497,8 +497,9 @@ class Manager:
             elif kind == "result":
                 s["currentAction"] = ""
                 s["turn_running"] = False
-                if isinstance(e.get("result"), str) and e["result"] and not s["report"]:
-                    s["report"] = e["result"]  # Stop 훅이 못 왔을 때를 위한 대비
+                if isinstance(e.get("result"), str) and e["result"] and not s.get("reportFresh"):
+                    s["report"] = e["result"]  # Stop 훅이 이번 턴에 못 왔을 때를 위한 대비(턴마다 reportFresh 를 비우므로 이후 턴도 반영된다)
+                    s["reportFresh"] = True
                 if s.pop("interrupted", False):
                     self.store.add_log(s, "사용자가 작업을 중단했습니다.")
                 elif e.get("is_error"):

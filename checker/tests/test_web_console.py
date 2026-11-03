@@ -4365,6 +4365,109 @@ def test_files_list_groups_versions_and_marks_changes(tmp_path, monkeypatch, req
     assert c.call("GET", "/api/sessions/nope/files")[0] == 404
 
 
+def test_files_list_keeps_session_files_after_commit_with_relative_paths(tmp_path, monkeypatch, request):
+    """커밋하면 git status 가 비어도 이 세션이 만든·바꾼 문서는 목록에 남고, 경로는 폴더를 포함한 상대 경로다(#619)."""
+    c = files_console(tmp_path, monkeypatch, request)
+    (c.work / "a").mkdir()
+    (c.work / "b").mkdir()
+    (c.work / "a" / "README.md").write_text("a", encoding="utf-8")
+    (c.work / "b" / "README.md").write_text("b", encoding="utf-8")
+    (c.work / "CLAUDE.md").write_text("c", encoding="utf-8")
+    c.event("s1", "PostToolUse", tool_name="Write", tool_input={"file_path": str(c.work / "CLAUDE.md")})
+    c.holder["status"] = "?? a/README.md\0?? b/README.md\0"
+    body = c.call("GET", "/api/sessions/s1/files")[1]
+    assert {f["path"] for f in body["files"]} == {"a/README.md", "b/README.md", "CLAUDE.md"}
+    assert all(f["changed"] for f in body["files"] if f["path"] != "CLAUDE.md")
+    c.holder["status"] = ""  # 커밋한 뒤
+    body = c.call("GET", "/api/sessions/s1/files")[1]
+    assert {f["path"] for f in body["files"]} == {"a/README.md", "b/README.md", "CLAUDE.md"}
+    assert not any(f["changed"] for f in body["files"])  # 커밋됐으니 '바뀜' 이 아니다
+
+
+def test_touched_files_skip_baseline_skip_dirs_and_report_truncation(tmp_path, monkeypatch, request):
+    from store import remember_touched, set_baseline
+    s = {"cwd": str(tmp_path)}
+    old, new, junk = str(tmp_path / "old.md"), str(tmp_path / "new.md"), str(tmp_path / "node_modules" / "x.md")
+    set_baseline(s, [old])
+    set_baseline(s, [new])  # 기준선은 한 번만 적는다
+    remember_touched(s, [old, new, junk], from_status=True)
+    assert s["touchedFiles"] == [new]
+    remember_touched(s, [old])  # 훅의 Edit·Write 경로는 기준선이어도 이 세션 것이다
+    assert s["touchedFiles"] == [new, old]
+    import store as store_mod
+    monkeypatch.setattr(store_mod, "MAX_CHANGED_FILES", 2)
+    remember_touched(s, [str(tmp_path / "z.md")])
+    assert s["touchedTruncated"] is True and len(s["touchedFiles"]) == 2
+
+
+def test_files_list_reports_truncated_and_earlier_git_failure(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request)
+    s = c.app.store.get("s1")
+    (c.work / "a.md").write_text("a", encoding="utf-8")
+    now = c.app.store.clock()
+    s["touchedFiles"], s["touchedTruncated"], s["touchedGap"] = [str(c.work / "a.md")], True, {"reason": "x", "at": now}
+    body = c.call("GET", "/api/sessions/s1/files")[1]
+    assert body["truncated"] is True and body["unknown"] is True and "빠졌을 수 있" in body["reason"]
+    assert [f["path"] for f in body["files"]] == ["a.md"]
+    s["touchedGap"] = {"reason": "x", "at": now - 99999}  # 오래된 실패는 영구 경고로 남기지 않는다
+    assert "unknown" not in c.call("GET", "/api/sessions/s1/files")[1]
+
+
+def test_files_list_in_non_repo_does_not_claim_committed(tmp_path, monkeypatch, request):
+    run = FakeRun(**{"git rev-parse --show-toplevel": (128, "")})
+    c = Console(tmp_path, monkeypatch, run=run)
+    request.addfinalizer(c.close)
+    c.login()
+    c.event("s1", "SessionStart")
+    (c.work / "a.md").write_text("a", encoding="utf-8")
+    c.event("s1", "PostToolUse", tool_name="Write", tool_input={"file_path": str(c.work / "a.md")})
+    body = c.call("GET", "/api/sessions/s1/files")[1]
+    assert body["unknown"] is True and "저장소가 아니라" in body["reason"]
+    assert [f["path"] for f in body["files"]] == ["a.md"]
+
+
+def test_touched_files_dedupe_separators_skip_outside_cwd_and_late_baseline(tmp_path):
+    from store import remember_touched, set_baseline
+    inside = tmp_path / "w"
+    inside.mkdir()
+    (inside / "early.md").write_text("e", encoding="utf-8")
+    (inside / "late.md").write_text("l", encoding="utf-8")
+    os.utime(inside / "early.md", (1, 1))
+    s = {"cwd": str(inside), "startedAt": 1000.0}
+    set_baseline(s, [str(inside / "early.md"), str(inside / "late.md")])  # 늦게 잡힌 기준선: 시작 뒤에 바뀐 파일은 뺀다
+    assert len(s["baselineFiles"]) == 1
+    p = str(inside / "sub" / "a.md")
+    remember_touched(s, [p, p.replace("\\", "/"), p.upper(), str(tmp_path / "outside.md")])
+    assert len(s["touchedFiles"]) <= 2 and str(tmp_path / "outside.md") not in s["touchedFiles"]
+    if os.name == "nt":
+        assert s["touchedFiles"] == [p]
+
+
+@pytest.mark.parametrize("report,asks", [
+    ("정리했어요.\n\n이슈를 만들까요?", True),
+    ("**진행할까요?**", True),
+    ("끝났습니다.", False),
+    ("끝났습니다. 질문 있나요? 없으면 마칩니다.", False),
+    ("", False),
+])
+def test_report_asks_follows_last_line_question_mark(report, asks):
+    from store import report_asks
+    assert report_asks(report) is asks
+
+
+def test_session_asked_in_text_moves_to_todo_and_marks_estimate(browser):
+    browser.event("t1", "UserPromptSubmit", prompt="작업")
+    browser.hook("stop", {"session_id": "t1", "cwd": "/w", "last_assistant_message": "결과예요.\n이대로 진행할까요?"})
+    s = browser.call("GET", "/api/sessions/t1")[1]
+    assert s["askedInText"] is True and s["group"] == "todo" and s["status"] == "idle"
+    browser.event("t1", "UserPromptSubmit", prompt="네")
+    s = browser.call("GET", "/api/sessions/t1")[1]
+    assert s["askedInText"] is False and s["group"] == "running"
+    browser.hook("stop", {"session_id": "t1", "cwd": "/w", "last_assistant_message": ""})  # 답한 뒤 빈 보고로 끝난 턴
+    s = browser.call("GET", "/api/sessions/t1")[1]
+    assert s["status"] == "idle" and s["askedInText"] is False  # 지난 턴의 물음표 보고가 되살아나면 안 된다
+
+
 def test_status_paths_parse_z_output_rename_and_delete():
     out = " M a b.md\0R  new.md\0old.md\0?? 새 폴더/c.md\0 D gone.md\0"
     run = FakeRun(**{"git rev-parse --show-toplevel": (0, "/r\n"), "git status": (0, out)})

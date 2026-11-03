@@ -13,6 +13,7 @@ from typing import Callable
 
 import flows
 import platform_compat
+from docfiles import SKIP_DIRS
 
 LOG_LIMIT = 200
 REQUEST_KEEP = 200
@@ -253,7 +254,7 @@ class Store:
                 s = {
                     "id": sid, "title": "", "title_rank": 0, "cwd": cwd, "repo": "", "branch": "", "managed": False,
                     "permissionMode": "", "model": "", "currentSkill": "", "currentAction": "", "startedAt": now, "updatedAt": now,
-                    "log": [], "report": "", "changedFiles": [], "prLinks": [], "subagents": [], "skillStates": {},
+                    "log": [], "report": "", "changedFiles": [], "touchedFiles": [], "prLinks": [], "subagents": [], "skillStates": {},
                     "pending_stop": [], "turn_running": False, "ended": False, "managed_alive": False,
                     "turn": {"skill": None, "unknown": False}, "flowState": None,
                 }
@@ -424,6 +425,73 @@ def mark_check(s: dict, cid: str, state: str = CHECK_DONE) -> bool:
     return False
 
 
+REPORT_TAIL_TRIM = " \t*_`~\"'”’)」』>]"
+
+
+def report_asks(report: str) -> bool:
+    """마지막 결과 보고가 질문으로 끝났는가(추정). 끝 줄의 끝 글자가 물음표이면 그렇다고 본다. 도구 질문창(AskUserQuestion)이 아니라
+    글로 물은 경우를 잡으려는 것이라 틀릴 수 있고, 화면은 이를 추정으로 보여 준다."""
+    lines = [ln.strip() for ln in str(report or "").splitlines() if ln.strip()]
+    if not lines:
+        return False
+    return lines[-1].rstrip(REPORT_TAIL_TRIM).endswith(("?", "？"))
+
+
+def _skipped(s: dict, p: str) -> bool:
+    """건너뛰는 폴더(.git, node_modules 등) 안의 경로인가."""
+    try:
+        rel = os.path.relpath(p, s["cwd"]) if s.get("cwd") and os.path.isabs(p) else p
+    except ValueError:
+        return False
+    return any(part in SKIP_DIRS for part in rel.replace("\\", "/").split("/")[:-1])
+
+
+def _key(p: str) -> str:
+    """경로 비교용 키. 구분자(\\ /)와 대소문자(Windows)를 같게 본다."""
+    return os.path.normcase(os.path.normpath(p))
+
+
+def _after_start(s: dict, p: str) -> bool:
+    """세션이 시작된 뒤에 마지막으로 바뀐 파일인가(세션 시작 시각을 모르거나 파일을 못 읽으면 아니라고 본다)."""
+    started = s.get("startedAt")
+    if not isinstance(started, (int, float)):
+        return False
+    try:
+        return os.stat(p).st_mtime >= started
+    except OSError:
+        return False
+
+
+def set_baseline(s: dict, paths) -> None:
+    """세션을 처음 본 때 이미 바뀌어 있던 파일을 기준선으로 한 번만 적는다. 이 파일들은 git status 만으로는 이 세션 것으로 치지 않는다.
+    기준선이 늦게 잡혀도(첫 refresh_git 이 첫 턴 끝에 오면) 세션 시작 뒤에 바뀐 파일은 기준선에 넣지 않는다 — 그 턴에 만든 파일이 빠지지 않게."""
+    if "baselineFiles" not in s:
+        s["baselineFiles"] = [_key(p) for p in paths if isinstance(p, str) and p and not _after_start(s, p)]
+
+
+def remember_touched(s: dict, paths, from_status: bool = False) -> None:
+    """이 세션이 만들거나 바꾼 파일 경로를 쌓는다. changedFiles(지금 git 상태)와 달리 커밋해도 지우지 않는다(만든 문서 목록용).
+    from_status 이면 git status 에서 온 경로라 기준선(세션 시작 전부터 바뀌어 있던 파일)은 뺀다. 훅의 Edit·Write 경로는 이 세션 것이 확실해 그대로 쌓는다.
+    작업 폴더 밖 경로(작업 폴더가 저장소 하위일 때 git status 에 같이 나온다)는 쌓지 않고, 구분자·대소문자만 다른 경로는 같은 것으로 본다.
+    상한에 닿으면 touchedTruncated 를 켜서 화면이 목록이 잘렸다고 알리게 한다."""
+    touched = s.setdefault("touchedFiles", [])
+    base = set(s.get("baselineFiles") or []) if from_status else set()
+    seen = {_key(t) for t in touched}
+    for p in paths:
+        if not isinstance(p, str) or not p:
+            continue
+        k = _key(p)
+        if k in seen or k in base or _skipped(s, p):
+            continue
+        if s.get("cwd") and os.path.isabs(p) and not platform_compat.is_within(p, s["cwd"]):
+            continue
+        if len(touched) >= MAX_CHANGED_FILES:
+            s["touchedTruncated"] = True
+            break
+        touched.append(p)
+        seen.add(k)
+
+
 def same_folder_ids(store: "Store", s: dict) -> list[str]:
     """같은 폴더(정규화해 비교)에서 살아 있는 다른 세션 id. 끝난 세션과 프로세스가 죽은 콘솔 세션은 뺀다."""
     if not s["cwd"] or s.get("handedOffTo"):  # 넘어간 세션 자신도 경고를 받지 않는다
@@ -485,7 +553,9 @@ def public_session(store: Store, s: dict, skills: list[str]) -> dict:
         else:
             status = "idle"
         turn_skill = s["turn"].get("skill")
-        if pending or (turn_skill and not running and not s["ended"]):
+        asks = bool(not pending and not running and not s["ended"] and not s.get("starting")
+                    and s.get("reportFresh") and report_asks(s["report"]))  # 이번 턴에 받은 보고일 때만
+        if pending or asks or (turn_skill and not running and not s["ended"]):
             group = "todo"
         elif running:
             group = "running"
@@ -500,6 +570,7 @@ def public_session(store: Store, s: dict, skills: list[str]) -> dict:
             "startedAt": s["startedAt"], "updatedAt": s["updatedAt"], "log": list(s["log"]), "report": s["report"],
             "changedFiles": list(s["changedFiles"]), "prLinks": list(s["prLinks"]), "subagents": list(s["subagents"]),
             "flow": flow, "turnSkill": turn_skill, "turnUnknown": bool(s["turn"].get("unknown")),
+            "askedInText": asks,
             "pendingRequestIds": pending, "canSend": ok, "cannotSendReason": why,
             "bypassPermissions": s["permissionMode"] == "bypassPermissions",
             "pluginVersions": [dict(p) for p in s.get("pluginVersions") or []],

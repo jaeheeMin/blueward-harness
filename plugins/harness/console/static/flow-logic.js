@@ -30,7 +30,7 @@
 
   function groupOf(s) {
     if (s.group === 'todo' || s.group === 'running' || s.group === 'idle') return s.group;
-    if (arr(s.pendingRequestIds).length || s.turnSkill) return 'todo';
+    if (arr(s.pendingRequestIds).length || s.turnSkill || s.askedInText) return 'todo';
     return s.status === 'running' || s.status === 'starting' ? 'running' : 'idle';
   }
 
