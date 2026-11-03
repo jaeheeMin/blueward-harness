@@ -132,6 +132,8 @@ class Hooks:
             return 200, None
         if self._terminal_without_browser(s):
             return 200, None  # 터미널 질문창으로 넘어간다
+        # 마감은 질문이 도착한 시점 기준이다. 요청을 화면에 등록한 뒤에 재면 그 사이 흐른 시간만큼 늦어진다(#610).
+        deadline = None if s["managed"] else self.clock() + self.question_wait
         try:
             req, created = self.store.add_request(s["id"], "question", "AskUserQuestion", tool_input, None,
                                                   tool_key("AskUserQuestion", tool_input))
@@ -141,7 +143,6 @@ class Hooks:
         if created:
             self.store.add_log(s, "질문이 도착함")
             self.store.touch(s)
-        deadline = None if s["managed"] else self.clock() + self.question_wait
         self.wait(req, alive, deadline)
         if req.status == "answered":
             return 200, req.response
