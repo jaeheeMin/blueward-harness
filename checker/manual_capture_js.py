@@ -156,7 +156,8 @@ LIB_JS = r"""(() => {
 
   // 입력 값 넣기 준비: 라벨이 가리키는 입력 칸에 포커스를 주고 글자를 모두 선택한다. 유일할 때만.
   const focusInput = name => {
-    const labs = labelsNamed(name).filter(shown);
+    // find('필터') 와 같은 후보(입력 칸이 딸린 라벨)만 센다 — 같은 이름의 표 열 머리글 라벨은 세지 않는다(#533 실제 테넌트 시험)
+    const labs = cands('필터', name).items.map(it => it.el);
     if (labs.length !== 1) return { ok: false, count: labs.length };
     const root = inputOf(labs[0]);
     if (!root) return { ok: false, count: 1, noInput: true };
@@ -189,6 +190,15 @@ LIB_JS = r"""(() => {
     document.documentElement.appendChild(o);
   };
 
-  window.__mc = { find, scrollColumn, focusInput, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
+  // 보이는 대화상자(오류·경고 창 등)의 글자. 준비 단계 뒤에 떠 있으면 그 상태를 찍지 않는다(#533 실제 테넌트 시험)
+  const dialogs = () => uniq([...document.querySelectorAll('[role=alertdialog], [role=dialog], .sapMMessageBox, .sapMDialog')])
+    .filter(d => {  // 대화상자는 잘림 판정(rectFor)을 쓰지 않는다 — UI5 는 고정 위치 영역에 그려 조상의 overflow 와 무관하다
+      if (d.closest('#__mc_overlay') || !shown(d)) return false;
+      const r = d.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight;
+    })
+    .map(d => trimLabel(d.innerText).slice(0, 200));
+
+  window.__mc = { find, scrollColumn, focusInput, dialogs, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
   return true;
 })()"""

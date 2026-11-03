@@ -617,6 +617,9 @@ class Capturer:
                     self.tab.call("Input.dispatchKeyEvent", type=t, key="Tab", code="Tab", windowsVirtualKeyCode=9)
             time.sleep(0.3)
             self.wait_ready(f"준비 단계 {s.action} {s.name!r}")
+            shown = self.tab.evaluate("window.__mc.dialogs()") or []
+            if shown:  # 오류·경고 창이 떴다 — 그 화면은 의도한 상태가 아니다(통과로 찍지 않는다)
+                raise Unavailable(f"준비 단계 {s.action} {s.name!r} 뒤에 대화상자가 떴다: {shown[0]!r}. 준비 단계(값·이미 들어 있는 기본값)를 확인한다")
 
     def wait_content(self, screen: Screen, what: str) -> None:
         """찾을 이름 중 하나라도 화면에 나타나고 문서가 멈출 때까지 기다린다. 시간 초과면 Unavailable.
@@ -651,6 +654,9 @@ class Capturer:
         self.run_steps(screen)
         if screen.steps:
             self.wait_content(screen, f"화면 {screen.name!r} 준비 뒤 그리기")
+        shown = self.tab.evaluate("window.__mc.dialogs()") or []
+        if shown:  # 찍기 직전에도 본다 — 대화상자는 준비 단계 뒤 늦게 뜰 수 있다
+            raise Unavailable(f"화면 {screen.name!r}: 대화상자가 떠 있다: {shown[0]!r}. 이 상태로는 찍지 않는다(준비 단계·기본값 확인)")
         for m in screen.marks:  # 가로 스크롤 밖 열은 먼저 보이게 한다
             if m.kind == "열":
                 self.tab.evaluate(f"window.__mc.scrollColumn({json.dumps(m.name)}, {json.dumps(m.index)})")
