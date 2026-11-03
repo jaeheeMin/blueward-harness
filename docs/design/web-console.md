@@ -24,8 +24,7 @@ plugins/harness/
     managed.py              콘솔이 띄운 claude -p 세션 관리
     analysis.py             새 작업 읽기 전용 분석
     gitstate.py             브랜치·변경·PR 로 `이번 차례` 판단, 갈래 진행·승인자 판정용 gh 조회
-    flows.json              갈래·단계·도구·노출 조건 데이터(코드가 아니라 데이터다)
-    flows.py                flows.json 읽기·검사, 세션의 갈래 진행 상태, 다음 갈래 계산
+    flows.py                ../workflow.json(작업 순서 정본) 읽기·검사, 세션의 갈래 진행 상태, 다음 갈래 계산
     platform_compat.py      프로세스 분리, 종료, 경로, claude 실행 파일 찾기
     session_start_hook.py   SessionStart command 훅
     static/                 index.html, app.css, app.js, theme.js, blueward-logo.png (순수 JS, 빌드 없음)
@@ -171,21 +170,29 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 스킬 목록은 플러그인의 `skills/*/SKILL.md` frontmatter 의 `name`·`description` 에서 읽는다. `update`, `scaffold`, `open` 은 버튼과 `/` 자동완성에서 숨긴다(`HIDDEN_SKILLS`). 실행 중에는 스킬 흐름에서 현재 스킬을 `진행 중` 으로 표시한다.
 
-## 7a. 갈래와 단계 (`flows.json`, `flows.py`)
+## 7a. 갈래와 단계 (`workflow.json`, `flows.py`)
 
-"하고 싶은 일 → 하네스 갈래 → 그 순서대로만 진행" 이다. 갈래와 단계는 코드가 아니라 `console/flows.json` 이 정한다(저장소 원칙 "규칙은 데이터"). 서버는 뜰 때 이 파일을 읽고 `flows.validate` 로 검사한다. 모든 스킬이 `skills/*/SKILL.md` 에 있어야 하고, 가리키는 갈래·조건·증거가 정의돼 있어야 한다. 틀리면 갈래 기능만 끄고(`GET /api/flows` 와 갈래 지정이 503, 사유는 서버 stderr) 콘솔은 그대로 뜬다. 갈래가 없는 세션은 예전처럼 스킬 제한이 없다.
+"하고 싶은 일 → 하네스 갈래 → 그 순서대로만 진행" 이다. **순서의 정본은 콘솔이 아니라 플러그인의 `plugins/harness/workflow.json` 이다**(#599, 저장소 원칙 "규칙은 데이터"). 콘솔은 화면만 쉽게 하고 순서를 따로 갖지 않는다(옛 `console/flows.json` 은 없앴다). 갈래·단계·다음 갈래·도구·조건마다 `basis: [{file, quote}]`(근거 스킬·규칙 파일과 그 안의 실제 문장)가 있어야 한다. 근거 문장을 못 찾는 단계는 넣지 않는다. 서버는 뜰 때 이 파일을 읽고 `flows.validate` 로 검사한다. 모든 스킬이 `skills/*/SKILL.md` 에 있어야 하고, 가리키는 갈래·조건·증거가 정의돼 있어야 하며, `basis` 가 비었거나 `file` 이 없거나 `quote` 가 그 파일에 없으면(공백·줄바꿈 차이는 무시) 오류다. 틀리면 갈래 기능만 끄고(`GET /api/flows` 와 갈래 지정이 503, 사유는 서버 stderr) 콘솔은 그대로 뜬다. 갈래가 없는 세션은 예전처럼 스킬 제한이 없다. PR 검사(`checker/tests/test_workflow_source.py`)는 모든 근거가 맞는지, 모든 스킬이 `workflow.json` 의 단계나 도구에 있는지 확인한다. 새 스킬을 순서나 도구에 넣지 않으면 실패한다.
 
 | 갈래 id | 이름 | 단계 |
 |---|---|---|
-| `new-customer` | 새 고객사 시작 | scaffold → (사람) 양식을 `templates/` 에 넣기 → 다음 갈래 `srs` |
 | `srs` | 요구사항 만들기·바꾸기 | srs → deliver → 승인·병합 기다리기 → 다음 갈래는 SRS 의 `다음 단계` 값에 따라 갈림 |
 | `spec` | 개발 Spec | spec → deliver → 승인·병합 기다리기 → 다음 갈래 `dev` |
-| `dev` | 개발하기 | start → 구현 → atc(`env/adt-tiers.yaml` 이 있을 때만) → deliver → 병합 기다리기 → 다음 "권한·CTS 양식"(준비 중, 비활성) |
-| `fix` | 작은 수정 | start → 고치기 → deliver → 병합 기다리기 |
-| `atc` | ATC 지적 고치기 | atc → 고치기 → deliver (`env/adt-tiers.yaml` 이 있을 때만 쓸 수 있다) |
-| `review` | 병합 기다리기 | prs → 사람 승인·병합 |
+| `dev` | 개발하기 | start → 구현(SAP 080 에서 개발·활성화) → deliver → 병합 기다리기. ATC 는 단계가 아니라 도구다. 개발 묶음이 안 끝나 deliver 가 "브랜치에만 올리기" 를 고르면 PR 이 생길 때까지 deliver 단계가 끝나지 않는다(정상 경로, 단계 설명에 적혀 있다) |
+| `config` | 설정하기 | start(그 `[DEV-xxx]` 로) → 설정하고 SRS 상세 절 Configuration Considerations 에 기록 → deliver(대표 이슈를 `Closes` 하면 원장 `완료`) → 병합 기다리기. 화면에는 "설정 DEV-003" 처럼 보인다 |
+| `fix` | 작은 수정 | start(원장이 있는 저장소의 feat·fix 면 DEV 번호를 받을지 묻는다) → 고치기 → deliver → 병합 기다리기 |
 
-**SRS 다음 갈래.** `srs` 갈래가 끝나면 `docs/ssot/SRS.md` 의 요구사항 표에서 `다음 단계` 열을 읽어 값별로 센다(Status 가 `Dropped`·`Duplicate` 인 줄은 뺀다). `개발` → `spec`, `설정` → `dev`(Spec 없이 `[DEV-xxx]` 설정 작업), `미정` → 끝(미결 사항). 값이 섞여 있으면 선택지를 값별 개수·ID 와 함께 모두 내려보낸다. 파일을 못 읽거나 열·값을 못 찾으면 `unknown` 사유를 넣고 선택지를 비운다(끝으로 두지 않는다).
+병합 기다리기 문구: 위험하지 않은 PR 은 검사가 모두 통과하면 자동 병합, 위험한 PR 은 작성자가 아닌 승인자의 Approve, 사람이 병합해야 하는 경로(`.github/human-merge-paths`)를 바꾼 PR 은 사람이 GitHub 에서 병합한다(`rules/governance.md`).
+
+없앤 갈래: "새 고객사 시작"(scaffold 는 프로젝트마다 한 번 하는 준비이지 작업 순서가 아니다), "ATC 지적 고치기"·"합쳐지기 기다리기"(`atc`·`prs` 는 도구다). 옛 갈래 id(`new-customer`·`atc`·`review`)로 저장된 세션은 정의를 못 찾으니 저장된 이름·단계가 그대로 보인다(`public_fields`).
+
+**프로젝트 준비.** 조건 `project-ready`(`type: paths`)는 작업 폴더에 `templates/` 와 `rules/` 가 둘 다 있는가를 본다. 없으면 홈(프로젝트 준비 카드)과 세션·새 작업 화면의 도구 줄 위에 "프로젝트 준비 안 됨" 안내를 내고, 관리자용 도구 `scaffold`(조건 `project-not-ready`)를 보인다. git 을 실행하지 못하는 등 판정 불능이면 숨기지 않고 "확인하지 못했어요" 로 알린다.
+
+**도구만 쓰는 일.** scaffold·cts·role·manual·handoff 같은 도구 스킬만 쓰는 일은 어느 갈래에도 억지로 넣지 않는다. 새 작업 분석의 갈래 보기에 `none`("순서 없이 이 도구만")이 늘 있고, 요청이 `/harness:<도구>` 로 시작하면 서버가 분석 결과와 상관없이 `none` 으로 본다. 이때 시작 글 앞에 `/harness:start` 같은 다른 스킬을 붙이지 않는다. 사용자가 글 맨 앞에 `/harness:<스킬>` 을 직접 적었으면(git 저장소) 그 스킬이 첫 줄이다. git 저장소가 아니면 기존 안전 문장을 앞세운다.
+
+**분석 프롬프트의 폴더 사실.** 대상은 SAP S/4HANA Public Cloud·ABAP Cloud 로 적는다(저장소 `env/adt-tiers.yaml` 최상위 `system_type` 이 있으면 그 값도 적는다). 프로젝트 준비 조건이 `no` 면 `understood` 첫 문장에 "먼저 관리자가 프로젝트 구조 만들기(/harness:scaffold)" 를 안내하게 하고, 판정 불능이면 단정하지 않게 한다.
+
+**SRS 다음 갈래.** `srs` 갈래가 끝나면 `docs/ssot/SRS.md` 의 요구사항 표에서 `다음 단계` 열을 읽어 값별로 센다. 빼는 Status 는 분기마다 근거가 있는 것만 둔다: `개발`·`설정` 은 `Dropped`·`Duplicate`·`On Hold`, `미정` 은 근거가 없어 아무것도 빼지 않는다. `개발` → `spec`, `설정` → `config`(Spec 없이 `[DEV-xxx]` 설정 작업), `미정` → 갈래 없이 안내만("개발 Spec 을 시작하면 그 자리에서 개발인지 설정인지 정하게 한다", spec 스킬의 미정 경로). 값이 섞여 있으면 선택지를 값별 개수·ID 와 함께 모두 내려보낸다. 설정 갈래로 넘길 때는 그 요구사항 번호(`ids`)를 `POST .../flow/next` 로 함께 보내 새 세션의 사유를 "설정 DEV-003" 으로 적는다. 파일을 못 읽거나 열·값을 못 찾으면 `unknown` 사유를 넣고 선택지를 비운다(끝으로 두지 않는다).
 
 **단계 종류와 완료 판정.** 단계는 `kind`(`skill` 스킬 실행 / `work` Claude Code 와 하는 작업 / `human` 사람이 하는 일 / `wait` 밖에서 일어나길 기다림)와 `done`(증거 목록, 모두 맞아야 끝)을 가진다. 증거:
 
@@ -202,10 +209,11 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 단계 상태는 `pending`(대기) / `active`(진행) / `done`(끝) / `skipped`(건너뜀 + 이유) 이다. 스킬 단계는 그 스킬이 시작되면 `active`, 그 밖의 단계는 지금 단계가 되면 바로 `active` 다. 단계에 `onlyIf`(조건 이름)가 있고 조건이 거짓이면 이유("조건에 맞지 않아 건너뜀")와 함께 자동으로 건너뛴다. 판정은 Stop·SessionStart 의 git 갱신 때, `flow/refresh` 때, 갈래를 지정할 때 돈다. **gh 로 근거를 못 읽으면 끝으로도 아님으로도 두지 않고** 단계를 그대로 둔 채 `flowUnknown` 에 사유를 넣는다("판정 불능"). 조건 판정도 같다 — 못 읽은 조건은 `unknown` 이고 숨기지 않는다.
 
-**순서.** 갈래가 있는 세션은 지금 단계의 스킬(`wait` 단계는 `helperSkill`)만 `POST .../skills/:skill/run`·예약으로 실행할 수 있고, 다른 스킬은 409 다. 단계를 건너뛰려면 `POST .../flow/skip {reason}` 이 필요하고 이유가 없으면 400 이다. 이유는 단계와 세션 로그에 남는다. **도구**(`tools`: version, sync, update, handoff, wrapup, prs, approvals, reload)는 갈래와 상관없이 언제나 실행된다. `reload`(콘솔 세션 전용)의 동작은 §7b 다. 버튼에 안 내는 `scaffold`·`update` 도 갈래·도구 데이터에 있으면 실행된다.
+**순서.** 갈래가 있는 세션은 지금 단계의 스킬(`wait` 단계는 `helperSkill`)만 `POST .../skills/:skill/run`·예약으로 실행할 수 있고, 다른 스킬은 409 다. 단계를 건너뛰려면 `POST .../flow/skip {reason}` 이 필요하고 이유가 없으면 400 이다. 이유는 단계와 세션 로그에 남는다. **도구**(`tools`: version, sync, update, handoff, wrapup, prs, reload, approvals, atc, role, cts, manual, scaffold, open)는 갈래와 상관없이 언제나 실행된다. `reload`(콘솔 세션 전용)의 동작은 §7b 다. 도구에 `requires`(조건 이름)가 있으면 그 조건이 거짓일 때만 숨기고(판정 불능은 보인다), `hidden: true`(`open`)는 화면에 단추를 내지 않는다. 버튼에 안 내는 `scaffold`·`update` 도 도구 데이터에 있으면 실행된다. 권한·CTS 양식은 "준비 중" 다음 갈래가 아니라 `role`·`cts`·`manual` 도구다.
 
 **노출 조건.** `conditions` 가 이름으로 정의한다.
-- `adt-tiers` (`file`): 저장소 꼭대기에 `env/adt-tiers.yaml` 이 있는가. 없으면 `atc` 갈래와 `dev` 의 atc 단계를 숨긴다(`GET /api/flows` 의 `exposure.visible=false`, 갈래 지정은 409).
+- `adt-tiers` (`file`): 저장소 꼭대기에 `env/adt-tiers.yaml` 이 있는가. 없으면 `atc` 도구를 숨긴다(`GET /api/flows` 의 `exposure.visible=false`). 갈래·단계에도 `requires`·`onlyIf` 로 같은 조건을 걸 수 있다(숨김, 갈래 지정은 409, 단계는 건너뜀). 지금 `workflow.json` 의 갈래·단계에는 쓰는 곳이 없고 엔진 시험은 조건을 더한 사본으로 본다.
+- `project-ready` / `project-not-ready` (`paths`): `templates/` 와 `rules/` 를 함께 가진 폴더가 저장소 꼭대기나 3단계 아래까지(`searchDepth`) 있는가 / 없는가(`negate`). `.claude-plugin/marketplace.json` 이 있는 플러그인 저장소(`exemptFile`)와 `HARNESS_NO_SCAFFOLD_HINT=1` 은 `session-start-sync.sh` 와 같이 따지지 않는다(준비된 것으로 본다). 위 "프로젝트 준비" 참고.
 - `approver`: 이 저장소에서 내가 승인자인가(`approvals` 도구를 보일지). `gh api user` 로 내 아이디를 읽고 `.github/ssot-approvers` 를 `checker.ssot_approval` 과 같은 형식으로 읽는다. 내용이 있으면 거기 든 사람만 승인자다. **파일이 없거나 비어 있으면** `whenNoFile` 에 따라 `admin`(`gh repo view` 의 `viewerPermission` 이 ADMIN 일 때만) 또는 `anyone`(작성자 아닌 누구든)이다. 지금 값은 `admin` 이다. 파일은 작업 폴더의 것을 읽는다(엔진은 기준 브랜치에서 읽는다). gh 가 실패하면 `unknown` 으로 두고 도구를 숨기지 않는다. 폴더가 GitHub 저장소(`git remote -v` 에 `github.com`)가 아니면 gh 를 부르지 않고 `no`(이유 "GitHub 저장소가 아님")로 두어 도구와 홈의 승인 칸을 숨긴다. 결과는 60초 기억하고, 못 읽은 결과는 기억하지 않는다.
 
 **분류(분석).** `POST /api/new` 의 분석 스키마에 선택 속성 `flow {id(갈래 id 목록 중 하나), reason, confident, alternativeId}` 가 더해진다(이 폴더에서 쓸 수 있는 갈래만 프롬프트·스키마에 든다. `required` 에는 넣지 않아 없어도 결과가 유효하다). 서버는 id 가 목록에 있는지 다시 검사해 결과에 `flow {id, name, reason, confident, alternativeId, alternativeName}` 와 `flowError` 를 넣는다. 확신이 없고(`confident=false`) 후보가 둘이면 `extraQuestions` 맨 앞에 두 갈래를 묻는 질문(`flowChoice: [id, id]`)을 끼운다. 시작할 때 `flow` 를 주지 않으면 확신한 분류를 쓰고, 첫 메시지는 갈래의 첫 스킬(`/harness:<skill>`)로 시작한다. 첫 단계가 스킬이 아니면 그대로 둔다.

@@ -125,9 +125,10 @@
     function toolsRow(getCtx) {
       var el = h('section', { class: 'toolsrow', 'aria-label': '도구' });
       var strip = h('div', { class: 'reload-strip', role: 'status', hidden: true });
+      var project = h('p', { class: 'note-attn project-notice', role: 'status', hidden: true, 'data-project-notice': '1' });
       var list = h('div', { class: 'tools-list' });
       var note = h('p', { class: 'note-muted tools-note', role: 'status', hidden: true });
-      el.appendChild(strip); el.appendChild(list); el.appendChild(note);
+      el.appendChild(strip); el.appendChild(project); el.appendChild(list); el.appendChild(note);
       var data = { flows: null, approvals: null, key: null }, alive = true;
 
       function say(text) { note.textContent = text; note.hidden = !text; }
@@ -150,6 +151,9 @@
         var ctx = getCtx(), s = ctx.session;
         var tools = L.visibleTools(data.flows, data.approvals, { hasSession: !!s, managed: !!(s && s.managed) });
         var blocked = s && s.canSend === false ? (s.cannotSendReason || '이 세션에는 지금 요청을 보낼 수 없어요.') : '';
+        var pn = L.projectNotice(data.flows);
+        project.hidden = !pn;
+        project.textContent = pn ? pn.text : '';
         clear(list);
         tools.forEach(function (t) {
           var isConsole = t.kind === 'console';
@@ -250,14 +254,14 @@
       }
       function startNext(opt) {
         st.busy = true; st.job = '새 세션을 준비하고 있어요.'; st.msg = ''; draw();
-        api('POST', '/api/sessions/' + sid(last) + '/flow/next', { flowId: opt.flow }).then(function (d) {
+        api('POST', '/api/sessions/' + sid(last) + '/flow/next', { flowId: opt.flow, ids: (opt.ids || []).filter(function (i) { return /^REQ-\d{1,6}$/.test(i); }) }).then(function (d) {
           var jobId = d && (d.jobId || d.id);
           if (!jobId) throw new Error('작업 번호를 받지 못했어요.');
           pollJob(jobId, 0);
         }, function (e) { st.busy = false; st.job = ''; st.msg = failText(e, '새 세션으로 넘기기'); if (alive) draw(); });
       }
       // 인계 결과를 사람이 보고 새 세션을 시작한다: [이대로 새 세션 시작] [고쳐서 시작] [취소]
-      function askStart(jobId, prompt) {
+      function askStart(jobId, prompt, warning) {
         var box = h('textarea', { class: 'textarea', rows: '10', readOnly: true, 'aria-label': '새 세션에 보낼 인계 글', maxlength: '4000' });
         box.value = prompt;
         function begin(path, body, label) {
@@ -267,7 +271,8 @@
         }
         modal({
           title: '새 세션에 이 글을 보낼까요?',
-          body: [h('p', { class: 'note-muted', text: '지금 세션이 정리한 인계 글이에요. 읽어 보고 그대로 시작하거나, 고쳐서 시작하세요.' }), box],
+          body: [h('p', { class: 'note-muted', text: '지금 세션이 정리한 인계 글이에요. 읽어 보고 그대로 시작하거나, 고쳐서 시작하세요.' }),
+                 warning ? h('p', { class: 'note-attn', role: 'status', text: warning }) : null, box],
           confirmText: '이대로 새 세션 시작',
           validate: function () { return box.value.trim() ? '' : '보낼 글이 비어 있어요.'; },
           onConfirm: function () { begin('/confirm', { prompt: box.value }, '새 세션을 시작하고 있어요.'); },
@@ -283,7 +288,7 @@
         if (!alive) return;
         api('GET', '/api/jobs/' + encodeURIComponent(jobId)).then(function (job) {
           var out = L.jobOutcome(job);
-          if (out.confirm) { st.busy = false; st.job = ''; if (alive) { draw(); askStart(jobId, out.prompt); } return; }
+          if (out.confirm) { st.busy = false; st.job = ''; if (alive) { draw(); askStart(jobId, out.prompt, out.warning); } return; }
           if (!out.done && n < JOB_POLL_MAX) { pollTimer = setTimeout(function () { pollJob(jobId, n + 1); }, JOB_POLL_MS); return; }
           st.busy = false; st.job = '';
           if (out.done && out.ok) { kit.go('/s/' + encodeURIComponent(out.sessionId)); return; }
@@ -530,6 +535,8 @@
         if (!r.ok) { el.hidden = false; el.appendChild(h('p', { class: 'note-muted', text: failText(r.error, '일 갈래') })); return; }
         var flows = kit.listOf(r.data, 'flows').filter(function (f) { return !(f.exposure && f.exposure.visible === false); });
         if (!flows.length) return;
+        // 도구 스킬만 쓰는 일(scaffold, cts, role, manual …)은 어느 갈래에도 억지로 넣지 않는다. 서버가 같은 id(none)로 알아듣는다.
+        flows.push({ id: L.NO_FLOW_ID, name: '순서 없이 이 도구만', steps: [] });
         el.hidden = false;
         var found = last.found, picked = last.selected;
         var cur = flows.filter(function (f) { return f.id === picked; })[0];
@@ -541,6 +548,9 @@
             two.appendChild(h('button', { type: 'button', class: 'btn', 'aria-pressed': String(picked === id), 'data-flow': id, text: nameOf(flows, id), onClick: function () { last.onPick(id); } }));
           });
           el.appendChild(two);
+        } else if (cur && cur.id === L.NO_FLOW_ID) {
+          el.appendChild(h('p', { class: 'flow-line', text: '도구만 쓰는 일이에요 · 정해진 순서 없이 그 도구 스킬로 바로 시작해요.' }));
+          if (found && found.id === cur.id && found.reason) el.appendChild(h('p', { class: 'note-muted', text: found.reason }));
         } else if (cur) {
           el.appendChild(h('p', { class: 'flow-line', text: '이 일은 \'' + cur.name + '\' 갈래예요 · 순서: ' + L.orderText(cur) }));
           if (found && found.id === cur.id && found.reason) el.appendChild(h('p', { class: 'note-muted', text: found.reason }));
@@ -592,6 +602,35 @@
       });
     }
 
+    // 프로젝트 준비 안내: 세션이 있는 폴더 중 templates/·rules/ 가 없는 곳을 알린다. 읽지 못한 폴더는 숨기지 않고 '확인 못 함' 으로 적는다.
+    function projectCard(box) {
+      var cwds = [], seen = {};
+      sessionList().forEach(function (s) {
+        var key = s.repo || L.normPath(s.cwd);
+        if (s.cwd && !seen[key] && cwds.length < MAX_APPROVAL_FOLDERS) { seen[key] = 1; cwds.push(s.cwd); }
+      });
+      var sig = cwds.join('|');
+      if (box.dataset.sig === sig && box.dataset.ready) return;
+      box.dataset.sig = sig;
+      Promise.all(cwds.map(flowsFor)).then(function (rs) {
+        if (box.dataset.sig !== sig || !box.isConnected) return;
+        box.dataset.ready = '1';
+        clear(box);
+        var lines = [];
+        rs.forEach(function (r, i) {
+          var name = kit.baseName(cwds[i]) || cwds[i];
+          if (!r.ok) { lines.push(name + ': 프로젝트 준비 여부를 확인하지 못했어요 - ' + failText(r.error)); return; }
+          var pn = L.projectNotice(r.data);
+          if (pn) lines.push(name + ': ' + pn.text);
+        });
+        if (lines.length) {
+          box.appendChild(h('section', { class: 'approval-card unknown', 'data-project-card': '1' },
+            h('h2', { class: 'sect-h', text: '프로젝트 준비' }),
+            h('ul', { class: 'plain-list' }, lines.map(function (t) { return h('li', null, h('span', { class: 'note-attn', text: t })); }))));
+        }
+      });
+    }
+
     function sessionCard(s) {
       var g = L.groupOf(s), todo = g === 'todo';
       var title = s.title || folderName(s) || '이름 없는 세션';
@@ -617,6 +656,7 @@
     var GROUP_ORDER = { todo: 0, running: 1, idle: 2 };
     function homeView(root) {
       var approvals = h('div', { class: 'approvals' });
+      var projects = h('div', { class: 'projects' });
       function draw() {
         clear(root);
         if (!kit.loaded()) {
@@ -630,6 +670,7 @@
         page.appendChild(h('p', { class: 'lede summary', 'data-summary': '1', text: L.summaryText(L.counts(list)) }));
         page.appendChild(h('div', { class: 'mt-16' }, kit.link('/new', { class: 'btn primary', text: '새 작업 시작' })));
         page.appendChild(approvals);
+        page.appendChild(projects);
         if (!list.length) page.appendChild(h('p', { class: 'note-muted mt-32', text: 'Claude Code 세션을 시작하면 여기에 나타납니다. 지금 바로 맡길 일이 있으면 새 작업으로 시작하세요.' }));
         else {
           list.sort(function (a, b) { return (GROUP_ORDER[L.groupOf(a)] - GROUP_ORDER[L.groupOf(b)]) || ((b.updatedAt || 0) - (a.updatedAt || 0)); });
@@ -637,6 +678,7 @@
         }
         root.appendChild(page);
         approvalCard(approvals);
+        projectCard(projects);
       }
       draw();
       return { onData: draw, onSession: draw, onRequest: draw, onRemoved: draw, title: function () { return ''; } };

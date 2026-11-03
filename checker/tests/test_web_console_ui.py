@@ -140,6 +140,23 @@ const cases = {
     // 서버가 숨기라고 한 도구는 숨긴다
     const hidden = { tools: [{ id: 'version', skill: 'version', exposure: { visible: false } }, { id: 'sync', skill: 'sync' }] };
     assert.deepStrictEqual(ids(hidden, null, { hasSession: true }), ['sync']);
+    // workflow.json 이 단추를 내지 않는다고 한 도구(콘솔을 여는 open)도 숨긴다
+    assert.deepStrictEqual(ids({ tools: [{ id: 'open', skill: 'open', hidden: true }, { id: 'sync', skill: 'sync' }] }, null, { hasSession: true }), ['sync']);
+  },
+  no_flow_id_and_job_warning() {
+    assert.strictEqual(L.NO_FLOW_ID, 'none');  // 서버 analysis.NO_FLOW 와 같은 값
+    const o = L.jobOutcome({ status: 'confirm', prompt: 'p', warning: '23건 중 20건만' });
+    assert.ok(o.confirm && o.warning === '23건 중 20건만' && L.jobOutcome({ status: 'confirm', prompt: 'p' }).warning === '');
+  },
+  project_notice_says_not_ready_or_unknown_and_stays_quiet_when_ready() {
+    const cond = (state, reason) => ({ conditions: { 'project-ready': { state, reason } } });
+    assert.strictEqual(L.projectNotice(null), null);
+    assert.strictEqual(L.projectNotice({}), null);  // 조건 자체를 못 받았으면 말할 근거가 없다
+    assert.strictEqual(L.projectNotice(cond('yes', '')), null);
+    const no = L.projectNotice(cond('no', 'templates 가 없습니다.'));
+    assert.strictEqual(no.state, 'no'); assert.ok(no.text.includes('프로젝트 준비 안 됨') && no.text.includes('templates 가 없습니다.'));
+    const unk = L.projectNotice(cond('unknown', 'git 을 실행하지 못했습니다.'));
+    assert.strictEqual(unk.state, 'unknown'); assert.ok(unk.text.includes('확인하지 못했어요') && !unk.text.includes('준비 안 됨'));
   },
   reload_strip_and_result() {
     const live = [{ id: 'a', status: 'idle' }, { id: 'b', status: 'ended' }, { id: 'c', status: 'running' }];

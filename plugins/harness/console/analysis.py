@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import posixpath
+import re
 import subprocess
 import threading
 import uuid
@@ -34,8 +35,12 @@ PROMPT = PROMPT_BODY + PROMPT_TAIL
 FLOW_PROMPT = (
     "\n\n그리고 요청을 아래 갈래 중 하나로 분류해 flow 에 답한다. flow.id 는 갈래 id, flow.reason 은 그렇게 본 이유 한 문장이다. "
     "어느 갈래인지 확신이 없으면 flow.confident 를 false 로 하고 두 번째 후보의 id 를 flow.alternativeId 에 적는다. "
-    "갈래 설명에 없는 일은 억지로 맞추지 않는다.\n갈래:\n"
+    "갈래 설명에 없는 일은 억지로 맞추지 않는다. 도구 스킬(/harness:scaffold, cts, role, manual, handoff, sync 등)만 쓰는 일이거나 "
+    "요청이 /harness:<도구> 로 시작하면 어느 갈래에도 넣지 말고 flow.id 를 none 으로 한다.\n갈래:\n"
 )
+NO_FLOW = "none"  # 갈래 없이 도구만 쓰는 일("순서 없이 이 도구만")
+NO_FLOW_NAME = "순서 없이 이 도구만"
+DIRECT_SKILL = re.compile(r"^/[A-Za-z][\w-]*:[\w-]+(?=\s|$)")  # 사용자가 글 맨 앞에 플러그인 스킬(/harness:scaffold)을 직접 적었다
 FLOW_QUESTION = "어떤 갈래로 진행할까요?"
 
 
@@ -152,11 +157,23 @@ def parse_output(stdout: str):
     return out, ""
 
 
-def first_message(text: str, picked: list[str], extra_answers: dict, note: str, is_git: bool, skill: str | None = None) -> str:
-    """화면 미리보기와 실제 첫 메시지는 이 함수 하나로 만든다. skill 은 고른 갈래의 첫 스킬이다(없으면 git 저장소일 때 start)."""
+def direct_skill(text: str) -> str:
+    """글 맨 앞에 사용자가 직접 적은 슬래시 명령(스킬) 이름. 예: `/harness:scaffold ...` -> `harness:scaffold`. 없으면 빈 문자열."""
+    m = DIRECT_SKILL.match((text or "").strip())
+    return m.group(0)[1:] if m else ""
+
+
+def first_message(text: str, picked: list[str], extra_answers: dict, note: str, is_git: bool, skill: str | None = None,
+                  tool_only: bool = False) -> str:
+    """화면 미리보기와 실제 첫 메시지는 이 함수 하나로 만든다. skill 은 고른 갈래의 첫 스킬이다(없으면 git 저장소일 때 start).
+    사용자가 글 맨 앞에 스킬을 직접 적었거나(direct_skill) 갈래 없이 도구만 쓰는 일(tool_only)이면 앞에 다른 스킬을 붙이지 않는다."""
     lines = []
     body = text.strip()
-    if skill:
+    if direct_skill(body) and is_git:
+        pass  # 그 스킬이 첫 줄이다. 앞에 start 등을 붙이면 엉뚱한 스킬이 먼저 돈다(git 저장소가 아니면 아래 기존 안전 문장을 유지한다)
+    elif tool_only:
+        pass
+    elif skill:
         lines.append(f"/harness:{skill}")
     elif is_git:
         lines.append("/harness:start")
@@ -208,17 +225,21 @@ class Analyses:
             args += ["--effort", level]
         return args
 
-    def prompt(self, flows: dict | None = None) -> str:
+    def prompt(self, flows: dict | None = None, context: str = "") -> str:
+        """context 는 이 폴더에 대해 서버가 아는 사실(프로젝트 준비 상태, 대상 시스템)이다. 요청 설명 바로 뒤에 둔다."""
         flows = self.flows if flows is None else flows
+        head = PROMPT_BODY + (("\n\n" + context.strip()) if context and context.strip() else "")
         if not flows:
-            return PROMPT
+            return head + PROMPT_TAIL
         listing = "\n".join(f"- {fid}: {f.get('name', fid)} - {f.get('description', '')}" for fid, f in flows.items())
-        return PROMPT_BODY + FLOW_PROMPT + listing + PROMPT_TAIL
+        return head + FLOW_PROMPT + listing + PROMPT_TAIL
 
-    def start(self, text: str, cwd: str, model: str | None = None, effort: str | None = None, flows: dict | None = None) -> str:
+    def start(self, text: str, cwd: str, model: str | None = None, effort: str | None = None, flows: dict | None = None,
+              context: str = "") -> str:
         """flows 는 이 폴더에서 쓸 수 있는 갈래(없으면 서버 기본 전체)."""
         job_id = uuid.uuid4().hex[:12]
-        job = {"id": job_id, "status": "running", "text": text, "cwd": cwd, "model": model, "effort": effort, "flows": self.flows if flows is None else flows, "result": None, "error": "",
+        job = {"id": job_id, "status": "running", "text": text, "cwd": cwd, "model": model, "effort": effort, "context": context,
+               "flows": self.flows if flows is None else flows, "result": None, "error": "",
                "start_lock": threading.Lock(), "session_id": None}
         with self.lock:
             self.jobs[job_id] = job
@@ -231,7 +252,7 @@ class Analyses:
             job.update(status="failed", error=CLAUDE_MISSING)
             return
         try:
-            done = subprocess.run(args, input=self.prompt(job["flows"]) + job["text"], cwd=job["cwd"], capture_output=True, text=True,
+            done = subprocess.run(args, input=self.prompt(job["flows"], job.get("context", "")) + job["text"], cwd=job["cwd"], capture_output=True, text=True,
                                   encoding="utf-8", errors="replace", timeout=self.timeout, **hidden_window_kwargs())
         except subprocess.TimeoutExpired:
             job.update(status="failed", error="분석이 시간 안에 끝나지 않았습니다.")
