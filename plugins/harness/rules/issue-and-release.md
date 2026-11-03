@@ -92,9 +92,10 @@ main 으로 수동 실행(workflow_dispatch)해 보충한다 — 그 커밋 기�
 
 이슈 등록은 `/harness:start` 가, 남은 작업의 이슈화는 `/harness:wrapup` 이 수행한다.
 
-새 개발 작업은 `/harness:start` 로 시작한다 — 진행 원장(`audit/ledger/`)이 있는
-저장소면 이때 개발 건으로 등록된다. 설계 문서가 필요하면 `/harness:spec` 으로 같은
-번호에 붙인다.
+개발 순서는 SRS(`/harness:srs`) → Spec(`/harness:spec`) → 개발이다. 요구사항은 SRS 로 먼저 정하고,
+개발로 정해진 건은 Spec 을 같은 DEV 번호로 만든 뒤, 그 번호로 `/harness:start` 가 개발을 시작한다. SRS 를 거치지 않는
+작은 개발은 `/harness:start` 로 바로 시작해 개발 건으로 등록하고, 설계 문서가 필요하면 `/harness:spec` 으로 같은 번호에 붙인다.
+진행 원장(`audit/ledger/`)이 있는 저장소에서 `/harness:start` 는 이미 원장에 있는 DEV 면 새 줄 없이 이어 쓴다.
 
 릴리즈 발행을 맡는 `/release` 스킬은 저장소에 따라 아직 없을 수 있다. 아직
 릴리즈할 것이 없거나, 이 harness 플러그인이 그 스킬을 아직 담고 있지 않기

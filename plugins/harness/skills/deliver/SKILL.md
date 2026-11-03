@@ -189,8 +189,8 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
     으로 불러 이 PR 이 줄기 표에서 앞 PR 다음 자리인지("앞: [#m](링크)")
     한 줄로 알린다(아래 "병합 순서 기록" 의 호출 방법). 읽지 못하면 "병합 순서 확인 불능" 이라고 말하고
     순서가 없다고 하지 않는다.
-13. **자동 병합을 건다(#437).** 사람의 승인이 곧 병합 결정이므로, 승인·검사가 끝나는 순간 GitHub 가 합치게
-    예약한다. 아래를 `gh api` 로 확인하고(저장소 `{repo}` 는 `gh repo view --json nameWithOwner --jq .nameWithOwner`,
+13. **자동 병합을 건다(#437).** 위험한 PR 은 승인자의 Approve 가 병합 결정이고 위험하지 않은 PR 은 검사 통과가 조건이므로
+    (`<이 스킬의 base directory>/../../rules/governance.md` "위험도에 따른 승인"), 그 조건이 갖춰지는 순간 GitHub 가 합치게 예약한다. 아래를 `gh api` 로 확인하고(저장소 `{repo}` 는 `gh repo view --json nameWithOwner --jq .nameWithOwner`,
     `{base}` 는 PR 의 base 브랜치) **둘 다 만족할 때만** 건다.
     - 저장소가 자동 병합을 허용한다: `gh api repos/{repo} --jq .allow_auto_merge` 가 `true`.
     - `{base}` 에 필수 상태 검사가 있다: `gh api repos/{repo}/rules/branches/{base}` 의 규칙 중

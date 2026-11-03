@@ -80,7 +80,8 @@ def make_repo(tmp_path: Path, *, ledger: bool = True, srs: str = SRS) -> Path:
 class FakeGh:
     """gh issue list/create/edit/view 만 흉내 내는 이슈 저장소."""
 
-    def __init__(self, issues=None, *, fail=False, rival_on_create: int | None = None):
+    def __init__(self, issues=None, *, fail=False, rival_on_create: int | None = None, prs=None):
+        self.prs = prs or []
         self.issues = {i["number"]: dict(i) for i in (issues or [])}
         self.fail = fail
         self.rival_on_create = rival_on_create
@@ -94,6 +95,9 @@ class FakeGh:
             raise rn.Undecidable("gh 실패(가짜)")
         if args[:2] == ["issue", "list"]:
             return json.dumps(list(self.issues.values()), ensure_ascii=False)
+        if args[:2] == ["pr", "list"]:
+            state = args[args.index("--state") + 1]
+            return json.dumps([p for p in self.prs if p.get("state", "open") == state], ensure_ascii=False)
         if args[:2] == ["issue", "create"]:
             title = args[args.index("--title") + 1]
             if self.rival_on_create is not None:
@@ -644,3 +648,84 @@ def test_같은_본문의_항목이_다른_꼬리표로_두_번_나오면_번호
 def test_꼬리표로_안_읽히는_표기(raw):
     (item,) = rn.scope_excluded_items("- 하지 않는 것:\n  - " + raw + "\n")
     assert item["reqs"] == []
+
+
+def _pr(number, state, *, title="", body="", paths=(), closes=()):
+    return {
+        "number": number, "state": state, "title": title, "body": body,
+        "files": [{"path": p} for p in paths],
+        "closingIssuesReferences": [{"number": c} for c in closes],
+    }
+
+
+SPEC_PATH = "docs/spec/DEV-002-요약.md"
+
+
+def test_review_reason_병합된_Spec_PR_만_있으면_proceed(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    fake = FakeGh(prs=[
+        _pr(10, "merged", title="docs: DEV-002 Spec", paths=[SPEC_PATH]),
+        _pr(11, "merged", title="다른 일", paths=["docs/spec/DEV-003-x.md"]),
+    ])
+    code, out = run(monkeypatch, capsys, work, fake, ["review-reason", "--dev", "DEV-002"])
+    res = json.loads(out)
+    assert code == 0 and res["verdict"] == "proceed" and res["reason"] == "merged_spec_only"
+    assert [p["number"] for p in res["merged_spec_prs"]] == [10]
+
+
+def test_review_reason_열린_개발_PR_이_있으면_ask(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    fake = FakeGh(prs=[
+        _pr(10, "merged", paths=[SPEC_PATH]),
+        _pr(12, "open", title="feat: 조회", body="## 진행 원장\nDEV-002(조회)"),
+    ])
+    code, out = run(monkeypatch, capsys, work, fake, ["review-reason", "--dev", "2"])
+    res = json.loads(out)
+    assert code == 0 and res["verdict"] == "ask" and res["reason"] == "open_pr"
+    assert [p["number"] for p in res["open_prs"]] == [12]
+
+
+def test_review_reason_열린_PR_이_하위_작업_이슈를_닫으면_ask(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    fake = FakeGh(
+        [{"number": 6, "title": "타일 노출 (DEV-002)", "state": "OPEN"}],
+        prs=[_pr(10, "merged", paths=[SPEC_PATH]), _pr(13, "open", title="feat: 타일", closes=[6])],
+    )
+    code, out = run(monkeypatch, capsys, work, fake, ["review-reason", "--dev", "DEV-002"])
+    assert code == 0 and json.loads(out)["verdict"] == "ask"
+
+
+def test_review_reason_병합된_Spec_PR_을_못_찾으면_ask(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    code, out = run(monkeypatch, capsys, work, FakeGh(prs=[]), ["review-reason", "--dev", "DEV-002"])
+    res = json.loads(out)
+    assert code == 0 and res["verdict"] == "ask" and res["reason"] == "no_merged_spec"
+
+
+def test_review_reason_번호가_더_긴_DEV_는_같은_번호로_보지_않는다(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    fake = FakeGh(prs=[
+        _pr(10, "merged", paths=[SPEC_PATH]),
+        _pr(14, "open", title="feat: DEV-0021 일"),
+    ])
+    code, out = run(monkeypatch, capsys, work, fake, ["review-reason", "--dev", "DEV-002"])
+    assert code == 0 and json.loads(out)["verdict"] == "proceed"
+
+
+def test_review_reason_병합된_개발_PR_도_있으면_ask(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    fake = FakeGh(prs=[
+        _pr(10, "merged", title="docs: DEV-002 Spec", paths=[SPEC_PATH]),
+        _pr(15, "merged", title="feat: DEV-002 조회", paths=[SPEC_PATH, "src/app.py"]),
+    ])
+    code, out = run(monkeypatch, capsys, work, fake, ["review-reason", "--dev", "DEV-002"])
+    res = json.loads(out)
+    assert code == 0 and res["verdict"] == "ask" and res["reason"] == "merged_dev_pr"
+
+
+def test_review_reason_gh_실패는_2(tmp_path, monkeypatch, capsys):
+    work = make_repo(tmp_path)
+    code, out = run(monkeypatch, capsys, work, FakeGh(fail=True), ["review-reason", "--dev", "DEV-002"])
+    assert code == 2 and json.loads(out)["status"] == "error"
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["review-reason", "--dev", "abc"])
+    assert code == 2

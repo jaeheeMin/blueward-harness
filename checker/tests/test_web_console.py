@@ -560,9 +560,31 @@ def test_question_times_out_after_300_seconds_with_injected_clock(browser):
     time.sleep(0.2)
     assert req.status == "pending"
     browser.clock.t += 2
-    h["t"].join(30)  # 느린 러너(windows)에서 5초로는 응답 전에 끝나 KeyError 'r' 가 났다(#597)
+    h["t"].join(30)
     assert "r" in h, "질문 훅 응답이 30초 안에 오지 않았다"
     assert h["r"][1] is None and req.status == "closed" and req.outcome == "터미널로 넘어감"
+
+
+def test_question_deadline_counts_from_arrival_not_from_registration(browser):
+    """요청을 화면에 등록하는 사이에 시계가 흘러도 마감은 도착 시점 기준 300초다(#610).
+    예전에는 등록 뒤에 마감을 재서, 느린 러너에서 마감이 밀려 응답이 오지 않았다."""
+    store = browser.app.store
+    original = store.add_request
+
+    def slow_add(*args, **kwargs):
+        browser.clock.t += 100  # 등록 중에 흐른 시간
+        return original(*args, **kwargs)
+
+    store.add_request = slow_add
+    try:
+        h = browser.hook_async("question", ask_body("t1"))
+        req = wait_for(lambda: (browser.pending("t1") or [None])[0])
+        browser.clock.t += 201  # 도착부터 301초
+        h["t"].join(30)
+        assert "r" in h, "마감이 등록 시점부터 재어져 300초에 넘어가지 않았다"
+        assert req.status == "closed" and req.outcome == "터미널로 넘어감"
+    finally:
+        store.add_request = original
 
 
 def test_managed_question_has_no_timeout(authed):
