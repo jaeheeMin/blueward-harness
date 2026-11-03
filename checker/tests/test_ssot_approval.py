@@ -202,6 +202,11 @@ def test_삭제된_계정의_승인은_통과도_검사_불능도_아닌_승인_
     assert approved is False and reason == mod.NO_ADMIN_APPROVAL
 
 
+def test_관리자_승인_없음_안내에_단독_관리자의_다음_할_일이_있다():
+    assert ".github/ssot-approvers" in mod.NO_ADMIN_APPROVAL
+    assert "다른 관리자" in mod.NO_ADMIN_APPROVAL and "작성자 한 명뿐" in mod.NO_ADMIN_APPROVAL
+
+
 def test_judge_admin_only_는_최신_상태가_현재_커밋_APPROVED_인_사람만_조회한다():
     asked = []
 

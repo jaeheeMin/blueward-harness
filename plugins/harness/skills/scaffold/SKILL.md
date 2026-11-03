@@ -96,7 +96,12 @@ compatibility: uv 가 있으면 uv 로, 없으면 python 으로 돌린다. 시�
      이슈만 닫았거나 대표 이슈를 안 닫은 PR 은 확인하지 않는다(그땐 사람이 PR 로 바꾼다). caller 권한은 `contents: read`
      면 된다. main 보호 규칙(PR 필수)을 켜도 deploy key 같은 push 용 secret 은 필요 없다.
    - SRS 는 `/harness:srs` Skill 로 만든다. 지금은 `docs/ssot/SRS.md` 가
-     빈 스텁으로만 있다.
+     빈 스텁으로만 있다. 스텁 머리에는 `버전: 0.1` 줄이 있다(첫 판은 0.1). 이 줄이 없으면
+     PR 의 doc-guard 판 번호 겹침 검사가 검사 불능이 된다(#620). 이 줄이 없던 옛 판으로 만든
+     저장소는 `docs/ssot/SRS.md` 머리(제목 아래)에 `버전: 0.1` 한 줄을 손으로 더한다.
+   - `.github/ssot-approvers` 가 비면 저장소 관리자(admin, PR 작성자 제외)만 승인자다. 관리자가
+     작성자 혼자인 저장소는 승인할 사람이 없으니, 이 파일에 작성자가 아닌 승인자의 GitHub 아이디를
+     더하거나 다른 관리자를 둔다(#620).
 
 ## 만들어지는 구조
 

@@ -71,7 +71,9 @@ NO_APPROVER_FOR_AUTHOR = (
 NO_ADMIN_APPROVAL = (
     "승인자 파일(.github/ssot-approvers)이 없거나 비어 저장소 관리자(admin)만 승인자로 본다. "
     "작성자 외 관리자의 승인이 없다. 다음: 🚨 직접 해 주세요: 저장소 관리자에게 이 PR 을 Approve 해 달라고 "
-    "요청하십시오."
+    "요청하십시오. 관리자가 작성자 한 명뿐이면 승인할 사람이 없으니, `.github/ssot-approvers` 에 작성자가 "
+    "아닌 승인자의 GitHub 아이디를 더하거나(이 파일은 기준 브랜치에서 읽으므로 따로 먼저 반영해야 합니다) "
+    "다른 관리자를 두십시오."
 )
 
 

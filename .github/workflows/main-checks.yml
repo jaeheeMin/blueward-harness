@@ -339,6 +339,10 @@ jobs:
                 status=unknown
                 if [ "$cause" = "retry" ]; then
                   reason="다른 열린 PR 을 읽지 못해 판 번호 겹침을 확인하지 못했다(GitHub 일시 오류일 수 있다). 이 실행을 다시 돌린다."
+                elif [ "$cause" = "doc" ]; then
+                  reason="SRS 의 \`버전:\` 줄이 없다(다시 돌려도 같다). job 요약을 본다."
+                elif [ "${cause#doc-other:}" != "$cause" ]; then
+                  reason="다른 열린 PR(#${cause#doc-other:}) 의 SRS 에 \`버전:\` 줄이 없어 비교하지 못했다(이 PR 탓이 아니다). job 요약을 본다."
                 else
                   reason="규칙 파일이나 검사 엔진에 문제가 있어 검사할 수 없다. 담당자에게 알린다."
                 fi

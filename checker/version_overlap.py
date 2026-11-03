@@ -103,6 +103,26 @@ def read_failure(detail: str) -> dict:
     }
 
 
+def no_version_line(pr: dict, own: bool) -> dict:
+    """SRS 를 읽었는데 `버전:` 줄이 없는 검사 불능. 문서 내용 문제라 다시 돌려도 같다(`read_failure` 아님).
+
+    통과도 위반도 아니다. 원인과 고칠 곳을 말한다.
+    """
+    where = "이 PR" if own else f"PR #{pr['number']}"
+    fix = (
+        f"다음: {SRS_PATH} 머리에 `버전: 0.1` 줄을 넣으십시오(첫 판은 0.1, 고칠 때마다 0.1 씩 올립니다). "
+        "다시 돌려도 같은 결과입니다."
+        if own else
+        f"다음: 그 PR 의 작성자가 {SRS_PATH} 머리에 `버전: 0.1` 줄을 넣어야 합니다. "
+        "그 PR 을 고치거나 닫기 전에는 다시 돌려도 같은 결과입니다."
+    )
+    return {
+        "status": CANNOT_CHECK, "warnings": [], "no_version_line": True,
+        "own": own, "pr_number": pr.get("number"),
+        "message": f"{where} 의 {SRS_PATH} 에서 `버전:` 줄을 찾지 못해 판 번호 겹침을 확인하지 못했습니다(GitHub 읽기 오류가 아니라 문서 내용 문제입니다). {fix}",
+    }
+
+
 def _cannot(message: str) -> dict:
     return {"status": CANNOT_CHECK, "warnings": [], "message": message}
 
@@ -156,6 +176,8 @@ def check_version_overlap(open_prs: dict, self_number: int) -> dict:
 
     # SRS 버전: 둘 다 바꿔서 같은 값
     if mine.get("srs_error"):
+        if mine.get("srs_error_kind") == "no_version_line":
+            return no_version_line(mine, own=True)
         return read_failure(f"이 PR 의 SRS 버전을 읽지 못했습니다: {mine['srs_error']}")
     mine_version = bumped(mine)
     if mine_version is not None:
@@ -164,6 +186,8 @@ def check_version_overlap(open_prs: dict, self_number: int) -> dict:
             if not p.get("srs_changed"):
                 continue
             if p.get("srs_error"):
+                if p.get("srs_error_kind") == "no_version_line":
+                    return no_version_line(p, own=False)
                 return read_failure(f"PR #{p['number']} 의 SRS 버전을 읽지 못했습니다: {p['srs_error']}")
             if bumped(p) == mine_version:
                 clash.append(p)
