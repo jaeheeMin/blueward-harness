@@ -350,7 +350,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.152, public-cloud main 기준 (2026-11-02)</div>
+      <div class="note">harness 0.10.157, public-cloud main 기준 (2026-11-02)</div>
     </div>
   </nav>
 
@@ -1042,12 +1042,12 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
 
   <div class="when">
     <div><div class="lbl">이럴 때</div>개발이 끝나 사용자에게 줄 매뉴얼이 필요할 때. 예전에 마크다운으로 쓴 매뉴얼을 고객사 양식으로 옮길 때.</div>
-    <div><div class="lbl">이렇게 말해</div><div class="say"><span>매뉴얼 만들어줘</span><span>생산계획 보드 매뉴얼 pptx 로 뽑아줘</span><span class="cmd">/harness:manual</span></div></div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>매뉴얼 만들어줘</span><span>매뉴얼 캡처해 줘</span><span>생산계획 보드 매뉴얼 pptx 로 뽑아줘</span><span class="cmd">/harness:manual</span></div></div>
   </div>
 
   <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
     <p>가전제품 사용설명서를 만드는 일이야. 제품(개발 건)마다 설명서를 따로 쓰지 않고, <b>쓰는 사람 입장의 업무</b>(예: 생산계획 보드) 하나에 설명서 한 부를 쓰고, 그 안에 관련 개발 건 번호를 적어 둬.</p>
-    <p>화면 위의 빨간 네모와 번호는 캡처 도구가 그림에 직접 그려 줘. 이 스킬은 그림 파일의 <b>경로만</b> 받아서 양식의 그림 자리에 넣어.</p>
+    <p>화면 위의 빨간 네모와 번호는 캡처 도구가 그림에 직접 그려 줘. "매뉴얼 캡처해 줘" 라고 하면 네가 로그인해 둔 전용 Chrome 에 붙어서 화면을 찍고, 화면에 보이는 이름으로 위치를 찾아 네모와 번호를 그려. 산출(pptx)은 그림 파일의 <b>경로만</b> 받아서 양식의 그림 자리에 넣어.</p>
   </div></div>
 
   <section class="diagram">
@@ -1055,6 +1055,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
       <div class="node"><b>묻기</b><span>LoB · 업무 제목 · 묶을 DEV</span></div><div class="arrow"></div>
       <div class="node"><b>Spec 읽기</b><span>상세 설계 · Launchpad 노출 · 권한</span></div><div class="arrow"></div>
       <div class="node hl"><b>작업본 쓰기</b><span>docs/manual/&lt;LoB&gt;/1.&lt;업무 제목&gt;.md</span></div><div class="arrow"></div>
+      <div class="node hl"><b>화면 캡처</b><span>찍을 화면 목록 → 전용 Chrome 에 로그인 → 찍기</span></div><div class="arrow"></div>
       <div class="node hl"><b>--check</b><span>캡처 없는 화면 목록</span></div><div class="arrow"></div>
       <div class="node ok"><b>pptx 산출</b><span>docs/manual/&lt;LoB&gt;/</span></div>
     </div>
@@ -1066,7 +1067,10 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
       <h3>내가 할 일</h3>
       <ul class="todo">
         <li>LoB, 업무 제목, 묶을 개발 건(DEV(Development) 번호)을 알려 줘</li>
-        <li>화면마다 캡처 파일(PNG(Portable Network Graphics))을 캡처 도구로 찍어 경로를 줘. <b>캡처가 없는 화면은 빈칸으로 통과시키지 않고</b> 어느 화면이 빠졌는지 목록으로 알려 줘</li>
+        <li>화면 캡처는 "매뉴얼 캡처해 줘" 라고 하면 돼. 먼저 화면마다 <b>찍을 요소</b>(필터·버튼·열·그 밖)와 번호 설명을 작업본 옆 <code>&lt;번호&gt;.&lt;업무 제목&gt;.capture.yaml</code> 에 적어. 테넌트 주소는 <code>env/manual-capture.yaml</code> 에 <code>테넌트: https://…</code> 만 적어(비밀번호·토큰은 넣지 마)</li>
+        <li>전용 Chrome 이 뜨면 <b>그 창에서 네가 직접 로그인</b>하고, 찍을 앱 탭을 하나만 남겨. 캡처 중에는 그 창을 최소화하거나 다른 창으로 가리지 마. 끝나면 Claude 가 창을 닫고 로그인 정보가 든 임시 프로필 폴더를 지워</li>
+        <li>같은 이름이 화면에 둘 이상이면 도구가 고르지 않아. 어느 것인지 <code>index</code>(1부터, 위에서 아래·왼쪽에서 오른쪽)를 네가 적어. 못 찾은 요소는 그리지 않고 목록으로 알려 줘. 찾은 것만 그린 그림은 <code>_미완_</code> 이 붙은 이름으로 따로 저장되고 작업본은 안 바뀌어</li>
+        <li>화면마다 캡처 파일(PNG(Portable Network Graphics))은 <code>docs/manual/img/&lt;LoB&gt;/&lt;화면 이름&gt;_v&lt;판&gt;.png</code> 로 생기고 작업본의 그림 경로와 번호 설명이 채워져. <b>캡처가 없는 화면은 빈칸으로 통과시키지 않고</b> 어느 화면이 빠졌는지 목록으로 알려 줘</li>
         <li>산출된 pptx 는 PowerPoint 로 열어 쪽마다 눈으로 확인해. 글이 넘치거나 겹치는지는 화면 없이 확인할 수 없어서 엔진이 "검사 불능" 으로 알려 줘</li>
         <li>내용이 바뀌면 작업본 머리의 <code>버전:</code> 을 올리고 다시 뽑아. 이전 판 pptx 는 지우지 않고 남아</li>
       </ul>
@@ -1083,6 +1087,8 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
 
   <div class="callouts">
     <div class="callout warn"><span class="k">산출 ≠ 통과</span><div>pptx 가 나왔다고 문서 검사를 통과한 건 아니야. 파일 이름은 PR(Pull Request) 의 doc-guard 단계가 <code>rules/manual-output.yaml</code> 로 검사해.</div></div>
+    <div class="callout warn"><span class="k">캡처 보안</span><div>전용 Chrome 의 디버깅 포트는 <code>127.0.0.1</code>(내 PC 안)에만 열려. 다른 주소로 붙으라고 하면 도구가 거부해. 로그인 정보가 든 프로필 폴더는 저장소 밖 임시 폴더에 두고 끝나면 지워. 캡처 그림에는 화면의 업무 데이터가 그대로 찍히니 올리기 전에 고객에게 내도 되는 데이터인지 확인해.</div></div>
+    <div class="callout warn"><span class="k">캡처 못 하는 것</span><div>팝업을 열거나 여러 화면을 거쳐야 하는 준비, 한 화면에 함께 안 보이는 가로 스크롤 밖 열 여러 개는 못 찍어. 준비 단계는 필터 값 넣기와 버튼 누르기뿐이야. 페이지가 30초 안에 준비되지 않으면 통과가 아니라 "검사 불능" 으로 알려 줘.</div></div>
     <div class="callout warn"><span class="k">그림 이름</span><div>그림 파일 이름 끝에 판(<code>_v0.1</code>)을 붙이길 권하지만, pptx 산출은 이 이름을 검사하지 않아. 판을 올릴 때 캡처를 다시 찍었는지는 사람이 챙겨.</div></div>
     <div class="callout warn"><span class="k">예시 글자</span><div>양식에 예시 글(날짜, "예시:" 안내)이 있는 쪽은 지도가 가리킨 것만 바뀌어. 지도의 <code>칸</code> 이나 <code>지우기</code> 에 넣지 않은 글은 산출물에 그대로 남으니 PowerPoint 확인 때 같이 봐.</div></div>
     <div class="callout ok"><span class="k">옛 매뉴얼</span><div>예전 <code>docs/manual/DEV-xxx-….md</code> 는 화면 단위로 잘라 새 작업본으로 옮겨 줘. 화면에 묶이지 않는 글(자주 묻는 질문 등)은 목록으로 알려 주고, 옛 파일은 네가 정할 때까지 지우지 않아.</div></div>
