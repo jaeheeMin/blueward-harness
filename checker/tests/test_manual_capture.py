@@ -198,6 +198,43 @@ def test_check_base_url(url, ok):
             mc.check_base_url(url)
 
 
+@pytest.mark.parametrize("url,ok", [
+    ("https://h.example/ui?sap-client=100", True),
+    ("https://h.example/ui?sap-language=ko", True),
+    ("https://h.example/ui?sap-client=100&sap-language=KO", True),
+    ("https://h.example/ui?sap-client=10", False),  # 3자리 아님
+    ("https://h.example/ui?sap-client=abc", False),
+    ("https://h.example/ui?sap-language=KOR", False),
+    ("https://h.example/ui?sap-language=k1", False),
+    ("https://h.example/ui?sap-client=100&sap-client=200", False),  # 중복 키
+    ("https://h.example/ui?sap-client=100&token=abc", False),  # 허용 밖 키
+    ("https://h.example/ui?sap-client", False),  # 값 없음
+    ("https://h.example/ui?sap-client=100&", False),
+    ("https://h.example/ui?sap-client=100#App-display", False),  # 프래그먼트
+    ("https://h.example/ui?sap-client=100/../x", False),
+])
+def test_check_base_url_query_allowlist(url, ok):
+    if ok:
+        assert mc.check_base_url(url) == url
+    else:
+        with pytest.raises(mc.ListError):
+            mc.check_base_url(url)
+
+
+def test_compose_url_keeps_query():
+    assert mc.compose_url("https://h.example/ui?sap-client=100", "#App-display") == "https://h.example/ui?sap-client=100#App-display"
+    assert mc.compose_url("https://h.example/ui", "#App-display") == "https://h.example/ui#App-display"
+
+
+def test_same_site_and_pick_tab_with_query_base():
+    base = "https://h.example/ui?sap-client=100"
+    assert mc.same_site("https://h.example/ui?sap-client=100#App-display", base)
+    assert not mc.same_site("https://other.example/ui?sap-client=100", base)
+    tabs = [{"url": "https://h.example/ui?sap-client=100#A", "title": "A"}, {"url": "https://accounts.example/login", "title": "L"}]
+    assert mc.pick_tab(tabs, base)["title"] == "A"
+    assert mc.same_site("file:///C:/x/page.html#a", "file:///C:/x/page.html?sap-client=100")
+
+
 def test_check_base_url_local_test_option_allows_loopback_http_and_file_only():
     assert mc.check_base_url("http://127.0.0.1:8000/x", allow_local=True)
     assert mc.check_base_url("file:///C:/x/page.html", allow_local=True)
