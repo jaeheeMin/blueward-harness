@@ -627,8 +627,14 @@ NONE = {"items": [], "noInput": 0}
 class FakeTab:
     """`cdp_client.Tab` 대역. 페이지 스크립트 결과를 `finds` 로 정해 준다."""
 
-    def __init__(self, finds, href=BASE, redirect=None, ready=True):
+    def __init__(self, finds, href=BASE, redirect=None, ready=True, visibility="visible", dialogs=None,
+                 dialog_on_click=None, late=0, focus=None, normal_restores=False):
+        self.normal_restores = normal_restores
         self.finds, self.href, self.redirect, self.ready = finds, href, redirect, ready
+        self.visibility, self.dialogs = visibility, list(dialogs or [])
+        self.dialog_on_click, self.late, self.find_calls = dialog_on_click, late, 0  # late: 앞의 N 번 찾기는 아직 안 그려져 비어 있다
+        self.focus = {"ok": True} if focus is None else focus
+        self.shots = 0
         self.stale = False
         self.calls: list[tuple] = []
         self.evals: list[str] = []
@@ -642,6 +648,13 @@ class FakeTab:
             self.stale = False
         elif method == "Page.reload":
             self.stale = False
+        elif method == "Browser.getWindowForTarget":
+            return {"windowId": 7}
+        elif method == "Browser.setWindowBounds" and params["bounds"].get("windowState") == "normal":
+            if self.normal_restores:  # 최소화된 창을 normal 로 돌리면 다시 그린다
+                self.visibility = "visible"
+        elif method == "Input.dispatchMouseEvent" and params.get("type") == "mousePressed" and self.dialog_on_click:
+            self.dialogs = list(self.dialog_on_click)
         return {}
 
     def evaluate(self, expr):
@@ -659,14 +672,22 @@ class FakeTab:
             return True
         if expr.startswith("window.__mc.find("):
             kind, name = json.loads("[" + expr[len("window.__mc.find("):-1] + "]")
+            self.find_calls += 1
+            if self.find_calls <= self.late:
+                return NONE
             return self.finds.get((kind, name), NONE)
+        if expr == "document.visibilityState":
+            return self.visibility
+        if expr == "window.__mc.dialogs()":
+            return self.dialogs
         if expr == "window.__mc.size()":
             return {"w": 1600, "h": 900}
         if expr.startswith("window.__mc.focusInput("):
-            return {"ok": True}
+            return self.focus
         return 1 if "scrollColumn" in expr else None
 
     def screenshot_png(self):
+        self.shots += 1
         if self.on_screenshot:
             self.on_screenshot()
         return tep._png((20, 40, 60), (1600, 900))
@@ -838,6 +859,94 @@ def test_locate_judges_with_find_result_through_capturer():
     t.finds = {("버튼", "이동"): "이상한 응답"}
     with pytest.raises(mc.Unavailable):
         cap.locate(mc.Mark("버튼", "이동", ""))
+
+
+# ---------------------------------------------------------------- 그리기 대기·창 보임·대화상자·입력 칸 후보(#533 실제 테넌트 시험)
+
+STEP_SCREEN = TWO_SCREENS.replace("    표시:", '    준비:\n      - {누르기: 이동}\n    표시:')
+STEP_FINDS = {("필터", "플랜트"): FOUND, ("버튼", "이동"): FOUND}
+
+
+def _one(root, text=TWO_SCREENS):
+    (root / "docs/manual/Test/1.시험.capture.yaml").write_text(text, encoding="utf-8")
+
+
+def test_run_waits_for_late_drawn_names_then_captures(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root)
+    fake["tab"] = FakeTab({("필터", "플랜트"): FOUND, ("버튼", "이동"): FOUND}, late=6)  # 처음엔 빈 화면
+    code, out = _capture(capsys, root)
+    assert code == 0 and out["status"] == "ok", out
+    assert fake["tab"].find_calls > 6 and fake["tab"].shots == 1
+
+
+def test_run_nothing_ever_drawn_is_unavailable_not_incomplete(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root)
+    before = _spec(root)
+    fake["tab"] = FakeTab({})  # 찾을 이름이 끝까지 하나도 안 나타남
+    code, out = _capture(capsys, root, "--timeout", "0.2")
+    assert code == 2 and out["status"] == "unavailable", out
+    row = out["screens"][0]
+    assert row["상태"] == "검사 불능" and "하나도 그려지지 않았다" in row["사유"]
+    assert fake["tab"].shots == 0 and _spec(root) == before and not (root / "docs/manual/img").exists()
+
+
+def test_run_hidden_window_is_unavailable_and_asks_chrome_to_restore_normal(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root)
+    fake["tab"] = FakeTab(STEP_FINDS, visibility="hidden")
+    code, out = _capture(capsys, root)
+    assert code == 2 and out["status"] != "ok", out  # 시작 단계에서 멈춘다(화면 행 없이 problems 에 검사 불능)
+    assert out["problems"][0].startswith("검사 불능") and "visibilityState" in out["problems"][0] and fake["tab"].shots == 0
+    assert not (root / "docs/manual/img").exists()
+    assert ("Browser.setWindowBounds", {"windowId": 7, "bounds": {"windowState": "normal"}}) in fake["tab"].calls
+
+
+def test_run_minimized_window_restored_by_normal_state_captures(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root)
+    fake["tab"] = FakeTab(STEP_FINDS, visibility="hidden", normal_restores=True)
+    code, out = _capture(capsys, root)
+    assert code == 0 and out["status"] == "ok", out
+
+
+def test_run_dialog_after_step_is_unavailable_and_does_not_shoot(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, STEP_SCREEN)
+    before = _spec(root)
+    fake["tab"] = FakeTab(STEP_FINDS, dialog_on_click=["오류\n이미 있는 값입니다"])
+    code, out = _capture(capsys, root)
+    assert code == 2 and out["status"] == "unavailable", out
+    row = out["screens"][0]
+    assert row["상태"] == "검사 불능" and "대화상자" in row["사유"] and "이미 있는 값" in row["사유"] and "준비 단계" in row["사유"]
+    assert fake["tab"].shots == 0 and _spec(root) == before and not (root / "docs/manual/img").exists()
+
+
+def test_run_dialog_right_before_shooting_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root)  # 준비 단계가 없어도 찍기 직전에 본다
+    fake["tab"] = FakeTab(STEP_FINDS, dialogs=["경고 창"])
+    code, out = _capture(capsys, root)
+    assert code == 2 and out["status"] == "unavailable", out
+    assert "대화상자가 떠 있다" in out["screens"][0]["사유"] and fake["tab"].shots == 0
+
+
+def test_run_input_step_focus_failure_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, TWO_SCREENS.replace("    표시:", '    준비:\n      - {입력: 플랜트, 값: "1010"}\n    표시:'))
+    fake["tab"] = FakeTab(STEP_FINDS, focus={"ok": False, "count": 2})
+    code, out = _capture(capsys, root)
+    assert code == 2 and "포커스" in out["screens"][0]["사유"] and fake["tab"].shots == 0
+    assert any(e == "window.__mc.focusInput(" + json.dumps("플랜트") + ")" for e in fake["tab"].evals)
+
+
+def test_focus_input_counts_only_filter_candidates_not_column_headers():
+    # 같은 이름의 표 열 머리글 라벨은 세지 않는다 — find('필터') 와 같은 후보(cands)로 센다. JS 는 여기서 실행되지 않아 소스로 확인한다.
+    from checker.manual_capture_js import LIB_JS
+    body = LIB_JS[LIB_JS.index("const focusInput"):LIB_JS.index("const drawOverlay") if "const drawOverlay" in LIB_JS else None]
+    assert "cands('필터', name)" in body and "labelsNamed(name)" not in body
+    assert "dialogs" in LIB_JS and "window.__mc = {" in LIB_JS and "dialogs," in LIB_JS
 
 
 # ---------------------------------------------------------------- 작업본 → 고객 양식 pptx 산출까지

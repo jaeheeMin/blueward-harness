@@ -350,7 +350,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.159, public-cloud main 기준 (2026-11-02)</div>
+      <div class="note">harness 0.10.160, public-cloud main 기준 (2026-11-02)</div>
     </div>
   </nav>
 
@@ -1069,7 +1069,8 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
       <ul class="todo">
         <li>LoB, 업무 제목, 묶을 개발 건(DEV(Development) 번호)을 알려 줘</li>
         <li>화면 캡처는 "매뉴얼 캡처해 줘" 라고 하면 돼. 먼저 화면마다 <b>찍을 요소</b>(필터·버튼·열·그 밖)와 번호 설명을 작업본 옆 <code>&lt;번호&gt;.&lt;업무 제목&gt;.capture.yaml</code> 에 적어. 테넌트 주소는 <code>env/manual-capture.yaml</code> 에 <code>테넌트: https://…</code> 만 적어(비밀번호·토큰은 넣지 마)</li>
-        <li>전용 Chrome 이 뜨면 <b>그 창에서 네가 직접 로그인</b>하고, 찍을 앱 탭을 하나만 남겨. 캡처 중에는 그 창을 최소화하거나 다른 창으로 가리지 마. 끝나면 Claude 가 창을 닫고 로그인 정보가 든 임시 프로필 폴더를 지워</li>
+        <li>전용 Chrome 이 뜨면 <b>그 창에서 네가 직접 로그인</b>하고, 찍을 앱 탭을 하나만 남겨. 캡처 중에는 그 창을 <b>최소화하지 마</b>(다른 창 뒤에 있는 건 괜찮아). 최소화돼 있으면 Claude 가 다시 띄우고, 그래도 안 보이면 찍지 않고 멈춰. 끝나면 Claude 가 창을 닫고 로그인 정보가 든 임시 프로필 폴더를 지워</li>
+        <li>필터에 <b>기본값이 이미 들어 있으면</b> 찍을 화면 목록에 그 값을 또 넣지 마. 같은 값을 다시 넣으면 SAP 이 오류 창을 띄우고, 오류 창이 떠 있는 화면은 찍지 않고 멈춰. 버튼 이름은 로그인한 언어로 화면에 보이는 글자 그대로 적어(예: <code>Go</code> 가 아니라 <code>실행</code>)</li>
         <li>같은 이름이 화면에 둘 이상이면 도구가 고르지 않아. 어느 것인지 <code>index</code>(1부터, 위에서 아래·왼쪽에서 오른쪽)를 네가 적어. 못 찾은 요소는 그리지 않고 목록으로 알려 줘. 찾은 것만 그린 그림은 <code>_미완_</code> 이 붙은 이름으로 따로 저장되고 작업본은 안 바뀌어</li>
         <li>화면마다 캡처 파일(PNG(Portable Network Graphics))은 <code>docs/manual/img/&lt;LoB&gt;/&lt;화면 이름&gt;_v&lt;판&gt;.png</code> 로 생기고 작업본의 그림 경로와 번호 설명이 채워져. <b>캡처가 없는 화면은 빈칸으로 통과시키지 않고</b> 어느 화면이 빠졌는지 목록으로 알려 줘</li>
         <li>산출된 pptx 는 PowerPoint 로 열어 쪽마다 눈으로 확인해. 글이 넘치거나 겹치는지는 화면 없이 확인할 수 없어서 엔진이 "검사 불능" 으로 알려 줘</li>

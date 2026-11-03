@@ -5,7 +5,7 @@
 - `checker/manual_capture.py`: 캡처 엔진·CLI. 찍을 화면 목록(`*.capture.yaml`) 검증, 판정(`judge`), 그리기 위치(`plan_marks`), 작업본 갱신(`update_workbook`), 탭 고르기.
 - `checker/cdp_client.py`: Chrome 디버깅 포트(CDP)에 붙는 최소 웹소켓 클라이언트(표준 라이브러리). `127.0.0.1` 만 허용한다(`localhost`·다른 PC·`/json/list` 가 돌려준 다른 호스트의 웹소켓 주소도 거부).
 - `checker/manual_capture_js.py`: 페이지에 주입하는 스크립트(UI5 준비 확인, 요소 찾기, 열 스크롤, 입력 포커스, 덮개 그리기).
-- `/harness:manual` SKILL.md 에 "캡처" 절(새 스킬을 만들지 않고 기존 스킬에 둠 — 같은 작업본을 읽고 쓰고, 목록·그림 이름 규칙이 한 곳에 있어야 해서). plugin.json 0.10.157(열린 #608 이 0.10.154 를 먼저 써 올림)(main 0.10.152, 열린 PR #595 가 0.10.153).
+- `/harness:manual` SKILL.md 에 "캡처" 절(새 스킬을 만들지 않고 기존 스킬에 둠 — 같은 작업본을 읽고 쓰고, 목록·그림 이름 규칙이 한 곳에 있어야 해서). plugin.json 0.10.160(main 0.10.159, 열린 PR 없음 — 2026-11-03 확인).
 - README·CLAUDE.md 스킬 표 문구, `form-map.md` 매뉴얼 절에 캡처 연결, `checker/README.md`, 길잡이 매뉴얼 탭(안내·보안·못 하는 것).
 - 시험 `checker/tests/test_manual_capture.py`.
 
@@ -75,3 +75,23 @@
 - 한계: 해시 라우팅 대기는 "다시 로드한 새 문서 + UI5 준비 상태 두 번 연속" 이다. Fiori 가 렌더를 끝냈다는 전용 신호(예: 앱 라우터 완료 이벤트)는 쓰지 않았다(실제 Fiori 에서 확인하지 못해서).
 - 한계: 같은 화면에서 맨 왼쪽 열과 맨 오른쪽 열처럼 함께 안 보이는 조합은 여전히 `not_found`(스크롤이 서로를 되돌림). 화면을 나눠 찍는다.
 - 로컬 Chrome 시험을 한 번 더 돌렸다(`--allow-local-test`). 화면 밖 열과 라벨이 같은 이름이면 `ambiguous`(보이는 것/화면 밖 개수 표시), 고른 번째가 화면 밖이면 `not_found`, 두 번째 화면부터 앞 화면의 입력 값이 남지 않는 것(다시 열기)과 `replaced_descriptions` 를 확인했다. Chrome 은 닫고 프로필(짧은 경로 `%TEMP%\mc533`)은 지웠다.
+
+## 실제 테넌트 시험(2026-11-03)
+
+080 대신 **100 테넌트**(`my406600`, 화면 상단 Z5U/100)의 DEV-008 앱으로 시험했다. 3화면 7요소를 모두 그렸고, 매뉴얼 pptx 6쪽을 산출해 PowerPoint 에서 열어 확인했다. 위 "확인하지 못한 것" 의 첫 항목(실제 Fiori 동작)과 마지막 항목(DEV-008 산출)은 이 시험으로 확인한 부분이 있다.
+
+드러난 문제 4개와 고친 방법.
+
+| # | 문제 | 고친 방법 |
+|---|---|---|
+| 1 | UI5 준비 신호 뒤에도 Launchpad 가 앱을 그리는 중이라 빈 화면이 찍힘 | `wait_content`: 찾을 이름이 하나라도 나타나고 문서 요소 수가 두 번 연속 같을 때까지 기다린다. 시간 안에 하나도 안 나타나면 못 찾음이 아니라 검사 불능 |
+| 2 | 최소화된 창은 렌더가 멈춰 `bringToFront` 로도 안 살아남 | `prepare` 가 `Browser.setWindowBounds` 로 창을 `normal` 로 되돌리고 `ensure_visible` 이 `visibilityState` 가 `visible` 인지 본다(아니면 검사 불능). SKILL.md 의 Chrome 명령에 `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling` 추가 |
+| 3 | 같은 이름의 표 열 머리글 라벨까지 세어 입력 포커스가 실패 | `focusInput` 이 `find('필터')` 와 같은 후보(입력 칸이 딸린 라벨)만 센다 |
+| 4 | 이미 기본값이 든 입력 칸(토큰)에 같은 값을 또 넣어 오류 창이 떴는데 완료로 찍힘 | `dialogs()` 로 보이는 대화상자를 읽어, 준비 단계 뒤와 찍기 직전에 있으면 검사 불능. SKILL.md 에 "기본값이 있으면 입력 단계를 뺀다" 와 버튼 글자는 로그인 언어 기준(`Go` 가 아니라 `실행`) 안내 |
+
+시험: `test_manual_capture.py` 에 가짜 CDP 로 늦게 그려지는 이름 기다림, 끝까지 안 그려지면 검사 불능(종료 2), `hidden` 이면 검사 불능과 `setWindowBounds` 호출, 최소화가 `normal` 로 살아나는 경우, 준비 단계 뒤·찍기 직전 대화상자 거부, 입력 포커스 실패, `focusInput` 후보 소스 확인을 더했다. `focusInput` 의 JS 는 가짜 CDP 에서 실행되지 않아 후보 기준은 소스 문자열로만 확인한다(실제 동작은 위 테넌트 시험).
+
+남은 한계.
+
+- 열 네모가 머리글만 감싼다 — UI5 표가 머리글 표와 본문 표로 나뉘어 있어 "머리글부터 표 아래 끝까지" 가 되지 않는다.
+- 화면에 업무 데이터가 그대로 찍힌다. 고객에게 제출하기 전에 사용자가 확인한다.

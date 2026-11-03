@@ -186,12 +186,13 @@ PowerShell(Windows). 프로필 경로는 **짧게** 둔다(긴 경로에서는 C
 ```powershell
 $profile = "$env:TEMP\manual-chrome"
 Start-Process "C:\Program Files\Google\Chrome\Application\chrome.exe" -ArgumentList `
-  "--remote-debugging-address=127.0.0.1","--remote-debugging-port=9222","--user-data-dir=$profile","--no-first-run","<테넌트 주소>"
+  "--remote-debugging-address=127.0.0.1","--remote-debugging-port=9222","--user-data-dir=$profile","--no-first-run","--disable-backgrounding-occluded-windows","--disable-renderer-backgrounding","--disable-background-timer-throttling","<테넌트 주소>"
 ```
 
 - 사용자에게 **그 창에서 로그인**하게 하고, 캡처할 앱이 속한 테넌트 탭을 **하나만** 남기라고 한다(탭이 여럿이면 도구가 고르지 않고 멈춘다. 필요하면 `--tab <주소나 제목의 글>`).
   로그인을 대신 입력하지 않는다.
-- 캡처하는 동안 그 창을 최소화하거나 다른 창으로 가리지 않는다(가려지면 화면이 그려지지 않는다. 도구가 맨 앞으로 가져온다).
+- 캡처하는 동안 그 창을 최소화하거나 다른 창으로 가리지 않는다(가려지면 화면이 그려지지 않는다. 도구가 맨 앞으로 가져온다). 위 `--disable-…` 세 옵션은 가려진 창을 Chrome 이 멈추지 않게 한다.
+  창을 최소화하면 Chrome 이 그리지 않아 도구가 창 상태를 `normal` 로 되돌린다. 그래도 `visibilityState` 가 `visible` 이 아니면 **검사 불능**이다(창을 화면에 띄우고 다시).
 
 ### 3. 캡처를 돈다
 
@@ -212,6 +213,13 @@ uvx --from "$e" \
 - `2` `error` / `unavailable` — 목록·작업본을 못 읽었거나, 브라우저에 붙지 못했거나, 30초 안에 페이지가 준비되지 않았다(UI5 로딩 대기 시간 초과, 로그인 화면일 수 있음).
   **검사 불능이다.** 통과도 위반도 아니라고 말하고 사유(`problems`, `screens[].사유`)를 그대로 보인다.
 - 준비 단계의 `입력`·`누르기` 대상을 못 찾거나 여럿이면 그 화면은 `검사 불능` 으로 건너뛴다(다른 화면은 계속 찍는다).
+- 준비 단계 뒤(또는 찍기 직전)에 오류·경고 창(대화상자)이 떠 있으면 그 화면은 찍지 않고 `검사 불능` 이다(사유에 창의 글이 나온다). 완료로 찍지 않는다.
+- 찾을 이름이 시간 안에 하나도 그려지지 않으면(앱이 덜 그려진 빈 화면) 못 찾음이 아니라 `검사 불능` 이다. 도구는 이름이 나타나고 화면이 멈출 때까지 기다린 뒤 찍는다.
+
+**목록을 쓸 때 조심할 것(실제 테넌트 시험, #533).**
+
+- **이미 기본값이 든 입력 칸(토큰)에 같은 값을 또 넣으면 오류가 난다 — 기본값이 있으면 `입력` 단계를 뺀다.** 화면을 먼저 열어 칸에 값이 들어 있는지 보고 정한다.
+- 화면에 보이는 버튼 글자는 **로그인 언어 기준**이다(예: `Go` 가 아니라 `실행`). `이름` 은 사용자가 보는 화면의 글자 그대로 적는다.
 
 ### 4. 끝나면 닫고 프로필을 지운다
 
