@@ -1,0 +1,18 @@
+{"_note": "transportsByConfig(configUri=…/searchconfiguration/configurations/<id>, targets=true) on abap-adt-z5u-dev (080), 2026-11-03 실측 응답. links 배열은 줄였고 사용자 ID 는 TESTUSER 로 바꿨다. 요청마다 tasks 가 하나씩 있다.",
+ "status": "success",
+ "transports": {
+  "workbench": [
+   {"tm:name": "Local Change Requests", "tm:desc": "No Target – Release locally only",
+    "modifiable": [
+     {"tm:number": "Z5UK900700", "tm:parent": "", "tm:owner": "TESTUSER", "tm:desc": "ZCL_MJH_MRP_VERIFY1 반복문 안 SELECT 수정 (#30)", "tm:type": "K", "tm:status": "D", "tm:target": "", "tm:target_desc": "", "tm:lastchanged_timestamp": 20260929014240,
+      "objects": [], "tasks": [{"tm:number": "Z5UK900701", "tm:parent": "Z5UK900700", "tm:owner": "TESTUSER", "tm:desc": "ZCL_MJH_MRP_VERIFY1 반복문 안 SELECT 수정 (#30)", "tm:type": "Unclassified", "tm:status": "D", "tm:target": "", "tm:lastchanged_timestamp": 20260929014241, "objects": []}]},
+     {"tm:number": "Z5UK900698", "tm:parent": "", "tm:owner": "TESTUSER", "tm:desc": "GRIV 세금코드 직접입력 - 화면/필드 추가", "tm:type": "K", "tm:status": "D", "tm:target": "", "tm:target_desc": "", "tm:lastchanged_timestamp": 20260923005210,
+      "objects": [], "tasks": [{"tm:number": "Z5UK900699", "tm:parent": "Z5UK900698", "tm:owner": "TESTUSER", "tm:desc": "GRIV 세금코드 직접입력 - 화면/필드 추가", "tm:type": "Unclassified", "tm:status": "D", "tm:target": "", "tm:lastchanged_timestamp": 20260923005211, "objects": []}]},
+     {"tm:number": "Z5UK900690", "tm:parent": "", "tm:owner": "TESTUSER", "tm:desc": "ZCSH 대량 구매오더 입하 입고 Fiori 앱", "tm:type": "K", "tm:status": "D", "tm:target": "", "tm:target_desc": "", "tm:lastchanged_timestamp": 20260901000748,
+      "objects": [], "tasks": [{"tm:number": "Z5UK900691", "tm:parent": "Z5UK900690", "tm:owner": "TESTUSER", "tm:desc": "ZCSH 대량 구매오더 입하 입고 Fiori 앱", "tm:type": "Unclassified", "tm:status": "D", "tm:target": "", "tm:lastchanged_timestamp": 20260901000749, "objects": []}]}
+    ],
+    "released": []}
+  ],
+  "customizing": []
+ }
+}

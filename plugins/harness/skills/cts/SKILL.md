@@ -1,6 +1,6 @@
 ---
 name: cts
-description: CTS(Change and Transport System) 관리대장(Configuration·CBO)에 요청 건이나 Error 내역을 더하고, 고객 양식 xlsx 로 산출할 때 쓴다. 사용자가 "CTS 관리대장에 추가해줘", "CTS 요청 기록해줘", "Error 내역 추가", "관리대장 엑셀로 뽑아줘" 라고 말할 때 사용한다. 이럴 땐 쓰지 않는다 — 트랜스포트 요청을 만들거나 릴리스하거나 조회하는 일, 트랜스포트에서 값을 자동으로 채우는 일은 이 스킬이 하지 않는다(#563, 사람이 알려 준 값만 받아 적는다). 개발 Spec 이나 사용자 매뉴얼이면 spec·manual 스킬로.
+description: CTS(Change and Transport System) 관리대장(Configuration·CBO)에 요청 건이나 Error 내역을 더하고, 트랜스포트에서 읽은 값으로 요청 표를 채우고, 고객 양식 xlsx 로 산출할 때 쓴다. 사용자가 "CTS 관리대장에 추가해줘", "CTS 요청 기록해줘", "트랜스포트에서 채워줘", "Error 내역 추가", "관리대장 엑셀로 뽑아줘" 라고 말할 때 사용한다. 이럴 땐 쓰지 않는다 — 트랜스포트 요청을 만들거나 릴리스하거나 지우는 일(쓰기 도구)은 이 스킬이 하지 않는다. 읽기 전용 조회로 채우기만 한다. 개발 Spec 이나 사용자 매뉴얼이면 spec·manual 스킬로.
 ---
 
 # /harness:cts
@@ -11,8 +11,9 @@ Project Repository 의 `templates/` 에 있고 양식 지도는 `templates/forms
 지도에서 읽는다 — 이 스킬에 양식 고유 글자를 지어 적지 않는다. `<이 스킬의 base directory>` 는 이 스킬이 로드될 때 위에
 표시되는 경로다.
 
-값은 사람이 알려 준 것만 받아 적는다. 트랜스포트 요청 번호·설명·대상 시스템을 SAP 에서 읽어 자동으로 채우는 일은
-[#563](https://github.com/jaeheeMin/blueward-harness/issues/563) 이고 아직 없다. 모르는 값은 지어내지 않고 묻는다.
+값은 사람이 알려 준 것과, 읽기 전용 ADT MCP 로 읽은 트랜스포트 정보(아래 "트랜스포트에서 채우기",
+[#563](https://github.com/jaeheeMin/blueward-harness/issues/563))만 받아 적는다. 오픈단계·모둘·주요변경 같은 사람만 아는 값은
+지어내지 않고 묻거나 비워 둔다.
 
 `git rev-parse --show-toplevel` 로 Project Repository 루트를 확인한다.
 
@@ -88,7 +89,8 @@ Project Repository 의 `templates/` 에 있고 양식 지도는 `templates/forms
    - `NO` 는 묻지 않는다. 그 표의 가장 큰 `NO` + 1 이다(비었으면 1).
    - `요청일` 은 사용자가 준 날짜를 `YYYY-MM-DD` 로 적는다. "오늘" 이라고 하면 오늘 날짜다. 말하지 않았으면 묻는다.
    - `오픈단계`·`모둘`·`CTS 유형`·`Target System`(CBO 는 `Client 종속여부`·`Target Client` 도)·`Request NO`·`Description`·
-     `주요변경 및 특이사항`·`요청자` 는 사용자에게서만 받는다. **트랜스포트 번호(`Request NO`)와 대상 시스템은 지어내지 않는다.**
+     `주요변경 및 특이사항`·`요청자` 는 사용자에게서만 받는다(트랜스포트에서 읽어 채우는 열은 아래 "트랜스포트에서 채우기" 가 맡는다).
+     **트랜스포트 번호(`Request NO`)와 대상 시스템은 지어내지 않는다.**
      모르면 비워 두고 그렇다고 알리거나 사용자에게 되묻는다. 형식이 정해진 값(예: `CTS 유형`)은 기존 행의 쓰는 방식을 따르고,
      기존 행이 없으면 양식 머리글의 메모(IMG/PGM, S/F 설명)가 있다고 알리고 묻는다.
    - `처리일자`·`처리시간`·`처리자`·`처리결과`·`승인` 은 처리하는 사람이 나중에 채우는 칸이다. 사용자가 알려 줄 때만 적고, 아니면
@@ -99,6 +101,57 @@ Project Repository 의 `templates/` 에 있고 양식 지도는 `templates/forms
    위 요청 표의 같은 건에서 가져오거나 사용자가 준 값을 쓴다. `Error 내용`·`조치사항` 은 사용자의 말을 요약하지 않고 그대로 적는다.
 5. 저장 전에 doc-guard 훅(`pre_write_guard.py`)이 `rules/cts.yaml` 로 파일 이름·필수 절·양식 밖 열을 검사한다. 막히면 사유대로
    고친다. 훅이 죽어 검사를 못 한 경우는 통과나 위반이 아니라 검사를 못 했다고 알린다. 훅이 막으면 우회하지 않고 사유를 알린다.
+
+## 트랜스포트에서 채우기
+
+사용자가 "트랜스포트에서 채워줘", "내 트랜스포트 관리대장에 넣어줘" 라고 하면 SAP 의 트랜스포트 요청을 읽어 요청 표에 행으로 더한다.
+**읽기만 한다.** 엔진은 MCP 를 부르지 못하니, 이 스킬이 읽고 JSON 으로 저장하면 엔진 명령이 작업본으로 옮긴다. 작업본이 없으면 먼저
+위 "요청 건 더하기" 1~2 로 종류를 정하고 작업본을 만든다(0단계 브랜치 확인 포함). `Request NO` 가 이미 있는 행은 건드리지 않는다.
+
+1. **읽을 서버와 사용자.** 읽을 테넌트·클라이언트는 `env/adt-tiers.yaml` 의 `servers` 기준이다(서버 이름 → 호스트·클라이언트·티어).
+   커스터마이징 요청은 커스터마이징 테넌트(예: `abap-adt-z5u`, 클라이언트 100), 워크벤치 요청은 개발 테넌트(`abap-adt-z5u-dev`,
+   080)에서 읽는 것이 보통이다. 어느 서버에서 읽을지, 어느 SAP 사용자(트랜스포트 소유자)의 것을 읽을지는 사용자에게 확인한다 — 모르면
+   지어내지 않는다. 그 파일이 없으면 멈추고 알린다.
+2. **읽기 도구만 쓴다.** 먼저 `mcp__<서버>__userTransports`(`user`, `targets: true`)를 부른다. 080 실측(2026-11-03)에서 이것은
+   workbench·customizing 모두 빈 배열이었으니, **비면** `transportConfigurations` 응답의 `configurations[0].link` 를
+   `transportsByConfig`(`configUri`=그 link, `targets: true`)에 넣어 읽는다. 설정(`configurations`)이 **여러 개면 전부** 읽어 설정마다 응답을
+   따로 저장한다(엔진이 합치고 같은 요청 번호는 한 번만 쓴다). 읽은 설정이 몇 개인지, 설정마다 요청이 몇 건이었는지 사용자에게 알린다.
+   `transportConfigurations` 가 비었거나 `link` 가 없으면 멈추고 알린다. 응답 모양은 `transports.{workbench|customizing}[]`(대상 묶음, `tm:name`·`tm:desc`) → `modifiable[]`·`released[]`(요청:
+   `tm:number`·`tm:owner`·`tm:desc`·`tm:target`·`tm:lastchanged_timestamp`) → `tasks[]`(요청 아래 task, 행이 아니다)다. **`createTransport`·
+   `transportRelease`·`transportDelete`·`transportSetOwner`·`transportAddUser` 같은 쓰기 도구는 부르지 않는다**(`env/adt-tiers.yaml` 의
+   `write_tools`, 읽기 전용 서버에서는 가드도 막는다). 가드·훅이 막으면 우회하지 말고 사유를 알린다.
+3. **응답을 그대로 저장한다.** 저장소 밖 임시 폴더(예: 세션 scratchpad)의 `adt.json` 에 응답 JSON 을 **고치지 않고** 쓴다 — 저장소 안에 두지
+   않는다. 변환은 엔진(`--adt`)이 한다: `category` 는 최상위 키(`workbench`/`customizing`), `tasks` 는 행으로 만들지 않고, 기본은 `modifiable`
+   만 넣는다(릴리스된 요청까지 넣으려면 `--include-released`). 응답 모양이 기대와 다르면 엔진이 검사 불능(종료 2)으로 멈춘다.
+   - **요청일은 ADT 응답에 없다.** 있는 것은 마지막 변경 시각(`tm:lastchanged_timestamp`, 14자리 `YYYYMMDDhhmmss`)뿐이고 요청을 만든 날짜가
+     아니다. 그래서 기본은 `요청일` 을 **비운다**(사람이 적는다). 매핑 `요청일_출처: lastchanged` 로 고른 경우만 마지막 변경일을 쓴다.
+   - `Target System` 은 요청의 `tm:target` 이고 비어 있으면(로컬 변경 요청) 빈칸이다.
+   - 읽지 못한 트랜스포트(상세 조회 오류·401 등)가 있으면 `adt.json` 대신 중간 JSON 형식(엔진 머리 설명)을 직접 만들어 `unread` 에
+     `{"number","reason"}` 을 넣고 `--adt` 를 빼서 부른다 — 빼면 조용히 빠진다. 사용자 소유 요청이 없는 빈 응답은 "읽을 것이 없다" 로 알린다.
+4. **엔진을 부른다.** 먼저 `--check`, 문제없으면 `--check` 를 빼고 다시.
+
+   ```bash
+   e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "채우기 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
+   uvx --from "$e" \
+     python -P -m checker.cts_fill --root "$(git rev-parse --show-toplevel)" --transports "<adt.json 경로>" [--transports "<다른 설정 응답 경로>"] --adt \
+     --spec "docs/CTS관리대장/CTS관리대장_<종류>.md" [--spec "docs/CTS관리대장/CTS관리대장_<다른 종류>.md"] --check
+   ```
+
+   매핑은 Project Repository 의 `templates/harness/cts-fill.yaml` 이다(없으면 아래 "규칙 설치"). 트랜스포트의 `category` 가 어느 작업본으로
+   갈지도 그 매핑이 정한다(`customizing` → Configuration, `workbench` → CBO). 이미 있는 행의 **빈 칸**만 채우려면 `--fill-empty` 를 더한다.
+   엔진은 새 행의 `NO`(표의 마지막 숫자 + 1)·`Request NO`·`Description`·`요청자`(소유자)·`Target System`·`CTS 유형`(IMG/PGM)만
+   채우고(`요청일` 은 위 매핑 설정일 때만), 오픈단계·모둘·주요변경 및 특이사항·Client 종속여부·Target Client·처리 칸은 비운다.
+5. **종료코드.** stdout 은 JSON 한 줄이다.
+   - `0` — 정상(`--check` 포함). `results` 의 `added`(더한 행)·`filled`·`kept`(이미 있어 건드리지 않은 건)를 알린다.
+   - `2` — 검사 불능. JSON·매핑·작업본을 읽지 못했거나 값 형식이 다르거나 `unread` 에 읽지 못한 트랜스포트가 있거나, 매핑의 열이 작업본
+     머리글에 없거나(지도·매핑 오류), 인자가 틀렸다(이것도 JSON 한 줄로 나온다). **아무 파일도 쓰지 않았다.**
+     `problems` 를 그대로 보이고 통과로도 위반으로도 취급하지 않는다. 읽지 못한 트랜스포트는 다시 읽어 JSON 을 고친 뒤 돈다.
+   - `3` — 경고(`warnings`). `read` 는 변환된 요청 수다. **3 이어도 라우팅된 작업본은 이미 반영됐다**(`written`).
+     `type: no-transports` — 읽은 요청이 0건이다. 읽을 요청이 없거나 읽기 경로가 틀린 것이니 `userTransports` 가 비면 `transportsByConfig`
+     로 읽었는지 확인하고, "채웠다" 고 말하지 않는다. `type: unrouted` — 채울 작업본이 없는 종류의 트랜스포트가 있어 그 건은 채우지
+     못했다. 그 종류의 작업본도 `--spec` 으로 주고 다시 돈다.
+6. **채운 뒤 사람이 확인한다.** 비어 있는 요청일·오픈단계·모둘·주요변경 및 특이사항(CBO 는 Client 종속여부·Target Client 도)은 사람이 알려 주는 대로 채운다.
+   `CTS 유형` 은 매핑의 값(IMG/PGM)이라 고객사 쓰는 방식과 맞는지 본다. 이어서 위 "산출" 로 `--check`.
 
 ## 버전 올리기
 
@@ -148,14 +201,15 @@ doc-guard 통과가 아니다. 파일 이름 패턴(`CTS관리대장_(Configurat
 
 ## 규칙 설치
 
-Project Repository 에 CTS 관리대장 검사 규칙이 없으면 이 스킬 폴더의 세 파일을 복사한다(이 PR 은 `rules/`·`templates/` 를 바꾸므로 승인자
-Approve 가 필요하다고 알린다. 엔진은 `rules/` 만 읽는다).
+Project Repository 에 CTS 관리대장 검사 규칙이 없으면 이 스킬 폴더의 파일을 복사한다(이 PR 은 `rules/`·`templates/` 를 바꾸므로 승인자
+Approve 가 필요하다고 알린다. 엔진은 `rules/` 만 읽는다). 마지막 줄의 `cts-fill.yaml` 은 "트랜스포트에서 채우기" 를 쓸 때만 필요하다.
 
 | 이 스킬 폴더 | Project Repository |
 |---|---|
 | `cts.yaml` | `rules/cts.yaml` (작업본: 파일명·필수 절·양식 밖 열) |
 | `cts-output.yaml` | `rules/cts-output.yaml` (산출 xlsx 파일명 패턴) |
 | `cts-template.md` | `templates/harness/cts.md` (필수 절의 기준) |
+| `cts-fill.yaml` | `templates/harness/cts-fill.yaml` (트랜스포트 → 작업본 열 매핑·종류 분기·CTS 유형 값) |
 
 작업본의 관할은 `docs/CTS관리대장/*.md`, 산출물의 관할은 `docs/CTS관리대장/*.xlsx` 다. 종류(Configuration·CBO)가 늘면 두 규칙 파일의
 파일명 패턴에 새 종류를 더한다.
