@@ -1,16 +1,20 @@
-"""갈래(flow) 데이터 읽기·검사와 세션의 갈래 진행 상태(web-console.md §갈래). 갈래와 단계는 flows.json 이 정한다.
-이 모듈은 파일·네트워크를 직접 부르지 않는다. 읽기(git·gh)는 호출한 쪽이 fetch 로 넘겨 주고, 조건은 cond 로 넘겨 준다."""
+"""갈래(flow) 데이터 읽기·검사와 세션의 갈래 진행 상태(web-console.md §갈래). 갈래와 단계는 플러그인의 workflow.json 이 정한다.
+이 모듈은 파일·네트워크를 직접 부르지 않는다. 읽기(git·gh)는 호출한 쪽이 fetch 로 넘겨 주고, 조건은 cond 로 넘겨 준다.
+데이터 검사(validate)만 근거(basis) 문장을 확인하려고 플러그인 안의 스킬·규칙 파일을 읽는다."""
 from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Callable
 
-DATA_FILE = Path(__file__).with_name("flows.json")
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+DATA_FILE = PLUGIN_ROOT / "workflow.json"
 STEP_KINDS = {"skill", "human", "work", "wait"}
 TOOL_KINDS = {"skill", "console"}
-CONDITION_TYPES = {"file", "approver"}
+CONDITION_TYPES = {"file", "approver", "paths"}
+BASIS_READ_LIMIT = 2 << 20
 PENDING, ACTIVE, DONE, SKIPPED = "pending", "active", "done", "skipped"
 EVIDENCE_TOKENS = {"skill_done", "has_changes", "on_work_branch", "pr_exists", "pr_merged", "manual"}
 MAX_REASON = 500
@@ -29,15 +33,65 @@ def load(path: Path = DATA_FILE) -> tuple[dict | None, str]:
     return (data, "") if isinstance(data, dict) else (None, "갈래 데이터가 객체가 아닙니다.")
 
 
-def validate(data: dict, skill_names: set[str]) -> list[str]:
-    """데이터의 모든 스킬이 실제로 있고, 가리키는 갈래·조건·증거가 정의돼 있는지 본다. 문제 목록(비면 유효)."""
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def basis_errors(where: str, basis, root: Path, cache: dict[str, str | None]) -> list[str]:
+    """basis: [{"file": 플러그인 기준 경로, "quote": 그 파일에 실제로 있는 문장}]. 비었거나, 파일이 없거나, 문장이 파일에 없으면 오류.
+    줄바꿈·공백 차이는 무시한다(문서가 줄을 접어 쓰므로)."""
+    if not isinstance(basis, list) or not basis:
+        return [f"{where}: basis(근거 스킬·규칙 문장)가 비어 있습니다. 근거 문장을 못 찾으면 이 항목을 넣지 않습니다."]
     errors: list[str] = []
+    for item in basis:
+        if not isinstance(item, dict) or not isinstance(item.get("file"), str) or not isinstance(item.get("quote"), str) \
+                or not item["file"].strip() or not _squash(item["quote"]):
+            errors.append(f"{where}: basis 항목은 file 과 quote 문자열을 가져야 합니다.")
+            continue
+        rel = item["file"]
+        if rel not in cache:
+            try:
+                path = (root / rel).resolve()
+                if not path.is_relative_to(root.resolve()) or not path.is_file() or path.stat().st_size > BASIS_READ_LIMIT:
+                    raise OSError("플러그인 안의 파일이 아니거나 없거나 너무 큽니다.")
+                cache[rel] = _squash(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, ValueError):
+                cache[rel] = None
+        if cache[rel] is None:
+            errors.append(f"{where}: basis 파일 {rel!r} 을 읽을 수 없습니다.")
+        elif _squash(item["quote"]) not in cache[rel]:
+            errors.append(f"{where}: basis 문장이 {rel} 에 없습니다: {item['quote'][:40]!r}")
+    return errors
+
+
+def validate(data: dict, skill_names: set[str], root: Path | None = None) -> list[str]:
+    """데이터의 모든 스킬이 실제로 있고, 가리키는 갈래·조건·증거가 정의돼 있고, 갈래·단계·다음 갈래·도구·조건마다 근거 문장이
+    실제 파일에 있는지 본다. root 는 basis 파일의 기준 폴더(기본: 플러그인 폴더). 문제 목록(비면 유효)."""
+    errors: list[str] = []
+    root = root or PLUGIN_ROOT
+    cache: dict[str, str | None] = {}
+
+    def basis_ok(where: str, owner) -> None:
+        errors.extend(basis_errors(where, owner.get("basis") if isinstance(owner, dict) else None, root, cache))
+
     conditions = data.get("conditions") if isinstance(data.get("conditions"), dict) else {}
     for name, cond in conditions.items():
         if not isinstance(cond, dict) or cond.get("type") not in CONDITION_TYPES:
             errors.append(f"조건 {name}: 종류가 {sorted(CONDITION_TYPES)} 중 하나여야 합니다.")
-        elif cond.get("type") == "approver" and cond.get("whenNoFile", "admin") != "admin":
+            continue
+        basis_ok(f"조건 {name}", cond)
+        if cond.get("type") == "approver" and cond.get("whenNoFile", "admin") != "admin":
             errors.append(f"조건 {name}: whenNoFile 은 \"admin\" 만 쓸 수 있습니다(엔진과 같은 판정).")
+        elif cond.get("type") == "paths":
+            paths = cond.get("paths")
+            if not isinstance(paths, list) or not paths or any(not isinstance(p, str) or not p or p.startswith("/") or ".." in p.split("/") for p in paths):
+                errors.append(f"조건 {name}: paths 는 저장소 안 상대 경로 문자열 목록이어야 합니다.")
+            depth = cond.get("searchDepth", 0)
+            if not isinstance(depth, int) or isinstance(depth, bool) or not 0 <= depth <= 5:
+                errors.append(f"조건 {name}: searchDepth 는 0~5 정수여야 합니다.")
+            exempt = cond.get("exemptFile")
+            if exempt is not None and (not isinstance(exempt, str) or not exempt or exempt.startswith("/") or ".." in exempt.split("/")):
+                errors.append(f"조건 {name}: exemptFile 은 저장소 안 상대 경로 문자열이어야 합니다.")
     flows = data.get("flows")
     if not isinstance(flows, list) or not flows:
         return errors + ["flows 가 비어 있습니다."]
@@ -58,6 +112,7 @@ def validate(data: dict, skill_names: set[str]) -> list[str]:
             errors.append("갈래가 객체가 아닙니다.")
             continue
         fid = f.get("id")
+        basis_ok(f"갈래 {fid}", f)
         if f.get("requires") is not None and f["requires"] not in conditions:
             errors.append(f"{fid}: requires {f['requires']!r} 조건이 없습니다.")
         steps = f.get("steps")
@@ -72,6 +127,7 @@ def validate(data: dict, skill_names: set[str]) -> list[str]:
             if not isinstance(s, dict) or s.get("kind") not in STEP_KINDS:
                 errors.append(f"{where}: kind 가 {sorted(STEP_KINDS)} 중 하나여야 합니다.")
                 continue
+            basis_ok(where, s)
             if s["kind"] == "skill":
                 skill_ok(where, s.get("skill"))
             if s.get("helperSkill") is not None:
@@ -90,20 +146,33 @@ def validate(data: dict, skill_names: set[str]) -> list[str]:
                 if not isinstance(col, dict) or not isinstance(col.get("branches"), dict) or not col.get("file") or not col.get("column"):
                     errors.append(f"{fid}: next.srsColumn 형식이 맞지 않습니다.")
                 else:
+                    basis_ok(f"{fid}: next.srsColumn", col)
                     for value, branch in col["branches"].items():
                         flow_ok(f"{fid}: next.srsColumn.{value}", branch.get("flow") if isinstance(branch, dict) else None)
+                        basis_ok(f"{fid}: next.srsColumn.{value}", branch)
+                        skip = branch.get("skipStatuses") if isinstance(branch, dict) else None
+                        if skip is not None and (not isinstance(skip, list) or any(not isinstance(x, str) for x in skip)):
+                            errors.append(f"{fid}: next.srsColumn.{value}: skipStatuses 는 문자열 목록이어야 합니다.")
             else:
                 flow_ok(f"{fid}: next", rule.get("flow"))
+                basis_ok(f"{fid}: next", rule)
     for t in data.get("tools") or []:
         where = f"도구 {t.get('id') if isinstance(t, dict) else '?'}"
         if not isinstance(t, dict) or t.get("kind") not in TOOL_KINDS:
             errors.append(f"{where}: kind 가 {sorted(TOOL_KINDS)} 중 하나여야 합니다.")
             continue
+        basis_ok(where, t)
         if t["kind"] == "skill":
             skill_ok(where, t.get("skill"))
         if t.get("requires") is not None and t["requires"] not in conditions:
             errors.append(f"{where}: requires {t['requires']!r} 조건이 없습니다.")
     return errors
+
+
+def missing_skills(data: dict, skill_names) -> list[str]:
+    """skills/ 에 있는데 workflow.json 의 단계(skill·helperSkill)에도 도구(tools)에도 없는 스킬. PR 검사가 비어 있어야 통과시킨다."""
+    used = flow_skills(data) | tool_skills(data)
+    return sorted(s for s in skill_names if s not in used)
 
 
 def flow_def(data: dict, fid) -> dict | None:
@@ -294,9 +363,10 @@ def _option(data: dict, rule: dict) -> dict:
             "disabled": bool(rule.get("disabled"))}
 
 
-def read_column(text: str, column: str, id_column: str, status_column: str, skip_statuses: list[str]) -> list[tuple[str, str]]:
-    """마크다운 표에서 (ID, column 값) 목록을 읽는다. column 이 든 표만 본다."""
-    rows: list[tuple[str, str]] = []
+def read_column(text: str, column: str, id_column: str, status_column: str, skip_statuses: list[str]) -> list[tuple[str, str, str]]:
+    """마크다운 표에서 (ID, column 값, 상태) 목록을 읽는다. column 이 든 표만 본다. skip_statuses 상태의 줄은 뺀다
+    (갈래마다 빼는 상태가 다르므로 호출한 쪽이 비워 두고 직접 거를 수 있다)."""
+    rows: list[tuple[str, str, str]] = []
     header: list[str] | None = None
     for line in text.splitlines():
         line = line.strip()
@@ -314,7 +384,7 @@ def read_column(text: str, column: str, id_column: str, status_column: str, skip
         row = dict(zip(header, cells))
         if status_column in row and row[status_column] in skip_statuses:
             continue
-        rows.append((row.get(id_column, ""), row.get(column, "")))
+        rows.append((row.get(id_column, ""), row.get(column, ""), row.get(status_column, "")))
     return rows
 
 
@@ -339,11 +409,12 @@ def compute_next(data: dict, flow: dict, root: str) -> dict | None:
         return {"options": [], "hint": NEXT_HINT, "unknown": f"{col['file']} 에서 '{col['column']}' 값이 든 요구사항을 찾지 못했습니다."}
     options = []
     for value, branch in col["branches"].items():
-        ids = [i for i, v in rows if v == value]
+        skip = set(branch.get("skipStatuses") or [])  # 갈래마다 근거가 있는 상태만 뺀다(없으면 아무것도 빼지 않는다)
+        ids = [i for i, v, st in rows if v == value and st not in skip]
         if ids:
             options.append(dict(_option(data, branch), value=value, count=len(ids), ids=ids))
     known = set(col["branches"])
-    other = [i for i, v in rows if v not in known]
+    other = [i for i, v, _st in rows if v not in known]
     if other:
         options.append({"flow": None, "name": "", "label": "정해진 값이 아닌 다음 단계(SRS 를 고쳐야 합니다)", "disabled": True,
                         "value": "", "count": len(other), "ids": other})

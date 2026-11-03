@@ -3,7 +3,7 @@
   'use strict';
 
   var BAR_LABEL = { done: '끝', now: '지금', wait: '대기', skipped: '건너뜀' };
-  // 도구 순서와 서버 데이터를 못 받았을 때의 기본값(서버 flows.json 의 tools 와 같은 순서)
+  // 도구 순서와 서버 데이터를 못 받았을 때의 기본값(플러그인 workflow.json 의 tools 중 늘 보이는 것과 같은 순서)
   var DEFAULT_TOOLS = [
     { id: 'version', name: '플러그인 판 보기', kind: 'skill', skill: 'version' },
     { id: 'sync', name: '최신 상태 받기', kind: 'skill', skill: 'sync' },
@@ -14,7 +14,8 @@
     { id: 'reload', name: '플러그인 다시 불러오기', kind: 'console' },
     { id: 'approvals', name: '내가 승인할 PR', kind: 'skill', skill: 'approvals', requires: 'approver' }
   ];
-  var CHECK_ORDER = ['sync', 'version', 'update', 'reload'];
+  var NO_FLOW_ID = 'none';  // 갈래 없이 도구만 쓰는 일(서버 analysis.NO_FLOW 와 같다)
+  var CHECK_ORDER =['sync', 'version', 'update', 'reload'];
   var CHECK_NAMES = { sync: '최신 받기', version: '판 확인', update: '갱신', reload: '다시 불러오기' };
   var CHECK_STATES = { done: ['ok', 'done', 'pass', 'passed', 'fresh', 'same'], run: ['running', 'active', 'doing'], fail: ['fail', 'failed', 'error', 'stale', 'differs', 'old'] };
   var JOB_OK = ['done', 'ready', 'complete', 'completed', 'ok', 'success', 'succeeded'];
@@ -105,7 +106,7 @@
   function jobOutcome(job) {
     var st = lower(job && job.state);
     var status = lower(job && job.status);
-    if (status === 'confirm') return { done: false, confirm: true, prompt: String((job && job.prompt) || '') };
+    if (status === 'confirm') return { done: false, confirm: true, prompt: String((job && job.prompt) || ''), warning: String((job && job.warning) || '') };
     if (status === 'canceled') return { done: true, ok: false, canceled: true, error: '취소했어요.' };
     if (job && job.error) return { done: true, ok: false, error: String(job.error) };
     if (JOB_FAIL.indexOf(st) >= 0) return { done: true, ok: false, error: (job && job.error) || '새 세션을 만들지 못했어요.' };
@@ -120,10 +121,22 @@
     var tools = flowsData && arr(flowsData.tools).length ? flowsData.tools : DEFAULT_TOOLS;
     return tools.filter(function (t) {
       if (t.id === 'approvals') return !!(approvals && approvals.state === 'yes');
+      if (t.hidden) return false;  // 콘솔 화면에 단추를 내지 않는 도구(예: 콘솔을 여는 open)
       if (t.exposure && t.exposure.visible === false) return false;
       if (t.id === 'reload') return !!(ctx && ctx.hasSession && ctx.managed);
       return true;
     });
+  }
+  // 프로젝트 준비 안내(templates/·rules/ 가 있는지). 조건을 못 읽었으면 숨기지 않고 '확인 못 함' 으로 알린다.
+  function projectNotice(flowsData) {
+    var c = flowsData && flowsData.conditions && flowsData.conditions['project-ready'];
+    if (!c) return null;
+    if (c.state === 'no') {
+      return { state: 'no', text: '프로젝트 준비 안 됨 - ' + (c.reason || 'templates/ 나 rules/ 가 없어요.') +
+        ' 고객사 프로젝트 저장소라면 관리자가 도구 줄의 "프로젝트 구조 만들기" 를 한 번 해야 해요.' };
+    }
+    if (c.state === 'unknown') return { state: 'unknown', text: '프로젝트 준비 여부를 확인하지 못했어요' + (c.reason ? ' - ' + c.reason : '') + '.' };
+    return null;
   }
   function liveCount(list) { return list.filter(function (s) { return s.status !== LIVE_ENDED; }).length; }
   function reloadStrip(updatePressed, list) {
@@ -233,7 +246,7 @@
   var api = {
     BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, counts: counts, summaryText: summaryText,
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
-    nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, reloadStrip: reloadStrip, reloadResult: reloadResult,
+    NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice, reloadStrip: reloadStrip, reloadResult: reloadResult,
     startChecks: startChecks, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
     mergeApprovals: mergeApprovals, prBadge: prBadge, runningSubCount: runningSubCount

@@ -59,6 +59,35 @@ HANDOFF_WAIT = 600.0        # 인계 턴이 끝나기를 기다리는 시간(최
 NEW_SESSION_ID_WAIT = 8.0   # 새 세션이 실제 id 를 얻을 때까지
 NEW_SESSION_INIT_WAIT = 60.0  # 새 세션이 init 이벤트를 낼 때까지(이 뒤에야 이전 세션을 닫는다)
 MAX_NEXT_PROMPT = 4000      # 새 세션 첫 메시지로 보낼 인계 프롬프트의 최대 글자 수
+MAX_NEXT_IDS = 20           # 다음 갈래로 넘길 요구사항 번호(REQ-xxx) 수
+REQ_ID = re.compile(r"REQ-\d{1,6}")
+SYSTEM_TYPE = re.compile(r"^system_type\s*:\s*([^#\r\n]*)", re.MULTILINE)
+PRUNE_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__"}  # session-start-sync.sh 의 기준 폴더 찾기와 같다
+
+
+def read_system_type(root: str) -> str:
+    """env/adt-tiers.yaml 의 최상위 system_type 값. 파일이나 키가 없거나 읽지 못하면 빈 문자열(지어내지 않는다)."""
+    try:
+        path = os.path.join(root, "env", "adt-tiers.yaml")
+        if os.path.getsize(path) > 1 << 20:
+            return ""
+        with open(path, encoding="utf-8") as fh:
+            m = SYSTEM_TYPE.search(fh.read())
+    except (OSError, UnicodeDecodeError):
+        return ""
+    return m.group(1).strip().strip("'\"")[:60] if m else ""
+
+
+def has_standard_folder(root: str, names: list[str], depth: int) -> bool:
+    """root 와 그 아래 depth 단계까지의 폴더 중 names 를 모두 하위 폴더로 가진 곳이 있는가."""
+    start = len(os.path.normpath(root).split(os.sep))
+    for cur, dirs, _files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in PRUNE_DIRS]
+        if all(n in dirs for n in names):
+            return True
+        if len(os.path.normpath(cur).split(os.sep)) - start >= depth:
+            dirs[:] = []
+    return False
 MAX_JOBS = 50
 JOB_ACTIVE = ("handoff", "starting")
 WAIT_POLL = 0.2
@@ -227,13 +256,14 @@ class App:
 
         self.spawn(work)
 
-    # ---- 갈래(flows.json) ----
+    # ---- 갈래(플러그인의 workflow.json) ----
     def load_flows(self, path) -> tuple[dict | None, str]:
-        """데이터를 읽고 모든 스킬이 skills/ 에 있는지 본다. 틀리면 갈래 기능을 끄고 사유를 남긴다(콘솔 전체는 계속 뜬다)."""
+        """데이터를 읽고 모든 스킬이 skills/ 에 있는지, 단계마다 근거 문장이 실제 파일에 있는지 본다.
+        틀리면 갈래 기능을 끄고 사유를 남긴다(콘솔 전체는 계속 뜬다)."""
         data, error = flows.load(path or flows.DATA_FILE)
         if data is not None:
             names = {f.parent.name for f in (self.plugin_root / "skills").glob("*/SKILL.md")}
-            problems = flows.validate(data, names)
+            problems = flows.validate(data, names)  # 근거 문장은 이 콘솔이 들어 있는 플러그인의 파일에서 찾는다
             if problems:
                 data, error = None, "갈래 데이터가 맞지 않습니다: " + "; ".join(problems[:5])
         if error:
@@ -299,6 +329,20 @@ class App:
         wait=False 는 gh 결과를 기다리지 않는다(읽는 중이면 unknown + loading)."""
         spec = self.require_flows()["conditions"][name]
         label = spec.get("label", name)
+        if spec["type"] == "paths":
+            root, failed = gitstate.repo_root_checked(self.run, cwd)
+            if failed:
+                return {"state": COND_UNKNOWN, "label": label, "reason": "git 을 실행하지 못해 " + ", ".join(spec["paths"]) + " 가 있는지 확인하지 못했습니다."}
+            root = root or cwd
+            names = ", ".join(spec["paths"])
+            exempt = spec.get("exemptFile")  # 플러그인 저장소처럼 Project Repository 가 아닌 곳은 준비 여부를 따지지 않는다(session-start-sync.sh 와 같다)
+            if (exempt and os.path.isfile(os.path.join(root, *exempt.split("/")))) or os.environ.get("HARNESS_NO_SCAFFOLD_HINT") == "1":
+                ready, why_ready = True, f"Project Repository 가 아니라서({exempt} 가 있거나 HARNESS_NO_SCAFFOLD_HINT=1) {names} 를 따지지 않습니다."
+            else:
+                ready = has_standard_folder(root, spec["paths"], int(spec.get("searchDepth", 0)))
+                why_ready = "" if ready else f"{names} 를 함께 가진 폴더가 없습니다."
+            holds = (not ready) if spec.get("negate") else ready  # negate: 준비가 안 됐을 때 참
+            return {"state": COND_YES if holds else COND_NO, "label": label, "reason": "" if holds else (why_ready or f"{names} 를 함께 가진 폴더가 있습니다.")}
         if spec["type"] == "file":
             root, failed = gitstate.repo_root_checked(self.run, cwd)
             if failed:  # git 을 실행하지 못했다 = 파일이 없다는 뜻이 아니다
@@ -402,8 +446,35 @@ class App:
         if data is None:
             return {}
         cond = self.cond_fn(cwd, wait=False)  # 요청 스레드는 gh 를 기다리지 않는다(읽는 중이면 판정 불능이라 둔다)
-        return {fid: f for fid, f in self.flow_catalog().items()
-                if not (flows.flow_def(data, fid).get("requires") and cond(flows.flow_def(data, fid)["requires"]) is False)}
+        out = {fid: f for fid, f in self.flow_catalog().items()
+               if not (flows.flow_def(data, fid).get("requires") and cond(flows.flow_def(data, fid)["requires"]) is False)}
+        tools = ", ".join(f"/{self.plugin_name}:{t['skill']}" for t in data.get("tools", []) if t.get("kind") == "skill" and not t.get("hidden"))
+        out[analysis.NO_FLOW] = {"name": analysis.NO_FLOW_NAME,
+                                 "description": f"갈래(순서) 없이 도구 스킬만 쓰는 일. 도구: {tools}. 개발·문서 작업이 아니면 이쪽이다."}
+        return out
+
+    def tool_skill_of(self, text: str) -> str:
+        """글 맨 앞에 사용자가 직접 적은 스킬이 workflow.json 의 도구 스킬이면 그 이름(`scaffold`), 아니면 빈 문자열."""
+        prefix, _, name = analysis.direct_skill(text).rpartition(":")
+        data = self.flow_data
+        return name if data is not None and prefix in ("", self.plugin_name) and name in flows.tool_skills(data) else ""
+
+    def analysis_context(self, cwd: str) -> str:
+        """분석 프롬프트에 넣을 이 폴더의 사실: 프로젝트 준비 상태(scaffold 스킬 설명), 대상 시스템(Public Cloud, ABAP Cloud)."""
+        lines = ["이 작업의 대상은 SAP S/4HANA Public Cloud 이고 ABAP Cloud(RAP, CDS, 릴리스된 API)를 전제로 한다. "
+                 "ALV 리포트·클래식 dynpro·SAP GUI 전용 방식처럼 Public Cloud 에서 쓸 수 없는 방식은 보기나 질문으로 내놓지 않는다."]
+        system_type = read_system_type(cwd)
+        if system_type:
+            lines.append(f"저장소 env/adt-tiers.yaml 의 system_type 은 {system_type!r} 이다. 이 값을 대상 시스템으로 본다.")
+        if self.flow_data is not None and "project-ready" in self.flow_data.get("conditions", {}):
+            state = self.cond_state("project-ready", cwd, wait=False)["state"]
+            if state == COND_NO:
+                lines.append("이 폴더는 프로젝트 준비가 안 됐다(templates/ 와 rules/ 를 함께 가진 폴더가 없다). 개발·문서 작업 요청이면 "
+                             "understood 의 첫 문장으로 \"먼저 관리자가 프로젝트 구조 만들기(/harness:scaffold)를 해야 한다\"고 안내하고, "
+                             "갈래 분류보다 이 안내를 앞세운다. scaffold 스킬은 새 고객사 Project Repository 를 처음 만들었을 때 표준 구조를 만든다.")
+            elif state == COND_UNKNOWN:
+                lines.append("이 폴더의 프로젝트 준비 여부(templates/ 와 rules/)는 확인하지 못했다. 준비가 됐다고도 안 됐다고도 단정하지 않는다.")
+        return "\n".join(lines)
 
     def model_of(self, s: dict) -> dict:
         """잠금 순서: manager.lock(잎) 은 store.lock 을 쥔 채 잡지 않는다. 그래서 살아 있는지부터 묻고 나서 store.lock 을 잡는다."""
@@ -871,6 +942,12 @@ class App:
         flow = flows.flow_def(data, fid)
         if flow is None:
             raise HttpError(400, "없는 갈래입니다.")
+        raw_ids = b.get("ids")
+        if raw_ids is not None and (not isinstance(raw_ids, list) or any(not isinstance(i, str) or not REQ_ID.fullmatch(i) for i in raw_ids)):
+            raise HttpError(400, "ids 는 REQ-xxx 번호 목록이어야 합니다.")
+        unique = list(dict.fromkeys(raw_ids or []))
+        ids = unique[:MAX_NEXT_IDS]
+        cut_note = f"요구사항 {len(unique)}건 중 {MAX_NEXT_IDS}건만 넘겼습니다. 나머지는 이 세션이 끝난 뒤 다시 고르세요." if len(unique) > MAX_NEXT_IDS else ""
         if not s["managed"]:
             raise HttpError(409, HANDOFF_GUIDE)
         if not s["cwd"] or not os.path.isdir(s["cwd"]):
@@ -883,8 +960,8 @@ class App:
             for j in self.jobs.values():  # 확인을 기다리다 잊힌 이전 요청은 새 요청이 대신한다
                 if j["fromSession"] == s["id"] and j["status"] == "confirm":
                     j.update(status="canceled", prompt="")
-            job = {"id": uuid.uuid4().hex[:12], "kind": "flowNext", "status": "handoff", "fromSession": s["id"], "flowId": fid,
-                   "sessionId": None, "error": "", "warning": ""}
+            job = {"id": uuid.uuid4().hex[:12], "kind": "flowNext", "status": "handoff", "fromSession": s["id"], "flowId": fid, "ids": ids,
+                   "sessionId": None, "error": "", "warning": cut_note}
             self.jobs[job["id"]] = job
             for old in [j["id"] for j in self.jobs.values() if j["status"] not in JOB_ACTIVE + ("confirm",)][:-MAX_JOBS]:
                 self.jobs.pop(old, None)
@@ -998,7 +1075,8 @@ class App:
             choices = {k: s.get(k) if isinstance(s.get(k), str) else None for k in ("modelChoice", "effortChoice", "permissionChoice")}
         if choices["permissionChoice"] not in PERMISSION_VALUES:  # 허용 집합(""·acceptEdits·plan) 밖의 모드는 승계하지 않는다
             choices["permissionChoice"] = None
-        message = handoff.new_session_message(prompt, flow, self.plugin_name)
+        devs = [("DEV-" + i[4:]) for i in job.get("ids") or []]  # REQ-003 은 DEV-003 이다(srs 스킬 "번호")
+        message = handoff.new_session_message(prompt, flow, self.plugin_name, devs)
         new = self.manager.launch(s["cwd"], message, title=f"{flow.get('name', flow['id'])} (이어서)", model=choices["modelChoice"],
                                   effort=choices["effortChoice"], permission=choices["permissionChoice"])
         if new is None:
@@ -1012,9 +1090,10 @@ class App:
             job["sessionId"] = real
             return self.next_failed(job, s["id"], "새 세션이 시작 신호를 보내지 않아 이전 세션을 닫지 않았습니다. 새 세션 상태를 확인해 주세요.")
         try:
-            self.assign_flow(self.get_session(real), flow["id"], "이전 세션에서 이어서 시작")
+            reason = f"{flow['reasonPrefix']} {', '.join(devs)}" if flow.get("reasonPrefix") and devs else "이전 세션에서 이어서 시작"
+            self.assign_flow(self.get_session(real), flow["id"], reason)
         except HttpError as e:
-            job["warning"] = "새 세션은 떴지만 갈래를 지정하지 못했습니다: " + e.message
+            job["warning"] = " ".join(x for x in (job.get("warning"), "새 세션은 떴지만 갈래를 지정하지 못했습니다: " + e.message) if x)
         self.mark_handed_off(s, real)
         with self.lock:
             job.update(status="started", sessionId=real)
@@ -1104,7 +1183,8 @@ class App:
         if not folder["ok"]:
             raise HttpError(400, folder["error"])
         self.store.add_folder(folder["path"])
-        return 202, {"id": self.analyses.start(text.strip(), folder["path"], model, effort, self.available_flows(folder["path"]))}
+        return 202, {"id": self.analyses.start(text.strip(), folder["path"], model, effort, self.available_flows(folder["path"]),
+                                               self.analysis_context(folder["path"]))}
 
     def get_job(self, jid):
         job = self.analyses.get(jid)
@@ -1114,17 +1194,26 @@ class App:
 
     def a_new_get(self, g, q, b):
         j = self.get_job(g[0])
-        return 200, {k: j[k] for k in ("id", "status", "text", "cwd", "result", "error")}
+        out = {k: j[k] for k in ("id", "status", "text", "cwd", "result", "error")}
+        tool = self.tool_skill_of(j["text"])
+        if tool and out["result"]:  # 요청이 도구 스킬로 시작하면 분석이 어느 갈래로 봤든 갈래 없이 도구만 쓰는 일이다
+            out["result"] = dict(out["result"], flow={"id": analysis.NO_FLOW, "name": analysis.NO_FLOW_NAME, "confident": True, "alternativeId": None,
+                                                     "alternativeName": "", "reason": f"요청이 도구 스킬(/{self.plugin_name}:{tool})로 시작해요."})
+        return 200, out
 
     def chosen_flow(self, job, b: dict) -> tuple[str | None, str]:
-        """시작 때 쓸 갈래와 이유. 요청이 고른 갈래가 먼저고, 없으면 분석이 확신한 분류를 쓴다."""
+        """시작 때 쓸 갈래와 이유. 요청이 고른 갈래가 먼저고, 없으면 분석이 확신한 분류를 쓴다. 갈래 없이 도구만 쓰는 일(none)이면 (None, "")."""
         fid = b.get("flow")
         found = (job.get("result") or {}).get("flow") or {}
         if fid is not None:
+            if fid == analysis.NO_FLOW:
+                return None, ""
             if not isinstance(fid, str) or flows.flow_def(self.require_flows(), fid) is None:
                 raise HttpError(400, "없는 갈래입니다.")
             return fid, str(b.get("flowReason") or (found.get("reason") if found.get("id") == fid else "") or "사용자가 고름")[:flows.MAX_REASON]
-        if found and found.get("confident"):
+        if self.tool_skill_of(job["text"]):
+            return None, ""
+        if found and found.get("confident") and found["id"] != analysis.NO_FLOW:
             return found["id"], found.get("reason", "")
         return None, ""
 
@@ -1142,11 +1231,12 @@ class App:
             extra = {}
         is_git = self.git_inspect(job["cwd"])["isRepo"]
         first = None
-        if flow_id and self.flow_data is not None:
+        if flow_id and flow_id != analysis.NO_FLOW and self.flow_data is not None:
             flow = flows.flow_def(self.flow_data, flow_id)
             step = flow["steps"][0] if flow else None
             first = step["skill"] if step and step["kind"] == "skill" else None
-        return analysis.first_message(job["text"], picked, extra, note if isinstance(note, str) else "", is_git, first)
+        tool_only = flow_id == analysis.NO_FLOW
+        return analysis.first_message(job["text"], picked, extra, note if isinstance(note, str) else "", is_git, first, tool_only)
 
     def a_preview(self, g, q, b):
         job = self.get_job(g[0])
@@ -1155,7 +1245,7 @@ class App:
         except ValueError:
             raise HttpError(400, "extraAnswers 가 JSON 이 아닙니다.")
         flow_id = q.get("flow", [""])[0] or None
-        if flow_id and (self.flow_data is None or flows.flow_def(self.flow_data, flow_id) is None):
+        if flow_id and flow_id != analysis.NO_FLOW and (self.flow_data is None or flows.flow_def(self.flow_data, flow_id) is None):
             raise HttpError(400, "없는 갈래입니다.")
         return 200, {"message": self.preview_text(job, q.get("picked", []), extra, q.get("note", [""])[0], flow_id)}
 
@@ -1169,7 +1259,10 @@ class App:
             effort = job.get("effort")
         permission = self.requested_permission(b)
         flow_id, flow_reason = self.chosen_flow(job, b)
-        message = self.preview_text(job, b.get("picked") or [], b.get("extraAnswers") or {}, b.get("note") or "", flow_id)
+        found = (job.get("result") or {}).get("flow") or {}
+        tool_only = not flow_id and (b.get("flow") == analysis.NO_FLOW or (b.get("flow") is None and (
+            bool(self.tool_skill_of(job["text"])) or (found.get("id") == analysis.NO_FLOW and bool(found.get("confident"))))))
+        message = self.preview_text(job, b.get("picked") or [], b.get("extraAnswers") or {}, b.get("note") or "", analysis.NO_FLOW if tool_only else flow_id)
         with job["start_lock"]:  # 시작 버튼을 두 번 눌러도 세션은 하나만 뜬다
             sid = job.get("session_id")
             if sid is None:

@@ -3132,14 +3132,32 @@ def test_subagent_cap_still_holds_with_new_fields(browser):
 # ---- 갈래(flows.json)와 단계 진행(#558) ----
 
 FAKE_ANALYSIS_FLOW = Path(__file__).with_name("fake_claude_analysis_flow.py")
-FLOWS_FILE = CONSOLE / "flows.json"
+FLOWS_FILE = PLUGIN / "workflow.json"  # 작업 순서의 정본은 플러그인 안의 workflow.json 이다(#599)
 REAL_SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md"))
-FLOW_IDS = ["new-customer", "srs", "spec", "dev", "fix", "atc", "review"]
+FLOW_IDS = ["srs", "spec", "dev", "config", "fix"]
+TOOL_IDS = ["version", "sync", "update", "handoff", "wrapup", "prs", "reload", "approvals", "atc", "role", "cts", "manual", "scaffold", "open"]
 BRANCH = "docs/1-x"
 PR_URL = "https://github.com/o/r/pull/7"
 GIT_INFO = {"isRepo": True, "repo": "r", "branch": BRANCH, "changedFiles": [], "skill": None, "unknown": False, "ahead": 0}
 SRS_TABLE = ("| ID | Title | Status | 다음 단계 |\n|---|---|---|---|\n| REQ-001 | a | Open | 개발 |\n| REQ-002 | b | Open | 개발 |\n"
-             "| REQ-003 | c | Open | 설정 |\n| REQ-004 | d | Open | 미정 |\n| REQ-005 | e | Dropped | 개발 |\n")
+             "| REQ-003 | c | Open | 설정 |\n| REQ-004 | d | Open | 미정 |\n| REQ-005 | e | Dropped | 개발 |\n| REQ-006 | f | On Hold | 설정 |\n"
+             "| REQ-007 | g | Dropped | 미정 |\n")
+
+
+def gated_flows_file(tmp_path):
+    """시험 전용 사본: 실제 workflow.json 에 조건부 단계(onlyIf)와 조건부 갈래(requires)를 더한다.
+    실제 순서에는 이런 것이 없지만, 엔진(flows.py)의 조건 처리는 데이터와 상관없이 계속 시험해야 한다."""
+    data = json.loads(FLOWS_FILE.read_text(encoding="utf-8"))
+    basis = [{"file": "skills/atc/SKILL.md", "quote": "SAP ATC(ABAP Test Cockpit) 지적을 돌려 보고 처리 순서에 따라 고친다."}]
+    dev = next(f for f in data["flows"] if f["id"] == "dev")
+    dev["steps"].insert(2, {"id": "atc", "name": "ATC 지적 확인", "kind": "skill", "skill": "atc", "onlyIf": "adt-tiers", "done": ["skill_done"], "basis": basis})
+    data["flows"].append({"id": "atc", "name": "ATC 지적 고치기", "description": "시험용 조건부 갈래", "requires": "adt-tiers", "basis": basis,
+                          "steps": [{"id": "atc", "name": "ATC 돌리고 분류하기", "kind": "skill", "skill": "atc", "done": ["skill_done"], "basis": basis}],
+                          "next": None})
+    path = tmp_path / "gated-workflow.json"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return path
 
 
 class FakeRun:
@@ -3164,11 +3182,11 @@ def pr_json(state="OPEN", checks=None):
             "statusCheckRollup": checks if checks is not None else [{"status": "COMPLETED", "conclusion": "SUCCESS"}]}
 
 
-def flow_console(tmp_path, monkeypatch, run=None, info=None, claude_cmd=None):
-    """실제 flows.json 과 실제 스킬 이름으로 뜬 콘솔. c.git 을 바꾸면 git 상태가 바뀐다."""
+def flow_console(tmp_path, monkeypatch, run=None, info=None, claude_cmd=None, flows_file=None):
+    """실제 workflow.json 과 실제 스킬 이름으로 뜬 콘솔. c.git 을 바꾸면 git 상태가 바뀐다."""
     state = dict(GIT_INFO, **(info or {}))
     c = Console(tmp_path, monkeypatch, claude_cmd=claude_cmd, git_inspect=lambda cwd: dict(state, changedFiles=list(state["changedFiles"])),
-                skills=REAL_SKILLS, flows_path=FLOWS_FILE,
+                skills=REAL_SKILLS, flows_path=flows_file or FLOWS_FILE,
                 run=run or FakeRun(**{"git rev-parse --show-toplevel": (128, "")}))  # 기본은 git 은 되는데 저장소가 아닌 폴더
     c.git = state
     c.login()
@@ -3206,9 +3224,13 @@ def test_flows_data_is_valid_and_every_skill_exists():
     assert err == "" and flows.validate(data, set(REAL_SKILLS)) == []
     assert (flows.flow_skills(data) | flows.tool_skills(data)) <= set(REAL_SKILLS)
     assert [f["id"] for f in data["flows"]] == FLOW_IDS
-    assert [t["id"] for t in data["tools"]] == ["version", "sync", "update", "handoff", "wrapup", "prs", "reload", "approvals"]
-    assert next(f for f in data["flows"] if f["id"] == "atc")["requires"] == "adt-tiers"
+    assert [t["id"] for t in data["tools"]] == TOOL_IDS
+    assert next(t for t in data["tools"] if t["id"] == "atc")["requires"] == "adt-tiers"
     assert next(t for t in data["tools"] if t["id"] == "approvals")["requires"] == "approver"
+    assert next(t for t in data["tools"] if t["id"] == "scaffold")["requires"] == "project-not-ready"
+    # scaffold 는 갈래가 아니라 프로젝트 준비 조건·도구이고, ATC 는 단계가 아니라 도구다(#599)
+    assert all(st.get("skill") not in ("scaffold", "atc") for f in data["flows"] for st in f["steps"])
+    assert all(f.get("requires") is None for f in data["flows"])
 
 
 def test_flows_validate_catches_bad_data():
@@ -3226,6 +3248,17 @@ def test_flows_validate_catches_bad_data():
     assert "onlyIf" in broken(lambda d: d["flows"][3]["steps"][2].update(onlyIf="missing"))
     assert "nope" in broken(lambda d: d["tools"][0].update(skill="nope"))
     assert "skill_done" in broken(lambda d: d["flows"][1]["steps"][2].update(done=["skill_done"]))
+    # 근거(basis): 비었거나, 파일이 없거나, 문장이 그 파일에 없으면 오류다(#599)
+    assert "basis" in broken(lambda d: d["flows"][1]["steps"][0].update(basis=[]))
+    assert "basis" in broken(lambda d: d["flows"][1]["steps"][0].pop("basis"))
+    assert "읽을 수 없습니다" in broken(lambda d: d["flows"][1]["steps"][0].update(basis=[{"file": "skills/none/SKILL.md", "quote": "x"}]))
+    assert "읽을 수 없습니다" in broken(lambda d: d["flows"][1]["steps"][0].update(basis=[{"file": "../../README.md", "quote": "x"}]))
+    assert "문장이 skills/spec/SKILL.md 에 없습니다" in broken(lambda d: d["flows"][1]["steps"][0].update(basis=[{"file": "skills/spec/SKILL.md", "quote": "이 문장은 어디에도 없다"}]))
+    assert "next" in broken(lambda d: d["flows"][1]["next"].pop("basis"))
+    assert "next.srsColumn.개발" in broken(lambda d: d["flows"][0]["next"]["srsColumn"]["branches"]["개발"].update(basis=[]))
+    assert "도구 version" in broken(lambda d: d["tools"][0].update(basis=[]))
+    assert "조건 adt-tiers" in broken(lambda d: d["conditions"]["adt-tiers"].pop("basis"))
+    assert "paths" in broken(lambda d: d["conditions"]["project-ready"].update(paths=["../x"]))
 
 
 def test_app_without_valid_flows_keeps_console_up_but_refuses_flow_features(console):
@@ -3241,7 +3274,7 @@ def test_flows_api_without_cwd_has_no_exposure(tmp_path, monkeypatch):
     c = flow_console(tmp_path, monkeypatch)
     try:
         status, body, _ = c.call("GET", "/api/flows")
-        assert status == 200 and [f["id"] for f in body["flows"]] == FLOW_IDS and len(body["tools"]) == 8
+        assert status == 200 and [f["id"] for f in body["flows"]] == FLOW_IDS and [t["id"] for t in body["tools"]] == TOOL_IDS
         assert "exposure" not in body["flows"][0] and "conditions" not in body
         assert body["flows"][3]["steps"][0]["done"] == ["skill_done", "on_work_branch"]
     finally:
@@ -3249,7 +3282,7 @@ def test_flows_api_without_cwd_has_no_exposure(tmp_path, monkeypatch):
 
 
 def test_exposure_hides_atc_without_adt_tiers_and_shows_it_with(tmp_path, monkeypatch):
-    c = flow_console(tmp_path, monkeypatch)
+    c = flow_console(tmp_path, monkeypatch, flows_file=gated_flows_file(tmp_path))  # 조건부 갈래·단계는 시험용 사본으로 본다
     try:
         c.event("e1", "SessionStart")
         q = "/api/flows?cwd=" + urllib.parse.quote(str(c.work))
@@ -3264,6 +3297,46 @@ def test_exposure_hides_atc_without_adt_tiers_and_shows_it_with(tmp_path, monkey
         body = c.call("GET", q)[1]
         assert next(f for f in body["flows"] if f["id"] == "atc")["exposure"]["visible"] is True
         assert body["conditions"]["adt-tiers"]["state"] == "yes"
+    finally:
+        c.close()
+
+
+def test_atc_tool_follows_adt_tiers_and_scaffold_tool_follows_project_readiness(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        c.event("e2", "SessionStart")
+        q = "/api/flows?cwd=" + urllib.parse.quote(str(c.work))
+
+        def tool(body, tid):
+            return next(t for t in body["tools"] if t["id"] == tid)
+
+        body = c.call("GET", q)[1]
+        assert tool(body, "atc")["exposure"]["visible"] is False and tool(body, "atc")["exposure"]["state"] == "no"
+        assert body["conditions"]["project-ready"]["state"] == "no" and "templates" in body["conditions"]["project-ready"]["reason"]
+        assert tool(body, "scaffold")["exposure"]["visible"] is True and tool(body, "scaffold")["exposure"]["state"] == "yes"
+        (c.work / "env").mkdir()
+        (c.work / "env" / "adt-tiers.yaml").write_text("x", encoding="utf-8")
+        (c.work / "templates").mkdir()
+        body = c.call("GET", q)[1]
+        assert tool(body, "atc")["exposure"]["visible"] is True
+        assert body["conditions"]["project-ready"]["state"] == "no" and "rules" in body["conditions"]["project-ready"]["reason"]  # 하나만 있으면 아직 준비 안 됨
+        (c.work / "rules").mkdir()
+        body = c.call("GET", q)[1]
+        assert body["conditions"]["project-ready"]["state"] == "yes" and tool(body, "scaffold")["exposure"]["visible"] is False
+        assert tool(body, "open")["hidden"] is True  # 콘솔을 여는 스킬은 화면에 단추를 내지 않는다
+    finally:
+        c.close()
+
+
+def test_unreadable_git_makes_project_readiness_unknown_and_keeps_scaffold_tool(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch, run=FakeRun())  # git 을 실행할 수 없다(127)
+    try:
+        c.event("e3", "SessionStart")
+        body = c.call("GET", "/api/flows?cwd=" + urllib.parse.quote(str(c.work)))[1]
+        ready = body["conditions"]["project-ready"]
+        assert ready["state"] == "unknown" and "git" in ready["reason"]  # 없다고도 있다고도 하지 않는다
+        scaffold = next(t for t in body["tools"] if t["id"] == "scaffold")
+        assert scaffold["exposure"]["state"] == "unknown" and scaffold["exposure"]["visible"] is True  # 판정 불능은 숨기지 않는다
     finally:
         c.close()
 
@@ -3489,7 +3562,7 @@ def test_analysis_schema_and_prompt_carry_flows_only_when_given():
 def test_analysis_classifies_flow_and_filters_flows_by_folder(tmp_path, monkeypatch):
     prompt_file = tmp_path / "prompt.txt"
     monkeypatch.setenv("FAKE_PROMPT_FILE", str(prompt_file))
-    c = flow_console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS_FLOW)])
+    c = flow_console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS_FLOW)], flows_file=gated_flows_file(tmp_path))
     try:
         def analyse(text):
             jid = c.call("POST", "/api/new", {"text": text, "cwd": str(c.work)})[1]["id"]
@@ -3530,7 +3603,8 @@ def test_start_saves_flow_on_session_and_first_message_uses_its_first_skill(tmp_
 
         jid = job("SRS 바꿔줘")
         assert c.call("GET", f"/api/new/{jid}/preview?flow=fix")[1]["message"].splitlines()[0] == "/harness:start"
-        assert c.call("GET", f"/api/new/{jid}/preview?flow=review")[1]["message"].splitlines()[0] == "/harness:prs"
+        assert c.call("GET", f"/api/new/{jid}/preview?flow=spec")[1]["message"].splitlines()[0] == "/harness:spec"
+        assert c.call("GET", f"/api/new/{jid}/preview?flow=new-customer")[0] == 400  # 없앤 옛 갈래
         assert c.call("GET", f"/api/new/{jid}/preview?flow=ghost")[0] == 400
         status, body, _ = c.call("POST", f"/api/new/{jid}/start", {})
         assert status == 202 and body["flowId"] == "srs" and sent[-1].splitlines()[0] == "/harness:srs"
@@ -3538,8 +3612,8 @@ def test_start_saves_flow_on_session_and_first_message_uses_its_first_skill(tmp_
         assert model["flowId"] == "srs" and model["flowReason"] == "요구사항을 바꾸는 일이다" and len(model["flowSteps"]) == 3
         # 사용자가 다른 갈래를 고르면 그것이 우선한다
         other = job("SRS 바꿔줘")
-        assert c.call("POST", f"/api/new/{other}/start", {"flow": "new-customer"})[1]["flowId"] == "new-customer"
-        assert sent[-1].splitlines()[0] == "/harness:scaffold" and sess(c, "sx")["flowId"] == "new-customer"
+        assert c.call("POST", f"/api/new/{other}/start", {"flow": "config"})[1]["flowId"] == "config"
+        assert sent[-1].splitlines()[0] == "/harness:start" and sess(c, "sx")["flowId"] == "config"
         assert c.call("POST", f"/api/new/{other}/start", {"flow": "ghost"})[0] == 400
         # 분류가 목록 밖이면 갈래 없이 시작한다
         c.call("PUT", "/api/sessions/sx/flow", {"flowId": None})
@@ -3547,6 +3621,146 @@ def test_start_saves_flow_on_session_and_first_message_uses_its_first_skill(tmp_
         assert c.call("POST", f"/api/new/{bad}/start", {})[1]["flowId"] is None and sess(c, "sx")["flowId"] is None
     finally:
         c.close()
+
+
+def test_first_message_never_puts_another_skill_before_a_skill_the_user_wrote_or_a_tool_only_job():
+    fm = analysis.first_message
+    assert fm("/harness:scaffold 구조 만들어줘", [], {}, "", True).splitlines()[0] == "/harness:scaffold 구조 만들어줘"  # start 를 앞에 붙이지 않는다
+    assert fm("/harness:scaffold x", [], {}, "", True, "srs").splitlines()[0] == "/harness:scaffold x"  # 갈래의 첫 스킬도 붙이지 않는다
+    assert fm("/harness:cts 추가", [], {}, "", True).splitlines()[0] == "/harness:cts 추가"
+    assert fm("/harness:cts 추가", [], {}, "", False).splitlines()[0].startswith("아래는 사용자가 콘솔에서 보낸")  # git 저장소가 아니면 기존 안전 문장
+    assert fm("/x", [], {}, "", True).splitlines()[0] == "/harness:start"  # 플러그인 스킬 꼴이 아니면 직접 적은 스킬로 보지 않는다
+    assert fm("CTS 관리대장에 추가해줘", [], {}, "", True, None, True) == "CTS 관리대장에 추가해줘"  # 갈래 없이 도구만: 앞에 아무것도 없다
+    assert fm("판매오더 앱 만들어줘", [], {}, "", True).splitlines()[0] == "/harness:start"  # 보통 일은 그대로
+    assert fm("/etc/hosts 를 고쳐줘", [], {}, "", False).splitlines()[0].startswith("아래는 사용자가 콘솔에서 보낸")  # 경로는 스킬이 아니다
+    assert analysis.direct_skill("  /harness:role 배정") == "harness:role" and analysis.direct_skill("abc /harness:role") == ""
+
+
+def test_tool_only_jobs_start_without_a_flow_and_without_start_in_front(tmp_path, monkeypatch):
+    prompt_file = tmp_path / "prompt.txt"
+    monkeypatch.setenv("FAKE_PROMPT_FILE", str(prompt_file))
+    c = flow_console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS_FLOW)])
+    try:
+        c.event("sx", "SessionStart")
+        sent = []
+        c.app.manager.launch = lambda cwd, message, **kw: (sent.append(message), "sx")[1]
+
+        def job(text):
+            jid = c.call("POST", "/api/new", {"text": text, "cwd": str(c.work)})[1]["id"]
+            wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+            return jid
+
+        jid = job("/harness:scaffold 프로젝트 구조 만들어줘")  # 가짜 분석은 srs 로 분류하지만 서버는 도구 일로 본다
+        body = c.call("GET", f"/api/new/{jid}")[1]
+        assert body["result"]["flow"]["id"] == "none" and body["result"]["flow"]["confident"] is True and "scaffold" in body["result"]["flow"]["reason"]
+        text = prompt_file.read_text(encoding="utf-8")
+        assert "- none: 순서 없이 이 도구만" in text and "flow.id 를 none 으로 한다" in text and '\\"none\\"' in text  # 프롬프트와 스키마에 보기가 있다
+        status, started, _ = c.call("POST", f"/api/new/{jid}/start", {})
+        assert status == 202 and started["flowId"] is None and sess(c, "sx")["flowId"] is None
+        assert sent[-1].splitlines()[0] == "/harness:scaffold 프로젝트 구조 만들어줘" and "/harness:start" not in sent[-1]
+        # 사용자가 '순서 없이 이 도구만' 을 직접 고르면 자연어 요청 앞에도 start 를 붙이지 않는다
+        plain = job("CTS 관리대장에 요청 건 추가해줘")
+        assert c.call("GET", f"/api/new/{plain}/preview?flow=none")[1]["message"] == "CTS 관리대장에 요청 건 추가해줘"
+        assert c.call("GET", f"/api/new/{plain}/preview")[1]["message"].splitlines()[0] == "/harness:start"
+        assert c.call("POST", f"/api/new/{plain}/start", {"flow": "none"})[1]["flowId"] is None
+        assert sent[-1] == "CTS 관리대장에 요청 건 추가해줘"
+        assert c.call("POST", f"/api/new/{plain}/start", {"flow": "ghost"})[0] == 400
+    finally:
+        c.close()
+
+
+def test_analysis_prompt_carries_project_readiness_and_public_cloud_target(tmp_path, monkeypatch):
+    prompt_file = tmp_path / "prompt.txt"
+    monkeypatch.setenv("FAKE_PROMPT_FILE", str(prompt_file))
+    c = flow_console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS_FLOW)])
+    try:
+        c.event("p0", "SessionStart")
+
+        def analyse():
+            jid = c.call("POST", "/api/new", {"text": "판매오더 앱 개발해줘", "cwd": str(c.work)})[1]["id"]
+            wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+            return prompt_file.read_text(encoding="utf-8")
+
+        text = analyse()
+        assert "SAP S/4HANA Public Cloud" in text and "ABAP Cloud" in text and "ALV 리포트" in text  # 대상 시스템(보기에 classic 을 내놓지 않는다)
+        assert "프로젝트 준비가 안 됐다" in text and "/harness:scaffold" in text and "갈래 분류보다 이 안내를 앞세운다" in text
+        assert "system_type" not in text
+        (c.work / "env").mkdir()
+        (c.work / "env" / "adt-tiers.yaml").write_text("tiers: x\nsystem_type: public_cloud  # 주석\n", encoding="utf-8")
+        (c.work / "templates").mkdir()
+        (c.work / "rules").mkdir()
+        text = analyse()
+        assert "system_type 은 'public_cloud'" in text and "프로젝트 준비가 안 됐다" not in text
+    finally:
+        c.close()
+
+
+def test_analysis_prompt_says_unknown_when_project_readiness_cannot_be_read(tmp_path, monkeypatch):
+    prompt_file = tmp_path / "prompt.txt"
+    monkeypatch.setenv("FAKE_PROMPT_FILE", str(prompt_file))
+    c = flow_console(tmp_path, monkeypatch, run=FakeRun(), claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS_FLOW)])  # git 불능(127)
+    try:
+        jid = c.call("POST", "/api/new", {"text": "개발해줘", "cwd": str(c.work)})[1]["id"]
+        wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+        text = prompt_file.read_text(encoding="utf-8")
+        assert "확인하지 못했다" in text and "프로젝트 준비가 안 됐다" not in text
+    finally:
+        c.close()
+
+
+def test_plugin_repository_and_nested_standards_count_as_project_ready(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        c.event("d1", "SessionStart")
+        q = "/api/flows?cwd=" + urllib.parse.quote(str(c.work))
+
+        def ready():
+            body = c.call("GET", q)[1]
+            tool = next(t for t in body["tools"] if t["id"] == "scaffold")
+            return body["conditions"]["project-ready"], tool["exposure"]["visible"]
+
+        assert ready()[0]["state"] == "no"
+        # 플러그인 저장소(.claude-plugin/marketplace.json)는 Project Repository 가 아니라 따지지 않는다(session-start-sync.sh 와 같다)
+        (c.work / ".claude-plugin").mkdir()
+        (c.work / ".claude-plugin" / "marketplace.json").write_text("{}", encoding="utf-8")
+        cond, scaffold_visible = ready()
+        assert cond["state"] == "yes" and scaffold_visible is False
+        (c.work / ".claude-plugin" / "marketplace.json").unlink()
+        assert ready()[0]["state"] == "no"
+        # HARNESS_NO_SCAFFOLD_HINT=1 도 같다
+        monkeypatch.setenv("HARNESS_NO_SCAFFOLD_HINT", "1")
+        assert ready()[0]["state"] == "yes"
+        monkeypatch.delenv("HARNESS_NO_SCAFFOLD_HINT")
+        # templates/ 와 rules/ 를 함께 가진 폴더가 3단계 아래까지 있으면 준비된 것이다(그 아래는 아니다)
+        deep = c.work / "a" / "b" / "c"
+        (deep / "templates").mkdir(parents=True)
+        (deep / "rules").mkdir()
+        assert ready()[0]["state"] == "yes"
+        too_deep = tmp_path / "other"
+        (too_deep / "a" / "b" / "c" / "d" / "templates").mkdir(parents=True)
+        (too_deep / "a" / "b" / "c" / "d" / "rules").mkdir()
+        assert server_has_standard_folder(str(too_deep), ["templates", "rules"], 3) is False
+        assert server_has_standard_folder(str(too_deep), ["templates", "rules"], 4) is True
+        pruned = tmp_path / "pruned"
+        (pruned / "node_modules" / "templates").mkdir(parents=True)  # node_modules 안은 들어가 보지 않는다
+        (pruned / "node_modules" / "rules").mkdir()
+        assert server_has_standard_folder(str(pruned), ["templates", "rules"], 3) is False
+    finally:
+        c.close()
+
+
+def server_has_standard_folder(root, names, depth):
+    return console_server.has_standard_folder(root, names, depth)
+
+
+def test_read_system_type_reads_only_a_real_value(tmp_path):
+    assert console_server.read_system_type(str(tmp_path)) == ""
+    (tmp_path / "env").mkdir()
+    f = tmp_path / "env" / "adt-tiers.yaml"
+    f.write_text("tiers:\n  system_type: nested\n", encoding="utf-8")
+    assert console_server.read_system_type(str(tmp_path)) == ""  # 최상위 키만 본다
+    f.write_text('system_type: "public_cloud"\n', encoding="utf-8")
+    assert console_server.read_system_type(str(tmp_path)) == "public_cloud"
 
 
 def test_sessions_without_flow_have_empty_flow_fields(tmp_path, monkeypatch):
@@ -3561,7 +3775,7 @@ def test_sessions_without_flow_have_empty_flow_fields(tmp_path, monkeypatch):
 
 
 def test_set_flow_validates_and_atc_needs_adt_tiers(tmp_path, monkeypatch):
-    c = flow_console(tmp_path, monkeypatch)
+    c = flow_console(tmp_path, monkeypatch, flows_file=gated_flows_file(tmp_path))  # requires 가 있는 갈래는 시험용 사본에만 있다
     try:
         c.event("v1", "SessionStart")
         assert c.call("PUT", "/api/sessions/v1/flow", {})[0] == 400
@@ -3572,7 +3786,8 @@ def test_set_flow_validates_and_atc_needs_adt_tiers(tmp_path, monkeypatch):
         (c.work / "env" / "adt-tiers.yaml").write_text("x", encoding="utf-8")
         status, body, _ = set_flow(c, "v1", "atc", reason="ATC 를 돌린다고 해서")
         assert status == 200 and body["flowId"] == "atc" and body["flowReason"] == "ATC 를 돌린다고 해서"
-        assert set_flow(c, "v1", "review")[1]["flowId"] == "review"  # 갈래는 바꿀 수 있다
+        assert set_flow(c, "v1", "fix")[1]["flowId"] == "fix"  # 갈래는 바꿀 수 있다
+        assert set_flow(c, "v1", "review")[0] == 400 and set_flow(c, "v1", "new-customer")[0] == 400  # 없앤 옛 갈래
         assert any("갈래 지정" in e["text"] for e in sess(c, "v1")["log"])
     finally:
         c.close()
@@ -3604,13 +3819,12 @@ def test_out_of_order_skill_is_409_but_tools_are_always_allowed(tmp_path, monkey
         assert status == 409 and "SRS 쓰기" in body["error"]
         assert run("spec") == 409 and run("start") == 409
         assert run("srs") == 202
-        for tool in ("version", "sync", "update", "handoff", "wrapup", "prs", "approvals"):
+        for tool in ("version", "sync", "update", "handoff", "wrapup", "prs", "approvals", "atc", "role", "cts", "manual", "scaffold"):
             assert run(tool) == 202, tool  # 도구는 갈래와 상관없이 언제나 된다
         assert run("nope") == 404
         assert c.call("PUT", "/api/sessions/o1/skills/deliver/reservation", {})[0] == 409  # 예약도 같은 순서를 따른다
-        # 버튼에 안 내는 scaffold 도 갈래의 지금 단계면 실행된다
-        set_flow(c, "o1", "new-customer")
-        assert run("scaffold") == 202 and run("srs") == 409
+        set_flow(c, "o1", "config")
+        assert run("start") == 202 and run("srs") == 409 and run("deliver") == 409
     finally:
         c.close()
 
@@ -3687,8 +3901,9 @@ def test_srs_flow_follows_git_and_pr_evidence_to_the_end(tmp_path, monkeypatch):
         assert m["flowFinished"] is True and states(m) == ["done", "done", "done"]
         opts = {o["value"]: o for o in m["nextFlow"]["options"]}
         assert opts["개발"]["flow"] == "spec" and opts["개발"]["ids"] == ["REQ-001", "REQ-002"]  # Dropped 는 세지 않는다
-        assert opts["설정"]["flow"] == "dev" and opts["설정"]["count"] == 1
-        assert opts["미정"]["flow"] is None and opts["미정"]["ids"] == ["REQ-004"]
+        assert opts["설정"]["flow"] == "config" and opts["설정"]["count"] == 1 and opts["설정"]["ids"] == ["REQ-003"]  # On Hold(REQ-006)도 세지 않는다
+        assert opts["미정"]["flow"] is None and opts["미정"]["ids"] == ["REQ-004", "REQ-007"] and "미정 요구사항 정하기" in opts["미정"]["label"]
+        assert opts["설정"]["name"] == "설정하기"
         assert "새 세션" in m["nextFlow"]["hint"]
         assert any("gh pr view 7" in call for call in run.calls)
         c.event("s1", "UserPromptSubmit", prompt="z")
@@ -3744,25 +3959,64 @@ def test_manual_step_needs_confirmation_and_other_evidence(tmp_path, monkeypatch
         c.close()
 
 
-def test_new_customer_flow_waits_for_a_person_then_points_to_srs(tmp_path, monkeypatch):
+def test_config_flow_starts_with_the_dev_number_configures_then_delivers_and_ends_without_a_next_flow(tmp_path, monkeypatch):
     c = flow_console(tmp_path, monkeypatch)
     try:
         turn(c, "n1")
-        set_flow(c, "n1", "new-customer")
-        skill_event(c, "n1", "scaffold")
+        status, m, _ = set_flow(c, "n1", "config", reason="설정 DEV-003")
+        assert status == 200 and m["flowName"] == "설정하기" and m["flowReason"] == "설정 DEV-003"
+        assert [st["id"] for st in m["flowSteps"]] == ["start", "configure", "deliver", "merge"]
+        assert [st["skill"] for st in m["flowSteps"]] == ["start", None, "deliver", None]
+        skill_event(c, "n1", "start")
         stop(c, "n1")
         m = sess(c, "n1")
-        assert m["stepIndex"] == 1 and m["flowSteps"][1]["kind"] == "human" and m["flowSteps"][1]["state"] == "active"
-        m = c.call("POST", "/api/sessions/n1/flow/done", {})[1]
-        assert m["flowFinished"] is True
-        assert m["nextFlow"]["options"] == [{"flow": "srs", "name": "요구사항 만들기·바꾸기", "label": "요구사항 만들기", "disabled": False}]
+        assert m["stepIndex"] == 1 and m["flowSteps"][1]["kind"] == "work" and "Configuration Considerations" in m["flowSteps"][1]["hint"]
+        assert "원장" in m["flowSteps"][2]["hint"] and "ssot-approval" in m["flowSteps"][3]["hint"]
+        assert "자동으로 병합" not in m["flowSteps"][3]["hint"]  # SRS PR 은 사람 승인이 병합 조건이다(자동 병합 설명은 dev·fix 에만)
+        dev = set_flow(c, "n1", "dev")[1]
+        assert "자동으로 병합" in dev["flowSteps"][3]["hint"] and "자동으로 병합" in set_flow(c, "n1", "fix")[1]["flowSteps"][3]["hint"]
+        assert m["nextFlow"] is None and not any(st["skill"] == "atc" for st in m["flowSteps"])
+    finally:
+        c.close()
+
+
+def test_dev_deliver_step_hint_explains_branch_only_push_and_flow_has_no_atc_step(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        c.event("h1", "SessionStart")
+        m = set_flow(c, "h1", "dev")[1]
+        assert [st["id"] for st in m["flowSteps"]] == ["start", "implement", "deliver", "merge"]
+        assert "브랜치에만 올리기" in m["flowSteps"][2]["hint"] and "정상 경로" in m["flowSteps"][2]["hint"]
+        fix = set_flow(c, "h1", "fix")[1]
+        assert "DEV 번호" in fix["flowSteps"][0]["hint"]
+    finally:
+        c.close()
+
+
+def test_sessions_saved_with_removed_flows_keep_their_saved_values(tmp_path, monkeypatch):
+    """#599: new-customer·atc·review 갈래는 없앴다. 그 갈래로 저장된 세션은 정의를 못 찾으니 저장된 이름·단계가 그대로 보인다."""
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        c.event("r1", "SessionStart")
+        for old_id, old_name in (("new-customer", "새 고객사 시작"), ("atc", "ATC 지적 고치기"), ("review", "합쳐지기 기다리기")):
+            c.event(f"r-{old_id}", "SessionStart")
+            sid = c.app.store.resolve_id(f"r-{old_id}")
+            steps = [{"id": "scaffold", "name": "저장소 표준 구조 만들기", "kind": "skill", "skill": "scaffold", "helperSkill": None, "hint": "옛 설명",
+                      "onlyIf": None, "done": ["skill_done"], "state": "active", "reason": "", "skillDone": False, "confirmed": False}]
+            with c.app.store.lock:
+                c.app.store.get(sid)["flowState"] = {"id": old_id, "name": old_name, "reason": "옛 이유", "assignedAt": 1.0, "stepIndex": 0, "steps": steps,
+                                                    "finished": False, "unknown": [], "next": None, "prNumber": None, "pr": None}
+            m = sess(c, f"r-{old_id}")
+            assert m["flowId"] == old_id and m["flowName"] == old_name and m["flowReason"] == "옛 이유"
+            assert m["flowSteps"][0]["name"] == "저장소 표준 구조 만들기" and m["flowSteps"][0]["hint"] == "옛 설명"
+        assert c.call("GET", "/api/flows")[1]["flows"] and sess(c, "r-atc")["flowId"] == "atc"
     finally:
         c.close()
 
 
 def test_dev_flow_skips_atc_without_adt_tiers_and_runs_it_with(tmp_path, monkeypatch):
     for has_tiers in (False, True):
-        c = flow_console(tmp_path / str(has_tiers), monkeypatch)
+        c = flow_console(tmp_path / str(has_tiers), monkeypatch, flows_file=gated_flows_file(tmp_path / str(has_tiers)))
         try:
             if has_tiers:
                 (c.work / "env").mkdir()
@@ -3811,7 +4065,7 @@ def test_start_step_needs_a_work_branch_and_ignores_stop_while_asking(tmp_path, 
 
 
 def test_unreadable_git_makes_conditions_unknown_and_keeps_atc_step(tmp_path, monkeypatch):
-    c = flow_console(tmp_path, monkeypatch, run=FakeRun())  # git 을 실행할 수 없다(127)
+    c = flow_console(tmp_path, monkeypatch, run=FakeRun(), flows_file=gated_flows_file(tmp_path))  # git 을 실행할 수 없다(127)
     try:
         turn(c, "u1")
         body = c.call("GET", "/api/flows?cwd=" + urllib.parse.quote(str(c.work)))[1]
@@ -3839,11 +4093,14 @@ def test_session_files_reports_unknown_when_git_cannot_run(tmp_path, monkeypatch
     assert status == 200 and body["unknown"] is True and body["reason"] and [f["path"] for f in body["files"]] == ["메모.md"]
 
 
-def test_dev_flow_ends_pointing_at_the_disabled_permission_form(tmp_path):
+def test_dev_config_and_fix_flows_end_without_a_next_flow_and_spec_points_to_dev(tmp_path):
+    """#599: '권한·CTS 양식(준비 중)' 다음 갈래는 지웠다. role·cts·manual 은 도구다."""
     data, _ = flows.load(FLOWS_FILE)
-    nxt = flows.compute_next(data, flows.flow_def(data, "dev"), str(tmp_path))
-    assert nxt["options"] == [{"flow": None, "name": "권한·CTS 양식(준비 중)", "label": "권한·CTS 양식(준비 중)", "disabled": True}]
-    assert flows.compute_next(data, flows.flow_def(data, "fix"), str(tmp_path)) is None
+    for fid in ("dev", "config", "fix"):
+        assert flows.compute_next(data, flows.flow_def(data, fid), str(tmp_path)) is None
+    assert flows.compute_next(data, flows.flow_def(data, "spec"), str(tmp_path))["options"] == [
+        {"flow": "dev", "name": "개발하기", "label": "개발하기", "disabled": False}]
+    assert not any("준비 중" in json.dumps(f, ensure_ascii=False) for f in data["flows"])
 
 
 def test_public_fields_shows_current_step_names_for_a_session_saved_before_the_rename():
@@ -3887,7 +4144,7 @@ def test_srs_next_flow_cannot_be_decided_without_a_readable_srs(tmp_path):
     assert "다음 단계" in flows.compute_next(data, srs, str(tmp_path))["unknown"]
     (tmp_path / "docs" / "ssot" / "SRS.md").write_text(SRS_TABLE.replace("| 미정 |", "| 몰라 |"), encoding="utf-8")
     opts = flows.compute_next(data, srs, str(tmp_path))["options"]
-    assert opts[-1]["disabled"] is True and opts[-1]["ids"] == ["REQ-004"]  # 정해진 값 밖은 따로 알린다
+    assert opts[-1]["disabled"] is True and opts[-1]["ids"] == ["REQ-004", "REQ-007"]  # 정해진 값 밖은 따로 알린다
 
 
 def test_gitstate_pr_status_and_checks_summary():
@@ -4462,8 +4719,8 @@ def test_init_event_plugin_versions_keep_known_versions():
 
 # ---- 다음 갈래로 넘어가기 ----
 
-def next_console(tmp_path, monkeypatch, request):
-    c = flow_console(tmp_path, monkeypatch, claude_cmd=fake_cmd)
+def next_console(tmp_path, monkeypatch, request, flows_file=None):
+    c = flow_console(tmp_path, monkeypatch, claude_cmd=fake_cmd, flows_file=flows_file)
     request.addfinalizer(c.close)
     c.app.wait_poll = 0.05
     return c
@@ -4518,6 +4775,31 @@ def test_flow_next_hands_off_then_starts_new_session_with_checks(tmp_path, monke
     assert "보냄: /harness:handoff" in old_log and "다음 세션으로 넘어감" in old_log
 
 
+def test_flow_next_to_config_shows_the_dev_numbers_as_the_reason(tmp_path, monkeypatch, request):
+    """#599: SRS 다음 단계가 '설정' 인 요구사항(REQ-003)은 '설정하기' 갈래로 넘어가고, 화면에는 '설정 DEV-003' 으로 보인다."""
+    c = next_console(tmp_path, monkeypatch, request)
+    sid = launch(c, "첫 작업")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫 작업")
+    body = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "config", "ids": ["REQ-003", "REQ-003", "REQ-007"]})[1]
+    job = confirm_job(c, body["jobId"])
+    assert job["status"] == "started" and job["ids"] == ["REQ-003", "REQ-007"]
+    model = c.call("GET", f"/api/sessions/{job['sessionId']}")[1]
+    assert model["flowId"] == "config" and model["flowName"] == "설정하기" and model["flowReason"] == "설정 DEV-003, DEV-007"
+    first = wait_for(lambda: (lambda r: r if r.startswith("echo: ") else None)(c.app.store.get(job["sessionId"])["report"]))
+    assert "이번에 맡는 개발 건: DEV-003, DEV-007" in first and "/harness:start" in first
+
+
+def test_flow_next_says_when_it_cuts_the_requirement_list(tmp_path, monkeypatch, request):
+    c = next_console(tmp_path, monkeypatch, request)
+    sid = launch(c, "첫 작업")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫 작업")
+    many = [f"REQ-{n:03d}" for n in range(1, 24)]
+    body = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "config", "ids": many})[1]
+    job = c.call("GET", f"/api/jobs/{body['jobId']}")[1]
+    assert job["ids"] == many[:20] and "23건 중 20건만" in job["warning"]  # 조용히 자르지 않는다
+    assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "config", "ids": ["REQ-1234567"]})[0] == 400  # 화면과 같은 범위(1~6자리)
+
+
 def test_flow_next_stops_without_new_session_when_handoff_has_no_code_block(tmp_path, monkeypatch, request):
     monkeypatch.setenv("FAKE_HANDOFF", "none")
     c = next_console(tmp_path, monkeypatch, request)
@@ -4533,13 +4815,15 @@ def test_flow_next_stops_without_new_session_when_handoff_has_no_code_block(tmp_
 
 
 def test_flow_next_refusals(tmp_path, monkeypatch, request):
-    c = next_console(tmp_path, monkeypatch, request)
+    c = next_console(tmp_path, monkeypatch, request, flows_file=gated_flows_file(tmp_path))
     c.event("term", "SessionStart")
     status, body, _ = c.call("POST", "/api/sessions/term/flow/next", {"flowId": "spec"})
     assert status == 409 and "/harness:handoff" in body["error"]  # 터미널 세션은 인계를 보낼 수 없다
     sid = launch(c, "첫 작업")
     assert c.call("POST", f"/api/sessions/{sid}/flow/next", {})[0] == 400
     assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": 3})[0] == 400
+    assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "config", "ids": ["DEV-003"]})[0] == 400  # ids 는 REQ-xxx 만
+    assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "config", "ids": "REQ-003"})[0] == 400
     assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "nope"})[0] == 400
     assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "atc"})[0] == 409  # env/adt-tiers.yaml 이 없는 폴더
     assert c.call("POST", "/api/sessions/nope/flow/next", {"flowId": "spec"})[0] == 404

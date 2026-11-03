@@ -16,9 +16,11 @@ def last_code_block(text: str) -> str:
     return next((b for b in reversed(found) if b), "")
 
 
-def new_session_message(prompt: str, flow: dict, plugin_name: str) -> str:
-    """새 세션의 첫 메시지: 시작 점검 + 인계 프롬프트 + 그 갈래 첫 단계 지시."""
+def new_session_message(prompt: str, flow: dict, plugin_name: str, devs: list[str] | None = None) -> str:
+    """새 세션의 첫 메시지: 시작 점검 + 인계 프롬프트 + 그 갈래 첫 단계 지시. devs 가 있으면 이번에 맡는 개발 건 번호를 덧붙인다."""
     text = CHECK_INTRO + prompt.strip()
+    if devs:
+        text += "\n\n이번에 맡는 개발 건: " + ", ".join(devs)
     step = flow["steps"][0]
     if step["kind"] == "skill":
         text += f"\n\n이 갈래({flow.get('name', flow['id'])})의 첫 단계는 /{plugin_name}:{step['skill']} 입니다. 위 점검을 마치면 이 스킬로 시작해 줘."
