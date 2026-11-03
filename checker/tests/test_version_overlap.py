@@ -275,6 +275,31 @@ def test_바뀐_SRS에_버전_줄이_없으면_검사_불능이다():
     assert check_version_overlap(data, 205)["status"] == CANNOT_CHECK
 
 
+def test_이_PR_SRS에_버전_줄이_없으면_다시_돌리라_하지_않고_고칠_곳을_말한다():
+    api = FakeApi(files={205: [_file("docs/ssot/SRS.md", "added")]}, pulls=[_pull(205)], texts={"h205": "# SRS\n본문만\n"})
+    data = collect(api.get_json, api.get_text, "o/r", 205)
+    r = check_version_overlap(data, 205)
+    assert r["status"] == CANNOT_CHECK and r["no_version_line"] and not r.get("read_failure")
+    assert "버전: 0.1" in r["message"] and "docs/ssot/SRS.md" in r["message"]
+    assert "Re-run" not in r["message"] and "다시 돌리십시오(Actions" not in r["message"]
+
+
+def test_다른_PR_SRS에_버전_줄이_없으면_그_PR_이_고칠_일이라고_말한다():
+    api = FakeApi(
+        files={**_SRS_SELF, 200: [_file("docs/ssot/SRS.md", "modified")]},
+        pulls=[_pull(200), _pull(205)],
+        texts={"h205": "버전: 0.3\n", "b205": "버전: 0.2\n", "h200": "# SRS\n", "b200": "버전: 0.2\n"},
+    )
+    r = check_version_overlap(collect(api.get_json, api.get_text, "o/r", 205), 205)
+    assert r["status"] == CANNOT_CHECK and r["no_version_line"] and not r.get("read_failure")
+    assert "#200" in r["message"] and "버전: 0.1" in r["message"]
+
+
+def test_GitHub_읽기_실패는_여전히_read_failure_이다():
+    r = check_version_overlap(_ok(_pr(205, srs="0.3"), _pr(200, srs_error="GitHub API 500")), 205)
+    assert r["read_failure"] and not r.get("no_version_line")
+
+
 def test_base에_SRS가_아직_없으면_정상이다():
     api = FakeApi(
         files={**_SRS_SELF, 200: []},
@@ -478,3 +503,30 @@ def test_읽기_실패_말고_다른_검사_불능이_섞이면_설정_문제로
     assert exit2_cause({**base, "code_rules": {"report": {}, "exit": 2}}) == "config"
     assert exit2_cause({"message": "x"}) == "config"
     assert exit2_cause({"summary": {}, "version_overlap": {"status": "cannot_check"}}) == "config"
+
+
+def test_버전_줄_없음은_다시_돌려도_같은_문서_문제로_가른다():
+    from render_report import exit2_cause
+
+    own = {"summary": {"violations": 0}, "version_overlap": {"status": "cannot_check", "no_version_line": True, "own": True, "pr_number": 205}}
+    other = {"summary": {"violations": 0}, "version_overlap": {"status": "cannot_check", "no_version_line": True, "own": False, "pr_number": 200}}
+    assert exit2_cause(own) == "doc"
+    assert exit2_cause(other) == "doc-other:200"
+    # 다른 검사 불능이 섞이면 여전히 설정 문제
+    assert exit2_cause({**own, "pairing": {"status": "cannot_check"}}) == "config"
+    assert exit2_cause({**own, "cross_checks": {"status": "cannot_check"}}) == "config"
+
+
+def test_버전_줄_없음_결과가_이_PR_인지_다른_PR_인지_담고_있다():
+    own = check_version_overlap(_ok(_pr(205, srs_error="x") | {"srs_error_kind": "no_version_line"}), 205)
+    assert own["own"] is True and own["pr_number"] == 205
+    other = check_version_overlap(
+        _ok(_pr(205, srs="0.3"), _pr(200, srs_error="x") | {"srs_error_kind": "no_version_line"}), 205)
+    assert other["own"] is False and other["pr_number"] == 200
+
+
+def test_워크플로_두_곳이_doc_원인을_가른다():
+    root = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+    for name in ("pr-checks.yml", "main-checks.yml"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert '"$cause" = "doc"' in text and "doc-other:" in text, name

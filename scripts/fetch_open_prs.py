@@ -85,7 +85,9 @@ def _record(
             return rec
         rec["srs_version"] = srs_version_of(head)
         if rec["srs_version"] is None:
+            # 읽기는 성공했고 문서에 줄이 없다 — 다시 돌려도 같다(내용 문제). 일시 오류와 가르려 표시한다.
             rec["srs_error"] = f"PR #{number} 의 {SRS_PATH} 에서 `버전:` 줄을 찾지 못했습니다"
+            rec["srs_error_kind"] = "no_version_line"
             return rec
         # base 에 SRS 가 아직 없으면(None) 정상이다 — 이 PR 이 처음 만드는 것이다.
         rec["srs_base_version"] = srs_version_of(base) if base is not None else None

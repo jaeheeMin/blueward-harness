@@ -65,6 +65,24 @@ def test_설정오류는_검사불능_제목이고_문서_문제가_아니라고
     assert "❌ 템플릿 위반" not in text
 
 
+def test_버전_줄_없음_검사_불능은_다시_돌리라_하지_않고_문서_문제라고_말한다():
+    report = _report(0, 0) | {"version_overlap": {
+        "status": "cannot_check", "no_version_line": True, "own": True, "pr_number": 2,
+        "message": "이 PR 의 docs/ssot/SRS.md 에서 `버전:` 줄을 찾지 못해 … `버전: 0.1` 줄을 넣으십시오.",
+    }}
+    text = render(report, 2)
+    assert "다시 돌려도 같습니다" in text
+    assert "Re-run" not in text and "다시 돌려 보십시오" not in text
+    assert "문서의 문제가 아닙니다" not in text
+    assert "버전: 0.1" in text
+
+
+def test_읽기_실패_검사_불능은_여전히_다시_돌리라고_말한다():
+    report = _report(0, 0) | {"version_overlap": {"status": "cannot_check", "read_failure": True, "message": "503"}}
+    text = render(report, 2)
+    assert "Re-run" in text and "다시 돌려도 같습니다" not in text
+
+
 def test_예상치_못한_코드도_검사불능이다():
     text = render({}, 7)
     assert "⚠️ 검사 불능" in text

@@ -127,9 +127,11 @@ def _render_version_overlap(result: dict) -> list[str]:
             "### ⚠️ 검사 불능", "",
             "```", str(result.get("message") or "열린 PR 을 읽지 못했습니다.").strip(), "```", "",
             "다른 열린 PR 과 판 번호가 겹치는지 확인하지 못했습니다. 통과도 위반도 아닙니다. "
-            "**문서의 문제가 아닙니다.** 위 문서 검사 결과는 그대로 유효합니다. "
-            + ("이 실행을 다시 돌려 보십시오(Re-run). 계속 같으면 저장소 담당자에게 알리십시오."
-               if result.get("read_failure") else "저장소 담당자에게 알리십시오."),
+            + ("SRS 의 `버전:` 줄이 없는 문서 내용 문제입니다. 위 메시지의 '다음' 대로 고치십시오. 다시 돌려도 같습니다."
+               if result.get("no_version_line") else
+               "**문서의 문제가 아닙니다.** 위 문서 검사 결과는 그대로 유효합니다. "
+               + ("이 실행을 다시 돌려 보십시오(Re-run). 계속 같으면 저장소 담당자에게 알리십시오."
+                  if result.get("read_failure") else "저장소 담당자에게 알리십시오.")),
         ]
         return out
     warnings = result.get("warnings") or []
@@ -393,10 +395,13 @@ def exit2_cause(report: dict) -> str:
     """종료코드 2 의 원인이 "다시 돌리면 풀리는 읽기 실패" 뿐이면 `retry`, 아니면 `config`(규칙·설정·엔진).
 
     판정 스텝이 안내 문구를 가르는 데 쓴다. `retry` 는 열린 PR 을 읽지 못해 판 번호 겹침만 확인하지 못한
-    경우다(`version_overlap.read_failure`). 다른 검사 불능이 하나라도 섞여 있으면 `config` 다.
+    경우다(`version_overlap.read_failure`). SRS 에 `버전:` 줄이 없어 비교하지 못한 경우(`no_version_line`)는
+    다시 돌려도 같은 문서 내용 문제라 이 PR 이면 `doc`, 다른 PR 이면 `doc-other:<번호>` 다(#620).
+    다른 검사 불능이 하나라도 섞여 있으면 `config` 다.
     """
     version = report.get("version_overlap") or {}
-    if "summary" not in report or not (version.get("status") == "cannot_check" and version.get("read_failure")):
+    cannot = version.get("status") == "cannot_check"
+    if "summary" not in report or not (cannot and (version.get("read_failure") or version.get("no_version_line"))):
         return "config"
     code_rules = report.get("code_rules")
     if code_rules and code_rules.get("exit") not in (0, 1):
@@ -404,7 +409,12 @@ def exit2_cause(report: dict) -> str:
     for key in ("pairing", "overlap"):
         if (report.get(key) or {}).get("status") == "cannot_check":
             return "config"
-    return "config" if report.get("cross_checks") else "retry"
+    if report.get("cross_checks"):
+        return "config"
+    if version.get("no_version_line"):
+        # 문서 내용 문제라 다시 돌려도 같다. 다른 PR 쪽이면 그 번호를 붙여 이 PR 탓이 아님을 드러낸다.
+        return "doc" if version.get("own", True) else f"doc-other:{version.get('pr_number')}"
+    return "retry"
 
 
 def main() -> int:
