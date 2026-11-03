@@ -479,6 +479,56 @@ def summarize_denials(data: dict) -> list[dict]:
     return out
 
 
+# 사유에 쓰기 전에 가리는 추가 모양(#625). 누출 검사 패턴(`load_secret_patterns`)에 더해 쓴다.
+_REDACT_EXTRA = [
+    re.compile(r"\bBearer\s+\S{8,}", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"),
+    re.compile(r"\b[0-9a-fA-F]{32,}\b"),
+]
+REASON_PART_LIMIT = 300  # stdout/result 앞부분
+REASON_LINE_LIMIT = 200  # stderr 한 줄
+REASON_LIMIT = 1500  # 사유 전체
+
+
+def redact(text: str, env: dict | None = None) -> str:
+    """비밀값으로 보이는 부분을 `***` 로 바꾼다. env 의 토큰 실제 값, 누출 패턴, 토큰 모양(Bearer·sk-·긴 hex·긴 base64)을 본다."""
+    src = os.environ if env is None else env
+    for name in LEAK_ENV_NAMES:
+        v = (src.get(name) or "").strip()
+        if len(v) >= 8:
+            text = text.replace(v, "***")
+    try:
+        patterns = load_secret_patterns()
+    except Unavailable:
+        patterns = list(_EXTRA_LEAK_PATTERNS)  # 불러오지 못해도 가리기는 한다
+    for p in patterns + _REDACT_EXTRA:
+        text = p.sub("***", text)
+    return _BASE64_LIKE.sub(lambda m: m.group(0) if _looks_like_name(m.group(0)) else "***", text)
+
+
+def _flat(text: str, limit: int) -> str:
+    return " ".join(str(text).split())[:limit]
+
+
+def failure_detail(data, out: str, err: str) -> str:
+    """claude 호출이 실패했을 때 사유에 붙일 원문(#625). 비밀값은 가리고, 여러 줄은 ` | ` 로 이어 한 줄로 만든다."""
+    parts: list[str] = []
+    if isinstance(data, dict):
+        for key in ("is_error", "subtype"):
+            if data.get(key) not in (None, ""):
+                parts.append(f"{key}={data[key]}")
+        if data.get("result") not in (None, ""):
+            parts.append("result=" + _flat(data["result"], REASON_PART_LIMIT))
+    elif out.strip():
+        parts.append("stdout=" + _flat(out, REASON_PART_LIMIT))
+    lines = [ln for ln in (_flat(x, REASON_LINE_LIMIT) for x in err.splitlines()) if ln]
+    if len(lines) > 6:
+        lines = lines[:3] + ["..."] + lines[-3:]
+    if lines:
+        parts.append("stderr=" + " / ".join(lines))
+    return redact(" | ".join(parts))[:REASON_LIMIT]
+
+
 def run_batch(batch: dict, *, repo: str, claude: str, model: str, max_turns: int, timeout: float,
               runner: Runner | None = None, env: dict | None = None) -> dict:
     """묶음 하나를 리뷰한다. 성공 = 종료코드 0, 결과 JSON 이 오류가 아니고 `structured_output` 이 스키마에 맞음.
@@ -507,14 +557,15 @@ def run_batch(batch: dict, *, repo: str, claude: str, model: str, max_turns: int
             res[key] = data.get(key)
         res["permission_denials"] = summarize_denials(data)
     if code != 0:
-        tail = (err.strip().splitlines() or [""])[-1][:200]
-        res["reason"] = f"종료코드 {code}" + (f": {tail}" if tail else "")
+        detail = failure_detail(data, out, err)
+        res["reason"] = f"종료코드 {code}" + (f": {detail}" if detail else "")
         return res
     if not isinstance(data, dict):
         res["reason"] = "결과가 JSON 이 아니다"
         return res
     if data.get("is_error") or (data.get("subtype") not in (None, "success")):
-        res["reason"] = f"claude 가 오류로 끝남({data.get('subtype') or 'is_error'})"
+        detail = redact(_flat(data.get("result") or "", REASON_PART_LIMIT))
+        res["reason"] = f"claude 가 오류로 끝남({data.get('subtype') or 'is_error'})" + (f": result={detail}" if detail else "")
         return res
     try:
         findings = parse_findings(data.get("structured_output"))

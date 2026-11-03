@@ -408,7 +408,7 @@ jobs:
               reason = read_unavailable_reason()
               lines = [
                   f"검사 불능: Claude 리뷰 단계가 끝나지 못했습니다({claude_outcome or '실행되지 않음'}). "
-                  + (f"사유: {clean(reason, 500)}." if reason else "시간 초과일 수 있으니 job 로그를 확인하십시오."),
+                  + (f"사유: {clean(reason, 1500)}." if reason else "시간 초과일 수 있으니 job 로그를 확인하십시오."),
                   unavailable_next,
               ]
           else:
