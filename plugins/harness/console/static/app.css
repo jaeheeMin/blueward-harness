@@ -1,9 +1,12 @@
+/* 글꼴은 static/fonts/ 에 들어 있다(OFL 라이선스 파일 동봉). 서버가 같은 곳에서 내보내므로 CSP font-src 'self' 로 된다. */
+@font-face { font-family: 'Pretendard'; src: url('/fonts/PretendardVariable.woff2') format('woff2'); font-weight: 45 920; font-style: normal; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
 :root {
   --bg: #0d0d0e; --surface: #131314; --text: #eeeeec; --sec: #a3a3a0; --muted: #8f8f8c;
   --accent: #8ab4ff; --attn: #e3b778; --btn: #f4f4f2; --btnink: #0d0d0e;
   --brand: #004696; /* Blueward 로고 글자색 */
   --line: rgba(255,255,255,.1); --line2: rgba(255,255,255,.18); --soft: rgba(255,255,255,.07);
-  --font: 'Inter Tight', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font: 'Pretendard', 'Inter Tight', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'D2Coding', 'Malgun Gothic', monospace;
 }
 html { zoom: 1.15; height: 100%; }
@@ -103,6 +106,10 @@ kbd { min-width: 12px; padding: 1px 7px; border-radius: 5px; border: 1px solid v
 .topline { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; min-height: 44px; font-size: 13px; color: var(--muted); }
 .topline > span:first-child:not(.url) { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topline .url { margin-left: auto; flex: none; max-width: 100%; font-family: var(--mono); font-size: 12px; letter-spacing: 0; overflow-wrap: anywhere; }
+.design-quick { display: flex; gap: 4px; margin-left: auto; flex: none; }
+.dq { min-width: 36px; min-height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; font-size: 12.5px; color: var(--sec); }
+.dq:hover { background: var(--soft); color: var(--text); }
+.dq[aria-pressed="true"] { border-color: var(--text); background: var(--soft); color: var(--text); font-weight: 600; }
 .eyebrow { display: flex; align-items: center; gap: 9px; margin-top: 44px; font-size: 13px; font-weight: 500; color: var(--sec); }
 .topline + [data-r] > .head { margin-top: 44px; }
 .eyebrow i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -465,3 +472,169 @@ table.sheet td { padding: 4px 10px; border: 1px solid var(--line); vertical-alig
 /* 대화상자 */
 .modal-back { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: color-mix(in srgb, var(--text) 40%, transparent); }
 .modal { width: min(480px, 100%); max-height: 90vh; overflow: auto; padding: 22px 24px; border-radius: 14px; border: 1px solid var(--line2); background: var(--bg); color: var(--text); }
+
+/* ==========================================================================
+   디자인 A·B·C (#611). 기존 디자인(data-design="base")은 위 규칙 그대로다.
+   파랑 #004696 은 로고·지금 단계·주 버튼에만 쓰고, 바탕·면·글자는 파란 기가 없는 중립색이다.
+   상태는 색 + 모양/기호로 구분한다: 지금(채운 점) / 끝남(회색 ✓) / 내 차례(주황 !) / 실패(진한 빨강 ✕) / 확인 못 함(보라 점선 ?).
+   ========================================================================== */
+:root[data-design="a"] {
+  --bg: #f4f4f4; --surface: #ffffff; --text: #1a1a1a; --sec: #4a4a4a; --muted: #5c5c5c;
+  --accent: #004696; --attn: #8f4300; --btn: #004696; --btnink: #ffffff; --brand: #004696;
+  --line: rgba(0,0,0,.12); --line2: rgba(0,0,0,.28); --soft: rgba(0,0,0,.06); --edge: #8c8c8c;
+  --st-now: #004696; --st-now-bg: #e8eef6; --st-done: #5c5c5c; --st-done-bg: #e9e9e9;
+  --st-turn: #8f4300; --st-turn-bg: #fff4e6; --st-turn-btn: #a85000; --st-turn-ink: #ffffff;
+  --st-fail: #b3261e; --st-fail-ink: #8c1d18; --st-fail-bg: #fbeceb;
+  --st-unk: #6b4fa0; --st-unk-ink: #55407f; --st-unk-bg: #f6f2fb;
+  --radius: 14px; --shadow: none;
+}
+:root[data-design="b"] {
+  --bg: #141414; --surface: #1f1f1f; --text: #ececec; --sec: #bcbcbc; --muted: #a0a0a0;
+  --accent: #8db8ff; --attn: #ffb366; --btn: #7fb0ff; --btnink: #0b1730; --brand: #004696;
+  --line: rgba(255,255,255,.12); --line2: rgba(255,255,255,.22); --soft: rgba(255,255,255,.07); --edge: #757575;
+  --st-now: #8db8ff; --st-now-bg: #1c2a44; --st-done: #bcbcbc; --st-done-bg: #2a2a2a;
+  --st-turn: #ffb366; --st-turn-bg: #2b2013; --st-turn-btn: #ffb366; --st-turn-ink: #231503;
+  --st-fail: #ff8a80; --st-fail-ink: #ffb4ad; --st-fail-bg: #2c1816;
+  --st-unk: #c3a8ff; --st-unk-ink: #d6c6ff; --st-unk-bg: #251f33;
+  --radius: 16px; --shadow: none;
+}
+:root[data-design="c"] {
+  --bg: #f6f3ee; --surface: #ffffff; --text: #26221d; --sec: #554e45; --muted: #665f55;
+  --accent: #004696; --attn: #8a3f00; --btn: #004696; --btnink: #ffffff; --brand: #004696;
+  --line: rgba(38,34,29,.12); --line2: rgba(38,34,29,.26); --soft: rgba(38,34,29,.06); --edge: #8f877b;
+  --st-now: #004696; --st-now-bg: #e9edf3; --st-done: #665f55; --st-done-bg: #ece8e1;
+  --st-turn: #8a3f00; --st-turn-bg: #fde7cf; --st-turn-btn: #a84f00; --st-turn-ink: #ffffff;
+  --st-fail: #a4231b; --st-fail-ink: #8c1d16; --st-fail-bg: #fbeceb;
+  --st-unk: #6a4f9e; --st-unk-ink: #55407f; --st-unk-bg: #f4f0fa;
+  --radius: 18px; --shadow: 0 1px 2px rgba(38,34,29,.06), 0 6px 20px rgba(38,34,29,.05);
+}
+
+/* 공통 */
+:root[data-design]:not([data-design="base"]) body { letter-spacing: -0.01em; }
+:root[data-design]:not([data-design="base"]) .side { background: var(--surface); }
+:root[data-design]:not([data-design="base"]) .btn,
+:root[data-design]:not([data-design="base"]) .input,
+:root[data-design]:not([data-design="base"]) .textarea,
+:root[data-design]:not([data-design="base"]) .opt,
+:root[data-design]:not([data-design="base"]) .chip,
+:root[data-design]:not([data-design="base"]) .tool { border-color: var(--edge); }
+:root[data-design]:not([data-design="base"]) .btn { border-radius: 10px; }
+:root[data-design]:not([data-design="base"]) .btn.primary { border-color: var(--btn); }
+:root[data-design]:not([data-design="base"]) .input,
+:root[data-design]:not([data-design="base"]) .textarea { background: var(--surface); }
+:root[data-design]:not([data-design="base"]) .tool { min-height: 36px; background: var(--surface); }
+:root[data-design]:not([data-design="base"]) .dq { border-color: var(--edge); }
+:root[data-design]:not([data-design="base"]) .dq[aria-pressed="true"] { border-color: var(--st-now); background: var(--st-now-bg); color: var(--text); }
+:root[data-design]:not([data-design="base"]) .flowpanel,
+:root[data-design]:not([data-design="base"]) .report,
+:root[data-design]:not([data-design="base"]) .scard,
+:root[data-design]:not([data-design="base"]) .startchecks,
+:root[data-design]:not([data-design="base"]) .approval-card,
+:root[data-design]:not([data-design="base"]) .docs-pane,
+:root[data-design]:not([data-design="base"]) .browser,
+:root[data-design]:not([data-design="base"]) .sugg,
+:root[data-design]:not([data-design="base"]) .tile { border-radius: var(--radius); }
+:root[data-design]:not([data-design="base"]) .flowpanel,
+:root[data-design]:not([data-design="base"]) .report,
+:root[data-design]:not([data-design="base"]) .scard,
+:root[data-design]:not([data-design="base"]) .startchecks { background: var(--surface); border-color: var(--line2); box-shadow: var(--shadow); }
+:root[data-design]:not([data-design="base"]) .flow-name { color: var(--text); font-weight: 700; }
+:root[data-design]:not([data-design="base"]) .scard-flow { color: var(--sec); font-weight: 600; }
+:root[data-design]:not([data-design="base"]) .scard-flow.none { color: var(--muted); font-weight: 400; }
+:root[data-design]:not([data-design="base"]) .brand b { color: var(--text); }
+:root[data-design]:not([data-design="base"]) .rail-btn.solid,
+:root[data-design]:not([data-design="base"]) .newbtn { background: var(--btn); color: var(--btnink); }
+
+/* 상태: 순서 막대 */
+:root[data-design]:not([data-design="base"]) .step { border-color: var(--line2); color: var(--sec); }
+:root[data-design]:not([data-design="base"]) .step .dot { border-color: var(--edge); }
+:root[data-design]:not([data-design="base"]) .step.done { color: var(--st-done); }
+:root[data-design]:not([data-design="base"]) .step.done .dot { background: var(--st-done-bg); border-color: var(--st-done); color: var(--st-done); }
+:root[data-design]:not([data-design="base"]) .step.now { border-color: var(--st-now); background: var(--st-now-bg); color: var(--text); font-weight: 700; }
+:root[data-design]:not([data-design="base"]) .step.now .dot { background: var(--st-now); border-color: var(--st-now); box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-now) 22%, transparent); }
+:root[data-design]:not([data-design="base"]) .step.skipped { color: var(--muted); }
+:root[data-design]:not([data-design="base"]) .step.skipped .dot { border-color: var(--muted); color: var(--muted); }
+
+/* 상태: 새 세션 점검 */
+:root[data-design]:not([data-design="base"]) .check::before { content: ''; flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin-left: -2px; border-radius: 50%; border: 1.5px solid var(--edge); font-size: 11px; font-weight: 700; line-height: 1; }
+:root[data-design]:not([data-design="base"]) .check.done::before { content: '\2713'; background: var(--st-done-bg); border-color: var(--st-done); color: var(--st-done); }
+:root[data-design]:not([data-design="base"]) .check.run::before { background: var(--st-now); border-color: var(--st-now); }
+:root[data-design]:not([data-design="base"]) .check.fail { border-color: var(--st-fail); background: var(--st-fail-bg); }
+:root[data-design]:not([data-design="base"]) .check.fail::before { content: '\2715'; background: var(--st-fail); border-color: var(--st-fail); color: var(--surface); }
+:root[data-design]:not([data-design="base"]) .check.done .cstate { color: var(--st-done); }
+:root[data-design]:not([data-design="base"]) .check.fail .cstate { color: var(--st-fail-ink); }
+
+/* 상태: PR 검사 칩 */
+:root[data-design]:not([data-design="base"]) .prchip { border-color: var(--edge); color: var(--sec); }
+:root[data-design]:not([data-design="base"]) .prchip::before { margin-right: 5px; font-weight: 700; }
+:root[data-design]:not([data-design="base"]) .prchip.pass { border-color: var(--st-done); color: var(--st-done); }
+:root[data-design]:not([data-design="base"]) .prchip.pass::before { content: '\2713'; }
+:root[data-design]:not([data-design="base"]) .prchip.pending { border-color: var(--st-now); color: var(--st-now); }
+:root[data-design]:not([data-design="base"]) .prchip.pending::before { content: '\25CF'; }
+:root[data-design]:not([data-design="base"]) .prchip.fail { border-color: var(--st-fail); background: var(--st-fail-bg); color: var(--st-fail-ink); }
+:root[data-design]:not([data-design="base"]) .prchip.fail::before { content: '\2715'; }
+
+/* 상태: 지금·내 차례·확인 못 함 */
+:root[data-design]:not([data-design="base"]) .tile.cur { border-color: var(--st-now); background: var(--st-now-bg); }
+:root[data-design]:not([data-design="base"]) .tile.cur .lab { color: var(--st-now); }
+:root[data-design]:not([data-design="base"]) .tile.cur .lab::before { content: '\25CF  '; }
+:root[data-design]:not([data-design="base"]) .tile.turn { border-color: var(--st-turn-btn); background: var(--st-turn-btn); color: var(--st-turn-ink); }
+:root[data-design]:not([data-design="base"]) .tile.turn .lab { color: var(--st-turn-ink); }
+:root[data-design]:not([data-design="base"]) .tile.turn .lab::before { content: '!  '; font-weight: 800; }
+:root[data-design]:not([data-design="base"]) .item .verb { color: var(--st-turn); font-weight: 600; }
+:root[data-design]:not([data-design="base"]) .item .verb::before { content: '! '; font-weight: 800; }
+:root[data-design]:not([data-design="base"]) .scard.attn { border: 2px solid var(--st-turn); background: var(--st-turn-bg); }
+:root[data-design]:not([data-design="base"]) .approval-card { border: 1.5px solid var(--st-turn); background: var(--st-turn-bg); }
+:root[data-design]:not([data-design="base"]) .approval-card.unknown { border: 1.5px dashed var(--st-unk); background: var(--st-unk-bg); }
+:root[data-design]:not([data-design="base"]) .approval-card.unknown::before { content: '?'; float: left; display: grid; place-items: center; width: 24px; height: 24px; margin: 0 10px 0 0; border-radius: 50%; border: 1.5px dashed var(--st-unk); font-weight: 700; color: var(--st-unk-ink); }
+:root[data-design]:not([data-design="base"]) .approval-card.unknown .note-attn { color: var(--st-unk-ink); }
+:root[data-design]:not([data-design="base"]) .banner,
+:root[data-design]:not([data-design="base"]) .conn,
+:root[data-design]:not([data-design="base"]) .reload-strip,
+:root[data-design]:not([data-design="base"]) .folder-notice { border-color: var(--st-turn); color: var(--st-turn); }
+:root[data-design]:not([data-design="base"]) .banner.info { border-color: var(--line2); color: var(--sec); }
+
+/* A: 밝은 정돈형 — 흰 카드와 얇은 선, 알약 모양 순서 */
+:root[data-design="a"] .main { background: var(--bg); }
+:root[data-design="a"] .flowpanel,
+:root[data-design="a"] .report { padding: 22px 24px; }
+:root[data-design="a"] h1.big { font-weight: 700; letter-spacing: -0.03em; }
+:root[data-design="a"] .stepbar.big .step { background: var(--surface); }
+:root[data-design="a"] .stepbar.big .step.now { background: var(--st-now-bg); }
+
+/* B: 어두운 집중형 — 순서와 지금 할 일을 위쪽 큰 상자에 모으고, 아래는 선으로만 나눈다 */
+:root[data-design="b"] .side { background: #101010; }
+:root[data-design="b"] .flowpanel { padding: 26px 28px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line2); }
+:root[data-design="b"] .flow-name { font-size: 24px; }
+:root[data-design="b"] .nextstep { border-top-color: var(--line2); }
+:root[data-design="b"] .report { border-color: var(--line); background: transparent; }
+:root[data-design="b"] .startchecks { background: transparent; }
+:root[data-design="b"] .checks { display: block; }
+:root[data-design="b"] .checks li.check { border: 0; border-bottom: 1px solid var(--line2); border-radius: 0; padding: 12px 4px; }
+:root[data-design="b"] .checks li.check.fail { background: var(--st-fail-bg); }
+:root[data-design="b"] .checks li.check .btn { margin-left: auto; }
+:root[data-design="b"] .tile { background: var(--surface); border-color: var(--line2); }
+:root[data-design="b"] .tile.cur { background: var(--st-now-bg); border-color: var(--st-now); }
+:root[data-design="b"] .step { background: transparent; }
+:root[data-design="b"] .step.done .dot::after { color: var(--st-done); }
+:root[data-design="b"] .md a, :root[data-design="b"] .plain-list a { color: var(--accent); }
+
+/* C: 따뜻한 카드형 — 큰 제목, 가로 막대 칸 순서, 그림자가 옅은 둥근 카드 */
+:root[data-design="c"] h1.big { margin-top: 10px; font-size: clamp(34px, 4.4vw, 56px); font-weight: 800; letter-spacing: -0.035em; }
+:root[data-design="c"] .flowpanel,
+:root[data-design="c"] .report,
+:root[data-design="c"] .scard { border-color: transparent; padding: 22px 24px; }
+:root[data-design="c"] .scard { padding: 18px 20px; }
+:root[data-design="c"] .scard.attn { border: 2px solid var(--st-turn); }
+:root[data-design="c"] .startchecks { border-color: transparent; }
+:root[data-design="c"] .stepbar { flex-wrap: wrap; gap: 8px 4px; }
+:root[data-design="c"] .step { flex: 1 1 150px; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 10px 4px; border: 0; border-top: 4px solid #d9d2c6; border-radius: 0; background: transparent; }
+:root[data-design="c"] .step.done { border-top-color: var(--st-done); }
+:root[data-design="c"] .step.now { border-top-color: var(--st-now); background: transparent; }
+:root[data-design="c"] .step.skipped { border-top-style: dashed; border-top-color: var(--muted); }
+:root[data-design="c"] .step .slb { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; font-size: 12px; font-weight: 700; letter-spacing: .02em; opacity: 1; }
+:root[data-design="c"] .step.now .slb { color: var(--st-now); }
+:root[data-design="c"] .stepbar.big .step { padding: 12px 10px 4px; font-size: 15px; }
+:root[data-design="c"] .tile { background: var(--surface); border-color: transparent; box-shadow: var(--shadow); }
+:root[data-design="c"] .tile.cur { background: var(--st-now-bg); border-color: var(--st-now); }
+:root[data-design="c"] .tile.next { border-color: var(--edge); }

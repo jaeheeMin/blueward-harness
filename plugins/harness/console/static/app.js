@@ -464,7 +464,19 @@
 
   /* ---------- 공통 조각 ---------- */
   function topline(left) {
-    return h('div', { class: 'topline' }, left ? h('span', { class: 'wrap-any', text: left }) : null);
+    return h('div', { class: 'topline' }, left ? h('span', { class: 'wrap-any', text: left }) : null, designQuick());
+  }
+  /* 디자인 빠른 전환: 위쪽 줄의 작은 버튼 4개. 고른 값은 theme.js 가 이 PC 에 저장한다. */
+  function syncDesignButtons() {
+    var cur = window.BH.getDesign(), list = document.querySelectorAll('[data-design-id]');
+    for (var i = 0; i < list.length; i++) list[i].setAttribute('aria-pressed', String(list[i].getAttribute('data-design-id') === cur));
+  }
+  function setDesign(id) { window.BH.setDesign(id); syncDesignButtons(); }
+  function designQuick() {
+    var cur = window.BH.getDesign();
+    return h('div', { class: 'design-quick', role: 'group', 'aria-label': '디자인 바꾸기' }, window.BH.DESIGNS.map(function (d) {
+      return h('button', { type: 'button', class: 'dq', 'data-design-id': d[0], 'aria-pressed': String(d[0] === cur), 'aria-label': '디자인 ' + d[1], title: d[1], text: d[2], onClick: function () { setDesign(d[0]); } });
+    }));
   }
   function backToSession(sid, label) {
     return sid ? link('/s/' + encodeURIComponent(sid), { class: 'linkbtn', text: label || '세션으로 돌아가기' }) : link('/', { class: 'linkbtn', text: '처음 화면으로' });
@@ -1496,6 +1508,12 @@
         sc.appendChild(h('button', { type: 'button', class: 'btn scale', 'aria-pressed': String(z[1] === scale), text: z[0], onClick: function () { BH.setScale(z[1]); draw(); } }));
       });
       page.appendChild(h('section', { class: 'mt-40' }, h('h2', { class: 'sect-h', text: '글자 크기' }), sc));
+      var ds = h('div', { class: 'row' }), design = BH.getDesign();
+      BH.DESIGNS.forEach(function (d) {
+        ds.appendChild(h('button', { type: 'button', class: 'btn scale', 'data-design-id': d[0], 'aria-pressed': String(d[0] === design), text: d[1], onClick: function () { setDesign(d[0]); draw(); } }));
+      });
+      page.appendChild(h('section', { class: 'mt-40' }, h('h2', { class: 'sect-h', text: '디자인' }), ds,
+        h('p', { class: 'note-muted mt-16', text: '기존이 아닌 디자인(A·B·C)을 고르면 색은 그 디자인이 정하고, 아래 테마는 기존 디자인일 때만 적용됩니다. 이 PC에 저장됩니다.' })));
       var grid = h('div', { class: 'themes' });
       Object.keys(BH.THEMES).forEach(function (id) {
         var t = BH.THEMES[id], sw = h('span', { class: 'sw', 'aria-hidden': 'true' });

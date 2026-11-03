@@ -1260,6 +1260,30 @@ def test_static_mime_does_not_depend_on_registry(console, monkeypatch):
         assert resp.getheader("Content-Type").startswith("text/javascript")
     ctype = console_server.STATIC_TYPES
     assert ctype[".js"].startswith("text/javascript") and ctype[".css"] == "text/css" and ctype[".svg"] == "image/svg+xml"
+    assert ctype[".woff2"] == "font/woff2"
+
+
+@pytest.mark.parametrize("name", ["PretendardVariable.woff2", "JetBrainsMono-Regular.woff2"])
+def test_fonts_served_as_woff2_regardless_of_registry(console, monkeypatch, name):
+    # 글꼴은 static/fonts/ 에서 font/woff2 로 나가고, CSP font-src 'self' 와 같은 출처라 막히지 않는다(#611).
+    monkeypatch.setattr(console_server.mimetypes, "guess_type", lambda n: ("text/plain", None))
+    for prefix in ("/fonts/", "/static/fonts/"):
+        status, body, resp = console.call("GET", prefix + name, cookie=False, binary=True)
+        assert status == 200, prefix
+        assert resp.getheader("Content-Type") == "font/woff2"
+        assert body[:4] == b"wOF2"
+        assert "font-src 'self'" in resp.getheader("Content-Security-Policy")
+        assert resp.getheader("X-Content-Type-Options") == "nosniff"
+
+
+def test_fonts_folder_does_not_open_other_paths(console):
+    for bad in ("/fonts/", "/fonts/none.woff2", "/fonts/../server.py", "/fonts/a/b.woff2", "/fonts/%2e%2e/server.py", "/static/fonts/../server.py"):
+        assert console.call("GET", bad, cookie=False, binary=True)[0] == 404, bad
+    css = (CONSOLE / "static" / "app.css").read_text(encoding="utf-8")
+    assert "url('/fonts/PretendardVariable.woff2')" in css and "font-weight: 45 920" in css and "font-display: swap" in css
+    assert "--font: 'Pretendard'" in css and "--mono: 'JetBrains Mono'" in css
+    html = (CONSOLE / "static" / "index.html").read_text(encoding="utf-8")
+    assert "fonts.googleapis.com" not in html  # CSP 가 막는 바깥 글꼴 요청은 두지 않는다
 
 
 def test_gitstate_uses_quotepath_off_and_survives_missing_git():
