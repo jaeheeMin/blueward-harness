@@ -537,8 +537,29 @@ class Capturer:
             raise Unavailable(f"현재 주소 {url!r} 의 출처가 테넌트 {self.base!r} 와 다르다(로그인 화면이거나 다른 사이트다. 전용 Chrome 에서 테넌트에 로그인한 뒤 다시)")
 
     def prepare(self) -> None:
+        try:  # 최소화된 창은 bringToFront 로 안 살아난다 — 창 상태를 normal 로 돌린다
+            win = self.tab.call("Browser.getWindowForTarget")
+            self.tab.call("Browser.setWindowBounds", windowId=win["windowId"], bounds={"windowState": "normal"})
+        except (CdpError, KeyError, TypeError):
+            pass  # 못 해도 아래 보임 확인이 판정한다
         self.tab.call("Page.bringToFront")
         self.tab.call("Emulation.setDeviceMetricsOverride", width=WIDTH, height=HEIGHT, deviceScaleFactor=1, mobile=False)
+        self.ensure_visible("시작")
+
+    def ensure_visible(self, what: str) -> None:
+        """창이 가려지거나 최소화되면 Chrome 이 화면을 그리지 않는다(#533 실제 테넌트 시험). 보이지 않으면 검사 불능이다."""
+        end = time.monotonic() + 3
+        while True:
+            try:
+                state = self.tab.evaluate("document.visibilityState")
+            except CdpError:
+                state = None
+            if state == "visible":
+                return
+            if time.monotonic() >= end:
+                raise Unavailable(f"{what}: 전용 Chrome 창이 보이지 않는다(visibilityState={state!r}). 창을 최소화하거나 다른 창으로 가리지 말고 화면에 띄워 둔 채 다시 돈다")
+            self.tab.call("Page.bringToFront")
+            time.sleep(0.5)
 
     def finish(self) -> None:
         try:
@@ -597,10 +618,39 @@ class Capturer:
             time.sleep(0.3)
             self.wait_ready(f"준비 단계 {s.action} {s.name!r}")
 
+    def wait_content(self, screen: Screen, what: str) -> None:
+        """찾을 이름 중 하나라도 화면에 나타나고 문서가 멈출 때까지 기다린다. 시간 초과면 Unavailable.
+
+        Launchpad 는 UI5 코어가 준비된 뒤에도 앱을 그리는 데 시간이 걸린다(#533 실제 테넌트 시험에서 빈 화면이 찍혔다).
+        하나도 안 나타나면 "못 찾음" 이 아니라 화면이 그려지지 않은 것이라 검사 불능이다.
+        """
+        names = [("버튼" if s.action == "누르기" else "필터", s.name) for s in screen.steps]
+        names += [(m.kind, m.name) for m in screen.marks]
+        end = time.monotonic() + self.timeout
+        last, stable = None, 0
+        while time.monotonic() < end:
+            try:
+                if not self.tab.evaluate("!!window.__mc"):
+                    self.tab.evaluate(LIB_JS)
+                hit = any(len(self.find(k, n)["items"]) > 0 for k, n in names)
+                nodes = self.tab.evaluate("document.getElementsByTagName('*').length")
+            except (CdpError, Unavailable):
+                hit, nodes = False, None
+            stable = stable + 1 if hit and nodes == last else 0
+            last = nodes
+            if stable >= 2:
+                return
+            time.sleep(0.5)
+        raise Unavailable(f"{what}: {self.timeout:g}초 안에 찾을 이름이 하나도 그려지지 않았다(화면이 덜 그려졌거나 이름이 모두 틀렸다)")
+
     def capture(self, screen: Screen) -> tuple[bytes, list[dict], list[dict]]:
         """화면 하나를 찍는다. (PNG, 그린 것, 못 찾은 것)."""
         self.navigate(screen.app)
+        self.ensure_visible(f"화면 {screen.name!r}")
+        self.wait_content(screen, f"화면 {screen.name!r} 그리기")
         self.run_steps(screen)
+        if screen.steps:
+            self.wait_content(screen, f"화면 {screen.name!r} 준비 뒤 그리기")
         for m in screen.marks:  # 가로 스크롤 밖 열은 먼저 보이게 한다
             if m.kind == "열":
                 self.tab.evaluate(f"window.__mc.scrollColumn({json.dumps(m.name)}, {json.dumps(m.index)})")
