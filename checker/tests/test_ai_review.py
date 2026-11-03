@@ -214,7 +214,57 @@ def test_structured_output_이_스키마에_안_맞으면_실패(structured):
 
 def test_종료코드가_0_이_아니면_실패():
     r = _go(_runner(code=1, out="", err="boom\nfatal: 인증 실패"))
-    assert not r["ok"] and r["reason"] == "종료코드 1: fatal: 인증 실패"
+    assert not r["ok"] and r["reason"] == "종료코드 1: stderr=boom / fatal: 인증 실패"
+
+
+AUTH_ERR = json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True,
+                       "result": "Invalid API key · Please run /login"})
+
+
+def test_종료코드_1_이고_stdout_이_인증_오류_JSON_이면_원문을_사유에_담는다():
+    r = _go(_runner(code=1, out=AUTH_ERR))
+    assert not r["ok"]
+    assert r["reason"] == ("종료코드 1: is_error=True | subtype=error_during_execution"
+                           " | result=Invalid API key · Please run /login")
+    print(r["reason"])
+
+
+def test_종료코드_1_이고_stdout_이_JSON_이_아니면_앞부분을_담는다():
+    r = _go(_runner(code=1, out="Error:\n  rate limited " + "x " * 400))
+    assert r["reason"].startswith("종료코드 1: stdout=Error: rate limited x x")
+    assert len(r["reason"]) < 400
+    print(r["reason"])
+
+
+def test_종료코드_1_이고_stderr_만_있으면_앞_3줄_뒤_3줄을_담는다():
+    err = "\n".join(f"line{i}" for i in range(1, 11))
+    r = _go(_runner(code=1, err=err))
+    assert r["reason"] == "종료코드 1: stderr=line1 / line2 / line3 / ... / line8 / line9 / line10"
+
+
+def test_종료코드_1_이고_비밀값이_섞이면_가린다(monkeypatch):
+    # 가짜 값. 비밀값 검사가 잡지 않게 조각을 이어 만든다(아래 scan_leaks 시험과 같다)
+    tok = "tok-" + "1234567890" + "abcdef"
+    secret = "sk-" + "ant-oat01-" + "ABCDEFGHIJKLMNOP"
+    bearer = "abcdefgh" + "12345678"
+    gh = "ghp_" + "abcdefghijklmnop" + "1234"
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", tok)
+    out = json.dumps({"is_error": True, "subtype": "x", "result": f"bad {secret} and Bearer {bearer}"})
+    r = _go(_runner(code=1, out=out, err=f"env {tok} {gh} " + "A1b2" * 20))
+    reason = r["reason"]
+    assert reason.count("***") >= 4
+    for leaked in (secret, bearer, tok, gh, "A1b2" * 20):
+        assert leaked not in reason
+    print(reason)
+
+
+def test_종료코드_1_이고_아무것도_없으면_종료코드만():
+    assert _go(_runner(code=1))["reason"] == "종료코드 1"
+
+
+def test_종료코드_0_이어도_is_error_면_result_를_담는다():
+    r = _go(_runner(out=json.dumps({"is_error": True, "subtype": "success", "result": "usage limit reached"})))
+    assert r["reason"] == "claude 가 오류로 끝남(success): result=usage limit reached"
 
 
 @pytest.mark.parametrize("out", ["", "not json", "[]"])
