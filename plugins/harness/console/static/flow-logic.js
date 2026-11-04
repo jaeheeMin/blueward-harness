@@ -374,7 +374,37 @@
     return { id: found.id, reason: found.reason || '' };
   }
 
+  /* 브라우저 알림(#651). 세션 하나의 직전·지금 모델을 비교해 보낼 알림 목록을 낸다(순수 함수).
+     prev 가 없으면(처음 본 세션·첫 목록) 비교 기준이 없어 보내지 않는다. cfg 는 {turn, blocked, done}, opts 는 {visible, name, reqKind(rid)}.
+     탭이 보이는 상태(opts.visible)면 보내지 않는다. 같은 일의 알림은 같은 tag 라 브라우저가 한 번만 보인다. */
+  function notifyEvents(prev, next, cfg, opts) {
+    var out = [];
+    opts = opts || {}; cfg = cfg || {};
+    if (!prev || !next || !next.id || opts.visible) return out;
+    var name = opts.name || next.title || '이름 없는 세션';
+    var pend = next.pendingRequestIds || [], was = prev.pendingRequestIds || [];
+    var fresh = pend.filter(function (r) { return was.indexOf(r) < 0; });
+    var turned = (next.group === 'todo' && prev.group !== 'todo') || fresh.length > 0;
+    if (cfg.turn && turned) {
+      var rid = fresh[0] || pend[0], k = rid && opts.reqKind ? opts.reqKind(rid) : '';
+      out.push({ kind: 'turn', tag: 'bh-turn-' + next.id + (fresh.length ? '-' + fresh[0] : ''), title: '내 차례야 · ' + name,
+        body: fresh.length ? (k === 'question' ? '질문' : k === 'permission' ? '승인' : '답할 일') : '다음 단계', path: rid ? '/r/' + encodeURIComponent(rid) : '/s/' + encodeURIComponent(next.id) });
+    }
+    var nb = next.lastBlock, pb = prev.lastBlock;
+    if (cfg.blocked && nb && nb.t != null && (!pb || nb.t > pb.t)) {
+      var cant = nb.kind === 'cannot_check';
+      out.push({ kind: 'blocked', tag: 'bh-blocked-' + next.id + '-' + nb.t, title: (cant ? '확인 못 함 · ' : '막혔어 · ') + name,
+        body: cant ? '확인하지 못한 일이 있어' : '하네스 훅이 막았어', path: '/s/' + encodeURIComponent(next.id) });
+    }
+    // 내 차례 알림이 이미 나가는 전환이면 끝남 알림은 겹치므로 생략한다.
+    if (cfg.done && prev.group === 'running' && next.group !== 'running' && !out.some(function (e) { return e.kind === 'turn'; })) {
+      out.push({ kind: 'done', tag: 'bh-done-' + next.id, title: 'AI가 끝냈어 · ' + name, body: '결과를 확인해 봐', path: '/s/' + encodeURIComponent(next.id) });
+    }
+    return out;
+  }
+
   var api = {
+    notifyEvents: notifyEvents,
     devReadyView: devReadyView, kindHint: kindHint, devBlock: devBlock, kindConflict: kindConflict,
     memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, prLines: prLines,
     BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, counts: counts, summaryText: summaryText,

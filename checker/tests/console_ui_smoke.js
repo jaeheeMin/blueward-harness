@@ -65,7 +65,8 @@ global.location = { pathname: '/', search: '' };
 global.history = { pushState(_, __, p) { const u = new URL(p, 'http://x'); location.pathname = u.pathname; location.search = u.search; }, replaceState(_, __, p) { this.pushState(_, __, p); } };
 global.addEventListener = () => {};
 global.requestAnimationFrame = f => setTimeout(f, 0);
-global.EventSource = function () { this.addEventListener = () => {}; this.close = () => {}; };
+const ES_LISTENERS = {};  // 시험이 서버 이벤트(SSE)를 흉내 내려고 모아 둔다
+global.EventSource = function () { this.addEventListener = (n, f) => { ES_LISTENERS[n] = f; }; this.close = () => {}; };
 global.AbortController = AbortController;
 global.Event = function () {};
 
@@ -80,6 +81,18 @@ global.fetch = (url, opts) => {
   const status = body === undefined ? 404 : 200;
   return Promise.resolve({ status, ok: status < 400, text: () => Promise.resolve(body === undefined ? '' : JSON.stringify(body)) });
 };
+// 브라우저 알림 가짜. DATA.__env = {notification: granted|denied|default|absent, ask: 물었을 때 답, visible: bool}
+const ENV = DATA.__env || {};
+const notes = [], noteObjs = [], asked = [];
+if (ENV.notification && ENV.notification !== 'absent') {
+  global.Notification = function (title, opts) { notes.push(Object.assign({ title }, opts)); noteObjs.push(this); this.close = () => {}; };
+  Notification.permission = ENV.notification;
+  Notification.requestPermission = () => { asked.push(1); Notification.permission = ENV.ask || 'denied'; return Promise.resolve(Notification.permission); };
+}
+const focused = [];
+global.focus = () => { focused.push(1); };
+document.visibilityState = ENV.visible ? 'visible' : 'hidden';
+document.hasFocus = () => !!ENV.visible;
 const errors = [];
 console.error = (...a) => errors.push(a.join(' '));
 console.warn = () => {};
@@ -91,7 +104,13 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
 (async () => {
   await tick(80);
   // 선택: argv[7] 의 동작 목록을 차례로 실행한다. [{"click": "선택자", "index": 0}] — 누른 뒤 화면이 다시 그려지기를 기다린다.
+  // 그 밖의 동작: {"set": {"GET /api/...": 본문}} 서버 답 바꾸기, {"emit": ["session", {"id": "s1"}]} 서버 이벤트 보내기(뒤이어 기다림),
+  // {"clickNote": 0} 알림 누르기, {"visible": true} 탭 보임 바꾸기.
   for (const act of JSON.parse(process.argv[7] || '[]')) {
+    if (act.set) { Object.assign(DATA, act.set); continue; }
+    if (act.visible !== undefined) { document.visibilityState = act.visible ? 'visible' : 'hidden'; document.hasFocus = () => !!act.visible; continue; }
+    if (act.emit) { const f = ES_LISTENERS[act.emit[0]]; if (f) f({ data: JSON.stringify(act.emit[1]) }); else errors.push('이벤트 구독 없음 ' + act.emit[0]); await tick(400); continue; }
+    if (act.clickNote !== undefined) { const o = noteObjs[act.clickNote]; if (o && o.onclick) o.onclick(); else errors.push('누를 알림이 없음'); await tick(80); continue; }
     const hit = root.querySelectorAll(act.click)[act.index || 0];
     if (!hit) { errors.push('누를 곳이 없음 ' + act.click); continue; }
     hit.click(); await tick(80);
@@ -100,7 +119,8 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
   const out = { text: main ? main.textContent : '(no main)', errors, calls: calls.map(c => c[0] + ' ' + c[1]) };
   const dump = (e, d) => { if (e.nodeType === 3) return e.text; return '<' + e.tag + (e.open ? '[open]' : '') + (e.attrs['class'] ? '.' + e.attrs['class'].replace(/ /g, '.') : '') + '>' + e.children.map(c => dump(c, d + 1)).join('') + '</' + e.tag + '>'; };
   out.dump = main ? dump(main, 0) : '';
-  out.posts = calls.filter(c => c[0] !== 'GET').map(c => [c[0], c[1], c[2] || '']);
+  out.notes = notes; out.asked = asked.length; out.focused = focused.length; out.path = location.pathname;
+  out.posts =calls.filter(c => c[0] !== 'GET').map(c => [c[0], c[1], c[2] || '']);
   out.side = root.querySelector('.side') ? root.querySelector('.side').textContent : '';
   out.sideDump = root.querySelector('.side') ? dump(root.querySelector('.side'), 0) : '';
   out.ann = root.querySelector('.ann-slot') ? root.querySelector('.ann-slot').textContent : '';

@@ -699,6 +699,8 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
         else:
             group = "idle"
         extra = {"chat": [dict(c) for c in s.get("chat") or [] if isinstance(c, dict)]} if include_chat else {}
+        last_block = next(({"t": c.get("t"), "kind": c.get("kind") or "blocked"} for c in reversed(s.get("chat") or [])
+                           if isinstance(c, dict) and c.get("role") == "block"), None)  # 목록 갱신만으로 새 막힘을 알아채게(알림용)
         return dict(flows.public_fields(s, store.flow_data), **extra, **{
             "chatPartial": not s["managed"],  # 터미널 세션은 내 말과 AI 마지막 답만 안다
             "id": s["id"], "title": display_title(s), "cwd": s["cwd"], "repo": s["repo"], "branch": s["branch"],
@@ -709,7 +711,7 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "startedAt": s["startedAt"], "updatedAt": s["updatedAt"], "log": list(s["log"]), "report": s["report"],
             "changedFiles": list(s["changedFiles"]), "prLinks": list(s["prLinks"]), "subagents": list(s["subagents"]),
             "flow": flow, "turnSkill": turn_skill, "turnUnknown": bool(s["turn"].get("unknown")),
-            "askedInText": asks,
+            "askedInText": asks, "lastBlock": last_block,
             "pendingRequestIds": pending, "canSend": ok, "cannotSendReason": why,
             "bypassPermissions": s["permissionMode"] == "bypassPermissions",
             "pluginVersions": [dict(p) for p in s.get("pluginVersions") or []],
