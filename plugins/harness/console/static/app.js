@@ -535,6 +535,13 @@
     var all = Object.keys(names);
     return all.length === 1 ? all[0] : '';
   }
+  /* 새 작업으로 가는 길. 세션·질문 화면에서 누르면 그 세션의 폴더를 기본값으로 쓰도록 출처 세션을 넘긴다(/new?from=세션id). */  function newHref() {
+    var sid = null;
+    if (route.name === 'session') sid = route.id;
+    else if (route.name === 'request') { var r = requests.get(route.id); sid = r && (r.sessionId || r.session_id); }
+    return sid ? '/new?from=' + encodeURIComponent(sid) : '/new';
+  }
+
   /* 상단 헤더. 내 일 = 처음 화면, 작업 = 가장 위 세션(내 차례가 먼저), 산출물 = /docs, 새 작업 = /new. */
   function renderHead(cur) {
     clear(headEl);
@@ -544,7 +551,7 @@
     nav.appendChild(link('/', { text: '내 일', 'aria-current': route.name === 'home' ? 'page' : null }));
     if (work) nav.appendChild(link(work, { text: '작업', 'aria-current': inWork ? 'page' : null }));
     nav.appendChild(link('/docs', { text: '산출물', 'aria-current': route.name === 'docs' ? 'page' : null }));
-    nav.appendChild(link('/new', { text: '새 작업', 'aria-current': route.name === 'new' ? 'page' : null }));
+    nav.appendChild(link(newHref(), { text: '새 작업', 'aria-current': route.name === 'new' ? 'page' : null }));
     headEl.appendChild(link('/', { class: 'brand', 'aria-label': 'Blueward Harness' }, h('img', { class: 'brand-logo', src: '/static/logo-sauce.png', alt: 'Blueward' })));
     headEl.appendChild(nav);
     headEl.appendChild(h('span', { class: 'sp' }));
@@ -584,7 +591,7 @@
     });
     nav.appendChild(list);
     var foot = h('div', { class: 'nav-foot' });
-    foot.appendChild(link('/new', { class: 'snew', text: '+ 새 세션' }));
+    foot.appendChild(link(newHref(), { class: 'snew', text: '+ 새 세션' }));
     foot.appendChild(h('button', { type: 'button', class: 'fold', 'aria-keyshortcuts': '[', 'aria-label': '목록 접기', onClick: function () { setCollapsed(true); } },
       h('span', { text: '목록 접기' }), h('kbd', { text: '[' })));
     nav.appendChild(foot);
@@ -594,7 +601,7 @@
     var n = d.todo.length;
     return h('nav', { class: 'rail', 'aria-label': '작업 목록 (접힘)' },
       h('button', { type: 'button', class: 'rail-btn', 'aria-label': '목록 펼치기 ([ 키)', title: '목록 펼치기 ( [ )', 'aria-keyshortcuts': '[', onClick: function () { setCollapsed(false); } }, icon('panel', 18)),
-      link('/new', { class: 'rail-btn solid', 'aria-label': '새 작업', title: '새 작업' }, icon('plus', 18)),
+      link(newHref(), { class: 'rail-btn solid', 'aria-label': '새 작업', title: '새 작업' }, icon('plus', 18)),
       link(d.todo.length ? d.todo[0].href : '/', { class: 'rail-count' + (n ? ' has' : ''), 'aria-label': '내가 할 일 ' + n + '건', title: '내가 할 일 ' + n + '건' },
         h('span', { class: 'n', text: String(n) }), h('span', { class: 'l', text: '내가 할 일' })),
       h('span', { class: 'rail-sp' }),
@@ -1442,10 +1449,26 @@
     function loadRecent() {
       api('GET', '/api/folders/recent').then(function (d) {
         recent = listOf(d, 'folders').map(function (f) { return typeof f === 'string' ? { path: f } : f; }).filter(function (f) { return f && f.path; });
-        if (!draft.cwd && recent.length) draft.cwd = recent[0].path;
+        return defaultFolder();
+      }, function () { recent = []; return defaultFolder(); });
+    }
+    /* 기본 폴더 순서: 세션 화면에서 왔으면 그 세션 폴더 → 콘솔에서 마지막으로 작업을 시작한 폴더(서버가 기억) → 없으면 기본값 없이 목록을 펼친다.
+       다른 세션이 움직인 흔적으로는 정하지 않는다. */
+    function defaultFolder() {
+      var from = new URLSearchParams(location.search).get('from'), src = from ? sessions.get(from) : null;
+      if (src && src.cwd) { draft.cwd = src.cwd; draft.picked = null; }
+      if (from && !src) {  // 목록이 아직 안 왔으면 그 세션만 따로 읽는다
+        return api('GET', '/api/sessions/' + encodeURIComponent(from)).then(function (s) { if (s && s.cwd) { draft.cwd = s.cwd; draft.picked = null; } }, function () {}).then(function () { return lastFolder(); });
+      }
+      if (draft.cwd) { draw(); return null; }
+      return lastFolder();
+    }
+    function lastFolder() {
+      if (draft.cwd) { if (alive) draw(); return null; }
+      return api('GET', '/api/folders/last').then(function (d) { if (!draft.cwd && d && d.path) draft.cwd = d.path; }, function () {}).then(function () {
         if (!draft.cwd) picking = true;
-        draw();
-      }, function () { recent = []; if (!draft.cwd) picking = true; draw(); });
+        if (alive) draw();
+      });
     }
 
     /* 분석 상태 */

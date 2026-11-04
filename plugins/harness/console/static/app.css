@@ -458,6 +458,9 @@ table.sheet td { padding: 4px 10px; border: 1px solid var(--line); vertical-alig
 .call .eb { color: inherit; overflow-wrap: anywhere; }
 .call b { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .call .pill { flex: none; }
+.calls-rest { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.calls-rest .calls-more { align-self: stretch; display: flex; flex-direction: column; gap: 10px; }
+.calls-rest .calls-more:empty { display: none; }
 .tablebox { padding: 22px 26px; gap: 8px; }
 table.list { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 table.list th { padding: 8px 10px; border-bottom: 1px solid var(--lline); font-size: 12px; font-weight: 400; text-align: left; color: var(--lmuted); }

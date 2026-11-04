@@ -1039,6 +1039,25 @@ def test_start_route_launches_session_with_first_message(mconsole):
     assert c.call("POST", f"/api/new/{jid}/start", {"picked": ["../x"]})[0] == 400
 
 
+def test_last_folder_is_saved_on_start_in_state_dir_and_ignored_when_gone(mconsole):
+    c = mconsole
+    assert c.call("GET", "/api/folders/last")[1] == {"path": None, "name": ""}  # 시작한 적 없으면 기본값 없음
+    assert c.call("GET", "/api/folders/recent")[0] == 200  # 최근 폴더 후보와는 따로다
+    jid = c.call("POST", "/api/new", {"text": "계획", "cwd": str(c.work)})[1]["id"]
+    wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+    assert c.call("GET", "/api/folders/last")[1]["path"] is None  # 분석만으로는 기억하지 않는다(작업을 시작해야)
+    assert c.call("POST", f"/api/new/{jid}/start", {})[0] == 202
+    want = os.path.realpath(str(c.work))
+    got = c.call("GET", "/api/folders/last")[1]
+    assert got["path"] == want and got["name"] == os.path.basename(want)
+    saved = c.state / console_server.LAST_FOLDER_FILE
+    assert saved.is_file() and json.loads(saved.read_text(encoding="utf-8"))["path"] == want  # 브라우저가 아니라 상태 폴더
+    saved.write_text(json.dumps({"path": str(c.work / "gone")}), encoding="utf-8")  # 지금 없는 폴더는 무시
+    assert c.call("GET", "/api/folders/last")[1]["path"] is None
+    saved.write_text("not json", encoding="utf-8")
+    assert c.call("GET", "/api/folders/last")[1]["path"] is None
+
+
 # ---- gitstate ----
 
 def fake_runner(table):
