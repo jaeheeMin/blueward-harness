@@ -9,7 +9,7 @@
 - `checker/manual_capture_js.py`: `readInput`(MultiInput 토큰 글자·Input value), `clearInput`(removeAllTokens+fireTokenUpdate, setValue+fireChange), `selectOption`(setSelectedItem+fireSelectionChange·fireChange) 추가. UI5 컨트롤이 없으면 DOM 입력 칸을 읽고 비운다.
 - `checker/manual_capture.py`: 준비 단계 `선택: 이름, 값: 항목 글자` 추가. `입력` 은 넣기 전에 지금 값을 읽어, 같은 값(토큰)이면 건너뛰고 다른 값이면 지운 뒤 넣는다. 읽지 못함·지운 뒤에도 남음·항목 없음(사유에 보이는 항목 목록)·드롭다운 아님은 검사 불능. 오류 창 거부는 그대로.
 - 모듈 docstring, `plugins/harness/skills/manual/SKILL.md`, 길잡이 `docs/guide/harness-guide.html` 설명 갱신.
-- plugin.json version 0.10.168(열린 PR #644 가 0.10.167).
+- plugin.json version 0.10.169(main 0.10.167, 열린 PR #658 이 0.10.168).
 
 ## 시험
 
