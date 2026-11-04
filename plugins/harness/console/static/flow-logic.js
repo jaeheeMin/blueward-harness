@@ -223,6 +223,41 @@
     return { kind: 'none', reason: body && body.reason ? String(body.reason) : '' };
   }
 
+  /* ---- 산출물 화면(/docs) ---- */
+  // 세션마다 받은 문서 목록을 한 목록으로 모은다. 같은 폴더의 같은 파일은 한 번만(가장 최근에 바뀐 세션 쪽).
+  var DOC_GROUPS = [['spec', '요구사항 · 설계'], ['form', '고객 양식'], ['record', '기록'], ['etc', '기타']];
+  function docGroup(f) {
+    var p = lower(f && f.path), ext = (/\.([a-z0-9]+)$/.exec(p) || [])[1] || '';
+    if (/^audit\//.test(p)) return 'record';
+    if (ext === 'xlsx' || ext === 'xlsm' || ext === 'pptx' || ext === 'docx' || ext === 'pdf') return 'form';
+    if (ext === 'md' || ext === 'markdown') return 'spec';
+    return 'etc';
+  }
+  // 올라간 정도 칩. 근거는 둘뿐이다: 커밋 안 된 파일인가(git), 이 세션의 PR 이 어떤 상태인가. 둘 다 없으면 '확인 못 함'.
+  function docChip(f, s, unknown) {
+    if (unknown) return { text: '확인 못 함', tone: 'unk', title: 'git 상태를 읽지 못해 올렸는지 알 수 없어.' };
+    if (f && f.changed) return { text: '안 올림', tone: '', title: '아직 커밋 안 됨 · 내 PC에만 있어.' };
+    var pr = s && s.flowPr, st = pr && pr.number ? String(pr.state || '').toUpperCase() : '';
+    if (st === 'MERGED') return { text: '합쳐짐', tone: 'ok', title: '이 세션의 PR #' + pr.number + ' 이 합쳐졌어.' };
+    if (st === 'OPEN') return { text: '검토 중', tone: 'ok', title: '이 세션의 PR #' + pr.number + ' 이 승인을 기다려.' };
+    return { text: '확인 못 함', tone: 'unk', title: '커밋은 됐지만 이 세션에서 PR 상태를 알 수 없어.' };
+  }
+  function mergeDocs(parts) {
+    var seen = {}, out = [];
+    arr(parts).forEach(function (p) {
+      if (!p || !p.session) return;
+      docList(p.files).forEach(function (f) {
+        var key = normPath(p.session.cwd) + '|' + lower(f.path);
+        if (seen[key]) return;
+        seen[key] = 1;
+        out.push({ key: key, file: f, session: p.session, group: docGroup(f), chip: docChip(f, p.session, p.unknown) });
+      });
+    });
+    out.sort(function (a, b) { return (b.file.mtime || 0) - (a.file.mtime || 0); });
+    return out;
+  }
+  function isFormOutput(f) { return docGroup(f) === 'form' && /\.(xlsx|pptx|docx)$/i.test(f.path || ''); }
+
   /* ---- 승인 카드 ---- */
   function mergeApprovals(list) {
     var out = { state: 'no', reason: '', items: [] }, seen = {};
@@ -307,7 +342,8 @@
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice, reloadStrip: reloadStrip, reloadResult: reloadResult,
     startChecks: startChecks, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
-    mergeApprovals: mergeApprovals, prBadge: prBadge, runningSubCount: runningSubCount
+    mergeApprovals: mergeApprovals, prBadge: prBadge, runningSubCount: runningSubCount,
+    DOC_GROUPS: DOC_GROUPS, docGroup: docGroup, docChip: docChip, mergeDocs: mergeDocs, isFormOutput: isFormOutput
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHLogic = api;

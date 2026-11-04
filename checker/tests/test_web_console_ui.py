@@ -417,6 +417,75 @@ const cases = {
     find(root, e => e.tag === 'form')[0].listeners.submit[0]({ preventDefault() {} });
     assert.strictEqual(went[1], '구매오더 조회 앱 요구사항 써 줘');
     assert.strictEqual(find(root, e => (e.attrs['class'] || '').includes('call')).length, 0);
+  },
+  docs_logic() {
+    const g = p => L.docGroup({ path: p });
+    assert.deepStrictEqual(['docs/SRS.md', 'audit/log.md', 'out/CTS_v0.2.xlsx', 'img/a.png', 'x/매뉴얼.pptx', 'a.pdf'].map(g), ['spec', 'record', 'form', 'etc', 'form', 'form']);
+    // 올림 칩의 근거는 커밋 여부와 이 세션의 PR 상태뿐이다. 근거가 없으면 확인 못 함이다.
+    const merged = { number: 6, state: 'MERGED' }, open = { number: 6, state: 'OPEN' };
+    assert.strictEqual(L.docChip({ changed: true }, { flowPr: merged }, false).text, '안 올림');
+    assert.strictEqual(L.docChip({ changed: false }, { flowPr: open }, false).text, '검토 중');
+    assert.strictEqual(L.docChip({ changed: false }, { flowPr: merged }, false).text, '합쳐짐');
+    assert.deepStrictEqual([L.docChip({ changed: false }, {}, false).text, L.docChip({ changed: false }, {}, false).tone], ['확인 못 함', 'unk']);
+    assert.strictEqual(L.docChip({ changed: false }, { flowPr: merged }, true).text, '확인 못 함');  // git 을 못 읽었으면 PR 상태가 있어도 단정하지 않는다
+    // 같은 폴더(경로 표기만 다른)의 같은 파일은 한 번만, 먼저 준 세션 쪽
+    const a = { id: 'a', cwd: 'C:/w/p' }, b = { id: 'b', cwd: 'c:\\w\\p\\' };
+    const out = L.mergeDocs([{ session: a, files: [{ path: 'docs/SRS.md', mtime: 5, changed: true }] }, { session: b, files: [{ path: 'docs/srs.md', mtime: 9 }, { path: 'x.xlsx', mtime: 1 }] }]);
+    assert.deepStrictEqual(out.map(d => [d.session.id, d.group]), [['a', 'spec'], ['b', 'form']]);
+    assert.ok(L.isFormOutput({ path: 'a.xlsx' }) && L.isFormOutput({ path: 'a.pptx' }) && !L.isFormOutput({ path: 'a.pdf' }) && !L.isFormOutput({ path: 'a.md' }));
+  },
+  async dom_docs_page() {
+    const s1 = { id: 's1', title: 'SRS 세션', cwd: '/w/p', updatedAt: 9, canSend: true, flowPr: { number: 6, state: 'OPEN' } };
+    const files = { files: [
+      { path: 'docs/SRS_v0.2.md', kind: 'md', size: 100, mtime: 20, changed: false, versions: ['docs/SRS_v0.1.md', 'docs/SRS_v0.2.md'] },
+      { path: 'out/BW_Backlog_v0.1.xlsx', kind: 'xlsx', size: 18000, mtime: 30, changed: true },
+      { path: 'audit/log.md', kind: 'md', size: 5, mtime: 10, changed: true }] };
+    const { kit, calls } = makeKit({ 'GET /api/sessions/s1/files': files, 'GET /api/sessions/s1/files/preview': { kind: 'md', text: '# 제목' },
+      'POST /api/sessions/s1/messages': { ok: true }, 'POST /api/sessions/s1/files/open': { ok: true } }, [s1]);
+    window.BHMarkdown = { render: t => h('div', { text: t }) };
+    const root = h('div');
+    const view = loadUI(kit).docsPage(root); await tick(); await tick();
+    for (const need of ['내가 만든 문서', '요구사항 · 설계', '고객 양식', '기록', 'SRS_v0.2.md', 'BW_Backlog_v0.1.xlsx', 'log.md', '검토 중', '안 올림', '이전 판 1개', '왼쪽에서 문서를 골라 줘']) assert.ok(root.textContent.includes(need), need);
+    const btn = txt => find(root, e => e.tag === 'button' && e.textContent === txt)[0];
+    // md 를 고르면 미리보기 + 열기 · 폴더에서 보기 · 고객 양식으로 뽑기 + 고쳐 달라고 하기
+    find(root, e => e.attrs['data-path'] === 'docs/SRS_v0.2.md')[0].click(); await tick(); await tick();
+    assert.ok(root.textContent.includes('# 제목') && root.textContent.includes('세션: SRS 세션'));
+    assert.ok(btn('열기') && btn('폴더에서 보기') && btn('고객 양식으로 뽑기'));
+    assert.strictEqual(find(root, e => e.attrs['data-form-card']).length, 0);
+    btn('고객 양식으로 뽑기').click(); await tick(); await tick();
+    const sent = calls.filter(c => c[0] === 'POST' && c[1] === '/api/sessions/s1/messages');
+    assert.ok(sent.length === 1 && sent[0][2].text.includes('docs/SRS_v0.2.md') && sent[0][2].text.includes('고객 양식'));  // 콘솔이 직접 뽑지 않고 세션에 말을 보낸다
+    assert.ok(root.textContent.includes('세션에 보냈어'));
+    // 고쳐 달라고 하기
+    const input = find(root, e => e.attrs.id === 'doc-ask')[0];
+    input.listeners.input[0]({ target: { value: '납품일 추가' } });
+    btn('보내기').click(); await tick(); await tick();
+    const fix = calls.filter(c => c[0] === 'POST' && c[1] === '/api/sessions/s1/messages')[1];
+    assert.ok(fix && fix[2].text.includes('납품일 추가') && fix[2].text.includes('고쳐 줘'));
+    // xlsx 는 고객 양식 결과 카드(파일 이름 · 크기 · 폴더에서 보기)이고 뽑기 버튼은 없다
+    find(root, e => e.attrs['data-path'] === 'out/BW_Backlog_v0.1.xlsx')[0].click(); await tick(); await tick();
+    const card = find(root, e => e.attrs['data-form-card'])[0];
+    assert.ok(card && card.textContent.includes('BW_Backlog_v0.1.xlsx') && card.textContent.includes('18000B') && card.textContent.includes('폴더에서 보기'));
+    assert.ok(!btn('고객 양식으로 뽑기'));
+    view.destroy();
+    process.exit(0);
+  },
+  async dom_start_checks_and_blocked_cards() {
+    const { kit } = makeKit({}, []);
+    const ui = loadUI(kit);
+    const p = ui.startChecksPanel();
+    p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'done' }, { id: 'version', state: 'pending' }] });
+    assert.ok(!p.el.hidden && p.el.attrs['class'] === 'q startchecks');
+    assert.deepStrictEqual(find(p.el, e => e.attrs['data-check']).map(e => e.attrs['data-check'] + ':' + e.attrs['class']), ['sync:crow ok', 'version:crow todo']);
+    assert.ok(p.el.textContent.includes('새 세션 점검') && p.el.textContent.includes('최신 받기') && p.el.textContent.includes('됐어요'));
+    p.update({ id: 's1', startChecks: [] }); assert.ok(p.el.hidden);
+    p.destroy();
+    // 검사 실패는 ✕ 막힘, 결과를 못 읽으면 ? 확인 못 함, 통과·진행 중에는 둘 다 없다
+    const card = checks => ui.prCard({ flowPr: { number: 6, state: 'OPEN', title: 't', checks } });
+    const fail = card('fail'), unk = card('none');
+    assert.ok(fail.attrs['class'].includes('blocked') && fail.textContent.includes('✕ 막힘') && !fail.textContent.includes('? 확인 못 함'));
+    assert.ok(unk.attrs['class'].includes('unsure') && unk.textContent.includes('? 확인 못 함') && unk.textContent.includes('통과도 실패도 아니야'));
+    for (const c of ['pass', 'pending']) { const ok = card(c); assert.ok(!/blocked|unsure/.test(ok.attrs['class']) && !ok.textContent.includes('✕ 막힘') && !ok.textContent.includes('? 확인 못 함'), c); }
   }
 };
 
@@ -573,10 +642,11 @@ def test_app_frame_ann_only_with_todo_and_menu_paths():
     # 맨 위 띠는 내 차례가 없으면 만들지 않는다
     ann = app[app.index("function renderAnn"):app.index("function projectOf")]
     assert re.search(r"clear\(annEl\);\s*if \(!d\.todo\.length\) return;", ann) and "내 차례 ' + d.todo.length + '건 — '" in ann
-    # 메뉴: 내 일 → /, 작업 → 가장 위 세션, 새 작업 → /new, 설정 → /settings. 길이 없는 산출물은 두지 않는다.
+    # 메뉴: 내 일 → /, 작업 → 가장 위 세션, 산출물 → /docs, 새 작업 → /new, 설정 → /settings.
     head = app[app.index("function renderHead"):app.index("function renderSide")]
     assert "link('/', { text: '내 일'" in head and "link('/new', { text: '새 작업'" in head and "link('/settings'" in head
-    assert "'/s/' + encodeURIComponent(rows[0].id)" in head and "text: '산출물'" not in head
+    assert "'/s/' + encodeURIComponent(rows[0].id)" in head and "link('/docs', { text: '산출물'" in head
+    assert "p === '/docs'" in app and "docs: docsView" in app
     # 세션 목록: 기억은 데이터가 없어 ? 와 툴팁만, 세션이 없으면 점선 상자와 새 세션 버튼
     side = app[app.index("function renderSide"):app.index("function renderRail")]
     assert "'기억 사용량 확인 못 함'" in side and "text: '?'" in side
@@ -699,6 +769,65 @@ def test_work_screen_new_task_has_kinds_flow_and_advanced_fold(tmp_path):
     for need in ("하고 싶은 일을 한두 줄로", "@ 로 파일 넣기", "이렇게 진행돼", "작업 폴더", "작업 시작", "고급 설정 (모델 · 생각 깊이 · 권한)", "권한 모드"):
         assert need in text, need
     assert "<details.more>" in got["dump"]  # 모델·생각 깊이·권한은 접힌 "고급" 안에 그대로 있다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_docs_screen_groups_files_and_has_menu(tmp_path):
+    got = _smoke(tmp_path, "docs", [_session("s1")])
+    for need in ("내가 만든 문서", "요구사항 · 설계", "SRS.md", "안 올림", "왼쪽에서 문서를 골라 줘"):
+        assert need in got["text"], need
+    assert "산출물" in got["head"] and "GET /api/sessions/s1/files" in got["calls"]  # 새 서버 API 없이 세션별 문서 목록을 모은다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_settings_screen_matches_design(tmp_path):
+    got = _smoke(tmp_path, "settings", [_session("s1")])
+    text, dump = got["text"], got["dump"]
+    for need in ("보기와 AI 설정", "글자 크기", "보통", "크게", "아주 크게", "AI가 묻는 범위", "연결 상태", "GitHub", "하네스 판", "프로젝트", "고급", "AI 모델", "생각 깊이"):
+        assert need in text, need
+    assert dump.count("<button.scale>") == 3 and dump.count("<button.radio>") >= 1  # 시안 .seg / .radio 모양, 기본 위젯 없음
+    assert "<select" not in dump and "<input" not in dump
+    assert "화면 밝기" not in text and "알림" not in text  # 다크 한 벌뿐이고 콘솔에 알림 기능이 없어 넣지 않았다
+    assert "연결돼 있어" in text and "준비 여부 확인 못 함" in text  # 조건 값이 없으면 준비됐다고 단정하지 않는다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_header_project_follows_the_folder_on_screen(tmp_path):
+    other = _session("s1", cwd="C:/other/templete-func", repo="templete-func")
+    got = _smoke(tmp_path, "new", [other])
+    assert "w/proj" in got["head"] and "templete-func" not in got["head"]  # 새 작업은 고른 작업 폴더를 따른다(가장 위 세션 것이 아니다)
+    got = _smoke(tmp_path, "s/s1", [other])
+    assert "templete-func" in got["head"]
+    got = _smoke(tmp_path, "settings", [other, _session("s2", cwd="C:/w/proj")])
+    assert "templete-func" not in got["head"] and "proj" not in got["head"].replace("프로젝트", "")  # 프로젝트가 여럿이면 비운다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_session_screen_checks_card_blocked_card_and_fold(tmp_path):
+    checks = [{"id": "sync", "state": "done"}, {"id": "version", "state": "pending"}]
+    got = _smoke(tmp_path, "s/s1", [_session("s1", startChecks=checks, flowPr=dict(_PR, checks="fail"))])
+    dump, text = got["dump"], got["text"]
+    assert dump.index("<section.light.talk>") < dump.index("<div.q.startchecks>") < dump.index("<div.msgs>")  # 새 세션 점검은 대화 판 맨 위 ✓ 줄 카드
+    assert "<div.crow.ok>" in dump and "<div.crow.todo>" in dump and "새 세션 점검" in text
+    assert "<div.q.prcard.blocked>" in dump and "✕ 막힘" in text and "? 확인 못 함" not in text
+    # 시안에 없는 옛 칸은 모두 "자세히" 안으로 접힌다(기능은 그대로)
+    fold = dump.index("<details.more.fold>")
+    for block in ("<section.toolsrow>", "<select.input>", "<section.mt-64>", "<details.tech>"):  # 도구 줄 · 권한 모드 · 기록 · 기술 정보
+        assert dump.count(block) == 1 and dump.index(block) > fold, block
+    for need in ("자세히 (도구", "권한 모드", "이 세션에서 일어난 일", "기술 정보 보기"):
+        assert need in text, need
+    assert dump.index("<section.light.talk>") < fold
+    got = _smoke(tmp_path, "s/s1", [_session("s1", flowPr=dict(_PR, checks="none"))])
+    assert "<div.q.prcard.unsure>" in got["dump"] and "? 확인 못 함" in got["text"] and "통과도 실패도 아니야" in got["text"]
+
+
+def test_third_chunk_css_and_legend():
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    for needle in (".q.blocked", ".q.unsure", ".tagx.fail", ".tagx.unk", ".seg button", ".radio", ".rd.on", ".dgrid", ".drow", ".chip2", ".legend", ".dresult", ".folder-opt.proj"):
+        assert needle in css, needle
+    assert "border: 2px solid var(--danger)" in css and "border: 2px dashed var(--st-unk)" in css  # 막힘 = 빨간 실선, 확인 못 함 = 보라 점선
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert "표시 약속" in ui and "✕ 막힘" in ui and "? 확인 못 함" in ui and "내 차례" in ui
 
 
 def test_work_screen_css_blocks_and_responsive_rules():

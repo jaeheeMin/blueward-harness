@@ -32,7 +32,7 @@
 ## 시험 결과 (2026-11-04, 로컬 Windows)
 
 - `test_web_console.py` + `test_web_console_ui.py`: 456 통과, 3 건너뜀, 실패 0.
-- 건너뛴 3개는 모두 심볼릭 링크를 만들어야 하는 시험이라 이 PC(관리자 권한·개발자 모드 없음, WinError 1314)에서 스스로 건너뛴다. 이번 변경과 무관하며 GitHub Actions(Linux)에서는 돈다.
+- 건너뛴 3개는 모두 심볼릭 링크를 만들어야 하는 시험이라 이 PC(관리자 권한·개발자 모드 없음, WinError 1314)에서 스스로 건너뛴다. 이번 변경과 무관하다. GitHub Actions 에서 실제로 도는지는 확인 못 했다 — #640 검사는 Linux·Windows 모두 4053 통과·15 건너뜀이었지만 `pytest -q` 가 건너뛴 시험 이름을 남기지 않는다. 셋째 PR 에서 `checker.yml` 에 `-rs` 를 더해 로그로 확인한다.
   - `test_analysis_symlink_candidate_escape` — 폴더 밖을 가리키는 링크 후보 걸러 내기
   - `test_files_route_excludes_links_that_escape_the_root` — 파일 목록에서 폴더 밖 링크 빼기
   - `test_file_open_blocks_a_link_that_hides_an_executable` — 링크 뒤 실행 파일 열기 막기

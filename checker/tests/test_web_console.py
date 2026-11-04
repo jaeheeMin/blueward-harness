@@ -347,6 +347,14 @@ def test_static_headers_and_spa_paths(console, tmp_path):
     assert console.call("GET", "/server.py", cookie=False)[0] == 404
 
 
+def test_spa_paths_include_every_menu_route():
+    # 메뉴 경로를 주소창에 바로 치거나 새로 고쳐도 화면이 떠야 한다(#636: /docs 가 404 였다).
+    from plugins.harness.console import server as srv
+    for p in ["/", "/new", "/settings", "/docs", "/s/abc", "/r/abc"]:
+        assert srv.SPA_PATHS.match(p), p
+    assert not srv.SPA_PATHS.match("/docs/x")
+
+
 # ---- 파일 탐색 ----
 
 def test_fs_blocks_escape_and_symlinks(authed, tmp_path):

@@ -98,7 +98,7 @@ SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", ".
 # Windows 레지스트리의 MIME 설정에 영향받지 않게 직접 매핑한다(CSP 가 script 를 막는 일 방지).
 STATIC_TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".html": "text/html",
                 ".svg": "image/svg+xml", ".json": "application/json", ".map": "application/json", ".woff2": "font/woff2"}
-SPA_PATHS = re.compile(r"^/(s/[^/]+|r/[^/]+|new|settings)?$")
+SPA_PATHS = re.compile(r"^/(s/[^/]+|r/[^/]+|new|settings|docs)?$")
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
