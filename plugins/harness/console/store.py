@@ -85,7 +85,7 @@ def display_title(s: dict) -> str:
     turn = s.get("turn") if isinstance(s.get("turn"), dict) else {}
     skill = str(s.get("currentSkill") or turn.get("skill") or "")
     cwd = str(s.get("cwd") or "")
-    folder = os.path.basename(cwd.rstrip("/\\")) or cwd
+    folder = re.split(r"[\\/]", cwd.rstrip("/\\"))[-1] or cwd  # Windows 경로를 Linux 에서 읽어도 폴더 이름만
     tail = f" · {folder}" if folder else ""
     if skill:
         name = skill.split(":", 1)[-1]
