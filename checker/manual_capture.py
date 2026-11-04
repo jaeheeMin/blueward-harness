@@ -636,7 +636,10 @@ class Capturer:
             raise Unavailable(f"준비 단계 입력 {s.name!r}: 입력 칸의 지금 값을 읽지 못했다(MultiInput·Input 이 아니거나 하나로 정하지 못했다): {cur!r}")
         tokens = [str(t).strip() for t in cur.get("tokens") or []]
         value = str(cur.get("value") or "").strip()
-        if want in tokens or f"={want}" in tokens or (not tokens and value in (want, f"={want}")):
+        keys = [str(k).strip() for k in cur.get("keys") or []]
+        # 토큰 글자는 "AutoOne 1공장 (4310)" 처럼 이름이 붙기도 한다(#656 실제 테넌트 100). 키나 끝의 "(값)" 도 같은 값으로 본다.
+        same = want in tokens or f"={want}" in tokens or want in keys or any(t.endswith(f"({want})") for t in tokens)
+        if same or (not tokens and value in (want, f"={want}")):
             return False
         if tokens or value:
             done = self.tab.evaluate(f"window.__mc.clearInput({name})")

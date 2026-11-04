@@ -1021,6 +1021,19 @@ def test_input_step_skips_when_same_token_already_there(tmp_path, capsys, fake):
     assert _typed(fake["tab"]) == [] and _called(fake["tab"], "clearInput") == [] and _called(fake["tab"], "focusInput") == []
 
 
+@pytest.mark.parametrize("read", [
+    {"ok": True, "kind": "multi", "tokens": ["AutoOne 1공장 (4310)"], "value": ""},  # 실제 테넌트 100 의 토큰 글자
+    {"ok": True, "kind": "multi", "tokens": ["AutoOne 1공장"], "keys": ["4310"], "value": ""},
+])
+def test_input_step_skips_when_token_has_name_or_key(tmp_path, capsys, fake, read):
+    root = _repo(tmp_path)
+    _one(root, INPUT_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    fake["tab"].reads = [read]
+    code, out = _capture(capsys, root)
+    assert code == 0 and _typed(fake["tab"]) == [] and _called(fake["tab"], "clearInput") == []
+
+
 def test_input_step_clears_other_token_then_types(tmp_path, capsys, fake):
     root = _repo(tmp_path)
     _one(root, INPUT_SCREEN)

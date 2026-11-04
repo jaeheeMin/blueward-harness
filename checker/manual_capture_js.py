@@ -195,7 +195,7 @@ LIB_JS = r"""(() => {
     const f = fieldOf(name);
     if (!f.ok) return f;
     const { root, ctl } = f;
-    if (ctl && typeof ctl.getTokens === 'function') return { ok: true, kind: 'multi', tokens: tokenTexts(ctl), value: trimLabel(ctl.getValue ? ctl.getValue() : '') };
+    if (ctl && typeof ctl.getTokens === 'function') return { ok: true, kind: 'multi', tokens: tokenTexts(ctl), keys: ctl.getTokens().map(t => trimLabel(String(t.getKey ? t.getKey() || '' : ''))), value: trimLabel(ctl.getValue ? ctl.getValue() : '') };
     if (ctl && typeof ctl.getValue === 'function') return { ok: true, kind: 'input', tokens: [], value: trimLabel(ctl.getValue()) };
     const el = root.matches('input, textarea') ? root : root.querySelector('input, textarea');
     if (el) return { ok: true, kind: 'input', tokens: [], value: trimLabel(el.value) };
