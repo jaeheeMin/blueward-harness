@@ -34,7 +34,10 @@ from pathlib import Path
 # 검사 엔진을 받아 오는 판은 `engine_spec.py` 가 정한다(#149). 스크립트로 실행되면 이 폴더가
 # sys.path 맨 앞이라 바로 import 되지만, 다른 방식으로 불려도 같은 폴더를 찾게 한다.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import console_block  # noqa: E402
 import engine_spec as _engine_spec  # noqa: E402
+
+_PAYLOAD: dict | None = None  # 막을 때 웹 콘솔에 알리려고 훅 입력을 기억해 둔다(#650)
 
 # 엔진을 실행할 시간. uvx 가 처음 이 저장소를 받아 빌드하는 데 시간이 걸릴 수 있어
 # 넉넉히 둔다. 이후에는 uv 캐시에 남아 빠르다. hooks.json 의 훅 타임아웃(120초)보다
@@ -131,6 +134,7 @@ def deny(reason: str) -> None:
     }
     json.dump(payload, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
+    console_block.report(_PAYLOAD, "pre_write_guard", reason)  # 실패해도 조용히 돌아온다
     sys.exit(0)
 
 
@@ -417,8 +421,10 @@ def _check_activation_gate(path: Path) -> None:
 
 
 def _main() -> None:
+    global _PAYLOAD
     try:
         payload = json.loads(sys.stdin.read() or "{}")
+        _PAYLOAD = payload if isinstance(payload, dict) else None
     except json.JSONDecodeError:
         # 입력을 읽지 못하면 이 파일이 doc-guard 소관인지조차 알 수 없다. 모른다는 것을
         # 통과로 바꾸지 않는다(CLAUDE.md 원칙 7).

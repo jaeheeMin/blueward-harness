@@ -81,7 +81,10 @@ from urllib.parse import unquote, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import adt_tiers  # noqa: E402
 
+import console_block  # noqa: E402
 import engine_spec as _engine_spec  # noqa: E402
+
+_PAYLOAD: dict | None = None  # 막을 때 웹 콘솔에 알리려고 훅 입력을 기억해 둔다(#650)
 
 # 엔진을 실행할 시간. `pre_write_guard.py` 와 같은 이유로 넉넉히 둔다.
 ENGINE_TIMEOUT_SECONDS = 110
@@ -166,6 +169,7 @@ def deny(reason: str) -> None:
     }
     json.dump(payload, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
+    console_block.report(_PAYLOAD, "mcp_source_guard", reason)  # 실패해도 조용히 돌아온다
     sys.exit(0)
 
 
@@ -680,8 +684,10 @@ def _check_tenant(tool: str, tool_input: object, cwd: object) -> None:
 
 
 def _main() -> None:
+    global _PAYLOAD
     try:
         payload = json.loads(sys.stdin.read() or "{}")
+        _PAYLOAD = payload if isinstance(payload, dict) else None
     except json.JSONDecodeError:
         # 입력을 읽지 못하면 이 호출이 setObjectSource 인지조차 알 수 없다. 모른다는
         # 것을 통과로 바꾸지 않는다(CLAUDE.md 원칙 7).

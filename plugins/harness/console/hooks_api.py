@@ -19,6 +19,20 @@ MAX_PENDING_AGENTS = 50  # 아직 SubagentStart 와 짝을 못 지은 Agent 호�
 MAX_AGENT_TEXT = 200  # description·type 글자 상한
 MAX_AGENT_PROMPT = 120  # 프롬프트는 첫 줄만, 이만큼까지
 
+# 막힌 게 아니라 검사를 못 한 사유. 실제 훅 사유 문구로 맞췄다(checker/tests/test_web_console.py 의 대입 시험).
+CANNOT_CHECK_WORDS = ("검사 불능", "확인 불능", "확인하지 못", "확인할 수 없", "판정할 수 없", "검사할 수 없", "검사하지 못",
+                      "확인되지 않는 상태", "판을 정하지 못", "해석하지 못", "판정하지 못", "판단할 수 없", "알 수 없",
+                      "읽지 못", "실행하지 못")
+CANNOT_CHECK_CUT = ("다음:", "사유:", "자세히:")  # 이 뒤는 고치는 법·도구 출력이라 판정에 쓰지 않는다
+
+
+def block_kind(reason: str) -> str:
+    """막은 사유가 검사를 못 해서인지(cannot_check) 진짜 위반인지(blocked) 가른다."""
+    head = reason
+    for cut in CANNOT_CHECK_CUT:
+        head = head.split(cut, 1)[0]
+    return "cannot_check" if any(w in head for w in CANNOT_CHECK_WORDS) else "blocked"
+
 Reply = tuple[int, "dict | None"]  # (HTTP 상태, 본문). 본문 None 은 빈 2xx
 
 
@@ -61,7 +75,7 @@ class Hooks:
         if not isinstance(sid, str) or not sid:
             return 400, {"error": "session_id 가 없습니다."}
         cwd = body.get("cwd") if isinstance(body.get("cwd"), str) else ""
-        if name not in ("permission", "question", "stop", "event"):
+        if name not in ("permission", "question", "stop", "event", "blocked"):
             return 404, {"error": "알 수 없는 훅 경로입니다."}
         waits = name in ("permission", "question")
         with self.store.lock:  # 세션 데이터를 바꾸는 동안 저장·화면 변환이 중간 상태를 읽지 않게 한다
@@ -76,6 +90,8 @@ class Hooks:
             tpath = context_usage.valid_path(body.get("transcript_path"))  # 기억 사용량을 읽을 대화 기록 위치(#648)
             if tpath:
                 s["transcriptPath"] = tpath
+            if name == "blocked":
+                return self.blocked(s, body)
             if not waits:
                 return self.stop(s, body, undo, ts) if name == "stop" else self.event(s, body, ts)
         return self.permission(s, body, alive) if name == "permission" else self.question(s, body, alive)
@@ -198,6 +214,24 @@ class Hooks:
             s["turn_running"] = False
             self.store.add_log(s, "예약 전송에 실패해 되돌림")
         self.store.touch(s)
+
+    # ---- 막는 훅의 보고(#650) ----
+    def blocked(self, s: dict, body: dict) -> Reply:
+        """막는 훅(hooks/console_block.py)이 막을 때 직접 보낸 사유를 대화에 쌓는다. 막힌 호출에는 다른 훅 이벤트가 뜨지 않는다."""
+        reason = body.get("reason") if isinstance(body.get("reason"), str) else ""
+        hook = body.get("hook") if isinstance(body.get("hook"), str) else ""
+        tool = body.get("tool_name") if isinstance(body.get("tool_name"), str) else ""
+        reason = reason.strip()
+        if not reason:
+            return 400, {"error": "reason 이 없습니다."}
+        kind = block_kind(reason)
+        fix = ""
+        if "다음:" in reason:
+            fix = reason.split("다음:", 1)[1].strip()
+        if self.store.add_chat(s, "block", reason, hook=hook[:80], kind=kind, fix=fix[:2000], tool=tool[:120]):
+            self.store.add_log(s, ("검사 못 해 멈춤: " if kind == "cannot_check" else "하네스 훅이 막음: ") + reason.split("\n", 1)[0][:200])
+            self.store.touch(s)
+        return 200, None
 
     # ---- 그 밖의 이벤트 ----
     def event(self, s: dict, body: dict, ts: float | None = None) -> Reply:
