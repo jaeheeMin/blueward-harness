@@ -588,6 +588,25 @@ class Capturer:
         self.tab.call("Emulation.setDeviceMetricsOverride", width=WIDTH, height=HEIGHT, deviceScaleFactor=1, mobile=False)
         self.ensure_visible("시작")
 
+    def window_hint(self) -> str:
+        """브라우저 응답 시간 초과 같은 CDP 오류 뒤에 붙일 원인 안내. 창이 가려지거나 최소화되면 Chrome 이 화면을 그리지 않아
+        응답이 멈춘다(#654 실제 테넌트 100). 창 상태·보임을 다시 읽어 알 수 있으면 그대로, 못 읽으면 가능성으로 말한다."""
+        state = win = None
+        try:
+            state = self.tab.evaluate("document.visibilityState")
+        except CdpError:
+            pass
+        try:
+            w = self.tab.call("Browser.getWindowForTarget")
+            win = self.tab.call("Browser.getWindowBounds", windowId=w["windowId"]).get("bounds", {}).get("windowState")
+        except (CdpError, KeyError, TypeError):
+            pass
+        if state == "hidden" or win == "minimized":
+            return f" — 전용 Chrome 창이 가려져 있거나 최소화돼 있다(visibilityState={state!r}, 창={win!r}). 창을 앞으로 꺼내 화면에 띄워 둔 채 다시 돈다"
+        if state is None and win is None:
+            return " — 창 상태를 읽지 못했다. 전용 Chrome 창이 다른 창에 가려지거나 최소화되면 이렇게 나온다. 창을 앞으로 꺼내 두고 다시 돈다"
+        return ""
+
     def ensure_visible(self, what: str) -> None:
         """창이 가려지거나 최소화되면 Chrome 이 화면을 그리지 않는다(#533 실제 테넌트 시험). 보이지 않으면 검사 불능이다."""
         end = time.monotonic() + 3
@@ -766,7 +785,17 @@ class Capturer:
         """화면 하나를 찍는다. (PNG, 그린 것, 못 찾은 것)."""
         self.navigate(screen.app)
         self.ensure_visible(f"화면 {screen.name!r}")
-        self.wait_content(screen, f"화면 {screen.name!r} 그리기")
+        try:
+            self.wait_content(screen, f"화면 {screen.name!r} 그리기")
+        except Unavailable as first:
+            # 앱 첫 로드(캐시 없음)는 시간 안에 못 그리기도 한다 — 같은 명령을 다시 돌리면 됐다(#655 실제 테넌트 100).
+            # 한 번만 다시 열어 기다린다. 또 안 되면 원인 안내를 붙여 검사 불능.
+            self.navigate(screen.app)
+            self.ensure_visible(f"화면 {screen.name!r} 다시 열기")
+            try:
+                self.wait_content(screen, f"화면 {screen.name!r} 다시 열어 그리기")
+            except Unavailable as e:
+                raise Unavailable(f"{e} — 한 번 다시 열어도 같았다(처음: {first}). 첫 로드가 느린 앱이면 --timeout 을 늘려 다시 돈다") from e
         self.run_steps(screen)
         if screen.steps:
             self.wait_content(screen, f"화면 {screen.name!r} 준비 뒤 그리기")
@@ -901,7 +930,10 @@ def run(args: argparse.Namespace) -> tuple[Report, int]:
             try:
                 png, drawn, missing = cap.capture(s)
             except (Unavailable, CdpError) as e:
-                report.screens.append({"이름": s.name, "상태": "검사 불능", "사유": str(e)})
+                why = str(e)
+                if isinstance(e, CdpError):
+                    why += cap.window_hint()
+                report.screens.append({"이름": s.name, "상태": "검사 불능", "사유": why})
                 continue
             complete = not missing
             rel = image_rel(lob, s.name, version, partial=not complete)

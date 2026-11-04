@@ -1292,3 +1292,64 @@ def test_column_box_uses_same_colindex_cells_not_header_table_only():
     from checker.manual_capture_js import LIB_JS
     assert "const columnBox" in LIB_JS and "aria-colindex" in LIB_JS
     assert "g.r = columnBox(h, g.r)" in LIB_JS
+
+
+# ---------------------------------------------------------------- 첫 로드 다시 열기(#655)·창 가려짐 안내(#654)
+
+class SlowFirstLoadTab(FakeTab):
+    """처음 연 문서는 끝까지 안 그려지고, 다시 열면(두 번째 navigate/reload 부터) 그려진다."""
+
+    def __init__(self, finds):
+        super().__init__(finds)
+        self.opens = 0
+
+    def call(self, method, **params):
+        if method in ("Page.navigate", "Page.reload"):
+            self.opens += 1
+        return super().call(method, **params)
+
+    def evaluate(self, expr):
+        if expr.startswith("window.__mc.find(") and self.opens < 2:
+            self.evals.append(expr)
+            return NONE
+        return super().evaluate(expr)
+
+
+def test_first_load_timeout_reopens_once_then_captures(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root)
+    fake["tab"] = SlowFirstLoadTab({("필터", "플랜트"): FOUND, ("버튼", "이동"): FOUND})
+    code, out = _capture(capsys, root, "--timeout", "0.3")
+    assert out["screens"][0]["상태"] == "완료", out
+    assert fake["tab"].opens >= 2 and fake["tab"].shots >= 1
+
+
+def test_first_load_timeout_twice_says_reopened_and_timeout_hint(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root)
+    fake["tab"] = FakeTab({})
+    code, out = _capture(capsys, root, "--timeout", "0.2")
+    why = out["screens"][0]["사유"]
+    assert code == 2 and "한 번 다시 열어도 같았다" in why and "--timeout" in why
+
+
+class HiddenWindowAfterStartTab(FakeTab):
+    """시작 땐 보이다가 찍을 때 창이 가려져 브라우저 응답이 멈춘다."""
+
+    def call(self, method, **params):
+        if method == "Browser.getWindowBounds":
+            return {"bounds": {"windowState": "normal"}}
+        return super().call(method, **params)
+
+    def screenshot_png(self):
+        self.visibility = "hidden"
+        raise mc.CdpError("브라우저 응답을 기다리다 시간이 지났다")
+
+
+def test_cdp_timeout_with_hidden_window_explains_cause(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root)
+    fake["tab"] = HiddenWindowAfterStartTab(STEP_FINDS)
+    code, out = _capture(capsys, root)
+    why = out["screens"][0]["사유"]
+    assert code == 2 and "시간이 지났다" in why and "가려져 있거나 최소화" in why and "visibilityState='hidden'" in why
