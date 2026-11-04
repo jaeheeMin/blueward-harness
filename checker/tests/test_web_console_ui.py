@@ -300,6 +300,56 @@ const cases = {
     assert.ok(p2.el.textContent.includes('아직 준비 안 됨'));
     p2.destroy();
   },
+  session_strip_only_known_cells() {
+    const cls = (c) => (c.value || '');
+    const s = { branch: 'feat/636-x', flowId: 'srs', stepIndex: 1, flowSteps: steps('done', 'active', 'pending'), flowPr: { number: 6, state: 'OPEN', checks: 'pass' } };
+    const cells = L.sessionStrip(s);
+    // 요구사항·개발 번호는 데이터(다음 갈래의 REQ 번호)가 없으면 만들지 않는다
+    assert.deepStrictEqual(cells.map(c => c.id), ['step', 'progress', 'issue', 'pr']);
+    assert.strictEqual(cls(cells[0]), '2 / 3 단계1');
+    assert.strictEqual(cls(cells[1]), '33%'); assert.ok(cells[1].title.includes('3단계 중 1단계'));  // 근거를 같이 보인다
+    assert.strictEqual(cls(cells[2]), '이슈 #636'); assert.strictEqual(cls(cells[3]), 'PR #6 검토 중');
+    assert.deepStrictEqual(L.progressOf(s), { done: 1, total: 3, pct: 33 });
+    // 갈래가 없으면 단계 칸만 "정해진 갈래 없음", 진행 %·PR 칸은 만들지 않는다
+    assert.deepStrictEqual(L.sessionStrip({ id: 'x' }).map(c => [c.id, c.value]), [['step', '정해진 갈래 없음']]);
+    // 끝난 갈래: 다음 갈래 옵션의 REQ 번호에서만 요구사항·개발 번호를 읽는다
+    const fin = L.sessionStrip({ flowId: 'srs', flowFinished: true, flowSteps: steps('done', 'done'), flowPr: { number: 6, state: 'MERGED' },
+      nextFlow: { options: [{ flow: 'spec', label: 'Spec', ids: ['REQ-001', 'REQ-002', 'REQ-003', 'bad'] }, { ids: ['REQ-001'] }] } });
+    const by = Object.fromEntries(fin.map(c => [c.id, c.value]));
+    assert.deepStrictEqual(by, { step: '2 / 2 끝', progress: '끝', req: 'REQ-001, REQ-002 외 1개', dev: 'DEV-001, DEV-002 외 1개', pr: 'PR #6 합쳐짐' });
+    // PR 이 아직 없으면 "PR 아직", 읽지 못했으면 "확인 못 함"
+    assert.strictEqual(L.sessionStrip({ flowId: 'f', flowSteps: steps('active') }).slice(-1)[0].value, 'PR 아직');
+    assert.strictEqual(L.sessionStrip({ flowId: 'f', flowSteps: steps('active'), flowUnknown: ['gh'] }).slice(-1)[0].value, '확인 못 함');
+    // 검토 요청 줄: 검사는 합친 한 값, 팀 승인은 PR 상태에서만 읽는다
+    assert.deepStrictEqual(L.prLines(null), []);
+    const lines = L.prLines({ number: 6, state: 'OPEN', checks: 'none' });
+    assert.deepStrictEqual(lines.map(l => [l.id, l.state]), [['checks', 'unk'], ['team', 'wait']]);
+    assert.deepStrictEqual(L.prLines({ number: 6, state: 'MERGED', checks: 'fail' }).map(l => l.state), ['fail', 'ok']);
+  },
+  async dom_pr_card_flow_preview_and_compact_panel() {
+    const { kit } = makeKit({ 'GET /api/flows': FLOWS });
+    const ui = loadUI(kit);
+    assert.strictEqual(ui.prCard({}), null);
+    const card = ui.prCard({ flowPr: { number: 6, state: 'OPEN', url: 'https://github.com/o/r/pull/6', title: 'docs: SRS', checks: 'pending' } });
+    assert.ok(card.textContent.includes('PR #6 · docs: SRS') && card.textContent.includes('GitHub에서 보기'));
+    assert.deepStrictEqual(find(card, e => e.attrs['data-line']).map(e => e.attrs['data-line'] + ':' + e.attrs['class'].split(' ')[1]), ['checks:wait', 'team:wait']);
+    // 이렇게 진행돼: 갈래 id 가 있으면 그 순서 칸, 없으면 안내 글
+    const pv = ui.flowPreview();
+    pv.update({ cwd: '/w', flowId: 'srs' }); await tick(); await tick();
+    const fs = find(pv.el, e => (e.attrs['class'] || '').split(' ').includes('fs'));
+    assert.deepStrictEqual(fs.map(e => e.children[0].textContent), ['1 SRS 쓰기', '2 제출', '3 승인']);
+    pv.update({ cwd: '/w', flowId: '', note: '순서는 나중에 알려 줘' });
+    assert.ok(pv.el.textContent === '순서는 나중에 알려 줘' && !find(pv.el, e => e.attrs['data-flow-cells']).length);
+    pv.destroy();
+    // 세션 화면용 compact 칸: 갈래 이름·순서 막대는 제목 아래 알약이 맡고, 버튼은 그대로다
+    const panel = ui.flowPanel({ compact: true });
+    panel.update({ id: 's1', cwd: '/w', flowId: 'srs', flowName: '요구사항', stepIndex: 0, status: 'idle', canSend: true,
+      flowSteps: [{ id: 'a', name: '지금', kind: 'skill', skill: 'srs', state: 'active' }, { id: 'b', name: '다음', kind: 'skill', skill: 'deliver', state: 'pending' }] });
+    assert.deepStrictEqual(find(panel.el, e => e.tag === 'button').map(e => e.textContent), ['/harness:srs 다시 실행', '이 단계 건너뛰기']);
+    assert.strictEqual(find(panel.el, e => e.tag === 'ol').length, 0);
+    assert.ok(!panel.el.textContent.includes('요구사항') && panel.el.textContent.includes('지금 할 일 · 지금'));
+    panel.destroy();
+  },
   async dom_home_cards() {
     const sessions = [
       { id: 'a', title: '요구사항 쓰기', cwd: 'C:\Work\proj-a', branch: 'feat/636-req', group: 'todo', pendingRequestIds: ['r1'], flowId: 'srs', flowName: '요구사항', stepIndex: 1,
@@ -544,3 +594,117 @@ def test_new_ui_copy_says_claude_code_not_claude():
     for name in ("flow-ui.js", "flow-logic.js"):
         text = (STATIC / name).read_text(encoding="utf-8")
         assert not re.search(r"Claude(?! Code)", text), name
+
+
+# ---- 작업 화면(세션·질문·승인·새 작업)을 가짜 DOM 에서 실제로 그려 본다 (#636) ----
+
+SMOKE = Path(__file__).with_name("console_ui_smoke.js")  # 가짜 DOM 에서 app.js 를 그대로 돌리는 도우미
+_STEPS = [{"id": "a", "name": "SRS 쓰기", "kind": "skill", "skill": "srs", "state": "done"},
+          {"id": "b", "name": "올리고 검토 요청하기", "kind": "skill", "skill": "deliver", "state": "active"},
+          {"id": "c", "name": "승인받고 합쳐지기 기다리기", "kind": "wait", "state": "pending"}]
+_PR = {"number": 6, "state": "OPEN", "url": "https://github.com/o/r/pull/6", "title": "docs: SRS", "checks": "pass"}
+
+
+def _session(sid, **extra):
+    base = {"id": sid, "title": "구매오더 조회 앱 요구사항", "cwd": "C:/w/proj", "branch": "docs/4-req", "status": "idle", "managed": True, "canSend": True,
+            "pendingRequestIds": [], "flowId": "srs", "flowName": "요구사항 만들기·바꾸기", "stepIndex": 1, "flowSteps": _STEPS, "flowPr": _PR,
+            "report": "## 다 썼어\n- REQ-001", "startedAt": 1700000000, "updatedAt": 1700000100, "log": [], "subagents": [], "prLinks": [], "changedFiles": []}
+    base.update(extra)
+    return base
+
+
+def _smoke(tmp_path, route, sessions, requests=None):
+    import json
+    data = {"GET /api/sessions": {"sessions": sessions}, "GET /api/flows": {"flows": [{"id": "srs", "name": "요구사항", "steps": _STEPS}], "tools": []},
+            "GET /api/approvals": {"state": "no"}, "GET /api/models": {"options": [{"value": "", "label": "기본"}], "effortOptions": [{"value": "", "label": "기본"}], "permissionOptions": [{"value": "", "label": "기본"}]},
+            "GET /api/folders/recent": {"folders": ["C:/w/proj"]}}
+    for s in sessions:
+        data["GET /api/sessions/" + s["id"]] = s
+        data["GET /api/sessions/" + s["id"] + "/files"] = {"files": [{"path": "docs/SRS.md", "mtime": 5, "changed": True}]}
+    for r in requests or []:
+        data["GET /api/requests/" + r["id"]] = r
+    src, out = tmp_path / "data.json", tmp_path / "out.json"
+    src.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    run = subprocess.run([NODE, str(SMOKE), str(STATIC), "x", str(src), route, str(out)], capture_output=True, text=True, encoding="utf-8")
+    assert run.returncode == 0, run.stderr
+    got = json.loads(out.read_text(encoding="utf-8"))
+    assert got["errors"] == [], got["errors"]
+    return got
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_work_screen_session_matches_design(tmp_path):
+    q = {"id": "q1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "rm x", "description": "옛 파일 지우기"}}
+    got = _smoke(tmp_path, "s/s1", [_session("s1", status="running", managed=True, currentAction="Edit docs/SRS.md", pendingRequestIds=["q1"])], [q])
+    text, dump = got["text"], got["dump"]
+    assert text.startswith("요구사항 만들기·바꾸기 · 내 응답을 기다리는 중구매오더 조회 앱 요구사항")
+    assert "<ol.stepbar.big>" in dump and "<div.strip>" in dump
+    for cell in ("단계2 / 3 올리고 검토 요청하기", "AI 진행33%", "작업 기록(이슈)이슈 #4", "검토 요청(PR)PR #6 검토 중"):
+        assert cell in text, cell
+    assert "요구사항REQ" not in text and "개발 번호" not in text  # 데이터가 없는 칸은 지어내지 않는다
+    assert "<section.light.talk>" in dump and "<aside.sess-side>" in dump and "<div.comp>" in dump
+    for need in ("다 썼어", "이 일의 순서", "자동 검사(문서·비밀값 등)", "모두 통과했어", "팀 승인·합치기", "네 차례", "승인하기", "작업 멈추기", "만든 산출물", "docs/SRS.md"):
+        assert need in text, need
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_work_screen_finished_session_shows_handoff_card(tmp_path):
+    nxt = {"options": [{"flow": "spec", "label": "개발 Spec 만들기", "value": "개발", "count": 1, "ids": ["REQ-001"]}, {"flow": None, "label": "권한 양식", "disabled": True}], "hint": "", "unknown": ""}
+    steps = [dict(s, state="done") for s in _STEPS]
+    got = _smoke(tmp_path, "s/s2", [_session("s2", flowFinished=True, stepIndex=2, flowSteps=steps, flowPr=dict(_PR, state="MERGED"), nextFlow=nxt)])
+    text = got["text"]
+    for need in ("→ 다음: 개발 Spec 만들기", "다음 일", "이 일은 끝났어요", "개발 Spec 만들기 · 개발 (1건)", "권한 양식준비 중", "요구사항REQ-001", "개발 번호DEV-001", "단계3 / 3 끝", "PR #6 합쳐짐", "합쳐졌어"):
+        assert need in text, need
+    assert "<div.nextflow.handoff>" in got["dump"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_work_screen_question_shows_each_sentence_once(tmp_path):
+    one = {"id": "q1", "sessionId": "s1", "kind": "question", "status": "pending",
+           "questions": [{"question": "이 앱은 얼마나 급해?", "header": "우선순위", "options": [{"label": "반드시 필요"}, {"label": "중요", "description": "이번 달 안에"}]}]}
+    got = _smoke(tmp_path, "r/q1", [_session("s1", pendingRequestIds=["q1"])], [one])
+    text = got["text"]
+    assert text.count("이 앱은 얼마나 급해?") == 1  # 질문 문장이 제목과 카드에 두 번 나오지 않는다(#635)
+    assert text.startswith("요구사항 만들기·바꾸기 · 내 답을 기다리는 중구매오더 조회 앱 요구사항")
+    for need in ("질문 · 우선순위", "반드시 필요", "중요이번 달 안에", "다른 답이 있으면 직접 적어 줘", "답 보내기"):
+        assert need in text, need
+    assert got["dump"].count("<button.qopt>") == 2 and "<div.q>" in got["dump"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_work_screen_permission_card_and_edit_names(tmp_path):
+    bash = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "cwd": "C:/w/proj",
+            "toolInput": {"command": "rm x.xlsx", "description": "옛 파일 지우기"}, "permissionSuggestions": [1], "suggestionText": ["Bash(rm *) 허용 규칙 추가"]}
+    edit = {"id": "p2", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Edit", "toolInput": {"file_path": "docs/a.md", "old_string": "가", "new_string": "나"}}
+    risky = {"id": "p3", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "curl x", "dangerouslyDisableSandbox": True}}
+    sess = [_session("s1", pendingRequestIds=["p1", "p2", "p3"])]
+    got = _smoke(tmp_path, "r/p1", sess, [bash, edit, risky])
+    for need in ("확인 필요", "옛 파일 지우기", "자세히 (명령 원문)", "이번만 허락", "하지 마", "다음 규칙이 추가됩니다", "도구에 넘기는 입력 전체"):
+        assert need in got["text"], need
+    assert "<details.more>" in got["dump"] and "<details[open].more>" not in got["dump"]  # 쉬운 설명이 있는 명령은 원문을 접어 둔다
+    got = _smoke(tmp_path, "r/p2", sess, [bash, edit, risky])
+    assert "원래 글가바꾼 글나" in got["text"] and "<details[open].more>" in got["dump"]  # #634 이름, 고치는 일은 열어 둔다
+    got = _smoke(tmp_path, "r/p3", sess, [bash, edit, risky])
+    assert "샌드박스를 끄고 실행해" in got["text"] and "<details[open].more>" in got["dump"]  # 위험 표시는 접지 않는다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_work_screen_new_task_has_kinds_flow_and_advanced_fold(tmp_path):
+    got = _smoke(tmp_path, "new", [])
+    text = got["text"]
+    assert text.startswith("새 작업무엇을 할까?")
+    for kind in ("요구사항정의서", "개발 Spec", "사용자 매뉴얼", "CTS 관리대장", "Role 정리", "개발하기", "설정하기", "ATC 지적 고치기", "작은 수정", "잘 모르겠어"):
+        assert kind in text, kind
+    assert got["dump"].count("<button.kind") >= 10
+    for need in ("하고 싶은 일을 한두 줄로", "@ 로 파일 넣기", "이렇게 진행돼", "작업 폴더", "작업 시작", "고급 설정 (모델 · 생각 깊이 · 권한)", "권한 모드"):
+        assert need in text, need
+    assert "<details.more>" in got["dump"]  # 모델·생각 깊이·권한은 접힌 "고급" 안에 그대로 있다
+
+
+def test_work_screen_css_blocks_and_responsive_rules():
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    for needle in (".sess-grid", ".strip", ".msgs", ".ask", ".qopt", ".bad", ".todo", ".crow", ".flow", ".fs", ".docs-pane", "details.more"):
+        assert needle in css, needle
+    # 넓을 때 옆, 좁을 때 아래
+    assert re.search(r"@container shell \(max-width: 1000px\) \{\s*\.sess-grid \{ grid-template-columns: minmax\(0, 1fr\); \}", css)
+    assert "details.more > summary::-webkit-details-marker { display: none; }" in css  # 접힘 삼각형은 직접 그린다
