@@ -7,7 +7,7 @@
 #
 #   gitleaks.yml, doc-guard.yml, ssot-approval.yml(check job), risk-gate.yml(check job), pr-queue.yml
 #
-# 단계 순서: 바뀐 파일 목록 → gitleaks → doc-guard → ssot-approval → ledger-ready(#479, 새 단계) → risk-gate → pr-queue → 종합.
+# 단계 순서: 바뀐 파일 목록 → gitleaks → doc-guard → ssot-approval → ledger-ready(#479, 새 단계) → spec-ready(#668, 새 단계) → risk-gate → pr-queue → 종합.
 # 옛 워크플로에서 옮겨 온 단계마다 동작은 옛 워크플로와 같다(ledger-ready 는 옛 워크플로가 없는 새 단계라 예외다)(코멘트 마커 `<!-- doc-guard -->`·`<!-- ssot-approval -->`·
 # `<!-- risk-gate -->`·pr-queue 마커도 그대로). 달라진 점은 아래 셋이다.
 #
@@ -442,6 +442,45 @@ jobs:
           esac
           exit 0
 
+      # ── spec-ready (#668, 새 단계) ───────────────────────────────────────────
+      # Spec 없이 개발은 없다. PR 이 `src/` 아래를 바꾸면 그 DEV(제목 끝 `(DEV-xxx)`·제목·브랜치·바꾼 Spec 파일·본문 첫 번호)의
+      # `docs/spec/DEV-xxx-*.md` 가 기준(base) 브랜치에 이미 있어야 한다. DEV 를 못 찾음·base 에 Spec 없음(이 PR 이 새로 추가한 것
+      # 포함)·원장 Spec 칸이 `설정` 인 건의 `src/` 변경은 위반이고, `src/` 변경이 없으면 통과(해당 없음)다. 읽지 못하면 unknown.
+      # 판정은 checker.spec_ready.check_pr 다. commit status 는 달지 않는다(ledger-ready 와 같다). 종합에 들어가므로 필수 검사
+      # `pr-checks / check` 가 곧 이 관문이다. API 로만 읽어 저장소 checkout 이 필요 없고 caller 권한은 그대로다.
+      # 한계: 트리거에 `edited` 가 없어(#411) PR 제목·본문만 고친 경우는 다시 판정되지 않는다. 새 커밋을 올리거나 Actions 에서
+      # Re-run 하면 다시 돈다(코멘트 사유에 안내한다).
+      - name: spec-ready 판정
+        id: spec-ready
+        if: github.event.action != 'closed'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          uv run --project .harness-engine python .harness-engine/scripts/spec_ready.py \
+            check-pr --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --markdown-file spec-ready.md \
+            > spec-ready-result.json 2> spec-ready-error.txt
+          code=$?
+          cat spec-ready-error.txt >&2 || true
+          cat spec-ready-result.json || true
+          case "$code" in
+            0)
+              echo "status=pass" >> "$GITHUB_OUTPUT"
+              ;;
+            1)
+              echo "status=fail" >> "$GITHUB_OUTPUT"
+              echo "reason=개발 변경(src/)인데 그 개발의 Spec 이 병합 대상 브랜치에 없다(또는 DEV 를 못 찾았다). 사유와 할 일은 PR 코멘트와 job 요약에 있다." >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "status=unknown" >> "$GITHUB_OUTPUT"
+              echo "reason=Spec 이 있는지 확인하지 못했다(종료코드 $code). 사유는 PR 코멘트와 job 요약에 있다." >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          exit 0
+
       # ── 앞 검사 셋의 status·코멘트 한 번에 (#515) ────────────────────────────
       # 예전에는 검사 단계마다 status 단계(uv 로 파이썬을 띄움)와 코멘트 단계(github-script)가 따로 있어, 단계 시작
       # 비용이 검사 수만큼 들었다. 이제 gitleaks·doc-guard·ssot-approval 의 옛 이름 status 를 한 단계에서 달고
@@ -489,13 +528,14 @@ jobs:
 
       - name: 앞 검사 PR 코멘트 갱신
         id: early-comments
-        if: github.event.action != 'closed' && ((inputs.comment && steps.doc-guard.outputs.has_report == 'true') || steps.ssot-approval.outcome != 'skipped' || steps.ledger-ready.outcome != 'skipped')
+        if: github.event.action != 'closed' && ((inputs.comment && steps.doc-guard.outputs.has_report == 'true') || steps.ssot-approval.outcome != 'skipped' || steps.ledger-ready.outcome != 'skipped' || steps.spec-ready.outcome != 'skipped')
         continue-on-error: true
         uses: actions/github-script@v8
         env:
           RUN_DOC_GUARD: ${{ inputs.comment && steps.doc-guard.outputs.has_report == 'true' }}
           RUN_SSOT: ${{ steps.ssot-approval.outcome != 'skipped' }}
           RUN_LEDGER: ${{ steps.ledger-ready.outcome != 'skipped' }}
+          RUN_SPEC: ${{ steps.spec-ready.outcome != 'skipped' }}
           EXIT_CODE_SSOT: ${{ steps.ssot-approval.outputs.exit-code }}
         with:
           script: |
@@ -567,12 +607,24 @@ jobs:
               await upsert(marker, body);
             };
 
+            const specReady = async () => {
+              const marker = '<!-- spec-ready -->';
+              let body = '';
+              try { body = fs.readFileSync('spec-ready.md', 'utf8'); } catch (e) {}
+              body = body.trim() ? body : null;
+              if (body !== null) {
+                await core.summary.addRaw(body.replace(marker + '\n', ''), true).write();
+              }
+              await upsert(marker, body);
+            };
+
             // 하나가 실패해도 나머지는 계속한다. 실패한 이름은 출력으로 남겨 종합이 경고한다.
             const failed = [];
             const parts = [
               ['doc-guard', process.env.RUN_DOC_GUARD, docGuard],
               ['ssot-approval', process.env.RUN_SSOT, ssotApproval],
               ['ledger-ready', process.env.RUN_LEDGER, ledgerReady],
+              ['spec-ready', process.env.RUN_SPEC, specReady],
             ];
             for (const [name, run, part] of parts) {
               if (run !== 'true') continue;
@@ -824,6 +876,8 @@ jobs:
           R_SSOT: ${{ steps.ssot-approval.outputs.reason }}
           S_LEDGER: ${{ steps.ledger-ready.outputs.status }}
           R_LEDGER: ${{ steps.ledger-ready.outputs.reason }}
+          S_SPEC: ${{ steps.spec-ready.outputs.status }}
+          R_SPEC: ${{ steps.spec-ready.outputs.reason }}
           S_RISK: ${{ steps.risk-gate.outputs.status }}
           R_RISK: ${{ steps.risk-gate.outputs.reason }}
           OUTCOME_PRQ: ${{ steps.pr-queue.outcome }}
@@ -883,6 +937,7 @@ jobs:
           ss_na=$closed; [ "$HAS_SSOT" = "false" ] && ss_na=true
           judge "ssot-approval" "$S_SSOT" "$R_SSOT" "$ss_na"
           judge "ledger-ready" "$S_LEDGER" "$R_LEDGER" "$closed"
+          judge "spec-ready" "$S_SPEC" "$R_SPEC" "$closed"
           judge "risk-gate" "$S_RISK" "$R_RISK" "$closed"
 
           # 판정에 넣지 않는 것: pr-queue 단계, 코멘트 갱신 단계, status 달기 단계. 경고로만 남긴다.
@@ -906,6 +961,7 @@ jobs:
           early_failed "$OUTCOME_COMMENTS_EARLY" "$FAILED_COMMENTS_EARLY" doc-guard && warn "doc-guard 코멘트 실패" "PR 코멘트를 쓰지 못했다. 결과는 job 요약에 있다."
           early_failed "$OUTCOME_COMMENTS_EARLY" "$FAILED_COMMENTS_EARLY" ssot-approval && warn "ssot-approval 코멘트 실패" "PR 코멘트를 갱신하지 못했다."
           early_failed "$OUTCOME_COMMENTS_EARLY" "$FAILED_COMMENTS_EARLY" ledger-ready && warn "ledger-ready 코멘트 실패" "PR 코멘트를 갱신하지 못했다. 결과는 job 요약에 있다."
+          early_failed "$OUTCOME_COMMENTS_EARLY" "$FAILED_COMMENTS_EARLY" spec-ready && warn "spec-ready 코멘트 실패" "PR 코멘트를 갱신하지 못했다. 결과는 job 요약에 있다."
           [ "$OUTCOME_COMMENT_RISK" = "failure" ] && warn "risk-gate 코멘트 실패" "PR 코멘트를 갱신하지 못했다."
 
           # status 를 달지 못하면 훅·엔진이 옛 이름 검사를 못 읽는다. 판정은 바꾸지 않고 경고만 남긴다.

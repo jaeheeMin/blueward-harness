@@ -282,6 +282,7 @@ def main_snapshot(root: str) -> dict[int, dict]:
             for n, row in _table_rows(_show_main(root, line) or "", DEV_ROW_RE):
                 entry(n).setdefault("ledger", {
                     "path": line, "content": row.get("내용", ""), "status": row.get("상태", ""),
+                    "spec": row.get("Spec", ""),
                 })
     return devs
 

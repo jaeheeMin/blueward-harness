@@ -78,7 +78,7 @@ def test_job_은_하나이고_permissions_를_적지_않고_PR_단위_취소형�
 
 def test_단계_순서():
     ids = [s["id"] for s in _steps() if "id" in s]
-    order = ["changed", "gitleaks", "doc-guard", "ssot-approval", "ledger-ready", "risk-gate", "pr-queue"]
+    order = ["changed", "gitleaks", "doc-guard", "ssot-approval", "ledger-ready", "spec-ready", "risk-gate", "pr-queue"]
     positions = [ids.index(i) for i in order]
     assert positions == sorted(positions)
     # 종합은 맨 마지막이다.
@@ -148,7 +148,7 @@ def test_앞_검사_셋의_status_는_한_단계에서_옛_이름으로_달고_r
     for dropped in ("gitleaks-status", "doc-guard-status", "ssot-approval-status"):
         assert not any(s.get("id") == dropped for s in _steps())
     # risk-gate 가 앞 검사 status 를 API 로 읽으므로 그 앞에 와야 한다. 판정 단계들은 모두 이 단계보다 앞이다.
-    assert _index("ssot-approval") < _index("ledger-ready") < _index("early-status") < _index("risk-gate")
+    assert _index("ssot-approval") < _index("ledger-ready") < _index("spec-ready") < _index("early-status") < _index("risk-gate")
 
 
 def test_risk_gate_status_는_risk_gate_바로_뒤에서_옛_이름으로_단다():
@@ -167,7 +167,7 @@ def test_risk_gate_status_는_risk_gate_바로_뒤에서_옛_이름으로_단다
 
 def test_코멘트_단계는_옛_마커를_그대로_쓴다():
     text = WORKFLOW.read_text(encoding="utf-8")
-    for marker in ("<!-- doc-guard -->", "<!-- ssot-approval -->", "<!-- risk-gate -->", "<!-- ledger-ready -->"):
+    for marker in ("<!-- doc-guard -->", "<!-- ssot-approval -->", "<!-- risk-gate -->", "<!-- ledger-ready -->", "<!-- spec-ready -->"):
         assert marker in text
     # 앞 검사 셋과 ledger-ready 의 코멘트는 한 단계다. doc-guard 코멘트만 comment 입력으로 끈다.
     step = _step("early-comments")
@@ -192,7 +192,7 @@ def test_종합은_앞_검사_status_코멘트_실패를_이름별로_경고한�
     assert env["OUTCOME_COMMENTS_EARLY"] == "${{ steps.early-comments.outcome }}"
     assert env["FAILED_COMMENTS_EARLY"] == "${{ steps.early-comments.outputs.failed }}"
     for title in ("gitleaks status 못 담", "doc-guard status 못 담", "ssot-approval status 못 담",
-                  "doc-guard 코멘트 실패", "ssot-approval 코멘트 실패", "ledger-ready 코멘트 실패"):
+                  "doc-guard 코멘트 실패", "ssot-approval 코멘트 실패", "ledger-ready 코멘트 실패", "spec-ready 코멘트 실패"):
         line = next(ln for ln in run.splitlines() if f'warn "{title}"' in ln)
         assert "early_failed" in line
     # 이름을 못 남기고 단계만 실패했으면 셋 다 경고한다(원인을 모르므로 조용히 넘기지 않는다).
@@ -222,6 +222,28 @@ def test_ledger_ready_는_원장_완료를_판정하고_종합에_들어간다()
     env = _steps()[-1]["env"]
     assert env["S_LEDGER"] == "${{ steps.ledger-ready.outputs.status }}"
     # 읽기 권한만 쓴다. caller 권한(PERMISSIONS)은 늘리지 않는다.
+    assert _caller_example()["jobs"]["pr-checks"]["permissions"] == PERMISSIONS
+
+
+def test_spec_ready_는_Spec_선행을_판정하고_종합에_들어간다():
+    step = _step("spec-ready")
+    assert step["continue-on-error"] is True
+    assert "github.event.action != 'closed'" in step["if"]
+    assert ".harness-engine/scripts/spec_ready.py" in step["run"] and "check-pr" in step["run"]
+    for token in ("status=pass", "status=fail", "status=unknown", "exit 0"):
+        assert token in step["run"]
+    assert (ROOT / "scripts" / "spec_ready.py").is_file()
+    # 코멘트는 early-comments 가 마커로 갱신하고(통과면 지움), 새 commit status 는 달지 않는다.
+    comments = _step("early-comments")
+    assert "steps.spec-ready.outcome != 'skipped'" in comments["if"]
+    assert comments["env"]["RUN_SPEC"] == "${{ steps.spec-ready.outcome != 'skipped' }}"
+    assert "spec-ready.md" in comments["with"]["script"]
+    assert not any(s.get("id") == "spec-ready-status" for s in _steps())
+    run = _steps()[-1]["run"]
+    assert 'judge "spec-ready" "$S_SPEC" "$R_SPEC" "$closed"' in run
+    env = _steps()[-1]["env"]
+    assert env["S_SPEC"] == "${{ steps.spec-ready.outputs.status }}"
+    assert env["R_SPEC"] == "${{ steps.spec-ready.outputs.reason }}"
     assert _caller_example()["jobs"]["pr-checks"]["permissions"] == PERMISSIONS
 
 
