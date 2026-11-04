@@ -1366,7 +1366,7 @@
 
   /* ---------- 새 작업 ---------- */
   var PERMISSION_FALLBACK = [{ value: '', label: '기본(그때그때 확인)' }, { value: 'acceptEdits', label: '파일 고치기는 자동 허용' }, { value: 'plan', label: '계획만 세우기' }];
-  var draft = { text: '', cwd: '', note: '', answers: {}, picked: null, extraPaths: [], model: null, modelCustom: false, customName: '', effort: null, permission: null, flowId: null, flowUser: false, kind: -1 };
+  var draft = { text: '', cwd: '', note: '', answers: {}, picked: null, extraPaths: [], model: null, modelCustom: false, customName: '', effort: null, permission: null, flowId: null, flowUser: false, kindFlowId: '', insist: false, kind: -1 };
   /* 새 작업의 종류 버튼: [이름, 한 줄 설명, 갈래 id(없으면 도구만 쓰는 일), 입력칸에 미리 넣는 문장]. 갈래 id 는 workflow.json flows 와 같다. */
   var KINDS = [
     ['요구사항정의서', '고객 요구를 SRS로', 'srs', '요구사항정의서(SRS)를 만들고 싶어. '],
@@ -1424,6 +1424,7 @@
     var recent = null, picking = false, custom = '', customMsg = '', customBusy = false;
     var browsing = false, dir = '', fsRows = null, fsErr = '', pollTimer = null, previewText = '', previewOpen = false, previewTimer = null;
     var starting = false, startedId = null, startErr = '', alive = true, browseBusy = false, modelErr = false, advOpen = false;
+    var BL = window.BHLogic, ready = null, readyCwd = null, readySig = 'null';
     var tools = ui.toolsRow(function () { return { session: null, cwd: draft.cwd, onInsert: insertTool }; });
     var folderWarn = ui.folderNotice(), chooser = ui.flowChooser(), preview = ui.flowPreview();
     function insertTool(skill) {
@@ -1432,10 +1433,23 @@
       var cmd = skillCommand(skillInfo || { plugin: DEFAULT_PLUGIN }, skill), rest = field.value.replace(/^\/\S*\s*/, '');
       setFieldValue(field, cmd + rest, cmd.length);
     }
+    // 종류 버튼으로 고른 갈래를 AI 가 다르게 보면 사용자가 답할 때까지 갈래를 정하지 않는다(#668).
+    function kindConflict() { return draft.flowUser ? null : BL.kindConflict(res().flow, draft.kindFlowId); }
     function effectiveFlow() {
       if (draft.flowUser) return draft.flowId;
+      if (draft.kindFlowId) return kindConflict() ? null : draft.kindFlowId;
       var f = res().flow;
       return f && f.confident ? f.id : null;
+    }
+    // 시작할 수 없는 사유. 묻는 카드에 답하지 않았거나, 종류 버튼으로 개발을 골랐는데 Spec 이 없다고 확실할 때.
+    function startBlock() {
+      if (kindConflict()) return '위에서 AI 추천을 어떻게 할지 먼저 골라 줘.';
+      if (draft.kindFlowId === 'dev' && effectiveFlow() === 'dev') return BL.devBlock('dev', ready) || '';
+      return '';
+    }
+    function keepKind() {
+      if (BL.devBlock(draft.kindFlowId, ready)) { draft.insist = true; draw(); return; }
+      draft.flowId = draft.kindFlowId; draft.flowUser = true; draw(); schedulePreview();
     }
 
     function res() { return (data && data.result) || data || {}; }
@@ -1476,7 +1490,8 @@
       if (!draft.text.trim()) { textErr = true; draw(); return; }
       if (draft.modelCustom && !customOk()) { modelErr = true; draw(); return; }
       if (!draft.cwd) { picking = true; err = ''; draw(); return; }
-      step = 'analyzing'; err = ''; draft.flowId = kindFlow() || null; draft.flowUser = !!kindFlow(); draw();
+      // 종류 버튼의 갈래는 AI 추천과 겹쳐 보기 전까지 사용자가 확정한 선택이 아니다(#668).
+      step = 'analyzing'; err = ''; draft.kindFlowId = kindFlow() || ''; draft.flowId = null; draft.flowUser = false; draft.insist = false; draw();
       api('POST', '/api/new', { text: draft.text.trim(), cwd: draft.cwd, model: modelChoice(), effort: effortChoice() }).then(function (d) {
         aid = d && (d.id || d.analysisId); if (!aid) throw new ApiError(0, '분석을 시작하지 못했습니다.');
         history.replaceState(null, '', '/new?id=' + encodeURIComponent(aid));
@@ -1526,7 +1541,7 @@
 
     function start() {
       starting = true; startErr = ''; draw();
-      api('POST', '/api/new/' + encodeURIComponent(aid) + '/start', { picked: pickedAll(), extraAnswers: answerMap(), note: draft.note.trim(), model: modelChoice(), effort: effortChoice(), permission: permissionChoice(), flow: draft.flowUser ? draft.flowId : undefined }).then(function (d) {
+      api('POST', '/api/new/' + encodeURIComponent(aid) + '/start', { picked: pickedAll(), extraAnswers: answerMap(), note: draft.note.trim(), model: modelChoice(), effort: effortChoice(), permission: permissionChoice(), flow: draft.flowUser || draft.kindFlowId ? effectiveFlow() : undefined }).then(function (d) {
         startedId = (d && (d.id || d.sessionId || (d.session && d.session.id))) || '';
         if (startedId) { mergeSession({ id: startedId }); }
         history.replaceState(null, '', '/new');
@@ -1577,8 +1592,21 @@
       failed: ['새 작업 · 확인 못 함', '요청을 살펴보지 못했어', '아래 이유를 보고 요청을 고쳐서 다시 해 봐.'],
       review: ['새 작업 · 확인', '이렇게 진행할게', '시작 전에 한 번만 봐 줘']
     };
+    // 개발 준비 상태(#668): 작업 폴더가 바뀔 때마다 한 번 읽는다. 읽지 못함·해당 없음이면 ready 는 null 이고 화면은 예전과 같다.
+    function checkReady() {
+      var cwd = draft.cwd;
+      if (readyCwd === cwd) return;
+      readyCwd = cwd; ready = null; readySig = 'null';
+      if (!cwd) return;
+      ui.devReadyFor(cwd).then(function (r) {
+        if (!alive || cwd !== draft.cwd) return;
+        var v = BL.devReadyView(r && r.ok ? r.data : null), sig = JSON.stringify(v);
+        if (sig !== readySig) { readySig = sig; ready = v; draw(); }
+      });
+    }
     function draw() {
       if (!alive) return;
+      checkReady();
       var keepFocus = document.activeElement && document.activeElement.id, selStart = document.activeElement && document.activeElement.selectionStart;
       clear(root);
       var page = h('div', { class: 'page sess newp' });
@@ -1621,7 +1649,7 @@
     function pickKind(i) {
       var prev = KINDS[draft.kind], k = KINDS[i], same = draft.kind === i;
       var prefilled = !draft.text.trim() || (prev && draft.text.trim() === prev[3].trim());
-      draft.kind = same ? -1 : i;
+      draft.kind = same ? -1 : i; draft.insist = false;
       if (prefilled) draft.text = same ? '' : k[3];
       draw();
       var f = document.getElementById('brief');
@@ -1630,8 +1658,21 @@
     function kindFlow() { var k = KINDS[draft.kind]; return k ? k[2] : ''; }
     function drawWrite(panel) {
       panel.appendChild(h('div', { class: 'kinds', role: 'group', 'aria-label': '하고 싶은 일의 종류' }, KINDS.map(function (k, i) {
-        return h('button', { type: 'button', class: 'kind', 'data-kind': k[0], 'aria-pressed': String(draft.kind === i), onClick: function () { pickKind(i); } }, h('b', { text: k[0] }), h('small', { text: k[1] }));
+        var hint = BL.kindHint(k[2], ready);  // 판정 대상이 아니거나 확인 못 하면 null 이라 예전 그대로
+        return h('button', { type: 'button', class: 'kind' + (hint ? ' ' + hint.tone : ''), 'data-kind': k[0], 'aria-pressed': String(draft.kind === i), onClick: function () { pickKind(i); } },
+          h('b', { text: k[0] }), h('small', { text: k[1] }), hint ? h('small', { class: 'khint', 'data-hint': k[2], text: hint.text }) : null);
       })));
+      // 개발하기를 눌렀는데 Spec 있는 건이 없다고 확실하면 분석 전에 바로 알린다.
+      if (kindFlow() === 'dev' && BL.devBlock('dev', ready)) {
+        var specIdx = KINDS.map(function (k) { return k[2]; }).indexOf('spec');
+        panel.appendChild(ui.askCard({
+          id: 'dev-nospec', label: '개발 시작 확인',
+          lead: ['Spec 있는 개발 건이 아직 없어. 개발은 ', h('b', { text: '개발 Spec' }), ' 이 승인돼 있어야 시작할 수 있어.'],
+          block: draft.insist ? BL.devBlock('dev', ready) : '',
+          switchText: '개발 Spec 으로 바꾸기 (추천)', keepText: '그래도 개발하기',
+          onSwitch: function () { pickKind(specIdx); }, onKeep: function () { draft.insist = true; draw(); }
+        }));
+      }
       panel.appendChild(h('label', { for: 'brief', class: 'field-label', text: '하고 싶은 일을 한두 줄로' }));
       var brief = h('textarea', { id: 'brief', class: 'textarea', rows: '3', value: draft.text, placeholder: '예: 구매요청을 올리면 팀장에게 승인 메일이 가면 좋겠어  (/ 로 스킬, @ 로 파일)',
         onInput: function (e) { draft.text = e.target.value; if (textErr) { textErr = false; var m = root.querySelector('[data-terr]'); if (m) m.hidden = true; } } });
@@ -1701,8 +1742,10 @@
       if (res().understood) msgs.appendChild(h('div', { class: 'ai' }, h('span', { class: 'eb', text: 'AI' }), res().understood));
       panel.appendChild(msgs);
       panel.appendChild(chooser.el);
-      chooser.update({ cwd: draft.cwd, found: res().flow, selected: effectiveFlow(), userPicked: draft.flowUser,
-        onPick: function (fid) { draft.flowId = fid; draft.flowUser = true; draw(); schedulePreview(); } });
+      var kd = KINDS[draft.kind];
+      chooser.update({ cwd: draft.cwd, found: res().flow, selected: effectiveFlow(), userPicked: draft.flowUser || (!!draft.kindFlowId && !kindConflict()),
+        kindFlowId: draft.kindFlowId, kindName: kd && kd[2] === draft.kindFlowId ? '그래도 ' + kd[0] : '', ready: ready, insist: draft.insist,
+        onPick: function (fid) { draft.flowId = fid; draft.flowUser = true; draw(); schedulePreview(); }, onKeep: keepKind });
 
       var cands = candidates(), cp = cands.map(function (c) { return c.path; });
       var sec = h('div', { class: 'lt' });
@@ -1747,7 +1790,8 @@
         if (startErr) panel.appendChild(h('p', { class: 'note-attn', role: 'alert', text: startErr }));
         panel.appendChild(h('div', { class: 'acts end' },
           h('button', { type: 'button', class: 'pill line', text: '다른 걸로 할래', onClick: function () { clearTimeout(pollTimer); step = 'write'; aid = null; history.replaceState(null, '', '/new'); draw(); } }),
-          h('button', { type: 'button', class: 'pill dark big', disabled: starting, text: starting ? '시작하는 중' : '이대로 시작', onClick: start })));
+          startBlock() ? h('span', { class: 'note-attn', role: 'status', text: startBlock() }) : null,
+          h('button', { type: 'button', class: 'pill dark big', disabled: starting || !!startBlock(), text: starting ? '시작하는 중' : '이대로 시작', onClick: start })));
       } else {
         panel.appendChild(h('div', { class: 'started', role: 'status' }, h('span', { text: '작업을 시작했어.' }), link(startedId ? '/s/' + encodeURIComponent(startedId) : '/', { text: '작업 화면으로 이동' })));
       }

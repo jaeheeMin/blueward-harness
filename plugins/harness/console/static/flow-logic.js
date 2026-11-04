@@ -335,7 +335,34 @@
     return [{ id: 'checks', name: '자동 검사(문서·비밀값 등)', state: checks[0], text: checks[1] }, { id: 'team', name: '팀 승인·합치기', state: team[0], text: team[1] }];
   }
 
+  /* 개발 준비 상태(#668). /api/dev-ready 응답에서 화면이 쓸 것만 뽑는다. 읽지 못함(unknown)·해당 없음(no)·읽는 중은 null 이고,
+     null 이면 종류 버튼에 아무 표시도 하지 않고 개발을 막지도 않는다(지어내지 않는다). */
+  function devReadyView(d) {
+    if (!d || d.state !== 'yes' || d.loading) return null;
+    var need = arr(d.needSpec).filter(function (x) { return x && x.label; });
+    return { specReady: d.specReady | 0, setup: d.setup | 0, need: need, needCount: Math.max(need.length, d.needSpecCount | 0) };
+  }
+  // 종류 버튼 밑에 보일 작은 글. flowId 는 종류 버튼의 갈래. 보일 것이 없으면 null.
+  function kindHint(flowId, v) {
+    if (!v) return null;
+    if (flowId === 'dev') return v.specReady === 0 ? { tone: 'dim', text: 'Spec 있는 건 없음 — 개발 Spec 먼저' } : { tone: '', text: 'Spec 있는 건 ' + v.specReady + '개' };
+    if (flowId === 'spec') return v.need.length ? { tone: 'hot', text: '할 차례 ' + v.need[0].label + (v.needCount > 1 ? ' 외 ' + (v.needCount - 1) + '건' : '') } : null;
+    if (flowId === 'config') return v.setup > 0 ? { tone: '', text: '설정 건 ' + v.setup + '개' } : null;
+    return null;
+  }
+  // Spec 이 없다고 확실할 때만 개발을 막는다. 개발 갈래가 아니거나 상태를 모르면 null.
+  function devBlock(flowId, v) {
+    if (flowId !== 'dev' || !v || v.specReady > 0) return null;
+    return 'Spec 없이 개발은 시작할 수 없어. PR 검사(spec-ready)에서도 막혀. 먼저 개발 Spec 을 만들어 승인받아야 해.';
+  }
+  // 종류 버튼으로 고른 갈래와 AI 가 고른 갈래가 다르면 AI 쪽({id, reason}), 같거나 어느 한쪽이 없으면 null.
+  function kindConflict(found, kindFlowId) {
+    if (!kindFlowId || !found || !found.id || found.id === kindFlowId) return null;
+    return { id: found.id, reason: found.reason || '' };
+  }
+
   var api = {
+    devReadyView: devReadyView, kindHint: kindHint, devBlock: devBlock, kindConflict: kindConflict,
     issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, prLines: prLines,
     BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, counts: counts, summaryText: summaryText,
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,

@@ -18,7 +18,7 @@
   function create(kit) {
     var L = window.BHLogic;
     var h = kit.h, clear = kit.clear, api = kit.api;
-    var cache = { flows: {}, approvals: {} };
+    var cache = { flows: {}, approvals: {}, devReady: {} };
     var updatePressed = false;
     var stripWatchers = [];
 
@@ -49,6 +49,20 @@
     function approvalsFor(cwd) {
       if (!cwd) return Promise.resolve({ ok: false, error: null });
       return cached(cache.approvals, cwd, '/api/approvals' + kit.qs({ cwd: cwd }), true);
+    }
+    // 이 폴더의 개발 건별 Spec 유무(#668). 읽는 중이면 끝나기를 기다린다. 결과는 L.devReadyView 로 거른다.
+    function devReadyFor(cwd) {
+      if (!cwd) return Promise.resolve({ ok: false, error: null });
+      return cached(cache.devReady, cwd, '/api/dev-ready' + kit.qs({ cwd: cwd }), true);
+    }
+    // 묻는 카드: 문장 + (선택) 막힌 이유 + 두 버튼(추천 / 그래도). 새 작업 화면의 두 곳이 같이 쓴다.
+    function askCard(o) {
+      return h('div', { class: 'askcard', role: 'group', 'aria-label': o.label || '확인', 'data-ask': o.id || 'flow' },
+        h('p', { class: 'ask-q' }, o.lead),
+        o.block ? h('p', { class: 'note-attn', role: 'alert', 'data-ask-block': '1', text: o.block }) : null,
+        h('div', { class: 'chips' },
+          h('button', { type: 'button', class: 'btn primary', 'data-ask-switch': '1', text: o.switchText, onClick: o.onSwitch }),
+          h('button', { type: 'button', class: 'btn', 'data-ask-keep': '1', text: o.keepText, onClick: o.onKeep })));
     }
     function sid(s) { return encodeURIComponent(s.id); }
     function sessionList() { return Array.from(kit.sessions.values()); }
@@ -751,6 +765,19 @@
         var found = last.found, picked = last.selected;
         var cur = flows.filter(function (f) { return f.id === picked; })[0];
         el.appendChild(h('h2', { class: 'sect-h', text: '어떤 일인가요?' }));
+        // 종류 버튼으로 고른 갈래를 AI 가 다르게 보면 조용히 덮어쓰지 않고 먼저 묻는다(#668).
+        var conflict = !last.userPicked && L.kindConflict(found, last.kindFlowId);
+        if (conflict) {
+          var aiName = nameOf(flows, conflict.id);
+          el.appendChild(askCard({
+            id: 'flow', label: 'AI 추천 확인',
+            lead: ['AI 는 ', h('b', { text: aiName }), ' 부터 하자고 해' + (conflict.reason ? ' — ' + conflict.reason : '')],
+            block: last.insist ? L.devBlock(last.kindFlowId, last.ready) : '',
+            switchText: aiName + ' 쪽으로 바꾸기 (추천)', keepText: last.kindName || '그래도 ' + nameOf(flows, last.kindFlowId),
+            onSwitch: function () { last.onPick(conflict.id); }, onKeep: function () { last.onKeep(); }
+          }));
+          return;
+        }
         if (found && found.confident === false && found.alternativeId && !last.userPicked) {
           el.appendChild(h('p', { class: 'note-muted', text: '어느 쪽에 더 가까운지 골라 주세요. ' + (found.reason || '') }));
           var two = h('div', { class: 'chips' });
@@ -766,6 +793,8 @@
           el.appendChild(flowCells(cur));
           if (found && found.id === cur.id && found.reason) el.appendChild(h('p', { class: 'note-muted', text: found.reason }));
         } else el.appendChild(h('p', { class: 'note-muted', text: '고르지 않으면 정해진 순서 없이 시작해요.' }));
+        var blocked = last.kindFlowId === 'dev' && picked === 'dev' ? L.devBlock('dev', last.ready) : '';  // 종류 버튼으로 개발을 골랐는데 Spec 이 없다고 확실할 때
+        if (blocked) el.appendChild(h('p', { class: 'note-attn', role: 'alert', 'data-ask-block': '1', text: blocked }));
         el.appendChild(h('button', { type: 'button', class: 'disclose', 'aria-expanded': String(open), onClick: function () { open = !open; draw(r); } }, kit.icon('chev', 14), '다른 갈래로 바꾸기'));
         if (open) {
           var grid = h('div', { class: 'chips' });
@@ -986,7 +1015,7 @@
 
     return {
       stepBar: stepBar, prCard: prCard, flowPreview: flowPreview, toolsRow: toolsRow, startChecksPanel: startChecksPanel, flowPanel: flowPanel, folderNotice: folderNotice,
-      docsPanel: docsPanel, docsPage: docsPage, flowsFor: flowsFor, approvalsFor: approvalsFor, flowChooser: flowChooser, homeView: homeView, closeModal: closeModal
+      docsPanel: docsPanel, docsPage: docsPage, flowsFor: flowsFor, approvalsFor: approvalsFor, flowChooser: flowChooser, devReadyFor: devReadyFor, askCard: askCard, homeView: homeView, closeModal: closeModal
     };
   }
 })();
