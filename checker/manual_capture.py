@@ -11,13 +11,16 @@ PNG(1600x900)를 찍고, 화면에 보이는 이름으로 요소 위치를 찾�
     화면:
       - 이름: 조회 조건                      # 작업본 `### <양식> · 본문 · 조회 조건` 소절의 화면 이름과 같게
         앱: "#ProductionPlanBoard-display"   # 선택. 테넌트 주소(env/manual-capture.yaml) 뒤에 붙는 Launchpad 해시
-        준비:                                # 선택. 필터 값 넣기·드롭다운 고르기·버튼 누르기뿐이다(팝업·여러 단계 흐름은 범위 밖)
+        준비:                                # 선택. 필터 값 넣기·드롭다운 고르기·버튼 누르기·팝업 열기(여러 화면을 거치는 흐름은 범위 밖)
           - {입력: 플랜트, 값: "1010"}       # 앱이 기억한 값이 이미 같으면 넘어가고, 다른 값이면 지우고 넣는다
           - {선택: 생산방식, 값: "반복제조"}  # Select·ComboBox 에서 보이는 항목 글자가 값과 같은 것을 고른다(없으면 검사 불능)
           - {누르기: 이동}
-        표시:                                # 필수. 번호는 이 목록 순서다
+          - {팝업: 그루핑}                   # 선택. 그 버튼을 눌러 대화상자가 정확히 하나 떠야 한다(안 뜨거나 오류·경고 창이면 검사 불능). 마지막 단계 하나만
+        표시:                               # 필수. 번호는 이 목록 순서다
           - {종류: 필터, 이름: 플랜트, 설명: 생산 플랜트를 고른다}
           - {종류: 열, 이름: 상태, index: 2, 설명: 오더 상태를 본다}   # index 는 같은 이름이 여럿일 때 사람이 고른다(1부터, 읽는 순서)
+
+`팝업` 이 있는 화면은 표시 요소를 **그 팝업 안에서만** 찾고, 찍기 직전에도 그 팝업 하나만 허용한다. 팝업의 확인·저장 버튼은 누르지 않는다.
 
 종류는 필터(라벨+입력 칸)·버튼·열(머리글부터 표 아래 끝)·그 밖(그 글자가 든 요소). 테넌트 주소는 `env/manual-capture.yaml` 의
 `테넌트:`(없으면 `--base-url`). `https://호스트/경로` 만이고, 쿼리는 `?sap-client=100`(숫자 3자리)·`sap-language=KO`(영문 2자리)만 붙일 수 있다
@@ -58,7 +61,7 @@ MAX_MARKS = 99
 KINDS = ("필터", "버튼", "열", "그 밖")
 SCREEN_KEYS = {"이름", "앱", "준비", "표시"}
 MARK_KEYS = {"종류", "이름", "index", "설명"}
-STEP_KEYS = {"입력", "값", "누르기", "선택"}
+STEP_KEYS = {"입력", "값", "누르기", "선택", "팝업"}
 ENV_PATH = "env/manual-capture.yaml"
 LIST_SUFFIX = ".capture.yaml"
 _BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -80,7 +83,7 @@ class Mark:
 
 @dataclass(frozen=True)
 class Step:
-    action: str  # 입력 | 선택 | 누르기
+    action: str  # 입력 | 선택 | 누르기 | 팝업
     name: str
     value: str | None = None
 
@@ -91,6 +94,11 @@ class Screen:
     app: str
     steps: tuple[Step, ...]
     marks: tuple[Mark, ...]
+
+    @property
+    def popup(self) -> bool:
+        """마지막 준비 단계가 `팝업` 이면 표시 요소는 그 팝업 안에서 찾는다."""
+        return bool(self.steps) and self.steps[-1].action == "팝업"
 
 
 def _text(v: object, where: str) -> str:
@@ -125,6 +133,9 @@ def parse_screens(data: object) -> list[Screen]:
             if not isinstance(app, str) or (app and not app.startswith("#")):
                 raise ListError(f"{where}: `앱` 은 `#` 로 시작하는 Launchpad 해시여야 한다(테넌트 주소는 {ENV_PATH}): {app!r}")
             steps = tuple(_parse_step(s, f"{where} 준비 {j}") for j, s in enumerate(raw.get("준비") or [], 1))
+            pops = [j for j, s in enumerate(steps) if s.action == "팝업"]
+            if pops and (len(pops) > 1 or pops[0] != len(steps) - 1):
+                raise ListError(f"{where}: `팝업` 은 한 화면에 하나이고 마지막 준비 단계여야 한다")
             if not isinstance(raw.get("표시"), list) or not raw["표시"]:
                 raise ListError(f"{where}: `표시` 목록이 필요하다")
             if len(raw["표시"]) > MAX_MARKS:
@@ -140,15 +151,15 @@ def parse_screens(data: object) -> list[Screen]:
 
 def _parse_step(raw: object, where: str) -> Step:
     if not isinstance(raw, dict) or set(raw) - STEP_KEYS:
-        raise ListError(f"{where}: `{{입력: 이름, 값: 값}}`·`{{선택: 이름, 값: 항목 글자}}` 또는 `{{누르기: 이름}}` 이어야 한다")
-    acts = [k for k in ("입력", "선택", "누르기") if k in raw]
+        raise ListError(f"{where}: `{{입력: 이름, 값: 값}}`·`{{선택: 이름, 값: 항목 글자}}` `{{누르기: 이름}}`·`{{팝업: 버튼 이름}}` 이어야 한다")
+    acts = [k for k in ("입력", "선택", "누르기", "팝업") if k in raw]
     if len(acts) != 1:
-        raise ListError(f"{where}: `입력`·`선택`·`누르기` 중 하나만 쓴다")
+        raise ListError(f"{where}: `입력`·`선택`·`누르기`·`팝업` 중 하나만 쓴다")
     action = acts[0]
-    if action == "누르기":
+    if action in ("누르기", "팝업"):
         if "값" in raw:
-            raise ListError(f"{where}: `누르기` 에는 `값` 을 쓰지 않는다")
-        return Step("누르기", _text(raw["누르기"], f"{where} 누르기"))
+            raise ListError(f"{where}: `{action}` 에는 `값` 을 쓰지 않는다")
+        return Step(action, _text(raw[action], f"{where} {action}"))
     if "값" not in raw:
         raise ListError(f"{where}: `{action}` 에는 `값` 이 필요하다")
     value = raw["값"]
@@ -531,6 +542,7 @@ def same_site(url: str, base: str) -> bool:
 class Capturer:
     def __init__(self, tab: cdp_client.Tab, base_url: str, ui5: str, timeout: float) -> None:
         self.tab, self.base, self.ui5, self.timeout = tab, base_url, ui5, timeout
+        self.scoped = False  # 팝업 단계 뒤 찾는 범위가 팝업 안으로 좁혀져 있다
 
     def wait_ready(self, what: str) -> None:
         """준비될 때까지 기다린다(두 번 연속 준비 상태여야 한다). 시간 초과면 Unavailable."""
@@ -601,7 +613,8 @@ class Capturer:
     def navigate(self, app: str) -> None:
         """화면마다 **강제로 다시 연다**(같은 주소여도). 앞 화면의 필터 값·열린 상태가 남지 않게 하고, 해시 이동만으로는 앱이 다시 로드되지 않는 문제를 피한다."""
         url = compose_url(self.base, app)
-        cur = self.tab.evaluate("location.href") or ""
+        self.scoped = False
+        cur =self.tab.evaluate("location.href") or ""
         self.tab.evaluate("window.__mc_stale = true")  # 새 문서가 열렸는지 알아보는 표지(새 문서에는 없다)
         if unquote(cur) != unquote(url):
             res = self.tab.call("Page.navigate", url=url)
@@ -652,10 +665,12 @@ class Capturer:
 
     def run_steps(self, screen: Screen) -> None:
         for s in screen.steps:
-            if s.action == "누르기":
+            if s.action in ("누르기", "팝업"):
                 v = self.locate(Mark("버튼", s.name, ""))
                 if v.status != "found":
-                    raise Unavailable(f"준비 단계 누르기 {s.name!r}: {v.status} — {v.reason}")
+                    raise Unavailable(f"준비 단계 {s.action} {s.name!r}: {v.status} — {v.reason}")
+                if s.action == "팝업" and (self.tab.evaluate("window.__mc.dialogs()") or []):
+                    raise Unavailable(f"준비 단계 팝업 {s.name!r}: 누르기 전에 이미 대화상자가 떠 있어 새 팝업을 가를 수 없다")
                 self.click(v.rect)
             elif s.action == "선택":
                 v = self.locate(Mark("필터", s.name, ""))
@@ -684,9 +699,40 @@ class Capturer:
                         self.tab.call("Input.dispatchKeyEvent", type=t, key="Tab", code="Tab", windowsVirtualKeyCode=9)
             time.sleep(0.3)
             self.wait_ready(f"준비 단계 {s.action} {s.name!r}")
+            if s.action == "팝업":  # 팝업은 마지막 단계다. 확인·저장은 누르지 않는다
+                self.open_popup(s)
+                continue
             shown = self.tab.evaluate("window.__mc.dialogs()") or []
             if shown:  # 오류·경고 창이 떴다 — 그 화면은 의도한 상태가 아니다(통과로 찍지 않는다)
                 raise Unavailable(f"준비 단계 {s.action} {s.name!r} 뒤에 대화상자가 떴다: {shown[0]!r}. 준비 단계(값·이미 들어 있는 기본값)를 확인한다")
+
+    def set_scope(self, what: str) -> None:
+        r = self.tab.evaluate("window.__mc.setScope()")
+        if not isinstance(r, dict) or not r.get("ok"):
+            raise Unavailable(f"{what}: 팝업 안으로 찾는 범위를 좁히지 못했다(대화상자 {r.get('count') if isinstance(r, dict) else r!r}개)")
+        self.scoped = True
+
+    def popup_info(self, what: str) -> dict:
+        """떠 있는 대화상자가 정확히 하나이고 오류·경고 창이 아닐 때만 그 하나를 돌려준다. 아니면 검사 불능."""
+        info = self.tab.evaluate("window.__mc.dialogInfo()") or []
+        if not info:
+            raise Unavailable(f"{what}: 팝업이 뜨지 않았다")
+        if len(info) > 1:
+            raise Unavailable(f"{what}: 대화상자가 {len(info)}개 떠 있어 팝업 하나로 정하지 못했다: {[i.get('text') for i in info]!r}")
+        if info[0].get("alert"):
+            raise Unavailable(f"{what}: 오류·경고 창이 떴다: {info[0].get('text')!r}. 준비 단계(값·기본값)를 확인한다")
+        return info[0]
+
+    def open_popup(self, s: Step) -> None:
+        what = f"준비 단계 팝업 {s.name!r}"
+        # 팝업은 서버 호출 뒤 늦게 뜨기도 한다(#653 실제 테넌트 100 그루핑). 뜰 때까지 기다린 뒤 판정한다.
+        end = time.monotonic() + self.timeout
+        while time.monotonic() < end and not (self.tab.evaluate("window.__mc.dialogInfo()") or []):
+            time.sleep(0.5)
+        time.sleep(0.5)  # 뜬 뒤 그리기·애니메이션
+        self.wait_ready(what)
+        self.popup_info(what)
+        self.set_scope(what)
 
     def wait_content(self, screen: Screen, what: str) -> None:
         """찾을 이름 중 하나라도 화면에 나타나고 문서가 멈출 때까지 기다린다. 시간 초과면 Unavailable.
@@ -694,7 +740,8 @@ class Capturer:
         Launchpad 는 UI5 코어가 준비된 뒤에도 앱을 그리는 데 시간이 걸린다(#533 실제 테넌트 시험에서 빈 화면이 찍혔다).
         하나도 안 나타나면 "못 찾음" 이 아니라 화면이 그려지지 않은 것이라 검사 불능이다.
         """
-        names = [("버튼" if s.action == "누르기" else "필터", s.name) for s in screen.steps]  # 입력·선택은 필터 라벨
+        # 입력·선택은 필터 라벨. 팝업 뒤에는 팝업 안에서 표시 이름이 그려지길 기다린다(준비 단계 대상은 팝업 밖에 있다)
+        names = [] if self.scoped else [("버튼" if s.action in ("누르기", "팝업") else "필터", s.name) for s in screen.steps]
         names += [(m.kind, m.name) for m in screen.marks]
         end = time.monotonic() + self.timeout
         last, stable = None, 0
@@ -702,6 +749,8 @@ class Capturer:
             try:
                 if not self.tab.evaluate("!!window.__mc"):
                     self.tab.evaluate(LIB_JS)
+                    if self.scoped:
+                        self.tab.evaluate("window.__mc.setScope()")
                 hit = any(len(self.find(k, n)["items"]) > 0 for k, n in names)
                 nodes = self.tab.evaluate("document.getElementsByTagName('*').length")
             except (CdpError, Unavailable):
@@ -721,7 +770,10 @@ class Capturer:
         self.run_steps(screen)
         if screen.steps:
             self.wait_content(screen, f"화면 {screen.name!r} 준비 뒤 그리기")
-        shown = self.tab.evaluate("window.__mc.dialogs()") or []
+        if screen.popup:  # 그 팝업 하나만 허용한다(그 밖의 대화상자가 더 있으면 검사 불능)
+            self.popup_info(f"화면 {screen.name!r} 찍기 직전")
+            self.set_scope(f"화면 {screen.name!r} 찍기 직전")
+        shown = [] if screen.popup else self.tab.evaluate("window.__mc.dialogs()") or []
         if shown:  # 찍기 직전에도 본다 — 대화상자는 준비 단계 뒤 늦게 뜰 수 있다
             raise Unavailable(f"화면 {screen.name!r}: 대화상자가 떠 있다: {shown[0]!r}. 이 상태로는 찍지 않는다(준비 단계·기본값 확인)")
         for m in screen.marks:  # 가로 스크롤 밖 열은 먼저 보이게 한다
