@@ -90,10 +90,17 @@ for (const f of ['theme.js', 'md.js', 'flow-logic.js', 'flow-ui.js', 'app.js']) 
 const tick = (n) => new Promise(r => setTimeout(r, n || 20));
 (async () => {
   await tick(80);
+  // 선택: argv[7] 의 동작 목록을 차례로 실행한다. [{"click": "선택자", "index": 0}] — 누른 뒤 화면이 다시 그려지기를 기다린다.
+  for (const act of JSON.parse(process.argv[7] || '[]')) {
+    const hit = root.querySelectorAll(act.click)[act.index || 0];
+    if (!hit) { errors.push('누를 곳이 없음 ' + act.click); continue; }
+    hit.click(); await tick(80);
+  }
   const main = root.querySelector('main');
   const out = { text: main ? main.textContent : '(no main)', errors, calls: calls.map(c => c[0] + ' ' + c[1]) };
   const dump = (e, d) => { if (e.nodeType === 3) return e.text; return '<' + e.tag + (e.open ? '[open]' : '') + (e.attrs['class'] ? '.' + e.attrs['class'].replace(/ /g, '.') : '') + '>' + e.children.map(c => dump(c, d + 1)).join('') + '</' + e.tag + '>'; };
   out.dump = main ? dump(main, 0) : '';
+  out.posts = calls.filter(c => c[0] !== 'GET').map(c => [c[0], c[1], c[2] || '']);
   out.side = root.querySelector('.side') ? root.querySelector('.side').textContent : '';
   out.sideDump = root.querySelector('.side') ? dump(root.querySelector('.side'), 0) : '';
   out.ann = root.querySelector('.ann-slot') ? root.querySelector('.ann-slot').textContent : '';

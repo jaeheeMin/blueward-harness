@@ -855,6 +855,7 @@ details.fold > [data-r]:empty { display: none; }
 .chip2 { flex: none; padding: 2px 10px; border-radius: 999px; border: 1.5px solid var(--lline); background: var(--card); font-size: 12px; color: var(--lightink); }
 .chip2.ok { border-color: transparent; background: var(--okbg); color: var(--okink); }
 .chip2.unk { border: 1.5px dashed var(--st-unk); color: #5a4bc2; }
+.chip2.warn { border-color: transparent; background: var(--attn); color: var(--lightink); }
 .dnote { margin-top: 6px; font-size: 12px; color: var(--lmuted); }
 .dhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .dhead h2 { font-size: 16px; font-weight: 600; }

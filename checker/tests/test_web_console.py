@@ -3377,6 +3377,126 @@ def test_flows_api_without_cwd_has_no_exposure(tmp_path, monkeypatch):
         c.close()
 
 
+def _register_folders(c, tmp_path, *names):
+    """tmp_path 아래 서로 겹치지 않는 폴더를 만들어 콘솔의 최근 폴더로 등록한다(하위 폴더 탐색이 서로 섞이지 않게)."""
+    out = []
+    for n in names:
+        d = tmp_path / n
+        d.mkdir()
+        assert c.call("POST", "/api/folders/validate", {"path": str(d)})[1]["ok"]
+        out.append(d)
+    return out
+
+
+def _recent(c):
+    status, body, _ = c.call("GET", "/api/folders/recent")
+    assert status == 200
+    return {r["name"]: r for r in body}
+
+
+def test_recent_folders_carry_ready_state_and_session_count(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        ready, plain = _register_folders(c, tmp_path, "ready", "plain")
+        (ready / "templates").mkdir()
+        (ready / "rules").mkdir()
+        (ready / "sub").mkdir()
+        for sid, cwd in (("s1", ready), ("s2", ready / "sub"), ("s3", plain)):  # 폴더 자체와 하위 폴더를 cwd 로 가진 세션을 센다
+            c.hook("event", {"session_id": sid, "cwd": str(cwd), "hook_event_name": "SessionStart"})
+        got = _recent(c)
+        assert (got["ready"]["ready"], got["ready"]["sessions"], got["ready"]["checking"]) == ("yes", 2, False)
+        assert (got["plain"]["ready"], got["plain"]["sessions"]) == ("no", 1)
+        # 판정은 60초 기억한다. 구조를 만들어도 기억이 지나기 전엔 그대로이고, 지나면 바뀐다.
+        (plain / "templates").mkdir()
+        (plain / "rules").mkdir()
+        assert _recent(c)["plain"]["ready"] == "no"
+        c.clock.t += console_server.CACHE_SECONDS + 1
+        assert _recent(c)["plain"]["ready"] == "yes"
+    finally:
+        c.close()
+
+
+def test_recent_folders_unreadable_is_unknown_not_ready_or_not(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch, run=FakeRun())  # git 을 실행할 수 없다(127)
+    try:
+        _register_folders(c, tmp_path, "a")
+        row = _recent(c)["a"]
+        assert row["ready"] == "unknown" and row["checking"] is False  # 못 읽은 것은 준비됨도 준비 필요도 아니다
+        assert c.call("GET", f"/api/folders/intro?path={urllib.parse.quote(str(tmp_path / 'a'))}")[1]["show"] is False
+    finally:
+        c.close()
+    (tmp_path / "x").mkdir()
+    c = Console(tmp_path / "x", monkeypatch)  # 갈래 데이터가 없는 콘솔
+    try:
+        c.login()
+        _register_folders(c, tmp_path / "x", "b")
+        assert _recent(c)["b"]["ready"] == "unknown"
+    finally:
+        c.close()
+
+
+def test_recent_folders_do_not_wait_for_the_check(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        c.app.sync_spawn = False  # 실제 서버처럼 계산은 요청 스레드 밖에서
+        (d,) = _register_folders(c, tmp_path, "slow")
+        (d / "templates").mkdir()
+        (d / "rules").mkdir()
+        first = _recent(c)["slow"]
+        assert first["ready"] in ("unknown", "yes") and (first["ready"] == "yes" or first["checking"] is True)  # 읽는 중이면 확인하는 중으로 먼저 답한다
+        assert wait_for(lambda: _recent(c)["slow"]["ready"] == "yes")  # 나중에 다시 물으면 채워진 값이 온다
+        assert _recent(c)["slow"]["checking"] is False
+    finally:
+        c.close()
+
+
+def test_folder_intro_shows_once_for_unready_folder_and_is_remembered_on_the_pc(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        plain, ready = _register_folders(c, tmp_path, "plain", "ready")
+        (ready / "templates").mkdir()
+        (ready / "rules").mkdir()
+
+        def intro(d):
+            return c.call("GET", f"/api/folders/intro?path={urllib.parse.quote(str(d))}")[1]
+
+        assert intro(plain) == {"ready": "no", "seen": False, "show": True}
+        assert intro(ready) == {"ready": "yes", "seen": False, "show": False}  # 준비된 폴더엔 안내하지 않는다
+        assert not (c.state / console_server.FOLDER_INTRO_FILE).exists()  # 묻기만 해서는 기억하지 않는다
+        assert c.call("POST", "/api/folders/intro/seen", {"path": str(plain) + "/"})[1] == {"seen": True}
+        assert intro(plain) == {"ready": "no", "seen": True, "show": False}  # 두 번째엔 안 뜬다
+        saved = json.loads((c.state / console_server.FOLDER_INTRO_FILE).read_text(encoding="utf-8"))["folders"]
+        assert len(saved) == 1 and saved[0]["path"] == os.path.normcase(os.path.realpath(plain))  # 브라우저가 아니라 상태 폴더, 정규화한 경로
+        assert intro(plain)["seen"] is True and c.app.intro_seen(str(plain)) is True
+        # 모르는 폴더는 받지 않는다
+        assert c.call("GET", f"/api/folders/intro?path={urllib.parse.quote(str(tmp_path))}")[0] == 403
+        assert c.call("POST", "/api/folders/intro/seen", {"path": str(tmp_path)})[0] == 403
+        assert c.call("GET", "/api/folders/intro")[0] == 400
+        (c.state / console_server.FOLDER_INTRO_FILE).write_text("not json", encoding="utf-8")  # 깨진 기억은 본 적 없음으로
+        assert intro(plain)["seen"] is False
+    finally:
+        c.close()
+
+
+def test_folder_intro_memory_keeps_only_the_newest_200(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        limit = console_server.FOLDER_INTRO_MAX
+        assert limit == 200
+        for i in range(limit + 5):
+            c.clock.t += 1
+            c.app.mark_intro_seen(str(tmp_path / f"f{i}"))
+        paths = [r["path"] for r in json.loads((c.state / console_server.FOLDER_INTRO_FILE).read_text(encoding="utf-8"))["folders"]]
+        assert len(paths) == limit
+        assert c.app.intro_seen(str(tmp_path / "f0")) is False and c.app.intro_seen(str(tmp_path / "f4")) is False  # 오래된 것부터 잊는다
+        assert c.app.intro_seen(str(tmp_path / "f5")) is True and c.app.intro_seen(str(tmp_path / f"f{limit + 4}")) is True
+        c.app.mark_intro_seen(str(tmp_path / "f5"))  # 다시 보여 주면 맨 뒤로 가고 중복되지 않는다
+        paths = [r["path"] for r in json.loads((c.state / console_server.FOLDER_INTRO_FILE).read_text(encoding="utf-8"))["folders"]]
+        assert len(paths) == limit and paths[-1] == os.path.normcase(os.path.realpath(tmp_path / "f5"))
+    finally:
+        c.close()
+
+
 def test_exposure_hides_atc_without_adt_tiers_and_shows_it_with(tmp_path, monkeypatch):
     c = flow_console(tmp_path, monkeypatch, flows_file=gated_flows_file(tmp_path))  # 조건부 갈래·단계는 시험용 사본으로 본다
     try:

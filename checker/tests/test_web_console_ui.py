@@ -787,7 +787,7 @@ def _session(sid, **extra):
     return base
 
 
-def _smoke(tmp_path, route, sessions, requests=None, extra=None):
+def _smoke(tmp_path, route, sessions, requests=None, extra=None, actions=None):
     import json
     data = dict(extra or {})
     data |= {"GET /api/sessions": {"sessions": sessions}, "GET /api/flows": {"flows": [{"id": "srs", "name": "요구사항", "steps": _STEPS}], "tools": []},
@@ -800,7 +800,7 @@ def _smoke(tmp_path, route, sessions, requests=None, extra=None):
         data["GET /api/requests/" + r["id"]] = r
     src, out = tmp_path / "data.json", tmp_path / "out.json"
     src.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    run = subprocess.run([NODE, str(SMOKE), str(STATIC), "x", str(src), route, str(out)], capture_output=True, text=True, encoding="utf-8")
+    run = subprocess.run([NODE, str(SMOKE), str(STATIC), "x", str(src), route, str(out), json.dumps(actions or [])], capture_output=True, text=True, encoding="utf-8")
     assert run.returncode == 0, run.stderr
     got = json.loads(out.read_text(encoding="utf-8"))
     assert got["errors"] == [], got["errors"]
@@ -939,6 +939,65 @@ def test_new_task_default_folder_priority(tmp_path):
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "'/new?from=' + encodeURIComponent(sid)" in app and app.count("link(newHref(),") == 3  # 헤더 메뉴 · 목록 아래 + 새 세션 · 접힌 레일 +
     assert "recent[0]" not in app
+
+
+def _folder_rows():
+    return {"GET /api/folders/recent": [
+        {"path": "C:/p/ready2", "name": "ready2", "ready": "yes", "sessions": 2},
+        {"path": "C:/p/ready0", "name": "ready0", "ready": "yes", "sessions": 0},
+        {"path": "C:/p/needs", "name": "needs", "ready": "no", "sessions": 0},
+        {"path": "C:/p/busy", "name": "busy", "ready": "unknown", "checking": True, "sessions": 0},
+        {"path": "C:/p/unk", "name": "unk", "ready": "unknown", "checking": False, "sessions": 0}],
+        "GET /api/folders/last": {"path": None}}
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_folder_cards_show_ready_chips_without_blurring_unknown(tmp_path):
+    """폴더 카드 칩(시안 02): 준비됨 · 세션 n / 준비됨 / 준비 필요 / 확인하는 중 / 확인 못 함. 읽지 못한 것은 준비됨도 준비 필요도 아니다."""
+    got = _smoke(tmp_path, "new", [], extra=_folder_rows())
+    assert re.findall(r"<span\.chip2([\w.]*)>", got["dump"]) == [".ok", ".ok", ".warn", "", ".unk"]
+    # 카드 한 장마다 이름 · 경로 · 칩 순서로 글이 이어진다(가짜 DOM 의 dump 는 text 속성 글을 안 보여 줘 본문 글로 본다)
+    text = got["text"]
+    for card in ("ready2C:/p/ready2준비됨 · 세션 2", "ready0C:/p/ready0준비됨NE","needsC:/p/needs준비 필요", "busyC:/p/busy확인하는 중", "unkC:/p/unk확인 못 함"):
+        assert card in text, card
+    # 옛 서버 응답(ready 키 없음)은 준비됨으로 치지 않는다
+    old = _smoke(tmp_path, "new", [], extra={"GET /api/folders/recent": {"folders": ["C:/w/proj"]}, "GET /api/folders/last": {"path": None}})
+    assert re.findall(r"<span\.chip2([\w.]*)>", old["dump"]) == [".unk"] and "projC:/w/proj확인 못 함" in old["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_starts_scaffold(tmp_path):
+    shown = {"GET /api/folders/intro": {"ready": "no", "seen": False, "show": True}, "POST /api/folders/intro/seen": {"seen": True}}
+    pick = [{"click": ".folder-opt", "index": 2}]
+    got = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick)
+    text = got["text"]
+    for need in ("프로젝트 준비", "needs 준비하기", "이 폴더엔 아직 하네스 구조가 없어", "네 차례", "표준 구조를 만들까? 한 번만 하면 돼",
+                 "만들고 나면 GitHub에 올려서 팀 승인을 받아. 그다음부터 문서를 쓸 수 있어.", "만들기", "나중에", "만들어지는 것",
+                 "templates/", "고객 양식을 넣는 곳", "rules/", "문서 검사 기준", "docs/ssot/", "요구사항정의서 자리", "audit/", "변경 기록",
+                 "만든 뒤 할 일", "고객 양식 파일을 templates/ 에 넣기", "GitHub에 올려서 승인받기", "첫 작업 시작"):
+        assert need in text, need
+    assert "하고 싶은 일을 한두 줄로" not in text and "<select" not in got["dump"]
+    assert any(p[:2] == ["POST", "/api/folders/intro/seen"] and "C:/p/needs" in p[2] for p in got["posts"])  # 보여 줬다고 서버에 남긴다
+    # [만들기] -> 그 폴더에서 scaffold 도구로 새 작업을 시작한다(입력칸에 도구를 넣고 분석을 시작하는 기존 경로)
+    made = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick + [{"click": "[data-intro-make]"}])
+    new = [p for p in made["posts"] if p[1] == "/api/new"]
+    assert len(new) == 1 and "/harness:scaffold" in new[0][2] and "C:/p/needs" in new[0][2], new
+    # [나중에] -> 원래 새 작업 화면으로 돌아가고 작업을 시작하지 않는다
+    later = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick + [{"click": "[data-intro-later]"}])
+    assert "하고 싶은 일을 한두 줄로" in later["text"] and "작업 폴더C:/p/needs" in later["text"] and "프로젝트 준비" not in later["text"]
+    assert not [p for p in later["posts"] if p[1] == "/api/new"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_prepare_screen_not_shown_when_seen_ready_or_unknown(tmp_path):
+    for state in ({"ready": "no", "seen": True, "show": False}, {"ready": "yes", "seen": False, "show": False},
+                  {"ready": "unknown", "seen": False, "show": False}):
+        got = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **{"GET /api/folders/intro": state}), actions=[{"click": ".folder-opt", "index": 2}])
+        assert "하고 싶은 일을 한두 줄로" in got["text"] and "준비하기" not in got["text"], state
+        assert not [p for p in got["posts"] if p[1] == "/api/folders/intro/seen"], state
+    # 안내를 못 읽으면(오류) 막지 않고 원래 화면으로 간다
+    err = _smoke(tmp_path, "new", [], extra=_folder_rows(), actions=[{"click": ".folder-opt", "index": 2}])
+    assert "하고 싶은 일을 한두 줄로" in err["text"] and "준비하기" not in err["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
