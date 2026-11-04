@@ -11,8 +11,9 @@ PNG(1600x900)를 찍고, 화면에 보이는 이름으로 요소 위치를 찾�
     화면:
       - 이름: 조회 조건                      # 작업본 `### <양식> · 본문 · 조회 조건` 소절의 화면 이름과 같게
         앱: "#ProductionPlanBoard-display"   # 선택. 테넌트 주소(env/manual-capture.yaml) 뒤에 붙는 Launchpad 해시
-        준비:                                # 선택. 필터 값 넣기·버튼 누르기뿐이다(팝업·여러 단계 흐름은 범위 밖)
-          - {입력: 플랜트, 값: "1010"}
+        준비:                                # 선택. 필터 값 넣기·드롭다운 고르기·버튼 누르기뿐이다(팝업·여러 단계 흐름은 범위 밖)
+          - {입력: 플랜트, 값: "1010"}       # 앱이 기억한 값이 이미 같으면 넘어가고, 다른 값이면 지우고 넣는다
+          - {선택: 생산방식, 값: "반복제조"}  # Select·ComboBox 에서 보이는 항목 글자가 값과 같은 것을 고른다(없으면 검사 불능)
           - {누르기: 이동}
         표시:                                # 필수. 번호는 이 목록 순서다
           - {종류: 필터, 이름: 플랜트, 설명: 생산 플랜트를 고른다}
@@ -57,7 +58,7 @@ MAX_MARKS = 99
 KINDS = ("필터", "버튼", "열", "그 밖")
 SCREEN_KEYS = {"이름", "앱", "준비", "표시"}
 MARK_KEYS = {"종류", "이름", "index", "설명"}
-STEP_KEYS = {"입력", "값", "누르기"}
+STEP_KEYS = {"입력", "값", "누르기", "선택"}
 ENV_PATH = "env/manual-capture.yaml"
 LIST_SUFFIX = ".capture.yaml"
 _BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -79,7 +80,7 @@ class Mark:
 
 @dataclass(frozen=True)
 class Step:
-    action: str  # 입력 | 누르기
+    action: str  # 입력 | 선택 | 누르기
     name: str
     value: str | None = None
 
@@ -139,19 +140,23 @@ def parse_screens(data: object) -> list[Screen]:
 
 def _parse_step(raw: object, where: str) -> Step:
     if not isinstance(raw, dict) or set(raw) - STEP_KEYS:
-        raise ListError(f"{where}: `{{입력: 이름, 값: 값}}` 또는 `{{누르기: 이름}}` 이어야 한다")
-    if ("입력" in raw) == ("누르기" in raw):
-        raise ListError(f"{where}: `입력` 과 `누르기` 중 하나만 쓴다")
-    if "누르기" in raw:
+        raise ListError(f"{where}: `{{입력: 이름, 값: 값}}`·`{{선택: 이름, 값: 항목 글자}}` 또는 `{{누르기: 이름}}` 이어야 한다")
+    acts = [k for k in ("입력", "선택", "누르기") if k in raw]
+    if len(acts) != 1:
+        raise ListError(f"{where}: `입력`·`선택`·`누르기` 중 하나만 쓴다")
+    action = acts[0]
+    if action == "누르기":
         if "값" in raw:
             raise ListError(f"{where}: `누르기` 에는 `값` 을 쓰지 않는다")
         return Step("누르기", _text(raw["누르기"], f"{where} 누르기"))
     if "값" not in raw:
-        raise ListError(f"{where}: `입력` 에는 `값` 이 필요하다")
+        raise ListError(f"{where}: `{action}` 에는 `값` 이 필요하다")
     value = raw["값"]
     if not isinstance(value, str):
         raise ListError(f"{where}: `값` 은 따옴표로 감싼 글이어야 한다(`1010` 은 숫자가 되고 `01` 은 앞의 0 이 사라진다): {value!r}")
-    return Step("입력", _text(raw["입력"], f"{where} 입력"), value)
+    if action == "선택":
+        value = _text(value, f"{where} 값")
+    return Step(action, _text(raw[action], f"{where} {action}"), value)
 
 
 def _parse_mark(raw: object, where: str) -> Mark:
@@ -623,6 +628,25 @@ class Capturer:
         for t in ("mouseMoved", "mousePressed", "mouseReleased"):
             self.tab.call("Input.dispatchMouseEvent", type=t, x=x, y=y, button="left", clickCount=1)
 
+    def fill_needed(self, s: Step) -> bool:
+        """입력 칸에 값을 넣어야 하는가. 앱이 기억한 필터 값(토큰)이 이미 같으면 False(또 넣으면 오류 창이 뜬다), 다른 값이 있으면 지우고 True."""
+        name, want = json.dumps(s.name), (s.value or "").strip()
+        cur = self.tab.evaluate(f"window.__mc.readInput({name})")
+        if not isinstance(cur, dict) or not cur.get("ok"):
+            raise Unavailable(f"준비 단계 입력 {s.name!r}: 입력 칸의 지금 값을 읽지 못했다(MultiInput·Input 이 아니거나 하나로 정하지 못했다): {cur!r}")
+        tokens = [str(t).strip() for t in cur.get("tokens") or []]
+        value = str(cur.get("value") or "").strip()
+        if want in tokens or f"={want}" in tokens or (not tokens and value in (want, f"={want}")):
+            return False
+        if tokens or value:
+            done = self.tab.evaluate(f"window.__mc.clearInput({name})")
+            if not isinstance(done, dict) or not done.get("ok"):
+                raise Unavailable(f"준비 단계 입력 {s.name!r}: 들어 있는 다른 값 {tokens or value!r} 을 지우지 못했다: {done!r}")
+            left = self.tab.evaluate(f"window.__mc.readInput({name})")
+            if not isinstance(left, dict) or left.get("tokens") or str(left.get("value") or "").strip():
+                raise Unavailable(f"준비 단계 입력 {s.name!r}: 들어 있는 다른 값 {tokens or value!r} 을 지운 뒤에도 남아 있다: {left!r}")
+        return True
+
     def run_steps(self, screen: Screen) -> None:
         for s in screen.steps:
             if s.action == "누르기":
@@ -630,16 +654,31 @@ class Capturer:
                 if v.status != "found":
                     raise Unavailable(f"준비 단계 누르기 {s.name!r}: {v.status} — {v.reason}")
                 self.click(v.rect)
+            elif s.action == "선택":
+                v = self.locate(Mark("필터", s.name, ""))
+                if v.status != "found":
+                    raise Unavailable(f"준비 단계 선택 {s.name!r}: {v.status} — {v.reason}")
+                r = self.tab.evaluate(f"window.__mc.selectOption({json.dumps(s.name)}, {json.dumps(s.value)})")
+                if not isinstance(r, dict) or not r.get("ok"):
+                    r = r if isinstance(r, dict) else {}
+                    if r.get("notSelect"):
+                        why = "드롭다운(Select·ComboBox)이 아니거나 UI5 컨트롤을 찾지 못했다"
+                    elif "items" in r:
+                        why = f"보이는 항목 중 {s.value!r} 와 같은 글자가 {r.get('count', 0)}개다. 보이는 항목: {r['items']!r}"
+                    else:
+                        why = "드롭다운을 하나로 정하지 못했다"
+                    raise Unavailable(f"준비 단계 선택 {s.name!r}: {why}")
             else:
                 v = self.locate(Mark("필터", s.name, ""))
                 if v.status != "found":
                     raise Unavailable(f"준비 단계 입력 {s.name!r}: {v.status} — {v.reason}")
-                f = self.tab.evaluate(f"window.__mc.focusInput({json.dumps(s.name)})")
-                if not f or not f.get("ok"):
-                    raise Unavailable(f"준비 단계 입력 {s.name!r}: 입력 칸에 포커스를 주지 못했다")
-                self.tab.call("Input.insertText", text=s.value or "")
-                for t in ("keyDown", "keyUp"):  # Tab 으로 값을 확정한다
-                    self.tab.call("Input.dispatchKeyEvent", type=t, key="Tab", code="Tab", windowsVirtualKeyCode=9)
+                if self.fill_needed(s):
+                    f = self.tab.evaluate(f"window.__mc.focusInput({json.dumps(s.name)})")
+                    if not f or not f.get("ok"):
+                        raise Unavailable(f"준비 단계 입력 {s.name!r}: 입력 칸에 포커스를 주지 못했다")
+                    self.tab.call("Input.insertText", text=s.value or "")
+                    for t in ("keyDown", "keyUp"):  # Tab 으로 값을 확정한다
+                        self.tab.call("Input.dispatchKeyEvent", type=t, key="Tab", code="Tab", windowsVirtualKeyCode=9)
             time.sleep(0.3)
             self.wait_ready(f"준비 단계 {s.action} {s.name!r}")
             shown = self.tab.evaluate("window.__mc.dialogs()") or []
@@ -652,7 +691,7 @@ class Capturer:
         Launchpad 는 UI5 코어가 준비된 뒤에도 앱을 그리는 데 시간이 걸린다(#533 실제 테넌트 시험에서 빈 화면이 찍혔다).
         하나도 안 나타나면 "못 찾음" 이 아니라 화면이 그려지지 않은 것이라 검사 불능이다.
         """
-        names = [("버튼" if s.action == "누르기" else "필터", s.name) for s in screen.steps]
+        names = [("버튼" if s.action == "누르기" else "필터", s.name) for s in screen.steps]  # 입력·선택은 필터 라벨
         names += [(m.kind, m.name) for m in screen.marks]
         end = time.monotonic() + self.timeout
         last, stable = None, 0

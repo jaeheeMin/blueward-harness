@@ -169,6 +169,82 @@ LIB_JS = r"""(() => {
     return { ok: true };
   };
 
+  // 라벨이 가리키는 입력 칸의 DOM 뿌리와 UI5 컨트롤(없으면 null). find('필터') 와 같은 후보가 유일할 때만 ok.
+  const fieldOf = name => {
+    const labs = cands('필터', name).items.map(it => it.el);
+    if (labs.length !== 1) return { ok: false, count: labs.length };
+    const root = inputOf(labs[0]);
+    if (!root) return { ok: false, count: 1, noInput: true };
+    let ctl = null;
+    // 입력 칸 DOM 은 보통 컨트롤 안쪽 요소(`…-inner`)라 id 로 바로 못 찾는다. 가장 가까운 UI5 컨트롤로 올라간다.
+    try {
+      const E = window.sap && sap.ui && sap.ui.core && sap.ui.core.Element;
+      if (E && typeof E.closestTo === 'function') ctl = E.closestTo(root);
+      if (!ctl && window.sap && sap.ui && sap.ui.getCore) {
+        for (let n = root; n && !ctl; n = n.parentElement) {
+          if (n.id && n.hasAttribute('data-sap-ui')) ctl = sap.ui.getCore().byId(n.id) || null;
+        }
+      }
+    } catch (e) { ctl = null; }
+    return { ok: true, root, ctl: ctl || null };
+  };
+  const tokenTexts = ctl => ctl.getTokens().map(t => trimLabel(t.getText()));
+
+  // 입력 칸의 지금 값: MultiInput 이면 토큰 글자들, 그 밖의 입력 칸이면 value. 판단 못 하면 ok:false(파이썬이 검사 불능으로 낸다).
+  const readInput = name => {
+    const f = fieldOf(name);
+    if (!f.ok) return f;
+    const { root, ctl } = f;
+    if (ctl && typeof ctl.getTokens === 'function') return { ok: true, kind: 'multi', tokens: tokenTexts(ctl), value: trimLabel(ctl.getValue ? ctl.getValue() : '') };
+    if (ctl && typeof ctl.getValue === 'function') return { ok: true, kind: 'input', tokens: [], value: trimLabel(ctl.getValue()) };
+    const el = root.matches('input, textarea') ? root : root.querySelector('input, textarea');
+    if (el) return { ok: true, kind: 'input', tokens: [], value: trimLabel(el.value) };
+    return { ok: false, count: 1, unknown: true };
+  };
+
+  // 지금 값을 UI5 컨트롤 API 로 지운다(토큰·value). UI5 컨트롤이 아니면 DOM 값을 비운다.
+  const clearInput = name => {
+    const f = fieldOf(name);
+    if (!f.ok) return f;
+    const { root, ctl } = f;
+    if (ctl && typeof ctl.getTokens === 'function') {
+      const removed = ctl.getTokens();
+      ctl.removeAllTokens();
+      if (typeof ctl.fireTokenUpdate === 'function') ctl.fireTokenUpdate({ type: 'removed', addedTokens: [], removedTokens: removed });
+      if (ctl.setValue) ctl.setValue('');
+      return { ok: true };
+    }
+    if (ctl && typeof ctl.setValue === 'function') {
+      ctl.setValue('');
+      if (typeof ctl.fireChange === 'function') ctl.fireChange({ value: '' });
+      return { ok: true };
+    }
+    const el = root.matches('input, textarea') ? root : root.querySelector('input, textarea');
+    if (!el) return { ok: false, count: 1, unknown: true };
+    el.value = '';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return { ok: true };
+  };
+
+  // 드롭다운(Select·ComboBox)에서 보이는 항목 글자가 value 와 같은 항목을 고른다. 항목 목록(items)은 실패 사유로 쓴다.
+  const selectOption = (name, value) => {
+    const f = fieldOf(name);
+    if (!f.ok) return f;
+    const ctl = f.ctl;
+    if (!ctl || typeof ctl.getItems !== 'function' || typeof ctl.setSelectedItem !== 'function') return { ok: false, count: 1, notSelect: true };
+    const items = ctl.getItems();
+    const texts = items.map(i => trimLabel(i.getText ? i.getText() : ''));
+    const hits = items.filter((_, k) => texts[k] === value);
+    if (hits.length !== 1) return { ok: false, count: hits.length, items: texts };
+    const item = hits[0];
+    ctl.setSelectedItem(item);
+    if (typeof ctl.fireSelectionChange === 'function') ctl.fireSelectionChange({ selectedItem: item });
+    if (typeof ctl.fireChange === 'function') ctl.fireChange({ selectedItem: item, value: value, itemPressed: true });
+    const now = ctl.getSelectedItem && ctl.getSelectedItem();
+    return { ok: !!now && trimLabel(now.getText()) === value, items: texts, selected: now ? trimLabel(now.getText()) : null };
+  };
+
   const clearOverlay = () => { const o = document.getElementById('__mc_overlay'); if (o) o.remove(); };
   // plan: [{n, box:{x,y,w,h}, badge:{cx,cy,r}}]
   const drawOverlay = (plan, color, border) => {
@@ -199,6 +275,6 @@ LIB_JS = r"""(() => {
     })
     .map(d => trimLabel(d.innerText).slice(0, 200));
 
-  window.__mc = { find, scrollColumn, focusInput, dialogs, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
+  window.__mc = { find, scrollColumn, focusInput, readInput, clearInput, selectOption, dialogs, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
   return true;
 })()"""

@@ -160,6 +160,11 @@ def _bad(**over):
     _bad(준비=[{"입력": "플랜트"}]),
     _bad(준비=[{"입력": "플랜트", "값": "1", "누르기": "이동"}]),
     _bad(준비=[{"누르기": "이동", "값": "1"}]),
+    _bad(준비=[{"선택": "생산방식"}]),  # 값 없음
+    _bad(준비=[{"선택": "생산방식", "값": 1}]),  # 숫자 값
+    _bad(준비=[{"선택": "생산방식", "값": " "}]),
+    _bad(준비=[{"선택": "생산방식", "값": "반복제조", "입력": "x"}]),
+    _bad(준비=[{"선택": "생산방식", "값": "반복제조", "누르기": "이동"}]),
     _bad(이름="a/b"),
     _bad(이름="끝점."),
     _bad(팝업=[]),
@@ -167,6 +172,11 @@ def _bad(**over):
 def test_parse_rejects_bad_list(data):
     with pytest.raises(mc.ListError):
         mc.parse_screens(data)
+
+
+def test_parse_accepts_select_step():
+    (s,) = mc.parse_screens(_bad(준비=[{"선택": "생산방식", "값": "반복제조"}, {"누르기": "이동"}]))
+    assert (s.steps[0].action, s.steps[0].name, s.steps[0].value) == ("선택", "생산방식", "반복제조")
 
 
 def test_parse_rejects_duplicate_screen_names_and_collects_all_problems():
@@ -671,6 +681,9 @@ class FakeTab:
         self.visibility, self.dialogs = visibility, list(dialogs or [])
         self.dialog_on_click, self.late, self.find_calls = dialog_on_click, late, 0  # late: 앞의 N 번 찾기는 아직 안 그려져 비어 있다
         self.focus = {"ok": True} if focus is None else focus
+        self.reads: list = []
+        self.clear_result: dict = {"ok": True}
+        self.pick: dict = {"ok": True, "items": ["반복제조", "개별제조"], "selected": "반복제조"}
         self.shots = 0
         self.stale = False
         self.calls: list[tuple] = []
@@ -721,6 +734,14 @@ class FakeTab:
             return {"w": 1600, "h": 900}
         if expr.startswith("window.__mc.focusInput("):
             return self.focus
+        if expr.startswith("window.__mc.readInput("):  # 기본은 빈 입력 칸. 필터 값이 남은 경우는 시험이 reads 에 차례로 정한다
+            if self.reads:
+                return self.reads.pop(0) if len(self.reads) > 1 else self.reads[0]
+            return {"ok": True, "kind": "input", "tokens": [], "value": ""}
+        if expr.startswith("window.__mc.clearInput("):
+            return self.clear_result
+        if expr.startswith("window.__mc.selectOption("):
+            return self.pick
         return 1 if "scrollColumn" in expr else None
 
     def screenshot_png(self):
@@ -976,6 +997,110 @@ def test_run_input_step_focus_failure_is_unavailable(tmp_path, capsys, fake):
     code, out = _capture(capsys, root)
     assert code == 2 and "포커스" in out["screens"][0]["사유"] and fake["tab"].shots == 0
     assert any(e == "window.__mc.focusInput(" + json.dumps("플랜트") + ")" for e in fake["tab"].evals)
+
+
+INPUT_SCREEN = TWO_SCREENS.replace("    표시:", '    준비:\n      - {입력: 플랜트, 값: "4310"}\n    표시:')
+SELECT_SCREEN = TWO_SCREENS.replace("    표시:", '    준비:\n      - {선택: 플랜트, 값: "반복제조"}\n    표시:')
+
+
+def _typed(tab):
+    return [p["text"] for m, p in tab.calls if m == "Input.insertText"]
+
+
+def _called(tab, fn):
+    return [e for e in tab.evals if e.startswith(f"window.__mc.{fn}(")]
+
+
+def test_input_step_skips_when_same_token_already_there(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, INPUT_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    fake["tab"].reads = [{"ok": True, "kind": "multi", "tokens": ["4310"], "value": ""}]
+    code, out = _capture(capsys, root)
+    assert code == 0 and out["status"] == "ok", out
+    assert _typed(fake["tab"]) == [] and _called(fake["tab"], "clearInput") == [] and _called(fake["tab"], "focusInput") == []
+
+
+def test_input_step_clears_other_token_then_types(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, INPUT_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    fake["tab"].reads = [{"ok": True, "kind": "multi", "tokens": ["1010"], "value": ""},
+                         {"ok": True, "kind": "multi", "tokens": [], "value": ""}]  # 지운 뒤 다시 읽으면 비었다
+    code, out = _capture(capsys, root)
+    assert code == 0 and out["status"] == "ok", out
+    assert len(_called(fake["tab"], "clearInput")) == 1 and _typed(fake["tab"]) == ["4310"]
+
+
+def test_input_step_types_into_empty_field_without_clearing(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, INPUT_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    code, out = _capture(capsys, root)
+    assert code == 0 and _typed(fake["tab"]) == ["4310"] and _called(fake["tab"], "clearInput") == []
+
+
+def test_input_step_plain_input_same_value_skips_other_value_replaces(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, INPUT_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    fake["tab"].reads = [{"ok": True, "kind": "input", "tokens": [], "value": "4310"}]
+    assert _capture(capsys, root)[0] == 0 and _typed(fake["tab"]) == []
+
+
+def test_input_step_unreadable_or_uncleared_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, INPUT_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    fake["tab"].reads = [{"ok": False, "count": 1, "unknown": True}]
+    code, out = _capture(capsys, root)
+    assert code == 2 and "읽지 못했다" in out["screens"][0]["사유"] and fake["tab"].shots == 0
+    fake["tab"] = FakeTab(STEP_FINDS)  # 지웠는데도 토큰이 남는다
+    fake["tab"].reads = [{"ok": True, "kind": "multi", "tokens": ["1010"], "value": ""}]
+    code, out = _capture(capsys, root)
+    assert code == 2 and "남아 있다" in out["screens"][0]["사유"] and _typed(fake["tab"]) == []
+
+
+def test_select_step_picks_item(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, SELECT_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    code, out = _capture(capsys, root)
+    assert code == 0 and out["status"] == "ok", out
+    assert _called(fake["tab"], "selectOption") == ["window.__mc.selectOption(" + json.dumps("플랜트") + ", " + json.dumps("반복제조") + ")"]
+    assert _typed(fake["tab"]) == []
+
+
+def test_select_step_missing_item_is_unavailable_and_lists_visible_items(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, SELECT_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    fake["tab"].pick = {"ok": False, "count": 0, "items": ["개별제조", "유형 없음"]}
+    code, out = _capture(capsys, root)
+    why = out["screens"][0]["사유"]
+    assert code == 2 and out["status"] == "unavailable" and "개별제조" in why and "유형 없음" in why and fake["tab"].shots == 0
+
+
+def test_select_step_not_a_dropdown_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, SELECT_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    fake["tab"].pick = {"ok": False, "count": 1, "notSelect": True}
+    code, out = _capture(capsys, root)
+    assert code == 2 and "드롭다운" in out["screens"][0]["사유"]
+
+
+def test_select_step_dialog_after_is_still_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, SELECT_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS, dialogs=["오류\n유효하지 않은 데이터"])
+    code, out = _capture(capsys, root)
+    assert code == 2 and "대화상자" in out["screens"][0]["사유"] and fake["tab"].shots == 0
+
+
+def test_js_exposes_read_clear_select():
+    from checker.manual_capture_js import LIB_JS
+    assert "readInput, clearInput, selectOption" in LIB_JS and "removeAllTokens" in LIB_JS and "setSelectedItem" in LIB_JS
 
 
 def test_focus_input_counts_only_filter_candidates_not_column_headers():
