@@ -301,6 +301,15 @@
     clearInterval(tick); tick = null;
     view = null;
     if (conn.state === 'auth') return renderAuth();
+    renderedOnce = true;
+    if (introWanted()) {  // 헤더 · 목록 없이 가운데 밝은 판 하나(시안 01)
+      appEl.setAttribute('data-intro', '1');
+      clear(mainEl);
+      mainEl.appendChild(introView());
+      setTitle('처음 화면');
+      return;
+    }
+    appEl.setAttribute('data-intro', '0');
     clear(mainEl);
     mainEl.scrollTop = 0; window.scrollTo(0, 0);
     var root = h('div');
@@ -448,10 +457,65 @@
   /* 맨 위 띠: 내 차례(대기 중인 질문·승인, 답을 기다리는 세션)가 있을 때만 있다. */
   function renderAnn(d) {
     clear(annEl);
-    if (!d.todo.length) return;
-    var first = d.todo[0];
-    annEl.appendChild(link(first.href, { class: 'ann', role: 'status' },
-      h('span', { text: '내 차례 ' + d.todo.length + '건 — ' + first.sname + '에서 답이 필요해' })));
+    if (d.todo.length) {
+      var first = d.todo[0];
+      annEl.appendChild(link(first.href, { class: 'ann', role: 'status' },
+        h('span', { text: '내 차례 ' + d.todo.length + '건 — ' + first.sname + '에서 답이 필요해' })));
+    }
+    // 막지 않는 문제(하네스 새 판)는 홈을 그대로 열고 띠 한 줄로만 알린다. 내 차례 띠와 같이 있으면 둘 다 보인다.
+    if (startData && startData.newVersion) {
+      annEl.appendChild(link('/settings', { class: 'ann note', role: 'status' },
+        h('span', { text: '하네스 새 판 ' + startData.newVersion + '이 있어 — 터미널에서 /harness:update 를 해 줘' })));
+    }
+  }
+
+  /* ---------- 첫 화면 · 자동 점검 (시안 01) ----------
+     첫 실행(이 PC 에서 시작하기를 아직 안 눌렀다: 서버가 상태 폴더에 표시를 둔다)이거나 막는 문제(GitHub 연결 등)가 있으면 01 화면을 띄운다.
+     막지 않는 문제(옛 판)는 띠만. 점검은 서버가 백그라운드로 하고, 첫 실행이 아니면 홈을 막지 않는다. */
+  var startData = null, introForce = false, introSkip = false, startPolls = 0, startTimer = null;
+  function introWanted() { return !!startData && !introSkip && (introForce || startData.firstRun || startData.blocking); }
+  function loadStart(refresh) {
+    return api('GET', '/api/start-checks' + (refresh ? '?refresh=1' : '')).then(function (d) {
+      startData = d && typeof d === 'object' ? d : null;
+      clearTimeout(startTimer);
+      if (startData && startData.loading && startPolls++ < 40) startTimer = setTimeout(function () { loadStart(false); }, 1500);
+      if (renderedOnce) applyStart();
+    }, function () { /* 점검을 못 읽으면 홈을 막지 않는다(검사 불능) */ });
+  }
+  var renderedOnce = false;
+  function applyStart() {
+    var on = !!(appEl && appEl.getAttribute('data-intro') === '1');
+    if (on || introWanted()) renderRoute(); else renderAnn(sideData());
+  }
+  function introView() {
+    var d = startData, blocking = d.blocking, names = { github: 'GitHub 연결', version: '하네스 판', claude: 'Claude Code 로그인' };
+    var rows = (d.checks && d.checks.length ? d.checks : ['github', 'version', 'claude'].map(function (id) { return { id: id, name: names[id], state: 'wait', detail: '확인하는 중이야' }; }));
+    var CL = { ok: 'ok', fail: 'fail', old: 'wait', unknown: 'unk', wait: 'wait' };
+    function done() {
+      introForce = false;
+      api('POST', '/api/start-checks/seen', {}).then(function () { startData.firstRun = false; }, function () { introSkip = true; }).then(renderRoute);
+    }
+    var list = h('div', { class: 'checks' }, rows.map(function (c) {
+      var kids = [h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: c.name }), h('span', { class: 'ct mono', text: c.detail || '' })];
+      if (c.fix && (c.state === 'fail' || c.state === 'old')) kids.push(h('span', { class: 'fix', text: c.fix }));
+      return h('div', { class: 'crow ' + CL[c.state], 'data-check': c.id }, kids);
+    }));
+    var steps = [['1', '프로젝트 고르기', '고객사 폴더 하나'], ['2', '할 일 말하기', '"요구사항 써 줘"처럼'], ['3', 'AI 질문에 답하기', '버튼으로 고르면 돼']];
+    var acts = blocking
+      ? [h('button', { type: 'button', class: 'pill line', text: '그냥 열기', onClick: function () { introSkip = true; renderRoute(); } }),
+         h('button', { type: 'button', class: 'pill dark', disabled: !!d.loading, text: d.loading ? '점검하는 중이야' : '다시 점검', onClick: function () { startPolls = 0; loadStart(true); } })]
+      : [h('button', { type: 'button', class: 'pill dark', text: '시작하기', onClick: done })];
+    return h('div', { class: 'intro' }, h('section', { class: 'light intro-box' },
+      h('span', { class: 'eb', text: blocking ? '점검 결과' : (d.firstRun ? '처음 열었어' : '처음 화면') }),
+      h('h1', { text: blocking ? '먼저 고칠 게 있어' : 'Blueward Harness에 온 걸 환영해' }),
+      h('span', { class: 'lm', text: blocking ? '아래 ✕ 줄을 고친 다음 "다시 점검"을 눌러 줘. 급하면 그냥 열어도 되지만, GitHub 일은 안 될 수 있어.'
+        : 'AI와 함께 고객사 문서(SRS·Spec·매뉴얼·CTS·Role)를 만들고 개발하는 곳이야. 시작 전에 필요한 것을 자동으로 확인했어.' }),
+      list,
+      h('span', { class: 'eb', text: '이렇게 써' }),
+      h('div', { class: 'num3' }, steps.map(function (s) {
+        return h('div', { class: 'n3' }, h('span', { class: 'eb', text: s[0] }), h('b', { text: s[1] }), h('span', { class: 'lm sm', text: s[2] }));
+      })),
+      h('div', { class: 'acts end' }, acts)));
   }
   /* 헤더 오른쪽 프로젝트 이름: 지금 화면이 다루는 폴더만 보인다. 새 작업은 고른 작업 폴더, 세션·질문·승인은 그 세션.
      그 밖의 화면은 열린 세션들의 프로젝트가 하나뿐일 때만 보이고, 여럿이면 어느 것인지 알 수 없어 비워 둔다(예전에는 가장 위 세션 것을 보여 줘서 틀렸다). */
@@ -1759,6 +1823,10 @@
 
       sec.appendChild(set('연결 상태', h('div', null, crow('GitHub', conn.gh), crow('하네스 판', conn.ver), crow('프로젝트', conn.proj))));
 
+      sec.appendChild(set('처음 화면', h('div', null,
+        h('button', { type: 'button', class: 'pill line', 'data-intro-again': '1', text: '처음 화면 다시 보기', onClick: function () { introForce = true; introSkip = false; if (!startData) startData = { firstRun: false, blocking: false, checks: [] }; renderRoute(); loadStart(false); } }),
+        h('p', { class: 'note-muted', text: '시작할 때 한 번 보이는 환영 화면과 자동 점검을 다시 봐.' }))));
+
       var model = modelChoice(), effort = effortChoice();
       var ml = (modelOptions().filter(function (o) { return o.value === model; })[0] || {}).label || model || '기본값';
       var el = (effortOptions().filter(function (o) { return o.value === effort; })[0] || {}).label || effort || '기본값';
@@ -1784,7 +1852,10 @@
     appEl.appendChild(annEl); appEl.appendChild(headEl);
     appEl.appendChild(h('div', { class: 'shell' }, sideEl, mainEl));
     root.appendChild(appEl);
-    renderRoute();
+    // 점검 결과(첫 실행인지)가 오면 그 화면으로 처음부터 그린다. 늦거나 못 읽으면 홈을 막지 않고 그대로 그린다.
+    var first = function () { if (!renderedOnce) renderRoute(); };
+    loadStart(false).then(first, first);
+    setTimeout(first, 1200);
     loadSessions().then(function () { connectEvents(); }, function (e) { if (e.status !== 401) { connectEvents(); scheduleRetryIfDown(); } });
     if (window.ResizeObserver) new ResizeObserver(function () { if (collapsed === null) scheduleSide(); }).observe(root);
   }

@@ -95,7 +95,8 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
   const dump = (e, d) => { if (e.nodeType === 3) return e.text; return '<' + e.tag + (e.open ? '[open]' : '') + (e.attrs['class'] ? '.' + e.attrs['class'].replace(/ /g, '.') : '') + '>' + e.children.map(c => dump(c, d + 1)).join('') + '</' + e.tag + '>'; };
   out.dump = main ? dump(main, 0) : '';
   out.side = root.querySelector('.side') ? root.querySelector('.side').textContent : '';
-  out.head = root.querySelector('header') ? root.querySelector('header').textContent : '';
+  out.ann = root.querySelector('.ann-slot') ? root.querySelector('.ann-slot').textContent : '';
+  out.head =root.querySelector('header') ? root.querySelector('header').textContent : '';
   
   require('fs').writeFileSync(process.argv[6], JSON.stringify(out, null, 1), 'utf8');
   process.exit(0);

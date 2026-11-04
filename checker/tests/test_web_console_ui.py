@@ -641,7 +641,7 @@ def test_app_frame_ann_only_with_todo_and_menu_paths():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     # 맨 위 띠는 내 차례가 없으면 만들지 않는다
     ann = app[app.index("function renderAnn"):app.index("function projectOf")]
-    assert re.search(r"clear\(annEl\);\s*if \(!d\.todo\.length\) return;", ann) and "내 차례 ' + d.todo.length + '건 — '" in ann
+    assert re.search(r"clear\(annEl\);\s*if \(d\.todo\.length\) \{", ann) and "내 차례 ' + d.todo.length + '건 — '" in ann
     # 메뉴: 내 일 → /, 작업 → 가장 위 세션, 산출물 → /docs, 새 작업 → /new, 설정 → /settings.
     head = app[app.index("function renderHead"):app.index("function renderSide")]
     assert "link('/', { text: '내 일'" in head and "link('/new', { text: '새 작업'" in head and "link('/settings'" in head
@@ -683,9 +683,10 @@ def _session(sid, **extra):
     return base
 
 
-def _smoke(tmp_path, route, sessions, requests=None):
+def _smoke(tmp_path, route, sessions, requests=None, extra=None):
     import json
-    data = {"GET /api/sessions": {"sessions": sessions}, "GET /api/flows": {"flows": [{"id": "srs", "name": "요구사항", "steps": _STEPS}], "tools": []},
+    data = dict(extra or {})
+    data |= {"GET /api/sessions": {"sessions": sessions}, "GET /api/flows": {"flows": [{"id": "srs", "name": "요구사항", "steps": _STEPS}], "tools": []},
             "GET /api/approvals": {"state": "no"}, "GET /api/models": {"options": [{"value": "", "label": "기본"}], "effortOptions": [{"value": "", "label": "기본"}], "permissionOptions": [{"value": "", "label": "기본"}]},
             "GET /api/folders/recent": {"folders": ["C:/w/proj"]}}
     for s in sessions:
@@ -837,3 +838,40 @@ def test_work_screen_css_blocks_and_responsive_rules():
     # 넓을 때 옆, 좁을 때 아래
     assert re.search(r"@container shell \(max-width: 1000px\) \{\s*\.sess-grid \{ grid-template-columns: minmax\(0, 1fr\); \}", css)
     assert "details.more > summary::-webkit-details-marker { display: none; }" in css  # 접힘 삼각형은 직접 그린다
+
+
+# 첫 화면(시안 01) 시험용 점검 결과
+_OK_CHECKS = [{"id": "github", "name": "GitHub 연결", "state": "ok", "detail": "me"},
+              {"id": "version", "name": "하네스 판", "state": "ok", "detail": "0.10.168"},
+              {"id": "claude", "name": "Claude Code 로그인", "state": "unknown", "detail": "확인 못 함 · 콘솔이 로그인 상태를 읽을 수 없어"}]
+
+
+def _start(**kw):
+    return {"GET /api/start-checks": dict({"firstRun": False, "loading": False, "blocking": False, "newVersion": None, "checks": _OK_CHECKS}, **kw)}
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_intro_screen_first_run_and_blocking(tmp_path):
+    got = _smoke(tmp_path, "", [_session("s1")], extra=_start(firstRun=True))
+    text, dump = got["text"], got["dump"]
+    for need in ("처음 열었어", "Blueward Harness에 온 걸 환영해", "GitHub 연결", "하네스 판", "Claude Code 로그인", "확인 못 함", "이렇게 써", "프로젝트 고르기", "시작하기"):
+        assert need in text, need
+    assert "<div.crow.ok>" in dump and "<div.crow.unk>" in dump and "다시 점검" not in text  # 확인 못 함은 ? 줄, 문제로 치지 않는다
+    assert "<div.ptitle>" not in dump and "<section.light.intro-box>" in dump  # 홈을 그리지 않고 가운데 판 하나(헤더·목록은 CSS 가 숨긴다)
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    assert '#app[data-intro="1"] .top' in css and '#app[data-intro="1"] .side' in css
+    blocked = [dict(_OK_CHECKS[0], state="fail", detail="로그인이 안 돼 있어", fix="터미널에서 gh auth login 을 하고 다시 점검해 줘.")] + _OK_CHECKS[1:]
+    got = _smoke(tmp_path, "", [_session("s1")], extra=_start(blocking=True, checks=blocked))  # 첫 실행이 아니어도 막는 문제면 뜬다
+    assert "먼저 고칠 게 있어" in got["text"] and "gh auth login" in got["text"] and "다시 점검" in got["text"] and "<div.crow.fail>" in got["dump"]
+    assert "시작하기" not in got["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_intro_not_shown_after_first_run_and_old_version_is_a_strip(tmp_path):
+    got = _smoke(tmp_path, "", [_session("s1")], extra=_start())
+    assert "처음 열었어" not in got["text"] and "시작하기" not in got["text"]  # 이미 본 PC 는 홈이 그대로 열린다
+    got = _smoke(tmp_path, "", [_session("s1", pendingRequestIds=["q1"])], extra=_start(newVersion="0.10.169"),
+                 requests=[{"id": "q1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "ls"}}])
+    assert "하네스 새 판 0.10.169" in got["ann"] and "/harness:update" in got["ann"] and "내 차례" in got["ann"]  # 내 차례 띠와 함께 둘 다 보인다
+    got = _smoke(tmp_path, "settings", [_session("s1")], extra=_start())
+    assert "처음 화면 다시 보기" in got["text"]

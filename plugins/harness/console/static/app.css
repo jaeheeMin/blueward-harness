@@ -863,3 +863,17 @@ details.fold > [data-r]:empty { display: none; }
   .set { grid-template-columns: minmax(0, 1fr); }
   .dlist { max-width: none; }
 }
+/* 첫 화면 · 자동 점검 (시안 01): 헤더 · 목록 없이 가운데 밝은 판 하나. 막는 문제 = ✕ 줄 + 고치는 법. */
+#app[data-intro="1"] .top, #app[data-intro="1"] .side, #app[data-intro="1"] .ann-slot { display: none; }
+#app[data-intro="1"] .shell { grid-template-columns: minmax(0, 1fr); padding: 0 20px; }
+.ann.note { background: var(--attn); color: var(--lightink); }
+.ann.note:hover { color: var(--lightink); }
+.intro { display: flex; justify-content: center; padding: 36px 0; }
+.intro-box { width: min(620px, 100%); gap: 16px; }
+.intro-box h1 { font-size: 20px; line-height: 1.3; font-weight: 500; letter-spacing: -0.3px; }
+.intro-box .eb { color: var(--lmuted); }
+.intro-box .lm.sm { font-size: 12.5px; }
+.intro-box .checks .crow:first-child { border-top: 0; }
+.intro-box .crow .fix { flex: 1 0 100%; padding-left: 32px; font-size: 13px; color: var(--lightink); overflow-wrap: anywhere; }
+.num3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 10px; }
+.n3 { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border: 1.5px solid var(--lline); border-radius: var(--rc); background: var(--card); }

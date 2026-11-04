@@ -5039,3 +5039,87 @@ def test_flow_next_needs_flow_data(tmp_path, monkeypatch, request):
     c.login()
     sid = launch(c, "첫 작업")
     assert c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[0] == 503
+
+
+# ---- 첫 화면 · 자동 점검 (시안 01, #636) ----
+# 점검 판정(gh 로그인 · 하네스 판 · Claude 로그인)과 첫 실행 표시 파일을 본다.
+
+def _check_console(tmp_path, monkeypatch, gh=(0, "me\n"), latest="9.9.9", installed=True):
+    c = Console(tmp_path, monkeypatch, run=FakeRun(gh_api_user=gh))
+    c.app.gh_installed = lambda: installed
+    c.app.remote_latest = (lambda: latest) if not callable(latest) else latest
+    c.login()
+    return c
+
+
+def _checks(c, refresh=False):
+    status, body, _ = c.call("GET", "/api/start-checks" + ("?refresh=1" if refresh else ""))
+    assert status == 200
+    return body, {x["id"]: x for x in body["checks"]}
+
+
+def test_first_run_mark_is_saved_on_the_pc_and_survives_restart(tmp_path, monkeypatch):
+    c = _check_console(tmp_path, monkeypatch)
+    try:
+        assert _checks(c)[0]["firstRun"] is True
+        assert not (c.state / console_server.FIRST_RUN_FILE).exists()
+        status, body, _ = c.call("POST", "/api/start-checks/seen", {})
+        assert status == 200 and body["firstRun"] is False
+        assert (c.state / console_server.FIRST_RUN_FILE).is_file()  # 브라우저가 아니라 상태 폴더에 남는다
+        assert _checks(c)[0]["firstRun"] is False
+        assert c.app.is_first_run() is False
+    finally:
+        c.close()
+
+
+def test_start_checks_all_ok_is_not_blocking(tmp_path, monkeypatch):
+    c = _check_console(tmp_path, monkeypatch)
+    try:
+        body, by = _checks(c)
+        assert body["blocking"] is False and body["newVersion"] is None and body["loading"] is False
+        assert by["github"]["state"] == "ok" and by["github"]["detail"] == "me"
+        assert by["version"]["state"] == "ok" and by["version"]["detail"] == "9.9.9"
+    finally:
+        c.close()
+
+
+def test_start_checks_github_not_logged_in_blocks_with_fix(tmp_path, monkeypatch):
+    msg = "You are not logged into any GitHub hosts. To log in, run: gh auth login\n"
+    c = _check_console(tmp_path, monkeypatch, gh=(1, msg))
+    try:
+        body, by = _checks(c)
+        assert body["blocking"] is True and by["github"]["state"] == "fail"
+        assert "gh auth login" in by["github"]["fix"]
+    finally:
+        c.close()
+    c = _check_console(tmp_path / "nogh", monkeypatch, gh=(127, ""), installed=False)  # gh 자체가 없다
+    try:
+        body, by = _checks(c)
+        assert body["blocking"] is True and by["github"]["state"] == "fail" and "gh auth login" in by["github"]["fix"]
+    finally:
+        c.close()
+
+
+def test_start_checks_cannot_read_is_unknown_not_blocking(tmp_path, monkeypatch):
+    c = _check_console(tmp_path, monkeypatch, gh=(127, ""), latest=lambda: None)  # gh 시간 초과(설치는 돼 있음) + 원격 못 읽음
+    try:
+        body, by = _checks(c)
+        assert body["blocking"] is False and body["newVersion"] is None
+        assert by["github"]["state"] == "unknown" and by["version"]["state"] == "unknown"  # 못 읽은 것을 통과나 위반으로 뭉개지 않는다
+        assert by["claude"]["state"] == "unknown" and "확인 못 함" in by["claude"]["detail"]
+    finally:
+        c.close()
+
+
+def test_start_checks_old_version_is_notice_only_and_refresh_rechecks(tmp_path, monkeypatch):
+    latest = ["10.0.0"]
+    c = _check_console(tmp_path, monkeypatch, latest=lambda: latest[0])
+    try:
+        body, by = _checks(c)
+        assert by["version"]["state"] == "old" and body["newVersion"] == "10.0.0" and body["blocking"] is False  # 막지 않는다
+        assert "/harness:update" in by["version"]["fix"]
+        latest[0] = "9.9.9"
+        assert _checks(c)[0]["newVersion"] == "10.0.0"  # 60초 기억
+        assert _checks(c, refresh=True)[0]["newVersion"] is None  # 다시 점검은 기억을 지우고 새로 읽는다
+    finally:
+        c.close()
