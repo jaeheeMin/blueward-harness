@@ -5239,6 +5239,76 @@ def test_dev_ready_unknown_when_git_cannot_be_read(tmp_path, monkeypatch, over):
         c.close()
 
 
+# ---- 세션 기억(context) 사용량 (#648) ----
+
+def _asst(inp, cc, cr, model="claude-opus-5-5", side=False, out=999):
+    row = {"type": "assistant", "message": {"model": model, "usage": {"input_tokens": inp, "cache_creation_input_tokens": cc,
+                                                                    "cache_read_input_tokens": cr, "output_tokens": out}}}
+    if side:
+        row["isSidechain"] = True
+    return json.dumps(row)
+
+
+def test_context_usage_reads_last_main_assistant_line_from_the_end(tmp_path):
+    import context_usage
+    f = tmp_path / "t.jsonl"
+    filler = json.dumps({"type": "user", "message": {"content": "x" * 5000}})
+    lines = [_asst(1, 2, 3)] + [filler] * 800 + [_asst(2, 340, 241140), _asst(9, 9, 9, side=True), '{"type":"progress"}', '{"type":"assistant","message":{"model":"x"']
+    f.write_text("\n".join(lines), encoding="utf-8")  # 4MB 넘는 파일. 마지막 줄은 쓰다 만 깨진 줄
+    assert f.stat().st_size > 4_000_000
+    got = context_usage.read_last_usage(str(f))
+    assert got == {"tokens": 241482, "model": "claude-opus-5-5"}  # output_tokens·서브에이전트 줄·깨진 줄은 셈에 넣지 않는다
+    # 파일이 바뀌면 다시 읽는다
+    f.write_text("\n".join(lines + [_asst(1, 1, 1)]) + "\n", encoding="utf-8")
+    assert context_usage.read_last_usage(str(f))["tokens"] == 3
+
+
+def test_context_usage_unknown_cases(tmp_path):
+    import context_usage
+    assert context_usage.read_last_usage(str(tmp_path / "nope.jsonl")) is None  # 파일 없음
+    f = tmp_path / "e.jsonl"
+    f.write_text('{"type":"user"}\n{"type":"assistant","message":{"role":"assistant"}}\n' + _asst(0, 0, 0) + "\n" + _asst(1, 1, 1, side=True) + "\n", encoding="utf-8")
+    assert context_usage.read_last_usage(str(f)) is None  # usage 없음·0·서브에이전트뿐
+    one = tmp_path / "one.jsonl"
+    one.write_text(_asst(5, 5, 5), encoding="utf-8")  # 줄 하나, 끝 줄바꿈 없음
+    assert context_usage.read_last_usage(str(one))["tokens"] == 15
+    assert context_usage.for_session({"transcriptPath": str(tmp_path / "nope.jsonl")}) == {"tokens": None, "window": None, "pct": None}
+    assert context_usage.for_session({}) == {"tokens": None, "window": None, "pct": None}
+    assert context_usage.valid_path("relative.jsonl") == "" and context_usage.valid_path(str(one)) == str(one) and context_usage.valid_path(str(f)[:-6] + ".txt") == ""
+
+
+@pytest.mark.parametrize("model,choice,window", [
+    ("claude-opus-5-5", "", 1_000_000), ("claude-sonnet-5-5", "", 1_000_000), ("claude-haiku-5-5", "", 1_000_000), ("claude-opus-4-7", "", 1_000_000),
+    ("claude-fable-5-1", "", 1_000_000), ("claude-opus-4-6", "", 200_000), ("claude-sonnet-4-6", "", 200_000),
+    ("claude-opus-4-6", "opus[1m]", 1_000_000), ("claude-sonnet-4-6[1m]", "", 1_000_000),
+    ("claude-haiku-4-5", "", None), ("claude-3-5-sonnet-20241022", "", None), ("claude-opus-4-1-20250805", "", None), ("something-else", "", None), ("", "", None)])
+def test_context_window_table_only_documented_models(model, choice, window):
+    import context_usage
+    assert context_usage.window_for(model, choice) == window  # 문서에 없는 모델은 창 크기를 지어내지 않는다
+
+
+def test_hook_saves_transcript_path_and_session_shows_context_pct(tmp_path, monkeypatch):
+    c = Console(tmp_path, monkeypatch)
+    try:
+        c.login()
+        f = tmp_path / "s1.jsonl"
+        f.write_text(_asst(2, 340, 920000, model="claude-opus-5-5") + "\n", encoding="utf-8")
+        c.event("s1", "SessionStart", transcript_path=str(f))
+        got = [s for s in c.call("GET", "/api/sessions")[1] if s["id"] == "s1"][0]
+        assert got["context"] == {"tokens": 920342, "window": 1_000_000, "pct": 92}
+        # 모르는 모델이면 % 없이 토큰 수만
+        f.write_text(_asst(1, 1, 99998, model="claude-haiku-4-5") + "\n", encoding="utf-8")
+        got = [s for s in c.call("GET", "/api/sessions")[1] if s["id"] == "s1"][0]
+        assert got["context"] == {"tokens": 100000, "window": None, "pct": None}
+        # 경로가 없거나 .jsonl 이 아닌 훅은 저장된 경로를 바꾸지 못한다
+        c.event("s1", "PreCompact", transcript_path="C:/etc/passwd")
+        c.event("s2", "SessionStart")
+        by = {s["id"]: s for s in c.call("GET", "/api/sessions")[1]}
+        assert by["s1"]["context"]["tokens"] == 100000 and by["s2"]["context"] == {"tokens": None, "window": None, "pct": None}
+    finally:
+        c.close()
+
+
 def test_dev_ready_rejects_unknown_folder_and_missing_cwd(tmp_path, monkeypatch):
     c = flow_console(tmp_path, monkeypatch)
     try:

@@ -385,7 +385,9 @@
         if (nx.unknown) box.appendChild(h('p', { class: 'sub attn', role: 'alert', text: '판정 불능 · ' + nx.unknown }));
         if (nx.hint && !nx.options.length) box.appendChild(h('p', { class: 'sub', text: nx.hint }));
         if (nx.options.length) {
-          box.appendChild(h('p', { class: 'sub', text: '다음에 이어서 할 일을 고르세요. 새 세션에서 시작하면 앞 대화를 다시 읽지 않아 더 빠르고 정확해요.' }));
+          var mem = L.memoryOf(s);
+          box.appendChild(h('p', { class: 'sub', 'data-memory': mem.kind, text: (mem.kind === 'pct' ? '이 세션이 기억을 ' + mem.pct + '% 썼어요. ' : mem.kind === 'tokens' ? '이 세션이 기억을 ' + mem.words + ' 썼어요(%는 확인 못 함). ' : '')
+            + '다음에 이어서 할 일을 고르세요. 새 세션에서 시작하면 앞 대화를 다시 읽지 않아 더 빠르고 정확해요.' }));
           var row = h('div', { class: 'acts' });
           nx.options.forEach(function (o) {
             if (o.disabled) row.appendChild(h('button', { type: 'button', class: 'pill off', disabled: true }, o.label, h('small', { text: '준비 중' })));
@@ -420,6 +422,8 @@
       return {
         el: el,
         update: function (s) { last = s; draw(); },
+        // 기억 배너의 [새 세션으로 넘기기]: 지금 갈래를 새 세션에서 이어 간다(다음 갈래 카드와 같은 인계 절차)
+        handoffSame: function (s) { last = s; askNext({ flow: s.flowId, label: (s.flowName || s.flowId) + ' 이어서', ids: [] }); },
         destroy: function () { alive = false; clearTimeout(pollTimer); closeModal(); }
       };
     }
@@ -996,7 +1000,10 @@
               h('span', { class: 'rs', text: (s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음') + ' · ' + folderName(s), title: s.cwd || null })),
             h('td', { 'data-l': '단계' }, tbar(s)),
             nums,
-            h('td', { 'data-l': '기억' }, h('span', { class: 'mono unk', title: '기억 사용량 확인 못 함', text: '?' })),
+            h('td', { 'data-l': '기억' }, (function () {
+              var m = L.memoryOf(s);
+              return h('span', { class: 'mono' + (m.kind === 'unknown' ? ' unk' : '') + (m.level ? ' ' + m.level : ''), title: m.title, text: m.text });
+            })()),
             h('td', { 'data-l': '상태' }, chip, h('span', { class: 'rs', title: doing, text: doing }),
               subs ? h('span', { class: 'rs', text: '서브에이전트 ' + subs + '개 실행 중' }) : null));
         });

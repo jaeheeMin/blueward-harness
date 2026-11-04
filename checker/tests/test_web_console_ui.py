@@ -305,18 +305,19 @@ const cases = {
     const s = { branch: 'feat/636-x', flowId: 'srs', stepIndex: 1, flowSteps: steps('done', 'active', 'pending'), flowPr: { number: 6, state: 'OPEN', checks: 'pass' } };
     const cells = L.sessionStrip(s);
     // 요구사항·개발 번호는 데이터(다음 갈래의 REQ 번호)가 없으면 만들지 않는다
-    assert.deepStrictEqual(cells.map(c => c.id), ['step', 'progress', 'issue', 'pr']);
+    assert.deepStrictEqual(cells.map(c => c.id), ['step', 'progress', 'issue', 'memory', 'pr']);
     assert.strictEqual(cls(cells[0]), '2 / 3 단계1');
     assert.strictEqual(cls(cells[1]), '33%'); assert.ok(cells[1].title.includes('3단계 중 1단계'));  // 근거를 같이 보인다
-    assert.strictEqual(cls(cells[2]), '이슈 #636'); assert.strictEqual(cls(cells[3]), 'PR #6 검토 중');
+    assert.strictEqual(cls(cells[2]), '이슈 #636'); assert.strictEqual(cls(cells[4]), 'PR #6 검토 중');
+    assert.strictEqual(cls(cells[3]), '확인 못 함');  // 기억 사용량을 못 읽으면 숫자를 지어내지 않는다
     assert.deepStrictEqual(L.progressOf(s), { done: 1, total: 3, pct: 33 });
     // 갈래가 없으면 단계 칸만 "정해진 갈래 없음", 진행 %·PR 칸은 만들지 않는다
-    assert.deepStrictEqual(L.sessionStrip({ id: 'x' }).map(c => [c.id, c.value]), [['step', '정해진 갈래 없음']]);
+    assert.deepStrictEqual(L.sessionStrip({ id: 'x' }).map(c => [c.id, c.value]), [['step', '정해진 갈래 없음'], ['memory', '확인 못 함']]);
     // 끝난 갈래: 다음 갈래 옵션의 REQ 번호에서만 요구사항·개발 번호를 읽는다
     const fin = L.sessionStrip({ flowId: 'srs', flowFinished: true, flowSteps: steps('done', 'done'), flowPr: { number: 6, state: 'MERGED' },
       nextFlow: { options: [{ flow: 'spec', label: 'Spec', ids: ['REQ-001', 'REQ-002', 'REQ-003', 'bad'] }, { ids: ['REQ-001'] }] } });
     const by = Object.fromEntries(fin.map(c => [c.id, c.value]));
-    assert.deepStrictEqual(by, { step: '2 / 2 끝', progress: '끝', req: 'REQ-001, REQ-002 외 1개', dev: 'DEV-001, DEV-002 외 1개', pr: 'PR #6 합쳐짐' });
+    assert.deepStrictEqual(by, { step: '2 / 2 끝', progress: '끝', req: 'REQ-001, REQ-002 외 1개', dev: 'DEV-001, DEV-002 외 1개', memory: '확인 못 함', pr: 'PR #6 합쳐짐' });
     // PR 이 아직 없으면 "PR 아직", 읽지 못했으면 "확인 못 함"
     assert.strictEqual(L.sessionStrip({ flowId: 'f', flowSteps: steps('active') }).slice(-1)[0].value, 'PR 아직');
     assert.strictEqual(L.sessionStrip({ flowId: 'f', flowSteps: steps('active'), flowUnknown: ['gh'] }).slice(-1)[0].value, '확인 못 함');
@@ -325,6 +326,19 @@ const cases = {
     const lines = L.prLines({ number: 6, state: 'OPEN', checks: 'none' });
     assert.deepStrictEqual(lines.map(l => [l.id, l.state]), [['checks', 'unk'], ['team', 'wait']]);
     assert.deepStrictEqual(L.prLines({ number: 6, state: 'MERGED', checks: 'fail' }).map(l => l.state), ['fail', 'ok']);
+  },
+  memory_of_pct_tokens_unknown_and_levels() {
+    // % 는 서버가 창 크기를 알 때만 온다. 없으면 토큰 수만, 아무것도 없으면 확인 못 함.
+    assert.deepStrictEqual(L.memoryOf({}).kind, 'unknown'); assert.strictEqual(L.memoryOf({}).text, '?');
+    assert.strictEqual(L.memoryOf({ context: { tokens: null, window: null, pct: null } }).kind, 'unknown');
+    const tok = L.memoryOf({ context: { tokens: 241482, window: null, pct: null } });
+    assert.deepStrictEqual([tok.kind, tok.text, tok.pct, tok.level], ['tokens', '24만 토큰', null, '']);
+    assert.ok(!/%/.test(tok.text));
+    const lv = (pct) => L.memoryOf({ context: { tokens: 1000, window: 1000, pct } }).level;
+    assert.deepStrictEqual([lv(64), lv(80), lv(81), lv(89), lv(90), lv(92)], ['', '', 'warn', 'warn', 'hot', 'hot']);  // 링 색: 80% 초과 노랑, 90% 이상 빨강
+    assert.strictEqual(L.memoryOf({ context: { tokens: 5, window: 10, pct: 92 } }).text, '92%');
+    const cell = L.sessionStrip({ context: { tokens: 920000, window: 1000000, pct: 92 } }).filter(c => c.id === 'memory')[0];
+    assert.deepStrictEqual([cell.value, cell.tone], ['92%', 'w']);
   },
   async dom_pr_card_flow_preview_and_compact_panel() {
     const { kit } = makeKit({ 'GET /api/flows': FLOWS });
@@ -734,9 +748,12 @@ def test_app_frame_ann_only_with_todo_and_menu_paths():
     assert "link('/', { text: '내 일'" in head and "link(newHref(), { text: '새 작업'" in head and "link('/settings'" in head
     assert "'/s/' + encodeURIComponent(rows[0].id)" in head and "link('/docs', { text: '산출물'" in head
     assert "p === '/docs'" in app and "docs: docsView" in app
-    # 세션 목록: 기억은 데이터가 없어 ? 와 툴팁만, 세션이 없으면 점선 상자와 새 세션 버튼
+    # 세션 목록: 기억은 값이 있으면 링, 못 읽으면 ? 와 툴팁만(memRing), 세션이 없으면 점선 상자와 새 세션 버튼
     side = app[app.index("function renderSide"):app.index("function renderRail")]
-    assert "'기억 사용량 확인 못 함'" in side and "text: '?'" in side
+    assert "memRing(s)" in side
+    ring = app[app.index("function memRing"):app.index("function renderSide")]
+    assert "text: '?'" in ring and "ring unk" in ring
+    assert "기억 사용량 확인 못 함" in (STATIC / "flow-logic.js").read_text(encoding="utf-8")
     assert "아직 세션이 없어. 새 작업을 시작하면 여기에 생겨." in side and "+ 새 세션" in side
     assert "logo-sauce.png" in head and (STATIC / "logo-sauce.png").is_file() and not (STATIC / "blueward-logo.png").exists()
 
@@ -985,3 +1002,29 @@ def test_intro_not_shown_after_first_run_and_old_version_is_a_strip(tmp_path):
     assert "하네스 새 판 0.10.169" in got["ann"] and "/harness:update" in got["ann"] and "내 차례" in got["ann"]  # 내 차례 띠와 함께 둘 다 보인다
     got = _smoke(tmp_path, "settings", [_session("s1")], extra=_start())
     assert "처음 화면 다시 보기" in got["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_memory_banner_ring_and_unknown_cases(tmp_path):
+    hot = {"tokens": 920000, "window": 1000000, "pct": 92}
+    got = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)])
+    assert "이 세션 기억이 거의 찼어 (92%)" in got["text"] and "새 세션으로 넘기기" in got["text"] and "계속하기" in got["text"]
+    assert "<span.ring.pct.hot>" in got["sideDump"] and "기억92%" in got["text"]  # 링(사이드바)은 빨강, 숫자 띠에도 기억 칸
+    # 80% 초과 90% 미만은 노랑 링, 배너는 없다
+    got = _smoke(tmp_path, "s/s1", [_session("s1", context={"tokens": 850000, "window": 1000000, "pct": 85})])
+    assert "<span.ring.pct.warn>" in got["sideDump"] and "기억이 거의 찼어" not in got["text"]
+    # 64% 는 기본 링
+    got = _smoke(tmp_path, "s/s1", [_session("s1", context={"tokens": 640000, "window": 1000000, "pct": 64})])
+    assert "<span.ring.pct>" in got["sideDump"] and "기억이 거의 찼어" not in got["text"]
+    # 창 크기를 모르면 % 없이 토큰 수만, 배너 없음
+    got = _smoke(tmp_path, "s/s1", [_session("s1", context={"tokens": 241482, "window": None, "pct": None})])
+    assert "기억24만 토큰" in got["text"] and "기억이 거의 찼어" not in got["text"] and "<span.ring.unk>" in got["sideDump"]
+    # 읽지 못했으면 지금처럼 ? 와 확인 못 함
+    got = _smoke(tmp_path, "s/s1", [_session("s1")])
+    assert "기억확인 못 함" in got["text"] and "<span.ring.unk>" in got["sideDump"] and "기억이 거의 찼어" not in got["text"]
+    # 터미널 세션은 넘기기 버튼 없이 안내만
+    got = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, context=hot)])
+    assert "기억이 거의 찼어" in got["text"] and "새 세션으로 넘기기" not in got["text"] and "/harness:handoff" in got["text"]
+    # 홈 표의 기억 열
+    got = _smoke(tmp_path, "", [_session("s1", context=hot)])
+    assert "92%" in got["text"]

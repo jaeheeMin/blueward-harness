@@ -6,6 +6,7 @@ import re
 import time
 from typing import Callable
 
+import context_usage
 import flows
 from store import (CHECK_DONE, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
                    TITLE_PROMPT, TITLE_SESSION, mark_check, remember_touched)
@@ -72,6 +73,9 @@ class Hooks:
             model = body.get("model")  # 훅 입력에 있을 때만 쓴다(없으면 표시하지 않는다)
             if isinstance(model, str) and model:
                 s["model"] = model
+            tpath = context_usage.valid_path(body.get("transcript_path"))  # 기억 사용량을 읽을 대화 기록 위치(#648)
+            if tpath:
+                s["transcriptPath"] = tpath
             if not waits:
                 return self.stop(s, body, undo, ts) if name == "stop" else self.event(s, body, ts)
         return self.permission(s, body, alive) if name == "permission" else self.question(s, body, alive)

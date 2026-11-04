@@ -559,6 +559,13 @@
     if (proj) headEl.appendChild(h('span', { class: 'eb proj', title: '프로젝트', text: proj }));
     headEl.appendChild(link('/settings', { class: 'pill ghost', 'aria-current': cur === '/settings' ? 'page' : null }, icon('settings', 14), '설정'));
   }
+  // 세션 기억 링(#648): % 를 알면 채워진 링(80% 초과 노랑, 90% 이상 빨강), 토큰 수만 알면 점선 링에 만 단위, 모르면 "?".
+  function memRing(s) {
+    var m = window.BHLogic.memoryOf(s);
+    if (m.kind === 'pct') return h('span', { class: 'ring pct' + (m.level ? ' ' + m.level : ''), style: '--p:' + m.pct, title: '기억 ' + m.pct + '% · ' + m.title }, h('b', { text: m.pct + '%' }));
+    if (m.kind === 'tokens') return h('span', { class: 'ring unk', title: m.title }, h('b', { text: m.tokens >= 10000 ? Math.round(m.tokens / 10000) + '만' : '<1만' }));
+    return h('span', { class: 'ring unk', title: m.title }, h('b', { text: '?' }));
+  }
   function renderSide() {
     if (!sideEl) return;
     var d = sideData(), col = isCollapsed(), cur = location.pathname;
@@ -583,7 +590,7 @@
           steps.map(function (x) { return h('i', { class: x.state === 'now' ? 'n' : x.state === 'done' || x.state === 'skipped' ? 'd' : '', title: x.name + ' · ' + x.label }); }));
       }
       list.appendChild(link('/s/' + encodeURIComponent(s.id), { class: 'srow' + (s.status === 'ended' ? ' ended' : ''), 'aria-current': onThis ? 'page' : null },
-        h('span', { class: 'ring unk', title: '기억 사용량 확인 못 함' }, h('b', { text: '?' })),
+        memRing(s),
         h('span', { class: 'sinfo' },
           h('span', { class: 'n', text: sessionTitle(s) }),
           bar,
@@ -640,7 +647,7 @@
   /* ---------- 세션 (/s/:id) ---------- */
   function sessionView(root) {
     var id = route.id, detail = null, errored = null, fetching = false, timer = null;
-    var regions = {}, parts = {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, permBusy = false, permNote = '', sent = [];
+    var memDismissed = {}, regions = {}, parts = {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, permBusy = false, permNote = '', sent = [];
 
     function cur() { return sessions.get(id) || {}; }
     function fetchDetail() {
@@ -868,6 +875,17 @@
 
     function paintNotices(s) {
       var notices = [];
+      // 시안 18: 기억이 90% 이상 찼으면 세션 화면 위에 배너. [계속하기] 는 이 화면을 다시 열 때까지만 닫는다.
+      var mem = window.BHLogic.memoryOf(s);
+      if (mem.kind === 'pct' && mem.level === 'hot' && s.status !== 'ended' && !memDismissed[s.id]) {
+        var canHand = s.managed && s.flowId && !s.handedOffTo;
+        notices.push(h('div', { class: 'banner mem', role: 'status', 'data-memory-banner': '1' },
+          h('b', { class: 'mem-t', text: '이 세션 기억이 거의 찼어 (' + mem.pct + '%)' }),
+          h('span', { class: 'mem-d', text: canHand ? '더 길어지면 앞 내용을 잊고 실수할 수 있어. 지금까지 한 일을 정리해서 새 세션으로 넘기길 권해.'
+            : '더 길어지면 앞 내용을 잊고 실수할 수 있어. ' + (s.managed ? '정해진 갈래가 없어서 여기서는 넘길 수 없어. 새 작업으로 시작해 줘.' : '터미널 세션이라 여기서는 넘길 수 없어. 터미널에서 /harness:handoff 를 불러 줘.') }),
+          canHand ? h('button', { type: 'button', class: 'mem-go', text: '새 세션으로 넘기기', onClick: function () { parts.flow.handoffSame(cur()); } }) : null,
+          h('button', { type: 'button', class: 'mem-stay', text: '계속하기', onClick: function () { memDismissed[s.id] = true; paintNotices(cur()); } })));
+      }
       if (s.bypassPermissions || /bypass/i.test(String(s.permissionMode || ''))) {
         notices.push(h('div', { class: 'banner info' }, h('span', { text: '권한 우회 모드로 실행 중인 세션이야. 이 세션은 승인 요청이 발생하지 않아 콘솔에 승인 화면이 뜨지 않아.' })));
       }
