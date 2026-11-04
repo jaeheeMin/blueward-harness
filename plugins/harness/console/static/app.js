@@ -401,10 +401,10 @@
           ids.forEach(function (rid) {
             var r = requests.get(rid);
             if (r && r.status && r.status !== 'pending') return;
-            todo.push({ href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : kindOf(r) === 'question' ? '답하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
+            todo.push({ sname: title, href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : kindOf(r) === 'question' ? '답하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
           });
         } else {
-          todo.push({ href: '/s/' + encodeURIComponent(s.id), verb: s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기', title: title, sub: sub, t: s.updatedAt });
+          todo.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), verb: s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기', title: title, sub: sub, t: s.updatedAt });
         }
       } else if (g === 'running') {
         run.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: (s.currentAction || (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중')) + subagentSummary(s), t: s.updatedAt });
@@ -414,34 +414,101 @@
     });
     return { todo: todo, run: run, idle: idle };
   }
+  var annEl = null, headEl = null;
+  var SIDE_ORDER = { todo: 0, running: 1, idle: 2 };
+  function sessionRank(s) { return s.status === 'ended' ? 3 : SIDE_ORDER[groupOf(s)]; }
+  function sessionTitle(s) { return s.title || baseName(s.cwd) || '이름 없는 세션'; }
+  function sortedSessions() {
+    var arr = [];
+    sessions.forEach(function (s) { arr.push(s); });
+    arr.sort(function (a, b) { return (sessionRank(a) - sessionRank(b)) || ((b.updatedAt || 0) - (a.updatedAt || 0)); });
+    return arr;
+  }
+  function firstPending(s) {
+    var ids = s.pendingRequestIds || [];
+    for (var i = 0; i < ids.length; i++) {
+      var r = requests.get(ids[i]);
+      if (!(r && r.status && r.status !== 'pending')) return { rid: ids[i], r: r };
+    }
+    return null;
+  }
+  /* 세션 한 줄 상태. 내 차례면 tone 이 attn 이다. */
+  function sideStatus(s) {
+    var g = groupOf(s);
+    if (g === 'todo') {
+      var p = firstPending(s);
+      var verb = p ? (!p.r ? '요청 확인하기' : kindOf(p.r) === 'question' ? '답하기' : '승인하기') : s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기';
+      return { tone: 'attn', text: '내 차례 · ' + verb };
+    }
+    if (s.status === 'ended') return { tone: '', text: '끝난 세션' };
+    if (g === 'running') return { tone: '', text: (s.currentAction || (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중')) + subagentSummary(s) };
+    return { tone: '', text: '쉬는 중' };
+  }
+  /* 맨 위 띠: 내 차례(대기 중인 질문·승인, 답을 기다리는 세션)가 있을 때만 있다. */
+  function renderAnn(d) {
+    clear(annEl);
+    if (!d.todo.length) return;
+    var first = d.todo[0];
+    annEl.appendChild(link(first.href, { class: 'ann', role: 'status' },
+      h('span', { text: '내 차례 ' + d.todo.length + '건 — ' + first.sname + '에서 답이 필요해' })));
+  }
+  function projectOf() {
+    var s = route.name === 'session' ? sessions.get(route.id) : null;
+    if (!s) s = sortedSessions().filter(function (x) { return x.status !== 'ended'; })[0] || sortedSessions()[0];
+    return s ? (baseName(s.repo) || baseName(s.cwd)) : '';
+  }
+  /* 상단 헤더. 내 일 = 처음 화면, 작업 = 가장 위 세션(내 차례가 먼저), 새 작업 = /new. 산출물은 세션 화면 안의 칸이라 따로 길이 없어 두지 않는다. */
+  function renderHead(cur) {
+    clear(headEl);
+    var rows = sortedSessions(), work = rows[0] ? '/s/' + encodeURIComponent(rows[0].id) : null;
+    var inWork = route.name === 'session' || route.name === 'request';
+    var nav = h('nav', { class: 'topnav', 'aria-label': '메뉴' });
+    nav.appendChild(link('/', { text: '내 일', 'aria-current': route.name === 'home' ? 'page' : null }));
+    if (work) nav.appendChild(link(work, { text: '작업', 'aria-current': inWork ? 'page' : null }));
+    nav.appendChild(link('/new', { text: '새 작업', 'aria-current': route.name === 'new' ? 'page' : null }));
+    headEl.appendChild(link('/', { class: 'brand', 'aria-label': 'Blueward Harness' }, h('img', { class: 'brand-logo', src: '/static/logo-sauce.png', alt: 'Blueward' })));
+    headEl.appendChild(nav);
+    headEl.appendChild(h('span', { class: 'sp' }));
+    var proj = projectOf();
+    if (proj) headEl.appendChild(h('span', { class: 'eb proj', title: '프로젝트', text: proj }));
+    headEl.appendChild(link('/settings', { class: 'pill ghost', 'aria-current': cur === '/settings' ? 'page' : null }, icon('settings', 14), '설정'));
+  }
   function renderSide() {
     if (!sideEl) return;
     var d = sideData(), col = isCollapsed(), cur = location.pathname;
     appEl.dataset.collapsed = col ? 'true' : 'false';
+    renderAnn(d); renderHead(cur);
     clear(sideEl);
     if (col) { sideEl.appendChild(renderRail(d, cur)); return; }
 
-    var nav = h('nav', { class: 'nav', 'aria-label': '작업 목록' });
-    var navHead = h('div', { class: 'nav-head' }), navList = h('div', { class: 'nav-list' }), navFoot = h('div', { class: 'nav-foot' });
-    nav.appendChild(navHead); nav.appendChild(navList); nav.appendChild(navFoot);
-    navHead.appendChild(link('/', { class: 'brand', 'aria-label': 'Blueward Harness' }, h('img', { class: 'brand-logo', src: '/static/blueward-logo.png', alt: 'Blueward' }), h('b', null, h('span', { text: 'Harness' }))));
-    navHead.appendChild(link('/new', { class: 'newbtn', text: '새 작업' }));
-    function group(title, items, cls, first, emptyText, withVerb) {
-      navList.appendChild(h('h2', { class: 'grp-h' + (cls ? ' ' + cls : '') + (first ? ' first' : '') }, title, h('span', { text: String(items.length) })));
-      if (!items.length && loadedOnce) navList.appendChild(h('p', { class: 'grp-empty', text: emptyText }));
-      items.forEach(function (it) {
-        navList.appendChild(link(it.href, { class: 'item', 'aria-current': cur === it.href ? 'page' : null },
-          withVerb ? h('span', { class: 'verb', text: it.verb }) : null,
-          h('span', { class: 'ttl', text: it.title }),
-          h('span', { class: 'sub', title: it.sub, text: it.sub })));
-      });
-    }
-    group('내가 할 일', d.todo, 'attn', true, '지금 할 일이 없습니다.', true);
-    group('Claude Code가 하는 일', d.run, '', false, '일하는 세션이 없습니다.', false);
-    group('쉬는 중', d.idle, '', false, '쉬는 세션이 없습니다.', false);
-    navFoot.appendChild(link('/settings', { class: 'side-link', 'aria-current': cur === '/settings' ? 'page' : null }, icon('settings', 16), '설정'));
-    navFoot.appendChild(h('button', { type: 'button', class: 'fold', 'aria-keyshortcuts': '[', 'aria-label': '목록 접기', onClick: function () { setCollapsed(true); } },
+    var rows = sortedSessions(), L = window.BHLogic;
+    var nav = h('nav', { class: 'nav', 'aria-label': '세션 목록' });
+    nav.appendChild(h('div', { class: 'sh' }, h('span', { class: 'eb', text: '세션 ' + rows.length }), h('span', { class: 'eb', text: '단계 · 기억' })));
+    var list = h('div', { class: 'nav-list' });
+    if (!rows.length && loadedOnce) list.appendChild(h('p', { class: 's-empty', text: '아직 세션이 없어. 새 작업을 시작하면 여기에 생겨.' }));
+    rows.forEach(function (s) {
+      var st = sideStatus(s), p = firstPending(s);
+      var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid));
+      var steps = s.flowId && L ? L.barSteps(s) : [];
+      var bar = null;
+      if (steps.length) {
+        var now = steps.filter(function (x) { return x.state === 'now'; })[0];
+        bar = h('span', { class: 'bar', role: 'img', 'aria-label': '진행 순서 ' + steps.length + '단계' + (now ? ', 지금 ' + now.name : '') },
+          steps.map(function (x) { return h('i', { class: x.state === 'now' ? 'n' : x.state === 'done' || x.state === 'skipped' ? 'd' : '', title: x.name + ' · ' + x.label }); }));
+      }
+      list.appendChild(link('/s/' + encodeURIComponent(s.id), { class: 'srow' + (s.status === 'ended' ? ' ended' : ''), 'aria-current': onThis ? 'page' : null },
+        h('span', { class: 'ring unk', title: '기억 사용량 확인 못 함' }, h('b', { text: '?' })),
+        h('span', { class: 'sinfo' },
+          h('span', { class: 'n', text: sessionTitle(s) }),
+          bar,
+          h('small', { class: st.tone === 'attn' ? 'w' : '', title: st.text, text: st.text }))));
+    });
+    nav.appendChild(list);
+    var foot = h('div', { class: 'nav-foot' });
+    foot.appendChild(link('/new', { class: 'snew', text: '+ 새 세션' }));
+    foot.appendChild(h('button', { type: 'button', class: 'fold', 'aria-keyshortcuts': '[', 'aria-label': '목록 접기', onClick: function () { setCollapsed(true); } },
       h('span', { text: '목록 접기' }), h('kbd', { text: '[' })));
+    nav.appendChild(foot);
     sideEl.appendChild(nav);
   }
   function renderRail(d, cur) {
@@ -464,19 +531,7 @@
 
   /* ---------- 공통 조각 ---------- */
   function topline(left) {
-    return h('div', { class: 'topline' }, left ? h('span', { class: 'wrap-any', text: left }) : null, designQuick());
-  }
-  /* 디자인 빠른 전환: 위쪽 줄의 작은 버튼 4개. 고른 값은 theme.js 가 이 PC 에 저장한다. */
-  function syncDesignButtons() {
-    var cur = window.BH.getDesign(), list = document.querySelectorAll('[data-design-id]');
-    for (var i = 0; i < list.length; i++) list[i].setAttribute('aria-pressed', String(list[i].getAttribute('data-design-id') === cur));
-  }
-  function setDesign(id) { window.BH.setDesign(id); syncDesignButtons(); }
-  function designQuick() {
-    var cur = window.BH.getDesign();
-    return h('div', { class: 'design-quick', role: 'group', 'aria-label': '디자인 바꾸기' }, window.BH.DESIGNS.map(function (d) {
-      return h('button', { type: 'button', class: 'dq', 'data-design-id': d[0], 'aria-pressed': String(d[0] === cur), 'aria-label': '디자인 ' + d[1], title: d[1], text: d[2], onClick: function () { setDesign(d[0]); } });
-    }));
+    return h('div', { class: 'topline' }, left ? h('span', { class: 'wrap-any', text: left }) : null);
   }
   function backToSession(sid, label) {
     return sid ? link('/s/' + encodeURIComponent(sid), { class: 'linkbtn', text: label || '세션으로 돌아가기' }) : link('/', { class: 'linkbtn', text: '처음 화면으로' });
@@ -489,7 +544,8 @@
   var ui = window.BHFlowUI.create({
     h: h, clear: clear, api: api, qs: qs, listOf: listOf, icon: icon, link: link, go: go, sessions: sessions, requests: requests,
     baseName: baseName, fmtSize: fmtSize, clock: clock, safeHttp: safeHttp, mergeSession: mergeSession, refreshSession: refreshSession,
-    kindOf: kindOf, skillLabel: skillLabel, topline: topline, stateBox: stateBox, loadingBox: loadingBox,
+    kindOf: kindOf, skillLabel: skillLabel, requestTitle: requestTitle, topline: topline,
+    startNew: function (text) { if (text && text.trim()) draft.text = text.trim(); go('/new'); }, stateBox: stateBox, loadingBox: loadingBox,
     loaded: function () { return loadedOnce; }, conn: function () { return conn.state; }
   });
   function homeView(root) { return ui.homeView(root); }
@@ -1508,7 +1564,7 @@
   function settingsView(root) {
     function draw() {
       clear(root);
-      var BH = window.BH, cur = BH.getTheme(), scale = BH.getScale();
+      var BH = window.BH, scale = BH.getScale();
       var page = h('div', { class: 'page' });
       page.appendChild(topline());
       page.appendChild(h('h1', { class: 'big mt-44', text: '설정' }));
@@ -1517,26 +1573,6 @@
         sc.appendChild(h('button', { type: 'button', class: 'btn scale', 'aria-pressed': String(z[1] === scale), text: z[0], onClick: function () { BH.setScale(z[1]); draw(); } }));
       });
       page.appendChild(h('section', { class: 'mt-40' }, h('h2', { class: 'sect-h', text: '글자 크기' }), sc));
-      var ds = h('div', { class: 'row' }), design = BH.getDesign();
-      BH.DESIGNS.forEach(function (d) {
-        ds.appendChild(h('button', { type: 'button', class: 'btn scale', 'data-design-id': d[0], 'aria-pressed': String(d[0] === design), text: d[1], onClick: function () { setDesign(d[0]); draw(); } }));
-      });
-      page.appendChild(h('section', { class: 'mt-40' }, h('h2', { class: 'sect-h', text: '디자인' }), ds,
-        h('p', { class: 'note-muted mt-16', text: '기존이 아닌 디자인(A·B·C)을 고르면 색은 그 디자인이 정하고, 아래 테마는 기존 디자인일 때만 적용됩니다. 이 PC에 저장됩니다.' })));
-      var grid = h('div', { class: 'themes' });
-      Object.keys(BH.THEMES).forEach(function (id) {
-        var t = BH.THEMES[id], sw = h('span', { class: 'sw', 'aria-hidden': 'true' });
-        sw.style.background = t[0]; sw.style.borderColor = t[9] ? 'rgba(0,0,0,.14)' : 'rgba(255,255,255,.1)';
-        function bar(w, hgt, col, mt) { var b = h('i'); b.style.width = w; b.style.height = hgt; b.style.background = col; if (mt) b.style.marginTop = mt; return b; }
-        sw.appendChild(bar('62%', '8px', t[2])); sw.appendChild(bar('84%', '5px', t[4], '8px'));
-        var dots = h('span', { class: 'dots' }), bt = h('i', { class: 'b' }); bt.style.background = t[7];
-        var d1 = h('i'), d2 = h('i'); d1.style.background = t[5]; d2.style.background = t[6];
-        dots.appendChild(bt); dots.appendChild(d1); dots.appendChild(d2); sw.appendChild(dots);
-        grid.appendChild(h('button', { type: 'button', class: 'theme', 'aria-pressed': String(id === cur), onClick: function () { BH.setTheme(id); draw(); } },
-          sw, h('span', { class: 'nmrow' }, h('b', { text: BH.NAMES[id] }), h('span', { text: t[9] ? '라이트' : '다크' }))));
-      });
-      page.appendChild(h('section', { class: 'mt-40' }, h('h2', { class: 'sect-h' }, '테마 ', h('small', { text: BH.NAMES[cur] })), grid,
-        h('p', { class: 'note-muted mt-16', text: '고르는 즉시 모든 화면에 적용되고, 이 PC에 저장됩니다.' })));
       root.appendChild(page);
     }
     setTitle('설정'); draw();
@@ -1549,7 +1585,10 @@
     appEl = h('div', { id: 'app', 'data-collapsed': 'false' });
     sideEl = h('aside', { class: 'side' });
     mainEl = h('main', { class: 'main', id: 'main' });
-    appEl.appendChild(sideEl); appEl.appendChild(mainEl);
+    annEl = h('div', { class: 'ann-slot' });
+    headEl = h('header', { class: 'top' });
+    appEl.appendChild(annEl); appEl.appendChild(headEl);
+    appEl.appendChild(h('div', { class: 'shell' }, sideEl, mainEl));
     root.appendChild(appEl);
     renderRoute();
     loadSessions().then(function () { connectEvents(); }, function (e) { if (e.status !== 401) { connectEvents(); scheduleRetryIfDown(); } });
