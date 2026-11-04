@@ -418,6 +418,72 @@ const cases = {
     const root6 = h('div'); loadUI(k6).homeView(root6); await tick(); await tick();
     assert.strictEqual(find(root6, e => e.attrs['data-calls-toggle']).length, 0);
   },
+  dev_ready_hints_and_block() {
+    // 읽지 못함·해당 없음·읽는 중은 null: 종류 버튼에 아무 표시도 없고 개발을 막지도 않는다
+    for (const d of [null, { state: 'unknown' }, { state: 'no' }, { state: 'yes', loading: true }]) {
+      const v = L.devReadyView(d);
+      assert.strictEqual(v, null);
+      ['dev', 'spec', 'config', 'srs', ''].forEach(f => assert.strictEqual(L.kindHint(f, v), null));
+      assert.strictEqual(L.devBlock('dev', v), null);
+    }
+    const none = L.devReadyView({ state: 'yes', specReady: 0, setup: 1, needSpec: [{ number: 1, label: 'REQ-001(구매오더)' }, { number: 2, label: 'REQ-002(판매)' }], needSpecCount: 2 });
+    assert.deepStrictEqual(L.kindHint('dev', none), { tone: 'dim', text: 'Spec 있는 건 없음 — 개발 Spec 먼저' });
+    assert.deepStrictEqual(L.kindHint('spec', none), { tone: 'hot', text: '할 차례 REQ-001(구매오더) 외 1건' });
+    assert.deepStrictEqual(L.kindHint('config', none), { tone: '', text: '설정 건 1개' });
+    assert.strictEqual(L.kindHint('srs', none), null);
+    assert.ok(L.devBlock('dev', none).includes('Spec 없이 개발은 시작할 수 없어'));
+    assert.strictEqual(L.devBlock('spec', none), null);
+    const some = L.devReadyView({ state: 'yes', specReady: 2, setup: 0, needSpec: [], needSpecCount: 0 });
+    assert.strictEqual(L.kindHint('dev', some).text, 'Spec 있는 건 2개');
+    assert.strictEqual(L.kindHint('spec', some), null);
+    assert.strictEqual(L.kindHint('config', some), null);
+    assert.strictEqual(L.devBlock('dev', some), null);
+  },
+  kind_conflict_rules() {
+    const ai = { id: 'spec', confident: false, alternativeId: 'dev', reason: 'Spec 이 없어' };
+    assert.deepStrictEqual(L.kindConflict(ai, 'dev'), { id: 'spec', reason: 'Spec 이 없어' });
+    assert.strictEqual(L.kindConflict(ai, 'spec'), null);  // 같으면 묻지 않는다
+    assert.strictEqual(L.kindConflict(ai, ''), null);      // 종류를 안 골랐으면 지금 동작 그대로
+    assert.strictEqual(L.kindConflict(null, 'dev'), null);
+  },
+  async dom_ask_card_when_ai_differs() {
+    const flows = { flows: ['spec', 'dev'].map(id => ({ id, name: id === 'spec' ? '개발 Spec' : '개발하기', steps: [{ kind: 'skill', skill: id, name: id }] })), tools: [] };
+    const { kit } = makeKit({ 'GET /api/flows': flows });
+    const ui = loadUI(kit);
+    const ai = { id: 'spec', confident: false, alternativeId: 'dev', reason: 'Spec 이 없어서 먼저 해야 해' };
+    const none = L.devReadyView({ state: 'yes', specReady: 0, setup: 0, needSpec: [], needSpecCount: 0 });
+    const picks = [], keeps = [];
+    const base = { cwd: '/w', found: ai, selected: null, userPicked: false, kindFlowId: 'dev', kindName: '그래도 개발하기', ready: none, insist: false,
+      onPick: id => picks.push(id), onKeep: () => keeps.push(1) };
+    const ch = ui.flowChooser();
+    ch.update(base); await tick(); await tick();
+    // AI 와 다르면 갈래 카드 대신 묻는 카드: AI 이유와 두 버튼. 두 후보 고르기 칩은 없다.
+    assert.ok(ch.el.textContent.includes('AI 는 개발 Spec 부터 하자고 해 — Spec 이 없어서 먼저 해야 해'));
+    assert.strictEqual(find(ch.el, e => e.attrs['data-flow']).length, 0);
+    assert.strictEqual(find(ch.el, e => e.attrs['data-ask-block']).length, 0);
+    const sw = find(ch.el, e => e.attrs['data-ask-switch'])[0], keep = find(ch.el, e => e.attrs['data-ask-keep'])[0];
+    assert.ok(sw.textContent.includes('개발 Spec 쪽으로 바꾸기 (추천)')); assert.strictEqual(keep.textContent, '그래도 개발하기');
+    sw.click(); assert.deepStrictEqual(picks, ['spec']);
+    keep.click(); assert.strictEqual(keeps.length, 1);
+    // Spec 없음이 확실하고 "그래도" 를 눌렀으면 막는 글
+    ch.update(Object.assign({}, base, { insist: true })); await tick(); await tick();
+    assert.ok(find(ch.el, e => e.attrs['data-ask-block'])[0].textContent.includes('Spec 없이 개발은 시작할 수 없어. PR 검사(spec-ready)에서도 막혀'));
+    // 상태를 모르면(ready null) 막는 글 없이 추천 카드만
+    ch.update(Object.assign({}, base, { insist: true, ready: null })); await tick(); await tick();
+    assert.strictEqual(find(ch.el, e => e.attrs['data-ask-block']).length, 0);
+    assert.strictEqual(find(ch.el, e => e.attrs['data-ask-switch']).length, 1);
+    // 종류를 안 골랐으면 지금 동작: 확신 없을 때 두 후보 묻기
+    ch.update(Object.assign({}, base, { kindFlowId: '', kindName: '' })); await tick(); await tick();
+    assert.strictEqual(find(ch.el, e => e.attrs['data-ask']).length, 0);
+    assert.deepStrictEqual(find(ch.el, e => e.attrs['data-flow'] && e.tag === 'button' && (e.attrs['class'] || '').includes('btn')).slice(0, 2).map(e => e.attrs['data-flow']), ['spec', 'dev']);
+    // AI 도 같은 갈래면 묻지 않고, Spec 이 없다고 확실하면 시작을 막는 글만 보인다
+    ch.update(Object.assign({}, base, { found: { id: 'dev', confident: true, reason: '' }, selected: 'dev', userPicked: true })); await tick(); await tick();
+    assert.strictEqual(find(ch.el, e => e.attrs['data-ask']).length, 0);
+    assert.strictEqual(find(ch.el, e => e.attrs['data-ask-block']).length, 1);
+    // 이미 사용자가 갈래를 고른 뒤에는 다시 묻지 않는다
+    ch.update(Object.assign({}, base, { userPicked: true, selected: 'spec' })); await tick(); await tick();
+    assert.strictEqual(find(ch.el, e => e.attrs['data-ask']).length, 0);
+  },
   async dom_home_empty() {
     const { kit } = makeKit({ 'GET /api/approvals': { state: 'no' } }, []);
     const went = [];

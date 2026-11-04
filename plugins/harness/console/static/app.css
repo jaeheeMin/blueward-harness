@@ -439,6 +439,14 @@ table.sheet td { padding: 4px 10px; border: 1px solid var(--line); vertical-alig
 .kind:hover { border-color: var(--lightink); }
 .kind b { font-size: 14px; font-weight: 600; }
 .kind small { font-size: 12px; color: var(--lmuted); }
+.kind .khint { font-weight: 600; color: var(--lightink); overflow-wrap: anywhere; }
+.kind.dim { background: var(--stbg); }
+.kind.dim b, .kind.dim small { opacity: .6; }
+.kind.dim .khint { opacity: 1; color: #7a5600; }
+.kind.hot { border-color: var(--lightink); box-shadow: inset 0 0 0 1px var(--lightink); }
+.askcard { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1.5px solid var(--lightink); border-radius: var(--rc); background: var(--card); color: var(--lightink); }
+.askcard .ask-q { font-size: 14.5px; font-weight: 500; overflow-wrap: anywhere; }
+.askcard .note-attn { margin-top: 0; color: #7a5600; }
 .comp { display: flex; align-items: center; gap: 8px; padding: 5px 5px 5px 18px; border: 1px solid var(--lline); border-radius: var(--rb); background: var(--card); color: var(--lightink); }
 .comp:focus-within { outline: 2px solid var(--lightink); outline-offset: 2px; }
 .comp-in { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: 14px; color: var(--lightink); }

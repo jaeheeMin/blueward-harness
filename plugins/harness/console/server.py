@@ -22,6 +22,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 import analysis
+import devready
 import docfiles
 import flows
 import gitstate
@@ -753,6 +754,14 @@ class App:
         file_rel, when_no_file = spec.get("file", ".github/ssot-approvers"), spec.get("whenNoFile", gitstate.WHEN_NO_FILE_ADMIN)
         got = self.cached(("approvals", os.path.normcase(cwd)), lambda: gitstate.approval_prs(self.run, cwd, file_rel, when_no_file), wait=False)
         return 200, got  # 읽는 중이면 loading: true 와 이전 값(없으면 state unknown)을 바로 준다
+
+    def a_dev_ready(self, g, q, b):
+        """이 폴더의 개발 건별 Spec 유무(#668). git 으로 읽고 60초 기억하며 요청 스레드는 기다리지 않는다(읽는 중이면 loading: true).
+        state: yes(읽음) / no(원장 없는 저장소 등 해당 없음) / unknown(읽지 못함)."""
+        if not q.get("cwd"):
+            raise HttpError(400, "cwd 가 필요합니다.")
+        cwd = self.known_root(q["cwd"][0])
+        return 200, self.cached(("dev-ready", os.path.normcase(cwd)), lambda: devready.read(self.run, self.slow_run, cwd), wait=False)
 
     # ---- 시작 점검(첫 화면) ----
     def first_run_file(self) -> Path | None:
@@ -1534,6 +1543,7 @@ ROUTES = [
     ("POST", re.compile(r"/api/folders/worktree"), App.a_worktree),
     ("GET", re.compile(r"/api/flows"), App.a_flows),
     ("GET", re.compile(r"/api/approvals"), App.a_approvals),
+    ("GET", re.compile(r"/api/dev-ready"), App.a_dev_ready),
     ("GET", re.compile(r"/api/start-checks"), App.a_start_checks),
     ("POST", re.compile(r"/api/start-checks/seen"), App.a_start_seen),
     ("GET", re.compile(rf"/api/requests/{S}"), App.a_request),

@@ -5142,3 +5142,109 @@ def test_start_checks_old_version_is_notice_only_and_refresh_rechecks(tmp_path, 
         assert _checks(c, refresh=True)[0]["newVersion"] is None  # 다시 점검은 기억을 지우고 새로 읽는다
     finally:
         c.close()
+
+
+# ---- 개발 준비 상태 GET /api/dev-ready (#668) ----
+READY_SRS = """| ID | Title | Status | 다음 단계 |
+|---|---|---|---|
+| REQ-001 | 구매오더 조회 | New | 개발 |
+| REQ-002 | 판매오더 조회 | New | 개발 |
+| REQ-003 | 사용자 코드 | New | 설정 |
+| REQ-004 | 옛 요구 | Dropped | 개발 |
+| REQ-005 | 아직 모름 | New | 미정 |
+"""
+READY_LEDGER = """## 개발 건
+
+| ID | 내용 | Spec | 담당 | 상태 |
+|---|---|---|---|---|
+| DEV-002 | 판매오더 조회 | docs/spec/DEV-002-판매.md | 김 | 진행 |
+| DEV-003 | 사용자 코드 설정 | 설정 | 김 | 진행 |
+"""
+
+
+def ready_run(work, spec_files=("docs/spec/DEV-002-판매.md",), **over):
+    files = {"docs/ssot/SRS.md": READY_SRS, "audit/ledger/a.md": READY_LEDGER}
+
+    def show(args):
+        path = args[-1].split(":", 1)[1]
+        return (0, files[path]) if path in files else (128, "")
+
+    table = {"git rev-parse --show-toplevel": (0, str(work) + "\n"), "git fetch origin main": (0, ""), "git show": show,
+             "git ls-tree": (0, "\n".join(["docs/ssot/SRS.md", "audit/ledger/a.md", *spec_files]) + "\n")}
+    table.update({k.replace("_", " "): v for k, v in over.items()})
+    return FakeRun(**{k.replace(" ", "_"): v for k, v in table.items()})
+
+
+def ready_get(c):
+    c.event("p1", "SessionStart")
+    return c.call("GET", "/api/dev-ready?cwd=" + urllib.parse.quote(str(c.work)))
+
+
+def test_dev_ready_reads_spec_and_setup_state_from_origin_main(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    run = ready_run(work)
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    (work / "audit" / "ledger").mkdir(parents=True)
+    try:
+        status, body, _ = ready_get(c)
+        assert status == 200 and body["state"] == "yes"
+        assert body["specReady"] == 1 and body["setup"] == 1  # DEV-002 는 Spec 있음, DEV-003 은 원장 Spec 칸이 설정
+        # 할 차례: Spec 없는 개발 건만(설정·보류·미정은 뺀다)
+        assert body["needSpec"] == [{"number": 1, "label": "REQ-001(구매오더 조회)"}] and body["needSpecCount"] == 1
+        assert "git fetch origin main" in run.calls
+        n = len(run.calls)
+        c.call("GET", "/api/dev-ready?cwd=" + urllib.parse.quote(str(c.work)))
+        assert len(run.calls) == n  # 60초 안에는 다시 읽지 않는다
+    finally:
+        c.close()
+
+
+def test_dev_ready_zero_spec_is_certain_when_no_spec_file_on_main(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    c = flow_console(tmp_path, monkeypatch, run=ready_run(work, spec_files=()))
+    (work / "audit" / "ledger").mkdir(parents=True)
+    try:
+        body = ready_get(c)[1]
+        assert body["state"] == "yes" and body["specReady"] == 0
+        assert [n["number"] for n in body["needSpec"]] == [1, 2]
+    finally:
+        c.close()
+
+
+def test_dev_ready_not_applicable_without_ledger_or_repo(tmp_path, monkeypatch):
+    work = tmp_path / "work"  # audit/ledger 가 없다
+    c = flow_console(tmp_path, monkeypatch, run=ready_run(work))
+    try:
+        body = ready_get(c)[1]
+        assert body["state"] == "no" and body["reason"] and "specReady" not in body
+    finally:
+        c.close()
+    c2 = flow_console(tmp_path / "second", monkeypatch)  # 기본 FakeRun: git 저장소가 아니다
+    try:
+        assert ready_get(c2)[1]["state"] == "no"
+    finally:
+        c2.close()
+
+
+@pytest.mark.parametrize("over", [{"git fetch origin main": (1, "")}, {"git ls-tree": (1, "")}, {"git show": (128, "")}, {"git rev-parse --show-toplevel": (127, "")}])
+def test_dev_ready_unknown_when_git_cannot_be_read(tmp_path, monkeypatch, over):
+    work = tmp_path / "work"
+    c = flow_console(tmp_path, monkeypatch, run=ready_run(work, **over))
+    (work / "audit" / "ledger").mkdir(parents=True)
+    try:
+        body = ready_get(c)[1]
+        assert body["state"] == "unknown" and body["reason"]  # 없음이나 통과로 뭉개지 않는다
+        assert "specReady" not in body
+    finally:
+        c.close()
+
+
+def test_dev_ready_rejects_unknown_folder_and_missing_cwd(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        other = tmp_path / "other"
+        other.mkdir()
+        assert c.call("GET", "/api/dev-ready?cwd=" + urllib.parse.quote(str(other)))[0] == 403
+        assert c.call("GET", "/api/dev-ready")[0] == 400
+    finally:
+        c.close()
