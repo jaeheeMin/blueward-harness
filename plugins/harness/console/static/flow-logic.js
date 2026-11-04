@@ -243,7 +243,65 @@
   }
   function runningSubCount(s) { return arr(s && s.subagents).filter(function (a) { return a && a.state === 'running'; }).length; }
 
+  /* ---- 세션 화면 숫자 띠 ---- */
+  // 데이터에 있는 칸만 만든다. 없는 값을 지어내지 않는다(REQ·DEV 는 다음 갈래 옵션의 번호에서만, 이슈는 브랜치 이름에서만 읽는다).
+  function issueOf(s) { var m = /^[\w.-]+\/(\d+)-/.exec((s && s.branch) || ''); return m ? m[1] : ''; }
+  function reqIds(s) {
+    var seen = {}, out = [];
+    arr(s && s.nextFlow && s.nextFlow.options).forEach(function (o) {
+      arr(o && o.ids).forEach(function (id) { if (/^REQ-\d{1,6}$/.test(id) && !seen[id]) { seen[id] = 1; out.push(id); } });
+    });
+    return out;
+  }
+  function joinIds(ids) { return ids.length > 2 ? ids.slice(0, 2).join(', ') + ' 외 ' + (ids.length - 2) + '개' : ids.join(', '); }
+  // 진행 %: AI 가 알려 주는 값이 없어서 순서의 끝난 단계 수(끝남·건너뜀) / 전체 단계 수로 계산한다.
+  function progressOf(s) {
+    var steps = barSteps(s);
+    if (!steps.length) return null;
+    var done = steps.filter(function (x) { return x.state === 'done' || x.state === 'skipped'; }).length;
+    return { done: done, total: steps.length, pct: Math.round(100 * done / steps.length) };
+  }
+  function prCell(s) {
+    var pr = s && s.flowPr;
+    if (pr && pr.number) {
+      var st = String(pr.state || '').toUpperCase();
+      return st === 'MERGED' ? { value: 'PR #' + pr.number + ' 합쳐짐', tone: 'g' } : st === 'CLOSED' ? { value: 'PR #' + pr.number + ' 닫힘', tone: 'w' } : { value: 'PR #' + pr.number + ' 검토 중', tone: 'g' };
+    }
+    if (arr(s && s.flowUnknown).length) return { value: '확인 못 함', tone: 'u' };
+    if (s && s.flowId) return { value: 'PR 아직', tone: 'w' };
+    var link = arr(s && s.prLinks).map(function (p) { return typeof p === 'string' ? p : p && p.url; }).map(function (u) { return /\/pull\/(\d+)/.exec(u || ''); }).filter(Boolean)[0];
+    return link ? { value: 'PR #' + link[1], tone: '' } : null;
+  }
+  function sessionStrip(s) {
+    var cells = [], steps = barSteps(s), prog = progressOf(s);
+    if (steps.length) {
+      var now = steps.filter(function (x) { return x.state === 'now'; })[0];
+      cells.push({ id: 'step', label: '단계', tone: 'g', value: s.flowFinished ? steps.length + ' / ' + steps.length + ' 끝' : now ? (now.index + 1) + ' / ' + steps.length + ' ' + now.name : '확인 못 함' });
+      cells.push({ id: 'progress', label: 'AI 진행', tone: '', value: s.flowFinished ? '끝' : prog.pct + '%',
+        title: '순서 ' + prog.total + '단계 중 ' + prog.done + '단계가 끝난 기준이야(AI 가 직접 알려 준 값이 아니야).' });
+    } else cells.push({ id: 'step', label: '단계', tone: '', value: '정해진 갈래 없음' });
+    var reqs = reqIds(s);
+    if (reqs.length) {
+      cells.push({ id: 'req', label: '요구사항', tone: '', value: joinIds(reqs) });
+      cells.push({ id: 'dev', label: '개발 번호', tone: '', value: joinIds(reqs.map(function (r) { return 'DEV-' + r.slice(4); })) });
+    }
+    var issue = issueOf(s);
+    if (issue) cells.push({ id: 'issue', label: '작업 기록(이슈)', tone: '', value: '이슈 #' + issue });
+    var pr = prCell(s);
+    if (pr) cells.push({ id: 'pr', label: '검토 요청(PR)', tone: pr.tone, value: pr.value });
+    return cells;
+  }
+  // 올림·승인 기다림 화면의 줄. 검사 결과는 합친 한 값(checks)만 있어 문서·비밀값 검사를 따로 나누지 않는다.
+  function prLines(pr) {
+    if (!pr || !pr.number) return [];
+    var checks = { pass: ['ok', '모두 통과했어'], fail: ['fail', '실패한 검사가 있어'], pending: ['wait', '아직 돌고 있어'], none: ['unk', '검사 결과를 확인 못 함'] }[pr.checks || 'none'] || ['unk', '검사 결과를 확인 못 함'];
+    var st = String(pr.state || '').toUpperCase();
+    var team = st === 'MERGED' ? ['ok', '합쳐졌어'] : st === 'CLOSED' ? ['fail', '합치지 않고 닫혔어'] : ['wait', '승인자 확인을 기다리는 중 · 승인은 GitHub 에서 해'];
+    return [{ id: 'checks', name: '자동 검사(문서·비밀값 등)', state: checks[0], text: checks[1] }, { id: 'team', name: '팀 승인·합치기', state: team[0], text: team[1] }];
+  }
+
   var api = {
+    issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, prLines: prLines,
     BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, counts: counts, summaryText: summaryText,
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice, reloadStrip: reloadStrip, reloadResult: reloadResult,

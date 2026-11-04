@@ -93,7 +93,7 @@
         return h('li', { class: 'step ' + st.state, 'aria-current': st.state === 'now' ? 'step' : null, title: st.reason || null },
           h('span', { class: 'dot', 'aria-hidden': 'true' }),
           h('span', { class: 'snm', text: st.name }),
-          h('span', { class: big ? 'slb' : 'slb sr-only', text: st.label }));
+          h('span', { class: 'slb sr-only', text: st.label }));
       }));
     }
     function prChip(s) {
@@ -102,6 +102,19 @@
       var url = kit.safeHttp(pr.url);
       var label = 'PR #' + pr.number + ' · ' + pr.text;
       return h('span', { class: 'prchip ' + pr.checks }, url ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer', text: label }) : label);
+    }
+
+    /* 올림·승인 기다림·합쳐짐: 검토 요청(PR) 카드. 줄은 데이터에 있는 것만(검사는 합친 한 값, 승인은 PR 상태에서 읽는다). */
+    function prCard(s) {
+      var pr = s && s.flowPr, lines = L.prLines(pr);
+      if (!lines.length) return null;
+      var url = kit.safeHttp(pr.url);
+      var label = 'PR #' + pr.number + (pr.title ? ' · ' + pr.title : '');
+      return h('div', { class: 'q prcard', 'data-pr-card': '1' },
+        h('div', { class: 'qh' }, h('b', { text: label }), url ? h('a', { class: 'pill line sm', href: url, target: '_blank', rel: 'noopener noreferrer', text: 'GitHub에서 보기' }) : null),
+        lines.map(function (ln) {
+          return h('div', { class: 'crow ' + ln.state, 'data-line': ln.id }, h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: ln.name }), h('span', { class: 'ct', text: ln.text }));
+        }));
     }
 
     /* ---------- 도구 실행 ---------- */
@@ -213,8 +226,10 @@
     }
 
     /* ---------- 갈래 칸(세션 화면) ---------- */
-    function flowPanel() {
-      var el = h('section', { class: 'flowpanel', 'aria-label': '진행 순서' });
+    // opts.compact: 세션 화면처럼 제목 아래에 순서 알약을 따로 두는 쪽에서 쓴다(갈래 이름·순서 막대를 이 칸에서 뺀다).
+    function flowPanel(opts) {
+      var compact = !!(opts && opts.compact);
+      var el = h('section', { class: 'flowpanel' + (compact ? ' compact' : ''), 'aria-label': '진행 순서' });
       var st = { busy: false, msg: '', picker: null, pickerCwd: null, job: '' };
       var last = null, alive = true, pollTimer = null;
 
@@ -318,45 +333,48 @@
       }
 
       function drawAction(s) {
-        var a = L.nextAction(s), box = h('div', { class: 'nextstep' });
-        if (a.type === 'none') { box.appendChild(h('p', { class: 'note-muted', text: a.note })); el.appendChild(box); return; }
-        box.appendChild(h('p', { class: 'label', text: '지금 할 일 · ' + a.stepName }));
-        if (a.hint) box.appendChild(h('p', { class: 'note-muted', text: a.hint }));
-        var row = h('div', { class: 'btn-row left' });
+        var a = L.nextAction(s), box = h('div', { class: 'nextstep ask' });
+        if (a.type === 'none') { box.appendChild(h('p', { class: 'sub', text: a.note })); el.appendChild(box); return; }
+        var busyNow = s.status === 'running' || s.status === 'starting';
+        box.appendChild(h('span', { class: 'eb', text: busyNow ? '다음 단계 · AI 가 끝나면' : '네 차례' }));
+        box.appendChild(h('b', { text: '지금 할 일 · ' + a.stepName }));
+        if (a.hint) box.appendChild(h('p', { class: 'sub', text: a.hint }));
+        var row = h('div', { class: 'acts' });
         if (a.type === 'skill') {
-          row.appendChild(h('button', { type: 'button', class: 'btn primary', disabled: st.busy || a.disabled, title: a.disabledReason || null, text: a.label,
+          row.appendChild(h('button', { type: 'button', class: 'pill acc', disabled: st.busy || a.disabled, title: a.disabledReason || null, text: a.label,
             onClick: function () { act(runSkill(last, a.skill), HARNESS_PREFIX + a.skill + ' 실행을 요청했어요.'); } }));
         } else if (a.type === 'done' || a.type === 'human') {
-          row.appendChild(h('button', { type: 'button', class: 'btn primary', disabled: st.busy, text: a.label,
+          row.appendChild(h('button', { type: 'button', class: 'pill acc', disabled: st.busy, text: a.label,
             onClick: function () { post('/flow/done', {}, '이 단계를 끝냈어요.'); } }));
-          if (a.type === 'human') row.appendChild(h('button', { type: 'button', class: 'btn', disabled: st.busy, text: a.refreshLabel, onClick: function () { post('/flow/refresh', {}, '다시 확인했어요.'); } }));
+          if (a.type === 'human') row.appendChild(h('button', { type: 'button', class: 'pill line', disabled: st.busy, text: a.refreshLabel, onClick: function () { post('/flow/refresh', {}, '다시 확인했어요.'); } }));
         } else {
-          box.appendChild(h('p', { class: 'stepstate', text: a.step.state === 'active' ? '밖에서 일이 끝나길 기다리는 중이에요.' : '아직 시작 전이에요.' }));
-          row.appendChild(h('button', { type: 'button', class: 'btn primary', disabled: st.busy, text: a.label, onClick: function () { post('/flow/refresh', {}, '다시 확인했어요.'); } }));
-          if (a.helper) row.appendChild(h('button', { type: 'button', class: 'btn', disabled: st.busy || a.helperDisabled, text: HARNESS_PREFIX + a.helper + ' 보기',
+          box.appendChild(h('p', { class: 'sub', text: a.step.state === 'active' ? '밖에서 일이 끝나길 기다리는 중이에요.' : '아직 시작 전이에요.' }));
+          row.appendChild(h('button', { type: 'button', class: 'pill acc', disabled: st.busy, text: a.label, onClick: function () { post('/flow/refresh', {}, '다시 확인했어요.'); } }));
+          if (a.helper) row.appendChild(h('button', { type: 'button', class: 'pill line', disabled: st.busy || a.helperDisabled, text: HARNESS_PREFIX + a.helper + ' 보기',
             onClick: function () { act(runSkill(last, a.helper), HARNESS_PREFIX + a.helper + ' 실행을 요청했어요.'); } }));
         }
         box.appendChild(row);
-        if (a.disabledReason && a.type === 'skill') box.appendChild(h('p', { class: 'note-muted', text: a.disabledReason }));
+        if (a.disabledReason && a.type === 'skill') box.appendChild(h('p', { class: 'sub', text: a.disabledReason }));
         box.appendChild(h('button', { type: 'button', class: 'skiplink', disabled: st.busy, text: '이 단계 건너뛰기', onClick: function () { askSkip(a.step); } }));
         el.appendChild(box);
       }
 
       function drawFinished(s) {
-        var nx = L.nextOptions(s), box = h('div', { class: 'nextflow' });
-        box.appendChild(h('h2', { class: 'sect-h', text: '이 일은 끝났어요' }));
-        if (nx.unknown) box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: '판정 불능 · ' + nx.unknown }));
-        if (nx.hint && !nx.options.length) box.appendChild(h('p', { class: 'note-muted', text: nx.hint }));
+        var nx = L.nextOptions(s), box = h('div', { class: 'nextflow handoff' });
+        box.appendChild(h('span', { class: 'eb', text: '다음 일' }));
+        box.appendChild(h('b', { text: '이 일은 끝났어요' }));
+        if (nx.unknown) box.appendChild(h('p', { class: 'sub attn', role: 'alert', text: '판정 불능 · ' + nx.unknown }));
+        if (nx.hint && !nx.options.length) box.appendChild(h('p', { class: 'sub', text: nx.hint }));
         if (nx.options.length) {
-          box.appendChild(h('p', { class: 'note-muted', text: '다음에 이어서 할 일을 고르세요.' }));
-          var row = h('div', { class: 'chips' });
+          box.appendChild(h('p', { class: 'sub', text: '다음에 이어서 할 일을 고르세요. 새 세션에서 시작하면 앞 대화를 다시 읽지 않아 더 빠르고 정확해요.' }));
+          var row = h('div', { class: 'acts' });
           nx.options.forEach(function (o) {
-            if (o.disabled) row.appendChild(h('button', { type: 'button', class: 'chip off', disabled: true }, o.label, h('small', { text: '준비 중' })));
-            else if (o.clickable) row.appendChild(h('button', { type: 'button', class: 'btn primary', disabled: st.busy, text: o.label, onClick: function () { askNext(o); } }));
-            else row.appendChild(h('span', { class: 'note-muted', text: o.label }));
+            if (o.disabled) row.appendChild(h('button', { type: 'button', class: 'pill off', disabled: true }, o.label, h('small', { text: '준비 중' })));
+            else if (o.clickable) row.appendChild(h('button', { type: 'button', class: 'pill dark', disabled: st.busy, text: o.label, onClick: function () { askNext(o); } }));
+            else row.appendChild(h('span', { class: 'sub', text: o.label }));
           });
           box.appendChild(row);
-        } else if (!nx.unknown && !nx.hint) box.appendChild(h('p', { class: 'note-muted', text: '이어서 할 일이 없어요.' }));
+        } else if (!nx.unknown && !nx.hint) box.appendChild(h('p', { class: 'sub', text: '이어서 할 일이 없어요.' }));
         el.appendChild(box);
       }
 
@@ -367,11 +385,13 @@
         if (!s.flowId) {
           ensurePicker(s); drawPicker(s);
         } else {
-          el.appendChild(h('div', { class: 'flow-head' },
-            h('h2', { class: 'flow-name', text: s.flowName || s.flowId }),
-            s.flowReason ? h('span', { class: 'flow-reason', text: s.flowReason }) : null,
-            prChip(s)));
-          el.appendChild(stepBar(s, true));
+          if (!compact) {
+            el.appendChild(h('div', { class: 'flow-head' },
+              h('h2', { class: 'flow-name', text: s.flowName || s.flowId }),
+              s.flowReason ? h('span', { class: 'flow-reason', text: s.flowReason }) : null,
+              prChip(s)));
+            el.appendChild(stepBar(s, true));
+          }
           (s.flowUnknown || []).forEach(function (u) { el.appendChild(h('p', { class: 'note-attn', role: 'status', text: '판정 불능 · ' + (typeof u === 'string' ? u : u.reason || JSON.stringify(u)) })); });
           if (s.flowFinished) drawFinished(s); else drawAction(s);
         }
@@ -419,7 +439,7 @@
       var listBox = h('div', { class: 'docs-list' });
       var pane = h('div', { class: 'docs-pane', hidden: true });
       var wrap = h('div', { class: 'docs-wrap' }, listBox, pane);
-      el.appendChild(h('h2', { class: 'label', text: '만든 문서' }));
+      el.appendChild(h('h2', { class: 'eb', text: '만든 산출물' }));
       el.appendChild(wrap);
       var st = { files: null, error: null, selected: null, preview: null, previewError: null, sheet: 0, note: '', at: 0, stamp: null };
       var last = null, alive = true, loading = false;
@@ -507,8 +527,8 @@
           h('b', { class: 'wrap-any', text: kit.baseName(st.selected) }),
           h('button', { type: 'button', class: 'iconbtn', 'aria-label': '미리보기 닫기', onClick: function () { st.selected = null; drawList(); drawPane(); } }, kit.icon('close', 14))));
         pane.appendChild(h('div', { class: 'btn-row left' },
-          h('button', { type: 'button', class: 'btn sm primary', text: '열기', onClick: function () { openFile('open'); } }),
-          h('button', { type: 'button', class: 'btn sm', text: '탐색기에서 위치 보기', onClick: function () { openFile('reveal'); } })));
+          h('button', { type: 'button', class: 'pill dark sm', text: '열기', onClick: function () { openFile('open'); } }),
+          h('button', { type: 'button', class: 'pill line sm', text: '탐색기에서 위치 보기', onClick: function () { openFile('reveal'); } })));
         if (st.note) pane.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.note }));
         if (st.previewError) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
         else if (!st.preview) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' }));
@@ -521,6 +541,33 @@
         drawList();
       }
       drawList();
+      return { el: el, update: update, destroy: function () { alive = false; } };
+    }
+
+    /* ---------- 새 작업: 순서 칸("이렇게 진행돼")과 분석한 갈래 보여 주고 바꾸기 ---------- */
+    var STEP_NOTE = { skill: function (st) { return st.skill ? HARNESS_PREFIX + st.skill : ''; }, work: function () { return '직접 하는 일'; }, human: function () { return '사람이 확인'; }, wait: function () { return '밖에서 일이 끝나길 기다려'; } };
+    function flowCells(flow) {
+      return h('div', { class: 'flow', 'data-flow-cells': flow.id }, kit.listOf(flow, 'steps').map(function (st, i) {
+        var note = STEP_NOTE[st.kind] ? STEP_NOTE[st.kind](st) : '';
+        return h('div', { class: 'fs' }, h('b', { text: (i + 1) + ' ' + (st.name || st.id) }), note ? h('small', { text: note }) : null);
+      }));
+    }
+    // update({cwd, flowId, note}): 갈래 id 가 있으면 그 갈래의 순서를, 없으면 note 를 보인다.
+    function flowPreview() {
+      var el = h('div', { class: 'flowpreview', 'data-flow-preview': '1' }), alive = true, last = null;
+      function draw(r) {
+        clear(el);
+        if (!last || !last.flowId) { el.appendChild(h('p', { class: 'quiet', text: last ? last.note || '' : '' })); return; }
+        if (!r) { el.appendChild(h('p', { class: 'quiet', role: 'status', text: '불러오는 중이야.' })); return; }
+        if (!r.ok) { el.appendChild(h('p', { class: 'quiet', role: 'status', text: failText(r.error, '진행 순서') })); return; }
+        var flow = kit.listOf(r.data, 'flows').filter(function (f) { return f.id === last.flowId; })[0];
+        el.appendChild(flow ? flowCells(flow) : h('p', { class: 'quiet', text: '이 프로젝트에는 이 일의 순서가 없어.' }));
+      }
+      function update(o) {
+        last = o;
+        draw(null);
+        if (o.flowId) flowsFor(o.cwd).then(function (r) { if (alive && last === o) draw(r); });
+      }
       return { el: el, update: update, destroy: function () { alive = false; } };
     }
 
@@ -554,7 +601,8 @@
           el.appendChild(h('p', { class: 'flow-line', text: '도구만 쓰는 일이에요 · 정해진 순서 없이 그 도구 스킬로 바로 시작해요.' }));
           if (found && found.id === cur.id && found.reason) el.appendChild(h('p', { class: 'note-muted', text: found.reason }));
         } else if (cur) {
-          el.appendChild(h('p', { class: 'flow-line', text: '이 일은 \'' + cur.name + '\' 갈래예요 · 순서: ' + L.orderText(cur) }));
+          el.appendChild(h('p', { class: 'flow-line', text: '이 일은 \'' + cur.name + '\' 갈래야.' }));
+          el.appendChild(flowCells(cur));
           if (found && found.id === cur.id && found.reason) el.appendChild(h('p', { class: 'note-muted', text: found.reason }));
         } else el.appendChild(h('p', { class: 'note-muted', text: '고르지 않으면 정해진 순서 없이 시작해요.' }));
         el.appendChild(h('button', { type: 'button', class: 'disclose', 'aria-expanded': String(open), onClick: function () { open = !open; draw(r); } }, kit.icon('chev', 14), '다른 갈래로 바꾸기'));
@@ -749,7 +797,7 @@
     }
 
     return {
-      stepBar: stepBar, toolsRow: toolsRow, startChecksPanel: startChecksPanel, flowPanel: flowPanel, folderNotice: folderNotice,
+      stepBar: stepBar, prCard: prCard, flowPreview: flowPreview, toolsRow: toolsRow, startChecksPanel: startChecksPanel, flowPanel: flowPanel, folderNotice: folderNotice,
       docsPanel: docsPanel, flowChooser: flowChooser, homeView: homeView, closeModal: closeModal
     };
   }

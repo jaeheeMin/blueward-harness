@@ -1835,8 +1835,12 @@ def test_approval_screen_shows_full_input_and_rules():
     js = (CONSOLE / "static" / "app.js").read_text(encoding="utf-8")
     assert "도구에 넘기는 입력 전체" in js and "dangerouslyDisableSandbox" in js and "run_in_background" in js
     assert "suggestionText" in js and "다음 규칙이 추가됩니다" in js
-    # 입력 JSON 이 접힌 details 안에 있지 않다
-    assert "det.appendChild(h('pre'" not in js
+    # 명령 원문·입력 전체는 "자세히" 안에 있지만, 쉬운 설명이 없는 명령·샌드박스를 끄는 명령·파일 고치기는 접지 않고 열어 둔다(#636)
+    assert "var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background;" in js
+    assert "class: 'more', open: !friendly" in js
+    # 시안 17 의 확인 카드: 이번만 허락 / 하지 마, Edit 은 원래 글 · 바꾼 글(#634)
+    assert "'이번만 허락'" in js and "'하지 마'" in js and "row('원래 글'" in js and "row('바꾼 글'" in js
+    assert "바꿀 내용" not in js and "바뀌는 부분" not in js
     css = (CONSOLE / "static" / "app.css").read_text(encoding="utf-8")
     assert ".scroll" in css and "max-height" in css
 
