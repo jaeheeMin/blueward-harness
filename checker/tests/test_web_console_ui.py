@@ -396,6 +396,27 @@ const cases = {
     const { kit: k4 } = makeKit({ 'GET /api/approvals': { state: 'no' } }, [sessions[1]]);
     const root4 = h('div'); loadUI(k4).homeView(root4); await tick(); await tick();
     assert.strictEqual(find(root4, e => e.attrs['data-call']).length, 0);
+    // 내 차례가 여러 건이어도 카드는 한 장(가장 오래 기다린 것) + "외 n건" 알약. 누르면 펼치고 다시 누르면 접는다. (#667)
+    const many = [
+      { id: 'n1', title: '새것', cwd: '/w/a', group: 'todo', updatedAt: 300 },
+      { id: 'n2', title: '가장 오래', cwd: '/w/b', group: 'todo', updatedAt: 100 },
+      { id: 'n3', title: '중간', cwd: '/w/c', group: 'todo', updatedAt: 200 },
+    ];
+    const { kit: k5 } = makeKit({ 'GET /api/approvals': { state: 'no' } }, many);
+    const root5 = h('div'); loadUI(k5).homeView(root5); await tick(); await tick();
+    assert.deepStrictEqual(find(root5, e => e.attrs['data-call']).map(e => e.attrs['data-call']), ['n2']);
+    const tog = find(root5, e => e.attrs['data-calls-toggle'])[0];
+    assert.strictEqual(tog.tag, 'button'); assert.strictEqual(tog.textContent, '외 2건'); assert.strictEqual(tog.attrs['aria-expanded'], 'false');
+    assert.strictEqual(find(root5, e => e.tag === 'details').length, 0);
+    tog.click();
+    assert.deepStrictEqual(find(root5, e => e.attrs['data-call']).map(e => e.attrs['data-call']), ['n2', 'n3', 'n1']);
+    assert.strictEqual(tog.textContent, '접기'); assert.strictEqual(tog.attrs['aria-expanded'], 'true');
+    tog.click();
+    assert.deepStrictEqual(find(root5, e => e.attrs['data-call']).map(e => e.attrs['data-call']), ['n2']);
+    // 한 건뿐이면 알약이 없다
+    const { kit: k6 } = makeKit({ 'GET /api/approvals': { state: 'no' } }, [many[0]]);
+    const root6 = h('div'); loadUI(k6).homeView(root6); await tick(); await tick();
+    assert.strictEqual(find(root6, e => e.attrs['data-calls-toggle']).length, 0);
   },
   async dom_home_empty() {
     const { kit } = makeKit({ 'GET /api/approvals': { state: 'no' } }, []);
@@ -644,7 +665,7 @@ def test_app_frame_ann_only_with_todo_and_menu_paths():
     assert re.search(r"clear\(annEl\);\s*if \(d\.todo\.length\) \{", ann) and "내 차례 ' + d.todo.length + '건 — '" in ann
     # 메뉴: 내 일 → /, 작업 → 가장 위 세션, 산출물 → /docs, 새 작업 → /new, 설정 → /settings.
     head = app[app.index("function renderHead"):app.index("function renderSide")]
-    assert "link('/', { text: '내 일'" in head and "link('/new', { text: '새 작업'" in head and "link('/settings'" in head
+    assert "link('/', { text: '내 일'" in head and "link(newHref(), { text: '새 작업'" in head and "link('/settings'" in head
     assert "'/s/' + encodeURIComponent(rows[0].id)" in head and "link('/docs', { text: '산출물'" in head
     assert "p === '/docs'" in app and "docs: docsView" in app
     # 세션 목록: 기억은 데이터가 없어 ? 와 툴팁만, 세션이 없으면 점선 상자와 새 세션 버튼
@@ -688,7 +709,7 @@ def _smoke(tmp_path, route, sessions, requests=None, extra=None):
     data = dict(extra or {})
     data |= {"GET /api/sessions": {"sessions": sessions}, "GET /api/flows": {"flows": [{"id": "srs", "name": "요구사항", "steps": _STEPS}], "tools": []},
             "GET /api/approvals": {"state": "no"}, "GET /api/models": {"options": [{"value": "", "label": "기본"}], "effortOptions": [{"value": "", "label": "기본"}], "permissionOptions": [{"value": "", "label": "기본"}]},
-            "GET /api/folders/recent": {"folders": ["C:/w/proj"]}}
+            "GET /api/folders/recent": (extra or {}).get("GET /api/folders/recent", {"folders": ["C:/w/proj"]})}
     for s in sessions:
         data["GET /api/sessions/" + s["id"]] = s
         data["GET /api/sessions/" + s["id"] + "/files"] = {"files": [{"path": "docs/SRS.md", "mtime": 5, "changed": True}]}
@@ -773,6 +794,29 @@ def test_work_screen_new_task_has_kinds_flow_and_advanced_fold(tmp_path):
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_default_folder_priority(tmp_path):
+    """기본 폴더: 세션에서 왔으면 그 세션 → 마지막으로 시작한 폴더 → 없으면 기본값 없이 목록 펼침. 최근 폴더 첫 줄·다른 세션은 쓰지 않는다. (#667)"""
+    other = _session("s9", cwd="C:/other/busy")  # 방금까지 움직인 다른 저장소 세션
+    mine = _session("s1", cwd="C:/mine/repo")
+    recent = {"GET /api/folders/recent": {"folders": ["C:/other/busy", "C:/mine/repo"]}}
+    # 1) 세션 화면에서 왔다
+    got = _smoke(tmp_path, "new?from=s1", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": "C:/last/one"}}))
+    assert "작업 폴더C:/mine/repo" in got["text"] and "C:/last/one" not in got["text"].split("작업 폴더")[1][:30]
+    assert "GET /api/folders/last" not in got["calls"]  # 세션 폴더가 있으면 서버 기억을 묻지 않는다
+    # 2) 그냥 새 작업: 서버가 기억한 마지막 폴더
+    got = _smoke(tmp_path, "new", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": "C:/last/one"}}))
+    assert "작업 폴더C:/last/one" in got["text"] and "폴더 바꾸기" in got["text"]
+    # 3) 둘 다 없으면 기본값 없이 목록을 펼쳐 고르게 한다(최근 폴더 첫 줄을 쓰지 않는다)
+    got = _smoke(tmp_path, "new", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": None}}))
+    assert "폴더를 골라 줘" in got["text"] and "작업 폴더C:/other/busy" not in got["text"] and "닫기" in got["text"]
+    assert "C:/other/busy" in got["text"] and "C:/mine/repo" in got["text"]  # 후보 목록은 그대로
+    # 4) 새 세션 버튼은 세션 화면에서만 출처 세션을 넘긴다
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "'/new?from=' + encodeURIComponent(sid)" in app and app.count("link(newHref(),") == 3  # 헤더 메뉴 · 목록 아래 + 새 세션 · 접힌 레일 +
+    assert "recent[0]" not in app
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
 def test_docs_screen_groups_files_and_has_menu(tmp_path):
     got = _smoke(tmp_path, "docs", [_session("s1")])
     for need in ("내가 만든 문서", "요구사항 · 설계", "SRS.md", "안 올림", "왼쪽에서 문서를 골라 줘"):
@@ -795,7 +839,7 @@ def test_settings_screen_matches_design(tmp_path):
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_header_project_follows_the_folder_on_screen(tmp_path):
     other = _session("s1", cwd="C:/other/templete-func", repo="templete-func")
-    got = _smoke(tmp_path, "new", [other])
+    got = _smoke(tmp_path, "new", [other], extra={"GET /api/folders/last": {"path": "C:/w/proj"}})
     assert "w/proj" in got["head"] and "templete-func" not in got["head"]  # 새 작업은 고른 작업 폴더를 따른다(가장 위 세션 것이 아니다)
     got = _smoke(tmp_path, "s/s1", [other])
     assert "templete-func" in got["head"]

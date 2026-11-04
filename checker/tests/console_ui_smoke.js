@@ -84,7 +84,7 @@ const errors = [];
 console.error = (...a) => errors.push(a.join(' '));
 console.warn = () => {};
 process.on('unhandledRejection', e => errors.push('unhandled ' + (e && e.stack || e)));
-location.pathname = '/' + (process.argv[5] || '');
+{ const parts = (process.argv[5] || '').split('?'); location.pathname = '/' + parts[0]; location.search = parts[1] ? '?' + parts[1] : ''; }
 
 for (const f of ['theme.js', 'md.js', 'flow-logic.js', 'flow-ui.js', 'app.js']) { const m = require(path.join(dir, f)); if (f === 'flow-logic.js') window.BHLogic = m; }
 const tick = (n) => new Promise(r => setTimeout(r, n || 20));

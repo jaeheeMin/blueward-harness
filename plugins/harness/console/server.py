@@ -100,7 +100,8 @@ SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", ".
 STATIC_TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".html": "text/html",
                 ".svg": "image/svg+xml", ".json": "application/json", ".map": "application/json", ".woff2": "font/woff2"}
 FIRST_RUN_FILE = "first-run.json"  # 이 PC 에서 첫 화면(시작하기)을 이미 본 표시. 상태 폴더 아래, 브라우저와 무관
-CHECK_RUN_TIMEOUT = 15.0           # 시작 점검의 gh 호출 제한 시간(초)
+LAST_FOLDER_FILE = "last-folder.json"  # 새 작업에서 마지막으로 시작한 작업 폴더. 상태 폴더 아래, 브라우저와 무관
+CHECK_RUN_TIMEOUT = 15.0          # 시작 점검의 gh 호출 제한 시간(초)
 GH_LOGIN_FAIL = ("gh auth login", "not logged in", "authentication", "bad credentials", "401", "no oauth token")
 
 
@@ -205,7 +206,8 @@ class App:
         self.check_run = run or (lambda args, cwd: gitstate.run_command(args, cwd, CHECK_RUN_TIMEOUT, merge_stderr=True))  # 시작 점검용(오류 글까지 본다)
         self.gh_installed = lambda: shutil.which("gh") is not None
         self.remote_latest = self.read_remote_latest  # 원격 최신 판. 시험이 바꿔 끼운다
-        self.first_run_seen = False  # 상태 폴더가 없는 실행(시험)에서만 메모리에 둔다
+        self.last_folder_mem = None  # 상태 폴더가 없는 실행(시험)에서만 쓴다
+        self.first_run_seen = False # 상태 폴더가 없는 실행(시험)에서만 메모리에 둔다
         self.wait_poll = wait_poll
         self.jobs: dict[str, dict] = {}  # 다음 갈래 넘기기 작업(메모리에만 둔다)
         self.reload_queue: set[str] = set()  # 턴이 끝나기를 기다리는 다시 불러오기
@@ -1398,6 +1400,7 @@ class App:
                 if sid is None:
                     raise HttpError(502, "claude 세션을 띄우지 못했습니다. " + platform_compat.CLAUDE_MISSING)
                 job["session_id"] = sid
+                self.save_last_folder(job["cwd"])
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline and self.store.resolve_id(sid) == sid and sid.startswith("m-"):
             time.sleep(0.05)
@@ -1417,6 +1420,35 @@ class App:
         if not os.path.isdir(p):
             return {"ok": False, "error": "폴더가 아니거나 없습니다."}
         return {"ok": True, "path": p, "name": os.path.basename(p) or p, "isGit": self.git_inspect(p)["isRepo"]}
+
+    def last_folder_file(self) -> Path | None:
+        return self.store.dir / LAST_FOLDER_FILE if self.store.dir else None
+
+    def save_last_folder(self, path: str) -> None:
+        """새 작업을 시작한 폴더를 기억한다. 상태 폴더가 없는 실행(시험)에서는 메모리에만 둔다."""
+        f = self.last_folder_file()
+        if f is None:
+            self.last_folder_mem = path
+            return
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"path": path, "at": self.clock()}, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, f)
+        except OSError:
+            pass  # 기억을 못 해도 작업 시작은 막지 않는다
+
+    def a_last_folder(self, g, q, b):
+        f = self.last_folder_file()
+        path = self.last_folder_mem
+        if f is not None:
+            try:
+                path = json.loads(f.read_text(encoding="utf-8")).get("path")
+            except (OSError, ValueError, AttributeError):
+                path = None
+        if isinstance(path, str) and path and os.path.isdir(path):  # 지금 없는 폴더는 없는 것으로 본다
+            return 200, {"path": path, "name": os.path.basename(path) or path}
+        return 200, {"path": None, "name": ""}
 
     def a_recent(self, g, q, b):
         with self.store.lock:
@@ -1511,6 +1543,7 @@ ROUTES = [
     ("POST", re.compile(rf"/api/new/{S}/start"), App.a_start),
     ("GET", re.compile(rf"/api/new/{S}/preview"), App.a_preview),
     ("GET", re.compile(r"/api/folders/recent"), App.a_recent),
+    ("GET", re.compile(r"/api/folders/last"), App.a_last_folder),
     ("POST", re.compile(r"/api/folders/validate"), App.a_validate),
     ("POST", re.compile(r"/api/folders/pick"), App.a_pick),
     ("GET", re.compile(r"/api/models"), App.a_models),

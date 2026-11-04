@@ -905,6 +905,7 @@
       var prVal = h('span', { class: 'v', text: '…' });
       var prTile = h('div', { class: 'tile2', 'data-pr-tile': '1' }, h('span', { class: 'eb', text: '승인 기다리는 PR' }), prVal);
       prTile.hidden = true;
+      var homeOpen = false;  // "외 n건" 펼침. 이 화면에서만 기억한다
       function showPr(merged) {
         if (merged.state === 'yes') { prVal.textContent = String(merged.items.length); prTile.className = 'tile2'; prTile.hidden = false; }
         else if (merged.state === 'unknown') { prVal.textContent = '확인 못 함'; prTile.className = 'tile2 unk'; prTile.hidden = false; }
@@ -926,15 +927,31 @@
         page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), tile('쉬는 중', String(c.idle), ''), prTile));
 
         var todo = list.filter(function (s) { return L.groupOf(s) === 'todo'; });
-        todo.forEach(function (s) {
+        // 내 차례는 가장 오래 기다린 한 건만 카드로 두고, 나머지는 "외 n건" 을 눌러 펼친다(펼침 상태는 이 화면에서만 기억).
+        var waiting = todo.slice().sort(function (a, b) { return (a.updatedAt || 0) - (b.updatedAt || 0); });
+        function callCard(s) {
           var pend = pendingOf(s), name = s.title || folderName(s) || '이름 없는 세션';
           var href = pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id);
           var verb = pend && pend.r && kit.kindOf(pend.r) === 'question' ? '가서 답하기' : pend ? '가서 승인하기' : '가서 확인하기';
           var what = pend ? (kit.requestTitle ? kit.requestTitle(pend.r) : (pend.r && pend.r.title) || '요청을 확인하세요') : s.askedInText ? '답을 기다리는 듯해요(추정)' : s.turnSkill ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례예요';
-          page.appendChild(h('div', { class: 'call', 'data-call': s.id },
+          return h('div', { class: 'call', 'data-call': s.id },
             h('div', { class: 'ct' }, h('span', { class: 'eb', text: '네 차례 · ' + name }), h('b', { text: what })),
-            kit.link(href, { class: 'pill dark', text: verb })));
-        });
+            kit.link(href, { class: 'pill dark', text: verb }));
+        }
+        if (waiting.length) {
+          page.appendChild(callCard(waiting[0]));
+          if (waiting.length > 1) {
+            var rest = waiting.slice(1), more = h('div', { class: 'calls-more', 'data-calls-more': '1' }), moreBtn = h('button', { type: 'button', class: 'pill line sm', 'data-calls-toggle': '1', onClick: function () { homeOpen = !homeOpen; paintMore(); } });
+            var paintMore = function () {
+              moreBtn.setAttribute('aria-expanded', String(homeOpen));
+              moreBtn.textContent = homeOpen ? '접기' : '외 ' + rest.length + '건';
+              clear(more);
+              if (homeOpen) rest.forEach(function (s) { more.appendChild(callCard(s)); });
+            };
+            paintMore();
+            page.appendChild(h('div', { class: 'calls-rest' }, moreBtn, more));
+          }
+        }
 
         var head = h('tr', null, ['작업', '단계', '번호', '기억', '상태'].map(function (t) { return h('th', { scope: 'col', text: t }); }));
         var rows = list.map(function (s) {
