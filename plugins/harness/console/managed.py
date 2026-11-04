@@ -263,7 +263,7 @@ class Manager:
             if s is not None:
                 s.pop("interrupted", None)
                 self.store.add_log(s, "보냄: " + text.split("\n", 1)[0][:200])
-                if not s["title"] or s.get("title_rank", 0) < TITLE_PROMPT:
+                if s.get("title_rank", 0) < TITLE_PROMPT:
                     title = prompt_title(text)
                     if title:
                         self.store.set_title(s, title, TITLE_PROMPT)

@@ -209,9 +209,9 @@ class Store:
                 s["turn_running"] = False
                 s["managed_alive"] = False
                 if s.get("title_rank") == TITLE_PROMPT:  # 옛 버전이 저장한 "[Image #17]" 같은 이름을 정리한다
+                    # 비어도 rank 는 그대로 둔다 — 첫 요청은 이미 지나갔으니 대화 중간 말("응 계속 해")이 이름이
+                    # 되지 않고 display_title 의 브랜치·스킬·폴더 이름으로 보이게 한다
                     s["title"] = " ".join(prompt_title(str(s.get("title") or "")).split())[:60]
-                    if not s["title"]:
-                        s["title_rank"] = 0
                 self.sessions[s["id"]] = s
         self.folders = [p for p in data.get("folders", []) if isinstance(p, str)]
 

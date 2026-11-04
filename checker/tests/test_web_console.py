@@ -1676,7 +1676,9 @@ def test_load_cleans_stale_prompt_titles(tmp_path):
         sess("a", "[Image #17]", 2), sess("b", "[Image #2] 이거 뭐야", 2), sess("c", "work", 1), sess("d", "[Image #1]", 3),
     ], "folders": []}), encoding="utf-8")
     st = Store(tmp_path)
-    assert (st.sessions["a"]["title"], st.sessions["a"]["title_rank"]) == ("", 0)
+    assert (st.sessions["a"]["title"], st.sessions["a"]["title_rank"]) == ("", 2)  # 다음 중간 말이 이름이 되지 않게
+    st.sessions["a"].update(branch="fix/12-old-work", cwd="C:\\x\\work")
+    assert store_mod.display_title(st.sessions["a"]) == "#12 old work"
     assert (st.sessions["b"]["title"], st.sessions["b"]["title_rank"]) == ("이거 뭐야", 2)
     assert (st.sessions["c"]["title"], st.sessions["c"]["title_rank"]) == ("work", 1)
     assert st.sessions["d"]["title"] == "[Image #1]"
