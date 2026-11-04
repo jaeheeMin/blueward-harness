@@ -328,6 +328,23 @@ def test_list_는_한글_이름_원장의_줄도_담는다(tmp_path, monkeypatch
     assert dev["ledger"]["status"] == "진행"
 
 
+def test_list_는_원장_Spec_칸과_main_의_Spec_파일을_함께_담는다(tmp_path, monkeypatch, capsys):
+    """start 의 Spec 선행 멈춤(#668)이 쓰는 재료. 설정 건(원장 Spec 칸 `설정`)과 Spec 없는 개발을 가른다."""
+    work = make_repo(tmp_path)
+    (work / "audit" / "ledger" / "p.md").write_text(
+        LEDGER + "| DEV-003 | c | 설정 | u | 대기 |\n| DEV-002 | b | - | u | 대기 |\n", encoding="utf-8"
+    )
+    _git(work, "add", "-A")
+    _git(work, "commit", "-m", "설정 건")
+    _git(work, "push", "origin", "main")
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["list"])
+    devs = {d["number"]: d for d in json.loads(out)["devs"]}
+    assert code == 0
+    assert devs["DEV-003"]["ledger"]["spec"] == "설정" and "spec" not in devs["DEV-003"]
+    assert devs["DEV-001"]["ledger"]["spec"] == "-" and "spec" not in devs["DEV-001"]  # Spec 파일 없음 → 시작 불가
+    assert devs["DEV-002"]["spec"].startswith("docs/spec/DEV-002")  # main 에 Spec 파일이 있다 → 시작 가능
+
+
 def test_list_원장이_없으면_3_gh_실패는_2(tmp_path, monkeypatch, capsys):
     work = make_repo(tmp_path, ledger=False)
     code, out = run(monkeypatch, capsys, work, FakeGh(), ["list"])

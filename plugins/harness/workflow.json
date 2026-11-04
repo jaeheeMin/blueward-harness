@@ -85,8 +85,9 @@
       "basis": [{"file": "skills/start/SKILL.md", "quote": "`[DEV-xxx]` 이슈는 개발 본체용이라 개발 PR 병합 때 닫히고"}],
       "steps": [
         {"id": "start", "name": "개발 건 고르고 작업 시작하기(작업 기록과 작업 공간을 자동으로 만들어요)", "kind": "skill", "skill": "start", "done": ["skill_done", "on_work_branch"],
-         "hint": "[DEV-xxx] 를 고른다. start 스킬이 시작할 때 GitHub 이슈(작업 기록)와 브랜치(작업 공간)를 만들고, 원장에 있는 개발 건이면 상태를 진행으로 바꾼다.",
-         "basis": [{"file": "skills/start/SKILL.md", "quote": "`대기` 면 묻지 않고 `진행` 으로만 바꾸고"}]},
+         "hint": "[DEV-xxx] 를 고른다. src/ 를 바꾸는 개발인데 그 개발의 Spec 이 main 에 없으면 시작하지 않고 먼저 Spec 을 만들라고 멈춘다. start 스킬이 시작할 때 GitHub 이슈(작업 기록)와 브랜치(작업 공간)를 만들고, 원장에 있는 개발 건이면 상태를 진행으로 바꾼다.",
+         "basis": [{"file": "skills/start/SKILL.md", "quote": "`대기` 면 묻지 않고 `진행` 으로만 바꾸고"},
+                   {"file": "skills/start/SKILL.md", "quote": "이번 작업이 `src/` 를 바꾸는 개발이고 Spec 이 main 에 없으면 시작하지 않는다(#668)."}]},
         {"id": "implement", "name": "구현(SAP 080 에서 개발·활성화)", "kind": "work", "done": ["has_changes", "manual"],
          "hint": "Claude Code 와 SAP 080 에서 개발하고 활성화한다. 활성화하지 않은 오브젝트가 있으면 deliver 가 멈춘다. 끝나면 끝났다고 누른다.",
          "basis": [{"file": "skills/deliver/SKILL.md", "quote": "이어서 080 에 쓴 ABAP 오브젝트의 활성화를 확인한다."},
