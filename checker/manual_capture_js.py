@@ -114,12 +114,7 @@ LIB_JS = r"""(() => {
       for (const h of colHeaders(name)) {
         const g = rectFor(h);
         if (!g) continue;
-        if (g.v) {
-          const tbl = h.closest('table, [role=grid], [role=treegrid], [role=table], .sapUiTable, .sapMList');
-          const tc = tbl && clip(tbl);
-          const bottom = tc ? tc.y + tc.h : g.r.y + g.r.h;
-          g.r = { x: g.r.x, y: g.r.y, w: g.r.w, h: Math.max(g.r.h, bottom - g.r.y) };
-        }
+        if (g.v) g.r = columnBox(h, g.r);
         add(h, g);
       }
     } else {
@@ -135,6 +130,25 @@ LIB_JS = r"""(() => {
   const find = (kind, name) => {
     const { items, noInput } = cands(kind, name);
     return { items: items.map(({ el, ...r }) => r), noInput };
+  };
+
+  // 열 네모: 머리글부터 같은 열의 보이는 본문 칸 아래 끝까지. UI5 표(sap.ui.table)는 머리글과 본문이 다른 <table> 이라
+  // 가장 가까운 <table> 은 머리글 표뿐이다(#637 실제 테넌트 100). 그래서 바깥 격자(role=grid 등)에서 같은 aria-colindex 칸을 모은다.
+  // 칸을 못 모으면 바깥 격자의 보이는 아래 끝, 그것도 없으면 가장 가까운 표의 아래 끝까지.
+  const columnBox = (h, hr) => {
+    const grid = h.closest('[role=grid], [role=treegrid], [role=table], .sapUiTable, .sapMList') || h.closest('table');
+    let bottom = hr.y + hr.h;
+    const ci = h.getAttribute('aria-colindex');
+    const cells = grid && ci ? [...grid.querySelectorAll('[aria-colindex="' + ci + '"]')].filter(c => c !== h && shown(c)) : [];
+    const vis = cells.map(c => fully(c)).filter(Boolean).map(rectOf).filter(r => r.y >= hr.y);
+    if (vis.length) bottom = Math.max(bottom, ...vis.map(r => r.y + r.h));
+    else {
+      // 머리글과 본문이 한 <table> 이면(sap.m.Table·HTML 표) 그 표가 머리글보다 아래로 내려간다. 머리글뿐이면 바깥 격자를 쓴다.
+      const t = h.closest('table'), tc = t && clip(t);
+      const box = tc && tc.y + tc.h > hr.y + hr.h + 2 ? tc : (grid && clip(grid));
+      if (box) bottom = Math.max(bottom, box.y + box.h);
+    }
+    return { x: hr.x, y: hr.y, w: hr.w, h: bottom - hr.y };
   };
 
   const colHeaders = name => uniq([...document.querySelectorAll('th, [role=columnheader], .sapMListTblHeaderCell, .sapUiTableCol')])
