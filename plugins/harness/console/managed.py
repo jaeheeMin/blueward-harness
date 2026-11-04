@@ -12,7 +12,7 @@ from typing import Callable
 
 import platform_compat
 from hooks_api import tool_key
-from store import CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, mark_check, new_start_checks
+from store import CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, mark_check, new_start_checks, prompt_title
 
 FLAGS = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
          "--permission-prompt-tool", "stdio"]
@@ -235,6 +235,7 @@ class Manager:
             s["permissionChoice"] = permission or ""
             if not resume:
                 s["startChecks"] = new_start_checks()  # 새 세션 점검 체크리스트(이어서 띄운 세션에는 새로 만들지 않는다)
+            title = prompt_title(title) if title else ""
             if title:
                 self.store.set_title(s, title, TITLE_PROMPT)
         proc = Proc(self, temp, p)
@@ -263,7 +264,9 @@ class Manager:
                 s.pop("interrupted", None)
                 self.store.add_log(s, "보냄: " + text.split("\n", 1)[0][:200])
                 if not s["title"] or s.get("title_rank", 0) < TITLE_PROMPT:
-                    self.store.set_title(s, text.lstrip("/").split("\n", 1)[0], TITLE_PROMPT)
+                    title = prompt_title(text)
+                    if title:
+                        self.store.set_title(s, title, TITLE_PROMPT)
         return proc.write(user_message(text))
 
     def interrupt(self, sid: str) -> bool:

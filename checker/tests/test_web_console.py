@@ -668,7 +668,7 @@ def test_reservation_can_be_cancelled_and_flow_shows_it(browser):
 def test_first_event_registers_session_and_title_rules(browser):
     browser.event("t9", "PreToolUse", tool_name="Bash", tool_input={"command": "ls"})
     s = browser.call("GET", "/api/sessions/t9")[1]
-    assert s["title"] == "work" and s["currentAction"].startswith("Bash: ls") and s["managed"] is False
+    assert s["title"] == "이름 없는 세션 · work" and s["currentAction"].startswith("Bash: ls") and s["managed"] is False
     browser.event("t9", "UserPromptSubmit", prompt="로그인 화면 고쳐줘\n자세히")
     assert browser.call("GET", "/api/sessions/t9")[1]["title"] == "로그인 화면 고쳐줘"
     browser.event("t9", "SessionStart", session_title="지정한 제목")
@@ -1617,6 +1617,69 @@ def test_follow_up_prompt_does_not_replace_session_title(browser):
     browser.event("t10", "UserPromptSubmit", prompt="처음 요청\n자세히")
     browser.event("t10", "UserPromptSubmit", prompt="두 번째 요청")
     assert browser.call("GET", "/api/sessions/t10")[1]["title"] == "처음 요청"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("[Image #26]", ""),
+    ("[Image #3]\n로그인 고쳐줘", "로그인 고쳐줘"),
+    ("[Image #26] 이거 뭐야", "이거 뭐야"),
+    ("[Image: source: C:\\a\\b.png]\n화면 봐줘", "화면 봐줘"),
+    ("[Pasted text #1 +20 lines]\n이 로그 분석해줘", "이 로그 분석해줘"),
+    ('<cross-session-message from="uds:abc">PR 병합했어</cross-session-message>', "다른 세션: PR 병합했어"),
+    ('<cross-session-message from="uds:abc">  </cross-session-message>', ""),
+    ('<cross-session-message from="uds:\\\\.\\pipe\\LOCAL\\cc-msg-3c6d1', ""),  # 옛 판이 60자로 잘라 저장한 이름
+    ('<cross-session-message from="uds:x">\n#685 검사 끝났어\n</cross-session-message>', "다른 세션: #685 검사 끝났어"),
+    ("<task-notification>\n<task-id>1</task-id>\n</task-notification>", ""),
+    ("<task-notification>끝까지 닫히지 않음\n본문", ""),
+    ("앞에 쓴 글\n<system-reminder>\n규칙\n</system-reminder>", "앞에 쓴 글"),
+    ("<system-reminder>규칙</system-reminder>\n뒤에 쓴 글", "뒤에 쓴 글"),
+    ("/harness:scaffold", ""),
+    ("<command-name>/harness:scaffold</command-name>\n<command-args></command-args>", ""),
+    ("", ""),
+    ("   \n\n  ", ""),
+])
+def test_prompt_title_cases(text, expected):
+    assert store_mod.prompt_title(text) == expected
+
+
+def test_hook_prompt_skips_image_line_and_uses_next_line(browser):
+    browser.event("t20", "UserPromptSubmit", prompt="[Image #3]\n로그인 고쳐줘")
+    assert browser.call("GET", "/api/sessions/t20")[1]["title"] == "로그인 고쳐줘"
+
+
+def test_image_only_prompt_leaves_next_prompt_as_title(browser):
+    browser.event("t21", "UserPromptSubmit", prompt="[Image #1]")
+    assert browser.call("GET", "/api/sessions/t21")[1]["title"] == "이름 없는 세션 · work"
+    browser.event("t21", "UserPromptSubmit", prompt="진짜 요청")
+    browser.event("t21", "UserPromptSubmit", prompt="두 번째")
+    assert browser.call("GET", "/api/sessions/t21")[1]["title"] == "진짜 요청"
+
+
+def test_display_title_fallback_order():
+    dt = store_mod.display_title
+    base = {"title": "work", "title_rank": 1, "branch": "fix/683-console-session-names", "cwd": "C:\\a\\work",
+            "currentSkill": "srs", "turn": {"skill": None}}
+    assert dt(base) == "#683 console session names"
+    assert dt(dict(base, branch="main")) == "요구사항 문서 · work"
+    assert dt(dict(base, branch="HEAD", currentSkill="", turn={"skill": "spec"})) == "개발 Spec · work"
+    assert dt(dict(base, branch="", currentSkill="harness:start")) == "작업 시작 · work"
+    assert dt(dict(base, branch="", currentSkill="custom-x", cwd="")) == "custom-x"
+    assert dt(dict(base, branch="", currentSkill="", turn={"skill": None})) == "이름 없는 세션 · work"
+    assert dt(dict(base, branch="", currentSkill="", cwd="")) == "이름 없는 세션"
+    assert dt(dict(base, title="요청 글", title_rank=2)) == "요청 글"
+
+
+def test_load_cleans_stale_prompt_titles(tmp_path):
+    def sess(sid, title, rank):
+        return {"id": sid, "title": title, "title_rank": rank}
+    (tmp_path / "sessions.json").write_text(json.dumps({"sessions": [
+        sess("a", "[Image #17]", 2), sess("b", "[Image #2] 이거 뭐야", 2), sess("c", "work", 1), sess("d", "[Image #1]", 3),
+    ], "folders": []}), encoding="utf-8")
+    st = Store(tmp_path)
+    assert (st.sessions["a"]["title"], st.sessions["a"]["title_rank"]) == ("", 0)
+    assert (st.sessions["b"]["title"], st.sessions["b"]["title_rank"]) == ("이거 뭐야", 2)
+    assert (st.sessions["c"]["title"], st.sessions["c"]["title_rank"]) == ("work", 1)
+    assert st.sessions["d"]["title"] == "[Image #1]"
 
 
 def test_interrupted_turn_is_logged_as_interruption_not_empty_error(tmp_path):

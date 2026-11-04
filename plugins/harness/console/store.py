@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import tempfile
 import threading
 import time
@@ -36,6 +37,60 @@ CHECK_PENDING, CHECK_DONE, CHECK_SKIPPED = "pending", "done", "skipped"
 
 # 제목 우선순위: SessionStart 의 session_title > 첫 요청 글 > 폴더 이름
 TITLE_FOLDER, TITLE_PROMPT, TITLE_SESSION = 1, 2, 3
+
+_DROP_TAGS = "system-reminder|task-notification|local-command-stdout|local-command-caveat"
+_DROP_BLOCK = re.compile(rf"<({_DROP_TAGS})\b[^>]*>.*?</\1\s*>", re.S)
+_DROP_OPEN = re.compile(rf"<({_DROP_TAGS})\b[^>]*>.*\Z", re.S)
+_COMMAND_TAG = re.compile(r"<command-[a-z-]+>")
+# 옛 판이 60자로 잘라 저장한 이름은 여는 태그의 > 가 없다 — 줄 끝까지를 태그로 본다
+_CROSS_SESSION = re.compile(r"<cross-session-message\b[^>\n]*(?:>|$)|</cross-session-message\s*>", re.M)
+_PLACEHOLDER = re.compile(r"\[Image #\d+\]|\[Image: source: [^\]]*\]|\[Pasted text #\d+[^\]]*\]")
+_BRANCH = re.compile(r"^[A-Za-z]+/(\d+)-(.+)$")
+
+
+def prompt_title(text: str) -> str:
+    """프롬프트 전체 글에서 세션 이름이 될 한 줄을 고른다. 사람이 쓴 글이 아니거나 슬래시 명령이면 빈 문자열."""
+    text = str(text or "")
+    text = _DROP_BLOCK.sub("", text)
+    text = _DROP_OPEN.sub("", text)
+    if _COMMAND_TAG.search(text):
+        return ""
+    cross = bool(_CROSS_SESSION.search(text))
+    text = _CROSS_SESSION.sub("", text)
+    text = _PLACEHOLDER.sub("", text)
+    for line in text.split("\n"):
+        line = line.strip()
+        if line:
+            if line.startswith("/"):
+                return ""
+            return ("다른 세션: " if cross else "") + line
+    return ""
+
+
+# 스킬 이름의 쉬운 말. static/app.js 의 SKILL_LABELS 와 같게 둔다.
+SKILL_TITLES = {
+    "start": "작업 시작", "sync": "최신 받기", "deliver": "제출하기", "wrapup": "이슈로 남기기", "srs": "요구사항 문서",
+    "spec": "개발 Spec", "scaffold": "구조 만들기", "atc": "ATC 고치기", "prs": "내 PR", "approvals": "승인 대기",
+    "version": "버전 보기", "update": "업데이트", "open": "콘솔 열기",
+}
+
+
+def display_title(s: dict) -> str:
+    """화면에 보일 이름. 요청 글 이름이 아직 없으면 브랜치·스킬·폴더 순으로 대신한다(저장값은 바꾸지 않는다)."""
+    if s.get("title_rank", 0) >= TITLE_PROMPT and s.get("title"):
+        return s["title"]
+    m = _BRANCH.match(str(s.get("branch") or ""))
+    if m:
+        return f"#{m.group(1)} " + " ".join(m.group(2).replace("-", " ").split())
+    turn = s.get("turn") if isinstance(s.get("turn"), dict) else {}
+    skill = str(s.get("currentSkill") or turn.get("skill") or "")
+    cwd = str(s.get("cwd") or "")
+    folder = os.path.basename(cwd.rstrip("/\\")) or cwd
+    tail = f" · {folder}" if folder else ""
+    if skill:
+        name = skill.split(":", 1)[-1]
+        return SKILL_TITLES.get(name, name) + tail  # 같은 스킬 세션이 여럿이어도 폴더로 가려 본다
+    return "이름 없는 세션" + tail
 
 
 class RequestLimit(Exception):
@@ -153,6 +208,10 @@ class Store:
             if isinstance(s, dict) and isinstance(s.get("id"), str):
                 s["turn_running"] = False
                 s["managed_alive"] = False
+                if s.get("title_rank") == TITLE_PROMPT:  # 옛 버전이 저장한 "[Image #17]" 같은 이름을 정리한다
+                    s["title"] = " ".join(prompt_title(str(s.get("title") or "")).split())[:60]
+                    if not s["title"]:
+                        s["title_rank"] = 0
                 self.sessions[s["id"]] = s
         self.folders = [p for p in data.get("folders", []) if isinstance(p, str)]
 
@@ -563,7 +622,7 @@ def public_session(store: Store, s: dict, skills: list[str]) -> dict:
         else:
             group = "idle"
         return dict(flows.public_fields(s, store.flow_data), **{
-            "id": s["id"], "title": s["title"], "cwd": s["cwd"], "repo": s["repo"], "branch": s["branch"],
+            "id": s["id"], "title": display_title(s), "cwd": s["cwd"], "repo": s["repo"], "branch": s["branch"],
             "managed": s["managed"], "status": status, "group": group, "permissionMode": s["permissionMode"],
             "model": s.get("model", ""), "modelChoice": s.get("modelChoice", ""),
             "effortChoice": s.get("effortChoice", ""), "permissionChoice": s.get("permissionChoice", ""),
