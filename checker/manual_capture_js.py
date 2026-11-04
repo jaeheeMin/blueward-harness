@@ -25,7 +25,10 @@ LIB_JS = r"""(() => {
   const clip = el => {
     const r = el.getBoundingClientRect();
     let L = r.left, T = r.top, R = r.right, B = r.bottom;
-    for (let p = el.parentElement; p; p = p.parentElement) {
+    // 고정 위치(position: fixed) 요소 위의 조상은 그 요소를 자르지 않는다. UI5 팝업은 크기 0·overflow hidden 인
+    // 정적 영역(sap-ui-static) 안에 고정 위치로 그려져, 그 조상까지 보면 팝업 안 요소가 모두 잘린 것으로 나왔다(#653 실제 테넌트 100).
+    for (let p = el.parentElement, prev = el; p; prev = p, p = p.parentElement) {
+      if (getComputedStyle(prev).position === 'fixed') break;
       const cs = getComputedStyle(p);
       if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
         const pr = p.getBoundingClientRect();

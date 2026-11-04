@@ -725,6 +725,12 @@ class Capturer:
 
     def open_popup(self, s: Step) -> None:
         what = f"준비 단계 팝업 {s.name!r}"
+        # 팝업은 서버 호출 뒤 늦게 뜨기도 한다(#653 실제 테넌트 100 그루핑). 뜰 때까지 기다린 뒤 판정한다.
+        end = time.monotonic() + self.timeout
+        while time.monotonic() < end and not (self.tab.evaluate("window.__mc.dialogInfo()") or []):
+            time.sleep(0.5)
+        time.sleep(0.5)  # 뜬 뒤 그리기·애니메이션
+        self.wait_ready(what)
         self.popup_info(what)
         self.set_scope(what)
 
