@@ -168,6 +168,10 @@ def _bad(**over):
     _bad(이름="a/b"),
     _bad(이름="끝점."),
     _bad(팝업=[]),
+    _bad(준비=[{"팝업": "그루핑"}, {"누르기": "이동"}]),  # 팝업이 마지막이 아니다
+    _bad(준비=[{"팝업": "그루핑"}, {"팝업": "다른"}]),  # 팝업은 하나
+    _bad(준비=[{"팝업": "그루핑", "값": "1"}]),
+    _bad(준비=[{"팝업": "그루핑", "누르기": "이동"}]),
 ])
 def test_parse_rejects_bad_list(data):
     with pytest.raises(mc.ListError):
@@ -177,6 +181,13 @@ def test_parse_rejects_bad_list(data):
 def test_parse_accepts_select_step():
     (s,) = mc.parse_screens(_bad(준비=[{"선택": "생산방식", "값": "반복제조"}, {"누르기": "이동"}]))
     assert (s.steps[0].action, s.steps[0].name, s.steps[0].value) == ("선택", "생산방식", "반복제조")
+
+
+def test_parse_accepts_popup_as_last_step():
+    (s,) = mc.parse_screens(_bad(준비=[{"누르기": "실행"}, {"팝업": "그루핑"}]))
+    assert [(x.action, x.name) for x in s.steps] == [("누르기", "실행"), ("팝업", "그루핑")] and s.popup
+    (n,) = mc.parse_screens(GOOD)
+    assert not n.popup
 
 
 def test_parse_rejects_duplicate_screen_names_and_collects_all_problems():
@@ -690,6 +701,9 @@ class FakeTab:
         self.evals: list[str] = []
         self.on_screenshot = None
         self.closed = False
+        self.alert_texts: set[str] = set()  # dialogInfo 가 오류·경고 창으로 알리는 글
+        self.scope_calls = 0
+        self.scope_result: dict = {"ok": True}
 
     def call(self, method, **params):
         self.calls.append((method, params))
@@ -730,6 +744,11 @@ class FakeTab:
             return self.visibility
         if expr == "window.__mc.dialogs()":
             return self.dialogs
+        if expr == "window.__mc.dialogInfo()":
+            return [{"text": t, "alert": t in self.alert_texts} for t in self.dialogs]
+        if expr == "window.__mc.setScope()":
+            self.scope_calls += 1
+            return self.scope_result
         if expr == "window.__mc.size()":
             return {"w": 1600, "h": 900}
         if expr.startswith("window.__mc.focusInput("):
@@ -1109,6 +1128,99 @@ def test_select_step_dialog_after_is_still_unavailable(tmp_path, capsys, fake):
     fake["tab"] = FakeTab(STEP_FINDS, dialogs=["오류\n유효하지 않은 데이터"])
     code, out = _capture(capsys, root)
     assert code == 2 and "대화상자" in out["screens"][0]["사유"] and fake["tab"].shots == 0
+
+
+POPUP_SCREEN = TWO_SCREENS.replace("    표시:", '    준비:\n      - {팝업: 이동}\n    표시:')
+
+
+def test_popup_step_opens_one_dialog_scopes_and_captures(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, POPUP_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS, dialog_on_click=["그루핑\n기준 열"])
+    code, out = _capture(capsys, root)
+    assert code == 0 and out["status"] == "ok", out
+    t = fake["tab"]
+    assert t.shots == 1 and t.scope_calls >= 2  # 열린 직후와 찍기 직전에 범위를 정한다
+    clicks = [p for m, p in t.calls if m == "Input.dispatchMouseEvent" and p["type"] == "mousePressed"]
+    assert len(clicks) == 1  # 팝업 안의 확인·저장은 누르지 않는다
+
+
+def test_popup_step_no_dialog_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, POPUP_SCREEN)
+    before = _spec(root)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    code, out = _capture(capsys, root)
+    assert code == 2 and out["status"] == "unavailable", out
+    assert "팝업이 뜨지 않았다" in out["screens"][0]["사유"] and fake["tab"].shots == 0 and _spec(root) == before
+
+
+def test_popup_step_two_dialogs_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, POPUP_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS, dialog_on_click=["그루핑", "다른 창"])
+    code, out = _capture(capsys, root)
+    assert code == 2 and "2개" in out["screens"][0]["사유"] and fake["tab"].shots == 0
+
+
+def test_popup_step_alert_dialog_is_unavailable_with_text(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, POPUP_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS, dialog_on_click=["오류\n유효하지 않은 데이터"])
+    fake["tab"].alert_texts = {"오류\n유효하지 않은 데이터"}
+    code, out = _capture(capsys, root)
+    why = out["screens"][0]["사유"]
+    assert code == 2 and "오류·경고 창" in why and "유효하지 않은 데이터" in why and fake["tab"].shots == 0
+
+
+def test_popup_screen_extra_dialog_before_shooting_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, POPUP_SCREEN)
+    t = fake["tab"] = FakeTab(STEP_FINDS, dialog_on_click=["그루핑"])
+    t.on_screenshot = None
+    orig = t.evaluate
+    state = {"n": 0}
+
+    def ev(expr):  # 팝업이 열린 직후엔 하나, 찍기 직전엔 늦게 뜬 다른 창이 더 있다
+        if expr == "window.__mc.dialogInfo()":
+            state["n"] += 1
+            if state["n"] >= 2:
+                t.dialogs = ["그루핑", "늦게 뜬 창"]
+        return orig(expr)
+
+    t.evaluate = ev
+    code, out = _capture(capsys, root)
+    assert code == 2 and out["status"] == "unavailable" and t.shots == 0, out
+
+
+def test_popup_open_before_click_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, POPUP_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS, dialogs=["이미 떠 있음"])
+    code, out = _capture(capsys, root)
+    assert code == 2 and "이미 대화상자가 떠 있어" in out["screens"][0]["사유"] and fake["tab"].shots == 0
+
+
+def test_popup_scope_fail_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, POPUP_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS, dialog_on_click=["그루핑"])
+    fake["tab"].scope_result = {"ok": False, "count": 0}
+    code, out = _capture(capsys, root)
+    assert code == 2 and "범위" in out["screens"][0]["사유"] and fake["tab"].shots == 0
+
+
+def test_screen_without_popup_never_sets_scope(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, STEP_SCREEN)
+    fake["tab"] = FakeTab(STEP_FINDS)
+    assert _capture(capsys, root)[0] == 0 and fake["tab"].scope_calls == 0
+
+
+def test_js_scope_api_and_finders_use_scope_root():
+    body = LIB_JS
+    assert "setScope, clearScope" in body and "dialogInfo" in body and "getState" in body
+    assert "document.querySelectorAll" not in body.split("const labelsNamed")[1].split("const dialogEls")[0]  # 후보 찾기는 범위 뿌리(R)로
 
 
 def test_js_exposes_read_clear_select():

@@ -4,6 +4,7 @@
 필터는 라벨과 입력 칸을 묶은 영역, 열은 머리글부터 표 아래 끝(보이는 만큼)까지다.
 후보는 화면 밖이거나 조상의 overflow 로 잘려 일부만 보이는 것까지 **모두** 읽는 순서로 내고 `visible` 로 구분한다(그래서 같은 이름이 화면 밖에 더 있으면
 파이썬이 ambiguous 로 판정하고, `index` 도 화면 밖을 포함한 전체 순서로 센다). 가로 스크롤 밖 열은 `scrollColumn` 이 같은 목록·순서로 골라 먼저 보이게 한다.
+`팝업` 단계 뒤에는 `setScope` 가 찾는 범위를 그 대화상자 안으로 좁히고(`clearScope` 로 되돌린다), 후보 찾기는 모두 그 범위 안에서만 한다.
 """
 from __future__ import annotations
 
@@ -55,7 +56,11 @@ LIB_JS = r"""(() => {
   };
   const uniq = els => [...new Set(els)];
 
-  const labelsNamed = name => uniq([...document.querySelectorAll('label, .sapMLabel, .sapUiCompFilterLabel')])
+  // 찾는 범위. 기본은 문서 전체, `팝업` 단계 뒤에는 그 대화상자 안(setScope). 범위 뿌리가 사라지면(팝업이 닫힘) 아무것도 못 찾는다.
+  let scopeEl = null;
+  const R = () => (scopeEl ? (scopeEl.isConnected ? scopeEl : document.createDocumentFragment()) : document);
+
+  const labelsNamed = name => uniq([...R().querySelectorAll('label, .sapMLabel, .sapUiCompFilterLabel')])
     .filter(l => trimLabel(l.textContent) === name);
 
   const inputOf = lab => {
@@ -107,7 +112,7 @@ LIB_JS = r"""(() => {
         if (b) add(lab, { r: union([a.r, b.r]), v: a.v && b.v });
       }
     } else if (kind === '버튼') {
-      const els = uniq([...document.querySelectorAll('button, [role=button], .sapMBtn, input[type=button], input[type=submit]')])
+      const els = uniq([...R().querySelectorAll('button, [role=button], .sapMBtn, input[type=button], input[type=submit]')])
         .filter(e => [e.innerText, e.getAttribute('aria-label'), e.title, e.value].some(v => trimLabel(v) === name));
       for (const e of els) add(e, rectFor(e));
     } else if (kind === '열') {
@@ -118,7 +123,7 @@ LIB_JS = r"""(() => {
         add(h, g);
       }
     } else {
-      const els = [...document.querySelectorAll('body *')].filter(e => !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(e.tagName) &&
+      const els = [...(scopeEl ? R() : document.body).querySelectorAll('*')].filter(e => !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(e.tagName) &&
         trimLabel(e.textContent) === name && ![...e.children].some(k => trimLabel(k.textContent) === name));
       for (const e of els) add(e, rectFor(e));
     }
@@ -151,7 +156,7 @@ LIB_JS = r"""(() => {
     return { x: hr.x, y: hr.y, w: hr.w, h: bottom - hr.y };
   };
 
-  const colHeaders = name => uniq([...document.querySelectorAll('th, [role=columnheader], .sapMListTblHeaderCell, .sapUiTableCol')])
+  const colHeaders = name => uniq([...R().querySelectorAll('th, [role=columnheader], .sapMListTblHeaderCell, .sapUiTableCol')])
     .filter(h => trimLabel(h.textContent) === name);
 
   // 가로 스크롤 밖 열을 보이게 한다. 같은 이름이 여럿이면 index(1부터, 읽는 순서)가 가리키는 것만.
@@ -281,14 +286,38 @@ LIB_JS = r"""(() => {
   };
 
   // 보이는 대화상자(오류·경고 창 등)의 글자. 준비 단계 뒤에 떠 있으면 그 상태를 찍지 않는다(#533 실제 테넌트 시험)
-  const dialogs = () => uniq([...document.querySelectorAll('[role=alertdialog], [role=dialog], .sapMMessageBox, .sapMDialog')])
-    .filter(d => {  // 대화상자는 잘림 판정(rectFor)을 쓰지 않는다 — UI5 는 고정 위치 영역에 그려 조상의 overflow 와 무관하다
-      if (d.closest('#__mc_overlay') || !shown(d)) return false;
-      const r = d.getBoundingClientRect();
-      return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight;
-    })
-    .map(d => trimLabel(d.innerText).slice(0, 200));
+  // 보이는 대화상자 요소. 대화상자 안에 role 이 겹쳐 붙은 것은 바깥 하나로 센다.
+  const dialogEls = () => {
+    const all = uniq([...document.querySelectorAll('[role=alertdialog], [role=dialog], .sapMMessageBox, .sapMDialog')])
+      .filter(d => {  // 대화상자는 잘림 판정(rectFor)을 쓰지 않는다 — UI5 는 고정 위치 영역에 그려 조상의 overflow 와 무관하다
+        if (d.closest('#__mc_overlay') || !shown(d)) return false;
+        const r = d.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight;
+      });
+    return all.filter(d => !all.some(o => o !== d && o.contains(d)));
+  };
+  const dialogs = () => dialogEls().map(d => trimLabel(d.innerText).slice(0, 200));
 
-  window.__mc = { find, scrollColumn, focusInput, readInput, clearInput, selectOption, dialogs, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
+  // 오류·경고 창인가: alertdialog·MessageBox 이거나 UI5 Dialog 의 상태가 Error/Warning.
+  const isAlert = d => {
+    if (d.matches('[role=alertdialog], .sapMMessageBox') || d.querySelector('[role=alertdialog], .sapMMessageBox')) return true;
+    try {
+      const c = window.sap && sap.ui && sap.ui.getCore && sap.ui.getCore().byId(d.id);
+      const st = c && c.getState && c.getState();
+      return st === 'Error' || st === 'Warning';
+    } catch (e) { return false; }
+  };
+  const dialogInfo = () => dialogEls().map(d => ({ text: trimLabel(d.innerText).slice(0, 200), alert: isAlert(d) }));
+
+  // `팝업` 단계 뒤: 떠 있는 대화상자가 정확히 하나일 때만 그 안으로 찾는 범위를 좁힌다.
+  const setScope = () => {
+    const els = dialogEls();
+    if (els.length !== 1) return { ok: false, count: els.length };
+    scopeEl = els[0];
+    return { ok: true };
+  };
+  const clearScope = () => { scopeEl = null; };
+
+  window.__mc = { find, scrollColumn, focusInput, readInput, clearInput, selectOption, dialogs, dialogInfo, setScope, clearScope, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
   return true;
 })()"""
