@@ -19,7 +19,8 @@ PNG(1600x900)를 찍고, 화면에 보이는 이름으로 요소 위치를 찾�
           - {종류: 열, 이름: 상태, index: 2, 설명: 오더 상태를 본다}   # index 는 같은 이름이 여럿일 때 사람이 고른다(1부터, 읽는 순서)
 
 종류는 필터(라벨+입력 칸)·버튼·열(머리글부터 표 아래 끝)·그 밖(그 글자가 든 요소). 테넌트 주소는 `env/manual-capture.yaml` 의
-`테넌트:`(없으면 `--base-url`). `https://호스트/경로` 만이다 — `?` 쿼리·`#`·계정이 있으면 거부(시험용 http://127.0.0.1·file:// 은 `--allow-local-test` 로만).
+`테넌트:`(없으면 `--base-url`). `https://호스트/경로` 만이고, 쿼리는 `?sap-client=100`(숫자 3자리)·`sap-language=KO`(영문 2자리)만 붙일 수 있다
+(`https://호스트/ui?sap-client=100` + 앱 `#App-display` → `…?sap-client=100#App-display`). 그 밖의 쿼리 키·`#`·계정이 있으면 거부(시험용 http://127.0.0.1·file:// 은 `--allow-local-test` 로만).
 비밀값(토큰·비밀번호)은 어디에도 두지 않는다 — 로그인은 사람이 전용 Chrome 에서 한다. 화면마다 강제로 다시 열고, 준비된 탭의 출처가 테넌트 출처와 다르면 검사 불능이다.
 
 판정(추측해서 그리지 않는다)
@@ -193,17 +194,41 @@ def load_env(root: Path) -> dict:
     return data
 
 
+QUERY_ALLOWED = {
+    "sap-client": re.compile(r"[0-9]{3}"),
+    "sap-language": re.compile(r"[A-Za-z]{2}"),
+}
+
+
+def _check_query(query: str) -> None:
+    """테넌트 주소 쿼리 검증: 허용 키(sap-client 숫자 3자리·sap-language 영문 2자리)만, 키 중복 없이."""
+    seen: set[str] = set()
+    for pair in query.split("&"):
+        key, eq, value = pair.partition("=")
+        if not eq or key not in QUERY_ALLOWED:
+            raise ListError(f"테넌트 주소 쿼리는 {'·'.join(QUERY_ALLOWED)} 만 쓸 수 있다 — 토큰이 섞일 수 있어 거부한다: {pair!r}")
+        if key in seen:
+            raise ListError(f"테넌트 주소 쿼리에 `{key}` 가 두 번 있다")
+        seen.add(key)
+        if not QUERY_ALLOWED[key].fullmatch(value):
+            hint = "숫자 3자리" if key == "sap-client" else "영문 2자리"
+            raise ListError(f"테넌트 주소 쿼리 `{key}` 값은 {hint}여야 한다: {value!r}")
+
+
 def check_base_url(url: object, allow_local: bool = False) -> str:
-    """테넌트 주소 검증: `https://호스트[/경로]` 만. 쿼리(`?`)·프래그먼트(`#`)·계정·비밀번호가 있으면 거부한다(토큰이 섞일 수 있다).
+    """테넌트 주소 검증: `https://호스트[/경로][?sap-client=100&sap-language=KO]` 만. 쿼리는 허용 키(`QUERY_ALLOWED`)만 받고,
+    그 밖의 키·값 모양·중복 키·프래그먼트(`#`)·계정·비밀번호는 거부한다(토큰이 섞일 수 있다).
 
     시험용 `http://127.0.0.1…`·`file://…` 은 `allow_local`(--allow-local-test)일 때만 허용한다.
     """
     if not isinstance(url, str) or not url.strip():
         raise ListError(f"테넌트 주소가 없다({ENV_PATH} 의 `테넌트:` 또는 --base-url)")
     s = url.strip()
-    if "?" in s or "#" in s:
-        raise ListError("테넌트 주소에 `?` 쿼리나 `#` 가 있다 — 토큰이 섞일 수 있어 거부한다(`https://호스트/경로` 만. 앱 해시는 화면 목록의 `앱` 에 적는다)")
+    if "#" in s:
+        raise ListError("테넌트 주소에 `#` 가 있다 — 토큰이 섞일 수 있어 거부한다(앱 해시는 화면 목록의 `앱` 에 적는다)")
     parts = urlsplit(s)
+    if "?" in s:
+        _check_query(parts.query)
     if parts.username is not None or parts.password is not None or "@" in parts.netloc:
         raise ListError("테넌트 주소에 계정·비밀번호를 넣지 않는다(로그인은 전용 Chrome 에서 사람이 한다)")
     if parts.scheme == "https" and parts.hostname:
@@ -495,7 +520,7 @@ def same_site(url: str, base: str) -> bool:
     u, b = urlsplit(url), urlsplit(base)
     if (u.scheme, u.netloc.lower()) != (b.scheme, b.netloc.lower()):
         return False
-    return b.scheme != "file" or unquote(url).startswith(unquote(base).split("#")[0])
+    return b.scheme != "file" or unquote(url).startswith(unquote(base).split("#")[0].split("?")[0])
 
 
 class Capturer:
