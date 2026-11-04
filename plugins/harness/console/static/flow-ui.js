@@ -110,7 +110,11 @@
       if (!lines.length) return null;
       var url = kit.safeHttp(pr.url);
       var label = 'PR #' + pr.number + (pr.title ? ' · ' + pr.title : '');
-      return h('div', { class: 'q prcard', 'data-pr-card': '1' },
+      // 검사가 실패했으면 ✕ 막힘(빨간 테두리), 결과를 못 읽었으면 ? 확인 못 함(보라 점선). 통과·실패 어느 쪽으로도 치지 않는다.
+      var failed = lines.some(function (ln) { return ln.state === 'fail'; }), unsure = !failed && lines.some(function (ln) { return ln.state === 'unk'; });
+      return h('div', { class: 'q prcard' + (failed ? ' blocked' : unsure ? ' unsure' : ''), 'data-pr-card': '1' },
+        failed ? h('span', { class: 'tagx fail', text: '✕ 막힘' }) : unsure ? h('span', { class: 'tagx unk', text: '? 확인 못 함' }) : null,
+        failed ? h('span', { class: 'sub', text: '자동 검사가 잘못을 찾았어. 고쳐서 다시 올려야 넘어가.' }) : unsure ? h('span', { class: 'sub', text: '검사 결과를 못 읽었어. 통과도 실패도 아니야.' }) : null,
         h('div', { class: 'qh' }, h('b', { text: label }), url ? h('a', { class: 'pill line sm', href: url, target: '_blank', rel: 'noopener noreferrer', text: 'GitHub에서 보기' }) : null),
         lines.map(function (ln) {
           return h('div', { class: 'crow ' + ln.state, 'data-line': ln.id }, h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: ln.name }), h('span', { class: 'ct', text: ln.text }));
@@ -201,26 +205,27 @@
 
     /* ---------- 새 세션 점검 ---------- */
     function startChecksPanel() {
-      var el = h('section', { class: 'startchecks', 'aria-label': '새 세션 점검', hidden: true });
+      // 시안 13: 대화 판 맨 위의 "시작 점검" 카드. 한 줄에 ✓ 동그라미 · 이름 · 상태 · (다시) 하기 버튼.
+      var el = h('div', { class: 'q startchecks', 'aria-label': '새 세션 점검', hidden: true });
       var note = h('p', { class: 'note-muted', role: 'status', hidden: true });
       var last = null, alive = true;
+      var CROW = { done: 'ok', run: 'run', fail: 'fail', todo: 'todo' };
       function draw() {
         var s = last, checks = s ? L.startChecks(s) : [];
         el.hidden = !checks.length;
         clear(el);
         if (!checks.length) return;
-        el.appendChild(h('h2', { class: 'label', text: '새 세션 점검' }));
-        var row = h('ul', { class: 'checks plain-list' });
+        el.appendChild(h('span', { class: 'eb', text: '새 세션 점검' }));
         checks.forEach(function (c) {
-          row.appendChild(h('li', { class: 'check ' + c.state, 'data-check': c.id },
-            h('span', { class: 'cname', text: c.name }), h('span', { class: 'cstate', text: c.label }),
-            h('button', { type: 'button', class: 'btn sm', disabled: s.canSend === false, text: c.state === 'done' ? '다시 하기' : '하기',
+          el.appendChild(h('div', { class: 'crow ' + CROW[c.state], 'data-check': c.id },
+            h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: c.name }), h('span', { class: 'ct', text: c.label }),
+            h('button', { type: 'button', class: 'pill line sm', disabled: s.canSend === false, text: c.state === 'done' ? '다시 하기' : '하기',
               onClick: function () {
                 note.hidden = false; note.textContent = c.name + ' 요청을 보내는 중이에요.';
                 runTool(s, c.id, c.name).then(function (msg) { if (alive) { note.textContent = msg; kit.refreshSession(s.id); } });
               } })));
         });
-        el.appendChild(row); el.appendChild(note);
+        el.appendChild(note);
       }
       return { el: el, update: function (s) { last = s; draw(); }, destroy: function () { alive = false; } };
     }
@@ -434,6 +439,192 @@
     }
 
     /* ---------- 만든 문서 칸 ---------- */
+    /* 미리보기 한 장: 세션 화면의 문서 칸과 산출물 화면이 같이 쓴다. ctx = { sheet, name, setSheet(i) } */
+    function renderPreview(p, ctx) {
+      var box = h('div', { class: 'preview' });
+      if (p.kind === 'md') {
+        box.appendChild(h('div', { class: 'report-body' }, window.BHMarkdown.render(p.text)));
+      } else if (p.kind === 'table') {
+        if (!p.sheets.length) box.appendChild(h('p', { class: 'note-muted', text: '표가 비어 있어요.' }));
+        else {
+          var idx = Math.min(ctx.sheet, p.sheets.length - 1);
+          box.appendChild(h('div', { class: 'sheet-tabs', role: 'tablist' }, p.sheets.map(function (sh, i) {
+            return h('button', { type: 'button', role: 'tab', class: 'chip', 'aria-selected': String(i === idx), 'aria-pressed': String(i === idx), text: sh.name || ('시트 ' + (i + 1)),
+              onClick: function () { ctx.setSheet(i); } });
+          })));
+          var rows = kit.listOf(p.sheets[idx], 'rows');
+          var table = h('table', { class: 'sheet' }, h('tbody', null, rows.map(function (r) {
+            return h('tr', null, (Array.isArray(r) ? r : [r]).map(function (c) { return h('td', { text: c == null ? '' : String(c) }); }));
+          })));
+          box.appendChild(h('div', { class: 'md-table sheet-wrap' }, table));
+          if (!rows.length) box.appendChild(h('p', { class: 'note-muted', text: '이 시트는 비어 있어요.' }));
+        }
+      } else if (p.kind === 'slides') {
+        if (!p.slides.length) box.appendChild(h('p', { class: 'note-muted', text: '슬라이드에서 읽은 글이 없어요.' }));
+        p.slides.forEach(function (sl, i) {
+          box.appendChild(h('section', { class: 'slide' }, h('h3', { class: 'label', text: '슬라이드 ' + (sl.index != null ? sl.index : i + 1) }),
+            kit.listOf(sl, 'texts').map(function (t) { return h('p', { text: String(t) }); })));
+        });
+      } else if (p.kind === 'image') {
+        var okUrl = p.url.charAt(0) === '/' && p.url.charAt(1) !== '/' ? p.url : kit.safeHttp(p.url);
+        box.appendChild(okUrl ? h('img', { class: 'preview-img', src: okUrl, alt: ctx.name }) : h('p', { class: 'note-muted', text: '그림 주소를 받지 못했어요.' }));
+      } else box.appendChild(h('p', { class: 'note-muted', text: p.reason || '이 종류는 미리 볼 수 없어요. 아래 버튼으로 열어 보세요.' }));
+      return box;
+    }
+
+    /* ---------- 산출물 화면 (/docs): 모든 세션이 만든 문서를 한 곳에서 ---------- */
+    // 새 서버 API 는 없다. 세션마다 /files 를 불러 모은다(최근에 바뀐 세션 DOCS_PAGE_MAX 개까지).
+    var DOCS_PAGE_MAX = 12;
+    function docsPage(root) {
+      var st = { parts: null, sel: null, preview: null, previewError: null, sheet: 0, note: '', say: '' };
+      var alive = true, loading = false, loadedAt = 0, timer = null, askVal = '';
+      var page = h('div', { class: 'page docs-page' });
+      root.appendChild(page);
+
+      function pool() {
+        return sessionList().filter(function (s) { return !s.handedOffTo; }).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).slice(0, DOCS_PAGE_MAX);
+      }
+      function sig() { return pool().map(function (s) { return s.id; }).join('|'); }
+      function load() {
+        if (loading) return;
+        loading = true; loadedAt = Date.now(); st.sig = sig();
+        Promise.all(pool().map(function (s) {
+          return api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { return { session: s, files: kit.listOf(d, 'files'), unknown: !!(d && d.unknown) }; },
+            function (e) { return { session: s, files: [], unknown: true, failed: e }; });
+        })).then(function (parts) { st.parts = parts; }).then(function () {
+          loading = false;
+          if (alive && sig() !== st.sig) { load(); return; }  // 읽는 동안 세션이 늘거나 줄었으면 다시 모은다
+          if (alive && !(document.activeElement && document.activeElement.id === 'doc-ask')) draw();  // 고쳐 달라고 쓰는 중이면 입력칸을 다시 그리지 않는다
+        });
+      }
+      function later() {
+        if (timer || !alive) return;
+        timer = setTimeout(function () { timer = null; if (alive && Date.now() - loadedAt > 5000) load(); }, 1500);
+      }
+      // 세션 데이터가 바뀔 때: 세션 구성이 달라졌으면 바로 다시 모으고, 아니면 가끔만 다시 읽는다.
+      function refresh() {
+        if (!alive) return;
+        if (!kit.loaded()) { draw(); return; }
+        if (sig() !== st.sig) load(); else later();
+      }
+      function docs() { return st.parts ? L.mergeDocs(st.parts) : []; }
+      function selected() {
+        if (!st.sel) return null;
+        var hit = docs().filter(function (d) { return d.key === st.sel; })[0];
+        if (hit) return hit;
+        return st.picked || null;
+      }
+      function pick(entry) {
+        st.sel = entry.key; st.picked = entry; st.preview = null; st.previewError = null; st.sheet = 0; st.note = ''; st.say = '';
+        draw();
+        api('GET', '/api/sessions/' + sid(entry.session) + '/files/preview' + kit.qs({ path: entry.file.path })).then(function (d) { st.preview = L.normPreview(d); },
+          function (e) { st.previewError = e; }).then(function () { if (alive && st.sel === entry.key) draw(); });
+      }
+      function openFile(entry, mode) {
+        st.note = mode === 'reveal' ? '탐색기를 여는 중이야.' : '기본 프로그램으로 여는 중이야.'; draw();
+        api('POST', '/api/sessions/' + sid(entry.session) + '/files/open', { path: entry.file.path, mode: mode }).then(function () {
+          st.note = mode === 'reveal' ? '탐색기에서 위치를 열었어.' : '열었어.';
+        }, function (e) { st.note = failText(e, '열기'); }).then(function () { if (alive) draw(); });
+      }
+      // 고쳐 달라고 하기·양식으로 뽑기는 이 문서를 만든 세션에 말을 보내는 일이다(콘솔이 직접 고치거나 뽑지 않는다).
+      function ask(entry, text) {
+        st.say = '세션에 보내는 중이야.'; draw();
+        api('POST', '/api/sessions/' + sid(entry.session) + '/messages', { text: text }).then(function () {
+          st.say = '"' + (entry.session.title || kit.baseName(entry.session.cwd) || '세션') + '" 세션에 보냈어. 끝나면 이 목록이 바뀌어.'; askVal = '';
+          setTimeout(function () { if (alive) load(); }, 4000);
+        }, function (e) { st.say = failText(e, '보내기'); }).then(function () { if (alive) draw(); });
+      }
+
+      function row(entry, sub) {
+        var f = entry.file, on = st.sel === entry.key, c = entry.chip;
+        return h('button', { type: 'button', class: 'drow' + (on ? ' on' : '') + (sub ? ' sub' : ''), 'aria-pressed': String(on), 'data-path': f.path, onClick: function () { pick(entry); } },
+          h('span', { class: 'dn' }, h('b', { text: kit.baseName(f.path) }),
+            h('small', { text: [f.size != null ? kit.fmtSize(f.size) : '', entry.session.title || ''].filter(Boolean).join(' · ') })),
+          c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text }) : null);
+      }
+      function listBox(all) {
+        var box = h('div', { class: 'lt dlist' });
+        L.DOC_GROUPS.forEach(function (g) {
+          var items = all.filter(function (d) { return d.group === g[0]; });
+          if (!items.length) return;
+          box.appendChild(h('span', { class: 'eb', text: g[1] }));
+          items.forEach(function (d) {
+            box.appendChild(row(d, false));
+            var olds = L.versionPaths(d.file);
+            if (olds.length) {
+              var det = h('details', { class: 'more docs-old' }, h('summary', { text: '이전 판 ' + olds.length + '개' }));
+              olds.forEach(function (v) { det.appendChild(row({ key: d.key.split('|')[0] + '|' + v.path.toLowerCase(), file: v, session: d.session, chip: null }, true)); });
+              box.appendChild(det);
+            }
+          });
+        });
+        box.appendChild(h('span', { class: 'dnote', text: '안 올림 = 내 PC에만 · 검토 중 = 승인 기다림 · 합쳐짐 = 팀 공용본 · 확인 못 함 = 알 수 없음' }));
+        return box;
+      }
+      function resultCard(entry) {
+        var f = entry.file, ext = (/\.([a-z0-9]+)$/i.exec(f.path) || [])[1] || '';
+        var fresh = f.mtime && Date.now() - (f.mtime > 1e12 ? f.mtime : f.mtime * 1000) < 120000;
+        return h('div', { class: 'q dresult', 'data-form-card': '1' },
+          h('span', { class: 'pi', text: ext.toUpperCase() }),
+          h('span', { class: 'dn' }, h('b', { text: kit.baseName(f.path) }),
+            h('small', { text: [f.size != null ? kit.fmtSize(f.size) : '', f.mtime ? (fresh ? '방금' : kit.clock(f.mtime)) : ''].filter(Boolean).join(' · ') })),
+          h('button', { type: 'button', class: 'pill line sm', text: '폴더에서 보기', onClick: function () { openFile(entry, 'reveal'); } }),
+          h('button', { type: 'button', class: 'pill dark sm', text: '열기', onClick: function () { openFile(entry, 'open'); } }));
+      }
+      function previewBox(entry) {
+        var f = entry.file, c = entry.chip, s = entry.session, can = s.canSend !== false;
+        var form = L.isFormOutput(f), canExport = L.docGroup(f) === 'spec';
+        var box = h('div', { class: 'dprev' });
+        box.appendChild(h('div', { class: 'dhead' }, h('h2', { class: 'wrap-any', text: kit.baseName(f.path) }), c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text }) : null,
+          h('span', { class: 'sp' }),
+          form ? null : h('button', { type: 'button', class: 'pill line sm', text: '열기', onClick: function () { openFile(entry, 'open'); } }),
+          form ? null : h('button', { type: 'button', class: 'pill line sm', text: '폴더에서 보기', onClick: function () { openFile(entry, 'reveal'); } }),
+          canExport ? h('button', { type: 'button', class: 'pill dark sm', disabled: !can, text: '고객 양식으로 뽑기',
+            onClick: function () { ask(entry, '"' + f.path + '" 을(를) 고객 양식 파일(xlsx·pptx)로 뽑아 줘.'); } }) : null));
+        box.appendChild(h('p', { class: 'dwhere', text: '세션: ' + (s.title || kit.baseName(s.cwd) || '이름 없는 세션') + ' · ' + f.path }));
+        if (form) box.appendChild(resultCard(entry));
+        if (st.note) box.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.note }));
+        var pane = h('div', { class: 'docs-pane' });
+        if (st.previewError) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
+        else if (!st.preview) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' }));
+        else pane.appendChild(renderPreview(st.preview, { sheet: st.sheet, name: kit.baseName(f.path), setSheet: function (i) { st.sheet = i; draw(); } }));
+        box.appendChild(pane);
+        var input = h('input', { id: 'doc-ask', class: 'comp-in', type: 'text', value: askVal, disabled: !can, autocomplete: 'off', placeholder: '이 문서 고쳐 달라고 하기 — 예: 표시 항목에 납품일 추가',
+          onInput: function (e) { askVal = e.target.value; } });
+        function send() { var t = askVal.trim(); if (t) ask(entry, '"' + f.path + '" 을(를) 고쳐 줘: ' + t); }
+        input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); } });
+        box.appendChild(h('label', { for: 'doc-ask', class: 'sr-only', text: '이 문서 고쳐 달라고 하기' }));
+        box.appendChild(h('div', { class: 'comp' }, input, h('button', { type: 'button', class: 'pill dark', disabled: !can, text: '보내기', onClick: send })));
+        if (!can) box.appendChild(h('p', { class: 'note-muted', text: s.cannotSendReason || '이 세션에는 지금 말을 보낼 수 없어.' }));
+        if (st.say) box.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.say }));
+        return box;
+      }
+
+      function draw() {
+        clear(page);
+        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '산출물' }), h('h1', { text: '내가 만든 문서' }),
+          h('p', { class: 'line', text: '세션들이 만든 문서를 한곳에 모았어. 하나 고르면 미리 볼 수 있어.' })));
+        if (!kit.loaded()) { page.appendChild(kit.loadingBox('세션을 불러오는 중입니다.')); return; }
+        if (!pool().length) { page.appendChild(kit.stateBox('folder', '아직 만든 문서가 없어', '작업을 시작하면 세션이 만든 문서가 여기에 모여.', kit.link('/new', { class: 'btn', text: '새 작업 시작' }))); return; }
+        if (!st.parts) { page.appendChild(kit.loadingBox('문서를 모으는 중이에요.')); return; }
+        var all = docs(), failed = st.parts.filter(function (p) { return p.failed; }), unsure = st.parts.filter(function (p) { return p.unknown && !p.failed; });
+        var sec = h('section', { class: 'light dsec' });
+        if (failed.length) sec.appendChild(h('p', { class: 'note-attn', role: 'status', text: failed.length + '개 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
+        else if (unsure.length) sec.appendChild(h('p', { class: 'note-attn', role: 'status', text: unsure.length + '개 세션은 git 상태를 읽지 못해서 올림 여부를 "확인 못 함"으로 보여.' }));
+        if (!all.length) { sec.appendChild(h('p', { class: 'note-muted', text: '아직 만든 문서가 없어.' })); page.appendChild(sec); return; }
+        var cur = selected();
+        sec.appendChild(h('div', { class: 'dgrid' }, listBox(all),
+          cur ? previewBox(cur) : h('div', { class: 'dprev' }, h('p', { class: 'empty-line', text: '왼쪽에서 문서를 골라 줘. 미리보기와 고치기 입력칸이 여기에 나와.' }))));
+        page.appendChild(sec);
+      }
+      draw(); refresh();
+      return {
+        title: function () { return '산출물'; },
+        onData: refresh, onSession: refresh, onRequest: function () {}, onRemoved: refresh,
+        destroy: function () { alive = false; clearTimeout(timer); }
+      };
+    }
+
     function docsPanel() {
       var el = h('section', { class: 'docs', 'aria-label': '만든 문서' });
       var listBox = h('div', { class: 'docs-list' });
@@ -488,37 +679,7 @@
           }
         });
       }
-      function drawPreview(p) {
-        var box = h('div', { class: 'preview' });
-        if (p.kind === 'md') {
-          box.appendChild(h('div', { class: 'report-body' }, window.BHMarkdown.render(p.text)));
-        } else if (p.kind === 'table') {
-          if (!p.sheets.length) box.appendChild(h('p', { class: 'note-muted', text: '표가 비어 있어요.' }));
-          else {
-            var idx = Math.min(st.sheet, p.sheets.length - 1);
-            box.appendChild(h('div', { class: 'sheet-tabs', role: 'tablist' }, p.sheets.map(function (sh, i) {
-              return h('button', { type: 'button', role: 'tab', class: 'chip', 'aria-selected': String(i === idx), 'aria-pressed': String(i === idx), text: sh.name || ('시트 ' + (i + 1)),
-                onClick: function () { st.sheet = i; drawPane(); } });
-            })));
-            var rows = kit.listOf(p.sheets[idx], 'rows');
-            var table = h('table', { class: 'sheet' }, h('tbody', null, rows.map(function (r) {
-              return h('tr', null, (Array.isArray(r) ? r : [r]).map(function (c) { return h('td', { text: c == null ? '' : String(c) }); }));
-            })));
-            box.appendChild(h('div', { class: 'md-table sheet-wrap' }, table));
-            if (!rows.length) box.appendChild(h('p', { class: 'note-muted', text: '이 시트는 비어 있어요.' }));
-          }
-        } else if (p.kind === 'slides') {
-          if (!p.slides.length) box.appendChild(h('p', { class: 'note-muted', text: '슬라이드에서 읽은 글이 없어요.' }));
-          p.slides.forEach(function (sl, i) {
-            box.appendChild(h('section', { class: 'slide' }, h('h3', { class: 'label', text: '슬라이드 ' + (sl.index != null ? sl.index : i + 1) }),
-              kit.listOf(sl, 'texts').map(function (t) { return h('p', { text: String(t) }); })));
-          });
-        } else if (p.kind === 'image') {
-          var okUrl = p.url.charAt(0) === '/' && p.url.charAt(1) !== '/' ? p.url : kit.safeHttp(p.url);
-          box.appendChild(okUrl ? h('img', { class: 'preview-img', src: okUrl, alt: kit.baseName(st.selected) }) : h('p', { class: 'note-muted', text: '그림 주소를 받지 못했어요.' }));
-        } else box.appendChild(h('p', { class: 'note-muted', text: p.reason || '이 종류는 미리 볼 수 없어요. 아래 버튼으로 열어 보세요.' }));
-        return box;
-      }
+      function drawPreview(p) { return renderPreview(p, { sheet: st.sheet, name: kit.baseName(st.selected), setSheet: function (i) { st.sheet = i; drawPane(); } }); }
       function drawPane() {
         clear(pane);
         pane.hidden = !st.selected;
@@ -727,7 +888,16 @@
       page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', '0', ''), tile('일하는 중', '0', ''), tile('만든 산출물', '확인 못 함', 'unk')));
       page.appendChild(approvals);
       page.appendChild(projects);
+      page.appendChild(legend());
       root.appendChild(page);
+    }
+    // 표시 약속(시안 16): 화면 어디서나 같은 뜻으로 쓰는 세 가지 표시
+    function legend() {
+      return h('div', { class: 'legend', role: 'group', 'aria-label': '표시 약속' },
+        h('span', { class: 'eb', text: '표시 약속' }),
+        h('span', null, h('b', { class: 'lf', text: '✕ 막힘' }), ' 잘못을 찾음, 고쳐야 넘어가'),
+        h('span', null, h('b', { class: 'lu', text: '? 확인 못 함' }), ' 검사 못 함, 통과로도 실패로도 안 침'),
+        h('span', null, h('b', { class: 'lw', text: '! 내 차례' }), ' 네 답이나 확인이 필요'));
     }
     function homeView(root) {
       var approvals = h('div', { class: 'approvals' });
@@ -788,6 +958,7 @@
           h('table', { class: 'list' }, h('thead', null, head), h('tbody', null, rows))));
         page.appendChild(approvals);
         page.appendChild(projects);
+        page.appendChild(legend());
         root.appendChild(page);
         approvalCard(approvals, showPr);
         projectCard(projects);
@@ -798,7 +969,7 @@
 
     return {
       stepBar: stepBar, prCard: prCard, flowPreview: flowPreview, toolsRow: toolsRow, startChecksPanel: startChecksPanel, flowPanel: flowPanel, folderNotice: folderNotice,
-      docsPanel: docsPanel, flowChooser: flowChooser, homeView: homeView, closeModal: closeModal
+      docsPanel: docsPanel, docsPage: docsPage, flowsFor: flowsFor, approvalsFor: approvalsFor, flowChooser: flowChooser, homeView: homeView, closeModal: closeModal
     };
   }
 })();

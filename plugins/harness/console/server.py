@@ -7,6 +7,7 @@ import os
 import queue
 import re
 import secrets
+import shutil
 import signal
 import subprocess
 import sys
@@ -98,7 +99,42 @@ SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", ".
 # Windows 레지스트리의 MIME 설정에 영향받지 않게 직접 매핑한다(CSP 가 script 를 막는 일 방지).
 STATIC_TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".html": "text/html",
                 ".svg": "image/svg+xml", ".json": "application/json", ".map": "application/json", ".woff2": "font/woff2"}
-SPA_PATHS = re.compile(r"^/(s/[^/]+|r/[^/]+|new|settings)?$")
+FIRST_RUN_FILE = "first-run.json"  # 이 PC 에서 첫 화면(시작하기)을 이미 본 표시. 상태 폴더 아래, 브라우저와 무관
+CHECK_RUN_TIMEOUT = 15.0           # 시작 점검의 gh 호출 제한 시간(초)
+GH_LOGIN_FAIL = ("gh auth login", "not logged in", "authentication", "bad credentials", "401", "no oauth token")
+
+
+def judge_github(rc: int, out: str, installed: bool) -> dict:
+    """`gh api user` 결과로 GitHub 연결을 판정한다. ok / fail(막는 문제) / unknown(확인 못 함).
+    gh 가 없거나 로그인이 안 된 것만 fail 이고, 시간 초과·네트워크 오류는 원인을 몰라 unknown 이다."""
+    text = (out or "").strip()
+    if rc == 0 and text:
+        return {"state": "ok", "detail": text.splitlines()[0][:80]}
+    if not installed:
+        return {"state": "fail", "detail": "gh 가 없어", "fix": "gh(GitHub CLI)를 설치한 뒤 터미널에서 gh auth login 을 해 줘."}
+    if rc != 0 and any(k in text.lower() for k in GH_LOGIN_FAIL):
+        return {"state": "fail", "detail": "로그인이 안 돼 있어", "fix": "터미널에서 gh auth login 을 하고 다시 점검해 줘."}
+    return {"state": "unknown", "detail": "확인 못 함 · 시간 안에 읽지 못했어"}
+
+
+def parse_version(text) -> tuple[int, ...] | None:
+    return tuple(int(p) for p in text.split(".")) if isinstance(text, str) and re.fullmatch(r"[0-9]+(\.[0-9]+)*", text) else None
+
+
+def judge_version(loaded: str, latest: str | None) -> dict:
+    """실린 판과 원격 최신 판 비교. old 는 막지 않는 문제, 원격을 못 읽으면 unknown(문제로 치지 않는다)."""
+    mine, newest = parse_version(loaded), parse_version(latest)
+    if mine is None:
+        return {"state": "unknown", "detail": "확인 못 함 · 실린 판을 읽지 못했어"}
+    if newest is None:
+        return {"state": "unknown", "detail": loaded + " · 최신 판은 확인 못 함"}
+    if mine < newest:
+        return {"state": "old", "detail": f"{loaded} → 새 판 {latest}", "latest": latest,
+                "fix": "터미널에서 /harness:update 를 하면 돼."}
+    return {"state": "ok", "detail": loaded}
+
+
+SPA_PATHS = re.compile(r"^/(s/[^/]+|r/[^/]+|new|settings|docs)?$")
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
@@ -166,6 +202,10 @@ class App:
         self.run = run or gitstate.gh_runner()  # gh·git 조회(갈래 진행·승인자 판정). 시험이 바꿔 끼운다
         self.slow_run = run or (lambda args, cwd: gitstate.run_command(args, cwd, gitstate.SLOW_GIT_TIMEOUT, merge_stderr=True))
         self.opener = opener or platform_compat.open_path  # 파일 열기·위치 보기. 시험이 바꿔 끼운다
+        self.check_run = run or (lambda args, cwd: gitstate.run_command(args, cwd, CHECK_RUN_TIMEOUT, merge_stderr=True))  # 시작 점검용(오류 글까지 본다)
+        self.gh_installed = lambda: shutil.which("gh") is not None
+        self.remote_latest = self.read_remote_latest  # 원격 최신 판. 시험이 바꿔 끼운다
+        self.first_run_seen = False  # 상태 폴더가 없는 실행(시험)에서만 메모리에 둔다
         self.wait_poll = wait_poll
         self.jobs: dict[str, dict] = {}  # 다음 갈래 넘기기 작업(메모리에만 둔다)
         self.reload_queue: set[str] = set()  # 턴이 끝나기를 기다리는 다시 불러오기
@@ -711,6 +751,69 @@ class App:
         file_rel, when_no_file = spec.get("file", ".github/ssot-approvers"), spec.get("whenNoFile", gitstate.WHEN_NO_FILE_ADMIN)
         got = self.cached(("approvals", os.path.normcase(cwd)), lambda: gitstate.approval_prs(self.run, cwd, file_rel, when_no_file), wait=False)
         return 200, got  # 읽는 중이면 loading: true 와 이전 값(없으면 state unknown)을 바로 준다
+
+    # ---- 시작 점검(첫 화면) ----
+    def first_run_file(self) -> Path | None:
+        return self.store.dir / FIRST_RUN_FILE if self.store.dir else None
+
+    def is_first_run(self) -> bool:
+        """이 PC 에서 시작하기를 아직 안 눌렀나. 표시 파일이 있으면 아니다(읽을 수 없어도 있는 것으로 본다)."""
+        f = self.first_run_file()
+        if f is None:
+            return not self.first_run_seen
+        return not f.exists()
+
+    def mark_first_run(self) -> None:
+        f = self.first_run_file()
+        if f is None:
+            self.first_run_seen = True
+            return
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"seenAt": self.clock()}), encoding="utf-8")
+        os.replace(tmp, f)
+
+    def read_remote_latest(self) -> str | None:
+        """원격 v* 태그 중 가장 큰 판(installed_version.py --remote 와 같은 update_notice 를 쓴다). 못 읽으면 None."""
+        hooks = str(self.plugin_root / "hooks")
+        try:
+            if hooks not in sys.path:
+                sys.path.insert(0, hooks)
+            import update_notice  # noqa: PLC0415 - 훅 모듈
+            return update_notice.latest_version(update_notice.ls_remote_tags())
+        except Exception:  # noqa: BLE001 - 어떤 이유로든 못 읽으면 "확인 못 함"
+            return None
+
+    def run_start_checks(self) -> dict:
+        home = str(Path.home())
+        rc, out = self.check_run(["gh", "api", "user", "--jq", ".login"], home)
+        gh = dict(judge_github(rc, out, self.gh_installed()), id="github", name="GitHub 연결")
+        ver = dict(judge_version(self.version, self.remote_latest()), id="version", name="하네스 판")
+        claude = {"id": "claude", "name": "Claude Code 로그인", "state": "unknown",
+                  "detail": "확인 못 함 · 콘솔이 로그인 상태를 읽을 수 없어"}  # 읽을 공식 근거가 코드에 없어 문제로 치지 않는다
+        checks = [gh, ver, claude]
+        return {"state": "ok", "checks": checks, "blocking": any(c["state"] == "fail" for c in checks),
+                "newVersion": ver.get("latest") if ver["state"] == "old" else None}
+
+    def a_start_checks(self, g, q, b):
+        """첫 화면과 맨 위 알림에 쓰는 점검 결과. 점검은 백그라운드에서 하고(60초 기억), 읽는 중이면 loading: true.
+        ?refresh=1 은 기억을 지우고 다시 점검한다(다시 점검 버튼)."""
+        key = ("start-checks",)
+        if q.get("refresh"):
+            with self.lock:
+                self.cache.pop(key, None)
+                self.last.pop(key, None)
+        got = self.cached(key, self.run_start_checks, wait=False)
+        out = {"firstRun": self.is_first_run(), "loading": bool(got.get("loading")), "checks": got.get("checks", []),
+               "blocking": bool(got.get("blocking")), "newVersion": got.get("newVersion")}
+        return 200, out
+
+    def a_start_seen(self, g, q, b):
+        try:
+            self.mark_first_run()
+        except OSError as e:
+            raise HttpError(500, f"첫 화면 표시를 남기지 못했습니다: {e}")
+        return 200, {"firstRun": False}
 
     def a_flow_set(self, g, q, b):
         s = self.get_session(g[0])
@@ -1399,6 +1502,8 @@ ROUTES = [
     ("POST", re.compile(r"/api/folders/worktree"), App.a_worktree),
     ("GET", re.compile(r"/api/flows"), App.a_flows),
     ("GET", re.compile(r"/api/approvals"), App.a_approvals),
+    ("GET", re.compile(r"/api/start-checks"), App.a_start_checks),
+    ("POST", re.compile(r"/api/start-checks/seen"), App.a_start_seen),
     ("GET", re.compile(rf"/api/requests/{S}"), App.a_request),
     ("POST", re.compile(rf"/api/requests/{S}/answer"), App.a_answer),
     ("POST", re.compile(r"/api/new"), App.a_new),

@@ -273,6 +273,7 @@
     if ((m = /^\/r\/([^/]+)$/.exec(p))) return { name: 'request', id: decodeURIComponent(m[1]) };
     if (p === '/new') return { name: 'new' };
     if (p === '/settings') return { name: 'settings' };
+    if (p === '/docs') return { name: 'docs' };
     return { name: 'missing' };
   }
   var route = parseRoute();
@@ -300,12 +301,21 @@
     clearInterval(tick); tick = null;
     view = null;
     if (conn.state === 'auth') return renderAuth();
+    renderedOnce = true;
+    if (introWanted()) {  // 헤더 · 목록 없이 가운데 밝은 판 하나(시안 01)
+      appEl.setAttribute('data-intro', '1');
+      clear(mainEl);
+      mainEl.appendChild(introView());
+      setTitle('처음 화면');
+      return;
+    }
+    appEl.setAttribute('data-intro', '0');
     clear(mainEl);
     mainEl.scrollTop = 0; window.scrollTo(0, 0);
     var root = h('div');
     mainEl.appendChild(connBanner());
     mainEl.appendChild(root);
-    var v = ({ home: homeView, session: sessionView, request: requestView, 'new': newView, settings: settingsView, missing: missingView })[route.name](root);
+    var v = ({ home: homeView, session: sessionView, request: requestView, 'new': newView, settings: settingsView, docs: docsView, missing: missingView })[route.name](root);
     view = v || null;
     if (v && v.tick) tick = setInterval(v.tick, 15000);
     scheduleSide();
@@ -447,17 +457,85 @@
   /* 맨 위 띠: 내 차례(대기 중인 질문·승인, 답을 기다리는 세션)가 있을 때만 있다. */
   function renderAnn(d) {
     clear(annEl);
-    if (!d.todo.length) return;
-    var first = d.todo[0];
-    annEl.appendChild(link(first.href, { class: 'ann', role: 'status' },
-      h('span', { text: '내 차례 ' + d.todo.length + '건 — ' + first.sname + '에서 답이 필요해' })));
+    if (d.todo.length) {
+      var first = d.todo[0];
+      annEl.appendChild(link(first.href, { class: 'ann', role: 'status' },
+        h('span', { text: '내 차례 ' + d.todo.length + '건 — ' + first.sname + '에서 답이 필요해' })));
+    }
+    // 막지 않는 문제(하네스 새 판)는 홈을 그대로 열고 띠 한 줄로만 알린다. 내 차례 띠와 같이 있으면 둘 다 보인다.
+    if (startData && startData.newVersion) {
+      annEl.appendChild(link('/settings', { class: 'ann note', role: 'status' },
+        h('span', { text: '하네스 새 판 ' + startData.newVersion + '이 있어 — 터미널에서 /harness:update 를 해 줘' })));
+    }
   }
+
+  /* ---------- 첫 화면 · 자동 점검 (시안 01) ----------
+     첫 실행(이 PC 에서 시작하기를 아직 안 눌렀다: 서버가 상태 폴더에 표시를 둔다)이거나 막는 문제(GitHub 연결 등)가 있으면 01 화면을 띄운다.
+     막지 않는 문제(옛 판)는 띠만. 점검은 서버가 백그라운드로 하고, 첫 실행이 아니면 홈을 막지 않는다. */
+  var startData = null, introForce = false, introSkip = false, startPolls = 0, startTimer = null;
+  function introWanted() { return !!startData && !introSkip && (introForce || startData.firstRun || startData.blocking); }
+  function loadStart(refresh) {
+    return api('GET', '/api/start-checks' + (refresh ? '?refresh=1' : '')).then(function (d) {
+      startData = d && typeof d === 'object' ? d : null;
+      clearTimeout(startTimer);
+      if (startData && startData.loading && startPolls++ < 40) startTimer = setTimeout(function () { loadStart(false); }, 1500);
+      if (renderedOnce) applyStart();
+    }, function () { /* 점검을 못 읽으면 홈을 막지 않는다(검사 불능) */ });
+  }
+  var renderedOnce = false;
+  function applyStart() {
+    var on = !!(appEl && appEl.getAttribute('data-intro') === '1');
+    if (on || introWanted()) renderRoute(); else renderAnn(sideData());
+  }
+  function introView() {
+    var d = startData, blocking = d.blocking, names = { github: 'GitHub 연결', version: '하네스 판', claude: 'Claude Code 로그인' };
+    var rows = (d.checks && d.checks.length ? d.checks : ['github', 'version', 'claude'].map(function (id) { return { id: id, name: names[id], state: 'wait', detail: '확인하는 중이야' }; }));
+    var CL = { ok: 'ok', fail: 'fail', old: 'wait', unknown: 'unk', wait: 'wait' };
+    function done() {
+      introForce = false;
+      api('POST', '/api/start-checks/seen', {}).then(function () { startData.firstRun = false; }, function () { introSkip = true; }).then(renderRoute);
+    }
+    var list = h('div', { class: 'checks' }, rows.map(function (c) {
+      var kids = [h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: c.name }), h('span', { class: 'ct mono', text: c.detail || '' })];
+      if (c.fix && (c.state === 'fail' || c.state === 'old')) kids.push(h('span', { class: 'fix', text: c.fix }));
+      return h('div', { class: 'crow ' + CL[c.state], 'data-check': c.id }, kids);
+    }));
+    var steps = [['1', '프로젝트 고르기', '고객사 폴더 하나'], ['2', '할 일 말하기', '"요구사항 써 줘"처럼'], ['3', 'AI 질문에 답하기', '버튼으로 고르면 돼']];
+    var acts = blocking
+      ? [h('button', { type: 'button', class: 'pill line', text: '그냥 열기', onClick: function () { introSkip = true; renderRoute(); } }),
+         h('button', { type: 'button', class: 'pill dark', disabled: !!d.loading, text: d.loading ? '점검하는 중이야' : '다시 점검', onClick: function () { startPolls = 0; loadStart(true); } })]
+      : [h('button', { type: 'button', class: 'pill dark', text: '시작하기', onClick: done })];
+    return h('div', { class: 'intro' }, h('section', { class: 'light intro-box' },
+      h('span', { class: 'eb', text: blocking ? '점검 결과' : (d.firstRun ? '처음 열었어' : '처음 화면') }),
+      h('h1', { text: blocking ? '먼저 고칠 게 있어' : 'Blueward Harness에 온 걸 환영해' }),
+      h('span', { class: 'lm', text: blocking ? '아래 ✕ 줄을 고친 다음 "다시 점검"을 눌러 줘. 급하면 그냥 열어도 되지만, GitHub 일은 안 될 수 있어.'
+        : 'AI와 함께 고객사 문서(SRS·Spec·매뉴얼·CTS·Role)를 만들고 개발하는 곳이야. 시작 전에 필요한 것을 자동으로 확인했어.' }),
+      list,
+      h('span', { class: 'eb', text: '이렇게 써' }),
+      h('div', { class: 'num3' }, steps.map(function (s) {
+        return h('div', { class: 'n3' }, h('span', { class: 'eb', text: s[0] }), h('b', { text: s[1] }), h('span', { class: 'lm sm', text: s[2] }));
+      })),
+      h('div', { class: 'acts end' }, acts)));
+  }
+  /* 헤더 오른쪽 프로젝트 이름: 지금 화면이 다루는 폴더만 보인다. 새 작업은 고른 작업 폴더, 세션·질문·승인은 그 세션.
+     그 밖의 화면은 열린 세션들의 프로젝트가 하나뿐일 때만 보이고, 여럿이면 어느 것인지 알 수 없어 비워 둔다(예전에는 가장 위 세션 것을 보여 줘서 틀렸다). */
+  function folderLabel(p) {
+    var segs = String(p || '').replace(/[\\/]+$/, '').split(/[\\/]+/).filter(Boolean);
+    return segs.slice(-2).join('/');
+  }
+  function projectName(s) { return baseName(s.repo) || folderLabel(s.cwd); }
   function projectOf() {
-    var s = route.name === 'session' ? sessions.get(route.id) : null;
-    if (!s) s = sortedSessions().filter(function (x) { return x.status !== 'ended'; })[0] || sortedSessions()[0];
-    return s ? (baseName(s.repo) || baseName(s.cwd)) : '';
+    if (route.name === 'new') return draft.cwd ? folderLabel(draft.cwd) : '';
+    var s = null;
+    if (route.name === 'session') s = sessions.get(route.id);
+    else if (route.name === 'request') { var r = requests.get(route.id); s = r && sessions.get(r.sessionId || r.session_id); }
+    if (s) return projectName(s);
+    var names = {};
+    sortedSessions().filter(function (x) { return x.status !== 'ended'; }).forEach(function (x) { var n = projectName(x); if (n) names[n] = 1; });
+    var all = Object.keys(names);
+    return all.length === 1 ? all[0] : '';
   }
-  /* 상단 헤더. 내 일 = 처음 화면, 작업 = 가장 위 세션(내 차례가 먼저), 새 작업 = /new. 산출물은 세션 화면 안의 칸이라 따로 길이 없어 두지 않는다. */
+  /* 상단 헤더. 내 일 = 처음 화면, 작업 = 가장 위 세션(내 차례가 먼저), 산출물 = /docs, 새 작업 = /new. */
   function renderHead(cur) {
     clear(headEl);
     var rows = sortedSessions(), work = rows[0] ? '/s/' + encodeURIComponent(rows[0].id) : null;
@@ -465,6 +543,7 @@
     var nav = h('nav', { class: 'topnav', 'aria-label': '메뉴' });
     nav.appendChild(link('/', { text: '내 일', 'aria-current': route.name === 'home' ? 'page' : null }));
     if (work) nav.appendChild(link(work, { text: '작업', 'aria-current': inWork ? 'page' : null }));
+    nav.appendChild(link('/docs', { text: '산출물', 'aria-current': route.name === 'docs' ? 'page' : null }));
     nav.appendChild(link('/new', { text: '새 작업', 'aria-current': route.name === 'new' ? 'page' : null }));
     headEl.appendChild(link('/', { class: 'brand', 'aria-label': 'Blueward Harness' }, h('img', { class: 'brand-logo', src: '/static/logo-sauce.png', alt: 'Blueward' })));
     headEl.appendChild(nav);
@@ -549,6 +628,7 @@
     loaded: function () { return loadedOnce; }, conn: function () { return conn.state; }
   });
   function homeView(root) { return ui.homeView(root); }
+  function docsView(root) { return ui.docsPage(root); }
 
   /* ---------- 세션 (/s/:id) ---------- */
   function sessionView(root) {
@@ -581,9 +661,9 @@
       built = true; clear(root);
       var page = h('div', { class: 'page sess' });
       function region(k, parent) { regions[k] = h('div', { 'data-r': k }); (parent || page).appendChild(regions[k]); return regions[k]; }
-      ['head', 'stages', 'strip', 'notices', 'checks'].forEach(function (k) { region(k); });
-      // 갈래·도구·점검·문서 칸은 한 번 만들어 두고 세션이 바뀔 때 update 만 부른다.
-      parts.checks = ui.startChecksPanel(); regions.checks.appendChild(parts.checks.el);
+      ['head', 'stages', 'strip', 'notices'].forEach(function (k) { region(k); });
+      // 갈래·도구·점검·문서 칸은 한 번 만들어 두고 세션이 바뀔 때 update 만 부른다. 새 세션 점검은 대화 판 맨 위 카드다(시안 13).
+      parts.checks = ui.startChecksPanel();
       parts.flow = ui.flowPanel({ compact: true });
       parts.docs = ui.docsPanel();
       // 이어서 요청 입력칸은 다시 그리지 않는다.
@@ -600,10 +680,14 @@
         h('p', { class: 'note-accent', 'data-note': '1', role: 'status' }),
         h('p', { class: 'note-muted', 'data-why': '1' }));
       regions.followInput = input; regions.followBtn = btn;
-      var talk = h('section', { class: 'light talk', 'aria-label': 'AI와 대화' }, regions.msgs, parts.flow.el, regions.follow);
+      var talk = h('section', { class: 'light talk', 'aria-label': 'AI와 대화' }, parts.checks.el, regions.msgs, parts.flow.el, regions.follow);
       var side = h('aside', { class: 'sess-side', 'aria-label': '만든 산출물' }, parts.docs.el);
       page.appendChild(h('div', { class: 'sess-grid' }, talk, side));
-      region('tools'); region('folder'); region('subs'); region('perm'); region('files'); region('log'); region('tech');
+      region('folder'); region('subs');
+      // 시안에 없는 옛 칸(도구 버튼 줄 · 권한 모드 · 검토 요청 주소와 바뀐 파일 · 일어난 일 기록 · 기술 정보)은 "자세히" 로 접는다. 기능은 그대로다.
+      var fold = h('details', { class: 'more fold', 'data-fold': '1' }, h('summary', { text: '자세히 (도구 · 권한 · 검토 요청 주소 · 기록 · 기술 정보)' }));
+      page.appendChild(fold);
+      ['tools', 'perm', 'files', 'log', 'tech'].forEach(function (k) { region(k, fold); });
       parts.tools = ui.toolsRow(function () { var s = cur(); return { session: s.id ? s : null, cwd: s.cwd }; }); regions.tools.appendChild(parts.tools.el);
       parts.folder = ui.folderNotice(); regions.folder.appendChild(parts.folder.el);
       root.appendChild(page);
@@ -1485,6 +1569,7 @@
       page.appendChild(panel);
       if (step === 'write' || step === 'review') { page.appendChild(tools.el); tools.update(); }
       root.appendChild(page);
+      renderHead(location.pathname);  // 헤더의 프로젝트 이름이 지금 고른 작업 폴더를 따라가게
       if (keepFocus) { var f = document.getElementById(keepFocus); if (f && f !== document.activeElement) { f.focus(); try { if (selStart != null) f.setSelectionRange(selStart, selStart); } catch (e) { console.debug('커서 위치를 되돌리지 못했습니다', e); } } }
     }
     function folderBar(page) {
@@ -1494,7 +1579,10 @@
       if (!picking) return;
       var box = h('div', { class: 'folder-pick' });
       (recent || []).forEach(function (f) {
-        box.appendChild(h('button', { type: 'button', class: 'folder-opt', 'aria-pressed': String(f.path === draft.cwd), onClick: function () { useFolder(f.path); }, text: f.path }));
+        var nm = baseName(f.path) || f.path;
+        box.appendChild(h('button', { type: 'button', class: 'folder-opt proj', 'aria-pressed': String(f.path === draft.cwd), onClick: function () { useFolder(f.path); } },
+          h('span', { class: 'pi', 'aria-hidden': 'true', text: nm.replace(/[^A-Za-z0-9가-힣]/g, '').slice(0, 2).toUpperCase() || '··' }),
+          h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', text: f.path }))));
       });
       if (recent && !recent.length) box.appendChild(h('p', { class: 'note-muted', text: '최근에 쓴 폴더가 없어. 아래에 경로를 적어 줘.' }));
       box.appendChild(h('label', { for: 'custom', class: 'field-label', text: '다른 폴더 경로' }));
@@ -1678,22 +1766,79 @@
   }
 
   /* ---------- 설정 ---------- */
+  /* 시안 19: 글자 크기 · AI가 묻는 범위 · 연결 상태 · 고급. 화면 밝기(다크 한 벌뿐)와 알림(콘솔에 알림 기능이 없다)은 넣지 않았다. */
   function settingsView(root) {
+    var alive = true, conn = { gh: '불러오는 중이야', ver: '불러오는 중이야', proj: '불러오는 중이야' };
+    function set(label, body) {
+      return h('div', { class: 'set' }, h('span', { class: 'eb', text: label }), h('div', { class: 'sc' }, body));
+    }
+    function crow(k, v) { return h('div', { class: 'srow2' }, h('span', { text: k }), h('span', { class: 'lm', text: v })); }
+    function cwdNow() { return (sortedSessions().filter(function (x) { return x.status !== 'ended'; })[0] || sortedSessions()[0] || {}).cwd; }
+    var lastCwd;
+    // 확인할 폴더는 세션 목록이 온 뒤에 정해진다. 목록이 오거나 첫 세션의 폴더가 바뀌면 다시 읽는다.
+    function loadConn(first) {
+      var cwd = cwdNow();
+      if (first) api('GET', '/api/health').then(function (d) { conn.ver = d && d.version ? d.version + ' (이 콘솔이 실린 판)' : '확인 못 함'; },
+        function (e) { conn.ver = '확인 못 함 · ' + e.message; }).then(paintConn);
+      if (!cwd && !loadedOnce) return;
+      lastCwd = cwd || '';
+      if (!cwd) { conn.gh = '확인 못 함 · 확인할 작업 폴더(세션)가 없어'; conn.proj = '확인 못 함 · 확인할 작업 폴더(세션)가 없어'; paintConn(); return; }
+      ui.approvalsFor(cwd).then(function (r) {
+        var d = r.ok ? r.data : null;
+        conn.gh = !r.ok ? '확인 못 함 · ' + (r.error && r.error.message || '읽지 못했어')
+          : d && d.state === 'unknown' ? '확인 못 함 · ' + (d.reason || 'gh 로 읽지 못했어')
+          : d && d.loading ? '확인하는 중이야' : '연결돼 있어 (gh 로 PR 정보를 읽었어)';
+      }).then(paintConn);
+      ui.flowsFor(cwd).then(function (r) {
+        var c = r.ok && r.data && r.data.conditions && r.data.conditions['project-ready'], name = folderLabel(cwd);
+        conn.proj = name + ' · ' + (!c ? '준비 여부 확인 못 함' : c.state === 'yes' ? '준비됨' : c.state === 'no' ? '준비 안 됨(templates/ · rules/ 없음)' : '준비 여부 확인 못 함');
+      }).then(paintConn);
+    }
+    function paintConn() { if (alive) draw(); }
+    function loadModelsOnce() {
+      if (modelInfo) return;
+      api('GET', '/api/models').then(function (d) { modelInfo = d && Array.isArray(d.options) ? d : null; }, function () { modelInfo = null; }).then(function () { if (alive && modelInfo) draw(); });
+    }
     function draw() {
       clear(root);
       var BH = window.BH, scale = BH.getScale();
-      var page = h('div', { class: 'page' });
-      page.appendChild(topline());
-      page.appendChild(h('h1', { class: 'big mt-44', text: '설정' }));
-      var sc = h('div', { class: 'row' });
-      BH.SCALES.forEach(function (z) {
-        sc.appendChild(h('button', { type: 'button', class: 'btn scale', 'aria-pressed': String(z[1] === scale), text: z[0], onClick: function () { BH.setScale(z[1]); draw(); } }));
-      });
-      page.appendChild(h('section', { class: 'mt-40' }, h('h2', { class: 'sect-h', text: '글자 크기' }), sc));
+      var page = h('div', { class: 'page w-960' });
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '설정' }), h('h1', { text: '보기와 AI 설정' })));
+      var sec = h('section', { class: 'light setbox' });
+
+      var seg = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': '글자 크기' }, BH.SCALES.map(function (z) {
+        return h('button', { type: 'button', role: 'radio', class: 'scale', 'aria-checked': String(z[1] === scale), text: z[0], onClick: function () { BH.setScale(z[1]); draw(); } });
+      }));
+      sec.appendChild(set('글자 크기', seg));
+
+      var cur = permissionChoice();
+      var radios = h('div', { class: 'radios', role: 'radiogroup', 'aria-label': 'AI가 묻는 범위' }, permissionOptions().map(function (o) {
+        var on = o.value === cur;
+        return h('button', { type: 'button', role: 'radio', class: 'radio', 'aria-checked': String(on), 'data-perm-opt': o.value,
+          onClick: function () { draft.permission = o.value; BH.write('bh-permission', o.value); draw(); } },
+          h('i', { class: 'rd' + (on ? ' on' : ''), 'aria-hidden': 'true' }), h('span', null, h('b', { text: o.label })));
+      }));
+      sec.appendChild(set('AI가 묻는 범위', h('div', null, radios,
+        h('p', { class: 'note-muted', text: '새 작업을 시작할 때 쓰는 기본값이야. 이미 돌고 있는 세션은 그 세션 화면의 "자세히" 에서 바꿔. 어느 걸 골라도 하네스 훅(맨손 git push · 강제 푸시 거부 등)은 그대로 일해.' }))));
+
+      sec.appendChild(set('연결 상태', h('div', null, crow('GitHub', conn.gh), crow('하네스 판', conn.ver), crow('프로젝트', conn.proj))));
+
+      sec.appendChild(set('처음 화면', h('div', null,
+        h('button', { type: 'button', class: 'pill line', 'data-intro-again': '1', text: '처음 화면 다시 보기', onClick: function () { introForce = true; introSkip = false; if (!startData) startData = { firstRun: false, blocking: false, checks: [] }; renderRoute(); loadStart(false); } }),
+        h('p', { class: 'note-muted', text: '시작할 때 한 번 보이는 환영 화면과 자동 점검을 다시 봐.' }))));
+
+      var model = modelChoice(), effort = effortChoice();
+      var ml = (modelOptions().filter(function (o) { return o.value === model; })[0] || {}).label || model || '기본값';
+      var el = (effortOptions().filter(function (o) { return o.value === effort; })[0] || {}).label || effort || '기본값';
+      sec.appendChild(set('고급', h('details', { class: 'more' }, h('summary', { text: 'AI 모델 · 생각 깊이 · 기술 정보' }),
+        crow('AI 모델', ml), crow('생각 깊이', el),
+        h('p', { class: 'note-muted', text: '모델과 생각 깊이는 새 작업 화면의 "고급 설정" 에서 바꿔.' }))));
+      page.appendChild(sec);
       root.appendChild(page);
     }
-    setTitle('설정'); draw();
-    return {};
+    function again() { if (alive && loadedOnce && (cwdNow() || '') !== lastCwd) loadConn(false); }
+    setTitle('설정'); loadModelsOnce(); loadConn(true); draw();
+    return { onData: again, onSession: again, destroy: function () { alive = false; } };
   }
 
   /* ---------- 시작 ---------- */
@@ -1707,7 +1852,10 @@
     appEl.appendChild(annEl); appEl.appendChild(headEl);
     appEl.appendChild(h('div', { class: 'shell' }, sideEl, mainEl));
     root.appendChild(appEl);
-    renderRoute();
+    // 점검 결과(첫 실행인지)가 오면 그 화면으로 처음부터 그린다. 늦거나 못 읽으면 홈을 막지 않고 그대로 그린다.
+    var first = function () { if (!renderedOnce) renderRoute(); };
+    loadStart(false).then(first, first);
+    setTimeout(first, 1200);
     loadSessions().then(function () { connectEvents(); }, function (e) { if (e.status !== 401) { connectEvents(); scheduleRetryIfDown(); } });
     if (window.ResizeObserver) new ResizeObserver(function () { if (collapsed === null) scheduleSide(); }).observe(root);
   }
