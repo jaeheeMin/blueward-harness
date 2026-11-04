@@ -5383,3 +5383,133 @@ def test_dev_ready_rejects_unknown_folder_and_missing_cwd(tmp_path, monkeypatch)
         assert c.call("GET", "/api/dev-ready")[0] == 400
     finally:
         c.close()
+
+
+# ---- 세션 대화(chat) (#682) ----
+
+def _chat(browser, sid):
+    return browser.call("GET", f"/api/sessions/{sid}")[1]["chat"]
+
+
+def test_chat_collects_prompt_and_stop_report_without_duplicates(browser):
+    browser.event("t1", "UserPromptSubmit", prompt="  표 순서를 바꿔 줘\n두 번째 줄  ")
+    browser.hook("stop", {"session_id": "t1", "cwd": "/w", "last_assistant_message": "바꿨어"})
+    browser.hook("stop", {"session_id": "t1", "cwd": "/w", "last_assistant_message": "바꿨어"})  # 같은 보고가 또 와도 쌓지 않는다
+    chat = _chat(browser, "t1")
+    assert [(c["role"], c["text"]) for c in chat] == [("me", "표 순서를 바꿔 줘\n두 번째 줄"), ("ai", "바꿨어")]
+    assert all(isinstance(c["t"], float) for c in chat)
+    browser.event("t1", "UserPromptSubmit", prompt="바꿨어")  # 같은 글이라도 앞 항목의 role 이 다르면 쌓는다
+    assert [c["role"] for c in _chat(browser, "t1")] == ["me", "ai", "me"]
+
+
+def test_chat_skips_system_only_prompts_and_keeps_slash_commands(browser):
+    for prompt in ("<task-notification>끝났어</task-notification>", "<system-reminder>x</system-reminder>\n<local-command-stdout>y</local-command-stdout>",
+                   "<system-reminder>열림", "   "):
+        browser.event("t1", "UserPromptSubmit", prompt=prompt)
+    assert _chat(browser, "t1") == []
+    browser.event("t1", "UserPromptSubmit", prompt="/harness:srs 구매오더")
+    browser.event("t1", "UserPromptSubmit", prompt="<system-reminder>잡음</system-reminder>[Image #1] 이거 봐줘")
+    assert [c["text"] for c in _chat(browser, "t1")] == ["/harness:srs 구매오더", "[Image #1] 이거 봐줘"]
+
+
+def test_chat_text_and_count_limits():
+    store = Store(None)
+    s = store.ensure("s1", "/w")
+    store.add_chat(s, "ai", "가" * 9000)
+    assert len(s["chat"][0]["text"]) == 8000
+    for i in range(230):
+        store.add_chat(s, "me" if i % 2 else "ai", f"글{i}")
+    assert len(s["chat"]) == 200 and s["chat"][-1]["text"] == "글229"
+    assert store.add_chat(s, "ai", "   ") is False
+
+
+def test_chat_request_item_is_added_then_filled_with_the_answer(browser):
+    h = browser.hook_async("question", ask_body("t1"))
+    req = wait_for(lambda: (browser.pending("t1") or [None])[0])
+    item = _chat(browser, "t1")[-1]
+    assert (item["role"], item["id"], item["kind"], item["title"], item["answer"]) == ("req", req.rid, "question", "색은?", None)
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"answers": {"색은?": ["Red", "Blue"]}})
+    h["t"].join(5)
+    item = _chat(browser, "t1")[-1]
+    assert item["answer"] == "Red, Blue" and len(_chat(browser, "t1")) == 1
+
+    h = browser.hook_async("permission", perm_body("t1", "touch a"))
+    req = wait_for(lambda: (browser.pending("t1") or [None])[0])
+    assert _chat(browser, "t1")[-1]["title"] == "Bash 사용"
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow"})
+    h["t"].join(5)
+    assert _chat(browser, "t1")[-1]["answer"] == "허락함"
+
+    h = browser.hook_async("permission", perm_body("t1", "touch b"))
+    req = wait_for(lambda: (browser.pending("t1") or [None])[0])
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "deny"})
+    h["t"].join(5)
+    assert _chat(browser, "t1")[-1]["answer"] == "거절함"
+
+    h = browser.hook_async("permission", perm_body("t1", "touch c"))
+    wait_for(lambda: browser.pending("t1"))
+    browser.event("t1", "SessionEnd")  # 터미널에서 닫히면 이유가 답 자리에 남는다
+    h["t"].join(5)
+    assert _chat(browser, "t1")[-1]["answer"] == "세션이 끝나서 닫힘"
+
+
+def test_chat_survives_save_and_load_and_old_sessions_get_empty_list(browser, tmp_path):
+    browser.event("t1", "UserPromptSubmit", prompt="저장해 줘")
+    browser.hook("stop", {"session_id": "t1", "cwd": "/w", "last_assistant_message": "저장했어"})
+    browser.app.store.flush()
+    assert [c["text"] for c in Store(browser.state).get("t1")["chat"]] == ["저장해 줘", "저장했어"]
+    d = tmp_path / "old"
+    d.mkdir()
+    (d / "sessions.json").write_text(json.dumps({"sessions": [{"id": "a"}, {"id": "b", "chat": "깨짐"}, {"id": "c", "chat": [1, {"role": "me", "text": "x"}]}],
+                                                  "folders": []}), encoding="utf-8")
+    old = Store(d)
+    assert old.get("a")["chat"] == [] and old.get("b")["chat"] == [] and old.get("c")["chat"] == [{"role": "me", "text": "x"}]
+
+
+def test_chat_is_only_in_single_session_response_and_partial_for_terminal(browser):
+    browser.event("t1", "UserPromptSubmit", prompt="안녕")
+    listed = browser.call("GET", "/api/sessions")[1]
+    assert listed and all("chat" not in s for s in listed) and listed[0]["chatPartial"] is True
+    one = browser.call("GET", "/api/sessions/t1")[1]
+    assert one["chat"][0]["text"] == "안녕" and one["chatPartial"] is True
+    assert "chat" not in browser.call("GET", "/api/sessions/t1?chat=0")[1]
+    assert "chat" not in browser.call("PUT", "/api/sessions/t1/skills/prs/reservation", {})[1]
+
+
+def test_chat_for_console_session_dedups_send_hook_and_stop(tmp_path):
+    store = Store(None)
+    m = managed.Manager(store, lambda: None, "/p")
+    s = store.ensure("s1", str(tmp_path))
+    s["managed"] = True
+    proc = FakeProc()
+    m.procs["s1"] = proc
+    assert m.send("s1", "계획을 세워 줘") is True
+    hooks = Hooks(store)
+    hooks.event(s, {"hook_event_name": "UserPromptSubmit", "prompt": "계획을 세워 줘"})  # 같은 말이 훅으로도 온다
+    m.on_event(proc, {"type": "assistant", "message": {"content": [{"type": "text", "text": "먼저 읽어 볼게"}, {"type": "tool_use", "name": "Read", "input": {}}]}})
+    m.on_event(proc, {"type": "assistant", "message": {"content": [{"type": "text", "text": "끝냈어"}]}})
+    hooks.stop(s, {"last_assistant_message": "끝냈어"})
+    m.on_event(proc, {"type": "result", "is_error": False, "result": "끝냈어"})
+    assert [(c["role"], c["text"]) for c in s["chat"]] == [("me", "계획을 세워 줘"), ("ai", "먼저 읽어 볼게"), ("ai", "끝냈어")]
+    assert store.get("s1") is s
+    from store import public_session
+    assert "chat" not in public_session(store, s, []) and public_session(store, s, [], True)["chatPartial"] is False
+
+
+def test_chat_result_fallback_when_stop_hook_never_came(tmp_path):
+    store = Store(None)
+    m = managed.Manager(store, lambda: None, "/p")
+    s = store.ensure("s1", str(tmp_path))
+    s["managed"] = True
+    proc = FakeProc()
+    m.procs["s1"] = proc
+    m.on_event(proc, {"type": "result", "is_error": False, "result": "대비 경로 글"})
+    assert [(c["role"], c["text"]) for c in s["chat"]] == [("ai", "대비 경로 글")]
+
+
+def test_chat_queued_console_message_is_recorded_when_stop_delivers_it(browser):
+    browser.event("t1", "UserPromptSubmit", prompt="작업")
+    browser.call("POST", "/api/sessions/t1/messages", {"text": "이어서 이것도"})
+    assert [c["text"] for c in _chat(browser, "t1")] == ["작업"]  # 아직 전달 전
+    browser.hook("stop", {"session_id": "t1", "cwd": "/w", "last_assistant_message": "1차 끝"})
+    assert [(c["role"], c["text"]) for c in _chat(browser, "t1")] == [("me", "작업"), ("ai", "1차 끝"), ("me", "이어서 이것도")]

@@ -178,7 +178,8 @@
   function refreshSession(id) {
     clearTimeout(sessTimers[id]);
     sessTimers[id] = setTimeout(function () {
-      api('GET', '/api/sessions/' + encodeURIComponent(id)).then(function (d) {
+      var open = route.name === 'session' && route.id === id;  // 대화(chat)는 지금 열어 본 세션만 받는다. 목록 갱신은 받아 둔 대화를 지우지 않는다
+      api('GET', '/api/sessions/' + encodeURIComponent(id) + (open ? '' : '?chat=0')).then(function (d) {
         d = d && d.session ? d.session : d;
         if (d && d.id) { mergeSession(d); scheduleSide(); if (view && view.onSession) view.onSession(d.id); }
       }, function (e) { if (e.status === 404) { sessions.delete(id); scheduleSide(); if (view && view.onRemoved) view.onRemoved(id); } });
@@ -648,6 +649,7 @@
   function sessionView(root) {
     var id = route.id, detail = null, errored = null, fetching = false, timer = null;
     var memDismissed = {}, regions = {}, parts = {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, permBusy = false, permNote = '', sent = [];
+    var chatAll = false, chatOpen = {}, chatKey = null;  // 앞 대화를 펼쳤는지 · 긴 AI 말을 펼친 것(시각별) · 마지막으로 그린 대화 모양(새 항목 감지)
 
     function cur() { return sessions.get(id) || {}; }
     function fetchDetail() {
@@ -775,7 +777,7 @@
       if (!text || s.canSend === false) return;
       regions.followBtn.disabled = true;
       api('POST', '/api/sessions/' + encodeURIComponent(id) + '/messages', { text: text }).then(function () {
-        followVal = ''; regions.followInput.value = ''; sent.push(text);
+        followVal = ''; regions.followInput.value = ''; sent.push({ text: text, at: Date.now() / 1000 });
         followNote = (s.status === 'running') ? '지금 단계가 끝나면 이어서 처리합니다.' : '이 작업에 전달했습니다.';
       }, function (e) { followNote = '보내지 못했습니다: ' + e.message; }).then(function () {
         regions.followBtn.disabled = cur().canSend === false; paintFollowNote(); paintMsgs(cur());
@@ -923,31 +925,93 @@
       return box;
     }
 
-    // 대화: AI 결과 보고 → 내가 보낸 말 → 순서·검토 요청 카드 → 네 차례(질문·승인) → 멈추기
+    // 대화 한 칸: 내 말은 말풍선(줄바꿈 그대로), AI 말은 마크다운(긴 글은 접기)
+    function chatMe(c) { return h('div', { class: 'me', 'data-chat': 'me', text: String(c.text || '') }); }
+    function chatAi(c) {
+      var text = String(c.text || ''), key = String(c.t), open = !!chatOpen[key];
+      var long = text.split('\n').length > 28 || text.length > 2200;
+      var box = h('div', { class: 'ai', 'data-chat': 'ai' }, h('span', { class: 'eb', text: 'AI' + (c.t ? ' · ' + clock(c.t) : '') }));
+      var body = h('div', { class: 'report-body' + (long && !open ? ' clip' : ''), tabindex: long ? '0' : null });
+      body.appendChild(window.BHMarkdown.render(text));
+      box.appendChild(body);
+      if (long) box.appendChild(h('button', { type: 'button', class: 'disclose', 'aria-expanded': String(open), onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, icon('chev', 14), open ? '접기' : '전체 보기'));
+      return box;
+    }
+    function askCard(rid) {
+      var r = requests.get(rid);
+      if (r && r.status && r.status !== 'pending') return null;
+      var q = r && kindOf(r) === 'question';
+      return h('div', { class: 'ask', 'data-ask': rid },
+        h('span', { class: 'eb', text: '네 차례' + waitedText(r && (r.createdAt || r.createdAtMs)) }),
+        h('b', { text: r ? requestTitle(r) : '확인해야 할 요청이 있어' }),
+        h('span', { class: 'sub', text: r ? (q ? 'AI가 물어본 게 있어. 답하면 이어서 일해.' : 'AI가 허락을 기다려. 확인하고 정해 줘.') : '요청 내용을 불러오는 중이거나 읽지 못했어.' }),
+        h('div', { class: 'acts' }, link('/r/' + encodeURIComponent(rid), { class: 'pill acc', text: r ? (q ? '답하기' : '승인하기') : '열기' })));
+    }
+    // 질문·승인 요청: 기다리는 중이면 '네 차례' 카드(여기서 한 번만), 끝났으면 답을 한 줄로
+    function chatReq(c, s, drawn) {
+      var pend = (s.pendingRequestIds || []).indexOf(c.id) >= 0;
+      if (pend && !c.answer) { drawn[c.id] = true; return askCard(c.id); }
+      var label = c.kind === 'question' ? '질문' : '승인 요청';
+      return h('div', { class: 'reqnote', 'data-chat': 'req', 'data-chat-req': c.id },
+        label + ': ' + String(c.title || '') + ' → ' + (c.answer ? String(c.answer) : '처리 결과를 알 수 없어'));
+    }
+    // 새 항목이 왔을 때 보던 자리가 대화 끝 근처일 때만 아래로 따라간다(위로 올려 읽는 중이면 그대로 둔다)
+    function chatEndNear() {
+      var el = regions.msgs;
+      if (!el || !el.getBoundingClientRect || typeof window.innerHeight !== 'number') return false;
+      return el.getBoundingClientRect().bottom <= window.innerHeight + 160;
+    }
+    var CHAT_FOLD = 12;
+    function chatList(s, items, drawn) {
+      var out = [], hidden = chatAll ? 0 : Math.max(0, items.length - CHAT_FOLD);
+      if (s.chatPartial) out.push(h('p', { class: 'quiet', 'data-chat-partial': '1', text: '터미널에서 한 대화는 내 말과 AI 마지막 답만 보여.' }));
+      if (items.length > CHAT_FOLD) {
+        out.push(h('button', { type: 'button', class: 'disclose', 'data-chat-fold': '1', 'aria-expanded': String(chatAll), onClick: function () { chatAll = !chatAll; paintMsgs(cur()); } },
+          icon('chev', 14), chatAll ? '앞 대화 접기' : '… 앞 대화 ' + hidden + '개 접힘'));
+      }
+      items.slice(hidden).forEach(function (c) {
+        var el = c.role === 'me' ? chatMe(c) : c.role === 'ai' ? chatAi(c) : c.role === 'req' ? chatReq(c, s, drawn) : null;
+        if (el) out.push(el);
+      });
+      return out;
+    }
+
+    // 대화: 서버가 쌓은 대화(없으면 AI 마지막 보고) → 방금 보낸 말 → 순서·검토 요청 카드 → 네 차례(질문·승인) → 멈추기
     function paintMsgs(s) {
-      var out = [reportMsg(s)];
-      sent.forEach(function (t) { out.push(h('div', { class: 'me', text: t })); });
+      var items = (Array.isArray(s.chat) ? s.chat : []).filter(function (c) { return c && typeof c === 'object'; });
+      var drawn = {}, out = [];
+      if (items.length) {
+        out = chatList(s, items, drawn);
+        // 서버 대화에 같은 글이 들어왔으면 이 탭에서 방금 보낸 말은 지운다
+        sent = sent.filter(function (m) {
+          return !items.some(function (c) { return c.role === 'me' && String(c.text || '').trim() === m.text.trim() && (Number(c.t) || 0) >= m.at - 30; });
+        });
+      } else {
+        out = [reportMsg(s)];
+      }
+      sent.forEach(function (m) { out.push(h('div', { class: 'me', text: m.text })); });
       var note = askedNote(s);
       if (note) out.push(note);
       if (s.status === 'running') { var td = todoCard(s); if (td) out.push(td); }
       var prc = ui.prCard(s);
       if (prc) out.push(prc);
       (s.pendingRequestIds || []).forEach(function (rid) {
-        var r = requests.get(rid);
-        if (r && r.status && r.status !== 'pending') return;
-        var q = r && kindOf(r) === 'question';
-        out.push(h('div', { class: 'ask', 'data-ask': rid },
-          h('span', { class: 'eb', text: '네 차례' + waitedText(r && (r.createdAt || r.createdAtMs)) }),
-          h('b', { text: r ? requestTitle(r) : '확인해야 할 요청이 있어' }),
-          h('span', { class: 'sub', text: r ? (q ? 'AI가 물어본 게 있어. 답하면 이어서 일해.' : 'AI가 허락을 기다려. 확인하고 정해 줘.') : '요청 내용을 불러오는 중이거나 읽지 못했어.' }),
-          h('div', { class: 'acts' }, link('/r/' + encodeURIComponent(rid), { class: 'pill acc', text: r ? (q ? '답하기' : '승인하기') : '열기' }))));
+        if (drawn[rid]) return;
+        var card = askCard(rid);
+        if (card) out.push(card);
       });
+      var last = items[items.length - 1];
+      var key = items.length + ':' + (last ? String(last.t) + String(last.answer || '') : '');
+      var follow = chatKey !== null && key !== chatKey && chatEndNear();
+      chatKey = key;
       if (s.managed && s.status === 'running') {
         out.push(interruptAsk
           ? h('div', { class: 'acts' }, h('span', { class: 'quiet', text: '진행 중인 작업을 멈출까?' }), h('button', { type: 'button', class: 'pill dark sm', text: '중단', onClick: interrupt }), h('button', { type: 'button', class: 'pill line sm', text: '취소', onClick: function () { interruptAsk = false; draw(); } }))
           : h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line sm', text: '작업 멈추기', onClick: function () { interruptAsk = true; draw(); } })));
       }
       regions.msgs.replaceChildren.apply(regions.msgs, out);
+      var tail = regions.msgs.lastChild;
+      if (follow && tail && tail.scrollIntoView) tail.scrollIntoView({ block: 'nearest' });
     }
 
     function paint(s) {
