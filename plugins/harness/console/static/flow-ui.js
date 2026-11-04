@@ -574,7 +574,7 @@
     }
 
     /* ---------- 홈 ---------- */
-    function approvalCard(box) {
+    function approvalCard(box, onMerged) {
       var cwds = [], seenRepo = {};
       sessionList().forEach(function (s) {
         var key = s.repo || L.normPath(s.cwd);
@@ -588,6 +588,7 @@
         box.dataset.ready = '1';
         var merged = L.mergeApprovals(rs.map(function (r) { return r.ok ? r.data : null; }));
         clear(box);
+        if (onMerged) onMerged(merged);
         if (merged.state === 'yes') {
           var items = merged.items;
           box.appendChild(h('section', { class: 'approval-card' },
@@ -633,32 +634,64 @@
       });
     }
 
-    function sessionCard(s) {
-      var g = L.groupOf(s), todo = g === 'todo';
-      var title = s.title || folderName(s) || '이름 없는 세션';
-      var href = '/s/' + encodeURIComponent(s.id);
-      var card = h('article', { class: 'scard' + (todo ? ' attn' : ''), 'data-session': s.id });
-      card.appendChild(h('div', { class: 'scard-top' },
-        kit.link(href, { class: 'scard-title', text: title }),
-        h('span', { class: 'scard-folder', title: s.cwd || null }, kit.icon('folder', 14), h('span', { text: folderName(s) }))));
-      card.appendChild(h('p', { class: 'scard-flow' + (s.flowId ? '' : ' none'), text: s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음' }));
-      if (s.flowId && (s.flowSteps || []).length) card.appendChild(stepBar(s, false));
-      var doing = s.status === 'ended' ? '끝난 세션' : s.currentAction || (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todo ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : s.status === 'running' ? '작업하는 중' : '쉬는 중');
-      card.appendChild(h('p', { class: 'scard-doing', title: doing, text: doing }));
-      var subs = L.runningSubCount(s);
-      var meta = h('div', { class: 'scard-meta' }, subs ? h('span', { class: 'meta', text: '서브에이전트 ' + subs + '개 실행 중' }) : null, prChip(s));
-      card.appendChild(meta);
-      if (todo) {
-        var pend = (s.pendingRequestIds || []).map(function (rid) { return { rid: rid, r: kit.requests.get(rid) }; }).filter(function (x) { return !(x.r && x.r.status && x.r.status !== 'pending'); })[0];
-        if (pend) card.appendChild(kit.link('/r/' + encodeURIComponent(pend.rid), { class: 'btn sm primary', text: !pend.r ? '확인하기' : kit.kindOf(pend.r) === 'question' ? '답하기' : '승인하기' }));
-        else card.appendChild(kit.link(href, { class: 'btn sm primary', text: '열기' }));
-      }
-      return card;
-    }
     var GROUP_ORDER = { todo: 0, running: 1, idle: 2 };
+    // 자주 하는 일: 누르면 새 작업 화면의 입력칸에 이 문장을 미리 넣어 간다(새 작업 화면은 종류를 미리 고르는 인자를 받지 않는다).
+    var KINDS = [
+      ['요구사항정의서', '고객 요구를 SRS 로', '요구사항정의서(SRS)를 만들고 싶어. '],
+      ['개발 Spec', '요구사항으로 설계서', '개발 Spec 을 만들고 싶어. '],
+      ['사용자 매뉴얼', '화면 캡처 · pptx', '사용자 매뉴얼을 만들고 싶어. '],
+      ['CTS 관리대장', '요청 건 · xlsx', 'CTS 관리대장에 요청 건을 더하고 싶어. '],
+      ['Role 정리', '메뉴 배정 · xlsx', 'Role(사용자 권한) 메뉴 배정을 정리하고 싶어. '],
+      ['개발하기', 'Spec 승인된 건', '새 기능을 개발하고 싶어. ']
+    ];
+    function startNew(text) { if (kit.startNew) kit.startNew(text); else kit.go('/new'); }
+    function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+    function today() { var d = new Date(); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+    function issueOf(s) { var m = /^[\w.-]+\/(\d+)-/.exec(s.branch || ''); return m ? m[1] : ''; }
+    function tile(label, value, cls) {
+      return h('div', { class: 'tile2' + (cls ? ' ' + cls : '') }, h('span', { class: 'eb', text: label }), h('span', { class: 'v', text: value }));
+    }
+    function tbar(s) {
+      var steps = s.flowId ? L.barSteps(s) : [];
+      if (!steps.length) return h('span', { class: 'none', text: '–' });
+      return h('ol', { class: 'tbar', 'aria-label': '진행 순서' }, steps.map(function (st) {
+        return h('li', { class: st.state, 'aria-current': st.state === 'now' ? 'step' : null, title: st.name + ' · ' + st.label },
+          h('span', { class: 'sr-only', text: st.name + ' ' + st.label }));
+      }));
+    }
+    function pendingOf(s) {
+      return (s.pendingRequestIds || []).map(function (rid) { return { rid: rid, r: kit.requests.get(rid) }; })
+        .filter(function (x) { return !(x.r && x.r.status && x.r.status !== 'pending'); })[0] || null;
+    }
+    function emptyHome(root, approvals, projects) {
+      var page = h('div', { class: 'page home' });
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '내 일' }), h('h1', { text: '아직 시작한 작업이 없어' }),
+        h('p', { class: 'line', text: 'Claude Code 세션을 시작하면 왼쪽 목록에 생겨. 지금 바로 맡길 일이 있으면 아래에서 시작해.' })));
+      var grid = h('div', { class: 'kinds' }, KINDS.map(function (k) {
+        return h('button', { type: 'button', class: 'kind', 'data-kind': k[0], onClick: function () { startNew(k[2]); } }, h('b', { text: k[0] }), h('small', { text: k[1] }));
+      }));
+      var input = h('input', { id: 'home-brief', class: 'comp-in', type: 'text', placeholder: '하고 싶은 일을 적어 — 예: 구매오더 조회 앱 요구사항 써 줘', autocomplete: 'off' });
+      var form = h('form', { class: 'comp', onSubmit: function (e) { e.preventDefault(); startNew(input.value); } },
+        h('label', { class: 'sr-only', for: 'home-brief', text: '하고 싶은 일' }), input,
+        h('button', { type: 'submit', class: 'pill dark', text: '새 작업으로' }));
+      page.appendChild(h('section', { class: 'light' }, h('h2', { text: '첫 작업을 시작해 볼까?' }),
+        h('p', { class: 'lm', text: '자주 하는 일이야. 눌러도 되고, 아래에 하고 싶은 일을 그냥 적어도 돼.' }), grid, form));
+      page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', '0', ''), tile('일하는 중', '0', ''), tile('만든 산출물', '확인 못 함', 'unk')));
+      page.appendChild(approvals);
+      page.appendChild(projects);
+      root.appendChild(page);
+    }
     function homeView(root) {
       var approvals = h('div', { class: 'approvals' });
       var projects = h('div', { class: 'projects' });
+      var prVal = h('span', { class: 'v', text: '…' });
+      var prTile = h('div', { class: 'tile2', 'data-pr-tile': '1' }, h('span', { class: 'eb', text: '승인 기다리는 PR' }), prVal);
+      prTile.hidden = true;
+      function showPr(merged) {
+        if (merged.state === 'yes') { prVal.textContent = String(merged.items.length); prTile.className = 'tile2'; prTile.hidden = false; }
+        else if (merged.state === 'unknown') { prVal.textContent = '확인 못 함'; prTile.className = 'tile2 unk'; prTile.hidden = false; }
+        else prTile.hidden = true;
+      }
       function draw() {
         clear(root);
         if (!kit.loaded()) {
@@ -666,20 +699,49 @@
           return;
         }
         var list = sessionList();
-        var page = h('div', { class: 'page' });
-        page.appendChild(kit.topline());
-        page.appendChild(h('h1', { class: 'big mt-44', text: '전체 진행 상황' }));
-        page.appendChild(h('p', { class: 'lede summary', 'data-summary': '1', text: L.summaryText(L.counts(list)) }));
-        page.appendChild(h('div', { class: 'mt-16' }, kit.link('/new', { class: 'btn primary', text: '새 작업 시작' })));
+        if (!list.length) { emptyHome(root, approvals, projects); approvalCard(approvals, showPr); projectCard(projects); return; }
+        list.sort(function (a, b) { return (GROUP_ORDER[L.groupOf(a)] - GROUP_ORDER[L.groupOf(b)]) || ((b.updatedAt || 0) - (a.updatedAt || 0)); });
+        var c = L.counts(list), page = h('div', { class: 'page home' });
+        var proj = folderName(list[0]);
+        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: today() + ' · ' + proj }), h('h1', { text: '오늘 내 일' }),
+          h('p', { class: 'line summary', 'data-summary': '1', text: L.summaryText(c) })));
+        page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), tile('쉬는 중', String(c.idle), ''), prTile));
+
+        var todo = list.filter(function (s) { return L.groupOf(s) === 'todo'; });
+        todo.forEach(function (s) {
+          var pend = pendingOf(s), name = s.title || folderName(s) || '이름 없는 세션';
+          var href = pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id);
+          var verb = pend && pend.r && kit.kindOf(pend.r) === 'question' ? '가서 답하기' : pend ? '가서 승인하기' : '가서 확인하기';
+          var what = pend ? (kit.requestTitle ? kit.requestTitle(pend.r) : (pend.r && pend.r.title) || '요청을 확인하세요') : s.askedInText ? '답을 기다리는 듯해요(추정)' : s.turnSkill ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례예요';
+          page.appendChild(h('div', { class: 'call', 'data-call': s.id },
+            h('div', { class: 'ct' }, h('span', { class: 'eb', text: '네 차례 · ' + name }), h('b', { text: what })),
+            kit.link(href, { class: 'pill dark', text: verb })));
+        });
+
+        var head = h('tr', null, ['작업', '단계', '번호', '기억', '상태'].map(function (t) { return h('th', { scope: 'col', text: t }); }));
+        var rows = list.map(function (s) {
+          var g = L.groupOf(s), todoRow = g === 'todo', ended = s.status === 'ended';
+          var title = s.title || folderName(s) || '이름 없는 세션';
+          var subs = L.runningSubCount(s);
+          var doing = ended ? '끝난 세션' : s.currentAction || (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : g === 'running' ? '작업하는 중' : '쉬는 중');
+          var chip = todoRow ? h('span', { class: 'tag', text: '내 차례' }) : h('span', { class: 'tag ok', text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
+          var issue = issueOf(s), pr = prChip(s);
+          var nums = h('td', { 'data-l': '번호' }, issue ? h('span', { class: 'mono', text: '이슈 #' + issue }) : null, pr, !issue && !pr ? h('span', { class: 'none', text: '–' }) : null);
+          return h('tr', { class: todoRow ? 'attn' : '', 'data-session': s.id },
+            h('td', { 'data-l': '작업' }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'rt', text: title }),
+              h('span', { class: 'rs', text: (s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음') + ' · ' + folderName(s), title: s.cwd || null })),
+            h('td', { 'data-l': '단계' }, tbar(s)),
+            nums,
+            h('td', { 'data-l': '기억' }, h('span', { class: 'mono unk', title: '기억 사용량 확인 못 함', text: '?' })),
+            h('td', { 'data-l': '상태' }, chip, h('span', { class: 'rs', title: doing, text: doing }),
+              subs ? h('span', { class: 'rs', text: '서브에이전트 ' + subs + '개 실행 중' }) : null));
+        });
+        page.appendChild(h('section', { class: 'light tablebox' }, h('h2', { text: '내 세션' }),
+          h('table', { class: 'list' }, h('thead', null, head), h('tbody', null, rows))));
         page.appendChild(approvals);
         page.appendChild(projects);
-        if (!list.length) page.appendChild(h('p', { class: 'note-muted mt-32', text: 'Claude Code 세션을 시작하면 여기에 나타납니다. 지금 바로 맡길 일이 있으면 새 작업으로 시작하세요.' }));
-        else {
-          list.sort(function (a, b) { return (GROUP_ORDER[L.groupOf(a)] - GROUP_ORDER[L.groupOf(b)]) || ((b.updatedAt || 0) - (a.updatedAt || 0)); });
-          page.appendChild(h('div', { class: 'cards mt-32' }, list.map(sessionCard)));
-        }
         root.appendChild(page);
-        approvalCard(approvals);
+        approvalCard(approvals, showPr);
         projectCard(projects);
       }
       draw();

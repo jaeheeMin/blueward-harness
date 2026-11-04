@@ -302,7 +302,7 @@ const cases = {
   },
   async dom_home_cards() {
     const sessions = [
-      { id: 'a', title: '요구사항 쓰기', cwd: 'C:\\Work\\proj-a', group: 'todo', pendingRequestIds: ['r1'], flowId: 'srs', flowName: '요구사항', stepIndex: 1,
+      { id: 'a', title: '요구사항 쓰기', cwd: 'C:\Work\proj-a', branch: 'feat/636-req', group: 'todo', pendingRequestIds: ['r1'], flowId: 'srs', flowName: '요구사항', stepIndex: 1,
         flowSteps: steps('done', 'active', 'pending'), flowPr: { number: 4, state: 'open', url: 'https://github.com/o/r/pull/4', checks: 'pass' } },
       { id: 'b', title: '', cwd: '/home/x/proj-b', group: 'running', currentAction: '파일 읽는 중', subagents: [{ state: 'running' }, { state: 'done' }] },
     ];
@@ -314,20 +314,59 @@ const cases = {
     const text = root.textContent;
     assert.ok(text.includes('세션 2개 · 일하는 중 1 · 내 차례 1 · 쉬는 중 0'));
     assert.ok(text.includes('proj-a') && text.includes('proj-b'));
-    assert.ok(text.includes('서브에이전트 1개 실행 중') && text.includes('PR #4 · 검사 통과'));
+    assert.ok(text.includes('서브에이전트 1개 실행 중') && text.includes('PR #4 · 검사 통과') && text.includes('이슈 #636'));
     assert.ok(text.includes('내가 승인할 PR 1건'));
-    const card = find(root, e => e.attrs['data-session'] === 'a')[0];
-    assert.ok((card.attrs['class'] || '').includes('attn'));
-    assert.ok(card.textContent.includes('승인하기'));
-    assert.strictEqual(find(card, e => e.tag === 'li' && e.attrs['aria-current'] === 'step').length, 1);
-    // 승인자가 아니면 카드가 없다
+    // 숫자 타일: 내 차례 / 일하는 중 / 쉬는 중, 승인 기다리는 PR 은 데이터를 받은 뒤에만 보인다
+    const tiles = find(root, e => (e.attrs['class'] || '').split(' ').includes('tile2'));
+    assert.deepStrictEqual(tiles.slice(0, 3).map(t => t.textContent), ['내 차례1', 'AI가 일하는 중1', '쉬는 중0']);
+    const prTile = find(root, e => e.attrs['data-pr-tile'])[0];
+    assert.ok(!prTile.hidden && prTile.textContent === '승인 기다리는 PR1');
+    // 내 차례 노랑 카드는 요청 화면으로 보낸다. 기억 %는 데이터가 없어 지어내지 않는다.
+    const call = find(root, e => e.attrs['data-call'] === 'a')[0];
+    assert.ok(call && call.textContent.includes('가서 승인하기'));
+    assert.strictEqual(find(call, e => e.tag === 'a')[0].attrs.href, '/r/r1');
+    const row = find(root, e => e.attrs['data-session'] === 'a')[0];
+    assert.ok((row.attrs['class'] || '').includes('attn'));
+    assert.ok(row.textContent.includes('내 차례'));
+    assert.strictEqual(find(row, e => e.tag === 'li' && e.attrs['aria-current'] === 'step').length, 1);
+    const unk = find(row, e => (e.attrs['class'] || '').includes('unk'))[0];
+    assert.ok(unk.textContent === '?' && unk.attrs.title === '기억 사용량 확인 못 함');
+    assert.ok(!/\d+%/.test(root.textContent));
+    // 승인자가 아니면 카드도 타일도 없다
     const { kit: k2 } = makeKit({ 'GET /api/approvals': { state: 'no' } }, sessions);
     const root2 = h('div'); loadUI(k2).homeView(root2); await tick(); await tick();
     assert.ok(!root2.textContent.includes('내가 승인할 PR'));
+    assert.ok(find(root2, e => e.attrs['data-pr-tile'])[0].hidden);
     // 판정 불능은 사유와 함께 보인다
     const { kit: k3 } = makeKit({ 'GET /api/approvals': { state: 'unknown', reason: 'gh 로그인 안 됨' } }, sessions);
     const root3 = h('div'); loadUI(k3).homeView(root3); await tick(); await tick();
     assert.ok(root3.textContent.includes('판정 불능 · gh 로그인 안 됨'));
+    assert.ok(find(root3, e => e.attrs['data-pr-tile'])[0].textContent.includes('확인 못 함'));
+    // 내 차례가 없으면 노랑 카드가 없다
+    const { kit: k4 } = makeKit({ 'GET /api/approvals': { state: 'no' } }, [sessions[1]]);
+    const root4 = h('div'); loadUI(k4).homeView(root4); await tick(); await tick();
+    assert.strictEqual(find(root4, e => e.attrs['data-call']).length, 0);
+  },
+  async dom_home_empty() {
+    const { kit } = makeKit({ 'GET /api/approvals': { state: 'no' } }, []);
+    const went = [];
+    kit.startNew = t => went.push(t); kit.go = p => went.push('go:' + p);
+    const root = h('div');
+    loadUI(kit).homeView(root); await tick(); await tick();
+    assert.ok(root.textContent.includes('아직 시작한 작업이 없어'));
+    // 자주 하는 일 6개 + 숫자 타일 3개(산출물 수는 구할 수 없어 확인 못 함)
+    const kinds = find(root, e => e.attrs['data-kind']);
+    assert.deepStrictEqual(kinds.map(k => k.attrs['data-kind']), ['요구사항정의서', '개발 Spec', '사용자 매뉴얼', 'CTS 관리대장', 'Role 정리', '개발하기']);
+    const tiles = find(root, e => (e.attrs['class'] || '').split(' ').includes('tile2'));
+    assert.deepStrictEqual(tiles.map(t => t.textContent), ['내 차례0', '일하는 중0', '만든 산출물확인 못 함']);
+    kinds[0].click();
+    assert.ok(went[0].includes('요구사항정의서'));
+    // 입력창에 적은 글은 새 작업으로 넘어간다
+    const input = find(root, e => e.tag === 'input')[0];
+    input.value = '구매오더 조회 앱 요구사항 써 줘';
+    find(root, e => e.tag === 'form')[0].listeners.submit[0]({ preventDefault() {} });
+    assert.strictEqual(went[1], '구매오더 조회 앱 요구사항 써 줘');
+    assert.strictEqual(find(root, e => (e.attrs['class'] || '').includes('call')).length, 0);
   }
 };
 
@@ -388,25 +427,19 @@ def test_session_screen_has_no_skill_button_row_and_keeps_slash_assist():
 
 
 _THEME_NODE = r"""
-const assert = require('assert');
 const [file, seed] = process.argv.slice(1);
 const store = seed ? JSON.parse(seed) : {};
 global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
-const attrs = {}, props = {};
+const style = {};
 global.window = {};
-global.document = { documentElement: { style: { setProperty: (k, v) => { props[k] = v; }, removeProperty: k => { delete props[k]; } }, setAttribute: (k, v) => { attrs[k] = v; } } };
+global.document = { documentElement: { style } };
 require(file);
 const BH = window.BH;
-const out = { first: BH.getDesign(), attr: attrs['data-design'], bg: props['--bg'] || null };
-BH.setDesign('b');
-out.afterB = [BH.getDesign(), store['bh-design'], attrs['data-design'], attrs['data-tone'], props['--bg'] || null];
-BH.setDesign('a');
-out.afterA = [store['bh-design'], attrs['data-tone']];
-BH.setDesign('nonsense');
-out.afterBad = [store['bh-design'], attrs['data-design'], props['--bg'] || null];
-BH.setTheme('blueward');
-out.themeBack = [attrs['data-tone'], props['--bg']];
-out.ids = BH.DESIGNS.map(d => d[0]).join(',');
+const out = { first: BH.getScale(), zoom: style.zoom, keys: Object.keys(BH).sort().join(',') };
+BH.setScale('1.3');
+out.afterSet = [BH.getScale(), store['bh-scale'], style.zoom];
+BH.setScale('nonsense');
+out.afterBad = [BH.getScale(), style.zoom];
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -419,29 +452,25 @@ def _theme_run(seed: dict | None = None) -> dict:
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
-def test_design_default_is_base_and_choice_is_saved_and_applied():
+def test_theme_js_only_keeps_text_scale():
     r = _theme_run()
-    assert r["first"] == "base" and r["attr"] == "base" and r["bg"]  # 기존 디자인은 테마 색을 인라인으로 넣는다
-    assert r["ids"] == "base,a,b,c"
-    assert r["afterB"][:4] == ["b", "b", "b", "dark"] and r["afterB"][4] is None  # 새 디자인은 인라인 색을 비워 스타일시트가 정한다
-    assert r["afterA"] == ["a", "light"]
-    assert r["afterBad"] == ["base", "base", r["afterBad"][2]] and r["afterBad"][2]  # 모르는 값은 기존으로
-    assert r["themeBack"][0] == "light" and r["themeBack"][1]
+    assert r["first"] == "1.15" and r["zoom"] == "1.15"
+    assert r["keys"] == "SCALES,getScale,read,setScale,write"  # 옛 테마 표·디자인 전환은 없다
+    assert r["afterSet"] == ["1.3", "1.3", "1.3"]
+    assert r["afterBad"] == ["1.3", "1.3"]  # 모르는 값은 저장도 적용도 하지 않는다(바로 앞 값 유지)
+    assert _theme_run({"bh-scale": "1.45"})["zoom"] == "1.45"
+    assert _theme_run({"bh-scale": "zzz"})["first"] == "1.15"
 
 
-@pytest.mark.skipif(not NODE, reason="node 없음")
-def test_saved_design_is_applied_on_load_and_garbage_falls_back():
-    r = _theme_run({"bh-design": "c"})
-    assert r["first"] == "c" and r["attr"] == "c" and r["bg"] is None
-    r = _theme_run({"bh-design": "zzz"})
-    assert r["first"] == "base" and r["attr"] == "base" and r["bg"]
-
-
-def test_design_switch_ui_wired_in_topline_and_settings():
+def test_no_theme_or_design_switch_left():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "design-quick" in app and "'aria-pressed': String(d[0] === cur)" in app and "data-design-id" in app
-    assert "text: '디자인'" in app and "BH.DESIGNS.forEach" in app
-    assert re.search(r"function topline\(left\)\s*\{\s*return h\('div', \{ class: 'topline' \}, left \? h\('span'[^\n]*designQuick\(\)\)", app)
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    theme = (STATIC / "theme.js").read_text(encoding="utf-8")
+    for needle in ("data-design", "data-tone", "design-quick", "getTheme", "getDesign", "setDesign", "BH.THEMES", "BH.DESIGNS"):
+        assert needle not in app and needle not in css and needle not in theme, needle
+    # 설정 화면에는 글자 크기만 남는다
+    settings = app[app.index("function settingsView"):app.index("/* ---------- 시작 ---------- */")]
+    assert "글자 크기" in settings and "테마" not in settings and "디자인" not in settings
 
 
 def _lum(hex_color: str) -> float:
@@ -455,50 +484,54 @@ def _ratio(a: str, b: str) -> float:
     return (x + 0.05) / (y + 0.05)
 
 
-def _design_vars(css: str, design: str) -> dict:
-    block = re.search(r':root\[data-design="%s"\] \{(.*?)\n\}' % design, css, re.S).group(1)
+def _root_vars(css: str) -> dict:
+    block = re.search(r"\n:root \{(.*?)\n\}", css, re.S).group(1)
     return dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{6})", block))
 
 
-# 글자와 바탕으로 같이 쓰이는 짝. 밝은 바탕의 회색 글씨도 포함한다.
+# 글자와 바탕으로 같이 쓰이는 짝. 밝은 판의 회색 글씨도 포함한다.
 _TEXT_PAIRS = [("text", "bg"), ("text", "surface"), ("sec", "bg"), ("sec", "surface"), ("muted", "bg"), ("muted", "surface"),
-               ("accent", "bg"), ("accent", "surface"), ("attn", "bg"), ("attn", "surface"), ("btnink", "btn"),
+               ("accent", "bg"), ("accent", "surface"), ("attn", "bg"), ("attn", "surface"), ("btnink", "btn"), ("onaccent", "accent"),
                ("text", "st-now-bg"), ("st-now", "st-now-bg"), ("muted", "st-now-bg"), ("st-done", "surface"), ("st-done", "st-done-bg"),
                ("st-turn", "st-turn-bg"), ("sec", "st-turn-bg"), ("muted", "st-turn-bg"), ("text", "st-turn-bg"), ("st-turn-ink", "st-turn-btn"),
-               ("st-fail-ink", "st-fail-bg"), ("st-fail-ink", "surface"), ("st-unk-ink", "st-unk-bg"), ("st-unk-ink", "surface")]
+               ("st-fail-ink", "st-fail-bg"), ("st-fail-ink", "surface"), ("st-unk-ink", "st-unk-bg"), ("st-unk-ink", "surface"),
+               ("lightink", "light"), ("lmuted", "light"), ("lightink", "card"), ("lmuted", "card"), ("lightink", "attn"), ("accent", "lightink"),
+               ("okink", "okbg"), ("lightink", "okbg"), ("lmuted", "stbg")]
 
 
-@pytest.mark.parametrize("design", ["a", "b", "c"])
-def test_design_text_contrast_is_at_least_4_5(design):
+def test_sauce_text_contrast_is_at_least_4_5():
     css = (STATIC / "app.css").read_text(encoding="utf-8")
-    v = _design_vars(css, design)
+    v = _root_vars(css)
     low = [(f, b, round(_ratio(v[f], v[b]), 2)) for f, b in _TEXT_PAIRS if _ratio(v[f], v[b]) < 4.5]
     assert not low, low
     assert _ratio(v["edge"], v["surface"]) >= 3 and _ratio(v["edge"], v["bg"]) >= 3  # 입력·버튼 테두리
-    assert v["brand"].lower() == "#004696"  # 브랜드 색은 그대로
+    assert v["bg"] == "#132322" and v["surface"] == "#0e1a19" and v["accent"] == "#3ddc91" and v["light"] == "#edf7f5" and v["attn"] == "#ffcd48"
 
 
-def test_design_colors_are_neutral_and_scoped():
+def test_no_text_larger_than_22px_and_no_native_widgets():
     css = (STATIC / "app.css").read_text(encoding="utf-8")
-    # 중립색: 바탕·면·글자 회색에 파란 기운(B 가 R·G 보다 큼)이 없다. 파랑은 지금 단계·주 버튼·로고 쪽 토큰에만 있다.
-    for design in ("a", "b", "c"):
-        v = _design_vars(css, design)
-        for k in ("bg", "surface", "text", "sec", "muted", "line", "edge"):
-            if k not in v:
-                continue
-            r, g, b = (int(v[k][i:i + 2], 16) for i in (1, 3, 5))
-            assert b <= max(r, g) + 2, (design, k, v[k])
-        assert design == "b" or v["btn"] == "#004696"
-    # 초록 계열(G 가 R·B 보다 확실히 큰 색)은 쓰지 않는다
-    for hexv in re.findall(r"#[0-9a-fA-F]{6}", css[css.index("디자인 A·B·C"):]):
-        r, g, b = (int(hexv[i:i + 2], 16) for i in (1, 3, 5))
-        assert not (g > r + 20 and g > b + 20), hexv
-    # 새 규칙은 모두 data-design 범위 안에 있다 — 기존 디자인 규칙은 이 표식 앞에서 끝난다
-    tail = css[css.index("*/", css.index("디자인 A·B·C")) + 2:]
-    for line in tail.splitlines():
-        if line and line[0] not in " /}":  # 들여쓰기 없는 줄은 규칙의 첫 줄(선택자)이다
-            assert line.startswith(":root[data-design"), line
+    sizes = [(m.group(0), float(m.group(1))) for m in re.finditer(r"font-size:\s*(\d+(?:\.\d+)?)px", css)]
+    assert sizes and not [m for m, n in sizes if n > 22], [m for m, n in sizes if n > 22]
+    assert "clamp(" not in "".join(re.findall(r"font-size:[^;]*;", css))
+    # 기본 체크박스·select 화살표는 쓰지 않고 직접 그린다
+    assert "input[type=checkbox] {" in css and "appearance: none" in css and "select.input" in css
     assert css.count("@font-face") == 2 and css.index("@font-face") < css.index(":root {")
+
+
+def test_app_frame_ann_only_with_todo_and_menu_paths():
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    # 맨 위 띠는 내 차례가 없으면 만들지 않는다
+    ann = app[app.index("function renderAnn"):app.index("function projectOf")]
+    assert re.search(r"clear\(annEl\);\s*if \(!d\.todo\.length\) return;", ann) and "내 차례 ' + d.todo.length + '건 — '" in ann
+    # 메뉴: 내 일 → /, 작업 → 가장 위 세션, 새 작업 → /new, 설정 → /settings. 길이 없는 산출물은 두지 않는다.
+    head = app[app.index("function renderHead"):app.index("function renderSide")]
+    assert "link('/', { text: '내 일'" in head and "link('/new', { text: '새 작업'" in head and "link('/settings'" in head
+    assert "'/s/' + encodeURIComponent(rows[0].id)" in head and "text: '산출물'" not in head
+    # 세션 목록: 기억은 데이터가 없어 ? 와 툴팁만, 세션이 없으면 점선 상자와 새 세션 버튼
+    side = app[app.index("function renderSide"):app.index("function renderRail")]
+    assert "'기억 사용량 확인 못 함'" in side and "text: '?'" in side
+    assert "아직 세션이 없어. 새 작업을 시작하면 여기에 생겨." in side and "+ 새 세션" in side
+    assert "logo-sauce.png" in head and (STATIC / "logo-sauce.png").is_file() and not (STATIC / "blueward-logo.png").exists()
 
 
 def test_design_states_have_shape_cues_not_only_color():

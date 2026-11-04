@@ -1890,7 +1890,7 @@ def test_session_headline_is_short_and_full_action_has_own_line():
     js = (CONSOLE / "static" / "app.js").read_text(encoding="utf-8")
     assert "HEADLINE_MAX" in js and "shortAction(s.currentAction)" in js and "action-line" in js
     css = (CONSOLE / "static" / "app.css").read_text(encoding="utf-8")
-    assert ".action-line" in css and "text-overflow: ellipsis" in css and "line-clamp: 2" in css
+    assert ".action-line" in css and "text-overflow: ellipsis" in css  # 사이드바 상태는 한 줄 말줄임(#636)
 
 
 def test_mention_path_rules(tmp_path):
