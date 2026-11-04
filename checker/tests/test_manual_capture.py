@@ -1173,3 +1173,10 @@ def test_updated_workbook_exports_to_pptx(tmp_path, capsys, fake):
 def test_real_chrome_capture_placeholder():
     # 로컬 HTML 로 끝까지 도는 절차는 docs/status/533-manual-capture.md 에 있다. 자동 시험은 Chrome 을 띄우지 않는다.
     assert cdp_client.list_tabs("127.0.0.1", mc.cdp_client.DEFAULT_PORT)
+
+
+def test_column_box_uses_same_colindex_cells_not_header_table_only():
+    # UI5 sap.ui.table 은 머리글·본문이 다른 <table> 이라 가장 가까운 <table> 은 머리글뿐이다(#637 실제 테넌트 100).
+    from checker.manual_capture_js import LIB_JS
+    assert "const columnBox" in LIB_JS and "aria-colindex" in LIB_JS
+    assert "g.r = columnBox(h, g.r)" in LIB_JS
