@@ -108,6 +108,14 @@ if [ "${HARNESS_NO_SCAFFOLD_HINT:-}" != "1" ] && [ ! -f "$repo_top/.claude-plugi
     -o -type d -name templates -print 2>/dev/null || true)
   if [ -z "$has_standards" ]; then
     add "기준 폴더(templates/ 와 rules/)가 없습니다. 다음: /harness:scaffold 를 실행해 표준 구조를 만드십시오(이 저장소가 Project Repository 가 아니면 HARNESS_NO_SCAFFOLD_HINT=1 로 이 안내를 끌 수 있습니다)."
+  else
+    # 구조는 됐는데 templates/ 에 고객 양식 원본(엑셀·파워포인트·워드·한글)이 없으면 한 줄 알린다(#615).
+    # 판정은 웹 콘솔 서버와 같은 console/standards_scan.py 를 불러 한 벌만 둔다. 못 읽었거나
+    # (uv·python 이 없거나 목록 읽기 실패) 결과가 이상하면 "없음" 으로 말하지 않고 조용히 넘어간다.
+    forms_state="$(uv run --no-project python "${plugin_root}/console/standards_scan.py" "$repo_top" 2>/dev/null </dev/null | tr -d '\r' | head -n1 || true)"
+    if [ "$forms_state" = "none" ]; then
+      add "구조는 만들어졌지만 templates/ 에 고객 양식 파일(엑셀·파워포인트 등)이 아직 없습니다. 다음: 고객사 양식 원본을 templates/ 에 넣으십시오(양식 없이 md 로만 쓰는 프로젝트면 무시해도 됩니다)."
+    fi
   fi
 fi
 

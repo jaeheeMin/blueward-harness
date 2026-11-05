@@ -31,6 +31,7 @@ import platform_compat
 from hooks_api import ASK_DEFAULT, ASK_LEVELS, Hooks, permission_reply, question_reply
 from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
                      PERMISSION_VALUES, Manager)
+from standards_scan import customer_forms, has_standard_folder  # noqa: F401
 from store import (CHECK_SKIPPED, MAX_PENDING_STOP, START_CHECK_IDS, Store, can_send, display_title, mark_check, public_session,
                    remember_touched, set_baseline)
 
@@ -66,7 +67,6 @@ MAX_NEXT_PROMPT = 4000      # 새 세션 첫 메시지로 보낼 인계 프롬�
 MAX_NEXT_IDS = 20           # 다음 갈래로 넘길 요구사항 번호(REQ-xxx) 수
 REQ_ID = re.compile(r"REQ-\d{1,6}")
 SYSTEM_TYPE = re.compile(r"^system_type\s*:\s*([^#\r\n]*)", re.MULTILINE)
-PRUNE_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__"}  # session-start-sync.sh 의 기준 폴더 찾기와 같다
 
 
 def read_system_type(root: str) -> str:
@@ -82,42 +82,6 @@ def read_system_type(root: str) -> str:
     return m.group(1).strip().strip("'\"")[:60] if m else ""
 
 
-def standard_folders(root: str, names: list[str], depth: int):
-    """root 와 그 아래 depth 단계까지의 폴더 중 names 를 모두 하위 폴더로 가진 곳을 차례로 낸다."""
-    start = len(os.path.normpath(root).split(os.sep))
-    for cur, dirs, _files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in PRUNE_DIRS]
-        if all(n in dirs for n in names):
-            yield cur
-        if len(os.path.normpath(cur).split(os.sep)) - start >= depth:
-            dirs[:] = []
-
-
-def has_standard_folder(root: str, names: list[str], depth: int) -> bool:
-    """root 와 그 아래 depth 단계까지의 폴더 중 names 를 모두 하위 폴더로 가진 곳이 있는가."""
-    return next(standard_folders(root, names, depth), None) is not None
-
-
-# 고객 양식 원본으로 치는 사무 문서 확장자. templates/README.md 가 "고객사에게 받은 Template 원본"(xlsx 등)을 넣는 자리라고 한다.
-# templates/harness/(scaffold 가 만든 기본 틀)와 templates/forms/(양식 지도 yaml)는 고객 양식이 아니라 건너뛴다.
-FORM_EXTS = {".xlsx", ".xlsm", ".xls", ".pptx", ".pptm", ".ppt", ".docx", ".docm", ".doc", ".hwp", ".hwpx"}
-FORM_SKIP_DIRS = {"harness", "forms"}
-FORM_DEPTH = 3
-
-
-def customer_forms(root: str, depth: int = 3) -> bool | None:
-    """root 아래 templates/ (templates 와 rules 를 함께 가진 폴더들)에 고객 양식 원본이 하나라도 있는가. 읽지 못하면 None."""
-    failed = []
-    for base in standard_folders(root, ["templates", "rules"], depth):
-        top = os.path.join(base, "templates")
-        for cur, dirs, files in os.walk(top, onerror=failed.append):
-            if os.path.normpath(cur) == os.path.normpath(top):
-                dirs[:] = [d for d in dirs if d not in FORM_SKIP_DIRS]
-            if len(os.path.normpath(cur).split(os.sep)) - len(os.path.normpath(top).split(os.sep)) >= FORM_DEPTH:
-                dirs[:] = []
-            if any(os.path.splitext(f)[1].lower() in FORM_EXTS and not f.startswith("~$") for f in files):
-                return True
-    return None if failed else False
 MAX_JOBS = 50
 JOB_ACTIVE = ("handoff", "starting")
 WAIT_POLL = 0.2
