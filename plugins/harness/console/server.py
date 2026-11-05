@@ -28,7 +28,7 @@ import flows
 import gitstate
 import handoff
 import platform_compat
-from hooks_api import Hooks, permission_reply, question_reply
+from hooks_api import ASK_DEFAULT, ASK_LEVELS, Hooks, permission_reply, question_reply
 from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
                      PERMISSION_VALUES, Manager)
 from store import (CHECK_SKIPPED, MAX_PENDING_STOP, START_CHECK_IDS, Store, can_send, display_title, mark_check, public_session,
@@ -105,6 +105,8 @@ FIRST_RUN_FILE = "first-run.json"  # 이 PC 에서 첫 화면(시작하기)을 �
 LAST_FOLDER_FILE = "last-folder.json"  # 새 작업에서 마지막으로 시작한 작업 폴더. 상태 폴더 아래, 브라우저와 무관
 NOTIFY_FILE = "notify.json"  # 브라우저 알림 설정(내 차례·막힘·끝남). 상태 폴더 아래, 브라우저와 무관
 NOTIFY_KEYS = ("turn", "blocked", "done")
+ASK_UNREADABLE = "설정을 읽지 못해 모든 명령마다 물어"
+ASK_FILE = "ask.json"  # 설정 "AI가 묻는 범위"(꼭 필요할 때만 · 문서를 바꿀 때마다 · 모든 명령마다). 상태 폴더 아래, 브라우저와 무관
 FOLDER_INTRO_FILE = "folder-intro.json"  # 준비 안 된 폴더의 "프로젝트 준비" 안내를 이미 보여 준 폴더들. 상태 폴더 아래, 브라우저와 무관
 FOLDER_INTRO_MAX = 200  # 넘치면 오래된 것부터 잊는다
 CHECK_RUN_TIMEOUT = 15.0         # 시작 점검의 gh 호출 제한 시간(초)
@@ -214,6 +216,7 @@ class App:
         self.remote_latest = self.read_remote_latest  # 원격 최신 판. 시험이 바꿔 끼운다
         self.last_folder_mem = None  # 상태 폴더가 없는 실행(시험)에서만 쓴다
         self.notify_mem = None  # 알림 설정도 같다
+        self.ask_mem = None  # 묻는 범위 설정도 같다
         self.first_run_seen = False # 상태 폴더가 없는 실행(시험)에서만 메모리에 둔다
         self.folder_intro_mem: list = []  # 상태 폴더가 없는 실행(시험)에서만 쓴다
         self.intro_lock = threading.Lock()
@@ -234,7 +237,9 @@ class App:
         self.manager = Manager(self.store, claude_cmd, str(self.plugin_root), model=model, popen=popen, effort=self.default_effort)
         self.analyses = analysis.Analyses(claude_cmd, model=model, spawn=self.spawn, effort=self.default_effort,
                                           flows=self.flow_catalog())
-        self.hooks = Hooks(self.store, clock, poll, question_wait, refresh_git=self.refresh_git)
+        self.hooks = Hooks(self.store, clock, poll, question_wait, refresh_git=self.refresh_git, ask_level=self.read_ask)
+        self.manager.auto_allowed = self.hooks.auto_allowed  # 콘솔 세션의 can_use_tool 요청도 같은 판정을 쓴다
+        self.manager.risk_of = self.hooks.risk_of
         self.tokens: dict[str, float] = {}
         self.cookies: dict[str, float] = {}  # 쿠키 값 -> 만료 시각(서버 쪽에서도 COOKIE_MAX_AGE 를 지킨다)
         self.lock = threading.Lock()
@@ -676,6 +681,8 @@ class App:
             if decision == "allow":
                 reply, outcome = {"behavior": "allow"}, "허용함"
             elif decision == "allow_session":
+                if r.risk == "irreversible":
+                    raise HttpError(400, "되돌릴 수 없는 일은 '다시 묻지 않기'로 허용할 수 없습니다. 이번만 허락하세요.")
                 if not r.suggestions:
                     raise HttpError(400, "이 요청에는 '다시 묻지 않기' 제안이 없습니다.")
                 reply, outcome = {"behavior": "allow", "updatedPermissions": r.suggestions}, "허용하고 이 세션에서 다시 묻지 않음"
@@ -1516,6 +1523,49 @@ class App:
             raise HttpError(500, f"알림 설정을 저장하지 못했습니다: {e}")
         return 200, now
 
+    # 묻는 범위(시안 19). notify.json 과 같은 방식으로 상태 폴더 아래 ask.json.
+    # 파일이 아예 없을 때(처음)만 기본(꼭 필요할 때만)이다. 있는데 못 읽거나 깨졌거나 값이 이상하면 가장 엄격한 all 로 본다.
+    def ask_state(self) -> tuple[str, str]:
+        f = self.store.dir / ASK_FILE if self.store.dir else None
+        if f is None:
+            saved = self.ask_mem
+            if saved is None:
+                return ASK_DEFAULT, ""
+        else:
+            try:
+                saved = json.loads(f.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                return ASK_DEFAULT, ""
+            except (OSError, ValueError):
+                return "all", ASK_UNREADABLE
+        level = saved.get("level") if isinstance(saved, dict) else None
+        return (level, "") if level in ASK_LEVELS else ("all", ASK_UNREADABLE)
+
+    def read_ask(self) -> str:
+        return self.ask_state()[0]
+
+    def a_ask_get(self, g, q, b):
+        level, problem = self.ask_state()
+        return 200, dict({"level": level}, **({"problem": problem} if problem else {}))
+
+    def a_ask_put(self, g, q, b):
+        level = b.get("level") if isinstance(b, dict) else None
+        if level not in ASK_LEVELS:
+            raise HttpError(400, f"묻는 범위는 {' · '.join(ASK_LEVELS)} 중 하나여야 합니다.")
+        now = {"level": level}
+        f = self.store.dir / ASK_FILE if self.store.dir else None
+        if f is None:
+            self.ask_mem = now
+            return 200, now
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(json.dumps(now), encoding="utf-8")
+            os.replace(tmp, f)
+        except OSError as e:
+            raise HttpError(500, f"묻는 범위를 저장하지 못했습니다: {e}")
+        return 200, now
+
     def folder_ready(self, path: str, wait: bool = False, fresh: bool = False) -> dict:
         """폴더 하나의 프로젝트 준비 판정. {"state": yes/no/unknown, "checking": bool}. 갈래 데이터가 없으면 확인 못 함이다.
         fresh 는 기억을 건너뛰고 지금 읽는다(첫 열기 안내처럼 틀리면 안 될 때). 아니면 cached 로 60초 기억하고, 계산 중이면 checking."""
@@ -1686,6 +1736,8 @@ ROUTES = [
     ("GET", re.compile(r"/api/folders/last"), App.a_last_folder),
     ("GET", re.compile(r"/api/settings/notify"), App.a_notify_get),
     ("PUT", re.compile(r"/api/settings/notify"), App.a_notify_put),
+    ("GET", re.compile(r"/api/settings/ask"), App.a_ask_get),
+    ("PUT", re.compile(r"/api/settings/ask"), App.a_ask_put),
     ("GET", re.compile(r"/api/folders/intro"), App.a_folder_intro),
     ("POST", re.compile(r"/api/folders/intro/seen"), App.a_folder_intro_seen),
     ("POST", re.compile(r"/api/folders/validate"), App.a_validate),

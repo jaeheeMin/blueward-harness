@@ -160,6 +160,7 @@
   }
 
   /* ---------- 브라우저 알림(#651) ---------- */
+  var askCfg = null;  // 서버에 저장된 {level}. 읽기 전엔 null
   var notifyCfg = null, notifyAsked = false;  // notifyCfg: 서버에 저장된 {turn, blocked, done}. 읽기 전엔 null
   function notifySupported() { return typeof window.Notification === 'function'; }
   function notifyPerm() { return notifySupported() ? window.Notification.permission : 'unsupported'; }
@@ -762,7 +763,7 @@
       regions.permSelect.disabled = permBusy;
       var live = s.permissionMode ? '지금 적용된 모드: ' + permissionLabel(s.permissionMode === 'default' ? '' : s.permissionMode) : '';
       var note = regions.perm.querySelector('[data-perm-note]');
-      note.textContent = [permNote, live].filter(Boolean).join(' · ');
+      note.textContent = [permNote, live, s.permissionNote].filter(Boolean).join(' · ');  // permissionNote: auto 를 못 쓴 사정(서버가 쉬운 말과 원문으로 준다)
     }
 
     function changePermission(e) {
@@ -929,6 +930,9 @@
       }
       if (s.bypassPermissions || /bypass/i.test(String(s.permissionMode || ''))) {
         notices.push(h('div', { class: 'banner info' }, h('span', { text: '권한 우회 모드로 실행 중인 세션이야. 이 세션은 승인 요청이 발생하지 않아 콘솔에 승인 화면이 뜨지 않아.' })));
+      }
+      if (s.permissionNote) {
+        notices.push(h('div', { class: 'banner info', 'data-perm-warn': '1', role: 'status' }, h('span', { text: s.permissionNote })));
       }
       if (s.handedOffTo) {
         notices.push(h('div', { class: 'banner info' }, h('span', { text: '다음 세션으로 넘어감 → ' }),
@@ -1245,12 +1249,14 @@
       var tool = req.toolName || req.tool_name || '도구', input = req.toolInput || req.tool_input || req.input || {};
       head(page, false, isPending() ? 'AI가 네 허락을 기다리고 있어' : '이미 처리된 요청이야');
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
-      var f = TOOL_FIELDS[tool], risk = req.risk || req.riskNote || req.warning;
-      msgs.appendChild(h('div', { class: 'ai' }, h('span', { class: 'eb', text: 'AI' }), req.description || (tool + ' 도구를 쓰려는데 네 확인이 필요해.')));
+      /* 시안 17: 되돌릴 수 없는 일(서버가 req.risk = 'irreversible' 과 쉬운 말 사유 riskNote 를 준다)은 같은 카드에 꼬리표와 한 줄 설명을 더한다. */
+      var irrev = req.risk === 'irreversible';
+      var f = TOOL_FIELDS[tool], risk = irrev ? '하네스는 되돌릴 수 없는 일은 항상 사람에게 물어.' : (req.risk || req.riskNote || req.warning);
+      msgs.appendChild(h('div', { class: 'ai' }, h('span', { class: 'eb', text: 'AI' }), req.description || (irrev ? tool + ' 도구를 쓰려는데 되돌릴 수 없는 일이라 네 확인이 필요해.' : tool + ' 도구를 쓰려는데 네 확인이 필요해.')));
 
-      var card = h('div', { class: 'bad' });
-      card.appendChild(h('span', { class: 'tagx', text: '확인 필요' }));
-      card.appendChild(h('b', { class: 'bt', text: req.title || 'Claude Code가 ' + tool + ' 도구를 쓰려고 해. 허락할까?' }));
+      var card = h('div', { class: 'bad' + (irrev ? ' irrev' : ''), 'data-risk': irrev ? 'irreversible' : null });
+      card.appendChild(h('span', { class: 'tagx', text: irrev ? '확인 필요 · 되돌릴 수 없어' : '확인 필요' }));
+      card.appendChild(h('b', { class: 'bt', text: req.title || (irrev && req.riskNote ? req.riskNote : 'Claude Code가 ' + tool + ' 도구를 쓰려고 해. 허락할까?') }));
       if (risk) card.appendChild(h('span', { class: 'warn-line', text: typeof risk === 'string' ? risk : (risk.text || risk.message || '') }));
       if (input && input.description) card.appendChild(h('span', { class: 'sm', text: str(input.description) }));
       if (f && input && input[f[1]] != null && tool !== 'Bash') card.appendChild(h('span', { class: 'sm' }, f[0] + ': ', h('b', { text: str(input[f[1]]) })));
@@ -1278,7 +1284,7 @@
       card.appendChild(det);
 
       if (isPending()) {
-        var canSess = !(req.canAllowSession === false || req.hasSuggestions === false || (Array.isArray(req.permissionSuggestions) && !req.permissionSuggestions.length) || (Array.isArray(req.permission_suggestions) && !req.permission_suggestions.length));
+        var canSess = !(irrev || req.canAllowSession === false || req.hasSuggestions === false || (Array.isArray(req.permissionSuggestions) && !req.permissionSuggestions.length) || (Array.isArray(req.permission_suggestions) && !req.permission_suggestions.length));
         var sugg = Array.isArray(req.suggestionText) ? req.suggestionText : [];
         if (canSess) card.appendChild(h('div', { class: 'sugg', role: 'group', 'aria-label': '다시 묻지 않기로 추가되는 규칙' },
           h('p', { class: 'sugg-h', text: '"허용하고 이 세션에서 다시 묻지 않기"를 누르면 다음 규칙이 추가됩니다' }),
@@ -1512,7 +1518,9 @@
   }
 
   /* ---------- 새 작업 ---------- */
-  var PERMISSION_FALLBACK = [{ value: '', label: '기본(그때그때 확인)' }, { value: 'acceptEdits', label: '파일 고치기는 자동 허용' }, { value: 'plan', label: '계획만 세우기' }];
+  var PERMISSION_FALLBACK = [{ value: '', label: '기본(그때그때 확인)' }, { value: 'acceptEdits', label: '파일 고치기는 자동 허용' }, { value: 'plan', label: '계획만 세우기' }, { value: 'auto', label: '알아서 하되 위험한 건 AI가 막기' }];
+  /* 설정 "AI가 묻는 범위"(서버 ask.json). 시안 19 글. */
+  var ASK_OPTIONS = [{ value: 'needed', label: '꼭 필요할 때만 (권장)' }, { value: 'edits', label: '문서를 바꿀 때마다' }, { value: 'all', label: '모든 명령마다' }];
   var draft = { text: '', cwd: '', note: '', answers: {}, picked: null, extraPaths: [], model: null, modelCustom: false, customName: '', effort: null, permission: null, flowId: null, flowUser: false, kindFlowId: '', insist: false, kind: -1 };
   /* 새 작업의 종류 버튼: [이름, 한 줄 설명, 갈래 id(없으면 도구만 쓰는 일), 입력칸에 미리 넣는 문장]. 갈래 id 는 workflow.json flows 와 같다. */
   var KINDS = [
@@ -2084,6 +2092,11 @@
       api('PUT', '/api/settings/notify', body).then(function (d) { notifyCfg = d; notifyErr = ''; },
         function (e) { notifyErr = '알림 설정을 저장하지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
     }
+    var askErr = '';
+    function saveAsk(level) {
+      api('PUT', '/api/settings/ask', { level: level }).then(function (d) { askCfg = d; askErr = ''; },
+        function (e) { askErr = '묻는 범위를 저장하지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
+    }
     // 처음 켤 때만 브라우저에 권한을 묻는다. 사용자 클릭 안에서 바로 불러야 브라우저가 물어 준다.
     function toggleNotify(key, want) {
       notifyErr = '';
@@ -2111,15 +2124,28 @@
       }));
       sec.appendChild(set('글자 크기', seg));
 
+      /* 시안 19 "AI가 묻는 범위": 서버 ask.json 과 이어진다. 읽기 전(askCfg 없음)에는 고르지 못한다. */
+      var askNow = askCfg && askCfg.level;
+      var askRadios = h('div', { class: 'radios', role: 'radiogroup', 'aria-label': 'AI가 묻는 범위' }, ASK_OPTIONS.map(function (o) {
+        var on = o.value === askNow;
+        return h('button', { type: 'button', role: 'radio', class: 'radio', 'aria-checked': String(on), 'data-ask-opt': o.value, disabled: !askCfg,
+          onClick: function () { saveAsk(o.value); } },
+          h('i', { class: 'rd' + (on ? ' on' : ''), 'aria-hidden': 'true' }), h('span', null, h('b', { text: o.label })));
+      }));
+      sec.appendChild(set('AI가 묻는 범위', h('div', null, askRadios,
+        askErr ? h('p', { class: 'note-attn', role: 'alert', text: askErr }) : null,
+        askCfg && askCfg.problem ? h('p', { class: 'note-attn', role: 'alert', 'data-ask-problem': '1', text: askCfg.problem }) : null,
+        h('p', { class: 'note-muted', 'data-ask-note': '1', text: '어떤 걸 골라도 위험한 일(main에 바로 올리기 · 강제 덮어쓰기 · SAP 운영 쓰기)은 하네스가 막아. 지우기 · GitHub에 올리기 · 작업 폴더 밖 쓰기처럼 되돌릴 수 없는 일은 항상 물어.' }))));
+
       var cur = permissionChoice();
-      var radios = h('div', { class: 'radios', role: 'radiogroup', 'aria-label': 'AI가 묻는 범위' }, permissionOptions().map(function (o) {
+      var radios = h('div', { class: 'radios', role: 'radiogroup', 'aria-label': '기본 권한' }, permissionOptions().map(function (o) {
         var on = o.value === cur;
         return h('button', { type: 'button', role: 'radio', class: 'radio', 'aria-checked': String(on), 'data-perm-opt': o.value,
           onClick: function () { draft.permission = o.value; BH.write('bh-permission', o.value); draw(); } },
           h('i', { class: 'rd' + (on ? ' on' : ''), 'aria-hidden': 'true' }), h('span', null, h('b', { text: o.label })));
       }));
-      sec.appendChild(set('AI가 묻는 범위', h('div', null, radios,
-        h('p', { class: 'note-muted', text: '새 작업을 시작할 때 쓰는 기본값이야. 이미 돌고 있는 세션은 그 세션 화면의 "자세히" 에서 바꿔. 어느 걸 골라도 하네스 훅(맨손 git push · 강제 푸시 거부 등)은 그대로 일해.' }))));
+      sec.appendChild(set('기본 권한', h('div', null, radios,
+        h('p', { class: 'note-muted', text: '새 작업을 시작할 때 쓰는 기본값이야. 이미 돌고 있는 세션은 그 세션 화면의 "자세히" 에서 바꿔. "알아서 하되 위험한 건 AI가 막기" 는 관리자가 껐거나 모델이 지원하지 않으면 못 써. 그러면 세션 화면에 이유가 떠.' }))));
 
       var perm = notifyPerm(), rows = [['turn', '내 차례가 오면'], ['blocked', '막히거나 확인 못 한 일이 생기면'], ['done', 'AI가 일을 끝낼 때마다']];
       var permText = perm === 'unsupported' ? '이 브라우저는 알림을 지원하지 않아'
@@ -2155,6 +2181,7 @@
     }
     function again() { if (alive && loadedOnce && (cwdNow() || '') !== lastCwd) loadConn(false); }
     api('GET', '/api/settings/notify').then(function (d) { notifyCfg = d; }, function (e) { notifyErr = '알림 설정을 읽지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
+    api('GET', '/api/settings/ask').then(function (d) { askCfg = d; }, function (e) { askErr = '묻는 범위를 읽지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
     setTitle('설정'); loadModelsOnce(); loadConn(true); draw();
     return { onData: again, onSession: again, destroy: function () { alive = false; } };
   }

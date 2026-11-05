@@ -8,12 +8,16 @@ from typing import Callable
 
 import context_usage
 import flows
+from risk import IRREVERSIBLE, SAFE, classify
 from store import (CHECK_DONE, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
                    TITLE_PROMPT, TITLE_SESSION, chat_clean, mark_check, prompt_title, remember_touched)
 
 QUESTION_WAIT = 300.0
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 EDIT_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+# 설정 "AI가 묻는 범위"(#649): needed 꼭 필요할 때만(기본) / edits 문서를 바꿀 때마다 / all 모든 명령마다
+ASK_LEVELS = ("needed", "edits", "all")
+ASK_DEFAULT = "needed"
 AGENT_TOOLS = {"Agent", "Task"}  # 서브에이전트를 띄우는 도구(버전에 따라 이름이 다르다)
 MAX_PENDING_AGENTS = 50  # 아직 SubagentStart 와 짝을 못 지은 Agent 호출
 MAX_AGENT_TEXT = 200  # description·type 글자 상한
@@ -55,8 +59,10 @@ def tool_key(tool_name, tool_input) -> str:
 
 class Hooks:
     def __init__(self, store: Store, clock: Callable[[], float] = time.time, poll: float = 0.5,
-                 question_wait: float = QUESTION_WAIT, refresh_git: Callable[[str], None] | None = None):
+                 question_wait: float = QUESTION_WAIT, refresh_git: Callable[[str], None] | None = None,
+                 ask_level: Callable[[], str] | None = None):
         self.store = store
+        self.ask_level = ask_level or (lambda: ASK_DEFAULT)
         self.clock = clock
         self.poll = poll
         self.question_wait = question_wait
@@ -121,6 +127,39 @@ class Hooks:
     def _terminal_without_browser(self, s: dict) -> bool:
         return not s["managed"] and not self.store.browser_connected()
 
+    def decide(self, s: dict, tool: str, tool_input) -> tuple[str, str, str]:
+        """(allow | ask, risk, 사유). 묻지 않고 허용할 일이면 allow. 되돌릴 수 없는 일이면 risk 가 irreversible.
+        판정 못 한 것(unknown)과 모든 명령마다(all)는 ask 다. 하네스 훅이 막는 일은 이 판정과 상관없이 훅이 막는다."""
+        level = self.ask_level()
+        if level not in ASK_LEVELS:
+            level = "all"  # 모르는 값이면 가장 엄격하게
+        verdict, why = classify(tool, tool_input, s.get("cwd") or "")
+        if verdict == IRREVERSIBLE:
+            return "ask", IRREVERSIBLE, why
+        if verdict == SAFE and level != "all" and not (level == "edits" and tool in EDIT_TOOLS):
+            return "allow", "", why
+        return "ask", "", why
+
+    def risk_of(self, s: dict, tool: str, tool_input) -> tuple[str, str]:
+        """카드에 붙일 (risk, 쉬운 말 사유). 되돌릴 수 없는 일이 아니면 ("", "")."""
+        _, risk, why = self.decide(s, tool, tool_input)
+        return (risk, why) if risk else ("", "")
+
+    def auto_allowed(self, s: dict, tool: str, tool_input) -> bool:
+        """콘솔이 카드를 띄울 경로에서만 부른다. 허용이면 세션 기록에 한 줄 남긴다(같은 호출을 훅과 콘솔 연결이 둘 다 물을 수 있어 한 번만)."""
+        if tool == "AskUserQuestion":
+            return False
+        action, _, why = self.decide(s, tool, tool_input)
+        if action != "allow":
+            return False
+        key = tool_key(tool, tool_input)
+        with self.store.lock:
+            if s.get("lastAutoKey") != key:
+                s["lastAutoKey"] = key
+                self.store.add_log(s, f"자동 허용: {_action(tool, tool_input)[:160]} ({why})")
+                self.store.touch(s)
+        return True
+
     # ---- 승인 ----
     def permission(self, s: dict, body: dict, alive) -> Reply:
         tool = body.get("tool_name") if isinstance(body.get("tool_name"), str) else ""
@@ -129,9 +168,13 @@ class Hooks:
         if self._terminal_without_browser(s):
             return 200, None  # 터미널 프롬프트가 처리한다
         tool_input = body.get("tool_input")
+        if self.auto_allowed(s, tool, tool_input):
+            return 200, permission_reply({"behavior": "allow"})  # 사람 카드 없이 바로 허용
+        risk, why = self.risk_of(s, tool, tool_input)
         try:
             req, created = self.store.add_request(
-                s["id"], "permission", tool, tool_input, body.get("permission_suggestions"), tool_key(tool, tool_input))
+                s["id"], "permission", tool, tool_input, body.get("permission_suggestions"), tool_key(tool, tool_input),
+                risk=risk, risk_note=why)
         except RequestLimit:
             self.store.add_log(s, f"대기 요청이 너무 많아 터미널로 넘김: {tool}")
             return 200, None  # 조용히 허용하지 않는다. 빈 응답은 터미널 승인 창으로 넘어간다

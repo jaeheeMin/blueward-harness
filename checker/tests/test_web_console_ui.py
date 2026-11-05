@@ -943,6 +943,34 @@ def test_work_screen_permission_card_and_edit_names(tmp_path):
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
+def test_work_screen_irreversible_card_is_yellow_and_cannot_be_remembered(tmp_path):
+    """시안 17: 되돌릴 수 없는 일 카드. 꼬리표, 쉬운 말 제목, 하네스 안내, 이번만 허락 / 하지 마만."""
+    rm = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "risk": "irreversible", "riskNote": "작업 폴더 밖 파일을 쓰려 해",
+          "toolInput": {"command": 'rm "C:/Users/x/Desktop/old.xlsx"'}, "permissionSuggestions": [1], "hasSuggestions": True, "suggestionText": ["Bash(rm *) 허용 규칙 추가"]}
+    plain = {"id": "p2", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "touch a"}, "hasSuggestions": True}
+    sess = [_session("s1", pendingRequestIds=["p1", "p2"])]
+    got = _smoke(tmp_path, "r/p1", sess, [rm, plain])
+    text, dump = got["text"], got["dump"]
+    for need in ("확인 필요 · 되돌릴 수 없어", "작업 폴더 밖 파일을 쓰려 해", "하네스는 되돌릴 수 없는 일은 항상 사람에게 물어.", "이번만 허락", "하지 마", "자세히 (명령 원문)"):
+        assert need in text, need
+    assert "<div.bad.irrev>" in dump
+    assert "irreversible" not in text  # 값 그대로를 화면에 쓰지 않는다
+    assert "다시 묻지 않기" not in text  # 되돌릴 수 없는 일은 기억시키지 못한다
+    got = _smoke(tmp_path, "r/p2", sess, [rm, plain])
+    assert "<div.bad>" in got["dump"] and "irrev" not in got["dump"] and "되돌릴 수 없어" not in got["text"]
+    assert "허용하고 이 세션에서 다시 묻지 않기" in got["text"]  # 일반 카드는 그대로
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_session_screen_shows_auto_mode_unavailable_note(tmp_path):
+    note = "auto 모드를 쓸 수 없는 것 같아. 이유는 확인 못 함 (claude 가 알려 준 모드 원문: default)"
+    got = _smoke(tmp_path, "s/s1", [_session("s1", permissionChoice="auto", permissionMode="default", permissionNote=note)])
+    assert note in got["text"]
+    clean = _smoke(tmp_path, "s/s1", [_session("s1", permissionChoice="auto", permissionMode="auto")])
+    assert "auto 모드를 쓸 수 없는 것 같아" not in clean["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
 def test_work_screen_new_task_has_kinds_flow_and_advanced_fold(tmp_path):
     got = _smoke(tmp_path, "new", [])
     text = got["text"]
@@ -1056,6 +1084,34 @@ def test_settings_screen_matches_design(tmp_path):
     assert "화면 밝기" not in text  # 다크 한 벌뿐이라 넣지 않았다
     assert dump.count("<button.swrow>") == 3 and "내 차례가 오면" in text  # 알림 스위치 셋(#651)은 별도 시험에서 본다
     assert "연결돼 있어" in text and "준비 여부 확인 못 함" in text  # 조건 값이 없으면 준비됐다고 단정하지 않는다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_settings_ask_range_has_three_steps_tied_to_server_and_default_permission_has_auto(tmp_path):
+    perms = {"GET /api/models": {"options": [{"value": "", "label": "기본"}], "effortOptions": [{"value": "", "label": "기본"}],
+                                 "permissionOptions": [{"value": "", "label": "기본(그때그때 확인)"}, {"value": "acceptEdits", "label": "파일 고치기는 자동 허용"},
+                                                       {"value": "plan", "label": "계획만 세우기"}, {"value": "auto", "label": "알아서 하되 위험한 건 AI가 막기"}]}}
+    got = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(perms, **{"GET /api/settings/ask": {"level": "needed"}}))
+    text, dump = got["text"], got["dump"]
+    for need in ("AI가 묻는 범위", "꼭 필요할 때만 (권장)", "문서를 바꿀 때마다", "모든 명령마다",
+                 "어떤 걸 골라도 위험한 일(main에 바로 올리기 · 강제 덮어쓰기 · SAP 운영 쓰기)은 하네스가 막아.",
+                 "기본 권한", "알아서 하되 위험한 건 AI가 막기"):
+        assert need in text, need
+    assert "GET /api/settings/ask" in got["calls"]
+    assert text.count("꼭 필요할 때만") == 1
+    # 단계를 누르면 서버에 저장한다
+    pick = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(perms, **{"GET /api/settings/ask": {"level": "needed"}, "PUT /api/settings/ask": {"level": "edits"}}),
+                  actions=[{"click": "[data-ask-opt=edits]"}])
+    assert any(p[0] == "PUT" and p[1] == "/api/settings/ask" and '"level":"edits"' in p[2].replace(" ", "") for p in pick["posts"]), pick["posts"]
+    # 서버가 설정 파일을 못 읽어 가장 엄격한 단계로 물러났으면 그 이유를 보인다
+    strict = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(perms, **{"GET /api/settings/ask": {"level": "all", "problem": "설정을 읽지 못해 모든 명령마다 물어"}}))
+    assert "설정을 읽지 못해 모든 명령마다 물어" in strict["text"]
+    assert "설정을 읽지 못해" not in text  # 정상이면 안 보인다
+    # 서버 설정을 읽지 못하면 고르지 못하게 둔다(고른 척하지 않는다)
+    broken = _smoke(tmp_path, "settings", [_session("s1")], extra=perms)
+    assert "묻는 범위를 읽지 못했어" in broken["text"]
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "value: 'bypassPermissions'" not in app and "dangerously-skip-permissions" not in app  # bypass 는 고를 수 없다
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
