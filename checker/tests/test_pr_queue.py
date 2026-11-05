@@ -821,6 +821,43 @@ def test_unnumbered_pr_touching_two_dev_groups_goes_to_no_chain_with_tail():
     assert rows == [("줄기 없음", f"{link(1)} ✅ · {link(2)} ✅ · {link(3)} ✅(앞: {link(1)}, {link(2)})")]
 
 
+def test_version_order_alone_does_not_pull_unnumbered_pr_into_dev_chain():
+    # #687: #685 는 DEV 가 없고 판 번호 순서로만 #680 뒤라서 DEV-008 줄기에 들어가면 안 된다.
+    prs = [
+        pr(678, title="docs: 매뉴얼 (DEV-008)", files=(PJ,)),
+        pr(680, title="feat: 매뉴얼 캡처 (DEV-008)", files=(PJ,), body="먼저: #678"),
+        pr(685, title="feat: 웹 콘솔 기억 표시", files=(PJ,)),
+    ]
+    versions = {"sha678": "0.10.175", "sha680": "0.10.176", "sha685": "0.10.177"}
+    rows = chain_rows(run_text(prs, "--all", versions=versions))
+    assert rows == [
+        ("DEV-008(매뉴얼)", f"{link(678)} ✅ → {link(680)} ✅"),
+        ("줄기 없음", f"{link(685)} ✅(앞: {link(680)})"),
+    ]
+
+
+def test_real_base_chain_of_unnumbered_prs_stays_one_chain_beside_dev_chain():
+    prs = [
+        pr(678, title="docs: 매뉴얼 (DEV-008)", files=(PJ,)),
+        pr(685, title="feat: 웹 콘솔 기억 표시", head="feat/685", files=(PJ,)),
+        pr(688, title="feat: 웹 콘솔 둘째", base="feat/685", files=(PJ,)),
+        pr(691, title="feat: 웹 콘솔 셋째", base="feat/688", files=(PJ,)),
+    ]
+    versions = {"sha678": "0.10.175", "sha685": "0.10.177", "sha688": "0.10.178", "sha691": "0.10.179"}
+    rows = chain_rows(run_text(prs, "--all", versions=versions))
+    assert len(rows) == 2
+    assert rows == [
+        ("feat: 웹 콘솔 기억 표시", f"{link(685)} ✅(앞: {link(678)}) → {link(688)} ✅ → {link(691)} ✅"),
+        ("줄기 없음", f"{link(678)} ✅"),  # DEV-008 은 혼자라 줄기가 아니라 단독 칸
+    ]
+
+
+def test_unnumbered_chain_linked_only_by_version_order_says_so_in_name():
+    prs = [pr(1, title="가 작업", files=(PJ,)), pr(2, title="나 작업", files=(PJ,))]
+    rows = chain_rows(run_text(prs, "--all", versions={"sha1": "0.10.1", "sha2": "0.10.2"}))
+    assert rows == [("가 작업 · 판 번호 순서", f"{link(1)} ✅ → {link(2)} ✅")]
+
+
 def test_chain_name_boundaries_period_two_numbers_and_spec_lead():
     # 제목 끝 (DEV-004) 뒤의 마침표.
     assert names_of("feat: 판매문서 취소 (DEV-004).", "x DEV-004") == ["DEV-004(판매문서 취소)"]
