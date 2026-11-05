@@ -105,8 +105,8 @@
       var steps = L.barSteps(s);
       return h('ol', { class: 'stepbar' + (big ? ' big' : ''), 'aria-label': '진행 순서' }, steps.map(function (st) {
         return h('li', { class: 'step ' + st.state, 'aria-current': st.state === 'now' ? 'step' : null, title: st.reason || null },
-          h('span', { class: 'dot', 'aria-hidden': 'true' }),
-          h('span', { class: 'snm', text: st.name }),
+          big ? null : h('span', { class: 'dot', 'aria-hidden': 'true' }),
+          h('span', { class: 'snm', text: (big && st.state === 'done' ? '✓ ' : '') + st.name }),
           h('span', { class: 'slb sr-only', text: st.label }));
       }));
     }
@@ -620,8 +620,7 @@
 
       function draw() {
         clear(page);
-        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '산출물' }), h('h1', { text: '내가 만든 문서' }),
-          h('p', { class: 'line', text: '세션들이 만든 문서를 한곳에 모았어. 하나 고르면 미리 볼 수 있어.' })));
+        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '산출물' }), h('h1', { text: '내가 만든 문서' })));  // 시안 G-14: 제목 아래 설명 줄 없음
         if (!kit.loaded()) { page.appendChild(kit.loadingBox('세션을 불러오는 중입니다.')); return; }
         if (!pool().length) { page.appendChild(kit.stateBox('folder', '아직 만든 문서가 없어', '작업을 시작하면 세션이 만든 문서가 여기에 모여.', kit.link('/new', { class: 'btn', text: '새 작업 시작' }))); return; }
         if (!st.parts) { page.appendChild(kit.loadingBox('문서를 모으는 중이에요.')); return; }
@@ -647,9 +646,9 @@
     function docsPanel() {
       var el = h('section', { class: 'docs', 'aria-label': '만든 문서' });
       var listBox = h('div', { class: 'docs-list' });
-      var pane = h('div', { class: 'docs-pane', hidden: true });
-      var wrap = h('div', { class: 'docs-wrap' }, listBox, pane);
-      el.appendChild(h('h2', { class: 'eb', text: '만든 산출물' }));
+      var pane = h('div', { class: 'docs-pane paper', hidden: true });
+      var wrap = h('div', { class: 'docs-wrap' }, pane, listBox);  // 시안 G-09: 위에 흰 문서 미리보기, 아래에 문서 줄
+      el.appendChild(h('h2', { class: 'eb', title: '이 세션에서 쓴 파일과 시작 뒤 새로 바뀐 파일이에요. 같은 폴더의 다른 세션이 바꾼 파일이 섞일 수 있어요.', text: '만든 산출물' }));
       el.appendChild(wrap);
       var st = { files: null, error: null, selected: null, preview: null, previewError: null, sheet: 0, note: '', at: 0, stamp: null };
       var last = null, alive = true, loading = false;
@@ -658,7 +657,7 @@
         if (loading) return;
         loading = true; st.at = Date.now();
         api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { st.files = L.docList(kit.listOf(d, 'files')); st.error = null; st.unknown = d && d.unknown ? String(d.reason || '') : null; st.note = d && d.note ? String(d.note) : ''; st.truncated = !!(d && d.truncated); },
-          function (e) { st.error = e; }).then(function () { loading = false; if (alive) drawList(); });
+          function (e) { st.error = e; }).then(function () { loading = false; if (alive) { drawList(); autoPick(); } });
       }
       function selectFile(f) {
         st.selected = f.path; st.preview = null; st.previewError = null; st.sheet = 0; st.note = '';
@@ -674,11 +673,18 @@
       }
 
       function item(f, sub) {
-        var picked = st.selected === f.path;
-        return h('button', { type: 'button', class: 'docitem' + (picked ? ' on' : '') + (sub ? ' sub' : ''), 'aria-pressed': String(picked), 'data-path': f.path, onClick: function () { selectFile(f); } },
-          h('span', { class: 'badge', text: L.kindBadge(f) }),
-          h('span', { class: 'dn' }, h('span', { class: 'nm', text: f.path }),
-            h('span', { class: 'dm', text: [f.size != null ? kit.fmtSize(f.size) : '', f.mtime ? kit.clock(f.mtime) : '', st.unknown != null ? '' : f.changed ? '아직 커밋 안 됨' : '지금 바뀐 것 없음(git 기준)'].filter(Boolean).join(' · ') })));
+        var picked = st.selected === f.path, c = sub ? null : L.docChip(f, last, st.unknown != null);
+        return h('button', { type: 'button', class: 'drow' + (picked ? ' on' : '') + (sub ? ' sub' : ''), 'aria-pressed': String(picked), 'data-path': f.path, onClick: function () { selectFile(f); } },
+          h('span', { class: 'dn' }, h('b', { class: 'wrap-any', text: kit.baseName(f.path) }),
+            h('small', { text: [L.kindBadge(f), f.size != null ? kit.fmtSize(f.size) : '', f.mtime ? kit.clock(f.mtime) : ''].filter(Boolean).join(' · ') })),
+          c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text }) : null);
+      }
+      // 시안 G-09: 처음엔 가장 최근 글 문서(md)를 흰 종이로 미리 보여 준다. 사람이 닫을 방법은 없다(다른 문서를 고르면 바뀐다).
+      function autoPick() {
+        if (st.selected || st.auto || !st.files || !st.files.length) return;
+        var md = st.files.filter(function (f) { return /\.(md|markdown|txt)$/i.test(f.path); })[0];
+        st.auto = true;
+        if (md) selectFile(md);
       }
       function drawList() {
         clear(listBox);
@@ -687,7 +693,6 @@
         if (st.unknown != null) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '바뀐 문서를 확인하지 못했어요.' + (st.unknown ? ' (' + st.unknown + ')' : '') + ' 아래 목록에 빠진 문서가 있을 수 있어요.' }));
         if (st.note) listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: st.note }));
         if (st.truncated) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '문서가 너무 많아 목록이 잘렸어요. 더 있을 수 있어요.' }));
-        listBox.appendChild(h('p', { class: 'note-muted', text: '이 세션에서 쓴 파일과 시작 뒤 새로 바뀐 파일이에요. 같은 폴더의 다른 세션이 바꾼 파일이 섞일 수 있어요.' }));
         if (!st.files.length) { listBox.appendChild(h('p', { class: 'note-muted', text: st.unknown != null ? '확인된 문서가 없어요.' : '아직 만든 문서가 없어요.' })); return; }
         st.files.forEach(function (f) {
           listBox.appendChild(item(f, false));
@@ -704,11 +709,12 @@
         clear(pane);
         pane.hidden = !st.selected;
         if (!st.selected) return;
+        var sel = (st.files || []).filter(function (f) { return f.path === st.selected; })[0], c = sel ? L.docChip(sel, last, st.unknown != null) : null;
         pane.appendChild(h('div', { class: 'pane-head' },
-          h('b', { class: 'wrap-any', text: kit.baseName(st.selected) }),
-          h('button', { type: 'button', class: 'iconbtn', 'aria-label': '미리보기 닫기', onClick: function () { st.selected = null; drawList(); drawPane(); } }, kit.icon('close', 14))));
-        pane.appendChild(h('div', { class: 'btn-row left' },
-          h('button', { type: 'button', class: 'pill dark sm', text: '열기', onClick: function () { openFile('open'); } }),
+          h('span', { class: 'wrap-any', text: kit.baseName(st.selected) }),
+          c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text }) : null,
+          h('span', { class: 'sp' }),
+          h('button', { type: 'button', class: 'pill line sm', text: '열기', onClick: function () { openFile('open'); } }),
           h('button', { type: 'button', class: 'pill line sm', text: '탐색기에서 위치 보기', onClick: function () { openFile('reveal'); } })));
         if (st.note) pane.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.note }));
         if (st.previewError) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
@@ -835,16 +841,18 @@
         if (onMerged) onMerged(merged);
         if (merged.state === 'yes') {
           var items = merged.items;
-          box.appendChild(h('section', { class: 'approval-card' },
-            h('h2', { class: 'sect-h', text: '내가 승인할 PR ' + items.length + '건' }),
-            items.length ? h('ul', { class: 'plain-list' }, items.map(function (it) {
-              var url = kit.safeHttp(it.url);
-              var label = '#' + it.number + ' ' + (it.title || '');
-              return h('li', null, url ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer', text: label }) : h('span', { text: label }),
-                h('span', { class: 'd', text: (it.author ? it.author : '') + (it.staleApproval ? ' · 새 변경 뒤 다시 확인' : '') }));
-            })) : h('p', { class: 'note-muted', text: '지금 기다리는 PR 이 없어요.' })));
+          // 시안 G-11 아래 칸: eb 머리 + 줄(이름 · 오른쪽 짧은 글)
+          box.appendChild(h('span', { class: 'eb', text: '내가 승인할 PR ' + items.length + '건' }));
+          if (!items.length) box.appendChild(h('span', { class: 'quiet', text: '지금 기다리는 PR 이 없어요.' }));
+          items.forEach(function (it) {
+            var url = kit.safeHttp(it.url);
+            var label = '#' + it.number + ' ' + (it.title || '');
+            box.appendChild(h('div', { class: 'srow2' }, url ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer', text: label }) : h('span', { text: label }),
+              h('span', { text: (it.author ? it.author : '') + (it.staleApproval ? ' · 새 변경 뒤 다시 확인' : '') })));
+          });
         } else if (merged.state === 'unknown') {
-          box.appendChild(h('section', { class: 'approval-card unknown' }, h('p', { class: 'note-attn', role: 'status', text: '승인할 PR 판정 불능 · ' + (merged.reason || '이유를 읽지 못했어요.') })));
+          box.appendChild(h('span', { class: 'eb', text: '내가 승인할 PR' }));
+          box.appendChild(h('span', { class: 'note-attn', role: 'status', text: '승인할 PR 판정 불능 · ' + (merged.reason || '이유를 읽지 못했어요.') }));
         }
       });
     }
@@ -876,6 +884,36 @@
             h('h2', { class: 'sect-h', text: '프로젝트 준비' }),
             h('ul', { class: 'plain-list' }, lines.map(function (t) { return h('li', null, h('span', { class: 'note-attn', text: t })); }))));
         }
+      });
+    }
+
+    // 홈 아래 오른쪽 칸 "최근 산출물"(시안 G-11): 최근에 움직인 세션 몇 개의 문서 목록을 모아 가장 최근 몇 개를 칩과 함께 보인다.
+    // 읽지 못하면 있는 것처럼 두지 않고 "확인 못 함" 이라고 쓴다.
+    var RECENT_POOL = 6, RECENT_ROWS = 4;
+    function recentCard(box) {
+      var pool = sessionList().filter(function (s) { return !s.handedOffTo; }).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).slice(0, RECENT_POOL);
+      // 순서만 바뀐 것(일하는 세션의 updatedAt 갱신)으로는 다시 읽지 않는다. 세션 묶음이 바뀔 때만 6개 파일 목록을 다시 묻는다.
+      var sig = pool.map(function (s) { return s.id; }).sort().join('|');
+      if (box.dataset.sig === sig && box.dataset.ready) return;
+      box.dataset.sig = sig;
+      if (!box.dataset.ready) { clear(box); box.appendChild(h('span', { class: 'eb', text: '최근 산출물' })); box.appendChild(h('span', { class: 'quiet', role: 'status', text: '불러오는 중이야.' })); }
+      Promise.all(pool.map(function (s) {
+        return api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { return { session: s, files: kit.listOf(d, 'files'), unknown: !!(d && d.unknown) }; },
+          function (e) { return { session: s, files: [], unknown: true, failed: e }; });
+      })).then(function (parts) {
+        if (box.dataset.sig !== sig || !box.isConnected) return;
+        box.dataset.ready = '1';
+        clear(box);
+        box.appendChild(h('span', { class: 'eb', text: '최근 산출물' }));
+        var failed = parts.filter(function (p) { return p.failed; }).length;
+        var docs = L.mergeDocs(parts).slice(0, RECENT_ROWS);
+        if (failed === parts.length && parts.length) { box.appendChild(h('span', { class: 'note-attn', role: 'status', text: '확인 못 함 · 문서 목록을 읽지 못했어.' })); return; }
+        if (!docs.length) box.appendChild(h('span', { class: 'quiet', text: '아직 만든 산출물이 없어.' }));
+        docs.forEach(function (d) {
+          box.appendChild(h('div', { class: 'srow2', 'data-doc': d.file.path }, h('span', { class: 'lm', title: d.session.title || null, text: kit.baseName(d.file.path) }),
+            h('span', { class: 'chip2 ' + d.chip.tone, title: d.chip.title, text: d.chip.text })));
+        });
+        if (failed) box.appendChild(h('span', { class: 'quiet', role: 'status', text: '일부 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
       });
     }
 
@@ -922,6 +960,7 @@
       page.appendChild(h('section', { class: 'light' }, h('h2', { text: '첫 작업을 시작해 볼까?' }),
         h('p', { class: 'lm', text: '자주 하는 일이야. 눌러도 되고, 아래에 하고 싶은 일을 그냥 적어도 돼.' }), grid, form));
       page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', '0', ''), tile('일하는 중', '0', ''), tile('만든 산출물', '확인 못 함', 'unk')));
+      approvals.className = 'approvals lt';  // 세션이 없을 땐 표 아래 칸이 없으니 따로 선 흰 칸. 비면 숨는다(.lt:empty)
       page.appendChild(approvals);
       page.appendChild(projects);
       page.appendChild(legend());
@@ -929,14 +968,16 @@
     }
     // 표시 약속(시안 16): 화면 어디서나 같은 뜻으로 쓰는 세 가지 표시
     function legend() {
-      return h('div', { class: 'legend', role: 'group', 'aria-label': '표시 약속' },
+      // 시안 G-16: 흰 칸(.lt) 안에 줄(표시 | 뜻)
+      return h('div', { class: 'grid3' }, h('div', { class: 'lt legend', role: 'group', 'aria-label': '표시 약속' },
         h('span', { class: 'eb', text: '표시 약속' }),
-        h('span', null, h('b', { class: 'lf', text: '✕ 막힘' }), ' 잘못을 찾음, 고쳐야 넘어가'),
-        h('span', null, h('b', { class: 'lu', text: '? 확인 못 함' }), ' 검사 못 함, 통과로도 실패로도 안 침'),
-        h('span', null, h('b', { class: 'lw', text: '! 내 차례' }), ' 네 답이나 확인이 필요'));
+        h('div', { class: 'srow2' }, h('b', { class: 'lf', text: '✕ 막힘' }), h('span', { text: '잘못을 찾음, 고쳐야 넘어가' })),
+        h('div', { class: 'srow2' }, h('b', { class: 'lu', text: '? 확인 못 함' }), h('span', { text: '검사 못 함, 통과로도 실패로도 안 침' })),
+        h('div', { class: 'srow2' }, h('b', { class: 'lw', text: '! 내 차례' }), h('span', { text: '네 답이나 확인이 필요' }))));
     }
     function homeView(root) {
       var approvals = h('div', { class: 'approvals' });
+      var recent = h('div', { class: 'lt', 'data-recent': '1' });
       var projects = h('div', { class: 'projects' });
       var prVal = h('span', { class: 'v', text: '…' });
       var prTile = h('div', { class: 'tile2', 'data-pr-tile': '1' }, h('span', { class: 'eb', text: '승인 기다리는 PR' }), prVal);
@@ -958,8 +999,7 @@
         list.sort(function (a, b) { return (GROUP_ORDER[L.groupOf(a)] - GROUP_ORDER[L.groupOf(b)]) || ((b.updatedAt || 0) - (a.updatedAt || 0)); });
         var c = L.counts(list), page = h('div', { class: 'page home' });
         var proj = folderName(list[0]);
-        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: today() + ' · ' + proj }), h('h1', { text: '오늘 내 일' }),
-          h('p', { class: 'line summary', 'data-summary': '1', text: L.summaryText(c) })));
+        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: today() + ' · ' + proj }), h('h1', { text: '오늘 내 일' })));  // "세션 n개 · …" 줄은 시안에 없다(타일이 같은 숫자를 보인다)
         page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), tile('쉬는 중', String(c.idle), ''), prTile));
 
         var todo = list.filter(function (s) { return L.groupOf(s) === 'todo'; });
@@ -995,27 +1035,37 @@
           var title = s.title || folderName(s) || '이름 없는 세션';
           var subs = L.runningSubCount(s);
           var doing = ended ? '끝난 세션' : s.currentAction || (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : g === 'running' ? '작업하는 중' : '쉬는 중');
-          var chip = todoRow ? h('span', { class: 'tag', text: '내 차례' }) : h('span', { class: 'tag ok', text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
+          var tip = doing + (subs ? ' · 서브에이전트 ' + subs + '개 실행 중' : '');  // 둘째 줄 대신 칩 title 로(시안: 상태 칸은 칩 하나)
+          var chip = todoRow ? h('span', { class: 'tag', title: tip, text: '내 차례' }) : h('span', { class: 'tag ok', title: tip, text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
           var issue = issueOf(s), pr = prChip(s);
           var nums = h('td', { 'data-l': '번호' }, issue ? h('span', { class: 'mono', text: '이슈 #' + issue }) : null, pr, !issue && !pr ? h('span', { class: 'none', text: '–' }) : null);
           return h('tr', { class: todoRow ? 'attn' : '', 'data-session': s.id },
             h('td', { 'data-l': '작업' }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'rt', text: title }),
-              h('span', { class: 'rs', text: (s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음') + ' · ' + folderName(s), title: s.cwd || null })),
+              h('span', { class: 'rs', text: s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음', title: s.cwd || null })),
             h('td', { 'data-l': '단계' }, tbar(s)),
             nums,
             h('td', { 'data-l': '기억' }, (function () {
               var m = L.memoryOf(s);
               return h('span', { class: 'mono' + (m.kind === 'unknown' ? ' unk' : '') + (m.level ? ' ' + m.level : ''), title: m.title, text: m.text });
             })()),
-            h('td', { 'data-l': '상태' }, chip, h('span', { class: 'rs', title: doing, text: doing }),
-              subs ? h('span', { class: 'rs', text: '서브에이전트 ' + subs + '개 실행 중' }) : null));
+            h('td', { 'data-l': '상태' }, chip));
         });
         page.appendChild(h('section', { class: 'light tablebox' }, h('h2', { text: '내 세션' }),
           h('table', { class: 'list' }, h('thead', null, head), h('tbody', null, rows))));
-        page.appendChild(approvals);
+        // 시안 G-11 표 아래 두 칸: 왼쪽 검토 요청(PR) 줄, 오른쪽 최근 산출물 줄
+        approvals.className = 'approvals';
+        var own = list.filter(function (s) { return s.flowPr && s.flowPr.number; }).slice(0, 4);
+        var prBox = h('div', { class: 'lt', 'data-pr-box': '1' }, h('span', { class: 'eb', text: '검토 요청(PR)' }),
+          own.length ? own.map(function (s) {
+            var pr = L.prBadge(s.flowPr);
+            return h('div', { class: 'srow2' }, h('span', { class: 'lm', text: 'PR #' + pr.number + (pr.title ? ' ' + pr.title : '') }), h('span', { text: pr.text }));
+          }) : h('span', { class: 'quiet', text: '이 콘솔의 세션에 연결된 검토 요청이 없어.' }),
+          approvals);
+        page.appendChild(h('div', { class: 'grid3' }, prBox, recent));
         page.appendChild(projects);
         page.appendChild(legend());
         root.appendChild(page);
+        recentCard(recent);
         approvalCard(approvals, showPr);
         projectCard(projects);
       }

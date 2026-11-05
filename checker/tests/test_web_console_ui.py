@@ -396,9 +396,10 @@ const cases = {
     const root = h('div');
     ui.homeView(root); await tick(); await tick();
     const text = root.textContent;
-    assert.ok(text.includes('세션 2개 · 일하는 중 1 · 내 차례 1 · 쉬는 중 0'));
+    assert.ok(!text.includes('세션 2개 ·'));  // 시안 G-11: 제목 아래 요약 줄은 없다(타일이 같은 숫자)
     assert.ok(text.includes('proj-a') && text.includes('proj-b'));
-    assert.ok(text.includes('서브에이전트 1개 실행 중') && text.includes('PR #4 · 검사 통과') && text.includes('이슈 #636'));
+    assert.ok(find(root, e => e.tag === 'span' && (e.attrs.title || '').includes('서브에이전트 1개 실행 중')).length === 1 && !text.includes('서브에이전트 1개 실행 중'));  // 상태 칸은 칩 하나, 둘째 줄은 title
+    assert.ok(text.includes('PR #4 · 검사 통과') && text.includes('이슈 #636'));
     assert.ok(text.includes('내가 승인할 PR 1건'));
     // 숫자 타일: 내 차례 / 일하는 중 / 쉬는 중, 승인 기다리는 PR 은 데이터를 받은 뒤에만 보인다
     const tiles = find(root, e => (e.attrs['class'] || '').split(' ').includes('tile2'));
@@ -716,8 +717,8 @@ global.document = { documentElement: { style } };
 require(file);
 const BH = window.BH;
 const out = { first: BH.getScale(), zoom: style.zoom, keys: Object.keys(BH).sort().join(',') };
-BH.setScale('1.3');
-out.afterSet = [BH.getScale(), store['bh-scale'], style.zoom];
+BH.setScale('1.15');
+out.afterSet = [BH.getScale(), store['bh-zoom'], style.zoom];
 BH.setScale('nonsense');
 out.afterBad = [BH.getScale(), style.zoom];
 process.stdout.write(JSON.stringify(out));
@@ -734,12 +735,13 @@ def _theme_run(seed: dict | None = None) -> dict:
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_theme_js_only_keeps_text_scale():
     r = _theme_run()
-    assert r["first"] == "1.15" and r["zoom"] == "1.15"
+    assert r["first"] == "1" and r["zoom"] == "1"  # 시안(가)대로 보통 = 배율 없음(#721)
     assert r["keys"] == "SCALES,getScale,read,setScale,write"  # 옛 테마 표·디자인 전환은 없다
-    assert r["afterSet"] == ["1.3", "1.3", "1.3"]
-    assert r["afterBad"] == ["1.3", "1.3"]  # 모르는 값은 저장도 적용도 하지 않는다(바로 앞 값 유지)
-    assert _theme_run({"bh-scale": "1.45"})["zoom"] == "1.45"
-    assert _theme_run({"bh-scale": "zzz"})["first"] == "1.15"
+    assert r["afterSet"] == ["1.15", "1.15", "1.15"]
+    assert r["afterBad"] == ["1.15", "1.15"]  # 모르는 값은 저장도 적용도 하지 않는다(바로 앞 값 유지)
+    assert _theme_run({"bh-zoom": "0.9"})["zoom"] == "0.9"
+    assert _theme_run({"bh-zoom": "zzz"})["first"] == "1"
+    assert _theme_run({"bh-scale": "1.15"})["first"] == "1"  # 옛 키(보통이 1.15 였다)는 읽지 않는다
 
 
 def test_no_theme_or_design_switch_left():
@@ -1014,15 +1016,15 @@ def test_new_task_default_folder_priority(tmp_path):
     recent = {"GET /api/folders/recent": {"folders": ["C:/other/busy", "C:/mine/repo"]}}
     # 1) 세션 화면에서 왔다
     got = _smoke(tmp_path, "new?from=s1", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": "C:/last/one"}}))
-    assert "작업 폴더C:/mine/repo" in got["text"] and "C:/last/one" not in got["text"].split("작업 폴더")[1][:30]
+    assert "작업 폴더 · repo" in got["text"] and "작업 폴더 · one" not in got["text"]  # 한 줄(이름만, 전체 경로는 title)
     assert "GET /api/folders/last" not in got["calls"]  # 세션 폴더가 있으면 서버 기억을 묻지 않는다
     # 2) 그냥 새 작업: 서버가 기억한 마지막 폴더
     got = _smoke(tmp_path, "new", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": "C:/last/one"}}))
-    assert "작업 폴더C:/last/one" in got["text"] and "폴더 바꾸기" in got["text"]
-    # 3) 둘 다 없으면 기본값 없이 목록을 펼쳐 고르게 한다(최근 폴더 첫 줄을 쓰지 않는다)
+    assert "작업 폴더 · one" in got["text"] and "바꾸기" in got["text"] and "프로젝트를 고르" not in got["text"]
+    # 3) 둘 다 없으면 기본값 없이 "폴더를 골라 줘 [고르기]" 한 줄(최근 폴더 첫 줄을 쓰지 않는다). 목록은 처음부터 펼치지 않는다(시안 G-05, #721)
     got = _smoke(tmp_path, "new", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": None}}))
-    assert "폴더를 골라 줘" in got["text"] and "작업 폴더C:/other/busy" not in got["text"] and "닫기" in got["text"]
-    assert "C:/other/busy" in got["text"] and "C:/mine/repo" in got["text"]  # 후보 목록은 그대로
+    assert "폴더를 골라 줘" in got["text"] and "작업 폴더 · busy" not in got["text"] and "고르기" in got["text"] and "닫기" not in got["text"]
+    assert "C:/other/busy" not in got["text"]  # 후보 목록은 [고르기] 를 눌러야 보인다
     # 4) 새 세션 버튼은 세션 화면에서만 출처 세션을 넘긴다
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "'/new?from=' + encodeURIComponent(sid)" in app and app.count("link(newHref(),") == 3  # 헤더 메뉴 · 목록 아래 + 새 세션 · 접힌 레일 +
@@ -1042,21 +1044,21 @@ def _folder_rows():
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_new_task_folder_cards_show_ready_chips_without_blurring_unknown(tmp_path):
     """폴더 카드 칩(시안 02): 준비됨 · 세션 n / 준비됨 / 준비 필요 / 확인하는 중 / 확인 못 함. 읽지 못한 것은 준비됨도 준비 필요도 아니다."""
-    got = _smoke(tmp_path, "new", [], extra=_folder_rows())
+    got = _smoke(tmp_path, "new", [], extra=_folder_rows(), actions=[{"click": "[data-folder-toggle]"}])  # 목록은 [고르기] 를 눌러야 펼친다(#721)
     assert re.findall(r"<span\.chip2([\w.]*)>", got["dump"]) == [".ok", ".ok", ".warn", "", ".unk"]
     # 카드 한 장마다 이름 · 경로 · 칩 순서로 글이 이어진다(가짜 DOM 의 dump 는 text 속성 글을 안 보여 줘 본문 글로 본다)
     text = got["text"]
     for card in ("ready2C:/p/ready2준비됨 · 세션 2", "ready0C:/p/ready0준비됨NE","needsC:/p/needs준비 필요", "busyC:/p/busy확인하는 중", "unkC:/p/unk확인 못 함"):
         assert card in text, card
     # 옛 서버 응답(ready 키 없음)은 준비됨으로 치지 않는다
-    old = _smoke(tmp_path, "new", [], extra={"GET /api/folders/recent": {"folders": ["C:/w/proj"]}, "GET /api/folders/last": {"path": None}})
+    old = _smoke(tmp_path, "new", [], extra={"GET /api/folders/recent": {"folders": ["C:/w/proj"]}, "GET /api/folders/last": {"path": None}}, actions=[{"click": "[data-folder-toggle]"}])
     assert re.findall(r"<span\.chip2([\w.]*)>", old["dump"]) == [".unk"] and "projC:/w/proj확인 못 함" in old["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_starts_scaffold(tmp_path):
     shown = {"GET /api/folders/intro": {"ready": "no", "seen": False, "show": True}, "POST /api/folders/intro/seen": {"seen": True}}
-    pick = [{"click": ".folder-opt", "index": 2}]
+    pick = [{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}]
     got = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick)
     text = got["text"]
     for need in ("프로젝트 준비", "needs 준비하기", "이 폴더엔 아직 하네스 구조가 없어", "네 차례", "표준 구조를 만들까? 한 번만 하면 돼",
@@ -1072,7 +1074,7 @@ def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_sta
     assert len(new) == 1 and "/harness:scaffold" in new[0][2] and "C:/p/needs" in new[0][2], new
     # [나중에] -> 원래 새 작업 화면으로 돌아가고 작업을 시작하지 않는다
     later = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick + [{"click": "[data-intro-later]"}])
-    assert "하고 싶은 일을 한두 줄로" in later["text"] and "작업 폴더C:/p/needs" in later["text"] and "프로젝트 준비" not in later["text"]
+    assert "하고 싶은 일을 한두 줄로" in later["text"] and "작업 폴더 · needs" in later["text"] and "프로젝트 준비" not in later["text"]
     assert not [p for p in later["posts"] if p[1] == "/api/new"]
 
 
@@ -1080,11 +1082,11 @@ def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_sta
 def test_new_task_prepare_screen_not_shown_when_seen_ready_or_unknown(tmp_path):
     for state in ({"ready": "no", "seen": True, "show": False}, {"ready": "yes", "seen": False, "show": False},
                   {"ready": "unknown", "seen": False, "show": False}):
-        got = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **{"GET /api/folders/intro": state}), actions=[{"click": ".folder-opt", "index": 2}])
+        got = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **{"GET /api/folders/intro": state}), actions=[{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}])
         assert "하고 싶은 일을 한두 줄로" in got["text"] and "준비하기" not in got["text"], state
         assert not [p for p in got["posts"] if p[1] == "/api/folders/intro/seen"], state
     # 안내를 못 읽으면(오류) 막지 않고 원래 화면으로 간다
-    err = _smoke(tmp_path, "new", [], extra=_folder_rows(), actions=[{"click": ".folder-opt", "index": 2}])
+    err = _smoke(tmp_path, "new", [], extra=_folder_rows(), actions=[{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}])
     assert "하고 싶은 일을 한두 줄로" in err["text"] and "준비하기" not in err["text"]
 
 
@@ -1100,7 +1102,7 @@ def test_docs_screen_groups_files_and_has_menu(tmp_path):
 def test_settings_screen_matches_design(tmp_path):
     got = _smoke(tmp_path, "settings", [_session("s1")])
     text, dump = got["text"], got["dump"]
-    for need in ("보기와 AI 설정", "글자 크기", "보통", "크게", "아주 크게", "AI가 묻는 범위", "연결 상태", "GitHub", "하네스 판", "프로젝트", "고급", "AI 모델", "생각 깊이"):
+    for need in ("보기와 AI 설정", "글자 크기", "작게", "보통", "크게", "AI가 묻는 범위", "연결 상태", "GitHub", "하네스 판", "프로젝트", "고급", "AI 모델", "생각 깊이"):
         assert need in text, need
     assert dump.count("<button.scale>") == 3 and dump.count("<button.radio>") >= 1  # 시안 .seg / .radio 모양, 기본 위젯 없음
     assert "<select" not in dump and "<input" not in dump
@@ -1180,8 +1182,9 @@ def test_work_screen_css_blocks_and_responsive_rules():
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     for needle in (".sess-grid", ".strip", ".msgs", ".ask", ".qopt", ".bad", ".todo", ".crow", ".flow", ".fs", ".docs-pane", "details.more"):
         assert needle in css, needle
-    # 넓을 때 옆, 좁을 때 아래
-    assert re.search(r"@container shell \(max-width: 1000px\) \{\s*\.sess-grid \{ grid-template-columns: minmax\(0, 1fr\); \}", css)
+    # 시안 .split: 넓을 때 옆, 좁을 때 줄바꿈으로 아래(flex-wrap)
+    assert re.search(r"\.sess-grid \{ display: flex; flex-wrap: wrap; gap: 18px;", css) and ".sess-grid > .talk { flex: 999 1 480px;" in css
+    assert re.search(r"@container shell \(max-width: 760px\) \{ \.iso \{ display: none; \} \}", css)  # 좁은 창에서는 층 그림을 숨긴다
     assert "details.more > summary::-webkit-details-marker { display: none; }" in css  # 접힘 삼각형은 직접 그린다
 
 

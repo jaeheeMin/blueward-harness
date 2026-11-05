@@ -596,7 +596,12 @@
     headEl.appendChild(h('span', { class: 'sp' }));
     var proj = projectOf();
     if (proj) headEl.appendChild(h('span', { class: 'eb proj', title: '프로젝트', text: proj }));
-    headEl.appendChild(link('/settings', { class: 'pill ghost', 'aria-current': cur === '/settings' ? 'page' : null }, icon('settings', 14), '설정'));
+    headEl.appendChild(link('/settings', { class: 'pill ghost', 'aria-current': cur === '/settings' ? 'page' : null, text: '설정' }));  // 시안 헤더: 아이콘 없는 글자 단추(.bs)
+  }
+  // 접기·펼치기 단추 하나: 접힌 칸과 펼친 칸 모두 목록 맨 위, 같은 자리·같은 크기. 화살표 방향만 반대다(SVG).
+  function foldBtn(collapsed) {
+    return h('button', { type: 'button', class: 'fold-btn', 'aria-label': collapsed ? '목록 펼치기' : '목록 접기', title: (collapsed ? '목록 펼치기' : '목록 접기') + ' ( [ )',
+      'aria-expanded': String(!collapsed), 'aria-keyshortcuts': '[', onClick: function () { setCollapsed(!collapsed); } }, icon(collapsed ? 'chev' : 'back', 16));
   }
   // 세션 기억 링(#648): % 를 알면 채워진 링(80% 초과 노랑, 90% 이상 빨강), 토큰 수만 알면 점선 링에 만 단위, 모르면 "?".
   function memRing(s) {
@@ -615,8 +620,8 @@
 
     var rows = sortedSessions(), L = window.BHLogic;
     var nav = h('nav', { class: 'nav', 'aria-label': '세션 목록' });
-    nav.appendChild(h('div', { class: 'sh' }, h('span', { class: 'eb', text: '세션 ' + rows.length }), h('span', { class: 'eb', text: '단계 · 기억' })));
-    var list = h('div', { class: 'nav-list' });
+    nav.appendChild(h('div', { class: 'sh' }, h('span', { class: 'eb', text: '세션 ' + rows.length }), h('span', { class: 'eb', text: '단계 · 기억' }), foldBtn(false)));
+    var list =h('div', { class: 'nav-list' });
     if (!rows.length && loadedOnce) list.appendChild(h('p', { class: 's-empty', text: '아직 세션이 없어. 새 작업을 시작하면 여기에 생겨.' }));
     rows.forEach(function (s) {
       var st = sideStatus(s), p = firstPending(s);
@@ -638,20 +643,23 @@
     nav.appendChild(list);
     var foot = h('div', { class: 'nav-foot' });
     foot.appendChild(link(newHref(), { class: 'snew', text: '+ 새 세션' }));
-    foot.appendChild(h('button', { type: 'button', class: 'fold', 'aria-keyshortcuts': '[', 'aria-label': '목록 접기', onClick: function () { setCollapsed(true); } },
-      h('span', { text: '목록 접기' }), h('kbd', { text: '[' })));
     nav.appendChild(foot);
     sideEl.appendChild(nav);
   }
   function renderRail(d, cur) {
-    var n = d.todo.length;
-    return h('nav', { class: 'rail', 'aria-label': '작업 목록 (접힘)' },
-      h('button', { type: 'button', class: 'rail-btn', 'aria-label': '목록 펼치기 ([ 키)', title: '목록 펼치기 ( [ )', 'aria-keyshortcuts': '[', onClick: function () { setCollapsed(false); } }, icon('panel', 18)),
-      link(newHref(), { class: 'rail-btn solid', 'aria-label': '새 작업', title: '새 작업' }, icon('plus', 18)),
+    var n = d.todo.length, rows = sortedSessions();
+    return h('nav', { class: 'rail', 'aria-label': '세션 목록 (접힘)' },
+      foldBtn(true),
       link(d.todo.length ? d.todo[0].href : '/', { class: 'rail-count' + (n ? ' has' : ''), 'aria-label': '내가 할 일 ' + n + '건', title: '내가 할 일 ' + n + '건' },
         h('span', { class: 'n', text: String(n) }), h('span', { class: 'l', text: '내가 할 일' })),
+      rows.map(function (s) {
+        var st = sideStatus(s), p = firstPending(s), name = sessionTitle(s);
+        var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid));
+        return link('/s/' + encodeURIComponent(s.id), { class: 'rail-ring' + (st.tone === 'attn' ? ' turn' : '') + (s.status === 'ended' ? ' ended' : ''), 'aria-label': name + ' · ' + st.text, title: name + ' · ' + st.text, 'aria-current': onThis ? 'page' : null },
+          h('span', { class: 'ring unk' }, h('b', { text: '?' })));
+      }),
       h('span', { class: 'rail-sp' }),
-      link('/settings', { class: 'rail-btn', 'aria-label': '설정', title: '설정', 'aria-current': cur === '/settings' ? 'page' : null }, icon('settings', 18)));
+      link(newHref(), { class: 'rail-add', 'aria-label': '새 세션', title: '새 세션' }, icon('plus', 14)));
   }
   document.addEventListener('keydown', function (e) {
     if (e.key !== '[' || e.isComposing || e.keyCode === 229 || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -758,7 +766,13 @@
       built = true; clear(root);
       var page = h('div', { class: 'page sess' });
       function region(k, parent) { regions[k] = h('div', { 'data-r': k }); (parent || page).appendChild(regions[k]); return regions[k]; }
-      ['head', 'stages', 'strip', 'notices'].forEach(function (k) { region(k); });
+      // 시안 G-09·12: 제목 블록(눈썹·제목·상태 줄·순서 알약) 오른쪽에 층 그림. 순서(갈래)가 있을 때만 그림이 보인다.
+      var titleCol = h('div', { class: 'titlecol' });
+      regions.head = h('div', { 'data-r': 'head' }); regions.stages = h('div', { 'data-r': 'stages' });
+      titleCol.appendChild(regions.head); titleCol.appendChild(regions.stages);
+      regions.iso = h('div', { class: 'iso', 'aria-hidden': 'true', hidden: true }, ['l1', 'l2', 'l3', 'l4'].map(function (c) { return h('i', { class: 'ly ' + c }); }));
+      page.appendChild(h('div', { class: 'titlerow' }, titleCol, regions.iso));
+      ['strip', 'notices'].forEach(function (k) { region(k); });
       // 갈래·도구·점검·문서 칸은 한 번 만들어 두고 세션이 바뀔 때 update 만 부른다. 새 세션 점검은 대화 판 맨 위 카드다(시안 13).
       parts.checks = ui.startChecksPanel();
       parts.flow = ui.flowPanel({ compact: true });
@@ -937,8 +951,7 @@
         h('h1', { text: tt }),
         h('p', { class: 'line' }, live ? h('span', { class: 'live' }, h('i'), headline) : headline,
           el ? h('span', { class: 'elapsed', 'data-elapsed': '1', text: ' · 경과 ' + el }) : null),
-        actionLine(s),
-        modelLine(s) ? h('p', { class: 'line small', 'data-model': '1', text: modelLine(s) }) : null));
+        actionLine(s)));  // 모델·권한 줄은 시안에 없어 "자세히" 의 기술 정보(kv)에만 둔다
     }
 
     // 순서 알약: ✓ 끝난 단계 / 지금 단계 / 남은 단계. 끝났으면 다음 갈래 이름을 마지막 알약으로 보인다.
@@ -949,6 +962,7 @@
         if (nx) bar.appendChild(h('li', { class: 'step next' }, h('span', { class: 'snm', text: '→ 다음: ' + nx.label })));
       }
       regions.stages.replaceChildren.apply(regions.stages, bar ? [bar] : []);
+      regions.iso.hidden = !bar;
     }
 
     function paintStrip(s) {
@@ -989,7 +1003,7 @@
       var steps = window.BHLogic.barSteps(s);
       if (!s.flowId || !steps.length) return null;
       return h('div', { class: 'q' }, h('span', { class: 'eb', text: '이 일의 순서' }),
-        h('div', { class: 'todo' }, steps.map(function (st) {
+        h('div', { class: 'todolist' }, steps.map(function (st) {
           return h('span', { class: st.state === 'done' || st.state === 'skipped' ? 'd' : st.state === 'now' ? 'n' : 'w', title: st.reason || null },
             h('i', { class: 'dot', 'aria-hidden': 'true' }), st.name + (st.state === 'now' ? ' — 지금' : st.state === 'skipped' ? ' (건너뜀)' : ''));
         })));
@@ -1563,7 +1577,8 @@
   /* ---------- 새 작업 ---------- */
   var PERMISSION_FALLBACK = [{ value: '', label: '기본(그때그때 확인)' }, { value: 'acceptEdits', label: '파일 고치기는 자동 허용' }, { value: 'plan', label: '계획만 세우기' }, { value: 'auto', label: '알아서 하되 위험한 건 AI가 막기' }];
   /* 설정 "AI가 묻는 범위"(서버 ask.json). 시안 19 글. */
-  var ASK_OPTIONS = [{ value: 'needed', label: '꼭 필요할 때만 (권장)' }, { value: 'edits', label: '문서를 바꿀 때마다' }, { value: 'all', label: '모든 명령마다' }];
+  var ASK_OPTIONS = [{ value: 'needed', label: '꼭 필요할 때만 (권장)', desc: 'GitHub에 올리기 · 파일 지우기 · 작업 폴더 밖 파일 · SAP에 저장하기' },
+    { value: 'edits', label: '문서를 바꿀 때마다', desc: 'AI가 고친 내용을 하나씩 직접 볼 때' }, { value: 'all', label: '모든 명령마다', desc: '관리자 점검용 · 확인이 아주 많아져' }];
   var draft = { text: '', cwd: '', note: '', answers: {}, picked: null, extraPaths: [], model: null, modelCustom: false, customName: '', effort: null, permission: null, flowId: null, flowUser: false, kindFlowId: '', insist: false, kind: -1 };
   /* 새 작업의 종류 버튼: [이름, 한 줄 설명, 갈래 id(없으면 도구만 쓰는 일), 입력칸에 미리 넣는 문장]. 갈래 id 는 workflow.json flows 와 같다. */
   var KINDS = [
@@ -1702,7 +1717,8 @@
     function lastFolder() {
       if (draft.cwd) { if (alive) draw(); return null; }
       return api('GET', '/api/folders/last').then(function (d) { if (!draft.cwd && d && d.path) draft.cwd = d.path; }, function () {}).then(function () {
-        if (!draft.cwd) picking = true;
+        // 기본 폴더가 없어도 목록을 처음부터 펼치지 않는다(시안 G-05 는 한 줄). "폴더를 골라 줘 [고르기]" 를 보이고,
+        // 고르지 않고 작업 시작을 누르면 begin() 이 목록을 연다(#721). 다른 세션 흔적으로 정하지 않는 #669 기준은 그대로.
         if (alive) draw();
       });
     }
@@ -1790,7 +1806,7 @@
     }
     function drawIntro(page) {
       var nm = baseName(draft.cwd) || draft.cwd;
-      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '프로젝트 준비' }), h('h1', { text: nm + ' 준비하기' }), h('p', { class: 'line', text: '이 폴더엔 아직 하네스 구조가 없어' })));
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '1단계 · 프로젝트 준비' }), h('h1', { text: nm + ' 준비하기' }), h('p', { class: 'line', text: '이 폴더엔 아직 하네스 구조가 없어' })));
       var panel = h('section', { class: 'light newbox', 'data-folder-intro': '1' });
       panel.appendChild(h('div', { class: 'ask' },
         h('span', { class: 'eb', text: '네 차례' }),
@@ -1799,14 +1815,14 @@
         h('div', { class: 'acts' },
           h('button', { type: 'button', class: 'pill acc', 'data-intro-make': '1', text: '만들기', onClick: function () { introDone(true); } }),
           h('button', { type: 'button', class: 'pill line', 'data-intro-later': '1', text: '나중에', onClick: function () { introDone(false); } }))));
-      panel.appendChild(h('span', { class: 'eb mt-24', text: '만들어지는 것' }));
-      [['templates/', '고객 양식을 넣는 곳'], ['rules/', '문서 검사 기준'], ['docs/ssot/', '요구사항정의서 자리'], ['audit/', '변경 기록']].forEach(function (r) {
-        panel.appendChild(h('div', { class: 'crow' }, h('span', { class: 'cn' }, h('b', { class: 'mono', text: r[0] })), h('span', { class: 'ct', text: r[1] })));
-      });
-      panel.appendChild(h('span', { class: 'eb mt-24', text: '만든 뒤 할 일' }));
-      ['고객 양식 파일을 templates/ 에 넣기', 'GitHub에 올려서 승인받기', '첫 작업 시작'].forEach(function (t, i) {
-        panel.appendChild(h('div', { class: 'crow' }, h('i', { class: 'mk', 'aria-hidden': 'true', text: String(i + 1) }), h('span', { class: 'cn', text: t })));
-      });
+      // 시안 G-03: 두 칸(.grid3 > .lt) 안에 줄(이름 | 설명)
+      panel.appendChild(h('div', { class: 'grid3' },
+        h('div', { class: 'lt' }, h('span', { class: 'eb', text: '만들어지는 것' }), [['templates/', '고객 양식을 넣는 곳'], ['rules/', '문서 검사 기준'], ['docs/ssot/', '요구사항정의서 자리'], ['audit/', '변경 기록']].map(function (r) {
+          return h('div', { class: 'srow2' }, h('span', { class: 'lm mono', text: r[0] }), h('span', { text: r[1] }));
+        })),
+        h('div', { class: 'lt' }, h('span', { class: 'eb', text: '만든 뒤 할 일' }), ['고객 양식 파일을 templates/ 에 넣기', 'GitHub에 올려서 승인받기', '첫 작업 시작'].map(function (t, i) {
+          return h('div', { class: 'srow2' }, h('span', { class: 'lm', text: String(i + 1) }), h('span', { text: t }));
+        }))));
       panel.appendChild(h('p', { class: 'note-muted mono', text: draft.cwd }));
       page.appendChild(panel);
     }
@@ -1847,7 +1863,7 @@
 
     /* 그리기 */
     var TITLES = {
-      write: ['새 작업', '무엇을 할까?', '한두 줄이면 돼. 쓰고 나면 AI가 먼저 살펴보고 어떤 순서로 할지 알려 줘.'],
+      write: ['새 작업', '무엇을 할까?', ''],  // 시안 G-05 는 제목 아래 설명 줄이 없다
       analyzing: ['새 작업 · 살펴보는 중', '요청과 폴더의 자료를 살펴보고 있어', '파일은 아직 고치지 않아.'],
       failed: ['새 작업 · 확인 못 함', '요청을 살펴보지 못했어', '아래 이유를 보고 요청을 고쳐서 다시 해 봐.'],
       review: ['새 작업 · 확인', '이렇게 진행할게', '시작 전에 한 번만 봐 줘']
@@ -1877,7 +1893,7 @@
         return;
       }
       var t = TITLES[step] || TITLES.review;
-      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: t[0] }), h('h1', { text: t[1] }), h('p', { class: 'line', text: t[2] })));
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: step === 'write' ? 'eb' : 'eb accent', text: t[0] }), h('h1', { text: t[1] }), t[2] ? h('p', { class: 'line', text: t[2] }) : null));
       var panel = h('section', { class: 'light newbox' });
       if (step === 'write') drawWrite(panel);
       else if (step === 'analyzing') drawAnalyzing(panel);
@@ -1890,10 +1906,11 @@
       if (keepFocus) { var f = document.getElementById(keepFocus); if (f && f !== document.activeElement) { f.focus(); try { if (selStart != null) f.setSelectionRange(selStart, selStart); } catch (e) { console.debug('커서 위치를 되돌리지 못했습니다', e); } } }
     }
     function folderBar(page) {
-      page.appendChild(h('div', { class: 'folder-bar' },
-        h('div', null, h('div', { class: 'k', text: '작업 폴더' }), draft.cwd ? h('div', { class: 'v', text: draft.cwd }) : h('div', { class: 'v none', text: recent === null ? '불러오는 중' : '폴더를 골라 줘' })),
-        h('button', { type: 'button', class: 'pill line sm', 'aria-expanded': String(picking), onClick: function () { picking = !picking; draw(); } }, picking ? '닫기' : (draft.cwd ? '폴더 바꾸기' : '폴더 고르기'))));
-      if (!picking) return;
+      // 시안 G-05: 작은 muted 한 줄 + 오른쪽 작업 시작 단추. 목록은 [바꾸기]·[고르기] 를 눌러야 펼친다(폴더 없이 작업 시작을 누를 때도 펼침).
+      var bar = h('span', { class: 'folder-bar' },
+        h('span', { class: 'k', text: '작업 폴더 · ' }), draft.cwd ? h('span', { class: 'v', title: draft.cwd, text: baseName(draft.cwd) || draft.cwd }) : h('span', { class: 'v none', text: recent === null ? '불러오는 중' : '폴더를 골라 줘' }),
+        h('button', { type: 'button', class: 'pill line sm', 'data-folder-toggle': '', 'aria-expanded': String(picking), onClick: function () { picking = !picking; draw(); } }, picking ? '닫기' : (draft.cwd ? '바꾸기' : '고르기')));
+      if (!picking) return bar;
       var box = h('div', { class: 'folder-pick' });
       (recent || []).forEach(function (f) {
         var nm = baseName(f.path) || f.path;
@@ -1904,14 +1921,16 @@
           (function () { var c = readyChip(f); return h('span', { class: ('chip2 ' + c.cls).trim(), 'data-ready': f.ready || 'unknown', text: c.text }); })()));
       });
       if (recent && !recent.length) box.appendChild(h('p', { class: 'note-muted', text: '최근에 쓴 폴더가 없어. 아래에 경로를 적어 줘.' }));
+      box.appendChild(h('button', { type: 'button', class: 'folder-opt proj add', disabled: browseBusy, onClick: browseFolder },  // 시안 G-02: 점선 "다른 폴더 찾아보기" 줄
+        h('span', { class: 'pi', 'aria-hidden': 'true', text: '+' }), h('span', { class: 'pn' }, h('span', { text: browseBusy ? '창 여는 중' : '다른 폴더 찾아보기' }))));
       box.appendChild(h('label', { for: 'custom', class: 'field-label', text: '다른 폴더 경로' }));
       box.appendChild(h('div', { class: 'inline-row' },
         h('input', { id: 'custom', class: 'input', value: custom, placeholder: 'C:\\Work\\project  또는  /Users/me/project', autocomplete: 'off', onInput: function (e) { custom = e.target.value; }, onKeydown: function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); validateCustom(); } } }),
-        h('button', { type: 'button', class: 'pill line sm', disabled: customBusy, text: customBusy ? '확인 중' : '사용', onClick: validateCustom }),
-        h('button', { type: 'button', class: 'pill line sm', disabled: browseBusy, text: browseBusy ? '창 여는 중' : '폴더 찾아보기', onClick: browseFolder })));
+        h('button', { type: 'button', class: 'pill line sm', disabled: customBusy, text: customBusy ? '확인 중' : '사용', onClick: validateCustom })));
       if (browseBusy) box.appendChild(h('p', { class: 'note-muted', role: 'status', text: '폴더 선택 창을 열었어. 창이 보이지 않으면 작업 표시줄을 확인해 줘. 고르면 이 화면에 자동으로 적용돼.' }));
       box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: customMsg, hidden: !customMsg }));
       page.appendChild(box);
+      return bar;
     }
     // 종류 버튼은 입력칸에 문장을 미리 넣고, 갈래가 있는 종류는 그 갈래로 시작하겠다고 정해 둔다(분석 결과보다 먼저 고른 사람의 선택).
     function pickKind(i) {
@@ -1957,7 +1976,7 @@
       panel.appendChild(preview.el);
       var k = KINDS[draft.kind];
       preview.update({ cwd: draft.cwd, flowId: kindFlow(), note: !k ? '어떤 순서로 할지는 AI가 요청을 읽은 다음 알려 줘. 위에서 종류를 고르면 그 순서를 미리 볼 수 있어.' : '이 종류는 정해진 순서 없이 그 도구 스킬로 바로 시작해.' });
-      folderBar(panel);
+      var folderLine = folderBar(panel);
       panel.appendChild(folderWarn.el);
       folderWarn.update(draft.cwd, window.BHLogic.otherSessions(draft.cwd, Array.from(sessions.values()), null).length > 0, useFolder);
       modelChoice(); effortChoice(); permissionChoice();
@@ -1989,7 +2008,7 @@
             permissionOptions().map(function (o) { return h('option', { value: o.value, selected: o.value === draft.permission, text: o.label }); })))));
       adv.appendChild(h('p', { class: 'note-muted', text: '요청을 살펴볼 때와 작업을 진행할 때 같은 모델과 에포트(생각의 깊이)를 써. 권한 모드는 작업을 진행하는 Claude Code 세션에만 적용돼.' }));
       panel.appendChild(adv);
-      panel.appendChild(h('div', { class: 'bottom' }, h('span', { class: 'note', text: draft.cwd ? '작업 폴더는 위에 보이는 곳이야.' : '작업 폴더를 먼저 골라야 해.' }), h('span', { class: 'sp' }),
+      panel.appendChild(h('div', { class: 'bottom' }, folderLine, h('span', { class: 'sp' }),
         h('button', { type: 'button', class: 'pill dark big', text: '작업 시작', onClick: begin })));
       if (startedId !== null) panel.appendChild(h('div', { class: 'started', role: 'status' }, h('span', { text: '이전 작업을 시작했어.' }), link(startedId ? '/s/' + encodeURIComponent(startedId) : '/', { text: '작업 화면으로 이동' })));
     }
@@ -2107,7 +2126,7 @@
     function set(label, body) {
       return h('div', { class: 'set' }, h('span', { class: 'eb', text: label }), h('div', { class: 'sc' }, body));
     }
-    function crow(k, v) { return h('div', { class: 'srow2' }, h('span', { text: k }), h('span', { class: 'lm', text: v })); }
+    function crow(k, v) { return h('div', { class: 'srow2' }, h('span', { class: 'lm', text: k }), h('span', { text: v })); }
     function cwdNow() { return (sortedSessions().filter(function (x) { return x.status !== 'ended'; })[0] || sortedSessions()[0] || {}).cwd; }
     var lastCwd;
     // 확인할 폴더는 세션 목록이 온 뒤에 정해진다. 목록이 오거나 첫 세션의 폴더가 바뀌면 다시 읽는다.
@@ -2159,8 +2178,8 @@
     function draw() {
       clear(root);
       var BH = window.BH, scale = BH.getScale();
-      var page = h('div', { class: 'page w-960' });
-      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '설정' }), h('h1', { text: '보기와 AI 설정' })));
+      var page = h('div', { class: 'page' });
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '설정' }), h('h1', { text: '보기와 AI 설정' })));
       var sec = h('section', { class: 'light setbox' });
 
       var seg = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': '글자 크기' }, BH.SCALES.map(function (z) {
@@ -2174,7 +2193,7 @@
         var on = o.value === askNow;
         return h('button', { type: 'button', role: 'radio', class: 'radio', 'aria-checked': String(on), 'data-ask-opt': o.value, disabled: !askCfg,
           onClick: function () { saveAsk(o.value); } },
-          h('i', { class: 'rd' + (on ? ' on' : ''), 'aria-hidden': 'true' }), h('span', null, h('b', { text: o.label })));
+          h('i', { class: 'rd' + (on ? ' on' : ''), 'aria-hidden': 'true' }), h('span', null, h('b', { text: o.label }), o.desc ? h('small', { text: o.desc }) : null));
       }));
       sec.appendChild(set('AI가 묻는 범위', h('div', null, askRadios,
         askErr ? h('p', { class: 'note-attn', role: 'alert', text: askErr }) : null,
@@ -2197,11 +2216,11 @@
         : perm === 'denied' ? '브라우저 알림 · 막힘'
         : '브라우저 알림 · 아직 안 물음 (스위치를 처음 켤 때 브라우저가 물어)';
       sec.appendChild(set('알림', h('div', null,
-        h('div', { class: 'radios', role: 'group', 'aria-label': '알림' }, rows.map(function (r) {
+        h('div', { class: 'stack', role: 'group', 'aria-label': '알림' }, rows.map(function (r) {
           var on = !!(notifyCfg && notifyCfg[r[0]]) && perm === 'granted';
           return h('button', { type: 'button', role: 'switch', class: 'swrow', 'aria-checked': String(on), 'data-notify-key': r[0], disabled: !notifyCfg || perm === 'unsupported',
             onClick: function () { toggleNotify(r[0], !on); } },
-            h('b', { text: r[1] }), h('i', { class: 'sw' + (on ? ' on' : ''), 'aria-hidden': 'true' }));
+            h('i', { class: 'sw' + (on ? ' on' : ''), 'aria-hidden': 'true' }), h('b', { text: r[1] }));
         })),
         h('p', { class: 'note-muted', 'data-notify-perm': perm, role: 'status', text: permText }),
         perm === 'denied' ? h('p', { class: 'note-attn', role: 'alert', text: '브라우저가 알림을 막았어 · 주소창 왼쪽 자물쇠에서 알림을 허용해 줘' }) : null,
