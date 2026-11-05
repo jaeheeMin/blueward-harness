@@ -139,6 +139,106 @@ def status_paths(run: Runner, cwd: str) -> tuple[list[str], str]:
     return paths, ""
 
 
+# ---- 산출물 칩: 파일마다 팀에 올라갔는가(#652) ----
+OPEN_PR_FILES_LIMIT = 100  # gh 가 PR 하나에 돌려주는 바뀐 파일 수의 상한. 이만큼이면 잘렸을 수 있다
+
+
+def open_pr_files(run: Runner, cwd: str) -> dict:
+    """열린 PR 들의 바뀐 파일. {"state": "ok"|"unknown", "prs": [{number,url,files,truncated}], "reason"}. 경로는 저장소 맨 위 기준."""
+    rc, out = run(["gh", "pr", "list", "--state", "open", "--json", "number,url,headRefName,files", "--limit", "50"], cwd)
+    data = _json(out) if rc == 0 else None
+    if not isinstance(data, list):
+        return {"state": "unknown", "prs": [], "reason": "gh 로 열린 PR 의 바뀐 파일을 읽지 못했습니다(gh 가 없거나 로그인·네트워크 문제)."}
+    prs = []
+    for d in data:
+        if not isinstance(d, dict):
+            continue
+        files = {str(f.get("path")) for f in d.get("files") or [] if isinstance(f, dict) and f.get("path")}
+        prs.append({"number": d.get("number"), "url": d.get("url", ""), "files": files, "truncated": len(files) >= OPEN_PR_FILES_LIMIT})
+    return {"state": "ok", "prs": prs, "reason": ""}
+
+
+def _tree_blobs(run: Runner, cwd: str, ref: str, rels: list[str]) -> dict[str, str] | None:
+    """ref 의 파일들 blob sha (cwd 기준 상대 경로 -> sha). 없는 파일은 빠진다. 읽지 못하면 None."""
+    rc, out = _git(run, cwd, "ls-tree", "-z", ref, "--", *[":(literal)" + r for r in rels])
+    if rc != 0:
+        return None
+    blobs = {}
+    for entry in out.split("\0"):
+        meta, _, path = entry.partition("\t")
+        parts = meta.split()
+        if path and len(parts) == 3 and parts[1] == "blob":
+            blobs[path] = parts[2]
+    return blobs
+
+
+def upload_states(run: Runner, cwd: str, files: list[tuple[str, bool]], open_prs: Callable[[], dict]) -> dict[str, dict]:
+    """산출물 파일마다 {"state": local|merged|review|committed|unknown, "prs": [{number,url}], "reason"}. files 는 (cwd 기준 상대 경로, 커밋 안 됨).
+    저장소가 squash 병합이라 커밋 조상 관계로는 합쳐짐을 알 수 없어 내용(blob)으로 본다. 순서:
+    1 커밋 안 됨 -> local. 2 origin/<기본> 의 같은 경로 blob 이 HEAD 와 같음 -> merged. 3 열린 PR 의 바뀐 파일에 있음 -> review.
+    4 그 밖 -> committed. git 실패 -> unknown. origin/<기본> 이 없으면 2 는 건너뛴다(원격 없는 저장소는 gh 도 안 돼 3 에서 unknown).
+    gh 실패는 3 이 필요한 파일만 unknown(2 까지는 gh 없이 판정). 파일 수만큼 git 을 부르지 않고 ls-tree 를 묶어 한 번씩 부른다."""
+    out: dict[str, dict] = {}
+    rest = []
+    for rel, changed in files:
+        if changed:
+            out[rel] = {"state": "local", "prs": [], "reason": ""}
+        else:
+            rest.append(rel)
+    if not rest:
+        return out
+
+    def fail(reason: str) -> None:
+        for rel in rest:
+            out[rel] = {"state": "unknown", "prs": [], "reason": reason}
+
+    rc, text = _git(run, cwd, "rev-parse", "--show-prefix", "HEAD")
+    lines = text.split("\n")
+    if rc != 0 or len(lines) < 2:
+        fail("git 으로 현재 커밋을 읽지 못했습니다.")
+        return out
+    prefix = lines[0].strip()
+    head = _tree_blobs(run, cwd, "HEAD", rest)
+    if head is None:
+        fail("git 으로 커밋된 파일을 읽지 못했습니다.")
+        return out
+    base = default_branch(run, cwd)
+    rc, _ = _git(run, cwd, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{base}")
+    if rc == GIT_UNAVAILABLE:
+        fail("git 을 실행하지 못했습니다.")
+        return out
+    main_blobs = _tree_blobs(run, cwd, f"origin/{base}", rest) if rc == 0 else {}
+    if main_blobs is None:
+        fail(f"git 으로 origin/{base} 의 파일을 읽지 못했습니다.")
+        return out
+    need = []
+    for rel in rest:
+        if rel not in head:  # 커밋에 없는 파일(무시 목록 등)은 올라간 적이 없다
+            out[rel] = {"state": "local", "prs": [], "reason": ""}
+        elif main_blobs.get(rel) == head[rel]:
+            out[rel] = {"state": "merged", "prs": [], "reason": ""}
+        else:
+            need.append(rel)
+    if not need:
+        return out
+    got = open_prs()
+    if got.get("state") != "ok":
+        for rel in need:
+            out[rel] = {"state": "unknown", "prs": [], "reason": got.get("reason") or "열린 PR 을 읽지 못했습니다."}
+        return out
+    prs = got.get("prs") or []
+    for rel in need:
+        full = prefix + rel
+        hit = [{"number": p["number"], "url": p["url"]} for p in prs if full in p["files"]]
+        if hit:
+            out[rel] = {"state": "review", "prs": hit, "reason": ""}
+        elif any(p["truncated"] for p in prs):  # 바뀐 파일이 많은 PR 은 목록이 잘렸을 수 있어 '없다' 고 단정하지 않는다
+            out[rel] = {"state": "unknown", "prs": [], "reason": "바뀐 파일이 많은 열린 PR 이 있어 이 파일이 들어 있는지 알 수 없습니다."}
+        else:
+            out[rel] = {"state": "committed", "prs": [], "reason": ""}
+    return out
+
+
 def summarize_error(out: str) -> str:
     text = " ".join((out or "").split())
     return text[-ERROR_SUMMARY_LIMIT:] if text else "자세한 오류 글이 없습니다."
