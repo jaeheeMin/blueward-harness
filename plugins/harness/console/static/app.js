@@ -524,16 +524,111 @@
   var renderedOnce = false;
   function applyStart() {
     var on = !!(appEl && appEl.getAttribute('data-intro') === '1');
+    if (on && introPage === 'project') return;  // 02 에서 고르는 중이면 점검 결과가 와도 다시 그리지 않는다(고른 것이 사라진다)
     if (on || introWanted()) renderRoute(); else renderAnn(sideData());
+  }
+  // 폴더 카드 칩: 준비됨(세션이 있으면 수) / 준비 필요 / 읽는 중 / 확인 못 함. 읽지 못한 것을 준비됨이나 준비 필요로 뭉개지 않는다.
+  function readyChip(f) {
+    if (f.ready === 'yes') return { cls: 'ok', text: typeof f.sessions === 'number' && f.sessions > 0 ? '준비됨 · 세션 ' + f.sessions : '준비됨' };
+    if (f.ready === 'no') return { cls: 'warn', text: '준비 필요' };
+    if (f.checking) return { cls: '', text: '확인하는 중' };
+    return { cls: 'unk', text: '확인 못 함' };
+  }
+  var introPage = 'welcome', firstPickFolder = null;  // 첫 화면 두 쪽(01 환영 → 02 프로젝트 고르기) · 02 에서 준비 안 된 폴더를 골랐을 때 새 작업 화면이 03 을 띄울 폴더
+
+  /* 시안 G-02 프로젝트 고르기. 카드는 고름 표시만 하고, [이 프로젝트로] 가 서버에 마지막 폴더로 기억시키고 첫 실행 표시를 남긴다.
+     준비 안 됨이고 안내를 아직 안 봤으면 03(새 작업 화면의 프로젝트 준비), 아니면 홈(04). */
+  function projectPickView() {
+    var wrap = h('div', { class: 'intro' }), recent = null, sel = '', custom = '', msg = '', busy = false, browseBusy = false, customBusy = false, tries = 0, timer = null;
+    function nameOf(p) { return baseName(p) || p; }
+    function parse(d) { return listOf(d, 'folders').map(function (f) { return typeof f === 'string' ? { path: f } : f; }).filter(function (f) { return f && f.path; }); }
+    function load() {
+      clearTimeout(timer);
+      api('GET', '/api/folders/recent').then(function (d) {
+        var next = parse(d), keep = (recent || []).filter(function (f) { return f.extra && !next.some(function (n) { return n.path === f.path; }); });
+        recent = keep.concat(next);
+        if (wrap.isConnected) draw();
+        if (tries++ < 6 && next.some(function (f) { return f.checking; })) timer = setTimeout(load, 1500);
+      }, function () { recent = recent || []; if (wrap.isConnected) draw(); });
+    }
+    function choose(p) {  // 직접 고른 폴더는 최근 목록에 없을 수 있어 맨 위에 더한다
+      msg = ''; sel = p;
+      if (!(recent || []).some(function (f) { return f.path === p; })) recent = [{ path: p, extra: true }].concat(recent || []);
+      draw(); tries = 0; load();
+    }
+    function validated(p) {
+      return api('POST', '/api/folders/validate', { path: p }).then(function (v) {
+        if (v && (v.ok === true || v.valid === true)) choose(v.path || v.realpath || p);
+        else msg = (v && (v.error || v.reason || v.message)) || '이 폴더를 사용할 수 없습니다.';
+      });
+    }
+    function browse() {
+      if (browseBusy) return;
+      browseBusy = true; msg = ''; draw();
+      api('POST', '/api/folders/pick', { path: sel || '' }).then(function (d) {
+        if (d && d.cancelled) return null;
+        var p = d && d.path;
+        if (!p) { msg = '고른 폴더를 받지 못했습니다. 경로를 직접 적어 주세요.'; return null; }
+        return validated(p);
+      }).then(null, function (e) { msg = e.message; }).then(function () { browseBusy = false; if (wrap.isConnected) draw(); });
+    }
+    function typed() {
+      var p = custom.trim(); if (!p || customBusy) return;
+      customBusy = true; msg = ''; draw();
+      validated(p).then(function () { custom = ''; }, function (e) { msg = e.message; }).then(function () { customBusy = false; if (wrap.isConnected) draw(); });
+    }
+    function confirmPick() {
+      if (!sel || busy) return;
+      busy = true; msg = ''; draw();
+      var f = (recent || []).filter(function (x) { return x.path === sel; })[0] || {};
+      api('POST', '/api/folders/last', { path: sel }).then(function (d) {
+        var p = (d && d.path) || sel;
+        function leave(path) { if (path === location.pathname + location.search) renderRoute(); else go(path); }
+        return api('POST', '/api/start-checks/seen', {}).then(function () { if (startData) startData.firstRun = false; }, function () { introSkip = true; /* 표시를 못 남겨도 홈으로 간다 */ }).then(function () {
+          introForce = false; introPage = 'welcome';
+          if (f.ready === 'yes') return leave('/');
+          return api('GET', '/api/folders/intro' + qs({ path: p })).then(function (i) { return i && i.show === true; }, function () { return false; }).then(function (show) {
+            if (show) { firstPickFolder = p; leave('/new'); } else leave('/');
+          });
+        });
+      }, function (e) { busy = false; msg = '이 폴더를 기억하지 못했어: ' + e.message; draw(); });
+    }
+    function draw() {
+      clear(wrap);
+      var box = h('section', { class: 'light intro-box', 'data-pick': '1' },
+        h('span', { class: 'eb', text: '1단계 · 프로젝트 고르기' }),
+        h('h1', { text: '어느 고객사 프로젝트에서 일할까?' }),
+        h('span', { class: 'lm', text: '최근에 쓴 폴더야. 처음이면 GitHub에서 받은 고객사 저장소 폴더를 골라.' }));
+      if (recent && !recent.length) box.appendChild(h('p', { class: 'note-muted', 'data-pick-empty': '1', text: '최근에 쓴 폴더가 없어. 아래에서 찾아보거나 경로를 적어 줘.' }));
+      (recent || []).forEach(function (f) {
+        var nm = nameOf(f.path), c = readyChip(f);
+        box.appendChild(h('button', { type: 'button', class: 'folder-opt proj', 'data-pick-folder': f.path, 'aria-pressed': String(f.path === sel), onClick: function () { sel = f.path; msg = ''; draw(); } },
+          h('span', { class: 'pi', 'aria-hidden': 'true', text: nm.replace(/[^A-Za-z0-9가-힣]/g, '').slice(0, 2).toUpperCase() || '··' }),
+          h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', text: f.path })),
+          h('span', { class: ('chip2 ' + c.cls).trim(), 'data-ready': f.ready || 'unknown', text: c.text })));
+      });
+      box.appendChild(h('button', { type: 'button', class: 'folder-opt proj add', 'data-pick-browse': '1', disabled: browseBusy, onClick: browse },
+        h('span', { class: 'pi', 'aria-hidden': 'true', text: '+' }), h('span', { class: 'pn' }, h('span', { text: browseBusy ? '창 여는 중' : '다른 폴더 찾아보기' }))));
+      if (browseBusy) box.appendChild(h('p', { class: 'note-muted', role: 'status', text: '폴더 선택 창을 열었어. 창이 보이지 않으면 작업 표시줄을 확인해 줘.' }));
+      box.appendChild(h('label', { for: 'pick-custom', class: 'field-label', text: '또는 경로를 직접 적기' }));
+      box.appendChild(h('div', { class: 'inline-row' },
+        h('input', { id: 'pick-custom', class: 'input', value: custom, placeholder: 'C:\\Work\\project  또는  /Users/me/project', autocomplete: 'off', onInput: function (e) { custom = e.target.value; }, onKeydown: function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); typed(); } } }),
+        h('button', { type: 'button', class: 'pill line sm', 'data-pick-use': '1', disabled: customBusy, text: customBusy ? '확인 중' : '사용', onClick: typed })));
+      box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: msg, hidden: !msg }));
+      box.appendChild(h('div', { class: 'acts end' },
+        h('button', { type: 'button', class: 'pill line', 'data-pick-back': '1', text: '뒤로', onClick: function () { clearTimeout(timer); introPage = 'welcome'; renderRoute(); } }),
+        h('button', { type: 'button', class: 'pill dark', 'data-pick-ok': '1', disabled: !sel || busy, text: busy ? '기억하는 중' : '이 프로젝트로', onClick: confirmPick })));
+      wrap.appendChild(box);
+    }
+    draw(); load();
+    return wrap;
   }
   function introView() {
     var d = startData, blocking = d.blocking, names = { github: 'GitHub 연결', version: '하네스 판', claude: 'Claude Code 로그인' };
+    if (introPage === 'project' && !blocking) return projectPickView();
     var rows = (d.checks && d.checks.length ? d.checks : ['github', 'version', 'claude'].map(function (id) { return { id: id, name: names[id], state: 'wait', detail: '확인하는 중이야' }; }));
     var CL = { ok: 'ok', fail: 'fail', old: 'wait', unknown: 'unk', wait: 'wait' };
-    function done() {
-      introForce = false;
-      api('POST', '/api/start-checks/seen', {}).then(function () { startData.firstRun = false; }, function () { introSkip = true; }).then(renderRoute);
-    }
+    function done() { introPage = 'project'; renderRoute(); }
     var list = h('div', { class: 'checks' }, rows.map(function (c) {
       var kids = [h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: c.name }), h('span', { class: 'ct mono', text: c.detail || '' })];
       if (c.fix && (c.state === 'fail' || c.state === 'old')) kids.push(h('span', { class: 'fix', text: c.fix }));
@@ -543,7 +638,7 @@
     var acts = blocking
       ? [h('button', { type: 'button', class: 'pill line', text: '그냥 열기', onClick: function () { introSkip = true; renderRoute(); } }),
          h('button', { type: 'button', class: 'pill dark', disabled: !!d.loading, text: d.loading ? '점검하는 중이야' : '다시 점검', onClick: function () { startPolls = 0; loadStart(true); } })]
-      : [h('button', { type: 'button', class: 'pill dark', text: '시작하기', onClick: done })];
+      : [h('button', { type: 'button', class: 'pill dark', 'data-intro-start': '1', text: '시작하기', onClick: done })];
     return h('div', { class: 'intro' }, h('section', { class: 'light intro-box' },
       h('span', { class: 'eb', text: blocking ? '점검 결과' : (d.firstRun ? '처음 열었어' : '처음 화면') }),
       h('h1', { text: blocking ? '먼저 고칠 게 있어' : 'Blueward Harness에 온 걸 환영해' }),
@@ -621,7 +716,7 @@
     var rows = sortedSessions(), L = window.BHLogic;
     var nav = h('nav', { class: 'nav', 'aria-label': '세션 목록' });
     nav.appendChild(h('div', { class: 'sh' }, h('span', { class: 'eb', text: '세션 ' + rows.length }), h('span', { class: 'eb', text: '단계 · 기억' }), foldBtn(false)));
-    var list =h('div', { class: 'nav-list' });
+    var list = h('div', { class: 'nav-list' });
     if (!rows.length && loadedOnce) list.appendChild(h('p', { class: 's-empty', text: '아직 세션이 없어. 새 작업을 시작하면 여기에 생겨.' }));
     rows.forEach(function (s) {
       var st = sideStatus(s), p = firstPending(s);
@@ -737,7 +832,7 @@
   /* ---------- 세션 (/s/:id) ---------- */
   function sessionView(root) {
     var id = route.id, detail = null, errored = null, fetching = false, timer = null;
-    var memDismissed = {}, regions = {}, parts = {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, permBusy = false, permNote = '', sent = [];
+    var memDismissed = {}, regions = {}, parts = {}, syncLegend = function () {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, permBusy = false, permNote = '', sent = [];
     var chatAll = false, chatOpen = {}, chatKey = null;  // 앞 대화를 펼쳤는지 · 긴 AI 말을 펼친 것(시각별) · 마지막으로 그린 대화 모양(새 항목 감지)
 
     function cur() { return sessions.get(id) || {}; }
@@ -794,6 +889,13 @@
       var talk = h('section', { class: 'light talk', 'aria-label': 'AI와 대화' }, parts.checks.el, regions.msgs, parts.flow.el, regions.follow);
       var side = h('aside', { class: 'sess-side', 'aria-label': '만든 산출물' }, parts.docs.el);
       page.appendChild(h('div', { class: 'sess-grid' }, talk, side));
+      // 시안 G-16: 대화 판에 막힘(✕)·확인 못 함(?) 카드가 있으면 그 아래 전체 폭으로 "표시 약속" 칸. PR 카드는 따로 늦게 그려지기도 해서 바뀔 때마다 본다.
+      regions.legend = h('div', { 'data-r': 'legend' }); page.appendChild(regions.legend);
+      syncLegend = function () {
+        var has = !!talk.querySelector('.q.blocked, .q.unsure');
+        if (has !== !!regions.legend.firstChild) regions.legend.replaceChildren.apply(regions.legend, has ? [ui.legend()] : []);
+      };
+      if (typeof window.MutationObserver === 'function') new window.MutationObserver(function () { syncLegend(); }).observe(talk, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
       region('folder'); region('subs');
       // 시안에 없는 옛 칸(도구 버튼 줄 · 권한 모드 · 검토 요청 주소와 바뀐 파일 · 일어난 일 기록 · 기술 정보)은 "자세히" 로 접는다. 기능은 그대로다.
       var fold = h('details', { class: 'more fold', 'data-fold': '1' }, h('summary', { text: '자세히 (도구 · 권한 · 검토 요청 주소 · 기록 · 기술 정보)' }));
@@ -1154,6 +1256,7 @@
       paintFiles(s);
       paintLog(s);
       paintTech(s);
+      syncLegend();
     }
 
     function paintFollow(s) {
@@ -1251,9 +1354,50 @@
       hadSession = !!(sessionOf() || {}).id;
       setTitle(isQ ? '질문' : '승인');
       (isQ ? drawQuestion : drawPermission)();
+      fetchDetail();
     }
 
     function sid() { return req.sessionId || req.session_id; }
+    /* 시안 G-07·17: 그 세션의 최근 대화(내 말 · AI 말)와 카드 아래 "AI에게 말하기" 입력창. 세션 화면의 대화 모양과 이어 요청을 그대로 따른다.
+       대화는 세션 상세에만 있어 한 번 따로 읽는다. 못 읽으면 대화 없이 카드만 보인다. */
+    var detail = null, detailTried = false, sayVal = '', sayNote = '', sayBusy = false, CHAT_SHOWN = 3;
+    function fetchDetail() {
+      if (detailTried || !req || !sid()) return;
+      detailTried = true;
+      api('GET', '/api/sessions/' + encodeURIComponent(sid())).then(function (d) { detail = d && d.session ? d.session : d; if (detail) draw(); }, function () {});
+    }
+    function sessData() { return Object.assign({}, sessionOf() || {}, detail || {}); }
+    function recentChat() {
+      var items = (Array.isArray(sessData().chat) ? sessData().chat : []).filter(function (c) { return c && (c.role === 'me' || c.role === 'ai') && String(c.text || '').trim(); });
+      return items.slice(-CHAT_SHOWN).map(function (c) {
+        if (c.role === 'me') return h('div', { class: 'me', 'data-chat': 'me', text: String(c.text) });
+        var text = String(c.text), long = text.split('\n').length > 28 || text.length > 2200;
+        var body = h('div', { class: 'report-body' + (long ? ' clip' : '') });
+        body.appendChild(window.BHMarkdown.render(text));
+        return h('div', { class: 'ai', 'data-chat': 'ai' }, h('span', { class: 'eb', text: 'AI' + (c.t ? ' · ' + clock(c.t) : '') }), body);
+      });
+    }
+    function sayBox() {
+      var s = sessData(), can = !!sid() && s.canSend !== false && s.status !== 'ended', box = h('div', { class: 'followbox', 'data-say': '1' });
+      var note = h('p', { class: 'note-accent', role: 'status', text: sayNote, hidden: !sayNote });
+      var input = h('input', { id: 'say', class: 'comp-in', value: sayVal, placeholder: 'AI에게 말하기 — 예: 잠깐, 이 파일은 지우지 말고 이름만 바꿔 줘  (/ 로 스킬, @ 로 파일)', autocomplete: 'off', disabled: !can,
+        onInput: function (e) { sayVal = e.target.value; sayNote = ''; note.textContent = ''; note.hidden = true; },
+        onKeydown: function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && !(assist && assist.isOpen())) { e.preventDefault(); send(); } } });
+      var assist = withAssist(input, function () { return s.cwd || req.cwd; });
+      var btn = h('button', { type: 'button', class: 'pill dark', disabled: !can || sayBusy, text: '보내기', onClick: send });
+      function send() {
+        var text = sayVal.trim(); if (!text || !can || sayBusy) return;
+        sayBusy = true; btn.disabled = true;
+        api('POST', '/api/sessions/' + encodeURIComponent(sid()) + '/messages', { text: text }).then(function () {
+          sayVal = ''; input.value = ''; sayNote = s.status === 'running' ? '지금 단계가 끝나면 이어서 처리합니다.' : '이 작업에 전달했습니다.';
+        }, function (e) { sayNote = '보내지 못했습니다: ' + e.message; }).then(function () { sayBusy = false; btn.disabled = false; note.textContent = sayNote; note.hidden = !sayNote; });
+      }
+      box.appendChild(h('label', { for: 'say', class: 'sr-only', text: 'AI에게 말하기' }));
+      box.appendChild(h('div', { class: 'comp' }, assist.wrap, btn));
+      box.appendChild(note);
+      if (!can) box.appendChild(h('p', { class: 'note-muted', 'data-say-why': '1', text: s.cannotSendReason || (sid() ? '이 세션에는 지금 말을 보낼 수 없어.' : '세션을 알 수 없어 말을 보낼 수 없어.') }));
+      return box;
+    }
     function ebText(isQ) {
       var s = sessionOf() || {}, open = isPending();
       return (s.flowName ? s.flowName + ' · ' : '') + (open ? (isQ ? '내 답을 기다리는 중' : '내 승인을 기다리는 중') + waitedText(req.createdAt || req.createdAtMs) : (isQ ? '처리된 질문' : '처리된 승인 요청'));
@@ -1309,12 +1453,20 @@
       /* 시안 17: 되돌릴 수 없는 일(서버가 req.risk = 'irreversible' 과 쉬운 말 사유 riskNote 를 준다)은 같은 카드에 꼬리표와 한 줄 설명을 더한다. */
       var irrev = req.risk === 'irreversible';
       var f = TOOL_FIELDS[tool], risk = irrev ? '하네스는 되돌릴 수 없는 일은 항상 사람에게 물어.' : (req.risk || req.riskNote || req.warning);
+      /* 시안 17: 단추는 행동을 그대로 말한다. 되돌릴 수 없는 일만 지우기 · 올리기를 가려내고, 나머지는 이번만 허락 / 하지 마. */
+      var cmdText = String(input && (input.command || input.file_path) || ''), noteText = String(req.riskNote || req.title || '');
+      var verbs = ['이번만 허락', '하지 마'];
+      if (irrev) {
+        if (/(^|[\s;&|])(rm|rmdir|del|erase|unlink)\s|Remove-Item|지우|삭제/i.test(cmdText + ' ' + noteText)) verbs = ['이번만 지워', '지우지 마'];
+        else if (/git\s+push|gh\s+pr\s+(create|merge)|올리|푸시/i.test(cmdText + ' ' + noteText)) verbs = ['이번만 올려', '올리지 마'];
+      }
       msgs.appendChild(h('div', { class: 'ai' }, h('span', { class: 'eb', text: 'AI' }), req.description || (irrev ? tool + ' 도구를 쓰려는데 되돌릴 수 없는 일이라 네 확인이 필요해.' : tool + ' 도구를 쓰려는데 네 확인이 필요해.')));
 
       var card = h('div', { class: 'bad' + (irrev ? ' irrev' : ''), 'data-risk': irrev ? 'irreversible' : null });
       card.appendChild(h('span', { class: 'tagx', text: irrev ? '확인 필요 · 되돌릴 수 없어' : '확인 필요' }));
       card.appendChild(h('b', { class: 'bt', text: req.title || (irrev && req.riskNote ? req.riskNote : 'Claude Code가 ' + tool + ' 도구를 쓰려고 해. 허락할까?') }));
-      if (risk) card.appendChild(h('span', { class: 'warn-line', text: typeof risk === 'string' ? risk : (risk.text || risk.message || '') }));
+      // 시안 17: 하네스 안내 줄은 강조 없이 연한 보통 글. 그 밖의 경고(req.risk 글)는 예전처럼 강조한다.
+      if (risk) card.appendChild(h('span', { class: irrev ? 'muted-line' : 'warn-line', text: typeof risk === 'string' ? risk : (risk.text || risk.message || '') }));
       if (input && input.description) card.appendChild(h('span', { class: 'sm', text: str(input.description) }));
       if (f && input && input[f[1]] != null && tool !== 'Bash') card.appendChild(h('span', { class: 'sm' }, f[0] + ': ', h('b', { text: str(input[f[1]]) })));
       if (input && input.dangerouslyDisableSandbox) card.appendChild(h('span', { class: 'warn-line', text: '샌드박스를 끄고 실행해(dangerouslyDisableSandbox)' }));
@@ -1348,16 +1500,20 @@
           sugg.length ? h('ul', { class: 'sugg-l' }, sugg.map(function (x) { return h('li', { class: 'mono', text: x }); }))
             : h('p', { class: 'sub', text: '규칙 내용을 읽지 못했어. 위 입력 전체를 확인해.' }),
           req.suggestions ? h('pre', { class: 'box scroll', tabindex: '0', text: JSON.stringify(req.suggestions, null, 2) }) : null));
-        card.appendChild(h('label', { for: 'why', class: 'field-label', text: '하지 마 를 누를 때 AI에게 전달할 이유 (선택)' }));
-        card.appendChild(h('input', { id: 'why', class: 'input', value: why, placeholder: '예: 리뷰가 끝난 뒤에 해 줘', autocomplete: 'off', onInput: function (e) { why = e.target.value; } }));
+        // 시안엔 이유 입력칸이 없어 접어 둔다(기능은 남김). 적은 이유가 있으면 펼친 채로 둔다.
+        card.appendChild(h('details', { class: 'more', 'data-why-fold': '1', open: !!why },
+          h('summary', { text: '이유 적기(선택)' }),
+          h('label', { for: 'why', class: 'field-label', text: verbs[1] + ' 를 누를 때 AI에게 전달할 이유' }),
+          h('input', { id: 'why', class: 'input', value: why, placeholder: '예: 리뷰가 끝난 뒤에 해 줘', autocomplete: 'off', onInput: function (e) { why = e.target.value; } })));
         if (sendErr) card.appendChild(h('p', { class: 'note-attn', role: 'alert', text: sendErr }));
         card.appendChild(h('div', { class: 'acts' },
-          h('button', { type: 'button', class: 'pill dark', disabled: busy, text: '이번만 허락', onClick: function () { decide('allow'); } }),
-          h('button', { type: 'button', class: 'pill line', disabled: busy, text: '하지 마', onClick: function () { decide('deny'); } }),
+          h('button', { type: 'button', class: 'pill dark', 'data-decide': 'allow', disabled: busy, text: verbs[0], onClick: function () { decide('allow'); } }),
+          h('button', { type: 'button', class: 'pill line', 'data-decide': 'deny', disabled: busy, text: verbs[1], onClick: function () { decide('deny'); } }),
           canSess ? h('button', { type: 'button', class: 'pill line', disabled: busy, text: '허용하고 이 세션에서 다시 묻지 않기', onClick: function () { decide('allow_session'); } }) : null));
         msgs.appendChild(card);
       } else { msgs.appendChild(card); msgs.appendChild(resultBlock()); }
       panel.appendChild(msgs);
+      if (isPending()) panel.appendChild(sayBox());
       page.appendChild(panel);
       root.appendChild(page);
     }
@@ -1395,6 +1551,7 @@
       var multi = qsList.length > 1, open = isPending();
       head(page, true, open ? (multi ? 'AI가 ' + qsList.length + '가지를 물어봤어 · 답하면 이어서 일해' : 'AI가 물어본 게 있어 · 답하면 이어서 일해') : '이미 처리된 질문이야');
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
+      recentChat().forEach(function (el) { msgs.appendChild(el); });  // 시안 G-07: 질문 카드 위에 그 세션의 최근 대화
       qsList.forEach(function (q, i) {
         var opts = q.options || [], hasPrev = opts.some(function (o) { return o && o.preview; });
         var card = h('div', { class: 'q', role: 'group', 'aria-labelledby': 'qh-' + i });
@@ -1413,8 +1570,8 @@
           var sel = opts.filter(function (o) { return o && o.label === picked[i][picked[i].length - 1]; })[0];
           card.appendChild(h('div', { class: 'q-body' }, list, h('pre', { class: 'box lg q-preview' + (sel && sel.preview ? '' : ' empty'), 'aria-label': '선택한 항목 미리보기', text: sel && sel.preview ? sel.preview : '항목을 고르면 미리보기가 여기에 보여.' })));
         } else card.appendChild(list);
-        card.appendChild(h('label', { for: 'other-' + i, class: 'field-label', text: '다른 답이 있으면 직접 적어 줘' }));
-        card.appendChild(h('input', { id: 'other-' + i, class: 'input', value: otherTexts[i], placeholder: '직접 입력', autocomplete: 'off', disabled: !open || busy,
+        card.appendChild(h('label', { for: 'other-' + i, class: 'sr-only', text: '다른 답이 있으면 직접 적어 줘' }));  // 시안엔 보이는 글 없이 입력칸만
+        card.appendChild(h('input', { id: 'other-' + i, class: 'input q-other', value: otherTexts[i], placeholder: '다른 답이 있으면 직접 적어 줘 — 예: 구매팀 김OO, 10/28 회의', autocomplete: 'off', disabled: !open || busy,
           onInput: function (e) {
             otherTexts[i] = e.target.value;
             if (!q.multiSelect && e.target.value.trim() && picked[i].length) { picked[i] = []; card.querySelectorAll('.qopt').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); }); }
@@ -1430,6 +1587,7 @@
         if (sendErr) msgs.appendChild(h('p', { class: 'note-attn', role: 'alert', text: sendErr }));
       } else msgs.appendChild(resultBlock());
       panel.appendChild(msgs);
+      if (open) panel.appendChild(sayBox());
       page.appendChild(panel);
       root.appendChild(page);
       syncSend();
@@ -1639,6 +1797,11 @@
     var starting = false, startedId = null, startErr = '', alive = true, browseBusy = false, modelErr = false, advOpen = false;
     var BL = window.BHLogic, ready = null, readyCwd = null, readySig = 'null';
     var recentTimer = null, recentTries = 0, intro = null;  // intro: 준비 안 된 폴더를 처음 골랐을 때 보이는 "프로젝트 준비" 안내가 가리키는 폴더
+    if (firstPickFolder) {  // 첫 실행 02 에서 준비 안 된 폴더를 골라 왔다: 그 폴더로 바로 03(프로젝트 준비) 안내를 확인한다
+      draft.cwd = firstPickFolder; draft.picked = null;
+      var firstP = firstPickFolder; firstPickFolder = null;
+      setTimeout(function () { if (alive) checkIntro(firstP); }, 0);
+    }
     var tools = ui.toolsRow(function () { return { session: null, cwd: draft.cwd, onInsert: insertTool }; });
     var folderWarn = ui.folderNotice(), chooser = ui.flowChooser(), preview = ui.flowPreview();
     function insertTool(skill) {
@@ -1695,13 +1858,6 @@
           watchReady();
         }, function () {});
       }, 1500);
-    }
-    // 폴더 카드 칩: 준비됨(세션이 있으면 수) / 준비 필요 / 읽는 중 / 확인 못 함. 읽지 못한 것을 준비됨이나 준비 필요로 뭉개지 않는다.
-    function readyChip(f) {
-      if (f.ready === 'yes') return { cls: 'ok', text: typeof f.sessions === 'number' && f.sessions > 0 ? '준비됨 · 세션 ' + f.sessions : '준비됨' };
-      if (f.ready === 'no') return { cls: 'warn', text: '준비 필요' };
-      if (f.checking) return { cls: '', text: '확인하는 중' };
-      return { cls: 'unk', text: '확인 못 함' };
     }
     /* 기본 폴더 순서: 세션 화면에서 왔으면 그 세션 폴더 → 콘솔에서 마지막으로 작업을 시작한 폴더(서버가 기억) → 없으면 기본값 없이 목록을 펼친다.
        다른 세션이 움직인 흔적으로는 정하지 않는다. */
@@ -1806,7 +1962,7 @@
     }
     function drawIntro(page) {
       var nm = baseName(draft.cwd) || draft.cwd;
-      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '1단계 · 프로젝트 준비' }), h('h1', { text: nm + ' 준비하기' }), h('p', { class: 'line', text: '이 폴더엔 아직 하네스 구조가 없어' })));
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '1단계 · 프로젝트 준비' }), h('h1', { title: draft.cwd, text: nm + ' 준비하기' }), h('p', { class: 'line', text: '이 폴더엔 아직 하네스 구조가 없어' })));  // 전체 경로는 제목 title 로(시안 G-03 엔 경로 줄이 없다)
       var panel = h('section', { class: 'light newbox', 'data-folder-intro': '1' });
       panel.appendChild(h('div', { class: 'ask' },
         h('span', { class: 'eb', text: '네 차례' }),
@@ -1823,7 +1979,6 @@
         h('div', { class: 'lt' }, h('span', { class: 'eb', text: '만든 뒤 할 일' }), ['고객 양식 파일을 templates/ 에 넣기', 'GitHub에 올려서 승인받기', '첫 작업 시작'].map(function (t, i) {
           return h('div', { class: 'srow2' }, h('span', { class: 'lm', text: String(i + 1) }), h('span', { text: t }));
         }))));
-      panel.appendChild(h('p', { class: 'note-muted mono', text: draft.cwd }));
       page.appendChild(panel);
     }
     function validateCustom() {
@@ -2230,7 +2385,7 @@
       sec.appendChild(set('연결 상태', h('div', null, crow('GitHub', conn.gh), crow('하네스 판', conn.ver), crow('프로젝트', conn.proj))));
 
       sec.appendChild(set('처음 화면', h('div', null,
-        h('button', { type: 'button', class: 'pill line', 'data-intro-again': '1', text: '처음 화면 다시 보기', onClick: function () { introForce = true; introSkip = false; if (!startData) startData = { firstRun: false, blocking: false, checks: [] }; renderRoute(); loadStart(false); } }),
+        h('button', { type: 'button', class: 'pill line', 'data-intro-again': '1', text: '처음 화면 다시 보기', onClick: function () { introForce = true; introSkip = false; introPage = 'welcome'; if (!startData) startData = { firstRun: false, blocking: false, checks: [] }; renderRoute(); loadStart(false); } }),
         h('p', { class: 'note-muted', text: '시작할 때 한 번 보이는 환영 화면과 자동 점검을 다시 봐.' }))));
 
       var model = modelChoice(), effort = effortChoice();

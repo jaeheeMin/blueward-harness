@@ -871,18 +871,24 @@
         if (box.dataset.sig !== sig || !box.isConnected) return;
         box.dataset.ready = '1';
         clear(box);
-        var lines = [];
+        var lines = [], unk = [];
         rs.forEach(function (r, i) {
           var name = kit.baseName(cwds[i]) || cwds[i];
-          if (!r.ok) { lines.push(name + ': 프로젝트 준비 여부를 확인하지 못했어요 - ' + failText(r.error)); return; }
+          if (!r.ok) { unk.push(name + ': 프로젝트 준비 여부를 확인하지 못했어요 - ' + failText(r.error)); return; }
           var pn = L.projectNotice(r.data);
           if (pn) lines.push(name + ': ' + pn.text);
           else { var fn = L.formsNotice(r.data); if (fn) lines.push(name + ': ' + fn.text); }
         });
+        // 할 일 안내는 시안의 흰 칸(.lt). 정말 못 읽은 폴더만 "? 확인 못 함" 모양(보라 점선)을 쓴다.
         if (lines.length) {
-          box.appendChild(h('section', { class: 'approval-card unknown', 'data-project-card': '1' },
+          box.appendChild(h('section', { class: 'lt', 'data-project-card': '1' },
+            h('span', { class: 'eb', text: '프로젝트 준비' }),
+            lines.map(function (t) { return h('div', { class: 'srow2' }, h('span', null, h('b', { class: 'lw', text: '! ' }), t)); })));
+        }
+        if (unk.length) {
+          box.appendChild(h('section', { class: 'approval-card unknown', 'data-project-card': 'unknown' },
             h('h2', { class: 'sect-h', text: '프로젝트 준비' }),
-            h('ul', { class: 'plain-list' }, lines.map(function (t) { return h('li', null, h('span', { class: 'note-attn', text: t })); }))));
+            h('ul', { class: 'plain-list' }, unk.map(function (t) { return h('li', null, h('span', { class: 'note-attn', text: t })); }))));
         }
       });
     }
@@ -948,8 +954,16 @@
     }
     function emptyHome(root, approvals, projects) {
       var page = h('div', { class: 'page home' });
-      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '내 일' }), h('h1', { text: '아직 시작한 작업이 없어' }),
-        h('p', { class: 'line', text: 'Claude Code 세션을 시작하면 왼쪽 목록에 생겨. 지금 바로 맡길 일이 있으면 아래에서 시작해.' })));
+      var sub = h('p', { class: 'line', text: 'Claude Code 세션을 시작하면 왼쪽 목록에 생겨. 지금 바로 맡길 일이 있으면 아래에서 시작해.' });
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '내 일' }), h('h1', { text: '아직 시작한 작업이 없어' }), sub));
+      // 시안 G-04: 서버가 기억한 마지막 폴더가 준비됐으면 "프로젝트 준비 끝 · 이름". 못 읽거나 준비됨이 아니면 위 문구 그대로.
+      api('GET', '/api/folders/last').then(function (d) {
+        if (!d || !d.path) return null;
+        return api('GET', '/api/folders/recent').then(function (r) {
+          var hit = kit.listOf(r, 'folders').filter(function (f) { return f && f.path === d.path && f.ready === 'yes'; })[0];
+          if (hit && sub.isConnected) sub.textContent = '프로젝트 준비 끝 · ' + (d.name || kit.baseName(d.path));
+        });
+      }).then(null, function (e) { console.debug('마지막 폴더를 읽지 못했습니다', e); });
       var grid = h('div', { class: 'kinds' }, KINDS.map(function (k) {
         return h('button', { type: 'button', class: 'kind', 'data-kind': k[0], onClick: function () { startNew(k[2]); } }, h('b', { text: k[0] }), h('small', { text: k[1] }));
       }));
@@ -959,21 +973,20 @@
         h('button', { type: 'submit', class: 'pill dark', text: '새 작업으로' }));
       page.appendChild(h('section', { class: 'light' }, h('h2', { text: '첫 작업을 시작해 볼까?' }),
         h('p', { class: 'lm', text: '자주 하는 일이야. 눌러도 되고, 아래에 하고 싶은 일을 그냥 적어도 돼.' }), grid, form));
-      page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', '0', ''), tile('일하는 중', '0', ''), tile('만든 산출물', '확인 못 함', 'unk')));
+      page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', '0', ''), tile('일하는 중', '0', ''), tile('만든 산출물', '0', '')));
       approvals.className = 'approvals lt';  // 세션이 없을 땐 표 아래 칸이 없으니 따로 선 흰 칸. 비면 숨는다(.lt:empty)
       page.appendChild(approvals);
       page.appendChild(projects);
-      page.appendChild(legend());
       root.appendChild(page);
     }
     // 표시 약속(시안 16): 화면 어디서나 같은 뜻으로 쓰는 세 가지 표시
     function legend() {
-      // 시안 G-16: 흰 칸(.lt) 안에 줄(표시 | 뜻)
-      return h('div', { class: 'grid3' }, h('div', { class: 'lt legend', role: 'group', 'aria-label': '표시 약속' },
+      // 시안 G-16: 막힘·확인 못 함 카드가 있는 세션 화면 아래, 전체 폭 흰 칸(.lt) 안에 줄(표시 | 뜻). 홈에는 없다(G-04·G-11).
+      return h('div', { class: 'lt legend', role: 'group', 'aria-label': '표시 약속' },
         h('span', { class: 'eb', text: '표시 약속' }),
         h('div', { class: 'srow2' }, h('b', { class: 'lf', text: '✕ 막힘' }), h('span', { text: '잘못을 찾음, 고쳐야 넘어가' })),
         h('div', { class: 'srow2' }, h('b', { class: 'lu', text: '? 확인 못 함' }), h('span', { text: '검사 못 함, 통과로도 실패로도 안 침' })),
-        h('div', { class: 'srow2' }, h('b', { class: 'lw', text: '! 내 차례' }), h('span', { text: '네 답이나 확인이 필요' }))));
+        h('div', { class: 'srow2' }, h('b', { class: 'lw', text: '! 내 차례' }), h('span', { text: '네 답이나 확인이 필요' })));
     }
     function homeView(root) {
       var approvals = h('div', { class: 'approvals' });
@@ -1063,7 +1076,6 @@
           approvals);
         page.appendChild(h('div', { class: 'grid3' }, prBox, recent));
         page.appendChild(projects);
-        page.appendChild(legend());
         root.appendChild(page);
         recentCard(recent);
         approvalCard(approvals, showPr);
@@ -1075,7 +1087,7 @@
 
     return {
       stepBar: stepBar, prCard: prCard, flowPreview: flowPreview, toolsRow: toolsRow, startChecksPanel: startChecksPanel, flowPanel: flowPanel, folderNotice: folderNotice,
-      docsPanel: docsPanel, docsPage: docsPage, flowsFor: flowsFor, approvalsFor: approvalsFor, flowChooser: flowChooser, devReadyFor: devReadyFor, askCard: askCard, homeView: homeView, closeModal: closeModal
+      docsPanel: docsPanel, docsPage: docsPage, flowsFor: flowsFor, approvalsFor: approvalsFor, flowChooser: flowChooser, devReadyFor: devReadyFor, askCard: askCard, homeView: homeView, legend: legend, closeModal: closeModal
     };
   }
 })();

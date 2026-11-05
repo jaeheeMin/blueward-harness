@@ -1588,6 +1588,15 @@ class App:
             return 200, {"path": path, "name": os.path.basename(path) or path}
         return 200, {"path": None, "name": ""}
 
+    def a_last_folder_set(self, g, q, b):
+        """첫 실행 "프로젝트 고르기"(시안 G-02)에서 고른 폴더를 마지막 폴더로 기억한다. 실제 폴더가 아니면 거부."""
+        info = self.folder_info(b.get("path") if isinstance(b, dict) else None)
+        if not info["ok"]:
+            raise HttpError(400, info["error"])
+        self.store.add_folder(info["path"])
+        self.save_last_folder(info["path"])
+        return 200, {"path": info["path"], "name": info["name"]}
+
     # 알림 설정(시안 19). 상태 폴더 아래 notify.json — 브라우저 저장소가 아니라 이 PC 의 콘솔 설정이다.
     def read_notify(self) -> dict:
         f = self.store.dir / NOTIFY_FILE if self.store.dir else None
@@ -1864,6 +1873,7 @@ ROUTES = [
     ("GET", re.compile(rf"/api/new/{S}/preview"), App.a_preview),
     ("GET", re.compile(r"/api/folders/recent"), App.a_recent),
     ("GET", re.compile(r"/api/folders/last"), App.a_last_folder),
+    ("POST", re.compile(r"/api/folders/last"), App.a_last_folder_set),
     ("GET", re.compile(r"/api/settings/notify"), App.a_notify_get),
     ("PUT", re.compile(r"/api/settings/notify"), App.a_notify_put),
     ("GET", re.compile(r"/api/settings/ask"), App.a_ask_get),

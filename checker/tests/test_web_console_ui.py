@@ -530,7 +530,7 @@ const cases = {
     const kinds = find(root, e => e.attrs['data-kind']);
     assert.deepStrictEqual(kinds.map(k => k.attrs['data-kind']), ['요구사항정의서', '개발 Spec', '사용자 매뉴얼', 'CTS 관리대장', 'Role 정리', '개발하기']);
     const tiles = find(root, e => (e.attrs['class'] || '').split(' ').includes('tile2'));
-    assert.deepStrictEqual(tiles.map(t => t.textContent), ['내 차례0', '일하는 중0', '만든 산출물확인 못 함']);
+    assert.deepStrictEqual(tiles.map(t => t.textContent), ['내 차례0', '일하는 중0', '만든 산출물0']);  // 시안 G-04 는 세 타일 모두 0
     kinds[0].click();
     assert.ok(went[0].includes('요구사항정의서'));
     // 입력창에 적은 글은 새 작업으로 넘어간다
@@ -976,9 +976,17 @@ def test_work_screen_irreversible_card_is_yellow_and_cannot_be_remembered(tmp_pa
     sess = [_session("s1", pendingRequestIds=["p1", "p2"])]
     got = _smoke(tmp_path, "r/p1", sess, [rm, plain])
     text, dump = got["text"], got["dump"]
-    for need in ("확인 필요 · 되돌릴 수 없어", "작업 폴더 밖 파일을 쓰려 해", "하네스는 되돌릴 수 없는 일은 항상 사람에게 물어.", "이번만 허락", "하지 마", "자세히 (명령 원문)"):
-        assert need in text, need
-    assert "<div.bad.irrev>" in dump
+    for need in ("확인 필요 · 되돌릴 수 없어", "작업 폴더 밖 파일을 쓰려 해", "하네스는 되돌릴 수 없는 일은 항상 사람에게 물어.", "이번만 지워", "지우지 마", "자세히 (명령 원문)", "이유 적기(선택)"):
+        assert need in text, need  # 단추는 행동을 그대로 말한다(시안 17)
+    assert "이번만 허락" not in text
+    assert "<div.bad.irrev>" in dump and "<span.muted-line>" in dump and "<span.warn-line>" not in dump  # 하네스 안내 줄은 강조 없이 연한 글
+    assert "<details.more>" in dump and "AI에게 말하기" in text  # 이유 입력칸은 접혀 있고, 카드 아래에 말하기 입력창이 있다
+    push = dict(rm, id="p4", toolInput={"command": "git push origin main"}, riskNote="GitHub 에 올리려 해")
+    up = _smoke(tmp_path, "r/p4", [_session("s1", pendingRequestIds=["p4"])], [push])
+    assert "이번만 올려" in up["text"] and "올리지 마" in up["text"]
+    other = dict(rm, id="p5", toolInput={"command": "chmod 777 a"}, riskNote="권한을 바꾸려 해")
+    gen = _smoke(tmp_path, "r/p5", [_session("s1", pendingRequestIds=["p5"])], [other])
+    assert "이번만 허락" in gen["text"] and "하지 마" in gen["text"]
     assert "irreversible" not in text  # 값 그대로를 화면에 쓰지 않는다
     assert "다시 묻지 않기" not in text  # 되돌릴 수 없는 일은 기억시키지 못한다
     got = _smoke(tmp_path, "r/p2", sess, [rm, plain])
@@ -1223,6 +1231,75 @@ def test_intro_not_shown_after_first_run_and_old_version_is_a_strip(tmp_path):
     assert "하네스 새 판 0.10.169" in got["ann"] and "/harness:update" in got["ann"] and "내 차례" in got["ann"]  # 내 차례 띠와 함께 둘 다 보인다
     got = _smoke(tmp_path, "settings", [_session("s1")], extra=_start())
     assert "처음 화면 다시 보기" in got["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_first_run_start_leads_to_project_pick_then_home_or_prepare_screen(tmp_path):
+    """시안 G-01 -> G-02: [시작하기] 는 바로 홈이 아니라 프로젝트 고르기로 간다. 확정은 [이 프로젝트로]."""
+    extra = dict(_folder_rows(), **_start(firstRun=True), **{"POST /api/folders/last": {"path": "C:/p/ready2", "name": "ready2"}, "POST /api/start-checks/seen": {"firstRun": False}})
+    start = [{"click": "[data-intro-start]"}]
+    got = _smoke(tmp_path, "", [], extra=extra, actions=start)
+    text, dump = got["text"], got["dump"]
+    for need in ("1단계 · 프로젝트 고르기", "어느 고객사 프로젝트에서 일할까?", "최근에 쓴 폴더야. 처음이면 GitHub에서 받은 고객사 저장소 폴더를 골라.",
+                 "ready2C:/p/ready2준비됨 · 세션 2", "needsC:/p/needs준비 필요", "다른 폴더 찾아보기", "뒤로", "이 프로젝트로"):
+        assert need in text, need
+    assert "환영해" not in text and not got["posts"]  # 아직 아무것도 기억시키지 않았다
+    assert "data-pick-ok" in (STATIC / "app.js").read_text(encoding="utf-8") and "disabled: !sel || busy" in (STATIC / "app.js").read_text(encoding="utf-8")  # 고르기 전에는 [이 프로젝트로] 가 막혀 있다
+    # 카드를 눌러도 확정되지 않는다
+    sel = _smoke(tmp_path, "", [], extra=extra, actions=start + [{"click": "[data-pick-folder]", "index": 0}])
+    assert not sel["posts"]
+    # [이 프로젝트로] -> 마지막 폴더 기억 + 첫 실행 표시, 준비된 폴더면 홈으로
+    ok = _smoke(tmp_path, "", [], extra=extra, actions=start + [{"click": "[data-pick-folder]", "index": 0}, {"click": "[data-pick-ok]"}])
+    posts = [(p[0], p[1]) for p in ok["posts"]]
+    assert ("POST", "/api/folders/last") in posts and ("POST", "/api/start-checks/seen") in posts
+    assert "C:/p/ready2" in [p[2] for p in ok["posts"] if p[1] == "/api/folders/last"][0] and ok["path"] == "/"
+    assert "1단계 · 프로젝트 고르기" not in ok["text"]
+    # 준비 안 됨 + 안내를 아직 안 봤으면 새 작업 화면의 프로젝트 준비(03)
+    shown = dict(extra, **{"GET /api/folders/intro": {"ready": "no", "seen": False, "show": True}, "POST /api/folders/intro/seen": {"seen": True},
+                           "POST /api/folders/last": {"path": "C:/p/needs", "name": "needs"}})
+    prep = _smoke(tmp_path, "", [], extra=shown, actions=start + [{"click": "[data-pick-folder]", "index": 2}, {"click": "[data-pick-ok]"}])
+    assert prep["path"] == "/new" and "needs 준비하기" in prep["text"] and "이 폴더엔 아직 하네스 구조가 없어" in prep["text"]
+    # 안내를 이미 봤으면 홈
+    seen = dict(shown, **{"GET /api/folders/intro": {"ready": "no", "seen": True, "show": False}})
+    home = _smoke(tmp_path, "", [], extra=seen, actions=start + [{"click": "[data-pick-folder]", "index": 2}, {"click": "[data-pick-ok]"}])
+    assert home["path"] == "/" and "준비하기" not in home["text"]
+    # [뒤로] -> 01
+    back = _smoke(tmp_path, "", [], extra=extra, actions=start + [{"click": "[data-pick-back]"}])
+    assert "환영해" in back["text"] and "시작하기" in back["text"] and not back["posts"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_project_pick_without_recent_folders_and_settings_replay(tmp_path):
+    empty = dict(_start(firstRun=True), **{"GET /api/folders/recent": {"folders": []}})
+    got = _smoke(tmp_path, "", [], extra=empty, actions=[{"click": "[data-intro-start]"}])
+    assert "최근에 쓴 폴더가 없어. 아래에서 찾아보거나 경로를 적어 줘." in got["text"] and "다른 폴더 찾아보기" in got["text"] and "<button.folder-opt.proj>" not in got["dump"]
+    # 설정의 "처음 화면 다시 보기" 도 01 부터 시작해 02 로 이어진다
+    again = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_start(), **_folder_rows()), actions=[{"click": "[data-intro-again]"}, {"click": "[data-intro-start]"}])
+    assert "어느 고객사 프로젝트에서 일할까?" in again["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_empty_home_subtitle_names_the_remembered_ready_project(tmp_path):
+    ready = dict(_folder_rows(), **{"GET /api/folders/last": {"path": "C:/p/ready2", "name": "ready2"}})
+    assert "프로젝트 준비 끝 · ready2" in _smoke(tmp_path, "", [], extra=ready)["text"]
+    needs = dict(_folder_rows(), **{"GET /api/folders/last": {"path": "C:/p/needs", "name": "needs"}})
+    assert "프로젝트 준비 끝" not in _smoke(tmp_path, "", [], extra=needs)["text"]
+    assert "Claude Code 세션을 시작하면" in _smoke(tmp_path, "", [], extra=_folder_rows())["text"]  # 기억한 폴더가 없으면 지금 문구 그대로
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_question_and_permission_screens_show_chat_and_say_box(tmp_path):
+    chat = [{"t": 1, "role": "me", "text": "구매오더 앱 써 줘"}, {"t": 2, "role": "ai", "text": "두 가지만 물어볼게."}]
+    q = {"id": "q1", "sessionId": "s1", "kind": "question", "status": "pending",
+         "questions": [{"question": "얼마나 급해?", "header": "우선순위", "options": [{"label": "반드시 필요"}]}]}
+    got = _smoke(tmp_path, "r/q1", [_session("s1", pendingRequestIds=["q1"], chat=chat)], [q])
+    dump, text = got["dump"], got["text"]
+    assert "구매오더 앱 써 줘" in text and "두 가지만 물어볼게." in text and "AI에게 말하기" in text
+    assert text.index("구매오더 앱 써 줘") < text.index("얼마나 급해?") < text.index("답 보내기") < text.index("AI에게 말하기")  # 대화 -> 질문 카드 -> 답 보내기 -> 말하기
+    assert "<input.input.q-other>" in dump and "<label.sr-only>" in dump and "다른 답이 있으면 직접 적어 줘" in text  # 보이는 글 없이 입력칸 하나(label 은 sr-only)
+    # 보낼 수 없는 세션은 입력창이 막히고 이유가 보인다
+    no = _smoke(tmp_path, "r/q1", [_session("s1", pendingRequestIds=["q1"], chat=chat, canSend=False, cannotSendReason="터미널에서 연 세션이라 콘솔에서 말할 수 없어.")], [q])
+    assert "터미널에서 연 세션이라 콘솔에서 말할 수 없어." in no["text"]
 
 
 def _wn(*versions, current="0.10.186"):

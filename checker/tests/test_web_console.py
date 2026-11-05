@@ -1058,6 +1058,21 @@ def test_last_folder_is_saved_on_start_in_state_dir_and_ignored_when_gone(mconso
     assert c.call("GET", "/api/folders/last")[1]["path"] is None
 
 
+def test_last_folder_can_be_set_from_first_run_project_pick(mconsole):
+    """시안 G-02 [이 프로젝트로]: POST /api/folders/last 가 고른 폴더를 마지막 폴더로 기억한다."""
+    c = mconsole
+    want = os.path.realpath(str(c.work))
+    status, body, _ = c.call("POST", "/api/folders/last", {"path": str(c.work)})
+    assert status == 200 and body == {"path": want, "name": os.path.basename(want)}
+    assert c.call("GET", "/api/folders/last")[1]["path"] == want  # 읽기 API 가 그대로 돌려준다
+    assert json.loads((c.state / console_server.LAST_FOLDER_FILE).read_text(encoding="utf-8"))["path"] == want  # 브라우저가 아니라 상태 폴더
+    assert want in [f["path"] for f in c.call("GET", "/api/folders/recent")[1]]  # 최근 폴더에도 오른다
+    for bad in ({"path": str(c.work / "nope")}, {"path": ""}, {}, {"path": 5}):
+        assert c.call("POST", "/api/folders/last", bad)[0] == 400, bad  # 없는 폴더 · 빈 값은 거부
+    assert c.call("GET", "/api/folders/last")[1]["path"] == want  # 거부한 요청은 기억을 바꾸지 않는다
+    assert c.call("POST", "/api/folders/last", {"path": str(c.work)}, cookie=False)[0] == 401  # 쿠키 인증이 필요하다
+
+
 # ---- gitstate ----
 
 def fake_runner(table):

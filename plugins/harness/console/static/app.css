@@ -89,7 +89,7 @@ ul, ol { padding: 0; }
 .fold-btn { flex: none; display: grid; place-items: center; width: 28px; height: 28px; margin-left: 8px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); }
 .fold-btn:hover { background: var(--soft); color: var(--text); }
 .rail .fold-btn { margin: 0; }
-.nav-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.nav-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .nav-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; }
 .srow { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: var(--rc); background: var(--surface); border: 1.5px solid transparent; }
 .srow:hover { border-color: var(--line2); }
@@ -188,6 +188,7 @@ select.input option { background: var(--surface); color: var(--text); }
 .banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 14px 18px; border-radius: var(--rc); background: var(--attn); color: var(--lightink); }
 .banner.info { margin-top: 24px; padding: 6px 16px; border-radius: 10px; border: 1px solid var(--line2); background: transparent; color: var(--sec); }
 .banner a { display: inline-flex; align-items: center; color: var(--text); font-weight: 600; }
+.banner:not(.info) a { color: var(--lightink); text-decoration: underline; text-underline-offset: 3px; }  /* 노란 채움 위 흰 글자 방지 */
 .conn { position: sticky; top: 8px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-height: 44px; margin: 0 0 20px; padding: 4px 16px; border-radius: 10px; background: var(--bg); border: 1px solid var(--attn); color: var(--attn); font-weight: 500; }
 
 .report-body { padding: 8px 20px 18px; }
@@ -662,6 +663,8 @@ table.list .unk { color: #5a4bc2; }
 .bad .sm { font-size: 13.5px; overflow-wrap: anywhere; }
 .bad .warn-line { font-size: 13px; font-weight: 600; color: #7a5600; }
 .bad .warn-line::before { content: '! '; font-weight: 800; }
+.bad .muted-line { font-size: 13px; color: var(--lmuted); }  /* 시안 17: 하네스 안내 줄은 강조 없이 연한 보통 글 */
+.input.q-other { min-height: 0; padding: 9px 12px; border-radius: 12px; font: inherit; }  /* 시안 G-07: 보기 바로 아래 입력칸 하나 */
 .followbox { margin-top: 2px; }
 .followbox p { margin: 0; }
 .comp .assist-wrap { flex: 1; min-width: 0; }
@@ -838,7 +841,7 @@ details.more dl.rows { margin-top: 8px; }
 .legend b { font-weight: 600; }
 .legend .lf { color: var(--danger); }
 .legend .lu { color: #5a4bc2; }
-.legend .lw { color: #7a5600; }
+.legend .lw, .lt .lw { color: #7a5600; }
 
 /* 세션 화면 아래 "자세히" 접이식 */
 details.fold > summary { color: var(--muted); }
@@ -865,6 +868,7 @@ details.fold > [data-r]:empty { display: none; }
 .drow:hover { background: var(--stbg); }
 .drow.on { width: calc(100% + 16px); margin: 0 -8px; padding: 8px; background: var(--okbg); }
 .drow.sub { margin-left: 14px; width: calc(100% - 14px); }
+.drow.sub.on { margin: 0 -8px 0 6px; width: calc(100% - 14px + 16px); }  /* 고른 하위 줄도 들여쓰기 유지 */
 .dn { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .dn b { font-weight: 600; overflow-wrap: anywhere; }
 .dn small { font-size: 12px; color: var(--lmuted); overflow-wrap: anywhere; }
@@ -920,7 +924,9 @@ details.fold > [data-r]:empty { display: none; }
   .dlist { max-width: none; }
 }
 /* 첫 화면 · 자동 점검 (시안 01): 헤더 · 목록 없이 가운데 밝은 판 하나. 막는 문제 = ✕ 줄 + 고치는 법. */
-#app[data-intro="1"] .top, #app[data-intro="1"] .side, #app[data-intro="1"] .ann-slot { display: none; }
+/* 시안 G-01: 머리줄엔 로고만 남기고(메뉴·설정 없음), 카드는 화면 가운데(.center{flex:1;align-items:center;justify-content:center;padding:30px}) */
+#app[data-intro="1"] .top > :not(.brand), #app[data-intro="1"] .side, #app[data-intro="1"] .ann-slot { display: none; }
+#app[data-intro="1"] .intro { box-sizing: border-box; min-height: 100%; align-items: center; padding: 30px 0; }
 #app[data-intro="1"] .shell { grid-template-columns: minmax(0, 1fr); padding: 0 20px; }
 .ann.note { background: var(--attn); color: var(--lightink); }
 .ann.note:hover { color: var(--lightink); }
