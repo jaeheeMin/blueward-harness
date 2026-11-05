@@ -87,7 +87,8 @@ def touches_version(path: str) -> bool:
 
 
 RETRY_HINT = (
-    "다음: 이 실행을 다시 돌리십시오(Actions 의 Re-run). 계속 같으면 부르는 workflow 의 permissions"
+    "다음: 검사를 다시 돌려 줘: GitHub 의 이 PR 화면에서 아래 검사 목록의 실패한 검사 → Details → 오른쪽 위 'Re-run jobs'(다시 돌리기)를 누르거나, "
+    "Claude 에게 '이 PR 검사 다시 돌려 줘' 라고 하면 돼(내 PR 이면 Claude 가 `gh run rerun --failed` 로 다시 돌린다). 계속 같으면 부르는 workflow 의 permissions"
     "(contents: read, pull-requests)를 확인하십시오."
 )
 

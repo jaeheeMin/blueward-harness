@@ -1110,8 +1110,8 @@ class App:
             out.update(unknown=True, reason=why)
         elif not_repo:
             out.update(unknown=True, reason="git 저장소가 아니라 커밋 여부를 알 수 없어요.")
-        elif isinstance(gap, dict) and now - gap.get("at", 0) <= GAP_NOTICE_SECONDS:  # 못 읽은 동안 커밋된 문서가 빠졌을 수 있다. 영구 경고는 피하려 일정 시간만 알린다
-            out.update(unknown=True, reason=f"{time.strftime('%H:%M', time.localtime(gap['at']))} 에 git 상태를 읽지 못해 그 사이 커밋된 문서가 빠졌을 수 있어요.")
+        elif isinstance(gap, dict) and now - gap.get("at", 0) <= GAP_NOTICE_SECONDS:  # 지금은 읽었다. 못 읽은 동안 커밋된 문서가 빠졌을 수 있다는 안내만 하고(note) 파일별 칩은 덮지 않는다. 영구 경고는 피하려 일정 시간만 알린다
+            out["note"] = f"{time.strftime('%H:%M', time.localtime(gap['at']))} 에 git 상태를 읽지 못해 그 사이 커밋된 문서가 빠졌을 수 있어요."
         return 200, out
 
     def a_file_preview(self, g, q, b):

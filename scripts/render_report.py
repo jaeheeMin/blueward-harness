@@ -130,7 +130,8 @@ def _render_version_overlap(result: dict) -> list[str]:
             + ("SRS 의 `버전:` 줄이 없는 문서 내용 문제입니다. 위 메시지의 '다음' 대로 고치십시오. 다시 돌려도 같습니다."
                if result.get("no_version_line") else
                "**문서의 문제가 아닙니다.** 위 문서 검사 결과는 그대로 유효합니다. "
-               + ("이 실행을 다시 돌려 보십시오(Re-run). 계속 같으면 저장소 담당자에게 알리십시오."
+               + ("검사를 다시 돌려 줘: GitHub 의 이 PR 화면에서 아래 검사 목록의 실패한 검사 → Details → 오른쪽 위 'Re-run jobs'(다시 돌리기)를 누르거나, "
+                   "Claude 에게 '이 PR 검사 다시 돌려 줘' 라고 하면 돼(내 PR 이면 Claude 가 `gh run rerun --failed` 로 다시 돌린다). 계속 같으면 저장소 담당자에게 알려 줘."
                   if result.get("read_failure") else "저장소 담당자에게 알리십시오.")),
         ]
         return out

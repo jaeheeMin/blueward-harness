@@ -107,7 +107,7 @@ def test_DEV_를_못_찾으면_위반이고_제목_끝에_적으라고_안내(tm
     code, result, md = run(Gh(title="기능 추가", branch="feat/1-x", base_files=SPEC10), tmp_path, capsys)
     assert code == 1 and result["items"][0]["kind"] == "no_dev"
     assert "<!-- spec-ready -->" in md and "(DEV-xxx)" in md
-    assert "새 커밋을 올리거나 Actions 에서 Re-run" in md
+    assert "새 커밋을 올리거나" in md and "Re-run jobs" in md and "gh run rerun --failed" in md
 
 
 def test_Spec_이_base_에_없으면_위반이고_harness_spec_을_안내(tmp_path, capsys):
