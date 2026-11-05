@@ -904,6 +904,17 @@ details.fold > [data-r]:empty { display: none; }
 #app[data-intro="1"] .shell { grid-template-columns: minmax(0, 1fr); padding: 0 20px; }
 .ann.note { background: var(--attn); color: var(--lightink); }
 .ann.note:hover { color: var(--lightink); }
+/* 판이 바뀐 뒤 홈 맨 위 "이번에 바뀐 것" 카드(#647) */
+.wn { max-width: 1040px; margin: 8px 0 16px; padding: 16px 20px; border-radius: var(--rc); background: var(--surface); border: 1px solid var(--line2); display: flex; flex-direction: column; gap: 10px; }
+.wn h2 { font-size: 16px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
+.wn-list { display: flex; flex-direction: column; gap: 10px; }
+.wn-ver { display: flex; flex-direction: column; gap: 2px; }
+.wn-v { font-size: 11px; color: var(--muted); }
+.wn-ver ul { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.wn-ver li { font-size: 14px; color: var(--sec); overflow-wrap: anywhere; }
+.wn-note { font-size: 13px; color: var(--st-fail-ink); }
+.wn-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.wn-acts .pill.dark { background: var(--btn); color: var(--btnink); }
 .intro { display: flex; justify-content: center; padding: 36px 0; }
 .intro-box { width: min(620px, 100%); gap: 16px; }
 .intro-box h1 { font-size: 20px; line-height: 1.3; font-weight: 500; letter-spacing: -0.3px; }

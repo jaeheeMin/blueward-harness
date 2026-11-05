@@ -1199,6 +1199,34 @@ def test_intro_not_shown_after_first_run_and_old_version_is_a_strip(tmp_path):
     assert "처음 화면 다시 보기" in got["text"]
 
 
+def _wn(*versions, current="0.10.186"):
+    return {"GET /api/whats-new": {"current": current, "seen": "0.10.180", "items": [{"version": v, "lines": ls} for v, ls in versions]}}
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_whats_new_card_text_and_ok_button_posts_seen(tmp_path):
+    extra = dict(_start(), **_wn(("0.10.186", ["첫 줄이야"]), ("0.10.185", ["둘째 줄이야", "셋째 줄이야"])), **{"POST /api/whats-new/seen": {"seen": "0.10.186"}})
+    got = _smoke(tmp_path, "", [_session("s1")], extra=extra)
+    for need in ("하네스가 새 판(0.10.186)으로 바뀌었어 · 이번에 바뀐 것", "0.10.186", "첫 줄이야", "0.10.185", "둘째 줄이야", "알겠어"):
+        assert need in got["text"], need
+    assert "더 보기" not in got["text"]
+    done = _smoke(tmp_path, "", [_session("s1")], extra=extra, actions=[{"click": "[data-wn-ok]"}])
+    assert ["POST", "/api/whats-new/seen", "{}"] in [list(p) for p in done["posts"]]
+    assert "이번에 바뀐 것" not in done["text"] and "첫 줄이야" not in done["text"]  # 누르면 카드가 닫힌다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_whats_new_card_hidden_when_empty_or_first_run_and_folds_long_lists(tmp_path):
+    assert "이번에 바뀐 것" not in _smoke(tmp_path, "", [_session("s1")], extra=dict(_start(), **_wn()))["text"]  # 줄이 없으면 안 뜬다
+    first = _smoke(tmp_path, "", [_session("s1")], extra=dict(_start(firstRun=True), **_wn(("0.10.186", ["첫 줄이야"]))))
+    assert "첫 줄이야" not in first["text"] and "GET /api/whats-new" not in first["calls"]  # 첫 실행 화면이 뜨는 동안엔 묻지도 않는다
+    long = dict(_start(), **_wn(("0.10.186", [f"가{i}줄" for i in range(5)]), ("0.10.185", [f"나{i}줄" for i in range(5)])))
+    got = _smoke(tmp_path, "", [_session("s1")], extra=long)
+    assert "가0줄" in got["text"] and "나0줄" not in got["text"] and "더 보기" in got["text"]
+    more = _smoke(tmp_path, "", [_session("s1")], extra=long, actions=[{"click": "[data-wn-more]"}])
+    assert "나0줄" in more["text"] and "더 보기" not in more["text"]
+
+
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_memory_banner_ring_and_unknown_cases(tmp_path):
     hot = {"tokens": 920000, "window": 1000000, "pct": 92}
