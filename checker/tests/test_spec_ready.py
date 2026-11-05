@@ -219,7 +219,40 @@ def test_원장_Spec_칸이_설정이면_src_변경은_위반(tmp_path, capsys):
     gh = Gh(base_files={LEDGER_F: ledger(lrow("DEV-010", "설정"))})
     code, result, md = run(gh, tmp_path, capsys)
     assert code == 1 and result["items"][0]["kind"] == "config"
-    assert "설정은 개발이 아닙니다" in md and "/harness:spec" not in md
+    assert "설정·표준은 개발이 아닙니다" in md and "/harness:spec" not in md
+
+
+SRS_F = "docs/ssot/SRS.md"
+
+
+def srs(step: str, n: int = 10) -> str:
+    return f"# SRS\n\n## 요구사항\n\n| ID | Title | Status | 다음 단계 |\n|---|---|---|---|\n| REQ-{n:03d} | 앱 | New | {step} |\n\n## 참조\n"
+
+
+@pytest.mark.parametrize("step", ["설정", "표준"])
+def test_SRS_다음_단계가_설정_표준이면_원장이_없어도_src_변경은_위반(tmp_path, capsys, step):
+    code, result, md = run(Gh(base_files={SRS_F: srs(step)}), tmp_path, capsys)
+    assert code == 1 and result["items"][0]["kind"] == "config" and "설정·표준은 개발이 아닙니다" in md
+
+
+def test_SRS_다음_단계가_개발이면_설정_판정이_아니라_Spec_으로_본다(tmp_path, capsys):
+    assert run(Gh(base_files={SRS_F: srs("개발"), **SPEC10}), tmp_path, capsys)[0] == 0
+    code, result, _ = run(Gh(base_files={SRS_F: srs("개발")}), tmp_path, capsys)
+    assert code == 1 and result["items"][0]["kind"] == "no_spec"
+
+
+def test_SRS_가_개발로_바꾼_건은_옛_원장_설정이어도_설정으로_막지_않는다(tmp_path, capsys):
+    # 원장엔 설정으로 적었다가 SRS 에서 개발로 바꾼 건: SRS 가 먼저다(#718)
+    both = {SRS_F: srs("개발"), LEDGER_F: ledger(lrow("DEV-010", "설정"))}
+    code, result, _ = run(Gh(base_files=both), tmp_path, capsys)
+    assert code == 1 and result["items"][0]["kind"] == "no_spec"
+    assert run(Gh(base_files={**both, **SPEC10}), tmp_path, capsys)[0] == 0
+
+
+def test_SRS_에_다음_단계_열이_없으면_원장_판정만_남는다(tmp_path, capsys):
+    old = "# SRS\n\n## 요구사항\n\n| ID | Title | Status |\n|---|---|---|\n| REQ-010 | 앱 | New |\n"
+    assert run(Gh(base_files={SRS_F: old, LEDGER_F: ledger(lrow("DEV-010", "설정"))}), tmp_path, capsys)[1]["items"][0]["kind"] == "config"
+    assert run(Gh(base_files={SRS_F: old}), tmp_path, capsys)[1]["items"][0]["kind"] == "no_spec"
 
 
 def test_원장_Spec_칸이_링크면_설정이_아니라_Spec_으로_판정(tmp_path, capsys):

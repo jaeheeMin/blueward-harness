@@ -1,6 +1,6 @@
 """병합 전 관문: 개발 변경(`src/`)이 있는 PR 은 그 DEV 의 Spec 이 base 에 이미 있어야 한다(#668).
 
-규칙은 "SRS → Spec → 개발 순"(`rules/governance.md`)이고 Spec 없이 개발은 없다. SRS 에서 설정으로 정한 건은 개발이 아니다.
+규칙은 "SRS → Spec → 개발 순"(`rules/governance.md`)이고 Spec 없이 개발은 없다. SRS 에서 설정·표준으로 정한 건은 개발이 아니다.
 `pr-checks.yml` 의 `spec-ready` 단계가 부른다. 파일을 쓰지 않는다(코멘트 본문만 `--markdown-file` 로 쓴다).
 
 판정(PR 하나):
@@ -9,7 +9,8 @@
   하네스 표시만 읽는다(`DEV-xxx 하위 작업`, `진행 원장: DEV-xxx`, `## 진행 원장` 절). 본문에 스친 번호는 읽지 않는다.
 - 통과: 찾은 모든 DEV 의 `docs/spec/DEV-<번호>-*.md` 가 base(병합 대상 브랜치)에 있다.
 - 위반: DEV 를 못 찾음 / Spec 이 base 에 없음(이 PR 이 Spec 을 새로 추가한 경우 포함 — Spec 은 먼저 승인·병합돼야 한다) /
-  원장 `audit/ledger/*.md` 의 그 DEV 행 Spec 칸이 `설정`(설정은 개발이 아니다).
+  base SRS 의 그 REQ `다음 단계` 가 `설정`·`표준` 이거나 옛 원장 `audit/ledger/*.md` 의 그 DEV 행 Spec 칸이 `설정`
+  (설정·표준은 개발이 아니다, #718).
 - 검사 불능(통과도 위반도 아니다): PR·파일·base 의 Spec 목록·원장을 읽지 못함, 뜻밖의 예외.
 종료코드: 0 통과/해당 없음, 1 위반, 2 검사 불능. 통과이면 마크다운은 빈 문자열이다.
 """
@@ -24,7 +25,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from checker.ledger_complete import _strip_non_prose
-from checker.pairing import LEDGER_DIR, section_span, table_indexed
+from checker.pairing import LEDGER_DIR, SRS_PATH, non_dev_numbers, section_span, table_indexed
 from checker.pr_queue import _SPEC_FILE, _order_devs
 from checker.ssot_approval import GhClient, GhError, _force_utf8
 
@@ -96,6 +97,21 @@ def _base_spec_numbers(client, repo: str, base: str) -> set[int]:
             if m:
                 nums.add(int(m.group(1)))
     return nums
+
+
+def _srs_step_numbers(client, repo: str, base: str) -> tuple[set[int], set[int]]:
+    """base SRS 에서 (`다음 단계` 가 설정·표준인 번호들, `개발` 인 번호들). SRS·표·열이 없으면 둘 다 빈 집합(원장 판정만 남는다).
+    읽다 실패하면 Unknown."""
+    data = client.get_json_or_none_404(f"repos/{repo}/contents/{quote(SRS_PATH, safe='/')}?ref={quote(base, safe='')}")
+    if data is None:
+        return set(), set()
+    if not isinstance(data, dict) or not data.get("content"):
+        raise Unknown(f"base({base}) 에서 `{SRS_PATH}` 를 읽지 못했다")
+    try:
+        text = base64.b64decode(data["content"]).decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise Unknown(f"base({base}) 의 `{SRS_PATH}` 를 해석하지 못했다: {exc}") from exc
+    return non_dev_numbers(text), non_dev_numbers(text, ("개발",))
 
 
 def _config_numbers(client, repo: str, base: str, devs: set[int]) -> set[int]:
@@ -182,7 +198,10 @@ def check_pr(client, repo: str, pr: int) -> dict:
         return {"status": "violation", "applicable": True,
                 "items": [{"kind": NO_DEV, "dev": "", "reason": "어느 개발인지 PR 에서 찾지 못했다"}]}
     base_specs = _base_spec_numbers(client, repo, base)
-    config = _config_numbers(client, repo, base, devs)
+    # SRS `다음 단계` 가 먼저다. 옛 원장 Spec 칸 `설정` 은 SRS 가 그 번호를 `개발` 로 정하지 않았을 때만 인정한다(#718:
+    # 설정으로 적었다가 SRS 에서 개발로 바꾼 건이 개발 PR 에서 "설정 건" 으로 막히지 않게).
+    srs_non_dev, srs_dev = _srs_step_numbers(client, repo, base)
+    config = ((_config_numbers(client, repo, base, devs) - srs_dev) | srs_non_dev) & devs
     added_here = {int(m.group(1)) for f in files if f.get("status") == "added"
                   for m in [_SPEC_FILE.match(f["filename"])] if m}
     missing = {n for n in devs - config if n not in base_specs}
@@ -190,7 +209,7 @@ def check_pr(client, repo: str, pr: int) -> dict:
     items = []
     for n in sorted(devs):
         if n in config:
-            items.append({"kind": CONFIG_ONLY, "dev": _dev(n), "reason": "원장 Spec 칸이 설정이다"})
+            items.append({"kind": CONFIG_ONLY, "dev": _dev(n), "reason": "SRS 다음 단계가 설정·표준이거나 원장 Spec 칸이 설정이다"})
         elif n not in base_specs:
             items.append({"kind": NO_SPEC, "dev": _dev(n), "reason": "Spec 이 base 에 없다",
                           "added_here": n in added_here, "open_prs": open_prs.get(n, [])})
@@ -213,7 +232,7 @@ def render_markdown(result: dict) -> str:
         if i["kind"] == NO_DEV:
             lines.append("- 어느 개발인지 찾지 못했습니다. PR 제목 끝에 `(DEV-xxx)` 로 적어 주세요. " + RERUN)
         elif i["kind"] == CONFIG_ONLY:
-            lines.append(f"- {i['dev']}: 설정은 개발이 아닙니다. 진행 원장의 Spec 칸이 `설정` 인 건은 `src/` 를 바꾸지 않습니다. "
+            lines.append(f"- {i['dev']}: 설정·표준은 개발이 아닙니다. SRS `다음 단계` 가 `설정`·`표준` 인 건(옛 원장은 Spec 칸 `설정`)은 `src/` 를 바꾸지 않습니다. "
                          "개발이 필요하면 SRS 에서 다음 단계를 고치는 것부터 하세요(`/harness:srs`).")
         elif i["kind"] == NO_SPEC:
             msg = f"- {i['dev']}: Spec(`docs/spec/{i['dev']}-*.md`)이 병합 대상 브랜치에 없습니다. `/harness:spec` 으로 Spec 을 먼저 만드세요."

@@ -3246,7 +3246,7 @@ def test_subagent_cap_still_holds_with_new_fields(browser):
 FAKE_ANALYSIS_FLOW = Path(__file__).with_name("fake_claude_analysis_flow.py")
 FLOWS_FILE = PLUGIN / "workflow.json"  # 작업 순서의 정본은 플러그인 안의 workflow.json 이다(#599)
 REAL_SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md"))
-FLOW_IDS = ["srs", "spec", "dev", "config", "fix"]
+FLOW_IDS = ["srs", "spec", "dev", "config", "standard", "fix"]
 TOOL_IDS = ["version", "sync", "update", "handoff", "wrapup", "prs", "reload", "approvals", "atc", "role", "cts", "manual", "scaffold", "open"]
 BRANCH = "docs/1-x"
 PR_URL = "https://github.com/o/r/pull/7"
@@ -4248,8 +4248,11 @@ def test_config_flow_starts_with_the_dev_number_configures_then_delivers_and_end
         stop(c, "n1")
         m = sess(c, "n1")
         assert m["stepIndex"] == 1 and m["flowSteps"][1]["kind"] == "work" and "Configuration Considerations" in m["flowSteps"][1]["hint"]
-        assert "원장" in m["flowSteps"][2]["hint"] and "ssot-approval" in m["flowSteps"][3]["hint"]
+        assert "Status" in m["flowSteps"][2]["hint"] and "ssot-approval" in m["flowSteps"][3]["hint"]
         assert "자동으로 병합" not in m["flowSteps"][3]["hint"]  # SRS PR 은 사람 승인이 병합 조건이다(자동 병합 설명은 dev·fix 에만)
+        std = set_flow(c, "n1", "standard", reason="표준 DEV-003")[1]  # 표준 갈래는 설정과 같은 모양(#718)
+        assert std["flowName"] == "표준 기능으로 처리하기" and [st["id"] for st in std["flowSteps"]] == ["start", "document", "deliver", "merge"]
+        assert "Status" in std["flowSteps"][2]["hint"] and "ssot-approval" in std["flowSteps"][3]["hint"]
         dev = set_flow(c, "n1", "dev")[1]
         assert "자동으로 병합" in dev["flowSteps"][3]["hint"] and "자동으로 병합" in set_flow(c, "n1", "fix")[1]["flowSteps"][3]["hint"]
         assert m["nextFlow"] is None and not any(st["skill"] == "atc" for st in m["flowSteps"])
@@ -5631,6 +5634,7 @@ READY_SRS = """| ID | Title | Status | 다음 단계 |
 | REQ-003 | 사용자 코드 | New | 설정 |
 | REQ-004 | 옛 요구 | Dropped | 개발 |
 | REQ-005 | 아직 모름 | New | 미정 |
+| REQ-006 | 표준 앱으로 | New | 표준 |
 """
 READY_LEDGER = """## 개발 건
 
@@ -5667,13 +5671,51 @@ def test_dev_ready_reads_spec_and_setup_state_from_origin_main(tmp_path, monkeyp
     try:
         status, body, _ = ready_get(c)
         assert status == 200 and body["state"] == "yes"
-        assert body["specReady"] == 1 and body["setup"] == 1  # DEV-002 는 Spec 있음, DEV-003 은 원장 Spec 칸이 설정
+        # DEV-002 는 Spec 있음, DEV-003 은 SRS 설정(+옛 원장 Spec 칸 설정), REQ-006 은 SRS 표준(#718)
+        assert body["specReady"] == 1 and body["setup"] == 2 and body["standard"] == 1
+        assert [i["number"] for i in body["items"] if i["standard"]] == [6]
         # 할 차례: Spec 없는 개발 건만(설정·보류·미정은 뺀다)
         assert body["needSpec"] == [{"number": 1, "label": "REQ-001(구매오더 조회)"}] and body["needSpecCount"] == 1
         assert "git fetch origin main" in run.calls
         n = len(run.calls)
         c.call("GET", "/api/dev-ready?cwd=" + urllib.parse.quote(str(c.work)))
         assert len(run.calls) == n  # 60초 안에는 다시 읽지 않는다
+    finally:
+        c.close()
+
+
+def test_dev_ready_reads_setup_and_standard_from_srs_without_ledger(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    run = ready_run(work, **{"git ls-tree": (0, "docs/ssot/SRS.md\ndocs/spec/DEV-002-판매.md\n")})
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    (work / "docs" / "ssot").mkdir(parents=True)
+    (work / "docs" / "ssot" / "SRS.md").write_text("# SRS\n", encoding="utf-8")  # 원장 폴더는 없다(#718)
+    try:
+        body = ready_get(c)[1]
+        assert body["state"] == "yes" and body["setup"] == 2 and body["standard"] == 1
+        assert body["specReady"] == 1 and [n["number"] for n in body["needSpec"]] == [1]
+    finally:
+        c.close()
+
+
+def test_dev_ready_srs_dev_overrides_old_ledger_setup(tmp_path, monkeypatch):
+    # 옛 원장엔 설정, SRS 는 개발로 바꾼 건: SRS 가 먼저라 설정 건으로 세지 않는다(#718, spec_ready 와 같다)
+    srs = "# SRS\n\n## 요구사항\n\n| ID | Title | Status | 다음 단계 |\n|---|---|---|---|\n| REQ-003 | 사용자 코드 | New | 개발 |\n"
+    files = {"docs/ssot/SRS.md": srs, "audit/ledger/a.md": READY_LEDGER}
+
+    def show(args):
+        path = args[-1].split(":", 1)[1]
+        return (0, files[path]) if path in files else (128, "")
+
+    work = tmp_path / "work"
+    run = ready_run(work, spec_files=(), **{"git show": show})
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    (work / "audit" / "ledger").mkdir(parents=True)
+    try:
+        body = ready_get(c)[1]
+        item = next(i for i in body["items"] if i["number"] == 3)
+        assert item["setup"] is False and item["dev"] is True
+        assert 3 in [n["number"] for n in body["needSpec"]]
     finally:
         c.close()
 

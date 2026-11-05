@@ -168,10 +168,18 @@ def test_개발인데_원장_Spec_칸이_설정이면_경고다(tmp_path):
     assert [w["kind"] for w in check_pairing(tmp_path)["warnings"]] == ["spec_cell_config"]
 
 
-def test_설정_REQ에_원장_줄이_없으면_경고다(tmp_path):
-    _srs(tmp_path, [_req(1, "설정")])
+def test_설정_표준_REQ는_원장_줄이_없어도_정상이다(tmp_path):
+    _srs(tmp_path, [_req(1, "설정"), _req(2, "표준")])
     _ledger(tmp_path, [])
-    assert _kinds(check_pairing(tmp_path)["warnings"]) == {"no_ledger_config"}
+    r = check_pairing(tmp_path)
+    assert r["status"] == PASS and r["warnings"] == []
+
+
+def test_표준_REQ에_RICEFW_ID가_있으면_위반이다(tmp_path):
+    _srs(tmp_path, [_req(1, "표준", "DEV-001"), _req(2, "표준")])
+    _ledger(tmp_path, [])
+    r = check_pairing(tmp_path)
+    assert [v["kind"] for v in r["violations"]] == ["ricefw_not_empty"] and "`표준`" in r["violations"][0]["message"]
 
 
 def test_SRS에_없는_원장_DEV와_Spec은_경고다(tmp_path):
@@ -399,7 +407,7 @@ def test_다음_단계가_오타거나_빈_칸이면_위반이고_그_요구사�
     assert _kinds(r["violations"]) == {"next_step_invalid"}  # RICEFW 불일치는 따로 나오지 않는다
     msgs = [x["message"] for x in r["violations"]]
     assert len(msgs) == 2
-    assert "REQ-001(제목1)" in msgs[0] and "`개발함`" in msgs[0] and "`개발` / `설정` / `미정`" in msgs[0]
+    assert "REQ-001(제목1)" in msgs[0] and "`개발함`" in msgs[0] and "`개발` / `설정` / `표준` / `미정`" in msgs[0]
     assert "REQ-002(제목2)" in msgs[1] and "빈 칸" in msgs[1]
     assert r["violations"][0]["file"] == "docs/ssot/SRS.md"
 
