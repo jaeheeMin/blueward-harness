@@ -36,3 +36,19 @@
   - B. 병합 힌트에 "문서만 바꾼 PR 은 Claude 가 검사 통과 후 병합하기도 해요" 한 줄을 더한다(basis: governance 예외 문장).
   - C. 콘솔이 PR 의 바뀐 파일을 보고 "사람 승인 필요 / Claude 병합 가능" 을 구분해 문구를 달리한다. 정확하지만 콘솔이 규칙을 두 번 구현하게 된다(규칙은 데이터라는 원칙과 어긋남).
 - 추천: B. 팀원이 "왜 아무도 안 눌렀는데 합쳐졌지?" 를 겪지 않게 하고, 규칙 로직은 늘지 않는다.
+
+## 5·6번 반영
+
+### 5. 준비됨 + 고객 양식 안내 (B안)
+
+- `project-ready` 판정과 "준비됨" 칩은 그대로. 서버(`console/server.py`)가 따로 `templates/` 의 고객 양식 원본을 본다: `customer_forms()` 가 `templates`·`rules` 를 함께 가진 폴더들(깊이 3)의 `templates/` 를 깊이 3 까지 읽어 xlsx·xlsm·xls·pptx·pptm·ppt·docx·docm·doc·hwp·hwpx 가 하나라도 있으면 있음. `templates/harness/`(scaffold 기본 틀)와 `templates/forms/`(양식 지도 yaml)는 건너뛴다. `~$` 임시 파일은 안 센다.
+- 결과 `formsMissing`: `yes`(없음, 안내 띄움) / `no`(있음 또는 따질 일 아님: 준비 안 됨·플러그인 저장소·`HARNESS_NO_SCAFFOLD_HINT=1`) / `unknown`(목록·git 을 못 읽음, 안내 없음). `/api/folders/recent` 의 각 폴더와 `/api/flows?cwd=` 응답에 실린다. 최근 폴더는 `folder_ready` 와 같은 60초 기억(`folder_forms`), flows 는 그때그때 읽는다.
+- 화면: 홈·세션의 "프로젝트 준비" 안내 자리(`projectCard`, 도구 줄 위 안내)에 `formsNotice` 문구, 새 작업 폴더 목록의 `준비됨` 칩 밑에 작은 글씨 "고객 양식 아직 없음"(전체 문구는 title). 문구에 "양식 없이 md 로만 쓰는 프로젝트면 신경 안 써도 돼" 를 덧붙였다.
+- 훅(`session-start-sync.sh`)의 안내는 이 PR 에서 건드리지 않았다. #615 의 "같은 기준으로 훅도" 는 남은 일.
+
+### 6. 병합 대기 문구 (B안)
+
+- `workflow.json` 의 작은 수정(fix) 갈래 `merge` 힌트에 한 줄을 더했다: "README 나 일반 문서(docs/ 아래, SRS·Spec 제외)만 바꾼 PR 은 검사가 모두 통과하면 Claude Code 가 바로 병합하기도 해." `rules/governance.md` 예외 조건 1·2·3(문서 범위·SSOT 제외·검사 통과)과 맞췄고, basis 에 "다만 아래 네 조건을 모두 만족하면 에이전트가" 를 더했다.
+- SRS·Spec·설정 갈래는 `docs/ssot`·`docs/spec` 를 바꾸고, 개발 갈래는 `src/` 를 바꿔 예외에 안 들어가므로 힌트에 넣지 않았다.
+- PR 칩(`prLines(pr, flowId)`)도 fix 갈래일 때만 "문서만 바꾼 PR 은 검사가 통과하면 Claude Code 가 바로 병합하기도 해." 를 붙인다. (화면 글은 "Claude Code" 로 쓰는 시험 `test_new_ui_copy_says_claude_code_not_claude` 때문에 "Claude" 가 아니라 "Claude Code".)
+- 길잡이 `docs/guide/harness-guide.html` 콘솔 항목(폴더 칩, 프로젝트 준비 안내, 갈래·병합 기다리기)에 한 문장씩 더했다.

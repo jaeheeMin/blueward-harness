@@ -82,16 +82,42 @@ def read_system_type(root: str) -> str:
     return m.group(1).strip().strip("'\"")[:60] if m else ""
 
 
-def has_standard_folder(root: str, names: list[str], depth: int) -> bool:
-    """root 와 그 아래 depth 단계까지의 폴더 중 names 를 모두 하위 폴더로 가진 곳이 있는가."""
+def standard_folders(root: str, names: list[str], depth: int):
+    """root 와 그 아래 depth 단계까지의 폴더 중 names 를 모두 하위 폴더로 가진 곳을 차례로 낸다."""
     start = len(os.path.normpath(root).split(os.sep))
     for cur, dirs, _files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in PRUNE_DIRS]
         if all(n in dirs for n in names):
-            return True
+            yield cur
         if len(os.path.normpath(cur).split(os.sep)) - start >= depth:
             dirs[:] = []
-    return False
+
+
+def has_standard_folder(root: str, names: list[str], depth: int) -> bool:
+    """root 와 그 아래 depth 단계까지의 폴더 중 names 를 모두 하위 폴더로 가진 곳이 있는가."""
+    return next(standard_folders(root, names, depth), None) is not None
+
+
+# 고객 양식 원본으로 치는 사무 문서 확장자. templates/README.md 가 "고객사에게 받은 Template 원본"(xlsx 등)을 넣는 자리라고 한다.
+# templates/harness/(scaffold 가 만든 기본 틀)와 templates/forms/(양식 지도 yaml)는 고객 양식이 아니라 건너뛴다.
+FORM_EXTS = {".xlsx", ".xlsm", ".xls", ".pptx", ".pptm", ".ppt", ".docx", ".docm", ".doc", ".hwp", ".hwpx"}
+FORM_SKIP_DIRS = {"harness", "forms"}
+FORM_DEPTH = 3
+
+
+def customer_forms(root: str, depth: int = 3) -> bool | None:
+    """root 아래 templates/ (templates 와 rules 를 함께 가진 폴더들)에 고객 양식 원본이 하나라도 있는가. 읽지 못하면 None."""
+    failed = []
+    for base in standard_folders(root, ["templates", "rules"], depth):
+        top = os.path.join(base, "templates")
+        for cur, dirs, files in os.walk(top, onerror=failed.append):
+            if os.path.normpath(cur) == os.path.normpath(top):
+                dirs[:] = [d for d in dirs if d not in FORM_SKIP_DIRS]
+            if len(os.path.normpath(cur).split(os.sep)) - len(os.path.normpath(top).split(os.sep)) >= FORM_DEPTH:
+                dirs[:] = []
+            if any(os.path.splitext(f)[1].lower() in FORM_EXTS and not f.startswith("~$") for f in files):
+                return True
+    return None if failed else False
 MAX_JOBS = 50
 JOB_ACTIVE = ("handoff", "starting")
 WAIT_POLL = 0.2
@@ -761,6 +787,8 @@ class App:
         if cwd:
             result["conditions"] = {name: state_of(name) for name in data["conditions"]}
             result["loading"] = any(c.get("loading") for c in result["conditions"].values())
+            ready = result["conditions"].get("project-ready", {}).get("state")
+            result["formsMissing"] = self.forms_missing(cwd)["state"] if ready == COND_YES else COND_NO
         return 200, result
 
     def a_approvals(self, g, q, b):
@@ -1649,6 +1677,31 @@ class App:
         got = self.cached(("project-ready", os.path.normcase(os.path.realpath(path))), lambda: self.cond_state("project-ready", path, wait=False), wait=wait)
         return {"state": got["state"], "checking": bool(got.get("loading"))}
 
+    def forms_missing(self, path: str) -> dict:
+        """준비된 폴더에 고객 양식 원본(templates/ 의 사무 문서)이 없는가. {"state": yes(없다)/no(있다·따질 일 아님)/unknown(못 읽음)}.
+        준비 안 된 폴더, 플러그인 저장소처럼 준비 여부를 따지지 않는 곳, 준비 여부를 모르는 곳은 따질 일이 아니라 no 다(안내하지 않는다)."""
+        data = self.flow_data
+        spec = (data or {}).get("conditions", {}).get("project-ready")
+        if spec is None or spec.get("type") != "paths":
+            return {"state": COND_UNKNOWN}
+        root, failed = gitstate.repo_root_checked(self.run, path)
+        if failed:
+            return {"state": COND_UNKNOWN}
+        root = root or path
+        exempt = spec.get("exemptFile")
+        if (exempt and os.path.isfile(os.path.join(root, *exempt.split("/")))) or os.environ.get("HARNESS_NO_SCAFFOLD_HINT") == "1":
+            return {"state": COND_NO}
+        try:
+            found = customer_forms(root, int(spec.get("searchDepth", 0)))
+        except OSError:
+            return {"state": COND_UNKNOWN}
+        return {"state": COND_UNKNOWN if found is None else (COND_NO if found else COND_YES)}
+
+    def folder_forms(self, path: str, wait: bool = False) -> dict:
+        """forms_missing 을 폴더 준비 판정과 같이 60초 기억한다."""
+        key = ("customer-forms", os.path.normcase(os.path.realpath(path)))
+        return self.cached(key, lambda: self.forms_missing(path), wait=wait)
+
     def folder_sessions(self, path: str) -> int:
         """그 폴더 또는 하위 폴더를 cwd 로 가진 세션 수(끝난 세션 포함, 세션 목록과 같은 기준)."""
         with self.store.lock:
@@ -1662,7 +1715,10 @@ class App:
         out = []
         for p in paths:
             r = self.folder_ready(p)
-            out.append({"path": p, "name": os.path.basename(p) or p, "ready": r["state"], "checking": r["checking"], "sessions": self.folder_sessions(p)})
+            # 양식 안내는 준비됨일 때만 따진다. 준비 판정이 아직 읽는 중이면 양식도 읽지 않는다(둘 다 기다리지 않는다).
+            forms = self.folder_forms(p)["state"] if r["state"] == COND_YES and not r["checking"] else COND_NO
+            out.append({"path": p, "name": os.path.basename(p) or p, "ready": r["state"], "checking": r["checking"], "sessions": self.folder_sessions(p),
+                        "formsMissing": forms})
         return 200, out
 
     # ---- 폴더별 첫 열기 안내(시안 03) ----

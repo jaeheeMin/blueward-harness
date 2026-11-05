@@ -3417,6 +3417,51 @@ def test_recent_folders_carry_ready_state_and_session_count(tmp_path, monkeypatc
         c.close()
 
 
+def test_customer_forms_notice_only_for_ready_folder_without_office_originals(tmp_path, monkeypatch):
+    """준비된 폴더의 templates/ 에 고객 양식 원본이 없으면 formsMissing=yes (최근 폴더와 flows 둘 다). 있으면 no, 못 읽으면 unknown."""
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        ready, plain = _register_folders(c, tmp_path, "ready", "plain")
+        q = "/api/flows?cwd=" + urllib.parse.quote(str(ready))
+        (ready / "rules").mkdir()
+        (ready / "templates" / "harness").mkdir(parents=True)  # scaffold 가 만드는 기본 틀만
+        (ready / "templates" / "harness" / "SRS.md").write_text("x", encoding="utf-8")
+        (ready / "templates" / "README.md").write_text("x", encoding="utf-8")
+        (ready / "templates" / "forms").mkdir()
+        (ready / "templates" / "forms" / "map.yaml").write_text("x", encoding="utf-8")
+        (ready / "templates" / "harness" / "stray.xlsx").write_text("x", encoding="utf-8")  # harness 틀 안은 고객 양식이 아니다
+        assert _recent(c)["ready"]["formsMissing"] == "yes"
+        assert _recent(c)["plain"]["formsMissing"] == "no"  # 준비 안 된 폴더는 양식을 따지지 않는다
+        assert c.call("GET", q)[1]["formsMissing"] == "yes"
+        (ready / "templates" / "개발사양서.xlsx").write_text("x", encoding="utf-8")  # 고객 양식 원본이 들어옴
+        c.clock.t += console_server.CACHE_SECONDS + 1
+        assert _recent(c)["ready"]["formsMissing"] == "no"
+        assert c.call("GET", q)[1]["formsMissing"] == "no"
+        assert c.call("GET", q)[1]["conditions"]["project-ready"]["state"] == "yes"  # 준비됨 판정은 그대로
+    finally:
+        c.close()
+
+
+def test_customer_forms_unreadable_gives_no_notice(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        (ready,) = _register_folders(c, tmp_path, "ready")
+        (ready / "rules").mkdir()
+        (ready / "templates").mkdir()
+        monkeypatch.setattr(console_server, "customer_forms", lambda root, depth=3: None)  # 목록을 읽다 실패
+        assert _recent(c)["ready"]["formsMissing"] == "unknown"
+        assert c.call("GET", "/api/flows?cwd=" + urllib.parse.quote(str(ready)))[1]["formsMissing"] == "unknown"
+    finally:
+        c.close()
+    (tmp_path / "x").mkdir()
+    c = flow_console(tmp_path / "x", monkeypatch, run=FakeRun())  # git 을 못 돌린다
+    try:
+        (r2,) = _register_folders(c, tmp_path / "x", "r2")
+        assert c.call("GET", "/api/flows?cwd=" + urllib.parse.quote(str(r2)))[1]["formsMissing"] == "no"  # 준비 여부부터 모르니 말하지 않는다
+    finally:
+        c.close()
+
+
 def test_recent_folders_unreadable_is_unknown_not_ready_or_not(tmp_path, monkeypatch):
     c = flow_console(tmp_path, monkeypatch, run=FakeRun())  # git 을 실행할 수 없다(127)
     try:

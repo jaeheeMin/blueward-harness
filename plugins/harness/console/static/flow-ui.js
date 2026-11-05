@@ -120,7 +120,7 @@
 
     /* 올림·승인 기다림·합쳐짐: 검토 요청(PR) 카드. 줄은 데이터에 있는 것만(검사는 합친 한 값, 승인은 PR 상태에서 읽는다). */
     function prCard(s) {
-      var pr = s && s.flowPr, lines = L.prLines(pr);
+      var pr = s && s.flowPr, lines = L.prLines(pr, s && s.flowId);
       if (!lines.length) return null;
       var url = kit.safeHttp(pr.url);
       var label = 'PR #' + pr.number + (pr.title ? ' · ' + pr.title : '');
@@ -182,7 +182,7 @@
         var ctx = getCtx(), s = ctx.session;
         var tools = L.visibleTools(data.flows, data.approvals, { hasSession: !!s, managed: !!(s && s.managed) });
         var blocked = s && s.canSend === false ? (s.cannotSendReason || '이 세션에는 지금 요청을 보낼 수 없어요.') : '';
-        var pn = L.projectNotice(data.flows);
+        var pn = L.projectNotice(data.flows) || L.formsNotice(data.flows);
         project.hidden = !pn;
         project.textContent = pn ? pn.text : '';
         clear(list);
@@ -869,6 +869,7 @@
           if (!r.ok) { lines.push(name + ': 프로젝트 준비 여부를 확인하지 못했어요 - ' + failText(r.error)); return; }
           var pn = L.projectNotice(r.data);
           if (pn) lines.push(name + ': ' + pn.text);
+          else { var fn = L.formsNotice(r.data); if (fn) lines.push(name + ': ' + fn.text); }
         });
         if (lines.length) {
           box.appendChild(h('section', { class: 'approval-card unknown', 'data-project-card': '1' },

@@ -138,6 +138,13 @@
     if (c.state === 'unknown') return { state: 'unknown', text: '프로젝트 준비 여부를 확인하지 못했어요' + (c.reason ? ' - ' + c.reason : '') + '.' };
     return null;
   }
+  // 준비됨인데 templates/ 에 고객 양식 원본이 없을 때의 안내. 서버가 없다고 확인한 경우(formsMissing === 'yes')에만 말한다. 못 읽었으면 null.
+  var FORMS_MISSING_SHORT = '고객 양식 아직 없음';
+  var FORMS_MISSING_TEXT = '고객 양식이 아직 없어 · templates/ 에 고객사 양식 파일을 넣어야 문서를 양식대로 뽑을 수 있어. 양식 없이 md 로만 쓰는 프로젝트면 신경 안 써도 돼.';
+  function formsNotice(flowsData) {
+    var c = flowsData && flowsData.conditions && flowsData.conditions['project-ready'];
+    return c && c.state === 'yes' && flowsData.formsMissing === 'yes' ? { text: FORMS_MISSING_TEXT, short: FORMS_MISSING_SHORT } : null;
+  }
   function liveCount(list) { return list.filter(function (s) { return s.status !== LIVE_ENDED; }).length; }
   function reloadStrip(updatePressed, list) {
     var n = liveCount(list);
@@ -354,11 +361,13 @@
     return cells;
   }
   // 올림·승인 기다림 화면의 줄. 검사 결과는 합친 한 값(checks)만 있어 문서·비밀값 검사를 따로 나누지 않는다.
-  function prLines(pr) {
+  // 일반 문서만 바꾼 PR 은 에이전트가 병합해도 되는 예외(rules/governance.md)가 있다. SRS·Spec(SSOT)·src 는 늘 사람이 병합하므로 작은 수정 갈래(fix)에서만 말한다.
+  var AGENT_MERGE_NOTE = '문서만 바꾼 PR 은 검사가 통과하면 Claude Code 가 바로 병합하기도 해.';
+  function prLines(pr, flowId) {
     if (!pr || !pr.number) return [];
     var checks = { pass: ['ok', '모두 통과했어'], fail: ['fail', '실패한 검사가 있어'], pending: ['wait', '아직 돌고 있어'], none: ['unk', '검사 결과를 확인 못 함'] }[pr.checks || 'none'] || ['unk', '검사 결과를 확인 못 함'];
     var st = String(pr.state || '').toUpperCase();
-    var team = st === 'MERGED' ? ['ok', '합쳐졌어'] : st === 'CLOSED' ? ['fail', '합치지 않고 닫혔어'] : ['wait', '승인자 확인을 기다리는 중 · 승인은 GitHub 에서 해'];
+    var team = st === 'MERGED' ? ['ok', '합쳐졌어'] : st === 'CLOSED' ? ['fail', '합치지 않고 닫혔어'] : ['wait', '승인자 확인을 기다리는 중 · 승인은 GitHub 에서 해' + (flowId === 'fix' ? ' · ' + AGENT_MERGE_NOTE : '')];
     return [{ id: 'checks', name: '자동 검사(문서·비밀값 등)', state: checks[0], text: checks[1] }, { id: 'team', name: '팀 승인·합치기', state: team[0], text: team[1] }];
   }
 
@@ -423,7 +432,9 @@
     memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, prLines: prLines,
     BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, counts: counts, summaryText: summaryText,
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
-    NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice, reloadStrip: reloadStrip, reloadResult: reloadResult,
+    NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice,
+    formsNotice: formsNotice, FORMS_MISSING_SHORT: FORMS_MISSING_SHORT, FORMS_MISSING_TEXT: FORMS_MISSING_TEXT,
+    reloadStrip: reloadStrip, reloadResult: reloadResult,
     startChecks: startChecks, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
     mergeApprovals: mergeApprovals, prBadge: prBadge, runningSubCount: runningSubCount,
