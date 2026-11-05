@@ -234,7 +234,10 @@ SRS 를 쓰기 전에 고객사 산출물 양식(예: Backlog List)이 있는지
    SRS 는 SSOT 라 SRS 를 바꾸는 PR 은 사람이 승인해야 한다(승인 없는 PR 은 Actions
    `ssot-approval` 이 실패시키고 Claude 의 `gh pr merge` 는 훅이 거부한다. 사람이
    웹 Merge 버튼으로 병합하는 것만 못 막으며, 그 경우 병합 뒤 이슈가 열린다). 다음
-   단계는 `/harness:spec` 으로 Spec 을 만드는 것이다.
+   단계는 요구사항의 `다음 단계` 값에 따라 다르다. `개발` 은 `/harness:spec` 으로 Spec 을 만든다.
+   `설정` 은 Spec 없이 설정하기로 간다 — `/harness:start` 로 그 `DEV-xxx` 를 시작하고, SAP 에서 설정한 뒤
+   내용을 SRS 상세 절에 기록한다. `미정` 은 개발인지 설정인지를 사람이 정할 때까지 기다린다 —
+   `## 미결 사항` 에 남기고, 정해지면 `/harness:srs` 로 `다음 단계` 열을 고친다(Spec 을 만들다 그 자리에서 정해도 된다).
 
 ## 고치기
 

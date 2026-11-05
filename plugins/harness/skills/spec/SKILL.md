@@ -67,7 +67,8 @@ main 이면 start 절차, 다른 작업 브랜치면 같은 일인지 판단·�
      없으면(방금 `미정` 에서 `설정` 으로 정한 경우 등) `/harness:srs` 의 "설정 요구사항" 대로 원장에
      `| DEV-xxx | <제목> | 설정 | <담당 GitHub 아이디> | 대기 |` 줄을 올린다(담당은 실명이 아니라 `gh api user --jq .login` 같은 GitHub 아이디로 적는다). 원장 파일(프로그램)은 아래 프로그램 선택처럼
      `audit/ledger/*.md` 목록에서 고르게 하고, 원장이 없는 저장소면 건너뛴다. 설정 내용은 SRS 상세 절의
-     `Configuration Considerations` 에 쓴다고 안내하고 여기서 끝낸다.
+     `Configuration Considerations` 에 쓴다고 안내하고 여기서 끝낸다. 원장 줄을 더해 파일이 바뀌었으면 `/harness:deliver` 로
+     올려 PR 병합을 기다린다(바뀐 파일이 없으면 올릴 것도 없다).
    - 열이 없는 옛 SRS — 지금처럼 Spec 대상으로 보되, `/harness:srs` 로 `다음 단계` 열을 추가하자고 안내한다.
 
    번호를 안 줬으면 SRS 의 요구사항 표에서 `다음 단계` 가 `개발` 이고 상태가 `On Hold`·`Dropped`·`Duplicate` 가
@@ -199,6 +200,7 @@ main 이면 start 절차, 다른 작업 브랜치면 같은 일인지 판단·�
    올리는 PR 은 `/harness:deliver` 로 만든다. 개발이 끝난 뒤의 결과(080 반영 확인, 시험 결과,
    구현하며 확정된 사항)는 Spec 에 적지 않고 `audit/changes/` 기록 파일에 종류 `구현 결과` 로 적는다(#552).
    `docs/spec/` 는 위험 경로라 Spec 을 고치면 승인자 Approve 가 필요하다.
+   Spec PR 이 병합되면 `/harness:start` 로 개발을 시작한다(개발 PR 은 그 Spec 이 main 에 있어야 시작할 수 있다).
 
 ## 고치기 (SRS 가 바뀌었거나 설계가 바뀌었을 때)
 
