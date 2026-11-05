@@ -15,6 +15,10 @@
 #     data_access: deny 로 바꾼다. 그 서버의 data_tools 호출을 되묻지 않고 막는다.
 #     적지 않거나 ask 면 지금처럼 사용자에게 되묻는다(기본). ask/deny 외의 값은 파일
 #     오류로 보고 MCP 호출을 막는다.
+#   - data_access: allow 면 필드를 고른 runQuery 는 훅이 묻지 않고, SELECT * 나 FIELDS *
+#     는 막는다(CR-003). tableContents 는 필드를 고를 수 없어 allow 여도 되묻는다.
+#     훅이 통과시켜도 .claude/settings.json 의 permissions.allow 에 도구가 없으면 Claude
+#     Code 가 따로 물을 수 있다.
 #
 #   - /harness:atc 스킬이 쓸 ATC check variant 가 있으면 서버 항목에 atc_variant 로
 #     적는다. 훅은 읽지 않는다(스킬이 이 파일을 직접 읽는다). 적지 않으면 스킬이
@@ -33,12 +37,13 @@ servers:
     role: customizing
     writes_allowed: false     # 조회 전용. 쓰기 도구는 막는다
     data_access: ask          # ask(기본): 데이터 도구는 되묻는다. 운영 실데이터 서버면 deny 권장
+    # data_access: allow  # 필요한 필드만 고른 조회는 묻지 않음. SELECT * 는 막음
 
   example-dev-server:         # .mcp.json 의 서버 이름으로 바꾼다
     client: "080"
     role: development
     writes_allowed: false     # 쓰기를 허용할 개발 서버만 true 로 바꾼다
-    data_access: ask
+    data_access: ask          # allow 로 바꾸면 필요한 필드만 고른 runQuery 는 묻지 않음(SELECT * 는 막음)
     # atc_variant: ABAP_CLOUD_DEVELOPMENT_DEFAULT   # 선택. 테넌트에서 확인한 이름으로 바꾼다
 
 # 쓰기로 취급하는 MCP 도구. 서버 이름 접두어(mcp__<서버>__)를 뗀 이름이다.

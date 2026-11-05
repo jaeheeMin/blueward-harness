@@ -182,11 +182,63 @@ def test_data_access_키가_없으면_ask_로_본다():
     assert d.kind == "ask"
 
 
-@pytest.mark.parametrize("value", ["allow", "Deny", "true", "", "[deny]", "1"])
-def test_data_access_값이_ask_deny_가_아니면_tierserror(value):
+@pytest.mark.parametrize("value", ["Allow", "Deny", "true", "", "[deny]", "1"])
+def test_data_access_값이_ask_deny_allow_가_아니면_tierserror(value):
     text = DENY_YAML.replace("data_access: deny", f"data_access: {value}")
-    with pytest.raises(adt_tiers.TiersError, match="data_access"):
+    with pytest.raises(adt_tiers.TiersError, match="data_access") as ei:
         adt_tiers.parse_tiers(text)
+    assert "allow" in str(ei.value)  # 허용 값 목록에 allow 가 보인다
+
+
+# --- data_access: allow (#699) ---------------------------------------------------
+
+ALLOW_YAML = DENY_YAML.replace("data_access: deny", "data_access: allow")
+_ALLOW_SERVER = "mcp__abap-adt-z5u__"
+
+
+def test_data_access_allow_를_해석기가_받아들인다():
+    assert _tiers(ALLOW_YAML).servers["abap-adt-z5u"]["data_access"] == "allow"
+
+
+def test_allow_서버의_필드를_고른_runquery_는_통과한다():
+    q = {"sqlQuery": "SELECT FROM I_Product FIELDS Product, ProductType"}
+    d = adt_tiers.decide(_ALLOW_SERVER + "runQuery", q, _tiers(ALLOW_YAML), DEFAULTS)
+    assert d.kind == "pass"
+
+
+@pytest.mark.parametrize("tool", ["runQuery", "tableContents"])
+@pytest.mark.parametrize("query", [
+    "SELECT * FROM t000", "select single * from t000", "SELECT FROM I_Product FIELDS *",
+])
+def test_allow_서버의_select_star_는_cr003_으로_거절한다(tool, query):
+    d = adt_tiers.decide(_ALLOW_SERVER + tool, {"ddicEntityName": "T000", "sqlQuery": query},
+                         _tiers(ALLOW_YAML), DEFAULTS)
+    assert d.kind == "deny"
+    assert "CR-003" in d.reason and "필드 목록을 적어" in d.reason
+
+
+def test_allow_서버의_tablecontents_는_필드를_못_골라_되묻는다():
+    d = adt_tiers.decide(_ALLOW_SERVER + "tableContents", {"ddicEntityName": "T000"},
+                         _tiers(ALLOW_YAML), DEFAULTS)
+    assert d.kind == "ask"
+
+
+@pytest.mark.parametrize("tool_input", [{}, {"sqlQuery": ""}, {"sqlQuery": 5}, {"query": "SELECT a FROM t"}, None])
+def test_allow_서버의_쿼리_글자를_못_찾는_runquery_는_되묻는다(tool_input):
+    d = adt_tiers.decide(_ALLOW_SERVER + "runQuery", tool_input, _tiers(ALLOW_YAML), DEFAULTS)
+    assert d.kind == "ask"
+
+
+def test_allow_는_다른_서버와_파일_없음에_번지지_않는다():
+    q = {"sqlQuery": "SELECT FROM t FIELDS a"}
+    assert adt_tiers.decide("mcp__abap-adt-z5u-dev__runQuery", q, _tiers(ALLOW_YAML), DEFAULTS).kind == "ask"
+    assert adt_tiers.decide(_ALLOW_SERVER + "runQuery", q, None, DEFAULTS).kind == "ask"
+    assert adt_tiers.decide("mcp__other__runQuery", q, _tiers(ALLOW_YAML), DEFAULTS).kind == "ask"
+
+
+def test_allow_서버의_쓰기_도구는_기존_쓰기_판정_그대로다():
+    d = adt_tiers.decide(_ALLOW_SERVER + "deleteObject", {}, _tiers(ALLOW_YAML), DEFAULTS)
+    assert d.kind == "deny" and "writes_allowed: false" in d.reason
 
 
 def test_data_access_deny_서버의_쓰기_도구는_기존_쓰기_판정_그대로다():
@@ -408,6 +460,17 @@ def test_훅_data_access_deny_서버의_데이터_도구는_거절한다(hook, t
     assert code == 0 and _decision(out) == "deny"
     assert "data_access: deny" in _reason(out)
     _지시_없음(_reason(out))
+
+
+def test_훅_data_access_allow_는_필드를_고른_쿼리를_묻지_않고_select_star_는_거절한다(hook, tmp_path):
+    repo = _project(tmp_path, ALLOW_YAML)
+    code, out = _run(hook, repo, "mcp__abap-adt-z5u__runQuery",
+                     {"sqlQuery": "SELECT FROM I_Product FIELDS Product"})
+    assert code == 0 and out is None
+    code, out = _run(hook, repo, "mcp__abap-adt-z5u__runQuery", {"sqlQuery": "SELECT * FROM t000"})
+    assert code == 0 and _decision(out) == "deny" and "CR-003" in _reason(out)
+    code, out = _run(hook, repo, "mcp__abap-adt-z5u__tableContents", {"ddicEntityName": "T000"})
+    assert code == 0 and _decision(out) == "ask"
 
 
 def test_훅_data_access_값이_잘못되면_파일_오류로_거절한다(hook, tmp_path):
