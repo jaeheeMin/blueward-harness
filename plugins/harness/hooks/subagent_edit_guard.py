@@ -41,6 +41,7 @@ from pathlib import Path
 MAX_BLOCKS = 2
 STATE_DIRNAME = "harness-subagent-guard"
 PENDING = "pending-warnings"
+NO_START = "pending-no-start"
 KEEP_SECONDS = 7 * 24 * 3600
 STALE_ACTIVE_SECONDS = 3600  # 끝났다는 기록 없이 이만큼 지난 서브에이전트는 겹침 판정에서 뺀다
 GIT_TIMEOUT = 20
@@ -74,6 +75,20 @@ def warn(message: str, state: Path | None = None) -> None:
                 fh.write(message.replace("\n", " / ") + "\n")
         except OSError:
             pass
+
+
+def note_no_start(state: Path, session: str, agent: str) -> None:
+    """시작 기록 없는 에이전트는 메인 모델에게 개별 경고 대신 묶어 알린다(#690). 같은 세션·id 는 한 번만 남긴다."""
+    line = f"{session}\t{agent}"
+    path = state / NO_START
+    try:
+        state.mkdir(parents=True, exist_ok=True)
+        if path.exists() and line in path.read_text(encoding="utf-8").splitlines():
+            return
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
 
 
 # ---- git / 해시 ------------------------------------------------------------
@@ -196,7 +211,7 @@ def save_json(path: Path, data: dict) -> None:
 def prune(state: Path) -> None:
     cutoff = time.time() - KEEP_SECONDS
     for item in state.iterdir():
-        if item.name == PENDING:
+        if item.name in (PENDING, NO_START):
             continue
         try:
             if item.stat().st_mtime < cutoff:
@@ -373,7 +388,14 @@ def do_stop(payload: dict) -> None:
         if not isinstance(base, dict):
             raise ValueError("baseline")
     except (OSError, ValueError, KeyError):
-        warn(f"harness: 서브에이전트({agent})의 시작 기준이 없어 Edit/Write 밖 수정을 확인하지 못했다(확인 못 함).", state)
+        if payload.get("agent_type") == "":
+            # 공식 문서: 프롬프트 제안·/btw 같은 Claude Code 내부 에이전트는 SubagentStart 없이 Stop 만 내고
+            # agent_type 이 빈 문자열이다(--agent 를 쓰면 세션 에이전트 이름이라 가릴 수 없다). 우리가 부른 게 아니다.
+            return
+        message = f"harness: 서브에이전트({agent})의 시작 기준이 없어 Edit/Write 밖 수정을 확인하지 못했다(확인 못 함)."
+        print(message, file=sys.stderr)
+        emit({"systemMessage": message})
+        note_no_start(state, str(payload.get("session_id") or "s"), str(agent))
         return
     started = float(meta.get("started") or 0)
 
@@ -450,6 +472,20 @@ def do_stop(payload: dict) -> None:
     emit({"decision": "block", "reason": reason})
 
 
+def _take(state: Path, name: str) -> str:
+    taking = state / (name + ".taking")
+    try:
+        os.replace(state / name, taking)  # 읽는 사이에 새로 쌓이는 경고를 잃지 않게 먼저 떼어 낸다
+    except OSError:
+        return ""  # 경고 없음
+    try:
+        text = taking.read_text(encoding="utf-8").strip()
+        taking.unlink()
+    except OSError:
+        return ""
+    return text
+
+
 def do_inject(payload: dict) -> None:
     if payload.get("agent_id"):
         return  # 서브에이전트 안에서 부른 Agent 호출이면 메인이 아니다
@@ -457,17 +493,11 @@ def do_inject(payload: dict) -> None:
         _, state = repo_paths(payload.get("cwd") or os.getcwd())
     except Unavailable:
         return
-    pending = state / PENDING
-    taking = state / (PENDING + ".taking")
-    try:
-        os.replace(pending, taking)  # 읽는 사이에 새로 쌓이는 경고를 잃지 않게 먼저 떼어 낸다
-    except OSError:
-        return  # 경고 없음
-    try:
-        text = taking.read_text(encoding="utf-8").strip()
-        taking.unlink()
-    except OSError:
-        return
+    text = _take(state, PENDING)
+    no_start = {ln for ln in _take(state, NO_START).splitlines() if ln.strip()}
+    if no_start:
+        extra = f"시작 기록이 없는 서브에이전트 {len(no_start)}개(Edit/Write 밖 수정 확인 못 함)"
+        text = (text + "\n" + extra) if text else extra
     if text:
         emit({"hookSpecificOutput": {
             "hookEventName": "PostToolUse",
