@@ -12,7 +12,7 @@ from typing import Callable
 
 import platform_compat
 from hooks_api import tool_key
-from store import CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, mark_check, new_start_checks, prompt_title
+from store import CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, chat_clean, mark_check, new_start_checks, prompt_title
 
 FLAGS = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
          "--permission-prompt-tool", "stdio"]
@@ -263,6 +263,7 @@ class Manager:
             if s is not None:
                 s.pop("interrupted", None)
                 self.store.add_log(s, "보냄: " + text.split("\n", 1)[0][:200])
+                self.store.add_chat(s, "me", chat_clean(text))
                 if s.get("title_rank", 0) < TITLE_PROMPT:
                     title = prompt_title(text)
                     if title:
@@ -497,12 +498,14 @@ class Manager:
                         s["currentAction"] = summarize_tool(str(block.get("name", "")), block.get("input"))
                     elif block.get("type") == "text" and block.get("text"):
                         self.store.add_log(s, "Claude Code: " +str(block["text"]).strip().split("\n", 1)[0][:200])
+                        self.store.add_chat(s, "ai", str(block["text"]))
             elif kind == "result":
                 s["currentAction"] = ""
                 s["turn_running"] = False
                 if isinstance(e.get("result"), str) and e["result"] and not s.get("reportFresh"):
                     s["report"] = e["result"]  # Stop 훅이 이번 턴에 못 왔을 때를 위한 대비(턴마다 reportFresh 를 비우므로 이후 턴도 반영된다)
                     s["reportFresh"] = True
+                    self.store.add_chat(s, "ai", e["result"])
                 if s.pop("interrupted", False):
                     self.store.add_log(s, "사용자가 작업을 중단했습니다.")
                 elif e.get("is_error"):

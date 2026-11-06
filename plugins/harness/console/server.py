@@ -530,12 +530,12 @@ class App:
                 lines.append("이 폴더의 프로젝트 준비 여부(templates/ 와 rules/)는 확인하지 못했다. 준비가 됐다고도 안 됐다고도 단정하지 않는다.")
         return "\n".join(lines)
 
-    def model_of(self, s: dict) -> dict:
+    def model_of(self, s: dict, chat: bool = False) -> dict:
         """잠금 순서: manager.lock(잎) 은 store.lock 을 쥔 채 잡지 않는다. 그래서 살아 있는지부터 묻고 나서 store.lock 을 잡는다."""
         alive = self.manager.alive(s["id"]) if s["managed"] else False
         with self.store.lock:
             s["managed_alive"] = alive
-            return public_session(self.store, s, self.skills)
+            return public_session(self.store, s, self.skills, chat)
 
     def known_roots(self) -> list[str]:
         with self.store.lock:
@@ -568,7 +568,7 @@ class App:
         return 200, [self.model_of(s) for s in items]
 
     def a_session(self, g, q, b):
-        return 200, self.model_of(self.get_session(g[0]))
+        return 200, self.model_of(self.get_session(g[0]), chat=q.get("chat", ["1"])[0] != "0")  # 열어 보지 않는 세션은 ?chat=0 으로 대화를 뺀다
 
     def a_message(self, g, q, b):
         s = self.get_session(g[0])

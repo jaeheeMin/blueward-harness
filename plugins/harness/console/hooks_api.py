@@ -9,7 +9,7 @@ from typing import Callable
 import context_usage
 import flows
 from store import (CHECK_DONE, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
-                   TITLE_PROMPT, TITLE_SESSION, mark_check, prompt_title, remember_touched)
+                   TITLE_PROMPT, TITLE_SESSION, chat_clean, mark_check, prompt_title, remember_touched)
 
 QUESTION_WAIT = 300.0
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
@@ -160,6 +160,7 @@ class Hooks:
         if isinstance(text, str) and text.strip():
             s["report"] = text
             s["reportFresh"] = True  # 이번 턴에 받은 보고(askedInText 는 이것만 본다)
+            self.store.add_chat(s, "ai", text)
         s["turn_running"] = False
         s["currentAction"] = ""
         asking = any(r.kind == "question" for r in self.store.pending_for(s["id"]))  # 질문 대기 중의 Stop 은 스킬 끝이 아니다(아래에서 닫기 전에 본다)
@@ -177,6 +178,8 @@ class Hooks:
             s["turn_running"] = True
             if undo is not None:
                 undo.append(lambda: self._restore_stop(s, item))
+            self.store.add_chat(s, "me", f"/{item['skill']}" + (f" {item['args']}" if item.get("args") else "")
+                                if item.get("kind") == "skill" else str(item.get("text", "")))  # 훅 프롬프트로는 오지 않는 콘솔 예약 말
             self.store.touch(s)
             self.store.flush()
             if item.get("kind") == "skill":
@@ -222,6 +225,7 @@ class Hooks:
                 if title:
                     store.set_title(s, title, TITLE_PROMPT)
             store.add_log(s, "요청: " + prompt.split("\n", 1)[0][:200])
+            store.add_chat(s, "me", chat_clean(prompt))
         elif name == "UserPromptExpansion":
             if not late:
                 self._skill_started(s, body.get("command_name"))

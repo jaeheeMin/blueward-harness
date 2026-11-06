@@ -27,6 +27,8 @@ MAX_SUBAGENTS = 200
 MAX_PENDING_STOP = 20
 MAX_CHANGED_FILES = 500
 MAX_PR_LINKS = 50
+CHAT_LIMIT = 200  # 세션마다 남기는 대화 항목 수
+CHAT_TEXT_LIMIT = 8000  # 항목 하나의 글자 수
 SUBSCRIBER_MAXSIZE = 1000
 TERMINAL_IDLE_SECONDS = 600.0  # 터미널 세션은 이만큼 신호가 없으면 쉬는 상태로 본다(Esc 로 끊으면 Stop 이 오지 않는다)
 REPLACE_RETRIES = 5
@@ -65,6 +67,43 @@ def prompt_title(text: str) -> str:
                 return ""
             return ("다른 세션: " if cross else "") + line
     return ""
+
+
+def chat_clean(text: str) -> str:
+    """대화에 남길 내 말. 시스템 블록(task-notification, system-reminder, local-command-*)을 걷어 내고, 남는 글이 없으면 빈 문자열."""
+    text = _DROP_OPEN.sub("", _DROP_BLOCK.sub("", str(text or "")))
+    return text.strip()
+
+
+def request_title(kind: str, tool_name, tool_input) -> str:
+    """대화에 남길 요청 제목. 질문이면 첫 질문 글, 승인이면 도구 이름."""
+    if kind == "question" and isinstance(tool_input, dict):
+        for q in tool_input.get("questions") or []:
+            if isinstance(q, dict) and str(q.get("question") or q.get("header") or "").strip():
+                return " ".join(str(q.get("question") or q.get("header")).split())[:200]
+        return "질문"
+    return str(tool_name or "도구")[:100] + " 사용"
+
+
+def request_answer(r) -> str:
+    """처리된 요청의 답 요약. 응답 구조를 알 수 없으면 outcome 만 쓴다(답을 지어내지 않는다)."""
+    if r.status != "answered":
+        return r.outcome or "닫힘"
+    out = r.response.get("hookSpecificOutput") if isinstance(r.response, dict) else None
+    out = out if isinstance(out, dict) else {}
+    if r.kind == "question":
+        answers = (out.get("updatedInput") or {}).get("answers") if isinstance(out.get("updatedInput"), dict) else None
+        if isinstance(answers, dict):
+            values = [" ".join(str(v).split()) for v in answers.values() if isinstance(v, str) and v.strip()]
+            if values:
+                return " / ".join(values)[:400]
+        return r.outcome or "답변함"
+    decision = out.get("decision") if isinstance(out.get("decision"), dict) else {}
+    if decision.get("behavior") == "allow":
+        return "허락함(이 세션에서 다시 묻지 않기)" if decision.get("updatedPermissions") else "허락함"
+    if decision.get("behavior") == "deny":
+        return "거절함"
+    return r.outcome or "처리함"
 
 
 # 스킬 이름의 쉬운 말. static/app.js 의 SKILL_LABELS 와 같게 둔다.
@@ -208,6 +247,10 @@ class Store:
             if isinstance(s, dict) and isinstance(s.get("id"), str):
                 s["turn_running"] = False
                 s["managed_alive"] = False
+                if not isinstance(s.get("chat"), list):
+                    s["chat"] = []
+                else:
+                    s["chat"] = [c for c in s["chat"] if isinstance(c, dict)][-CHAT_LIMIT:]
                 if s.get("title_rank") == TITLE_PROMPT:  # 옛 버전이 저장한 "[Image #17]" 같은 이름을 정리한다
                     # 비어도 rank 는 그대로 둔다 — 첫 요청은 이미 지나갔으니 대화 중간 말("응 계속 해")이 이름이
                     # 되지 않고 display_title 의 브랜치·스킬·폴더 이름으로 보이게 한다
@@ -314,7 +357,7 @@ class Store:
                 s = {
                     "id": sid, "title": "", "title_rank": 0, "cwd": cwd, "repo": "", "branch": "", "managed": False,
                     "permissionMode": "", "model": "", "currentSkill": "", "currentAction": "", "startedAt": now, "updatedAt": now,
-                    "log": [], "report": "", "changedFiles": [], "touchedFiles": [], "prLinks": [], "subagents": [], "skillStates": {},
+                    "log": [], "chat": [], "report": "", "changedFiles": [], "touchedFiles": [], "prLinks": [], "subagents": [], "skillStates": {},
                     "pending_stop": [], "turn_running": False, "ended": False, "managed_alive": False,
                     "turn": {"skill": None, "unknown": False}, "flowState": None,
                 }
@@ -354,6 +397,34 @@ class Store:
             s["log"].append({"time": self.clock(), "text": str(text)[:500]})
             del s["log"][:-LOG_LIMIT]
 
+    def add_chat(self, s: dict, role: str, text: str = "", **extra) -> bool:
+        """대화 목록(s["chat"], 오래된 것부터)에 항목을 더한다. 바로 앞 항목이 같은 role·같은 글이면 더하지 않는다
+        (훅과 콘솔 전송, 콘솔 마지막 블록과 Stop 보고가 같은 글을 두 번 알린다). 더했으면 True."""
+        text = str(text or "").strip()[:CHAT_TEXT_LIMIT]
+        if role != "req" and not text:
+            return False
+        with self.lock:
+            chat = s.get("chat")
+            if not isinstance(chat, list):
+                chat = s["chat"] = []
+            if role != "req" and chat and chat[-1].get("role") == role and chat[-1].get("text") == text:
+                return False
+            item = {"t": self.clock(), "role": role}
+            if role != "req":
+                item["text"] = text
+            item.update(extra)
+            chat.append(item)
+            del chat[:-CHAT_LIMIT]
+        return True
+
+    def _chat_answer(self, r: "Request") -> None:
+        """처리된 요청의 답을 같은 id 의 대화 항목에 채운다(store.lock 안에서 부른다)."""
+        s = self.sessions.get(r.session_id)
+        for item in reversed((s.get("chat") if s else None) or []):
+            if isinstance(item, dict) and item.get("role") == "req" and item.get("id") == r.rid:
+                item["answer"] = request_answer(r)
+                return
+
     def touch(self, s: dict, publish: bool = True) -> None:
         with self.lock:
             s["updatedAt"] = self.clock()
@@ -377,6 +448,7 @@ class Store:
                 if s["title_rank"] > existing["title_rank"]:
                     existing["title"], existing["title_rank"] = s["title"], s["title_rank"]
                 existing["log"] = (s["log"] + existing["log"])[-LOG_LIMIT:]
+                existing["chat"] = (list(s.get("chat") or []) + list(existing.get("chat") or []))[-CHAT_LIMIT:]
                 target = existing
             else:
                 s["id"] = new
@@ -419,6 +491,9 @@ class Store:
                 raise RequestLimit("대기 중인 요청이 너무 많습니다.")
             r = Request(uuid.uuid4().hex[:12], sid, kind, tool_name, tool_input, suggestions, key, self.clock())
             self.requests[r.rid] = r
+            s = self.sessions.get(sid)
+            if s is not None:
+                self.add_chat(s, "req", id=r.rid, kind=kind, title=request_title(kind, tool_name, tool_input), answer=None)
             self._prune_requests()
         self.publish("request", {"id": r.rid, "sessionId": sid})
         self.publish("session", {"id": sid})
@@ -437,6 +512,7 @@ class Store:
             if r is None or r.status != "pending":
                 return False
             r.status, r.response, r.outcome, r.answered_at = "answered", response, outcome, self.clock()
+            self._chat_answer(r)
             r.event.set()
         self.publish("request", {"id": rid, "sessionId": r.session_id})
         self.publish("session", {"id": r.session_id})
@@ -448,6 +524,7 @@ class Store:
             if r is None or r.status != "pending":
                 return False
             r.status, r.outcome, r.answered_at = "closed", outcome, self.clock()
+            self._chat_answer(r)
             r.event.set()
         self.publish("request", {"id": rid, "sessionId": r.session_id})
         self.publish("session", {"id": r.session_id})
@@ -587,8 +664,8 @@ def can_send(s: dict, store: "Store | None" = None) -> tuple[bool, str]:
     return False, CANNOT_SEND_IDLE
 
 
-def public_session(store: Store, s: dict, skills: list[str]) -> dict:
-    """화면에 내려보내는 세션 모델(web-console.md §8)."""
+def public_session(store: Store, s: dict, skills: list[str], include_chat: bool = False) -> dict:
+    """화면에 내려보내는 세션 모델(web-console.md §8). 대화(chat)는 크기 때문에 include_chat 일 때만(단일 세션 응답) 싣는다."""
     with store.lock:
         pending = [r.rid for r in store.pending_for(s["id"])]
         running = turn_running(store, s)
@@ -621,7 +698,9 @@ def public_session(store: Store, s: dict, skills: list[str]) -> dict:
             group = "running"
         else:
             group = "idle"
-        return dict(flows.public_fields(s, store.flow_data), **{
+        extra = {"chat": [dict(c) for c in s.get("chat") or [] if isinstance(c, dict)]} if include_chat else {}
+        return dict(flows.public_fields(s, store.flow_data), **extra, **{
+            "chatPartial": not s["managed"],  # 터미널 세션은 내 말과 AI 마지막 답만 안다
             "id": s["id"], "title": display_title(s), "cwd": s["cwd"], "repo": s["repo"], "branch": s["branch"],
             "managed": s["managed"], "status": status, "group": group, "permissionMode": s["permissionMode"],
             "model": s.get("model", ""), "modelChoice": s.get("modelChoice", ""),

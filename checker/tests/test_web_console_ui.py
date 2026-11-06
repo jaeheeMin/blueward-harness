@@ -822,6 +822,48 @@ def test_work_screen_session_matches_design(tmp_path):
         assert need in text, need
 
 
+def _chat_items(n):
+    return [{"t": 1700000000 + i, "role": "me" if i % 2 == 0 else "ai", "text": f"대화{i:02d}번"} for i in range(n)]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_chat_screen_folds_before_the_last_12_and_hides_report_when_chat_exists(tmp_path):
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=_chat_items(15), chatPartial=True)])
+    text, dump = got["text"], got["dump"]
+    assert "… 앞 대화 3개 접힘" in text
+    assert "대화00번" not in text and "대화02번" not in text and "대화03번" in text and "대화14번" in text
+    assert dump.count("<div.me>") + dump.count("<div.ai>") == 12
+    assert "터미널에서 한 대화는 내 말과 AI 마지막 답만 보여." in text
+    assert "다 썼어" not in text  # 대화가 있으면 마지막 보고 하나만 따로 그리지 않는다
+    few = _smoke(tmp_path, "s/s1", [_session("s1", chat=_chat_items(12))])
+    assert "앞 대화" not in few["text"] and "대화00번" in few["text"] and "터미널에서 한 대화" not in few["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_chat_screen_draws_waiting_request_once_in_place_and_answers_as_one_line(tmp_path):
+    chat = [{"t": 1, "role": "me", "text": "시작해 줘"},
+            {"t": 2, "role": "req", "id": "q0", "kind": "question", "title": "색은?", "answer": "Red"},
+            {"t": 3, "role": "req", "id": "p0", "kind": "permission", "title": "Bash 사용", "answer": "허락함"},
+            {"t": 4, "role": "req", "id": "p9", "kind": "permission", "title": "Edit 사용", "answer": None},
+            {"t": 5, "role": "req", "id": "q1", "kind": "question", "title": "우선순위는?", "answer": None}]
+    q1 = {"id": "q1", "sessionId": "s1", "kind": "question", "status": "pending", "questions": [{"question": "우선순위는?", "options": [{"label": "높음"}]}]}
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, pendingRequestIds=["q1"], status="waiting")], [q1])
+    text, dump = got["text"], got["dump"]
+    assert dump.count("<div.ask>") == 1  # 대기 카드는 chat 안 자리에서 한 번만(머리 글에도 같은 말이 있어 글자 수는 세지 않는다)
+    assert dump.count("<div.reqnote>") == 3 and dump.index("<div.reqnote>") < dump.index("<div.ask>")
+    assert "질문: 색은? → Red" in text and "승인 요청: Bash 사용 → 허락함" in text
+    assert "승인 요청: Edit 사용 → 처리 결과를 알 수 없어" in text  # 답이 없고 대기도 아니면 지어내지 않는다
+    assert text.index("시작해 줘") < text.index("질문: 색은? → Red")
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_chat_screen_falls_back_to_report_for_sessions_without_chat(tmp_path):
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=[])])
+    assert "다 썼어" in got["text"] and "앞 대화" not in got["text"]
+    got = _smoke(tmp_path, "s/s1", [_session("s1")])  # 옛 서버 응답엔 chat 키가 없다
+    assert "다 썼어" in got["text"]
+
+
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_work_screen_finished_session_shows_handoff_card(tmp_path):
     nxt = {"options": [{"flow": "spec", "label": "개발 Spec 만들기", "value": "개발", "count": 1, "ids": ["REQ-001"]}, {"flow": None, "label": "권한 양식", "disabled": True}], "hint": "", "unknown": ""}
