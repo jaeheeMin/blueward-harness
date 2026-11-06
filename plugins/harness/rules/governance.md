@@ -38,7 +38,7 @@ PR 의 차례가 되면 작성자를 멘션하고(Teams 웹훅이 있으면 Team
 
 1. 한 PR = 하위 작업 이슈 하나. 기능이 여럿인 개발은 `/harness:start` 에서 하위 작업으로 쪼갠다. DEV 가 둘 이상이거나
    SRS 와 개발이 함께면 섞임이라 나누자고 제안한다. 개발 PR 이 같은 DEV 의 Spec 을 같이 고치는 것, SRS 와 Spec 을
-   함께 올리는 것은 섞임이 아니다. 단 개발 결과 기록은 Spec 이 아니라 `audit/changes/` 에 적는다(Spec 을 고치면 `docs/spec/` 위험 경로라 승인 대상, #552). 개발 중 `src/` 변경이 기준(기본 1,000줄)을 넘으면 deliver 가 나누기를 묻는다(막지 않는다). 안 끝난 개발이어도 센다.
+   함께 올리는 것은 섞임이 아니다. 단 개발 결과 기록은 Spec 이 아니라 `audit/changes/` 에 적는다(개발 결과 기록 위치, #552. 승인을 피하려는 것이 아니다). 개발 중 `src/` 변경이 기준(기본 1,000줄)을 넘으면 deliver 가 나누기를 묻는다(막지 않는다). 안 끝난 개발이어도 센다.
 2. 안 끝난 개발은 PR 없이 브랜치에만 올린다. 하위 작업 하나가 080 에서 활성화된 뒤 그 PR 을 낸다.
 3. 끝난 PR 은 GitHub 자동 병합으로 검사(위험한 PR 은 승인까지)가 끝나는 순간 합친다. 위험한 PR 은 **사람의 승인이 곧 병합 결정**이고, 위험하지 않은 PR 은 검사 통과가 병합 조건이다.
 4. 개발 PR 은 쌓지 않는다. 앞 PR 이 열려 있으면 브랜치에만 올리고, 병합되면 main 에서 다시 찍어 PR 을 낸다.
@@ -103,10 +103,12 @@ PR 검사는 이름이 `pr-checks` 인 job 하나이고, 비밀정보·문서·S
 결과는 옛 이름(`gitleaks`·`doc-guard`·`ssot-approval`·`risk-gate`·`merge-order`) commit status 로도 달려 `gh pr checks` 와
 훅이 이름으로 읽는다. 승인(리뷰)이 달리면 `pr-review` 가 승인 여부만 다시 판정하고, 병합 뒤 감시는 `main-checks` 가 한다.
 
-Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험도를 판정한다. 바뀐 줄이
-300 을 넘거나 파일이 10개를 넘을 때, 위험 경로(`docs/ssot/`, `rules/`, `.github/` 등과
+Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험도를 판정한다. 위험 경로(`docs/ssot/`, `rules/`, `.github/` 등과
 `.github/human-merge-paths`)를 바꿀 때, 추가된 줄에 비밀값 모양이 있을 때, 다른 검사가
-실패했거나 진행 중일 때 그 PR 은 위험하다. 위험하지 않은 PR 은 승인 없이 병합할 수 있고,
+실패했거나 진행 중일 때 그 PR 은 위험하다. `docs/spec/` 은 **새로 만든 Spec 파일(PR files 의 status 가 `added`)만** 위험 경로로 센다
+— 이미 있는 Spec 을 고치거나 옮기거나 지우는 것은 승인 대상이 아니다(#736). status 가 없거나 처음 보는 값이면 새 파일로 본다(검사 불능을 통과로 뭉개지 않는다). SRS(`docs/ssot/`)는 그대로 고치면 승인 대상이다.
+바뀐 줄이 300 을 넘거나 파일이 10개를 넘는 것(크기)은 `size_gate`(기본 `false`) 때문에 **경고만** 한다. 결과의 `notes`·PR 코멘트의
+"참고(승인 필요 없음)" 로 보일 뿐 승인 사유가 아니다. `size_gate: true` 로 켠 저장소에서만 크기 초과가 승인 사유다. 위험하지 않은 PR 은 승인 없이 병합할 수 있고,
 위험한 PR 은 `.github/ssot-approvers` 의 사람 가운데 **작성자가 아닌 사람이 PR 의 마지막
 커밋에 Approve** 해야 한다. 승인이 없으면 PR 검사 `pr-checks` 가 빨간불이 되고(그 안의 risk-gate
 단계가 실패하고 commit status `risk-gate` 도 빨갛다) 이유와 다음 할 일이 PR 코멘트에 남으며, Claude 의 `gh pr merge` 는 훅이 거부한다. 승인 없이 병합됐으면
@@ -115,10 +117,11 @@ Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험�
 (작성자 제외, 권한을 읽지 못하면 검사 불능).
 
 기준은 `.github/risk-gate.yaml`(`max_changed_lines`, `max_changed_files`, `high_risk_paths`,
-`secret_scan`, `require_checks_green`, `ai_review`, `size_exclude_paths`, `size_warn_only_paths`, `srs_split_hint`, `approvers_file`)에서 고친다.
+`secret_scan`, `require_checks_green`, `ai_review`, `size_gate`, `size_exclude_paths`, `size_warn_only_paths`, `srs_split_hint`, `approvers_file`)에서 고친다.
+`max_changed_*` 는 `size_gate: false` 면 경고 기준이고 `size_gate: true` 면 승인 기준이다. 아래 `size_exclude_paths`·`size_warn_only_paths` 는 `size_gate: true` 일 때만 의미가 있다(false 면 크기는 어차피 경고만 낸다).
 `size_exclude_paths`(기본 비어 있음 = 모든 파일을 센다, #534)에 접두어(예 `src/`, `audit/`)를 적으면, 그 아래 파일은 줄·파일 수 합계에서
 빼고 **남은 파일만으로** `max_changed_*` 를 판정한다. 남은 부분이 기준을 넘으면 승인 사유이고, 뺀 것까지 합쳐야 넘는 부분은 경고
-(결과의 `notes`, PR 코멘트의 "참고(승인 필요 없음)")로만 낸다. 그래서 `src/` 와 Spec 을 같이 고쳐도 `src/` 줄은 승인 사유가 되지 않는다(Spec 은 위험 경로라 별도 사유다. 개발 결과는 Spec 대신 `audit/changes/` 에 적어 이 사유를 피한다, #552).
+(결과의 `notes`, PR 코멘트의 "참고(승인 필요 없음)")로만 낸다. 그래서 `src/` 와 Spec 을 같이 고쳐도 `src/` 줄은 승인 사유가 되지 않는다(고친 Spec 도 위험 경로가 아니다. 개발 결과 기록은 Spec 이 아니라 `audit/changes/` 에 적는다, #552).
 다른 기준(위험 경로·비밀값·AI 리뷰·다른 검사 실패)은 그대로다. 두 키를 함께 쓰면 `size_exclude_paths` 를 먼저 적용하고,
 `size_warn_only_paths` 는 **센 파일**이 모두 그 아래일 때 남은 사유를 경고로 바꾼다.
 `size_warn_only_paths`(기본 비어 있음, #436)에 접두어(예 `src/`)를 적으면, **센 파일**(`size_exclude_paths` 를 쓰면 그 아래를 뺀 나머지, 안 쓰면 바뀐 파일 전부)이
