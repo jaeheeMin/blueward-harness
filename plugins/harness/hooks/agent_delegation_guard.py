@@ -21,6 +21,12 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import console_block  # noqa: E402
+
+_PAYLOAD: dict | None = None  # 막을 때 웹 콘솔에 알리려고 훅 입력을 기억해 둔다(#650)
 
 # 정의 파일이 없는 기본형 에이전트. 소문자로 비교한다.
 CATCH_ALL_TYPES = frozenset({"general-purpose", "claude"})
@@ -45,6 +51,7 @@ def deny(reason: str) -> None:
     }
     json.dump(payload, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
+    console_block.report(_PAYLOAD, "agent_delegation_guard", reason)  # 실패해도 조용히 돌아온다
     sys.exit(0)
 
 
@@ -56,10 +63,12 @@ def _force_utf8_io() -> None:
 
 
 def _main() -> None:
+    global _PAYLOAD
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError:
         payload = None
+    _PAYLOAD = payload if isinstance(payload, dict) else None
     tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
     if not isinstance(tool_input, dict):
         deny(

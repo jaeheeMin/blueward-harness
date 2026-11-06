@@ -5513,3 +5513,52 @@ def test_chat_queued_console_message_is_recorded_when_stop_delivers_it(browser):
     assert [c["text"] for c in _chat(browser, "t1")] == ["작업"]  # 아직 전달 전
     browser.hook("stop", {"session_id": "t1", "cwd": "/w", "last_assistant_message": "1차 끝"})
     assert [(c["role"], c["text"]) for c in _chat(browser, "t1")] == [("me", "작업"), ("ai", "1차 끝"), ("me", "이어서 이것도")]
+
+
+# ---- 훅이 막은 이유(#650) ----
+
+def _blocked(browser, sid, reason, hook="pre_write_guard", tool="Write"):
+    return browser.hook("blocked", {"session_id": sid, "cwd": "/w", "hook_event_name": "HarnessBlocked", "hook": hook, "reason": reason, "tool_name": tool})
+
+
+def test_blocked_report_becomes_a_block_chat_item_with_fix(browser):
+    assert _blocked(browser, "b1", "문서가 템플릿을 따르지 않습니다.\n다음: 개요 절을 추가하십시오.")[0] == 200
+    item, = _chat(browser, "b1")
+    assert item["role"] == "block" and item["kind"] == "blocked" and item["hook"] == "pre_write_guard" and item["tool"] == "Write"
+    assert item["text"].startswith("문서가 템플릿을") and item["fix"] == "개요 절을 추가하십시오."
+
+
+@pytest.mark.parametrize("word", ["검사 불능", "확인하지 못", "확인할 수 없", "판정할 수 없", "검사할 수 없", "확인 불능"])
+def test_blocked_report_with_cannot_check_words_is_cannot_check(browser, word):
+    _blocked(browser, "b2", f"엔진을 돌리지 못해 {word} 상태입니다.")
+    assert _chat(browser, "b2")[0]["kind"] == "cannot_check" and _chat(browser, "b2")[0]["fix"] == ""
+
+
+# 실제 훅 사유 문구 대입(검토 지적: 단어만 시험하면 실제 문구가 빠진다)
+@pytest.mark.parametrize("reason, kind", [
+    ("임시 파일을 만들지 못해 검사 엔진의 판을 정하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오.", "cannot_check"),
+    ("공통 개발 규칙 검사기가 알 수 없는 종료코드(3)로 끝나 이 코드를 확인할 수 없었습니다. 확인되지 않는 상태로 통과시키지 않습니다.", "cannot_check"),
+    ("harness: 기본 데이터 도구 목록(mcp_default_tools.json)을 읽지 못해 이 MCP 호출을 확인할 수 없었습니다.", "cannot_check"),
+    ("검사 불능: gitleaks 가 없어 비밀정보 검사를 하지 못했습니다. 검사하지 못한 상태로 커밋을 통과시키지 않습니다.", "cannot_check"),
+    ("PR #7 의 검사가 실패해 merge 를 막습니다. 실패한 검사: test 링크: u 다음: 로그를 보고 고치십시오.", "blocked"),
+    ("SRS(docs/ssot) 를 바꾼 PR #7 인데 작성자가 아닌 승인자의 Approve 가 없어 merge 를 막습니다. 사유: 승인을 확인할 수 없음 다음: 승인을 받으십시오.", "blocked"),
+    ("PR #7 의 검사 상태를 확인하지 못해 merge 를 막습니다(종료코드 1). 검사 불능이므로 통과시키지 않습니다. 자세히: x", "cannot_check"),
+    ("git push --force 는 이 저장소에서 금지되어 있습니다. 다음: --force 를 빼고 /harness:deliver 를 실행하십시오. 확인할 수 없는 경우 사람에게 물으십시오.", "blocked"),
+    ("비밀값 발견: 커밋에 들어갈 staged 변경에서 비밀정보 모양이 발견되어 커밋을 막습니다. 발견: a.txt 다음: 줄을 지우십시오.", "blocked"),
+    ("doc-guard: 이 문서가 템플릿을 따르지 않습니다.\n\n- 개요 절 없음\n다음: Claude 가 위 템플릿을 보고 문서를 고친 뒤 다시 저장하십시오.", "blocked"),
+])
+def test_block_kind_matches_real_hook_reasons(reason, kind):
+    assert hooks_mod.block_kind(reason) == kind
+
+
+def test_blocked_report_same_as_previous_block_is_not_stacked_but_other_is(browser):
+    _blocked(browser, "b3", "같은 사유")
+    _blocked(browser, "b3", "같은 사유")
+    assert len(_chat(browser, "b3")) == 1
+    _blocked(browser, "b3", "다른 사유")
+    assert [c["text"] for c in _chat(browser, "b3")] == ["같은 사유", "다른 사유"]
+
+
+def test_blocked_report_without_reason_or_session_is_rejected(browser):
+    assert _blocked(browser, "b4", "  ")[0] == 400
+    assert browser.hook("blocked", {"hook": "x", "reason": "r"})[0] == 400

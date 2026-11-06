@@ -772,12 +772,14 @@
       if (n) { n.textContent = followNote; n.hidden = !followNote; }
     }
 
-    function sendFollow() {
-      var s = cur(), text = followVal.trim();
+    // over 가 글이면 입력칸 대신 그 글을 보낸다(막힘 카드의 "그렇게 고쳐 줘" 버튼)
+    function sendFollow(over) {
+      var s = cur(), typed = typeof over !== 'string', text = (typed ? followVal : over).trim();
       if (!text || s.canSend === false) return;
       regions.followBtn.disabled = true;
       api('POST', '/api/sessions/' + encodeURIComponent(id) + '/messages', { text: text }).then(function () {
-        followVal = ''; regions.followInput.value = ''; sent.push({ text: text, at: Date.now() / 1000 });
+        if (typed) { followVal = ''; regions.followInput.value = ''; }
+        sent.push({ text: text, at: Date.now() / 1000 });
         followNote = (s.status === 'running') ? '지금 단계가 끝나면 이어서 처리합니다.' : '이 작업에 전달했습니다.';
       }, function (e) { followNote = '보내지 못했습니다: ' + e.message; }).then(function () {
         regions.followBtn.disabled = cur().canSend === false; paintFollowNote(); paintMsgs(cur());
@@ -955,6 +957,32 @@
       return h('div', { class: 'reqnote', 'data-chat': 'req', 'data-chat-req': c.id },
         label + ': ' + String(c.title || '') + ' → ' + (c.answer ? String(c.answer) : '처리 결과를 알 수 없어'));
     }
+    // 하네스 훅이 막은 이유(#650): 막힘은 빨간 ✕ 카드, 검사를 못 해 멈춘 건 보라 점선 ? 카드
+    var HOOK_NAMES = {
+      'pre-bash-git-guard': 'git 명령 검사', 'stop-deliver': '마무리 확인', 'pre_write_guard': '파일 쓰기 검사',
+      'agent_delegation_guard': '서브에이전트 호출 검사', 'mcp_source_guard': 'SAP 소스 쓰기 검사'
+    };
+    function chatBlock(c, s) {
+      var cannot = c.kind === 'cannot_check', name = HOOK_NAMES[c.hook] || String(c.hook || '하네스 훅');
+      var text = String(c.text || ''), lines = text.split('\n'), first = lines[0].trim(), rest = lines.slice(1).join('\n').trim();
+      var fix = String(c.fix || '').trim(), key = 'b' + String(c.t), open = !!chatOpen[key];
+      var m = first.match(/^(.+?[.!?。](?=\s|$))\s*(.*)$/);  // 첫 문장은 크게, 나머지는 접기
+      var head = m ? m[1] : first, more = ((m ? m[2] : '') + (rest ? '\n' + rest : '')).trim();
+      var card = h('div', { class: 'q ' + (cannot ? 'unsure' : 'blocked'), 'data-chat': 'block', 'data-block-kind': cannot ? 'cannot_check' : 'blocked' });
+      card.appendChild(h('span', { class: 'tagx ' + (cannot ? 'unk' : 'fail'), text: cannot ? '? 확인 못 함' : '✕ 막힘' }));
+      card.appendChild(h('b', { class: 'bt', text: (cannot ? '검사를 못 해서 멈췄어 · ' : '하네스 검사가 막았어 · ') + name }));
+      card.appendChild(h('span', { class: 'sm', 'data-block-head': '1', text: head }));
+      if (more) {
+        if (open) card.appendChild(h('span', { class: 'sub', 'data-block-more': '1', text: more }));
+        card.appendChild(h('button', { type: 'button', class: 'disclose', 'aria-expanded': String(open), onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, icon('chev', 14), open ? '접기' : '전체 보기'));
+      }
+      if (fix) card.appendChild(h('span', { class: 'sub', 'data-block-fix': '1' }, h('b', { text: '고치는 법 ' }), fix));
+      if (s.canSend === true) {
+        card.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line sm', 'data-block-send': '1', text: '그렇게 고쳐 줘',
+          onClick: function () { sendFollow('하네스 훅이 막은 이유대로 고쳐 줘: ' + head + (fix ? '\n고치는 법: ' + fix : '')); } })));
+      }
+      return card;
+    }
     // 새 항목이 왔을 때 보던 자리가 대화 끝 근처일 때만 아래로 따라간다(위로 올려 읽는 중이면 그대로 둔다)
     function chatEndNear() {
       var el = regions.msgs;
@@ -970,7 +998,7 @@
           icon('chev', 14), chatAll ? '앞 대화 접기' : '… 앞 대화 ' + hidden + '개 접힘'));
       }
       items.slice(hidden).forEach(function (c) {
-        var el = c.role === 'me' ? chatMe(c) : c.role === 'ai' ? chatAi(c) : c.role === 'req' ? chatReq(c, s, drawn) : null;
+        var el = c.role === 'me' ? chatMe(c) : c.role === 'ai' ? chatAi(c) : c.role === 'req' ? chatReq(c, s, drawn) : c.role === 'block' ? chatBlock(c, s) : null;
         if (el) out.push(el);
       });
       return out;

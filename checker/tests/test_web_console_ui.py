@@ -1070,3 +1070,23 @@ def test_memory_banner_ring_and_unknown_cases(tmp_path):
     # 홈 표의 기억 열
     got = _smoke(tmp_path, "", [_session("s1", context=hot)])
     assert "92%" in got["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_chat_draws_hook_block_cards_two_kinds_and_fix_button(tmp_path):
+    chat = [{"t": 1, "role": "me", "text": "문서 써 줘"},
+            {"t": 2, "role": "block", "hook": "pre_write_guard", "kind": "blocked", "tool": "Write",
+             "text": "문서가 템플릿을 따르지 않습니다. 개요 절이 없습니다.\n자세한 위반 목록입니다.\n\n다음: 개요 절을 추가하십시오.", "fix": "개요 절을 추가하십시오."},
+            {"t": 3, "role": "block", "hook": "stop-deliver", "kind": "cannot_check", "text": "엔진을 받지 못해 검사 불능입니다.", "fix": ""}]
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)])
+    text, dump = got["text"], got["dump"]
+    assert "<div.q.blocked>" in dump and "<div.q.unsure>" in dump
+    assert "✕ 막힘" in text and "하네스 검사가 막았어 · 파일 쓰기 검사" in text
+    assert "? 확인 못 함" in text and "검사를 못 해서 멈췄어 · 마무리 확인" in text
+    assert "문서가 템플릿을 따르지 않습니다." in text and "자세한 위반 목록입니다." not in text  # 첫 문장만 크게, 나머지는 접힘
+    assert "고치는 법 개요 절을 추가하십시오." in text
+    assert text.count("그렇게 고쳐 줘") == 2
+    unsent = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, canSend=False)])
+    assert "그렇게 고쳐 줘" not in unsent["text"] and "✕ 막힘" in unsent["text"]
+    unknown = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="새_훅")])])
+    assert "하네스 검사가 막았어 · 새_훅" in unknown["text"]  # 이름표에 없으면 원래 이름

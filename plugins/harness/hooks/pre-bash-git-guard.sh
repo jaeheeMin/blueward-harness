@@ -37,7 +37,19 @@ cd "$resolved_dir"
 # jq 부재이기 때문이다. 그래서 사유 문자열에 큰따옴표와 역슬래시를 쓰지 않는다.
 deny() {
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$1"
+  report_block "$1"
   exit 0
+}
+
+# 막은 사유를 웹 콘솔에 알린다(#650). 부가 기능이라 콘솔이 없거나 실패해도 이 훅의 종료코드·stdout·stderr 는
+# 그대로다 — 출력은 모두 버리고 실패는 무시한다. 판정 JSON 을 낸 뒤에 부른다.
+report_block() {
+  case "$input" in *'"session_id"'*) ;; *) return 0 ;; esac  # 어느 세션인지 모르면 보낼 곳이 없다
+  if timeout --version >/dev/null 2>&1; then  # Windows 기본 timeout.exe 가 잡히면 --version 이 실패한다 — 그땐 제한 없이 보낸다
+    printf '%s' "$input" | HARNESS_BLOCK_REASON="$1" timeout 5 uv run --no-project python "$hook_dir/console_block.py" pre-bash-git-guard >/dev/null 2>&1 || true
+  else
+    printf '%s' "$input" | HARNESS_BLOCK_REASON="$1" uv run --no-project python "$hook_dir/console_block.py" pre-bash-git-guard >/dev/null 2>&1 || true
+  fi
 }
 
 # 거부 메시지는 "왜 막혔는지" 와 "다음에 할 일" 을 함께 담는다(#113 Hook 거부 메시지에
@@ -1096,6 +1108,7 @@ enabled_guard() {
   fi
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' \
     "$(printf '%s' "$what 를 막습니다. $out" | jq -Rs .)"
+  report_block "$what 를 막습니다. $out"
   exit 0
 }
 if [ -n "$commit_seg" ] && git rev-parse --show-toplevel >/dev/null 2>&1; then
@@ -1126,6 +1139,7 @@ if [ "$push_found" -eq 1 ]; then
       fi
       printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' \
         "$(printf '%s' "푸시를 막습니다. $act_out" | jq -Rs .)"
+      report_block "푸시를 막습니다. $act_out"
       exit 0
     fi
   fi
