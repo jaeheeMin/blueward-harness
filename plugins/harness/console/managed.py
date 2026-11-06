@@ -24,12 +24,17 @@ MODEL_ALIASES = {v for v, _ in MODEL_OPTIONS if v}
 # claude --effort 가 받는 단계. 빈 값은 플래그를 붙이지 않는다는 뜻이다. (값, 쉬운 이름)
 EFFORT_OPTIONS = [("", "기본값"), ("low", "낮음"), ("medium", "보통"), ("high", "높음"), ("xhigh", "아주 높음"), ("max", "최대")]
 EFFORT_VALUES = {v for v, _ in EFFORT_OPTIONS}
-# claude --permission-mode 로 고를 수 있는 값. bypassPermissions·dontAsk·auto 는 화면에도 서버에도 두지 않는다. 빈 값은 플래그를 붙이지 않는다.
-PERMISSION_OPTIONS = [("", "기본(그때그때 확인)"), ("acceptEdits", "파일 고치기는 자동 허용"), ("plan", "계획만 세우기")]
+# claude --permission-mode 로 고를 수 있는 값. bypassPermissions·dontAsk 는 화면에도 서버에도 두지 않는다. 빈 값은 플래그를 붙이지 않는다.
+# auto 는 AI 가 위험한 행동을 알아서 막는 모드다(#684, https://code.claude.com/docs/en/permission-modes). 못 쓰는 환경이면 AUTO_UNAVAILABLE 로 알린다.
+PERMISSION_OPTIONS = [("", "기본(그때그때 확인)"), ("acceptEdits", "파일 고치기는 자동 허용"), ("plan", "계획만 세우기"),
+                      ("auto", "알아서 하되 위험한 건 AI가 막기")]
 PERMISSION_VALUES = {v for v, _ in PERMISSION_OPTIONS}
 PERMISSION_LABELS = dict(PERMISSION_OPTIONS)
 # 살아 있는 세션에 set_permission_mode 를 보내고 control_response 를 기다리는 시간(초). 빈 값(기본)은 claude 쪽 이름 default 로 보낸다.
 MODE_REPLY_WAIT = 8.0
+AUTO_MODE = "auto"
+AUTO_UNAVAILABLE = ("auto 모드를 쓸 수 없는 것 같아. 관리자가 꺼 뒀거나, 이 모델·Claude Code 판이 지원하지 않을 수 있어. "
+                    "그래서 다른 모드로 시작됐어. 이유는 확인 못 함")
 DEFAULT_MODE_NAME = "default"
 # 플러그인 다시 불러오기: control_request(reload_plugins) 가 안 되면 user 메시지 /reload-plugins 로 대신한다(모델 비용 없는 합성 응답).
 RELOAD_SUBTYPE = "reload_plugins"
@@ -129,6 +134,9 @@ class Manager:
         self.session_locks: dict[str, threading.RLock] = {}
         self.stderr_log = stderr_log
         self.mode_waits: dict[str, dict] = {}  # request_id -> {"event", "response"}. manager.lock 으로 지킨다
+        # 서버가 끼워 준다(hooks_api.Hooks). 없으면 묻지 않고 허용하는 일이 없고 위험 표시도 없다.
+        self.auto_allowed: Callable[[dict, str, object], bool] | None = None
+        self.risk_of: Callable[[dict, str, object], tuple[str, str]] | None = None
 
     # ---- 시작 ----
     def command(self, resume: str | None = None, model: str | None = None, effort: str | None = None,
@@ -307,6 +315,8 @@ class Manager:
             response = wait["response"] or {}
             if response.get("subtype") != "success":
                 detail = str(response.get("error") or "알 수 없는 오류")[:200]
+                if mode == AUTO_MODE:
+                    detail = f"{AUTO_UNAVAILABLE.split('. ', 1)[0]}. 원문: {detail}"
                 self._warn(real, f"권한 모드를 바꾸지 못함: {detail}")
                 return {"ok": False, "live": True, "error": detail}
         with self.store.lock:
@@ -314,6 +324,7 @@ class Manager:
             if s is None:
                 return {"ok": False, "live": live, "error": "없는 세션입니다."}
             s["permissionChoice"] = mode
+            s["permissionNote"] = ""
             if live:
                 s["permissionMode"] = mode or DEFAULT_MODE_NAME
             if mode != previous:
@@ -484,6 +495,11 @@ class Manager:
                 s["starting"] = False
                 if isinstance(e.get("permissionMode"), str):
                     s["permissionMode"] = e["permissionMode"]
+                    if s.get("permissionChoice") == AUTO_MODE:  # auto 로 시작해 달라고 했는데 다른 모드로 떴으면 쓸 수 없는 환경이다
+                        if e["permissionMode"] != AUTO_MODE:
+                            self._auto_note(s, f"{AUTO_UNAVAILABLE} (claude 가 알려 준 모드 원문: {e['permissionMode'][:40]})")
+                        else:
+                            s["permissionNote"] = ""
                 if isinstance(e.get("model"), str) and e["model"]:
                     s["model"] = e["model"]
                 plugins = plugin_list(e.get("plugins"))
@@ -511,6 +527,8 @@ class Manager:
                 elif e.get("is_error"):
                     detail = str(e.get("result") or e.get("subtype") or "").strip()
                     self.store.add_log(s, "오류로 끝남" + (": " + detail[:200] if detail else ""))
+                    if s.get("permissionChoice") == AUTO_MODE and "auto" in detail.lower():
+                        self._auto_note(s, f"{AUTO_UNAVAILABLE} (claude 가 낸 메시지 원문: {detail[:300]})")
             elif kind == "control_request":
                 control = s
         if control is not None:
@@ -520,6 +538,11 @@ class Manager:
             else:
                 self._deny_control(proc, control, e)
         self.store.touch(control or s)
+
+    def _auto_note(self, s: dict, text: str) -> None:
+        """auto 모드를 못 쓴 사정을 세션 기록과 화면(permissionNote)에 쉬운 말로 남긴다. store.lock 안에서 부른다."""
+        s["permissionNote"] = text
+        self.store.add_log(s, "권한 모드 auto: " + text)
 
     def _deny_control(self, proc: Proc, s: dict, e: dict) -> None:
         """can_use_tool 이 아니거나 우리가 다루지 못하는 요청은 거부로 답하고 로그에 남긴다."""
@@ -537,9 +560,15 @@ class Manager:
         바로 거부하면 사용자가 허용해도 도구가 막히므로, 훅과 같은 요청으로 합쳐 같은 답을 돌려준다."""
         req = e["request"]
         tool, tool_input = str(req.get("tool_name", "")), req.get("input")
+        if self.auto_allowed is not None and self.auto_allowed(s, tool, tool_input):  # 묻지 않고 허용할 일(#649). 훅 쪽과 같은 판정
+            self._control_reply(proc, e, {"behavior": "allow", "updatedInput": tool_input if isinstance(tool_input, dict) else {}})
+            return
+        risk, note = "", ""
+        if self.risk_of is not None:
+            risk, note = self.risk_of(s, tool, tool_input)
         try:
             r, created = self.store.add_request(s["id"], "permission", tool, tool_input, req.get("permission_suggestions"),
-                                                tool_key(tool, tool_input))
+                                                tool_key(tool, tool_input), risk=risk, risk_note=note)
         except RequestLimit:  # 조용히 허용하지 않고 거부한다
             with self.store.lock:
                 self.store.add_log(s, f"대기 요청이 너무 많아 거부함: {tool}")
@@ -574,6 +603,10 @@ class Manager:
             s = self.store.get(proc.session_id or proc.temp_id)
             if s is None:
                 return
+            if s.get("starting") and s.get("permissionChoice") == AUTO_MODE:  # 시작 신호(init)도 못 보내고 끝났다
+                raw = proc.last_result.strip()[:300]
+                self._auto_note(s, f"auto 모드로 시작하다 끝났어. {AUTO_UNAVAILABLE.split('. ', 1)[0]}. "
+                                   + (f"claude 가 낸 메시지 원문: {raw}" if raw else "claude 가 남긴 메시지가 없어서 이유는 확인 못 함"))
             s.update(managed_alive=False, starting=False, turn_running=False, ended=True)
             self.store.close_session(s["id"], "세션이 끝나서 닫힘")
             self.store.add_log(s, "세션 프로세스가 끝남")

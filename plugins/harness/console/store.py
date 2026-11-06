@@ -186,6 +186,8 @@ class Request:
         self.suggestions = suggestions if isinstance(suggestions, list) else []
         self.key = key
         self.created = created
+        self.risk = ""  # "irreversible" 이면 되돌릴 수 없는 일이라 노랑 카드로 묻는다(#649)
+        self.risk_note = ""  # 무엇을 하려는지 쉬운 말
         self.status = "pending"  # pending | answered | closed
         self.outcome = ""  # 화면에 보여 줄 처리 결과
         self.response = None  # 훅에 돌려줄 값(answered 일 때)
@@ -207,6 +209,8 @@ class Request:
             "createdAt": self.created,
             "answeredAt": self.answered_at,
         }
+        if self.risk:
+            data["risk"], data["riskNote"] = self.risk, self.risk_note
         if self.kind == "question" and isinstance(self.tool_input, dict):
             data["questions"] = self.tool_input.get("questions", [])
         return data
@@ -477,7 +481,7 @@ class Store:
             del self.folders[20:]
 
     # ---- 요청 ----
-    def add_request(self, sid, kind, tool_name, tool_input, suggestions, key) -> tuple[Request, bool]:
+    def add_request(self, sid, kind, tool_name, tool_input, suggestions, key, risk: str = "", risk_note: str = "") -> tuple[Request, bool]:
         """같은 세션·도구·입력의 동시 호출은 요청 하나로 합친다. (요청, 새로 만들었는지) 를 돌려준다."""
         with self.lock:
             sid = self.resolve_id(sid)
@@ -490,6 +494,7 @@ class Store:
             if sum(1 for r in self.requests.values() if r.status == "pending") >= MAX_PENDING_REQUESTS:
                 raise RequestLimit("대기 중인 요청이 너무 많습니다.")
             r = Request(uuid.uuid4().hex[:12], sid, kind, tool_name, tool_input, suggestions, key, self.clock())
+            r.risk, r.risk_note = risk, risk_note
             self.requests[r.rid] = r
             s = self.sessions.get(sid)
             if s is not None:
@@ -707,6 +712,7 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "managed": s["managed"], "status": status, "group": group, "permissionMode": s["permissionMode"],
             "model": s.get("model", ""), "modelChoice": s.get("modelChoice", ""),
             "effortChoice": s.get("effortChoice", ""), "permissionChoice": s.get("permissionChoice", ""),
+            "permissionNote": s.get("permissionNote", ""),
             "currentSkill": s["currentSkill"], "currentAction": s["currentAction"],
             "startedAt": s["startedAt"], "updatedAt": s["updatedAt"], "log": list(s["log"]), "report": s["report"],
             "changedFiles": list(s["changedFiles"]), "prLinks": list(s["prLinks"]), "subagents": list(s["subagents"]),

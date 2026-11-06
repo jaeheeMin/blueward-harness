@@ -2954,14 +2954,15 @@ def test_files_route_limits_results_and_scan(authed, monkeypatch):
     assert body["files"] == [] and body["truncated"]
 
 
-def test_models_route_lists_only_three_permission_modes(authed):
+def test_models_route_lists_only_the_allowed_permission_modes(authed):
     options = authed.call("GET", "/api/models")[1]["permissionOptions"]
-    assert [o["value"] for o in options] == ["", "acceptEdits", "plan"]
-    assert not {"bypassPermissions", "dontAsk", "auto"} & {o["value"] for o in options}
+    assert [o["value"] for o in options] == ["", "acceptEdits", "plan", "auto"]  # auto 는 #684 로 더했다
+    assert not {"bypassPermissions", "dontAsk"} & {o["value"] for o in options}
+    assert [o["label"] for o in options][-1] == "알아서 하되 위험한 건 AI가 막기"
 
 
-@pytest.mark.parametrize("bad", ["bypassPermissions", "dontAsk", "auto", "default", "ACCEPTEDITS", "plan --x", 3, ["plan"]])
-def test_start_rejects_permission_modes_outside_the_three(tmp_path, monkeypatch, bad):
+@pytest.mark.parametrize("bad", ["bypassPermissions", "dontAsk", "default", "ACCEPTEDITS", "AUTO", "auto --x", "plan --x", 3, ["plan"]])
+def test_start_rejects_permission_modes_outside_the_allowed_set(tmp_path, monkeypatch, bad):
     c = Console(tmp_path, monkeypatch, claude_cmd=lambda: [sys.executable, str(FAKE_ANALYSIS)])
     try:
         c.login()
@@ -3104,7 +3105,7 @@ def test_permission_change_ended_session_applies_on_resume(mconsole):
     assert c.app.store.get(sid)["permissionMode"] == "acceptEdits"  # 새 프로세스가 --permission-mode acceptEdits 로 떴다
 
 
-@pytest.mark.parametrize("mode", ["bypassPermissions", "dontAsk", "auto", "bogus", 3, None, ["plan"]])
+@pytest.mark.parametrize("mode", ["bypassPermissions", "dontAsk", "AUTO", "bogus", 3, None, ["plan"]])
 def test_permission_change_rejects_values_outside_allowed_set(mconsole, mode):
     c = mconsole
     sid = launch(c, "a")
@@ -5801,3 +5802,535 @@ def test_blocked_report_same_as_previous_block_is_not_stacked_but_other_is(brows
 def test_blocked_report_without_reason_or_session_is_rejected(browser):
     assert _blocked(browser, "b4", "  ")[0] == 400
     assert browser.hook("blocked", {"hook": "x", "reason": "r"})[0] == 400
+
+
+# ---- #649 묻는 범위와 되돌릴 수 없는 일 / #684 auto 모드 ----
+import risk as risk_mod  # noqa: E402
+
+W = r"C:\work" if os.name == "nt" else "/work"
+BASH = lambda cmd: ("Bash", {"command": cmd})  # noqa: E731
+
+
+@pytest.mark.parametrize("tool, tool_input, want", [
+    # 읽기·되돌릴 수 있는 명령
+    BASH("ls -la") + ("safe",), BASH("git status") + ("safe",), BASH("git diff --stat") + ("safe",), BASH("git log --oneline -5") + ("safe",),
+    BASH("git show HEAD") + ("safe",), BASH("git branch") + ("safe",), BASH("git branch -a") + ("safe",), BASH("git fetch origin") + ("unknown",),
+    BASH("git rev-parse HEAD") + ("safe",), BASH("git ls-files") + ("safe",), BASH("git remote -v") + ("unknown",),
+    BASH("gh pr view 3") + ("safe",), BASH("gh pr list") + ("safe",), BASH("gh pr checks 3") + ("safe",), BASH("gh issue view 5") + ("safe",),
+    BASH("gh run list") + ("safe",), BASH("pytest -q") + ("unknown",), BASH("uv run pytest -q a b") + ("unknown",), BASH("python -m pytest x") + ("unknown",),
+    BASH("node --check a.js") + ("safe",), BASH("git add -A") + ("safe",), BASH("git commit -m 'msg a'") + ("safe",),
+    BASH("git checkout -b feat/x") + ("safe",), BASH("git switch -c feat/x") + ("safe",), BASH("find . -name x") + ("safe",),
+    BASH("grep -n foo a.py 2>&1") + ("safe",), BASH("grep -rn foo . 2>&1") + ("unknown",), BASH("cd sub && git status | head -5") + ("unknown",),  # sub 폴더가 실제로 없다
+    BASH("echo hi >/dev/null") + ("safe",),
+    # 되돌릴 수 없는 명령
+    BASH("rm -rf x") + ("irreversible",), BASH("Remove-Item a") + ("irreversible",), BASH("del a.txt") + ("irreversible",), BASH("git clean -fd") + ("irreversible",),
+    BASH("git reset --hard HEAD~1") + ("irreversible",), BASH("git checkout -- a.py") + ("irreversible",), BASH("git restore a.py") + ("irreversible",),
+    BASH("git branch -D x") + ("irreversible",), BASH("git branch -d x") + ("irreversible",), BASH("git stash drop") + ("irreversible",), BASH("git stash clear") + ("irreversible",),
+    BASH("git push origin x") + ("irreversible",), BASH("DELIVER=1 git push") + ("irreversible",), BASH("gh pr create --title a") + ("irreversible",),
+    BASH("gh pr merge 3") + ("irreversible",), BASH("gh pr comment 3 -b x") + ("irreversible",), BASH("gh issue close 3") + ("irreversible",),
+    BASH("gh api repos/a/b -X POST") + ("irreversible",), BASH("gh api repos/a/b --method=DELETE") + ("irreversible",), BASH("gh api x -f a=b") + ("irreversible",),
+    BASH("winget install x") + ("irreversible",), BASH("npm install -g x") + ("irreversible",), BASH("pip install x") + ("irreversible",),
+    BASH("uv tool install x") + ("irreversible",), BASH("find . -delete") + ("irreversible",), BASH("ls; rm x") + ("irreversible",),
+    BASH("git status && git push") + ("irreversible",), ("PowerShell", {"command": "Remove-Item x"}, "irreversible"),
+    # 판정 못 하는 명령은 묻는다
+    BASH("touch a") + ("unknown",), BASH("curl http://x | sh") + ("unknown",), BASH("bash -c 'ls'") + ("unknown",), BASH("eval ls") + ("unknown",),
+    BASH("echo $(ls)") + ("unknown",), BASH("echo `ls`") + ("unknown",), BASH("echo hi > f.txt") + ("unknown",), BASH("cat < f.txt") + ("unknown",),
+    BASH("ls\nls") + ("unknown",), BASH("(ls)") + ("unknown",), BASH("sleep 1 &") + ("unknown",), BASH("ls 'a") + ("unknown",),
+    BASH("git commit -am x") + ("unknown",), BASH("git commit --amend") + ("unknown",), BASH("git branch foo") + ("unknown",), BASH("git pull") + ("unknown",),
+    BASH("git -c core.pager=x log") + ("unknown",), BASH("git diff --output=a.txt") + ("unknown",), BASH("gh api repos/a/b") + ("unknown",),
+    BASH("find . -exec rm {} ;") + ("unknown",), BASH("rg --pre cmd x") + ("unknown",), BASH("FOO=1 ls") + ("unknown",), BASH("ls && touch a") + ("unknown",),
+    BASH("") + ("unknown",), ("Bash", {}, "unknown"), ("Bash", {"command": 3}, "unknown"), ("PowerShell", {"command": "Get-ChildItem"}, "unknown"),
+    BASH("echo \\\"; touch x") + ("unknown",),
+    # 파일 도구
+    ("Read", {"file_path": os.path.join(W, "a.md")}, "safe"), ("Glob", {"pattern": "*.md"}, "safe"), ("Grep", {"pattern": "x"}, "safe"),
+    ("WebSearch", {"query": "x"}, "safe"), ("WebFetch", {"url": "https://example.com/a?b=1"}, "safe"), ("TodoWrite", {"todos": []}, "safe"),
+    ("Read", {"file_path": os.path.join(os.path.dirname(W), "other", "a")}, "unknown"),
+    ("Edit", {"file_path": os.path.join(W, "a.md")}, "safe"), ("Write", {"file_path": "sub/a.md"}, "safe"), ("NotebookEdit", {"notebook_path": os.path.join(W, "n.ipynb")}, "safe"),
+    ("Edit", {"file_path": os.path.join(os.path.dirname(W), "other", "a.md")}, "irreversible"), ("Write", {"file_path": os.path.join(W, "..", "x.md")}, "irreversible"),
+    ("Edit", {"file_path": os.path.join(W, ".git", "config")}, "unknown"), ("Write", {"file_path": os.path.join(W, ".claude", "settings.json")}, "unknown"),
+    ("Write", {"file_path": os.path.join(W, ".claude", "settings.local.json")}, "unknown"), ("Edit", {}, "unknown"),
+    # SAP MCP: 읽기 도구라도 env/adt-tiers.yaml 이 없는 작업 폴더에서는 서버를 확인할 수 없어 unknown(safe 는 test_sap_read_tools_need_exact_server_in_tiers_file)
+    ("mcp__abap-adt__getObjectSource", {}, "unknown"), ("mcp__abap-adt-z5u-dev__searchObject", {}, "unknown"), ("mcp__abap-adt__atcWorklists", {}, "unknown"),
+    ("mcp__abap-adt__transportInfo", {}, "unknown"), ("mcp__abap-adt__syntaxCheckCode", {}, "unknown"), ("mcp__abap-adt__tracesStatements", {}, "unknown"),
+    ("mcp__abap-adt__setObjectSource", {}, "irreversible"), ("mcp__abap-adt-z5u__createObject", {}, "irreversible"), ("mcp__abap-adt__activateByName", {}, "irreversible"),
+    ("mcp__abap-adt__transportRelease", {}, "irreversible"), ("mcp__abap-adt__deleteObject", {}, "irreversible"), ("mcp__abap-adt__runClass", {}, "irreversible"),
+    ("mcp__abap-adt__pushRepo", {}, "irreversible"), ("mcp__abap-adt__tableContents", {}, "unknown"), ("mcp__abap-adt__runQuery", {}, "unknown"),
+    ("mcp__other__whatever", {}, "unknown"), ("Agent", {}, "unknown"), ("Skill", {}, "unknown"), ("", {}, "unknown"),
+    # ---- 검토 지적(#649): 확실히 안전한 것만 safe ----
+    # 1) 임의 명령 실행 우회 — 옵션 허용 목록
+    BASH("git fetch --upload-pack=x .") + ("unknown",), BASH("rg --hostname-bin x y") + ("unknown",), BASH("rg --hostname-bin=x y") + ("unknown",),
+    BASH("rg --pre cat foo") + ("unknown",), BASH("rg --pre-glob '*.x' foo") + ("unknown",), BASH("rg -z foo") + ("unknown",),
+    BASH("git diff --ext-diff") + ("unknown",), BASH("git log --textconv") + ("unknown",), BASH("git diff --output=o.txt") + ("unknown",),
+    BASH("git -c core.pager=x log") + ("unknown",), BASH("git --exec-path=/x log") + ("unknown",), BASH("git -C /tmp log") + ("unknown",),
+    BASH("git --git-dir=/x status") + ("unknown",), BASH("git --work-tree=/x status") + ("unknown",), BASH("git log --upload-pack=x") + ("unknown",),
+    BASH("git --no-pager log --oneline") + ("safe",), BASH("git status -s") + ("safe",), BASH("git log -n 5 --oneline") + ("safe",),
+    BASH("grep -f pats.txt x") + ("unknown",), BASH("grep --file=pats.txt x") + ("unknown",), BASH("grep -rn foo src") + ("unknown",), BASH("grep -n foo src/a.py") + ("safe",),
+    BASH("find . -fprint o.txt") + ("unknown",), BASH("find . -exec cat {} ;") + ("unknown",), BASH("find . -name '*.py' -type f") + ("safe",),
+    # 2) 강제 옵션이 어디 있든, pytest 옵션 목록
+    BASH("git checkout -b x -f origin/main") + ("irreversible",), BASH("git switch -c x --discard-changes main") + ("irreversible",),
+    BASH("git switch -c x --force") + ("irreversible",), BASH("git checkout -b x --merge") + ("irreversible",), BASH("git checkout -fb x") + ("irreversible",),
+    BASH("git switch -C x main") + ("irreversible",), BASH("git switch -c x main") + ("safe",),
+    BASH("pytest --basetemp=d") + ("unknown",), BASH("pytest -p mod") + ("unknown",), BASH("pytest -pmod") + ("unknown",), BASH("pytest --junitxml=r.xml") + ("unknown",),
+    BASH("pytest -c other.ini") + ("unknown",), BASH("pytest --rootdir=/x") + ("unknown",), BASH("pytest --pyargs mod") + ("unknown",), BASH("pytest --confcutdir=/x") + ("unknown",),
+    BASH("pytest -n 4") + ("unknown",), BASH("pytest /etc/x.py") + ("unknown",), BASH("pytest ../x.py") + ("unknown",),
+    BASH("pytest -q -x -s -k 'not slow' -m unit -p no:cacheprovider --tb=short -ra --maxfail=2 tests/test_a.py::test_x") + ("unknown",),  # pytest 는 써 둔 시험 파일로 임의 코드가 돌아 어떤 옵션이어도 묻는다
+    BASH("uv run pytest -q -p no:cacheprovider checker/tests/a.py") + ("unknown",), BASH("python -m pytest --basetemp=d") + ("unknown",),
+    BASH("uv run pytest --junitxml=r.xml") + ("unknown",),
+    # 3) 쓰기 보호 경로(대소문자 무시) / 세션 scratchpad / 메모리
+    ("Write", {"file_path": os.path.join(W, ".githooks", "pre-commit")}, "unknown"), ("Write", {"file_path": os.path.join(W, ".claude", "hooks", "x.sh")}, "unknown"),
+    ("Write", {"file_path": os.path.join(W, ".claude", "agents", "a.md")}, "unknown"), ("Write", {"file_path": os.path.join(W, ".mcp.json")}, "unknown"),
+    ("Write", {"file_path": os.path.join(W, "CLAUDE.md")}, "unknown"), ("Write", {"file_path": os.path.join(W, "sub", "claude.MD")}, "unknown"),
+    ("Write", {"file_path": os.path.join(W, "AGENTS.md")}, "unknown"), ("Write", {"file_path": os.path.join(W, "conftest.py")}, "unknown"),
+    ("Write", {"file_path": os.path.join(W, "tests", "conftest.py")}, "unknown"), ("Write", {"file_path": os.path.join(W, "plugins", "x", "hooks", "hooks.json")}, "unknown"),
+    ("Write", {"file_path": os.path.join(W, ".envrc")}, "unknown"), ("Write", {"file_path": os.path.join(W, ".env.local")}, "unknown"),
+    ("Edit", {"file_path": os.path.join(W, "package.json")}, "unknown"), ("Edit", {"file_path": os.path.join(W, "pyproject.toml")}, "unknown"),
+    ("Edit", {"file_path": os.path.join(W, "setup.cfg")}, "unknown"), ("Edit", {"file_path": os.path.join(W, "tox.ini")}, "unknown"),
+    ("Edit", {"file_path": os.path.join(W, "pytest.ini")}, "unknown"), ("NotebookEdit", {"notebook_path": os.path.join(W, ".GIT", "x.ipynb")}, "unknown"),
+    ("Write", {"file_path": os.path.join(W, "docs", "notes.md")}, "safe"),
+    ("Write", {"file_path": os.path.join(os.path.dirname(W), "u", "AppData", "Local", "Temp", "claude", "proj", "sess", "scratchpad", "..", "x.py")}, "irreversible"),
+    ("Write", {"file_path": os.path.join(os.path.dirname(W), "u", "AppData", "Local", "Temp", "other", "scratchpad", "a.py")}, "irreversible"),
+    ("Write", {"file_path": os.path.join(os.path.dirname(W), "u", ".claude", "projects", "p", "memory", "m.md")}, "irreversible"),
+    # 4) 읽기 경로: 작업 폴더 밖 · 비밀값 · 변수 확장
+    BASH("cat ~/.ssh/id_rsa") + ("unknown",), BASH("cat /etc/passwd") + ("unknown",), BASH("cat .env") + ("unknown",), BASH("head -n 5 ../../x") + ("unknown",),
+    BASH("ls /") + ("unknown",), BASH("ls ..") + ("unknown",), BASH("cat C:/Windows/win.ini") + ("unknown",), BASH("cat C:\\Windows\\win.ini") + ("unknown",),
+    BASH("cat $HOME/x") + ("unknown",), BASH("cat ${HOME}/x") + ("unknown",), BASH("cat %USERPROFILE%/x") + ("unknown",), BASH("ls ~") + ("unknown",),
+    BASH("cat server.pem") + ("unknown",), BASH("cat a/id_rsa.pub") + ("unknown",), BASH("cat key.pfx") + ("unknown",), BASH("cat k.key") + ("unknown",),
+    BASH("cat credentials.json") + ("unknown",), BASH("cat .netrc") + ("unknown",), BASH("cat .npmrc") + ("unknown",), BASH("cat .env.local") + ("unknown",),
+    BASH("cat *.pem") + ("unknown",), BASH("grep -r token .ssh") + ("unknown",), BASH("wc -l ../x") + ("unknown",), BASH("find / -name x") + ("unknown",),
+    BASH("rg foo /etc") + ("unknown",), BASH("tail -n 3 a/../../x") + ("unknown",), BASH("cd .. && ls") + ("unknown",), BASH("cd /tmp && ls") + ("unknown",),
+    BASH("cat README.md") + ("safe",), BASH("cat docs/a.md | head -3") + ("safe",), BASH("ls -la src") + ("safe",), BASH("cd sub && cat a.md") + ("unknown",),
+    BASH("grep -rn '/api/x' static") + ("unknown",), BASH("tail -n 20 log.txt") + ("safe",), BASH("wc -l a.py b.py") + ("safe",),
+    ("Glob", {"pattern": "C:/Users/**/*.pem"}, "unknown"), ("Glob", {"pattern": "**/*.pem"}, "unknown"), ("Glob", {"pattern": "../*.md"}, "unknown"),
+    ("Glob", {"pattern": "/etc/*"}, "unknown"), ("Glob", {"pattern": "**/*.md", "path": os.path.dirname(W)}, "unknown"), ("Glob", {"pattern": "src/**/*.py"}, "safe"),
+    ("Grep", {"pattern": "x", "path": "/etc"}, "unknown"), ("Grep", {"pattern": "x", "path": ".env"}, "unknown"), ("Grep", {"pattern": "x", "path": "src"}, "safe"),
+    ("Read", {"file_path": os.path.join(W, ".env")}, "unknown"), ("Read", {"file_path": "~/.ssh/id_rsa"}, "unknown"), ("Read", {"file_path": os.path.join(W, "..", "x")}, "unknown"),
+    # 5) MCP 서버 이름
+    ("mcp__evil__getObjectSource", {}, "unknown"), ("mcp__evil__searchObject", {}, "unknown"), ("mcp__abap-adt-z5u__getObjectSource", {}, "unknown"),
+    ("mcp__evil__setObjectSource", {}, "irreversible"),
+    ("mcp__abap-adt__gitExternalRepoInfo", {}, "unknown"), ("mcp__abap-adt__remoteRepoInfo", {}, "unknown"), ("mcp__abap-adt__renamePreview", {}, "unknown"),
+    ("mcp__abap-adt__extractMethodPreview", {}, "unknown"), ("mcp__abap-adt__renameEvaluate", {}, "unknown"), ("mcp__abap-adt__extractMethodEvaluate", {}, "unknown"),
+    ("mcp__abap-adt__atcCustomizing", {}, "unknown"), ("mcp__abap-adt__checkRepo", {}, "unknown"),
+    # 7) 추가로 안전한 읽기
+    BASH("sed -n '3,5p' a.md") + ("safe",), BASH("sed -n '7p' a.md") + ("safe",), BASH("sed -n '3,5p' ../a.md") + ("unknown",), BASH("sed -n '3,5p' .env") + ("unknown",),
+    BASH("sed -i 's/a/b/' a.md") + ("unknown",), BASH("sed -n '1,$p' a.md") + ("unknown",), BASH("sed 's/a/b/' a.md") + ("unknown",), BASH("sed -n '3,5w out' a.md") + ("unknown",),
+    BASH("cut -d, -f1 a.csv") + ("safe",), BASH("cut -d, -f1 /etc/passwd") + ("unknown",), BASH("sort a.txt | uniq -c") + ("safe",), BASH("tr a-z A-Z") + ("safe",),
+    BASH("sort -o out.txt a.txt") + ("unknown",), BASH("sort --output=o a.txt") + ("unknown",), BASH("uniq a.txt out.txt") + ("unknown",),
+    BASH("sort -u /etc/hosts") + ("unknown",), BASH("git ls-files | sort | uniq") + ("safe",),
+])
+def test_risk_classify_table(tool, tool_input, want):
+    got, why = risk_mod.classify(tool, tool_input, W)
+    assert got == want, (got, why)
+    assert why  # 사유는 늘 있다
+
+
+@pytest.mark.parametrize("tool, tool_input, want", [
+    # ---- 2차 검토 ① git clean ----
+    BASH("git clean -f -e -n") + ("irreversible",), BASH("git clean -fd") + ("irreversible",), BASH("git clean --force") + ("irreversible",),
+    BASH("git clean -n") + ("safe",), BASH("git clean --dry-run") + ("safe",), BASH("git clean -d") + ("safe",), BASH("git clean -dn") + ("safe",), BASH("git clean -n -d") + ("safe",),
+    BASH("git clean") + ("unknown",), BASH("git clean -x -n") + ("unknown",), BASH("git clean -X -n") + ("unknown",), BASH("git clean -e x -n") + ("unknown",),
+    BASH("git clean -n sub") + ("unknown",),
+    # ---- ⑤ WebFetch ----
+    ("WebFetch", {"url": "https://example.com"}, "safe"), ("WebFetch", {"url": "http://example.com:8080/x?y=1"}, "safe"), ("WebFetch", {"url": "https://docs.python.org/3/"}, "safe"),
+    ("WebSearch", {"query": "x"}, "safe"),
+    *[("WebFetch", {"url": u}, "unknown") for u in (
+        "http://localhost/", "http://localhost:3000/a", "http://LOCALHOST/", "http://localhost./", "http://a.localhost/", "http://127.0.0.1/", "http://127.1.2.3:80/",
+        "http://[::1]/", "http://10.0.0.1/", "http://172.16.0.1/", "http://172.31.255.1/", "http://192.168.1.1/", "http://169.254.169.254/latest/meta-data",
+        "http://[fe80::1]/", "http://printer.local/", "http://nas.lan/", "http://svc.internal/", "http://8.8.8.8/", "http://[2001:db8::1]/",
+        "http://2130706433/", "http://0x7f.0.0.1/", "http://0177.0.0.1/", "http://intranet/", "ftp://example.com/", "file:///etc/passwd", "javascript:alert(1)",
+        "https://user:pw@example.com/", "https://example.com:notaport/", "", "example.com", "//example.com")],
+    ("WebFetch", {}, "unknown"), ("WebFetch", {"url": 3}, "unknown"), ("WebFetch", {"url": None}, "unknown"),
+    # ---- ⑥ pytest 는 어떤 꼴이어도 묻는다, 쓰기 보호 경로 추가 ----
+    BASH("pytest") + ("unknown",), BASH("pytest tests/a.py") + ("unknown",), BASH("uv run pytest") + ("unknown",), BASH("python -m pytest -q") + ("unknown",),
+    BASH("uv run python -m pytest") + ("unknown",), BASH("python3 -m pytest") + ("unknown",),
+    *[("Write", {"file_path": os.path.join(W, *p.split("/"))}, "unknown") for p in (
+        ".husky/pre-commit", ".husky/_/husky.sh", ".pre-commit-config.yaml", "Makefile", "sub/makefile", ".vscode/settings.json", ".vscode/tasks.json",
+        ".github/workflows/ci.yml", "sub/.github/workflows/x.yaml", "sitecustomize.py", "src/usercustomize.py", "site/x.pth", "sub/.npmrc", ".pypirc",
+        "hooks/run.py", "plugins/x/hooks/guard.sh", "plugins/x/HOOKS/Guard.PY", ".gitattributes", ".gitconfig")],
+    *[("Write", {"file_path": os.path.join(W, *p.split("/"))}, "safe") for p in (
+        "hooks/readme.md", "docs/hooks.md", ".github/ISSUE_TEMPLATE/a.md", ".github/CODEOWNERS", "src/hooks_util.py", "docs/Makefile.md", "vscode/a.md")],
+    # ---- ⑦ echo / printf / 리디렉션 ----
+    BASH("echo hi") + ("safe",), BASH("echo hi 2>&1") + ("safe",), BASH("echo hi > /dev/null") + ("safe",), BASH("printf hello") + ("safe",),
+    BASH("echo $HOME") + ("unknown",), BASH("echo ${HOME}") + ("unknown",), BASH("echo %PATH%") + ("unknown",), BASH("echo ~") + ("unknown",), BASH("echo \"$USER\"") + ("unknown",),
+    BASH("echo `id`") + ("unknown",), BASH("printf '%s' x") + ("unknown",), BASH("printf '%s' $HOME") + ("unknown",), BASH("echo hi >nul") + ("unknown",),
+    BASH("echo hi > nul") + ("unknown",), BASH("echo hi >NUL") + ("unknown",), BASH("echo hi 2>nul") + ("unknown",), BASH("echo -E hi") + ("unknown",),
+    # ---- ⑧ 재귀 읽기 · --hidden ----
+    BASH("grep -r x .") + ("unknown",), BASH("grep -R x .") + ("unknown",), BASH("grep --recursive x .") + ("unknown",), BASH("grep -rn x a.py") + ("unknown",),
+    BASH("grep -n x a.py") + ("safe",), BASH("grep -n -e x a.py") + ("safe",), BASH("grep -A 3 x a.py") + ("safe",),
+    BASH("rg foo") + ("unknown",), BASH("rg -A 3 foo") + ("unknown",), BASH("rg foo a.py") + ("safe",), BASH("rg -g '*.py' foo a.py") + ("safe",),
+    BASH("rg --hidden foo a.py") + ("unknown",), BASH("rg --no-ignore foo a.py") + ("unknown",), BASH("rg -u foo a.py") + ("unknown",), BASH("rg -uu foo a.py") + ("unknown",),
+    BASH("rg -e foo a.py") + ("unknown",), BASH("rg --files") + ("unknown",),
+    BASH("ls -R") + ("unknown",), BASH("ls -lR") + ("unknown",), BASH("ls -l") + ("safe",),
+    # git 위치 인자 · 경로
+    BASH("git show HEAD:.env") + ("unknown",), BASH("git show HEAD:.git/config") + ("unknown",), BASH("git show HEAD:CLAUDE.md") + ("unknown",),
+    BASH("git cat-file -p HEAD:.env") + ("unknown",), BASH("git cat-file -p HEAD") + ("unknown",),
+    BASH("git diff -- .env") + ("unknown",), BASH("git diff -- secrets/token.txt") + ("unknown",), BASH("git log -p -- .env") + ("unknown",),
+    BASH("git log -p -- id_rsa") + ("unknown",), BASH("git log -p -- ssh/id_ed25519") + ("unknown",), BASH("git ls-files .env") + ("unknown",),
+    BASH("git add .env") + ("unknown",), BASH("git add -A") + ("safe",), BASH("git add src/a.py") + ("safe",), BASH("git commit -m 'fix token refresh'") + ("safe",),
+    BASH("git show HEAD:src/a.py") + ("safe",), BASH("git diff -- src/a.py") + ("safe",), BASH("git log -p -- docs/a.md") + ("safe",),
+    BASH("git remote get-url origin") + ("unknown",), BASH("git remote -v") + ("unknown",), BASH("git remote") + ("unknown",),
+    BASH("git config user.email") + ("unknown",), BASH("git config --get remote.origin.url") + ("unknown",),
+    # 읽기 금지 경로(쓰기 보호 목록 + .git)
+    BASH("cat .git/config") + ("unknown",), BASH("cat .git/HEAD") + ("unknown",), BASH("cat CLAUDE.md") + ("unknown",), BASH("cat package.json") + ("unknown",),
+    BASH("cat .claude/settings.json") + ("unknown",), BASH("cat Makefile") + ("unknown",), BASH("head -n 3 conftest.py") + ("unknown",), BASH("cat .github/workflows/ci.yml") + ("unknown",),
+    BASH("cat .mcp.json") + ("unknown",), BASH("sed -n '1,3p' .gitconfig") + ("unknown",),
+    # 비밀값 이름
+    *[BASH(f"cat {n}") + ("unknown",) for n in (
+        "id_ed25519", "id_ecdsa", "id_rsa", "id_rsa.pub", "a.p12", "server.key.bak", "server.key", "cert.pem.bak", "cert.pem", "my-secrets.txt", "api_token.txt", "TOKEN.md",
+        "aws-credentials", "credentials.json", "prod.tfvars", "service-account-prod.json", "service-account.json", ".docker/config.json", "prod.env", "x.ENV", ".env",
+        ".env.production", ".netrc", "_netrc", ".git-credentials", ".npmrc", "a.pfx", "sub/.ssh/known_hosts")],
+    # ⑨ 진짜 안전한 흔한 명령은 여전히 safe
+    BASH("git status") + ("safe",), BASH("git diff --stat") + ("safe",), BASH("git log --oneline -5") + ("safe",), BASH("gh pr view 1") + ("safe",), BASH("gh pr checks 1") + ("safe",),
+    BASH("ls") + ("safe",), BASH("cat README.md") + ("safe",), BASH("head -n 20 a.py") + ("safe",), BASH("wc -l a") + ("safe",), BASH("sed -n '3,5p' a") + ("safe",),
+    BASH("git branch") + ("safe",), BASH("git diff") + ("safe",), BASH("git show HEAD") + ("safe",), BASH("git log -n 3 --stat") + ("safe",), BASH("git rev-parse --show-toplevel") + ("safe",),
+    BASH("gh issue view 3") + ("safe",), BASH("gh pr list") + ("safe",), BASH("tail -n 5 a.log") + ("safe",), BASH("find . -name '*.md'") + ("safe",),
+    BASH("git add -A && git commit -m 'msg'") + ("safe",), BASH("git status && git diff --stat") + ("safe",),
+])
+def test_risk_second_review_table(tool, tool_input, want):
+    got, why = risk_mod.classify(tool, tool_input, W)
+    assert got == want, (got, why)
+
+
+def test_risk_cd_is_safe_only_as_leading_cd_and_and_into_a_real_work_folder(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "file.txt").write_text("x", encoding="utf-8")
+    cwd = str(tmp_path)
+    c = lambda cmd: risk_mod.classify("Bash", {"command": cmd}, cwd)[0]  # noqa: E731
+    assert c("cd sub && git status") == "safe" and c("cd sub && git status | head -5") == "safe" and c("cd sub && ls && git diff --stat") == "safe"
+    assert c("cd sub; git status") == "unknown" and c("cd sub | cat a") == "unknown" and c("cd sub || ls") == "unknown" and c("cd sub") == "unknown"
+    assert c("ls && cd sub && ls") == "unknown" and c("git status; cd sub && ls") == "unknown" and c("cd sub && cd sub && ls") == "unknown"
+    assert c("cd nope && ls") == "unknown" and c("cd file.txt && ls") == "unknown" and c("cd .. && ls") == "unknown" and c("cd / && ls") == "unknown"
+    assert c("cd ~ && ls") == "unknown" and c("cd $HOME && ls") == "unknown" and c("cd && ls") == "unknown" and c("cd -- sub && ls") == "unknown"
+    assert c("cd sub && cat ../file.txt") == "safe"  # 기준 폴더가 sub 라 ../file.txt 는 작업 폴더 안
+    assert c("cd sub && cat ../../x") == "unknown"
+    assert c(f"cd {tmp_path.parent} && ls") == "unknown"
+
+
+def test_risk_rg_needs_a_file_path_and_refuses_folders(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "a.py").write_text("x", encoding="utf-8")
+    cwd = str(tmp_path)
+    c = lambda cmd: risk_mod.classify("Bash", {"command": cmd}, cwd)[0]  # noqa: E731
+    assert c("rg foo a.py") == "safe" and c("rg foo") == "unknown" and c("rg foo .") == "unknown" and c("rg foo sub") == "unknown" and c("rg foo a.py sub") == "unknown"
+    assert c("grep -n foo a.py") == "safe"
+
+
+def test_risk_symlink_to_secret_is_checked_by_real_name(tmp_path):
+    (tmp_path / "real.txt").write_text("x", encoding="utf-8")
+    (tmp_path / ".env").write_text("K=1", encoding="utf-8")
+    try:
+        os.symlink(tmp_path / ".env", tmp_path / "harmless.txt")
+        os.symlink(tmp_path / "real.txt", tmp_path / "fine.txt")
+    except (OSError, NotImplementedError):
+        pytest.skip("심볼릭 링크를 만들 수 없는 환경")
+    cwd = str(tmp_path)
+    assert risk_mod.classify("Bash", {"command": "cat harmless.txt"}, cwd)[0] == "unknown"
+    assert risk_mod.classify("Read", {"file_path": str(tmp_path / "harmless.txt")}, cwd)[0] == "unknown"
+    assert risk_mod.classify("Bash", {"command": "cat fine.txt"}, cwd)[0] == "safe"
+
+
+def test_risk_scratchpad_is_decided_by_real_temp_dir_and_depth(tmp_path, monkeypatch):
+    import tempfile
+    temp = tmp_path / "tmproot"
+    work = tmp_path / "work"
+    temp.mkdir(); work.mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(temp))
+    cwd = str(work)
+    scratch = temp / "claude" / "proj" / "sess" / "scratchpad"
+    w = lambda p: risk_mod.classify("Write", {"file_path": str(p)}, cwd)  # noqa: E731
+    assert w(scratch / "a.py")[0] == "safe" and "임시 폴더" in w(scratch / "a.py")[1]
+    assert w(scratch / "sub" / "b.txt")[0] == "safe"
+    for bad in (temp / "claude" / "proj" / "scratchpad" / "a",              # 깊이가 모자란다
+                temp / "claude" / "proj" / "sess" / "other" / "a",          # scratchpad 가 아니다
+                temp / "claude" / "proj" / "sess" / "scratchpad",           # 폴더 자체
+                temp / "claude" / "p" / "s" / "extra" / "scratchpad" / "a",  # 깊이가 넘친다
+                scratch / ".." / "x.py",                                    # 벗어난다
+                temp / "other" / "p" / "s" / "scratchpad" / "a",            # claude 폴더가 아니다
+                tmp_path / "evil" / "temp" / "claude" / "foo" / "scratchpad" / "a",   # 글자만 같은 다른 곳
+                tmp_path / "Windows" / "Temp" / "claude" / "a" / "scratchpad" / "x.dll",
+                tmp_path / "home" / ".claude" / "projects" / "p" / "memory" / "m.md"):  # 메모리 폴더는 묻는다
+        assert w(bad)[0] == "irreversible", (bad, w(bad))
+    # 작업 폴더 안 하위 폴더 이름이 temp/claude/scratchpad 여도 scratchpad 가 아니다(보호 경로 규칙을 그대로 받는다)
+    fake = work / "docs" / "temp" / "claude" / "s" / "scratchpad"
+    assert w(fake / "CLAUDE.md")[0] == "unknown"
+    assert w(work / ".claude" / "commands" / "Temp" / "Claude" / "a" / "Scratchpad" / "evil.md")[0] == "unknown"
+    assert w(work / ".git" / "hooks" / "temp" / "claude" / "s" / "scratchpad" / "pre-commit")[0] == "unknown"
+    assert "임시 폴더" not in w(fake / "a.md")[1]  # 안 폴더라 일반 작업 폴더 안 쓰기로 본다
+
+
+def test_sap_read_tools_need_exact_server_in_tiers_file(tmp_path):
+    (tmp_path / "env").mkdir()
+    (tmp_path / "env" / "adt-tiers.yaml").write_text(
+        "servers:\n  abap-adt:\n    writes_allowed: false\n  abap-adt-z5u:\n    writes_allowed: false\nwrite_tools: [setObjectSource]\n", encoding="utf-8")
+    cwd = str(tmp_path)
+    c = lambda name: risk_mod.classify(name, {}, cwd)[0]  # noqa: E731
+    assert c("mcp__abap-adt__getObjectSource") == "safe" and c("mcp__abap-adt-z5u__searchObject") == "safe"
+    for bad in ("mcp__abap-adt-z5u-dev__getObjectSource", "mcp__abap-adt-evil__getObjectSource", "mcp__ABAP-ADT__getObjectSource", "mcp__abap__getObjectSource",
+                "mcp__evil__getObjectSource", "mcp__abap-adt-z5u-dev__searchObject"):  # 접두어가 같아도 이름이 정확히 같지 않으면 묻는다
+        assert c(bad) == "unknown", bad
+    for gone in ("gitExternalRepoInfo", "remoteRepoInfo", "renamePreview", "extractMethodPreview", "renameEvaluate", "extractMethodEvaluate", "atcCustomizing", "checkRepo"):
+        assert c(f"mcp__abap-adt__{gone}") == "unknown", gone
+    assert c("mcp__abap-adt__tableContents") == "unknown" and c("mcp__abap-adt__runQuery") == "unknown"
+    assert c("mcp__abap-adt__setObjectSource") == "irreversible" and c("mcp__evil__setObjectSource") == "irreversible"
+    assert risk_mod.classify("mcp__abap-adt__getObjectSource", {}, str(tmp_path / "nowhere"))[0] == "unknown"  # 파일이 없으면 읽기 도구도 묻는다
+    (tmp_path / "env" / "adt-tiers.yaml").write_text("깨진: [", encoding="utf-8")
+    assert c("mcp__abap-adt__getObjectSource") == "unknown"
+    assert "sap_server_prefixes" not in json.loads((CONSOLE / "safe_tools.json").read_text(encoding="utf-8"))  # 접두어 항목은 없앴다
+
+
+def test_risk_classify_without_cwd_never_calls_file_edits_safe():
+    assert risk_mod.classify("Edit", {"file_path": "a.md"}, "")[0] == "unknown"
+    assert risk_mod.classify("Edit", {"file_path": "a.md"}, None)[0] == "unknown"
+
+
+def test_risk_rules_come_from_data_file_and_missing_file_means_everything_unknown(tmp_path):
+    data = json.loads((CONSOLE / "safe_tools.json").read_text(encoding="utf-8"))
+    assert "getObjectSource" in data["sap_read_tools"] and "setObjectSource" in data["sap_write_tools"]
+    assert not {"tableContents", "runQuery"} & set(data["sap_read_tools"])  # 데이터 조회는 하네스 훅이 따로 판정한다
+    assert risk_mod.load_rules(tmp_path / "none.json") == {}
+    assert risk_mod.load_rules(CONSOLE / "risk.py") == {}  # 깨진 파일도 빈 목록
+
+
+def test_risk_write_tools_cover_adt_tiers_write_tools_in_repo():
+    """env/adt-tiers.yaml 쓰기 목록(예시)의 이름이 우리 쓰기 목록에 빠져 있지 않다."""
+    names = {"setObjectSource", "createObject", "deleteObject", "activateObjects", "activateByName", "renameExecute", "extractMethodExecute",
+             "createTransport", "transportRelease", "transportDelete", "publishServiceBinding", "unPublishServiceBinding", "deployUi5App",
+             "undeployUi5App", "publishBusinessCatalog", "runClass", "gitPullRepo", "pushRepo"}
+    assert names <= set(json.loads((CONSOLE / "safe_tools.json").read_text(encoding="utf-8"))["sap_write_tools"])
+
+
+def _perm(c, sid, tool, tool_input, **kw):
+    return c.hook("permission", {"session_id": sid, "cwd": str(c.work), "hook_event_name": "PermissionRequest", "tool_name": tool,
+                                 "tool_input": tool_input, **kw})
+
+
+def _answer_when_pending(c, sid, decision="allow"):
+    req = wait_for(lambda: (c.pending(sid) or [None])[0])
+    assert c.call("POST", f"/api/requests/{req.rid}/answer", {"decision": decision})[0] == 200
+    return req
+
+
+def test_ask_setting_defaults_to_needed_and_validates_and_persists(authed):
+    assert authed.call("GET", "/api/settings/ask")[1] == {"level": "needed"}
+    for bad in ("", "ALL", "none", 3, None, ["all"]):
+        assert authed.call("PUT", "/api/settings/ask", {"level": bad})[0] == 400
+    assert authed.call("PUT", "/api/settings/ask", {})[0] == 400
+    assert authed.call("PUT", "/api/settings/ask", {"level": "edits"})[1] == {"level": "edits"}
+    assert authed.call("GET", "/api/settings/ask")[1] == {"level": "edits"}
+    saved = authed.state / console_server.ASK_FILE
+    assert json.loads(saved.read_text(encoding="utf-8")) == {"level": "edits"}  # notify.json 처럼 상태 폴더에 둔다
+    strict = {"level": "all", "problem": "설정을 읽지 못해 모든 명령마다 물어"}
+    for broken in ("not json", json.dumps({"level": "bogus"}), json.dumps([1]), "", json.dumps({})):  # 있는데 깨졌으면 가장 엄격하게
+        saved.write_text(broken, encoding="utf-8")
+        assert authed.call("GET", "/api/settings/ask")[1] == strict, broken
+    assert authed.call("PUT", "/api/settings/ask", {"level": "needed"})[1] == {"level": "needed"}  # 다시 저장하면 풀린다
+    assert authed.call("GET", "/api/settings/ask")[1] == {"level": "needed"}
+    saved.unlink()
+    assert authed.call("GET", "/api/settings/ask")[1] == {"level": "needed"}  # 파일이 아예 없을 때(처음)만 기본
+    assert authed.call("PUT", "/api/settings/ask", {"level": "all"}, cookie=False)[0] in (401, 403)  # 로그인 없이는 못 바꾼다
+
+
+def test_needed_level_allows_safe_without_card_and_logs_once(browser):
+    browser.event("n1", "SessionStart")
+    status, body = _perm(browser, "n1", "Bash", {"command": "git status"})[:2]
+    assert status == 200 and body == {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
+    assert browser.pending("n1") == []
+    s = browser.app.store.get("n1")
+    assert [e["text"] for e in s["log"] if e["text"].startswith("자동 허용")] == ["자동 허용: Bash: git status (git 으로 상태를 읽기만 해)"]
+    assert not [c for c in s.get("chat") or [] if c.get("role") == "req"]  # 대화에는 남기지 않는다
+    _perm(browser, "n1", "Bash", {"command": "git status"})  # 같은 호출을 훅과 콘솔 연결이 둘 다 물어도 한 줄
+    assert len([e for e in browser.app.store.get("n1")["log"] if e["text"].startswith("자동 허용")]) == 1
+    f = browser.work / "a.md"
+    assert _perm(browser, "n1", "Edit", {"file_path": str(f), "old_string": "a", "new_string": "b"})[1]["hookSpecificOutput"]["decision"]["behavior"] == "allow"
+    assert _perm(browser, "n1", "Read", {"file_path": str(f)})[1]["hookSpecificOutput"]["decision"]["behavior"] == "allow"
+
+
+def test_unreadable_ask_setting_asks_for_everything(browser):
+    browser.state.mkdir(parents=True, exist_ok=True)
+    (browser.state / console_server.ASK_FILE).write_text("{broken", encoding="utf-8")
+    browser.event("n9", "SessionStart")
+    holder = browser.hook_async("permission", {"session_id": "n9", "cwd": str(browser.work), "tool_name": "Bash", "tool_input": {"command": "git status"}})
+    req = wait_for(lambda: (browser.pending("n9") or [None])[0])  # 안전한 명령도 카드로 묻는다
+    assert req.risk == ""
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow"})
+    holder["t"].join(30)
+    assert not [e for e in browser.app.store.get("n9")["log"] if e["text"].startswith("자동 허용")]
+
+
+def test_tier_file_servers_count_as_sap_servers(tmp_path):
+    (tmp_path / "env").mkdir()
+    (tmp_path / "env" / "adt-tiers.yaml").write_text(
+        "servers:\n  corp-sap:\n    writes_allowed: false\nwrite_tools: [setObjectSource]\n", encoding="utf-8")
+    assert risk_mod.classify("mcp__corp-sap__getObjectSource", {}, str(tmp_path))[0] == "safe"
+    assert risk_mod.classify("mcp__other__getObjectSource", {}, str(tmp_path))[0] == "unknown"
+    assert risk_mod.classify("mcp__corp-sap__getObjectSource", {}, str(tmp_path / "none"))[0] == "unknown"  # 파일이 없으면 모르는 서버
+    (tmp_path / "env" / "adt-tiers.yaml").write_text("깨진: [", encoding="utf-8")
+    assert risk_mod.classify("mcp__corp-sap__getObjectSource", {}, str(tmp_path))[0] == "unknown"
+
+
+def test_needed_level_asks_for_unknown_with_plain_card(browser):
+    browser.event("n2", "SessionStart")
+    holder = browser.hook_async("permission", {"session_id": "n2", "cwd": str(browser.work), "tool_name": "Bash", "tool_input": {"command": "touch a"}})
+    req = wait_for(lambda: (browser.pending("n2") or [None])[0])
+    pub = browser.call("GET", f"/api/requests/{req.rid}")[1]
+    assert "risk" not in pub and "riskNote" not in pub  # 일반 카드
+    assert browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow_session"})[0] == 400  # 제안이 없어서 늘 그랬다
+    assert browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "deny"})[0] == 200
+    holder["t"].join(30)
+    assert holder["r"][1]["hookSpecificOutput"]["decision"]["behavior"] == "deny"
+
+
+def test_irreversible_goes_to_yellow_card_and_cannot_be_remembered(browser):
+    browser.event("n3", "SessionStart")
+    sugg = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "rm *"}], "behavior": "allow", "destination": "session"}]
+    holder = browser.hook_async("permission", {"session_id": "n3", "cwd": str(browser.work), "tool_name": "Bash",
+                                                "tool_input": {"command": "rm old.xlsx"}, "permission_suggestions": sugg})
+    req = wait_for(lambda: (browser.pending("n3") or [None])[0])
+    pub = browser.call("GET", f"/api/requests/{req.rid}")[1]
+    assert pub["risk"] == "irreversible" and pub["riskNote"] == "파일이나 폴더를 지우려 해"
+    assert browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow_session"})[0] == 400  # 되돌릴 수 없는 일은 다시 묻지 않기로 허용하지 못한다
+    assert browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow"})[0] == 200
+    holder["t"].join(30)
+    assert holder["r"][1]["hookSpecificOutput"]["decision"]["behavior"] == "allow"
+    s = browser.call("GET", "/api/sessions/n3")[1]
+    assert s["pendingRequestIds"] == [] and s["permissionNote"] == ""
+
+
+@pytest.mark.parametrize("tool, tool_input", [
+    ("Bash", {"command": "git push origin x"}), ("Bash", {"command": "gh pr merge 3"}), ("mcp__abap-adt__setObjectSource", {}),
+    ("Write", {"file_path": "OUTSIDE"}),
+])
+@pytest.mark.parametrize("level", ["needed", "edits", "all"])
+def test_irreversible_is_asked_at_every_level(browser, tool, tool_input, level):
+    assert browser.call("PUT", "/api/settings/ask", {"level": level})[0] == 200
+    if tool_input.get("file_path") == "OUTSIDE":
+        tool_input = {"file_path": str(browser.work.parent / "outside.md")}
+    browser.event("n4", "SessionStart")
+    holder = browser.hook_async("permission", {"session_id": "n4", "cwd": str(browser.work), "tool_name": tool, "tool_input": tool_input})
+    req = wait_for(lambda: (browser.pending("n4") or [None])[0])
+    assert req.risk == "irreversible"
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "deny"})
+    holder["t"].join(30)
+
+
+def test_edits_level_also_asks_for_edit_tools_but_not_reads(browser):
+    assert browser.call("PUT", "/api/settings/ask", {"level": "edits"})[0] == 200
+    browser.event("n5", "SessionStart")
+    assert _perm(browser, "n5", "Bash", {"command": "git status"})[1]["hookSpecificOutput"]["decision"]["behavior"] == "allow"
+    assert _perm(browser, "n5", "Read", {"file_path": str(browser.work / "a")})[1]["hookSpecificOutput"]["decision"]["behavior"] == "allow"
+    for tool, tool_input in (("Edit", {"file_path": str(browser.work / "a.md")}), ("Write", {"file_path": str(browser.work / "b.md")}),
+                             ("NotebookEdit", {"notebook_path": str(browser.work / "n.ipynb")})):
+        holder = browser.hook_async("permission", {"session_id": "n5", "cwd": str(browser.work), "tool_name": tool, "tool_input": tool_input})
+        req = wait_for(lambda: (browser.pending("n5") or [None])[0])
+        assert req.risk == ""  # 되돌릴 수 없는 일은 아니라 일반 카드
+        browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow"})
+        holder["t"].join(30)
+        assert holder["r"][1]["hookSpecificOutput"]["decision"]["behavior"] == "allow"
+
+
+def test_all_level_asks_for_everything_like_before(browser):
+    assert browser.call("PUT", "/api/settings/ask", {"level": "all"})[0] == 200
+    browser.event("n6", "SessionStart")
+    for tool, tool_input in (("Bash", {"command": "git status"}), ("Read", {"file_path": str(browser.work / "a")})):
+        holder = browser.hook_async("permission", {"session_id": "n6", "cwd": str(browser.work), "tool_name": tool, "tool_input": tool_input})
+        req = wait_for(lambda: (browser.pending("n6") or [None])[0])
+        browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow"})
+        holder["t"].join(30)
+    assert not [e for e in browser.app.store.get("n6")["log"] if e["text"].startswith("자동 허용")]
+
+
+def test_terminal_session_without_browser_is_untouched_by_auto_allow(authed):
+    """브라우저가 없으면 터미널 프롬프트가 맡는다 — 안전한 명령이어도 콘솔이 대신 허용하지 않는다."""
+    authed.event("n7", "SessionStart")
+    assert _perm(authed, "n7", "Bash", {"command": "git status"})[:2] == (200, None)
+    assert _perm(authed, "n7", "Bash", {"command": "rm x"})[:2] == (200, None)
+    assert not [e for e in authed.app.store.get("n7")["log"] if e["text"].startswith("자동 허용")]
+
+
+def test_ask_question_tool_is_never_auto_allowed(browser):
+    browser.event("n8", "SessionStart")
+    assert browser.hook("permission", perm_body("n8", tool_name="AskUserQuestion"))[1] is None
+    assert Hooks(Store(None)).auto_allowed({"id": "x", "cwd": "/w"}, "AskUserQuestion", {}) is False
+
+
+def test_managed_bridge_auto_allows_safe_and_marks_irreversible(tmp_path):
+    store = Store(None)
+    proc = FakeProc()
+    m = managed.Manager(store, lambda: None, "/p")
+    hooks = Hooks(store, poll=0.02)
+    m.auto_allowed, m.risk_of = hooks.auto_allowed, hooks.risk_of
+    store.ensure("s1", str(tmp_path))["managed"] = True
+    m.on_event(proc, {"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "git status"}}})
+    assert proc.written[0]["response"]["response"] == {"behavior": "allow", "updatedInput": {"command": "git status"}}
+    assert store.pending_for("s1") == []
+    m.on_event(proc, {"type": "control_request", "request_id": "r2", "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "rm x"}}})
+    (req,) = store.pending_for("s1")
+    assert req.risk == "irreversible" and len(proc.written) == 1  # 사람 답 전에는 답하지 않는다
+    store.resolve(req.rid, permission_reply({"behavior": "deny", "message": "싫음"}), "거부함")
+    wait_for(lambda: len(proc.written) == 2)
+
+
+def test_managed_bridge_without_hooks_wired_still_asks(tmp_path):
+    store = Store(None)
+    proc = FakeProc()
+    m = managed.Manager(store, lambda: None, "/p")
+    store.ensure("s1", str(tmp_path))
+    m.on_event(proc, {"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "git status"}}})
+    assert len(store.pending_for("s1")) == 1 and proc.written == []  # 연결이 없으면 허용으로 뭉개지 않는다
+
+
+def test_auto_permission_mode_is_launched_and_reported(tmp_path):
+    m = managed.Manager(Store(None), lambda: ["claude"], "/plug")
+    cmd = m.command(permission="auto")
+    assert cmd[cmd.index("--permission-mode") + 1] == "auto"
+    assert "--dangerously-skip-permissions" not in cmd and "bypassPermissions" not in cmd
+
+
+def _init_event(mode):
+    return {"type": "system", "subtype": "init", "session_id": "s1", "permissionMode": mode, "model": "m"}
+
+
+def test_auto_mode_running_normally_has_no_warning(tmp_path):
+    store = Store(None)
+    m = managed.Manager(store, lambda: None, "/p")
+    store.ensure("s1", str(tmp_path)).update(managed=True, permissionChoice="auto")
+    m.on_event(FakeProc(), _init_event("auto"))
+    assert not store.get("s1").get("permissionNote")
+
+
+def test_auto_mode_started_as_other_mode_shows_reason_with_original(tmp_path):
+    store = Store(None)
+    m = managed.Manager(store, lambda: None, "/p")
+    store.ensure("s1", str(tmp_path)).update(managed=True, permissionChoice="auto")
+    m.on_event(FakeProc(), _init_event("default"))
+    note = store.get("s1")["permissionNote"]
+    assert "auto 모드를 쓸 수 없는 것 같아" in note and "원문: default" in note and "이유는 확인 못 함" in note
+    assert any(e["text"].startswith("권한 모드 auto:") for e in store.get("s1")["log"])
+    assert store.get("s1")["permissionMode"] == "default"
+
+
+def test_auto_mode_error_result_and_early_exit_are_reported(tmp_path):
+    store = Store(None)
+    m = managed.Manager(store, lambda: None, "/p")
+    store.ensure("s1", str(tmp_path)).update(managed=True, permissionChoice="auto")
+    m.on_event(FakeProc(), _init_event("auto"))
+    m.on_event(FakeProc(), {"type": "result", "is_error": True, "result": "auto mode is not available for this model", "session_id": "s1"})
+    assert "claude 가 낸 메시지 원문: auto mode is not available for this model" in store.get("s1")["permissionNote"]
+    # 시작 신호도 못 보내고 끝났다
+    store.ensure("s2", str(tmp_path)).update(managed=True, permissionChoice="auto", starting=True)
+    proc = FakeProc()
+    proc.session_id = proc.temp_id = "s2"
+    proc.last_result = "Error: auto mode requires an Opus 4.6+ model"
+    m.on_exit(proc)
+    note = store.get("s2")["permissionNote"]
+    assert "시작하다 끝났어" in note and "원문: Error: auto mode requires an Opus 4.6+ model" in note
+    store.ensure("s3", str(tmp_path)).update(managed=True, permissionChoice="auto", starting=True)
+    proc = FakeProc()
+    proc.session_id = proc.temp_id = "s3"
+    m.on_exit(proc)
+    assert "확인 못 함" in store.get("s3")["permissionNote"]
+    # 다른 모드를 고른 세션은 이 안내를 만들지 않는다
+    store.ensure("s4", str(tmp_path)).update(managed=True, permissionChoice="plan", starting=True)
+    proc = FakeProc()
+    proc.session_id = proc.temp_id = "s4"
+    m.on_exit(proc)
+    assert not store.get("s4").get("permissionNote")
