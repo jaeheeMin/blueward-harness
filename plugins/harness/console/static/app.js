@@ -842,6 +842,7 @@
   function sessionView(root) {
     var id = route.id, detail = null, errored = null, fetching = false, timer = null;
     var memDismissed = {}, regions = {}, parts = {}, syncLegend = function () {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, permBusy = false, permNote = '', sent = [];
+    var srsCache = {};  // 작업 폴더별 SRS Status 응답(설정·표준 갈래 세션의 "SRS 상태" 칸)
     var chatAll = false, chatOpen = {}, chatKey = null;  // 앞 대화를 펼쳤는지 · 긴 AI 말을 펼친 것(시각별) · 마지막으로 그린 대화 모양(새 항목 감지)
 
     function cur() { return sessions.get(id) || {}; }
@@ -1084,8 +1085,23 @@
       regions.iso.hidden = !bar;
     }
 
+    // 설정·표준 갈래 세션의 "SRS 상태" 칸(#718): 작업 폴더 SRS 의 Status 를 읽어 온다. 못 받은 동안은 칸을 비우고, 받으면 다시 그린다.
+    function srsFor(s) {
+      if (!s.cwd || (s.flowId !== 'config' && s.flowId !== 'standard')) return undefined;
+      var hit = srsCache[s.cwd];
+      if (!hit || (!hit.busy && Date.now() - hit.at > 5000)) {
+        var e = srsCache[s.cwd] = { busy: true, at: Date.now(), data: hit && hit.data };
+        api('GET', '/api/srs-status' + qs({ cwd: s.cwd })).then(function (d) { return d; }, function () { return { state: 'unknown' }; }).then(function (d) {
+          e.busy = false; e.at = Date.now();
+          var changed = JSON.stringify(d) !== JSON.stringify(e.data);
+          e.data = d;
+          if (changed && built && cur().cwd === s.cwd) paintStrip(cur());
+        });
+      }
+      return srsCache[s.cwd].data;
+    }
     function paintStrip(s) {
-      var cells = window.BHLogic.sessionStrip(s);
+      var cells = window.BHLogic.sessionStrip(s, srsFor(s));
       regions.strip.replaceChildren(h('div', { class: 'strip', role: 'list', 'aria-label': '진행 숫자' }, cells.map(function (c) {
         return h('div', { role: 'listitem', 'data-cell': c.id, title: c.title || null }, h('span', { class: 'eb', text: c.label }), h('span', { class: 'x ' + (c.tone || ''), text: c.value }));
       })));
@@ -1786,6 +1802,7 @@
     ['Role 정리', '메뉴 배정 · xlsx', '', 'Role(사용자 권한) 메뉴 배정을 정리하고 싶어. '],
     ['개발하기', 'Spec 승인된 건', 'dev', '새 기능을 개발하고 싶어. '],
     ['설정하기', '설정으로 처리할 건', 'config', '설정 건을 처리하고 싶어. '],
+    ['표준 기능으로 처리', 'SAP 표준 앱으로 끝나는 건', 'standard', '표준 기능으로 처리할 건이야. '],
     ['ATC 지적 고치기', 'SAP 검사 결과', '', 'ATC 지적을 돌려서 고치고 싶어. '],
     ['작은 수정', '오타 · 설정 한 줄', 'fix', '작은 수정을 하고 싶어. '],
     ['잘 모르겠어', 'AI가 골라 줘', '', '']

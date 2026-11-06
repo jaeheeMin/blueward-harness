@@ -349,11 +349,29 @@
     if (pct == null) return { kind: 'tokens', pct: null, tokens: t, level: '', text: tokenText(t), words: tokenText(t), title: '창 크기를 몰라서 %는 확인 못 함 · ' + tokenText(t) + ' 사용' };
     return { kind: 'pct', pct: pct, tokens: t, level: pct >= 90 ? 'hot' : pct > 80 ? 'warn' : '', text: pct + '%', words: tokenText(t), title: tokenText(t) + ' 사용' };
   }
-  function sessionStrip(s) {
+  // 설정·표준 갈래는 진행 원장이 아니라 SRS 의 Status 로 진행을 본다(#718). srs 는 /api/srs-status 응답(아직 못 받았으면 undefined → 칸을 비운다).
+  var SRS_STATUS_TEXT = { 'new': '새로 등록', 'planned': '계획됨', 'in process': '진행 중', 'done': '끝', 'on hold': '보류', 'dropped': '취소', 'duplicate': '중복' };
+  function srsStatusCell(s, srs) {
+    if (!s || (s.flowId !== 'config' && s.flowId !== 'standard') || !srs) return null;
+    // 요구사항 번호: 다음 갈래 옵션에 없으면(새 작업으로 바로 시작한 건) 세션 이름의 REQ-/DEV- 번호를 쓴다(REQ 와 DEV 번호는 같다).
+    var reqs = reqIds(s), items = srs.state === 'yes' && srs.items ? srs.items : {};
+    if (!reqs.length) String(s.title || '').replace(/\b(?:REQ|DEV)-(\d{1,6})\b/g, function (m, n) { var id = 'REQ-' + ('00' + n).slice(-Math.max(3, n.length)); if (reqs.indexOf(id) < 0) reqs.push(id); return m; });
+    var got = reqs.map(function (r) { return { id: r, status: String(items[r] && items[r].status || '').trim() }; }).filter(function (x) { return x.status; });
+    if (!got.length) return { id: 'srs-status', label: 'SRS 상태', tone: 'u', value: '확인 못 함', title: 'SRS(docs/ssot/SRS.md)의 Status 칸을 읽지 못했거나 이 요구사항을 찾지 못했어.' };
+    var text = function (x) { return SRS_STATUS_TEXT[x.status.toLowerCase()] || x.status; };
+    var same = got.every(function (x) { return x.status.toLowerCase() === got[0].status.toLowerCase(); });
+    return { id: 'srs-status', label: 'SRS 상태', tone: same && got[0].status.toLowerCase() === 'done' ? 'g' : '', value: same ? text(got[0]) : joinIds(got.map(function (x) { return x.id + ' ' + text(x); })),
+      title: '이 작업 폴더 SRS 의 Status 칸: ' + got.map(function (x) { return x.id + ' ' + x.status; }).join(', ') };
+  }
+  // 단계 이름 끝의 괄호 설명("…시작하기(작업 기록과 작업 공간을 자동으로 만들어요)")을 뗀 짧은 이름. 시안의 숫자 띠·순서 알약은 짧은 이름이다.
+  // 전체 이름은 호출한 쪽이 title 로 둔다.
+  function shortStepName(name) { return String(name || '').replace(/\s*\([^()]*\)\s*$/, '') || String(name || ''); }
+  function sessionStrip(s, srs) {
     var cells = [], steps = barSteps(s), prog = progressOf(s);
     if (steps.length) {
       var now = steps.filter(function (x) { return x.state === 'now'; })[0];
-      cells.push({ id: 'step', label: '단계', tone: 'g', value: s.flowFinished ? steps.length + ' / ' + steps.length + ' 끝' : now ? (now.index + 1) + ' / ' + steps.length + ' ' + now.name : '확인 못 함' });
+      cells.push({ id: 'step', label: '단계', tone: 'g', value: s.flowFinished ? steps.length + ' / ' + steps.length + ' 끝' : now ? (now.index + 1) + ' / ' + steps.length + ' ' + shortStepName(now.name) : '확인 못 함',
+        title: now && !s.flowFinished ? now.name : null });
       cells.push({ id: 'progress', label: 'AI 진행', tone: '', value: s.flowFinished ? '끝' : prog.pct + '%',
         title: '순서 ' + prog.total + '단계 중 ' + prog.done + '단계가 끝난 기준이야(AI 가 직접 알려 준 값이 아니야).' });
     } else cells.push({ id: 'step', label: '단계', tone: '', value: '정해진 갈래 없음' });
@@ -362,6 +380,8 @@
       cells.push({ id: 'req', label: '요구사항', tone: '', value: joinIds(reqs) });
       cells.push({ id: 'dev', label: '개발 번호', tone: '', value: joinIds(reqs.map(function (r) { return 'DEV-' + r.slice(4); })) });
     }
+    var st = srsStatusCell(s, srs);
+    if (st) cells.push(st);
     var issue = issueOf(s);
     if (issue) cells.push({ id: 'issue', label: '작업 기록(이슈)', tone: '', value: '이슈 #' + issue });
     var mem = memoryOf(s);
@@ -386,7 +406,9 @@
   function devReadyView(d) {
     if (!d || d.state !== 'yes' || d.loading) return null;
     var need = arr(d.needSpec).filter(function (x) { return x && x.label; });
-    return { specReady: d.specReady | 0, setup: d.setup | 0, need: need, needCount: Math.max(need.length, d.needSpecCount | 0) };
+    // setup 은 표준 건을 포함한 수다(서버 devready). 화면은 표준을 따로 세고 설정은 그만큼 뺀다(#718).
+    var standard = Math.min(d.standard | 0, d.setup | 0);
+    return { specReady: d.specReady | 0, setup: (d.setup | 0) - standard, standard: standard, need: need, needCount: Math.max(need.length, d.needSpecCount | 0) };
   }
   // 종류 버튼 밑에 보일 작은 글. flowId 는 종류 버튼의 갈래. 보일 것이 없으면 null.
   function kindHint(flowId, v) {
@@ -394,6 +416,7 @@
     if (flowId === 'dev') return v.specReady === 0 ? { tone: 'dim', text: 'Spec 있는 건 없음 — 개발 Spec 먼저' } : { tone: '', text: 'Spec 있는 건 ' + v.specReady + '개' };
     if (flowId === 'spec') return v.need.length ? { tone: 'hot', text: '할 차례 ' + v.need[0].label + (v.needCount > 1 ? ' 외 ' + (v.needCount - 1) + '건' : '') } : null;
     if (flowId === 'config') return v.setup > 0 ? { tone: '', text: '설정 건 ' + v.setup + '개' } : null;
+    if (flowId === 'standard') return v.standard > 0 ? { tone: '', text: '표준 건 ' + v.standard + '개' } : null;
     return null;
   }
   // Spec 이 없다고 확실할 때만 개발을 막는다. 개발 갈래가 아니거나 상태를 모르면 null.
@@ -439,7 +462,7 @@
   var api = {
     notifyEvents: notifyEvents,
     devReadyView: devReadyView, kindHint: kindHint, devBlock: devBlock, kindConflict: kindConflict,
-    memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, prLines: prLines,
+    memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, shortStepName: shortStepName, prLines: prLines,
     BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, counts: counts, summaryText: summaryText,
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice,

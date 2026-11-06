@@ -795,6 +795,13 @@ class App:
         cwd = self.known_root(q["cwd"][0])
         return 200, self.cached(("dev-ready", os.path.normcase(cwd)), lambda: devready.read(self.run, self.slow_run, cwd), wait=False)
 
+    def a_srs_status(self, g, q, b):
+        """세션 작업 폴더 SRS 의 요구사항별 Status(#718). 설정·표준 건 세션 화면의 "SRS 상태" 칸이 쓴다.
+        state: yes(읽음) / no(SRS 없음) / unknown(읽지 못함)."""
+        if not q.get("cwd"):
+            raise HttpError(400, "cwd 가 필요합니다.")
+        return 200, devready.srs_status(self.run, self.known_root(q["cwd"][0]))
+
     # ---- 시작 점검(첫 화면) ----
     def first_run_file(self) -> Path | None:
         return self.store.dir / FIRST_RUN_FILE if self.store.dir else None
@@ -1852,6 +1859,7 @@ ROUTES = [
     ("GET", re.compile(r"/api/flows"), App.a_flows),
     ("GET", re.compile(r"/api/approvals"), App.a_approvals),
     ("GET", re.compile(r"/api/dev-ready"), App.a_dev_ready),
+    ("GET", re.compile(r"/api/srs-status"), App.a_srs_status),
     ("GET", re.compile(r"/api/start-checks"), App.a_start_checks),
     ("POST", re.compile(r"/api/start-checks/seen"), App.a_start_seen),
     ("GET", re.compile(r"/api/whats-new"), App.a_whats_new),

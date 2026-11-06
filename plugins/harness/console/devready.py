@@ -133,3 +133,22 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
             need.append({"number": n, "label": label})
     return {"state": "yes", "reason": "", "specReady": spec_ready, "setup": setup, "standard": standard, "needSpec": need[:NEED_LIMIT],
             "needSpecCount": len(need), "items": items}
+
+
+def srs_status(run: gitstate.Runner, cwd: str) -> dict:
+    """세션 작업 폴더의 SRS 에서 요구사항별 Status·다음 단계를 읽는다(#718). 설정·표준 건의 진행(In Process·Done)은
+    작업 브랜치의 SRS 에 먼저 적히므로 origin/main 이 아니라 작업 폴더 파일을 읽는다. 캐시하지 않는다(가벼운 파일 읽기).
+    state: yes(읽음, items = {"REQ-002": {"status", "next"}}) / no(SRS 가 없음) / unknown(읽지 못함, 지어내지 않는다)."""
+    root, failed = gitstate.repo_root_checked(run, cwd)
+    if failed:
+        return _unknown("git 을 실행하지 못해 SRS 를 찾지 못했습니다.")
+    path = os.path.join(root or cwd, "docs", "ssot", "SRS.md")
+    if not os.path.isfile(path):
+        return {"state": "no", "reason": "작업 폴더에 docs/ssot/SRS.md 가 없습니다."}
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError):
+        return _unknown("작업 폴더의 SRS 를 읽지 못했습니다.")
+    items = {f"REQ-{n:03d}": {"status": _pick(row, "Status", "상태"), "next": _pick(row, "다음 단계")} for n, row in _rows(text, REQ_ROW_RE)}
+    return {"state": "yes", "reason": "", "items": items}
