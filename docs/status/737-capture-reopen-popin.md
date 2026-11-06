@@ -13,3 +13,4 @@ public-cloud DEV-006 매뉴얼 캡처(100 테넌트, v0.10.186)에서 나온 두
 ## 시험
 - `uv run pytest checker/tests/test_manual_capture.py -q` 173 통과·1 건너뜀(route_ok 표, 경로 맞추기 성공·실패, 접힌 열 안내).
 - 실제 테넌트로는 이 PR 을 돌리지 않았다. #737 의 해법(location.hash 를 목록으로)은 plugin-help 세션이 DEV-006 에서 손으로 확인했다.
+- 덧붙임(plugin-help DEV-011): 다른 앱으로도 안 넘어가 준비 단계 입력이 엉뚱한 앱 필터에 들어갔다. 같은 경로 맞추기로 고쳐지고, 못 맞추면 준비 단계 전에 멈춘다(시험 2개 추가).

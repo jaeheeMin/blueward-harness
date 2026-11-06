@@ -1612,3 +1612,44 @@ def test_column_not_found_but_popin_label_explains(tmp_path, capsys, fake):
     code, out = _capture(capsys, root)
     miss = out["screens"][0]["못 찾은 것"][0]
     assert miss["상태"] == "not_found" and "접힌(pop-in) 열" in miss["사유"] and "그 밖" in miss["사유"]
+
+
+class OtherAppStuckTab(FakeTab):
+    """다시 열어도 탭이 다른 앱(#Other-manage)에 남는다(#737 DEV-011). fix 면 location.hash 로 옮겨진다."""
+
+    def __init__(self, finds, fix):
+        super().__init__(finds)
+        self.fix = fix
+
+    def call(self, method, **params):
+        r = super().call(method, **params)
+        if method in ("Page.navigate", "Page.reload"):
+            self.href = self.href.split("#")[0] + "#Other-manage&/"
+        return r
+
+    def evaluate(self, expr):
+        if expr.startswith("location.hash = "):
+            self.evals.append(expr)
+            if self.fix:
+                self.href = self.href.split("#")[0] + json.loads(expr[len("location.hash = "):])
+            return True
+        return super().evaluate(expr)
+
+
+def test_reopen_stuck_in_other_app_moves_hash_then_runs_steps(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, INPUT_SCREEN)
+    t = fake["tab"] = OtherAppStuckTab(STEP_FINDS, fix=True)
+    t.reads = [{"ok": True, "kind": "multi", "tokens": [], "value": ""}]
+    code, out = _capture(capsys, root)
+    assert out["screens"][0]["상태"] == "완료", out
+
+
+def test_reopen_stuck_in_other_app_stops_before_any_step(tmp_path, capsys, fake):
+    # 잘못된 앱에 입력·누르기가 가면 안 된다 — 경로를 못 맞추면 준비 단계 전에 멈춘다
+    root = _repo(tmp_path)
+    _one(root, INPUT_SCREEN)
+    t = fake["tab"] = OtherAppStuckTab(STEP_FINDS, fix=False)
+    code, out = _capture(capsys, root)
+    assert code == 2 and "Other-manage" in out["screens"][0]["사유"]
+    assert _typed(t) == [] and not any(m == "Input.dispatchMouseEvent" for m, _ in t.calls)
