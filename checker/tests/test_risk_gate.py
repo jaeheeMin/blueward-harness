@@ -26,8 +26,10 @@ TEAMS = "https://prod-12.koreacentral." + "logic.azure.com:443/workflows/abc/tri
 PP_URL = "https://abc.12.environment." + "api.powerplatform.com/powerautomate/automations/direct/workflows/x/triggers/manual/paths/invoke?api-version=1&sp=%2F&sig=" + "Abc123_-xyz"
 
 
-def _file(name, additions=1, deletions=0, patch="@@ -0,0 +1 @@\n+x"):
+def _file(name, additions=1, deletions=0, patch="@@ -0,0 +1 @@\n+x", status=None):
     entry = {"filename": name, "additions": additions, "deletions": deletions}
+    if status is not None:
+        entry["status"] = status
     if patch is not None:
         entry["patch"] = patch
     return entry
@@ -39,6 +41,7 @@ def _patch(*added):
 
 
 CFG = rg.load_config(None)
+SG = "size_gate: true\n"  # 크기 초과를 승인 사유로 보는 설정(#736). 기본은 false 라 경고만 낸다.
 
 
 # --- 설정 ---------------------------------------------------------------------
@@ -551,7 +554,7 @@ def test_작고_안전하고_검사_통과면_승인_없이_통과():
 
 
 def test_크기가_크면_위험하고_승인이_없으면_1():
-    client = _client(files=[_file("src/a.py", 500, 0)])
+    client = _client(config=SG, files=[_file("src/a.py", 500, 0)])
     result = rg.decide_pr(client, "o/r", 5)
     assert result["risk"] == "high" and result["requires_approval"] is True
     assert result["approved"] is False
@@ -561,7 +564,7 @@ def test_크기가_크면_위험하고_승인이_없으면_1():
     assert rg._exit_for(result) == 1
 
 
-SRC_ONLY = "size_warn_only_paths:\n  - src/\n"
+SRC_ONLY = SG + "size_warn_only_paths:\n  - src/\n"
 
 
 def test_소스만_바꾼_큰_PR_은_크기가_승인_사유가_아니라_참고다():
@@ -591,10 +594,10 @@ def test_소스_밖_일반_파일이_하나라도_끼면_크기는_승인_사유
 
 
 def test_size_warn_only_paths_가_비면_소스만이어도_전과_같이_위험():
-    result = rg.decide_pr(_client(files=[_file("src/a.py", 400, 0)]), "o/r", 5)
+    result = rg.decide_pr(_client(config=SG, files=[_file("src/a.py", 400, 0)]), "o/r", 5)
     assert result["risk"] == "high" and "400줄" in result["reasons"][0]
     assert result["notes"] == []
-    result = rg.decide_pr(_client(config="size_warn_only_paths: []\n", files=[_file("src/a.py", 400, 0)]), "o/r", 5)
+    result = rg.decide_pr(_client(config=SG + "size_warn_only_paths: []\n", files=[_file("src/a.py", 400, 0)]), "o/r", 5)
     assert result["requires_approval"] is True
 
 
@@ -633,12 +636,12 @@ def test_size_기준의_참고_Finding_은_note_표시가_붙는다():
     assert [f.note for f in findings] == [True]
 
 
-EXCL = "size_exclude_paths: [src/, audit/]\n"
+EXCL = SG + "size_exclude_paths: [src/, audit/]\n"
 
 
 def test_제외_경로가_비면_섞인_PR_도_전체를_센다_전과_같다():
     files = [_file("src/a.py", 400, 0), _file("ops/run.sh", 1, 0)]
-    result = rg.decide_pr(_client(files=files), "o/r", 5)
+    result = rg.decide_pr(_client(config=SG, files=files), "o/r", 5)
     assert result["requires_approval"] is True and "401줄" in result["reasons"][0]
 
 
@@ -693,19 +696,85 @@ def test_센_파일이_정확히_기준이면_사유_없고_하나_넘으면_사
 
 
 def test_제외_접두어_src_는_srcx_를_빼지_않는다():
-    cfg = "size_exclude_paths: [src/]\n"
+    cfg = SG + "size_exclude_paths: [src/]\n"
     r = rg.decide_pr(_client(config=cfg, files=[_file("srcx/a.txt", 301, 0)]), "o/r", 5)
     assert r["requires_approval"] is True and "301줄" in r["reasons"][0]
 
 
 def test_두_키를_함께_쓰면_제외가_먼저_적용되고_warn_only_는_남은_사유에_그대로_적용된다():
-    cfg = "size_exclude_paths: [audit/]\nsize_warn_only_paths: [src/]\n"
+    cfg = SG + "size_exclude_paths: [audit/]\nsize_warn_only_paths: [src/]\n"
     # 센 파일이 모두 warn_only 아래 → 남은 사유도 참고
     r = rg.decide_pr(_client(config=cfg, files=[_file("src/a.py", 400, 0), _file("audit/x.md", 5, 0)]), "o/r", 5)
     assert r["requires_approval"] is False and len(r["notes"]) == 1
     # 센 파일에 warn_only 밖(ops)이 있으면 사유
     r = rg.decide_pr(_client(config=cfg, files=[_file("src/a.py", 400, 0), _file("ops/run.sh", 1, 0)]), "o/r", 5)
     assert r["requires_approval"] is True
+
+
+def test_size_gate_기본은_false_이고_설정이_덮는다():
+    assert rg.load_config(None)["size_gate"] is False
+    assert rg.load_config("size_gate: true\n")["size_gate"] is True
+    with pytest.raises(rg.ConfigError):
+        rg.load_config("size_gate: yes please\n")
+
+
+def test_size_gate_false_면_300줄_10파일_초과도_참고만_내고_위험이_아니다():
+    for files, text in (([_file("ops/a.sh", 301, 0)], "301줄"), ([_file(f"ops/{i}.sh", 1, 0) for i in range(11)], "11개")):
+        result = rg.decide_pr(_client(files=files), "o/r", 5)
+        assert result["risk"] == "low" and result["requires_approval"] is False and result["reasons"] == []
+        assert len(result["notes"]) == 1 and text in result["notes"][0]
+        assert "size_gate: false" in result["notes"][0] and "승인은 필요 없음(참고)" in result["notes"][0]
+        assert rg._exit_for(result) == 0
+
+
+def test_size_gate_true_면_크기_초과가_이전처럼_승인_사유():
+    result = rg.decide_pr(_client(config=SG, files=[_file("ops/a.sh", 301, 0)]), "o/r", 5)
+    assert result["risk"] == "high" and result["requires_approval"] is True
+    assert "301줄" in result["reasons"][0] and result["notes"] == []
+
+
+def test_size_gate_false_여도_비밀값은_위험이다():
+    client = _client(files=[_file("a.py", 400, 0, patch=_patch(f"KEY = '{AWS_KEY}'"))])
+    result = rg.decide_pr(client, "o/r", 5)
+    assert result["requires_approval"] is True
+    assert any("비밀값" in r for r in result["reasons"]) and len(result["notes"]) == 1
+
+
+def test_Spec_새_파일만_위험_경로다():
+    added = rg.decide_pr(_client(files=[_file("docs/spec/DEV-001-a.md", status="added")]), "o/r", 5)
+    assert added["risk"] == "high" and "docs/spec/DEV-001-a.md" in added["reasons"][0]
+    for status in ("modified", "renamed", "removed", "changed", "unchanged"):
+        result = rg.decide_pr(_client(files=[_file("docs/spec/DEV-001-a.md", status=status)]), "o/r", 5)
+        assert result["risk"] == "low" and result["requires_approval"] is False, status
+
+
+def test_Spec_상태를_모르면_새_파일처럼_위험():
+    # 상태가 없거나 처음 보는 값이면 승인 불필요로 뭉개지 않는다(원칙 7). copied 는 새 파일이 생긴다.
+    for status in (None, "copied", "weird"):
+        result = rg.decide_pr(_client(files=[_file("docs/spec/DEV-001-a.md", status=status)]), "o/r", 5)
+        assert result["risk"] == "high" and "docs/spec/DEV-001-a.md" in result["reasons"][0], status
+
+
+def test_Spec_수정만_센_파일_수에는_그대로_든다():
+    files = [_file(f"docs/spec/DEV-{i:03d}-a.md", 1, 0, status="modified") for i in range(11)]
+    result = rg.decide_pr(_client(config=SG, files=files), "o/r", 5)
+    assert [r for r in result["reasons"] if "위험 경로" in r] == [] and any("11개" in r for r in result["reasons"])
+
+
+def test_SRS_수정은_여전히_위험이고_Spec_수정이_같이_있어도_SRS_때문이다():
+    srs = rg.decide_pr(_client(files=[_file("docs/ssot/SRS.md", status="modified")]), "o/r", 5)
+    assert srs["risk"] == "high" and "docs/ssot/SRS.md" in srs["reasons"][0]
+    both = rg.decide_pr(_client(files=[_file("docs/ssot/SRS.md", status="modified"),
+                                       _file("docs/spec/DEV-001-a.md", status="modified")]), "o/r", 5)
+    reason = next(r for r in both["reasons"] if "위험 경로" in r)
+    assert "docs/ssot/SRS.md" in reason and "docs/spec" not in reason
+
+
+def test_human_merge_paths_의_다른_경로는_Spec_수정이_섞여도_그대로_위험():
+    client = _client(files=[_file("docs/spec/DEV-001-a.md", status="modified"), _file("plugins/x.sh", status="modified")],
+                     human_paths="plugins/\n")
+    reason = rg.decide_pr(client, "o/r", 5)["reasons"][0]
+    assert "plugins/x.sh" in reason and "docs/spec" not in reason
 
 
 def test_위험_경로를_바꾸면_위험():
@@ -829,7 +898,7 @@ def test_승인자_파일이_없거나_비면_다음_안내도_저장소_관리�
     assert "저장소 관리자(admin, 작성자 제외)에게 최신 커밋을 보고 Approve 를 요청" in missing["next"]
     assert ".github/ssot-approvers" not in missing["next"]
 
-    big = rg.decide_pr(_client(files=[_file("src/a.py", 500, 0)], approvers=approvers), "o/r", 5)
+    big = rg.decide_pr(_client(config=SG, files=[_file("src/a.py", 500, 0)], approvers=approvers), "o/r", 5)
     assert "저장소 관리자(admin, 작성자 제외)" in big["next"] and "PR 을 나눠" in big["next"]
 
 
@@ -1455,7 +1524,7 @@ def test_precheck_위험하지_않으면_돌려도_된다():
     ],
 )
 def test_precheck_크기_경로_비밀값이_위험이어도_enabled_는_true(files, criteria):
-    result = rg.precheck_pr(_client(config="ai_review: true\n", files=files), "o/r", 5)
+    result = rg.precheck_pr(_client(config=SG + "ai_review: true\n", files=files), "o/r", 5)
     # 위험 여부와 사유는 코멘트 안내용으로 남기되 enabled 는 true 다(#360). 기준 이름도 출력한다.
     assert result["enabled"] is True and result["risky"] is True and result["reasons"]
     assert result["criteria"] == criteria

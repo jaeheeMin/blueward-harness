@@ -14,10 +14,13 @@
 
 기준(`CRITERIA`):
 
-- `size`      바뀐 줄(추가+삭제)과 파일 수가 기준을 넘는가. `size_exclude_paths` 아래 파일은 합계에서 빼고, 뺀 것까지
+- `size`      바뀐 줄(추가+삭제)과 파일 수가 기준을 넘는가. `size_gate`(기본 false)가 false 면 초과는 전부 참고(note)로만
+              낸다(#736). true 일 때만 아래대로 승인 사유다. `size_exclude_paths` 아래 파일은 합계에서 빼고, 뺀 것까지
               합칠 때만 넘는 부분은 참고(note)로 낸다(#534). `size_warn_only_paths` 가 비어 있지 않고 PR 이 바꾼
               파일이 모두 그 접두어 아래면 승인 사유가 아니라 참고(note)로만 낸다(#436, 결과의 `notes`).
-- `paths`     `high_risk_paths` 와 `.github/human-merge-paths` 의 경로를 바꿨는가.
+- `paths`     `high_risk_paths` 와 `.github/human-merge-paths` 의 경로를 바꿨는가. `docs/spec/` 아래는 새 파일만
+              센다(#736). 고친 것이 확실한 status(`modified`·`renamed`·`removed`·`changed`·`unchanged`)만 빼고, status 가
+              없거나 처음 보는 값이면 새 파일로 본다.
 - `secret`    추가된 줄에 토큰·키·비밀번호·웹훅 주소 모양이 있는가(CR-004 의 기계 검사).
               보고에는 파일:줄과 패턴 이름만 담고 값은 절대 담지 않는다.
 - `checks`    이 PR 의 다른 검사(check run, commit status)가 실패했거나 진행 중인가.
@@ -165,6 +168,8 @@ DEFAULT_HIGH_RISK_PATHS = [
 DEFAULT_CONFIG: dict = {
     "max_changed_lines": 300,
     "max_changed_files": 10,
+    # false(기본)면 줄·파일 수 초과를 승인 사유가 아니라 경고(note)로만 낸다(#736). true 면 초과가 승인 사유다.
+    "size_gate": False,
     "high_risk_paths": DEFAULT_HIGH_RISK_PATHS,
     "secret_scan": True,
     "require_checks_green": True,
@@ -183,7 +188,7 @@ DEFAULT_CONFIG: dict = {
 }
 
 _INT_KEYS = ("max_changed_lines", "max_changed_files")
-_BOOL_KEYS = ("secret_scan", "require_checks_green", "ai_review", "srs_split_hint")
+_BOOL_KEYS = ("secret_scan", "require_checks_green", "ai_review", "srs_split_hint", "size_gate")
 _LIST_KEYS = ("high_risk_paths", "ai_review_paths", "size_warn_only_paths", "size_exclude_paths")
 
 _MAX_LISTED = 5  # 사유에 이름을 나열하는 최대 개수
@@ -280,6 +285,15 @@ def all_under(files: list[str], prefixes: list[str]) -> bool:
     if not normalized or not files:
         return False
     return len(human_merge_hits(files, normalized)) == len(files)
+
+
+SPEC_PREFIX = "docs/spec/"
+# 이미 있던 Spec 을 고친 것으로 확실한 GitHub 파일 상태(#736). `added`·`copied`(새 파일)와 상태 없음은 여기 없다.
+_SPEC_EDIT_STATUSES = frozenset({"modified", "renamed", "removed", "changed", "unchanged"})
+
+
+def _is_spec_path(path: str) -> bool:
+    return _normalize(path).startswith(SPEC_PREFIX)
 
 
 def path_reasons(files: list[str], prefixes: list[str]) -> list[str]:
@@ -839,6 +853,12 @@ def criterion(name: str):
 @criterion("size")
 def _crit_size(ctx: Context) -> list[Finding]:
     cfg = ctx.cfg
+    if not cfg["size_gate"]:
+        # 크기는 경고만(#736). 승인 사유로 만들지 않는다.
+        return [
+            Finding("size", f"{msg} — 크기는 경고만(size_gate: false)이라 승인은 필요 없음(참고)", note=True)
+            for msg in _size_exceeded(ctx.files, cfg).values()
+        ]
     counted, excluded = size_excluded_split(ctx.files, cfg["size_exclude_paths"])
     over = _size_exceeded(counted, cfg)
     findings: list[Finding] = []
@@ -859,7 +879,14 @@ def _crit_size(ctx: Context) -> list[Finding]:
 
 @criterion("paths")
 def _crit_paths(ctx: Context) -> list[Finding]:
-    return [Finding("paths", r) for r in path_reasons(ctx.filenames, ctx.prefixes)]
+    # `docs/spec/` 은 새 파일만 센다(#736). 고치거나 옮기거나 지운 Spec 은 위험 경로가 아니다. 상태를 모르면
+    # (없음·처음 보는 값) 새 파일로 보고 센다 — 확인 못 한 것을 승인 불필요로 뭉개지 않는다(원칙 7).
+    names = [
+        f.get("filename") or ""
+        for f in ctx.files
+        if not _is_spec_path(f.get("filename") or "") or f.get("status") not in _SPEC_EDIT_STATUSES
+    ]
+    return [Finding("paths", r) for r in path_reasons(names, ctx.prefixes)]
 
 
 @criterion("secret")

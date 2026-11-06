@@ -8,15 +8,20 @@
 # 이 파일을 지우면 위험도 게이트는 꺼진다(아무것도 막지 않는다).
 # 알 수 없는 키나 잘못된 값이 있으면 판정 불능으로 빨간불이 된다(오타가 기준을 몰래 바꾸지 않게).
 
-# 크기: 바뀐 줄(추가 + 삭제)이 이 값을 넘거나 바뀐 파일이 이 개수를 넘으면 위험하다.
+# 크기 경고 기준: 바뀐 줄(추가 + 삭제)이 이 값을 넘거나 바뀐 파일이 이 개수를 넘으면 PR 코멘트에
+# "참고(승인 필요 없음)" 경고를 남긴다. size_gate 를 true 로 켜면 이 기준이 승인 기준이 된다.
 max_changed_lines: 300
 max_changed_files: 10
+
+# 크기 승인(#736): false(기본)면 위 크기 초과는 경고만 하고 승인을 요구하지 않는다. true 면 크기 초과도 위험이다.
+# 아래 size_exclude_paths·size_warn_only_paths 는 이 키가 true 일 때만 의미가 있다.
+size_gate: false
 
 # 위험 경로: 이 접두어 아래 파일을 바꾸면 위험하다. 적어 둔 것에 더해
 # .github/human-merge-paths 의 경로도 언제나 위험 경로로 본다.
 high_risk_paths:
   - docs/ssot/
-  - docs/spec/
+  - docs/spec/   # 새 Spec 파일(added)만 승인 대상이다. 이미 있는 Spec 을 고치거나 옮기거나 지우는 것은 위험이 아니다(#736).
   - rules/
   - templates/
   - conventions/
@@ -45,6 +50,7 @@ ai_review: false
 ai_review_paths:
   - src/
 
+# (size_exclude_paths·size_warn_only_paths 는 size_gate: true 일 때만 의미가 있다.)
 # 크기를 세지 않는 경로(#534): 이 접두어 아래 파일은 위 max_changed_* 판정의 줄·파일 수 합계에서 뺀다. src/ 는
 # 080 에서 이미 활성화된 코드의 사본이고 audit/ 은 기록이라 사람이 크기로 막을 것이 적다. 그래서 개발 PR 이 Spec 한
 # 줄을 같이 고쳐도 src/ 줄이 승인 사유가 되지 않는다. 남은 파일만으로 기준을 판정해 넘으면 승인 사유이고, 뺀 것까지
