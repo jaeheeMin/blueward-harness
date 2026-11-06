@@ -176,6 +176,25 @@ LIB_JS = r"""(() => {
     return 1;
   };
 
+  // `팝업` 단계의 `행`(#673): 이름이 유일한 열 머리글과 같은 aria-colindex 의 보이는 본문 칸(role=gridcell)을 위에서부터 센다.
+  // 칸 안에 보이는 아이콘(.sapUiIcon)이 있으면 그 가운데를, 없으면 칸 가운데를 누를 자리로 돌려준다. 칸 글자·아이콘 유무도 함께 돌려준다.
+  const cellOf = (name, row) => {
+    const { items } = cands('열', name);
+    if (items.length !== 1) return { ok: false, count: items.length };
+    const h = items[0].el;
+    const grid = h.closest('[role=grid], [role=treegrid], [role=table], .sapUiTable, .sapMList') || h.closest('table');
+    const ci = h.getAttribute('aria-colindex');
+    if (!grid || !ci) return { ok: false, count: 1, noGrid: true };
+    const vis = [...grid.querySelectorAll('[role=gridcell][aria-colindex="' + ci + '"]')]
+      .map(c => ({ c, f: fully(c) })).filter(o => o.f).map(o => ({ c: o.c, r: rectOf(o.f) }))
+      .sort((p, q) => p.r.y - q.r.y);
+    const o = vis[row - 1];
+    if (!o) return { ok: false, count: 1, rows: vis.length };
+    const icon = o.c.querySelector('.sapUiIcon');
+    const ig = icon && fully(icon);
+    return { ok: true, rect: ig ? rectOf(ig) : o.r, text: trimLabel(o.c.textContent), icon: !!icon, rows: vis.length };
+  };
+
   // 같은 표의 열 여럿을 한 번에 보이게 한다(#657). 열마다 따로 가운데로 넘기면 먼저 보이던 왼쪽 열이 밀려난다.
   // 열들의 가로 범위(가장 왼쪽 열 시작 ~ 가장 오른쪽 열 끝)가 표의 보이는 폭 안이면 그 범위가 다 보이는 위치 하나로 넘긴다.
   // 가로 스크롤 요소는 sap.ui.table 이면 `.sapUiTableHSb`(scrollLeft), 아니면 overflow-x 가 auto·scroll 인 가장 가까운 조상이다.
@@ -366,6 +385,6 @@ LIB_JS = r"""(() => {
   };
   const clearScope = () => { scopeEl = null; };
 
-  window.__mc = { find, scrollColumn, scrollColumns, focusInput, readInput, clearInput, selectOption, dialogs, dialogInfo, setScope, clearScope, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
+  window.__mc = { find, scrollColumn, scrollColumns, cellOf,focusInput, readInput, clearInput, selectOption, dialogs, dialogInfo, setScope, clearScope, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
   return true;
 })()"""

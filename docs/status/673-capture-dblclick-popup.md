@@ -1,0 +1,21 @@
+# #673 매뉴얼 캡처: 표 칸 더블클릭으로 여는 팝업 (2026-11-06)
+
+## 배경
+
+public-cloud DEV-008 앱의 백로그 팝업은 버튼이 아니라 표의 `백로그상태` 칸(다이아몬드 아이콘, 백로그가 있는 반복제조 행만)을 더블클릭해야 열린다. 기존 `{팝업: 버튼}`(#653)으로는 열 수 없었다.
+
+## 바뀐 것
+
+| 곳 | 내용 |
+|---|---|
+| `checker/manual_capture.py` | `팝업` 단계에 선택 키 `행`(1 이상 정수, 팝업 단계에서만). `Step.row`. `cell_target`(열 머리글이 유일한지 확인 → `scrollColumn` 으로 보이게 → `cellOf`), `double_click`(mouseMoved 뒤 pressed/released clickCount=1, 2). 뒤는 기존 `open_popup` 그대로. 빈 칸이라 팝업이 안 뜨면 사유에 "그 행 칸이 비어 있다(백로그 없는 행일 수 있다), 다른 `행` 을 고른다" |
+| `checker/manual_capture_js.py` | `cellOf(name, row)`: 머리글과 같은 aria-colindex 의 보이는 `[role=gridcell]` 을 위에서부터 센다. 칸 안 보이는 `.sapUiIcon` 이 있으면 그 가운데, 없으면 칸 가운데. 칸 글자·아이콘 유무·보이는 행 수를 돌려준다 |
+| `checker/tests/test_manual_capture.py` | 파싱(허용·0·문자·불리언·팝업 아닌 단계 거부), 실행(더블클릭 이벤트 clickCount 1→2, 칸 없음, 열 여럿·없음, 빈 칸 안내, 안 빈 칸은 안내 없음) |
+| `plugins/harness/skills/manual/SKILL.md`, 모듈 docstring, `docs/guide/harness-guide.html` | `행` 설명, "더블클릭은 데이터를 바꾸지 않는 칸에만 쓴다(사람이 고른다)" |
+| `plugin.json` | 0.10.195 (열린 PR 들이 0.10.177~0.10.194 를 쓰는 중이라 그 뒤) |
+
+## 한계 / 실제 테넌트로 확인할 것
+
+- `값:` 으로 고르는 방식은 하지 않았다(행 번호만).
+- 세로로 안 보이는 행은 세지 않는다. 보이는 행 수가 모자라면 검사 불능(사유에 보이는 행 수).
+- 실제 DEV-008 표에서 확인: 본문 칸이 `role=gridcell` + 머리글과 같은 `aria-colindex` 인가, 더블클릭으로 팝업이 뜨는가(아이콘 가운데 vs 칸 가운데), 백로그 없는 행의 칸이 비어 있어 안내가 붙는가.
