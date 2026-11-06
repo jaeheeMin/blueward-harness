@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+import context_usage
 import flows
 import platform_compat
 from docfiles import SKIP_DIRS
@@ -576,4 +577,5 @@ def public_session(store: Store, s: dict, skills: list[str]) -> dict:
             "pluginVersions": [dict(p) for p in s.get("pluginVersions") or []],
             "sameFolder": same_folder_ids(store, s), "handedOffTo": s.get("handedOffTo") or None,
             "startChecks": [dict(c) for c in s.get("startChecks") or []],
+            "context": context_usage.for_session(s),
         })

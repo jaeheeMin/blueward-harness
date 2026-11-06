@@ -95,6 +95,19 @@ ul, ol { padding: 0; }
 .ring { flex: none; display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%; }
 .ring b { font-family: var(--mono); font-size: 11px; font-weight: 400; }
 .ring.unk { border: 2px dashed var(--st-unk); color: var(--st-unk-ink); }
+.ring.pct { --rcol: var(--accent); background: conic-gradient(var(--rcol) calc(var(--p) * 1%), var(--track) 0); }
+.ring.pct.warn { --rcol: var(--st-turn); }
+.ring.pct.hot { --rcol: var(--st-fail); }
+.ring.pct b { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--surface); font-size: 10px; }
+.mem-near { margin-top: 0; }
+.banner.mem { margin-top: 16px; padding: 10px 16px; gap: 8px 14px; justify-content: flex-start; }
+.banner.mem .mem-t { font-weight: 600; }
+.banner.mem .mem-d { flex: 1 1 260px; font-weight: 400; font-size: 13px; }
+.banner.mem button { min-height: 36px; padding: 0 14px; border-radius: 999px; font-size: 13px; cursor: pointer; }
+.banner.mem .mem-go { border: 1.5px solid var(--st-turn); background: var(--st-turn); color: var(--st-turn-ink); font-weight: 600; }
+.banner.mem .mem-stay { border: 1.5px solid transparent; background: transparent; color: inherit; }
+.mono.warn { color: var(--st-turn); }
+.mono.hot { color: var(--st-fail-ink); }
 .sinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .sinfo .n { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sinfo small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

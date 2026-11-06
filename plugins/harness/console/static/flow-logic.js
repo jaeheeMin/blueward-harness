@@ -307,6 +307,17 @@
     var link = arr(s && s.prLinks).map(function (p) { return typeof p === 'string' ? p : p && p.url; }).map(function (u) { return /\/pull\/(\d+)/.exec(u || ''); }).filter(Boolean)[0];
     return link ? { value: 'PR #' + link[1], tone: '' } : null;
   }
+  /* 세션 기억(context) 사용량(#648). 서버가 읽은 s.context = { tokens, window, pct } 를 화면 값으로 바꾼다.
+     kind: 'pct'(창 크기를 알아 % 가 있음) / 'tokens'(토큰 수만) / 'unknown'(읽지 못함). 모르는 값은 지어내지 않는다.
+     level: 80% 초과 'warn', 90% 이상 'hot'(링 색과 숫자 띠·배너가 같은 기준을 쓴다). */
+  function tokenText(n) { return n >= 10000 ? Math.round(n / 10000) + '만 토큰' : n + ' 토큰'; }
+  function memoryOf(s) {
+    var c = (s && s.context) || {}, t = c.tokens;
+    if (typeof t !== 'number' || !isFinite(t) || t <= 0) return { kind: 'unknown', pct: null, tokens: null, level: '', text: '?', title: '기억 사용량 확인 못 함' };
+    var pct = typeof c.pct === 'number' && isFinite(c.pct) ? Math.max(0, Math.min(100, Math.round(c.pct))) : null;
+    if (pct == null) return { kind: 'tokens', pct: null, tokens: t, level: '', text: tokenText(t), words: tokenText(t), title: '창 크기를 몰라서 %는 확인 못 함 · ' + tokenText(t) + ' 사용' };
+    return { kind: 'pct', pct: pct, tokens: t, level: pct >= 90 ? 'hot' : pct > 80 ? 'warn' : '', text: pct + '%', words: tokenText(t), title: tokenText(t) + ' 사용' };
+  }
   function sessionStrip(s) {
     var cells = [], steps = barSteps(s), prog = progressOf(s);
     if (steps.length) {
@@ -322,6 +333,8 @@
     }
     var issue = issueOf(s);
     if (issue) cells.push({ id: 'issue', label: '작업 기록(이슈)', tone: '', value: '이슈 #' + issue });
+    var mem = memoryOf(s);
+    cells.push({ id: 'memory', label: '기억', tone: mem.kind === 'unknown' ? 'u' : mem.level ? 'w' : '', value: mem.kind === 'unknown' ? '확인 못 함' : mem.text, title: mem.title });
     var pr = prCell(s);
     if (pr) cells.push({ id: 'pr', label: '검토 요청(PR)', tone: pr.tone, value: pr.value });
     return cells;
@@ -363,7 +376,7 @@
 
   var api = {
     devReadyView: devReadyView, kindHint: kindHint, devBlock: devBlock, kindConflict: kindConflict,
-    issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, prLines: prLines,
+    memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, prLines: prLines,
     BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, counts: counts, summaryText: summaryText,
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice, reloadStrip: reloadStrip, reloadResult: reloadResult,
