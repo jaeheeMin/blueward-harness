@@ -540,7 +540,14 @@
      준비 안 됨이고 안내를 아직 안 봤으면 03(새 작업 화면의 프로젝트 준비), 아니면 홈(04). */
   function projectPickView() {
     var wrap = h('div', { class: 'intro' }), recent = null, sel = '', custom = '', msg = '', busy = false, browseBusy = false, customBusy = false, tries = 0, timer = null;
+    var typing = false;  // OS 선택 창을 못 열었을 때만 경로 입력칸을 보인다
     function nameOf(p) { return baseName(p) || p; }
+    // 시안처럼 긴 경로는 앞(드라이브·첫 칸) … 끝 두 칸으로 줄여 한 줄로. 전체 경로는 카드 title.
+    function shortPath(p) {
+      var sep = p.indexOf('\\') >= 0 ? '\\' : '/', parts = p.split(/[\\/]+/);
+      if (parts.length <= 4) return p;
+      return parts.slice(0, 2).join(sep) + sep + '…' + sep + parts.slice(-2).join(sep);
+    }
     function parse(d) { return listOf(d, 'folders').map(function (f) { return typeof f === 'string' ? { path: f } : f; }).filter(function (f) { return f && f.path; }); }
     function load() {
       clearTimeout(timer);
@@ -568,9 +575,9 @@
       api('POST', '/api/folders/pick', { path: sel || '' }).then(function (d) {
         if (d && d.cancelled) return null;
         var p = d && d.path;
-        if (!p) { msg = '고른 폴더를 받지 못했습니다. 경로를 직접 적어 주세요.'; return null; }
+        if (!p) { msg = '고른 폴더를 받지 못했습니다. 경로를 직접 적어 주세요.'; typing = true; return null; }
         return validated(p);
-      }).then(null, function (e) { msg = e.message; }).then(function () { browseBusy = false; if (wrap.isConnected) draw(); });
+      }).then(null, function (e) { msg = e.message; typing = true; }).then(function () { browseBusy = false; if (wrap.isConnected) draw(); });
     }
     function typed() {
       var p = custom.trim(); if (!p || customBusy) return;
@@ -596,24 +603,26 @@
     function draw() {
       clear(wrap);
       var box = h('section', { class: 'light intro-box', 'data-pick': '1' },
-        h('span', { class: 'eb', text: '1단계 · 프로젝트 고르기' }),
+        h('span', { class: 'eb', text: '1단계 · 프로젝트' }),
         h('h1', { text: '어느 고객사 프로젝트에서 일할까?' }),
         h('span', { class: 'lm', text: '최근에 쓴 폴더야. 처음이면 GitHub에서 받은 고객사 저장소 폴더를 골라.' }));
-      if (recent && !recent.length) box.appendChild(h('p', { class: 'note-muted', 'data-pick-empty': '1', text: '최근에 쓴 폴더가 없어. 아래에서 찾아보거나 경로를 적어 줘.' }));
       (recent || []).forEach(function (f) {
         var nm = nameOf(f.path), c = readyChip(f);
-        box.appendChild(h('button', { type: 'button', class: 'folder-opt proj', 'data-pick-folder': f.path, 'aria-pressed': String(f.path === sel), onClick: function () { sel = f.path; msg = ''; draw(); } },
+        box.appendChild(h('button', { type: 'button', class: 'folder-opt proj', 'data-pick-folder': f.path, 'aria-pressed': String(f.path === sel), title: f.path, onClick: function () { sel = f.path; msg = ''; draw(); } },
           h('span', { class: 'pi', 'aria-hidden': 'true', text: nm.replace(/[^A-Za-z0-9가-힣]/g, '').slice(0, 2).toUpperCase() || '··' }),
-          h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', text: f.path })),
+          h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', text: shortPath(f.path) })),
           h('span', { class: ('chip2 ' + c.cls).trim(), 'data-ready': f.ready || 'unknown', text: c.text })));
       });
       box.appendChild(h('button', { type: 'button', class: 'folder-opt proj add', 'data-pick-browse': '1', disabled: browseBusy, onClick: browse },
         h('span', { class: 'pi', 'aria-hidden': 'true', text: '+' }), h('span', { class: 'pn' }, h('span', { text: browseBusy ? '창 여는 중' : '다른 폴더 찾아보기' }))));
       if (browseBusy) box.appendChild(h('p', { class: 'note-muted', role: 'status', text: '폴더 선택 창을 열었어. 창이 보이지 않으면 작업 표시줄을 확인해 줘.' }));
-      box.appendChild(h('label', { for: 'pick-custom', class: 'field-label', text: '또는 경로를 직접 적기' }));
-      box.appendChild(h('div', { class: 'inline-row' },
-        h('input', { id: 'pick-custom', class: 'input', value: custom, placeholder: 'C:\\Work\\project  또는  /Users/me/project', autocomplete: 'off', onInput: function (e) { custom = e.target.value; }, onKeydown: function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); typed(); } } }),
-        h('button', { type: 'button', class: 'pill line sm', 'data-pick-use': '1', disabled: customBusy, text: customBusy ? '확인 중' : '사용', onClick: typed })));
+      // 시안 G-02 엔 경로 입력칸이 없다(폴더는 "다른 폴더 찾아보기" 의 OS 선택 창으로 고른다). 선택 창을 못 열었을 때만 대신 입력칸을 보인다.
+      if (typing) {
+        box.appendChild(h('label', { for: 'pick-custom', class: 'field-label', text: '폴더 경로를 직접 적기' }));
+        box.appendChild(h('div', { class: 'inline-row' },
+          h('input', { id: 'pick-custom', class: 'input', value: custom, placeholder: '예: C:\\Work\\public-cloud', autocomplete: 'off', onInput: function (e) { custom = e.target.value; }, onKeydown: function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); typed(); } } }),
+          h('button', { type: 'button', class: 'pill line sm', 'data-pick-use': '1', disabled: customBusy, text: customBusy ? '확인 중' : '사용', onClick: typed })));
+      }
       box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: msg, hidden: !msg }));
       box.appendChild(h('div', { class: 'acts end' },
         h('button', { type: 'button', class: 'pill line', 'data-pick-back': '1', text: '뒤로', onClick: function () { clearTimeout(timer); introPage = 'welcome'; renderRoute(); } }),

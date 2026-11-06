@@ -1240,7 +1240,7 @@ def test_first_run_start_leads_to_project_pick_then_home_or_prepare_screen(tmp_p
     start = [{"click": "[data-intro-start]"}]
     got = _smoke(tmp_path, "", [], extra=extra, actions=start)
     text, dump = got["text"], got["dump"]
-    for need in ("1단계 · 프로젝트 고르기", "어느 고객사 프로젝트에서 일할까?", "최근에 쓴 폴더야. 처음이면 GitHub에서 받은 고객사 저장소 폴더를 골라.",
+    for need in ("1단계 · 프로젝트", "어느 고객사 프로젝트에서 일할까?", "최근에 쓴 폴더야. 처음이면 GitHub에서 받은 고객사 저장소 폴더를 골라.",
                  "ready2C:/p/ready2준비됨 · 세션 2", "needsC:/p/needs준비 필요", "다른 폴더 찾아보기", "뒤로", "이 프로젝트로"):
         assert need in text, need
     assert "환영해" not in text and not got["posts"]  # 아직 아무것도 기억시키지 않았다
@@ -1253,7 +1253,7 @@ def test_first_run_start_leads_to_project_pick_then_home_or_prepare_screen(tmp_p
     posts = [(p[0], p[1]) for p in ok["posts"]]
     assert ("POST", "/api/folders/last") in posts and ("POST", "/api/start-checks/seen") in posts
     assert "C:/p/ready2" in [p[2] for p in ok["posts"] if p[1] == "/api/folders/last"][0] and ok["path"] == "/"
-    assert "1단계 · 프로젝트 고르기" not in ok["text"]
+    assert "1단계 · 프로젝트" not in ok["text"]
     # 준비 안 됨 + 안내를 아직 안 봤으면 새 작업 화면의 프로젝트 준비(03)
     shown = dict(extra, **{"GET /api/folders/intro": {"ready": "no", "seen": False, "show": True}, "POST /api/folders/intro/seen": {"seen": True},
                            "POST /api/folders/last": {"path": "C:/p/needs", "name": "needs"}})
@@ -1272,7 +1272,7 @@ def test_first_run_start_leads_to_project_pick_then_home_or_prepare_screen(tmp_p
 def test_project_pick_without_recent_folders_and_settings_replay(tmp_path):
     empty = dict(_start(firstRun=True), **{"GET /api/folders/recent": {"folders": []}})
     got = _smoke(tmp_path, "", [], extra=empty, actions=[{"click": "[data-intro-start]"}])
-    assert "최근에 쓴 폴더가 없어. 아래에서 찾아보거나 경로를 적어 줘." in got["text"] and "다른 폴더 찾아보기" in got["text"] and "<button.folder-opt.proj>" not in got["dump"]
+    assert "다른 폴더 찾아보기" in got["text"] and "<div.inline-row>" not in got["dump"] and "사용" not in got["text"]  # 시안 G-02: 경로 입력칸 없이 찾아보기만(선택 창을 못 열 때만 입력칸) and "<button.folder-opt.proj>" not in got["dump"]
     # 설정의 "처음 화면 다시 보기" 도 01 부터 시작해 02 로 이어진다
     again = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_start(), **_folder_rows()), actions=[{"click": "[data-intro-again]"}, {"click": "[data-intro-start]"}])
     assert "어느 고객사 프로젝트에서 일할까?" in again["text"]

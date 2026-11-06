@@ -5402,8 +5402,12 @@ def test_flow_next_needs_flow_data(tmp_path, monkeypatch, request):
 # ---- 첫 화면 · 자동 점검 (시안 01, #636) ----
 # 점검 판정(gh 로그인 · 하네스 판 · Claude 로그인)과 첫 실행 표시 파일을 본다.
 
-def _check_console(tmp_path, monkeypatch, gh=(0, "me\n"), latest="9.9.9", installed=True):
-    c = Console(tmp_path, monkeypatch, run=FakeRun(gh_api_user=gh))
+CLAUDE_OK = (0, '{"loggedIn": true, "authMethod": "claude.ai", "email": "x@example.com"}\n')
+
+
+def _check_console(tmp_path, monkeypatch, gh=(0, "me\n"), latest="9.9.9", installed=True, claude=CLAUDE_OK, claude_found=True):
+    c = Console(tmp_path, monkeypatch, run=FakeRun(gh_api_user=gh, **{"claude auth status": claude}))
+    c.app.claude_cmd = (lambda: ["claude"]) if claude_found else (lambda: None)
     c.app.gh_installed = lambda: installed
     c.app.remote_latest = (lambda: latest) if not callable(latest) else latest
     c.login()
@@ -5539,8 +5543,42 @@ def test_start_checks_all_ok_is_not_blocking(tmp_path, monkeypatch):
         assert body["blocking"] is False and body["newVersion"] is None and body["loading"] is False
         assert by["github"]["state"] == "ok" and by["github"]["detail"] == "me"
         assert by["version"]["state"] == "ok" and by["version"]["detail"] == "9.9.9"
+        assert by["claude"]["state"] == "ok" and by["claude"]["detail"] == "로그인됨 · Claude 계정"
+        assert "example.com" not in json.dumps(body)  # 계정 이메일은 화면에 옮기지 않는다
     finally:
         c.close()
+
+
+def test_start_checks_claude_login_reads_auth_status(tmp_path, monkeypatch):
+    """Claude Code 로그인: 공식 명령 claude auth status --json 의 loggedIn 으로 판정한다(#721)."""
+    run = FakeRun(gh_api_user=(0, "me\n"), **{"claude auth status": (1, '{"loggedIn": false}\n')})
+    c = Console(tmp_path, monkeypatch, run=run)
+    c.app.claude_cmd = lambda: ["claude"]
+    c.app.gh_installed = lambda: True
+    c.app.remote_latest = lambda: "9.9.9"
+    c.login()
+    try:
+        body, by = _checks(c)
+        assert body["blocking"] is True and by["claude"]["state"] == "fail" and "claude auth login" in by["claude"]["fix"]
+        assert "claude auth status --json" in run.calls
+    finally:
+        c.close()
+    c = _check_console(tmp_path / "nf", monkeypatch, claude_found=False)  # claude 를 못 찾음: 로그인 안 됨이 아니라 확인 못 함
+    try:
+        body, by = _checks(c)
+        assert by["claude"]["state"] == "unknown" and "찾지 못했어" in by["claude"]["detail"] and body["blocking"] is False
+    finally:
+        c.close()
+
+
+def test_judge_claude_reads_json_even_with_noise_and_never_guesses():
+    j = console_server.judge_claude
+    assert j(0, 'warning: x\n{"loggedIn": true, "authMethod": "apiKey"}\n', True) == {"state": "ok", "detail": "로그인됨"}
+    assert j(0, '{"loggedIn": false}', True)["state"] == "fail"
+    assert j(1, '{"loggedIn": false}', True)["state"] == "fail"
+    for rc, out in ((0, ""), (0, "not json"), (0, '{"other": 1}'), (124, ""), (1, "error")):
+        assert j(rc, out, True)["state"] == "unknown", (rc, out)
+    assert j(0, '{"loggedIn": true}', False)["state"] == "unknown"
 
 
 def test_start_checks_github_not_logged_in_blocks_with_fix(tmp_path, monkeypatch):
@@ -5561,7 +5599,7 @@ def test_start_checks_github_not_logged_in_blocks_with_fix(tmp_path, monkeypatch
 
 
 def test_start_checks_cannot_read_is_unknown_not_blocking(tmp_path, monkeypatch):
-    c = _check_console(tmp_path, monkeypatch, gh=(127, ""), latest=lambda: None)  # gh 시간 초과(설치는 돼 있음) + 원격 못 읽음
+    c = _check_console(tmp_path, monkeypatch, gh=(127, ""), latest=lambda: None, claude=(124, ""))  # gh 시간 초과(설치는 돼 있음) + 원격 못 읽음 + claude 시간 초과
     try:
         body, by = _checks(c)
         assert body["blocking"] is False and body["newVersion"] is None

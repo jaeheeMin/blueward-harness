@@ -443,7 +443,7 @@ table.sheet td { padding: 4px 10px; border: 1px solid var(--line); vertical-alig
 /* 홈 */
 .home > * + * { margin-top: 16px; }
 .ptitle { display: flex; flex-direction: column; gap: 0; }
-.ptitle h1 { font-size: 20px; line-height: 1.3; font-weight: 500; letter-spacing: -0.3px; overflow-wrap: anywhere; }
+.ptitle h1 { font-size: 20px; line-height: 1.5; font-weight: 500; letter-spacing: -0.3px; overflow-wrap: anywhere; }
 .ptitle .line { font-size: 13.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .light { display: flex; flex-direction: column; gap: 14px; padding: 26px 30px; border-radius: var(--rbig); background: var(--light); color: var(--lightink); }
 .light a:hover { color: var(--lightink); }
@@ -857,6 +857,7 @@ details.fold > [data-r]:empty { display: none; }
 .folder-opt.proj.add { border-style: dashed; }
 .folder-opt.proj.add .pi { background: transparent; color: var(--lightink); border: 1.5px dashed var(--lline); }
 .proj .pn small { font-size: 12px; color: var(--lmuted); overflow-wrap: anywhere; }
+[data-pick] .proj .pn small { overflow-wrap: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }  /* 시안 G-02: 경로는 한 줄 */
 
 /* 산출물 화면 */
 .dsec { gap: 14px; }
@@ -943,7 +944,11 @@ details.fold > [data-r]:empty { display: none; }
 .wn-acts .pill.dark { background: var(--btn); color: var(--btnink); }
 .intro { display: flex; justify-content: center; padding: 36px 0; }
 .intro-box { width: min(620px, 100%); gap: 16px; }
-.intro-box h1 { font-size: 20px; line-height: 1.3; font-weight: 500; letter-spacing: -0.3px; }
+/* 시안 G-02: 카드 680px, 줄 간격 12px(카드 사이 덧여백 없음), [이 프로젝트로] 10px 26px */
+.intro-box[data-pick] { width: min(680px, 100%); gap: 12px; }
+[data-pick] .folder-opt.proj + .folder-opt.proj { margin-top: 0; }
+[data-pick] [data-pick-ok] { padding: 10px 26px; }
+.intro-box h1 { font-size: 20px; line-height: 1.5; font-weight: 500; letter-spacing: -0.3px; }
 .intro-box .eb { color: var(--lmuted); }
 .intro-box .lm.sm { font-size: 12.5px; }
 .intro-box .checks .crow:first-child { border-top: 0; }

@@ -154,6 +154,27 @@ def judge_github(rc: int, out: str, installed: bool) -> dict:
     return {"state": "unknown", "detail": "확인 못 함 · 시간 안에 읽지 못했어"}
 
 
+def judge_claude(rc: int, out: str, found: bool) -> dict:
+    """`claude auth status --json`(Claude Code CLI 의 공식 로그인 상태 명령) 결과로 로그인을 판정한다.
+    loggedIn true = ok, false = fail(막는 문제, claude auth login 안내). 명령을 못 찾았거나 JSON 을 못 읽으면 unknown —
+    못 읽은 것을 로그인 안 됨으로 뭉개지 않는다. 이메일 같은 계정 정보는 화면에 옮기지 않는다."""
+    if not found:
+        return {"state": "unknown", "detail": "확인 못 함 · claude 명령을 찾지 못했어"}
+    text = out or ""
+    start, end = text.find("{"), text.rfind("}")
+    try:
+        data = json.loads(text[start:end + 1]) if 0 <= start < end else None  # 로그인 안 됨이면 종료코드가 0 이 아닐 수 있어 종료코드로 거르지 않는다
+    except ValueError:
+        data = None
+    logged = data.get("loggedIn") if isinstance(data, dict) else None
+    if logged is True:
+        how = {"claude.ai": "Claude 계정"}.get(data.get("authMethod"), "")
+        return {"state": "ok", "detail": "로그인됨" + (" · " + how if how else "")}
+    if logged is False:
+        return {"state": "fail", "detail": "로그인이 안 돼 있어", "fix": "터미널에서 claude auth login 을 하고 다시 점검해 줘."}
+    return {"state": "unknown", "detail": "확인 못 함 · 로그인 상태를 읽지 못했어"}
+
+
 def parse_version(text) -> tuple[int, ...] | None:
     return tuple(int(p) for p in text.split(".")) if isinstance(text, str) and re.fullmatch(r"[0-9]+(\.[0-9]+)*", text) else None
 
@@ -263,6 +284,7 @@ class App:
         self.store = Store(state_dir, clock)
         self.store.flow_data = self.flow_data
         claude_cmd = claude_cmd or platform_compat.find_claude
+        self.claude_cmd = claude_cmd  # 시작 점검의 로그인 확인(claude auth status)도 세션을 띄우는 것과 같은 claude 를 쓴다
         self.manager = Manager(self.store, claude_cmd, str(self.plugin_root), model=model, popen=popen, effort=self.default_effort)
         self.analyses = analysis.Analyses(claude_cmd, model=model, spawn=self.spawn, effort=self.default_effort,
                                           flows=self.flow_catalog())
@@ -845,9 +867,14 @@ class App:
         home = str(Path.home())
         rc, out = self.check_run(["gh", "api", "user", "--jq", ".login"], home)
         gh = dict(judge_github(rc, out, self.gh_installed()), id="github", name="GitHub 연결")
-        ver = dict(judge_version(self.version, self.remote_latest()), id="version", name="하네스 판")
-        claude = {"id": "claude", "name": "Claude Code 로그인", "state": "unknown",
-                  "detail": "확인 못 함 · 콘솔이 로그인 상태를 읽을 수 없어"}  # 읽을 공식 근거가 코드에 없어 문제로 치지 않는다
+        ver = judge_version(self.version, self.remote_latest())
+        ver = dict(ver, id="version", name="하네스 최신 판" if ver["state"] == "ok" else "하네스 판")  # 시안 G-01: 최신이면 "하네스 최신 판"
+        try:
+            base = self.claude_cmd()
+        except Exception:  # noqa: BLE001 - 못 찾으면 확인 못 함
+            base = None
+        rc2, out2 = self.check_run(list(base) + ["auth", "status", "--json"], home) if base else (127, "")
+        claude = dict(judge_claude(rc2, out2, bool(base)), id="claude", name="Claude Code 로그인")
         checks = [gh, ver, claude]
         return {"state": "ok", "checks": checks, "blocking": any(c["state"] == "fail" for c in checks),
                 "newVersion": ver.get("latest") if ver["state"] == "old" else None}
