@@ -20,7 +20,7 @@
 | `skills/scaffold/skeleton/dot-github/risk-gate.yaml` | `size_gate: false` 와 주석 |
 | `skills/{spec,deliver,start}/SKILL.md`, `workflow.json` | "Spec 을 고치면 승인" 문장 정정, `quote` 맞춤 |
 | `docs/guide/harness-guide.html` | "승인이 필요할 때" 표와 callout, risk-gate 설명 |
-| `plugin.json` | `0.10.186` → `0.10.196` (main 0.10.186, 열린 PR 최대 0.10.195) |
+| `plugin.json` | `0.10.186` → `0.10.198` (main 0.10.186, 열린 PR 최대 0.10.197 — #739. 처음 0.10.196 으로 올렸다가 #728 이 같은 값으로 올라가 다시 올림) |
 
 ## 남은 일
 
