@@ -103,7 +103,9 @@ STATIC_TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "te
                 ".svg": "image/svg+xml", ".json": "application/json", ".map": "application/json", ".woff2": "font/woff2"}
 FIRST_RUN_FILE = "first-run.json"  # 이 PC 에서 첫 화면(시작하기)을 이미 본 표시. 상태 폴더 아래, 브라우저와 무관
 LAST_FOLDER_FILE = "last-folder.json"  # 새 작업에서 마지막으로 시작한 작업 폴더. 상태 폴더 아래, 브라우저와 무관
-CHECK_RUN_TIMEOUT = 15.0          # 시작 점검의 gh 호출 제한 시간(초)
+FOLDER_INTRO_FILE = "folder-intro.json"  # 준비 안 된 폴더의 "프로젝트 준비" 안내를 이미 보여 준 폴더들. 상태 폴더 아래, 브라우저와 무관
+FOLDER_INTRO_MAX = 200  # 넘치면 오래된 것부터 잊는다
+CHECK_RUN_TIMEOUT = 15.0         # 시작 점검의 gh 호출 제한 시간(초)
 GH_LOGIN_FAIL = ("gh auth login", "not logged in", "authentication", "bad credentials", "401", "no oauth token")
 
 
@@ -210,6 +212,8 @@ class App:
         self.remote_latest = self.read_remote_latest  # 원격 최신 판. 시험이 바꿔 끼운다
         self.last_folder_mem = None  # 상태 폴더가 없는 실행(시험)에서만 쓴다
         self.first_run_seen = False # 상태 폴더가 없는 실행(시험)에서만 메모리에 둔다
+        self.folder_intro_mem: list = []  # 상태 폴더가 없는 실행(시험)에서만 쓴다
+        self.intro_lock = threading.Lock()
         self.wait_poll = wait_poll
         self.jobs: dict[str, dict] = {}  # 다음 갈래 넘기기 작업(메모리에만 둔다)
         self.reload_queue: set[str] = set()  # 턴이 끝나기를 기다리는 다시 불러오기
@@ -1460,10 +1464,83 @@ class App:
             return 200, {"path": path, "name": os.path.basename(path) or path}
         return 200, {"path": None, "name": ""}
 
+    def folder_ready(self, path: str, wait: bool = False, fresh: bool = False) -> dict:
+        """폴더 하나의 프로젝트 준비 판정. {"state": yes/no/unknown, "checking": bool}. 갈래 데이터가 없으면 확인 못 함이다.
+        fresh 는 기억을 건너뛰고 지금 읽는다(첫 열기 안내처럼 틀리면 안 될 때). 아니면 cached 로 60초 기억하고, 계산 중이면 checking."""
+        data = self.flow_data
+        if data is None or "project-ready" not in data.get("conditions", {}):
+            return {"state": COND_UNKNOWN, "checking": False}
+        if fresh:
+            return {"state": self.cond_state("project-ready", path, wait=False)["state"], "checking": False}
+        got = self.cached(("project-ready", os.path.normcase(os.path.realpath(path))), lambda: self.cond_state("project-ready", path, wait=False), wait=wait)
+        return {"state": got["state"], "checking": bool(got.get("loading"))}
+
+    def folder_sessions(self, path: str) -> int:
+        """그 폴더 또는 하위 폴더를 cwd 로 가진 세션 수(끝난 세션 포함, 세션 목록과 같은 기준)."""
+        with self.store.lock:
+            cwds = [s["cwd"] for s in self.store.sessions.values() if s["cwd"]]
+        return sum(1 for c in cwds if platform_compat.is_within(c, path))
+
     def a_recent(self, g, q, b):
+        """최근 폴더와 폴더별 준비 판정(ready: yes/no/unknown, checking: 읽는 중이면 true)·세션 수. 판정은 기다리지 않는다."""
         with self.store.lock:
             paths = [p for p in self.store.folders if os.path.isdir(p)]
-        return 200, [{"path": p, "name": os.path.basename(p) or p} for p in paths]
+        out = []
+        for p in paths:
+            r = self.folder_ready(p)
+            out.append({"path": p, "name": os.path.basename(p) or p, "ready": r["state"], "checking": r["checking"], "sessions": self.folder_sessions(p)})
+        return 200, out
+
+    # ---- 폴더별 첫 열기 안내(시안 03) ----
+    def intro_file(self) -> Path | None:
+        return self.store.dir / FOLDER_INTRO_FILE if self.store.dir else None
+
+    def intro_list(self) -> list:
+        f = self.intro_file()
+        if f is None:
+            return list(self.folder_intro_mem)
+        try:
+            rows = json.loads(f.read_text(encoding="utf-8")).get("folders", [])
+        except (OSError, ValueError, AttributeError):
+            return []
+        return [r for r in rows if isinstance(r, dict) and isinstance(r.get("path"), str)] if isinstance(rows, list) else []
+
+    def intro_key(self, path: str) -> str:
+        return os.path.normcase(os.path.realpath(path))
+
+    def intro_seen(self, path: str) -> bool:
+        key = self.intro_key(path)
+        return any(r["path"] == key for r in self.intro_list())
+
+    def mark_intro_seen(self, path: str) -> None:
+        key = self.intro_key(path)
+        with self.intro_lock:
+            rows = [r for r in self.intro_list() if r["path"] != key] + [{"path": key, "at": self.clock()}]
+            rows = rows[-FOLDER_INTRO_MAX:]
+            f = self.intro_file()
+            if f is None:
+                self.folder_intro_mem = rows
+                return
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"folders": rows}, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, f)
+
+    def a_folder_intro(self, g, q, b):
+        """고른 폴더가 준비 안 됐고(no) 이 안내를 본 적이 없으면 show: true. 확인 못 함(unknown)이면 안내하지 않는다."""
+        if not q.get("path"):
+            raise HttpError(400, "path 가 필요합니다.")
+        root = self.known_root(q["path"][0])
+        state = self.folder_ready(root, fresh=True)["state"]
+        return 200, {"ready": state, "seen": self.intro_seen(root), "show": state == COND_NO and not self.intro_seen(root)}
+
+    def a_folder_intro_seen(self, g, q, b):
+        root = self.known_root(b.get("path"))
+        try:
+            self.mark_intro_seen(root)
+        except OSError as e:
+            raise HttpError(500, f"안내 표시를 남기지 못했습니다: {e}")
+        return 200, {"seen": True}
 
     def a_pick(self, g, q, b):
         """서버를 돌리는 컴퓨터에 OS 폴더 선택 창을 띄운다. 쿠키로 인증한 로컬 사용자만 부를 수 있다."""
@@ -1555,6 +1632,8 @@ ROUTES = [
     ("GET", re.compile(rf"/api/new/{S}/preview"), App.a_preview),
     ("GET", re.compile(r"/api/folders/recent"), App.a_recent),
     ("GET", re.compile(r"/api/folders/last"), App.a_last_folder),
+    ("GET", re.compile(r"/api/folders/intro"), App.a_folder_intro),
+    ("POST", re.compile(r"/api/folders/intro/seen"), App.a_folder_intro_seen),
     ("POST", re.compile(r"/api/folders/validate"), App.a_validate),
     ("POST", re.compile(r"/api/folders/pick"), App.a_pick),
     ("GET", re.compile(r"/api/models"), App.a_models),

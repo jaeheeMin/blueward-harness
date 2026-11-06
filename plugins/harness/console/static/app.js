@@ -1535,6 +1535,7 @@
     var browsing = false, dir = '', fsRows = null, fsErr = '', pollTimer = null, previewText = '', previewOpen = false, previewTimer = null;
     var starting = false, startedId = null, startErr = '', alive = true, browseBusy = false, modelErr = false, advOpen = false;
     var BL = window.BHLogic, ready = null, readyCwd = null, readySig = 'null';
+    var recentTimer = null, recentTries = 0, intro = null;  // intro: 준비 안 된 폴더를 처음 골랐을 때 보이는 "프로젝트 준비" 안내가 가리키는 폴더
     var tools = ui.toolsRow(function () { return { session: null, cwd: draft.cwd, onInsert: insertTool }; });
     var folderWarn = ui.folderNotice(), chooser = ui.flowChooser(), preview = ui.flowPreview();
     function insertTool(skill) {
@@ -1572,9 +1573,32 @@
     }
     function loadRecent() {
       api('GET', '/api/folders/recent').then(function (d) {
-        recent = listOf(d, 'folders').map(function (f) { return typeof f === 'string' ? { path: f } : f; }).filter(function (f) { return f && f.path; });
+        recent = parseRecent(d);
+        watchReady();
         return defaultFolder();
       }, function () { recent = []; return defaultFolder(); });
+    }
+    function parseRecent(d) { return listOf(d, 'folders').map(function (f) { return typeof f === 'string' ? { path: f } : f; }).filter(function (f) { return f && f.path; }); }
+    // 서버가 폴더의 준비 여부를 아직 읽는 중(checking)이면 잠시 뒤 다시 묻는다. 값이 바뀐 때만 다시 그린다.
+    function watchReady() {
+      clearTimeout(recentTimer);
+      if (!alive || recentTries >= 6 || !(recent || []).some(function (f) { return f.checking; })) return;
+      recentTries++;
+      recentTimer = setTimeout(function () {
+        api('GET', '/api/folders/recent').then(function (d) {
+          if (!alive) return;
+          var next = parseRecent(d), sig = JSON.stringify(next);
+          if (sig !== JSON.stringify(recent)) { recent = next; draw(); }
+          watchReady();
+        }, function () {});
+      }, 1500);
+    }
+    // 폴더 카드 칩: 준비됨(세션이 있으면 수) / 준비 필요 / 읽는 중 / 확인 못 함. 읽지 못한 것을 준비됨이나 준비 필요로 뭉개지 않는다.
+    function readyChip(f) {
+      if (f.ready === 'yes') return { cls: 'ok', text: typeof f.sessions === 'number' && f.sessions > 0 ? '준비됨 · 세션 ' + f.sessions : '준비됨' };
+      if (f.ready === 'no') return { cls: 'warn', text: '준비 필요' };
+      if (f.checking) return { cls: '', text: '확인하는 중' };
+      return { cls: 'unk', text: '확인 못 함' };
     }
     /* 기본 폴더 순서: 세션 화면에서 왔으면 그 세션 폴더 → 콘솔에서 마지막으로 작업을 시작한 폴더(서버가 기억) → 없으면 기본값 없이 목록을 펼친다.
        다른 세션이 움직인 흔적으로는 정하지 않는다. */
@@ -1659,7 +1683,45 @@
     }
 
     /* 폴더 */
-    function useFolder(p) { draft.cwd = p; draft.picked = null; picking = false; browsing = false; fsRows = null; dir = ''; customMsg = ''; draw(); }
+    function useFolder(p) { draft.cwd = p; draft.picked = null; picking = false; browsing = false; fsRows = null; dir = ''; customMsg = ''; intro = null; draw(); checkIntro(p); }
+    // 고른 폴더가 준비 안 됨(no)이고 이 폴더로 안내를 본 적이 없으면 서버가 show 를 true 로 준다. 확인 못 함이면 안내하지 않는다.
+    function checkIntro(p) {
+      if (step !== 'write') return;
+      api('GET', '/api/folders/intro' + qs({ path: p })).then(function (d) {
+        if (!alive || draft.cwd !== p || step !== 'write' || !d || d.show !== true) return;
+        intro = p; draw();
+        if (mainEl) mainEl.scrollTop = 0;  // 목록을 내려서 골랐어도 안내 제목과 [만들기] 가 먼저 보이게
+        window.scrollTo(0, 0);
+        api('POST', '/api/folders/intro/seen', { path: p }).then(null, function (e) { console.debug('안내 표시를 남기지 못했습니다', e); });  // 보여 줬다고 서버에 남긴다(브라우저 저장소가 아니다)
+      }, function () {});
+    }
+    function introDone(create) {
+      intro = null;
+      if (create) { draft.text = skillCommand(skillInfo || { plugin: DEFAULT_PLUGIN }, 'scaffold'); draft.kind = -1; begin(); }
+      else draw();
+    }
+    function drawIntro(page) {
+      var nm = baseName(draft.cwd) || draft.cwd;
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '프로젝트 준비' }), h('h1', { text: nm + ' 준비하기' }), h('p', { class: 'line', text: '이 폴더엔 아직 하네스 구조가 없어' })));
+      var panel = h('section', { class: 'light newbox', 'data-folder-intro': '1' });
+      panel.appendChild(h('div', { class: 'ask' },
+        h('span', { class: 'eb', text: '네 차례' }),
+        h('b', { text: '표준 구조를 만들까? 한 번만 하면 돼' }),
+        h('span', { class: 'sub', text: '만들고 나면 GitHub에 올려서 팀 승인을 받아. 그다음부터 문서를 쓸 수 있어.' }),
+        h('div', { class: 'acts' },
+          h('button', { type: 'button', class: 'pill acc', 'data-intro-make': '1', text: '만들기', onClick: function () { introDone(true); } }),
+          h('button', { type: 'button', class: 'pill line', 'data-intro-later': '1', text: '나중에', onClick: function () { introDone(false); } }))));
+      panel.appendChild(h('span', { class: 'eb mt-24', text: '만들어지는 것' }));
+      [['templates/', '고객 양식을 넣는 곳'], ['rules/', '문서 검사 기준'], ['docs/ssot/', '요구사항정의서 자리'], ['audit/', '변경 기록']].forEach(function (r) {
+        panel.appendChild(h('div', { class: 'crow' }, h('span', { class: 'cn' }, h('b', { class: 'mono', text: r[0] })), h('span', { class: 'ct', text: r[1] })));
+      });
+      panel.appendChild(h('span', { class: 'eb mt-24', text: '만든 뒤 할 일' }));
+      ['고객 양식 파일을 templates/ 에 넣기', 'GitHub에 올려서 승인받기', '첫 작업 시작'].forEach(function (t, i) {
+        panel.appendChild(h('div', { class: 'crow' }, h('i', { class: 'mk', 'aria-hidden': 'true', text: String(i + 1) }), h('span', { class: 'cn', text: t })));
+      });
+      panel.appendChild(h('p', { class: 'note-muted mono', text: draft.cwd }));
+      page.appendChild(panel);
+    }
     function validateCustom() {
       var p = custom.trim(); if (!p) return;
       customBusy = true; customMsg = ''; draw();
@@ -1720,6 +1782,12 @@
       var keepFocus = document.activeElement && document.activeElement.id, selStart = document.activeElement && document.activeElement.selectionStart;
       clear(root);
       var page = h('div', { class: 'page sess newp' });
+      if (intro && intro === draft.cwd && step === 'write') {
+        drawIntro(page);
+        root.appendChild(page);
+        renderHead(location.pathname);
+        return;
+      }
       var t = TITLES[step] || TITLES.review;
       page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: t[0] }), h('h1', { text: t[1] }), h('p', { class: 'line', text: t[2] })));
       var panel = h('section', { class: 'light newbox' });
@@ -1743,7 +1811,8 @@
         var nm = baseName(f.path) || f.path;
         box.appendChild(h('button', { type: 'button', class: 'folder-opt proj', 'aria-pressed': String(f.path === draft.cwd), onClick: function () { useFolder(f.path); } },
           h('span', { class: 'pi', 'aria-hidden': 'true', text: nm.replace(/[^A-Za-z0-9가-힣]/g, '').slice(0, 2).toUpperCase() || '··' }),
-          h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', text: f.path }))));
+          h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', text: f.path })),
+          (function () { var c = readyChip(f); return h('span', { class: ('chip2 ' + c.cls).trim(), 'data-ready': f.ready || 'unknown', text: c.text }); })()));
       });
       if (recent && !recent.length) box.appendChild(h('p', { class: 'note-muted', text: '최근에 쓴 폴더가 없어. 아래에 경로를 적어 줘.' }));
       box.appendChild(h('label', { for: 'custom', class: 'field-label', text: '다른 폴더 경로' }));
@@ -1938,7 +2007,7 @@
     } else { draw(); loadRecent(); loadModels(); }
     return {
       title: function () { return '새 작업'; },
-      destroy: function () { alive = false; clearTimeout(pollTimer); clearTimeout(previewTimer); tools.destroy(); folderWarn.destroy(); chooser.destroy(); preview.destroy(); if (startedId !== null) draft = { text: '', cwd: draft.cwd, note: '', answers: {}, picked: null, extraPaths: [], kind: -1 }; }
+      destroy: function () { alive = false; clearTimeout(pollTimer); clearTimeout(recentTimer); clearTimeout(previewTimer); tools.destroy(); folderWarn.destroy(); chooser.destroy(); preview.destroy(); if (startedId !== null) draft = { text: '', cwd: draft.cwd, note: '', answers: {}, picked: null, extraPaths: [], kind: -1 }; }
     };
   }
 
