@@ -12,7 +12,7 @@ public-cloud DEV-008 앱의 백로그 팝업은 버튼이 아니라 표의 `백�
 | `checker/manual_capture_js.py` | `cellOf(name, row)`: 머리글과 같은 aria-colindex 의 보이는 `[role=gridcell]` 을 위에서부터 센다. 칸 안 보이는 `.sapUiIcon` 이 있으면 그 가운데, 없으면 칸 가운데. 칸 글자·아이콘 유무·보이는 행 수를 돌려준다 |
 | `checker/tests/test_manual_capture.py` | 파싱(허용·0·문자·불리언·팝업 아닌 단계 거부), 실행(더블클릭 이벤트 clickCount 1→2, 칸 없음, 열 여럿·없음, 빈 칸 안내, 안 빈 칸은 안내 없음) |
 | `plugins/harness/skills/manual/SKILL.md`, 모듈 docstring, `docs/guide/harness-guide.html` | `행` 설명, "더블클릭은 데이터를 바꾸지 않는 칸에만 쓴다(사람이 고른다)" |
-| `plugin.json` | 0.10.195 (열린 PR 들이 0.10.177~0.10.194 를 쓰는 중이라 그 뒤) |
+| `plugin.json` | 0.10.196 (열린 PR 들이 0.10.177~0.10.194 를 쓰는 중이라 그 뒤) |
 
 ## 한계 / 실제 테넌트로 확인할 것
 
