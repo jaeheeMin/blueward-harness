@@ -5276,6 +5276,23 @@ def test_first_run_mark_is_saved_on_the_pc_and_survives_restart(tmp_path, monkey
         c.close()
 
 
+def test_notify_settings_default_off_saved_in_state_dir_and_validated(mconsole):
+    c = mconsole
+    off = {"turn": False, "blocked": False, "done": False}
+    assert c.call("GET", "/api/settings/notify")[1] == off  # 기본은 모두 꺼짐
+    status, body, _ = c.call("PUT", "/api/settings/notify", {"turn": True})
+    assert status == 200 and body == dict(off, turn=True)
+    saved = c.state / console_server.NOTIFY_FILE
+    assert saved.is_file() and json.loads(saved.read_text(encoding="utf-8")) == dict(off, turn=True)  # 브라우저가 아니라 상태 폴더
+    assert c.call("PUT", "/api/settings/notify", {"done": True})[1] == dict(off, turn=True, done=True)  # 보낸 키만 바뀐다
+    assert c.call("GET", "/api/settings/notify")[1] == dict(off, turn=True, done=True)  # 파일을 읽으므로 재기동 뒤에도 같다
+    for bad in ({"turn": "yes"}, {"turn": 1}, {"nope": True}, {"turn": True, "x": False}, {}):
+        assert c.call("PUT", "/api/settings/notify", bad)[0] == 400, bad
+    assert c.call("GET", "/api/settings/notify")[1] == dict(off, turn=True, done=True)  # 거절한 요청은 아무것도 바꾸지 않는다
+    saved.write_text("not json", encoding="utf-8")
+    assert c.call("GET", "/api/settings/notify")[1] == off  # 깨진 파일은 꺼진 것으로
+
+
 def test_start_checks_all_ok_is_not_blocking(tmp_path, monkeypatch):
     c = _check_console(tmp_path, monkeypatch)
     try:
@@ -5652,6 +5669,18 @@ def test_blocked_report_becomes_a_block_chat_item_with_fix(browser):
 def test_blocked_report_with_cannot_check_words_is_cannot_check(browser, word):
     _blocked(browser, "b2", f"엔진을 돌리지 못해 {word} 상태입니다.")
     assert _chat(browser, "b2")[0]["kind"] == "cannot_check" and _chat(browser, "b2")[0]["fix"] == ""
+
+
+def test_session_list_carries_last_block_time_and_kind_for_notifications(browser):
+    _blocked(browser, "b3", "문서가 템플릿을 따르지 않습니다.")
+    listed = {s["id"]: s for s in browser.call("GET", "/api/sessions")[1]}
+    first = listed["b3"]["lastBlock"]
+    assert first["kind"] == "blocked" and isinstance(first["t"], (int, float))  # 대화(chat)는 목록에 없어도 새 막힘을 알 수 있다
+    assert "chat" not in listed["b3"]
+    _blocked(browser, "b3", "엔진을 돌리지 못해 검사 불능 상태입니다.")
+    assert {s["id"]: s for s in browser.call("GET", "/api/sessions")[1]}["b3"]["lastBlock"]["kind"] == "cannot_check"
+    browser.event("b4", "UserPromptSubmit", prompt="막힘 없는 세션")
+    assert {s["id"]: s for s in browser.call("GET", "/api/sessions")[1]}["b4"]["lastBlock"] is None
 
 
 # 실제 훅 사유 문구 대입(검토 지적: 단어만 시험하면 실제 문구가 빠진다)

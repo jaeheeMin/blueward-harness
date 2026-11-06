@@ -103,6 +103,8 @@ STATIC_TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "te
                 ".svg": "image/svg+xml", ".json": "application/json", ".map": "application/json", ".woff2": "font/woff2"}
 FIRST_RUN_FILE = "first-run.json"  # 이 PC 에서 첫 화면(시작하기)을 이미 본 표시. 상태 폴더 아래, 브라우저와 무관
 LAST_FOLDER_FILE = "last-folder.json"  # 새 작업에서 마지막으로 시작한 작업 폴더. 상태 폴더 아래, 브라우저와 무관
+NOTIFY_FILE = "notify.json"  # 브라우저 알림 설정(내 차례·막힘·끝남). 상태 폴더 아래, 브라우저와 무관
+NOTIFY_KEYS = ("turn", "blocked", "done")
 FOLDER_INTRO_FILE = "folder-intro.json"  # 준비 안 된 폴더의 "프로젝트 준비" 안내를 이미 보여 준 폴더들. 상태 폴더 아래, 브라우저와 무관
 FOLDER_INTRO_MAX = 200  # 넘치면 오래된 것부터 잊는다
 CHECK_RUN_TIMEOUT = 15.0         # 시작 점검의 gh 호출 제한 시간(초)
@@ -211,6 +213,7 @@ class App:
         self.gh_installed = lambda: shutil.which("gh") is not None
         self.remote_latest = self.read_remote_latest  # 원격 최신 판. 시험이 바꿔 끼운다
         self.last_folder_mem = None  # 상태 폴더가 없는 실행(시험)에서만 쓴다
+        self.notify_mem = None  # 알림 설정도 같다
         self.first_run_seen = False # 상태 폴더가 없는 실행(시험)에서만 메모리에 둔다
         self.folder_intro_mem: list = []  # 상태 폴더가 없는 실행(시험)에서만 쓴다
         self.intro_lock = threading.Lock()
@@ -1464,6 +1467,41 @@ class App:
             return 200, {"path": path, "name": os.path.basename(path) or path}
         return 200, {"path": None, "name": ""}
 
+    # 알림 설정(시안 19). 상태 폴더 아래 notify.json — 브라우저 저장소가 아니라 이 PC 의 콘솔 설정이다.
+    def read_notify(self) -> dict:
+        f = self.store.dir / NOTIFY_FILE if self.store.dir else None
+        saved = self.notify_mem
+        if f is not None:
+            try:
+                saved = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                saved = None
+        saved = saved if isinstance(saved, dict) else {}
+        return {k: saved.get(k) is True for k in NOTIFY_KEYS}  # 파일이 깨졌거나 값이 이상하면 꺼진 것으로 본다
+
+    def a_notify_get(self, g, q, b):
+        return 200, self.read_notify()
+
+    def a_notify_put(self, g, q, b):
+        if not isinstance(b, dict) or not b:
+            raise HttpError(400, "바꿀 알림 설정이 없습니다.")
+        bad = [k for k, v in b.items() if k not in NOTIFY_KEYS or not isinstance(v, bool)]
+        if bad:
+            raise HttpError(400, f"알림 설정은 turn · blocked · done 의 true/false 만 받습니다: {', '.join(map(str, bad))}")
+        now = dict(self.read_notify(), **b)
+        f = self.store.dir / NOTIFY_FILE if self.store.dir else None
+        if f is None:
+            self.notify_mem = now
+            return 200, now
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(json.dumps(now), encoding="utf-8")
+            os.replace(tmp, f)
+        except OSError as e:
+            raise HttpError(500, f"알림 설정을 저장하지 못했습니다: {e}")
+        return 200, now
+
     def folder_ready(self, path: str, wait: bool = False, fresh: bool = False) -> dict:
         """폴더 하나의 프로젝트 준비 판정. {"state": yes/no/unknown, "checking": bool}. 갈래 데이터가 없으면 확인 못 함이다.
         fresh 는 기억을 건너뛰고 지금 읽는다(첫 열기 안내처럼 틀리면 안 될 때). 아니면 cached 로 60초 기억하고, 계산 중이면 checking."""
@@ -1632,6 +1670,8 @@ ROUTES = [
     ("GET", re.compile(rf"/api/new/{S}/preview"), App.a_preview),
     ("GET", re.compile(r"/api/folders/recent"), App.a_recent),
     ("GET", re.compile(r"/api/folders/last"), App.a_last_folder),
+    ("GET", re.compile(r"/api/settings/notify"), App.a_notify_get),
+    ("PUT", re.compile(r"/api/settings/notify"), App.a_notify_put),
     ("GET", re.compile(r"/api/folders/intro"), App.a_folder_intro),
     ("POST", re.compile(r"/api/folders/intro/seen"), App.a_folder_intro_seen),
     ("POST", re.compile(r"/api/folders/validate"), App.a_validate),

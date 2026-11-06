@@ -587,6 +587,35 @@ const cases = {
     assert.ok(fail.attrs['class'].includes('blocked') && fail.textContent.includes('✕ 막힘') && !fail.textContent.includes('? 확인 못 함'));
     assert.ok(unk.attrs['class'].includes('unsure') && unk.textContent.includes('? 확인 못 함') && unk.textContent.includes('통과도 실패도 아니야'));
     for (const c of ['pass', 'pending']) { const ok = card(c); assert.ok(!/blocked|unsure/.test(ok.attrs['class']) && !ok.textContent.includes('✕ 막힘') && !ok.textContent.includes('? 확인 못 함'), c); }
+  },
+  notify_events_compare_previous_and_next() {
+    const on = { turn: true, blocked: true, done: true }, off = { turn: false, blocked: false, done: false };
+    const base = { id: 's1', title: '구매오더', group: 'idle', pendingRequestIds: [], lastBlock: null };
+    const ev = (prev, next, cfg, opts) => L.notifyEvents(prev, next, cfg || on, Object.assign({ visible: false, name: '구매오더', reqKind: r => (r === 'q1' ? 'question' : 'permission') }, opts));
+    assert.deepStrictEqual(ev(undefined, Object.assign({}, base, { group: 'todo' })), []);  // 비교 기준이 없으면(첫 목록) 무알림
+    // todo 로 새로 들어옴 / 새 요청(질문·승인) — 각각 한 번, 끈 스위치와 보이는 탭은 무알림
+    let e = ev(base, Object.assign({}, base, { group: 'todo' }));
+    assert.strictEqual(e.length, 1); assert.strictEqual(e[0].kind, 'turn'); assert.strictEqual(e[0].title, '내 차례야 · 구매오더');
+    assert.strictEqual(e[0].body, '다음 단계'); assert.strictEqual(e[0].path, '/s/s1');
+    e = ev(base, Object.assign({}, base, { group: 'todo', pendingRequestIds: ['q1'] }));
+    assert.strictEqual(e.length, 1); assert.strictEqual(e[0].body, '질문'); assert.strictEqual(e[0].path, '/r/q1'); assert.ok(e[0].tag.includes('s1') && e[0].tag.includes('q1'));
+    e = ev(Object.assign({}, base, { group: 'todo', pendingRequestIds: ['q1'] }), Object.assign({}, base, { group: 'todo', pendingRequestIds: ['q1', 'a2'] }));
+    assert.strictEqual(e.length, 1); assert.strictEqual(e[0].body, '승인'); assert.strictEqual(e[0].path, '/r/a2');
+    assert.deepStrictEqual(ev(Object.assign({}, base, { group: 'todo' }), Object.assign({}, base, { group: 'todo' })), []);  // 그대로면 다시 보내지 않는다
+    assert.deepStrictEqual(ev(base, Object.assign({}, base, { group: 'todo' }), off), []);
+    assert.deepStrictEqual(ev(base, Object.assign({}, base, { group: 'todo' }), on, { visible: true }), []);
+    // 새 block: 시각이 직전보다 새로울 때만. cannot_check 는 다른 제목
+    const b1 = Object.assign({}, base, { lastBlock: { t: 10, kind: 'blocked' } });
+    e = ev(base, b1); assert.strictEqual(e.length, 1); assert.strictEqual(e[0].title, '막혔어 · 구매오더'); assert.strictEqual(e[0].path, '/s/s1');
+    assert.deepStrictEqual(ev(b1, Object.assign({}, b1)), []);
+    e = ev(b1, Object.assign({}, base, { lastBlock: { t: 11, kind: 'cannot_check' } })); assert.strictEqual(e[0].title, '확인 못 함 · 구매오더');
+    assert.deepStrictEqual(ev(base, b1, { turn: true, blocked: false, done: true }), []);
+    // running -> idle 은 끝남 한 번. running -> todo 는 내 차례가 대신 나가 겹치지 않는다
+    const run = Object.assign({}, base, { group: 'running' });
+    e = ev(run, base); assert.strictEqual(e.length, 1); assert.strictEqual(e[0].title, 'AI가 끝냈어 · 구매오더');
+    e = ev(run, Object.assign({}, base, { group: 'todo' })); assert.deepStrictEqual(e.map(x => x.kind), ['turn']);
+    e = ev(run, Object.assign({}, base, { group: 'todo' }), { turn: false, blocked: false, done: true }); assert.deepStrictEqual(e.map(x => x.kind), ['done']);
+    assert.deepStrictEqual(ev(base, run), []);  // 시작은 알리지 않는다
   }
 };
 
@@ -1016,7 +1045,8 @@ def test_settings_screen_matches_design(tmp_path):
         assert need in text, need
     assert dump.count("<button.scale>") == 3 and dump.count("<button.radio>") >= 1  # 시안 .seg / .radio 모양, 기본 위젯 없음
     assert "<select" not in dump and "<input" not in dump
-    assert "화면 밝기" not in text and "알림" not in text  # 다크 한 벌뿐이고 콘솔에 알림 기능이 없어 넣지 않았다
+    assert "화면 밝기" not in text  # 다크 한 벌뿐이라 넣지 않았다
+    assert dump.count("<button.swrow>") == 3 and "내 차례가 오면" in text  # 알림 스위치 셋(#651)은 별도 시험에서 본다
     assert "연결돼 있어" in text and "준비 여부 확인 못 함" in text  # 조건 값이 없으면 준비됐다고 단정하지 않는다
 
 
@@ -1149,3 +1179,81 @@ def test_chat_draws_hook_block_cards_two_kinds_and_fix_button(tmp_path):
     assert "그렇게 고쳐 줘" not in unsent["text"] and "✕ 막힘" in unsent["text"]
     unknown = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="새_훅")])])
     assert "하네스 검사가 막았어 · 새_훅" in unknown["text"]  # 이름표에 없으면 원래 이름
+
+
+# ---- 브라우저 알림 (#651) ----
+
+_OFF = {"turn": False, "blocked": False, "done": False}
+_ALL = {"turn": True, "blocked": True, "done": True}
+
+
+def _notify_env(permission, cfg=None, **env):
+    return {"__env": dict({"notification": permission}, **env), "GET /api/settings/notify": cfg or _OFF}
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_settings_notify_group_shows_three_switches_and_permission_line(tmp_path):
+    got = _smoke(tmp_path, "settings", [_session("s1")], extra=_notify_env("granted", {"turn": True, "blocked": False, "done": False}))
+    text, dump = got["text"], got["dump"]
+    for need in ("알림", "내 차례가 오면", "막히거나 확인 못 한 일이 생기면", "AI가 일을 끝낼 때마다", "브라우저 알림 · 허용됨", "콘솔 탭이 열려 있을 때만"):
+        assert need in text, need
+    assert dump.count("<button.swrow>") == 3 and "<input" not in dump  # 기본 checkbox 가 아니라 스위치 모양
+    assert dump.count("<i.sw.on>") == 1  # 서버에 저장된 값(turn)만 켜져 있다
+    assert "GET /api/settings/notify" in got["calls"]
+    default = _smoke(tmp_path, "settings", [_session("s1")], extra=_notify_env("default"))
+    assert "아직 안 물음" in default["text"] and "<i.sw.on>" not in default["dump"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_settings_notify_first_switch_asks_permission_and_saves_only_when_granted(tmp_path):
+    saved = {"PUT /api/settings/notify": dict(_OFF, turn=True)}
+    sw = [{"click": "button[data-notify-key=turn]"}]
+    ok = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("default", ask="granted"), **saved), actions=sw)
+    assert ok["asked"] == 1 and any(p[0] == "PUT" and p[1] == "/api/settings/notify" and '"turn":true' in p[2].replace(" ", "") for p in ok["posts"])
+    assert ok["dump"].count("<i.sw.on>") == 1
+    no = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("default", ask="denied"), **saved), actions=sw)
+    assert no["asked"] == 1 and not [p for p in no["posts"] if p[0] == "PUT"] and "<i.sw.on>" not in no["dump"]  # 막히면 켠 채 두지 않는다
+    assert "브라우저가 알림을 막았어 · 주소창 왼쪽 자물쇠에서 알림을 허용해 줘" in no["text"]
+    denied = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("denied"), **saved), actions=sw)
+    assert denied["asked"] == 0 and not [p for p in denied["posts"] if p[0] == "PUT"] and "주소창 왼쪽 자물쇠" in denied["text"]
+    gone = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("absent"), **saved), actions=sw)
+    assert "이 브라우저는 알림을 지원하지 않아" in gone["text"] and not [p for p in gone["posts"] if p[0] == "PUT"]
+    off = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("granted", dict(_OFF, turn=True)), **{"PUT /api/settings/notify": _OFF}), actions=sw)
+    assert any(p[0] == "PUT" and '"turn":false' in p[2].replace(" ", "") for p in off["posts"]) and off["asked"] == 0  # 끄는 건 묻지 않는다
+
+
+def _live(tmp_path, sessions, actions, cfg=_ALL, requests=None, **env):
+    extra = _notify_env("granted", cfg, **env)
+    return _smoke(tmp_path, "", sessions, requests=requests, extra=extra, actions=actions)
+
+
+def _change(sid, **fields):
+    return [{"set": {"GET /api/sessions/" + sid: _session(sid, **fields)}}, {"emit": ["session", {"id": sid}]}]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notify_sends_once_per_event_and_skips_first_list_visible_tab_and_off_switches(tmp_path):
+    # 첫 목록(이미 내 차례)은 기준만 잡고 보내지 않는다
+    assert _live(tmp_path, [_session("s1", group="todo")], [])["notes"] == []
+    # running -> idle: 끝남 한 번
+    got = _live(tmp_path, [_session("s1", group="running")], _change("s1", group="idle"))
+    assert [n["title"] for n in got["notes"]] == ["AI가 끝냈어 · 구매오더 조회 앱 요구사항"] and got["notes"][0]["tag"] == "bh-done-s1"
+    # 같은 상태로 다시 와도 더 보내지 않는다
+    again = _live(tmp_path, [_session("s1", group="running")], _change("s1", group="idle") + _change("s1", group="idle"))
+    assert len(again["notes"]) == 1
+    # 새 요청(질문): 내 차례 한 번, 본문은 질문, 누르면 창을 앞으로 하고 /r/<id> 로 간다
+    q = {"id": "q9", "sessionId": "s1", "kind": "question", "status": "pending", "questions": [{"question": "무엇을?"}]}
+    got = _live(tmp_path, [_session("s1", group="running")], _change("s1", group="todo", pendingRequestIds=["q9"]) + [{"clickNote": 0}],
+                requests=[q])
+    assert [n["title"] for n in got["notes"]] == ["내 차례야 · 구매오더 조회 앱 요구사항"] and got["notes"][0]["body"] == "질문"
+    assert got["focused"] == 1 and got["path"] == "/r/q9"
+    # 새 막힘 / 확인 못 함
+    blk = _change("s1", lastBlock={"t": 50, "kind": "blocked"}) + _change("s1", lastBlock={"t": 60, "kind": "cannot_check"}) + _change("s1", lastBlock={"t": 60, "kind": "cannot_check"})
+    got = _live(tmp_path, [_session("s1", lastBlock={"t": 40, "kind": "blocked"})], blk)
+    assert [n["title"].split(" · ")[0] for n in got["notes"]] == ["막혔어", "확인 못 함"]
+    # 끈 스위치 / 보이는 탭은 보내지 않는다
+    assert _live(tmp_path, [_session("s1", group="running")], _change("s1", group="idle"), cfg=_OFF)["notes"] == []
+    assert _live(tmp_path, [_session("s1", group="running")], _change("s1", group="idle"), visible=True)["notes"] == []
+    # 권한이 없으면 보내지 않는다
+    off = _smoke(tmp_path, "", [_session("s1", group="running")], extra=_notify_env("denied", _ALL), actions=_change("s1", group="idle"))
+    assert off["notes"] == []

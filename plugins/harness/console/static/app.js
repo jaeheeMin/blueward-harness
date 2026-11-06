@@ -159,18 +159,53 @@
     return SKILL_LABELS[id] || id || '';
   }
 
+  /* ---------- 브라우저 알림(#651) ---------- */
+  var notifyCfg = null, notifyAsked = false;  // notifyCfg: 서버에 저장된 {turn, blocked, done}. 읽기 전엔 null
+  function notifySupported() { return typeof window.Notification === 'function'; }
+  function notifyPerm() { return notifySupported() ? window.Notification.permission : 'unsupported'; }
+  function notifyActive() { return !!(notifyCfg && (notifyCfg.turn || notifyCfg.blocked || notifyCfg.done) && notifyPerm() === 'granted'); }
+  function loadNotify() {
+    if (notifyAsked) return;
+    notifyAsked = true;
+    api('GET', '/api/settings/notify').then(function (d) { notifyCfg = d || null; }, function () { notifyAsked = false; });
+  }
+  function pageVisible() { return document.visibilityState === 'visible' && (typeof document.hasFocus !== 'function' || document.hasFocus()); }
+  function notifyChange(prev, next) {
+    if (!notifyActive() || !prev) return;
+    // 질문인지 승인인지는 요청을 받아 와야 안다. 받는 중이면 받은 뒤에 보낸다.
+    var wait = (next.pendingRequestIds || []).map(function (r) { return reqFetching[r]; }).filter(Boolean);
+    if (wait.length) Promise.all(wait).then(function () { notifySend(prev, next); }); else notifySend(prev, next);
+  }
+  function notifySend(prev, next) {
+    if (!notifyActive()) return;
+    var evs = window.BHLogic.notifyEvents(prev, next, notifyCfg, {
+      visible: pageVisible(), name: sessionTitle(next),
+      reqKind: function (rid) { return requests.has(rid) ? kindOf(requests.get(rid)) : ''; }
+    });
+    evs.forEach(function (e) {
+      try {
+        var n = new window.Notification(e.title, { body: e.body, tag: e.tag, renotify: true });
+        n.onclick = function () {
+          try { window.focus(); n.close(); } catch (x) { console.warn('알림 창을 앞으로 가져오지 못했습니다', x); }
+          go(e.path);
+        };
+      } catch (x) { console.warn('알림을 띄우지 못했습니다', x); }
+    });
+  }
+
   function mergeSession(s) {
     if (!s || !s.id) return null;
-    var old = sessions.get(s.id) || {};
+    var prev = sessions.get(s.id);
+    var old = prev || {};
     var m = Object.assign({}, old, s);
     sessions.set(s.id, m);
     (m.pendingRequestIds || []).forEach(ensureRequest);
+    if (loadedOnce) notifyChange(prev, m);  // 첫 목록은 비교 기준만 잡는다
     return m;
   }
   function ensureRequest(rid) {
     if (requests.has(rid) || reqFetching[rid]) return;
-    reqFetching[rid] = true;
-    api('GET', '/api/requests/' + encodeURIComponent(rid)).then(function (r) {
+    reqFetching[rid] = api('GET', '/api/requests/' + encodeURIComponent(rid)).then(function (r) {
       if (r) { r = r.request || r; if (!r.id) r.id = rid; requests.set(rid, r); scheduleSide(); if (view && view.onRequest) view.onRequest(rid); }
     }, function () {}).then(function () { delete reqFetching[rid]; });
   }
@@ -193,6 +228,7 @@
     }, function () {});
   }
   function loadSessions() {
+    loadNotify();
     return api('GET', '/api/sessions').then(function (data) {
       var list = listOf(data, 'sessions'), seen = {};
       list.forEach(function (s) { if (s && s.id) { var rs = requests; (s.pendingRequestIds || []).forEach(function (rid) { var r = rs.get(rid); if (r && r.status && r.status !== 'pending') rs.delete(rid); }); } });
@@ -209,7 +245,7 @@
   function connectEvents() {
     if (es) { es.close(); es = null; }
     clearTimeout(retryTimer);
-    if (document.hidden) { eventsPaused = true; return; }  // 숨겨진 탭은 붙지 않는다(보이면 붙는다)
+    if (document.hidden && !notifyActive()) { eventsPaused = true; return; }  // 숨겨진 탭은 붙지 않는다(보이면 붙는다). 알림을 켰으면 숨겨져도 붙어 있어야 알림이 온다
     try { es = new EventSource('/api/events'); } catch (e) { return scheduleRetry(); }
     es.onopen = function () { retry = 0; setConn('ok'); loadSessions().catch(function (e) { console.warn('세션 목록을 불러오지 못했습니다', e); }); };
     es.addEventListener('session', function (ev) {
@@ -253,6 +289,7 @@
   var eventsPaused = false;
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
+      if (notifyActive()) return;  // 알림을 켠 탭은 숨겨져도 SSE 를 닫지 않는다
       eventsPaused = true;
       if (es) { es.close(); es = null; }
       clearTimeout(retryTimer);
@@ -2012,7 +2049,7 @@
   }
 
   /* ---------- 설정 ---------- */
-  /* 시안 19: 글자 크기 · AI가 묻는 범위 · 연결 상태 · 고급. 화면 밝기(다크 한 벌뿐)와 알림(콘솔에 알림 기능이 없다)은 넣지 않았다. */
+  /* 시안 19: 글자 크기 · AI가 묻는 범위 · 알림(스위치 셋, 서버 notify.json) · 연결 상태 · 고급. 화면 밝기(다크 한 벌뿐)는 넣지 않았다. */
   function settingsView(root) {
     var alive = true, conn = { gh: '불러오는 중이야', ver: '불러오는 중이야', proj: '불러오는 중이야' };
     function set(label, body) {
@@ -2041,6 +2078,23 @@
       }).then(paintConn);
     }
     function paintConn() { if (alive) draw(); }
+    var notifyErr = '';
+    function saveNotify(key, val) {
+      var body = {}; body[key] = val;
+      api('PUT', '/api/settings/notify', body).then(function (d) { notifyCfg = d; notifyErr = ''; },
+        function (e) { notifyErr = '알림 설정을 저장하지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
+    }
+    // 처음 켤 때만 브라우저에 권한을 묻는다. 사용자 클릭 안에서 바로 불러야 브라우저가 물어 준다.
+    function toggleNotify(key, want) {
+      notifyErr = '';
+      if (!want) return saveNotify(key, false);
+      var p = notifyPerm();
+      if (p === 'granted') return saveNotify(key, true);
+      if (p !== 'default') return draw();  // 막힘·미지원은 안내 문구가 이미 보인다. 켠 채로 두지 않는다
+      Promise.resolve(window.Notification.requestPermission()).then(function (r) {
+        if (r === 'granted') saveNotify(key, true); else if (alive) draw();
+      });
+    }
     function loadModelsOnce() {
       if (modelInfo) return;
       api('GET', '/api/models').then(function (d) { modelInfo = d && Array.isArray(d.options) ? d : null; }, function () { modelInfo = null; }).then(function () { if (alive && modelInfo) draw(); });
@@ -2067,6 +2121,23 @@
       sec.appendChild(set('AI가 묻는 범위', h('div', null, radios,
         h('p', { class: 'note-muted', text: '새 작업을 시작할 때 쓰는 기본값이야. 이미 돌고 있는 세션은 그 세션 화면의 "자세히" 에서 바꿔. 어느 걸 골라도 하네스 훅(맨손 git push · 강제 푸시 거부 등)은 그대로 일해.' }))));
 
+      var perm = notifyPerm(), rows = [['turn', '내 차례가 오면'], ['blocked', '막히거나 확인 못 한 일이 생기면'], ['done', 'AI가 일을 끝낼 때마다']];
+      var permText = perm === 'unsupported' ? '이 브라우저는 알림을 지원하지 않아'
+        : perm === 'granted' ? '브라우저 알림 · 허용됨'
+        : perm === 'denied' ? '브라우저 알림 · 막힘'
+        : '브라우저 알림 · 아직 안 물음 (스위치를 처음 켤 때 브라우저가 물어)';
+      sec.appendChild(set('알림', h('div', null,
+        h('div', { class: 'radios', role: 'group', 'aria-label': '알림' }, rows.map(function (r) {
+          var on = !!(notifyCfg && notifyCfg[r[0]]) && perm === 'granted';
+          return h('button', { type: 'button', role: 'switch', class: 'swrow', 'aria-checked': String(on), 'data-notify-key': r[0], disabled: !notifyCfg || perm === 'unsupported',
+            onClick: function () { toggleNotify(r[0], !on); } },
+            h('b', { text: r[1] }), h('i', { class: 'sw' + (on ? ' on' : ''), 'aria-hidden': 'true' }));
+        })),
+        h('p', { class: 'note-muted', 'data-notify-perm': perm, role: 'status', text: permText }),
+        perm === 'denied' ? h('p', { class: 'note-attn', role: 'alert', text: '브라우저가 알림을 막았어 · 주소창 왼쪽 자물쇠에서 알림을 허용해 줘' }) : null,
+        notifyErr ? h('p', { class: 'note-attn', role: 'alert', text: notifyErr }) : null,
+        h('p', { class: 'note-muted', text: '콘솔 탭이 열려 있을 때만 알려 줘. 지금 보고 있는 화면에서는 보내지 않아.' }))));
+
       sec.appendChild(set('연결 상태', h('div', null, crow('GitHub', conn.gh), crow('하네스 판', conn.ver), crow('프로젝트', conn.proj))));
 
       sec.appendChild(set('처음 화면', h('div', null,
@@ -2083,6 +2154,7 @@
       root.appendChild(page);
     }
     function again() { if (alive && loadedOnce && (cwdNow() || '') !== lastCwd) loadConn(false); }
+    api('GET', '/api/settings/notify').then(function (d) { notifyCfg = d; }, function (e) { notifyErr = '알림 설정을 읽지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
     setTitle('설정'); loadModelsOnce(); loadConn(true); draw();
     return { onData: again, onSession: again, destroy: function () { alive = false; } };
   }
