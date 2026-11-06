@@ -237,8 +237,9 @@
   // 없으면(옛 서버) 커밋 안 된 파일인가와 이 세션의 PR 상태로 짐작한다. 근거가 없으면 '확인 못 함'.
   function uploadChip(u) {
     var st = u && u.state;
-    if (st === 'local') return { text: '안 올림', tone: '', title: '아직 커밋 안 됨 · 내 PC에만 있어.' };
-    if (st === 'committed') return { text: '안 올림', tone: '', title: '커밋은 됐지만 열린 PR 이 없어 · 아직 팀에 안 올림' };
+    // '안 올림' 은 노랑(warn) — 시안 G-11·G-14 처럼 손봐야 할 상태로 보인다
+    if (st === 'local') return { text: '안 올림', tone: 'warn', title: '아직 커밋 안 됨 · 내 PC에만 있어.' };
+    if (st === 'committed') return { text: '안 올림', tone: 'warn', title: '커밋은 됐지만 열린 PR 이 없어 · 아직 팀에 안 올림' };
     if (st === 'merged') return { text: '합쳐짐', tone: 'ok', title: 'main 에 같은 내용이 있어.' };
     if (st === 'review') {
       var nums = arr(u.prs).map(function (p) { return '#' + p.number; }).join(', ');
@@ -249,7 +250,7 @@
   function docChip(f, s, unknown) {
     if (f && f.upload && typeof f.upload === 'object') return uploadChip(f.upload);
     if (unknown) return { text: '확인 못 함', tone: 'unk', title: 'git 상태를 읽지 못해 올렸는지 알 수 없어.' };
-    if (f && f.changed) return { text: '안 올림', tone: '', title: '아직 커밋 안 됨 · 내 PC에만 있어.' };
+    if (f && f.changed) return { text: '안 올림', tone: 'warn', title: '아직 커밋 안 됨 · 내 PC에만 있어.' };
     var pr = s && s.flowPr, st = pr && pr.number ? String(pr.state || '').toUpperCase() : '';
     if (st === 'MERGED') return { text: '합쳐짐', tone: 'ok', title: '이 세션의 PR #' + pr.number + ' 이 합쳐졌어.' };
     if (st === 'OPEN') return { text: '검토 중', tone: 'ok', title: '이 세션의 PR #' + pr.number + ' 이 승인을 기다려.' };

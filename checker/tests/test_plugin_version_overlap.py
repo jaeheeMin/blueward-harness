@@ -74,7 +74,7 @@ def test_이_PR_이_version_을_안_올렸으면_대상이_아니다():
 
 def test_읽기_실패는_검사_불능이다():
     r = check_plugin_version_overlap({"status": CANNOT_CHECK, "message": "GitHub API 503"}, 12)
-    assert r["status"] == CANNOT_CHECK and r["read_failure"] and "503" in r["message"] and "다시 돌리십시오" in r["message"]
+    assert r["status"] == CANNOT_CHECK and r["read_failure"] and "503" in r["message"] and "Re-run jobs" in r["message"] and "gh run rerun --failed" in r["message"]
 
 
 def test_모르는_모양이거나_version_이_없으면_검사_불능이다():
@@ -315,7 +315,7 @@ def test_읽기_실패는_종료코드_2이고_다시_돌리라고_안내한다(
     _fake_collect(monkeypatch, {"status": CANNOT_CHECK, "message": "GitHub API 503"})
     assert script.main(["12", "sha", "main"]) == 2
     err = capsys.readouterr().err
-    assert "503" in err and "다시 돌리십시오" in err
+    assert "503" in err and "Re-run jobs" in err
 
 
 def test_base_version_을_git_에서_못_읽으면_검사_불능이다(monkeypatch, capsys, tmp_path):

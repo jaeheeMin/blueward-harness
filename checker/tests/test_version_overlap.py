@@ -489,7 +489,7 @@ def test_문서_위반과_읽기_실패가_함께면_종료코드_2이고_위반
     assert report["version_overlap"]["read_failure"] is True
     text = render(report, code)
     assert "템플릿 위반" in text and "memo/bad.md" in text  # 위반 표 그대로
-    assert "다시 돌려 보십시오" in text and "규칙·설정을 고쳐야" not in text
+    assert "Re-run jobs" in text and "다시 돌려 줘" in text and "규칙·설정을 고쳐야" not in text
     assert exit2_cause(report) == "retry"
 
 

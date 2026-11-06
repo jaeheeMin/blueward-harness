@@ -345,7 +345,7 @@ jobs:
                   --exit2-cause report.json 2>/dev/null || echo config)
                 status=unknown
                 if [ "$cause" = "retry" ]; then
-                  reason="다른 열린 PR 을 읽지 못해 판 번호 겹침을 확인하지 못했다(GitHub 일시 오류일 수 있다). 이 실행을 다시 돌린다."
+                  reason="다른 열린 PR 을 읽지 못해 판 번호 겹침을 확인하지 못했다(GitHub 일시 오류일 수 있다). 이 PR 화면의 검사 목록에서 실패한 검사 → Details → 오른쪽 위 'Re-run jobs'(다시 돌리기)를 누르거나 Claude 에게 '이 PR 검사 다시 돌려 줘' 라고 한다(내 PR 이면 Claude 가 gh run rerun --failed 로 돌린다)."
                 elif [ "$cause" = "doc" ]; then
                   reason="SRS 의 \`버전:\` 줄이 없다(다시 돌려도 같다). PR 코멘트를 본다."
                 elif [ "${cause#doc-other:}" != "$cause" ]; then

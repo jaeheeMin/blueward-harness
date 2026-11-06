@@ -507,7 +507,7 @@
         if (loading) return;
         loading = true; loadedAt = Date.now(); st.sig = sig();
         Promise.all(pool().map(function (s) {
-          return api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { return { session: s, files: kit.listOf(d, 'files'), unknown: !!(d && d.unknown) }; },
+          return api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { return { session: s, files: kit.listOf(d, 'files'), unknown: !!(d && d.unknown), note: d && d.note ? String(d.note) : '' }; },
             function (e) { return { session: s, files: [], unknown: true, failed: e }; });
         })).then(function (parts) { st.parts = parts; }).then(function () {
           loading = false;
@@ -629,6 +629,7 @@
         var sec = h('section', { class: 'light dsec' });
         if (failed.length) sec.appendChild(h('p', { class: 'note-attn', role: 'status', text: failed.length + '개 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
         else if (unsure.length) sec.appendChild(h('p', { class: 'note-attn', role: 'status', text: unsure.length + '개 세션은 git 상태를 읽지 못해서 올림 여부를 "확인 못 함"으로 보여.' }));
+        st.parts.forEach(function (p) { if (p.note && !p.unknown) sec.appendChild(h('p', { class: 'note-muted', role: 'status', text: p.note })); });  // 칩은 그대로 두고 안내만 한 줄 더한다
         if (!all.length) { sec.appendChild(h('p', { class: 'note-muted', text: '아직 만든 문서가 없어.' })); page.appendChild(sec); return; }
         var cur = selected();
         sec.appendChild(h('div', { class: 'dgrid' }, listBox(all),
@@ -656,7 +657,7 @@
       function fetchFiles(s) {
         if (loading) return;
         loading = true; st.at = Date.now();
-        api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { st.files = L.docList(kit.listOf(d, 'files')); st.error = null; st.unknown = d && d.unknown ? String(d.reason || '') : null; st.truncated = !!(d && d.truncated); },
+        api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { st.files = L.docList(kit.listOf(d, 'files')); st.error = null; st.unknown = d && d.unknown ? String(d.reason || '') : null; st.note = d && d.note ? String(d.note) : ''; st.truncated = !!(d && d.truncated); },
           function (e) { st.error = e; }).then(function () { loading = false; if (alive) drawList(); });
       }
       function selectFile(f) {
@@ -684,6 +685,7 @@
         if (st.error && !st.files) { listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.error, '문서 목록') })); return; }
         if (!st.files) { listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' })); return; }
         if (st.unknown != null) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '바뀐 문서를 확인하지 못했어요.' + (st.unknown ? ' (' + st.unknown + ')' : '') + ' 아래 목록에 빠진 문서가 있을 수 있어요.' }));
+        if (st.note) listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: st.note }));
         if (st.truncated) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '문서가 너무 많아 목록이 잘렸어요. 더 있을 수 있어요.' }));
         listBox.appendChild(h('p', { class: 'note-muted', text: '이 세션에서 쓴 파일과 시작 뒤 새로 바뀐 파일이에요. 같은 폴더의 다른 세션이 바꾼 파일이 섞일 수 있어요.' }));
         if (!st.files.length) { listBox.appendChild(h('p', { class: 'note-muted', text: st.unknown != null ? '확인된 문서가 없어요.' : '아직 만든 문서가 없어요.' })); return; }

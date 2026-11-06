@@ -4624,10 +4624,13 @@ def test_files_list_reports_truncated_and_earlier_git_failure(tmp_path, monkeypa
     now = c.app.store.clock()
     s["touchedFiles"], s["touchedTruncated"], s["touchedGap"] = [str(c.work / "a.md")], True, {"reason": "x", "at": now}
     body = c.call("GET", "/api/sessions/s1/files")[1]
-    assert body["truncated"] is True and body["unknown"] is True and "빠졌을 수 있" in body["reason"]
+    # 지금은 읽었으니 칩을 덮는 unknown 은 없고(#708), 30분 안 공백은 note 한 줄로만 알린다
+    assert body["truncated"] is True and "unknown" not in body and "reason" not in body and "빠졌을 수 있" in body["note"]
     assert [f["path"] for f in body["files"]] == ["a.md"]
+    assert body["files"][0]["upload"].get("reason", "") != "x"  # 칩 근거는 지금 읽은 git 상태이지 옛 실패가 아니다(지금 못 읽으면 확인 못 함은 위 test_session_files_reports_unknown_when_git_cannot_run)
     s["touchedGap"] = {"reason": "x", "at": now - 99999}  # 오래된 실패는 영구 경고로 남기지 않는다
-    assert "unknown" not in c.call("GET", "/api/sessions/s1/files")[1]
+    body = c.call("GET", "/api/sessions/s1/files")[1]
+    assert "unknown" not in body and "note" not in body
 
 
 def test_files_list_in_non_repo_does_not_claim_committed(tmp_path, monkeypatch, request):

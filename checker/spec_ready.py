@@ -36,7 +36,9 @@ EXIT_UNKNOWN = 2
 SPEC_DIR = "docs/spec"
 SRC_PREFIX = "src/"
 CONFIG = "설정"
-RERUN = "제목을 고친 뒤 검사를 다시 돌려 줘: 새 커밋을 올리거나 Actions 에서 Re-run"
+RERUN_HOW = ("검사를 다시 돌려 줘: GitHub 의 이 PR 화면에서 아래 검사 목록의 실패한 검사 → Details → 오른쪽 위 'Re-run jobs'(다시 돌리기)를 누르거나, "
+             "Claude 에게 '이 PR 검사 다시 돌려 줘' 라고 하면 돼(내 PR 이면 Claude 가 `gh run rerun --failed` 로 다시 돌린다).")
+RERUN = "제목을 고친 뒤 새 커밋을 올리거나 " + RERUN_HOW
 
 NO_DEV = "no_dev"
 NO_SPEC = "no_spec"
@@ -209,7 +211,7 @@ def render_markdown(result: dict) -> str:
     lines += ["⚠️ 개발 변경(`src/`)이 있는데 Spec 이 main 에 아직 없어 병합할 수 없습니다. Spec 없이 개발은 없습니다(SRS → Spec → 개발 순).", ""]
     for i in items:
         if i["kind"] == NO_DEV:
-            lines.append("- 어느 개발인지 찾지 못했습니다. PR 제목 끝에 `(DEV-xxx)` 로 적어 주세요. " + RERUN + ".")
+            lines.append("- 어느 개발인지 찾지 못했습니다. PR 제목 끝에 `(DEV-xxx)` 로 적어 주세요. " + RERUN)
         elif i["kind"] == CONFIG_ONLY:
             lines.append(f"- {i['dev']}: 설정은 개발이 아닙니다. 진행 원장의 Spec 칸이 `설정` 인 건은 `src/` 를 바꾸지 않습니다. "
                          "개발이 필요하면 SRS 에서 다음 단계를 고치는 것부터 하세요(`/harness:srs`).")
@@ -220,7 +222,7 @@ def render_markdown(result: dict) -> str:
             for p in i.get("open_prs") or []:
                 msg += f" 열린 Spec PR #{p['number']}({p['title']}) 이 병합되면 이 검사를 다시 돌려 주세요."
             lines.append(msg)
-    lines += ["", "Spec 이 병합된 뒤 새 커밋을 올리거나 Actions 에서 Re-run 하면 다시 판정합니다."]
+    lines += ["", "Spec 이 병합된 뒤 새 커밋을 올리거나 " + RERUN_HOW]
     return "\n".join(lines) + "\n"
 
 
