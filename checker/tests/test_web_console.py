@@ -5367,6 +5367,91 @@ def test_first_run_mark_is_saved_on_the_pc_and_survives_restart(tmp_path, monkey
         c.close()
 
 
+def _wn_console(tmp_path, monkeypatch, versions=None, raw=None, seen=None, version="9.9.9"):
+    c = Console(tmp_path, monkeypatch)
+    c.login()
+    c.app.version = version
+    if raw is not None or versions is not None:
+        (c.app.plugin_root / "console").mkdir(exist_ok=True)
+        (c.app.plugin_root / "console" / "whats_new.json").write_text(raw if raw is not None else json.dumps({"versions": versions}), encoding="utf-8")
+    if seen is not None:
+        c.state.mkdir(parents=True, exist_ok=True)
+        (c.state / console_server.SEEN_VERSION_FILE).write_text(json.dumps({"version": seen}), encoding="utf-8")
+    return c
+
+
+def _seen_file(c):
+    f = c.state / console_server.SEEN_VERSION_FILE
+    return json.loads(f.read_text(encoding="utf-8"))["version"] if f.is_file() else None
+
+
+def test_whats_new_first_time_on_this_pc_is_empty_and_saves_current(tmp_path, monkeypatch):
+    c = _wn_console(tmp_path, monkeypatch, {"9.9.9": ["a"], "9.9.8": ["b"]})
+    try:
+        status, body, _ = c.call("GET", "/api/whats-new")
+        assert status == 200 and body == {"current": "9.9.9", "seen": "9.9.9", "items": []}
+        assert _seen_file(c) == "9.9.9"
+        assert c.call("GET", "/api/whats-new")[1]["items"] == []
+    finally:
+        c.close()
+
+
+def test_whats_new_lists_versions_between_seen_and_current_newest_first_skipping_missing(tmp_path, monkeypatch):
+    versions = {"0.10.99": ["옛"], "0.10.100": ["백"], "0.10.101": ["백일"], "0.10.102": ["백이"], "0.10.103": ["미래"], "0.10.98": []}
+    c = _wn_console(tmp_path, monkeypatch, versions, seen="0.10.99", version="0.10.102")
+    try:
+        status, body, _ = c.call("GET", "/api/whats-new")
+        assert status == 200 and body["seen"] == "0.10.99" and body["current"] == "0.10.102"
+        assert body["items"] == [{"version": "0.10.102", "lines": ["백이"]}, {"version": "0.10.101", "lines": ["백일"]},
+                                 {"version": "0.10.100", "lines": ["백"]}]  # 숫자 비교: 99 < 100, seen 이하와 current 초과는 뺀다
+        assert _seen_file(c) == "0.10.99"  # 보기만 해서는 본 판이 바뀌지 않는다
+        status, body, _ = c.call("POST", "/api/whats-new/seen", {})
+        assert status == 200 and _seen_file(c) == "0.10.102"
+        assert c.call("GET", "/api/whats-new")[1]["items"] == []
+    finally:
+        c.close()
+
+
+def test_whats_new_version_without_entry_is_left_out(tmp_path, monkeypatch):
+    c = _wn_console(tmp_path, monkeypatch, {"9.9.9": ["a"]}, seen="9.9.5")
+    try:
+        assert [x["version"] for x in c.call("GET", "/api/whats-new")[1]["items"]] == ["9.9.9"]  # 9.9.6~9.9.8 은 데이터가 없어 안 띄운다
+    finally:
+        c.close()
+
+
+def test_whats_new_broken_or_missing_json_is_empty_with_reason_and_keeps_seen(tmp_path, monkeypatch):
+    for kw in ({"raw": "{깨짐"}, {"raw": '{"versions": []}'}, {}):
+        sub = tmp_path / str(len(list(tmp_path.iterdir())))
+        sub.mkdir()
+        c = _wn_console(sub, monkeypatch, seen="9.9.0", **kw)
+        try:
+            status, body, _ = c.call("GET", "/api/whats-new")
+            assert status == 200 and body["items"] == [] and body["reason"] and body["seen"] == "9.9.0"
+            assert _seen_file(c) == "9.9.0"  # 다음에 읽히면 보이도록 건드리지 않는다
+        finally:
+            c.close()
+
+
+def test_whats_new_unknown_current_is_empty_with_reason_and_keeps_seen(tmp_path, monkeypatch):
+    c = _wn_console(tmp_path, monkeypatch, {"9.9.9": ["a"]}, seen="9.9.0", version="")
+    try:
+        body = c.call("GET", "/api/whats-new")[1]
+        assert body["items"] == [] and body["reason"] and _seen_file(c) == "9.9.0"
+        assert c.call("POST", "/api/whats-new/seen", {})[0] == 409 and _seen_file(c) == "9.9.0"
+    finally:
+        c.close()
+
+
+def test_whats_new_downgrade_is_empty_and_resets_seen_to_current(tmp_path, monkeypatch):
+    c = _wn_console(tmp_path, monkeypatch, {"9.9.9": ["a"], "9.9.5": ["b"]}, seen="9.9.20")
+    try:
+        body = c.call("GET", "/api/whats-new")[1]
+        assert body["items"] == [] and body["seen"] == "9.9.9" and _seen_file(c) == "9.9.9"
+    finally:
+        c.close()
+
+
 def test_notify_settings_default_off_saved_in_state_dir_and_validated(mconsole):
     c = mconsole
     off = {"turn": False, "blocked": False, "done": False}

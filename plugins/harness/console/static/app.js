@@ -680,7 +680,50 @@
     startNew: function (text) { if (text && text.trim()) draft.text = text.trim(); go('/new'); }, stateBox: stateBox, loadingBox: loadingBox,
     loaded: function () { return loadedOnce; }, conn: function () { return conn.state; }
   });
-  function homeView(root) { return ui.homeView(root); }
+  /* 판이 바뀐 뒤 처음 여는 홈에 "이번에 바뀐 것" 카드 하나(#647). 서버가 지난번 본 판과 비교해 줄 것만 주고, [알겠어]로 본 판을 남긴다.
+     첫 실행 화면이 뜨는 동안에는 부르지도 않는다(boot). 카드를 못 읽으면 홈은 그대로다. */
+  var whatsNew = null, whatsSlot = null, whatsMore = false, whatsNote = '', whatsStarted = false;
+  function loadWhatsNew() {
+    if (whatsStarted) return; whatsStarted = true;
+    api('GET', '/api/whats-new').then(function (d) {
+      whatsNew = d && d.items && d.items.length ? d : null;
+      if (whatsSlot) drawWhatsNew();  // 홈을 떠나면 destroy 가 whatsSlot 을 비운다
+    }, function () { /* 못 읽으면 카드를 안 띄운다 */ });
+  }
+  function drawWhatsNew() {
+    var slot = whatsSlot; if (!slot) return;
+    clear(slot);
+    if (!whatsNew || introWanted()) return;
+    var items = whatsNew.items, shown = items, total = 0, cut = items.length;
+    items.forEach(function (it, i) { total += it.lines.length; if (total > 8 && cut === items.length && i > 0) cut = i; });
+    if (!whatsMore && cut < items.length) shown = items.slice(0, cut);
+    var body = h('div', { class: 'wn-list' }, shown.map(function (it) {
+      return h('div', { class: 'wn-ver', 'data-wn-ver': it.version },
+        h('span', { class: 'wn-v mono', text: it.version }),
+        h('ul', null, it.lines.map(function (t) { return h('li', { text: t }); })));
+    }));
+    var acts = [h('button', { type: 'button', class: 'pill dark', 'data-wn-ok': '1', text: '알겠어', onClick: function () {
+      api('POST', '/api/whats-new/seen', {}).then(function () { whatsNew = null; whatsNote = ''; drawWhatsNew(); },
+        function (e) { whatsNote = '본 판을 남기지 못했어 · ' + (e && e.message || ''); drawWhatsNew(); });
+    } })];
+    if (!whatsMore && cut < items.length) acts.unshift(h('button', { type: 'button', class: 'pill ghost', 'data-wn-more': '1', text: '더 보기', onClick: function () { whatsMore = true; drawWhatsNew(); } }));
+    slot.appendChild(h('section', { class: 'wn', 'data-whats-new': '1' },
+      h('span', { class: 'eb accent', text: '이번에 바뀐 것' }),
+      h('h2', { text: '하네스가 새 판(' + whatsNew.current + ')으로 바뀌었어 · 이번에 바뀐 것' }),
+      body,
+      whatsNote ? h('p', { class: 'wn-note', text: whatsNote }) : null,
+      h('div', { class: 'wn-acts' }, acts)));
+  }
+  function homeView(root) {
+    whatsSlot = h('div', { class: 'wn-slot' });
+    var rest = h('div');
+    root.appendChild(whatsSlot); root.appendChild(rest);
+    drawWhatsNew();
+    var v = ui.homeView(rest);
+    if (v && v.destroy) { var d0 = v.destroy; v.destroy = function () { whatsSlot = null; d0(); }; }
+    else v = Object.assign({}, v, { destroy: function () { whatsSlot = null; } });
+    return v;
+  }
   function docsView(root) { return ui.docsPage(root); }
 
   /* ---------- 세션 (/s/:id) ---------- */
@@ -2199,7 +2242,8 @@
     root.appendChild(appEl);
     // 점검 결과(첫 실행인지)가 오면 그 화면으로 처음부터 그린다. 늦거나 못 읽으면 홈을 막지 않고 그대로 그린다.
     var first = function () { if (!renderedOnce) renderRoute(); };
-    loadStart(false).then(first, first);
+    var wn = function () { if (!(startData && startData.firstRun)) loadWhatsNew(); };  // 첫 실행 화면이 뜨는 동안엔 바뀐 점을 띄우지 않는다
+    loadStart(false).then(function () { first(); wn(); }, function () { first(); wn(); });
     setTimeout(first, 1200);
     loadSessions().then(function () { connectEvents(); }, function (e) { if (e.status !== 401) { connectEvents(); scheduleRetryIfDown(); } });
     if (window.ResizeObserver) new ResizeObserver(function () { if (collapsed === null) scheduleSide(); }).observe(root);

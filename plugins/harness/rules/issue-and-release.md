@@ -47,6 +47,7 @@
 같은 version 으로 올린 열린 PR 이 또 있으면 이 저장소의 PR 검사(`checker` 워크플로)가
 **실패**한다 — 검사가 도는 순간 먼저 그 version 을 쓴 PR 이 이기고, 늦은 쪽이 메시지의 다음 값으로 올려
 다시 푸시한다(먼저 병합되는 쪽만 `v{version}` 태그를 받아 배포된다. #324, 경고였다가 초록이라 겹쳐 병합돼 실패로 바꿈 #470).
+version 을 올리는 PR 이 팀원이 알아야 할 변경이면 `plugins/harness/console/whats_new.json` 에 그 판의 쉬운 말 한두 줄을 더한다(웹 콘솔이 판이 바뀐 뒤 처음 열 때 보여 준다. 시험·내부 정리는 적지 않는다).
 
 main 에 version 이 바뀐 plugin.json 이 병합되면 Actions(`release-tag.yml`)가 그 커밋에
 `v{version}` 태그를 붙이고 움직이는 태그 `stable` 을 그 커밋으로 옮긴다. 사람이 따로 배포를

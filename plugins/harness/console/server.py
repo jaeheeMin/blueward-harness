@@ -102,7 +102,9 @@ SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", ".
 STATIC_TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".html": "text/html",
                 ".svg": "image/svg+xml", ".json": "application/json", ".map": "application/json", ".woff2": "font/woff2"}
 FIRST_RUN_FILE = "first-run.json"  # 이 PC 에서 첫 화면(시작하기)을 이미 본 표시. 상태 폴더 아래, 브라우저와 무관
-LAST_FOLDER_FILE = "last-folder.json"  # 새 작업에서 마지막으로 시작한 작업 폴더. 상태 폴더 아래, 브라우저와 무관
+SEEN_VERSION_FILE = "seen-version.json"  # 바뀐 점 안내를 마지막으로 본 판. 상태 폴더 아래, 브라우저와 무관
+WHATS_NEW_FILE = "whats_new.json"  # 판별 바뀐 점(플러그인 console 폴더). 판을 올리는 PR 이 줄을 더한다
+LAST_FOLDER_FILE ="last-folder.json"  # 새 작업에서 마지막으로 시작한 작업 폴더. 상태 폴더 아래, 브라우저와 무관
 NOTIFY_FILE = "notify.json"  # 브라우저 알림 설정(내 차례·막힘·끝남). 상태 폴더 아래, 브라우저와 무관
 NOTIFY_KEYS = ("turn", "blocked", "done")
 ASK_UNREADABLE = "설정을 읽지 못해 모든 명령마다 물어"
@@ -217,7 +219,8 @@ class App:
         self.last_folder_mem = None  # 상태 폴더가 없는 실행(시험)에서만 쓴다
         self.notify_mem = None  # 알림 설정도 같다
         self.ask_mem = None  # 묻는 범위 설정도 같다
-        self.first_run_seen = False # 상태 폴더가 없는 실행(시험)에서만 메모리에 둔다
+        self.seen_version: str | None = None  # 상태 폴더가 없는 실행(시험)에서만 메모리에 둔다
+        self.first_run_seen = False# 상태 폴더가 없는 실행(시험)에서만 메모리에 둔다
         self.folder_intro_mem: list = []  # 상태 폴더가 없는 실행(시험)에서만 쓴다
         self.intro_lock = threading.Lock()
         self.wait_poll = wait_poll
@@ -840,6 +843,75 @@ class App:
         except OSError as e:
             raise HttpError(500, f"첫 화면 표시를 남기지 못했습니다: {e}")
         return 200, {"firstRun": False}
+
+    # ---- 플러그인이 바뀐 뒤 바뀐 점 안내(#647) ----
+    def read_seen_version(self) -> str | None:
+        """지난번 본 판. 파일이 없거나 읽을 수 없으면 None(이 PC 에서 처음으로 본다)."""
+        f = self.store.dir / SEEN_VERSION_FILE if self.store.dir else None
+        if f is None:
+            return self.seen_version
+        try:
+            v = json.loads(f.read_text(encoding="utf-8")).get("version")
+        except (OSError, ValueError, AttributeError):
+            return None
+        return v if isinstance(v, str) and v else None
+
+    def save_seen_version(self, version: str) -> None:
+        f = self.store.dir / SEEN_VERSION_FILE if self.store.dir else None
+        if f is None:
+            self.seen_version = version
+            return
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"version": version, "seenAt": self.clock()}), encoding="utf-8")
+        os.replace(tmp, f)
+
+    def a_whats_new(self, g, q, b):
+        """콘솔이 실린 판(current)과 지난번 본 판(seen) 사이 판들의 바뀐 점. 새 판부터."""
+        current = self.version
+        seen = self.read_seen_version()
+        cur_key = parse_version(current)
+        if cur_key is None:
+            return 200, {"current": current, "seen": seen, "items": [], "reason": "콘솔이 실린 판을 몰라서 바뀐 점을 못 보여 줘"}
+        if seen is None or parse_version(seen) is None:  # 이 PC 에서 처음 — 첫 화면이 따로 있으니 옛 변경을 쏟지 않는다
+            try:
+                self.save_seen_version(current)
+            except OSError as e:
+                return 200, {"current": current, "seen": None, "items": [], "reason": f"본 판을 남기지 못했어: {e}"}
+            return 200, {"current": current, "seen": current, "items": []}
+        seen_key = parse_version(seen)
+        if seen_key > cur_key:  # 판을 내렸다
+            try:
+                self.save_seen_version(current)
+            except OSError as e:
+                return 200, {"current": current, "seen": seen, "items": [], "reason": f"본 판을 남기지 못했어: {e}"}
+            return 200, {"current": current, "seen": current, "items": []}
+        try:
+            data = json.loads((self.plugin_root / "console" / WHATS_NEW_FILE).read_text(encoding="utf-8"))
+            versions = data["versions"]
+            if not isinstance(versions, dict):
+                raise ValueError("versions 가 목록이 아니야")
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            return 200, {"current": current, "seen": seen, "items": [], "reason": f"바뀐 점 목록을 못 읽었어: {e}"}
+        found = []
+        for ver, lines in versions.items():
+            k = parse_version(ver)
+            if k is None or not (seen_key < k <= cur_key) or not isinstance(lines, list):
+                continue
+            lines = [x for x in lines if isinstance(x, str) and x.strip()]
+            if lines:
+                found.append((k, {"version": ver, "lines": lines}))
+        found.sort(key=lambda t: t[0], reverse=True)
+        return 200, {"current": current, "seen": seen, "items": [x for _, x in found]}
+
+    def a_whats_new_seen(self, g, q, b):
+        if parse_version(self.version) is None:
+            raise HttpError(409, "콘솔이 실린 판을 몰라서 본 판을 남길 수 없어.")
+        try:
+            self.save_seen_version(self.version)
+        except OSError as e:
+            raise HttpError(500, f"본 판을 남기지 못했습니다: {e}")
+        return 200, {"seen": self.version}
 
     def a_flow_set(self, g, q, b):
         s = self.get_session(g[0])
@@ -1726,6 +1798,8 @@ ROUTES = [
     ("GET", re.compile(r"/api/dev-ready"), App.a_dev_ready),
     ("GET", re.compile(r"/api/start-checks"), App.a_start_checks),
     ("POST", re.compile(r"/api/start-checks/seen"), App.a_start_seen),
+    ("GET", re.compile(r"/api/whats-new"), App.a_whats_new),
+    ("POST", re.compile(r"/api/whats-new/seen"), App.a_whats_new_seen),
     ("GET", re.compile(rf"/api/requests/{S}"), App.a_request),
     ("POST", re.compile(rf"/api/requests/{S}/answer"), App.a_answer),
     ("POST", re.compile(r"/api/new"), App.a_new),
