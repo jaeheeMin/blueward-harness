@@ -1528,7 +1528,7 @@ fix/31-broken-link</pre>
   <div class="callouts">
     <div class="callout stop"><span class="k">하지 마</span><div><b>100 에는 쓰지 않아.</b> 100 에서 <code>S_DEVELOP</code> 403 이 나는 건 정상이야. 막혔다고 Claude 가 서버를 바꿔서 다시 시도하지 않아. 어디에 쓸지는 사람이 정해.</div></div>
     <div class="callout stop"><span class="k">하지 마</span><div><code>src/</code> 를 SAP 보다 먼저 고치지 않아. 사진이 현장과 달라져.</div></div>
-    <div class="callout warn"><span class="k">데이터 조회</span><div>테이블 내용을 꺼내는 도구(<code>tableContents</code>, <code>runQuery</code>)는 쓰기 전에 되물어 봐. 고객 데이터가 화면에 나오기 때문이야.</div></div>
+    <div class="callout warn"><span class="k">데이터 조회</span><div>테이블 내용을 꺼내는 도구(<code>tableContents</code>, <code>runQuery</code>)는 쓰기 전에 되물어 봐. 고객 데이터가 화면에 나오기 때문이야. 프로젝트의 <code>env/adt-tiers.yaml</code> 에서 서버에 <code>data_access: allow</code> 를 적으면 필요한 필드만 고른 <code>runQuery</code> 는 묻지 않고, <code>SELECT *</code> 처럼 모든 칸을 꺼내는 쿼리는 막아(<code>tableContents</code> 는 필드를 못 골라서 계속 물어).</div></div>
     <div class="callout warn"><span class="k">이름 짓기</span><div>오브젝트 이름은 <code>conventions/naming.md</code>(사내 SAP Naming Guide)를 먼저 읽고 지어. ZLOCAL 계열 테스트 패키지는 트랜스포트를 만들지 않아. 판매오더 앱(DEV-002)은 패키지 <code>ZSD_TEST</code>, 접두어 <code>zsd_</code> 를 써.</div></div>
     <div class="callout ok"><span class="k">세션 만료</span><div>401 이나 400 이 나면 <code>/c080</code> 이나 <code>/c100</code> 으로 다시 로그인해.</div></div>
   </div>

@@ -12,7 +12,8 @@
         client: "100"                 # 선택, 안내문에만 쓴다
         role: customizing             # 선택, 안내문에만 쓴다
         writes_allowed: false         # 필수, true/false
-        data_access: ask              # 선택, ask(기본) 또는 deny — deny 면 data_tools 를 막는다
+        data_access: ask              # 선택, ask(기본)·deny·allow — deny 면 data_tools 를 막고,
+                                      # allow 면 필드를 고른 runQuery 는 묻지 않고 SELECT * 는 막는다
     write_tools: [setObjectSource, ...]   # 필수, 쓰기로 취급하는 도구 이름
     data_tools: [tableContents, runQuery] # 선택, 되묻는 도구 이름
 
@@ -43,7 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 TIERS_RELATIVE_PATH = Path("env") / "adt-tiers.yaml"
-DATA_ACCESS_VALUES = ("ask", "deny")
+DATA_ACCESS_VALUES = ("ask", "deny", "allow")
 _DEFAULT_TOOLS_PATH = Path(__file__).with_name("mcp_default_tools.json")
 
 
@@ -257,7 +258,7 @@ def parse_tiers(text: str) -> Tiers:
         data_access = info["data_access"] if "data_access" in info else "ask"
         if data_access not in DATA_ACCESS_VALUES:  # 글자가 아닌 값(None, bool 등)도 여기서 걸린다
             raise TiersError(
-                f"servers.{name}.data_access 가 ask 또는 deny 가 아니다: {data_access!r}"
+                f"servers.{name}.data_access 가 ask, deny, allow 중 하나가 아니다: {data_access!r}"
             )
         servers[name] = {
             "writes_allowed": allowed,
@@ -309,6 +310,14 @@ def has_select_star(tool_input: object) -> bool:
     """입력의 어느 글자 값에든 SELECT * 가 있으면 True. 쿼리 칸 이름(`sqlQuery` 등)에
     기대지 않고 모든 글자 값을 본다 — 칸 이름이 바뀌어도 놓치지 않는다."""
     return any(_SELECT_STAR_RE.search(s) for s in _iter_strings(tool_input))
+
+
+def _has_query_text(tool_input: object) -> bool:
+    """runQuery 입력에 비어 있지 않은 sqlQuery 글자가 있는가(필드 판정을 할 수 있는가)."""
+    if not isinstance(tool_input, dict):
+        return False
+    q = tool_input.get("sqlQuery")
+    return isinstance(q, str) and bool(q.strip())
 
 
 def _server_label(name: str, info: dict) -> str:
@@ -369,6 +378,19 @@ def decide(
                 "data_access 를 바꿀지는 사람이 정합니다(🚨 직접 해 주세요). 사람이 정하기 전에는 다른 "
                 "서버로 옮겨 다시 시도하지 마십시오."
             ))
+        if info is not None and info["data_access"] == "allow":
+            if has_select_star(tool_input):
+                return Decision("deny", (
+                    "harness: 모든 칸을 꺼내는 쿼리는 막습니다(공통 개발 규칙 CR-003). 필요한 "
+                    "필드만 골라 다시 조회하십시오.\n\n"
+                    "다음: 필드 목록을 적어(예: SELECT FROM I_Product FIELDS Product, ProductType) "
+                    "다시 요청하십시오."
+                ))
+            if tool == "runQuery" and _has_query_text(tool_input):
+                return PASS  # 필드를 고른 쿼리 — Claude Code 기본 권한 흐름으로
+            # tableContents 는 입력에 필드 지정이 없어(ddicEntityName, sqlQuery 는 행 필터,
+            # rowNumber, decode) 테이블 통째 = 모든 칸이다. 쿼리 글자를 못 찾는 runQuery 도
+            # 판정할 수 없으니 통과시키지 않고 되묻는다(CLAUDE.md 원칙 7).
         reason = (
             f"harness: {server} 의 {tool} 는 SAP 테이블 데이터를 꺼내 대화에 싣습니다. 개인정보나 "
             "기밀이 섞일 수 있으니 필요한 테이블·필드·행 수만 가져오는지 확인하고 허용하십시오."
@@ -416,6 +438,6 @@ def load_error_reason(path: Path, exc: Exception) -> str:
         "쓰는지 확인할 수 없었습니다. 확인되지 않는 상태로 통과시키지 않습니다.\n"
         f"파일: {path}\n사유: {exc}\n\n"
         "다음: 사람이 env/adt-tiers.yaml 을 고치십시오 — 필수 키는 servers(서버마다 "
-        "writes_allowed: true/false)와 write_tools(도구 이름 목록)입니다. data_access 를 적었다면 ask 또는 deny 여야 합니다. 예시는 harness "
+        "writes_allowed: true/false)와 write_tools(도구 이름 목록)입니다. data_access 를 적었다면 ask, deny, allow 중 하나여야 합니다. 예시는 harness "
         "플러그인 README 의 \"테넌트별 쓰기 차단\" 절에 있습니다."
     )
