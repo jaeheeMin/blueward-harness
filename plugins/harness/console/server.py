@@ -31,7 +31,8 @@ import platform_compat
 from hooks_api import Hooks, permission_reply, question_reply
 from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
                      PERMISSION_VALUES, Manager)
-from store import CHECK_SKIPPED, MAX_PENDING_STOP, START_CHECK_IDS, Store, mark_check, public_session, can_send, remember_touched, set_baseline
+from store import (CHECK_SKIPPED, MAX_PENDING_STOP, START_CHECK_IDS, Store, can_send, display_title, mark_check, public_session,
+                   remember_touched, set_baseline)
 
 APP_NAME = "harness-console"
 COOKIE = "harness_console"
@@ -655,7 +656,7 @@ class App:
             raise HttpError(404, "없는 요청입니다.")
         data = r.public()
         s = self.store.get(r.session_id)
-        data["sessionTitle"] = s["title"] if s else ""
+        data["sessionTitle"] = display_title(s) if s else ""
         data["suggestions"] = r.suggestions
         return 200, data
 
@@ -954,7 +955,7 @@ class App:
         targets = [s for s in targets if self.manager.alive(s["id"])]
 
         def one(s: dict) -> dict:
-            item = {"sessionId": s["id"], "title": s["title"]}
+            item = {"sessionId": s["id"], "title": display_title(s)}
             try:
                 _, data = self.reload_session(s)
             except HttpError as e:

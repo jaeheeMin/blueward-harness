@@ -9,7 +9,7 @@ from typing import Callable
 import context_usage
 import flows
 from store import (CHECK_DONE, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
-                   TITLE_PROMPT, TITLE_SESSION, mark_check, remember_touched)
+                   TITLE_PROMPT, TITLE_SESSION, mark_check, prompt_title, remember_touched)
 
 QUESTION_WAIT = 300.0
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
@@ -217,8 +217,10 @@ class Hooks:
             prompt = body.get("prompt") if isinstance(body.get("prompt"), str) else ""
             if not s["managed"]:
                 store.close_session(s["id"], "터미널에서 처리됨", before=ts)  # 늦게 온 프롬프트가 그 뒤의 새 요청을 닫지 않게 한다
-            if prompt and not prompt.lstrip().startswith("/") and s.get("title_rank", 0) < TITLE_PROMPT:
-                store.set_title(s, prompt.split("\n", 1)[0], TITLE_PROMPT)
+            if prompt and s.get("title_rank", 0) < TITLE_PROMPT:
+                title = prompt_title(prompt)
+                if title:
+                    store.set_title(s, title, TITLE_PROMPT)
             store.add_log(s, "요청: " + prompt.split("\n", 1)[0][:200])
         elif name == "UserPromptExpansion":
             if not late:
