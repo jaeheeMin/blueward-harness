@@ -997,6 +997,18 @@ class App:
             raise HttpError(e.status, e.message)
         return cwd, real, rel
 
+    def annotate_upload(self, cwd: str, root: str, listed: list[dict], why: str) -> None:
+        """파일마다 upload 를 더한다(칩의 근거, #652). git 상태를 못 읽었으면(why) 커밋 여부도 모르므로 모두 unknown 이다."""
+        if why:
+            for f in listed:
+                f["upload"] = {"state": "unknown", "prs": [], "reason": why}
+            return
+        key = ("open-pr-files", os.path.normcase(root))  # gh 는 느리니 저장소당 CACHE_SECONDS 기억한다(못 읽은 결과는 기억하지 않는다)
+        states = gitstate.upload_states(self.run, cwd, [(f["path"], bool(f.get("changed"))) for f in listed],
+                                        lambda: self.cached(key, lambda: gitstate.open_pr_files(self.run, cwd)))
+        for f in listed:
+            f["upload"] = states.get(f["path"]) or {"state": "unknown", "prs": [], "reason": "올렸는지 판정하지 못했습니다."}
+
     def a_session_files(self, g, q, b):
         s, cwd = self.file_session_cwd(g[0])
         root, failed = gitstate.repo_root_checked(self.run, cwd)
@@ -1010,7 +1022,9 @@ class App:
                 remember_touched(s, paths, from_status=True)  # 커밋하면 git status 에서 사라지므로 이 세션이 만든 파일은 따로 쌓아 둔다
             touched = list(s.get("touchedFiles") or [])
             truncated, gap = bool(s.get("touchedTruncated")), s.get("touchedGap")
-        out = {"files": docfiles.collect(cwd, touched, None if (why or not_repo) else paths)}
+        listed = docfiles.collect(cwd, touched, None if (why or not_repo) else paths)
+        out = {"files": listed}
+        self.annotate_upload(cwd, root, listed, why or ("git 저장소가 아니라 올렸는지 알 수 없어요." if not_repo else ""))
         if truncated:
             out["truncated"] = True  # 쌓아 두는 상한에 닿아 더 있는 문서가 빠졌다
         if why:  # git 을 못 읽었다 = 바뀐 문서가 없다는 뜻이 아니다. 훅이 모은 목록만으로 보여 주고 화면이 알리게 한다

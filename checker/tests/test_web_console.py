@@ -4642,6 +4642,96 @@ def test_files_list_in_non_repo_does_not_claim_committed(tmp_path, monkeypatch, 
     assert [f["path"] for f in body["files"]] == ["a.md"]
 
 
+def _git(cwd, *args):
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=str(cwd), check=True, capture_output=True)
+
+
+def upload_console(tmp_path, monkeypatch, request, gh=None, git_fail=None):
+    """진짜 임시 git 저장소 + 가짜 원격(bare). merged.md 는 squash 처럼 다른 커밋으로 main 에 같은 내용이 들어갔고, committed.md·review.md 는 브랜치에만
+    커밋됐고, local.md 는 커밋 전이다. gh 는 holder["gh"]=(종료코드, 출력) 가짜이고 gh_calls 가 부른 횟수다. git_fail 이 앞부분이 맞는 git 명령을 실패시킨다."""
+    remote, work = tmp_path / "remote.git", tmp_path / "work"
+    holder = {"gh": gh if gh is not None else (0, json.dumps([{"number": 5, "url": "https://x/pull/5", "headRefName": "f", "files": [{"path": "review.md"}]}]))}
+    calls = {"gh": 0}
+
+    def run(args, cwd):
+        if args[0] == "gh":
+            calls["gh"] += 1
+            return holder["gh"]
+        if git_fail and " ".join(args[1:]).replace("-c core.quotepath=false ", "").startswith(git_fail):
+            return 1, ""
+        return gitstate.run_command(args, cwd)
+
+    c = Console(tmp_path, monkeypatch, run=run)
+    request.addfinalizer(c.close)
+    remote.mkdir()
+    _git(remote, "init", "--bare", "-b", "main")
+    _git(work, "init", "-b", "main")
+    _git(work, "remote", "add", "origin", str(remote))
+    (work / "base.txt").write_text("b", encoding="utf-8")
+    _git(work, "add", "."), _git(work, "commit", "-m", "base"), _git(work, "push", "-u", "origin", "main")
+    _git(work, "checkout", "-b", "feat")
+    for name in ("merged.md", "committed.md", "review.md"):
+        (work / name).write_text(name, encoding="utf-8")
+    _git(work, "add", "."), _git(work, "commit", "-m", "feat")
+    _git(work, "checkout", "main"), _git(work, "checkout", "feat", "--", "merged.md"), _git(work, "commit", "-m", "squash"), _git(work, "push", "origin", "main")
+    _git(work, "checkout", "feat")
+    (work / "local.md").write_text("l", encoding="utf-8")
+    c.login()
+    c.event("s1", "SessionStart")
+    for name in ("merged.md", "committed.md", "review.md", "local.md"):
+        c.event("s1", "PostToolUse", tool_name="Write", tool_input={"file_path": str(work / name)})
+    c.holder, c.gh_calls = holder, calls
+    return c
+
+
+def uploads(c):
+    body = c.call("GET", "/api/sessions/s1/files")[1]
+    return {f["path"]: f["upload"] for f in body["files"]}
+
+
+def test_files_upload_states_by_content_and_open_prs(tmp_path, monkeypatch, request):
+    c = upload_console(tmp_path, monkeypatch, request)
+    got = uploads(c)
+    assert {k: v["state"] for k, v in got.items()} == {"local.md": "local", "merged.md": "merged", "review.md": "review", "committed.md": "committed"}
+    assert got["review.md"]["prs"] == [{"number": 5, "url": "https://x/pull/5"}]
+    assert c.gh_calls["gh"] == 1
+    uploads(c)
+    assert c.gh_calls["gh"] == 1  # 저장소당 60초 기억
+    c.clock.t += 61
+    uploads(c)
+    assert c.gh_calls["gh"] == 2
+
+
+def test_files_upload_gh_failure_only_blocks_files_that_need_prs(tmp_path, monkeypatch, request):
+    c = upload_console(tmp_path, monkeypatch, request, gh=(1, ""))
+    got = uploads(c)
+    assert {k: v["state"] for k, v in got.items()} == {"local.md": "local", "merged.md": "merged", "review.md": "unknown", "committed.md": "unknown"}
+    assert "gh" in got["review.md"]["reason"]
+    c.holder["gh"] = (0, "[]")  # 못 읽은 결과는 기억하지 않아 다음에 다시 읽는다
+    assert uploads(c)["committed.md"]["state"] == "committed"
+
+
+def test_files_upload_truncated_pr_list_is_unknown_not_committed(tmp_path, monkeypatch, request):
+    big = json.dumps([{"number": 9, "url": "u", "headRefName": "g", "files": [{"path": f"x{i}.md"} for i in range(100)]}])
+    c = upload_console(tmp_path, monkeypatch, request, gh=(0, big))
+    assert uploads(c)["committed.md"]["state"] == "unknown"
+
+
+def test_files_upload_git_failure_is_unknown(tmp_path, monkeypatch, request):
+    c = upload_console(tmp_path, monkeypatch, request, git_fail="ls-tree")
+    got = uploads(c)
+    assert got["local.md"]["state"] == "local"
+    assert {got[k]["state"] for k in ("merged.md", "committed.md", "review.md")} == {"unknown"}
+    (tmp_path / "n").mkdir()
+    c2 = Console(tmp_path / "n", monkeypatch, run=lambda a, cwd: (127, ""))
+    request.addfinalizer(c2.close)
+    c2.login()
+    c2.event("s1", "SessionStart")
+    (c2.work / "a.md").write_text("a", encoding="utf-8")
+    c2.event("s1", "PostToolUse", tool_name="Write", tool_input={"file_path": str(c2.work / "a.md")})
+    assert c2.call("GET", "/api/sessions/s1/files")[1]["files"][0]["upload"]["state"] == "unknown"  # git 상태를 못 읽으면 안 올림 으로 단정하지 않는다
+
+
 def test_touched_files_dedupe_separators_skip_outside_cwd_and_late_baseline(tmp_path):
     from store import remember_touched, set_baseline
     inside = tmp_path / "w"

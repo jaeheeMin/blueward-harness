@@ -529,6 +529,14 @@ const cases = {
     assert.strictEqual(L.docChip({ changed: false }, { flowPr: merged }, false).text, '합쳐짐');
     assert.deepStrictEqual([L.docChip({ changed: false }, {}, false).text, L.docChip({ changed: false }, {}, false).tone], ['확인 못 함', 'unk']);
     assert.strictEqual(L.docChip({ changed: false }, { flowPr: merged }, true).text, '확인 못 함');  // git 을 못 읽었으면 PR 상태가 있어도 단정하지 않는다
+    // 서버가 파일마다 판정한 upload 가 있으면 PR 상태 짐작 대신 그것을 쓴다(#652)
+    const up = (state, extra) => L.docChip({ changed: false, upload: Object.assign({ state }, extra) }, { flowPr: merged }, false);
+    assert.deepStrictEqual([up('local').text, up('committed').text, up('merged').text, up('review', { prs: [{ number: 5 }, { number: 8 }] }).text, up('unknown').text],
+      ['안 올림', '안 올림', '합쳐짐', '검토 중', '확인 못 함']);
+    assert.ok(up('review', { prs: [{ number: 5 }, { number: 8 }] }).title.includes('#5, #8') && !up('merged').title.includes('세션'));
+    assert.ok(up('committed').title.includes('열린 PR 이 없어') && up('local').title.includes('커밋 안 됨'));
+    assert.strictEqual(up('unknown', { reason: 'gh 실패' }).title, 'gh 실패');
+    assert.strictEqual(L.docChip({ changed: false, upload: { state: 'committed' } }, {}, true).text, '안 올림');  // 서버 판정이 있으면 세션 쪽 짐작은 쓰지 않는다
     // 같은 폴더(경로 표기만 다른)의 같은 파일은 한 번만, 먼저 준 세션 쪽
     const a = { id: 'a', cwd: 'C:/w/p' }, b = { id: 'b', cwd: 'c:\\w\\p\\' };
     const out = L.mergeDocs([{ session: a, files: [{ path: 'docs/SRS.md', mtime: 5, changed: true }] }, { session: b, files: [{ path: 'docs/srs.md', mtime: 9 }, { path: 'x.xlsx', mtime: 1 }] }]);

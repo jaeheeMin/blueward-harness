@@ -233,8 +233,21 @@
     if (ext === 'md' || ext === 'markdown') return 'spec';
     return 'etc';
   }
-  // 올라간 정도 칩. 근거는 둘뿐이다: 커밋 안 된 파일인가(git), 이 세션의 PR 이 어떤 상태인가. 둘 다 없으면 '확인 못 함'.
+  // 올라간 정도 칩. 서버가 파일마다 판정한 f.upload 가 있으면 그것으로 정한다(커밋 여부·main 과 같은 내용인가·열린 PR 에 들어 있는가).
+  // 없으면(옛 서버) 커밋 안 된 파일인가와 이 세션의 PR 상태로 짐작한다. 근거가 없으면 '확인 못 함'.
+  function uploadChip(u) {
+    var st = u && u.state;
+    if (st === 'local') return { text: '안 올림', tone: '', title: '아직 커밋 안 됨 · 내 PC에만 있어.' };
+    if (st === 'committed') return { text: '안 올림', tone: '', title: '커밋은 됐지만 열린 PR 이 없어 · 아직 팀에 안 올림' };
+    if (st === 'merged') return { text: '합쳐짐', tone: 'ok', title: 'main 에 같은 내용이 있어.' };
+    if (st === 'review') {
+      var nums = arr(u.prs).map(function (p) { return '#' + p.number; }).join(', ');
+      return { text: '검토 중', tone: 'ok', title: 'PR ' + nums + ' 에 들어 있어 · 승인 기다림' };
+    }
+    return { text: '확인 못 함', tone: 'unk', title: u && u.reason ? String(u.reason) : '올렸는지 알 수 없어.' };
+  }
   function docChip(f, s, unknown) {
+    if (f && f.upload && typeof f.upload === 'object') return uploadChip(f.upload);
     if (unknown) return { text: '확인 못 함', tone: 'unk', title: 'git 상태를 읽지 못해 올렸는지 알 수 없어.' };
     if (f && f.changed) return { text: '안 올림', tone: '', title: '아직 커밋 안 됨 · 내 PC에만 있어.' };
     var pr = s && s.flowPr, st = pr && pr.number ? String(pr.state || '').toUpperCase() : '';

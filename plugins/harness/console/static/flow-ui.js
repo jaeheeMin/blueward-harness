@@ -576,7 +576,7 @@
             }
           });
         });
-        box.appendChild(h('span', { class: 'dnote', text: '안 올림 = 내 PC에만 · 검토 중 = 승인 기다림 · 합쳐짐 = 팀 공용본 · 확인 못 함 = 알 수 없음' }));
+        box.appendChild(h('span', { class: 'dnote', text: '안 올림 = 아직 팀에 안 올림(내 PC에만이거나 PR 없음) · 검토 중 = 열린 PR 에 들어 있어 승인 기다림 · 합쳐짐 = main 에 같은 내용이 있음 · 확인 못 함 = 알 수 없음' }));
         return box;
       }
       function resultCard(entry) {
