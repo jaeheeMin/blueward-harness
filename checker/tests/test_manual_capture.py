@@ -1212,7 +1212,7 @@ def test_popup_row_empty_cell_adds_hint_when_no_popup(tmp_path, capsys, fake):
     t.cell = {"ok": True, "rect": {"x": 500, "y": 300, "w": 80, "h": 24}, "text": "", "icon": False, "rows": 5}
     code, out = _capture(capsys, root)
     why = out["screens"][0]["사유"]
-    assert code == 2 and "팝업이 뜨지 않았다" in why and "그 행 칸이 비어 있다(백로그 없는 행일 수 있다), 다른 `행` 을 고른다" in why
+    assert code == 2 and "팝업이 뜨지 않았다" in why and "그 행 칸이 비어 있다(백로그 없는 행일 수 있다), 팝업이 열리는 다른 `행` 을 고른다" in why
     assert t.shots == 0
 
 
@@ -1221,7 +1221,9 @@ def test_popup_row_filled_cell_no_popup_has_no_empty_hint(tmp_path, capsys, fake
     _one(root, ROW_SCREEN)
     fake["tab"] = FakeTab(ROW_FINDS)
     code, out = _capture(capsys, root)
-    assert code == 2 and "팝업이 뜨지 않았다" in out["screens"][0]["사유"] and "비어 있다" not in out["screens"][0]["사유"]
+    why = out["screens"][0]["사유"]
+    # 칸에 아이콘이 있어도(예: 백로그 없음 동그라미) 그 행은 팝업을 안 열 수 있다 — 다른 행을 고르라고 안내한다(#673 실제 테넌트 100)
+    assert code == 2 and "팝업이 뜨지 않았다" in why and "비어 있다" not in why and "그 행은 팝업을 열지 않는다" in why and "다른 `행`" in why
 
 
 def test_js_has_cell_of():

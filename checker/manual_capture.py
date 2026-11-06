@@ -844,8 +844,10 @@ class Capturer:
         try:
             self.popup_info(what)
         except Unavailable as e:
-            if empty_cell and "팝업이 뜨지 않았다" in str(e):
-                raise Unavailable(f"{e} — 그 행 칸이 비어 있다(백로그 없는 행일 수 있다), 다른 `행` 을 고른다") from e
+            if s.row and "팝업이 뜨지 않았다" in str(e):
+                # 칸이 비어 있지 않아도(예: 백로그 없음을 뜻하는 동그라미 아이콘) 그 행은 팝업을 안 열 수 있다(#673 실제 테넌트 100).
+                why = "그 행 칸이 비어 있다" if empty_cell else f"{s.row}번째 행 칸을 더블클릭했지만 그 행은 팝업을 열지 않는다"
+                raise Unavailable(f"{e} — {why}(백로그 없는 행일 수 있다), 팝업이 열리는 다른 `행` 을 고른다") from e
             raise
         self.set_scope(what)
 
