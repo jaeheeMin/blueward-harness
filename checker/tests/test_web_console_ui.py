@@ -525,6 +525,9 @@ const cases = {
     // 올림 칩의 근거는 커밋 여부와 이 세션의 PR 상태뿐이다. 근거가 없으면 확인 못 함이다.
     const merged = { number: 6, state: 'MERGED' }, open = { number: 6, state: 'OPEN' };
     assert.strictEqual(L.docChip({ changed: true }, { flowPr: merged }, false).text, '안 올림');
+    assert.strictEqual(L.docChip({ changed: true }, { flowPr: merged }, false).tone, 'warn');  // 시안 G-11·G-14: 안 올림은 노랑
+    assert.strictEqual(L.docChip({ changed: false, upload: { state: 'local' } }, {}, false).tone, 'warn');
+    assert.strictEqual(L.docChip({ changed: false, upload: { state: 'committed' } }, {}, false).tone, 'warn');
     assert.strictEqual(L.docChip({ changed: false }, { flowPr: open }, false).text, '검토 중');
     assert.strictEqual(L.docChip({ changed: false }, { flowPr: merged }, false).text, '합쳐짐');
     assert.deepStrictEqual([L.docChip({ changed: false }, {}, false).text, L.docChip({ changed: false }, {}, false).tone], ['확인 못 함', 'unk']);
