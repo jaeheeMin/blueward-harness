@@ -704,6 +704,8 @@ class FakeTab:
         self.alert_texts: set[str] = set()  # dialogInfo 가 오류·경고 창으로 알리는 글
         self.scope_calls = 0
         self.scope_result: dict = {"ok": True}
+        self.scroll_cols = None  # scrollColumns 결과(None 이면 1 — 스크롤 요소를 못 찾은 것처럼 dict 가 아니다)
+        self.inner = {"w": 1600, "h": 900}  # innerWidth·innerHeight
 
     def call(self, method, **params):
         self.calls.append((method, params))
@@ -750,7 +752,7 @@ class FakeTab:
             self.scope_calls += 1
             return self.scope_result
         if expr == "window.__mc.size()":
-            return {"w": 1600, "h": 900}
+            return self.inner
         if expr.startswith("window.__mc.focusInput("):
             return self.focus
         if expr.startswith("window.__mc.readInput("):  # 기본은 빈 입력 칸. 필터 값이 남은 경우는 시험이 reads 에 차례로 정한다
@@ -761,6 +763,8 @@ class FakeTab:
             return self.clear_result
         if expr.startswith("window.__mc.selectOption("):
             return self.pick
+        if expr.startswith("window.__mc.scrollColumns("):
+            return self.scroll_cols if self.scroll_cols is not None else 1
         return 1 if "scrollColumn" in expr else None
 
     def screenshot_png(self):
@@ -1353,3 +1357,107 @@ def test_cdp_timeout_with_hidden_window_explains_cause(tmp_path, capsys, fake):
     code, out = _capture(capsys, root)
     why = out["screens"][0]["사유"]
     assert code == 2 and "시간이 지났다" in why and "가려져 있거나 최소화" in why and "visibilityState='hidden'" in why
+
+# ---------------------------------------------------------------- 넓은 표(#657): 한 번에 넘기기·나누기 제안·화면별 배율
+
+WIDE = ("화면:\n  - 이름: 조회 조건\n    표시:\n"
+        "      - {종류: 열, 이름: 상태, 설명: 하나}\n"
+        "      - {종류: 열, 이름: 반복생산 확인, 설명: 둘}\n")
+WIDE_FINDS = {("열", "상태"): FOUND, ("열", "반복생산 확인"): FOUND}
+
+
+def _scrolls(t, name):
+    return [e for e in t.evals if e.startswith(f"window.__mc.{name}(")]
+
+
+def test_parse_scale_accepts_range_and_rejects_outside():
+    for v in (0.5, 0.9, 1.0, 1):
+        (s,) = mc.parse_screens(_bad(배율=v))
+        assert s.scale == float(v)
+    (n,) = mc.parse_screens(GOOD)
+    assert n.scale is None
+    for v in (0.49, 1.1, 0, -1, "0.9", True, [0.9]):
+        with pytest.raises(mc.ListError):
+            mc.parse_screens(_bad(배율=v))
+
+
+def test_wide_columns_scroll_once_together_when_they_fit(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, WIDE)
+    t = FakeTab(WIDE_FINDS)
+    t.scroll_cols = {"ok": True, "fits": True, "span": 1400, "view": 1490,
+                     "cols": [{"name": "상태", "left": 50, "width": 100}, {"name": "반복생산 확인", "left": 1350, "width": 100}]}
+    fake["tab"] = t
+    code, out = _capture(capsys, root)
+    assert code == 0 and out["status"] == "ok", out
+    calls = _scrolls(t, "scrollColumns")
+    assert len(calls) == 1 and not _scrolls(t, "scrollColumn")  # 열마다 따로 넘기지 않는다
+    assert json.loads(calls[0][len("window.__mc.scrollColumns("):-1]) == [{"name": "상태", "index": None}, {"name": "반복생산 확인", "index": None}]
+    assert t.shots == 1
+
+
+def test_wide_columns_fall_back_to_per_column_when_no_scroller(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, WIDE)
+    t = FakeTab(WIDE_FINDS)
+    t.scroll_cols = {"ok": False, "cols": []}
+    fake["tab"] = t
+    code, _ = _capture(capsys, root)
+    assert code == 0 and len(_scrolls(t, "scrollColumn")) == 2
+
+
+def test_single_column_keeps_scroll_column(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, WIDE.replace("      - {종류: 열, 이름: 반복생산 확인, 설명: 둘}\n", ""))
+    t = FakeTab(WIDE_FINDS)
+    fake["tab"] = t
+    _capture(capsys, root)
+    assert len(_scrolls(t, "scrollColumn")) == 1 and not _scrolls(t, "scrollColumns")
+
+
+def test_wide_columns_not_fitting_is_unavailable_with_split_and_scale_hint(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, WIDE)
+    t = FakeTab(WIDE_FINDS)
+    t.scroll_cols = {"ok": True, "fits": False, "span": 1650, "view": 1490,
+                     "cols": [{"name": "상태", "left": 50, "width": 100}, {"name": "취소", "left": 700, "width": 100},
+                              {"name": "반복생산 확인", "left": 1500, "width": 200}]}
+    fake["tab"] = t
+    code, out = _capture(capsys, root)
+    row = out["screens"][0]
+    assert code == 2 and row["상태"] == "검사 불능" and t.shots == 0
+    why = row["사유"]
+    assert "3개가 한 화면에 안 들어간다(필요 폭 1650px, 보이는 폭 1490px)" in why
+    assert "1화면 [상태, 취소]" in why and "2화면 [반복생산 확인]" in why and "첫 묶음" in why
+    assert "배율: 0.9" in why
+
+
+def test_split_columns_and_scale_hint():
+    cols = [{"name": "c", "left": 900, "width": 100}, {"name": "a", "left": 0, "width": 400}, {"name": "b", "left": 450, "width": 100}]
+    assert mc.split_columns(cols, 600) == [["a", "b"], ["c"]]
+    assert mc.split_columns([{"name": "x", "left": 0, "width": 900}], 600) == [["x"]]  # 혼자 넘쳐도 한 묶음
+    s = mc.parse_screens(_bad())[0]
+    assert "배율: 0.9" in mc.wide_reason(s, {"cols": cols, "span": 1000, "view": 920})
+    assert "배율로는 부족" in mc.wide_reason(s, {"cols": cols, "span": 3000, "view": 1000})
+
+
+def test_scale_sets_metrics_override_and_restores_after_screen(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, TWO_SCREENS.replace("    표시:", "    배율: 0.8\n    표시:"))
+    t = FakeTab({("필터", "플랜트"): FOUND, ("버튼", "이동"): FOUND})
+    t.inner = {"w": 2000, "h": 1125}  # 1600/0.8, 900/0.8
+    fake["tab"] = t
+    code, out = _capture(capsys, root)
+    assert code == 0 and out["status"] == "ok", out
+    metrics = [p for m, p in t.calls if m == "Emulation.setDeviceMetricsOverride"]
+    assert [(p["width"], p["height"], p["deviceScaleFactor"]) for p in metrics] == [(1600, 900, 1.0), (2000, 1125, 0.8), (1600, 900, 1.0)]
+    overlay = [e for e in t.evals if e.startswith("window.__mc.drawOverlay(")][0]
+    assert overlay.endswith(", 4)")  # 테두리 3px → CSS 3/0.8 = 4px
+
+
+def test_scale_wrong_inner_size_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, TWO_SCREENS.replace("    표시:", "    배율: 0.8\n    표시:"))
+    fake["tab"] = FakeTab({("필터", "플랜트"): FOUND, ("버튼", "이동"): FOUND})  # innerWidth 가 1600 그대로
+    code, out = _capture(capsys, root)
+    assert code == 2 and "2000x1125" in out["screens"][0]["사유"]

@@ -3,7 +3,7 @@
 요소 위치는 **화면에 보이는 이름**으로 찾는다(#348 시험의 방식). 찾기만 하고 판정(0개·1개·여러 개)은 파이썬이 한다.
 필터는 라벨과 입력 칸을 묶은 영역, 열은 머리글부터 표 아래 끝(보이는 만큼)까지다.
 후보는 화면 밖이거나 조상의 overflow 로 잘려 일부만 보이는 것까지 **모두** 읽는 순서로 내고 `visible` 로 구분한다(그래서 같은 이름이 화면 밖에 더 있으면
-파이썬이 ambiguous 로 판정하고, `index` 도 화면 밖을 포함한 전체 순서로 센다). 가로 스크롤 밖 열은 `scrollColumn` 이 같은 목록·순서로 골라 먼저 보이게 한다.
+파이썬이 ambiguous 로 판정하고, `index` 도 화면 밖을 포함한 전체 순서로 센다). 가로 스크롤 밖 열은 `scrollColumn`(하나)·`scrollColumns`(같은 표의 여럿을 한 번에)가 같은 목록·순서로 골라 먼저 보이게 한다.
 `팝업` 단계 뒤에는 `setScope` 가 찾는 범위를 그 대화상자 안으로 좁히고(`clearScope` 로 되돌린다), 후보 찾기는 모두 그 범위 안에서만 한다.
 """
 from __future__ import annotations
@@ -176,6 +176,51 @@ LIB_JS = r"""(() => {
     return 1;
   };
 
+  // 같은 표의 열 여럿을 한 번에 보이게 한다(#657). 열마다 따로 가운데로 넘기면 먼저 보이던 왼쪽 열이 밀려난다.
+  // 열들의 가로 범위(가장 왼쪽 열 시작 ~ 가장 오른쪽 열 끝)가 표의 보이는 폭 안이면 그 범위가 다 보이는 위치 하나로 넘긴다.
+  // 가로 스크롤 요소는 sap.ui.table 이면 `.sapUiTableHSb`(scrollLeft), 아니면 overflow-x 가 auto·scroll 인 가장 가까운 조상이다.
+  // 못 찾으면 ok:false(파이썬이 열마다 scrollColumn 으로 되돌아간다). 범위가 안 들어가면 넘기지 않고 fits:false 로 알린다.
+  const scrollColumns = list => {
+    const picks = [];
+    for (const { name, index } of list) {
+      const { items } = cands('열', name);  // scrollColumn 과 같은 후보·같은 index 기준
+      if (items.length === 0) continue;
+      let pick = items[0];
+      if (items.length > 1) {
+        if (!index) continue;
+        pick = items[index - 1];
+        if (!pick) continue;
+      }
+      picks.push({ name, el: pick.el });
+    }
+    if (picks.length === 0) return { ok: false, cols: [] };
+    const scrollerOf = el => {
+      const t = el.closest('.sapUiTable'), sb = t && t.querySelector('.sapUiTableHSb');
+      if (sb && sb.scrollWidth > sb.clientWidth) return sb;
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        if (/(auto|scroll|overlay)/.test(getComputedStyle(p).overflowX) && p.scrollWidth > p.clientWidth + 1) return p;
+      }
+      return null;
+    };
+    const groups = new Map();
+    for (const p of picks) {
+      const sc = scrollerOf(p.el);
+      if (!sc) return { ok: false, cols: [] };
+      if (!groups.has(sc)) groups.set(sc, []);
+      groups.get(sc).push(p);
+    }
+    const out = [];
+    for (const [sc, ps] of groups) {
+      const base = sc.getBoundingClientRect().left - sc.scrollLeft;  // 표 안 좌표의 0 (지금 스크롤과 무관)
+      const cols = ps.map(p => { const r = p.el.getBoundingClientRect(); return { name: p.name, left: Math.round(r.left - base), width: Math.round(r.width) }; });
+      const minL = Math.min(...cols.map(c => c.left)), maxR = Math.max(...cols.map(c => c.left + c.width));
+      const view = sc.clientWidth, span = maxR - minL, fits = span <= view;
+      if (fits) sc.scrollLeft = Math.max(0, Math.min(minL - (view - span) / 2, sc.scrollWidth - view));
+      out.push({ ok: true, fits, span, view, cols });
+    }
+    return out.find(o => !o.fits) || out[0];
+  };
+
   // 입력 값 넣기 준비: 라벨이 가리키는 입력 칸에 포커스를 주고 글자를 모두 선택한다. 유일할 때만.
   const focusInput = name => {
     // find('필터') 와 같은 후보(입력 칸이 딸린 라벨)만 센다 — 같은 이름의 표 열 머리글 라벨은 세지 않는다(#533 실제 테넌트 시험)
@@ -321,6 +366,6 @@ LIB_JS = r"""(() => {
   };
   const clearScope = () => { scopeEl = null; };
 
-  window.__mc = { find, scrollColumn, focusInput, readInput, clearInput, selectOption, dialogs, dialogInfo, setScope, clearScope, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
+  window.__mc = { find, scrollColumn, scrollColumns, focusInput, readInput, clearInput, selectOption, dialogs, dialogInfo, setScope, clearScope, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
   return true;
 })()"""

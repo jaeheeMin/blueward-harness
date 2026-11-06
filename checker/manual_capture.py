@@ -16,11 +16,17 @@ PNG(1600x900)를 찍고, 화면에 보이는 이름으로 요소 위치를 찾�
           - {선택: 생산방식, 값: "반복제조"}  # Select·ComboBox 에서 보이는 항목 글자가 값과 같은 것을 고른다(없으면 검사 불능)
           - {누르기: 이동}
           - {팝업: 그루핑}                   # 선택. 그 버튼을 눌러 대화상자가 정확히 하나 떠야 한다(안 뜨거나 오류·경고 창이면 검사 불능). 마지막 단계 하나만
+        배율: 0.9                           # 선택(0.5~1.0). 넓은 표를 한 화면에 담으려 이 화면만 축소해 찍는다(그림은 그대로 1600x900)
         표시:                               # 필수. 번호는 이 목록 순서다
           - {종류: 필터, 이름: 플랜트, 설명: 생산 플랜트를 고른다}
           - {종류: 열, 이름: 상태, index: 2, 설명: 오더 상태를 본다}   # index 는 같은 이름이 여럿일 때 사람이 고른다(1부터, 읽는 순서)
 
 `팝업` 이 있는 화면은 표시 요소를 **그 팝업 안에서만** 찾고, 찍기 직전에도 그 팝업 하나만 허용한다. 팝업의 확인·저장 버튼은 누르지 않는다.
+
+넓은 표(#657): 같은 화면의 `열` 표시가 둘 이상이면 열마다 따로 넘기지 않고, 그 열들이 다 보이는 가로 스크롤 위치 하나로 한 번에 넘긴다
+(열이 하나거나 표의 스크롤 요소를 못 찾으면 열마다 넘긴다). 열들의 가로 범위가 표의 보이는 폭보다 넓으면 찍지 않고 검사 불능으로 알리며
+**화면을 나눌 방법**(왼쪽부터 들어가는 만큼 묶음)과 **필요 `배율`** 을 사유에 적는다. `배율` 은 찍기 전에 화면 크기를 1/배율 로 넓히고
+(`setDeviceMetricsOverride` 의 width·height 를 키우고 deviceScaleFactor=배율) 다음 화면 전에 원래대로 되돌린다.
 
 종류는 필터(라벨+입력 칸)·버튼·열(머리글부터 표 아래 끝)·그 밖(그 글자가 든 요소). 테넌트 주소는 `env/manual-capture.yaml` 의
 `테넌트:`(없으면 `--base-url`). `https://호스트/경로` 만이고, 쿼리는 `?sap-client=100`(숫자 3자리)·`sap-language=KO`(영문 2자리)만 붙일 수 있다
@@ -59,7 +65,8 @@ BOX_BORDER = 3
 BADGE_R = 13
 MAX_MARKS = 99
 KINDS = ("필터", "버튼", "열", "그 밖")
-SCREEN_KEYS = {"이름", "앱", "준비", "표시"}
+SCREEN_KEYS = {"이름", "앱", "준비", "표시", "배율"}
+MIN_SCALE = 0.5
 MARK_KEYS = {"종류", "이름", "index", "설명"}
 STEP_KEYS = {"입력", "값", "누르기", "선택", "팝업"}
 ENV_PATH = "env/manual-capture.yaml"
@@ -94,6 +101,7 @@ class Screen:
     app: str
     steps: tuple[Step, ...]
     marks: tuple[Mark, ...]
+    scale: float | None = None  # 배율(0.5~1.0). 있으면 찍기 전에 CSS 화면을 1/배율 로 넓히고 그림 크기는 그대로 둔다
 
     @property
     def popup(self) -> bool:
@@ -141,7 +149,12 @@ def parse_screens(data: object) -> list[Screen]:
             if len(raw["표시"]) > MAX_MARKS:
                 raise ListError(f"{where}: 표시는 {MAX_MARKS}개까지다")
             marks = tuple(_parse_mark(m, f"{where} 표시 {j}") for j, m in enumerate(raw["표시"], 1))
-            screens.append(Screen(name, app, steps, marks))
+            scale = raw.get("배율")
+            if scale is not None:
+                if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not MIN_SCALE <= scale <= 1.0:
+                    raise ListError(f"{where}: `배율` 은 {MIN_SCALE}~1.0 의 숫자여야 한다(예: 0.9): {scale!r}")
+                scale = float(scale)
+            screens.append(Screen(name, app, steps, marks, scale))
         except ListError as e:
             problems.append(str(e))
     if problems:
@@ -513,6 +526,34 @@ class Unavailable(RuntimeError):
     """검사 불능(브라우저·페이지가 준비되지 않았다)."""
 
 
+def split_columns(cols: list[dict], view: float) -> list[list[str]]:
+    """열(`name`·`left`·`width`, 표 안 좌표)을 왼쪽부터 보이는 폭 `view` 에 들어가는 만큼 묶는다. 한 열이 혼자 넘쳐도 그 열 하나로 한 묶음."""
+    groups: list[list[str]] = []
+    start = None
+    for c in sorted(cols, key=lambda c: c["left"]):
+        if start is None or c["left"] + c["width"] - start > view:
+            groups.append([])
+            start = c["left"]
+        groups[-1].append(c["name"])
+    return groups
+
+
+def wide_reason(screen: Screen, res: dict) -> str:
+    """열들이 한 화면에 안 들어갈 때의 사유: 나눌 방법과 `배율` 제안."""
+    cols, span, view = res.get("cols") or [], res.get("span") or 0, res.get("view") or 0
+    parts = [f"열 {len(cols)}개가 한 화면에 안 들어간다(필요 폭 {span}px, 보이는 폭 {view}px)."]
+    groups = split_columns(cols, view)
+    parts.append("나누기 제안: " + ", ".join(f"{i}화면 [{', '.join(g)}]" for i, g in enumerate(groups, 1))
+                 + " (`열` 이 아닌 표시(버튼·필터)는 첫 묶음 화면에 둔다).")
+    if span and view:
+        need = int(view / span * 20) / 20  # 5% 단위로 내림
+        if need >= MIN_SCALE:
+            parts.append(f"또는 화면에 `배율: {need:g}` 을 적는다(필요 배율 약 {view / span:.2f}).")
+        else:
+            parts.append(f"배율로는 부족하다(필요 배율 약 {view / span:.2f}, 최소 {MIN_SCALE:g}).")
+    return " ".join(parts)
+
+
 def pick_tab(tabs: list[dict], base_url: str, hint: str | None = None) -> dict:
     """붙을 탭을 고른다. `hint`(주소·제목에 든 글)가 있으면 그것으로, 없으면 테넌트 주소가 같은 탭, 탭이 하나뿐이면 그것."""
     if hint:
@@ -585,7 +626,7 @@ class Capturer:
         except (CdpError, KeyError, TypeError):
             pass  # 못 해도 아래 보임 확인이 판정한다
         self.tab.call("Page.bringToFront")
-        self.tab.call("Emulation.setDeviceMetricsOverride", width=WIDTH, height=HEIGHT, deviceScaleFactor=1, mobile=False)
+        self.set_viewport(None)
         self.ensure_visible("시작")
 
     def window_hint(self) -> str:
@@ -606,6 +647,15 @@ class Capturer:
         if state is None and win is None:
             return " — 창 상태를 읽지 못했다. 전용 Chrome 창이 다른 창에 가려지거나 최소화되면 이렇게 나온다. 창을 앞으로 꺼내 두고 다시 돈다"
         return ""
+
+    def set_viewport(self, scale: float | None) -> tuple[int, int]:
+        """화면 크기를 정한다. 배율이 있으면 CSS 픽셀을 1/배율 만큼 넓히고 deviceScaleFactor=배율 로 그림은 WIDTH x HEIGHT 를 유지한다.
+        돌려주는 값은 CSS 픽셀 크기(innerWidth·innerHeight 와 같아야 한다).
+        실제 테넌트 확인 필요(#657): deviceScaleFactor<1 의 스크린샷이 정확히 1600x900 인지, 반올림으로 1px 어긋나지 않는지."""
+        s = scale or 1.0
+        w, h = round(WIDTH / s), round(HEIGHT / s)
+        self.tab.call("Emulation.setDeviceMetricsOverride", width=w, height=h, deviceScaleFactor=s, mobile=False)
+        return w, h
 
     def ensure_visible(self, what: str) -> None:
         """창이 가려지거나 최소화되면 Chrome 이 화면을 그리지 않는다(#533 실제 테넌트 시험). 보이지 않으면 검사 불능이다."""
@@ -782,7 +832,28 @@ class Capturer:
         raise Unavailable(f"{what}: {self.timeout:g}초 안에 찾을 이름이 하나도 그려지지 않았다(화면이 덜 그려졌거나 이름이 모두 틀렸다)")
 
     def capture(self, screen: Screen) -> tuple[bytes, list[dict], list[dict]]:
-        """화면 하나를 찍는다. (PNG, 그린 것, 못 찾은 것)."""
+        """화면 하나를 찍는다. (PNG, 그린 것, 못 찾은 것). `배율` 이 있으면 이 화면만 그 배율로 찍고 원래 크기로 되돌린다."""
+        if not screen.scale:
+            return self._capture(screen, WIDTH, HEIGHT)
+        size = self.set_viewport(screen.scale)
+        try:
+            return self._capture(screen, *size)
+        finally:
+            self.set_viewport(None)
+
+    def scroll_columns(self, screen: Screen) -> None:
+        """`열` 표시들을 가로 스크롤 안에서 보이게 한다. 둘 이상이면 한 번에 넘기고, 한 화면에 안 들어가면 검사 불능(나누기·배율 제안)."""
+        cols = [m for m in screen.marks if m.kind == "열"]
+        if len(cols) >= 2:
+            res = self.tab.evaluate(f"window.__mc.scrollColumns({json.dumps([{'name': m.name, 'index': m.index} for m in cols], ensure_ascii=False)})")
+            if isinstance(res, dict) and res.get("ok"):
+                if not res.get("fits"):
+                    raise Unavailable(f"화면 {screen.name!r}: {wide_reason(screen, res)}")
+                return
+        for m in cols:  # 열이 하나이거나 표의 가로 스크롤 요소를 못 찾으면 열마다 넘긴다
+            self.tab.evaluate(f"window.__mc.scrollColumn({json.dumps(m.name)}, {json.dumps(m.index)})")
+
+    def _capture(self, screen: Screen, cw: int, ch: int) -> tuple[bytes, list[dict], list[dict]]:
         self.navigate(screen.app)
         self.ensure_visible(f"화면 {screen.name!r}")
         try:
@@ -805,13 +876,11 @@ class Capturer:
         shown = [] if screen.popup else self.tab.evaluate("window.__mc.dialogs()") or []
         if shown:  # 찍기 직전에도 본다 — 대화상자는 준비 단계 뒤 늦게 뜰 수 있다
             raise Unavailable(f"화면 {screen.name!r}: 대화상자가 떠 있다: {shown[0]!r}. 이 상태로는 찍지 않는다(준비 단계·기본값 확인)")
-        for m in screen.marks:  # 가로 스크롤 밖 열은 먼저 보이게 한다
-            if m.kind == "열":
-                self.tab.evaluate(f"window.__mc.scrollColumn({json.dumps(m.name)}, {json.dumps(m.index)})")
+        self.scroll_columns(screen)  # 가로 스크롤 밖 열은 먼저 보이게 한다
         time.sleep(0.2)
         size = self.tab.evaluate("window.__mc.size()")
-        if (size["w"], size["h"]) != (WIDTH, HEIGHT):
-            raise Unavailable(f"창 크기를 {WIDTH}x{HEIGHT} 로 고정하지 못했다(현재 {size['w']}x{size['h']})")
+        if (size["w"], size["h"]) != (cw, ch):
+            raise Unavailable(f"창 크기를 {cw}x{ch} 로 고정하지 못했다(현재 {size['w']}x{size['h']})")
         drawn, missing, items = [], [], []
         for n, m in enumerate(screen.marks, 1):
             v = self.locate(m)
@@ -820,8 +889,9 @@ class Capturer:
                 drawn.append({"번호": n, "종류": m.kind, "이름": m.name, "설명": m.text})
             else:
                 missing.append({"번호": n, "종류": m.kind, "이름": m.name, "상태": v.status, "사유": v.reason, "후보": v.count})
-        plan = plan_marks(items)
-        self.tab.evaluate(f"window.__mc.drawOverlay({json.dumps([p.__dict__ for p in plan])}, {json.dumps(RED)}, {BOX_BORDER})")
+        k = WIDTH / cw  # 배율. 덮개는 CSS 픽셀로 그리므로 그림에서 같은 굵기·크기가 되게 1/배율 만큼 키운다
+        plan = plan_marks(items, cw, ch, pad=round(BOX_PAD / k), r=round(BADGE_R / k))
+        self.tab.evaluate(f"window.__mc.drawOverlay({json.dumps([p.__dict__ for p in plan])}, {json.dumps(RED)}, {round(BOX_BORDER / k)})")
         time.sleep(0.15)
         try:
             png = self.tab.screenshot_png()
