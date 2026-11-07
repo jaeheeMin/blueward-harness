@@ -26,9 +26,10 @@ plugins/harness/
     gitstate.py             브랜치·변경·PR 로 `이번 차례` 판단, 갈래 진행·승인자 판정용 gh 조회
     devready.py             origin/main 의 SRS·Spec·원장으로 개발 건별 Spec 유무 읽기(새 작업 종류 버튼용, #668)
     flows.py                ../workflow.json(작업 순서 정본) 읽기·검사, 세션의 갈래 진행 상태, 다음 갈래 계산
+    trouble.py              문제·해결 기록(`type:trouble` 이슈) 읽기·쓰기 API(#733)
     platform_compat.py      프로세스 분리, 종료, 경로, claude 실행 파일 찾기
     session_start_hook.py   SessionStart command 훅
-    static/                 index.html, app.css, app.js, theme.js, logo-sauce.png (순수 JS, 빌드 없음)
+    static/                 index.html, app.css, app.js, trouble.js, trouble.css, theme.js, logo-sauce.png (순수 JS, 빌드 없음)
   hooks/hooks.json          훅 추가
 ```
 
@@ -256,6 +257,11 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 | POST | `/api/open` | 브라우저 열기 (쿠키 불필요) |
 | GET | `/api/health` | `{app:"harness-console", version}` (쿠키 불필요) |
 | GET | `/api/events` | SSE: `session`, `request`, `removed` |
+| GET | `/api/trouble` | 문제·해결 기록 목록(#733). 쿼리 `status`(all/open/solved)·`stage`·`q`·`project`(owner/repo)·`author`·`limit`·`refresh=1`. 콘솔이 아는 폴더의 저장소에서 `type:trouble` 이슈를 gh 로 모아 60초 기억하고, 못 읽은 저장소는 `projects[].ok:false` + `reason`(기록 없음과 구분), 읽는 중이면 `loading:true`. `stats`(total·month·open·solved·topStage) 는 필터와 무관 |
+| GET | `/api/trouble/item` | 한 건 `?repo=&number=`: 본문 칸(증상·원인·해결 방법·단계·PR) + 이력(댓글 맨 앞 `시도·안 됨:`/`해결 후보:`/`해결:` 으로 분류) + 관련 PR(상태·검사) + 비슷한 기록. 기록 라벨이 없는 이슈는 404, 못 읽으면 502(확인 못 함) |
+| GET | `/api/trouble/pr`·`/similar`·`/draft` | PR 번호 확인 · 비슷한 기록 찾기 · AI 초안(메모리) 읽기 |
+| POST | `/api/trouble` | 새 기록 올리기. 라벨이 저장소에 없으면 409(라벨은 만들지 않고 만드는 명령을 안내), 비밀처럼 보이는 줄이 있으면 422. 제목 머리말 `[기록] `·라벨 `type:trouble`·양식 칸 그대로. 해결 방법이 있으면 `해결:`(해결됐을 때, 이슈 닫음)/`해결 후보:` 댓글을 더한다 |
+| POST | `/api/trouble/comment`·`/resolve`·`/check`·`/draft` | 이력 더하기(`kind` try/candidate/solved, solved 면 본문 해결 방법 갱신+닫기) · "이걸로 해결"(후보 댓글 `commentId`) · 비밀 검사 · AI 초안 저장. 쓰기는 이슈 만들기·댓글·본문 해결 방법 고치기·닫기뿐이고 저장소는 known_root 의 것만 |
 | GET | `/api/sessions` | 목록(`updatedAt` 내림차순). 각 세션의 `group`: `todo` / `running` / `idle`. 필터는 화면이 한다 |
 | GET | `/api/sessions/:id` | 상세. 로그, 결과 보고, 변경 파일, 서브에이전트, 스킬 흐름 |
 | POST | `/api/sessions/:id/messages` | `{text}` 이어서 요청 |
@@ -308,7 +314,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 ## 9. 화면
 
-디자인은 시안(`design-canvas/project/`)을 그대로 옮긴다. 경로: `/`, `/s/:id`, `/r/:rid`, `/new`, `/settings`, `/docs`. 한 페이지 앱이고 서버는 이 경로 모두에 `index.html` 을 준다.
+디자인은 시안(`design-canvas/project/`)을 그대로 옮긴다. 경로: `/`, `/s/:id`, `/r/:rid`, `/new`, `/settings`, `/docs`, `/troubles`, `/troubles/new`, `/troubles/:owner/:repo/:n`. 한 페이지 앱이고 서버는 이 경로 모두에 `index.html` 을 준다.
 
 - 이름과 문구: 화면 이름은 "Blueward Harness" 이고 로고(`static/logo-sauce.png`, 흰 글자 + 네온 네모)를 헤더 왼쪽에 둔다. 화면 문구는 "Claude" 대신 "Claude Code" 로 쓴다. 상단의 서버 주소 표시는 두지 않는다.
 - 앱 틀(#636, 디자인 "Sauce"): 위에서부터 **알림 띠 → 헤더 → (왼쪽 세션 목록 + 본문)**.
@@ -344,6 +350,8 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 - 디자인 "Sauce"(#636): 색은 `app.css` 맨 위 `:root` 한 곳에만 있다. 흑요석 배경 `#132322`·패널 `#0e1a19`·깊은 `#070f0f`, 네온 그린 `#3ddc91`(accent)·민트 `#97ddbc`, 밝은 판 `#edf7f5`(글자 `#132322`), 신호 노랑 `#ffcd48`(내 차례), 위험 `#e5484d`, 확인 못 함 보라 `#8b7cf6`. 알약 버튼 56px, 카드 20px, 큰 판 40px. 대문자 모노 라벨(`.eb`) 10px, 제목 20px, **어떤 글자도 22px 를 넘지 않는다**(시험이 CSS 에서 확인). 체크박스·select 화살표는 기본 모양을 쓰지 않고 직접 그린다. 라벨 글꼴은 외부 글꼴(IBM Plex Mono)을 받을 수 없어(CSP `font-src 'self'`) 내장 JetBrains Mono 를 쓴다. 상태는 색과 모양을 함께 쓴다: 지금(채운 점) / 끝남(✓) / 내 차례(노랑 !) / 실패(빨강 ✕) / 확인 못 함(보라 점선 ?). 글자 대비는 4.5:1 이상이고 시험이 CSS 값에서 계산한다. 이번 판은 앱 틀과 홈만 새 배치이고, 세션·질문·승인·새 작업·설정 화면의 배치는 그대로이며 새 색·글꼴만 입는다.
 - 글꼴(#611): Pretendard(본문)와 JetBrains Mono(코드)를 `static/fonts/` 에 담았고(OFL 라이선스 파일 동봉) `app.css` 의 `@font-face` 가 `/fonts/…` 로 불러온다. 서버는 `.woff2` 를 `font/woff2` 로 내보내고 `fonts/` 한 단계만 연다. 바깥 글꼴 서버로 가는 `<link>` 는 CSP 가 막아 왔으므로 `index.html` 에서 뺐다.
 - 금지: 그라데이션 배경, 유리 효과, Pulse 복제, 터미널 버튼. 시안의 샘플 데이터를 코드에 남기지 않는다. 빈 상태 화면을 만든다.
+
+- 문제·해결 기록(#733, 시안 G-20~22, `static/trouble.js`): 헤더 메뉴 `기록`. 목록(팀 전체·찾기·전체/아직/해결됨·프로젝트·쓴 사람, 못 읽은 저장소는 보라 `? 확인 못 함` 줄 + `다시 확인`), 한 건(요약·이력 타임라인·`내 이야기 더하기`·관련 PR·비슷한 기록·GitHub 링크), 새 기록(AI 초안 줄·PR 번호 확인·비밀 줄 빨간 표시와 올리기 잠금·비슷한 기록 `거기에 더하기`·GitHub 에 올라갈 모양 미리보기). 기록은 각 Project Repository 의 이슈이고(양식 `.github/ISSUE_TEMPLATE/trouble.yml`), 콘솔이 등록·댓글·해결 단추로 바로 올린다. 구현 기록 `docs/status/733-trouble-pages.md`.
 
 ## 10. 범위 밖
 
