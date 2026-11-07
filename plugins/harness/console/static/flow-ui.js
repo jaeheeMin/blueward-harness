@@ -630,6 +630,12 @@
         else if (unsure.length) sec.appendChild(h('p', { class: 'note-attn', role: 'status', text: unsure.length + '개 세션은 git 상태를 읽지 못해서 올림 여부를 "확인 못 함"으로 보여.' }));
         st.parts.forEach(function (p) { if (p.note && !p.unknown) sec.appendChild(h('p', { class: 'note-muted', role: 'status', text: p.note })); });  // 칩은 그대로 두고 안내만 한 줄 더한다
         if (!all.length) { sec.appendChild(h('p', { class: 'note-muted', text: '아직 만든 문서가 없어.' })); page.appendChild(sec); return; }
+        // 시안 G-14: 처음 들어오면 가장 최근 글 문서(md)를, 없으면 가장 최근 문서를 골라 미리보기까지 보인다. 한 번만(사람이 고른 뒤엔 건드리지 않는다).
+        if (!st.sel && !st.auto) {
+          st.auto = true;
+          var first = all.filter(function (d) { return /\.(md|markdown|txt)$/i.test(d.file.path); })[0] || all[0];
+          setTimeout(function () { if (alive && !st.sel) pick(first); }, 0);
+        }
         var cur = selected();
         sec.appendChild(h('div', { class: 'dgrid' }, listBox(all),
           cur ? previewBox(cur) : h('div', { class: 'dprev' }, h('p', { class: 'empty-line', text: '왼쪽에서 문서를 골라 줘. 미리보기와 고치기 입력칸이 여기에 나와.' }))));

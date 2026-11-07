@@ -588,7 +588,7 @@ const cases = {
     window.BHMarkdown = { render: t => h('div', { text: t }) };
     const root = h('div');
     const view = loadUI(kit).docsPage(root); await tick(); await tick();
-    for (const need of ['내가 만든 문서', '요구사항 · 설계', '고객 양식', '기록', 'SRS_v0.2.md', 'BW_Backlog_v0.1.xlsx', 'log.md', '검토 중', '안 올림', '이전 판 1개', '왼쪽에서 문서를 골라 줘']) assert.ok(root.textContent.includes(need), need);
+    for (const need of ['내가 만든 문서', '요구사항 · 설계', '고객 양식', '기록', 'SRS_v0.2.md', 'BW_Backlog_v0.1.xlsx', 'log.md', '검토 중', '안 올림', '이전 판 1개']) assert.ok(root.textContent.includes(need), need);
     const btn = txt => find(root, e => e.tag === 'button' && e.textContent === txt)[0];
     // md 를 고르면 미리보기 + 열기 · 폴더에서 보기 · 고객 양식으로 뽑기 + 고쳐 달라고 하기
     find(root, e => e.attrs['data-path'] === 'docs/SRS_v0.2.md')[0].click(); await tick(); await tick();
@@ -1114,7 +1114,7 @@ def test_new_task_prepare_screen_not_shown_when_seen_ready_or_unknown(tmp_path):
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_docs_screen_groups_files_and_has_menu(tmp_path):
     got = _smoke(tmp_path, "docs", [_session("s1")])
-    for need in ("내가 만든 문서", "요구사항 · 설계", "SRS.md", "안 올림", "왼쪽에서 문서를 골라 줘"):
+    for need in ("내가 만든 문서", "요구사항 · 설계", "SRS.md", "안 올림"):  # 시안 G-14: 처음엔 최근 글 문서를 골라 미리보기까지 보인다(빈 안내 대신)
         assert need in got["text"], need
     assert "산출물" in got["head"] and "GET /api/sessions/s1/files" in got["calls"]  # 새 서버 API 없이 세션별 문서 목록을 모은다
 
