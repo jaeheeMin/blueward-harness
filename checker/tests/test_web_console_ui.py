@@ -477,6 +477,49 @@ const cases = {
     assert.strictEqual(L.kindHint('config', some), null);
     assert.strictEqual(L.devBlock('dev', some), null);
   },
+  standard_kind_hint_and_srs_status_cell() {
+    // 숫자 띠·큰 순서 알약은 단계 이름 끝 괄호 설명을 뗀 짧은 이름(시안 G-09·12), 전체는 title
+    assert.strictEqual(L.shortStepName('표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어요)'), '표준 건 작업 시작하기');
+    assert.strictEqual(L.shortStepName('SRS 쓰기'), 'SRS 쓰기');
+    assert.strictEqual(L.shortStepName('(괄호만)'), '(괄호만)');  // 다 지워지면 원래 이름
+    // step.short(workflow.json)가 있으면 그것, 없으면 괄호만 뗀 이름
+    assert.strictEqual(L.stepShort({ name: '올리고 검토 요청하기', short: '올리기' }), '올리기');
+    assert.strictEqual(L.stepShort({ name: '표준 건 작업 시작하기(설명)' }), '표준 건 작업 시작하기');
+    const shortStep = { flowId: 'srs', flowSteps: [{ name: 'SRS 쓰기', short: '쓰기', state: 'done' }, { name: '올리고 검토 요청하기', short: '올리기', state: 'now' }, { name: '승인받고 합쳐지기 기다리기', short: '승인·합치기', state: 'todo' }], stepIndex: 1 };
+    const shortCell = L.sessionStrip(shortStep, undefined).find(c => c.id === 'step');
+    if (shortCell && shortCell.value !== '확인 못 함') { assert.strictEqual(shortCell.value, '2 / 3 올리기'); assert.strictEqual(shortCell.title, '올리고 검토 요청하기'); }
+    const longStep = { flowId: 'standard', flowSteps: [{ name: '표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어요)', state: 'now' }, { name: '올리기', state: 'todo' }], stepIndex: 0 };
+    const stepCell = L.sessionStrip(longStep, undefined).find(c => c.id === 'step');
+    if (stepCell && stepCell.value !== '확인 못 함') { assert.ok(!stepCell.value.includes('(')); assert.ok(stepCell.title.includes('자동으로 만들어요')); }
+    // 설정 수(setup)는 표준 건을 포함한다: 화면은 표준을 따로 세고 설정은 그만큼 뺀다(#718)
+    const v = L.devReadyView({ state: 'yes', specReady: 1, setup: 3, standard: 2, needSpec: [], needSpecCount: 0 });
+    assert.deepStrictEqual(L.kindHint('config', v), { tone: '', text: '설정 건 1개' });
+    assert.deepStrictEqual(L.kindHint('standard', v), { tone: '', text: '표준 건 2개' });
+    const onlyStd = L.devReadyView({ state: 'yes', specReady: 0, setup: 2, standard: 2, needSpec: [], needSpecCount: 0 });
+    assert.strictEqual(L.kindHint('config', onlyStd), null);
+    assert.strictEqual(L.kindHint('standard', L.devReadyView({ state: 'yes', specReady: 0, setup: 1, needSpec: [], needSpecCount: 0 })), null);
+    assert.strictEqual(L.kindHint('standard', null), null);
+    // 새 작업 종류 버튼: '설정하기' 바로 뒤에 표준 종류, standard 갈래로 시작
+    const app = require('fs').readFileSync(path.join(dir, 'app.js'), 'utf8');
+    assert.ok(/\['설정하기'[^\n]*'config'[^\n]*\],\s*\n\s*\['표준 기능으로 처리', 'SAP 표준 앱으로 끝나는 건', 'standard',/.test(app));
+    // SRS 상태 칸: 설정·표준 갈래에서만, 받은 값(없으면 칸을 비움). 못 읽으면 확인 못 함
+    const mk = (flowId, extra) => Object.assign({ flowId, flowSteps: [], title: 'REQ-002(판매) 표준 처리' }, extra);
+    const ids = (s, srs) => L.sessionStrip(s, srs).map(c => c.id);
+    const srs = { state: 'yes', items: { 'REQ-002': { status: 'In Process', next: '표준' }, 'REQ-003': { status: 'Done', next: '표준' } } };
+    assert.ok(!ids(mk('standard'), undefined).includes('srs-status'));          // 아직 못 받음
+    assert.ok(!ids(mk('dev'), srs).includes('srs-status'));                     // 개발 갈래엔 없다
+    const cell = L.sessionStrip(mk('standard'), srs).find(c => c.id === 'srs-status');
+    assert.deepStrictEqual([cell.label, cell.value], ['SRS 상태', '진행 중']); assert.ok(cell.title.includes('In Process'));
+    assert.strictEqual(L.sessionStrip(mk('config', { title: 'DEV-003 설정' }), srs).find(c => c.id === 'srs-status').value, '끝');
+    assert.strictEqual(L.sessionStrip(mk('config', { title: 'DEV-003 설정' }), srs).find(c => c.id === 'srs-status').tone, 'g');
+    const two = mk('standard', { nextFlow: { options: [{ ids: ['REQ-002', 'REQ-003'] }] } });
+    assert.strictEqual(L.sessionStrip(two, srs).find(c => c.id === 'srs-status').value, 'REQ-002 진행 중, REQ-003 끝');
+    for (const bad of [{ state: 'unknown' }, { state: 'no' }, { state: 'yes', items: {} }]) {
+      const c = L.sessionStrip(mk('standard'), bad).find(x => x.id === 'srs-status');
+      assert.strictEqual(c.value, '확인 못 함');
+    }
+    assert.strictEqual(L.sessionStrip(mk('standard', { title: '이름에 번호 없음' }), srs).find(x => x.id === 'srs-status').value, '확인 못 함');
+  },
   kind_conflict_rules() {
     const ai = { id: 'spec', confident: false, alternativeId: 'dev', reason: 'Spec 이 없어' };
     assert.deepStrictEqual(L.kindConflict(ai, 'dev'), { id: 'spec', reason: 'Spec 이 없어' });

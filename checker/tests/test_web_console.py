@@ -5830,6 +5830,43 @@ def test_hook_saves_transcript_path_and_session_shows_context_pct(tmp_path, monk
         c.close()
 
 
+def test_srs_status_reads_working_tree_srs(tmp_path, monkeypatch):
+    # 설정·표준 건의 진행(In Process)은 작업 브랜치 SRS 에만 있다: origin/main 이 아니라 작업 폴더 파일을 읽는다(#718)
+    work = tmp_path / "work"
+    c = flow_console(tmp_path, monkeypatch, run=ready_run(work))
+    (work / "docs" / "ssot").mkdir(parents=True)
+    (work / "docs" / "ssot" / "SRS.md").write_text(READY_SRS.replace("| New | 표준 |", "| In Process | 표준 |"), encoding="utf-8")
+    try:
+        c.event("p1", "SessionStart")
+        url = "/api/srs-status?cwd=" + urllib.parse.quote(str(c.work))
+        status, body, _ = c.call("GET", url)
+        assert status == 200 and body["state"] == "yes"
+        assert body["items"]["REQ-006"] == {"status": "In Process", "next": "표준"}
+        assert body["items"]["REQ-003"] == {"status": "New", "next": "설정"}
+        (work / "docs" / "ssot" / "SRS.md").write_text(READY_SRS.replace("| New | 표준 |", "| Done | 표준 |"), encoding="utf-8")
+        assert c.call("GET", url)[1]["items"]["REQ-006"]["status"] == "Done"  # 캐시하지 않는다
+        (work / "docs" / "ssot" / "SRS.md").unlink()
+        body = c.call("GET", url)[1]
+        assert body["state"] == "no" and "items" not in body
+        assert c.call("GET", "/api/srs-status")[0] == 400
+        other = tmp_path / "other"
+        other.mkdir()
+        assert c.call("GET", "/api/srs-status?cwd=" + urllib.parse.quote(str(other)))[0] == 403
+    finally:
+        c.close()
+
+
+def test_srs_status_unknown_when_git_cannot_run(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    c = flow_console(tmp_path, monkeypatch, run=ready_run(work, **{"git rev-parse --show-toplevel": (127, "")}))
+    try:
+        c.event("p1", "SessionStart")
+        body = c.call("GET", "/api/srs-status?cwd=" + urllib.parse.quote(str(c.work)))[1]
+        assert body["state"] == "unknown" and body["reason"]
+    finally:
+        c.close()
+
+
 def test_dev_ready_rejects_unknown_folder_and_missing_cwd(tmp_path, monkeypatch):
     c = flow_console(tmp_path, monkeypatch)
     try:
