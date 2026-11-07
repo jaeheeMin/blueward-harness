@@ -16,7 +16,9 @@
   ];
   var NO_FLOW_ID = 'none';  // 갈래 없이 도구만 쓰는 일(서버 analysis.NO_FLOW 와 같다)
   var CHECK_ORDER =['sync', 'version', 'update', 'reload'];
-  var CHECK_NAMES = { sync: '최신 받기', version: '판 확인', update: '갱신', reload: '다시 불러오기' };
+  var CHECK_NAMES = { sync: '최신 내용 받기', version: '하네스 판', update: '갱신', reload: '다시 불러오기' };
+  // 시안 G-13: 새 세션이 스스로 하는 점검은 이 두 줄뿐이다. 갱신·다시 불러오기는 도구 줄(자세히)에서 직접 한다.
+  var AUTO_CHECKS = ['sync', 'version'];
   var CHECK_STATES = { done: ['ok', 'done', 'pass', 'passed', 'fresh', 'same'], run: ['running', 'active', 'doing'], fail: ['fail', 'failed', 'error', 'stale', 'differs', 'old'] };
   var JOB_OK = ['done', 'ready', 'complete', 'completed', 'ok', 'success', 'succeeded'];
   var JOB_FAIL = ['error', 'fail', 'failed', 'cancelled', 'canceled'];
@@ -88,6 +90,13 @@
     // wait 와 그 밖: 상태를 보여 주고 다시 확인만 한다. 도우미 스킬이 있으면 보조로 둔다.
     return make({ type: 'wait', label: '다시 확인', helper: step.helperSkill || '', helperDisabled: busy || !!cannot });
   }
+
+  /* ---- 시안 G-09: 단계별 질문 한 줄 ---- */
+  // 올릴 차례(deliver)는 "질문 + 한 줄 설명 + 단추 둘(올리고 검토 요청 / 아직)". 다른 스킬 단계는 단계 이름과 설명을 그대로 쓴다.
+  var ASK_TEXT = {
+    deliver: { q: 'GitHub에 올려서 검토 요청(PR)을 만들까?', sub: '팀 승인자가 확인해야 합쳐져.', yes: '올리고 검토 요청',
+      later: '알겠어, 아직 안 올릴게', laterSub: '준비되면 아래 단추를 눌러 줘.' }
+  };
 
   /* ---- 건너뛰기 이유 ---- */
   function skipReasonError(text) { return String(text || '').trim() ? '' : '건너뛰는 이유를 적어 주세요.'; }
@@ -167,11 +176,15 @@
     if (CHECK_STATES.fail.indexOf(st) >= 0) return 'fail';
     return 'todo';
   }
-  var CHECK_LABEL = { done: '됐어요', run: '하는 중', fail: '다시 필요', todo: '아직' };
+  var CHECK_LABEL = { done: '됐어', run: '하는 중', fail: '다시 필요', todo: '아직' };
+  // 자동 점검이 아직 안 끝났는가(새 세션이 첫 일을 하기 전). 건너뛴 항목은 끝난 것으로 본다.
+  function autoChecksOpen(s) {
+    return arr(s && s.startChecks).some(function (c) { return c && AUTO_CHECKS.indexOf(c.id) >= 0 && lower(c.state) === 'pending'; });
+  }
   function startChecks(s) {
     var list = arr(s && s.startChecks);
     if (!list.length) return [];
-    return CHECK_ORDER.map(function (id) {
+    return AUTO_CHECKS.map(function (id) {
       var hit = list.filter(function (c) { return c && c.id === id; })[0];
       if (!hit) return null;
       var state = checkState(hit.state);
@@ -368,39 +381,90 @@
   function shortStepName(name) { return String(name || '').replace(/\s*\([^()]*\)\s*$/, '') || String(name || ''); }
   // 화면용 짧은 이름: workflow.json 의 step.short 가 있으면 그것, 없으면 괄호 설명만 뗀 이름.
   function stepShort(st) { return (st && st.short) || shortStepName(st && st.name); }
+  // 시안 G-09·10·12·13 숫자 띠: 단계 · AI 진행(갈래가 끝나면 뺀다) · 요구사항 · 개발 번호 · 작업 기록 · 검토 요청. 기억 칸은 없다(기억은 사이드바 링과 배너가 보인다).
+  // 값이 없는 칸은 지어내지 않고 건너뛴다.
   function sessionStrip(s, srs) {
-    var cells = [], steps = barSteps(s), prog = progressOf(s);
+    var cells = [], steps = barSteps(s), prog = progressOf(s), approval = s && s.phase === 'approval';
     if (steps.length) {
       var now = steps.filter(function (x) { return x.state === 'now'; })[0];
-      cells.push({ id: 'step', label: '단계', tone: 'g', value: s.flowFinished ? steps.length + ' / ' + steps.length + ' 끝' : now ? (now.index + 1) + ' / ' + steps.length + ' ' + stepShort(now) : '확인 못 함',
+      cells.push({ id: 'step', label: '단계', tone: 'g', value: s.flowFinished ? steps.length + ' / ' + steps.length + ' 끝' : now ? (now.index + 1) + ' / ' + steps.length + ' ' + (approval ? '승인 기다림' : stepShort(now)) : '확인 못 함',
         title: now && !s.flowFinished ? now.name : null });
-      cells.push({ id: 'progress', label: 'AI 진행', tone: '', value: s.flowFinished ? '끝' : prog.pct + '%',
-        title: '순서 ' + prog.total + '단계 중 ' + prog.done + '단계가 끝난 기준이야(AI 가 직접 알려 준 값이 아니야).' });
+      if (!s.flowFinished) cells.push({ id: 'progress', label: 'AI 진행', tone: '', value: approval ? '끝' : prog.pct + '%',
+        title: approval ? 'AI 가 할 일은 끝났고 승인자 확인만 남았어.' : '순서 ' + prog.total + '단계 중 ' + prog.done + '단계가 끝난 기준이야(AI 가 직접 알려 준 값이 아니야).' });
     } else cells.push({ id: 'step', label: '단계', tone: '', value: '정해진 갈래 없음' });
     var reqs = reqIds(s);
     if (reqs.length) {
-      cells.push({ id: 'req', label: '요구사항', tone: '', value: joinIds(reqs) });
+      cells.push({ id: 'req', label: '요구사항', tone: '', value: joinIds(reqs) + (s.flowFinished && s.flowId === 'srs' ? ' 확정' : '') });
       cells.push({ id: 'dev', label: '개발 번호', tone: '', value: joinIds(reqs.map(function (r) { return 'DEV-' + r.slice(4); })) });
     }
     var st = srsStatusCell(s, srs);
     if (st) cells.push(st);
     var issue = issueOf(s);
-    if (issue) cells.push({ id: 'issue', label: '작업 기록(이슈)', tone: '', value: '이슈 #' + issue });
-    var mem = memoryOf(s);
-    cells.push({ id: 'memory', label: '기억', tone: mem.kind === 'unknown' ? 'u' : mem.level ? 'w' : '', value: mem.kind === 'unknown' ? '확인 못 함' : mem.text, title: mem.title });
+    if (issue) cells.push({ id: 'issue', label: '작업 기록', tone: '', value: '이슈 #' + issue });
     var pr = prCell(s);
-    if (pr) cells.push({ id: 'pr', label: '검토 요청(PR)', tone: pr.tone, value: pr.value });
+    if (pr) cells.push({ id: 'pr', label: '검토 요청', tone: pr.tone, value: pr.value });
     return cells;
   }
   // 올림·승인 기다림 화면의 줄. 검사 결과는 합친 한 값(checks)만 있어 문서·비밀값 검사를 따로 나누지 않는다.
   // 일반 문서만 바꾼 PR 은 에이전트가 병합해도 되는 예외(rules/governance.md)가 있다. SRS·Spec(SSOT)·src 는 늘 사람이 병합하므로 작은 수정 갈래(fix)에서만 말한다.
   var AGENT_MERGE_NOTE = '문서만 바꾼 PR 은 검사가 통과하면 Claude Code 가 바로 병합하기도 해.';
+  // 검사 두 줄: 앞 검사 status 이름(doc-guard·gitleaks)이 읽히면 그 값, 아니면 합친 값(checks)에서만 말한다.
+  // 합친 값이 통과면 둘 다 통과(검사 단계가 하나라도 실패하면 합친 값이 실패다). 어느 쪽이 실패했는지 모르면 확인 못 함으로 둔다.
+  var STEP_LINES = {
+    'doc-guard': { id: 'doc', name: '문서 검사', text: { pass: '양식에 맞아', fail: '양식에 안 맞는 곳이 있어', pending: '아직 돌고 있어' } },
+    'gitleaks': { id: 'secret', name: '비밀값 검사', text: { pass: '없음', fail: '비밀값이 발견됐어', pending: '아직 돌고 있어' } }
+  };
+  var STEP_STATE = { pass: 'ok', fail: 'fail', pending: 'wait' };
+  function stepLine(key, pr, overall) {
+    var def = STEP_LINES[key], got = pr.stepChecks && pr.stepChecks[key], res = got || (overall === 'pass' ? 'pass' : overall === 'pending' ? 'pending' : '');
+    if (!res) return { id: def.id, name: def.name, state: 'unk', text: overall === 'fail' ? '어느 검사가 실패했는지 확인 못 함' : '검사 결과를 확인 못 함' };
+    return { id: def.id, name: def.name, state: STEP_STATE[res], text: def.text[res] };
+  }
+  var TEAM_WAIT = { srs: '요구사항 문서라 승인자 확인이 필요 · 기다리는 중', spec: '개발 Spec 이라 승인자 확인이 필요 · 기다리는 중' };
   function prLines(pr, flowId) {
     if (!pr || !pr.number) return [];
-    var checks = { pass: ['ok', '모두 통과했어'], fail: ['fail', '실패한 검사가 있어'], pending: ['wait', '아직 돌고 있어'], none: ['unk', '검사 결과를 확인 못 함'] }[pr.checks || 'none'] || ['unk', '검사 결과를 확인 못 함'];
+    var overall = pr.checks || 'none';
     var st = String(pr.state || '').toUpperCase();
-    var team = st === 'MERGED' ? ['ok', '합쳐졌어'] : st === 'CLOSED' ? ['fail', '합치지 않고 닫혔어'] : ['wait', '승인자 확인을 기다리는 중 · 승인은 GitHub 에서 해' + (flowId === 'fix' ? ' · ' + AGENT_MERGE_NOTE : '')];
-    return [{ id: 'checks', name: '자동 검사(문서·비밀값 등)', state: checks[0], text: checks[1] }, { id: 'team', name: '팀 승인·합치기', state: team[0], text: team[1] }];
+    var team = st === 'MERGED' ? ['ok', '합쳐졌어'] : st === 'CLOSED' ? ['fail', '합치지 않고 닫혔어'] : ['wait', (TEAM_WAIT[flowId] || '승인자 확인을 기다리는 중') + ' · 승인은 GitHub 에서 해' + (flowId === 'fix' ? ' · ' + AGENT_MERGE_NOTE : '')];
+    return [stepLine('doc-guard', pr, overall), stepLine('gitleaks', pr, overall), { id: 'team', name: '팀 승인', state: team[0], text: team[1] }];
+  }
+  // 승인자를 기다리는 동안 검사가 실패했는지(실패면 AI 에게 고치라고 해야 해서 대화 입력칸을 남긴다)
+  function checksFailed(s) { return !!(s && s.flowPr && s.flowPr.checks === 'fail'); }
+
+  /* ---- 승인 기다림·끝남(시안 G-10·12) 문장 ---- */
+  function hasBatchim(word) {
+    var t = String(word || '').replace(/[\s.·()]+$/g, ''), c = t.charCodeAt(t.length - 1);
+    if (c >= 0xAC00 && c <= 0xD7A3) return (c - 0xAC00) % 28 !== 0;
+    return /[bcdgklmnpqtx]$/i.test(t) || /[013678]$/.test(t);  // 영문·숫자는 읽는 소리의 받침으로 본다(Spec=스펙은 ㄱ)
+  }
+  function nextBase(label) { return String(label || '').split(' · ')[0].trim(); }
+  function nextShort(label) { return String(label || '').split(' · ')[0].replace(/\s*(만들기|하기)$/, '').trim(); }
+  function nextFirst(s) {
+    var o = arr(s && s.nextFlow && s.nextFlow.options).filter(function (x) { return x && x.flow && !x.disabled; })[0];
+    return o ? { flow: o.flow, short: o.name || nextShort(o.label), label: o.label || o.name || '' } : null;
+  }
+  function prMerged(s) { var pr = s && s.flowPr; return pr && pr.number && String(pr.state || '').toUpperCase() === 'MERGED' ? pr.number : null; }
+  // 사이드바 한 줄: 승인 기다림 · PR #n / 끝 · PR #n 합쳐짐
+  function phaseSide(s) {
+    var n = s && s.flowPr && s.flowPr.number;
+    if (s && s.phase === 'approval') return '승인 기다림' + (n ? ' · PR #' + n : '');
+    if (s && s.phase === 'finished') return prMerged(s) ? '끝 · PR #' + prMerged(s) + ' 합쳐짐' : '끝';
+    return '';
+  }
+  // 맨 위 띠(갈래가 끝난 세션을 보고 있을 때): PR #n이 합쳐졌어 — 다음은 <다음 갈래>
+  function finishedBand(s) {
+    var n = prMerged(s);
+    if (!s || s.phase !== 'finished' || !n) return '';
+    var nx = nextFirst(s);
+    return 'PR #' + n + '이 합쳐졌어' + (nx ? ' — 다음은 ' + nx.short : '');
+  }
+  function phaseLine(s) {
+    if (s && s.phase === 'approval') return 'GitHub에 올렸어 · 팀 승인을 기다리는 중';
+    if (s && s.phase === 'finished') {
+      var n = prMerged(s), nx = nextFirst(s);
+      return (n ? 'PR #' + n + '이 합쳐졌어.' : '이 일은 끝났어.') + (nx ? ' 다음 갈래는 ' + nx.short + (hasBatchim(nx.short) ? '이야' : '야') : '');
+    }
+    return '';
   }
 
   /* 개발 준비 상태(#668). /api/dev-ready 응답에서 화면이 쓸 것만 뽑는다. 읽지 못함(unknown)·해당 없음(no)·읽는 중은 null 이고,
@@ -464,13 +528,13 @@
   var api = {
     notifyEvents: notifyEvents,
     devReadyView: devReadyView, kindHint: kindHint, devBlock: devBlock, kindConflict: kindConflict,
-    memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, shortStepName: shortStepName, stepShort: stepShort, prLines: prLines,
+    memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, shortStepName: shortStepName, stepShort: stepShort, prLines: prLines, checksFailed: checksFailed, phaseSide: phaseSide, finishedBand: finishedBand, phaseLine: phaseLine, nextFirst: nextFirst, nextShort: nextShort, nextBase: nextBase, ASK_TEXT: ASK_TEXT, hasBatchim: hasBatchim, prMerged: prMerged,
     BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, counts: counts, summaryText: summaryText,
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice,
     formsNotice: formsNotice, FORMS_MISSING_SHORT: FORMS_MISSING_SHORT, FORMS_MISSING_TEXT: FORMS_MISSING_TEXT,
     reloadStrip: reloadStrip, reloadResult: reloadResult,
-    startChecks: startChecks, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
+    startChecks: startChecks, autoChecksOpen: autoChecksOpen, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
     mergeApprovals: mergeApprovals, prBadge: prBadge, runningSubCount: runningSubCount,
     DOC_GROUPS: DOC_GROUPS, docGroup: docGroup, docChip: docChip, mergeDocs: mergeDocs, weekDocCount: weekDocCount, weekPool: weekPool, isFormOutput: isFormOutput
