@@ -626,35 +626,76 @@ const cases = {
       { path: 'docs/SRS_v0.2.md', kind: 'md', size: 100, mtime: 20, changed: false, versions: ['docs/SRS_v0.1.md', 'docs/SRS_v0.2.md'] },
       { path: 'out/BW_Backlog_v0.1.xlsx', kind: 'xlsx', size: 18000, mtime: 30, changed: true },
       { path: 'audit/log.md', kind: 'md', size: 5, mtime: 10, changed: true }] };
-    const { kit, calls } = makeKit({ 'GET /api/sessions/s1/files': files, 'GET /api/sessions/s1/files/preview': { kind: 'md', text: '# 제목' },
+    const table = { kind: 'table', sheets: [{ name: 'Backlog', rows: [['ID', 'Title', 'Source'], ['R1', 'a', ''], ['R2', 'b', 'x']] }] };
+    const { kit, calls } = makeKit({ 'GET /api/sessions/s1/files': files,
+      'GET /api/sessions/s1/files/preview': (b, url) => (/xlsx/.test(url) ? table : { kind: 'md', text: '# SRS\n\n버전: 0.2\n\n본문' }),
       'POST /api/sessions/s1/messages': { ok: true }, 'POST /api/sessions/s1/files/open': { ok: true } }, [s1]);
     window.BHMarkdown = { render: t => h('div', { text: t }) };
     const root = h('div');
-    const view = loadUI(kit).docsPage(root); await tick(); await tick();
-    for (const need of ['내가 만든 문서', '요구사항 · 설계', '고객 양식', '기록', 'SRS_v0.2.md', 'BW_Backlog_v0.1.xlsx', 'log.md', '검토 중', '안 올림', '이전 판 1개']) assert.ok(root.textContent.includes(need), need);
+    const view = loadUI(kit).docsPage(root); for (let i = 0; i < 5; i++) await tick();
     const btn = txt => find(root, e => e.tag === 'button' && e.textContent === txt)[0];
-    // md 를 고르면 미리보기 + 열기 · 폴더에서 보기 · 고객 양식으로 뽑기 + 고쳐 달라고 하기
-    find(root, e => e.attrs['data-path'] === 'docs/SRS_v0.2.md')[0].click(); await tick(); await tick();
-    assert.ok(root.textContent.includes('# 제목') && root.textContent.includes('세션: SRS 세션'));
-    assert.ok(btn('열기') && btn('폴더에서 보기') && btn('고객 양식으로 뽑기'));
-    assert.strictEqual(find(root, e => e.attrs['data-form-card']).length, 0);
-    btn('고객 양식으로 뽑기').click(); await tick(); await tick();
-    const sent = calls.filter(c => c[0] === 'POST' && c[1] === '/api/sessions/s1/messages');
-    assert.ok(sent.length === 1 && sent[0][2].text.includes('docs/SRS_v0.2.md') && sent[0][2].text.includes('고객 양식'));  // 콘솔이 직접 뽑지 않고 세션에 말을 보낸다
+    const sentTo = () => calls.filter(c => c[0] === 'POST' && c[1] === '/api/sessions/s1/messages');
+    // 가장 최근 산출물이 고객 양식 xlsx 이면 목록 없이 결과 화면(시안 G-15): 제목 · 원본 → 양식 · 칸 수 · 넓은 미리보기 · 빈 칸 안내
+    for (const need of ['산출물 · 고객 양식', '고객 양식으로 뽑았어', '요구사항정의서 v0.1 → 고객사 Backlog 양식(xlsx)', 'BW_Backlog_v0.1.xlsx', '18000B', '양식 칸 6개 중 5개 채움',
+      '미리보기 · Backlog 시트', '비어 있는 칸 1개', 'Source 칸이 비어 있어', '폴더에서 보기', '내려받기', '문서 목록 보기']) assert.ok(root.textContent.includes(need), need);
+    assert.ok(!root.textContent.includes('내가 만든 문서') && find(root, e => (e.attrs['class'] || '').includes('dlist')).length === 0);
+    assert.strictEqual(find(root, e => (e.attrs['class'] || '') === 'sheet-tabs').length, 0);  // 시트가 하나면 시트 탭은 없다
+    assert.deepStrictEqual(find(root, e => e.tag === 'th').map(e => e.textContent), ['ID', 'Title', 'Source']);
+    const dl = find(root, e => e.tag === 'a' && e.textContent === '내려받기')[0];
+    assert.ok(dl.attrs.href.startsWith('/api/sessions/s1/files/download?path=') && dl.attrs.href.includes('BW_Backlog_v0.1.xlsx') && dl.attrs.download === 'BW_Backlog_v0.1.xlsx');
+    btn('폴더에서 보기').click(); await tick(); await tick();
+    assert.ok(calls.some(c => c[1] === '/api/sessions/s1/files/open' && c[2].mode === 'reveal' && c[2].path === 'out/BW_Backlog_v0.1.xlsx'));
+    // 빈 칸을 알려 주고 다시 뽑아 달라고 하면 이 세션에 말을 보낸다
+    const inp = find(root, e => e.attrs.id === 'doc-ask')[0];
+    assert.strictEqual(inp.attrs.placeholder, '예: 출처는 구매팀 김OO, 10/28 회의야');
+    inp.listeners.input[0]({ target: { value: '출처는 구매팀' } });
+    btn('보내기').click(); await tick(); await tick();
+    assert.ok(sentTo().length === 1 && sentTo()[0][2].text.includes('out/BW_Backlog_v0.1.xlsx') && sentTo()[0][2].text.includes('비어 있는 칸') && sentTo()[0][2].text.includes('출처는 구매팀'));
+    // '문서 목록 보기' → 시안 G-14: 왼쪽 목록 + 가장 최근 글 문서 미리보기
+    btn('문서 목록 보기').click(); for (let i = 0; i < 4; i++) await tick();
+    for (const need of ['내가 만든 문서', '요구사항 · 설계', '고객 양식', '기록', 'SRS', 'v0.2 · md', 'BW_Backlog', 'v0.1 · xlsx', 'log.md', '검토 중', '안 올림', '이전 판 1개', '안 올림 = 내 PC에만 · 검토 중 = 승인 기다림 · 합쳐짐 = 팀 공용본']) assert.ok(root.textContent.includes(need), need);
+    assert.ok(!root.textContent.includes('고객 양식으로 뽑았어') && !root.textContent.includes('확인 못 함 = 알 수 없음'));
+    assert.ok(btn('열기') && btn('폴더에서 보기') && btn('xlsx로 뽑기'));
+    assert.ok(root.textContent.includes('SRS_v0.2.md · v0.2') && root.textContent.includes('세션 SRS 세션'));
+    btn('xlsx로 뽑기').click(); await tick(); await tick();
+    assert.ok(sentTo().length === 2 && sentTo()[1][2].text.includes('docs/SRS_v0.2.md') && sentTo()[1][2].text.includes('고객 양식'));  // 콘솔이 직접 뽑지 않고 세션에 말을 보낸다
     assert.ok(root.textContent.includes('세션에 보냈어'));
     // 고쳐 달라고 하기
-    const input = find(root, e => e.attrs.id === 'doc-ask')[0];
-    input.listeners.input[0]({ target: { value: '납품일 추가' } });
+    find(root, e => e.attrs.id === 'doc-ask')[0].listeners.input[0]({ target: { value: '납품일 추가' } });
     btn('보내기').click(); await tick(); await tick();
-    const fix = calls.filter(c => c[0] === 'POST' && c[1] === '/api/sessions/s1/messages')[1];
+    const fix = sentTo()[2];
     assert.ok(fix && fix[2].text.includes('납품일 추가') && fix[2].text.includes('고쳐 줘'));
-    // xlsx 는 고객 양식 결과 카드(파일 이름 · 크기 · 폴더에서 보기)이고 뽑기 버튼은 없다
+    // 목록에서 xlsx 를 고르면 고객 양식 결과 카드(뽑기 버튼 없음), 목록은 그대로
     find(root, e => e.attrs['data-path'] === 'out/BW_Backlog_v0.1.xlsx')[0].click(); await tick(); await tick();
     const card = find(root, e => e.attrs['data-form-card'])[0];
-    assert.ok(card && card.textContent.includes('BW_Backlog_v0.1.xlsx') && card.textContent.includes('18000B') && card.textContent.includes('폴더에서 보기'));
-    assert.ok(!btn('고객 양식으로 뽑기'));
+    assert.ok(card && card.textContent.includes('BW_Backlog_v0.1.xlsx') && card.textContent.includes('18000B') && card.textContent.includes('양식 칸 6개 중 5개 채움') && card.textContent.includes('내려받기'));
+    assert.ok(find(root, e => (e.attrs['class'] || '').includes('dlist')).length === 1 && !btn('xlsx로 뽑기'));
     view.destroy();
     process.exit(0);
+  },
+  docs_form_logic() {
+    // 양식 칸 세기: 첫 줄이 칸 이름, 아래 내용 있는 줄 x 칸 이름 수. 비어 있는 칸은 이름으로 모은다. 못 읽었거나 잘렸으면 세지 않는다.
+    const t = rows => ({ kind: 'table', sheets: [{ name: 'S', rows }] });
+    assert.deepStrictEqual(L.formCells(t([['ID', 'T'], ['1', 'a'], ['2', 'b']])), { known: true, total: 4, filled: 4, empty: 0, blankNames: [] });
+    assert.deepStrictEqual(L.formCells(t([['ID', 'T', 'Src'], ['1', 'a'], [], ['2', '', ' ']])), { known: true, total: 6, filled: 3, empty: 3, blankNames: ['Src', 'T'] });
+    assert.strictEqual(L.formCells(t([['ID', 'T']])).known, false);  // 내용 줄이 없으면 칸 수를 말하지 않는다
+    assert.strictEqual(L.formCells({ kind: 'table', sheets: [{ name: 'S', rows: [['a'], ['b']], truncated: true }] }).known, false);
+    assert.strictEqual(L.formCells({ kind: 'table', sheets: [{ name: 'S', rows: [], error: 'x' }] }).known, false);
+    assert.strictEqual(L.formCells({ kind: 'md', text: '' }).known, false);
+    assert.strictEqual(L.formCells(null).known, false);
+    assert.strictEqual(L.formCells({ kind: 'table', sheets: [] }).known, false);
+    // 이름·원본·부제
+    assert.deepStrictEqual(L.docLabel('docs/ssot/SRS.md'), { name: '요구사항정의서', ver: '', ext: 'md', base: 'SRS.md' });
+    assert.deepStrictEqual(L.docLabel('CTS 관리대장_v0.2.xlsx'), { name: 'CTS 관리대장', ver: '0.2', ext: 'xlsx', base: 'CTS 관리대장_v0.2.xlsx' });
+    assert.strictEqual(L.formSubtitle('x/BW_Backlog List_v0.1.xlsx'), '요구사항정의서 v0.1 → 고객사 Backlog 양식(xlsx)');
+    assert.strictEqual(L.formSubtitle('개발사양서_v0.3.xlsx'), '개발 Spec v0.3 → 고객사 개발사양서 양식(xlsx)');
+    assert.strictEqual(L.formSubtitle('모르는 양식_v0.1.xlsx'), '고객사 모르는 양식 양식(xlsx) v0.1');  // 원본을 모르면 지어내지 않는다
+    // 가장 최근 산출물이 xlsx 양식일 때만 결과 화면
+    const d = (path, group) => ({ key: path, file: { path }, group });
+    assert.strictEqual(L.latestFormXlsx([d('a.xlsx', 'form'), d('s.md', 'spec')]).key, 'a.xlsx');
+    assert.strictEqual(L.latestFormXlsx([d('s.md', 'spec'), d('a.xlsx', 'form')]), null);
+    assert.strictEqual(L.latestFormXlsx([d('a.pptx', 'form')]), null);
+    assert.strictEqual(L.latestFormXlsx([]), null);
   },
   async dom_start_checks_and_blocked_cards() {
     const { kit } = makeKit({}, []);
