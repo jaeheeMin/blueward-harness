@@ -615,10 +615,10 @@ table.list .unk { color: #5a4bc2; }
 .quiet { color: var(--lmuted); }
 .ai .report-body { padding: 0; }
 .light .eb { color: var(--lmuted); }
-.ask { display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; border-radius: var(--rc); background: var(--bg); color: var(--text); }
+.ask { display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; border-radius: var(--rc); background: var(--bg); color: #fff; }
 .light .ask .eb { color: var(--attn); }
 .ask b { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
-.ask .sub, .light .ask .sub { margin: 0; font-size: 13px; color: var(--sec); }
+.ask .sub, .light .ask .sub { margin: 0; font-size: 13px; color: #fff; opacity: .8; }  /* 시안: 글자 흰색 · 둘째 줄은 투명도 .8 */
 .ask .skiplink { color: var(--muted); }
 .ask .skiplink:hover:not(:disabled) { color: var(--text); }
 .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }

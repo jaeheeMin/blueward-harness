@@ -1853,6 +1853,7 @@ ROUTES = [
     ("POST", re.compile(r"/api/trouble/comment"), tb(trouble.a_comment)),
     ("POST", re.compile(r"/api/trouble/resolve"), tb(trouble.a_resolve)),
     ("POST", re.compile(r"/api/trouble/draft"), tb(trouble.a_draft_put)),
+    ("POST", re.compile(r"/api/trouble/ai-draft"), tb(trouble.a_ai_draft)),
     ("GET", re.compile(r"/api/sessions"), App.a_sessions),
     ("GET", re.compile(rf"/api/sessions/{S}"), App.a_session),
     ("POST", re.compile(rf"/api/sessions/{S}/messages"), App.a_message),

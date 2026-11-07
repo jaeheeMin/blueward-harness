@@ -1266,38 +1266,42 @@
       var fix = String(c.fix || '').trim(), key = 'b' + String(c.t), open = !!chatOpen[key];
       var m = first.match(/^(.+?[.!?。](?=\s|$))\s*(.*)$/);  // 첫 문장은 크게, 나머지는 접기
       var head = m ? m[1] : first, more = ((m ? m[2] : '') + (rest ? '\n' + rest : '')).trim();
-      var card = h('div', { class: 'q ' + (cannot ? 'unsure' : 'blocked'), 'data-chat': 'block', 'data-block-kind': cannot ? 'cannot_check' : 'blocked' });
+      var card = h('div', { class: 'bad q ' + (cannot ? 'unsure' : 'blocked'), 'data-chat': 'block', 'data-block-kind': cannot ? 'cannot_check' : 'blocked' });
       card.appendChild(h('span', { class: 'tagx ' + (cannot ? 'unk' : 'fail'), text: cannot ? '? 확인 못 함' : '✕ 막힘' }));
       card.appendChild(h('b', { class: 'bt', text: (cannot ? '검사를 못 해서 멈췄어 · ' : '하네스 검사가 막았어 · ') + name }));
       card.appendChild(h('span', { class: 'sm', 'data-block-head': '1', text: head }));
-      if (more && open) card.appendChild(h('span', { class: 'sub', 'data-block-more': '1', text: more }));
-      if (fix) card.appendChild(h('span', { class: 'sub', 'data-block-fix': '1' }, h('b', { text: '고치는 법 ' }), fix));
+      if (more && open) card.appendChild(h('span', { class: 'sm', 'data-block-more': '1', text: more }));
+      if (fix) card.appendChild(h('span', { class: 'sm', 'data-block-fix': '1', text: '고치는 법: ' + fix }));
       // 시안 G-16: 막힘 [그렇게 고쳐 줘](진한) [내가 직접 볼게](테두리) [검사 원문](글자) /
       //            확인 못 함 [검사 다시 돌리기](진한) [관리자에게 알리기](테두리). 보낼 수 없는 세션이면 보내는 단추는 빼고 나머지만.
       var hkey = 'h' + String(c.t), mine = !!chatOpen[hkey], note = chatOpen['n' + String(c.t)] || '';
-      var raw = more ? h('button', { type: 'button', class: 'linkbtn sm', 'data-block-raw': '1', 'aria-expanded': String(open),
+      var raw = more ? h('button', { type: 'button', class: 'pill line quiet-edge', 'data-block-raw': '1', 'aria-expanded': String(open),
         onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, open ? '원문 접기' : '검사 원문') : null;
+      // 시안 G-23: 막힘 카드 아래 "비슷한 기록 n건 — …" 한 줄(막힘 사유 낱말로 지난 기록을 찾는다). 확인 못 함 카드에는 두지 않는다.
+      var simRow = cannot ? null : tb.similarRow(s, c, name + ' 막힘 ' + head, function () { if (built) paintMsgs(cur()); });
       if (mine) {
         card.appendChild(h('div', { class: 'acts' }, h('span', { class: 'note-muted', 'data-block-mine': '1', text: '직접 보기로 했어.' }), raw));
+        if (simRow) card.appendChild(simRow);
         return card;
       }
       var send = s.canSend === true;
       var acts = cannot
-        ? [send ? h('button', { type: 'button', class: 'pill dark sm', 'data-block-send': '1', text: '검사 다시 돌리기',
+        ? [send ? h('button', { type: 'button', class: 'pill dark', 'data-block-send': '1', text: '검사 다시 돌리기',
               onClick: function () { sendFollow('검사를 못 해서 멈춘 일을 다시 시도해 줘: ' + head + (fix ? '\n고치는 법: ' + fix : '')); } }) : null,
-           h('button', { type: 'button', class: 'pill line sm', 'data-block-admin': '1', text: '관리자에게 알리기',
+           h('button', { type: 'button', class: 'pill line', 'data-block-admin': '1', text: '관리자에게 알리기',
               onClick: function () {
                 var msg = '[하네스 검사 못 함] ' + name + '\n' + text + (s.cwd ? '\n폴더: ' + s.cwd : '');
                 var done = function (ok) { chatOpen['n' + String(c.t)] = ok ? '보낼 내용을 복사했어. 팀 메신저에 붙여 넣어 관리자에게 알려 줘.' : '복사하지 못했어. 위 문구를 직접 골라 복사해 줘.'; paintMsgs(cur()); };
                 try { navigator.clipboard.writeText(msg).then(function () { done(true); }, function () { done(false); }); } catch (e) { done(false); }
               } })]
-        : [send ? h('button', { type: 'button', class: 'pill dark sm', 'data-block-send': '1', text: '그렇게 고쳐 줘',
+        : [send ? h('button', { type: 'button', class: 'pill dark', 'data-block-send': '1', text: '그렇게 고쳐 줘',
               onClick: function () { sendFollow('하네스 훅이 막은 이유대로 고쳐 줘: ' + head + (fix ? '\n고치는 법: ' + fix : '')); } }) : null,
-           h('button', { type: 'button', class: 'pill line sm', 'data-block-self': '1', text: '내가 직접 볼게',
+           h('button', { type: 'button', class: 'pill line', 'data-block-self': '1', text: '내가 직접 볼게',
               onClick: function () { chatOpen[hkey] = true; paintMsgs(cur()); } }),
            raw];
       card.appendChild(h('div', { class: 'acts' }, acts));
       if (note) card.appendChild(h('p', { class: 'note-accent', role: 'status', text: note }));
+      if (simRow) card.appendChild(simRow);
       return card;
     }
     // 새 항목이 왔을 때 보던 자리가 대화 끝 근처일 때만 아래로 따라간다(위로 올려 읽는 중이면 그대로 둔다)
@@ -1346,6 +1350,8 @@
         var card = inlineQuestion(rid);
         if (card) out.push(card);
       });
+      var tbAsk = tb.suggestCard(s, function () { if (built) paintMsgs(cur()); });  // 시안 G-23: 막힘이 풀렸을 때 "기록해 둘까?"
+      if (tbAsk) out.push(tbAsk);
       var last = items[items.length - 1];
       var key = items.length + ':' + (last ? String(last.t) + String(last.answer || '') : '');
       var follow = chatKey !== null && key !== chatKey && chatEndNear();

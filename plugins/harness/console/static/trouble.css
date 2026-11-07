@@ -94,3 +94,9 @@
   .tl { grid-template-columns: 64px 12px minmax(0, 1fr); }
   .tb-set96, .tb-set110 { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* 세션 화면(시안 G-23, #734): 막힘 카드 아래 "비슷한 기록" 줄(시안 .row)과 "기록해 둘까?" 카드(.ask, 글자 크기는 app.css 것) */
+.tb-simrow { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; padding: 7px 0; border-top: 1px solid var(--lline); font-size: 13px; color: var(--lightink); }
+.tb-simrow a { color: var(--lightink); text-decoration: underline; }
+.ask .sub.tb-askerr { color: var(--attn); }
+
