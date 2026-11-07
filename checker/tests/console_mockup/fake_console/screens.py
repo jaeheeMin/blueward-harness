@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-from .lib import (HERE, LOGIN, RUN, ANALYSIS, add_req_row, hook_flow_session, make_project, make_xlsx, pr, set_gh, start_server, transcript, write,
+from .lib import (HERE, LOGIN, RUN, ANALYSIS, add_req_row, git, hook_flow_session, make_project, make_xlsx, pr, set_gh, start_server, transcript, write,
                   wait_for)
 
 
@@ -146,5 +146,99 @@ def g15(api):
     return "/docs"
 
 
+SLUG = "example/public-cloud"
+
+
+def _issue(number, title, state, author, day, stage, pr_no, symptom, cause="", solution="", comments=()):
+    """type:trouble 이슈 하나(gh issue list/view 가 돌려주는 모양). comments 는 (종류 글머리, 쓴 사람, 날짜, 글)."""
+    none = "_No response_"  # 본문은 .github/ISSUE_TEMPLATE/trouble.yml 이 만드는 모양(### 칸이름 아래 값)
+    body = "\n\n".join(["### 관련 PR", f"#{pr_no}" if pr_no else none, "### 단계", stage, "### 증상", "```text\n" + symptom + "\n```",
+                        "### 원인", cause or none, "### 해결 방법", solution or none]) + "\n"
+    return {"number": number, "title": "[기록] " + title, "state": state, "author": {"login": author}, "body": body,
+            "createdAt": f"2026-{day}T03:00:00Z", "url": f"https://github.com/{SLUG}/issues/{number}",
+            "comments": [{"id": f"c{number}-{i}", "author": {"login": who}, "createdAt": f"2026-{d}T03:00:00Z", "body": text}
+                         for i, (who, d, text) in enumerate(comments)]}
+
+
+def _list_issues():
+    """시안 G-20 목록의 여덟 줄."""
+    t, c, s = "시도·안 됨: x", "해결 후보: x", "해결: x"
+    return [
+        _issue(842, "ATC 검사에서 운송이 막힘(금지 API)", "OPEN", "sora", "11-05", "SAP 운송", 812, "ATC 우선순위 1: 금지된 API 사용\nCL_ABAP_RANDOM 는 ABAP Cloud 에서 쓸 수 없어(ZCL_SO_QUERY 라인 48)",
+               "공개 API 로 공개되지 않은 클래스를 호출했어. 운송 릴리스 전 ATC 검사가 이걸 막아.", "",
+               [("sora", "11-05", "시도·안 됨: \"릴리스 다시 시도\" 했는데 같은 ATC 지적으로 또 막혔어."),
+                ("minjae", "11-06", "해결 후보: CL_ABAP_RANDOM 대신 공개 API XCO_.. 로 바꾸기"),
+                ("hyun", "11-06", "시도·안 됨: ATC 예외 신청을 해 봤는데 운송 담당자가 반려했어.")]),
+        _issue(841, "doc-guard 가 Spec 양식 열 이름을 거절", "CLOSED", "hyun", "11-04", "문서 검사", 798, "doc-guard: 열 이름이 양식과 다름", "", "양식 열 이름을 맞춤",
+               [("hyun", "11-04", t), ("hyun", "11-04", s)]),
+        _issue(840, "트랜스포트 릴리스 때 잠금 오류", "OPEN", "minjae", "11-03", "SAP 운송", 806, "릴리스 중 객체 잠금 오류", "", "", [("minjae", "11-03", t)] * 3),
+        _issue(839, "SRS 승인 검사가 승인자를 못 찾음", "CLOSED", "hyun", "11-02", "문서 검사", 781, "ssot-approval: 승인자 없음", "", "승인자 파일을 고침",
+               [("hyun", "11-02", t), ("hyun", "11-02", s)]),
+        _issue(838, "uvx 엔진 받기 시간 초과", "OPEN", "sora", "11-01", "개발", None, "uvx: 시간 초과", "", "", [("sora", "11-01", t), ("minjae", "11-01", c), ("hyun", "11-01", c)]),
+        _issue(837, "pptx 매뉴얼 캡처 첫 로드 실패", "CLOSED", "minjae", "10-30", "개발", 790, "캡처 첫 로드 실패", "", "다시 열기", [("minjae", "10-30", t), ("minjae", "10-30", s)]),
+        _issue(836, "Role 매핑 xlsx 에 사람 행이 채워져 나옴", "CLOSED", "hyun", "10-28", "문서 검사", 775, "Role xlsx 사람 행 채워짐", "", "사람 행을 비움",
+               [("hyun", "10-28", t), ("hyun", "10-28", s)]),
+        _issue(835, "병합 뒤 stable 태그가 안 붙음", "CLOSED", "sora", "10-27", "배포", None, "stable 태그 없음", "", "Actions 재실행", [("sora", "10-27", t), ("sora", "10-27", s), ("sora", "10-27", t)][:3]),
+    ]
+
+
+def _trouble_world(name, extra_issues=()):
+    """기록 화면 공통 상태: 저장소 둘(public-cloud 는 읽힘, cloud-b 는 gh 로그인 필요로 못 읽음), 세션 셋(왼쪽 목록), gh 흉내."""
+    br = "docs/812-so-query"
+    root = make_project(name, br)
+    git(root, "remote", "set-url", "origin", f"https://github.com/{SLUG}.git")
+    other = make_project(name + "-b", "docs/13-manual")
+    git(other, "remote", "set-url", "origin", "https://github.com/example/cloud-b.git")
+    (RUN / "trouble_state.json").write_text(json.dumps({
+        "repos": {root.name: {"slug": SLUG}, other.name: {"error": "To get started with GitHub CLI, please run: gh auth login"}},
+        "issues": {SLUG: _list_issues() + list(extra_issues)}, "labels": ["type:trouble"]}, ensure_ascii=False), encoding="utf-8")
+    set_gh([pr(812, br, "OPEN", "판매오더 조회 앱", LOGIN, ["docs/ssot/SRS.md"], "fail")])
+    return root, other
+
+
+def _trouble_sessions(api, root, other):
+    """시안의 왼쪽 세션 셋: 판매오더 조회 앱(기억 60%, PR #812 고쳐야 함) · 구매오더 매뉴얼(81%) · CTS 관리대장 11월(15%). 목록은 새 세션이 위."""
+    api.post("/api/folders/last", {"path": str(other)})
+    api.post("/api/folders/last", {"path": str(root)})
+    hook_flow_session(api, "t3", other, "CTS 관리대장 11월", "srs", "srs", None, "작업 중", tokens=150_000, stop=False)
+    hook_flow_session(api, "t2", other, "구매오더 매뉴얼", "srs", "srs", None, "작업 중", tokens=810_000, stop=False)
+    hook_flow_session(api, "t1", root, "판매오더 조회 앱", "srs", "srs", "docs/ssot/SRS.md", "작업 중", tokens=600_000, stop=True)
+
+
+def _trouble_ready(api, path):
+    """목록 읽기는 60초 기억 + 백그라운드라 한 번 읽어 데워 둔다(못 읽은 저장소 줄도 나오도록)."""
+    wait_for(lambda: (lambda d: d if d and not d["loading"] and len(d["projects"]) >= 2 else None)(api.get("/api/trouble")[1]), 30)
+    return path
+
+
+def g20(api):
+    _trouble_sessions(api, *_trouble_world("proj-g20"))
+    return _trouble_ready(api, "/troubles")
+
+
+def g21(api):
+    similar = [_issue(733, "ATC 금지 API 를 공개 API 로 바꿈", "CLOSED", "hyun", "10-20", "SAP 운송", None, "ATC 우선순위 1: 금지된 API 사용", "", "공개 API 로 바꿈"),
+               _issue(771, "ATC 우선순위 2 지적 정리", "CLOSED", "sora", "10-25", "SAP 운송", None, "ATC 금지된 API 사용 지적", "", "정리함")]
+    _trouble_sessions(api, *_trouble_world("proj-g21", similar))
+    return _trouble_ready(api, f"/troubles/{SLUG}/842")
+
+
+def g22(api):
+    similar = [_issue(842, "ATC 검사에서 운송이 막힘", "OPEN", "sora", "11-05", "SAP 운송", 812, "ATC 우선순위 1: 금지된 API 사용")]
+    root, other = _trouble_world("proj-g22")
+    ts = json.loads((RUN / "trouble_state.json").read_text(encoding="utf-8"))
+    ts["issues"][SLUG] = [i for i in ts["issues"][SLUG] if i["number"] != 842] + similar
+    (RUN / "trouble_state.json").write_text(json.dumps(ts, ensure_ascii=False), encoding="utf-8")
+    _trouble_sessions(api, root, other)
+    _trouble_ready(api, "")
+    st, d = api.post("/api/trouble/draft", {
+        "repo": SLUG, "pr": "812", "stage": "SAP 운송", "title": "ATC 검사에서 운송이 막힘(금지 API)",
+        "symptom": "ATC 우선순위 1: 금지된 API 사용\nCL_ABAP_RANDOM 는 ABAP Cloud 에서 쓸 수 없어\nclient_secret=abcd1234efgh", "cause": "공개 API 가 아닌 클래스를 호출함",
+        "solution": "CL_ABAP_RANDOM 대신 XCO_.. 로 바꾸기", "solved": False, "source": {"title": "판매오더 조회 앱"}})
+    assert st == 200, (st, d)
+    return "/troubles/new?draft=" + d["id"]
+
+
 # 시안 화면 번호 -> 상태 만드는 함수. 상태 만들기가 준비되면 여기에 더한다.
-BUILDERS = {"G-04": g04, "G-05": g05, "G-06": g06, "G-09": g09, "G-10": g10, "G-12": g12, "G-13": g13, "G-15": g15}
+BUILDERS = {"G-04": g04, "G-05": g05, "G-06": g06, "G-09": g09, "G-10": g10, "G-12": g12, "G-13": g13, "G-15": g15,
+            "G-20": g20, "G-21": g21, "G-22": g22}

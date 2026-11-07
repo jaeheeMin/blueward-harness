@@ -313,6 +313,9 @@
     if (p === '/new') return { name: 'new' };
     if (p === '/settings') return { name: 'settings' };
     if (p === '/docs') return { name: 'docs' };
+    if (p === '/troubles') return { name: 'troubles' };
+    if (p === '/troubles/new') return { name: 'troubleNew', draft: new URLSearchParams(location.search).get('draft') || '' };
+    if ((m = /^\/troubles\/([^/]+)\/([^/]+)\/(\d+)$/.exec(p))) return { name: 'troubleItem', repo: decodeURIComponent(m[1]) + '/' + decodeURIComponent(m[2]), number: m[3] };
     return { name: 'missing' };
   }
   var route = parseRoute();
@@ -354,7 +357,7 @@
     var root = h('div');
     mainEl.appendChild(connBanner());
     mainEl.appendChild(root);
-    var v = ({ home: homeView, session: sessionView, request: requestView, 'new': newView, settings: settingsView, docs: docsView, missing: missingView })[route.name](root);
+    var v = ({ home: homeView, session: sessionView, request: requestView, 'new': newView, settings: settingsView, docs: docsView, troubles: troubleList, troubleNew: troubleNew, troubleItem: troubleItem, missing: missingView })[route.name](root);
     view = v || null;
     if (v && v.tick) tick = setInterval(v.tick, 15000);
     scheduleSide();
@@ -695,6 +698,7 @@
     if (work) nav.appendChild(link(work, { text: '작업', 'aria-current': inWork ? 'page' : null }));
     nav.appendChild(link('/docs', { text: '산출물', 'aria-current': route.name === 'docs' ? 'page' : null }));
     nav.appendChild(link(newHref(), { text: '새 작업', 'aria-current': route.name === 'new' ? 'page' : null }));
+    nav.appendChild(link('/troubles', { text: '기록', 'aria-current': /^trouble/.test(route.name) ? 'page' : null }));
     headEl.appendChild(link('/', { class: 'brand', 'aria-label': 'Blueward Harness' }, h('img', { class: 'brand-logo', src: '/static/logo-sauce.png', alt: 'Blueward' })));
     headEl.appendChild(nav);
     headEl.appendChild(h('span', { class: 'sp' }));
@@ -837,6 +841,11 @@
     return v;
   }
   function docsView(root) { return ui.docsPage(root); }
+  /* 문제·해결 기록 화면(trouble.js) */
+  var tb = window.BHTrouble.create({ h: h, clear: clear, api: api, qs: qs, link: link, go: go, safeHttp: safeHttp, loadingBox: loadingBox });
+  function troubleList(root) { return tb.listView(root); }
+  function troubleNew(root) { return tb.newView(root, { draft: route.draft }); }
+  function troubleItem(root) { return tb.itemView(root, route.repo, route.number); }
 
   /* ---------- 세션 (/s/:id) ---------- */
   function sessionView(root) {

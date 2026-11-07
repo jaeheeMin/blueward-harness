@@ -26,9 +26,10 @@ plugins/harness/
     gitstate.py             브랜치·변경·PR 로 `이번 차례` 판단, 갈래 진행·승인자 판정용 gh 조회
     devready.py             origin/main 의 SRS·Spec·원장으로 개발 건별 Spec 유무 읽기(새 작업 종류 버튼용, #668)
     flows.py                ../workflow.json(작업 순서 정본) 읽기·검사, 세션의 갈래 진행 상태, 다음 갈래 계산
+    trouble.py              문제·해결 기록(`type:trouble` 이슈) 읽기·쓰기 API(#733)
     platform_compat.py      프로세스 분리, 종료, 경로, claude 실행 파일 찾기
     session_start_hook.py   SessionStart command 훅
-    static/                 index.html, app.css, app.js, theme.js, logo-sauce.png (순수 JS, 빌드 없음)
+    static/                 index.html, app.css, app.js, trouble.js, trouble.css, theme.js, logo-sauce.png (순수 JS, 빌드 없음)
   hooks/hooks.json          훅 추가
 ```
 
@@ -256,6 +257,11 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 | POST | `/api/open` | 브라우저 열기 (쿠키 불필요) |
 | GET | `/api/health` | `{app:"harness-console", version}` (쿠키 불필요) |
 | GET | `/api/events` | SSE: `session`, `request`, `removed` |
+| GET | `/api/trouble` | 문제·해결 기록 목록(#733). 쿼리 `status`(all/open/solved)·`stage`·`q`·`project`(owner/repo)·`author`·`limit`·`refresh=1`. 콘솔이 아는 폴더의 저장소에서 `type:trouble` 이슈를 gh 로 모아 60초 기억하고, 못 읽은 저장소는 `projects[].ok:false` + `reason`(기록 없음과 구분), 읽는 중이면 `loading:true`. `stats`(total·month·open·solved·topStage) 는 필터와 무관 |
+| GET | `/api/trouble/item` | 한 건 `?repo=&number=`: 본문 칸(증상·원인·해결 방법·단계·PR) + 이력(댓글 맨 앞 `시도·안 됨:`/`해결 후보:`/`해결:` 으로 분류) + 관련 PR(상태·검사) + 비슷한 기록. 기록 라벨이 없는 이슈는 404, 못 읽으면 502(확인 못 함) |
+| GET | `/api/trouble/pr`·`/similar`·`/draft` | PR 번호 확인 · 비슷한 기록 찾기 · AI 초안(메모리) 읽기 |
+| POST | `/api/trouble` | 새 기록 올리기. 라벨이 저장소에 없으면 409(라벨은 만들지 않고 만드는 명령을 안내), 비밀처럼 보이는 줄이 있으면 422. 제목 머리말 `[기록] `·라벨 `type:trouble`·양식 칸 그대로. 해결 방법이 있으면 `해결:`(해결됐을 때, 이슈 닫음)/`해결 후보:` 댓글을 더한다 |
+| POST | `/api/trouble/comment`·`/resolve`·`/check`·`/draft` | 이력 더하기(`kind` try/candidate/solved, solved 면 본문 해결 방법 갱신+닫기) · "이걸로 해결"(후보 댓글 `commentId`) · 비밀 검사 · AI 초안 저장. 쓰기는 이슈 만들기·댓글·본문 해결 방법 고치기·닫기뿐이고 저장소는 known_root 의 것만 |
 | GET | `/api/sessions` | 목록(`updatedAt` 내림차순). 각 세션의 `group`: `todo` / `running` / `idle`. 필터는 화면이 한다 |
 | GET | `/api/sessions/:id` | 상세. 로그, 결과 보고, 변경 파일, 서브에이전트, 스킬 흐름 |
 | POST | `/api/sessions/:id/messages` | `{text}` 이어서 요청 |
@@ -308,7 +314,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 ## 9. 화면
 
-디자인은 시안(`design-canvas/project/`)을 그대로 옮긴다. 경로: `/`, `/s/:id`, `/r/:rid`, `/new`, `/settings`, `/docs`. 한 페이지 앱이고 서버는 이 경로 모두에 `index.html` 을 준다.
+디자인은 시안(`design-canvas/project/`)을 그대로 옮긴다. 경로: `/`, `/s/:id`, `/r/:rid`, `/new`, `/settings`, `/docs`, `/troubles`, `/troubles/new`, `/troubles/:owner/:repo/:n`. 한 페이지 앱이고 서버는 이 경로 모두에 `index.html` 을 준다.
 
 - 이름과 문구: 화면 이름은 "Blueward Harness" 이고 로고(`static/logo-sauce.png`, 흰 글자 + 네온 네모)를 헤더 왼쪽에 둔다. 화면 문구는 "Claude" 대신 "Claude Code" 로 쓴다. 상단의 서버 주소 표시는 두지 않는다.
 - 앱 틀(#636, 디자인 "Sauce"): 위에서부터 **알림 띠 → 헤더 → (왼쪽 세션 목록 + 본문)**.
@@ -344,6 +350,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 - 디자인 "Sauce"(#636): 색은 `app.css` 맨 위 `:root` 한 곳에만 있다. 흑요석 배경 `#132322`·패널 `#0e1a19`·깊은 `#070f0f`, 네온 그린 `#3ddc91`(accent)·민트 `#97ddbc`, 밝은 판 `#edf7f5`(글자 `#132322`), 신호 노랑 `#ffcd48`(내 차례), 위험 `#e5484d`, 확인 못 함 보라 `#8b7cf6`. 알약 버튼 56px, 카드 20px, 큰 판 40px. 대문자 모노 라벨(`.eb`) 10px, 제목 20px, **어떤 글자도 22px 를 넘지 않는다**(시험이 CSS 에서 확인). 체크박스·select 화살표는 기본 모양을 쓰지 않고 직접 그린다. 라벨 글꼴은 외부 글꼴(IBM Plex Mono)을 받을 수 없어(CSP `font-src 'self'`) 내장 JetBrains Mono 를 쓴다. 상태는 색과 모양을 함께 쓴다: 지금(채운 점) / 끝남(✓) / 내 차례(노랑 !) / 실패(빨강 ✕) / 확인 못 함(보라 점선 ?). 글자 대비는 4.5:1 이상이고 시험이 CSS 값에서 계산한다. 이번 판은 앱 틀과 홈만 새 배치이고, 세션·질문·승인·새 작업·설정 화면의 배치는 그대로이며 새 색·글꼴만 입는다.
 - 글꼴(#611): Pretendard(본문)와 JetBrains Mono(코드)를 `static/fonts/` 에 담았고(OFL 라이선스 파일 동봉) `app.css` 의 `@font-face` 가 `/fonts/…` 로 불러온다. 서버는 `.woff2` 를 `font/woff2` 로 내보내고 `fonts/` 한 단계만 연다. 바깥 글꼴 서버로 가는 `<link>` 는 CSP 가 막아 왔으므로 `index.html` 에서 뺐다.
 - 금지: 그라데이션 배경, 유리 효과, Pulse 복제, 터미널 버튼. 시안의 샘플 데이터를 코드에 남기지 않는다. 빈 상태 화면을 만든다.
+- 문제·해결 기록(#733, 시안 G-20~22, `static/trouble.js`): 헤더 메뉴 `기록`. 목록(팀 전체·찾기·전체/아직/해결됨·프로젝트·쓴 사람, 못 읽은 저장소는 보라 `? 확인 못 함` 줄 + `다시 확인`), 한 건(요약·이력 타임라인·`내 이야기 더하기`·관련 PR·비슷한 기록·GitHub 링크), 새 기록(AI 초안 줄·PR 번호 확인·비밀 줄 빨간 표시와 올리기 잠금·비슷한 기록 `거기에 더하기`·GitHub 에 올라갈 모양 미리보기). 기록은 각 Project Repository 의 이슈이고(양식 `.github/ISSUE_TEMPLATE/trouble.yml`), 콘솔이 등록·댓글·해결 단추로 바로 올린다. 구현 기록 `docs/status/733-trouble-pages.md`.
 
 ## 9a. 시안 대조 검사 (`checker/tests/console_mockup/`, #764)
 
@@ -351,7 +358,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 - **기준 파일** `baseline.json`: 시안 G-01~24(`*.dc.html`)를 1440·1280 너비로 열어 요소 30종 안팎(헤더·로고·사이드바·본문·제목·알약·숫자 띠·밝은 판·대화·카드·단추·입력칸·오른쪽 칸 등)의 위치·크기·글자 크기·안쪽 여백·모서리를 CSS px 로, 배경색·글자색을 computed 문자열로 저장한 것. 시안이 바뀌면 `python -m checker.tests.console_mockup.extract_baseline <시안 폴더>` 로 다시 뽑아 같은 PR 에 넣는다(시안 폴더는 저장소 밖 디자인 도구 쪽에 있다).
 - **요소 대응표** `elements.py`: 시안과 콘솔이 같은 클래스를 쓰는 것이 기본이고 다른 것만 따로 적는다(시안 `.steps` ↔ 콘솔 `.stepbar.big`, 시안 `.nav` ↔ 콘솔 `.topnav`, 시안 `.tile` ↔ 콘솔 `.docs-list`, 오른쪽 칸 `.split > aside` ↔ `aside.sess-side` 등). 비교 항목·허용 오차(기본 ±2px, 글자 크기 ±0.5)는 요소마다 정하고, 화면마다 `screen_config.py` 에서 덮어쓴다. 글 길이에 따라 달라지는 높이·세로 위치는 기본에서 뺐고, 세로 위치는 헤더 아래끝 기준이다(맨 위 알림 띠가 있고 없고에 흔들리지 않게).
-- **상태 만들기** `fake_console/`: 가짜 gh·claude 로 화면마다 세션 상태를 만들어 시험 콘솔(기본 포트 4881, `CONSOLE_CHECK_PORT`)을 임시 폴더에 띄운다. 준비된 화면은 G-04·05·06·09·10·12·13·15, 더하려면 `fake_console/screens.py` 에 함수를 만들고 `BUILDERS` 에 올린다.
+- **상태 만들기** `fake_console/`: 가짜 gh·claude 로 화면마다 세션 상태를 만들어 시험 콘솔(기본 포트 4881, `CONSOLE_CHECK_PORT`)을 임시 폴더에 띄운다. 준비된 화면은 G-04·05·06·09·10·12·13·15·20·21·22(기록 화면 셋은 `trouble_state.json` 으로 가짜 gh 가 type:trouble 이슈 목록·한 건·못 읽은 저장소를 돌려주고, 새 기록은 AI 초안 API 로 칸을 채운다, #779), 더하려면 `fake_console/screens.py` 에 함수를 만들고 `BUILDERS` 에 올린다.
 - **대조**: 헤드리스 Chrome·Edge·Chromium 을 DevTools 프로토콜로 직접 움직인다(새 의존성 없음, 표준 라이브러리만). 허용 오차 밖이면 `화면 너비 요소.항목: 시안 값 / 실제 값` 을 찍고 실패한다. 가로 스크롤(`scrollWidth > clientWidth`)도 실패다. 그 밖에 ① 페이지 배경이 창 높이(innerHeight) 끝까지 덮는지(html·body 배경 또는 최상위 앱 상자 배경; 시안은 `.app min-height 1000` 이라 콘솔 쪽만 판정), ② 헤더 로고가 실제로 떴는지(`naturalWidth > 0`)와 크기·위치, ③ 주요 요소의 `background-color`·`color` 가 시안과 **정확히 같은지**를 본다. 글자색 예외는 `screen_config.py` 의 `COLOR_EXCEPTIONS` 에 (시안 색, 콘솔 색) 값 쌍과 이유로 적는다(지금은 #722 의 대비 4.5:1 결정 둘: 기본 글자색 #fff→rgb(243,250,248), --lmuted #6d7775→#55625f). 값 쌍이 아니면 실패하고, 배경색·테두리색에는 예외가 없다. `screen_config.py` 의 `expect` 로 글·단추(기능) 기대값도 같이 본다.
 
 실행(저장소 루트에서):
