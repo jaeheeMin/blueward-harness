@@ -124,8 +124,17 @@ class Hooks:
             with self.store.lock:
                 req.waiters -= 1
 
-    def _terminal_without_browser(self, s: dict) -> bool:
-        return not s["managed"] and not self.store.browser_connected()
+    def _terminal_without_browser(self, s: dict, tool: str = "", tool_input=None) -> bool:
+        if s["managed"] or self.store.browser_connected():
+            return False
+        # 콘솔이 다시 연결됐을 때 화면이 알릴 수 있게 기록을 남긴다(app.js HANDOFF_MARK). 같은 호출이 거듭 오면 한 번만.
+        key = tool_key(tool, tool_input)
+        with self.store.lock:
+            if s.get("lastTermKey") != key:
+                s["lastTermKey"] = key
+                self.store.add_log(s, f"콘솔이 연결돼 있지 않아 터미널로 넘김: {tool or '질문'}")
+                self.store.touch(s)
+        return True
 
     def decide(self, s: dict, tool: str, tool_input) -> tuple[str, str, str]:
         """(allow | ask, risk, 사유). 묻지 않고 허용할 일이면 allow. 되돌릴 수 없는 일이면 risk 가 irreversible.
@@ -165,7 +174,7 @@ class Hooks:
         tool = body.get("tool_name") if isinstance(body.get("tool_name"), str) else ""
         if tool == "AskUserQuestion":
             return 200, None  # 질문은 PreToolUse 훅이 맡는다
-        if self._terminal_without_browser(s):
+        if self._terminal_without_browser(s, tool, body.get("tool_input")):
             return 200, None  # 터미널 프롬프트가 처리한다
         tool_input = body.get("tool_input")
         if self.auto_allowed(s, tool, tool_input):
@@ -193,7 +202,7 @@ class Hooks:
         tool_input = body.get("tool_input")
         if not isinstance(tool_input, dict) or not isinstance(tool_input.get("questions"), list):
             return 200, None
-        if self._terminal_without_browser(s):
+        if self._terminal_without_browser(s, "AskUserQuestion", tool_input):
             return 200, None  # 터미널 질문창으로 넘어간다
         # 마감은 질문이 도착한 시점 기준이다. 요청을 화면에 등록한 뒤에 재면 그 사이 흐른 시간만큼 늦어진다(#610).
         deadline = None if s["managed"] else self.clock() + self.question_wait
