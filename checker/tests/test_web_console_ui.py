@@ -395,6 +395,34 @@ const cases = {
     // 숫자 띠에는 기억 칸이 없다(시안 G-09·10·12·13): 기억은 사이드바 링과 배너가 보인다
     assert.ok(!L.sessionStrip({ context: { tokens: 920000, window: 1000000, pct: 92 } }).some(c => c.id === 'memory'));
   },
+  async dom_flow_cells_use_easy_words_and_review_adds_next_flow() {
+    // 순서 칸은 스킬 명령이 아니라 단계의 plain·easy(데이터)로 쓰고, 확인 화면은 첫 칸 강조 + brief + 다음 갈래 칸을 더한다(G-05·06)
+    const steps = [
+      { id: 'srs', name: 'SRS 쓰기', short: '쓰기', plain: '요구사항 쓰기', easy: 'AI가 몇 가지 물어봐', kind: 'skill', skill: 'srs' },
+      { id: 'deliver', name: '올리고 검토 요청하기', short: '올리기', plain: 'GitHub에 올리기', easy: '올리기 전에 너한테 물어', brief: '올리기 전에 물어봐', kind: 'skill', skill: 'deliver' },
+      { id: 'merge', name: '승인받고 합쳐지기 기다리기', short: '승인·합치기', kind: 'wait' }];
+    const flows = { flows: [{ id: 'srs', name: '요구사항', steps, next: { srsColumn: { branches: { '개발': { flow: 'spec', label: '개발 Spec 만들기' }, '미정': { flow: null, label: 'x' } } } } },
+                            { id: 'spec', name: '개발 Spec', steps: [] }], tools: [] };
+    const { kit } = makeKit({ 'GET /api/flows': flows });
+    const ui = loadUI(kit);
+    const pv = ui.flowPreview();
+    pv.update({ cwd: '/w', flowId: 'srs' }); await tick(); await tick();
+    const cells = (el) => find(el, e => (e.attrs['class'] || '').split(' ').includes('fs')).map(e => e.textContent);
+    assert.deepStrictEqual(cells(pv.el), ['1 요구사항 쓰기AI가 몇 가지 물어봐', '2 GitHub에 올리기올리기 전에 너한테 물어', '3 승인·합치기밖에서 일이 끝나길 기다려']);
+    assert.ok(!pv.el.textContent.includes('/harness:'));
+    pv.destroy();
+    const ch = ui.flowChooser();
+    ch.update({ cwd: '/w', found: { id: 'srs', confident: true, reason: '요구사항을 더하는 일' }, selected: 'srs', userPicked: false, kindFlowId: '', kindName: '', ready: null, insist: false, onPick: () => {}, onKeep: () => {} });
+    await tick(); await tick();
+    assert.deepStrictEqual(cells(ch.el), ['1 요구사항 쓰기이번 세션', '2 GitHub에 올리기올리기 전에 물어봐', '3 승인·합치기밖에서 일이 끝나길 기다려', '4 개발 Spec다음 세션']);
+    assert.ok(find(ch.el, e => (e.attrs['class'] || '').split(' ').includes('now')).length === 1);
+    // 갈래 설명은 AI 말 한 줄(line)로 합쳐지고, 따로 "어떤 일인가요?" 제목이나 "이 일은" 줄은 없다
+    assert.ok(ch.line.textContent.includes('이 일은 요구사항 갈래야.') && ch.line.textContent.includes('요구사항을 더하는 일'));
+    assert.ok(!ch.el.textContent.includes('어떤 일인가요?') && !ch.el.textContent.includes('이 일은'));
+    // 다른 갈래로 바꾸기는 아래 단추 줄(tail)에, 고르는 칸은 grid 에
+    assert.ok(ch.tail.textContent.includes('다른 갈래로 바꾸기'));
+    ch.destroy();
+  },
   async dom_pr_card_flow_preview_and_compact_panel() {
     const { kit } = makeKit({ 'GET /api/flows': FLOWS });
     const ui = loadUI(kit);
@@ -1106,14 +1134,18 @@ def test_session_screen_shows_auto_mode_unavailable_note(tmp_path):
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_work_screen_new_task_has_kinds_flow_and_advanced_fold(tmp_path):
-    got = _smoke(tmp_path, "new", [])
+    got = _smoke(tmp_path, "new", [], extra={"GET /api/folders/last": {"path": "C:/w/proj"}})
     text = got["text"]
     assert text.startswith("새 작업무엇을 할까?")
     for kind in ("요구사항정의서", "개발 Spec", "사용자 매뉴얼", "CTS 관리대장", "Role 정리", "개발하기", "설정하기", "ATC 지적 고치기", "작은 수정", "잘 모르겠어"):
         assert kind in text, kind
-    assert got["dump"].count("<button.kind") >= 10
-    for need in ("하고 싶은 일을 한두 줄로", "@ 로 파일 넣기", "이렇게 진행돼", "작업 폴더", "작업 시작", "고급 설정 (모델 · 생각 깊이 · 권한)", "권한 모드"):
+    assert got["dump"].count("<button.kind") == 9  # 시안 G-05 의 아홉 칸. 설정하기·표준 기능은 "그 밖의 종류" 줄(칸 줄 수가 시안과 같게)
+    assert "그 밖의 종류" in text and "<div.kinds-more" in got["dump"]
+    for need in ("하고 싶은 일을 한두 줄로", "참고 파일(회의록 · 고객 메일 · 기존 양식)", "이렇게 진행돼", "작업 폴더는 이 프로젝트로 자동으로 정해져.", "작업 시작", "고급 설정 (모델 · 생각 깊이 · 권한)", "권한 모드"):
         assert need in text, need
+    assert "/harness:" not in text.split("이렇게 진행돼")[1].split("작업 폴더")[0]  # 순서 칸은 스킬 명령이 아니라 쉬운 말
+    # 시안 순서: 고급 설정은 작업 시작 줄 아래
+    assert text.index("작업 시작") < text.index("고급 설정")
     assert "<details.more>" in got["dump"]  # 모델·생각 깊이·권한은 접힌 "고급" 안에 그대로 있다
 
 
@@ -1125,14 +1157,14 @@ def test_new_task_default_folder_priority(tmp_path):
     recent = {"GET /api/folders/recent": {"folders": ["C:/other/busy", "C:/mine/repo"]}}
     # 1) 세션 화면에서 왔다
     got = _smoke(tmp_path, "new?from=s1", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": "C:/last/one"}}))
-    assert "작업 폴더 · repo" in got["text"] and "작업 폴더 · one" not in got["text"]  # 한 줄(이름만, 전체 경로는 title)
+    assert "repo" in got["head"] and "one" not in got["head"] and "작업 폴더는 이 프로젝트로 자동으로 정해져." in got["text"]  # 프로젝트 이름은 헤더(경로 조각이 아니라 이름)
     assert "GET /api/folders/last" not in got["calls"]  # 세션 폴더가 있으면 서버 기억을 묻지 않는다
     # 2) 그냥 새 작업: 서버가 기억한 마지막 폴더
     got = _smoke(tmp_path, "new", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": "C:/last/one"}}))
-    assert "작업 폴더 · one" in got["text"] and "바꾸기" in got["text"] and "프로젝트를 고르" not in got["text"]
+    assert "one" in got["head"] and "바꾸기" in got["text"] and "프로젝트를 고르" not in got["text"]
     # 3) 둘 다 없으면 기본값 없이 "폴더를 골라 줘 [고르기]" 한 줄(최근 폴더 첫 줄을 쓰지 않는다). 목록은 처음부터 펼치지 않는다(시안 G-05, #721)
     got = _smoke(tmp_path, "new", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": None}}))
-    assert "폴더를 골라 줘" in got["text"] and "작업 폴더 · busy" not in got["text"] and "고르기" in got["text"] and "닫기" not in got["text"]
+    assert "폴더를 골라 줘" in got["text"] and "busy" not in got["head"] and "고르기" in got["text"] and "닫기" not in got["text"]
     assert "C:/other/busy" not in got["text"]  # 후보 목록은 [고르기] 를 눌러야 보인다
     # 4) 새 세션 버튼은 세션 화면에서만 출처 세션을 넘긴다
     app = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -1183,7 +1215,7 @@ def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_sta
     assert len(new) == 1 and "/harness:scaffold" in new[0][2] and "C:/p/needs" in new[0][2], new
     # [나중에] -> 원래 새 작업 화면으로 돌아가고 작업을 시작하지 않는다
     later = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick + [{"click": "[data-intro-later]"}])
-    assert "하고 싶은 일을 한두 줄로" in later["text"] and "작업 폴더 · needs" in later["text"] and "프로젝트 준비" not in later["text"]
+    assert "하고 싶은 일을 한두 줄로" in later["text"] and "needs" in later["head"] and "작업 폴더는 이 프로젝트로 자동으로 정해져." in later["text"] and "프로젝트 준비" not in later["text"]
     assert not [p for p in later["posts"] if p[1] == "/api/new"]
 
 
@@ -1255,7 +1287,7 @@ def test_settings_ask_range_has_three_steps_tied_to_server_and_default_permissio
 def test_header_project_follows_the_folder_on_screen(tmp_path):
     other = _session("s1", cwd="C:/other/templete-func", repo="templete-func")
     got = _smoke(tmp_path, "new", [other], extra={"GET /api/folders/last": {"path": "C:/w/proj"}})
-    assert "w/proj" in got["head"] and "templete-func" not in got["head"]  # 새 작업은 고른 작업 폴더를 따른다(가장 위 세션 것이 아니다)
+    assert "proj" in got["head"] and "w/proj" not in got["head"] and "templete-func" not in got["head"]  # 새 작업은 고른 작업 폴더를 따른다(가장 위 세션 것이 아니다)
     got = _smoke(tmp_path, "s/s1", [other])
     assert "templete-func" in got["head"]
     got = _smoke(tmp_path, "settings", [other, _session("s2", cwd="C:/w/proj")])
@@ -1562,3 +1594,14 @@ def test_notify_sends_once_per_event_and_skips_first_list_visible_tab_and_off_sw
     # 권한이 없으면 보내지 않는다
     off = _smoke(tmp_path, "", [_session("s1", group="running")], extra=_notify_env("denied", _ALL), actions=_change("s1", group="idle"))
     assert off["notes"] == []
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_header_keeps_work_menu_and_project_name_without_sessions(tmp_path):
+    """시안 G-04: 세션이 없어도 메뉴(내 일·작업·산출물·새 작업)와 프로젝트 이름(경로가 아니라 이름, 마지막 폴더)이 보이고, 홈 입력칸 단추는 "보내기" 다."""
+    last = {"GET /api/folders/last": {"path": "C:/Work/harness-sandbox", "name": "harness-sandbox"}}
+    got = _smoke(tmp_path, "", [], extra=last)
+    assert got["head"].startswith("내 일작업산출물새 작업") and "harness-sandbox" in got["head"] and "Work/" not in got["head"]
+    assert "보내기" in got["text"] and "새 작업으로" not in got["text"]
+    new = _smoke(tmp_path, "new", [], extra=last)
+    assert "harness-sandbox" in new["head"] and "Work/" not in new["head"]
