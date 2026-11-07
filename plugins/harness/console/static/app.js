@@ -870,6 +870,7 @@
       built = true; clear(root);
       var page = h('div', { class: 'page sess' });
       function region(k, parent) { regions[k] = h('div', { 'data-r': k }); (parent || page).appendChild(regions[k]); return regions[k]; }
+      region('memtop');  // 시안 G-18: 기억 배너는 제목 위 맨 꼭대기
       // 시안 G-09·12: 제목 블록(눈썹·제목·상태 줄·순서 알약) 오른쪽에 층 그림. 순서(갈래)가 있을 때만 그림이 보인다.
       var titleCol = h('div', { class: 'titlecol' });
       regions.head = h('div', { 'data-r': 'head' }); regions.stages = h('div', { 'data-r': 'stages' });
@@ -1066,8 +1067,11 @@
     }
 
     // 순서 알약: ✓ 끝난 단계 / 지금 단계 / 남은 단계. 끝났으면 다음 갈래 이름을 마지막 알약으로 보인다.
+    // 시안: 순서 알약과 층 그림은 "올릴 차례"(G-09, turnSkill deliver)와 "갈래가 끝남"(G-12)에서만 보인다.
+    // 질문(G-07)·일하는 중(G-08)·막힘(G-16)·확인(G-17)·기억(G-18) 화면에는 없다.
+    function stagesShown(s) { return !!(s.flowFinished || (s.turnSkill === 'deliver' && !(s.pendingRequestIds || []).length)); }
     function paintStages(s) {
-      var bar = s.flowId && (s.flowSteps || []).length ? ui.stepBar(s, true) : null;
+      var bar = s.flowId && (s.flowSteps || []).length && stagesShown(s) ? ui.stepBar(s, true) : null;
       if (bar && s.flowFinished) {
         var nx = window.BHLogic.nextOptions(s).options.filter(function (o) { return !o.disabled; })[0];
         if (nx) bar.appendChild(h('li', { class: 'step next' }, h('span', { class: 'snm', text: '→ 다음: ' + nx.label })));
@@ -1084,17 +1088,19 @@
     }
 
     function paintNotices(s) {
-      var notices = [];
-      // 시안 18: 기억이 90% 이상 찼으면 세션 화면 위에 배너. [계속하기] 는 이 화면을 다시 열 때까지만 닫는다.
+      var notices = [], top = [];
+      // 시안 G-18: 기억이 90% 이상 찼으면 제목 위 맨 꼭대기에 노란 배너, [새 세션으로 넘기기](진한) [계속하기](테두리).
+      // [계속하기] 는 이 화면을 다시 열 때까지만 닫는다.
       var mem = window.BHLogic.memoryOf(s);
       if (mem.kind === 'pct' && mem.level === 'hot' && s.status !== 'ended' && !memDismissed[s.id]) {
         var canHand = s.managed && s.flowId && !s.handedOffTo;
-        notices.push(h('div', { class: 'banner mem', role: 'status', 'data-memory-banner': '1' },
+        top.push(h('div', { class: 'banner mem', role: 'status', 'data-memory-banner': '1' },
           h('b', { class: 'mem-t', text: '이 세션 기억이 거의 찼어 (' + mem.pct + '%)' }),
           h('span', { class: 'mem-d', text: canHand ? '더 길어지면 앞 내용을 잊고 실수할 수 있어. 지금까지 한 일을 정리해서 새 세션으로 넘기길 권해.'
             : '더 길어지면 앞 내용을 잊고 실수할 수 있어. ' + (s.managed ? '정해진 갈래가 없어서 여기서는 넘길 수 없어. 새 작업으로 시작해 줘.' : '터미널 세션이라 여기서는 넘길 수 없어. 터미널에서 /harness:handoff 를 불러 줘.') }),
-          canHand ? h('button', { type: 'button', class: 'mem-go', text: '새 세션으로 넘기기', onClick: function () { parts.flow.handoffSame(cur()); } }) : null,
-          h('button', { type: 'button', class: 'mem-stay', text: '계속하기', onClick: function () { memDismissed[s.id] = true; paintNotices(cur()); } })));
+          h('span', { class: 'acts mem-acts' },
+            canHand ? h('button', { type: 'button', class: 'pill dark sm mem-go', text: '새 세션으로 넘기기', onClick: function () { parts.flow.handoffSame(cur()); } }) : null,
+            h('button', { type: 'button', class: 'pill line sm mem-stay', text: '계속하기', onClick: function () { memDismissed[s.id] = true; paintNotices(cur()); } }))));
       }
       if (s.bypassPermissions || /bypass/i.test(String(s.permissionMode || ''))) {
         notices.push(h('div', { class: 'banner info' }, h('span', { text: '권한 우회 모드로 실행 중인 세션이야. 이 세션은 승인 요청이 발생하지 않아 콘솔에 승인 화면이 뜨지 않아.' })));
@@ -1107,6 +1113,7 @@
           link('/s/' + encodeURIComponent(s.handedOffTo), { text: '새 세션 보기' })));
       }
       regions.notices.replaceChildren.apply(regions.notices, notices);
+      regions.memtop.replaceChildren.apply(regions.memtop, top);
     }
 
     // 이 일의 순서를 체크리스트로(AI 가 따로 알려 주는 할 일 목록은 데이터에 없다)
@@ -1181,15 +1188,34 @@
       card.appendChild(h('span', { class: 'tagx ' + (cannot ? 'unk' : 'fail'), text: cannot ? '? 확인 못 함' : '✕ 막힘' }));
       card.appendChild(h('b', { class: 'bt', text: (cannot ? '검사를 못 해서 멈췄어 · ' : '하네스 검사가 막았어 · ') + name }));
       card.appendChild(h('span', { class: 'sm', 'data-block-head': '1', text: head }));
-      if (more) {
-        if (open) card.appendChild(h('span', { class: 'sub', 'data-block-more': '1', text: more }));
-        card.appendChild(h('button', { type: 'button', class: 'disclose', 'aria-expanded': String(open), onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, icon('chev', 14), open ? '접기' : '전체 보기'));
-      }
+      if (more && open) card.appendChild(h('span', { class: 'sub', 'data-block-more': '1', text: more }));
       if (fix) card.appendChild(h('span', { class: 'sub', 'data-block-fix': '1' }, h('b', { text: '고치는 법 ' }), fix));
-      if (s.canSend === true) {
-        card.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line sm', 'data-block-send': '1', text: '그렇게 고쳐 줘',
-          onClick: function () { sendFollow('하네스 훅이 막은 이유대로 고쳐 줘: ' + head + (fix ? '\n고치는 법: ' + fix : '')); } })));
+      // 시안 G-16: 막힘 [그렇게 고쳐 줘](진한) [내가 직접 볼게](테두리) [검사 원문](글자) /
+      //            확인 못 함 [검사 다시 돌리기](진한) [관리자에게 알리기](테두리). 보낼 수 없는 세션이면 보내는 단추는 빼고 나머지만.
+      var hkey = 'h' + String(c.t), mine = !!chatOpen[hkey], note = chatOpen['n' + String(c.t)] || '';
+      var raw = more ? h('button', { type: 'button', class: 'linkbtn sm', 'data-block-raw': '1', 'aria-expanded': String(open),
+        onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, open ? '원문 접기' : '검사 원문') : null;
+      if (mine) {
+        card.appendChild(h('div', { class: 'acts' }, h('span', { class: 'note-muted', 'data-block-mine': '1', text: '직접 보기로 했어.' }), raw));
+        return card;
       }
+      var send = s.canSend === true;
+      var acts = cannot
+        ? [send ? h('button', { type: 'button', class: 'pill dark sm', 'data-block-send': '1', text: '검사 다시 돌리기',
+              onClick: function () { sendFollow('검사를 못 해서 멈춘 일을 다시 시도해 줘: ' + head + (fix ? '\n고치는 법: ' + fix : '')); } }) : null,
+           h('button', { type: 'button', class: 'pill line sm', 'data-block-admin': '1', text: '관리자에게 알리기',
+              onClick: function () {
+                var msg = '[하네스 검사 못 함] ' + name + '\n' + text + (s.cwd ? '\n폴더: ' + s.cwd : '');
+                var done = function (ok) { chatOpen['n' + String(c.t)] = ok ? '보낼 내용을 복사했어. 팀 메신저에 붙여 넣어 관리자에게 알려 줘.' : '복사하지 못했어. 위 문구를 직접 골라 복사해 줘.'; paintMsgs(cur()); };
+                try { navigator.clipboard.writeText(msg).then(function () { done(true); }, function () { done(false); }); } catch (e) { done(false); }
+              } })]
+        : [send ? h('button', { type: 'button', class: 'pill dark sm', 'data-block-send': '1', text: '그렇게 고쳐 줘',
+              onClick: function () { sendFollow('하네스 훅이 막은 이유대로 고쳐 줘: ' + head + (fix ? '\n고치는 법: ' + fix : '')); } }) : null,
+           h('button', { type: 'button', class: 'pill line sm', 'data-block-self': '1', text: '내가 직접 볼게',
+              onClick: function () { chatOpen[hkey] = true; paintMsgs(cur()); } }),
+           raw];
+      card.appendChild(h('div', { class: 'acts' }, acts));
+      if (note) card.appendChild(h('p', { class: 'note-accent', role: 'status', text: note }));
       return card;
     }
     // 새 항목이 왔을 때 보던 자리가 대화 끝 근처일 때만 아래로 따라간다(위로 올려 읽는 중이면 그대로 둔다)
@@ -1418,7 +1444,7 @@
         h('span', { class: 'eb ' + (open ? 'attn' : ''), 'data-eb': '1', text: ebText(isQ) }),
         h('h1', { text: s.title || baseName(s.cwd) || (isQ ? '질문' : '승인') }),
         h('p', { class: 'line', text: line })));
-      if (s.id && s.flowId && (s.flowSteps || []).length) page.appendChild(ui.stepBar(s, true));
+      // 질문(G-07)·확인(G-17) 화면에는 순서 알약이 없다(시안)
       if (s.id) {
         var cells = window.BHLogic.sessionStrip(s);
         page.appendChild(h('div', { class: 'strip', role: 'list', 'aria-label': '진행 숫자' }, cells.map(function (c) {
@@ -2364,15 +2390,8 @@
         askCfg && askCfg.problem ? h('p', { class: 'note-attn', role: 'alert', 'data-ask-problem': '1', text: askCfg.problem }) : null,
         h('p', { class: 'note-muted', 'data-ask-note': '1', text: '어떤 걸 골라도 위험한 일(main에 바로 올리기 · 강제 덮어쓰기 · SAP 운영 쓰기)은 하네스가 막아. 지우기 · GitHub에 올리기 · 작업 폴더 밖 쓰기처럼 되돌릴 수 없는 일은 항상 물어.' }))));
 
-      var cur = permissionChoice();
-      var radios = h('div', { class: 'radios', role: 'radiogroup', 'aria-label': '기본 권한' }, permissionOptions().map(function (o) {
-        var on = o.value === cur;
-        return h('button', { type: 'button', role: 'radio', class: 'radio', 'aria-checked': String(on), 'data-perm-opt': o.value,
-          onClick: function () { draft.permission = o.value; BH.write('bh-permission', o.value); draw(); } },
-          h('i', { class: 'rd' + (on ? ' on' : ''), 'aria-hidden': 'true' }), h('span', null, h('b', { text: o.label })));
-      }));
-      sec.appendChild(set('기본 권한', h('div', null, radios,
-        h('p', { class: 'note-muted', text: '새 작업을 시작할 때 쓰는 기본값이야. 이미 돌고 있는 세션은 그 세션 화면의 "자세히" 에서 바꿔. "알아서 하되 위험한 건 AI가 막기" 는 관리자가 껐거나 모델이 지원하지 않으면 못 써. 그러면 세션 화면에 이유가 떠.' }))));
+      // 시안 G-19: 설정엔 "AI가 묻는 범위" 하나만 둔다. 권한 모드(계획만 세우기 · 알아서 하되 위험한 건 AI가 막기 포함)는
+      // 일마다 고르는 것이라 새 작업 "고급 설정" 의 권한 모드에서 고르고, 고른 값은 다음 새 작업에도 기억한다(bh-permission).
 
       var perm = notifyPerm(), rows = [['turn', '내 차례가 오면'], ['blocked', '막히거나 확인 못 한 일이 생기면'], ['done', 'AI가 일을 끝낼 때마다']];
       var permText = perm === 'unsupported' ? '이 브라우저는 알림을 지원하지 않아'

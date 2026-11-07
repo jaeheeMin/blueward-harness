@@ -400,10 +400,13 @@ const cases = {
     assert.ok(text.includes('proj-a') && text.includes('proj-b'));
     assert.ok(find(root, e => e.tag === 'span' && (e.attrs.title || '').includes('서브에이전트 1개 실행 중')).length === 1 && !text.includes('서브에이전트 1개 실행 중'));  // 상태 칸은 칩 하나, 둘째 줄은 title
     assert.ok(text.includes('PR #4 · 검사 통과') && text.includes('이슈 #636'));
-    assert.ok(text.includes('내가 승인할 PR 1건'));
-    // 숫자 타일: 내 차례 / 일하는 중 / 쉬는 중, 승인 기다리는 PR 은 데이터를 받은 뒤에만 보인다
+    // 시안 G-11: 검토 요청(PR) 칸 안에서는 큰 카드 없이 줄 하나("내가 승인할 PR #n …"). 머리와 문장이 붙어 나오지 않는다
+    assert.ok(text.includes('내가 승인할 PR #') && !text.includes('내가 승인할 PR 1건') && !text.includes('건지금'));
+    // 숫자 타일(시안 G-11): 내 차례 / 일하는 중 / 이번 주 산출물, 승인 기다리는 PR 은 데이터를 받은 뒤에만 보인다
     const tiles = find(root, e => (e.attrs['class'] || '').split(' ').includes('tile2'));
-    assert.deepStrictEqual(tiles.slice(0, 3).map(t => t.textContent), ['내 차례1', 'AI가 일하는 중1', '쉬는 중0']);
+    assert.deepStrictEqual(tiles.slice(0, 2).map(t => t.textContent), ['내 차례1', 'AI가 일하는 중1']);
+    const weekTile = find(root, e => e.attrs['data-week-tile'])[0];
+    assert.ok(weekTile && weekTile.textContent.startsWith('이번 주 산출물') && !text.includes('쉬는 중0'));
     const prTile = find(root, e => e.attrs['data-pr-tile'])[0];
     assert.ok(!prTile.hidden && prTile.textContent === '승인 기다리는 PR1');
     // 내 차례 노랑 카드는 요청 화면으로 보낸다. 기억 %는 데이터가 없어 지어내지 않는다.
@@ -566,6 +569,13 @@ const cases = {
     const out = L.mergeDocs([{ session: a, files: [{ path: 'docs/SRS.md', mtime: 5, changed: true }] }, { session: b, files: [{ path: 'docs/srs.md', mtime: 9 }, { path: 'x.xlsx', mtime: 1 }] }]);
     assert.deepStrictEqual(out.map(d => [d.session.id, d.group]), [['a', 'spec'], ['b', 'form']]);
     assert.ok(L.isFormOutput({ path: 'a.xlsx' }) && L.isFormOutput({ path: 'a.pptx' }) && !L.isFormOutput({ path: 'a.pdf' }) && !L.isFormOutput({ path: 'a.md' }));
+    // 이번 주 산출물(시안 G-11): 최근 7일 안에 바뀐 문서만 센다. 시각은 초·밀리초 둘 다
+    const now = 1000000000, day = 86400;
+    const docs = [{ file: { mtime: now - day } }, { file: { mtime: (now - 2 * day) * 1000 } }, { file: { mtime: now - 8 * day } }, { file: {} }];
+    assert.strictEqual(L.weekDocCount(docs, now), 2);
+    const ss = [{ id: 'old', updatedAt: now - 9 * day }, { id: 'new', updatedAt: now - 60 }, { id: 'mid', updatedAt: now - 3 * day }, { id: 'gone', updatedAt: now, handedOffTo: 'x' }];
+    assert.deepStrictEqual(L.weekPool(ss, now, 20).map(s => s.id), ['new', 'mid']);
+    assert.deepStrictEqual(L.weekPool(ss, now, 1).map(s => s.id), ['new']);
   },
   async dom_docs_page() {
     const s1 = { id: 's1', title: 'SRS 세션', cwd: '/w/p', updatedAt: 9, canSend: true, flowPr: { number: 6, state: 'OPEN' } };
@@ -875,7 +885,10 @@ def test_work_screen_session_matches_design(tmp_path):
     got = _smoke(tmp_path, "s/s1", [_session("s1", status="running", managed=True, currentAction="Edit docs/SRS.md", pendingRequestIds=["q1"])], [q])
     text, dump = got["text"], got["dump"]
     assert text.startswith("요구사항 만들기·바꾸기 · 내 응답을 기다리는 중구매오더 조회 앱 요구사항")
-    assert "<ol.stepbar.big>" in dump and "<div.strip>" in dump
+    # 시안: 순서 알약·층 그림은 "올릴 차례"(G-09)·"갈래 끝남"(G-12)에만. 확인을 기다리는 화면(G-17)엔 없다
+    assert "<ol.stepbar.big>" not in dump and "<div.strip>" in dump
+    turn = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", managed=True, turnSkill="deliver")])
+    assert "<ol.stepbar.big>" in turn["dump"]
     for cell in ("단계2 / 3 올리고 검토 요청하기", "AI 진행33%", "작업 기록(이슈)이슈 #4", "검토 요청(PR)PR #6 검토 중"):
         assert cell in text, cell
     assert "요구사항REQ" not in text and "개발 번호" not in text  # 데이터가 없는 칸은 지어내지 않는다
@@ -1127,9 +1140,12 @@ def test_settings_ask_range_has_three_steps_tied_to_server_and_default_permissio
     got = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(perms, **{"GET /api/settings/ask": {"level": "needed"}}))
     text, dump = got["text"], got["dump"]
     for need in ("AI가 묻는 범위", "꼭 필요할 때만 (권장)", "문서를 바꿀 때마다", "모든 명령마다",
-                 "어떤 걸 골라도 위험한 일(main에 바로 올리기 · 강제 덮어쓰기 · SAP 운영 쓰기)은 하네스가 막아.",
-                 "기본 권한", "알아서 하되 위험한 건 AI가 막기"):
+                 "어떤 걸 골라도 위험한 일(main에 바로 올리기 · 강제 덮어쓰기 · SAP 운영 쓰기)은 하네스가 막아."):
         assert need in text, need
+    # 시안 G-19: 설정엔 "AI가 묻는 범위" 하나만. 권한 모드(계획만·auto 포함)는 새 작업 고급 설정에서 고른다
+    assert "기본 권한" not in text and "data-perm-opt" not in dump
+    new = _smoke(tmp_path, "new", [], extra=perms)
+    assert "권한 모드" in new["text"] and "<select.input>" in new["dump"]  # 새 작업 고급 설정의 권한 모드 고르기(선택지는 /api/models 의 permissionOptions)
     assert "GET /api/settings/ask" in got["calls"]
     assert text.count("꼭 필요할 때만") == 1
     # 단계를 누르면 서버에 저장한다
@@ -1369,9 +1385,15 @@ def test_chat_draws_hook_block_cards_two_kinds_and_fix_button(tmp_path):
     assert "? 확인 못 함" in text and "검사를 못 해서 멈췄어 · 마무리 확인" in text
     assert "문서가 템플릿을 따르지 않습니다." in text and "자세한 위반 목록입니다." not in text  # 첫 문장만 크게, 나머지는 접힘
     assert "고치는 법 개요 절을 추가하십시오." in text
-    assert text.count("그렇게 고쳐 줘") == 2
+    # 시안 G-16 단추: 막힘 [그렇게 고쳐 줘] [내가 직접 볼게] [검사 원문] / 확인 못 함 [검사 다시 돌리기] [관리자에게 알리기]
+    assert text.count("그렇게 고쳐 줘") == 1 and "내가 직접 볼게" in text and "검사 원문" in text
+    assert "검사 다시 돌리기" in text and "관리자에게 알리기" in text
+    assert "<button.pill.dark.sm>" in dump  # 보내는 단추는 진한 단추
     unsent = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, canSend=False)])
-    assert "그렇게 고쳐 줘" not in unsent["text"] and "✕ 막힘" in unsent["text"]
+    assert "그렇게 고쳐 줘" not in unsent["text"] and "검사 다시 돌리기" not in unsent["text"] and "✕ 막힘" in unsent["text"]
+    assert "내가 직접 볼게" in unsent["text"] and "관리자에게 알리기" in unsent["text"]  # 보내지 않는 단추는 남는다
+    mine = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-self]"}])
+    assert "직접 보기로 했어." in mine["text"] and mine["text"].count("내가 직접 볼게") == 0
     unknown = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="새_훅")])])
     assert "하네스 검사가 막았어 · 새_훅" in unknown["text"]  # 이름표에 없으면 원래 이름
 

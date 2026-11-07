@@ -694,6 +694,13 @@
         if (st.note) listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: st.note }));
         if (st.truncated) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '문서가 너무 많아 목록이 잘렸어요. 더 있을 수 있어요.' }));
         if (!st.files.length) { listBox.appendChild(h('p', { class: 'note-muted', text: st.unknown != null ? '확인된 문서가 없어요.' : '아직 만든 문서가 없어요.' })); return; }
+        // 시안 G-08·G-09: 오른쪽은 문서 미리보기 한 장. 다른 문서 목록은 눌렀을 때만 펼친다(고를 수 있게 남겨 둔다).
+        if (st.selected && !st.showList) {
+          var others = st.files.length - 1;
+          if (others > 0) listBox.appendChild(h('button', { type: 'button', class: 'disclose', 'data-docs-more': '1', 'aria-expanded': 'false',
+            onClick: function () { st.showList = true; drawList(); } }, '다른 문서 ' + others + '개 보기'));
+          return;
+        }
         st.files.forEach(function (f) {
           listBox.appendChild(item(f, false));
           var olds = L.versionPaths(f);
@@ -839,20 +846,23 @@
         var merged = L.mergeApprovals(rs.map(function (r) { return r.ok ? r.data : null; }));
         clear(box);
         if (onMerged) onMerged(merged);
+        var compact = !!box.dataset.compact;  // 홈 "검토 요청(PR)" 칸 안(시안 G-11): 머리 없이 줄만
         if (merged.state === 'yes') {
           var items = merged.items;
-          // 시안 G-11 아래 칸: eb 머리 + 줄(이름 · 오른쪽 짧은 글)
-          box.appendChild(h('span', { class: 'eb', text: '내가 승인할 PR ' + items.length + '건' }));
-          if (!items.length) box.appendChild(h('span', { class: 'quiet', text: '지금 기다리는 PR 이 없어요.' }));
+          if (!compact) {
+            // 세션이 없을 때의 따로 선 칸: eb 머리 + 줄(이름 · 오른쪽 짧은 글). 머리와 문장은 각자 한 줄(.blk)
+            box.appendChild(h('span', { class: 'eb blk', text: '내가 승인할 PR ' + items.length + '건' }));
+            if (!items.length) box.appendChild(h('span', { class: 'quiet blk', text: '지금 기다리는 PR 이 없어요.' }));
+          }
           items.forEach(function (it) {
             var url = kit.safeHttp(it.url);
-            var label = '#' + it.number + ' ' + (it.title || '');
-            box.appendChild(h('div', { class: 'srow2' }, url ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer', text: label }) : h('span', { text: label }),
-              h('span', { text: (it.author ? it.author : '') + (it.staleApproval ? ' · 새 변경 뒤 다시 확인' : '') })));
+            var label = (compact ? '내가 승인할 PR ' : '') + '#' + it.number + ' ' + (it.title || '');
+            box.appendChild(h('div', { class: 'srow2', 'data-approval': String(it.number) }, url ? h('a', { class: 'lm', href: url, target: '_blank', rel: 'noopener noreferrer', text: label }) : h('span', { class: 'lm', text: label }),
+              h('span', { text: (it.author ? it.author + (compact ? ' 가 올림' : '') : '') + (it.staleApproval ? ' · 새 변경 뒤 다시 확인' : '') })));
           });
         } else if (merged.state === 'unknown') {
-          box.appendChild(h('span', { class: 'eb', text: '내가 승인할 PR' }));
-          box.appendChild(h('span', { class: 'note-attn', role: 'status', text: '승인할 PR 판정 불능 · ' + (merged.reason || '이유를 읽지 못했어요.') }));
+          if (!compact) box.appendChild(h('span', { class: 'eb blk', text: '내가 승인할 PR' }));
+          box.appendChild(h('span', { class: 'note-attn blk', role: 'status', text: '승인할 PR 판정 불능 · ' + (merged.reason || '이유를 읽지 못했어요.') }));
         }
       });
     }
@@ -895,9 +905,13 @@
 
     // 홈 아래 오른쪽 칸 "최근 산출물"(시안 G-11): 최근에 움직인 세션 몇 개의 문서 목록을 모아 가장 최근 몇 개를 칩과 함께 보인다.
     // 읽지 못하면 있는 것처럼 두지 않고 "확인 못 함" 이라고 쓴다.
-    var RECENT_POOL = 6, RECENT_ROWS = 4;
-    function recentCard(box) {
-      var pool = sessionList().filter(function (s) { return !s.handedOffTo; }).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).slice(0, RECENT_POOL);
+    // 같은 목록으로 홈 숫자 칸 "이번 주 산출물" 도 센다(onWeek(n), 읽지 못하면 onWeek(null)). 이번 주에 움직인 세션은 WEEK_POOL 개까지 본다.
+    var RECENT_POOL = 6, RECENT_ROWS = 4, WEEK_POOL = 20;
+    function recentCard(box, onWeek) {
+      var nowSec = Date.now() / 1000, all = sessionList();
+      var recentFirst = all.filter(function (s) { return !s.handedOffTo; }).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).slice(0, RECENT_POOL);
+      var pool = recentFirst.slice();
+      L.weekPool(all, nowSec, WEEK_POOL).forEach(function (s) { if (pool.indexOf(s) < 0) pool.push(s); });
       // 순서만 바뀐 것(일하는 세션의 updatedAt 갱신)으로는 다시 읽지 않는다. 세션 묶음이 바뀔 때만 6개 파일 목록을 다시 묻는다.
       var sig = pool.map(function (s) { return s.id; }).sort().join('|');
       if (box.dataset.sig === sig && box.dataset.ready) return;
@@ -912,7 +926,9 @@
         clear(box);
         box.appendChild(h('span', { class: 'eb', text: '최근 산출물' }));
         var failed = parts.filter(function (p) { return p.failed; }).length;
-        var docs = L.mergeDocs(parts).slice(0, RECENT_ROWS);
+        var allDocs = L.mergeDocs(parts);
+        if (onWeek) onWeek(failed === parts.length && parts.length ? null : L.weekDocCount(allDocs, Date.now() / 1000));
+        var docs = allDocs.slice(0, RECENT_ROWS);
         if (failed === parts.length && parts.length) { box.appendChild(h('span', { class: 'note-attn', role: 'status', text: '확인 못 함 · 문서 목록을 읽지 못했어.' })); return; }
         if (!docs.length) box.appendChild(h('span', { class: 'quiet', text: '아직 만든 산출물이 없어.' }));
         docs.forEach(function (d) {
@@ -995,6 +1011,13 @@
       var prVal = h('span', { class: 'v', text: '…' });
       var prTile = h('div', { class: 'tile2', 'data-pr-tile': '1' }, h('span', { class: 'eb', text: '승인 기다리는 PR' }), prVal);
       prTile.hidden = true;
+      // 시안 G-11 의 넷째 칸 "이번 주 산출물". 값은 최근 산출물 칸이 읽은 문서 목록으로 센다(새로 묻지 않는다).
+      var weekVal = h('span', { class: 'v', text: '…' });
+      var weekTile = h('div', { class: 'tile2', 'data-week-tile': '1' }, h('span', { class: 'eb', text: '이번 주 산출물' }), weekVal);
+      function showWeek(n) {
+        weekVal.textContent = n == null ? '확인 못 함' : String(n);
+        weekTile.className = 'tile2' + (n == null ? ' unk' : '');
+      }
       var homeOpen = false;  // "외 n건" 펼침. 이 화면에서만 기억한다
       function showPr(merged) {
         if (merged.state === 'yes') { prVal.textContent = String(merged.items.length); prTile.className = 'tile2'; prTile.hidden = false; }
@@ -1013,7 +1036,7 @@
         var c = L.counts(list), page = h('div', { class: 'page home' });
         var proj = folderName(list[0]);
         page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: today() + ' · ' + proj }), h('h1', { text: '오늘 내 일' })));  // "세션 n개 · …" 줄은 시안에 없다(타일이 같은 숫자를 보인다)
-        page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), tile('쉬는 중', String(c.idle), ''), prTile));
+        page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), weekTile, prTile));
 
         var todo = list.filter(function (s) { return L.groupOf(s) === 'todo'; });
         // 내 차례는 가장 오래 기다린 한 건만 카드로 두고, 나머지는 "외 n건" 을 눌러 펼친다(펼침 상태는 이 화면에서만 기억).
@@ -1067,6 +1090,7 @@
           h('table', { class: 'list' }, h('thead', null, head), h('tbody', null, rows))));
         // 시안 G-11 표 아래 두 칸: 왼쪽 검토 요청(PR) 줄, 오른쪽 최근 산출물 줄
         approvals.className = 'approvals';
+        approvals.dataset.compact = '1';  // 검토 요청 칸 안에서는 줄로 그린다(시안 G-11)
         var own = list.filter(function (s) { return s.flowPr && s.flowPr.number; }).slice(0, 4);
         var prBox = h('div', { class: 'lt', 'data-pr-box': '1' }, h('span', { class: 'eb', text: '검토 요청(PR)' }),
           own.length ? own.map(function (s) {
@@ -1077,7 +1101,7 @@
         page.appendChild(h('div', { class: 'grid3' }, prBox, recent));
         page.appendChild(projects);
         root.appendChild(page);
-        recentCard(recent);
+        recentCard(recent, showWeek);
         approvalCard(approvals, showPr);
         projectCard(projects);
       }

@@ -103,12 +103,13 @@ ul, ol { padding: 0; }
 .ring.pct.hot { --rcol: var(--st-fail); }
 .ring.pct b { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--surface); font-size: 10px; }
 .mem-near { margin-top: 0; }
-.banner.mem { margin-top: 16px; padding: 10px 16px; gap: 8px 14px; justify-content: flex-start; }
+/* 시안 G-18: 제목 위 노란 배너. [새 세션으로 넘기기] 진한 단추 + [계속하기] 테두리 단추(시안 .bd · .bs) */
+[data-r="memtop"]:empty { display: none; }
+[data-r="memtop"] .banner.mem { margin: 0 0 14px; }
+.banner.mem { padding: 14px 18px; gap: 8px 14px; justify-content: flex-start; }
 .banner.mem .mem-t { font-weight: 600; }
 .banner.mem .mem-d { flex: 1 1 260px; font-weight: 400; font-size: 13px; }
-.banner.mem button { min-height: 36px; padding: 0 14px; border-radius: 999px; font-size: 13px; cursor: pointer; }
-.banner.mem .mem-go { border: 1.5px solid var(--st-turn); background: var(--st-turn); color: var(--st-turn-ink); font-weight: 600; }
-.banner.mem .mem-stay { border: 1.5px solid transparent; background: transparent; color: inherit; }
+.banner.mem .mem-acts { margin: 0; flex: none; }
 .mono.warn { color: var(--st-turn); }
 .mono.hot { color: var(--st-fail-ink); }
 .sinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -957,3 +958,5 @@ details.fold > [data-r]:empty { display: none; }
 @container shell (min-width: 761px) { .num3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .n3 { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 16px; background: var(--stbg); }
 .n3 b { font-size: 18px; font-weight: 500; }
+/* 머리 글과 문장이 한 줄에 붙지 않게(홈 승인 칸 등) */
+.blk { display: block; }
