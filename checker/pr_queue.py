@@ -930,6 +930,24 @@ def _dev_of(it: dict) -> int | None:
     return min(devs) if devs else None
 
 
+VERSION_ORDER_REASON = "plugin.json version 이 더 낮음"
+
+
+def _real_after(it: dict) -> list[int]:
+    """`after` 중 판 번호 순서 말고 다른 근거(먼저: 줄·base 브랜치·같은 DEV 단계)도 있는 앞 PR.
+    `after_reasons` 가 없는 항목은 모두 실제 관계로 본다."""
+    reasons = it.get("after_reasons")
+    if reasons is None:
+        return list(it["after"])
+    out = []
+    for d in it["after"]:
+        prefix = f"#{d}: "
+        mine = [r[len(prefix):] for r in reasons if r.startswith(prefix)]
+        if not mine or any(not r.startswith(VERSION_ORDER_REASON) for r in mine):
+            out.append(d)
+    return out
+
+
 def _groups(pool: list[dict]) -> list[tuple[int | None, list[dict]]]:
     """줄기 후보 [(DEV 번호 또는 None, PR 들)]. 번호가 같은 PR 이 한 줄기다. 번호 없는 PR 은 번호 없는 PR 끼리 앞 PR
     관계로 이은 묶음 단위로 보고, 그 묶음이 닿는 DEV 줄기가 하나뿐이면 전부 그 줄기에 넣는다. 둘 이상에 닿거나 하나도
@@ -946,7 +964,7 @@ def _groups(pool: list[dict]) -> list[tuple[int | None, list[dict]]]:
             dev_of[it["number"]] = dev
     neighbors: dict[int, set[int]] = {}
     for it in pool:
-        for d in it["after"]:
+        for d in _real_after(it):  # 판 번호 순서만으로 이어진 앞 PR 은 DEV 줄기로 끌어들이지 않는다(#687)
             neighbors.setdefault(it["number"], set()).add(d)
             neighbors.setdefault(d, set()).add(it["number"])
     alone: list[dict] = []
@@ -981,7 +999,11 @@ def _chain_name(dev: int | None, members: list[dict]) -> str:
     ④ 그것도 비면 번호만. 번호 없는 줄기는 맨 앞 PR 제목."""
     ordered = sorted(members, key=lambda it: (it["order"] is None, it["order"] or 0, it["number"]))
     if dev is None:
-        return _clip(ordered[0]["title"], 28)
+        name = _clip(ordered[0]["title"], 28)
+        nums = {it["number"] for it in members}
+        real = {it["number"]: {d for d in _real_after(it) if d in nums} for it in members}
+        linked = _components([{"number": n, "after": sorted(ds)} for n, ds in real.items()])
+        return name + " · 판 번호 순서" if len(linked) > 1 else name  # 실제 관계 없이 판 순서로만 묶인 줄기
     label = f"DEV-{dev:03d}"
     def without_end(title: str) -> str:
         end = _title_end_devs(title)
