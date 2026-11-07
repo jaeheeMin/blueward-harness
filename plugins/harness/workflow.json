@@ -53,9 +53,11 @@
                                 "설정": {"flow": "config", "label": "설정하기",
                                          "skipStatuses": ["Dropped", "Duplicate", "On Hold"],
                                          "basis": [{"file": "skills/srs/SKILL.md", "quote": "Spec 을 만들지 않고 진행 원장에서 관리한다"},
+                                                   {"file": "skills/srs/SKILL.md", "quote": "`설정` 은 Spec 없이 설정하기로 간다"},
                                                    {"file": "skills/srs/SKILL.md", "quote": "`[보류]`(On Hold) 또는 `[취소]`(Dropped·Duplicate)를 붙이며"}]},
                                 "미정": {"flow": null, "label": "미정 요구사항 정하기 - 개발 Spec 을 시작하면(/harness:spec) 그 자리에서 개발인지 설정인지 정하게 한다",
-                                         "basis": [{"file": "skills/srs/SKILL.md", "quote": "Spec 을 만들다 그 자리에서 정하는 길은 `/harness:spec` 에 있다"}]}}}}
+                                         "basis": [{"file": "skills/srs/SKILL.md", "quote": "Spec 을 만들다 그 자리에서 정하는 길은 `/harness:spec` 에 있다"},
+                                                   {"file": "skills/srs/SKILL.md", "quote": "`미정` 은 개발인지 설정인지를 사람이 정할 때까지 기다린다"}]}}}}
     },
     {
       "id": "spec",
@@ -76,7 +78,8 @@
                    {"file": "rules/governance.md", "quote": "Spec PR 은 설계가 정해지면 병합한다."}]}
       ],
       "next": {"flow": "dev", "label": "개발하기",
-               "basis": [{"file": "rules/governance.md", "quote": "SRS → Spec → 개발 순"}]}
+               "basis": [{"file": "rules/governance.md", "quote": "SRS → Spec → 개발 순"},
+                         {"file": "skills/spec/SKILL.md", "quote": "Spec PR 이 병합되면 `/harness:start` 로 개발을 시작한다"}]}
     },
     {
       "id": "dev",

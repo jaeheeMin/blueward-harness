@@ -743,6 +743,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
         <li>끝에 Claude 가 보여 주는 <b>찜한 번호 표</b>(REQ 번호 · 제목 · 다음 단계 · <code>[DEV-xxx]</code> 이슈)를 확인해</li>
         <li>다 되면 <code>/harness:deliver</code> 로 PR(Pull Request) 을 올려</li>
         <li>작성자가 아닌 승인자에게 Approve 를 받아</li>
+        <li>병합된 뒤의 길은 요구사항의 다음 단계가 정해 — <b>개발</b>은 <code>/harness:spec</code>, <b>설정</b>은 <code>/harness:start</code> 로 그 DEV 를 시작해 설정한 뒤 SRS 상세 절에 기록, <b>미정</b>은 사람이 정할 때까지 기다려</li>
       </ul>
     </section>
     <section class="box">
@@ -912,10 +913,11 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
         <li>따로 <code>/harness:start</code> 를 안 불러도 돼. Spec 이 브랜치를 확인해 줘 — 어떤 개발인지 정해지면 main 일 때 "<code>… (DEV-xxx)</code>" 하위 작업 이슈로 브랜치를 열어(개발 본체 이슈 <code>[DEV-xxx]</code> 는 Spec 병합 뒤에도 열려 있어), 다른 작업 브랜치면 같은 일인지 보고 물어봐</li>
         <li>어떤 REQ 로 만들지 정해. 후보로는 다음 단계가 <b>개발</b>인 것만 보여 줘</li>
         <li>고른 REQ 가 <b>미정</b>이면 개발인지 설정인지 먼저 정해. Claude 가 SRS 를 고치고 변경 기록을 남긴 뒤 이어 가</li>
-        <li>고른 REQ 가 <b>설정</b>이면 Spec 은 안 만들어. 진행 원장에 설정 건으로 올려 주고 끝나. <b>On Hold</b>(보류)도 Spec 을 안 만들고 알려 줘 — 상태를 바꾸면 이어 가</li>
+        <li>고른 REQ 가 <b>설정</b>이면 Spec 은 안 만들어. 진행 원장에 설정 건으로 올려 주고 끝나. 원장 파일이 바뀌었으면 <code>/harness:deliver</code> 로 올려 병합을 기다려. <b>On Hold</b>(보류)도 Spec 을 안 만들고 알려 줘 — 상태를 바꾸면 이어 가</li>
         <li>양식을 쓸지 골라. 고르면 파일명에 들어갈 값(개발 ID(Identifier), 제목)을 먼저 물어보고, 산출될 이름을 보여 줘</li>
         <li>모르는 값은 Claude 가 추측하지 않아. 물어보면 답하고, 정말 없으면 "미정" 으로 둬</li>
         <li>저장하면 경비원이 Spec 생김새를 바로 검사해</li>
+        <li>Spec PR 이 병합되면 <code>/harness:start</code> 로 개발을 시작해</li>
       </ul>
     </section>
     <section class="box">
