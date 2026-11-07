@@ -255,6 +255,31 @@ def test_unavailable_warning_also_reaches_main_model(repo: Path) -> None:
     assert got is not None and "확인 못 함" in got["hookSpecificOutput"]["additionalContext"]
 
 
+def test_no_start_stops_are_bundled_into_one_line(repo: Path) -> None:
+    for agent in ("x1", "x2", "x3", "x1"):  # x1 은 두 번 — 한 번만 센다
+        stop(repo, agent)
+    got = inject(repo)
+    assert got is not None
+    text = got["hookSpecificOutput"]["additionalContext"]
+    assert "시작 기록이 없는 서브에이전트 3개" in text and "확인 못 함" in text
+    assert "x1" not in text and text.count("\n") == 1  # 머리글 + 묶음 한 줄
+    assert inject(repo) is None
+
+
+def test_internal_agent_with_empty_type_is_silent(repo: Path) -> None:
+    payload = {**base(repo, "int1"), "agent_type": "", "hook_event_name": "SubagentStop", "stop_hook_active": False}
+    code, out, _ = hook("stop", payload)
+    assert code == 0 and out is None
+    assert inject(repo) is None
+
+
+def test_started_agent_warning_stays_per_line_beside_bundle(repo: Path) -> None:
+    stop(repo, "ghost")
+    exhaust_limit(repo)
+    text = inject(repo)["hookSpecificOutput"]["additionalContext"]
+    assert "a.txt" in text and "시작 기록이 없는 서브에이전트 1개" in text
+
+
 def test_inject_without_warnings_is_silent(repo: Path) -> None:
     assert inject(repo) is None
 
