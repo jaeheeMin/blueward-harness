@@ -172,6 +172,11 @@ def _bad(**over):
     _bad(준비=[{"팝업": "그루핑"}, {"팝업": "다른"}]),  # 팝업은 하나
     _bad(준비=[{"팝업": "그루핑", "값": "1"}]),
     _bad(준비=[{"팝업": "그루핑", "누르기": "이동"}]),
+    _bad(준비=[{"팝업": "백로그상태", "행": 0}]),
+    _bad(준비=[{"팝업": "백로그상태", "행": "3"}]),
+    _bad(준비=[{"팝업": "백로그상태", "행": True}]),
+    _bad(준비=[{"누르기": "이동", "행": 1}]),  # 행은 팝업 단계에서만
+    _bad(준비=[{"입력": "플랜트", "값": "1", "행": 1}]),
 ])
 def test_parse_rejects_bad_list(data):
     with pytest.raises(mc.ListError):
@@ -188,6 +193,13 @@ def test_parse_accepts_popup_as_last_step():
     assert [(x.action, x.name) for x in s.steps] == [("누르기", "실행"), ("팝업", "그루핑")] and s.popup
     (n,) = mc.parse_screens(GOOD)
     assert not n.popup
+
+
+def test_parse_accepts_popup_row():
+    (s,) = mc.parse_screens(_bad(준비=[{"팝업": "백로그상태", "행": 3}]))
+    assert (s.steps[0].action, s.steps[0].name, s.steps[0].row) == ("팝업", "백로그상태", 3) and s.popup
+    (b,) = mc.parse_screens(_bad(준비=[{"팝업": "그루핑"}]))
+    assert b.steps[0].row is None
 
 
 def test_parse_rejects_duplicate_screen_names_and_collects_all_problems():
@@ -706,6 +718,7 @@ class FakeTab:
         self.scope_result: dict = {"ok": True}
         self.scroll_cols = None  # scrollColumns 결과(None 이면 1 — 스크롤 요소를 못 찾은 것처럼 dict 가 아니다)
         self.inner = {"w": 1600, "h": 900}  # innerWidth·innerHeight
+        self.cell = {"ok": True, "rect": {"x": 500, "y": 300, "w": 20, "h": 20}, "text": "", "icon": True, "rows": 5}  # cellOf 결과
 
     def call(self, method, **params):
         self.calls.append((method, params))
@@ -763,6 +776,8 @@ class FakeTab:
             return self.clear_result
         if expr.startswith("window.__mc.selectOption("):
             return self.pick
+        if expr.startswith("window.__mc.cellOf("):
+            return self.cell
         if expr.startswith("window.__mc.scrollColumns("):
             return self.scroll_cols if self.scroll_cols is not None else 1
         return 1 if "scrollColumn" in expr else None
@@ -1147,6 +1162,72 @@ def test_popup_step_opens_one_dialog_scopes_and_captures(tmp_path, capsys, fake)
     assert t.shots == 1 and t.scope_calls >= 2  # 열린 직후와 찍기 직전에 범위를 정한다
     clicks = [p for m, p in t.calls if m == "Input.dispatchMouseEvent" and p["type"] == "mousePressed"]
     assert len(clicks) == 1  # 팝업 안의 확인·저장은 누르지 않는다
+
+
+ROW_SCREEN = TWO_SCREENS.replace("    표시:", '    준비:\n      - {팝업: 백로그상태, 행: 3}\n    표시:')
+ROW_FINDS = {**STEP_FINDS, ("열", "백로그상태"): FOUND}
+
+
+def test_popup_row_double_clicks_cell_then_scopes_and_captures(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, ROW_SCREEN)
+    t = fake["tab"] = FakeTab(ROW_FINDS, dialog_on_click=["백로그\n목록"])
+    code, out = _capture(capsys, root)
+    assert code == 0 and out["status"] == "ok", out
+    assert t.shots == 1 and t.scope_calls >= 2
+    assert [e for e in t.evals if e.startswith("window.__mc.cellOf(")] == [f"window.__mc.cellOf({json.dumps('백로그상태')}, 3)"]
+    ev = [p for m, p in t.calls if m == "Input.dispatchMouseEvent" and p["type"] in ("mousePressed", "mouseReleased")]
+    assert [(p["type"], p["clickCount"]) for p in ev] == [("mousePressed", 1), ("mouseReleased", 1), ("mousePressed", 2), ("mouseReleased", 2)]
+    assert all((p["x"], p["y"]) == (510, 310) for p in ev)  # 칸 안 아이콘 가운데
+    assert not [e for e in t.evals if e.startswith('window.__mc.find("버튼", "백로그상태")')]  # 버튼은 찾지 않는다
+
+
+def test_popup_row_missing_cell_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, ROW_SCREEN)
+    t = fake["tab"] = FakeTab(ROW_FINDS, dialog_on_click=["x"])
+    t.cell = {"ok": False, "count": 1, "rows": 2}
+    code, out = _capture(capsys, root)
+    why = out["screens"][0]["사유"]
+    assert code == 2 and "2개뿐" in why and "3번째" in why and t.shots == 0
+    assert not [1 for m, p in t.calls if m == "Input.dispatchMouseEvent"]
+
+
+def test_popup_row_ambiguous_or_missing_column_is_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, ROW_SCREEN)
+    two = {"items": FOUND["items"] * 2, "noInput": 0}
+    fake["tab"] = FakeTab({**ROW_FINDS, ("열", "백로그상태"): two})
+    code, out = _capture(capsys, root)
+    assert code == 2 and "2개라" in out["screens"][0]["사유"]
+    fake["tab"] = FakeTab(STEP_FINDS)
+    code, out = _capture(capsys, root)
+    assert code == 2 and fake["tab"].shots == 0
+
+
+def test_popup_row_empty_cell_adds_hint_when_no_popup(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, ROW_SCREEN)
+    t = fake["tab"] = FakeTab(ROW_FINDS)  # 팝업이 안 뜬다
+    t.cell = {"ok": True, "rect": {"x": 500, "y": 300, "w": 80, "h": 24}, "text": "", "icon": False, "rows": 5}
+    code, out = _capture(capsys, root)
+    why = out["screens"][0]["사유"]
+    assert code == 2 and "팝업이 뜨지 않았다" in why and "그 행 칸이 비어 있다(백로그 없는 행일 수 있다), 팝업이 열리는 다른 `행` 을 고른다" in why
+    assert t.shots == 0
+
+
+def test_popup_row_filled_cell_no_popup_has_no_empty_hint(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, ROW_SCREEN)
+    fake["tab"] = FakeTab(ROW_FINDS)
+    code, out = _capture(capsys, root)
+    why = out["screens"][0]["사유"]
+    # 칸에 아이콘이 있어도(예: 백로그 없음 동그라미) 그 행은 팝업을 안 열 수 있다 — 다른 행을 고르라고 안내한다(#673 실제 테넌트 100)
+    assert code == 2 and "팝업이 뜨지 않았다" in why and "비어 있다" not in why and "그 행은 팝업을 열지 않는다" in why and "다른 `행`" in why
+
+
+def test_js_has_cell_of():
+    assert "cellOf" in LIB_JS and "role=gridcell" in LIB_JS
 
 
 def test_popup_step_no_dialog_is_unavailable(tmp_path, capsys, fake):

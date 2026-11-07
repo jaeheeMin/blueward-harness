@@ -16,6 +16,7 @@ PNG(1600x900)를 찍고, 화면에 보이는 이름으로 요소 위치를 찾�
           - {선택: 생산방식, 값: "반복제조"}  # Select·ComboBox 에서 보이는 항목 글자가 값과 같은 것을 고른다(없으면 검사 불능)
           - {누르기: 이동}
           - {팝업: 그루핑}                   # 선택. 그 버튼을 눌러 대화상자가 정확히 하나 떠야 한다(안 뜨거나 오류·경고 창이면 검사 불능). 마지막 단계 하나만
+          - {팝업: 백로그상태, 행: 3}         # 버튼 대신 그 열의 보이는 본문 3번째 행 칸(없으면 아이콘)을 더블클릭해 연다(#673). 데이터를 바꾸지 않는 칸에만 쓴다
         배율: 0.9                           # 선택(0.5~1.0). 넓은 표를 한 화면에 담으려 이 화면만 축소해 찍는다(그림은 그대로 1600x900)
         표시:                               # 필수. 번호는 이 목록 순서다
           - {종류: 필터, 이름: 플랜트, 설명: 생산 플랜트를 고른다}
@@ -68,7 +69,7 @@ KINDS = ("필터", "버튼", "열", "그 밖")
 SCREEN_KEYS = {"이름", "앱", "준비", "표시", "배율"}
 MIN_SCALE = 0.5
 MARK_KEYS = {"종류", "이름", "index", "설명"}
-STEP_KEYS = {"입력", "값", "누르기", "선택", "팝업"}
+STEP_KEYS = {"입력", "값", "누르기", "선택", "팝업", "행"}
 ENV_PATH = "env/manual-capture.yaml"
 LIST_SUFFIX = ".capture.yaml"
 _BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -93,6 +94,7 @@ class Step:
     action: str  # 입력 | 선택 | 누르기 | 팝업
     name: str
     value: str | None = None
+    row: int | None = None  # 팝업 단계만: 이 열의 보이는 본문 N번째 행 칸을 더블클릭해 연다(없으면 버튼을 누른다)
 
 
 @dataclass(frozen=True)
@@ -169,10 +171,15 @@ def _parse_step(raw: object, where: str) -> Step:
     if len(acts) != 1:
         raise ListError(f"{where}: `입력`·`선택`·`누르기`·`팝업` 중 하나만 쓴다")
     action = acts[0]
+    if "행" in raw and action != "팝업":
+        raise ListError(f"{where}: `행` 은 `팝업` 단계에서만 쓴다")
     if action in ("누르기", "팝업"):
         if "값" in raw:
             raise ListError(f"{where}: `{action}` 에는 `값` 을 쓰지 않는다")
-        return Step(action, _text(raw[action], f"{where} {action}"))
+        row = raw.get("행")
+        if "행" in raw and (not isinstance(row, int) or isinstance(row, bool) or row < 1):
+            raise ListError(f"{where}: `행` 은 1 이상의 정수여야 한다: {row!r}")
+        return Step(action, _text(raw[action], f"{where} {action}"), None, row)
     if "값" not in raw:
         raise ListError(f"{where}: `{action}` 에는 `값` 이 필요하다")
     value = raw["값"]
@@ -710,6 +717,33 @@ class Capturer:
         for t in ("mouseMoved", "mousePressed", "mouseReleased"):
             self.tab.call("Input.dispatchMouseEvent", type=t, x=x, y=y, button="left", clickCount=1)
 
+    def double_click(self, rect: Rect) -> None:
+        x, y = rect["x"] + rect["w"] / 2, rect["y"] + rect["h"] / 2
+        self.tab.call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y, button="left", clickCount=1)
+        for n in (1, 2):
+            for t in ("mousePressed", "mouseReleased"):
+                self.tab.call("Input.dispatchMouseEvent", type=t, x=x, y=y, button="left", clickCount=n)
+
+    def cell_target(self, s: Step) -> dict:
+        """`행` 이 있는 팝업 단계: 그 열의 보이는 본문 N번째 칸을 찾는다(열이 유일해야 한다). 못 찾으면 검사 불능."""
+        what = f"준비 단계 팝업 {s.name!r} 행 {s.row}"
+        n = len(self.find("열", s.name)["items"])
+        if n != 1:
+            raise Unavailable(f"{what}: 열 머리글 {s.name!r} 이 {n}개라 하나로 정하지 못했다")
+        self.tab.evaluate(f"window.__mc.scrollColumn({json.dumps(s.name)}, null)")  # 가로 화면 밖이면 먼저 보이게 한다
+        time.sleep(0.3)
+        r = self.tab.evaluate(f"window.__mc.cellOf({json.dumps(s.name)}, {s.row})")
+        if not isinstance(r, dict) or not r.get("ok"):
+            r = r if isinstance(r, dict) else {}
+            if r.get("noGrid"):
+                why = "열 머리글에 aria-colindex 가 없거나 표를 찾지 못해 본문 칸을 셀 수 없다"
+            elif "rows" in r:
+                why = f"그 열에 보이는 본문 행이 {r['rows']}개뿐이라 {s.row}번째 칸이 없다(세로로 안 보이는 행은 세지 않는다)"
+            else:
+                why = "열 머리글이 하나로 정해지지 않았다"
+            raise Unavailable(f"{what}: {why}")
+        return r
+
     def fill_needed(self, s: Step) -> bool:
         """입력 칸에 값을 넣어야 하는가. 앱이 기억한 필터 값(토큰)이 이미 같으면 False(또 넣으면 오류 창이 뜬다), 다른 값이 있으면 지우고 True."""
         name, want = json.dumps(s.name), (s.value or "").strip()
@@ -733,8 +767,15 @@ class Capturer:
         return True
 
     def run_steps(self, screen: Screen) -> None:
+        empty_cell = False
         for s in screen.steps:
-            if s.action in ("누르기", "팝업"):
+            if s.action == "팝업" and s.row:
+                cell = self.cell_target(s)
+                if self.tab.evaluate("window.__mc.dialogs()") or []:
+                    raise Unavailable(f"준비 단계 팝업 {s.name!r}: 더블클릭 전에 이미 대화상자가 떠 있어 새 팝업을 가를 수 없다")
+                empty_cell = not cell.get("text") and not cell.get("icon")
+                self.double_click(cell["rect"])
+            elif s.action in ("누르기", "팝업"):
                 v = self.locate(Mark("버튼", s.name, ""))
                 if v.status != "found":
                     raise Unavailable(f"준비 단계 {s.action} {s.name!r}: {v.status} — {v.reason}")
@@ -769,7 +810,7 @@ class Capturer:
             time.sleep(0.3)
             self.wait_ready(f"준비 단계 {s.action} {s.name!r}")
             if s.action == "팝업":  # 팝업은 마지막 단계다. 확인·저장은 누르지 않는다
-                self.open_popup(s)
+                self.open_popup(s, empty_cell)
                 continue
             shown = self.tab.evaluate("window.__mc.dialogs()") or []
             if shown:  # 오류·경고 창이 떴다 — 그 화면은 의도한 상태가 아니다(통과로 찍지 않는다)
@@ -792,7 +833,7 @@ class Capturer:
             raise Unavailable(f"{what}: 오류·경고 창이 떴다: {info[0].get('text')!r}. 준비 단계(값·기본값)를 확인한다")
         return info[0]
 
-    def open_popup(self, s: Step) -> None:
+    def open_popup(self, s: Step, empty_cell: bool = False) -> None:
         what = f"준비 단계 팝업 {s.name!r}"
         # 팝업은 서버 호출 뒤 늦게 뜨기도 한다(#653 실제 테넌트 100 그루핑). 뜰 때까지 기다린 뒤 판정한다.
         end = time.monotonic() + self.timeout
@@ -800,7 +841,14 @@ class Capturer:
             time.sleep(0.5)
         time.sleep(0.5)  # 뜬 뒤 그리기·애니메이션
         self.wait_ready(what)
-        self.popup_info(what)
+        try:
+            self.popup_info(what)
+        except Unavailable as e:
+            if s.row and "팝업이 뜨지 않았다" in str(e):
+                # 칸이 비어 있지 않아도(예: 백로그 없음을 뜻하는 동그라미 아이콘) 그 행은 팝업을 안 열 수 있다(#673 실제 테넌트 100).
+                why = "그 행 칸이 비어 있다" if empty_cell else f"{s.row}번째 행 칸을 더블클릭했지만 그 행은 팝업을 열지 않는다"
+                raise Unavailable(f"{e} — {why}(백로그 없는 행일 수 있다), 팝업이 열리는 다른 `행` 을 고른다") from e
+            raise
         self.set_scope(what)
 
     def wait_content(self, screen: Screen, what: str) -> None:
@@ -810,7 +858,7 @@ class Capturer:
         하나도 안 나타나면 "못 찾음" 이 아니라 화면이 그려지지 않은 것이라 검사 불능이다.
         """
         # 입력·선택은 필터 라벨. 팝업 뒤에는 팝업 안에서 표시 이름이 그려지길 기다린다(준비 단계 대상은 팝업 밖에 있다)
-        names = [] if self.scoped else [("버튼" if s.action in ("누르기", "팝업") else "필터", s.name) for s in screen.steps]
+        names = [] if self.scoped else [("열" if s.row else "버튼" if s.action in ("누르기", "팝업") else "필터", s.name) for s in screen.steps]
         names += [(m.kind, m.name) for m in screen.marks]
         end = time.monotonic() + self.timeout
         last, stable = None, 0
