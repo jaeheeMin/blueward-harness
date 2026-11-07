@@ -111,7 +111,7 @@ def test_hooks_json_이_유효하고_네_훅을_모두_담고_있다():
     # #389: 뒤에서 만든 PR 표는 같은 턴에 컨텍스트에 들어가야 하므로 async 가 아니다.
     pr_table = events["UserPromptSubmit"][1]["hooks"][0]
     assert "pr_table_notice.py" in pr_table["command"]
-    assert pr_table["timeout"] <= 10
+    assert pr_table["timeout"] == 30  # #768: 바쁜 PC 에서 uv 기동만 2~3초라 10초를 넘긴 적이 있다
     assert "async" not in pr_table
     assert pr_table["command"].rstrip().endswith("|| exit 0")
 
