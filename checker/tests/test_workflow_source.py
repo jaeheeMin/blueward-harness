@@ -80,7 +80,7 @@ def test_console_reads_workflow_json_from_the_plugin_not_a_console_copy():
     fake_app = SimpleNamespace(plugin_root=PLUGIN)
     got, error = console_server.App.load_flows(fake_app, None)  # 경로를 안 주면 기본(플러그인의 workflow.json)을 읽는다
     assert error == "" and got is not None
-    assert [f["id"] for f in got["flows"]] == ["srs", "spec", "dev", "config", "fix"]
+    assert [f["id"] for f in got["flows"]] == ["srs", "spec", "dev", "config", "standard", "fix"]
 
 
 def test_console_turns_flows_off_when_a_basis_quote_is_wrong(tmp_path, capsys):

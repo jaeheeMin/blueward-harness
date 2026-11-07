@@ -1,10 +1,11 @@
-"""개발 준비 상태(#668): 이 폴더의 개발 건 중 Spec 이 origin/main 에 있는 것·없는 것·설정 건을 읽는다.
+"""개발 준비 상태(#668): 이 폴더의 개발 건 중 Spec 이 origin/main 에 있는 것·없는 것·설정·표준 건을 읽는다.
 
 새 작업 화면이 종류 버튼에 "Spec 있는 건 없음" 같은 것을 미리 보이고, 개발을 시작하지 못하는 때를 알려 주는 데 쓴다.
-기준은 start 스킬·PR 검사 spec-ready 와 같다: origin/main 에 `docs/spec/DEV-xxx-*.md` 가 있는가, 원장 Spec 칸이 `설정` 인가.
+기준은 start 스킬·PR 검사 spec-ready 와 같다: origin/main 에 `docs/spec/DEV-xxx-*.md` 가 있는가, SRS `다음 단계` 가 `설정`·`표준` 인가
+(옛 데이터 호환으로 원장 Spec 칸 `설정` 도 설정 건으로 본다, #718). 원장이 없어도 SRS 만으로 읽는다.
 번호는 REQ 와 DEV 가 같다(SRS `REQ-001` = Spec·원장 `DEV-001`).
 
-state: yes(판정 대상, 읽음) / no(원장 없는 저장소·git 저장소 아님 = 해당 없음) / unknown(읽지 못함, 지어내지 않는다).
+state: yes(판정 대상, 읽음) / no(원장도 SRS 도 없는 저장소·git 저장소 아님 = 해당 없음) / unknown(읽지 못함, 지어내지 않는다).
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ DEV_ROW_RE = re.compile(r"^\|\s*DEV-(\d+)\s*\|")
 SPEC_NAME_RE = re.compile(r"(?:^|/)DEV-(\d+)[^/]*\.md$")
 TITLE_UNKNOWN = "제목 미확인"
 SETUP = "설정"
+STANDARD = "표준"
 DEV_NEXT = "개발"
 INACTIVE_STATUS = {"dropped", "duplicate", "on hold"}  # 보류·취소된 요구사항은 "할 차례" 가 아니다
 DONE_LEDGER = "완료"
@@ -68,8 +70,8 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
         return _unknown("git 을 실행하지 못해 개발 준비 상태를 확인하지 못했습니다.")
     if not root:
         return {"state": "no", "reason": "git 저장소가 아니라 개발 준비 상태를 따지지 않습니다."}
-    if not os.path.isdir(os.path.join(root, "audit", "ledger")):
-        return {"state": "no", "reason": "audit/ledger/ 가 없는 저장소라 개발 준비 상태를 따지지 않습니다."}
+    if not (os.path.isdir(os.path.join(root, "audit", "ledger")) or os.path.isfile(os.path.join(root, "docs", "ssot", "SRS.md"))):
+        return {"state": "no", "reason": "audit/ledger/ 도 docs/ssot/SRS.md 도 없는 저장소라 개발 준비 상태를 따지지 않습니다."}
     rc, out = slow_run(["git", "fetch", "origin", "main"], root)
     if rc != 0:
         return _unknown("origin/main 을 받지 못해 Spec 이 있는지 확인하지 못했습니다.")
@@ -106,23 +108,28 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
             for n, row in _rows(text, DEV_ROW_RE):
                 entry(n).setdefault("ledger", {"title": _pick(row, "내용"), "spec": _pick(row, "Spec"), "status": _pick(row, "상태")})
 
-    spec_ready, setup, need, items = 0, 0, [], []
+    spec_ready, setup, standard, need, items = 0, 0, 0, [], []
     for n in sorted(nums):
         e = nums[n]
         srs, ledger, has_spec = e.get("srs"), e.get("ledger"), "spec" in e
-        is_setup = bool(ledger) and ledger["spec"].strip() == SETUP  # 설정 갈래의 기준은 원장 Spec 칸이다(PR 검사 spec-ready 와 같다)
+        step = srs["next"].strip() if srs else ""
+        is_standard = step == STANDARD
+        # 설정·표준 갈래의 기준은 SRS 다음 단계다. 옛 원장의 Spec 칸 `설정` 도 설정 건으로 읽는다(PR 검사 spec-ready 와 같다, #718).
+        # SRS 가 그 번호를 개발로 정했으면 옛 원장 `설정` 은 무시한다(spec_ready 와 같다).
+        is_setup = step == SETUP or is_standard or (step != DEV_NEXT and bool(ledger) and ledger["spec"].strip() == SETUP)
         # 개발 건: SRS 다음 단계가 개발이거나, SRS 에 없는데 원장에 있는 건. 다음 단계가 미정·빈 칸이면 개발인지 모르니 세지 않는다.
         is_dev = not is_setup and ((srs and srs["next"].strip() == DEV_NEXT) or (not srs and bool(ledger)))
         inactive = (bool(srs) and srs["status"].strip().casefold() in INACTIVE_STATUS) or (bool(ledger) and ledger["status"].strip() == DONE_LEDGER)
         label = f"REQ-{n:03d}({_title(srs['title'])})" if srs else f"DEV-{n:03d}({_title(ledger['title']) if ledger else TITLE_UNKNOWN})"
-        item = {"number": n, "label": label, "spec": has_spec, "setup": is_setup, "dev": is_dev,
+        item = {"number": n, "label": label, "spec": has_spec, "setup": is_setup, "standard": is_standard, "dev": is_dev,
                 "next": srs["next"] if srs else ""}
         items.append(item)
         if is_setup:
             setup += 1
+            standard += is_standard
         elif is_dev and has_spec:
             spec_ready += 1
         elif is_dev and not inactive:
             need.append({"number": n, "label": label})
-    return {"state": "yes", "reason": "", "specReady": spec_ready, "setup": setup, "needSpec": need[:NEED_LIMIT],
+    return {"state": "yes", "reason": "", "specReady": spec_ready, "setup": setup, "standard": standard, "needSpec": need[:NEED_LIMIT],
             "needSpecCount": len(need), "items": items}

@@ -32,7 +32,9 @@ SKIPPED = "skipped"
 EXEMPT_STATUSES = {"on hold", "dropped", "duplicate", "폐기"}
 EMPTY_VALUES = {"", "-", "—", "–"}
 # SRS 요구사항 표 `다음 단계` 열의 허용 값(#567). 고객사 양식이 아니라 하네스가 정한 말이라 규칙 데이터가 아니라 여기에 둔다.
-NEXT_STEPS = ("개발", "설정", "미정")
+NEXT_STEPS = ("개발", "설정", "표준", "미정")
+# 개발이 아닌 다음 단계. 진행은 원장이 아니라 SRS Status 칸으로 본다(#718). RICEFW ID 는 비운다.
+NON_DEV_STEPS = ("설정", "표준", "미정")
 
 _REQ_ID = re.compile(r"^REQ-(\d+)$")
 _DEV_ID = re.compile(r"^DEV-(\d+)$")
@@ -202,6 +204,22 @@ def _load_srs(root: Path) -> tuple[dict[int, dict] | None, bool]:
     return reqs, no_step_column
 
 
+def non_dev_numbers(text: str, steps: tuple[str, ...] = ("설정", "표준")) -> set[int]:
+    """SRS 본문 글에서 `다음 단계` 가 steps 에 드는 REQ 번호들. 표·열이 없거나 읽지 못하면 빈 집합(#718)."""
+    section = _section(text[1:] if text.startswith("﻿") else text, "요구사항")
+    table = _table(section) if section is not None else None
+    if table is None or "다음 단계" not in table[0]:
+        return set()
+    header, rows = table
+    out: set[int] = set()
+    for cells in rows:
+        row = _row(header, cells)
+        m = _REQ_ID.match(row.get("ID", ""))
+        if m and row.get("다음 단계", "").strip() in steps:
+            out.add(int(m.group(1)))
+    return out
+
+
 def _first_block(section: list[str]) -> str:
     """절의 첫 문단(앞의 빈 줄을 건너뛰고 다음 빈 줄 전까지). 근거 REQ 는 여기에만 적는다."""
     block: list[str] = []
@@ -354,7 +372,7 @@ def check_pairing(root: Path) -> dict:
                 elif step == "개발" and n not in {int(x) for x in _DEV_IN.findall(value)}:
                     v("ricefw_mismatch", SRS_PATH,
                       f"{label} 는 다음 단계가 `개발` 인데 Development RICEFW ID 가 `{value}` 입니다(`DEV-{_fmt(n)}` 이어야 합니다).")
-                elif step in ("설정", "미정") and has_value:
+                elif step in NON_DEV_STEPS and has_value:
                     v("ricefw_not_empty", SRS_PATH,
                       f"{label} 는 다음 단계가 `{step}` 인데 Development RICEFW ID 에 `{value}` 가 적혀 있습니다(비워야 합니다).")
 
@@ -375,8 +393,7 @@ def check_pairing(root: Path) -> dict:
                     if spec_cell in EMPTY_VALUES:
                         w("spec_not_yet", rows[0]["file"], f"{label} (개발): Spec 은 아직 작성 전입니다(원장 Spec 칸 `-`).")
                     # 링크가 있는데 파일이 없는 것은 위반으로 이미 잡혔다
-            elif step == "설정" and not rows:
-                w("no_ledger_config", SRS_PATH, f"{label} (설정): 원장에 설정 건 줄이 아직 없습니다.")
+            # 설정·표준 건은 원장 줄이 없어도 정상이다(진행은 SRS Status). 옛 원장의 `설정` 줄은 읽기만 한다(#718).
 
         for n, rs in sorted(by_dev.items()):
             if n not in reqs:

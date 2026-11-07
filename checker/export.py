@@ -78,7 +78,7 @@ _INT = re.compile(r"^(0|-?[1-9]\d{0,14})$")
 _CTRL = re.compile("[" + chr(0) + "-" + chr(8) + chr(0xB) + chr(0xC) + chr(0xE) + "-" + chr(0x1F) + chr(0xFFFE) + chr(0xFFFF) + chr(0xD800) + "-" + chr(0xDFFF) + "]")  # XML 1.0 에 못 넣는 문자
 MAX_CELL_CHARS = 32767
 EXTRA_PREFIX = "@"  # 작업본에만 있는 열(`md_전용`·펼침 `표시.열`)의 행 키 접두어. 엑셀 열 문자(A~ZZZ)와 겹치지 않는다
-SRS_NEXT_STEP_COL = "다음 단계"  # SRS 요구사항 표의 엔진 기본 md 전용 열(개발/설정/미정). 다음 단계 값은 엑셀로 쓰지 않는다. 값 검사는 `checker/pairing.py` 의 `NEXT_STEPS` 가 한다(#567).
+SRS_NEXT_STEP_COL = "다음 단계"  # SRS 요구사항 표의 엔진 기본 md 전용 열(개발/설정/표준/미정). 다음 단계 값은 엑셀로 쓰지 않는다. 값 검사는 `checker/pairing.py` 의 `NEXT_STEPS` 가 한다(#567).
 
 
 class ExportError(Exception):
