@@ -263,6 +263,16 @@
     if (st === 'OPEN') return { text: '검토 중', tone: 'ok', title: '이 세션의 PR #' + pr.number + ' 이 승인을 기다려.' };
     return { text: '확인 못 함', tone: 'unk', title: '커밋은 됐지만 이 세션에서 PR 상태를 알 수 없어.' };
   }
+  // 홈 숫자 칸 "이번 주 산출물"(시안 G-11): mergeDocs 결과 중 최근 7일 안에 바뀐 문서 수. 시각은 초·밀리초 둘 다 받는다.
+  var WEEK_SEC = 7 * 24 * 3600;
+  function toSec(t) { return t > 1e12 ? t / 1000 : t; }
+  function weekDocCount(docs, nowSec) {
+    return arr(docs).filter(function (d) { var t = d && d.file && d.file.mtime; return t && nowSec - toSec(t) <= WEEK_SEC; }).length;
+  }
+  function weekPool(sessions, nowSec, limit) {  // 이번 주에 움직인 세션(최근 순, limit 개까지)
+    return arr(sessions).filter(function (s) { return s && !s.handedOffTo && s.updatedAt && nowSec - toSec(s.updatedAt) <= WEEK_SEC; })
+      .sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).slice(0, limit);
+  }
   function mergeDocs(parts) {
     var seen = {}, out = [];
     arr(parts).forEach(function (p) {
@@ -438,7 +448,7 @@
     startChecks: startChecks, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
     mergeApprovals: mergeApprovals, prBadge: prBadge, runningSubCount: runningSubCount,
-    DOC_GROUPS: DOC_GROUPS, docGroup: docGroup, docChip: docChip, mergeDocs: mergeDocs, isFormOutput: isFormOutput
+    DOC_GROUPS: DOC_GROUPS, docGroup: docGroup, docChip: docChip, mergeDocs: mergeDocs, weekDocCount: weekDocCount, weekPool: weekPool, isFormOutput: isFormOutput
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHLogic = api;

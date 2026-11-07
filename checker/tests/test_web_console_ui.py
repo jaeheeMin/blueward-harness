@@ -396,13 +396,17 @@ const cases = {
     const root = h('div');
     ui.homeView(root); await tick(); await tick();
     const text = root.textContent;
-    assert.ok(text.includes('세션 2개 · 일하는 중 1 · 내 차례 1 · 쉬는 중 0'));
+    assert.ok(!text.includes('세션 2개 ·'));  // 시안 G-11: 제목 아래 요약 줄은 없다(타일이 같은 숫자)
     assert.ok(text.includes('proj-a') && text.includes('proj-b'));
-    assert.ok(text.includes('서브에이전트 1개 실행 중') && text.includes('PR #4 · 검사 통과') && text.includes('이슈 #636'));
-    assert.ok(text.includes('내가 승인할 PR 1건'));
-    // 숫자 타일: 내 차례 / 일하는 중 / 쉬는 중, 승인 기다리는 PR 은 데이터를 받은 뒤에만 보인다
+    assert.ok(find(root, e => e.tag === 'span' && (e.attrs.title || '').includes('서브에이전트 1개 실행 중')).length === 1 && !text.includes('서브에이전트 1개 실행 중'));  // 상태 칸은 칩 하나, 둘째 줄은 title
+    assert.ok(text.includes('PR #4 · 검사 통과') && text.includes('이슈 #636'));
+    // 시안 G-11: 검토 요청(PR) 칸 안에서는 큰 카드 없이 줄 하나("내가 승인할 PR #n …"). 머리와 문장이 붙어 나오지 않는다
+    assert.ok(text.includes('내가 승인할 PR #') && !text.includes('내가 승인할 PR 1건') && !text.includes('건지금'));
+    // 숫자 타일(시안 G-11): 내 차례 / 일하는 중 / 이번 주 산출물, 승인 기다리는 PR 은 데이터를 받은 뒤에만 보인다
     const tiles = find(root, e => (e.attrs['class'] || '').split(' ').includes('tile2'));
-    assert.deepStrictEqual(tiles.slice(0, 3).map(t => t.textContent), ['내 차례1', 'AI가 일하는 중1', '쉬는 중0']);
+    assert.deepStrictEqual(tiles.slice(0, 2).map(t => t.textContent), ['내 차례1', 'AI가 일하는 중1']);
+    const weekTile = find(root, e => e.attrs['data-week-tile'])[0];
+    assert.ok(weekTile && weekTile.textContent.startsWith('이번 주 산출물') && !text.includes('쉬는 중0'));
     const prTile = find(root, e => e.attrs['data-pr-tile'])[0];
     assert.ok(!prTile.hidden && prTile.textContent === '승인 기다리는 PR1');
     // 내 차례 노랑 카드는 요청 화면으로 보낸다. 기억 %는 데이터가 없어 지어내지 않는다.
@@ -529,7 +533,7 @@ const cases = {
     const kinds = find(root, e => e.attrs['data-kind']);
     assert.deepStrictEqual(kinds.map(k => k.attrs['data-kind']), ['요구사항정의서', '개발 Spec', '사용자 매뉴얼', 'CTS 관리대장', 'Role 정리', '개발하기']);
     const tiles = find(root, e => (e.attrs['class'] || '').split(' ').includes('tile2'));
-    assert.deepStrictEqual(tiles.map(t => t.textContent), ['내 차례0', '일하는 중0', '만든 산출물확인 못 함']);
+    assert.deepStrictEqual(tiles.map(t => t.textContent), ['내 차례0', '일하는 중0', '만든 산출물0']);  // 시안 G-04 는 세 타일 모두 0
     kinds[0].click();
     assert.ok(went[0].includes('요구사항정의서'));
     // 입력창에 적은 글은 새 작업으로 넘어간다
@@ -565,6 +569,13 @@ const cases = {
     const out = L.mergeDocs([{ session: a, files: [{ path: 'docs/SRS.md', mtime: 5, changed: true }] }, { session: b, files: [{ path: 'docs/srs.md', mtime: 9 }, { path: 'x.xlsx', mtime: 1 }] }]);
     assert.deepStrictEqual(out.map(d => [d.session.id, d.group]), [['a', 'spec'], ['b', 'form']]);
     assert.ok(L.isFormOutput({ path: 'a.xlsx' }) && L.isFormOutput({ path: 'a.pptx' }) && !L.isFormOutput({ path: 'a.pdf' }) && !L.isFormOutput({ path: 'a.md' }));
+    // 이번 주 산출물(시안 G-11): 최근 7일 안에 바뀐 문서만 센다. 시각은 초·밀리초 둘 다
+    const now = 1000000000, day = 86400;
+    const docs = [{ file: { mtime: now - day } }, { file: { mtime: (now - 2 * day) * 1000 } }, { file: { mtime: now - 8 * day } }, { file: {} }];
+    assert.strictEqual(L.weekDocCount(docs, now), 2);
+    const ss = [{ id: 'old', updatedAt: now - 9 * day }, { id: 'new', updatedAt: now - 60 }, { id: 'mid', updatedAt: now - 3 * day }, { id: 'gone', updatedAt: now, handedOffTo: 'x' }];
+    assert.deepStrictEqual(L.weekPool(ss, now, 20).map(s => s.id), ['new', 'mid']);
+    assert.deepStrictEqual(L.weekPool(ss, now, 1).map(s => s.id), ['new']);
   },
   async dom_docs_page() {
     const s1 = { id: 's1', title: 'SRS 세션', cwd: '/w/p', updatedAt: 9, canSend: true, flowPr: { number: 6, state: 'OPEN' } };
@@ -577,7 +588,7 @@ const cases = {
     window.BHMarkdown = { render: t => h('div', { text: t }) };
     const root = h('div');
     const view = loadUI(kit).docsPage(root); await tick(); await tick();
-    for (const need of ['내가 만든 문서', '요구사항 · 설계', '고객 양식', '기록', 'SRS_v0.2.md', 'BW_Backlog_v0.1.xlsx', 'log.md', '검토 중', '안 올림', '이전 판 1개', '왼쪽에서 문서를 골라 줘']) assert.ok(root.textContent.includes(need), need);
+    for (const need of ['내가 만든 문서', '요구사항 · 설계', '고객 양식', '기록', 'SRS_v0.2.md', 'BW_Backlog_v0.1.xlsx', 'log.md', '검토 중', '안 올림', '이전 판 1개']) assert.ok(root.textContent.includes(need), need);
     const btn = txt => find(root, e => e.tag === 'button' && e.textContent === txt)[0];
     // md 를 고르면 미리보기 + 열기 · 폴더에서 보기 · 고객 양식으로 뽑기 + 고쳐 달라고 하기
     find(root, e => e.attrs['data-path'] === 'docs/SRS_v0.2.md')[0].click(); await tick(); await tick();
@@ -716,8 +727,8 @@ global.document = { documentElement: { style } };
 require(file);
 const BH = window.BH;
 const out = { first: BH.getScale(), zoom: style.zoom, keys: Object.keys(BH).sort().join(',') };
-BH.setScale('1.3');
-out.afterSet = [BH.getScale(), store['bh-scale'], style.zoom];
+BH.setScale('1.15');
+out.afterSet = [BH.getScale(), store['bh-zoom'], style.zoom];
 BH.setScale('nonsense');
 out.afterBad = [BH.getScale(), style.zoom];
 process.stdout.write(JSON.stringify(out));
@@ -734,12 +745,13 @@ def _theme_run(seed: dict | None = None) -> dict:
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_theme_js_only_keeps_text_scale():
     r = _theme_run()
-    assert r["first"] == "1.15" and r["zoom"] == "1.15"
+    assert r["first"] == "1" and r["zoom"] == "1"  # 시안(가)대로 보통 = 배율 없음(#721)
     assert r["keys"] == "SCALES,getScale,read,setScale,write"  # 옛 테마 표·디자인 전환은 없다
-    assert r["afterSet"] == ["1.3", "1.3", "1.3"]
-    assert r["afterBad"] == ["1.3", "1.3"]  # 모르는 값은 저장도 적용도 하지 않는다(바로 앞 값 유지)
-    assert _theme_run({"bh-scale": "1.45"})["zoom"] == "1.45"
-    assert _theme_run({"bh-scale": "zzz"})["first"] == "1.15"
+    assert r["afterSet"] == ["1.15", "1.15", "1.15"]
+    assert r["afterBad"] == ["1.15", "1.15"]  # 모르는 값은 저장도 적용도 하지 않는다(바로 앞 값 유지)
+    assert _theme_run({"bh-zoom": "0.9"})["zoom"] == "0.9"
+    assert _theme_run({"bh-zoom": "zzz"})["first"] == "1"
+    assert _theme_run({"bh-scale": "1.15"})["first"] == "1"  # 옛 키(보통이 1.15 였다)는 읽지 않는다
 
 
 def test_no_theme_or_design_switch_left():
@@ -873,7 +885,10 @@ def test_work_screen_session_matches_design(tmp_path):
     got = _smoke(tmp_path, "s/s1", [_session("s1", status="running", managed=True, currentAction="Edit docs/SRS.md", pendingRequestIds=["q1"])], [q])
     text, dump = got["text"], got["dump"]
     assert text.startswith("요구사항 만들기·바꾸기 · 내 응답을 기다리는 중구매오더 조회 앱 요구사항")
-    assert "<ol.stepbar.big>" in dump and "<div.strip>" in dump
+    # 시안: 순서 알약·층 그림은 "올릴 차례"(G-09)·"갈래 끝남"(G-12)에만. 확인을 기다리는 화면(G-17)엔 없다
+    assert "<ol.stepbar.big>" not in dump and "<div.strip>" in dump
+    turn = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", managed=True, turnSkill="deliver")])
+    assert "<ol.stepbar.big>" in turn["dump"]
     for cell in ("단계2 / 3 올리고 검토 요청하기", "AI 진행33%", "작업 기록(이슈)이슈 #4", "검토 요청(PR)PR #6 검토 중"):
         assert cell in text, cell
     assert "요구사항REQ" not in text and "개발 번호" not in text  # 데이터가 없는 칸은 지어내지 않는다
@@ -974,9 +989,17 @@ def test_work_screen_irreversible_card_is_yellow_and_cannot_be_remembered(tmp_pa
     sess = [_session("s1", pendingRequestIds=["p1", "p2"])]
     got = _smoke(tmp_path, "r/p1", sess, [rm, plain])
     text, dump = got["text"], got["dump"]
-    for need in ("확인 필요 · 되돌릴 수 없어", "작업 폴더 밖 파일을 쓰려 해", "하네스는 되돌릴 수 없는 일은 항상 사람에게 물어.", "이번만 허락", "하지 마", "자세히 (명령 원문)"):
-        assert need in text, need
-    assert "<div.bad.irrev>" in dump
+    for need in ("확인 필요 · 되돌릴 수 없어", "작업 폴더 밖 파일을 쓰려 해", "하네스는 되돌릴 수 없는 일은 항상 사람에게 물어.", "이번만 지워", "지우지 마", "자세히 (명령 원문)", "이유 적기(선택)"):
+        assert need in text, need  # 단추는 행동을 그대로 말한다(시안 17)
+    assert "이번만 허락" not in text
+    assert "<div.bad.irrev>" in dump and "<span.muted-line>" in dump and "<span.warn-line>" not in dump  # 하네스 안내 줄은 강조 없이 연한 글
+    assert "<details.more>" in dump and "AI에게 말하기" in text  # 이유 입력칸은 접혀 있고, 카드 아래에 말하기 입력창이 있다
+    push = dict(rm, id="p4", toolInput={"command": "git push origin main"}, riskNote="GitHub 에 올리려 해")
+    up = _smoke(tmp_path, "r/p4", [_session("s1", pendingRequestIds=["p4"])], [push])
+    assert "이번만 올려" in up["text"] and "올리지 마" in up["text"]
+    other = dict(rm, id="p5", toolInput={"command": "chmod 777 a"}, riskNote="권한을 바꾸려 해")
+    gen = _smoke(tmp_path, "r/p5", [_session("s1", pendingRequestIds=["p5"])], [other])
+    assert "이번만 허락" in gen["text"] and "하지 마" in gen["text"]
     assert "irreversible" not in text  # 값 그대로를 화면에 쓰지 않는다
     assert "다시 묻지 않기" not in text  # 되돌릴 수 없는 일은 기억시키지 못한다
     got = _smoke(tmp_path, "r/p2", sess, [rm, plain])
@@ -1014,15 +1037,15 @@ def test_new_task_default_folder_priority(tmp_path):
     recent = {"GET /api/folders/recent": {"folders": ["C:/other/busy", "C:/mine/repo"]}}
     # 1) 세션 화면에서 왔다
     got = _smoke(tmp_path, "new?from=s1", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": "C:/last/one"}}))
-    assert "작업 폴더C:/mine/repo" in got["text"] and "C:/last/one" not in got["text"].split("작업 폴더")[1][:30]
+    assert "작업 폴더 · repo" in got["text"] and "작업 폴더 · one" not in got["text"]  # 한 줄(이름만, 전체 경로는 title)
     assert "GET /api/folders/last" not in got["calls"]  # 세션 폴더가 있으면 서버 기억을 묻지 않는다
     # 2) 그냥 새 작업: 서버가 기억한 마지막 폴더
     got = _smoke(tmp_path, "new", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": "C:/last/one"}}))
-    assert "작업 폴더C:/last/one" in got["text"] and "폴더 바꾸기" in got["text"]
-    # 3) 둘 다 없으면 기본값 없이 목록을 펼쳐 고르게 한다(최근 폴더 첫 줄을 쓰지 않는다)
+    assert "작업 폴더 · one" in got["text"] and "바꾸기" in got["text"] and "프로젝트를 고르" not in got["text"]
+    # 3) 둘 다 없으면 기본값 없이 "폴더를 골라 줘 [고르기]" 한 줄(최근 폴더 첫 줄을 쓰지 않는다). 목록은 처음부터 펼치지 않는다(시안 G-05, #721)
     got = _smoke(tmp_path, "new", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": None}}))
-    assert "폴더를 골라 줘" in got["text"] and "작업 폴더C:/other/busy" not in got["text"] and "닫기" in got["text"]
-    assert "C:/other/busy" in got["text"] and "C:/mine/repo" in got["text"]  # 후보 목록은 그대로
+    assert "폴더를 골라 줘" in got["text"] and "작업 폴더 · busy" not in got["text"] and "고르기" in got["text"] and "닫기" not in got["text"]
+    assert "C:/other/busy" not in got["text"]  # 후보 목록은 [고르기] 를 눌러야 보인다
     # 4) 새 세션 버튼은 세션 화면에서만 출처 세션을 넘긴다
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "'/new?from=' + encodeURIComponent(sid)" in app and app.count("link(newHref(),") == 3  # 헤더 메뉴 · 목록 아래 + 새 세션 · 접힌 레일 +
@@ -1042,21 +1065,21 @@ def _folder_rows():
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_new_task_folder_cards_show_ready_chips_without_blurring_unknown(tmp_path):
     """폴더 카드 칩(시안 02): 준비됨 · 세션 n / 준비됨 / 준비 필요 / 확인하는 중 / 확인 못 함. 읽지 못한 것은 준비됨도 준비 필요도 아니다."""
-    got = _smoke(tmp_path, "new", [], extra=_folder_rows())
+    got = _smoke(tmp_path, "new", [], extra=_folder_rows(), actions=[{"click": "[data-folder-toggle]"}])  # 목록은 [고르기] 를 눌러야 펼친다(#721)
     assert re.findall(r"<span\.chip2([\w.]*)>", got["dump"]) == [".ok", ".ok", ".warn", "", ".unk"]
     # 카드 한 장마다 이름 · 경로 · 칩 순서로 글이 이어진다(가짜 DOM 의 dump 는 text 속성 글을 안 보여 줘 본문 글로 본다)
     text = got["text"]
     for card in ("ready2C:/p/ready2준비됨 · 세션 2", "ready0C:/p/ready0준비됨NE","needsC:/p/needs준비 필요", "busyC:/p/busy확인하는 중", "unkC:/p/unk확인 못 함"):
         assert card in text, card
     # 옛 서버 응답(ready 키 없음)은 준비됨으로 치지 않는다
-    old = _smoke(tmp_path, "new", [], extra={"GET /api/folders/recent": {"folders": ["C:/w/proj"]}, "GET /api/folders/last": {"path": None}})
+    old = _smoke(tmp_path, "new", [], extra={"GET /api/folders/recent": {"folders": ["C:/w/proj"]}, "GET /api/folders/last": {"path": None}}, actions=[{"click": "[data-folder-toggle]"}])
     assert re.findall(r"<span\.chip2([\w.]*)>", old["dump"]) == [".unk"] and "projC:/w/proj확인 못 함" in old["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_starts_scaffold(tmp_path):
     shown = {"GET /api/folders/intro": {"ready": "no", "seen": False, "show": True}, "POST /api/folders/intro/seen": {"seen": True}}
-    pick = [{"click": ".folder-opt", "index": 2}]
+    pick = [{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}]
     got = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick)
     text = got["text"]
     for need in ("프로젝트 준비", "needs 준비하기", "이 폴더엔 아직 하네스 구조가 없어", "네 차례", "표준 구조를 만들까? 한 번만 하면 돼",
@@ -1072,7 +1095,7 @@ def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_sta
     assert len(new) == 1 and "/harness:scaffold" in new[0][2] and "C:/p/needs" in new[0][2], new
     # [나중에] -> 원래 새 작업 화면으로 돌아가고 작업을 시작하지 않는다
     later = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick + [{"click": "[data-intro-later]"}])
-    assert "하고 싶은 일을 한두 줄로" in later["text"] and "작업 폴더C:/p/needs" in later["text"] and "프로젝트 준비" not in later["text"]
+    assert "하고 싶은 일을 한두 줄로" in later["text"] and "작업 폴더 · needs" in later["text"] and "프로젝트 준비" not in later["text"]
     assert not [p for p in later["posts"] if p[1] == "/api/new"]
 
 
@@ -1080,18 +1103,18 @@ def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_sta
 def test_new_task_prepare_screen_not_shown_when_seen_ready_or_unknown(tmp_path):
     for state in ({"ready": "no", "seen": True, "show": False}, {"ready": "yes", "seen": False, "show": False},
                   {"ready": "unknown", "seen": False, "show": False}):
-        got = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **{"GET /api/folders/intro": state}), actions=[{"click": ".folder-opt", "index": 2}])
+        got = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **{"GET /api/folders/intro": state}), actions=[{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}])
         assert "하고 싶은 일을 한두 줄로" in got["text"] and "준비하기" not in got["text"], state
         assert not [p for p in got["posts"] if p[1] == "/api/folders/intro/seen"], state
     # 안내를 못 읽으면(오류) 막지 않고 원래 화면으로 간다
-    err = _smoke(tmp_path, "new", [], extra=_folder_rows(), actions=[{"click": ".folder-opt", "index": 2}])
+    err = _smoke(tmp_path, "new", [], extra=_folder_rows(), actions=[{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}])
     assert "하고 싶은 일을 한두 줄로" in err["text"] and "준비하기" not in err["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_docs_screen_groups_files_and_has_menu(tmp_path):
     got = _smoke(tmp_path, "docs", [_session("s1")])
-    for need in ("내가 만든 문서", "요구사항 · 설계", "SRS.md", "안 올림", "왼쪽에서 문서를 골라 줘"):
+    for need in ("내가 만든 문서", "요구사항 · 설계", "SRS.md", "안 올림"):  # 시안 G-14: 처음엔 최근 글 문서를 골라 미리보기까지 보인다(빈 안내 대신)
         assert need in got["text"], need
     assert "산출물" in got["head"] and "GET /api/sessions/s1/files" in got["calls"]  # 새 서버 API 없이 세션별 문서 목록을 모은다
 
@@ -1100,7 +1123,7 @@ def test_docs_screen_groups_files_and_has_menu(tmp_path):
 def test_settings_screen_matches_design(tmp_path):
     got = _smoke(tmp_path, "settings", [_session("s1")])
     text, dump = got["text"], got["dump"]
-    for need in ("보기와 AI 설정", "글자 크기", "보통", "크게", "아주 크게", "AI가 묻는 범위", "연결 상태", "GitHub", "하네스 판", "프로젝트", "고급", "AI 모델", "생각 깊이"):
+    for need in ("보기와 알림", "글자 크기", "작게", "보통", "크게", "AI가 묻는 범위", "연결 상태", "GitHub", "하네스 판", "프로젝트", "고급", "AI 모델", "생각 깊이"):
         assert need in text, need
     assert dump.count("<button.scale>") == 3 and dump.count("<button.radio>") >= 1  # 시안 .seg / .radio 모양, 기본 위젯 없음
     assert "<select" not in dump and "<input" not in dump
@@ -1117,9 +1140,12 @@ def test_settings_ask_range_has_three_steps_tied_to_server_and_default_permissio
     got = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(perms, **{"GET /api/settings/ask": {"level": "needed"}}))
     text, dump = got["text"], got["dump"]
     for need in ("AI가 묻는 범위", "꼭 필요할 때만 (권장)", "문서를 바꿀 때마다", "모든 명령마다",
-                 "어떤 걸 골라도 위험한 일(main에 바로 올리기 · 강제 덮어쓰기 · SAP 운영 쓰기)은 하네스가 막아.",
-                 "기본 권한", "알아서 하되 위험한 건 AI가 막기"):
+                 "어떤 걸 골라도 위험한 일(main에 바로 올리기 · 강제 덮어쓰기 · SAP 운영 쓰기)은 하네스가 막아."):
         assert need in text, need
+    # 시안 G-19: 설정엔 "AI가 묻는 범위" 하나만. 권한 모드(계획만·auto 포함)는 새 작업 고급 설정에서 고른다
+    assert "기본 권한" not in text and "data-perm-opt" not in dump
+    new = _smoke(tmp_path, "new", [], extra=perms)
+    assert "권한 모드" in new["text"] and "<select.input>" in new["dump"]  # 새 작업 고급 설정의 권한 모드 고르기(선택지는 /api/models 의 permissionOptions)
     assert "GET /api/settings/ask" in got["calls"]
     assert text.count("꼭 필요할 때만") == 1
     # 단계를 누르면 서버에 저장한다
@@ -1180,8 +1206,9 @@ def test_work_screen_css_blocks_and_responsive_rules():
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     for needle in (".sess-grid", ".strip", ".msgs", ".ask", ".qopt", ".bad", ".todo", ".crow", ".flow", ".fs", ".docs-pane", "details.more"):
         assert needle in css, needle
-    # 넓을 때 옆, 좁을 때 아래
-    assert re.search(r"@container shell \(max-width: 1000px\) \{\s*\.sess-grid \{ grid-template-columns: minmax\(0, 1fr\); \}", css)
+    # 시안 .split: 넓을 때 옆, 좁을 때 줄바꿈으로 아래(flex-wrap)
+    assert re.search(r"\.sess-grid \{ display: flex; flex-wrap: wrap; gap: 18px;", css) and ".sess-grid > .talk { flex: 999 1 480px;" in css
+    assert re.search(r"@container shell \(max-width: 760px\) \{ \.iso \{ display: none; \} \}", css)  # 좁은 창에서는 층 그림을 숨긴다
     assert "details.more > summary::-webkit-details-marker { display: none; }" in css  # 접힘 삼각형은 직접 그린다
 
 
@@ -1220,6 +1247,75 @@ def test_intro_not_shown_after_first_run_and_old_version_is_a_strip(tmp_path):
     assert "하네스 새 판 0.10.169" in got["ann"] and "/harness:update" in got["ann"] and "내 차례" in got["ann"]  # 내 차례 띠와 함께 둘 다 보인다
     got = _smoke(tmp_path, "settings", [_session("s1")], extra=_start())
     assert "처음 화면 다시 보기" in got["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_first_run_start_leads_to_project_pick_then_home_or_prepare_screen(tmp_path):
+    """시안 G-01 -> G-02: [시작하기] 는 바로 홈이 아니라 프로젝트 고르기로 간다. 확정은 [이 프로젝트로]."""
+    extra = dict(_folder_rows(), **_start(firstRun=True), **{"POST /api/folders/last": {"path": "C:/p/ready2", "name": "ready2"}, "POST /api/start-checks/seen": {"firstRun": False}})
+    start = [{"click": "[data-intro-start]"}]
+    got = _smoke(tmp_path, "", [], extra=extra, actions=start)
+    text, dump = got["text"], got["dump"]
+    for need in ("1단계 · 프로젝트", "어느 고객사 프로젝트에서 일할까?", "최근에 쓴 폴더야. 처음이면 GitHub에서 받은 고객사 저장소 폴더를 골라.",
+                 "ready2C:/p/ready2준비됨 · 세션 2", "needsC:/p/needs준비 필요", "다른 폴더 찾아보기", "뒤로", "이 프로젝트로"):
+        assert need in text, need
+    assert "환영해" not in text and not got["posts"]  # 아직 아무것도 기억시키지 않았다
+    assert "data-pick-ok" in (STATIC / "app.js").read_text(encoding="utf-8") and "disabled: !sel || busy" in (STATIC / "app.js").read_text(encoding="utf-8")  # 고르기 전에는 [이 프로젝트로] 가 막혀 있다
+    # 카드를 눌러도 확정되지 않는다
+    sel = _smoke(tmp_path, "", [], extra=extra, actions=start + [{"click": "[data-pick-folder]", "index": 0}])
+    assert not sel["posts"]
+    # [이 프로젝트로] -> 마지막 폴더 기억 + 첫 실행 표시, 준비된 폴더면 홈으로
+    ok = _smoke(tmp_path, "", [], extra=extra, actions=start + [{"click": "[data-pick-folder]", "index": 0}, {"click": "[data-pick-ok]"}])
+    posts = [(p[0], p[1]) for p in ok["posts"]]
+    assert ("POST", "/api/folders/last") in posts and ("POST", "/api/start-checks/seen") in posts
+    assert "C:/p/ready2" in [p[2] for p in ok["posts"] if p[1] == "/api/folders/last"][0] and ok["path"] == "/"
+    assert "1단계 · 프로젝트" not in ok["text"]
+    # 준비 안 됨 + 안내를 아직 안 봤으면 새 작업 화면의 프로젝트 준비(03)
+    shown = dict(extra, **{"GET /api/folders/intro": {"ready": "no", "seen": False, "show": True}, "POST /api/folders/intro/seen": {"seen": True},
+                           "POST /api/folders/last": {"path": "C:/p/needs", "name": "needs"}})
+    prep = _smoke(tmp_path, "", [], extra=shown, actions=start + [{"click": "[data-pick-folder]", "index": 2}, {"click": "[data-pick-ok]"}])
+    assert prep["path"] == "/new" and "needs 준비하기" in prep["text"] and "이 폴더엔 아직 하네스 구조가 없어" in prep["text"]
+    # 안내를 이미 봤으면 홈
+    seen = dict(shown, **{"GET /api/folders/intro": {"ready": "no", "seen": True, "show": False}})
+    home = _smoke(tmp_path, "", [], extra=seen, actions=start + [{"click": "[data-pick-folder]", "index": 2}, {"click": "[data-pick-ok]"}])
+    assert home["path"] == "/" and "준비하기" not in home["text"]
+    # [뒤로] -> 01
+    back = _smoke(tmp_path, "", [], extra=extra, actions=start + [{"click": "[data-pick-back]"}])
+    assert "환영해" in back["text"] and "시작하기" in back["text"] and not back["posts"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_project_pick_without_recent_folders_and_settings_replay(tmp_path):
+    empty = dict(_start(firstRun=True), **{"GET /api/folders/recent": {"folders": []}})
+    got = _smoke(tmp_path, "", [], extra=empty, actions=[{"click": "[data-intro-start]"}])
+    assert "다른 폴더 찾아보기" in got["text"] and "<div.inline-row>" not in got["dump"] and "사용" not in got["text"]  # 시안 G-02: 경로 입력칸 없이 찾아보기만(선택 창을 못 열 때만 입력칸) and "<button.folder-opt.proj>" not in got["dump"]
+    # 설정의 "처음 화면 다시 보기" 도 01 부터 시작해 02 로 이어진다
+    again = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_start(), **_folder_rows()), actions=[{"click": "[data-intro-again]"}, {"click": "[data-intro-start]"}])
+    assert "어느 고객사 프로젝트에서 일할까?" in again["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_empty_home_subtitle_names_the_remembered_ready_project(tmp_path):
+    ready = dict(_folder_rows(), **{"GET /api/folders/last": {"path": "C:/p/ready2", "name": "ready2"}})
+    assert "프로젝트 준비 끝 · ready2" in _smoke(tmp_path, "", [], extra=ready)["text"]
+    needs = dict(_folder_rows(), **{"GET /api/folders/last": {"path": "C:/p/needs", "name": "needs"}})
+    assert "프로젝트 준비 끝" not in _smoke(tmp_path, "", [], extra=needs)["text"]
+    assert "Claude Code 세션을 시작하면" in _smoke(tmp_path, "", [], extra=_folder_rows())["text"]  # 기억한 폴더가 없으면 지금 문구 그대로
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_question_and_permission_screens_show_chat_and_say_box(tmp_path):
+    chat = [{"t": 1, "role": "me", "text": "구매오더 앱 써 줘"}, {"t": 2, "role": "ai", "text": "두 가지만 물어볼게."}]
+    q = {"id": "q1", "sessionId": "s1", "kind": "question", "status": "pending",
+         "questions": [{"question": "얼마나 급해?", "header": "우선순위", "options": [{"label": "반드시 필요"}]}]}
+    got = _smoke(tmp_path, "r/q1", [_session("s1", pendingRequestIds=["q1"], chat=chat)], [q])
+    dump, text = got["dump"], got["text"]
+    assert "구매오더 앱 써 줘" in text and "두 가지만 물어볼게." in text and "AI에게 말하기" in text
+    assert text.index("구매오더 앱 써 줘") < text.index("얼마나 급해?") < text.index("답 보내기") < text.index("AI에게 말하기")  # 대화 -> 질문 카드 -> 답 보내기 -> 말하기
+    assert "<input.input.q-other>" in dump and "<label.sr-only>" in dump and "다른 답이 있으면 직접 적어 줘" in text  # 보이는 글 없이 입력칸 하나(label 은 sr-only)
+    # 보낼 수 없는 세션은 입력창이 막히고 이유가 보인다
+    no = _smoke(tmp_path, "r/q1", [_session("s1", pendingRequestIds=["q1"], chat=chat, canSend=False, cannotSendReason="터미널에서 연 세션이라 콘솔에서 말할 수 없어.")], [q])
+    assert "터미널에서 연 세션이라 콘솔에서 말할 수 없어." in no["text"]
 
 
 def _wn(*versions, current="0.10.186"):
@@ -1289,9 +1385,15 @@ def test_chat_draws_hook_block_cards_two_kinds_and_fix_button(tmp_path):
     assert "? 확인 못 함" in text and "검사를 못 해서 멈췄어 · 마무리 확인" in text
     assert "문서가 템플릿을 따르지 않습니다." in text and "자세한 위반 목록입니다." not in text  # 첫 문장만 크게, 나머지는 접힘
     assert "고치는 법 개요 절을 추가하십시오." in text
-    assert text.count("그렇게 고쳐 줘") == 2
+    # 시안 G-16 단추: 막힘 [그렇게 고쳐 줘] [내가 직접 볼게] [검사 원문] / 확인 못 함 [검사 다시 돌리기] [관리자에게 알리기]
+    assert text.count("그렇게 고쳐 줘") == 1 and "내가 직접 볼게" in text and "검사 원문" in text
+    assert "검사 다시 돌리기" in text and "관리자에게 알리기" in text
+    assert "<button.pill.dark.sm>" in dump  # 보내는 단추는 진한 단추
     unsent = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, canSend=False)])
-    assert "그렇게 고쳐 줘" not in unsent["text"] and "✕ 막힘" in unsent["text"]
+    assert "그렇게 고쳐 줘" not in unsent["text"] and "검사 다시 돌리기" not in unsent["text"] and "✕ 막힘" in unsent["text"]
+    assert "내가 직접 볼게" in unsent["text"] and "관리자에게 알리기" in unsent["text"]  # 보내지 않는 단추는 남는다
+    mine = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-self]"}])
+    assert "직접 보기로 했어." in mine["text"] and mine["text"].count("내가 직접 볼게") == 0
     unknown = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="새_훅")])])
     assert "하네스 검사가 막았어 · 새_훅" in unknown["text"]  # 이름표에 없으면 원래 이름
 

@@ -1058,6 +1058,21 @@ def test_last_folder_is_saved_on_start_in_state_dir_and_ignored_when_gone(mconso
     assert c.call("GET", "/api/folders/last")[1]["path"] is None
 
 
+def test_last_folder_can_be_set_from_first_run_project_pick(mconsole):
+    """시안 G-02 [이 프로젝트로]: POST /api/folders/last 가 고른 폴더를 마지막 폴더로 기억한다."""
+    c = mconsole
+    want = os.path.realpath(str(c.work))
+    status, body, _ = c.call("POST", "/api/folders/last", {"path": str(c.work)})
+    assert status == 200 and body == {"path": want, "name": os.path.basename(want)}
+    assert c.call("GET", "/api/folders/last")[1]["path"] == want  # 읽기 API 가 그대로 돌려준다
+    assert json.loads((c.state / console_server.LAST_FOLDER_FILE).read_text(encoding="utf-8"))["path"] == want  # 브라우저가 아니라 상태 폴더
+    assert want in [f["path"] for f in c.call("GET", "/api/folders/recent")[1]]  # 최근 폴더에도 오른다
+    for bad in ({"path": str(c.work / "nope")}, {"path": ""}, {}, {"path": 5}):
+        assert c.call("POST", "/api/folders/last", bad)[0] == 400, bad  # 없는 폴더 · 빈 값은 거부
+    assert c.call("GET", "/api/folders/last")[1]["path"] == want  # 거부한 요청은 기억을 바꾸지 않는다
+    assert c.call("POST", "/api/folders/last", {"path": str(c.work)}, cookie=False)[0] == 401  # 쿠키 인증이 필요하다
+
+
 # ---- gitstate ----
 
 def fake_runner(table):
@@ -5387,8 +5402,12 @@ def test_flow_next_needs_flow_data(tmp_path, monkeypatch, request):
 # ---- 첫 화면 · 자동 점검 (시안 01, #636) ----
 # 점검 판정(gh 로그인 · 하네스 판 · Claude 로그인)과 첫 실행 표시 파일을 본다.
 
-def _check_console(tmp_path, monkeypatch, gh=(0, "me\n"), latest="9.9.9", installed=True):
-    c = Console(tmp_path, monkeypatch, run=FakeRun(gh_api_user=gh))
+CLAUDE_OK = (0, '{"loggedIn": true, "authMethod": "claude.ai", "email": "x@example.com"}\n')
+
+
+def _check_console(tmp_path, monkeypatch, gh=(0, "me\n"), latest="9.9.9", installed=True, claude=CLAUDE_OK, claude_found=True):
+    c = Console(tmp_path, monkeypatch, run=FakeRun(gh_api_user=gh, **{"claude auth status": claude}))
+    c.app.claude_cmd = (lambda: ["claude"]) if claude_found else (lambda: None)
     c.app.gh_installed = lambda: installed
     c.app.remote_latest = (lambda: latest) if not callable(latest) else latest
     c.login()
@@ -5524,8 +5543,42 @@ def test_start_checks_all_ok_is_not_blocking(tmp_path, monkeypatch):
         assert body["blocking"] is False and body["newVersion"] is None and body["loading"] is False
         assert by["github"]["state"] == "ok" and by["github"]["detail"] == "me"
         assert by["version"]["state"] == "ok" and by["version"]["detail"] == "9.9.9"
+        assert by["claude"]["state"] == "ok" and by["claude"]["detail"] == "로그인됨 · Claude 계정"
+        assert "example.com" not in json.dumps(body)  # 계정 이메일은 화면에 옮기지 않는다
     finally:
         c.close()
+
+
+def test_start_checks_claude_login_reads_auth_status(tmp_path, monkeypatch):
+    """Claude Code 로그인: 공식 명령 claude auth status --json 의 loggedIn 으로 판정한다(#721)."""
+    run = FakeRun(gh_api_user=(0, "me\n"), **{"claude auth status": (1, '{"loggedIn": false}\n')})
+    c = Console(tmp_path, monkeypatch, run=run)
+    c.app.claude_cmd = lambda: ["claude"]
+    c.app.gh_installed = lambda: True
+    c.app.remote_latest = lambda: "9.9.9"
+    c.login()
+    try:
+        body, by = _checks(c)
+        assert body["blocking"] is True and by["claude"]["state"] == "fail" and "claude auth login" in by["claude"]["fix"]
+        assert "claude auth status --json" in run.calls
+    finally:
+        c.close()
+    c = _check_console(tmp_path / "nf", monkeypatch, claude_found=False)  # claude 를 못 찾음: 로그인 안 됨이 아니라 확인 못 함
+    try:
+        body, by = _checks(c)
+        assert by["claude"]["state"] == "unknown" and "찾지 못했어" in by["claude"]["detail"] and body["blocking"] is False
+    finally:
+        c.close()
+
+
+def test_judge_claude_reads_json_even_with_noise_and_never_guesses():
+    j = console_server.judge_claude
+    assert j(0, 'warning: x\n{"loggedIn": true, "authMethod": "apiKey"}\n', True) == {"state": "ok", "detail": "로그인됨"}
+    assert j(0, '{"loggedIn": false}', True)["state"] == "fail"
+    assert j(1, '{"loggedIn": false}', True)["state"] == "fail"
+    for rc, out in ((0, ""), (0, "not json"), (0, '{"other": 1}'), (124, ""), (1, "error")):
+        assert j(rc, out, True)["state"] == "unknown", (rc, out)
+    assert j(0, '{"loggedIn": true}', False)["state"] == "unknown"
 
 
 def test_start_checks_github_not_logged_in_blocks_with_fix(tmp_path, monkeypatch):
@@ -5546,7 +5599,7 @@ def test_start_checks_github_not_logged_in_blocks_with_fix(tmp_path, monkeypatch
 
 
 def test_start_checks_cannot_read_is_unknown_not_blocking(tmp_path, monkeypatch):
-    c = _check_console(tmp_path, monkeypatch, gh=(127, ""), latest=lambda: None)  # gh 시간 초과(설치는 돼 있음) + 원격 못 읽음
+    c = _check_console(tmp_path, monkeypatch, gh=(127, ""), latest=lambda: None, claude=(124, ""))  # gh 시간 초과(설치는 돼 있음) + 원격 못 읽음 + claude 시간 초과
     try:
         body, by = _checks(c)
         assert body["blocking"] is False and body["newVersion"] is None
