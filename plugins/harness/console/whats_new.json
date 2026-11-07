@@ -1,6 +1,9 @@
 {
   "_comment": "판(plugin.json version)마다 팀원이 알아야 할 변경을 쉬운 말 한두 줄로 적는다. 웹 콘솔이 판이 바뀐 뒤 처음 열 때 지난번 본 판보다 새 판들의 줄을 한 번 보여 준다. 팀원이 몰라도 되는 변경(시험·내부 정리)은 적지 않는다. 판 키가 없으면 그 판은 띄우지 않는다.",
   "versions": {
+    "0.10.201": [
+      "Spec 의 사용 객체에 권한 객체·Access Control·Restriction·Business Role Template 을 적을 수 있고, Launchpad 에 앱을 띄우는 객체를 어떤 순서로 만드는지 Claude 가 안내해 줘."
+    ],
     "0.10.200": [
       "이름 규칙의 Launchpad 액션 이름을 소문자 시작(list, display)으로 바로잡았어요. 규칙대로 쓰면 Spec 검사에 걸리던 문제예요."
     ],

@@ -28,9 +28,10 @@ REQ-012 ([SRS](../ssot/SRS.md))
 - 종류: Domain, Data Element, Structure, Database Table, CDS View, Metadata
   Extension, Behavior Definition, Service Definition, Service Binding, ABAP
   Class, AMDP Class, CDS Table Function, Message Class, IAM App, Business
-  Catalog, Launchpad App Descriptor Item 중 하나(앞의 13종과 IAM App·Business
-  Catalog 는 `conventions/naming.md` 의 표기, Launchpad App Descriptor Item 은
-  ADT 가 앱 디스크립터에 쓰는 이름)
+  Catalog, Launchpad App Descriptor Item, Authorization Field, Authorization
+  Object, Access Control, Restriction Field, Restriction Type, Business Role
+  Template 중 하나(앞의 13종과 IAM App·Business Catalog 는 `conventions/naming.md`
+  의 표기, 나머지는 ADT 문서의 객체 이름)
 - 이름: 영문자로 시작하는 객체 이름(예: `ZSD_UI_CUSTOMER`, 대소문자 무관).
   네임스페이스는 `/DMO/I_TRAVEL` 처럼 쓴다. 참조만 하는 SAP 표준 객체도 같다.
   공백·하이픈·한글은 쓸 수 없다. 이름을 모르면 추측으로 채우지 않는다

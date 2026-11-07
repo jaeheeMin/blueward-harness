@@ -15,7 +15,7 @@
     절: 사용 객체
     열: [종류, 이름, 작업, 비고]
     값:
-      종류: [Domain, Data Element, Structure, Database Table, CDS View, Metadata Extension, Behavior Definition, Service Definition, Service Binding, ABAP Class, AMDP Class, CDS Table Function, Message Class, IAM App, Business Catalog, Launchpad App Descriptor Item]
+      종류: [Domain, Data Element, Structure, Database Table, CDS View, Metadata Extension, Behavior Definition, Service Definition, Service Binding, ABAP Class, AMDP Class, CDS Table Function, Message Class, IAM App, Business Catalog, Launchpad App Descriptor Item, Authorization Field, Authorization Object, Access Control, Restriction Field, Restriction Type, Business Role Template]
       작업: [생성, 수정, 참조]
     패턴:
       이름: '(?:/[A-Za-z0-9_]+/)?[A-Za-z][A-Za-z0-9_]*'
