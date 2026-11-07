@@ -1899,7 +1899,8 @@
         var nm = baseName(f.path) || f.path;
         box.appendChild(h('button', { type: 'button', class: 'folder-opt proj', 'aria-pressed': String(f.path === draft.cwd), onClick: function () { useFolder(f.path); } },
           h('span', { class: 'pi', 'aria-hidden': 'true', text: nm.replace(/[^A-Za-z0-9가-힣]/g, '').slice(0, 2).toUpperCase() || '··' }),
-          h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', text: f.path })),
+          h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', text: f.path }),
+            f.ready === 'yes' && f.formsMissing === 'yes' ? h('small', { class: 'forms-hint', 'data-forms-missing': '1', title: BL.FORMS_MISSING_TEXT, text: BL.FORMS_MISSING_SHORT }) : null),
           (function () { var c = readyChip(f); return h('span', { class: ('chip2 ' + c.cls).trim(), 'data-ready': f.ready || 'unknown', text: c.text }); })()));
       });
       if (recent && !recent.length) box.appendChild(h('p', { class: 'note-muted', text: '최근에 쓴 폴더가 없어. 아래에 경로를 적어 줘.' }));

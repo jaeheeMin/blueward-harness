@@ -158,6 +158,26 @@ const cases = {
     const unk = L.projectNotice(cond('unknown', 'git 을 실행하지 못했습니다.'));
     assert.strictEqual(unk.state, 'unknown'); assert.ok(unk.text.includes('확인하지 못했어요') && !unk.text.includes('준비 안 됨'));
   },
+  forms_notice_only_when_ready_and_server_says_missing() {
+    const d = (state, forms) => ({ conditions: { 'project-ready': { state } }, formsMissing: forms });
+    const n = L.formsNotice(d('yes', 'yes'));
+    assert.ok(n.text.includes('고객 양식이 아직 없어') && n.text.includes('templates/') && n.text.includes('md 로만 쓰는 프로젝트면 신경 안 써도 돼'));
+    assert.strictEqual(n.short, '고객 양식 아직 없음');
+    assert.strictEqual(L.formsNotice(d('yes', 'no')), null);       // 양식이 있다
+    assert.strictEqual(L.formsNotice(d('yes', 'unknown')), null);  // 못 읽었으면 말하지 않는다
+    assert.strictEqual(L.formsNotice(d('yes', undefined)), null);
+    assert.strictEqual(L.formsNotice(d('no', 'yes')), null);       // 준비 안 됨 안내가 따로 있다
+    assert.strictEqual(L.formsNotice(null), null);
+    assert.strictEqual(L.projectNotice(d('yes', 'yes')), null);    // 준비됨 판정은 그대로
+  },
+  pr_team_line_mentions_agent_merge_only_in_small_fix_flow() {
+    const pr = { number: 6, state: 'OPEN', checks: 'pass' };
+    const team = (flow) => L.prLines(pr, flow).find(l => l.id === 'team').text;
+    assert.ok(team('fix').includes('승인은 GitHub 에서 해') && team('fix').includes('문서만 바꾼 PR 은 검사가 통과하면 Claude Code 가 바로 병합하기도 해.'));
+    assert.ok(!team('srs').includes('바로 병합하기도'));  // SRS·Spec·개발 PR 은 늘 사람이 병합한다
+    assert.ok(!team(undefined).includes('바로 병합하기도'));
+    assert.strictEqual(L.prLines({ number: 6, state: 'MERGED', checks: 'pass' }, 'fix').find(l => l.id === 'team').text, '합쳐졌어');
+  },
   reload_strip_and_result() {
     const live = [{ id: 'a', status: 'idle' }, { id: 'b', status: 'ended' }, { id: 'c', status: 'running' }];
     assert.strictEqual(L.reloadStrip(false, live), null);
