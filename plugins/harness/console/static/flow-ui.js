@@ -127,7 +127,7 @@
       var url = kit.safeHttp(pr.url);
       var label = 'PR #' + pr.number + (pr.title ? ' · ' + pr.title : '');
       // 검사가 실패했으면 ✕ 막힘(빨간 테두리), 결과를 못 읽었으면 ? 확인 못 함(보라 점선). 통과·실패 어느 쪽으로도 치지 않는다.
-      var failed = lines.some(function (ln) { return ln.state === 'fail'; }), unsure = !failed && lines.some(function (ln) { return ln.state === 'unk'; });
+      var failed = pr.checks === 'fail' || lines.some(function (ln) { return ln.state === 'fail'; }), unsure = !failed && lines.some(function (ln) { return ln.state === 'unk'; });
       return h('div', { class: 'q prcard' + (failed ? ' blocked' : unsure ? ' unsure' : ''), 'data-pr-card': '1' },
         failed ? h('span', { class: 'tagx fail', text: '✕ 막힘' }) : unsure ? h('span', { class: 'tagx unk', text: '? 확인 못 함' }) : null,
         failed ? h('span', { class: 'sub', text: '자동 검사가 잘못을 찾았어. 고쳐서 다시 올려야 넘어가.' }) : unsure ? h('span', { class: 'sub', text: '검사 결과를 못 읽었어. 통과도 실패도 아니야.' }) : null,
@@ -231,15 +231,16 @@
         el.hidden = !checks.length;
         clear(el);
         if (!checks.length) return;
-        el.appendChild(h('span', { class: 'eb', text: '새 세션 점검' }));
+        // 시안 G-13: 새 세션이 스스로 하는 두 줄(최신 내용 받기 · 하네스 판). 버튼 없이 상태만 보이고, 잘못됐을 때만 다시 하기가 나온다.
+        el.appendChild(h('span', { class: 'eb', text: '시작 점검 · 자동' }));
         checks.forEach(function (c) {
           el.appendChild(h('div', { class: 'crow ' + CROW[c.state], 'data-check': c.id },
             h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: c.name }), h('span', { class: 'ct', text: c.label }),
-            h('button', { type: 'button', class: 'pill line sm', disabled: s.canSend === false, text: c.state === 'done' ? '다시 하기' : '하기',
+            c.state === 'fail' ? h('button', { type: 'button', class: 'pill line sm', disabled: s.canSend === false, text: '다시 하기',
               onClick: function () {
-                note.hidden = false; note.textContent = c.name + ' 요청을 보내는 중이에요.';
+                note.hidden = false; note.textContent = c.name + ' 요청을 보내는 중이야.';
                 runTool(s, c.id, c.name).then(function (msg) { if (alive) { note.textContent = msg; kit.refreshSession(s.id); } });
-              } })));
+              } }) : null));
         });
         el.appendChild(note);
       }
@@ -251,7 +252,7 @@
     function flowPanel(opts) {
       var compact = !!(opts && opts.compact);
       var el = h('section', { class: 'flowpanel' + (compact ? ' compact' : ''), 'aria-label': '진행 순서' });
-      var st = { busy: false, msg: '', picker: null, pickerCwd: null, job: '' };
+      var st = { busy: false, msg: '', picker: null, pickerCwd: null, job: '', later: {}, stay: {}, editFirst: false };
       var last = null, alive = true, pollTimer = null;
 
       function ensurePicker(s) {
@@ -281,14 +282,15 @@
       }
       function choose(flowId) { act(api('PUT', '/api/sessions/' + sid(last) + '/flow', { flowId: flowId })); }
 
-      function askNext(opt) {
+      function askNext(opt, editFirst) {
         modal({
           title: '"' + opt.label + '" 로 넘어갈까요?',
           body: [h('p', { text: '인계하고 새 세션으로 넘어갑니다. 지금 세션에서 한 일을 정리해 새 세션에 넘겨요.' })],
-          confirmText: '넘어가기', onConfirm: function () { startNext(opt); }
+          confirmText: '넘어가기', onConfirm: function () { startNext(opt, editFirst); }
         });
       }
-      function startNext(opt) {
+      function startNext(opt, editFirst) {
+        st.editFirst = !!editFirst;
         st.busy = true; st.job = '새 세션을 준비하고 있어요.'; st.msg = ''; draw();
         api('POST', '/api/sessions/' + sid(last) + '/flow/next', { flowId: opt.flow, ids: (opt.ids || []).filter(function (i) { return /^REQ-\d{1,6}$/.test(i); }) }).then(function (d) {
           var jobId = d && (d.jobId || d.id);
@@ -297,7 +299,7 @@
         }, function (e) { st.busy = false; st.job = ''; st.msg = failText(e, '새 세션으로 넘기기'); if (alive) draw(); });
       }
       // 인계 결과를 사람이 보고 새 세션을 시작한다: [이대로 새 세션 시작] [고쳐서 시작] [취소]
-      function askStart(jobId, prompt, warning) {
+      function askStart(jobId, prompt, warning, edit) {
         var box = h('textarea', { class: 'textarea', rows: '10', readOnly: true, 'aria-label': '새 세션에 보낼 인계 글', maxlength: '4000' });
         box.value = prompt;
         function begin(path, body, label) {
@@ -314,9 +316,9 @@
           onConfirm: function () { begin('/confirm', { prompt: box.value }, '새 세션을 시작하고 있어요.'); },
           onCancel: function () { begin('/cancel', {}, '취소하고 있어요.'); },
           extra: function (ok) {
-            return [h('button', { type: 'button', class: 'btn', text: '고쳐서 시작', onClick: function () {
-              box.readOnly = false; box.focus(); ok.textContent = '고친 내용으로 새 세션 시작';
-            } })];
+            function editNow() { box.readOnly = false; box.focus(); ok.textContent = '고친 내용으로 새 세션 시작'; }
+            if (edit) editNow();  // [넘길 내용 고치기] 로 왔으면 처음부터 고칠 수 있게 연다
+            return [h('button', { type: 'button', class: 'btn', text: '고쳐서 시작', onClick: editNow })];
           }
         });
       }
@@ -324,7 +326,7 @@
         if (!alive) return;
         api('GET', '/api/jobs/' + encodeURIComponent(jobId)).then(function (job) {
           var out = L.jobOutcome(job);
-          if (out.confirm) { st.busy = false; st.job = ''; if (alive) { draw(); askStart(jobId, out.prompt, out.warning); } return; }
+          if (out.confirm) { st.busy = false; st.job = ''; var edit = st.editFirst; st.editFirst = false; if (alive) { draw(); askStart(jobId, out.prompt, out.warning, edit); } return; }
           if (!out.done && n < JOB_POLL_MAX) { pollTimer = setTimeout(function () { pollJob(jobId, n + 1); }, JOB_POLL_MS); return; }
           st.busy = false; st.job = '';
           if (out.done && out.ok) { kit.go('/s/' + encodeURIComponent(out.sessionId)); return; }
@@ -357,7 +359,21 @@
         var a = L.nextAction(s), box = h('div', { class: 'nextstep ask' });
         if (a.type === 'none') { box.appendChild(h('p', { class: 'sub', text: a.note })); el.appendChild(box); return; }
         var busyNow = s.status === 'running' || s.status === 'starting';
+        var ask = a.type === 'skill' && !busyNow ? L.ASK_TEXT[a.skill] : null;  // 시안 G-09: 올릴 차례는 질문 한 줄 + 단추 둘
         box.appendChild(h('span', { class: 'eb', text: busyNow ? '다음 단계 · AI 가 끝나면' : '네 차례' }));
+        if (ask) {
+          var later = !!st.later[s.id];
+          box.appendChild(h('b', { text: later ? ask.later : ask.q }));
+          box.appendChild(h('p', { class: 'sub', text: a.disabledReason || (later ? ask.laterSub : ask.sub) }));  // 못 보내는 세션이면 한 줄을 그 이유로
+          var arow = h('div', { class: 'acts' });
+          arow.appendChild(h('button', { type: 'button', class: 'pill acc', disabled: st.busy || a.disabled, title: a.disabledReason || null, text: ask.yes,
+            onClick: function () { act(runSkill(last, a.skill), HARNESS_PREFIX + a.skill + ' 실행을 요청했어요.'); } }));
+          if (!later) arow.appendChild(h('button', { type: 'button', class: 'pill line', 'data-ask-later': '1', text: '아직', onClick: function () { st.later[s.id] = true; draw(); } }));
+          arow.appendChild(h('button', { type: 'button', class: 'skiplink', disabled: st.busy, text: '이 단계 건너뛰기', onClick: function () { askSkip(a.step); } }));
+          box.appendChild(arow);
+          el.appendChild(box);
+          return;
+        }
         box.appendChild(h('b', { text: '지금 할 일 · ' + a.stepName }));
         if (a.hint) box.appendChild(h('p', { class: 'sub', text: a.hint }));
         var row = h('div', { class: 'acts' });
@@ -382,22 +398,43 @@
 
       function drawFinished(s) {
         var nx = L.nextOptions(s), box = h('div', { class: 'nextflow handoff' });
-        box.appendChild(h('span', { class: 'eb', text: '다음 일' }));
-        box.appendChild(h('b', { text: '이 일은 끝났어요' }));
-        if (nx.unknown) box.appendChild(h('p', { class: 'sub attn', role: 'alert', text: '판정 불능 · ' + nx.unknown }));
-        if (nx.hint && !nx.options.length) box.appendChild(h('p', { class: 'sub', text: nx.hint }));
+        if (nx.unknown) { box.appendChild(h('span', { class: 'eb', text: '다음 일' })); box.appendChild(h('b', { text: '이 일은 끝났어' })); box.appendChild(h('p', { class: 'sub attn', role: 'alert', text: '판정 불능 · ' + nx.unknown })); }
+        var main = nx.options.filter(function (o) { return o.clickable; })[0];
+        if (nx.hint && !nx.options.length) { box.appendChild(h('span', { class: 'eb', text: '다음 일' })); box.appendChild(h('b', { text: '이 일은 끝났어' })); box.appendChild(h('p', { class: 'sub', text: nx.hint })); }
         if (nx.options.length) {
-          var mem = L.memoryOf(s);
-          box.appendChild(h('p', { class: 'sub', 'data-memory': mem.kind, text: (mem.kind === 'pct' ? '이 세션이 기억을 ' + mem.pct + '% 썼어요. ' : mem.kind === 'tokens' ? '이 세션이 기억을 ' + mem.words + ' 썼어요(%는 확인 못 함). ' : '')
-            + '다음에 이어서 할 일을 고르세요. 새 세션에서 시작하면 앞 대화를 다시 읽지 않아 더 빠르고 정확해요.' }));
-          var row = h('div', { class: 'acts' });
-          nx.options.forEach(function (o) {
-            if (o.disabled) row.appendChild(h('button', { type: 'button', class: 'pill off', disabled: true }, o.label, h('small', { text: '준비 중' })));
-            else if (o.clickable) row.appendChild(h('button', { type: 'button', class: 'pill dark', disabled: st.busy, text: o.label, onClick: function () { askNext(o); } }));
-            else row.appendChild(h('span', { class: 'sub', text: o.label }));
-          });
-          box.appendChild(row);
-        } else if (!nx.unknown && !nx.hint) box.appendChild(h('p', { class: 'sub', text: '이어서 할 일이 없어요.' }));
+          var mem = L.memoryOf(s), first = L.nextFirst(s) || { short: main ? L.nextShort(main.label) : '', label: main ? main.label : '' };
+          if (st.stay[s.id]) {
+            // [여기서 계속]: 이 세션에서 이어 가기로 했다. 다시 넘기고 싶으면 한 줄에서 되돌린다.
+            box.appendChild(h('span', { class: 'eb', text: '다음 일' }));
+            box.appendChild(h('b', { text: '이 세션에서 계속 이어 가는 중이야' }));
+            box.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', 'data-next-again': '1', text: '다음 일 다시 보기', onClick: function () { st.stay[s.id] = false; draw(); } })));
+          } else {
+            var title = main ? L.nextBase(first.label || main.label) + ' — 새 세션에서 시작하길 권해' : '다음에 이어서 할 일을 고르세요';
+            box.appendChild(h('span', { class: 'eb', text: '다음 일' }));
+            box.appendChild(h('b', { text: title }));
+            box.appendChild(h('p', { class: 'sub', 'data-memory': mem.kind, text: (mem.kind === 'pct' ? '이 세션이 기억을 ' + mem.pct + '% 썼어. ' : mem.kind === 'tokens' ? '이 세션이 기억을 ' + mem.words + ' 썼어(%는 확인 못 함). ' : '')
+              + '새로 시작하면 앞 대화를 다시 읽지 않아 더 빠르고 정확해.' }));
+            if (main) {
+              var hand = h('div', { class: 'handoff-list', 'data-handoff-list': '1' }, h('span', { class: 'eb', text: '새 세션에 넘길 것' }));
+              if (main.ids && main.ids.length) hand.appendChild(h('span', { text: '· ' + main.ids.join(', ') + ' — ' + main.ids.map(function (i) { return 'DEV-' + i.slice(4); }).join(', ') + ' 번호로 ' + first.short + ' 하기' }));
+              hand.appendChild(h('span', { text: '· 지금까지 한 일과 남은 일 — 인계 글에 정리해서 넘겨' }));
+              hand.appendChild(h('span', { text: '· 지켜야 할 규칙과 이 세션 상태(브랜치 · 열린 PR) — 시작 전에 읽고 고칠 수 있어' }));
+              box.appendChild(hand);
+            }
+            var row = h('div', { class: 'acts' });
+            nx.options.forEach(function (o) {
+              if (o.disabled) row.appendChild(h('button', { type: 'button', class: 'pill off', disabled: true }, o.label, h('small', { text: '준비 중' })));
+              else if (o.clickable && o === main) {
+                row.appendChild(h('button', { type: 'button', class: 'pill dark', 'data-next-start': '1', disabled: st.busy, text: '새 세션에서 ' + (first.short || o.label) + ' 시작', onClick: function () { askNext(o); } }));
+                row.appendChild(h('button', { type: 'button', class: 'pill line', 'data-next-edit': '1', disabled: st.busy, text: '넘길 내용 고치기', onClick: function () { askNext(o, true); } }));
+                row.appendChild(h('button', { type: 'button', class: 'pill line quiet-edge', 'data-next-stay': '1', text: '여기서 계속', onClick: function () { st.stay[s.id] = true; draw(); } }));
+              } else if (o.clickable) row.appendChild(h('button', { type: 'button', class: 'pill line', disabled: st.busy, text: o.label, onClick: function () { askNext(o); } }));
+              else row.appendChild(h('span', { class: 'sub', text: o.label }));
+            });
+            box.appendChild(row);
+            box.appendChild(h('span', { class: 'fine', text: '새 세션은 최신 내용 받기와 플러그인 판 확인을 스스로 해. 문제가 있을 때만 알려 줄게.' }));
+          }
+        } else if (!nx.unknown && !nx.hint) { box.appendChild(h('span', { class: 'eb', text: '다음 일' })); box.appendChild(h('b', { text: '이 일은 끝났어' })); box.appendChild(h('p', { class: 'sub', text: '이어서 할 일이 없어.' })); }
         el.appendChild(box);
       }
 
@@ -416,7 +453,8 @@
             el.appendChild(stepBar(s, true));
           }
           (s.flowUnknown || []).forEach(function (u) { el.appendChild(h('p', { class: 'note-attn', role: 'status', text: '판정 불능 · ' + (typeof u === 'string' ? u : u.reason || JSON.stringify(u)) })); });
-          if (s.flowFinished) drawFinished(s); else drawAction(s);
+          // 질문이 떠 있으면 그 질문이 네 차례 카드라 겹치지 않게 뺀다(G-13). 승인을 기다리는 동안은 할 일 카드 대신 대화 쪽 안내(G-10).
+          if (s.flowFinished) drawFinished(s); else if (!(s.pendingRequestIds || []).length && s.phase !== 'approval') drawAction(s);
         }
         if (st.job) el.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.job }));
         if (st.msg) el.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.msg }));

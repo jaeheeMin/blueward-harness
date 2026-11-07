@@ -697,7 +697,8 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
         turn_skill = s["turn"].get("skill")
         asks = bool(not pending and not running and not s["ended"] and not s.get("starting")
                     and s.get("reportFresh") and report_asks(s["report"]))  # 이번 턴에 받은 보고일 때만
-        if pending or asks or (turn_skill and not running and not s["ended"]):
+        phase = flows.phase_of(s) if not (pending or asks or running or s.get("starting") or s["ended"]) else ""
+        if pending or asks or (turn_skill and not running and not s["ended"] and not phase):
             group = "todo"
         elif running:
             group = "running"
@@ -717,7 +718,7 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "startedAt": s["startedAt"], "updatedAt": s["updatedAt"], "log": list(s["log"]), "report": s["report"],
             "changedFiles": list(s["changedFiles"]), "prLinks": list(s["prLinks"]), "subagents": list(s["subagents"]),
             "flow": flow, "turnSkill": turn_skill, "turnUnknown": bool(s["turn"].get("unknown")),
-            "askedInText": asks, "lastBlock": last_block,
+            "askedInText": asks, "lastBlock": last_block, "phase": phase,
             "pendingRequestIds": pending, "canSend": ok, "cannotSendReason": why,
             "bypassPermissions": s["permissionMode"] == "bypassPermissions",
             "pluginVersions": [dict(p) for p in s.get("pluginVersions") or []],
