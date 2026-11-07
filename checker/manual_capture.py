@@ -579,6 +579,20 @@ def compose_url(base: str, app: str) -> str:
     return base + app
 
 
+def route_ok(hash_now: str, app: str) -> bool:
+    """지금 해시가 화면 목록의 `앱` 화면인가. 앱 상태 꼬리(`&/`, `&/?sap-iapp-state=…`)는 같은 화면으로 보고,
+    `앱` 에 없는 앱 안 경로(`&/상세(…)`)가 남아 있으면 다른 화면이다(#737). `앱` 자체에 경로를 적었으면 그대로 비교한다."""
+    now, want = unquote(hash_now or ""), unquote(app)
+    if now == want:
+        return True
+    if not now.startswith(want):
+        return False
+    rest = now[len(want):]
+    if "&/" in want:  # 앱에 경로까지 적었으면 그 뒤에는 앱 상태 쿼리만 허용
+        return rest == "" or rest.startswith("?")
+    return rest in ("", "&/") or rest.startswith("&/?")
+
+
 def same_site(url: str, base: str) -> bool:
     """`url` 의 출처(스킴+호스트·포트)가 테넌트 주소와 같은가. file:// 은 파일 경로가 테넌트 파일 아래여야 한다."""
     u, b = urlsplit(url), urlsplit(base)
@@ -700,7 +714,20 @@ class Capturer:
             self.tab.call("Page.reload", ignoreCache=False)
         time.sleep(0.5)
         self.wait_ready(f"화면 열기 {url}")
+        if app and not route_ok(self.current_hash(), app):
+            # 다시 열어도 Fiori 가 앞 화면의 앱 안 경로(`&/상세(...)`)를 되살리기도 한다(#737 실제 테넌트 100 DEV-006).
+            # 해시를 화면 목록의 `앱` 으로 맞춘 뒤 한 번 더 기다린다.
+            self.tab.evaluate(f"location.hash = {json.dumps(app)}")
+            time.sleep(0.5)
+            self.wait_ready(f"화면 열기 {url} 경로 맞추기")
+            now = self.current_hash()
+            if not route_ok(now, app):
+                raise Unavailable(f"화면 열기: 앱 안 경로가 남아 있다(지금 {unquote(now)!r}, 기대 {app!r}). 앞 화면의 상세 경로가 되살아난 것이다 — 화면 순서를 바꾸거나 `앱` 에 원하는 경로까지 적는다")
         self.tab.evaluate(LIB_JS)
+
+    def current_hash(self) -> str:
+        href = self.tab.evaluate("location.href") or ""
+        return "#" + href.split("#", 1)[1] if "#" in href else ""
 
     def find(self, kind: str, name: str) -> dict:
         res = self.tab.evaluate(f"window.__mc.find({json.dumps(kind)}, {json.dumps(name)})")
@@ -710,7 +737,19 @@ class Capturer:
 
     def locate(self, mark: Mark) -> Verdict:
         res = self.find(mark.kind, mark.name)
-        return judge(res["items"], mark.index, no_input=int(res.get("noInput") or 0))
+        v = judge(res["items"], mark.index, no_input=int(res.get("noInput") or 0))
+        if mark.kind == "열" and v.status == "not_found" and not res["items"] and self.popin_label(mark.name):
+            # 응답형 표(sap.m.Table)가 폭이 모자라 접은 열은 머리글이 없고 행 아래에 "이름:" 으로 붙는다(#738 실제 테넌트 100 DEV-006)
+            v = Verdict("not_found", reason="접힌(pop-in) 열이다 — 표 폭이 모자라 행 아래로 접혀 머리글이 없다. `그 밖` 으로 찾거나 화면에 `배율:` 을 적어 넓힌다")
+        return v
+
+    def popin_label(self, name: str) -> bool:
+        js = ("(n => [...document.querySelectorAll('.sapMListTblSubCntHdr')].some(e => "
+              "(e.textContent || '').replace(/\\s+/g, ' ').replace(/[\\s:：*]+$/, '').trim() === n))(" + json.dumps(name) + ")")
+        try:
+            return bool(self.tab.evaluate(js))
+        except CdpError:
+            return False
 
     def click(self, rect: Rect) -> None:
         x, y = rect["x"] + rect["w"] / 2, rect["y"] + rect["h"] / 2

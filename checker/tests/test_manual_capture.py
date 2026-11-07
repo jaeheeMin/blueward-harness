@@ -1542,3 +1542,114 @@ def test_scale_wrong_inner_size_is_unavailable(tmp_path, capsys, fake):
     fake["tab"] = FakeTab({("필터", "플랜트"): FOUND, ("버튼", "이동"): FOUND})  # innerWidth 가 1600 그대로
     code, out = _capture(capsys, root)
     assert code == 2 and "2000x1125" in out["screens"][0]["사유"]
+
+
+# ---------------------------------------------------------------- 다시 열기 앱 안 경로(#737)·접힌 열 안내(#738)
+
+@pytest.mark.parametrize("now,app,ok", [
+    ("#A-display", "#A-display", True),
+    ("#A-display&/", "#A-display", True),
+    ("#A-display&/?sap-iapp-state=XYZ", "#A-display", True),
+    ("#A-display&/Detail(HeaderUuid=1,IsActiveEntity=true)", "#A-display", False),
+    ("#B-display", "#A-display", False),
+    ("#A-display&/Detail(1)?sap-iapp-state=X", "#A-display&/Detail(1)", True),
+])
+def test_route_ok(now, app, ok):
+    assert mc.route_ok(now, app) is ok
+
+
+class StickyRouteTab(FakeTab):
+    """다시 열어도 앞 화면의 상세 경로가 남는다. `fix` 면 location.hash 를 맞추면 고쳐진다."""
+
+    def __init__(self, finds, fix=True):
+        super().__init__(finds)
+        self.fix = fix
+
+    def call(self, method, **params):
+        r = super().call(method, **params)
+        if method == "Page.navigate":  # 다시 열어도 앞 화면의 상세 경로가 되살아난다
+            self.href = self.href + "&/Detail(1)"
+        return r
+
+    def evaluate(self, expr):
+        if expr.startswith("location.hash = "):
+            self.evals.append(expr)
+            if self.fix:
+                self.href = self.href.split("#")[0] + json.loads(expr[len("location.hash = "):])
+            return True
+        return super().evaluate(expr)
+
+
+def test_reopen_fixes_leftover_inner_route(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, TWO_SCREENS)
+    t = fake["tab"] = StickyRouteTab({("필터", "플랜트"): FOUND, ("버튼", "이동"): FOUND})
+    code, out = _capture(capsys, root)
+    assert any(e.startswith("location.hash = ") for e in t.evals)
+    assert out["screens"][0]["상태"] == "완료", out
+
+
+def test_reopen_leftover_route_that_cannot_be_fixed_is_unavailable_with_reason(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, TWO_SCREENS)
+    fake["tab"] = StickyRouteTab({("필터", "플랜트"): FOUND, ("버튼", "이동"): FOUND}, fix=False)
+    code, out = _capture(capsys, root)
+    why = out["screens"][0]["사유"]
+    assert code == 2 and "앱 안 경로가 남아 있다" in why and "Detail(1)" in why and "--timeout" not in why
+
+
+class PopinTab(FakeTab):
+    def evaluate(self, expr):
+        if "sapMListTblSubCntHdr" in expr:
+            return True
+        return super().evaluate(expr)
+
+
+def test_column_not_found_but_popin_label_explains(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, "화면:\n  - 이름: 조회 조건\n    표시:\n      - {종류: 버튼, 이름: 이동, 설명: 하나}\n      - {종류: 열, 이름: 확인번호, 설명: 둘}\n")
+    fake["tab"] = PopinTab({("버튼", "이동"): FOUND})
+    code, out = _capture(capsys, root)
+    miss = out["screens"][0]["못 찾은 것"][0]
+    assert miss["상태"] == "not_found" and "접힌(pop-in) 열" in miss["사유"] and "그 밖" in miss["사유"]
+
+
+class OtherAppStuckTab(FakeTab):
+    """다시 열어도 탭이 다른 앱(#Other-manage)에 남는다(#737 DEV-011). fix 면 location.hash 로 옮겨진다."""
+
+    def __init__(self, finds, fix):
+        super().__init__(finds)
+        self.fix = fix
+
+    def call(self, method, **params):
+        r = super().call(method, **params)
+        if method in ("Page.navigate", "Page.reload"):
+            self.href = self.href.split("#")[0] + "#Other-manage&/"
+        return r
+
+    def evaluate(self, expr):
+        if expr.startswith("location.hash = "):
+            self.evals.append(expr)
+            if self.fix:
+                self.href = self.href.split("#")[0] + json.loads(expr[len("location.hash = "):])
+            return True
+        return super().evaluate(expr)
+
+
+def test_reopen_stuck_in_other_app_moves_hash_then_runs_steps(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, INPUT_SCREEN)
+    t = fake["tab"] = OtherAppStuckTab(STEP_FINDS, fix=True)
+    t.reads = [{"ok": True, "kind": "multi", "tokens": [], "value": ""}]
+    code, out = _capture(capsys, root)
+    assert out["screens"][0]["상태"] == "완료", out
+
+
+def test_reopen_stuck_in_other_app_stops_before_any_step(tmp_path, capsys, fake):
+    # 잘못된 앱에 입력·누르기가 가면 안 된다 — 경로를 못 맞추면 준비 단계 전에 멈춘다
+    root = _repo(tmp_path)
+    _one(root, INPUT_SCREEN)
+    t = fake["tab"] = OtherAppStuckTab(STEP_FINDS, fix=False)
+    code, out = _capture(capsys, root)
+    assert code == 2 and "Other-manage" in out["screens"][0]["사유"]
+    assert _typed(t) == [] and not any(m == "Input.dispatchMouseEvent" for m, _ in t.calls)
