@@ -285,9 +285,29 @@ def summarize_checks(rollup) -> str:
     return "pending" if pending else "pass"
 
 
+STEP_CHECKS = ("doc-guard", "gitleaks")  # 앞 검사 status 의 이름(pr-checks.yml 의 "앞 검사 status 달기")
+
+
+def step_checks(rollup) -> dict:
+    """statusCheckRollup 에서 문서 검사(doc-guard)·비밀값 검사(gitleaks) 한 줄씩의 결과를 fail/pending/pass 로 뽑는다. 못 찾은 이름은 담지 않는다."""
+    out: dict = {}
+    for item in rollup if isinstance(rollup, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("context") or item.get("name") or "")
+        if name not in STEP_CHECKS:
+            continue
+        status = str(item.get("status") or "")
+        conclusion = str(item.get("conclusion") or item.get("state") or "").upper()
+        out[name] = ("fail" if conclusion in FAILED_CONCLUSIONS
+                     else "pending" if (status and status != "COMPLETED") or conclusion not in PASSED_CONCLUSIONS else "pass")
+    return out
+
+
 def _pr_item(raw: dict) -> dict:
     return {"number": raw.get("number"), "state": str(raw.get("state") or "").upper(), "url": raw.get("url", ""),
-            "title": raw.get("title", ""), "checks": summarize_checks(raw.get("statusCheckRollup"))}
+            "title": raw.get("title", ""), "checks": summarize_checks(raw.get("statusCheckRollup")),
+            "stepChecks": step_checks(raw.get("statusCheckRollup"))}
 
 
 def pr_status(run: Runner, cwd: str, branch: str, number: int | None = None) -> dict:

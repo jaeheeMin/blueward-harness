@@ -960,3 +960,38 @@ details.fold > [data-r]:empty { display: none; }
 .n3 b { font-size: 18px; font-weight: 500; }
 /* 머리 글과 문장이 한 줄에 붙지 않게(홈 승인 칸 등) */
 .blk { display: block; }
+
+/* ==========================================================================
+   세션 화면을 시안 G-09·10·12·13 에 맞춘 치수(#762)
+   ========================================================================== */
+.sh .fold-btn { margin: -6px 0 -7px 8px; }  /* 접기 단추가 목록 머리 줄(시안 15px)을 늘리지 않게 */
+.sess > .titlerow { margin-top: 0; }
+.msgs-list { display: contents; }
+.sess-side[hidden] { display: none; }
+.sess-side { flex: 1 1 300px; max-width: 360px; }
+.flowpanel.compact .nextstep, .flowpanel.compact .nextflow { margin-top: 0; }
+.flowpanel.compact .nextstep { padding-top: 16px; border-top: 0; }
+.nextstep .acts .skiplink { min-height: 0; margin: 0 0 0 auto; }
+.msgs .ai.muted { color: var(--lmuted); }
+.msgs .qgroup { display: flex; flex-direction: column; gap: 12px; }
+.msgs .qgroup .acts { margin-top: 0; }
+.msgs .qgroup .skiplink { min-height: 0; color: var(--lmuted); }
+.handoff .sub { color: var(--lmuted); }
+.handoff-list { display: flex; flex-direction: column; gap: 3px; padding-top: 8px; border-top: 1px solid var(--lline); font-size: 13.5px; }
+.handoff .fine { font-size: 12px; color: var(--lmuted); }
+.pill.quiet-edge { border-color: transparent; }
+.prcard .crow.wait .mk::after { content: ''; }
+.prcard .crow.wait .mk { border-color: var(--attn); background: var(--attn); }
+.page.sess .ptitle > .eb, .page.sess .ptitle .line { line-height: 21px; }  /* 시안 제목 블록: 눈썹·상태 줄이 21px 줄 상자 안에 앉는다(제목 블록 높이 72) */
+.talk .acts .skiplink { min-height: 0; margin: 0 0 0 4px; }
+.msgs .ask .eb, .msgs .handoff .eb { line-height: 16px; }  /* 시안 카드 눈썹 줄 16px */
+.handoff-list { padding-bottom: 2px; }
+.stepbar.big .step.done { color: #fff; }  /* 시안 끝난 알약 글자색 */
+/* 오른쪽 산출물 칸 안쪽(시안 G-09): 종이와 문서 목록 칸이 칸 너비(300)를 꽉 채우고 넘치지 않는다. 문서 줄은 이름 + 칩 한 줄 */
+.sess-side .docs-wrap, .sess-side .docs-wrap:has(.docs-pane[hidden]) { align-items: stretch; }
+.sess-side .docs-wrap > * { min-width: 0; max-width: 100%; }
+.sess-side .docs-pane { width: 100%; overflow: hidden; }
+.sess-side .docs-list { width: 100%; }
+.sess-side .docs-list .dn { display: flex; flex-direction: row; align-items: baseline; gap: 8px; min-width: 0; }
+.sess-side .docs-list .dn b { flex: none; max-width: 60%; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.sess-side .docs-list .dn small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
