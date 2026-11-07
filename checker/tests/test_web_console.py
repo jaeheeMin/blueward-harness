@@ -4168,14 +4168,20 @@ def test_srs_flow_follows_git_and_pr_evidence_to_the_end(tmp_path, monkeypatch):
         m = c.call("POST", "/api/sessions/s1/flow/refresh", {})[1]
         assert m["stepIndex"] == 2 and states(m) == ["done", "done", "active"] and m["flowFinished"] is False
         assert m["flowPr"]["number"] == 7 and m["flowPr"]["checks"] == "pass" and m["flowUnknown"] == []
+        assert m["phase"] == "approval" and m["group"] == "idle"  # 승인 기다림은 내 차례가 아니다(#762)
         listed["data"] = [pr_json("OPEN", [{"status": "COMPLETED", "conclusion": "FAILURE"}])]
         assert c.call("POST", "/api/sessions/s1/flow/refresh", {})[1]["flowPr"]["checks"] == "fail"
+        listed["data"] = [pr_json("OPEN", [{"context": "doc-guard", "state": "SUCCESS"}, {"context": "gitleaks", "state": "PENDING"}, {"context": "other", "state": "FAILURE"}])]
+        m = c.call("POST", "/api/sessions/s1/flow/refresh", {})[1]
+        assert m["flowPr"]["stepChecks"] == {"doc-guard": "pass", "gitleaks": "pending"}  # 문서 검사·비밀값 검사 한 줄씩(이름이 읽힌 것만)
+        listed["data"] = [pr_json("OPEN", [{"status": "COMPLETED", "conclusion": "FAILURE"}])]
         (c.work / "docs" / "ssot").mkdir(parents=True)
         (c.work / "docs" / "ssot" / "SRS.md").write_text(SRS_TABLE, encoding="utf-8")
         c.git["branch"] = "main"  # 병합 뒤 main 으로 옮겨도 PR 번호로 다시 본다
         listed["data"] = [pr_json("MERGED")]
         m = c.call("POST", "/api/sessions/s1/flow/refresh", {})[1]
         assert m["flowFinished"] is True and states(m) == ["done", "done", "done"]
+        assert m["phase"] == "finished" and m["group"] == "idle"  # 갈래가 끝났어도 내 차례로 세지 않는다
         opts = {o["value"]: o for o in m["nextFlow"]["options"]}
         assert opts["개발"]["flow"] == "spec" and opts["개발"]["ids"] == ["REQ-001", "REQ-002"]  # Dropped 는 세지 않는다
         assert opts["설정"]["flow"] == "config" and opts["설정"]["count"] == 1 and opts["설정"]["ids"] == ["REQ-003"]  # On Hold(REQ-006)도 세지 않는다

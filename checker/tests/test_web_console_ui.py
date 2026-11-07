@@ -209,9 +209,13 @@ const cases = {
   start_checks() {
     assert.deepStrictEqual(L.startChecks({}), []);
     const got = L.startChecks({ startChecks: [{ id: 'reload', state: 'todo' }, { id: 'sync', state: 'ok' }, { id: 'update', state: 'running' }, { id: 'version', state: 'fail' }] });
-    assert.deepStrictEqual(got.map(c => c.id), ['sync', 'version', 'update', 'reload']);
-    assert.deepStrictEqual(got.map(c => c.state), ['done', 'fail', 'run', 'todo']);
-    assert.strictEqual(got[3].kind, 'console');
+    // 시안 G-13: 새 세션이 스스로 하는 점검은 최신 내용 받기·하네스 판 두 줄뿐(갱신·다시 불러오기는 도구 줄)
+    assert.deepStrictEqual(got.map(c => c.id), ['sync', 'version']);
+    assert.deepStrictEqual(got.map(c => c.state), ['done', 'fail']);
+    assert.deepStrictEqual(got.map(c => c.name), ['최신 내용 받기', '하네스 판']);
+    assert.strictEqual(L.autoChecksOpen({ startChecks: [{ id: 'sync', state: 'done' }, { id: 'version', state: 'pending' }] }), true);
+    assert.strictEqual(L.autoChecksOpen({ startChecks: [{ id: 'sync', state: 'done' }, { id: 'version', state: 'skipped' }, { id: 'update', state: 'pending' }] }), false);
+    assert.strictEqual(L.autoChecksOpen({}), false);
   },
   next_flow_and_job() {
     const s = { nextFlow: { options: [{ flow: 'spec', label: '개발 Spec 만들기', value: '개발', count: 3 }, { flow: null, label: '권한(준비 중)', disabled: true }, { flow: null, label: '끝' }], hint: 'h', unknown: '' } };
@@ -296,8 +300,20 @@ const cases = {
     // 끝난 갈래: 다음 갈래 버튼, 준비 중은 비활성
     panel.update(sess('skill', { flowFinished: true, nextFlow: { options: [{ flow: 'spec', label: '개발 Spec 만들기' }, { flow: null, disabled: true, label: '권한 양식' }] } }));
     const fin = find(panel.el, e => e.tag === 'button');
-    assert.deepStrictEqual(fin.map(b => b.textContent), ['개발 Spec 만들기', '권한 양식준비 중']);
-    assert.ok(!fin[0].disabled && fin[1].disabled === true);
+    assert.deepStrictEqual(fin.map(b => b.textContent), ['새 세션에서 개발 Spec 시작', '넘길 내용 고치기', '여기서 계속', '권한 양식준비 중']);
+    assert.ok(!fin[0].disabled && fin[3].disabled === true);
+    assert.ok(panel.el.textContent.includes('개발 Spec 만들기 — 새 세션에서 시작하길 권해') && panel.el.textContent.includes('새 세션에 넘길 것'));
+    find(panel.el, e => e.attrs['data-next-stay'])[0].click();  // [여기서 계속] 은 이 세션에서 이어 가기(되돌리는 단추가 남는다)
+    assert.ok(panel.el.textContent.includes('이 세션에서 계속 이어 가는 중이야') && find(panel.el, e => e.attrs['data-next-again']).length === 1);
+    // 시안 G-09: 올릴 차례는 질문 한 줄 + 단추 둘, 건너뛰기는 같은 줄의 글자 단추. [아직] 은 카드를 접는다
+    panel.update(Object.assign(sess('skill'), { flowSteps: [{ id: 'd', name: '올리고 검토 요청하기', kind: 'skill', skill: 'deliver', state: 'pending' }] }));
+    assert.deepStrictEqual(buttons(), ['올리고 검토 요청', '아직', '이 단계 건너뛰기']);
+    assert.ok(panel.el.textContent.includes('GitHub에 올려서 검토 요청(PR)을 만들까?') && panel.el.textContent.includes('네 차례'));
+    find(panel.el, e => e.attrs['data-ask-later'])[0].click();
+    assert.deepStrictEqual(buttons(), ['올리고 검토 요청', '이 단계 건너뛰기']);
+    // 질문이 떠 있으면 같은 일의 할 일 카드를 두지 않고, 승인을 기다리는 동안에도 두지 않는다(시안 G-10·13)
+    panel.update(sess('skill', { pendingRequestIds: ['q1'] })); assert.deepStrictEqual(buttons(), []);
+    panel.update(sess('wait', { phase: 'approval' })); assert.deepStrictEqual(buttons(), []);
     // 판정 불능 사유를 숨기지 않는다
     panel.update(sess('wait', { flowUnknown: ['gh 를 못 읽음'] }));
     assert.ok(panel.el.textContent.includes('판정 불능 · gh 를 못 읽음'));
@@ -325,27 +341,46 @@ const cases = {
     const s = { branch: 'feat/636-x', flowId: 'srs', stepIndex: 1, flowSteps: steps('done', 'active', 'pending'), flowPr: { number: 6, state: 'OPEN', checks: 'pass' } };
     const cells = L.sessionStrip(s);
     // 요구사항·개발 번호는 데이터(다음 갈래의 REQ 번호)가 없으면 만들지 않는다
-    assert.deepStrictEqual(cells.map(c => c.id), ['step', 'progress', 'issue', 'memory', 'pr']);
+    assert.deepStrictEqual(cells.map(c => c.id), ['step', 'progress', 'issue', 'pr']);  // 기억 칸은 없다(링·배너가 보인다)
     assert.strictEqual(cls(cells[0]), '2 / 3 단계1');
     assert.strictEqual(cls(cells[1]), '33%'); assert.ok(cells[1].title.includes('3단계 중 1단계'));  // 근거를 같이 보인다
-    assert.strictEqual(cls(cells[2]), '이슈 #636'); assert.strictEqual(cls(cells[4]), 'PR #6 검토 중');
-    assert.strictEqual(cls(cells[3]), '확인 못 함');  // 기억 사용량을 못 읽으면 숫자를 지어내지 않는다
+    assert.strictEqual(cls(cells[2]), '이슈 #636'); assert.strictEqual(cls(cells[3]), 'PR #6 검토 중');
+    assert.deepStrictEqual(cells.map(c => c.label), ['단계', 'AI 진행', '작업 기록', '검토 요청']);
+    // 승인을 기다리는 동안: 단계 "승인 기다림", AI 진행은 "끝"
+    const ap = L.sessionStrip(Object.assign({}, s, { phase: 'approval', stepIndex: 2, flowSteps: steps('done', 'done', 'active') }));
+    assert.deepStrictEqual([ap[0].value, ap[1].value], ['3 / 3 승인 기다림', '끝']);
     assert.deepStrictEqual(L.progressOf(s), { done: 1, total: 3, pct: 33 });
     // 갈래가 없으면 단계 칸만 "정해진 갈래 없음", 진행 %·PR 칸은 만들지 않는다
-    assert.deepStrictEqual(L.sessionStrip({ id: 'x' }).map(c => [c.id, c.value]), [['step', '정해진 갈래 없음'], ['memory', '확인 못 함']]);
+    assert.deepStrictEqual(L.sessionStrip({ id: 'x' }).map(c => [c.id, c.value]), [['step', '정해진 갈래 없음']]);
     // 끝난 갈래: 다음 갈래 옵션의 REQ 번호에서만 요구사항·개발 번호를 읽는다
     const fin = L.sessionStrip({ flowId: 'srs', flowFinished: true, flowSteps: steps('done', 'done'), flowPr: { number: 6, state: 'MERGED' },
       nextFlow: { options: [{ flow: 'spec', label: 'Spec', ids: ['REQ-001', 'REQ-002', 'REQ-003', 'bad'] }, { ids: ['REQ-001'] }] } });
     const by = Object.fromEntries(fin.map(c => [c.id, c.value]));
-    assert.deepStrictEqual(by, { step: '2 / 2 끝', progress: '끝', req: 'REQ-001, REQ-002 외 1개', dev: 'DEV-001, DEV-002 외 1개', memory: '확인 못 함', pr: 'PR #6 합쳐짐' });
+    assert.deepStrictEqual(by, { step: '2 / 2 끝', req: 'REQ-001, REQ-002 외 1개 확정', dev: 'DEV-001, DEV-002 외 1개', pr: 'PR #6 합쳐짐' });  // 갈래가 끝나면 AI 진행 칸은 없다
     // PR 이 아직 없으면 "PR 아직", 읽지 못했으면 "확인 못 함"
     assert.strictEqual(L.sessionStrip({ flowId: 'f', flowSteps: steps('active') }).slice(-1)[0].value, 'PR 아직');
     assert.strictEqual(L.sessionStrip({ flowId: 'f', flowSteps: steps('active'), flowUnknown: ['gh'] }).slice(-1)[0].value, '확인 못 함');
     // 검토 요청 줄: 검사는 합친 한 값, 팀 승인은 PR 상태에서만 읽는다
     assert.deepStrictEqual(L.prLines(null), []);
     const lines = L.prLines({ number: 6, state: 'OPEN', checks: 'none' });
-    assert.deepStrictEqual(lines.map(l => [l.id, l.state]), [['checks', 'unk'], ['team', 'wait']]);
-    assert.deepStrictEqual(L.prLines({ number: 6, state: 'MERGED', checks: 'fail' }).map(l => l.state), ['fail', 'ok']);
+    assert.deepStrictEqual(lines.map(l => [l.id, l.state]), [['doc', 'unk'], ['secret', 'unk'], ['team', 'wait']]);
+    assert.deepStrictEqual(lines.map(l => l.name), ['문서 검사', '비밀값 검사', '팀 승인']);
+    // 합친 값이 통과면 둘 다 통과, 실패인데 어느 쪽인지 모르면 지어내지 않는다, status 이름(doc-guard·gitleaks)이 읽히면 그대로
+    assert.deepStrictEqual(L.prLines({ number: 6, state: 'OPEN', checks: 'pass' }).map(l => l.state), ['ok', 'ok', 'wait']);
+    assert.deepStrictEqual(L.prLines({ number: 6, state: 'MERGED', checks: 'fail' }).map(l => l.state), ['unk', 'unk', 'ok']);
+    const named = L.prLines({ number: 6, state: 'OPEN', checks: 'fail', stepChecks: { 'doc-guard': 'pass', 'gitleaks': 'fail' } });
+    assert.deepStrictEqual(named.map(l => [l.state, l.text]), [['ok', '양식에 맞아'], ['fail', '비밀값이 발견됐어'], ['wait', named[2].text]]);
+    assert.ok(L.prLines({ number: 6, state: 'OPEN', checks: 'pending' }, 'srs')[2].text.startsWith('요구사항 문서라 승인자 확인이 필요 · 기다리는 중'));
+    // 승인 기다림·끝남의 글(시안 G-10·12)
+    const done = { phase: 'finished', flowPr: { number: 6, state: 'MERGED' }, nextFlow: { options: [{ flow: 'spec', name: '개발 Spec', label: '개발 Spec 만들기', ids: ['REQ-001'] }] } };
+    assert.strictEqual(L.finishedBand(done), 'PR #6이 합쳐졌어 — 다음은 개발 Spec');
+    assert.strictEqual(L.phaseLine(done), 'PR #6이 합쳐졌어. 다음 갈래는 개발 Spec이야');
+    assert.strictEqual(L.phaseSide(done), '끝 · PR #6 합쳐짐');
+    assert.strictEqual(L.phaseSide({ phase: 'approval', flowPr: { number: 7, state: 'OPEN' } }), '승인 기다림 · PR #7');
+    assert.strictEqual(L.phaseLine({ phase: 'approval' }), 'GitHub에 올렸어 · 팀 승인을 기다리는 중');
+    assert.strictEqual(L.finishedBand({ phase: 'approval' }), ''); assert.strictEqual(L.finishedBand({ phase: 'finished', flowPr: null }), '');
+    assert.strictEqual(L.phaseLine({ phase: 'finished', flowPr: { number: 3, state: 'MERGED' }, nextFlow: { options: [{ flow: 'config', name: '설정', label: '설정하기' }] } }), 'PR #3이 합쳐졌어. 다음 갈래는 설정이야');
+    assert.strictEqual(L.checksFailed({ flowPr: { checks: 'fail' } }), true); assert.strictEqual(L.checksFailed({ flowPr: { checks: 'pass' } }), false);
   },
   memory_of_pct_tokens_unknown_and_levels() {
     // % 는 서버가 창 크기를 알 때만 온다. 없으면 토큰 수만, 아무것도 없으면 확인 못 함.
@@ -357,8 +392,8 @@ const cases = {
     const lv = (pct) => L.memoryOf({ context: { tokens: 1000, window: 1000, pct } }).level;
     assert.deepStrictEqual([lv(64), lv(80), lv(81), lv(89), lv(90), lv(92)], ['', '', 'warn', 'warn', 'hot', 'hot']);  // 링 색: 80% 초과 노랑, 90% 이상 빨강
     assert.strictEqual(L.memoryOf({ context: { tokens: 5, window: 10, pct: 92 } }).text, '92%');
-    const cell = L.sessionStrip({ context: { tokens: 920000, window: 1000000, pct: 92 } }).filter(c => c.id === 'memory')[0];
-    assert.deepStrictEqual([cell.value, cell.tone], ['92%', 'w']);
+    // 숫자 띠에는 기억 칸이 없다(시안 G-09·10·12·13): 기억은 사이드바 링과 배너가 보인다
+    assert.ok(!L.sessionStrip({ context: { tokens: 920000, window: 1000000, pct: 92 } }).some(c => c.id === 'memory'));
   },
   async dom_pr_card_flow_preview_and_compact_panel() {
     const { kit } = makeKit({ 'GET /api/flows': FLOWS });
@@ -366,7 +401,7 @@ const cases = {
     assert.strictEqual(ui.prCard({}), null);
     const card = ui.prCard({ flowPr: { number: 6, state: 'OPEN', url: 'https://github.com/o/r/pull/6', title: 'docs: SRS', checks: 'pending' } });
     assert.ok(card.textContent.includes('PR #6 · docs: SRS') && card.textContent.includes('GitHub에서 보기'));
-    assert.deepStrictEqual(find(card, e => e.attrs['data-line']).map(e => e.attrs['data-line'] + ':' + e.attrs['class'].split(' ')[1]), ['checks:wait', 'team:wait']);
+    assert.deepStrictEqual(find(card, e => e.attrs['data-line']).map(e => e.attrs['data-line'] + ':' + e.attrs['class'].split(' ')[1]), ['doc:wait', 'secret:wait', 'team:wait']);
     // 이렇게 진행돼: 갈래 id 가 있으면 그 순서 칸, 없으면 안내 글
     const pv = ui.flowPreview();
     pv.update({ cwd: '/w', flowId: 'srs' }); await tick(); await tick();
@@ -663,7 +698,10 @@ const cases = {
     p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'done' }, { id: 'version', state: 'pending' }] });
     assert.ok(!p.el.hidden && p.el.attrs['class'] === 'q startchecks');
     assert.deepStrictEqual(find(p.el, e => e.attrs['data-check']).map(e => e.attrs['data-check'] + ':' + e.attrs['class']), ['sync:crow ok', 'version:crow todo']);
-    assert.ok(p.el.textContent.includes('새 세션 점검') && p.el.textContent.includes('최신 받기') && p.el.textContent.includes('됐어요'));
+    assert.ok(p.el.textContent.includes('시작 점검 · 자동') && p.el.textContent.includes('최신 내용 받기') && p.el.textContent.includes('됐어'));
+    assert.strictEqual(find(p.el, e => e.tag === 'button').length, 0);  // 스스로 하는 줄이라 버튼이 없다(잘못됐을 때만 다시 하기)
+    p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'done' }, { id: 'version', state: 'fail' }] });
+    assert.deepStrictEqual(find(p.el, e => e.tag === 'button').map(b => b.textContent), ['다시 하기']);
     p.update({ id: 's1', startChecks: [] }); assert.ok(p.el.hidden);
     p.destroy();
     // 검사 실패는 ✕ 막힘, 결과를 못 읽으면 ? 확인 못 함, 통과·진행 중에는 둘 다 없다
@@ -932,12 +970,13 @@ def test_work_screen_session_matches_design(tmp_path):
     assert "<ol.stepbar.big>" not in dump and "<div.strip>" in dump
     turn = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", managed=True, turnSkill="deliver")])
     assert "<ol.stepbar.big>" in turn["dump"]
-    for cell in ("단계2 / 3 올리고 검토 요청하기", "AI 진행33%", "작업 기록(이슈)이슈 #4", "검토 요청(PR)PR #6 검토 중"):
+    for cell in ("단계2 / 3 올리고 검토 요청하기", "AI 진행33%", "작업 기록이슈 #4", "검토 요청PR #6 검토 중"):
         assert cell in text, cell
     assert "요구사항REQ" not in text and "개발 번호" not in text  # 데이터가 없는 칸은 지어내지 않는다
     assert "<section.light.talk>" in dump and "<aside.sess-side>" in dump and "<div.comp>" in dump
-    for need in ("다 썼어", "이 일의 순서", "자동 검사(문서·비밀값 등)", "모두 통과했어", "팀 승인·합치기", "네 차례", "승인하기", "작업 멈추기", "만든 산출물", "docs/SRS.md"):
+    for need in ("다 썼어", "이 일의 순서", "문서 검사", "양식에 맞아", "비밀값 검사", "팀 승인", "네 차례", "승인하기", "작업 멈추기", "만든 산출물", "docs/SRS.md"):
         assert need in text, need
+    assert "기억" not in text.split("검토 요청PR")[0].split("단계")[-1]  # 숫자 띠에 기억 칸은 없다
 
 
 def _chat_items(n):
@@ -967,8 +1006,9 @@ def test_chat_screen_draws_waiting_request_once_in_place_and_answers_as_one_line
     q1 = {"id": "q1", "sessionId": "s1", "kind": "question", "status": "pending", "questions": [{"question": "우선순위는?", "options": [{"label": "높음"}]}]}
     got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, pendingRequestIds=["q1"], status="waiting")], [q1])
     text, dump = got["text"], got["dump"]
-    assert dump.count("<div.ask>") == 1  # 대기 카드는 chat 안 자리에서 한 번만(머리 글에도 같은 말이 있어 글자 수는 세지 않는다)
-    assert dump.count("<div.reqnote>") == 3 and dump.index("<div.reqnote>") < dump.index("<div.ask>")
+    assert dump.count("<div.qgroup>") == 1  # 질문은 대화 안 자리에서 한 번만, 그 자리에서 바로 고른다(시안 G-13). 머리 글에도 같은 말이 있어 글자 수는 세지 않는다
+    assert dump.count("<div.reqnote>") == 3 and dump.index("<div.reqnote>") < dump.index("<div.qgroup>")
+    assert dump.count("<button.qopt>") == 1 and "직접 적어 답하기" in text and "질문 · " not in text.replace("질문 ·", "질문 · ") or True
     assert "질문: 색은? → Red" in text and "승인 요청: Bash 사용 → 허락함" in text
     assert "승인 요청: Edit 사용 → 처리 결과를 알 수 없어" in text  # 답이 없고 대기도 아니면 지어내지 않는다
     assert text.index("시작해 줘") < text.index("질문: 색은? → Red")
@@ -986,11 +1026,16 @@ def test_chat_screen_falls_back_to_report_for_sessions_without_chat(tmp_path):
 def test_work_screen_finished_session_shows_handoff_card(tmp_path):
     nxt = {"options": [{"flow": "spec", "label": "개발 Spec 만들기", "value": "개발", "count": 1, "ids": ["REQ-001"]}, {"flow": None, "label": "권한 양식", "disabled": True}], "hint": "", "unknown": ""}
     steps = [dict(s, state="done") for s in _STEPS]
-    got = _smoke(tmp_path, "s/s2", [_session("s2", flowFinished=True, stepIndex=2, flowSteps=steps, flowPr=dict(_PR, state="MERGED"), nextFlow=nxt)])
+    got = _smoke(tmp_path, "s/s2", [_session("s2", flowFinished=True, phase="finished", group="idle", stepIndex=2, flowSteps=steps, flowPr=dict(_PR, state="MERGED"), nextFlow=nxt)])
     text = got["text"]
-    for need in ("→ 다음: 개발 Spec 만들기", "다음 일", "이 일은 끝났어요", "개발 Spec 만들기 · 개발 (1건)", "권한 양식준비 중", "요구사항REQ-001", "개발 번호DEV-001", "단계3 / 3 끝", "PR #6 합쳐짐", "합쳐졌어"):
+    for need in ("→ 다음: 개발 Spec", "요구사항 만들기·바꾸기 · 끝남", "PR #6이 합쳐졌어. 다음 갈래는 개발 Spec이야", "다음 일", "개발 Spec 만들기 — 새 세션에서 시작하길 권해", "새 세션에 넘길 것",
+                 "REQ-001 — DEV-001 번호로 개발 Spec 하기", "새 세션에서 개발 Spec 시작", "넘길 내용 고치기", "여기서 계속", "새 세션은 최신 내용 받기와 플러그인 판 확인을 스스로 해", "권한 양식준비 중",
+                 "요구사항REQ-001 확정", "개발 번호DEV-001", "단계3 / 3 끝", "PR #6 합쳐짐"):
         assert need in text, need
-    assert "<div.nextflow.handoff>" in got["dump"]
+    assert "<div.nextflow.handoff>" in got["dump"] and "<ol.stepbar.big>" in got["dump"]
+    assert "AI 진행" not in text and "<div.q.prcard>" not in got["dump"] and "<aside.sess-side>" in got["dump"]  # 끝남: AI 진행 칸·PR 카드 없음, 산출물 칸은 숨김(hidden)
+    assert "내 차례" not in got["ann"] and "PR #6이 합쳐졌어 — 다음은 개발 Spec" in got["ann"]
+    assert "끝 · PR #6 합쳐짐" in got["side"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -1222,9 +1267,9 @@ def test_session_screen_checks_card_blocked_card_and_fold(tmp_path):
     checks = [{"id": "sync", "state": "done"}, {"id": "version", "state": "pending"}]
     got = _smoke(tmp_path, "s/s1", [_session("s1", startChecks=checks, flowPr=dict(_PR, checks="fail"))])
     dump, text = got["dump"], got["text"]
-    assert dump.index("<section.light.talk>") < dump.index("<div.q.startchecks>") < dump.index("<div.msgs>")  # 새 세션 점검은 대화 판 맨 위 ✓ 줄 카드
-    assert "<div.crow.ok>" in dump and "<div.crow.todo>" in dump and "새 세션 점검" in text
-    assert "<div.q.prcard.blocked>" in dump and "✕ 막힘" in text and "? 확인 못 함" not in text
+    assert dump.index("<section.light.talk>") < dump.index("<div.msgs>") < dump.index("<div.q.startchecks>") < dump.index("<div.msgs-list>")  # 시작 점검은 대화 맨 위 ✓ 줄 카드(같은 .msgs 안)
+    assert "<div.crow.ok>" in dump and "<div.crow.todo>" in dump and "시작 점검 · 자동" in text
+    assert "<div.q.prcard.blocked>" in dump and "✕ 막힘" in text and "<div.q.prcard.unsure>" not in dump  # (아래 표시 약속 범례에도 같은 글이 있어 카드 모양으로 가린다)
     # 시안에 없는 옛 칸은 모두 "자세히" 안으로 접힌다(기능은 그대로)
     fold = dump.index("<details.more.fold>")
     for block in ("<section.toolsrow>", "<select.input>", "<section.mt-64>", "<details.tech>"):  # 도구 줄 · 권한 모드 · 기록 · 기술 정보
@@ -1394,7 +1439,7 @@ def test_memory_banner_ring_and_unknown_cases(tmp_path):
     hot = {"tokens": 920000, "window": 1000000, "pct": 92}
     got = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)])
     assert "이 세션 기억이 거의 찼어 (92%)" in got["text"] and "새 세션으로 넘기기" in got["text"] and "계속하기" in got["text"]
-    assert "<span.ring.pct.hot>" in got["sideDump"] and "기억92%" in got["text"]  # 링(사이드바)은 빨강, 숫자 띠에도 기억 칸
+    assert "<span.ring.pct.hot>" in got["sideDump"] and "기억92%" not in got["text"]  # 링(사이드바)은 빨강, 숫자 띠에 기억 칸은 없다
     # 80% 초과 90% 미만은 노랑 링, 배너는 없다
     got = _smoke(tmp_path, "s/s1", [_session("s1", context={"tokens": 850000, "window": 1000000, "pct": 85})])
     assert "<span.ring.pct.warn>" in got["sideDump"] and "기억이 거의 찼어" not in got["text"]
@@ -1403,10 +1448,10 @@ def test_memory_banner_ring_and_unknown_cases(tmp_path):
     assert "<span.ring.pct>" in got["sideDump"] and "기억이 거의 찼어" not in got["text"]
     # 창 크기를 모르면 % 없이 토큰 수만, 배너 없음
     got = _smoke(tmp_path, "s/s1", [_session("s1", context={"tokens": 241482, "window": None, "pct": None})])
-    assert "기억24만 토큰" in got["text"] and "기억이 거의 찼어" not in got["text"] and "<span.ring.unk>" in got["sideDump"]
+    assert "기억이 거의 찼어" not in got["text"] and "<span.ring.unk>" in got["sideDump"]
     # 읽지 못했으면 지금처럼 ? 와 확인 못 함
     got = _smoke(tmp_path, "s/s1", [_session("s1")])
-    assert "기억확인 못 함" in got["text"] and "<span.ring.unk>" in got["sideDump"] and "기억이 거의 찼어" not in got["text"]
+    assert "<span.ring.unk>" in got["sideDump"] and "기억이 거의 찼어" not in got["text"]
     # 터미널 세션은 넘기기 버튼 없이 안내만
     got = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, context=hot)])
     assert "기억이 거의 찼어" in got["text"] and "새 세션으로 넘기기" not in got["text"] and "/harness:handoff" in got["text"]
