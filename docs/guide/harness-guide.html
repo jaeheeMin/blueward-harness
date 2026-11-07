@@ -1222,6 +1222,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     <div class="callout warn"><span class="k">사람 행은 비어 있어</span><div><code>ID-Role Mapping</code> 시트는 Role 머리글만 채워져. 사원 번호·이름·SAP ID 줄은 비워서 나가고, 알려 줘도 작업본에 적지 않아. 고객사 담당자가 엑셀에서 채워.</div></div>
     <div class="callout warn"><span class="k">버전 올리기</span><div>한 번 main 에 병합된 엑셀은 같은 이름으로 다시 만들 수 없어. 새로 뽑으려면 작업본 머리의 <code>버전:</code> 을 0.1 올려. 이전 판 엑셀은 지우지 않고 남아.</div></div>
     <div class="callout warn"><span class="k">대조는 이름만 봐</span><div>Spec 대조는 카탈로그 이름이 작업본에 있는지만 봐. SAP 에 실제로 배정돼 있는지는 보지 않고, PR 검사도 하지 않아. 스킬을 부를 때 확인해.</div></div>
+    <div class="callout"><span class="k">SAP 에는 관리자가 따로</span><div>작업본의 Role·Space·Page 는 정리일 뿐이야. SAP 에서는 관리자가 <b>customizing 테넌트</b>에서 Maintain Business Roles 로 만들고, 개발 transport 와 <b>따로</b> Software Collection(Key User Extensibility)에 Role·Space·Page 를 함께 담아 옮겨. 컬렉션을 빼먹으면 운영에서 앱이 안 보여(SAP 공식 문서 Transport Your App).</div></div>
     <div class="callout ok"><span class="k">처음 쓸 때</span><div>Project Repository 에 <code>rules/role.yaml</code>, <code>rules/role-output.yaml</code>, <code>templates/harness/role.md</code> 가 없으면 스킬이 복사할 파일을 알려 줘. 규칙을 바꾸는 PR 은 승인자의 Approve 가 필요해.</div></div>
   </div>
 

@@ -21,6 +21,23 @@ Role 은 **가로 열**로 늘어난다. 작업본에는 Role 개요 표에 한 
 SAP 에서 Role·카탈로그가 실제로 어떻게 배정돼 있는지는 이 스킬이 읽지 않는다. 사람이 알려 준 것과 Spec 의 기록만 받아 적고,
 모르는 값은 지어내지 않고 묻는다.
 
+**작업본의 Role·Space·Page 는 SAP 에서 관리자가 따로 만들고 따로 옮긴다**(#750). 작업본을 산출한 뒤 사용자에게 아래를 짧게
+알린다. 이 스킬이 SAP 에 만들거나 옮기지는 않는다. 근거는 SAP S/4HANA Cloud Public Edition 공식 문서다.
+
+- 만드는 곳: 운송할 Business Role·Space·Page 는 **customizing 테넌트**에서 만든다. 개발 테넌트에서 만든 것은 시험용이다.
+  ("you must maintain the spaces, pages, and business roles in the customizing tenant and transport them to the production tenant
+  via a software collection" — https://help.sap.com/docs/SAP_S4HANA_CLOUD/6aa39f1ac05441e5a23f484f31e477e7/c79fa657501546fa8d9a4eee07409b7b.html)
+- 만드는 앱: Maintain Business Roles 에서 Role 을 만들고 Catalog 를 넣는다. 쓰기·읽기·값 도움말 제한을 정하고 사용자를
+  배정한다. Launchpad Spaces 탭(Manage Launchpad Spaces / Manage Launchpad Pages)에서 Space·Page·타일을 놓는다. 앱은
+  Spaces 모드에서만 보인다(https://help.sap.com/docs/SAP_S4HANA_CLOUD/6aa39f1ac05441e5a23f484f31e477e7/e9c4108610d14b8e9c08353458ed7f8c.html).
+- 옮기는 길: 개발 객체(IAM App·Catalog 등)의 개발 transport 와는 **따로** 옮긴다. Export Software Collection 에 Role·Space·Page 를
+  **같은 컬렉션에** 담고, Import Collection 에서 Key User Extensibility 유형으로 가져온다. SAP* 로 시작하는 Role 과 SAP 이
+  제공한 Space·Page 는 옮길 수 없다(https://help.sap.com/docs/SAP_S4HANA_CLOUD/6aa39f1ac05441e5a23f484f31e477e7/f259607ecde645f1b77bed32815c2db0.html,
+  https://help.sap.com/docs/SAP_S4HANA_CLOUD/53e36b5493804bcdb3f6f14de8b487dd/83c1cd62666f48c68d93f2fdeae1ae95.html).
+  대안으로 Role 만 Download/Upload 할 수 있다. 다만 새 릴리스에서 옛 릴리스로는 안 되고, 컬렉션으로 옮긴 Role 은 다시 올릴 수
+  없다(https://help.sap.com/docs/SAP_S4HANA_CLOUD/53e36b5493804bcdb3f6f14de8b487dd/a58f69585339484aa204cf0321cab2cd.html).
+- 개발 transport 만 옮기고 컬렉션을 빼먹으면, 운영에 Role·Space 가 없어 앱이 보이지 않는다.
+
 `git rev-parse --show-toplevel` 로 Project Repository 루트를 확인한다.
 
 ## 작업본 형식
