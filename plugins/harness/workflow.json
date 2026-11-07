@@ -76,8 +76,8 @@
          "basis": [{"file": "skills/spec/SKILL.md", "quote": "`/harness:deliver` 는 하위 작업 이슈의 `(DEV-xxx)` 로도 같은 줄을 찾아 `리뷰` 로 갱신한다"},
                    {"file": "skills/deliver/SKILL.md", "quote": "`docs/spec/` 변경은 Spec"}]},
         {"id": "merge", "name": "승인받고 합쳐지기 기다리기", "short": "승인·합치기", "kind": "wait", "helperSkill": "prs", "done": ["pr_merged"],
-         "hint": "Spec 을 고치면 설계 변경이라 승인이 필요하다. 승인자의 Approve 와 병합은 GitHub 에서 한다.",
-         "basis": [{"file": "rules/commit-and-pr.md", "quote": "Spec 은 설계가 바뀔 때만 고친다(고치면 승인 대상)"},
+         "hint": "새 Spec 파일은 승인자의 Approve 가 필요하고, 이미 있는 Spec 을 고친 PR 은 검사가 통과하면 합쳐진다. 승인자의 Approve 와 병합은 GitHub 에서 한다.",
+         "basis": [{"file": "rules/commit-and-pr.md", "quote": "Spec 은 설계가 바뀔 때만 고친다(새 Spec 파일만 승인 대상이고 고친 Spec 은 승인 대상이 아니다)"},
                    {"file": "rules/governance.md", "quote": "Spec PR 은 설계가 정해지면 병합한다."}]}
       ],
       "next": {"flow": "dev", "label": "개발하기",
