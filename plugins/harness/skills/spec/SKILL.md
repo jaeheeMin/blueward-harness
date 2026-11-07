@@ -137,6 +137,30 @@ main 이면 start 절차, 다른 작업 브랜치면 같은 일인지 판단·�
    사용 권한만 보기로 하는 결정이면** 이유와 결정자(누가 정했는지)·날짜를 사용자에게서 받아 `비고` 에 적는다. 비워 두면
    검사가 거절한다. 이런 행은 PR 에서 승인자가 확인한다고 사용자에게 알린다. 읽기만 하는 앱이면 틀의 이 절을
    지운다.
+   **권한 객체와 Launchpad 노출 객체를 `## 사용 객체` 에 적게 한다**(#749). 아래는 개발 단계에서 Claude 가 따르는
+   안내이고, 기계가 순서나 빠진 객체를 막지는 않는다(종류 허용 값만 검사한다).
+   - `## 권한` 표에 새로 만드는 커스텀 권한 객체를 적었으면 그 `Authorization Object`(권한 필드가 새것이면
+     `Authorization Field` 도)와 그 객체를 읽는 `Access Control` 을 `## 사용 객체` 에도 적게 한다. 객체는 Y·Z 로 시작한다
+     (https://help.sap.com/docs/abap-cloud/abap-development-tools-user-guide/defining-authorization-objects).
+   - Business Role 에서 필드 값으로 범위를 제한해야 하면 사용자에게 묻고, 필요하면 `Restriction Field`·`Restriction Type` 을
+     적는다. 권한 필드를 Role 에서 유지하려면 대응하는 Restriction Field 가 필요하고(https://help.sap.com/docs/abap-cloud/abap-development-tools-user-guide/defining-restriction-fields),
+     정의하면 IAM App 의 권한 값을 Role 값이 덮어쓴다. Business Role Template 은 선택이다
+     (https://help.sap.com/docs/abap-cloud/abap-development-tools-user-guide/creating-business-role-template).
+   - Launchpad 에 노출하는 객체는 공식 순서대로 만든다고 알린다(https://help.sap.com/docs/SAP_S4HANA_CLOUD/6aa39f1ac05441e5a23f484f31e477e7/04330b95ea524c9bb89a3d1777c616e6.html).
+     패키지는 운송 가능한 소프트웨어 컴포넌트에 만든다(ZLOCAL 객체는 import 할 수 없다,
+     https://help.sap.com/docs/SAP_S4HANA_CLOUD/6aa39f1ac05441e5a23f484f31e477e7/851595ea424b432d98d899c5d0f5ce8e.html)
+     → 권한 객체 → Access Control → BDEF `authorization master` → 서비스 바인딩 게시 뒤 권한 기본값에서 Synchronize 로 내
+     권한 객체를 넣는다(빼면 개발 테넌트에서 시험이 안 된다,
+     https://help.sap.com/docs/SAP_S4HANA_CLOUD/6aa39f1ac05441e5a23f484f31e477e7/964057839dc3401b91d03fabaa567c79.html,
+     https://help.sap.com/docs/SAP_S4HANA_CLOUD/6aa39f1ac05441e5a23f484f31e477e7/266999e6b9244e728583e10dbbffc8bd.html)
+     → UI5 배포(BSP·LADI 자동 생성) → IAM App(Services 탭, UI5 Application ID 에 LADI) Publish Locally → (선택) Restriction
+     → Business Catalog(Apps 탭) Publish Locally → (선택) Business Role Template Publish Locally.
+   - Access Control 의 `@AccessControl.authorizationCheck` 값은 SAP 문서끼리 다르다. IAM 가이드(Implementing a Read
+     Protection, https://help.sap.com/docs/SAP_S4HANA_CLOUD/6aa39f1ac05441e5a23f484f31e477e7/2a5524a8e57c4888a7ebec4898272484.html)는
+     `#CHECK`, ABAP 키워드 문서(RAP - CDS-Based Authorization,
+     https://help.sap.com/docs/abap-cloud/abap-keyword/rap-cds-based-authorization)는 "#CHECK should not be used at all. Use #MANDATORY instead" 라고
+     한다. 두 문서를 모두 알리고 어느 쪽을 쓸지는 정하지 않은 채 사용자에게 묻는다. 권한 객체·Restriction 이름 규칙이 프로젝트
+     `conventions/naming.md` 에 없으면 채우게 안내만 한다(CR-008).
    4 에서 양식을 골랐으면 고른 지도를 읽어 `## 양식 항목` 절을 맨 뒤
    (`## 사용 객체`, 있으면 `## 권한`, `## Launchpad 노출` 다음)에 쓴다. 절 순서는 상세 설계 → 사용 객체 → 권한 → Launchpad 노출 → 양식 항목이다. 표기와 키의 뜻은 `form-map.md` 를 따른다.
    양식 지도에 없는 시트·칸·`#### <표·서술>`·표 열(오타 포함)은 쓰지 않는다 — 저장할 때(훅)·PR 의 doc-guard

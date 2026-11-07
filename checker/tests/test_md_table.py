@@ -370,6 +370,18 @@ def test_새_종류_세_가지는_사용_객체에서_통과한다(tmp_path, cap
     assert code == EXIT_PASS, out
 
 
+@pytest.mark.parametrize("kind", ["Authorization Field", "Authorization Object", "Access Control",
+                                  "Restriction Field", "Restriction Type", "Business Role Template"])
+def test_권한_객체_종류는_사용_객체에서_통과한다(tmp_path, capsys, kind):
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with(HEAD + f"| {kind} | ZMM_AO_AUTO1 | 생성 | |\n")))
+    assert code == EXIT_PASS, out
+
+
+def test_없는_권한_종류는_여전히_거절된다(tmp_path, capsys):
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with(HEAD + "| Authorization Objects | ZMM_AO_AUTO1 | 생성 | |\n")))
+    assert code != EXIT_PASS, out
+
+
 # ---- 양식 산출은 새 절에 영향받지 않는다 ----
 
 FORM = """\
