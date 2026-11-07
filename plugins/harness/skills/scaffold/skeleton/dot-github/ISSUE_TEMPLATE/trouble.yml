@@ -1,0 +1,35 @@
+name: 문제·해결 기록
+description: PR 작업 중 겪은 문제와 해결 방법을 팀 기록으로 남긴다
+title: "[기록] "
+labels: ["type:trouble"]
+body:
+  - type: input
+    id: pr
+    attributes:
+      label: 관련 PR
+      description: "PR 번호. 예: #812 (없으면 비워 둬)"
+  - type: dropdown
+    id: stage
+    attributes:
+      label: 단계
+      options: [개발, 문서 검사, SAP 운송, 배포, 기타]
+    validations:
+      required: true
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 증상
+      description: 오류 문구를 그대로 붙여 넣어. 비밀번호·키·토큰은 지우고 넣어.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: cause
+    attributes:
+      label: 원인
+      description: 모르면 비워 둬
+  - type: textarea
+    id: solution
+    attributes:
+      label: 해결 방법
+      description: 아직 못 풀었으면 해결 후보를 적어. 시도했다 안 된 것·새 후보는 댓글로 더한다(맨 앞에 "시도·안 됨" / "해결 후보" / "해결").
