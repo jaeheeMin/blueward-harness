@@ -987,3 +987,11 @@ details.fold > [data-r]:empty { display: none; }
 .msgs .ask .eb, .msgs .handoff .eb { line-height: 16px; }  /* 시안 카드 눈썹 줄 16px */
 .handoff-list { padding-bottom: 2px; }
 .stepbar.big .step.done { color: #fff; }  /* 시안 끝난 알약 글자색 */
+/* 오른쪽 산출물 칸 안쪽(시안 G-09): 종이와 문서 목록 칸이 칸 너비(300)를 꽉 채우고 넘치지 않는다. 문서 줄은 이름 + 칩 한 줄 */
+.sess-side .docs-wrap, .sess-side .docs-wrap:has(.docs-pane[hidden]) { align-items: stretch; }
+.sess-side .docs-wrap > * { min-width: 0; max-width: 100%; }
+.sess-side .docs-pane { width: 100%; overflow: hidden; }
+.sess-side .docs-list { width: 100%; }
+.sess-side .docs-list .dn { display: flex; flex-direction: row; align-items: baseline; gap: 8px; min-width: 0; }
+.sess-side .docs-list .dn b { flex: none; max-width: 60%; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.sess-side .docs-list .dn small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
