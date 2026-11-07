@@ -345,6 +345,24 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 - 글꼴(#611): Pretendard(본문)와 JetBrains Mono(코드)를 `static/fonts/` 에 담았고(OFL 라이선스 파일 동봉) `app.css` 의 `@font-face` 가 `/fonts/…` 로 불러온다. 서버는 `.woff2` 를 `font/woff2` 로 내보내고 `fonts/` 한 단계만 연다. 바깥 글꼴 서버로 가는 `<link>` 는 CSP 가 막아 왔으므로 `index.html` 에서 뺐다.
 - 금지: 그라데이션 배경, 유리 효과, Pulse 복제, 터미널 버튼. 시안의 샘플 데이터를 코드에 남기지 않는다. 빈 상태 화면을 만든다.
 
+## 9a. 시안 대조 검사 (`checker/tests/console_mockup/`, #764)
+
+"시안과 같은가" 를 눈대중이 아니라 숫자로 판정한다. **"시안 대조 완료" 는 이 검사 통과로만 기록한다**(스크린샷을 눈으로 본 것, "비슷함", 일부 요소만 잰 것은 완료가 아니다. 상태 기록·PR 본문에는 검사를 돌린 명령과 통과한 화면 번호를 적는다). 검사를 못 돌렸으면(브라우저 없음 등) "대조 못 함" 이라고 적고 통과로 쓰지 않는다.
+
+- **기준 파일** `baseline.json`: 시안 G-01~24(`*.dc.html`)를 1440·1280 너비로 열어 요소 30종 안팎(헤더·로고·사이드바·본문·제목·알약·숫자 띠·밝은 판·대화·카드·단추·입력칸·오른쪽 칸 등)의 위치·크기·글자 크기·안쪽 여백·모서리를 CSS px 로, 배경색·글자색을 computed 문자열로 저장한 것. 시안이 바뀌면 `python -m checker.tests.console_mockup.extract_baseline <시안 폴더>` 로 다시 뽑아 같은 PR 에 넣는다(시안 폴더는 저장소 밖 디자인 도구 쪽에 있다).
+- **요소 대응표** `elements.py`: 시안과 콘솔이 같은 클래스를 쓰는 것이 기본이고 다른 것만 따로 적는다(시안 `.steps` ↔ 콘솔 `.stepbar.big`, 시안 `.nav` ↔ 콘솔 `.topnav`, 시안 `.tile` ↔ 콘솔 `.docs-list`, 오른쪽 칸 `.split > aside` ↔ `aside.sess-side` 등). 비교 항목·허용 오차(기본 ±2px, 글자 크기 ±0.5)는 요소마다 정하고, 화면마다 `screen_config.py` 에서 덮어쓴다. 글 길이에 따라 달라지는 높이·세로 위치는 기본에서 뺐고, 세로 위치는 헤더 아래끝 기준이다(맨 위 알림 띠가 있고 없고에 흔들리지 않게).
+- **상태 만들기** `fake_console/`: 가짜 gh·claude 로 화면마다 세션 상태를 만들어 시험 콘솔(기본 포트 4881, `CONSOLE_CHECK_PORT`)을 임시 폴더에 띄운다. 준비된 화면은 G-04·05·06·09·10·12·13·15, 더하려면 `fake_console/screens.py` 에 함수를 만들고 `BUILDERS` 에 올린다.
+- **대조**: 헤드리스 Chrome·Edge·Chromium 을 DevTools 프로토콜로 직접 움직인다(새 의존성 없음, 표준 라이브러리만). 허용 오차 밖이면 `화면 너비 요소.항목: 시안 값 / 실제 값` 을 찍고 실패한다. 가로 스크롤(`scrollWidth > clientWidth`)도 실패다. 그 밖에 ① 페이지 배경이 창 높이(innerHeight) 끝까지 덮는지(html·body 배경 또는 최상위 앱 상자 배경; 시안은 `.app min-height 1000` 이라 콘솔 쪽만 판정), ② 헤더 로고가 실제로 떴는지(`naturalWidth > 0`)와 크기·위치, ③ 주요 요소의 `background-color`·`color` 가 시안과 **정확히 같은지**를 본다. 글자색 예외는 `screen_config.py` 의 `COLOR_EXCEPTIONS` 에 (시안 색, 콘솔 색) 값 쌍과 이유로 적는다(지금은 #722 의 대비 4.5:1 결정 둘: 기본 글자색 #fff→rgb(243,250,248), --lmuted #6d7775→#55625f). 값 쌍이 아니면 실패하고, 배경색·테두리색에는 예외가 없다. `screen_config.py` 의 `expect` 로 글·단추(기능) 기대값도 같이 본다.
+
+실행(저장소 루트에서):
+
+```
+python -m checker.tests.console_mockup.check_console                  # 준비된 화면 전부
+python -m checker.tests.console_mockup.check_console G-09 --shots out  # 한 화면만, 그림도 저장
+```
+
+종료 코드 0 = 모두 시안 안, 1 = 시안과 다름, 2 = **검사 불능**(브라우저·기준 파일 없음, 서버 못 띄움). 2 는 통과가 아니다. 브라우저는 `CONSOLE_CHECK_BROWSER` → PATH → 흔한 설치 위치 순으로 찾고(Windows 는 Edge 가 기본으로 있다), 다른 작업 폴더의 콘솔을 보려면 `CONSOLE_CHECK_REPO`. pytest 에서는 `CONSOLE_MOCKUP_CHECK=1` 일 때만 같은 검사가 돈다(브라우저가 없으면 이유를 보이고 건너뜀). 기본 시험은 브라우저 없이 비교 함수·기준 파일 모양·main 에서 잰 G-09 값에서 차이를 잡아내는지만 확인한다. 한계: 시안 폴더의 `_blob/` 에 진짜 로고(png)·글꼴(woff2)이 있어야 기준을 뽑을 수 있다(이미지를 못 불러오면 멈춘다). 시안이 쓰는 구글 글꼴 IBM Plex Mono 만 밖에서 안 불러와져 콘솔의 JetBrains Mono 로 대신 잰다. gh·claude 는 흉내라 PR 검사 이름·승인 수 같은 진짜 GitHub 값은 못 본다.
+
 ## 10. 범위 밖
 
 - `SKILL.md` 를 고쳐 단계별 진행을 보고하게 하는 일. 나중에 한다.
