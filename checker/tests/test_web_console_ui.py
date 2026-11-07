@@ -482,6 +482,12 @@ const cases = {
     assert.strictEqual(L.shortStepName('표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어요)'), '표준 건 작업 시작하기');
     assert.strictEqual(L.shortStepName('SRS 쓰기'), 'SRS 쓰기');
     assert.strictEqual(L.shortStepName('(괄호만)'), '(괄호만)');  // 다 지워지면 원래 이름
+    // step.short(workflow.json)가 있으면 그것, 없으면 괄호만 뗀 이름
+    assert.strictEqual(L.stepShort({ name: '올리고 검토 요청하기', short: '올리기' }), '올리기');
+    assert.strictEqual(L.stepShort({ name: '표준 건 작업 시작하기(설명)' }), '표준 건 작업 시작하기');
+    const shortStep = { flowId: 'srs', flowSteps: [{ name: 'SRS 쓰기', short: '쓰기', state: 'done' }, { name: '올리고 검토 요청하기', short: '올리기', state: 'now' }, { name: '승인받고 합쳐지기 기다리기', short: '승인·합치기', state: 'todo' }], stepIndex: 1 };
+    const shortCell = L.sessionStrip(shortStep, undefined).find(c => c.id === 'step');
+    if (shortCell && shortCell.value !== '확인 못 함') { assert.strictEqual(shortCell.value, '2 / 3 올리기'); assert.strictEqual(shortCell.title, '올리고 검토 요청하기'); }
     const longStep = { flowId: 'standard', flowSteps: [{ name: '표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어요)', state: 'now' }, { name: '올리기', state: 'todo' }], stepIndex: 0 };
     const stepCell = L.sessionStrip(longStep, undefined).find(c => c.id === 'step');
     if (stepCell && stepCell.value !== '확인 못 함') { assert.ok(!stepCell.value.includes('(')); assert.ok(stepCell.title.includes('자동으로 만들어요')); }

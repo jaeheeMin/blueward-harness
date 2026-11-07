@@ -337,7 +337,7 @@ def public_fields(s: dict, data: dict | None = None) -> dict:
     if not state:
         return {"flowId": None, "flowName": "", "flowReason": "", "stepIndex": 0, "flowSteps": [], "flowFinished": False,
                 "flowUnknown": [], "flowPr": None, "nextFlow": None}
-    keep = ("id", "name", "kind", "skill", "helperSkill", "hint", "onlyIf", "state", "reason")
+    keep = ("id", "name", "kind", "skill", "helperSkill", "hint", "short", "onlyIf", "state", "reason")
     flow = flow_def(data, state["id"]) if data else None
     current_steps = {x.get("id"): x for x in (flow or {}).get("steps", []) if isinstance(x, dict)}
 
@@ -347,6 +347,7 @@ def public_fields(s: dict, data: dict | None = None) -> dict:
         if cur:
             out["name"] = cur.get("name", st.get("id"))
             out["hint"] = cur.get("hint", "")
+            out["short"] = cur.get("short")
         return out
 
     flow_name = flow.get("name", state["id"]) if flow else state["name"]

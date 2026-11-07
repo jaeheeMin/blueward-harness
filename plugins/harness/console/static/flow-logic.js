@@ -55,7 +55,7 @@
   function barSteps(s) {
     return arr(s && s.flowSteps).map(function (st, i) {
       var state = stepState(st, i, s);
-      return { index: i, id: st.id, name: st.name || st.id || '', kind: st.kind, skill: st.skill || '', state: state, label: BAR_LABEL[state], reason: st.reason || '' };
+      return { index: i, id: st.id, name: st.name || st.id || '', kind: st.kind, skill: st.skill || '', state: state, label: BAR_LABEL[state], reason: st.reason || '', short: st.short || '' };
     });
   }
   function currentStep(s) {
@@ -366,11 +366,13 @@
   // 단계 이름 끝의 괄호 설명("…시작하기(작업 기록과 작업 공간을 자동으로 만들어요)")을 뗀 짧은 이름. 시안의 숫자 띠·순서 알약은 짧은 이름이다.
   // 전체 이름은 호출한 쪽이 title 로 둔다.
   function shortStepName(name) { return String(name || '').replace(/\s*\([^()]*\)\s*$/, '') || String(name || ''); }
+  // 화면용 짧은 이름: workflow.json 의 step.short 가 있으면 그것, 없으면 괄호 설명만 뗀 이름.
+  function stepShort(st) { return (st && st.short) || shortStepName(st && st.name); }
   function sessionStrip(s, srs) {
     var cells = [], steps = barSteps(s), prog = progressOf(s);
     if (steps.length) {
       var now = steps.filter(function (x) { return x.state === 'now'; })[0];
-      cells.push({ id: 'step', label: '단계', tone: 'g', value: s.flowFinished ? steps.length + ' / ' + steps.length + ' 끝' : now ? (now.index + 1) + ' / ' + steps.length + ' ' + shortStepName(now.name) : '확인 못 함',
+      cells.push({ id: 'step', label: '단계', tone: 'g', value: s.flowFinished ? steps.length + ' / ' + steps.length + ' 끝' : now ? (now.index + 1) + ' / ' + steps.length + ' ' + stepShort(now) : '확인 못 함',
         title: now && !s.flowFinished ? now.name : null });
       cells.push({ id: 'progress', label: 'AI 진행', tone: '', value: s.flowFinished ? '끝' : prog.pct + '%',
         title: '순서 ' + prog.total + '단계 중 ' + prog.done + '단계가 끝난 기준이야(AI 가 직접 알려 준 값이 아니야).' });
@@ -462,7 +464,7 @@
   var api = {
     notifyEvents: notifyEvents,
     devReadyView: devReadyView, kindHint: kindHint, devBlock: devBlock, kindConflict: kindConflict,
-    memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, shortStepName: shortStepName, prLines: prLines,
+    memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, shortStepName: shortStepName, stepShort: stepShort, prLines: prLines,
     BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, counts: counts, summaryText: summaryText,
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice,

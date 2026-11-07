@@ -105,10 +105,10 @@
       var steps = L.barSteps(s);
       return h('ol', { class: 'stepbar' + (big ? ' big' : ''), 'aria-label': '진행 순서' }, steps.map(function (st) {
         // 큰 순서 알약(세션 제목 아래, 시안 G-09·12)은 짧은 이름. 전체 이름은 title 로(이유가 있으면 이유와 함께).
-        var full = big && L.shortStepName(st.name) !== st.name ? st.name : '';
+        var full = big && L.stepShort(st) !== st.name ? st.name : '';
         return h('li', { class: 'step ' + st.state, 'aria-current': st.state === 'now' ? 'step' : null, title: [full, st.reason].filter(Boolean).join(' · ') || null },
           big ? null : h('span', { class: 'dot', 'aria-hidden': 'true' }),
-          h('span', { class: 'snm', text: (big && st.state === 'done' ? '✓ ' : '') + (big ? L.shortStepName(st.name) : st.name) }),
+          h('span', { class: 'snm', text: (big && st.state === 'done' ? '✓ ' : '') + (big ? L.stepShort(st) : st.name) }),
           h('span', { class: 'slb sr-only', text: st.label }));
       }));
     }

@@ -35,6 +35,24 @@ def test_workflow_json_basis_quotes_all_exist_in_the_plugin_files():
     assert errors == [], "workflow.json 의 근거(basis)가 맞지 않다. 스킬·규칙 문장을 바꿨다면 workflow.json 의 quote 도 맞춘다:\n" + "\n".join(errors)
 
 
+def test_step_short_names_are_short_nonempty_strings():
+    # short 는 선택. 있으면 화면용 짧은 이름이라 비지 않은 12자 이하 문자열이다.
+    steps = [(f"{f['id']}/{s['id']}", s) for f in _data()["flows"] for s in f["steps"]]
+    assert any("short" in s for _, s in steps)
+    for key, s in steps:
+        if "short" in s:
+            assert isinstance(s["short"], str) and s["short"].strip() and len(s["short"]) <= 12, key
+
+
+def test_console_passes_step_short_to_the_screen():
+    data = _data()
+    srs = next(f for f in data["flows"] if f["id"] == "srs")
+    state = {"id": "srs", "name": srs["name"], "reason": "", "stepIndex": 0, "finished": False, "unknown": [],
+             "steps": [{"id": s["id"], "name": s["name"], "kind": s["kind"]} for s in srs["steps"]]}
+    out = flows.public_fields({"flowState": state}, data)
+    assert [st["short"] for st in out["flowSteps"]] == ["쓰기", "올리기", "승인·합치기"]
+
+
 def test_every_step_flow_next_tool_and_condition_has_a_basis():
     data = _data()
     owners = [("조건 " + k, v) for k, v in data["conditions"].items()]
