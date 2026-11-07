@@ -18,7 +18,7 @@
   function create(kit) {
     var L = window.BHLogic;
     var h = kit.h, clear = kit.clear, api = kit.api;
-    var cache = { flows: {}, approvals: {}, devReady: {} };
+    var cache = { flows: {}, approvals: {}, devReady: {}, myPrs: {} };
     var updatePressed = false;
     var stripWatchers = [];
 
@@ -49,6 +49,11 @@
     function approvalsFor(cwd) {
       if (!cwd) return Promise.resolve({ ok: false, error: null });
       return cached(cache.approvals, cwd, '/api/approvals' + kit.qs({ cwd: cwd }), true);
+    }
+    // 내가 올린 열린 PR 과 검사 결과(홈 "고쳐야 할 내 PR", #735). 읽는 중이면 끝나기를 기다린다.
+    function myPrsFor(cwd) {
+      if (!cwd) return Promise.resolve({ ok: false, error: null });
+      return cached(cache.myPrs, cwd, '/api/my-prs' + kit.qs({ cwd: cwd }), true);
     }
     // 이 폴더의 개발 건별 Spec 유무(#668). 읽는 중이면 끝나기를 기다린다. 결과는 L.devReadyView 로 거른다.
     function devReadyFor(cwd) {
@@ -897,6 +902,66 @@
       });
     }
 
+    // 홈 "고쳐야 할 내 PR"(시안 G-24, #735): 내가 올린 열린 PR 중 자동 검사가 실패한 것. 세션에 연결되지 않은 PR 도 gh 로 읽는다.
+    // 못 읽은 폴더는 없는 것으로 치지 않고 "? 확인 못 함" 줄로 알린다. 고치라고 하기는 그 PR 의 세션이 있고 보낼 수 있으면 그 세션에, 아니면 새 작업 입력칸에 문장을 넣어 간다.
+    var FIX_ROWS = 3;
+    function fixCard(box) {
+      var cwds = [], seenRepo = {};
+      sessionList().forEach(function (s) {
+        var key = s.repo || L.normPath(s.cwd);
+        if (s.cwd && !seenRepo[key] && cwds.length < MAX_APPROVAL_FOLDERS) { seenRepo[key] = 1; cwds.push(s.cwd); }
+      });
+      var sig = cwds.join('|');
+      function target(it) {
+        return sessionList().filter(function (s) {
+          return s.status !== 'ended' && s.canSend !== false && ((s.flowPr && s.flowPr.number === it.number) || (it.branch && s.branch === it.branch));
+        })[0] || null;
+      }
+      function say(it) { return 'PR #' + it.number + (it.title ? ' (' + it.title + ')' : '') + ' 의 자동 검사가 실패했어. 실패한 검사를 보고 고쳐 줘.'; }
+      function paint() {
+        var d = box._fix;
+        clear(box);
+        if (!d) return;
+        var fails = d.items, shown = fails.slice(0, FIX_ROWS);
+        shown.forEach(function (it, i) {
+          var url = kit.safeHttp(it.url), s = target(it), msg = h('span', { class: 'quiet', role: 'status', hidden: true });
+          var label = '#' + it.number + ' ' + (it.title || '') + ' · 검사 실패';
+          var btn = h('button', { type: 'button', class: 'pill dark', 'data-fix-send': String(it.number), text: 'AI 에게 고치라고 하기', onClick: function () {
+            if (!s) { startNew(say(it)); return; }
+            btn.disabled = true;
+            api('POST', '/api/sessions/' + sid(s) + '/messages', { text: say(it) }).then(function () { msg.textContent = '세션에 보냈어.'; },
+              function (e) { msg.textContent = failText(e, '보내기'); }).then(function () { msg.hidden = false; btn.disabled = false; });
+          } });
+          box.appendChild(h('div', { class: 'fixpr', 'data-fix-pr': String(it.number) },
+            h('div', { class: 'ft' }, h('span', { class: 'eb', text: '고쳐야 할 내 PR' + (i === 0 ? ' ' + fails.length + '건' : '') }), h('br'),
+              h('b', null, url ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer', text: label }) : label)),
+            msg, btn));
+        });
+        if (fails.length > shown.length) box.appendChild(h('span', { class: 'quiet', text: '고쳐야 할 PR 이 ' + (fails.length - shown.length) + '건 더 있어.' }));
+        if (d.unknown.length) {
+          box.appendChild(h('div', { class: 'fixpr unk', 'data-fix-pr': 'unknown' },
+            h('div', { class: 'ft' }, h('span', { class: 'eb', text: '고쳐야 할 내 PR' }), h('br'),
+              h('b', { text: '? 확인 못 함 · ' + d.unknown.join(' / ') }))));
+        }
+      }
+      if (box.dataset.sig === sig && box.dataset.ready) { paint(); return; }  // 세션만 바뀌면 다시 읽지 않고 단추의 대상만 새로 정한다
+      box.dataset.sig = sig;
+      Promise.all(cwds.map(myPrsFor)).then(function (rs) {
+        if (box.dataset.sig !== sig || !box.isConnected) return;
+        box.dataset.ready = '1';
+        var items = [], seen = {}, unknown = [];
+        rs.forEach(function (r, i) {
+          var name = kit.baseName(cwds[i]) || cwds[i], d = r.ok ? r.data : null;
+          if (!d) { unknown.push(name + ': ' + failText(r.error, '내 PR 목록')); return; }
+          if (d.state === 'unknown') { unknown.push(name + ': ' + (d.reason || '내 PR 목록을 읽지 못했어')); return; }
+          (d.items || []).forEach(function (it) { if (it && it.checks === 'fail' && !seen[it.url || it.number]) { seen[it.url || it.number] = 1; items.push(it); } });
+        });
+        items.sort(function (a, b) { return (a.number || 0) - (b.number || 0); });
+        box._fix = { items: items, unknown: unknown };
+        paint();
+      });
+    }
+
     // 프로젝트 준비 안내: 세션이 있는 폴더 중 templates/·rules/ 가 없는 곳을 알린다. 읽지 못한 폴더는 숨기지 않고 '확인 못 함' 으로 적는다.
     function projectCard(box) {
       var cwds = [], seen = {};
@@ -1048,6 +1113,34 @@
         weekVal.textContent = n == null ? '확인 못 함' : String(n);
         weekTile.className = 'tile2' + (n == null ? ' unk' : '');
       }
+      // 시안 G-24 다섯째 칸 "팀 기록 · 아직 안 풀린 문제 n건 [보기]". 값은 기록 API(/api/trouble)의 열린 이슈 수다.
+      // 일부 저장소만 읽었으면 title 에 적고, 하나도 못 읽었으면 0 이 아니라 "확인 못 함".
+      var tbLine = h('span', { class: 'tline', role: 'status', text: '불러오는 중이야' });
+      var tbTile = h('div', { class: 'tile2', 'data-trouble-tile': '1' }, h('span', { class: 'eb', text: '팀 기록' }), tbLine,
+        h('div', { class: 'acts' }, kit.link('/troubles', { class: 'pill line sm', text: '보기' })));
+      function showTrouble(d, err) {
+        var okP = d ? (d.projects || []).filter(function (p) { return p.ok; }) : [], badP = d ? (d.projects || []).filter(function (p) { return !p.ok; }) : [];
+        clear(tbLine);
+        tbLine.title = '';
+        if (!d || !okP.length) {
+          tbTile.className = 'tile2 unk';
+          tbLine.textContent = '확인 못 함 · ' + (err ? err : badP[0] && badP[0].reason ? badP[0].reason : '기록을 읽을 저장소를 찾지 못했어');
+          return;
+        }
+        var n = d.stats && d.stats.open || 0;
+        tbTile.className = 'tile2';
+        tbLine.appendChild(document.createTextNode('아직 안 풀린 문제 '));
+        tbLine.appendChild(h('b', { class: n ? 'w' : null, text: n + '건' }));
+        if (badP.length) tbLine.title = badP.map(function (p) { return p.name; }).join(', ') + ' 는 읽지 못해 세지 못했어.';
+      }
+      function loadTrouble(n) {
+        api('GET', '/api/trouble?limit=1').then(function (d) {
+          if (d && d.loading && n < 30) { if ((d.projects || []).some(function (p) { return p.ok; })) showTrouble(d); setTimeout(function () { loadTrouble(n + 1); }, 1500); return; }
+          showTrouble(d);
+        }, function (e) { showTrouble(null, e && e.message || '읽지 못했어'); });
+      }
+      loadTrouble(0);
+      var fixBox = h('div', { class: 'fixbox' });
       var homeOpen = false;  // "외 n건" 펼침. 이 화면에서만 기억한다
       function showPr(merged) {
         if (merged.state === 'yes') { prVal.textContent = String(merged.items.length); prTile.className = 'tile2'; prTile.hidden = false; }
@@ -1066,7 +1159,8 @@
         var c = L.counts(list), page = h('div', { class: 'page home' });
         var proj = folderName(list[0]);
         page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: today() + ' · ' + proj }), h('h1', { text: '오늘 내 일' })));  // "세션 n개 · …" 줄은 시안에 없다(타일이 같은 숫자를 보인다)
-        page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), prTile, weekTile));  // 시안 G-11 순서
+        page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), prTile, weekTile, tbTile));  // 시안 G-11 순서 + G-24 다섯째 칸
+        page.appendChild(fixBox);  // 시안 G-24: 타일 줄 바로 아래
 
         var todo = list.filter(function (s) { return L.groupOf(s) === 'todo'; });
         // 내 차례는 가장 오래 기다린 한 건만 카드로 두고, 나머지는 "외 n건" 을 눌러 펼친다(펼침 상태는 이 화면에서만 기억).
@@ -1102,7 +1196,8 @@
           var subs = L.runningSubCount(s);
           var doing = ended ? '끝난 세션' : s.currentAction || (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : g === 'running' ? '작업하는 중' : '쉬는 중');
           var tip = doing + (subs ? ' · 서브에이전트 ' + subs + '개 실행 중' : '');  // 둘째 줄 대신 칩 title 로(시안: 상태 칸은 칩 하나)
-          var chip = todoRow ? h('span', { class: 'tag', title: tip, text: '내 차례' }) : h('span', { class: 'tag ok', title: tip, text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
+          var fixRow = !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)
+          var chip = todoRow || fixRow ? h('span', { class: 'tag', title: tip, text: fixRow ? '고쳐야 함' : '내 차례' }) : h('span', { class: 'tag ok', title: tip, text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
           var issue = issueOf(s), pr = prChip(s);
           var nums = h('td', { 'data-l': '번호' }, issue ? h('span', { class: 'mono', text: '이슈 #' + issue }) : null, pr, !issue && !pr ? h('span', { class: 'none', text: '–' }) : null);
           return h('tr', { class: todoRow ? 'attn' : '', 'data-session': s.id },
@@ -1134,6 +1229,7 @@
         recentCard(recent, showWeek);
         approvalCard(approvals, showPr);
         projectCard(projects);
+        fixCard(fixBox);
       }
       draw();
       return { onData: draw, onSession: draw, onRequest: draw, onRemoved: draw, title: function () { return ''; } };

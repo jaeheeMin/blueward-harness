@@ -3721,6 +3721,37 @@ def test_approvals_not_approver_and_gh_failure_are_not_hidden_as_empty(tmp_path,
             c.close()
 
 
+def test_my_prs_lists_only_my_open_prs_with_check_results_and_never_hides_failure(tmp_path, monkeypatch):
+    """#735: 홈 "고쳐야 할 내 PR". 내 열린 PR 의 검사 결과를 읽고, 못 읽으면 빈 목록이 아니라 unknown 이다."""
+    fail = [{"status": "COMPLETED", "conclusion": "FAILURE"}]
+    prs = [{"number": 9, "title": "나중", "url": "u9", "headRefName": "b9", "statusCheckRollup": []},
+           {"number": 4, "title": "실패", "url": "u4", "headRefName": "b4", "statusCheckRollup": fail},
+           {"number": 5, "title": "진행", "url": "u5", "headRefName": "b5", "statusCheckRollup": [{"status": "IN_PROGRESS"}]}]
+    run = approvals_run(prs)
+    c = flow_console(tmp_path / "ok", monkeypatch, run=run)
+    try:
+        c.event("m1", "SessionStart")
+        q = "/api/my-prs?cwd=" + urllib.parse.quote(str(c.work))
+        status, body, _ = c.call("GET", q)
+        assert status == 200 and body["state"] == "ok"
+        assert [(i["number"], i["checks"], i["branch"]) for i in body["items"]] == [(4, "fail", "b4"), (5, "pending", "b5"), (9, "none", "b9")]
+        assert any("--author @me" in call for call in run.calls)  # 남의 PR 은 읽지 않는다
+        n = len(run.calls)
+        c.call("GET", q)
+        assert len(run.calls) == n  # 60초 안에는 gh 를 다시 부르지 않는다
+        assert c.call("GET", "/api/my-prs")[0] == 400
+    finally:
+        c.close()
+    bad = approvals_run([], gh_pr_list=(1, ""))
+    c = flow_console(tmp_path / "bad", monkeypatch, run=bad)
+    try:
+        c.event("m2", "SessionStart")
+        body = c.call("GET", "/api/my-prs?cwd=" + urllib.parse.quote(str(c.work)))[1]
+        assert body["state"] == "unknown" and body["items"] == [] and body["reason"]
+    finally:
+        c.close()
+
+
 @pytest.mark.parametrize("remote,state", [
     ((0, "origin\thttps://github.com/o/r.git (fetch)\norigin\thttps://github.com/o/r.git (push)\n"), "yes"),
     ((0, "origin\tgit@github.com:o/r.git (fetch)\n"), "yes"),

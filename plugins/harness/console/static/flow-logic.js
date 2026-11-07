@@ -307,6 +307,11 @@
     if (!pr || !pr.number) return null;
     return { number: pr.number, url: pr.url || '', title: pr.title || '', text: CHECK_TEXT[pr.checks] || CHECK_TEXT.none, checks: pr.checks || 'none' };
   }
+  // 내 PR 이 열려 있고 자동 검사가 실패했다 = 고쳐야 할 PR(홈 G-24). 검사 결과가 없거나 진행 중이면 아니다.
+  function prNeedsFix(s) {
+    var pr = s && s.flowPr;
+    return !!(pr && pr.number && String(pr.state || '').toUpperCase() === 'OPEN' && pr.checks === 'fail');
+  }
   function runningSubCount(s) { return arr(s && s.subagents).filter(function (a) { return a && a.state === 'running'; }).length; }
 
   /* ---- 세션 화면 숫자 띠 ---- */
@@ -472,7 +477,7 @@
     reloadStrip: reloadStrip, reloadResult: reloadResult,
     startChecks: startChecks, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
-    mergeApprovals: mergeApprovals, prBadge: prBadge, runningSubCount: runningSubCount,
+    mergeApprovals: mergeApprovals, prBadge: prBadge, prNeedsFix: prNeedsFix, runningSubCount: runningSubCount,
     DOC_GROUPS: DOC_GROUPS, docGroup: docGroup, docChip: docChip, mergeDocs: mergeDocs, weekDocCount: weekDocCount, weekPool: weekPool, isFormOutput: isFormOutput
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

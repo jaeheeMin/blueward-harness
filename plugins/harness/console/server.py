@@ -788,6 +788,13 @@ class App:
         got = self.cached(("approvals", os.path.normcase(cwd)), lambda: gitstate.approval_prs(self.run, cwd, file_rel, when_no_file), wait=False)
         return 200, got  # 읽는 중이면 loading: true 와 이전 값(없으면 state unknown)을 바로 준다
 
+    def a_my_prs(self, g, q, b):
+        """내가 올린 열린 PR 과 검사 결과(홈 "고쳐야 할 내 PR", #735). gh 로 읽고 60초 기억한다. state: ok / no(GitHub 저장소 아님) / unknown(읽지 못함)."""
+        if not q.get("cwd"):
+            raise HttpError(400, "cwd 가 필요합니다.")
+        cwd = self.known_root(q["cwd"][0])
+        return 200, self.cached(("my-prs", os.path.normcase(cwd)), lambda: gitstate.my_open_prs(self.run, cwd), wait=False)
+
     def a_dev_ready(self, g, q, b):
         """이 폴더의 개발 건별 Spec 유무(#668). git 으로 읽고 60초 기억하며 요청 스레드는 기다리지 않는다(읽는 중이면 loading: true).
         state: yes(읽음) / no(원장 없는 저장소 등 해당 없음) / unknown(읽지 못함)."""
@@ -1879,6 +1886,7 @@ ROUTES = [
     ("POST", re.compile(r"/api/folders/worktree"), App.a_worktree),
     ("GET", re.compile(r"/api/flows"), App.a_flows),
     ("GET", re.compile(r"/api/approvals"), App.a_approvals),
+    ("GET", re.compile(r"/api/my-prs"), App.a_my_prs),
     ("GET", re.compile(r"/api/dev-ready"), App.a_dev_ready),
     ("GET", re.compile(r"/api/srs-status"), App.a_srs_status),
     ("GET", re.compile(r"/api/start-checks"), App.a_start_checks),

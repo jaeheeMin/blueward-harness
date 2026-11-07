@@ -484,6 +484,56 @@ const cases = {
     const root6 = h('div'); loadUI(k6).homeView(root6); await tick(); await tick();
     assert.strictEqual(find(root6, e => e.attrs['data-calls-toggle']).length, 0);
   },
+  async dom_home_trouble_and_fix_pr() {
+    // 시안 G-24: 홈에 "팀 기록 · 아직 안 풀린 문제 n건 [보기]" 칸과 "고쳐야 할 내 PR n건" 줄이 더해진다
+    const mine = { state: 'ok', items: [
+      { number: 812, title: '판매오더 조회 앱', url: 'https://github.com/o/r/pull/812', branch: 'feat/4-so', checks: 'fail' },
+      { number: 3, title: 'CTS', url: 'https://github.com/o/r/pull/3', branch: 'docs/6', checks: 'pending' },
+      { number: 820, title: '세션 없는 PR', url: 'https://github.com/o/r/pull/820', branch: 'docs/20', checks: 'fail' }] };
+    const sessions = [{ id: 'a', title: '판매오더', cwd: '/w/proj-a', branch: 'feat/4-so', group: 'idle', canSend: true,
+      flowId: 'srs', flowSteps: steps('done', 'active', 'pending'), flowPr: { number: 812, state: 'OPEN', checks: 'fail' } }];
+    const sent = [];
+    const routes = { 'GET /api/approvals': { state: 'no' }, 'GET /api/my-prs': mine,
+      'GET /api/trouble': { loading: false, projects: [{ ok: true, name: 'r' }], stats: { open: 3 } },
+      'POST /api/sessions/a/messages': body => { sent.push(body.text); return { sent: true }; } };
+    const { kit } = makeKit(routes, sessions);
+    const root = h('div'); loadUI(kit).homeView(root); await tick(); await tick(); await tick();
+    const tb = find(root, e => e.attrs['data-trouble-tile'])[0];
+    assert.ok(tb.textContent.startsWith('팀 기록') && tb.textContent.includes('아직 안 풀린 문제 3건') && tb.textContent.endsWith('보기'));
+    assert.strictEqual(find(tb, e => e.tag === 'a')[0].attrs.href, '/troubles');
+    // 검사가 실패한 내 PR 만(진행 중인 #3 은 아니다). 세션 없는 PR 도 읽는다. 머리의 건수는 첫 줄에만
+    const rows = find(root, e => e.attrs['data-fix-pr']);
+    assert.deepStrictEqual(rows.map(e => e.attrs['data-fix-pr']), ['812', '820']);
+    assert.ok(rows[0].textContent.includes('고쳐야 할 내 PR 2건') && rows[0].textContent.includes('#812 판매오더 조회 앱 · 검사 실패') && rows[0].textContent.includes('AI 에게 고치라고 하기'));
+    // 세션이 있고 보낼 수 있으면 그 세션에 말을 보낸다
+    find(rows[0], e => e.tag === 'button')[0].click(); await tick(); await tick();
+    assert.strictEqual(sent.length, 1); assert.ok(sent[0].includes('#812') && sent[0].includes('자동 검사가 실패'));
+    // 세션 표 칩은 "고쳐야 함"
+    assert.strictEqual(find(find(root, e => e.attrs['data-session'] === 'a')[0], e => (e.attrs['class'] || '') === 'tag')[0].textContent, '고쳐야 함');
+    // 기록을 못 읽으면 0건이 아니라 확인 못 함, 내 PR 을 못 읽으면 줄이 아니라 확인 못 함 줄
+    const bad = Object.assign({}, routes, { 'GET /api/trouble': { loading: false, projects: [{ ok: false, name: 'r', reason: 'gh 로그인 안 됨' }], stats: { open: 0 } },
+      'GET /api/my-prs': { state: 'unknown', reason: 'gh 로 내 PR 목록을 읽지 못했습니다' } });
+    const { kit: k2 } = makeKit(bad, sessions);
+    const root2 = h('div'); loadUI(k2).homeView(root2); await tick(); await tick(); await tick();
+    const tb2 = find(root2, e => e.attrs['data-trouble-tile'])[0];
+    assert.ok(tb2.textContent.includes('확인 못 함 · gh 로그인 안 됨') && !tb2.textContent.includes('0건') && tb2.attrs['class'].includes('unk'));
+    const rows2 = find(root2, e => e.attrs['data-fix-pr']);
+    assert.deepStrictEqual(rows2.map(e => e.attrs['data-fix-pr']), ['unknown']);
+    assert.ok(rows2[0].textContent.includes('? 확인 못 함 · ') && rows2[0].textContent.includes('내 PR 목록을 읽지 못했습니다') && !find(rows2[0], e => e.tag === 'button').length);
+    // 실패한 PR 이 없으면 줄이 없다. 열린 문제가 0건이면 "0건"
+    const none = Object.assign({}, routes, { 'GET /api/my-prs': { state: 'ok', items: [mine.items[1]] }, 'GET /api/trouble': { projects: [{ ok: true, name: 'r' }], stats: { open: 0 } } });
+    const { kit: k3 } = makeKit(none, sessions);
+    const root3 = h('div'); loadUI(k3).homeView(root3); await tick(); await tick(); await tick();
+    assert.strictEqual(find(root3, e => e.attrs['data-fix-pr']).length, 0);
+    assert.ok(find(root3, e => e.attrs['data-trouble-tile'])[0].textContent.includes('아직 안 풀린 문제 0건'));
+    // 그 PR 의 세션이 없거나 보낼 수 없으면 새 작업 입력칸에 문장을 넣어 간다
+    let started = '';
+    const { kit: k4 } = makeKit(routes, [Object.assign({}, sessions[0], { canSend: false })]);
+    k4.startNew = t => { started = t; };
+    const root4 = h('div'); loadUI(k4).homeView(root4); await tick(); await tick(); await tick();
+    find(find(root4, e => e.attrs['data-fix-pr'] === '820')[0], e => e.tag === 'button')[0].click();
+    assert.ok(started.includes('#820') && started.includes('자동 검사가 실패'));
+  },
   dev_ready_hints_and_block() {
     // 읽지 못함·해당 없음·읽는 중은 null: 종류 버튼에 아무 표시도 없고 개발을 막지도 않는다
     for (const d of [null, { state: 'unknown' }, { state: 'no' }, { state: 'yes', loading: true }]) {
