@@ -694,8 +694,9 @@
         if (st.note) listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: st.note }));
         if (st.truncated) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '문서가 너무 많아 목록이 잘렸어요. 더 있을 수 있어요.' }));
         if (!st.files.length) { listBox.appendChild(h('p', { class: 'note-muted', text: st.unknown != null ? '확인된 문서가 없어요.' : '아직 만든 문서가 없어요.' })); return; }
-        // 시안 G-08·G-09: 오른쪽은 문서 미리보기 한 장. 다른 문서 목록은 눌렀을 때만 펼친다(고를 수 있게 남겨 둔다).
-        if (st.selected && !st.showList) {
+        // 시안 G-08(일하는 중): 오른쪽은 문서 미리보기 한 장 — 다른 문서 목록은 눌렀을 때만 펼친다(고를 수 있게 남겨 둔다).
+        // G-09(일을 마치고 내 차례): 미리보기 아래에 문서 줄 목록을 보인다.
+        if (st.selected && !st.showList && last && last.status === 'running') {
           var others = st.files.length - 1;
           if (others > 0) listBox.appendChild(h('button', { type: 'button', class: 'disclose', 'data-docs-more': '1', 'aria-expanded': 'false',
             onClick: function () { st.showList = true; drawList(); } }, '다른 문서 ' + others + '개 보기'));
@@ -1036,7 +1037,7 @@
         var c = L.counts(list), page = h('div', { class: 'page home' });
         var proj = folderName(list[0]);
         page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: today() + ' · ' + proj }), h('h1', { text: '오늘 내 일' })));  // "세션 n개 · …" 줄은 시안에 없다(타일이 같은 숫자를 보인다)
-        page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), weekTile, prTile));
+        page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), prTile, weekTile));  // 시안 G-11 순서
 
         var todo = list.filter(function (s) { return L.groupOf(s) === 'todo'; });
         // 내 차례는 가장 오래 기다린 한 건만 카드로 두고, 나머지는 "외 n건" 을 눌러 펼친다(펼침 상태는 이 화면에서만 기억).

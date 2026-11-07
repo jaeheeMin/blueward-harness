@@ -1123,7 +1123,7 @@ def test_docs_screen_groups_files_and_has_menu(tmp_path):
 def test_settings_screen_matches_design(tmp_path):
     got = _smoke(tmp_path, "settings", [_session("s1")])
     text, dump = got["text"], got["dump"]
-    for need in ("보기와 AI 설정", "글자 크기", "작게", "보통", "크게", "AI가 묻는 범위", "연결 상태", "GitHub", "하네스 판", "프로젝트", "고급", "AI 모델", "생각 깊이"):
+    for need in ("보기와 알림", "글자 크기", "작게", "보통", "크게", "AI가 묻는 범위", "연결 상태", "GitHub", "하네스 판", "프로젝트", "고급", "AI 모델", "생각 깊이"):
         assert need in text, need
     assert dump.count("<button.scale>") == 3 and dump.count("<button.radio>") >= 1  # 시안 .seg / .radio 모양, 기본 위젯 없음
     assert "<select" not in dump and "<input" not in dump

@@ -1069,7 +1069,11 @@
     // 순서 알약: ✓ 끝난 단계 / 지금 단계 / 남은 단계. 끝났으면 다음 갈래 이름을 마지막 알약으로 보인다.
     // 시안: 순서 알약과 층 그림은 "올릴 차례"(G-09, turnSkill deliver)와 "갈래가 끝남"(G-12)에서만 보인다.
     // 질문(G-07)·일하는 중(G-08)·막힘(G-16)·확인(G-17)·기억(G-18) 화면에는 없다.
-    function stagesShown(s) { return !!(s.flowFinished || (s.turnSkill === 'deliver' && !(s.pendingRequestIds || []).length)); }
+    function stagesShown(s) {
+      if (s.flowFinished) return true;
+      // G-09 는 AI 가 일을 끝내고(일하는 중 아님) 질문·확인 없이 "올릴 차례" 일 때
+      return s.turnSkill === 'deliver' && s.status !== 'running' && !(s.pendingRequestIds || []).length;
+    }
     function paintStages(s) {
       var bar = s.flowId && (s.flowSteps || []).length && stagesShown(s) ? ui.stepBar(s, true) : null;
       if (bar && s.flowFinished) {
@@ -2369,7 +2373,7 @@
       clear(root);
       var BH = window.BH, scale = BH.getScale();
       var page = h('div', { class: 'page' });
-      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '설정' }), h('h1', { text: '보기와 AI 설정' })));
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '설정' }), h('h1', { text: '보기와 알림' })));
       var sec = h('section', { class: 'light setbox' });
 
       var seg = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': '글자 크기' }, BH.SCALES.map(function (z) {
