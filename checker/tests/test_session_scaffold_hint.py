@@ -27,6 +27,8 @@ def session_plugin_root(tmp_path_factory) -> Path:
     root = tmp_path_factory.mktemp("hint-root") / "harness"
     (root / "hooks").mkdir(parents=True)
     shutil.copy(PLUGIN_ROOT / "hooks" / "session-start-sync.sh", root / "hooks" / "session-start-sync.sh")
+    (root / "console").mkdir()
+    shutil.copy(PLUGIN_ROOT / "console" / "standards_scan.py", root / "console" / "standards_scan.py")
     return root
 
 
@@ -114,3 +116,45 @@ def test_git_저장소가_아니면_안내하지_않는다(session_plugin_root, 
     out = _run(session_plugin_root, plain)
     assert HINT not in out
     assert "git 저장소가 아닙니다" in out
+
+
+FORMS_HINT = "templates/ 에 고객 양식 파일"
+
+
+def test_준비됐는데_고객_양식_원본이_없으면_양식을_안내한다(session_plugin_root, tmp_path):
+    repo = _git_repo(tmp_path)
+    _standards(repo)
+    (repo / "templates" / "harness").mkdir()
+    (repo / "templates" / "harness" / "base.xlsx").write_text("x", encoding="utf-8")  # 기본 틀은 고객 양식이 아니다
+    (repo / "templates" / "~$임시.xlsx").write_text("x", encoding="utf-8")
+    out = _run(session_plugin_root, repo)
+    assert FORMS_HINT in out
+    assert HINT not in out
+    assert "현재 브랜치:" in out
+
+
+def test_고객_양식_원본이_있으면_양식을_안내하지_않는다(session_plugin_root, tmp_path):
+    repo = _git_repo(tmp_path)
+    _standards(repo)
+    (repo / "templates" / "개발사양서.xlsx").write_text("x", encoding="utf-8")
+    assert FORMS_HINT not in _run(session_plugin_root, repo)
+
+
+def test_양식_안내는_환경_변수와_플러그인_저장소에서_끈다(session_plugin_root, tmp_path):
+    repo = _git_repo(tmp_path)
+    _standards(repo)
+    assert FORMS_HINT not in _run(session_plugin_root, repo, HARNESS_NO_SCAFFOLD_HINT="1")
+    (repo / ".claude-plugin").mkdir()
+    (repo / ".claude-plugin" / "marketplace.json").write_text("{}", encoding="utf-8")
+    assert FORMS_HINT not in _run(session_plugin_root, repo)
+
+
+def test_양식_판정_스크립트가_없으면_양식을_안내하지_않는다(tmp_path):
+    root = tmp_path / "bare" / "harness"
+    (root / "hooks").mkdir(parents=True)
+    shutil.copy(PLUGIN_ROOT / "hooks" / "session-start-sync.sh", root / "hooks" / "session-start-sync.sh")
+    repo = _git_repo(tmp_path)
+    _standards(repo)
+    out = _run(root, repo)  # 판정을 못 하면 "없음" 으로 말하지 않는다
+    assert FORMS_HINT not in out
+    assert "현재 브랜치:" in out
