@@ -73,6 +73,7 @@ EXPECTED_FILES = {
     ".github/workflows/main-checks.yml",
     ".github/ssot-approvers",
     ".github/risk-gate.yaml",
+    ".github/ISSUE_TEMPLATE/trouble.yml",
     ".github/workflows/ai-review.yml",
     ".github/workflows/pr-tamper-alert.yml",
     ".claude/settings.json",

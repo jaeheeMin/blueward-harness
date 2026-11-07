@@ -28,6 +28,7 @@ import flows
 import gitstate
 import handoff
 import platform_compat
+import trouble
 from hooks_api import ASK_DEFAULT, ASK_LEVELS, Hooks, permission_reply, question_reply
 from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
                      PERMISSION_VALUES, Manager)
@@ -156,7 +157,7 @@ def judge_version(loaded: str, latest: str | None) -> dict:
     return {"state": "ok", "detail": loaded}
 
 
-SPA_PATHS = re.compile(r"^/(s/[^/]+|r/[^/]+|new|settings|docs)?$")
+SPA_PATHS = re.compile(r"^/(s/[^/]+|r/[^/]+|new|settings|docs|troubles(/new|/[^/]+/[^/]+/\d+)?)?$")
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
@@ -1830,8 +1831,28 @@ class App:
         return 200, {"root": root, "dir": rel.strip("/\\"), "entries": entries}
 
 
+def tb(fn):
+    """문제·해결 기록 API(trouble.py)의 오류를 HttpError 로 바꾼다."""
+    def call(app, g, q, b):
+        try:
+            return fn(app, g, q, b)
+        except trouble.HttpError as e:
+            raise HttpError(e.status, e.message)
+    return call
+
+
 S = r"([^/]+)"
 ROUTES = [
+    ("GET", re.compile(r"/api/trouble"), tb(trouble.a_list)),
+    ("GET", re.compile(r"/api/trouble/item"), tb(trouble.a_item)),
+    ("GET", re.compile(r"/api/trouble/pr"), tb(trouble.a_pr)),
+    ("GET", re.compile(r"/api/trouble/similar"), tb(trouble.a_similar)),
+    ("GET", re.compile(r"/api/trouble/draft"), tb(trouble.a_draft_get)),
+    ("POST", re.compile(r"/api/trouble/check"), tb(trouble.a_check)),
+    ("POST", re.compile(r"/api/trouble"), tb(trouble.a_create)),
+    ("POST", re.compile(r"/api/trouble/comment"), tb(trouble.a_comment)),
+    ("POST", re.compile(r"/api/trouble/resolve"), tb(trouble.a_resolve)),
+    ("POST", re.compile(r"/api/trouble/draft"), tb(trouble.a_draft_put)),
     ("GET", re.compile(r"/api/sessions"), App.a_sessions),
     ("GET", re.compile(rf"/api/sessions/{S}"), App.a_session),
     ("POST", re.compile(rf"/api/sessions/{S}/messages"), App.a_message),
