@@ -226,9 +226,22 @@ def test_올바른_launchpad_노출_표는_통과한다(tmp_path, capsys):
 
 
 def test_밑줄이_든_시맨틱_오브젝트는_통과한다(tmp_path, capsys):
+    # SAP 문서는 영문자·숫자만이지만 실제 테넌트 앱이 밑줄을 써서 허용해 둔다(#751)
     row = LP_ROW.replace("AnalyticQuery", "Z_Stock_Ledger1")
     code, out = _run_auto(capsys, _put(tmp_path, _spec_with_lp(LP_HEAD + row)))
     assert code == EXIT_PASS, out
+
+
+def test_영문자_숫자_시맨틱_오브젝트와_소문자_시작_액션은_통과한다(tmp_path, capsys):
+    row = LP_ROW.replace("AnalyticQuery", "SalesOrder1").replace("preview", "display")
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with_lp(LP_HEAD + row)))
+    assert code == EXIT_PASS, out
+
+
+def test_밑줄로_시작하는_액션은_현행대로_위반이다(tmp_path, capsys):
+    row = LP_ROW.replace("preview", "_x")
+    code, out = _run_auto(capsys, _put(tmp_path, _spec_with_lp(LP_HEAD + row)))
+    assert code == EXIT_VIOLATION
 
 
 def test_launchpad_노출_절이_없는_spec은_통과한다(tmp_path, capsys):

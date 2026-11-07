@@ -366,9 +366,11 @@ View 시나리오 코드.
 | 대상 | 규칙 | 표기법 | 예시 |
 |---|---|---|---|
 | SemanticObject name | Module name 의 text 와 같게 명명. 일관성을 지키고 약어 사용을 피한다 | Upper Camel Case | `SalesOrderList`, `MaterialList` |
-| Action name | 어떤 View 를 가리키는지 쉽게 짐작할 수 있는 단어를 조합. 일관성을 지키고 약어 사용을 피한다 | Upper Camel Case | `List`, `Display`, `Detail` |
+| Action name | 어떤 View 를 가리키는지 쉽게 짐작할 수 있는 단어를 조합. 일관성을 지키고 약어 사용을 피한다. 소문자로 시작하고 공백 없음 | 소문자로 시작하는 camelCase | `list`, `display`, `detail` |
 
-- SemanticObject 와 Action 을 이은 예시: `OrderManagement-List`, `Finance-Detail`.
+- SemanticObject 는 새로 지을 때 영문자·숫자만 쓰고 첫 글자는 영문자로 한다(SAP 문서 규칙). 배포로 자동 생성된 기존 디스크립터에는 밑줄 든 값(`ZPP_AUTO1_PRODUCT_STATUS`)도 있어 Spec 검사는 밑줄을 거절하지 않는다.
+- SemanticObject 와 Action 을 이은 예시: `OrderManagement-list`, `Finance-detail`.
+- 근거: SAP Help "Editing Launchpad App Descriptor Items"(https://help.sap.com/docs/abap-cloud/abap-development-tools-user-guide/editing-launchpad-app-descriptor-items) — Action 은 "choose a verb or a short phrase starting with lower case and without blanks", Semantic Object 는 "The following characters are allowed: uppercase letters [A-Z], lowercase letters [a-z], numbers [0-9]. The first character must be an uppercase or lowercase letter."
 
 ## 6. NodeJS (CAP CDS)
 
