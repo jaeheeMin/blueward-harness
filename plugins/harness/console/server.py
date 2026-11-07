@@ -1164,6 +1164,22 @@ class App:
         # SVG 안의 스크립트가 이 출처에서 돌지 못하게 한다
         return 200, Raw(body, docfiles.IMAGE_MIME[ext], {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox"})
 
+    def a_file_download(self, g, q, b):
+        """고객 양식 결과를 내려받는다(시안 G-15 '내려받기'). 열기와 같은 확장자만, 작업 폴더 안 파일만."""
+        _, real, rel = self.file_target(g[0], q.get("path", [""])[0])
+        if not {docfiles.ext_of(real), docfiles.ext_of(rel)} <= docfiles.OPEN_EXTS:
+            raise HttpError(403, "이 형식은 내려받을 수 없습니다.")
+        try:
+            if os.path.getsize(real) > docfiles.MAX_RAW_BYTES:
+                raise HttpError(413, "파일이 너무 큽니다.")
+            with open(real, "rb") as fh:
+                body = fh.read()
+        except OSError as e:
+            raise HttpError(500, f"파일을 읽지 못했습니다: {type(e).__name__}")
+        name = os.path.basename(rel)
+        return 200, Raw(body, "application/octet-stream",
+                        {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name, safe='')}"})  # nosniff 는 send 가 모든 응답에 붙인다
+
     def a_file_open(self, g, q, b):
         mode = b.get("mode")
         if mode not in ("open", "reveal"):
@@ -1854,6 +1870,7 @@ ROUTES = [
     ("GET", re.compile(rf"/api/sessions/{S}/files"), App.a_session_files),
     ("GET", re.compile(rf"/api/sessions/{S}/files/preview"), App.a_file_preview),
     ("GET", re.compile(rf"/api/sessions/{S}/files/raw"), App.a_file_raw),
+    ("GET", re.compile(rf"/api/sessions/{S}/files/download"), App.a_file_download),
     ("POST", re.compile(rf"/api/sessions/{S}/files/open"), App.a_file_open),
     ("POST", re.compile(r"/api/folders/worktree"), App.a_worktree),
     ("GET", re.compile(r"/api/flows"), App.a_flows),

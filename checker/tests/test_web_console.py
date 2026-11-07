@@ -4894,6 +4894,22 @@ def test_file_raw_serves_images_only_with_sandbox_headers(tmp_path, monkeypatch,
     assert c.call("GET", "/api/sessions/s1/files/raw", cookie=False)[0] == 401
 
 
+def test_file_download_sends_attachment_for_open_extensions_only(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request)
+    make_xlsx(c.work / "BW_Backlog List_v0.1.xlsx")
+    (c.work / "x.exe").write_bytes(b"MZ")
+    (c.work / "x.svg").write_text("<svg/>", encoding="utf-8")
+    status, data, resp = c.call("GET", f"/api/sessions/s1/files/download?path={quoted('BW_Backlog List_v0.1.xlsx')}", binary=True)
+    assert status == 200 and data[:2] == b"PK"
+    assert resp.getheader("Content-Disposition") == "attachment; filename*=UTF-8''" + quote_path("BW_Backlog List_v0.1.xlsx")
+    assert resp.getheader("Content-Type") == "application/octet-stream" and resp.getheader("X-Content-Type-Options") == "nosniff"
+    for name in ("x.exe", "x.svg"):  # 열기와 같은 허용 확장자만
+        assert c.call("GET", f"/api/sessions/s1/files/download?path={quoted(name)}")[0] == 403, name
+    assert c.call("GET", f"/api/sessions/s1/files/download?path={quoted('없음.xlsx')}")[0] == 404
+    assert c.call("GET", f"/api/sessions/s1/files/download?path={quoted('../밖.xlsx')}")[0] == 403
+    assert c.call("GET", "/api/sessions/s1/files/download?path=a.xlsx", cookie=False)[0] == 401
+
+
 def test_file_routes_refuse_paths_outside_cwd_and_missing_files(tmp_path, monkeypatch, request):
     c = files_console(tmp_path, monkeypatch, request)
     (tmp_path / "밖.md").write_text("비밀", encoding="utf-8")

@@ -882,9 +882,37 @@ details.fold > [data-r]:empty { display: none; }
 .dhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .dhead h2 { font-size: 16px; font-weight: 600; }
 .dhead .sp { flex: 1; }
-.dwhere { margin: 0; font-size: 12px; color: var(--lmuted); overflow-wrap: anywhere; }
-.dresult { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; }
-.dresult .pi { width: 44px; height: 44px; border-radius: 12px; }
+.dresult { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 14px; }
+.dresult .pi { width: 44px; height: 44px; border-radius: 12px; font-size: 12px; }
+.dresult .dn > * { display: block; line-height: 21px; }
+.dresult .dn small { font-size: 12.5px; }
+.dresult .pill.line { font-size: 13px; }
+.dresult a.pill.dark:hover { color: var(--accent); }
+/* 시안 G-14·G-15: 제목 아래 16px, 제목 줄은 21px 줄 상자, 목록 줄은 이름 한 줄(고른 줄만 진하게) */
+.docs-page > * + * { margin-top: 16px; }
+.docs-page .ptitle .eb, .docs-page .ptitle .line { line-height: 21px; }
+.ptitle-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ptitle-row .ptitle { flex: 1 1 320px; min-width: 0; }
+.dres { gap: 14px; }
+.dres .banner b { font-weight: 600; }
+.dres .banner .bt { flex: 1 1 200px; }
+.dlist .eb:not(:first-child) { margin-top: 8px; }
+.drow .dn { color: var(--lmuted); }
+.drow .dl b { font-weight: 400; }
+.drow.on .dn { color: var(--lightink); }
+.drow.on .dl b { font-weight: 600; }
+.dhead h2 { font-weight: 500; }
+.dhead .pill.dark.sm { padding: 7px 16px; }
+.docs-page .ptool { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #e3e8e6; font-size: 12.5px; }
+.docs-page .ptool .sp { flex: 1; }
+.docs-page .ptool .pt-m { color: #6f807b; }
+.pill.line.xs { padding: 4px 12px; font-size: 12px; }
+.dsheet .preview { margin: 0; }
+.dsheet .sheet-wrap { overflow: auto; max-width: 100%; }
+.dsheet table.sheet { width: 100%; font-size: 12px; background: #fff; color: #14201e; }
+.dsheet table.sheet td, .dsheet table.sheet th { padding: 5px 8px; border: 1px solid #cfd8d5; text-align: left; line-height: 1.5; }
+.dsheet table.sheet th { background: #e8f3ee; font-weight: 500; }
+@media (max-width: 760px) { .dresult { flex-wrap: wrap; } }
 .docs-page .docs-pane { max-height: 60vh; }
 .docs-page .empty-line { border: 1.5px dashed var(--lline); border-radius: var(--rc); padding: 14px; text-align: center; }
 
@@ -960,3 +988,12 @@ details.fold > [data-r]:empty { display: none; }
 .n3 b { font-size: 18px; font-weight: 500; }
 /* 머리 글과 문장이 한 줄에 붙지 않게(홈 승인 칸 등) */
 .blk { display: block; }
+
+/* 시안 G-14 종이: 소제목 14px 진하게, 표는 아래 줄만 */
+.docs-page .docs-pane .report-body { padding: 0; }
+.docs-page .docs-pane .md { display: flex; flex-direction: column; gap: 6px; font-size: inherit; line-height: inherit; }
+.docs-page .docs-pane .md > * { margin: 0; }
+.docs-page .docs-pane .md :is(h2, h3, h4) { margin: 8px 0 0; font-size: 14px; font-weight: 600; line-height: 1.75; }
+.docs-page .docs-pane .md table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.docs-page .docs-pane .md :is(th, td) { padding: 6px 8px; border: 0; border-bottom: 1px solid #e3e8e6; text-align: left; line-height: 1.75; }
+.docs-page .docs-pane .md th { background: transparent; color: #6f807b; font-weight: 400; }
