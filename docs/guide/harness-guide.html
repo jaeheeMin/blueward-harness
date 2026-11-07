@@ -1493,7 +1493,7 @@ fix/31-broken-link</pre>
         <div class="node ok"><b>④ 게시</b><span>V4 바인딩 게시</span></div>
       </div>
     </div>
-    <p class="small" style="margin-top:10px">100 서버(<code>abap-adt-z5u</code>)는 그대로라 이 기능이 없어. 아직 안 되는 것: V4 게시 해제, 메시지 클래스·패키지 생성, UI5(SAPUI5) 앱 배포·권한(IAM(Identity and Access Management))·카탈로그 — 이건 지금도 사람이 SAP 화면에서 해.</p>
+    <p class="small" style="margin-top:10px">100 서버(<code>abap-adt-z5u</code>)는 그대로라 이 기능이 없어. Launchpad 에 띄우는 객체도 080 에서 Claude 가 MCP 도구로 만들 수 있어: UI5(SAPUI5) 앱 배포(<code>deployUi5App</code>), IAM(Identity and Access Management) App·Business Catalog 생성(<code>createObject</code>)과 카탈로그 게시(<code>publishBusinessCatalog</code>). 훅은 이 도구들의 이름에 한글이 있는지(CR-001)와, 쓰기 금지로 정한 테넌트인지(<code>env/adt-tiers.yaml</code>)를 검사해. 배포하는 UI5 소스 내용은 검사하지 않아. 아직 안 되는 것: V4 게시 해제, 메시지 클래스·패키지 생성. 그리고 Business Role·Launchpad Space·Page 만들기와 사용자 배정은 지금도 관리자가 SAP 화면(customizing 테넌트의 Maintain Business Roles)에서 해 — 운영으로 옮기는 길은 Role 매핑 탭을 봐.</p>
     <p class="small" style="margin-top:6px">앱 디스크립터(UIAD, Launchpad 타일 설정 JSON(JavaScript Object Notation))도 080 에서 Claude 가 <code>setObjectSource</code> 로 쓸 수 있어. ABAP 코드가 아니라서 CR(공통 개발 규칙) 코드 검사는 없고(080 에 쓰는 것만 허용), 쓴 뒤에는 활성화했는지 확인하는 대상이야.</p>
   </section>
 
