@@ -3,6 +3,22 @@ set -euo pipefail
 
 input="$(cat)"
 
+# 아래에서 cd 하기 전에 이 스크립트가 있는 폴더를 잡아 둔다(상대 경로로 불렸을 수 있다).
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 세션을 막은 사유를 웹 콘솔에 알린다(#765, pre-bash-git-guard.sh 의 report_block 과 같다). 부가 기능이라 콘솔이
+# 없거나 실패해도 이 훅의 종료코드·stdout·stderr 는 그대로다 — 출력은 모두 버리고 실패는 무시한다. 판정 JSON 을 낸 뒤에 부른다.
+report_block() {
+  case "$input" in *'"session_id"'*) ;; *) return 0 ;; esac  # 어느 세션인지 모르면 보낼 곳이 없다
+  command -v uv >/dev/null 2>&1 || return 0
+  if timeout --version >/dev/null 2>&1; then  # Windows 기본 timeout.exe 가 잡히면 --version 이 실패한다 — 그땐 제한 없이 보낸다
+    printf '%s' "$input" | HARNESS_BLOCK_REASON="$1" timeout 5 uv run --no-project python "$hook_dir/console_block.py" stop-deliver >/dev/null 2>&1 || true
+  else
+    printf '%s' "$input" | HARNESS_BLOCK_REASON="$1" uv run --no-project python "$hook_dir/console_block.py" stop-deliver >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
 # 세션이 다른 git worktree 로 옮겨가도(#71) 그 worktree 기준으로 판단하기
 # 위해, 훅에 오는 stdin JSON 의 cwd 를 최우선으로 쓴다. CLAUDE_PROJECT_DIR 은
 # 세션을 "처음 연" 폴더라 세션 도중 다른 worktree 로 옮기면 더는 맞지 않는다.
@@ -499,6 +515,7 @@ reason="커밋되지 않은 변경이 ${branch} 브랜치에 남아 있습니다
 if [ "$has_jq" -eq 1 ]; then
   jq -n --arg r "$reason" \
     '{decision: "block", reason: $r}'
+  report_block "$reason"
 else
   # jq 가 없다고 통과시키지 않는다. pre-bash-git-guard.sh 와 같은 태도다.
   # printf 로 직접 JSON 을 내므로, 사유 문자열에서 JSON 을 깨뜨릴 수 있는
@@ -506,6 +523,7 @@ else
   reason="jq 가 설치되어 있지 않습니다. 🚨 직접 해 주세요: PowerShell 에서 winget install --id jqlang.jq -e 로 jq 를 설치한 뒤 Claude Code 를 새 터미널에서 다시 여십시오. ${reason}"
   reason="$(printf '%s' "$reason" | tr -d '"\\')"
   printf '{"decision":"block","reason":"%s"}\n' "$reason"
+  report_block "$reason"
 fi
 
 exit 0

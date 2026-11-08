@@ -38,6 +38,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import console_block  # noqa: E402
+
 MAX_BLOCKS = 2
 STATE_DIRNAME = "harness-subagent-guard"
 PENDING = "pending-warnings"
@@ -470,6 +473,7 @@ def do_stop(payload: dict) -> None:
             "그렇게 판단한 근거를 적어라(근거 없는 \"내가 한 게 아님\" 은 받아들여지지 않는다)."
         )
     emit({"decision": "block", "reason": reason})
+    console_block.report(payload, "subagent_edit_guard", reason)  # 웹 콘솔에 알린다(#765). 실패해도 조용히 돌아온다
 
 
 def _take(state: Path, name: str) -> str:

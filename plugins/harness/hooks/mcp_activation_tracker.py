@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import adt_activation as aa  # noqa: E402
 import adt_tiers  # noqa: E402
+import console_block  # noqa: E402
 
 
 def _force_utf8_io() -> None:
@@ -30,8 +31,8 @@ def _force_utf8_io() -> None:
             reconfigure(encoding="utf-8")
 
 
-def _fail(cwd, tool: str, reason: str) -> None:
-    """표식을 남기고 경고와 함께 exit 2 로 끝낸다."""
+def _fail(cwd, tool: str, reason: str, payload=None) -> None:
+    """표식을 남기고 경고와 함께 exit 2 로 끝낸다. 웹 콘솔에는 검사 못 함으로 알린다(#765)."""
     marker = None
     try:
         marker = aa.mark_error(cwd, tool, reason) if cwd else None
@@ -46,11 +47,19 @@ def _fail(cwd, tool: str, reason: str) -> None:
         "지우십시오. 계속되면 위 사유를 붙여 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오(🚨 직접 해 주세요).",
         file=sys.stderr,
     )
+    # 이미 끝난 호출을 막은 것이 아니라 활성화 상태를 확인하지 못한 것이다 -> ? 확인 못 함 카드. 콘솔이 없거나 실패해도 종료코드는 그대로다.
+    console_block.report(
+        payload, "mcp_activation_tracker",
+        f"ABAP 오브젝트의 활성화 상태를 확인하지 못했다(활성화 기록을 남기지 못함). 도구: {tool}. 사유: {reason}. "
+        "이 상태에서는 푸시와 src/ 쓰기가 검사 불능으로 막힌다. "
+        "다음: inactiveObjects 로 서버의 비활성 오브젝트를 확인한 뒤 .git 아래 harness-adt-activation.error 표식 파일을 지우십시오.",
+    )
     sys.exit(2)
 
 
 def _run(ctx: dict) -> None:
     payload = json.loads(sys.stdin.read() or "{}")
+    ctx["payload"] = payload  # 실패를 웹 콘솔에 알릴 때 쓴다(#765)
     ctx["cwd"] = payload.get("cwd") or "."
     ctx["tool"] = payload.get("tool_name") or "?"
     split = adt_tiers.split_mcp_tool_name(payload.get("tool_name") or "")
@@ -84,7 +93,7 @@ def main() -> None:
     try:
         _run(ctx)
     except Exception as exc:  # noqa: BLE001 - 어떤 실패든 표식을 남기고 exit 2 로 알린다
-        _fail(ctx.get("cwd"), ctx.get("tool", "?"), f"{type(exc).__name__}: {exc}")
+        _fail(ctx.get("cwd"), ctx.get("tool", "?"), f"{type(exc).__name__}: {exc}", ctx.get("payload"))
     sys.exit(0)
 
 
