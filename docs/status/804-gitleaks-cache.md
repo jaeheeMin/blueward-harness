@@ -26,3 +26,4 @@ gitleaks 릴리즈 파일을 매번 github.com 에서 내려받아, 일시 고�
 - curl 이 실패하면 `.part` 조각을 지운다.
 - main-checks 는 gitleaks 검사 바로 뒤에 status 단계가 와야 해서(시험) 저장 단계를 status 단계 뒤에 뒀다.
 - 시험: `test_main_checks_workflow.py`·`test_pr_checks_workflow.py`·`test_plugin_version.py`·`test_ensure_tools.py` 110 통과, 세 run 스크립트 `bash -n` 통과.
+- 기본 주소(github.com 릴리스)가 막히면 `gh release download`(GitHub API 경로, `GH_TOKEN: github.token`)로 다시 받는다. 2026-11-08 고장 때 github.com 은 504, API 경로는 정상이었다. 로컬 확인: 기본 주소를 막은 상태로 checker.yml 단계를 돌려 API 로 받고 sha256 OK·캐시 표시 남음, 캐시 파일을 바꾸면 sha256 FAILED·파일 삭제·종료 1.
