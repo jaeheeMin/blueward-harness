@@ -203,12 +203,26 @@ jobs:
           exit 0
 
       # ── gitleaks (옛 gitleaks.yml) ────────────────────────────────────────────
+      # gitleaks 압축 파일 캐시(#804). github.com 일시 고장으로 내려받기가 실패해 검사 불능이 되는 것을 줄인다.
+      # 캐시에서 꺼낸 파일도 아래 단계에서 sha256 을 다시 확인한다(바뀐 파일이면 실패하고 통과로 두지 않는다).
+      # 권한: actions/cache 는 GITHUB_TOKEN 이 아니라 러너의 런타임 토큰으로 캐시 서비스를 부르므로
+      # caller 의 permissions 에 따로 더할 것이 없다(contents: read 로 충분. 캐시 삭제 API 만 actions: write 가 필요한데 쓰지 않는다).
+      # 키의 8.30.1 은 아래 GITLEAKS_VERSION 과 같이 고친다.
+      - name: gitleaks 받은 파일 캐시 꺼내기
+        id: gl-cache
+        if: github.event.action != 'closed'
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/gitleaks-dl
+          key: gitleaks-${{ runner.os }}-8.30.1
+
       - name: gitleaks 검사
         id: gitleaks
         if: github.event.action != 'closed'
         continue-on-error: true
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}  # 내려받기 대체 경로(gh release download, 공개 저장소 읽기만)
           GITLEAKS_VERSION: 8.30.1
           GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
           GITLEAKS_BIN: ${{ runner.temp }}/gitleaks-bin/gitleaks
@@ -225,11 +239,23 @@ jobs:
           (
             set -euo pipefail
             tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-            curl -fsSL --retry 3 -o "$RUNNER_TEMP/$tarball" \
-              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
-            echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+            # 캐시(~/.cache/gitleaks-dl)에 없을 때만 내려받는다. 일시 고장은 재시도로 넘긴다.
+            # 어느 쪽이든 sha256 이 다르면 파일을 지워(캐시에 저장되지 않게) 실패한다.
+            cache_dir="$HOME/.cache/gitleaks-dl"
+            mkdir -p "$cache_dir"
+            pkg="$cache_dir/$tarball"
+            if [ ! -f "$pkg" ]; then
+              curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o "$pkg.part" \
+                "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}" || { rm -f "$pkg.part"; echo "github.com 에서 못 받아 GitHub API 로 다시 받는다(#804)"; gh release download "v${GITLEAKS_VERSION}" -R gitleaks/gitleaks -p "$tarball" -O "$pkg.part" || { rm -f "$pkg.part"; exit 1; }; }
+              mv "$pkg.part" "$pkg"
+            fi
+            if ! echo "${GITLEAKS_SHA256}  $pkg" | sha256sum -c -; then
+              rm -f "$pkg"
+              exit 1
+            fi
+            echo "GITLEAKS_CACHE_OK=1" >> "$GITHUB_ENV"
             mkdir -p "$RUNNER_TEMP/gitleaks-bin"
-            tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP/gitleaks-bin" gitleaks
+            tar -xzf "$pkg" -C "$RUNNER_TEMP/gitleaks-bin" gitleaks
             "$RUNNER_TEMP/gitleaks-bin/gitleaks" version
           )
           if [ $? -ne 0 ]; then
@@ -256,6 +282,14 @@ jobs:
               ;;
           esac
           exit 0
+
+      # 받아서 sha256 확인까지 통과했을 때만 저장한다(#804). 실패한 실행이 빈 캐시를 저장해 키를 차지하지 않게.
+      - name: gitleaks 받은 파일 캐시 저장
+        if: env.GITLEAKS_CACHE_OK == '1' && steps.gl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/gitleaks-dl
+          key: gitleaks-${{ runner.os }}-8.30.1
 
       - name: gitleaks 리포트 올리기(값은 가려져 있다)
         if: always() && steps.gitleaks.outputs.leak == 'true'
