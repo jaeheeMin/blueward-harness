@@ -67,7 +67,8 @@ global.history = { pushState(_, __, p) { const u = new URL(p, 'http://x'); locat
 global.addEventListener = () => {};
 global.requestAnimationFrame = f => setTimeout(f, 0);
 const ES_LISTENERS = {};  // 시험이 서버 이벤트(SSE)를 흉내 내려고 모아 둔다
-global.EventSource = function () { this.addEventListener = (n, f) => { ES_LISTENERS[n] = f; }; this.close = () => {}; };
+let ES_LAST = null;
+global.EventSource = function () { ES_LAST = this; this.addEventListener = (n, f) => { ES_LISTENERS[n] = f; }; this.close = () => {}; };
 global.AbortController = AbortController;
 global.Event = function () {};
 
@@ -106,9 +107,11 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
   await tick(80);
   // 선택: argv[7] 의 동작 목록을 차례로 실행한다. [{"click": "선택자", "index": 0}] — 누른 뒤 화면이 다시 그려지기를 기다린다.
   // 그 밖의 동작: {"set": {"GET /api/...": 본문}} 서버 답 바꾸기, {"emit": ["session", {"id": "s1"}]} 서버 이벤트 보내기(뒤이어 기다림),
+  // {"es": "error"} 서버 연결 끊김, {"es": "open"} 다시 붙음.
   // {"clickNote": 0} 알림 누르기, {"visible": true} 탭 보임 바꾸기.
   for (const act of JSON.parse(process.argv[7] || '[]')) {
     if (act.set) { Object.assign(DATA, act.set); continue; }
+    if (act.es) { if (!ES_LAST) errors.push('EventSource 없음'); else { const f = ES_LAST['on' + act.es]; if (f) f(); } await tick(200); continue; }  // {"es": "error"|"open"} 연결 끊김·다시 붙음 흉내
     if (act.visible !== undefined) { document.visibilityState = act.visible ? 'visible' : 'hidden'; document.hasFocus = () => !!act.visible; continue; }
     if (act.emit) { const f = ES_LISTENERS[act.emit[0]]; if (f) f({ data: JSON.stringify(act.emit[1]) }); else errors.push('이벤트 구독 없음 ' + act.emit[0]); await tick(400); continue; }
     if (act.clickNote !== undefined) { const o = noteObjs[act.clickNote]; if (o && o.onclick) o.onclick(); else errors.push('누를 알림이 없음'); await tick(80); continue; }

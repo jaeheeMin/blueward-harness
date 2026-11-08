@@ -82,7 +82,24 @@
   /* ---------- API ---------- */
   function ApiError(status, message, data) { this.status = status; this.message = message; this.data = data; }
   var conn = { state: 'loading' };
-  function setConn(s) { if (conn.state !== s) { conn.state = s; onConn(); } }
+  function setConn(s) { if (conn.state !== s) { if (s === 'down' && !offSince) offSince = Date.now() / 1000; conn.state = s; onConn(); } }
+  /* 콘솔 연결이 끊긴(또는 숨겨진 탭이 닫은) 사이 서버가 승인·질문을 터미널로 넘기면 세션 기록에 한 줄 남긴다(hooks_api._terminal_without_browser).
+     다시 붙었을 때 그 사이 시각의 기록만 세어 알린다. 이 탭이 열리기 전에 넘어간 건 알 수 없어 세지 않는다. */
+  var offSince = 0, handoffNote = '', HANDOFF_MARK = '콘솔이 연결돼 있지 않아 터미널로 넘김';
+  function checkHandoff() {
+    var since = offSince; offSince = 0;
+    if (!since) return;
+    var n = 0;
+    sessions.forEach(function (s) {
+      (s.log || []).forEach(function (l) {
+        var t = toDate(l && l.time);
+        if (l && typeof l.text === 'string' && l.text.indexOf(HANDOFF_MARK) === 0 && t && t.getTime() / 1000 >= since - 2) n++;
+      });
+    });
+    if (!n) return;
+    handoffNote = '연결이 끊긴 사이 AI가 ' + n + '번 허락이나 질문을 터미널에서 물었어. 터미널에서 답했는지 확인해 줘. (콘솔에서 받지 못한 건 여기서 답할 수 없어)';
+    onConn();
+  }
   function errMessage(data, status) {
     if (data) {
       var m = data.error || data.message || data.detail;
@@ -248,7 +265,7 @@
     clearTimeout(retryTimer);
     if (document.hidden && !notifyActive()) { eventsPaused = true; return; }  // 숨겨진 탭은 붙지 않는다(보이면 붙는다). 알림을 켰으면 숨겨져도 붙어 있어야 알림이 온다
     try { es = new EventSource('/api/events'); } catch (e) { return scheduleRetry(); }
-    es.onopen = function () { retry = 0; setConn('ok'); loadSessions().catch(function (e) { console.warn('세션 목록을 불러오지 못했습니다', e); }); };
+    es.onopen = function () { retry = 0; setConn('ok'); loadSessions().then(checkHandoff, function (e) { console.warn('세션 목록을 불러오지 못했습니다', e); }); };
     es.addEventListener('session', function (ev) {
       var d = parse(ev.data); if (!d) return;
       d = d.session || d;
@@ -292,6 +309,7 @@
     if (document.hidden) {
       if (notifyActive()) return;  // 알림을 켠 탭은 숨겨져도 SSE 를 닫지 않는다
       eventsPaused = true;
+      if (es && !offSince) offSince = Date.now() / 1000;  // 숨긴 사이에도 서버는 연결 없음으로 본다
       if (es) { es.close(); es = null; }
       clearTimeout(retryTimer);
     } else if (eventsPaused) {
@@ -377,6 +395,10 @@
       b.hidden = false;
       b.appendChild(h('span', { text: '서버와 연결이 끊겼습니다. 다시 연결하는 중입니다. 화면의 내용은 최신이 아닐 수 있습니다.' }));
       b.appendChild(h('button', { type: 'button', class: 'btn sm', text: '지금 다시 시도', onClick: function () { retry = 0; scheduleRetry(); } }));
+    } else if (handoffNote) {
+      b.hidden = false;
+      b.appendChild(h('span', { 'data-handoff': '1', text: handoffNote }));
+      b.appendChild(h('button', { type: 'button', class: 'btn sm', text: '확인했어', onClick: function () { handoffNote = ''; fillConn(b); } }));
     } else b.hidden = true;
   }
   function onConn() {
@@ -2458,7 +2480,7 @@
       }).then(paintConn);
     }
     function paintConn() { if (alive) draw(); }
-    var notifyErr = '';
+    var notifyErr = '', notifyAskState = '';  // notifyAskState: '' | waiting(허용창 답 기다림) | dismissed(답 없이 닫음)
     function saveNotify(key, val) {
       var body = {}; body[key] = val;
       api('PUT', '/api/settings/notify', body).then(function (d) { notifyCfg = d; notifyErr = ''; },
@@ -2476,9 +2498,11 @@
       var p = notifyPerm();
       if (p === 'granted') return saveNotify(key, true);
       if (p !== 'default') return draw();  // 막힘·미지원은 안내 문구가 이미 보인다. 켠 채로 두지 않는다
+      notifyAskState = 'waiting'; draw();  // 허용창이 떠 있는 동안은 "답 기다리는 중" 으로 보인다. 아직 켜진 게 아니다
       Promise.resolve(window.Notification.requestPermission()).then(function (r) {
+        notifyAskState = (r === 'default') ? 'dismissed' : '';  // 허용창을 답 없이 닫으면 default 로 돌아온다
         if (r === 'granted') saveNotify(key, true); else if (alive) draw();
-      });
+      }, function () { notifyAskState = ''; if (alive) draw(); });
     }
     function loadModelsOnce() {
       if (modelInfo) return;
@@ -2513,10 +2537,14 @@
       // 일마다 고르는 것이라 새 작업 "고급 설정" 의 권한 모드에서 고르고, 고른 값은 다음 새 작업에도 기억한다(bh-permission).
 
       var perm = notifyPerm(), rows = [['turn', '내 차례가 오면'], ['blocked', '막히거나 확인 못 한 일이 생기면'], ['done', 'AI가 일을 끝낼 때마다']];
+      var anyOn = !!(notifyCfg && (notifyCfg.turn || notifyCfg.blocked || notifyCfg.done));
       var permText = perm === 'unsupported' ? '이 브라우저는 알림을 지원하지 않아'
-        : perm === 'granted' ? '브라우저 알림 · 허용됨'
-        : perm === 'denied' ? '브라우저 알림 · 막힘'
+        : perm === 'granted' ? (anyOn ? '브라우저 알림 · 허용됨 · 켜져 있어' : '브라우저 알림 · 허용됨 · 스위치는 모두 꺼져 있어')
+        : perm === 'denied' ? '브라우저 알림 · 막힘 · 알림이 오지 않아'
+        : notifyAskState === 'waiting' ? '브라우저 알림 · 허용창의 답을 기다리는 중이야 (아직 안 켜졌어) · 브라우저의 허용창에서 "허용" 을 눌러 줘'
+        : notifyAskState === 'dismissed' ? '브라우저 알림 · 허용창을 답 없이 닫았어 (아직 안 켜졌어) · 스위치를 다시 켜 줘'
         : '브라우저 알림 · 아직 안 물음 (스위치를 처음 켤 때 브라우저가 물어)';
+      var staleOn = anyOn && perm !== 'granted' && perm !== 'unsupported';  // 저장된 값은 켜 둔 채인데 브라우저가 허용하지 않은 때
       sec.appendChild(set('알림', h('div', null,
         h('div', { class: 'stack', role: 'group', 'aria-label': '알림' }, rows.map(function (r) {
           var on = !!(notifyCfg && notifyCfg[r[0]]) && perm === 'granted';
@@ -2525,7 +2553,8 @@
             h('i', { class: 'sw' + (on ? ' on' : ''), 'aria-hidden': 'true' }), h('b', { text: r[1] }));
         })),
         h('p', { class: 'note-muted', 'data-notify-perm': perm, role: 'status', text: permText }),
-        perm === 'denied' ? h('p', { class: 'note-attn', role: 'alert', text: '브라우저가 알림을 막았어 · 주소창 왼쪽 자물쇠에서 알림을 허용해 줘' }) : null,
+        perm === 'denied' ? h('p', { class: 'note-attn', role: 'alert', text: '브라우저가 알림을 막았어 · 주소창 왼쪽 자물쇠에서 알림을 허용해 줘 (안 보이면 브라우저 설정의 사이트 알림에서 켤 수 있어)' }) : null,
+        staleOn ? h('p', { class: 'note-attn', role: 'alert', 'data-notify-stale': '1', text: '저장된 스위치는 켜 둔 채지만 브라우저가 허용하지 않아서 알림은 오지 않아' }) : null,
         notifyErr ? h('p', { class: 'note-attn', role: 'alert', text: notifyErr }) : null,
         h('p', { class: 'note-muted', text: '콘솔 탭이 열려 있을 때만 알려 줘. 지금 보고 있는 화면에서는 보내지 않아.' }))));
 
