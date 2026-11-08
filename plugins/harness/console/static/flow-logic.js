@@ -5,13 +5,13 @@
   var BAR_LABEL = { done: '끝', now: '지금', wait: '대기', skipped: '건너뜀' };
   // 도구 순서와 서버 데이터를 못 받았을 때의 기본값(플러그인 workflow.json 의 tools 중 늘 보이는 것과 같은 순서)
   var DEFAULT_TOOLS = [
-    { id: 'version', name: '플러그인 판 보기', kind: 'skill', skill: 'version' },
+    { id: 'version', name: '설치된 버전 보기', kind: 'skill', skill: 'version' },
     { id: 'sync', name: '최신 상태 받기', kind: 'skill', skill: 'sync' },
-    { id: 'update', name: '플러그인 갱신', kind: 'skill', skill: 'update' },
-    { id: 'handoff', name: '새 세션에 인계', kind: 'skill', skill: 'handoff' },
-    { id: 'wrapup', name: '남은 일 이슈로', kind: 'skill', skill: 'wrapup' },
+    { id: 'update', name: '하네스 갱신', kind: 'skill', skill: 'update' },
+    { id: 'handoff', name: '새 세션으로 이어 가기', kind: 'skill', skill: 'handoff' },
+    { id: 'wrapup', name: '남은 일 적어 두기', kind: 'skill', skill: 'wrapup' },
     { id: 'prs', name: '내 PR 보기', kind: 'skill', skill: 'prs' },
-    { id: 'reload', name: '플러그인 다시 불러오기', kind: 'console' },
+    { id: 'reload', name: '하네스 다시 불러오기', kind: 'console' },
     { id: 'approvals', name: '내가 승인할 PR', kind: 'skill', skill: 'approvals', requires: 'approver' }
   ];
   var NO_FLOW_ID = 'none';  // 갈래 없이 도구만 쓰는 일(서버 analysis.NO_FLOW 와 같다)
@@ -147,6 +147,25 @@
     return { done: false };
   }
 
+  /* ---- 막힘 카드 사유의 영문 이름을 쉬운 말로(#794) ----
+     화면에 보이는 글만 바꾼다. 원문은 "검사 원문" 안에 그대로 두고, AI 에게 보내는 글도 원문을 쓴다. */
+  var PLAIN_WORDS = [
+    [/mcp__[A-Za-z0-9_-]+__[A-Za-z]+/g, 'SAP 연결 도구'],
+    [/\binactiveObjects\b/g, '“아직 활성화 안 된 오브젝트 보기”'],
+    [/\b(?:activateObjects|activateByName)\b/g, '“오브젝트 활성화”'],
+    [/\bsetObjectSource\b/g, '“SAP 소스 쓰기”'],
+    [/\bcreateObject\b/g, '“오브젝트 만들기”'],
+    [/\bdeleteObject\b/g, '“오브젝트 지우기”'],
+    [/\bactivation_gate\b/g, '활성화 확인'],
+    [/\b(?:pre_write_guard|mcp_source_guard|agent_delegation_guard)\b/g, '하네스 검사']
+    // 이름 모양만 보고 바꾸지 않는다("jaeheeMin/blueward-harness" 같은 저장소 이름·고유 명사가 망가진다). 아는 이름만 바꾼다.
+  ];
+  function plainReason(text) {
+    var out = String(text == null ? '' : text);
+    PLAIN_WORDS.forEach(function (r) { out = out.replace(r[0], r[1]); });
+    return out;
+  }
+
   /* ---- 도구 줄 ---- */
   // ctx: { managed(콘솔 세션인가), hasSession(세션 화면인가), approvals({state}) }
   function visibleTools(flowsData, approvals, ctx) {
@@ -165,7 +184,7 @@
     if (!c) return null;
     if (c.state === 'no') {
       return { state: 'no', text: '프로젝트 준비 안 됨 - ' + (c.reason || 'templates/ 나 rules/ 가 없어요.') +
-        ' 고객사 프로젝트 저장소라면 관리자가 도구 줄의 "프로젝트 구조 만들기" 를 한 번 해야 해요.' };
+        ' 고객사 프로젝트라면 관리자가 처음에 한 번 기본 폴더 구조를 만들어 줘야 해요.' };
     }
     if (c.state === 'unknown') return { state: 'unknown', text: '프로젝트 준비 여부를 확인하지 못했어요' + (c.reason ? ' - ' + c.reason : '') + '.' };
     return null;
@@ -612,7 +631,7 @@
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice,
     formsNotice: formsNotice, FORMS_MISSING_SHORT: FORMS_MISSING_SHORT, FORMS_MISSING_TEXT: FORMS_MISSING_TEXT,
-    reloadStrip: reloadStrip, reloadResult: reloadResult,
+    plainReason: plainReason, reloadStrip: reloadStrip, reloadResult: reloadResult,
     startChecks: startChecks, autoChecksOpen: autoChecksOpen, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
     mergeApprovals: mergeApprovals, prBadge: prBadge, prNeedsFix: prNeedsFix, runningSubCount: runningSubCount,

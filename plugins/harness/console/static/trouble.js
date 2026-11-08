@@ -361,7 +361,7 @@
           s.appendChild(h('div', { class: 'tb-empty tb-unk' }, h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }), ' · ' + hits[0].label));
         }
         if (!real.length) return;
-        var first = real[0], names = { title: '제목', symptom: '증상', cause: '원인', solution: '해결 방법' };
+        var first = real[0], names = { title: '제목', symptom: '증상', cause: '원인', solution: '해결 방법', text: '댓글' };
         s.appendChild(h('div', { class: 'tb-bad' }, h('span', { class: 'tagx fail', text: '✕ 올리기 전에 지워 줘' }),
           h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어' }),
           h('span', { class: 'tb-s135', text: (names[first.field] || first.field) + ' ' + first.line + "번째 줄 '" + first.label + "'." + (real.length > 1 ? ' 외 ' + (real.length - 1) + '곳.' : '') + ' 지우고 올려 줘.' }),

@@ -1018,7 +1018,6 @@ details.fold > [data-r]:empty { display: none; }
 .wn h2 { font-size: 16px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
 .wn-list { display: flex; flex-direction: column; gap: 10px; }
 .wn-ver { display: flex; flex-direction: column; gap: 2px; }
-.wn-v { font-size: 11px; color: var(--muted); }
 .wn-ver ul { list-style: none; display: flex; flex-direction: column; gap: 4px; }
 .wn-ver li { font-size: 14px; color: var(--sec); overflow-wrap: anywhere; }
 .wn-note { font-size: 13px; color: var(--st-fail-ink); }

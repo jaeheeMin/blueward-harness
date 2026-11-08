@@ -1537,8 +1537,9 @@ def _wn(*versions, current="0.10.186"):
 def test_whats_new_card_text_and_ok_button_posts_seen(tmp_path):
     extra = dict(_start(), **_wn(("0.10.186", ["첫 줄이야"]), ("0.10.185", ["둘째 줄이야", "셋째 줄이야"])), **{"POST /api/whats-new/seen": {"seen": "0.10.186"}})
     got = _smoke(tmp_path, "", [_session("s1")], extra=extra)
-    for need in ("하네스가 새 판(0.10.186)으로 바뀌었어 · 이번에 바뀐 것", "0.10.186", "첫 줄이야", "0.10.185", "둘째 줄이야", "알겠어"):
+    for need in ("하네스가 새로 바뀌었어 · 이번에 바뀐 것", "첫 줄이야", "둘째 줄이야", "알겠어"):
         assert need in got["text"], need
+    assert "0.10.186" not in got["text"] and "0.10.185" not in got["text"]  # 판 번호는 글로 보이지 않는다(#794)
     assert "더 보기" not in got["text"]
     done = _smoke(tmp_path, "", [_session("s1")], extra=extra, actions=[{"click": "[data-wn-ok]"}])
     assert ["POST", "/api/whats-new/seen", "{}"] in [list(p) for p in done["posts"]]
@@ -1606,7 +1607,13 @@ def test_chat_draws_hook_block_cards_two_kinds_and_fix_button(tmp_path):
     mine = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-self]"}])
     assert "직접 보기로 했어." in mine["text"] and mine["text"].count("내가 직접 볼게") == 0
     unknown = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="새_훅")])])
-    assert "하네스 검사가 막았어 · 새_훅" in unknown["text"]  # 이름표에 없으면 원래 이름
+    assert "하네스 검사가 막았어 · 새_훅" in unknown["text"]  # 이름표에 없는 한글 이름은 원래 이름
+    english = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="activation_gate", text="비활성 오브젝트가 있습니다. inactiveObjects 로 확인하십시오.", fix="inactiveObjects 로 확인하십시오.")])])
+    assert "하네스 검사가 막았어 · 활성화 확인" in english["text"] and "inactiveObjects" not in english["text"] and "activation_gate" not in english["text"]  # 영문 이름은 카드에 안 나온다(#794)
+    opened = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="activation_gate", text="비활성 오브젝트가 있습니다. inactiveObjects 로 확인하십시오.", fix="inactiveObjects 로 확인하십시오.")])], actions=[{"click": "[data-block-raw]"}])
+    assert "inactiveObjects" in opened["text"]  # 원문은 [검사 원문] 안에만
+    repo = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="mcp_activation_tracker", text="계속되면 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오.", fix="")])])
+    assert "jaeheeMin/blueward-harness" in repo["text"]  # 아는 이름만 바꾸고 저장소 이름은 그대로(#794)
 
 
 _BLOCK = {"t": 2, "role": "block", "hook": "pre_write_guard", "kind": "blocked", "tool": "Write",
