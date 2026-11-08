@@ -39,6 +39,7 @@ El.prototype = {
   contains(o) { while (o) { if (o === this) return true; o = o.parentNode; } return false; },
   get clientWidth() { return 1200; },
   querySelectorAll(sel) {
+    if (sel.includes(',')) { const seen = new Set(); return sel.split(',').flatMap(s => this.querySelectorAll(s.trim())).filter(e => !seen.has(e) && seen.add(e)); }  // 쉼표로 이은 목록
     const chain = sel.split(/\s+/).filter(Boolean), out = [];
     const walk = (e, anc) => { e.children.forEach(c => { if (c.nodeType !== 1) return; if (matches(c, chain, anc)) out.push(c); walk(c, anc.concat(c)); }); };
     walk(this, []); return out;

@@ -330,6 +330,21 @@ def allowed_skills(s: dict) -> set[str] | None:
     return {x for x in (st["skill"] if st["kind"] == "skill" else None, st.get("helperSkill")) if x}
 
 
+def phase_of(s: dict) -> str:
+    """내 손을 떠난 두 때를 가른다(시안 G-10·12). approval: 검토 요청(PR)이 열려 있고 지금 단계가 대기라 승인자를 기다리는 중.
+    finished: 갈래가 끝남. 갈래가 없거나 그 밖이면 빈 글. 이 둘은 '내 차례' 로 세지 않는다."""
+    state = s.get("flowState")
+    if not state:
+        return ""
+    if state.get("finished"):
+        return "finished"
+    st = current(state)
+    pr = state.get("pr")
+    if st and st.get("kind") == "wait" and isinstance(pr, dict) and pr.get("number") and str(pr.get("state") or "").upper() == "OPEN":
+        return "approval"
+    return ""
+
+
 def public_fields(s: dict, data: dict | None = None) -> dict:
     """화면용 갈래 상태. `data`(현재 갈래 정의)를 주면 같은 갈래·단계 id 의 이름·설명을 현재 값으로 내보낸다
     (개편 전에 저장된 세션의 옛 이름이 남지 않게). 정의에서 못 찾으면 저장된 값 그대로다. 저장 상태는 바꾸지 않는다."""
