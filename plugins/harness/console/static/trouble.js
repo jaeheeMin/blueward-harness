@@ -11,6 +11,7 @@
     note: { tag: null, dot: 'tb-d-open' }
   };
   var DRAFT_KEY = 'bh-trouble-draft';
+  var SEEN_KEY = 'bh-trouble-prfail', SKIP_KEY = 'bh-trouble-skip';  // 세션 화면: 검사 실패로 본 PR · 기록 제안을 넘긴 것
 
   function dateText(iso) {
     var d = new Date(iso);
@@ -268,7 +269,7 @@
       }
       function boot() {
         var saved = null;
-        var pend = opts.draft ? api('GET', '/api/trouble/draft' + qs({ id: opts.draft })).then(function (d) { aiSource = (d.source && d.source.title) || ''; applySeed(d); }, function (e) { draftNote = '초안을 읽지 못했어 · ' + (e && e.message || '') + ' (빈 칸에서 시작해)'; }) : Promise.resolve();
+        var pend = opts.draft ? api('GET', '/api/trouble/draft' + qs({ id: opts.draft })).then(function (d) { aiSource = (d.source && d.source.title) || ''; applySeed(d); if (d.hidden) draftNote = '초안에서 비밀처럼 보인 ' + d.hidden + '줄을 가렸어. 필요하면 다시 적어 줘.'; },function (e) { draftNote = '초안을 읽지 못했어 · ' + (e && e.message || '') + ' (빈 칸에서 시작해)'; }) : Promise.resolve();
         pend.then(function () {
           if (!opts.draft) {
             try { saved = JSON.parse(stored(DRAFT_KEY) || 'null'); } catch (e) { saved = null; }
@@ -490,8 +491,71 @@
       return { title: function () { return '새 기록'; }, destroy: function () { state.dead = true; clearTimeout(prTimer); clearTimeout(checkTimer); clearTimeout(simTimer); } };
     }
 
-    return { listView: listView, itemView: itemView, newView: newView };
+    /* ---------- 세션 화면에서 만나는 곳(시안 G-23, #734) ---------- */
+    var sim = {}, asks = {}, failSeen = readJson(SEEN_KEY), skipped = readJson(SKIP_KEY);
+    function save(key, obj) { store(key, JSON.stringify(obj)); }
+
+    // 막힘 카드 아래 한 줄: 비슷한 기록 n건 — #790 제목(해결됨) · …  불러오는 중이거나 없으면 줄이 없고, 못 읽었으면 "확인 못 함"(없음이 아니다).
+    function similarRow(s, c, query, redraw) {
+      var key = s.id + ':' + c.t, st = sim[key];
+      if (!st) {
+        st = sim[key] = { state: 'loading' };
+        api('GET', '/api/trouble/similar' + qs({ cwd: s.cwd, q: query })).then(function (r) { sim[key] = r && r.ok ? { state: 'ok', items: r.items || [] } : { state: 'fail', reason: (r && r.reason) || '' }; },
+          function (e) { sim[key] = { state: 'fail', reason: (e && e.message) || '' }; }).then(redraw);
+      }
+      if (st.state === 'loading' || (st.state === 'ok' && !st.items.length)) return null;
+      var line = h('span', { 'data-similar-line': '1' });
+      if (st.state === 'fail') line.appendChild(h('span', { class: 'tb-unk-t', text: '? 비슷한 기록 확인 못 함' + (st.reason ? ' · ' + st.reason : '') }));
+      else {
+        line.appendChild(document.createTextNode('비슷한 기록 ' + st.items.length + '건 — '));
+        st.items.forEach(function (it, i) {
+          if (i) line.appendChild(document.createTextNode(' · '));
+          line.appendChild(link(itemHref(it.repo, it.number), { 'data-similar-item': String(it.number), text: '#' + it.number + ' ' + it.title + '(' + (it.solved ? '해결됨' : '아직 안 풀림') + ')' }));
+        });
+      }
+      return h('div', { class: 'tb-simrow', 'data-similar': st.state }, line);
+    }
+
+    // "기록해 둘까?" 카드. 막힘이 풀렸거나 검사가 실패에서 통과로 바뀌었을 때만 뜨고, [기록하기] 를 누를 때만 AI 가 초안을 쓴다.
+    function suggestCard(s, redraw) {
+      var pr = s.flowPr;
+      if (pr && pr.number && pr.checks === 'fail' && failSeen[s.id] !== pr.number) { failSeen[s.id] = pr.number; save(SEEN_KEY, failSeen); }
+      var sug = suggestFor(s, failSeen[s.id]);
+      if (!sug || (skipped[s.id] || {})[sug.key]) return null;
+      var key = s.id + ':' + sug.key, st = asks[key] || (asks[key] = { busy: false, err: '' });
+      function skip() { (skipped[s.id] = skipped[s.id] || {})[sug.key] = 1; save(SKIP_KEY, skipped); }
+      function write() {
+        st.busy = true; st.err = ''; redraw();
+        api('POST', '/api/trouble/ai-draft', { sessionId: s.id }).then(function (d) { skip(); st.busy = false; go('/troubles/new?draft=' + encodeURIComponent(d.id)); },
+          function (e) { st.busy = false; st.err = (e && e.message) || '초안을 못 만들었어'; redraw(); });
+      }
+      return h('div', { class: 'ask', 'data-trouble-ask': sug.kind },
+        h('span', { class: 'eb', text: '기록해 둘까?' }),
+        h('b', { text: '방금 푼 문제를 팀 기록으로 남길까?' }),
+        h('span', { class: 'sub', text: st.busy ? 'AI 가 이 대화를 읽고 초안을 쓰는 중이야. 조금 걸려.' : 'AI 가 대화로 초안을 써 둘게. 너는 확인만 하면 돼.' }),
+        st.err ? h('span', { class: 'sub tb-askerr', role: 'alert', text: st.err }) : null,
+        h('div', { class: 'acts' },
+          h('button', { type: 'button', class: 'pill acc', 'data-trouble-write': '1', disabled: st.busy, text: st.busy ? '초안 쓰는 중…' : '기록하기', onClick: write }),
+          st.err ? link('/troubles/new', { class: 'pill line', 'data-trouble-blank': '1', text: '빈 칸으로 쓰기' }) : null,
+          h('button', { type: 'button', class: 'pill line', 'data-trouble-skip': '1', disabled: st.busy, text: '괜찮아', onClick: function () { skip(); redraw(); } })));
+    }
+
+    return { listView: listView, itemView: itemView, newView: newView, similarRow: similarRow, suggestCard: suggestCard };
   }
 
-  window.BHTrouble = { create: create, dateText: dateText, itemHref: itemHref, counts: counts, STAGES: STAGES };
+  function readJson(key) { try { var v = JSON.parse(stored(key) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } }
+
+  // 기록을 권할 때: (1) 마지막 막힘(✕) 뒤에 AI 가 이어서 말했고 지금 쉬는 중 (2) 이 세션 PR 의 검사가 실패로 보였다가 통과로 바뀜(seenFail 은 화면이 본 실패한 PR 번호).
+  // "확인 못 함" 막힘은 풀렸는지 알 수 없어 권하지 않는다. 풀렸다고 단정하지 않고 사람이 [기록하기] 를 고른다.
+  function suggestFor(s, seenFail) {
+    if (!s || ['running', 'waiting', 'starting'].indexOf(s.status) >= 0 || (s.pendingRequestIds || []).length) return null;
+    var chat = Array.isArray(s.chat) ? s.chat : [], bi = -1, i;
+    for (i = 0; i < chat.length; i++) if (chat[i] && chat[i].role === 'block' && chat[i].kind !== 'cannot_check') bi = i;
+    if (bi >= 0) for (i = bi + 1; i < chat.length; i++) if (chat[i] && chat[i].role === 'ai') return { key: 'b' + chat[bi].t, kind: 'block' };
+    var pr = s.flowPr;
+    if (pr && pr.number && pr.checks === 'pass' && seenFail === pr.number) return { key: 'pr' + pr.number, kind: 'pr' };
+    return null;
+  }
+
+  window.BHTrouble = { create: create, dateText: dateText, itemHref: itemHref, counts: counts, STAGES: STAGES, suggestFor: suggestFor };
 })();

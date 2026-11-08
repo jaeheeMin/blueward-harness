@@ -1541,15 +1541,15 @@ def test_chat_draws_hook_block_cards_two_kinds_and_fix_button(tmp_path):
             {"t": 3, "role": "block", "hook": "stop-deliver", "kind": "cannot_check", "text": "엔진을 받지 못해 검사 불능입니다.", "fix": ""}]
     got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)])
     text, dump = got["text"], got["dump"]
-    assert "<div.q.blocked>" in dump and "<div.q.unsure>" in dump
+    assert "<div.bad.q.blocked>" in dump and "<div.bad.q.unsure>" in dump
     assert "✕ 막힘" in text and "하네스 검사가 막았어 · 파일 쓰기 검사" in text
     assert "? 확인 못 함" in text and "검사를 못 해서 멈췄어 · 마무리 확인" in text
     assert "문서가 템플릿을 따르지 않습니다." in text and "자세한 위반 목록입니다." not in text  # 첫 문장만 크게, 나머지는 접힘
-    assert "고치는 법 개요 절을 추가하십시오." in text
+    assert "고치는 법: 개요 절을 추가하십시오." in text
     # 시안 G-16 단추: 막힘 [그렇게 고쳐 줘] [내가 직접 볼게] [검사 원문] / 확인 못 함 [검사 다시 돌리기] [관리자에게 알리기]
     assert text.count("그렇게 고쳐 줘") == 1 and "내가 직접 볼게" in text and "검사 원문" in text
     assert "검사 다시 돌리기" in text and "관리자에게 알리기" in text
-    assert "<button.pill.dark.sm>" in dump  # 보내는 단추는 진한 단추
+    assert "<button.pill.dark>" in dump and "<button.pill.dark.sm>" not in dump  # 보내는 단추는 시안의 진한 단추(보통 크기)
     unsent = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, canSend=False)])
     assert "그렇게 고쳐 줘" not in unsent["text"] and "검사 다시 돌리기" not in unsent["text"] and "✕ 막힘" in unsent["text"]
     assert "내가 직접 볼게" in unsent["text"] and "관리자에게 알리기" in unsent["text"]  # 보내지 않는 단추는 남는다
@@ -1557,6 +1557,31 @@ def test_chat_draws_hook_block_cards_two_kinds_and_fix_button(tmp_path):
     assert "직접 보기로 했어." in mine["text"] and mine["text"].count("내가 직접 볼게") == 0
     unknown = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="새_훅")])])
     assert "하네스 검사가 막았어 · 새_훅" in unknown["text"]  # 이름표에 없으면 원래 이름
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_session_meets_trouble_records_g23(tmp_path):
+    """시안 G-23: 막힘 카드 아래 비슷한 기록, 막힘이 풀리면 기록해 둘까? 카드, [기록하기] 는 눌러야 AI 초안."""
+    block = {"t": 2, "role": "block", "hook": "pre-bash-git-guard", "kind": "blocked", "tool": "Bash", "text": "그냥 git push 는 쓸 수 없어.", "fix": "올리기 단계로 푸시하면 돼."}
+    chat = [{"t": 1, "role": "ai", "text": "푸시하려다 막혔어."}, block, {"t": 3, "role": "me", "text": "그렇게 고쳐 줘"}, {"t": 4, "role": "ai", "text": "다시 푸시했고 통과했어."}]
+    sim = {"ok": True, "slug": "o/p", "items": [{"number": 790, "repo": "o/p", "title": "deliver 가 git 명령 검사에 막힘", "solved": True}, {"number": 655, "repo": "o/p", "title": "맨손 git push 가 거절됨", "solved": False}]}
+    extra = {"GET /api/trouble/similar": sim, "POST /api/trouble/ai-draft": {"id": "d-abc", "hidden": 0}}
+    got = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra=extra)
+    assert "비슷한 기록 2건 — #790 deliver 가 git 명령 검사에 막힘(해결됨) · #655 맨손 git push 가 거절됨(아직 안 풀림)" in got["text"]
+    assert "기록해 둘까?" in got["text"] and "방금 푼 문제를 팀 기록으로 남길까?" in got["text"] and "기록하기" in got["text"] and "괜찮아" in got["text"]
+    assert not [p for p in got["posts"] if "ai-draft" in p[1]]  # 보기만 해서는 초안을 만들지 않는다(자동 실행 없음)
+    assert any("cwd=" in c and "similar" in c for c in got["calls"])
+    pressed = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra=extra, actions=[{"click": "[data-trouble-write]"}])
+    assert [p[1] for p in pressed["posts"] if "ai-draft" in p[1]] == ["/api/trouble/ai-draft"] and pressed["path"] == "/troubles/new"
+    # 풀리기 전(막힘이 마지막)·일하는 중에는 제안 카드가 없다
+    assert "기록해 둘까?" not in _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat[:2])], extra=extra)["text"]
+    assert "기록해 둘까?" not in _smoke(tmp_path, "s/s1", [_session("s1", status="running", chat=chat)], extra=extra)["text"]
+    # 기록 목록을 못 읽으면 "없음" 이 아니라 확인 못 함
+    unknown = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra={"GET /api/trouble/similar": {"ok": False, "reason": "GitHub 로그인이 필요해", "items": []}})
+    assert "? 비슷한 기록 확인 못 함 · GitHub 로그인이 필요해" in unknown["text"]
+    # 초안을 못 만들면 이유와 빈 칸 쓰기를 보인다(지어내지 않는다)
+    failed = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra={"GET /api/trouble/similar": sim}, actions=[{"click": "[data-trouble-write]"}])
+    assert "빈 칸으로 쓰기" in failed["text"] and failed["path"] != "/troubles/new"
 
 
 # ---- 브라우저 알림 (#651) ----

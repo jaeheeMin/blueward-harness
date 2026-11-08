@@ -8,12 +8,15 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import threading
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
 
+import analysis
 import gitstate
+from platform_compat import CLAUDE_MISSING, hidden_window_kwargs
 
 
 class HttpError(Exception):
@@ -400,12 +403,28 @@ def a_pr(app, g, q, b):
     return 200, pr_info(app, slug, repo_root(app, slug), int_arg(q))
 
 
+def slug_of_cwd(app, cwd: str, projects: list) -> str:
+    """세션 폴더가 속한 저장소. 같은 저장소의 worktree 는 origin 주소가 같다. 못 찾으면 빈 글."""
+    if not cwd or not os.path.isdir(cwd):
+        return ""
+    mine = origin_of(app, os.path.realpath(cwd))
+    return next((p["slug"] for p in projects if p.get("slug") and origin_of(app, p["root"]) == mine), "")
+
+
 def a_similar(app, g, q, b):
+    """비슷한 기록. repo 대신 cwd(세션 폴더)를 주면 그 폴더의 저장소에서 찾는다. 저장소를 못 정하거나 못 읽었으면 없음이 아니라 ok:false + 사유."""
     slug = (q.get("repo") or [""])[0]
+    cwd = (q.get("cwd") or [""])[0]
     text = (q.get("q") or [""])[0][:500]
     got = collect(app, wait=True)
+    if cwd and not slug:
+        slug = slug_of_cwd(app, cwd, got["projects"])
+        if not slug:
+            bad = next((p for p in got["projects"] if not p["ok"]), None)
+            return 200, {"ok": False, "reason": bad["reason"] if bad else "이 폴더가 GitHub 저장소인지 확인 못 했어", "items": []}
     ok = any(p["ok"] and (not slug or p["slug"] == slug) for p in got["projects"])
-    return 200, {"ok": ok, "items": similar([i for i in got["items"] if not slug or i["repo"] == slug], text)}
+    reason = "" if ok else next((p["reason"] for p in got["projects"] if not p["ok"] and (not slug or p["slug"] == slug)), "기록 목록을 읽지 못했어")
+    return 200, {"ok": ok, "reason": reason, "slug": slug, "items": similar([i for i in got["items"] if not slug or i["repo"] == slug], text)}
 
 
 def a_check(app, g, q, b):
@@ -575,3 +594,106 @@ def a_draft_get(app, g, q, b):
     if d is None:
         raise HttpError(404, "없는 초안입니다.")
     return 200, d
+
+
+# ---- 세션 대화로 AI 초안 만들기(#734) ----
+DRAFT_SCHEMA = {"type": "object", "properties": {
+    "title": {"type": "string"}, "stage": {"type": "string", "enum": STAGES}, "symptom": {"type": "string"}, "cause": {"type": "string"},
+    "solution": {"type": "string"}, "solved": {"type": "boolean"}}, "required": ["title", "stage", "symptom", "cause", "solution", "solved"]}
+DRAFT_PROMPT = (
+    "아래는 한 작업 세션의 대화다. 여기서 막힌 일과 푼 방법을 팀 기록 초안으로 정리한다. 파일을 만들거나 고치지 않는다. "
+    "title 은 한 줄로 막힌 일을, symptom 은 사용자가 본 오류 문구나 증상을 대화에 나온 그대로(지어내지 않는다), cause 는 대화에서 알아낸 원인(모르면 빈 글), "
+    "solution 은 대화에서 실제로 쓴 해결 방법(대화에 없으면 빈 글), solved 는 대화에서 해결이 확인됐을 때만 true 다. "
+    "stage 는 개발 · 문서 검사 · SAP 운송 · 배포 · 기타 중 하나. 대화에 없는 내용을 채우지 말고, 비밀번호·키·토큰 값은 쓰지 않는다.\n\n대화:\n")
+CHAT_TAKE = 40
+ITEM_MAX = 1500
+TRANSCRIPT_MAX = 14000
+DRAFT_TIMEOUT = 150.0
+HIDDEN_LINE = "(비밀처럼 보여 가린 줄)"
+
+
+def redact(text: str) -> tuple[str, int]:
+    """비밀번호·키처럼 보이는 줄을 가린다. (가린 글, 가린 줄 수)"""
+    lines, n = [], 0
+    for line in str(text or "").split("\n"):
+        if scan_secrets({"x": line}):
+            lines.append(HIDDEN_LINE)
+            n += 1
+        else:
+            lines.append(line)
+    return "\n".join(lines), n
+
+
+def transcript_of(chat: list) -> tuple[str, int]:
+    """최근 대화를 글로 만든다. 비밀처럼 보이는 줄은 모델에 보내기 전에 가린다."""
+    names, parts, hidden = {"me": "사용자", "ai": "AI", "block": "하네스 검사가 막음"}, [], 0
+    for c in chat[-CHAT_TAKE:]:
+        if not isinstance(c, dict):
+            continue
+        if c.get("role") == "req":
+            line = f"승인·질문 요청: {c.get('title', '')} → {c.get('answer') or '답 없음'}"
+        elif c.get("role") in names:
+            line = f"[{names[c['role']]}] {c.get('text', '')}"
+        else:
+            continue
+        line, n = redact(line[:ITEM_MAX])
+        hidden += n
+        parts.append(line)
+    return "\n\n".join(parts)[-TRANSCRIPT_MAX:], hidden
+
+
+def run_claude(app, prompt: str, cwd: str) -> str:
+    """읽기 전용 claude 를 한 번 불러 JSON 결과 글을 받는다. 못 부르면 HttpError(확인 못 함)."""
+    base = app.analyses.claude_cmd()
+    if not base:
+        raise HttpError(503, "초안을 못 만들었어 · " + CLAUDE_MISSING)
+    args = [*base, "-p", "--permission-mode", "plan", "--output-format", "json", "--json-schema", json.dumps(DRAFT_SCHEMA),
+            "--no-session-persistence", "--settings", json.dumps({"disableAllHooks": True})]  # 훅이 붙으면 콘솔에 유령 세션이 생긴다
+    if app.analyses.model:
+        args += ["--model", app.analyses.model]
+    try:
+        done = subprocess.run(args, input=prompt, cwd=cwd if cwd and os.path.isdir(cwd) else None, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=DRAFT_TIMEOUT, **hidden_window_kwargs())
+    except subprocess.TimeoutExpired:
+        raise HttpError(504, "초안을 못 만들었어 · 시간 안에 끝나지 않았어")
+    except OSError as e:
+        raise HttpError(502, f"초안을 못 만들었어 · claude 를 실행하지 못했어({e})")
+    return done.stdout
+
+
+def clip(v, limit: int = FIELD_MAX) -> str:
+    return v.replace("\r\n", "\n").strip()[:limit] if isinstance(v, str) else ""
+
+
+def a_ai_draft(app, g, q, b):
+    """"기록하기" 를 눌렀을 때만 부른다. 세션 대화로 초안을 써서 draft 로 저장하고 id 를 돌려준다(화면이 /troubles/new?draft=id 를 연다)."""
+    sid = text_arg(b, "sessionId", True, 200)
+    s = app.get_session(sid)
+    with app.store.lock:
+        chat, cwd = [dict(c) for c in s.get("chat") or [] if isinstance(c, dict)], s.get("cwd") or ""
+    text, hidden = transcript_of(chat)
+    if not text.strip():
+        raise HttpError(422, "이 세션엔 초안으로 쓸 대화가 아직 없어. 빈 칸으로 써 줘.")
+    info = app.model_of(s)
+    slug = slug_of_cwd(app, cwd, collect(app, wait=True)["projects"])
+    run = getattr(app, "trouble_claude", None) or run_claude
+    out, why = analysis.parse_output(run(app, DRAFT_PROMPT + text, cwd))
+    if not isinstance(out, dict):
+        raise HttpError(502, "초안을 못 만들었어 · " + (why or "결과 형식이 맞지 않아"))
+    fields, hidden_n = {}, hidden
+    for k in ("title", "symptom", "cause", "solution"):
+        fields[k], n = redact(clip(out.get(k), TITLE_MAX if k == "title" else FIELD_MAX))  # 모델이 쓴 글도 비밀 검사를 거친다
+        hidden_n += n
+    fields["title"] = clean_title(fields["title"].split("\n")[0])
+    if not fields["title"] or not fields["symptom"]:
+        raise HttpError(502, "초안을 못 만들었어 · 대화에서 막힌 일을 찾지 못했어")
+    stage = out.get("stage")
+    pr = (info.get("flowPr") or {}).get("number")
+    did = "d-" + uuid.uuid4().hex[:12]
+    store = drafts(app)
+    with app.__dict__.setdefault("trouble_lock", threading.Lock()):
+        store[did] = dict(fields, repo=slug, pr=str(pr) if pr else "", stage=stage if stage in STAGES else "기타",
+                          solved=out.get("solved") is True and bool(fields["solution"]), hidden=hidden_n, source={"title": str(info.get("title") or "")[:100]})
+        for old in list(store)[:-DRAFT_MAX]:
+            store.pop(old)
+    return 200, {"id": did, "hidden": hidden_n}
