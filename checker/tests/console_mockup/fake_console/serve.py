@@ -34,10 +34,36 @@ def opt(a, name):
     return a[a.index(name) + 1] if name in a and a.index(name) + 1 < len(a) else None
 
 
+def fake_trouble_gh(a, cwd):
+    """문제·해결 기록(trouble.py)이 부르는 gh 읽기 명령. trouble_state.json 이 없으면 None(기존 흉내가 처리).
+    repos 는 폴더 이름 -> {slug} 또는 {error}(gh 가 실패한 저장소), issues 는 slug -> 이슈 목록(본문·댓글 포함), labels 는 라벨 이름 목록."""
+    try:
+        ts = json.loads((RUN / "trouble_state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if a[:2] == ["repo", "view"] and "--json" in a:
+        repo = ts["repos"].get(Path(cwd).name)
+        if repo is None:
+            return 1, "none of the git remotes configured for this repository"
+        return (1, repo["error"]) if "error" in repo else (0, json.dumps({"nameWithOwner": repo["slug"]}))
+    slug = opt(a, "-R")
+    if a[:2] == ["issue", "list"]:
+        return 0, json.dumps(ts["issues"].get(slug, []), ensure_ascii=False)
+    if a[:2] == ["issue", "view"]:
+        hit = next((i for i in ts["issues"].get(slug, []) if str(i["number"]) == a[2]), None)
+        return (0, json.dumps(dict(hit, labels=[{"name": "type:trouble"}]), ensure_ascii=False)) if hit else (1, "could not resolve to an issue")
+    if a[:2] == ["label", "list"]:
+        return 0, json.dumps([{"name": n} for n in ts.get("labels", [])])
+    return None
+
+
 def fake_gh(args, cwd):
     st, a = gh_state(), args[1:]
     if a[:2] == ["api", "user"]:
         return 0, st["login"] + "\n"
+    tb = fake_trouble_gh(a, cwd)
+    if tb is not None:
+        return tb
     if a[:2] == ["repo", "view"]:
         return 0, "ADMIN\n"
     prs = st["prs"]
