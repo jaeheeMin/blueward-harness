@@ -51,3 +51,26 @@ NAV_5 = {"sel": "header.top .topnav a", "text": "기록", "exact": True, "why": 
 for _g in ("G-04", "G-05", "G-06", "G-09", "G-10", "G-12", "G-13", "G-15"):
     SCREEN_CONFIG[_g].setdefault("elements", {})["nav"] = {"props": ("x", "h")}
     SCREEN_CONFIG[_g]["expect"].append(NAV_5)
+
+# 기록 화면 셋(G-20~22).
+SCREEN_CONFIG["G-20"] = {"expect": [NAV_5,
+    {"sel": ".main h1", "text": "팀이 겪은 문제와 푼 방법", "why": "시안 G-20 제목"},
+    {"sel": ".strip", "text": "이번 달 기록", "why": "숫자 띠 첫 칸"},
+    {"sel": ".light", "text": "ATC 검사에서 운송이 막힘(금지 API)", "why": "목록 맨 위 기록(가짜 gh 이슈)"},
+    {"sel": ".light", "text": "확인 못 함", "why": "못 읽은 저장소(cloud-b)는 보라 '? 확인 못 함' 줄"},
+    {"sel": ".light button, .light a", "text": "+ 새 기록", "why": "새 기록 단추"}]}
+SCREEN_CONFIG["G-21"] = {"expect": [NAV_5,
+    {"sel": ".main h1", "text": "ATC 검사에서 운송이 막힘(금지 API)", "why": "시안 G-21 제목"},
+    {"sel": ".light", "text": "해결 후보", "why": "이력의 해결 후보 줄"},
+    {"sel": ".light button", "text": "이걸로 해결", "why": "해결 후보 줄의 단추"},
+    {"sel": ".light", "text": "내 이야기 더하기", "why": "댓글 입력 구역"},
+    {"sel": ".light", "text": "비슷한 기록", "why": "비슷한 기록 구역"}]}
+SCREEN_CONFIG["G-22"] = {
+    # 시안 .paper 는 콘솔에서 .tb-paper(GitHub 에 올라갈 모양 미리보기)다.
+    "elements": {"paper": {"console": ".tb-paper"}},
+    "expect": [NAV_5,
+    {"sel": ".main h1", "text": "어떤 문제였어?", "why": "시안 G-22 제목"},
+    {"sel": ".ask", "text": "AI 초안", "why": "AI 초안 줄"},
+    {"sel": ".light", "text": "비밀번호·키처럼 보이는 글이 있어", "why": "비밀 줄 빨간 표시"},
+    {"sel": ".light button", "text": "GitHub 에 올리기", "why": "올리기 단추(비밀 줄이 있으면 잠김)"},
+    {"sel": ".light", "text": "이미 비슷한 기록이 있어", "why": "비슷한 기록 구역"}]}
