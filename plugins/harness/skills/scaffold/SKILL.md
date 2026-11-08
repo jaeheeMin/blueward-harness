@@ -132,6 +132,7 @@ env/adt-tiers.example.yaml         SAP MCP 서버별 쓰기 허용 표 예시(#1
 .github/workflows/pr-review.yml    승인(리뷰)이 달리거나 취소되면 승인 여부를 다시 판정하는 워크플로(#419, #420)
 .github/workflows/main-checks.yml  main 에 병합된 뒤 읽기 전용 검사(진행 원장 완료 확인 포함)를 돌리고 위반을 이슈로 알리는 워크플로(#419, #420, #508)
 .github/ssot-approvers             SRS 변경 PR 을 승인할 수 있는 GitHub 아이디 목록
+.github/ISSUE_TEMPLATE/trouble.yml 문제·해결 기록 이슈 양식(`type:trouble` 라벨·`[기록] ` 제목 자동, #732)
 .github/risk-gate.yaml             위험도 기준(크기·위험 경로·비밀값·검사 통과). 위험한 PR 만 승인자가 Approve 해야 통과
 .github/workflows/ai-review.yml    위험한 PR 포함 코드(src/)를 바꾼 PR 에 Claude AI 리뷰를 돌리는 워크플로(#125, #360, #411). 기본 꺼짐
 .github/workflows/pr-tamper-alert.yml 작성자가 아닌 계정이 PR 에 push 하거나 리뷰를 해제하면 이슈·Teams 로 알리는 워크플로(#150)
