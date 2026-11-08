@@ -1600,6 +1600,43 @@ def test_settings_notify_first_switch_asks_permission_and_saves_only_when_grante
     assert any(p[0] == "PUT" and '"turn":false' in p[2].replace(" ", "") for p in off["posts"]) and off["asked"] == 0  # 끄는 건 묻지 않는다
 
 
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_settings_notify_state_line_tells_waiting_dismissed_denied_and_granted_apart(tmp_path):
+    sw = [{"click": "button[data-notify-key=turn]"}]
+    saved = {"PUT /api/settings/notify": dict(_OFF, turn=True)}
+    # 허용창에 답 없이 닫으면(default 로 돌아옴) 켜진 걸로 보이지 않고 닫았다고 말한다
+    shut = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("default", ask="default"), **saved), actions=sw)
+    assert "허용창을 답 없이 닫았어 (아직 안 켜졌어)" in shut["text"] and "<i.sw.on>" not in shut["dump"] and not [p for p in shut["posts"] if p[0] == "PUT"]
+    # 막힘: 켜는 법 한 줄. 서버엔 켜 둔 값이 있어도 켜짐으로 그리지 않고 따로 경고한다
+    denied = _smoke(tmp_path, "settings", [_session("s1")], extra=_notify_env("denied", dict(_OFF, turn=True)))
+    assert "막힘 · 알림이 오지 않아" in denied["text"] and "브라우저 설정의 사이트 알림" in denied["text"]
+    assert "<i.sw.on>" not in denied["dump"] and "data-notify-stale" not in denied["dump"] and "알림은 오지 않아" in denied["text"]
+    # 허용됨: 스위치가 켜졌는지까지 구분
+    on = _smoke(tmp_path, "settings", [_session("s1")], extra=_notify_env("granted", dict(_OFF, done=True)))
+    assert "허용됨 · 켜져 있어" in on["text"] and "알림은 오지 않아" not in on["text"]
+    off = _smoke(tmp_path, "settings", [_session("s1")], extra=_notify_env("granted"))
+    assert "허용됨 · 스위치는 모두 꺼져 있어" in off["text"]
+    ask = _smoke(tmp_path, "settings", [_session("s1")], extra=_notify_env("default"))
+    assert "아직 안 물음" in ask["text"] and "알림은 오지 않아" not in ask["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_console_tells_when_requests_went_to_terminal_while_disconnected(tmp_path):
+    import time
+    later = time.time() + 60
+    mark = {"time": later, "text": "콘솔이 연결돼 있지 않아 터미널로 넘김: Bash"}
+    sessions = [_session("s1", log=[mark, mark])]
+    def gone(logs):  # 끊김 -> (그 사이 서버가 남긴 기록) -> 다시 붙음
+        return [{"es": "error"}, {"set": {"GET /api/sessions": {"sessions": [_session("s1", log=logs)]}}}, {"es": "open"}]
+    got = _smoke(tmp_path, "", [_session("s1")], actions=gone([mark, mark]))
+    assert "연결이 끊긴 사이 AI가 2번 허락이나 질문을 터미널에서 물었어" in got["head"] + got["text"] + got["dump"]
+    # 끊긴 적 없으면, 또는 끊긴 사이가 아닌 옛 기록이면 알리지 않는다
+    never = _smoke(tmp_path, "", sessions, actions=[{"es": "open"}])
+    assert "터미널에서 물었어" not in never["dump"] + never["text"]
+    old = _smoke(tmp_path, "", [_session("s1")], actions=gone([dict(mark, time=1700000000)]))
+    assert "터미널에서 물었어" not in old["dump"] + old["text"]
+
+
 def _live(tmp_path, sessions, actions, cfg=_ALL, requests=None, **env):
     extra = _notify_env("granted", cfg, **env)
     return _smoke(tmp_path, "", sessions, requests=requests, extra=extra, actions=actions)

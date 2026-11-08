@@ -519,6 +519,14 @@ def test_managed_session_waits_even_without_browser(authed):
     assert h["r"][1]["hookSpecificOutput"]["decision"]["behavior"] == "allow"
 
 
+def test_permission_without_browser_goes_to_terminal_and_leaves_one_log_line(authed):
+    authed.hook("permission", perm_body("t9"))
+    authed.hook("permission", perm_body("t9"))  # 같은 호출이 거듭 와도 한 줄
+    authed.hook("permission", perm_body("t9", command="touch b"))
+    logs = [l["text"] for l in authed.app.store.sessions["t9"]["log"] if "터미널로 넘김" in l["text"]]
+    assert logs == ["콘솔이 연결돼 있지 않아 터미널로 넘김: Bash"] * 2
+
+
 def test_permission_for_ask_user_question_is_left_to_question_hook(browser):
     assert browser.hook("permission", perm_body("t1", tool_name="AskUserQuestion"))[1] is None
     assert browser.pending("t1") == []
