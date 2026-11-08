@@ -44,6 +44,19 @@ def test_step_short_names_are_short_nonempty_strings():
             assert isinstance(s["short"], str) and s["short"].strip() and len(s["short"]) <= 12, key
 
 
+def test_every_step_has_plain_easy_words_without_skill_commands():
+    # 새 작업 화면 순서 칸의 쉬운 말(plain 이름·easy 설명). 선택 필드지만 모든 단계에 채워 두고, 스킬 명령 문자는 쓰지 않는다.
+    for f in _data()["flows"]:
+        for s in f["steps"]:
+            key = f"{f['id']}/{s['id']}"
+            for field in ("plain", "easy"):
+                assert isinstance(s.get(field), str) and s[field].strip(), (key, field)
+                assert "/harness:" not in s[field], (key, field)
+            assert len(s["plain"]) <= 12, key
+            if "brief" in s:
+                assert isinstance(s["brief"], str) and s["brief"].strip() and len(s["brief"]) <= 20, key
+
+
 def test_console_passes_step_short_to_the_screen():
     data = _data()
     srs = next(f for f in data["flows"] if f["id"] == "srs")

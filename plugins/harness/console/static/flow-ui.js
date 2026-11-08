@@ -786,12 +786,27 @@
     }
 
     /* ---------- 새 작업: 순서 칸("이렇게 진행돼")과 분석한 갈래 보여 주고 바꾸기 ---------- */
-    var STEP_NOTE = { skill: function (st) { return st.skill ? HARNESS_PREFIX + st.skill : ''; }, work: function () { return '직접 하는 일'; }, human: function () { return '사람이 확인'; }, wait: function () { return '밖에서 일이 끝나길 기다려'; } };
-    function flowCells(flow) {
-      return h('div', { class: 'flow', 'data-flow-cells': flow.id }, kit.listOf(flow, 'steps').map(function (st, i) {
-        var note = STEP_NOTE[st.kind] ? STEP_NOTE[st.kind](st) : '';
-        return h('div', { class: 'fs' }, h('b', { text: (i + 1) + ' ' + (st.name || st.id) }), note ? h('small', { text: note }) : null);
-      }));
+    /* 순서 칸은 스킬 명령이 아니라 쉬운 말로 보인다. 이름은 단계의 plain(없으면 short·name), 설명은 easy(없으면 종류별 한마디).
+       확인 화면(o.review)은 첫 칸을 지금 단계로 테두리 강조하고 "이번 세션", 둘째 칸부터는 brief(없으면 easy), 맨 끝에 다음 갈래 칸("다음 세션")을 더한다. */
+    var STEP_NOTE = { skill: function () { return ''; }, work: function () { return '직접 하는 일'; }, human: function () { return '사람이 확인'; }, wait: function () { return '밖에서 일이 끝나길 기다려'; } };
+    // 이 갈래 다음에 오는 갈래 하나: next.flow, 없으면 srsColumn 갈림길 중 처음으로 갈래가 있는 것(workflow.json 에 적힌 순서)
+    function nextFlowOf(flow, flows) {
+      var n = flow.next, id = '';
+      if (n && n.flow) id = n.flow;
+      else if (n && n.srsColumn) { var br = n.srsColumn.branches || {}; Object.keys(br).some(function (k) { if (br[k] && br[k].flow) { id = br[k].flow; return true; } return false; }); }
+      return id ? (flows || []).filter(function (f) { return f.id === id; })[0] || null : null;
+    }
+    function flowCells(flow, o) {
+      o = o || {};
+      var steps = kit.listOf(flow, 'steps');
+      var cells = steps.map(function (st, i) {
+        var note = o.review ? (i === 0 ? '이번 세션' : st.brief || st.easy || '') : st.easy || '';
+        if (!note && STEP_NOTE[st.kind]) note = STEP_NOTE[st.kind](st);
+        return h('div', { class: 'fs' + (o.review && i === 0 ? ' now' : '') }, h('b', { text: (i + 1) + ' ' + (st.plain || st.short || st.name || st.id) }), note ? h('small', { text: note }) : null);
+      });
+      var nx = o.review ? nextFlowOf(flow, o.flows) : null;
+      if (nx) cells.push(h('div', { class: 'fs next', 'data-next-flow': nx.id }, h('b', { text: (steps.length + 1) + ' ' + nx.name }), h('small', { text: '다음 세션' })));
+      return h('div', { class: 'flow', 'data-flow-cells': flow.id }, cells);
     }
     // update({cwd, flowId, note}): 갈래 id 가 있으면 그 갈래의 순서를, 없으면 note 를 보인다.
     function flowPreview() {
@@ -814,27 +829,30 @@
 
     /* ---------- 새 작업: 분석한 갈래 보여 주고 바꾸기 ---------- */
     // update({cwd, found, selected, onPick(id)})
+    // 시안 G-06 구성: 갈래 설명은 AI 말 한 줄 안에 합쳐지고(line), 그 아래에 순서 칸(el), "다른 갈래로 바꾸기"는 아래 단추 줄(tail)과 고르는 칸(grid)에 따로 둔다.
     function flowChooser() {
       var el = h('section', { class: 'flowchoose', hidden: true });
+      var line = h('span', { class: 'flow-ai', 'data-flow-line': '1' });
+      var tail = h('span', { class: 'flow-tail' });
+      var grid = h('div', { class: 'flowgrid', hidden: true });
       var open = false, alive = true, last = null;
       function nameOf(flows, id) { var f = flows.filter(function (x) { return x.id === id; })[0]; return f ? f.name : id; }
       function draw(r) {
-        clear(el);
-        el.hidden = true;
+        clear(el); clear(line); clear(tail); clear(grid);
+        el.hidden = true; grid.hidden = true;
         if (!last || !r) return;
         if (!r.ok) { el.hidden = false; el.appendChild(h('p', { class: 'note-muted', text: failText(r.error, '일 갈래') })); return; }
         var flows = kit.listOf(r.data, 'flows').filter(function (f) { return !(f.exposure && f.exposure.visible === false); });
         if (!flows.length) return;
         // 도구 스킬만 쓰는 일(scaffold, cts, role, manual …)은 어느 갈래에도 억지로 넣지 않는다. 서버가 같은 id(none)로 알아듣는다.
         flows.push({ id: L.NO_FLOW_ID, name: '순서 없이 이 도구만', steps: [] });
-        el.hidden = false;
         var found = last.found, picked = last.selected;
         var cur = flows.filter(function (f) { return f.id === picked; })[0];
-        el.appendChild(h('h2', { class: 'sect-h', text: '어떤 일인가요?' }));
         // 종류 버튼으로 고른 갈래를 AI 가 다르게 보면 조용히 덮어쓰지 않고 먼저 묻는다(#668).
         var conflict = !last.userPicked && L.kindConflict(found, last.kindFlowId);
         if (conflict) {
           var aiName = nameOf(flows, conflict.id);
+          el.hidden = false;
           el.appendChild(askCard({
             id: 'flow', label: 'AI 추천 확인',
             lead: ['AI 는 ', h('b', { text: aiName }), ' 부터 하자고 해' + (conflict.reason ? ' — ' + conflict.reason : '')],
@@ -845,6 +863,7 @@
           return;
         }
         if (found && found.confident === false && found.alternativeId && !last.userPicked) {
+          el.hidden = false;
           el.appendChild(h('p', { class: 'note-muted', text: '어느 쪽에 더 가까운지 골라 주세요. ' + (found.reason || '') }));
           var two = h('div', { class: 'chips' });
           [found.id, found.alternativeId].forEach(function (id) {
@@ -852,29 +871,31 @@
           });
           el.appendChild(two);
         } else if (cur && cur.id === L.NO_FLOW_ID) {
-          el.appendChild(h('p', { class: 'flow-line', text: '도구만 쓰는 일이에요 · 정해진 순서 없이 그 도구 스킬로 바로 시작해요.' }));
-          if (found && found.id === cur.id && found.reason) el.appendChild(h('p', { class: 'note-muted', text: found.reason }));
+          line.appendChild(document.createTextNode(' 도구만 쓰는 일이라 정해진 순서 없이 그 도구 스킬로 바로 시작할게.' + (found && found.id === cur.id && found.reason ? ' ' + found.reason : '')));
         } else if (cur) {
-          el.appendChild(h('p', { class: 'flow-line', text: '이 일은 \'' + cur.name + '\' 갈래야.' }));
-          el.appendChild(flowCells(cur));
-          if (found && found.id === cur.id && found.reason) el.appendChild(h('p', { class: 'note-muted', text: found.reason }));
-        } else el.appendChild(h('p', { class: 'note-muted', text: '고르지 않으면 정해진 순서 없이 시작해요.' }));
+          line.appendChild(document.createTextNode(' 이 일은 '));
+          line.appendChild(h('b', { text: cur.name }));
+          line.appendChild(document.createTextNode(' 갈래야.' + (found && found.id === cur.id && found.reason ? ' ' + found.reason : '')));
+          el.hidden = false;
+          el.appendChild(flowCells(cur, { review: true, flows: flows }));
+        } else {
+          line.appendChild(document.createTextNode(' 고르지 않으면 정해진 순서 없이 시작할게.'));
+        }
         var blocked = last.kindFlowId === 'dev' && picked === 'dev' ? L.devBlock('dev', last.ready) : '';  // 종류 버튼으로 개발을 골랐는데 Spec 이 없다고 확실할 때
-        if (blocked) el.appendChild(h('p', { class: 'note-attn', role: 'alert', 'data-ask-block': '1', text: blocked }));
-        el.appendChild(h('button', { type: 'button', class: 'disclose', 'aria-expanded': String(open), onClick: function () { open = !open; draw(r); } }, kit.icon('chev', 14), '다른 갈래로 바꾸기'));
+        if (blocked) { el.hidden = false; el.appendChild(h('p', { class: 'note-attn', role: 'alert', 'data-ask-block': '1', text: blocked })); }
+        tail.appendChild(h('button', { type: 'button', class: 'disclose', 'aria-expanded': String(open), onClick: function () { open = !open; draw(r); } }, kit.icon('chev', 14), '다른 갈래로 바꾸기'));
         if (open) {
-          var grid = h('div', { class: 'chips' });
+          grid.hidden = false;
           flows.forEach(function (f) {
             grid.appendChild(h('button', { type: 'button', class: 'chip', 'aria-pressed': String(f.id === picked), 'data-flow': f.id, text: f.name, onClick: function () { last.onPick(f.id); } }));
           });
-          el.appendChild(grid);
         }
       }
       function update(o) {
         last = o;
         flowsFor(o.cwd).then(function (r) { if (alive) draw(r); });
       }
-      return { el: el, update: update, destroy: function () { alive = false; } };
+      return { el: el, line: line, tail: tail, grid: grid, update: update, destroy: function () { alive = false; } };
     }
 
     /* ---------- 홈 ---------- */
@@ -1033,7 +1054,7 @@
       var input = h('input', { id: 'home-brief', class: 'comp-in', type: 'text', placeholder: '하고 싶은 일을 적어 — 예: 구매오더 조회 앱 요구사항 써 줘', autocomplete: 'off' });
       var form = h('form', { class: 'comp', onSubmit: function (e) { e.preventDefault(); startNew(input.value); } },
         h('label', { class: 'sr-only', for: 'home-brief', text: '하고 싶은 일' }), input,
-        h('button', { type: 'submit', class: 'pill dark', text: '새 작업으로' }));
+        h('button', { type: 'submit', class: 'pill dark', text: '보내기' }));
       page.appendChild(h('section', { class: 'light' }, h('h2', { text: '첫 작업을 시작해 볼까?' }),
         h('p', { class: 'lm', text: '자주 하는 일이야. 눌러도 되고, 아래에 하고 싶은 일을 그냥 적어도 돼.' }), grid, form));
       page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', '0', ''), tile('일하는 중', '0', ''), tile('만든 산출물', '0', '')));
