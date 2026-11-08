@@ -466,11 +466,14 @@
   function runningSubagents(s) { return (s.subagents || []).filter(function (a) { return a && a.state === 'running'; }); }
   function subagentSummary(s) { var n = runningSubagents(s).length; return n ? ' · 서브에이전트 ' + n + '개 실행 중' : ''; }
   function sideData() {
-    var todo = [], run = [], idle = [];
+    var todo = [], run = [], idle = [], blocked = [];
     sessions.forEach(function (s) {
       var g = groupOf(s), sub = s.branch || baseName(s.cwd) || '';
       var title = s.title || baseName(s.cwd) || '이름 없는 세션';
-      if (g === 'todo') {
+      var bk = window.BHLogic.blockOf(s);  // 훅이 막아 아직 안 풀린 세션은 내 차례와 따로 센다(#790)
+      if (bk) {
+        blocked.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), kind: bk.kind, t: s.updatedAt });
+      } else if (g === 'todo') {
         var ids = s.pendingRequestIds || [];
         if (ids.length) {
           ids.forEach(function (rid) {
@@ -487,11 +490,11 @@
         idle.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: s.status === 'ended' ? '끝난 세션' : sub, t: s.updatedAt });
       }
     });
-    return { todo: todo, run: run, idle: idle };
+    return { todo: todo, run: run, idle: idle, blocked: blocked };
   }
   var annEl = null, headEl = null;
   var SIDE_ORDER = { todo: 0, running: 1, idle: 2 };
-  function sessionRank(s) { return s.status === 'ended' ? 3 : SIDE_ORDER[groupOf(s)]; }
+  function sessionRank(s) { return s.status === 'ended' ? 3 : window.BHLogic.blockOf(s) ? 0 : SIDE_ORDER[groupOf(s)]; }
   function sessionTitle(s) { return s.title || baseName(s.cwd) || '이름 없는 세션'; }
   function sortedSessions() {
     var arr = [];
@@ -509,9 +512,10 @@
   }
   /* 세션 한 줄 상태. 내 차례면 tone 이 attn 이다. */
   function sideStatus(s) {
-    var g = groupOf(s), L = window.BHLogic;
+    var g = groupOf(s), L = window.BHLogic, bk = L.blockOf(s);
+    if (bk) return bk.kind === 'cannot_check' ? { tone: 'unk', text: '? 확인 못 함 · 검사를 못 했어' } : { tone: 'fail', text: '✕ 막힘 · 고친 뒤 이어서' };
     // 시안 G-24: PR 검사가 실패한 세션(AI 가 일하는 중이 아닐 때)은 "PR #n 고쳐야 함". 내 차례 세션이면 tone 은 그대로 attn.
-    if (g !== 'running' && s.status !== 'ended' && L && L.prNeedsFix(s) && !firstPending(s)) return { tone: g === 'todo' ? 'attn' : '', fix: true, text: 'PR #' + s.flowPr.number + ' 고쳐야 함' };
+    if (g !== 'running' && s.status !== 'ended' && L.prNeedsFix(s) && !firstPending(s)) return { tone: g === 'todo' ? 'attn' : '', fix: true, text: 'PR #' + s.flowPr.number + ' 고쳐야 함' };
     if (g === 'todo') {
       var p = firstPending(s);
       var verb = p ? (!p.r ? '요청 확인하기' : kindOf(p.r) === 'question' ? '답하기' : '승인하기') : s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기';
@@ -529,8 +533,15 @@
     if (d.todo.length) {
       var first = d.todo[0];
       annEl.appendChild(link(first.href, { class: 'ann', role: 'status' },
-        h('span', { text: '내 차례 ' + d.todo.length + '건 — ' + first.sname + '에서 답이 필요해' })));
+        h('span', { text: '내 차례 ' + d.todo.length + '건 — “' + first.sname + '” 세션에서 답이 필요해' })));  // 제목에 조사가 바로 붙지 않게 따옴표와 "세션"
     }
+    // 막힘·확인 못 함은 내 차례 건수에 넣지 않고 따로 띠로 알린다(#790). ✕ 막힘과 ? 확인 못 함은 각각 한 줄
+    [['blocked', '✕ 막힘', '하네스 검사가 막았어. 고친 뒤 이어서 하자'], ['cannot_check', '? 확인 못 함', '검사를 못 해서 멈췄어. 통과도 실패도 아니야']].forEach(function (k) {
+      var got = (d.blocked || []).filter(function (b) { return b.kind === k[0]; });
+      if (!got.length) return;
+      annEl.appendChild(link(got[0].href, { class: 'ann note', role: 'status', 'data-ann': k[0] },
+        h('span', { text: k[1] + ' ' + got.length + '건 — “' + got[0].sname + '” 세션에서 ' + k[2] })));
+    });
     // 시안 G-12: 합쳐진 갈래의 세션 화면을 보는 동안은 초록 띠 "PR #n이 합쳐졌어 — 다음은 …"
     if (route && route.name === 'session') {
       var cs = sessions.get(route.id), band = cs ? window.BHLogic.finishedBand(cs) : '';
@@ -788,7 +799,7 @@
         h('span', { class: 'sinfo' },
           h('span', { class: 'n', text: sessionTitle(s) }),
           bar,
-          h('small', { class: st.tone === 'attn' || st.fix ? 'w' : '', title: st.text, text: st.text }))));
+          h('small', { class: st.tone === 'attn' || st.fix ? 'w' : st.tone === 'fail' || st.tone === 'unk' ? 'bk ' + st.tone : '', title: st.text, text: st.text }))));
     });
     nav.appendChild(list);
     var foot = h('div', { class: 'nav-foot' });
@@ -805,7 +816,7 @@
       rows.map(function (s) {
         var st = sideStatus(s), p = firstPending(s), name = sessionTitle(s);
         var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid));
-        return link('/s/' + encodeURIComponent(s.id), { class: 'rail-ring' + (st.tone === 'attn' ? ' turn' : '') + (s.status === 'ended' ? ' ended' : ''), 'aria-label': name + ' · ' + st.text, title: name + ' · ' + st.text, 'aria-current': onThis ? 'page' : null },
+        return link('/s/' + encodeURIComponent(s.id), { class: 'rail-ring' + (st.tone === 'attn' ? ' turn' : st.tone === 'fail' || st.tone === 'unk' ? ' bk ' + st.tone : '') + (s.status === 'ended' ? ' ended' : ''), 'aria-label': name + ' · ' + st.text, title: name + ' · ' + st.text, 'aria-current': onThis ? 'page' : null },
           h('span', { class: 'ring unk' }, h('b', { text: '?' })));
       }),
       h('span', { class: 'rail-sp' }),
@@ -1297,8 +1308,10 @@
     };
     function chatBlock(c, s) {
       var cannot = c.kind === 'cannot_check', name = HOOK_NAMES[c.hook] || String(c.hook || '하네스 훅');
-      var text = String(c.text || ''), lines = text.split('\n'), first = lines[0].trim(), rest = lines.slice(1).join('\n').trim();
-      var fix = String(c.fix || '').trim(), key = 'b' + String(c.t), open = !!chatOpen[key];
+      var text = String(c.text || ''), fix = String(c.fix || '').trim(), key = 'b' + String(c.t), open = !!chatOpen[key];
+      // 원문 끝의 "다음: …" 줄은 아래 "고치는 법" 과 같은 글이라, 고치는 법이 있으면 원문에서는 뺀다(#791: 두 번 나오지 않게)
+      var cut = fix ? text.search(/(^|\n)[ \t]*다음:/) : -1, body = cut >= 0 ? text.slice(0, cut) : text;
+      var lines = body.split('\n'), first = lines[0].trim(), rest = lines.slice(1).join('\n').trim();
       var m = first.match(/^(.+?[.!?。](?=\s|$))\s*(.*)$/);  // 첫 문장은 크게, 나머지는 접기
       var head = m ? m[1] : first, more = ((m ? m[2] : '') + (rest ? '\n' + rest : '')).trim();
       var card = h('div', { class: 'bad q ' + (cannot ? 'unsure' : 'blocked'), 'data-chat': 'block', 'data-block-kind': cannot ? 'cannot_check' : 'blocked' });
@@ -1314,12 +1327,20 @@
         onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, open ? '원문 접기' : '검사 원문') : null;
       // 시안 G-23: 막힘 카드 아래 "비슷한 기록 n건 — …" 한 줄(막힘 사유 낱말로 지난 기록을 찾는다). 확인 못 함 카드에는 두지 않는다.
       var simRow = cannot ? null : tb.similarRow(s, c, name + ' 막힘 ' + head, function () { if (built) paintMsgs(cur()); });
+      var send = s.canSend === true;
       if (mine) {
-        card.appendChild(h('div', { class: 'acts' }, h('span', { class: 'note-muted', 'data-block-mine': '1', text: '직접 보기로 했어.' }), raw));
+        // 직접 보기로 했으면 다음 할 일을 한 줄로 알리고, 마음이 바뀌면 되돌릴 수 있게 한다(#791)
+        card.appendChild(h('p', { class: 'note-muted', 'data-block-mine': '1', text: '직접 보기로 했어. ' + (send ? '고친 뒤 “다 고쳤어, 이어서 해 줘” 를 눌러 줘.' : '터미널에서 고친 뒤 이어서 하면 돼.') }));
+        card.appendChild(h('div', { class: 'acts' },
+          send ? h('button', { type: 'button', class: 'pill dark', 'data-block-done': '1', text: '다 고쳤어, 이어서 해 줘', onClick: function () { sendFollow('다 고쳤어. 하네스 훅이 막은 일을 이어서 해 줘.'); } }) : null,
+          h('button', { type: 'button', class: 'pill line', 'data-block-undo': '1', text: '다시 고르기', onClick: function () { chatOpen[hkey] = false; paintMsgs(cur()); } }),
+          raw));
         if (simRow) card.appendChild(simRow);
         return card;
       }
-      var send = s.canSend === true;
+      var terminal = !send ? h('p', { class: 'note-muted', 'data-block-terminal': '1', text: cannot
+        ? '이 세션은 터미널에서 열어서 여기서 다시 돌릴 수 없어. 터미널에서 같은 일을 다시 시켜 줘.'
+        : '이 세션은 터미널에서 열어서 여기서 고쳐 달라고 보낼 수 없어. 터미널에서 고쳐 줘.' }) : null;
       var acts = cannot
         ? [send ? h('button', { type: 'button', class: 'pill dark', 'data-block-send': '1', text: '검사 다시 돌리기',
               onClick: function () { sendFollow('검사를 못 해서 멈춘 일을 다시 시도해 줘: ' + head + (fix ? '\n고치는 법: ' + fix : '')); } }) : null,
@@ -1335,6 +1356,7 @@
               onClick: function () { chatOpen[hkey] = true; paintMsgs(cur()); } }),
            raw];
       card.appendChild(h('div', { class: 'acts' }, acts));
+      if (terminal) card.appendChild(terminal);
       if (note) card.appendChild(h('p', { class: 'note-accent', role: 'status', text: note }));
       if (simRow) card.appendChild(simRow);
       return card;
@@ -1433,6 +1455,8 @@
       var why = regions.follow.querySelector('[data-why]');
       why.textContent = can ? '' : (s.cannotSendReason || '이 세션에는 지금 요청을 보낼 수 없어.');
       why.hidden = can;
+      // 막힘이 있는데 터미널 세션이라 입력칸이 잠겼으면 이유를 눈에 띄는 색으로 한 번 더(#791). 막힘이 없을 땐 시안대로 작은 회색 글
+      why.className = !can && window.BHLogic.blockOf(s) ? 'note-attn' : 'note-muted';
       paintFollowNote();
     }
 

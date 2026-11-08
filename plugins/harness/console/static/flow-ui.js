@@ -257,7 +257,7 @@
     function flowPanel(opts) {
       var compact = !!(opts && opts.compact);
       var el = h('section', { class: 'flowpanel' + (compact ? ' compact' : ''), 'aria-label': '진행 순서' });
-      var st = { busy: false, msg: '', picker: null, pickerCwd: null, job: '', later: {}, stay: {}, editFirst: false };
+      var st = { busy: false, msg: '', picker: null, pickerCwd: null, job: '', later: {}, stay: {}, editFirst: false, skipHold: {} };
       var last = null, alive = true, pollTimer = null;
 
       function ensurePicker(s) {
@@ -443,12 +443,26 @@
         el.appendChild(box);
       }
 
+      // 막힘 카드가 열려 있는 동안은 갈래 고르기·다음 단계보다 "고친 뒤 이어서" 가 먼저다(#791). [먼저 일 고르기] 로 넘어갈 수는 있다.
+      function drawHold(s, bk) {
+        var cant = bk.kind === 'cannot_check', can = s.canSend !== false;
+        var box = h('div', { class: 'nextstep ask', 'data-block-hold': bk.kind });
+        box.appendChild(h('span', { class: 'eb', text: cant ? '? 확인 못 함 · 먼저 할 일' : '✕ 막힘 · 먼저 할 일' }));
+        box.appendChild(h('b', { text: cant ? '검사를 다시 돌린 뒤 이어서 하자' : '막힌 걸 고친 뒤 이어서 하자' }));
+        box.appendChild(h('p', { class: 'sub', text: (cant ? '검사를 못 했어. 통과도 실패도 아니야. ' : '') + (can
+          ? '위 카드에서 고치는 법을 보고 AI 에게 맡기거나 직접 고쳐 줘.'
+          : '이 세션은 터미널에서 열었어. 터미널에서 고친 뒤 이어서 하면 돼.') }));
+        box.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'skiplink', 'data-hold-skip': '1', text: s.flowId ? '그래도 다음 단계 보기' : '그래도 먼저 일 고르기', onClick: function () { st.skipHold[s.id + ':' + bk.t] = true; draw(); } })));
+        el.appendChild(box);
+      }
+
       function draw() {
         var s = last;
         if (!s) return;
         clear(el);
+        var hold = L.blockOf(s); if (hold && st.skipHold[s.id + ':' + hold.t]) hold = null;  // 새 막힘이 오면 다시 안내한다
         if (!s.flowId) {
-          ensurePicker(s); drawPicker(s);
+          if (hold) drawHold(s, hold); else { ensurePicker(s); drawPicker(s); }
         } else {
           if (!compact) {
             el.appendChild(h('div', { class: 'flow-head' },
@@ -459,7 +473,7 @@
           }
           (s.flowUnknown || []).forEach(function (u) { el.appendChild(h('p', { class: 'note-attn', role: 'status', text: '판정 불능 · ' + (typeof u === 'string' ? u : u.reason || JSON.stringify(u)) })); });
           // 질문이 떠 있으면 그 질문이 네 차례 카드라 겹치지 않게 뺀다(G-13). 승인을 기다리는 동안은 할 일 카드 대신 대화 쪽 안내(G-10).
-          if (s.flowFinished) drawFinished(s); else if (!(s.pendingRequestIds || []).length && s.phase !== 'approval') drawAction(s);
+          if (hold) drawHold(s, hold); else if (s.flowFinished) drawFinished(s); else if (!(s.pendingRequestIds || []).length && s.phase !== 'approval') drawAction(s);
         }
         if (st.job) el.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.job }));
         if (st.msg) el.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.msg }));
@@ -1255,14 +1269,15 @@
         }
         var list = sessionList();
         if (!list.length) { emptyHome(root, approvals, projects); approvalCard(approvals, showPr); projectCard(projects); return; }
-        list.sort(function (a, b) { return (GROUP_ORDER[L.groupOf(a)] - GROUP_ORDER[L.groupOf(b)]) || ((b.updatedAt || 0) - (a.updatedAt || 0)); });
+        var rankOf = function (s) { return L.blockOf(s) ? 0 : GROUP_ORDER[L.groupOf(s)]; };
+        list.sort(function (a, b) { return (rankOf(a) - rankOf(b)) || ((b.updatedAt || 0) - (a.updatedAt || 0)); });
         var c = L.counts(list), page = h('div', { class: 'page home' });
         var proj = folderName(list[0]);
         page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: today() + ' · ' + proj }), h('h1', { text: '오늘 내 일' })));  // "세션 n개 · …" 줄은 시안에 없다(타일이 같은 숫자를 보인다)
         page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), prTile, weekTile, tbTile));  // 시안 G-11 순서 + G-24 다섯째 칸
         page.appendChild(fixBox);  // 시안 G-24: 타일 줄 바로 아래
 
-        var todo = list.filter(function (s) { return L.groupOf(s) === 'todo'; });
+        var todo = list.filter(function (s) { return L.groupOf(s) === 'todo' && !L.blockOf(s); });  // 막힘·확인 못 함은 내 차례 숫자와 따로(#790)
         // 내 차례는 가장 오래 기다린 한 건만 카드로 두고, 나머지는 "외 n건" 을 눌러 펼친다(펼침 상태는 이 화면에서만 기억).
         var waiting = todo.slice().sort(function (a, b) { return (a.updatedAt || 0) - (b.updatedAt || 0); });
         function callCard(s) {
@@ -1289,15 +1304,27 @@
           }
         }
 
+        // 훅이 막아 아직 안 풀린 세션(#790): 내 차례 카드와 따로, 같은 모양의 카드로 먼저 알린다. 글자에도 ✕·? 를 넣어 색에만 기대지 않는다
+        list.forEach(function (s) {
+          var bk = L.blockOf(s);
+          if (!bk) return;
+          var cant = bk.kind === 'cannot_check', name = s.title || folderName(s) || '이름 없는 세션';
+          page.appendChild(h('div', { class: 'call', 'data-call-block': s.id, 'data-block-kind': bk.kind },
+            h('div', { class: 'ct' }, h('span', { class: 'eb', text: (cant ? '? 확인 못 함 · ' : '✕ 막힘 · ') + name }), h('b', { text: cant ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자' })),
+            kit.link('/s/' + encodeURIComponent(s.id), { class: 'pill dark', text: '가서 보기' })));
+        });
+
         var head = h('tr', null, ['작업', '단계', '번호', '기억', '상태'].map(function (t) { return h('th', { scope: 'col', text: t }); }));
         var rows = list.map(function (s) {
-          var g = L.groupOf(s), todoRow = g === 'todo', ended = s.status === 'ended';
+          var g = L.groupOf(s), todoRow = g === 'todo' && !L.blockOf(s), ended = s.status === 'ended';
           var title = s.title || folderName(s) || '이름 없는 세션';
           var subs = L.runningSubCount(s);
           var doing = ended ? '끝난 세션' : s.currentAction || (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : g === 'running' ? '작업하는 중' : '쉬는 중');
           var tip = doing + (subs ? ' · 서브에이전트 ' + subs + '개 실행 중' : '');  // 둘째 줄 대신 칩 title 로(시안: 상태 칸은 칩 하나)
-          var fixRow = !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)
-          var chip = todoRow || fixRow ? h('span', { class: 'tag', title: tip, text: fixRow ? '고쳐야 함' : '내 차례' }) : h('span', { class: 'tag ok', title: tip, text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
+          var bk = L.blockOf(s);
+          var fixRow = !bk && !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)
+          var chip = bk ? h('span', { class: 'tagx ' + (bk.kind === 'cannot_check' ? 'unk' : 'fail'), title: bk.kind === 'cannot_check' ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자', text: bk.kind === 'cannot_check' ? '? 확인 못 함' : '✕ 막힘' })
+            : todoRow || fixRow ? h('span', { class: 'tag', title: tip, text: fixRow ? '고쳐야 함' : '내 차례' }) : h('span', { class: 'tag ok', title: tip, text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
           var issue = issueOf(s), pr = prChip(s);
           var nums = h('td', { 'data-l': '번호' }, issue ? h('span', { class: 'mono', text: '이슈 #' + issue }) : null, pr, !issue && !pr ? h('span', { class: 'none', text: '–' }) : null);
           return h('tr', { class: todoRow ? 'attn' : '', 'data-session': s.id },

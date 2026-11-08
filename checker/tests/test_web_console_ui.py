@@ -1014,7 +1014,7 @@ def test_app_frame_ann_only_with_todo_and_menu_paths():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     # 맨 위 띠는 내 차례가 없으면 만들지 않는다
     ann = app[app.index("function renderAnn"):app.index("function projectOf")]
-    assert re.search(r"clear\(annEl\);\s*if \(d\.todo\.length\) \{", ann) and "내 차례 ' + d.todo.length + '건 — '" in ann
+    assert re.search(r"clear\(annEl\);\s*if \(d\.todo\.length\) \{", ann) and "내 차례 ' + d.todo.length + '건 — “' + first.sname + '” 세션에서 답이 필요해" in ann  # 제목에 조사가 바로 붙지 않게(#790)
     # 메뉴: 내 일 → /, 작업 → 가장 위 세션, 산출물 → /docs, 새 작업 → /new, 설정 → /settings.
     head = app[app.index("function renderHead"):app.index("function renderSide")]
     assert "link('/', { text: '내 일'" in head and "link(newHref(), { text: '새 작업'" in head and "link('/settings'" in head
@@ -1607,6 +1607,57 @@ def test_chat_draws_hook_block_cards_two_kinds_and_fix_button(tmp_path):
     assert "직접 보기로 했어." in mine["text"] and mine["text"].count("내가 직접 볼게") == 0
     unknown = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="새_훅")])])
     assert "하네스 검사가 막았어 · 새_훅" in unknown["text"]  # 이름표에 없으면 원래 이름
+
+
+_BLOCK = {"t": 2, "role": "block", "hook": "pre_write_guard", "kind": "blocked", "tool": "Write",
+          "text": "문서가 템플릿을 따르지 않습니다. 개요 절이 없습니다.\n자세한 위반 목록입니다.\n\n다음: 개요 절을 추가하십시오.", "fix": "개요 절을 추가하십시오."}
+_UNSURE = {"t": 3, "role": "block", "hook": "stop-deliver", "kind": "cannot_check", "text": "엔진을 받지 못해 검사 불능입니다.", "fix": ""}
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_blocked_session_shows_apart_from_my_turn_in_home_side_and_banner(tmp_path):
+    """#790: 막힘(✕)·확인 못 함(?)은 홈 표·사이드바·맨 위 띠에서 내 차례와 따로 보이고, 내 차례 숫자에 섞이지 않는다."""
+    sessions = [_session("s1", title="막힌 일", status="idle", lastBlock={"t": 2, "kind": "blocked", "open": True}),
+                _session("s2", title="못 한 일", status="idle", lastBlock={"t": 3, "kind": "cannot_check", "open": True}),
+                _session("s3", title="풀린 일", status="idle", lastBlock={"t": 4, "kind": "blocked", "open": False}),
+                _session("s4", title="질문 일", status="waiting", pendingRequestIds=["q1"], lastBlock={"t": 5, "kind": "blocked", "open": True})]
+    q = {"id": "q1", "sessionId": "s4", "kind": "question", "status": "pending", "toolName": "AskUserQuestion", "toolInput": {"questions": [{"question": "어느 쪽?", "options": [{"label": "가"}]}]}}
+    got = _smoke(tmp_path, "", sessions, [q])
+    text, dump = got["text"], got["dump"]
+    assert "<span.tagx.fail>" in dump and "<span.tagx.unk>" in dump and "✕ 막힘" in text and "? 확인 못 함" in text
+    assert text.count("가서 보기") == 2 and "내 차례1" in text  # 막힘 둘은 내 차례 숫자에 안 들어가고, 묻는 요청이 있는 세션만 내 차례
+    assert "✕ 막힘 · 고친 뒤 이어서" in got["side"] and "? 확인 못 함 · 검사를 못 했어" in got["side"]  # 사이드바
+    assert "✕ 막힘 1건 — “막힌 일” 세션에서" in got["ann"] and "? 확인 못 함 1건 — “못 한 일” 세션에서" in got["ann"]
+    assert "내 차례 1건 — “질문 일” 세션에서 답이 필요해" in got["ann"]  # 제목에 조사가 바로 붙지 않는다
+    # 풀린 막힘(뒤에 말이 이어짐)과 목록이 열림 여부를 안 알려 주는 옛 서버는 막힘으로 치지 않는다
+    calm = _smoke(tmp_path, "", [_session("s3", status="idle", lastBlock={"t": 4, "kind": "blocked", "open": False}), _session("s5", status="idle", lastBlock={"t": 4, "kind": "blocked"})])
+    assert "<span.tagx.fail>" not in calm["dump"] and "✕ 막힘" not in calm["ann"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_open_block_card_comes_before_flow_picker_and_has_next_steps(tmp_path):
+    """#791: 막힘이 열려 있으면 갈래 선택·다음 단계보다 "고친 뒤 이어서" 안내가 먼저, 직접 보기 뒤 다음 할 일과 되돌리기, 원문·고치는 법 중복 없음."""
+    chat = [{"t": 1, "role": "me", "text": "문서 써 줘"}, _BLOCK]
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, flowId=None, flowName=None, flowSteps=[], stepIndex=0)])
+    assert "막힌 걸 고친 뒤 이어서 하자" in got["text"] and "어떤 일인가요?" not in got["text"] and "그래도 먼저 일 고르기" in got["text"]
+    skipped = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, flowId=None, flowName=None, flowSteps=[], stepIndex=0)], actions=[{"click": "[data-hold-skip]"}])
+    assert "어떤 일인가요?" in skipped["text"] and "막힌 걸 고친 뒤 이어서 하자" not in skipped["text"]
+    # 막힘이 풀리면(뒤에 AI 말) 안내가 사라진다
+    solved = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat + [{"t": 4, "role": "ai", "text": "고쳤어."}], flowId=None, flowName=None, flowSteps=[], stepIndex=0)])
+    assert "막힌 걸 고친 뒤 이어서 하자" not in solved["text"] and "어떤 일인가요?" in solved["text"]
+    # 직접 보기 뒤: 다음 할 일, [다 고쳤어, 이어서 해 줘], [다시 고르기]
+    mine = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-self]"}])
+    assert "직접 보기로 했어." in mine["text"] and "다 고쳤어, 이어서 해 줘" in mine["text"] and "다시 고르기" in mine["text"]
+    back = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-self]"}, {"click": "[data-block-undo]"}])
+    assert "직접 보기로 했어." not in back["text"] and "내가 직접 볼게" in back["text"]
+    # 원문을 펼쳐도 "다음:" 줄과 "고치는 법" 이 같은 글로 두 번 나오지 않는다
+    raw = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-raw]"}])
+    assert "자세한 위반 목록입니다." in raw["text"] and raw["text"].count("개요 절을 추가하십시오.") == 1 and "다음: 개요" not in raw["text"]
+    # 보낼 수 없는(터미널) 세션: 보내는 단추 대신 터미널에서 하라는 안내
+    term = _smoke(tmp_path, "s/s1", [_session("s1", chat=[_UNSURE], canSend=False, managed=False, cannotSendReason="쉬는 터미널 세션입니다.")])
+    assert "검사 다시 돌리기" not in term["text"] and "터미널에서 같은 일을 다시 시켜 줘" in term["text"]
+    term2 = _smoke(tmp_path, "s/s1", [_session("s1", chat=[_BLOCK], canSend=False, managed=False, cannotSendReason="쉬는 터미널 세션입니다.")])
+    assert "그렇게 고쳐 줘" not in term2["text"] and "터미널에서 고쳐 줘" in term2["text"] and "<p.note-attn>" in term2["dump"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")

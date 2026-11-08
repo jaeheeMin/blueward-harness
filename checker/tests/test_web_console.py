@@ -6100,6 +6100,14 @@ def test_session_list_carries_last_block_time_and_kind_for_notifications(browser
     assert {s["id"]: s for s in browser.call("GET", "/api/sessions")[1]}["b4"]["lastBlock"] is None
 
 
+def test_last_block_is_open_until_user_or_ai_speaks_again(browser):
+    """#790: 목록의 lastBlock.open 은 막힘 뒤에 내 말·AI 말이 없을 때만 참(홈·사이드바가 막힘으로 보이는 근거)."""
+    _blocked(browser, "b5", "문서가 템플릿을 따르지 않습니다.")
+    assert {s["id"]: s for s in browser.call("GET", "/api/sessions")[1]}["b5"]["lastBlock"]["open"] is True
+    browser.event("b5", "UserPromptSubmit", prompt="그렇게 고쳐 줘")
+    assert {s["id"]: s for s in browser.call("GET", "/api/sessions")[1]}["b5"]["lastBlock"]["open"] is False
+
+
 # 실제 훅 사유 문구 대입(검토 지적: 단어만 시험하면 실제 문구가 빠진다)
 @pytest.mark.parametrize("reason, kind", [
     ("임시 파일을 만들지 못해 검사 엔진의 판을 정하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오.", "cannot_check"),
