@@ -200,13 +200,15 @@ def test_bash_git_guard_reports_and_output_is_unchanged(recorder, tmp_path):
 @pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
 @pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 훅이 모든 git 명령을 거부한다")
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv 가 없으면 bash 훅이 보고를 보낼 수 없다")
-def test_stop_deliver_does_not_report(recorder, tmp_path):
-    # 커밋 안 된 변경 알림은 오류가 아니라 안내라서 콘솔 막힘 카드로 보내지 않는다(턴마다 빨간 카드가 쌓인다)
+def test_stop_deliver_reports_and_output_is_unchanged(recorder, tmp_path):
+    # #650 에서는 안내라서 보내지 않았으나 #765 에서 막는 훅은 모두 알리도록 바꿨다(출력은 그대로)
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", "-b", "feat/1-work", str(repo)], check=True)
     (repo / "a.txt").write_text("x", encoding="utf-8")
     stdin = json.dumps({"session_id": "s1", "hook_event_name": "Stop", "cwd": str(repo), "stop_hook_active": False})
     env = dict(os.environ, HARNESS_CONSOLE_PORT=str(recorder.port))
     up = subprocess.run([_BASH, str(HOOKS / "stop-deliver.sh")], input=stdin.encode("utf-8"), env=env, capture_output=True, timeout=180)
-    assert json.loads(up.stdout.decode("utf-8"))["decision"] == "block"
-    assert recorder.got == []
+    out = json.loads(up.stdout.decode("utf-8"))
+    assert out["decision"] == "block"
+    (path, body), = recorder.got
+    assert path == "/hooks/blocked" and body["hook"] == "stop-deliver" and body["reason"] == out["reason"]
