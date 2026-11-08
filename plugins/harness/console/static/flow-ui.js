@@ -1277,7 +1277,7 @@
         page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), prTile, weekTile, tbTile));  // 시안 G-11 순서 + G-24 다섯째 칸
         page.appendChild(fixBox);  // 시안 G-24: 타일 줄 바로 아래
 
-        var todo = list.filter(function (s) { return L.groupOf(s) === 'todo' && !L.blockOf(s); });  // 막힘·확인 못 함은 내 차례 숫자와 따로(#790)
+        var todo = list.filter(function (s) { return L.groupOf(s) === 'todo' && !L.blockOf(s) && !(L.prNeedsFix(s) && !pendingOf(s) && !s.askedInText); });  // 막힘·확인 못 함은 내 차례 숫자와 따로(#790)
         // 내 차례는 가장 오래 기다린 한 건만 카드로 두고, 나머지는 "외 n건" 을 눌러 펼친다(펼침 상태는 이 화면에서만 기억).
         var waiting = todo.slice().sort(function (a, b) { return (a.updatedAt || 0) - (b.updatedAt || 0); });
         function callCard(s) {

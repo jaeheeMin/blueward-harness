@@ -192,6 +192,18 @@ const cases = {
     assert.strictEqual(L.summaryText(L.counts(list)), '세션 5개 · 일하는 중 2 · 내 차례 2 · 쉬는 중 1');
     assert.strictEqual(L.summaryText(L.counts([])), '세션 0개 · 일하는 중 0 · 내 차례 0 · 쉬는 중 0');
   },
+  fix_pr_counts_as_todo() {
+    // 시안 G-24: 검사 실패한 내 PR 세션은 내 차례. 일하는 중·끝난 세션·막힘은 아니다
+    const pr = { number: 812, state: 'OPEN', checks: 'fail' };
+    const fix = { id: 1, group: 'idle', status: 'idle', flowPr: pr };
+    assert.strictEqual(L.groupOf(fix), 'todo');
+    assert.strictEqual(L.groupOf({ id: 2, group: 'running', status: 'running', flowPr: pr }), 'running');
+    assert.strictEqual(L.groupOf({ id: 3, group: 'idle', status: 'ended', flowPr: pr }), 'idle');
+    assert.strictEqual(L.groupOf({ id: 4, group: 'idle', status: 'idle', flowPr: { number: 3, state: 'OPEN', checks: 'pending' } }), 'idle');
+    const blocked = { id: 5, group: 'idle', status: 'idle', flowPr: pr, lastBlock: { kind: 'blocked', open: true } };
+    const c = L.counts([fix, blocked]);
+    assert.strictEqual(c.todo, 1); assert.strictEqual(c.blocked, 1);
+  },
   same_folder() {
     const a = { id: 'a', cwd: 'C:\\Work\\Proj\\', status: 'idle' };
     const list = [a, { id: 'b', cwd: 'c:/work/proj', status: 'running' }, { id: 'c', cwd: 'c:/work/proj', status: 'ended' }, { id: 'd', cwd: 'c:/other', status: 'idle' }];
@@ -543,6 +555,9 @@ const cases = {
     // 세션이 있고 보낼 수 있으면 그 세션에 말을 보낸다
     find(rows[0], e => e.tag === 'button')[0].click(); await tick(); await tick();
     assert.strictEqual(sent.length, 1); assert.ok(sent[0].includes('#812') && sent[0].includes('자동 검사가 실패'));
+    // 내 차례로 세지만(홈 타일 숫자) 노랑 내 차례 카드는 없다 — 빨간 줄이 그 일을 한다
+    assert.strictEqual(find(root, e => e.attrs['data-call']).length, 0);
+    assert.strictEqual(find(root, e => (e.attrs['class'] || '').includes('tile2') && e.textContent.startsWith('내 차례'))[0].textContent.replace(/\D+/g, ''), '1');
     // 세션 표 칩은 "고쳐야 함"
     assert.strictEqual(find(find(root, e => e.attrs['data-session'] === 'a')[0], e => (e.attrs['class'] || '') === 'tag')[0].textContent, '고쳐야 함');
     // 기록을 못 읽으면 0건이 아니라 확인 못 함, 내 PR 을 못 읽으면 줄이 아니라 확인 못 함 줄
@@ -1014,7 +1029,7 @@ def test_app_frame_ann_only_with_todo_and_menu_paths():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     # 맨 위 띠는 내 차례가 없으면 만들지 않는다
     ann = app[app.index("function renderAnn"):app.index("function projectOf")]
-    assert re.search(r"clear\(annEl\);\s*if \(d\.todo\.length\) \{", ann) and "내 차례 ' + d.todo.length + '건 — “' + first.sname + '” 세션에서 답이 필요해" in ann  # 제목에 조사가 바로 붙지 않게(#790)
+    assert re.search(r"clear\(annEl\);\s*if \(d\.todo\.length\) \{", ann) and "내 차례 ' + d.todo.length + '건 — ' + (first.fix ?" in ann and "'“' + first.sname + '” 세션에서 답이 필요해'" in ann and "'“' + first.sname + '” PR 의 검사 실패를 고쳐야 해'" in ann  # 제목에 조사가 바로 붙지 않게(#790), 검사 실패 PR 은 고치라는 문구(G-24)
     # 메뉴: 내 일 → /, 작업 → 가장 위 세션, 산출물 → /docs, 새 작업 → /new, 설정 → /settings.
     head = app[app.index("function renderHead"):app.index("function renderSide")]
     assert "link('/', { text: '내 일'" in head and "link(newHref(), { text: '새 작업'" in head and "link('/settings'" in head
@@ -1474,6 +1489,10 @@ def test_first_run_start_leads_to_project_pick_then_home_or_prepare_screen(tmp_p
         assert need in text, need
     assert "환영해" not in text and not got["posts"]  # 아직 아무것도 기억시키지 않았다
     assert "data-pick-ok" in (STATIC / "app.js").read_text(encoding="utf-8") and "disabled: !sel || busy" in (STATIC / "app.js").read_text(encoding="utf-8")  # 고르기 전에는 [이 프로젝트로] 가 막혀 있다
+    assert "REready2" in text and "NEneeds" in text  # 머리글자: 한 단어면 앞 두 글자(시안 G-02: 단어가 둘이면 단어 첫 글자 HC·PC)
+    # 시안 G-02: 첫 줄(가장 최근 폴더)이 처음부터 골라져 있어 아무것도 안 눌러도 [이 프로젝트로] 를 누를 수 있다
+    pre = _smoke(tmp_path, "", [], extra=extra, actions=start + [{"click": "[data-pick-ok]"}])
+    assert any("/api/folders/last" in str(p_) for p_ in pre["posts"]), pre["posts"]
     # 카드를 눌러도 확정되지 않는다
     sel = _smoke(tmp_path, "", [], extra=extra, actions=start + [{"click": "[data-pick-folder]", "index": 0}])
     assert not sel["posts"]

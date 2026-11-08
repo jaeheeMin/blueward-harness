@@ -31,9 +31,13 @@
   function lower(v) { return String(v == null ? '' : v).toLowerCase(); }
 
   function groupOf(s) {
-    if (s.group === 'todo' || s.group === 'running' || s.group === 'idle') return s.group;
-    if (arr(s.pendingRequestIds).length || s.turnSkill || s.askedInText) return 'todo';
-    return s.status === 'running' || s.status === 'starting' ? 'running' : 'idle';
+    var g;
+    if (s.group === 'todo' || s.group === 'running' || s.group === 'idle') g = s.group;
+    else if (arr(s.pendingRequestIds).length || s.turnSkill || s.askedInText) g = 'todo';
+    else g = s.status === 'running' || s.status === 'starting' ? 'running' : 'idle';
+    // 시안 G-24: 내 PR 의 검사가 실패한 세션(일하는 중 아님·끝난 세션 아님)은 고칠 차례라 내 차례로 센다. 막힘(✕·?)은 호출한 쪽이 따로 거른다.
+    if (g === 'idle' && s.status !== 'ended' && prNeedsFix(s)) return 'todo';
+    return g;
   }
 
   /* 훅이 막아 아직 풀리지 않은 세션(#790). { kind: 'blocked'(✕ 막힘) | 'cannot_check'(? 확인 못 함), t } 또는 null.
