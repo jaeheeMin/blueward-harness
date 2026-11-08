@@ -167,7 +167,7 @@
   var loadedOnce = false;
   var reqFetching = {};
   var SKILL_LABELS = {
-    start: '작업 시작', sync: '최신 받기', deliver: '제출하기', wrapup: '이슈로 남기기', srs: '요구사항 문서',
+    start: '작업 시작', sync: '최신 받기', deliver: '제출하기', wrapup: '남은 일 적어 두기', srs: '요구사항 문서',
     spec: '개발 Spec', scaffold: '구조 만들기', atc: 'ATC 고치기', prs: '내 PR', approvals: '승인 대기',
     version: '버전 보기', update: '업데이트', open: '콘솔 열기'
   };
@@ -867,18 +867,17 @@
     items.forEach(function (it, i) { total += it.lines.length; if (total > 8 && cut === items.length && i > 0) cut = i; });
     if (!whatsMore && cut < items.length) shown = items.slice(0, cut);
     var body = h('div', { class: 'wn-list' }, shown.map(function (it) {
-      return h('div', { class: 'wn-ver', 'data-wn-ver': it.version },
-        h('span', { class: 'wn-v mono', text: it.version }),
+      return h('div', { class: 'wn-ver', 'data-wn-ver': it.version, title: '하네스 ' + it.version },  // 판 번호는 글로 보이지 않고 마우스를 올리면 나온다(#794)
         h('ul', null, it.lines.map(function (t) { return h('li', { text: t }); })));
     }));
     var acts = [h('button', { type: 'button', class: 'pill dark', 'data-wn-ok': '1', text: '알겠어', onClick: function () {
       api('POST', '/api/whats-new/seen', {}).then(function () { whatsNew = null; whatsNote = ''; drawWhatsNew(); },
         function (e) { whatsNote = '본 판을 남기지 못했어 · ' + (e && e.message || ''); drawWhatsNew(); });
     } })];
-    if (!whatsMore && cut < items.length) acts.unshift(h('button', { type: 'button', class: 'pill ghost', 'data-wn-more': '1', text: '더 보기', onClick: function () { whatsMore = true; drawWhatsNew(); } }));
+    if (cut < items.length) acts.unshift(h('button', { type: 'button', class: 'pill ghost', 'data-wn-more': '1', 'aria-expanded': String(whatsMore), text: whatsMore ? '접기' : '더 보기', onClick: function () { whatsMore = !whatsMore; drawWhatsNew(); } }));
     slot.appendChild(h('section', { class: 'wn', 'data-whats-new': '1' },
       h('span', { class: 'eb accent', text: '이번에 바뀐 것' }),
-      h('h2', { text: '하네스가 새 판(' + whatsNew.current + ')으로 바뀌었어 · 이번에 바뀐 것' }),
+      h('h2', { text: '하네스가 새로 바뀌었어 · 이번에 바뀐 것' }),
       body,
       whatsNote ? h('p', { class: 'wn-note', text: whatsNote }) : null,
       h('div', { class: 'wn-acts' }, acts)));
@@ -1304,26 +1303,30 @@
     // 하네스 훅이 막은 이유(#650): 막힘은 빨간 ✕ 카드, 검사를 못 해 멈춘 건 보라 점선 ? 카드
     var HOOK_NAMES = {
       'pre-bash-git-guard': 'git 명령 검사', 'stop-deliver': '마무리 확인', 'pre_write_guard': '파일 쓰기 검사',
-      'agent_delegation_guard': '서브에이전트 호출 검사', 'mcp_source_guard': 'SAP 소스 쓰기 검사'
+      'agent_delegation_guard': '서브에이전트 호출 검사', 'mcp_source_guard': 'SAP 소스 쓰기 검사', 'activation_gate': '활성화 확인'
     };
     function chatBlock(c, s) {
-      var cannot = c.kind === 'cannot_check', name = HOOK_NAMES[c.hook] || String(c.hook || '하네스 훅');
+      var cannot = c.kind === 'cannot_check', name = HOOK_NAMES[c.hook] || (/[A-Za-z]/.test(String(c.hook || '')) ? '하네스 검사' : String(c.hook || '하네스 훅'));  // 모르는 훅 이름은 영문 그대로 내지 않는다(#794)
       var text = String(c.text || ''), fix = String(c.fix || '').trim(), key = 'b' + String(c.t), open = !!chatOpen[key];
       // 원문 끝의 "다음: …" 줄은 아래 "고치는 법" 과 같은 글이라, 고치는 법이 있으면 원문에서는 뺀다(#791: 두 번 나오지 않게)
       var cut = fix ? text.search(/(^|\n)[ \t]*다음:/) : -1, body = cut >= 0 ? text.slice(0, cut) : text;
       var lines = body.split('\n'), first = lines[0].trim(), rest = lines.slice(1).join('\n').trim();
       var m = first.match(/^(.+?[.!?。](?=\s|$))\s*(.*)$/);  // 첫 문장은 크게, 나머지는 접기
       var head = m ? m[1] : first, more = ((m ? m[2] : '') + (rest ? '\n' + rest : '')).trim();
+      // 영문 도구·훅 이름은 카드 본문에 그대로 두지 않고 쉬운 말로 바꿔 보인다(#794). 원문은 "검사 원문" 안에만 있고, AI 에게 보내는 글도 원문을 쓴다.
+      var PW = window.BHLogic.plainReason, headShow = PW(head), fixShow = PW(fix), moreShow = PW(more);
+      var changed = headShow !== head || fixShow !== fix || moreShow !== more;
+      var rawShow = changed ? (head + (more ? '\n' + more : '') + (fix ? '\n고치는 법: ' + fix : '')).trim() : more;
       var card = h('div', { class: 'bad q ' + (cannot ? 'unsure' : 'blocked'), 'data-chat': 'block', 'data-block-kind': cannot ? 'cannot_check' : 'blocked' });
       card.appendChild(h('span', { class: 'tagx ' + (cannot ? 'unk' : 'fail'), text: cannot ? '? 확인 못 함' : '✕ 막힘' }));
       card.appendChild(h('b', { class: 'bt', text: (cannot ? '검사를 못 해서 멈췄어 · ' : '하네스 검사가 막았어 · ') + name }));
-      card.appendChild(h('span', { class: 'sm', 'data-block-head': '1', text: head }));
-      if (more && open) card.appendChild(h('span', { class: 'sm', 'data-block-more': '1', text: more }));
-      if (fix) card.appendChild(h('span', { class: 'sm', 'data-block-fix': '1', text: '고치는 법: ' + fix }));
+      card.appendChild(h('span', { class: 'sm', 'data-block-head': '1', text: headShow }));
+      if (rawShow && open) card.appendChild(h('span', { class: changed ? 'sm mono' : 'sm', 'data-block-more': '1', text: rawShow }));
+      if (fix) card.appendChild(h('span', { class: 'sm', 'data-block-fix': '1', text: '고치는 법: ' + fixShow }));
       // 시안 G-16: 막힘 [그렇게 고쳐 줘](진한) [내가 직접 볼게](테두리) [검사 원문](글자) /
       //            확인 못 함 [검사 다시 돌리기](진한) [관리자에게 알리기](테두리). 보낼 수 없는 세션이면 보내는 단추는 빼고 나머지만.
       var hkey = 'h' + String(c.t), mine = !!chatOpen[hkey], note = chatOpen['n' + String(c.t)] || '';
-      var raw = more ? h('button', { type: 'button', class: 'pill line quiet-edge', 'data-block-raw': '1', 'aria-expanded': String(open),
+      var raw = rawShow ? h('button', { type: 'button', class: 'pill line quiet-edge', 'data-block-raw': '1', 'aria-expanded': String(open),
         onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, open ? '원문 접기' : '검사 원문') : null;
       // 시안 G-23: 막힘 카드 아래 "비슷한 기록 n건 — …" 한 줄(막힘 사유 낱말로 지난 기록을 찾는다). 확인 못 함 카드에는 두지 않는다.
       var simRow = cannot ? null : tb.similarRow(s, c, name + ' 막힘 ' + head, function () { if (built) paintMsgs(cur()); });
@@ -1677,11 +1680,12 @@
       var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background;
       var det = h('details', { class: 'more', open: !friendly }, h('summary', { text: tool === 'Bash' ? '자세히 (명령 원문)' : '자세히 (바뀌는 내용)' }), rows);
       var kv = h('dl', { class: 'kv' });
-      [['세션', s.title || sid()], ['브랜치', s.branch], ['도구 이름', tool], ['요청 ID', rid]].forEach(function (r) { if (r[1]) { kv.appendChild(h('dt', { text: r[0] })); kv.appendChild(h('dd', { class: 'mono', text: String(r[1]) })); } });
-      det.appendChild(kv);
-      /* 입력 전체는 항상 이 안에 있다. 사용자가 무엇을 허락하는지 가려지면 안 된다(MCP, Agent, Skill 등 목록에 없는 도구 포함). */
-      det.appendChild(h('h2', { class: 'label', text: '도구에 넘기는 입력 전체' }));
-      det.appendChild(h('pre', { class: 'box scroll', tabindex: '0', 'aria-label': '도구 입력 전체', text: JSON.stringify(input, null, 2) }));
+      [['세션', s.title || sid()], ['브랜치', s.branch], ['도구 이름', tool], ['요청 번호', rid]].forEach(function (r) { if (r[1]) { kv.appendChild(h('dt', { text: r[0] })); kv.appendChild(h('dd', { class: 'mono', text: String(r[1]) })); } });
+      /* 도구 이름·요청 번호·입력 전체는 팀원이 몰라도 되는 기술 정보라 한 겹 더 접어 둔다(#794). 무엇을 허락하는지는 위 "자세히" 의 명령·파일 줄에 그대로 있다. */
+      var tech = h('details', { class: 'more', 'data-tech-fold': '1' }, h('summary', { text: '기술 정보' }), kv);
+      tech.appendChild(h('h2', { class: 'label', text: '도구에 넘기는 입력 전체' }));
+      tech.appendChild(h('pre', { class: 'box scroll', tabindex: '0', 'aria-label': '도구 입력 전체', text: JSON.stringify(input, null, 2) }));
+      det.appendChild(tech);
       card.appendChild(det);
 
       if (isPending()) {

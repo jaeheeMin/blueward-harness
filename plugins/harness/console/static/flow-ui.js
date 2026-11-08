@@ -290,7 +290,7 @@
       function askNext(opt, editFirst) {
         modal({
           title: '"' + opt.label + '" 로 넘어갈까요?',
-          body: [h('p', { text: '인계하고 새 세션으로 넘어갑니다. 지금 세션에서 한 일을 정리해 새 세션에 넘겨요.' })],
+          body: [h('p', { text: '지금 세션에서 한 일을 정리해 새 세션으로 넘어갑니다.' })],
           confirmText: '넘어가기', onConfirm: function () { startNext(opt, editFirst); }
         });
       }
@@ -305,7 +305,7 @@
       }
       // 인계 결과를 사람이 보고 새 세션을 시작한다: [이대로 새 세션 시작] [고쳐서 시작] [취소]
       function askStart(jobId, prompt, warning, edit) {
-        var box = h('textarea', { class: 'textarea', rows: '10', readOnly: true, 'aria-label': '새 세션에 보낼 인계 글', maxlength: '4000' });
+        var box = h('textarea', { class: 'textarea', rows: '10', readOnly: true, 'aria-label': '새 세션에 보낼 이어 가기 글', maxlength: '4000' });
         box.value = prompt;
         function begin(path, body, label) {
           st.busy = true; st.job = label; st.msg = ''; draw();
@@ -314,7 +314,7 @@
         }
         modal({
           title: '새 세션에 이 글을 보낼까요?',
-          body: [h('p', { class: 'note-muted', text: '지금 세션이 정리한 인계 글이에요. 읽어 보고 그대로 시작하거나, 고쳐서 시작하세요.' }),
+          body: [h('p', { class: 'note-muted', text: '지금 세션이 정리한 이어 가기 글이에요. 읽어 보고 그대로 시작하거나, 고쳐서 시작하세요.' }),
                  warning ? h('p', { class: 'note-attn', role: 'status', text: warning }) : null, box],
           confirmText: '이대로 새 세션 시작',
           validate: function () { return box.value.trim() ? '' : '보낼 글이 비어 있어요.'; },
@@ -422,7 +422,7 @@
             if (main) {
               var hand = h('div', { class: 'handoff-list', 'data-handoff-list': '1' }, h('span', { class: 'eb', text: '새 세션에 넘길 것' }));
               if (main.ids && main.ids.length) hand.appendChild(h('span', { text: '· ' + main.ids.join(', ') + ' — ' + main.ids.map(function (i) { return 'DEV-' + i.slice(4); }).join(', ') + ' 번호로 ' + first.short + ' 하기' }));
-              hand.appendChild(h('span', { text: '· 지금까지 한 일과 남은 일 — 인계 글에 정리해서 넘겨' }));
+              hand.appendChild(h('span', { text: '· 지금까지 한 일과 남은 일 — 정리해서 넘겨' }));
               hand.appendChild(h('span', { text: '· 지켜야 할 규칙과 이 세션 상태(브랜치 · 열린 PR) — 시작 전에 읽고 고칠 수 있어' }));
               box.appendChild(hand);
             }
