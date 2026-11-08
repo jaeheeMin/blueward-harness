@@ -509,7 +509,9 @@
   }
   /* 세션 한 줄 상태. 내 차례면 tone 이 attn 이다. */
   function sideStatus(s) {
-    var g = groupOf(s);
+    var g = groupOf(s), L = window.BHLogic;
+    // 시안 G-24: PR 검사가 실패한 세션(AI 가 일하는 중이 아닐 때)은 "PR #n 고쳐야 함". 내 차례 세션이면 tone 은 그대로 attn.
+    if (g !== 'running' && s.status !== 'ended' && L && L.prNeedsFix(s) && !firstPending(s)) return { tone: g === 'todo' ? 'attn' : '', fix: true, text: 'PR #' + s.flowPr.number + ' 고쳐야 함' };
     if (g === 'todo') {
       var p = firstPending(s);
       var verb = p ? (!p.r ? '요청 확인하기' : kindOf(p.r) === 'question' ? '답하기' : '승인하기') : s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기';
@@ -786,7 +788,7 @@
         h('span', { class: 'sinfo' },
           h('span', { class: 'n', text: sessionTitle(s) }),
           bar,
-          h('small', { class: st.tone === 'attn' ? 'w' : '', title: st.text, text: st.text }))));
+          h('small', { class: st.tone === 'attn' || st.fix ? 'w' : '', title: st.text, text: st.text }))));
     });
     nav.appendChild(list);
     var foot = h('div', { class: 'nav-foot' });

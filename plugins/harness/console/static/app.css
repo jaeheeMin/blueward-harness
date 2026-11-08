@@ -480,6 +480,22 @@ table.sheet td { padding: 4px 10px; border: 1px solid var(--line); vertical-alig
 .tile2.unk { border: 1.5px dashed var(--st-unk); }
 .tile2.unk .v { font-size: 14px; color: var(--st-unk-ink); }
 .tile2.unk .v::before { content: '? '; font-weight: 700; }
+/* 시안 G-24: 팀 기록 칸(다섯째 타일)과 "고쳐야 할 내 PR" 줄 */
+.tile2 .acts .pill.line.sm { padding: 5px 14px; }
+.tile2 .tline { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.tile2 .tline b { font-weight: 600; }
+.tile2 .tline b.w { color: var(--attn); }
+.tile2.unk .tline { color: var(--st-unk-ink); }
+.tile2.unk .tline::before { content: '? '; font-weight: 700; }
+.fixbox { display: flex; flex-direction: column; gap: 16px; }
+.fixbox:empty { display: none; }
+.fixpr { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 16px 18px; border: 2px solid var(--danger); border-radius: var(--rc); background: var(--card); color: var(--lightink); }
+.fixpr .ft { flex: 1 1 300px; min-width: 0; }
+.fixpr .eb { color: var(--lmuted); }
+.fixpr b { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.fixpr b a { color: inherit; }
+.fixpr.unk { border: 2px dashed var(--st-unk); }
+.fixpr .quiet { font-size: 13px; color: var(--lmuted); }
 .call { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 16px 18px; border-radius: var(--rc); background: var(--attn); color: var(--lightink); }
 .call:hover { color: var(--lightink); }
 .call .ct { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

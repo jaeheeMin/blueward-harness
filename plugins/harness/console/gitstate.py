@@ -434,3 +434,19 @@ def approval_prs(run: Runner, cwd: str, rel_file: str, when_no_file: str) -> dic
                       "staleApproval": any(r.get("state") == "APPROVED" for r in mine)})
     items.sort(key=lambda i: i["number"] or 0)
     return dict(out_base, items=items)
+
+
+def my_open_prs(run: Runner, cwd: str) -> dict:
+    """내가 올린 열린 PR(세션과 상관없이). {"state": "ok"|"no"|"unknown", "reason", "items": [{number,title,url,branch,checks}]}.
+    checks 는 summarize_checks 의 fail/pending/pass/none. 읽지 못하면 빈 목록이 아니라 unknown 이다."""
+    if not is_github_repo(run, cwd):
+        return {"state": "no", "reason": "git 원격이 GitHub 인 저장소가 아닙니다.", "items": []}
+    rc, out = run(["gh", "pr", "list", "--author", "@me", "--state", "open", "--limit", str(PR_LIST_LIMIT), "--json",
+                   "number,title,url,headRefName,statusCheckRollup"], cwd)
+    data = _json(out) if rc == 0 else None
+    if not isinstance(data, list):
+        return {"state": "unknown", "reason": "gh 로 내 PR 목록을 읽지 못했습니다(gh 로그인·네트워크 확인).", "items": []}
+    items = [{"number": d.get("number"), "title": d.get("title", ""), "url": d.get("url", ""), "branch": d.get("headRefName", ""),
+              "checks": summarize_checks(d.get("statusCheckRollup"))} for d in data if isinstance(d, dict) and d.get("number")]
+    items.sort(key=lambda i: i["number"])
+    return {"state": "ok", "reason": "", "items": items}
