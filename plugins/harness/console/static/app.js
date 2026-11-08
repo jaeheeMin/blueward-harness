@@ -580,7 +580,10 @@
     if (f.checking) return { cls: '', text: '확인하는 중' };
     return { cls: 'unk', text: '확인 못 함' };
   }
-  var introPage = 'welcome', firstPickFolder = null;  // 첫 화면 두 쪽(01 환영 → 02 프로젝트 고르기) · 02 에서 준비 안 된 폴더를 골랐을 때 새 작업 화면이 03 을 띄울 폴더
+  // 시작하기를 누른 뒤 새로고침해도 01 로 돌아가지 않게 02 쪽에 있다는 표시를 브라우저에 남긴다(#796). 접근이 막히면 01 부터.
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* 저장이 막혀도 화면은 그대로 */ } }
+  var introPage = lsGet('bh-intro-page') === 'project' ? 'project' : 'welcome', firstPickFolder = null;  // 첫 화면 두 쪽(01 환영 → 02 프로젝트 고르기) · 02 에서 준비 안 된 폴더를 골랐을 때 새 작업 화면이 03 을 띄울 폴더
 
   /* 시안 G-02 프로젝트 고르기. 카드는 고름 표시만 하고, [이 프로젝트로] 가 서버에 마지막 폴더로 기억시키고 첫 실행 표시를 남긴다.
      준비 안 됨이고 안내를 아직 안 봤으면 03(새 작업 화면의 프로젝트 준비), 아니면 홈(04). */
@@ -638,7 +641,7 @@
         var p = (d && d.path) || sel;
         function leave(path) { if (path === location.pathname + location.search) renderRoute(); else go(path); }
         return api('POST', '/api/start-checks/seen', {}).then(function () { if (startData) startData.firstRun = false; }, function () { introSkip = true; /* 표시를 못 남겨도 홈으로 간다 */ }).then(function () {
-          introForce = false; introPage = 'welcome';
+          introForce = false; introPage = 'welcome'; lsSet('bh-intro-page', null);
           if (f.ready === 'yes') return leave('/');
           return api('GET', '/api/folders/intro' + qs({ path: p })).then(function (i) { return i && i.show === true; }, function () { return false; }).then(function (show) {
             if (show) { firstPickFolder = p; leave('/new'); } else leave('/');
@@ -671,7 +674,7 @@
       }
       box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: msg, hidden: !msg }));
       box.appendChild(h('div', { class: 'acts end' },
-        h('button', { type: 'button', class: 'pill line', 'data-pick-back': '1', text: '뒤로', onClick: function () { clearTimeout(timer); introPage = 'welcome'; renderRoute(); } }),
+        h('button', { type: 'button', class: 'pill line', 'data-pick-back': '1', text: '뒤로', onClick: function () { clearTimeout(timer); introPage = 'welcome'; lsSet('bh-intro-page', null); renderRoute(); } }),
         h('button', { type: 'button', class: 'pill dark', 'data-pick-ok': '1', disabled: !sel || busy, text: busy ? '기억하는 중' : '이 프로젝트로', onClick: confirmPick })));
       wrap.appendChild(box);
     }
@@ -683,7 +686,7 @@
     if (introPage === 'project' && !blocking) return projectPickView();
     var rows = (d.checks && d.checks.length ? d.checks : ['github', 'version', 'claude'].map(function (id) { return { id: id, name: names[id], state: 'wait', detail: '확인하는 중이야' }; }));
     var CL = { ok: 'ok', fail: 'fail', old: 'wait', unknown: 'unk', wait: 'wait' };
-    function done() { introPage = 'project'; renderRoute(); }
+    function done() { introPage = 'project'; lsSet('bh-intro-page', 'project'); renderRoute(); }
     var list = h('div', { class: 'checks' }, rows.map(function (c) {
       var kids = [h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: c.name }), h('span', { class: 'ct mono', text: c.detail || '' })];
       if (c.fix && (c.state === 'fail' || c.state === 'old')) kids.push(h('span', { class: 'fix', text: c.fix }));
@@ -1179,9 +1182,9 @@
     function paintNotices(s) {
       var notices = [], top = [];
       // 시안 G-18: 기억이 90% 이상 찼으면 제목 위 맨 꼭대기에 노란 배너, [새 세션으로 넘기기](진한) [계속하기](테두리).
-      // [계속하기] 는 이 화면을 다시 열 때까지만 닫는다.
+      // [계속하기] 는 그 세션에서는 새로고침해도 닫은 채로 둔다(localStorage, #796).
       var mem = window.BHLogic.memoryOf(s);
-      if (mem.kind === 'pct' && mem.level === 'hot' && s.status !== 'ended' && !memDismissed[s.id]) {
+      if (mem.kind === 'pct' && mem.level === 'hot' && s.status !== 'ended' && !memDismissed[s.id] && lsGet('bh-mem-ok:' + s.id) !== '1') {
         var canHand = s.managed && s.flowId && !s.handedOffTo;
         top.push(h('div', { class: 'banner mem', role: 'status', 'data-memory-banner': '1' },
           h('b', { class: 'mem-t', text: '이 세션 기억이 거의 찼어 (' + mem.pct + '%)' }),
@@ -1189,7 +1192,7 @@
             : '더 길어지면 앞 내용을 잊고 실수할 수 있어. ' + (s.managed ? '정해진 갈래가 없어서 여기서는 넘길 수 없어. 새 작업으로 시작해 줘.' : '터미널 세션이라 여기서는 넘길 수 없어. 터미널에서 /harness:handoff 를 불러 줘.') }),
           h('span', { class: 'acts mem-acts' },
             canHand ? h('button', { type: 'button', class: 'pill dark sm mem-go', text: '새 세션으로 넘기기', onClick: function () { parts.flow.handoffSame(cur()); } }) : null,
-            h('button', { type: 'button', class: 'pill line sm mem-stay', text: '계속하기', onClick: function () { memDismissed[s.id] = true; paintNotices(cur()); } }))));
+            h('button', { type: 'button', class: 'pill line sm mem-stay', text: '계속하기', onClick: function () { memDismissed[s.id] = true; lsSet('bh-mem-ok:' + s.id, '1'); paintNotices(cur()); } }))));
       }
       if (s.bypassPermissions || /bypass/i.test(String(s.permissionMode || ''))) {
         notices.push(h('div', { class: 'banner info' }, h('span', { text: '권한 우회 모드로 실행 중인 세션이야. 이 세션은 승인 요청이 발생하지 않아 콘솔에 승인 화면이 뜨지 않아.' })));
@@ -2597,7 +2600,7 @@
       sec.appendChild(set('연결 상태', h('div', null, crow('GitHub', conn.gh), crow('하네스 판', conn.ver), crow('프로젝트', conn.proj))));
 
       sec.appendChild(set('처음 화면', h('div', null,
-        h('button', { type: 'button', class: 'pill line', 'data-intro-again': '1', text: '처음 화면 다시 보기', onClick: function () { introForce = true; introSkip = false; introPage = 'welcome'; if (!startData) startData = { firstRun: false, blocking: false, checks: [] }; renderRoute(); loadStart(false); } }),
+        h('button', { type: 'button', class: 'pill line', 'data-intro-again': '1', text: '처음 화면 다시 보기', onClick: function () { introForce = true; introSkip = false; introPage = 'welcome'; lsSet('bh-intro-page', null); if (!startData) startData = { firstRun: false, blocking: false, checks: [] }; renderRoute(); loadStart(false); } }),
         h('p', { class: 'note-muted', text: '시작할 때 한 번 보이는 환영 화면과 자동 점검을 다시 봐.' }))));
 
       var model = modelChoice(), effort = effortChoice();
