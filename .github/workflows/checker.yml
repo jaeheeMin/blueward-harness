@@ -38,6 +38,15 @@ jobs:
       # 진짜 gitleaks 로 SAP 규칙·설정 이어받기·종료코드 구분을 확인하는 시험(9개)은 GITLEAKS_BIN 이
       # 없으면 건너뛴다(#662). 다른 워크플로와 같은 판을 공식 체크섬으로 고정해 받고, 다음 단계에 경로를 넘긴다.
       # 판을 올릴 때는 main-checks.yml·pr-checks.yml 의 GITLEAKS_VERSION·GITLEAKS_SHA256 과 함께 고친다.
+      # 받은 압축 파일 캐시(#804). 캐시에서 꺼낸 파일도 아래에서 sha256 을 다시 확인한다.
+      # 키의 8.30.1 은 아래 GITLEAKS_VERSION 과 같이 고친다.
+      - name: gitleaks 받은 파일 캐시 꺼내기
+        id: gl-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/gitleaks-dl
+          key: gitleaks-${{ runner.os }}-8.30.1
+
       - name: gitleaks 받기
         shell: bash
         env:
@@ -48,23 +57,44 @@ jobs:
           set -euo pipefail
           dir="$RUNNER_TEMP/gitleaks-bin"
           mkdir -p "$dir"
+          # 캐시에 없을 때만 내려받고, 일시 고장은 재시도로 넘긴다. sha256 이 다르면 파일을 지워(캐시에 저장되지 않게) 실패한다.
+          cache_dir="$HOME/.cache/gitleaks-dl"
+          mkdir -p "$cache_dir"
+          fetch_verified() { # $1 파일명 $2 sha256
+            local pkg="$cache_dir/$1"
+            if [ ! -f "$pkg" ]; then
+              curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o "$pkg.part" "$base/$1" || { rm -f "$pkg.part"; exit 1; }
+              mv "$pkg.part" "$pkg"
+            fi
+            if ! echo "$2  $pkg" | sha256sum -c -; then
+              rm -f "$pkg"
+              exit 1
+            fi
+            echo "GITLEAKS_CACHE_OK=1" >> "$GITHUB_ENV"
+          }
           base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
           if [ "$RUNNER_OS" = "Windows" ]; then
             pkg="gitleaks_${GITLEAKS_VERSION}_windows_x64.zip"
-            curl -fsSL --retry 3 -o "$RUNNER_TEMP/$pkg" "$base/$pkg"
-            echo "${GITLEAKS_SHA256_WINDOWS}  $RUNNER_TEMP/$pkg" | sha256sum -c -
-            unzip -q -o "$RUNNER_TEMP/$pkg" gitleaks.exe -d "$dir"
+            fetch_verified "$pkg" "$GITLEAKS_SHA256_WINDOWS"
+            unzip -q -o "$cache_dir/$pkg" gitleaks.exe -d "$dir"
             # bash 로 도는 훅 시험이 역슬래시 경로를 잘못 읽지 않게 C:/… 꼴로 바꾼다.
             bin="$(cygpath -m "$dir/gitleaks.exe")"
           else
             pkg="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-            curl -fsSL --retry 3 -o "$RUNNER_TEMP/$pkg" "$base/$pkg"
-            echo "${GITLEAKS_SHA256_LINUX}  $RUNNER_TEMP/$pkg" | sha256sum -c -
-            tar -xzf "$RUNNER_TEMP/$pkg" -C "$dir" gitleaks
+            fetch_verified "$pkg" "$GITLEAKS_SHA256_LINUX"
+            tar -xzf "$cache_dir/$pkg" -C "$dir" gitleaks
             bin="$dir/gitleaks"
           fi
           "$bin" version
           echo "GITLEAKS_BIN=$bin" >> "$GITHUB_ENV"
+
+      # 받아서 sha256 확인까지 통과했을 때만 저장한다(#804). 실패한 실행이 빈 캐시를 저장해 키를 차지하지 않게.
+      - name: gitleaks 받은 파일 캐시 저장
+        if: env.GITLEAKS_CACHE_OK == '1' && steps.gl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/gitleaks-dl
+          key: gitleaks-${{ runner.os }}-8.30.1
 
       - name: 테스트
         # -rs: 건너뛴 시험의 이름과 이유를 로그 끝에 남긴다. 팀원 PC(Windows)에서 건너뛰는
