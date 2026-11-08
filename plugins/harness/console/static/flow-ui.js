@@ -506,13 +506,13 @@
         if (!p.sheets.length) box.appendChild(h('p', { class: 'note-muted', text: '표가 비어 있어요.' }));
         else {
           var idx = Math.min(ctx.sheet, p.sheets.length - 1);
-          box.appendChild(h('div', { class: 'sheet-tabs', role: 'tablist' }, p.sheets.map(function (sh, i) {
+          if (!ctx.header || p.sheets.length > 1) box.appendChild(h('div', { class: 'sheet-tabs', role: 'tablist' }, p.sheets.map(function (sh, i) {
             return h('button', { type: 'button', role: 'tab', class: 'chip', 'aria-selected': String(i === idx), 'aria-pressed': String(i === idx), text: sh.name || ('시트 ' + (i + 1)),
               onClick: function () { ctx.setSheet(i); } });
           })));
           var rows = kit.listOf(p.sheets[idx], 'rows');
           var table = h('table', { class: 'sheet' }, h('tbody', null, rows.map(function (r) {
-            return h('tr', null, (Array.isArray(r) ? r : [r]).map(function (c) { return h('td', { text: c == null ? '' : String(c) }); }));
+            return h('tr', null, (Array.isArray(r) ? r : [r]).map(function (c) { return h(ctx.header && r === rows[0] ? 'th' : 'td', { text: c == null ? '' : String(c) }); }));
           })));
           box.appendChild(h('div', { class: 'md-table sheet-wrap' }, table));
           if (!rows.length) box.appendChild(h('p', { class: 'note-muted', text: '이 시트는 비어 있어요.' }));
@@ -593,20 +593,26 @@
         }, function (e) { st.say = failText(e, '보내기'); }).then(function () { if (alive) draw(); });
       }
 
+      // 시안 G-14: 한 줄에 이름 · 판 · 확장자 + 올림 칩. 크기·세션은 줄에 올려 두면 보이는 설명으로 둔다.
+      function rowTitle(entry) {
+        var f = entry.file;
+        return [f.path, f.size != null ? kit.fmtSize(f.size) : '', entry.session.title || ''].filter(Boolean).join(' · ');
+      }
       function row(entry, sub) {
-        var f = entry.file, on = st.sel === entry.key, c = entry.chip;
-        return h('button', { type: 'button', class: 'drow' + (on ? ' on' : '') + (sub ? ' sub' : ''), 'aria-pressed': String(on), 'data-path': f.path, onClick: function () { pick(entry); } },
-          h('span', { class: 'dn' }, h('b', { text: kit.baseName(f.path) }),
-            h('small', { text: [f.size != null ? kit.fmtSize(f.size) : '', entry.session.title || ''].filter(Boolean).join(' · ') })),
+        var f = entry.file, on = st.sel === entry.key, c = entry.chip, lb = L.docLabel(f.path);
+        var tail = lb.ver ? ' v' + lb.ver + ' · ' + lb.ext : '';
+        return h('button', { type: 'button', class: 'drow' + (on ? ' on' : '') + (sub ? ' sub' : ''), 'aria-pressed': String(on), 'data-path': f.path, title: rowTitle(entry), onClick: function () { pick(entry); } },
+          h('span', { class: 'dn' }, h('span', { class: 'dl' }, h('b', { text: lb.name }), tail ? h('span', { class: 'dv', text: tail }) : null)),
           c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text }) : null);
       }
       function listBox(all) {
-        var box = h('div', { class: 'lt dlist' });
+        var box = h('div', { class: 'lt dlist' }), unsure = false;
         L.DOC_GROUPS.forEach(function (g) {
           var items = all.filter(function (d) { return d.group === g[0]; });
           if (!items.length) return;
           box.appendChild(h('span', { class: 'eb', text: g[1] }));
           items.forEach(function (d) {
+            if (d.chip && d.chip.text === '확인 못 함') unsure = true;
             box.appendChild(row(d, false));
             var olds = L.versionPaths(d.file);
             if (olds.length) {
@@ -616,60 +622,116 @@
             }
           });
         });
-        box.appendChild(h('span', { class: 'dnote', text: '안 올림 = 아직 팀에 안 올림(내 PC에만이거나 PR 없음) · 검토 중 = 열린 PR 에 들어 있어 승인 기다림 · 합쳐짐 = main 에 같은 내용이 있음 · 확인 못 함 = 알 수 없음' }));
+        box.appendChild(h('span', { class: 'dnote', text: '안 올림 = 내 PC에만 · 검토 중 = 승인 기다림 · 합쳐짐 = 팀 공용본' + (unsure ? ' · 확인 못 함 = 알 수 없음' : '') }));
         return box;
       }
-      function resultCard(entry) {
+
+      // ---- 고객 양식 결과(시안 G-15) ----
+      function cellsText(cells) {
+        if (!cells.known) return cells.pending ? '양식 칸 세는 중' : '양식 칸 수 확인 못 함';
+        return cells.empty ? '양식 칸 ' + cells.total + '개 중 ' + cells.filled + '개 채움' : '양식 칸 ' + cells.total + '개 모두 채움';
+      }
+      function resultCard(entry, cells) {
         var f = entry.file, ext = (/\.([a-z0-9]+)$/i.exec(f.path) || [])[1] || '';
         var fresh = f.mtime && Date.now() - (f.mtime > 1e12 ? f.mtime : f.mtime * 1000) < 120000;
+        var info = [f.size != null ? kit.fmtSize(f.size) : '', f.mtime ? (fresh ? '방금' : kit.clock(f.mtime)) : '', cells ? cellsText(cells) : ''].filter(Boolean).join(' · ');
         return h('div', { class: 'q dresult', 'data-form-card': '1' },
           h('span', { class: 'pi', text: ext.toUpperCase() }),
-          h('span', { class: 'dn' }, h('b', { text: kit.baseName(f.path) }),
-            h('small', { text: [f.size != null ? kit.fmtSize(f.size) : '', f.mtime ? (fresh ? '방금' : kit.clock(f.mtime)) : ''].filter(Boolean).join(' · ') })),
-          h('button', { type: 'button', class: 'pill line sm', text: '폴더에서 보기', onClick: function () { openFile(entry, 'reveal'); } }),
-          h('button', { type: 'button', class: 'pill dark sm', text: '열기', onClick: function () { openFile(entry, 'open'); } }));
+          h('span', { class: 'dn' }, h('b', { text: kit.baseName(f.path) }), h('small', { text: info })),
+          h('button', { type: 'button', class: 'pill line', text: '폴더에서 보기', onClick: function () { openFile(entry, 'reveal'); } }),
+          h('a', { class: 'pill dark', href: '/api/sessions/' + sid(entry.session) + '/files/download' + kit.qs({ path: f.path }), download: kit.baseName(f.path), text: '내려받기' }));
+      }
+      // 카드 · 미리보기 · (빈 칸 안내) · AI 에게 말하기. 결과 화면과 목록 화면(양식 파일을 고른 때)이 같이 쓴다.
+      function resultBody(entry, can) {
+        var f = entry.file, isX = /\.xlsx$/i.test(f.path);
+        var cells = !isX ? null : st.preview ? L.formCells(st.preview) : st.previewError ? { known: false } : { known: false, pending: true };
+        var out = [resultCard(entry, cells)], sheetName = '';
+        if (isX && st.preview && st.preview.kind === 'table' && st.preview.sheets.length) {
+          var si = Math.min(st.sheet, st.preview.sheets.length - 1);
+          sheetName = st.preview.sheets[si].name || ('시트 ' + (si + 1));
+        }
+        if (isX) out.push(h('span', { class: 'eb', text: '미리보기' + (sheetName ? ' · ' + sheetName + ' 시트' : '') }));
+        if (st.note) out.push(h('p', { class: 'note-accent', role: 'status', text: st.note }));
+        if (st.previewError) out.push(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
+        else if (!st.preview) out.push(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' }));
+        else out.push(h('div', { class: 'dsheet' }, renderPreview(st.preview, { sheet: st.sheet, name: kit.baseName(f.path), header: true, setSheet: function (i) { st.sheet = i; draw(); } })));
+        if (cells && cells.known && cells.empty) {
+          var names = cells.blankNames.slice(0, 3).join(', ') + (cells.blankNames.length > 3 ? ' 외 ' + (cells.blankNames.length - 3) + '곳' : '');
+          out.push(h('div', { class: 'banner', role: 'status' }, h('b', { text: '비어 있는 칸 ' + cells.empty + '개' }),
+            h('span', { class: 'bt', text: names + ' 칸이 비어 있어. 알게 되면 말해 줘, 다시 뽑아 줄게.' })));
+        }
+        out.push(composer(entry, can, '"' + f.path + '" 의 비어 있는 칸을 채워서 다시 뽑아 줘: ', '예: 출처는 구매팀 김OO, 10/28 회의야'));
+        if (!can) out.push(h('p', { class: 'note-muted', text: entry.session.cannotSendReason || '이 세션에는 지금 말을 보낼 수 없어.' }));
+        if (st.say) out.push(h('p', { class: 'note-accent', role: 'status', text: st.say }));
+        return out;
+      }
+      function composer(entry, can, prefix, placeholder) {
+        var input = h('input', { id: 'doc-ask', class: 'comp-in', type: 'text', value: askVal, disabled: !can, autocomplete: 'off', placeholder: placeholder,
+          onInput: function (e) { askVal = e.target.value; } });
+        function send() { var t = askVal.trim(); if (t) ask(entry, prefix + t); }
+        input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); } });
+        return h('div', { class: 'dask' }, h('label', { for: 'doc-ask', class: 'sr-only', text: 'AI에게 말하기' }),
+          h('div', { class: 'comp' }, input, h('button', { type: 'button', class: 'pill dark', disabled: !can, text: '보내기', onClick: send })));
+      }
+      function exportBtn(entry, can, cls) {
+        var f = entry.file, kind = /매뉴얼|manual/i.test(f.path) ? 'pptx' : 'xlsx';
+        return h('button', { type: 'button', class: cls, disabled: !can, text: kind + '로 뽑기',
+          onClick: function () { ask(entry, '"' + f.path + '" 을(를) 고객 양식 ' + kind + ' 파일로 뽑아 줘.'); } });
       }
       function previewBox(entry) {
         var f = entry.file, c = entry.chip, s = entry.session, can = s.canSend !== false;
-        var form = L.isFormOutput(f), canExport = L.docGroup(f) === 'spec';
+        var form = L.isFormOutput(f), canExport = L.docGroup(f) === 'spec', lb = L.docLabel(f.path);
+        var ver = lb.ver || (st.preview && st.preview.kind === 'md' ? (/^\s*버전:\s*v?(\d+(?:\.\d+)*)/m.exec(st.preview.text) || [])[1] || '' : '');
         var box = h('div', { class: 'dprev' });
-        box.appendChild(h('div', { class: 'dhead' }, h('h2', { class: 'wrap-any', text: kit.baseName(f.path) }), c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text }) : null,
+        var chipText = c ? (ver ? 'v' + ver + ' · ' : '') + c.text : (ver ? 'v' + ver : '');
+        box.appendChild(h('div', { class: 'dhead' }, h('h2', { class: 'wrap-any', text: form ? kit.baseName(f.path) : lb.name }), chipText ? h('span', { class: 'chip2 ' + (c ? c.tone : ''), title: c ? c.title : '', text: chipText }) : null,
           h('span', { class: 'sp' }),
           form ? null : h('button', { type: 'button', class: 'pill line sm', text: '열기', onClick: function () { openFile(entry, 'open'); } }),
           form ? null : h('button', { type: 'button', class: 'pill line sm', text: '폴더에서 보기', onClick: function () { openFile(entry, 'reveal'); } }),
-          canExport ? h('button', { type: 'button', class: 'pill dark sm', disabled: !can, text: '고객 양식으로 뽑기',
-            onClick: function () { ask(entry, '"' + f.path + '" 을(를) 고객 양식 파일(xlsx·pptx)로 뽑아 줘.'); } }) : null));
-        box.appendChild(h('p', { class: 'dwhere', text: '세션: ' + (s.title || kit.baseName(s.cwd) || '이름 없는 세션') + ' · ' + f.path }));
-        if (form) box.appendChild(resultCard(entry));
+          canExport ? exportBtn(entry, can, 'pill dark sm') : null));
+        if (form) { resultBody(entry, can).forEach(function (n) { box.appendChild(n); }); return box; }
         if (st.note) box.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.note }));
         var pane = h('div', { class: 'docs-pane' });
+        pane.appendChild(h('div', { class: 'ptool' }, h('span', { text: lb.base + (ver ? ' · v' + ver : '') }),
+          c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text === '안 올림' ? '아직 안 올림' : c.text }) : null,
+          h('span', { class: 'sp' }), h('span', { class: 'pt-m', text: '세션 ' + (s.title || kit.baseName(s.cwd) || '이름 없는 세션') }),
+          canExport ? exportBtn(entry, can, 'pill line xs') : null));
         if (st.previewError) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
         else if (!st.preview) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' }));
         else pane.appendChild(renderPreview(st.preview, { sheet: st.sheet, name: kit.baseName(f.path), setSheet: function (i) { st.sheet = i; draw(); } }));
         box.appendChild(pane);
-        var input = h('input', { id: 'doc-ask', class: 'comp-in', type: 'text', value: askVal, disabled: !can, autocomplete: 'off', placeholder: '이 문서 고쳐 달라고 하기 — 예: 표시 항목에 납품일 추가',
-          onInput: function (e) { askVal = e.target.value; } });
-        function send() { var t = askVal.trim(); if (t) ask(entry, '"' + f.path + '" 을(를) 고쳐 줘: ' + t); }
-        input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); } });
-        box.appendChild(h('label', { for: 'doc-ask', class: 'sr-only', text: '이 문서 고쳐 달라고 하기' }));
-        box.appendChild(h('div', { class: 'comp' }, input, h('button', { type: 'button', class: 'pill dark', disabled: !can, text: '보내기', onClick: send })));
+        box.appendChild(composer(entry, can, '"' + f.path + '" 을(를) 고쳐 줘: ', '이 문서 고쳐 달라고 하기 — 예: 표시 항목에 납품일 추가'));
         if (!can) box.appendChild(h('p', { class: 'note-muted', text: s.cannotSendReason || '이 세션에는 지금 말을 보낼 수 없어.' }));
         if (st.say) box.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.say }));
         return box;
       }
 
+      function title(eb, h1, line) {
+        return h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: eb }), h('h1', { text: h1 }), line ? h('span', { class: 'line', text: line }) : null);
+      }
       function draw() {
         clear(page);
-        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '산출물' }), h('h1', { text: '내가 만든 문서' })));  // 시안 G-14: 제목 아래 설명 줄 없음
-        if (!kit.loaded()) { page.appendChild(kit.loadingBox('세션을 불러오는 중입니다.')); return; }
-        if (!pool().length) { page.appendChild(kit.stateBox('folder', '아직 만든 문서가 없어', '작업을 시작하면 세션이 만든 문서가 여기에 모여.', kit.link('/new', { class: 'btn', text: '새 작업 시작' }))); return; }
-        if (!st.parts) { page.appendChild(kit.loadingBox('문서를 모으는 중이에요.')); return; }
+        if (!kit.loaded()) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.loadingBox('세션을 불러오는 중입니다.')); return; }
+        if (!pool().length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.stateBox('folder', '아직 만든 문서가 없어', '작업을 시작하면 세션이 만든 문서가 여기에 모여.', kit.link('/new', { class: 'btn', text: '새 작업 시작' }))); return; }
+        if (!st.parts) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.loadingBox('문서를 모으는 중이에요.')); return; }
         var all = docs(), failed = st.parts.filter(function (p) { return p.failed; }), unsure = st.parts.filter(function (p) { return p.unknown && !p.failed; });
-        var sec = h('section', { class: 'light dsec' });
-        if (failed.length) sec.appendChild(h('p', { class: 'note-attn', role: 'status', text: failed.length + '개 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
-        else if (unsure.length) sec.appendChild(h('p', { class: 'note-attn', role: 'status', text: unsure.length + '개 세션은 git 상태를 읽지 못해서 올림 여부를 "확인 못 함"으로 보여.' }));
-        st.parts.forEach(function (p) { if (p.note && !p.unknown) sec.appendChild(h('p', { class: 'note-muted', role: 'status', text: p.note })); });  // 칩은 그대로 두고 안내만 한 줄 더한다
-        if (!all.length) { sec.appendChild(h('p', { class: 'note-muted', text: '아직 만든 문서가 없어.' })); page.appendChild(sec); return; }
+        var notes = [];
+        if (failed.length) notes.push(h('p', { class: 'note-attn', role: 'status', text: failed.length + '개 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
+        else if (unsure.length) notes.push(h('p', { class: 'note-attn', role: 'status', text: unsure.length + '개 세션은 git 상태를 읽지 못해서 올림 여부를 "확인 못 함"으로 보여.' }));
+        st.parts.forEach(function (p) { if (p.note && !p.unknown) notes.push(h('p', { class: 'note-muted', role: 'status', text: p.note })); });  // 칩은 그대로 두고 안내만 한 줄 더한다
+        if (!all.length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(h('section', { class: 'light dsec' }, notes, h('p', { class: 'note-muted', text: '아직 만든 문서가 없어.' }))); return; }
+        // 시안 G-15: 방금 고객 양식 xlsx 를 뽑았으면(가장 최근 산출물이 그 파일) 목록 없이 결과 화면을 먼저 보인다. '문서 목록 보기' 로 나가면 시안 G-14 목록 화면.
+        var fresh = st.view === 'list' ? null : L.latestFormXlsx(all);
+        if (fresh && (!st.sel || st.sel === fresh.key || st.inResult)) {
+          st.inResult = true;
+          if (st.sel !== fresh.key) setTimeout(function () { if (alive && st.sel !== fresh.key) pick(fresh); }, 0);
+          page.appendChild(h('div', { class: 'ptitle-row' }, title('산출물 · 고객 양식', '고객 양식으로 뽑았어', L.formSubtitle(fresh.file.path)),
+            h('button', { type: 'button', class: 'pill line sm', text: '문서 목록 보기', onClick: function () { st.view = 'list'; st.inResult = false; st.sel = null; st.picked = null; st.auto = false; draw(); } })));
+          page.appendChild(h('section', { class: 'light dres' }, notes, resultBody(fresh, fresh.session.canSend !== false)));
+          return;
+        }
+        page.appendChild(title('산출물', '내가 만든 문서'));
+        var sec = h('section', { class: 'light dsec' }, notes);
         // 시안 G-14: 처음 들어오면 가장 최근 글 문서(md)를, 없으면 가장 최근 문서를 골라 미리보기까지 보인다. 한 번만(사람이 고른 뒤엔 건드리지 않는다).
         if (!st.sel && !st.auto) {
           st.auto = true;

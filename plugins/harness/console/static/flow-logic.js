@@ -300,6 +300,57 @@
     out.sort(function (a, b) { return (b.file.mtime || 0) - (a.file.mtime || 0); });
     return out;
   }
+  // 문서 한 줄의 글: 이름과 판. SRS.md 처럼 이름이 정해진 문서는 시안처럼 쉬운 이름으로, `이름_v0.2.xlsx` 는 이름 · 판 · 확장자로 나눈다.
+  var FRIENDLY = { 'srs.md': '요구사항정의서' };
+  function docLabel(path) {
+    var base = String(path || '').split('/').pop(), m = /^(.*)_v(\d+(?:\.\d+)*)\.([A-Za-z0-9]+)$/.exec(base);
+    if (m) return { name: m[1], ver: m[2], ext: m[3].toLowerCase(), base: base };
+    var e = (/\.([A-Za-z0-9]+)$/.exec(base) || [])[1] || '';
+    return { name: FRIENDLY[lower(base)] || base, ver: '', ext: e.toLowerCase(), base: base };
+  }
+  // 고객 양식 결과(시안 G-15): 가장 최근 산출물이 xlsx 이면 그 파일. 아니면 null.
+  function latestFormXlsx(docs) {
+    var d = arr(docs)[0];
+    return d && d.group === 'form' && /\.xlsx$/i.test(d.file.path || '') ? d : null;
+  }
+  var SOURCE_OF = [[/backlog/i, '요구사항정의서'], [/개발\s*사양서|spec/i, '개발 Spec'], [/cts/i, 'CTS 작업본'], [/role/i, 'Role 작업본'], [/매뉴얼|manual/i, '사용자 매뉴얼 작업본']];
+  // "BW_Backlog List_v0.1.xlsx" -> { form: 'Backlog', ver: '0.1', ext: 'xlsx', source: '요구사항정의서' }. 원본을 모르면 source 는 빈 글.
+  function formInfo(path) {
+    var l = docLabel(path), form = l.name.replace(/^BW[_ ]/i, '').replace(/[_ ]*List$/i, '').trim() || l.name;
+    var hit = SOURCE_OF.filter(function (p) { return p[0].test(form); })[0];
+    return { form: form, ver: l.ver, ext: l.ext, source: hit ? hit[1] : '' };
+  }
+  function formSubtitle(path) {
+    var i = formInfo(path), v = i.ver ? ' v' + i.ver : '';
+    return i.source ? i.source + v + ' → 고객사 ' + i.form + ' 양식(' + i.ext + ')' : '고객사 ' + i.form + ' 양식(' + i.ext + ')' + v;
+  }
+  // 양식 칸 세기: 시트마다 첫 줄을 칸 이름 줄로 보고, 그 아래 내용이 있는 줄 x 칸 이름 수 = 칸 수. 비어 있는 칸은 이름으로 모은다.
+  // 미리보기가 잘렸거나 읽지 못한 시트가 있으면 세지 않고 known:false 로 돌려준다(지어내지 않는다).
+  function formCells(p) {
+    if (!p || p.kind !== 'table') return { known: false, reason: '표를 읽지 못했어요.' };
+    var total = 0, filled = 0, blanks = {}, order = [], sheets = arr(p.sheets);
+    if (!sheets.length) return { known: false, reason: '시트가 없어요.' };
+    for (var i = 0; i < sheets.length; i++) {
+      var sh = sheets[i];
+      if (sh.error || sh.truncated) return { known: false, reason: '표가 커서 일부만 읽었어요.' };
+      var rows = arr(sh.rows), cell = function (r, c) { var v = r && r[c]; return v == null ? '' : String(v).trim(); };
+      var hi = -1;
+      for (var r0 = 0; r0 < rows.length && hi < 0; r0++) if (arr(rows[r0]).some(function (v) { return v != null && String(v).trim(); })) hi = r0;
+      if (hi < 0) continue;
+      var cols = [];
+      arr(rows[hi]).forEach(function (v, c) { if (cell(rows[hi], c)) cols.push(c); });
+      for (var r = hi + 1; r < rows.length; r++) {
+        if (!arr(rows[r]).some(function (v) { return v != null && String(v).trim(); })) continue;
+        cols.forEach(function (c) {
+          total++;
+          if (cell(rows[r], c)) filled++;
+          else { var n = cell(rows[hi], c); if (!blanks[n]) { blanks[n] = 1; order.push(n); } }
+        });
+      }
+    }
+    if (!total) return { known: false, reason: '내용이 있는 줄이 없어요.' };
+    return { known: true, total: total, filled: filled, empty: total - filled, blankNames: order };
+  }
   function isFormOutput(f) { return docGroup(f) === 'form' && /\.(xlsx|pptx|docx)$/i.test(f.path || ''); }
 
   /* ---- 승인 카드 ---- */
@@ -537,7 +588,7 @@
     startChecks: startChecks, autoChecksOpen: autoChecksOpen, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
     mergeApprovals: mergeApprovals, prBadge: prBadge, runningSubCount: runningSubCount,
-    DOC_GROUPS: DOC_GROUPS, docGroup: docGroup, docChip: docChip, mergeDocs: mergeDocs, weekDocCount: weekDocCount, weekPool: weekPool, isFormOutput: isFormOutput
+    DOC_GROUPS: DOC_GROUPS, docGroup: docGroup, docChip: docChip, mergeDocs: mergeDocs, weekDocCount: weekDocCount, weekPool: weekPool, isFormOutput: isFormOutput, docLabel: docLabel, latestFormXlsx: latestFormXlsx, formInfo: formInfo, formSubtitle: formSubtitle, formCells: formCells
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHLogic = api;
