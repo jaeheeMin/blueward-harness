@@ -669,6 +669,17 @@ def can_send(s: dict, store: "Store | None" = None) -> tuple[bool, str]:
     return False, CANNOT_SEND_IDLE
 
 
+def last_block_of(chat: list) -> dict | None:
+    """마지막 훅 막힘. open 은 그 뒤에 내 말·AI 말이 아직 없다는 뜻(있으면 이미 이어 간 것이라 풀린 걸로 본다 — 확인 못 함은 풀렸는지 알 수 없어도 이어 갔으면 닫는다)."""
+    items = [c for c in chat if isinstance(c, dict)]
+    for i in range(len(items) - 1, -1, -1):
+        c = items[i]
+        if c.get("role") == "block":
+            return {"t": c.get("t"), "kind": c.get("kind") or "blocked",
+                    "open": not any(x.get("role") in ("me", "ai") for x in items[i + 1:])}
+    return None
+
+
 def public_session(store: Store, s: dict, skills: list[str], include_chat: bool = False) -> dict:
     """화면에 내려보내는 세션 모델(web-console.md §8). 대화(chat)는 크기 때문에 include_chat 일 때만(단일 세션 응답) 싣는다."""
     with store.lock:
@@ -705,8 +716,7 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
         else:
             group = "idle"
         extra = {"chat": [dict(c) for c in s.get("chat") or [] if isinstance(c, dict)]} if include_chat else {}
-        last_block = next(({"t": c.get("t"), "kind": c.get("kind") or "blocked"} for c in reversed(s.get("chat") or [])
-                           if isinstance(c, dict) and c.get("role") == "block"), None)  # 목록 갱신만으로 새 막힘을 알아채게(알림용)
+        last_block = last_block_of(s.get("chat") or [])  # 목록 갱신만으로 새 막힘을 알아채게(알림용) · open 은 홈·목록 표시용
         return dict(flows.public_fields(s, store.flow_data), **extra, **{
             "chatPartial": not s["managed"],  # 터미널 세션은 내 말과 AI 마지막 답만 안다
             "id": s["id"], "title": display_title(s), "cwd": s["cwd"], "repo": s["repo"], "branch": s["branch"],

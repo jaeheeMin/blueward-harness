@@ -36,13 +36,36 @@
     return s.status === 'running' || s.status === 'starting' ? 'running' : 'idle';
   }
 
+  /* 훅이 막아 아직 풀리지 않은 세션(#790). { kind: 'blocked'(✕ 막힘) | 'cannot_check'(? 확인 못 함), t } 또는 null.
+     막힘 뒤에 내 말·AI 말이 이어졌으면 풀린 걸로 본다. 묻는 요청이 떠 있거나 AI 가 일하는 중이면 그쪽이 먼저라 null.
+     대화(chat)를 알면 그걸로, 목록에는 서버가 준 lastBlock.open 으로 센다(open 을 모르는 옛 서버는 null: 열렸는지 알 수 없는 걸 막힘으로 치지 않는다). */
+  function blockOf(s) {
+    if (!s || s.status === 'ended' || s.status === 'running' || s.status === 'starting' || arr(s.pendingRequestIds).length) return null;
+    var chat = arr(s.chat);
+    if (s.chat && Array.isArray(s.chat)) {
+      for (var i = chat.length - 1; i >= 0; i--) {
+        var c = chat[i];
+        if (!c || typeof c !== 'object') continue;
+        if (c.role === 'me' || c.role === 'ai') return null;
+        if (c.role === 'block') return { kind: c.kind === 'cannot_check' ? 'cannot_check' : 'blocked', t: c.t };
+      }
+      return null;
+    }
+    var b = s.lastBlock;
+    return b && b.open === true ? { kind: b.kind === 'cannot_check' ? 'cannot_check' : 'blocked', t: b.t } : null;
+  }
+  /* 세션을 세는 갈래. 막힘·확인 못 함은 내 차례와 따로 센다(내 차례 숫자에 섞지 않는다). */
   function counts(list) {
-    var c = { total: 0, running: 0, todo: 0, idle: 0 };
-    list.forEach(function (s) { c.total++; c[groupOf(s)]++; });
+    var c = { total: 0, running: 0, todo: 0, idle: 0, blocked: 0, unsure: 0 };
+    list.forEach(function (s) {
+      c.total++;
+      var b = blockOf(s);
+      if (b) c[b.kind === 'cannot_check' ? 'unsure' : 'blocked']++; else c[groupOf(s)]++;
+    });
     return c;
   }
   function summaryText(c) {
-    return '세션 ' + c.total + '개 · 일하는 중 ' + c.running + ' · 내 차례 ' + c.todo + ' · 쉬는 중 ' + c.idle;
+    return '세션 ' + c.total + '개 · 일하는 중 ' + c.running + ' · 내 차례 ' + c.todo + (c.blocked ? ' · ✕ 막힘 ' + c.blocked : '') + (c.unsure ? ' · ? 확인 못 함 ' + c.unsure : '') + ' · 쉬는 중 ' + c.idle;
   }
 
   /* ---- 순서 막대 ---- */
@@ -585,7 +608,7 @@
     notifyEvents: notifyEvents,
     devReadyView: devReadyView, kindHint: kindHint, devBlock: devBlock, kindConflict: kindConflict,
     memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, shortStepName: shortStepName, stepShort: stepShort, prLines: prLines, checksFailed: checksFailed, phaseSide: phaseSide, finishedBand: finishedBand, phaseLine: phaseLine, nextFirst: nextFirst, nextShort: nextShort, nextBase: nextBase, ASK_TEXT: ASK_TEXT, hasBatchim: hasBatchim, prMerged: prMerged,
-    BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, counts: counts, summaryText: summaryText,
+    BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, blockOf: blockOf, counts: counts, summaryText: summaryText,
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice,
     formsNotice: formsNotice, FORMS_MISSING_SHORT: FORMS_MISSING_SHORT, FORMS_MISSING_TEXT: FORMS_MISSING_TEXT,
