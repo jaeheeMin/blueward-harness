@@ -42,6 +42,7 @@ ELEMENTS = {
     "comp": {"mock": ".comp", "props": ("x", "w", "h", "pad", "rad")},
     "right": {"mock": ".split > aside", "console": "aside.sess-side", "props": ("x", "y", "w")},
     "paper": {"mock": ".paper", "props": ("x", "y", "w", "rad", *C)},
+    "proj": {"mock": ".proj", "console": ".folder-opt.proj", "props": ("x", "w", "h", "pad", "rad")},  # 첫 화면 프로젝트 줄(G-02)
     "opt": {"mock": ".opt", "console": ".kind", "props": ("w", "h", "pad", "rad")},
     "tile": {"mock": ".tile", "console": ".docs-list, .tile2", "props": ("x", "w", "h", "pad", "rad", *C)},
 }

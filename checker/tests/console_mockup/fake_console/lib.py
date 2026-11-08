@@ -357,7 +357,8 @@ def hook_flow_session(api: Api, sid: str, cwd: Path, prompt: str, flow: str, ski
     api.event(sid, c, "UserPromptSubmit", prompt=prompt, model="claude-opus-4-7", transcript_path=tp)
     st, d = api.put(f"/api/sessions/{sid}/flow", {"flowId": flow, "reason": "시안 대조용으로 지정"})
     assert st == 200, f"갈래 지정 실패 {st} {d}"
-    api.event(sid, c, "PreToolUse", tool_name="Skill", tool_input={"skill": f"harness:{skill}"})
+    if skill:  # skill 이 None 이면 스킬을 부르지 않은 세션(Stop 뒤에도 turnSkill 이 없어 "~ 끝남" 내 차례가 아니다)
+        api.event(sid, c, "PreToolUse", tool_name="Skill", tool_input={"skill": f"harness:{skill}"})
     for wf in ([write_file] if write_file else []) + list(extra_files or []):  # 세션이 쓴 파일마다 Write 한 쌍(산출물 목록에 오른다)
         fp = str(cwd / wf)
         api.event(sid, c, "PreToolUse", tool_name="Write", tool_input={"file_path": fp, "content": "x"})

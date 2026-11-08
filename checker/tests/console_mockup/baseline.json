@@ -403,6 +403,30 @@
      "comp": null,
      "right": null,
      "paper": null,
+     "proj": {
+      "x": 410,
+      "y": 430.5,
+      "w": 620,
+      "h": 72,
+      "tcy": 466.5,
+      "fs": 14,
+      "bg": "rgb(255, 255, 255)",
+      "color": "rgb(19, 35, 34)",
+      "nat": null,
+      "pad": [
+       14,
+       14,
+       14,
+       14
+      ],
+      "rad": [
+       16,
+       16,
+       16,
+       16
+      ],
+      "n": 3
+     },
      "opt": null,
      "tile": null,
      "_layout": {
@@ -537,6 +561,30 @@
      "comp": null,
      "right": null,
      "paper": null,
+     "proj": {
+      "x": 330,
+      "y": 430.5,
+      "w": 620,
+      "h": 72,
+      "tcy": 466.5,
+      "fs": 14,
+      "bg": "rgb(255, 255, 255)",
+      "color": "rgb(19, 35, 34)",
+      "nat": null,
+      "pad": [
+       14,
+       14,
+       14,
+       14
+      ],
+      "rad": [
+       16,
+       16,
+       16,
+       16
+      ],
+      "n": 3
+     },
      "opt": null,
      "tile": null,
      "_layout": {

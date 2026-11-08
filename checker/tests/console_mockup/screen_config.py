@@ -74,3 +74,34 @@ SCREEN_CONFIG["G-22"] = {
     {"sel": ".light", "text": "비밀번호·키처럼 보이는 글이 있어", "why": "비밀 줄 빨간 표시"},
     {"sel": ".light button", "text": "GitHub 에 올리기", "why": "올리기 단추(비밀 줄이 있으면 잠김)"},
     {"sel": ".light", "text": "이미 비슷한 기록이 있어", "why": "비슷한 기록 구역"}]}
+
+# 세션·홈에서 기록을 만나는 곳(G-23·24). 세션 목록 등 나머지는 G-20 과 같은 상태(판매오더 조회 앱·PR #812 검사 실패).
+SCREEN_CONFIG["G-23"] = {"scroll_top": True, "expect": [NAV_5,
+    {"sel": ".main h1", "text": "판매오더 조회 앱", "why": "세션 제목"},
+    {"sel": ".bad.blocked", "text": "✕ 막힘", "why": "막힘 카드"},
+    {"sel": "[data-similar-line]", "text": "비슷한 기록 2건", "why": "막힘 카드 아래 비슷한 기록 줄"},
+    {"sel": ".ask", "text": "기록해 둘까?", "why": "풀린 뒤 기록 제안 카드"},
+    {"sel": ".ask button", "text": "기록하기", "why": "제안 카드 [기록하기]"},
+    {"sel": ".ask button", "text": "괜찮아", "why": "제안 카드 [괜찮아]"}]}
+SCREEN_CONFIG["G-24"] = {"ready": "[data-fix-pr]", "expect": [NAV_5,
+    {"sel": ".main h1", "text": "오늘 내 일", "why": "홈 제목"},
+    {"sel": "main.main", "text": "고쳐야 할 내 PR 1건", "why": "고쳐야 할 내 PR 줄"},
+    {"sel": "main.main", "text": "아직 안 풀린 문제", "why": "팀 기록 타일"},
+    {"sel": "main.main", "text": "3건", "why": "열린 기록 3건"}]}
+
+# 첫 실행 화면(G-01~03). 첫 실행·화면 안 단추 누르기는 check_console 의 first_run·clicks 가 한다.
+SCREEN_CONFIG["G-01"] = {"first_run": True, "ready": ".crow.ok", "expect": [
+    {"sel": ".intro-box h1", "text": "Blueward Harness에 온 걸 환영해", "why": "시안 G-01 제목"},
+    {"sel": ".intro-box", "text": "GitHub 연결", "why": "점검 줄"},
+    {"sel": ".intro-box button", "text": "시작하기", "why": "시작하기 단추"}]}
+SCREEN_CONFIG["G-02"] = {"first_run": True, "clicks": ["[data-intro-start]", "[data-pick-folder]"], "ready": "[data-pick-folder]", "expect": [
+    {"sel": ".intro-box h1", "text": "어느 고객사 프로젝트에서 일할까?", "why": "시안 G-02 제목"},
+    {"sel": "[data-pick-folder]", "text": "harness-console-sandbox", "why": "최근 폴더(준비 필요)"},
+    {"sel": "[data-pick-folder]", "text": "public-cloud", "why": "최근 폴더(준비됨)"},
+    {"sel": ".proj.add", "text": "다른 폴더 찾아보기", "why": "점선 줄"},
+    {"sel": ".intro-box button", "text": "이 프로젝트로", "why": "확인 단추"}]}
+SCREEN_CONFIG["G-03"] = {"first_run": True, "clicks": ["[data-intro-start]", "[data-pick-folder$=\"harness-console-sandbox\"]", "[data-pick-ok]:not([disabled])"], "ready": ".ask", "expect": [
+    {"sel": "main.main", "text": "표준 구조", "why": "시안 G-03 표준 구조 만들기 안내"}]}
+# G-03 도 헤더 메뉴는 시안이 네 칸(기록 화면 앞)이라 다른 G-01~19 와 같이 처리한다.
+SCREEN_CONFIG["G-03"].setdefault("elements", {})["nav"] = {"props": ("x", "h")}
+SCREEN_CONFIG["G-03"]["expect"].append(NAV_5)
