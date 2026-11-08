@@ -427,11 +427,14 @@ def text_arg(b: dict, name: str, required: bool = False, limit: int = FIELD_MAX)
     return v
 
 
+FIELD_NAMES = {"title": "제목", "symptom": "증상", "cause": "원인", "solution": "해결 방법", "text": "댓글"}
+
+
 def refuse_secrets(fields: dict) -> None:
     hits = scan_secrets(fields)
     if hits:
         raise HttpError(422, "비밀번호·키처럼 보이는 글이 있어 올리지 않았어. 지우고 다시 올려 줘. (" + ", ".join(
-            f"{h['field']} {h['line']}번째 줄 {h['label']}" for h in hits[:3]) + ")")
+            f"{FIELD_NAMES.get(h['field'], h['field'])} {h['line']}번째 줄 {h['label']}" for h in hits[:3]) + ")")
 
 
 def invalidate(app, slug: str) -> None:
