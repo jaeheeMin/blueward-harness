@@ -42,3 +42,12 @@ SCREEN_CONFIG: dict[str, dict] = {
         "expect": [NAV_4, {"sel": "main.main", "text": "BW_Backlog List_v0.1.xlsx", "why": "산출물 목록에 양식 xlsx"}],
     },
 }
+
+NAV_5 = {"sel": "header.top .topnav a", "text": "기록", "exact": True, "why": "시안 헤더는 내 일·작업·산출물·새 작업·기록 다섯 칸"}
+
+# 헤더 메뉴 칸 수(2026-11-07 사용자 결정, #779): 시안 G-01~19 는 기록 화면을 그리기 전이라 네 칸이고, G-20~24 는 '기록' 을 더한
+# 다섯 칸이다. 나중 시안(다섯 칸)을 정답으로 본다. 그래서 G-20 앞 화면에서는 메뉴 너비(nav.w)만 비교에서 빼고(x·h 는 그대로 본다),
+# 다섯째 칸 '기록' 이 있는지를 글자 확인으로 본다.
+for _g in ("G-04", "G-05", "G-06", "G-09", "G-10", "G-12", "G-13", "G-15"):
+    SCREEN_CONFIG[_g].setdefault("elements", {})["nav"] = {"props": ("x", "h")}
+    SCREEN_CONFIG[_g]["expect"].append(NAV_5)
