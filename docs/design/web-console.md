@@ -259,9 +259,10 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 | GET | `/api/events` | SSE: `session`, `request`, `removed` |
 | GET | `/api/trouble` | 문제·해결 기록 목록(#733). 쿼리 `status`(all/open/solved)·`stage`·`q`·`project`(owner/repo)·`author`·`limit`·`refresh=1`. 콘솔이 아는 폴더의 저장소에서 `type:trouble` 이슈를 gh 로 모아 60초 기억하고, 못 읽은 저장소는 `projects[].ok:false` + `reason`(기록 없음과 구분), 읽는 중이면 `loading:true`. `stats`(total·month·open·solved·topStage) 는 필터와 무관 |
 | GET | `/api/trouble/item` | 한 건 `?repo=&number=`: 본문 칸(증상·원인·해결 방법·단계·PR) + 이력(댓글 맨 앞 `시도·안 됨:`/`해결 후보:`/`해결:` 으로 분류) + 관련 PR(상태·검사) + 비슷한 기록. 기록 라벨이 없는 이슈는 404, 못 읽으면 502(확인 못 함) |
-| GET | `/api/trouble/pr`·`/similar`·`/draft` | PR 번호 확인 · 비슷한 기록 찾기 · AI 초안(메모리) 읽기 |
+| GET | `/api/trouble/pr`·`/similar`(쿼리 `repo` 대신 `cwd` 도 됨)·`/draft` | PR 번호 확인 · 비슷한 기록 찾기 · AI 초안(메모리) 읽기 |
 | POST | `/api/trouble` | 새 기록 올리기. 라벨이 저장소에 없으면 409(라벨은 만들지 않고 만드는 명령을 안내), 비밀처럼 보이는 줄이 있으면 422. 제목 머리말 `[기록] `·라벨 `type:trouble`·양식 칸 그대로. 해결 방법이 있으면 `해결:`(해결됐을 때, 이슈 닫음)/`해결 후보:` 댓글을 더한다 |
 | POST | `/api/trouble/comment`·`/resolve`·`/check`·`/draft` | 이력 더하기(`kind` try/candidate/solved, solved 면 본문 해결 방법 갱신+닫기) · "이걸로 해결"(후보 댓글 `commentId`) · 비밀 검사 · AI 초안 저장. 쓰기는 이슈 만들기·댓글·본문 해결 방법 고치기·닫기뿐이고 저장소는 known_root 의 것만 |
+| POST | `/api/trouble/ai-draft` | 세션 대화로 AI 초안 만들기(#734, [기록하기] 를 누를 때만). 본문 `{sessionId}`, 응답 `{id, hidden}`(id 는 `/troubles/new?draft=` 에 쓰고 `hidden` 은 가린 줄 수). 읽기 전용 `claude -p` 한 번. 대화가 없으면 422, 못 부르면 503, 시간 초과 504, 결과 형식이 틀리면 502 |
 | GET | `/api/sessions` | 목록(`updatedAt` 내림차순). 각 세션의 `group`: `todo` / `running` / `idle`. 필터는 화면이 한다 |
 | GET | `/api/sessions/:id` | 상세. 로그, 결과 보고, 변경 파일, 서브에이전트, 스킬 흐름 |
 | POST | `/api/sessions/:id/messages` | `{text}` 이어서 요청 |
@@ -353,6 +354,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 - 글꼴(#611): Pretendard(본문)와 JetBrains Mono(코드)를 `static/fonts/` 에 담았고(OFL 라이선스 파일 동봉) `app.css` 의 `@font-face` 가 `/fonts/…` 로 불러온다. 서버는 `.woff2` 를 `font/woff2` 로 내보내고 `fonts/` 한 단계만 연다. 바깥 글꼴 서버로 가는 `<link>` 는 CSP 가 막아 왔으므로 `index.html` 에서 뺐다.
 - 금지: 그라데이션 배경, 유리 효과, Pulse 복제, 터미널 버튼. 시안의 샘플 데이터를 코드에 남기지 않는다. 빈 상태 화면을 만든다.
 - 문제·해결 기록(#733, 시안 G-20~22, `static/trouble.js`): 헤더 메뉴 `기록`. 목록(팀 전체·찾기·전체/아직/해결됨·프로젝트·쓴 사람, 못 읽은 저장소는 보라 `? 확인 못 함` 줄 + `다시 확인`), 한 건(요약·이력 타임라인·`내 이야기 더하기`·관련 PR·비슷한 기록·GitHub 링크), 새 기록(AI 초안 줄·PR 번호 확인·비밀 줄 빨간 표시와 올리기 잠금·비슷한 기록 `거기에 더하기`·GitHub 에 올라갈 모양 미리보기). 기록은 각 Project Repository 의 이슈이고(양식 `.github/ISSUE_TEMPLATE/trouble.yml`), 콘솔이 등록·댓글·해결 단추로 바로 올린다. 구현 기록 `docs/status/733-trouble-pages.md`.
+- 세션 화면에서 만나는 곳(#734, 시안 G-23, `trouble.js` 의 `similarRow`·`suggestCard`·`suggestFor`): ① 막힘(✕) 카드 아래 `비슷한 기록 n건 — #번호 제목(해결됨) · …` 한 줄. `GET /api/trouble/similar?cwd=<세션 폴더>&q=<훅 이름 + 막힘 + 첫 문장>` 으로 그 폴더 저장소의 기록에서 찾고(없으면 줄을 두지 않고, 기록 목록이나 저장소를 못 읽었으면 `ok:false`+`reason` 으로 보라 `? 확인 못 함` 줄), "확인 못 함" 막힘 카드에는 두지 않는다. ② 대화 끝 `기록해 둘까?` 카드(`.ask`, [기록하기] [괜찮아]): 마지막 막힘(`kind` 가 `blocked`) 뒤에 AI 말이 있고 세션이 쉬는 중(running·waiting·starting·대기 요청 없음)이거나, 이 화면이 본 PR 검사 `fail` 뒤에 같은 PR 이 `pass` 일 때. 풀렸다고 단정하지 않고 사람이 고른다. [괜찮아]·기록하기 성공은 localStorage(`bh-trouble-skip`)에 세션·건별로 남겨 다시 띄우지 않고, 본 실패는 `bh-trouble-prfail`. ③ [기록하기] 를 누를 때만 `POST /api/trouble/ai-draft {sessionId}`: 세션 대화 최근 40개(막힘·승인 요청 포함, 비밀처럼 보이는 줄은 모델에 보내기 전에 가림)로 읽기 전용 `claude -p`(훅 끔, 구조화 출력, 150초)를 한 번 불러 제목·단계·증상·원인·해결 방법·해결 여부를 받고, 모델이 쓴 글도 다시 비밀 검사로 가린 뒤 draft 로 저장해 `{id, hidden}` 을 돌려준다(저장소는 세션 폴더의 origin 으로, PR 은 세션 갈래의 PR 로 채움). 화면이 `/troubles/new?draft=<id>` 를 연다. claude 를 못 부르거나 시간 초과·형식 오류면 503/504/502 와 이유, 카드가 이유와 `빈 칸으로 쓰기` 를 보인다. 한계: "막힘이 풀렸다" 는 AI 가 이어서 말했는지로만 알고(서버에 풀림 기록이 없다), 터미널 세션은 대화가 내 말과 AI 마지막 답뿐이라 초안 재료가 적다.
 
 ## 9a. 시안 대조 검사 (`checker/tests/console_mockup/`, #764)
 

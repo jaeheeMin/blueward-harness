@@ -408,3 +408,104 @@ def test_draft_ids_are_unique_and_unguessable(tmp_path, monkeypatch):
         assert len(c.app.trouble_drafts) == trouble.DRAFT_MAX  # 오래된 것부터 밀려난다
     finally:
         c.close()
+
+
+# ---- 세션 화면에서 만나는 곳(#734, 시안 G-23) ----
+def draft_out(**over):
+    data = dict({"title": "맨손 git push 가 막힘", "stage": "개발", "symptom": "그냥 git push 는 쓸 수 없어", "cause": "deliver 를 안 거침", "solution": "deliver 로 푸시", "solved": True}, **over)
+    return json.dumps({"type": "result", "is_error": False, "structured_output": data}, ensure_ascii=False)
+
+
+def session_with_chat(c, *chat):
+    c.event("s1", "SessionStart")
+    s = c.app.store.get("s1")
+    for role, text in chat:
+        c.app.store.add_chat(s, role, text)
+    return s
+
+
+def test_ai_draft_is_written_from_session_chat_with_secrets_hidden(tmp_path, monkeypatch):
+    c = trouble_console(tmp_path, monkeypatch, FakeGh())
+    seen = {}
+    try:
+        session_with_chat(c, ("me", "푸시해 줘"), ("block", "그냥 git push 는 쓸 수 없어.\nclient_secret=Ab12cd34ef56"), ("ai", "deliver 로 다시 푸시했어"))
+
+        def fake(app, prompt, cwd):
+            seen["prompt"] = prompt
+            return draft_out(solution="deliver 로 푸시\npassword: hunter2hunter2")
+        c.app.trouble_claude = fake
+        status, body, _ = c.call("POST", "/api/trouble/ai-draft", {"sessionId": "s1"})
+        assert status == 200 and body["hidden"] == 2
+        assert "client_secret=Ab12cd34ef56" not in seen["prompt"] and trouble.HIDDEN_LINE in seen["prompt"] and "푸시해 줘" in seen["prompt"]  # 모델에 보내기 전에 가린다
+        d = c.call("GET", "/api/trouble/draft?id=" + body["id"])[1]
+        assert d["repo"] == SLUG and d["stage"] == "개발" and d["title"] == "맨손 git push 가 막힘" and d["solved"] is True and d["hidden"] == 2
+        assert "hunter2" not in d["solution"] and trouble.HIDDEN_LINE in d["solution"]  # 모델이 쓴 글도 가린다
+        assert not trouble.scan_secrets({k: d[k] for k in ("title", "symptom", "cause", "solution")})
+    finally:
+        c.close()
+
+
+def test_ai_draft_failures_are_reported_not_faked(tmp_path, monkeypatch):
+    c = trouble_console(tmp_path, monkeypatch, FakeGh())
+    try:
+        assert c.call("POST", "/api/trouble/ai-draft", {"sessionId": "nope"})[0] == 404
+        assert c.call("POST", "/api/trouble/ai-draft", {})[0] == 400
+        session_with_chat(c)
+        assert c.call("POST", "/api/trouble/ai-draft", {"sessionId": "s1"})[0] == 422  # 대화가 없으면 초안을 지어내지 않는다
+        session_with_chat(c, ("ai", "막혔어"))
+        c.app.trouble_claude = lambda app, prompt, cwd: "not json"
+        status, body, _ = c.call("POST", "/api/trouble/ai-draft", {"sessionId": "s1"})
+        assert status == 502 and "초안을 못 만들었어" in body["error"]
+        c.app.trouble_claude = lambda app, prompt, cwd: draft_out(symptom="")
+        assert c.call("POST", "/api/trouble/ai-draft", {"sessionId": "s1"})[0] == 502
+        def boom(app, prompt, cwd):
+            raise trouble.HttpError(504, "초안을 못 만들었어 · 시간 안에 끝나지 않았어")
+        c.app.trouble_claude = boom
+        assert c.call("POST", "/api/trouble/ai-draft", {"sessionId": "s1"})[0] == 504
+        assert not c.app.__dict__.get("trouble_drafts")  # 실패하면 초안이 남지 않는다
+        c.app.analyses.claude_cmd = lambda: None
+        del c.app.trouble_claude
+        assert c.call("POST", "/api/trouble/ai-draft", {"sessionId": "s1"})[0] == 503
+    finally:
+        c.close()
+
+
+def test_similar_by_session_folder_and_unknown_when_unreadable(tmp_path, monkeypatch):
+    gh = FakeGh()
+    c = trouble_console(tmp_path, monkeypatch, gh)
+    try:
+        q = urllib.parse.quote("ATC 검사에서 운송이 막힘 금지된 API")
+        status, body, _ = c.call("GET", f"/api/trouble/similar?cwd={urllib.parse.quote(str(c.work))}&q={q}")
+        assert status == 200 and body["ok"] and body["slug"] == SLUG and body["items"] and body["items"][0]["number"] == 842
+        (tmp_path / "b").mkdir()
+        bad = trouble_console(tmp_path / "b", monkeypatch, FakeGh(fail="gh auth login required (not logged in)"))
+        try:
+            body = bad.call("GET", f"/api/trouble/similar?cwd={urllib.parse.quote(str(bad.work))}&q={q}")[1]
+            assert body["ok"] is False and body["items"] == [] and "로그인" in body["reason"]  # 없음이 아니라 확인 못 함
+        finally:
+            bad.close()
+    finally:
+        c.close()
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_suggest_conditions_and_session_cards():
+    script = r"""
+const path = require('path'); const assert = require('assert');
+global.window = {}; global.document = {}; require(path.join(process.argv[1], 'trouble.js'));
+const S = window.BHTrouble.suggestFor;
+const chat = (...r) => r.map((role, i) => ({ t: i + 1, role, kind: role === 'block' ? 'blocked' : undefined }));
+assert.strictEqual(S({ status: 'idle', chat: chat('ai', 'block', 'me', 'ai') }).key, 'b2');  // 막힘 뒤 AI 말 + 쉬는 중
+assert.strictEqual(S({ status: 'idle', chat: chat('ai', 'block') }), null);                  // 아직 풀리지 않음
+assert.strictEqual(S({ status: 'running', chat: chat('block', 'ai') }), null);                // 일하는 중엔 권하지 않는다
+assert.strictEqual(S({ status: 'idle', pendingRequestIds: ['r'], chat: chat('block', 'ai') }), null);
+assert.strictEqual(S({ status: 'idle', chat: [{ t: 1, role: 'block', kind: 'cannot_check' }, { t: 2, role: 'ai' }] }), null);  // 확인 못 함은 풀렸는지 모른다
+assert.strictEqual(S({ status: 'idle', chat: chat('block', 'ai', 'block') }), null);          // 새 막힘이 풀리기 전
+assert.strictEqual(S({ status: 'idle', chat: [], flowPr: { number: 7, checks: 'pass' } }, 7).key, 'pr7');  // 실패로 본 PR 이 통과
+assert.strictEqual(S({ status: 'idle', chat: [], flowPr: { number: 7, checks: 'pass' } }, undefined), null);
+assert.strictEqual(S({ status: 'idle', chat: [], flowPr: { number: 7, checks: 'pass' } }, 8), null);
+assert.strictEqual(S({ status: 'idle', chat: [], flowPr: { number: 7, checks: 'fail' } }, 7), null);
+console.log('ok');
+"""
+    out = subprocess.run([NODE, "-e", script, "--", str(STATIC)], capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert out.returncode == 0 and "ok" in out.stdout, out.stderr + out.stdout
