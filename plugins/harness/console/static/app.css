@@ -517,6 +517,7 @@ table.list tr:last-child td { border-bottom: 0; }
 table.list .rt { display: block; font-weight: 600; overflow-wrap: anywhere; }
 table.list .rs { display: block; font-size: 12px; color: var(--lmuted); overflow-wrap: anywhere; }
 table.list .mono { font-size: 12px; }
+table.list .mono + .prchip { margin-left: 8px; }  /* 시안 G-24: 번호 칸의 "이슈 #n" 과 PR 칩 사이 간격 */
 table.list .none { color: var(--lmuted); }
 table.list .unk { color: #5a4bc2; }
 .tbar { display: flex; gap: 3px; width: 120px; max-width: 100%; margin: 0; list-style: none; }
@@ -706,6 +707,7 @@ table.list .unk { color: #5a4bc2; }
 .sess-side .docs-list .drow { color: var(--text); border-top-color: var(--line); }
 .sess-side .docs-list .drow:hover { background: var(--soft); }
 .sess-side .docs-list .drow.on { background: var(--st-now-bg); }
+.sess-side .docs-list .drow.on .dn { color: var(--text); }  /* 고른 줄: 진한 초록 배경 위라 밝은 글자(밝은 배경용 규칙의 어두운 글자가 남지 않게) */
 .sess-side .docs-list .dn small { color: var(--muted); }
 .sess-side .docs-list details.docs-old { color: var(--muted); }
 .docs-pane { padding: 0; border: 1px solid var(--lline); border-radius: 14px; background: #fff; color: #14201e; }
@@ -1033,6 +1035,8 @@ details.fold > [data-r]:empty { display: none; }
 [data-pick] .proj .pn small { line-height: 20px; }  /* 시안 프로젝트 줄 높이 72(이름 21 + 경로 20) */
 .intro-box h1 { font-size: 20px; line-height: 1.5; font-weight: 500; letter-spacing: -0.3px; }
 .intro-box .eb { color: var(--lmuted); }
+/* 시안 G-01: [시작하기] 는 padding 11px 28px (약 104×42) */
+.intro-box .pill[data-intro-start] { padding: 11px 28px; }
 .intro-box .lm.sm { font-size: 12.5px; }
 .intro-box .checks .crow:first-child { border-top: 0; }
 .intro-box .crow .fix { flex: 1 0 100%; padding-left: 32px; font-size: 13px; color: var(--lightink); overflow-wrap: anywhere; }
@@ -1061,6 +1065,7 @@ details.fold > [data-r]:empty { display: none; }
 .handoff .sub { color: var(--lmuted); }
 .handoff-list { display: flex; flex-direction: column; gap: 3px; padding-top: 8px; border-top: 1px solid var(--lline); font-size: 13.5px; }
 .handoff .fine { font-size: 12px; color: var(--lmuted); }
+.handoff .handoff-list .eb, .light .handoff .handoff-list .eb { color: var(--attn); }  /* 시안 G-12: "새 세션에 넘길 것" 눈썹은 노랑 */
 .pill.quiet-edge { border-color: transparent; }
 .prcard .crow.wait .mk::after { content: ''; }
 .prcard .crow.wait .mk { border-color: var(--attn); background: var(--attn); }
