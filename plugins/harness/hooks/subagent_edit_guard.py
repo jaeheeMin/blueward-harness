@@ -9,7 +9,13 @@
               서브에이전트(`agent_id` 있음)든 메인 세션이든 모두 적는다(다른 사람의 편집을 "설명된 변경" 으로
               쳐 잘못 막는 일을 줄이기 위해서다).
 - `start`   — SubagentStart. 그 시점의 작업 트리(`git status --porcelain` 경로와 각 파일 내용 해시)와 HEAD 를 저장.
-- `stop`    — SubagentStop. 지금 상태와 기준을 비교해 "도는 동안 바뀐 파일" 을 구한다. 파일마다
+              세션 폴더만이 아니라 같은 저장소의 모든 worktree(`git worktree list`)를 담는다(#829).
+              목록을 못 읽으면 세션 폴더만 담고 stop 이 "확인 못 함" 으로 알린다.
+- `prompt`  — PreToolUse(Agent|Task). 넘기는 프롬프트에 경로가 나온 worktree 를 세션 기록에 남긴다.
+- `bash`    — PreToolUse(Bash|PowerShell). 서브에이전트의 명령·cwd 에 경로가 나온 worktree 를 그 에이전트에 연결한다.
+              막는 판정은 연결된 트리(세션 폴더, prompt·bash·Edit/Write 로 이어진 worktree)에만 한다 — 같은 저장소의
+              다른 세션이 일하는 worktree 변경을 탓하지 않기 위해서다. 연결된 트리의 다른 세션 Edit/Write 기록도 읽는다.
+- `stop`    — SubagentStop. 연결된 worktree 의 지금 상태와 기준을 비교해 "도는 동안 바뀐 파일" 을 구한다. 파일마다
               기준 해시 -> pre -> post -> pre -> post ... -> 현재 내용 사슬이 끊김 없이 이어질 때만 "설명된
               변경" 으로 보고, 아니면 `decision: block` 으로 다시 고치게 한다. Write 는 파일 전체를 새로 쓰므로
               사슬을 다시 시작시킨다. 막힌 뒤에 그 파일을 다시 쓴 기록도 같다(막힌 사실을 알고 고친 것).
@@ -17,7 +23,10 @@
               `additionalContext` 로 메인 모델에 한 번 주입하고 비운다. `systemMessage` 는 사용자 화면 전용이라
               메인 모델이 모르기 때문이다.
 
-**기록 위치.** `<git 디렉터리>/harness-subagent-guard/`. git 이 추적하지 않고 worktree 별로 갈린다.
+**기록 위치.** 세션 폴더의 `<git 디렉터리>/harness-subagent-guard/`. git 이 추적하지 않고 worktree 별로 갈린다.
+Edit/Write 로 고친 파일이 다른 worktree·저장소에 있어도 기록은 이 한 곳에 모으되, 해시와 상대 경로는 그
+파일이 속한 작업 트리 기준이다(`pre`/`record`). 시작 때 기준이 없던 작업 트리는 서브에이전트가 거기를 처음
+Edit/Write 하기 직전에 기준을 더한다(그 전의 스크립트 수정은 못 본다).
 
 **무한 반복 방지.** 같은 `agent_id` 가 `MAX_BLOCKS` 번 막힌 뒤에는 더 막지 않고 통과시키며 메인 세션에 경고한다.
 
@@ -47,6 +56,7 @@ PENDING = "pending-warnings"
 NO_START = "pending-no-start"
 KEEP_SECONDS = 7 * 24 * 3600
 STALE_ACTIVE_SECONDS = 3600  # 끝났다는 기록 없이 이만큼 지난 서브에이전트는 겹침 판정에서 뺀다
+PROMPT_WINDOW_SECONDS = 900  # 서브에이전트 시작 이만큼 전부터 넘긴 프롬프트에 나온 worktree 를 연결한다
 GIT_TIMEOUT = 20
 MISSING = "-"  # 파일이 없거나 디렉터리
 
@@ -72,12 +82,17 @@ def warn(message: str, state: Path | None = None) -> None:
     print(message, file=sys.stderr)
     emit({"systemMessage": message})
     if state is not None:
-        try:
-            state.mkdir(parents=True, exist_ok=True)
-            with open(state / PENDING, "a", encoding="utf-8") as fh:
-                fh.write(message.replace("\n", " / ") + "\n")
-        except OSError:
-            pass
+        remember(state, message)
+
+
+def remember(state: Path, message: str) -> None:
+    """메인 모델에게 주입할 경고로 남긴다(`inject` 가 비운다)."""
+    try:
+        state.mkdir(parents=True, exist_ok=True)
+        with open(state / PENDING, "a", encoding="utf-8") as fh:
+            fh.write(message.replace("\n", " / ") + "\n")
+    except OSError:
+        pass
 
 
 def note_no_start(state: Path, session: str, agent: str) -> None:
@@ -187,6 +202,54 @@ def rel_of(top: str, file_path: str) -> str | None:
     return rel
 
 
+def tkey(top: str) -> str:
+    """작업 트리를 가리키는 비교용 키."""
+    return nk(os.path.realpath(top))
+
+
+def list_worktrees(top: str) -> list[str]:
+    """같은 저장소의 모든 worktree 경로(`git worktree list --porcelain`). 디렉터리가 사라진 것(prunable)과
+    작업 트리가 없는 bare 항목은 고칠 수 없으니 뺀다."""
+    text = _git(top, "worktree", "list", "--porcelain").decode("utf-8", "replace")
+    paths: list[str] = []
+    current: str | None = None
+    skip = False
+    for line in [*text.splitlines(), ""]:
+        if line.startswith("worktree "):
+            current, skip = line[len("worktree "):], False
+        elif line == "bare" or line.startswith("prunable"):
+            skip = True
+        elif line == "":
+            if current is not None and not skip:
+                paths.append(current)
+            current = None
+    return paths
+
+
+def snapshot_tree(top: str) -> dict:
+    base, unreadable = snapshot(top)
+    return {"top": top, "baseline": base, "unreadable": unreadable, "head": head_of(top)}
+
+
+def take_trees(top: str) -> tuple[dict[str, dict], list[str]]:
+    """세션 폴더의 작업 트리와 같은 저장소의 모든 worktree 의 기준. ({키: 기준}, 확인 못 한 사유 목록)"""
+    problems: list[str] = []
+    try:
+        tops = list_worktrees(top)
+    except Unavailable as exc:
+        problems.append(f"worktree 목록을 읽지 못해 세션 폴더 밖 worktree 는 볼 수 없다({exc})")
+        tops = []
+    if tkey(top) not in {tkey(t) for t in tops}:
+        tops.insert(0, top)
+    trees: dict[str, dict] = {}
+    for item in tops:
+        try:
+            trees[tkey(item)] = snapshot_tree(item)
+        except (Unavailable, OSError) as exc:
+            problems.append(f"{item} 의 기준을 찍지 못했다({exc})")
+    return trees, problems
+
+
 # ---- 상태 파일 --------------------------------------------------------------
 
 def safe(name: str) -> str:
@@ -199,6 +262,10 @@ def agent_file(state: Path, session: str, agent: str) -> Path:
 
 def edits_file(state: Path, session: str, actor: str) -> Path:
     return state / f"{safe(session)}.{safe(actor)}.edits.jsonl"
+
+
+def prompts_file(state: Path, session: str) -> Path:
+    return state / f"prompts.{safe(session)}.jsonl"
 
 
 def pre_file(state: Path, tool_use_id: str) -> Path:
@@ -223,8 +290,13 @@ def prune(state: Path) -> None:
             pass
 
 
-def read_rows(state: Path, since: float) -> dict[str, list[dict]]:
-    """`since` 이후의 Edit/Write 기록. 모든 세션·행위자를 모아 {정규화 경로: 시각순 행}.
+def row_key(tree_key: str, rel: str) -> str:
+    return tree_key + "\0" + nk(rel)
+
+
+def read_rows(state: Path, since: float, default_tree: str) -> dict[str, list[dict]]:
+    """`since` 이후의 Edit/Write 기록. 모든 세션·행위자를 모아 {row_key(작업 트리, 경로): 시각순 행}.
+    작업 트리 키(`r`)가 없는 옛 행은 `default_tree` 로 본다.
 
     마지막으로 쓰인 시각이 `since` 이전인 기록 파일은 열지 않는다(읽는 양을 줄인다).
     """
@@ -241,7 +313,7 @@ def read_rows(state: Path, since: float) -> dict[str, list[dict]]:
                 row = json.loads(line)
                 if float(row["t"]) < since:
                     continue
-                found.setdefault(nk(row["p"]), []).append(row)
+                found.setdefault(row_key(row.get("r") or default_tree, row["p"]), []).append(row)
             except (ValueError, KeyError, TypeError):
                 continue  # 깨진 한 줄은 건너뛴다(그 파일은 기록 없음으로 취급)
     for rows in found.values():
@@ -280,20 +352,169 @@ def _file_path_of(payload: dict) -> str | None:
     return file_path if isinstance(file_path, str) and file_path else None
 
 
+def top_of(file_path: str) -> str:
+    """고친 파일이 속한 작업 트리의 최상위. 세션 폴더와 다른 worktree·저장소일 수 있다(#829)."""
+    folder = os.path.dirname(os.path.abspath(file_path))
+    while not os.path.isdir(folder):
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            raise Unavailable("파일이 속한 폴더를 찾을 수 없다")
+        folder = parent
+    top = _git(folder, "rev-parse", "--show-toplevel").decode("utf-8", "replace").strip()
+    if not top:
+        raise Unavailable("git 경로를 알 수 없다")
+    return top
+
+
+def link_trees(state: Path, payload: dict, tops: list[str]) -> None:
+    """이 서브에이전트와 연결된 작업 트리로 적는다(#829). 막는 판정은 연결된 트리에만 한다 — 같은 저장소의 다른
+    세션이 일하는 worktree 의 변경까지 이 서브에이전트 탓으로 돌리지 않기 위해서다.
+
+    시작 때 기준을 찍지 않은 작업 트리(다른 저장소, 시작 뒤 생긴 worktree)는 이때 기준도 더한다. 연결되기
+    전에 스크립트로 고친 것은 볼 수 없다(한계)."""
+    agent = payload.get("agent_id")
+    if not agent or not tops:
+        return
+    me = agent_file(state, str(payload.get("session_id") or "s"), str(agent))
+    try:
+        meta = json.loads(me.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return  # 시작 기록이 없다 — stop 이 알린다
+    trees = meta.get("trees")
+    if not isinstance(trees, dict):
+        return
+    linked = meta.setdefault("linked", [])
+    problems = meta.setdefault("problems", [])
+    changed = False
+    for top in tops:
+        key = tkey(top)
+        if key not in linked:
+            linked.append(key)
+            changed = True
+        if key in trees:
+            continue
+        changed = True
+        try:
+            trees[key] = snapshot_tree(top)
+        except (Unavailable, OSError) as exc:
+            message = f"{top} 의 기준을 찍지 못했다({exc})"
+            if message not in problems:
+                problems.append(message)
+    if changed:
+        save_json(me, meta)
+
+
+def mentioned_tops(top: str, text: str) -> list[str]:
+    """`text`(명령·프롬프트) 안에 경로가 나온 같은 저장소의 worktree. 대소문자·구분자를 맞춰 비교하고
+    Git Bash 식 `/c/…` 도 `c:/…` 로 읽는다. 상대 경로는 `../이름` 꼴만 본다. 목록을 못 읽으면 Unavailable."""
+    hay = nk(re.sub(r"(?<![A-Za-z0-9_.-])/([A-Za-z])/", r"\1:/", text))
+    edge_before, edge_after = r"(?<![A-Za-z0-9_.-])", r"(?![A-Za-z0-9_.-])"
+    found: list[str] = []
+    for item in list_worktrees(top):
+        names = {nk(item), nk(os.path.realpath(item))}
+        patterns = [edge_before + re.escape(n) + edge_after for n in names]
+        patterns.append(r"\.\.[/\\]" + re.escape(nk(os.path.basename(item.rstrip("/\\")))) + edge_after)
+        if any(re.search(p, hay) for p in patterns):
+            found.append(item)
+    return found
+
+
+def do_prompt(payload: dict) -> None:
+    """PreToolUse(Agent|Task). 서브에이전트에게 넘기는 프롬프트에 나온 worktree 를 이 세션 기록에 남긴다."""
+    tool_input = payload.get("tool_input")
+    text = tool_input.get("prompt") if isinstance(tool_input, dict) else None
+    if not isinstance(text, str) or not text:
+        return
+    try:
+        top, state = repo_paths(payload.get("cwd") or os.getcwd())
+    except Unavailable:
+        return  # git 이 아니면 stop 이 알린다
+    row: dict = {"t": time.time()}
+    try:
+        row["k"] = [tkey(t) for t in mentioned_tops(top, text)]
+    except Unavailable:
+        row["unknown"] = True  # stop 이 "확인 못 함" 으로 알린다
+    if not row.get("k") and not row.get("unknown"):
+        return
+    state.mkdir(parents=True, exist_ok=True)
+    with open(prompts_file(state, str(payload.get("session_id") or "s")), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\n")
+
+
+def do_bash(payload: dict) -> None:
+    """PreToolUse(Bash|PowerShell). 서브에이전트가 실행하는 명령·작업 폴더에 나온 worktree 를 그 에이전트와 연결한다."""
+    if not payload.get("agent_id"):
+        return
+    tool_input = payload.get("tool_input")
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    cwd = payload.get("cwd") or os.getcwd()
+    try:
+        top, state = repo_paths(cwd)
+        tops = mentioned_tops(top, f"{command if isinstance(command, str) else ''}\n{cwd}")
+    except Unavailable as exc:
+        add_problem(state_of_or_none(cwd), payload, f"명령에 나온 worktree 를 알아내지 못했다({exc})")
+        return
+    link_trees(state, payload, tops)
+
+
+def state_of_or_none(cwd: str) -> Path | None:
+    try:
+        return repo_paths(cwd)[1]
+    except Unavailable:
+        return None
+
+
+def add_problem(state: Path | None, payload: dict, message: str) -> None:
+    if state is None:
+        return
+    me = agent_file(state, str(payload.get("session_id") or "s"), str(payload.get("agent_id")))
+    try:
+        meta = json.loads(me.read_text(encoding="utf-8"))
+        problems = meta.setdefault("problems", [])
+        if message not in problems:
+            problems.append(message)
+            save_json(me, meta)
+    except (OSError, ValueError):
+        return  # 시작 기록이 없다 — stop 이 알린다
+
+
+def read_prompt_links(state: Path, session: str, since: float) -> tuple[set[str], bool]:
+    """`since` 이후 이 세션이 서브에이전트에게 넘긴 프롬프트에 나온 worktree 키, 알아내지 못한 프롬프트가 있었는가."""
+    keys: set[str] = set()
+    unknown = False
+    path = prompts_file(state, session)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    except OSError as exc:
+        raise Unavailable(f"프롬프트 기록을 읽지 못했다({type(exc).__name__})") from exc
+    for line in lines:
+        try:
+            row = json.loads(line)
+            if float(row["t"]) < since:
+                continue
+            keys.update(str(k) for k in row.get("k", []))
+            unknown = unknown or bool(row.get("unknown"))
+        except (ValueError, KeyError, TypeError):
+            continue  # 깨진 한 줄은 건너뛴다
+    return keys, unknown
+
+
 def do_pre(payload: dict) -> None:
     file_path = _file_path_of(payload)
     tool_use_id = payload.get("tool_use_id")
     if not file_path or not isinstance(tool_use_id, str) or not tool_use_id:
         return
     try:
-        top, state = repo_paths(payload.get("cwd") or os.getcwd())
+        _, state = repo_paths(payload.get("cwd") or os.getcwd())
+        top = top_of(file_path)
         rel = rel_of(top, file_path)
         if rel is None:
             return
         dirty = any(nk(p) == nk(rel) for p in status_paths(top, rel))
-    except Unavailable:
+        state.mkdir(parents=True, exist_ok=True)
+        link_trees(state, payload, [top])
+    except (Unavailable, OSError):
         return  # pre 가 없으면 stop 이 그 고리를 확인하지 않는다
-    state.mkdir(parents=True, exist_ok=True)
     save_json(pre_file(state, tool_use_id), {"h": hash_file(top, rel), "d": dirty})
 
 
@@ -302,14 +523,18 @@ def do_record(payload: dict) -> None:
     if file_path is None:
         return
     try:
-        top, state = repo_paths(payload.get("cwd") or os.getcwd())
+        _, state = repo_paths(payload.get("cwd") or os.getcwd())
+        top = top_of(file_path)
     except Unavailable:
         return  # git 이 아니면 기록할 곳도 대조할 곳도 없다(stop 이 알린다)
     rel = rel_of(top, file_path)
     if rel is None:
         return
     state.mkdir(parents=True, exist_ok=True)
-    row = {"p": rel, "h": hash_file(top, rel), "t": time.time(), "w": payload.get("tool_name") == "Write"}
+    row = {
+        "p": rel, "r": tkey(top), "h": hash_file(top, rel), "t": time.time(),
+        "w": payload.get("tool_name") == "Write",
+    }
     tool_use_id = payload.get("tool_use_id")
     if isinstance(tool_use_id, str) and tool_use_id:
         pre = pre_file(state, tool_use_id)
@@ -336,11 +561,13 @@ def do_start(payload: dict) -> None:
         top, state = repo_paths(payload.get("cwd") or os.getcwd())
         state.mkdir(parents=True, exist_ok=True)
         prune(state)
-        base, unreadable = snapshot(top)
+        trees, problems = take_trees(top)
+        if tkey(top) not in trees:
+            raise Unavailable("세션 폴더의 작업 트리를 읽지 못했다: " + "; ".join(problems))
         save_json(
             agent_file(state, str(payload.get("session_id") or "s"), str(agent)),
             {
-                "started": time.time(), "baseline": base, "unreadable": unreadable, "head": head_of(top),
+                "started": time.time(), "trees": trees, "problems": problems, "primary": tkey(top),
                 "blocks": 0, "blocked": {}, "done": None,
             },
         )
@@ -370,6 +597,17 @@ def _overlapping(state: Path, me: Path, started: float) -> bool:
     return False
 
 
+def trees_of(meta: dict, top: str) -> dict[str, dict]:
+    """시작 기록의 작업 트리별 기준. 옛 기록(세션 폴더 하나만)도 읽는다."""
+    trees = meta.get("trees")
+    if isinstance(trees, dict) and trees:
+        return trees
+    base = meta["baseline"]
+    if not isinstance(base, dict):
+        raise ValueError("baseline")
+    return {tkey(top): {"top": top, "baseline": base, "unreadable": meta.get("unreadable", []), "head": meta.get("head")}}
+
+
 def do_stop(payload: dict) -> None:
     agent = payload.get("agent_id")
     if not agent:
@@ -387,10 +625,8 @@ def do_stop(payload: dict) -> None:
     me = agent_file(state, str(payload.get("session_id") or "s"), str(agent))
     try:
         meta = json.loads(me.read_text(encoding="utf-8"))
-        base = meta["baseline"]
-        if not isinstance(base, dict):
-            raise ValueError("baseline")
-    except (OSError, ValueError, KeyError):
+        trees = trees_of(meta, top)
+    except (OSError, ValueError, KeyError, TypeError):
         if payload.get("agent_type") == "":
             # 공식 문서: 프롬프트 제안·/btw 같은 Claude Code 내부 에이전트는 SubagentStart 없이 Stop 만 내고
             # agent_type 이 빈 문자열이다(--agent 를 쓰면 세션 에이전트 이름이라 가릴 수 없다). 우리가 부른 게 아니다.
@@ -402,47 +638,83 @@ def do_stop(payload: dict) -> None:
         return
     started = float(meta.get("started") or 0)
 
-    head_then = meta.get("head")
-    if head_then is not None and head_of(top) != head_then:
-        meta["done"] = time.time()
-        save_json(me, meta)
-        warn(
-            f"harness: 서브에이전트({agent})가 도는 동안 HEAD 가 바뀌었다(커밋·체크아웃). 커밋된 파일은 작업 트리에서 "
-            "사라져 Edit/Write 밖 수정을 확인하지 못했다(확인 못 함). 메인 세션이 `git show` 로 직접 확인한다.",
-            state,
-        )
-        return
-
+    primary = tkey(top)
+    session = str(payload.get("session_id") or "s")
+    notes: list[str] = [str(p) for p in (meta.get("problems") or [])]
     try:
-        now, unreadable_now = snapshot(top, extra=list(base))
-        rows = read_rows(state, started)
+        rows = read_rows(state, started, primary)
+        prompt_keys, prompt_unknown = read_prompt_links(state, session, started - PROMPT_WINDOW_SECONDS)
     except (Unavailable, OSError) as exc:
         warn(f"harness: 서브에이전트({agent})가 고친 파일을 확인하지 못했다(확인 못 함): {exc}", state)
         return
+    if prompt_unknown:
+        notes.append("서브에이전트에게 넘긴 프롬프트에 나온 worktree 를 알아내지 못했다")
 
-    base_keys = {nk(p): h for p, h in base.items()}
+    # 막는 판정은 이 서브에이전트와 연결된 작업 트리에만 한다: 세션 폴더, 프롬프트·Bash 명령에 나온 worktree,
+    # Edit/Write 한 작업 트리. 같은 저장소의 다른 세션이 일하는 worktree 변경은 이 서브에이전트 탓이 아니다.
+    connected = {primary, *(str(k) for k in meta.get("linked") or []), *prompt_keys}
+    head_changed: list[str] = []
+    try:
+        listed = {tkey(t) for t in list_worktrees(top)}
+        for key in sorted((listed & connected) - set(trees)):
+            notes.append(f"도는 동안 생긴 worktree({key})는 시작 기준이 없어 보지 못했다")
+    except Unavailable as exc:
+        notes.append(f"worktree 목록을 다시 읽지 못했다({exc})")
+
     blocked = {nk(p): float(t) for p, t in (meta.get("blocked") or {}).items()}
-    skipped = {nk(p) for p in [*unreadable_now, *meta.get("unreadable", [])]}
     bad: list[str] = []
-    for rel, cur in now.items():
-        key = nk(rel)
-        if key in skipped:
+    skipped: set[str] = set()
+    for key, tree in trees.items():
+        if key not in connected:
             continue
-        if key in base_keys and base_keys[key] == cur:
-            continue  # 시작 전부터 있던 변경, 그대로
-        if explained(base_keys.get(key), rows.get(key, []), cur, blocked.get(key)):
+        ttop = str(tree["top"])
+        shown_top = "" if key == primary else ttop.rstrip("/\\") + "/"
+        if key != primary:
+            # 그 작업 트리에서 다른 세션이 Edit/Write 로 고친 기록도 설명된 변경으로 본다.
+            try:
+                other_rows = read_rows(repo_paths(ttop)[1], started, key)
+            except (Unavailable, OSError) as exc:
+                notes.append(f"{ttop} 의 다른 세션 편집 기록을 읽지 못했다({exc})")
+                continue
+            for row_name, found in other_rows.items():
+                rows[row_name] = sorted([*rows.get(row_name, []), *found], key=lambda r: r["t"])
+        head_then = tree.get("head")
+        if head_then is not None and head_of(ttop) != head_then:
+            head_changed.append(ttop)
             continue
-        bad.append(rel)
+        base = tree["baseline"]
+        try:
+            now, unreadable_now = snapshot(ttop, extra=list(base))
+        except (Unavailable, OSError) as exc:
+            notes.append(f"{ttop} 의 지금 상태를 읽지 못했다({exc})")
+            continue
+        base_keys = {nk(p): h for p, h in base.items()}
+        skip_here = {nk(p) for p in [*unreadable_now, *tree.get("unreadable", [])]}
+        skipped |= {shown_top + p for p in skip_here}
+        for rel, cur in now.items():
+            name = nk(rel)
+            if name in skip_here:
+                continue
+            if name in base_keys and base_keys[name] == cur:
+                continue  # 시작 전부터 있던 변경, 그대로
+            if explained(base_keys.get(name), rows.get(row_key(key, rel), []), cur, blocked.get(nk(shown_top + rel))):
+                continue
+            bad.append(shown_top + rel)
 
-    notes = []
     if skipped:
         notes.append("읽지 못해 확인하지 못한 파일: " + ", ".join(sorted(skipped)[:10]))
+    if head_changed:
+        notes.append(
+            "도는 동안 HEAD 가 바뀌었다(커밋·체크아웃). 커밋된 파일은 작업 트리에서 사라져 Edit/Write 밖 수정을 "
+            "확인하지 못했다. 메인 세션이 `git show` 로 직접 확인한다: " + ", ".join(head_changed[:5])
+        )
+    notes_text = "; ".join(notes)
 
     if not bad:
         meta["done"] = time.time()
         save_json(me, meta)
         if notes:
-            warn("harness: 서브에이전트(" + str(agent) + ") 점검 — " + "; ".join(notes) + "(확인 못 함)", state)
+            warn("harness: 서브에이전트(" + str(agent) + ") 점검 — " + notes_text + "(확인 못 함)", state)
         return
 
     shown = "\n".join(f"- {p}" for p in sorted(bad)[:20]) + ("\n- …" if len(bad) > 20 else "")
@@ -452,7 +724,8 @@ def do_stop(payload: dict) -> None:
         save_json(me, meta)
         warn(
             f"harness: 서브에이전트({agent})가 Edit/Write 밖에서 고친 것으로 보이는 파일이 {MAX_BLOCKS}번 막은 뒤에도 "
-            f"남아 더는 막지 않고 통과시켰다. 메인 세션이 직접 확인한다:\n{shown}",
+            f"남아 더는 막지 않고 통과시켰다. 메인 세션이 직접 확인한다:\n{shown}"
+            + (f"\n(확인 못 함: {notes_text})" if notes else ""),
             state,
         )
         return
@@ -467,6 +740,9 @@ def do_stop(payload: dict) -> None:
         "Edit/Write 로 다시 고쳐라(같은 내용을 한 번 더 써도 된다):\n" + shown
         + f"\n(이 점검은 {MAX_BLOCKS}번까지 막는다. 지금 {blocks + 1}번째.)"
     )
+    if notes:
+        reason += f"\n(확인 못 함: {notes_text})"
+        remember(state, f"harness: 서브에이전트({agent}) 점검 — {notes_text}(확인 못 함)")
     if _overlapping(state, me, started):
         reason += (
             "\n동시에 다른 서브에이전트가 돌았다. 그 파일을 다른 에이전트가 고쳤다면 최종 답에 파일 이름과 "
@@ -519,7 +795,7 @@ def _main() -> None:
         warn("harness: 서브에이전트 수정 점검 훅이 입력을 읽지 못했다(확인 못 함).")
         return
     handlers = {
-        "pre": do_pre, "record": do_record, "start": do_start, "stop": do_stop, "inject": do_inject,
+        "pre": do_pre, "prompt": do_prompt, "bash": do_bash, "record": do_record, "start": do_start, "stop": do_stop, "inject": do_inject,
     }
     handler = handlers.get(mode)
     if handler is None:

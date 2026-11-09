@@ -363,6 +363,213 @@ def test_stale_unfinished_agent_does_not_count_as_overlap(repo: Path) -> None:
     assert out is not None and "근거" not in out["reason"]
 
 
+# --- 세션 폴더 밖 worktree·저장소(#829) ------------------------------------------
+
+@pytest.fixture()
+def other_tree(repo: Path) -> Path:
+    """같은 저장소의 다른 worktree(세션 폴더는 `repo`)."""
+    other = repo.parent / (repo.name + "-wt")
+    git(repo, "worktree", "add", "-q", "-b", "other", str(other))
+    return other
+
+
+def edit_abs(cwd: Path, target: Path, text: str, agent: str = "ag1", tool: str = "Edit") -> None:
+    """세션 폴더(`cwd`)에서 절대 경로 `target` 을 Edit/Write 로 고친 것을 흉내 낸다."""
+    global _TOOL_SEQ
+    _TOOL_SEQ += 1
+    payload = {
+        **base(cwd, agent), "tool_name": tool, "tool_input": {"file_path": str(target)},
+        "tool_use_id": f"toolu_{_TOOL_SEQ}",
+    }
+    assert hook("pre", payload)[:2] == (0, None)
+    target.write_text(text, encoding="utf-8")
+    assert hook("record", payload)[:2] == (0, None)
+
+
+def agent_prompt(cwd: Path, text: str) -> None:
+    """PreToolUse(Agent) — 메인 세션이 서브에이전트에게 넘기는 프롬프트."""
+    payload = {"session_id": "s1", "cwd": str(cwd), "tool_name": "Agent", "tool_input": {"prompt": text}}
+    assert hook("prompt", payload)[:2] == (0, None)
+
+
+def agent_bash(cwd: Path, command: str, agent: str = "ag1") -> None:
+    """PreToolUse(Bash) — 서브에이전트가 실행하려는 명령(실행은 시험이 따로 흉내 낸다)."""
+    payload = {**base(cwd, agent), "tool_name": "Bash", "tool_input": {"command": command}}
+    assert hook("bash", payload)[:2] == (0, None)
+
+
+def test_unconnected_worktree_changes_do_not_block(repo: Path, other_tree: Path) -> None:
+    """같은 저장소의 다른 세션이 일하는 worktree 는 이 서브에이전트와 연결되지 않으면 막지 않는다."""
+    start(repo)
+    (other_tree / "a.txt").write_text("another session by script or IDE\n", encoding="utf-8")
+    (other_tree / "made.txt").write_text("test output\n", encoding="utf-8")
+    code, out, _ = stop(repo)
+    assert code == 0 and out is None
+
+
+def test_script_write_in_prompt_worktree_blocks(repo: Path, other_tree: Path) -> None:
+    """11-09 사고: 프롬프트로 넘긴 다른 worktree 를 서브에이전트가 스크립트로 고쳤다."""
+    agent_prompt(repo, f"{other_tree} 에서 a.txt 를 고쳐라")
+    start(repo)
+    (other_tree / "a.txt").write_text("via script\n", encoding="utf-8")
+    code, out, _ = stop(repo)
+    assert code == 0
+    assert out is not None and out["decision"] == "block"
+    assert "a.txt" in out["reason"] and other_tree.name in out["reason"]
+
+
+def test_prompt_path_style_is_normalized(repo: Path, other_tree: Path) -> None:
+    mangled = str(other_tree).replace("\\", "/").upper()  # 구분자·대소문자가 달라도 같은 worktree
+    if sys.platform != "win32":
+        mangled = str(other_tree)
+    agent_prompt(repo, f"작업 폴더: {mangled}\n")
+    start(repo)
+    (other_tree / "a.txt").write_text("via script\n", encoding="utf-8")
+    _, out, _ = stop(repo)
+    assert out is not None and out["decision"] == "block"
+
+
+def test_prompt_naming_similar_worktree_does_not_connect_it(repo: Path, other_tree: Path) -> None:
+    agent_prompt(repo, f"{repo} 만 고쳐라")  # other_tree 이름은 repo 이름 + "-wt" — 접두사만 같다
+    start(repo)
+    (other_tree / "a.txt").write_text("someone else\n", encoding="utf-8")
+    code, out, _ = stop(repo)
+    assert code == 0 and out is None
+
+
+def test_old_prompt_is_not_linked(repo: Path, other_tree: Path) -> None:
+    agent_prompt(repo, f"{other_tree}")
+    prompts = next(state_dir(repo).glob("prompts.*.jsonl"))
+    prompts.write_text(json.dumps({"t": 1.0, "k": [json.loads(prompts.read_text().splitlines()[0])["k"][0]]}) + "\n")
+    start(repo)
+    (other_tree / "a.txt").write_text("via script\n", encoding="utf-8")
+    code, out, _ = stop(repo)
+    assert code == 0 and out is None
+
+
+def test_script_write_in_bash_command_worktree_blocks(repo: Path, other_tree: Path) -> None:
+    start(repo)
+    script = f"python -c \"open(r'{other_tree}/a.txt','w').write('x')\""
+    agent_bash(repo, script)
+    (other_tree / "a.txt").write_text("via script\n", encoding="utf-8")
+    _, out, _ = stop(repo)
+    assert out is not None and out["decision"] == "block" and "a.txt" in out["reason"]
+
+
+def test_bash_command_without_worktree_path_links_nothing(repo: Path, other_tree: Path) -> None:
+    start(repo)
+    agent_bash(repo, "ls -la")
+    (other_tree / "a.txt").write_text("someone else\n", encoding="utf-8")
+    code, out, _ = stop(repo)
+    assert code == 0 and out is None
+
+
+def test_worktree_created_by_agent_command_is_baselined_then_checked(repo: Path) -> None:
+    start(repo)
+    other = repo.parent / (repo.name + "-late")
+    git(repo, "worktree", "add", "-q", "-b", "late", str(other))
+    agent_bash(repo, f"cd {other}")  # 만든 뒤 처음 나온 명령 — 이때부터 연결·기준
+    (other / "a.txt").write_text("via script\n", encoding="utf-8")
+    _, out, _ = stop(repo)
+    assert out is not None and out["decision"] == "block" and "a.txt" in out["reason"]
+
+
+def test_edit_in_other_worktree_passes(repo: Path, other_tree: Path) -> None:
+    start(repo)
+    edit_abs(repo, other_tree / "a.txt", "a2\n")
+    edit_abs(repo, other_tree / "new.txt", "n\n", tool="Write")
+    code, out, _ = stop(repo)
+    assert code == 0 and out is None
+
+
+def test_edit_then_script_in_other_worktree_blocks(repo: Path, other_tree: Path) -> None:
+    start(repo)
+    edit_abs(repo, other_tree / "a.txt", "a2\n")  # Edit 한 트리는 연결된다
+    (other_tree / "a.txt").write_text("a3 by script\n", encoding="utf-8")
+    _, out, _ = stop(repo)
+    assert out is not None and out["decision"] == "block" and "a.txt" in out["reason"]
+
+
+def test_other_worktree_changes_before_start_pass(repo: Path, other_tree: Path) -> None:
+    (other_tree / "a.txt").write_text("dirty before\n", encoding="utf-8")
+    agent_prompt(repo, f"{other_tree}")
+    start(repo)
+    code, out, _ = stop(repo)
+    assert code == 0 and out is None
+
+
+def test_other_session_edit_record_explains_change_in_linked_tree(repo: Path, other_tree: Path) -> None:
+    agent_prompt(repo, f"{other_tree}")
+    start(repo)
+    edit_tool(other_tree, "a.txt", "by the other session\n", agent=None)  # 그 worktree 의 기록 폴더에만 남는다
+    code, out, _ = stop(repo)
+    assert code == 0 and out is None
+    (other_tree / "b.txt").write_text("script\n", encoding="utf-8")  # 기록 없는 변경은 여전히 막는다
+    _, out, _ = stop(repo)
+    assert out is not None and "b.txt" in out["reason"] and "a.txt" not in out["reason"]
+
+
+def test_script_write_in_other_repo_after_edit_blocks(repo: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    foreign = tmp_path_factory.mktemp("foreign")
+    git(foreign, "init", "-q")
+    git(foreign, "config", "user.email", "t@example.com")
+    git(foreign, "config", "user.name", "t")
+    (foreign / "f.txt").write_text("f\n", encoding="utf-8")
+    (foreign / "g.txt").write_text("g\n", encoding="utf-8")
+    git(foreign, "add", ".")
+    git(foreign, "commit", "-q", "-m", "init")
+    start(repo)
+    edit_abs(repo, foreign / "f.txt", "f2\n")  # 이때 그 저장소의 기준이 더해진다
+    code, out, _ = stop(repo)
+    assert code == 0 and out is None
+    (foreign / "g.txt").write_text("via script\n", encoding="utf-8")
+    _, out, _ = stop(repo)
+    assert out is not None and out["decision"] == "block"
+    assert "g.txt" in out["reason"] and "f.txt" not in out["reason"]
+
+
+def test_worktree_created_during_run_is_reported_not_passed_silently(repo: Path) -> None:
+    start(repo)
+    other = repo.parent / (repo.name + "-late")
+    git(repo, "worktree", "add", "-q", "-b", "late", str(other))
+    agent_prompt(repo, f"{other} 에서 이어서 일해라")  # 시작 뒤 연결된 worktree — 기준이 없다
+    code, out, _ = stop(repo)
+    assert code == 0
+    assert out is not None and "decision" not in out
+    assert "확인 못 함" in out["systemMessage"] and "worktree" in out["systemMessage"]
+
+
+def load_hook_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("subagent_edit_guard_under_test", HOOK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_unreadable_worktree_list_warns_and_still_checks_session_folder(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = load_hook_module()
+
+    def broken(_top: str) -> list[str]:
+        raise module.Unavailable("git worktree 실패")
+
+    monkeypatch.setattr(module, "list_worktrees", broken)
+    payload = {**base(repo), "hook_event_name": "SubagentStart"}
+    module.do_start(payload)
+    assert capsys.readouterr().out == ""
+
+    module.do_stop(payload)  # 바뀐 것 없음 — 통과가 아니라 "확인 못 함" 이어야 한다
+    out = json.loads(capsys.readouterr().out)
+    assert "decision" not in out and "확인 못 함" in out["systemMessage"] and "worktree 목록" in out["systemMessage"]
+
+    (repo / "a.txt").write_text("script\n", encoding="utf-8")  # 세션 폴더는 그래도 막는다
+    module.do_stop(payload)
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block" and "확인 못 함" in out["reason"]
+
+
 def test_old_state_files_are_pruned_at_stop(repo: Path) -> None:
     import os
     import time
