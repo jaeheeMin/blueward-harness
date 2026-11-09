@@ -508,3 +508,36 @@ def test_다음_단계_대응표가_틀리면_검사_불능이다(repo, capsys, 
     _with_map(repo, _NSM_MAP.replace(*broken))
     code, out = _check(repo, capsys, _srs())
     assert code == EXIT_CONFIG_ERROR and "다음_단계_대응" in out["message"]
+
+
+# ---------------------------------------------------------------- 반복 견본 시트의 소절 (#830: `견본 · ID`)
+
+REPEAT_MAP = SPEC_MAP.replace("  - 이름: Info\n", "  - 이름: Info\n    반복: true\n    빼기: [Other]\n", 1)
+REPEAT_SPEC = SPEC_OK.replace("### 시험양식 · Info", "### 시험양식 · Info · FI.01.03.02.02")
+
+
+def test_반복_견본의_소절은_양식_밖_시트가_아니다(repo, capsys):
+    _with_map(repo, REPEAT_MAP, "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, REPEAT_SPEC + "\n" + REPEAT_SPEC.replace("FI.01.03.02.02", "FI.02.03.02"))
+    assert code == EXIT_PASS, out
+
+
+def test_반복_소절_안의_양식_밖_칸은_위반이다(repo, capsys):
+    _with_map(repo, REPEAT_MAP, "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, REPEAT_SPEC.replace("| 제목 | 가 |", "| 없는칸 | 가 |"))
+    assert code == EXIT_VIOLATION
+    assert [v["actual"] for v in _violations(out)] == ["없는칸"]
+
+
+def test_반복_소절의_ID가_시트_이름_규칙을_어기면_위반이다(repo, capsys):
+    _with_map(repo, REPEAT_MAP, "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, REPEAT_SPEC.replace("FI.01.03.02.02", "A/B"))
+    assert code == EXIT_VIOLATION
+    assert "쓸 수 없는 문자" in _violations(out)[0]["message"]
+
+
+def test_반복이_아닌_시트의_견본_ID_소절은_위반이다(repo, capsys):
+    _with_map(repo, SPEC_MAP, "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, REPEAT_SPEC)
+    assert code == EXIT_VIOLATION
+    assert _violations(out)[0]["actual"] == "Info · FI.01.03.02.02"
