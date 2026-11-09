@@ -205,14 +205,22 @@ LIB_JS = r"""(() => {
     if (items.length !== 1) return { ok: false, count: items.length };
     const vis = gridCells(items[0].el);
     if (!vis) return { ok: false, count: 1, noGrid: true };
-    return { ok: true, rows: vis.map((o, i) => ({ row: i + 1, text: trimLabel(o.c.textContent) })) };
+    // opaque: 칸 글자가 비었는데 입력칸·체크박스·아이콘이 들어 있다 — 글자가 없다는 뜻이 아니라 글자로 읽을 수 없다는 뜻이다.
+    return { ok: true, rows: vis.map((o, i) => {
+      const text = trimLabel(o.c.textContent);
+      return { row: i + 1, text, opaque: !text && !!o.c.querySelector('input, textarea, select, [role=checkbox], [role=switch], .sapUiIcon, img, svg') };
+    }) };
   };
 
-  // 보이는 요소(가장 안쪽) 중 글자에 s 가 든 것이 있는가. 화면 밖·잘린 요소는 세지 않는다.
+  // 보이는 요소(가장 안쪽) 중 글자에 s 가 든 것, 또는 보이는 input·textarea 의 값에 s 가 든 것이 있는가. 화면 밖·잘린 요소는 세지 않는다.
+  // 찾는 범위(팝업)가 사라졌으면 못 읽은 것이다(why: 'scope') — 없다고 하지 않는다.
   const hasText = s => {
-    const els = [...(scopeEl ? R() : document.body).querySelectorAll('*')].filter(e => !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(e.tagName) &&
+    if (scopeEl && !scopeEl.isConnected) return { ok: false, why: 'scope' };
+    const root = scopeEl ? R() : document.body;
+    const els = [...root.querySelectorAll('*')].filter(e => !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(e.tagName) &&
       trimLabel(e.textContent).includes(s) && ![...e.children].some(k => trimLabel(k.textContent).includes(s)));
-    const seen = els.filter(e => { const g = rectFor(e); return g && g.v; });
+    const inputs = [...root.querySelectorAll('input, textarea')].filter(e => trimLabel(e.value).includes(s));
+    const seen = uniq([...els, ...inputs]).filter(e => { const g = rectFor(e); return g && g.v; });
     return { ok: true, found: seen.length > 0, count: seen.length };
   };
 

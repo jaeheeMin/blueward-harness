@@ -225,8 +225,8 @@ def _parse_check(raw: object, where: str) -> Check:
     if "값" not in raw:
         raise ListError(f"{where}: `열` 에는 `값` 이 필요하다")
     value = raw["값"]
-    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
-        raise ListError(f"{where}: `값` 은 글자나 숫자여야 한다: {value!r}")
+    if not isinstance(value, str):
+        raise ListError(f"{where}: `값` 은 따옴표로 감싼 글이어야 한다. 숫자는 따옴표로 감싼다(예: \"0010\" — 따옴표가 없으면 YAML 이 0010 을 8 로, 12:30 을 750 으로 읽는다): {value!r}")
     expected = norm_text(value)
     if not expected:
         raise ListError(f"{where}: `값` 이 비어 있다: {value!r}")
@@ -993,6 +993,8 @@ class Capturer:
     def _check_one(self, c: Check) -> dict:
         if c.kind == "글자":
             r = self.tab.evaluate(f"window.__mc.hasText({json.dumps(c.target, ensure_ascii=False)})")
+            if isinstance(r, dict) and r.get("why") == "scope":
+                return {"결과": "검사 불능", "사유": "팝업(찾는 범위)이 사라져 화면 글자를 읽지 못했다"}
             if not isinstance(r, dict) or not r.get("ok"):
                 return {"결과": "검사 불능", "사유": f"화면 글자를 읽지 못했다: {r!r}"}
             if r.get("found"):
@@ -1021,13 +1023,16 @@ class Capturer:
             if c.row > len(rows):
                 return {"결과": "검사 불능", "사유": f"그 열에 보이는 본문 행이 {len(rows)}개뿐이라 {c.row}번째 칸이 없다(세로로 안 보이는 행은 세지 않는다)"}
             rows = [rows[c.row - 1]]
+        opaque = [x["row"] for x in rows if x.get("opaque")]
+        if opaque:  # 입력칸·체크박스·아이콘 칸은 글자가 비어 있어도 값이 없다는 뜻이 아니다
+            shown = ", ".join(str(n) for n in opaque[:MAX_ACTUAL]) + (f" 외 {len(opaque) - MAX_ACTUAL}개" if len(opaque) > MAX_ACTUAL else "")
+            return {"결과": "검사 불능", "사유": f"{shown}행 칸이 입력칸·체크박스·아이콘이라 글자로 읽을 수 없다"}
         bad = [{"행": x["row"], "값": norm_text(x.get("text"))} for x in rows if norm_text(x.get("text")) != c.expected]
-        if not bad:
-            return {"결과": "맞음"}
         if c.row:
-            return {"결과": "다름", "실제": bad[0]["값"]}
-        res = {"결과": "다름", "실제": bad[:MAX_ACTUAL], "다른 행 수": len(bad), "읽은 행 수": len(rows)}
-        return res
+            return {"결과": "다름", "실제": bad[0]["값"]} if bad else {"결과": "맞음"}
+        if not bad:
+            return {"결과": "맞음", "읽은 행 수": len(rows)}
+        return {"결과": "다름", "실제": bad[:MAX_ACTUAL], "다른 행 수": len(bad), "읽은 행 수": len(rows)}
 
     def scroll_columns(self, screen: Screen) -> None:
         """`열` 표시들을 가로 스크롤 안에서 보이게 한다. 둘 이상이면 한 번에 넘기고, 한 화면에 안 들어가면 검사 불능(나누기·배율 제안)."""
@@ -1179,7 +1184,7 @@ def run(args: argparse.Namespace) -> tuple[Report, int]:
     if report.problems:
         return report, 2
     if args.check:
-        report.screens = [{"이름": s.name, "상태": "목록 정상", "표시": len(s.marks), "준비": len(s.steps), "확인 항목": len(s.checks)} for s in wanted]
+        report.screens = [{"이름": s.name, "상태": "목록 정상", "표시": len(s.marks), "준비": len(s.steps), **({"확인 항목": len(s.checks)} if s.checks else {})} for s in wanted]
         return report, 0
 
     try:
