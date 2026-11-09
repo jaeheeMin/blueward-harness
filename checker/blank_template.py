@@ -295,7 +295,9 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                 out.append(("map", f"시트 {sn!r} 서술 {n.get('이름')!r} 의 `열` 이 위치 {n['위치']} 의 열 범위 밖이다"))
     from checker import screen_draw  # screen_draw 가 이 모듈을 불러 순환하므로 호출할 때 가져온다
 
-    return out + screen_draw.map_problems(fmap)  # 시트 `화면:` (#335 C2)
+    from checker import sheet_repeat
+
+    return out + sheet_repeat.map_problems(fmap) + screen_draw.map_problems(fmap)  # 시트 `반복`·`빼기`(#830), `화면:` (#335 C2)
 
 
 def check_map(fmap: dict, label: str, form: str = "") -> None:

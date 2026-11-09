@@ -38,7 +38,7 @@ from pathlib import Path
 
 import yaml
 
-from checker import blank_template, export
+from checker import blank_template, export, sheet_repeat
 from checker.model import ConfigError, Violation
 from checker.rules import prepare, rule
 from checker.rules.md_table import read_section_table
@@ -332,6 +332,13 @@ def _check_spec(text: str, params: dict, name: str = "") -> list[Violation]:
         map_sheets = {export.norm(s["이름"]): s for s in fmap["시트"]}
         for sname, (sec, subs) in sheets.items():
             smap = map_sheets.get(sname)
+            rep = sheet_repeat.resolve(map_sheets, sname) if smap is None else None
+            if rep is not None:  # 반복 견본의 소절(`견본 · ID`, #830): 견본 항목으로 대조하고 ID 가 시트 이름 규칙을 지키는지 본다
+                smap, sid = rep
+                why = sheet_repeat.name_problem(sid)
+                if why:
+                    out.append(_v("엑셀 시트 이름 규칙", sid, f"{form} · {sname}: {why}. 다음: ID 를 고친다."))
+                    continue
             if smap is None:
                 out.append(_v(", ".join(map_sheets), sname,
                               f"양식 밖 시트: {form} · {sname}. 허용: {', '.join(map_sheets)}. {export.NEXT_FIX_MAP}"))

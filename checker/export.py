@@ -1056,11 +1056,18 @@ def build_form(
                     f"원본이 SRS 인 지도에는 시트 {s['이름']!r} 의 칸·서술·원본 없는 표를 둘 수 없다(`원본: SRS` 표만 쓴다)",
                     form=form, sheet=norm(s["이름"]),
                 )
+    from checker import sheet_repeat  # sheet_repeat 가 export 를 불러 순환하므로 호출할 때 가져온다
+
     for sheet in spec_sections:
-        if sheet not in map_sheets:
+        if sheet not in map_sheets and sheet_repeat.resolve(map_sheets, sheet) is None:
             raise ExportError(f"작업본의 시트 {sheet!r} 이 양식 지도에 없다", form=form, sheet=sheet)
 
     infos, raw, paths, date_styles, wb_xml = _read_template(root, map_path, fmap, form)
+    if srs is None:  # 반복 견본 시트(`반복: true`)를 작업본 소절 수만큼 복제하고 견본·`빼기` 시트를 뺀다(#830)
+        fmap, spec_sections, infos, raw, paths, wb_xml = sheet_repeat.expand(
+            form, fmap, spec_sections, infos, raw, paths, wb_xml, problem, warn
+        )
+        map_sheets = {norm(s["이름"]): s for s in fmap["시트"]}
     base1904 = bool(re.search(r'date1904="(1|true)"', wb_xml))
 
     editors: dict[str, SheetXml] = {}
