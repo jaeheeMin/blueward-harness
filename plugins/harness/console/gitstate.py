@@ -120,12 +120,12 @@ def status_paths(run: Runner, cwd: str) -> tuple[list[str], str]:
     status 가 실패하면 ([], 사유) — 빈 목록을 '바뀐 것 없음' 으로 읽지 않게 사유를 따로 낸다."""
     root, failed = repo_root_checked(run, cwd)
     if failed:
-        return [], "git 을 실행하지 못했습니다."
+        return [], "git 을 실행하지 못했어."
     if not root:
         return [], ""
     rc, out = _git(run, cwd, "status", "--porcelain", "-z", "-uall")
     if rc != 0:
-        return [], "git status 가 실패했습니다."
+        return [], "git status 가 실패했어."
     entries, paths, i = out.split("\0"), [], 0
     while i < len(entries):
         entry, i = entries[i], i + 1
@@ -148,7 +148,7 @@ def open_pr_files(run: Runner, cwd: str) -> dict:
     rc, out = run(["gh", "pr", "list", "--state", "open", "--json", "number,url,headRefName,files", "--limit", "50"], cwd)
     data = _json(out) if rc == 0 else None
     if not isinstance(data, list):
-        return {"state": "unknown", "prs": [], "reason": "gh 로 열린 PR 의 바뀐 파일을 읽지 못했습니다(gh 가 없거나 로그인·네트워크 문제)."}
+        return {"state": "unknown", "prs": [], "reason": "gh 로 열린 PR 의 바뀐 파일을 읽지 못했어(gh 가 없거나 로그인·네트워크 문제)."}
     prs = []
     for d in data:
         if not isinstance(d, dict):
@@ -195,21 +195,21 @@ def upload_states(run: Runner, cwd: str, files: list[tuple[str, bool]], open_prs
     rc, text = _git(run, cwd, "rev-parse", "--show-prefix", "HEAD")
     lines = text.split("\n")
     if rc != 0 or len(lines) < 2:
-        fail("git 으로 현재 커밋을 읽지 못했습니다.")
+        fail("git 으로 현재 커밋을 읽지 못했어.")
         return out
     prefix = lines[0].strip()
     head = _tree_blobs(run, cwd, "HEAD", rest)
     if head is None:
-        fail("git 으로 커밋된 파일을 읽지 못했습니다.")
+        fail("git 으로 커밋된 파일을 읽지 못했어.")
         return out
     base = default_branch(run, cwd)
     rc, _ = _git(run, cwd, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{base}")
     if rc == GIT_UNAVAILABLE:
-        fail("git 을 실행하지 못했습니다.")
+        fail("git 을 실행하지 못했어.")
         return out
     main_blobs = _tree_blobs(run, cwd, f"origin/{base}", rest) if rc == 0 else {}
     if main_blobs is None:
-        fail(f"git 으로 origin/{base} 의 파일을 읽지 못했습니다.")
+        fail(f"git 으로 origin/{base} 의 파일을 읽지 못했어.")
         return out
     need = []
     for rel in rest:
@@ -224,7 +224,7 @@ def upload_states(run: Runner, cwd: str, files: list[tuple[str, bool]], open_prs
     got = open_prs()
     if got.get("state") != "ok":
         for rel in need:
-            out[rel] = {"state": "unknown", "prs": [], "reason": got.get("reason") or "열린 PR 을 읽지 못했습니다."}
+            out[rel] = {"state": "unknown", "prs": [], "reason": got.get("reason") or "열린 PR 을 읽지 못했어."}
         return out
     prs = got.get("prs") or []
     for rel in need:
@@ -233,7 +233,7 @@ def upload_states(run: Runner, cwd: str, files: list[tuple[str, bool]], open_prs
         if hit:
             out[rel] = {"state": "review", "prs": hit, "reason": ""}
         elif any(p["truncated"] for p in prs):  # 바뀐 파일이 많은 PR 은 목록이 잘렸을 수 있어 '없다' 고 단정하지 않는다
-            out[rel] = {"state": "unknown", "prs": [], "reason": "바뀐 파일이 많은 열린 PR 이 있어 이 파일이 들어 있는지 알 수 없습니다."}
+            out[rel] = {"state": "unknown", "prs": [], "reason": "바뀐 파일이 많은 열린 PR 이 있어 이 파일이 들어 있는지 알 수 없어."}
         else:
             out[rel] = {"state": "committed", "prs": [], "reason": ""}
     return out
@@ -241,7 +241,7 @@ def upload_states(run: Runner, cwd: str, files: list[tuple[str, bool]], open_prs
 
 def summarize_error(out: str) -> str:
     text = " ".join((out or "").split())
-    return text[-ERROR_SUMMARY_LIMIT:] if text else "자세한 오류 글이 없습니다."
+    return text[-ERROR_SUMMARY_LIMIT:] if text else "자세한 오류 글이 없어."
 
 
 def worktree_path(root: str, short_id: str) -> str:
@@ -253,11 +253,11 @@ def add_worktree(run: Runner, slow_run: Runner, root: str, path: str) -> str:
     """origin 을 가져와 기본 브랜치 끝에서 떼어낸(detached) 작업용 폴더를 만든다. 브랜치는 만들지 않는다. 성공이면 "", 실패면 사유."""
     rc, out = _git(slow_run, root, "fetch", "origin")
     if rc != 0:
-        return "git fetch 가 실패했습니다: " + summarize_error(out)
+        return "git fetch 가 실패했어: " + summarize_error(out)
     base = default_branch(run, root)
     rc, out = _git(slow_run, root, "worktree", "add", "--detach", path, f"origin/{base}")
     if rc != 0:
-        return "git worktree add 가 실패했습니다: " + summarize_error(out)
+        return "git worktree add 가 실패했어: " + summarize_error(out)
     return ""
 
 
@@ -316,14 +316,14 @@ def pr_status(run: Runner, cwd: str, branch: str, number: int | None = None) -> 
         rc, out = run(["gh", "pr", "view", str(number), "--json", PR_FIELDS], cwd)
         data = _json(out) if rc == 0 else None
         if not isinstance(data, dict):
-            return {"state": "unknown", "pr": None, "reason": f"gh 로 PR #{number} 를 읽지 못했습니다."}
+            return {"state": "unknown", "pr": None, "reason": f"gh 로 PR #{number} 를 읽지 못했어."}
         return {"state": "ok", "pr": _pr_item(data), "reason": ""}
     if not branch or branch in ("HEAD", default_branch(run, cwd)):
         return {"state": "ok", "pr": None, "reason": ""}
     rc, out = run(["gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "5", "--json", PR_FIELDS], cwd)
     data = _json(out) if rc == 0 else None
     if not isinstance(data, list):
-        return {"state": "unknown", "pr": None, "reason": "gh 로 PR 상태를 읽지 못했습니다(gh 가 없거나 로그인·네트워크 문제)."}
+        return {"state": "unknown", "pr": None, "reason": "gh 로 PR 상태를 읽지 못했어(gh 가 없거나 로그인·네트워크 문제)."}
     items = [_pr_item(d) for d in data if isinstance(d, dict)]
     for want in ("OPEN", "MERGED", "CLOSED"):
         hit = next((i for i in items if i["state"] == want), None)
@@ -370,12 +370,12 @@ def is_github_repo(run: Runner, cwd: str) -> bool:
 def _approver_rules(run: Runner, cwd: str, rel_file: str, when_no_file: str) -> dict:
     """{"state": "yes"|"no"|"unknown", "reason", "login", "rules", "admin"}. rules 는 (by_author, default, has_entries)."""
     if not is_github_repo(run, cwd):
-        return {"state": "no", "reason": "git 원격이 GitHub 인 저장소가 아니라 승인자를 따지지 않습니다.", "login": "", "rules": None,
+        return {"state": "no", "reason": "git 원격이 GitHub 인 저장소가 아니라 승인자를 따지지 않아.", "login": "", "rules": None,
                 "admin": None, "github": False}
     rc, out = run(["gh", "api", "user", "--jq", ".login"], cwd)
     login = out.strip().lower() if rc == 0 else ""
     if not login:
-        return {"state": "unknown", "reason": "gh 로 내 GitHub 아이디를 읽지 못했습니다(gh 로그인·네트워크 확인).", "login": "", "rules": None, "admin": None}
+        return {"state": "unknown", "reason": "gh 로 내 GitHub 아이디를 읽지 못했어(gh 로그인·네트워크 확인).", "login": "", "rules": None, "admin": None}
     root = repo_root(run, cwd) or cwd
     text = None
     path = os.path.join(root, *rel_file.split("/"))
@@ -384,20 +384,20 @@ def _approver_rules(run: Runner, cwd: str, rel_file: str, when_no_file: str) -> 
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
         except OSError as e:
-            return {"state": "unknown", "reason": f"{rel_file} 을 읽지 못했습니다: {e}", "login": login, "rules": None, "admin": None}
+            return {"state": "unknown", "reason": f"{rel_file} 을 읽지 못했어: {e}", "login": login, "rules": None, "admin": None}
     rules = parse_approvers(text)
     base = {"login": login, "rules": rules, "admin": None}
     if rules[2]:
         everyone = set(rules[1]).union(*rules[0].values())
         yes = login in everyone
         return dict(base, state="yes" if yes else "no",
-                    reason="" if yes else f"{rel_file} 의 승인자에 {login} 가 없습니다.")
+                    reason="" if yes else f"{rel_file} 의 승인자에 {login} 가 없어.")
     rc, out = run(["gh", "repo", "view", "--json", "viewerPermission", "--jq", ".viewerPermission"], cwd)
     if rc != 0 or not out.strip():
-        return dict(base, state="unknown", reason="gh 로 저장소 권한을 읽지 못했습니다(gh 로그인·네트워크 확인).")
+        return dict(base, state="unknown", reason="gh 로 저장소 권한을 읽지 못했어(gh 로그인·네트워크 확인).")
     admin = out.strip().upper() == ADMIN_PERMISSION
     return dict(base, state="yes" if admin else "no", admin=admin,
-                reason=f"{rel_file} 이 없어 저장소 admin 만 승인자로 봅니다." + ("" if admin else " 내 권한은 admin 이 아닙니다."))
+                reason=f"{rel_file} 이 없어 저장소 admin 만 승인자로 봐." + ("" if admin else " 내 권한은 admin 이 아니야."))
 
 
 def approver_state(run: Runner, cwd: str, rel_file: str, when_no_file: str) -> dict:
@@ -415,7 +415,7 @@ def approval_prs(run: Runner, cwd: str, rel_file: str, when_no_file: str) -> dic
                    "number,title,url,author,isDraft,headRefOid,latestReviews"], cwd)
     data = _json(out) if rc == 0 else None
     if not isinstance(data, list):
-        return dict(out_base, state="unknown", reason="gh 로 열린 PR 목록을 읽지 못했습니다.")
+        return dict(out_base, state="unknown", reason="gh 로 열린 PR 목록을 읽지 못했어.")
     by_author, default, has_entries = info["rules"]
     login, items = info["login"], []
     for pr in data:
@@ -440,12 +440,12 @@ def my_open_prs(run: Runner, cwd: str) -> dict:
     """내가 올린 열린 PR(세션과 상관없이). {"state": "ok"|"no"|"unknown", "reason", "items": [{number,title,url,branch,checks}]}.
     checks 는 summarize_checks 의 fail/pending/pass/none. 읽지 못하면 빈 목록이 아니라 unknown 이다."""
     if not is_github_repo(run, cwd):
-        return {"state": "no", "reason": "git 원격이 GitHub 인 저장소가 아닙니다.", "items": []}
+        return {"state": "no", "reason": "git 원격이 GitHub 인 저장소가 아니야.", "items": []}
     rc, out = run(["gh", "pr", "list", "--author", "@me", "--state", "open", "--limit", str(PR_LIST_LIMIT), "--json",
                    "number,title,url,headRefName,statusCheckRollup"], cwd)
     data = _json(out) if rc == 0 else None
     if not isinstance(data, list):
-        return {"state": "unknown", "reason": "gh 로 내 PR 목록을 읽지 못했습니다(gh 로그인·네트워크 확인).", "items": []}
+        return {"state": "unknown", "reason": "gh 로 내 PR 목록을 읽지 못했어(gh 로그인·네트워크 확인).", "items": []}
     items = [{"number": d.get("number"), "title": d.get("title", ""), "url": d.get("url", ""), "branch": d.get("headRefName", ""),
               "checks": summarize_checks(d.get("statusCheckRollup"))} for d in data if isinstance(d, dict) and d.get("number")]
     items.sort(key=lambda i: i["number"])

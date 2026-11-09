@@ -51,8 +51,8 @@ def hidden_window_kwargs(os_name: str | None = None) -> dict:
     return {}
 
 
-CLAUDE_MISSING = ("claude 실행 파일을 찾을 수 없습니다. Claude Code 를 설치했는지 확인하고, 새 터미널에서 `claude --version` 이 "
-                  "되는지 보십시오. npm 으로 설치했다면 `claude.exe` 가 있는 공식 설치본으로 다시 설치하는 것을 권합니다.")
+CLAUDE_MISSING = ("claude 실행 파일을 찾을 수 없어. Claude Code 를 설치했는지 확인하고, 새 터미널에서 `claude --version` 이 "
+                  "되는지 봐 줘. npm 으로 설치했다면 `claude.exe` 가 있는 공식 설치본으로 다시 설치하는 걸 권해.")
 
 
 def _windows_cmd_target(path: str, which, exists) -> list[str] | None:
@@ -158,7 +158,7 @@ def open_in_browser(url: str, opener: Callable[[str], bool] = webbrowser.open) -
 
 
 PICK_TIMEOUT = 600.0  # 사람이 폴더를 고르는 동안 기다리는 시간(초). 넘으면 프로세스를 끝낸다
-PICK_FALLBACK = "경로를 직접 적어 주세요."
+PICK_FALLBACK = "경로를 직접 적어 줘."
 # 고정 스크립트. 사용자 입력을 넣지 않는다. 시작 폴더는 환경변수 HARNESS_PICK_START(UTF-8 base64)로 받는다.
 # 탐색기식 창(IFileOpenDialog + FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)을 Add-Type 한 작은 C# 로 띄우고,
 # COM 이 실패하면 옛 FolderBrowserDialog 로 대신한다.
@@ -303,19 +303,19 @@ def pick_folder(os_name: str | None = None, runner=subprocess.run, timeout: floa
     elif name == "macos" or (name == "posix" and sys.platform == "darwin"):
         cmd, cancel_code = ["osascript", "-e", "POSIX path of (choose folder)"], 1
     else:
-        raise PickUnavailable("이 컴퓨터에서는 폴더 선택 창을 열 수 없습니다. " + PICK_FALLBACK)
+        raise PickUnavailable("이 컴퓨터에서는 폴더 선택 창을 열 수 없어. " + PICK_FALLBACK)
     try:
         done = runner(cmd, capture_output=True, timeout=timeout, **extra, **hidden_window_kwargs(name))
     except subprocess.TimeoutExpired:
-        raise PickUnavailable("폴더 선택 창이 너무 오래 열려 있어 닫았습니다. " + PICK_FALLBACK)
+        raise PickUnavailable("폴더 선택 창이 너무 오래 열려 있어 닫았어. " + PICK_FALLBACK)
     except (OSError, subprocess.SubprocessError):
-        raise PickUnavailable("폴더 선택 창을 열지 못했습니다. " + PICK_FALLBACK)
+        raise PickUnavailable("폴더 선택 창을 열지 못했어. " + PICK_FALLBACK)
     code = getattr(done, "returncode", 1)
     raw = getattr(done, "stdout", b"") or b""
     if code != 0:
         if code == cancel_code:
             return None
-        raise PickUnavailable("폴더 선택 창이 정상적으로 끝나지 않았습니다. " + PICK_FALLBACK)
+        raise PickUnavailable("폴더 선택 창이 정상적으로 끝나지 않았어. " + PICK_FALLBACK)
     text = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
     text = text.strip()
     if not text:
@@ -326,7 +326,7 @@ def pick_folder(os_name: str | None = None, runner=subprocess.run, timeout: floa
         try:
             text = base64.b64decode(text, validate=True).decode("utf-8")
         except (binascii.Error, ValueError):
-            raise PickUnavailable("고른 폴더 경로를 읽지 못했습니다. " + PICK_FALLBACK)
+            raise PickUnavailable("고른 폴더 경로를 읽지 못했어. " + PICK_FALLBACK)
     elif len(text) > 1:
         text = text.rstrip("/") or "/"
     return text
@@ -381,7 +381,7 @@ def open_path(path: str, mode: str, os_name: str | None = None, popen=subprocess
     호출한 쪽이 path 가 작업 폴더 안의 존재하는 파일이고 열어도 되는 확장자인지 이미 검사해야 한다."""
     name = os_name or opener_os()
     if '"' in path or "\0" in path:
-        return "경로에 쓸 수 없는 문자가 들어 있습니다."
+        return "경로에 쓸 수 없는 문자가 들어 있어."
     quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     try:
         if name == "windows":
@@ -394,5 +394,5 @@ def open_path(path: str, mode: str, os_name: str | None = None, popen=subprocess
         else:
             popen(["xdg-open", os.path.dirname(path) if mode == "reveal" else path], **quiet)
     except OSError as e:
-        return f"열지 못했습니다: {e}"
+        return f"열지 못했어: {e}"
     return ""

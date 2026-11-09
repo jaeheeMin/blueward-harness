@@ -316,9 +316,9 @@ class Manager:
                    "request": {"subtype": "set_permission_mode", "mode": mode or DEFAULT_MODE_NAME}}
             try:
                 if not proc.write(json.dumps(req) + "\n"):
-                    return {"ok": False, "live": True, "error": "실행 중인 프로세스에 보내지 못했습니다."}
+                    return {"ok": False, "live": True, "error": "실행 중인 프로세스에 보내지 못했어."}
                 if not wait["event"].wait(MODE_REPLY_WAIT):
-                    return {"ok": False, "live": True, "error": "세션이 권한 모드 변경에 답하지 않았습니다."}
+                    return {"ok": False, "live": True, "error": "세션이 권한 모드 변경에 답하지 않았어."}
             finally:
                 with self.lock:
                     self.mode_waits.pop(request_id, None)
@@ -332,7 +332,7 @@ class Manager:
         with self.store.lock:
             s = self.store.get(real)
             if s is None:
-                return {"ok": False, "live": live, "error": "없는 세션입니다."}
+                return {"ok": False, "live": live, "error": "없는 세션이야."}
             s["permissionChoice"] = mode
             s["permissionNote"] = ""
             if live:
@@ -358,12 +358,12 @@ class Manager:
         proc0, before = marker
         proc = self.proc_for(sid)
         if proc is None:
-            return False, "", False, "세션 프로세스가 없습니다."
+            return False, "", False, "세션 프로세스가 없어."
         base = before if proc is proc0 else 0
         if proc.results > base:
             return True, proc.last_result, proc.last_error, ""
         if not proc.alive():
-            return False, "", False, "세션 프로세스가 끝났습니다."
+            return False, "", False, "세션 프로세스가 끝났어."
         return False, "", False, ""
 
     # ---- 플러그인 다시 불러오기 ----
@@ -375,9 +375,9 @@ class Manager:
             self.mode_waits[request_id] = wait
         try:
             if not proc.write(json.dumps({"type": "control_request", "request_id": request_id, "request": request}) + "\n"):
-                return {"ok": False, "error": "실행 중인 프로세스에 보내지 못했습니다."}
+                return {"ok": False, "error": "실행 중인 프로세스에 보내지 못했어."}
             if not wait["event"].wait(wait_seconds):
-                return {"ok": False, "error": "세션이 답하지 않았습니다."}
+                return {"ok": False, "error": "세션이 답하지 않았어."}
         finally:
             with self.lock:
                 self.mode_waits.pop(request_id, None)
@@ -393,7 +393,7 @@ class Manager:
         proc = self.proc_for(sid)
         real = self.store.resolve_id(sid)
         if proc is None or not proc.alive():
-            return {"ok": False, "dead": True, "error": "세션 프로세스가 끝났습니다."}
+            return {"ok": False, "dead": True, "error": "세션 프로세스가 끝났어."}
         with proc.reload_lock:
             got = self.control_call(proc, {"subtype": RELOAD_SUBTYPE}, RELOAD_REPLY_WAIT)
             if got["ok"]:
@@ -417,17 +417,17 @@ class Manager:
             if s is not None:
                 s["turn_running"] = True
         if not self.send(real, RELOAD_COMMAND):
-            return {"ok": False, "error": "메시지를 보내지 못했습니다."}
+            return {"ok": False, "error": "메시지를 보내지 못했어."}
         deadline = time.monotonic() + RELOAD_MESSAGE_WAIT
         while proc.results <= before:
             if not proc.alive():
-                return {"ok": False, "error": "세션 프로세스가 끝났습니다."}
+                return {"ok": False, "error": "세션 프로세스가 끝났어."}
             if time.monotonic() > deadline:
-                return {"ok": False, "error": "답이 오지 않았습니다."}
+                return {"ok": False, "error": "답이 오지 않았어."}
             time.sleep(RELOAD_POLL)
         text = proc.last_result
         if proc.last_error or not RELOADED.search(text):
-            return {"ok": False, "error": ("이 판은 지원하지 않는 듯합니다: " + text.strip()[:100]) if text.strip() else "빈 응답입니다."}
+            return {"ok": False, "error": ("이 판은 지원하지 않는 듯해: " + text.strip()[:100]) if text.strip() else "빈 응답이야."}
         errors = RELOAD_ERRORS.search(text)
         with self.store.lock:
             s = self.store.get(real)
@@ -533,7 +533,7 @@ class Manager:
                     s["reportFresh"] = True
                     self.store.add_chat(s, "ai", e["result"])
                 if s.pop("interrupted", False):
-                    self.store.add_log(s, "사용자가 작업을 중단했습니다.")
+                    self.store.add_log(s, "사용자가 작업을 중단했어.")
                 elif e.get("is_error"):
                     detail = str(e.get("result") or e.get("subtype") or "").strip()
                     self.store.add_log(s, "오류로 끝남" + (": " + detail[:200] if detail else ""))

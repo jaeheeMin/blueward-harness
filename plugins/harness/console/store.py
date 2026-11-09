@@ -492,7 +492,7 @@ class Store:
                         and r.suggestions == (suggestions if isinstance(suggestions, list) else [])):
                     return r, False
             if sum(1 for r in self.requests.values() if r.status == "pending") >= MAX_PENDING_REQUESTS:
-                raise RequestLimit("대기 중인 요청이 너무 많습니다.")
+                raise RequestLimit("대기 중인 요청이 너무 많아.")
             r = Request(uuid.uuid4().hex[:12], sid, kind, tool_name, tool_input, suggestions, key, self.clock())
             r.risk, r.risk_note = risk, risk_note
             self.requests[r.rid] = r

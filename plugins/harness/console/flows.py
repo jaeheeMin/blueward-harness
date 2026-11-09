@@ -18,7 +18,7 @@ BASIS_READ_LIMIT = 2 << 20
 PENDING, ACTIVE, DONE, SKIPPED = "pending", "active", "done", "skipped"
 EVIDENCE_TOKENS = {"skill_done", "has_changes", "on_work_branch", "pr_exists", "pr_merged", "manual"}
 MAX_REASON = 500
-NEXT_HINT = "새 세션으로 시작하십시오."
+NEXT_HINT = "새 세션으로 시작해 줘."
 SRS_READ_LIMIT = 4 << 20
 
 Cond = Callable[[str], "bool | None"]  # 조건 이름 -> 참/거짓/None(판정 불능)
@@ -29,8 +29,8 @@ def load(path: Path = DATA_FILE) -> tuple[dict | None, str]:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
-        return None, f"갈래 데이터를 읽지 못했습니다({Path(path).name}): {e}"
-    return (data, "") if isinstance(data, dict) else (None, "갈래 데이터가 객체가 아닙니다.")
+        return None, f"갈래 데이터를 읽지 못했어({Path(path).name}): {e}"
+    return (data, "") if isinstance(data, dict) else (None, "갈래 데이터가 객체가 아니야.")
 
 
 def _squash(text: str) -> str:
@@ -228,7 +228,7 @@ def settle(state: dict, cond: Cond, now: float) -> bool:
                 continue
             if value is None:
                 undecided = True
-                msg = f"조건 {st['onlyIf']} 을 확인하지 못했습니다."
+                msg = f"조건 {st['onlyIf']} 을 확인하지 못했어."
                 if msg not in state["unknown"]:
                     state["unknown"].append(msg)
         if st["kind"] != "skill" and st["state"] == PENDING:
@@ -265,7 +265,7 @@ def _token(state: dict, st: dict, token: str, fetch: Fetch):
         return None if ev is None or ev.get("state") != "ok" else bool(ev.get("value"))
     ev = fetch("pr")
     if ev is None or ev.get("state") != "ok":
-        reason = (ev or {}).get("reason") or "PR 상태를 확인하지 못했습니다."
+        reason = (ev or {}).get("reason") or "PR 상태를 확인하지 못했어."
         if reason not in state["unknown"]:
             state["unknown"].append(reason)
         return None
@@ -300,9 +300,9 @@ def confirm(s: dict) -> str:
     """사람이 '끝났다' 고 누른다. 지금 단계에 manual 이 없으면 사유 문장을 돌려준다."""
     st = current(s.get("flowState"))
     if st is None:
-        return "진행 중인 단계가 없습니다."
+        return "진행 중인 단계가 없어."
     if "manual" not in st["done"]:
-        return f"이 단계({st['name']})는 사람이 끝냈다고 누르는 단계가 아닙니다."
+        return f"이 단계({st['name']})는 사람이 끝냈다고 누르는 단계가 아니야."
     st["confirmed"] = True
     return ""
 
@@ -310,10 +310,10 @@ def confirm(s: dict) -> str:
 def skip(s: dict, reason, now: float, cond: Cond) -> str:
     """지금 단계를 이유와 함께 건너뛴다. 이유가 비면 사유 문장을 돌려준다."""
     if not isinstance(reason, str) or not reason.strip():
-        return "건너뛰는 이유를 적어야 합니다."
+        return "건너뛰는 이유를 적어야 해."
     st = current(s.get("flowState"))
     if st is None:
-        return "진행 중인 단계가 없습니다."
+        return "진행 중인 단계가 없어."
     st["state"], st["reason"], st["skippedAt"] = SKIPPED, reason.strip()[:MAX_REASON], now
     settle(s["flowState"], cond, now)
     return ""
@@ -420,9 +420,9 @@ def compute_next(data: dict, flow: dict, root: str) -> dict | None:
             rows = read_column(fh.read(), col["column"], col.get("idColumn", "ID"), col.get("statusColumn", "Status"),
                                col.get("skipStatuses", []))
     except (OSError, UnicodeDecodeError) as e:
-        return {"options": [], "hint": NEXT_HINT, "unknown": f"{col['file']} 을 읽지 못해 다음 갈래를 정할 수 없습니다: {e}"}
+        return {"options": [], "hint": NEXT_HINT, "unknown": f"{col['file']} 을 읽지 못해 다음 갈래를 정할 수 없어: {e}"}
     if not rows:
-        return {"options": [], "hint": NEXT_HINT, "unknown": f"{col['file']} 에서 '{col['column']}' 값이 든 요구사항을 찾지 못했습니다."}
+        return {"options": [], "hint": NEXT_HINT, "unknown": f"{col['file']} 에서 '{col['column']}' 값이 든 요구사항을 찾지 못했어."}
     options = []
     for value, branch in col["branches"].items():
         skip = set(branch.get("skipStatuses") or [])  # 갈래마다 근거가 있는 상태만 뺀다(없으면 아무것도 빼지 않는다)
@@ -432,6 +432,6 @@ def compute_next(data: dict, flow: dict, root: str) -> dict | None:
     known = set(col["branches"])
     other = [i for i, v, _st in rows if v not in known]
     if other:
-        options.append({"flow": None, "name": "", "label": "정해진 값이 아닌 다음 단계(SRS 를 고쳐야 합니다)", "disabled": True,
+        options.append({"flow": None, "name": "", "label": "정해진 값이 아닌 다음 단계(SRS 를 고쳐야 해)", "disabled": True,
                         "value": "", "count": len(other), "ids": other})
     return {"options": options, "hint": NEXT_HINT}

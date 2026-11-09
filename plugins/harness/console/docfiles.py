@@ -55,13 +55,13 @@ def kind_of(path: str) -> str:
 def resolve(cwd: str, raw) -> tuple[str, str]:
     """요청 경로를 작업 폴더 안의 실제 파일로 푼다. (realpath, 작업 폴더 기준 상대 경로 '/' 구분). 밖이면 403, 없으면 404."""
     if not isinstance(raw, str) or not raw.strip() or "\0" in raw:
-        raise PathRefused(400, "path 가 비어 있거나 올바르지 않습니다.")
+        raise PathRefused(400, "path 가 비어 있거나 올바르지 않아.")
     full = os.path.join(cwd, raw.strip())
     if not is_within(full, cwd):
-        raise PathRefused(403, "작업 폴더 밖의 경로입니다.")
+        raise PathRefused(403, "작업 폴더 밖의 경로야.")
     real = os.path.realpath(full)
     if not os.path.isfile(real):
-        raise PathRefused(404, "없는 파일입니다.")
+        raise PathRefused(404, "없는 파일이야.")
     return real, os.path.relpath(real, os.path.realpath(cwd)).replace("\\", "/")
 
 
@@ -156,21 +156,21 @@ def open_part(zf: zipfile.ZipFile, name: str):
     try:
         info = zf.getinfo(name)
     except KeyError:
-        raise PreviewError(f"문서 안에 {name} 이 없습니다.")
+        raise PreviewError(f"문서 안에 {name} 이 없어.")
     if info.file_size > MAX_PART_BYTES:
-        raise PreviewError(f"{name} 이 너무 커서 미리볼 수 없습니다.")
+        raise PreviewError(f"{name} 이 너무 커서 미리볼 수 없어.")
     left = getattr(zf, "preview_budget", MAX_TOTAL_BYTES) - info.file_size  # 미리보기 한 번에 풀어도 되는 총 바이트
     if left < 0:
-        raise PreviewError("문서가 너무 커서 미리볼 수 없습니다.")
+        raise PreviewError("문서가 너무 커서 미리볼 수 없어.")
     zf.preview_budget = left
     data = zf.read(info)  # 헤더의 크기만큼만 풀린다(위에서 상한을 이미 확인했다)
     if data[:4] in UTF_BOMS or data[:2] in UTF_BOMS or b"\0" in data[:4]:
-        raise PreviewError(f"{name} 이 UTF-16/32 로 되어 있어 읽지 않았습니다.")
+        raise PreviewError(f"{name} 이 UTF-16/32 로 되어 있어 읽지 않았어.")
     declared = XML_ENCODING.search(data[:200])
     if declared and declared.group(1).lower() not in (b"utf-8", b"utf8", b"us-ascii", b"ascii"):
-        raise PreviewError(f"{name} 의 문자 인코딩이 UTF-8 이 아니어서 읽지 않았습니다.")
+        raise PreviewError(f"{name} 의 문자 인코딩이 UTF-8 이 아니어서 읽지 않았어.")
     if b"<!ENTITY" in data or b"<!DOCTYPE" in data:  # 부분 전체에서 찾는다(앞부분만 보면 긴 주석 뒤에 숨길 수 있다)
-        raise PreviewError(f"{name} 에 허용하지 않는 선언이 있어 읽지 않았습니다.")
+        raise PreviewError(f"{name} 에 허용하지 않는 선언이 있어 읽지 않았어.")
     return io.BytesIO(data)
 
 
@@ -392,12 +392,12 @@ def read_xlsx(full: str) -> dict:
             sheets = []
             for name, path in _sheet_targets(zf):
                 if path not in zf.namelist():
-                    sheets.append({"name": name, "rows": [], "truncated": False, "error": "시트 파일을 찾지 못했습니다."})
+                    sheets.append({"name": name, "rows": [], "truncated": False, "error": "시트 파일을 찾지 못했어."})
                     continue
                 rows, truncated = _read_sheet(zf, path, shared, dates, is1904)
                 sheets.append({"name": name, "rows": rows, "truncated": truncated})
     except (zipfile.BadZipFile, ET.ParseError, OSError, ValueError) as e:
-        raise PreviewError(f"엑셀 문서를 읽지 못했습니다: {type(e).__name__}")
+        raise PreviewError(f"엑셀 문서를 읽지 못했어: {type(e).__name__}")
     return {"kind": "table", "sheets": sheets}
 
 
@@ -417,7 +417,7 @@ def read_pptx(full: str) -> dict:
                             el.clear()
                 slides.append({"index": number, "texts": texts})
     except (zipfile.BadZipFile, ET.ParseError, OSError, ValueError) as e:
-        raise PreviewError(f"파워포인트 문서를 읽지 못했습니다: {type(e).__name__}")
+        raise PreviewError(f"파워포인트 문서를 읽지 못했어: {type(e).__name__}")
     return {"kind": "slides", "slides": slides}
 
 
