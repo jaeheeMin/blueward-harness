@@ -2359,9 +2359,25 @@ def list_values(root: Path, form: str) -> dict:
          "reason": f"{c['column']} 열의 목록이 비어 있어 허용 값이 없다"}
         for sh in sheets for c in sh["columns"] if c.get("empty")
     ]
+    # 다음 단계 대응표(#828)의 값 이름이 그 열의 드롭다운 허용 값 안인지 본다. 밖이면 지도 오류라 알린다.
+    from checker import blank_template
+
+    nsm = blank_template.next_step_map_of(fmap)
+    if nsm is not None:
+        ncol, nvals = nsm
+        for sh in sheets:
+            for c in sh["columns"]:
+                if c["column"] == norm(ncol) and c["allowed"] is not None:
+                    off = [k for k in nvals if k not in c["allowed"]]
+                    if off:
+                        warns.append({
+                            "form": form, "sheet": sh["sheet"], "item": c["column"], "type": "next-step-map",
+                            "reason": f"양식 지도 `다음_단계_대응` 의 값 {', '.join(off)} 이 {c['column']} 열 드롭다운 허용 값에 없다. "
+                                      f"다음: 양식 지도(templates/forms/)의 이름을 허용 값({', '.join(c['allowed'])})에 맞춰 고친다.",
+                        })
     unread = any(w["type"] == "dropdown-unchecked" for w in warns)
     return {
-        "status": "warning" if unread else "ok",
+        "status": "warning" if (unread or any(w["type"] == "next-step-map" for w in warns)) else "ok",
         "form": form,
         "sheets": sheets,
         "problems": [],

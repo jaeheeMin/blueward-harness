@@ -447,3 +447,99 @@ def test_다음_단계가_잘못되면_짝_검사가_종료코드_1로_막는다
     assert main_entry(["changed.txt"]) == EXIT_VIOLATION
     report = json.loads(capsys.readouterr().out)
     assert report["pairing"]["violations"][0]["kind"] == "next_step_invalid"
+
+
+# ---------------------------------------------------------------- Type 으로 정해지는 다음 단계(#828)
+
+TYPE_HEAD = "| ID | Title | Status | Type | 다음 단계 | Development RICEFW ID |\n|---|---|---|---|---|---|\n"
+TYPE_MAP = """\
+양식: Backlog
+템플릿: ../Backlog.xlsx
+시트:
+  - 이름: Backlog
+    표:
+      - 이름: Backlog
+        원본: SRS
+        열:
+          Backlog ID: A
+          Type: H
+        다음_단계_대응:
+          열: Type
+          값:
+            SSCUI: 설정
+            Process: 표준
+            Developer Extensibility: 개발
+            Key User Extensibility: 묻기
+"""
+
+
+def _tmap(tmp: Path, text: str = TYPE_MAP) -> None:
+    path = tmp / "templates" / "forms" / "Backlog.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _treq(n: int, typ: str, step: str, ricefw: str = "") -> str:
+    return f"| REQ-{n:03d} | 제목{n} | New | {typ} | {step} | {ricefw} |"
+
+
+def _tsetup(tmp: Path, rows: list[str], text: str | None = TYPE_MAP, head: str = TYPE_HEAD) -> dict:
+    _srs(tmp, rows, head=head)
+    _ledger(tmp, [])
+    if text is not None:
+        _tmap(tmp, text)
+    return check_pairing(tmp)
+
+
+def test_Type과_다음_단계가_대응표와_맞으면_경고가_없다(tmp_path):
+    r = _tsetup(tmp_path, [_treq(1, "SSCUI", "설정"), _treq(2, "Process", "표준"), _treq(3, "Developer Extensibility", "개발", "DEV-003")])
+    assert r["violations"] == []
+    assert not {"type_next_step_mismatch", "type_unmapped", "type_map_invalid"} & _kinds(r["warnings"])
+
+
+def test_Type과_다음_단계가_어긋나면_위반이_아니라_경고다(tmp_path):
+    r = _tsetup(tmp_path, [_treq(1, "SSCUI", "개발", "DEV-001")])
+    assert r["status"] == PASS and r["violations"] == []
+    [w] = [x for x in r["warnings"] if x["kind"] == "type_next_step_mismatch"]
+    assert "REQ-001" in w["message"] and "SSCUI" in w["message"] and "`설정`" in w["message"] and "/harness:srs" in w["message"]
+
+
+def test_묻기_값은_개발과_설정_둘_다_허용하고_표준은_경고한다(tmp_path):
+    r = _tsetup(tmp_path, [_treq(1, "Key User Extensibility", "개발", "DEV-001"), _treq(2, "Key User Extensibility", "설정"),
+                           _treq(3, "Key User Extensibility", "표준")])
+    bad = [x for x in r["warnings"] if x["kind"] == "type_next_step_mismatch"]
+    assert len(bad) == 1 and "REQ-003" in bad[0]["message"]
+
+
+def test_미정이거나_Type이_비었으면_경고하지_않는다(tmp_path):
+    r = _tsetup(tmp_path, [_treq(1, "SSCUI", "미정"), _treq(2, "", "개발", "DEV-002")])
+    assert "type_next_step_mismatch" not in _kinds(r["warnings"])
+
+
+def test_대응표에_없는_Type_값은_경고로_알린다(tmp_path):
+    r = _tsetup(tmp_path, [_treq(1, "Output", "설정")])
+    assert "type_unmapped" in _kinds(r["warnings"])
+
+
+def test_대응표가_없으면_아무것도_하지_않는다(tmp_path):
+    r = _tsetup(tmp_path, [_treq(1, "SSCUI", "개발", "DEV-001")], text=None)
+    assert not {k for k in _kinds(r["warnings"]) if k.startswith("type_")}
+    r = _tsetup(tmp_path, [_treq(1, "SSCUI", "개발", "DEV-001")], text=TYPE_MAP.replace("        다음_단계_대응:\n          열: Type\n          값:\n", "        x:\n          값:\n").replace("            SSCUI: 설정\n            Process: 표준\n            Developer Extensibility: 개발\n            Key User Extensibility: 묻기\n", "            SSCUI: 설정\n"))
+    assert not {k for k in _kinds(r["warnings"]) if k.startswith("type_")}
+
+
+def test_SRS에_Type_열이_없으면_대조하지_않는다(tmp_path):
+    head = "| ID | Title | Status | 다음 단계 | Development RICEFW ID |\n|---|---|---|---|---|\n"
+    r = _tsetup(tmp_path, ["| REQ-001 | t | New | 개발 | DEV-001 |"], head=head)
+    assert not {k for k in _kinds(r["warnings"]) if k.startswith("type_")}
+
+
+def test_지도_대응표_모양이_틀리면_경고로_알리고_통과로_뭉개지_않는다(tmp_path):
+    bad = TYPE_MAP.replace("Process: 표준", "Process: 모름")
+    r = _tsetup(tmp_path, [_treq(1, "SSCUI", "개발", "DEV-001")], text=bad)
+    [w] = [x for x in r["warnings"] if x["kind"] == "type_map_invalid"]
+    assert "Backlog.yaml" in w["message"] and "통과가 아닙니다" in w["message"]
+    assert "type_next_step_mismatch" not in _kinds(r["warnings"])
+    bad = TYPE_MAP.replace("          열: Type\n", "          열: Kind\n")
+    r = _tsetup(tmp_path, [_treq(1, "SSCUI", "개발", "DEV-001")], text=bad)
+    assert "type_map_invalid" in _kinds(r["warnings"])

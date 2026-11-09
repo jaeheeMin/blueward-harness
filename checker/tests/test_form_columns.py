@@ -483,3 +483,28 @@ def test_Spec_머리의_버전_줄은_양식_밖_검사에_걸리지_않는다(r
     text = _spec(SPEC_OK).replace("# DEV-001 시험\n", "# DEV-001 시험\n\n버전: 0.1\n", 1)
     code, out = _check(repo, capsys, text, "docs/spec/DEV-001-시험.md")
     assert code == EXIT_PASS, out
+
+
+# ---------------------------------------------------------------- 다음 단계 대응표 모양(#828)
+
+_NSM_MAP = BACKLOG_MAP.replace(
+    "          Development RICEFW ID: G\n",
+    "          Development RICEFW ID: G\n          Type: H\n        다음_단계_대응:\n          열: Type\n          값:\n            SSCUI: 설정\n            Key User Extensibility: 묻기\n",
+)
+
+
+def test_다음_단계_대응표가_맞는_모양이면_통과한다(repo, capsys):
+    _with_map(repo, _NSM_MAP)
+    code, out = _check(repo, capsys, _srs())
+    assert code == EXIT_PASS, out
+
+
+@pytest.mark.parametrize("broken", [
+    ("SSCUI: 설정", "SSCUI: 모름"),                  # 허용 값 밖
+    ("          열: Type\n", "          열: Kind\n"),  # 표 열에 없는 열
+    ("          열: Type\n", ""),                     # 열 키 없음
+])
+def test_다음_단계_대응표가_틀리면_검사_불능이다(repo, capsys, broken):
+    _with_map(repo, _NSM_MAP.replace(*broken))
+    code, out = _check(repo, capsys, _srs())
+    assert code == EXIT_CONFIG_ERROR and "다음_단계_대응" in out["message"]
