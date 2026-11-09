@@ -1307,8 +1307,10 @@
       // 원문 끝의 "다음: …" 줄은 아래 "고치는 법" 과 같은 글이라, 고치는 법이 있으면 원문에서는 뺀다(#791: 두 번 나오지 않게)
       var cut = fix ? text.search(/(^|\n)[ \t]*다음:/) : -1, body = cut >= 0 ? text.slice(0, cut) : text;
       var lines = body.split('\n'), first = lines[0].trim(), rest = lines.slice(1).join('\n').trim();
-      var m = first.match(/^(.+?[.!?。](?=\s|$))\s*(.*)$/);  // 첫 문장은 크게, 나머지는 접기
-      var head = m ? m[1] : first, more = ((m ? m[2] : '') + (rest ? '\n' + rest : '')).trim();
+      var SENT = /^(.+?[.!?。](?=\s|$))\s*(.*)$/;  // 시안 G-23: 본문은 앞 두 문장, 셋째부터는 접기
+      var m = first.match(SENT), m2 = m && m[2] ? m[2].match(SENT) : null;
+      var head1 = m ? m[1] : first, head = m && m[2] ? head1 + ' ' + (m2 ? m2[1] : m[2]) : head1;
+      var more = ((m2 ? m2[2] : '') + (rest ? '\n' + rest : '')).trim();
       // 영문 도구·훅 이름은 카드 본문에 그대로 두지 않고 쉬운 말로 바꿔 보인다(#794). 원문은 "검사 원문" 안에만 있고, AI 에게 보내는 글도 원문을 쓴다.
       var PW = window.BHLogic.plainReason, headShow = PW(head), fixShow = PW(fix), moreShow = PW(more);
       var changed = headShow !== head || fixShow !== fix || moreShow !== more;
@@ -1325,7 +1327,7 @@
       var raw = rawShow ? h('button', { type: 'button', class: 'pill line quiet-edge', 'data-block-raw': '1', 'aria-expanded': String(open),
         onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, open ? '원문 접기' : '검사 원문') : null;
       // 시안 G-23: 막힘 카드 아래 "비슷한 기록 n건 — …" 한 줄(막힘 사유 낱말로 지난 기록을 찾는다). 확인 못 함 카드에는 두지 않는다.
-      var simRow = cannot ? null : tb.similarRow(s, c, name + ' 막힘 ' + head, function () { if (built) paintMsgs(cur()); });
+      var simRow = cannot ? null : tb.similarRow(s, c, name + ' 막힘 ' + head1, function () { if (built) paintMsgs(cur()); });
       var send = s.canSend === true;
       if (mine) {
         // 직접 보기로 했으면 다음 할 일을 한 줄로 알리고, 마음이 바뀌면 되돌릴 수 있게 한다(#791)
@@ -2169,10 +2171,10 @@
           h('button', { type: 'button', class: 'pill line', 'data-intro-later': '1', text: '나중에', onClick: function () { introDone(false); } }))));
       // 시안 G-03: 두 칸(.grid3 > .lt) 안에 줄(이름 | 설명)
       panel.appendChild(h('div', { class: 'grid3' },
-        h('div', { class: 'lt' }, h('span', { class: 'eb', text: '만들어지는 것' }), [['templates/', '고객 양식을 넣는 곳'], ['rules/', '문서 검사 기준'], ['docs/ssot/', '요구사항정의서 자리'], ['audit/', '변경 기록']].map(function (r) {
-          return h('div', { class: 'srow2' }, h('span', { class: 'lm mono', text: r[0] }), h('span', { text: r[1] }));
+        h('div', { class: 'lt' }, h('span', { class: 'eb', text: '만들어지는 것' }), [['templates/', '고객 양식 넣는 곳'], ['rules/', '문서 검사 기준'], ['docs/ssot/', '요구사항정의서 자리'], ['audit/', '변경 기록']].map(function (r) {
+          return h('div', { class: 'srow2' }, h('span', { class: 'lm', text: r[0] }), h('span', { text: r[1] }));
         })),
-        h('div', { class: 'lt' }, h('span', { class: 'eb', text: '만든 뒤 할 일' }), ['고객 양식 파일을 templates/ 에 넣기', 'GitHub에 올려서 승인받기', '첫 작업 시작'].map(function (t, i) {
+        h('div', { class: 'lt' }, h('span', { class: 'eb', text: '만든 뒤 할 일' }), ['고객 양식 파일을 templates/에 넣기', 'GitHub에 올려 승인받기', '첫 작업 시작'].map(function (t, i) {
           return h('div', { class: 'srow2' }, h('span', { class: 'lm', text: String(i + 1) }), h('span', { text: t }));
         }))));
       page.appendChild(panel);

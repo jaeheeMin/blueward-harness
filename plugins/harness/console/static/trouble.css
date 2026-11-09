@@ -62,7 +62,7 @@
 .tb-simrow > span:first-child { color: var(--lightink); }
 .tb-b6 { font-weight: 600; overflow-wrap: anywhere; }
 .tb-bad-t { color: var(--danger); font-weight: 600; }
-.tb-gh { font-size: 13.5px; color: var(--lightink); }
+.tb-gh { font-size: 13.5px; color: var(--lightink); text-decoration: underline; }  /* 시안 G-21: 밑줄 */
 .tb-note { font-size: 12px; color: var(--lmuted); }
 
 /* G-22 새 기록 */
@@ -98,5 +98,6 @@
 /* 세션 화면(시안 G-23, #734): 막힘 카드 아래 "비슷한 기록" 줄(시안 .row)과 "기록해 둘까?" 카드(.ask, 글자 크기는 app.css 것) */
 .tb-simrow { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; padding: 7px 0; border-top: 1px solid var(--lline); font-size: 13px; color: var(--lightink); }
 .tb-simrow a { color: var(--lightink); text-decoration: underline; }
+.tb-simrow .tag { align-self: center; flex: none; }  /* 제목이 두 줄이어도 칩은 알약 그대로 */
 .ask .sub.tb-askerr { color: var(--attn); }
 

@@ -1349,8 +1349,8 @@ def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_sta
     text = got["text"]
     for need in ("프로젝트 준비", "needs 준비하기", "이 폴더엔 아직 하네스 구조가 없어", "네 차례", "표준 구조를 만들까? 한 번만 하면 돼",
                  "만들고 나면 GitHub에 올려서 팀 승인을 받아. 그다음부터 문서를 쓸 수 있어.", "만들기", "나중에", "만들어지는 것",
-                 "templates/", "고객 양식을 넣는 곳", "rules/", "문서 검사 기준", "docs/ssot/", "요구사항정의서 자리", "audit/", "변경 기록",
-                 "만든 뒤 할 일", "고객 양식 파일을 templates/ 에 넣기", "GitHub에 올려서 승인받기", "첫 작업 시작"):
+                 "templates/", "고객 양식 넣는 곳", "rules/", "문서 검사 기준", "docs/ssot/", "요구사항정의서 자리", "audit/", "변경 기록",
+                 "만든 뒤 할 일", "고객 양식 파일을 templates/에 넣기", "GitHub에 올려 승인받기", "첫 작업 시작"):
         assert need in text, need
     assert "하고 싶은 일을 한두 줄로" not in text and "<select" not in got["dump"]
     assert any(p[:2] == ["POST", "/api/folders/intro/seen"] and "C:/p/needs" in p[2] for p in got["posts"])  # 보여 줬다고 서버에 남긴다
@@ -1700,6 +1700,18 @@ def test_chat_draws_hook_block_cards_two_kinds_and_fix_button(tmp_path):
 _BLOCK = {"t": 2, "role": "block", "hook": "pre_write_guard", "kind": "blocked", "tool": "Write",
           "text": "문서가 템플릿을 따르지 않습니다. 개요 절이 없습니다.\n자세한 위반 목록입니다.\n\n다음: 개요 절을 추가하십시오.", "fix": "개요 절을 추가하십시오."}
 _UNSURE = {"t": 3, "role": "block", "hook": "stop-deliver", "kind": "cannot_check", "text": "엔진을 받지 못해 검사 불능입니다.", "fix": ""}
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_block_card_body_shows_first_two_sentences_and_folds_the_rest(tmp_path):
+    """시안 G-23: 막힘 카드 본문은 앞 두 문장, 셋째부터는 [검사 원문] 안에 접힌다."""
+    three = dict(_BLOCK, text="첫째 문장입니다. 둘째 문장입니다. 셋째 문장입니다.", fix="")
+    closed = _smoke(tmp_path, "s/s1", [_session("s1", chat=[three])])
+    assert "첫째 문장입니다. 둘째 문장입니다." in closed["text"] and "셋째 문장입니다." not in closed["text"]
+    opened = _smoke(tmp_path, "s/s1", [_session("s1", chat=[three])], actions=[{"click": "[data-block-raw]"}])
+    assert "셋째 문장입니다." in opened["text"]
+    one = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(three, text="한 문장입니다.")])])
+    assert "한 문장입니다." in one["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
