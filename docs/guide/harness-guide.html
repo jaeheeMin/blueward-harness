@@ -793,6 +793,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
       <tr><td>보류 · 취소</td><td>그대로</td><td>다음 단계가 아니라 Status 로 적어: <code>On Hold</code> · <code>Dropped</code> · <code>Duplicate</code> 면 Spec 도 안 만들고 멈춰. 원장에 줄이 있으면 지우지 않고 내용 앞에 <code>[보류]</code> · <code>[취소]</code> 만 붙여</td></tr>
       <tr><td>설정·표준 → 개발로 바뀜</td><td><code>DEV-003</code> 을 채움</td><td>옛 원장에 설정 줄이 있었다면 그대로 쓰고 Spec 칸만 "-" 로 되돌려. 그다음 <code>/harness:spec</code> 이 이어받아</td></tr>
     </table></div>
+    <p class="small" style="margin-top:10px">고객 양식에 <code>Type</code> 같은 종류 드롭다운이 있고 양식 지도에 대응표가 있으면, Type 을 고르는 것으로 다음 단계가 정해져(예: SSCUI → 설정, Process → 표준, Developer Extensibility → 개발). 따로 또 묻지 않고, 하나로 안 정해지는 값(예: Key User Extensibility)만 개발/설정을 한 번 더 물어. 서로 어긋나게 적으면 PR 검사가 경고로 알려 줘(막지는 않아).</p>
     <p class="small" style="margin-top:10px">다음 단계를 나중에 바꾸면(미정 → 설정·표준, 개발 → 설정) 변경 기록에 종류 "결정" 으로 남아.</p>
   </section>
 
