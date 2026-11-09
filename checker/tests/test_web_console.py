@@ -2005,11 +2005,12 @@ def test_markdown_table_escapes_html_and_ignores_non_table(tmp_path):
     assert "<table>" not in plain
 
 
-def test_session_headline_is_short_and_full_action_has_own_line():
+def test_session_headline_uses_plain_action_and_raw_stays_in_tech_info():
     js = (CONSOLE / "static" / "app.js").read_text(encoding="utf-8")
-    assert "HEADLINE_MAX" in js and "shortAction(s.currentAction)" in js and "action-line" in js
+    assert "plainAction(s.currentAction, skillLabel)" in js and "shortAction" not in js  # 원문은 제목에 안 나온다(#818)
+    assert "['현재 동작', s.currentAction]" in js  # 기술 정보에는 원문
     css = (CONSOLE / "static" / "app.css").read_text(encoding="utf-8")
-    assert ".action-line" in css and "text-overflow: ellipsis" in css  # 사이드바 상태는 한 줄 말줄임(#636)
+    assert "text-overflow: ellipsis" in css  # 사이드바 상태는 한 줄 말줄임(#636)
 
 
 def test_mention_path_rules(tmp_path):

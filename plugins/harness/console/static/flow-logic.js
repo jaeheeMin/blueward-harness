@@ -110,7 +110,7 @@
     if (step.kind === 'skill' && step.skill) {
       var again = lower(step.state) === 'active' && !busy;
       return make({ type: 'skill', skill: step.skill, label: '/harness:' + step.skill + (again ? ' 다시 실행' : ' 실행'),
-        disabled: busy || !!cannot, disabledReason: busy ? '지금 Claude Code 가 일하는 중이에요.' : cannot });
+        disabled: busy || !!cannot, disabledReason: busy ? '지금 Claude Code 가 일하는 중이에요.' : cannot, cannotSend: !busy && !!cannot });
     }
     if (step.kind === 'work') return make({ type: 'done', label: '끝났어요' });
     if (step.kind === 'human') return make({ type: 'human', label: '끝났어요', refreshLabel: '다시 확인' });
@@ -168,6 +168,40 @@
     var out = String(text == null ? '' : text);
     PLAIN_WORDS.forEach(function (r) { out = out.replace(r[0], r[1]); });
     return out;
+  }
+
+  /* ---- 지금 하는 일(#818): 서버가 주는 "Skill: harness:srs" · "Bash: git push …" 같은 원문을 쉬운 말로 ----
+     입력 원문(명령·경로)은 어디에도 내지 않는다. 원문은 세션 화면 "자세히 > 기술 정보" 에서만 보인다.
+     labelFn(스킬 id) 은 스킬 이름표를 돌려주는 함수(없으면 id 그대로). */
+  var ACTION_WORDS = [
+    [/^(?:Write|Edit|MultiEdit|NotebookEdit)$/, '파일 고치는 중'],
+    [/^(?:Read|Glob|Grep|LS)$/, '파일 살펴보는 중'],
+    [/^(?:Agent|Task)$/, '보조에게 맡기는 중'],
+    [/^(?:WebFetch|WebSearch)$/, '웹에서 찾는 중'],
+    [/^Bash$/, '명령 실행 중'],
+    [/^TodoWrite$/, '할 일 정리하는 중']
+  ];
+  function plainAction(text, labelFn) {
+    var t = String(text == null ? '' : text).trim();
+    if (!t) return '작업하는 중';
+    var i = t.indexOf(':'), tool = (i < 0 ? t : t.slice(0, i)).trim(), input = i < 0 ? '' : t.slice(i + 1).trim();
+    if (tool === 'Skill') {
+      var id = input.split(/\s+/)[0].replace(/^[^:\s]*:/, '');
+      if (!id) return '작업하는 중';
+      var label = typeof labelFn === 'function' ? labelFn(id) : id;
+      return (label || id) + ' 진행 중';
+    }
+    if (/^mcp__/.test(tool)) return /abap/i.test(tool) ? 'SAP 연결 도구 쓰는 중' : '연결 도구 쓰는 중';
+    for (var k = 0; k < ACTION_WORDS.length; k++) if (ACTION_WORDS[k][0].test(tool)) return ACTION_WORDS[k][1];
+    return '작업하는 중';
+  }
+
+  // 콘솔이 첫 말 앞에 붙인 "/harness:spec" 같은 스킬 명령 줄은 대화 풍선에서만 숨긴다(#818). Claude Code 에게 간 글은 그대로다.
+  function hideSkillLine(text) {
+    var t = String(text == null ? '' : text), m = /^\/[A-Za-z0-9_-]+:[A-Za-z0-9_-]+[ \t]*(?:\r?\n|$)/.exec(t);
+    if (!m) return t;
+    var rest = t.slice(m[0].length).replace(/^(?:[ \t]*\r?\n)+/, '');
+    return rest.trim() ? rest : t;
   }
 
   /* ---- 도구 줄 ---- */
@@ -635,7 +669,7 @@
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice,
     formsNotice: formsNotice, FORMS_MISSING_SHORT: FORMS_MISSING_SHORT, FORMS_MISSING_TEXT: FORMS_MISSING_TEXT,
-    plainReason: plainReason, reloadStrip: reloadStrip, reloadResult: reloadResult,
+    plainReason: plainReason, plainAction: plainAction, hideSkillLine: hideSkillLine, reloadStrip: reloadStrip, reloadResult: reloadResult,
     startChecks: startChecks, autoChecksOpen: autoChecksOpen, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
     mergeApprovals: mergeApprovals, prBadge: prBadge, prNeedsFix: prNeedsFix, runningSubCount: runningSubCount,

@@ -483,7 +483,7 @@
           todo.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), verb: s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기', title: title, sub: sub, t: s.updatedAt });
         }
       } else if (g === 'running') {
-        run.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: (s.currentAction || (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중')) + subagentSummary(s), t: s.updatedAt });
+        run.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: (s.currentAction ? window.BHLogic.plainAction(s.currentAction, skillLabel) : (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중')) + subagentSummary(s), t: s.updatedAt });
       } else {
         idle.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: s.status === 'ended' ? '끝난 세션' : sub, t: s.updatedAt });
       }
@@ -522,7 +522,7 @@
     var ph = window.BHLogic.phaseSide(s);  // 승인 기다림 · PR #n / 끝 · PR #n 합쳐짐(내 차례로 세지 않는다)
     if (ph && g !== 'running') return { tone: '', text: ph };
     if (s.status === 'ended') return { tone: '', text: '끝난 세션' };
-    if (g === 'running') return { tone: '', text: (s.currentAction || (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중')) + subagentSummary(s) };
+    if (g === 'running') return { tone: '', text: (s.currentAction ? window.BHLogic.plainAction(s.currentAction, skillLabel) : (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중')) + subagentSummary(s) };
     return { tone: '', text: '쉬는 중' };
   }
   /* 맨 위 띠: 내 차례(대기 중인 질문·승인, 답을 기다리는 세션)가 있을 때만 있다. */
@@ -1086,22 +1086,11 @@
       if (s.turnSkill) return ['attn', '작업을 마치고 기다리는 중'];
       return ['sec', '쉬는 중'];
     }
-    // 큰 제목에는 도구 이름 + 앞부분만, 전체는 아래 작은 한 줄(actionLine)에 둔다
-    var HEADLINE_MAX = 40;
-    function shortAction(a) {
-      var t = String(a).replace(/\s+/g, ' ').trim();
-      return t.length > HEADLINE_MAX ? t.slice(0, HEADLINE_MAX).replace(/\s+$/, '') + '…' : t;
-    }
-    function actionLine(s) {
-      if (s.status !== 'running' || !s.currentAction || (s.pendingRequestIds || []).length) return null;
-      var full = String(s.currentAction);
-      if (shortAction(full) === full.trim()) return null;
-      return h('p', { class: 'action-line mono', title: full, text: full.replace(/\s+/g, ' ') });
-    }
+    // 큰 제목은 쉬운 말로(#818). 도구 이름·입력 원문은 "자세히 > 기술 정보" 의 현재 동작에만 있다
     function headlineFor(s) {
       var pend = (s.pendingRequestIds || []).length;
       if (pend) return 'Claude Code가 내 확인을 기다리고 있어';
-      if (s.status === 'running') return s.currentAction ? shortAction(s.currentAction) : (s.currentSkill ? skillLabel(s.currentSkill) + ' 진행 중' : '작업하는 중이야');
+      if (s.status === 'running') return s.currentAction ? window.BHLogic.plainAction(s.currentAction, skillLabel) : (s.currentSkill ? skillLabel(s.currentSkill) + ' 진행 중' : '작업하는 중이야');
       if (s.status === 'starting') return '세션을 시작하고 있어';
       if (s.status === 'ended') return '세션이 끝났어';
       if (s.askedInText) return '내 답을 기다리는 듯해(추정).';
@@ -1140,8 +1129,7 @@
         h('span', { class: 'eb ' + (eb[0] === 'attn' ? 'attn' : eb[0] === 'accent' ? 'accent' : ''), text: (s.flowName ? s.flowName + ' · ' : '') + eb[1] }),
         h('h1', { text: tt }),
         h('p', { class: 'line' }, live ? h('span', { class: 'live' }, h('i'), headline) : headline,
-          el && s.status === 'running' ? h('span', { class: 'elapsed', 'data-elapsed': '1', text: ' · 경과 ' + el }) : null),
-        actionLine(s)));  // 모델·권한 줄은 시안에 없어 "자세히" 의 기술 정보(kv)에만 둔다
+          el && s.status === 'running' ? h('span', { class: 'elapsed', 'data-elapsed': '1', text: ' · 경과 ' + el }) : null)));  // 모델·권한 줄은 시안에 없어 "자세히" 의 기술 정보(kv)에만 둔다
     }
 
     // 순서 알약: ✓ 끝난 단계 / 지금 단계 / 남은 단계. 끝났으면 다음 갈래 이름을 마지막 알약으로 보인다.
@@ -1241,7 +1229,7 @@
     }
 
     // 대화 한 칸: 내 말은 말풍선(줄바꿈 그대로), AI 말은 마크다운(긴 글은 접기)
-    function chatMe(c) { return h('div', { class: 'me', 'data-chat': 'me', text: String(c.text || '') }); }
+    function chatMe(c) { return h('div', { class: 'me', 'data-chat': 'me', text: window.BHLogic.hideSkillLine(c.text) }); }
     function chatAi(c) {
       var text = String(c.text || ''), key = String(c.t), open = !!chatOpen[key];
       var long = text.split('\n').length > 28 || text.length > 2200;
@@ -1573,7 +1561,7 @@
     function recentChat() {
       var items = (Array.isArray(sessData().chat) ? sessData().chat : []).filter(function (c) { return c && (c.role === 'me' || c.role === 'ai') && String(c.text || '').trim(); });
       return items.slice(-CHAT_SHOWN).map(function (c) {
-        if (c.role === 'me') return h('div', { class: 'me', 'data-chat': 'me', text: String(c.text) });
+        if (c.role === 'me') return h('div', { class: 'me', 'data-chat': 'me', text: window.BHLogic.hideSkillLine(c.text) });
         var text = String(c.text), long = text.split('\n').length > 28 || text.length > 2200;
         var body = h('div', { class: 'report-body' + (long ? ' clip' : '') });
         body.appendChild(window.BHMarkdown.render(text));

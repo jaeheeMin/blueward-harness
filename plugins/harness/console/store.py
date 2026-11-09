@@ -644,8 +644,8 @@ def same_folder_ids(store: "Store", s: dict) -> list[str]:
                 and platform_compat.same_path(o["cwd"], s["cwd"])]
 
 
-CANNOT_SEND_IDLE = "쉬는 터미널 세션에는 바깥에서 새 턴을 시작할 수 없습니다. 터미널에서 직접 이어 가십시오."
-CANNOT_SEND_ENDED = "끝난 터미널 세션입니다."
+CANNOT_SEND_IDLE = "쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어. 터미널에서 이어서 말해 줘."
+CANNOT_SEND_ENDED = "끝난 터미널 세션이야."
 
 
 def turn_running(store: "Store", s: dict) -> bool:

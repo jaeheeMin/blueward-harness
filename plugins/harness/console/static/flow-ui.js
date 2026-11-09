@@ -369,7 +369,7 @@
         if (ask) {
           var later = !!st.later[s.id];
           box.appendChild(h('b', { text: later ? ask.later : ask.q }));
-          box.appendChild(h('p', { class: 'sub', text: a.disabledReason || (later ? ask.laterSub : ask.sub) }));  // 못 보내는 세션이면 한 줄을 그 이유로
+          box.appendChild(h('p', { class: 'sub', text: (a.cannotSend ? '' : a.disabledReason) || (later ? ask.laterSub : ask.sub) }));  // 일하는 중이면 그 이유. 터미널이라 못 보내는 이유는 입력칸 아래에 한 번만(#818)
           var arow = h('div', { class: 'acts' });
           arow.appendChild(h('button', { type: 'button', class: 'pill acc', disabled: st.busy || a.disabled, title: a.disabledReason || null, text: ask.yes,
             onClick: function () { act(runSkill(last, a.skill), HARNESS_PREFIX + a.skill + ' 실행을 요청했어요.'); } }));
@@ -396,7 +396,7 @@
             onClick: function () { act(runSkill(last, a.helper), HARNESS_PREFIX + a.helper + ' 실행을 요청했어요.'); } }));
         }
         box.appendChild(row);
-        if (a.disabledReason && a.type === 'skill') box.appendChild(h('p', { class: 'sub', text: a.disabledReason }));
+        if (a.disabledReason && !a.cannotSend && a.type === 'skill') box.appendChild(h('p', { class: 'sub', text: a.disabledReason }));
         box.appendChild(h('button', { type: 'button', class: 'skiplink', disabled: st.busy, text: '이 단계 건너뛰기', onClick: function () { askSkip(a.step); } }));
         el.appendChild(box);
       }
@@ -1319,7 +1319,7 @@
           var g = L.groupOf(s), todoRow = g === 'todo' && !L.blockOf(s), ended = s.status === 'ended';
           var title = s.title || folderName(s) || '이름 없는 세션';
           var subs = L.runningSubCount(s);
-          var doing = ended ? '끝난 세션' : s.currentAction || (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : g === 'running' ? '작업하는 중' : '쉬는 중');
+          var doing = ended ? '끝난 세션' : s.currentAction ? L.plainAction(s.currentAction, kit.skillLabel) : (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : g === 'running' ? '작업하는 중' : '쉬는 중');
           var tip = doing + (subs ? ' · 서브에이전트 ' + subs + '개 실행 중' : '');  // 둘째 줄 대신 칩 title 로(시안: 상태 칸은 칩 하나)
           var bk = L.blockOf(s);
           var fixRow = !bk && !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)
