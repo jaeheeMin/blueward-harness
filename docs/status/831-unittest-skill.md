@@ -5,7 +5,7 @@ LoB 별 단위테스트 List 작업본(`docs/unittest/<LoB>.md`)을 쓰고 고�
 
 - `plugins/harness/skills/unittest/` — `SKILL.md`, `unittest.yaml`(작업본 규칙: 파일명·필수 절·form_columns·ID 형식), `unittest-output.yaml`(산출 파일명), `unittest-template.md`(틀).
 - `checker/rules/form_columns.py` — 새 파라미터 `ID_패턴`: 반복 견본 소절(`### <양식> · <견본> · <ID>`)의 ID 가 정규식 전체와 맞아야 한다. 단위테스트 규칙은 `^[A-Z]{2,3}(\.\d{2}){3,4}$`.
-- `plugins/harness/workflow.json`(도구 `unittest`), `CLAUDE.md` 스킬 표, `plugins/harness/README.md`, 길잡이 `docs/guide/harness-guide.html`(탭 "단위테스트 List 쓰기"), plugin.json 0.10.237.
+- `plugins/harness/workflow.json`(도구 `unittest`), `CLAUDE.md` 스킬 표, `plugins/harness/README.md`, 길잡이 `docs/guide/harness-guide.html`(탭 "단위테스트 List 쓰기"), plugin.json 0.10.242.
 - 시험: `checker/tests/test_unittest_skill.py`(새 파일), `test_form_columns.py` 에 `ID_패턴` 시험, 스킬 목록이 열거된 `test_engine_pin.py`·`test_plugin_layout.py`·`test_web_console.py` 의 목록에 `unittest` 추가.
 
 ## 설계 결정
