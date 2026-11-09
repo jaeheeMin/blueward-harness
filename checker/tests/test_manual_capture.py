@@ -718,6 +718,8 @@ class FakeTab:
         self.scope_result: dict = {"ok": True}
         self.scroll_cols = None  # scrollColumns 결과(None 이면 1 — 스크롤 요소를 못 찾은 것처럼 dict 가 아니다)
         self.inner = {"w": 1600, "h": 900}  # innerWidth·innerHeight
+        self.col_values: dict = {}  # columnValues 결과(열 이름 → dict). 없는 이름은 열을 못 찾은 것
+        self.text_result: object = {"ok": True, "found": True, "count": 1}  # hasText 결과
         self.cell = {"ok": True, "rect": {"x": 500, "y": 300, "w": 20, "h": 20}, "text": "", "icon": True, "rows": 5}  # cellOf 결과
 
     def call(self, method, **params):
@@ -778,6 +780,10 @@ class FakeTab:
             return self.pick
         if expr.startswith("window.__mc.cellOf("):
             return self.cell
+        if expr.startswith("window.__mc.columnValues("):
+            return self.col_values.get(json.loads(expr[len("window.__mc.columnValues("):-1]), {"ok": False, "count": 0})
+        if expr.startswith("window.__mc.hasText("):
+            return self.text_result
         if expr.startswith("window.__mc.scrollColumns("):
             return self.scroll_cols if self.scroll_cols is not None else 1
         return 1 if "scrollColumn" in expr else None
@@ -1653,3 +1659,169 @@ def test_reopen_stuck_in_other_app_stops_before_any_step(tmp_path, capsys, fake)
     code, out = _capture(capsys, root)
     assert code == 2 and "Other-manage" in out["screens"][0]["사유"]
     assert _typed(t) == [] and not any(m == "Input.dispatchMouseEvent" for m, _ in t.calls)
+
+
+# ---------------------------------------------------------------- 확인(#743)
+
+def _vals(*texts):
+    return {"ok": True, "rows": [{"row": i, "text": t} for i, t in enumerate(texts, 1)]}
+
+
+CHK_SCREEN = TWO_SCREENS.replace("    표시:", "    확인:\n      - {열: 플랜트, 값: 1710}\n    표시:")
+
+
+def _chk(*items):
+    return TWO_SCREENS.replace("    표시:", "    확인:\n" + "".join(f"      - {i}\n" for i in items) + "    표시:")
+
+
+def _run_checks(tmp_path, capsys, fake, yaml_text, setup):
+    root = _repo(tmp_path)
+    _one(root, yaml_text)
+    t = fake["tab"] = FakeTab(STEP_FINDS)
+    setup(t)
+    code, out = _capture(capsys, root)
+    return code, out, t, root
+
+
+def test_parse_check_good_and_value_coerced_to_text():
+    data = _bad(확인=[{"열": "플랜트", "값": 1710}, {"열": "수량", "행": 2, "값": "5 "}, {"글자": "조회 결과"}])
+    (s,) = mc.parse_screens(data)
+    assert [(c.kind, c.target, c.expected, c.row) for c in s.checks] == [
+        ("열", "플랜트", "1710", None), ("열", "수량", "5", 2), ("글자", "조회 결과", "조회 결과", None)]
+    (n,) = mc.parse_screens(GOOD)
+    assert n.checks == ()
+
+
+@pytest.mark.parametrize("bad", [
+    "x", {"열": "a", "값": "1"},  # 목록이 아니다
+    [{"열": "a"}],  # 값 없음
+    [{"값": "1"}],  # 열도 글자도 없음
+    [{"열": "a", "글자": "b", "값": "1"}],
+    [{"글자": "b", "값": "1"}], [{"글자": "b", "행": 1}],
+    [{"열": "a", "값": "1", "색": "x"}],
+    [{"열": "a", "값": "1", "행": 0}], [{"열": "a", "값": "1", "행": "2"}], [{"열": "a", "값": "1", "행": True}],
+    [{"열": "a", "값": ""}], [{"열": "a", "값": " "}], [{"열": "a", "값": True}], [{"열": "a", "값": None}], [{"열": "a", "값": ["1"]}],
+    [{"열": "", "값": "1"}], [{"글자": ""}], [{"글자": " "}], [{"글자": 5}],
+    ["열"],
+])
+def test_parse_rejects_bad_check(bad):
+    with pytest.raises(mc.ListError) as e:
+        mc.parse_screens(_bad(확인=bad))
+    assert "확인" in str(e.value)
+
+
+def test_norm_text_matches_trim_label():
+    assert mc.norm_text("  1710 \n") == "1710" and mc.norm_text("플랜트 :*") == "플랜트" and mc.norm_text("a   b") == "a b"
+
+
+def test_check_count_in_check_mode(tmp_path, capsys):
+    root = _repo(tmp_path)
+    _one(root, CHK_SCREEN)
+    code, out = _run(capsys, "--list", "docs/manual/Test/1.시험.capture.yaml", "--root", str(root), "--check")
+    assert code == 0 and out["screens"][0]["확인 항목"] == 1
+
+
+def test_column_all_rows_match(tmp_path, capsys, fake):
+    code, out, t, root = _run_checks(tmp_path, capsys, fake, CHK_SCREEN, lambda t: t.col_values.update({"플랜트": _vals("1710", " 1710 ")}))
+    c = out["screens"][0]["확인"][0]
+    assert code == 0 and out["status"] == "ok" and c == {"번호": 1, "종류": "열", "대상": "플랜트", "기대": "1710", "결과": "맞음"}
+
+
+def test_column_mismatch_reports_rows_and_exits_1_but_still_shoots(tmp_path, capsys, fake):
+    code, out, t, root = _run_checks(tmp_path, capsys, fake, CHK_SCREEN, lambda t: t.col_values.update({"플랜트": _vals("1710", "1720", "1710")}))
+    row = out["screens"][0]
+    c = row["확인"][0]
+    assert code == 1 and out["status"] == "incomplete" and c["결과"] == "다름" and c["실제"] == [{"행": 2, "값": "1720"}]
+    assert row["상태"] == "완료" and t.shots == 1 and (root / "docs/manual/img/Test/조회 조건_v0.2.png").is_file()  # 그림 이름은 그대로
+
+
+def test_column_mismatch_lists_only_first_few_with_total(tmp_path, capsys, fake):
+    code, out, t, root = _run_checks(tmp_path, capsys, fake, CHK_SCREEN, lambda t: t.col_values.update({"플랜트": _vals(*["9"] * 8)}))
+    c = out["screens"][0]["확인"][0]
+    assert len(c["실제"]) == mc.MAX_ACTUAL and c["다른 행 수"] == 8
+
+
+def test_single_row_check(tmp_path, capsys, fake):
+    y = _chk("{열: 플랜트, 행: 2, 값: 1720}")
+    code, out, t, root = _run_checks(tmp_path, capsys, fake, y, lambda t: t.col_values.update({"플랜트": _vals("1710", "1720")}))
+    c = out["screens"][0]["확인"][0]
+    assert code == 0 and c["결과"] == "맞음" and c["행"] == 2
+    code, out, t, root = _run_checks(tmp_path / "b", capsys, fake, y, lambda t: t.col_values.update({"플랜트": _vals("1710", "1730")}))
+    c = out["screens"][0]["확인"][0]
+    assert code == 1 and c["결과"] == "다름" and c["실제"] == "1730"
+
+
+def test_row_beyond_visible_rows_is_unavailable(tmp_path, capsys, fake):
+    y = _chk("{열: 플랜트, 행: 3, 값: 1710}")
+    code, out, t, root = _run_checks(tmp_path, capsys, fake, y, lambda t: t.col_values.update({"플랜트": _vals("1710", "1710")}))
+    c = out["screens"][0]["확인"][0]
+    assert code == 2 and out["status"] == "unavailable" and c["결과"] == "검사 불능" and "2개뿐" in c["사유"]
+
+
+@pytest.mark.parametrize("res,needle,popin", [
+    ({"ok": False, "count": 0}, "찾지 못했다", False),
+    ({"ok": False, "count": 2}, "2개", False),
+    ({"ok": False, "count": 1, "noGrid": True}, "aria-colindex", False),
+    ({"ok": False, "count": 0}, "pop-in", True),
+    ({"ok": True, "rows": []}, "보이는 본문 행이 없다", False),
+    ("이상한 값", "읽지 못했다", False),
+])
+def test_column_unreadable_is_unavailable_never_pass_or_fail(tmp_path, capsys, fake, monkeypatch, res, needle, popin):
+    monkeypatch.setattr(mc.Capturer, "popin_label", lambda self, name: popin)
+    code, out, t, root = _run_checks(tmp_path, capsys, fake, CHK_SCREEN, lambda t: t.col_values.update({"플랜트": res}))
+    c = out["screens"][0]["확인"][0]
+    assert code == 2 and c["결과"] == "검사 불능" and needle in c["사유"] and "실제" not in c
+
+
+def test_text_check_found_missing_and_unreadable(tmp_path, capsys, fake):
+    y = _chk("{글자: 조회 결과}")
+    code, out, t, root = _run_checks(tmp_path, capsys, fake, y, lambda t: None)
+    assert code == 0 and out["screens"][0]["확인"][0] == {"번호": 1, "종류": "글자", "대상": "조회 결과", "기대": "조회 결과", "결과": "맞음"}
+    code, out, t, root = _run_checks(tmp_path / "b", capsys, fake, y, lambda t: setattr(t, "text_result", {"ok": True, "found": False, "count": 0}))
+    c = out["screens"][0]["확인"][0]
+    assert code == 1 and c["결과"] == "다름" and c["실제"] is None
+    code, out, t, root = _run_checks(tmp_path / "c", capsys, fake, y, lambda t: setattr(t, "text_result", None))
+    assert code == 2 and out["screens"][0]["확인"][0]["결과"] == "검사 불능"
+
+
+def test_check_status_combinations(tmp_path, capsys, fake):
+    y = _chk("{열: 플랜트, 값: 1710}", "{글자: 조회 결과}")
+    # 불능 + 다름 → 불능(더 나쁜 쪽)
+    code, out, t, root = _run_checks(tmp_path, capsys, fake, y, lambda t: (t.col_values.update({"플랜트": _vals("1720")}), setattr(t, "text_result", None)))
+    assert code == 2 and [c["결과"] for c in out["screens"][0]["확인"]] == ["다름", "검사 불능"]
+    # 확인은 맞음이어도 표시가 미완이면 1
+    root = _repo(tmp_path / "b")
+    _one(root, y)
+    t = fake["tab"] = FakeTab({("필터", "플랜트"): FOUND})  # 이동 버튼 없음 → 미완
+    t.col_values["플랜트"] = _vals("1710")
+    code, out = _capture(capsys, root)
+    assert code == 1 and out["screens"][0]["상태"] == "미완" and (root / "docs/manual/img/Test/조회 조건_미완_v0.2.png").is_file()
+
+
+def test_checks_run_before_overlay_and_screen_failure_skips_them(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, CHK_SCREEN)
+    t = fake["tab"] = FakeTab(STEP_FINDS)
+    t.col_values["플랜트"] = _vals("1710")
+    _capture(capsys, root)
+    i_chk = next(i for i, e in enumerate(t.evals) if e.startswith("window.__mc.columnValues("))
+    i_draw = next(i for i, e in enumerate(t.evals) if e.startswith("window.__mc.drawOverlay("))
+    assert i_chk < i_draw
+    root2 = _repo(tmp_path / "c")
+    _one(root2, CHK_SCREEN)
+    fake["tab"] = FakeTab({}, ready=False)
+    code, out = _capture(capsys, root2, "--timeout", "0.05")
+    assert code == 2 and out["screens"][0]["상태"] == "검사 불능" and "확인" not in out["screens"][0]
+
+
+def test_list_without_checks_has_no_check_key(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root)
+    t = fake["tab"] = FakeTab(STEP_FINDS)
+    code, out = _capture(capsys, root)
+    assert code == 0 and "확인" not in out["screens"][0]
+    assert not any(e.startswith(("window.__mc.columnValues(", "window.__mc.hasText(")) for e in t.evals)
+
+
+def test_js_has_check_functions():
+    assert "columnValues" in LIB_JS and "hasText" in LIB_JS and "columnValues, hasText" in LIB_JS

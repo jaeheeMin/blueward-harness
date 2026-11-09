@@ -178,21 +178,42 @@ LIB_JS = r"""(() => {
 
   // `팝업` 단계의 `행`(#673): 이름이 유일한 열 머리글과 같은 aria-colindex 의 보이는 본문 칸(role=gridcell)을 위에서부터 센다.
   // 칸 안에 보이는 아이콘(.sapUiIcon)이 있으면 그 가운데를, 없으면 칸 가운데를 누를 자리로 돌려준다. 칸 글자·아이콘 유무도 함께 돌려준다.
+  // 열 머리글과 같은 aria-colindex 의 보이는 본문 칸을 위에서부터 낸다. 머리글에 aria-colindex 가 없거나 격자를 못 찾으면 null.
+  const gridCells = h => {
+    const grid = h.closest('[role=grid], [role=treegrid], [role=table], .sapUiTable, .sapMList') || h.closest('table');
+    const ci = h.getAttribute('aria-colindex');
+    if (!grid || !ci) return null;
+    return [...grid.querySelectorAll('[role=gridcell][aria-colindex="' + ci + '"]')]
+      .map(c => ({ c, f: fully(c) })).filter(o => o.f).map(o => ({ c: o.c, r: rectOf(o.f) }))
+      .sort((p, q) => p.r.y - q.r.y);
+  };
   const cellOf = (name, row) => {
     const { items } = cands('열', name);
     if (items.length !== 1) return { ok: false, count: items.length };
-    const h = items[0].el;
-    const grid = h.closest('[role=grid], [role=treegrid], [role=table], .sapUiTable, .sapMList') || h.closest('table');
-    const ci = h.getAttribute('aria-colindex');
-    if (!grid || !ci) return { ok: false, count: 1, noGrid: true };
-    const vis = [...grid.querySelectorAll('[role=gridcell][aria-colindex="' + ci + '"]')]
-      .map(c => ({ c, f: fully(c) })).filter(o => o.f).map(o => ({ c: o.c, r: rectOf(o.f) }))
-      .sort((p, q) => p.r.y - q.r.y);
+    const vis = gridCells(items[0].el);
+    if (!vis) return { ok: false, count: 1, noGrid: true };
     const o = vis[row - 1];
     if (!o) return { ok: false, count: 1, rows: vis.length };
     const icon = o.c.querySelector('.sapUiIcon');
     const ig = icon && fully(icon);
     return { ok: true, rect: ig ? rectOf(ig) : o.r, text: trimLabel(o.c.textContent), icon: !!icon, rows: vis.length };
+  };
+
+  // 매뉴얼 데이터 확인(#743): 이름이 유일한 열의 보이는 본문 칸 글자를 위에서부터 낸다(row 는 1부터).
+  const columnValues = name => {
+    const { items } = cands('열', name);
+    if (items.length !== 1) return { ok: false, count: items.length };
+    const vis = gridCells(items[0].el);
+    if (!vis) return { ok: false, count: 1, noGrid: true };
+    return { ok: true, rows: vis.map((o, i) => ({ row: i + 1, text: trimLabel(o.c.textContent) })) };
+  };
+
+  // 보이는 요소(가장 안쪽) 중 글자에 s 가 든 것이 있는가. 화면 밖·잘린 요소는 세지 않는다.
+  const hasText = s => {
+    const els = [...(scopeEl ? R() : document.body).querySelectorAll('*')].filter(e => !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(e.tagName) &&
+      trimLabel(e.textContent).includes(s) && ![...e.children].some(k => trimLabel(k.textContent).includes(s)));
+    const seen = els.filter(e => { const g = rectFor(e); return g && g.v; });
+    return { ok: true, found: seen.length > 0, count: seen.length };
   };
 
   // 같은 표의 열 여럿을 한 번에 보이게 한다(#657). 열마다 따로 가운데로 넘기면 먼저 보이던 왼쪽 열이 밀려난다.
@@ -385,6 +406,6 @@ LIB_JS = r"""(() => {
   };
   const clearScope = () => { scopeEl = null; };
 
-  window.__mc = { find, scrollColumn, scrollColumns, cellOf,focusInput, readInput, clearInput, selectOption, dialogs, dialogInfo, setScope, clearScope, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
+  window.__mc = { find, scrollColumn, scrollColumns, cellOf, columnValues, hasText, focusInput, readInput, clearInput, selectOption, dialogs, dialogInfo, setScope, clearScope, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
   return true;
 })()"""

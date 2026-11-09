@@ -435,7 +435,8 @@ python -m checker.export --spec docs/spec/DEV-001-요약.md --root <Project Repo
 사용자 매뉴얼 화면 캡처(#533): `python -P -m checker.manual_capture --list docs/manual/<LoB>/<번호>.<업무 제목>.capture.yaml --root <루트> [--check]`.
 사람이 로그인한 전용 Chrome(`127.0.0.1` 디버깅 포트만, 다른 호스트는 거부)에 `checker/cdp_client.py`(표준 라이브러리 웹소켓)로 붙어 화면마다 1600x900 PNG 를 찍고,
 `checker/manual_capture_js.py` 의 스크립트로 보이는 이름의 요소를 찾아(0개 `not_found`·여럿 `ambiguous`, 추측하지 않음) 빨간 네모·번호를 덮개로 얹어 그림에 그린다.
-작업본의 `#### 그림`·`#### 번호 설명` 을 채운다. 종료코드 0 모두 완료 / 1 못 찾은 요소 있음 / 2 검사 불능. 쓰는 방법은 `/harness:manual` 의 "캡처" 절.
+작업본의 `#### 그림`·`#### 번호 설명` 을 채운다. 화면 항목의 선택 키 `확인`(`{열, 값}`·`{열, 행, 값}`·`{글자}`, #743)은 준비 뒤 찍기 직전에 화면 값을 읽어 `맞음`·`다름`·`검사 불능` 으로 `screens[].확인` 에 낸다(읽기만 한다).
+종료코드 0 모두 완료 / 1 못 찾은 요소 또는 확인 `다름` 있음 / 2 검사 불능(확인이 `검사 불능` 인 것 포함). 쓰는 방법은 `/harness:manual` 의 "캡처" 절.
 
 stdout 에 JSON 한 줄 `{"status": "ok|rejected|error", "files": [...], "problems": [{"form", "sheet", "item", "reason"}], "warnings": [...], "next": "..."}`
 을 낸다. 종료코드는 0 산출함, 1 거부(필수 `미정`·`최대_행` 초과·짝 행 수 불일치·같은 이름 파일 존재
