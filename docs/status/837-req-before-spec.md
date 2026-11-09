@@ -22,7 +22,7 @@ public-cloud 의 DEV-010(이슈 #340, 10-21)과 DEV-011(이슈 #366, 10-23)은 S
 - `plugins/harness/skills/spec/SKILL.md`: "Spec 번호" 의 SRS 를 거치지 않는 개발 허용 문장을 REQ 없으면 멈춤 원칙으로 바꾸고, 만들기 1·2·3 단계와 고치기 1 단계를 맞췄다. `Dropped`·`Duplicate`·`On Hold`, 다음 단계 `설정`·`표준` 처리는 그대로다.
 - `plugins/harness/skills/start/reserve_number.py`·`SKILL.md`: `list` 의 `devs[]` 에 `req: true`(SRS 표에 그 번호의 REQ 가 있거나 RICEFW ID 칸이 그 DEV 를 가리킴)를 더하고, 없으면 시작을 멈춘다.
 - `plugins/harness/console/devready.py`·`static/flow-logic.js`: `noReq`·`noReqCount`, 종류 버튼 밑 글과 개발 막기 문구.
-- `docs/guide/harness-guide.html`(Spec 만들기·작업 시작하기 탭), `plugins/harness/workflow.json`(spec·start 단계 hint 와 근거 문장), `whats_new.json`, plugin.json 0.10.244.
+- `docs/guide/harness-guide.html`(Spec 만들기·작업 시작하기 탭), `plugins/harness/workflow.json`(spec·start 단계 hint 와 근거 문장), `whats_new.json`, plugin.json 0.10.241.
 
 ## 옛 Spec 은 경고만 두는 이유
 
