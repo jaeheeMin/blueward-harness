@@ -61,7 +61,8 @@ global.document = { createElement: t => new El(t), createElementNS: (n, t) => ne
 document.body.appendChild(root);
 root.parentNode = document.body;
 global.window = global; window.scrollTo = () => {};
-global.localStorage = { getItem: () => null, setItem: () => {} };
+const LS = {};  // 시험이 data.json 의 "__ls" 로 미리 넣어 두고 out.ls 로 읽는다(새로고침 흉내)
+global.localStorage = { getItem: k => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); }, removeItem: k => { delete LS[k]; } };
 global.location = { pathname: '/', search: '' };
 global.history = { pushState(_, __, p) { const u = new URL(p, 'http://x'); location.pathname = u.pathname; location.search = u.search; }, replaceState(_, __, p) { this.pushState(_, __, p); } };
 global.addEventListener = () => {};
@@ -73,6 +74,7 @@ global.AbortController = AbortController;
 global.Event = function () {};
 
 const DATA = JSON.parse(require('fs').readFileSync(process.argv[4], 'utf8'));
+Object.assign(LS, DATA['__ls'] || {});
 const calls = [];
 global.fetch = (url, opts) => {
   const method = (opts && opts.method) || 'GET', p = url.split('?')[0];
@@ -123,7 +125,7 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
   const out = { text: main ? main.textContent : '(no main)', errors, calls: calls.map(c => c[0] + ' ' + c[1]) };
   const dump = (e, d) => { if (e.nodeType === 3) return e.text; return '<' + e.tag + (e.open ? '[open]' : '') + (e.attrs['class'] ? '.' + e.attrs['class'].replace(/ /g, '.') : '') + '>' + e.children.map(c => dump(c, d + 1)).join('') + '</' + e.tag + '>'; };
   out.dump = main ? dump(main, 0) : '';
-  out.notes = notes; out.asked = asked.length; out.focused = focused.length; out.path = location.pathname;
+  out.notes = notes; out.asked = asked.length; out.focused = focused.length; out.path = location.pathname; out.ls = Object.assign({}, LS);
   out.posts =calls.filter(c => c[0] !== 'GET').map(c => [c[0], c[1], c[2] || '']);
   out.side = root.querySelector('.side') ? root.querySelector('.side').textContent : '';
   out.sideDump = root.querySelector('.side') ? dump(root.querySelector('.side'), 0) : '';

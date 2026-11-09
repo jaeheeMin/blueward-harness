@@ -1059,9 +1059,11 @@ def _session(sid, **extra):
     return base
 
 
-def _smoke(tmp_path, route, sessions, requests=None, extra=None, actions=None):
+def _smoke(tmp_path, route, sessions, requests=None, extra=None, actions=None, ls=None):
     import json
     data = dict(extra or {})
+    if ls:
+        data["__ls"] = ls  # 새로고침 뒤 브라우저에 남아 있는 localStorage 흉내
     data |= {"GET /api/sessions": {"sessions": sessions}, "GET /api/flows": {"flows": [{"id": "srs", "name": "요구사항", "steps": _STEPS}], "tools": []},
             "GET /api/approvals": {"state": "no"}, "GET /api/models": {"options": [{"value": "", "label": "기본"}], "effortOptions": [{"value": "", "label": "기본"}], "permissionOptions": [{"value": "", "label": "기본"}]},
             "GET /api/folders/recent": (extra or {}).get("GET /api/folders/recent", {"folders": ["C:/w/proj"]})}
@@ -1582,6 +1584,29 @@ def test_memory_banner_ring_and_unknown_cases(tmp_path):
     # 홈 표의 기억 열
     got = _smoke(tmp_path, "", [_session("s1", context=hot)])
     assert "92%" in got["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_first_run_start_survives_reload_and_memory_banner_stays_closed(tmp_path):
+    """#796: 시작하기 뒤 새로고침하면 01 이 아니라 02, 계속하기는 새로고침해도 닫은 채."""
+    extra = dict(_folder_rows(), **_start(firstRun=True))
+    started = _smoke(tmp_path, "", [], extra=extra, actions=[{"click": "[data-intro-start]"}])
+    assert started["ls"].get("bh-intro-page") == "project"
+    reloaded = _smoke(tmp_path, "", [], extra=extra, ls=started["ls"])
+    assert "어느 고객사 프로젝트에서 일할까?" in reloaded["text"] and "환영해" not in reloaded["text"]
+    back = _smoke(tmp_path, "", [], extra=extra, ls=started["ls"], actions=[{"click": "[data-pick-back]"}])
+    assert "환영해" in back["text"] and "bh-intro-page" not in back["ls"]
+    done = _smoke(tmp_path, "", [], extra=dict(extra, **{"POST /api/folders/last": {"path": "C:/p/ready2", "name": "ready2"}, "POST /api/start-checks/seen": {"firstRun": False}}),
+                  ls=started["ls"], actions=[{"click": "[data-pick-folder]", "index": 0}, {"click": "[data-pick-ok]"}])
+    assert "bh-intro-page" not in done["ls"]
+    # 기억 90% 배너: 계속하기 -> 새로고침해도 닫힘, 다른 세션은 그대로 뜬다
+    hot = {"tokens": 920000, "window": 1000000, "pct": 92}
+    first = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)], actions=[{"click": ".mem-stay"}])
+    assert "기억이 거의 찼어" not in first["text"] and first["ls"].get("bh-mem-ok:s1") == "1"
+    again = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)], ls=first["ls"])
+    assert "기억이 거의 찼어" not in again["text"]
+    other = _smoke(tmp_path, "s/s2", [_session("s2", context=hot)], ls=first["ls"])
+    assert "기억이 거의 찼어" in other["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
