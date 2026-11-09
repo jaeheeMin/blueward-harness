@@ -115,6 +115,16 @@ class Proc:
                         self.manager.log(self, f"이벤트 처리 오류: {e}")
         except (OSError, ValueError):
             pass
+        # 읽기가 끝났으면(EOF) 자식 파이프를 닫는다. 안 닫으면 오래 켜 둔 콘솔에 파일 핸들이 쌓인다(#823).
+        # stdin 은 write() 와 겹치지 않게 같은 잠금 안에서 닫는다(닫힌 뒤 write() 는 False).
+        with self.write_lock:
+            for pipe in (self.p.stdout, self.p.stdin):
+                close = getattr(pipe, "close", None)  # 시험의 가짜 프로세스는 stdout 이 줄 목록이라 close 가 없다
+                try:
+                    if close is not None:
+                        close()
+                except (OSError, ValueError) as e:
+                    self.manager.log(self, f"파이프 닫기 실패: {e}")
         self.manager.on_exit(self)
 
 
