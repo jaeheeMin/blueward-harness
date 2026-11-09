@@ -1755,3 +1755,29 @@ def test_xlsx_작업본_머리_버전이_없거나_형식이_틀리면_거부한
 def test_xlsx_표_버전_자리는_머리_버전과_상관없이_그대로다(proj, capsys):
     code, report = _run(proj, capsys, _with_head("버전: 9.9"))
     assert code == 0 and report["files"] == ["docs/out/T_01_시험 건 1_v1.1.xlsx"]
+
+
+# -- 다음 단계 대응표(#828)
+
+_NSM = "        다음_단계_대응:\n          열: Flag\n          값:\n{vals}"
+
+
+def _nsm_proj(bproj: Path, vals: str) -> Path:
+    path = bproj / "templates" / "forms" / "Backlog.yaml"
+    path.write_text(BACKLOG_MAP.replace("          Flag: H\n", "          Flag: H\n" + _NSM.format(vals=vals)), encoding="utf-8")
+    return bproj
+
+
+def test_대응표_값이_드롭다운_허용_값_안이면_경고가_없다(bproj, capsys):
+    _nsm_proj(bproj, "            Y: 개발\n            N: 묻기\n")
+    code = export.main(["--root", str(bproj), "--form", "Backlog", "--list-values"])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0 and report["warnings"] == []
+
+
+def test_대응표_값이_드롭다운_허용_값_밖이면_지도_오류로_알린다(bproj, capsys):
+    _nsm_proj(bproj, "            Y: 개발\n            Z: 설정\n")
+    code = export.main(["--root", str(bproj), "--form", "Backlog", "--list-values"])
+    report = json.loads(capsys.readouterr().out)
+    [w] = [x for x in report["warnings"] if x["type"] == "next-step-map"]
+    assert code == 3 and report["status"] == "warning" and "Z" in w["reason"] and "다음:" in w["reason"]

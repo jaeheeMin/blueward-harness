@@ -161,6 +161,38 @@ Project Repository `rules/ssot.yaml`·`rules/spec.yaml` 에 켠다. 먼저 켜�
     원본: 작업본
 ```
 
+### 양식 지도 `다음_단계_대응` — Type 으로 정해지는 다음 단계(#828)
+
+고객 양식에 요구사항 종류를 고르는 드롭다운 열(예: `Type`)이 있으면 그 값이 `다음 단계` 를 정한다. 값은 양식마다 달라
+대응표는 코드가 아니라 양식 지도(Project Repository 의 `templates/forms/<양식>.yaml`)의 `원본: SRS` 표에 둔다.
+**아래 값은 public-cloud Type 기준의 예시다 — 저장소마다 자기 양식의 드롭다운 값으로 적는다.**
+
+```yaml
+      - 이름: Backlog
+        원본: SRS
+        열:
+          Type: E                       # 대응표의 열은 표 `열` 안에 있어야 한다
+        다음_단계_대응:
+          열: Type
+          값:                            # 키는 그 열의 드롭다운 허용 값, 값은 개발 | 설정 | 표준 | 묻기
+            Developer Extensibility: 개발
+            Side-by-Side Extensibility: 개발
+            SSCUI: 설정
+            Expert Configuration: 설정
+            Organization: 설정
+            Master Data: 설정
+            Output: 설정
+            Process: 표준
+            Key User Extensibility: 묻기  # 하나로 안 정해지는 값 — 개발·설정 둘 다 맞는 것으로 본다
+```
+
+- 모양 검사는 지도를 읽는 모든 곳(`form_columns`, 산출)이 같은 함수(`blank_template.next_step_map_problems`)로 한다 —
+  `원본: SRS` 표에만, `열`·`값` 두 키, `열` 은 표 `열` 안, 값은 `개발`/`설정`/`표준`/`묻기`. 틀리면 지도 오류(검사 불능, 종료코드 2).
+- 키 이름이 그 열의 드롭다운 허용 값 안인지는 템플릿 xlsx 를 열어야 알 수 있어 `python -m checker.export --list-values` 가
+  `type: next-step-map` 경고(종료코드 3)로 알린다.
+- SRS.md 의 Type 과 다음 단계가 어긋나면 번호 짝 검사(아래 `pairing`)가 경고 `type_next_step_mismatch` 를 낸다(위반 아님).
+  대응표가 없거나 SRS 에 Type 열이 없으면 아무것도 하지 않는다. 지도를 못 읽으면 `type_map_invalid` 경고로 알린다(통과가 아니다).
+
 ## `pairing` — SRS·Spec·원장 번호 짝 맞추기(#284)
 
 규칙 종류가 아니라 저장소 전체를 보는 별도 검사다(`checker/pairing.py`). 개발 번호는 SRS 요구사항 표

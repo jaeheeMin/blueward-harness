@@ -90,6 +90,48 @@ def _hit(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
 FORMAT_ROLES = ("첫", "중간", "끝", "한_행")
 
 
+# SRS 표 `다음_단계_대응` 의 값(#828). 개발/설정/표준은 그 Type 값이 정하는 다음 단계, 묻기는 하나로 안 정해져 그 자리에서 고른다.
+NEXT_STEP_MAP_VALUES = ("개발", "설정", "표준", "묻기")
+
+
+def next_step_map_problems(t: dict) -> list[str]:
+    """SRS 표의 `다음_단계_대응: {열: <열 이름>, 값: {<드롭다운 값>: 개발|설정|표준|묻기}}` 오류(#828).
+
+    키 이름이 그 열의 드롭다운 허용 값 안인지는 템플릿 xlsx 를 열어야 알 수 있어 여기선 보지 않는다(`export.list_values` 가 본다).
+    """
+    m = t.get("다음_단계_대응")
+    if m is None:
+        return []
+    if str(t.get("원본", "")).strip().upper() != "SRS":
+        return ["`다음_단계_대응` 은 원본이 SRS 인 표에만 쓴다"]
+    if not isinstance(m, dict) or set(m) != {"열", "값"}:
+        return ["`다음_단계_대응` 은 {열: <열 이름>, 값: {Type 값: 다음 단계}} 두 키의 사전이어야 한다"]
+    out: list[str] = []
+    cols = t.get("열") if isinstance(t.get("열"), dict) else {}
+    if not isinstance(m["열"], str) or m["열"] not in cols:
+        out.append(f"`다음_단계_대응` 의 열({m['열']!r})이 표 `열` 에 없다")
+    vals = m["값"]
+    if not isinstance(vals, dict) or not vals:
+        out.append("`다음_단계_대응` 의 `값` 은 비어 있지 않은 {드롭다운 값: 다음 단계} 사전이어야 한다")
+    else:
+        for k, v in vals.items():
+            if not isinstance(k, str) or not k.strip():
+                out.append(f"`다음_단계_대응` 의 값 이름 {k!r} 이 글자가 아니다")
+            if v not in NEXT_STEP_MAP_VALUES:
+                out.append(f"`다음_단계_대응` 의 {k!r} 는 {' / '.join(NEXT_STEP_MAP_VALUES)} 중 하나여야 한다({v!r})")
+    return out
+
+
+def next_step_map_of(fmap: dict) -> tuple[str, dict[str, str]] | None:
+    """지도에서 (대응표 열 이름, {값: 다음 단계}) 를 꺼낸다. 없거나 모양이 틀리면 None(틀림은 map_problems 가 알린다)."""
+    for s in fmap.get("시트") or []:
+        for t in (s.get("표") or []) if isinstance(s, dict) else []:
+            if isinstance(t, dict) and t.get("다음_단계_대응") is not None and not next_step_map_problems(t):
+                m = t["다음_단계_대응"]
+                return m["열"], {str(k).strip(): v for k, v in m["값"].items()}
+    return None
+
+
 def _table_format_problems(t: dict) -> list[str]:
     """표의 `서식_행`·`묶음_열` 오류. 둘은 같이 있어야 한다. 템플릿 안에 그 행·셀이 있는지는 산출이 본다."""
     fr, gc = t.get("서식_행"), t.get("묶음_열")
@@ -227,7 +269,7 @@ def map_problems(fmap: dict) -> list[tuple[str, str]]:
                     owned.append((f"표 {t.get('이름')!r} 의 {col} 열", (n, start, n, end)))
         for t in s.get("표") or []:
             if isinstance(t, dict):
-                out += [("map", f"시트 {sn!r} 표 {t.get('이름')!r} 의 {m}") for m in _table_format_problems(t) + _format_row_overlaps(s, t) + expand.map_problems(t, fmap)]
+                out += [("map", f"시트 {sn!r} 표 {t.get('이름')!r} 의 {m}") for m in _table_format_problems(t) + next_step_map_problems(t) + _format_row_overlaps(s, t) + expand.map_problems(t, fmap)]
                 owned += expand.owned_rects(t)  # 표 오른쪽으로 펼치는 열이 맡은 머리글·표시 영역
         for key in ("비우기", "서식_지우기"):
             for x, rect in keyed[key]:

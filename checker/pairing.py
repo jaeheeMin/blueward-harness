@@ -200,6 +200,7 @@ def _load_srs(root: Path) -> tuple[dict[int, dict] | None, bool]:
             "status": status,
             "title": _title_cell(row.get("Title") or row.get("요구사항") or ""),
             "ricefw": row.get("Development RICEFW ID") if "Development RICEFW ID" in header else None,
+            "row": row,
         })
     return reqs, no_step_column
 
@@ -278,6 +279,45 @@ def _link_target(cell: str) -> str | None:
     return target or None
 
 
+FORMS_DIR = "templates/forms"
+
+
+def _load_type_map(root: Path) -> tuple[tuple[str, dict[str, str]] | None, str | None]:
+    """양식 지도의 SRS 표 `다음_단계_대응` → ((Type 열 이름, {값: 다음 단계}), 지도 오류 문구).
+
+    대응표가 없으면 (None, None) — 아무것도 하지 않는다. 지도를 못 읽거나 모양이 틀리면 (None, 사유):
+    검사 불능을 통과로 뭉개지 않고 경고로 드러낸다(#828).
+    """
+    import yaml
+
+    from checker import blank_template
+
+    folder = root / FORMS_DIR
+    if not folder.is_dir():
+        return None, None
+    found = []
+    for f in sorted(folder.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(f.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            return None, f"양식 지도 {f.name} 를 읽지 못했습니다({type(exc).__name__})."
+        if not isinstance(data, dict) or not isinstance(data.get("시트"), list):
+            continue
+        for s in data["시트"]:
+            for t in (s.get("표") or []) if isinstance(s, dict) else []:
+                if isinstance(t, dict) and t.get("다음_단계_대응") is not None:
+                    probs = blank_template.next_step_map_problems(t)
+                    if probs:
+                        return None, f"양식 지도 {f.name} 의 {probs[0]}"
+                    found.append(blank_template.next_step_map_of({"시트": [{"표": [t]}]}))
+    found = [x for x in found if x]
+    if not found:
+        return None, None
+    if len(found) > 1:
+        return None, f"`다음_단계_대응` 이 양식 지도 여러 곳에 있어 어느 것이 기준인지 알 수 없습니다."
+    return found[0], None
+
+
 def check_pairing(root: Path) -> dict:
     """저장소 루트를 받아 번호 짝을 맞춘다. 결과는 `status`·`violations`·`warnings`·`message`."""
     root = Path(root)
@@ -309,6 +349,33 @@ def check_pairing(root: Path) -> dict:
 
     if not (root / SRS_PATH).is_file():
         w("srs_missing", SRS_PATH, f"`{SRS_PATH}` 가 없어 SRS 와의 대조는 건너뛰었습니다.")
+
+    if reqs is not None and not no_step_column:
+        type_map, map_problem = _load_type_map(root)
+        if map_problem:
+            w("type_map_invalid", FORMS_DIR,
+              f"{map_problem} Type 과 다음 단계의 짝은 대조하지 못했습니다(통과가 아닙니다). 양식 지도를 고친 뒤 다시 확인하십시오.")
+        elif type_map is not None:
+            col, table = type_map
+            for n, req in sorted(reqs.items()):
+                if col not in req["row"]:
+                    break  # SRS 에 Type 열이 없다 — 대조할 것이 없다
+                typ = req["row"][col].strip()
+                step = req["next"].strip()
+                if typ in EMPTY_VALUES or step not in NEXT_STEPS or step == "미정":
+                    continue
+                if typ not in table:
+                    w("type_unmapped", SRS_PATH,
+                      f"{t('REQ', n)} 의 {col} `{typ}` 는 양식 지도의 `다음_단계_대응` 에 없어 다음 단계와 대조하지 못했습니다. "
+                      f"양식 지도에 그 값을 더하거나 {col} 을 지도에 있는 값으로 고치십시오.")
+                    continue
+                want = table[typ]
+                if (want == "묻기" and step in ("개발", "설정")) or want == step:
+                    continue
+                shown = "`개발` 또는 `설정`" if want == "묻기" else f"`{want}`"
+                w("type_next_step_mismatch", SRS_PATH,
+                  f"{t('REQ', n)} 는 {col} 이 `{typ}` 라 다음 단계는 {shown} 인데 `{step}` 로 적혀 있습니다. "
+                  f"{col} 과 다음 단계 중 맞는 쪽으로 SRS 요구사항 표를 고치십시오(/harness:srs 로 고칠 수 있습니다).")
 
     if reqs is not None and no_step_column:
         w("srs_no_next_step", SRS_PATH, "`다음 단계` 열이 없어 모두 개발로 보고 대조했습니다.")
