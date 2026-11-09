@@ -580,7 +580,7 @@
   }
   // 시작하기를 누른 뒤 새로고침해도 01 로 돌아가지 않게 02 쪽에 있다는 표시를 브라우저에 남긴다(#796). 접근이 막히면 01 부터.
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
-  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* 저장이 막혀도 화면은 그대로 */ } }
+  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { console.warn('브라우저에 표시를 남기지 못했어(localStorage) — 새로고침하면 처음 화면부터 보일 수 있어', e); } }
   var introPage = lsGet('bh-intro-page') === 'project' ? 'project' : 'welcome', firstPickFolder = null;  // 첫 화면 두 쪽(01 환영 → 02 프로젝트 고르기) · 02 에서 준비 안 된 폴더를 골랐을 때 새 작업 화면이 03 을 띄울 폴더
 
   /* 시안 G-02 프로젝트 고르기. 카드는 고름 표시만 하고, [이 프로젝트로] 가 서버에 마지막 폴더로 기억시키고 첫 실행 표시를 남긴다.
@@ -1060,8 +1060,8 @@
       api('POST', '/api/sessions/' + encodeURIComponent(id) + '/messages', { text: text }).then(function () {
         if (typed) { followVal = ''; regions.followInput.value = ''; }
         sent.push({ text: text, at: Date.now() / 1000 });
-        followNote = (s.status === 'running') ? '지금 단계가 끝나면 이어서 처리합니다.' : '이 작업에 전달했습니다.';
-      }, function (e) { followNote = '보내지 못했습니다: ' + e.message; }).then(function () {
+        followNote = (s.status === 'running') ? '지금 단계가 끝나면 이어서 할게.' : '이 작업에 전달했어.';
+      }, function (e) { followNote = '보내지 못했어: ' + e.message; }).then(function () {
         regions.followBtn.disabled = cur().canSend === false; paintFollowNote(); paintMsgs(cur());
       });
     }
@@ -1580,8 +1580,8 @@
         var text = sayVal.trim(); if (!text || !can || sayBusy) return;
         sayBusy = true; btn.disabled = true;
         api('POST', '/api/sessions/' + encodeURIComponent(sid()) + '/messages', { text: text }).then(function () {
-          sayVal = ''; input.value = ''; sayNote = s.status === 'running' ? '지금 단계가 끝나면 이어서 처리합니다.' : '이 작업에 전달했습니다.';
-        }, function (e) { sayNote = '보내지 못했습니다: ' + e.message; }).then(function () { sayBusy = false; btn.disabled = false; note.textContent = sayNote; note.hidden = !sayNote; });
+          sayVal = ''; input.value = ''; sayNote = s.status === 'running' ? '지금 단계가 끝나면 이어서 할게.' : '이 작업에 전달했어.';
+        }, function (e) { sayNote = '보내지 못했어: ' + e.message; }).then(function () { sayBusy = false; btn.disabled = false; note.textContent = sayNote; note.hidden = !sayNote; });
       }
       box.appendChild(h('label', { for: 'say', class: 'sr-only', text: 'AI에게 말하기' }));
       box.appendChild(h('div', { class: 'comp' }, assist.wrap, btn));

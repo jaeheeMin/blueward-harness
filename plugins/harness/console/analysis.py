@@ -70,24 +70,24 @@ def mention_path(cwd: str, path) -> tuple[str, str]:
     존재하는 작업 폴더 안의 파일만 받는다. 줄바꿈·제어문자·`@`·따옴표·역슬래시가 든 경로는 `@` 멘션 방식으로
     넘기면 형식이 깨지거나 다른 지시로 읽힐 수 있어 받지 않는다. 구분자는 `/` 로 통일한다."""
     if not isinstance(path, str) or not path:
-        return "", "경로가 비어 있습니다."
+        return "", "경로가 비어 있어."
     if os.path.isabs(path) or path.startswith(("/", "\\")) or (len(path) > 1 and path[1] == ":"):
-        return "", "절대 경로입니다."
+        return "", "절대 경로야."
     rel = posixpath.normpath(path.replace(os.sep, "/"))
     for ch in rel:
         if ord(ch) < 32 or ord(ch) == 127 or (ch.isspace() and ch != " "):
-            return "", "공백이 아닌 공백 문자나 제어문자가 들어 있습니다."
+            return "", "공백이 아닌 공백 문자나 제어문자가 들어 있어."
     if "@" in rel or '"' in rel or "\\" in rel:
-        return "", "@, 따옴표, 역슬래시가 들어 있어 @ 멘션으로 넘길 수 없습니다."
+        return "", "@, 따옴표, 역슬래시가 들어 있어 @ 멘션으로 넘길 수 없어."
     if rel == ".." or rel.startswith("../") or rel == ".":
-        return "", "작업 폴더 밖이거나 파일이 아닙니다."
+        return "", "작업 폴더 밖이거나 파일이 아니야."
     full = os.path.join(cwd, *rel.split("/"))
     if not is_within(full, cwd):
-        return "", "작업 폴더 밖입니다."
+        return "", "작업 폴더 밖이야."
     if not os.path.isfile(full):
-        return "", "존재하는 파일이 아닙니다."
+        return "", "존재하는 파일이 아니야."
     if " " in rel and not SPACE_MENTION_SUPPORTED:
-        return "", "공백이 든 경로는 @ 멘션으로 넘길 수 없습니다."
+        return "", "공백이 든 경로는 @ 멘션으로 넘길 수 없어."
     return rel, ""
 
 
@@ -100,7 +100,7 @@ def check_flow(raw, flows: dict[str, str]) -> tuple[dict | None, str, dict | Non
     if raw is None or not flows:
         return None, "", None
     if not isinstance(raw, dict) or raw.get("id") not in flows:
-        return None, "분류 결과가 갈래 목록에 없어 버렸습니다.", None
+        return None, "분류 결과가 갈래 목록에 없어 버렸어.", None
     fid = raw["id"]
     alt = raw.get("alternativeId") if raw.get("alternativeId") in flows and raw.get("alternativeId") != fid else None
     confident = raw.get("confident") is not False
@@ -144,16 +144,16 @@ def parse_output(stdout: str):
     try:
         data = json.loads(stdout)
     except ValueError:
-        return None, "분석 결과를 읽을 수 없습니다."
+        return None, "분석 결과를 읽을 수 없어."
     if isinstance(data, list):
         data = next((d for d in reversed(data) if isinstance(d, dict) and d.get("type") == "result"), None)
     if not isinstance(data, dict):
-        return None, "분석 결과를 읽을 수 없습니다."
+        return None, "분석 결과를 읽을 수 없어."
     if data.get("is_error"):
-        return None, str(data.get("result") or "분석이 실패했습니다.")[:300]
+        return None, str(data.get("result") or "분석이 실패했어.")[:300]
     out = data.get("structured_output")
     if out is None:
-        return None, "분석 결과에 구조화된 답이 없습니다."
+        return None, "분석 결과에 구조화된 답이 없어."
     return out, ""
 
 
@@ -255,15 +255,15 @@ class Analyses:
             done = subprocess.run(args, input=self.prompt(job["flows"], job.get("context", "")) + job["text"], cwd=job["cwd"], capture_output=True, text=True,
                                   encoding="utf-8", errors="replace", timeout=self.timeout, **hidden_window_kwargs())
         except subprocess.TimeoutExpired:
-            job.update(status="failed", error="분석이 시간 안에 끝나지 않았습니다.")
+            job.update(status="failed", error="분석이 시간 안에 끝나지 않았어.")
             return
         except OSError as e:
-            job.update(status="failed", error=f"claude 를 실행하지 못했습니다: {e}")
+            job.update(status="failed", error=f"claude 를 실행하지 못했어: {e}")
             return
         out, why = parse_output(done.stdout)
         checked = check_result(out, job["cwd"], {fid: f.get("name", fid) for fid, f in job["flows"].items()}) if out is not None else None
         if checked is None:
-            job.update(status="failed", error=why or "분석 결과의 형식이 맞지 않습니다.")
+            job.update(status="failed", error=why or "분석 결과의 형식이 맞지 않아.")
         else:
             job.update(status="done", result=checked)
 

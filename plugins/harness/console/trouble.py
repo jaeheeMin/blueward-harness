@@ -305,7 +305,7 @@ def repo_root(app, slug: str) -> str:
     for p in collect(app, wait=True)["projects"]:
         if p["slug"] == slug:
             return p["root"]
-    raise HttpError(403, "콘솔이 아는 프로젝트의 저장소가 아닙니다.")
+    raise HttpError(403, "콘솔이 아는 프로젝트의 저장소가 아니야.")
 
 
 def public(item: dict) -> dict:
@@ -437,12 +437,12 @@ def a_check(app, g, q, b):
 def text_arg(b: dict, name: str, required: bool = False, limit: int = FIELD_MAX) -> str:
     v = b.get(name, "")
     if not isinstance(v, str):
-        raise HttpError(400, f"{name} 는 글이어야 합니다.")
+        raise HttpError(400, f"{name} 는 글이어야 해.")
     v = v.replace("\r\n", "\n").strip()
     if required and not v:
-        raise HttpError(400, f"{name} 가 비었습니다.")
+        raise HttpError(400, f"{name} 가 비었어.")
     if len(v) > limit:
-        raise HttpError(413, f"{name} 가 너무 깁니다.")
+        raise HttpError(413, f"{name} 가 너무 길어.")
     return v
 
 
@@ -492,14 +492,14 @@ def a_create(app, g, q, b):
     title = clean_title(text_arg(b, "title", True, TITLE_MAX))
     stage = text_arg(b, "stage", True, 20)
     if stage not in STAGES:
-        raise HttpError(400, "단계가 올바르지 않습니다.")
+        raise HttpError(400, "단계가 올바르지 않아.")
     pr_raw = text_arg(b, "pr", False, 20).lstrip("#")
     if pr_raw and not pr_raw.isdigit():
-        raise HttpError(400, "PR 번호는 숫자여야 합니다.")
+        raise HttpError(400, "PR 번호는 숫자여야 해.")
     symptom, cause, solution = text_arg(b, "symptom", True), text_arg(b, "cause"), text_arg(b, "solution")
     solved = b.get("solved") is True
     if solved and not solution:
-        raise HttpError(400, "해결됐다면 해결 방법을 적어 주세요.")
+        raise HttpError(400, "해결됐다면 해결 방법을 적어 줘.")
     refuse_secrets({"title": title, "symptom": symptom, "cause": cause, "solution": solution})
     has_label(app, slug, root)
     body = build_body(int(pr_raw) if pr_raw else None, stage, symptom, cause, solved and solution or "")
@@ -566,7 +566,7 @@ def a_resolve(app, g, q, b):
         if isinstance(c, dict) and c.get("id") == cid:
             kind, text = classify(c.get("body"))
             if kind != "candidate" or not text:
-                raise HttpError(400, "해결 후보 댓글이 아닙니다.")
+                raise HttpError(400, "해결 후보 댓글이 아니야.")
             return 200, {"ok": True, "warnings": resolve(app, slug, root, number, data, text)}
     raise HttpError(404, "그 댓글을 찾지 못했어.")
 
@@ -592,7 +592,7 @@ def a_draft_put(app, g, q, b):
 def a_draft_get(app, g, q, b):
     d = drafts(app).get((q.get("id") or [""])[0])
     if d is None:
-        raise HttpError(404, "없는 초안입니다.")
+        raise HttpError(404, "없는 초안이야.")
     return 200, d
 
 

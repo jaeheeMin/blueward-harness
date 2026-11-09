@@ -1175,7 +1175,7 @@ def test_find_claude_windows_cmd_resolves_native_exe_or_cli_js():
     assert got == [r"C:\node\node.exe", pkg + r"\cli.js"]
     # 찾지 못하면 cmd /c 로 감싸지 않고 None -> 호출한 쪽이 안내 문구를 보여 준다
     assert platform_compat.find_claude("windows", which, lambda p: False) is None
-    assert "찾을 수 없습니다" in platform_compat.CLAUDE_MISSING
+    assert "찾을 수 없어" in platform_compat.CLAUDE_MISSING
 
 
 def test_claude_missing_message_reaches_analysis_job():
@@ -1715,7 +1715,7 @@ def test_interrupted_turn_is_logged_as_interruption_not_empty_error(tmp_path):
     m.procs["s1"] = proc
     assert m.interrupt("s1") is True
     m.on_event(proc, {"type": "result", "is_error": True, "result": ""})
-    assert store.get("s1")["log"][-1]["text"] == "사용자가 작업을 중단했습니다."
+    assert store.get("s1")["log"][-1]["text"] == "사용자가 작업을 중단했어."
     m.on_event(proc, {"type": "result", "is_error": True, "result": ""})  # 중단 표시는 한 번만 쓴다
     assert store.get("s1")["log"][-1]["text"] == "오류로 끝남"
 
@@ -4893,8 +4893,8 @@ def test_status_paths_parse_z_output_rename_and_delete():
     paths, why = gitstate.status_paths(run, "/r")
     assert [p.replace("\\", "/") for p in paths] == ["/r/a b.md", "/r/new.md", "/r/새 폴더/c.md"] and why == ""
     assert gitstate.status_paths(FakeRun(**{"git rev-parse --show-toplevel": (128, "")}), "/r") == ([], "")  # 저장소가 아니다 = 사유 없음
-    assert gitstate.status_paths(FakeRun(), "/r") == ([], "git 을 실행하지 못했습니다.")  # git 실행 불능은 빈 목록과 구분한다
-    assert gitstate.status_paths(FakeRun(**{"git rev-parse --show-toplevel": (0, "/r\n"), "git status": (1, "")}), "/r") == ([], "git status 가 실패했습니다.")
+    assert gitstate.status_paths(FakeRun(), "/r") == ([], "git 을 실행하지 못했어.")  # git 실행 불능은 빈 목록과 구분한다
+    assert gitstate.status_paths(FakeRun(**{"git rev-parse --show-toplevel": (0, "/r\n"), "git status": (1, "")}), "/r") == ([], "git status 가 실패했어.")
 
 
 def test_file_preview_kinds_and_limits(tmp_path, monkeypatch, request):
@@ -5036,7 +5036,7 @@ def test_open_path_commands_per_os():
     def boom(args, **kw):
         raise OSError("no such")
 
-    assert "열지 못했습니다" in platform_compat.open_path("/u/a", "open", "linux", boom)
+    assert "열지 못했어" in platform_compat.open_path("/u/a", "open", "linux", boom)
 
 
 # ---- 작업용 폴더 ----
@@ -5419,7 +5419,7 @@ def test_flow_next_fails_when_handoff_prompt_is_too_long(tmp_path, monkeypatch, 
     wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫 작업")
     job_id = c.call("POST", f"/api/sessions/{sid}/flow/next", {"flowId": "spec"})[1]["jobId"]
     job = finished_job(c, job_id)
-    assert job["status"] == "failed" and "너무 깁니다" in job["error"] and len(c.call("GET", "/api/sessions")[1]) == 1
+    assert job["status"] == "failed" and "너무 길어" in job["error"] and len(c.call("GET", "/api/sessions")[1]) == 1
 
 
 def test_flow_next_keeps_only_allowed_permission_and_closes_old_after_init(tmp_path, monkeypatch, request):
