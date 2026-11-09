@@ -45,6 +45,57 @@ SCREEN_CONFIG: dict[str, dict] = {
 
 NAV_5 = {"sel": "header.top .topnav a", "text": "기록", "exact": True, "why": "시안 헤더는 내 일·작업·산출물·새 작업·기록 다섯 칸"}
 
+# 질문·일하는 중·홈·산출물·막힘·확인·기억·설정(G-07·08·11·14·16~19). 상태 만들기는 fake_console/screens.py.
+SCREEN_CONFIG.update({
+    "G-07": {"expect": [NAV_4,
+        {"sel": ".main h1", "text": "구매오더 조회 앱 요구사항", "why": "시안 G-07 제목"},
+        {"sel": ".q", "text": "이 앱은 얼마나 급해?", "why": "질문 1"},
+        {"sel": ".q", "text": "반드시 필요", "why": "질문 1 선택지"},
+        {"sel": ".q", "text": "누가 언제 요청했어?", "why": "질문 2"},
+        {"sel": ".q button, .acts button", "text": "답 보내기", "why": "답 보내기 단추"}]},
+    "G-08": {"expect": [NAV_4,
+        {"sel": ".main h1", "text": "구매오더 조회 앱 요구사항", "why": "시안 G-08 제목"},
+        {"sel": ".live", "text": "중", "why": "일하는 중 표시(글은 AI 가 하는 일에 따라 다르다)"},
+        {"sel": ".q .eb", "text": "이 일의 순서", "why": "순서 체크리스트 카드"},
+        {"sel": ".main button", "text": "작업 멈추기", "why": "일하는 중에만 있는 [작업 멈추기]"},
+        {"sel": "aside.sess-side", "text": "SRS.md", "why": "오른쪽 칸에 쓰는 중인 문서"}]},
+    # 시안 G-11 노란 '네 차례' 카드(.ask)는 콘솔 홈에서 .call 이다.
+    "G-11": {"ready": ".tile2, .tile", "elements": {"ask": {"console": ".call"}}, "expect": [NAV_4,
+        {"sel": ".main h1", "text": "오늘 내 일", "why": "시안 G-11 제목"},
+        {"sel": "main.main", "text": "내 차례", "why": "내 차례 칸"},
+        {"sel": ".ann", "text": "내 차례 1건", "why": "맨 위 띠"},
+        {"sel": ".side .srow", "text": "구매오더 매뉴얼", "why": "왼쪽 세션 목록"}]},
+    # 시안 .paper(고른 문서 미리보기 판)는 콘솔 산출물 화면에서 .docs-pane 이다.
+    "G-14": {"elements": {"paper": {"console": ".docs-pane"}}, "expect": [NAV_4,
+        {"sel": ".main h1", "text": "내가 만든 문서", "why": "시안 G-14 제목"},
+        {"sel": "main.main", "text": "요구사항정의서", "why": "문서 목록의 SRS"},
+        {"sel": "main.main button, main.main a", "text": "xlsx", "why": "xlsx로 뽑기 단추"}]},
+    "G-16": {"scroll_top": True, "expect": [NAV_4,
+        {"sel": ".bad.blocked", "text": "✕ 막힘", "why": "막힘 카드"},
+        {"sel": ".bad.blocked button", "text": "그렇게 고쳐 줘", "why": "막힘 카드 단추"},
+        {"sel": ".bad.blocked button", "text": "내가 직접 볼게", "why": "막힘 카드 단추"},
+        {"sel": ".bad.unsure", "text": "? 확인 못 함", "why": "확인 못 함 카드"},
+        {"sel": ".ann", "text": "확인 못 함", "why": "맨 위 띠에 확인 못 함"},
+        {"sel": "main.main", "text": "표시 약속", "why": "막힘·확인 못 함 아래 표시 약속 칸"}]},
+    "G-17": {"expect": [NAV_4,
+        {"sel": ".bad", "text": "확인 필요 · 되돌릴 수 없어", "why": "되돌릴 수 없는 일 꼬리표"},
+        {"sel": ".bad button", "text": "이번만 지워", "why": "지우기 허락 단추"},
+        {"sel": ".bad button", "text": "지우지 마", "why": "거절 단추"},
+        {"sel": ".bad summary", "text": "자세히", "why": "명령 원문 접힘"}]},
+    "G-18": {"expect": [NAV_4,
+        {"sel": ".banner.mem .mem-t", "text": "이 세션 기억이 거의 찼어 (92%)", "why": "기억 배너 제목"},
+        {"sel": ".banner.mem button", "text": "새 세션으로 넘기기", "why": "배너 단추"},
+        {"sel": ".banner.mem button", "text": "계속하기", "why": "배너 단추"}]},
+    "G-19": {"expect": [NAV_4,
+        {"sel": ".main h1", "text": "보기와 알림", "why": "시안 G-19 제목"},
+        {"sel": "main.main", "text": "AI가 묻는 범위", "why": "묻는 범위 설정"},
+        {"sel": "main.main", "text": "연결 상태", "why": "연결 상태 구역"},
+        {"sel": "main.main", "text": "고급", "why": "고급 · 관리자용"}]},
+})
+for _g in ("G-07", "G-08", "G-11", "G-14", "G-16", "G-17", "G-18", "G-19"):  # 시안은 기록 화면 앞이라 네 칸(위 G-04~15 와 같이 처리)
+    SCREEN_CONFIG[_g].setdefault("elements", {})["nav"] = {"props": ("x", "h")}
+    SCREEN_CONFIG[_g]["expect"].append(NAV_5)
+
 # 헤더 메뉴 칸 수(2026-11-07 사용자 결정, #779): 시안 G-01~19 는 기록 화면을 그리기 전이라 네 칸이고, G-20~24 는 '기록' 을 더한
 # 다섯 칸이다. 나중 시안(다섯 칸)을 정답으로 본다. 그래서 G-20 앞 화면에서는 메뉴 너비(nav.w)만 비교에서 빼고(x·h 는 그대로 본다),
 # 다섯째 칸 '기록' 이 있는지를 글자 확인으로 본다.

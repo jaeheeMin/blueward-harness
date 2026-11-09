@@ -167,15 +167,20 @@ def g13(api):
     qs = [{"question": "개발 Spec 을 어느 요구사항부터 만들까요?", "header": "범위", "multiSelect": False,
            "options": [{"label": "REQ-001 구매오더 조회", "description": "먼저 만들어 볼 요구사항"},
                        {"label": "SRS 의 개발 건 전부", "description": "한 번에 만들기"}]}]
-    body_file = RUN / "q_g13.json"
-    body_file.write_text(json.dumps({"session_id": real, "cwd": c, "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion",
-                                     "tool_input": {"questions": qs}}, ensure_ascii=False), encoding="utf-8")
-    # 질문 카드가 남도록 연결을 붙드는 별도 프로세스로 보낸다(연결이 끊기면 서버가 요청을 닫는다). 서버를 끄면 같이 끝난다.
-    detach = {"creationflags": 0x00000008 | 0x00000200} if sys.platform == "win32" else {"start_new_session": True}
-    subprocess.Popen([sys.executable, "-B", str(HERE / "hold_hook.py"), "question", str(body_file)], stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, close_fds=True, **detach)
-    wait_for(lambda: ((api.get(f"/api/sessions/{real}")[1] or {}).get("pendingRequestIds") or [None])[0], 10)
+    _hold_request(api, real, "question", "g13", {"session_id": real, "cwd": c, "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion",
+                                                 "tool_input": {"questions": qs}})
     return f"/s/{real}"
+
+
+def _hold_request(api, real, kind, tag, body):
+    """질문(question)·승인(permission) 요청을 훅이 보낸 것처럼 쌓고, 화면에 카드가 남도록 연결을 붙든다. 요청 번호를 돌려준다."""
+    body_file = RUN / f"{kind}_{tag}.json"
+    body_file.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    # 연결을 붙드는 별도 프로세스로 보낸다(연결이 끊기면 서버가 요청을 닫는다). 서버를 끄면 같이 끝난다.
+    detach = {"creationflags": 0x00000008 | 0x00000200} if sys.platform == "win32" else {"start_new_session": True}
+    subprocess.Popen([sys.executable, "-B", str(HERE / "hold_hook.py"), kind, str(body_file)], stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, close_fds=True, **detach)
+    return wait_for(lambda: ((api.get(f"/api/sessions/{real}")[1] or {}).get("pendingRequestIds") or [None])[0], 10)
 
 
 def g15(api):
@@ -327,6 +332,143 @@ def g24(api):
     return _trouble_ready(api, "/")
 
 
+def _managed_srs(api, name, text, tokens=None, branch="main", req=False):
+    """콘솔이 띄운(managed) 가짜 claude 세션 하나(SRS 갈래). (작업 폴더, 세션 id) 를 돌려준다. tokens 를 주면 기억 사용량도 그만큼으로 하고,
+    req 면 세션을 띄우기 전에 SRS 에 요구사항 줄을 더해 둔다(바뀐 파일은 처음 읽을 때 정해진다)."""
+    root = make_project(name, branch)
+    if req:
+        add_req_row(root)
+    srs_analysis()
+    api.post("/api/folders/last", {"path": str(root)})
+    _jid, sid = managed_session(api, root, text)
+    wait_for(lambda: sess(api, sid).get("report", "").startswith("echo"), 20)
+    real = sess(api, sid)["id"]
+    for chk in ("sync", "version"):  # 시작 점검(최신 내용 받기 · 하네스 판)을 끝낸 것으로: 안 끝나면 오른쪽 칸이 숨는다
+        api.event(real, str(root), "PreToolUse", tool_name="Skill", tool_input={"skill": f"harness:{chk}"})
+    if tokens:
+        api.event(real, str(root), "SessionStart", model="claude-opus-4-7", transcript_path=transcript(real, tokens))
+    return root, real
+
+
+def _hub_world(api, tag, mine=True):
+    """시안 G-11·14·16~19 의 왼쪽 세션 셋 중 다른 둘: 구매오더 매뉴얼(81%, 일하는 중) · CTS 관리대장 11월(15%, PR #3 승인 기다림).
+    mine 이면 첫째 세션 '구매오더 요구사항'(42%, 내 차례 · 올리기)도 만든다. 첫째 세션의 작업 폴더를 돌려준다."""
+    cts_br, man_br = "docs/3-cts-ledger", "docs/7-manual"
+    cts, man = make_project(f"proj-{tag}-cts", cts_br), make_project(f"proj-{tag}-man", man_br)
+    add_req_row(cts)
+    set_gh([pr(3, cts_br, "OPEN", "CTS 관리대장 11월", LOGIN, ["docs/ssot/SRS.md"], "pending"),
+            pr(9, "docs/9-other", "OPEN", "SRS: 승인 요청 시험 PR", "teammate", ["docs/ssot/SRS.md"], "pass")])  # 둘째는 내 승인을 기다리는 남의 PR(홈 '승인 기다리는 PR' 칸)
+    api.post("/api/folders/last", {"path": str(cts)})
+    api.post("/api/folders/last", {"path": str(man)})
+    hook_flow_session(api, "h3", cts, "CTS 관리대장 11월", "srs", "srs", "docs/ssot/SRS.md", "CTS 관리대장을 올렸어요. 승인을 기다리는 중이에요.", tokens=150_000)
+    hook_flow_session(api, "h2", man, "구매오더 매뉴얼", "srs", "srs", None, "작업 중", tokens=810_000, stop=False)
+    root = None
+    if mine:
+        root = make_project(f"proj-{tag}", "docs/4-srs-purchase-order")
+        write(root / "audit" / "changes" / "REQ-001.md", "# 변경 기록\n\n- REQ-001 구매오더 조회 앱 추가\n")
+        time.sleep(0.05)
+        add_req_row(root)  # SRS 가 더 나중에 바뀐 파일이라 산출물 화면에서 고른 문서가 된다
+        api.post("/api/folders/last", {"path": str(root)})
+        hook_flow_session(api, "h1", root, "구매오더 조회 앱 요구사항", "srs", "srs", "audit/changes/REQ-001.md",
+                          "SRS 에 REQ-001 을 더했어요.", tokens=420_000, extra_files=["docs/ssot/SRS.md"])  # SRS 를 나중에 써야 산출물 화면에서 SRS 가 고른 문서다
+    return root
+
+
+def g07(api):
+    """시안 G-07: AI 의 질문 둘(우선순위 · 요청 출처)을 한 번에 묻는 카드. 세션 하나, 기억 12%."""
+    root, real = _managed_srs(api, "proj-g07", "구매오더 조회 앱 요구사항", tokens=120_000)
+    c = str(root)
+    api.event(real, c, "PreToolUse", tool_name="Skill", tool_input={"skill": "harness:srs"})
+    qs = [{"question": "이 앱은 얼마나 급해?", "header": "우선순위", "multiSelect": False,
+           "options": [{"label": "반드시 필요", "description": "없으면 업무가 멈춰"}, {"label": "중요", "description": "빨리 필요해"},
+                       {"label": "있으면 좋음", "description": "여유가 있을 때"}, {"label": "아직 모름", "description": "나중에 정해"}]},
+          {"question": "누가 언제 요청했어?", "header": "요청 출처", "multiSelect": False,
+           "options": [{"label": "모름 · 나중에 확인", "description": "비워 두고 이어서 써"}, {"label": "직접 적기", "description": "아래 칸에 적어"}]}]
+    _hold_request(api, real, "question", "g07", {"session_id": real, "cwd": c, "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion",
+                                                 "tool_input": {"questions": qs}})
+    return f"/s/{real}"
+
+
+def g08(api):
+    """시안 G-08: AI 가 일하는 중(순서 체크리스트 · 오른쪽에 쓰는 중인 문서). 세션 하나, 기억 12%."""
+    root, real = _managed_srs(api, "proj-g08", "구매오더 조회 앱 요구사항", tokens=120_000, branch="docs/4-srs-purchase-order", req=True)  # 콘솔이 띄운 세션이라 [작업 멈추기] 가 나온다
+    c = str(root)
+    api.event(real, c, "UserPromptSubmit", prompt="구매오더 조회 앱 요구사항")
+    api.event(real, c, "PreToolUse", tool_name="Skill", tool_input={"skill": "harness:srs"})
+    fp = str(root / "docs" / "ssot" / "SRS.md")
+    api.event(real, c, "PreToolUse", tool_name="Write", tool_input={"file_path": fp, "content": "x"})
+    api.event(real, c, "PostToolUse", tool_name="Write", tool_input={"file_path": fp, "content": "x"}, tool_response="ok")
+    api.event(real, c, "PreToolUse", tool_name="Read", tool_input={"file_path": fp})  # 마지막 이벤트가 도구 호출이라 일하는 중으로 남는다
+    wait_for(lambda: api.get(f"/api/sessions/{real}")[1].get("branch"), 15)  # git 정보는 백그라운드로 읽힌다(훅 세션은 hook_flow_session 이 기다린다)
+    return f"/s/{real}"
+
+
+def g11(api):
+    """시안 G-11: 홈(오늘 내 일) - 세션 셋, 내 차례 1건(구매오더 요구사항 올리기), 승인 기다리는 PR 1건."""
+    root = _hub_world(api, "g11")
+    # 팀 기록 타일(시안 G-24 에서 생긴 다섯째 칸)은 기록을 읽을 수 있어야 한 줄 모양이다(못 읽으면 보라 점선 안내로 더 길어진다).
+    git(root, "remote", "set-url", "origin", f"https://github.com/{SLUG}.git")
+    (RUN / "trouble_state.json").write_text(json.dumps({"repos": {root.name: {"slug": SLUG}}, "issues": {SLUG: _list_issues()}, "labels": ["type:trouble"]},
+                                                       ensure_ascii=False), encoding="utf-8")
+    wait_for(lambda: (lambda d: d if d and not d["loading"] and d["projects"] else None)(api.get("/api/trouble")[1]), 30)
+    _my_prs_ready(api, root)
+    return "/"
+
+
+def g14(api):
+    """시안 G-14: 산출물(내가 만든 문서) - 세션 셋, 요구사항정의서 v0.1 안 올림이 고른 문서."""
+    _hub_world(api, "g14")
+    return "/docs"
+
+
+def g16(api):
+    """시안 G-16: 막힘(✕) 카드 + 확인 못 함(?) 카드. 막힘은 Spec 세션(기억 23%), 확인 못 함은 다른 세션(CTS)에서 난 것으로 쌓는다."""
+    _hub_world(api, "g16", mine=False)
+    root, real = _managed_srs(api, "proj-g16", "구매오더 조회 앱 개발 Spec 쓰기", tokens=230_000)
+    c = str(root)
+    cannot = "AI 리뷰를 확인하지 못했어. 검토 도구에 접속하지 못했어(인증 오류).\n다음: 검사를 다시 돌려 봐."
+    # 시안의 ? 확인 못 함은 다른 세션(CTS) 일이라 그 세션에 쌓는다(맨 위 띠·사이드바). 이 세션 대화에도 한 장 둔다: 그 뒤에 내 말·AI 말이 이어지면
+    # 풀린 것으로 보므로, 이 세션이 막힘으로 남도록 마지막은 막힘 카드다.
+    api.hook("blocked", {"session_id": "h3", "cwd": str(WORK / "proj-g16-cts"), "hook": "pre_write_guard", "tool_name": "Write", "reason": cannot})
+    api.hook("blocked", {"session_id": real, "cwd": c, "hook": "pre_write_guard", "tool_name": "Write", "reason": cannot})
+    api.event(real, c, "UserPromptSubmit", prompt="다시 돌려 줘")
+    api.stop(real, c, "다시 돌려 봤는데 이번에는 Spec 저장이 막혔어.")
+    st, d = api.hook("blocked", {"session_id": real, "cwd": c, "hook": "pre_write_guard", "tool_name": "Write",
+                                 "reason": "저장 안 됨 — 양식에 없는 칸이 있어. Spec 화면 표에 '비고2' 칸이 들어갔는데 고객 양식에는 없어.\n다음: '비고2' 내용을 '비고' 칸으로 옮기면 돼."})
+    assert st == 200, (st, d)
+    return f"/s/{real}"
+
+
+def g17(api):
+    """시안 G-17: 되돌릴 수 없는 일(작업 폴더 밖 파일 지우기)을 묻는 확인 카드. 세션 기억 55%."""
+    _hub_world(api, "g17", mine=False)
+    root, real = _managed_srs(api, "proj-g17", "구매오더 조회 앱 개발 Spec 쓰기", tokens=550_000)
+    c = str(root)
+    api.event(real, c, "PreToolUse", tool_name="Skill", tool_input={"skill": "harness:spec"})
+    target = str(WORK.parent / "Desktop" / "구매오더_Spec_초안_old.xlsx")  # 작업 폴더 밖
+    rid = _hold_request(api, real, "permission", "g17", {
+        "session_id": real, "cwd": c, "hook_event_name": "PermissionRequest", "tool_name": "Bash",
+        "tool_input": {"command": f'rm "{target}"', "description": "이전 Spec 초안 파일 지우기"}})
+    assert rid, "승인 요청이 안 쌓였다"
+    return f"/r/{rid}"
+
+
+def g18(api):
+    """시안 G-18: 기억 92% - 맨 위 노란 배너(새 세션으로 넘기기 · 계속하기). 일하는 중인 매뉴얼 세션."""
+    _hub_world(api, "g18", mine=False)
+    root, real = _managed_srs(api, "proj-g18", "구매오더 조회 사용자 매뉴얼", tokens=920_000)
+    c = str(root)
+    api.event(real, c, "UserPromptSubmit", prompt="구매오더 조회 사용자 매뉴얼", model="claude-opus-4-7", transcript_path=transcript(real, 920_000))
+    return f"/s/{real}"
+
+
+def g19(api):
+    """시안 G-19: 설정(보기와 알림). 세션 셋은 G-11 과 같다."""
+    _hub_world(api, "g19")
+    return "/settings"
+
+
 # 시안 화면 번호 -> 상태 만드는 함수. 상태 만들기가 준비되면 여기에 더한다.
-BUILDERS = {"G-01": g01, "G-02": g02, "G-03": g03, "G-04": g04, "G-05": g05, "G-06": g06, "G-09": g09, "G-10": g10, "G-12": g12, "G-13": g13, "G-15": g15,
+BUILDERS = {"G-01": g01, "G-02": g02, "G-03": g03, "G-04": g04, "G-05": g05, "G-06": g06, "G-07": g07, "G-08": g08, "G-09": g09, "G-10": g10,
+            "G-11": g11, "G-12": g12, "G-13": g13, "G-14": g14, "G-15": g15, "G-16": g16, "G-17": g17, "G-18": g18, "G-19": g19,
             "G-20": g20, "G-21": g21, "G-22": g22, "G-23": g23, "G-24": g24}
