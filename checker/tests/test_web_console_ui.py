@@ -714,6 +714,36 @@ const cases = {
     assert.strictEqual(went[1], '구매오더 조회 앱 요구사항 써 줘');
     assert.strictEqual(find(root, e => (e.attrs['class'] || '').includes('call')).length, 0);
   },
+  plain_action_logic() {
+    const lab = id => ({ srs: '요구사항 문서' }[id] || id);
+    const P = t => L.plainAction(t, lab);
+    assert.strictEqual(P('Skill: harness:srs'), '요구사항 문서 진행 중');
+    assert.strictEqual(P('Skill: srs'), '요구사항 문서 진행 중');
+    assert.strictEqual(P('Skill: harness:zzz'), 'zzz 진행 중');  // 이름표가 없으면 스킬 id
+    assert.strictEqual(P('Bash: git push origin main'), '명령 실행 중');
+    for (const t of ['Write', 'Edit: a.md', 'MultiEdit: a', 'NotebookEdit: a']) assert.strictEqual(P(t), '파일 고치는 중');
+    for (const t of ['Read: a.md', 'Glob: *.md', 'Grep: x', 'LS: .']) assert.strictEqual(P(t), '파일 살펴보는 중');
+    assert.strictEqual(P('Agent: 조사'), '보조에게 맡기는 중');
+    assert.strictEqual(P('Task'), '보조에게 맡기는 중');
+    assert.strictEqual(P('WebSearch: x'), '웹에서 찾는 중');
+    assert.strictEqual(P('mcp__abap-adt__getObjectSource: zcl'), 'SAP 연결 도구 쓰는 중');
+    assert.strictEqual(P('mcp__other__tool'), '연결 도구 쓰는 중');
+    assert.strictEqual(P('TodoWrite'), '할 일 정리하는 중');
+    assert.strictEqual(P('Weird: x'), '작업하는 중');
+    assert.strictEqual(P(''), '작업하는 중');
+    assert.strictEqual(P(null), '작업하는 중');
+    assert.strictEqual(P('Skill'), '작업하는 중');
+    assert.ok(!P('Bash: rm -rf secret').includes('secret'));  // 입력 원문은 내지 않는다
+    assert.strictEqual(L.plainAction('Skill: harness:srs'), 'srs 진행 중');  // 이름표 함수가 없어도 깨지지 않는다
+    // 첫 내 말 풍선: 콘솔이 붙인 스킬 명령 줄만 숨긴다
+    assert.strictEqual(L.hideSkillLine('/harness:spec\n구매오더 조회\n\n참고 파일: @docs/ssot/SRS.md'), '구매오더 조회\n\n참고 파일: @docs/ssot/SRS.md');
+    assert.strictEqual(L.hideSkillLine('/harness:spec\n\n구매오더'), '구매오더');
+    assert.strictEqual(L.hideSkillLine('/other-plugin:do_it\r\n내용'), '내용');
+    assert.strictEqual(L.hideSkillLine('/harness:spec'), '/harness:spec');  // 남는 말이 없으면 그대로
+    assert.strictEqual(L.hideSkillLine('/harness:spec 이어서 해 줘'), '/harness:spec 이어서 해 줘');  // 줄 전체가 명령일 때만
+    assert.strictEqual(L.hideSkillLine('그냥 말\n/harness:spec\n뒤'), '그냥 말\n/harness:spec\n뒤');
+    assert.strictEqual(L.hideSkillLine(undefined), '');
+  },
   docs_logic() {
     const g = p => L.docGroup({ path: p });
     assert.deepStrictEqual(['docs/SRS.md', 'audit/log.md', 'out/CTS_v0.2.xlsx', 'img/a.png', 'x/매뉴얼.pptx', 'a.pdf'].map(g), ['spec', 'record', 'form', 'etc', 'form', 'form']);
@@ -1705,7 +1735,7 @@ def test_open_block_card_comes_before_flow_picker_and_has_next_steps(tmp_path):
     raw = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-raw]"}])
     assert "자세한 위반 목록입니다." in raw["text"] and raw["text"].count("개요 절을 추가하십시오.") == 1 and "다음: 개요" not in raw["text"]
     # 보낼 수 없는(터미널) 세션: 보내는 단추 대신 터미널에서 하라는 안내
-    term = _smoke(tmp_path, "s/s1", [_session("s1", chat=[_UNSURE], canSend=False, managed=False, cannotSendReason="쉬는 터미널 세션입니다.")])
+    term = _smoke(tmp_path, "s/s1", [_session("s1", chat=[_UNSURE], canSend=False, managed=False, cannotSendReason="쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어. 터미널에서 이어서 말해 줘.")])
     assert "검사 다시 돌리기" not in term["text"] and "터미널에서 같은 일을 다시 시켜 줘" in term["text"]
     term2 = _smoke(tmp_path, "s/s1", [_session("s1", chat=[_BLOCK], canSend=False, managed=False, cannotSendReason="쉬는 터미널 세션입니다.")])
     assert "그렇게 고쳐 줘" not in term2["text"] and "터미널에서 고쳐 줘" in term2["text"] and "<p.note-attn>" in term2["dump"]
@@ -1860,3 +1890,40 @@ def test_header_keeps_work_menu_and_project_name_without_sessions(tmp_path):
     assert "보내기" in got["text"] and "새 작업으로" not in got["text"]
     new = _smoke(tmp_path, "new", [], extra=last)
     assert "harness-sandbox" in new["head"] and "Work/" not in new["head"]
+
+
+_IDLE_TERMINAL = "쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어. 터미널에서 이어서 말해 줘."
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_current_action_shows_plain_words_raw_only_in_tech_info(tmp_path):
+    """#818: 목록·내 일·홈 표·세션 제목은 쉬운 말, 원문은 기술 정보에만."""
+    running = [_session("s1", status="running", managed=True, currentAction="Skill: harness:srs", title="구매오더"),
+               _session("s2", status="running", managed=True, currentAction="Bash: git push origin main", title="다른 일", cwd="C:/w/other")]
+    for route in ("s/s1", ""):
+        got = _smoke(tmp_path, route, running)
+        shown = got["text"] + got["side"]
+        assert "명령 실행 중" in got["side"] and "요구사항 문서 진행 중" in shown, route  # 왼쪽 목록 둘째 줄
+        assert "git push" not in got["side"] and "Skill:" not in got["side"], route
+    one = _smoke(tmp_path, "s/s1", running)
+    assert "요구사항 문서 진행 중" in one["text"].split("현재 동작")[0]  # 세션 제목
+    assert "현재 동작Skill: harness:srs" in one["text"]  # 기술 정보의 원문
+    assert "<p.action-line" not in one["dump"]
+    files = _smoke(tmp_path, "s/s1", [_session("s1", status="running", managed=True, currentAction="Write: docs/SRS.md")])
+    assert "파일 고치는 중" in files["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_idle_terminal_notice_once_and_casual(tmp_path):
+    for flow in ({}, {"turnSkill": "deliver"}):
+        got = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, canSend=False, cannotSendReason=_IDLE_TERMINAL, **flow)])
+        assert got["text"].count(_IDLE_TERMINAL) == 1, (flow, got["text"].count(_IDLE_TERMINAL))
+    assert "입니다" not in _IDLE_TERMINAL and "십시오" not in _IDLE_TERMINAL
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_first_my_bubble_hides_skill_command_line(tmp_path):
+    chat = [{"t": 1, "role": "me", "text": "/harness:spec\n구매오더 조회 앱 만들어 줘\n\n참고 파일: @docs/ssot/SRS.md"}, {"t": 2, "role": "ai", "text": "알겠어."}]
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)])
+    assert "구매오더 조회 앱 만들어 줘" in got["text"] and "참고 파일: @docs/ssot/SRS.md" in got["text"]
+    assert "/harness:spec" not in got["text"].replace("/harness:spec 실행", "")
