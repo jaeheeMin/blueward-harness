@@ -6,8 +6,9 @@ import json
 import subprocess
 import sys
 import time
+import urllib.parse
 
-from .lib import (HERE, LOGIN, RUN, ANALYSIS, add_req_row, git, hook_flow_session, make_project, make_xlsx, pr, set_gh, start_server, transcript, write,
+from .lib import (HERE, LOGIN, RUN, WORK, ANALYSIS, rmtree, add_req_row, git, hook_flow_session, make_project, make_xlsx, pr, set_gh, start_server, transcript, write,
                   wait_for)
 
 
@@ -51,6 +52,48 @@ def _ready_home(api):
     api.get("/api/folders/recent")  # 판정은 백그라운드로 읽는다: 한 번 부르고 기다렸다가
     wait_for(lambda: (lambda r: r if r and not r[0]["checking"] and r[0]["formsMissing"] != "unknown" else None)(api.get("/api/folders/recent")[1]), 15)
     return root
+
+
+def _checks_ready(api):
+    """첫 화면의 시작 점검(GitHub·하네스 판·Claude Code)은 백그라운드 + 60초 기억이라 한 번 읽어 데워 둔다."""
+    wait_for(lambda: (lambda d: d if d and not d.get("loading") and d.get("checks") else None)(api.get("/api/start-checks")[1]), 30)
+
+
+def g01(api):
+    """시안 G-01: 첫 실행 환영 화면(점검 셋). 첫 실행은 check_console 이 화면 설정 first_run 으로 만든다."""
+    _checks_ready(api)
+    return "/"
+
+
+def _pick_world(api):
+    """시안 G-02 의 최근 폴더 둘: harness-console-sandbox(하네스 구조 없음 = 준비 필요), public-cloud(준비됨 · 세션 2)."""
+    box = WORK / "harness-console-sandbox"
+    rmtree(box)
+    box.mkdir(parents=True)
+    git(box, "init", "-q", "-b", "main")
+    write(box / "README.md", "# sandbox\n")
+    git(box, "add", "-A")
+    git(box, "commit", "-q", "-m", "init")
+    root = make_project("public-cloud", "main")
+    hook_flow_session(api, "p1", root, "구매오더 매뉴얼", "srs", "srs", None, "작업 중", stop=False)
+    hook_flow_session(api, "p2", root, "CTS 관리대장 11월", "srs", "srs", None, "작업 중", stop=False)
+    api.post("/api/folders/last", {"path": str(root)})
+    api.post("/api/folders/last", {"path": str(box)})  # 나중에 쓴 것이 위(시안은 sandbox 가 첫 줄)
+    api.get("/api/folders/recent")  # 준비 판정은 백그라운드: 한 번 불러 두고 끝날 때까지
+    wait_for(lambda: (lambda r: r if r and len(r) >= 2 and not any(x["checking"] for x in r) else None)(api.get("/api/folders/recent")[1]), 30)
+    _checks_ready(api)
+
+
+def g02(api):
+    """시안 G-02: 첫 화면 둘째 쪽(프로젝트 고르기). 화면 설정 clicks 가 '시작하기' 와 첫 폴더 고르기를 누른다."""
+    _pick_world(api)
+    return "/"
+
+
+def g03(api):
+    """시안 G-03: 준비 안 된 폴더를 골라 '이 프로젝트로' 를 누르면 가는 새 작업 화면의 표준 구조 만들기 안내."""
+    _pick_world(api)
+    return "/"
 
 
 def g04(api):
@@ -211,6 +254,12 @@ def _trouble_ready(api, path):
     return path
 
 
+def _my_prs_ready(api, root):
+    """내 PR 목록 읽기도 백그라운드(처음엔 loading)라 한 번 읽어 데워 둔다(홈의 '고쳐야 할 내 PR' 줄이 처음 그릴 때 보이도록)."""
+    q = urllib.parse.quote(str(root))
+    wait_for(lambda: (lambda d: d if d and not d.get("loading") else None)(api.get("/api/my-prs?cwd=" + q)[1]), 30)
+
+
 def g20(api):
     _trouble_sessions(api, *_trouble_world("proj-g20"))
     return _trouble_ready(api, "/troubles")
@@ -239,6 +288,45 @@ def g22(api):
     return "/troubles/new?draft=" + d["id"]
 
 
+def g23(api):
+    """시안 G-23: 막힘 카드 + 비슷한 기록 줄 + 풀린 뒤 '기록해 둘까?' 카드. 막힘은 훅이 보낸 것처럼 /hooks/blocked 로 쌓는다."""
+    similar = [_issue(790, "deliver 가 git 명령 검사에 막힘", "CLOSED", "hyun", "10-30", "개발", None, "하네스 검사가 막았어: git 명령 검사 그냥 git push 는 쓸 수 없어", "", "올리기 단계로 푸시함"),
+               _issue(655, "맨손 git push 가 거절됨", "CLOSED", "sora", "10-12", "개발", None, "하네스 검사가 막았어: git 명령 검사 그냥 git push 는 쓸 수 없어", "", "올리기 단계로 푸시함")]
+    root, other = _trouble_world("proj-g23", similar)
+    api.post("/api/folders/last", {"path": str(other)})
+    api.post("/api/folders/last", {"path": str(root)})
+    c = str(root)
+    hook_flow_session(api, "t3", other, "CTS 관리대장 11월", "srs", "srs", None, "작업 중", tokens=150_000, stop=False)
+    hook_flow_session(api, "t2", other, "구매오더 매뉴얼", "srs", "srs", None, "작업 중", tokens=810_000, stop=False)
+    # 막힘 카드의 [그렇게 고쳐 줘] 는 보낼 수 있는 세션(콘솔이 띄운 것)에만 나온다: 콘솔이 띄운 가짜 claude 세션에 막힘을 쌓는다.
+    srs_analysis()
+    _jid, sid = managed_session(api, root, "판매오더 조회 앱")
+    wait_for(lambda: sess(api, sid).get("report", "").startswith("echo"), 20)
+    real = sess(api, sid)["id"]
+    api.stop(real, c, "푸시하려고 git 명령을 썼는데 하네스 검사가 막았어.")
+    st, d = api.hook("blocked", {"session_id": real, "cwd": c, "hook": "pre-bash-git-guard", "tool_name": "Bash",
+                                 "reason": "그냥 git push 는 쓸 수 없어. 푸시는 올리기 단계로만 할 수 있어.\n다음: 올리기 단계로 푸시하면 돼."})
+    assert st == 200, (st, d)
+    api.event(real, c, "UserPromptSubmit", prompt="그렇게 고쳐 줘")
+    api.stop(real, c, "올리기 단계로 다시 푸시했고, 검사 다시 돌렸고 통과했어.")
+    _trouble_ready(api, "")
+    return f"/s/{real}"
+
+
+def g24(api):
+    """시안 G-24: 홈에 '고쳐야 할 내 PR' 줄과 '팀 기록 · 아직 안 풀린 문제' 타일(세션 셋·PR #812 검사 실패·열린 기록 3건)."""
+    root, other = _trouble_world("proj-g24")
+    add_req_row(root)  # SRS 에 요구사항을 더한 근거(g10 과 같다): 쓰기 단계가 끝나야 콘솔이 PR 을 세션과 연결한다
+    # 시안 G-24 의 첫 세션: SRS 를 올려 PR #812 가 열렸고 검사가 실패한 상태(G-10 과 같은 순서로 쓰기 -> 멈춤). 콘솔이 PR 을 세션과 연결해야 "고쳐야 함" 이 된다.
+    api.post("/api/folders/last", {"path": str(other)})
+    api.post("/api/folders/last", {"path": str(root)})
+    hook_flow_session(api, "t3", other, "CTS 관리대장 11월", "srs", "srs", None, "작업 중", tokens=150_000, stop=False)
+    hook_flow_session(api, "t2", other, "구매오더 매뉴얼", "srs", "srs", None, "작업 중", tokens=810_000, stop=False)
+    hook_flow_session(api, "t1", root, "판매오더 조회 앱", "srs", "srs", "docs/ssot/SRS.md", "SRS 를 올렸어요. 검사가 실패했어요.", tokens=600_000, stop=True)
+    _my_prs_ready(api, root)
+    return _trouble_ready(api, "/")
+
+
 # 시안 화면 번호 -> 상태 만드는 함수. 상태 만들기가 준비되면 여기에 더한다.
-BUILDERS = {"G-04": g04, "G-05": g05, "G-06": g06, "G-09": g09, "G-10": g10, "G-12": g12, "G-13": g13, "G-15": g15,
-            "G-20": g20, "G-21": g21, "G-22": g22}
+BUILDERS = {"G-01": g01, "G-02": g02, "G-03": g03, "G-04": g04, "G-05": g05, "G-06": g06, "G-09": g09, "G-10": g10, "G-12": g12, "G-13": g13, "G-15": g15,
+            "G-20": g20, "G-21": g21, "G-22": g22, "G-23": g23, "G-24": g24}

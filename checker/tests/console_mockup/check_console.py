@@ -36,7 +36,7 @@ def check_screen(br, lib, screen: str, baseline: dict, builders: dict, shots: Pa
     cfg = SCREEN_CONFIG.get(screen, {})
     ov = {k: (dict(v) if v is not None else None) for k, v in cfg.get("elements", {}).items()}
     cex = {**COLOR_EXCEPTIONS, **cfg.get("color_exceptions", {})}
-    lib.start_server()
+    lib.start_server(first_run_done=not cfg.get("first_run"))  # 첫 화면(G-01~03)은 '시작하기를 아직 안 눌렀다' 로 띄운다
     api = lib.Api().login()
     path = builders[screen](api)
     br.set_cookie("harness_console", api.cookie, lib.BASE)
@@ -44,6 +44,9 @@ def check_screen(br, lib, screen: str, baseline: dict, builders: dict, shots: Pa
     sels = selectors("console", ov)
     for w in WIDTHS:
         br.set_viewport(w, 1000)
+        if cfg.get("first_run"):  # 너비마다 처음 열린 상태로(시작하기를 누르면 표시가 남는다)
+            (lib.STATE / "first-run.json").unlink(missing_ok=True)
+            (lib.STATE / "folder-intro.json").unlink(missing_ok=True)  # 준비 안 된 폴더 안내(G-03)도 처음 보는 것으로
         br.goto(lib.BASE + path)
         end = time.time() + 15
         while time.time() < end and not br.evaluate("!!document.querySelector('main.main > *')"):
@@ -52,6 +55,23 @@ def check_screen(br, lib, screen: str, baseline: dict, builders: dict, shots: Pa
         end = time.time() + 15  # 산출물·점검 등 뒤늦게 채워지는 칸이 "불러오는 중" 을 벗어날 때까지
         while time.time() < end and br.evaluate("document.body.innerText.indexOf('불러오는 중') >= 0"):
             time.sleep(0.4)
+        end = time.time() + 15  # 로고 같은 그림이 다 뜰 때까지(전체를 이어 돌릴 때 로고가 늦게 떠 '안 뜸' 으로 잘못 잰 적이 있다)
+        while time.time() < end and not br.evaluate("Array.from(document.images).every(function(i){return i.complete})"):
+            time.sleep(0.3)
+        for sel in cfg.get("clicks", []):  # 화면 안 단추를 차례로 눌러 그 화면까지 간다(주소로 못 가는 첫 화면 둘째 쪽 등)
+            end = time.time() + 15
+            while time.time() < end and not br.evaluate(f"!!document.querySelector({json.dumps(sel)})"):
+                time.sleep(0.3)
+            br.evaluate(f"(function(){{var e=document.querySelector({json.dumps(sel)});if(e)e.click()}})()")
+            time.sleep(1.0)
+        if cfg.get("ready"):  # 화면 설정의 ready 선택자(예: 홈의 뒤늦게 그려지는 줄)가 나타날 때까지(없으면 그대로 재서 '없음' 으로 실패한다)
+            end = time.time() + 15
+            while time.time() < end and not br.evaluate(f"!!document.querySelector({json.dumps(cfg['ready'])})"):
+                time.sleep(0.3)
+            time.sleep(0.5)
+        if cfg.get("scroll_top"):  # 대화가 길어 화면 안이 아래로 스크롤된 화면: 시안(스크롤 전)과 같은 위쪽에서 잰다
+            br.evaluate("(function(){window.scrollTo(0,0);document.querySelectorAll('*').forEach(function(e){if(e.scrollTop)e.scrollTop=0})})()")
+            time.sleep(0.3)
         meas = measure(br, sels)
         got[w] = meas
         if shots:
