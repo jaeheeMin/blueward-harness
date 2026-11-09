@@ -31,12 +31,13 @@ class Gh:
     pr: PR 응답, files: [(경로, status)], open_prs: {번호: (제목, 브랜치, [파일])}."""
 
     def __init__(self, title="기능 (DEV-010)", body="", branch="feat/1-x", files=(("src/a.abap", "modified"),),
-                 base_files=None, open_prs=None, fail=None, base="main"):
+                 base_files=None, open_prs=None, fail=None, base="main", head_files=None):
         self.title, self.body, self.branch, self.base = title, body, branch, base
         self.files = list(files)
         self.base_files = base_files if base_files is not None else {}
         self.open_prs = open_prs or {}
         self.fail = fail or {}
+        self.head_files = head_files if head_files is not None else {}  # head 에서만 다른 파일(없으면 base 와 같다)
 
     def _maybe_fail(self, path):
         for key, msg in self.fail.items():
@@ -46,7 +47,7 @@ class Gh:
     def get_json(self, path):
         self._maybe_fail(path)
         if path == f"repos/{REPO}/pulls/5":
-            return {"title": self.title, "body": self.body, "head": {"ref": self.branch}, "base": {"ref": self.base}}
+            return {"title": self.title, "body": self.body, "head": {"ref": self.branch, "sha": "HEADSHA"}, "base": {"ref": self.base}}
         raise AssertionError(path)
 
     def get_all(self, path):
@@ -64,11 +65,15 @@ class Gh:
         self._maybe_fail(path)
         rest = path.split("/contents/")[1]
         target, ref = rest.split("?ref=")
-        assert unquote(ref) == self.base  # base(병합 대상)에서 읽는다. head 가 아니다
+        ref = unquote(ref)
+        assert ref in (self.base, "HEADSHA")  # Spec 선행은 base 에서, SRS 요구사항은 base·head 에서만 읽는다
+        files = self.base_files if ref == self.base else {**self.base_files, **self.head_files}
         target = unquote(target)
-        if target in self.base_files:
-            return {"type": "file", "content": base64.b64encode(self.base_files[target].encode("utf-8")).decode()}
-        kids = sorted(p for p in self.base_files if p.startswith(target + "/"))
+        if ref == "HEADSHA":
+            assert target == "docs/ssot/SRS.md"
+        if target in files:
+            return {"type": "file", "content": base64.b64encode(files[target].encode("utf-8")).decode()}
+        kids = sorted(p for p in files if p.startswith(target + "/"))
         if kids:
             return [{"path": p, "type": "file"} for p in kids]
         return None
@@ -317,3 +322,85 @@ def test_start_스킬의_Spec_판정과_같은_이름_규칙을_쓴다():
         assert a and b and int(a.group(1)) == int(b.group(1)) == num
     for name in ["docs/spec/README.md", "docs/other/DEV-002-x.md"]:
         assert spec_ready._SPEC_FILE.match(name) is None
+
+
+# ── 요구사항 없는 Spec (#837) ─────────────────────────────────────────────
+REQ_TABLE_HEAD = "# SRS\n\n## 요구사항\n\n| ID | Title | Status | 다음 단계 | Development RICEFW ID |\n|---|---|---|---|---|\n"
+
+
+def req_srs(*rows: str) -> str:
+    return REQ_TABLE_HEAD + "".join(r + "\n" for r in rows)
+
+
+REQ10 = "| REQ-010 | 앱 | Open | 개발 | DEV-010 |"
+LEDGER_ONLY = {LEDGER_F: ledger()}
+
+
+def spec_pr(status="added", **kw):
+    return Gh(files=(("docs/spec/DEV-010-앱.md", status),), title="docs: Spec (DEV-010)", **kw)
+
+
+def test_새_Spec_과_base_SRS_에_REQ_가_있으면_통과(tmp_path, capsys):
+    code, result, md = run(spec_pr(base_files={**LEDGER_ONLY, SRS_F: req_srs(REQ10)}), tmp_path, capsys)
+    assert code == 0 and result["status"] == "ok" and md == ""
+
+
+def test_새_Spec_인데_SRS_에_REQ_가_없으면_위반이고_srs_를_안내(tmp_path, capsys):
+    code, result, md = run(spec_pr(base_files={**LEDGER_ONLY, SRS_F: req_srs("| REQ-011 | 다른 | Open | 개발 | DEV-011 |")}),
+                           tmp_path, capsys)
+    assert code == 1 and result["items"][0]["kind"] == "no_req" and result["items"][0]["dev"] == "DEV-010"
+    assert "/harness:srs" in md and "REQ-010" in md and "src/" not in md
+
+
+def test_SRS_와_Spec_을_한_PR_에_같이_올리면_head_SRS_로_통과(tmp_path, capsys):
+    gh = spec_pr(base_files={**LEDGER_ONLY, SRS_F: req_srs()}, head_files={SRS_F: req_srs(REQ10)})
+    assert run(gh, tmp_path, capsys)[0] == 0
+
+
+def test_SRS_표의_RICEFW_칸이_그_DEV_이면_번호가_달라도_통과(tmp_path, capsys):
+    gh = spec_pr(base_files={**LEDGER_ONLY, SRS_F: req_srs("| REQ-003 | 앱 | Open | 개발 | DEV-010 |")})
+    assert run(gh, tmp_path, capsys)[0] == 0
+
+
+def test_Spec_수정이어도_REQ_가_없으면_위반(tmp_path, capsys):
+    gh = spec_pr(status="modified", base_files={**LEDGER_ONLY, SRS_F: req_srs(), "docs/spec/DEV-010-앱.md": "x"})
+    assert run(gh, tmp_path, capsys)[0] == 1
+
+
+def test_Spec_삭제는_보지_않는다(tmp_path, capsys):
+    gh = spec_pr(status="removed", base_files={**LEDGER_ONLY, SRS_F: req_srs()})
+    assert run(gh, tmp_path, capsys)[0] == 0
+
+
+def test_PR_이_안_건드린_옛_Spec_은_REQ_가_없어도_통과(tmp_path, capsys):
+    gh = Gh(files=(("README.md", "modified"),), title="문서",
+            base_files={**LEDGER_ONLY, SRS_F: req_srs(), "docs/spec/DEV-011-옛.md": "x"})
+    code, result, md = run(gh, tmp_path, capsys)
+    assert code == 0 and result["status"] == "ok" and md == ""
+
+
+def test_SRS_를_읽지_못하면_검사_불능(tmp_path, capsys):
+    gh = spec_pr(base_files={**LEDGER_ONLY, SRS_F: req_srs()}, fail={"ssot/SRS.md": "boom"})
+    code, result, _ = run(gh, tmp_path, capsys)
+    assert code == 2 and result["status"] == "unknown"
+
+
+def test_SRS_요구사항_표를_해석하지_못하면_검사_불능(tmp_path, capsys):
+    gh = spec_pr(base_files={**LEDGER_ONLY, SRS_F: "# SRS\n\n## 요구사항\n\nREQ-010 표 없이 글만\n"})
+    assert run(gh, tmp_path, capsys)[0] == 2
+
+
+def test_원장이_없는_저장소는_기존_동작(tmp_path, capsys):
+    assert run(spec_pr(base_files={SRS_F: req_srs()}), tmp_path, capsys)[0] == 0
+
+
+def test_SRS_가_없는_저장소는_기존_동작(tmp_path, capsys):
+    assert run(spec_pr(base_files=LEDGER_ONLY), tmp_path, capsys)[0] == 0
+
+
+def test_src_변경과_REQ_없는_Spec_이_함께면_두_종류_사유가_다_나온다(tmp_path, capsys):
+    gh = Gh(files=(("src/a.abap", "modified"), ("docs/spec/DEV-010-앱.md", "modified")),
+            base_files={**LEDGER_ONLY, SRS_F: req_srs(), "docs/spec/DEV-010-앱.md": "x"})
+    code, result, md = run(gh, tmp_path, capsys)
+    assert code == 1 and {i["kind"] for i in result["items"]} == {"no_req"}
+    assert "/harness:srs" in md and "Spec 이 main 에 아직 없어" not in md
