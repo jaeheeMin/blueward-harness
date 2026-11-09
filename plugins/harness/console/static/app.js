@@ -445,11 +445,7 @@
     sideQueued = true;
     requestAnimationFrame(function () { sideQueued = false; renderSide(); });
   }
-  function groupOf(s) {
-    if (s.group === 'todo' || s.group === 'running' || s.group === 'idle') return s.group;
-    if ((s.pendingRequestIds || []).length || s.turnSkill || s.askedInText) return 'todo';
-    return s.status === 'running' || s.status === 'starting' ? 'running' : 'idle';
-  }
+  function groupOf(s) { return window.BHLogic.groupOf(s); }
   function requestTitle(r) {
     if (!r) return '요청을 확인하세요';
     if (r.title) return r.title;
@@ -481,6 +477,8 @@
             if (r && r.status && r.status !== 'pending') return;
             todo.push({ sname: title, href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : kindOf(r) === 'question' ? '답하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
           });
+        } else if (!s.askedInText && window.BHLogic.prNeedsFix(s)) {  // 시안 G-24: 검사 실패한 내 PR 을 고칠 차례
+          todo.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), verb: 'PR 고치기', title: title, sub: sub, t: s.updatedAt, fix: true });
         } else {
           todo.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), verb: s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기', title: title, sub: sub, t: s.updatedAt });
         }
@@ -533,7 +531,7 @@
     if (d.todo.length) {
       var first = d.todo[0];
       annEl.appendChild(link(first.href, { class: 'ann', role: 'status' },
-        h('span', { text: '내 차례 ' + d.todo.length + '건 — “' + first.sname + '” 세션에서 답이 필요해' })));  // 제목에 조사가 바로 붙지 않게 따옴표와 "세션"
+        h('span', { text: '내 차례 ' + d.todo.length + '건 — ' + (first.fix ? '“' + first.sname + '” PR 의 검사 실패를 고쳐야 해' : '“' + first.sname + '” 세션에서 답이 필요해') })));  // 제목에 조사가 바로 붙지 않게 따옴표와 "세션"
     }
     // 막힘·확인 못 함은 내 차례 건수에 넣지 않고 따로 띠로 알린다(#790). ✕ 막힘과 ? 확인 못 함은 각각 한 줄
     [['blocked', '✕ 막힘', '하네스 검사가 막았어. 고친 뒤 이어서 하자'], ['cannot_check', '? 확인 못 함', '검사를 못 해서 멈췄어. 통과도 실패도 아니야']].forEach(function (k) {
@@ -591,6 +589,11 @@
     var wrap = h('div', { class: 'intro' }), recent = null, sel = '', custom = '', msg = '', busy = false, browseBusy = false, customBusy = false, tries = 0, timer = null;
     var typing = false;  // OS 선택 창을 못 열었을 때만 경로 입력칸을 보인다
     function nameOf(p) { return baseName(p) || p; }
+    // 시안 G-02 머리글자: 이름의 단어(-_. 공백 사이) 첫 글자 둘(harness-console-sandbox → HC). 단어가 하나면 앞 두 글자.
+    function initials(nm) {
+      var w = nm.split(/[-_.\s]+/).filter(Boolean), s = w.length > 1 ? w[0].charAt(0) + w[1].charAt(0) : (w[0] || '').slice(0, 2);
+      return s.replace(/[^A-Za-z0-9가-힣]/g, '').toUpperCase() || '··';
+    }
     // 시안처럼 긴 경로는 앞(드라이브·첫 칸) … 끝 두 칸으로 줄여 한 줄로. 전체 경로는 카드 title.
     function shortPath(p) {
       var sep = p.indexOf('\\') >= 0 ? '\\' : '/', parts = p.split(/[\\/]+/);
@@ -603,6 +606,8 @@
       api('GET', '/api/folders/recent').then(function (d) {
         var next = parse(d), keep = (recent || []).filter(function (f) { return f.extra && !next.some(function (n) { return n.path === f.path; }); });
         recent = keep.concat(next);
+        // 시안 G-02: 첫 줄(가장 최근에 쓴 폴더)을 처음부터 고른 상태로 둔다. 가장 쓸 만한 폴더이고 [이 프로젝트로] 를 바로 누를 수 있다. 다른 줄을 누르면 바뀐다.
+        if (!sel) recent.slice(0, 1).forEach(function (f) { sel = f.path; });  // (새 작업 화면의 기본 폴더 규칙 #667 과 다른 화면: 여기는 고르는 화면이다)
         if (wrap.isConnected) draw();
         if (tries++ < 6 && next.some(function (f) { return f.checking; })) timer = setTimeout(load, 1500);
       }, function () { recent = recent || []; if (wrap.isConnected) draw(); });
@@ -658,7 +663,7 @@
       (recent || []).forEach(function (f) {
         var nm = nameOf(f.path), c = readyChip(f);
         box.appendChild(h('button', { type: 'button', class: 'folder-opt proj', 'data-pick-folder': f.path, 'aria-pressed': String(f.path === sel), title: f.path, onClick: function () { sel = f.path; msg = ''; draw(); } },
-          h('span', { class: 'pi', 'aria-hidden': 'true', text: nm.replace(/[^A-Za-z0-9가-힣]/g, '').slice(0, 2).toUpperCase() || '··' }),
+          h('span', { class: 'pi', 'aria-hidden': 'true', text: initials(nm) }),
           h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', text: shortPath(f.path) })),
           h('span', { class: ('chip2 ' + c.cls).trim(), 'data-ready': f.ready || 'unknown', text: c.text })));
       });

@@ -1011,6 +1011,7 @@ details.fold > [data-r]:empty { display: none; }
 #app[data-intro="1"] .top > :not(.brand), #app[data-intro="1"] .side, #app[data-intro="1"] .ann-slot { display: none; }
 #app[data-intro="1"] .intro { box-sizing: border-box; min-height: 100%; align-items: center; padding: 30px 0; }
 #app[data-intro="1"] .shell { grid-template-columns: minmax(0, 1fr); padding: 0 20px; }
+#app[data-intro="1"] main.main { padding-bottom: 0; }  /* 시안은 카드를 머리줄 아래 남은 높이 전부의 가운데에 둔다(아래 덧여백 28px 없이) */
 .ann.note { background: var(--attn); color: var(--lightink); }
 .ann.note:hover { color: var(--lightink); }
 /* 판이 바뀐 뒤 홈 맨 위 "이번에 바뀐 것" 카드(#647) */
@@ -1029,6 +1030,8 @@ details.fold > [data-r]:empty { display: none; }
 .intro-box[data-pick] { width: min(680px, 100%); gap: 12px; }
 [data-pick] .folder-opt.proj + .folder-opt.proj { margin-top: 0; }
 [data-pick] [data-pick-ok] { padding: 10px 26px; }
+[data-pick] [data-pick-back] { padding: 9px 16px; }  /* 시안 [뒤로] 높이 41 */
+[data-pick] .proj .pn small { line-height: 20px; }  /* 시안 프로젝트 줄 높이 72(이름 21 + 경로 20) */
 .intro-box h1 { font-size: 20px; line-height: 1.5; font-weight: 500; letter-spacing: -0.3px; }
 .intro-box .eb { color: var(--lmuted); }
 .intro-box .lm.sm { font-size: 12.5px; }
