@@ -12,6 +12,11 @@
   base SRS 의 그 REQ `다음 단계` 가 `설정`·`표준` 이거나 옛 원장 `audit/ledger/*.md` 의 그 DEV 행 Spec 칸이 `설정`
   (설정·표준은 개발이 아니다, #718).
 - 검사 불능(통과도 위반도 아니다): PR·파일·base 의 Spec 목록·원장을 읽지 못함, 뜻밖의 예외.
+
+둘째 관문(#837, `src/` 변경과 무관): 이 PR 이 새로 만들거나 바꾼(삭제 제외) `docs/spec/DEV-xxx-*.md` 의 DEV 에 대응하는 요구사항(같은 번호의
+REQ, 또는 SRS 표 `Development RICEFW ID` 칸이 그 DEV)이 base SRS 에도 이 PR head SRS 에도 없으면 위반(`no_req`)이다. SRS 와 Spec 을
+한 PR 에 같이 올리는 것은 허용이라 head SRS 에 있으면 통과다. base 에 `audit/ledger/` 가 없거나 SRS 가 base·head 어디에도 없는 저장소는
+이 관문을 건너뛴다(기존 동작). 이 PR 이 건드리지 않은 옛 Spec 은 보지 않는다(`pairing` 경고 `spec_without_req` 만). SRS 를 읽지 못하면 검사 불능.
 종료코드: 0 통과/해당 없음, 1 위반, 2 검사 불능. 통과이면 마크다운은 빈 문자열이다.
 """
 from __future__ import annotations
@@ -25,7 +30,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from checker.ledger_complete import _strip_non_prose
-from checker.pairing import LEDGER_DIR, SRS_PATH, non_dev_numbers, section_span, table_indexed
+from checker.pairing import CannotCheck, LEDGER_DIR, SRS_PATH, covered_dev_numbers, non_dev_numbers, section_span, table_indexed
 from checker.pr_queue import _SPEC_FILE, _order_devs
 from checker.ssot_approval import GhClient, GhError, _force_utf8
 
@@ -43,6 +48,7 @@ RERUN = "제목을 고친 뒤 새 커밋을 올리거나 " + RERUN_HOW
 
 NO_DEV = "no_dev"
 NO_SPEC = "no_spec"
+NO_REQ = "no_req"
 CONFIG_ONLY = "config"
 UNKNOWN = "unknown"
 
@@ -151,6 +157,39 @@ def _config_numbers(client, repo: str, base: str, devs: set[int]) -> set[int]:
     return found
 
 
+def _srs_text_or_none(client, repo: str, ref: str) -> str | None:
+    """`ref` 의 SRS 본문. 파일이 없으면 None, 읽다 실패하면 Unknown."""
+    data = client.get_json_or_none_404(f"repos/{repo}/contents/{quote(SRS_PATH, safe='/')}?ref={quote(ref, safe='')}")
+    if data is None:
+        return None
+    if not isinstance(data, dict) or not data.get("content"):
+        raise Unknown(f"{ref} 에서 `{SRS_PATH}` 를 읽지 못했다")
+    try:
+        return base64.b64decode(data["content"]).decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise Unknown(f"{ref} 의 `{SRS_PATH}` 를 해석하지 못했다: {exc}") from exc
+
+
+def _spec_without_req(client, repo: str, base: str, head_sha: str | None, files: list[dict]) -> list[dict]:
+    """이 PR 이 새로 만들거나 바꾼 Spec 중 대응 요구사항이 base·head SRS 어디에도 없는 것들(#837). 해당 없으면 빈 목록."""
+    nums = {int(m.group(1)) for f in files if f.get("status") != "removed"
+            for m in [_SPEC_FILE.match(str(f["filename"]))] if m}
+    if not nums:
+        return []
+    if client.get_json_or_none_404(f"repos/{repo}/contents/{LEDGER_DIR}?ref={quote(base, safe='')}") is None:
+        return []  # 원장을 안 쓰는 저장소는 기존 동작(pairing 도 건너뛴다)
+    if not head_sha:
+        raise Unknown("PR 의 head 커밋을 알지 못해 head 의 SRS 를 읽지 못했다")
+    texts = [t for t in (_srs_text_or_none(client, repo, base), _srs_text_or_none(client, repo, head_sha)) if t is not None]
+    if not texts:
+        return []  # SRS 가 없는 저장소
+    try:
+        covered = set().union(*(covered_dev_numbers(t) for t in texts))
+    except CannotCheck as exc:
+        raise Unknown(str(exc)) from exc
+    return [{"kind": NO_REQ, "dev": _dev(n), "reason": "대응하는 요구사항이 SRS 에 없다"} for n in sorted(nums - covered)]
+
+
 def _open_spec_prs(client, repo: str, me: int, nums: set[int]) -> dict[int, list[dict]]:
     """그 DEV 의 Spec 파일을 바꾸는 열린 PR. 읽지 못하면 그 정보만 뺀다(지어내지 않는다)."""
     out: dict[int, list[dict]] = {}
@@ -185,9 +224,10 @@ def check_pr(client, repo: str, pr: int) -> dict:
         raise GhError("PR 응답을 읽지 못했다(기준 브랜치가 없다)")
     entries = client.get_all(f"repos/{repo}/pulls/{pr}/files")
     files = [e for e in entries if isinstance(e, dict) and e.get("filename")]
+    req_items = _spec_without_req(client, repo, base, ((data.get("head") or {}).get("sha")), files)
     if not any(f["filename"].startswith(SRC_PREFIX) or str(f.get("previous_filename") or "").startswith(SRC_PREFIX)
                for f in files):
-        return {"status": "ok", "applicable": False, "items": []}
+        return {"status": "violation" if req_items else "ok", "applicable": False, "items": req_items}
     # 본문은 `_order_devs` 에 넘기지 않는다(본문에 스친 번호·REQ 번호로 통과하지 않게). 제목·브랜치·바꾼 Spec 파일로도 못 찾을 때만
     # 하네스가 일부러 쓰는 표시(`body_devs`)를 인정한다.
     raw = {"title": data.get("title"), "body": "",
@@ -213,6 +253,7 @@ def check_pr(client, repo: str, pr: int) -> dict:
         elif n not in base_specs:
             items.append({"kind": NO_SPEC, "dev": _dev(n), "reason": "Spec 이 base 에 없다",
                           "added_here": n in added_here, "open_prs": open_prs.get(n, [])})
+    items += req_items
     return {"status": "violation" if items else "ok", "applicable": True, "items": items}
 
 
@@ -227,9 +268,16 @@ def render_markdown(result: dict) -> str:
         lines.append("")
         lines += [f"- {i['reason']}" for i in items]
         return "\n".join(lines) + "\n"
-    lines += ["⚠️ 개발 변경(`src/`)이 있는데 Spec 이 main 에 아직 없어 병합할 수 없습니다. Spec 없이 개발은 없습니다(SRS → Spec → 개발 순).", ""]
+    if any(i["kind"] != NO_REQ for i in items):
+        lines += ["⚠️ 개발 변경(`src/`)이 있는데 Spec 이 main 에 아직 없어 병합할 수 없습니다. Spec 없이 개발은 없습니다(SRS → Spec → 개발 순).", ""]
+    if any(i["kind"] == NO_REQ for i in items):
+        lines += ["⚠️ 요구사항(SRS)에 없는 개발의 Spec 이 들어 있어 병합할 수 없습니다. 요구사항이 먼저, Spec 은 그 다음입니다(SRS → Spec → 개발 순).", ""]
     for i in items:
-        if i["kind"] == NO_DEV:
+        if i["kind"] == NO_REQ:
+            n = i["dev"].split("-")[1]
+            lines.append(f"- {i['dev']}: 이 Spec 에 대응하는 요구사항(`REQ-{n}`)이 SRS(`{SRS_PATH}`)에 없습니다. "
+                         f"다음: `/harness:srs` 로 REQ-{n} 를 먼저 올립니다(같은 PR 에 SRS 와 같이 담아도 됩니다).")
+        elif i["kind"] == NO_DEV:
             lines.append("- 어느 개발인지 찾지 못했습니다. PR 제목 끝에 `(DEV-xxx)` 로 적어 주세요. " + RERUN)
         elif i["kind"] == CONFIG_ONLY:
             lines.append(f"- {i['dev']}: 설정·표준은 개발이 아닙니다. SRS `다음 단계` 가 `설정`·`표준` 인 건(옛 원장은 Spec 칸 `설정`)은 `src/` 를 바꾸지 않습니다. "
@@ -241,7 +289,10 @@ def render_markdown(result: dict) -> str:
             for p in i.get("open_prs") or []:
                 msg += f" 열린 Spec PR #{p['number']}({p['title']}) 이 병합되면 이 검사를 다시 돌려 주세요."
             lines.append(msg)
-    lines += ["", "Spec 이 병합된 뒤 새 커밋을 올리거나 " + RERUN_HOW]
+    if any(i["kind"] == NO_REQ for i in items):
+        lines += ["", "SRS 에 요구사항을 올린 뒤 새 커밋을 올리거나 " + RERUN_HOW]
+    if any(i["kind"] != NO_REQ for i in items):
+        lines += ["", "Spec 이 병합된 뒤 새 커밋을 올리거나 " + RERUN_HOW]
     return "\n".join(lines) + "\n"
 
 

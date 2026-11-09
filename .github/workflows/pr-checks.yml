@@ -482,6 +482,8 @@ jobs:
       # 포함)·원장 Spec 칸이 `설정` 인 건의 `src/` 변경은 위반이고, `src/` 변경이 없으면 통과(해당 없음)다. 읽지 못하면 unknown.
       # 판정은 checker.spec_ready.check_pr 다. commit status 는 달지 않는다(ledger-ready 와 같다). 종합에 들어가므로 필수 검사
       # `pr-checks / check` 가 곧 이 관문이다. API 로만 읽어 저장소 checkout 이 필요 없고 caller 권한은 그대로다.
+      # 둘째 관문(#837): src/ 와 무관하게, 이 PR 이 새로 만들거나 바꾼 `docs/spec/DEV-xxx-*.md` 의 DEV 에 대응하는 요구사항(REQ)이 기준
+      # 브랜치 SRS 에도 이 PR 의 SRS 에도 없으면 위반이다(원장이 없거나 SRS 가 없는 저장소는 건너뜀). 건드리지 않은 옛 Spec 은 pairing 경고만.
       # 한계: 트리거에 `edited` 가 없어(#411) PR 제목·본문만 고친 경우는 다시 판정되지 않는다. 새 커밋을 올리거나 Actions 에서
       # Re-run 하면 다시 돈다(코멘트 사유에 안내한다).
       - name: spec-ready 판정
@@ -506,7 +508,7 @@ jobs:
               ;;
             1)
               echo "status=fail" >> "$GITHUB_OUTPUT"
-              echo "reason=개발 변경(src/)인데 그 개발의 Spec 이 병합 대상 브랜치에 없다(또는 DEV 를 못 찾았다). 사유와 할 일은 PR 코멘트와 job 요약에 있다." >> "$GITHUB_OUTPUT"
+              echo "reason=개발 변경(src/)인데 그 개발의 Spec 이 병합 대상 브랜치에 없다(또는 DEV 를 못 찾았다), 또는 요구사항(SRS)에 없는 개발의 Spec 이 들어 있다. 사유와 할 일은 PR 코멘트와 job 요약에 있다." >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "status=unknown" >> "$GITHUB_OUTPUT"

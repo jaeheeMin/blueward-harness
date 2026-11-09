@@ -5794,6 +5794,30 @@ def test_dev_ready_zero_spec_is_certain_when_no_spec_file_on_main(tmp_path, monk
         c.close()
 
 
+def test_dev_ready_spec_without_req_is_not_counted_as_ready(tmp_path, monkeypatch):
+    # SRS 요구사항 표에 없는 번호는 Spec·원장이 있어도 Spec 있는 건으로 세지 않고 따로 알린다(#837)
+    ledger = READY_LEDGER + "| DEV-009 | 요구사항 없는 개발 | docs/spec/DEV-009-x.md | 김 | 진행 |\n"
+    files = {"docs/ssot/SRS.md": READY_SRS, "audit/ledger/a.md": ledger}
+
+    def show(args):
+        path = args[-1].split(":", 1)[1]
+        return (0, files[path]) if path in files else (128, "")
+
+    work = tmp_path / "work"
+    run = ready_run(work, spec_files=("docs/spec/DEV-002-판매.md", "docs/spec/DEV-009-x.md"), **{"git show": show})
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    (work / "audit" / "ledger").mkdir(parents=True)
+    try:
+        body = ready_get(c)[1]
+        assert body["state"] == "yes" and body["specReady"] == 1  # DEV-002 만
+        assert body["noReq"] == [{"number": 9, "label": "DEV-009(요구사항 없는 개발)"}] and body["noReqCount"] == 1
+        assert next(i for i in body["items"] if i["number"] == 9)["req"] is False
+        assert next(i for i in body["items"] if i["number"] == 2)["req"] is True
+        assert 9 not in [n["number"] for n in body["needSpec"]]  # 요구사항이 없으면 Spec 을 쓸 차례도 아니다
+    finally:
+        c.close()
+
+
 def test_dev_ready_not_applicable_without_ledger_or_repo(tmp_path, monkeypatch):
     work = tmp_path / "work"  # audit/ledger 가 없다
     c = flow_console(tmp_path, monkeypatch, run=ready_run(work))

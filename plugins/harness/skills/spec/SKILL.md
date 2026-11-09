@@ -39,17 +39,17 @@ main 이면 start 절차, 다른 작업 브랜치면 같은 일인지 판단·�
 (`docs/spec/DEV-003-<요약>.md`), 진행 원장의 개발 건 표 ID 칸에도 같은 번호를
 적어 SRS·Spec·원장이 한 번호로 연결되게 한다. 숫자는 3자리로 0 을 채운다.
 
-근거 REQ 가 없는 개발(SRS 를 거치지 않는 개발)이면 그 브랜치·이슈에 찜해 둔
-번호(이슈 제목의 `[DEV-xxx]`)를 쓴다. 이 번호는 새로 계산하지 않는다 — 번호 찜과
-계산식은 `<이 스킬의 base directory>/../start/SKILL.md` 의 "번호 찜" 에 있고
-스크립트(`reserve_number.py`)가 한다. 찜 번호가 아직 없으면 `claim --issue <번호>`
-로 붙인다. 종료코드 4(이슈 제목이 기존 REQ 제목이나 범위 `하지 않는 것` 항목과 겹침)면 `matches` 와 `excluded_matches` 를 보여 주고 "기존 개발의 하위 작업인가, 새 개발인가"
-를 묻는다. 하위 작업이면 새 번호를 받지 않고 `<이 스킬의 base directory>/../start/SKILL.md` 의 "기존 개발과의 관계"
-하위 작업 절차로 가고, 새 개발이 맞다고 하면 `--confirmed-new` 를 붙여 다시 부른다.
+**요구사항(REQ)이 SRS 에 없으면 Spec 을 쓰지 않는다**(#837). SRS 를 거치지 않는 개발은 없다 — Spec 의 DEV 번호는
+origin/main 의 `docs/ssot/SRS.md` 요구사항 표에 이미 있는 REQ 에서만 나온다. 번호는 새로 계산하지 않고 이 스킬이
+`reserve_number.py` 로 새로 찜하지도 않는다(번호 찜은 `/harness:srs` 가 REQ 를 올릴 때 하는 일이다). 대응 REQ 가 없으면
+멈추고 쉬운 말로 알린다: "이 개발은 요구사항(SRS)에 아직 없어서 Spec 을 쓸 수 없어요. 먼저 `/harness:srs` 로 요구사항을
+올려서 병합해야 Spec 을 쓸 수 있어요." 같은 PR 에 SRS 와 Spec 을 함께 담는 PR 검사 허용이 있어도 이 스킬은 쓰지 않는다 —
+REQ 가 병합된 SRS 부터 있어야 한다.
 
 ## 만들기
 
-1. `docs/ssot/SRS.md` 를 읽는다. 없는데 `docs/ssot/PRD.md` 가 있으면 예전
+1. `git fetch origin` 뒤 origin/main 의 `docs/ssot/SRS.md`(`git show origin/main:docs/ssot/SRS.md`)를 읽는다. 이 브랜치에서 SRS 를
+   고쳤어도 병합 전의 REQ 는 근거가 아니다. 없는데 `docs/ssot/PRD.md` 가 있으면 예전
    이름(PRD)으로 만든 저장소다 — 멈추고 그렇게 알린 뒤, 옮기는 방법은
    `/harness:srs` 스킬의 "옛 구조 확인" 절을 따르라고 안내한다. 아직 `templates/harness/SRS.md` 의 빈
    스텁 그대로면(요구사항 절에 표가 없거나 `REQ-001` 한 줄만 비어 있으면) 이 Spec 이
@@ -59,6 +59,8 @@ main 이면 start 절차, 다른 작업 브랜치면 같은 일인지 판단·�
    쓰되, 그 REQ 의 상태(Backlog Status)가 `Dropped` 나 `Duplicate` 면 Spec 을 만들지 않고 그렇다고
    알린다. `On Hold` 도 만들지 않고 보류 중이라고 알린다(사용자가 `/harness:srs` 로 상태를 바꾸면 진행).
    그 REQ 의 `다음 단계` 열(SRS 요구사항 표)도 본다.
+   사용자가 준 REQ 번호(또는 이슈 제목·브랜치의 DEV 번호에 대응하는 REQ)가 origin/main 의 요구사항 표에 없으면
+   Spec 을 쓰지 않고 멈춘다 — 위 "Spec 번호" 의 안내를 그대로 한다.
    - `개발` — 그대로 진행한다.
    - `미정` — (`/harness:srs` 는 미정을 미결 사항에 남겨 두고 나중에 정하는 길이고, 여기는 Spec 을 만들다 그 자리에서 정하는 길이다.) 먼저 개발인지 설정·표준인지 사용자에게 정하게 하고(모르면 멈춘다), `/harness:srs` 의 고치기대로 SRS 의
      다음 단계(개발이면 RICEFW ID `DEV-xxx` 도)를 고치고 변경 기록(`audit/changes/`, 종류 "결정")을 남긴 뒤 진행한다.
@@ -72,7 +74,7 @@ main 이면 start 절차, 다른 작업 브랜치면 같은 일인지 판단·�
 
    번호를 안 줬으면 SRS 의 요구사항 표에서 `다음 단계` 가 `개발` 이고 상태가 `On Hold`·`Dropped`·`Duplicate` 가
    아니면서
-   아직 어느 Spec 의 `## 근거 요구사항` 에도 적히지 않은 REQ(= 아직 Spec 이 없는 REQ)를 찾아 목록으로
+   아직 어느 Spec 의 `## 근거 요구사항` 에도 적히지 않은 REQ(= 아직 Spec 이 없는 REQ)를 찾아(표에 있는 REQ 만 후보다) 목록으로
    보여 주고 고르게 한다(번호에는 제목을 괄호로 붙여 `REQ-002(판매오더 조회 앱)` 로 보인다). `미정` 인 REQ 가 있으면 목록 끝에 "다음 단계 미정 N건" 으로 따로 알려 준다(고르면 위 `미정`
    처럼 먼저 정한다). `설정`·`표준` 은 후보가 아니다. 상태 값은 Backlog Status(New / Planned / In Process / Done / On Hold /
    Dropped / Duplicate) 하나뿐이다 — 옛 `유효`·`변경됨`·`폐기` 로 적힌 SRS 면 `Dropped` 는 `폐기` 에 해당하고
@@ -84,10 +86,8 @@ main 이면 start 절차, 다른 작업 브랜치면 같은 일인지 판단·�
    `DEV-003`). 그 번호가 `audit/ledger/*.md` 의 개발 건 표에 이미 있고 Spec 칸이
    `-` 이면 그 줄을 이어받는다. Spec 칸이 `설정` 이어도 SRS 의 그 REQ 다음 단계가 `개발` 이면 막지 않고 `-` 처럼
    취급해 이어받고, Spec 을 쓸 때 Spec 칸을 Spec 경로로 채운다. SRS 다음 단계가 `설정`·`표준` 이면 Spec 을 만들지
-   않는다(2 의 `설정`·`표준`). (2 의 프로그램 선택도 그 원장 파일로 정해진 것으로 보고 다시 묻지 않는다.) 근거 REQ 가 없으면 브랜치 이름의 이슈 번호로 `gh issue view`
-   해 읽은 이슈 제목의 `[DEV-xxx]`(또는 본문의 `진행 원장: DEV-xxx` 줄)를 쓴다.
-   어디서도 번호를 못 찾으면 위 "Spec 번호" 대로 `claim` 으로 찜한다. 번호를 직접
-   계산하지 않는다. 같은 번호의 Spec 이 이미 있으면 새로 만들지 않고 "고치기" 로
+   않는다(2 의 `설정`·`표준`). (2 의 프로그램 선택도 그 원장 파일로 정해진 것으로 보고 다시 묻지 않는다.) 번호를 직접
+   계산하지 않고 `claim` 으로 새로 찜하지도 않는다. 근거 REQ 가 없으면 번호를 정하지 않고 위 "Spec 번호" 대로 멈춘다. 같은 번호의 Spec 이 이미 있으면 새로 만들지 않고 "고치기" 로
    안내한다.
 4. 양식을 고른다. `templates/forms/*.yaml`(양식 지도)을 모두 읽어 본다.
    - 폴더가 없거나 비었으면 "지도 없음" 이다. 이 단계를 건너뛰고 기존처럼
@@ -233,7 +233,8 @@ main 이면 start 절차, 다른 작업 브랜치면 같은 일인지 판단·�
 (종류 `구현 결과`, `templates/harness/audit-change.md` 틀)에만 적는다. Spec 을 고치는 PR 은 PR 검사상 승인 대상이 아니다(새 Spec 파일만 승인 대상, #736).
 예외로 구현하며 쓰는 객체가 바뀌었으면 그것은 설계 변경이라 `## 사용 객체` 를 고친다.
 
-1. 무엇이 왜 바뀌는지와 어느 REQ 가 바뀌었는지 받는다. `/harness:srs` 로
+1. 무엇이 왜 바뀌는지와 어느 REQ 가 바뀌었는지 받는다. 고칠 Spec 의 REQ 가 origin/main SRS 에 없으면(옛 Spec 이어도) 고치지 않고
+   멈춰 위 "Spec 번호" 의 안내대로 `/harness:srs` 로 REQ 를 올리게 한다(PR 검사도 이런 Spec 변경을 막는다). `/harness:srs` 로
    SRS 를 고쳤다면 그때 남긴 변경 기록(`audit/changes/`)을 근거로 쓴다. 기존 개발의 하위 작업(이슈 제목 끝
    `(DEV-xxx)`)도 새 Spec 을 만들지 않고 그 DEV 의 Spec 을 고친다.
 2. 해당 Spec 을 고친다. `## 변경 이력` 에 날짜, 바뀐 내용, 근거가 된 변경

@@ -221,6 +221,35 @@ def non_dev_numbers(text: str, steps: tuple[str, ...] = ("설정", "표준")) ->
     return out
 
 
+_DEV_IN_CELL = re.compile(r"DEV-0*(\d+)", re.IGNORECASE)
+
+
+def covered_dev_numbers(text: str) -> set[int]:
+    """SRS 본문 글에서 개발 번호(DEV-n)에 대응하는 요구사항이 있는 번호들(#837): 요구사항 표의 REQ 번호,
+    그리고 `Development RICEFW ID` 칸에 적힌 DEV 번호. 상태(Dropped 등)·다음 단계는 보지 않는다(있느냐만).
+
+    `## 요구사항` 절이 없거나 REQ 가 있는데 표 머리(`ID` 열)를 못 찾으면 CannotCheck. 표가 아직 없으면(작성 전) 빈 집합."""
+    text = text[1:] if text.startswith("﻿") else text
+    section = _section(text, "요구사항")
+    if section is None:
+        raise CannotCheck(f"`{SRS_PATH}` 에서 `## 요구사항` 절을 찾지 못했습니다.")
+    table = _table(section)
+    if table is None:
+        if any(_REQ_IN.search(line) for line in section):
+            raise CannotCheck(f"`{SRS_PATH}` 의 요구사항 표 머리(`ID` 열)를 찾지 못했습니다.")
+        return set()
+    header, rows = table
+    out: set[int] = set()
+    for cells in rows:
+        row = _row(header, cells)
+        m = _REQ_ID.match(row.get("ID", ""))
+        if not m:
+            continue
+        out.add(int(m.group(1)))
+        out.update(int(n) for n in _DEV_IN_CELL.findall(row.get("Development RICEFW ID", "")))
+    return out
+
+
 def _first_block(section: list[str]) -> str:
     """절의 첫 문단(앞의 빈 줄을 건너뛰고 다음 빈 줄 전까지). 근거 REQ 는 여기에만 적는다."""
     block: list[str] = []

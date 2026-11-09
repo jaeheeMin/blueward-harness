@@ -53,6 +53,7 @@ EXCLUDED_TAG_RE = re.compile(r"\s*[(（]\s*(REQ-\d+(?:\s*[,，、]\s*REQ-\d+)*)\
 MAX_RECHECKS = 3
 TAG_RE = re.compile(r"^\s*\[DEV-(\d+)\]\s*")
 REQ_ROW_RE = re.compile(r"^\|\s*REQ-(\d+)\s*\|", re.MULTILINE)
+DEV_IN_CELL_RE = re.compile(r"DEV-0*(\d+)", re.IGNORECASE)
 DEV_ROW_RE = re.compile(r"^\|\s*DEV-(\d+)\s*\|", re.MULTILINE)
 SUBTASK_RE = re.compile(r"\(DEV-(\d+)\)\s*$")
 SPEC_NAME_RE = re.compile(r"(?:^|/)DEV-(\d+)[^/]*\.md$")
@@ -264,6 +265,9 @@ def main_snapshot(root: str) -> dict[int, dict]:
     if srs:
         for n, row in _table_rows(srs, REQ_ROW_RE):
             e = entry(n)
+            e["req"] = True  # 이 번호의 요구사항이 SRS 표에 있다(#837). RICEFW ID 칸에 적힌 DEV 번호도 같다
+            for m in DEV_IN_CELL_RE.finditer(row.get("Development RICEFW ID", "")):
+                entry(int(m.group(1)))["req"] = True
             for key, names in (
                 ("req_title", ("Title", "요구사항")), ("lob", ("LoB",)),
                 ("next_step", ("다음 단계",)), ("status", ("Status", "상태")),

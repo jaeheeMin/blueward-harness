@@ -610,12 +610,17 @@
     var need = arr(d.needSpec).filter(function (x) { return x && x.label; });
     // setup 은 표준 건을 포함한 수다(서버 devready). 화면은 표준을 따로 세고 설정은 그만큼 뺀다(#718).
     var standard = Math.min(d.standard | 0, d.setup | 0);
-    return { specReady: d.specReady | 0, setup: (d.setup | 0) - standard, standard: standard, need: need, needCount: Math.max(need.length, d.needSpecCount | 0) };
+    return { specReady: d.specReady | 0, setup: (d.setup | 0) - standard, standard: standard, need: need, needCount: Math.max(need.length, d.needSpecCount | 0), noReqCount: d.noReqCount | 0 };
   }
   // 종류 버튼 밑에 보일 작은 글. flowId 는 종류 버튼의 갈래. 보일 것이 없으면 null.
   function kindHint(flowId, v) {
     if (!v) return null;
-    if (flowId === 'dev') return v.specReady === 0 ? { tone: 'dim', text: 'Spec 있는 건 없음 — 개발 Spec 먼저' } : { tone: '', text: 'Spec 있는 건 ' + v.specReady + '개' };
+    if (flowId === 'dev') {
+      // 요구사항(SRS)이 없는 건은 Spec 이 있어도 센 수에 넣지 않고, 있으면 따로 알린다(#837).
+      var noReq = v.noReqCount > 0 ? ' · 요구사항 없는 건 ' + v.noReqCount + '개(요구사항 먼저)' : '';
+      return v.specReady === 0 ? { tone: 'dim', text: 'Spec 있는 건 없음 — ' + (noReq ? '요구사항 없는 건 ' + v.noReqCount + '개, 요구사항 먼저' : '개발 Spec 먼저') }
+        : { tone: '', text: 'Spec 있는 건 ' + v.specReady + '개' + noReq };
+    }
     if (flowId === 'spec') return v.need.length ? { tone: 'hot', text: '할 차례 ' + v.need[0].label + (v.needCount > 1 ? ' 외 ' + (v.needCount - 1) + '건' : '') } : null;
     if (flowId === 'config') return v.setup > 0 ? { tone: '', text: '설정 건 ' + v.setup + '개' } : null;
     if (flowId === 'standard') return v.standard > 0 ? { tone: '', text: '표준 건 ' + v.standard + '개' } : null;
@@ -624,6 +629,7 @@
   // Spec 이 없다고 확실할 때만 개발을 막는다. 개발 갈래가 아니거나 상태를 모르면 null.
   function devBlock(flowId, v) {
     if (flowId !== 'dev' || !v || v.specReady > 0) return null;
+    if (v.noReqCount > 0) return '요구사항(SRS)에 없는 개발은 시작할 수 없어. Spec 이 있어도 안 돼. 먼저 요구사항을 올려서 병합해야 해.';
     return 'Spec 없이 개발은 시작할 수 없어. PR 검사(spec-ready)에서도 막혀. 먼저 개발 Spec 을 만들어 승인받아야 해.';
   }
   // 종류 버튼으로 고른 갈래와 AI 가 고른 갈래가 다르면 AI 쪽({id, reason}), 같거나 어느 한쪽이 없으면 null.
