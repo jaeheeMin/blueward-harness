@@ -27,6 +27,9 @@
     if (it.solvedNotes) parts.push('해결 ' + it.solvedNotes);
     return parts.join(' · ');
   }
+  // 비밀처럼 보이는 값은 입력칸에서도 화면에서도 `••••••••` 로 바꾼다(flow-logic.js 의 maskSecrets, 서버 trouble.py 와 같은 규칙).
+  var MASK_NOTE = '비밀처럼 보이는 값을 가렸어.';
+  function M(t) { return window.BHLogic && window.BHLogic.maskSecrets ? window.BHLogic.maskSecrets(t) : String(t == null ? '' : t); }
   function stored(key) { try { return window.localStorage.getItem(key); } catch (e) { return null; } }
   function store(key, value) {
     try { if (value == null) window.localStorage.removeItem(key); else window.localStorage.setItem(key, value); } catch (e) { return false; }
@@ -110,7 +113,7 @@
         d.items.forEach(function (it) {
           rows.appendChild(link(itemHref(it.repo, it.number), { class: 'rec' },
             chip(it.solved),
-            h('div', null, h('b', { text: it.title }), h('small', { text: [it.project, it.pr ? 'PR #' + it.pr + (it.prTitle ? ' ' + it.prTitle : '') : 'PR 없음',
+            h('div', null, h('b', { text: M(it.title) }), h('small', { text: [it.project, it.pr ? 'PR #' + it.pr + (it.prTitle ? ' ' + it.prTitle : '') : 'PR 없음',
               '단계 ' + (it.stage || '-'), it.author, dateText(it.createdAt)].join(' · ') })),
             h('span', { class: 'cnt', text: counts(it) })));
         });
@@ -164,13 +167,13 @@
         return h('div', { class: 'set tb-set96' }, h('span', { class: 'tb-lm', text: label }), content || h('span', { class: 'tb-lm', text: '' }));
       }
       function draw(d) {
-        title = '기록 #' + d.number + ' ' + d.title;
+        title = '기록 #' + d.number + ' ' + M(d.title);
         clear(page);
         var meta = h('div', { class: 'tb-meta' }, chip(d.solved));
         if (d.prNumber) meta.appendChild(h('span', { class: 'tag tb-dk', text: 'PR #' + d.prNumber + (d.prTitle ? ' ' + d.prTitle : '') }));
         meta.appendChild(h('span', { class: 'tag tb-dk', text: '단계 ' + (d.stage || '-') }));
         meta.appendChild(h('span', { class: 'tb-by', text: d.author + ' · ' + dateText(d.createdAt) }));
-        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '기록 번호 #' + d.number + ' · 프로젝트 ' + d.project }), h('h1', { text: d.title }), meta));
+        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '기록 번호 #' + d.number + ' · 프로젝트 ' + d.project }), h('h1', { text: M(d.title) }), meta));
 
         var left = h('div', { class: 'tb-left' }), right = h('div', { class: 'tb-right' });
         if (carry.warnings.length) {
@@ -178,15 +181,15 @@
           carry.warnings = [];
         }
         left.appendChild(h('div', { class: 'lt' }, h('span', { class: 'eb', text: '요약' }),
-          summaryRow('증상', h('span', { class: 'mono tb-sym', text: d.symptom || '(적지 않았어)' })),
-          summaryRow('원인', h('span', { text: d.cause || '아직 몰라' })),
-          summaryRow('해결 방법', d.solution ? h('span', { text: d.solution }) :
+          summaryRow('증상', h('span', { class: 'mono tb-sym', text: M(d.symptom) || '(적지 않았어)' })),
+          summaryRow('원인', h('span', { text: M(d.cause) || '아직 몰라' })),
+          summaryRow('해결 방법', d.solution ? h('span', { text: M(d.solution) }) :
             h('span', { class: 'tb-lm', text: "아직 없어 — 아래 후보 중 하나를 '이걸로 해결' 하면 여기 채워져" }))));
         var hist = h('div', { class: 'lt' }, h('span', { class: 'eb', text: '이력' }));
         d.history.forEach(function (c) {
           var k = KIND[c.kind] || KIND.note, text = h('span');
           if (k.tag) { text.appendChild(h('span', { class: 'tagx ' + k.cls, text: k.tag })); text.appendChild(h('br')); }
-          text.appendChild(document.createTextNode(c.text));
+          text.appendChild(document.createTextNode(M(c.text)));
           if (c.kind === 'candidate' && !d.solved) {
             text.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill dark tb-small', text: '이걸로 해결', disabled: compose.busy, onClick: function () {
               compose.busy = true; compose.note = '';
@@ -205,7 +208,10 @@
         var opts = h('span', { class: 'qo' }, kinds.map(function (o) {
           return h('button', { type: 'button', class: 'qopt', 'aria-pressed': String(compose.kind === o[0]), text: o[1], onClick: function () { compose.text = ta.value; compose.kind = o[0]; draw(d); } });
         }));
-        function sync() { compose.text = ta.value; send.disabled = compose.busy || !ta.value.trim(); }
+        function sync() {
+          var m = M(ta.value);
+          if (m !== ta.value) { ta.value = m; compose.note = MASK_NOTE; hint.textContent = MASK_NOTE; }
+          compose.text = ta.value; send.disabled = compose.busy || !ta.value.trim(); }
         ta.addEventListener('input', sync);
         send.addEventListener('click', function () {
           sync(); if (send.disabled) return;
@@ -241,7 +247,7 @@
         if (d.similarOk === false) sim.appendChild(h('span', null, h('span', { class: 'tb-unk-t', text: '? ' }), h('span', { class: 'tb-lm', text: '비슷한 기록을 확인 못 함 — 목록을 읽지 못했어' })));
         else if (!d.similar.length) sim.appendChild(h('span', { class: 'tb-lm', text: '비슷한 기록이 아직 없어' }));
         d.similar.forEach(function (s) {
-          sim.appendChild(link(itemHref(s.repo, s.number), { class: 'tb-row tb-simrow' }, h('span', { text: '#' + s.number + ' ' + s.title }), chip(s.solved)));
+          sim.appendChild(link(itemHref(s.repo, s.number), { class: 'tb-row tb-simrow' }, h('span', { text: '#' + s.number + ' ' + M(s.title) }), chip(s.solved)));
         });
         right.appendChild(sim);
         var gh = kit.safeHttp(d.url);
@@ -258,7 +264,7 @@
       opts = opts || {};
       var state = { dead: false }, page = h('div', { class: 'tb-page' }), seed = {}, aiSource = '', savedNote = '';
       var f = { repo: '', pr: '', stage: STAGES[0], title: '', symptom: '', cause: '', solved: false, solution: '' };
-      var prInfo = null, prTimer = null, hits = [], checkTimer = null, similarList = [], simTimer = null, busy = false, err = null, simFail = false, draftNote = '';
+      var prInfo = null, prTimer = null, hits = [], checkTimer = null, similarList = [], simTimer = null, busy = false, err = null, simFail = false, draftNote = '', maskNote = '';
       var projects = [];
       root.appendChild(page);
       page.appendChild(kit.loadingBox('프로젝트를 읽는 중이야'));
@@ -266,6 +272,9 @@
       function applySeed(d) {
         ['repo', 'pr', 'stage', 'title', 'symptom', 'cause', 'solution'].forEach(function (k) { if (d[k]) f[k] = String(d[k]); });
         f.solved = d.solved === true;
+        var masked = false;
+        ['title', 'symptom', 'cause', 'solution'].forEach(function (k) { var m = M(f[k]); if (m !== f[k]) { f[k] = m; masked = true; } });
+        if (masked) maskNote = MASK_NOTE;
       }
       function boot() {
         var saved = null;
@@ -319,14 +328,24 @@
 
       var slots = {};
       function slot(name, cls) { return (slots[name] = h('div', { class: cls || '' })); }
-      function setField(k, v) { f[k] = v; recheck(); drawPreview(); drawSubmit(); if (k === 'title' || k === 'symptom') findSimilar(); }
+      function setField(k, v) { f[k] = v; recheck(); drawBad(); drawPreview(); drawSubmit(); if (k === 'title' || k === 'symptom') findSimilar(); }  // drawBad: 가린 줄 카드는 서버 검사를 기다리지 않고 바로 보인다
       function textarea(k, rows, extra) {
         var ta = h('textarea', { class: 'tb-fld' + (extra ? ' ' + extra : ''), rows: rows, value: f[k], 'aria-label': k });
         function grow() { ta.style.height = ''; if (ta.scrollHeight > ta.clientHeight + 1) ta.style.height = ta.scrollHeight + 2 + 'px'; }
-        ta.addEventListener('input', function () { setField(k, ta.value); grow(); });
+        ta.addEventListener('input', function () { setField(k, maskInput(ta)); grow(); });
         setTimeout(grow, 0);
         return ta;
       }
+      // 입력칸 값에서 비밀처럼 보이는 값을 실제로 `••••••••` 로 바꾼다(겹쳐 가리는 게 아니다). 바뀌면 알림을 켜고 칸 끝에 커서를 둔다.
+      function maskInput(el) {
+        var m = M(el.value);
+        if (m !== el.value) {
+          el.value = m; maskNote = MASK_NOTE; drawMask();
+          try { el.setSelectionRange(m.length, m.length); } catch (e) { console.debug('커서를 칸 끝으로 옮기지 못했어', e); }
+        }
+        return el.value;
+      }
+      function drawMask() { var s = slots.mask; if (s) s.textContent = maskedLines().length ? '' : maskNote; }  // 가린 줄 카드(drawBad)가 같은 말을 하면 비운다
       function setRow(label, hint, content) {
         return h('div', { class: 'set tb-set110' }, h('span', null, label, hint ? [h('br'), h('small', { class: 'tb-lm', text: hint })] : null), content);
       }
@@ -344,10 +363,26 @@
         else s.appendChild(h('span', { class: 'tag', text: '? 확인 못 함 · ' + prInfo.reason }));
       }
       function lines(k) { return (f[k] || '').split('\n'); }
+      // 이미 `••••••••` 로 가린 줄(시안 G-22 의 비밀 줄 카드를 이 줄로 보인다, #827). 가린 값은 비밀로 치지 않으니 올리기는 잠그지 않는다.
+      function maskedLines() {
+        var mark = (window.BHLogic && window.BHLogic.MASK) || '••••••••', out = [];
+        ['title', 'symptom', 'cause', 'solution'].forEach(function (k) {
+          lines(k).forEach(function (ln, i) { if (ln.indexOf(mark) >= 0) out.push({ field: k, line: i + 1, label: ln.trim() }); });
+        });
+        return out;
+      }
+      // 카드의 [그 줄 지우기]: 고른 줄을 칸에서 뺀다(제목은 통째로 비운다).
+      function dropLines(list) {
+        if (list.some(function (x) { return x.field === 'title'; })) f.title = '';
+        ['symptom', 'cause', 'solution'].forEach(function (k) {
+          var drop = {}; list.filter(function (x) { return x.field === k; }).forEach(function (x) { drop[x.line] = 1; });
+          if (Object.keys(drop).length) f[k] = lines(k).filter(function (_, i) { return !drop[i + 1]; }).join('\n');
+        });
+      }
       function drawMirror() {
         var m = slots.mirror; if (!m) return; clear(m);
         var bad = {};
-        hits.filter(function (x) { return x.field === 'symptom'; }).forEach(function (x) { bad[x.line] = 1; });
+        hits.concat(maskedLines()).filter(function (x) { return x.field === 'symptom'; }).forEach(function (x) { bad[x.line] = 1; });
         lines('symptom').forEach(function (ln, i) {
           if (i) m.appendChild(document.createTextNode('\n'));
           m.appendChild(bad[i + 1] ? h('mark', { text: ln }) : document.createTextNode(ln));
@@ -360,18 +395,27 @@
         if (hits.some(function (x) { return x.unknown; })) {
           s.appendChild(h('div', { class: 'tb-empty tb-unk' }, h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }), ' · ' + hits[0].label));
         }
+        var names = { title: '제목', symptom: '증상', cause: '원인', solution: '해결 방법', text: '댓글' };
+        function where(list) { var first = list[0]; return (names[first.field] || first.field) + ' ' + first.line + '번째 줄'; }
+        function more(list) { return list.length > 1 ? ' 외 ' + (list.length - 1) + '곳.' : ''; }
+        var masked = real.length ? [] : maskedLines();
+        if (slots.mask) slots.mask.textContent = masked.length ? '' : maskNote;  // 가린 줄 카드가 보이면 아래 알림 줄은 겹치니 비운다
+        if (masked.length) {
+          s.appendChild(h('div', { class: 'tb-bad tb-masked' }, h('span', { class: 'tagx warn', text: '! 확인하고 올려 줘' }),
+            h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어 · 가렸어' }),
+            h('span', { class: 'tb-s135', text: where(masked) + '의 값을 ' + ((window.BHLogic && window.BHLogic.MASK) || '••••••••') + ' 로 바꿨어.' + more(masked) + ' 필요 없는 줄이면 지워 줘.' }),
+            h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', text: masked.length > 1 ? '그 줄들 지우기' : '그 줄 지우기', onClick: function () {
+              dropLines(masked); maskNote = ''; draw(); recheck();
+            } }))));
+          return;
+        }
         if (!real.length) return;
-        var first = real[0], names = { title: '제목', symptom: '증상', cause: '원인', solution: '해결 방법', text: '댓글' };
+        var first = real[0];
         s.appendChild(h('div', { class: 'tb-bad' }, h('span', { class: 'tagx fail', text: '✕ 올리기 전에 지워 줘' }),
           h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어' }),
-          h('span', { class: 'tb-s135', text: (names[first.field] || first.field) + ' ' + first.line + "번째 줄 '" + first.label + "'." + (real.length > 1 ? ' 외 ' + (real.length - 1) + '곳.' : '') + ' 지우고 올려 줘.' }),
+          h('span', { class: 'tb-s135', text: where(real) + " '" + first.label + "'." + more(real) + ' 지우고 올려 줘.' }),
           h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', text: real.length > 1 ? '그 줄들 지우기' : '그 줄 지우기', onClick: function () {
-            if (real.some(function (x) { return x.field === 'title'; })) f.title = '';
-            ['symptom', 'cause', 'solution'].forEach(function (k) {
-              var drop = {}; real.filter(function (x) { return x.field === k; }).forEach(function (x) { drop[x.line] = 1; });
-              if (Object.keys(drop).length) f[k] = lines(k).filter(function (_, i) { return !drop[i + 1]; }).join('\n');
-            });
-            hits = []; draw(); recheck();
+            dropLines(real); hits = []; draw(); recheck();
           } }))));
       }
       function drawSimilar() {
@@ -381,7 +425,7 @@
           if (simFail) s.appendChild(h('span', { class: 'tb-s125' }, h('span', { class: 'tb-unk-t', text: '? ' }), '비슷한 기록을 확인 못 함 — 목록을 읽지 못했어'));
           return;
         }
-        s.appendChild(h('div', { class: 'lt' }, h('span', { class: 'eb', text: '이미 비슷한 기록이 있어' }), h('b', { class: 'tb-b6', text: '#' + it.number + ' ' + it.title }),
+        s.appendChild(h('div', { class: 'lt' }, h('span', { class: 'eb', text: '이미 비슷한 기록이 있어' }), h('b', { class: 'tb-b6', text: '#' + it.number + ' ' + M(it.title) }),
           h('span', { class: 'tb-s125', text: it.author + ' · ' + dateText(it.createdAt) + ' · ' + (it.solved ? '해결됨' : '아직 안 풀림') }),
           h('div', { class: 'acts' }, link(itemHref(it.repo, it.number), { class: 'pill line', text: '거기에 더하기' }))));
       }
@@ -453,7 +497,7 @@
         var prIn = h('input', { class: 'tb-fld tb-pr', value: f.pr, 'aria-label': '관련 PR 번호', inputmode: 'numeric' });
         prIn.addEventListener('input', function () { f.pr = prIn.value; checkPr(); drawPreview(); drawSubmit(); });
         var titleIn = h('input', { class: 'tb-fld', value: f.title, 'aria-label': '제목' });
-        titleIn.addEventListener('input', function () { setField('title', titleIn.value); });
+        titleIn.addEventListener('input', function () { setField('title', maskInput(titleIn)); });
         var mirror = slot('mirror', 'tb-mirror'), symTa = textarea('symptom', 3, 'mono tb-symta');
         symTa.addEventListener('input', drawMirror);
         var form = h('div', { class: 'lt' },
@@ -481,6 +525,8 @@
           h('button', { type: 'button', class: 'pill line tb-quiet', text: '취소', onClick: function () { go('/troubles'); } })));
         slots.note = h('span', { class: 'tb-note125' });
         light.appendChild(slots.note);
+        slots.mask = h('span', { class: 'tb-note125 tb-masknote', role: 'status', text: maskNote });
+        light.appendChild(slots.mask);
         if (savedNote) light.appendChild(h('span', { class: 'tb-note125', text: savedNote }));
         if (draftNote) light.appendChild(h('span', { class: 'tb-note125', text: draftNote }));
         page.appendChild(light);
@@ -510,7 +556,7 @@
         line.appendChild(document.createTextNode('비슷한 기록 ' + st.items.length + '건 — '));
         st.items.forEach(function (it, i) {
           if (i) line.appendChild(document.createTextNode(' · '));
-          line.appendChild(link(itemHref(it.repo, it.number), { 'data-similar-item': String(it.number), text: '#' + it.number + ' ' + it.title + '(' + (it.solved ? '해결됨' : '아직 안 풀림') + ')' }));
+          line.appendChild(link(itemHref(it.repo, it.number), { 'data-similar-item': String(it.number), text: '#' + it.number + ' ' + M(it.title) + '(' + (it.solved ? '해결됨' : '아직 안 풀림') + ')' }));
         });
       }
       return h('div', { class: 'tb-simrow', 'data-similar': st.state }, line);

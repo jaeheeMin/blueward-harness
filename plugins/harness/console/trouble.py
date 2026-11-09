@@ -48,10 +48,11 @@ SECRET_ASSIGN = re.compile(r"(?i)\b(" + SECRET_NAME + r")[\"']?\s*[:=]\s*(?:\"([
 SECRET_OTHER = [(re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"), "GitHub 토큰"), (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), "GitHub 토큰"),
                 (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS 키"), (re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"), "API 키"),
                 (re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"), "Slack 토큰"),
-                (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "개인 키"),
+                (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----|[\s\S]*)"), "개인 키"),
                 (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "JWT"),
                 (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{16,}"), "Bearer 토큰"), (re.compile(r"://[^/\s:@]+:[^/\s@]{3,}@"), "주소에 든 비밀번호")]
 PLACEHOLDER = re.compile(r"^[•*x.\-_<>…()\[\]{}#]+$|^<.*>$|^\(생략\)$", re.I)
+MASK = "••••••••"  # 가린 값. PLACEHOLDER 에 걸리므로 비밀로 치지 않는다(가린 글은 저장할 수 있다).
 
 
 # ---- 순수 함수 ----
@@ -75,6 +76,19 @@ def scan_secrets(fields: dict) -> list[dict]:
             if label:
                 hits.append({"field": field, "line": no, "label": label})
     return hits
+
+
+def mask_secrets(text: str) -> str:
+    """비밀처럼 보이는 값을 MASK 로 바꾼 글. 이름과 `=`·`:` 는 남기고 값만 바꾼다. 브라우저의 BHLogic.maskSecrets 와 같은 규칙(시험이 맞춰 본다)."""
+    def assign(m):
+        g = 2 if m.group(2) else 3 if m.group(3) else 4
+        if PLACEHOLDER.match((m.group(g) or "").strip()):
+            return m.group(0)
+        return m.group(0)[:m.start(g) - m.start()] + MASK + m.group(0)[m.end(g) - m.start():]
+    out = SECRET_ASSIGN.sub(assign, str(text or ""))
+    for rx, name in SECRET_OTHER:
+        out = rx.sub("://" + MASK + "@" if name == "주소에 든 비밀번호" else MASK, out)
+    return out
 
 
 def fence_len(line: str) -> int:

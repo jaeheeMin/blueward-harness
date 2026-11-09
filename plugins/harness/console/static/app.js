@@ -77,6 +77,8 @@
   function safeHttp(u) {
     try { var p = new URL(u); return p.protocol === 'http:' || p.protocol === 'https:' ? p.href : null; } catch (e) { return null; }
   }
+  // 화면에 보이는 글에서 비밀처럼 보이는 값을 `••••••••` 로 가린다(보이기만 바꾼다 — AI 에게 보내는 글·서버에 쌓인 원문은 그대로).
+  function MS(t) { return window.BHLogic.maskSecrets(t); }
   function str(v) { return v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v); }
 
   /* ---------- API ---------- */
@@ -448,9 +450,9 @@
   function groupOf(s) { return window.BHLogic.groupOf(s); }
   function requestTitle(r) {
     if (!r) return '요청을 확인하세요';
-    if (r.title) return r.title;
+    if (r.title) return MS(r.title);
     var qs_ = questionsOf(r);
-    if (kindOf(r) === 'question') return qs_.length ? (qs_[0].question || qs_[0].header || '질문이 있습니다') : '질문이 있습니다';
+    if (kindOf(r) === 'question') return qs_.length ? MS(qs_[0].question || qs_[0].header || '질문이 있습니다') : '질문이 있습니다';
     return (r.toolName || r.tool_name || '도구') + ' 사용을 허용할까요?';
   }
   function kindOf(r) { return (r && (r.kind || r.type)) === 'question' ? 'question' : (r && (r.kind || r.type)) === 'permission' ? 'permission' : (questionsOf(r).length ? 'question' : 'permission'); }
@@ -1213,7 +1215,7 @@
     }
 
     function reportMsg(s) {
-      var rep = s.report, text = rep && typeof rep === 'object' ? (rep.text || rep.markdown || rep.body || '') : (rep || '');
+      var rep = s.report, text = MS(rep && typeof rep === 'object' ? (rep.text || rep.markdown || rep.body || '') : (rep || ''));
       var when = rep && typeof rep === 'object' ? (rep.updatedAt || rep.at || rep.time) : null;
       var box = h('div', { class: 'ai', 'data-r': 'report' }, h('span', { class: 'eb', text: 'AI' + (when ? ' · ' + clock(when) + ' 기준' : '') }));
       if (!String(text).trim()) {
@@ -1229,9 +1231,9 @@
     }
 
     // 대화 한 칸: 내 말은 말풍선(줄바꿈 그대로), AI 말은 마크다운(긴 글은 접기)
-    function chatMe(c) { return h('div', { class: 'me', 'data-chat': 'me', text: window.BHLogic.hideSkillLine(c.text) }); }
+    function chatMe(c) { return h('div', { class: 'me', 'data-chat': 'me', text: MS(window.BHLogic.hideSkillLine(c.text)) }); }
     function chatAi(c) {
-      var text = String(c.text || ''), key = String(c.t), open = !!chatOpen[key];
+      var text = MS(c.text || ''), key = String(c.t), open = !!chatOpen[key];
       var long = text.split('\n').length > 28 || text.length > 2200;
       var box = h('div', { class: 'ai', 'data-chat': 'ai' }, h('span', { class: 'eb', text: 'AI' + (c.t ? ' · ' + clock(c.t) : '') }));
       var body = h('div', { class: 'report-body' + (long && !open ? ' clip' : ''), tabindex: long ? '0' : null });
@@ -1294,7 +1296,7 @@
       if (pend && !c.answer) { drawn[c.id] = true; return c.kind === 'question' ? inlineQuestion(c.id) : askCard(c.id); }
       var label = c.kind === 'question' ? '질문' : '승인 요청';
       return h('div', { class: 'reqnote', 'data-chat': 'req', 'data-chat-req': c.id },
-        label + ': ' + String(c.title || '') + ' → ' + (c.answer ? String(c.answer) : '처리 결과를 알 수 없어'));
+        label + ': ' + MS(c.title || '') + ' → ' + (c.answer ? MS(c.answer) : '처리 결과를 알 수 없어'));
     }
     // 하네스 훅이 막은 이유(#650): 막힘은 빨간 ✕ 카드, 검사를 못 해 멈춘 건 보라 점선 ? 카드
     var HOOK_NAMES = {
@@ -1312,9 +1314,9 @@
       var head1 = m ? m[1] : first, head = m && m[2] ? head1 + ' ' + (m2 ? m2[1] : m[2]) : head1;
       var more = ((m2 ? m2[2] : '') + (rest ? '\n' + rest : '')).trim();
       // 영문 도구·훅 이름은 카드 본문에 그대로 두지 않고 쉬운 말로 바꿔 보인다(#794). 원문은 "검사 원문" 안에만 있고, AI 에게 보내는 글도 원문을 쓴다.
-      var PW = window.BHLogic.plainReason, headShow = PW(head), fixShow = PW(fix), moreShow = PW(more);
+      var PW = window.BHLogic.plainReason, headShow = MS(PW(head)), fixShow = MS(PW(fix)), moreShow = MS(PW(more));
       var changed = headShow !== head || fixShow !== fix || moreShow !== more;
-      var rawShow = changed ? (head + (more ? '\n' + more : '') + (fix ? '\n고치는 법: ' + fix : '')).trim() : more;
+      var rawShow = MS(changed ? (head + (more ? '\n' + more : '') + (fix ? '\n고치는 법: ' + fix : '')).trim() : more);
       var card = h('div', { class: 'bad q ' + (cannot ? 'unsure' : 'blocked'), 'data-chat': 'block', 'data-block-kind': cannot ? 'cannot_check' : 'blocked' });
       card.appendChild(h('span', { class: 'tagx ' + (cannot ? 'unk' : 'fail'), text: cannot ? '? 확인 못 함' : '✕ 막힘' }));
       card.appendChild(h('b', { class: 'bt', text: (cannot ? '검사를 못 해서 멈췄어 · ' : '하네스 검사가 막았어 · ') + name }));
@@ -1347,7 +1349,7 @@
               onClick: function () { sendFollow('검사를 못 해서 멈춘 일을 다시 시도해 줘: ' + head + (fix ? '\n고치는 법: ' + fix : '')); } }) : null,
            h('button', { type: 'button', class: 'pill line', 'data-block-admin': '1', text: '관리자에게 알리기',
               onClick: function () {
-                var msg = '[하네스 검사 못 함] ' + name + '\n' + text + (s.cwd ? '\n폴더: ' + s.cwd : '');
+                var msg = '[하네스 검사 못 함] ' + name + '\n' + MS(text) + (s.cwd ? '\n폴더: ' + s.cwd : '');  // 메신저로 나가는 글이라 비밀 값을 가린다(#827)
                 var done = function (ok) { chatOpen['n' + String(c.t)] = ok ? '보낼 내용을 복사했어. 팀 메신저에 붙여 넣어 관리자에게 알려 줘.' : '복사하지 못했어. 위 문구를 직접 골라 복사해 줘.'; paintMsgs(cur()); };
                 try { navigator.clipboard.writeText(msg).then(function () { done(true); }, function () { done(false); }); } catch (e) { done(false); }
               } })]
@@ -1563,8 +1565,8 @@
     function recentChat() {
       var items = (Array.isArray(sessData().chat) ? sessData().chat : []).filter(function (c) { return c && (c.role === 'me' || c.role === 'ai') && String(c.text || '').trim(); });
       return items.slice(-CHAT_SHOWN).map(function (c) {
-        if (c.role === 'me') return h('div', { class: 'me', 'data-chat': 'me', text: window.BHLogic.hideSkillLine(c.text) });
-        var text = String(c.text), long = text.split('\n').length > 28 || text.length > 2200;
+        if (c.role === 'me') return h('div', { class: 'me', 'data-chat': 'me', text: MS(window.BHLogic.hideSkillLine(c.text)) });
+        var text = MS(c.text), long = text.split('\n').length > 28 || text.length > 2200;
         var body = h('div', { class: 'report-body' + (long ? ' clip' : '') });
         body.appendChild(window.BHMarkdown.render(text));
         return h('div', { class: 'ai', 'data-chat': 'ai' }, h('span', { class: 'eb', text: 'AI' + (c.t ? ' · ' + clock(c.t) : '') }), body);
@@ -1660,13 +1662,13 @@
       card.appendChild(h('b', { class: 'bt', text: req.title || (irrev && req.riskNote ? req.riskNote : 'Claude Code가 ' + tool + ' 도구를 쓰려고 해. 허락할까?') }));
       // 시안 17: 하네스 안내 줄은 강조 없이 연한 보통 글. 그 밖의 경고(req.risk 글)는 예전처럼 강조한다.
       if (risk) card.appendChild(h('span', { class: irrev ? 'muted-line' : 'warn-line', text: typeof risk === 'string' ? risk : (risk.text || risk.message || '') }));
-      if (input && input.description) card.appendChild(h('span', { class: 'sm', text: str(input.description) }));
-      if (f && input && input[f[1]] != null && tool !== 'Bash') card.appendChild(h('span', { class: 'sm' }, f[0] + ': ', h('b', { text: str(input[f[1]]) })));
+      if (input && input.description) card.appendChild(h('span', { class: 'sm', text: MS(str(input.description)) }));
+      if (f && input && input[f[1]] != null && tool !== 'Bash') card.appendChild(h('span', { class: 'sm' }, f[0] + ': ', h('b', { text: MS(str(input[f[1]])) })));
       if (input && input.dangerouslyDisableSandbox) card.appendChild(h('span', { class: 'warn-line', text: '샌드박스를 끄고 실행해(dangerouslyDisableSandbox)' }));
       if (input && input.run_in_background) card.appendChild(h('span', { class: 'sm', text: '백그라운드로 실행해(run_in_background)' }));
 
       var rows = h('dl', { class: 'rows' });
-      function row(k, v, mono, scroll) { if (v == null || v === '') return; rows.appendChild(h('dt', { text: k })); rows.appendChild(h('dd', { class: (mono ? 'mono' : '') + (scroll ? ' scroll' : ''), tabindex: scroll ? '0' : null, text: v })); }
+      function row(k, v, mono, scroll) { if (v == null || v === '') return; rows.appendChild(h('dt', { text: k })); rows.appendChild(h('dd', { class: (mono ? 'mono' : '') + (scroll ? ' scroll' : ''), tabindex: scroll ? '0' : null, text: MS(v) })); }
       row('도구', tool, true);
       if (f && input && input[f[1]] != null) row(f[0], str(input[f[1]]), true, tool === 'Bash');  // 여러 줄 명령(heredoc)의 줄바꿈을 그대로 보인다
       if (input && input.description) row('설명', str(input.description));
@@ -1682,7 +1684,7 @@
       /* 도구 이름·요청 번호·입력 전체는 팀원이 몰라도 되는 기술 정보라 한 겹 더 접어 둔다(#794). 무엇을 허락하는지는 위 "자세히" 의 명령·파일 줄에 그대로 있다. */
       var tech = h('details', { class: 'more', 'data-tech-fold': '1' }, h('summary', { text: '기술 정보' }), kv);
       tech.appendChild(h('h2', { class: 'label', text: '도구에 넘기는 입력 전체' }));
-      tech.appendChild(h('pre', { class: 'box scroll', tabindex: '0', 'aria-label': '도구 입력 전체', text: JSON.stringify(input, null, 2) }));
+      tech.appendChild(h('pre', { class: 'box scroll', tabindex: '0', 'aria-label': '도구 입력 전체', text: MS(JSON.stringify(input, null, 2)) }));
       det.appendChild(tech);
       card.appendChild(det);
 
@@ -1691,9 +1693,9 @@
         var sugg = Array.isArray(req.suggestionText) ? req.suggestionText : [];
         if (canSess) card.appendChild(h('div', { class: 'sugg', role: 'group', 'aria-label': '다시 묻지 않기로 추가되는 규칙' },
           h('p', { class: 'sugg-h', text: '"허용하고 이 세션에서 다시 묻지 않기"를 누르면 다음 규칙이 추가됩니다' }),
-          sugg.length ? h('ul', { class: 'sugg-l' }, sugg.map(function (x) { return h('li', { class: 'mono', text: x }); }))
+          sugg.length ? h('ul', { class: 'sugg-l' }, sugg.map(function (x) { return h('li', { class: 'mono', text: MS(x) }); }))
             : h('p', { class: 'sub', text: '규칙 내용을 읽지 못했어. 위 입력 전체를 확인해.' }),
-          req.suggestions ? h('pre', { class: 'box scroll', tabindex: '0', text: JSON.stringify(req.suggestions, null, 2) }) : null));
+          req.suggestions ? h('pre', { class: 'box scroll', tabindex: '0', text: MS(JSON.stringify(req.suggestions, null, 2)) }) : null));
         // 시안엔 이유 입력칸이 없어 접어 둔다(기능은 남김). 적은 이유가 있으면 펼친 채로 둔다.
         card.appendChild(h('details', { class: 'more', 'data-why-fold': '1', open: !!why },
           h('summary', { text: '이유 적기(선택)' }),
@@ -2125,7 +2127,7 @@
       previewTimer = setTimeout(function () {
         var am = answerMap();
         api('GET', '/api/new/' + encodeURIComponent(aid) + '/preview' + qs({ picked: pickedAll(), note: draft.note.trim(), flow: effectiveFlow(), extraAnswers: Object.keys(am).length ? JSON.stringify(am) : '' })).then(function (d) {
-          previewText = typeof d === 'string' ? d : (d && (d.text || d.message || d.preview)) || '';
+          previewText = MS(typeof d === 'string' ? d : (d && (d.text || d.message || d.preview)) || '');
           var pre = root.querySelector('[data-preview]'); if (pre) pre.textContent = previewText || '(내용이 없습니다)';
         }, function (e) { var pre = root.querySelector('[data-preview]'); if (pre) pre.textContent = '미리보기를 불러오지 못했습니다: ' + e.message; });
       }, 300);

@@ -509,3 +509,35 @@ console.log('ok');
 """
     out = subprocess.run([NODE, "-e", script, "--", str(STATIC)], capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert out.returncode == 0 and "ok" in out.stdout, out.stderr + out.stdout
+
+
+# ---- 비밀 값 가리기(#827): 서버 mask_secrets 와 화면 BHLogic.maskSecrets 가 같은 결과 ----
+_MASK_SAMPLES = [
+    "client_secret=abcd1234efgh", '{"password": "abc123XYZ"}', "'api_key': 'sk-abcdefghijklmnopqrstuvwx'",
+    "sk-proj-abcdefghijklmnopqrstuvwx", "ghp_" + "a" * 30, "AKIA" + "ABCDEFGHIJKLMNOP", "password: letmein",
+    'password: "my secret pass"', "PASSWORD=Zz9", "client_secret = 'a b c'", "github_pat_" + "A" * 30,
+    "xoxb-1234567890-abcdef", "db_password: hunter2 연결 실패", "Authorization: Bearer abcdefghijklmnopqrstuvwx",
+    "https://user:pa55word@example.com/repo.git", "ATC 우선순위 1: 금지된 API 사용\nclient_secret=abcd1234efgh\n끝",
+    # 가리면 안 되는 글
+    "password 정책을 바꿨다", "토큰 만료 시간이 짧다", "token: ••••••••", "api_key=<키>", "secret=(생략)", "일반 문장이야.",
+]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_mask_secrets_same_on_server_and_screen_and_masked_text_is_not_a_secret():
+    script = r"""
+const path = require('path');
+const L = require(path.join(process.argv[1], 'flow-logic.js'));
+const samples = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+process.stdout.write(JSON.stringify(samples.map(L.maskSecrets)));
+"""
+    out = subprocess.run([NODE, "-e", script, str(STATIC)], input=json.dumps(_MASK_SAMPLES), capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert out.returncode == 0, out.stderr
+    screen = json.loads(out.stdout)
+    server = [trouble.mask_secrets(s) for s in _MASK_SAMPLES]
+    assert screen == server  # 두 쪽 규칙이 어긋나지 않는다
+    for raw, masked in zip(_MASK_SAMPLES, server):
+        assert not trouble.scan_secrets({"symptom": masked}), (raw, masked)  # 가린 글은 저장할 수 있다
+    assert server[0] == "client_secret=" + trouble.MASK and "abcd1234efgh" not in server[15] and "pa55word" not in server[14]
+    for keep in _MASK_SAMPLES[16:]:
+        assert trouble.mask_secrets(keep) == keep, keep  # 값이 없는 말·이미 가린 값·자리표시는 그대로
