@@ -97,6 +97,9 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
                 return _unknown("origin/main 의 SRS 를 읽지 못했어.")
             for n, row in _rows(text, REQ_ROW_RE):
                 entry(n)["srs"] = {"title": _pick(row, "Title", "요구사항"), "next": _pick(row, "다음 단계"), "status": _pick(row, "Status", "상태")}
+                # RICEFW ID 칸이 가리키는 DEV 번호도 요구사항이 있는 번호다(PR 검사 spec-ready 와 같다, #837)
+                for m in re.finditer(r"DEV-0*(\d+)", row.get("Development RICEFW ID", ""), re.IGNORECASE):
+                    entry(int(m.group(1)))["req_by_ricefw"] = True
         elif line.startswith("docs/spec/"):
             m = SPEC_NAME_RE.search(line)
             if m:
@@ -108,10 +111,11 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
             for n, row in _rows(text, DEV_ROW_RE):
                 entry(n).setdefault("ledger", {"title": _pick(row, "내용"), "spec": _pick(row, "Spec"), "status": _pick(row, "상태")})
 
-    spec_ready, setup, standard, need, items = 0, 0, 0, [], []
+    spec_ready, setup, standard, need, no_req, items = 0, 0, 0, [], [], []
     for n in sorted(nums):
         e = nums[n]
         srs, ledger, has_spec = e.get("srs"), e.get("ledger"), "spec" in e
+        has_req = bool(srs) or bool(e.get("req_by_ricefw"))
         step = srs["next"].strip() if srs else ""
         is_standard = step == STANDARD
         # 설정·표준 갈래의 기준은 SRS 다음 단계다. 옛 원장의 Spec 칸 `설정` 도 설정 건으로 읽는다(PR 검사 spec-ready 와 같다, #718).
@@ -121,18 +125,22 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
         is_dev = not is_setup and ((srs and srs["next"].strip() == DEV_NEXT) or (not srs and bool(ledger)))
         inactive = (bool(srs) and srs["status"].strip().casefold() in INACTIVE_STATUS) or (bool(ledger) and ledger["status"].strip() == DONE_LEDGER)
         label = f"REQ-{n:03d}({_title(srs['title'])})" if srs else f"DEV-{n:03d}({_title(ledger['title']) if ledger else TITLE_UNKNOWN})"
-        item = {"number": n, "label": label, "spec": has_spec, "setup": is_setup, "standard": is_standard, "dev": is_dev,
+        item = {"number": n, "label": label, "spec": has_spec, "req": has_req, "setup": is_setup, "standard": is_standard, "dev": is_dev,
                 "next": srs["next"] if srs else ""}
         items.append(item)
         if is_setup:
             setup += 1
             standard += is_standard
+        elif (is_dev or has_spec) and not has_req:
+            # 요구사항(SRS)이 없는 개발 건: Spec 이 있어도 개발할 수 없고 Spec 을 쓸 차례도 아니다. 먼저 요구사항을 올려야 한다(#837).
+            if not inactive:
+                no_req.append({"number": n, "label": label})
         elif is_dev and has_spec:
             spec_ready += 1
         elif is_dev and not inactive:
             need.append({"number": n, "label": label})
     return {"state": "yes", "reason": "", "specReady": spec_ready, "setup": setup, "standard": standard, "needSpec": need[:NEED_LIMIT],
-            "needSpecCount": len(need), "items": items}
+            "needSpecCount": len(need), "noReq": no_req[:NEED_LIMIT], "noReqCount": len(no_req), "items": items}
 
 
 def srs_status(run: gitstate.Runner, cwd: str) -> dict:

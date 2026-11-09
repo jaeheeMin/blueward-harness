@@ -746,3 +746,22 @@ def test_review_reason_gh_실패는_2(tmp_path, monkeypatch, capsys):
     assert code == 2 and json.loads(out)["status"] == "error"
     code, out = run(monkeypatch, capsys, work, FakeGh(), ["review-reason", "--dev", "abc"])
     assert code == 2
+
+
+def test_list_는_SRS_표에_요구사항이_있는_번호에만_req_키를_담는다(tmp_path, monkeypatch, capsys):
+    """start 의 REQ 선행 멈춤(#837)이 쓰는 재료. 원장·Spec 만 있고 SRS 표에 없는 번호는 req 키가 없다."""
+    srs = (
+        "# SRS\n\n## 요구사항\n\n| ID | Title | Status | 다음 단계 | Development RICEFW ID |\n|---|---|---|---|---|\n"
+        "| REQ-001 | a | New | 개발 | DEV-001 |\n| REQ-005 | e | New | 개발 | DEV-004 |\n"
+    )
+    work = make_repo(tmp_path, srs=srs)
+    (work / "audit" / "ledger" / "p.md").write_text(LEDGER + "| DEV-002 | b | - | u | 대기 |\n", encoding="utf-8")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-m", "REQ 없는 DEV-002")
+    _git(work, "push", "origin", "main")
+    code, out = run(monkeypatch, capsys, work, FakeGh(), ["list"])
+    devs = {d["number"]: d for d in json.loads(out)["devs"]}
+    assert code == 0
+    assert devs["DEV-001"]["req"] is True and devs["DEV-005"]["req"] is True
+    assert devs["DEV-004"]["req"] is True  # RICEFW ID 칸이 가리키는 DEV
+    assert "req" not in devs["DEV-002"] and devs["DEV-002"]["spec"].startswith("docs/spec/DEV-002")  # Spec 은 있으나 REQ 가 없다

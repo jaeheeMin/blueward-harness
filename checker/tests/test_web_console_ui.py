@@ -604,6 +604,13 @@ const cases = {
     assert.strictEqual(L.kindHint('spec', some), null);
     assert.strictEqual(L.kindHint('config', some), null);
     assert.strictEqual(L.devBlock('dev', some), null);
+    // 요구사항(SRS)이 없는 건은 Spec 이 있어도 세지 않고 따로 알린다(#837)
+    const noReq = L.devReadyView({ state: 'yes', specReady: 0, setup: 0, needSpec: [], needSpecCount: 0, noReq: [{ number: 9, label: 'DEV-009(x)' }], noReqCount: 1 });
+    assert.strictEqual(L.kindHint('dev', noReq).text, 'Spec 있는 건 없음 — 요구사항 없는 건 1개, 요구사항 먼저');
+    assert.ok(L.devBlock('dev', noReq).includes('요구사항(SRS)에 없는 개발은 시작할 수 없어'));
+    const mixed = L.devReadyView({ state: 'yes', specReady: 2, setup: 0, needSpec: [], needSpecCount: 0, noReqCount: 1 });
+    assert.strictEqual(L.kindHint('dev', mixed).text, 'Spec 있는 건 2개 · 요구사항 없는 건 1개(요구사항 먼저)');
+    assert.strictEqual(L.devBlock('dev', mixed), null);
   },
   standard_kind_hint_and_srs_status_cell() {
     // 숫자 띠·큰 순서 알약은 단계 이름 끝 괄호 설명을 뗀 짧은 이름(시안 G-09·12), 전체는 title
