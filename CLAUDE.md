@@ -88,6 +88,7 @@
 | `/harness:manual` | 사용자 매뉴얼 작업본 쓰기·고치기, 화면 자동 캡처, 고객 양식 pptx 산출 |
 | `/harness:cts` | CTS 관리대장 작업본에 요청 건·Error 내역 더하기, 트랜스포트(읽기 전용)에서 요청 표 채우기, 고객 양식 xlsx 산출 |
 | `/harness:role` | User Role Mapping 작업본에 Role·메뉴 배정 쓰기, Spec 카탈로그 대조, 고객 양식 xlsx 산출(사람 행은 비움) |
+| `/harness:unittest` | 단위테스트 List 작업본(LoB 별 Test Case·단계) 쓰기, SAP Best Practices 공식 테스트 스크립트로 초안, 고객 양식 xlsx 산출(사람 칸은 비움) |
 | `/harness:sync` | GitHub 의 최신 상태를 지금 로컬 브랜치로 당겨받기 |
 | `/harness:prs` | 내 열린 PR 의 상태와 병합 순서 확인(세션 시작에도 알린다) |
 | `/harness:approvals` | 내 승인을 기다리는 PR 보기(승인은 GitHub 에서 사람이) |
