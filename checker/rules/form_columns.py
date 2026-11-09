@@ -14,6 +14,8 @@ params (한글 키, 영문 키도 받는다):
                         (작업본) 작업본 파일 이름이 정하는 양식만 쓰게 한다(#577). `{패턴: <정규식, 이름 그룹>, 양식: <틀>}`.
                         예 `{패턴: '^CTS관리대장_(?P<종류>.+)[.]md$', 양식: 'CTS_관리대장_{종류}'}` — 다른 양식의 소절이 있거나
                         파일 이름이 패턴에 맞지 않으면 위반이다. `--form` 으로 고른 산출이 다른 양식 소절을 조용히 빼는 것을 막는다.
+  ID_패턴 / id_pattern  (작업본) 반복 견본 시트의 소절 ID(`### <양식> · <견본> · <ID>` 의 ID, 시트 이름이 된다)가 이 정규식 전체와
+                        맞아야 한다(#831). 예 `'^[A-Z]{2,3}(\\.\\d{2}){3,4}$'`. 시트 이름 규칙(31자 등)은 이와 별개로 늘 본다.
 
 `원본: SRS` — `## 요구사항` 표 머리글과 `### REQ-n` 아래 `#### <소제목>` 을 본다.
 - 허용 표 열 = `ID` + 지도 `열` + 지도 `md_전용` + 엔진 기본 md 전용 `다음 단계`.
@@ -45,7 +47,7 @@ from checker.rules.md_table import read_section_table
 
 _ALLOWED = {
     "원본", "source", "지도_폴더", "maps", "양식", "form", "기본_소제목", "details",
-    "파일명_양식", "form_from_name",
+    "파일명_양식", "form_from_name", "ID_패턴", "id_pattern",
 }
 DEFAULT_MAPS = "../templates/forms"
 NEXT_FIX_TEMPLATE = (
@@ -75,7 +77,7 @@ def _check_keys(params: dict) -> None:
     if stray:
         raise ConfigError(
             f"form_columns 규칙에 모르는 키가 있다: {', '.join(map(str, stray))} "
-            f"(쓸 수 있는 키: 원본, 지도_폴더, 양식, 기본_소제목, 파일명_양식)"
+            f"(쓸 수 있는 키: 원본, 지도_폴더, 양식, 기본_소제목, 파일명_양식, ID_패턴)"
         )
 
 
@@ -189,6 +191,17 @@ def _form_from_name(params: dict, name: str) -> tuple[str | None, list[Violation
         raise ConfigError(f"form_columns 규칙의 '파일명_양식' 틀이 패턴에 없는 이름 그룹을 쓴다: {exc}") from exc
 
 
+def _id_pattern(params: dict) -> re.Pattern | None:
+    """`ID_패턴` 이 있으면 컴파일한 정규식(반복 견본 소절 ID 의 형식). 키가 없으면 None."""
+    raw = _get(params, "ID_패턴", "id_pattern")
+    if raw is None:
+        return None
+    try:
+        return re.compile(str(raw))
+    except re.error as exc:
+        raise ConfigError(f"form_columns 규칙의 'ID_패턴' 이 정규식이 아니다: {exc}") from exc
+
+
 # ---------------------------------------------------------------- SRS
 
 def _srs_tables(params: dict) -> tuple[str, list[dict]] | None:
@@ -277,6 +290,7 @@ def _check_srs(text: str, params: dict) -> list[Violation]:
 
 def _check_spec(text: str, params: dict, name: str = "") -> list[Violation]:
     expected, out = _form_from_name(params, name)
+    id_pat = _id_pattern(params)
     if not re.search(r"^##\s+양식 항목\s*$", text, re.M):
         return out  # 양식을 쓰지 않는 Spec
     try:
@@ -338,6 +352,10 @@ def _check_spec(text: str, params: dict, name: str = "") -> list[Violation]:
                 why = sheet_repeat.name_problem(sid)
                 if why:
                     out.append(_v("엑셀 시트 이름 규칙", sid, f"{form} · {sname}: {why}. 다음: ID 를 고친다."))
+                    continue
+                if id_pat is not None and not id_pat.fullmatch(sid):
+                    out.append(_v(id_pat.pattern, sid,
+                                  f"{form} · {sname}: ID {sid!r} 가 규칙의 ID 형식(패턴 {id_pat.pattern})과 다르다. 다음: ID 를 고친다."))
                     continue
             if smap is None:
                 out.append(_v(", ".join(map_sheets), sname,

@@ -541,3 +541,43 @@ def test_반복이_아닌_시트의_견본_ID_소절은_위반이다(repo, capsy
     code, out = _spec_check(repo, capsys, REPEAT_SPEC)
     assert code == EXIT_VIOLATION
     assert _violations(out)[0]["actual"] == "Info · FI.01.03.02.02"
+
+
+# ---------------------------------------------------------------- 반복 견본 소절의 ID 형식 (#831: `ID_패턴`)
+
+def _id_rule(repo: Path, pattern: str = r"^[A-Z]{2,3}(\.\d{2}){3,4}$") -> None:
+    _with_map(repo, REPEAT_MAP, "시험양식.yaml")
+    (repo / "rules" / "idpat.yaml").write_text(
+        f"템플릿: ../templates/harness/spec.md\n관할: \"docs/idpat/*.md\"\n규칙:\n  - 종류: form_columns\n    원본: 작업본\n    ID_패턴: '{pattern}'\n", encoding="utf-8")
+
+
+def _id_check(repo: Path, capsys, sid: str):
+    return _check(repo, capsys, _spec(REPEAT_SPEC.replace("FI.01.03.02.02", sid)), "docs/idpat/x.md")
+
+
+@pytest.mark.parametrize("sid", ["FI.01.03.01", "FI.01.03.02.02"])
+def test_ID_패턴에_맞는_반복_소절은_통과한다(repo, capsys, sid):
+    _id_rule(repo)
+    code, out = _id_check(repo, capsys, sid)
+    assert code == EXIT_PASS, out
+
+
+@pytest.mark.parametrize("sid", ["fi.01.03.01", "FI.01.03", "FI.1.3.1", "TC-1"])
+def test_ID_패턴과_다른_반복_소절은_위반이다(repo, capsys, sid):
+    _id_rule(repo)
+    code, out = _id_check(repo, capsys, sid)
+    assert code == EXIT_VIOLATION
+    [v] = _violations(out)
+    assert v["actual"] == sid and "ID 형식" in v["message"]
+
+
+def test_ID_패턴이_정규식이_아니면_검사_불능이다(repo, capsys):
+    _id_rule(repo, "(")
+    code, out = _id_check(repo, capsys, "FI.01.03.01")
+    assert code == EXIT_CONFIG_ERROR
+
+
+def test_ID_패턴이_없으면_ID_형식을_보지_않는다(repo, capsys):
+    _with_map(repo, REPEAT_MAP, "시험양식.yaml")
+    code, out = _spec_check(repo, capsys, REPEAT_SPEC.replace("FI.01.03.02.02", "아무이름"))
+    assert code == EXIT_PASS, out

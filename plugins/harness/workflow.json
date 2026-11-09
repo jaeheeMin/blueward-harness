@@ -205,6 +205,8 @@
      "basis": [{"file": "skills/role/SKILL.md", "quote": "User Role Mapping(사용자권한관리) 작업본에 Role 목록과 Role 별 Launchpad 메뉴 배정을 정리하고"}]},
     {"id": "cts", "name": "CTS 관리대장", "kind": "skill", "skill": "cts",
      "basis": [{"file": "skills/cts/SKILL.md", "quote": "CTS(Change and Transport System) 관리대장(Configuration·CBO)에 요청 건이나 Error 내역을 더하고"}]},
+    {"id": "unittest", "name": "단위테스트 List", "kind": "skill", "skill": "unittest",
+     "basis": [{"file": "skills/unittest/SKILL.md", "quote": "LoB 별 단위테스트 List(고객 양식 xlsx) 작업본을 쓰고 산출할 때 쓴다."}]},
     {"id": "manual", "name": "사용자 매뉴얼", "kind": "skill", "skill": "manual",
      "basis": [{"file": "skills/manual/SKILL.md", "quote": "사용자 매뉴얼(고객 양식 pptx)을 쓰거나 고칠 때"}]},
     {"id": "scaffold", "name": "프로젝트 구조 만들기(관리자)", "kind": "skill", "skill": "scaffold", "requires": "project-not-ready",

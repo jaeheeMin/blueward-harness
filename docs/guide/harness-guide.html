@@ -304,6 +304,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
           <button class="tab" role="tab" data-tab="manual">사용자 매뉴얼 만들기<small>/harness:manual</small></button>
           <button class="tab" role="tab" data-tab="cts">CTS 관리대장 쓰기<small>/harness:cts</small></button>
           <button class="tab" role="tab" data-tab="role">Role 매핑 쓰기<small>/harness:role</small></button>
+          <button class="tab" role="tab" data-tab="unittest">단위테스트 List 쓰기<small>/harness:unittest</small></button>
         </div>
       </div>
       <div>
@@ -1232,7 +1233,68 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
     <div class="callout ok"><span class="k">처음 쓸 때</span><div>Project Repository 에 <code>rules/role.yaml</code>, <code>rules/role-output.yaml</code>, <code>templates/harness/role.md</code> 가 없으면 스킬이 복사할 파일을 알려 줘. 규칙을 바꾸는 PR 은 승인자의 Approve 가 필요해.</div></div>
   </div>
 
-  <div class="next"><button data-go="cts">← CTS 관리대장 쓰기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
+  <div class="next"><button data-go="cts">← CTS 관리대장 쓰기</button><button data-go="unittest">다음: 단위테스트 List 쓰기 →</button></div>
+</article>
+
+<!-- ================= 단위테스트 List ================= -->
+<article class="panel" data-panel="unittest" role="tabpanel" hidden>
+  <header class="panel-head">
+    <div class="eyebrow">문서 작업 · /harness:unittest</div>
+    <h2>단위테스트 List 쓰기</h2>
+    <p class="lead">업무 영역(LoB(Line of Business)) 별로 "무엇을 어떤 순서로 시험할지" 적는 양식이야. Test Case 목록과 Test Case 마다 단계 시트를 작업본(마크다운)에 쓰고, 고객사 양식(엑셀)으로 뽑아. 개발 건 하나의 테스트가 아니라 LoB 전체 시나리오야.</p>
+  </header>
+
+  <div class="when">
+    <div><div class="lbl">이럴 때</div>LoB 의 단위테스트 시나리오를 처음 짜야 할 때. 고객사에 단위테스트 List 엑셀을 줘야 할 때.</div>
+    <div><div class="lbl">이렇게 말해</div><div class="say"><span>단위테스트 만들어줘</span><span>테스트 시나리오 만들어줘</span><span>단위테스트 엑셀로 뽑아줘</span><span class="cmd">/harness:unittest</span></div></div>
+  </div>
+
+  <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
+    <p>시험 시간표와 시험지 묶음 같은 거야. 시간표(List)에 어떤 시험을 보는지 한 줄씩 적고, 시험마다 시험지(Test Case 시트)가 한 장씩 붙어. 시험지 이름은 시험 번호(ID)야.</p>
+    <p>시험지 초안은 SAP 가 공식으로 내놓은 테스트 스크립트(Best Practices, 스코프 아이템별)에서만 가져와. 그 문서에 없는 단계는 짐작해서 채우지 않고 비워 둔 채 "확인 필요" 라고 적어 둬. 누가 언제 시험하는지, 결과가 어땠는지는 사람 몫이라 비워서 내보내.</p>
+  </div></div>
+
+  <section class="diagram">
+    <div class="flow">
+      <div class="node"><b>범위 받기</b><span>스코프 아이템 목록</span></div><div class="arrow"></div>
+      <div class="node hl"><b>공식 스크립트 읽기</b><span>SAP Best Practices</span></div><div class="arrow"></div>
+      <div class="node hl"><b>초안 → 확인</b><span>docs/unittest/&lt;LoB&gt;.md</span></div><div class="arrow"></div>
+      <div class="node hl"><b>버전 올리기</b><span>버전: 0.1 → 0.2</span></div><div class="arrow"></div>
+      <div class="node ok"><b>xlsx 산출</b><span>BW_단위테스트 List_&lt;LoB&gt;_v0.2.xlsx</span></div>
+    </div>
+    <div class="cap">양식 지도(<code>templates/forms/단위테스트 List.yaml</code>)가 없으면 만들지 않고 멈춰. 문서를 읽지 못한 스코프 아이템은 "확인 불능" 으로 알리고 초안을 만들지 않아.</div>
+  </section>
+
+  <div class="cols">
+    <section class="box">
+      <h3>내가 할 일</h3>
+      <ul class="todo">
+        <li>LoB 이름과 이 LoB 에서 시험할 스코프 아이템 목록을 알려 줘. 어떤 아이템이 프로젝트 범위인지는 스킬이 추측하지 않아</li>
+        <li>계층 번호(Process·Sub Process·Task 번호) 체계가 있으면 알려 줘. 없으면 안을 보여 주니 확인해</li>
+        <li>초안(Test Case 와 단계)을 보고 고칠 곳을 알려 줘. 안 할 단계는 <code>Test 대상 여부</code> 를 <code>No</code> 로 바꿔</li>
+        <li><code>확인 필요</code> 로 남은 칸은 공식 문서에서 못 찾은 것이니 네가 채우거나 문서를 알려 줘</li>
+        <li>엑셀이 나오면 열어서 계층 칸·시트 이름·서식을 눈으로 확인해</li>
+      </ul>
+    </section>
+    <section class="box">
+      <h3>만들어지는 것</h3>
+      <ul class="made">
+        <li><code>docs/unittest/&lt;LoB&gt;.md</code> — 작업본 (LoB 마다 파일 하나)</li>
+        <li><code>docs/unittest/BW_단위테스트 List_&lt;LoB&gt;_v&lt;버전&gt;.xlsx</code> — 산출한 엑셀 (판마다 파일 하나, 시트 이름이 Test Case ID)</li>
+      </ul>
+      <p class="small" style="margin-top:12px">작업본 머리에 <code>버전: 0.1</code> 과 <code>LoB: Production</code> 이 있어. Test Case ID 는 <code>FI.01.03.01</code> 처럼 모듈로 시작하고 두 자리 번호가 이어지는 모양(Task Variant 면 한 자리 더)이어야 하고, 아니면 저장할 때와 PR 이 거절해. <code>근거</code> 열에 스코프 아이템과 문서 출처를 적어 두는데, 이 열은 엑셀에 안 들어가.</p>
+    </section>
+  </div>
+
+  <div class="callouts">
+    <div class="callout warn"><span class="k">사람 칸은 비어 있어</span><div>담당자(KU·컨설턴트·연계 담당자)·Test 담당자·예정일·완료일·상태·Test 결과·이슈, Document Control 의 작성자·결재는 비워서 나가고, 알려 줘도 작업본에 적지 않아. 컨설턴트가 엑셀에서 채워.</div></div>
+    <div class="callout warn"><span class="k">짝은 네가 챙겨</span><div>List 의 Test Case ID 마다 단계 시트 소절이 하나씩 있어야 해. 이 짝은 어느 검사도 안 봐서, 스킬이 산출 전에 알려 주고 사람이 확인해. 계층 칸은 처음 한 번만 적고 이어지는 줄은 비워(양식 1행의 개수 세기 때문).</div></div>
+    <div class="callout warn"><span class="k">버전 올리기</span><div>한 번 main 에 병합된 엑셀은 같은 이름으로 다시 만들 수 없어. 새로 뽑으려면 작업본 머리의 <code>버전:</code> 을 0.1 올려. 이전 판 엑셀은 지우지 않고 남아.</div></div>
+    <div class="callout warn"><span class="k">산출 ≠ 통과</span><div>엑셀이 나왔다고 문서 검사를 통과한 건 아니야. 파일 이름은 PR 의 doc-guard 단계가 <code>rules/unittest-output.yaml</code> 로 검사해. 근거가 공식 문서와 맞는지는 아무 검사도 안 봐서 사람이 확인해.</div></div>
+    <div class="callout ok"><span class="k">처음 쓸 때</span><div>Project Repository 에 <code>rules/unittest.yaml</code>, <code>rules/unittest-output.yaml</code>, <code>templates/harness/unittest.md</code> 가 없으면 스킬이 복사할 파일을 알려 줘. 규칙을 바꾸는 PR 은 승인자의 Approve 가 필요해.</div></div>
+  </div>
+
+  <div class="next"><button data-go="role">← Role 매핑 쓰기</button><button data-go="start">다음: 작업 시작하기 →</button></div>
 </article>
 
 
@@ -1318,7 +1380,7 @@ fix/31-broken-link</pre>
     <div class="callout ok"><span class="k">이름 실수</span><div>브랜치 이름을 잘못 지었으면 새로 만들지 말고 <code>git branch -m</code> 으로 고쳐.</div></div>
   </div>
 
-  <div class="next"><button data-go="role">← Role 매핑 쓰기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
+  <div class="next"><button data-go="unittest">← 단위테스트 List 쓰기</button><button data-go="sync">다음: 최신으로 맞추기 →</button></div>
 </article>
 
 <!-- ================= sync ================= -->

@@ -3256,7 +3256,7 @@ FAKE_ANALYSIS_FLOW = Path(__file__).with_name("fake_claude_analysis_flow.py")
 FLOWS_FILE = PLUGIN / "workflow.json"  # 작업 순서의 정본은 플러그인 안의 workflow.json 이다(#599)
 REAL_SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md"))
 FLOW_IDS = ["srs", "spec", "dev", "config", "standard", "fix"]
-TOOL_IDS = ["version", "sync", "update", "handoff", "wrapup", "prs", "reload", "approvals", "atc", "role", "cts", "manual", "scaffold", "open"]
+TOOL_IDS = ["version", "sync", "update", "handoff", "wrapup", "prs", "reload", "approvals", "atc", "role", "cts", "unittest", "manual", "scaffold", "open"]
 BRANCH = "docs/1-x"
 PR_URL = "https://github.com/o/r/pull/7"
 GIT_INFO = {"isRepo": True, "repo": "r", "branch": BRANCH, "changedFiles": [], "skill": None, "unknown": False, "ahead": 0}
@@ -4136,7 +4136,7 @@ def test_out_of_order_skill_is_409_but_tools_are_always_allowed(tmp_path, monkey
         assert status == 409 and "SRS 쓰기" in body["error"]
         assert run("spec") == 409 and run("start") == 409
         assert run("srs") == 202
-        for tool in ("version", "sync", "update", "handoff", "wrapup", "prs", "approvals", "atc", "role", "cts", "manual", "scaffold"):
+        for tool in ("version", "sync", "update", "handoff", "wrapup", "prs", "approvals", "atc", "role", "cts", "unittest", "manual", "scaffold"):
             assert run(tool) == 202, tool  # 도구는 갈래와 상관없이 언제나 된다
         assert run("nope") == 404
         assert c.call("PUT", "/api/sessions/o1/skills/deliver/reservation", {})[0] == 409  # 예약도 같은 순서를 따른다
