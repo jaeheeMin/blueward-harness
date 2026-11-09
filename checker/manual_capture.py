@@ -66,7 +66,9 @@ BOX_BORDER = 3
 BADGE_R = 13
 MAX_MARKS = 99
 KINDS = ("필터", "버튼", "열", "그 밖")
-SCREEN_KEYS = {"이름", "앱", "준비", "표시", "배율"}
+SCREEN_KEYS = {"이름", "앱", "준비", "표시", "배율", "확인"}
+CHECK_KEYS = {"열", "행", "값", "글자"}
+MAX_ACTUAL = 5  # 확인이 다를 때 실제 값을 내는 행 수(나머지는 개수만)
 MIN_SCALE = 0.5
 MARK_KEYS = {"종류", "이름", "index", "설명"}
 STEP_KEYS = {"입력", "값", "누르기", "선택", "팝업", "행"}
@@ -98,12 +100,21 @@ class Step:
 
 
 @dataclass(frozen=True)
+class Check:
+    kind: str  # 열 | 글자
+    target: str  # 열 이름 또는 화면에 있어야 할 글자
+    expected: str  # 열: 기대 값(글자로 비교), 글자: target 과 같다
+    row: int | None = None  # 열만: 이 행(보이는 본문 1부터) 한 칸만. 없으면 보이는 모든 행
+
+
+@dataclass(frozen=True)
 class Screen:
     name: str
     app: str
     steps: tuple[Step, ...]
     marks: tuple[Mark, ...]
     scale: float | None = None  # 배율(0.5~1.0). 있으면 찍기 전에 CSS 화면을 1/배율 로 넓히고 그림 크기는 그대로 둔다
+    checks: tuple[Check, ...] = ()  # 확인(#743). 준비가 끝난 뒤 찍기 직전에 돈다
 
     @property
     def popup(self) -> bool:
@@ -156,7 +167,11 @@ def parse_screens(data: object) -> list[Screen]:
                 if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not MIN_SCALE <= scale <= 1.0:
                     raise ListError(f"{where}: `배율` 은 {MIN_SCALE}~1.0 의 숫자여야 한다(예: 0.9): {scale!r}")
                 scale = float(scale)
-            screens.append(Screen(name, app, steps, marks, scale))
+            raw_checks = raw.get("확인")
+            if raw_checks is not None and not isinstance(raw_checks, list):
+                raise ListError(f"{where}: `확인` 은 목록이어야 한다")
+            checks = tuple(_parse_check(c, f"{where} 확인 {j}") for j, c in enumerate(raw_checks or [], 1))
+            screens.append(Screen(name, app, steps, marks, scale, checks))
         except ListError as e:
             problems.append(str(e))
     if problems:
@@ -188,6 +203,37 @@ def _parse_step(raw: object, where: str) -> Step:
     if action == "선택":
         value = _text(value, f"{where} 값")
     return Step(action, _text(raw[action], f"{where} {action}"), value)
+
+
+def norm_text(s: object) -> str:
+    """페이지 JS 의 trimLabel 과 같은 정규화: 공백 접기, 끝의 공백·`:`·`*` 제거, 앞뒤 공백 제거."""
+    return re.sub(r"[\s:：*]+$", "", re.sub(r"\s+", " ", str(s or ""))).strip()
+
+
+def _parse_check(raw: object, where: str) -> Check:
+    if not isinstance(raw, dict) or set(raw) - CHECK_KEYS:
+        raise ListError(f"{where}: `{{열: 열 이름, 값: 기대 값}}`·`{{열: 열 이름, 행: 번호, 값: 기대 값}}`·`{{글자: 화면에 있어야 할 글자}}` 이어야 한다")
+    if ("열" in raw) == ("글자" in raw):
+        raise ListError(f"{where}: `열`·`글자` 중 하나만 쓴다")
+    if "글자" in raw:
+        if "행" in raw or "값" in raw:
+            raise ListError(f"{where}: `글자` 에는 `행`·`값` 을 쓰지 않는다")
+        text = _text(raw["글자"], f"{where} 글자")
+        if not norm_text(text):
+            raise ListError(f"{where}: 글자가 비어 있다: {text!r}")
+        return Check("글자", norm_text(text), norm_text(text))
+    if "값" not in raw:
+        raise ListError(f"{where}: `열` 에는 `값` 이 필요하다")
+    value = raw["값"]
+    if not isinstance(value, str):
+        raise ListError(f"{where}: `값` 은 따옴표로 감싼 글이어야 한다. 숫자는 따옴표로 감싼다(예: \"0010\" — 따옴표가 없으면 YAML 이 0010 을 8 로, 12:30 을 750 으로 읽는다): {value!r}")
+    expected = norm_text(value)
+    if not expected:
+        raise ListError(f"{where}: `값` 이 비어 있다: {value!r}")
+    row = raw.get("행")
+    if "행" in raw and (not isinstance(row, int) or isinstance(row, bool) or row < 1):
+        raise ListError(f"{where}: `행` 은 1 이상의 정수여야 한다: {row!r}")
+    return Check("열", _text(raw["열"], f"{where} 열"), expected, row)
 
 
 def _parse_mark(raw: object, where: str) -> Mark:
@@ -605,6 +651,7 @@ class Capturer:
     def __init__(self, tab: cdp_client.Tab, base_url: str, ui5: str, timeout: float) -> None:
         self.tab, self.base, self.ui5, self.timeout = tab, base_url, ui5, timeout
         self.scoped = False  # 팝업 단계 뒤 찾는 범위가 팝업 안으로 좁혀져 있다
+        self.checks: list[dict] = []  # 마지막으로 찍은 화면의 확인 결과(capture 가 채운다)
 
     def wait_ready(self, what: str) -> None:
         """준비될 때까지 기다린다(두 번 연속 준비 상태여야 한다). 시간 초과면 Unavailable."""
@@ -928,6 +975,65 @@ class Capturer:
         finally:
             self.set_viewport(None)
 
+    def run_checks(self, screen: Screen) -> list[dict]:
+        """확인 항목마다 맞음·다름·검사 불능을 낸다. 읽지 못한 것을 맞음·다름으로 뭉개지 않는다."""
+        out = []
+        for i, c in enumerate(screen.checks, 1):
+            row: dict = {"번호": i, "종류": c.kind, "대상": c.target}
+            if c.row:
+                row["행"] = c.row
+            row["기대"] = c.expected
+            try:
+                row.update(self._check_one(c))
+            except CdpError as e:
+                row.update({"결과": "검사 불능", "사유": f"화면 값을 읽지 못했다: {e}"})
+            out.append(row)
+        return out
+
+    def _check_one(self, c: Check) -> dict:
+        if c.kind == "글자":
+            r = self.tab.evaluate(f"window.__mc.hasText({json.dumps(c.target, ensure_ascii=False)})")
+            if isinstance(r, dict) and r.get("why") == "scope":
+                return {"결과": "검사 불능", "사유": "팝업(찾는 범위)이 사라져 화면 글자를 읽지 못했다"}
+            if not isinstance(r, dict) or not r.get("ok"):
+                return {"결과": "검사 불능", "사유": f"화면 글자를 읽지 못했다: {r!r}"}
+            if r.get("found"):
+                return {"결과": "맞음"}
+            return {"결과": "다름", "실제": None, "사유": "화면에 보이는 요소 중 이 글자가 든 것이 없다"}
+        name = json.dumps(c.target, ensure_ascii=False)
+        self.tab.evaluate(f"window.__mc.scrollColumn({name}, null)")  # 가로 화면 밖이면 먼저 보이게 한다
+        time.sleep(0.3)
+        r = self.tab.evaluate(f"window.__mc.columnValues({name})")
+        if not isinstance(r, dict):
+            return {"결과": "검사 불능", "사유": f"열 값을 읽지 못했다: {r!r}"}
+        if not r.get("ok"):
+            if r.get("noGrid"):
+                why = "열 머리글에 aria-colindex 가 없거나 표를 찾지 못해 본문 칸을 읽을 수 없다"
+            elif r.get("count", 0) > 1:
+                why = f"열 머리글 {c.target!r} 이 {r['count']}개라 하나로 정하지 못했다"
+            elif self.popin_label(c.target):
+                why = "접힌(pop-in) 열이다 — 표 폭이 모자라 행 아래로 접혀 머리글이 없어 읽을 수 없다. 화면에 `배율:` 을 적어 넓힌다"
+            else:
+                why = f"열 머리글 {c.target!r} 을 찾지 못했다"
+            return {"결과": "검사 불능", "사유": why}
+        rows = r.get("rows") or []
+        if not rows:
+            return {"결과": "검사 불능", "사유": "그 열에 보이는 본문 행이 없다(조회 결과가 없거나 세로로 안 보인다)"}
+        if c.row:
+            if c.row > len(rows):
+                return {"결과": "검사 불능", "사유": f"그 열에 보이는 본문 행이 {len(rows)}개뿐이라 {c.row}번째 칸이 없다(세로로 안 보이는 행은 세지 않는다)"}
+            rows = [rows[c.row - 1]]
+        opaque = [x["row"] for x in rows if x.get("opaque")]
+        if opaque:  # 입력칸·체크박스·아이콘 칸은 글자가 비어 있어도 값이 없다는 뜻이 아니다
+            shown = ", ".join(str(n) for n in opaque[:MAX_ACTUAL]) + (f" 외 {len(opaque) - MAX_ACTUAL}개" if len(opaque) > MAX_ACTUAL else "")
+            return {"결과": "검사 불능", "사유": f"{shown}행 칸이 입력칸·체크박스·아이콘이라 글자로 읽을 수 없다"}
+        bad = [{"행": x["row"], "값": norm_text(x.get("text"))} for x in rows if norm_text(x.get("text")) != c.expected]
+        if c.row:
+            return {"결과": "다름", "실제": bad[0]["값"]} if bad else {"결과": "맞음"}
+        if not bad:
+            return {"결과": "맞음", "읽은 행 수": len(rows)}
+        return {"결과": "다름", "실제": bad[:MAX_ACTUAL], "다른 행 수": len(bad), "읽은 행 수": len(rows)}
+
     def scroll_columns(self, screen: Screen) -> None:
         """`열` 표시들을 가로 스크롤 안에서 보이게 한다. 둘 이상이면 한 번에 넘기고, 한 화면에 안 들어가면 검사 불능(나누기·배율 제안)."""
         cols = [m for m in screen.marks if m.kind == "열"]
@@ -941,6 +1047,7 @@ class Capturer:
             self.tab.evaluate(f"window.__mc.scrollColumn({json.dumps(m.name)}, {json.dumps(m.index)})")
 
     def _capture(self, screen: Screen, cw: int, ch: int) -> tuple[bytes, list[dict], list[dict]]:
+        self.checks = []
         self.navigate(screen.app)
         self.ensure_visible(f"화면 {screen.name!r}")
         try:
@@ -963,6 +1070,7 @@ class Capturer:
         shown = [] if screen.popup else self.tab.evaluate("window.__mc.dialogs()") or []
         if shown:  # 찍기 직전에도 본다 — 대화상자는 준비 단계 뒤 늦게 뜰 수 있다
             raise Unavailable(f"화면 {screen.name!r}: 대화상자가 떠 있다: {shown[0]!r}. 이 상태로는 찍지 않는다(준비 단계·기본값 확인)")
+        self.checks = self.run_checks(screen)  # 값 읽기는 덮개를 그리기 전에, 표시용 열 스크롤 전에 한다
         self.scroll_columns(screen)  # 가로 스크롤 밖 열은 먼저 보이게 한다
         time.sleep(0.2)
         size = self.tab.evaluate("window.__mc.size()")
@@ -1031,10 +1139,15 @@ class Report:
     screens: list[dict] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
 
+    def _check_results(self) -> set[str]:
+        return {c["결과"] for s in self.screens for c in s.get("확인", [])}
+
     def status(self) -> str:
-        if self.problems or any(s["상태"] == "검사 불능" for s in self.screens):
+        if self.problems or any(s["상태"] == "검사 불능" for s in self.screens) or "검사 불능" in self._check_results():
             return "unavailable"
-        return "incomplete" if any(s["상태"] == "미완" for s in self.screens) else "ok"
+        if any(s["상태"] == "미완" for s in self.screens) or "다름" in self._check_results():
+            return "incomplete"
+        return "ok"
 
 
 def run(args: argparse.Namespace) -> tuple[Report, int]:
@@ -1071,7 +1184,7 @@ def run(args: argparse.Namespace) -> tuple[Report, int]:
     if report.problems:
         return report, 2
     if args.check:
-        report.screens = [{"이름": s.name, "상태": "목록 정상", "표시": len(s.marks), "준비": len(s.steps)} for s in wanted]
+        report.screens = [{"이름": s.name, "상태": "목록 정상", "표시": len(s.marks), "준비": len(s.steps), **({"확인 항목": len(s.checks)} if s.checks else {})} for s in wanted]
         return report, 0
 
     try:
@@ -1096,6 +1209,8 @@ def run(args: argparse.Namespace) -> tuple[Report, int]:
             rel = image_rel(lob, s.name, version, partial=not complete)
             _write_png(root / rel, png)
             row = {"이름": s.name, "상태": "완료" if complete else "미완", "그림": rel, "그린 것": drawn, "못 찾은 것": missing}
+            if s.checks:
+                row["확인"] = cap.checks
             if complete and not args.no_spec_update:
                 try:  # 화면마다 갱신 직전에 다시 읽는다(캡처 중 사람이 작업본을 고쳤을 수 있다)
                     current = _read_spec(spec_path)
@@ -1107,6 +1222,8 @@ def run(args: argparse.Namespace) -> tuple[Report, int]:
                     row["작업본 갱신"] = True
                 except (ListError, OSError, UnicodeDecodeError) as e:
                     row = {"이름": s.name, "상태": "검사 불능", "사유": f"그림은 {rel} 에 저장했으나 작업본을 고치지 못했다: {e}"}
+                    if s.checks:
+                        row["확인"] = cap.checks
             report.screens.append(row)
     except (CdpError, Unavailable, OSError) as e:
         report.problems.append(f"검사 불능: {e}")
