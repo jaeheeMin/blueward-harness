@@ -111,18 +111,25 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
   // 그 밖의 동작: {"set": {"GET /api/...": 본문}} 서버 답 바꾸기, {"emit": ["session", {"id": "s1"}]} 서버 이벤트 보내기(뒤이어 기다림),
   // {"es": "error"} 서버 연결 끊김, {"es": "open"} 다시 붙음.
   // {"clickNote": 0} 알림 누르기, {"visible": true} 탭 보임 바꾸기.
+  const out_values = [];  // type 동작 뒤 입력칸에 남은 값(가림 확인용)
   for (const act of JSON.parse(process.argv[7] || '[]')) {
     if (act.set) { Object.assign(DATA, act.set); continue; }
     if (act.es) { if (!ES_LAST) errors.push('EventSource 없음'); else { const f = ES_LAST['on' + act.es]; if (f) f(); } await tick(200); continue; }  // {"es": "error"|"open"} 연결 끊김·다시 붙음 흉내
     if (act.visible !== undefined) { document.visibilityState = act.visible ? 'visible' : 'hidden'; document.hasFocus = () => !!act.visible; continue; }
     if (act.emit) { const f = ES_LISTENERS[act.emit[0]]; if (f) f({ data: JSON.stringify(act.emit[1]) }); else errors.push('이벤트 구독 없음 ' + act.emit[0]); await tick(400); continue; }
     if (act.clickNote !== undefined) { const o = noteObjs[act.clickNote]; if (o && o.onclick) o.onclick(); else errors.push('누를 알림이 없음'); await tick(80); continue; }
+    if (act.type) {  // {"type": 선택자, "value": 글, "index": n} 입력칸에 글을 넣고 input 이벤트를 보낸다(붙여 넣기 흉내)
+      const el = root.querySelectorAll(act.type)[act.index || 0];
+      if (!el) { errors.push('입력칸이 없음 ' + act.type); continue; }
+      el.value = act.value; (el.listeners.input || []).forEach(f => f({ target: el, currentTarget: el })); await tick(80);
+      out_values.push(el.value); continue;
+    }
     const hit = root.querySelectorAll(act.click)[act.index || 0];
     if (!hit) { errors.push('누를 곳이 없음 ' + act.click); continue; }
     hit.click(); await tick(80);
   }
   const main = root.querySelector('main');
-  const out = { text: main ? main.textContent : '(no main)', errors, calls: calls.map(c => c[0] + ' ' + c[1]) };
+  const out = { text: main ? main.textContent : '(no main)', errors, calls: calls.map(c => c[0] + ' ' + c[1]), values: out_values };
   const dump = (e, d) => { if (e.nodeType === 3) return e.text; return '<' + e.tag + (e.open ? '[open]' : '') + (e.attrs['class'] ? '.' + e.attrs['class'].replace(/ /g, '.') : '') + '>' + e.children.map(c => dump(c, d + 1)).join('') + '</' + e.tag + '>'; };
   out.dump = main ? dump(main, 0) : '';
   out.notes = notes; out.asked = asked.length; out.focused = focused.length; out.path = location.pathname; out.ls = Object.assign({}, LS);

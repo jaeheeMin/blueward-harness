@@ -1946,3 +1946,32 @@ def test_first_my_bubble_hides_skill_command_line(tmp_path):
     got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)])
     assert "구매오더 조회 앱 만들어 줘" in got["text"] and "참고 파일: @docs/ssot/SRS.md" in got["text"]
     assert "/harness:spec" not in got["text"].replace("/harness:spec 실행", "")
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_secret_values_are_masked_in_chat_and_record_form(tmp_path):
+    """#827: 화면에 보이는 비밀 값은 ••••••••. 대화는 보이기만 가리고, 기록 입력칸은 값 자체를 바꾼다."""
+    chat = [{"t": 1, "role": "me", "text": "배포가 안 돼\nclient_secret=abcd1234efgh"},
+            {"t": 2, "role": "ai", "text": "db_password: hunter2xyz 로 붙었어요."}]
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)])
+    assert "abcd1234efgh" not in got["text"] and "hunter2xyz" not in got["text"]
+    assert "client_secret=••••••••" in got["text"] and "db_password: ••••••••" in got["text"]
+    form = _smoke(tmp_path, "troubles/new", [], extra={"GET /api/trouble": {"loading": False, "projects": [{"ok": True, "name": "r", "repo": "o/r"}], "stats": {"open": 0}},
+                                                       "POST /api/trouble/check": {"hits": []}, "GET /api/trouble/similar": {"ok": True, "items": []}},
+                  actions=[{"type": "[aria-label=symptom]", "value": "ATC 막힘\nclient_secret=abcd1234efgh"}])
+    assert form["values"] == ["ATC 막힘\nclient_secret=••••••••"], form["errors"]  # 입력칸 값이 실제로 바뀐다
+    # 시안 G-22 의 비밀 줄 카드는 "가렸어" 로 보인다. 가린 값은 비밀이 아니니 [GitHub 에 올리기] 는 잠그지 않고, 같은 말을 하는 아래 알림 줄은 비운다.
+    assert "비밀번호·키처럼 보이는 글이 있어 · 가렸어" in form["text"] and "증상 2번째 줄의 값을 •••••••• 로 바꿨어." in form["text"], form["text"]
+    assert "올리기 전에 지워 줘" not in form["text"] and "비밀처럼 보이는 값을 가렸어." not in form["text"]
+    assert "비밀번호처럼 보이는 줄을 지워 줘" not in form["text"] and "비어 있는 칸: 프로젝트, 제목" in form["text"]  # 못 올리는 까닭은 빈 칸뿐이다(비밀 때문이 아니다)
+    assert not [p for p in form["posts"] if "abcd1234efgh" in p[2]]  # 서버로 원래 값이 가지 않는다
+    gone = _smoke(tmp_path, "troubles/new", [], extra={"GET /api/trouble": {"loading": False, "projects": [{"ok": True, "name": "r", "repo": "o/r"}], "stats": {"open": 0}},
+                                                       "POST /api/trouble/check": {"hits": []}, "GET /api/trouble/similar": {"ok": True, "items": []}},
+                  actions=[{"type": "[aria-label=symptom]", "value": "ATC 막힘\nclient_secret=abcd1234efgh"}, {"click": ".tb-masked button"}])
+    assert not gone["errors"], gone["errors"]
+    assert "client_secret" not in gone["text"] and "가렸어" not in gone["text"]  # [그 줄 지우기] 로 가린 줄이 빠지고 카드도 사라진다
+    # 승인 화면: 명령 원문·도구 입력 전체도 보이기만 가린다(허락하면 원래 명령이 그대로 돈다)
+    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "cwd": "C:/w/proj",
+           "toolInput": {"command": "curl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwx' https://x", "description": "API 확인"}}
+    appr = _smoke(tmp_path, "r/p1", [_session("s1", pendingRequestIds=["p1"])], [req])
+    assert "abcdefghijklmnopqrstuvwx" not in appr["text"] and "도구에 넘기는 입력 전체" in appr["text"] and "••••••••" in appr["text"]

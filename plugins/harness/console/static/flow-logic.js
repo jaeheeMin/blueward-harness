@@ -667,7 +667,30 @@
     return out;
   }
 
+  // 비밀처럼 보이는 값을 `••••••••` 로 바꾼 글. 서버 trouble.py 의 SECRET_ASSIGN·SECRET_OTHER·PLACEHOLDER·mask_secrets 와 같은 규칙이다(시험이 두 쪽 결과를 맞춰 본다).
+  var MASK = '••••••••';
+  var SECRET_NAME = '[\\w.-]*(?:secret|password|passwd|pwd|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|credential)[\\w.-]*';
+  var SECRET_ASSIGN = new RegExp('\\b(' + SECRET_NAME + ')["\']?\\s*[:=]\\s*(?:"([^"]+)"|\'([^\']+)\'|([^\\s"\']{3,}))', 'gi');
+  var SECRET_OTHER = [
+    [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, 0], [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, 0], [/\bAKIA[0-9A-Z]{16}\b/g, 0], [/\bsk-[A-Za-z0-9_-]{16,}/g, 0],
+    [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, 0], [/-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----|[\s\S]*)/g, 0],
+    [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, 0], [/\bBearer\s+[A-Za-z0-9._~+\/-]{16,}/gi, 0], [/:\/\/[^\/\s:@]+:[^\/\s@]{3,}@/g, 1]
+  ];
+  var PLACEHOLDER = /^[•*x.\-_<>…()\[\]{}#]+$|^<.*>$|^\(생략\)$/i;
+  function maskSecrets(text) {
+    var s = text == null ? '' : String(text);
+    s = s.replace(SECRET_ASSIGN, function (all, name, dq, sq, bare) {
+      var value = dq || sq || bare || '';
+      if (PLACEHOLDER.test(value.trim())) return all;
+      var end = all.length - (dq || sq ? 1 : 0);
+      return all.slice(0, end - value.length) + MASK + all.slice(end);
+    });
+    SECRET_OTHER.forEach(function (o) { s = s.replace(o[0], o[1] ? '://' + MASK + '@' : MASK); });
+    return s;
+  }
+
   var api = {
+    maskSecrets: maskSecrets, MASK: MASK,
     notifyEvents: notifyEvents,
     devReadyView: devReadyView, kindHint: kindHint, devBlock: devBlock, kindConflict: kindConflict,
     memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, shortStepName: shortStepName, stepShort: stepShort, prLines: prLines, checksFailed: checksFailed, phaseSide: phaseSide, finishedBand: finishedBand, phaseLine: phaseLine, nextFirst: nextFirst, nextShort: nextShort, nextBase: nextBase, ASK_TEXT: ASK_TEXT, hasBatchim: hasBatchim, prMerged: prMerged,
