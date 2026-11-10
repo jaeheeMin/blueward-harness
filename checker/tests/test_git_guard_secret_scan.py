@@ -81,10 +81,18 @@ def _fake(tmp_path: Path) -> Path:
     return path
 
 
+def _may_have_gitleaks(d: str) -> bool:
+    # #895: 읽을 수 없는 PATH 항목(Junction 등, stat 이 OSError)은 빼서 gitleaks 없는 PATH 를 확실히 만든다.
+    try:
+        return any((Path(d) / n).exists() for n in ("gitleaks", "gitleaks.exe"))
+    except OSError:
+        return True
+
+
 def _path_without_gitleaks() -> str:
     parts = []
     for d in os.environ.get("PATH", "").split(os.pathsep):
-        if d and not any((Path(d) / n).exists() for n in ("gitleaks", "gitleaks.exe")):
+        if d and not _may_have_gitleaks(d):
             parts.append(d)
     return os.pathsep.join(parts)
 
