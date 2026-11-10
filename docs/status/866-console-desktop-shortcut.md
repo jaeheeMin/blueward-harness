@@ -22,6 +22,7 @@
 - **창 없이 실행**: `.lnk` -> `wscript.exe launcher.vbs`(실행 스타일 0) -> `uv run --no-project python launcher.py`. VBS 는 한글 경로를 읽도록 UTF-16 LE BOM 으로 쓴다. `uv` 는 만들 때 `shutil.which` 로 찾은 전체 경로를 적는다(스킬이 이미 `uv` 를 요구한다).
 - **다시 안 만들기**: 같은 폴더의 `shortcut.json` 에 `made`/`removed`. 만든 뒤 `.lnk` 가 없으면 지운 것으로 보고 `removed` 를 적고 조용히 넘어간다. 강제는 `open.py --make-shortcut` 뿐이다. 콘솔 설정의 "바탕화면 바로가기 → 만들기" 단추도 같은 강제 경로를 쓴다(`POST /api/settings/shortcut`, server.py 에 핸들러·경로·import 만 더했다. #793 과 겹치지 않게 최소로).
 - **실패 표시**: 못 만들면 `바로가기를 만들지 못함(이유)` 한 줄만 덧붙이고 상태는 기록하지 않아(다음 실행에 다시 시도) 통과로 뭉개지 않는다. 성공은 기존 한 줄 끝에 붙인다.
+- **유니코드 경로(Actions 영문 Windows 실패)**: 처음엔 PowerShell `WScript.Shell` COM 으로 만들었는데, 영문 Windows(ANSI 1252)에서 한글 폴더의 `.lnk` 저장이 `Unable to save shortcut` 으로 실패했다. 이 PC(cp949)에서 cp949 밖 글자(`Ωǅ`) 폴더로 같은 실패를 재현해 원인을 확인했다(`WScript.Shell` 은 경로를 ANSI 로 바꿔 저장). 지금은 PowerShell `Add-Type` C# 으로 `IShellLinkW`+`IPersistFile`(유니코드)을 불러 만들고 읽는다(대상·인자·작업 폴더·설명). 값은 그대로 `HB_*` 환경변수, 새 Python 의존성 없음. 대가로 PowerShell 한 번에 컴파일이 1~1.5초 들어 만들기+확인이 약 3초다(바탕화면에 이미 맞는 바로가기가 있으면 확인 한 번뿐). 시험에 `Ω·ǅ 폴더` 를 더했다.
 - **인증**: 바로가기도 `POST /api/open` -> 일회용 토큰 -> 서버가 직접 브라우저를 여는 기존 길을 그대로 쓴다. 토큰이 stdout·바로가기 어디에도 남지 않는다.
 - **아이콘**: 기본 아이콘. 바로가기 아이콘은 `.ico` 가 필요한데 로고(`logo-sauce.png`)는 860x141 로 가로로 길고 PNG 를 변환할 표준 라이브러리 수단이 없다.
 

@@ -97,16 +97,54 @@ def wscript_path(env=None) -> str:
     return str(Path(env.get("SystemRoot") or "C:\\Windows") / "System32" / "wscript.exe")
 
 
+# WScript.Shell COM 은 ANSI 코드 페이지 밖 글자(영문 Windows 의 한글 등)가 든 경로를 저장하지 못한다.
+# 그래서 유니코드 인터페이스(IShellLinkW + IPersistFile)를 Add-Type 으로 직접 부른다.
+_LNK_CS = (
+    "using System;using System.Runtime.InteropServices;using System.Text;"
+    '[ComImport,Guid("000214F9-0000-0000-C000-000000000046"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]'
+    "public interface IShellLinkW{"
+    "void GetPath([Out,MarshalAs(UnmanagedType.LPWStr)]StringBuilder f,int c,IntPtr d,uint fl);"
+    "void GetIDList(out IntPtr p);void SetIDList(IntPtr p);"
+    "void GetDescription([Out,MarshalAs(UnmanagedType.LPWStr)]StringBuilder s,int c);"
+    "void SetDescription([MarshalAs(UnmanagedType.LPWStr)]string s);"
+    "void GetWorkingDirectory([Out,MarshalAs(UnmanagedType.LPWStr)]StringBuilder s,int c);"
+    "void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)]string s);"
+    "void GetArguments([Out,MarshalAs(UnmanagedType.LPWStr)]StringBuilder s,int c);"
+    "void SetArguments([MarshalAs(UnmanagedType.LPWStr)]string s);"
+    "void GetHotkey(out short h);void SetHotkey(short h);"
+    "void GetShowCmd(out int i);void SetShowCmd(int i);"
+    "void GetIconLocation([Out,MarshalAs(UnmanagedType.LPWStr)]StringBuilder s,int c,out int i);"
+    "void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)]string s,int i);"
+    "void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)]string s,uint r);"
+    "void Resolve(IntPtr h,uint f);"
+    "void SetPath([MarshalAs(UnmanagedType.LPWStr)]string s);}"
+    '[ComImport,Guid("0000010B-0000-0000-C000-000000000046"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]'
+    "public interface IPersistFile{"
+    "void GetClassID(out Guid g);[PreserveSig]int IsDirty();"
+    "void Load([MarshalAs(UnmanagedType.LPWStr)]string f,uint m);"
+    "void Save([MarshalAs(UnmanagedType.LPWStr)]string f,bool r);"
+    "void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)]string f);"
+    "void GetCurFile([MarshalAs(UnmanagedType.LPWStr)]out string f);}"
+    '[ComImport,Guid("00021401-0000-0000-C000-000000000046")]public class ShellLink{}'
+    "public static class HbLnk{"
+    "public static void Create(string lnk,string target,string args,string dir,string desc){"
+    "var l=(IShellLinkW)new ShellLink();l.SetPath(target);l.SetArguments(args);l.SetWorkingDirectory(dir);l.SetDescription(desc);"
+    "((IPersistFile)l).Save(lnk,true);}"
+    "public static string[] Read(string lnk){"
+    "var l=(IShellLinkW)new ShellLink();((IPersistFile)l).Load(lnk,0);"
+    "var t=new StringBuilder(4096);var a=new StringBuilder(4096);"
+    "l.GetPath(t,4096,IntPtr.Zero,4);l.GetArguments(a,4096);"
+    "return new string[]{t.ToString(),a.ToString()};}}"
+)
+_LOAD_CS = f"$ErrorActionPreference='Stop';Add-Type -TypeDefinition '{_LNK_CS}';"
 CREATE_SCRIPT = (
-    "$ErrorActionPreference='Stop';"
-    "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:HB_LNK);"
-    "$s.TargetPath=$env:HB_TARGET;$s.Arguments=$env:HB_ARGS;$s.WorkingDirectory=$env:HB_DIR;"
-    "$s.Description='Blueward Harness web console';$s.Save()"
+    _LOAD_CS
+    + "[HbLnk]::Create($env:HB_LNK,$env:HB_TARGET,$env:HB_ARGS,$env:HB_DIR,'Blueward Harness web console')"
 )
 CHECK_SCRIPT = (
-    "$ErrorActionPreference='Stop';"
-    "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:HB_LNK);"
-    "if($s.TargetPath -eq $env:HB_TARGET -and $s.Arguments -eq $env:HB_ARGS){exit 0}else{exit 3}"
+    _LOAD_CS
+    + "$r=[HbLnk]::Read($env:HB_LNK);"
+    "if($r[0] -eq $env:HB_TARGET -and $r[1] -eq $env:HB_ARGS){exit 0}else{exit 3}"
 )
 
 

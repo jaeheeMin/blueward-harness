@@ -1843,8 +1843,8 @@ def fake_ps_runner(calls, matches=True, fail_create=False):
     def runner(cmd, **kw):
         env = kw["env"]
         script = cmd[-1]
-        calls.append("create" if "TargetPath=" in script else "check")
-        if "TargetPath=" in script:
+        calls.append("create" if "[HbLnk]::Create" in script else "check")
+        if "[HbLnk]::Create" in script:
             if fail_create:
                 return subprocess.CompletedProcess(cmd, 1, "", "접근이 거부됐습니다")
             Path(env["HB_LNK"]).write_bytes(b"lnk")
@@ -1903,7 +1903,7 @@ def test_shortcut_fixed_when_it_points_elsewhere(tmp_path):
     answers = iter([3, 0])
 
     def runner(cmd, **kw):
-        if "TargetPath=" in cmd[-1]:
+        if "[HbLnk]::Create" in cmd[-1]:
             calls.append("create")
             return subprocess.CompletedProcess(cmd, 0, "", "")
         return subprocess.CompletedProcess(cmd, next(answers), "", "")
@@ -1970,7 +1970,7 @@ def test_launcher_runs_open_py_hidden_and_reports_failure(tmp_path, monkeypatch)
     assert launcher.main() == 1 and "플러그인을 찾지 못했어요" in shown[-1]
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows 의 WScript.Shell 로 실제 .lnk 를 만든다")
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows 의 셸 링크 COM 으로 실제 .lnk 를 만든다")
 def test_shortcut_real_lnk_in_temp_folder_points_at_launcher(tmp_path):
     desk, ldir = shortcut_dirs(tmp_path / "한글 폴더")
     res = REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv")
@@ -1981,6 +1981,18 @@ def test_shortcut_real_lnk_in_temp_folder_points_at_launcher(tmp_path):
     assert shortcut.lnk_matches(lnk, target, args, ldir)
     assert not shortcut.lnk_matches(lnk, target, '"다른 곳.vbs"', ldir)
     assert REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv").status == "none"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows 의 셸 링크 COM 으로 실제 .lnk 를 만든다")
+def test_shortcut_real_lnk_with_chars_outside_ansi_code_page(tmp_path):
+    # cp949·cp1252 어디에도 없는 글자(Ω 는 cp949 에 없고, ǅ 는 둘 다 없다)가 든 폴더에서도 만들고 읽어 확인한다.
+    desk, ldir = shortcut_dirs(tmp_path / "Ω·ǅ 폴더")
+    res = REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv")
+    assert res.status == "made", res.text
+    lnk = desk / shortcut.LNK_NAME
+    target, args = shortcut.wscript_path(), f'"{ldir / "launcher.vbs"}"'
+    assert shortcut.lnk_matches(lnk, target, args, ldir)
+    assert not shortcut.lnk_matches(lnk, target, '"Ω·ǅ 다른 곳.vbs"', ldir)
 
 
 def test_hook_post_forwards_body_and_prints_response(browser):
