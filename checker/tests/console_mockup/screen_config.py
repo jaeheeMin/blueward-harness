@@ -75,7 +75,7 @@ SCREEN_CONFIG.update({
         {"sel": ".bad.blocked button", "text": "그렇게 고쳐 줘", "why": "막힘 카드 단추"},
         {"sel": ".bad.blocked button", "text": "내가 직접 볼게", "why": "막힘 카드 단추"},
         {"sel": ".bad.unsure", "text": "? 확인 못 함", "why": "확인 못 함 카드"},
-        {"sel": ".ann", "text": "확인 못 함", "why": "맨 위 띠에 확인 못 함"},
+        {"sel": ".ann", "text": "막힌 일 1건 · 확인 못 한 검사 1건", "why": "맨 위 초록 띠 한 줄(시안 G-16)"},
         {"sel": "main.main", "text": "표시 약속", "why": "막힘·확인 못 함 아래 표시 약속 칸"}]},
     "G-17": {"expect": [NAV_4,
         {"sel": ".bad", "text": "확인 필요 · 되돌릴 수 없어", "why": "되돌릴 수 없는 일 꼬리표"},

@@ -528,6 +528,12 @@
       if (!s.flowFinished) cells.push({ id: 'progress', label: 'AI 진행', tone: '', value: approval ? '끝' : prog.pct + '%',
         title: approval ? 'AI 가 할 일은 끝났고 승인자 확인만 남았어.' : '순서 ' + prog.total + '단계 중 ' + prog.done + '단계가 끝난 기준이야(AI 가 직접 알려 준 값이 아니야).' });
     } else cells.push({ id: 'step', label: '단계', tone: '', value: '정해진 갈래 없음' });
+    // 시안 G-16: 하네스 검사에 막힌 세션은 단계 칸이 "1 / 3 쓰기 · 막힘" 빨강. 검사를 못 한 건 막힘이 아니라 "확인 못 함" 보라로 따로 말한다.
+    var bk = blockOf(s);
+    if (bk && steps.length) {
+      cells[0].value += bk.kind === 'cannot_check' ? ' · 확인 못 함' : ' · 막힘';
+      cells[0].tone = bk.kind === 'cannot_check' ? 'u' : 'r';
+    }
     var reqs = reqIds(s);
     if (reqs.length) {
       cells.push({ id: 'req', label: '요구사항', tone: '', value: joinIds(reqs) + (s.flowFinished && s.flowId === 'srs' ? ' 확정' : '') });

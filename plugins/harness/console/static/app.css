@@ -106,10 +106,10 @@ ul, ol { padding: 0; }
 .mem-near { margin-top: 0; }
 /* 시안 G-18: 제목 위 노란 배너. [새 세션으로 넘기기] 진한 단추 + [계속하기] 테두리 단추(시안 .bd · .bs) */
 [data-r="memtop"]:empty { display: none; }
-[data-r="memtop"] .banner.mem { margin: 0 0 14px; }
-.banner.mem { padding: 14px 18px; gap: 8px 14px; justify-content: flex-start; }
+[data-r="memtop"] .banner.mem { margin: 0 0 16px; }
+.banner.mem { padding: 14px 18px; gap: 10px 18px; justify-content: flex-start; }  /* 시안 .banner 와 같은 간격 */
 .banner.mem .mem-t { font-weight: 600; }
-.banner.mem .mem-d { flex: 1 1 260px; font-weight: 400; font-size: 13px; }
+.banner.mem .mem-d { flex: 1 1 0; min-width: 0; font-weight: 400; font-size: 14px; }  /* 시안 G-18: 설명은 본문 14px, 남은 너비를 채우고 모자라면 줄바꿈 */
 .banner.mem .mem-acts { margin: 0; flex: none; }
 .mono.warn { color: var(--st-turn); }
 .mono.hot { color: var(--st-fail-ink); }
@@ -476,7 +476,7 @@ table.sheet td { padding: 4px 10px; border: 1px solid var(--line); vertical-alig
 .comp-in { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: 14px; color: var(--lightink); }
 .comp-in::placeholder { color: var(--lmuted); }
 .comp .pill { flex: none; }
-.tiles2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 12px; }
+.tiles2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 12px; }  /* 시안 .stat4 와 같은 최소 너비 */
 .tile2 { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: var(--rc); background: var(--surface); }
 .tile2 .v { font-size: 20px; line-height: 1.5; font-weight: 500; color: var(--accent); }
 .tile2.warn .v { color: var(--attn); }
@@ -502,8 +502,8 @@ table.sheet td { padding: 4px 10px; border: 1px solid var(--line); vertical-alig
 .fixpr .quiet { font-size: 13px; color: var(--lmuted); }
 .call { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 16px 18px; border-radius: var(--rc); background: var(--attn); color: var(--lightink); }
 .call:hover { color: var(--lightink); }
-.call .ct { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.call .eb { color: inherit; overflow-wrap: anywhere; }
+.call .ct { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 0; }
+.call .eb { color: inherit; overflow-wrap: anywhere; line-height: 21px; }  /* 시안 G-11: 눈썹 줄도 본문 줄 높이(21)라 카드 높이 75.5 */
 .call b { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .call .pill { flex: none; }
 .calls-rest { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
@@ -626,6 +626,7 @@ table.list .unk { color: #5a4bc2; }
 .strip .x.g { color: var(--accent); }
 .strip .x.w { color: var(--attn); }
 .strip .x.w::before { content: '! '; font-weight: 800; }
+.strip .x.r { color: var(--danger); }
 .strip .x.u { color: var(--st-unk-ink); }
 .strip .x.u::before { content: '? '; font-weight: 700; }
 
@@ -890,6 +891,7 @@ details.more dl.rows { margin-top: 8px; }
 .tagx { align-self: flex-start; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .tagx.fail { background: var(--danger); color: #fff; }
 .tagx.unk { border: 1.5px dashed var(--st-unk); color: #5a4bc2; }
+.bad .tagx.unk { background: transparent; border: 1.5px solid var(--st-unk); color: var(--st-unk); }  /* 시안 G-16 .tagx: 테두리만(채움 없음) */
 .q.blocked { border: 2px solid var(--danger); }
 .q.unsure { border: 2px dashed var(--st-unk); }
 .q .sub { margin: 0; font-size: 13.5px; color: var(--lmuted); }
@@ -977,6 +979,7 @@ details.fold > [data-r]:empty { display: none; }
 .set > .eb { padding-top: 6px; }
 .set .sc { min-width: 0; }
 /* 시안 .seg: 회색 트랙 안의 작은 알약. 고른 것은 어두운 알약 */
+.set .sc > .seg { display: flex; }  /* 시안 G-19: 격자 칸의 직접 자식이라 줄 전체 너비로 늘어난다 */
 .seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--stbg); }
 .seg button { padding: 6px 14px; border: 0; border-radius: 999px; background: transparent; color: var(--lmuted); font-size: 13px; }
 .seg button:hover { color: var(--lightink); }
@@ -1055,12 +1058,14 @@ details.fold > [data-r]:empty { display: none; }
 .msgs-list { display: contents; }
 .sess-side[hidden] { display: none; }
 .sess-side { flex: 1 1 300px; max-width: 360px; }
+.sess-side.run { flex: 1 1 320px; max-width: 380px; }  /* 시안 G-08(일하는 중)의 오른쪽 칸은 G-09(올릴 차례)보다 20 넓다 */
 .flowpanel.compact .nextstep, .flowpanel.compact .nextflow { margin-top: 0; }
 .flowpanel.compact .nextstep { padding-top: 16px; border-top: 0; }
 .nextstep .acts .skiplink { min-height: 0; margin: 0 0 0 auto; }
 .msgs .ai.muted { color: var(--lmuted); }
 .msgs .qgroup { display: flex; flex-direction: column; gap: 12px; }
-.msgs .qgroup .acts { margin-top: 0; }
+.msgs .qgroup .acts { margin-top: 0; justify-content: flex-end; align-items: center; }  /* 시안 G-07: 답 보내기는 카드 아래 오른쪽 */
+.msgs .qgroup .acts .quiet { margin-right: auto; }
 .msgs .qgroup .skiplink { min-height: 0; color: var(--lmuted); }
 .handoff .sub { color: var(--lmuted); }
 .handoff-list { display: flex; flex-direction: column; gap: 3px; padding-top: 8px; border-top: 1px solid var(--lline); font-size: 13.5px; }

@@ -770,7 +770,7 @@
       };
     }
 
-    function docsPanel() {
+    function docsPanel(onShape) {
       var el = h('section', { class: 'docs', 'aria-label': '만든 문서' });
       var listBox = h('div', { class: 'docs-list' });
       var pane = h('div', { class: 'docs-pane paper', hidden: true });
@@ -813,7 +813,11 @@
         st.auto = true;
         if (md) selectFile(md);
       }
-      function drawList() {
+      // 시안 G-07·16·18: 보여 줄 문서(또는 확인 못 했다는 말)가 없으면 세션 화면이 이 칸을 아예 두지 않는다.
+      // 처음 불러오는 동안은 "불러오는 중이에요" 와 함께 칸을 두고, 다 읽은 뒤에 비어 있으면 거둔다.
+      function has() { return !st.files || !!(st.error || st.files.length || st.unknown != null || st.truncated || st.note); }
+      function drawList() { drawListBody(); if (onShape) onShape(); }
+      function drawListBody() {
         clear(listBox);
         if (st.error && !st.files) { listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.error, '문서 목록') })); return; }
         if (!st.files) { listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' })); return; }
@@ -863,7 +867,7 @@
         drawList();
       }
       drawList();
-      return { el: el, update: update, destroy: function () { alive = false; } };
+      return { el: el, update: update, has: has, destroy: function () { alive = false; } };
     }
 
     /* ---------- 새 작업: 순서 칸("이렇게 진행돼")과 분석한 갈래 보여 주고 바꾸기 ---------- */

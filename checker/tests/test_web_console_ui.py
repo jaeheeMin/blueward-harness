@@ -1146,7 +1146,7 @@ def test_work_screen_session_matches_design(tmp_path):
     for cell in ("단계2 / 3 올리고 검토 요청하기", "AI 진행33%", "작업 기록이슈 #4", "검토 요청PR #6 검토 중"):
         assert cell in text, cell
     assert "요구사항REQ" not in text and "개발 번호" not in text  # 데이터가 없는 칸은 지어내지 않는다
-    assert "<section.light.talk>" in dump and "<aside.sess-side>" in dump and "<div.comp>" in dump
+    assert "<section.light.talk>" in dump and "<aside.sess-side.run>" in dump and "<div.comp>" in dump
     for need in ("다 썼어", "이 일의 순서", "문서 검사", "양식에 맞아", "비밀값 검사", "팀 승인", "네 차례", "승인하기", "작업 멈추기", "만든 산출물", "docs/SRS.md"):
         assert need in text, need
     assert "기억" not in text.split("검토 요청PR")[0].split("단계")[-1]  # 숫자 띠에 기억 칸은 없다
@@ -1181,7 +1181,8 @@ def test_chat_screen_draws_waiting_request_once_in_place_and_answers_as_one_line
     text, dump = got["text"], got["dump"]
     assert dump.count("<div.qgroup>") == 1  # 질문은 대화 안 자리에서 한 번만, 그 자리에서 바로 고른다(시안 G-13). 머리 글에도 같은 말이 있어 글자 수는 세지 않는다
     assert dump.count("<div.reqnote>") == 3 and dump.index("<div.reqnote>") < dump.index("<div.qgroup>")
-    assert dump.count("<button.qopt>") == 1 and "직접 적어 답하기" in text and "질문 · " not in text.replace("질문 ·", "질문 · ") or True
+    # 시안 G-07: 보기 + 콘솔이 더하는 '직접 적기'. 하나만 고르는 질문 하나라 [답 보내기] 는 '직접 적기' 를 고를 때만 생긴다
+    assert dump.count("<button.qopt>") == 2 and "직접 적기" in text and "직접 적어 답하기" not in text and "답 보내기" not in text
     assert "질문: 색은? → Red" in text and "승인 요청: Bash 사용 → 허락함" in text
     assert "승인 요청: Edit 사용 → 처리 결과를 알 수 없어" in text  # 답이 없고 대기도 아니면 지어내지 않는다
     assert text.index("시작해 줘") < text.index("질문: 색은? → Red")
@@ -1727,7 +1728,7 @@ def test_blocked_session_shows_apart_from_my_turn_in_home_side_and_banner(tmp_pa
     assert "<span.tagx.fail>" in dump and "<span.tagx.unk>" in dump and "✕ 막힘" in text and "? 확인 못 함" in text
     assert text.count("가서 보기") == 2 and "내 차례1" in text  # 막힘 둘은 내 차례 숫자에 안 들어가고, 묻는 요청이 있는 세션만 내 차례
     assert "✕ 막힘 · 고친 뒤 이어서" in got["side"] and "? 확인 못 함 · 검사를 못 했어" in got["side"]  # 사이드바
-    assert "✕ 막힘 1건 — “막힌 일” 세션에서" in got["ann"] and "? 확인 못 함 1건 — “못 한 일” 세션에서" in got["ann"]
+    assert "막힌 일 1건 · 확인 못 한 검사 1건" in got["ann"]  # 시안 G-16: 둘을 세되 초록 띠 한 줄
     assert "내 차례 1건 — “질문 일” 세션에서 답이 필요해" in got["ann"]  # 제목에 조사가 바로 붙지 않는다
     # 풀린 막힘(뒤에 말이 이어짐)과 목록이 열림 여부를 안 알려 주는 옛 서버는 막힘으로 치지 않는다
     calm = _smoke(tmp_path, "", [_session("s3", status="idle", lastBlock={"t": 4, "kind": "blocked", "open": False}), _session("s5", status="idle", lastBlock={"t": 4, "kind": "blocked"})])

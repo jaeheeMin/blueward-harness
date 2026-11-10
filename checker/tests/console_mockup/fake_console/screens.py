@@ -177,7 +177,7 @@ def _hold_request(api, real, kind, tag, body):
     body_file = RUN / f"{kind}_{tag}.json"
     body_file.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
     # 연결을 붙드는 별도 프로세스로 보낸다(연결이 끊기면 서버가 요청을 닫는다). 서버를 끄면 같이 끝난다.
-    detach = {"creationflags": 0x00000008 | 0x00000200} if sys.platform == "win32" else {"start_new_session": True}
+    detach = {"creationflags": 0x08000000 | 0x00000200} if sys.platform == "win32" else {"start_new_session": True}
     subprocess.Popen([sys.executable, "-B", str(HERE / "hold_hook.py"), kind, str(body_file)], stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, close_fds=True, **detach)
     return wait_for(lambda: ((api.get(f"/api/sessions/{real}")[1] or {}).get("pendingRequestIds") or [None])[0], 10)
