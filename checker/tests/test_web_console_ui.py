@@ -910,6 +910,82 @@ const cases = {
     e = ev(run, Object.assign({}, base, { group: 'todo' })); assert.deepStrictEqual(e.map(x => x.kind), ['turn']);
     e = ev(run, Object.assign({}, base, { group: 'todo' }), { turn: false, blocked: false, done: true }); assert.deepStrictEqual(e.map(x => x.kind), ['done']);
     assert.deepStrictEqual(ev(base, run), []);  // 시작은 알리지 않는다
+  },
+  attach_textarea_keys() {
+    // 이어서 요청 칸: 여러 줄 textarea. Enter 보내기, Shift+Enter 줄바꿈, 한글 조합 중 Enter 는 안 보냄, 자동완성 목록이 열려 있으면 안 보냄
+    delete require.cache[require.resolve(path.join(dir, 'attach.js'))];
+    const A = require(path.join(dir, 'attach.js'));
+    let sent = 0, blocked = false, typed = null;
+    const c = A.composer(h, { id: 'follow', placeholder: '예', onInput: v => { typed = v; }, onSend: () => { sent++; }, isBlocked: () => blocked });
+    assert.strictEqual(c.field.tag, 'textarea'); assert.strictEqual(c.field.attrs.id, 'follow'); assert.strictEqual(c.field.attrs.rows, '1');
+    assert.ok(c.field.className.includes('comp-in'));  // 한 줄 칸과 같은 글꼴·자리를 쓰는 클래스
+    const key = (o) => { let prevented = false; (c.field.listeners.keydown || []).forEach(f => f(Object.assign({ key: 'Enter', keyCode: 13, preventDefault() { prevented = true; } }, o))); return prevented; };
+    assert.strictEqual(key({}), true); assert.strictEqual(sent, 1);
+    assert.strictEqual(key({ shiftKey: true }), false); assert.strictEqual(sent, 1);          // 줄바꿈은 브라우저가 한다
+    assert.strictEqual(key({ isComposing: true }), false); assert.strictEqual(key({ keyCode: 229 }), false); assert.strictEqual(sent, 1);
+    assert.strictEqual(key({ key: 'a' }), false); assert.strictEqual(sent, 1);
+    blocked = true; assert.strictEqual(key({}), false); assert.strictEqual(sent, 1); blocked = false;
+    (c.field.listeners.input || []).forEach(f => f({ target: { value: '한 줄\n두 줄' } })); assert.strictEqual(typed, '한 줄\n두 줄');
+    assert.ok(A.enterSends({ key: 'Enter' }) && !A.enterSends({ key: 'Enter', shiftKey: true }) && !A.enterSends({ key: 'Enter', isComposing: true }));
+  },
+  attach_chips_limits_and_remove() {
+    delete require.cache[require.resolve(path.join(dir, 'attach.js'))];
+    const A = require(path.join(dir, 'attach.js'));
+    window.FileReader = function () { this.readAsDataURL = (f) => { this.result = 'data:' + f.type + ';base64,QUJD'; setTimeout(() => this.onload(), 0); }; };
+    const c = A.composer(h, { id: 'f', placeholder: '', onSend() {} });
+    const chips = () => find(c.chips, e => e.className === 'attach-chip');
+    const note = () => find(c.chips, e => e.className === 'attach-note').map(e => e.textContent).join('|');
+    const png = (n, size) => ({ name: n, type: 'image/png', size: size || 1000 }), pdf = (n, size) => ({ name: n, type: 'application/pdf', size: size || 1000 });
+    assert.strictEqual(c.chips.hidden, true);
+    c.add([png('화면.png'), pdf('계약서.pdf')]);
+    assert.strictEqual(chips().length, 2); assert.strictEqual(c.chips.hidden, false); assert.ok(c.busy());
+    return tick().then(() => {
+      assert.ok(!c.busy());
+      assert.deepStrictEqual(c.payload().map(a => [a.name, a.media_type, a.data]), [['화면.png', 'image/png', 'QUJD'], ['계약서.pdf', 'application/pdf', 'QUJD']]);
+      assert.ok(find(c.chips, e => e.tag === 'img' && e.attrs.src.startsWith('data:image/png')).length === 1);  // 이미지는 작은 그림
+      assert.ok(chips()[1].textContent.includes('계약서.pdf') && chips()[1].textContent.includes('PDF'));      // PDF 는 이름
+      // 형식 밖·큰 것·빈 것은 조용히 버리지 않고 한 줄로 알린다
+      c.add([{ name: 'a.docx', type: 'application/vnd.openxmlformats', size: 10 }]);
+      assert.ok(note().includes('a.docx') && note().includes('PDF')); assert.strictEqual(chips().length, 2);
+      c.add([png('big.png', 6 * 1024 * 1024)]); assert.ok(note().includes('5MB')); assert.strictEqual(chips().length, 2);
+      c.add([pdf('big.pdf', 21 * 1024 * 1024)]); assert.ok(note().includes('20MB'));
+      c.add([png('a.png'), png('b.png'), png('c.png'), png('d.png')]);  // 2 + 3 = 5개까지, 하나는 개수 초과
+      assert.strictEqual(chips().length, 5); assert.ok(note().includes('5개'));
+      // 빼기(×)
+      const x = find(chips()[0], e => e.tag === 'button')[0]; assert.ok(x.attrs['aria-label'].includes('화면.png'));
+      x.click(); assert.strictEqual(chips().length, 4); assert.ok(!c.meta().some(m => m.name === '화면.png'));
+      // 서버 대화 기록의 첨부(이름·형식·크기)는 빼기 없이 보인다
+      const row = A.chatChips(h, [{ name: '화면.png', type: 'image/png', size: 2048 }, { name: '계약서.pdf', type: 'application/pdf', size: 1 }]);
+      assert.strictEqual(find(row, e => e.tag === 'button').length, 0); assert.ok(row.textContent.includes('계약서.pdf'));
+      assert.strictEqual(A.chatChips(h, []), null);
+      // 터미널에서 연 세션은 단추를 감추고 붙이지 않는다
+      c.setEnabled(false); assert.strictEqual(c.pick.hidden, true); assert.strictEqual(chips().length, 0);
+      c.add([png('x.png')]); assert.strictEqual(chips().length, 0); assert.ok(note().includes('터미널'));
+      c.reset(); assert.strictEqual(c.field.value, '');
+    });
+  },
+  attach_paste_drop_and_file_button() {
+    delete require.cache[require.resolve(path.join(dir, 'attach.js'))];
+    const A = require(path.join(dir, 'attach.js'));
+    window.FileReader = function () { this.readAsDataURL = (f) => { this.result = 'data:' + f.type + ';base64,QUJD'; setTimeout(() => this.onload(), 0); }; };
+    const c = A.composer(h, { id: 'f', placeholder: '', onSend() {} });
+    const fire = (el, name, ev) => { let prevented = false; (el.listeners[name] || []).forEach(f => f(Object.assign({ preventDefault() { prevented = true; } }, ev))); return prevented; };
+    const file = (n, t) => ({ name: n, type: t, size: 500 });
+    // 글 붙여 넣기는 그대로 두고, 파일이 든 붙여 넣기만 가로챈다
+    assert.strictEqual(fire(c.field, 'paste', { clipboardData: { files: [], items: [] } }), false); assert.strictEqual(c.count(), 0);
+    assert.strictEqual(fire(c.field, 'paste', { clipboardData: { files: [file('붙인.png', 'image/png')] } }), true); assert.strictEqual(c.count(), 1);
+    // 끌어 놓기
+    const zone = h('div'); c.bindDrop(zone);
+    assert.strictEqual(fire(zone, 'drop', { dataTransfer: { files: [] } }), false);
+    assert.strictEqual(fire(zone, 'drop', { dataTransfer: { files: [file('a.pdf', 'application/pdf')] } }), true); assert.strictEqual(c.count(), 2);
+    assert.strictEqual(fire(zone, 'dragover', { dataTransfer: { types: ['Files'] } }), true);
+    // 파일 고르기 단추: 숨은 input 을 누르고, 고른 파일을 붙인다
+    const btn = find(c.pick, e => e.tag === 'button')[0], input = find(c.pick, e => e.tag === 'input')[0];
+    assert.strictEqual(input.attrs.type, 'file'); assert.ok(input.attrs.accept.includes('application/pdf') && input.attrs.accept.includes('image/webp'));
+    let clicked = 0; input.listeners.click = [() => { clicked++; }]; btn.click(); assert.strictEqual(clicked, 1);
+    fire(input, 'change', { target: { files: [file('b.webp', 'image/webp')], value: 'x' } }); assert.strictEqual(c.count(), 3);
+    assert.strictEqual(A.typeOf({ name: 'scan.PDF', type: '' }), 'application/pdf');  // 형식이 비어 오면 확장자로
+    return tick();
   }
 };
 

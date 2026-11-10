@@ -999,9 +999,11 @@
       parts.docs = ui.docsPanel(function () { if (parts.docs) syncSide(); });
       // 이어서 요청 입력칸은 다시 그리지 않는다.
       var followAssist = null;
-      var input = h('input', { id: 'follow', class: 'comp-in', placeholder: '예: 표의 항목 순서를 바꿔 줘  (/ 로 스킬, @ 로 파일)', autocomplete: 'off',
-        onInput: function (e) { followVal = e.target.value; followNote = ''; paintFollowNote(); },
-        onKeydown: function (e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && !(followAssist && followAssist.isOpen())) { e.preventDefault(); sendFollow(); } } });
+      // 여러 줄 입력칸(Enter 보내기 · Shift+Enter 줄바꿈 · 한글 조합 중 Enter 는 안 보냄) + 첨부(붙여 넣기·끌어 놓기·고르기). attach.js
+      var comp = window.BHAttach.composer(h, { id: 'follow', placeholder: '예: 표의 항목 순서를 바꿔 줘  (/ 로 스킬, @ 로 파일)',
+        onInput: function (v) { followVal = v; followNote = ''; paintFollowNote(); },
+        onSend: function () { sendFollow(); }, isBlocked: function () { return !!(followAssist && followAssist.isOpen()); } });
+      var input = comp.field;
       followAssist = withAssist(input, function () { return cur().cwd; });
       var btn = h('button', { type: 'button', class: 'pill dark', text: '보내기', onClick: sendFollow });
       // 시안: 시작 점검 카드 · 대화 · 다음 일 카드가 모두 한 .msgs 안에서 12px 간격으로 이어진다. 대화 칸(msgsList)만 다시 그리고, 점검·갈래 칸은 그대로 둔다.
@@ -1009,10 +1011,12 @@
       regions.msgs = h('div', { class: 'msgs' }, parts.checks.el, regions.msgsList, parts.flow.el);
       regions.follow = h('div', { class: 'followbox', 'data-r': 'follow' },
         h('label', { for: 'follow', class: 'sr-only', text: '이 작업에 이어서 요청' }),
-        h('div', { class: 'comp' }, followAssist.wrap, btn),
+        comp.chips,
+        h('div', { class: 'comp' }, followAssist.wrap, comp.pick, btn),
         h('p', { class: 'note-accent', 'data-note': '1', role: 'status' }),
         h('p', { class: 'note-muted', 'data-why': '1' }));
-      regions.followInput = input; regions.followBtn = btn;
+      comp.bindDrop(regions.follow);
+      regions.followInput = input; regions.followBtn = btn; regions.followComp = comp;
       regions.after = h('div', { class: 'acts', 'data-r': 'after', hidden: true });
       var talk = h('section', { class: 'light talk', 'aria-label': 'AI와 대화' }, regions.msgs, regions.after, regions.follow);
       regions.side = h('aside', { class: 'sess-side', 'aria-label': '만든 산출물' }, parts.docs.el);
@@ -1099,12 +1103,14 @@
 
     // over 가 글이면 입력칸 대신 그 글을 보낸다(막힘 카드의 "그렇게 고쳐 줘" 버튼)
     function sendFollow(over) {
-      var s = cur(), typed = typeof over !== 'string', text = (typed ? followVal : over).trim();
-      if (!text || s.canSend === false) return;
+      var s = cur(), typed = typeof over !== 'string', text = (typed ? followVal : over).trim(), comp = regions.followComp;
+      var files = typed && s.canAttach !== false ? comp.payload() : [], meta = typed && s.canAttach !== false ? comp.meta() : [];
+      if ((!text && !files.length) || s.canSend === false) return;
+      if (typed && comp.busy()) { comp.note('첨부를 읽는 중이야. 잠깐만 기다렸다가 다시 보내 줘.'); return; }
       regions.followBtn.disabled = true;
-      api('POST', '/api/sessions/' + encodeURIComponent(id) + '/messages', { text: text }).then(function () {
-        if (typed) { followVal = ''; regions.followInput.value = ''; }
-        sent.push({ text: text, at: Date.now() / 1000 });
+      api('POST', '/api/sessions/' + encodeURIComponent(id) + '/messages', files.length ? { text: text, attachments: files } : { text: text }).then(function () {
+        if (typed) { followVal = ''; comp.reset(); }
+        sent.push({ text: text || window.BHAttach.PLACEHOLDER, at: Date.now() / 1000, attachments: meta });
         followNote = (s.status === 'running') ? '지금 단계가 끝나면 이어서 할게.' : '이 작업에 전달했어.';
       }, function (e) { followNote = '보내지 못했어: ' + e.message; }).then(function () {
         regions.followBtn.disabled = cur().canSend === false; paintFollowNote(); paintMsgs(cur());
@@ -1275,7 +1281,7 @@
 
     // 대화 한 칸: 내 말은 말풍선(줄바꿈 그대로), AI 말은 마크다운(긴 글은 접기)
     // 바뀌지 않은 대화 칸은 만들어 둔 노드를 그대로 쓴다(#793): 이벤트마다 마크다운을 다시 풀고 노드를 다시 만들지 않는다.
-    // 칸 모양에 드는 값(시각·글·펼침)이 키에 다 들어 있어야 한다. 이번 그리기에서 쓴 것만 다음으로 넘긴다.
+    // 칸 모양에 드는 값(시각·글·펼침·첨부)이 키에 다 들어 있어야 한다. 이번 그리기에서 쓴 것만 다음으로 넘긴다.
     var chatCache = {}, chatNext = {};
     function chatCached(ck, build) {
       var el = (!chatNext[ck] && chatCache[ck]) || build();  // 같은 키가 두 칸이면 한 노드를 두 번 쓰지 않는다
@@ -1283,7 +1289,12 @@
       return el;
     }
     function chatMe(c) {
-      return chatCached('me|' + String(c.t) + '|' + String(c.text), function () { return h('div', { class: 'me', 'data-chat': 'me', text: MS(window.BHLogic.hideSkillLine(c.text)) }); });
+      var key = 'me|' + String(c.t) + '|' + String(c.text) + '|' + JSON.stringify(c.attachments || null);  // 첨부(#860)도 칸 모양이라 키에 넣는다
+      return chatCached(key, function () {
+        var text = MS(window.BHLogic.hideSkillLine(c.text)), chips = window.BHAttach.chatChips(h, c.attachments);
+        if (!chips) return h('div', { class: 'me', 'data-chat': 'me', text: text });
+        return h('div', { class: 'me', 'data-chat': 'me' }, text && text !== window.BHAttach.PLACEHOLDER ? h('div', { text: text }) : null, chips);  // 첨부는 이름·형식·크기만 기록에 있다
+      });
     }
     function chatAi(c) {
       return chatCached('ai|' + String(c.t) + '|' + (chatOpen[String(c.t)] ? 1 : 0) + '|' + String(c.text), function () { return chatAiBuild(c); });
@@ -1478,7 +1489,7 @@
       } else {
         out = [reportMsg(s)];
       }
-      sent.forEach(function (m) { out.push(h('div', { class: 'me', text: m.text })); });
+      sent.forEach(function (m) { out.push(chatMe({ text: m.text, attachments: m.attachments })); });
       var note = askedNote(s);
       if (note) out.push(note);
       if (s.status === 'running') { var td = todoCard(s); if (td) out.push(td); }
@@ -1543,6 +1554,7 @@
       // 시안 G-10: 승인을 기다리는 동안엔 입력칸이 없다. 검사가 실패해 AI 가 고쳐야 하면 남긴다.
       regions.follow.hidden = s.phase === 'approval' && !window.BHLogic.checksFailed(s);
       regions.followInput.disabled = !can; regions.followBtn.disabled = !can;
+      regions.followComp.setEnabled(s.canAttach !== false);  // 터미널에서 연 세션은 첨부를 보낼 수 없다
       var why = regions.follow.querySelector('[data-why]');
       why.textContent = can ? '' : (s.cannotSendReason || '이 세션에는 지금 요청을 보낼 수 없어.');
       why.hidden = can;

@@ -6911,3 +6911,113 @@ def test_auto_mode_error_result_and_early_exit_are_reported(tmp_path):
     proc.session_id = proc.temp_id = "s4"
     m.on_exit(proc)
     assert not store.get("s4").get("permissionNote")
+
+
+# ---- 이어서 요청 첨부(#860): 형식·크기 검사, content 배열, 기록 ----
+import base64  # noqa: E402
+
+import attachments as attach_mod  # noqa: E402
+
+PNG_1PX = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 40).decode()
+PDF_MIN = base64.b64encode(b"%PDF-1.4\n" + b"x" * 40).decode()
+
+
+def att(name, media_type, data):
+    return {"name": name, "media_type": media_type, "data": data}
+
+
+def test_attachment_parse_accepts_image_and_pdf_and_cleans_name():
+    out = attach_mod.parse([att("C:\\Users\\a\\화면.png", "image/png", PNG_1PX), att("계약서.pdf", "application/pdf", PDF_MIN)])
+    assert [a["name"] for a in out] == ["화면.png", "계약서.pdf"] and out[0]["size"] == 48
+    assert attach_mod.parse(None) == [] and attach_mod.parse([]) == []
+    webp = base64.b64encode(b"RIFF\x00\x00\x00\x00WEBPVP8 ").decode()
+    assert attach_mod.parse([att("a.webp", "image/webp", webp)])[0]["media_type"] == "image/webp"
+
+
+@pytest.mark.parametrize("items,status", [
+    ([att("a.exe", "application/octet-stream", PNG_1PX)], 400),                 # 허용 안 한 형식
+    ([att("a.png", "image/png", "!!!not base64!!!")], 400),                     # base64 아님
+    ([att("a.png", "image/png", PDF_MIN)], 400),                                # 이름·형식은 png 인데 내용은 PDF(매직 바이트)
+    ([att("a.webp", "image/webp", base64.b64encode(b"RIFF\x00\x00\x00\x00WAVEfmt ").decode())], 400),
+    ([att("a.png", "image/png", "")], 400),
+    ([att("big.png", "image/png", base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * (5 * 1024 * 1024)).decode())], 413),  # 이미지 5MB 초과
+    ([att("big.pdf", "application/pdf", base64.b64encode(b"%PDF-" + b"0" * (20 * 1024 * 1024)).decode())], 413),      # PDF 20MB 초과
+    ([att(f"{i}.png", "image/png", PNG_1PX) for i in range(6)], 400),            # 개수
+    ("not a list", 400),
+    (["str"], 400),
+])
+def test_attachment_parse_rejects(items, status):
+    with pytest.raises(attach_mod.AttachmentError) as e:
+        attach_mod.parse(items)
+    assert e.value.status == status and str(e.value)
+
+
+def test_attachment_total_size_limit():
+    one = base64.b64encode(b"%PDF-" + b"0" * (11 * 1024 * 1024)).decode()
+    with pytest.raises(attach_mod.AttachmentError) as e:
+        attach_mod.parse([att("a.pdf", "application/pdf", one), att("b.pdf", "application/pdf", one)])
+    assert e.value.status == 413 and "20MB" in str(e.value)
+
+
+def test_user_message_content_blocks_have_the_measured_shape():
+    files = attach_mod.parse([att("a.png", "image/png", PNG_1PX), att("b.pdf", "application/pdf", PDF_MIN)])
+    msg = json.loads(managed.user_message("이거 봐 줘", files))["message"]
+    assert msg["role"] == "user" and msg["content"] == [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG_1PX}},
+        {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": PDF_MIN}},
+        {"type": "text", "text": "이거 봐 줘"}]
+    assert json.loads(managed.user_message("", files))["message"]["content"][-1]["type"] == "document"  # 글이 없으면 text 블록은 뺀다
+    assert json.loads(managed.user_message("글만"))["message"]["content"] == "글만"
+
+
+def test_message_with_attachments_reaches_claude_as_content_array_and_history_has_no_original(mconsole, monkeypatch, tmp_path):
+    log = tmp_path / "content.log"
+    monkeypatch.setenv("FAKE_CONTENT_LOG", str(log))
+    c = mconsole
+    sid = launch(c, "첫번째")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫번째")
+    st, data, _ = c.call("POST", f"/api/sessions/{sid}/messages", {"text": "이 화면 봐 줘", "attachments": [att("화면.png", "image/png", PNG_1PX), att("계약서.pdf", "application/pdf", PDF_MIN)]})
+    assert st == 202 and data["sent"]
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 이 화면 봐 줘")
+    blocks = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
+    assert [b["type"] for b in blocks] == ["image", "document", "text"]
+    assert blocks[0]["source"] == {"type": "base64", "media_type": "image/png", "data": PNG_1PX}
+    # 기록: 이름·형식·크기만, 원본 없음
+    chat = [x for x in c.call("GET", f"/api/sessions/{sid}")[1]["chat"] if x.get("role") == "me" and x.get("attachments")]
+    assert chat[0]["text"] == "이 화면 봐 줘"
+    assert chat[0]["attachments"] == [{"name": "화면.png", "type": "image/png", "size": 48}, {"name": "계약서.pdf", "type": "application/pdf", "size": 49}]
+    c.app.store.save()
+    saved = (c.state / "sessions.json").read_text(encoding="utf-8") if hasattr(c, "state") else ""
+    assert PNG_1PX not in json.dumps(c.app.store.get(sid), ensure_ascii=False) and PDF_MIN not in saved and PNG_1PX not in saved
+    assert c.call("GET", f"/api/sessions/{sid}")[1]["canAttach"] is True
+
+
+def test_message_with_only_attachment_is_allowed_and_chat_shows_placeholder(mconsole, monkeypatch, tmp_path):
+    monkeypatch.setenv("FAKE_CONTENT_LOG", str(tmp_path / "c.log"))
+    c = mconsole
+    sid = launch(c, "첫번째")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첫번째")
+    assert c.call("POST", f"/api/sessions/{sid}/messages", {"text": "", "attachments": [att("a.png", "image/png", PNG_1PX)]})[0] == 202
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 첨부만")
+    assert [x["text"] for x in c.call("GET", f"/api/sessions/{sid}")[1]["chat"] if x.get("attachments")] == ["(첨부만 보냄)"]
+    assert c.call("POST", f"/api/sessions/{sid}/messages", {"text": "  "})[0] == 400  # 글도 첨부도 없으면 거절
+
+
+def test_message_attachment_errors_over_http(mconsole):
+    c = mconsole
+    sid = launch(c, "첫번째")
+    st, data, _ = c.call("POST", f"/api/sessions/{sid}/messages", {"text": "x", "attachments": [att("a.exe", "application/x-msdownload", PNG_1PX)]})
+    assert st == 400 and "png" in data["error"]
+    st, data, _ = c.call("POST", f"/api/sessions/{sid}/messages", {"text": "x", "attachments": [att("a.png", "image/png", PDF_MIN)]})
+    assert st == 400
+    big = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * (5 * 1024 * 1024)).decode()
+    st, data, _ = c.call("POST", f"/api/sessions/{sid}/messages", {"text": "x", "attachments": [att("big.png", "image/png", big)]})
+    assert st == 413 and "5MB" in data["error"]  # 본문 상한(1MB)이 아니라 첨부 검사가 답한다
+
+
+def test_terminal_session_cannot_receive_attachments(browser):
+    browser.event("t1", "UserPromptSubmit", prompt="작업")
+    assert browser.call("GET", "/api/sessions/t1")[1]["canAttach"] is False
+    st, data, _ = browser.call("POST", "/api/sessions/t1/messages", {"text": "x", "attachments": [att("a.png", "image/png", PNG_1PX)]})
+    assert st == 409 and "터미널" in data["error"]
+    assert browser.call("POST", "/api/sessions/t1/messages", {"text": "글만"})[0] == 202  # 글은 그대로 된다

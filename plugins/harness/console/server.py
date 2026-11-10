@@ -22,6 +22,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 import analysis
+import attachments
 import devready
 import docfiles
 import flows
@@ -45,6 +46,8 @@ GAP_NOTICE_SECONDS = 1800.0  # git 상태를 못 읽은 일을 만든 문서 목
 TOKEN_TTL = 60.0
 API_BODY_LIMIT = 1 << 20
 HOOK_BODY_LIMIT = 32 << 20
+ATTACH_BODY_LIMIT = HOOK_BODY_LIMIT  # 이어서 요청의 첨부(base64). 합계 20MB 원본이 약 26.7MB 라 이 안에 든다(attachments.py)
+ATTACH_PATH = re.compile(r"/api/sessions/[^/]+/messages")
 DRAIN_LIMIT = 1 << 20   # 오류 응답 전에 버려 읽는 본문의 상한
 DRAIN_SECONDS = 1.0     # 버려 읽는 데 쓰는 총 시간
 HEARTBEAT = 10.0
@@ -607,9 +610,15 @@ class App:
     def a_message(self, g, q, b):
         s = self.get_session(g[0])
         text = b.get("text")
-        if not isinstance(text, str) or not text.strip():
+        try:
+            files = attachments.parse(b.get("attachments"))
+        except attachments.AttachmentError as e:
+            raise HttpError(e.status, str(e))
+        if not isinstance(text, str) or (not text.strip() and not files):
             raise HttpError(400, "text 가 비어 있습니다.")
-        return self.deliver(s, text.strip(), {"kind": "message", "text": text.strip()})
+        if files and not s["managed"]:
+            raise HttpError(409, "터미널에서 연 세션에는 첨부를 보낼 수 없어. 콘솔에서 연 작업에서 보내 줘.")
+        return self.deliver(s, text.strip(), {"kind": "message", "text": text.strip()}, files)
 
     def a_run(self, g, q, b):
         s = self.get_session(g[0])
@@ -621,10 +630,10 @@ class App:
         text = f"/{self.plugin_name}:{skill}" + (f" {args.strip()}" if args.strip() else "")
         return self.deliver(s, text, {"kind": "skill", "skill": skill, "args": args.strip()})
 
-    def deliver(self, s: dict, text: str, queued: dict):
-        """콘솔이 띄운 세션은 stdin 으로 바로, 실행 중인 터미널 세션은 턴 끝에 Stop 훅으로 보낸다. 쉬는 터미널은 불가."""
+    def deliver(self, s: dict, text: str, queued: dict, files: list[dict] | None = None):
+        """콘솔이 띄운 세션은 stdin 으로 바로, 실행 중인 터미널 세션은 턴 끝에 Stop 훅으로 보낸다. 쉬는 터미널은 불가. 첨부(files)는 콘솔 세션만."""
         if s["managed"]:
-            if not self.manager.send_or_resume(s["id"], text):
+            if not self.manager.send_or_resume(s["id"], text, files or None):
                 raise HttpError(502, "세션에 보내지 못했어.")
             with self.store.lock:
                 s["turn_running"] = True
@@ -2115,7 +2124,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(415, "Content-Type 은 application/json 이어야 합니다.")
             if path == "/api/events" and method == "GET":
                 return self.events()
-            body = self.read_json(API_BODY_LIMIT) if method != "GET" else {}
+            limit = ATTACH_BODY_LIMIT if method == "POST" and ATTACH_PATH.fullmatch(path) else API_BODY_LIMIT
+            body = self.read_json(limit) if method != "GET" else {}
             status, data = app.api(method, path, query, body)
             if isinstance(data, Raw):
                 return self.send(status, data.body, data.ctype, data.headers)
