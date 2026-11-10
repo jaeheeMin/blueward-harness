@@ -11,6 +11,7 @@ import uuid
 from typing import Callable
 
 import attachments as attachments_mod
+import context_usage
 import platform_compat
 from hooks_api import tool_key
 from store import (CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, chat_clean, mark_check, mcp_servers_of, new_start_checks,
@@ -48,6 +49,9 @@ RELOAD_POLL = 0.05
 MCP_STATUS_SUBTYPE = "mcp_status"
 MCP_RECONNECT_SUBTYPE = "mcp_reconnect"
 MCP_REPLY_WAIT = 30.0
+# 기억 요약(#863). claude -p 에 user 메시지 "/compact" 를 보내면 system/status(compacting) → compact_result → compact_boundary 가 온다.
+COMPACT_COMMAND = "/compact"
+COMPACT_ACTION = "Compact"  # currentAction 값(화면 문구는 flow-logic 의 plainAction 이 쉬운 말로 바꾼다)
 RELOADED = re.compile(r"Reloaded:\s*\d+\s+plugins?", re.IGNORECASE)
 RELOAD_ERRORS = re.compile(r"(\d+)\s+errors?", re.IGNORECASE)
 
@@ -320,6 +324,58 @@ class Manager:
                     if title:
                         self.store.set_title(s, title, TITLE_PROMPT)
         return proc.write(user_message(text, attachments))
+
+    def compact(self, sid: str) -> dict:
+        """기억을 요약하라는 /compact 를 stdin 으로 보낸다. 일하는 중이거나 이미 요약 중이면 보내지 않는다. {"ok"} 또는 {"ok": False, "error", "busy"?}."""
+        proc = self.proc_for(sid)
+        if proc is None or not proc.alive():
+            return {"ok": False, "error": "실행 중인 프로세스가 없어."}
+        with self.store.lock:
+            s = self.store.get(sid)
+            if s is None:
+                return {"ok": False, "error": "없는 세션이야."}
+            if s.get("turn_running") or (s.get("compact") or {}).get("state") == "running":
+                return {"ok": False, "busy": True, "error": "지금 일하는 중이야. 끝난 뒤에 요약해 줘."}
+            s["compact"] = {"state": "running", "at": self.store.clock()}
+            s.update(turn_running=True, currentAction=COMPACT_ACTION)
+            self.store.add_log(s, "기억 요약을 요청함")
+        if not proc.write(user_message(COMPACT_COMMAND)):
+            with self.store.lock:
+                s.pop("compact", None)
+                s.update(turn_running=False, currentAction="")
+            return {"ok": False, "error": "세션에 보내지 못했어."}
+        self.store.touch(s)
+        return {"ok": True}
+
+    def _compact_event(self, s: dict, e: dict) -> None:
+        """/compact 의 이벤트를 세션 상태와 대화 한 줄로 옮긴다(store.lock 안에서 부른다). 모르는 모양은 지어내지 않고 넘긴다."""
+        sub = e.get("subtype")
+        cp = s.get("compact") if isinstance(s.get("compact"), dict) else {}
+        if sub == "status":
+            if e.get("status") == "compacting":
+                s["compact"] = {"state": "running", "at": cp.get("at") or self.store.clock()}
+                s["currentAction"] = COMPACT_ACTION
+            elif e.get("compact_result") not in (None, "success"):  # success 는 compact_boundary 가 이어서 알린다
+                self._compact_failed(s, str(e.get("compact_error") or e.get("compact_result"))[:200])
+        elif sub == "compact_boundary":
+            meta = e.get("compact_metadata") if isinstance(e.get("compact_metadata"), dict) else {}
+            num = lambda k: meta[k] if isinstance(meta.get(k), int) and not isinstance(meta.get(k), bool) and meta[k] >= 0 else None
+            pre, post = num("pre_tokens"), num("post_tokens")
+            path = s.get("transcriptPath")
+            old = context_usage.read_last_usage(path) if isinstance(path, str) and path else None
+            s["compact"] = {"state": "done", "pre": pre, "post": post, "at": self.store.clock(), "auto": meta.get("trigger") == "auto",
+                            "stale": old["tokens"] if old else None}  # stale: 요약 전 대화 기록의 마지막 사용량(이 값이 그대로면 아직 새 답이 없다)
+            s["currentAction"] = ""
+            text = "기억을 요약했어" + (f" · {pre:,} → {post:,} 토큰" if pre is not None and post is not None else "")
+            self.store.add_log(s, text)
+            self.store.add_chat(s, "note", text, tone="ok")
+
+    def _compact_failed(self, s: dict, reason: str) -> None:
+        s["compact"] = {"state": "failed", "at": self.store.clock(), "reason": reason}
+        s["currentAction"] = ""
+        text = "기억을 요약하지 못했어" + (f" (원문: {reason})" if reason else "")
+        self.store.add_log(s, text)
+        self.store.add_chat(s, "note", text, tone="bad")
 
     def interrupt(self, sid: str) -> bool:
         proc = self.proc_for(sid)
@@ -640,12 +696,20 @@ class Manager:
                     elif block.get("type") == "text" and block.get("text"):
                         self.store.add_log(s, "Claude Code: " +str(block["text"]).strip().split("\n", 1)[0][:200])
                         self.store.add_chat(s, "ai", str(block["text"]))
+            elif kind == "system" and e.get("subtype") in ("status", "compact_boundary"):
+                self._compact_event(s, e)
             elif kind == "result":
                 s["currentAction"] = ""
                 s["turn_running"] = False
                 failed = bool(e.get("is_error"))  # 오류 result 도 subtype 은 success 라서 is_error 로 가린다(#865)
                 if not failed:
                     s.pop("apiIssue", None)  # 이번 턴이 정상으로 끝나면 앞의 오류·재시도 안내는 닫는다
+                if (s.get("compact") or {}).get("state") == "running":  # 요약하라고 했는데 결과 신호 없이 턴이 끝났다
+                    if e.get("is_error"):
+                        self._compact_failed(s, str(e.get("result") or e.get("subtype") or "")[:200])
+                    else:
+                        s["compact"] = {"state": "unknown", "at": self.store.clock()}
+                        self.store.add_chat(s, "note", "기억 요약이 끝났다는 신호는 왔는데 결과는 확인 못 했어", tone="warn")
                 if isinstance(e.get("result"), str) and e["result"] and not s.get("reportFresh") and not failed:
                     s["report"] = e["result"]  # Stop 훅이 이번 턴에 못 왔을 때를 위한 대비(턴마다 reportFresh 를 비우므로 이후 턴도 반영된다)
                     s["reportFresh"] = True
@@ -759,6 +823,8 @@ class Manager:
                 raw = proc.last_result.strip()[:300]
                 self._auto_note(s, f"auto 모드로 시작하다 끝났어. {AUTO_UNAVAILABLE.split('. ', 1)[0]}. "
                                    + (f"claude 가 낸 메시지 원문: {raw}" if raw else "claude 가 남긴 메시지가 없어서 이유는 확인 못 함"))
+            if (s.get("compact") or {}).get("state") == "running":
+                self._compact_failed(s, "세션 프로세스가 끝났어")
             s.update(managed_alive=False, starting=False, turn_running=False, ended=True)
             self.store.close_session(s["id"], "세션이 끝나서 닫힘")
             self.store.add_log(s, "세션 프로세스가 끝남")

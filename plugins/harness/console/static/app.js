@@ -977,7 +977,7 @@
   /* ---------- 세션 (/s/:id) ---------- */
   function sessionView(root) {
     var id = route.id, detail = null, errored = null, fetching = false, timer = null;
-    var memDismissed = {}, regions = {}, parts = {}, syncLegend = function () {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, permBusy = false, permNote = '', sent = [];
+    var memDismissed = {}, regions = {}, parts = {}, syncLegend = function () {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, permBusy = false, permNote = '', sent = [], compactSending = false;
     var srsCache = {};  // 작업 폴더별 SRS Status 응답(설정·표준 갈래 세션의 "SRS 상태" 칸)
     var chatAll = false, chatOpen = {}, chatKey = null;  // 앞 대화를 펼쳤는지 · 긴 AI 말을 펼친 것(시각별) · 마지막으로 그린 대화 모양(새 항목 감지)
 
@@ -1054,7 +1054,7 @@
       // 시안에 없는 옛 칸(도구 버튼 줄 · 권한 모드 · 검토 요청 주소와 바뀐 파일 · 일어난 일 기록 · 기술 정보)은 "자세히" 로 접는다. 기능은 그대로다.
       var fold = h('details', { class: 'more fold', 'data-fold': '1' }, h('summary', { text: '자세히 (도구 · 권한 · 검토 요청 주소 · 기록 · 기술 정보)' }));
       page.appendChild(fold);
-      ['tools', 'perm', 'files', 'log', 'tech'].forEach(function (k) { region(k, fold); });
+      ['tools', 'perm', 'memory', 'files', 'log', 'tech'].forEach(function (k) { region(k, fold); });
       parts.tools = ui.toolsRow(function () { var s = cur(); return { session: s.id ? s : null, cwd: s.cwd }; }); regions.tools.appendChild(parts.tools.el);
       parts.folder = ui.folderNotice(); regions.folder.appendChild(parts.folder.el);
       root.appendChild(page);
@@ -1258,6 +1258,32 @@
         if (still.length) mcpErr = name + ' 은(는) 아직 연결되지 않았어. 잠시 뒤에 다시 눌러 봐.';
       }, function (e) { mcpErr = '다시 연결하지 못했어: ' + e.message; }).then(function () { mcpBusy = ''; paintNotices(cur()); });
     }
+
+    // 기억 요약(#863): 일하는 중·요약 중에는 누를 수 없다. 서버도 한 번 더 막는다.
+    function compactButton(s, cls) {
+      var squeezing = !!(s.compact && s.compact.state === 'running'), busy = s.status === 'running' || s.status === 'starting' || (s.pendingRequestIds || []).length > 0;
+      return h('button', { type: 'button', class: cls, 'data-compact': '1', disabled: squeezing || busy || compactSending, text: squeezing ? '요약하는 중…' : '요약해서 계속하기',
+        title: squeezing ? '기억을 요약하는 중이야.' : busy ? '일하는 중에는 요약할 수 없어. 끝난 뒤에 눌러 줘.' : '앞 대화를 짧게 줄여서 이 세션을 이어 가요.',
+        onClick: function () {
+          if (squeezing || busy || compactSending) return;
+          compactSending = true; paintNotices(cur()); paintMemory(cur());
+          api('POST', '/api/sessions/' + encodeURIComponent(id) + '/compact', {}).then(function () { followNote = '기억을 요약하는 중이야. 조금 걸려.'; },
+            function (e) { followNote = e.message; }).then(function () { compactSending = false; paintFollowNote(); refetchSoon(); paintNotices(cur()); paintMemory(cur()); });
+        } });
+    }
+    // 자세히 안의 기억 칸: 기억 사용량과 같은 [요약해서 계속하기]
+    function paintMemory(s) {
+      var box = regions.memory;
+      if (!box) return;
+      var mem = window.BHLogic.memoryOf(s);
+      box.hidden = !s.managed;
+      if (!s.managed) return;
+      var last = s.compact && s.compact.state === 'failed' ? ' · 지난번 요약은 실패했어' : s.compact && s.compact.state === 'done' ? ' · 방금 요약했어' : '';
+      box.replaceChildren(h('section', { class: 'mt-32', 'data-memory-panel': '1' }, h('span', { class: 'label', text: '기억 요약' }),
+        h('p', { class: 'note-muted', text: (mem.kind === 'unknown' ? '기억 사용량은 확인 못 함' : mem.kind === 'pct' ? mem.pct + '% 사용(' + mem.words + ')' : mem.words + ' 사용') + last }),
+        compactButton(s, 'pill line sm')));
+    }
+
     function paintNotices(s) {
       var notices = [], top = [];
       // 시안 G-18: 기억이 90% 이상 찼으면 제목 위 맨 꼭대기에 노란 배너, [새 세션으로 넘기기](진한) [계속하기](테두리).
@@ -1265,11 +1291,14 @@
       var mem = window.BHLogic.memoryOf(s);
       if (mem.kind === 'pct' && mem.level === 'hot' && s.status !== 'ended' && !memDismissed[s.id] && lsGet('bh-mem-ok:' + s.id) !== '1') {
         var canHand = s.managed && s.flowId && !s.handedOffTo;
+        var squeezing = !!(s.compact && s.compact.state === 'running');
         top.push(h('div', { class: 'banner mem', role: 'status', 'data-memory-banner': '1' },
           h('b', { class: 'mem-t', text: '이 세션 기억이 거의 찼어 (' + mem.pct + '%)' }),
-          h('span', { class: 'mem-d', text: canHand ? '더 길어지면 앞 내용을 잊고 실수할 수 있어. 지금까지 한 일을 정리해서 새 세션으로 넘기길 권해.'
-            : '더 길어지면 앞 내용을 잊고 실수할 수 있어. ' + (s.managed ? '정해진 갈래가 없어서 여기서는 넘길 수 없어. 새 작업으로 시작해 줘.' : '터미널 세션이라 여기서는 넘길 수 없어. 터미널에서 /harness:handoff 를 불러 줘.') }),
+          h('span', { class: 'mem-d', text: squeezing ? '기억을 요약하는 중이야. 조금 걸려.' : canHand ? '더 길어지면 앞 내용을 잊고 실수할 수 있어. 지금까지 한 일을 정리해서 새 세션으로 넘기거나, 기억을 요약해서 이어 가길 권해.'
+            : '더 길어지면 앞 내용을 잊고 실수할 수 있어. ' + (s.managed ? '정해진 갈래가 없어서 여기서는 넘길 수 없어. 기억을 요약해서 이어 가거나 새 작업으로 시작해 줘.' : '터미널 세션이라 여기서는 넘길 수 없어. 터미널에서 /harness:handoff 를 불러 줘.')
+              + (s.compact && s.compact.state === 'failed' ? ' (지난번 요약은 실패했어.)' : '') }),
           h('span', { class: 'acts mem-acts' },
+            s.managed ? compactButton(s, 'pill line mem-compact') : null,
             canHand ? h('button', { type: 'button', class: 'pill dark mem-go', text: '새 세션으로 넘기기', onClick: function () { parts.flow.handoffSame(cur()); } }) : null,
             h('button', { type: 'button', class: 'pill line mem-stay', text: '계속하기', onClick: function () { memDismissed[s.id] = true; lsSet('bh-mem-ok:' + s.id, '1'); paintNotices(cur()); } }))));
       }
@@ -1346,6 +1375,8 @@
         return h('div', { class: 'me', 'data-chat': 'me' }, text && text !== window.BHAttach.PLACEHOLDER ? h('div', { text: text }) : null, chips);  // 첨부는 이름·형식·크기만 기록에 있다
       });
     }
+    // 콘솔이 알리는 한 줄(예: 기억을 요약했어 · 35,779 → 8,449 토큰). 실패·확인 못 함은 tone 으로 구분한다.
+    function chatNote(c) { return h('div', { class: 'reqnote chat-note', 'data-chat': 'note', 'data-note-tone': c.tone || '', text: String(c.text || '') }); }
     function chatAi(c) {
       return chatCached('ai|' + String(c.t) + '|' + (chatOpen[String(c.t)] ? 1 : 0) + '|' + String(c.text), function () { return chatAiBuild(c); });
     }
@@ -1535,7 +1566,7 @@
           icon('chev', 14), chatAll ? '앞 대화 접기' : '… 앞 대화 ' + hidden + '개 접힘'));
       }
       items.slice(hidden).forEach(function (c) {
-        var el = c.role === 'me' ? chatMe(c) : c.role === 'ai' ? chatAi(c) : c.role === 'req' ? chatReq(c, s, drawn) : c.role === 'block' ? chatBlock(c, s) : null;
+        var el = c.role === 'me' ? chatMe(c) : c.role === 'ai' ? chatAi(c) : c.role === 'req' ? chatReq(c, s, drawn) : c.role === 'block' ? chatBlock(c, s) : c.role === 'note' ? chatNote(c) : null;
         if (el) out.push(el);
       });
       return out;
@@ -1598,6 +1629,7 @@
       paintMsgs(s);
       paintSubs(s);
       paintPerm(s);
+      paintMemory(s);
       parts.checks.update(s); parts.flow.update(s); parts.tools.update();
       parts.folder.update(s.cwd, window.BHLogic.sameFolderBusy(s, Array.from(sessions.values())), function (path) { draft.cwd = path; draft.picked = null; });
       parts.docs.update(s);

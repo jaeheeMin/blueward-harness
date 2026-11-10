@@ -646,6 +646,7 @@ table.list .unk { color: #5a4bc2; }
 .me { align-self: flex-end; max-width: 78%; padding: 10px 15px; border-radius: 18px 18px 5px 18px; background: var(--card); color: var(--lightink); overflow-wrap: anywhere; }
 .me { white-space: pre-wrap; }
 .reqnote { align-self: flex-start; max-width: 92%; padding: 8px 14px; border-radius: 12px; background: var(--card); color: var(--lmuted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.chat-note[data-note-tone="bad"] { color: var(--danger); font-weight: 600; }
 .ai { max-width: 92%; overflow-wrap: anywhere; }
 .ai .eb { display: block; }
 .quiet { color: var(--lmuted); }
