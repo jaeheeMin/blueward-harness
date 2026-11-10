@@ -47,8 +47,12 @@ out({"type": "system", "subtype": "hook_started", "session_id": sid})
 model = args[args.index("--model") + 1] if "--model" in args else "fake-default-model"  # 진짜 init 처럼 실제 모델 이름을 싣는다
 mode = args[args.index("--permission-mode") + 1] if "--permission-mode" in args else "default"
 plugin_dir = args[args.index("--plugin-dir") + 1] if "--plugin-dir" in args else ""
-out({"type": "system", "subtype": "init", "session_id": sid, "model": model, "permissionMode": mode, "args": args,
-     "plugins": [{"name": "harness", "path": plugin_dir, "source": "inline"}]})
+mcp = json.loads(os.environ["FAKE_MCP"]) if os.environ.get("FAKE_MCP") else None  # [{name,status,error?}]
+init = {"type": "system", "subtype": "init", "session_id": sid, "model": model, "permissionMode": mode, "args": args,
+        "plugins": [{"name": "harness", "path": plugin_dir, "source": "inline"}]}
+if mcp is not None:  # 진짜 init 은 이름·상태·source 만 싣는다(실패 사유는 mcp_status 로만)
+    init["mcp_servers"] = [{"name": m["name"], "status": m["status"], "source": "user"} for m in mcp]
+out(init)
 for line in sys.stdin:
     msg = json.loads(line)
     if msg.get("type") == "control_request":
@@ -71,6 +75,19 @@ for line in sys.stdin:
                     "commands": [], "agents": [], "plugins": [
                         {"name": "harness", "path": plugin_dir, "source": "inline", "version": "1.2.3"},
                         {"name": "other", "path": "/x", "source": "market", "version": "0.4"}], "error_count": 0}}})
+            continue
+        if request.get("subtype") == "mcp_status":
+            out({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"], "response": {
+                "mcpServers": [dict(m, config={}, transport="stdio", scope="user", source="user", tools=[]) for m in (mcp or [])]}}})
+            continue
+        if request.get("subtype") == "mcp_reconnect":
+            target = [m for m in (mcp or []) if m["name"] == request.get("serverName")]
+            if os.environ.get("FAKE_MCP_RECONNECT_FAIL") or not target:
+                out({"type": "control_response", "response": {"subtype": "error", "request_id": msg["request_id"], "error": "Server not found or failed"}})
+            else:
+                target[0].update(status="connected")
+                target[0].pop("error", None)
+                out({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"], "response": {}}})
             continue
         out({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"]}})
         continue

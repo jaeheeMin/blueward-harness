@@ -262,6 +262,18 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 `GET /api/jobs/:jobId` → `{id, kind:"flowNext", status("handoff"/"confirm"/"starting"/"started"/"failed"/"canceled"), fromSession, flowId, prompt(confirm 일 때), sessionId(started 일 때 새 세션 id), error, warning}`. 작업은 메모리에만 있다(서버를 다시 띄우면 사라진다). 실패는 이전 세션 로그에도 남는다. 예외가 나도 job 은 `failed`(사유)로 끝나 세션이 '넘기는 중' 에 갇히지 않는다.
 
+## 7d. MCP 연결 상태와 MCP 도구 승인 (#864)
+
+claude 2.1.321 실측(`system/init`, `control_request` mcp_status·mcp_reconnect, MCP 도구 `can_use_tool`)에 맞춘다.
+
+**상태 읽기.** 콘솔이 띄운 세션은 `system/init` 의 `mcp_servers[{name,status,source}]` 를 세션의 `mcpServers[{name,status,error}]` 로 적는다(status: `connected`·`failed`·`needs-auth`·`pending`·`disabled`, 그 밖의 값은 "상태를 확인하지 못했어요" 로 문제 취급). init 에는 실패 사유가 없다. 연결 안 된 서버가 하나라도 있으면 읽기 스레드와 다른 스레드에서 `control_request{subtype:"mcp_status"}` 를 보내 `response.mcpServers[].error`(예: `Connection closed`)까지 받아 채운다(읽기 스레드가 응답을 기다리면 응답을 못 읽는다). `init` 에 `mcp_servers` 키가 없으면 알던 값을 지킨다(없다는 말이 아니다). 세션 로그에 "연결되지 않은 MCP 서버: …" 를 남긴다.
+
+**세션 필드 `mcp`** `{state, canReconnect, servers[{name,status,label,problem,error,canReconnect}]}`. `state`: `ok`(모두 연결됨, 화면은 아무것도 안 그린다) · `problem`(실패·로그인 필요·모르는 상태가 있음. 화면이 노란 알림으로 문제 서버만 보인다, 사유는 "자세히") · `none`(끝난 세션, 서버 없음, init 에 목록이 없음. 화면은 그리지 않는다) · `unknown`(터미널 세션은 init 을 받지 못해 모른다. 화면은 "연결됐는지는 여기서 확인할 수 없어요" 한 줄, 연결됨이라 하지 않는다).
+
+**다시 연결** `POST /api/sessions/:id/mcp/reconnect {server}` → `control_request{subtype:"mcp_reconnect", serverName}` 뒤 `mcp_status` 로 새 상태를 받아 `200 {ok, session}`. `server` 가 비면 400, 터미널·끝난 세션 409, 이 세션에 없는 서버 404, claude 가 거절하거나 30초 안에 답이 없으면 502(상태는 그대로 두고, 연결됨으로 바꾸지 않는다). 단추는 `failed`·모르는 상태에만 있다(`needs-auth` 는 다시 연결로 안 풀려 "터미널에서 /mcp 로 로그인" 안내만).
+
+**MCP 도구 승인.** `can_use_tool` 의 `tool_name` 이 `mcp__<서버>__<도구>` 이면 `mcp_server.name`·`display_name`(도구 이름 그대로면 버림)을 요청에 붙이고, 요청 모델에 `mcp{server, tool, display}` 를 낸다(훅으로만 온 요청은 도구 이름에서 읽는다. 훅 요청과 합쳐질 때 없던 정보만 채운다). 화면 카드는 "SAP 시스템 도구(서버)의 '도구 이름' 을(를) 써도 될까요?"(서버 이름에 abap·sap 이 있을 때. 없으면 "연결 도구")라 묻고 `display` 를 우선한다. 도구 원문 이름·넘기는 값은 접힌 "자세히" 안에 둔다. 허용·거절 응답은 다른 도구와 같다. `mcp__…` 가 아닌 다른 `control_request`(예: MCP elicitation)는 아직 거부로 답한다 — 실측하지 않았다.
+
 ## 8. API
 
 | 메서드 | 경로 | 용도 |
@@ -289,6 +301,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 | GET | `/api/jobs/:jobId` | 다음 갈래 넘기기 진행 상태 (§7c) |
 | POST | `/api/sessions/:id/reload` | 플러그인 다시 불러오기(콘솔 세션만). `200 {ok, method, plugins, errorCount, harnessVersion}` / 턴 중 `202 {queued:true}` / 터미널·끝난 세션 409 / 실패 502 (§7b) |
 | POST | `/api/reload-all` | 콘솔 세션 전부에 같은 일. `{results[]}` |
+| POST | `/api/sessions/:id/mcp/reconnect` | 실패한 MCP 서버 다시 연결. body `{server}`. `200 {ok, session}` / 빈 값 400 / 터미널·끝난 세션 409 / 없는 서버 404 / 실패 502 (§7d) |
 | POST | `/api/sessions/:id/checks/:cid/skip` | 새 세션 점검 항목(`sync`/`version`/`update`/`reload`)을 건너뜀으로 |
 | GET | `/api/sessions/:id/files` | 만든 문서 목록(`{files[]}`, 판 묶음 `versions`) (§7b) |
 | GET | `/api/sessions/:id/files/preview` | 쿼리 `path`. md·표·슬라이드·이미지·none 미리보기 |
@@ -320,7 +333,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 - 시간 값(`startedAt`, `updatedAt`, 로그의 `time`, 요청의 `createdAt`·`answeredAt`)은 epoch **초**(소수 포함)다. 화면이 경과 시간을 계산한다.
 - `turnSkill` 은 `이번 차례`(§7)의 `start`/`deliver`/`prs`/없음, `turnUnknown` 은 `gh` 로 PR 을 보지 못해 판단이 불완전했다는 뜻이다. `bypassPermissions` 는 `permissionMode == "bypassPermissions"` 다.
 - `status` 는 끝난 터미널 세션 → `ended`, 대기 요청 있음 → `waiting`, 턴 실행 중 → `running`, 띄우는 중 → `starting`, 끝난 콘솔 세션 → `ended`, 그 밖 → `idle` 순으로 정한다.
-- 요청 모델: `id, sessionId, kind(permission/question), toolName, toolInput, hasSuggestions, status(pending/answered/closed), outcome, createdAt, answeredAt` 이고 질문에는 `questions` 가 더해진다. 완료된 요청은 최근 200개만 남긴다.
+- 요청 모델: `id, sessionId, kind(permission/question), toolName, toolInput, hasSuggestions, status(pending/answered/closed), outcome, createdAt, answeredAt` 이고 질문에는 `questions` 가, MCP 도구 승인에는 `mcp{server, tool, display}` 가 더해진다(§7d). 완료된 요청은 최근 200개만 남긴다.
 - 승인 답변에서 `allow_session` 은 `permission_suggestions` 가 없으면 400, 거부 사유가 비면 "콘솔에서 거부했습니다."(계획 확인이면 "계획을 고쳐 달라고 했어.") 를 쓴다. 질문 답변은 모든 질문에 빈 값이 아닌 답이 있어야 하고(없으면 400) 배열은 `", "` 로 잇는다. 이미 처리된 요청에 답하면 409 와 처리 결과를 돌려준다.
 - 실행 중이 아닌 터미널 세션에 메시지·스킬·예약을 보내면 409 와 이유를 돌려준다. 예약은 턴 끝에 한 번 꺼내 쓰고 `sessions.json` 에 함께 저장된다.
 

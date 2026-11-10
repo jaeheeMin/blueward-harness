@@ -84,6 +84,9 @@ def request_title(kind: str, tool_name, tool_input) -> str:
         return "질문"
     if tool_name == "ExitPlanMode":
         return "계획 확인"  # 계획 모드에서 AI 가 계획을 다 세우고 진행해도 되는지 묻는 요청(#861)
+    mcp = mcp_request_info(tool_name)
+    if mcp:
+        return f"연결 도구({mcp['server']})의 {mcp['tool']} 사용"[:100]
     return str(tool_name or "도구")[:100] + " 사용"
 
 
@@ -133,6 +136,59 @@ def display_title(s: dict) -> str:
         name = skill.split(":", 1)[-1]
         return SKILL_TITLES.get(name, name) + tail  # 같은 스킬 세션이 여럿이어도 폴더로 가려 본다
     return "이름 없는 세션" + tail
+
+
+def mcp_request_info(tool_name, known: dict | None = None) -> dict:
+    """MCP 도구(mcp__<서버>__<도구>) 승인이면 {"server", "tool", "display"}, 아니면 {}. claude 가 서버 이름·display_name 을 줬으면(known) 그것을 우선한다.
+    서버 이름에 밑줄 둘이 들어 있으면 도구 이름으로는 나눌 수 없어 known 이 없을 때는 첫 구분에서 나눈다."""
+    name = str(tool_name or "")
+    if not name.startswith("mcp__"):
+        return {}
+    known = known if isinstance(known, dict) else {}
+    server, _, tool = name[5:].partition("__")
+    server = str(known.get("server") or server)[:100]
+    if server and name.startswith(f"mcp__{server}__"):
+        tool = name[len(f"mcp__{server}__"):]
+    return {"server": server, "tool": tool[:100], "display": str(known.get("display") or "")[:100]}
+
+
+# claude 가 알려 주는 MCP 서버 상태(init·mcp_status)를 쉬운 말로. (쉬운 말, 문제인가)
+MCP_STATUS_TEXT = {
+    "connected": ("연결됨", False),
+    "failed": ("연결하지 못했어요", True),
+    "needs-auth": ("로그인이 필요해요(터미널에서 /mcp 로 로그인해 주세요)", True),
+    "pending": ("연결하는 중이에요", False),
+    "disabled": ("꺼져 있어요", False),
+}
+
+
+def mcp_servers_of(raw) -> list[dict]:
+    """claude 가 준 mcp_servers·mcpServers 를 [{name, status, error}] 로 줄인다. 모양이 다르면 빈 목록."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]:
+            out.append({"name": item["name"][:100], "status": str(item.get("status") or "")[:40],
+                        "error": str(item.get("error") or "")[:300]})
+    return out
+
+
+def mcp_view(s: dict) -> dict:
+    """세션 화면의 MCP 연결 상태. state: unknown(터미널 세션은 init 을 못 받아 모름) / none(보일 것 없음: 끝난 세션·서버 없음) /
+    ok(모두 연결됨, 화면은 조용히) / problem(실패·로그인 필요가 있음). 모르는 상태 이름은 '확인 못 함' 으로 두고 문제로 본다."""
+    if not s.get("managed"):
+        return {"state": "unknown", "servers": [], "canReconnect": False}
+    servers = s.get("mcpServers") if isinstance(s.get("mcpServers"), list) else []
+    if not s.get("managed_alive") or not servers:
+        return {"state": "none", "servers": [], "canReconnect": False}
+    items = []
+    for sv in servers:
+        text, bad = MCP_STATUS_TEXT.get(sv.get("status"), (f"상태를 확인하지 못했어요({sv.get('status') or '비어 있음'})", True))
+        items.append({"name": sv["name"], "status": sv.get("status", ""), "label": text, "problem": bad, "error": sv.get("error", ""),
+                      "canReconnect": sv.get("status") == "failed" or text.startswith("상태를")})  # 로그인은 다시 연결로 안 풀린다
+    bad_any = any(i["problem"] for i in items)
+    return {"state": "problem" if bad_any else "ok", "servers": items, "canReconnect": True}
 
 
 class RequestLimit(Exception):
@@ -191,6 +247,7 @@ class Request:
         self.created = created
         self.risk = ""  # "irreversible" 이면 되돌릴 수 없는 일이라 노랑 카드로 묻는다(#649)
         self.risk_note = ""  # 무엇을 하려는지 쉬운 말
+        self.mcp: dict = {}  # MCP 도구 승인이면 claude 가 준 {"server", "display"}(훅으로만 온 요청은 비어 있고 도구 이름에서 읽는다)
         self.status = "pending"  # pending | answered | closed
         self.outcome = ""  # 화면에 보여 줄 처리 결과
         self.response = None  # 훅에 돌려줄 값(answered 일 때)
@@ -214,6 +271,9 @@ class Request:
         }
         if self.risk:
             data["risk"], data["riskNote"] = self.risk, self.risk_note
+        mcp = mcp_request_info(self.tool_name, self.mcp)
+        if mcp:
+            data["mcp"] = mcp
         if self.kind == "question" and isinstance(self.tool_input, dict):
             data["questions"] = self.tool_input.get("questions", [])
         return data
@@ -486,8 +546,10 @@ class Store:
             del self.folders[20:]
 
     # ---- 요청 ----
-    def add_request(self, sid, kind, tool_name, tool_input, suggestions, key, risk: str = "", risk_note: str = "") -> tuple[Request, bool]:
-        """같은 세션·도구·입력의 동시 호출은 요청 하나로 합친다. (요청, 새로 만들었는지) 를 돌려준다."""
+    def add_request(self, sid, kind, tool_name, tool_input, suggestions, key, risk: str = "", risk_note: str = "",
+                    mcp: dict | None = None) -> tuple[Request, bool]:
+        """같은 세션·도구·입력의 동시 호출은 요청 하나로 합친다. (요청, 새로 만들었는지) 를 돌려준다.
+        mcp 는 claude 가 준 MCP 서버 이름·display_name({"server", "display"}). 합쳐질 때 먼저 온 요청에 없던 정보만 채운다."""
         with self.lock:
             sid = self.resolve_id(sid)
             for r in self.requests.values():
@@ -495,11 +557,14 @@ class Store:
                 # 진짜 요청의 '다시 묻지 않기' 답으로 적용된다.
                 if (r.status == "pending" and r.session_id == sid and r.kind == kind and r.key == key
                         and r.suggestions == (suggestions if isinstance(suggestions, list) else [])):
+                    if mcp and not r.mcp:
+                        r.mcp = dict(mcp)
                     return r, False
             if sum(1 for r in self.requests.values() if r.status == "pending") >= MAX_PENDING_REQUESTS:
                 raise RequestLimit("대기 중인 요청이 너무 많아.")
             r = Request(uuid.uuid4().hex[:12], sid, kind, tool_name, tool_input, suggestions, key, self.clock())
             r.risk, r.risk_note = risk, risk_note
+            r.mcp = dict(mcp) if mcp else {}
             self.requests[r.rid] = r
             s = self.sessions.get(sid)
             if s is not None:
@@ -739,6 +804,7 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "pendingRequestIds": pending, "canSend": ok, "cannotSendReason": why,
             "bypassPermissions": s["permissionMode"] == "bypassPermissions",
             "pluginVersions": [dict(p) for p in s.get("pluginVersions") or []],
+            "mcp": mcp_view(s),
             "sameFolder": same_folder_ids(store, s), "handedOffTo": s.get("handedOffTo") or None,
             "startChecks": [dict(c) for c in s.get("startChecks") or []],
             "context": context_usage.for_session(s),

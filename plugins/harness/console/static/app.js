@@ -491,7 +491,13 @@
     if (r.title) return MS(r.title);
     var qs_ = questionsOf(r);
     if (kindOf(r) === 'question') return qs_.length ? MS(qs_[0].question || qs_[0].header || '질문이 있습니다') : '질문이 있습니다';
+    if (r.mcp) return mcpAsk(r.mcp);
     return (r.toolName || r.tool_name || '도구') + ' 사용을 허용할까요?';
+  }
+  /* MCP 도구 승인 문장(#864): 서버 이름이 abap·sap 이면 "SAP 시스템 도구", 아니면 "연결 도구". 도구 이름은 display_name 을 우선한다. */
+  function mcpAsk(m) {
+    var kind = /abap|sap/i.test(m.server || '') ? 'SAP 시스템 도구' : '연결 도구';
+    return kind + (m.server ? '(' + m.server + ')' : '') + '의 \'' + (m.display || m.tool || '도구') + '\' 을(를) 써도 될까요?';
   }
   function kindOf(r) { return (r && (r.kind || r.type)) === 'question' ? 'question' : (r && (r.kind || r.type)) === 'permission' ? 'permission' : (questionsOf(r).length ? 'question' : 'permission'); }
   function questionsOf(r) {
@@ -1243,6 +1249,15 @@
       })));
     }
 
+    var mcpBusy = '', mcpErr = '';
+    function mcpReconnect(name) {
+      mcpBusy = name; mcpErr = ''; paintNotices(cur());
+      api('POST', '/api/sessions/' + encodeURIComponent(id) + '/mcp/reconnect', { server: name }).then(function (d) {
+        if (d && d.session && d.session.id) mergeSession(Object.assign({}, d.session, { id: id }));
+        var still = ((cur().mcp || {}).servers || []).filter(function (m) { return m.name === name && m.problem; });
+        if (still.length) mcpErr = name + ' 은(는) 아직 연결되지 않았어요. 잠시 뒤에 다시 눌러 보세요.';
+      }, function (e) { mcpErr = '다시 연결하지 못했어요: ' + e.message; }).then(function () { mcpBusy = ''; paintNotices(cur()); });
+    }
     function paintNotices(s) {
       var notices = [], top = [];
       // 시안 G-18: 기억이 90% 이상 찼으면 제목 위 맨 꼭대기에 노란 배너, [새 세션으로 넘기기](진한) [계속하기](테두리).
@@ -1263,6 +1278,23 @@
       }
       if (s.permissionNote) {
         notices.push(h('div', { class: 'banner info', 'data-perm-warn': '1', role: 'status' }, h('span', { text: s.permissionNote })));
+      }
+      // MCP(SAP 시스템 같은 연결 도구). 모두 연결됐으면 아무것도 안 그린다. 실패·로그인 필요는 눈에 띄게, 터미널 세션은 모른다고 말한다(#864).
+      var mcp = s.mcp || {};
+      if (mcp.state === 'problem') {
+        var bad = (mcp.servers || []).filter(function (m) { return m.problem; });
+        notices.push(h('div', { class: 'banner mcp', 'data-mcp': 'problem', role: 'status' },
+          h('b', { class: 'mcp-t', text: '연결이 안 된 도구가 있어요' }),
+          h('span', { class: 'mcp-d', text: 'AI가 아래 도구를 쓰려 해도 못 쓸 수 있어요.' }),
+          h('ul', { class: 'mcp-l' }, bad.map(function (m) {
+            return h('li', { 'data-mcp-server': m.name },
+              h('span', { class: 'mcp-n', text: m.name + ' — ' + m.label }),
+              m.error ? h('details', { class: 'mcp-more' }, h('summary', { text: '자세히' }), h('span', { class: 'mono', text: MS(m.error) })) : null,
+              m.canReconnect ? h('button', { type: 'button', class: 'pill line sm mcp-again', disabled: mcpBusy, text: mcpBusy === m.name ? '연결하는 중…' : '다시 연결', onClick: function () { mcpReconnect(m.name); } }) : null);
+          })),
+          mcpErr ? h('span', { class: 'mcp-err', role: 'alert', text: mcpErr }) : null));
+      } else if (mcp.state === 'unknown') {
+        notices.push(h('div', { class: 'banner info mcp-unknown', 'data-mcp': 'unknown', role: 'status' }, h('span', { text: '터미널에서 연 세션이라 SAP 같은 연결 도구가 잘 연결됐는지는 여기서 확인할 수 없어요.' })));
       }
       if (s.handedOffTo) {
         notices.push(h('div', { class: 'banner info' }, h('span', { text: '다음 세션으로 넘어감 → ' }),
@@ -1809,11 +1841,12 @@
         if (/(^|[\s;&|])(rm|rmdir|del|erase|unlink)\s|Remove-Item|지우|삭제/i.test(cmdText + ' ' + noteText)) verbs = ['이번만 지워', '지우지 마'];
         else if (/git\s+push|gh\s+pr\s+(create|merge)|올리|푸시/i.test(cmdText + ' ' + noteText)) verbs = ['이번만 올려', '올리지 마'];
       }
-      msgs.appendChild(h('div', { class: 'ai' }, h('span', { class: 'eb', text: 'AI' }), req.description || (irrev ? tool + ' 도구를 쓰려는데 되돌릴 수 없는 일이라 네 확인이 필요해.' : tool + ' 도구를 쓰려는데 네 확인이 필요해.')));
+      var mcpInfo = req.mcp || null;
+      msgs.appendChild(h('div', { class: 'ai' }, h('span', { class: 'eb', text: 'AI' }), req.description || (mcpInfo ? mcpAsk(mcpInfo) : irrev ? tool + ' 도구를 쓰려는데 되돌릴 수 없는 일이라 네 확인이 필요해.' : tool + ' 도구를 쓰려는데 네 확인이 필요해.')));
 
       var card = h('div', { class: 'bad' + (irrev ? ' irrev' : ''), 'data-risk': irrev ? 'irreversible' : null });
       card.appendChild(h('span', { class: 'tagx', text: irrev ? '확인 필요 · 되돌릴 수 없어' : '확인 필요' }));
-      card.appendChild(h('b', { class: 'bt', text: req.title || (irrev && req.riskNote ? req.riskNote : 'Claude Code가 ' + tool + ' 도구를 쓰려고 해. 허락할까?') }));
+      card.appendChild(h('b', { class: 'bt', text: mcpInfo && !(irrev && req.riskNote) ? mcpAsk(mcpInfo) : req.title || (irrev && req.riskNote ? req.riskNote : 'Claude Code가 ' + tool + ' 도구를 쓰려고 해. 허락할까?') }));  // MCP 는 서버 제목보다 쉬운 문장(#864)
       // 시안 17: 하네스 안내 줄은 강조 없이 연한 보통 글. 그 밖의 경고(req.risk 글)는 예전처럼 강조한다.
       if (risk) card.appendChild(h('span', { class: irrev ? 'muted-line' : 'warn-line', text: typeof risk === 'string' ? risk : (risk.text || risk.message || '') }));
       if (input && input.description) card.appendChild(h('span', { class: 'sm', text: MS(str(input.description)) }));
@@ -1823,7 +1856,8 @@
 
       var rows = h('dl', { class: 'rows' });
       function row(k, v, mono, scroll) { if (v == null || v === '') return; rows.appendChild(h('dt', { text: k })); rows.appendChild(h('dd', { class: (mono ? 'mono' : '') + (scroll ? ' scroll' : ''), tabindex: scroll ? '0' : null, text: MS(v) })); }
-      row('도구', tool, true);
+      if (mcpInfo) { row('연결 서버', mcpInfo.server, true); row('도구 이름(원문)', tool, true); } else row('도구', tool, true);
+      if (mcpInfo && input && typeof input === 'object' && Object.keys(input).length) row('AI가 넘기는 값', JSON.stringify(input, null, 2), true, true);
       if (f && input && input[f[1]] != null) row(f[0], str(input[f[1]]), true, tool === 'Bash');  // 여러 줄 명령(heredoc)의 줄바꿈을 그대로 보인다
       if (input && input.description) row('설명', str(input.description));
       if (input && typeof input.content === 'string') row('쓸 내용', input.content, true, true);
@@ -1832,7 +1866,8 @@
       var s = sessionOf() || {};
       row('작업 폴더', req.cwd || s.cwd, true);
       var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background;
-      var det = h('details', { class: 'more', open: !friendly }, h('summary', { text: tool === 'Bash' ? '자세히 (명령 원문)' : '자세히 (바뀌는 내용)' }), rows);
+      if (mcpInfo) friendly = true;  // MCP 도구는 문장으로 묻고 원문 이름·넘기는 값은 접어 둔다(#864)
+      var det = h('details', { class: 'more', open: !friendly }, h('summary', { text: tool === 'Bash' ? '자세히 (명령 원문)' : mcpInfo ? '자세히 (도구 이름·넘기는 값)' : '자세히 (바뀌는 내용)' }), rows);
       var kv = h('dl', { class: 'kv' });
       [['세션', s.title || sid()], ['브랜치', s.branch], ['도구 이름', tool], ['요청 번호', rid]].forEach(function (r) { if (r[1]) { kv.appendChild(h('dt', { text: r[0] })); kv.appendChild(h('dd', { class: 'mono', text: String(r[1]) })); } });
       /* 도구 이름·요청 번호·입력 전체는 팀원이 몰라도 되는 기술 정보라 한 겹 더 접어 둔다(#794). 무엇을 허락하는지는 위 "자세히" 의 명령·파일 줄에 그대로 있다. */
