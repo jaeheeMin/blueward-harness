@@ -223,6 +223,23 @@ def test_다음_단계_열이_없으면_모두_개발로_보고_대조하고_참
     assert _kinds(r["warnings"]) == {"srs_no_next_step", "spec_not_yet"}
 
 
+def test_사후_등록한_REQ는_원장_완료와_Spec이_있어도_위반도_경고도_없다(tmp_path):
+    # #859: SRS 없이 끝난 DEV-010 을 REQ-010(RICEFW DEV-010, Done)로 사후 등록. 원장은 완료 그대로.
+    _srs(tmp_path, [_req(10, "개발", "DEV-010", status="Done")])
+    link = _spec(tmp_path, 10)
+    _ledger(tmp_path, [_lrow(10, link).replace("대기", "완료")])
+    r = check_pairing(tmp_path)
+    assert r["status"] == PASS
+    assert r["violations"] == [] and r["warnings"] == []
+
+
+def test_사후_등록이_다른_번호면_RICEFW_불일치_위반이다(tmp_path):
+    # reserve 로 새 번호(REQ-015)를 받고 RICEFW 만 DEV-010 으로 적은 경우
+    _srs(tmp_path, [_req(15, "개발", "DEV-010", status="Done")])
+    _ledger(tmp_path, [_lrow(10, _spec(tmp_path, 10)).replace("대기", "완료")])
+    assert "ricefw_mismatch" in _kinds(check_pairing(tmp_path)["violations"])
+
+
 def test_Backlog_양식에서도_개발로_본_REQ의_짝_위반은_잡는다(tmp_path):
     head = "| ID | Title | Status |\n|---|---|---|\n"
     _srs(tmp_path, ["| REQ-001 | t | New |"], head=head)
