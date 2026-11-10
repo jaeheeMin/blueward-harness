@@ -483,8 +483,11 @@
     requestAnimationFrame(function () { sideQueued = false; renderSide(); });
   }
   function groupOf(s) { return window.BHLogic.groupOf(s); }
+  // 계획 모드에서 AI 가 계획을 다 세우고 "이대로 진행해도 되나" 묻는 요청(ExitPlanMode, #861)
+  function isPlan(r) { return !!r && (r.toolName || r.tool_name) === 'ExitPlanMode'; }
   function requestTitle(r) {
     if (!r) return '요청을 확인하세요';
+    if (isPlan(r)) return '계획 확인';
     if (r.title) return MS(r.title);
     var qs_ = questionsOf(r);
     if (kindOf(r) === 'question') return qs_.length ? MS(qs_[0].question || qs_[0].header || '질문이 있습니다') : '질문이 있습니다';
@@ -512,7 +515,7 @@
           ids.forEach(function (rid) {
             var r = requests.get(rid);
             if (r && r.status && r.status !== 'pending') return;
-            todo.push({ sname: title, href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : kindOf(r) === 'question' ? '답하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
+            todo.push({ sname: title, href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : kindOf(r) === 'question' ? '답하기' : isPlan(r) ? '계획 확인하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
           });
         } else if (!s.askedInText && window.BHLogic.prNeedsFix(s)) {  // 시안 G-24: 검사 실패한 내 PR 을 고칠 차례
           todo.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), verb: 'PR 고치기', title: title, sub: sub, t: s.updatedAt, fix: true });
@@ -545,6 +548,7 @@
     }
     return null;
   }
+  function planPending(s) { var p = firstPending(s); return !!(p && isPlan(p.r)); }  // 첫 대기 요청이 계획 확인인가
   /* 세션 한 줄 상태. 내 차례면 tone 이 attn 이다. */
   function sideStatus(s) {
     var g = groupOf(s), L = window.BHLogic, bk = L.blockOf(s);
@@ -553,7 +557,7 @@
     if (g !== 'running' && s.status !== 'ended' && L.prNeedsFix(s) && !firstPending(s)) return { tone: g === 'todo' ? 'attn' : '', fix: true, text: 'PR #' + s.flowPr.number + ' 고쳐야 함' };
     if (g === 'todo') {
       var p = firstPending(s);
-      var verb = p ? (!p.r ? '요청 확인하기' : kindOf(p.r) === 'question' ? '답하기' : '승인하기') : s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기';
+      var verb = p ? (!p.r ? '요청 확인하기' : kindOf(p.r) === 'question' ? '답하기' : isPlan(p.r) ? '계획 확인하기' : '승인하기') : s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기';
       return { tone: 'attn', text: '내 차례 · ' + verb };
     }
     var ph = window.BHLogic.phaseSide(s);  // 승인 기다림 · PR #n / 끝 · PR #n 합쳐짐(내 차례로 세지 않는다)
@@ -898,7 +902,7 @@
   var ui = window.BHFlowUI.create({
     h: h, clear: clear, api: api, qs: qs, listOf: listOf, icon: icon, link: link, go: go, sessions: sessions, requests: requests,
     baseName: baseName, fmtSize: fmtSize, clock: clock, safeHttp: safeHttp, mergeSession: mergeSession, refreshSession: refreshSession,
-    kindOf: kindOf, skillLabel: skillLabel, requestTitle: requestTitle, topline: topline,
+    kindOf: kindOf, isPlan: isPlan, skillLabel: skillLabel, requestTitle: requestTitle, topline: topline,
     startNew: function (text) { if (text && text.trim()) draft.text = text.trim(); go('/new'); }, stateBox: stateBox, loadingBox: loadingBox,
     loaded: function () { return loadedOnce; }, conn: function () { return conn.state; }
   });
@@ -1126,7 +1130,7 @@
 
     function eyebrowFor(s) {
       var pend = (s.pendingRequestIds || []).length;
-      if (pend) return ['attn', '내 응답을 기다리는 중'];
+      if (pend) return ['attn', planPending(s) ? '내 계획 확인을 기다리는 중' : '내 응답을 기다리는 중'];
       if (s.status === 'running') return ['accent', '지금 하는 일'];
       if (s.status === 'starting') return ['accent', '시작하는 중'];
       if (s.status === 'ended') return ['sec', '끝난 세션'];
@@ -1140,7 +1144,7 @@
     // 큰 제목은 쉬운 말로(#818). 도구 이름·입력 원문은 "자세히 > 기술 정보" 의 현재 동작에만 있다
     function headlineFor(s) {
       var pend = (s.pendingRequestIds || []).length;
-      if (pend) return 'Claude Code가 내 확인을 기다리고 있어';
+      if (pend) return planPending(s) ? 'AI가 계획을 세웠어 — 읽고 진행할지 정해 줘' : 'Claude Code가 내 확인을 기다리고 있어';
       if (s.status === 'running') return s.currentAction ? window.BHLogic.plainAction(s.currentAction, skillLabel) : (s.currentSkill ? skillLabel(s.currentSkill) + ' 진행 중' : '작업하는 중이야');
       if (s.status === 'starting') return '세션을 시작하고 있어';
       if (s.status === 'ended') return '세션이 끝났어';
@@ -1316,8 +1320,8 @@
       return h('div', { class: 'ask', 'data-ask': rid },
         h('span', { class: 'eb', text: '네 차례' + waitedText(r && (r.createdAt || r.createdAtMs)) }),
         h('b', { text: r ? requestTitle(r) : '확인해야 할 요청이 있어' }),
-        h('span', { class: 'sub', text: r ? (q ? 'AI가 물어본 게 있어. 답하면 이어서 일해.' : 'AI가 허락을 기다려. 확인하고 정해 줘.') : '요청 내용을 불러오는 중이거나 읽지 못했어.' }),
-        h('div', { class: 'acts' }, link('/r/' + encodeURIComponent(rid), { class: 'pill acc', text: r ? (q ? '답하기' : '승인하기') : '열기' })));
+        h('span', { class: 'sub', text: r ? (q ? 'AI가 물어본 게 있어. 답하면 이어서 일해.' : isPlan(r) ? 'AI가 계획을 세웠어. 읽어 보고 진행할지 정해 줘.' : 'AI가 허락을 기다려. 확인하고 정해 줘.') : '요청 내용을 불러오는 중이거나 읽지 못했어.' }),
+        h('div', { class: 'acts' }, link('/r/' + encodeURIComponent(rid), { class: 'pill acc', text: r ? (q ? '답하기' : isPlan(r) ? '계획 보기' : '승인하기') : '열기' })));
     }
     // 시안 G-13: 질문은 대화 안에서 바로 고른다. 질문이 하나이고 하나만 고르는 것이면 보기를 누르는 순간 답이 간다.
     // 여러 개를 묻거나 여러 개를 고르게 하면 모두 고른 뒤 [답 보내기]. 직접 적은 답은 [직접 적어 답하기](/r/…)에서.
@@ -1384,9 +1388,9 @@
     function chatReq(c, s, drawn) {
       var pend = (s.pendingRequestIds || []).indexOf(c.id) >= 0;
       if (pend && !c.answer) { drawn[c.id] = true; return c.kind === 'question' ? inlineQuestion(c.id) : askCard(c.id); }
-      var label = c.kind === 'question' ? '질문' : '승인 요청';
+      var label = c.kind === 'question' ? '질문' : '승인 요청', plan = c.title === '계획 확인';
       return h('div', { class: 'reqnote', 'data-chat': 'req', 'data-chat-req': c.id },
-        label + ': ' + MS(c.title || '') + ' → ' + (c.answer ? MS(c.answer) : '처리 결과를 알 수 없어'));
+        (plan ? '' : label + ': ') + MS(c.title || '') + ' → ' + (c.answer ? MS(c.answer) : '처리 결과를 알 수 없어'));
     }
     // 하네스 훅이 막은 이유(#650): 막힘은 빨간 ✕ 카드, 검사를 못 해 멈춘 건 보라 점선 ? 카드
     var HOOK_NAMES = {
@@ -1638,6 +1642,7 @@
   function requestView(root) {
     var rid = route.id, req = requests.get(rid) || null, errored = null, outcome = null, busy = false;
     var why = '', answers = null, picked = null, otherTexts = null, sendErr = '', hadSession = false;
+    var planOpen = false, planRevise = false;  // 계획 카드: 긴 계획 펼침 · "고쳐 달라고 하기" 입력칸 열림(#861)
 
     function fetchReq() {
       api('GET', '/api/requests/' + encodeURIComponent(rid)).then(function (r) {
@@ -1657,8 +1662,9 @@
       }
       var isQ = kindOf(req) === 'question';
       hadSession = !!(sessionOf() || {}).id;
-      setTitle(isQ ? '질문' : '승인');
-      (isQ ? drawQuestion : drawPermission)();
+      var plan = !isQ && isPlan(req);  // 계획 글이 없어도 계획 카드로 그리고, 없다는 사실을 카드에 적는다(통과로 뭉개지 않는다)
+      setTitle(isQ ? '질문' : plan ? '계획 확인' : '승인');
+      (isQ ? drawQuestion : plan ? drawPlan : drawPermission)();
       fetchDetail();
     }
 
@@ -1705,7 +1711,8 @@
     }
     function ebText(isQ) {
       var s = sessionOf() || {}, open = isPending();
-      return (s.flowName ? s.flowName + ' · ' : '') + (open ? (isQ ? '내 답을 기다리는 중' : '내 승인을 기다리는 중') + waitedText(req.createdAt || req.createdAtMs) : (isQ ? '처리된 질문' : '처리된 승인 요청'));
+      var plan = !isQ && isPlan(req);
+      return (s.flowName ? s.flowName + ' · ' : '') + (open ? (isQ ? '내 답을 기다리는 중' : plan ? '내 계획 확인을 기다리는 중' : '내 승인을 기다리는 중') + waitedText(req.createdAt || req.createdAtMs) : (isQ ? '처리된 질문' : plan ? '처리된 계획 확인' : '처리된 승인 요청'));
     }
     /* 위 제목 블록(갈래 · 지금 하는 일, 세션 이름, 한 줄 상태) + 순서 알약 + 숫자 띠. 세션 화면과 같은 모양이다. */
     function head(page, isQ, line) {
@@ -1732,11 +1739,14 @@
       handoff: ['터미널로 넘어감', '기다리는 시간이 지나 터미널의 질문창이 대신 처리해.'],
       expired: ['닫힌 요청', '시간이 지났거나 세션이 끝나 더 이상 답할 수 없어.'], closed: ['닫힌 요청', '세션이 끝났거나 다른 곳에서 처리되어 더 이상 답할 수 없어.']
     };
+    var PLAN_RES = Object.assign({}, RES, { allow: ['이 계획대로 진행하기로 했어.', '권한 모드가 기본으로 돌아가고, AI가 계획대로 일을 시작해.'],
+      deny: ['고쳐 달라고 전했어.', 'AI가 적어 준 말을 보고 계획을 다시 세워.'] });
+    function resTable() { return isPlan(req) ? PLAN_RES : RES; }
     function resultOf() {
       if (outcome) return outcome;
       var code = String(req.outcome || req.closedReason || req.resolution && req.resolution.code || req.status || 'closed').toLowerCase();
       var key = /terminal|처리/.test(code) ? (/hand|넘/.test(code) ? 'handoff' : 'terminal') : /hand/.test(code) ? 'handoff' : /allowed_session|allow_session/.test(code) ? 'allow_session' : /allow/.test(code) ? 'allow' : /den/.test(code) ? 'deny' : /answer/.test(code) ? 'answered' : /expire|timeout/.test(code) ? 'expired' : 'closed';
-      var r = RES[key].slice();
+      var r = resTable()[key].slice();
       var custom = req.resultText || (req.resolution && (req.resolution.text || req.resolution.message)) || (typeof req.resolution === 'string' ? req.resolution : '');
       if (custom) r[1] = custom;
       return { title: r[0], note: r[1], extra: req.reason ? '전달한 이유: ' + req.reason : '' };
@@ -1823,11 +1833,60 @@
       page.appendChild(panel);
       root.appendChild(page);
     }
+    /* 계획 확인(#861): 계획 본문은 AI 말과 같은 마크다운으로 보인다. 긴 계획은 접어 두고, 명령·도구 입력은 "자세히" 에만 둔다.
+       [이 계획대로 진행] = 허락(권한 모드는 AI 쪽에서 기본으로 돌아온다) / [고쳐 달라고 하기] = 사유를 적어 거절(사유가 AI 에게 간다). */
+    function drawPlan() {
+      var page = h('div', { class: 'page sess req' }), input = req.toolInput || req.tool_input || req.input || {}, open = isPending();
+      head(page, false, open ? 'AI가 계획을 세웠어 · 읽고 진행할지 정해 줘' : '이미 처리된 계획이야');
+      var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
+      // Windows 에서 계획 파일 맨 앞에 BOM 이 붙어 오면 첫 제목 줄이 제목으로 안 그려진다(실측)
+      var has = typeof input.plan === 'string' && input.plan.replace(/^\uFEFF/, '').trim() !== '';  // claude 가 계획 파일을 안 쓰면 input 이 {} 로 온다(실측)
+      var text = has ? MS(String(input.plan).replace(/^\uFEFF/, '')) : '', long = text.split('\n').length > 28 || text.length > 2200;
+      var card = h('div', { class: 'bad plan', 'data-plan': '1' }, h('span', { class: 'eb', text: '계획' + (open ? waitedText(req.createdAt || req.createdAtMs) : '') }));
+      if (has) {
+        var body = h('div', { class: 'report-body' + (long && !planOpen ? ' clip' : ''), 'data-plan-body': '1', tabindex: long ? '0' : null });
+        body.appendChild(window.BHMarkdown.render(text));
+        card.appendChild(body);
+      } else {
+        card.appendChild(h('p', { class: 'warn-line', 'data-plan-empty': '1', text: '계획 본문이 없어. AI가 계획 글을 보내지 않았어' + (input.planFilePath ? '(계획 파일 위치만 왔어: ' + MS(String(input.planFilePath)) + ')' : '') + '. 진행하기 전에 [고쳐 달라고 하기] 로 계획을 적어 달라고 할 수 있어.' }));
+      }
+      if (has && long) card.appendChild(h('button', { type: 'button', class: 'disclose', 'aria-expanded': String(planOpen), onClick: function () { planOpen = !planOpen; draw(); } }, icon('chev', 14), planOpen ? '접기' : '계획 전체 보기'));
+      var rows = h('dl', { class: 'rows' }), s = sessionOf() || {};
+      [['도구', req.toolName || req.tool_name, true], ['계획 파일', input.planFilePath, true], ['작업 폴더', req.cwd || s.cwd, true]].forEach(function (r) {
+        if (r[1] == null || r[1] === '') return;
+        rows.appendChild(h('dt', { text: r[0] })); rows.appendChild(h('dd', { class: 'mono', text: MS(String(r[1])) }));
+      });
+      var det = h('details', { class: 'more', 'data-tech-fold': '1' }, h('summary', { text: '자세히 (도구 입력 전체)' }), rows,
+        h('pre', { class: 'box scroll', tabindex: '0', 'aria-label': '도구 입력 전체', text: MS(JSON.stringify(input, null, 2)) }));
+      card.appendChild(det);
+      if (open) {
+        if (planRevise) {
+          var send = h('button', { type: 'button', class: 'pill dark', 'data-decide': 'deny', disabled: busy || !why.trim(), text: '고쳐 달라고 보내기', onClick: function () { decide('deny'); } });
+          card.appendChild(h('div', { class: 'plan-why', 'data-plan-why': '1' },
+            h('label', { for: 'plan-why', class: 'field-label', text: '어떻게 고치면 좋을지 적어 줘' }),
+            h('input', { id: 'plan-why', class: 'input', value: why, placeholder: '예: 테스트 코드는 빼고, 문서만 먼저 고쳐 줘', autocomplete: 'off', disabled: busy,
+              onInput: function (e) { why = e.target.value; send.disabled = busy || !why.trim(); } })));
+          if (sendErr) card.appendChild(h('p', { class: 'note-attn', role: 'alert', text: sendErr }));
+          card.appendChild(h('div', { class: 'acts' }, send,
+            h('button', { type: 'button', class: 'pill line', disabled: busy, text: '취소', onClick: function () { planRevise = false; draw(); } })));
+        } else {
+          if (sendErr) card.appendChild(h('p', { class: 'note-attn', role: 'alert', text: sendErr }));
+          card.appendChild(h('div', { class: 'acts' },
+            h('button', { type: 'button', class: 'pill dark', 'data-decide': 'allow', disabled: busy, text: '이 계획대로 진행', onClick: function () { decide('allow'); } }),
+            h('button', { type: 'button', class: 'pill line', 'data-plan-revise': '1', disabled: busy, text: '고쳐 달라고 하기', onClick: function () { planRevise = true; draw(); var i = root.querySelector('#plan-why'); if (i) i.focus(); } })));
+        }
+        msgs.appendChild(card);
+      } else { msgs.appendChild(card); msgs.appendChild(resultBlock()); }
+      panel.appendChild(msgs);
+      if (open) panel.appendChild(sayBox());
+      page.appendChild(panel);
+      root.appendChild(page);
+    }
     function decide(d) {
       busy = true; sendErr = ''; var reason = why.trim(); draw();
       var body = { decision: d }; if (d === 'deny' && reason) body.reason = reason;
       api('POST', '/api/requests/' + encodeURIComponent(rid) + '/answer', body).then(function () {
-        var r = RES[d].slice(); if (d === 'deny' && reason) r[1] = '전달한 이유: ' + reason;
+        var r = resTable()[d].slice(); if (d === 'deny' && reason) r[1] = '전달한 이유: ' + reason;
         outcome = { title: r[0], note: r[1] };
       }, function (e) { afterFail(e); }).then(function () { busy = false; draw(); });
     }

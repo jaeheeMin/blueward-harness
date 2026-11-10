@@ -111,6 +111,7 @@ PreToolUse `*`(async)와 PreToolUse `AskUserQuestion`(동기)은 질문 도구�
 - 같은 세션·도구·입력의 동시 호출은 요청 하나로 합친다. 요청 하나에 붙은 훅 연결이 여러 개여도 모두 같은 답을 받고, 붙은 연결이 전부 끊겨야 요청을 닫는다.
 - 콘솔이 띄운 세션은 훅과 `can_use_tool` control_request 가 **동시에** 같은 승인을 보낸다 **[시험]**. 서버는 둘을 요청 하나로 합쳐 사용자에게 한 번만 묻고, 사용자가 답하면 훅 응답과 control_response 양쪽에 같은 답을 돌려준다(`managed.py`). 허용이면 control_response 는 `updatedInput` 에 원래 입력을, `updatedPermissions` 가 있으면 그것을 담는다. 요청이 답 없이 닫히면 control_response 는 거부다.
 - 이 경로에서 `AskUserQuestion` 의 control_request 는 다루지 않고(훅이 맡는다) 거부로 답한다.
+- **계획 확인(`ExitPlanMode`, #861)**: 계획 모드에서 AI 가 계획을 끝내면 `can_use_tool` control_request 로 `tool_name: "ExitPlanMode"`, `input: {plan(마크다운 글), planFilePath}`, `requires_user_interaction: true` 가 온다 **[시험]**. 일반 승인과 같은 요청 모델(`kind: permission`)이고 `toolInput` 이 그대로 화면에 간다. 제목은 "계획 확인"(`store.request_title`), 처리 결과 줄은 "이 계획대로 진행하기로 함" · "고쳐 달라고 함". 화면은 전용 카드(눈썹 `계획`, 마크다운 본문, 긴 계획은 접기, `[이 계획대로 진행]` = `allow` · `[고쳐 달라고 하기]` = 사유 입력 뒤 `deny`+`reason`)를 그린다. 계획 파일을 안 쓰면 `input` 이 `{}` 로 와 `plan` 이 없을 수 있어 **[시험]**, 그때는 본문 자리에 "계획 본문이 없어" 를 적고(`planFilePath` 가 있으면 위치만 적는다. 서버가 그 파일을 읽어 오지는 않는다) 같은 단추를 둔다. 허락은 control_response 에 `updatedInput` 을 input 그대로 담고 **[시험]** 그러면 claude 가 `system/status permissionMode:"default"` 를 보내므로, 서버는 그 알림에서 고른 값(`permissionChoice`)이 `plan` 이었으면 비워 이어 띄울 때 다시 계획 모드로 가지 않게 한다. 거절은 `{behavior: deny, message: <사유>}` 이고 AI 는 그 말을 받아 계획을 고쳐 다시 요청한다 **[시험]**. 사유가 비면 "계획을 고쳐 달라고 했어." 를 쓴다. 터미널 세션은 `PermissionRequest` 훅으로 같은 요청이 올 것으로 보고 같은 카드를 그리게 했다(훅 응답은 `{behavior: allow | deny, message}` 라 허락의 `updatedInput` 은 싣지 않는다). **[미확인]** 터미널 세션의 `PermissionRequest` 훅이 `ExitPlanMode` 에도 뜨는지는 실제로 재지 못했다. 서버 시험은 훅 모양의 요청으로만 확인했다.
 
 ### 질문 `/hooks/question`
 
@@ -320,7 +321,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 - `turnSkill` 은 `이번 차례`(§7)의 `start`/`deliver`/`prs`/없음, `turnUnknown` 은 `gh` 로 PR 을 보지 못해 판단이 불완전했다는 뜻이다. `bypassPermissions` 는 `permissionMode == "bypassPermissions"` 다.
 - `status` 는 끝난 터미널 세션 → `ended`, 대기 요청 있음 → `waiting`, 턴 실행 중 → `running`, 띄우는 중 → `starting`, 끝난 콘솔 세션 → `ended`, 그 밖 → `idle` 순으로 정한다.
 - 요청 모델: `id, sessionId, kind(permission/question), toolName, toolInput, hasSuggestions, status(pending/answered/closed), outcome, createdAt, answeredAt` 이고 질문에는 `questions` 가 더해진다. 완료된 요청은 최근 200개만 남긴다.
-- 승인 답변에서 `allow_session` 은 `permission_suggestions` 가 없으면 400, 거부 사유가 비면 "콘솔에서 거부했습니다." 를 쓴다. 질문 답변은 모든 질문에 빈 값이 아닌 답이 있어야 하고(없으면 400) 배열은 `", "` 로 잇는다. 이미 처리된 요청에 답하면 409 와 처리 결과를 돌려준다.
+- 승인 답변에서 `allow_session` 은 `permission_suggestions` 가 없으면 400, 거부 사유가 비면 "콘솔에서 거부했습니다."(계획 확인이면 "계획을 고쳐 달라고 했어.") 를 쓴다. 질문 답변은 모든 질문에 빈 값이 아닌 답이 있어야 하고(없으면 400) 배열은 `", "` 로 잇는다. 이미 처리된 요청에 답하면 409 와 처리 결과를 돌려준다.
 - 실행 중이 아닌 터미널 세션에 메시지·스킬·예약을 보내면 409 와 이유를 돌려준다. 예약은 턴 끝에 한 번 꺼내 쓰고 `sessions.json` 에 함께 저장된다.
 
 `askedInText` 는 §7 의 글로 물은 경우 추정이다. `group` 은 대기 중인 요청이 있거나 `askedInText` 이거나 `turnSkill` 이 있고 턴이 끝났으면 `todo`, 턴 실행 중이면 `running`, 그 밖에는 `idle` 이다. 제목은 SessionStart 의 `session_title` → 첫 요청 글 첫 줄(`/` 로 시작하는 글은 제외) → 폴더 이름 순이고 60자로 자른다. 로그는 세션당 200개, 한 줄 500자로 자른다. 훅이 모은 변경 파일은 `Write`·`Edit`·`MultiEdit`·`NotebookEdit` 의 PostToolUse 에서, PR 링크는 PostToolUse 의 도구 응답에서 `github.com/.../pull/N` 을 찾아 모은다. 최근 작업 폴더는 20개까지 기억한다.

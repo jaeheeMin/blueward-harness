@@ -509,6 +509,9 @@ class Manager:
             kind = e.get("type")
             if kind == "system" and e.get("subtype") == "status" and isinstance(e.get("permissionMode"), str):
                 s["permissionMode"] = e["permissionMode"]  # 도중에 바꾼 모드가 실제로 반영됐다는 알림
+                if s.get("permissionChoice") == "plan" and e["permissionMode"] != "plan":  # 계획을 승인해 모드가 기본으로 돌아왔다(#861). 고른 값도 맞춰야 이어 띄울 때 다시 계획 모드로 가지 않는다
+                    s["permissionChoice"] = ""
+                    self.store.add_log(s, "계획 승인: 권한 모드가 계획만 세우기에서 " + ("기본" if e["permissionMode"] == DEFAULT_MODE_NAME else e["permissionMode"][:40]) + "(으)로 바뀜")
             if kind == "system" and e.get("subtype") == "init":
                 s["starting"] = False
                 if isinstance(e.get("permissionMode"), str):
