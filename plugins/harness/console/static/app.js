@@ -977,7 +977,7 @@
   /* ---------- 세션 (/s/:id) ---------- */
   function sessionView(root) {
     var id = route.id, detail = null, errored = null, fetching = false, timer = null;
-    var memDismissed = {}, regions = {}, parts = {}, syncLegend = function () {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, permBusy = false, permNote = '', sent = [], compactSending = false;
+    var memDismissed = {}, regions = {}, parts = {}, syncLegend = function () {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, rw = null, permBusy = false, permNote = '', sent = [], compactSending = false;
     var srsCache = {};  // 작업 폴더별 SRS Status 응답(설정·표준 갈래 세션의 "SRS 상태" 칸)
     var chatAll = false, chatOpen = {}, chatKey = null;  // 앞 대화를 펼쳤는지 · 긴 AI 말을 펼친 것(시각별) · 마지막으로 그린 대화 모양(새 항목 감지)
 
@@ -1144,6 +1144,61 @@
       api('POST', '/api/sessions/' + encodeURIComponent(id) + '/interrupt', {}).then(function () { followNote = '중단을 요청했습니다.'; paintFollowNote(); refetchSoon(); },
         function (e) { followNote = '중단하지 못했습니다: ' + e.message; paintFollowNote(); });
       draw();
+    }
+
+    // 되돌리기(#862): 내 말 아래 단추 → 바뀔 파일 확인 카드 → 되돌린 결과 한 줄. rw = {uuid, phase: checking|ask|doing|done|fail, data, msg}
+    function rewindCheck(uuid) {
+      rw = { uuid: uuid, phase: 'checking' }; paintMsgs(cur());
+      api('POST', '/api/sessions/' + encodeURIComponent(id) + '/rewind', { uuid: uuid, dryRun: true }).then(function (d) {
+        rw = d.canRewind ? { uuid: uuid, phase: 'ask', data: d } : { uuid: uuid, phase: 'fail', msg: '되돌릴 수 없어. 이유: ' + (d.error || '알려 주지 않았어') };
+      }, function (e) { rw = { uuid: uuid, phase: 'fail', msg: '되돌릴 수 있는지 확인하지 못했어: ' + e.message }; }).then(function () { paintMsgs(cur()); });
+    }
+    function rewindDo(uuid) {
+      rw = { uuid: uuid, phase: 'doing' }; paintMsgs(cur());
+      api('POST', '/api/sessions/' + encodeURIComponent(id) + '/rewind', { uuid: uuid }).then(function (d) {
+        rw = d.canRewind ? { uuid: uuid, phase: 'done', msg: '되돌렸어. 파일을 이 요청을 보내기 전 모습으로 돌려놨어. 대화는 그대로야.' }
+          : { uuid: uuid, phase: 'fail', msg: '되돌리지 못했어. 이유: ' + (d.error || '알려 주지 않았어') };
+      }, function (e) { rw = { uuid: uuid, phase: 'fail', msg: '되돌렸는지 알 수 없어: ' + e.message }; }).then(function () { paintMsgs(cur()); refetchSoon(); });
+    }
+    function chatRewind(c, s) {
+      if (!s.managed || !c.uuid) return null;  // 터미널 세션(훅만)은 지점을 모른다
+      if (s.status === 'ended' && !(rw && rw.uuid === c.uuid)) return null;  // 끝난 세션은 되돌릴 수 없으니 내 말마다 같은 안내를 늘어놓지 않는다
+      var mine = rw && rw.uuid === c.uuid ? rw : null;
+      var blocked = s.status === 'running' || s.status === 'starting' || s.status === 'ended';
+      var wrap = h('div', { class: 'rewind', 'data-rewind': c.uuid });
+      if (!mine || mine.phase === 'checking' || mine.phase === 'doing') {
+        var busy = !!mine;
+        wrap.appendChild(h('div', { class: 'acts end' },
+          blocked ? h('span', { class: 'quiet', 'data-rewind-why': '1', text: s.status === 'ended' ? '끝난 세션은 되돌릴 수 없어' : 'AI 가 일하는 중엔 되돌릴 수 없어' }) : null,
+          h('button', { type: 'button', class: 'skiplink', 'data-rewind-open': '1', disabled: blocked || busy,
+            text: mine && mine.phase === 'checking' ? '바뀔 파일 확인하는 중…' : mine && mine.phase === 'doing' ? '되돌리는 중…' : '이 요청 이전으로 되돌리기',
+            onClick: function () { rewindCheck(c.uuid); } })));
+        return wrap;
+      }
+      var close = function () { rw = null; paintMsgs(cur()); };
+      if (mine.phase === 'ask') {
+        var d = mine.data, files = d.filesChanged || [];
+        var card = h('div', { class: 'ai rewind-card', 'data-rewind-card': 'ask' },
+          h('span', { class: 'eb', text: '되돌리기 확인' }));
+        if (!files.length) {
+          card.appendChild(h('p', { text: '이 요청 이후로 AI 가 고친 파일이 없어서 되돌릴 게 없어.' }));
+          card.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line sm', text: '닫기', onClick: close })));
+          return card;
+        }
+        card.appendChild(h('p', { text: '이 요청을 보내기 전 모습으로 파일 ' + files.length + '개가 돌아가요(추가했던 ' + (d.insertions || 0) + '줄은 사라지고, 지웠던 ' + (d.deletions || 0) + '줄은 돌아와요).' }));
+        var base = String(s.cwd || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() + '/';  // 작업 폴더 밑 파일은 상대 경로로 보인다
+        var shown = function (f) { var p = String(f).replace(/\\/g, '/'); return base.length > 1 && p.toLowerCase().indexOf(base) === 0 ? p.slice(base.length) : String(f); };
+        card.appendChild(h('ul', { class: 'rewind-files' }, files.slice(0, 12).map(function (f) { return h('li', { text: shown(f) }); }),
+          files.length > 12 ? h('li', { class: 'quiet', text: '… 외 ' + (files.length - 12) + '개' }) : null));
+        card.appendChild(h('p', { class: 'quiet', 'data-rewind-limit': '1', text: '파일만 돌아가요. 대화 내용은 그대로 남고, 이미 커밋하거나 푸시한 것은 안 돌아가요. AI 가 명령어(bash)로만 바꾼 파일, 보조 AI(서브에이전트)가 고친 파일, 내가 직접 고친 파일도 못 돌릴 수 있어요.' }));
+        card.appendChild(h('div', { class: 'acts' },
+          h('button', { type: 'button', class: 'pill dark sm', 'data-rewind-go': '1', text: '되돌리기', onClick: function () { rewindDo(c.uuid); } }),
+          h('button', { type: 'button', class: 'pill line sm', 'data-rewind-cancel': '1', text: '취소', onClick: close })));
+        return card;
+      }
+      return h('div', { class: 'acts end rewind-result', 'data-rewind-result': mine.phase },
+        h('span', { class: 'quiet', text: mine.msg || '' }),
+        h('button', { type: 'button', class: 'skiplink', text: '닫기', onClick: close }));
     }
 
     function eyebrowFor(s) {
@@ -1568,6 +1623,8 @@
       items.slice(hidden).forEach(function (c) {
         var el = c.role === 'me' ? chatMe(c) : c.role === 'ai' ? chatAi(c) : c.role === 'req' ? chatReq(c, s, drawn) : c.role === 'block' ? chatBlock(c, s) : c.role === 'note' ? chatNote(c) : null;
         if (el) out.push(el);
+        var back = c.role === 'me' ? chatRewind(c, s) : null;
+        if (back) out.push(back);
       });
       return out;
     }

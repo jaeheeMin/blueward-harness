@@ -2265,3 +2265,47 @@ def test_secret_values_are_masked_in_chat_and_record_form(tmp_path):
            "toolInput": {"command": "curl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwx' https://x", "description": "API 확인"}}
     appr = _smoke(tmp_path, "r/p1", [_session("s1", pendingRequestIds=["p1"])], [req])
     assert "abcdefghijklmnopqrstuvwx" not in appr["text"] and "도구에 넘기는 입력 전체" in appr["text"] and "••••••••" in appr["text"]
+
+
+def _rewind_chat():
+    return [{"t": 1, "role": "me", "text": "표 고쳐 줘", "uuid": "u-1"}, {"t": 2, "role": "ai", "text": "고쳤어"}]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_rewind_button_only_on_console_messages_and_blocked_while_running(tmp_path):
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())])
+    assert got["text"].count("이 요청 이전으로 되돌리기") == 1 and "<div.rewind>" in got["dump"]
+    term = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat(), managed=False)])  # 터미널(훅만) 세션은 지점을 모른다
+    assert "이 요청 이전으로 되돌리기" not in term["text"]
+    old = _smoke(tmp_path, "s/s1", [_session("s1", chat=[{"t": 1, "role": "me", "text": "uuid 없는 옛 말"}])])
+    assert "이 요청 이전으로 되돌리기" not in old["text"]
+    run = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat(), status="running")])
+    assert "AI 가 일하는 중엔 되돌릴 수 없어" in run["text"]
+    assert "AI 가 일하는 중엔" not in got["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_rewind_card_lists_files_and_limits_then_rewinds(tmp_path):
+    api = {"POST /api/sessions/s1/rewind": {"canRewind": True, "error": "", "filesChanged": ["a.txt", "docs/b.md"], "insertions": 3, "deletions": 5, "dryRun": True}}
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=api, actions=[{"click": "[data-rewind-open]"}])
+    text = got["text"]
+    for need in ("되돌리기 확인", "파일 2개", "a.txt", "docs/b.md", "추가했던 3줄", "지웠던 5줄", "대화 내용은 그대로", "커밋하거나 푸시한 것은 안 돌아가요", "되돌리기", "취소"):
+        assert need in text, need
+    first = [p for p in got["posts"] if p[1].endswith("/rewind")]
+    assert len(first) == 1 and '"dryRun":true' in first[0][2].replace(" ", "")
+    done = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=api, actions=[{"click": "[data-rewind-open]"}, {"click": "[data-rewind-go]"}])
+    posts = [p for p in done["posts"] if p[1].endswith("/rewind")]
+    assert len(posts) == 2 and "dryRun" not in posts[1][2] and "u-1" in posts[1][2]
+    assert "되돌렸어." in done["text"] and "대화는 그대로야" in done["text"]
+    cancel = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=api, actions=[{"click": "[data-rewind-open]"}, {"click": "[data-rewind-cancel]"}])
+    assert "되돌리기 확인" not in cancel["text"] and len([p for p in cancel["posts"] if p[1].endswith("/rewind")]) == 1  # 취소는 서버에 아무것도 안 보낸다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_rewind_shows_claude_reason_and_does_not_pass_silently(tmp_path):
+    no = {"POST /api/sessions/s1/rewind": {"canRewind": False, "error": "File rewinding is not enabled.", "filesChanged": [], "insertions": 0, "deletions": 0, "dryRun": True}}
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=no, actions=[{"click": "[data-rewind-open]"}])
+    assert "되돌릴 수 없어. 이유: File rewinding is not enabled." in got["text"] and "data-rewind-go" not in got["dump"]
+    empty = {"POST /api/sessions/s1/rewind": {"canRewind": True, "error": "", "filesChanged": [], "insertions": 0, "deletions": 0, "dryRun": True}}
+    e = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=empty, actions=[{"click": "[data-rewind-open]"}])
+    assert "되돌릴 게 없어" in e["text"] and "data-rewind-go" not in e["dump"]

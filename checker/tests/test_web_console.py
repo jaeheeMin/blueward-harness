@@ -7397,3 +7397,91 @@ def test_compact_route_only_for_console_sessions(mconsole):
     c.event("t1", "SessionStart")
     status, body, _ = c.call("POST", "/api/sessions/t1/compact", {})
     assert status == 409 and "터미널" in body["error"]
+
+
+# ---- 이 요청 이전으로 되돌리기(#862) ----
+
+def test_managed_launch_turns_on_file_checkpointing(tmp_path):
+    seen = {}
+
+    def popen(args, **kw):
+        seen.update(kw)
+        raise OSError("stop")
+
+    m = managed.Manager(Store(None), lambda: ["claude"], "/plug", popen=popen)
+    assert m.launch(str(tmp_path), "hi") is None
+    assert seen["env"][managed.CHECKPOINT_ENV] == "1" and "PATH" in seen["env"]  # 기존 환경은 그대로 두고 하나만 더한다
+
+
+def test_sent_message_carries_uuid_kept_in_chat(mconsole):
+    c = mconsole
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    me = [x for x in c.call("GET", f"/api/sessions/{sid}")[1]["chat"] if x["role"] == "me"]
+    assert len(me) == 1 and re.fullmatch(r"[0-9a-f-]{36}", me[0]["uuid"])
+    assert json.loads(managed.user_message("x", msg_uuid="u-1"))["uuid"] == "u-1" and "uuid" not in json.loads(managed.user_message("x"))
+    # 첨부(#860)와 함께 보내도 uuid 가 붙는다
+    both = json.loads(managed.user_message("x", attach_mod.parse([att("a.png", "image/png", PNG_1PX)]), msg_uuid="u-2"))
+    assert both["uuid"] == "u-2" and both["message"]["content"][0]["type"] == "image"
+
+
+def first_uuid(c, sid):
+    return next(x["uuid"] for x in c.call("GET", f"/api/sessions/{sid}")[1]["chat"] if x["role"] == "me")
+
+
+def test_rewind_dry_run_then_real(mconsole):
+    c = mconsole
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    u = first_uuid(c, sid)
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u, "dryRun": True})
+    assert status == 200 and body == {"canRewind": True, "error": "", "filesChanged": ["a.txt", "docs/b.md"], "insertions": 3, "deletions": 5, "dryRun": True}
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u})
+    assert status == 200 and body["canRewind"] is True and body["dryRun"] is False
+    assert any("이 요청 이전으로 되돌림" in x["text"] for x in c.app.store.get(sid)["log"])
+
+
+def test_rewind_passes_claude_reason_through_instead_of_hiding_it(mconsole, monkeypatch):
+    monkeypatch.setenv("FAKE_REWIND_ERROR", "1")
+    c = mconsole
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    u = first_uuid(c, sid)
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u})  # 실제 되돌리기만 오류(subtype:error)
+    assert status == 200 and body["canRewind"] is False and body["error"] == "Failed to rewind: disk"
+    assert any("되돌리지 못함: Failed to rewind: disk" in x["text"] for x in c.app.store.get(sid)["log"])
+
+
+def test_rewind_reports_cannot_rewind_when_claude_does_not_know_the_point(mconsole):
+    c = mconsole
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    u = first_uuid(c, sid)
+    with c.app.store.lock:
+        c.app.store.add_chat(c.app.store.get(sid), "me", "claude 가 모르는 지점", uuid="unknown-uuid")
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": "unknown-uuid", "dryRun": True})
+    assert status == 200 and body["canRewind"] is False and body["error"] == "No file checkpoint found for this message."
+    assert c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": "not-in-chat", "dryRun": True})[0] == 404  # 대화에 없는 지점은 claude 에 묻지 않는다
+    assert c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u, "dryRun": True})[0] == 200
+
+
+def test_rewind_refusals(mconsole, monkeypatch, tmp_path):
+    gate = tmp_path / "gate"
+    monkeypatch.setenv("FAKE_GATE", str(gate))
+    c = mconsole
+    c.event("term", "SessionStart")
+    assert c.call("POST", "/api/sessions/term/rewind", {"uuid": "x"})[0] == 409  # 터미널 세션은 못 한다
+    assert c.call("POST", "/api/sessions/nope/rewind", {"uuid": "x"})[0] == 404
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    u = first_uuid(c, sid)
+    assert c.call("POST", f"/api/sessions/{sid}/rewind", {})[0] == 404
+    assert c.call("POST", f"/api/sessions/{sid}/messages", {"text": "slow 작업"})[0] == 202
+    wait_for(lambda: c.app.store.get(sid)["turn_running"])
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u, "dryRun": True})
+    assert status == 409 and "일하는 중" in body["error"]  # AI 가 일하는 중엔 막는다
+    gate.write_text("go", encoding="utf-8")
+    wait_for(lambda: not c.app.store.get(sid)["turn_running"])
+    c.app.manager.close(c.app.manager.proc_for(sid))
+    wait_for(lambda: c.app.store.get(sid)["ended"])
+    assert c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u, "dryRun": True})[0] == 409

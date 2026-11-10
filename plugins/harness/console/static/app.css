@@ -661,6 +661,12 @@ table.list .unk { color: #5a4bc2; }
 .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
 .acts.end { justify-content: flex-end; }
 .acts .quiet { font-size: 13.5px; }
+.rewind { align-self: flex-end; margin-top: -6px; }
+.rewind .skiplink { min-height: 28px; margin-top: 0; }
+.rewind-card { padding: 12px 16px; border: 1.5px solid var(--lline); border-radius: 16px; background: var(--card); color: var(--lightink); }
+.rewind-card p { margin: 6px 0; font-size: 14px; line-height: 1.55; }
+.rewind-card .quiet { font-size: 13px; }
+.rewind-files { margin: 4px 0 6px; padding-left: 20px; font-size: 13px; font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
 .q { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1.5px solid var(--lline); border-radius: 16px; background: var(--card); color: var(--lightink); }
 .q b { font-weight: 600; overflow-wrap: anywhere; }
 .q .qh { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

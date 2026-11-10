@@ -7,6 +7,7 @@ stdin 의 user 메시지 내용에 따라 움직인다.
   control_request(reload_plugins)  plugins[{name,path,source,version}]·error_count 로 success. FAKE_NO_RELOAD_CONTROL 이면 error
   /reload-plugins  합성 응답 "Reloaded: 2 plugins · 0 errors". FAKE_NO_RELOAD_MESSAGE 이면 echo(미지원 흉내)
   /harness:handoff  코드 블록이 든 인계 글로 답한다. FAKE_HANDOFF=none 이면 코드 블록 없이, long 이면 4001자 코드 블록으로 답한다
+  control_request(rewind_files)  보낸 uuid 만 지점으로 안다. 환경변수 CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING 이 없으면 canRewind:false. FAKE_REWIND_ERROR 면 실제 되돌리기만 error
   slow     FAKE_GATE 파일이 생길 때까지(최대 30초) 턴을 끝내지 않는다
   garbage  stdout 에 깨진 줄을 섞는다
   그 밖    echo 로 답한다
@@ -53,6 +54,7 @@ init = {"type": "system", "subtype": "init", "session_id": sid, "model": model, 
 if mcp is not None:  # 진짜 init 은 이름·상태·source 만 싣는다(실패 사유는 mcp_status 로만)
     init["mcp_servers"] = [{"name": m["name"], "status": m["status"], "source": "user"} for m in mcp]
 out(init)
+seen_uuids, rewinds = set(), []
 for line in sys.stdin:
     msg = json.loads(line)
     if msg.get("type") == "control_request":
@@ -89,8 +91,25 @@ for line in sys.stdin:
                 target[0].pop("error", None)
                 out({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"], "response": {}}})
             continue
+        if request.get("subtype") == "rewind_files":  # 진짜처럼: 환경변수가 없으면 canRewind:false, 모르는 uuid 도 false, 실제 되돌리기 오류는 subtype:error
+            rid = msg["request_id"]
+            reason = "File rewinding is not enabled." if not os.environ.get("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING") else (
+                "" if request.get("user_message_id") in seen_uuids else "No file checkpoint found for this message.")
+            if reason and request.get("dry_run"):
+                out({"type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": {"canRewind": False, "error": reason}}})
+            elif reason or os.environ.get("FAKE_REWIND_ERROR"):
+                out({"type": "control_response", "response": {"subtype": "error", "request_id": rid, "error": reason or "Failed to rewind: disk"}})
+            elif request.get("dry_run"):
+                out({"type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": {
+                    "canRewind": True, "filesChanged": ["a.txt", "docs/b.md"], "insertions": 3, "deletions": 5}}})
+            else:
+                rewinds.append(request.get("user_message_id"))
+                out({"type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": {"canRewind": True, "skippedLinks": 0}}})
+            continue
         out({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"]}})
         continue
+    if msg.get("uuid"):
+        seen_uuids.add(msg["uuid"])
     text = msg["message"]["content"]
     if isinstance(text, list):  # 첨부가 있는 메시지(content 블록 배열). 시험이 받은 블록을 읽을 수 있게 파일에 남긴다
         if os.environ.get("FAKE_CONTENT_LOG"):
