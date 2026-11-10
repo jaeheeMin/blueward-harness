@@ -29,8 +29,9 @@ main 이면 start 절차, 다른 작업 브랜치면 같은 일인지 판단·�
   이슈를 만든다 — 제목 `<요약> (DEV-xxx)`(예: `판매오더 조회 앱 Spec 작성 (DEV-002)`), 본문 `DEV-xxx 하위 작업` 과
   대표 `[DEV-xxx]` 이슈 링크(`start/reserve_number.py list` 의 `issues` 에서 찾는다. 없으면 원장 줄이나 SRS 링크).
   브랜치는 `feat/{이슈번호}-…` 다. Spec PR 이 병합되면 이 하위 작업 이슈만 닫히고 `[DEV-xxx]` 는 열려 있다. 원장에 이미
-  있는 DEV 면 start 의 "이미 원장에 있는 DEV" 단계가 상태를 `진행` 으로 바꾸고, `/harness:deliver` 는 하위 작업 이슈의
-  `(DEV-xxx)` 로도 같은 줄을 찾아 `리뷰` 로 갱신한다.
+  있는 DEV 면 start 의 "이미 원장에 있는 DEV" 단계가 상태를 `진행` 으로 바꾼다. 단 원장 상태가 `완료` 인 DEV(예: SRS 없이 끝나 REQ 를
+  사후 등록한 건, #859)의 Spec 작성·수정은 원장 상태를 바꾸지 않는다 — `진행` 으로 바꿀지도 묻지 않고, Spec 칸만 채운다. `/harness:deliver` 는 하위 작업 이슈의
+  `(DEV-xxx)` 로도 같은 줄을 찾아 `리뷰` 로 갱신한다(`완료` 인 줄은 제외 — deliver 가 그대로 둔다).
 
 ## Spec 번호(DEV)
 

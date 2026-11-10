@@ -743,6 +743,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
         <li>Claude 가 모아서 묻는 질문에 답해. 모르면 "미결 사항" 에 남겨도 돼</li>
         <li>누가·언제·왜 요청했는지 알려 줘. 요구사항마다 Short Description 첫 줄에 <code>요청: 홍길동(영업팀), 2026-10-12, 킥오프 회의록</code> 처럼 들어가</li>
         <li><b>다음 단계 답하기.</b> 요구사항마다 "개발이야, 설정이야, 표준이야?" 를 물어봐. 코드를 짜면 <b>개발</b>, 설정만 하면 <b>설정</b>, SAP 표준 앱으로 되면 <b>표준</b>, 아직 모르면 <b>미정</b>이라고 해</li>
+        <li><b>SRS 없이 끝난 개발을 나중에 등록할 때.</b> "DEV-010 사후 등록" 이라고만 말해도 돼. Claude 가 요구사항(REQ)만 없는 개발을 후보로 보여 주고, 그 개발의 <code>[DEV-010]</code> 이슈 번호를 그대로 받아 REQ-010 으로 써(새 번호를 안 받아). 다음 단계는 개발, 개발 ID(RICEFW ID)는 같은 번호, 상태(Status)는 실제 상태(끝났으면 Done)야. "기존 개발의 일부냐" 는 묻지 않아. 진행 원장 줄은 안 건드려서 완료는 완료 그대로야.</li>
         <li>끝에 Claude 가 보여 주는 <b>찜한 번호 표</b>(REQ 번호 · 제목 · 다음 단계 · <code>[DEV-xxx]</code> 이슈)를 확인해</li>
         <li>다 되면 <code>/harness:deliver</code> 로 PR(Pull Request) 을 올려</li>
         <li>작성자가 아닌 승인자에게 Approve 를 받아</li>
@@ -923,6 +924,7 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
         <li>모르는 값은 Claude 가 추측하지 않아. 물어보면 답하고, 정말 없으면 "미정" 으로 둬</li>
         <li>저장하면 경비원이 Spec 생김새를 바로 검사해</li>
         <li>Spec PR 이 병합되면 <code>/harness:start</code> 로 개발을 시작해</li>
+        <li>진행 원장이 이미 <b>완료</b>인 개발(예: SRS 없이 끝나 요구사항을 나중에 등록한 건)의 Spec 을 써도 원장 상태는 완료 그대로고 Spec 칸만 채워져. 되돌릴지도 묻지 않아.</li>
       </ul>
     </section>
     <section class="box">
