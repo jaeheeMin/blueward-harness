@@ -1294,7 +1294,8 @@
         function callCard(s) {
           var pend = pendingOf(s), name = s.title || folderName(s) || '이름 없는 세션';
           var href = pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id);
-          var verb = pend && pend.r && kit.kindOf(pend.r) === 'question' ? '가서 답하기' : pend ? '가서 승인하기' : '가서 확인하기';
+          var plan = !!(pend && pend.r && kit.isPlan && kit.isPlan(pend.r));  // 계획 확인 요청(#861)
+          var verb = pend && pend.r && kit.kindOf(pend.r) === 'question' ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
           var what = pend ? (kit.requestTitle ? kit.requestTitle(pend.r) : (pend.r && pend.r.title) || '요청을 확인하세요') : s.askedInText ? '답을 기다리는 듯해요(추정)' : s.turnSkill ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례예요';
           return h('div', { class: 'call', 'data-call': s.id },
             h('div', { class: 'ct' }, h('span', { class: 'eb', text: '네 차례 · ' + name }), h('b', { text: what })),
@@ -1330,7 +1331,8 @@
           var g = L.groupOf(s), todoRow = g === 'todo' && !L.blockOf(s), ended = s.status === 'ended';
           var title = s.title || folderName(s) || '이름 없는 세션';
           var subs = L.runningSubCount(s);
-          var doing = ended ? '끝난 세션' : s.currentAction ? L.plainAction(s.currentAction, kit.skillLabel) : (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : g === 'running' ? '작업하는 중' : '쉬는 중');
+          var rowPend = todoRow ? pendingOf(s) : null, rowPlan = !!(rowPend && rowPend.r && kit.isPlan && kit.isPlan(rowPend.r));
+          var doing = ended ? '끝난 세션' : rowPlan ? '계획 확인 기다림' : s.currentAction ? L.plainAction(s.currentAction, kit.skillLabel) : (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : g === 'running' ? '작업하는 중' : '쉬는 중');
           var tip = doing + (subs ? ' · 서브에이전트 ' + subs + '개 실행 중' : '');  // 둘째 줄 대신 칩 title 로(시안: 상태 칸은 칩 하나)
           var bk = L.blockOf(s);
           var fixRow = !bk && !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)

@@ -1044,6 +1044,61 @@ def test_control_request_permission_deny_is_bridged(tmp_path):
     assert proc.written[0]["response"]["response"] == {"behavior": "deny", "message": "싫음"}
 
 
+PLAN_INPUT = {"plan": "## 계획\n1. 문서 고치기\n2. 검사 돌리기", "planFilePath": "C:\\w\\.claude\\plans\\x.md"}
+
+
+def test_plan_request_keeps_claude_shape_and_answers_allow_and_deny(browser):
+    """ExitPlanMode 승인(#861): 계획 글(plan)과 계획 파일 위치가 그대로 화면에 가고, 허락·거절 응답이 훅 모양으로 돌아간다."""
+    body = dict(perm_body("pl1"), tool_name="ExitPlanMode", tool_input=PLAN_INPUT)
+    h = browser.hook_async("permission", body)
+    req = wait_for(lambda: (browser.pending("pl1") or [None])[0])
+    status, detail, _ = browser.call("GET", f"/api/requests/{req.rid}")
+    assert detail["toolName"] == "ExitPlanMode" and detail["toolInput"] == PLAN_INPUT and detail["kind"] == "permission"
+    assert browser.app.store.get("pl1")["chat"][-1]["title"] == "계획 확인"
+    assert browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow"})[0] == 200
+    h["t"].join(5)
+    assert h["r"][1]["hookSpecificOutput"]["decision"] == {"behavior": "allow"}
+    assert browser.app.store.get("pl1")["chat"][-1]["answer"] == "이 계획대로 진행하기로 함"
+    h = browser.hook_async("permission", dict(body, tool_input=dict(PLAN_INPUT, plan="다른 계획")))
+    req = wait_for(lambda: (browser.pending("pl1") or [None])[0])
+    assert browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "deny", "reason": "테스트는 빼 줘"})[0] == 200
+    h["t"].join(5)
+    assert h["r"][1]["hookSpecificOutput"]["decision"] == {"behavior": "deny", "message": "테스트는 빼 줘"}
+    assert browser.app.store.get("pl1")["chat"][-1]["answer"] == "고쳐 달라고 함"
+    h = browser.hook_async("permission", dict(body, tool_input=dict(PLAN_INPUT, plan="또 다른 계획")))
+    req = wait_for(lambda: (browser.pending("pl1") or [None])[0])
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "deny"})
+    h["t"].join(5)
+    assert h["r"][1]["hookSpecificOutput"]["decision"] == {"behavior": "deny", "message": "계획을 고쳐 달라고 했어."}
+
+
+def test_plan_control_request_is_bridged_with_input_unchanged_and_mode_follows_status(tmp_path):
+    """실제 claude 로 잰 모양(can_use_tool · ExitPlanMode · input.plan): 허락은 updatedInput 에 input 그대로, 거절은 message.
+    허락 뒤 claude 가 permissionMode 를 default 로 알리면 화면 값과 고른 값(plan)이 함께 기본으로 돌아온다."""
+    store = Store(None)
+    proc = FakeProc()
+    m = managed.Manager(store, lambda: None, "/p")
+    s = store.ensure("s1", str(tmp_path))
+    s["managed"], s["permissionChoice"], s["permissionMode"] = True, "plan", "plan"
+    ev = {"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "ExitPlanMode", "input": PLAN_INPUT,
+                                                                      "tool_use_id": "t1", "requires_user_interaction": True}}
+    m.on_event(proc, ev)
+    (req,) = store.pending_for("s1")
+    assert proc.written == [] and req.tool_name == "ExitPlanMode" and req.tool_input == PLAN_INPUT
+    store.resolve(req.rid, permission_reply({"behavior": "allow"}), "허용함")
+    wait_for(lambda: proc.written)
+    assert proc.written[0] == {"type": "control_response", "response": {"subtype": "success", "request_id": "r1",
+                                                                         "response": {"behavior": "allow", "updatedInput": PLAN_INPUT}}}
+    m.on_event(proc, {"type": "system", "subtype": "status", "permissionMode": "default"})
+    assert s["permissionMode"] == "default" and s["permissionChoice"] == ""
+    assert any("계획 승인" in x["text"] for x in s["log"])
+    m.on_event(proc, dict(ev, request_id="r2"))
+    (req,) = store.pending_for("s1")
+    store.resolve(req.rid, permission_reply({"behavior": "deny", "message": "범위를 줄여 줘"}), "거부함")
+    wait_for(lambda: len(proc.written) == 2)
+    assert proc.written[1]["response"]["response"] == {"behavior": "deny", "message": "범위를 줄여 줘"}
+
+
 def test_start_route_launches_session_with_first_message(mconsole):
     c = mconsole
     (c.work / "a.md").write_text("x")

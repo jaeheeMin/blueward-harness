@@ -691,6 +691,9 @@ table.list .unk { color: #5a4bc2; }
 .bad .warn-line { font-size: 13px; font-weight: 600; color: #7a5600; }
 .bad .warn-line::before { content: '! '; font-weight: 800; }
 .bad .muted-line { font-size: 13px; color: var(--lmuted); }  /* 시안 17: 하네스 안내 줄은 강조 없이 연한 보통 글 */
+.bad.plan .report-body { padding: 0; }  /* 계획 확인 카드(#861): 본문은 카드 안쪽 여백만 */
+.bad.plan .report-body.clip { max-height: 24em; }
+.bad.plan .plan-why { display: flex; flex-direction: column; gap: 6px; }
 .input.q-other { min-height: 0; padding: 9px 12px; border-radius: 12px; font: inherit; }  /* 시안 G-07: 보기 바로 아래 입력칸 하나 */
 .followbox { margin-top: 2px; }
 .followbox p { margin: 0; }

@@ -1360,6 +1360,55 @@ def test_work_screen_irreversible_card_is_yellow_and_cannot_be_remembered(tmp_pa
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
+def test_plan_card_shows_plan_markdown_with_two_buttons_and_reason(tmp_path):
+    """#861: 계획 모드의 ExitPlanMode 요청은 도구 입력 덩어리가 아니라 계획 카드. [이 계획대로 진행] 은 허락, [고쳐 달라고 하기] 는 사유를 적어 거절."""
+    plan = {"id": "pl1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "ExitPlanMode", "cwd": "C:/w/proj",
+            "toolInput": {"plan": "﻿# 고칠 순서\n- 문서 먼저\n- 검사 돌리기", "planFilePath": "C:\\w\\.claude\\plans\\x.md"}}
+    sess = [_session("s1", pendingRequestIds=["pl1"])]
+    got = _smoke(tmp_path, "r/pl1", sess, [plan])
+    text, dump = got["text"], got["dump"]
+    for need in ("계획", "고칠 순서", "문서 먼저", "이 계획대로 진행", "고쳐 달라고 하기", "자세히 (도구 입력 전체)", "계획 파일", "AI에게 말하기", "내 계획 확인을 기다리는 중"):
+        assert need in text, need
+    assert "<div.bad.plan>" in dump
+    assert "# 고칠 순서" not in text.split("자세히")[0] and "<h3.md-h>고칠 순서</h3>" in dump  # 마크다운으로 그려진다. Windows 계획 파일 맨 앞의 BOM 이 제목을 깨뜨리지 않는다(실측). 원문은 "자세히" 안에만
+    assert "이번만 허락" not in text and "확인 필요" not in text  # 일반 승인 카드가 아니다
+    assert "이유 적기" not in text and "고쳐 달라고 보내기" not in text  # 사유 칸은 [고쳐 달라고 하기] 를 눌러야 열린다
+    ok = _smoke(tmp_path, "r/pl1", sess, [plan], extra={"POST /api/requests/pl1/answer": {}}, actions=[{"click": "[data-decide=allow]"}])
+    assert ok["posts"] == [["POST", "/api/requests/pl1/answer", '{"decision":"allow"}']]
+    assert "이 계획대로 진행하기로 했어." in ok["text"] and "권한 모드가 기본으로 돌아가고" in ok["text"]
+    open_ = _smoke(tmp_path, "r/pl1", sess, [plan], actions=[{"click": "[data-plan-revise]"}])
+    assert "어떻게 고치면 좋을지 적어 줘" in open_["text"] and "고쳐 달라고 보내기" in open_["text"]
+    sent = _smoke(tmp_path, "r/pl1", sess, [plan], extra={"POST /api/requests/pl1/answer": {}},
+                  actions=[{"click": "[data-plan-revise]"}, {"type": "#plan-why", "value": "문서만 먼저 해 줘"}, {"click": "[data-decide=deny]"}])
+    assert sent["posts"] == [["POST", "/api/requests/pl1/answer", '{"decision":"deny","reason":"문서만 먼저 해 줘"}']]
+    assert "고쳐 달라고 전했어." in sent["text"] and "전달한 이유: 문서만 먼저 해 줘" in sent["text"]
+    # 계획 글이 없으면(실측: 계획 파일을 안 쓰면 input 이 {}) 계획 카드에 "계획 본문이 없어" 를 사실대로 적는다. 빈 계획을 보여 주는 척하지 않는다
+    for odd_input in ({}, {"plan": 3}, {"plan": "  "}):
+        odd = _smoke(tmp_path, "r/pl1", sess, [dict(plan, toolInput=odd_input)])
+        assert "계획 본문이 없어" in odd["text"] and "<p.warn-line>" in odd["dump"] and "이 계획대로 진행" in odd["text"] and "이번만 허락" not in odd["text"]
+    assert "계획 본문이 없어" not in got["text"]
+    # 긴 계획은 접어 두고 [계획 전체 보기] 로 연다
+    longp = dict(plan, toolInput={"plan": "\n".join(f"- 할 일 {i}" for i in range(60))})
+    folded = _smoke(tmp_path, "r/pl1", sess, [longp])
+    assert "<div.report-body.clip>" in folded["dump"] and "계획 전체 보기" in folded["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_plan_waiting_is_told_in_plain_words_in_chat_side_and_home(tmp_path):
+    plan = {"id": "pl1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "ExitPlanMode", "title": "계획 확인",
+            "toolInput": {"plan": "## 계획\n- 하나"}}
+    sess = [_session("s1", pendingRequestIds=["pl1"], status="idle", chat=[{"t": 3, "role": "req", "id": "pl1", "kind": "permission", "title": "계획 확인", "answer": None}])]
+    work = _smoke(tmp_path, "s/s1", sess, [plan])
+    for need in ("내 계획 확인을 기다리는 중", "AI가 계획을 세웠어", "계획 보기"):
+        assert need in work["text"], need
+    assert "승인하기" not in work["text"]
+    home = _smoke(tmp_path, "", sess, [plan])
+    for need in ("계획 확인", "가서 계획 보기"):
+        assert need in home["text"], need
+    assert "가서 승인하기" not in home["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
 def test_session_screen_shows_auto_mode_unavailable_note(tmp_path):
     note = "auto 모드를 쓸 수 없는 것 같아. 이유는 확인 못 함 (claude 가 알려 준 모드 원문: default)"
     got = _smoke(tmp_path, "s/s1", [_session("s1", permissionChoice="auto", permissionMode="default", permissionNote=note)])

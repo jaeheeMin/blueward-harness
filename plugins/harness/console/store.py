@@ -82,6 +82,8 @@ def request_title(kind: str, tool_name, tool_input) -> str:
             if isinstance(q, dict) and str(q.get("question") or q.get("header") or "").strip():
                 return " ".join(str(q.get("question") or q.get("header")).split())[:200]
         return "질문"
+    if tool_name == "ExitPlanMode":
+        return "계획 확인"  # 계획 모드에서 AI 가 계획을 다 세우고 진행해도 되는지 묻는 요청(#861)
     return str(tool_name or "도구")[:100] + " 사용"
 
 
@@ -99,10 +101,11 @@ def request_answer(r) -> str:
                 return " / ".join(values)[:400]
         return r.outcome or "답변함"
     decision = out.get("decision") if isinstance(out.get("decision"), dict) else {}
+    plan = r.tool_name == "ExitPlanMode"
     if decision.get("behavior") == "allow":
-        return "허락함(이 세션에서 다시 묻지 않기)" if decision.get("updatedPermissions") else "허락함"
+        return "이 계획대로 진행하기로 함" if plan else "허락함(이 세션에서 다시 묻지 않기)" if decision.get("updatedPermissions") else "허락함"
     if decision.get("behavior") == "deny":
-        return "거절함"
+        return "고쳐 달라고 함" if plan else "거절함"
     return r.outcome or "처리함"
 
 

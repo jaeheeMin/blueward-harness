@@ -718,7 +718,8 @@ class App:
                     raise HttpError(400, "이 요청에는 '다시 묻지 않기' 제안이 없어.")
                 reply, outcome = {"behavior": "allow", "updatedPermissions": r.suggestions}, "허용하고 이 세션에서 다시 묻지 않음"
             elif decision == "deny":
-                reason = b.get("reason") if isinstance(b.get("reason"), str) and b["reason"].strip() else "콘솔에서 거부했어."
+                reason = b.get("reason") if isinstance(b.get("reason"), str) and b["reason"].strip() else (
+                    "계획을 고쳐 달라고 했어." if r.tool_name == "ExitPlanMode" else "콘솔에서 거부했어.")
                 reply, outcome = {"behavior": "deny", "message": reason}, "거부함"
             else:
                 raise HttpError(400, "decision 은 allow, allow_session, deny 중 하나여야 합니다.")
