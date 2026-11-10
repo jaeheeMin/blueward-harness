@@ -150,6 +150,13 @@ PreToolUse `*`(async)와 PreToolUse `AskUserQuestion`(동기)은 질문 도구�
 | 보내는 모양 | stream-json user 메시지의 `content` 배열: `{"type":"image"|"document","source":{"type":"base64","media_type":…,"data":…}}` 를 먼저, `{"type":"text","text":…}` 를 뒤에(글이 없으면 text 블록 없음). 실제 `claude -p` 로 확인했다 |
 | 기록 | `sessions.json` 의 대화 항목에는 `attachments: [{name, type, size}]` 만 남고 base64 원본은 없다. 글 없이 첨부만 보내면 대화 글은 `(첨부만 보냄)`. 화면의 미리보기 그림은 그 탭 메모리에만 있어 새로 고침하면 이름 칩만 보인다 |
 
+**쉬는 터미널 세션 이어 가기 (#867).** 입력칸은 막혀도 아래 "콘솔에서 이어 가기" 칸이 있다. 같은 세션을 다른 프로세스가 동시에 `--resume` 하면 오류 없이 대화가 두 갈래로 조용히 갈라지므로(같은 jsonl 에 부모 uuid 로 분기, 서로의 새 메시지를 못 봄 **[시험]**), 터미널의 claude 가 끝났는지 먼저 본다(`session_alive.py`).
+
+- 근거는 claude 가 남기는 `<설정 폴더>/sessions/<pid>.json`(`pid`·`sessionId`·`procStart`)이다 **[시험, claude 2.1.321]**. 시작하면 생기고, 정상 종료하면 지워지고, 강제로 끄면 파일만 남는다. 그래서 pid 가 실제로 살아 있는지(Windows: `OpenProcess`+`GetProcessTimes`+`GetExitCodeProcess`, `procStart`(FILETIME)와 만든 시각을 맞춰 pid 재사용을 거른다. POSIX: `kill(pid, 0)`)도 본다. 설정 폴더는 훅이 알려 준 `transcriptPath`(`<설정 폴더>/projects/…`)에서 찾고, 없으면 `CLAUDE_CONFIG_DIR`·`~/.claude`.
+- 결과는 셋이다. `alive`(그 세션을 쥔 살아 있는 프로세스가 있음) · `ended`(sessions 를 읽었고 없음) · `unknown`(sessions 폴더가 없는 옛 claude 이거나 못 읽은 파일이 있음). 모르면 모른다고 하고 `ended` 로 뭉개지 않는다. 확인할 수 없을 땐 살아 있는 쪽으로 답한다(틀려도 안전한 쪽).
+- 한계: sessions 폴더를 남기지 않는 옛 판의 claude 는 `unknown` 이다. 공식 문서에 없는 내부 파일이라 판이 바뀌면 달라질 수 있어, 읽지 못하면 `unknown` 으로 떨어진다. 명령줄에 session id 가 있는지 보는 방법은 쓰지 않았다(그냥 `claude` 로 연 터미널은 명령줄에 id 가 없다). 훅의 SessionEnd 도 근거로 쓰지 않는다(창을 강제로 닫으면 오지 않는다).
+- 이어 가는 길 둘. `resume`: 서버가 다시 확인해 `ended` 일 때만 같은 session id 로 `--resume`(그 세션이 콘솔 세션이 된다. 같은 id 라 기존 항목에 합쳐져 두 줄로 보이지 않는다). `fork`: 언제나 가능, `--resume <id> --fork-session` 으로 대화를 이어받은 새 session id 의 콘솔 세션을 띄운다(`forkedFrom` 에 원래 id, 화면에 "갈라서 이어 감" 배너, 원래 터미널 세션은 그대로). 둘 다 첫 말이 필요하다. `claude -p` 는 첫 user 메시지를 받기 전에는 `init` 을 내지 않아서 말 없이 띄우면 `starting` 에 머문다 **[시험]**.
+
 ### 콘솔이 띄우는 세션
 
 ```
@@ -314,6 +321,8 @@ claude 2.1.321 실측(`system/init`, `control_request` mcp_status·mcp_reconnect
 | GET | `/api/dev-ready` | 쿼리 `cwd` 필수(아는 폴더만, 아니면 403). 개발 준비 상태(#668). `state` 는 `yes`(읽음) / `no`(git 저장소가 아니거나 `audit/ledger/` 도 `docs/ssot/SRS.md` 도 없어 해당 없음) / `unknown`(git 을 못 실행·`git fetch origin main`·목록·SRS·원장 읽기 실패, `reason` 에 사유). `yes` 면 `specReady`(origin/main 에 `docs/spec/DEV-xxx-*.md` 가 있는 개발 건 수), `setup`(SRS 다음 단계가 `설정`·`표준` 이거나 옛 원장 Spec 칸이 `설정` 인 건 수), `standard`(그중 `표준` 건 수), `needSpec[{number, label}]`·`needSpecCount`(Spec 이 없는 개발 요구사항. 설정·Dropped/Duplicate/On Hold·원장 `완료`·다음 단계 미정은 뺀다), `items[]`(각 항목에 `setup`·`standard` 표시). 개발 건 = SRS 다음 단계가 `개발`, 또는 SRS 에 없는데 원장에 있는 건. 기준은 start 스킬·PR 검사 spec-ready 와 같다. 60초 기억, 요청 스레드는 기다리지 않는다(읽는 중이면 `loading: true`) |
 | GET | `/api/my-prs` | 쿼리 `cwd` 필수(#735). `{state(ok/no/unknown), reason, items[{number, title, url, branch, checks(fail/pending/pass/none)}]}`. 내가 올린 열린 PR 전부(번호순), `gh pr list --author @me`. GitHub 저장소가 아니면 `no`, gh 실패는 빈 목록이 아니라 `unknown`. 60초 기억. |
 | GET | `/api/approvals` | 쿼리 `cwd` 필수. `{state(yes/no/unknown), reason, login, items[{number, title, url, author, staleApproval}]}`. 내가 승인자이고, 작성자가 내가 아니고, 초안이 아니고, 최신 커밋을 내가 아직 승인하지 않은 열린 PR(번호순, 병합 순서는 계산하지 않는다). 60초 기억. GitHub 저장소가 아닌 폴더는 `no`. 홈은 세션 폴더를 저장소별로 묶어 부르고, 전부 `no` 면 칸을 안 보이며 gh 자체 실패(`unknown`)만 "판정 불능" 으로 보인다 |
+| GET | `/api/sessions/:id/liveness` | 터미널 세션의 claude 가 아직 열려 있는지(#867). `{state: alive/ended/unknown, why}`. 콘솔 세션은 409 |
+| POST | `/api/sessions/:id/continue` | 쉬는 터미널 세션 이어 가기(#867). body `{mode: resume/fork, text}` → `202 {id, mode, forked}`. mode·text 가 틀리면 400, 콘솔 세션·폴더 모름은 409, `resume` 은 서버가 다시 확인해 `ended` 가 아니면 409(이유 포함), 못 띄우면 502 |
 | PUT | `/api/sessions/:id/permission` | 세션 도중 권한 모드 바꾸기. body `{mode}`, 허용 3종(`""`·`acceptEdits`·`plan`) 밖은 400, 터미널 세션은 409, claude 가 거절하거나 답이 없으면 502 |
 | GET | `/api/requests/:rid` | 승인·질문 내용. 요청 모델에 `sessionTitle`, `suggestions` 가 더해진다 |
 | POST | `/api/requests/:rid/answer` | 승인 `{decision: allow / allow_session / deny, reason?}`, 질문 `{answers:{질문:답}}` |
@@ -336,6 +345,7 @@ claude 2.1.321 실측(`system/init`, `control_request` mcp_status·mcp_reconnect
 - `status` 는 끝난 터미널 세션 → `ended`, 대기 요청 있음 → `waiting`, 턴 실행 중 → `running`, 띄우는 중 → `starting`, 끝난 콘솔 세션 → `ended`, 그 밖 → `idle` 순으로 정한다.
 - 요청 모델: `id, sessionId, kind(permission/question), toolName, toolInput, hasSuggestions, status(pending/answered/closed), outcome, createdAt, answeredAt` 이고 질문에는 `questions` 가, MCP 도구 승인에는 `mcp{server, tool, display}` 가 더해진다(§7d). 완료된 요청은 최근 200개만 남긴다.
 - 승인 답변에서 `allow_session` 은 `permission_suggestions` 가 없으면 400, 거부 사유가 비면 "콘솔에서 거부했습니다."(계획 확인이면 "계획을 고쳐 달라고 했어.") 를 쓴다. 질문 답변은 모든 질문에 빈 값이 아닌 답이 있어야 하고(없으면 400) 배열은 `", "` 로 잇는다. 이미 처리된 요청에 답하면 409 와 처리 결과를 돌려준다.
+- 세션 모델 `forkedFrom`: 터미널 세션을 갈라서 이어 간 세션이면 원래 session id, 아니면 `null`(#867).
 - 실행 중이 아닌 터미널 세션에 메시지·스킬·예약을 보내면 409 와 이유를 돌려준다. 예약은 턴 끝에 한 번 꺼내 쓰고 `sessions.json` 에 함께 저장된다.
 
 `askedInText` 는 §7 의 글로 물은 경우 추정이다. `group` 은 대기 중인 요청이 있거나 `askedInText` 이거나 `turnSkill` 이 있고 턴이 끝났으면 `todo`, 턴 실행 중이면 `running`, 그 밖에는 `idle` 이다. 제목은 SessionStart 의 `session_title` → 첫 요청 글 첫 줄(`/` 로 시작하는 글은 제외) → 폴더 이름 순이고 60자로 자른다. 로그는 세션당 200개, 한 줄 500자로 자른다. 훅이 모은 변경 파일은 `Write`·`Edit`·`MultiEdit`·`NotebookEdit` 의 PostToolUse 에서, PR 링크는 PostToolUse 의 도구 응답에서 `github.com/.../pull/N` 을 찾아 모은다. 최근 작업 폴더는 20개까지 기억한다.

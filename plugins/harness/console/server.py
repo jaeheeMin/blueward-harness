@@ -29,6 +29,7 @@ import flows
 import gitstate
 import handoff
 import platform_compat
+import session_alive
 import shortcut
 import trouble
 from hooks_api import ASK_DEFAULT, ASK_LEVELS, Hooks, permission_reply, question_reply
@@ -232,6 +233,7 @@ class App:
         self.opener = opener or platform_compat.open_path  # 파일 열기·위치 보기. 시험이 바꿔 끼운다
         self.check_run = run or (lambda args, cwd: gitstate.run_command(args, cwd, CHECK_RUN_TIMEOUT, merge_stderr=True))  # 시작 점검용(오류 글까지 본다)
         self.gh_installed = lambda: shutil.which("gh") is not None
+        self.session_alive = session_alive.check  # (session_id, transcript_path) -> (상태, 설명). 시험이 바꿔 끼운다
         self.remote_latest = self.read_remote_latest  # 원격 최신 판. 시험이 바꿔 끼운다
         self.last_folder_mem = None  # 상태 폴더가 없는 실행(시험)에서만 쓴다
         self.notify_mem = None  # 알림 설정도 같다
@@ -619,6 +621,53 @@ class App:
         if files and not s["managed"]:
             raise HttpError(409, "터미널에서 연 세션에는 첨부를 보낼 수 없어. 콘솔에서 연 작업에서 보내 줘.")
         return self.deliver(s, text.strip(), {"kind": "message", "text": text.strip()}, files)
+
+    def terminal_liveness(self, s: dict) -> dict:
+        """터미널 세션의 claude 가 아직 열려 있는지(session_alive.py). 콘솔이 띄운 세션에는 묻지 않는다."""
+        if s["managed"]:
+            raise HttpError(409, "콘솔이 띄운 세션이야.")
+        with self.store.lock:
+            sid, transcript = s["id"], s.get("transcriptPath") or ""
+        state, why = self.session_alive(sid, transcript)
+        return {"state": state, "why": why}
+
+    def a_liveness(self, g, q, b):
+        return 200, self.terminal_liveness(self.get_session(g[0]))
+
+    def a_continue(self, g, q, b):
+        """쉬는 터미널 세션을 콘솔이 이어받는다(#867). resume 은 터미널이 닫힌 것을 확인했을 때만, fork 는 언제나(새 세션 id 로 갈라 쓴다).
+        같은 세션을 두 프로세스가 --resume 하면 오류 없이 대화가 갈라지므로, 확인은 화면이 아니라 여기서 다시 한다."""
+        s = self.get_session(g[0])
+        mode, text = b.get("mode"), b.get("text")
+        if mode not in ("resume", "fork"):
+            raise HttpError(400, "mode 는 resume 이나 fork 여야 합니다.")
+        if not isinstance(text, str) or not text.strip():
+            raise HttpError(400, "text 가 비어 있습니다.")
+        live = self.terminal_liveness(s)
+        with self.store.lock:
+            sid, cwd = s["id"], s["cwd"]
+            title = display_title(s)
+        if not cwd:
+            raise HttpError(409, "세션이 열린 폴더를 몰라서 이어 갈 수 없어.")
+        if mode == "resume" and live["state"] != session_alive.ENDED:
+            raise HttpError(409, live["why"] + " 터미널 창을 닫은 뒤 다시 확인하거나, 갈라서 이어 가기를 골라 줘.")
+        if mode == "resume":
+            new = self.manager.launch(cwd, text.strip(), resume=sid)
+        else:
+            new = self.manager.launch(cwd, text.strip(), fork_of=sid, title=(title + " (갈라서 이어 감)")[:80])
+        if new is None:
+            raise HttpError(502, "claude 세션을 띄우지 못했어. " + platform_compat.CLAUDE_MISSING)
+        end = time.monotonic() + NEW_SESSION_ID_WAIT
+        while time.monotonic() < end and self.store.resolve_id(new) == new and new.startswith("m-"):
+            time.sleep(0.05)
+        real = self.store.resolve_id(new)
+        started = self.store.get(real)
+        if started is not None:
+            with self.store.lock:
+                started["turn_running"], started["reportFresh"] = True, False
+            self.store.touch(started)
+        self.refresh_git(real)
+        return 202, {"id": real, "mode": mode, "forked": mode == "fork"}
 
     def a_run(self, g, q, b):
         s = self.get_session(g[0])
@@ -1980,6 +2029,8 @@ ROUTES = [
     ("GET", re.compile(r"/api/sessions"), App.a_sessions),
     ("GET", re.compile(rf"/api/sessions/{S}"), App.a_session),
     ("POST", re.compile(rf"/api/sessions/{S}/messages"), App.a_message),
+    ("GET", re.compile(rf"/api/sessions/{S}/liveness"), App.a_liveness),
+    ("POST", re.compile(rf"/api/sessions/{S}/continue"), App.a_continue),
     ("POST", re.compile(rf"/api/sessions/{S}/skills/{S}/run"), App.a_run),
     ("PUT", re.compile(rf"/api/sessions/{S}/skills/{S}/reservation"), App.a_reserve),
     ("DELETE", re.compile(rf"/api/sessions/{S}/skills/{S}/reservation"), App.a_unreserve),

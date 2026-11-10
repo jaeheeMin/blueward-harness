@@ -7502,3 +7502,130 @@ def test_rewind_refusals(mconsole, monkeypatch, tmp_path):
     c.app.manager.close(c.app.manager.proc_for(sid))
     wait_for(lambda: c.app.store.get(sid)["ended"])
     assert c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u, "dryRun": True})[0] == 409
+
+
+# ---- #867 쉬는 터미널 세션 이어 가기 ----
+
+import session_alive  # noqa: E402
+
+
+def _registry(tmp_path, entries):
+    """<설정 폴더>/sessions/<pid>.json 을 흉내 낸 폴더와 훅이 알려 주는 모양의 transcript 경로."""
+    cfg = tmp_path / "cfg"
+    (cfg / "sessions").mkdir(parents=True)
+    for pid, data in entries.items():
+        (cfg / "sessions" / f"{pid}.json").write_text(json.dumps(data), encoding="utf-8")
+    return cfg, str(cfg / "projects" / "proj" / "sid-1.jsonl")
+
+
+def test_session_alive_alive_ended_and_unknown(tmp_path):
+    cfg, transcript = _registry(tmp_path, {111: {"pid": 111, "sessionId": "sid-1", "procStart": "5"}, 222: {"pid": 222, "sessionId": "other"}})
+    seen = []
+
+    def alive(pid, start):
+        seen.append((pid, start))
+        return pid == 111
+
+    assert session_alive.check("sid-1", transcript, alive=alive)[0] == session_alive.ALIVE and seen == [(111, 5)]  # 다른 세션 파일은 보지 않는다
+    assert session_alive.check("sid-1", transcript, alive=lambda p, s: False)[0] == session_alive.ENDED  # 강제로 끈 뒤 남은 파일은 죽은 pid 라 끝난 것
+    assert session_alive.check("nobody", transcript, alive=lambda p, s: True)[0] == session_alive.ENDED
+    (cfg / "sessions" / "333.json").write_text("{깨짐", encoding="utf-8")
+    state, why = session_alive.check("sid-1", transcript, alive=lambda p, s: False)
+    assert state == session_alive.UNKNOWN and "읽지 못해" in why  # 못 읽은 파일이 있으면 닫혔다고 하지 않는다
+    assert session_alive.check("sid-1", transcript, alive=alive)[0] == session_alive.ALIVE  # 살아 있다는 증거는 못 읽은 파일보다 앞선다
+
+
+def test_session_alive_without_sessions_folder_is_unknown_not_ended(tmp_path):
+    transcript = str(tmp_path / "old" / "projects" / "p" / "sid-1.jsonl")
+    state, why = session_alive.check("sid-1", transcript, alive=lambda p, s: False)
+    assert state == session_alive.UNKNOWN and "확인하지 못했어" in why
+
+
+def test_session_alive_config_dir_from_transcript_then_env(tmp_path):
+    assert session_alive.config_dir(str(tmp_path / "a" / "projects" / "x" / "s.jsonl"), env={}) == tmp_path / "a"
+    assert session_alive.config_dir("", env={"CLAUDE_CONFIG_DIR": str(tmp_path / "b")}) == tmp_path / "b"
+    assert session_alive.config_dir("", env={}, home=tmp_path) == tmp_path / ".claude"
+
+
+def test_process_alive_real_pids():
+    assert session_alive.process_alive(os.getpid()) is True
+    p = subprocess.Popen([sys.executable, "-c", "pass"], **platform_compat.hidden_window_kwargs())
+    p.wait()
+    assert session_alive.process_alive(p.pid) is False
+    if sys.platform.startswith("win"):  # 같은 pid 라도 만든 시각이 다르면 다른 프로세스(pid 재사용)
+        assert session_alive.process_alive(os.getpid(), 1) is False
+
+
+def test_managed_command_fork_adds_fork_session_only_when_asked(tmp_path):
+    seen = []
+
+    def popen(args, **kw):
+        seen.append(args)
+        raise OSError("stop")
+
+    m = managed.Manager(Store(None), lambda: ["claude"], "/plug", popen=popen)
+    assert m.launch(str(tmp_path), "hi", fork_of="sid-old") is None
+    args = seen[-1]
+    assert args[args.index("--resume") + 1] == "sid-old" and "--fork-session" in args
+    assert m.launch(str(tmp_path), "hi", resume="sid-old") is None
+    assert "--fork-session" not in seen[-1] and "--resume" in seen[-1]
+
+
+def _terminal(c, sid="t1", state=(session_alive.ALIVE, "열려 있어"), calls=None):
+    c.event(sid, "SessionStart")
+    c.app.session_alive = lambda s, t: (calls.append((s, t)) if calls is not None else None) or state
+    return sid
+
+
+def test_continue_liveness_reports_state_and_passes_transcript(mconsole):
+    c, calls = mconsole, []
+    sid = _terminal(c, calls=calls)
+    c.app.store.get(sid)["transcriptPath"] = "/cfg/projects/p/t1.jsonl"
+    assert c.call("GET", f"/api/sessions/{sid}/liveness")[1] == {"state": "alive", "why": "열려 있어"}
+    assert calls == [("t1", "/cfg/projects/p/t1.jsonl")]
+    managed_sid = launch(c, "a")
+    assert c.call("GET", f"/api/sessions/{managed_sid}/liveness")[0] == 409  # 콘솔 세션에는 묻지 않는다
+
+
+@pytest.mark.parametrize("state", [session_alive.ALIVE, session_alive.UNKNOWN])
+def test_continue_resume_refused_unless_terminal_is_confirmed_ended(mconsole, state):
+    c = mconsole
+    sid = _terminal(c, state=(state, "이유 글"))
+    code, body, _ = c.call("POST", f"/api/sessions/{sid}/continue", {"mode": "resume", "text": "이어서"})
+    assert code == 409 and "이유 글" in body["error"] and "갈라서" in body["error"]
+    assert not c.app.manager.procs and c.app.store.get(sid)["managed"] is False  # 아무 프로세스도 띄우지 않았다
+
+
+def test_continue_resume_when_ended_merges_into_the_same_session(mconsole):
+    c = mconsole
+    sid = _terminal(c, state=(session_alive.ENDED, "닫힘"))
+    assert c.call("POST", f"/api/sessions/{sid}/continue", {"mode": "resume", "text": "이어서"})[1]["id"] == sid
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 이어서")
+    assert c.app.store.get(sid)["managed"] is True and list(c.app.store.sessions) == [sid]  # 두 줄로 보이지 않는다
+    assert c.call("GET", f"/api/sessions/{sid}")[1]["canSend"] is True
+
+
+def test_continue_fork_works_even_if_terminal_is_open_and_marks_the_new_session(mconsole):
+    c = mconsole
+    sid = _terminal(c)
+    code, body, _ = c.call("POST", f"/api/sessions/{sid}/continue", {"mode": "fork", "text": "갈라서"})
+    new = body["id"]
+    assert code == 202 and body["forked"] is True and new != sid and new.startswith("fake-")
+    wait_for(lambda: c.app.store.get(new)["report"] == "echo: 갈라서")
+    shown = c.call("GET", f"/api/sessions/{new}")[1]
+    assert shown["managed"] is True and shown["forkedFrom"] == sid and "갈라서 이어 감" in shown["title"]
+    original = c.call("GET", f"/api/sessions/{sid}")[1]
+    assert original["managed"] is False and original["forkedFrom"] is None  # 원래 터미널 세션은 그대로
+    assert all(m.get("text") != "갈라서" for m in c.app.store.get(sid)["chat"])
+
+
+def test_continue_bad_requests(mconsole):
+    c = mconsole
+    sid = _terminal(c, state=(session_alive.ENDED, "닫힘"))
+    assert c.call("POST", f"/api/sessions/{sid}/continue", {"mode": "x", "text": "a"})[0] == 400
+    assert c.call("POST", f"/api/sessions/{sid}/continue", {"mode": "resume", "text": "  "})[0] == 400
+    assert c.call("POST", "/api/sessions/nope/continue", {"mode": "fork", "text": "a"})[0] == 404
+    managed_sid = launch(c, "a")
+    assert c.call("POST", f"/api/sessions/{managed_sid}/continue", {"mode": "fork", "text": "a"})[0] == 409
+    c.app.store.get(sid)["cwd"] = ""
+    assert c.call("POST", f"/api/sessions/{sid}/continue", {"mode": "resume", "text": "a"})[0] == 409
