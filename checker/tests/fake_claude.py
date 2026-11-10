@@ -75,6 +75,11 @@ for line in sys.stdin:
         out({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"]}})
         continue
     text = msg["message"]["content"]
+    if isinstance(text, list):  # 첨부가 있는 메시지(content 블록 배열). 시험이 받은 블록을 읽을 수 있게 파일에 남긴다
+        if os.environ.get("FAKE_CONTENT_LOG"):
+            with open(os.environ["FAKE_CONTENT_LOG"], "a", encoding="utf-8") as f:
+                f.write(json.dumps(text, ensure_ascii=False) + "\n")
+        text = "".join(b.get("text", "") for b in text if b.get("type") == "text") or "첨부만"
     hook("event", {"hook_event_name": "UserPromptSubmit", "prompt": text})
     reply = "echo: " + text
     if text.startswith("ask"):

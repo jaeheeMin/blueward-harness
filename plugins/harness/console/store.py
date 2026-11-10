@@ -411,7 +411,7 @@ class Store:
             chat = s.get("chat")
             if not isinstance(chat, list):
                 chat = s["chat"] = []
-            if role != "req" and chat and chat[-1].get("role") == role and chat[-1].get("text") == text:
+            if role != "req" and not extra.get("attachments") and chat and chat[-1].get("role") == role and chat[-1].get("text") == text:
                 return False
             item = {"t": self.clock(), "role": role}
             if role != "req":
@@ -720,7 +720,7 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
         return dict(flows.public_fields(s, store.flow_data), **extra, **{
             "chatPartial": not s["managed"],  # 터미널 세션은 내 말과 AI 마지막 답만 안다
             "id": s["id"], "title": display_title(s), "cwd": s["cwd"], "repo": s["repo"], "branch": s["branch"],
-            "managed": s["managed"], "status": status, "group": group, "permissionMode": s["permissionMode"],
+            "managed": s["managed"], "canAttach": bool(s["managed"]), "status": status, "group": group, "permissionMode": s["permissionMode"],
             "model": s.get("model", ""), "modelChoice": s.get("modelChoice", ""),
             "effortChoice": s.get("effortChoice", ""), "permissionChoice": s.get("permissionChoice", ""),
             "permissionNote": s.get("permissionNote", ""),

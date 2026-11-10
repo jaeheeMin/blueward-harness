@@ -139,6 +139,16 @@ PreToolUse `*`(async)와 PreToolUse `AskUserQuestion`(동기)은 질문 도구�
 
 쉬는 터미널 세션에 외부에서 턴을 시작하는 공식 수단은 없다 **[시험]**. 입력칸과 스킬 버튼을 막고 이유를 표시한다. 문서화되지 않은 `messagingSocketPath` 는 쓰지 않는다.
 
+**이어서 요청의 첨부(#860).** 세션 화면의 입력칸은 여러 줄 textarea 이고(Enter 보내기·Shift+Enter 줄바꿈·한글 조합 중 Enter 는 안 보냄), 이미지(png·jpg·gif·webp)와 PDF 를 붙여 넣기·끌어 놓기·"첨부" 단추로 붙인다(`static/attach.js`). 콘솔이 띄운 세션만 된다 — 터미널 세션은 stdin 이 없어 단추를 숨기고 서버도 409 로 거절한다(`canAttach` = `managed`). 서버(`attachments.py`)는 화면과 별개로 다시 검사한다.
+
+| 항목 | 값 |
+|---|---|
+| 형식 | `image/png`·`image/jpeg`·`image/gif`·`image/webp`·`application/pdf`. 이름·`media_type` 이 아니라 **파일 첫머리(매직 바이트)** 로 확인하고, base64 로 풀리는지 본다 |
+| 크기 | 이미지 한 장 5MB(Claude API 의 이미지 한 장 한도), PDF 한 개 20MB, 한 번에 5개·합쳐서 20MB |
+| 요청 본문 | 이 경로(`POST /api/sessions/:id/messages`)만 `ATTACH_BODY_LIMIT` = 32MB(= `HOOK_BODY_LIMIT`). 합계 20MB 원본이 base64 로 약 26.7MB 라 안에 든다. 다른 API 는 그대로 1MB |
+| 보내는 모양 | stream-json user 메시지의 `content` 배열: `{"type":"image"|"document","source":{"type":"base64","media_type":…,"data":…}}` 를 먼저, `{"type":"text","text":…}` 를 뒤에(글이 없으면 text 블록 없음). 실제 `claude -p` 로 확인했다 |
+| 기록 | `sessions.json` 의 대화 항목에는 `attachments: [{name, type, size}]` 만 남고 base64 원본은 없다. 글 없이 첨부만 보내면 대화 글은 `(첨부만 보냄)`. 화면의 미리보기 그림은 그 탭 메모리에만 있어 새로 고침하면 이름 칩만 보인다 |
+
 ### 콘솔이 띄우는 세션
 
 ```
@@ -266,7 +276,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 | POST | `/api/trouble/ai-draft` | 세션 대화로 AI 초안 만들기(#734, [기록하기] 를 누를 때만). 본문 `{sessionId}`, 응답 `{id, hidden}`(id 는 `/troubles/new?draft=` 에 쓰고 `hidden` 은 가린 줄 수). 읽기 전용 `claude -p` 한 번. 대화가 없으면 422, 못 부르면 503, 시간 초과 504, 결과 형식이 틀리면 502 |
 | GET | `/api/sessions` | 목록(`updatedAt` 내림차순). 각 세션의 `group`: `todo` / `running` / `idle`. 필터는 화면이 한다 |
 | GET | `/api/sessions/:id` | 상세. 로그, 결과 보고, 변경 파일, 서브에이전트, 스킬 흐름 |
-| POST | `/api/sessions/:id/messages` | `{text}` 이어서 요청 |
+| POST | `/api/sessions/:id/messages` | `{text, attachments?}` 이어서 요청. `attachments` 는 `[{name, media_type, data(base64)}]`(#860, 아래 "이어서 요청의 첨부") |
 | POST | `/api/sessions/:id/skills/:skill/run` | 스킬 실행. 본문 `{args?}`, 보내는 글은 `/harness:<skill> <args>` |
 | PUT, DELETE | `/api/sessions/:id/skills/:skill/reservation` | 예약 |
 | POST | `/api/sessions/:id/interrupt` | 콘솔이 띄운 세션 중단 |

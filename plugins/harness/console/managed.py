@@ -10,6 +10,7 @@ import time
 import uuid
 from typing import Callable
 
+import attachments as attachments_mod
 import platform_compat
 from hooks_api import tool_key
 from store import CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, chat_clean, mark_check, new_start_checks, prompt_title
@@ -58,8 +59,10 @@ def parse_line(line: str):
     return data if isinstance(data, dict) else None
 
 
-def user_message(text: str) -> str:
-    return json.dumps({"type": "user", "message": {"role": "user", "content": text}}, ensure_ascii=False) + "\n"
+def user_message(text: str, attachments: list[dict] | None = None) -> str:
+    """첨부가 있으면 content 를 [image|document 블록…, text 블록] 배열로 보낸다(attachments.content_blocks)."""
+    content = attachments_mod.content_blocks(text, attachments) if attachments else text
+    return json.dumps({"type": "user", "message": {"role": "user", "content": content}}, ensure_ascii=False) + "\n"
 
 
 def summarize_tool(name: str, tool_input) -> str:
@@ -214,21 +217,22 @@ class Manager:
         return value if isinstance(value, str) else None
 
     def launch(self, cwd: str, first_message: str | None, resume: str | None = None, title: str = "",
-               model: str | None = None, effort: str | None = None, permission: str | None = None) -> str | None:
+               model: str | None = None, effort: str | None = None, permission: str | None = None,
+               attachments: list[dict] | None = None) -> str | None:
         """세션을 띄우고 첫 메시지를 보낸다. 세션 id(임시 또는 실제)를 돌려준다. 못 띄우면 None.
         model 은 --model 별칭이다. 이어서 띄울 때(resume) 안 주면 그 세션에 기억된 모델을 쓴다.
         같은 세션을 다시 띄우는 요청(resume)은 세션 단위로 직렬화하고, 이미 살아 있으면 새로 띄우지 않고 메시지만 보낸다."""
         if resume:
             with self.session_lock(resume):
                 if self.alive(resume):
-                    if first_message and not self.send(resume, first_message):
+                    if (first_message or attachments) and not self.send(resume, first_message or "", attachments):
                         return None
                     return self.store.resolve_id(resume)
-                return self._launch(cwd, first_message, resume, title, model, effort, permission)
-        return self._launch(cwd, first_message, resume, title, model, effort, permission)
+                return self._launch(cwd, first_message, resume, title, model, effort, permission, attachments)
+        return self._launch(cwd, first_message, resume, title, model, effort, permission, attachments)
 
     def _launch(self, cwd: str, first_message: str | None, resume: str | None, title: str, model: str | None,
-                effort: str | None = None, permission: str | None = None) -> str | None:
+                effort: str | None = None, permission: str | None = None, attachments: list[dict] | None = None) -> str | None:
         if model is None and resume:
             model = self.remembered_model(resume)
         if effort is None and resume:
@@ -260,8 +264,8 @@ class Manager:
         proc.session_id = resume
         with self.lock:
             self.procs[temp] = proc
-        if first_message:
-            self.send(temp, first_message)
+        if first_message or attachments:
+            self.send(temp, first_message or "", attachments)
         self.store.touch(s)
         self.store.touch_peers(s)
         return temp
@@ -272,7 +276,7 @@ class Manager:
         with self.lock:
             return self.procs.get(real) or self.procs.get(sid)
 
-    def send(self, sid: str, text: str) -> bool:
+    def send(self, sid: str, text: str, attachments: list[dict] | None = None) -> bool:
         proc = self.proc_for(sid)
         if proc is None or not proc.alive():
             return False
@@ -280,13 +284,17 @@ class Manager:
             s = self.store.get(sid)
             if s is not None:
                 s.pop("interrupted", None)
-                self.store.add_log(s, "보냄: " + text.split("\n", 1)[0][:200])
-                self.store.add_chat(s, "me", chat_clean(text))
+                names = ", ".join(a["name"] for a in attachments or [])
+                self.store.add_log(s, "보냄: " + (text.split("\n", 1)[0][:200] or "(글 없음)") + (f" + 첨부 {len(attachments)}개({names[:100]})" if attachments else ""))
+                if attachments:  # 기록에는 이름·형식·크기만 남기고 base64 원본은 넣지 않는다
+                    self.store.add_chat(s, "me", chat_clean(text) or "(첨부만 보냄)", attachments=attachments_mod.meta(attachments))
+                else:
+                    self.store.add_chat(s, "me", chat_clean(text))
                 if s.get("title_rank", 0) < TITLE_PROMPT:
                     title = prompt_title(text)
                     if title:
                         self.store.set_title(s, title, TITLE_PROMPT)
-        return proc.write(user_message(text))
+        return proc.write(user_message(text, attachments))
 
     def interrupt(self, sid: str) -> bool:
         proc = self.proc_for(sid)
@@ -446,24 +454,24 @@ class Manager:
             self.store.add_log(s, f"플러그인 다시 불러옴({result['method']}): {len(result['plugins'])}개, 오류 {result['errorCount']}개")
         self.store.touch(s)
 
-    def resume(self, sid: str, text: str) -> bool:
+    def resume(self, sid: str, text: str, attachments: list[dict] | None = None) -> bool:
         """끝난 세션을 --resume 으로 다시 띄우고 메시지를 보낸다."""
         with self.store.lock:
             s = self.store.get(sid)
             cwd, real = (s["cwd"], s["id"]) if s is not None else ("", "")
         if not cwd or sid.startswith("m-"):
             return False
-        return self.launch(cwd, text, resume=real) is not None
+        return self.launch(cwd, text, resume=real, attachments=attachments) is not None
 
-    def send_or_resume(self, sid: str, text: str) -> bool:
+    def send_or_resume(self, sid: str, text: str, attachments: list[dict] | None = None) -> bool:
         """살아 있으면 보내고, 끝났으면 --resume 으로 띄운다. 같은 세션의 동시 호출이 프로세스를 둘 띄우지 않게 직렬화한다."""
         with self.store.lock:
             s = self.store.get(sid)
             real = s["id"] if s is not None else sid
         with self.session_lock(real):
             if self.alive(real):
-                return self.send(real, text)
-            return self.resume(real, text)
+                return self.send(real, text, attachments)
+            return self.resume(real, text, attachments)
 
     # ---- 읽기 ----
     def log(self, proc: Proc, text: str) -> None:

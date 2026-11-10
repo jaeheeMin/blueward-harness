@@ -119,7 +119,7 @@ console.warn = () => {};
 process.on('unhandledRejection', e => errors.push('unhandled ' + (e && e.stack || e)));
 { const parts = (process.argv[5] || '').split('?'); location.pathname = '/' + parts[0]; location.search = parts[1] ? '?' + parts[1] : ''; }
 
-for (const f of ['theme.js', 'md.js', 'flow-logic.js', 'flow-ui.js', 'trouble.js', 'app.js']) { const m = require(path.join(dir, f)); if (f === 'flow-logic.js') window.BHLogic = m; }
+for (const f of ['theme.js', 'md.js', 'flow-logic.js', 'flow-ui.js', 'trouble.js', 'attach.js', 'app.js']) { const m = require(path.join(dir, f)); if (f === 'flow-logic.js') window.BHLogic = m; if (f === 'attach.js') window.BHAttach = m; }
 const tick = (n) => new Promise(r => setTimeout(r, n || 20));
 (async () => {
   await tick(80);
