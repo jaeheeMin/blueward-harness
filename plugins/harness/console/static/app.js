@@ -414,7 +414,7 @@
     appEl.dataset.auth = '1';
     clear(mainEl);
     mainEl.appendChild(stateBox('plug', '콘솔을 다시 여세요',
-      [h('span', { text: '이 화면은 연결이 끊겼습니다. Claude Code 에서 ' }), h('code', { text: '/harness:open' }), h('span', { text: ' 을 실행하면 새로 열립니다.' })]));
+      [h('span', { text: '이 화면은 연결이 끊겼습니다. 바탕화면의 Blueward Harness 를 다시 누르면 새로 열립니다. 바로가기가 없으면 Claude Code 에서 ' }), h('code', { text: '/harness:open' }), h('span', { text: ' 을 실행하세요.' })]));
     if (es) { es.close(); es = null; }
     clearTimeout(retryTimer);
   }
@@ -2522,7 +2522,7 @@
       api('PUT', '/api/settings/notify', body).then(function (d) { notifyCfg = d; notifyErr = ''; },
         function (e) { notifyErr = '알림 설정을 저장하지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
     }
-    var askErr = '';
+    var askErr = '', scMsg = '';
     function saveAsk(level) {
       api('PUT', '/api/settings/ask', { level: level }).then(function (d) { askCfg = d; askErr = ''; },
         function (e) { askErr = '묻는 범위를 저장하지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
@@ -2599,6 +2599,16 @@
       sec.appendChild(set('처음 화면', h('div', null,
         h('button', { type: 'button', class: 'pill line', 'data-intro-again': '1', text: '처음 화면 다시 보기', onClick: function () { introForce = true; introSkip = false; introPage = 'welcome'; lsSet('bh-intro-page', null); if (!startData) startData = { firstRun: false, blocking: false, checks: [] }; renderRoute(); loadStart(false); } }),
         h('p', { class: 'note-muted', text: '시작할 때 한 번 보이는 환영 화면과 자동 점검을 다시 봐.' }))));
+
+      sec.appendChild(set('바탕화면 바로가기', h('div', null,
+        h('button', { type: 'button', class: 'pill line', 'data-shortcut-make': '1', text: '만들기', onClick: function () {
+          scMsg = '만드는 중이야'; draw();
+          api('POST', '/api/settings/shortcut', {}).then(function (d) {
+            scMsg = d.status === 'failed' ? d.text : d.status === 'none' ? '이 PC 에서는 만들 수 없어(Windows 만 지원)' : d.text;
+          }, function (e) { scMsg = '바로가기를 만들지 못함(' + (e && e.message || '') + ')'; }).then(function () { if (alive) draw(); });
+        } }),
+        scMsg ? h('p', { class: 'note-muted', role: 'status', 'data-shortcut-msg': '1', text: scMsg }) : null,
+        h('p', { class: 'note-muted', text: '바탕화면의 Blueward Harness 아이콘을 지웠다면 여기서 다시 만들어.' }))));
 
       var model = modelChoice(), effort = effortChoice();
       var ml = (modelOptions().filter(function (o) { return o.value === model; })[0] || {}).label || model || '기본값';

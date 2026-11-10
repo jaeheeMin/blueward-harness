@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 import platform_compat
+import shortcut
 
 APP_NAME = "harness-console"
 
@@ -183,7 +184,13 @@ def main(argv: list[str]) -> int:
     if status != 200:
         print("웹 콘솔 서버는 떠 있지만 브라우저를 열지 못했습니다. 이 명령을 다시 실행해 보십시오.")
         return 1
-    print("웹 콘솔을 브라우저로 열었습니다: http://127.0.0.1:%d" % port)
+    line = "웹 콘솔을 브라우저로 열었습니다: http://127.0.0.1:%d" % port
+    result = shortcut.Result("none") if "--from-shortcut" in argv else shortcut.ensure_shortcut(force="--make-shortcut" in argv)
+    if result.status in ("made", "fixed"):
+        line += " " + result.text
+    print(line)
+    if result.status == "failed":
+        print(result.text)  # 콘솔은 이미 열렸다. 바로가기를 못 만든 것만 한 줄 더 알린다
     return 0
 
 
