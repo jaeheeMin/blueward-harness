@@ -4723,6 +4723,7 @@ def files_console(tmp_path, monkeypatch, request, status="", opener=None, **kw):
     request.addfinalizer(c.close)
     c.login()
     c.holder = holder
+    c.fake_run = run
     c.event("s1", "SessionStart")
     return c
 
@@ -4858,6 +4859,54 @@ def test_files_list_groups_versions_and_marks_changes(tmp_path, monkeypatch, req
     assert sheet["versions"][0]["path"] == sheet["path"]
     assert by_path["메모 1.md"]["kind"] == "md" and by_path["메모 1.md"]["versions"] == [] and by_path["새 문서.pptx"]["kind"] == "pptx"
     assert c.call("GET", "/api/sessions/nope/files")[0] == 404
+
+
+def test_files_cache_param_reuses_last_result_without_running_git(tmp_path, monkeypatch, request):
+    """?cache=1 (목록·홈이 세션마다 부르는 읽기)은 3초 안 두 번째 호출에 git 을 다시 실행하지 않는다. 그냥 부르면 매번 읽는다(#793)."""
+    c = files_console(tmp_path, monkeypatch, request)
+    c.work.mkdir(exist_ok=True)
+    (c.work / "a.md").write_text("a", encoding="utf-8")
+    c.holder["status"] = "?? a.md\0"
+    c.fake_run.calls.clear()
+    first = c.call("GET", "/api/sessions/s1/files?cache=1")[1]
+    after_first = len(c.fake_run.calls)
+    assert after_first and [f["path"] for f in first["files"]] == ["a.md"]
+    assert len([x for x in c.fake_run.calls if x.startswith("git rev-parse --show-toplevel")]) == 1  # 같은 git 호출을 두 번 하지 않는다
+    t = time.time()
+    second = c.call("GET", "/api/sessions/s1/files?cache=1")[1]
+    assert second == first and len(c.fake_run.calls) == after_first and time.time() - t < 3
+    c.holder["status"] = ""
+    c.call("GET", "/api/sessions/s1/files")  # 캐시 없이 부르면 새로 읽는다
+    assert len(c.fake_run.calls) > after_first
+
+
+def test_files_cache_param_does_not_keep_unreadable_results(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request)
+    c.fake_run.table["git status"] = (1, "")  # status 실패 = 못 읽음
+    assert c.call("GET", "/api/sessions/s1/files?cache=1")[1].get("unknown") is True
+    n = len(c.fake_run.calls)
+    assert c.call("GET", "/api/sessions/s1/files?cache=1")[1].get("unknown") is True
+    assert len(c.fake_run.calls) > n  # 못 읽은 결과는 기억하지 않고 다시 읽는다
+
+
+def test_session_lite_param_drops_log_only(browser):
+    """?lite=1 은 일어난 일 기록(log)만 뺀다. 그냥 부르면 log 가 있고 대화(chat)도 그대로다(#793)."""
+    browser.event("t1", "UserPromptSubmit", prompt="안녕")
+    full = browser.call("GET", "/api/sessions/t1")[1]
+    assert full["log"] and full["chat"]
+    lite = browser.call("GET", "/api/sessions/t1?chat=0&lite=1")[1]
+    assert "log" not in lite and "chat" not in lite
+    assert {k: v for k, v in full.items() if k not in ("log", "chat")} == {k: v for k, v in lite.items()}
+    assert browser.call("GET", "/api/sessions/t1?chat=0")[1]["log"] == full["log"]
+    assert browser.call("GET", "/api/sessions/t1?lite=1")[1]["chat"] == full["chat"]
+
+
+def test_session_event_sends_only_the_id(browser):
+    """SSE session 이벤트는 id 만 싣는다(화면이 그 세션을 다시 읽는다). 세션 전체를 이벤트마다 만들지 않는다(#793)."""
+    browser.event("t1", "UserPromptSubmit", prompt="안녕")
+    handler = type("H", (), {"app": browser.app})()
+    assert console_server.Handler.event_data(handler, "session", {"id": "t1"}) == {"id": "t1"}
+    assert console_server.Handler.event_data(handler, "session", {"id": "nope"}) is None
 
 
 def test_files_list_keeps_session_files_after_commit_with_relative_paths(tmp_path, monkeypatch, request):

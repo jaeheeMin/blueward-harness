@@ -48,7 +48,8 @@ HOOK_BODY_LIMIT = 32 << 20
 DRAIN_LIMIT = 1 << 20   # 오류 응답 전에 버려 읽는 본문의 상한
 DRAIN_SECONDS = 1.0     # 버려 읽는 데 쓰는 총 시간
 HEARTBEAT = 10.0
-CACHE_SECONDS = 60.0  # 승인자 판정과 승인 대기 PR 목록은 gh 를 자주 부르지 않게 이만큼 기억한다
+FILES_CACHE_SECONDS = 3.0  # 세션 산출물 목록(?cache=1)을 이만큼 기억한다. git 을 여러 번 실행해 느리다(#793)
+CACHE_SECONDS = 60.0 # 승인자 판정과 승인 대기 PR 목록은 gh 를 자주 부르지 않게 이만큼 기억한다
 MAX_ADVANCE_ROUNDS = 4  # 갈래 진행 판정에서 증거를 읽고 다시 판정하는 최대 횟수(증거 종류가 둘뿐이라 넉넉하다)
 COND_YES, COND_NO, COND_UNKNOWN = "yes", "no", "unknown"
 LOADING_REASON = "GitHub 에서 읽는 중이야."
@@ -240,7 +241,8 @@ class App:
         self.jobs: dict[str, dict] = {}  # 다음 갈래 넘기기 작업(메모리에만 둔다)
         self.reload_queue: set[str] = set()  # 턴이 끝나기를 기다리는 다시 불러오기
         self.cache: dict = {}
-        self.last: dict = {}      # 마지막으로 읽은 값(못 읽은 것 포함). 새로 읽는 동안 이전 값으로 보여 준다
+        self.files_cache: dict = {}  # 세션 산출물 목록(?cache=1)의 마지막 결과(#793)
+        self.last: dict = {}     # 마지막으로 읽은 값(못 읽은 것 포함). 새로 읽는 동안 이전 값으로 보여 준다
         self.inflight: dict = {}  # 지금 계산 중인 key -> Event
         self.flow_data, self.flow_error = self.load_flows(flows_path)
         self.browser_open = browser_open
@@ -597,7 +599,10 @@ class App:
         return 200, [self.model_of(s) for s in items]
 
     def a_session(self, g, q, b):
-        return 200, self.model_of(self.get_session(g[0]), chat=q.get("chat", ["1"])[0] != "0")  # 열어 보지 않는 세션은 ?chat=0 으로 대화를 뺀다
+        out = self.model_of(self.get_session(g[0]), chat=q.get("chat", ["1"])[0] != "0")  # 열어 보지 않는 세션은 ?chat=0 으로 대화를 뺀다
+        if q.get("lite", ["0"])[0] == "1":
+            out.pop("log", None)  # ?lite=1 은 일어난 일 기록(log)도 뺀다. 목록·홈은 쓰지 않고, 열 때 한 번 전체를 받는다(#793)
+        return 200, out
 
     def a_message(self, g, q, b):
         s = self.get_session(g[0])
@@ -1124,10 +1129,28 @@ class App:
             f["upload"] = states.get(f["path"]) or {"state": "unknown", "prs": [], "reason": "올렸는지 판정하지 못했어."}
 
     def a_session_files(self, g, q, b):
-        s, cwd = self.file_session_cwd(g[0])
-        root, failed = gitstate.repo_root_checked(self.run, cwd)
+        """?cache=1(목록·홈이 세션마다 부르는 읽기)은 못 읽은 결과가 아니면 FILES_CACHE_SECONDS 동안 마지막 결과를 쓴다.
+        이 응답은 git 을 여러 번 실행해 0.4~2.4초 걸리고, 훅 이벤트마다 화면이 다시 부르기 때문이다(#793)."""
+        use_cache = q.get("cache", ["0"])[0] == "1"
+        key = ("session-files", g[0])
+        now = self.store.clock()
+        if use_cache:
+            with self.lock:
+                hit = self.files_cache.get(key)
+            if hit and now - hit[0] < FILES_CACHE_SECONDS:
+                return 200, hit[1]
+        out = self.session_files(g[0])
+        if use_cache and not out.get("unknown"):
+            with self.lock:
+                self.files_cache[key] = (now, out)
+        return 200, out
+
+    def session_files(self, sid: str) -> dict:
+        s, cwd = self.file_session_cwd(sid)
+        checked = gitstate.repo_root_checked(self.run, cwd)
+        root, failed = checked
         not_repo = not root and not failed  # 저장소가 아니면 git status 가 비어도 '바뀐 것 없음' 이 아니다
-        paths, why = ([], "") if not_repo else gitstate.status_paths(self.run, cwd)
+        paths, why = ([], "") if not_repo else gitstate.status_paths(self.run, cwd, checked)
         now = self.store.clock()
         with self.store.lock:
             if why:
@@ -1147,7 +1170,7 @@ class App:
             out.update(unknown=True, reason="git 저장소가 아니라 커밋 여부를 알 수 없어요.")
         elif isinstance(gap, dict) and now - gap.get("at", 0) <= GAP_NOTICE_SECONDS:  # 지금은 읽었다. 못 읽은 동안 커밋된 문서가 빠졌을 수 있다는 안내만 하고(note) 파일별 칩은 덮지 않는다. 영구 경고는 피하려 일정 시간만 알린다
             out["note"] = f"{time.strftime('%H:%M', time.localtime(gap['at']))} 에 git 상태를 읽지 못해 그 사이 커밋된 문서가 빠졌을 수 있어요."
-        return 200, out
+        return out
 
     def a_file_preview(self, g, q, b):
         _, real, rel = self.file_target(g[0], q.get("path", [""])[0])
@@ -2157,8 +2180,8 @@ class Handler(BaseHTTPRequestHandler):
     def event_data(self, kind: str, payload: dict):
         app = self.app
         if kind == "session":
-            s = app.store.get(payload["id"])
-            return app.model_of(s) if s else None
+            # 화면은 id 만 보고 그 세션을 다시 읽는다. 세션 전체를 이벤트마다 만들어 보내면 서버 일과 전송량만 는다(#793)
+            return {"id": payload["id"]} if app.store.get(payload["id"]) else None
         if kind == "request":
             r = app.store.get_request(payload["id"])
             return r.public() if r else None

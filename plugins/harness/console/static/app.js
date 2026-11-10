@@ -26,6 +26,33 @@
     parent.appendChild(typeof c === 'object' ? c : document.createTextNode(String(c)));
   }
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+  /* 부모의 자식들을 새 노드 목록 모양으로 고친다(#793). 같은 자리의 노드가 이미 같으면(isEqualNode) 손대지 않고, 다르면 안쪽만 고친다.
+     이벤트가 올 때마다 목록을 통째로 지우고 다시 만들면 레이아웃·페인트가 매번 다시 돈다. 옛 노드의 이벤트 핸들러가 남으므로
+     핸들러가 노드 모양 밖의 값을 쥐지 않는 조각(사이드 목록·머리줄)에만 쓴다. */
+  function patchChildren(parent, next) {
+    for (var i = 0; i < next.length; i++) {
+      var old = parent.childNodes[i], nu = next[i];
+      if (!old) parent.appendChild(nu);
+      else if (old !== nu && !old.isEqualNode(nu)) patchNode(parent, old, nu);
+    }
+    while (parent.childNodes.length > next.length) parent.removeChild(parent.lastChild);
+  }
+  /* 부모의 자식을 새 목록으로 바꾸되, 앞에서부터 같은 노드(===)인 만큼은 그대로 둔다. 이벤트 핸들러를 가진 칸에도 안전하다(노드를 바꾸지 않는다). */
+  function keepLeading(parent, next) {
+    var i = 0;
+    while (i < next.length && parent.childNodes[i] === next[i]) i++;
+    if (i === next.length && parent.childNodes.length === next.length) return;
+    while (parent.childNodes.length > i) parent.removeChild(parent.lastChild);
+    for (; i < next.length; i++) parent.appendChild(next[i]);
+  }
+  function patchNode(parent, old, nu) {
+    if (old.nodeType !== nu.nodeType || old.nodeName !== nu.nodeName || old.namespaceURI !== nu.namespaceURI) { parent.replaceChild(nu, old); return; }
+    if (old.nodeType !== 1) { old.nodeValue = nu.nodeValue; return; }
+    var i, a;
+    for (i = old.attributes.length - 1; i >= 0; i--) { a = old.attributes[i]; if (!nu.hasAttribute(a.name)) old.removeAttribute(a.name); }
+    for (i = 0; i < nu.attributes.length; i++) { a = nu.attributes[i]; if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name, a.value); }
+    patchChildren(old, Array.prototype.slice.call(nu.childNodes));
+  }
   var SVGNS = 'http://www.w3.org/2000/svg';
   var ICONS = {
     chev: { d: 'M9 5l7 7-7 7', w: 2 }, back: { d: 'M15 5l-7 7 7 7', w: 2 }, close: { d: 'M6 6l12 12M18 6L6 18', w: 2 },
@@ -229,16 +256,24 @@
       if (r) { r = r.request || r; if (!r.id) r.id = rid; requests.set(rid, r); scheduleSide(); if (view && view.onRequest) view.onRequest(rid); }
     }, function () {}).then(function () { delete reqFetching[rid]; });
   }
-  var sessTimers = {};
+  /* 세션 이벤트는 훅(도구 호출)마다 와서 세션 스무 개가 일하면 초당 수십 번이다. 세션마다 읽기를 몰아서 한다(#793):
+     보고 있는 세션은 0.3초에 한 번, 나머지는 1초에 한 번까지만. 오래 조용하던 세션의 첫 이벤트는 0.12초 뒤에 바로 읽는다.
+     읽는 동안 온 이벤트는 읽기가 끝난 뒤 다음 읽기 하나로 묻힌다(마지막 상태는 반드시 읽는다). 보고 있지 않은 세션은 대화·기록(log)을 빼고 받는다. */
+  var sessTimers = {}, sessLast = {};
+  var SESS_GAP_OPEN = 300, SESS_GAP_OTHER = 1000, SESS_FIRST = 120;
   function refreshSession(id) {
-    clearTimeout(sessTimers[id]);
+    if (sessTimers[id]) return;  // 이미 예약됨: 이번 이벤트는 그 읽기에 묻힌다
+    var open = route.name === 'session' && route.id === id;
+    var wait = Math.max(SESS_FIRST, (open ? SESS_GAP_OPEN : SESS_GAP_OTHER) - (Date.now() - (sessLast[id] || 0)));
     sessTimers[id] = setTimeout(function () {
-      var open = route.name === 'session' && route.id === id;  // 대화(chat)는 지금 열어 본 세션만 받는다. 목록 갱신은 받아 둔 대화를 지우지 않는다
-      api('GET', '/api/sessions/' + encodeURIComponent(id) + (open ? '' : '?chat=0')).then(function (d) {
+      delete sessTimers[id];
+      sessLast[id] = Date.now();
+      var openNow = route.name === 'session' && route.id === id;  // 대화(chat)는 지금 열어 본 세션만 받는다. 목록 갱신은 받아 둔 대화를 지우지 않는다
+      api('GET', '/api/sessions/' + encodeURIComponent(id) + (openNow ? '' : '?chat=0&lite=1')).then(function (d) {
         d = d && d.session ? d.session : d;
         if (d && d.id) { mergeSession(d); scheduleSide(); if (view && view.onSession) view.onSession(d.id); }
       }, function (e) { if (e.status === 404) { sessions.delete(id); scheduleSide(); if (view && view.onRemoved) view.onRemoved(id); } });
-    }, 120);
+    }, wait);
   }
   function refreshRequest(rid) {
     api('GET', '/api/requests/' + encodeURIComponent(rid)).then(function (r) {
@@ -528,8 +563,12 @@
     return { tone: '', text: '쉬는 중' };
   }
   /* 맨 위 띠: 내 차례(대기 중인 질문·승인, 답을 기다리는 세션)가 있을 때만 있다. */
-  function renderAnn(d) {
-    clear(annEl);
+  function renderAnn(d) {  // 새 모양을 따로 만들고 보이는 띠에는 달라진 곳만 반영한다(#793)
+    var box = h('div');
+    buildAnn(d, box);
+    patchChildren(annEl, Array.prototype.slice.call(box.childNodes));
+  }
+  function buildAnn(d, annEl) {
     if (d.todo.length) {
       var first = d.todo[0];
       annEl.appendChild(link(first.href, { class: 'ann', role: 'status' },
@@ -755,7 +794,7 @@
 
   /* 상단 헤더. 내 일 = 처음 화면, 작업 = 가장 위 세션(내 차례가 먼저), 산출물 = /docs, 새 작업 = /new. */
   function renderHead(cur) {
-    clear(headEl);
+    var out = h('div');  // 새 모양을 따로 만들고 머리줄에는 달라진 곳만 반영한다(로고 그림이 매번 다시 만들어지지 않게, #793)
     var rows = sortedSessions(), work = rows[0] ? '/s/' + encodeURIComponent(rows[0].id) : null;
     var inWork = route.name === 'session' || route.name === 'request';
     var nav = h('nav', { class: 'topnav', 'aria-label': '메뉴' });
@@ -764,12 +803,13 @@
     nav.appendChild(link('/docs', { text: '산출물', 'aria-current': route.name === 'docs' ? 'page' : null }));
     nav.appendChild(link(newHref(), { text: '새 작업', 'aria-current': route.name === 'new' ? 'page' : null }));
     nav.appendChild(link('/troubles', { text: '기록', 'aria-current': /^trouble/.test(route.name) ? 'page' : null }));
-    headEl.appendChild(link('/', { class: 'brand', 'aria-label': 'Blueward Harness' }, h('img', { class: 'brand-logo', src: '/static/logo-sauce.png', alt: 'Blueward' })));
-    headEl.appendChild(nav);
-    headEl.appendChild(h('span', { class: 'sp' }));
+    out.appendChild(link('/', { class: 'brand', 'aria-label': 'Blueward Harness' }, h('img', { class: 'brand-logo', src: '/static/logo-sauce.png', alt: 'Blueward' })));
+    out.appendChild(nav);
+    out.appendChild(h('span', { class: 'sp' }));
     var proj = projectOf();
-    if (proj) headEl.appendChild(h('span', { class: 'eb proj', title: '프로젝트', text: proj }));
-    headEl.appendChild(link('/settings', { class: 'pill ghost', 'aria-current': cur === '/settings' ? 'page' : null, text: '설정' }));  // 시안 헤더: 아이콘 없는 글자 단추(.bs)
+    if (proj) out.appendChild(h('span', { class: 'eb proj', title: '프로젝트', text: proj }));
+    out.appendChild(link('/settings', { class: 'pill ghost', 'aria-current': cur === '/settings' ? 'page' : null, text: '설정' }));  // 시안 헤더: 아이콘 없는 글자 단추(.bs)
+    patchChildren(headEl, Array.prototype.slice.call(out.childNodes));
   }
   // 접기·펼치기 단추 하나: 접힌 칸과 펼친 칸 모두 목록 맨 위, 같은 자리·같은 크기. 화살표 방향만 반대다(SVG).
   function foldBtn(collapsed) {
@@ -783,13 +823,14 @@
     if (m.kind === 'tokens') return h('span', { class: 'ring unk', title: m.title }, h('b', { text: m.tokens >= 10000 ? Math.round(m.tokens / 10000) + '만' : '<1만' }));
     return h('span', { class: 'ring unk', title: m.title }, h('b', { text: '?' }));
   }
+  var sideMode = null;
   function renderSide() {
     if (!sideEl) return;
     var d = sideData(), col = isCollapsed(), cur = location.pathname;
     appEl.dataset.collapsed = col ? 'true' : 'false';
     renderAnn(d); renderHead(cur);
-    clear(sideEl);
-    if (col) { sideEl.appendChild(renderRail(d, cur)); return; }
+    if (sideMode !== col) { clear(sideEl); sideMode = col; }  // 접힘·펼침이 바뀌면 처음부터 다시 만든다(단추 핸들러가 다르다)
+    if (col) { patchChildren(sideEl, [renderRail(d, cur)]); return; }  // 달라진 곳만 고친다(이벤트마다 목록을 통째로 다시 만들지 않는다, #793)
 
     var rows = sortedSessions(), L = window.BHLogic;
     var nav = h('nav', { class: 'nav', 'aria-label': '세션 목록' });
@@ -817,7 +858,7 @@
     var foot = h('div', { class: 'nav-foot' });
     foot.appendChild(link(newHref(), { class: 'snew', text: '+ 새 세션' }));
     nav.appendChild(foot);
-    sideEl.appendChild(nav);
+    patchChildren(sideEl, [nav]);
   }
   function renderRail(d, cur) {
     var n = d.todo.length, rows = sortedSessions();
@@ -1233,8 +1274,21 @@
     }
 
     // 대화 한 칸: 내 말은 말풍선(줄바꿈 그대로), AI 말은 마크다운(긴 글은 접기)
-    function chatMe(c) { return h('div', { class: 'me', 'data-chat': 'me', text: MS(window.BHLogic.hideSkillLine(c.text)) }); }
+    // 바뀌지 않은 대화 칸은 만들어 둔 노드를 그대로 쓴다(#793): 이벤트마다 마크다운을 다시 풀고 노드를 다시 만들지 않는다.
+    // 칸 모양에 드는 값(시각·글·펼침)이 키에 다 들어 있어야 한다. 이번 그리기에서 쓴 것만 다음으로 넘긴다.
+    var chatCache = {}, chatNext = {};
+    function chatCached(ck, build) {
+      var el = (!chatNext[ck] && chatCache[ck]) || build();  // 같은 키가 두 칸이면 한 노드를 두 번 쓰지 않는다
+      if (!chatNext[ck]) chatNext[ck] = el;
+      return el;
+    }
+    function chatMe(c) {
+      return chatCached('me|' + String(c.t) + '|' + String(c.text), function () { return h('div', { class: 'me', 'data-chat': 'me', text: MS(window.BHLogic.hideSkillLine(c.text)) }); });
+    }
     function chatAi(c) {
+      return chatCached('ai|' + String(c.t) + '|' + (chatOpen[String(c.t)] ? 1 : 0) + '|' + String(c.text), function () { return chatAiBuild(c); });
+    }
+    function chatAiBuild(c) {
       var text = MS(c.text || ''), key = String(c.t), open = !!chatOpen[key];
       var long = text.split('\n').length > 28 || text.length > 2200;
       var box = h('div', { class: 'ai', 'data-chat': 'ai' }, h('span', { class: 'eb', text: 'AI' + (c.t ? ' · ' + clock(c.t) : '') }));
@@ -1412,6 +1466,7 @@
 
     // 대화: 서버가 쌓은 대화(없으면 AI 마지막 보고) → 방금 보낸 말 → 순서·검토 요청 카드 → 네 차례(질문·승인) → 멈추기
     function paintMsgs(s) {
+      chatNext = {};
       var items = (Array.isArray(s.chat) ? s.chat : []).filter(function (c) { return c && typeof c === 'object'; });
       var drawn = {}, out = [];
       if (items.length) {
@@ -1446,7 +1501,8 @@
           ? h('div', { class: 'acts' }, h('span', { class: 'quiet', text: '진행 중인 작업을 멈출까?' }), h('button', { type: 'button', class: 'pill dark sm', text: '중단', onClick: interrupt }), h('button', { type: 'button', class: 'pill line sm', text: '취소', onClick: function () { interruptAsk = false; draw(); } }))
           : h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line sm', text: '작업 멈추기', onClick: function () { interruptAsk = true; draw(); } })));
       }
-      regions.msgsList.replaceChildren.apply(regions.msgsList, out);
+      chatCache = chatNext;
+      keepLeading(regions.msgsList, out);  // 앞에서부터 그대로인 칸은 건드리지 않는다(레이아웃이 뒤쪽만 다시 돈다, #793)
       regions.after.hidden = s.phase !== 'approval';
       regions.after.replaceChildren.apply(regions.after, s.phase === 'approval' ? [link('/', { class: 'pill line', 'data-go-other': '1', text: '다른 작업 하러 가기' }),
         h('button', { type: 'button', class: 'skiplink', 'data-recheck': '1', text: '다시 확인', onClick: function () {
@@ -1540,11 +1596,21 @@
 
     fetchDetail();
     draw();
+    /* 이벤트로 오는 다시 그리기는 몰아서 한다(#793): 훅 이벤트가 초당 수십 번 와도 화면은 0.25초에 한 번, 프레임에 맞춰 그린다.
+       사용자가 누른 단추의 draw() 는 그대로 바로 그린다. */
+    var soonOn = false, soonLast = 0, gone = false;
+    function drawSoon() {
+      if (soonOn || gone) return;
+      soonOn = true;
+      setTimeout(function () {
+        requestAnimationFrame(function () { soonOn = false; soonLast = Date.now(); if (!gone) draw(); });
+      }, Math.max(0, 250 - (Date.now() - soonLast)));
+    }
     return {
       title: function () { return cur().title || ''; },
-      onSession: function (sid) { if (sid === id) draw(); },
-      onRequest: function () { draw(); },
-      onData: function () { draw(); },
+      onSession: function (sid) { if (sid === id) drawSoon(); },
+      onRequest: function () { drawSoon(); },
+      onData: function () { drawSoon(); },
       onRemoved: function (rid) { if (rid === id) { errored = new ApiError(404, ''); built = false; draw(); } },
       tick: function () {
         var el = regions.head && regions.head.querySelector('[data-elapsed]');
@@ -1552,7 +1618,7 @@
         if (el && t) el.textContent = ' · 경과 ' + t;
         if (regions.subs && runningSubagents(cur()).length) paintSubs(cur());  // 서브에이전트 경과 시간
       },
-      destroy: function () { clearTimeout(timer); Object.keys(parts).forEach(function (k) { parts[k].destroy(); }); }
+      destroy: function () { gone = true; clearTimeout(timer); Object.keys(parts).forEach(function (k) { parts[k].destroy(); }); }
     };
   }
 

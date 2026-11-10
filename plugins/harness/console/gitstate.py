@@ -115,10 +115,11 @@ SLOW_GIT_TIMEOUT = 180.0   # fetch·worktree add 는 네트워크와 체크아�
 ERROR_SUMMARY_LIMIT = 300
 
 
-def status_paths(run: Runner, cwd: str) -> tuple[list[str], str]:
+def status_paths(run: Runner, cwd: str, checked: tuple[str, bool] | None = None) -> tuple[list[str], str]:
     """git status 의 바뀐·새 파일을 절대 경로로. (경로 목록, 못 읽은 사유). 저장소가 아니면 ([], ""), git 을 실행하지 못했거나
-    status 가 실패하면 ([], 사유) — 빈 목록을 '바뀐 것 없음' 으로 읽지 않게 사유를 따로 낸다."""
-    root, failed = repo_root_checked(run, cwd)
+    status 가 실패하면 ([], 사유) — 빈 목록을 '바뀐 것 없음' 으로 읽지 않게 사유를 따로 낸다.
+    checked 는 방금 repo_root_checked 로 읽은 값(같은 git 호출을 두 번 하지 않게, #793)."""
+    root, failed = checked if checked is not None else repo_root_checked(run, cwd)
     if failed:
         return [], "git 을 실행하지 못했어."
     if not root:
