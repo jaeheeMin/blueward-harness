@@ -28,6 +28,7 @@ import flows
 import gitstate
 import handoff
 import platform_compat
+import shortcut
 import trouble
 from hooks_api import ASK_DEFAULT, ASK_LEVELS, Hooks, permission_reply, question_reply
 from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
@@ -1619,6 +1620,11 @@ class App:
         self.save_last_folder(info["path"])
         return 200, {"path": info["path"], "name": info["name"]}
 
+    def a_shortcut_make(self, g, q, b):
+        """설정의 "바탕화면 바로가기 만들기" 단추(#866). 지웠던 것도 다시 만든다."""
+        r = shortcut.ensure_shortcut(force=True)
+        return 200, {"status": r.status, "text": r.text}
+
     # 알림 설정(시안 19). 상태 폴더 아래 notify.json — 브라우저 저장소가 아니라 이 PC 의 콘솔 설정이다.
     def read_notify(self) -> dict:
         f = self.store.dir / NOTIFY_FILE if self.store.dir else None
@@ -1920,6 +1926,7 @@ ROUTES = [
     ("GET", re.compile(r"/api/folders/recent"), App.a_recent),
     ("GET", re.compile(r"/api/folders/last"), App.a_last_folder),
     ("POST", re.compile(r"/api/folders/last"), App.a_last_folder_set),
+    ("POST", re.compile(r"/api/settings/shortcut"), App.a_shortcut_make),
     ("GET", re.compile(r"/api/settings/notify"), App.a_notify_get),
     ("PUT", re.compile(r"/api/settings/notify"), App.a_notify_put),
     ("GET", re.compile(r"/api/settings/ask"), App.a_ask_get),
@@ -2078,7 +2085,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/api/"):
             if not app.cookie_ok(self.headers.get("Cookie")):
-                raise HttpError(401, "인증이 필요해. /harness:open 으로 다시 열어 줘.")
+                raise HttpError(401, "인증이 필요해. 바탕화면의 Blueward Harness 를 다시 눌러 줘(없으면 /harness:open).")
             if origin is not None and origin not in app.origins:
                 raise HttpError(403, "다른 출처의 요청입니다.")
             if method != "GET" and not (self.headers.get("Content-Type") or "").lower().startswith("application/json"):
@@ -2098,7 +2105,7 @@ class Handler(BaseHTTPRequestHandler):
     def auth(self, query) -> None:
         value = self.app.consume_token((query.get("t") or [""])[0])
         if value is None:
-            return self.send(403, "링크가 만료됐거나 이미 썼어. /harness:open 을 다시 실행해 줘.".encode("utf-8"),
+            return self.send(403, "링크가 만료됐거나 이미 썼어. 바탕화면의 Blueward Harness 를 다시 눌러 줘(없으면 /harness:open).".encode("utf-8"),
                              "text/plain; charset=utf-8")
         self.send(302, b"", headers={"Location": "/", "Set-Cookie": f"{COOKIE}={value}; HttpOnly; SameSite=Strict; Path=/; Max-Age={COOKIE_MAX_AGE}"})
 

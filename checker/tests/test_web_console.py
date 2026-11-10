@@ -37,6 +37,16 @@ import open as console_open  # noqa: E402
 import platform_compat  # noqa: E402
 import server as console_server  # noqa: E402
 from store import Store  # noqa: E402
+import launcher  # noqa: E402
+import shortcut  # noqa: E402
+
+REAL_ENSURE_SHORTCUT = shortcut.ensure_shortcut
+
+
+@pytest.fixture(autouse=True)
+def no_real_desktop_shortcut(monkeypatch):
+    """open.main 시험이 이 PC 의 실제 바탕화면에 바로가기를 만들지 않게 한다. 바로가기 시험은 임시 폴더를 직접 넘긴다."""
+    monkeypatch.setattr(shortcut, "ensure_shortcut", lambda force=False, **kw: shortcut.Result("none"))
 
 
 class FakeClock:
@@ -1824,6 +1834,165 @@ def test_open_main_gives_api_open_a_long_timeout(monkeypatch):
     monkeypatch.setattr(console_open, "request", fake_request)
     assert console_open.main([]) == 0
     assert calls == [("/api/open", 30)]
+
+
+# ---- 바탕화면 바로가기와 런처 (#866) ----
+
+def fake_ps_runner(calls, matches=True, fail_create=False):
+    """PowerShell 을 실제로 부르지 않는 대역. 만들기는 빈 .lnk 파일만 남긴다."""
+    def runner(cmd, **kw):
+        env = kw["env"]
+        script = cmd[-1]
+        calls.append("create" if "[HbLnk]::Create" in script else "check")
+        if "[HbLnk]::Create" in script:
+            if fail_create:
+                return subprocess.CompletedProcess(cmd, 1, "", "접근이 거부됐습니다")
+            Path(env["HB_LNK"]).write_bytes(b"lnk")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return subprocess.CompletedProcess(cmd, 0 if matches else 3, "", "")
+    return runner
+
+
+def shortcut_dirs(tmp_path):
+    desk, ldir = tmp_path / "Desktop", tmp_path / "launcher"
+    desk.mkdir(parents=True)
+    return desk, ldir
+
+
+def test_shortcut_first_run_creates_then_leaves_alone(tmp_path):
+    desk, ldir = shortcut_dirs(tmp_path)
+    calls = []
+    run = fake_ps_runner(calls)
+    first = REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv", runner=run)
+    assert first.status == "made" and "Blueward Harness" in first.text
+    assert (desk / shortcut.LNK_NAME).exists() and shortcut.read_state(ldir) == "made"
+    assert (ldir / "launcher.py").read_text(encoding="utf-8") == (CONSOLE / "launcher.py").read_text(encoding="utf-8")
+    assert (ldir / "launcher.vbs").read_bytes().startswith(b"\xff\xfe")  # UTF-16 LE BOM
+    again = REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv", runner=run)
+    assert again.status == "none"
+
+
+def test_settings_shortcut_button_forces_creation_and_needs_login(authed, monkeypatch):
+    seen = []
+    monkeypatch.setattr(shortcut, "ensure_shortcut", lambda force=False, **kw: seen.append(force) or shortcut.Result("made", "만들었어요"))
+    assert authed.call("POST", "/api/settings/shortcut", {}, cookie=False)[0] in (401, 403)
+    assert seen == []
+    code, body, _ = authed.call("POST", "/api/settings/shortcut", {})
+    assert code == 200 and body == {"status": "made", "text": "만들었어요"} and seen == [True]
+
+
+def test_shortcut_not_recreated_after_user_deletes_it(tmp_path):
+    desk, ldir = shortcut_dirs(tmp_path)
+    run = fake_ps_runner([])
+    REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv", runner=run)
+    (desk / shortcut.LNK_NAME).unlink()
+    assert REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv", runner=run).status == "none"
+    assert shortcut.read_state(ldir) == "removed" and not (desk / shortcut.LNK_NAME).exists()
+    assert REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv", runner=run).status == "none"
+    assert not (desk / shortcut.LNK_NAME).exists()
+    forced = REAL_ENSURE_SHORTCUT(force=True, os_name="windows", desktop=desk, ldir=ldir, uv="uv", runner=run)
+    assert forced.status == "made" and (desk / shortcut.LNK_NAME).exists() and shortcut.read_state(ldir) == "made"
+
+
+def test_shortcut_fixed_when_it_points_elsewhere(tmp_path):
+    desk, ldir = shortcut_dirs(tmp_path)
+    shortcut.write_state(ldir, "made")
+    (desk / shortcut.LNK_NAME).write_bytes(b"old")
+    calls = []
+    # 첫 확인은 다르다고, 만든 뒤 확인은 맞다고 답하게 한다
+    answers = iter([3, 0])
+
+    def runner(cmd, **kw):
+        if "[HbLnk]::Create" in cmd[-1]:
+            calls.append("create")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return subprocess.CompletedProcess(cmd, next(answers), "", "")
+    res = REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv", runner=runner)
+    assert res.status == "fixed" and calls == ["create"]
+
+
+def test_shortcut_failure_is_one_line_and_not_recorded(tmp_path):
+    desk, ldir = shortcut_dirs(tmp_path)
+    res = REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv", runner=fake_ps_runner([], fail_create=True))
+    assert res.status == "failed" and res.text.startswith("바로가기를 만들지 못함(") and "접근이 거부됐습니다" in res.text
+    assert "\n" not in res.text and shortcut.read_state(ldir) is None
+    missing = REAL_ENSURE_SHORTCUT(os_name="windows", desktop=tmp_path / "없는폴더", ldir=ldir, uv="uv", runner=fake_ps_runner([]))
+    assert missing.status == "failed" and "바탕화면" in missing.text
+
+
+def test_shortcut_skipped_silently_off_windows(tmp_path):
+    desk, ldir = shortcut_dirs(tmp_path)
+    assert REAL_ENSURE_SHORTCUT(os_name="posix", desktop=desk, ldir=ldir).status == "none"
+    assert list(desk.iterdir()) == [] and not ldir.exists()
+
+
+def test_open_main_appends_shortcut_result(console, monkeypatch, capsys):
+    monkeypatch.setattr(console_open, "ensure_server", lambda port: None)
+    monkeypatch.setattr(shortcut, "ensure_shortcut", lambda force=False, **kw: shortcut.Result("made", "바탕화면에 Blueward Harness 바로가기를 만들었어요."))
+    assert console_open.main([]) == 0
+    assert len(capsys.readouterr().out.strip().splitlines()) == 1
+    monkeypatch.setattr(shortcut, "ensure_shortcut", lambda force=False, **kw: shortcut.Result("failed", "바로가기를 만들지 못함(테스트)"))
+    assert console_open.main([]) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 2 and lines[1] == "바로가기를 만들지 못함(테스트)"
+    seen = []
+    monkeypatch.setattr(shortcut, "ensure_shortcut", lambda force=False, **kw: seen.append(force) or shortcut.Result("none"))
+    console_open.main(["--make-shortcut"])
+    console_open.main(["--from-shortcut"])  # 바로가기에서 온 실행은 다시 만들지 않는다
+    assert seen == [True]
+
+
+def test_launcher_finds_highest_installed_version(tmp_path):
+    base = tmp_path / "plugins" / "cache" / "blueward-harness" / "harness"
+    for name in ("0.10.98", "0.10.247", "0.10.34", "junk"):
+        (base / name / "console").mkdir(parents=True)
+        (base / name / "console" / "open.py").write_text("", encoding="utf-8")
+    (base / "0.10.300").mkdir()  # open.py 가 없는 폴더는 고르지 않는다
+    assert launcher.find_latest_open(tmp_path) == base / "0.10.247" / "console" / "open.py"
+    (base / "0.11.0" / "console").mkdir(parents=True)
+    (base / "0.11.0" / "console" / "open.py").write_text("", encoding="utf-8")
+    assert launcher.find_latest_open(tmp_path) == base / "0.11.0" / "console" / "open.py"  # 갱신돼 새 폴더가 생겨도 바로가기는 그대로
+    assert launcher.find_latest_open(tmp_path / "none") is None
+    assert launcher.version_key("0.10.247") > launcher.version_key("0.10.98") and launcher.version_key("x.1") is None
+
+
+def test_launcher_runs_open_py_hidden_and_reports_failure(tmp_path, monkeypatch):
+    base = tmp_path / "plugins" / "cache" / "blueward-harness" / "harness" / "0.10.1" / "console"
+    base.mkdir(parents=True)
+    (base / "open.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(launcher, "config_dir", lambda env=None: tmp_path)
+    shown, ran = [], []
+    monkeypatch.setattr(launcher, "message_box", shown.append)
+    monkeypatch.setattr(launcher.subprocess, "run", lambda cmd, **kw: ran.append((cmd, kw)) or subprocess.CompletedProcess(cmd, 1, "포트 문제", ""))
+    assert launcher.main() == 1
+    assert ran[0][0][1:] == [str(base / "open.py"), "--from-shortcut"] and shown == ["포트 문제"]
+    monkeypatch.setattr(launcher, "config_dir", lambda env=None: tmp_path / "none")
+    assert launcher.main() == 1 and "플러그인을 찾지 못했어요" in shown[-1]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows 의 셸 링크 COM 으로 실제 .lnk 를 만든다")
+def test_shortcut_real_lnk_in_temp_folder_points_at_launcher(tmp_path):
+    desk, ldir = shortcut_dirs(tmp_path / "한글 폴더")
+    res = REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv")
+    assert res.status == "made", res.text
+    lnk = desk / shortcut.LNK_NAME
+    assert lnk.is_file()
+    target, args = shortcut.wscript_path(), f'"{ldir / "launcher.vbs"}"'
+    assert shortcut.lnk_matches(lnk, target, args, ldir)
+    assert not shortcut.lnk_matches(lnk, target, '"다른 곳.vbs"', ldir)
+    assert REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv").status == "none"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows 의 셸 링크 COM 으로 실제 .lnk 를 만든다")
+def test_shortcut_real_lnk_with_chars_outside_ansi_code_page(tmp_path):
+    # cp949·cp1252 어디에도 없는 글자(Ω 는 cp949 에 없고, ǅ 는 둘 다 없다)가 든 폴더에서도 만들고 읽어 확인한다.
+    desk, ldir = shortcut_dirs(tmp_path / "Ω·ǅ 폴더")
+    res = REAL_ENSURE_SHORTCUT(os_name="windows", desktop=desk, ldir=ldir, uv="uv")
+    assert res.status == "made", res.text
+    lnk = desk / shortcut.LNK_NAME
+    target, args = shortcut.wscript_path(), f'"{ldir / "launcher.vbs"}"'
+    assert shortcut.lnk_matches(lnk, target, args, ldir)
+    assert not shortcut.lnk_matches(lnk, target, '"Ω·ǅ 다른 곳.vbs"', ldir)
 
 
 def test_hook_post_forwards_body_and_prints_response(browser):
