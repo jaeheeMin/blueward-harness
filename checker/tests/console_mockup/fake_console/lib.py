@@ -224,7 +224,7 @@ def start_server(first_run_done: bool = True) -> None:
                PYTHONIOENCODING="utf-8")
     env.pop("HARNESS_NO_SCAFFOLD_HINT", None)
     env.update(CONSOLE_CHECK_RUN=str(RUN), CONSOLE_CHECK_REPO=str(REPO))
-    detach = {"creationflags": 0x00000008 | 0x00000200} if sys.platform == "win32" else {"start_new_session": True}  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    detach = {"creationflags": 0x08000000 | 0x00000200} if sys.platform == "win32" else {"start_new_session": True}  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP(venv python.exe 는 DETACHED_PROCESS 로 띄우면 진짜 python 이 새 콘솔 창을 연다)
     log = open(LOG, "wb")
     token = os.urandom(8).hex()  # 띄운 서버의 명령줄에 넣어 두고, 끌 때 같은 토큰이 명령줄에 있는지로 우리 서버임을 확인한다
     TOKEN_FILE.write_text(token, encoding="utf-8")

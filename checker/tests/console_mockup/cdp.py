@@ -141,13 +141,15 @@ class Browser:
         self.proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         port_file = self.profile / "DevToolsActivePort"
         end = time.time() + 30
+        # Chrome 156(Windows)은 실행한 프로세스가 브라우저를 넘겨 띄우고 곧바로 끝난다. 그래서 먼저 끝난 것만으로는 실패로 보지 않고
+        # 이 프로필의 디버그 포트 파일이 생길 때까지 기다린다. 끝내 안 생기면 그때 실패다.
         while time.time() < end and not port_file.exists():
-            if self.proc.poll() is not None:
-                raise RuntimeError("브라우저가 바로 종료됨: " + self.exe)
             time.sleep(0.1)
         if not port_file.exists():
-            raise RuntimeError("브라우저 디버그 포트를 못 받음")
+            early = self.proc.poll() is not None
+            raise RuntimeError(("브라우저가 바로 종료됨: " + self.exe) if early else "브라우저 디버그 포트를 못 받음")
         port = port_file.read_text().split()[0]
+        self.port = port
         pages = []
         while time.time() < end and not pages:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as r:
@@ -161,6 +163,18 @@ class Browser:
     def __exit__(self, *exc) -> None:
         if self.ws:
             self.ws.close()
+        if getattr(self, "port", None):  # 띄운 프로세스가 이미 끝났어도(Chrome 156) 브라우저 자체를 닫는다
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/json/version", timeout=5) as r:
+                    bws = WebSocket(json.load(r)["webSocketDebuggerUrl"], timeout=5)
+                try:
+                    bws.send(json.dumps({"id": 1, "method": "Browser.close", "params": {}}))
+                    bws.recv()
+                except (OSError, ConnectionError, ValueError):
+                    pass  # 닫히면서 연결이 끊기는 것도 정상이다
+                bws.close()
+            except (OSError, ValueError, KeyError):
+                pass
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
             try:

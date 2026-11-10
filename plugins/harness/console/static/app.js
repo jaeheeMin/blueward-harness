@@ -535,13 +535,15 @@
       annEl.appendChild(link(first.href, { class: 'ann', role: 'status' },
         h('span', { text: '내 차례 ' + d.todo.length + '건 — ' + (first.fix ? '“' + first.sname + '” PR 의 검사 실패를 고쳐야 해' : '“' + first.sname + '” 세션에서 답이 필요해') })));  // 제목에 조사가 바로 붙지 않게 따옴표와 "세션"
     }
-    // 막힘·확인 못 함은 내 차례 건수에 넣지 않고 따로 띠로 알린다(#790). ✕ 막힘과 ? 확인 못 함은 각각 한 줄
-    [['blocked', '✕ 막힘', '하네스 검사가 막았어. 고친 뒤 이어서 하자'], ['cannot_check', '? 확인 못 함', '검사를 못 해서 멈췄어. 통과도 실패도 아니야']].forEach(function (k) {
-      var got = (d.blocked || []).filter(function (b) { return b.kind === k[0]; });
-      if (!got.length) return;
-      annEl.appendChild(link(got[0].href, { class: 'ann note', role: 'status', 'data-ann': k[0] },
-        h('span', { text: k[1] + ' ' + got.length + '건 — “' + got[0].sname + '” 세션에서 ' + k[2] })));
-    });
+    // 막힘·확인 못 함은 내 차례 건수에 넣지 않고 따로 알린다(#790). 시안 G-16: 둘을 합쳐 초록 띠 한 줄 "막힌 일 1건 · 확인 못 한 검사 1건".
+    // 막힘과 확인 못 함은 서로 다른 말이라 한 줄 안에서도 각각 센다(검사를 못 한 것을 막힘으로 뭉개지 않는다).
+    var blockedAll = d.blocked || [];
+    var nBlocked = blockedAll.filter(function (b) { return b.kind === 'blocked'; }), nCannot = blockedAll.filter(function (b) { return b.kind === 'cannot_check'; });
+    if (nBlocked.length || nCannot.length) {
+      var firstBk = nBlocked[0] || nCannot[0];
+      annEl.appendChild(link(firstBk.href, { class: 'ann', role: 'status', 'data-ann': 'blocked', title: '“' + firstBk.sname + '” 세션부터 보자' },
+        h('span', { text: [nBlocked.length ? '막힌 일 ' + nBlocked.length + '건' : '', nCannot.length ? '확인 못 한 검사 ' + nCannot.length + '건' : ''].filter(Boolean).join(' · ') })));
+    }
     // 시안 G-12: 합쳐진 갈래의 세션 화면을 보는 동안은 초록 띠 "PR #n이 합쳐졌어 — 다음은 …"
     if (route && route.name === 'session') {
       var cs = sessions.get(route.id), band = cs ? window.BHLogic.finishedBand(cs) : '';
@@ -953,7 +955,7 @@
       // 갈래·도구·점검·문서 칸은 한 번 만들어 두고 세션이 바뀔 때 update 만 부른다. 새 세션 점검은 대화 판 맨 위 카드다(시안 13).
       parts.checks = ui.startChecksPanel();
       parts.flow = ui.flowPanel({ compact: true });
-      parts.docs = ui.docsPanel();
+      parts.docs = ui.docsPanel(function () { if (parts.docs) syncSide(); });
       // 이어서 요청 입력칸은 다시 그리지 않는다.
       var followAssist = null;
       var input = h('input', { id: 'follow', class: 'comp-in', placeholder: '예: 표의 항목 순서를 바꿔 줘  (/ 로 스킬, @ 로 파일)', autocomplete: 'off',
@@ -1186,8 +1188,8 @@
           h('span', { class: 'mem-d', text: canHand ? '더 길어지면 앞 내용을 잊고 실수할 수 있어. 지금까지 한 일을 정리해서 새 세션으로 넘기길 권해.'
             : '더 길어지면 앞 내용을 잊고 실수할 수 있어. ' + (s.managed ? '정해진 갈래가 없어서 여기서는 넘길 수 없어. 새 작업으로 시작해 줘.' : '터미널 세션이라 여기서는 넘길 수 없어. 터미널에서 /harness:handoff 를 불러 줘.') }),
           h('span', { class: 'acts mem-acts' },
-            canHand ? h('button', { type: 'button', class: 'pill dark sm mem-go', text: '새 세션으로 넘기기', onClick: function () { parts.flow.handoffSame(cur()); } }) : null,
-            h('button', { type: 'button', class: 'pill line sm mem-stay', text: '계속하기', onClick: function () { memDismissed[s.id] = true; lsSet('bh-mem-ok:' + s.id, '1'); paintNotices(cur()); } }))));
+            canHand ? h('button', { type: 'button', class: 'pill dark mem-go', text: '새 세션으로 넘기기', onClick: function () { parts.flow.handoffSame(cur()); } }) : null,
+            h('button', { type: 'button', class: 'pill line mem-stay', text: '계속하기', onClick: function () { memDismissed[s.id] = true; lsSet('bh-mem-ok:' + s.id, '1'); paintNotices(cur()); } }))));
       }
       if (s.bypassPermissions || /bypass/i.test(String(s.permissionMode || ''))) {
         notices.push(h('div', { class: 'banner info' }, h('span', { text: '권한 우회 모드로 실행 중인 세션이야. 이 세션은 승인 요청이 발생하지 않아 콘솔에 승인 화면이 뜨지 않아.' })));
@@ -1260,8 +1262,15 @@
       if (r && r.status && r.status !== 'pending') return null;
       var qsList = r && kindOf(r) === 'question' ? questionsOf(r) : [];
       if (!qsList.length) return askCard(rid);
-      var st = qInline[rid] || (qInline[rid] = { picked: {}, busy: false, err: '' }), multi = qsList.length > 1;
-      function ans(i, q) { var p = st.picked[i] || []; return q.multiSelect ? p.join(', ') : (p[0] || ''); }
+      var st = qInline[rid] || (qInline[rid] = { picked: {}, text: {}, busy: false, err: '' }), multi = qsList.length > 1;
+      // 시안 G-07: '직접 적기' 를 고르면 그 질문 카드 안에 입력칸이 열리고, 적은 글이 답이 된다. 질문이 이 보기를 안 주면 콘솔이 더한다.
+      var OTHER = '직접 적기';
+      function typed(i) { return String(st.text[i] || '').trim(); }
+      function ans(i, q) {
+        var p = (st.picked[i] || []).map(function (x) { return x === OTHER ? typed(i) : x; }).filter(Boolean);
+        return q.multiSelect ? p.join(', ') : (p[0] || '');
+      }
+      function usesOther(i) { return (st.picked[i] || []).indexOf(OTHER) >= 0; }
       function send() {
         var body = {};
         qsList.forEach(function (q, i) { body[q.question] = ans(i, q); });
@@ -1270,23 +1279,39 @@
           function (e) { st.err = (e.status === 404 || e.status === 409 || e.status === 410) ? '이미 처리된 질문이야.' : '전달하지 못했어: ' + e.message; }).then(function () { st.busy = false; refetchSoon(); draw(); });
       }
       var cards = qsList.map(function (q, i) {
-        var list = h('div', { class: 'qo' }, (q.options || []).map(function (o) {
+        var opts = (q.options || []).slice();
+        if (!opts.some(function (o) { return (typeof o === 'string' ? o : o.label) === OTHER; })) opts.push(OTHER);
+        var list = h('div', { class: 'qo' }, opts.map(function (o) {
           var label = typeof o === 'string' ? o : o.label, on = (st.picked[i] || []).indexOf(label) >= 0;
           return h('button', { type: 'button', class: 'qopt', 'aria-pressed': String(on), disabled: st.busy, title: o && o.description || null, onClick: function () {
             var p = st.picked[i] || [];
             st.picked[i] = q.multiSelect ? (on ? p.filter(function (x) { return x !== label; }) : p.concat(label)) : (on ? [] : [label]);
-            if (!multi && !q.multiSelect && st.picked[i].length) send(); else draw();
+            if (label === OTHER && !on) st.focus = i;
+            if (!multi && !q.multiSelect && st.picked[i].length && !usesOther(i)) send(); else draw();
           } }, h('span', { class: 't', text: label }));
         }));
-        return h('div', { class: 'q', role: 'group', 'data-q': rid, 'aria-labelledby': 'iq-' + rid + '-' + i },
+        var box = h('div', { class: 'q', role: 'group', 'data-q': rid, 'aria-labelledby': 'iq-' + rid + '-' + i },
           h('span', { class: 'eb', text: (multi ? '질문 ' + (i + 1) + ' / ' + qsList.length : '질문') + (q.header ? ' · ' + q.header : '') + (q.multiSelect ? ' · 여러 개 선택' : '') }),
           h('b', { id: 'iq-' + rid + '-' + i, text: q.question || '질문이 있어' }), list);
+        if (usesOther(i)) {
+          var box_in = h('input', { class: 'input q-other', 'aria-label': '직접 적은 답', value: st.text[i] || '', placeholder: '예: 구매팀 김OO, 10/28 회의', autocomplete: 'off', disabled: st.busy,
+            onInput: function (e) { st.text[i] = e.target.value; syncFoot(); } });
+          box.appendChild(box_in);
+          if (st.focus === i) { st.focus = null; setTimeout(function () { box_in.focus(); }, 0); }
+        }
+        return box;
       });
-      var need = multi || qsList[0].multiSelect, left = qsList.filter(function (q, i) { return !ans(i, q); }).length;
-      var foot = h('div', { class: 'acts', 'data-q-foot': rid },
-        need ? h('button', { type: 'button', class: 'pill dark', disabled: st.busy || left > 0, text: '답 보내기', onClick: send }) : null,
-        link('/r/' + encodeURIComponent(rid), { class: 'skiplink', text: '직접 적어 답하기' }),
-        left && need ? h('span', { class: 'quiet', text: '아직 답하지 않은 질문이 ' + left + '개 있어.' }) : null,
+      // 시안 G-07: [답 보내기] 는 카드들 아래 오른쪽 진한 알약. 질문이 하나이고 하나만 고르는 것이면 보기를 누르는 순간 답이 가니 단추가 없다(직접 적을 때는 있다).
+      var need = multi || qsList[0].multiSelect || usesOther(0);
+      var sendBtn = need ? h('button', { type: 'button', class: 'pill dark', text: '답 보내기', onClick: send }) : null;
+      var leftNote = need ? h('span', { class: 'quiet' }) : null;
+      function syncFoot() {
+        var left = qsList.filter(function (q, i) { return !ans(i, q); }).length;
+        if (sendBtn) sendBtn.disabled = st.busy || left > 0;
+        if (leftNote) { leftNote.textContent = left ? '아직 답하지 않은 질문이 ' + left + '개 있어.' : ''; leftNote.hidden = !left; }
+      }
+      syncFoot();
+      var foot = h('div', { class: 'acts', 'data-q-foot': rid }, leftNote, sendBtn,
         st.err ? h('span', { class: 'note-attn', role: 'alert', text: st.err }) : null);
       return h('div', { class: 'qgroup', 'data-ask': rid }, cards, foot);
     }
@@ -1441,13 +1466,20 @@
       parts.checks.update(s); parts.flow.update(s); parts.tools.update();
       parts.folder.update(s.cwd, window.BHLogic.sameFolderBusy(s, Array.from(sessions.values())), function (path) { draft.cwd = path; draft.picked = null; });
       parts.docs.update(s);
-      // 시안: 만든 산출물 칸은 올릴 차례(G-09)와 일하는 중에만. 승인 기다림(G-10)·끝남(G-12)·새 세션 점검(G-13)에는 없다.
-      regions.side.hidden = !!s.phase || window.BHLogic.autoChecksOpen(s);
+      syncSide();
       paintFollow(s);
       paintFiles(s);
       paintLog(s);
       paintTech(s);
       syncLegend();
+    }
+
+    // 시안: 만든 산출물 칸은 올릴 차례(G-09)와 일하는 중에만, 그리고 보여 줄 문서가 있을 때만(G-07·16·18 은 대화 판이 본문 전체).
+    // 승인 기다림(G-10)·끝남(G-12)·새 세션 점검(G-13)에는 없다.
+    function syncSide() {
+      var s = cur();
+      regions.side.hidden = !!s.phase || window.BHLogic.autoChecksOpen(s) || !parts.docs.has();
+      regions.side.className = 'sess-side' + (s.status === 'running' ? ' run' : '');
     }
 
     function paintFollow(s) {
@@ -2547,7 +2579,7 @@
     function draw() {
       clear(root);
       var BH = window.BH, scale = BH.getScale();
-      var page = h('div', { class: 'page' });
+      var page = h('div', { class: 'page home' });  // 시안 G-19 제목 블록·판 간격은 홈과 같은 구조(눈썹·제목이 한 줄 상자에 흐르고 칸 사이 16)
       page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '설정' }), h('h1', { text: '보기와 알림' })));
       var sec = h('section', { class: 'light setbox' });
 
