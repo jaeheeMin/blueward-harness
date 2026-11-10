@@ -502,12 +502,16 @@
   function runningSubagents(s) { return (s.subagents || []).filter(function (a) { return a && a.state === 'running'; }); }
   function subagentSummary(s) { var n = runningSubagents(s).length; return n ? ' · 서브에이전트 ' + n + '개 실행 중' : ''; }
   function sideData() {
-    var todo = [], run = [], idle = [], blocked = [];
+    var todo = [], run = [], idle = [], blocked = [], errs = [];
     sessions.forEach(function (s) {
       var g = groupOf(s), sub = s.branch || baseName(s.cwd) || '';
       var title = s.title || baseName(s.cwd) || '이름 없는 세션';
       var bk = window.BHLogic.blockOf(s);  // 훅이 막아 아직 안 풀린 세션은 내 차례와 따로 센다(#790)
-      if (bk) {
+      var an = apiNote(s);
+      if (!bk && an && an.sideTone === 'err') errs.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), side: an.side, t: s.updatedAt });
+      if (!bk && an && an.side && g !== 'todo') {
+        (g === 'running' ? run : idle).push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: an.side, t: s.updatedAt });
+      } else if (bk) {
         blocked.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), kind: bk.kind, t: s.updatedAt });
       } else if (g === 'todo') {
         var ids = s.pendingRequestIds || [];
@@ -528,7 +532,7 @@
         idle.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: s.status === 'ended' ? '끝난 세션' : sub, t: s.updatedAt });
       }
     });
-    return { todo: todo, run: run, idle: idle, blocked: blocked };
+    return { todo: todo, run: run, idle: idle, blocked: blocked, errs: errs };
   }
   var annEl = null, headEl = null;
   var SIDE_ORDER = { todo: 0, running: 1, idle: 2 };
@@ -549,10 +553,13 @@
     return null;
   }
   function planPending(s) { var p = firstPending(s); return !!(p && isPlan(p.r)); }  // 첫 대기 요청이 계획 확인인가
+  // API 오류·재시도·사용 한도 안내(#865, api-notice.js). 훅 막힘과 원인이 달라 따로 본다
+  function apiNote(s) { return window.BHApiNotice ? window.BHApiNotice.notice(s) : null; }
   /* 세션 한 줄 상태. 내 차례면 tone 이 attn 이다. */
   function sideStatus(s) {
-    var g = groupOf(s), L = window.BHLogic, bk = L.blockOf(s);
+    var g = groupOf(s), L = window.BHLogic, bk = L.blockOf(s), an = apiNote(s);
     if (bk) return bk.kind === 'cannot_check' ? { tone: 'unk', text: '? 확인 못 함 · 검사를 못 했어' } : { tone: 'fail', text: '✕ 막힘 · 고친 뒤 이어서' };
+    if (an && an.side) return { tone: an.sideTone, text: an.side };  // 오류로 끝난 세션을 '끝난 세션'·'쉬는 중' 으로 뭉개지 않는다
     // 시안 G-24: PR 검사가 실패한 세션(AI 가 일하는 중이 아닐 때)은 "PR #n 고쳐야 함". 내 차례 세션이면 tone 은 그대로 attn.
     if (g !== 'running' && s.status !== 'ended' && L.prNeedsFix(s) && !firstPending(s)) return { tone: g === 'todo' ? 'attn' : '', fix: true, text: 'PR #' + s.flowPr.number + ' 고쳐야 함' };
     if (g === 'todo') {
@@ -586,6 +593,11 @@
       var firstBk = nBlocked[0] || nCannot[0];
       annEl.appendChild(link(firstBk.href, { class: 'ann', role: 'status', 'data-ann': 'blocked', title: '“' + firstBk.sname + '” 세션부터 보자' },
         h('span', { text: [nBlocked.length ? '막힌 일 ' + nBlocked.length + '건' : '', nCannot.length ? '확인 못 한 검사 ' + nCannot.length + '건' : ''].filter(Boolean).join(' · ') })));
+    }
+    // API 오류(로그인·한도·서버 오류)는 훅 막힘과 다른 원인이라 따로 한 줄(#865)
+    if ((d.errs || []).length) {
+      annEl.appendChild(link(d.errs[0].href, { class: 'ann note', role: 'status', 'data-ann': 'api' },
+        h('span', { text: '⚠ 오류 ' + d.errs.length + '건 — “' + d.errs[0].sname + '” 세션: ' + d.errs[0].side.replace(/^⚠\s*(오류 · )?/, '') })));
     }
     // 시안 G-12: 합쳐진 갈래의 세션 화면을 보는 동안은 초록 띠 "PR #n이 합쳐졌어 — 다음은 …"
     if (route && route.name === 'session') {
@@ -856,7 +868,7 @@
         h('span', { class: 'sinfo' },
           h('span', { class: 'n', text: sessionTitle(s) }),
           bar,
-          h('small', { class: st.tone === 'attn' || st.fix ? 'w' : st.tone === 'fail' || st.tone === 'unk' ? 'bk ' + st.tone : '', title: st.text, text: st.text }))));
+          h('small', { class: st.tone === 'attn' || st.fix ? 'w' : st.tone === 'fail' || st.tone === 'unk' || st.tone === 'err' ? 'bk ' + st.tone : '', title: st.text, text: st.text }))));
     });
     nav.appendChild(list);
     var foot = h('div', { class: 'nav-foot' });
@@ -873,7 +885,7 @@
       rows.map(function (s) {
         var st = sideStatus(s), p = firstPending(s), name = sessionTitle(s);
         var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid));
-        return link('/s/' + encodeURIComponent(s.id), { class: 'rail-ring' + (st.tone === 'attn' ? ' turn' : st.tone === 'fail' || st.tone === 'unk' ? ' bk ' + st.tone : '') + (s.status === 'ended' ? ' ended' : ''), 'aria-label': name + ' · ' + st.text, title: name + ' · ' + st.text, 'aria-current': onThis ? 'page' : null },
+        return link('/s/' + encodeURIComponent(s.id), { class: 'rail-ring' + (st.tone === 'attn' ? ' turn' : st.tone === 'fail' || st.tone === 'unk' || st.tone === 'err' ? ' bk ' + st.tone : '') + (s.status === 'ended' ? ' ended' : ''), 'aria-label': name + ' · ' + st.text, title: name + ' · ' + st.text, 'aria-current': onThis ? 'page' : null },
           h('span', { class: 'ring unk' }, h('b', { text: '?' })));
       }),
       h('span', { class: 'rail-sp' }),
@@ -1131,6 +1143,8 @@
     function eyebrowFor(s) {
       var pend = (s.pendingRequestIds || []).length;
       if (pend) return ['attn', planPending(s) ? '내 계획 확인을 기다리는 중' : '내 응답을 기다리는 중'];
+      var an = apiNote(s);
+      if (an && an.sideTone === 'err') return ['attn', '오류로 멈춤'];
       if (s.status === 'running') return ['accent', '지금 하는 일'];
       if (s.status === 'starting') return ['accent', '시작하는 중'];
       if (s.status === 'ended') return ['sec', '끝난 세션'];
@@ -1145,6 +1159,8 @@
     function headlineFor(s) {
       var pend = (s.pendingRequestIds || []).length;
       if (pend) return planPending(s) ? 'AI가 계획을 세웠어 — 읽고 진행할지 정해 줘' : 'Claude Code가 내 확인을 기다리고 있어';
+      var an = apiNote(s);
+      if (an && (an.sideTone === 'err' || an.kind === 'retry')) return an.title;
       if (s.status === 'running') return s.currentAction ? window.BHLogic.plainAction(s.currentAction, skillLabel) : (s.currentSkill ? skillLabel(s.currentSkill) + ' 진행 중' : '작업하는 중이야');
       if (s.status === 'starting') return '세션을 시작하고 있어';
       if (s.status === 'ended') return '세션이 끝났어';
@@ -1397,6 +1413,22 @@
       'pre-bash-git-guard': 'git 명령 검사', 'stop-deliver': '마무리 확인', 'pre_write_guard': '파일 쓰기 검사',
       'agent_delegation_guard': '서브에이전트 호출 검사', 'mcp_source_guard': 'SAP 소스 쓰기 검사', 'activation_gate': '활성화 확인'
     };
+    // API 오류·재시도·사용 한도 카드(#865). 훅 막힘(✕·?) 카드와 섞지 않고 ⚠ 표시와 노란 테두리를 쓴다. 원문은 "자세히" 안에만
+    function apiCard(s) {
+      var n = apiNote(s);
+      if (!n) return null;
+      var key = 'api:' + n.kind, open = !!chatOpen[key];
+      var card = h('div', { class: 'bad q apierr ' + n.tone, 'data-chat': 'api', 'data-api-kind': n.kind, role: n.tone === 'err' ? 'alert' : 'status' });
+      card.appendChild(h('span', { class: 'tagx', text: n.tag }));
+      card.appendChild(h('b', { class: 'bt', text: n.title }));
+      card.appendChild(h('span', { class: 'sm', 'data-api-body': '1', text: n.body }));
+      if (n.raw) {
+        if (open) card.appendChild(h('span', { class: 'sm mono', 'data-api-raw': '1', text: MS(n.raw) }));
+        card.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line quiet-edge', 'data-api-more': '1', 'aria-expanded': String(open),
+          onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, open ? '자세히 접기' : '자세히')));
+      }
+      return card;
+    }
     function chatBlock(c, s) {
       var cannot = c.kind === 'cannot_check', name = HOOK_NAMES[c.hook] || (/[A-Za-z]/.test(String(c.hook || '')) ? '하네스 검사' : String(c.hook || '하네스 훅'));  // 모르는 훅 이름은 영문 그대로 내지 않는다(#794)
       var text = String(c.text || ''), fix = String(c.fix || '').trim(), key = 'b' + String(c.t), open = !!chatOpen[key];
@@ -1507,6 +1539,8 @@
       });
       var tbAsk = tb.suggestCard(s, function () { if (built) paintMsgs(cur()); });  // 시안 G-23: 막힘이 풀렸을 때 "기록해 둘까?"
       if (tbAsk) out.push(tbAsk);
+      var apc = apiCard(s);
+      if (apc) out.push(apc);
       var last = items[items.length - 1];
       var key = items.length + ':' + (last ? String(last.t) + String(last.answer || '') : '');
       var follow = chatKey !== null && key !== chatKey && chatEndNear();

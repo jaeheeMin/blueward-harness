@@ -47,6 +47,24 @@ RELOADED = re.compile(r"Reloaded:\s*\d+\s+plugins?", re.IGNORECASE)
 RELOAD_ERRORS = re.compile(r"(\d+)\s+errors?", re.IGNORECASE)
 
 
+def classify_api_error(error, status) -> str:
+    """claude 가 알려 준 API 오류 이름·상태 번호를 화면 종류로 나눈다(#865). 모르는 모양은 other 로 두고 성공으로 치지 않는다.
+    auth(로그인) · limit(사용 한도) · model(없는 모델) · other(그 밖의 API 오류)."""
+    name = str(error or "")
+    code = status if isinstance(status, int) and not isinstance(status, bool) else None
+    if name == "authentication_failed" or code == 401:
+        return "auth"
+    if name == "rate_limit" or code == 429:
+        return "limit"
+    if name == "model_not_found" or code == 404:
+        return "model"
+    return "other"
+
+
+def issue_text(value) -> str:
+    return value.strip()[:600] if isinstance(value, str) else ""
+
+
 def parse_line(line: str):
     """stdout 한 줄을 JSON 객체로 읽는다. 깨진 줄은 None 이라서 건너뛴다."""
     line = line.strip()
@@ -284,6 +302,7 @@ class Manager:
             s = self.store.get(sid)
             if s is not None:
                 s.pop("interrupted", None)
+                s.pop("apiIssue", None)  # 새로 시키면 앞의 오류 안내는 닫고, 또 나면 다시 띄운다
                 names = ", ".join(a["name"] for a in attachments or [])
                 self.store.add_log(s, "보냄: " + (text.split("\n", 1)[0][:200] or "(글 없음)") + (f" + 첨부 {len(attachments)}개({names[:100]})" if attachments else ""))
                 if attachments:  # 기록에는 이름·형식·크기만 남기고 base64 원본은 넣지 않는다
@@ -514,6 +533,7 @@ class Manager:
                     self.store.add_log(s, "계획 승인: 권한 모드가 계획만 세우기에서 " + ("기본" if e["permissionMode"] == DEFAULT_MODE_NAME else e["permissionMode"][:40]) + "(으)로 바뀜")
             if kind == "system" and e.get("subtype") == "init":
                 s["starting"] = False
+                s.pop("apiIssue", None)
                 if isinstance(e.get("permissionMode"), str):
                     s["permissionMode"] = e["permissionMode"]
                     if s.get("permissionChoice") == AUTO_MODE:  # auto 로 시작해 달라고 했는데 다른 모드로 떴으면 쓸 수 없는 환경이다
@@ -527,7 +547,30 @@ class Manager:
                 if plugins:  # init 에 판이 안 실려 있으면 알던 판을 지키고, 실려 있으면 새로 적는다
                     old = {p["name"]: p["version"] for p in s.get("pluginVersions") or []}
                     s["pluginVersions"] = [dict(p, version=p["version"] or old.get(p["name"], "")) for p in plugins]
+            elif kind == "system" and e.get("subtype") == "api_retry":
+                num = lambda v: v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None  # noqa: E731
+                s["apiIssue"] = {"kind": "retry", "t": self.store.clock(), "attempt": num(e.get("attempt")), "max": num(e.get("max_retries")),
+                                 "delayMs": num(e.get("retry_delay_ms")), "status": num(e.get("error_status")), "error": issue_text(e.get("error"))}
+            elif kind == "rate_limit_event":
+                info = e.get("rate_limit_info") if isinstance(e.get("rate_limit_info"), dict) else {}
+                status = str(info.get("status") or "")
+                if status in ("", "allowed"):
+                    s.pop("rateLimit", None)
+                else:  # allowed_warning(곧 한도) · rejected(한도 참) · 모르는 값도 그대로 실어 화면이 "알 수 없음" 으로 보이게 한다
+                    reset, used = info.get("resetsAt"), info.get("utilization")
+                    s["rateLimit"] = {"status": status[:40], "type": str(info.get("rateLimitType") or "")[:40], "t": self.store.clock(),
+                                      "resetsAt": reset if isinstance(reset, (int, float)) and not isinstance(reset, bool) else None,
+                                      "utilization": used if isinstance(used, (int, float)) and not isinstance(used, bool) else None}
+            elif kind == "assistant" and (e.get("error") or e.get("is_api_error_message")):
+                # claude 가 API 오류를 assistant 글처럼 내보낸 것. 대화의 AI 말로 쓰지 않고 오류 카드로만 알린다(#865)
+                texts = [str(b.get("text", "")) for b in (e.get("message") or {}).get("content") or [] if isinstance(b, dict) and b.get("type") == "text"]
+                status = e.get("api_error_status")
+                s["apiIssue"] = {"kind": classify_api_error(e.get("error"), status), "t": self.store.clock(),
+                                 "status": status if isinstance(status, int) and not isinstance(status, bool) else None,
+                                 "error": issue_text(e.get("error")), "raw": issue_text("\n".join(texts))}
             elif kind == "assistant":
+                if (s.get("apiIssue") or {}).get("kind") == "retry":
+                    s.pop("apiIssue", None)  # 다시 시도가 통해 답이 왔다
                 for block in (e.get("message") or {}).get("content") or []:
                     if not isinstance(block, dict):
                         continue
@@ -539,17 +582,22 @@ class Manager:
             elif kind == "result":
                 s["currentAction"] = ""
                 s["turn_running"] = False
-                if isinstance(e.get("result"), str) and e["result"] and not s.get("reportFresh"):
+                failed = bool(e.get("is_error"))  # 오류 result 도 subtype 은 success 라서 is_error 로 가린다(#865)
+                if not failed:
+                    s.pop("apiIssue", None)  # 이번 턴이 정상으로 끝나면 앞의 오류·재시도 안내는 닫는다
+                if isinstance(e.get("result"), str) and e["result"] and not s.get("reportFresh") and not failed:
                     s["report"] = e["result"]  # Stop 훅이 이번 턴에 못 왔을 때를 위한 대비(턴마다 reportFresh 를 비우므로 이후 턴도 반영된다)
                     s["reportFresh"] = True
                     self.store.add_chat(s, "ai", e["result"])
                 if s.pop("interrupted", False):
                     self.store.add_log(s, "사용자가 작업을 중단했어.")
-                elif e.get("is_error"):
+                elif failed:
                     detail = str(e.get("result") or e.get("subtype") or "").strip()
                     self.store.add_log(s, "오류로 끝남" + (": " + detail[:200] if detail else ""))
                     if s.get("permissionChoice") == AUTO_MODE and "auto" in detail.lower():
                         self._auto_note(s, f"{AUTO_UNAVAILABLE} (claude 가 낸 메시지 원문: {detail[:300]})")
+                    else:
+                        s["apiIssue"] = self._failed_issue(s, e)
             elif kind == "control_request":
                 control = s
         if control is not None:
@@ -559,6 +607,21 @@ class Manager:
             else:
                 self._deny_control(proc, control, e)
         self.store.touch(control or s)
+
+    def _failed_issue(self, s: dict, e: dict) -> dict:
+        """is_error result 를 오류 카드 모델로 만든다. assistant 오류 이벤트·재시도로 이미 알던 것을 이어받는다.
+        API 오류라는 표시(terminal_reason·상태 번호·앞선 오류 이벤트·재시도)가 없는 모양은 unknown 으로 두고 성공으로 치지 않는다. store.lock 안에서 부른다."""
+        prev = s.get("apiIssue") if isinstance(s.get("apiIssue"), dict) else {}
+        status = e.get("api_error_status") if isinstance(e.get("api_error_status"), int) and not isinstance(e.get("api_error_status"), bool) else prev.get("status")
+        raw = issue_text(e.get("result")) or prev.get("raw", "")
+        base = {"t": self.store.clock(), "status": status, "raw": raw}
+        if prev.get("kind") in ("auth", "limit", "model", "other"):
+            return dict(prev, **base, kind=classify_api_error(prev.get("error"), status) if prev.get("error") or status else prev["kind"])
+        if prev.get("kind") == "retry":  # 다시 시도를 다 쓰고 끝났다
+            return dict(base, kind=classify_api_error(prev.get("error"), status), error=prev.get("error", ""), attempt=prev.get("attempt"), max=prev.get("max"))
+        if e.get("terminal_reason") == "api_error" or status is not None:
+            return dict(base, kind=classify_api_error("", status), error="")
+        return dict(base, kind="unknown", error=issue_text(e.get("subtype")), reason=issue_text(e.get("terminal_reason")))
 
     def _auto_note(self, s: dict, text: str) -> None:
         """auto 모드를 못 쓴 사정을 세션 기록과 화면(permissionNote)에 쉬운 말로 남긴다. store.lock 안에서 부른다."""

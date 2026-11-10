@@ -882,6 +882,44 @@ const cases = {
     assert.ok(unk.attrs['class'].includes('unsure') && unk.textContent.includes('? 확인 못 함') && unk.textContent.includes('통과도 실패도 아니야'));
     for (const c of ['pass', 'pending']) { const ok = card(c); assert.ok(!/blocked|unsure/.test(ok.attrs['class']) && !ok.textContent.includes('✕ 막힘') && !ok.textContent.includes('? 확인 못 함'), c); }
   },
+  api_notice_words_and_times() {
+    const A = require(path.join(dir, 'api-notice.js'));
+    const now = new Date(2026, 10, 10, 9, 0).getTime(), sec = ms => Math.floor(ms / 1000);
+    const at = new Date(2026, 10, 10, 15, 5).getTime(), later = new Date(2026, 10, 12, 8, 30).getTime();
+    assert.strictEqual(A.clockText(sec(at), now), '오늘 15:05');
+    assert.strictEqual(A.clockText(sec(later), now), '11월 12일 08:30');
+    assert.strictEqual(A.clockText(null, now), '');
+    const idle = { status: 'idle' };
+    let n = A.notice(Object.assign({ apiIssue: { kind: 'auth', status: 401, error: 'authentication_failed', raw: 'Invalid API key · Fix external API key' } }, idle), now);
+    assert.strictEqual(n.kind, 'auth'); assert.strictEqual(n.sideTone, 'err');
+    assert.ok(n.title.includes('로그인이 풀렸어') && n.body.includes('/login') && n.side.includes('로그인'));
+    assert.ok(n.raw.includes('Invalid API key') && n.raw.includes('상태 401'));
+    n = A.notice(Object.assign({ apiIssue: { kind: 'model', status: 404 } }, idle), now);
+    assert.ok(n.title.includes('모델') && n.sideTone === 'err');
+    n = A.notice(Object.assign({ apiIssue: { kind: 'other', status: 500, raw: 'boom' } }, idle), now);
+    assert.ok(n.title.includes('오류') && n.raw.includes('boom'));
+    // 모르는 종류·빈 원문도 성공으로 치지 않는다
+    for (const k of ['unknown', 'weird']) {
+      n = A.notice(Object.assign({ apiIssue: { kind: k } }, idle), now);
+      assert.strictEqual(n.kind, 'unknown'); assert.ok(n.title.includes('알 수 없는 오류') && n.raw === '(원문 없음)' && n.sideTone === 'err');
+    }
+    // 재시도: 일하는 중에만, n/max 와 다음 시도 초
+    const retry = { kind: 'retry', attempt: 3, max: 10, delayMs: 2060 };
+    n = A.notice({ status: 'running', apiIssue: retry }, now);
+    assert.ok(n.title.includes('다시 시도하는 중 3/10') && n.body.includes('3초 뒤') && n.sideTone === '');
+    assert.strictEqual(A.notice({ status: 'idle', apiIssue: retry }, now), null);
+    // 한도: 걸리면 풀리는 시각(현지), 경고면 미리 알림, 지난 시각이면 없음
+    n = A.notice({ status: 'idle', rateLimit: { status: 'rejected', type: 'five_hour', resetsAt: sec(at) } }, now);
+    assert.ok(n.kind === 'limit' && n.body.includes('오늘 15:05') && n.side.includes('오늘 15:05') && n.sideTone === 'err');
+    n = A.notice({ status: 'idle', apiIssue: { kind: 'limit', status: 429 } }, now);
+    assert.ok(n.kind === 'limit' && n.body.includes('확인 못 했어'));
+    n = A.notice({ status: 'running', rateLimit: { status: 'allowed_warning', type: 'seven_day', utilization: 0.99, resetsAt: sec(later) } }, now);
+    assert.ok(n.kind === 'limit_warn' && n.tone === 'warn' && n.body.includes('7일 사용량이 99%') && n.body.includes('11월 12일 08:30') && n.side === '');
+    assert.strictEqual(A.notice({ status: 'idle', rateLimit: { status: 'allowed_warning', resetsAt: sec(now) - 60 } }, now), null);
+    n = A.notice({ status: 'idle', rateLimit: { status: 'mystery' } }, now);
+    assert.ok(n.kind === 'limit_unknown' && n.body.includes('mystery'));
+    assert.strictEqual(A.notice({ status: 'idle' }, now), null);
+  },
   notify_events_compare_previous_and_next() {
     const on = { turn: true, blocked: true, done: true }, off = { turn: false, blocked: false, done: false };
     const base = { id: 's1', title: '구매오더', group: 'idle', pendingRequestIds: [], lastBlock: null };
@@ -1415,6 +1453,33 @@ def test_session_screen_shows_auto_mode_unavailable_note(tmp_path):
     assert note in got["text"]
     clean = _smoke(tmp_path, "s/s1", [_session("s1", permissionChoice="auto", permissionMode="auto")])
     assert "auto 모드를 쓸 수 없는 것 같아" not in clean["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_session_screen_api_error_card_side_and_ann(tmp_path):
+    """#865: 오류로 끝난 세션은 대화 판에 ⚠ 카드(원문은 자세히 안), 목록·띠에도 오류로. 훅 막힘 카드(✕·?)와 섞지 않는다."""
+    issue = {"kind": "auth", "status": 401, "error": "authentication_failed", "raw": "Invalid API key · Fix external API key"}
+    got = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue=issue, chat=[{"t": 1, "role": "me", "text": "해 줘"}])])
+    text, dump = got["text"], got["dump"]
+    assert "<div.bad.q.apierr.err>" in dump and "로그인이 풀렸어" in text and "/login" in text
+    assert "Invalid API key" not in text  # 원문은 자세히를 눌러야
+    assert "✕ 막힘" not in text and "? 확인 못 함" not in text
+    assert "로그인이 풀렸어" in got["side"] and "끝난 세션" not in got["side"]
+    assert "⚠ 오류 1건" in got["ann"] and "로그인이 풀렸어" in got["ann"]
+    opened = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue=issue, chat=[{"t": 1, "role": "me", "text": "해 줘"}])], actions=[{"click": "[data-api-more]"}])
+    assert "Invalid API key · Fix external API key" in opened["text"] and "상태 401" in opened["text"]
+    # 모르는 모양은 알 수 없는 오류로
+    unk = _smoke(tmp_path, "s/s1", [_session("s1", status="ended", apiIssue={"kind": "unknown", "error": "error_during_execution"})])
+    assert "알 수 없는 오류로 끝났어" in unk["text"] and "알 수 없는 오류" in unk["side"] and "끝난 세션" not in unk["side"]
+    # 재시도 중은 오류가 아니라 안내(띠에 오류로 세지 않는다)
+    retry = _smoke(tmp_path, "s/s1", [_session("s1", status="running", group="running", apiIssue={"kind": "retry", "attempt": 2, "max": 10, "delayMs": 1190})])
+    assert "<div.bad.q.apierr.info>" in retry["dump"] and "다시 시도하는 중 2/10" in retry["text"] and "2초 뒤" in retry["text"]
+    assert "오류" not in retry["ann"] and "다시 시도 중 2/10" in retry["side"]
+    clean = _smoke(tmp_path, "s/s1", [_session("s1")])
+    assert "apierr" not in clean["dump"] and "오류" not in clean["ann"]
+    # 홈 표: 오류 세션의 상태 칩은 '끝남' 이 아니라 ⚠ 오류
+    home = _smoke(tmp_path, "", [_session("s1", status="ended", apiIssue=issue)], extra=_start())
+    assert "<span.tagx.err>" in home["dump"] and "⚠ 오류 · 로그인이 풀렸어" in home["text"] and "<span.tag.ok>" not in home["dump"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
