@@ -4,6 +4,9 @@ const dir = process.argv[2];
 const scenario = process.argv[3];
 
 function Text(s) { this.nodeType = 3; this.text = String(s); this.parentNode = null; }
+// app.js patchChildren(#793)이 쓰는 DOM 속성: 글 노드의 이름·값·자식
+Text.prototype = { nodeName: '#text', namespaceURI: null, childNodes: [], get nodeValue() { return this.text; }, set nodeValue(v) { this.text = String(v); },
+  isEqualNode(o) { return !!o && o.nodeType === 3 && o.text === this.text; } };
 function matchSimple(el, sel) {
   // 한 덩어리: tag#id.class[attr][attr=v]
   const re = /^([a-zA-Z0-9]*)((?:[#.][\w-]+|\[[^\]]+\])*)$/;
@@ -29,9 +32,22 @@ El.prototype = {
   replaceChildren() { this.children.forEach(c => { c.parentNode = null; }); this.children = []; this._text = null; for (const c of arguments) this.appendChild(c); },
   setAttribute(k, v) { this.attrs[k] = String(v); },
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+  hasAttribute(k) { return k in this.attrs; },
+  removeAttribute(k) { delete this.attrs[k]; },
+  get attributes() { return Object.keys(this.attrs).map(name => ({ name, value: this.attrs[name] })); },
+  get childNodes() { return this.children; },
+  get nodeName() { return this.tag.toUpperCase(); },
+  namespaceURI: null, nodeValue: null,
+  replaceChild(nu, old) { const i = this.children.indexOf(old); if (nu.parentNode) nu.parentNode.removeChild(nu); const j = this.children.indexOf(old); this.children.splice(j, 1, nu); nu.parentNode = this; old.parentNode = null; this._text = null; return old; },
+  isEqualNode(o) {
+    if (!o || o.nodeType !== 1 || o.tag !== this.tag || o.children.length !== this.children.length) return false;
+    const a = Object.keys(this.attrs), b = Object.keys(o.attrs);
+    if (a.length !== b.length || a.some(k => this.attrs[k] !== o.attrs[k])) return false;
+    return this.children.every((c, i) => c.isEqualNode(o.children[i]));
+  },
   get className() { return this.attrs['class'] || ''; }, set className(v) { this.attrs['class'] = v; },
   get hidden() { return 'hidden' in this.attrs; }, set hidden(v) { if (v) this.attrs.hidden = ''; else delete this.attrs.hidden; },
-  set textContent(v) { this.children.forEach(c => { c.parentNode = null; }); this.children = []; this._text = String(v); },
+  set textContent(v) { this.children.forEach(c => { c.parentNode = null; }); this.children = []; this._text = null; if (String(v) !== '') this.appendChild(new Text(v)); },  // 진짜 DOM 처럼 글 노드 하나를 자식으로 둔다(patchChildren 이 고칠 수 있게)
   get textContent() { return this._text !== null ? this._text : this.children.map(t => t.nodeType === 3 ? t.text : t.textContent).join(''); },
   addEventListener(n, f) { (this.listeners[n] = this.listeners[n] || []).push(f); },
   get isConnected() { let e = this; while (e.parentNode) e = e.parentNode; return e === document.body || e === root; },

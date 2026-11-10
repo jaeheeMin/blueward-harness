@@ -566,7 +566,7 @@
         if (loading) return;
         loading = true; loadedAt = Date.now(); st.sig = sig();
         Promise.all(pool().map(function (s) {
-          return api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { return { session: s, files: kit.listOf(d, 'files'), unknown: !!(d && d.unknown), note: d && d.note ? String(d.note) : '' }; },
+          return api('GET', '/api/sessions/' + sid(s) + '/files?cache=1').then(function (d) { return { session: s, files: kit.listOf(d, 'files'), unknown: !!(d && d.unknown), note: d && d.note ? String(d.note) : '' }; },
             function (e) { return { session: s, files: [], unknown: true, failed: e }; });
         })).then(function (parts) { st.parts = parts; }).then(function () {
           loading = false;
@@ -1128,10 +1128,17 @@
       // 순서만 바뀐 것(일하는 세션의 updatedAt 갱신)으로는 다시 읽지 않는다. 세션 묶음이 바뀔 때만 6개 파일 목록을 다시 묻는다.
       var sig = pool.map(function (s) { return s.id; }).sort().join('|');
       if (box.dataset.sig === sig && box.dataset.ready) return;
+      // 일하는 세션이 있으면 최근 6개가 계속 바뀌어 매번 스무 개 넘는 목록(git 을 여러 번 실행)을 다시 읽게 된다. 5초에 한 번까지만 읽고, 모자란 시간 뒤에 한 번 다시 본다(#793)
+      var wait = 5000 - (Date.now() - (Number(box.dataset.at) || 0));
+      if (box.dataset.ready && wait > 0) {
+        if (!box._later) box._later = setTimeout(function () { box._later = null; if (box.isConnected) recentCard(box, onWeek); }, wait);
+        return;
+      }
+      box.dataset.at = String(Date.now());
       box.dataset.sig = sig;
       if (!box.dataset.ready) { clear(box); box.appendChild(h('span', { class: 'eb', text: '최근 산출물' })); box.appendChild(h('span', { class: 'quiet', role: 'status', text: '불러오는 중이야.' })); }
       Promise.all(pool.map(function (s) {
-        return api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { return { session: s, files: kit.listOf(d, 'files'), unknown: !!(d && d.unknown) }; },
+        return api('GET', '/api/sessions/' + sid(s) + '/files?cache=1').then(function (d) { return { session: s, files: kit.listOf(d, 'files'), unknown: !!(d && d.unknown) }; },
           function (e) { return { session: s, files: [], unknown: true, failed: e }; });
       })).then(function (parts) {
         if (box.dataset.sig !== sig || !box.isConnected) return;
@@ -1363,7 +1370,16 @@
         fixCard(fixBox);
       }
       draw();
-      return { onData: draw, onSession: draw, onRequest: draw, onRemoved: draw, title: function () { return ''; } };
+      // 세션 이벤트가 초당 수십 번 와도 홈 표는 0.5초에 한 번, 프레임에 맞춰 다시 그린다(#793)
+      var soonOn = false, soonLast = 0, gone = false;
+      function drawSoon() {
+        if (soonOn || gone) return;
+        soonOn = true;
+        setTimeout(function () {
+          requestAnimationFrame(function () { soonOn = false; soonLast = Date.now(); if (!gone) draw(); });
+        }, Math.max(0, 500 - (Date.now() - soonLast)));
+      }
+      return { onData: drawSoon, onSession: drawSoon, onRequest: drawSoon, onRemoved: draw, title: function () { return ''; }, destroy: function () { gone = true; } };
     }
 
     return {

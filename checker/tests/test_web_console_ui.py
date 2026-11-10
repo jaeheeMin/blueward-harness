@@ -1064,9 +1064,9 @@ def test_no_text_larger_than_22px_and_no_native_widgets():
 
 def test_app_frame_ann_only_with_todo_and_menu_paths():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    # 맨 위 띠는 내 차례가 없으면 만들지 않는다
-    ann = app[app.index("function renderAnn"):app.index("function projectOf")]
-    assert re.search(r"clear\(annEl\);\s*if \(d\.todo\.length\) \{", ann) and "내 차례 ' + d.todo.length + '건 — ' + (first.fix ?" in ann and "'“' + first.sname + '” 세션에서 답이 필요해'" in ann and "'“' + first.sname + '” PR 의 검사 실패를 고쳐야 해'" in ann  # 제목에 조사가 바로 붙지 않게(#790), 검사 실패 PR 은 고치라는 문구(G-24)
+    # 맨 위 띠는 내 차례가 없으면 만들지 않는다(buildAnn 이 만들고 renderAnn 은 달라진 곳만 고친다, #793)
+    ann =app[app.index("function renderAnn"):app.index("function projectOf")]
+    assert re.search(r"function buildAnn\(d, annEl\) \{\s*if \(d\.todo\.length\) \{", ann) and "내 차례 ' + d.todo.length + '건 — ' + (first.fix ?" in ann and "'“' + first.sname + '” 세션에서 답이 필요해'" in ann and "'“' + first.sname + '” PR 의 검사 실패를 고쳐야 해'" in ann  # 제목에 조사가 바로 붙지 않게(#790), 검사 실패 PR 은 고치라는 문구(G-24)
     # 메뉴: 내 일 → /, 작업 → 가장 위 세션, 산출물 → /docs, 새 작업 → /new, 설정 → /settings.
     head = app[app.index("function renderHead"):app.index("function renderSide")]
     assert "link('/', { text: '내 일'" in head and "link(newHref(), { text: '새 작업'" in head and "link('/settings'" in head
@@ -1080,6 +1080,20 @@ def test_app_frame_ann_only_with_todo_and_menu_paths():
     assert "기억 사용량 확인 못 함" in (STATIC / "flow-logic.js").read_text(encoding="utf-8")
     assert "아직 세션이 없어. 새 작업을 시작하면 여기에 생겨." in side and "+ 새 세션" in side
     assert "logo-sauce.png" in head and (STATIC / "logo-sauce.png").is_file() and not (STATIC / "blueward-logo.png").exists()
+
+
+def test_event_storm_is_coalesced_not_redrawn_per_event():
+    """훅 이벤트가 초당 수십 번 와도 세션 읽기·그리기는 몰아서 한다(#793). 이 줄들이 빠지면 세션이 많을 때 화면이 다시 느려진다."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    flow = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    refresh = app[app.index("function refreshSession"):app.index("function refreshRequest")]
+    assert "if (sessTimers[id]) return;" in refresh and "SESS_GAP_OTHER" in refresh and "?chat=0&lite=1" in refresh  # 세션마다 읽기를 하나로 묻고, 안 보는 세션은 대화·기록을 뺀다
+    assert "function drawSoon" in app and "onSession: function (sid) { if (sid === id) drawSoon(); }" in app  # 세션 화면은 0.25초에 한 번, 프레임에 맞춰
+    assert "function drawSoon" in flow and "onSession: drawSoon" in flow  # 홈 표는 0.5초에 한 번
+    assert "function patchChildren" in app and "function keepLeading" in app  # 바뀐 곳만 고친다
+    recent = flow[flow.index("function recentCard"):flow.index("function recentCard") + 3000]
+    assert "5000 - (Date.now() -" in recent and "box._later" in recent  # 최근 산출물은 5초에 한 번까지만 다시 읽는다
+    assert flow.count("/files?cache=1") == 2  # 목록·홈이 세션마다 부르는 /files 는 서버 기억(3초)을 쓴다
 
 
 def test_design_states_have_shape_cues_not_only_color():
@@ -1382,7 +1396,7 @@ def test_docs_screen_groups_files_and_has_menu(tmp_path):
     got = _smoke(tmp_path, "docs", [_session("s1")])
     for need in ("내가 만든 문서", "요구사항 · 설계", "SRS.md", "안 올림"):  # 시안 G-14: 처음엔 최근 글 문서를 골라 미리보기까지 보인다(빈 안내 대신)
         assert need in got["text"], need
-    assert "산출물" in got["head"] and "GET /api/sessions/s1/files" in got["calls"]  # 새 서버 API 없이 세션별 문서 목록을 모은다
+    assert "산출물" in got["head"] and "GET /api/sessions/s1/files?cache=1" in got["calls"]  # 새 서버 API 없이 세션별 문서 목록을 모은다(서버 기억을 쓰는 ?cache=1, #793)
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
