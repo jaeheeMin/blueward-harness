@@ -725,24 +725,31 @@ class FakeTab:
         self.cell = {"ok": True, "rect": {"x": 500, "y": 300, "w": 20, "h": 20}, "text": "", "icon": True, "rows": 5}  # cellOf 결과
         self.click_hooks: dict = {}  # (x, y) 가운데를 누르면(mousePressed) 부르는 함수(t) — 대화상자를 띄우거나 닫는다
         self.row_sel: object = {"ok": True, "rect": {"x": 10, "y": 300, "w": 20, "h": 20}}  # rowSelector 결과
-        self.row_selected: object = {"ok": True, "selected": True}  # rowSelected 결과
+        self.row_selected: object = {"ok": True, "selected": True}  # rowSelected 결과(행 선택 칸 (20, 310) 을 누른 뒤)
+        self.row_before: object = {"ok": True, "selected": False}  # rowSelected 결과(누르기 전)
+        self.row_clicked = False
         self.dbtn: dict = {}  # dialogButton 결과(버튼 글자 → dict). 대화상자가 정확히 하나일 때만 찾는다
         self.toast_now: list = []  # toasts() 가 돌려주는 글
         self.toast_error = False
         self.toast_raw: object = None  # 있으면 toasts() 가 이 값을 그대로 돌려준다(목록이 아닌 응답 시험)
-        self.escape_closes = False  # Escape 키가 대화상자를 닫는다
+        self.toast_fail_n = 0  # 앞의 N 번 toasts() 는 CdpError
+        self.reload_closes = False  # 페이지를 새로 읽으면 대화상자가 없어진다
 
     def call(self, method, **params):
         self.calls.append((method, params))
+        if method == "Input.dispatchMouseEvent" and params.get("type") == "mousePressed" and (params["x"], params["y"]) == (20, 310):
+            self.row_clicked = True
         if method == "Input.dispatchMouseEvent" and params.get("type") == "mousePressed" and (params["x"], params["y"]) in self.click_hooks:
             self.click_hooks[(params["x"], params["y"])](self)
-        elif method == "Input.dispatchKeyEvent" and params.get("key") == "Escape" and params.get("type") == "keyDown" and self.escape_closes:
-            self.dialogs.clear()
         elif method == "Page.navigate":
             self.href = self.redirect or params["url"]
             self.stale = False
+            self.row_clicked = False
         elif method == "Page.reload":
             self.stale = False
+            self.row_clicked = False
+            if self.reload_closes:
+                self.dialogs.clear()
         elif method == "Browser.getWindowForTarget":
             return {"windowId": 7}
         elif method == "Browser.setWindowBounds" and params["bounds"].get("windowState") == "normal":
@@ -807,12 +814,15 @@ class FakeTab:
         if expr.startswith("window.__mc.rowSelector("):
             return self.row_sel
         if expr.startswith("window.__mc.rowSelected("):
-            return self.row_selected
+            return self.row_selected if self.row_clicked else self.row_before
         if expr.startswith("window.__mc.dialogButton("):
             if len(self.dialogs) != 1:
                 return {"ok": False, "dialogs": len(self.dialogs)}
             return self.dbtn.get(json.loads(expr[len("window.__mc.dialogButton("):-1]), {"ok": False, "dialogs": 1, "count": 0, "buttons": list(self.dbtn)})
         if expr == "window.__mc.toasts()":
+            if self.toast_fail_n > 0:
+                self.toast_fail_n -= 1
+                raise mc.CdpError("페이지 스크립트 오류: toasts")
             if self.toast_error:
                 raise mc.CdpError("페이지 스크립트 오류: toasts")
             return list(self.toast_now) if self.toast_raw is None else self.toast_raw
@@ -2072,30 +2082,34 @@ def test_practice_stops_before_window_press_shoots_closes_dialog(tmp_path, capsy
     assert row["알림"] == ["첫째 알림", "둘째 알림"]  # 바꿈 화면은 알림을 모은다
 
 
-def test_practice_uses_korean_cancel_then_escape(tmp_path, capsys, fake):
+def test_practice_uses_korean_cancel_then_reload_never_escape(tmp_path, capsys, fake):
     root = _repo(tmp_path)
     _one(root, WRITE_YAML)
     t = fake["tab"] = _write_tab()
     t.dbtn = {"OK": BTN_OK, "취소": BTN_CANCEL}
     code, out = _capture(capsys, root)
     assert "`취소` 버튼" in out["screens"][0]["사유"] and t.dialogs == []
+    reloads = [m for m, _ in t.calls if m == "Page.reload"]
+    assert len(reloads) == 1  # 화면 열기 때 한 번뿐 — 닫기에는 쓰지 않았다
     t = fake["tab"] = _write_tab()
-    t.dbtn = {"OK": BTN_OK}
-    t.escape_closes = True
+    t.dbtn = {"OK": BTN_OK}  # Cancel·취소 버튼이 없다 → 페이지를 새로 읽어 없앤다
+    t.reload_closes = True
     code, out = _capture(capsys, root)
-    assert "Escape" in out["screens"][0]["사유"] and t.dialogs == [] and (730, 515) not in _pressed(t)
-    keys = [(p["type"], p["key"]) for m, p in t.calls if m == "Input.dispatchKeyEvent"]
-    assert keys == [("keyDown", "Escape"), ("keyUp", "Escape")]
+    row = out["screens"][0]
+    assert row["상태"] == "멈춤" and "페이지 새로 읽기(으)로 대화상자를 닫았다" in row["사유"] and t.dialogs == [] and (730, 515) not in _pressed(t)
+    assert len([m for m, _ in t.calls if m == "Page.reload"]) == 2 and t.evals.count("window.__mc_stale = true") == 2  # 화면 열기 + 닫기
+    assert not [1 for m, _ in t.calls if m == "Input.dispatchKeyEvent"]  # Escape 를 포함해 키를 누르지 않는다
 
 
 def test_practice_dialog_that_will_not_close_is_reported(tmp_path, capsys, fake):
     root = _repo(tmp_path)
     _one(root, WRITE_YAML)
     t = fake["tab"] = _write_tab()
-    t.dbtn = {"OK": BTN_OK}  # 닫을 버튼도 Escape 효과도 없다
+    t.dbtn = {"OK": BTN_OK}  # 닫을 버튼도 없고 새로 읽어도 남는다
     code, out = _capture(capsys, root)
     row = out["screens"][0]
-    assert code == 1 and row["상태"] == "멈춤" and "남아 있다" in row["사유"]
+    assert code == 1 and row["상태"] == "멈춤" and "페이지 새로 읽기" in row["사유"] and "남아 있다" in row["사유"]
+    assert not [1 for m, _ in t.calls if m == "Input.dispatchKeyEvent"]
 
 
 def test_practice_checks_window_button_exists_without_pressing(tmp_path, capsys, fake):
@@ -2131,7 +2145,7 @@ def test_allow_write_runs_to_the_end_and_marks_data_changed(tmp_path, capsys, fa
     assert _pressed(t) == [(20, 310), (200, 225), (730, 515)] and t.shots == 1
     assert row["알림"] == ["첫째 알림", "둘째 알림", "취소 완료 1건, 실패 0건"]  # 나타난 순서, 중복 없이
     names = [e for e in t.evals if e.startswith("window.__mc.rowSelector(")] + [e for e in t.evals if e.startswith("window.__mc.rowSelected(")]
-    assert names == [f"window.__mc.rowSelector({json.dumps('플랜트')}, 1)", f"window.__mc.rowSelected({json.dumps('플랜트')}, 1)"]
+    assert names == [f"window.__mc.rowSelector({json.dumps('플랜트')}, 1)"] + [f"window.__mc.rowSelected({json.dumps('플랜트')}, 1)"] * 2  # 클릭 전·뒤
 
 
 def test_press_step_allows_one_dialog_only_when_window_press_follows(tmp_path, capsys, fake):
@@ -2148,7 +2162,7 @@ def test_allow_write_dialog_count_must_be_exactly_one_to_find_button(tmp_path, c
     t = fake["tab"] = _write_tab()
     t.click_hooks[(200, 225)] = lambda t: t.dialogs.extend([CONFIRM, "다른 창"])
     code, out = _capture(capsys, root, "--allow-write")
-    assert code == 2 and "대화상자가 떴다" in out["screens"][0]["사유"]  # 누르기 뒤 둘 이상은 예전 규칙 — 버튼도 누르지 않는다
+    assert code == 2 and "확인 창이 뜨지 않았다" in out["screens"][0]["사유"]  # 누르기 뒤 둘 이상 — 버튼도 누르지 않는다
     assert (730, 515) not in _pressed(t)
     t = fake["tab"] = _write_tab()
     t.dbtn = {"OK": {"ok": False, "dialogs": 1, "count": 2}}
@@ -2162,7 +2176,31 @@ def test_allow_write_dialog_count_must_be_exactly_one_to_find_button(tmp_path, c
     t = fake["tab"] = _write_tab()
     t.click_hooks[(200, 225)] = lambda t: None  # 대화상자가 안 뜬다
     code, out = _capture(capsys, root, "--allow-write")
-    assert code == 2 and "떠 있는 대화상자가 없다" in out["screens"][0]["사유"]
+    assert code == 2 and "확인 창이 뜨지 않았다" in out["screens"][0]["사유"]
+
+
+def test_button_without_confirm_dialog_marks_data_changed_even_in_practice(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, WRITE_YAML)
+    for extra in ((), ("--allow-write",)):
+        for hook in (lambda t: None, lambda t: t.dialogs.extend([CONFIRM, "다른 창"])):  # 확인 창이 안 뜬다 / 둘이 뜬다
+            t = fake["tab"] = _write_tab()
+            t.click_hooks[(200, 225)] = hook
+            code, out = _capture(capsys, root, *extra)
+            row = out["screens"][0]
+            assert code == 2 and row["상태"] == "검사 불능" and row["데이터 바뀜"] is True and t.shots == 0, extra
+            assert row["사유"] == "데이터가 바뀌었을 수 있다 — `누르기` 이동 뒤 확인 창이 뜨지 않았다 — 이 버튼이 바로 데이터를 바꿨을 수 있다(뜬 대화상자 %d개)" % len(t.dialogs)
+            assert (730, 515) not in _pressed(t)  # 창 버튼은 누르지 않는다
+
+
+def test_parse_window_press_needs_press_step_right_before():
+    for steps in ([{"창 누르기": "OK"}], [{"누르기": "이동"}, {"행 고르기": "플랜트", "행": 1}, {"창 누르기": "OK"}],
+                  [{"입력": "플랜트", "값": "1010"}, {"창 누르기": "OK"}], [{"선택": "생산방식", "값": "반복제조"}, {"창 누르기": "OK"}]):
+        with pytest.raises(mc.ListError) as e:
+            mc.parse_screens(_bad(바꿈=True, 준비=steps))
+        assert "`창 누르기` 앞에는 확인 창을 띄우는 `누르기` 가 있어야 한다" in str(e.value)
+    (ok,) = mc.parse_screens(_bad(바꿈=True, 준비=[{"누르기": "이동"}, {"창 누르기": "OK"}, {"창 누르기": "닫기"}]))  # 첫 `창 누르기` 앞만 본다
+    assert ok.write
 
 
 def test_error_window_after_write_is_unavailable_with_data_changed(tmp_path, capsys, fake):
@@ -2203,6 +2241,67 @@ def test_write_screen_without_window_press_step_under_allow_write_marks_data_cha
     code, out = _capture(capsys, root, "--allow-write")
     row = out["screens"][0]
     assert code == 0 and row["상태"] == "완료" and row["데이터 바뀜"] is True and out["쓰기"] == "허락"
+
+
+def test_png_save_failure_after_write_keeps_data_changed_and_continues(tmp_path, capsys, fake, monkeypatch):
+    root = _repo(tmp_path)
+    _one(root, WRITE_YAML + '  - 이름: 결과\n    앱: "#B-display"\n    표시:\n      - {종류: 버튼, 이름: 이동, 설명: 조회한다}\n')
+    real = mc._write_png
+
+    def flaky(path, data):
+        if "조회 조건" in path.name:
+            raise PermissionError("디스크가 가득 찼다")
+        real(path, data)
+
+    monkeypatch.setattr(mc, "_write_png", flaky)
+    t = fake["tab"] = _write_tab()
+    code, out = _capture(capsys, root, "--allow-write")
+    a, b = out["screens"]
+    assert code == 2 and out["status"] == "unavailable" and "problems" not in out, out
+    assert a["이름"] == "조회 조건" and a["상태"] == "검사 불능" and a["데이터 바뀜"] is True
+    assert a["사유"] == "데이터가 바뀌었을 수 있다 — 그림을 저장하지 못했다: 디스크가 가득 찼다"
+    assert b["이름"] == "결과" and b["상태"] == "완료" and "데이터 바뀜" not in b  # 다음 화면은 계속 돈다
+    assert t.shots == 2
+
+
+def test_png_save_failure_without_write_has_no_data_changed(tmp_path, capsys, fake, monkeypatch):
+    root = _repo(tmp_path)
+    _one(root, TWO_SCREENS)
+    monkeypatch.setattr(mc, "_write_png", lambda path, data: (_ for _ in ()).throw(OSError("읽기 전용")))
+    fake["tab"] = FakeTab({("필터", "플랜트"): FOUND, ("버튼", "이동"): FOUND})
+    code, out = _capture(capsys, root)
+    row = out["screens"][0]
+    assert code == 2 and row["사유"] == "그림을 저장하지 못했다: 읽기 전용" and "데이터 바뀜" not in row
+
+
+def test_unexpected_error_after_write_reports_screen_and_warning(tmp_path, capsys, fake, monkeypatch):
+    root = _repo(tmp_path)
+    _one(root, WRITE_YAML)
+    monkeypatch.setattr(mc, "image_rel", lambda *a, **k: (_ for _ in ()).throw(OSError("경로 오류")))  # 화면 단위 처리 밖에서 나는 예외
+    fake["tab"] = _write_tab()
+    code, out = _capture(capsys, root, "--allow-write")
+    row = out["screens"][0]
+    assert code == 2 and row["이름"] == "조회 조건" and row["상태"] == "검사 불능" and row["데이터 바뀜"] is True
+    assert row["사유"].startswith("데이터가 바뀌었을 수 있다 — ")
+    assert out["problems"] == ["데이터가 바뀌었을 수 있다 — 검사 불능: 화면 '조회 조건': 경로 오류"]
+    fake["tab"] = _write_tab()
+    code, out = _capture(capsys, root)  # 연습(쓰기 없음)이면 경고를 붙이지 않는다
+    assert out["problems"] == ["검사 불능: 경로 오류"] and not out["screens"]
+
+
+def test_row_pick_already_selected_is_unavailable_and_clicks_nothing(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, WRITE_YAML)
+    t = fake["tab"] = _write_tab()
+    t.row_before = {"ok": True, "selected": True}
+    code, out = _capture(capsys, root, "--allow-write")
+    row = out["screens"][0]
+    assert code == 2 and row["사유"].endswith("이미 선택돼 있어 누르면 선택이 풀린다 — 화면을 새로 연 뒤 다시") and not _pressed(t)
+    assert "데이터 바뀜" not in row
+    t = fake["tab"] = _write_tab()
+    t.row_before = {"ok": False, "count": 1, "noSelector": True}  # 클릭 전 상태를 읽을 수 없다
+    code, out = _capture(capsys, root, "--allow-write")
+    assert code == 2 and "읽지 못했다" in out["screens"][0]["사유"] and not _pressed(t)
 
 
 def test_row_pick_not_selected_is_unavailable(tmp_path, capsys, fake):
@@ -2290,6 +2389,21 @@ def test_alert_read_failure_is_unavailable_not_mismatch(tmp_path, capsys, fake):
     assert code == 2 and out["screens"][0]["확인"][0]["결과"] == "검사 불능"
 
 
+def test_one_alert_read_failure_is_retried_but_two_in_a_row_are_unavailable(tmp_path, capsys, fake):
+    root = _repo(tmp_path)
+    _one(root, ALERT_YAML)
+    t = fake["tab"] = _write_tab()
+    t.toast_fail_n = 1  # 한 번만 실패 — 다음 기회에 다시 읽는다
+    code, out = _capture(capsys, root, "--allow-write")
+    a, b = out["screens"][0]["확인"]
+    assert a["결과"] == "맞음" and b["결과"] == "다름" and out["screens"][0]["알림"][-1] == "취소 완료 1건, 실패 0건"
+    t = fake["tab"] = _write_tab()
+    t.toast_fail_n = 2  # 연속 2회
+    code, out = _capture(capsys, root, "--allow-write")
+    cs = out["screens"][0]["확인"]
+    assert code == 2 and [c["결과"] for c in cs] == ["검사 불능", "검사 불능"] and "알림(MessageToast)을 읽지 못했다" in cs[0]["사유"]
+
+
 def test_record_check_reports_value_without_judging(tmp_path, capsys, fake):
     y = _chk('{열: 플랜트, 행: 2}')
     code, out, t, root = _run_checks(tmp_path, capsys, fake, y, lambda t: t.col_values.update({"플랜트": _vals("1710", " 5000012345 ")}))
@@ -2335,4 +2449,7 @@ def test_js_has_write_flow_functions():
     for name in ("rowSelector", "rowSelected", "dialogButton", "toasts"):
         assert f"const {name} =" in LIB_JS and name in LIB_JS.split("window.__mc = {", 1)[1]
     assert ".sapUiTableRowSelectionCell" in LIB_JS and "[role=rowheader]" in LIB_JS and "aria-rowindex" in LIB_JS
-    assert ".sapMMessageToast" in LIB_JS and "[role=status]" in LIB_JS and "columnValues, hasText" in LIB_JS
+    assert ".sapMMessageToast" in LIB_JS and "[role=status]" not in LIB_JS and "columnValues, hasText" in LIB_JS
+    sel = LIB_JS.split("const selCellOf", 1)[1].split("// 매뉴얼 데이터 확인", 1)[0]  # 행 선택 칸 후보는 둘뿐이다
+    assert "['.sapUiTableRowSelectionCell', '[role=rowheader]']" in sel and "role=checkbox" not in sel and ".sapMCb" not in sel
+    assert "'[aria-checked=\"true\"], [aria-selected=\"true\"], .sapUiTableRowSel'" in sel and "r.getAttribute('aria-selected') === 'true'" in sel

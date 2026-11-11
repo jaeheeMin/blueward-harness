@@ -28,8 +28,10 @@ PNG(1600x900)를 찍고, 화면에 보이는 이름으로 요소 위치를 찾�
 `팝업` 이 있는 화면은 표시 요소를 **그 팝업 안에서만** 찾고, 찍기 직전에도 그 팝업 하나만 허용한다. 팝업의 확인·저장 버튼은 `팝업` 단계가 누르지 않는다.
 
 데이터를 바꾸는 흐름(#744): 화면에 `바꿈: true` 를 적으면 `창 누르기`(확인 대화상자의 OK 등)를 쓸 수 있다. 쓰기 허락 `--allow-write` 가 없으면 **연습**이다 — 첫
-`창 누르기` 앞까지 돌아 그 상태(대화상자가 떠 있다)를 찍고, 그 단계의 버튼이 있는지만 확인한 뒤 Cancel·취소 버튼(없으면 Escape)으로 닫고, 화면 상태는 `멈춤` 이다
-(`창 누르기` 가 없는 `바꿈` 화면은 어디서 멈출지 몰라 실행하지 않고 `멈춤`). `--allow-write` 이면 끝까지 돈다. 결과에 `쓰기: 연습|허락` 이 붙고, 첫 `창 누르기` 뒤
+`창 누르기` 앞까지 돌아 그 상태(대화상자가 떠 있다)를 찍고, 그 단계의 버튼이 있는지만 확인한 뒤 Cancel·취소 버튼(없으면 페이지를 새로 읽어)으로 닫고, 화면 상태는 `멈춤` 이다
+(`창 누르기` 가 없는 `바꿈` 화면은 어디서 멈출지 몰라 실행하지 않고 `멈춤`). 연습은 확인 창(`창 누르기`)을 거치는 흐름에서만 안전하다 — 첫 `창 누르기` 바로 앞 단계는
+확인 창을 띄우는 `누르기` 여야 하고(아니면 목록 오류), 그 `누르기` 뒤 대화상자가 정확히 하나 뜨지 않으면 검사 불능이며 `데이터 바뀜: true`(연습이어도)를 단다. 버튼 하나가 바로
+저장·전기하는 흐름은 연습도 데이터를 바꾸므로 쓰지 않는다. `--allow-write` 이면 끝까지 돈다. 결과에 `쓰기: 연습|허락` 이 붙고, 첫 `창 누르기` 뒤
 검사 불능·미완이 된 화면은 `데이터 바뀜: true` 와 "데이터가 바뀌었을 수 있다 — " 사유를 단다. 준비 단계 동안 보인 MessageToast 글은 화면의 `알림` 에 모으고,
 `확인` 의 `{알림: 글}` 이 그 글이 든 알림이 있는지 본다. `{열: X, 행: N}`(값 없음)은 그 칸 값을 `기록` 한다(판정 없음).
 
@@ -193,6 +195,9 @@ def parse_screens(data: object) -> list[Screen]:
                 raise ListError(f"{where}: `바꿈` 은 true 또는 false 여야 한다: {write!r}")
             if not write and any(s.action == "창 누르기" for s in steps):
                 raise ListError(f"{where}: `창 누르기` 는 데이터를 바꾸는 화면(`바꿈: true`)에서만 쓴다")
+            firsts = [j for j, s in enumerate(steps) if s.action == "창 누르기"]
+            if firsts and (firsts[0] == 0 or steps[firsts[0] - 1].action != "누르기"):
+                raise ListError(f"{where}: `창 누르기` 앞에는 확인 창을 띄우는 `누르기` 가 있어야 한다(연습이 데이터를 바꾸지 않으려면 첫 `창 누르기` 바로 앞 단계가 `누르기` 여야 한다)")
             screens.append(Screen(name, app, steps, marks, scale, checks, write))
         except ListError as e:
             problems.append(str(e))
@@ -697,6 +702,7 @@ class Capturer:
         self.watch = False  # 알림(MessageToast)을 모으는 화면인가
         self.alerts: list[str] = []
         self.alert_error: str | None = None  # 알림 읽기가 실패했다 — 알림 확인은 검사 불능이다
+        self.alert_fails = 0  # 알림 읽기가 연달아 실패한 횟수(CdpError 한 번은 다음 기회에 다시 읽는다)
 
     def practice(self, screen: Screen) -> bool:
         return screen.write and not self.allow_write
@@ -708,8 +714,11 @@ class Capturer:
         try:
             r = self.tab.evaluate("window.__mc.toasts()")
         except CdpError as e:
-            self.alert_error = f"알림(MessageToast)을 읽지 못했다: {e}"
+            self.alert_fails += 1
+            if self.alert_fails >= 2:  # 같은 화면에서 연속 2회 실패할 때만 검사 불능으로 둔다
+                self.alert_error = f"알림(MessageToast)을 읽지 못했다: {e}"
             return
+        self.alert_fails = 0
         if not isinstance(r, list):
             self.alert_error = f"알림(MessageToast)을 읽지 못했다: {r!r}"
             return
@@ -960,10 +969,15 @@ class Capturer:
             elif r.get("noRow"):
                 why = "그 칸이 속한 행([role=row])을 찾지 못했다"
             elif r.get("noSelector"):
-                why = "그 행의 행 선택 칸(.sapUiTableRowSelectionCell·[role=rowheader]·체크박스)을 찾지 못했다"
+                why = "그 행의 행 선택 칸(.sapUiTableRowSelectionCell·[role=rowheader])을 찾지 못했다"
             else:
                 why = "열 머리글이 하나로 정해지지 않았다"
             raise Unavailable(f"{what}: {why}")
+        before = self.tab.evaluate(f"window.__mc.rowSelected({json.dumps(s.name)}, {s.row})")  # 클릭 전 상태 — 이미 선택돼 있으면 누를 때 풀린다
+        if not isinstance(before, dict) or not before.get("ok"):
+            raise Unavailable(f"{what}: 누르기 전에 그 행이 선택돼 있는지 읽지 못했다: {before!r}")
+        if before.get("selected"):
+            raise Unavailable(f"{what}: 이미 선택돼 있어 누르면 선택이 풀린다 — 화면을 새로 연 뒤 다시")
         self.click(r["rect"])
 
     def verify_row(self, s: Step) -> None:
@@ -975,7 +989,8 @@ class Capturer:
             raise Unavailable(f"{what}: 행 선택 칸을 눌렀지만 그 행이 선택되지 않았다(aria-selected·체크 상태가 켜지지 않았다)")
 
     def close_dialog(self) -> str:
-        """연습 모드에서 멈춘 뒤 대화상자를 닫는다: Cancel·취소 버튼, 없으면 Escape. 결과를 한 줄로 돌려준다."""
+        """연습 모드에서 멈춘 뒤 대화상자를 닫는다: Cancel·취소 버튼, 없으면 페이지를 새로 읽어 버튼 없이 없앤다(Escape 는 누르지 않는다 —
+        확인 창이 Escape 를 확인으로 받을 수 있다). 결과를 한 줄로 돌려준다."""
         if not (self.tab.evaluate("window.__mc.dialogs()") or []):
             return "닫을 대화상자가 없었다"
         how = ""
@@ -985,17 +1000,24 @@ class Capturer:
                 self.click(r["rect"])
                 how = f"`{label}` 버튼"
                 break
-        if not how:
-            for t in ("keyDown", "keyUp"):
-                self.tab.call("Input.dispatchKeyEvent", type=t, key="Escape", code="Escape", windowsVirtualKeyCode=27)
-            how = "Escape"
+        reloaded = not how
+        if reloaded:
+            self.tab.evaluate("window.__mc_stale = true")  # 새 문서가 열렸는지 알아보는 표지
+            self.tab.call("Page.reload", ignoreCache=False)
+            self.scoped = False
+            how = "페이지 새로 읽기"  # Cancel·취소 버튼이 없어서
         time.sleep(0.3)
         try:
             self.wait_ready("대화상자 닫기")
-        except Unavailable:
+            if reloaded:
+                self.tab.evaluate(LIB_JS)  # 새 문서에는 도구 함수가 없다
+        except (Unavailable, CdpError):
             pass
-        left = self.tab.evaluate("window.__mc.dialogs()") or []
-        return f"{how}(으)로 대화상자를 닫았다" if not left else f"{how}(을)를 눌렀지만 대화상자가 남아 있다: {left[0]!r}"
+        try:
+            left = self.tab.evaluate("window.__mc.dialogs()") or []
+        except CdpError as e:
+            return f"{how}(을)를 했지만 대화상자가 닫혔는지 읽지 못했다: {e}"
+        return f"{how}(으)로 대화상자를 닫았다" if not left else f"{how}(을)를 했지만 대화상자가 남아 있다: {left[0]!r}"
 
     def run_steps(self, screen: Screen) -> None:
         empty_cell = False
@@ -1064,7 +1086,10 @@ class Capturer:
                 kind = "오류·경고 창" if info.get("alert") else "대화상자"
                 raise Unavailable(f"준비 단계 창 누르기 {s.name!r} 뒤에 {kind}이 떴다: {info.get('text')!r}")
             nxt = screen.steps[i + 1] if i + 1 < len(screen.steps) else None
-            if shown and s.action == "누르기" and nxt and nxt.action == "창 누르기" and len(shown) == 1:
+            if s.action == "누르기" and nxt and nxt.action == "창 누르기":
+                if len(shown) != 1:  # 확인 창이 정확히 하나 떠야 한다 — 아니면 이 버튼이 연습에서도 바로 데이터를 바꿨을 수 있다
+                    self.wrote = True
+                    raise Unavailable(f"`누르기` {s.name} 뒤 확인 창이 뜨지 않았다 — 이 버튼이 바로 데이터를 바꿨을 수 있다(뜬 대화상자 {len(shown)}개)")
                 continue  # 다음 단계가 그 대화상자의 버튼을 누른다(MessageBox 같은 확인 창도 허용)
             if shown:  # 오류·경고 창이 떴다 — 그 화면은 의도한 상태가 아니다(통과로 찍지 않는다)
                 raise Unavailable(f"준비 단계 {s.action} {s.name!r} 뒤에 대화상자가 떴다: {shown[0]!r}. 준비 단계(값·이미 들어 있는 기본값)를 확인한다")
@@ -1394,9 +1419,11 @@ def run(args: argparse.Namespace) -> tuple[Report, int]:
     if any(s.write for s in wanted):
         report.write = "허락" if allow_write else "연습"
     cap = Capturer(tab, base, args.ui5, args.timeout, allow_write)
+    current: Screen | None = None
     try:
         cap.prepare()
         for s in wanted:
+            current = s
             try:
                 png, drawn, missing = cap.capture(s)
             except Halted as e:
@@ -1413,7 +1440,16 @@ def run(args: argparse.Namespace) -> tuple[Report, int]:
                 continue
             complete = not missing
             rel = image_rel(lob, s.name, version, partial=not complete)
-            _write_png(root / rel, png)
+            try:
+                _write_png(root / rel, png)
+            except OSError as e:  # 쓰기 뒤라면 `데이터 바뀜` 이 사라지지 않게 화면 단위로 잡고 다음 화면으로 계속한다
+                row = {"이름": s.name, "상태": "검사 불능", "사유": f"그림을 저장하지 못했다: {e}"}
+                if s.checks:
+                    row["확인"] = cap.checks
+                if s.watch_alerts:
+                    row["알림"] = cap.alerts
+                report.screens.append(_after_write(row, cap.wrote))
+                continue
             row = {"이름": s.name, "상태": "완료" if complete else "미완", "그림": rel, "그린 것": drawn, "못 찾은 것": missing}
             if cap.halted:  # 연습: 첫 `창 누르기` 앞에서 멈췄다. 작업본은 고치지 않는다(끝까지 돈 그림이 아니다)
                 row["상태"] = "멈춤"
@@ -1439,7 +1475,11 @@ def run(args: argparse.Namespace) -> tuple[Report, int]:
                         row["알림"] = cap.alerts
             report.screens.append(_after_write(row, cap.wrote))
     except (CdpError, Unavailable, OSError) as e:
-        report.problems.append(f"검사 불능: {e}")
+        if current is not None and cap.wrote:  # 화면 단위로 못 잡은 예외가 쓰기 뒤에 났다 — 그 화면 이름과 경고를 남긴다
+            report.screens.append(_after_write({"이름": current.name, "상태": "검사 불능", "사유": str(e)}, True))
+            report.problems.append(f"{WROTE}검사 불능: 화면 {current.name!r}: {e}")
+        else:
+            report.problems.append(f"검사 불능: {e}")
     finally:
         cap.finish()
         tab.close()
