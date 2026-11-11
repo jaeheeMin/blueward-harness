@@ -119,7 +119,6 @@ ul, ol { padding: 0; }
 .banner.mcp .mcp-more { font-size: 12px; }
 .banner.mcp .mcp-more .mono { display: block; margin-top: 4px; overflow-wrap: anywhere; }
 .banner.mcp .mcp-err { flex: 1 1 100%; font-size: 13px; font-weight: 600; }
-.banner.mcp-unknown { font-size: 13px; }
 .mono.warn { color: var(--st-turn); }
 .mono.hot { color: var(--st-fail-ink); }
 .sinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }

@@ -1293,9 +1293,7 @@
               m.canReconnect ? h('button', { type: 'button', class: 'pill line sm mcp-again', disabled: mcpBusy, text: mcpBusy === m.name ? '연결하는 중…' : '다시 연결', onClick: function () { mcpReconnect(m.name); } }) : null);
           })),
           mcpErr ? h('span', { class: 'mcp-err', role: 'alert', text: mcpErr }) : null));
-      } else if (mcp.state === 'unknown') {
-        notices.push(h('div', { class: 'banner info mcp-unknown', 'data-mcp': 'unknown', role: 'status' }, h('span', { text: '터미널에서 연 세션이라 SAP 같은 연결 도구가 잘 연결됐는지는 여기서 확인할 수 없어요.' })));
-      }
+      }  // 터미널 세션(unknown)은 띠를 띄우지 않고 "자세히 > 기술 정보" 에서 확인할 수 없다고 말한다(시안 G-09)
       if (s.handedOffTo) {
         notices.push(h('div', { class: 'banner info' }, h('span', { text: '다음 세션으로 넘어감 → ' }),
           link('/s/' + encodeURIComponent(s.handedOffTo), { text: '새 세션 보기' })));
@@ -1661,6 +1659,15 @@
       regions.log.replaceChildren(sec);
     }
 
+    // 모르면 모른다고, 연결됨으로 뭉개지 않는다(#864). init 을 못 받은 세션(none)은 줄을 안 그린다
+    function mcpTechLine(m) {
+      m = m || {};
+      if (m.state === 'unknown') return '터미널에서 연 세션이라 여기서는 연결됐는지 확인할 수 없어요';
+      if (m.state === 'ok') return '모두 연결됨';
+      if (m.state === 'problem') return '연결 안 됨: ' + (m.servers || []).filter(function (x) { return x.problem; }).map(function (x) { return x.name; }).join(', ');
+      return '';
+    }
+
     function paintTech(s) {
       var open = regions.tech.querySelector('details') ? regions.tech.querySelector('details').open : false;
       var subs = (s.subagents || []).map(function (a) { return typeof a === 'string' ? a : [a.model || a.name || a.type, a.task || a.description || a.state || a.status].filter(Boolean).join(' · '); });
@@ -1668,7 +1675,8 @@
         ['저장소', [s.repo, s.branch].filter(Boolean).join(' / ')],
         ['작업 폴더', s.cwd], ['현재 동작', s.currentAction], ['현재 스킬', s.currentSkill], ['상태', s.status],
         ['권한 모드', s.permissionMode], ['모델', modelLine(s).replace(/^모델: /, '').replace(/ · 에포트: /, ' · 에포트 ')], ['세션 ID', s.id], ['실행 방식', s.managed ? '콘솔이 띄운 세션' : '터미널 세션'],
-        ['서브에이전트', subs.length ? subs.join('\n') : '돌고 있는 서브에이전트 없음']
+        ['서브에이전트', subs.length ? subs.join('\n') : '돌고 있는 서브에이전트 없음'],
+        ['연결 도구(MCP)', mcpTechLine(s.mcp)]
       ].filter(function (r) { return r[1]; });
       var dl = h('dl', { class: 'kv' });
       rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { class: r[0] === '서브에이전트' ? '' : 'mono', text: r[1] })); });

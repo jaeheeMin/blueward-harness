@@ -268,7 +268,7 @@ claude 2.1.321 실측(`system/init`, `control_request` mcp_status·mcp_reconnect
 
 **상태 읽기.** 콘솔이 띄운 세션은 `system/init` 의 `mcp_servers[{name,status,source}]` 를 세션의 `mcpServers[{name,status,error}]` 로 적는다(status: `connected`·`failed`·`needs-auth`·`pending`·`disabled`, 그 밖의 값은 "상태를 확인하지 못했어요" 로 문제 취급). init 에는 실패 사유가 없다. 연결 안 된 서버가 하나라도 있으면 읽기 스레드와 다른 스레드에서 `control_request{subtype:"mcp_status"}` 를 보내 `response.mcpServers[].error`(예: `Connection closed`)까지 받아 채운다(읽기 스레드가 응답을 기다리면 응답을 못 읽는다). `init` 에 `mcp_servers` 키가 없으면 알던 값을 지킨다(없다는 말이 아니다). 세션 로그에 "연결되지 않은 MCP 서버: …" 를 남긴다.
 
-**세션 필드 `mcp`** `{state, canReconnect, servers[{name,status,label,problem,error,canReconnect}]}`. `state`: `ok`(모두 연결됨, 화면은 아무것도 안 그린다) · `problem`(실패·로그인 필요·모르는 상태가 있음. 화면이 노란 알림으로 문제 서버만 보인다, 사유는 "자세히") · `none`(끝난 세션, 서버 없음, init 에 목록이 없음. 화면은 그리지 않는다) · `unknown`(터미널 세션은 init 을 받지 못해 모른다. 화면은 "연결됐는지는 여기서 확인할 수 없어요" 한 줄, 연결됨이라 하지 않는다).
+**세션 필드 `mcp`** `{state, canReconnect, servers[{name,status,label,problem,error,canReconnect}]}`. `state`: `ok`(모두 연결됨, 화면은 아무것도 안 그린다) · `problem`(실패·로그인 필요·모르는 상태가 있음. 화면이 노란 알림으로 문제 서버만 보인다, 사유는 "자세히") · `none`(끝난 세션, 서버 없음, init 에 목록이 없음. 화면은 그리지 않는다) · `unknown`(터미널 세션은 init 을 받지 못해 모른다. 알림 띠는 그리지 않고(시안 G-09) "자세히 > 기술 정보" 의 `연결 도구(MCP)` 줄에 "여기서는 연결됐는지 확인할 수 없어요" 라고 적는다, 연결됨이라 하지 않는다). 기술 정보 줄은 `ok` 면 "모두 연결됨", `problem` 이면 "연결 안 됨: 서버 이름", `none` 이면 줄이 없다.
 
 **다시 연결** `POST /api/sessions/:id/mcp/reconnect {server}` → `control_request{subtype:"mcp_reconnect", serverName}` 뒤 `mcp_status` 로 새 상태를 받아 `200 {ok, session}`. `server` 가 비면 400, 터미널·끝난 세션 409, 이 세션에 없는 서버 404, claude 가 거절하거나 30초 안에 답이 없으면 502(상태는 그대로 두고, 연결됨으로 바꾸지 않는다). 단추는 `failed`·모르는 상태에만 있다(`needs-auth` 는 다시 연결로 안 풀려 "터미널에서 /mcp 로 로그인" 안내만).
 

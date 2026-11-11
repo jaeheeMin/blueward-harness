@@ -1472,7 +1472,10 @@ def test_session_screen_mcp_status_quiet_when_ok_loud_when_failed_honest_for_ter
     assert "Connection closed" in bad["text"] and "echosrv" not in bad["text"]  # 사유는 "자세히" 안, 멀쩡한 서버는 안 보인다
     assert "<details.mcp-more>" in bad["dump"] and "<div.banner.mcp>" in bad["dump"]
     term = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, mcp={"state": "unknown", "servers": [], "canReconnect": False})])
-    assert "연결됐는지는 여기서 확인할 수 없어요" in term["text"] and "다시 연결" not in term["text"]  # 모르면 모른다고, 연결됨이라 하지 않는다
+    # 터미널 세션은 띠 없이(시안 G-09) "자세히 > 기술 정보" 에서 모른다고 말한다. 연결됨이라 하지 않는다
+    assert "data-mcp" not in term["dump"] and "다시 연결" not in term["text"]
+    assert "여기서는 연결됐는지 확인할 수 없어요" in term["text"] and "모두 연결됨" not in term["text"]
+    assert "모두 연결됨" in ok["text"] and "연결 안 됨: abap-adt" in bad["text"]
     auth = _smoke(tmp_path, "s/s1", [_session("s1", mcp={"state": "problem", "canReconnect": True, "servers": [
         {"name": "notion", "status": "needs-auth", "label": "로그인이 필요해요(터미널에서 /mcp 로 로그인해 주세요)", "problem": True, "error": "", "canReconnect": False}]})])
     assert "로그인이 필요해요" in auth["text"] and "다시 연결" not in auth["text"]
