@@ -18,6 +18,10 @@ READY_JS = """(() => {
   if (core.isInitialized && !core.isInitialized()) return false;
   if (core.getUIDirty && core.getUIDirty()) return false;
   if (document.querySelector('.sapMBusyDialog, .sapUiLocalBusy, .sapUiBlockLayer:not(.sapUiBlockLayerHidden)')) return false;
+  // 전역 BusyIndicator(#sapUiBusyIndicator)·지역 busy 표시는 숨겨 두기만 하고 DOM 에 남아 있으니 **보일 때만** 막는 것으로 본다(#744 실제 테넌트: 쓰기 뒤 처리 중 표시)
+  for (const el of document.querySelectorAll('#sapUiBusyIndicator, .sapUiLocalBusyIndicator, .sapUiBusy')) {
+    if (el.offsetWidth > 0 && el.offsetHeight > 0) return false;
+  }
   return true;
 })()"""
 

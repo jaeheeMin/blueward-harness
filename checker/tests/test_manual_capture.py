@@ -734,6 +734,8 @@ class FakeTab:
         self.toast_raw: object = None  # 있으면 toasts() 가 이 값을 그대로 돌려준다(목록이 아닌 응답 시험)
         self.toast_fail_n = 0  # 앞의 N 번 toasts() 는 CdpError
         self.reload_closes = False  # 페이지를 새로 읽으면 대화상자가 없어진다
+        self.busy_polls = 0  # 앞의 N 번 준비 확인은 처리 중 표시 때문에 false
+        self.after_busy = None  # busy_polls 가 0 이 되는 순간 부르는 함수(t)
 
     def call(self, method, **params):
         self.calls.append((method, params))
@@ -764,6 +766,11 @@ class FakeTab:
         if expr.startswith("(window.__mc_stale"):
             if self.stale:
                 return "stale"
+            if self.busy_polls > 0:
+                self.busy_polls -= 1
+                if self.busy_polls == 0 and self.after_busy:
+                    self.after_busy(self)
+                return False
             return True if self.ready else False
         if expr == "window.__mc_stale = true":
             self.stale = True
@@ -2212,6 +2219,63 @@ def test_error_window_after_write_is_unavailable_with_data_changed(tmp_path, cap
     assert code == 2 and out["status"] == "unavailable" and row["상태"] == "검사 불능"
     assert row["사유"].startswith("데이터가 바뀌었을 수 있다 — ") and "오류·경고 창" in row["사유"] and "취소하지 못했다" in row["사유"]
     assert row["데이터 바뀜"] is True and row["알림"] == ["첫째 알림", "둘째 알림", "취소 완료 1건, 실패 0건"] and t.shots == 0
+
+
+def _fake_clock(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(mc.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(mc.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    return clock
+
+
+def test_ready_js_blocks_on_visible_global_busy_indicator():
+    for sel in ("#sapUiBusyIndicator", ".sapUiLocalBusyIndicator", ".sapUiBusy", ".sapMBusyDialog", ".sapUiBlockLayer:not(.sapUiBlockLayerHidden)"):
+        assert sel in mc.READY_JS
+    assert "offsetWidth > 0" in mc.READY_JS and "offsetHeight > 0" in mc.READY_JS
+
+
+def test_settle_after_write_waits_min_time_even_when_ready(tmp_path, capsys, fake, monkeypatch):
+    clock = _fake_clock(monkeypatch)
+    pressed_at = []
+    root = _repo(tmp_path)
+    _one(root, WRITE_YAML)
+    t = fake["tab"] = _write_tab(after_ok=lambda t: pressed_at.append(clock[0]))
+    ready_times = []
+    real_eval = t.evaluate
+    t.evaluate = lambda expr: (ready_times.append(clock[0]) if expr.startswith("(window.__mc_stale") else None, real_eval(expr))[1]
+    code, out = _capture(capsys, root, "--allow-write")
+    row = out["screens"][0]
+    assert code == 0 and row["상태"] == "완료" and row["데이터 바뀜"] is True
+    after = [x for x in ready_times if x > pressed_at[0]]
+    assert after and max(after) - pressed_at[0] >= mc.SETTLE_MIN  # 계속 준비 상태여도 최소 대기를 채운 뒤 끝낸다
+    assert len([x for x in after if x - pressed_at[0] < mc.SETTLE_MIN]) >= 1
+
+
+def test_settle_after_write_busy_then_error_window_is_unavailable_with_data_changed(tmp_path, capsys, fake, monkeypatch):
+    _fake_clock(monkeypatch)
+    root = _repo(tmp_path)
+    _one(root, WRITE_YAML)
+    err = "API 호출에 실패 하였읍니다."
+
+    def after_ok(t):
+        t.busy_polls = 4
+        t.after_busy = lambda t: (t.dialogs.append(err), t.alert_texts.add(err))
+    t = fake["tab"] = _write_tab(after_ok=after_ok)
+    code, out = _capture(capsys, root, "--allow-write")
+    row = out["screens"][0]
+    assert code == 2 and row["상태"] == "검사 불능" and row["데이터 바뀜"] is True and t.shots == 0
+    assert row["사유"].startswith("데이터가 바뀌었을 수 있다 — ") and "오류·경고 창" in row["사유"] and err in row["사유"]
+
+
+def test_settle_after_write_busy_never_clears_is_unavailable_with_data_changed(tmp_path, capsys, fake, monkeypatch):
+    _fake_clock(monkeypatch)
+    root = _repo(tmp_path)
+    _one(root, WRITE_YAML)
+    t = fake["tab"] = _write_tab(after_ok=lambda t: setattr(t, "busy_polls", 10 ** 9))
+    code, out = _capture(capsys, root, "--allow-write")
+    row = out["screens"][0]
+    assert code == 2 and row["상태"] == "검사 불능" and row["데이터 바뀜"] is True and t.shots == 0
+    assert row["사유"].startswith("데이터가 바뀌었을 수 있다 — ") and "쓰기 뒤 처리 중 표시가 사라지지 않았다" in row["사유"]
 
 
 def test_unavailable_after_write_for_any_reason_is_marked(tmp_path, capsys, fake):

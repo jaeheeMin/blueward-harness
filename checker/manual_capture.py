@@ -84,6 +84,8 @@ MIN_SCALE = 0.5
 MARK_KEYS = {"종류", "이름", "index", "설명"}
 STEP_KEYS = {"입력", "값", "누르기", "선택", "팝업", "행", "행 고르기", "창 누르기"}
 ACTIONS = ("입력", "선택", "누르기", "팝업", "행 고르기", "창 누르기")
+SETTLE_MIN = 3.0  # 쓰기 뒤 최소 대기(초). 전역 BusyIndicator 표시 지연 1초 + 여유(#744)
+SETTLE_STREAK = 3  # 그 뒤 연속 준비 상태 횟수(0.5초 간격)
 WROTE = "데이터가 바뀌었을 수 있다 — "  # 첫 `창 누르기`(쓰기) 뒤 검사 불능·미완 사유 앞에 붙인다(#744)
 ENV_PATH = "env/manual-capture.yaml"
 LIST_SUFFIX = ".capture.yaml"
@@ -756,6 +758,26 @@ class Capturer:
             hint = " — UI5 가 없는 페이지다(UI5 가 아닌 페이지면 --ui5 skip)"
         raise Unavailable(f"{what}: {self.timeout:g}초 안에 페이지가 준비되지 않았다(현재 {url!r}){hint}")
 
+    def settle_after_write(self, what: str) -> None:
+        """`창 누르기`(쓰기) 직후의 대기(#744). 앱이 서버 호출을 되풀이하는 동안 전역 BusyIndicator 가 1초쯤 늦게 뜨므로, 최소 `SETTLE_MIN` 초는
+        준비 상태여도 끝내지 않고 그 뒤 연속 `SETTLE_STREAK` 회 준비 상태일 때 끝낸다. 상한은 `--timeout`(최소 `SETTLE_MIN`+2초). 넘으면 Unavailable."""
+        start = time.monotonic()
+        end = start + max(self.timeout, SETTLE_MIN + 2)
+        streak = 0
+        while time.monotonic() < end:
+            try:
+                state = self.tab.evaluate(f"(window.__mc_stale === true) ? 'stale' : {READY_JS}")
+            except CdpError:
+                state = False
+            self.collect_alerts()
+            ok = state is True or (state == "no-ui5" and self.ui5 == "skip")
+            streak = streak + 1 if ok else 0
+            if streak >= SETTLE_STREAK and time.monotonic() - start >= SETTLE_MIN:
+                self.check_site()
+                return
+            time.sleep(0.5)
+        raise Unavailable(f"{what}: 쓰기 뒤 처리 중 표시가 사라지지 않았다({max(self.timeout, SETTLE_MIN + 2):g}초 안에 {SETTLE_STREAK}회 연속 준비 상태가 되지 않았다)")
+
     def check_site(self) -> None:
         """준비된 페이지의 출처가 테넌트 출처와 같아야 한다. 다르면(로그인 화면·다른 사이트) 검사 불능이다."""
         url = self.tab.evaluate("location.href") or ""
@@ -1074,7 +1096,10 @@ class Capturer:
                         self.tab.call("Input.dispatchKeyEvent", type=t, key="Tab", code="Tab", windowsVirtualKeyCode=9)
             time.sleep(0.3)
             self.collect_alerts()
-            self.wait_ready(f"준비 단계 {s.action} {s.name!r}")
+            if s.action == "창 누르기":
+                self.settle_after_write(f"준비 단계 {s.action} {s.name!r}")
+            else:
+                self.wait_ready(f"준비 단계 {s.action} {s.name!r}")
             if s.action == "행 고르기":
                 self.verify_row(s)
             if s.action == "팝업":  # 팝업은 마지막 단계다. 확인·저장은 누르지 않는다
