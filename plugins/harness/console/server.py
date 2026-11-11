@@ -1085,6 +1085,23 @@ class App:
     def a_reload(self, g, q, b):
         return self.reload_session(self.console_session(g[0]))
 
+    def a_mcp_reconnect(self, g, q, b):
+        """실패한 MCP 서버를 다시 연결한다(콘솔이 띄운 살아 있는 세션만). 바뀐 상태는 세션 응답의 mcp 로 돌려준다."""
+        s = self.get_session(g[0])
+        name = b.get("server")
+        if not isinstance(name, str) or not name:
+            raise HttpError(400, "server 가 비어 있습니다.")
+        if not s["managed"]:
+            raise HttpError(409, "콘솔이 띄운 세션만 MCP 를 다시 연결할 수 있어. 터미널 세션은 터미널에서 /mcp 를 실행해 줘.")
+        if not self.manager.alive(s["id"]):
+            raise HttpError(409, "끝난 세션이야. 이어서 띄우면 MCP 도 다시 연결돼.")
+        if name not in [m.get("name") for m in s.get("mcpServers") or []]:
+            raise HttpError(404, "이 세션에 없는 MCP 서버야.")
+        got = self.manager.reconnect_mcp(s["id"], name)
+        if not got["ok"]:
+            raise HttpError(502, "MCP 를 다시 연결하지 못했어: " + got["error"])
+        return 200, {"ok": True, "session": self.model_of(s)}
+
     def a_reload_all(self, g, q, b):
         with self.store.lock:
             targets = [s for s in self.store.sessions.values() if s["managed"]]
@@ -1933,6 +1950,7 @@ ROUTES = [
     ("POST", re.compile(r"/api/jobs/([^/]+)/cancel"), App.a_job_cancel),
     ("GET", re.compile(rf"/api/jobs/{S}"), App.a_job),
     ("POST", re.compile(rf"/api/sessions/{S}/reload"), App.a_reload),
+    ("POST", re.compile(rf"/api/sessions/{S}/mcp/reconnect"), App.a_mcp_reconnect),
     ("POST", re.compile(r"/api/reload-all"), App.a_reload_all),
     ("POST", re.compile(rf"/api/sessions/{S}/checks/{S}/skip"), App.a_check_skip),
     ("GET", re.compile(rf"/api/sessions/{S}/files"), App.a_session_files),

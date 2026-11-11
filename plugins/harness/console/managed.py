@@ -13,7 +13,8 @@ from typing import Callable
 import attachments as attachments_mod
 import platform_compat
 from hooks_api import tool_key
-from store import CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, chat_clean, mark_check, new_start_checks, prompt_title
+from store import (CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, chat_clean, mark_check, mcp_servers_of, new_start_checks,
+                   prompt_title)
 
 FLAGS = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
          "--permission-prompt-tool", "stdio"]
@@ -43,6 +44,10 @@ RELOAD_COMMAND = "/reload-plugins"
 RELOAD_REPLY_WAIT = 20.0
 RELOAD_MESSAGE_WAIT = 60.0
 RELOAD_POLL = 0.05
+# MCP 연결 상태: init 의 mcp_servers 는 이름·상태만 온다. 실패 사유는 control_request(mcp_status), 다시 연결은 mcp_reconnect(#864).
+MCP_STATUS_SUBTYPE = "mcp_status"
+MCP_RECONNECT_SUBTYPE = "mcp_reconnect"
+MCP_REPLY_WAIT = 30.0
 RELOADED = re.compile(r"Reloaded:\s*\d+\s+plugins?", re.IGNORECASE)
 RELOAD_ERRORS = re.compile(r"(\d+)\s+errors?", re.IGNORECASE)
 
@@ -107,6 +112,7 @@ class Proc:
         self.session_id: str | None = None
         self.write_lock = threading.Lock()
         self.reload_lock = threading.Lock()
+        self.mcp_lock = threading.Lock()
         self.results = 0  # 받은 result 이벤트 수. 보낸 메시지의 턴이 끝났는지 이 수가 늘었는지로 안다
         self.last_result = ""
         self.last_error = False
@@ -462,6 +468,54 @@ class Manager:
         return {"ok": True, "method": "message", "plugins": known, "errorCount": int(errors.group(1)) if errors else 0,
                 "message": text.strip()[:200]}
 
+    # ---- MCP 연결 상태 ----
+    def refresh_mcp(self, sid: str) -> dict:
+        """mcp_status 로 서버별 상태와 실패 사유를 새로 받는다. {"ok": True} 또는 {"ok": False, "error"}."""
+        proc = self.proc_for(sid)
+        if proc is None or not proc.alive():
+            return {"ok": False, "error": "세션 프로세스가 끝났어."}
+        with proc.mcp_lock:
+            return self._mcp_status(proc, self.store.resolve_id(sid))
+
+    def _mcp_status(self, proc: Proc, real: str) -> dict:
+        got = self.control_call(proc, {"subtype": MCP_STATUS_SUBTYPE}, MCP_REPLY_WAIT)
+        if not got["ok"]:
+            return got
+        servers = mcp_servers_of(got["response"].get("mcpServers"))
+        with self.store.lock:
+            s = self.store.get(real)
+            if s is None:
+                return {"ok": False, "error": "없는 세션이야."}
+            s["mcpServers"] = servers
+        self.store.touch(s)
+        return {"ok": True}
+
+    def reconnect_mcp(self, sid: str, name: str) -> dict:
+        """실패한 MCP 서버 하나를 다시 연결하고 상태를 새로 받는다. 성공은 연결됐다는 뜻이 아니라 요청이 받아들여졌다는 뜻이다(결과는 상태로 본다)."""
+        proc = self.proc_for(sid)
+        real = self.store.resolve_id(sid)
+        if proc is None or not proc.alive():
+            return {"ok": False, "error": "세션 프로세스가 끝났어."}
+        with proc.mcp_lock:
+            got = self.control_call(proc, {"subtype": MCP_RECONNECT_SUBTYPE, "serverName": name}, MCP_REPLY_WAIT)
+            with self.store.lock:
+                s = self.store.get(real)
+                if s is not None:
+                    self.store.add_log(s, f"MCP 서버 {name} 다시 연결 " + ("요청함" if got["ok"] else "실패: " + got["error"]))
+            status = self._mcp_status(proc, real)  # 다시 연결이 실패해도 새 상태(사유)를 받아 둔다
+            if not got["ok"]:
+                return got
+            return status if not status["ok"] else {"ok": True}
+
+    def _mcp_refresh_later(self, proc: Proc, real: str) -> None:
+        """init 에 연결 안 된 서버가 있으면 실패 사유를 받아 온다. 읽기 스레드 안에서 control_call 을 기다리면 응답을 못 읽으니 따로 돈다."""
+        def run() -> None:
+            if not proc.alive():
+                return
+            with proc.mcp_lock:
+                self._mcp_status(proc, real)
+        threading.Thread(target=run, daemon=True).start()
+
     def _record_reload(self, real: str, result: dict) -> None:
         with self.store.lock:
             s = self.store.get(real)
@@ -519,6 +573,7 @@ class Manager:
             if proc.temp_id != sid:
                 self.store.rekey(proc.temp_id, sid)
         control = None
+        mcp_check = False
         with self.store.lock:  # 세션 데이터 변경은 store.lock 안에서 한다. 자식 프로세스에 쓰는 일은 잠금 밖에서 한다.
             s = self.store.get(proc.session_id or proc.temp_id)
             if s is None:
@@ -547,6 +602,12 @@ class Manager:
                 if plugins:  # init 에 판이 안 실려 있으면 알던 판을 지키고, 실려 있으면 새로 적는다
                     old = {p["name"]: p["version"] for p in s.get("pluginVersions") or []}
                     s["pluginVersions"] = [dict(p, version=p["version"] or old.get(p["name"], "")) for p in plugins]
+                if isinstance(e.get("mcp_servers"), list):  # 키가 없으면 알던 상태를 지킨다(없다는 말이 아니라 모른다는 말)
+                    s["mcpServers"] = mcp_servers_of(e["mcp_servers"])
+                    broken = [m["name"] for m in s["mcpServers"] if m["status"] != "connected"]
+                    if broken:
+                        self.store.add_log(s, "연결되지 않은 MCP 서버: " + ", ".join(broken)[:300])
+                        mcp_check = True
             elif kind == "system" and e.get("subtype") == "api_retry":
                 num = lambda v: v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None  # noqa: E731
                 s["apiIssue"] = {"kind": "retry", "t": self.store.clock(), "attempt": num(e.get("attempt")), "max": num(e.get("max_retries")),
@@ -607,6 +668,8 @@ class Manager:
             else:
                 self._deny_control(proc, control, e)
         self.store.touch(control or s)
+        if mcp_check:
+            self._mcp_refresh_later(proc, s["id"])
 
     def _failed_issue(self, s: dict, e: dict) -> dict:
         """is_error result 를 오류 카드 모델로 만든다. assistant 오류 이벤트·재시도로 이미 알던 것을 이어받는다.
@@ -650,9 +713,14 @@ class Manager:
         risk, note = "", ""
         if self.risk_of is not None:
             risk, note = self.risk_of(s, tool, tool_input)
+        mcp = None
+        server = req.get("mcp_server")
+        if tool.startswith("mcp__"):  # MCP 도구: claude 가 준 서버 이름과 사람이 읽는 이름(display_name)을 카드에 쓴다
+            mcp = {"server": str(server.get("name") or "") if isinstance(server, dict) else "",
+                   "display": str(req.get("display_name") or "") if req.get("display_name") != tool else ""}
         try:
             r, created = self.store.add_request(s["id"], "permission", tool, tool_input, req.get("permission_suggestions"),
-                                                tool_key(tool, tool_input), risk=risk, risk_note=note)
+                                                tool_key(tool, tool_input), risk=risk, risk_note=note, mcp=mcp)
         except RequestLimit:  # 조용히 허용하지 않고 거부한다
             with self.store.lock:
                 self.store.add_log(s, f"대기 요청이 너무 많아 거부함: {tool}")

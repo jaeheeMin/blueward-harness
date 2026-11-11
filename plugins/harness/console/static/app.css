@@ -111,6 +111,14 @@ ul, ol { padding: 0; }
 .banner.mem .mem-t { font-weight: 600; }
 .banner.mem .mem-d { flex: 1 1 0; min-width: 0; font-weight: 400; font-size: 14px; }  /* 시안 G-18: 설명은 본문 14px, 남은 너비를 채우고 모자라면 줄바꿈 */
 .banner.mem .mem-acts { margin: 0; flex: none; }
+.banner.mcp { margin-top: 24px; padding: 12px 18px; gap: 6px 14px; justify-content: flex-start; }
+.banner.mcp .mcp-t { font-weight: 600; }
+.banner.mcp .mcp-d { flex: 1 1 260px; font-weight: 400; font-size: 13px; }
+.banner.mcp .mcp-l { flex: 1 1 100%; margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; }
+.banner.mcp .mcp-l li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.banner.mcp .mcp-more { font-size: 12px; }
+.banner.mcp .mcp-more .mono { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+.banner.mcp .mcp-err { flex: 1 1 100%; font-size: 13px; font-weight: 600; }
 .mono.warn { color: var(--st-turn); }
 .mono.hot { color: var(--st-fail-ink); }
 .sinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }

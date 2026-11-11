@@ -983,6 +983,7 @@ class FakeProc:
 
     def __init__(self):
         self.written = []
+        self.mcp_lock = threading.Lock()
 
     def write(self, text):
         self.written.append(json.loads(text))
@@ -7178,3 +7179,131 @@ def test_rate_limit_event_warning_and_allowed(tmp_path):
     assert "rateLimit" not in s
     m.on_event(FakeProc(), {"type": "rate_limit_event", "session_id": "s1", "rate_limit_info": {"status": "rejected", "resetsAt": "x", "utilization": True}})
     assert s["rateLimit"]["status"] == "rejected" and s["rateLimit"]["resetsAt"] is None and s["rateLimit"]["utilization"] is None
+
+
+# ---- MCP 연결 상태와 MCP 도구 승인(#864). 입력은 실제 claude 2.1.321 stream-json 실측 모양 ----
+
+MCP_INIT = {"type": "system", "subtype": "init", "session_id": "s1",
+            "mcp_servers": [{"name": "abap-adt", "status": "failed", "source": "user"},
+                            {"name": "echosrv", "status": "connected", "source": "dynamic"}]}
+MCP_STATUS_REPLY = {"type": "control_response", "response": {"subtype": "success", "request_id": "", "response": {"mcpServers": [
+    {"name": "abap-adt", "status": "failed", "error": "Connection closed", "config": {"type": "stdio"}, "transport": "stdio",
+     "scope": "user", "source": "user", "tools": []},
+    {"name": "echosrv", "status": "connected", "serverInfo": {"name": "echo", "version": "1"}, "config": {}, "transport": "stdio",
+     "scope": "dynamic", "source": "dynamic", "tools": [{"name": "echo", "annotations": {}}]}]}}}
+
+
+def test_mcp_init_marks_failed_server_and_fetches_reason(tmp_path):
+    store = Store(None)
+    proc = FakeProc()
+    m = managed.Manager(store, lambda: None, "/p")
+    store.ensure("s1", str(tmp_path))["managed"] = True
+    m.on_event(proc, dict(MCP_INIT))
+    from store import mcp_view
+    view = mcp_view(store.get("s1"))
+    assert view["state"] == "problem"
+    by = {x["name"]: x for x in view["servers"]}
+    assert by["abap-adt"]["problem"] and by["abap-adt"]["canReconnect"] and "연결하지 못했어" in by["abap-adt"]["label"]
+    assert not by["echosrv"]["problem"] and by["echosrv"]["label"] == "연결됨"
+    assert by["abap-adt"]["error"] == ""  # init 에는 사유가 없다
+    wait_for(lambda: proc.written)  # 연결 안 된 서버가 있으면 사유를 mcp_status 로 받아 온다(읽기 스레드 밖에서)
+    request = proc.written[0]
+    assert request["type"] == "control_request" and request["request"] == {"subtype": "mcp_status"}
+    reply = json.loads(json.dumps(MCP_STATUS_REPLY))
+    reply["response"]["request_id"] = request["request_id"]
+    m.on_event(proc, reply)
+    wait_for(lambda: mcp_view(store.get("s1"))["servers"][0]["error"] == "Connection closed")
+    assert any("연결되지 않은 MCP 서버: abap-adt" in x["text"] for x in store.get("s1")["log"])
+
+
+def test_mcp_all_connected_is_quiet_and_sends_nothing(tmp_path):
+    from store import mcp_view
+    store = Store(None)
+    proc = FakeProc()
+    m = managed.Manager(store, lambda: None, "/p")
+    store.ensure("s1", str(tmp_path))["managed"] = True
+    init = dict(MCP_INIT, mcp_servers=[{"name": "echosrv", "status": "connected", "source": "dynamic"}])
+    m.on_event(proc, init)
+    assert mcp_view(store.get("s1"))["state"] == "ok" and proc.written == []
+
+
+def test_mcp_needs_auth_pending_unknown_status_wording(tmp_path):
+    from store import mcp_view
+    s = {"managed": True, "managed_alive": True, "mcpServers": [
+        {"name": "a", "status": "needs-auth", "error": ""}, {"name": "b", "status": "pending", "error": ""},
+        {"name": "c", "status": "weird", "error": ""}]}
+    by = {x["name"]: x for x in mcp_view(s)["servers"]}
+    assert by["a"]["problem"] and not by["a"]["canReconnect"] and "로그인" in by["a"]["label"]  # 다시 연결로는 로그인이 안 풀린다
+    assert not by["b"]["problem"]
+    assert by["c"]["problem"] and "weird" in by["c"]["label"] and by["c"]["canReconnect"]  # 모르는 상태는 연결됨으로 뭉개지 않는다
+
+
+def test_mcp_terminal_and_ended_sessions_are_honest(tmp_path):
+    from store import mcp_view
+    store = Store(None)
+    term = store.ensure("t1", str(tmp_path))
+    assert mcp_view(term) == {"state": "unknown", "servers": [], "canReconnect": False}  # init 을 못 받는 터미널 세션은 모른다
+    ended = {"managed": True, "managed_alive": False, "mcpServers": [{"name": "a", "status": "failed", "error": ""}]}
+    assert mcp_view(ended)["state"] == "none"  # 끝난 세션의 옛 상태를 보이지 않는다
+    assert mcp_view({"managed": True, "managed_alive": True})["state"] == "none"  # init 에 mcp_servers 가 없으면 안다고 하지 않는다
+
+
+def test_mcp_tool_approval_uses_server_and_display_name(tmp_path):
+    store = Store(None)
+    proc = FakeProc()
+    m = managed.Manager(store, lambda: None, "/p")
+    store.ensure("s1", str(tmp_path))
+    m.on_event(proc, control_event("mcp__abap-adt__getObjectSource", mcp_server={"name": "abap-adt", "source": "user"},
+                                   display_name="Get Object Source", input={"objectUrl": "/x"}))
+    (req,) = store.pending_for("s1")
+    assert req.public()["mcp"] == {"server": "abap-adt", "tool": "getObjectSource", "display": "Get Object Source"}
+    chat = [c for c in store.get("s1")["chat"] if c["role"] == "req"]
+    assert chat[0]["title"] == "연결 도구(abap-adt)의 getObjectSource 사용"
+    # display_name 이 도구 이름 그대로면 사람이 읽는 이름이 아니라서 비운다
+    m.on_event(proc, control_event("mcp__echosrv__echo", mcp_server={"name": "echosrv"}, display_name="mcp__echosrv__echo", input={"text": "a"}))
+    assert store.pending_for("s1")[1].public()["mcp"] == {"server": "echosrv", "tool": "echo", "display": ""}
+    # 서버 이름에 밑줄 둘이 들어도 claude 가 준 서버 이름으로 도구 이름을 나눈다
+    m.on_event(proc, control_event("mcp__my__srv__tool_x", mcp_server={"name": "my__srv"}, input={"q": 1}))
+    assert store.pending_for("s1")[2].public()["mcp"] == {"server": "my__srv", "tool": "tool_x", "display": ""}
+    # 일반 도구에는 mcp 가 없다
+    m.on_event(proc, control_event("Bash"))
+    assert "mcp" not in store.pending_for("s1")[3].public()
+
+
+def test_mcp_hook_only_request_reads_server_from_tool_name(browser):
+    h = browser.hook_async("permission", perm_body("t1", tool_name="mcp__abap-adt__login", tool_input={}))
+    req = wait_for(lambda: (browser.pending("t1") or [None])[0])
+    status, detail, _ = browser.call("GET", f"/api/requests/{req.rid}")
+    assert detail["mcp"] == {"server": "abap-adt", "tool": "login", "display": ""}  # 훅으로만 온 요청은 도구 이름에서 읽는다
+    browser.event("t1", "SessionEnd")
+    h["t"].join(5)
+
+
+def test_mcp_routes_status_and_reconnect(mconsole, monkeypatch):
+    monkeypatch.setenv("FAKE_MCP", json.dumps([{"name": "abap-adt", "status": "failed", "error": "Connection closed"},
+                                               {"name": "echosrv", "status": "connected"}]))
+    c = mconsole
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    model = wait_for(lambda: (lambda d: d if d["mcp"]["servers"] and d["mcp"]["servers"][0]["error"] else None)(c.call("GET", f"/api/sessions/{sid}")[1]))
+    assert model["mcp"]["state"] == "problem" and model["mcp"]["servers"][0]["error"] == "Connection closed"
+    assert c.call("POST", f"/api/sessions/{sid}/mcp/reconnect", {})[0] == 400
+    assert c.call("POST", f"/api/sessions/{sid}/mcp/reconnect", {"server": "nope"})[0] == 404
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/mcp/reconnect", {"server": "abap-adt"})
+    assert status == 200 and body["session"]["mcp"]["state"] == "ok"  # 다시 연결해 모두 연결됨 → 화면은 조용해진다
+    assert any("MCP 서버 abap-adt 다시 연결 요청함" in x["text"] for x in c.app.store.get(sid)["log"])
+    c.event("term", "SessionStart")
+    assert c.call("GET", "/api/sessions/term")[1]["mcp"]["state"] == "unknown"
+    assert c.call("POST", "/api/sessions/term/mcp/reconnect", {"server": "abap-adt"})[0] == 409  # 터미널 세션
+    assert c.call("POST", "/api/sessions/nope/mcp/reconnect", {"server": "a"})[0] == 404
+
+
+def test_mcp_reconnect_failure_is_502_and_keeps_failed_state(mconsole, monkeypatch):
+    monkeypatch.setenv("FAKE_MCP", json.dumps([{"name": "abap-adt", "status": "failed", "error": "Connection closed"}]))
+    monkeypatch.setenv("FAKE_MCP_RECONNECT_FAIL", "1")
+    c = mconsole
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/mcp/reconnect", {"server": "abap-adt"})
+    assert status == 502 and "Server not found or failed" in body["error"]
+    assert c.call("GET", f"/api/sessions/{sid}")[1]["mcp"]["state"] == "problem"  # 못 고쳤는데 연결됨으로 바꾸지 않는다
