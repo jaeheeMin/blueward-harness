@@ -226,6 +226,18 @@ LIB_JS = r"""(() => {
         if (f) return { el: e, rect: rectOf(f), via: sel };
       }
     }
+    // sap.ui.table 은 행 선택 칸이 본문 행 밖(왼쪽 고정 영역)에 따로 있다(Z5U/100 실측: 본문 `…-rows-rowK`, 선택 칸 `…-rowselK`).
+    // 1) 본문 행 id 의 번호로 짝 칸을 찾고, 2) 없으면 같은 높이(위아래 3px 안)의 선택 칸 하나를 쓴다.
+    for (const r of p.rows) {
+      const m = /^(.*)-rows-row(\d+)$/.exec(r.id || '');
+      const e = m && R().querySelector('#' + CSS.escape(`${m[1]}-rowsel${m[2]}`));
+      const f = e && e.matches('.sapUiTableRowSelectionCell, [role=rowheader]') && fully(e);
+      if (f) return { el: e, rect: rectOf(f), via: '#rowsel' };
+    }
+    const ry = p.rows[0].getBoundingClientRect();
+    const near = [...R().querySelectorAll('.sapUiTableRowSelectionCell')]
+      .filter(e => { const b = e.getBoundingClientRect(); return b.height > 0 && Math.abs(b.top - ry.top) <= 3 && Math.abs(b.bottom - ry.bottom) <= 3; });
+    if (near.length === 1) { const f = fully(near[0]); if (f) return { el: near[0], rect: rectOf(f), via: 'same-y' }; }
     return null;
   };
   const rowSelector = (name, row) => {

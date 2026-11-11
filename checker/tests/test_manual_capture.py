@@ -2453,3 +2453,5 @@ def test_js_has_write_flow_functions():
     sel = LIB_JS.split("const selCellOf", 1)[1].split("// 매뉴얼 데이터 확인", 1)[0]  # 행 선택 칸 후보는 둘뿐이다
     assert "['.sapUiTableRowSelectionCell', '[role=rowheader]']" in sel and "role=checkbox" not in sel and ".sapMCb" not in sel
     assert "'[aria-checked=\"true\"], [aria-selected=\"true\"], .sapUiTableRowSel'" in sel and "r.getAttribute('aria-selected') === 'true'" in sel
+    # sap.ui.table 실측(Z5U/100): 선택 칸은 본문 행 밖 `…-rowselK` — 본문 행 id 번호로 짝을 찾고, 없으면 같은 높이 하나
+    assert "-rows-row(\\d+)$" in sel and "-rowsel${m[2]}" in sel and "near.length === 1" in sel
