@@ -1294,7 +1294,7 @@
         var squeezing = !!(s.compact && s.compact.state === 'running');
         top.push(h('div', { class: 'banner mem', role: 'status', 'data-memory-banner': '1' },
           h('b', { class: 'mem-t', text: '이 세션 기억이 거의 찼어 (' + mem.pct + '%)' }),
-          h('span', { class: 'mem-d', text: squeezing ? '기억을 요약하는 중이야. 조금 걸려.' : canHand ? '더 길어지면 앞 내용을 잊고 실수할 수 있어. 지금까지 한 일을 정리해서 새 세션으로 넘기거나, 기억을 요약해서 이어 가길 권해.'
+          h('span', { class: 'mem-d', text: squeezing ? '기억을 요약하는 중이야. 조금 걸려.' : canHand ? '더 길어지면 앞 내용을 잊고 실수할 수 있어. 요약해서 이어 가거나 새 세션으로 넘기길 권해.'
             : '더 길어지면 앞 내용을 잊고 실수할 수 있어. ' + (s.managed ? '정해진 갈래가 없어서 여기서는 넘길 수 없어. 기억을 요약해서 이어 가거나 새 작업으로 시작해 줘.' : '터미널 세션이라 여기서는 넘길 수 없어. 터미널에서 /harness:handoff 를 불러 줘.')
               + (s.compact && s.compact.state === 'failed' ? ' (지난번 요약은 실패했어.)' : '') }),
           h('span', { class: 'acts mem-acts' },
