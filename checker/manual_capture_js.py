@@ -4,6 +4,7 @@
 필터는 라벨과 입력 칸을 묶은 영역, 열은 머리글부터 표 아래 끝(보이는 만큼)까지다.
 후보는 화면 밖이거나 조상의 overflow 로 잘려 일부만 보이는 것까지 **모두** 읽는 순서로 내고 `visible` 로 구분한다(그래서 같은 이름이 화면 밖에 더 있으면
 파이썬이 ambiguous 로 판정하고, `index` 도 화면 밖을 포함한 전체 순서로 센다). 가로 스크롤 밖 열은 `scrollColumn`(하나)·`scrollColumns`(같은 표의 여럿을 한 번에)가 같은 목록·순서로 골라 먼저 보이게 한다.
+데이터를 바꾸는 흐름(#744)은 `rowSelector`·`rowSelected`(행 선택 칸)·`dialogButton`(대화상자 안 버튼)·`toasts`(MessageToast 글)를 쓴다.
 `팝업` 단계 뒤에는 `setScope` 가 찾는 범위를 그 대화상자 안으로 좁히고(`clearScope` 로 되돌린다), 후보 찾기는 모두 그 범위 안에서만 한다.
 """
 from __future__ import annotations
@@ -197,6 +198,43 @@ LIB_JS = r"""(() => {
     const icon = o.c.querySelector('.sapUiIcon');
     const ig = icon && fully(icon);
     return { ok: true, rect: ig ? rectOf(ig) : o.r, text: trimLabel(o.c.textContent), icon: !!icon, rows: vis.length };
+  };
+
+  // `행 고르기`(#744): 이름이 유일한 열의 보이는 본문 N번째 칸이 속한 행(가장 가까운 [role=row])을 찾고, 같은 aria-rowindex 의 행들(sap.ui.table 은
+  // 행 선택 칸이 다른 <table> 에 있다)에서 행 선택 칸을 찾는다: .sapUiTableRowSelectionCell → [role=rowheader] → [role=checkbox]·.sapMCb.
+  // 실제 테넌트 확인 필요: 이 앱의 행 선택 칸이 위 중 어느 것인지.
+  const rowParts = (name, row) => {
+    const { items } = cands('열', name);
+    if (items.length !== 1) return { ok: false, count: items.length };
+    const vis = gridCells(items[0].el);
+    if (!vis) return { ok: false, count: 1, noGrid: true };
+    const o = vis[row - 1];
+    if (!o) return { ok: false, count: 1, rows: vis.length };
+    const rowEl = o.c.closest('[role=row]');
+    if (!rowEl) return { ok: false, count: 1, noRow: true };
+    const ri = rowEl.getAttribute('aria-rowindex');
+    const grid = items[0].el.closest('[role=grid], [role=treegrid], [role=table], .sapUiTable, .sapMList') || document;
+    const rows = ri ? [...grid.querySelectorAll('[role=row]')].filter(r => r.getAttribute('aria-rowindex') === ri) : [rowEl];
+    return { ok: true, rows: rows.includes(rowEl) ? rows : [rowEl, ...rows] };
+  };
+  const rowSelector = (name, row) => {
+    const p = rowParts(name, row);
+    if (!p.ok) return p;
+    const inRows = sel => uniq(p.rows.flatMap(r => [...(r.matches(sel) ? [r] : []), ...r.querySelectorAll(sel)]));
+    for (const sel of ['.sapUiTableRowSelectionCell', '[role=rowheader]', '[role=checkbox]', '.sapMCb']) {
+      for (const e of inRows(sel)) {
+        const f = fully(e);
+        if (f) return { ok: true, rect: rectOf(f), via: sel };
+      }
+    }
+    return { ok: false, count: 1, noSelector: true };
+  };
+  // 클릭 뒤 그 행이 선택됐는가: 같은 행의 요소나 그 안에 aria-selected·aria-checked 가 true 이거나 선택·체크 클래스가 있다.
+  const rowSelected = (name, row) => {
+    const p = rowParts(name, row);
+    if (!p.ok) return p;
+    const on = '[aria-selected="true"], [aria-checked="true"], .sapUiTableRowSel, .sapMCbMarkChecked';
+    return { ok: true, selected: p.rows.some(r => r.matches(on) || !!r.querySelector(on)) };
   };
 
   // 매뉴얼 데이터 확인(#743): 이름이 유일한 열의 보이는 본문 칸 글자를 위에서부터 낸다(row 는 1부터).
@@ -414,6 +452,24 @@ LIB_JS = r"""(() => {
   };
   const clearScope = () => { scopeEl = null; };
 
-  window.__mc = { find, scrollColumn, scrollColumns, cellOf, columnValues, hasText, focusInput, readInput, clearInput, selectOption, dialogs, dialogInfo, setScope, clearScope, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
+  // `창 누르기`(#744): 보이는 대화상자가 정확히 하나일 때 그 안에서 글자·aria-label·title 이 name 과 같은 버튼을 찾는다(MessageBox 의 OK·Cancel 포함).
+  // 같은 버튼을 감싼 겹친 후보는 하나로 센다. 못 찾으면 대화상자 수·버튼 수·그 대화상자의 버튼 글자를 돌려준다.
+  const dialogButton = name => {
+    const els = dialogEls();
+    if (els.length !== 1) return { ok: false, dialogs: els.length };
+    const all = uniq([...els[0].querySelectorAll('button, [role=button], .sapMBtn, input[type=button], input[type=submit]')])
+      .map(e => ({ e, label: [e.innerText, e.getAttribute('aria-label'), e.title, e.value].map(trimLabel).filter(Boolean), g: rectFor(e) }))
+      .filter(o => o.g);
+    const hits = [];
+    for (const o of all.filter(o => o.label.includes(name))) if (!hits.some(h => iou(h.g.r, o.g.r) >= 0.9)) hits.push(o);
+    if (hits.length !== 1) return { ok: false, dialogs: 1, count: hits.length, buttons: all.map(o => o.label[0] || '') };
+    return { ok: true, rect: hits[0].g.r };
+  };
+
+  // 준비 단계 동안 보이는 알림(#744): MessageToast(.sapMMessageToast, 클래스 추정) 또는 [role=status] 의 글. 실제 테넌트 확인 필요.
+  const toasts = () => uniq([...document.querySelectorAll('.sapMMessageToast, [role=status]')])
+    .filter(e => !e.closest('#__mc_overlay') && shown(e)).map(e => trimLabel(e.innerText || e.textContent)).filter(Boolean);
+
+  window.__mc = { find, scrollColumn, scrollColumns, cellOf, columnValues, hasText, focusInput, readInput, clearInput, selectOption, dialogs, dialogInfo, setScope, clearScope, rowSelector, rowSelected, dialogButton, toasts, drawOverlay, clearOverlay, size: () => ({ w: innerWidth, h: innerHeight }) };
   return true;
 })()"""
