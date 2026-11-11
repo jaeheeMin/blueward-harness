@@ -1456,7 +1456,7 @@ def test_session_screen_shows_auto_mode_unavailable_note(tmp_path):
 
 
 _MCP_BAD = {"state": "problem", "canReconnect": True, "servers": [
-    {"name": "abap-adt", "status": "failed", "label": "연결하지 못했어요", "problem": True, "error": "Connection closed", "canReconnect": True},
+    {"name": "abap-adt", "status": "failed", "label": "연결하지 못했어", "problem": True, "error": "Connection closed", "canReconnect": True},
     {"name": "echosrv", "status": "connected", "label": "연결됨", "problem": False, "error": "", "canReconnect": False}]}
 
 
@@ -1468,17 +1468,17 @@ def test_session_screen_mcp_status_quiet_when_ok_loud_when_failed_honest_for_ter
     none = _smoke(tmp_path, "s/s1", [_session("s1", mcp={"state": "none", "servers": [], "canReconnect": False})])
     assert "data-mcp" not in none["dump"]
     bad = _smoke(tmp_path, "s/s1", [_session("s1", mcp=_MCP_BAD)])
-    assert "연결이 안 된 도구가 있어요" in bad["text"] and "abap-adt — 연결하지 못했어요" in bad["text"] and "다시 연결" in bad["text"]
+    assert "연결이 안 된 도구가 있어" in bad["text"] and "abap-adt — 연결하지 못했어" in bad["text"] and "다시 연결" in bad["text"]
     assert "Connection closed" in bad["text"] and "echosrv" not in bad["text"]  # 사유는 "자세히" 안, 멀쩡한 서버는 안 보인다
     assert "<details.mcp-more>" in bad["dump"] and "<div.banner.mcp>" in bad["dump"]
     term = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, mcp={"state": "unknown", "servers": [], "canReconnect": False})])
     # 터미널 세션은 띠 없이(시안 G-09) "자세히 > 기술 정보" 에서 모른다고 말한다. 연결됨이라 하지 않는다
     assert "data-mcp" not in term["dump"] and "다시 연결" not in term["text"]
-    assert "여기서는 연결됐는지 확인할 수 없어요" in term["text"] and "모두 연결됨" not in term["text"]
+    assert "여기서는 연결됐는지 확인할 수 없어" in term["text"] and "모두 연결됨" not in term["text"]
     assert "모두 연결됨" in ok["text"] and "연결 안 됨: abap-adt" in bad["text"]
     auth = _smoke(tmp_path, "s/s1", [_session("s1", mcp={"state": "problem", "canReconnect": True, "servers": [
-        {"name": "notion", "status": "needs-auth", "label": "로그인이 필요해요(터미널에서 /mcp 로 로그인해 주세요)", "problem": True, "error": "", "canReconnect": False}]})])
-    assert "로그인이 필요해요" in auth["text"] and "다시 연결" not in auth["text"]
+        {"name": "notion", "status": "needs-auth", "label": "로그인이 필요해(터미널에서 /mcp 로 로그인해 줘)", "problem": True, "error": "", "canReconnect": False}]})])
+    assert "로그인이 필요해" in auth["text"] and "다시 연결" not in auth["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -1488,9 +1488,9 @@ def test_session_screen_mcp_reconnect_button_posts_server_name(tmp_path):
     got = _smoke(tmp_path, "s/s1", [_session("s1", mcp=_MCP_BAD)], extra=extra, actions=[{"click": ".mcp-again"}])
     posts = [p for p in got["posts"] if p[1].endswith("/mcp/reconnect")]
     assert len(posts) == 1 and "abap-adt" in posts[0][2], got["posts"]
-    assert "연결이 안 된 도구가 있어요" not in got["text"]  # 연결되면 알림이 사라진다
+    assert "연결이 안 된 도구가 있어" not in got["text"]  # 연결되면 알림이 사라진다
     fail = _smoke(tmp_path, "s/s1", [_session("s1", mcp=_MCP_BAD)], actions=[{"click": ".mcp-again"}])  # 길이 없으면 404 로 실패한다
-    assert "연결이 안 된 도구가 있어요" in fail["text"] and "다시 연결하지 못했어요" in fail["text"]
+    assert "연결이 안 된 도구가 있어" in fail["text"] and "다시 연결하지 못했어" in fail["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -1499,12 +1499,18 @@ def test_permission_card_for_mcp_tool_speaks_plainly_and_folds_raw_name(tmp_path
            "toolInput": {"objectSourceUrl": "/sap/bc/adt/x"}, "hasSuggestions": False,
            "mcp": {"server": "abap-adt", "tool": "getObjectSource", "display": "Get Object Source"}}
     got = _smoke(tmp_path, "r/m1", [_session("s1", pendingRequestIds=["m1"])], [req])
-    assert "SAP 시스템 도구(abap-adt)의 'Get Object Source' 을(를) 써도 될까요?" in got["text"]
+    assert "SAP 시스템 도구(abap-adt)의 'Get Object Source' 을(를) 써도 될까?" in got["text"]
     assert "Claude Code가 mcp__" not in got["text"] and "<details.more>" in got["dump"]
-    assert "자세히 (도구 이름·넘기는 값)" in got["text"]
-    other = dict(req, id="m2", mcp={"server": "notion", "tool": "search", "display": ""}, toolName="mcp__notion__search")
+    assert "자세히 (도구 이름·넘기는 값)" in got["text"] and "<details[open].more>" not in got["dump"]  # 되돌릴 수 있는 요청은 접어 둔다
+    # 되돌릴 수 없는 MCP 요청(SAP 소스 쓰기 등)은 넘기는 값을 보고 정하도록 펼쳐 둔다
+    irrev = dict(req, id="m3", toolName="mcp__abap-adt__setObjectSource", risk="irreversible", riskNote="SAP 소스를 바꾸려 해",
+                 toolInput={"objectSourceUrl": "/sap/bc/adt/x", "source": "REPORT z."},
+                 mcp={"server": "abap-adt", "tool": "setObjectSource", "display": "Set Object Source"})
+    got3 = _smoke(tmp_path, "r/m3", [_session("s1", pendingRequestIds=["m3"])], [irrev])
+    assert "<details[open].more>" in got3["dump"] and "REPORT z." in got3["text"]
+    other =dict(req, id="m2", mcp={"server": "notion", "tool": "search", "display": ""}, toolName="mcp__notion__search")
     got2 = _smoke(tmp_path, "r/m2", [_session("s1", pendingRequestIds=["m2"])], [other])
-    assert "연결 도구(notion)의 'search' 을(를) 써도 될까요?" in got2["text"]  # SAP 이 아니면 SAP 이라 하지 않고 display_name 이 없으면 도구 이름
+    assert "연결 도구(notion)의 'search' 을(를) 써도 될까?" in got2["text"]  # SAP 이 아니면 SAP 이라 하지 않고 display_name 이 없으면 도구 이름
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")

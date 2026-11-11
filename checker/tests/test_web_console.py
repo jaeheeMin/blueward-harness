@@ -7203,7 +7203,7 @@ def test_mcp_init_marks_failed_server_and_fetches_reason(tmp_path):
     view = mcp_view(store.get("s1"))
     assert view["state"] == "problem"
     by = {x["name"]: x for x in view["servers"]}
-    assert by["abap-adt"]["problem"] and by["abap-adt"]["canReconnect"] and "연결하지 못했어요" in by["abap-adt"]["label"]
+    assert by["abap-adt"]["problem"] and by["abap-adt"]["canReconnect"] and "연결하지 못했어" in by["abap-adt"]["label"]
     assert not by["echosrv"]["problem"] and by["echosrv"]["label"] == "연결됨"
     assert by["abap-adt"]["error"] == ""  # init 에는 사유가 없다
     wait_for(lambda: proc.written)  # 연결 안 된 서버가 있으면 사유를 mcp_status 로 받아 온다(읽기 스레드 밖에서)

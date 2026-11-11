@@ -155,10 +155,10 @@ def mcp_request_info(tool_name, known: dict | None = None) -> dict:
 # claude 가 알려 주는 MCP 서버 상태(init·mcp_status)를 쉬운 말로. (쉬운 말, 문제인가)
 MCP_STATUS_TEXT = {
     "connected": ("연결됨", False),
-    "failed": ("연결하지 못했어요", True),
-    "needs-auth": ("로그인이 필요해요(터미널에서 /mcp 로 로그인해 주세요)", True),
-    "pending": ("연결하는 중이에요", False),
-    "disabled": ("꺼져 있어요", False),
+    "failed": ("연결하지 못했어", True),
+    "needs-auth": ("로그인이 필요해(터미널에서 /mcp 로 로그인해 줘)", True),
+    "pending": ("연결하는 중이야", False),
+    "disabled": ("꺼져 있어", False),
 }
 
 
@@ -184,7 +184,7 @@ def mcp_view(s: dict) -> dict:
         return {"state": "none", "servers": [], "canReconnect": False}
     items = []
     for sv in servers:
-        text, bad = MCP_STATUS_TEXT.get(sv.get("status"), (f"상태를 확인하지 못했어요({sv.get('status') or '비어 있음'})", True))
+        text, bad = MCP_STATUS_TEXT.get(sv.get("status"), (f"상태를 확인하지 못했어({sv.get('status') or '비어 있음'})", True))
         items.append({"name": sv["name"], "status": sv.get("status", ""), "label": text, "problem": bad, "error": sv.get("error", ""),
                       "canReconnect": sv.get("status") == "failed" or text.startswith("상태를")})  # 로그인은 다시 연결로 안 풀린다
     bad_any = any(i["problem"] for i in items)

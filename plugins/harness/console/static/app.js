@@ -497,7 +497,7 @@
   /* MCP 도구 승인 문장(#864): 서버 이름이 abap·sap 이면 "SAP 시스템 도구", 아니면 "연결 도구". 도구 이름은 display_name 을 우선한다. */
   function mcpAsk(m) {
     var kind = /abap|sap/i.test(m.server || '') ? 'SAP 시스템 도구' : '연결 도구';
-    return kind + (m.server ? '(' + m.server + ')' : '') + '의 \'' + (m.display || m.tool || '도구') + '\' 을(를) 써도 될까요?';
+    return kind + (m.server ? '(' + m.server + ')' : '') + '의 \'' + (m.display || m.tool || '도구') + '\' 을(를) 써도 될까?';
   }
   function kindOf(r) { return (r && (r.kind || r.type)) === 'question' ? 'question' : (r && (r.kind || r.type)) === 'permission' ? 'permission' : (questionsOf(r).length ? 'question' : 'permission'); }
   function questionsOf(r) {
@@ -1255,8 +1255,8 @@
       api('POST', '/api/sessions/' + encodeURIComponent(id) + '/mcp/reconnect', { server: name }).then(function (d) {
         if (d && d.session && d.session.id) mergeSession(Object.assign({}, d.session, { id: id }));
         var still = ((cur().mcp || {}).servers || []).filter(function (m) { return m.name === name && m.problem; });
-        if (still.length) mcpErr = name + ' 은(는) 아직 연결되지 않았어요. 잠시 뒤에 다시 눌러 보세요.';
-      }, function (e) { mcpErr = '다시 연결하지 못했어요: ' + e.message; }).then(function () { mcpBusy = ''; paintNotices(cur()); });
+        if (still.length) mcpErr = name + ' 은(는) 아직 연결되지 않았어. 잠시 뒤에 다시 눌러 봐.';
+      }, function (e) { mcpErr = '다시 연결하지 못했어: ' + e.message; }).then(function () { mcpBusy = ''; paintNotices(cur()); });
     }
     function paintNotices(s) {
       var notices = [], top = [];
@@ -1284,8 +1284,8 @@
       if (mcp.state === 'problem') {
         var bad = (mcp.servers || []).filter(function (m) { return m.problem; });
         notices.push(h('div', { class: 'banner mcp', 'data-mcp': 'problem', role: 'status' },
-          h('b', { class: 'mcp-t', text: '연결이 안 된 도구가 있어요' }),
-          h('span', { class: 'mcp-d', text: 'AI가 아래 도구를 쓰려 해도 못 쓸 수 있어요.' }),
+          h('b', { class: 'mcp-t', text: '연결이 안 된 도구가 있어' }),
+          h('span', { class: 'mcp-d', text: 'AI가 아래 도구를 쓰려 해도 못 쓸 수 있어.' }),
           h('ul', { class: 'mcp-l' }, bad.map(function (m) {
             return h('li', { 'data-mcp-server': m.name },
               h('span', { class: 'mcp-n', text: m.name + ' — ' + m.label }),
@@ -1662,7 +1662,7 @@
     // 모르면 모른다고, 연결됨으로 뭉개지 않는다(#864). init 을 못 받은 세션(none)은 줄을 안 그린다
     function mcpTechLine(m) {
       m = m || {};
-      if (m.state === 'unknown') return '터미널에서 연 세션이라 여기서는 연결됐는지 확인할 수 없어요';
+      if (m.state === 'unknown') return '터미널에서 연 세션이라 여기서는 연결됐는지 확인할 수 없어';
       if (m.state === 'ok') return '모두 연결됨';
       if (m.state === 'problem') return '연결 안 됨: ' + (m.servers || []).filter(function (x) { return x.problem; }).map(function (x) { return x.name; }).join(', ');
       return '';
@@ -1874,7 +1874,7 @@
       var s = sessionOf() || {};
       row('작업 폴더', req.cwd || s.cwd, true);
       var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background;
-      if (mcpInfo) friendly = true;  // MCP 도구는 문장으로 묻고 원문 이름·넘기는 값은 접어 둔다(#864)
+      if (mcpInfo) friendly = !irrev;  // MCP 도구는 문장으로 묻고 원문 이름·넘기는 값은 접어 둔다(#864). 되돌릴 수 없는 요청(SAP 쓰기 등)은 펼쳐서 넘기는 값을 보고 정하게 한다
       var det = h('details', { class: 'more', open: !friendly }, h('summary', { text: tool === 'Bash' ? '자세히 (명령 원문)' : mcpInfo ? '자세히 (도구 이름·넘기는 값)' : '자세히 (바뀌는 내용)' }), rows);
       var kv = h('dl', { class: 'kv' });
       [['세션', s.title || sid()], ['브랜치', s.branch], ['도구 이름', tool], ['요청 번호', rid]].forEach(function (r) { if (r[1]) { kv.appendChild(h('dt', { text: r[0] })); kv.appendChild(h('dd', { class: 'mono', text: String(r[1]) })); } });
