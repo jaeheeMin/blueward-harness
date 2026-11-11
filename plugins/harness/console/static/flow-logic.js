@@ -179,7 +179,8 @@
     [/^(?:Agent|Task)$/, '보조에게 맡기는 중'],
     [/^(?:WebFetch|WebSearch)$/, '웹에서 찾는 중'],
     [/^Bash$/, '명령 실행 중'],
-    [/^TodoWrite$/, '할 일 정리하는 중']
+    [/^TodoWrite$/, '할 일 정리하는 중'],
+    [/^Compact$/, '기억을 요약하는 중']
   ];
   function plainAction(text, labelFn) {
     var t = String(text == null ? '' : text).trim();

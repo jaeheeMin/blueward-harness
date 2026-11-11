@@ -1906,6 +1906,33 @@ def test_memory_banner_ring_and_unknown_cases(tmp_path):
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
+def test_memory_banner_compact_button_states_and_chat_note(tmp_path):
+    """#863: 콘솔 세션의 기억 배너와 자세히 > 기억 칸에 [요약해서 계속하기]. 일하는 중·요약 중에는 보내지 않고, 터미널 세션엔 없다."""
+    hot = {"tokens": 920000, "window": 1000000, "pct": 92}
+    url = "POST /api/sessions/s1/compact"
+    idle = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)], extra={url: {"ok": True}}, actions=[{"click": ".mem-compact"}])
+    assert "요약해서 계속하기" in idle["text"] and "새 세션으로 넘기기" in idle["text"]
+    assert [p[1] for p in idle["posts"] if p[1].endswith("/compact")] == ["/api/sessions/s1/compact"]
+    assert "기억 요약92% 사용(92만 토큰)" in idle["text"]  # 자세히 안의 기억 칸
+    panel = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)], extra={url: {"ok": True}}, actions=[{"click": "[data-compact]", "index": 1}])  # 0 은 배너, 1 은 자세히 안의 기억 칸
+    assert any(p[1].endswith("/compact") for p in panel["posts"])
+    working = _smoke(tmp_path, "s/s1", [_session("s1", status="running", context=hot)], extra={url: {"ok": True}}, actions=[{"click": ".mem-compact"}])
+    assert not any(p[1].endswith("/compact") for p in working["posts"])  # 일하는 중에는 보내지 않는다
+    squeezing = _smoke(tmp_path, "s/s1", [_session("s1", status="running", currentAction="Compact", compact={"state": "running"}, context=hot)],
+                       extra={url: {"ok": True}}, actions=[{"click": ".mem-compact"}])
+    assert "기억을 요약하는 중이야" in squeezing["text"] and "요약하는 중…" in squeezing["text"]
+    assert not any(p[1].endswith("/compact") for p in squeezing["posts"])
+    failed = _smoke(tmp_path, "s/s1", [_session("s1", context=hot, compact={"state": "failed", "reason": "x"})])
+    assert "지난번 요약은 실패했어" in failed["text"]
+    term = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, context=hot)])
+    assert "요약해서 계속하기" not in term["text"] and "/harness:handoff" in term["text"]
+    chat = [{"t": 1, "role": "me", "text": "요약해 줘"}, {"t": 2, "role": "note", "text": "기억을 요약했어 · 35,779 → 8,449 토큰", "tone": "ok"},
+            {"t": 3, "role": "note", "text": "기억을 요약하지 못했어", "tone": "bad"}]
+    noted = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)])
+    assert "기억을 요약했어 · 35,779 → 8,449 토큰" in noted["text"] and "<div.reqnote.chat-note>" in noted["dump"] and "기억을 요약하지 못했어" in noted["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
 def test_first_run_start_survives_reload_and_memory_banner_stays_closed(tmp_path):
     """#796: 시작하기 뒤 새로고침하면 01 이 아니라 02, 계속하기는 새로고침해도 닫은 채."""
     extra = dict(_folder_rows(), **_start(firstRun=True))

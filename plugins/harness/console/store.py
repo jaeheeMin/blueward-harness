@@ -316,6 +316,11 @@ class Store:
                 s["managed_alive"] = False
                 if isinstance(s.get("apiIssue"), dict) and s["apiIssue"].get("kind") == "retry":
                     s.pop("apiIssue")  # 콘솔을 다시 켠 뒤에는 "다시 시도하는 중" 일 수 없다
+                if isinstance(s.get("compact"), dict) and s["compact"].get("state") == "running":
+                    # 요약 중에 콘솔이 꺼졌다. 끝났는지 모르니 "확인 못 함" 으로 두어 단추가 잠긴 채 남지 않게 한다(#863)
+                    s["compact"] = {"state": "unknown", "at": s["compact"].get("at"), "reason": "요약 중에 콘솔이 꺼져서 결과를 확인 못 했어"}
+                    if s.get("currentAction") == "Compact":
+                        s["currentAction"] = ""
                 if not isinstance(s.get("chat"), list):
                     s["chat"] = []
                 else:
@@ -808,4 +813,5 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "sameFolder": same_folder_ids(store, s), "handedOffTo": s.get("handedOffTo") or None,
             "startChecks": [dict(c) for c in s.get("startChecks") or []],
             "context": context_usage.for_session(s),
+            "compact": {k: v for k, v in s["compact"].items() if k in ("state", "pre", "post", "auto", "reason")} if isinstance(s.get("compact"), dict) else None,
         })

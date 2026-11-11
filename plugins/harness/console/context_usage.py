@@ -116,6 +116,10 @@ def for_session(s: dict) -> dict:
     """화면용 {tokens, window, pct}. 모르는 값은 None(지어내지 않는다)."""
     path = s.get("transcriptPath")
     usage = read_last_usage(path) if isinstance(path, str) and path else None
+    cp = s.get("compact")
+    # 기억을 요약한 뒤 새 답이 올 때까지는 대화 기록의 마지막 사용량이 요약 전 값이다 → claude 가 알려 준 요약 뒤 크기(post_tokens)를 쓴다(#863)
+    if isinstance(cp, dict) and cp.get("state") == "done" and isinstance(cp.get("post"), int) and (usage is None or usage["tokens"] == cp.get("stale")):
+        usage = {"tokens": cp["post"], "model": usage["model"] if usage else ""}
     if not usage:
         return {"tokens": None, "window": None, "pct": None}
     window = window_for(usage["model"], s.get("model", ""), s.get("modelChoice", ""))

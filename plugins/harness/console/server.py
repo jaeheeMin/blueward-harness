@@ -681,6 +681,15 @@ class App:
             raise HttpError(409, "실행 중인 프로세스가 없어.")
         return 200, {"ok": True}
 
+    def a_compact(self, g, q, b):
+        s = self.get_session(g[0])
+        if not s["managed"]:
+            raise HttpError(409, "콘솔이 띄운 세션만 여기서 요약할 수 있어. 터미널에서 /compact 를 입력해 줘.")
+        result = self.manager.compact(s["id"])
+        if not result["ok"]:
+            raise HttpError(409 if result.get("busy") else 502, "기억을 요약하지 못했어: " + str(result.get("error", "")))
+        return 202, {"ok": True}
+
     def a_permission(self, g, q, b):
         s = self.get_session(g[0])
         mode = b.get("mode")
@@ -1940,6 +1949,7 @@ ROUTES = [
     ("PUT", re.compile(rf"/api/sessions/{S}/skills/{S}/reservation"), App.a_reserve),
     ("DELETE", re.compile(rf"/api/sessions/{S}/skills/{S}/reservation"), App.a_unreserve),
     ("POST", re.compile(rf"/api/sessions/{S}/interrupt"), App.a_interrupt),
+    ("POST", re.compile(rf"/api/sessions/{S}/compact"), App.a_compact),
     ("PUT", re.compile(rf"/api/sessions/{S}/permission"), App.a_permission),
     ("PUT", re.compile(rf"/api/sessions/{S}/flow"), App.a_flow_set),
     ("POST", re.compile(rf"/api/sessions/{S}/flow/skip"), App.a_flow_skip),

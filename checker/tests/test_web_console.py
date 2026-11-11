@@ -7307,3 +7307,93 @@ def test_mcp_reconnect_failure_is_502_and_keeps_failed_state(mconsole, monkeypat
     status, body, _ = c.call("POST", f"/api/sessions/{sid}/mcp/reconnect", {"server": "abap-adt"})
     assert status == 502 and "Server not found or failed" in body["error"]
     assert c.call("GET", f"/api/sessions/{sid}")[1]["mcp"]["state"] == "problem"  # 못 고쳤는데 연결됨으로 바꾸지 않는다
+
+
+# ---- 기억 요약(/compact, #863) ----
+def _compact_setup(tmp_path, tokens=35779):
+    store = Store(None)
+    proc = FakeProc()
+    m = managed.Manager(store, lambda: None, "/p")
+    m.procs["s1"] = proc
+    f = tmp_path / "s1.jsonl"
+    f.write_text(_asst(1, 0, tokens, model="claude-haiku-5-5") + "\n", encoding="utf-8")
+    store.ensure("s1", str(tmp_path)).update(managed=True, transcriptPath=str(f))
+    return store, proc, m, f
+
+
+def _ctx(store):
+    from store import public_session
+    return public_session(store, store.get("s1"), [], include_chat=True)
+
+
+def test_compact_sends_command_and_boundary_updates_state_chat_and_memory(tmp_path):
+    store, proc, m, f = _compact_setup(tmp_path)
+    assert m.compact("s1") == {"ok": True}
+    assert proc.written == [{"type": "user", "message": {"role": "user", "content": "/compact"}}]
+    s = _ctx(store)
+    assert s["status"] == "running" and s["compact"] == {"state": "running"} and s["currentAction"] == "Compact"
+    assert m.compact("s1")["busy"] is True and len(proc.written) == 1  # 요약 중에는 또 보내지 않는다
+    m.on_event(proc, {"type": "system", "subtype": "status", "status": "compacting", "session_id": "s1"})
+    m.on_event(proc, {"type": "system", "subtype": "status", "status": None, "compact_result": "success", "session_id": "s1"})
+    assert _ctx(store)["compact"]["state"] == "running"  # 성공 신호만으로는 끝으로 보지 않고 boundary 를 기다린다
+    m.on_event(proc, {"type": "system", "subtype": "compact_boundary", "session_id": "s1",
+                      "compact_metadata": {"trigger": "manual", "pre_tokens": 35779, "post_tokens": 8449}})
+    m.on_event(proc, {"type": "result", "subtype": "success", "is_error": False, "result": "", "session_id": "s1"})
+    s = _ctx(store)
+    assert s["compact"] == {"state": "done", "pre": 35779, "post": 8449, "auto": False} and s["status"] != "running"
+    assert s["chat"][-1]["role"] == "note" and s["chat"][-1]["text"] == "기억을 요약했어 · 35,779 → 8,449 토큰"
+    assert s["context"]["tokens"] == 8449 and s["context"]["pct"] == 1  # 새 답이 오기 전에는 요약 뒤 크기로 맞춘다
+    f.write_text(f.read_text(encoding="utf-8") + _asst(1, 0, 9100, model="claude-haiku-5-5") + "\n", encoding="utf-8")
+    assert _ctx(store)["context"]["tokens"] == 9101  # 새 답이 오면 대화 기록 값
+
+
+def test_compact_failure_is_reported_not_swallowed(tmp_path):
+    store, proc, m, f = _compact_setup(tmp_path)
+    m.compact("s1")
+    m.on_event(proc, {"type": "system", "subtype": "status", "status": "compacting", "session_id": "s1"})
+    m.on_event(proc, {"type": "system", "subtype": "status", "status": None, "compact_result": "failed", "session_id": "s1"})
+    s = _ctx(store)
+    assert s["compact"]["state"] == "failed" and s["chat"][-1]["tone"] == "bad" and "요약하지 못했어" in s["chat"][-1]["text"]
+    assert s["context"]["tokens"] == 35780  # 실패했으면 기억 %를 바꾸지 않는다
+    # 신호 없이 오류 result 로 끝난 경우도 실패
+    (tmp_path / "x").mkdir()
+    store2, proc2, m2, _ = _compact_setup(tmp_path / "x")
+    m2.compact("s1")
+    m2.on_event(proc2, {"type": "result", "subtype": "success", "is_error": True, "result": "Not enough messages", "session_id": "s1"})
+    assert _ctx(store2)["compact"]["state"] == "failed" and "Not enough messages" in _ctx(store2)["chat"][-1]["text"]
+
+
+def test_compact_is_refused_while_working_dead_or_unmanaged(tmp_path):
+    store, proc, m, _ = _compact_setup(tmp_path)
+    store.get("s1")["turn_running"] = True
+    assert m.compact("s1")["busy"] is True and proc.written == []
+    store.get("s1")["turn_running"] = False
+    proc.alive = lambda: False
+    assert m.compact("s1")["ok"] is False and proc.written == []
+    store.get("s1")["turn_running"] = True
+    store.get("s1")["compact"] = {"state": "running", "at": 1}
+    m.on_exit(FakeProc())  # 프로세스가 끝나면 요약 중이던 건 실패로 남는다
+    assert store.get("s1")["compact"]["state"] == "failed"
+
+
+def test_compact_running_left_by_console_shutdown_is_unlocked_on_reload(tmp_path):
+    # 요약 중에 콘솔이 꺼지면 running 이 sessions.json 에 남는다. 다시 켜면 "확인 못 함" 으로 풀어 다시 요약할 수 있어야 한다
+    st = Store(tmp_path)
+    st.ensure("c1", str(tmp_path)).update(managed=True, compact={"state": "running", "at": 5}, currentAction=managed.COMPACT_ACTION)
+    st.ensure("c2", str(tmp_path))["compact"] = {"state": "done", "at": 5}
+    st.save(force=True)
+    again = Store(tmp_path)
+    c1 = again.sessions["c1"]
+    assert c1["compact"]["state"] == "unknown" and "콘솔이 꺼져서" in c1["compact"]["reason"] and c1["currentAction"] == ""
+    assert again.sessions["c2"]["compact"]["state"] == "done"  # 끝난 요약은 그대로
+    proc = FakeProc()
+    m = managed.Manager(again, lambda: None, "/p")
+    m.procs["c1"] = proc
+    assert m.compact("c1")["ok"] is True and proc.written  # 단추가 잠기지 않는다
+
+
+def test_compact_route_only_for_console_sessions(mconsole):
+    c = mconsole
+    c.event("t1", "SessionStart")
+    status, body, _ = c.call("POST", "/api/sessions/t1/compact", {})
+    assert status == 409 and "터미널" in body["error"]
