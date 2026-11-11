@@ -60,7 +60,7 @@
       }
       if (issue.kind === 'model') {
         return { kind: 'model', tone: 'err', sideTone: 'err', tag: '⚠ 모델', title: '고른 모델을 쓸 수 없어',
-          body: '모델 이름이 없거나 이 계정에서 쓸 수 없는 것 같아. 설정에서 다른 모델로 바꾸고 다시 해 줘.', raw: rawText(issue), side: '⚠ 오류 · 모델을 쓸 수 없어' };
+          body: '모델 이름이 없거나 이 계정에서 쓸 수 없는 것 같아. 새 작업 화면 아래 "고급 설정" 에서 다른 모델을 골라 새로 시작해 줘.', raw: rawText(issue), side: '⚠ 오류 · 모델을 쓸 수 없어' };
       }
       if (issue.kind === 'other') {
         return { kind: 'other', tone: 'err', sideTone: 'err', tag: '⚠ 서버 오류', title: 'Claude Code 서버가 오류를 돌려줬어',
