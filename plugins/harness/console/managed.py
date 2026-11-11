@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -54,6 +55,13 @@ COMPACT_COMMAND = "/compact"
 COMPACT_ACTION = "Compact"  # currentAction 값(화면 문구는 flow-logic 의 plainAction 이 쉬운 말로 바꾼다)
 RELOADED = re.compile(r"Reloaded:\s*\d+\s+plugins?", re.IGNORECASE)
 RELOAD_ERRORS = re.compile(r"(\d+)\s+errors?", re.IGNORECASE)
+# 되돌리기(체크포인트): 이 환경변수가 있어야 claude 가 파일 고치기 전 상태를 지점(user 메시지 uuid)마다 저장한다. 없으면 rewind_files 가 canRewind:false 로 답한다.
+CHECKPOINT_ENV = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"
+REWIND_SUBTYPE = "rewind_files"
+REWIND_DRY_WAIT = 30.0
+REWIND_WAIT = 90.0
+NOT_DELIVERED = "실행 중인 프로세스에 보내지 못했어."
+NO_ANSWER = "세션이 답하지 않았어."
 
 
 def classify_api_error(error, status) -> str:
@@ -86,10 +94,14 @@ def parse_line(line: str):
     return data if isinstance(data, dict) else None
 
 
-def user_message(text: str, attachments: list[dict] | None = None) -> str:
-    """첨부가 있으면 content 를 [image|document 블록…, text 블록] 배열로 보낸다(attachments.content_blocks)."""
+def user_message(text: str, attachments: list[dict] | None = None, msg_uuid: str | None = None) -> str:
+    """첨부가 있으면 content 를 [image|document 블록…, text 블록] 배열로 보낸다(attachments.content_blocks).
+    msg_uuid 를 주면 그 user 메시지의 uuid 가 되고, 되돌리기(rewind_files)의 지점으로 쓴다."""
     content = attachments_mod.content_blocks(text, attachments) if attachments else text
-    return json.dumps({"type": "user", "message": {"role": "user", "content": content}}, ensure_ascii=False) + "\n"
+    msg = {"type": "user", "message": {"role": "user", "content": content}}
+    if msg_uuid:
+        msg["uuid"] = msg_uuid
+    return json.dumps(msg, ensure_ascii=False) + "\n"
 
 
 def summarize_tool(name: str, tool_input) -> str:
@@ -273,6 +285,7 @@ class Manager:
         try:
             p = self.popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr_log or subprocess.DEVNULL,
                            cwd=cwd, text=True, encoding="utf-8", errors="replace", bufsize=1,
+                           env={**os.environ, CHECKPOINT_ENV: "1"},
                            **platform_compat.hidden_window_kwargs())
         except OSError:
             return None
@@ -308,6 +321,7 @@ class Manager:
         proc = self.proc_for(sid)
         if proc is None or not proc.alive():
             return False
+        msg_uuid = str(uuid.uuid4())
         with self.store.lock:
             s = self.store.get(sid)
             if s is not None:
@@ -316,14 +330,14 @@ class Manager:
                 names = ", ".join(a["name"] for a in attachments or [])
                 self.store.add_log(s, "보냄: " + (text.split("\n", 1)[0][:200] or "(글 없음)") + (f" + 첨부 {len(attachments)}개({names[:100]})" if attachments else ""))
                 if attachments:  # 기록에는 이름·형식·크기만 남기고 base64 원본은 넣지 않는다
-                    self.store.add_chat(s, "me", chat_clean(text) or "(첨부만 보냄)", attachments=attachments_mod.meta(attachments))
+                    self.store.add_chat(s, "me", chat_clean(text) or "(첨부만 보냄)", attachments=attachments_mod.meta(attachments), uuid=msg_uuid)  # 되돌릴 지점
                 else:
-                    self.store.add_chat(s, "me", chat_clean(text))
+                    self.store.add_chat(s, "me", chat_clean(text), uuid=msg_uuid)  # 되돌릴 지점
                 if s.get("title_rank", 0) < TITLE_PROMPT:
                     title = prompt_title(text)
                     if title:
                         self.store.set_title(s, title, TITLE_PROMPT)
-        return proc.write(user_message(text, attachments))
+        return proc.write(user_message(text, attachments, msg_uuid))
 
     def compact(self, sid: str) -> dict:
         """기억을 요약하라는 /compact 를 stdin 으로 보낸다. 일하는 중이거나 이미 요약 중이면 보내지 않는다. {"ok"} 또는 {"ok": False, "error", "busy"?}."""
@@ -376,6 +390,27 @@ class Manager:
         text = "기억을 요약하지 못했어" + (f" (원문: {reason})" if reason else "")
         self.store.add_log(s, text)
         self.store.add_chat(s, "note", text, tone="bad")
+
+    def rewind(self, sid: str, msg_uuid: str, dry_run: bool) -> dict:
+        """그 user 메시지를 보내기 전 파일 상태로 되돌린다(dry_run 이면 바뀔 파일만 알린다). claude 가 답하면 ok=True.
+        {"ok", "canRewind", "error", "filesChanged"[], "insertions", "deletions"} — canRewind 가 False 면 error 가 claude 가 준 이유다.
+        답을 못 받았으면 ok=False 와 error(되돌려졌는지 알 수 없다)."""
+        proc = self.proc_for(sid)
+        if proc is None or not proc.alive():
+            return {"ok": False, "error": "세션 프로세스가 끝났어."}
+        request = {"subtype": REWIND_SUBTYPE, "user_message_id": msg_uuid}
+        if dry_run:
+            request["dry_run"] = True
+        got = self.control_call(proc, request, REWIND_DRY_WAIT if dry_run else REWIND_WAIT)
+        if not got["ok"]:
+            if got["error"] in (NOT_DELIVERED, NO_ANSWER):
+                return {"ok": False, "error": got["error"]}
+            return {"ok": True, "canRewind": False, "error": got["error"], "filesChanged": [], "insertions": 0, "deletions": 0}
+        body = got["response"]
+        files = body.get("filesChanged")
+        nums = {k: body.get(k) if isinstance(body.get(k), int) and not isinstance(body.get(k), bool) else 0 for k in ("insertions", "deletions")}
+        return {"ok": True, "canRewind": body.get("canRewind") is True, "error": str(body.get("error") or "")[:300],
+                "filesChanged": [str(f)[:300] for f in files][:200] if isinstance(files, list) else [], **nums}
 
     def interrupt(self, sid: str) -> bool:
         proc = self.proc_for(sid)
@@ -464,9 +499,9 @@ class Manager:
             self.mode_waits[request_id] = wait
         try:
             if not proc.write(json.dumps({"type": "control_request", "request_id": request_id, "request": request}) + "\n"):
-                return {"ok": False, "error": "실행 중인 프로세스에 보내지 못했어."}
+                return {"ok": False, "error": NOT_DELIVERED}
             if not wait["event"].wait(wait_seconds):
-                return {"ok": False, "error": "세션이 답하지 않았어."}
+                return {"ok": False, "error": NO_ANSWER}
         finally:
             with self.lock:
                 self.mode_waits.pop(request_id, None)

@@ -158,6 +158,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 ```
 
 - 작업 폴더를 `cwd` 로 띄운다. 터미널 창 없이 stdin/stdout 만 쓴다.
+- **되돌리기(#862)**: 띄울 때 환경에 `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=1` 을 더한다(없으면 `rewind_files` 가 `canRewind:false` 로 답한다) **[시험]**. 보내는 user 메시지마다 `uuid` 를 붙이고 대화의 내 말 항목(`chat[].uuid`)에 남긴다 — 이 uuid 가 되돌릴 지점이다. `POST /api/sessions/:id/rewind` body `{uuid, dryRun?}` 가 `control_request{subtype:"rewind_files", user_message_id, dry_run}` 로 넘어가고, 응답은 `{canRewind, error, filesChanged[], insertions, deletions, dryRun}` 이다. `canRewind:false`(체크포인트 없음 등)는 200 으로 claude 가 준 이유를 그대로 돌려준다. 터미널 세션·대화에 없는 uuid·끝난 세션·AI 가 일하는 중이면 409/404, claude 가 답하지 않으면 502(되돌려졌는지 알 수 없다고 적는다). 파일만 돌아가며 대화·git 은 그대로다(공식 문서: Bash 로만 바뀐 파일·서브에이전트 편집은 추적 안 됨). 화면은 내 말 아래 단추 → 확인 카드([되돌리기]/[취소]) → 결과 한 줄. 실제 되돌리기 결과는 대화에도 `note` 한 줄로 남긴다(됐음 `tone:ok` · 못 함 `bad` · 답 없음 `warn`, dry_run 은 남기지 않는다). AI 가 일하는 중·끝난 세션에서는 내 말마다 잠긴 단추를 붙이지 않고 단추를 그리지 않는다(시안 G-18).
 - `--permission-prompt-tool stdio` 가 없으면 `AskUserQuestion` 도구가 아예 없다 **[시험]**. `can_use_tool` control_request 는 훅과 동시에 오므로(§5 승인) 훅 요청에 합쳐 답한다. `can_use_tool` 이 아닌 control_request 와 `AskUserQuestion` 요청은 거부로 답하고 로그에 남긴다. control_request 만으로 답하지 않는 이유는 약 100초 뒤 취소되기 때문이다 **[시험]**.
 - `--plugin-dir` 은 그 폴더에 플러그인이 켜져 있지 않아도 훅이 걸리게 하려는 것이다. 같은 이름의 플러그인이 이미 설치돼 있을 때 훅이 이중으로 걸리거나 빠지지 않는지 시험으로 확인한다. 문제가 있으면 보고한다.
 - stdin 메시지는 다중 턴이 된다. `/스킬` 은 확장된다. 실행 중 보낸 메시지는 큐잉돼 같은 턴에 합쳐진다. 중단은 `control_request{subtype:"interrupt"}` 를 쓴다. 전부 **[시험]**.

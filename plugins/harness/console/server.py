@@ -690,6 +690,41 @@ class App:
             raise HttpError(409 if result.get("busy") else 502, "기억을 요약하지 못했어: " + str(result.get("error", "")))
         return 202, {"ok": True}
 
+    def a_rewind(self, g, q, b):
+        """내 말 하나 이전으로 파일을 되돌린다(#862). dryRun 이면 바뀔 파일만 알려 준다. 대화·git 은 건드리지 않는다.
+        claude 가 못 한다고 답하면(canRewind:false) 200 으로 그 이유를 그대로 돌려준다."""
+        s = self.get_session(g[0])
+        if not s["managed"]:
+            raise HttpError(409, "콘솔이 띄운 세션만 되돌릴 수 있어. 터미널 세션은 터미널에서 /rewind 를 써 줘.")
+        msg_uuid, dry = b.get("uuid"), b.get("dryRun") is True
+        with self.store.lock:
+            known = isinstance(msg_uuid, str) and any(c.get("role") == "me" and c.get("uuid") == msg_uuid for c in s.get("chat") or [] if isinstance(c, dict))
+        if not known:
+            raise HttpError(404, "되돌릴 지점을 찾지 못했어. 콘솔에서 보낸 내 말만 지점이 돼.")
+        if not self.manager.alive(s["id"]):
+            raise HttpError(409, "끝난 세션이야. 이어서 띄운 뒤에는 그 전 지점으로 되돌리지 못할 수 있어.")
+        if self.busy(s):
+            raise HttpError(409, "AI 가 일하는 중에는 되돌릴 수 없어. 끝나기를 기다리거나 작업을 멈춘 뒤에 해 줘.")
+        got = self.manager.rewind(s["id"], msg_uuid, dry)
+        if not got["ok"]:
+            self.manager._warn(s["id"], ("되돌리기 확인 " if dry else "되돌리기 ") + "답을 못 받음: " + got["error"])
+            if not dry:  # 되돌렸는지 모르는 채로 끝났다는 것도 대화에 남긴다
+                with self.store.lock:
+                    self.store.add_chat(s, "note", "되돌리기 답을 못 받았어. 파일이 되돌려졌는지 알 수 없어 (" + got["error"] + ")", tone="warn")
+                self.store.touch(s)
+            raise HttpError(502, "되돌리기 요청에 답을 못 받았어: " + got["error"] + ("" if dry else " 파일이 되돌려졌는지 알 수 없어. 바뀐 파일 목록을 다시 확인해 줘."))
+        if not dry:
+            with self.store.lock:
+                self.store.add_log(s, "이 요청 이전으로 되돌림" if got["canRewind"] else "되돌리지 못함: " + (got["error"] or "이유를 알려 주지 않았어"))
+                # 화면 변수만으로는 새로 고치면 사라진다. 대화에 한 줄로 남긴다(기억 요약과 같은 note)
+                if got["canRewind"]:
+                    self.store.add_chat(s, "note", "이 요청 이전으로 파일을 되돌렸어. 대화는 그대로야.", tone="ok")
+                else:
+                    self.store.add_chat(s, "note", "되돌리지 못했어: " + (got["error"] or "이유를 알려 주지 않았어"), tone="bad")
+            self.store.touch(s)
+        return 200, {"canRewind": got["canRewind"], "error": got["error"], "filesChanged": got["filesChanged"],
+                     "insertions": got["insertions"], "deletions": got["deletions"], "dryRun": dry}
+
     def a_permission(self, g, q, b):
         s = self.get_session(g[0])
         mode = b.get("mode")
@@ -1950,6 +1985,7 @@ ROUTES = [
     ("DELETE", re.compile(rf"/api/sessions/{S}/skills/{S}/reservation"), App.a_unreserve),
     ("POST", re.compile(rf"/api/sessions/{S}/interrupt"), App.a_interrupt),
     ("POST", re.compile(rf"/api/sessions/{S}/compact"), App.a_compact),
+    ("POST", re.compile(rf"/api/sessions/{S}/rewind"), App.a_rewind),
     ("PUT", re.compile(rf"/api/sessions/{S}/permission"), App.a_permission),
     ("PUT", re.compile(rf"/api/sessions/{S}/flow"), App.a_flow_set),
     ("POST", re.compile(rf"/api/sessions/{S}/flow/skip"), App.a_flow_skip),
