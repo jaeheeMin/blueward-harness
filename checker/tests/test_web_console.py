@@ -7376,6 +7376,22 @@ def test_compact_is_refused_while_working_dead_or_unmanaged(tmp_path):
     assert store.get("s1")["compact"]["state"] == "failed"
 
 
+def test_compact_running_left_by_console_shutdown_is_unlocked_on_reload(tmp_path):
+    # 요약 중에 콘솔이 꺼지면 running 이 sessions.json 에 남는다. 다시 켜면 "확인 못 함" 으로 풀어 다시 요약할 수 있어야 한다
+    st = Store(tmp_path)
+    st.ensure("c1", str(tmp_path)).update(managed=True, compact={"state": "running", "at": 5}, currentAction=managed.COMPACT_ACTION)
+    st.ensure("c2", str(tmp_path))["compact"] = {"state": "done", "at": 5}
+    st.save(force=True)
+    again = Store(tmp_path)
+    c1 = again.sessions["c1"]
+    assert c1["compact"]["state"] == "unknown" and "콘솔이 꺼져서" in c1["compact"]["reason"] and c1["currentAction"] == ""
+    assert again.sessions["c2"]["compact"]["state"] == "done"  # 끝난 요약은 그대로
+    proc = FakeProc()
+    m = managed.Manager(again, lambda: None, "/p")
+    m.procs["c1"] = proc
+    assert m.compact("c1")["ok"] is True and proc.written  # 단추가 잠기지 않는다
+
+
 def test_compact_route_only_for_console_sessions(mconsole):
     c = mconsole
     c.event("t1", "SessionStart")

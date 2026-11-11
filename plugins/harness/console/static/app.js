@@ -1263,7 +1263,7 @@
     function compactButton(s, cls) {
       var squeezing = !!(s.compact && s.compact.state === 'running'), busy = s.status === 'running' || s.status === 'starting' || (s.pendingRequestIds || []).length > 0;
       return h('button', { type: 'button', class: cls, 'data-compact': '1', disabled: squeezing || busy || compactSending, text: squeezing ? '요약하는 중…' : '요약해서 계속하기',
-        title: squeezing ? '기억을 요약하는 중이야.' : busy ? '일하는 중에는 요약할 수 없어. 끝난 뒤에 눌러 줘.' : '앞 대화를 짧게 줄여서 이 세션을 이어 가요.',
+        title: squeezing ? '기억을 요약하는 중이야.' : busy ? '일하는 중에는 요약할 수 없어. 끝난 뒤에 눌러 줘.' : '앞 대화를 짧게 줄여서 이 세션을 이어 가.',
         onClick: function () {
           if (squeezing || busy || compactSending) return;
           compactSending = true; paintNotices(cur()); paintMemory(cur());
