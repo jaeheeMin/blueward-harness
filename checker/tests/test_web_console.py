@@ -7436,9 +7436,12 @@ def test_rewind_dry_run_then_real(mconsole):
     u = first_uuid(c, sid)
     status, body, _ = c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u, "dryRun": True})
     assert status == 200 and body == {"canRewind": True, "error": "", "filesChanged": ["a.txt", "docs/b.md"], "insertions": 3, "deletions": 5, "dryRun": True}
+    assert not [x for x in c.app.store.get(sid)["chat"] if x.get("role") == "note"]  # 확인만 해서는 대화에 남기지 않는다
     status, body, _ = c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u})
     assert status == 200 and body["canRewind"] is True and body["dryRun"] is False
     assert any("이 요청 이전으로 되돌림" in x["text"] for x in c.app.store.get(sid)["log"])
+    notes = [x for x in c.app.store.get(sid)["chat"] if x.get("role") == "note"]  # 새로 고쳐도 남도록 대화에 한 줄
+    assert notes[-1]["text"].startswith("이 요청 이전으로 파일을 되돌렸어") and notes[-1]["tone"] == "ok"
 
 
 def test_rewind_passes_claude_reason_through_instead_of_hiding_it(mconsole, monkeypatch):
@@ -7450,6 +7453,20 @@ def test_rewind_passes_claude_reason_through_instead_of_hiding_it(mconsole, monk
     status, body, _ = c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u})  # 실제 되돌리기만 오류(subtype:error)
     assert status == 200 and body["canRewind"] is False and body["error"] == "Failed to rewind: disk"
     assert any("되돌리지 못함: Failed to rewind: disk" in x["text"] for x in c.app.store.get(sid)["log"])
+    note = [x for x in c.app.store.get(sid)["chat"] if x.get("role") == "note"][-1]
+    assert note["text"] == "되돌리지 못했어: Failed to rewind: disk" and note["tone"] == "bad"
+
+
+def test_rewind_without_answer_is_502_and_leaves_unknown_note(mconsole, monkeypatch):
+    c = mconsole
+    sid = launch(c, "시작")
+    wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 시작")
+    u = first_uuid(c, sid)
+    monkeypatch.setattr(c.app.manager, "rewind", lambda *a: {"ok": False, "error": managed.NO_ANSWER})
+    status, body, _ = c.call("POST", f"/api/sessions/{sid}/rewind", {"uuid": u})
+    assert status == 502 and "알 수 없어" in body["error"]
+    note = [x for x in c.app.store.get(sid)["chat"] if x.get("role") == "note"][-1]
+    assert "되돌려졌는지 알 수 없어" in note["text"] and note["tone"] == "warn"  # 통과로도 실패로도 뭉개지 않는다
 
 
 def test_rewind_reports_cannot_rewind_when_claude_does_not_know_the_point(mconsole):

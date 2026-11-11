@@ -708,10 +708,19 @@ class App:
         got = self.manager.rewind(s["id"], msg_uuid, dry)
         if not got["ok"]:
             self.manager._warn(s["id"], ("되돌리기 확인 " if dry else "되돌리기 ") + "답을 못 받음: " + got["error"])
+            if not dry:  # 되돌렸는지 모르는 채로 끝났다는 것도 대화에 남긴다
+                with self.store.lock:
+                    self.store.add_chat(s, "note", "되돌리기 답을 못 받았어. 파일이 되돌려졌는지 알 수 없어 (" + got["error"] + ")", tone="warn")
+                self.store.touch(s)
             raise HttpError(502, "되돌리기 요청에 답을 못 받았어: " + got["error"] + ("" if dry else " 파일이 되돌려졌는지 알 수 없어. 바뀐 파일 목록을 다시 확인해 줘."))
         if not dry:
             with self.store.lock:
                 self.store.add_log(s, "이 요청 이전으로 되돌림" if got["canRewind"] else "되돌리지 못함: " + (got["error"] or "이유를 알려 주지 않았어"))
+                # 화면 변수만으로는 새로 고치면 사라진다. 대화에 한 줄로 남긴다(기억 요약과 같은 note)
+                if got["canRewind"]:
+                    self.store.add_chat(s, "note", "이 요청 이전으로 파일을 되돌렸어. 대화는 그대로야.", tone="ok")
+                else:
+                    self.store.add_chat(s, "note", "되돌리지 못했어: " + (got["error"] or "이유를 알려 주지 않았어"), tone="bad")
             self.store.touch(s)
         return 200, {"canRewind": got["canRewind"], "error": got["error"], "filesChanged": got["filesChanged"],
                      "insertions": got["insertions"], "deletions": got["deletions"], "dryRun": dry}

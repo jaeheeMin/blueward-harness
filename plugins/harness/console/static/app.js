@@ -1162,14 +1162,14 @@
     }
     function chatRewind(c, s) {
       if (!s.managed || !c.uuid) return null;  // 터미널 세션(훅만)은 지점을 모른다
-      if (s.status === 'ended' && !(rw && rw.uuid === c.uuid)) return null;  // 끝난 세션은 되돌릴 수 없으니 내 말마다 같은 안내를 늘어놓지 않는다
       var mine = rw && rw.uuid === c.uuid ? rw : null;
       var blocked = s.status === 'running' || s.status === 'starting' || s.status === 'ended';
+      // 끝났거나 AI 가 일하는 중이면 되돌릴 수 없으니 내 말마다 잠긴 단추·안내를 늘어놓지 않는다(시안 G-18). 하던 되돌리기는 계속 보인다
+      if (blocked && !mine) return null;
       var wrap = h('div', { class: 'rewind', 'data-rewind': c.uuid });
       if (!mine || mine.phase === 'checking' || mine.phase === 'doing') {
         var busy = !!mine;
         wrap.appendChild(h('div', { class: 'acts end' },
-          blocked ? h('span', { class: 'quiet', 'data-rewind-why': '1', text: s.status === 'ended' ? '끝난 세션은 되돌릴 수 없어' : 'AI 가 일하는 중엔 되돌릴 수 없어' }) : null,
           h('button', { type: 'button', class: 'skiplink', 'data-rewind-open': '1', disabled: blocked || busy,
             text: mine && mine.phase === 'checking' ? '바뀔 파일 확인하는 중…' : mine && mine.phase === 'doing' ? '되돌리는 중…' : '이 요청 이전으로 되돌리기',
             onClick: function () { rewindCheck(c.uuid); } })));
@@ -1185,12 +1185,12 @@
           card.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line sm', text: '닫기', onClick: close })));
           return card;
         }
-        card.appendChild(h('p', { text: '이 요청을 보내기 전 모습으로 파일 ' + files.length + '개가 돌아가요(추가했던 ' + (d.insertions || 0) + '줄은 사라지고, 지웠던 ' + (d.deletions || 0) + '줄은 돌아와요).' }));
+        card.appendChild(h('p', { text: '이 요청을 보내기 전 모습으로 파일 ' + files.length + '개가 돌아가(추가했던 ' + (d.insertions || 0) + '줄은 사라지고, 지웠던 ' + (d.deletions || 0) + '줄은 돌아와).' }));
         var base = String(s.cwd || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() + '/';  // 작업 폴더 밑 파일은 상대 경로로 보인다
         var shown = function (f) { var p = String(f).replace(/\\/g, '/'); return base.length > 1 && p.toLowerCase().indexOf(base) === 0 ? p.slice(base.length) : String(f); };
         card.appendChild(h('ul', { class: 'rewind-files' }, files.slice(0, 12).map(function (f) { return h('li', { text: shown(f) }); }),
           files.length > 12 ? h('li', { class: 'quiet', text: '… 외 ' + (files.length - 12) + '개' }) : null));
-        card.appendChild(h('p', { class: 'quiet', 'data-rewind-limit': '1', text: '파일만 돌아가요. 대화 내용은 그대로 남고, 이미 커밋하거나 푸시한 것은 안 돌아가요. AI 가 명령어(bash)로만 바꾼 파일, 보조 AI(서브에이전트)가 고친 파일, 내가 직접 고친 파일도 못 돌릴 수 있어요.' }));
+        card.appendChild(h('p', { class: 'quiet', 'data-rewind-limit': '1', text: '파일만 돌아가. 대화 내용은 그대로 남고, 이미 커밋하거나 푸시한 것은 안 돌아가. AI 가 명령어(bash)로만 바꾼 파일, 보조 AI(서브에이전트)가 고친 파일, 내가 직접 고친 파일도 못 돌릴 수 있어.' }));
         card.appendChild(h('div', { class: 'acts' },
           h('button', { type: 'button', class: 'pill dark sm', 'data-rewind-go': '1', text: '되돌리기', onClick: function () { rewindDo(c.uuid); } }),
           h('button', { type: 'button', class: 'pill line sm', 'data-rewind-cancel': '1', text: '취소', onClick: close })));
