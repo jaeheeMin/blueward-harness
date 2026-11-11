@@ -7076,3 +7076,105 @@ def test_terminal_session_cannot_receive_attachments(browser):
     st, data, _ = browser.call("POST", "/api/sessions/t1/messages", {"text": "x", "attachments": [att("a.png", "image/png", PNG_1PX)]})
     assert st == 409 and "터미널" in data["error"]
     assert browser.call("POST", "/api/sessions/t1/messages", {"text": "글만"})[0] == 202  # 글은 그대로 된다
+# ---- API 오류·재시도·사용 한도(#865). 입력은 claude -p stream-json 실측 로그(lD1·l6·lD2·l1)의 모양을 줄인 것 ----
+_AUTH_ASSISTANT = {"type": "assistant", "session_id": "s1", "error": "authentication_failed", "is_api_error_message": True, "api_error_status": 401,
+                   "message": {"model": "<synthetic>", "role": "assistant", "content": [{"type": "text", "text": "Invalid API key · Fix external API key"}]}}
+_AUTH_RESULT = {"type": "result", "subtype": "success", "is_error": True, "terminal_reason": "api_error", "api_error_status": 401,
+                "result": "Invalid API key · Fix external API key", "session_id": "s1"}
+_MODEL_ASSISTANT = {"type": "assistant", "session_id": "s1", "error": "model_not_found", "is_api_error_message": True, "api_error_status": 404,
+                    "message": {"model": "<synthetic>", "role": "assistant", "content": [{"type": "text", "text": "There's an issue with the selected model (claude-nonexistent-9)."}]}}
+_RETRY = {"type": "system", "subtype": "api_retry", "attempt": 3, "max_retries": 10, "retry_delay_ms": 2060, "error_status": None, "error": "unknown", "session_id": "s1"}
+_RATE_WARN = {"type": "rate_limit_event", "session_id": "s1", "rate_limit_info": {"status": "allowed_warning", "resetsAt": 1794344400, "rateLimitType": "seven_day",
+                                                                                   "utilization": 0.99, "overageStatus": "rejected", "surpassedThreshold": 0.75}}
+
+
+def _api_manager(tmp_path):
+    store = Store(None)
+    m = managed.Manager(store, lambda: None, "/p")
+    s = store.ensure("s1", str(tmp_path))
+    s.update(managed=True, turn_running=True)
+    return store, m, s
+
+
+def test_api_auth_error_is_an_issue_not_a_successful_report(tmp_path):
+    store, m, s = _api_manager(tmp_path)
+    m.on_event(FakeProc(), _AUTH_ASSISTANT)
+    assert s["apiIssue"]["kind"] == "auth" and s["apiIssue"]["status"] == 401
+    m.on_event(FakeProc(), _AUTH_RESULT)
+    issue = s["apiIssue"]
+    assert (issue["kind"], issue["status"], issue["error"]) == ("auth", 401, "authentication_failed")
+    assert issue["raw"] == "Invalid API key · Fix external API key"
+    # subtype 이 success 라도 AI 말·보고로 쓰지 않는다
+    assert not [c for c in s["chat"] if c.get("role") == "ai"] and s["report"] == ""
+    assert s["log"][-1]["text"].startswith("오류로 끝남")
+    pub = store_mod.public_session(store, s, [])
+    assert pub["apiIssue"]["kind"] == "auth" and pub["status"] == "idle" and pub["lastBlock"] is None  # 훅 막힘과 섞지 않는다
+
+
+def test_api_model_error_and_result_status_without_assistant(tmp_path):
+    store, m, s = _api_manager(tmp_path)
+    m.on_event(FakeProc(), _MODEL_ASSISTANT)
+    m.on_event(FakeProc(), dict(_AUTH_RESULT, api_error_status=404, result="There's an issue with the selected model (claude-nonexistent-9)."))
+    assert s["apiIssue"]["kind"] == "model" and "claude-nonexistent-9" in s["apiIssue"]["raw"]
+    # assistant 오류 이벤트 없이 result 만 와도 상태 번호로 가른다
+    store2, m2, s2 = _api_manager(tmp_path)
+    m2.on_event(FakeProc(), dict(_AUTH_RESULT, api_error_status=429, result="rate limited"))
+    assert s2["apiIssue"]["kind"] == "limit"
+    store3, m3, s3 = _api_manager(tmp_path)
+    m3.on_event(FakeProc(), dict(_AUTH_RESULT, api_error_status=500, result="Internal server error"))
+    assert s3["apiIssue"]["kind"] == "other" and s3["apiIssue"]["status"] == 500
+
+
+def test_api_unknown_error_shape_is_unknown_not_success(tmp_path):
+    store, m, s = _api_manager(tmp_path)
+    m.on_event(FakeProc(), {"type": "result", "subtype": "error_during_execution", "is_error": True, "result": "", "session_id": "s1"})
+    issue = s["apiIssue"]
+    assert issue["kind"] == "unknown" and issue["error"] == "error_during_execution"
+    assert managed.classify_api_error("something_new", None) == "other"
+    assert managed.classify_api_error(True, True) == "other"  # 이상한 값도 성공 쪽으로 가지 않는다
+
+
+def test_api_retry_is_recorded_then_cleared_by_answer_and_success(tmp_path):
+    store, m, s = _api_manager(tmp_path)
+    m.on_event(FakeProc(), _RETRY)
+    issue = s["apiIssue"]
+    assert (issue["kind"], issue["attempt"], issue["max"], issue["delayMs"], issue["status"], issue["error"]) == ("retry", 3, 10, 2060, None, "unknown")
+    m.on_event(FakeProc(), {"type": "assistant", "session_id": "s1", "message": {"content": [{"type": "text", "text": "ok"}]}})
+    assert "apiIssue" not in s
+    m.on_event(FakeProc(), _RETRY)
+    m.on_event(FakeProc(), {"type": "result", "subtype": "success", "is_error": False, "result": "ok", "session_id": "s1"})
+    assert "apiIssue" not in s
+    # 다시 시도를 다 쓰고 오류로 끝나면 그 서버 오류로 남는다(최종 result 모양은 실측 못 해 is_error 만 믿는다)
+    m.on_event(FakeProc(), _RETRY)
+    m.on_event(FakeProc(), {"type": "result", "subtype": "success", "is_error": True, "result": "Connection error.", "session_id": "s1"})
+    assert s["apiIssue"]["kind"] == "other" and s["apiIssue"]["attempt"] == 3 and s["apiIssue"]["raw"] == "Connection error."
+
+
+def test_api_issue_cleared_on_new_message_and_init_and_retry_dropped_on_reload(tmp_path):
+    store, m, s = _api_manager(tmp_path)
+    proc = FakeProc()
+    m.procs["s1"] = proc
+    m.on_event(proc, _AUTH_RESULT)
+    assert s["apiIssue"]["kind"] == "auth"  # assistant 오류 이벤트 없이 상태 번호 401 만으로
+    assert m.send("s1", "다시 해 줘") is True
+    assert "apiIssue" not in s
+    m.on_event(proc, _AUTH_RESULT)
+    m.on_event(proc, _init_event("default"))
+    assert "apiIssue" not in s
+    st = Store(tmp_path)
+    st.ensure("r1", str(tmp_path))["apiIssue"] = {"kind": "retry", "attempt": 1}
+    st.ensure("r2", str(tmp_path))["apiIssue"] = {"kind": "auth"}
+    st.save(force=True)
+    again = Store(tmp_path)
+    assert "apiIssue" not in again.sessions["r1"] and again.sessions["r2"]["apiIssue"]["kind"] == "auth"
+
+
+def test_rate_limit_event_warning_and_allowed(tmp_path):
+    store, m, s = _api_manager(tmp_path)
+    m.on_event(FakeProc(), _RATE_WARN)
+    assert s["rateLimit"] == {"status": "allowed_warning", "type": "seven_day", "t": s["rateLimit"]["t"], "resetsAt": 1794344400, "utilization": 0.99}
+    assert store_mod.public_session(store, s, [])["rateLimit"]["status"] == "allowed_warning"
+    m.on_event(FakeProc(), {"type": "rate_limit_event", "session_id": "s1", "rate_limit_info": {"status": "allowed", "resetsAt": 1794344400}})
+    assert "rateLimit" not in s
+    m.on_event(FakeProc(), {"type": "rate_limit_event", "session_id": "s1", "rate_limit_info": {"status": "rejected", "resetsAt": "x", "utilization": True}})
+    assert s["rateLimit"]["status"] == "rejected" and s["rateLimit"]["resetsAt"] is None and s["rateLimit"]["utilization"] is None

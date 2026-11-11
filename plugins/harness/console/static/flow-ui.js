@@ -1336,7 +1336,8 @@
           var tip = doing + (subs ? ' · 서브에이전트 ' + subs + '개 실행 중' : '');  // 둘째 줄 대신 칩 title 로(시안: 상태 칸은 칩 하나)
           var bk = L.blockOf(s);
           var fixRow = !bk && !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)
-          var chip = bk ? h('span', { class: 'tagx ' + (bk.kind === 'cannot_check' ? 'unk' : 'fail'), title: bk.kind === 'cannot_check' ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자', text: bk.kind === 'cannot_check' ? '? 확인 못 함' : '✕ 막힘' })
+          var an = !bk && window.BHApiNotice ? window.BHApiNotice.notice(s) : null;  // API 오류(#865)는 '끝남'·'쉬는 중' 이 아니라 ⚠ 오류로
+          var chip = an && an.sideTone === 'err' ? h('span', { class: 'tagx err', title: an.title, text: an.side }) : bk ?h('span', { class: 'tagx ' + (bk.kind === 'cannot_check' ? 'unk' : 'fail'), title: bk.kind === 'cannot_check' ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자', text: bk.kind === 'cannot_check' ? '? 확인 못 함' : '✕ 막힘' })
             : todoRow || fixRow ? h('span', { class: 'tag', title: tip, text: fixRow ? '고쳐야 함' : '내 차례' }) : h('span', { class: 'tag ok', title: tip, text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
           var issue = issueOf(s), pr = prChip(s);
           var nums = h('td', { 'data-l': '번호' }, issue ? h('span', { class: 'mono', text: '이슈 #' + issue }) : null, pr, !issue && !pr ? h('span', { class: 'none', text: '–' }) : null);
