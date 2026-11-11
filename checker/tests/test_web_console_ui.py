@@ -2226,7 +2226,9 @@ def test_current_action_shows_plain_words_raw_only_in_tech_info(tmp_path):
 def test_idle_terminal_notice_once_and_casual(tmp_path):
     for flow in ({}, {"turnSkill": "deliver"}):
         got = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, canSend=False, cannotSendReason=_IDLE_TERMINAL, **flow)])
-        assert got["text"].count(_IDLE_TERMINAL) == 1, (flow, got["text"].count(_IDLE_TERMINAL))
+        # 아래 "콘솔에서 이어 가기" 칸과 어긋나지 않게 그 칸을 가리키는 말로 한 번만(#867)
+        shown = "쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어. 터미널에서 이어서 말하거나, 아래에서 콘솔로 이어 가."
+        assert got["text"].count(shown) == 1 and _IDLE_TERMINAL not in got["text"], (flow, got["text"].count(shown))
     assert "입니다" not in _IDLE_TERMINAL and "십시오" not in _IDLE_TERMINAL
 
 
@@ -2249,7 +2251,9 @@ def test_idle_terminal_resume_panel_follows_the_liveness_check(tmp_path):
 
     ended = _smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=live("ended", "닫힘"))
     assert "터미널이 닫힌 걸 확인했어" in ended["text"] and "갈라서 이어 가기" in ended["text"]
-    alive = _smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=live("alive", "열림"))
+    # 밝은 칸 위의 [다시 확인] 은 어두운 바탕용 ghost 가 아니라 line(그러면 글자가 묻힌다)
+    assert "<button.pill.line>" in ended["dump"] and "<button.pill.ghost>" not in ended["dump"].split("<div.contbox>", 1)[-1].split("</div.contbox>", 1)[0]
+    alive =_smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=live("alive", "열림"))
     assert "아직 열려 있어" in alive["text"] and "두 갈래로 갈라져" in alive["text"] and "터미널이 닫힌 걸 확인했어" not in alive["text"]
     unknown = _smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=live("unknown", "세션 목록을 못 읽어."))
     assert "세션 목록을 못 읽어." in unknown["text"] and "“갈라서 이어 가기” 를 써 줘" in unknown["text"]

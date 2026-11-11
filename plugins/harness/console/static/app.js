@@ -1131,7 +1131,7 @@
       c.state = h('p', { class: 'note-muted', 'data-cont-state': '1', role: 'status' });
       c.resume = h('button', { type: 'button', class: 'pill dark', 'data-cont-resume': '1', text: '콘솔에서 이어 가기', onClick: function () { continueSession('resume'); } });
       c.fork = h('button', { type: 'button', class: 'pill line', 'data-cont-fork': '1', text: '갈라서 이어 가기', onClick: function () { continueSession('fork'); } });
-      c.recheck = h('button', { type: 'button', class: 'pill ghost', 'data-cont-recheck': '1', text: '다시 확인', onClick: function () { checkLive(); } });
+      c.recheck = h('button', { type: 'button', class: 'pill line', 'data-cont-recheck': '1', text: '다시 확인', onClick: function () { checkLive(); } });
       c.hint = h('p', { class: 'note-muted', 'data-cont-hint': '1', text: '갈라서 이어 가기: 이 대화를 이어받은 새 세션을 만들어. 원래 터미널 세션은 그대로 남고, 서로의 새 말은 보이지 않아.' });
       c.error = h('p', { class: 'note-attn', 'data-cont-error': '1', role: 'alert' });
       regions.contParts = c;
@@ -1781,6 +1781,8 @@
       regions.followComp.setEnabled(s.canAttach !== false);  // 터미널에서 연 세션은 첨부를 보낼 수 없다
       var why = regions.follow.querySelector('[data-why]');
       why.textContent = can ? '' : (s.cannotSendReason || '이 세션에는 지금 요청을 보낼 수 없어.');
+      // 아래 "콘솔에서 이어 가기" 칸이 보이면 '터미널에서만' 처럼 읽히지 않게 그 칸을 가리킨다(#867)
+      if (!can && !s.managed && s.id) why.textContent = why.textContent.replace('터미널에서 이어서 말해 줘.', '터미널에서 이어서 말하거나, 아래에서 콘솔로 이어 가.');
       why.hidden = can;
       // 막힘이 있는데 터미널 세션이라 입력칸이 잠겼으면 이유를 눈에 띄는 색으로 한 번 더(#791). 막힘이 없을 땐 시안대로 작은 회색 글
       why.className = !can && window.BHLogic.blockOf(s) ? 'note-attn' : 'note-muted';

@@ -45,6 +45,13 @@
 - **첫 말 필수.** 실측 8b-S3: 말 없이 띄우면 init 이 안 와서 `starting` 에 머문다.
 - **기존 항목과 합치기**: resume 은 원래 session id 그대로라 `store.ensure` 가 같은 항목을 `managed` 로 바꾼다(rekey 불필요). fork 는 `m-…` 임시 id -> init 의 새 id 로 rekey(기존 흐름).
 
+## 11-11 main 위로 옮기며 고친 것(558 세션 점검)
+
+- 첨부(#860)와 합치며 `launch`·`_launch` 가 `attachments` 와 `fork_of` 를 둘 다 받는다.
+- [다시 확인] 이 어두운 바탕용 `pill ghost` 라 밝은 이어 가기 칸 위에서 글자가 묻혔다 → `pill line`.
+- 입력칸 밑 "터미널에서 이어서 말해 줘." 바로 아래에 "콘솔에서 이어 가기" 칸이 있어 서로 어긋났다 → 터미널 세션이면 "터미널에서 이어서 말하거나, 아래에서 콘솔로 이어 가." 로 보인다.
+- 잠긴 위 입력칸을 숨기자는 권장은 따르지 않음: 시안 G-09(터미널 세션 화면)가 잠긴 입력칸을 그대로 보이고, 숨기면 시안 검사가 어긋난다.
+
 ## 확인 못 한 것
 
 - macOS·Linux 에서 `sessions/<pid>.json` 의 `procStart` 모양(Windows FILETIME 만 확인). POSIX 는 `procStart` 를 비교하지 않고 `kill(pid,0)` 만 본다.
