@@ -978,6 +978,7 @@
   function sessionView(root) {
     var id = route.id, detail = null, errored = null, fetching = false, timer = null;
     var memDismissed = {}, regions = {}, parts = {}, syncLegend = function () {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, rw = null, permBusy = false, permNote = '', sent = [], compactSending = false;
+    var contInfo = {};  // 쉬는 터미널 세션 이어 가기(#867): 세션별 {state, why, checked, loading, busy, error, text}
     var srsCache = {};  // 작업 폴더별 SRS Status 응답(설정·표준 갈래 세션의 "SRS 상태" 칸)
     var chatAll = false, chatOpen = {}, chatKey = null;  // 앞 대화를 펼쳤는지 · 긴 AI 말을 펼친 것(시각별) · 마지막으로 그린 대화 모양(새 항목 감지)
 
@@ -1036,7 +1037,8 @@
         comp.chips,
         h('div', { class: 'comp' }, followAssist.wrap, comp.pick, btn),
         h('p', { class: 'note-accent', 'data-note': '1', role: 'status' }),
-        h('p', { class: 'note-muted', 'data-why': '1' }));
+        h('p', { class: 'note-muted', 'data-why': '1' }),
+        buildCont());
       comp.bindDrop(regions.follow);
       regions.followInput = input; regions.followBtn = btn; regions.followComp = comp;
       regions.after = h('div', { class: 'acts', 'data-r': 'after', hidden: true });
@@ -1116,6 +1118,67 @@
       if (doneList.length) out.push(h('details', { class: 'tech mt-16', open: open }, h('summary', { text: '끝난 서브에이전트 ' + doneList.length + '개' }),
         h('ul', { class: 'plain-list sub-list' }, doneList.map(function (a) { return subRow(a, false); }))));
       regions.subs.replaceChildren.apply(regions.subs, out);
+    }
+
+    // 쉬는 터미널 세션을 콘솔이 이어받는 칸(#867). 같은 세션을 두 프로세스가 --resume 하면 대화가 조용히 갈라져서,
+    // 터미널이 닫힌 것을 서버가 확인했을 때만 "콘솔에서 이어 가기" 를 켜고, 아니면 새 세션으로 "갈라서 이어 가기" 만 둔다.
+    function contOf() { return contInfo[id] || (contInfo[id] = { state: '', why: '', checked: false, loading: false, busy: false, error: '', text: '' }); }
+    function buildCont() {
+      var c = {};
+      c.text = h('input', { class: 'cont-in', 'data-cont-text': '1', placeholder: '이어서 시킬 말', autocomplete: 'off', 'aria-label': '이어서 시킬 말',
+        onInput: function (e) { contOf().text = e.target.value; paintCont(cur()); } });
+      c.head = h('p', { class: 'cont-h', text: '콘솔에서 이어 가기' });
+      c.state = h('p', { class: 'note-muted', 'data-cont-state': '1', role: 'status' });
+      c.resume = h('button', { type: 'button', class: 'pill dark', 'data-cont-resume': '1', text: '콘솔에서 이어 가기', onClick: function () { continueSession('resume'); } });
+      c.fork = h('button', { type: 'button', class: 'pill line', 'data-cont-fork': '1', text: '갈라서 이어 가기', onClick: function () { continueSession('fork'); } });
+      c.recheck = h('button', { type: 'button', class: 'pill line', 'data-cont-recheck': '1', text: '다시 확인', onClick: function () { checkLive(); } });
+      c.hint = h('p', { class: 'note-muted', 'data-cont-hint': '1', text: '갈라서 이어 가기: 이 대화를 이어받은 새 세션을 만들어. 원래 터미널 세션은 그대로 남고, 서로의 새 말은 보이지 않아.' });
+      c.error = h('p', { class: 'note-attn', 'data-cont-error': '1', role: 'alert' });
+      regions.contParts = c;
+      regions.cont = h('div', { class: 'contbox', 'data-r': 'cont', hidden: true }, c.head, c.state, c.text, h('div', { class: 'acts' }, c.resume, c.fork, c.recheck), c.hint, c.error);
+      return regions.cont;
+    }
+    function checkLive() {
+      var c = contOf(), want = id;
+      c.checked = true; c.loading = true; paintCont(cur());
+      api('GET', '/api/sessions/' + encodeURIComponent(want) + '/liveness').then(function (d) {
+        c.state = d && d.state || 'unknown'; c.why = d && d.why || '';
+      }, function (e) { c.state = 'unknown'; c.why = '확인하지 못했어: ' + e.message; }).then(function () {
+        c.loading = false; if (id === want) paintCont(cur());
+      });
+    }
+    function continueSession(mode) {
+      var c = contOf(), want = id, text = c.text.trim();
+      if (!text || c.busy || (mode === 'resume' && c.state !== 'ended')) return;  // 서버도 다시 확인한다
+      c.busy = true; c.error = ''; paintCont(cur());
+      api('POST', '/api/sessions/' + encodeURIComponent(want) + '/continue', { mode: mode, text: text }).then(function (d) {
+        c.text = ''; regions.contParts.text.value = '';
+        c.checked = false; c.state = '';
+        if (d && d.id && d.id !== want) go('/s/' + encodeURIComponent(d.id)); else refetchSoon();
+      }, function (e) { c.error = '이어 가지 못했어: ' + e.message; }).then(function () {
+        c.busy = false; if (id === want) paintCont(cur());
+      });
+    }
+    function paintCont(s) {
+      var p = regions.contParts, box = regions.cont;
+      if (!p || !box) return;
+      var show = !s.managed && s.canSend === false && !!s.id;
+      box.hidden = !show;
+      if (!show) return;
+      var c = contOf();
+      if (!c.checked && !c.loading) { checkLive(); return; }
+      var msg = c.loading ? '이 세션의 터미널이 열려 있는지 확인하는 중이야.'
+        : c.state === 'ended' ? '터미널이 닫힌 걸 확인했어. 여기서 이어 가면 이 세션이 콘솔 세션이 돼.'
+        : c.state === 'alive' ? '이 세션의 터미널이 아직 열려 있어. 터미널 창을 닫은 뒤 “다시 확인” 을 눌러 줘. 그대로 이어 가면 대화가 두 갈래로 갈라져.'
+        : (c.why || '터미널이 열려 있는지 확인하지 못했어.') + ' 터미널 창을 닫았는지 확인할 수 없으면 “갈라서 이어 가기” 를 써 줘.';
+      p.state.textContent = msg;
+      p.state.className = c.state === 'ended' ? 'note-muted' : 'note-attn';
+      var typed = !!c.text.trim();
+      p.resume.disabled = !(c.state === 'ended' && typed && !c.busy && !c.loading);
+      p.fork.disabled = !(typed && !c.busy && !c.loading);
+      p.recheck.disabled = c.busy || c.loading;
+      p.text.disabled = c.busy;
+      p.error.textContent = c.error; p.error.hidden = !c.error;
     }
 
     function paintFollowNote() {
@@ -1381,6 +1444,10 @@
       if (s.handedOffTo) {
         notices.push(h('div', { class: 'banner info' }, h('span', { text: '다음 세션으로 넘어감 → ' }),
           link('/s/' + encodeURIComponent(s.handedOffTo), { text: '새 세션 보기' })));
+      }
+      if (s.forkedFrom) {
+        notices.push(h('div', { class: 'banner info', 'data-forked': '1' }, h('span', { text: '터미널 세션에서 갈라서 이어 감 — 원래 터미널 세션은 그대로 있고, 거기에는 이 세션의 새 대화가 보이지 않아. ' }),
+          link('/s/' + encodeURIComponent(s.forkedFrom), { text: '원래 세션 보기' })));
       }
       regions.notices.replaceChildren.apply(regions.notices, notices);
       regions.memtop.replaceChildren.apply(regions.memtop, top);
@@ -1714,9 +1781,12 @@
       regions.followComp.setEnabled(s.canAttach !== false);  // 터미널에서 연 세션은 첨부를 보낼 수 없다
       var why = regions.follow.querySelector('[data-why]');
       why.textContent = can ? '' : (s.cannotSendReason || '이 세션에는 지금 요청을 보낼 수 없어.');
+      // 아래 "콘솔에서 이어 가기" 칸이 보이면 '터미널에서만' 처럼 읽히지 않게 그 칸을 가리킨다(#867)
+      if (!can && !s.managed && s.id) why.textContent = why.textContent.replace('터미널에서 이어서 말해 줘.', '터미널에서 이어서 말하거나, 아래에서 콘솔로 이어 가.');
       why.hidden = can;
       // 막힘이 있는데 터미널 세션이라 입력칸이 잠겼으면 이유를 눈에 띄는 색으로 한 번 더(#791). 막힘이 없을 땐 시안대로 작은 회색 글
       why.className = !can && window.BHLogic.blockOf(s) ? 'note-attn' : 'note-muted';
+      paintCont(s);
       paintFollowNote();
     }
 

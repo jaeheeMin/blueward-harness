@@ -2226,7 +2226,9 @@ def test_current_action_shows_plain_words_raw_only_in_tech_info(tmp_path):
 def test_idle_terminal_notice_once_and_casual(tmp_path):
     for flow in ({}, {"turnSkill": "deliver"}):
         got = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, canSend=False, cannotSendReason=_IDLE_TERMINAL, **flow)])
-        assert got["text"].count(_IDLE_TERMINAL) == 1, (flow, got["text"].count(_IDLE_TERMINAL))
+        # 아래 "콘솔에서 이어 가기" 칸과 어긋나지 않게 그 칸을 가리키는 말로 한 번만(#867)
+        shown = "쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어. 터미널에서 이어서 말하거나, 아래에서 콘솔로 이어 가."
+        assert got["text"].count(shown) == 1 and _IDLE_TERMINAL not in got["text"], (flow, got["text"].count(shown))
     assert "입니다" not in _IDLE_TERMINAL and "십시오" not in _IDLE_TERMINAL
 
 
@@ -2236,6 +2238,48 @@ def test_first_my_bubble_hides_skill_command_line(tmp_path):
     got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)])
     assert "구매오더 조회 앱 만들어 줘" in got["text"] and "참고 파일: @docs/ssot/SRS.md" in got["text"]
     assert "/harness:spec" not in got["text"].replace("/harness:spec 실행", "")
+
+
+_TERM = {"managed": False, "canSend": False, "cannotSendReason": _IDLE_TERMINAL}
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_idle_terminal_resume_panel_follows_the_liveness_check(tmp_path):
+    """#867: 터미널이 닫힌 걸 서버가 확인했을 때만 [콘솔에서 이어 가기]. 열려 있거나 모르면 이유와 갈라서 이어 가기만."""
+    def live(state, why):
+        return {"GET /api/sessions/s1/liveness": {"state": state, "why": why}}
+
+    ended = _smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=live("ended", "닫힘"))
+    assert "터미널이 닫힌 걸 확인했어" in ended["text"] and "갈라서 이어 가기" in ended["text"]
+    # 밝은 칸 위의 [다시 확인] 은 어두운 바탕용 ghost 가 아니라 line(그러면 글자가 묻힌다)
+    assert "<button.pill.line>" in ended["dump"] and "<button.pill.ghost>" not in ended["dump"].split("<div.contbox>", 1)[-1].split("</div.contbox>", 1)[0]
+    alive =_smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=live("alive", "열림"))
+    assert "아직 열려 있어" in alive["text"] and "두 갈래로 갈라져" in alive["text"] and "터미널이 닫힌 걸 확인했어" not in alive["text"]
+    unknown = _smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=live("unknown", "세션 목록을 못 읽어."))
+    assert "세션 목록을 못 읽어." in unknown["text"] and "“갈라서 이어 가기” 를 써 줘" in unknown["text"]
+    managed = _smoke(tmp_path, "s/s1", [_session("s1")])
+    assert not [c for c in managed["calls"] if c.endswith("/liveness")] and "터미널이 닫힌 걸 확인했어" not in managed["text"]  # 콘솔 세션엔 확인도 없다(칸은 숨김)
+    forked = _smoke(tmp_path, "s/s2", [_session("s2", forkedFrom="s1")])
+    assert "터미널 세션에서 갈라서 이어 감" in forked["text"] and "원래 세션 보기" in forked["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_idle_terminal_resume_panel_sends_mode_and_text_and_opens_the_new_session(tmp_path):
+    base = {"GET /api/sessions/s1/liveness": {"state": "ended", "why": "닫힘"}, "POST /api/sessions/s1/continue": {"id": "s9", "mode": "fork", "forked": True},
+            "GET /api/sessions/s9": _session("s9", forkedFrom="s1")}
+    fork = _smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=base,
+                  actions=[{"type": "[data-cont-text]", "value": "이어서 해 줘"}, {"click": "[data-cont-fork]"}])
+    assert [p[:2] for p in fork["posts"]] == [["POST", "/api/sessions/s1/continue"]] and '"mode":"fork"' in fork["posts"][0][2] and "이어서 해 줘" in fork["posts"][0][2]
+    assert fork["path"] == "/s/s9"  # 갈라진 새 세션 화면으로 간다
+    resume = _smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=dict(base, **{"POST /api/sessions/s1/continue": {"id": "s1", "mode": "resume", "forked": False}}),
+                    actions=[{"type": "[data-cont-text]", "value": "이어서"}, {"click": "[data-cont-resume]"}])
+    assert '"mode":"resume"' in resume["posts"][0][2] and resume["path"] == "/s/s1"  # 같은 세션이라 화면은 그대로
+    alive = _smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=dict(base, **{"GET /api/sessions/s1/liveness": {"state": "alive", "why": "열림"}}),
+                   actions=[{"type": "[data-cont-text]", "value": "이어서"}, {"click": "[data-cont-resume]"}])
+    assert alive["posts"] == []  # 열려 있으면 단추를 눌러도 보내지 않는다
+    refused = _smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra={k: v for k, v in base.items() if not k.startswith("POST")},  # 보내기가 404 로 거절된다
+                     actions=[{"type": "[data-cont-text]", "value": "이어서"}, {"click": "[data-cont-fork]"}])
+    assert "이어 가지 못했어" in refused["text"] and refused["path"] == "/s/s1"
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")

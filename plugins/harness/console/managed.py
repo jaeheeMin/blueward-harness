@@ -193,9 +193,10 @@ class Manager:
 
     # ---- 시작 ----
     def command(self, resume: str | None = None, model: str | None = None, effort: str | None = None,
-                permission: str | None = None) -> list[str] | None:
+                permission: str | None = None, fork: bool = False) -> list[str] | None:
         """model·effort 가 None 이면 서버 기본값, 빈 문자열이면 --model·--effort 를 붙이지 않는다.
-        permission 은 None 이거나 빈 문자열이면 --permission-mode 를 붙이지 않는다(기본값은 서버 쪽에 없다)."""
+        permission 은 None 이거나 빈 문자열이면 --permission-mode 를 붙이지 않는다(기본값은 서버 쪽에 없다).
+        fork 는 resume 한 세션을 이어받되 새 session_id 로 갈라 쓴다(--fork-session, 원래 세션은 그대로 둔다)."""
         base = self.claude_cmd()
         if not base:
             return None
@@ -220,6 +221,8 @@ class Manager:
             args += ["--permission-mode", permission]
         if resume:
             args += ["--resume", resume]
+            if fork:
+                args += ["--fork-session"]
         return args
 
     def _warn(self, sid: str | None, text: str) -> None:
@@ -258,10 +261,13 @@ class Manager:
 
     def launch(self, cwd: str, first_message: str | None, resume: str | None = None, title: str = "",
                model: str | None = None, effort: str | None = None, permission: str | None = None,
-               attachments: list[dict] | None = None) -> str | None:
+               attachments: list[dict] | None = None, fork_of: str | None = None) -> str | None:
         """세션을 띄우고 첫 메시지를 보낸다. 세션 id(임시 또는 실제)를 돌려준다. 못 띄우면 None.
         model 은 --model 별칭이다. 이어서 띄울 때(resume) 안 주면 그 세션에 기억된 모델을 쓴다.
-        같은 세션을 다시 띄우는 요청(resume)은 세션 단위로 직렬화하고, 이미 살아 있으면 새로 띄우지 않고 메시지만 보낸다."""
+        같은 세션을 다시 띄우는 요청(resume)은 세션 단위로 직렬화하고, 이미 살아 있으면 새로 띄우지 않고 메시지만 보낸다.
+        fork_of 는 그 세션의 대화를 이어받아 새 세션으로 갈라 띄운다(원래 세션은 건드리지 않는다. resume 과 같이 쓰지 않는다)."""
+        if fork_of:
+            return self._launch(cwd, first_message, None, title, model, effort, permission, fork_of=fork_of)
         if resume:
             with self.session_lock(resume):
                 if self.alive(resume):
@@ -272,14 +278,15 @@ class Manager:
         return self._launch(cwd, first_message, resume, title, model, effort, permission, attachments)
 
     def _launch(self, cwd: str, first_message: str | None, resume: str | None, title: str, model: str | None,
-                effort: str | None = None, permission: str | None = None, attachments: list[dict] | None = None) -> str | None:
-        if model is None and resume:
-            model = self.remembered_model(resume)
-        if effort is None and resume:
-            effort = self.remembered_effort(resume)
-        if permission is None and resume:
-            permission = self.remembered_permission(resume)
-        args = self.command(resume, model, effort, permission)
+                effort: str | None = None, permission: str | None = None, attachments: list[dict] | None = None, fork_of: str | None = None) -> str | None:
+        source = resume or fork_of
+        if model is None and source:
+            model = self.remembered_model(source)
+        if effort is None and source:
+            effort = self.remembered_effort(source)
+        if permission is None and source:
+            permission = self.remembered_permission(source)
+        args = self.command(source, model, effort, permission, fork=bool(fork_of))
         if args is None:
             return None
         try:
@@ -296,7 +303,9 @@ class Manager:
             s["modelChoice"] = self.model if model is None else model
             s["effortChoice"] = self.effort if effort is None else effort
             s["permissionChoice"] = permission or ""
-            if not resume:
+            if fork_of:
+                s["forkedFrom"] = fork_of  # 터미널 세션을 갈라서 이어 간 새 세션(#867). 화면에 '갈라서 이어 감' 을 밝힌다
+            if not resume and not fork_of:
                 s["startChecks"] = new_start_checks()  # 새 세션 점검 체크리스트(이어서 띄운 세션에는 새로 만들지 않는다)
             title = prompt_title(title) if title else ""
             if title:

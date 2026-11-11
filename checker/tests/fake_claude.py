@@ -24,7 +24,7 @@ sys.stdin.reconfigure(encoding="utf-8")  # Windows 기본(cp949)이면 한글이
 sys.stdout.reconfigure(encoding="utf-8")
 
 args = sys.argv[1:]
-sid = args[args.index("--resume") + 1] if "--resume" in args else "fake-" + uuid.uuid4().hex[:8]
+sid = args[args.index("--resume") + 1] if "--resume" in args and "--fork-session" not in args else "fake-" + uuid.uuid4().hex[:8]  # --fork-session 은 새 session_id 로 갈라 쓴다
 port = int(os.environ["HARNESS_CONSOLE_PORT"])
 cwd = os.getcwd()
 

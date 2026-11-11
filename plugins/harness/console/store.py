@@ -811,6 +811,7 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "pluginVersions": [dict(p) for p in s.get("pluginVersions") or []],
             "mcp": mcp_view(s),
             "sameFolder": same_folder_ids(store, s), "handedOffTo": s.get("handedOffTo") or None,
+            "forkedFrom": s.get("forkedFrom") or None,
             "startChecks": [dict(c) for c in s.get("startChecks") or []],
             "context": context_usage.for_session(s),
             "compact": {k: v for k, v in s["compact"].items() if k in ("state", "pre", "post", "auto", "reason")} if isinstance(s.get("compact"), dict) else None,
