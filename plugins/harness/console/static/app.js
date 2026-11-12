@@ -488,6 +488,7 @@
   function requestTitle(r) {
     if (!r) return '요청을 확인하세요';
     if (isPlan(r)) return '계획 확인';
+    if (kindOf(r) === 'elicitation' && r.elicitation) return MS('연결 도구(' + (r.elicitation.server || '?') + ')가 묻는 것: ' + String(r.elicitation.message || '').replace(/\s+/g, ' ').slice(0, 120));
     if (r.title) return MS(r.title);
     var qs_ = questionsOf(r);
     if (kindOf(r) === 'question') return qs_.length ? MS(qs_[0].question || qs_[0].header || '질문이 있습니다') : '질문이 있습니다';
@@ -499,7 +500,8 @@
     var kind = /abap|sap/i.test(m.server || '') ? 'SAP 시스템 도구' : '연결 도구';
     return kind + (m.server ? '(' + m.server + ')' : '') + '의 \'' + (m.display || m.tool || '도구') + '\' 을(를) 써도 될까?';
   }
-  function kindOf(r) { return (r && (r.kind || r.type)) === 'question' ? 'question' : (r && (r.kind || r.type)) === 'permission' ? 'permission' : (questionsOf(r).length ? 'question' : 'permission'); }
+  function kindOf(r) { return (r && (r.kind || r.type)) === 'elicitation' ? 'elicitation' : (r && (r.kind || r.type)) === 'question' ? 'question' : (r && (r.kind || r.type)) === 'permission' ? 'permission' : (questionsOf(r).length ? 'question' : 'permission'); }
+  function answersAsk(r) { return kindOf(r) === 'elicitation' || kindOf(r) === 'question'; }  // 사용자가 값을 골라 답하는 요청(질문·MCP 질문)
   function questionsOf(r) {
     if (!r) return [];
     var q = r.questions || (r.toolInput && r.toolInput.questions) || (r.tool_input && r.tool_input.questions) || (r.input && r.input.questions);
@@ -525,7 +527,7 @@
           ids.forEach(function (rid) {
             var r = requests.get(rid);
             if (r && r.status && r.status !== 'pending') return;
-            todo.push({ sname: title, href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : kindOf(r) === 'question' ? '답하기' : isPlan(r) ? '계획 확인하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
+            todo.push({ sname: title, href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : answersAsk(r) ? '답하기' : isPlan(r) ? '계획 확인하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
           });
         } else if (!s.askedInText && window.BHLogic.prNeedsFix(s)) {  // 시안 G-24: 검사 실패한 내 PR 을 고칠 차례
           todo.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), verb: 'PR 고치기', title: title, sub: sub, t: s.updatedAt, fix: true });
@@ -570,7 +572,7 @@
     if (g !== 'running' && s.status !== 'ended' && L.prNeedsFix(s) && !firstPending(s)) return { tone: g === 'todo' ? 'attn' : '', fix: true, text: 'PR #' + s.flowPr.number + ' 고쳐야 함' };
     if (g === 'todo') {
       var p = firstPending(s);
-      var verb = p ? (!p.r ? '요청 확인하기' : kindOf(p.r) === 'question' ? '답하기' : isPlan(p.r) ? '계획 확인하기' : '승인하기') : s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기';
+      var verb = p ? (!p.r ? '요청 확인하기' : answersAsk(p.r) ? '답하기' : isPlan(p.r) ? '계획 확인하기' : '승인하기') : s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기';
       return { tone: 'attn', text: '내 차례 · ' + verb };
     }
     var ph = window.BHLogic.phaseSide(s);  // 승인 기다림 · PR #n / 끝 · PR #n 합쳐짐(내 차례로 세지 않는다)
@@ -1516,12 +1518,12 @@
     function askCard(rid) {
       var r = requests.get(rid);
       if (r && r.status && r.status !== 'pending') return null;
-      var q = r && kindOf(r) === 'question';
+      var q = r && kindOf(r) === 'question', el = r && kindOf(r) === 'elicitation';
       return h('div', { class: 'ask', 'data-ask': rid },
         h('span', { class: 'eb', text: '네 차례' + waitedText(r && (r.createdAt || r.createdAtMs)) }),
         h('b', { text: r ? requestTitle(r) : '확인해야 할 요청이 있어' }),
-        h('span', { class: 'sub', text: r ? (q ? 'AI가 물어본 게 있어. 답하면 이어서 일해.' : isPlan(r) ? 'AI가 계획을 세웠어. 읽어 보고 진행할지 정해 줘.' : 'AI가 허락을 기다려. 확인하고 정해 줘.') : '요청 내용을 불러오는 중이거나 읽지 못했어.' }),
-        h('div', { class: 'acts' }, link('/r/' + encodeURIComponent(rid), { class: 'pill acc', text: r ? (q ? '답하기' : isPlan(r) ? '계획 보기' : '승인하기') : '열기' })));
+        h('span', { class: 'sub', text: r ? (q ? 'AI가 물어본 게 있어. 답하면 이어서 일해.' : el ? 'AI가 쓰는 연결 도구가 값을 물어봐. 답하면 이어서 일해.' : isPlan(r) ? 'AI가 계획을 세웠어. 읽어 보고 진행할지 정해 줘.' : 'AI가 허락을 기다려. 확인하고 정해 줘.') : '요청 내용을 불러오는 중이거나 읽지 못했어.' }),
+        h('div', { class: 'acts' }, link('/r/' + encodeURIComponent(rid), { class: 'pill acc', text: r ? (q || el ? '답하기' : isPlan(r) ? '계획 보기' : '승인하기') : '열기' })));
     }
     // 시안 G-13: 질문은 대화 안에서 바로 고른다. 질문이 하나이고 하나만 고르는 것이면 보기를 누르는 순간 답이 간다.
     // 여러 개를 묻거나 여러 개를 고르게 하면 모두 고른 뒤 [답 보내기]. 직접 적은 답은 [직접 적어 답하기](/r/…)에서.
@@ -1584,11 +1586,17 @@
         st.err ? h('span', { class: 'note-attn', role: 'alert', text: st.err }) : null);
       return h('div', { class: 'qgroup', 'data-ask': rid }, cards, foot);
     }
+    // MCP 질문(#885): 대화 안에서 바로 폼으로 답한다. 내용을 아직 못 받았으면 '네 차례' 카드로
+    function inlineElicit(rid) {
+      var r = requests.get(rid);
+      if (r && r.status && r.status !== 'pending') return null;
+      return elicitCard(rid, draw, refetchSoon) || askCard(rid);
+    }
     // 질문·승인 요청: 기다리는 중이면 질문은 그 자리에서 고르고 승인은 '네 차례' 카드(여기서 한 번만), 끝났으면 답을 한 줄로
     function chatReq(c, s, drawn) {
       var pend = (s.pendingRequestIds || []).indexOf(c.id) >= 0;
-      if (pend && !c.answer) { drawn[c.id] = true; return c.kind === 'question' ? inlineQuestion(c.id) : askCard(c.id); }
-      var label = c.kind === 'question' ? '질문' : '승인 요청', plan = c.title === '계획 확인';
+      if (pend && !c.answer) { drawn[c.id] = true; return c.kind === 'question' ? inlineQuestion(c.id) : c.kind === 'elicitation' ? inlineElicit(c.id) : askCard(c.id); }
+      var label = c.kind === 'question' ? '질문' : '승인 요청', plan = c.title === '계획 확인' || c.kind === 'elicitation';  // MCP 질문은 제목에 이미 "연결 도구(…)가 묻는 것" 이 있다
       return h('div', { class: 'reqnote', 'data-chat': 'req', 'data-chat-req': c.id },
         (plan ? '' : label + ': ') + MS(c.title || '') + ' → ' + (c.answer ? MS(c.answer) : '처리 결과를 알 수 없어'));
     }
@@ -1873,6 +1881,90 @@
     };
   }
 
+  /* ---------- MCP 질문(elicitation) 카드(#885) ----------
+     연결 도구(MCP 서버)가 사용자에게 값을 묻는 요청. 질문 카드(.q·.qopt·.qgroup)와 같은 모양으로 대화 안과 /r/:rid 에서 함께 쓴다.
+     redraw: 상태가 바뀔 때 다시 그리는 함수, done: 답이 간 뒤 부르는 함수(action 을 준다). */
+  var elicitSt = {};  // 요청 id -> { vals: {칸 이름: 값}, busy, err }
+  var ELICIT_RES = { accept: ['답을 보냈어.', '연결 도구가 받은 값으로 이어 가.'], decline: ['거절했어.', '연결 도구는 답을 못 받고 이어 가.'], cancel: ['닫았어.', '연결 도구는 답을 못 받고 이어 가.'] };
+  var ELICIT_OUT = { '보냄': 'accept', '거절함': 'decline', '닫음': 'cancel' };
+  var FORMAT_HINT = { email: '예: name@example.com', uri: '예: https://example.com', date: '예: 2026-11-12', 'date-time': '예: 2026-11-12T09:00:00' };
+  function safeHttpUrl(u) { try { var x = new URL(String(u)); return x.protocol === 'http:' || x.protocol === 'https:' ? x.href : ''; } catch (e) { return ''; } }
+  function elicitCard(rid, redraw, done) {
+    var r = requests.get(rid), info = r && r.elicitation;
+    if (!info) return null;
+    var st = elicitSt[rid] || (elicitSt[rid] = { vals: {}, busy: false, err: '' });
+    var fields = Array.isArray(info.fields) ? info.fields : [], isUrl = info.mode === 'url';
+    function isNum(f) { return f.type === 'number' || f.type === 'integer'; }
+    function blank(v) { return v == null || String(v).trim() === ''; }
+    function filled(f) {
+      var v = st.vals[f.key];
+      if (f.type === 'boolean') return typeof v === 'boolean';
+      if (f.type === 'multi') return Array.isArray(v) && v.length > 0;
+      if (isNum(f)) return !blank(v) && isFinite(Number(v)) && (f.type !== 'integer' || Number.isInteger(Number(v)));
+      return !blank(v);
+    }
+    function missing() { return fields.filter(function (f) { return f.required ? !filled(f) : (isNum(f) && !blank(st.vals[f.key]) && !filled(f)); }).length; }
+    function content() {
+      var out = {};
+      fields.forEach(function (f) { if (filled(f)) out[f.key] = isNum(f) ? Number(st.vals[f.key]) : st.vals[f.key]; });
+      return out;
+    }
+    function send(action) {
+      var body = { action: action };
+      if (action === 'accept' && !isUrl) body.content = content();
+      st.busy = true; st.err = ''; redraw();
+      api('POST', '/api/requests/' + encodeURIComponent(rid) + '/answer', body).then(function () { if (done) done(action); },
+        function (e) { st.err = (e.status === 404 || e.status === 409 || e.status === 410) ? '이미 처리된 질문이야.' : '전달하지 못했어: ' + e.message; }).then(function () { st.busy = false; redraw(); });
+    }
+    var top = h('div', { class: 'q', role: 'group', 'data-elicit': rid, 'aria-labelledby': 'el-' + rid },
+      h('span', { class: 'eb', text: '연결 도구(' + (info.server || '?') + ')가 묻는 것' }),
+      h('b', { id: 'el-' + rid, text: info.message || '값을 알려 달라고 해' }));
+    if (isUrl) {
+      var href = safeHttpUrl(info.url);
+      top.appendChild(href ? h('a', { class: 'sub', href: href, target: '_blank', rel: 'noopener noreferrer', 'data-elicit-url': '1', text: href })
+        : h('span', { class: 'sub', 'data-elicit-url': '1', text: String(info.url || '') }));
+      top.appendChild(href ? h('span', { class: 'sub', text: '주소를 열어 마친 다음 [다 했어]를 눌러 줘.' }) : h('span', { class: 'note-attn', role: 'alert', text: '열 수 없는 주소야' }));
+    }
+    var cards = fields.map(function (f, i) {
+      var id = 'ef-' + rid + '-' + i, v = st.vals[f.key];
+      var box = h('div', { class: 'q', role: 'group', 'data-elicit-field': f.key, 'aria-labelledby': id },
+        h('span', { class: 'eb', text: (f.required ? '꼭 채워야 해' : '안 채워도 돼') + (f.type === 'multi' ? ' · 여러 개 선택' : '') }),
+        h('b', { id: id, text: f.title || f.key }));
+      if (f.description) box.appendChild(h('span', { class: 'sub', text: f.description }));
+      if (f.type === 'enum' || f.type === 'multi' || f.type === 'boolean') {
+        var opts = f.type === 'boolean' ? [{ value: true, label: '예' }, { value: false, label: '아니오' }] : (f.options || []);
+        box.appendChild(h('div', { class: 'qo' }, opts.map(function (o) {
+          var on = f.type === 'multi' ? (v || []).indexOf(o.value) >= 0 : v === o.value;
+          return h('button', { type: 'button', class: 'qopt', 'aria-pressed': String(on), disabled: st.busy, onClick: function () {
+            if (f.type === 'multi') { var p = v || []; st.vals[f.key] = on ? p.filter(function (x) { return x !== o.value; }) : p.concat(o.value); }
+            else st.vals[f.key] = on ? undefined : o.value;
+            redraw();
+          } }, h('span', { class: 't', text: o.label }));
+        })));
+      } else {
+        var hint = isNum(f) ? '숫자로 적어 줘' + (f.minimum != null || f.maximum != null ? ' (' + (f.minimum != null ? f.minimum : '') + '~' + (f.maximum != null ? f.maximum : '') + ')' : '') : (FORMAT_HINT[f.format] || '');
+        box.appendChild(h('input', { class: 'input q-other', type: isNum(f) ? 'number' : 'text', step: f.type === 'integer' ? '1' : isNum(f) ? 'any' : null,
+          min: isNum(f) && f.minimum != null ? String(f.minimum) : null, max: isNum(f) && f.maximum != null ? String(f.maximum) : null,
+          maxlength: f.type === 'string' && f.maxLength != null ? String(f.maxLength) : null, 'aria-labelledby': id, value: v == null ? '' : String(v),
+          placeholder: hint, autocomplete: 'off', disabled: st.busy, onInput: function (e) { st.vals[f.key] = e.target.value; syncFoot(); } }));
+      }
+      return box;
+    });
+    var sendBtn = h('button', { type: 'button', class: 'pill dark', 'data-elicit-send': '1', text: isUrl ? '다 했어' : '보내기', onClick: function () { send('accept'); } });
+    var leftNote = h('span', { class: 'quiet' });
+    function syncFoot() {
+      var n = isUrl ? 0 : missing();
+      sendBtn.disabled = st.busy || n > 0;
+      leftNote.textContent = n ? '아직 채우지 못한 항목이 ' + n + '개 있어.' : ''; leftNote.hidden = !n;
+    }
+    syncFoot();
+    var foot = h('div', { class: 'acts', 'data-q-foot': rid }, leftNote,
+      h('button', { type: 'button', class: 'pill line', 'data-elicit-cancel': '1', disabled: st.busy, text: '닫기', onClick: function () { send('cancel'); } }),
+      h('button', { type: 'button', class: 'pill line', 'data-elicit-decline': '1', disabled: st.busy, text: '거절', onClick: function () { send('decline'); } }),
+      sendBtn, st.err ? h('span', { class: 'note-attn', role: 'alert', text: st.err }) : null);
+    return h('div', { class: 'qgroup', 'data-ask': rid }, top, cards, foot);
+  }
+
   /* ---------- 승인·질문 (/r/:rid) ---------- */
   function requestView(root) {
     var rid = route.id, req = requests.get(rid) || null, errored = null, outcome = null, busy = false;
@@ -1895,11 +1987,11 @@
         if (errored) return root.appendChild(stateBox('warn', '요청을 불러오지 못했습니다', errored.message, h('button', { type: 'button', class: 'btn', text: '다시 시도', onClick: function () { errored = null; draw(); fetchReq(); } })));
         return root.appendChild(loadingBox('요청을 불러오는 중입니다.'));
       }
-      var isQ = kindOf(req) === 'question';
+      var isE = kindOf(req) === 'elicitation', isQ = kindOf(req) === 'question';
       hadSession = !!(sessionOf() || {}).id;
-      var plan = !isQ && isPlan(req);  // 계획 글이 없어도 계획 카드로 그리고, 없다는 사실을 카드에 적는다(통과로 뭉개지 않는다)
-      setTitle(isQ ? '질문' : plan ? '계획 확인' : '승인');
-      (isQ ? drawQuestion : plan ? drawPlan : drawPermission)();
+      var plan = !isQ && !isE && isPlan(req);  // 계획 글이 없어도 계획 카드로 그리고, 없다는 사실을 카드에 적는다(통과로 뭉개지 않는다)
+      setTitle(isQ || isE ? '질문' : plan ? '계획 확인' : '승인');
+      (isE ? drawElicitation : isQ ? drawQuestion : plan ? drawPlan : drawPermission)();
       fetchDetail();
     }
 
@@ -1979,6 +2071,7 @@
     function resTable() { return isPlan(req) ? PLAN_RES : RES; }
     function resultOf() {
       if (outcome) return outcome;
+      if (kindOf(req) === 'elicitation' && ELICIT_OUT[req.outcome]) { var er = ELICIT_RES[ELICIT_OUT[req.outcome]]; return { title: er[0], note: er[1], extra: '' }; }
       var code = String(req.outcome || req.closedReason || req.resolution && req.resolution.code || req.status || 'closed').toLowerCase();
       var key = /terminal|처리/.test(code) ? (/hand|넘/.test(code) ? 'handoff' : 'terminal') : /hand/.test(code) ? 'handoff' : /allowed_session|allow_session/.test(code) ? 'allow_session' : /allow/.test(code) ? 'allow' : /den/.test(code) ? 'deny' : /answer/.test(code) ? 'answered' : /expire|timeout/.test(code) ? 'expired' : 'closed';
       var r = resTable()[key].slice();
@@ -2195,6 +2288,21 @@
       root.appendChild(page);
       syncSend();
     }
+    /* MCP 질문: 대화 위 질문 카드와 같은 폼. 칸 모양은 서버가 정리해 준 elicitation.fields 로만 그린다. */
+    function drawElicitation() {
+      var page = h('div', { class: 'page sess req' }), open = isPending();
+      head(page, true, open ? '연결 도구가 값을 물어봤어 · 답하면 이어서 일해' : '이미 처리된 질문이야');
+      var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
+      recentChat().forEach(function (el) { msgs.appendChild(el); });
+      if (open) {
+        var card = elicitCard(rid, draw, function (action) { var r = ELICIT_RES[action]; outcome = { title: r[0], note: r[1] }; });
+        msgs.appendChild(card || h('p', { class: 'note-attn', role: 'alert', text: '질문 내용을 읽지 못했어. 닫고 다시 시도해 줘.' }));
+      } else msgs.appendChild(resultBlock());
+      panel.appendChild(msgs);
+      if (open) panel.appendChild(sayBox());
+      page.appendChild(panel);
+      root.appendChild(page);
+    }
     function allAnswered() { return questionsOf(req).every(function (q, i) { return !!answerOf(i, q); }); }
     function syncSend() {
       var b = root.querySelector('#qsend'), st = root.querySelector('#qstat'); if (!b) return;
@@ -2220,7 +2328,7 @@
       onSession: function () { if (req && !hadSession && (sessionOf() || {}).id) draw(); },
       onData: function () { if (req && !hadSession && (sessionOf() || {}).id) draw(); },
       onRemoved: function (id) { if (id === rid) { req = requests.get(rid) || req; draw(); } },
-      tick: function () { var e = root.querySelector('[data-eb]'); if (e && isPending()) e.textContent = ebText(kindOf(req) === 'question'); }
+      tick: function () { var e = root.querySelector('[data-eb]'); if (e && isPending()) e.textContent = ebText(kindOf(req) !== 'permission'); }
     };
   }
 

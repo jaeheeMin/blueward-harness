@@ -1317,7 +1317,7 @@
           var pend = pendingOf(s), name = s.title || folderName(s) || '이름 없는 세션';
           var href = pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id);
           var plan = !!(pend && pend.r && kit.isPlan && kit.isPlan(pend.r));  // 계획 확인 요청(#861)
-          var verb = pend && pend.r && kit.kindOf(pend.r) === 'question' ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
+          var verb = pend && pend.r && (kit.kindOf(pend.r) === 'elicitation' || kit.kindOf(pend.r) === 'question') ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
           var what = pend ? (kit.requestTitle ? kit.requestTitle(pend.r) : (pend.r && pend.r.title) || '요청을 확인하세요') : s.askedInText ? '답을 기다리는 듯해요(추정)' : s.turnSkill ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례예요';
           return h('div', { class: 'call', 'data-call': s.id },
             h('div', { class: 'ct' }, h('span', { class: 'eb', text: '네 차례 · ' + name }), h('b', { text: what })),

@@ -15,8 +15,8 @@ import attachments as attachments_mod
 import context_usage
 import platform_compat
 from hooks_api import tool_key
-from store import (CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, chat_clean, mark_check, mcp_servers_of, new_start_checks,
-                   prompt_title)
+from store import (CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, chat_clean, elicitation_fields, mark_check, mcp_servers_of,
+                   new_start_checks, prompt_title)
 
 FLAGS = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
          "--permission-prompt-tool", "stdio"]
@@ -773,6 +773,8 @@ class Manager:
             request = e.get("request") if isinstance(e.get("request"), dict) else {}
             if request.get("subtype") == "can_use_tool" and request.get("tool_name") != "AskUserQuestion":
                 self._bridge_permission(proc, control, e)
+            elif request.get("subtype") == "elicitation":
+                self._bridge_elicitation(proc, control, e)
             else:
                 self._deny_control(proc, control, e)
         self.store.touch(control or s)
@@ -809,6 +811,57 @@ class Manager:
     def _control_reply(self, proc: Proc, e: dict, response: dict) -> None:
         reply = {"type": "control_response", "response": {"subtype": "success", "request_id": e.get("request_id"), "response": response}}
         proc.write(json.dumps(reply, ensure_ascii=False) + "\n")
+
+    def _bridge_elicitation(self, proc: Proc, s: dict, e: dict) -> None:
+        """MCP 서버가 사용자에게 값을 묻는 요청(elicitation)을 요청 카드로 띄우고, 사용자의 답(accept·decline·cancel)을 그대로 돌려준다.
+        모양을 모르는 요청은 지어내서 보여 주지 않고 cancel 로 닫는다. 세션이 끝나거나 요청이 닫히면 cancel."""
+        req = e["request"]
+        server, message, mode = str(req.get("mcp_server_name") or ""), str(req.get("message") or ""), req.get("mode")
+        tool_input = {"server": server, "message": message, "mode": mode, "schema": None, "propertyOrder": [], "url": "", "elicitationId": ""}
+        bad = ""
+        if mode == "form":
+            if elicitation_fields(req.get("requested_schema"), req.get("property_order")) is None:
+                bad = "입력 칸 모양을 알 수 없음"
+            tool_input.update(schema=req.get("requested_schema"), propertyOrder=req.get("property_order") if isinstance(req.get("property_order"), list) else [])
+        elif mode == "url":
+            if not isinstance(req.get("url"), str) or not req["url"].strip():
+                bad = "주소가 없음"
+            tool_input.update(url=str(req.get("url") or ""), elicitationId=str(req.get("elicitation_id") or ""))
+        else:
+            bad = f"알 수 없는 방식({str(mode)[:40]})"
+        if bad:
+            with self.store.lock:
+                self.store.add_log(s, f"처리할 수 없는 MCP 질문을 닫음({server or '?'}): {bad}")
+            self._control_reply(proc, e, {"action": "cancel"})
+            return
+        key = "elicitation\0" + str(e.get("request_id"))  # 요청마다 따로(같은 글이라도 합치지 않는다)
+        try:
+            r, created = self.store.add_request(s["id"], "elicitation", "elicitation:" + server, tool_input, None, key)
+        except RequestLimit:
+            with self.store.lock:
+                self.store.add_log(s, f"대기 요청이 너무 많아 MCP 질문을 닫음: {server}")
+            self._control_reply(proc, e, {"action": "cancel"})
+            return
+        if created:
+            with self.store.lock:
+                self.store.add_log(s, f"MCP 질문: {server}")
+
+        def answer() -> None:
+            while not r.event.wait(1.0):
+                if not proc.alive():
+                    return
+            resp = r.response if r.status == "answered" and isinstance(r.response, dict) else {}
+            if resp.get("action") == "accept":
+                reply = {"action": "accept"}
+                if mode == "form":
+                    reply["content"] = resp.get("content") if isinstance(resp.get("content"), dict) else {}
+            elif resp.get("action") == "decline":
+                reply = {"action": "decline"}
+            else:
+                reply = {"action": "cancel"}
+            self._control_reply(proc, e, reply)
+
+        threading.Thread(target=answer, daemon=True).start()
 
     def _bridge_permission(self, proc: Proc, s: dict, e: dict) -> None:
         """[실제 시험] 훅이 답을 기다리는 동안에도 claude 는 같은 승인을 control_request 로 동시에 보낸다.

@@ -2403,3 +2403,78 @@ def test_rewind_shows_claude_reason_and_does_not_pass_silently(tmp_path):
     empty = {"POST /api/sessions/s1/rewind": {"canRewind": True, "error": "", "filesChanged": [], "insertions": 0, "deletions": 0, "dryRun": True}}
     e = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=empty, actions=[{"click": "[data-rewind-open]"}])
     assert "되돌릴 게 없어" in e["text"] and "data-rewind-go" not in e["dump"]
+
+
+_ELICIT_FIELDS = [
+    {"key": "color", "title": "색", "description": "", "required": True, "type": "enum", "options": [{"value": "red", "label": "빨강"}, {"value": "blue", "label": "파랑"}]},
+    {"key": "size", "title": "팀 인원", "description": "", "required": False, "type": "integer", "minimum": 1, "maximum": 50},
+    {"key": "note", "title": "메모", "description": "", "required": False, "type": "string", "format": "email"},
+    {"key": "ok", "title": "동의", "description": "", "required": False, "type": "boolean"},
+]
+_ELICIT_FORM = {"id": "e1", "sessionId": "s1", "kind": "elicitation", "status": "pending", "toolName": "elicitation:asksrv",
+                "elicitation": {"server": "asksrv", "message": "좋아하는 색과 팀 인원을 알려 줘", "mode": "form", "fields": _ELICIT_FIELDS, "url": ""}}
+
+
+def _elicit_url(url):
+    return {"id": "e2", "sessionId": "s1", "kind": "elicitation", "status": "pending", "toolName": "elicitation:asksrv",
+            "elicitation": {"server": "asksrv", "message": "이 주소에서 로그인해 줘", "mode": "url", "fields": [], "url": url}}
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_elicitation_form_draws_fields_and_send_needs_required(tmp_path):
+    """#885: MCP 질문 폼은 질문 카드 모양(.q·.qopt)으로 그려지고, 꼭 채워야 하는 칸이 비면 [보내기] 가 잠긴다."""
+    sess = [_session("s1", pendingRequestIds=["e1"])]
+    got = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM])
+    text, dump = got["text"], got["dump"]
+    for need in ("연결 도구(asksrv)가 묻는 것", "좋아하는 색과 팀 인원을 알려 줘", "꼭 채워야 해", "안 채워도 돼", "빨강", "파랑", "팀 인원", "메모", "동의", "예", "아니오", "보내기", "거절", "닫기",
+                 "내 답을 기다리는 중", "아직 채우지 못한 항목이 1개 있어."):
+        assert need in text, need
+    assert dump.count("<button.qopt>") == 4 and "<div.qgroup>" in dump and "<div.q>" in dump and "<input.input.q-other>" in dump
+    assert "보내기" in got["disabledButtons"] and "거절" not in got["disabledButtons"] and "닫기" not in got["disabledButtons"]
+    picked = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM], actions=[{"click": ".qopt", "index": 1}])
+    assert "보내기" not in picked["disabledButtons"] and "아직 채우지 못한 항목" not in picked["text"]
+    # 숫자 칸에 정수가 아닌 값을 적으면 다시 잠긴다
+    odd = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM], actions=[{"click": ".qopt", "index": 1}, {"type": ".q-other", "value": "2.5", "index": 0}])
+    assert "보내기" in odd["disabledButtons"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_elicitation_form_posts_values_and_decline_cancel(tmp_path):
+    sess = [_session("s1", pendingRequestIds=["e1"])]
+    route = {"POST /api/requests/e1/answer": {}}
+    sent = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM], extra=route,
+                  actions=[{"click": ".qopt", "index": 1}, {"type": ".q-other", "value": "4", "index": 0}, {"type": ".q-other", "value": "a@b.kr", "index": 1},
+                           {"click": ".qopt", "index": 2}, {"click": "[data-elicit-send]"}])
+    assert sent["posts"] == [["POST", "/api/requests/e1/answer", '{"action":"accept","content":{"color":"blue","size":4,"note":"a@b.kr","ok":true}}']]
+    assert "답을 보냈어." in sent["text"]
+    no = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM], extra=route, actions=[{"click": "[data-elicit-decline]"}])
+    assert no["posts"] == [["POST", "/api/requests/e1/answer", '{"action":"decline"}']] and "거절했어." in no["text"]
+    cut = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM], extra=route, actions=[{"click": "[data-elicit-cancel]"}])
+    assert cut["posts"] == [["POST", "/api/requests/e1/answer", '{"action":"cancel"}']] and "닫았어." in cut["text"]
+    fail = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM], actions=[{"click": "[data-elicit-decline]"}])  # 길이 없으면 404
+    assert "이미 처리된 질문이야." in fail["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_elicitation_url_mode_links_only_http_and_sends_without_content(tmp_path):
+    sess = [_session("s1", pendingRequestIds=["e2"])]
+    shown = _smoke(tmp_path, "r/e2", sess, [_elicit_url("https://example.com/login")])
+    assert ["https://example.com/login", "_blank", "noopener noreferrer"] in shown["links"] and "열 수 없는 주소야" not in shown["text"]
+    assert "연결 도구(asksrv)가 묻는 것" in shown["text"] and "다 했어" in shown["text"]
+    ok = _smoke(tmp_path, "r/e2", sess, [_elicit_url("https://example.com/login")], extra={"POST /api/requests/e2/answer": {}}, actions=[{"click": "[data-elicit-send]"}])
+    assert ok["posts"] == [["POST", "/api/requests/e2/answer", '{"action":"accept"}']]
+    for bad in ("javascript:alert(1)", "file:///C:/x", "data:text/html,x", "not a url"):
+        got = _smoke(tmp_path, "r/e2", sess, [_elicit_url(bad)])
+        assert all(l[0] != bad for l in got["links"]), bad  # 다른 스킴은 링크로 만들지 않는다
+        assert "열 수 없는 주소야" in got["text"] and bad in got["text"] and "다 했어" in got["text"], bad
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_elicitation_waiting_in_chat_is_drawn_in_place_as_form(tmp_path):
+    chat = [{"t": 1, "role": "me", "text": "해 줘"},
+            {"t": 2, "role": "req", "id": "e1", "kind": "elicitation", "title": "연결 도구(asksrv)가 묻는 것: 좋아하는 색", "answer": None},
+            {"t": 3, "role": "req", "id": "e0", "kind": "elicitation", "title": "연결 도구(asksrv)가 묻는 것: 지난 질문", "answer": "보냄: color=red"}]
+    got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, pendingRequestIds=["e1"], status="waiting")], [_ELICIT_FORM])
+    text, dump = got["text"], got["dump"]
+    assert dump.count("<div.qgroup>") == 1 and "연결 도구(asksrv)가 묻는 것" in text and dump.count("<button.qopt>") == 4
+    assert "연결 도구(asksrv)가 묻는 것: 지난 질문 → 보냄: color=red" in text and "승인 요청:" not in text

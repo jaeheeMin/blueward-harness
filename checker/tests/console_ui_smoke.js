@@ -150,6 +150,8 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
   out.dump = main ? dump(main, 0) : '';
   out.notes = notes; out.asked = asked.length; out.focused = focused.length; out.path = location.pathname; out.ls = Object.assign({}, LS);
   out.posts =calls.filter(c => c[0] !== 'GET').map(c => [c[0], c[1], c[2] || '']);
+  out.disabledButtons = root.querySelectorAll('button').filter(b => b.disabled).map(b => b.textContent);  // 눌러도 되는지(#885)
+  out.links = root.querySelectorAll('a').map(a => [a.attrs.href || '', a.attrs.target || '', a.attrs.rel || '']);
   out.side = root.querySelector('.side') ? root.querySelector('.side').textContent : '';
   out.sideDump = root.querySelector('.side') ? dump(root.querySelector('.side'), 0) : '';
   out.ann = root.querySelector('.ann-slot') ? root.querySelector('.ann-slot').textContent : '';

@@ -36,8 +36,8 @@ from hooks_api import ASK_DEFAULT, ASK_LEVELS, Hooks, permission_reply, question
 from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
                      PERMISSION_VALUES, Manager)
 from standards_scan import customer_forms, has_standard_folder  # noqa: F401
-from store import (CHECK_SKIPPED, MAX_PENDING_STOP, START_CHECK_IDS, Store, can_send, display_title, mark_check, public_session,
-                   remember_touched, set_baseline)
+from store import (CHECK_SKIPPED, MAX_PENDING_STOP, START_CHECK_IDS, Store, can_send, display_title, elicitation_fields, mark_check,
+                   public_session, remember_touched, set_baseline)
 
 APP_NAME = "harness-console"
 COOKIE = "harness_console"
@@ -827,12 +827,83 @@ class App:
             else:
                 raise HttpError(400, "decision 은 allow, allow_session, deny 중 하나여야 합니다.")
             response = permission_reply(reply)
+        elif r.kind == "elicitation":
+            response, outcome = self.check_elicitation(r, b)
         else:
             response = question_reply(r.tool_input["questions"], self.check_answers(r, b.get("answers")))
             outcome = "답변함"
         if not self.store.resolve(r.rid, response, outcome):
             raise HttpError(409, f"이미 처리된 요청이야: {r.outcome}")
         return 200, r.public()
+
+    @staticmethod
+    def check_elicitation(r, b) -> tuple[dict, str]:
+        """MCP 질문 답을 검사한다. 보내기(accept)는 schema 와 맞아야 하고, 거절·닫기는 값 없이 받는다."""
+        action = b.get("action")
+        if action == "decline":
+            return {"action": "decline"}, "거절함"
+        if action == "cancel":
+            return {"action": "cancel"}, "닫음"
+        if action != "accept":
+            raise HttpError(400, "action 은 accept, decline, cancel 중 하나여야 해.")
+        ti = r.tool_input if isinstance(r.tool_input, dict) else {}
+        if ti.get("mode") == "url":
+            return {"action": "accept"}, "보냄"  # 주소 열기는 사용자가 밖에서 했다. 값은 받지 않는다
+        fields = elicitation_fields(ti.get("schema"), ti.get("propertyOrder"))
+        if fields is None:
+            raise HttpError(400, "이 질문의 입력 칸 모양을 알 수 없어서 보낼 수 없어. 닫아 줘.")
+        content = b.get("content")
+        if not isinstance(content, dict):
+            raise HttpError(400, "content 가 객체가 아니야.")
+        known = {f["key"] for f in fields}
+        extra = [k for k in content if k not in known]
+        if extra:
+            raise HttpError(400, f"없는 항목이야: {str(extra[0])[:60]}")
+        out = {}
+        for f in fields:
+            k, name = f["key"], f["title"]
+            v = content.get(k)
+            if v is None or (isinstance(v, str) and not v.strip() and f["type"] in ("string", "number", "integer")):
+                if f["required"]:
+                    raise HttpError(400, f"꼭 채워야 하는 항목이 비었어: {name}")
+                continue
+            t = f["type"]
+            if t == "string":
+                if not isinstance(v, str):
+                    raise HttpError(400, f"글자로 보내야 해: {name}")
+                if f.get("minLength") is not None and len(v) < f["minLength"]:
+                    raise HttpError(400, f"{name} 은 {int(f['minLength'])}글자 이상이어야 해.")
+                if f.get("maxLength") is not None and len(v) > f["maxLength"]:
+                    raise HttpError(400, f"{name} 은 {int(f['maxLength'])}글자 이하여야 해.")
+            elif t in ("number", "integer"):
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")):
+                    raise HttpError(400, f"숫자로 보내야 해: {name}")
+                if t == "integer":
+                    if isinstance(v, float) and not v.is_integer():
+                        raise HttpError(400, f"정수여야 해: {name}")
+                    v = int(v)
+                if f.get("minimum") is not None and v < f["minimum"]:
+                    raise HttpError(400, f"{name} 은 {f['minimum']:g} 이상이어야 해.")
+                if f.get("maximum") is not None and v > f["maximum"]:
+                    raise HttpError(400, f"{name} 은 {f['maximum']:g} 이하여야 해.")
+            elif t == "boolean":
+                if not isinstance(v, bool):
+                    raise HttpError(400, f"예·아니오로 보내야 해: {name}")
+            elif t == "enum":
+                if not isinstance(v, str) or v not in [o["value"] for o in f["options"]]:
+                    raise HttpError(400, f"고를 수 없는 값이야: {name}")
+            else:  # multi
+                values = [o["value"] for o in f["options"]]
+                if not isinstance(v, list) or not all(isinstance(x, str) and x in values for x in v) or len(set(v)) != len(v):
+                    raise HttpError(400, f"고를 수 없는 값이 섞였어: {name}")
+                if f["required"] and not v:
+                    raise HttpError(400, f"꼭 채워야 하는 항목이 비었어: {name}")
+                if f.get("minItems") is not None and len(v) < f["minItems"]:
+                    raise HttpError(400, f"{name} 은 {int(f['minItems'])}개 이상 골라야 해.")
+                if f.get("maxItems") is not None and len(v) > f["maxItems"]:
+                    raise HttpError(400, f"{name} 은 {int(f['maxItems'])}개 이하로 골라야 해.")
+            out[k] = v
+        return {"action": "accept", "content": out}, "보냄"
 
     @staticmethod
     def check_answers(r, answers) -> dict:
