@@ -131,14 +131,17 @@ def test_spec에_근거_요구사항_절이_없으면_위반이다(tmp_path: Pat
     )
 
 
-def test_spec_gitkeep은_건너뛰고_통과한다(tmp_path: Path, capsys):
+def test_spec_gitkeep은_관할_밖이라_통과한다(tmp_path: Path, capsys):
+    # Spec 관할이 docs/spec/*.md 라(#921, 캡처 그림을 빼려고 좁힘) 자리표시 .gitkeep 은
+    # 관할 안의 건너뜀이 아니라 관할 밖이다. 어느 쪽이든 검사 불능·위반 없이 통과해야 한다.
     scaffold(tmp_path, "고객사", "프로젝트", False)
     gitkeep = tmp_path / "docs" / "spec" / ".gitkeep"
 
     code, out = _run_auto(capsys, gitkeep)
 
     assert code == EXIT_PASS
-    assert out["summary"]["skipped"] == 1
+    assert out["summary"]["out_of_scope"] == 1
+    assert out["summary"]["skipped"] == 0
     assert out["summary"]["scoped"] == 0
 
 
