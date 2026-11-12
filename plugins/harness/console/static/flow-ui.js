@@ -456,13 +456,35 @@
         el.appendChild(box);
       }
 
+      // 로그인 풀림·사용 한도·쓸 수 없는 모델(#865) 은 지금 실행해도 같은 오류로 다시 멈춘다. 막힘처럼 "먼저 할 일" 을 앞에 둔다(#900)
+      var API_HOLD = {
+        auth: ['로그인한 뒤 이어서 하자', '지금 실행하면 같은 오류로 다시 멈춰. 위 ⚠ 카드대로 터미널에서 /login 으로 로그인한 다음 이어서 해.'],
+        limit: ['한도가 풀린 뒤 이어서 하자', '지금 실행하면 같은 오류로 다시 멈춰. 위 ⚠ 카드에 적힌 시각 뒤에 이어서 해.'],
+        model: ['다른 모델로 새로 시작하자', '이 세션은 같은 모델이라 실행해도 다시 멈춰. 새 작업 화면 아래 "고급 설정" 에서 다른 모델을 골라 시작해.']
+      };
+      function apiHoldOf(s) {
+        var n = window.BHApiNotice ? window.BHApiNotice.notice(s) : null;
+        if (!n || !API_HOLD[n.kind]) return null;
+        var t = (s.apiIssue && s.apiIssue.t) || (s.rateLimit && s.rateLimit.t) || 0;
+        return st.skipHold[s.id + ':api:' + n.kind + ':' + t] ? null : { kind: n.kind, key: s.id + ':api:' + n.kind + ':' + t };
+      }
+      function drawApiHold(s, ah) {
+        var box = h('div', { class: 'nextstep ask', 'data-api-hold': ah.kind });
+        box.appendChild(h('span', { class: 'eb', text: '⚠ 오류 · 먼저 할 일' }));
+        box.appendChild(h('b', { text: API_HOLD[ah.kind][0] }));
+        box.appendChild(h('p', { class: 'sub', text: API_HOLD[ah.kind][1] }));
+        box.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'skiplink', 'data-hold-skip': '1', text: s.flowId ? '그래도 다음 단계 보기' : '그래도 먼저 일 고르기', onClick: function () { st.skipHold[ah.key] = true; draw(); } })));
+        el.appendChild(box);
+      }
+
       function draw() {
         var s = last;
         if (!s) return;
         clear(el);
         var hold = L.blockOf(s); if (hold && st.skipHold[s.id + ':' + hold.t]) hold = null;  // 새 막힘이 오면 다시 안내한다
+        var apiHold = hold ? null : apiHoldOf(s);
         if (!s.flowId) {
-          if (hold) drawHold(s, hold); else { ensurePicker(s); drawPicker(s); }
+          if (hold) drawHold(s, hold); else if (apiHold) drawApiHold(s, apiHold); else { ensurePicker(s); drawPicker(s); }
         } else {
           if (!compact) {
             el.appendChild(h('div', { class: 'flow-head' },
@@ -473,7 +495,7 @@
           }
           (s.flowUnknown || []).forEach(function (u) { el.appendChild(h('p', { class: 'note-attn', role: 'status', text: '판정 불능 · ' + (typeof u === 'string' ? u : u.reason || JSON.stringify(u)) })); });
           // 질문이 떠 있으면 그 질문이 네 차례 카드라 겹치지 않게 뺀다(G-13). 승인을 기다리는 동안은 할 일 카드 대신 대화 쪽 안내(G-10).
-          if (hold) drawHold(s, hold); else if (s.flowFinished) drawFinished(s); else if (!(s.pendingRequestIds || []).length && s.phase !== 'approval') drawAction(s);
+          if (hold) drawHold(s, hold); else if (apiHold && !s.flowFinished) drawApiHold(s, apiHold); else if (s.flowFinished) drawFinished(s); else if (!(s.pendingRequestIds || []).length && s.phase !== 'approval') drawAction(s);
         }
         if (st.job) el.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.job }));
         if (st.msg) el.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.msg }));
@@ -1337,7 +1359,7 @@
           var bk = L.blockOf(s);
           var fixRow = !bk && !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)
           var an = !bk && window.BHApiNotice ? window.BHApiNotice.notice(s) : null;  // API 오류(#865)는 '끝남'·'쉬는 중' 이 아니라 ⚠ 오류로
-          var chip = an && an.sideTone === 'err' ? h('span', { class: 'tagx err', title: an.title, text: an.side }) : bk ?h('span', { class: 'tagx ' + (bk.kind === 'cannot_check' ? 'unk' : 'fail'), title: bk.kind === 'cannot_check' ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자', text: bk.kind === 'cannot_check' ? '? 확인 못 함' : '✕ 막힘' })
+          var chip = an && an.sideTone === 'err' ? h('span', { class: 'tagx err', title: an.title, text: an.side }) : bk ? h('span', { class: 'tagx ' + (bk.kind === 'cannot_check' ? 'unk' : 'fail'), title: bk.kind === 'cannot_check' ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자', text: bk.kind === 'cannot_check' ? '? 확인 못 함' : '✕ 막힘' })
             : todoRow || fixRow ? h('span', { class: 'tag', title: tip, text: fixRow ? '고쳐야 함' : '내 차례' }) : h('span', { class: 'tag ok', title: tip, text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
           var issue = issueOf(s), pr = prChip(s);
           var nums = h('td', { 'data-l': '번호' }, issue ? h('span', { class: 'mono', text: '이슈 #' + issue }) : null, pr, !issue && !pr ? h('span', { class: 'none', text: '–' }) : null);

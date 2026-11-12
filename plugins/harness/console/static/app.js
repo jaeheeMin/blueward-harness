@@ -1607,7 +1607,8 @@
       card.appendChild(h('span', { class: 'sm', 'data-api-body': '1', text: n.body }));
       if (n.raw) {
         if (open) card.appendChild(h('span', { class: 'sm mono', 'data-api-raw': '1', text: MS(n.raw) }));
-        card.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line quiet-edge', 'data-api-more': '1', 'aria-expanded': String(open),
+        // 혼자 있는 단추라 테두리를 둔다(quiet-edge 는 다른 단추와 나란할 때만 글자 단추로 읽힌다, #900)
+        card.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', 'data-api-more': '1', 'aria-expanded': String(open),
           onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, open ? '자세히 접기' : '자세히')));
       }
       return card;

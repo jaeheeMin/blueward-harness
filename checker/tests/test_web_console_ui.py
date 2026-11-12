@@ -1508,7 +1508,7 @@ def test_permission_card_for_mcp_tool_speaks_plainly_and_folds_raw_name(tmp_path
                  mcp={"server": "abap-adt", "tool": "setObjectSource", "display": "Set Object Source"})
     got3 = _smoke(tmp_path, "r/m3", [_session("s1", pendingRequestIds=["m3"])], [irrev])
     assert "<details[open].more>" in got3["dump"] and "REPORT z." in got3["text"]
-    other =dict(req, id="m2", mcp={"server": "notion", "tool": "search", "display": ""}, toolName="mcp__notion__search")
+    other = dict(req, id="m2", mcp={"server": "notion", "tool": "search", "display": ""}, toolName="mcp__notion__search")
     got2 = _smoke(tmp_path, "r/m2", [_session("s1", pendingRequestIds=["m2"])], [other])
     assert "연결 도구(notion)의 'search' 을(를) 써도 될까?" in got2["text"]  # SAP 이 아니면 SAP 이라 하지 않고 display_name 이 없으면 도구 이름
 
@@ -1538,6 +1538,30 @@ def test_session_screen_api_error_card_side_and_ann(tmp_path):
     # 홈 표: 오류 세션의 상태 칩은 '끝남' 이 아니라 ⚠ 오류
     home = _smoke(tmp_path, "", [_session("s1", status="ended", apiIssue=issue)], extra=_start())
     assert "<span.tagx.err>" in home["dump"] and "⚠ 오류 · 로그인이 풀렸어" in home["text"] and "<span.tag.ok>" not in home["dump"]
+    # 혼자 있는 [자세히] 는 테두리 단추로 보인다(#900: quiet-edge 는 밝은 판에서 글자만 보였다)
+    assert "<button.pill.line>" in got["dump"] and "<button.pill.line.quiet-edge>" not in got["dump"].split("apierr", 1)[1].split("</div", 1)[0]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_api_error_holds_next_step_until_login_or_limit(tmp_path):
+    """#900: 로그인 풀림·사용 한도·쓸 수 없는 모델이면 다음 단계 [실행] 대신 '먼저 할 일' 을 두고, 넘길 수도 있다. 다른 오류는 막지 않는다."""
+    chat = [{"t": 1, "role": "me", "text": "해 줘"}]
+    for kind, title in (("auth", "로그인한 뒤 이어서 하자"), ("limit", "한도가 풀린 뒤 이어서 하자"), ("model", "다른 모델로 새로 시작하자")):
+        got = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": kind, "t": 5}, chat=chat)])
+        assert "<div.nextstep.ask>" in got["dump"] and title in got["text"] and "다시 멈춰" in got["text"], kind
+        assert "네 차례" not in got["text"] and "⚠ 오류 · 먼저 할 일" in got["text"], kind
+    skipped = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "auth", "t": 5}, chat=chat)], actions=[{"click": "[data-hold-skip]"}])
+    assert "네 차례" in skipped["text"] and "로그인한 뒤 이어서 하자" not in skipped["text"]
+    nopick = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "auth", "t": 5}, chat=chat, flowId=None, flowName=None, flowSteps=[], stepIndex=0)])
+    assert "로그인한 뒤 이어서 하자" in nopick["text"] and "어떤 일인가요?" not in nopick["text"] and "그래도 먼저 일 고르기" in nopick["text"]
+    other = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "other", "t": 5}, chat=chat)])
+    assert "먼저 할 일" not in other["text"] and "네 차례" in other["text"]  # 일시적일 수 있는 서버 오류는 다시 해 볼 수 있다
+    # 한도가 apiIssue 없이 rateLimit(rejected) 로만 와도 같다
+    rl = _smoke(tmp_path, "s/s1", [_session("s1", rateLimit={"status": "rejected", "t": 6, "resetsAt": 4102444800}, chat=chat)])
+    assert "한도가 풀린 뒤 이어서 하자" in rl["text"]
+    # 모델 오류 안내는 없는 '설정' 이 아니라 새 작업의 고급 설정을 가리킨다
+    model = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "model", "t": 5}, chat=chat)])
+    assert "설정에서 다른 모델로" not in model["text"] and "고급 설정" in model["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
