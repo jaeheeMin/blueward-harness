@@ -12,6 +12,12 @@
 - 시험: `test_risk_plan_file_is_safe_only_with_plan_dir_and_only_direct_md`, `test_managed_bridge_auto_allows_plan_file_only_in_plan_mode`(고치기 전 코드로 실패 확인).
 - 길잡이 웹 콘솔 탭 '답하는 것', `docs/design/web-console.md`, whats_new 0.10.266.
 
+## 점검 반영 (558 세션, #909 댓글)
+
+- 구멍: `<설정 폴더>/plans` 를 작업 폴더로 가는 Junction(관리자 불필요)으로 만들면 `plans/CLAUDE.md` 쓰기가 계획 파일로 safe 였다(`_is_plan_file` 이 기준을 링크 대상으로 옮겼다).
+- 제안 (a) "plans 가 링크면 계획 파일로 안 봄" 은 따르지 않음: 이 PC(Orca 프로필)의 `plans` 가 `~/.claude/plans` 로 가는 심볼릭 링크라 정상 경우가 막힌다.
+- 대신: 링크 대상 폴더 이름도 `plans` 여야 하고, 작업 폴더 안이면 안 되고, 보호 경로 이름(`_protected`: CLAUDE.md·AGENTS.md 등)은 계획 파일이 아니다. 시험 `test_risk_plan_dir_link_is_allowed_only_to_another_plans_outside_work`(Windows 는 mklink /J, 그 밖은 symlink) + 지시 파일 이름 단언. 고치기 전 코드로 실패 확인. 이 PC 의 실제 링크 plans 에서 `x-plan.md` 는 safe, `CLAUDE.md` 는 묻는 것 확인.
+
 ## 결정
 
 - 계획 모드일 때만 허용한다. 평소 모드에서 AI 가 설정 폴더 plans/ 에 쓰는 일은 흔하지 않고, 쓰면 묻는 게 맞다.

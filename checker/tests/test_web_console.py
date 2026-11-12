@@ -6919,6 +6919,45 @@ def test_risk_plan_file_is_safe_only_with_plan_dir_and_only_direct_md(tmp_path):
                 tmp_path / "evil" / "plans" / "a.md"):   # 글자만 같은 다른 곳
         assert w(bad)[0] == "irreversible", (bad, w(bad))
     assert w(conf / "plans" / "a.md", pd="")[0] == "irreversible"  # 계획 모드가 아니면 묻는다
+    for name in ("CLAUDE.md", "agents.md", "Claude.MD"):  # 지시 파일 이름은 계획 파일이어도 묻는다(#909 리뷰)
+        assert w(conf / "plans" / name)[0] != "safe", name
+
+
+def _dir_link(link, target):
+    """디렉터리 링크. Windows 는 관리자 없이 되는 Junction(mklink /J), 그 밖은 심볼릭 링크. 못 만들면 skip."""
+    import subprocess
+    if os.name == "nt":
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True)
+        if r.returncode != 0:
+            pytest.skip("Junction 을 만들 수 없는 환경")
+    else:
+        try:
+            os.symlink(target, link, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("심볼릭 링크를 만들 수 없는 환경")
+
+
+def test_risk_plan_dir_link_is_allowed_only_to_another_plans_outside_work(tmp_path):
+    """#909 리뷰: plans 가 링크면 그 대상으로 계획 파일을 본다(Orca 프로필은 ~/.claude/plans 로 링크). 다만 작업 폴더나
+    plans 가 아닌 곳을 가리키는 링크로 작업 폴더의 CLAUDE.md 등을 계획 파일인 척 쓰지 못한다."""
+    work, conf, home_plans = tmp_path / "work", tmp_path / "conf", tmp_path / "home" / ".claude" / "plans"
+    work.mkdir(); conf.mkdir(); home_plans.mkdir(parents=True)
+    _dir_link(conf / "plans", home_plans)  # 정상: 다른 설정 폴더의 plans 로 가는 링크
+    w = lambda p, pd: risk_mod.classify("Write", {"file_path": str(p)}, str(work), plan_dir=pd)  # noqa: E731
+    assert w(conf / "plans" / "wise-fox.md", str(conf / "plans"))[0] == "safe"
+    bad = tmp_path / "conf2"
+    bad.mkdir()
+    _dir_link(bad / "plans", work)  # 공격: plans → 작업 폴더
+    for name in ("CLAUDE.md", "AGENTS.md"):
+        assert w(bad / "plans" / name, str(bad / "plans"))[0] != "safe", name
+    # 보통 파일은 링크를 따라가면 작업 폴더 안이라 원래 규칙(작업 폴더 안 고치기)으로 허용될 뿐, 계획 파일로 보지 않는다
+    assert w(bad / "plans" / "notes.md", str(bad / "plans")) == ("safe", "작업 폴더 안 파일을 고쳐")
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    bad3 = tmp_path / "conf3"
+    bad3.mkdir()
+    _dir_link(bad3 / "plans", other)  # plans 가 아닌 곳으로 가는 링크
+    assert w(bad3 / "plans" / "a.md", str(bad3 / "plans"))[0] != "safe"
 
 
 def test_managed_bridge_auto_allows_plan_file_only_in_plan_mode(tmp_path):
