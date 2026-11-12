@@ -1216,6 +1216,17 @@ def test_design_states_have_shape_cues_not_only_color():
         assert needle in css, needle
 
 
+def test_markdown_table_cells_do_not_break_per_letter():
+    """#904: .md 의 overflow-wrap:anywhere 를 표 칸이 물려받으면 좁은 미리보기에서 REQ-001 이 글자마다 쪼개진다.
+    표 칸은 낱말 단위로만 줄을 바꾸고 첫 열은 한 줄, 넘치는 표는 .md-table 가로 스크롤. (실제 그림은 G-09 SRS 미리보기로 확인)"""
+    css = re.sub(r"\s+", " ", (STATIC / "app.css").read_text(encoding="utf-8"))
+    assert ".md { font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }" in css  # 이 규칙을 물려받는 것이 원인
+    assert ".md th, .md td { overflow-wrap: normal; word-break: keep-all; }" in css
+    assert ".md td:first-child { white-space: nowrap; }" in css
+    assert ".md .md-table { overflow-x: auto; max-width: 100%; }" in css
+    assert css.index(".md { font-size") < css.index(".md th, .md td { overflow-wrap: normal")  # 뒤에 와야 이긴다
+
+
 def test_new_ui_copy_says_claude_code_not_claude():
     for name in ("flow-ui.js", "flow-logic.js"):
         text = (STATIC / name).read_text(encoding="utf-8")
