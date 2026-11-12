@@ -6965,8 +6965,10 @@ def test_risk_plan_dir_link_is_allowed_only_to_another_plans_outside_work(tmp_pa
     work, conf, home_plans = tmp_path / "work", tmp_path / "conf", tmp_path / "home" / ".claude" / "plans"
     work.mkdir(); conf.mkdir(); home_plans.mkdir(parents=True)
     _dir_link(conf / "plans", home_plans)  # 정상: 다른 설정 폴더의 plans 로 가는 링크
-    w = lambda p, pd: risk_mod.classify("Write", {"file_path": str(p)}, str(work), plan_dir=pd)  # noqa: E731
+    roots = [str(tmp_path / "home" / ".claude")]  # 실제 설정 폴더(콘솔은 CLAUDE_CONFIG_DIR·~/.claude 를 넘긴다)
+    w = lambda p, pd: risk_mod.classify("Write", {"file_path": str(p)}, str(work), plan_dir=pd, config_roots=roots)  # noqa: E731
     assert w(conf / "plans" / "wise-fox.md", str(conf / "plans"))[0] == "safe"
+    assert risk_mod.classify("Write", {"file_path": str(conf / "plans" / "a.md")}, str(work), plan_dir=str(conf / "plans"))[0] != "safe"  # 실제 설정 폴더를 모르면 링크를 받지 않는다
     bad = tmp_path / "conf2"
     bad.mkdir()
     _dir_link(bad / "plans", work)  # 공격: plans → 작업 폴더
@@ -6980,6 +6982,25 @@ def test_risk_plan_dir_link_is_allowed_only_to_another_plans_outside_work(tmp_pa
     bad3.mkdir()
     _dir_link(bad3 / "plans", other)  # plans 가 아닌 곳으로 가는 링크
     assert w(bad3 / "plans" / "a.md", str(bad3 / "plans"))[0] != "safe"
+    # #911: 작업 폴더 밖 다른 저장소의 plans/ 로 가는 링크도 계획 폴더로 보지 않는다(부모가 설정 폴더도 .claude 도 아님)
+    repo_plans = tmp_path / "other-repo" / "plans"
+    repo_plans.mkdir(parents=True)
+    bad4 = tmp_path / "conf4"
+    bad4.mkdir()
+    _dir_link(bad4 / "plans", repo_plans)
+    for name in ("notes.md", "wise-fox.md"):
+        assert w(bad4 / "plans" / name, str(bad4 / "plans"))[0] != "safe", name
+    # #919 리뷰: 다른 저장소 안의 .claude/plans 처럼 이름만 같은 곳도 실제 설정 폴더가 아니면 받지 않는다
+    fake_claude = tmp_path / "other-repo2" / ".claude" / "plans"
+    fake_claude.mkdir(parents=True)
+    bad5 = tmp_path / "conf5"
+    bad5.mkdir()
+    _dir_link(bad5 / "plans", fake_claude)
+    assert w(bad5 / "plans" / "notes.md", str(bad5 / "plans"))[0] != "safe"
+    # 링크가 아닌 plans 는 설정 폴더 이름이 무엇이든(예: Orca 프로필 home) 그대로 된다
+    plain = tmp_path / "profile" / "home"
+    (plain / "plans").mkdir(parents=True)
+    assert w(plain / "plans" / "a.md", str(plain / "plans"))[0] == "safe"
 
 
 def test_managed_bridge_auto_allows_plan_file_only_in_plan_mode(tmp_path):

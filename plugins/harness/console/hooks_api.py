@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
+from pathlib import Path
 from typing import Callable
 
 import context_usage
@@ -145,7 +147,8 @@ class Hooks:
             level = "all"  # 모르는 값이면 가장 엄격하게
         # 계획 모드면 그 세션의 설정 폴더 plans/ 의 계획 파일 쓰기를 묻지 않는다(#878). 설정 폴더는 대화 기록 경로로, 없으면 CLAUDE_CONFIG_DIR·~/.claude
         plan_dir = plan_dir_of(session_alive.config_dir(str(s.get("transcriptPath") or ""))) if s.get("permissionMode") == "plan" else ""
-        verdict, why = classify(tool, tool_input, s.get("cwd") or "", plan_dir=plan_dir)
+        roots = (os.environ.get("CLAUDE_CONFIG_DIR") or "", str(Path.home() / ".claude")) if plan_dir else ()  # plans 링크로 받아 줄 실제 설정 폴더(#911)
+        verdict, why = classify(tool, tool_input, s.get("cwd") or "", plan_dir=plan_dir, config_roots=roots)
         if verdict == IRREVERSIBLE:
             return "ask", IRREVERSIBLE, why
         if verdict == SAFE and level != "all" and not (level == "edits" and tool in EDIT_TOOLS):
