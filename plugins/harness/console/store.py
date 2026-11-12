@@ -75,8 +75,89 @@ def chat_clean(text: str) -> str:
     return text.strip()
 
 
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and v not in (float("inf"), float("-inf")) else None
+
+
+def _options_of(spec) -> list[dict] | None:
+    """enum(+enumNames)·oneOf/anyOf(const+title) 에서 고를 값 목록. 모양이 이상하면 None."""
+    if isinstance(spec.get("enum"), list):
+        names = spec.get("enumNames") if isinstance(spec.get("enumNames"), list) else []
+        vals = spec["enum"]
+        if not vals or not all(isinstance(v, str) for v in vals):
+            return None
+        return [{"value": v, "label": str(names[i]) if i < len(names) and isinstance(names[i], str) and names[i] else v} for i, v in enumerate(vals)]
+    for key in ("oneOf", "anyOf"):
+        if isinstance(spec.get(key), list):
+            out = []
+            for o in spec[key]:
+                if not isinstance(o, dict) or not isinstance(o.get("const"), str):
+                    return None
+                out.append({"value": o["const"], "label": str(o.get("title") or o["const"])})
+            return out or None
+    return None
+
+
+def elicitation_fields(schema, order=None) -> list[dict] | None:
+    """MCP elicitation 의 requested_schema 를 화면·검증이 같이 쓰는 필드 목록으로 정리한다(property_order 순서).
+    지원하지 못하는 모양(객체 아님·알 수 없는 타입·중첩)이면 None — 지어내지 않고 호출한 쪽이 닫는다."""
+    if not isinstance(schema, dict) or schema.get("type") not in (None, "object") or not isinstance(schema.get("properties"), dict):
+        return None
+    props = schema["properties"]
+    required = schema.get("required") if isinstance(schema.get("required"), list) else []
+    keys = [k for k in (order if isinstance(order, list) else []) if isinstance(k, str) and k in props]
+    keys += [k for k in props if k not in keys]
+    fields = []
+    for key in keys:
+        spec = props[key]
+        if not isinstance(spec, dict):
+            return None
+        f = {"key": key, "title": str(spec.get("title") or key)[:200], "description": str(spec.get("description") or "")[:500],
+             "required": key in required, "default": spec.get("default")}
+        t = spec.get("type")
+        if t == "array":
+            items = spec.get("items") if isinstance(spec.get("items"), dict) else {}
+            opts = _options_of(items)
+            if opts is None:
+                return None
+            f.update(type="multi", options=opts, minItems=_num(spec.get("minItems")), maxItems=_num(spec.get("maxItems")))
+        elif _options_of(spec) is not None:
+            f.update(type="enum", options=_options_of(spec))
+        elif t == "string":
+            f.update(type="string", format=str(spec.get("format") or ""), minLength=_num(spec.get("minLength")), maxLength=_num(spec.get("maxLength")))
+        elif t in ("number", "integer"):
+            f.update(type=t, minimum=_num(spec.get("minimum")), maximum=_num(spec.get("maximum")))
+        elif t == "boolean":
+            f.update(type="boolean")
+        else:
+            return None
+        fields.append(f)
+    return fields
+
+
+def elicitation_summary(content, fields=None) -> str:
+    """보낸 값 요약. 칸 제목=값 을 이어 붙인다. fields(elicitation_fields 결과)가 있으면 키 대신 칸 제목, 보기 값 대신 보기 이름을 쓴다."""
+    if not isinstance(content, dict) or not content:
+        return ""
+    by_key = {f["key"]: f for f in fields or []}
+    parts = []
+    for k, v in content.items():
+        f = by_key.get(k) or {}
+        labels = {o["value"]: o["label"] for o in f.get("options") or []}
+        if isinstance(v, bool):
+            v = "예" if v else "아니오"
+        elif isinstance(v, list):
+            v = ", ".join(str(labels.get(x, x)) for x in v)
+        elif isinstance(v, str):
+            v = labels.get(v, v)
+        parts.append(f"{f.get('title') or k}={' '.join(str(v).split())}")
+    return ", ".join(parts)[:300]
+
+
 def request_title(kind: str, tool_name, tool_input) -> str:
     """대화에 남길 요청 제목. 질문이면 첫 질문 글, 승인이면 도구 이름."""
+    if kind == "elicitation" and isinstance(tool_input, dict):
+        return f"연결 도구({str(tool_input.get('server') or '?')[:60]})가 묻는 것: " + " ".join(str(tool_input.get("message") or "").split())[:120]
     if kind == "question" and isinstance(tool_input, dict):
         for q in tool_input.get("questions") or []:
             if isinstance(q, dict) and str(q.get("question") or q.get("header") or "").strip():
@@ -94,6 +175,13 @@ def request_answer(r) -> str:
     """처리된 요청의 답 요약. 응답 구조를 알 수 없으면 outcome 만 쓴다(답을 지어내지 않는다)."""
     if r.status != "answered":
         return r.outcome or "닫힘"
+    if r.kind == "elicitation":
+        action = r.response.get("action") if isinstance(r.response, dict) else None
+        if action == "accept":
+            ti = r.tool_input if isinstance(r.tool_input, dict) else {}
+            got = elicitation_summary(r.response.get("content"), elicitation_fields(ti.get("schema"), ti.get("propertyOrder")))
+            return "보냄" + (": " + got if got else "")
+        return {"decline": "거절함", "cancel": "닫음"}.get(action, r.outcome or "처리함")
     out = r.response.get("hookSpecificOutput") if isinstance(r.response, dict) else None
     out = out if isinstance(out, dict) else {}
     if r.kind == "question":
@@ -239,7 +327,7 @@ class Request:
     def __init__(self, rid, session_id, kind, tool_name, tool_input, suggestions, key, created):
         self.rid = rid
         self.session_id = session_id
-        self.kind = kind  # "permission" | "question"
+        self.kind = kind  # "permission" | "question" | "elicitation"(MCP 서버가 묻는 값. tool_input 은 server·message·mode·schema·propertyOrder·url·elicitationId)
         self.tool_name = tool_name
         self.tool_input = tool_input
         self.suggestions = suggestions if isinstance(suggestions, list) else []
@@ -276,6 +364,11 @@ class Request:
             data["mcp"] = mcp
         if self.kind == "question" and isinstance(self.tool_input, dict):
             data["questions"] = self.tool_input.get("questions", [])
+        if self.kind == "elicitation" and isinstance(self.tool_input, dict):
+            ti = self.tool_input
+            data["elicitation"] = {"server": ti.get("server", ""), "message": ti.get("message", ""), "mode": ti.get("mode", ""),
+                                   "fields": elicitation_fields(ti.get("schema"), ti.get("propertyOrder")) or [] if ti.get("mode") == "form" else [],
+                                   "url": ti.get("url", "")}
         return data
 
 

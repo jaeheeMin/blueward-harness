@@ -659,7 +659,7 @@
     if (cfg.turn && turned) {
       var rid = fresh[0] || pend[0], k = rid && opts.reqKind ? opts.reqKind(rid) : '';
       out.push({ kind: 'turn', tag: 'bh-turn-' + next.id + (fresh.length ? '-' + fresh[0] : ''), title: '내 차례야 · ' + name,
-        body: fresh.length ? (k === 'question' ? '질문' : k === 'permission' ? '승인' : '답할 일') : '다음 단계', path: rid ? '/r/' + encodeURIComponent(rid) : '/s/' + encodeURIComponent(next.id) });
+        body: fresh.length ? ((k === 'question' || k === 'elicitation') ? '질문' : k === 'permission' ? '승인' : '답할 일') : '다음 단계', path: rid ? '/r/' + encodeURIComponent(rid) : '/s/' + encodeURIComponent(next.id) });
     }
     var nb = next.lastBlock, pb = prev.lastBlock;
     if (cfg.blocked && nb && nb.t != null && (!pb || nb.t > pb.t)) {

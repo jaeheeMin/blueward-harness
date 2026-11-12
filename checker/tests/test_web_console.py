@@ -1100,6 +1100,154 @@ def test_plan_control_request_is_bridged_with_input_unchanged_and_mode_follows_s
     assert proc.written[1]["response"]["response"] == {"behavior": "deny", "message": "범위를 줄여 줘"}
 
 
+ELICIT_SCHEMA = {"type": "object", "properties": {
+    "color": {"type": "string", "title": "색", "enum": ["red", "blue"], "enumNames": ["빨강", "파랑"]},
+    "size": {"type": "integer", "title": "팀 인원", "minimum": 1, "maximum": 50},
+    "note": {"type": "string", "title": "메모", "minLength": 2, "maxLength": 10},
+    "ok": {"type": "boolean", "title": "동의"},
+    "tags": {"type": "array", "title": "태그", "items": {"type": "string", "enum": ["a", "b", "c"]}},
+    "ratio": {"type": "number", "title": "비율", "minimum": 0, "maximum": 1}},
+    "required": ["color"]}
+
+
+def elicit_form_event(rid="e1", message="좋아하는 색을 알려 줘", schema=None, **extra):
+    req = {"subtype": "elicitation", "mcp_server_name": "asksrv", "message": message, "mode": "form",
+           "requested_schema": schema or ELICIT_SCHEMA, "property_order": ["color", "size", "note", "ok", "tags", "ratio"]}
+    req.update(extra)
+    return {"type": "control_request", "request_id": rid, "request": req}
+
+
+def elicit_url_event(rid="u1", url="https://example.com/login"):
+    return {"type": "control_request", "request_id": rid, "request": {"subtype": "elicitation", "mcp_server_name": "asksrv", "message": "로그인해 줘",
+                                                                        "mode": "url", "url": url, "elicitation_id": "el-1"}}
+
+
+def elicit_setup(c):
+    proc = FakeProc()
+    c.app.store.ensure("s1", str(c.work))["managed"] = True
+    return proc
+
+
+def test_elicitation_form_accept_passes_values_through_as_claude_shape(mconsole):
+    """#885: control_request(subtype elicitation, form)는 거부가 아니라 요청 카드가 되고, 사용자가 보낸 값이 {"action":"accept","content":…} 로 그대로 돌아간다."""
+    c = mconsole
+    proc = elicit_setup(c)
+    c.app.manager.on_event(proc, elicit_form_event())
+    (req,) = c.app.store.pending_for("s1")
+    assert proc.written == [] and req.kind == "elicitation" and "asksrv" in req.tool_name  # 답할 때까지 답하지 않는다
+    status, detail, _ = c.call("GET", f"/api/requests/{req.rid}")
+    info = detail["elicitation"]
+    assert detail["kind"] == "elicitation" and info["server"] == "asksrv" and info["mode"] == "form" and info["message"] == "좋아하는 색을 알려 줘"
+    assert [f["key"] for f in info["fields"]] == ["color", "size", "note", "ok", "tags", "ratio"]  # property_order 순서
+    assert info["fields"][0]["options"] == [{"value": "red", "label": "빨강"}, {"value": "blue", "label": "파랑"}] and info["fields"][0]["required"] is True
+    assert c.app.store.get("s1")["chat"][-1]["title"].startswith("연결 도구(asksrv)가 묻는 것: 좋아하는 색을 알려 줘")
+    content = {"color": "blue", "size": 4, "note": "메모해", "ok": False, "tags": ["a", "c"], "ratio": 0.5}
+    assert c.call("POST", f"/api/requests/{req.rid}/answer", {"action": "accept", "content": content})[0] == 200
+    wait_for(lambda: proc.written)
+    assert proc.written == [{"type": "control_response", "response": {"subtype": "success", "request_id": "e1", "response": {"action": "accept", "content": content}}}]
+    assert c.app.store.get("s1")["chat"][-1]["answer"] == "보냄: 색=파랑, 팀 인원=4, 메모=메모해, 동의=아니오, 태그=a, c, 비율=0.5"  # 키 대신 칸 제목, 값 대신 보기 이름(558 지적)
+    assert c.call("POST", f"/api/requests/{req.rid}/answer", {"action": "decline"})[0] == 409  # 이미 처리됨
+
+
+def test_elicitation_decline_and_cancel_and_session_close_reply_cancel(mconsole):
+    c = mconsole
+    proc = elicit_setup(c)
+    c.app.manager.on_event(proc, elicit_form_event("e1"))
+    (req,) = c.app.store.pending_for("s1")
+    assert c.call("POST", f"/api/requests/{req.rid}/answer", {"action": "decline"})[0] == 200
+    wait_for(lambda: len(proc.written) == 1)
+    assert proc.written[0]["response"]["response"] == {"action": "decline"} and c.app.store.get("s1")["chat"][-1]["answer"] == "거절함"
+    c.app.manager.on_event(proc, elicit_form_event("e2"))
+    (req,) = c.app.store.pending_for("s1")
+    assert c.call("POST", f"/api/requests/{req.rid}/answer", {"action": "cancel"})[0] == 200
+    wait_for(lambda: len(proc.written) == 2)
+    assert proc.written[1]["response"]["response"] == {"action": "cancel"} and c.app.store.get("s1")["chat"][-1]["answer"] == "닫음"
+    c.app.manager.on_event(proc, elicit_form_event("e3"))
+    c.app.store.close_session("s1", "세션이 끝나서 닫힘")  # 요청이 닫히면 cancel 로 답한다(지어낸 값을 보내지 않는다)
+    wait_for(lambda: len(proc.written) == 3)
+    assert proc.written[2]["response"]["response"] == {"action": "cancel"} and proc.written[2]["response"]["request_id"] == "e3"
+
+
+def test_elicitation_url_accept_has_no_content_even_if_sent(mconsole):
+    c = mconsole
+    proc = elicit_setup(c)
+    c.app.manager.on_event(proc, elicit_url_event())
+    (req,) = c.app.store.pending_for("s1")
+    info = c.call("GET", f"/api/requests/{req.rid}")[1]["elicitation"]
+    assert info["mode"] == "url" and info["url"] == "https://example.com/login" and info["fields"] == []
+    assert c.call("POST", f"/api/requests/{req.rid}/answer", {"action": "accept", "content": {"x": 1}})[0] == 200
+    wait_for(lambda: proc.written)
+    assert proc.written[0]["response"]["response"] == {"action": "accept"}  # content 키가 없다
+
+
+def test_elicitation_answer_validation_rejects_bad_values_with_400(mconsole):
+    c = mconsole
+    proc = elicit_setup(c)
+    c.app.manager.on_event(proc, elicit_form_event())
+    (req,) = c.app.store.pending_for("s1")
+    url = f"/api/requests/{req.rid}/answer"
+    bad = [{"action": "later"}, {"action": "accept"}, {"action": "accept", "content": []},
+           {"action": "accept", "content": {}},  # 필수 칸 없음
+           {"action": "accept", "content": {"color": ""}}, {"action": "accept", "content": {"color": "green"}},  # enum 밖
+           {"action": "accept", "content": {"color": "red", "extra": 1}},  # schema 에 없는 키
+           {"action": "accept", "content": {"color": "red", "size": 0}}, {"action": "accept", "content": {"color": "red", "size": 51}},
+           {"action": "accept", "content": {"color": "red", "size": 2.5}}, {"action": "accept", "content": {"color": "red", "size": "3"}},
+           {"action": "accept", "content": {"color": "red", "size": True}},
+           {"action": "accept", "content": {"color": "red", "note": "가"}}, {"action": "accept", "content": {"color": "red", "note": "가" * 11}},
+           {"action": "accept", "content": {"color": "red", "ok": "yes"}},
+           {"action": "accept", "content": {"color": "red", "tags": ["z"]}}, {"action": "accept", "content": {"color": "red", "tags": ["a", "a"]}},
+           {"action": "accept", "content": {"color": "red", "tags": "a"}},
+           {"action": "accept", "content": {"color": "red", "ratio": 1.5}}]
+    for body in bad:
+        status, resp, _ = c.call("POST", url, body)
+        assert status == 400, body
+    assert req.status == "pending" and proc.written == []  # 거부한 답은 요청을 닫지 않는다
+    assert c.call("POST", url, {"action": "accept", "content": {"color": "red", "size": 3.0}})[0] == 200  # 3.0 은 정수로 받는다
+    wait_for(lambda: proc.written)
+    assert proc.written[0]["response"]["response"] == {"action": "accept", "content": {"color": "red", "size": 3}}
+
+
+def test_two_different_elicitations_are_not_merged(mconsole):
+    c = mconsole
+    proc = elicit_setup(c)
+    c.app.manager.on_event(proc, elicit_form_event("e1"))
+    c.app.manager.on_event(proc, elicit_form_event("e2"))  # 같은 서버·같은 글이어도 요청마다 따로
+    c.app.manager.on_event(proc, elicit_url_event("u1"))
+    reqs = c.app.store.pending_for("s1")
+    assert len(reqs) == 3 and len({r.rid for r in reqs}) == 3
+    assert c.call("POST", f"/api/requests/{reqs[1].rid}/answer", {"action": "accept", "content": {"color": "red"}})[0] == 200
+    wait_for(lambda: proc.written)
+    assert [w["response"]["request_id"] for w in proc.written] == ["e2"] and len(c.app.store.pending_for("s1")) == 2
+
+
+def test_elicitation_with_unknown_mode_or_shape_is_cancelled_and_logged(mconsole):
+    c = mconsole
+    proc = elicit_setup(c)
+    c.app.manager.on_event(proc, elicit_form_event("e1", mode="wizard"))
+    c.app.manager.on_event(proc, elicit_form_event("e2", schema={"type": "object", "properties": {"x": {"type": "object"}}}))  # 중첩은 지원하지 않는다
+    c.app.manager.on_event(proc, elicit_form_event("e3", requested_schema="nope"))
+    c.app.manager.on_event(proc, elicit_url_event("e4", url=""))
+    assert [w["response"]["request_id"] for w in proc.written] == ["e1", "e2", "e3", "e4"]
+    assert all(w["response"]["response"] == {"action": "cancel"} for w in proc.written)
+    assert c.app.store.pending_for("s1") == []  # 카드로 띄우지 않는다
+    logs = " ".join(x["text"] for x in c.app.store.get("s1")["log"])
+    assert "MCP 질문을 닫음" in logs and "wizard" in logs
+    # 알 수 없는 subtype 은 지금처럼 거부
+    c.app.manager.on_event(proc, control_event(subtype="something_else"))
+    assert proc.written[-1]["response"]["response"]["behavior"] == "deny"
+
+
+def test_elicitation_over_pending_limit_is_cancelled(mconsole, monkeypatch):
+    c = mconsole
+    proc = elicit_setup(c)
+    monkeypatch.setattr(store_mod, "MAX_PENDING_REQUESTS", 1)
+    c.app.manager.on_event(proc, elicit_form_event("e1"))
+    c.app.manager.on_event(proc, elicit_form_event("e2"))
+    assert len(c.app.store.pending_for("s1")) == 1
+    assert [w["response"]["request_id"] for w in proc.written] == ["e2"] and proc.written[0]["response"]["response"] == {"action": "cancel"}
+    assert "너무 많아" in c.app.store.get("s1")["log"][-1]["text"]
+
+
 def test_start_route_launches_session_with_first_message(mconsole):
     c = mconsole
     (c.work / "a.md").write_text("x")
