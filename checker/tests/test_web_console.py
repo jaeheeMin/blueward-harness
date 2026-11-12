@@ -6902,6 +6902,86 @@ def test_managed_bridge_auto_allows_safe_and_marks_irreversible(tmp_path):
     wait_for(lambda: len(proc.written) == 2)
 
 
+def test_risk_plan_file_is_safe_only_with_plan_dir_and_only_direct_md(tmp_path):
+    """#878: 계획 모드의 계획 파일(<설정 폴더>/plans/*.md)만 safe. plan_dir 를 안 주면(계획 모드가 아니면) 그대로 작업 폴더 밖 쓰기다."""
+    work, conf = tmp_path / "work", tmp_path / "conf"
+    work.mkdir(); (conf / "plans").mkdir(parents=True)
+    plan_dir = risk_mod.plan_dir_of(conf)
+    assert plan_dir == str(conf / "plans") and risk_mod.plan_dir_of("") == ""
+    w = lambda p, pd=plan_dir, tool="Write": risk_mod.classify(tool, {"file_path": str(p)}, str(work), plan_dir=pd)  # noqa: E731
+    assert w(conf / "plans" / "wise-fox.md") == ("safe", "계획 모드에서 계획 파일을 쓸 뿐이야")
+    assert w(conf / "plans" / "WISE.MD")[0] == "safe" and w(conf / "plans" / "a.md", tool="Edit")[0] == "safe"
+    for bad in (conf / "plans" / "sub" / "a.md",   # 하위 폴더
+                conf / "plans" / "a.py",           # 계획 파일 모양이 아니다
+                conf / "plans",                    # 폴더 자체
+                conf / "plans" / ".." / "settings.json",
+                conf / "projects" / "p" / "memory" / "m.md",
+                tmp_path / "evil" / "plans" / "a.md"):   # 글자만 같은 다른 곳
+        assert w(bad)[0] == "irreversible", (bad, w(bad))
+    assert w(conf / "plans" / "a.md", pd="")[0] == "irreversible"  # 계획 모드가 아니면 묻는다
+    for name in ("CLAUDE.md", "agents.md", "Claude.MD"):  # 지시 파일 이름은 계획 파일이어도 묻는다(#909 리뷰)
+        assert w(conf / "plans" / name)[0] != "safe", name
+
+
+def _dir_link(link, target):
+    """디렉터리 링크. Windows 는 관리자 없이 되는 Junction(mklink /J), 그 밖은 심볼릭 링크. 못 만들면 skip."""
+    import subprocess
+    if os.name == "nt":
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True)
+        if r.returncode != 0:
+            pytest.skip("Junction 을 만들 수 없는 환경")
+    else:
+        try:
+            os.symlink(target, link, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("심볼릭 링크를 만들 수 없는 환경")
+
+
+def test_risk_plan_dir_link_is_allowed_only_to_another_plans_outside_work(tmp_path):
+    """#909 리뷰: plans 가 링크면 그 대상으로 계획 파일을 본다(Orca 프로필은 ~/.claude/plans 로 링크). 다만 작업 폴더나
+    plans 가 아닌 곳을 가리키는 링크로 작업 폴더의 CLAUDE.md 등을 계획 파일인 척 쓰지 못한다."""
+    work, conf, home_plans = tmp_path / "work", tmp_path / "conf", tmp_path / "home" / ".claude" / "plans"
+    work.mkdir(); conf.mkdir(); home_plans.mkdir(parents=True)
+    _dir_link(conf / "plans", home_plans)  # 정상: 다른 설정 폴더의 plans 로 가는 링크
+    w = lambda p, pd: risk_mod.classify("Write", {"file_path": str(p)}, str(work), plan_dir=pd)  # noqa: E731
+    assert w(conf / "plans" / "wise-fox.md", str(conf / "plans"))[0] == "safe"
+    bad = tmp_path / "conf2"
+    bad.mkdir()
+    _dir_link(bad / "plans", work)  # 공격: plans → 작업 폴더
+    for name in ("CLAUDE.md", "AGENTS.md"):
+        assert w(bad / "plans" / name, str(bad / "plans"))[0] != "safe", name
+    # 보통 파일은 링크를 따라가면 작업 폴더 안이라 원래 규칙(작업 폴더 안 고치기)으로 허용될 뿐, 계획 파일로 보지 않는다
+    assert w(bad / "plans" / "notes.md", str(bad / "plans")) == ("safe", "작업 폴더 안 파일을 고쳐")
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    bad3 = tmp_path / "conf3"
+    bad3.mkdir()
+    _dir_link(bad3 / "plans", other)  # plans 가 아닌 곳으로 가는 링크
+    assert w(bad3 / "plans" / "a.md", str(bad3 / "plans"))[0] != "safe"
+
+
+def test_managed_bridge_auto_allows_plan_file_only_in_plan_mode(tmp_path):
+    """#878: 계획 모드 세션이 계획 파일을 쓰면 승인 카드 없이 허용, 계획 확인(ExitPlanMode)은 그대로 묻는다. 모드가 풀리면 다시 묻는다."""
+    conf = tmp_path / "conf"
+    (conf / "projects" / "p").mkdir(parents=True); (conf / "plans").mkdir()
+    store = Store(None)
+    proc = FakeProc()
+    m = managed.Manager(store, lambda: None, "/p")
+    hooks = Hooks(store, poll=0.02)
+    m.auto_allowed, m.risk_of = hooks.auto_allowed, hooks.risk_of
+    s = store.ensure("s1", str(tmp_path / "work"))
+    s.update(managed=True, permissionMode="plan", transcriptPath=str(conf / "projects" / "p" / "s1.jsonl"))
+    plan = {"file_path": str(conf / "plans" / "wise-fox.md"), "content": "# 계획"}
+    m.on_event(proc, {"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "Write", "input": plan}})
+    assert proc.written[0]["response"]["response"] == {"behavior": "allow", "updatedInput": plan} and store.pending_for("s1") == []
+    assert any("자동 허용" in x["text"] and "계획 파일" in x["text"] for x in s["log"])
+    m.on_event(proc, {"type": "control_request", "request_id": "r2", "request": {"subtype": "can_use_tool", "tool_name": "ExitPlanMode", "input": {"plan": "x"}}})
+    assert len(store.pending_for("s1")) == 1 and len(proc.written) == 1  # 계획 확인 카드는 하나 뜬다
+    s["permissionMode"] = "default"
+    m.on_event(proc, {"type": "control_request", "request_id": "r3", "request": {"subtype": "can_use_tool", "tool_name": "Write", "input": plan}})
+    assert len(store.pending_for("s1")) == 2 and len(proc.written) == 1  # 계획 모드가 아니면 작업 폴더 밖 쓰기라 묻는다
+
+
 def test_managed_bridge_without_hooks_wired_still_asks(tmp_path):
     store = Store(None)
     proc = FakeProc()

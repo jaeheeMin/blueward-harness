@@ -4,6 +4,8 @@
   "webfetch_blocked_suffixes": [".local", ".localhost", ".internal", ".lan", ".home.arpa", ".corp", ".intranet"],
   "path_tools": ["Read", "Glob", "Grep", "LS", "NotebookRead"],
   "edit_tools": ["Edit", "Write", "MultiEdit", "NotebookEdit"],
+  "plan_dir_name": "plans",
+  "plan_file_suffixes": [".md"],
   "protected_dir_names": [".git", ".claude", ".githooks", ".husky", ".vscode"],
   "protected_dir_pairs": [[".github", "workflows"]],
   "protected_file_names": [".mcp.json", "hooks.json", "claude.md", "agents.md", "conftest.py", ".envrc", "package.json", "pyproject.toml", "setup.cfg", "tox.ini", "pytest.ini", ".pre-commit-config.yaml", "makefile", "sitecustomize.py", "usercustomize.py", ".npmrc", ".pypirc", ".gitattributes", ".gitconfig"],

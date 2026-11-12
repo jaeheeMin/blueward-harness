@@ -8,7 +8,8 @@ from typing import Callable
 
 import context_usage
 import flows
-from risk import IRREVERSIBLE, SAFE, classify
+import session_alive
+from risk import IRREVERSIBLE, SAFE, classify, plan_dir_of
 from store import (CHECK_DONE, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
                    TITLE_PROMPT, TITLE_SESSION, chat_clean, mark_check, prompt_title, remember_touched)
 
@@ -142,7 +143,9 @@ class Hooks:
         level = self.ask_level()
         if level not in ASK_LEVELS:
             level = "all"  # 모르는 값이면 가장 엄격하게
-        verdict, why = classify(tool, tool_input, s.get("cwd") or "")
+        # 계획 모드면 그 세션의 설정 폴더 plans/ 의 계획 파일 쓰기를 묻지 않는다(#878). 설정 폴더는 대화 기록 경로로, 없으면 CLAUDE_CONFIG_DIR·~/.claude
+        plan_dir = plan_dir_of(session_alive.config_dir(str(s.get("transcriptPath") or ""))) if s.get("permissionMode") == "plan" else ""
+        verdict, why = classify(tool, tool_input, s.get("cwd") or "", plan_dir=plan_dir)
         if verdict == IRREVERSIBLE:
             return "ask", IRREVERSIBLE, why
         if verdict == SAFE and level != "all" and not (level == "edits" and tool in EDIT_TOOLS):

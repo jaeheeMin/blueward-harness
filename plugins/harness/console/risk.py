@@ -587,7 +587,35 @@ def _classify_mcp(name: str, cwd: str):
     return UNKNOWN, f"{tool} 는 목록에 없어"
 
 
-def classify(tool_name, tool_input, cwd) -> tuple[str, str]:
+def plan_dir_of(config_dir) -> str:
+    """설정 폴더 아래 계획 파일 폴더(safe_tools.json 의 plan_dir_name). 이름이 비면 "" (계획 파일을 safe 로 보지 않는다)."""
+    name = RULES.get("plan_dir_name")
+    return os.path.join(str(config_dir), name) if isinstance(name, str) and name and config_dir else ""
+
+
+def _is_plan_file(real_path: str, plan_dir: str, cwd: str = "") -> bool:
+    """계획 모드의 계획 파일: <설정 폴더>/plans/ 바로 아래의 .md 파일 하나(#878). 하위 폴더·다른 확장자는 아니다.
+    real_path 는 realpath 로 푼 경로를 넘긴다. plans 폴더가 링크여도 된다(Orca 프로필은 ~/.claude/plans 로 링크한다).
+    다만 링크로 다른 곳을 계획 폴더처럼 쓰지 못하게, 링크가 가리키는 폴더도 이름이 plans 여야 하고 작업 폴더 안이면 안 되며,
+    훅·설정·지시 파일 이름(보호 경로)은 계획 파일로 보지 않는다(#909 리뷰: plans → 작업 폴더 Junction 으로 CLAUDE.md 쓰기)."""
+    try:
+        root = os.path.realpath(plan_dir)
+        if os.path.normcase(os.path.basename(root.rstrip("\\/"))) != os.path.normcase(os.path.basename(os.path.abspath(plan_dir).rstrip("\\/"))):
+            return False
+        if cwd and platform_compat.is_within(root, os.path.realpath(cwd)):
+            return False
+        if not platform_compat.is_within(real_path, root):
+            return False
+        parts = [p for p in re.split(r"[\\/]", os.path.relpath(real_path, root)) if p]
+    except (OSError, ValueError):
+        return False
+    if len(parts) != 1 or parts[0] in (".", "..") or _protected(parts[0]):
+        return False
+    return any(parts[0].lower().endswith(s) for s in _names("plan_file_suffixes"))
+
+
+def classify(tool_name, tool_input, cwd, plan_dir: str = "") -> tuple[str, str]:
+    """plan_dir 는 계획 모드인 세션에서만 넘긴다(<설정 폴더>/plans). 그 폴더 바로 아래 계획 파일 쓰기만 safe 로 본다."""
     name = tool_name if isinstance(tool_name, str) else ""
     cwd = cwd if isinstance(cwd, str) else ""
     if name.startswith("mcp__"):
@@ -607,6 +635,8 @@ def classify(tool_name, tool_input, cwd) -> tuple[str, str]:
         real = os.path.realpath(full)
         if _is_scratchpad(real):
             return SAFE, "Claude 의 임시 폴더에 쓸 뿐이야"
+        if plan_dir and _is_plan_file(real, plan_dir, cwd):
+            return SAFE, "계획 모드에서 계획 파일을 쓸 뿐이야"
         if not platform_compat.is_within(full, cwd):
             return IRREVERSIBLE, "작업 폴더 밖 파일을 쓰려 해"
         if _protected(os.path.relpath(real, os.path.realpath(cwd))):
