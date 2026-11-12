@@ -604,6 +604,12 @@ def _is_plan_file(real_path: str, plan_dir: str, cwd: str = "") -> bool:
             return False
         if cwd and platform_compat.is_within(root, os.path.realpath(cwd)):
             return False
+        # 링크 대상도 설정 폴더 안의 plans 여야 한다(#911): 부모가 원래 설정 폴더(링크가 아닌 경우)이거나 이름이 .claude 인 폴더.
+        # 다른 저장소의 plans 로 미리 링크해 두고 그 안 .md 를 계획 파일인 척 쓰지 못하게 한다. Orca 프로필(<conf>/plans → ~/.claude/plans)은 그대로 된다
+        parent = os.path.dirname(root.rstrip("\\/"))
+        config_real = os.path.realpath(os.path.dirname(os.path.abspath(plan_dir).rstrip("\\/")))
+        if os.path.normcase(parent) != os.path.normcase(config_real) and os.path.normcase(os.path.basename(parent)) != os.path.normcase(".claude"):
+            return False
         if not platform_compat.is_within(real_path, root):
             return False
         parts = [p for p in re.split(r"[\\/]", os.path.relpath(real_path, root)) if p]

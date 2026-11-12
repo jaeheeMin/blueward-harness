@@ -6980,6 +6980,18 @@ def test_risk_plan_dir_link_is_allowed_only_to_another_plans_outside_work(tmp_pa
     bad3.mkdir()
     _dir_link(bad3 / "plans", other)  # plans 가 아닌 곳으로 가는 링크
     assert w(bad3 / "plans" / "a.md", str(bad3 / "plans"))[0] != "safe"
+    # #911: 작업 폴더 밖 다른 저장소의 plans/ 로 가는 링크도 계획 폴더로 보지 않는다(부모가 설정 폴더도 .claude 도 아님)
+    repo_plans = tmp_path / "other-repo" / "plans"
+    repo_plans.mkdir(parents=True)
+    bad4 = tmp_path / "conf4"
+    bad4.mkdir()
+    _dir_link(bad4 / "plans", repo_plans)
+    for name in ("notes.md", "wise-fox.md"):
+        assert w(bad4 / "plans" / name, str(bad4 / "plans"))[0] != "safe", name
+    # 링크가 아닌 plans 는 설정 폴더 이름이 무엇이든(예: Orca 프로필 home) 그대로 된다
+    plain = tmp_path / "profile" / "home"
+    (plain / "plans").mkdir(parents=True)
+    assert w(plain / "plans" / "a.md", str(plain / "plans"))[0] == "safe"
 
 
 def test_managed_bridge_auto_allows_plan_file_only_in_plan_mode(tmp_path):
