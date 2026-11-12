@@ -1559,6 +1559,133 @@ def test_리베이스_충돌이_나면_되돌리고_보고한다(tmp_path):
     assert after_head == before_head
 
 
+# --- 이미 올린 브랜치는 origin/main 을 합쳐 받는다(#914) -----------------------
+#
+# upstream 이 있는 브랜치는 upstream 으로 맞춘 뒤 origin/main 이 앞서 있으면 merge 로 합친다.
+# 리베이스가 아니라 merge 이므로 올린 이력이 바뀌지 않아, 다음 푸시에 --force-with-lease 가 필요 없다.
+
+
+def _rev(repo: Path, ref: str) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", ref], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    done = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant], cwd=repo
+    )
+    return done.returncode == 0
+
+
+def _setup_pushed_feature(tmp_path: Path) -> tuple[Path, Path]:
+    """main 과 upstream 이 있는 feature/1-thing 을 둔 (seed, work) 를 만든다. 둘 다 init 에서 출발."""
+    origin = tmp_path / "origin.git"
+    _init_bare_origin(origin)
+    seed = tmp_path / "seed"
+    _clone(origin, seed)
+    (seed / "README.md").write_text("v1\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "init")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:feature/1-thing"], cwd=seed, check=True)
+
+    work = tmp_path / "work"
+    _clone(origin, work)
+    subprocess.run(
+        ["git", "switch", "-q", "-c", "feature/1-thing", "origin/feature/1-thing"],
+        cwd=work,
+        check=True,
+    )
+    return seed, work
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_upstream_있는_브랜치는_origin_main_을_합쳐_받는다(tmp_path):
+    seed, work = _setup_pushed_feature(tmp_path)
+    # 로컬 커밋을 올려 두고(upstream 과 같은 상태), main 만 앞서가게 한다.
+    (work / "feature.txt").write_text("mine\n", encoding="utf-8", newline="\n")
+    _commit_all(work, "feat: local feature file")
+    subprocess.run(["git", "push", "-q", "origin", "feature/1-thing"], cwd=work, check=True)
+    (seed / "main.txt").write_text("from main\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "feat: second commit on main")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+    pushed_tip = _rev(work, "HEAD")
+
+    out = _run_session_start_sync(work)
+
+    assert "origin/main 의 새 변경을 합쳐 받았습니다" in out
+    assert _is_ancestor(work, "origin/main", "HEAD")
+    # 올린 이력은 그대로(원격 브랜치가 HEAD 의 조상) — 다음 푸시가 fast-forward 다.
+    assert _rev(work, "origin/feature/1-thing") == pushed_tip
+    assert _is_ancestor(work, "origin/feature/1-thing", "HEAD")
+    assert (work / "main.txt").exists()
+    assert (work / "feature.txt").exists()
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_origin_main_합치다_충돌이_나면_되돌리고_충돌_파일을_알린다(tmp_path):
+    seed, work = _setup_pushed_feature(tmp_path)
+    (work / "README.md").write_text("LOCAL\n", encoding="utf-8", newline="\n")
+    _commit_all(work, "feat: change readme locally")
+    subprocess.run(["git", "push", "-q", "origin", "feature/1-thing"], cwd=work, check=True)
+    (seed / "README.md").write_text("MAIN\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "feat: change readme on main")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+    before_head = _rev(work, "HEAD")
+
+    out = _run_session_start_sync(work)
+
+    assert "합치다 충돌해 원래 상태로 되돌렸습니다" in out
+    assert "README.md" in out
+    assert "/harness:sync" in out
+    git_dir = subprocess.run(
+        ["git", "rev-parse", "--git-dir"], cwd=work, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert not (work / git_dir / "MERGE_HEAD").exists()
+    assert _rev(work, "HEAD") == before_head
+    assert (work / "README.md").read_text(encoding="utf-8") == "LOCAL\n"
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_main_브랜치에서는_origin_main_을_합치지_않는다(tmp_path):
+    seed, work = _setup_pushed_feature(tmp_path)
+    subprocess.run(["git", "switch", "-q", "main"], cwd=work, check=True)
+    (seed / "main.txt").write_text("from main\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "feat: second commit on main")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+
+    out = _run_session_start_sync(work)
+
+    # main 은 upstream(origin/main) 기준으로 맞출 뿐 merge 커밋을 만들지 않는다.
+    assert "합쳐 받았습니다" not in out
+    assert "origin/main 기준으로 최신 상태로 맞췄습니다" in out
+    merges = subprocess.run(
+        ["git", "rev-list", "--merges", "HEAD"], cwd=work, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert merges == ""
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_upstream_없는_브랜치는_main_이_앞서도_합치지_않고_리베이스한다(tmp_path):
+    seed, work = _setup_pushed_feature(tmp_path)
+    subprocess.run(["git", "switch", "-q", "-c", "local-only"], cwd=work, check=True)
+    (work / "local.txt").write_text("mine\n", encoding="utf-8", newline="\n")
+    _commit_all(work, "feat: local only commit")
+    (seed / "main.txt").write_text("from main\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "feat: second commit on main")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+
+    out = _run_session_start_sync(work)
+
+    assert "원격 짝 브랜치가 없어 origin/main 기준으로 맞췄습니다" in out
+    assert "합쳐 받았습니다" not in out
+    merges = subprocess.run(
+        ["git", "rev-list", "--merges", "HEAD"], cwd=work, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert merges == ""
+    assert _is_ancestor(work, "origin/main", "HEAD")
+
+
 # --- 미커밋 판정에서 인계 메모 제외(#59) ------------------------------------
 #
 # /harness:deliver 는 .superpowers/ 와 *handoff*.md 를 스테이징에서 뺀다. 두

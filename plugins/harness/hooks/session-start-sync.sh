@@ -365,6 +365,32 @@ run_rebase() {
   return 0
 }
 
+# 원격에 이미 올린 브랜치(upstream 이 있는 브랜치)가 origin/main 보다 뒤처졌으면 origin/main 을
+# 합쳐 받는다(#914). 리베이스가 아니라 merge 인 이유: 올린 브랜치의 이력을 바꾸지 않아
+# 다음 /harness:deliver 가 --force-with-lease 없이 평범한 푸시로 올라간다. 항상 0 을 돌려준다.
+run_merge() {
+  local target="$1"
+  local merge_output merge_files
+  if merge_output="$(git merge --no-edit -m "chore: main 의 새 변경 합쳐 받기" "$target" 2>&1)"; then
+    add "$target 의 새 변경을 합쳐 받았습니다(이미 올린 브랜치라 리베이스하지 않고 합쳤습니다)."
+    return 0
+  fi
+  # 합치다 멈췄으면 되돌린다. 충돌 상태로 남기면 그다음에 무엇을 해도 막힌다.
+  if [ -f "$git_dir/MERGE_HEAD" ]; then
+    merge_files="$(git diff --name-only --diff-filter=U 2>/dev/null | head -n 10 | paste -sd, - | sed 's/,/, /g')"
+    if git merge --abort >/dev/null 2>&1; then
+      add "$target 을 합치다 충돌해 원래 상태로 되돌렸습니다. 충돌 파일: ${merge_files:-확인하지 못했습니다}. 다음: /harness:sync 로 상황을 확인하십시오."
+    else
+      add "$target 을 합치다 충돌했고 되돌리기(git merge --abort)도 실패했습니다. 충돌 파일: ${merge_files:-확인하지 못했습니다}. 저장소가 병합 진행 중 상태로 남아 있습니다. 다음: git status 로 상태를 확인하고 git merge --abort 를 직접 실행하십시오(어려우면 사람에게 도움을 요청)."
+    fi
+  else
+    local merge_err
+    merge_err="$(printf '%s\n' "$merge_output" | head -n1)"
+    add "$target 합치기에 실패했습니다: ${merge_err:-원인을 알 수 없습니다}. /harness:sync 로 상황을 직접 확인하십시오."
+  fi
+  return 0
+}
+
 if [ "$branch" = "main" ]; then
   add "main 에서는 커밋할 수 없습니다. 작업을 시작하려면 /harness:start 를 실행하십시오."
 fi
@@ -409,10 +435,29 @@ elif git remote get-url origin >/dev/null 2>&1; then
       add "커밋되지 않은 변경이 있어 자동 동기화(리베이스)를 건너뛰었습니다. /harness:sync 로 당겨받으십시오."
     elif [ -n "$upstream" ]; then
       behind="$(git rev-list --count "HEAD..$upstream" 2>/dev/null || echo 0)"
+      up_ok=1
       if [ "$behind" = "0" ]; then
-        add "이미 최신 상태입니다($upstream 기준)."
+        up_msg="이미 최신 상태입니다($upstream 기준)."
       else
+        up_msg=""
+        # run_rebase 는 항상 0 이므로 실패 여부는 리베이스가 남긴 진행 상태가 아니라 HEAD 로 본다.
+        before_up_head="$(git rev-parse HEAD 2>/dev/null || true)"
         run_rebase "$upstream" "$upstream 기준으로 최신 상태로 맞췄습니다."
+        if [ "$(git rev-parse HEAD 2>/dev/null || true)" = "$before_up_head" ]; then
+          up_ok=0
+        fi
+      fi
+      # upstream 이 있는 브랜치는 origin/main 도 합쳐 받는다. main 자신이거나 upstream 리베이스가
+      # 실패했으면 하지 않는다.
+      main_behind=0
+      if [ "$up_ok" = "1" ] && [ "$branch" != "main" ] && git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+        main_behind="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+      fi
+      if [ "$main_behind" != "0" ]; then
+        [ -n "$up_msg" ] && add "$up_msg"
+        run_merge origin/main
+      elif [ "$up_ok" = "1" ] && [ "$behind" = "0" ]; then
+        add "$up_msg"
       fi
     elif git rev-parse --verify -q origin/main >/dev/null 2>&1; then
       behind="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
