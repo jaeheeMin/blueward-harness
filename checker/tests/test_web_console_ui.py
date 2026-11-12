@@ -1336,6 +1336,19 @@ def test_chat_screen_falls_back_to_report_for_sessions_without_chat(tmp_path):
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
+def test_in_progress_session_step_bar_ends_with_upcoming_next_flow(tmp_path):
+    """#858 시안 G-09: 올릴 차례(진행 중)인 세션의 순서 알약 끝에 서버가 미리 계산한 다음 갈래(upcomingFlow). 모르거나 없으면 알약을 만들지 않는다."""
+    up = {"options": [{"flow": "spec", "name": "개발 Spec", "label": "개발 Spec 만들기", "value": "개발", "count": 2, "ids": ["REQ-001", "REQ-002"]}], "hint": ""}
+    base = dict(turnSkill="deliver", status="idle")
+    got = _smoke(tmp_path, "s/s1", [_session("s1", upcomingFlow=up, **base)])
+    assert "<ol.stepbar.big>" in got["dump"] and "→ 다음: 개발 Spec" in got["text"] and "<li.step.next>" in got["dump"]
+    unknown = _smoke(tmp_path, "s/s1", [_session("s1", upcomingFlow={"options": [], "hint": "", "unknown": "SRS 를 읽지 못해"}, **base)])
+    assert "→ 다음" not in unknown["text"] and "<ol.stepbar.big>" in unknown["dump"]  # 모르면 지어내지 않는다
+    old = _smoke(tmp_path, "s/s1", [_session("s1", **base)])  # 옛 서버 응답엔 upcomingFlow 가 없다
+    assert "→ 다음" not in old["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
 def test_work_screen_finished_session_shows_handoff_card(tmp_path):
     nxt = {"options": [{"flow": "spec", "label": "개발 Spec 만들기", "value": "개발", "count": 1, "ids": ["REQ-001"]}, {"flow": None, "label": "권한 양식", "disabled": True}], "hint": "", "unknown": ""}
     steps = [dict(s, state="done") for s in _STEPS]

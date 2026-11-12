@@ -4685,6 +4685,28 @@ def test_public_fields_keeps_saved_values_when_the_definition_is_gone():
     assert shown["flowName"] == "없어진 갈래" and shown["flowSteps"][0]["name"] == state["steps"][0]["name"]
 
 
+def test_in_progress_srs_flow_previews_next_flow_from_srs(tmp_path, monkeypatch):
+    """#858: 진행 중(올릴 차례)에도 SRS 의 다음 단계 열로 다음 갈래를 미리 알려 준다(upcomingFlow). 끝난 갈래의 nextFlow 와 같은 계산이고,
+    SRS 를 못 읽으면 지어내지 않고 unknown 사유를 둔다. 판정마다 파일을 읽지 않게 30초에 한 번만 다시 읽는다."""
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        m = drive_srs_to_deliver(c, "s1")
+        assert m["flowFinished"] is False and m["nextFlow"] is None
+        assert m["upcomingFlow"]["options"] == [] and "읽지 못해" in m["upcomingFlow"]["unknown"]  # SRS 가 아직 없다
+        (c.work / "docs" / "ssot").mkdir(parents=True)
+        (c.work / "docs" / "ssot" / "SRS.md").write_text(SRS_TABLE, encoding="utf-8")
+        m = c.call("POST", "/api/sessions/s1/flow/refresh", {})[1]
+        assert m["upcomingFlow"]["options"] == []  # 30초 안에는 다시 읽지 않는다
+        with c.app.store.lock:
+            c.app.store.get("s1")["flowState"]["upcomingAt"] = 0
+        m = c.call("POST", "/api/sessions/s1/flow/refresh", {})[1]
+        opts = {o["value"]: o for o in m["upcomingFlow"]["options"]}
+        assert opts["개발"]["flow"] == "spec" and opts["개발"]["name"] == "개발 Spec" and opts["개발"]["ids"] == ["REQ-001", "REQ-002"]
+        assert m["nextFlow"] is None and m["flowFinished"] is False  # 미리보기일 뿐, 갈래가 끝난 것이 아니다
+    finally:
+        c.close()
+
+
 def test_srs_next_flow_cannot_be_decided_without_a_readable_srs(tmp_path):
     data, _ = flows.load(FLOWS_FILE)
     srs = flows.flow_def(data, "srs")

@@ -55,6 +55,7 @@ HEARTBEAT = 10.0
 FILES_CACHE_SECONDS = 3.0  # 세션 산출물 목록(?cache=1)을 이만큼 기억한다. git 을 여러 번 실행해 느리다(#793)
 CACHE_SECONDS = 60.0 # 승인자 판정과 승인 대기 PR 목록은 gh 를 자주 부르지 않게 이만큼 기억한다
 MAX_ADVANCE_ROUNDS = 4  # 갈래 진행 판정에서 증거를 읽고 다시 판정하는 최대 횟수(증거 종류가 둘뿐이라 넉넉하다)
+UPCOMING_REFRESH = 30.0  # 진행 중 세션의 다음 갈래(upcoming)를 SRS 에서 다시 읽는 간격(초, #858). 판정마다 파일을 읽지 않게
 COND_YES, COND_NO, COND_UNKNOWN = "yes", "no", "unknown"
 LOADING_REASON = "GitHub 에서 읽는 중이야."
 HIDDEN_SKILLS = {"update", "scaffold", "open"}
@@ -482,6 +483,15 @@ class App:
         if state["finished"] and state.get("next") is None:
             flow = flows.flow_def(self.flow_data, state["id"])
             state["next"] = flows.compute_next(self.flow_data, flow, gitstate.repo_root(self.run, cwd) or cwd) if flow else None
+        elif not state["finished"]:
+            # 진행 중에도 다음 갈래를 미리 알려 준다(#858, 시안 G-09 "→ 개발 Spec"). 같은 계산(SRS 의 다음 단계 열)이고, 모르면 unknown 사유가 남는다.
+            # 갈래가 끝나면 next 를 새로 계산하므로 여기 값은 미리보기일 뿐이다
+            now = self.clock()
+            if now - float(state.get("upcomingAt") or 0) >= UPCOMING_REFRESH:
+                flow = flows.flow_def(self.flow_data, state["id"])
+                upcoming = flows.compute_next(self.flow_data, flow, gitstate.repo_root(self.run, cwd) or cwd) if flow else None
+                with self.store.lock:
+                    state["upcoming"], state["upcomingAt"] = upcoming, now
 
     def read_evidence(self, s: dict, kind: str, info: dict | None) -> dict:
         state = s["flowState"]
