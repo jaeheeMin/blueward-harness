@@ -427,6 +427,19 @@ def _run_auto(capsys, *paths: Path) -> tuple[int, dict]:
     return code, json.loads(capsys.readouterr().out)
 
 
+def test_스캐폴딩한_Spec_관할은_md_만_잡고_캡처_그림은_뺀다(tmp_path: Path):
+    from checker.engine import resolve
+    from checker.loader import load
+
+    scaffold(tmp_path, "고객사", "프로젝트", False)
+    types = load(tmp_path / "rules")  # 관할 겹침도 여기서 확인된다
+
+    spec = resolve("docs/spec/DEV-001-x.md", types)
+    assert spec is not None
+    assert spec.jurisdiction == "docs/spec/*.md"
+    assert resolve("docs/spec/img/화면1_v0.1.png", types) is None
+
+
 def test_스캐폴딩한_구조를_검사기가_그대로_읽는다(tmp_path: Path, capsys):
     scaffold(tmp_path, "고객사", "프로젝트", False)
     srs = tmp_path / "docs" / "ssot" / "SRS.md"
