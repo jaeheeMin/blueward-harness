@@ -6,7 +6,7 @@
 
 ## 바꾼 것
 
-- `console/risk.py` `_is_plan_file`: 링크 대상(`realpath(plans)`)의 부모가 원래 설정 폴더(링크가 아닌 경우의 그 폴더)이거나 이름이 `.claude` 인 폴더일 때만 계획 폴더로 본다. Orca 프로필(`<프로필 home>/plans` → `~/.claude/plans`)은 부모가 `.claude` 라 그대로 되고, 링크가 아닌 plans 는 설정 폴더 이름(예: Orca 의 `home`)과 상관없이 된다.
+- `console/risk.py` `_is_plan_file`: 링크 대상(`realpath(plans)`)의 부모가 원래 설정 폴더(링크가 아닌 경우의 그 폴더)이거나 실제 설정 폴더(`CLAUDE_CONFIG_DIR`·`~/.claude` 의 realpath, 순수 함수라 `hooks_api` 가 `config_roots` 로 넘긴다)일 때만 계획 폴더로 본다. 처음엔 부모 이름이 `.claude` 인지만 봤는데 #919 리뷰에서 다른 저장소의 `.claude/plans` 로 링크하면 통과한다고 해 실제 위치 비교로 좁혔다(옛 코드 safe → 새 코드 묻기, Junction 으로 확인). Orca 프로필(`<프로필 home>/plans` → `~/.claude/plans`)은 부모가 실제 `~/.claude` 라 그대로 되고, 링크가 아닌 plans 는 설정 폴더 이름(예: Orca 의 `home`)과 상관없이 된다.
 - 시험 `test_risk_plan_dir_link_is_allowed_only_to_another_plans_outside_work` 에 다른 저장소 plans 로 가는 링크(`notes.md`·`wise-fox.md` 안 safe)와 링크 아닌 `profile/home/plans`(safe) 를 더함. 고치기 전 코드로 실패 확인.
 - 이 PC 의 실제 링크된 plans 에서 `x-plan.md` 가 그대로 safe 인 것 확인.
 - `docs/design/web-console.md`, 길잡이 레일 판. whats_new 는 팀원이 몰라도 되는 보안 조임이라 적지 않음. 0.10.271 은 #914 예약.

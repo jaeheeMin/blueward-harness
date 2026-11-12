@@ -593,7 +593,7 @@ def plan_dir_of(config_dir) -> str:
     return os.path.join(str(config_dir), name) if isinstance(name, str) and name and config_dir else ""
 
 
-def _is_plan_file(real_path: str, plan_dir: str, cwd: str = "") -> bool:
+def _is_plan_file(real_path: str, plan_dir: str, cwd: str = "", config_roots=()) -> bool:
     """계획 모드의 계획 파일: <설정 폴더>/plans/ 바로 아래의 .md 파일 하나(#878). 하위 폴더·다른 확장자는 아니다.
     real_path 는 realpath 로 푼 경로를 넘긴다. plans 폴더가 링크여도 된다(Orca 프로필은 ~/.claude/plans 로 링크한다).
     다만 링크로 다른 곳을 계획 폴더처럼 쓰지 못하게, 링크가 가리키는 폴더도 이름이 plans 여야 하고 작업 폴더 안이면 안 되며,
@@ -604,11 +604,13 @@ def _is_plan_file(real_path: str, plan_dir: str, cwd: str = "") -> bool:
             return False
         if cwd and platform_compat.is_within(root, os.path.realpath(cwd)):
             return False
-        # 링크 대상도 설정 폴더 안의 plans 여야 한다(#911): 부모가 원래 설정 폴더(링크가 아닌 경우)이거나 이름이 .claude 인 폴더.
-        # 다른 저장소의 plans 로 미리 링크해 두고 그 안 .md 를 계획 파일인 척 쓰지 못하게 한다. Orca 프로필(<conf>/plans → ~/.claude/plans)은 그대로 된다
-        parent = os.path.dirname(root.rstrip("\\/"))
-        config_real = os.path.realpath(os.path.dirname(os.path.abspath(plan_dir).rstrip("\\/")))
-        if os.path.normcase(parent) != os.path.normcase(config_real) and os.path.normcase(os.path.basename(parent)) != os.path.normcase(".claude"):
+        # 링크 대상도 설정 폴더 바로 아래의 plans 여야 한다(#911): 부모가 원래 설정 폴더(링크가 아닌 경우)이거나, 호출한 쪽이 넘긴
+        # 실제 설정 폴더(CLAUDE_CONFIG_DIR·~/.claude 의 realpath) 중 하나. 폴더 이름(.claude)만 보지 않는다 — 다른 저장소의 .claude/plans 로
+        # 미리 링크해 두고 그 안 .md 를 계획 파일인 척 쓰지 못하게(#919 리뷰). Orca 프로필(<conf>/plans → ~/.claude/plans)은 그대로 된다
+        parent = os.path.normcase(os.path.dirname(root.rstrip("\\/")))
+        allowed = {os.path.normcase(os.path.realpath(os.path.dirname(os.path.abspath(plan_dir).rstrip("\\/"))))}
+        allowed |= {os.path.normcase(os.path.realpath(str(c))) for c in config_roots if c}
+        if parent not in allowed:
             return False
         if not platform_compat.is_within(real_path, root):
             return False
@@ -620,8 +622,9 @@ def _is_plan_file(real_path: str, plan_dir: str, cwd: str = "") -> bool:
     return any(parts[0].lower().endswith(s) for s in _names("plan_file_suffixes"))
 
 
-def classify(tool_name, tool_input, cwd, plan_dir: str = "") -> tuple[str, str]:
-    """plan_dir 는 계획 모드인 세션에서만 넘긴다(<설정 폴더>/plans). 그 폴더 바로 아래 계획 파일 쓰기만 safe 로 본다."""
+def classify(tool_name, tool_input, cwd, plan_dir: str = "", config_roots=()) -> tuple[str, str]:
+    """plan_dir 는 계획 모드인 세션에서만 넘긴다(<설정 폴더>/plans). 그 폴더 바로 아래 계획 파일 쓰기만 safe 로 본다.
+    config_roots 는 plans 가 링크일 때 받아 줄 실제 설정 폴더들(CLAUDE_CONFIG_DIR·~/.claude). 순수 함수라 환경은 호출한 쪽이 읽는다."""
     name = tool_name if isinstance(tool_name, str) else ""
     cwd = cwd if isinstance(cwd, str) else ""
     if name.startswith("mcp__"):
@@ -641,7 +644,7 @@ def classify(tool_name, tool_input, cwd, plan_dir: str = "") -> tuple[str, str]:
         real = os.path.realpath(full)
         if _is_scratchpad(real):
             return SAFE, "Claude 의 임시 폴더에 쓸 뿐이야"
-        if plan_dir and _is_plan_file(real, plan_dir, cwd):
+        if plan_dir and _is_plan_file(real, plan_dir, cwd, config_roots):
             return SAFE, "계획 모드에서 계획 파일을 쓸 뿐이야"
         if not platform_compat.is_within(full, cwd):
             return IRREVERSIBLE, "작업 폴더 밖 파일을 쓰려 해"
