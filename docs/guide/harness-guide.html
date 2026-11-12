@@ -1397,7 +1397,7 @@ fix/31-broken-link</pre>
   <header class="panel-head">
     <div class="eyebrow">개발 · 기타 작업 열기 · /harness:sync</div>
     <h2>최신으로 맞추기</h2>
-    <p class="lead">다른 사람이 main 에 올린 걸 받아서, 내 브랜치를 그 위로 옮겨 놓아. 커밋이나 푸시는 하지 않아.</p>
+    <p class="lead">다른 사람이 main 에 올린 걸 받아서 내 브랜치에 맞춰 줘. 아직 안 올린 브랜치는 main 위로 옮겨 놓고, 이미 올린 브랜치는 main 의 새 내용을 합쳐 받아. 커밋이나 푸시는 하지 않아.</p>
   </header>
 
   <div class="when">
@@ -1406,7 +1406,8 @@ fix/31-broken-link</pre>
   </div>
 
   <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
-    <p>내가 작업대에서 일하는 동안 진열대(main)에 새 물건이 올라왔어. 내 작업을 잠깐 들어 올려서, 새 진열대 상태를 깔고, 그 위에 내 작업을 다시 올려놓는 거야(rebase).</p>
+    <p>내가 작업대에서 일하는 동안 진열대(main)에 새 물건이 올라왔어. 아직 아무한테도 안 보여 준 작업이면, 내 작업을 잠깐 들어 올려서 새 진열대 상태를 깔고 그 위에 다시 올려놓아(rebase).</p>
+    <p>이미 동료한테 보여 준(원격에 올린) 작업이면 들어 올리지 않아. 이미 나간 이력을 바꾸면 다음에 올릴 때 덮어쓰기가 필요해지거든. 대신 진열대의 새 물건을 내 작업대 옆에 그냥 합쳐 놓아(merge). 이력은 그대로고, 다음에 올릴 땐 평범하게 올라가.</p>
   </div></div>
 
   <section class="diagram">
@@ -1414,7 +1415,7 @@ fix/31-broken-link</pre>
       <div class="node"><b>확인</b><span>다른 작업이 진행 중이면 멈춤</span></div><div class="arrow"></div>
       <div class="node"><b>받아 오기</b><span>git fetch</span></div><div class="arrow"></div>
       <div class="node hl"><b>저장 안 한 변경?</b><span>있으면 멈추고 물어봄</span></div><div class="arrow"></div>
-      <div class="node hl"><b>옮겨 놓기</b><span>git rebase</span></div><div class="arrow"></div>
+      <div class="node hl"><b>맞추기</b><span>안 올린 브랜치는 git rebase, 올린 브랜치는 원격 브랜치에 rebase 한 뒤 main 을 git merge</span></div><div class="arrow"></div>
       <div class="node ok"><b>보고</b><span>새로 받은 커밋 · 플러그인 버전</span></div>
     </div>
   </section>
@@ -1422,10 +1423,10 @@ fix/31-broken-link</pre>
   <div class="cols">
     <section class="box">
       <h3>저장 안 한 변경이 있으면</h3>
-      <p class="small" style="margin-bottom:10px">셋 중 하나를 골라.</p>
+      <p class="small" style="margin-bottom:10px">셋 중 하나를 골라. 이미 올린 브랜치에서 main 을 합쳐야 할 땐 둘째는 없고 첫째와 셋째만 있어(임시 커밋 위에 합친 기록이 생기면 임시 커밋만 풀 수 없어서).</p>
       <ol class="steps">
         <li><div><b>먼저 올리기</b> — <code>/harness:deliver</code> 로 커밋·푸시부터</div></li>
-        <li><div><b>잠깐 묶어 두고 맞추기</b> — 임시 커밋 → 맞추기 → 다시 풀어 놓기 (main 에선 안 됨)</div></li>
+        <li><div><b>잠깐 묶어 두고 맞추기</b> — 임시 커밋 → 맞추기 → 다시 풀어 놓기 (main 에선 안 되고, main 을 합쳐야 할 땐 안 돼)</div></li>
         <li><div><b>취소</b></div></li>
       </ol>
     </section>
@@ -1440,7 +1441,7 @@ fix/31-broken-link</pre>
   </div>
 
   <div class="callouts">
-    <div class="callout warn"><span class="k">충돌</span><div>맞추다 충돌이 나면 되돌려 놓고(rebase --abort) 어느 파일이 부딪혔는지 보고해. 어떻게 풀지는 내가 정해.</div></div>
+    <div class="callout warn"><span class="k">충돌</span><div>맞추거나 합치다 충돌이 나면 되돌려 놓고(rebase --abort, merge --abort) 어느 파일이 부딪혔는지 보고해. 어떻게 풀지는 내가 정해.</div></div>
     <div class="callout ok"><span class="k">덤</span><div>마지막에 플러그인 버전 셋(지금 세션 / 내려받은 것 / 최신)을 비교해서 <code>/reload-plugins</code> 가 필요한지 알려 줘.</div></div>
   </div>
 
@@ -2308,7 +2309,7 @@ Closes #143</pre>
       <tr><td>문서 버전 크게 올리기</td><td>보통은 0.1 씩 올리고, 크게 바뀌면 얼마나 올릴지 물어</td><td><span class="pill">약속</span></td></tr>
       <tr><td>고객사 양식으로 산출</td><td>어떤 양식으로 할지, 나올 파일명이 맞는지 확인받아</td><td><span class="pill">약속</span></td></tr>
       <tr><td>진행 원장 등록</td><td><code>/harness:start</code> 때 개발 건으로 올릴지 물어</td><td><span class="pill">약속</span></td></tr>
-      <tr><td>올리기 전 정리 안 된 변경</td><td><code>/harness:sync</code> 가 멈추고 올릴지, 임시 커밋할지, 그만둘지 물어</td><td><span class="pill">약속</span></td></tr>
+      <tr><td>올리기 전 정리 안 된 변경</td><td><code>/harness:sync</code> 가 멈추고 올릴지, 임시 커밋할지, 그만둘지 물어(이미 올린 브랜치에서 main 을 합쳐야 할 땐 임시 커밋 없이 올릴지·그만둘지만 물어)</td><td><span class="pill">약속</span></td></tr>
       <tr><td>리베이스 충돌</td><td>혼자 풀지 않아. 멈추고 알린 뒤 새 브랜치(<code>-v2</code>)로 옮길지 물어</td><td><span class="pill">약속</span></td></tr>
       <tr><td>못 끝낸 일을 이슈로</td><td><code>/harness:wrapup</code> 이 초안을 보여 주고, 내가 고른 것만 등록해</td><td><span class="pill">약속</span></td></tr>
       <tr><td>릴리즈 내기</td><td>릴리즈 노트를 보여 주고 승인받은 뒤에 발행해</td><td><span class="pill">약속</span></td></tr>
