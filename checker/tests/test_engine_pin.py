@@ -120,6 +120,23 @@ def test_스킬이_main_엔진_주소를_쓰지_않고_engine_spec_을_부른다
     assert "hooks/engine_spec.py" in text
 
 
+def test_훅과_스킬은_엔진을_콘솔_스크립트_exe_가_아니라_python_m_으로_부른다():
+    # #908 — uv 가 만드는 콘솔 스크립트(doc-guard.exe)는 서명이 없어 Smart App Control 이
+    # 켜진 Windows 에서 막힌다. 엔진은 늘 `uvx --from <engine> python -P -m checker.xxx` 로 부른다.
+    import re
+
+    # py 훅의 리스트("uvx", "--from", ...)·셸 한 줄·SKILL.md 의 `\` 줄잇기 모양을 모두 잡는다.
+    pattern = re.compile(r'uvx"?,?[ \t]+"?--from"?,?[ \t]+\S+?,?(?:[ \t]+\\\n)?\s+"?([A-Za-z0-9_.-]+)')
+    calls, bad = 0, []
+    for p in list(HOOKS.glob("*.py")) + list(HOOKS.glob("*.sh")) + list((PLUGIN_ROOT / "skills").rglob("SKILL.md")):
+        for m in pattern.finditer(p.read_text(encoding="utf-8")):
+            calls += 1
+            if m.group(1) != "python":
+                bad.append(f"{p.relative_to(ROOT)}: {m.group(0)}")
+    assert calls >= 20  # 정규식이 줄잇기 모양을 놓쳐 0 건으로 통과하지 않게
+    assert bad == []
+
+
 def test_저장소_어디에도_엔진을_main_으로_받는_주소가_없다():
     hits = []
     for base in (PLUGIN_ROOT, ROOT / ".github", ROOT / "checker", ROOT / "scripts"):

@@ -506,8 +506,13 @@ def _main() -> None:
         #
         # 엔진 자체는 이 저장소에 있지 않고 uvx 로 GitHub 에서 받는다. 처음 받을 때는
         # 네트워크가 필요하고 시간이 걸리지만, uv 캐시에 남아 이후로는 빠르다.
+        #
+        # 콘솔 스크립트 `doc-guard` 대신 `python -P -m checker.cli` 로 부른다(#908). uv 가 PC
+        # 마다 만드는 `doc-guard.exe` 는 서명이 없어 Smart App Control 이 켜진 Windows 에서
+        # 차단된다. 다른 훅·스킬의 엔진 호출과 같은 모양이고, cli 의 `__main__` 이 같은
+        # main() 을 부른다.
         cmd = [
-            "uvx", "--from", engine_spec(), "doc-guard",
+            "uvx", "--from", engine_spec(), "python", "-P", "-m", "checker.cli",
             "--rules", str(standards_root / "rules"),
             "--root", tmp,
             str(staged),
