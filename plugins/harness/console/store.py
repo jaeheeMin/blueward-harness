@@ -135,17 +135,22 @@ def elicitation_fields(schema, order=None) -> list[dict] | None:
     return fields
 
 
-def elicitation_summary(content) -> str:
-    """보낸 값 요약. 이름=값 을 이어 붙인다."""
+def elicitation_summary(content, fields=None) -> str:
+    """보낸 값 요약. 칸 제목=값 을 이어 붙인다. fields(elicitation_fields 결과)가 있으면 키 대신 칸 제목, 보기 값 대신 보기 이름을 쓴다."""
     if not isinstance(content, dict) or not content:
         return ""
+    by_key = {f["key"]: f for f in fields or []}
     parts = []
     for k, v in content.items():
+        f = by_key.get(k) or {}
+        labels = {o["value"]: o["label"] for o in f.get("options") or []}
         if isinstance(v, bool):
             v = "예" if v else "아니오"
         elif isinstance(v, list):
-            v = ", ".join(str(x) for x in v)
-        parts.append(f"{k}={' '.join(str(v).split())}")
+            v = ", ".join(str(labels.get(x, x)) for x in v)
+        elif isinstance(v, str):
+            v = labels.get(v, v)
+        parts.append(f"{f.get('title') or k}={' '.join(str(v).split())}")
     return ", ".join(parts)[:300]
 
 
@@ -173,7 +178,8 @@ def request_answer(r) -> str:
     if r.kind == "elicitation":
         action = r.response.get("action") if isinstance(r.response, dict) else None
         if action == "accept":
-            got = elicitation_summary(r.response.get("content"))
+            ti = r.tool_input if isinstance(r.tool_input, dict) else {}
+            got = elicitation_summary(r.response.get("content"), elicitation_fields(ti.get("schema"), ti.get("propertyOrder")))
             return "보냄" + (": " + got if got else "")
         return {"decline": "거절함", "cancel": "닫음"}.get(action, r.outcome or "처리함")
     out = r.response.get("hookSpecificOutput") if isinstance(r.response, dict) else None

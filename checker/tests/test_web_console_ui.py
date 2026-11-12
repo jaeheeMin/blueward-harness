@@ -2439,6 +2439,31 @@ def test_elicitation_form_draws_fields_and_send_needs_required(tmp_path):
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
+def test_elicitation_defaults_prefill_only_matching_values(tmp_path):
+    """#885 558 지적: schema 의 default 를 처음 값으로 채운다. 보기에 없거나 타입이 다른 default 는 버린다."""
+    fields = [dict(_ELICIT_FIELDS[0], default="blue"), dict(_ELICIT_FIELDS[1], default=7), dict(_ELICIT_FIELDS[2], default="a@b.kr"),
+              dict(_ELICIT_FIELDS[3], default=True)]
+    form = dict(_ELICIT_FORM, elicitation=dict(_ELICIT_FORM["elicitation"], fields=fields))
+    sess = [_session("s1", pendingRequestIds=["e1"])]
+    sent = _smoke(tmp_path, "r/e1", sess, [form], extra={"POST /api/requests/e1/answer": {}}, actions=[{"click": "[data-elicit-send]"}])
+    assert sent["posts"] == [["POST", "/api/requests/e1/answer", '{"action":"accept","content":{"color":"blue","size":7,"note":"a@b.kr","ok":true}}']]
+    bad = [dict(_ELICIT_FIELDS[0], default="green"), dict(_ELICIT_FIELDS[1], default="7"), dict(_ELICIT_FIELDS[2], default=3), dict(_ELICIT_FIELDS[3], default="yes")]
+    form2 = dict(_ELICIT_FORM, elicitation=dict(_ELICIT_FORM["elicitation"], fields=bad))
+    got = _smoke(tmp_path, "r/e1", sess, [form2])
+    assert "보내기" in got["disabledButtons"] and "아직 채우지 못한 항목이 1개 있어." in got["text"]  # 꼭 채울 색이 비어 있다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_elicitation_url_shows_open_button(tmp_path):
+    """#885 558 지적: url 모드 주소는 글자로 보이고, 누를 곳은 [주소 열기] 단추(pill)다. 열 수 없는 주소엔 단추가 없다."""
+    sess = [_session("s1", pendingRequestIds=["e2"])]
+    shown = _smoke(tmp_path, "r/e2", sess, [_elicit_url("https://example.com/login")])
+    assert "<a.pill.line>" in shown["dump"] and "주소 열기" in shown["text"] and "https://example.com/login" in shown["text"]
+    bad = _smoke(tmp_path, "r/e2", sess, [_elicit_url("javascript:alert(1)")])
+    assert "주소 열기" not in bad["text"] and bad["links"] == [l for l in bad["links"] if l[0] != "javascript:alert(1)"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
 def test_elicitation_form_posts_values_and_decline_cancel(tmp_path):
     sess = [_session("s1", pendingRequestIds=["e1"])]
     route = {"POST /api/requests/e1/answer": {}}

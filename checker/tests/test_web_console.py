@@ -1145,7 +1145,7 @@ def test_elicitation_form_accept_passes_values_through_as_claude_shape(mconsole)
     assert c.call("POST", f"/api/requests/{req.rid}/answer", {"action": "accept", "content": content})[0] == 200
     wait_for(lambda: proc.written)
     assert proc.written == [{"type": "control_response", "response": {"subtype": "success", "request_id": "e1", "response": {"action": "accept", "content": content}}}]
-    assert c.app.store.get("s1")["chat"][-1]["answer"].startswith("보냄: color=blue")
+    assert c.app.store.get("s1")["chat"][-1]["answer"] == "보냄: 색=파랑, 팀 인원=4, 메모=메모해, 동의=아니오, 태그=a, c, 비율=0.5"  # 키 대신 칸 제목, 값 대신 보기 이름(558 지적)
     assert c.call("POST", f"/api/requests/{req.rid}/answer", {"action": "decline"})[0] == 409  # 이미 처리됨
 
 

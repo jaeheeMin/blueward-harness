@@ -1892,9 +1892,22 @@
   function elicitCard(rid, redraw, done) {
     var r = requests.get(rid), info = r && r.elicitation;
     if (!info) return null;
-    var st = elicitSt[rid] || (elicitSt[rid] = { vals: {}, busy: false, err: '' });
     var fields = Array.isArray(info.fields) ? info.fields : [], isUrl = info.mode === 'url';
     function isNum(f) { return f.type === 'number' || f.type === 'integer'; }
+    // schema 의 default 는 맞는 모양일 때만 처음 값으로 채운다(보기에 없는 값·타입이 다른 값은 버린다)
+    function defaultOf(f) {
+      var d = f.default, vals = (f.options || []).map(function (o) { return o.value; });
+      if (f.type === 'boolean') return typeof d === 'boolean' ? d : undefined;
+      if (f.type === 'enum') return vals.indexOf(d) >= 0 ? d : undefined;
+      if (f.type === 'multi') return Array.isArray(d) && d.every(function (x) { return vals.indexOf(x) >= 0; }) ? d.slice() : undefined;
+      if (isNum(f)) return typeof d === 'number' && isFinite(d) ? String(d) : undefined;
+      return typeof d === 'string' ? d : undefined;
+    }
+    var st = elicitSt[rid];
+    if (!st) {
+      st = elicitSt[rid] = { vals: {}, busy: false, err: '' };
+      fields.forEach(function (f) { var d = defaultOf(f); if (d !== undefined) st.vals[f.key] = d; });
+    }
     function blank(v) { return v == null || String(v).trim() === ''; }
     function filled(f) {
       var v = st.vals[f.key];
@@ -1921,9 +1934,11 @@
       h('b', { id: 'el-' + rid, text: info.message || '값을 알려 달라고 해' }));
     if (isUrl) {
       var href = safeHttpUrl(info.url);
-      top.appendChild(href ? h('a', { class: 'sub', href: href, target: '_blank', rel: 'noopener noreferrer', 'data-elicit-url': '1', text: href })
-        : h('span', { class: 'sub', 'data-elicit-url': '1', text: String(info.url || '') }));
-      top.appendChild(href ? h('span', { class: 'sub', text: '주소를 열어 마친 다음 [다 했어]를 눌러 줘.' }) : h('span', { class: 'note-attn', role: 'alert', text: '열 수 없는 주소야' }));
+      // 주소는 글자로 보이고, 누를 곳은 [주소 열기] 단추로 따로 둔다(회색 글자 링크는 누를 수 있는지 안 보여서, 558 지적)
+      top.appendChild(h('span', { class: 'sub mono', 'data-elicit-url': '1', text: href || String(info.url || '') }));
+      top.appendChild(href ? h('div', { class: 'acts' }, h('a', { class: 'pill line', href: href, target: '_blank', rel: 'noopener noreferrer', 'data-elicit-open': '1', text: '주소 열기' }))
+        : h('span', { class: 'note-attn', role: 'alert', text: '열 수 없는 주소야' }));
+      if (href) top.appendChild(h('span', { class: 'sub', text: '주소를 열어 마친 다음 [다 했어]를 눌러 줘.' }));
     }
     var cards = fields.map(function (f, i) {
       var id = 'ef-' + rid + '-' + i, v = st.vals[f.key];

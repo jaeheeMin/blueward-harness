@@ -69,4 +69,10 @@ url 모드 요청(l4_url:18):
 - 거절: 대화 답 "거절함", MCP 서버는 `{"action":"decline"}`.
 - 시험 뒤 남은 claude·MCP 프로세스 없음.
 - 전체 시험(리베이스 뒤): `test_web_console.py` 1118 passed·4 skipped, `test_web_console_ui.py` 126 passed.
+
+558 점검 뒤 고친 것(PR #926 댓글의 막지 않는 지적 3개)
+- url 모드 주소: 회색 글자 링크 대신 주소는 글자(`.sub.mono`)로, 누를 곳은 [주소 열기] 단추(`a.pill.line`, http/https 만).
+- 대화에 남는 답 요약: schema 키 대신 칸 제목, 보기 값 대신 보기 이름("보냄: 색=파랑, 팀 인원=4, …").
+- schema `default` 를 처음 값으로 채움. 보기에 없거나 타입이 다른 default 는 버린다.
+- 시험 2개 추가·1개 기대값 바꿈(고치기 전 코드에서 3개 모두 실패 확인). 전체 `test_web_console.py` 1118 passed·4 skipped, `test_web_console_ui.py` 128 passed.
 - 답을 오래 안 할 때 claude 쪽 시간 제한은 그대로 확인 못 함.
