@@ -246,6 +246,8 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 
 **끝난 뒤.** 갈래가 끝나면 세션의 `nextFlow {options[{flow, name, label, disabled, value?, count?, ids?}], hint, unknown?}` 에 다음 갈래를 넣는다. "새 세션으로 시작하십시오." 힌트와 함께 내려보내고, 사람이 고르면 `POST .../flow/next` 가 자동 인계와 새 세션 띄우기를 한다(§7c).
 
+**진행 중 미리보기(#858).** 갈래가 끝나기 전에도 같은 계산(`compute_next`)을 `upcomingFlow` 로 내보낸다(끝나면 `null`, 그때는 `nextFlow`). 판정마다 SRS 를 읽지 않게 30초(`UPCOMING_REFRESH`)에 한 번만 다시 읽는다. 화면은 순서 알약이 보이는 때(올릴 차례, 시안 G-09) 끝에 `→ 다음: <갈래>` 알약을 붙인다. 고를 수 있는 다음 갈래가 없거나 SRS 를 못 읽으면(`unknown`) 알약을 만들지 않는다(지어내지 않는다). 미리보기일 뿐이라 이 값으로 갈래를 끝내거나 새 세션을 띄우지 않는다.
+
 ## 7b. 플러그인 다시 불러오기, 만든 문서 보기, 같은 폴더
 
 **플러그인 다시 불러오기** (`POST /api/sessions/:id/reload`, 콘솔이 띄운 세션만). stdin 에 `control_request{subtype:"reload_plugins"}` 를 보내 `control_response.response.plugins[{name,path,source,version}]`·`error_count` 를 받는다(claude 2.1.316 실측, 모델 비용 없음). 거절당하거나 20초 안에 답이 없으면 user 메시지 `/reload-plugins` 로 대신하고(`method:"message"`, 합성 응답 `Reloaded: N plugins · M errors` 를 읽는다. 이 경우 판 목록은 알던 값 그대로) 둘 다 안 되면 502 다. 응답 `{ok, method("control"|"message"), plugins[{name,version}], errorCount, harnessVersion, message?}`. 터미널 세션과 끝난 세션은 409. 세션이 턴 진행 중이면(턴 실행 중이거나 띄우는 중) 끝날 때까지 기다렸다가 하고(최대 10분, 같은 세션은 한 번만 대기) 바로 `202 {queued:true}` 로 답한다. 결과는 세션 로그와 `pluginVersions` 에 남는다. `POST /api/reload-all` 은 살아 있는 콘솔 세션 전부에 같은 일을 하고 `{results:[{sessionId, title, ok, ...위 응답 또는 error / queued}]}` 를 돌려준다. 세션 필드 `pluginVersions[{name,version}]` 는 `system/init` 의 `plugins`(판이 없으면 알던 판을 지킨다)와 다시 불러오기 결과로 갱신한다.

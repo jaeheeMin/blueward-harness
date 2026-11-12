@@ -1337,8 +1337,9 @@
     }
     function paintStages(s) {
       var bar = s.flowId && (s.flowSteps || []).length && stagesShown(s) ? ui.stepBar(s, true) : null;
-      if (bar && s.flowFinished) {
-        var nx = window.BHLogic.nextOptions(s).options.filter(function (o) { return !o.disabled; })[0];
+      if (bar) {
+        // 끝난 갈래는 nextFlow, 진행 중(G-09 올릴 차례)은 서버가 SRS 를 읽어 미리 계산한 upcomingFlow(#858). 모르면 알약을 만들지 않는다
+        var nx = window.BHLogic.nextOptions({ nextFlow: s.flowFinished ? s.nextFlow : s.upcomingFlow }).options.filter(function (o) { return !o.disabled; })[0];
         if (nx) bar.appendChild(h('li', { class: 'step next' }, h('span', { class: 'snm', text: '→ 다음: ' + window.BHLogic.nextShort(nx.label) })));
       }
       regions.stages.replaceChildren.apply(regions.stages, bar ? [bar] : []);

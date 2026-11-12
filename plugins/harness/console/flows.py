@@ -351,7 +351,7 @@ def public_fields(s: dict, data: dict | None = None) -> dict:
     state = s.get("flowState")
     if not state:
         return {"flowId": None, "flowName": "", "flowReason": "", "stepIndex": 0, "flowSteps": [], "flowFinished": False,
-                "flowUnknown": [], "flowPr": None, "nextFlow": None}
+                "flowUnknown": [], "flowPr": None, "nextFlow": None, "upcomingFlow": None}
     keep = ("id", "name", "kind", "skill", "helperSkill", "hint", "short", "onlyIf", "state", "reason")
     flow = flow_def(data, state["id"]) if data else None
     current_steps = {x.get("id"): x for x in (flow or {}).get("steps", []) if isinstance(x, dict)}
@@ -368,7 +368,8 @@ def public_fields(s: dict, data: dict | None = None) -> dict:
     flow_name = flow.get("name", state["id"]) if flow else state["name"]
     return {"flowId": state["id"], "flowName": flow_name, "flowReason": state["reason"], "stepIndex": state["stepIndex"],
             "flowSteps": [view(st) for st in state["steps"]], "flowFinished": bool(state["finished"]),
-            "flowUnknown": list(state["unknown"]), "flowPr": state.get("pr"), "nextFlow": state.get("next")}
+            "flowUnknown": list(state["unknown"]), "flowPr": state.get("pr"), "nextFlow": state.get("next"),
+            "upcomingFlow": None if state["finished"] else state.get("upcoming")}
 
 
 # ---- 다음 갈래 ----
