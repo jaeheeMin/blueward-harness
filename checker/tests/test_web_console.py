@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import gc
 import http.client
 import json
 import os
@@ -16,6 +17,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import warnings
 from pathlib import Path
 
 import pytest
@@ -1599,12 +1601,16 @@ def test_open_reports_port_bind_failure_reason(tmp_path, monkeypatch):
     monkeypatch.setattr(console_open, "probe", lambda p: "free")  # 다른 프로그램이 점유 중이지만 우리 프로브는 못 본다고 가정
     try:
         why = console_open.ensure_server(port, wait=6)
+        left = list(console_open._launched)
     finally:
         sock.close()
         pid = tmp_path / "d" / "server.pid"
         if pid.exists():
             platform_compat.terminate_pid(int(pid.read_text().split()[0]))
+        console_open.reap_launched(5)
+        console_open._launched.clear()
     assert why and "원인:" in why
+    assert left == []  # 못 뜨고 끝난 서버 프로세스는 그 자리에서 거둔다(#836)
 
 
 def test_api_shutdown_rules(console):
@@ -1746,13 +1752,20 @@ def test_open_starts_detached_server_and_stop(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path / "data"))
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(PLUGIN))
     try:
-        assert console_open.probe(port) == "free"
-        assert console_open.ensure_server(port) is None
-        assert console_open.probe(port) == "ours"
-        assert (tmp_path / "data" / "server.pid").exists()
-        assert console_open.stop_server(port) == "웹 콘솔 서버를 껐습니다."
-        assert console_open.probe(port) == "free"
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            assert console_open.probe(port) == "free"
+            assert console_open.ensure_server(port) is None
+            assert len(console_open._launched) == 1  # 띄운 서버의 Popen 을 버리지 않고 들고 있다(#836)
+            assert console_open.probe(port) == "ours"
+            assert (tmp_path / "data" / "server.pid").exists()
+            assert console_open.stop_server(port) == "웹 콘솔 서버를 껐습니다."
+            assert console_open.probe(port) == "free"
+            assert console_open._launched == []  # 같은 프로세스에서 끄면 끝난 서버를 거둔다
+            gc.collect()
+        assert not [w for w in caught if issubclass(w.category, ResourceWarning) and "subprocess" in str(w.message)]  # #836
     finally:
+        console_open._launched.clear()
         pid = tmp_path / "data" / "server.pid"
         if pid.exists():
             platform_compat.terminate_pid(int(pid.read_text().split()[0]))
