@@ -614,7 +614,7 @@ const cases = {
   },
   standard_kind_hint_and_srs_status_cell() {
     // 숫자 띠·큰 순서 알약은 단계 이름 끝 괄호 설명을 뗀 짧은 이름(시안 G-09·12), 전체는 title
-    assert.strictEqual(L.shortStepName('표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어요)'), '표준 건 작업 시작하기');
+    assert.strictEqual(L.shortStepName('표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어)'), '표준 건 작업 시작하기');
     assert.strictEqual(L.shortStepName('SRS 쓰기'), 'SRS 쓰기');
     assert.strictEqual(L.shortStepName('(괄호만)'), '(괄호만)');  // 다 지워지면 원래 이름
     // step.short(workflow.json)가 있으면 그것, 없으면 괄호만 뗀 이름
@@ -623,9 +623,9 @@ const cases = {
     const shortStep = { flowId: 'srs', flowSteps: [{ name: 'SRS 쓰기', short: '쓰기', state: 'done' }, { name: '올리고 검토 요청하기', short: '올리기', state: 'now' }, { name: '승인받고 합쳐지기 기다리기', short: '승인·합치기', state: 'todo' }], stepIndex: 1 };
     const shortCell = L.sessionStrip(shortStep, undefined).find(c => c.id === 'step');
     if (shortCell && shortCell.value !== '확인 못 함') { assert.strictEqual(shortCell.value, '2 / 3 올리기'); assert.strictEqual(shortCell.title, '올리고 검토 요청하기'); }
-    const longStep = { flowId: 'standard', flowSteps: [{ name: '표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어요)', state: 'now' }, { name: '올리기', state: 'todo' }], stepIndex: 0 };
+    const longStep = { flowId: 'standard', flowSteps: [{ name: '표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어)', state: 'now' }, { name: '올리기', state: 'todo' }], stepIndex: 0 };
     const stepCell = L.sessionStrip(longStep, undefined).find(c => c.id === 'step');
-    if (stepCell && stepCell.value !== '확인 못 함') { assert.ok(!stepCell.value.includes('(')); assert.ok(stepCell.title.includes('자동으로 만들어요')); }
+    if (stepCell && stepCell.value !== '확인 못 함') { assert.ok(!stepCell.value.includes('(')); assert.ok(stepCell.title.includes('자동으로 만들어)')); }
     // 설정 수(setup)는 표준 건을 포함한다: 화면은 표준을 따로 세고 설정은 그만큼 뺀다(#718)
     const v = L.devReadyView({ state: 'yes', specReady: 1, setup: 3, standard: 2, needSpec: [], needSpecCount: 0 });
     assert.deepStrictEqual(L.kindHint('config', v), { tone: '', text: '설정 건 1개' });
