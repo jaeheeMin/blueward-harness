@@ -645,8 +645,8 @@ def _check_naming(tool: str, kind: str, name: str, cwd: object) -> None:
         f"MCP 도구: {tool}, {kind} 새 이름: {name}\n"
         f"사유: {result.get('message') or (done.stderr or '').strip()[:300] or '종료코드 ' + str(done.returncode)}\n"
         "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
-        f"다음: {NAMING_CONFIG} 을 고쳐야 하는 사유라면 그 파일을 관리하는 담당자에게 알리십시오"
-        "(🚨 직접 해 주세요). 그 밖이면 같은 작업을 한 번 더 시도하십시오."
+        f"다음: {NAMING_CONFIG} 을 고쳐야 하는 사유라면 🚨 직접 해 주세요: 이 Project Repository 의 "
+        f"{NAMING_CONFIG} 을 고칠 수 있는 담당자가 파일을 고칩니다. 그 밖이면 같은 작업을 한 번 더 시도하십시오."
     )
 
 
