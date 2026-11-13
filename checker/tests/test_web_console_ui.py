@@ -111,7 +111,7 @@ const cases = {
     const skill = L.nextAction(at(0, [{ id: 'a', name: 'A', kind: 'skill', skill: 'srs', state: 'pending' }]));
     assert.strictEqual(skill.type, 'skill'); assert.strictEqual(skill.skill, 'srs'); assert.strictEqual(skill.label, '/harness:srs 실행'); assert.strictEqual(skill.disabled, false);
     const work = L.nextAction(at(0, [{ id: 'a', name: 'A', kind: 'work', state: 'active' }]));
-    assert.strictEqual(work.type, 'done'); assert.strictEqual(work.label, '끝났어요'); assert.ok(!('skill' in work));
+    assert.strictEqual(work.type, 'done'); assert.strictEqual(work.label, '끝났어'); assert.ok(!('skill' in work));
     const human = L.nextAction(at(0, [{ id: 'a', name: 'A', kind: 'human', state: 'active', hint: '넣기' }]));
     assert.strictEqual(human.type, 'human'); assert.strictEqual(human.refreshLabel, '다시 확인'); assert.strictEqual(human.hint, '넣기');
     const wait = L.nextAction(at(0, [{ id: 'a', name: 'A', kind: 'wait', state: 'active', helperSkill: 'prs' }]));
@@ -156,7 +156,7 @@ const cases = {
     const no = L.projectNotice(cond('no', 'templates 가 없습니다.'));
     assert.strictEqual(no.state, 'no'); assert.ok(no.text.includes('프로젝트 준비 안 됨') && no.text.includes('templates 가 없습니다.'));
     const unk = L.projectNotice(cond('unknown', 'git 을 실행하지 못했습니다.'));
-    assert.strictEqual(unk.state, 'unknown'); assert.ok(unk.text.includes('확인하지 못했어요') && !unk.text.includes('준비 안 됨'));
+    assert.strictEqual(unk.state, 'unknown'); assert.ok(unk.text.includes('확인하지 못했어') && !unk.text.includes('준비 안 됨'));
   },
   forms_notice_only_when_ready_and_server_says_missing() {
     const d = (state, forms) => ({ conditions: { 'project-ready': { state } }, formsMissing: forms });
@@ -183,8 +183,8 @@ const cases = {
     assert.strictEqual(L.reloadStrip(false, live), null);
     assert.strictEqual(L.reloadStrip(true, [{ id: 'b', status: 'ended' }]), null);
     assert.deepStrictEqual(L.reloadStrip(true, live), { count: 2, text: '돌고 있는 세션 2개 다시 불러오기 필요' });
-    assert.strictEqual(L.reloadResult({ ok: true, harnessVersion: '0.10.140', plugins: [], errorCount: 0 }), 'harness 0.10.140 로 다시 불러왔어요.');
-    assert.strictEqual(L.reloadResult({ ok: true, plugins: [{ name: 'harness', version: '0.10.9' }], errorCount: 2 }), 'harness 0.10.9 로 다시 불러왔어요. (오류 2개)');
+    assert.strictEqual(L.reloadResult({ ok: true, harnessVersion: '0.10.140', plugins: [], errorCount: 0 }), 'harness 0.10.140 로 다시 불러왔어.');
+    assert.strictEqual(L.reloadResult({ ok: true, plugins: [{ name: 'harness', version: '0.10.9' }], errorCount: 2 }), 'harness 0.10.9 로 다시 불러왔어. (오류 2개)');
     assert.ok(L.reloadResult({ queued: true }).includes('끝나면'));
   },
   summary_counts() {
@@ -303,9 +303,9 @@ const cases = {
       flowSteps: [{ id: 'a', name: '지금', kind, skill: kind === 'skill' ? 'srs' : undefined, state: 'active' }, { id: 'b', name: '다음', kind: 'skill', skill: 'deliver', state: 'pending' }] }, extra);
     const buttons = () => find(panel.el, e => e.tag === 'button').map(e => e.textContent);
     panel.update(sess('skill')); assert.deepStrictEqual(buttons(), ['/harness:srs 다시 실행', '이 단계 건너뛰기']);
-    panel.update(sess('work')); assert.deepStrictEqual(buttons(), ['끝났어요', '이 단계 건너뛰기']);
+    panel.update(sess('work')); assert.deepStrictEqual(buttons(), ['끝났어', '이 단계 건너뛰기']);
     panel.update(sess('wait')); assert.deepStrictEqual(buttons(), ['다시 확인', '이 단계 건너뛰기']);
-    panel.update(sess('human')); assert.deepStrictEqual(buttons(), ['끝났어요', '다시 확인', '이 단계 건너뛰기']);
+    panel.update(sess('human')); assert.deepStrictEqual(buttons(), ['끝났어', '다시 확인', '이 단계 건너뛰기']);
     // 순서 막대: 지금 단계 하나만 강조
     assert.strictEqual(find(panel.el, e => e.tag === 'li' && e.attrs['aria-current'] === 'step').length, 1);
     assert.strictEqual(find(panel.el, e => e.tag === 'li' && (e.attrs['class'] || '').includes('step')).length, 2);
@@ -338,7 +338,7 @@ const cases = {
     const panel = ui.flowPanel();
     panel.update({ id: 's1', cwd: '/w', status: 'idle' }); await tick(); await tick();
     assert.deepStrictEqual(find(panel.el, e => e.attrs['data-flow']).map(e => e.attrs['data-flow']), ['srs']);
-    assert.ok(panel.el.textContent.includes('어떤 일인가요?'));
+    assert.ok(panel.el.textContent.includes('어떤 일이야?'));
     panel.destroy();
     // 갈래 데이터를 못 쓰면(503) 준비 안 됨으로 알린다
     const err = Object.assign(new Error('x'), { status: 503 });
@@ -428,9 +428,9 @@ const cases = {
     await tick(); await tick();
     assert.deepStrictEqual(cells(ch.el), ['1 요구사항 쓰기이번 세션', '2 GitHub에 올리기올리기 전에 물어봐', '3 승인·합치기밖에서 일이 끝나길 기다려', '4 개발 Spec다음 세션']);
     assert.ok(find(ch.el, e => (e.attrs['class'] || '').split(' ').includes('now')).length === 1);
-    // 갈래 설명은 AI 말 한 줄(line)로 합쳐지고, 따로 "어떤 일인가요?" 제목이나 "이 일은" 줄은 없다
+    // 갈래 설명은 AI 말 한 줄(line)로 합쳐지고, 따로 "어떤 일이야?" 제목이나 "이 일은" 줄은 없다
     assert.ok(ch.line.textContent.includes('이 일은 요구사항 갈래야.') && ch.line.textContent.includes('요구사항을 더하는 일'));
-    assert.ok(!ch.el.textContent.includes('어떤 일인가요?') && !ch.el.textContent.includes('이 일은'));
+    assert.ok(!ch.el.textContent.includes('어떤 일이야?') && !ch.el.textContent.includes('이 일은'));
     // 다른 갈래로 바꾸기는 아래 단추 줄(tail)에, 고르는 칸은 grid 에
     assert.ok(ch.tail.textContent.includes('다른 갈래로 바꾸기'));
     ch.destroy();
@@ -1385,7 +1385,7 @@ def test_work_screen_permission_card_and_edit_names(tmp_path):
     risky = {"id": "p3", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "curl x", "dangerouslyDisableSandbox": True}}
     sess = [_session("s1", pendingRequestIds=["p1", "p2", "p3"])]
     got = _smoke(tmp_path, "r/p1", sess, [bash, edit, risky])
-    for need in ("확인 필요", "옛 파일 지우기", "자세히 (명령 원문)", "이번만 허락", "하지 마", "다음 규칙이 추가됩니다", "도구에 넘기는 입력 전체"):
+    for need in ("확인 필요", "옛 파일 지우기", "자세히 (명령 원문)", "이번만 허락", "하지 마", "다음 규칙이 추가돼", "도구에 넘기는 입력 전체"):
         assert need in got["text"], need
     assert "<details.more>" in got["dump"] and "<details[open].more>" not in got["dump"]  # 쉬운 설명이 있는 명령은 원문을 접어 둔다
     got = _smoke(tmp_path, "r/p2", sess, [bash, edit, risky])
@@ -1577,7 +1577,7 @@ def test_api_error_holds_next_step_until_login_or_limit(tmp_path):
     skipped = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "auth", "t": 5}, chat=chat)], actions=[{"click": "[data-hold-skip]"}])
     assert "네 차례" in skipped["text"] and "로그인한 뒤 이어서 하자" not in skipped["text"]
     nopick = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "auth", "t": 5}, chat=chat, flowId=None, flowName=None, flowSteps=[], stepIndex=0)])
-    assert "로그인한 뒤 이어서 하자" in nopick["text"] and "어떤 일인가요?" not in nopick["text"] and "그래도 먼저 일 고르기" in nopick["text"]
+    assert "로그인한 뒤 이어서 하자" in nopick["text"] and "어떤 일이야?" not in nopick["text"] and "그래도 먼저 일 고르기" in nopick["text"]
     other = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "other", "t": 5}, chat=chat)])
     assert "먼저 할 일" not in other["text"] and "네 차례" in other["text"]  # 일시적일 수 있는 서버 오류는 다시 해 볼 수 있다
     # 한도가 apiIssue 없이 rateLimit(rejected) 로만 와도 같다
@@ -2077,12 +2077,12 @@ def test_open_block_card_comes_before_flow_picker_and_has_next_steps(tmp_path):
     """#791: 막힘이 열려 있으면 갈래 선택·다음 단계보다 "고친 뒤 이어서" 안내가 먼저, 직접 보기 뒤 다음 할 일과 되돌리기, 원문·고치는 법 중복 없음."""
     chat = [{"t": 1, "role": "me", "text": "문서 써 줘"}, _BLOCK]
     got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, flowId=None, flowName=None, flowSteps=[], stepIndex=0)])
-    assert "막힌 걸 고친 뒤 이어서 하자" in got["text"] and "어떤 일인가요?" not in got["text"] and "그래도 먼저 일 고르기" in got["text"]
+    assert "막힌 걸 고친 뒤 이어서 하자" in got["text"] and "어떤 일이야?" not in got["text"] and "그래도 먼저 일 고르기" in got["text"]
     skipped = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, flowId=None, flowName=None, flowSteps=[], stepIndex=0)], actions=[{"click": "[data-hold-skip]"}])
-    assert "어떤 일인가요?" in skipped["text"] and "막힌 걸 고친 뒤 이어서 하자" not in skipped["text"]
+    assert "어떤 일이야?" in skipped["text"] and "막힌 걸 고친 뒤 이어서 하자" not in skipped["text"]
     # 막힘이 풀리면(뒤에 AI 말) 안내가 사라진다
     solved = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat + [{"t": 4, "role": "ai", "text": "고쳤어."}], flowId=None, flowName=None, flowSteps=[], stepIndex=0)])
-    assert "막힌 걸 고친 뒤 이어서 하자" not in solved["text"] and "어떤 일인가요?" in solved["text"]
+    assert "막힌 걸 고친 뒤 이어서 하자" not in solved["text"] and "어떤 일이야?" in solved["text"]
     # 직접 보기 뒤: 다음 할 일, [다 고쳤어, 이어서 해 줘], [다시 고르기]
     mine = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-self]"}])
     assert "직접 보기로 했어." in mine["text"] and "다 고쳤어, 이어서 해 줘" in mine["text"] and "다시 고르기" in mine["text"]

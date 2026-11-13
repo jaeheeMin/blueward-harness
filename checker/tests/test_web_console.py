@@ -2322,7 +2322,7 @@ def test_describe_suggestions_is_readable():
 def test_approval_screen_shows_full_input_and_rules():
     js = (CONSOLE / "static" / "app.js").read_text(encoding="utf-8")
     assert "도구에 넘기는 입력 전체" in js and "dangerouslyDisableSandbox" in js and "run_in_background" in js
-    assert "suggestionText" in js and "다음 규칙이 추가됩니다" in js
+    assert "suggestionText" in js and "다음 규칙이 추가돼" in js
     # 명령 원문·입력 전체는 "자세히" 안에 있지만, 쉬운 설명이 없는 명령·샌드박스를 끄는 명령·파일 고치기는 접지 않고 열어 둔다(#636)
     assert "var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background;" in js
     assert "class: 'more', open: !friendly" in js

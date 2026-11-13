@@ -25,7 +25,7 @@
     /* ---------- 공통 ---------- */
     function failText(e, what) {
       if (e && NOT_READY_STATUS.indexOf(e.status) >= 0) return (what ? what + ': ' : '') + NOT_READY;
-      return (what ? what + ': ' : '') + (e && e.message ? e.message : '요청을 처리하지 못했어요.');
+      return (what ? what + ': ' : '') + (e && e.message ? e.message : '요청을 처리하지 못했어.');
     }
     /* 같은 주소는 CACHE_MS 안에 한 번만 부른다(진행 중인 요청도 같이 쓴다). 서버가 loading 을 주면 gh 가 아직 읽는 중이다:
        wait 면 그동안 가벼운 재요청으로 끝나기를 기다리고, 아니면 받은 값을 바로 쓰고 캐시만 짧게 둔다. */
@@ -153,7 +153,7 @@
       }
       return runSkill(s, toolId).then(function () {
         if (toolId === 'update') { updatePressed = true; notifyStrip(); }
-        return name + ' 실행을 요청했어요.';
+        return name + ' 실행을 요청했어.';
       }, function (e) { return failText(e, name); });
     }
     function notifyStrip() { stripWatchers.forEach(function (f) { f(); }); }
@@ -179,16 +179,16 @@
         strip.appendChild(h('button', { type: 'button', class: 'btn sm', text: '모두 다시 불러오기', onClick: reloadAll }));
       }
       function reloadAll() {
-        say('모두 다시 불러오는 중이에요.');
+        say('모두 다시 불러오는 중이야.');
         api('POST', '/api/reload-all', {}).then(function (d) {
           updatePressed = false; notifyStrip();
-          say(d && d.queued ? '지금 하는 일이 끝나면 다시 불러올게요.' : '돌고 있는 세션을 다시 불러왔어요.');
+          say(d && d.queued ? '지금 하는 일이 끝나면 다시 불러올게.' : '돌고 있는 세션을 다시 불러왔어.');
         }, function (e) { say(failText(e, '모두 다시 불러오기')); });
       }
       function paint() {
         var ctx = getCtx(), s = ctx.session;
         var tools = L.visibleTools(data.flows, data.approvals, { hasSession: !!s, managed: !!(s && s.managed) });
-        var blocked = s && s.canSend === false ? (s.cannotSendReason || '이 세션에는 지금 요청을 보낼 수 없어요.') : '';
+        var blocked = s && s.canSend === false ? (s.cannotSendReason || '이 세션에는 지금 요청을 보낼 수 없어.') : '';
         var pn = L.projectNotice(data.flows) || L.formsNotice(data.flows);
         project.hidden = !pn;
         project.textContent = pn ? pn.text : '';
@@ -198,7 +198,7 @@
           list.appendChild(h('button', { type: 'button', class: 'tool', 'data-tool': t.id, disabled: !!blocked, title: blocked || (isConsole ? t.name : HARNESS_PREFIX + t.skill),
             onClick: function () {
               if (!s) { if (ctx.onInsert && t.skill) ctx.onInsert(t.skill); return; }
-              say(t.name + ' 요청을 보내는 중이에요.');
+              say(t.name + ' 요청을 보내는 중이야.');
               runTool(s, t.id, t.name).then(function (msg) { if (alive) say(msg); });
             } }, t.name));
         });
@@ -279,27 +279,27 @@
       function askSkip(step) {
         var reason = h('textarea', { class: 'textarea', rows: '3', placeholder: '예: 이번에는 양식이 필요 없어서', 'aria-label': '건너뛰는 이유' });
         modal({
-          title: '"' + (step.name || step.id) + '" 단계를 건너뛸까요?',
-          body: [h('p', { class: 'note-muted', text: '순서를 건너뛰면 기록에 이유가 남아요. 이유를 꼭 적어 주세요.' }), reason],
+          title: '"' + (step.name || step.id) + '" 단계를 건너뛸까?',
+          body: [h('p', { class: 'note-muted', text: '순서를 건너뛰면 기록에 이유가 남아. 이유를 꼭 적어 줘.' }), reason],
           confirmText: '건너뛰기', validate: function () { return L.skipReasonError(reason.value); },
-          onConfirm: function () { post('/flow/skip', { reason: reason.value.trim() }, '단계를 건너뛰었어요.'); }
+          onConfirm: function () { post('/flow/skip', { reason: reason.value.trim() }, '단계를 건너뛰었어.'); }
         });
       }
       function choose(flowId) { act(api('PUT', '/api/sessions/' + sid(last) + '/flow', { flowId: flowId })); }
 
       function askNext(opt, editFirst) {
         modal({
-          title: '"' + opt.label + '" 로 넘어갈까요?',
-          body: [h('p', { text: '지금 세션에서 한 일을 정리해 새 세션으로 넘어갑니다.' })],
+          title: '"' + opt.label + '" 로 넘어갈까?',
+          body: [h('p', { text: '지금 세션에서 한 일을 정리해 새 세션으로 넘어가.' })],
           confirmText: '넘어가기', onConfirm: function () { startNext(opt, editFirst); }
         });
       }
       function startNext(opt, editFirst) {
         st.editFirst = !!editFirst;
-        st.busy = true; st.job = '새 세션을 준비하고 있어요.'; st.msg = ''; draw();
+        st.busy = true; st.job = '새 세션을 준비하고 있어.'; st.msg = ''; draw();
         api('POST', '/api/sessions/' + sid(last) + '/flow/next', { flowId: opt.flow, ids: (opt.ids || []).filter(function (i) { return /^REQ-\d{1,6}$/.test(i); }) }).then(function (d) {
           var jobId = d && (d.jobId || d.id);
-          if (!jobId) throw new Error('작업 번호를 받지 못했어요.');
+          if (!jobId) throw new Error('작업 번호를 받지 못했어.');
           pollJob(jobId, 0);
         }, function (e) { st.busy = false; st.job = ''; st.msg = failText(e, '새 세션으로 넘기기'); if (alive) draw(); });
       }
@@ -313,13 +313,13 @@
             function (e) { st.busy = false; st.job = ''; st.msg = failText(e, path === '/confirm' ? '새 세션 시작' : '취소'); if (alive) draw(); });
         }
         modal({
-          title: '새 세션에 이 글을 보낼까요?',
-          body: [h('p', { class: 'note-muted', text: '지금 세션이 정리한 이어 가기 글이에요. 읽어 보고 그대로 시작하거나, 고쳐서 시작하세요.' }),
+          title: '새 세션에 이 글을 보낼까?',
+          body: [h('p', { class: 'note-muted', text: '지금 세션이 정리한 이어 가기 글이야. 읽어 보고 그대로 시작하거나, 고쳐서 시작해 줘.' }),
                  warning ? h('p', { class: 'note-attn', role: 'status', text: warning }) : null, box],
           confirmText: '이대로 새 세션 시작',
-          validate: function () { return box.value.trim() ? '' : '보낼 글이 비어 있어요.'; },
-          onConfirm: function () { begin('/confirm', { prompt: box.value }, '새 세션을 시작하고 있어요.'); },
-          onCancel: function () { begin('/cancel', {}, '취소하고 있어요.'); },
+          validate: function () { return box.value.trim() ? '' : '보낼 글이 비어 있어.'; },
+          onConfirm: function () { begin('/confirm', { prompt: box.value }, '새 세션을 시작하고 있어.'); },
+          onCancel: function () { begin('/cancel', {}, '취소하고 있어.'); },
           extra: function (ok) {
             function editNow() { box.readOnly = false; box.focus(); ok.textContent = '고친 내용으로 새 세션 시작'; }
             if (edit) editNow();  // [넘길 내용 고치기] 로 왔으면 처음부터 고칠 수 있게 연다
@@ -335,17 +335,17 @@
           if (!out.done && n < JOB_POLL_MAX) { pollTimer = setTimeout(function () { pollJob(jobId, n + 1); }, JOB_POLL_MS); return; }
           st.busy = false; st.job = '';
           if (out.done && out.ok) { kit.go('/s/' + encodeURIComponent(out.sessionId)); return; }
-          st.msg = out.done ? '새 세션으로 넘기지 못했어요: ' + out.error : '새 세션이 아직 준비되지 않았어요. 잠시 뒤 다시 확인해 주세요.';
+          st.msg = out.done ? '새 세션으로 넘기지 못했어: ' + out.error : '새 세션이 아직 준비되지 않았어. 잠시 뒤 다시 확인해 줘.';
           if (alive) draw();
         }, function (e) { st.busy = false; st.job = ''; st.msg = failText(e, '진행 상태 확인'); if (alive) draw(); });
       }
 
       function drawPicker(s) {
         var box = h('div', { class: 'flowpick' });
-        box.appendChild(h('h2', { class: 'sect-h', text: '어떤 일인가요?' }));
-        box.appendChild(h('p', { class: 'note-muted', text: '일을 고르면 그 순서대로만 진행해요.' }));
+        box.appendChild(h('h2', { class: 'sect-h', text: '어떤 일이야?' }));
+        box.appendChild(h('p', { class: 'note-muted', text: '일을 고르면 그 순서대로만 진행해.' }));
         var r = st.picker;
-        if (!r) box.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' }));
+        if (!r) box.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' }));
         else if (!r.ok) box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: failText(r.error, '일 목록') }));
         else {
           var flows = kit.listOf(r.data, 'flows').filter(function (f) { return !(f.exposure && f.exposure.visible === false); });
@@ -372,7 +372,7 @@
           box.appendChild(h('p', { class: 'sub', text: (a.cannotSend ? '' : a.disabledReason) || (later ? ask.laterSub : ask.sub) }));  // 일하는 중이면 그 이유. 터미널이라 못 보내는 이유는 입력칸 아래에 한 번만(#818)
           var arow = h('div', { class: 'acts' });
           arow.appendChild(h('button', { type: 'button', class: 'pill acc', disabled: st.busy || a.disabled, title: a.disabledReason || null, text: ask.yes,
-            onClick: function () { act(runSkill(last, a.skill), HARNESS_PREFIX + a.skill + ' 실행을 요청했어요.'); } }));
+            onClick: function () { act(runSkill(last, a.skill), HARNESS_PREFIX + a.skill + ' 실행을 요청했어.'); } }));
           if (!later) arow.appendChild(h('button', { type: 'button', class: 'pill line', 'data-ask-later': '1', text: '아직', onClick: function () { st.later[s.id] = true; draw(); } }));
           arow.appendChild(h('button', { type: 'button', class: 'skiplink', disabled: st.busy, text: '이 단계 건너뛰기', onClick: function () { askSkip(a.step); } }));
           box.appendChild(arow);
@@ -384,16 +384,16 @@
         var row = h('div', { class: 'acts' });
         if (a.type === 'skill') {
           row.appendChild(h('button', { type: 'button', class: 'pill acc', disabled: st.busy || a.disabled, title: a.disabledReason || null, text: a.label,
-            onClick: function () { act(runSkill(last, a.skill), HARNESS_PREFIX + a.skill + ' 실행을 요청했어요.'); } }));
+            onClick: function () { act(runSkill(last, a.skill), HARNESS_PREFIX + a.skill + ' 실행을 요청했어.'); } }));
         } else if (a.type === 'done' || a.type === 'human') {
           row.appendChild(h('button', { type: 'button', class: 'pill acc', disabled: st.busy, text: a.label,
-            onClick: function () { post('/flow/done', {}, '이 단계를 끝냈어요.'); } }));
-          if (a.type === 'human') row.appendChild(h('button', { type: 'button', class: 'pill line', disabled: st.busy, text: a.refreshLabel, onClick: function () { post('/flow/refresh', {}, '다시 확인했어요.'); } }));
+            onClick: function () { post('/flow/done', {}, '이 단계를 끝냈어.'); } }));
+          if (a.type === 'human') row.appendChild(h('button', { type: 'button', class: 'pill line', disabled: st.busy, text: a.refreshLabel, onClick: function () { post('/flow/refresh', {}, '다시 확인했어.'); } }));
         } else {
-          box.appendChild(h('p', { class: 'sub', text: a.step.state === 'active' ? '밖에서 일이 끝나길 기다리는 중이에요.' : '아직 시작 전이에요.' }));
-          row.appendChild(h('button', { type: 'button', class: 'pill acc', disabled: st.busy, text: a.label, onClick: function () { post('/flow/refresh', {}, '다시 확인했어요.'); } }));
+          box.appendChild(h('p', { class: 'sub', text: a.step.state === 'active' ? '밖에서 일이 끝나길 기다리는 중이야.' : '아직 시작 전이야.' }));
+          row.appendChild(h('button', { type: 'button', class: 'pill acc', disabled: st.busy, text: a.label, onClick: function () { post('/flow/refresh', {}, '다시 확인했어.'); } }));
           if (a.helper) row.appendChild(h('button', { type: 'button', class: 'pill line', disabled: st.busy || a.helperDisabled, text: HARNESS_PREFIX + a.helper + ' 보기',
-            onClick: function () { act(runSkill(last, a.helper), HARNESS_PREFIX + a.helper + ' 실행을 요청했어요.'); } }));
+            onClick: function () { act(runSkill(last, a.helper), HARNESS_PREFIX + a.helper + ' 실행을 요청했어.'); } }));
         }
         box.appendChild(row);
         if (a.disabledReason && !a.cannotSend && a.type === 'skill') box.appendChild(h('p', { class: 'sub', text: a.disabledReason }));
@@ -414,7 +414,7 @@
             box.appendChild(h('b', { text: '이 세션에서 계속 이어 가는 중이야' }));
             box.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', 'data-next-again': '1', text: '다음 일 다시 보기', onClick: function () { st.stay[s.id] = false; draw(); } })));
           } else {
-            var title = main ? L.nextBase(first.label || main.label) + ' — 새 세션에서 시작하길 권해' : '다음에 이어서 할 일을 고르세요';
+            var title = main ? L.nextBase(first.label || main.label) + ' — 새 세션에서 시작하길 권해' : '다음에 이어서 할 일을 골라 줘';
             box.appendChild(h('span', { class: 'eb', text: '다음 일' }));
             box.appendChild(h('b', { text: title }));
             box.appendChild(h('p', { class: 'sub', 'data-memory': mem.kind, text: (mem.kind === 'pct' ? '이 세션이 기억을 ' + mem.pct + '% 썼어. ' : mem.kind === 'tokens' ? '이 세션이 기억을 ' + mem.words + ' 썼어(%는 확인 못 함). ' : '')
@@ -521,7 +521,7 @@
         el.hidden = !(last.busy || state.msg);
         if (el.hidden) return;
         if (last.busy) {
-          el.appendChild(h('p', { text: '이 폴더에서 다른 세션이 일하고 있어요. 같은 파일을 고치면 서로 덮어쓸 수 있어요.' }));
+          el.appendChild(h('p', { text: '이 폴더에서 다른 세션이 일하고 있어. 같은 파일을 고치면 서로 덮어쓸 수 있어.' }));
           el.appendChild(h('button', { type: 'button', class: 'btn sm', disabled: state.busy, text: state.busy ? '만드는 중' : '이 작업용 폴더 따로 만들기', onClick: make }));
         }
         if (state.msg) el.appendChild(h('p', { class: 'note-accent', text: state.msg }));
@@ -529,8 +529,8 @@
       function make() {
         state.busy = true; state.msg = ''; draw();
         api('POST', '/api/folders/worktree', { cwd: last.cwd }).then(function (d) {
-          if (!d || !d.path) throw new Error('새 폴더 경로를 받지 못했어요.');
-          state.msg = '작업용 폴더를 만들었어요: ' + d.path;
+          if (!d || !d.path) throw new Error('새 폴더 경로를 받지 못했어.');
+          state.msg = '작업용 폴더를 만들었어: ' + d.path;
           if (last.onSwitch) last.onSwitch(d.path);
         }, function (e) { state.msg = failText(e, '작업용 폴더 만들기'); }).then(function () { state.busy = false; if (alive) draw(); });
       }
@@ -544,7 +544,7 @@
       if (p.kind === 'md') {
         box.appendChild(h('div', { class: 'report-body' }, window.BHMarkdown.render(p.text)));
       } else if (p.kind === 'table') {
-        if (!p.sheets.length) box.appendChild(h('p', { class: 'note-muted', text: '표가 비어 있어요.' }));
+        if (!p.sheets.length) box.appendChild(h('p', { class: 'note-muted', text: '표가 비어 있어.' }));
         else {
           var idx = Math.min(ctx.sheet, p.sheets.length - 1);
           if (!ctx.header || p.sheets.length > 1) box.appendChild(h('div', { class: 'sheet-tabs', role: 'tablist' }, p.sheets.map(function (sh, i) {
@@ -556,18 +556,18 @@
             return h('tr', null, (Array.isArray(r) ? r : [r]).map(function (c) { return h(ctx.header && r === rows[0] ? 'th' : 'td', { text: c == null ? '' : String(c) }); }));
           })));
           box.appendChild(h('div', { class: 'md-table sheet-wrap' }, table));
-          if (!rows.length) box.appendChild(h('p', { class: 'note-muted', text: '이 시트는 비어 있어요.' }));
+          if (!rows.length) box.appendChild(h('p', { class: 'note-muted', text: '이 시트는 비어 있어.' }));
         }
       } else if (p.kind === 'slides') {
-        if (!p.slides.length) box.appendChild(h('p', { class: 'note-muted', text: '슬라이드에서 읽은 글이 없어요.' }));
+        if (!p.slides.length) box.appendChild(h('p', { class: 'note-muted', text: '슬라이드에서 읽은 글이 없어.' }));
         p.slides.forEach(function (sl, i) {
           box.appendChild(h('section', { class: 'slide' }, h('h3', { class: 'label', text: '슬라이드 ' + (sl.index != null ? sl.index : i + 1) }),
             kit.listOf(sl, 'texts').map(function (t) { return h('p', { text: String(t) }); })));
         });
       } else if (p.kind === 'image') {
         var okUrl = p.url.charAt(0) === '/' && p.url.charAt(1) !== '/' ? p.url : kit.safeHttp(p.url);
-        box.appendChild(okUrl ? h('img', { class: 'preview-img', src: okUrl, alt: ctx.name }) : h('p', { class: 'note-muted', text: '그림 주소를 받지 못했어요.' }));
-      } else box.appendChild(h('p', { class: 'note-muted', text: p.reason || '이 종류는 미리 볼 수 없어요. 아래 버튼으로 열어 보세요.' }));
+        box.appendChild(okUrl ? h('img', { class: 'preview-img', src: okUrl, alt: ctx.name }) : h('p', { class: 'note-muted', text: '그림 주소를 받지 못했어.' }));
+      } else box.appendChild(h('p', { class: 'note-muted', text: p.reason || '이 종류는 미리 볼 수 없어. 아래 버튼으로 열어 봐.' }));
       return box;
     }
 
@@ -694,7 +694,7 @@
         if (isX) out.push(h('span', { class: 'eb', text: '미리보기' + (sheetName ? ' · ' + sheetName + ' 시트' : '') }));
         if (st.note) out.push(h('p', { class: 'note-accent', role: 'status', text: st.note }));
         if (st.previewError) out.push(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
-        else if (!st.preview) out.push(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' }));
+        else if (!st.preview) out.push(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' }));
         else out.push(h('div', { class: 'dsheet' }, renderPreview(st.preview, { sheet: st.sheet, name: kit.baseName(f.path), header: true, setSheet: function (i) { st.sheet = i; draw(); } })));
         if (cells && cells.known && cells.empty) {
           var names = cells.blankNames.slice(0, 3).join(', ') + (cells.blankNames.length > 3 ? ' 외 ' + (cells.blankNames.length - 3) + '곳' : '');
@@ -738,7 +738,7 @@
           h('span', { class: 'sp' }), h('span', { class: 'pt-m', text: '세션 ' + (s.title || kit.baseName(s.cwd) || '이름 없는 세션') }),
           canExport ? exportBtn(entry, can, 'pill line xs') : null));
         if (st.previewError) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
-        else if (!st.preview) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' }));
+        else if (!st.preview) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' }));
         else pane.appendChild(renderPreview(st.preview, { sheet: st.sheet, name: kit.baseName(f.path), setSheet: function (i) { st.sheet = i; draw(); } }));
         box.appendChild(pane);
         box.appendChild(composer(entry, can, '"' + f.path + '" 을(를) 고쳐 줘: ', '이 문서 고쳐 달라고 하기 — 예: 표시 항목에 납품일 추가'));
@@ -752,9 +752,9 @@
       }
       function draw() {
         clear(page);
-        if (!kit.loaded()) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.loadingBox('세션을 불러오는 중입니다.')); return; }
+        if (!kit.loaded()) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.loadingBox('세션을 불러오는 중이야.')); return; }
         if (!pool().length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.stateBox('folder', '아직 만든 문서가 없어', '작업을 시작하면 세션이 만든 문서가 여기에 모여.', kit.link('/new', { class: 'btn', text: '새 작업 시작' }))); return; }
-        if (!st.parts) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.loadingBox('문서를 모으는 중이에요.')); return; }
+        if (!st.parts) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.loadingBox('문서를 모으는 중이야.')); return; }
         var all = docs(), failed = st.parts.filter(function (p) { return p.failed; }), unsure = st.parts.filter(function (p) { return p.unknown && !p.failed; });
         var notes = [];
         if (failed.length) notes.push(h('p', { class: 'note-attn', role: 'status', text: failed.length + '개 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
@@ -797,7 +797,7 @@
       var listBox = h('div', { class: 'docs-list' });
       var pane = h('div', { class: 'docs-pane paper', hidden: true });
       var wrap = h('div', { class: 'docs-wrap' }, pane, listBox);  // 시안 G-09: 위에 흰 문서 미리보기, 아래에 문서 줄
-      el.appendChild(h('h2', { class: 'eb', title: '이 세션에서 쓴 파일과 시작 뒤 새로 바뀐 파일이에요. 같은 폴더의 다른 세션이 바꾼 파일이 섞일 수 있어요.', text: '만든 산출물' }));
+      el.appendChild(h('h2', { class: 'eb', title: '이 세션에서 쓴 파일과 시작 뒤 새로 바뀐 파일이야. 같은 폴더의 다른 세션이 바꾼 파일이 섞일 수 있어.', text: '만든 산출물' }));
       el.appendChild(wrap);
       var st = { files: null, error: null, selected: null, preview: null, previewError: null, sheet: 0, note: '', at: 0, stamp: null };
       var last = null, alive = true, loading = false;
@@ -815,9 +815,9 @@
           function (e) { st.previewError = e; }).then(function () { if (alive && st.selected === f.path) drawPane(); });
       }
       function openFile(mode) {
-        st.note = mode === 'reveal' ? '탐색기를 여는 중이에요.' : '기본 프로그램으로 여는 중이에요.'; drawPane();
+        st.note = mode === 'reveal' ? '탐색기를 여는 중이야.' : '기본 프로그램으로 여는 중이야.'; drawPane();
         api('POST', '/api/sessions/' + sid(last) + '/files/open', { path: st.selected, mode: mode }).then(function () {
-          st.note = mode === 'reveal' ? '탐색기에서 위치를 열었어요.' : '열었어요.';
+          st.note = mode === 'reveal' ? '탐색기에서 위치를 열었어.' : '열었어.';
         }, function (e) { st.note = failText(e, '열기'); }).then(function () { if (alive) drawPane(); });
       }
 
@@ -842,11 +842,11 @@
       function drawListBody() {
         clear(listBox);
         if (st.error && !st.files) { listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.error, '문서 목록') })); return; }
-        if (!st.files) { listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' })); return; }
-        if (st.unknown != null) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '바뀐 문서를 확인하지 못했어요.' + (st.unknown ? ' (' + st.unknown + ')' : '') + ' 아래 목록에 빠진 문서가 있을 수 있어요.' }));
+        if (!st.files) { listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' })); return; }
+        if (st.unknown != null) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '바뀐 문서를 확인하지 못했어.' + (st.unknown ? ' (' + st.unknown + ')' : '') + ' 아래 목록에 빠진 문서가 있을 수 있어.' }));
         if (st.note) listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: st.note }));
-        if (st.truncated) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '문서가 너무 많아 목록이 잘렸어요. 더 있을 수 있어요.' }));
-        if (!st.files.length) { listBox.appendChild(h('p', { class: 'note-muted', text: st.unknown != null ? '확인된 문서가 없어요.' : '아직 만든 문서가 없어요.' })); return; }
+        if (st.truncated) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '문서가 너무 많아 목록이 잘렸어. 더 있을 수 있어.' }));
+        if (!st.files.length) { listBox.appendChild(h('p', { class: 'note-muted', text: st.unknown != null ? '확인된 문서가 없어.' : '아직 만든 문서가 없어.' })); return; }
         // 시안 G-08(일하는 중): 오른쪽은 문서 미리보기 한 장 — 다른 문서 목록은 눌렀을 때만 펼친다(고를 수 있게 남겨 둔다).
         // G-09(일을 마치고 내 차례): 미리보기 아래에 문서 줄 목록을 보인다.
         if (st.selected && !st.showList && last && last.status === 'running') {
@@ -879,7 +879,7 @@
           h('button', { type: 'button', class: 'pill line sm', text: '탐색기에서 위치 보기', onClick: function () { openFile('reveal'); } })));
         if (st.note) pane.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.note }));
         if (st.previewError) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
-        else if (!st.preview) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이에요.' }));
+        else if (!st.preview) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' }));
         else pane.appendChild(drawPreview(st.preview));
       }
       function update(s) {
@@ -971,7 +971,7 @@
         }
         if (found && found.confident === false && found.alternativeId && !last.userPicked) {
           el.hidden = false;
-          el.appendChild(h('p', { class: 'note-muted', text: '어느 쪽에 더 가까운지 골라 주세요. ' + (found.reason || '') }));
+          el.appendChild(h('p', { class: 'note-muted', text: '어느 쪽에 더 가까운지 골라 줘. ' + (found.reason || '') }));
           var two = h('div', { class: 'chips' });
           [found.id, found.alternativeId].forEach(function (id) {
             two.appendChild(h('button', { type: 'button', class: 'btn', 'aria-pressed': String(picked === id), 'data-flow': id, text: nameOf(flows, id), onClick: function () { last.onPick(id); } }));
@@ -1027,7 +1027,7 @@
           if (!compact) {
             // 세션이 없을 때의 따로 선 칸: eb 머리 + 줄(이름 · 오른쪽 짧은 글). 머리와 문장은 각자 한 줄(.blk)
             box.appendChild(h('span', { class: 'eb blk', text: '내가 승인할 PR ' + items.length + '건' }));
-            if (!items.length) box.appendChild(h('span', { class: 'quiet blk', text: '지금 기다리는 PR 이 없어요.' }));
+            if (!items.length) box.appendChild(h('span', { class: 'quiet blk', text: '지금 기다리는 PR 이 없어.' }));
           }
           items.forEach(function (it) {
             var url = kit.safeHttp(it.url);
@@ -1037,7 +1037,7 @@
           });
         } else if (merged.state === 'unknown') {
           if (!compact) box.appendChild(h('span', { class: 'eb blk', text: '내가 승인할 PR' }));
-          box.appendChild(h('span', { class: 'note-attn blk', role: 'status', text: '승인할 PR 판정 불능 · ' + (merged.reason || '이유를 읽지 못했어요.') }));
+          box.appendChild(h('span', { class: 'note-attn blk', role: 'status', text: '승인할 PR 판정 불능 · ' + (merged.reason || '이유를 읽지 못했어.') }));
         }
       });
     }
@@ -1119,7 +1119,7 @@
         var lines = [], unk = [];
         rs.forEach(function (r, i) {
           var name = kit.baseName(cwds[i]) || cwds[i];
-          if (!r.ok) { unk.push(name + ': 프로젝트 준비 여부를 확인하지 못했어요 - ' + failText(r.error)); return; }
+          if (!r.ok) { unk.push(name + ': 프로젝트 준비 여부를 확인하지 못했어 - ' + failText(r.error)); return; }
           var pn = L.projectNotice(r.data);
           if (pn) lines.push(name + ': ' + pn.text);
           else { var fn = L.formsNotice(r.data); if (fn) lines.push(name + ': ' + fn.text); }
@@ -1297,7 +1297,7 @@
       function draw() {
         clear(root);
         if (!kit.loaded()) {
-          root.appendChild(kit.conn() === 'down' ? kit.stateBox('warn', '서버에 연결할 수 없습니다', '서버가 꺼졌을 수 있습니다. 다시 연결을 시도하고 있습니다.') : kit.loadingBox('세션을 불러오는 중입니다.'));
+          root.appendChild(kit.conn() === 'down' ? kit.stateBox('warn', '서버에 연결할 수 없어', '서버가 꺼졌을 수 있어. 다시 연결을 시도하고 있어.') : kit.loadingBox('세션을 불러오는 중이야.'));
           return;
         }
         var list = sessionList();
@@ -1318,7 +1318,7 @@
           var href = pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id);
           var plan = !!(pend && pend.r && kit.isPlan && kit.isPlan(pend.r));  // 계획 확인 요청(#861)
           var verb = pend && pend.r && (kit.kindOf(pend.r) === 'elicitation' || kit.kindOf(pend.r) === 'question') ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
-          var what = pend ? (kit.requestTitle ? kit.requestTitle(pend.r) : (pend.r && pend.r.title) || '요청을 확인하세요') : s.askedInText ? '답을 기다리는 듯해요(추정)' : s.turnSkill ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례예요';
+          var what = pend ? (kit.requestTitle ? kit.requestTitle(pend.r) : (pend.r && pend.r.title) || '요청을 확인해 줘') : s.askedInText ? '답을 기다리는 듯해(추정)' : s.turnSkill ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례야';
           return h('div', { class: 'call', 'data-call': s.id },
             h('div', { class: 'ct' }, h('span', { class: 'eb', text: '네 차례 · ' + name }), h('b', { text: what })),
             kit.link(href, { class: 'pill dark', text: verb }));
@@ -1354,7 +1354,7 @@
           var title = s.title || folderName(s) || '이름 없는 세션';
           var subs = L.runningSubCount(s);
           var rowPend = todoRow ? pendingOf(s) : null, rowPlan = !!(rowPend && rowPend.r && kit.isPlan && kit.isPlan(rowPend.r));
-          var doing = ended ? '끝난 세션' : rowPlan ? '계획 확인 기다림' : s.currentAction ? L.plainAction(s.currentAction, kit.skillLabel) : (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해요(추정)' : '내 차례예요') : g === 'running' ? '작업하는 중' : '쉬는 중');
+          var doing = ended ? '끝난 세션' : rowPlan ? '계획 확인 기다림' : s.currentAction ? L.plainAction(s.currentAction, kit.skillLabel) : (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해(추정)' : '내 차례야') : g === 'running' ? '작업하는 중' : '쉬는 중');
           var tip = doing + (subs ? ' · 서브에이전트 ' + subs + '개 실행 중' : '');  // 둘째 줄 대신 칩 title 로(시안: 상태 칸은 칩 하나)
           var bk = L.blockOf(s);
           var fixRow = !bk && !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)
