@@ -82,6 +82,8 @@ def launch_server(port: int, os_name: str | None = None, popen=subprocess.Popen,
 
 STOP_PORT_WAIT = 10.0   # --stop 이 포트가 풀리기를 기다리는 최대 시간(초)
 START_PORT_WAIT = 3.0   # 시작할 때 포트가 사용 중이면 풀리기를 기다리는 시간(초)
+STOP_REAP_WAIT = 5.0    # 끈 뒤 이 프로세스가 띄운 서버 프로세스가 끝나기를 기다리는 최대 시간(초, #836)
+FAIL_REAP_WAIT = 2.0    # 띄우기에 실패했을 때 그 서버 프로세스가 끝나기를 기다리는 최대 시간(초, #836)
 
 
 def port_bindable(port: int) -> bool:
@@ -120,12 +122,29 @@ def read_server_error() -> str:
         return ""
 
 
+# 이 프로세스가 띄운 서버의 Popen. 떼어 띄운 서버는 기다리지 않지만, 핸들을 바로 버리면 살아 있는 프로세스의 Popen 이
+# 정리되며 ResourceWarning 이 난다(#836). 들고 있다가 같은 프로세스에서 서버를 끄면 stop_server 가 거둔다.
+# Windows venv 의 pythonw.exe 는 실제 서버를 자식으로 띄우는 런처라 Popen pid 와 server.pid 가 다를 수 있어 pid 로 짝짓지 않는다.
+_launched: list = []
+
+
 def start_server(port: int) -> None:
     try:
         err_path().unlink()  # 이전 실행의 실패 이유가 남아 있지 않게 한다
     except OSError:
         pass
-    launch_server(port)
+    _launched.append(launch_server(port))
+
+
+def reap_launched(timeout: float) -> None:
+    """이 프로세스가 띄운 서버 중 끝난 것을 거둔다(wait). 시간 안에 안 끝난 것은 그대로 둔다."""
+    end = time.monotonic() + timeout
+    for proc in list(_launched):
+        try:
+            proc.wait(max(0.0, end - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            continue
+        _launched.remove(proc)
 
 
 def ensure_server(port: int, wait: float = 20.0) -> str | None:
@@ -147,11 +166,14 @@ def ensure_server(port: int, wait: float = 20.0) -> str | None:
         if state == "ours":
             return None
         if state == "other":
+            reap_launched(FAIL_REAP_WAIT)  # 띄운 서버는 포트를 못 열고 끝난다 -> 거둔다(#836)
             return f"포트 {port} 를 다른 프로그램이 쓰고 있어 웹 콘솔을 띄울 수 없습니다."
         why = read_server_error()
         if why:  # 서버가 스스로 못 뜬 이유를 남겼다 -> 더 기다리지 않는다
+            reap_launched(FAIL_REAP_WAIT)
             return f"웹 콘솔 서버가 뜨지 못했습니다. 원인: {why}"
     why = read_server_error()
+    reap_launched(FAIL_REAP_WAIT)  # 아직 안 끝났으면 그대로 둔다(끝까지 기다리지 않는다)
     return "웹 콘솔 서버가 시간 안에 뜨지 않았습니다." + (f" 원인: {why}" if why else "")
 
 
@@ -167,6 +189,7 @@ def stop_server(port: int) -> str:
     if status != 200:
         platform_compat.terminate_pid(pid)  # 위에서 /api/health 로 우리 서버임을 확인했다
     if wait_port_released(port, STOP_PORT_WAIT):  # 서버가 응답을 멈춘 뒤에도 소켓이 잠시 남는다 -> 바로 다시 띄우면 열지 못한다
+        reap_launched(STOP_REAP_WAIT)  # 이 프로세스가 띄운 서버였다면 끝난 프로세스를 거둔다(#836)
         return "웹 콘솔 서버를 껐습니다."
     return "웹 콘솔 서버가 아직 꺼지지 않았습니다."
 
