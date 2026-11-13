@@ -1362,7 +1362,7 @@ def build_form(
                     if old_body is None:
                         warn(sname, screen_draw.md_name(item), f"{item['이름']} 은 지난 판(origin/main)에 그림 절이 없어 변경 표시를 하지 않았다")
                 try:
-                    drawn = screen_draw.draw(editor(sname), styles_ed, item, body, sname, problem, old_body)
+                    drawn = screen_draw.draw(editor(sname), styles_ed, item, body, sname, problem, old_body, warn)
                 except ExportError as e:
                     raise ExportError(e.reason, form=form, sheet=sname, item=e.item) from None
                 if drawn == 0:  # 거부(None)가 아니라 그릴 항목이 없는 경우

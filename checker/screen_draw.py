@@ -27,7 +27,7 @@ Spec 작업본 `## 양식 항목` 의 `### <양식> · <시트>` 아래에 `####
 뒤에 빈 줄 한 줄. `조회: Go` 면 필터 바 마지막 줄의 영역 오른쪽 끝에 `Go` 액션을 놓고(자리가 없으면 다음 줄 오른쪽 끝), 그 뒤에 빈 줄 한 줄.
 액션은 결과 테이블 머리글 바로 윗줄(테이블 툴바)에 결과 테이블의 오른쪽 끝에 맞춰 오른쪽 정렬한다(간격 한 칸). 액션이 테이블보다 넓어 영역 왼쪽을
 넘으면 영역 오른쪽 끝 기준으로 바꾼다. 결과 테이블이 없으면 영역 오른쪽 끝 기준으로 그 자리(빈 줄 다음 줄)에 둔다.
-결과 테이블은 열마다 머리글 칸과 빈 행 `빈_행` 줄(이어 붙음).
+결과 테이블은 열마다 머리글 칸과 빈 행 `빈_행` 줄(이어 붙음). `칸_수.열` 너비로 영역을 넘치면 열 너비를 1칸으로 좁혀 다시 배치한다(경고).
 """
 from __future__ import annotations
 
@@ -666,12 +666,13 @@ def read_previous(item: dict, body: list[str], sname: str) -> tuple[list[tuple[s
 
 def draw(
     ed: SheetXml, styles: StylesXml, item: dict, body: list[str], sname: str, problem,
-    old_body: list[str] | None = None,
+    old_body: list[str] | None = None, warn=None,
 ) -> int | None:
     """한 화면을 그린다. 그린 칸 수를 낸다(소절이 없거나 비어 0). 이름 빈칸·영역 초과·영역 안 값은 쓰지 않고 problem 으로 알리고 None.
 
     `old_body` 가 있으면 지난 판의 같은 그림 절과 비교해(`screen_diff`) 달라진 항목에 번호와 표시 스타일을 겹쳐 쓰고,
     지도 `변경:` 의 변경 내용 표를 채운다. 없으면(첫 판 등) 표시 없이 그린다.
+    결과 테이블이 `칸_수.열` 너비로 영역을 넘치면 열 너비를 1칸으로 좁혀 다시 배치하고(`warn(시트, 항목, 사유)` 로 알린다), 그래도 넘치면 거절한다.
     """
     where = md_name(item)
     read = _read(item, body, sname, problem)
@@ -681,11 +682,21 @@ def draw(
     if old_body is not None:
         merged = screen_diff.merge(read_previous(item, old_body, sname), read)
         read = (merged.conds, merged.actions, merged.cols, merged.go)
-    boxes, over = layout(item, *read, marks=merged.marks if merged else None)
+    marks = merged.marks if merged else None
+    boxes, over = layout(item, *read, marks=marks)
+    if over and read[2] and item["칸_수"]["열"] > 1:
+        # 결과 테이블이 영역 너비를 넘칠 때만 열 너비를 1칸으로 좁혀 다시 배치한다. 중간 값(예: 3칸 → 2칸)은 시도하지 않는다 — 단순하게 1칸만.
+        # 넘치지 않은 표는 이 길로 오지 않으므로 지금과 셀 하나까지 같다. 삭제 항목을 합친 목록(`read`)이 기준이다.
+        narrow = {**item, "칸_수": {**item["칸_수"], "열": 1}}
+        boxes, over = layout(narrow, *read, marks=marks)
+        if not over:
+            item = narrow
+            if warn is not None:
+                warn(sname, where, f"{item['이름']} 결과 테이블 열이 많아({len(read[2])}개) 열 너비를 1칸으로 줄였다")
     if over:
         problem(sname, where, (
             f"{where} 이 영역 {item['영역']} 를 넘는다 — 넘친 항목: {', '.join(over[:12])}{' …' if len(over) > 12 else ''}. "
-            "영역을 넓히거나 항목을 줄이거나 지도의 `칸_수` 를 줄인다(자르지 않는다)"
+            "영역을 넓히거나 항목을 줄이거나 지도의 `칸_수` 를 줄이거나 실제 화면 캡처를 쓴다(자르지 않는다)"
         ))
         return None
     c0, r0, c1, r1 = parse_range(item["영역"])

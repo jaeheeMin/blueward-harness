@@ -156,6 +156,25 @@ def test_추가_수정_삭제가_번호와_스타일로_표시되고_변경_표�
     assert _fill(_at(ws, "기간 *")) == "FFD9E1F2" and _fill(_at(ws, "취소")) != YELLOW and not _at(ws, "취소").font.strike
 
 
+def test_열이_추가돼_9열이_되면_좁힌_배치에도_표시와_변경_표가_맞다(proj, capsys):
+    cols = lambda names: "| 열 |\n|---|\n" + "".join(f"| {n} |\n" for n in names)  # noqa: E731
+    old_names = [f"열{i}" for i in range(1, 9)]  # 8열은 2칸 너비로 들어간다
+    _map(proj, extra=CHANGE % 5)
+    _origin(proj, screen(cond=None, btn=None, res=cols(old_names)))
+    code, report = _run(proj, capsys, screen(cond=None, btn=None, res=cols([*old_names[:4], *old_names[5:], "열9", "열10"])))
+    # 열5 삭제 + 열9·열10 추가 → 합친 목록 10열(삭제 항목 포함, 새 판은 9열)이 2칸 너비로는 넘쳐 1칸으로 줄어든다. 판정은 합친 목록 기준이다.
+    assert code == 0, report
+    warns = [w["reason"] for w in report["warnings"] if w["item"] == "화면 1 그림"]
+    assert len(warns) == 1 and "(10개)" in warns[0]
+    ws = _sheet(proj, report)
+    gone = _at(ws, "① 열5")
+    assert _fill(gone) == GREY and gone.font.strike and _fill(ws.cell(gone.row + 1, gone.column)) == GREY
+    add = _at(ws, "② 열9")
+    assert _fill(add) == YELLOW and ws.cell(add.row + 1, add.column).fill.fill_type is None
+    assert add.column == gone.column + 4 and _merges(ws) == set()  # 1칸 너비라 한 칸씩
+    assert [(r[0], r[1]) for r in _table(ws)] == [("①", "삭제"), ("②", "추가"), ("③", "추가")]
+
+
 def test_이름을_바꾸면_삭제와_추가다(proj, capsys):
     _map(proj, extra=CHANGE % 5)
     _origin(proj, OLD)
