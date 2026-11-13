@@ -351,7 +351,7 @@ svg text { font-family: var(--body); fill: var(--fg); }
       </div>
     </div>
     <div class="rail-foot">
-      <div class="note">harness 0.10.279, public-cloud main 기준 (2026-11-13)</div>
+      <div class="note">harness 0.10.280, public-cloud main 기준 (2026-11-13)</div>
     </div>
   </nav>
 
@@ -1587,7 +1587,7 @@ fix/31-broken-link</pre>
       <tr><td><code>CR-005</code></td><td>표준 객체를 직접 고치지 않고 Released API(Application Programming Interface), Cloud BAdI 만 쓴다</td><td>Public Cloud 가 막음</td></tr>
       <tr><td><code>CR-006</code></td><td>회사코드 같은 하드코딩 값은 설정이나 상수로 뺀다</td><td>사람</td></tr>
       <tr><td><code>CR-007</code></td><td>오류를 조용히 삼키지 않는다. 빈 CATCH 금지</td><td>Hook + Actions</td></tr>
-      <tr><td><code>CR-008</code></td><td>이름 접두어와 네이밍은 프로젝트 <code>conventions/naming.md</code> 를 따른다</td><td>사람</td></tr>
+      <tr><td><code>CR-008</code></td><td>이름 접두어와 네이밍은 프로젝트 <code>conventions/naming.md</code> 를 따른다. 프로젝트에 <code>conventions/naming.yaml</code>(객체 종류별 이름 형식·최대 길이)이 있으면 객체를 만들거나 이름을 바꾸기 전에 훅이 막고, PR 은 <code>src/</code> 에 새로 생긴 객체만 봐(이미 있는 객체를 고치는 건 안 막아). 표준에 없는 정당한 이름은 그 파일의 <code>예외</code> 에 넣어</td><td>사람 + (naming.yaml 이 있으면) Hook + Actions</td></tr>
       <tr><td><code>CR-009</code></td><td>데이터를 바꾸는 앱은 권한을 검사한다. behavior pool 의 권한 메서드가 <code>auth-allowed</code> 만 대입하고 <code>AUTHORITY-CHECK</code> 가 없으면 <b>경고</b>(막지는 않고 PR(Pull Request) 코멘트에 나와). 권한을 전부 허용으로 두고 EML(Entity Manipulation Language) 을 <code>PRIVILEGED</code> 로 부르면 표준 BO(Business Object) 의 권한 검사가 건너뛰어질 수 있어 따로 경고(<code>harness:allow CR-009 &lt;이유&gt;</code> 로 예외)</td><td>Actions 경고 + risk-gate</td></tr>
     </table></div>
     <p class="small" style="margin-top:10px">꼭 예외가 필요하면 그 줄이나 바로 위에 <code>harness:allow CR-001 &lt;이유&gt;</code> 주석을 달아. 이유가 없으면 인정 안 돼.</p>

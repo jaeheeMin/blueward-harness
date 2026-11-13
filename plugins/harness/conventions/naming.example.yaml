@@ -1,0 +1,31 @@
+# 개발 표준 이름 규칙 예시 — 프로젝트의 conventions/naming.yaml 로 복사해 고객사 표준에 맞게 고친다.
+#
+# 이 이름으로 둔 파일이 있으면 하네스가 읽어 검사한다.
+#   - SAP 객체를 만들거나 이름을 바꾸기 직전(createObject, renameExecute, renamePreview 훅)
+#   - PR 에서 src/ 에 새로 생긴 객체(이미 있는 객체를 고치는 PR 은 막지 않는다)
+# 파일이 없으면 검사하지 않는다. 있는데 못 읽으면(키 오타, 정규식 오류) 통과로 두지 않고 검사 불능으로 막는다.
+# 이 예시는 블루어드 사내 표준(SAP S/4HANA Public Cloud & BTP Naming Guide v1.2)을 옮긴 것이다.
+#
+# - 객체 종류는 ADT objtype 앞 4글자(CLAS, DDLS, TABL, BDEF ...). TABL/DT 처럼 하위 종류까지 적으면 그 종류만 따로 본다.
+#   파일 이름만 아는 PR 검사는 하위 종류를 몰라서 TABL 규칙이 없으면 TABL/.. 규칙 중 하나라도 맞으면 통과로 본다.
+# - 형식은 정규식이고 전체 일치, 대소문자는 무시한다. {영역} 은 아래 영역코드 목록으로 바뀐다.
+# - 여기에 없는 종류는 규칙이 없는 것이라 통과한다.
+# - 예외는 형식·길이 검사를 건너뛰는 이름이다(대소문자 무시). 사람이 결정해서 넣는다.
+
+영역코드: [SD, LE, PP, MM, CM, FB, PM, HR, VC, MD, GV, FI, CO, TR, IM]
+
+객체:
+  DEVC: {형식: '^Z{영역}(_.+)?$', 최대_길이: 30}                     # Package
+  DOMA: {형식: '^ZD_.+$', 최대_길이: 30}                             # Domain
+  DTEL: {형식: '^ZE_.+$', 최대_길이: 30}                             # Data Element
+  TABL/DS: {형식: '^Z{영역}_S_.+$', 최대_길이: 30}                   # Structure
+  TABL/DT: {형식: '^Z{영역}[AD]\d{4}(_.+)?$', 최대_길이: 16}         # DB Table (A: 마스터, D: 트랜잭션 + 숫자 4자리, 뒤에 _Text 선택)
+  DDLS: {형식: '^Z{영역}_([RICAXEFD]|TF)_.+$', 최대_길이: 30}        # CDS View, CDS Table Function(TF)
+  BDEF: {형식: '^Z{영역}_([RICAXEFD]|TF)_.+$', 최대_길이: 30}        # 연결한 CDS 와 같은 이름
+  DDLX: {형식: '^Z{영역}_([RICAXEFD]|TF)_.+$', 최대_길이: 30}        # 연결한 CDS 와 같은 이름
+  SRVD: {형식: '^Z{영역}_(UI|API)_.+$', 최대_길이: 40}               # Service Definition
+  SRVB: {형식: '^Z{영역}_(UI|API|OB)_.+_(V2|V4|REST)$', 최대_길이: 30}  # Service Binding
+  CLAS: {형식: '^Z(CL|BP)_.+$', 최대_길이: 30}                       # ABAP Class(ZCL_, AMDP 는 ZCL_AMDP_), Behavior Pool(ZBP_)
+  MSAG: {형식: '^Z{영역}$', 최대_길이: 20}                           # Message Class
+
+예외: []

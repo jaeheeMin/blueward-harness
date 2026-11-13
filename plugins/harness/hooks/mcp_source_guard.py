@@ -31,6 +31,12 @@ Claude 가 ADT MCP 서버(예: npm `mcp-abap-abap-adt-api`)의 도구로 오브�
    `refactoring.affectedObjects[].textReplaceDeltas[].contentNew` 안의 ABAP
    코드 조각에만 있어서, 그 조각들을 이어 붙여 검사한다.
 
+**개발 표준 이름 규칙(#943).** 프로젝트에 `conventions/naming.yaml` 이 있으면 `createObject` 와
+`renameExecute`·`renamePreview` 는 CR-001 을 통과한 새 이름을 `checker.naming_rules`(엔진, uvx)로 한 번 더
+본다. 파일이 없으면 이 검사를 하지 않는다(엔진도 부르지 않는다). 종류는 createObject 의 `objtype`, 이름
+바꾸기의 `adtObjectUri.uri` 에서 얻되 `oldName` 이 그 객체 이름과 같을 때만 본다(메서드·변수 이름
+바꾸기는 건너뛴다). 엔진 실패나 검사 불능은 거절한다.
+
 **입력 모양.** #61 조사로 확인한 각 도구의 `tool_input` 모양:
 
 | 도구 | 새 이름 위치 | 형태 |
@@ -79,6 +85,7 @@ from urllib.parse import unquote, urlsplit
 # 스크립트로 실행되면 이 폴더가 sys.path 맨 앞이라 바로 import 되지만, 다른 방식으로
 # 불려도 같은 폴더의 모듈을 찾게 한다.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import adt_activation  # noqa: E402
 import adt_tiers  # noqa: E402
 
 import console_block  # noqa: E402
@@ -436,10 +443,12 @@ def _filter_report_to_rules(report: dict, keep_rules: set[str]) -> bool:
     return still_violation
 
 
-def _run_engine_and_get_violations(tool: str, content: str, suffix: str, context: str) -> dict:
+def _run_engine_and_get_violations(
+    tool: str, content: str, suffix: str, context: str, on_clean=None
+) -> dict:
     """스테이징한 코드를 엔진으로 검사한다.
 
-    통과(0)면 여기서 끝낸다(`allow()`). 엔진을 못 받거나 실행하지 못했거나
+    통과(0)면 여기서 끝낸다(`allow()`) — 그 전에 `on_clean` 이 있으면 부른다(이름 규칙, #943). 엔진을 못 받거나 실행하지 못했거나
     (`OSError`/타임아웃), 출력을 해석하지 못했거나, 종료코드가 2(검사 불능)이거나
     0/1/2 어디에도 없으면 여기서 끝낸다(`deny()`) — `_check_code` 와 같은 fail-closed
     (CLAUDE.md 원칙 7). 위반(1)일 때만 리포트를 돌려줘 호출부가 규칙별로 다시
@@ -472,6 +481,8 @@ def _run_engine_and_get_violations(tool: str, content: str, suffix: str, context
             )
 
     if done.returncode == 0:
+        if on_clean is not None:
+            on_clean()
         allow()
 
     try:
@@ -512,14 +523,148 @@ def _run_engine_and_get_violations(tool: str, content: str, suffix: str, context
     return report
 
 
-def _check_name(tool: str, name: str) -> None:
+NAMING_CONFIG = "conventions/naming.yaml"
+
+
+def _find_naming_config(cwd: object) -> Path | None:
+    """작업 폴더에서 위로 올라가며 `conventions/naming.yaml` 을 찾는다(#943). `.git` 폴더에서 멈춘다.
+
+    파일이 없으면 None — 이름 규칙을 검사하지 않는 지금 동작 그대로다. 훅은 pyyaml 이 없어 파일을 읽지
+    않고 있는지만 보며, 읽고 판정하는 것은 엔진(`checker.naming_rules`)이 한다.
+    """
+    start = Path(cwd) if isinstance(cwd, str) and cwd else Path(os.getcwd())
+    try:
+        start = start.resolve()
+    except OSError:
+        pass
+    for parent in [start, *start.parents]:
+        if (parent / NAMING_CONFIG).is_file():
+            return parent / NAMING_CONFIG
+        if (parent / ".git").exists():
+            return None
+    return None
+
+
+# 이름 규칙 종류를 알 수 없는 생성 유형. 펑션 모듈·인클루드는 이름이 그룹 안의 것이라 표준 대상이 아니다.
+_NAMING_SKIP_OBJTYPES = frozenset({"FUGR/FF", "FUGR/I"})
+
+
+def _naming_kind(tool: str, tool_kind: str, tool_input: dict) -> str | None:
+    """이름 규칙 검사에 쓸 객체 종류. 알 수 없어 검사하지 않는 경우는 None.
+
+    createObject 는 `objtype`(`CLAS/OC` 등)으로 안다. 못 읽으면 거절한다(설정 파일이 있을 때만 불린다).
+    renameExecute·renamePreview 는 `adtObjectUri` 로 종류를 안다. abap-adt-api 의 RenameRefactoringProposal 은
+    `{oldName, newName, adtObjectUri: UriParts}` 이고 UriParts 는 `{uri, query, range, hashparms}` 객체다
+    (문자열도 방어로 받는다). `uri` 에서 `key_from_url` 로 객체 종류·이름을 얻고, `oldName` 이 그 객체 이름과
+    같을 때(대소문자 무시)만 객체 이름 바꾸기로 보고 검사한다. 클래스 이름 바꾸기는 커서가 소스 안이라 uri 에
+    `/source/main` 이 붙을 수 있어 URL 모양으로는 거르지 않는다. `oldName` 이 다르면(메서드·변수)
+    종류가 없어 건너뛴다. 모양이 낯설면(uri·oldName 없음, 종류 못 얻음) 검사하지 않고 CR-001 만 본다.
+    """
+    if tool_kind == "createObject":
+        objtype = tool_input.get("objtype")
+        if not isinstance(objtype, str) or not objtype.strip():
+            deny(
+                f"이 MCP 쓰기({tool})의 objtype 이 없거나 문자열이 아니어서 개발 표준 이름 규칙"
+                f"({NAMING_CONFIG})을 확인할 수 없습니다.\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                + NEXT_FIX_INPUT
+            )
+        objtype = objtype.strip().upper()
+        return None if objtype in _NAMING_SKIP_OBJTYPES else objtype
+    if tool_kind in ("renameExecute", "renamePreview"):
+        sub_field, _ = _NAME_FIELD_BY_TOOL_KIND[tool_kind]
+        parsed = _parse_json_or_dict(tool_input.get(sub_field))
+        if not parsed:
+            return None
+        uri = parsed.get("adtObjectUri")
+        if isinstance(uri, dict):
+            uri = uri.get("uri")  # abap-adt-api 의 UriParts 는 객체 { uri, query, range, hashparms }
+        old_name = parsed.get("oldName")
+        if not isinstance(uri, str) or not isinstance(old_name, str):
+            return None
+        key = adt_activation.key_from_url(uri)
+        if key is None or key["type"] == "URL" or old_name.strip().upper() != key["name"]:
+            return None  # 종류를 못 얻었거나 oldName 이 객체 이름이 아니다(메서드·변수)
+        return key["type"]
+    return None
+
+
+def _check_naming(tool: str, kind: str, name: str, cwd: object) -> None:
+    """`conventions/naming.yaml` 의 이름 규칙으로 새 이름을 본다(#943). 위반이면 거절하고, 통과하면 돌아간다.
+
+    엔진을 못 부르거나 검사 불능(설정 오류)이면 거절한다 — 통과로 뭉개지 않는다(원칙 7).
+    """
+    root = str(cwd) if isinstance(cwd, str) and cwd else os.getcwd()
+    cmd = [
+        "uvx", "--from", engine_spec(), "python", "-P", "-m", "checker.naming_rules",
+        "check", "--type", kind, "--name", name, "--root", root,
+    ]
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    try:
+        done = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", env=env,
+            timeout=ENGINE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        deny(
+            "harness 가 개발 표준 이름 규칙 검사 엔진을 받거나 실행하지 못해 이 MCP 쓰기를 "
+            f"확인할 수 없었습니다.\n{kind} 새 이름: {name}\n사유: {exc}\n"
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + engine_hint() + NEXT_ENGINE_FAIL
+        )
+    try:
+        result = json.loads(done.stdout)
+        if not isinstance(result, dict):
+            raise ValueError("JSON 객체가 아니다")
+    except ValueError:
+        deny(
+            "개발 표준 이름 규칙 검사기의 출력을 해석하지 못했습니다.\n"
+            f"MCP 도구: {tool}, {kind} 새 이름: {name}\n"
+            f"{(done.stderr or done.stdout or '').strip()[:500]}\n"
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            + engine_hint() + NEXT_RETRY
+        )
+
+    if done.returncode == 0:
+        return
+    if done.returncode == 1 and result.get("status") == "violation":
+        rules = result.get("rules") or []
+        how = " 또는 ".join(
+            f"{r.get('형식')}" + (f"(최대 {r['최대_길이']}자)" if r.get("최대_길이") else "") for r in rules
+        )
+        deny(
+            f"harness: 이 MCP 쓰기({tool})가 새로 붙이려는 이름이 이 프로젝트의 개발 표준 이름 규칙을 "
+            f"따르지 않습니다({NAMING_CONFIG}).\n"
+            f"{kind} 새 이름: {name}\n"
+            f"이유: {'; '.join(result.get('reasons') or [])}\n"
+            f"{NAMING_CONFIG} 의 {kind} 형식은 {how} 입니다.\n\n"
+            "다음: Claude 가 표준에 맞는 이름으로 같은 MCP 도구를 다시 호출하십시오. 표준에 없는 "
+            "정당한 이름이면 사람이 결정해 그 이름을 같은 파일의 예외 목록에 넣은 뒤 다시 시도하십시오."
+        )
+    deny(
+        "개발 표준 이름 규칙을 확인하지 못했습니다(검사 불능).\n"
+        f"MCP 도구: {tool}, {kind} 새 이름: {name}\n"
+        f"사유: {result.get('message') or (done.stderr or '').strip()[:300] or '종료코드 ' + str(done.returncode)}\n"
+        "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+        f"다음: {NAMING_CONFIG} 을 고쳐야 하는 사유라면 그 파일을 관리하는 담당자에게 알리십시오"
+        "(🚨 직접 해 주세요). 그 밖이면 같은 작업을 한 번 더 시도하십시오."
+    )
+
+
+def _check_name(tool: str, name: str, naming_kind: str | None = None, cwd: object = None) -> None:
     """rename*/extractMethodPreview/createObject 가 새로 붙이려는 이름에 CR-001 만
     적용한다(#61) — 이름 하나짜리 코드에는 CR-002 대상(반복문)이 있을 수 없지만,
-    엔진 쪽이 나중에 바뀌어도 흔들리지 않게 방어적으로 걸러 둔다."""
+    엔진 쪽이 나중에 바뀌어도 흔들리지 않게 방어적으로 걸러 둔다.
+
+    CR-001 을 통과하면 `naming_kind` 가 있을 때 프로젝트 이름 규칙(`conventions/naming.yaml`, #943)도 본다."""
     context = f"새 이름: {name}"
-    report = _run_engine_and_get_violations(tool, name + "\n", ".abap", context)
+    def check_naming() -> None:
+        if naming_kind:
+            _check_naming(tool, naming_kind, name, cwd)
+
+    report = _run_engine_and_get_violations(tool, name + "\n", ".abap", context, check_naming)
 
     if not _filter_report_to_rules(report, {"CR-001"}):
+        check_naming()
         allow()
 
     deny(
@@ -763,7 +908,11 @@ def _main() -> None:
     # undeployUi5App, publishBusinessCatalog — 새
     # 이름 하나만 CR-001 로 본다(#61, 모듈 docstring).
     name = _extract_name(tool, tool_kind, tool_input)
-    _check_name(tool, name)
+    cwd = payload.get("cwd")
+    naming_kind = None
+    if tool_kind in ("createObject", "renameExecute", "renamePreview") and _find_naming_config(cwd):
+        naming_kind = _naming_kind(tool, tool_kind, tool_input)  # 이름 규칙 파일이 있을 때만(#943)
+    _check_name(tool, name, naming_kind, cwd)
 
 
 def _force_utf8_io() -> None:

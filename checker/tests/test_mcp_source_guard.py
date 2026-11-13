@@ -341,6 +341,139 @@ def test_createobject는_이름이_없으면_검사_불능으로_거절한다(in
     assert "확인되지 않는 상태로 통과시키지 않습니다" in reason
 
 
+# --- 개발 표준 이름 규칙(#943): conventions/naming.yaml 이 있을 때만 -------------
+
+_NAMING_YAML = """\
+영역코드: [SD, LE]
+객체:
+  CLAS: {형식: '^Z(CL|BP)_.+$', 최대_길이: 30}
+  MSAG: {형식: '^Z{영역}$', 최대_길이: 20}
+"""
+
+
+def _naming_project(tmp_path: Path, text: str | None = _NAMING_YAML) -> str:
+    (tmp_path / ".git").mkdir()
+    if text is not None:
+        (tmp_path / "conventions").mkdir()
+        (tmp_path / "conventions" / "naming.yaml").write_text(text, encoding="utf-8")
+    return str(tmp_path)
+
+
+def _create(objtype, name, cwd) -> dict:
+    tool_input = {"name": name, "parentName": "ZPKG", "description": "d", "parentPath": "/x"}
+    if objtype is not None:
+        tool_input["objtype"] = objtype
+    return {"tool_name": "mcp__abap_adt__createObject", "tool_input": tool_input, "cwd": cwd}
+
+
+def test_createobject는_이름_규칙에_맞으면_통과한다(installed_hook, tmp_path):
+    payload = _create("CLAS/OC", "ZCL_ORDER", _naming_project(tmp_path))
+    code, out = run_hook(installed_hook, payload, str(ENGINE_ROOT))
+    assert code == 0 and out is None
+
+
+def test_createobject는_이름_규칙을_어기면_거절한다(installed_hook, tmp_path):
+    payload = _create("CLAS/OC", "YCL_ORDER", _naming_project(tmp_path))
+    code, out = run_hook(installed_hook, payload, str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "conventions/naming.yaml" in reason
+    assert "^Z(CL|BP)_.+$" in reason
+    assert "YCL_ORDER" in reason
+    assert "예외" in reason
+
+
+def test_createobject는_영역_코드를_넣어_본다(installed_hook, tmp_path):
+    cwd = _naming_project(tmp_path)
+    assert run_hook(installed_hook, _create("MSAG/N", "ZSD", cwd), str(ENGINE_ROOT)) == (0, None)
+    code, out = run_hook(installed_hook, _create("MSAG/N", "ZXX", cwd), str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+
+
+def test_createobject는_규칙에_없는_종류는_통과한다(installed_hook, tmp_path):
+    payload = _create("INTF/OI", "anything", _naming_project(tmp_path))
+    assert run_hook(installed_hook, payload, str(ENGINE_ROOT)) == (0, None)
+
+
+def test_이름_규칙_파일이_없으면_지금_동작_그대로다(installed_hook, tmp_path):
+    payload = _create("CLAS/OC", "YCL_ORDER", _naming_project(tmp_path, None))
+    assert run_hook(installed_hook, payload, str(ENGINE_ROOT)) == (0, None)
+
+
+def test_이름_규칙_파일이_깨졌으면_검사_불능으로_거절한다(installed_hook, tmp_path):
+    payload = _create("CLAS/OC", "ZCL_ORDER", _naming_project(tmp_path, "모르는키: 1\n"))
+    code, out = run_hook(installed_hook, payload, str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "검사 불능" in reason and "확인되지 않는 상태로 통과시키지 않습니다" in reason
+
+
+def test_이름_규칙이_있는데_objtype이_없으면_거절한다(installed_hook, tmp_path):
+    payload = _create(None, "ZCL_ORDER", _naming_project(tmp_path))
+    code, out = run_hook(installed_hook, payload, str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    assert "objtype" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_엔진을_받지_못하면_거절한다(installed_hook, tmp_path):
+    payload = _create("CLAS/OC", "ZCL_ORDER", _naming_project(tmp_path))
+    code, out = run_hook(installed_hook, payload, str(tmp_path / "없는-엔진"))
+    assert decision(out) == "deny"
+
+
+def _uri_parts(uri: str) -> dict:
+    """abap-adt-api 의 UriParts 모양(객체, urlparser.d.ts)."""
+    return {"uri": uri, "range": {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 8}}}
+
+
+def _rename(uri, new_name, cwd, tool="renameExecute", field="refactoring", old_name="ZCL_OLD") -> dict:
+    refactoring = {"newName": new_name}
+    if old_name is not None:
+        refactoring["oldName"] = old_name
+    if uri is not None:
+        refactoring["adtObjectUri"] = uri
+    return {"tool_name": f"mcp__abap_adt__{tool}", "tool_input": {field: refactoring}, "cwd": cwd}
+
+
+CLASS_SOURCE_URI = "/sap/bc/adt/oo/classes/zcl_old/source/main"
+
+
+def test_객체_이름_바꾸기는_이름_규칙을_본다_uri_parts_객체(installed_hook, tmp_path):
+    cwd = _naming_project(tmp_path)
+    ok = _rename(_uri_parts(CLASS_SOURCE_URI), "ZCL_NEW", cwd)
+    assert run_hook(installed_hook, ok, str(ENGINE_ROOT)) == (0, None)
+    bad = _rename(_uri_parts(CLASS_SOURCE_URI), "XCL_NEW", cwd)
+    code, out = run_hook(installed_hook, bad, str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    assert "conventions/naming.yaml" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    bad_preview = _rename(_uri_parts(CLASS_SOURCE_URI), "XCL_NEW", cwd, "renamePreview", "renameRefactoring")
+    code, out = run_hook(installed_hook, bad_preview, str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+
+
+def test_객체_이름_바꾸기_adtobjecturi가_문자열이어도_본다(installed_hook, tmp_path):
+    cwd = _naming_project(tmp_path)
+    code, out = run_hook(
+        installed_hook, _rename("/sap/bc/adt/oo/classes/zcl_old", "XCL_NEW", cwd, old_name="zcl_old"), str(ENGINE_ROOT)
+    )
+    assert decision(out) == "deny"
+
+
+@pytest.mark.parametrize(
+    "uri,old_name",
+    [
+        (_uri_parts(CLASS_SOURCE_URI + "#type=CLAS/OM;name=run"), "run"),  # 메서드: oldName 이 객체 이름이 아니다
+        (_uri_parts(CLASS_SOURCE_URI), "lv_count"),  # 변수
+        (_uri_parts(CLASS_SOURCE_URI), None),  # oldName 없음
+        (None, "ZCL_OLD"),  # uri 없음
+        (_uri_parts("/sap/bc/adt/unknown/thing"), "thing"),  # 종류를 못 얻음
+    ],
+)
+def test_메서드_변수_이름_바꾸기나_모양이_낯설면_이름_규칙을_건너뛴다(installed_hook, tmp_path, uri, old_name):
+    payload = _rename(uri, "XXX_NEW", _naming_project(tmp_path), old_name=old_name)
+    assert run_hook(installed_hook, payload, str(ENGINE_ROOT)) == (0, None)
+
+
 # --- extractMethodExecute: 이름 필드가 없어 contentNew 조각을 이어 붙여 본다(#61) --
 
 

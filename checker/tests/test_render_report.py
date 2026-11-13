@@ -315,3 +315,24 @@ def test_코드_검사_불능은_따로_알린다():
     assert "### ⚠️ 검사 불능" in text
     assert "엔진을 받지 못했습니다" in text
     assert "코드의 문제가 아닙니다" in text
+
+
+def test_이름_규칙_위반은_개발_표준_이름_절에_표로_보인다():
+    report = _report(0, 0)
+    report["naming"] = {
+        "status": "violation",
+        "checked": 2,
+        "violations": [
+            {"file": "src/xcl_bad.clas.abap", "type": "CLAS", "name": "XCL_BAD", "reasons": ["형식 ^Z(CL|BP)_.+$ 에 맞지 않는다"]}
+        ],
+    }
+    text = render(report, 1)
+    assert "## 개발 표준 이름" in text
+    assert "src/xcl_bad.clas.abap" in text and "XCL_BAD" in text
+
+
+def test_이름_규칙_검사_불능은_통과도_위반도_아니라고_말한다():
+    report = _report(0, 0)
+    report["naming"] = {"status": "cannot_check", "message": "설정이 깨졌다"}
+    text = render(report, 2)
+    assert "검사 불능" in text and "통과도 위반도 아닙니다" in text
