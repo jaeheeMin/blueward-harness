@@ -135,7 +135,7 @@
       if (m && typeof m === 'object') m = m.message || JSON.stringify(m);
       if (m) return String(m);
     }
-    return '요청을 처리하지 못했습니다 (' + status + ')';
+    return '요청을 처리하지 못했어 (' + status + ')';
   }
   /* 브라우저는 한 서버에 HTTP/1.x 연결을 6개까지만 연다(SSE 가 1개씩 차지한다). 읽기(GET)는 동시에 MAX_GETS 개까지만 보내고
      나머지는 줄 세워, 느린 응답 몇 개가 연결을 다 쓰고 다른 요청을 막지 않게 한다. 쓰기(POST 등)는 줄 세우지 않는다. */
@@ -165,7 +165,7 @@
     }
     return fetch(path, opts).then(function (res) {
       clearTimeout(timer);
-      if (res.status === 401) { setConn('auth'); throw new ApiError(401, '콘솔을 다시 여세요.'); }
+      if (res.status === 401) { setConn('auth'); throw new ApiError(401, '콘솔을 다시 열어 줘.'); }
       setConn('ok');
       return res.text().then(function (t) {
         var data = null;
@@ -176,7 +176,7 @@
     }, function () {
       clearTimeout(timer);
       setConn('down');
-      throw new ApiError(0, '서버에 연결할 수 없습니다.');
+      throw new ApiError(0, '서버에 연결할 수 없어.');
     });
   }
   function qs(obj) {
@@ -430,7 +430,7 @@
     clear(b);
     if (conn.state === 'down') {
       b.hidden = false;
-      b.appendChild(h('span', { text: '서버와 연결이 끊겼습니다. 다시 연결하는 중입니다. 화면의 내용은 최신이 아닐 수 있습니다.' }));
+      b.appendChild(h('span', { text: '서버와 연결이 끊겼어. 다시 연결하는 중이야. 화면의 내용은 최신이 아닐 수 있어.' }));
       b.appendChild(h('button', { type: 'button', class: 'btn sm', text: '지금 다시 시도', onClick: function () { retry = 0; scheduleRetry(); } }));
     } else if (handoffNote) {
       b.hidden = false;
@@ -448,8 +448,8 @@
   function renderAuth() {
     appEl.dataset.auth = '1';
     clear(mainEl);
-    mainEl.appendChild(stateBox('plug', '콘솔을 다시 여세요',
-      [h('span', { text: '이 화면은 연결이 끊겼습니다. 바탕화면의 Blueward Harness 를 다시 누르면 새로 열립니다. 바로가기가 없으면 Claude Code 에서 ' }), h('code', { text: '/harness:open' }), h('span', { text: ' 을 실행하세요.' })]));
+    mainEl.appendChild(stateBox('plug', '콘솔을 다시 열어 줘',
+      [h('span', { text: '이 화면은 연결이 끊겼어. 바탕화면의 Blueward Harness 를 다시 누르면 새로 열려. 바로가기가 없으면 Claude Code 에서 ' }), h('code', { text: '/harness:open' }), h('span', { text: ' 을 실행해 줘.' })]));
     if (es) { es.close(); es = null; }
     clearTimeout(retryTimer);
   }
@@ -461,7 +461,7 @@
       action || null);
   }
   function loadingBox(label) {
-    return h('div', { class: 'state', role: 'status' }, h('p', { text: label || '불러오는 중입니다.' }), h('div', { class: 'progress' }, h('i')));
+    return h('div', { class: 'state', role: 'status' }, h('p', { text: label || '불러오는 중이야.' }), h('div', { class: 'progress' }, h('i')));
   }
 
   /* ---------- 사이드바 ---------- */
@@ -486,14 +486,14 @@
   // 계획 모드에서 AI 가 계획을 다 세우고 "이대로 진행해도 되나" 묻는 요청(ExitPlanMode, #861)
   function isPlan(r) { return !!r && (r.toolName || r.tool_name) === 'ExitPlanMode'; }
   function requestTitle(r) {
-    if (!r) return '요청을 확인하세요';
+    if (!r) return '요청을 확인해 줘';
     if (isPlan(r)) return '계획 확인';
     if (kindOf(r) === 'elicitation' && r.elicitation) return MS('연결 도구(' + (r.elicitation.server || '?') + ')가 묻는 것: ' + String(r.elicitation.message || '').replace(/\s+/g, ' ').slice(0, 120));
     if (r.title) return MS(r.title);
     var qs_ = questionsOf(r);
-    if (kindOf(r) === 'question') return qs_.length ? MS(qs_[0].question || qs_[0].header || '질문이 있습니다') : '질문이 있습니다';
+    if (kindOf(r) === 'question') return qs_.length ? MS(qs_[0].question || qs_[0].header || '질문이 있어') : '질문이 있어';
     if (r.mcp) return mcpAsk(r.mcp);
-    return (r.toolName || r.tool_name || '도구') + ' 사용을 허용할까요?';
+    return (r.toolName || r.tool_name || '도구') + ' 사용을 허용할까?';
   }
   /* MCP 도구 승인 문장(#864): 서버 이름이 abap·sap 이면 "SAP 시스템 도구", 아니면 "연결 도구". 도구 이름은 display_name 을 우선한다. */
   function mcpAsk(m) {
@@ -687,7 +687,7 @@
     function validated(p) {
       return api('POST', '/api/folders/validate', { path: p }).then(function (v) {
         if (v && (v.ok === true || v.valid === true)) choose(v.path || v.realpath || p);
-        else msg = (v && (v.error || v.reason || v.message)) || '이 폴더를 사용할 수 없습니다.';
+        else msg = (v && (v.error || v.reason || v.message)) || '이 폴더를 사용할 수 없어.';
       });
     }
     function browse() {
@@ -696,7 +696,7 @@
       api('POST', '/api/folders/pick', { path: sel || '' }).then(function (d) {
         if (d && d.cancelled) return null;
         var p = d && d.path;
-        if (!p) { msg = '고른 폴더를 받지 못했습니다. 경로를 직접 적어 주세요.'; typing = true; return null; }
+        if (!p) { msg = '고른 폴더를 받지 못했어. 경로를 직접 적어 줘.'; typing = true; return null; }
         return validated(p);
       }).then(null, function (e) { msg = e.message; typing = true; }).then(function () { browseBusy = false; if (wrap.isConnected) draw(); });
     }
@@ -915,7 +915,7 @@
     return sid ? link('/s/' + encodeURIComponent(sid), { class: 'linkbtn', text: label || '세션으로 돌아가기' }) : link('/', { class: 'linkbtn', text: '처음 화면으로' });
   }
   function missingView(root) {
-    root.appendChild(stateBox('warn', '이 주소의 화면이 없습니다', '주소를 다시 확인하거나 처음 화면으로 이동하세요.', link('/', { class: 'btn', text: '처음 화면으로' })));
+    root.appendChild(stateBox('warn', '이 주소의 화면이 없어', '주소를 다시 확인하거나 처음 화면으로 이동해 줘.', link('/', { class: 'btn', text: '처음 화면으로' })));
   }
 
   /* ---------- 홈과 갈래 화면 조각(flow-ui.js) ---------- */
@@ -997,9 +997,9 @@
     function draw() {
       var s = cur();
       if (!built) {
-        if (errored && errored.status === 404) { clear(root); root.appendChild(stateBox('warn', '세션을 찾을 수 없습니다', '이미 끝났거나 목록에서 지워진 세션입니다.', link('/', { class: 'btn', text: '처음 화면으로' }))); return; }
-        if (errored && !s.id) { clear(root); root.appendChild(stateBox('warn', '세션을 불러오지 못했습니다', errored.message, h('button', { type: 'button', class: 'btn', text: '다시 시도', onClick: function () { errored = null; fetchDetail(); } }))); return; }
-        if (!s.id) { clear(root); root.appendChild(loadingBox('세션을 불러오는 중입니다.')); return; }
+        if (errored && errored.status === 404) { clear(root); root.appendChild(stateBox('warn', '세션을 찾을 수 없어', '이미 끝났거나 목록에서 지워진 세션이야.', link('/', { class: 'btn', text: '처음 화면으로' }))); return; }
+        if (errored && !s.id) { clear(root); root.appendChild(stateBox('warn', '세션을 불러오지 못했어', errored.message, h('button', { type: 'button', class: 'btn', text: '다시 시도', onClick: function () { errored = null; fetchDetail(); } }))); return; }
+        if (!s.id) { clear(root); root.appendChild(loadingBox('세션을 불러오는 중이야.')); return; }
         build();
       }
       paint(s);
@@ -1085,10 +1085,10 @@
 
     function changePermission(e) {
       var mode = e.target.value;
-      permBusy = true; permNote = '권한 모드를 바꾸는 중입니다.'; paintPerm(cur());
+      permBusy = true; permNote = '권한 모드를 바꾸는 중이야.'; paintPerm(cur());
       api('PUT', '/api/sessions/' + encodeURIComponent(id) + '/permission', { mode: mode }).then(function (d) {
-        permNote = d && d.live === false ? '다음에 이어서 띄울 때 적용됩니다.' : '권한 모드를 바꿨습니다.';
-      }, function (err) { permNote = '바꾸지 못했습니다: ' + err.message; }).then(function () {
+        permNote = d && d.live === false ? '다음에 이어서 띄울 때 적용돼.' : '권한 모드를 바꿨어.';
+      }, function (err) { permNote = '바꾸지 못했어: ' + err.message; }).then(function () {
         permBusy = false; paintPerm(cur()); refetchSoon();
       });
     }
@@ -1206,8 +1206,8 @@
 
     function interrupt() {
       interruptAsk = false;
-      api('POST', '/api/sessions/' + encodeURIComponent(id) + '/interrupt', {}).then(function () { followNote = '중단을 요청했습니다.'; paintFollowNote(); refetchSoon(); },
-        function (e) { followNote = '중단하지 못했습니다: ' + e.message; paintFollowNote(); });
+      api('POST', '/api/sessions/' + encodeURIComponent(id) + '/interrupt', {}).then(function () { followNote = '중단을 요청했어.'; paintFollowNote(); refetchSoon(); },
+        function (e) { followNote = '중단하지 못했어: ' + e.message; paintFollowNote(); });
       draw();
     }
 
@@ -1998,9 +1998,9 @@
     function draw() {
       clear(root);
       if (!req) {
-        if (errored && errored.status === 404) return root.appendChild(stateBox('warn', '요청을 찾을 수 없습니다', '이미 지나간 요청이거나 콘솔이 다시 시작되어 기록이 없습니다.', link('/', { class: 'btn', text: '처음 화면으로' })));
-        if (errored) return root.appendChild(stateBox('warn', '요청을 불러오지 못했습니다', errored.message, h('button', { type: 'button', class: 'btn', text: '다시 시도', onClick: function () { errored = null; draw(); fetchReq(); } })));
-        return root.appendChild(loadingBox('요청을 불러오는 중입니다.'));
+        if (errored && errored.status === 404) return root.appendChild(stateBox('warn', '요청을 찾을 수 없어', '이미 지나간 요청이거나 콘솔이 다시 시작되어 기록이 없어.', link('/', { class: 'btn', text: '처음 화면으로' })));
+        if (errored) return root.appendChild(stateBox('warn', '요청을 불러오지 못했어', errored.message, h('button', { type: 'button', class: 'btn', text: '다시 시도', onClick: function () { errored = null; draw(); fetchReq(); } })));
+        return root.appendChild(loadingBox('요청을 불러오는 중이야.'));
       }
       var isE = kindOf(req) === 'elicitation', isQ = kindOf(req) === 'question';
       hadSession = !!(sessionOf() || {}).id;
@@ -2158,7 +2158,7 @@
         var canSess = !(irrev || req.canAllowSession === false || req.hasSuggestions === false || (Array.isArray(req.permissionSuggestions) && !req.permissionSuggestions.length) || (Array.isArray(req.permission_suggestions) && !req.permission_suggestions.length));
         var sugg = Array.isArray(req.suggestionText) ? req.suggestionText : [];
         if (canSess) card.appendChild(h('div', { class: 'sugg', role: 'group', 'aria-label': '다시 묻지 않기로 추가되는 규칙' },
-          h('p', { class: 'sugg-h', text: '"허용하고 이 세션에서 다시 묻지 않기"를 누르면 다음 규칙이 추가됩니다' }),
+          h('p', { class: 'sugg-h', text: '"허용하고 이 세션에서 다시 묻지 않기"를 누르면 다음 규칙이 추가돼' }),
           sugg.length ? h('ul', { class: 'sugg-l' }, sugg.map(function (x) { return h('li', { class: 'mono', text: MS(x) }); }))
             : h('p', { class: 'sub', text: '규칙 내용을 읽지 못했어. 위 입력 전체를 확인해.' }),
           req.suggestions ? h('pre', { class: 'box scroll', tabindex: '0', text: MS(JSON.stringify(req.suggestions, null, 2)) }) : null));
@@ -2238,7 +2238,7 @@
     }
     function afterFail(e) {
       if (e.status === 404 || e.status === 409 || e.status === 410) { sendErr = ''; fetchReq(); req = Object.assign({}, req, { status: req.status === 'pending' ? 'closed' : req.status }); requests.set(rid, req); }
-      else sendErr = '전달하지 못했습니다: ' + e.message;
+      else sendErr = '전달하지 못했어: ' + e.message;
     }
 
     /* 질문: 보기 하나가 알약 버튼. 질문 글은 카드 안에 한 번만 나온다(위 제목은 세션 이름이라 겹치지 않는다, #635). */
@@ -2536,7 +2536,7 @@
     var folderWarn = ui.folderNotice(), chooser = ui.flowChooser(), preview = ui.flowPreview();
     function insertTool(skill) {
       var field = document.getElementById('brief');
-      if (!field) { tools.say('요청을 적는 화면에서 누르면 입력칸에 넣어 드려요.'); return; }
+      if (!field) { tools.say('요청을 적는 화면에서 누르면 입력칸에 넣어 줄게.'); return; }
       var cmd = skillCommand(skillInfo || { plugin: DEFAULT_PLUGIN }, skill), rest = field.value.replace(/^\/\S*\s*/, '');
       setFieldValue(field, cmd + rest, cmd.length);
     }
@@ -2617,7 +2617,7 @@
       // 종류 버튼의 갈래는 AI 추천과 겹쳐 보기 전까지 사용자가 확정한 선택이 아니다(#668).
       step = 'analyzing'; err = ''; draft.kindFlowId = kindFlow() || ''; draft.flowId = null; draft.flowUser = false; draft.insist = false; draw();
       api('POST', '/api/new', { text: draft.text.trim(), cwd: draft.cwd, model: modelChoice(), effort: effortChoice() }).then(function (d) {
-        aid = d && (d.id || d.analysisId); if (!aid) throw new ApiError(0, '분석을 시작하지 못했습니다.');
+        aid = d && (d.id || d.analysisId); if (!aid) throw new ApiError(0, '분석을 시작하지 못했어.');
         history.replaceState(null, '', '/new?id=' + encodeURIComponent(aid));
         data = d; poll();
       }, function (e) { if (!alive) return; step = 'failed'; err = e.message; draw(); });
@@ -2634,11 +2634,11 @@
         if (!alive) return; data = d;
         var st = norm(d.status);
         if (st === 'ready') { enterReview(); }
-        else if (st === 'failed') { step = 'failed'; err = d.error || d.message || '분석에 실패했습니다.'; draw(); }
+        else if (st === 'failed') { step = 'failed'; err = d.error || d.message || '분석에 실패했어.'; draw(); }
         else pollTimer = setTimeout(poll, 1200);
       }, function (e) {
         if (!alive) return;
-        if (e.status === 404) { step = 'failed'; err = '분석 기록을 찾을 수 없습니다. 콘솔이 다시 시작되었을 수 있습니다.'; draw(); }
+        if (e.status === 404) { step = 'failed'; err = '분석 기록을 찾을 수 없어. 콘솔이 다시 시작되었을 수 있어.'; draw(); }
         else if (e.status === 401) return;
         else pollTimer = setTimeout(poll, 2500);
       });
@@ -2658,8 +2658,8 @@
         var am = answerMap();
         api('GET', '/api/new/' + encodeURIComponent(aid) + '/preview' + qs({ picked: pickedAll(), note: draft.note.trim(), flow: effectiveFlow(), extraAnswers: Object.keys(am).length ? JSON.stringify(am) : '' })).then(function (d) {
           previewText = MS(typeof d === 'string' ? d : (d && (d.text || d.message || d.preview)) || '');
-          var pre = root.querySelector('[data-preview]'); if (pre) pre.textContent = previewText || '(내용이 없습니다)';
-        }, function (e) { var pre = root.querySelector('[data-preview]'); if (pre) pre.textContent = '미리보기를 불러오지 못했습니다: ' + e.message; });
+          var pre = root.querySelector('[data-preview]'); if (pre) pre.textContent = previewText || '(내용이 없어)';
+        }, function (e) { var pre = root.querySelector('[data-preview]'); if (pre) pre.textContent = '미리보기를 불러오지 못했어: ' + e.message; });
       }, 300);
     }
 
@@ -2669,7 +2669,7 @@
         startedId = (d && (d.id || d.sessionId || (d.session && d.session.id))) || '';
         if (startedId) { mergeSession({ id: startedId }); }
         history.replaceState(null, '', '/new');
-      }, function (e) { startErr = '시작하지 못했습니다: ' + e.message; }).then(function () { starting = false; draw(); });
+      }, function (e) { startErr = '시작하지 못했어: ' + e.message; }).then(function () { starting = false; draw(); });
     }
 
     /* 폴더 */
@@ -2717,7 +2717,7 @@
       api('POST', '/api/folders/validate', { path: p }).then(function (d) {
         var ok = d && (d.ok === true || d.valid === true);
         if (ok) { custom = ''; useFolder(d.path || d.realpath || p); }
-        else customMsg = (d && (d.error || d.reason || d.message)) || '이 폴더를 사용할 수 없습니다.';
+        else customMsg = (d && (d.error || d.reason || d.message)) || '이 폴더를 사용할 수 없어.';
       }, function (e) { customMsg = e.message; }).then(function () { customBusy = false; if (alive) draw(); });
     }
     function browseFolder() {
@@ -2726,10 +2726,10 @@
       api('POST', '/api/folders/pick', { path: draft.cwd || '' }).then(function (d) {
         if (d && d.cancelled) return null;
         var p = d && d.path;
-        if (!p) { customMsg = '고른 폴더를 받지 못했습니다. 경로를 직접 적어 주세요.'; return null; }
+        if (!p) { customMsg = '고른 폴더를 받지 못했어. 경로를 직접 적어 줘.'; return null; }
         return api('POST', '/api/folders/validate', { path: p }).then(function (v) {
           if (v && (v.ok === true || v.valid === true)) useFolder(v.path || v.realpath || p);
-          else customMsg = (v && (v.error || v.reason || v.message)) || '이 폴더를 사용할 수 없습니다.';
+          else customMsg = (v && (v.error || v.reason || v.message)) || '이 폴더를 사용할 수 없어.';
         });
       }).then(null, function (e) { customMsg = e.message; }).then(function () { browseBusy = false; if (alive) draw(); });
     }
@@ -2986,8 +2986,8 @@
       box.appendChild(h('div', { class: 'browser-bar' },
         dir ? h('button', { type: 'button', class: 'iconbtn', 'aria-label': '상위 폴더', onClick: function () { dir = dir.indexOf('/') >= 0 ? dir.slice(0, dir.lastIndexOf('/')) : ''; loadFs(); } }, icon('back', 15)) : null,
         h('span', { text: root0 + (dir ? '/' + dir : '') })));
-      if (fsRows === null) { box.appendChild(h('p', { class: 'msg', role: 'status', text: '불러오는 중입니다.' })); return box; }
-      if (fsErr) box.appendChild(h('p', { class: 'msg', role: 'alert', text: '폴더를 열지 못했습니다: ' + fsErr }));
+      if (fsRows === null) { box.appendChild(h('p', { class: 'msg', role: 'status', text: '불러오는 중이야.' })); return box; }
+      if (fsErr) box.appendChild(h('p', { class: 'msg', role: 'alert', text: '폴더를 열지 못했어: ' + fsErr }));
       var ul = h('ul');
       fsRows.forEach(function (r) {
         var name = r.name, isDir = /^(dir|directory|folder|d)$/i.test(String(r.kind || r.type || '')) || r.isDir === true, p = (dir ? dir + '/' : '') + name;
@@ -2995,7 +2995,7 @@
         else ul.appendChild(h('li', null, h('label', { class: 'ent' }, h('input', { type: 'checkbox', checked: draft.picked.indexOf(p) >= 0, onChange: function () { togglePath(p); } }), h('span', { class: 'nm', text: name }), h('span', { class: 'sz', text: fmtSize(r.size) }))));
       });
       box.appendChild(ul);
-      if (!fsRows.length && !fsErr) box.appendChild(h('p', { class: 'msg', text: '이 폴더에는 파일이 없습니다.' }));
+      if (!fsRows.length && !fsErr) box.appendChild(h('p', { class: 'msg', text: '이 폴더에는 파일이 없어.' }));
       return box;
     }
 
@@ -3006,7 +3006,7 @@
       api('GET', '/api/new/' + encodeURIComponent(aid)).then(function (d) {
         data = d; if (d.cwd) draft.cwd = d.cwd; if (d.text && !draft.text) draft.text = d.text;
         var st = norm(d.status);
-        if (st === 'ready') enterReview(); else if (st === 'failed') { step = 'failed'; err = d.error || d.message || '분석에 실패했습니다.'; draw(); } else poll();
+        if (st === 'ready') enterReview(); else if (st === 'failed') { step = 'failed'; err = d.error || d.message || '분석에 실패했어.'; draw(); } else poll();
         loadRecent();
       }, function () { aid = null; step = 'write'; history.replaceState(null, '', '/new'); draw(); loadRecent(); loadModels(); });
     } else { draw(); loadRecent(); loadModels(); }

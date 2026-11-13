@@ -102,18 +102,18 @@
     if (!s || !s.flowId) return { type: 'pick' };
     if (s.flowFinished) return { type: 'finished' };
     var step = currentStep(s);
-    if (!step) return { type: 'none', note: '지금 단계를 읽지 못했어요.' };
+    if (!step) return { type: 'none', note: '지금 단계를 읽지 못했어.' };
     var busy = s.status === 'running' || s.status === 'starting';
-    var cannot = s.canSend === false ? (s.cannotSendReason || '이 세션에는 지금 요청을 보낼 수 없어요.') : '';
+    var cannot = s.canSend === false ? (s.cannotSendReason || '이 세션에는 지금 요청을 보낼 수 없어.') : '';
     var base = { step: step, stepName: step.name || step.id || '', hint: step.hint || '' };
     function make(extra) { return Object.assign({}, base, extra); }
     if (step.kind === 'skill' && step.skill) {
       var again = lower(step.state) === 'active' && !busy;
       return make({ type: 'skill', skill: step.skill, label: '/harness:' + step.skill + (again ? ' 다시 실행' : ' 실행'),
-        disabled: busy || !!cannot, disabledReason: busy ? '지금 Claude Code 가 일하는 중이에요.' : cannot, cannotSend: !busy && !!cannot });
+        disabled: busy || !!cannot, disabledReason: busy ? '지금 Claude Code 가 일하는 중이야.' : cannot, cannotSend: !busy && !!cannot });
     }
-    if (step.kind === 'work') return make({ type: 'done', label: '끝났어요' });
-    if (step.kind === 'human') return make({ type: 'human', label: '끝났어요', refreshLabel: '다시 확인' });
+    if (step.kind === 'work') return make({ type: 'done', label: '끝났어' });
+    if (step.kind === 'human') return make({ type: 'human', label: '끝났어', refreshLabel: '다시 확인' });
     // wait 와 그 밖: 상태를 보여 주고 다시 확인만 한다. 도우미 스킬이 있으면 보조로 둔다.
     return make({ type: 'wait', label: '다시 확인', helper: step.helperSkill || '', helperDisabled: busy || !!cannot });
   }
@@ -126,7 +126,7 @@
   };
 
   /* ---- 건너뛰기 이유 ---- */
-  function skipReasonError(text) { return String(text || '').trim() ? '' : '건너뛰는 이유를 적어 주세요.'; }
+  function skipReasonError(text) { return String(text || '').trim() ? '' : '건너뛰는 이유를 적어 줘.'; }
 
   /* ---- 다음 갈래 ---- */
   function nextOptions(s) {
@@ -143,11 +143,11 @@
     var st = lower(job && job.state);
     var status = lower(job && job.status);
     if (status === 'confirm') return { done: false, confirm: true, prompt: String((job && job.prompt) || ''), warning: String((job && job.warning) || '') };
-    if (status === 'canceled') return { done: true, ok: false, canceled: true, error: '취소했어요.' };
+    if (status === 'canceled') return { done: true, ok: false, canceled: true, error: '취소했어.' };
     if (job && job.error) return { done: true, ok: false, error: String(job.error) };
-    if (JOB_FAIL.indexOf(st) >= 0) return { done: true, ok: false, error: (job && job.error) || '새 세션을 만들지 못했어요.' };
+    if (JOB_FAIL.indexOf(st) >= 0) return { done: true, ok: false, error: (job && job.error) || '새 세션을 만들지 못했어.' };
     if (job && job.sessionId && (!st || JOB_OK.indexOf(st) >= 0)) return { done: true, ok: true, sessionId: job.sessionId };
-    if (JOB_OK.indexOf(st) >= 0) return { done: true, ok: !!(job && job.sessionId), sessionId: job && job.sessionId, error: job && job.sessionId ? '' : '새 세션 번호를 받지 못했어요.' };
+    if (JOB_OK.indexOf(st) >= 0) return { done: true, ok: !!(job && job.sessionId), sessionId: job && job.sessionId, error: job && job.sessionId ? '' : '새 세션 번호를 받지 못했어.' };
     return { done: false };
   }
 
@@ -222,10 +222,10 @@
     var c = flowsData && flowsData.conditions && flowsData.conditions['project-ready'];
     if (!c) return null;
     if (c.state === 'no') {
-      return { state: 'no', text: '프로젝트 준비 안 됨 - ' + (c.reason || 'templates/ 나 rules/ 가 없어요.') +
-        ' 고객사 프로젝트라면 관리자가 처음에 한 번 기본 폴더 구조를 만들어 줘야 해요.' };
+      return { state: 'no', text: '프로젝트 준비 안 됨 - ' + (c.reason || 'templates/ 나 rules/ 가 없어.') +
+        ' 고객사 프로젝트라면 관리자가 처음에 한 번 기본 폴더 구조를 만들어 줘야 해.' };
     }
-    if (c.state === 'unknown') return { state: 'unknown', text: '프로젝트 준비 여부를 확인하지 못했어요' + (c.reason ? ' - ' + c.reason : '') + '.' };
+    if (c.state === 'unknown') return { state: 'unknown', text: '프로젝트 준비 여부를 확인하지 못했어' + (c.reason ? ' - ' + c.reason : '') + '.' };
     return null;
   }
   // 준비됨인데 templates/ 에 고객 양식 원본이 없을 때의 안내. 서버가 없다고 확인한 경우(formsMissing === 'yes')에만 말한다. 못 읽었으면 null.
@@ -241,10 +241,10 @@
     return updatePressed && n > 0 ? { count: n, text: '돌고 있는 세션 ' + n + '개 다시 불러오기 필요' } : null;
   }
   function reloadResult(d) {
-    if (d && d.queued) return '지금 하는 일이 끝나면 다시 불러올게요.';
+    if (d && d.queued) return '지금 하는 일이 끝나면 다시 불러올게.';
     var plugin = arr(d && d.plugins).filter(function (p) { return p && p.name === 'harness'; })[0];
     var ver = (d && d.harnessVersion) || (plugin && plugin.version) || '';
-    var text = ver ? 'harness ' + ver + ' 로 다시 불러왔어요.' : '다시 불러왔어요.';
+    var text = ver ? 'harness ' + ver + ' 로 다시 불러왔어.' : '다시 불러왔어.';
     if (d && d.errorCount) text += ' (오류 ' + d.errorCount + '개)';
     return text;
   }
@@ -408,12 +408,12 @@
   // 양식 칸 세기: 시트마다 첫 줄을 칸 이름 줄로 보고, 그 아래 내용이 있는 줄 x 칸 이름 수 = 칸 수. 비어 있는 칸은 이름으로 모은다.
   // 미리보기가 잘렸거나 읽지 못한 시트가 있으면 세지 않고 known:false 로 돌려준다(지어내지 않는다).
   function formCells(p) {
-    if (!p || p.kind !== 'table') return { known: false, reason: '표를 읽지 못했어요.' };
+    if (!p || p.kind !== 'table') return { known: false, reason: '표를 읽지 못했어.' };
     var total = 0, filled = 0, blanks = {}, order = [], sheets = arr(p.sheets);
-    if (!sheets.length) return { known: false, reason: '시트가 없어요.' };
+    if (!sheets.length) return { known: false, reason: '시트가 없어.' };
     for (var i = 0; i < sheets.length; i++) {
       var sh = sheets[i];
-      if (sh.error || sh.truncated) return { known: false, reason: '표가 커서 일부만 읽었어요.' };
+      if (sh.error || sh.truncated) return { known: false, reason: '표가 커서 일부만 읽었어.' };
       var rows = arr(sh.rows), cell = function (r, c) { var v = r && r[c]; return v == null ? '' : String(v).trim(); };
       var hi = -1;
       for (var r0 = 0; r0 < rows.length && hi < 0; r0++) if (arr(rows[r0]).some(function (v) { return v != null && String(v).trim(); })) hi = r0;
@@ -429,7 +429,7 @@
         });
       }
     }
-    if (!total) return { known: false, reason: '내용이 있는 줄이 없어요.' };
+    if (!total) return { known: false, reason: '내용이 있는 줄이 없어.' };
     return { known: true, total: total, filled: filled, empty: total - filled, blankNames: order };
   }
   function isFormOutput(f) { return docGroup(f) === 'form' && /\.(xlsx|pptx|docx)$/i.test(f.path || ''); }
