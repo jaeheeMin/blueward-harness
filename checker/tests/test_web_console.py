@@ -1759,7 +1759,7 @@ def test_open_starts_detached_server_and_stop(tmp_path, monkeypatch):
             assert len(console_open._launched) == 1  # 띄운 서버의 Popen 을 버리지 않고 들고 있다(#836)
             assert console_open.probe(port) == "ours"
             assert (tmp_path / "data" / "server.pid").exists()
-            assert console_open.stop_server(port) == "웹 콘솔 서버를 껐습니다."
+            assert console_open.stop_server(port) == "웹 콘솔 서버를 껐어."
             assert console_open.probe(port) == "free"
             assert console_open._launched == []  # 같은 프로세스에서 끄면 끝난 서버를 거둔다
             gc.collect()
@@ -2184,7 +2184,7 @@ def test_launcher_runs_open_py_hidden_and_reports_failure(tmp_path, monkeypatch)
     assert launcher.main() == 1
     assert ran[0][0][1:] == [str(base / "open.py"), "--from-shortcut"] and shown == ["포트 문제"]
     monkeypatch.setattr(launcher, "config_dir", lambda env=None: tmp_path / "none")
-    assert launcher.main() == 1 and "플러그인을 찾지 못했어요" in shown[-1]
+    assert launcher.main() == 1 and "플러그인을 찾지 못했어." in shown[-1]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows 의 셸 링크 COM 으로 실제 .lnk 를 만든다")

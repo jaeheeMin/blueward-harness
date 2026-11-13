@@ -627,7 +627,7 @@ class App:
         except attachments.AttachmentError as e:
             raise HttpError(e.status, str(e))
         if not isinstance(text, str) or (not text.strip() and not files):
-            raise HttpError(400, "text 가 비어 있습니다.")
+            raise HttpError(400, "text 가 비어 있어.")
         if files and not s["managed"]:
             raise HttpError(409, "터미널에서 연 세션에는 첨부를 보낼 수 없어. 콘솔에서 연 작업에서 보내 줘.")
         return self.deliver(s, text.strip(), {"kind": "message", "text": text.strip()}, files)
@@ -650,9 +650,9 @@ class App:
         s = self.get_session(g[0])
         mode, text = b.get("mode"), b.get("text")
         if mode not in ("resume", "fork"):
-            raise HttpError(400, "mode 는 resume 이나 fork 여야 합니다.")
+            raise HttpError(400, "mode 는 resume 이나 fork 여야 해.")
         if not isinstance(text, str) or not text.strip():
-            raise HttpError(400, "text 가 비어 있습니다.")
+            raise HttpError(400, "text 가 비어 있어.")
         live = self.terminal_liveness(s)
         with self.store.lock:
             sid, cwd = s["id"], s["cwd"]
@@ -825,7 +825,7 @@ class App:
                     "계획을 고쳐 달라고 했어." if r.tool_name == "ExitPlanMode" else "콘솔에서 거부했어.")
                 reply, outcome = {"behavior": "deny", "message": reason}, "거부함"
             else:
-                raise HttpError(400, "decision 은 allow, allow_session, deny 중 하나여야 합니다.")
+                raise HttpError(400, "decision 은 allow, allow_session, deny 중 하나여야 해.")
             response = permission_reply(reply)
         elif r.kind == "elicitation":
             response, outcome = self.check_elicitation(r, b)
@@ -909,7 +909,7 @@ class App:
     def check_answers(r, answers) -> dict:
         questions = [q.get("question") for q in r.tool_input.get("questions", []) if isinstance(q, dict)]
         if not isinstance(answers, dict):
-            raise HttpError(400, "answers 가 객체가 아닙니다.")
+            raise HttpError(400, "answers 가 객체가 아니야.")
         result = {}
         for q in questions:
             value = answers.get(q)
@@ -971,7 +971,7 @@ class App:
     def a_approvals(self, g, q, b):
         """내 승인을 기다리는 열린 PR. gh 로 읽고 60초 기억한다. state: yes(승인자) / no(승인자 아님) / unknown(판정 불능)."""
         if not q.get("cwd"):
-            raise HttpError(400, "cwd 가 필요합니다.")
+            raise HttpError(400, "cwd 가 필요해.")
         cwd = self.known_root(q["cwd"][0])
         spec = (self.flow_data or {}).get("conditions", {}).get("approver", {})
         file_rel, when_no_file = spec.get("file", ".github/ssot-approvers"), spec.get("whenNoFile", gitstate.WHEN_NO_FILE_ADMIN)
@@ -981,7 +981,7 @@ class App:
     def a_my_prs(self, g, q, b):
         """내가 올린 열린 PR 과 검사 결과(홈 "고쳐야 할 내 PR", #735). gh 로 읽고 60초 기억한다. state: ok / no(GitHub 저장소 아님) / unknown(읽지 못함)."""
         if not q.get("cwd"):
-            raise HttpError(400, "cwd 가 필요합니다.")
+            raise HttpError(400, "cwd 가 필요해.")
         cwd = self.known_root(q["cwd"][0])
         return 200, self.cached(("my-prs", os.path.normcase(cwd)), lambda: gitstate.my_open_prs(self.run, cwd), wait=False)
 
@@ -989,7 +989,7 @@ class App:
         """이 폴더의 개발 건별 Spec 유무(#668). git 으로 읽고 60초 기억하며 요청 스레드는 기다리지 않는다(읽는 중이면 loading: true).
         state: yes(읽음) / no(원장 없는 저장소 등 해당 없음) / unknown(읽지 못함)."""
         if not q.get("cwd"):
-            raise HttpError(400, "cwd 가 필요합니다.")
+            raise HttpError(400, "cwd 가 필요해.")
         cwd = self.known_root(q["cwd"][0])
         return 200, self.cached(("dev-ready", os.path.normcase(cwd)), lambda: devready.read(self.run, self.slow_run, cwd), wait=False)
 
@@ -997,7 +997,7 @@ class App:
         """세션 작업 폴더 SRS 의 요구사항별 Status(#718). 설정·표준 건 세션 화면의 "SRS 상태" 칸이 쓴다.
         state: yes(읽음) / no(SRS 없음) / unknown(읽지 못함)."""
         if not q.get("cwd"):
-            raise HttpError(400, "cwd 가 필요합니다.")
+            raise HttpError(400, "cwd 가 필요해.")
         return 200, devready.srs_status(self.run, self.known_root(q["cwd"][0]))
 
     # ---- 시작 점검(첫 화면) ----
@@ -1140,7 +1140,7 @@ class App:
     def a_flow_set(self, g, q, b):
         s = self.get_session(g[0])
         if "flowId" not in b:
-            raise HttpError(400, "flowId 가 필요합니다(비우려면 null).")
+            raise HttpError(400, "flowId 가 필요해(비우려면 null).")
         if b["flowId"] is None:
             with self.store.lock:
                 s["flowState"] = None
@@ -1148,7 +1148,7 @@ class App:
             self.store.touch(s)
             return 200, self.model_of(s)
         if not isinstance(b["flowId"], str):
-            raise HttpError(400, "flowId 가 문자열이 아닙니다.")
+            raise HttpError(400, "flowId 가 문자열이 아니야.")
         reason = b.get("reason") if isinstance(b.get("reason"), str) and b["reason"].strip() else "사용자가 고름"
         self.assign_flow(s, b["flowId"], reason)
         return 200, self.model_of(s)
@@ -1264,7 +1264,7 @@ class App:
         s = self.get_session(g[0])
         name = b.get("server")
         if not isinstance(name, str) or not name:
-            raise HttpError(400, "server 가 비어 있습니다.")
+            raise HttpError(400, "server 가 비어 있어.")
         if not s["managed"]:
             raise HttpError(409, "콘솔이 띄운 세션만 MCP 를 다시 연결할 수 있어. 터미널 세션은 터미널에서 /mcp 를 실행해 줘.")
         if not self.manager.alive(s["id"]):
@@ -1362,15 +1362,15 @@ class App:
             truncated, gap = bool(s.get("touchedTruncated")), s.get("touchedGap")
         listed = docfiles.collect(cwd, touched, None if (why or not_repo) else paths)
         out = {"files": listed}
-        self.annotate_upload(cwd, root, listed, why or ("git 저장소가 아니라 올렸는지 알 수 없어요." if not_repo else ""))
+        self.annotate_upload(cwd, root, listed, why or ("git 저장소가 아니라 올렸는지 알 수 없어." if not_repo else ""))
         if truncated:
             out["truncated"] = True  # 쌓아 두는 상한에 닿아 더 있는 문서가 빠졌다
         if why:  # git 을 못 읽었다 = 바뀐 문서가 없다는 뜻이 아니다. 훅이 모은 목록만으로 보여 주고 화면이 알리게 한다
             out.update(unknown=True, reason=why)
         elif not_repo:
-            out.update(unknown=True, reason="git 저장소가 아니라 커밋 여부를 알 수 없어요.")
+            out.update(unknown=True, reason="git 저장소가 아니라 커밋 여부를 알 수 없어.")
         elif isinstance(gap, dict) and now - gap.get("at", 0) <= GAP_NOTICE_SECONDS:  # 지금은 읽었다. 못 읽은 동안 커밋된 문서가 빠졌을 수 있다는 안내만 하고(note) 파일별 칩은 덮지 않는다. 영구 경고는 피하려 일정 시간만 알린다
-            out["note"] = f"{time.strftime('%H:%M', time.localtime(gap['at']))} 에 git 상태를 읽지 못해 그 사이 커밋된 문서가 빠졌을 수 있어요."
+            out["note"] = f"{time.strftime('%H:%M', time.localtime(gap['at']))} 에 git 상태를 읽지 못해 그 사이 커밋된 문서가 빠졌을 수 있어."
         return out
 
     def a_file_preview(self, g, q, b):
@@ -1416,7 +1416,7 @@ class App:
     def a_file_open(self, g, q, b):
         mode = b.get("mode")
         if mode not in ("open", "reveal"):
-            raise HttpError(400, "mode 는 open 또는 reveal 이어야 합니다.")
+            raise HttpError(400, "mode 는 open 또는 reveal 이어야 해.")
         _, real, rel = self.file_target(g[0], b.get("path"))
         if mode == "open" and not {docfiles.ext_of(real), docfiles.ext_of(rel)} <= docfiles.OPEN_EXTS:
             raise HttpError(403, "이 형식은 열 수 없어. 실행 파일이나 스크립트일 수 있어 위치 보기만 돼.")
@@ -1452,14 +1452,14 @@ class App:
         s = self.get_session(g[0])
         fid = b.get("flowId")
         if not isinstance(fid, str):
-            raise HttpError(400, "flowId 가 필요합니다.")
+            raise HttpError(400, "flowId 가 필요해.")
         data = self.require_flows()
         flow = flows.flow_def(data, fid)
         if flow is None:
             raise HttpError(400, "없는 갈래야.")
         raw_ids = b.get("ids")
         if raw_ids is not None and (not isinstance(raw_ids, list) or any(not isinstance(i, str) or not REQ_ID.fullmatch(i) for i in raw_ids)):
-            raise HttpError(400, "ids 는 REQ-xxx 번호 목록이어야 합니다.")
+            raise HttpError(400, "ids 는 REQ-xxx 번호 목록이어야 해.")
         unique = list(dict.fromkeys(raw_ids or []))
         ids = unique[:MAX_NEXT_IDS]
         cut_note = f"요구사항 {len(unique)}건 중 {MAX_NEXT_IDS}건만 넘겼어. 나머지는 이 세션이 끝난 뒤 다시 골라 줘." if len(unique) > MAX_NEXT_IDS else ""
@@ -1713,7 +1713,7 @@ class App:
         tool = self.tool_skill_of(j["text"])
         if tool and out["result"]:  # 요청이 도구 스킬로 시작하면 분석이 어느 갈래로 봤든 갈래 없이 도구만 쓰는 일이다
             out["result"] = dict(out["result"], flow={"id": analysis.NO_FLOW, "name": analysis.NO_FLOW_NAME, "confident": True, "alternativeId": None,
-                                                     "alternativeName": "", "reason": f"요청이 도구 스킬(/{self.plugin_name}:{tool})로 시작해요."})
+                                                     "alternativeName": "", "reason": f"요청이 도구 스킬(/{self.plugin_name}:{tool})로 시작해."})
         return 200, out
 
     def chosen_flow(self, job, b: dict) -> tuple[str | None, str]:
@@ -1734,7 +1734,7 @@ class App:
 
     def preview_text(self, job, picked, extra, note, flow_id=None) -> str:
         if not isinstance(picked, list) or not all(isinstance(p, str) for p in picked):
-            raise HttpError(400, "picked 형식이 맞지 않습니다.")
+            raise HttpError(400, "picked 형식이 맞지 않아.")
         clean = []
         for p in picked:
             rel, why = analysis.mention_path(job["cwd"], p)
@@ -1758,7 +1758,7 @@ class App:
         try:
             extra = json.loads(q.get("extraAnswers", ["{}"])[0])
         except ValueError:
-            raise HttpError(400, "extraAnswers 가 JSON 이 아닙니다.")
+            raise HttpError(400, "extraAnswers 가 JSON 이 아니야.")
         flow_id = q.get("flow", [""])[0] or None
         if flow_id and flow_id != analysis.NO_FLOW and (self.flow_data is None or flows.flow_def(self.flow_data, flow_id) is None):
             raise HttpError(400, "없는 갈래야.")
@@ -1866,10 +1866,10 @@ class App:
 
     def a_notify_put(self, g, q, b):
         if not isinstance(b, dict) or not b:
-            raise HttpError(400, "바꿀 알림 설정이 없습니다.")
+            raise HttpError(400, "바꿀 알림 설정이 없어.")
         bad = [k for k, v in b.items() if k not in NOTIFY_KEYS or not isinstance(v, bool)]
         if bad:
-            raise HttpError(400, f"알림 설정은 turn · blocked · done 의 true/false 만 받습니다: {', '.join(map(str, bad))}")
+            raise HttpError(400, f"알림 설정은 turn · blocked · done 의 true/false 만 받아: {', '.join(map(str, bad))}")
         now = dict(self.read_notify(), **b)
         f = self.store.dir / NOTIFY_FILE if self.store.dir else None
         if f is None:
@@ -1912,7 +1912,7 @@ class App:
     def a_ask_put(self, g, q, b):
         level = b.get("level") if isinstance(b, dict) else None
         if level not in ASK_LEVELS:
-            raise HttpError(400, f"묻는 범위는 {' · '.join(ASK_LEVELS)} 중 하나여야 합니다.")
+            raise HttpError(400, f"묻는 범위는 {' · '.join(ASK_LEVELS)} 중 하나여야 해.")
         now = {"level": level}
         f = self.store.dir / ASK_FILE if self.store.dir else None
         if f is None:
@@ -2020,7 +2020,7 @@ class App:
     def a_folder_intro(self, g, q, b):
         """고른 폴더가 준비 안 됐고(no) 이 안내를 본 적이 없으면 show: true. 확인 못 함(unknown)이면 안내하지 않는다."""
         if not q.get("path"):
-            raise HttpError(400, "path 가 필요합니다.")
+            raise HttpError(400, "path 가 필요해.")
         root = self.known_root(q["path"][0])
         state = self.folder_ready(root, fresh=True)["state"]
         return 200, {"ready": state, "seen": self.intro_seen(root), "show": state == COND_NO and not self.intro_seen(root)}
@@ -2227,24 +2227,24 @@ class Handler(BaseHTTPRequestHandler):
         self.body_touched = True
         header = (self.headers.get("Content-Length") or "0").strip()
         if not header.isascii() or not header.isdigit():  # 음수·숫자 아님·부호가 붙은 값은 거부한다
-            raise HttpError(400, "Content-Length 가 올바르지 않습니다.")
+            raise HttpError(400, "Content-Length 가 올바르지 않아.")
         length = int(header)
         if length > limit:
-            raise HttpError(413, "요청 본문이 너무 큽니다.")
+            raise HttpError(413, "요청 본문이 너무 커.")
         try:
             raw = self.rfile.read(length) if length else b""
         except TimeoutError:
-            raise HttpError(408, "요청을 제때 다 받지 못했습니다.")
+            raise HttpError(408, "요청을 제때 다 받지 못했어.")
         if len(raw) < length:
-            raise HttpError(400, "요청 본문이 모자랍니다.")
+            raise HttpError(400, "요청 본문이 모자라.")
         if not raw:
             return {}
         try:
             data = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
-            raise HttpError(400, "JSON 이 아닙니다.")
+            raise HttpError(400, "JSON 이 아니야.")
         if not isinstance(data, dict):
-            raise HttpError(400, "JSON 객체가 아닙니다.")
+            raise HttpError(400, "JSON 객체가 아니야.")
         return data
 
     # ---- 라우팅 ----
@@ -2272,7 +2272,7 @@ class Handler(BaseHTTPRequestHandler):
     def dispatch(self) -> None:
         app = self.app
         if self.headers.get("Host") not in app.hosts:  # DNS 리바인딩 차단
-            raise HttpError(403, "허용되지 않은 Host 입니다.")
+            raise HttpError(403, "허용되지 않은 Host 야.")
         url = urlsplit(self.path)
         path, query, method = url.path, parse_qs(url.query), self.command
         origin = self.headers.get("Origin")
@@ -2280,9 +2280,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/hooks/") or path in ("/api/open", "/api/shutdown"):
             # 쿠키 없이 받는 경로. 브라우저가 부른 것(Origin 이 있음)은 거부한다. 요청을 만들 수만 있고 답할 수 없다.
             if method != "POST":
-                raise HttpError(405, "POST 만 받습니다.")
+                raise HttpError(405, "POST 만 받아.")
             if origin is not None:
-                raise HttpError(403, "브라우저에서 부를 수 없는 경로입니다.")
+                raise HttpError(403, "브라우저에서 부를 수 없는 경로야.")
             if path == "/api/open":
                 self.read_json(API_BODY_LIMIT)
                 return self.send_json(200, app.open_browser())
@@ -2316,9 +2316,9 @@ class Handler(BaseHTTPRequestHandler):
             if not app.cookie_ok(self.headers.get("Cookie")):
                 raise HttpError(401, "인증이 필요해. 바탕화면의 Blueward Harness 를 다시 눌러 줘(없으면 /harness:open).")
             if origin is not None and origin not in app.origins:
-                raise HttpError(403, "다른 출처의 요청입니다.")
+                raise HttpError(403, "다른 출처의 요청이야.")
             if method != "GET" and not (self.headers.get("Content-Type") or "").lower().startswith("application/json"):
-                raise HttpError(415, "Content-Type 은 application/json 이어야 합니다.")
+                raise HttpError(415, "Content-Type 은 application/json 이어야 해.")
             if path == "/api/events" and method == "GET":
                 return self.events()
             limit = ATTACH_BODY_LIMIT if method == "POST" and ATTACH_PATH.fullmatch(path) else API_BODY_LIMIT
@@ -2329,7 +2329,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(status, data)
 
         if method != "GET":
-            raise HttpError(405, "허용되지 않은 메서드입니다.")
+            raise HttpError(405, "허용되지 않은 메서드야.")
         self.static(path)
 
     def auth(self, query) -> None:
@@ -2427,7 +2427,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         server = make_server(app)
     except OSError as e:
-        reason = f"포트 {port} 를 열지 못했습니다: {type(e).__name__} {getattr(e, 'winerror', None) or e.errno or ''} {e.strerror or ''}".strip()
+        reason = f"포트 {port} 를 열지 못했어: {type(e).__name__} {getattr(e, 'winerror', None) or e.errno or ''} {e.strerror or ''}".strip()
         if sys.stderr is not None:  # pythonw.exe 로 뜨면 stderr 가 없다
             print(reason, file=sys.stderr)
         write_error_file(state, reason)

@@ -266,7 +266,7 @@ public static class HarnessPick {
 }
 if (-not $done) {
   $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-  $dlg.Description = '작업 폴더를 골라 주세요.'
+  $dlg.Description = '작업 폴더를 골라 줘.'
   $dlg.ShowNewFolderButton = $true
   $dlg.SelectedPath = $start
   if ($dlg.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { $picked = $dlg.SelectedPath }

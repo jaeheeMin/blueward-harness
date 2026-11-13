@@ -41,7 +41,7 @@ FLOW_PROMPT = (
 NO_FLOW = "none"  # 갈래 없이 도구만 쓰는 일("순서 없이 이 도구만")
 NO_FLOW_NAME = "순서 없이 이 도구만"
 DIRECT_SKILL = re.compile(r"^/[A-Za-z][\w-]*:[\w-]+(?=\s|$)")  # 사용자가 글 맨 앞에 플러그인 스킬(/harness:scaffold)을 직접 적었다
-FLOW_QUESTION = "어떤 갈래로 진행할까요?"
+FLOW_QUESTION = "어떤 갈래로 진행할까?"
 
 
 # claude 2.1.309 에서 `@"a b.txt"` 로 공백이 든 파일 이름을 넘기면 파일을 읽는 것을 확인했다(haiku, 1회).

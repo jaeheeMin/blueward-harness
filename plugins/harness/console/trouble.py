@@ -315,7 +315,7 @@ def collect(app, wait: bool = False, refresh: bool = False) -> dict:
 
 def repo_root(app, slug: str) -> str:
     if not isinstance(slug, str) or not SLUG.fullmatch(slug):
-        raise HttpError(400, "repo 가 올바르지 않습니다.")
+        raise HttpError(400, "repo 가 올바르지 않아.")
     for p in collect(app, wait=True)["projects"]:
         if p["slug"] == slug:
             return p["root"]
@@ -382,7 +382,7 @@ def pr_info(app, slug: str, root: str, number: int) -> dict:
 def int_arg(q, name="number") -> int:
     v = (q.get(name) or [""])[0]
     if not v.isdigit():
-        raise HttpError(400, f"{name} 가 필요합니다.")
+        raise HttpError(400, f"{name} 가 필요해.")
     return int(v)
 
 
@@ -444,7 +444,7 @@ def a_similar(app, g, q, b):
 def a_check(app, g, q, b):
     fields = b.get("fields")
     if not isinstance(fields, dict):
-        raise HttpError(400, "fields 가 필요합니다.")
+        raise HttpError(400, "fields 가 필요해.")
     return 200, {"hits": scan_secrets({str(k): v for k, v in fields.items() if isinstance(v, str)})}
 
 
@@ -554,10 +554,10 @@ def a_comment(app, g, q, b):
     root = repo_root(app, slug)
     number = b.get("number")
     if not isinstance(number, int) or isinstance(number, bool):
-        raise HttpError(400, "number 가 필요합니다.")
+        raise HttpError(400, "number 가 필요해.")
     kind = b.get("kind")
     if kind not in KIND_MARK:
-        raise HttpError(400, "kind 는 try / candidate / solved 중 하나여야 합니다.")
+        raise HttpError(400, "kind 는 try / candidate / solved 중 하나여야 해.")
     text = text_arg(b, "text", True)
     refuse_secrets({"text": text})
     data = view_issue(app, slug, root, number)
@@ -574,7 +574,7 @@ def a_resolve(app, g, q, b):
     root = repo_root(app, slug)
     number, cid = b.get("number"), b.get("commentId")
     if not isinstance(number, int) or isinstance(number, bool) or not isinstance(cid, str) or not cid:
-        raise HttpError(400, "number 와 commentId 가 필요합니다.")
+        raise HttpError(400, "number 와 commentId 가 필요해.")
     data = view_issue(app, slug, root, number)
     for c in data.get("comments") or []:
         if isinstance(c, dict) and c.get("id") == cid:
