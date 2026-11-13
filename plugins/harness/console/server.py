@@ -2427,7 +2427,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         server = make_server(app)
     except OSError as e:
-        reason = f"포트 {port} 를 열지 못했어:{type(e).__name__} {getattr(e, 'winerror', None) or e.errno or ''} {e.strerror or ''}".strip()
+        reason = f"포트 {port} 를 열지 못했어: {type(e).__name__} {getattr(e, 'winerror', None) or e.errno or ''} {e.strerror or ''}".strip()
         if sys.stderr is not None:  # pythonw.exe 로 뜨면 stderr 가 없다
             print(reason, file=sys.stderr)
         write_error_file(state, reason)
