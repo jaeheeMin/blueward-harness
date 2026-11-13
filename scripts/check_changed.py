@@ -43,6 +43,11 @@ out_of_scope 로 빠지기 때문이다. 이 워크플로를 부르는 저장소
 `checker.version_overlap` 을 돌려 `version_overlap` 키로 합친다. 경고만 하고 위반은 없다. 열린 PR 정보를 못
 읽었으면(파일 없음·깨짐·API 실패) 검사 불능(2)이다. 환경변수가 없으면(push, 로컬) 대상이 아니라 키도 없다.
 스위치 `판_겹침` 으로 끌 수 있다.
+
+**개발 표준 이름 검사(#943)**: 환경변수 `DOC_GUARD_ADDED_FILES`(PR 이벤트에서 워크플로가 `--diff-filter=A` 로 만든
+추가 파일 목록 경로)가 있고 프로젝트에 `conventions/naming.yaml` 이 있으면, `src/` 에 새로 생긴 객체 이름만
+`checker.naming_rules` 로 검사해 `naming` 키로 합친다. 이미 있는 객체를 고치는 PR 은 막지 않는다. 설정이
+없으면 대상이 아니라 키도 없고, 설정이나 목록을 읽지 못하면 검사 불능(2)이다.
 """
 from __future__ import annotations
 
@@ -57,6 +62,7 @@ from checker.code_rules import build_report as _build_code_report
 from checker.code_rules import exit_code_for as _code_exit_code
 from checker.code_rules import language_for_suffix
 from checker.model import ConfigError
+from checker.naming_rules import evaluate_files as _evaluate_naming
 from checker.cross_switches import DISABLED, SwitchError, load_switches
 from checker.overlap import check_overlap
 from checker.pairing import CANNOT_CHECK, LEDGER_DIR, SKIPPED, SPEC_DIR, SRS_PATH, check_pairing
@@ -65,6 +71,7 @@ from checker.version_overlap import NOT_NEEDED, check_version_overlap, read_fail
 
 OPEN_PRS_ENV = "DOC_GUARD_OPEN_PRS"  # 열린 PR 정보 JSON 경로(PR 이벤트에서만 워크플로가 채움)
 PR_NUMBER_ENV = "DOC_GUARD_PR_NUMBER"
+ADDED_FILES_ENV = "DOC_GUARD_ADDED_FILES"  # 이 PR 이 새로 추가한 파일 목록 경로(PR 이벤트에서 워크플로가 채움, #943)
 
 EMPTY_REPORT = (
     '{"summary": {"scoped": 0, "passed": 0, "violations": 0, "skipped": 0,'
@@ -116,6 +123,23 @@ def _check_version_overlap(path: Path) -> dict | None:
     if not number.isdigit():
         return {"status": CANNOT_CHECK, "warnings": [], "message": f"이 PR 번호({PR_NUMBER_ENV})를 알 수 없습니다"}
     return check_version_overlap(data, int(number))
+
+
+def _check_naming_for_added(added_path: str | None) -> dict | None:
+    """이 PR 이 `src/` 에 새로 추가한 객체의 이름만 `conventions/naming.yaml` 로 본다(#943). 대상이 아니면 None.
+
+    이미 있는 객체를 고치는 PR 은 이름 규칙 밖이어도 막지 않으므로 추가된 파일 목록(`--diff-filter=A`)만 받는다.
+    환경변수가 없거나(push, 로컬) 설정 파일이 없으면 대상이 아니라 키도 만들지 않는다. 설정을 읽지 못하거나
+    추가 목록을 읽지 못하면 검사 불능이다.
+    """
+    if not added_path:
+        return None
+    try:
+        lines = Path(added_path).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        return {"status": CANNOT_CHECK, "message": f"추가된 파일 목록 {added_path} 를 읽지 못했습니다: {exc}"}
+    result = _evaluate_naming([ln.strip() for ln in lines if ln.strip()], Path.cwd())
+    return None if result["status"] == "not_applicable" else result
 
 
 def split_listing(text: str) -> tuple[list[str], list[str]]:
@@ -254,7 +278,8 @@ def main_entry(argv: list[str] | None = None) -> int:
         elif wants_version and switches.get("판_겹침"):
             version_result = _check_version_overlap(Path(open_prs_path))
 
-    extras = [r for r in (pairing_result, overlap_result, version_result, switch_error) if r is not None]
+    naming_result = _check_naming_for_added(os.environ.get(ADDED_FILES_ENV))
+    extras = [r for r in (pairing_result, overlap_result, version_result, switch_error, naming_result) if r is not None]
     if not code_files and not extras:
         # 코드 파일도 교차 검사 대상도 없다. doc-guard 만 있던 예전 그대로 동작한다.
         return main(["--auto", *doc_files])
@@ -285,6 +310,8 @@ def main_entry(argv: list[str] | None = None) -> int:
         combined["version_overlap"] = version_result
     if switch_error:
         combined["cross_checks"] = switch_error
+    if naming_result:
+        combined["naming"] = naming_result
     extra_exits = [_pairing_exit_code(r) for r in extras]  # 겹침은 위반이 없어 0 또는 2
     print(json.dumps(combined, ensure_ascii=False))
 

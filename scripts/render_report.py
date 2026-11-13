@@ -48,10 +48,42 @@ def render(report: dict, code: int) -> str:
         text += "\n" + "\n".join(
             _render_disabled("판 번호 겹침") if version.get("status") == "disabled" else _render_version_overlap(version)
         )
+    naming = report.get("naming")
+    if naming:
+        text += "\n" + "\n".join(_render_naming(naming))
     cross = report.get("cross_checks")
     if cross:
         text += "\n" + "\n".join(_render_cross_checks(cross))
     return text
+
+
+def _render_naming(result: dict) -> list[str]:
+    """개발 표준 이름 절(#943). `result` 는 `checker.naming_rules.check_files` 의 결과다."""
+    out = ["", "---", "", "## 개발 표준 이름", ""]
+    if result.get("status") == "cannot_check":
+        out += [
+            "### ⚠️ 검사 불능", "",
+            "```", str(result.get("message") or "이름 규칙을 확인하지 못했습니다.").strip(), "```", "",
+            "새 객체의 이름이 표준에 맞는지 확인하지 못했습니다. 통과도 위반도 아닙니다. "
+            "`conventions/naming.yaml` 을 관리하는 담당자가 고쳐야 합니다.",
+        ]
+        return out
+    violations = result.get("violations") or []
+    if not violations:
+        out.append(f"새로 생긴 객체 {result.get('checked', 0)}개의 이름이 표준에 맞습니다.")
+        return out
+    out += [
+        "### ❌ 표준에 맞지 않는 새 이름", "",
+        f"**{len(violations)}건**입니다. 새 객체는 `conventions/naming.yaml` 의 형식을 따라야 합니다. "
+        "이미 있는 객체를 고치는 것은 해당하지 않습니다. 정당한 이름이면 그 파일의 `예외` 에 넣어 달라고 담당자에게 요청하십시오.", "",
+        "| 파일 | 종류 | 이름 | 이유 |",
+        "|---|---|---|---|",
+    ]
+    for item in violations:
+        out.append(
+            f"| `{item.get('file')}` | {item.get('type')} | `{item.get('name')}` | {_cell('; '.join(item.get('reasons') or []))} |"
+        )
+    return out
 
 
 def _render_disabled(name: str) -> list[str]:
@@ -407,7 +439,7 @@ def exit2_cause(report: dict) -> str:
     code_rules = report.get("code_rules")
     if code_rules and code_rules.get("exit") not in (0, 1):
         return "config"
-    for key in ("pairing", "overlap"):
+    for key in ("pairing", "overlap", "naming"):
         if (report.get(key) or {}).get("status") == "cannot_check":
             return "config"
     if report.get("cross_checks"):

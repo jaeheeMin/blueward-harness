@@ -330,6 +330,15 @@ jobs:
             cat changed-err.txt >&2
             : > changed.txt
           fi
+          # 새로 추가된 파일만 따로 구한다(#943). 개발 표준 이름 검사는 이미 있는 객체를 고치는 PR 을 막지 않으려고
+          # 추가분만 본다. --no-renames 라야 이름을 바꾼 파일의 새 이름이 추가로 잡힌다. 못 구하면 같은 검사 불능이다.
+          if ! git -c core.quotepath=false diff --name-only --no-renames --diff-filter=A "$base"...HEAD > added.txt 2> changed-err-added.txt; then
+            diff_ok=false
+            cat changed-err-added.txt >&2
+            cp changed-err-added.txt changed-err.txt
+            : > added.txt
+          fi
+          export DOC_GUARD_ADDED_FILES=added.txt
           echo "바뀐 파일:"; cat changed.txt
 
           if [ "$diff_ok" != true ]; then

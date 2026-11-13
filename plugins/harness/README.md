@@ -307,7 +307,10 @@ PR 마다 각각 부른다 — doc-guard 와 같은 엔진 저장소, 같은 관
 CR-005(표준 객체 수정)는 기본 대상인 Public Cloud(ABAP Cloud)에서 플랫폼이
 막으므로 하네스가 검사하지 않는다. CR-004 는 아래 gitleaks 가 잡고, 나머지 CR-006, CR-008 은 사람이
 리뷰로만 본다 — CR-006(하드코딩)은 프로젝트별 도메인 지식이 있어야 하고, CR-008 은
-코드 검사 대상이 아니다. CR-004(비밀정보)는 이 검사기가 아니라 범용 시크릿 스캐너인
+코드 검사 대상이 아니다. 다만 프로젝트가 `conventions/naming.yaml`(객체 종류별 이름 형식·최대 길이,
+예시는 `conventions/naming.example.yaml`)을 두면 이름만은 기계로 본다(#943) — SAP 객체를 만들거나
+이름을 바꾸기 직전 `mcp_source_guard.py` 가 `checker/naming_rules.py` 로 판정해 막고, `pr-checks` 는
+`src/` 에 새로 생긴 객체만 본다. 파일이 없으면 검사하지 않고, 있는데 못 읽으면 검사 불능이다. CR-004(비밀정보)는 이 검사기가 아니라 범용 시크릿 스캐너인
 gitleaks 가 맡는다(아래 "비밀정보 검사").
 SAP ATC 와의 관계는 `conventions/common.md` 의 "기본 대상과 ATC 와의 관계" 에
 있다 — 080 실측으로 ATC 기본 variant 가 CR-002·CR-003 패턴을 잡지 않는 것을
