@@ -27,7 +27,7 @@ Spec 작업본 `## 양식 항목` 의 `### <양식> · <시트>` 아래에 `####
 뒤에 빈 줄 한 줄. `조회: Go` 면 필터 바 마지막 줄의 영역 오른쪽 끝에 `Go` 액션을 놓고(자리가 없으면 다음 줄 오른쪽 끝), 그 뒤에 빈 줄 한 줄.
 액션은 결과 테이블 머리글 바로 윗줄(테이블 툴바)에 결과 테이블의 오른쪽 끝에 맞춰 오른쪽 정렬한다(간격 한 칸). 액션이 테이블보다 넓어 영역 왼쪽을
 넘으면 영역 오른쪽 끝 기준으로 바꾼다. 결과 테이블이 없으면 영역 오른쪽 끝 기준으로 그 자리(빈 줄 다음 줄)에 둔다.
-결과 테이블은 열마다 머리글 칸과 빈 행 `빈_행` 줄(이어 붙음). `칸_수.열` 너비로 영역을 넘치면 열 너비를 1칸으로 좁혀 다시 배치한다(경고).
+결과 테이블은 열마다 머리글 칸과 빈 행 `빈_행` 줄(이어 붙음). `칸_수.열` 너비로 영역을 넘치면 열 너비를 1칸으로 좁혀 다시 배치하고, 그래도 넘치면 영역 너비만큼의 열씩 여러 줄로 나눈다(경고).
 """
 from __future__ import annotations
 
@@ -507,12 +507,13 @@ class Box(NamedTuple):
 
 def layout(
     item: dict, conds: list[tuple[str, bool]], actions: list[str], cols: list[str], go: bool = False,
-    marks: dict[tuple[str, str], tuple[str, int]] | None = None,
+    marks: dict[tuple[str, str], tuple[str, int]] | None = None, wrap: bool = False,
 ) -> tuple[list[Box], list[str]]:
     """(그릴 칸들, 영역을 넘친 항목들). 넘친 항목이 있으면 그리지 않고 거절한다. `go` 면 필터 바 오른쪽 끝에 Go 액션을 둔다.
 
     `marks` 는 지난 판과 달라진 항목 {(소절, 이름): (구분, 번호)}(`screen_diff`). 표시한 칸은 글자 앞에 번호를 붙이고 `Box.mark` 를 단다.
     필터 바는 추가·삭제면 라벨·입력 둘 다, 수정이면 라벨만. 결과 테이블은 추가면 머리글만, 삭제면 머리글과 빈 행 모두.
+    `wrap` 이면 결과 테이블을 영역 너비만큼의 열씩 여러 줄 묶음으로 나눈다(열 너비 1칸일 때만 쓴다).
     """
     c0, r0, c1, r1 = parse_range(item["영역"])
     n = item["칸_수"]
@@ -580,12 +581,21 @@ def layout(
         for i, name in enumerate(actions):
             put(start + i * (act_w + gap), row, act_w, "액션", name, f"액션 '{name}'", ("액션", name), "head")
         row += 1
+    per_band = max(1, (c1 - c0 + 1) // col_w) if wrap else len(cols) or 1  # 여러 줄 묶음이면 한 묶음에 영역 너비만큼의 열
     for i, name in enumerate(cols):
         what = f"결과 테이블 '{name}'"
-        put(c0 + i * col_w, row, col_w, "머리글", name, what, ("결과 테이블", name), "head")
+        at = row + (i // per_band) * (empty + 2)  # 묶음마다 머리글 + 빈 행 줄, 묶음 사이에 빈 줄 하나
+        col = c0 + (i % per_band) * col_w
+        put(col, at, col_w, "머리글", name, what, ("결과 테이블", name), "head")
         for k in range(1, empty + 1):
-            put(c0 + i * col_w, row + k, col_w, "행", "", what, ("결과 테이블", name), "row")
+            put(col, at + k, col_w, "행", "", what, ("결과 테이블", name), "row")
     return boxes, over
+
+
+def band_count(item: dict, n_cols: int) -> int:
+    """열 너비 1칸으로 영역 너비에 나눠 그릴 때의 묶음(줄) 수."""
+    c0, _r0, c1, _r1 = parse_range(item["영역"])
+    return -(-n_cols // (c1 - c0 + 1))
 
 
 def _read(item: dict, body: list[str], sname: str, problem) -> tuple[list[tuple[str, bool]], list[str], list[str], bool] | None:
@@ -672,7 +682,7 @@ def draw(
 
     `old_body` 가 있으면 지난 판의 같은 그림 절과 비교해(`screen_diff`) 달라진 항목에 번호와 표시 스타일을 겹쳐 쓰고,
     지도 `변경:` 의 변경 내용 표를 채운다. 없으면(첫 판 등) 표시 없이 그린다.
-    결과 테이블이 `칸_수.열` 너비로 영역을 넘치면 열 너비를 1칸으로 좁혀 다시 배치하고(`warn(시트, 항목, 사유)` 로 알린다), 그래도 넘치면 거절한다.
+    결과 테이블이 `칸_수.열` 너비로 영역을 넘치면 열 너비를 1칸으로 좁혀 다시 배치하고(`warn(시트, 항목, 사유)` 로 알린다), 그래도 넘치면 영역 너비만큼의 열씩 여러 줄로 나눠 그리고, 행이 모자라면 거절한다.
     """
     where = md_name(item)
     read = _read(item, body, sname, problem)
@@ -684,15 +694,27 @@ def draw(
         read = (merged.conds, merged.actions, merged.cols, merged.go)
     marks = merged.marks if merged else None
     boxes, over = layout(item, *read, marks=marks)
-    if over and read[2] and item["칸_수"]["열"] > 1:
+    if over and read[2]:
         # 결과 테이블이 영역 너비를 넘칠 때만 열 너비를 1칸으로 좁혀 다시 배치한다. 중간 값(예: 3칸 → 2칸)은 시도하지 않는다 — 단순하게 1칸만.
-        # 넘치지 않은 표는 이 길로 오지 않으므로 지금과 셀 하나까지 같다. 삭제 항목을 합친 목록(`read`)이 기준이다.
+        # 1칸으로도 넘치면 영역 너비만큼의 열씩 여러 줄 묶음으로 나눈다. 둘 다 넘치지 않은 표는 이 길로 오지 않으므로 지금과 셀 하나까지 같다.
+        # 삭제 항목을 합친 목록(`read`)이 기준이다.
+        was = item["칸_수"]["열"]
         narrow = {**item, "칸_수": {**item["칸_수"], "열": 1}}
-        boxes, over = layout(narrow, *read, marks=marks)
+        tried = None
+        if was > 1:
+            boxes, over = layout(narrow, *read, marks=marks)
+            if not over:
+                tried = "열 너비를 1칸으로 줄였다"
+        if over:
+            wrapped, over2 = layout(narrow, *read, marks=marks, wrap=True)
+            boxes, over = wrapped, over2  # 거절 사유도 나눠 그린 배치 기준(행이 모자라는 항목)
+            if not over:
+                lines = band_count(item, len(read[2]))
+                tried = (f"열 너비를 1칸으로 줄이고 {lines}줄로 나눠 그렸다" if was > 1 else f"{lines}줄로 나눠 그렸다")
         if not over:
             item = narrow
-            if warn is not None:
-                warn(sname, where, f"{item['이름']} 결과 테이블 열이 많아({len(read[2])}개) 열 너비를 1칸으로 줄였다")
+            if warn is not None and tried:
+                warn(sname, where, f"{item['이름']} 결과 테이블 열이 많아({len(read[2])}개) {tried}")
     if over:
         problem(sname, where, (
             f"{where} 이 영역 {item['영역']} 를 넘는다 — 넘친 항목: {', '.join(over[:12])}{' …' if len(over) > 12 else ''}. "

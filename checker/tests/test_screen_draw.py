@@ -363,12 +363,13 @@ def _cols(n: int) -> str:
     return "| 열 |\n|---|\n" + "".join(f"| 열{i} |\n" for i in range(1, n + 1))
 
 
-def test_열이_1칸으로도_영역을_넘으면_거절하고_넘친_항목을_알린다(proj, capsys):
-    code, report = _run(proj, capsys, screen(res=_cols(18)))  # 18열 x 1칸 = 18칸 > 17칸
+def test_열이_1칸으로도_영역을_넘고_나눠도_행이_모자라면_거절하고_넘친_항목을_알린다(proj, capsys):
+    # 조건 3개(7행) + 빈 줄 + 액션(9행) 뒤 결과 테이블이 10행부터: 첫 묶음 10~12행, 빈 줄 13행, 둘째 묶음 머리글이 14행이고 빈 행이 영역 밖.
+    code, report = _run(proj, capsys, screen(res=_cols(18)))
     assert code == 1
     assert report["status"] == "rejected" and report["files"] == []
     reason = report["problems"][0]["reason"]
-    assert "화면 1 그림" in reason and "C7:S14" in reason and "열18" in reason and "열)" in reason
+    assert "화면 1 그림" in reason and "C7:S14" in reason and "열18" in reason and "(행)" in reason
     assert "열1'" not in reason and "실제 화면 캡처를 쓴다" in reason
     assert _nothing_written(proj)
 
@@ -416,10 +417,39 @@ def test_칸_수_열이_3이어도_넘치면_중간_값_없이_1칸으로_줄인
     assert len(_screen_warns(report)) == 1
 
 
-def test_지도의_칸_수_열이_이미_1이면_좁힐_게_없어_거절한다(proj, capsys):
+def test_지도의_칸_수_열이_이미_1이면_좁히지_않고_나눠_그린다(proj, capsys):
     _map(proj, extra="        칸_수: {열: 1}\n")
-    code, report = _run(proj, capsys, screen(res=_cols(18)))
-    assert code == 1 and "열18" in report["problems"][0]["reason"]
+    code, report = _run(proj, capsys, screen(cond=None, res=_cols(18)))
+    assert code == 0, report
+    assert _screen_warns(report) == ["화면 1 결과 테이블 열이 많아(18개) 2줄로 나눠 그렸다"]
+
+
+# 1칸으로도 영역 너비(17칸)를 넘치면 17열씩 여러 줄 묶음으로 나눈다(#940). 묶음 사이에 빈 줄 하나.
+
+def test_17열을_넘는_18열은_두_줄로_나눠_그리고_경고한다(proj, capsys):
+    code, report = _run(proj, capsys, screen(cond=None, res=_cols(18)))  # 액션 7행, 첫 묶음 8~10행, 빈 줄 11행, 둘째 묶음 12~14행
+    assert code == 0, report
+    assert _screen_warns(report) == ["화면 1 결과 테이블 열이 많아(18개) 열 너비를 1칸으로 줄이고 2줄로 나눠 그렸다"]
+    ws = _sheet(proj, report)
+    assert [ws.cell(8, c).value for c in range(3, 20)] == [f"열{i}" for i in range(1, 18)]  # C~S 17열
+    assert ws["C12"].value == "열18" and ws["D12"].value is None and ws["C11"].value is None
+    assert ws["C9"].border.bottom.style == "thin" and ws["C14"].border.bottom.style == "thin" and ws["D13"].border.bottom.style is None
+    # 액션 묶음은 첫 묶음의 오른쪽 끝(영역 오른쪽 끝 S)에 맞춘다: 취소 O~P, 일괄 취소 R~S
+    assert _merges(ws) == {"O7:P7", "R7:S7"} and ws["O7"].value == "취소" and ws["R7"].value == "일괄 취소"
+
+
+def test_34열은_두_줄로_들어간다(proj, capsys):
+    code, report = _run(proj, capsys, screen(cond=None, btn=None, res=_cols(34)))  # 7~9행, 빈 줄, 11~13행
+    assert code == 0, report
+    ws = _sheet(proj, report)
+    assert ws["S7"].value == "열17" and ws["C11"].value == "열18" and ws["S11"].value == "열34"
+    assert "2줄" in _screen_warns(report)[0]
+
+
+def test_35열은_셋째_묶음이_영역_밖이라_거절한다(proj, capsys):
+    code, report = _run(proj, capsys, screen(cond=None, btn=None, res=_cols(35)))  # 셋째 묶음이 15행부터라 영역(14행) 밖
+    assert code == 1 and "(행)" in report["problems"][0]["reason"] and "열35" in report["problems"][0]["reason"]
+    assert _nothing_written(proj)
 
 
 def test_테이블을_좁혀도_행이_넘치면_거절한다(proj, capsys):
@@ -446,8 +476,8 @@ def test_조건_묶음이_영역_너비보다_넓으면_모두_넘친_것으로_
 
 
 def test_check도_같은_이유로_거절한다(proj, capsys):
-    res = _cols(18)
-    code, report = _run(proj, capsys, screen(res=res), "--check")
+    res = _cols(35)  # 1칸으로도 넘치고 나눠도 행이 모자란다
+    code, report = _run(proj, capsys, screen(cond=None, btn=None, res=res), "--check")
     assert code == 1 and report["status"] == "rejected"
     assert _nothing_written(proj)
     code, report = _run(proj, capsys, screen(), "--check")
