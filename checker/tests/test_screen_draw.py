@@ -354,14 +354,78 @@ def test_지도의_스타일과_칸_수가_기본값을_덮어쓴다(proj, capsy
 
 # ---------------------------------------------------------------- 영역을 넘으면 거절
 
-def test_열이_영역을_넘으면_거절하고_넘친_항목을_알린다(proj, capsys):
-    res = "| 열 |\n|---|\n" + "".join(f"| 열{i} |\n" for i in range(1, 10))  # 9열 x 2칸 = 18칸 > 17칸
-    code, report = _run(proj, capsys, screen(res=res))
+def _screen_warns(report: dict) -> list[str]:
+    """화면 그림이 낸 경고 사유들(합성 템플릿 Other 시트의 견본 경고는 뺀다)."""
+    return [w["reason"] for w in report["warnings"] if w["item"] == "화면 1 그림"]
+
+
+def _cols(n: int) -> str:
+    return "| 열 |\n|---|\n" + "".join(f"| 열{i} |\n" for i in range(1, n + 1))
+
+
+def test_열이_1칸으로도_영역을_넘으면_거절하고_넘친_항목을_알린다(proj, capsys):
+    code, report = _run(proj, capsys, screen(res=_cols(18)))  # 18열 x 1칸 = 18칸 > 17칸
     assert code == 1
     assert report["status"] == "rejected" and report["files"] == []
     reason = report["problems"][0]["reason"]
-    assert "화면 1 그림" in reason and "C7:S14" in reason and "열9" in reason and "열)" in reason
-    assert "열1'" not in reason
+    assert "화면 1 그림" in reason and "C7:S14" in reason and "열18" in reason and "열)" in reason
+    assert "열1'" not in reason and "실제 화면 캡처를 쓴다" in reason
+    assert _nothing_written(proj)
+
+
+# 결과 테이블이 `칸_수.열` 너비로 영역(17칸)을 넘칠 때만 열 너비를 1칸으로 좁힌다(#939).
+
+def test_8열은_2칸_너비_그대로이고_경고가_없다(proj, capsys):
+    code, report = _run(proj, capsys, screen(cond=None, res=_cols(8)))  # 8열 x 2칸 = 16칸 <= 17칸
+    assert code == 0, report
+    assert _screen_warns(report) == []
+    ws = _sheet(proj, report)
+    cols =[f"{n}" for n in "CEGIKMOQ"]
+    ends = dict(zip("CEGIKMOQ", "DFHJLNPR"))
+    # 액션 묶음(5칸)은 테이블 오른쪽 끝(R열)에 맞춘다: 취소 N~O, 일괄 취소 Q~R. 머리글은 액션 바로 아래 줄.
+    assert _merges(ws) == {"N7:O7", "Q7:R7"} | {f"{c}{r}:{ends[c]}{r}" for c in cols for r in (8, 9, 10)}
+    assert ws["C8"].value == "열1" and ws["Q8"].value == "열8" and ws["S8"].value is None
+
+
+def test_9열은_열_너비를_1칸으로_줄여_그리고_경고한다(proj, capsys):
+    code, report = _run(proj, capsys, screen(cond=None, res=_cols(9)))  # 9열 x 2칸 = 18칸 > 17칸 → 9칸
+    assert code == 0, report
+    assert _screen_warns(report) == ["화면 1 결과 테이블 열이 많아(9개) 열 너비를 1칸으로 줄였다"]
+    ws = _sheet(proj, report)
+    assert [ws.cell(8, c).value for c in range(3, 12)] == [f"열{i}" for i in range(1, 10)] and ws["L8"].value is None
+    # 1칸 열은 병합이 없다. 액션 묶음은 좁힌 테이블(C~K)의 오른쪽 끝 K 에 맞춰 다시 정렬된다: 취소 G~H, 일괄 취소 J~K.
+    assert _merges(ws) == {"G7:H7", "J7:K7"}
+    assert ws["G7"].value == "취소" and ws["J7"].value == "일괄 취소"
+    assert ws["C9"].border.bottom.style == "thin" and ws["C10"].border.bottom.style == "thin"  # 빈_행 2줄은 그대로
+
+
+def test_17열은_1칸으로_그려진다(proj, capsys):
+    code, report = _run(proj, capsys, screen(cond=None, btn=None, res=_cols(17)))
+    assert code == 0, report
+    ws = _sheet(proj, report)
+    assert ws["C7"].value == "열1" and ws["S7"].value == "열17" and len(_screen_warns(report)) == 1
+
+
+def test_칸_수_열이_3이어도_넘치면_중간_값_없이_1칸으로_줄인다(proj, capsys):
+    # 3칸 → 2칸 같은 중간 값은 시도하지 않는다(단순하게 1칸만). 6열 x 3칸 = 18칸 > 17칸 이라 넘치고, 2칸이면 들어가지만 1칸으로 그린다.
+    _map(proj, extra="        칸_수: {열: 3}\n")
+    code, report = _run(proj, capsys, screen(cond=None, btn=None, res=_cols(6)))
+    assert code == 0, report
+    ws = _sheet(proj, report)
+    assert [ws.cell(7, c).value for c in range(3, 9)] == [f"열{i}" for i in range(1, 7)] and _merges(ws) == set()
+    assert len(_screen_warns(report)) == 1
+
+
+def test_지도의_칸_수_열이_이미_1이면_좁힐_게_없어_거절한다(proj, capsys):
+    _map(proj, extra="        칸_수: {열: 1}\n")
+    code, report = _run(proj, capsys, screen(res=_cols(18)))
+    assert code == 1 and "열18" in report["problems"][0]["reason"]
+
+
+def test_테이블을_좁혀도_행이_넘치면_거절한다(proj, capsys):
+    cond = "| 이름 |\n|---|\n" + "".join(f"| 조건{i} |\n" for i in range(1, 11))  # 4줄(7~10행) + 빈 줄 + 액션 + 머리글 + 빈 행이 14행 밖
+    code, report = _run(proj, capsys, screen(cond=cond, res=_cols(9)))
+    assert code == 1 and "(행)" in report["problems"][0]["reason"]
     assert _nothing_written(proj)
 
 
@@ -382,7 +446,7 @@ def test_조건_묶음이_영역_너비보다_넓으면_모두_넘친_것으로_
 
 
 def test_check도_같은_이유로_거절한다(proj, capsys):
-    res = "| 열 |\n|---|\n" + "".join(f"| 열{i} |\n" for i in range(1, 10))
+    res = _cols(18)
     code, report = _run(proj, capsys, screen(res=res), "--check")
     assert code == 1 and report["status"] == "rejected"
     assert _nothing_written(proj)
