@@ -45,13 +45,13 @@ def parse(items) -> list[dict]:
     if items in (None, []):
         return []
     if not isinstance(items, list):
-        raise AttachmentError("attachments 는 목록이어야 합니다.")
+        raise AttachmentError("attachments 는 목록이어야 해.")
     if len(items) > MAX_COUNT:
         raise AttachmentError(f"첨부는 한 번에 {MAX_COUNT}개까지 보낼 수 있어.")
     out, total = [], 0
     for item in items:
         if not isinstance(item, dict):
-            raise AttachmentError("첨부 항목 모양이 올바르지 않습니다.")
+            raise AttachmentError("첨부 항목 모양이 올바르지 않아.")
         media_type, data = item.get("media_type"), item.get("data")
         name = _clean_name(item.get("name"))
         if media_type not in _SIGNATURES:
