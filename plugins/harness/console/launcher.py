@@ -60,17 +60,17 @@ def message_box(text: str) -> None:
 def main() -> int:
     open_py = find_latest_open()
     if open_py is None:
-        message_box("하네스 플러그인을 찾지 못했어요. Claude Code 에서 /harness:update 를 실행한 뒤 다시 눌러 주세요.")
+        message_box("하네스 플러그인을 찾지 못했어. Claude Code 에서 /harness:update 를 실행한 뒤 다시 눌러 줘.")
         return 1
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform.startswith("win") else 0
     try:
         done = subprocess.run([sys.executable, str(open_py), "--from-shortcut"], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=120, creationflags=flags)
     except (OSError, subprocess.SubprocessError) as exc:
-        message_box(f"웹 콘솔을 열지 못했어요: {exc}")
+        message_box(f"웹 콘솔을 열지 못했어: {exc}")
         return 1
     if done.returncode != 0:
-        message_box((done.stdout or done.stderr or "웹 콘솔을 열지 못했어요.").strip()[:600])
+        message_box((done.stdout or done.stderr or "웹 콘솔을 열지 못했어.").strip()[:600])
     return done.returncode
 
 

@@ -1362,15 +1362,15 @@ class App:
             truncated, gap = bool(s.get("touchedTruncated")), s.get("touchedGap")
         listed = docfiles.collect(cwd, touched, None if (why or not_repo) else paths)
         out = {"files": listed}
-        self.annotate_upload(cwd, root, listed, why or ("git 저장소가 아니라 올렸는지 알 수 없어요." if not_repo else ""))
+        self.annotate_upload(cwd, root, listed, why or ("git 저장소가 아니라 올렸는지 알 수 없어." if not_repo else ""))
         if truncated:
             out["truncated"] = True  # 쌓아 두는 상한에 닿아 더 있는 문서가 빠졌다
         if why:  # git 을 못 읽었다 = 바뀐 문서가 없다는 뜻이 아니다. 훅이 모은 목록만으로 보여 주고 화면이 알리게 한다
             out.update(unknown=True, reason=why)
         elif not_repo:
-            out.update(unknown=True, reason="git 저장소가 아니라 커밋 여부를 알 수 없어요.")
+            out.update(unknown=True, reason="git 저장소가 아니라 커밋 여부를 알 수 없어.")
         elif isinstance(gap, dict) and now - gap.get("at", 0) <= GAP_NOTICE_SECONDS:  # 지금은 읽었다. 못 읽은 동안 커밋된 문서가 빠졌을 수 있다는 안내만 하고(note) 파일별 칩은 덮지 않는다. 영구 경고는 피하려 일정 시간만 알린다
-            out["note"] = f"{time.strftime('%H:%M', time.localtime(gap['at']))} 에 git 상태를 읽지 못해 그 사이 커밋된 문서가 빠졌을 수 있어요."
+            out["note"] = f"{time.strftime('%H:%M', time.localtime(gap['at']))} 에 git 상태를 읽지 못해 그 사이 커밋된 문서가 빠졌을 수 있어."
         return out
 
     def a_file_preview(self, g, q, b):
@@ -1713,7 +1713,7 @@ class App:
         tool = self.tool_skill_of(j["text"])
         if tool and out["result"]:  # 요청이 도구 스킬로 시작하면 분석이 어느 갈래로 봤든 갈래 없이 도구만 쓰는 일이다
             out["result"] = dict(out["result"], flow={"id": analysis.NO_FLOW, "name": analysis.NO_FLOW_NAME, "confident": True, "alternativeId": None,
-                                                     "alternativeName": "", "reason": f"요청이 도구 스킬(/{self.plugin_name}:{tool})로 시작해요."})
+                                                     "alternativeName": "", "reason": f"요청이 도구 스킬(/{self.plugin_name}:{tool})로 시작해."})
         return 200, out
 
     def chosen_flow(self, job, b: dict) -> tuple[str | None, str]:
@@ -2427,7 +2427,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         server = make_server(app)
     except OSError as e:
-        reason = f"포트 {port} 를 열지 못했습니다: {type(e).__name__} {getattr(e, 'winerror', None) or e.errno or ''} {e.strerror or ''}".strip()
+        reason = f"포트 {port} 를 열지 못했어:{type(e).__name__} {getattr(e, 'winerror', None) or e.errno or ''} {e.strerror or ''}".strip()
         if sys.stderr is not None:  # pythonw.exe 로 뜨면 stderr 가 없다
             print(reason, file=sys.stderr)
         write_error_file(state, reason)

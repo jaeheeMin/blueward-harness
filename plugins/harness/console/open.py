@@ -153,7 +153,7 @@ def ensure_server(port: int, wait: float = 20.0) -> str | None:
     if state == "ours":
         return None
     if state == "other":
-        return f"포트 {port} 를 다른 프로그램이 쓰고 있어 웹 콘솔을 띄울 수 없습니다."
+        return f"포트 {port} 를 다른 프로그램이 쓰고 있어 웹 콘솔을 띄울 수 없어."
     wait_port_released(port, START_PORT_WAIT)  # 방금 끈 서버의 포트가 풀리기를 잠깐 기다린다. 끝내 안 풀려도 띄워 원인을 남기게 한다
     state = probe(port)
     if state == "ours":
@@ -167,14 +167,14 @@ def ensure_server(port: int, wait: float = 20.0) -> str | None:
             return None
         if state == "other":
             reap_launched(FAIL_REAP_WAIT)  # 띄운 서버는 포트를 못 열고 끝난다 -> 거둔다(#836)
-            return f"포트 {port} 를 다른 프로그램이 쓰고 있어 웹 콘솔을 띄울 수 없습니다."
+            return f"포트 {port} 를 다른 프로그램이 쓰고 있어 웹 콘솔을 띄울 수 없어."
         why = read_server_error()
         if why:  # 서버가 스스로 못 뜬 이유를 남겼다 -> 더 기다리지 않는다
             reap_launched(FAIL_REAP_WAIT)
-            return f"웹 콘솔 서버가 뜨지 못했습니다. 원인: {why}"
+            return f"웹 콘솔 서버가 뜨지 못했어. 원인: {why}"
     why = read_server_error()
     reap_launched(FAIL_REAP_WAIT)  # 아직 안 끝났으면 그대로 둔다(끝까지 기다리지 않는다)
-    return "웹 콘솔 서버가 시간 안에 뜨지 않았습니다." + (f" 원인: {why}" if why else "")
+    return "웹 콘솔 서버가 시간 안에 뜨지 않았어." + (f" 원인: {why}" if why else "")
 
 
 def stop_server(port: int) -> str:
@@ -182,16 +182,16 @@ def stop_server(port: int) -> str:
     try:
         pid = int(pid_path.read_text(encoding="utf-8").split()[0])
     except (OSError, ValueError, IndexError):
-        return "실행 중인 웹 콘솔 서버를 찾지 못했습니다." if probe(port) != "ours" else "서버 기록을 찾지 못해 끄지 못했습니다."
+        return "실행 중인 웹 콘솔 서버를 찾지 못했어." if probe(port) != "ours" else "서버 기록을 찾지 못해 끄지 못했어."
     if probe(port) != "ours":
-        return "실행 중인 웹 콘솔 서버가 없습니다."  # 옛 기록이 다른 프로세스를 가리킬 수 있으므로 건드리지 않는다
+        return "실행 중인 웹 콘솔 서버가 없어."  # 옛 기록이 다른 프로세스를 가리킬 수 있으므로 건드리지 않는다
     status, _ = request(port, "POST", "/api/shutdown", {})  # 정상 종료 절차를 먼저 요청한다
     if status != 200:
         platform_compat.terminate_pid(pid)  # 위에서 /api/health 로 우리 서버임을 확인했다
     if wait_port_released(port, STOP_PORT_WAIT):  # 서버가 응답을 멈춘 뒤에도 소켓이 잠시 남는다 -> 바로 다시 띄우면 열지 못한다
         reap_launched(STOP_REAP_WAIT)  # 이 프로세스가 띄운 서버였다면 끝난 프로세스를 거둔다(#836)
-        return "웹 콘솔 서버를 껐습니다."
-    return "웹 콘솔 서버가 아직 꺼지지 않았습니다."
+        return "웹 콘솔 서버를 껐어."
+    return "웹 콘솔 서버가 아직 꺼지지 않았어."
 
 
 def main(argv: list[str]) -> int:
@@ -205,9 +205,9 @@ def main(argv: list[str]) -> int:
         return 1
     status, data = request(port, "POST", "/api/open", {}, timeout=30)  # 바쁜 PC 에서 브라우저가 뜨는 동안 끊기지 않게
     if status != 200:
-        print("웹 콘솔 서버는 떠 있지만 브라우저를 열지 못했습니다. 이 명령을 다시 실행해 보십시오.")
+        print("웹 콘솔 서버는 떠 있지만 브라우저를 열지 못했어. 이 명령을 다시 실행해 봐.")
         return 1
-    line = "웹 콘솔을 브라우저로 열었습니다: http://127.0.0.1:%d" % port
+    line = "웹 콘솔을 브라우저로 열었어: http://127.0.0.1:%d" % port
     result = shortcut.Result("none") if "--from-shortcut" in argv else shortcut.ensure_shortcut(force="--make-shortcut" in argv)
     if result.status in ("made", "fixed"):
         line += " " + result.text

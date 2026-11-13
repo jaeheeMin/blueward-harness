@@ -166,7 +166,7 @@ def lnk_matches(lnk: Path, target: str, args: str, workdir: Path, runner=subproc
 def create_lnk(lnk: Path, target: str, args: str, workdir: Path, runner=subprocess.run) -> None:
     done = run_powershell(CREATE_SCRIPT, lnk_values(lnk, target, args, workdir), runner)
     if done.returncode != 0:
-        raise OSError((done.stderr or done.stdout or "PowerShell 가 실패했습니다.").strip()[:150])
+        raise OSError((done.stderr or done.stdout or "PowerShell 가 실패했어.").strip()[:150])
 
 
 def ensure_shortcut(force: bool = False, os_name: str | None = None, desktop: Path | None = None, ldir: Path | None = None,
@@ -180,7 +180,7 @@ def ensure_shortcut(force: bool = False, os_name: str | None = None, desktop: Pa
     try:
         desk = desktop if desktop is not None else windows_desktop()
         if desk is None or not desk.is_dir():
-            return Result("failed", "바로가기를 만들지 못함(바탕화면 폴더를 찾지 못했어요)")
+            return Result("failed", "바로가기를 만들지 못함(바탕화면 폴더를 찾지 못했어)")
         lnk = desk / LNK_NAME
         state = read_state(ldir)
         if not force:
@@ -198,10 +198,10 @@ def ensure_shortcut(force: bool = False, os_name: str | None = None, desktop: Pa
             return Result("none")
         create_lnk(lnk, target, args, ldir, runner)
         if not lnk_matches(lnk, target, args, ldir, runner):
-            return Result("failed", "바로가기를 만들지 못함(만든 바로가기를 다시 읽어 확인하지 못했어요)")
+            return Result("failed", "바로가기를 만들지 못함(만든 바로가기를 다시 읽어 확인하지 못했어)")
         write_state(ldir, "made")
         if existed and not force:
-            return Result("fixed", "바탕화면의 Blueward Harness 바로가기가 가리키는 곳을 고쳤어요.")
-        return Result("made", "바탕화면에 Blueward Harness 바로가기를 만들었어요.")
+            return Result("fixed", "바탕화면의 Blueward Harness 바로가기가 가리키는 곳을 고쳤어.")
+        return Result("made", "바탕화면에 Blueward Harness 바로가기를 만들었어.")
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         return Result("failed", f"바로가기를 만들지 못함({' '.join(str(exc).split())[:120] or type(exc).__name__})")
