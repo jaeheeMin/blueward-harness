@@ -863,20 +863,15 @@ jobs:
                     body: [
                       {
                         type: "TextBlock",
-                        text: "PR이 main에 병합되었습니다",
+                        text: ($author + " 의 PR 이 병합됐습니다"),
                         weight: "bolder",
-                        size: "medium"
+                        size: "medium",
+                        wrap: true
                       },
                       {
                         type: "TextBlock",
                         text: ($title + " (#" + $number + ")"),
                         wrap: true
-                      },
-                      {
-                        type: "FactSet",
-                        facts: [
-                          { title: "작성자", value: $author }
-                        ]
                       }
                     ],
                     actions: [

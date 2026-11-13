@@ -267,7 +267,9 @@ def test_병합_Teams_알림은_기본_브랜치로_병합된_closed_에서만_s
     assert "secrets." not in cond  # secret 은 step if 에서 못 쓴다 — 안에서 가린다
     run = step["run"]
     assert '[ -z "${TEAMS_MERGE_WEBHOOK_URL:-}" ]' in run and "::notice" in run and "result=skipped" in run
-    assert "application/vnd.microsoft.card.adaptive" in run and "PR이 main에 병합되었습니다" in run
+    assert "application/vnd.microsoft.card.adaptive" in run
+    # #930: Teams 카드 머리에 Workflow 만든 사람 이름이 붙어, 제목에 PR 작성자를 넣는다(작성자 칸은 뺐다)
+    assert '($author + " 의 PR 이 병합됐습니다")' in run and '"작성자"' not in run
     assert "curl -sS -f" in run
     assert _index("pr-queue") < _index("merge-notify") < len(_steps()) - 1
 
