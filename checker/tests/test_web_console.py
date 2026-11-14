@@ -7003,6 +7003,43 @@ def test_risk_reads_inside_harness_plugin_folder_are_safe_but_writes_and_outside
     assert c("Bash", {"command": f"cat {skill}"}) == "unknown"  # 셸 읽기는 넓히지 않는다
 
 
+def _dir_link(link, target):
+    """폴더 링크를 만든다. Windows 는 권한 없이 되는 Junction, 아니면 심볼릭 링크."""
+    try:
+        if os.name == "nt":
+            import _winapi
+            _winapi.CreateJunction(str(target), str(link))
+        else:
+            os.symlink(target, link, target_is_directory=True)
+    except (OSError, NotImplementedError, AttributeError):
+        pytest.skip("폴더 링크를 만들 수 없는 환경")
+
+
+def test_risk_plugin_folder_reads_are_judged_by_the_path_the_tool_really_opens(tmp_path):
+    """#960 점검: 상대 경로는 작업 폴더(Glob pattern 은 path) 기준으로 열린다. 플러그인 폴더에 붙여 보면 작업 폴더 안 링크로
+    밖을 읽는 것을 safe 로 본다. 링크를 푼 실제 경로가 플러그인 폴더 안일 때만 safe."""
+    work = tmp_path / "work"
+    work.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x.md").write_text("x", encoding="utf-8")
+    harness = tmp_path / "conf" / "plugins" / "cache" / "blueward-harness" / "harness"
+    plugin = harness / "0.10.280"
+    (plugin / "skills" / "start").mkdir(parents=True)
+    (plugin / "skills" / "start" / "SKILL.md").write_text("x", encoding="utf-8")
+    _dir_link(work / "lnk", outside)
+    _dir_link(plugin / "out", outside)
+    roots = (str(harness),)
+    c = lambda tool, inp: risk_mod.classify(tool, inp, str(work), read_roots=roots)[0]  # noqa: E731
+    assert c("Grep", {"pattern": "x", "path": "lnk"}) == "unknown"
+    assert c("Read", {"file_path": "lnk/x.md"}) == "unknown"
+    assert c("Glob", {"pattern": "lnk/*.md"}) == "unknown"
+    assert c("Read", {"file_path": str(plugin / "out" / "x.md")}) == "unknown"  # 플러그인 안 링크가 밖을 가리킴
+    assert c("Glob", {"pattern": "out/*.md", "path": str(plugin)}) == "unknown"
+    assert c("Glob", {"pattern": "skills/*/SKILL.md", "path": str(plugin)}) == "safe"
+    assert c("Read", {"file_path": str(plugin / "skills" / "start" / "SKILL.md")}) == "safe"
+
+
 def test_plugin_read_roots_cover_all_versions_of_installed_harness_or_the_dev_plugin(tmp_path):
     import hooks_api as hooks_mod
     installed = tmp_path / "conf" / "plugins" / "cache" / "blueward-harness" / "harness" / "0.10.285" / "console" / "hooks_api.py"

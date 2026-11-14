@@ -716,6 +716,33 @@ def _is_plan_file(real_path: str, plan_dir: str, cwd: str = "", config_roots=())
     return any(parts[0].lower().endswith(s) for s in _names("plan_file_suffixes"))
 
 
+def _opened_paths(name: str, tool_input, cwd: str) -> list[str]:
+    """읽기 도구가 실제로 열 경로(절대 경로). 상대 경로는 작업 폴더 기준이고, Glob 의 pattern 은 path(없으면 작업 폴더) 기준이다(#960)."""
+    if not isinstance(tool_input, dict):
+        return []
+    out = []
+    for k in ("file_path", "notebook_path", "path"):
+        v = tool_input.get(k)
+        if isinstance(v, str) and v:
+            out.append(v if _is_abs(v) else os.path.join(cwd, v))
+    if name == "Glob" and isinstance(tool_input.get("pattern"), str) and tool_input["pattern"]:
+        pat = tool_input["pattern"]
+        base = next((p for p in out), cwd)
+        out.append(pat if _is_abs(pat) else os.path.join(base, pat))
+    return out
+
+
+def _real_within(path: str, root: str) -> bool:
+    """링크를 모두 푼 실제 경로(글롭이면 글롭 앞까지)가 root 의 실제 경로 안인가."""
+    parts = re.split(r"[\\/]", path)
+    wild = next((k for k, part in enumerate(parts) if _WILD.search(part)), None)
+    fixed = os.sep.join(parts[:wild]) if wild is not None else path
+    try:
+        return bool(fixed) and platform_compat.is_within(os.path.realpath(fixed), os.path.realpath(root))
+    except (OSError, ValueError):
+        return False
+
+
 def classify(tool_name, tool_input, cwd, plan_dir: str = "", config_roots=(), read_roots=()) -> tuple[str, str]:
     """plan_dir 는 계획 모드인 세션에서만 넘긴다(<설정 폴더>/plans). 그 폴더 바로 아래 계획 파일 쓰기만 safe 로 본다.
     config_roots 는 plans 가 링크일 때 받아 줄 실제 설정 폴더들(CLAUDE_CONFIG_DIR·~/.claude). 순수 함수라 환경은 호출한 쪽이 읽는다.
@@ -755,10 +782,13 @@ def classify(tool_name, tool_input, cwd, plan_dir: str = "", config_roots=(), re
         if all(_path_ok(p, {"base": cwd, "cur": [cwd], "bs": False}) for p in paths):
             return SAFE, "읽기만 해"
         # 하네스 플러그인 폴더 안 읽기(스킬이 자기 플러그인의 다른 스킬 문서를 읽는 일, #953). 읽기 도구만이고 쓰기는 그대로 묻는다.
-        # 경로는 모두 그 폴더 안이어야 하고(상대 경로는 그 폴더 기준), 훅·설정 같은 보호 경로와 비밀값 모양은 여기서도 묻는다
-        for root in read_roots:
-            if root and paths and all(_path_ok(p, {"base": root, "cur": [root], "bs": False}) for p in paths):
-                return SAFE, "하네스 플러그인 문서를 읽기만 해"
+        # 도구가 실제로 열 경로로 본다: 상대 경로는 작업 폴더(Glob 의 pattern 은 path) 기준으로 붙이고, 링크를 푼 실제 경로도 그 폴더 안이어야 한다
+        # (작업 폴더 안 Junction 이 밖을 가리키면 상대 경로가 밖을 읽는다, #960 점검). 훅·설정 같은 보호 경로와 비밀값 모양은 여기서도 묻는다
+        if read_roots and paths:
+            opened = _opened_paths(name, tool_input, cwd)
+            for root in read_roots:
+                if root and opened and all(_path_ok(p, {"base": root, "cur": [root], "bs": False}) and _real_within(p, root) for p in opened):
+                    return SAFE, "하네스 플러그인 문서를 읽기만 해"
         return UNKNOWN, "작업 폴더 밖이거나 비밀값 모양 파일을 읽으려 해"
     if name == "WebFetch":
         url = tool_input.get("url") if isinstance(tool_input, dict) else None
