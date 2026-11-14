@@ -3758,7 +3758,7 @@ def test_subagent_cap_still_holds_with_new_fields(browser):
 FAKE_ANALYSIS_FLOW = Path(__file__).with_name("fake_claude_analysis_flow.py")
 FLOWS_FILE = PLUGIN / "workflow.json"  # 작업 순서의 정본은 플러그인 안의 workflow.json 이다(#599)
 REAL_SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md"))
-FLOW_IDS = ["srs", "spec", "dev", "config", "standard", "fix"]
+FLOW_IDS = ["srs", "spec", "dev", "config", "standard", "fix", "srs-export"]
 TOOL_IDS = ["version", "sync", "update", "handoff", "wrapup", "prs", "reload", "approvals", "atc", "role", "cts", "unittest", "manual", "scaffold", "open"]
 BRANCH = "docs/1-x"
 PR_URL = "https://github.com/o/r/pull/7"

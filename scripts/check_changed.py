@@ -44,6 +44,11 @@ out_of_scope 로 빠지기 때문이다. 이 워크플로를 부르는 저장소
 읽었으면(파일 없음·깨짐·API 실패) 검사 불능(2)이다. 환경변수가 없으면(push, 로컬) 대상이 아니라 키도 없다.
 스위치 `판_겹침` 으로 끌 수 있다.
 
+**SRS 고치기·주기 분리 검사(#974)**: 환경변수 `DOC_GUARD_DIFF_FILE` 과 `DOC_GUARD_ADDED_FILES`(둘 다 PR 이벤트에서 워크플로가 항상 채운다)가
+있고 바뀐 파일에 `docs/ssot/SRS.md` 나 `.xlsx` 가 있으면 `checker.srs_split` 을 돌려 `srs_split` 키로 합친다. `버전:` 줄과 내용이 함께 바뀐
+PR, 판이 base + 0.1 이 아니거나 그 판 Backlog 엑셀이 없는 PR, 엑셀만 있고 `버전:` 이 안 바뀐 PR 은 위반(종료코드 1)이다. diff·추가 목록·
+양식 지도를 읽지 못하면 검사 불능(2)이다. 환경변수가 없으면(push, 로컬) 대상이 아니라 키도 없다. 스위치 `SRS_분리` 로 끌 수 있다.
+
 **개발 표준 이름 검사(#943)**: 환경변수 `DOC_GUARD_ADDED_FILES`(PR 이벤트에서 워크플로가 `--diff-filter=A` 로 만든
 추가 파일 목록 경로)가 있고 프로젝트에 `conventions/naming.yaml` 이 있으면, `src/` 에 새로 생긴 객체 이름만
 `checker.naming_rules` 로 검사해 `naming` 키로 합친다. 이미 있는 객체를 고치는 PR 은 막지 않는다. 설정이
@@ -69,7 +74,7 @@ from checker.code_rules import exit_code_for as _code_exit_code
 from checker.code_rules import language_for_suffix
 from checker.model import ConfigError
 from checker.naming_rules import evaluate_files as _evaluate_naming
-from checker import ui5_rules
+from checker import srs_split, ui5_rules
 from checker.cross_switches import DISABLED, SwitchError, load_switches
 from checker.overlap import check_overlap
 from checker.pairing import CANNOT_CHECK, LEDGER_DIR, SKIPPED, SPEC_DIR, SRS_PATH, check_pairing
@@ -285,7 +290,9 @@ def main_entry(argv: list[str] | None = None) -> int:
     wants_overlap = touches_spec_files(found + missing)
     open_prs_path = os.environ.get(OPEN_PRS_ENV)  # PR 이벤트에서만 워크플로가 채운다. 없으면 이 검사는 대상이 아니다.
     wants_version = bool(open_prs_path) and any(touches_version(n) for n in found + missing)
-    if wants_pairing or wants_overlap or wants_version:
+    split_result = None
+    wants_split = bool(os.environ.get(DIFF_FILE_ENV) and os.environ.get(ADDED_FILES_ENV)) and any(srs_split.touches(found + missing))
+    if wants_pairing or wants_overlap or wants_version or wants_split:
         try:
             switches = load_switches(Path.cwd())
         except SwitchError as exc:
@@ -311,6 +318,12 @@ def main_entry(argv: list[str] | None = None) -> int:
             result = check_overlap(Path.cwd(), changed_specs)
             if result["status"] != SKIPPED:
                 overlap_result = result
+        if wants_split and switches.get("SRS_분리") is False:
+            split_result = {"status": DISABLED}
+        elif wants_split and switches.get("SRS_분리"):
+            split_result = srs_split.evaluate(
+                os.environ.get(DIFF_FILE_ENV), os.environ.get(ADDED_FILES_ENV), Path.cwd(), found + missing
+            )
         if wants_version and switches.get("판_겹침") is False:
             version_result = {"status": DISABLED}
         elif wants_version and switches.get("판_겹침"):
@@ -319,7 +332,7 @@ def main_entry(argv: list[str] | None = None) -> int:
     naming_result = _check_naming_for_added(os.environ.get(ADDED_FILES_ENV))
     ui5_result = _check_ui5_for_diff(os.environ.get(DIFF_FILE_ENV), found)
     extras = [
-        r for r in (pairing_result, overlap_result, version_result, switch_error, naming_result, ui5_result)
+        r for r in (pairing_result, overlap_result, version_result, split_result, switch_error, naming_result, ui5_result)
         if r is not None
     ]
     if not code_files and not extras:
@@ -353,6 +366,8 @@ def main_entry(argv: list[str] | None = None) -> int:
         combined["overlap"] = overlap_result
     if version_result:
         combined["version_overlap"] = version_result
+    if split_result:
+        combined["srs_split"] = split_result
     if switch_error:
         combined["cross_checks"] = switch_error
     if naming_result:
