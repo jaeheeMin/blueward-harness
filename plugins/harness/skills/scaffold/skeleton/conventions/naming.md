@@ -340,14 +340,16 @@ View 시나리오 코드.
 | View 파일명 | `text` + `.view.xml` (text: View 의 용도를 쉽게 알 수 있는 단어를 조합) | - | `CustomerList.view.xml`, `OrderList.view.xml`, `OrderDetail.view.xml` |
 | Fragment 파일명 | `text1` + `text2` + `.fragment.xml` (text1: Fragment 의 용도를 뜻하는 단어 조합, text2: Fragment 를 대표하는 Control name) | Upper Camel Case | `SearchDialog.fragment.xml`, `AdditionalTable.fragment.xml` |
 | Controller 파일명 | `text` + `.controller.js` (text: View 의 text 와 같게) | - | `CustomerList.controller.js`, `OrderList.controller.js`, `OrderDetail.controller.js` |
-| Control id | `text1` + `text2` (text1: 컨트롤의 용도를 쉽게 알 수 있는 단어 조합, text2: `Button`, `Input`, `ComboBox` 등) | Lower Camel Case | `deliveryFromDate`, `goodsNameInput`, `deleteRowButton` |
-| Event handler | `on` + `text2` + `text3` (text2: 기능을 쉽게 알 수 있는 단어 조합, text3: Control 의 event name) | Upper Camel Case | `onNewItemPress`, `onSelectedRowDeletePress` |
-| Internal function | `fn` + `text2` (text2: 기능을 쉽게 알 수 있는 단어 조합) | Upper Camel Case | `fnGetToken`, `fnSendRequest`, `fnParsingResponse` |
-| i18n key | `text1` + `text2` + `text3` (text1: View 의 text 와 같게, text2: Control 의 ID, text3: 텍스트가 보여질 Attribute 명칭) | Upper Camel Case | `MainNameLableText`, `MainTableAmountText` |
-| Constant | 상수의 용도를 알 수 있는 단어. 둘 이상이면 `_` 로 조합 | - | `MAX_LENGTH`, `SUCCESS`, `FAIL` |
-| Variable | 데이터 타입 접두어 + `text2` (text2: 용도를 쉽게 알 수 있는 단어 조합) | Lower Camel Case | `iTotalCount`, `dTaxRate`, `oParameter` |
+| Control id | `text1` + `text2` (text1: 컨트롤의 용도를 쉽게 알 수 있는 단어 조합, text2: `Button`, `Input`, `ComboBox` 등). 하이픈(`-`)은 UI5 가 붙이는 구분자라 쓰지 않는다 (SAP 공식: SAPUI5 ID Handling) | Lower Camel Case | `deliveryFromDate`, `goodsNameInput`, `deleteRowButton` |
+| Event handler | `on` + `text2` + `text3` (text2: 기능을 쉽게 알 수 있는 단어 조합, text3: Control 의 event name). Control 약어를 넣은 `onBtnSavePress` 도 허용(사내 규칙) | Upper Camel Case | `onNewItemPress`, `onSelectedRowDeletePress` |
+| Internal function | `_` + `text2` (text2: 기능을 쉽게 알 수 있는 단어 조합. private 은 `_` 로 시작 — SAP 공식: openui5 guidelines.md) | Lower Camel Case | `_getToken`, `_sendRequest`, `_parsingResponse` |
+| i18n key | `[화면].[Type].[key]` (화면: View 이름, Type: title·label·text·button·message·column·dialog 등, key: 카멜 표기). 문구 윗줄에 `#XBUT` 같은 텍스트 종류 주석을 단다(SAP 공식: openui5 translationfiles.md) | Lower Camel Case | `main.title.empDetailInfo`, `main.button.save` (원문 예시는 `MainNameLableText`) |
+| Constant | 상수의 용도를 알 수 있는 단어. 둘 이상이면 `_` 로 조합. 대문자와 밑줄이며 `CONST_` 접두어는 붙여도 안 붙여도 된다 (사내 규칙) | Upper Case | `MAX_LENGTH`, `SUCCESS`, `FAIL`, `CONST_MAX_COUNT` |
+| Variable | 데이터 타입 접두어 + `text2` (text2: 용도를 쉽게 알 수 있는 단어 조합) | 접두어 뒤 대문자로 이어 쓰는 camelCase | `iTotalCount`, `dTaxDate`, `fTaxRate`, `oParameter` |
 
 - Controller Lifecycle method 는 기존 명칭을 유지한다(Event handler 예외).
+- 변수 접두어는 SAP 공식 표(`conventions/cap-ui5.md` 의 Variable Datatype Prefix)를 따른다. `d` 는 Date, `f` 는 float 이다(예전 표는 `d` 를 실수형으로 적었다). 접두어 `s o $ i m a d f b r fn v p` 전체는 `cap-ui5.md` 에 있다.
+- 이 5절의 이름 규칙은 ABAP 에 배포하는 UI5 앱(`src/ui5/`)에 쓴다. CAP 프로젝트 `app/` 안의 앱은 폴더 이름·i18n key·Event handler 를 `conventions/cap-ui5.md` 의 4절 규칙으로 정한다. 두 문서가 겹치는 이름(Control ID, 상수, 내부 함수 등)은 같은 규칙으로 맞춰 두었다.
 - 원문의 i18n key 예시 표기: 자리 구분자는 `.` (N+1, M+1 위치)이나 예시에는 `.` 이 없다.
 
 변수 접두어(데이터 타입).
@@ -356,7 +358,8 @@ View 시나리오 코드.
 |---|---|---|---|
 | String | `s` | String 값 | `sName`, `sMessage` |
 | 정수형 | `i` | 정수형 값 | `iCost`, `iTotal` |
-| 실수형 | `d` | 실수형 값 | `dAmount`, `dTaxRate` |
+| 실수형 | `f` | 실수형(float) 값 | `fAmount`, `fTaxRate` |
+| Date | `d` | 날짜(Date) 값 | `dToday`, `dTaxDate` |
 | Boolean | `b` | 참/거짓 값 | `bIsReady`, `bDone` |
 | 객체 | `o` | 객체 유형 | `oObject`, `oButton` |
 | 함수 | `fn` | 함수 유형 | `fnCallback`, `fnSuccess` |
@@ -376,8 +379,8 @@ View 시나리오 코드.
 
 | 대상 | 이름 형식 | 표기법 | 예시 |
 |---|---|---|---|
-| CDS Domain - Model 파일명 | `schema` + `.` + `cds` | - | `schema.cds` |
-| CDS Domain - Namespace | `<회사약어>` + `.` + 모듈 코드(`fi`, `co`, `mm`, `pp`, `sd` 등) | - | `<회사약어>.fi`, `<회사약어>.mm`, `<회사약어>.sd` |
+| CDS Domain - Model 파일명 | `schema` + `.` + `cds` (기본 예시. 고정 강제는 아니다) | - | `schema.cds` |
+| CDS Domain - Namespace | `<회사약어>` + `.` + 모듈 코드(`fi`, `co`, `mm`, `pp`, `sd` 등). `<회사약어>` 만 쓰는 형태도 허용한다(사내 규칙). CAP 은 조직 이름처럼 바뀔 수 있는 말을 피하라고 한다(SAP 공식: CAP Domain Modeling) | - | `<회사약어>.fi`, `<회사약어>.mm`, `<회사약어>.sd` |
 | CDS Domain - Entity name | 용도를 쉽게 알 수 있는 단어 조합. 같은 개념에는 같은 명칭. 약어 사용 지양 | Upper Camel Case | `SalesOrderList`, `MaterialList` |
 | CDS Domain - Element name | 용도를 쉽게 알 수 있는 단어 조합. 같은 개념에는 같은 명칭. 약어 사용 지양 | Lower Camel Case | `deliveryDate`, `orderDate` |
 | CDS Service - Definitions 파일명 | `text` + `_` + `service` + `.` + `cds` (text: 서비스의 기능을 명확히 표현하는 단어를 조합) | Upper Camel Case 를 조합 | 원문 예시 `OrderProcess-service.cds`, `MaterialManagement-service.cds` |
@@ -386,11 +389,13 @@ View 시나리오 코드.
 | CDS Service - Element name | 전체 단어로 이름을 구성. 같은 개념에는 같은 명칭 | Lower Camel Case | `deliveryDate`, `orderDate` |
 | CDS Service - Action & Function | `prefix` + `text` (prefix: 대표 기능을 동사로, text: 로직을 설명할 수 있는 단어 조합) | prefix 는 lower case, text 는 Upper Camel Case | `getOrderList`, `createCostomerInformation`, `UpdateOrderItem` (원문 예시 그대로) |
 | CDS Service - Additional Library | `text` + `.` + `js` (용도에 맞게 이름을 만든다) | - | `Helper.js`, `Utils.js` |
-| CDS - Constant name | 상수의 용도를 알 수 있는 단어. 둘 이상이면 `_` 로 조합 | - | `MAX_LENGTH`, `SUCCESS`, `FAIL` |
-| CDS - Variable name | 데이터 타입 접두어 + `text2` (text2: 용도를 쉽게 알 수 있는 단어 조합) | Lower Camel Case | `iTotalCount`, `dTaxRate`, `oParameter` |
+| CDS - Constant name | 상수의 용도를 알 수 있는 단어. 둘 이상이면 `_` 로 조합. `CONST_` 접두어는 붙여도 안 붙여도 된다(사내 규칙) | - | `MAX_LENGTH`, `SUCCESS`, `FAIL`, `CONST_MAX_COUNT` |
+| CDS - Variable name | 데이터 타입 접두어 + `text2` (text2: 용도를 쉽게 알 수 있는 단어 조합) | 접두어 뒤 대문자로 이어 쓰는 camelCase | `iTotalCount`, `dTaxDate`, `fTaxRate`, `oParameter` |
 
-- Service Definitions 파일명의 구분자는 원문 표(위치 N+1)에 `_` 로 적혀 있고 예시는 `-` 이다. Implementation 쪽은 표·예시 모두 `-` 이다. 원문 그대로 옮겼다.
-- CDS 변수 타입 접두어는 5.3 의 변수 접두어 표와 같다(`s`, `i`, `d`, `b`, `o`, `fn`).
+- Service Definitions 파일명의 구분자는 원문 표(위치 N+1)에 `_` 로 적혀 있고 예시는 `-` 이다. Implementation 쪽은 표·예시 모두 `-` 이다. SAP 공식 예시(`cat-service.cds`)와 같이 `-` 를 쓴다(2026-11-14 정리).
+- Action & Function 은 소문자로 시작하는 lowerCamel 로 쓴다(CAP 공식 예시 `cancelOrder`, `countOrders`). 원문 예시 `UpdateOrderItem` 은 이 규칙과 어긋난다.
+- CDS 변수 타입 접두어는 5.3 의 변수 접두어 표와 같다(`s`, `i`, `f`, `d`, `b`, `o`, `fn` 등).
+- CDS Service 의 Definitions 파일은 서비스별 이름 `<이름>-service.cds`, Implementation 은 같은 이름 `.js` 로 한다(SAP 공식: CAP Core Services). Entity 는 Upper Camel Case(Domain 은 복수형), element 는 소문자로 시작한다(SAP 공식: CAP Domain Modeling). 자세한 CAP 이름 규칙은 `conventions/cap-ui5.md` 4.1 에 있다.
 
 ## 7. Fiori Launchpad & Work Zone
 
