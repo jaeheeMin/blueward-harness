@@ -160,6 +160,21 @@ main 병합이 아니라 태그 기준이다 — 병합 뒤 `release-tag` 가 �
   - 종류: srs_shape             # rules/ssot.yaml
 ```
 
+## `srs_automerge` — SRS 같은 자리 줄 추가 충돌을 자동으로 합친다(#977)
+
+규칙 종류가 아닌 CLI 다(`python -m checker.srs_automerge --mode merge|rebase --root .`). deliver(rebase)·sync(merge)·세션 시작 훅이
+충돌을 만났을 때 abort 하기 전에 부른다. 충돌 파일이 `docs/ssot/SRS.md` 하나뿐이고 모든 충돌 덩어리가 아래 조건이면 main 줄 먼저 → 내 줄로 합치고
+`git add` 까지 한다(커밋·`rebase --continue` 는 부른 쪽).
+
+- index stage(`:1` base, `:2`, `:3`)를 읽고 `git merge-file -p --zdiff3` 로 다시 합쳐 덩어리를 얻는다(diff3 는 공통 추가 줄이 두 번 남는다).
+  merge 에선 `:2`=내 쪽·`:3`=main, rebase 에선 `:2`=main·`:3`=내 쪽이라 `--mode` 로 정한다.
+- 덩어리 조건: base 부분이 비어 있음, 양쪽 모두 줄이 있음, `버전:` 줄 없음, 표 머리글·구분줄 없음, 양쪽에서 base 에 없던 새 REQ-n·DEV-n 이 안 겹침,
+  표 행은 바로 앞이 같은 표의 행이고 열 수가 그 표 머리글과 같음.
+- 합친 결과는 `srs_shape` 검사와 같은 줄 중복 검사(빈 줄·표 구분줄·제목 줄 제외, base 에 없던 줄이 새로 겹친 것만)를 통과해야 한다. 제목 줄을 뺀 것은
+  `#### Short Description` 같은 제목이 상세 절마다 되풀이되기 때문이다.
+- 결과 JSON `status`: `merged`(종료코드 0) / `refused`(1, 조건 밖) / `cannot_check`(2, 읽거나 돌리지 못함 — 통과가 아니다). 앞의 둘 아닌 것은 아무것도 바꾸지 않는다.
+- 합친 커밋은 SRS 승인을 낡게 만든다(`ssot_approval`). 호출한 쪽이 "올리면 승인을 다시 받아야 해" 를 알린다.
+
 ## `form_columns` — 양식 밖 열·소제목이 원본에 들어오지 못하게 한다(#316)
 
 산출물은 고객사 양식(`templates/forms/<양식>.yaml`)을 따른다. 양식 지도에 없는 열이 원본 md 에 들어오면 엑셀로 갈
