@@ -1126,6 +1126,28 @@ def test_late_join_is_once_per_route_and_only_within_window(tmp_path):
     t.join(60)
 
 
+def test_late_hook_never_reuses_an_irreversible_answer(tmp_path):
+    """#957 점검: A(rm -rf docs) 를 control 로 허용했는데 A 의 훅이 안 오고, 30초 안 같은 명령 B 의 훅이 B control 보다 먼저 오면
+    B 가 A 의 허락을 받아 카드 없이 실행될 수 있다. 되돌릴 수 없는 일은 늦게 합치지 않고 늘 묻는다."""
+    now, store, proc, m, hooks = _late_hook_setup(tmp_path)
+    m.risk_of = hooks.risk_of
+    event = {"type": "control_request", "request_id": "r1",
+             "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "rm -rf docs"}}}
+    m.on_event(proc, event)
+    (a,) = store.pending_for("s1")
+    assert a.risk == "irreversible"
+    store.resolve(a.rid, permission_reply({"behavior": "allow"}), "허용함")
+    wait_for(lambda: proc.written, timeout=60)
+    now[0] += 3
+    t, holder = _hook_in_thread(hooks, perm_body("s1", "rm -rf docs", cwd="/w"))  # B 의 훅이 먼저 온다
+    wait_for(lambda: len(store.pending_for("s1")) == 1, timeout=60)
+    (b,) = store.pending_for("s1")
+    assert b.rid != a.rid and b.risk == "irreversible"  # 새 노랑 카드로 묻는다
+    store.resolve(b.rid, permission_reply({"behavior": "deny"}), "거부함")
+    t.join(60)
+    assert holder["r"][1]["hookSpecificOutput"]["decision"]["behavior"] == "deny"
+
+
 def test_hook_only_session_repeated_command_still_asks_each_time(tmp_path):
     """#952: 터미널 세션처럼 훅 하나로만 묻는 곳에서 같은 명령을 곧 다시 실행해도 앞 답을 쓰지 않는다."""
     now, store, proc, m, hooks = _late_hook_setup(tmp_path)

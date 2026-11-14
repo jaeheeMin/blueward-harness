@@ -671,6 +671,7 @@ class Store:
                 late = [r for r in self.requests.values()
                         if r.status == "answered" and r.session_id == sid and r.kind == kind and r.key == key
                         and r.suggestions == same_suggestions and r.sources == {"control"}
+                        and r.risk != "irreversible"  # 훅은 붙는 요청이 자기 호출 것인지 모른다. 노랑은 카드를 한 번 더 띄우더라도 늘 묻는다(#957 점검)
                         and r.answered_at is not None and 0 <= now - r.answered_at <= LATE_JOIN_SECONDS]
                 if late:
                     r = max(late, key=lambda x: x.answered_at)
