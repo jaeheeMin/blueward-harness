@@ -189,7 +189,7 @@ class Hooks:
         try:
             req, created = self.store.add_request(
                 s["id"], "permission", tool, tool_input, body.get("permission_suggestions"), tool_key(tool, tool_input),
-                risk=risk, risk_note=why)
+                risk=risk, risk_note=why, source="hook")
         except RequestLimit:
             self.store.add_log(s, f"대기 요청이 너무 많아 터미널로 넘김: {tool}")
             return 200, None  # 조용히 허용하지 않는다. 빈 응답은 터미널 승인 창으로 넘어간다

@@ -22,6 +22,7 @@ REQUEST_KEEP = 200
 SAVE_INTERVAL = 2.0
 MAX_SESSIONS = 500
 MAX_PENDING_REQUESTS = 100
+LATE_JOIN_SECONDS = 30  # 사람이 답한 뒤 늦게 온 다른 승인 경로(훅)가 그 답을 받아 갈 수 있는 시간(#952)
 MAX_SKILL_STATES = 100
 MAX_SUBAGENTS = 200
 MAX_PENDING_STOP = 20
@@ -340,6 +341,7 @@ class Request:
         self.outcome = ""  # 화면에 보여 줄 처리 결과
         self.response = None  # 훅에 돌려줄 값(answered 일 때)
         self.answered_at = None
+        self.sources: set[str] = set()  # 이 요청을 기다린 승인 경로("hook" | "control"). 늦게 온 훅이 control 만 기다린 답을 한 번 받아 간다(#952)
         self.waiters = 0
         self.event = threading.Event()
 
@@ -645,24 +647,42 @@ class Store:
 
     # ---- 요청 ----
     def add_request(self, sid, kind, tool_name, tool_input, suggestions, key, risk: str = "", risk_note: str = "",
-                    mcp: dict | None = None) -> tuple[Request, bool]:
+                    mcp: dict | None = None, source: str = "") -> tuple[Request, bool]:
         """같은 세션·도구·입력의 동시 호출은 요청 하나로 합친다. (요청, 새로 만들었는지) 를 돌려준다.
-        mcp 는 claude 가 준 MCP 서버 이름·display_name({"server", "display"}). 합쳐질 때 먼저 온 요청에 없던 정보만 채운다."""
+        mcp 는 claude 가 준 MCP 서버 이름·display_name({"server", "display"}). 합쳐질 때 먼저 온 요청에 없던 정보만 채운다.
+        source 는 승인이 온 경로("hook" | "control"). 콘솔이 띄운 세션은 같은 도구 호출의 승인이 control_request 로 바로, 훅으로 몇 초 늦게 온다.
+        그 사이 사람이 답했으면 늦게 온 훅은 새 카드 없이 그 답을 받는다(#952). control 만 기다린 요청 하나에 훅 한 번, LATE_JOIN_SECONDS 안에서만 —
+        훅이 또 오거나 control 이 다시 오면 새 호출이라 묻는다."""
+        same_suggestions = suggestions if isinstance(suggestions, list) else []
         with self.lock:
             sid = self.resolve_id(sid)
             for r in self.requests.values():
                 # 제안(permission_suggestions)이 다르면 합치지 않는다. 합치면 먼저 온 위조 요청의 제안이
                 # 진짜 요청의 '다시 묻지 않기' 답으로 적용된다.
                 if (r.status == "pending" and r.session_id == sid and r.kind == kind and r.key == key
-                        and r.suggestions == (suggestions if isinstance(suggestions, list) else [])):
+                        and r.suggestions == same_suggestions):
                     if mcp and not r.mcp:
                         r.mcp = dict(mcp)
+                    if source:
+                        r.sources.add(source)
+                    return r, False
+            if source == "hook":  # 늦는 쪽은 훅이다. control_request 가 기다린 답만 받아 간다(훅만 있는 터미널 세션은 늘 묻는다)
+                now = self.clock()
+                late = [r for r in self.requests.values()
+                        if r.status == "answered" and r.session_id == sid and r.kind == kind and r.key == key
+                        and r.suggestions == same_suggestions and r.sources == {"control"}
+                        and r.answered_at is not None and 0 <= now - r.answered_at <= LATE_JOIN_SECONDS]
+                if late:
+                    r = max(late, key=lambda x: x.answered_at)
+                    r.sources.add(source)
                     return r, False
             if sum(1 for r in self.requests.values() if r.status == "pending") >= MAX_PENDING_REQUESTS:
                 raise RequestLimit("대기 중인 요청이 너무 많아.")
             r = Request(uuid.uuid4().hex[:12], sid, kind, tool_name, tool_input, suggestions, key, self.clock())
             r.risk, r.risk_note = risk, risk_note
             r.mcp = dict(mcp) if mcp else {}
+            if source:
+                r.sources.add(source)
             self.requests[r.rid] = r
             s = self.sessions.get(sid)
             if s is not None:
