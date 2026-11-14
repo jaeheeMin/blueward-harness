@@ -391,6 +391,33 @@ run_merge() {
   return 0
 }
 
+# 원격 브랜치가 지워진 현재 브랜치가 병합된 작업인지 gh 로 묻고 알린다(#978). 합치거나 지우거나
+# 옮기지 않는다. gh 로 판정하지 못하면 병합 여부를 추측하지 않고 검사 불능으로 알린다.
+report_gone_branch() {
+  local gone_out gone_rc=0 gone_pr gone_err
+  if ! command -v gh >/dev/null 2>&1; then
+    gone_rc=127
+    gone_out="gh 가 없음"
+  else
+    local gone_wrap=()
+    if command -v timeout >/dev/null 2>&1; then gone_wrap=(timeout 30); fi
+    gone_out="$(${gone_wrap[@]+"${gone_wrap[@]}"} gh pr list --head "$branch" --state merged --json number --limit 1 --jq '.[0].number // empty' 2>&1 </dev/null)" || gone_rc=$?
+  fi
+  gone_out="$(printf '%s' "$gone_out" | tr -d '\r')"
+  if [ "$gone_rc" -ne 0 ]; then
+    gone_err="$(printf '%s\n' "$gone_out" | head -n1)"
+    add "${branch} 브랜치는 원격 브랜치가 지워졌는데 병합됐는지 확인하지 못했습니다(검사 불능: ${gone_err:-원인을 알 수 없음}). 병합 여부를 모른 채 합쳐 받지 않았습니다. 다음: gh auth status 로 로그인 상태를 보고, GitHub 에서 이 브랜치의 PR 을 확인하십시오."
+    return 0
+  fi
+  gone_pr="$(printf '%s\n' "$gone_out" | head -n1)"
+  if [ -n "$gone_pr" ]; then
+    add "${branch} 브랜치는 끝난 작업입니다(PR #${gone_pr} 병합됨, 원격 브랜치가 지워졌습니다). main 의 새 변경을 합쳐 받지 않았습니다. 다음: main 으로 옮기거나 /harness:start 로 새 작업을 시작하십시오."
+  else
+    add "${branch} 브랜치는 원격 브랜치가 지워졌지만 병합된 PR 을 찾지 못했습니다(닫힌 PR 이거나 원격에서 직접 지웠을 수 있음). 합쳐 받지 않았습니다. 다음: GitHub 에서 이 브랜치의 PR 상태를 확인하십시오."
+  fi
+  return 0
+}
+
 if [ "$branch" = "main" ]; then
   add "main 에서는 커밋할 수 없습니다. 작업을 시작하려면 /harness:start 를 실행하십시오."
 fi
@@ -431,7 +458,22 @@ elif git remote get-url origin >/dev/null 2>&1; then
     fetch_state="ok"
     add "원격을 가져왔습니다."
     upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
-    if [ -n "$changed" ]; then
+    # 원격 브랜치가 지워진([gone]) 브랜치는 끝난 작업일 수 있다. 합쳐 받지 않고 알리기만 한다(#978).
+    upstream_track="$(git for-each-ref --format='%(upstream:track)' "refs/heads/$branch" 2>/dev/null || true)"
+    # 로컬 main 이 원격보다 앞서 있는지(#978). 그대로 새 브랜치를 따면 그 커밋이 섞인다.
+    main_ahead=0
+    if [ "$branch" = "main" ] && [ "$upstream_track" != "[gone]" ]; then
+      main_ref="${upstream:-origin/main}"
+      if git rev-parse --verify -q "$main_ref" >/dev/null 2>&1; then
+        main_ahead="$(git rev-list --count "${main_ref}..HEAD" 2>/dev/null || echo 0)"
+      fi
+    fi
+    if [ "$upstream_track" = "[gone]" ]; then
+      report_gone_branch
+    elif [ "$main_ahead" != "0" ]; then
+      main_behind_cnt="$(git rev-list --count "HEAD..${main_ref}" 2>/dev/null || echo 0)"
+      add "로컬 main 에 ${main_ref} 에 없는 커밋이 ${main_ahead}개 있습니다(${main_ref} 보다 ${main_behind_cnt}개 뒤). 이대로 새 브랜치를 따면 그 커밋이 섞입니다. 최신 상태라고 볼 수 없어 자동으로 맞추지 않았습니다. 다음: git log ${main_ref}..main 으로 확인하고 사람이 처리한 뒤 /harness:start 를 실행하십시오."
+    elif [ -n "$changed" ]; then
       add "커밋되지 않은 변경이 있어 자동 동기화(리베이스)를 건너뛰었습니다. /harness:sync 로 당겨받으십시오."
     elif [ -n "$upstream" ]; then
       behind="$(git rev-list --count "HEAD..$upstream" 2>/dev/null || echo 0)"
