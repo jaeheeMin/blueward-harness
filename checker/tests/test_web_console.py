@@ -5477,6 +5477,23 @@ def test_touched_files_dedupe_separators_skip_outside_cwd_and_late_baseline(tmp_
     ("REQ 번호를 알려 줘.", True),
     ("고칠 게 없으면 이대로 올릴게.", True),
     ("필요하면 \"다시 봐 줘\"라고 해 줘.", False),
+    # #964 재점검: '면' 으로 끝나는 명사는 조건절이 아니다
+    ("로그인 화면 문구를 어떻게 할지 정해 줘.", True),
+    ("두 화면 중 어느 쪽을 먼저 고칠지 골라 줘.", True),
+    ("매뉴얼 표지 화면 제목을 알려 주세요.", True),
+    ("매뉴얼 표지화면 제목을 알려 주세요.", True),
+    ("보안 측면 에서 어느 안이 나은지 알려 줘.", True),
+    # 조건절 뒤라도 고르기·정하기나 의문사가 있으면 질문
+    ("시안이 두 개면 어느 쪽인지 골라 줘.", True),
+    ("SRS 가 없으면 어떤 REQ 로 할지 정해 줘.", True),
+    # 허락 조건 뒤 "나중에·아니면" 은 끝인사
+    ("괜찮으면 나중에 알려 줘.", False),
+    ("좋으면 그대로 두고, 아니면 알려 줘.", False),
+    ("결과가 맞으면 다음 단계로 넘어갈게.", True),
+    # 동사 활용 -면 은 여전히 조건절
+    ("값이 다르면 알려 줘.", False),
+    ("파일이 길어지면 알려 줘.", False),
+    ("PR 을 내면 알려 줘.", False),
 ])
 def test_report_asks_follows_last_line_question_mark(report, asks):
     from store import report_asks

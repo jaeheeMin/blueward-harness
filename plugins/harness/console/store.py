@@ -772,13 +772,22 @@ _ASK_REQUEST = re.compile(r"((알려|말해|말씀해|골라|정해|답해|선�
 _ASK_OFFER = re.compile(r"((알려|말해|말씀해|골라|정해|승인해|허락해|확인해)\s?주(시)?면|(원하|말씀하)시면|라고\s?(하시면|하면|해\s?주(시)?면))"
                         r"\s.*(겠습니다|[가-힣]게요?)(?![가-힣])")
 # 사용자가 아무 말 없을 때 할 일을 미리 말하는 꼴("없으면 다음으로 넘어갈게")도 답을 기다리는 신호다
-_ASK_DEFAULT = re.compile(r"(없|괜찮|좋)(으시)?(으)?면\s.*(넘어갈게|넘어가겠습니다|진행할게|진행하겠습니다|올릴게|올리겠습니다)")
+_ASK_DEFAULT = re.compile(r"(없|괜찮|좋|맞)(으시)?(으)?면\s.*(넘어갈게|넘어가겠습니다|진행할게|진행하겠습니다|올릴게|올리겠습니다)")
 # 끝인사로 늘 붙는 "필요하면 말해 줘" 류는 답을 기다리는 게 아니다
 _ASK_GENERIC = re.compile(r"(필요(하|한|해|할)|궁금|언제든|더\s?(있|필요|궁금|도움)|다른\s?(것|거|게|건)|추가로)")
-# 요청 앞의 조건절("문제가 생기면·끝나면·막히면 알려 줘")은 일이 생길 때 알려 달라는 끝인사다. 허락을 묻는 조건("괜찮으면")만 남긴다
-_ASK_CONDITION = re.compile(r"[가-힣]+면\s")
+# 요청 앞의 조건절("문제가 생기면·끝나면·막히면 알려 줘")은 일이 생길 때 알려 달라는 끝인사다. 허락을 묻는 조건("괜찮으면")만 남긴다.
+# '면' 으로 끝나는 명사(화면·측면…)는 조건절이 아니다(#964 점검)
+_ASK_CONDITION = re.compile(r"([가-힣]+)면\s")
+# 면 앞 글자. -이면·-다면·-지면·-내면 처럼 동사 활용과 겹치는 글자는 넣지 않는다
+_MYEON_NOUNS = frozenset("화측장정표전양방국단후외반평곡")
 _ASK_APPROVAL = re.compile(r"(괜찮|좋|원하|맞|동의하)(으시|시)?(으)?면\s")
+_ASK_LATER = re.compile(r"(나중에|아니면)")  # "괜찮으면 나중에 알려 줘" · "좋으면 두고, 아니면 알려 줘" 는 끝인사에 가깝다
+_ASK_CHOICE = re.compile(r"(골라|정해|선택해)\s?(주|줘)|어느|어떤|어떻게|무엇|뭘|무슨")  # 고르기·정하기나 의문사가 있으면 진짜 질문
 REPORT_ASK_SENTENCES = 3  # 끝에서 몇 문장까지 보나
+
+
+def _has_condition(text: str) -> bool:
+    return any(m.group(1)[-1] not in _MYEON_NOUNS for m in _ASK_CONDITION.finditer(text))
 
 
 def _sentence_asks(sent: str) -> bool:
@@ -790,7 +799,9 @@ def _sentence_asks(sent: str) -> bool:
     if not m:
         return False
     before = sent[:m.start()]
-    return not _ASK_CONDITION.search(before) or bool(_ASK_APPROVAL.search(before))
+    if not _has_condition(before) or _ASK_CHOICE.search(sent):
+        return True
+    return bool(_ASK_APPROVAL.search(before)) and not _ASK_LATER.search(sent)
 
 
 def report_asks(report: str) -> bool:
