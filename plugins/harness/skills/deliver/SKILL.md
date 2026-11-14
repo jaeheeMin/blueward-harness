@@ -38,7 +38,12 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
    `git rev-list HEAD..origin/{base} --count` 로 새 커밋이 있는지 확인하고,
    있을 때만 리베이스한다.
 4. 새 커밋이 있으면 `git rebase origin/{base}` 를 수행한다. **리베이스
-   충돌이 나면 스스로 해결하지 않는다.** 충돌 파일 목록과 상황을 사용자에게
+   충돌이 나면 스스로 해결하지 않는다.** 예외는 하나다. `git diff --name-only --diff-filter=U` 가
+   `docs/ssot/SRS.md` 하나뿐이면 `uvx --from "$e" python -P -m checker.srs_automerge --mode rebase --root .`
+   (`e` 는 위 2단계와 같이 `engine_spec.py` 로 구한다)를 부른다. 결과가 `merged` 면 `GIT_EDITOR=true git rebase --continue`
+   로 이어 가고(또 충돌하면 같은 방법으로 되풀이, 상한 20번), PR 보고에 "SRS 에서 양쪽이 줄만 추가한 충돌 N곳을 자동으로 합쳤어 —
+   올리면 승인을 다시 받아야 해" 를 넣는다(합친 커밋은 SRS 승인을 낡게 만든다). `refused`·`cannot_check`·엔진 호출 실패면 합치지 않은 것이다
+   — 아래대로 보고하고 중단한다. 그 밖의 충돌은 충돌 파일 목록과 상황을 사용자에게
    보고하고, 리베이스를 중단한 뒤 기준 브랜치에서 딴 `-v2` 브랜치로 옮겨
    갈지 확인받는다. 새 브랜치 이름은 기존 이름 뒤에 `-v2` 를 붙인 것이고,
    이 이름도 브랜치 규칙을 만족한다. **확인 없이 브랜치를 갈아타지 않는다.**
