@@ -175,6 +175,26 @@ def test_열이_추가돼_9열이_되면_좁힌_배치에도_표시와_변경_�
     assert [(r[0], r[1]) for r in _table(ws)] == [("①", "삭제"), ("②", "추가"), ("③", "추가")]
 
 
+def test_열이_18개가_돼_나눠_그려도_표시와_변경_표가_둘째_줄_열에_맞다(proj, capsys):
+    cols = lambda names: "| 열 |\n|---|\n" + "".join(f"| {n} |\n" for n in names)  # noqa: E731
+    old_names = [f"열{i}" for i in range(1, 18)]  # 17열은 한 줄에 들어간다
+    _map(proj, extra=CHANGE % 5)
+    _origin(proj, screen(cond=None, btn=None, res=cols(old_names)))
+    code, report = _run(proj, capsys, screen(cond=None, btn=None, res=cols([*old_names[:2], *old_names[3:], "열18", "열19"])))
+    # 열3 삭제 + 열18·열19 추가 → 합친 목록 19열이 두 줄로 나뉜다: 첫 줄 열1~열17(열3 포함), 둘째 줄 열18·열19.
+    assert code == 0, report
+    warns = [w["reason"] for w in report["warnings"] if w["item"] == "화면 1 그림"]
+    assert len(warns) == 1 and "(19개)" in warns[0] and "2줄" in warns[0]
+    ws = _sheet(proj, report)
+    gone = _at(ws, "① 열3")
+    assert _fill(gone) == GREY and gone.font.strike and _fill(ws.cell(gone.row + 1, gone.column)) == GREY
+    a18, a19 = _at(ws, "② 열18"), _at(ws, "③ 열19")
+    assert _fill(a18) == YELLOW and a18.row == gone.row + 4 and a18.column == 3  # 둘째 줄 맨 왼쪽(C열)
+    assert _fill(a19) == YELLOW and a19.row == a18.row and a19.column == 4
+    assert ws.cell(a18.row + 1, a18.column).fill.fill_type is None  # 추가는 머리글만 표시
+    assert [(r[0], r[1]) for r in _table(ws)] == [("①", "삭제"), ("②", "추가"), ("③", "추가")]
+
+
 def test_이름을_바꾸면_삭제와_추가다(proj, capsys):
     _map(proj, extra=CHANGE % 5)
     _origin(proj, OLD)
