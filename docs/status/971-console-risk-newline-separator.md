@@ -7,7 +7,7 @@
 | 파일 | 내용 |
 |---|---|
 | `plugins/harness/console/risk.py` | 따옴표·heredoc 밖 줄바꿈은 bash 처럼 `;` 와 같은 명령 구분이다. "여러 줄 명령" 사유를 없애고 줄마다 판정한다(모두 safe 면 safe, 하나라도 irreversible 이면 노랑, unknown 이 섞이면 묻기) |
-| 〃 | 줄 잇기(`\` + 줄바꿈)는 두 줄을 한 명령으로 잇는다. 전에는 뒤 줄바꿈을 명령 구분으로 읽었다(이제 나누지 않고, 지금처럼 "줄을 잇는 \\" 사유로 묻는다) |
+| 〃 | 줄 잇기(`\` + `\n`)는 두 줄을 한 명령으로 잇는다. 전에는 뒤 줄바꿈을 명령 구분으로 읽었다(이제 나누지 않고, 지금처럼 "줄을 잇는 \\" 사유로 묻는다). `\` + `\r\n` 은 bash 가 `\r` 만 이스케이프하고 `\n` 에서 끊으니 줄을 나눈다(558 점검: `echo hi \␍␊rm -rf docs` 에서 rm 이 따로 실행됨을 실제 bash 로 확인) |
 | `checker/tests/test_web_console.py` | `ls\nls`·heredoc 커밋+`git status`·`git add -A\ngit status` 를 safe 로, 시험 B 2회차 커밋 모양 safe, 다음 줄 원격 올리기는 irreversible, 판정 못 하는 줄은 unknown, CRLF·빈 줄, 줄 잇기 |
 
 ## 결정

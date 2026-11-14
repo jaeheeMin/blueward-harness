@@ -158,11 +158,10 @@ def tokenize(command: str):
             if i + 1 < n and command[i + 1] not in "\r\n":
                 cur.append(command[i + 1]); has_word = True; i += 2; continue
             unsafe = unsafe or "줄을 잇는 \\ 가 있어"
-            # 줄 잇기: 뒤 줄바꿈은 명령을 나누지 않는다(bash 는 두 줄을 한 명령으로 잇는다, #971)
+            # 줄 잇기: \ 바로 뒤 \n 은 명령을 나누지 않는다(bash 는 두 줄을 한 명령으로 잇는다, #971).
+            # \ 뒤가 \r\n 이면 bash 는 \r 만 이스케이프하고 \n 에서 끊으니 그대로 나눈다(#972 점검)
             i += 1
-            if command.startswith("\r\n", i):
-                i += 2
-            elif i < n and command[i] in "\r\n":
+            if i < n and command[i] == "\n":
                 i += 1
             continue
         if c == "'":

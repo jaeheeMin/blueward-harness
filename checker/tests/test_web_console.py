@@ -7003,7 +7003,8 @@ def test_risk_second_review_table(tool, tool_input, want):
     ("git commit -q -F - <<'EOF'\ndocs: x (DEV-001)\n\nRefs #13\n\nCo-Authored-By: a <b@c>\nEOF\ngit log -1 --format=%h", "safe"),  # 시험 B 2회차 모양
     ("git commit -F - <<'EOF'\nm\nEOF\ngit log -1 --format=%h\ngit push", "irreversible"),
     ("git status\ntouch x", "unknown"), ("git status\r\ngit diff --stat\r\n", "safe"), ("git status\n\n\ngit log --oneline -3\n", "safe"),
-    ("git status \\\nrm x", "unknown"), ("git status \\\r\n-s", "unknown"),  # 줄 잇기는 한 명령(git status rm x)이라 나누지 않고, 지금처럼 묻는다
+    ("git status \\\nrm x", "unknown"),  # 줄 잇기는 한 명령(git status rm x)이라 나누지 않고, 지금처럼 묻는다
+    ("echo hi \\\r\nrm -rf docs", "irreversible"),  # \ 뒤 \r\n 은 bash 가 \r 만 이스케이프하고 \n 에서 끊는다(#972 점검)
     # 주석 안의 << 는 heredoc 이 아니다: 다음 줄은 실제로 실행되는 명령이다(#955 점검)
     ("git status # <<EOF\nrm -rf docs\nEOF", "irreversible"), ("git status # <<EOF\ngit add -A\nEOF", "unknown"),
     ("git status #<<'EOF'\nls\nEOF", "unknown"), ("git status;# <<EOF\nls\nEOF", "unknown"), ("git status # x", "unknown"),
