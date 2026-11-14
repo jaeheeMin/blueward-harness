@@ -1704,6 +1704,7 @@ def _fake_gh_env(tmp_path: Path, stdout: str, exit_code: int) -> dict[str, str]:
         encoding="utf-8",
         newline="\n",
     )
+    (bin_dir / "gh").chmod(0o755)  # Linux 는 실행 권한이 없으면 PATH 의 진짜 gh 가 대신 불린다
     return {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
 
 
