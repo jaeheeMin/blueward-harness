@@ -22,7 +22,7 @@ REQUEST_KEEP = 200
 SAVE_INTERVAL = 2.0
 MAX_SESSIONS = 500
 MAX_PENDING_REQUESTS = 100
-LATE_JOIN_SECONDS = 30  # 사람이 답한 뒤 늦게 온 다른 승인 경로(훅)가 그 답을 받아 갈 수 있는 시간(#952)
+LATE_JOIN_SECONDS = 30  # 사람이 control 쪽 요청에 답한 뒤 늦게 온 승인 훅을 카드 없이 넘기는 시간(#952)
 MAX_SKILL_STATES = 100
 MAX_SUBAGENTS = 200
 MAX_PENDING_STOP = 20
@@ -341,7 +341,7 @@ class Request:
         self.outcome = ""  # 화면에 보여 줄 처리 결과
         self.response = None  # 훅에 돌려줄 값(answered 일 때)
         self.answered_at = None
-        self.sources: set[str] = set()  # 이 요청을 기다린 승인 경로("hook" | "control"). 늦게 온 훅이 control 만 기다린 답을 한 번 받아 간다(#952)
+        self.sources: set[str] = set()  # 이 요청을 기다린 승인 경로("hook" | "control"). control 만 기다린 요청이면 늦게 온 훅 하나를 카드 없이 넘긴다(#952)
         self.waiters = 0
         self.event = threading.Event()
 
@@ -650,9 +650,7 @@ class Store:
                     mcp: dict | None = None, source: str = "") -> tuple[Request, bool]:
         """같은 세션·도구·입력의 동시 호출은 요청 하나로 합친다. (요청, 새로 만들었는지) 를 돌려준다.
         mcp 는 claude 가 준 MCP 서버 이름·display_name({"server", "display"}). 합쳐질 때 먼저 온 요청에 없던 정보만 채운다.
-        source 는 승인이 온 경로("hook" | "control"). 콘솔이 띄운 세션은 같은 도구 호출의 승인이 control_request 로 바로, 훅으로 몇 초 늦게 온다.
-        그 사이 사람이 답했으면 늦게 온 훅은 새 카드 없이 그 답을 받는다(#952). control 만 기다린 요청 하나에 훅 한 번, LATE_JOIN_SECONDS 안에서만 —
-        훅이 또 오거나 control 이 다시 오면 새 호출이라 묻는다."""
+        source 는 승인이 온 경로("hook" | "control"). 늦게 온 훅은 late_hook_after_control 로 먼저 거른다(#952)."""
         same_suggestions = suggestions if isinstance(suggestions, list) else []
         with self.lock:
             sid = self.resolve_id(sid)
@@ -665,17 +663,6 @@ class Store:
                         r.mcp = dict(mcp)
                     if source:
                         r.sources.add(source)
-                    return r, False
-            if source == "hook":  # 늦는 쪽은 훅이다. control_request 가 기다린 답만 받아 간다(훅만 있는 터미널 세션은 늘 묻는다)
-                now = self.clock()
-                late = [r for r in self.requests.values()
-                        if r.status == "answered" and r.session_id == sid and r.kind == kind and r.key == key
-                        and r.suggestions == same_suggestions and r.sources == {"control"}
-                        and r.risk != "irreversible"  # 훅은 붙는 요청이 자기 호출 것인지 모른다. 노랑은 카드를 한 번 더 띄우더라도 늘 묻는다(#957 점검)
-                        and r.answered_at is not None and 0 <= now - r.answered_at <= LATE_JOIN_SECONDS]
-                if late:
-                    r = max(late, key=lambda x: x.answered_at)
-                    r.sources.add(source)
                     return r, False
             if sum(1 for r in self.requests.values() if r.status == "pending") >= MAX_PENDING_REQUESTS:
                 raise RequestLimit("대기 중인 요청이 너무 많아.")
@@ -692,6 +679,25 @@ class Store:
         self.publish("request", {"id": r.rid, "sessionId": sid})
         self.publish("session", {"id": sid})
         return r, True
+
+    def late_hook_after_control(self, sid, kind, key, suggestions) -> bool:
+        """콘솔이 띄운 세션은 같은 도구 호출의 승인이 control_request 로 바로, PermissionRequest 훅으로 몇 초 늦게 온다(#952).
+        사람이 그 사이 control 쪽 요청에 답했으면 늦은 훅이 합칠 대기 요청이 없어 카드를 또 만들었다. 이 훅이면 True —
+        부른 쪽은 카드도 답도 없이 빈 응답을 돌려준다. 훅 입력엔 호출 id(tool_use_id)가 없어(11-14 실측) 이 훅이 그 호출 것인지
+        모르므로 앞 답을 넘기지 않는다: 앞 호출의 훅이면 claude 는 이미 control 답으로 진행했고, 같은 명령의 다음 호출 훅이면
+        claude 가 그 호출의 control_request 로 넘어가 거기서 카드가 뜬다. control 만 기다린 요청 하나에 훅 한 번, LATE_JOIN_SECONDS 안에서만."""
+        same_suggestions = suggestions if isinstance(suggestions, list) else []
+        with self.lock:
+            sid = self.resolve_id(sid)
+            now = self.clock()
+            late = [r for r in self.requests.values()
+                    if r.status == "answered" and r.session_id == sid and r.kind == kind and r.key == key
+                    and r.suggestions == same_suggestions and r.sources == {"control"}
+                    and r.answered_at is not None and 0 <= now - r.answered_at <= LATE_JOIN_SECONDS]
+            if not late:
+                return False
+            max(late, key=lambda x: x.answered_at).sources.add("hook")
+            return True
 
     def _prune_requests(self) -> None:
         done = [r for r in self.requests.values() if r.status != "pending"]

@@ -1065,8 +1065,9 @@ def _hook_in_thread(hooks, body):
 
 
 @pytest.mark.parametrize("behavior", ["allow", "deny"])
-def test_late_hook_after_quick_answer_gets_that_answer_without_new_card(tmp_path, behavior):
-    """#952: control_request 로 온 승인에 사람이 빨리 답한 뒤 같은 호출의 PermissionRequest 훅이 늦게 오면 카드를 또 띄우지 않고 그 답을 돌려준다."""
+def test_late_hook_after_quick_answer_is_passed_without_new_card(tmp_path, behavior):
+    """#952: control_request 로 온 승인에 사람이 빨리 답한 뒤 PermissionRequest 훅이 늦게 오면 카드도 답도 없이 넘긴다.
+    claude 는 control 쪽 답으로 이미 진행했다(훅이 빈 응답이어도 control 답으로 도구가 돈다, 11-14 실측)."""
     now, store, proc, m, hooks = _late_hook_setup(tmp_path)
     m.on_event(proc, control_event())
     (req,) = store.pending_for("s1")
@@ -1076,43 +1077,65 @@ def test_late_hook_after_quick_answer_gets_that_answer_without_new_card(tmp_path
     now[0] += 4  # 훅은 몇 초 늦게 온다
     t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w"))
     t.join(60)
-    assert not t.is_alive() and holder["r"] == (200, reply)
+    assert not t.is_alive() and holder["r"] == (200, None)  # 앞 답을 넘기지 않는다
     assert store.pending_for("s1") == [] and len(store.requests) == 1  # 새 카드가 없다
     assert len([e for e in store.get("s1")["chat"] if e.get("kind") == "permission"]) == 1
+    assert req.sources == {"control", "hook"}
 
 
-def test_late_join_is_once_per_route_and_only_within_window(tmp_path):
-    """#952: 같은 경로로 다시 온 같은 명령은 새 호출이라 묻는다. 시간이 지난 훅, 제안이 다른 훅도 묻는다."""
+@pytest.mark.parametrize("command", ["rm -rf docs", "python deploy.py"])
+def test_next_calls_hook_before_its_control_never_gets_previous_answer(tmp_path, command):
+    """#957 점검: A 를 control 로 허용했는데 A 의 훅이 안 오고, 30초 안 같은 명령 B 의 훅이 B 의 control 보다 먼저 와도
+    B 는 A 의 허락을 받지 않는다. 훅은 빈 응답으로 넘기고 B 의 control_request 가 카드를 띄운다(노랑·판정 못 함 모두)."""
+    now, store, proc, m, hooks = _late_hook_setup(tmp_path)
+    m.risk_of = hooks.risk_of
+    event = {"type": "control_request", "request_id": "r1",
+             "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": command}}}
+    m.on_event(proc, event)
+    (a,) = store.pending_for("s1")
+    store.resolve(a.rid, permission_reply({"behavior": "allow"}), "허용함")
+    wait_for(lambda: proc.written, timeout=60)
+    now[0] += 3
+    t, holder = _hook_in_thread(hooks, perm_body("s1", command, cwd="/w"))  # B 의 훅이 먼저 온다
+    t.join(60)
+    assert holder["r"] == (200, None)  # 허락을 넘기지 않는다
+    m.on_event(proc, dict(event, request_id="r2"))  # B 의 control_request
+    (b,) = store.pending_for("s1")
+    assert b.rid != a.rid and b.risk == a.risk  # B 는 카드로 묻는다
+    assert len(proc.written) == 1  # B 에는 아직 답하지 않았다
+    store.resolve(b.rid, permission_reply({"behavior": "deny"}), "거부함")
+    wait_for(lambda: len(proc.written) == 2, timeout=60)
+    assert proc.written[1]["response"]["response"]["behavior"] == "deny"
+
+
+def test_late_hook_pass_is_once_per_request_and_only_within_window(tmp_path):
+    """#952: 늦은 훅은 control 만 기다린 요청 하나에 한 번만 넘긴다. 짝 없는 훅, 제안이 다른 훅, 시간이 지난 훅은 묻는다."""
     now, store, proc, m, hooks = _late_hook_setup(tmp_path)
     m.on_event(proc, control_event())
     (req,) = store.pending_for("s1")
     store.resolve(req.rid, permission_reply({"behavior": "allow"}), "허용함")
-    wait_for(lambda: proc.written, timeout=60)
     # 같은 경로(control)로 같은 명령이 다시 오면 새 카드
     m.on_event(proc, control_event())
     (again,) = store.pending_for("s1")
     assert again.rid != req.rid
     store.resolve(again.rid, permission_reply({"behavior": "allow"}), "허용함")
-    # 제안이 다른 훅은 합치지 않는다(위조 제안이 '다시 묻지 않기' 로 쓰이지 않게)
+    # 제안이 다른 훅은 넘기지 않고 묻는다(위조 제안이 '다시 묻지 않기' 로 쓰이지 않게)
     t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w", permission_suggestions=[{"type": "addRules"}]))
     wait_for(lambda: len(store.pending_for("s1")) == 1, timeout=60)
     (forged,) = store.pending_for("s1")
     assert forged.rid not in (req.rid, again.rid)
     store.resolve(forged.rid, permission_reply({"behavior": "deny"}), "거부함")
     t.join(60)
-    # 앞의 두 호출(req·again)에 늦게 온 훅이 하나씩 답을 받아 간다. 셋째 훅은 짝이 없어 새 카드
+    # 앞의 두 호출(req·again)에 늦게 온 훅을 하나씩 넘긴다. 셋째 훅은 짝이 없어 새 카드
     for _ in range(2):
         t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w"))
         t.join(60)
-        assert holder["r"][1]["hookSpecificOutput"]["decision"]["behavior"] == "allow" and store.pending_for("s1") == []
+        assert holder["r"] == (200, None) and store.pending_for("s1") == []
     assert req.sources == again.sources == {"control", "hook"}
     t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w"))
     wait_for(lambda: len(store.pending_for("s1")) == 1, timeout=60)
     store.resolve(store.pending_for("s1")[0].rid, permission_reply({"behavior": "deny"}), "거부함")
     t.join(60)
-    # 훅만 기다린 요청의 답을 control 이 받아 가지 않는다(control 은 늦는 쪽이 아니다)
-    hook_only = [r for r in store.requests.values() if r.sources == {"hook"} and r.status == "answered"]
-    assert len(hook_only) == 2  # 제안이 다른 훅, 짝 없는 셋째 훅
     # 답한 지 LATE_JOIN_SECONDS 가 지나 온 훅은 묻는다
     m.on_event(proc, control_event())
     (late,) = store.pending_for("s1")
@@ -1124,28 +1147,6 @@ def test_late_join_is_once_per_route_and_only_within_window(tmp_path):
     assert store.pending_for("s1")[0].rid != late.rid
     store.resolve(store.pending_for("s1")[0].rid, permission_reply({"behavior": "deny"}), "거부함")
     t.join(60)
-
-
-def test_late_hook_never_reuses_an_irreversible_answer(tmp_path):
-    """#957 점검: A(rm -rf docs) 를 control 로 허용했는데 A 의 훅이 안 오고, 30초 안 같은 명령 B 의 훅이 B control 보다 먼저 오면
-    B 가 A 의 허락을 받아 카드 없이 실행될 수 있다. 되돌릴 수 없는 일은 늦게 합치지 않고 늘 묻는다."""
-    now, store, proc, m, hooks = _late_hook_setup(tmp_path)
-    m.risk_of = hooks.risk_of
-    event = {"type": "control_request", "request_id": "r1",
-             "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "rm -rf docs"}}}
-    m.on_event(proc, event)
-    (a,) = store.pending_for("s1")
-    assert a.risk == "irreversible"
-    store.resolve(a.rid, permission_reply({"behavior": "allow"}), "허용함")
-    wait_for(lambda: proc.written, timeout=60)
-    now[0] += 3
-    t, holder = _hook_in_thread(hooks, perm_body("s1", "rm -rf docs", cwd="/w"))  # B 의 훅이 먼저 온다
-    wait_for(lambda: len(store.pending_for("s1")) == 1, timeout=60)
-    (b,) = store.pending_for("s1")
-    assert b.rid != a.rid and b.risk == "irreversible"  # 새 노랑 카드로 묻는다
-    store.resolve(b.rid, permission_reply({"behavior": "deny"}), "거부함")
-    t.join(60)
-    assert holder["r"][1]["hookSpecificOutput"]["decision"]["behavior"] == "deny"
 
 
 def test_hook_only_session_repeated_command_still_asks_each_time(tmp_path):
