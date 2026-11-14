@@ -218,9 +218,11 @@ Service Binding Suffix.
 
 | 객체 | 이름 형식 | 길이 제한 | 예시 |
 |---|---|---|---|
-| ABAP Class | `Z` + `CL` + `_` + Text | 30 | `ZCL_SalesOrderUpdate` |
-| AMDP Class | `Z` + `CL` + `_` + `AMDP` + `_` + Text | 30 | `ZCL_AMDP_SalesOrderUpdate` |
+| ABAP Class | `Z` + `CL` + `_` + Text | 30 | `ZCL_SALES_ORDER_UPDATE` |
+| AMDP Class | `Z` + `CL` + `_` + `AMDP` + `_` + Text | 30 | `ZCL_AMDP_SALES_ORDER_UPDATE` |
 | CDS Table Function | `Z` + 영역코드 + `_` + `TF` + `_` + Text | 30 | `ZFI_TF_JournalEntry` |
+
+- ABAP Class·AMDP Class 이름은 대문자와 밑줄(`_`)로 단어를 나눈다. SAP 는 ABAP 이름을 대소문자 섞은 카멜 표기로 쓰지 말라고 한다([SAP Help: ABAP Naming Conventions](https://help.sap.com/docs/ABAP_Cloud/f2961be2bd3d403585563277e65d108f/bd0231738cd84b3195a127c8400d1e34.html)). 예전 예시 `ZCL_SalesOrderUpdate` 는 2026-11-14 에 고쳤다. CDS 엔티티 이름(`ZSD_I_Customer` 등)은 SAP 표준(`I_SalesOrder`)처럼 대소문자를 섞어 쓴다.
 
 세부(원문 위치 번호 그대로).
 
