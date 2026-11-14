@@ -5,7 +5,8 @@ classify(tool_name, tool_input, cwd) -> (판정, 사유)
   irreversible  되돌릴 수 없거나 밖으로 나가는 일(지우기, 올리기, 설치, 작업 폴더 밖 쓰기, SAP 쓰기)
   unknown       목록에 없거나 해석하지 못한 것. 허용으로 뭉개지 않고 사람에게 묻는다(CLAUDE.md 7).
 원칙: 애매하면 unknown. safe 명령은 옵션 허용 목록 방식이라 목록에 없는 옵션이 하나라도 있으면 unknown 이다.
-셸 명령은 ; && || | 로 조각을 나눠 조각이 모두 safe 일 때만 safe 다. 따옴표 밖의 $( ` 리디렉션 줄바꿈은 해석하지 않고 unknown 이다.
+셸 명령은 ; && || | 와 줄바꿈으로 조각을 나눠 조각이 모두 safe 일 때만 safe 다. 따옴표 밖의 $( ` 리디렉션은 해석하지 않고 unknown 이다.
+heredoc 본문은 데이터라 건너뛴다. 그 밖에서 줄바꿈 뒤에 명령이 더 있으면 unknown 이지만, 조각 하나라도 되돌릴 수 없으면 irreversible 이다.
 읽기 명령의 경로 인자가 작업 폴더 밖이거나 비밀값 모양 파일이면 unknown 이다.
 """
 from __future__ import annotations
@@ -25,7 +26,8 @@ import platform_compat
 
 SAFE, IRREVERSIBLE, UNKNOWN = "safe", "irreversible", "unknown"
 RULES_FILE = Path(__file__).with_name("safe_tools.json")
-MAX_COMMAND = 2000  # 이보다 긴 명령은 해석하지 않는다
+MAX_COMMAND = 2000  # heredoc 본문을 뺀 길이가 이보다 긴 명령은 해석하지 않는다
+MAX_WITH_HEREDOC = 100_000  # heredoc 본문까지 센 길이 상한
 
 
 def load_rules(path: Path = RULES_FILE) -> dict:
@@ -61,16 +63,67 @@ def _opts_ok(args: list[str], patterns: list) -> bool:
 
 # ---- 셸 조각 나누기 ----
 _OPS = set(";&|")
-Token = tuple  # (종류 "word" | "op" | "redir", 글, 앞에 공백이 있었는가)
+Token = tuple  # (종류 "word" | "op" | "redir" | "heredoc", 글, 앞에 공백이 있었는가)
+
+
+_HEREDOC_STOP = set(" \t\r\n;&|()<>")
+
+
+def _heredoc_word(command: str, i: int):
+    """<< 바로 뒤(i)의 끝 표시 낱말을 읽는다. (끝 표시, 따옴표로 막았는가, 다음 위치). 못 읽으면 끝 표시가 ""."""
+    n = len(command)
+    while i < n and command[i] in " \t":
+        i += 1
+    buf, quoted = [], False
+    while i < n and command[i] not in _HEREDOC_STOP:
+        c = command[i]
+        if c in "'\"":
+            j = command.find(c, i + 1)
+            if j < 0:
+                return "", True, n
+            buf.append(command[i + 1:j]); quoted = True; i = j + 1; continue
+        if c == "\\" and i + 1 < n:
+            buf.append(command[i + 1]); quoted = True; i += 2; continue
+        buf.append(c); i += 1
+    return "".join(buf), quoted, i
+
+
+def _heredoc_bodies(command: str, i: int, heredocs: list):
+    """줄바꿈(i) 다음 줄부터 heredoc 본문을 차례로 건너뛴다(본문은 명령이 아니라 데이터다).
+    (마지막 닫는 줄 끝의 줄바꿈 위치 또는 끝, 해석 못 할 사유). 끝 표시를 따옴표로 막지 않은 본문은 $ 와 백틱을 풀어 쓰니(명령 실행 포함) 사유가 된다."""
+    n = len(command)
+    nl = command.find("\n", i)
+    pos = nl + 1 if nl >= 0 else n
+    why, last = "", n
+    for delim, strip_tabs, quoted in heredocs:
+        start = pos
+        while True:
+            if pos >= n:
+                return n, "heredoc 이 닫히지 않았어"
+            end = command.find("\n", pos)
+            line_end = end if end >= 0 else n
+            line = command[pos:line_end].rstrip("\r")
+            if (line.lstrip("\t") if strip_tabs else line) == delim:
+                body = command[start:pos]
+                if not quoted and ("`" in body or "$" in body):
+                    why = why or "heredoc 본문에 변수나 다른 명령 실행($ 또는 백틱)이 있어"
+                last, pos = line_end, line_end + 1
+                break
+            pos = line_end + 1
+    return last, why
 
 
 def tokenize(command: str):
-    """(토큰 목록, 해석 못 할 사유). 따옴표 밖의 줄바꿈·$( ·백틱·괄호가 있거나 따옴표가 안 닫히면 사유가 있다."""
+    """(토큰 목록, 해석 못 할 사유, heredoc 본문 글자 수). 따옴표 밖의 $( ·백틱·괄호가 있거나 따옴표가 안 닫히면 사유가 있다.
+    따옴표 밖 줄바꿈은 ; 처럼 명령을 나누는 "\\n" 연산자다(#951). heredoc 본문은 건너뛰고, 그 밖에서 줄바꿈 뒤에 명령이 더 있으면
+    "여러 줄 명령" 사유를 남긴다 — 사유가 있어도 조각은 끝까지 나눠 두어 뒤 줄의 되돌릴 수 없는 명령을 가려낸다."""
     tokens: list[Token] = []
     cur: list[str] = []
     has_word = False
     spaced = True
     unsafe = ""
+    heredocs: list = []  # 이 줄에서 열린 (끝 표시, <<- 인가, 따옴표로 막았나)
+    body_chars = 0
     i, n = 0, len(command)
 
     def flush():
@@ -83,10 +136,24 @@ def tokenize(command: str):
     while i < n:
         c = command[i]
         if c in "\r\n":
-            unsafe = unsafe or "여러 줄 명령이야"
-            flush(); spaced = True; i += 1; continue
+            flush(); spaced = True
+            if tokens and not (tokens[-1][0] == "op" and tokens[-1][1] not in "()"):  # a &&<줄바꿈> b 처럼 연산자 뒤 줄바꿈은 나누지 않는다
+                tokens.append(("op", "\n", True))
+            if heredocs:
+                end, why = _heredoc_bodies(command, i, heredocs)
+                body_chars += end - i
+                heredocs = []
+                unsafe = unsafe or why
+                i = end; continue
+            if command[i + 1:].strip():
+                unsafe = unsafe or "여러 줄 명령이야"
+            i += 1; continue
         if c in " \t":
             flush(); spaced = True; i += 1; continue
+        if c == "#" and not has_word:  # 낱말 첫머리 # 는 줄 끝까지 주석이다. 그 안의 << 로 heredoc 을 열면 다음 줄 명령을 본문으로 건너뛴다(#955 점검)
+            unsafe = unsafe or "주석(#)이 있어"
+            j = command.find("\n", i)
+            i = n if j < 0 else j; continue
         if not has_word:
             spaced_at[0] = spaced
         if c == "\\":
@@ -97,7 +164,7 @@ def tokenize(command: str):
         if c == "'":
             j = command.find("'", i + 1)
             if j < 0:
-                return tokens, "따옴표가 안 닫혔어"
+                return tokens, "따옴표가 안 닫혔어", 0
             cur.append(command[i + 1:j]); has_word = True; spaced = False; i = j + 1; continue
         if c == '"':
             j, buf = i + 1, []
@@ -108,7 +175,7 @@ def tokenize(command: str):
                     unsafe = unsafe or "명령 안에서 다른 명령을 실행해($( 또는 백틱)"
                 buf.append(command[j]); j += 1
             if j >= n:
-                return tokens, "따옴표가 안 닫혔어"
+                return tokens, "따옴표가 안 닫혔어", 0
             cur.append("".join(buf)); has_word = True; spaced = False; i = j + 1; continue
         if c == "`" or (c == "$" and command.startswith("$(", i)):
             unsafe = unsafe or "명령 안에서 다른 명령을 실행해($( 또는 백틱)"
@@ -121,6 +188,13 @@ def tokenize(command: str):
             j = i
             while j < n and command[j] in "<>&":
                 j += 1
+            if command[i:j] == "<<":  # heredoc: 본문은 다음 줄부터, 끝 표시는 지금 읽어 둔다
+                strip_tabs = j < n and command[j] == "-"
+                delim, quoted, j = _heredoc_word(command, j + 1 if strip_tabs else j)
+                if not delim:
+                    unsafe = unsafe or "heredoc 끝 표시를 읽지 못했어"
+                heredocs.append((delim, strip_tabs, quoted))
+                tokens.append(("heredoc", "<<", spaced)); spaced = False; i = j; continue
             tokens.append(("redir", command[i:j], spaced)); spaced = False; i = j; continue
         if c in "();&|":
             flush()
@@ -133,12 +207,16 @@ def tokenize(command: str):
             tokens.append(("op", command[i:j], spaced)); spaced = False; i = j; continue
         cur.append(c); has_word = True; spaced = False; i += 1
     flush()
-    return tokens, unsafe
+    if heredocs:
+        unsafe = unsafe or "heredoc 이 닫히지 않았어"
+    if tokens and tokens[-1][:2] == ("op", "\n"):
+        tokens.pop()  # 끝 줄바꿈은 명령을 나누지 않는다
+    return tokens, unsafe, body_chars
 
 
 def _segments(command: str):
-    """(조각별 낱말 목록, 조각 사이 연산자 목록(ops[i] 는 i번 조각 뒤), 해석 못 할 사유)."""
-    tokens, unsafe = tokenize(command)
+    """(조각별 낱말 목록, 조각 사이 연산자 목록(ops[i] 는 i번 조각 뒤), 해석 못 할 사유, heredoc 본문 글자 수)."""
+    tokens, unsafe, body_chars = tokenize(command)
     segs: list[list[str]] = [[]]
     ops: list[str] = []
     k = 0
@@ -146,6 +224,8 @@ def _segments(command: str):
         kind, text, _ = tokens[k]
         if kind == "word":
             segs[-1].append(text)
+        elif kind == "heredoc":
+            pass  # 본문은 tokenize 가 건너뛰었다. 표준 입력으로 글을 넘길 뿐 파일을 읽거나 쓰지 않는다
         elif kind == "op":
             if text in ("(", ")"):
                 pass
@@ -165,7 +245,7 @@ def _segments(command: str):
         k += 1
     if any(not s for s in segs):
         unsafe = unsafe or "빈 조각이 있어"
-    return segs, ops, unsafe
+    return segs, ops, unsafe, body_chars
 
 
 # ---- 경로 ----
@@ -303,6 +383,9 @@ def _git_sub(args: list[str]):
         readonly = {"-a", "-r", "-v", "-vv", "--list", "-l", "--show-current", "--merged", "--no-merged", "--contains", "--all", "--remotes", "--verbose"}
         return (SAFE, "브랜치 목록을 읽기만 해") if all(a in readonly or not a.startswith("-") and "--list" in rest for a in rest) else (UNKNOWN, "git branch 는 판정 못 했어")
     if sub in ("add", "commit"):
+        if sub == "commit":  # 메시지를 표준 입력(heredoc)으로 받는 -F - 만 허용한다. -F <파일> 은 목록에 없어 판정 못 함(#951)
+            rest = [a for k, a in enumerate(rest) if not (a in ("-F", "--file") and rest[k + 1:k + 2] == ["-"])
+                    and not (a == "-" and k > 0 and rest[k - 1] in ("-F", "--file")) and a != "--file=-"]
         if not _opts_ok(rest, _regexes(RULES.get("git_add_options" if sub == "add" else "git_commit_options"))):
             return UNKNOWN, f"git {sub} 에 목록에 없는 옵션이 있어"
         if sub == "add" and any(_name_blocked(a) for a in _positionals(rest, value_opts)):
@@ -460,9 +543,11 @@ def _command(words: list[str], ctx: dict):
 def classify_bash(command: str, cwd: str = "", powershell: bool = False):
     if not command.strip():
         return UNKNOWN, "빈 명령이야"
-    if len(command) > MAX_COMMAND:
+    if len(command) > MAX_WITH_HEREDOC:
         return UNKNOWN, "명령이 너무 길어서 읽지 못했어"
-    segs, ops, unsafe = _segments(command)
+    segs, ops, unsafe, body_chars = _segments(command)
+    if len(command) - body_chars > MAX_COMMAND:  # heredoc 본문(PR·커밋 글)은 길이에 세지 않는다(#951)
+        return UNKNOWN, "명령이 너무 길어서 읽지 못했어"
     ctx = {"base": cwd, "cur": [cwd], "bs": "\\" in command, "ops": ops, "idx": 0}  # \ 는 Windows 경로일 수 있어 경로를 읽는 명령은 판정하지 않는다
     results = []
     for i, w in enumerate(segs):
