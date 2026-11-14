@@ -48,6 +48,11 @@ def render(report: dict, code: int) -> str:
         text += "\n" + "\n".join(
             _render_disabled("판 번호 겹침") if version.get("status") == "disabled" else _render_version_overlap(version)
         )
+    split = report.get("srs_split")
+    if split:
+        text += "\n" + "\n".join(
+            _render_disabled("SRS 고치기·주기 분리") if split.get("status") == "disabled" else _render_srs_split(split)
+        )
     naming = report.get("naming")
     if naming:
         text += "\n" + "\n".join(_render_naming(naming))
@@ -58,6 +63,31 @@ def render(report: dict, code: int) -> str:
     if cross:
         text += "\n" + "\n".join(_render_cross_checks(cross))
     return text
+
+
+def _render_srs_split(result: dict) -> list[str]:
+    """SRS 고치기·주기 분리 절(#974). `result` 는 `checker.srs_split.check_srs_split` 의 결과다."""
+    out = ["", "---", "", "## SRS 고치기·주기 분리", ""]
+    if result.get("status") == "cannot_check":
+        out += [
+            "### ⚠️ 검사 불능", "",
+            "```", str(result.get("message") or "SRS 의 버전·엑셀을 확인하지 못했습니다.").strip(), "```", "",
+            "SRS `버전:` 줄과 Backlog 엑셀이 약속대로 나뉘었는지 확인하지 못했습니다. 통과도 위반도 아닙니다.",
+        ]
+        return out
+    violations = result.get("violations") or []
+    if not violations:
+        out.append("`버전:` 줄·Backlog 엑셀과 내용이 약속대로 나뉘어 있습니다.")
+        return out
+    out += [
+        "### ❌ 고치기와 주기가 섞였습니다", "",
+        f"**{len(violations)}건**입니다. 내용 PR 은 `버전:` 줄과 엑셀 없이, 산출 PR 은 `버전:`(+0.1)과 그 판 엑셀만 냅니다.", "",
+    ]
+    for item in violations:
+        out.append(f"- {_cell(str(item.get('reason') or ''))}")
+        if item.get("fix"):
+            out.append(f"  - 고치기: {_cell(str(item['fix']))}")
+    return out
 
 
 def _render_naming(result: dict) -> list[str]:
@@ -491,7 +521,7 @@ def exit2_cause(report: dict) -> str:
     code_rules = report.get("code_rules")
     if code_rules and code_rules.get("exit") not in (0, 1):
         return "config"
-    for key in ("pairing", "overlap", "naming", "ui5"):
+    for key in ("pairing", "overlap", "srs_split", "naming", "ui5"):
         if (report.get(key) or {}).get("status") == "cannot_check":
             return "config"
     if report.get("cross_checks"):

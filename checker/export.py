@@ -1020,15 +1020,18 @@ def is_srs_map(fmap: dict) -> bool:
 
 def build_form(
     form: str, spec_sections: dict, root: Path, srs: SrsDoc | None = None, replaced: list | None = None,
-    spec_rel: str | None = None, meta: dict[str, str] | None = None,
+    spec_rel: str | None = None, meta: dict[str, str] | None = None, out_file: Path | None = None,
 ) -> tuple[list[tuple[Path, bytes]], list[dict], list[dict]]:
     """한 양식을 산출한다. (쓸 파일, 거부 사유들, 경고들) 을 낸다. 못 읽으면 ExportError.
 
     `srs` 가 있으면 지도의 `원본: SRS` 표를 SRS.md 요구사항 표·상세 절로 채운다(작업본 `## 양식 항목` 은 쓰지 않는다).
     `spec_rel` 은 작업본의 root 기준 상대 경로다. 화면 그림이 있으면 origin/main 의 같은 경로 작업본과 비교해 바뀐 곳을 표시한다(#347).
+    `out_file` 은 미리보기 경로(`--out`, #974)다. 있으면 판 이름 계산·파일명 패턴·"main 에 있는 판" 거부를 하지 않고 이 경로에 쓴다(이미 있으면 덮는다).
     """
     fmap, map_path = load_map(root, form)
     if "쪽" in fmap and "시트" not in fmap:
+        if out_file is not None:
+            raise ExportError("--out(미리보기 경로)은 xlsx 양식에만 쓴다 — pptx 양식은 판 이름으로만 산출한다", form=form)
         return _build_pptx(form, fmap, map_path, spec_sections, root, replaced, meta, spec_rel)
     if is_srs_map(fmap) != (srs is not None):
         raise ExportError(
@@ -1434,8 +1437,8 @@ def build_form(
         head = dict(meta or {})
         if not re.fullmatch(r"[vV]?\d+\.\d+", head.get("버전", "")):
             head.pop("버전", None)
-    out_name = _file_name(form, fmap, map_sheets, spec_sections, md_values, problem, head)
-    if captured and out_name:  # 캡처 그림 파일 이름의 판이 이 산출 판과 같아야 한다(옛 판 캡처를 조용히 넣지 않는다, #348)
+    out_name = out_file.name if out_file is not None else _file_name(form, fmap, map_sheets, spec_sections, md_values, problem, head)
+    if captured and out_name and out_file is None:  # 캡처 그림 파일 이름의 판이 이 산출 판과 같아야 한다(옛 판 캡처를 조용히 넣지 않는다, #348)
         from checker import screen_capture
 
         want = screen_capture.file_version(out_name)
@@ -1444,7 +1447,13 @@ def build_form(
                 problem(sname, p.label, f"산출 파일 이름 {out_name!r} 에서 판 번호(`_v0.1`)를 찾지 못해 캡처 {p.path} 의 판을 대조하지 못한다(검사 불능이라 넣지 않는다)")
             elif p.version != want:
                 problem(sname, p.label, f"캡처 {p.path} 는 v{p.version} 판인데 이번 산출은 v{want} 다 — 캡처가 옛 판이다. 지금 화면을 다시 캡처해 파일 이름을 `_v{want}` 로 하고 경로를 고친다")
-    out_path = _out_path(form, fmap, map_path, root, out_name, problem, replaced) if out_name else None
+    if out_file is not None:
+        bad = [c for c in FORBIDDEN_NAME_CHARS if c in out_name]
+        if bad:
+            problem("", "파일명", f"미리보기 파일 이름 {out_name!r} 에 쓸 수 없는 문자 {' '.join(bad)} 가 있다")
+        out_path = None if bad else out_file
+    else:
+        out_path = _out_path(form, fmap, map_path, root, out_name, problem, replaced) if out_name else None
 
     unique: list[dict] = []
     for p in problems:
@@ -2104,6 +2113,14 @@ def _field_value(spec_sections, sname, name) -> str:
 
 # ---------------------------------------------------------------- 진입점
 
+def _shown_path(path: Path, root: Path) -> str:
+    """보고에 싣는 경로. 저장소 안이면 root 기준 상대, 밖(미리보기 `--out`)이면 절대 경로."""
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def _commit(writes: list[tuple[Path, bytes]], root: Path, replace: frozenset[Path] = frozenset()) -> list[str]:
     """산출물을 원자적으로 쓴다.
 
@@ -2163,7 +2180,7 @@ def _commit(writes: list[tuple[Path, bytes]], root: Path, replace: frozenset[Pat
             backup.unlink()
         except OSError:
             pass
-    return [p.relative_to(root).as_posix() for p, _ in writes]
+    return [_shown_path(p, root) for p, _ in writes]
 
 
 def _srs_map_names(root: Path) -> list[str]:
@@ -2182,7 +2199,7 @@ def _srs_map_names(root: Path) -> list[str]:
     return out
 
 
-def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False) -> tuple[int, dict]:
+def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False, out: Path | None = None) -> tuple[int, dict]:
     try:
         text = spec.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
@@ -2217,12 +2234,28 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
         spec_rel: str | None = spec.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
         spec_rel = None
+    out_file: Path | None = None
+    if out is not None:
+        # 미리보기 경로(#974): 저장소 밖 한 파일에만 쓴다. 저장소 안이면 커밋돼 판 없는 산출물이 남으므로 거부한다.
+        if len(jobs) != 1:
+            raise ExportError("--out 은 양식 하나에만 쓴다 — --form 으로 양식을 하나 고른다")
+        out_file = out.resolve()
+        if out_file.suffix.lower() != ".xlsx":
+            raise ExportError(f"--out {out} 은 .xlsx 파일 경로여야 한다")
+        if out_file.is_dir():
+            raise ExportError(f"--out {out} 이 폴더다 — 파일 경로를 준다")
+        try:
+            out_file.relative_to(root.resolve())
+        except ValueError:
+            pass
+        else:
+            raise ExportError(f"--out {out} 이 저장소 안이다 — 미리보기는 저장소 밖 경로(임시 폴더)에만 쓴다")
     writes: list[tuple[Path, bytes]] = []
     problems: list[dict] = []
     warnings: list[dict] = []
     replaced: list[dict] = []
     for form, sections in jobs:
-        w, p, wa = build_form(form, sections, root, srs, replaced, spec_rel, _head_meta(text))
+        w, p, wa = build_form(form, sections, root, srs, replaced, spec_rel, _head_meta(text), out_file)
         writes += w
         problems += p
         warnings += wa
@@ -2272,7 +2305,7 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
                    note + " 고친 뒤 다시 확인한다." if flagged else "문제가 없으면 --check 없이 다시 실행해 산출한다.")
             ),
         }
-    written = _commit(writes, root, frozenset(root / r["file"] for r in replaced))
+    written = _commit(writes, root, frozenset(root / r["file"] for r in replaced) | (frozenset({out_file}) if out_file else frozenset()))
     if flagged:
         return EXIT_WARNING, {
             "status": "warning",
@@ -2292,7 +2325,11 @@ def run(spec: Path, root: Path, only_form: str | None, check_only: bool = False)
         "files": written,
         "problems": [],
         "warnings": warnings,
-        "next": "다음:" + rp_note + " 엑셀로 한 번 열어 서식을 확인한다. 올리면 PR 에서 doc-guard(Actions)가 파일 이름과 구조를 검사한다.",
+        "next": (
+            "다음: 미리보기 파일을 만들었다(저장소 밖). 엑셀로 열어 본다. 고객에게 주는 판이 아니라 PR 에 올리지 않는다."
+            if out_file else
+            "다음:" + rp_note + " 엑셀로 한 번 열어 서식을 확인한다. 올리면 PR 에서 doc-guard(Actions)가 파일 이름과 구조를 검사한다."
+        ),
     }
 
 
@@ -2423,6 +2460,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, required=True, help="Project Repository 루트")
     parser.add_argument("--form", help="이 양식만 산출한다(생략하면 작업본의 모든 양식). 지도 이름 또는 지도 파일 경로(--root 기준 상대·절대). 원본이 SRS 인 지도는 필수")
     parser.add_argument("--check", action="store_true", help="파일을 쓰지 않고 같은 검사·보고만 한다")
+    parser.add_argument("--out", type=Path, help="미리보기: 이 .xlsx 경로(저장소 밖)에 쓴다. 판 이름 계산과 'main 에 있는 판' 거부를 하지 않고, 있으면 덮는다. 양식 하나(--form)만")
     parser.add_argument("--list-values", action="store_true", help="--form 지도 템플릿의 드롭다운 허용 값을 열별 JSON 으로 낸다")
     args = parser.parse_args(argv)
     try:
@@ -2437,7 +2475,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if args.spec is None:
                 raise ExportError("--spec 이 필요하다(--list-values 가 아니면)")
-            code, report = run(args.spec, root, args.form, args.check)
+            code, report = run(args.spec, root, args.form, args.check, args.out)
     except ExportError as e:
         code, report = EXIT_ERROR, _error_report(e.reason, e.form, e.sheet, e.item)
     except Exception as e:  # 예상하지 못한 오류도 검사 불능(2)이지 거부(1)가 아니다

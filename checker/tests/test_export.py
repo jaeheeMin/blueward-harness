@@ -1781,3 +1781,49 @@ def test_대응표_값이_드롭다운_허용_값_밖이면_지도_오류로_알
     report = json.loads(capsys.readouterr().out)
     [w] = [x for x in report["warnings"] if x["type"] == "next-step-map"]
     assert code == 3 and report["status"] == "warning" and "Z" in w["reason"] and "다음:" in w["reason"]
+
+
+# --- 미리보기 경로 --out (#974) ---
+
+def test_out_미리보기는_저장소_밖_경로에_판_이름_없이_쓴다(bproj, capsys, tmp_path_factory):
+    out = tmp_path_factory.mktemp("preview") / "BW_Backlog List_미리보기.xlsx"
+    code, report = _srs_run(bproj, capsys, SRS_MD, "--out", str(out))
+    assert code == 0 and report["status"] == "ok"
+    assert report["files"] == [out.as_posix()] and out.is_file()
+    assert not list((bproj / "docs" / "out").glob("*.xlsx"))  # 판 이름 산출물은 만들지 않는다
+    assert _cell_values(out)["A4"] == 2
+
+
+def test_out_미리보기는_버전_줄이_없어도_쓰고_이미_있으면_덮는다(bproj, capsys, tmp_path_factory):
+    out = tmp_path_factory.mktemp("preview") / "BW_Backlog List_미리보기.xlsx"
+    out.write_bytes(b"old")
+    code, report = _srs_run(bproj, capsys, SRS_MD.replace("버전: 0.2\n", ""), "--out", str(out))
+    assert code == 0 and report["status"] == "ok"
+    assert out.read_bytes()[:2] == b"PK"  # 덮었다
+
+
+def test_out_미리보기는_main_에_있는_판_이름이어도_거부하지_않는다(bproj, capsys, tmp_path_factory, monkeypatch):
+    monkeypatch.setattr(export, "_in_origin_main", lambda root, rel: (True, ""))
+    out = tmp_path_factory.mktemp("preview") / "BW_Backlog List_미리보기.xlsx"
+    code, _ = _srs_run(bproj, capsys, SRS_MD, "--out", str(out))
+    assert code == 0 and out.is_file()
+
+
+def test_out_저장소_안_경로는_거부한다(bproj, capsys):
+    code, report = _srs_run(bproj, capsys, SRS_MD, "--out", str(bproj / "docs" / "out" / "미리보기.xlsx"))
+    assert code == 2 and report["status"] == "error"
+    assert "저장소 안" in report["problems"][0]["reason"]
+    assert not (bproj / "docs" / "out" / "미리보기.xlsx").exists()
+
+
+def test_out_xlsx_가_아니거나_폴더면_거부한다(bproj, capsys, tmp_path_factory):
+    d = tmp_path_factory.mktemp("preview")
+    code, report = _srs_run(bproj, capsys, SRS_MD, "--out", str(d / "x.txt"))
+    assert code == 2 and ".xlsx" in report["problems"][0]["reason"]
+    code, report = _srs_run(bproj, capsys, SRS_MD, "--out", str(d))
+    assert code == 2
+
+
+def test_out_없는_산출은_예전처럼_판_이름으로_쓴다(bproj, capsys):
+    code, report = _srs_run(bproj, capsys)
+    assert code == 0 and report["files"] == ["docs/out/BW_Backlog List_v0.2.xlsx"]

@@ -255,15 +255,31 @@ Project Repository `rules/ssot.yaml`·`rules/spec.yaml` 에 켠다. 먼저 켜�
   돌려 줘" 로 안내하되 PR 화면의 Details → 'Re-run jobs' 위치와 Claude 에게 시키는 방법(`gh run rerun --failed`)까지 적고, 문서 위반과 함께 나와도 위반 표는 그대로다(종료코드는 2).
 - 이 PR 과 base 브랜치가 다른 열린 PR 은 비교에서 빼고, 초안 PR 은 넣는다. 다른 PR 제목은 백틱으로 감싸 60자로 자른다.
 - 스위치 `판_겹침` 으로 끈다.
+- SRS 를 고치기(내용 PR)와 고객에게 주기(산출 PR)로 나눈 뒤(#974)에는 `버전:` 을 바꾸고 `_v<판>` 엑셀을 추가하는 것이 산출 PR 뿐이라, 이 검사는 곧 산출 PR 끼리 같은 판 경고다.
+  내용 PR 은 판을 건드리지 않아 겹침 대상이 아니다.
+
+## `srs_split` — SRS 고치기와 고객에게 주기를 가르는 PR 검사(#974)
+
+규칙 종류가 아닌 별도 검사다(`checker/srs_split.py`). 여럿이 SRS 를 동시에 고치면 `버전:` 줄과 같은 이름 Backlog 엑셀이 부딪혀 PR 이 계속 충돌하므로,
+내용 PR(SRS.md 내용과 `audit/changes/` 기록만, `버전:` 줄·엑셀 없음)과 산출 PR(`버전:` main + 0.1, 그 판 엑셀, 산출 기록, 내용은 안 고침)로 나눈다. 이 모듈이 그 약속을 PR diff 로 확인한다.
+
+- 입력: 워크플로가 PR 이벤트에서 항상 만드는 두 파일 — 환경변수 `DOC_GUARD_DIFF_FILE`(`git diff -U0 --no-renames`)과 `DOC_GUARD_ADDED_FILES`(`--diff-filter=A` 목록)를
+  `scripts/check_changed.py` 가 읽어 리포트 키 `srs_split` 에 합친다. 둘 중 하나라도 없으면(push, 로컬 훅) 대상이 아니다. 바뀐 파일에 `docs/ssot/SRS.md` 도 `.xlsx` 도 없으면 대상이 아니다.
+- 위반(종료코드 1): `mixed` — SRS.md 에서 `버전:` 줄과 그 밖의 줄(빈 줄 제외)이 함께 바뀜. `bump` — `버전:` 이 바뀌었는데 새 값이 base 값 + 0.1 이 아니거나, 그 판 이름의 Backlog 엑셀이 같은 PR 에
+  추가되지 않음. `orphan_xlsx` — Backlog 엑셀을 추가했는데 `버전:` 이 그 판으로 바뀌지 않음. 이 PR 이 SRS.md 를 새로 만들었으면(첫 판) `mixed`·`bump` 는 보지 않는다.
+- Backlog 엑셀은 `templates/forms/*.yaml` 중 표에 `원본: SRS` 가 있는 지도의 `산출.폴더`·`산출.파일명`(자리 `버전: {메타: 버전}`)으로 알아본다. 그런 지도가 없으면 엑셀 짝은 따지지 않고 `mixed`·`bump` 의 +0.1 만 본다.
+- 검사 불능(종료코드 2): diff·추가 목록을 못 읽음, 바뀐 파일 목록엔 SRS.md 가 있는데 diff 에 구역이 없음, 기준(main)에 `버전:` 줄이 없는데 줄이 바뀜, 양식 지도를 못 읽거나 파일명 자리를 알 수 없음. 통과로 넘기지 않는다.
+- 스위치 `SRS_분리` 로 끈다.
 
 ### 교차 검사 스위치
 
-`pairing`·`overlap`·`version_overlap` 은 Project Repository 의 `rules/cross-checks/switches.yaml` 로 각각 끈다(`checker/cross_switches.py`).
+`pairing`·`overlap`·`version_overlap`·`srs_split` 은 Project Repository 의 `rules/cross-checks/switches.yaml` 로 각각 끈다(`checker/cross_switches.py`).
 
 ```yaml
 번호_짝: true      # false 면 번호 짝 검사를 돌리지 않는다
 객체_겹침: true    # false 면 객체 겹침 검사를 돌리지 않는다
 판_겹침: true      # false 면 열린 PR 끼리 판 번호 겹침 검사를 돌리지 않는다
+SRS_분리: true     # false 면 SRS 고치기·주기 분리 검사를 돌리지 않는다
 ```
 
 꺼져 있으면 리포트에 `{"status": "disabled"}` 를 싣고 코멘트에 "꺼져 있음" 한 줄이 남는다(종료코드 0). 파일이나 키가 없으면 켠다. 모르는 키나 불린이 아닌 값은 검사 불능(종료코드 2, 리포트 키 `cross_checks`)이다. 엔진 로더가
@@ -474,6 +490,8 @@ md 전용 열이다 — 엑셀로 쓰지 않고 값(`개발`/`설정`/`표준`/`
 칸(`dropdown-unchecked`)도 종료코드 3 이고 `next` 가 "검사하지 못한 열" 로 구분한다. 목록이 실제로 비어 있으면
 `dropdown-empty` 알림만 내고 종료코드는 그대로다. 엑셀이 목록 밖 값을 받는 유효성(오류 메시지 꺼짐·정보/경고 스타일)은
 검사하지 않는다. `--check` 는 파일을 쓰지 않고 같은 보고만 낸다.
+`--out <.xlsx 경로>` 는 미리보기(#974)다. 양식 하나(`--form`)를 **저장소 밖** 그 경로에 쓰고(저장소 안이면 거부), 판 이름 계산·파일명 패턴·"main 에 있는 판" 거부를 하지 않으며 같은
+이름 파일이 있으면 덮는다. 보고의 `files` 는 절대 경로다. pptx 양식에는 쓰지 않는다. 고객에게 주는 판이 아니다.
 `--root R --form <지도> --list-values` 는 지도 열 이름별 허용 값을 JSON 으로 낸다. 쓰는 행의 `hidden` 은
 풀고 고정 줄 높이도 지우고, 자동 필터(`autoFilter`·`_xlnm._FilterDatabase`)는 쓴 행이 그 범위를 넘을 때만 늘린다.
 
