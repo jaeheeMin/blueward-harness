@@ -6824,6 +6824,10 @@ def test_risk_second_review_table(tool, tool_input, want):
     ("git commit -F - <<'EOF'\nm", "unknown"), ("git commit -F - <<'EOF'", "unknown"), ("git commit -F - <<", "unknown"),
     ("git commit -F msg.txt", "unknown"), ("git commit -F - -F x", "unknown"), ("git commit -F - <<'EOF'\nm\nEOF\ngit status", "unknown"),
     ("git add -A\ngit status", "unknown"), ("cat <<< hi", "unknown"), ("bash <<'EOF'\nls\nEOF", "unknown"),
+    # 주석 안의 << 는 heredoc 이 아니다: 다음 줄은 실제로 실행되는 명령이다(#955 점검)
+    ("git status # <<EOF\nrm -rf docs\nEOF", "irreversible"), ("git status # <<EOF\ngit add -A\nEOF", "unknown"),
+    ("git status #<<'EOF'\nls\nEOF", "unknown"), ("git status;# <<EOF\nls\nEOF", "unknown"), ("git status # x", "unknown"),
+    ("git commit -F - <<'EOF'\n# 본문의 # 는 글이야\nEOF", "safe"), ("echo a#b", "safe"),
 ])
 def test_risk_heredoc_body_is_data_and_following_commands_are_classified(cmd, want):
     got, why = risk_mod.classify("Bash", {"command": cmd}, W)

@@ -150,6 +150,10 @@ def tokenize(command: str):
             i += 1; continue
         if c in " \t":
             flush(); spaced = True; i += 1; continue
+        if c == "#" and not has_word:  # 낱말 첫머리 # 는 줄 끝까지 주석이다. 그 안의 << 로 heredoc 을 열면 다음 줄 명령을 본문으로 건너뛴다(#955 점검)
+            unsafe = unsafe or "주석(#)이 있어"
+            j = command.find("\n", i)
+            i = n if j < 0 else j; continue
         if not has_word:
             spaced_at[0] = spaced
         if c == "\\":
