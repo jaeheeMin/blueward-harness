@@ -356,6 +356,20 @@ SRS 를 쓰기 전에 고객사 산출물 양식(예: Backlog List)이 있는지
 7. 마무리를 안내한다. 새 판 번호와 엑셀 경로, 이 PR 에는 `버전:` 한 줄과 엑셀과 산출 기록뿐이라는 것을 알리고, `/harness:deliver` 로 올린다. PR 본문에는
    "SRS 산출" 표시와 판 번호, 산출 기록 링크를 적는다. SRS 가 바뀌는 PR 이라 사람 승인이 필요하다(내용 PR 과 같다). 엑셀은 사람이 엑셀로 열어
    드롭다운과 줄 높이를 확인한 뒤 고객에게 준다.
+8. **병합 뒤 확인(고객에게 보내기 전).** 산출 PR 을 연 뒤 다른 내용 PR 이 먼저 병합되면 충돌 없이 병합돼 엑셀이 main 의 SRS 보다 낡을 수 있다
+   (#976. PR 검사·`gh pr merge` 훅·병합 뒤 검사가 막거나 알리지만, 마지막 확인은 여기서 한다). PR 이 병합되면 `/harness:sync` 로 main 을 받은 뒤
+   main 위에서 칸 값 비교를 돌린다. 엔진 판을 정하는 방법은 아래 "양식 파일 산출" 1 과 같다.
+
+   ```bash
+   e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
+   uvx --from "$e" python -P -m checker.srs_export_check compare --root "$(git rev-parse --show-toplevel)"
+   ```
+
+   결과는 stdout 의 JSON 한 줄이고 `status` 로 읽는다. 저장소 안에는 아무 파일도 만들지 않는다(임시 폴더에 다시 만들어 비교하고 지운다).
+   - `same`(종료코드 0) — **이때만** "고객에게 보내도 된다" 고 말한다. 엑셀 경로와 판 번호를 함께 알린다.
+   - `differ`(1) — 보내지 말라고 알린다. `forms[].cells` 의 다른 칸을 보여 주고, main 위에서 "백로그 뽑아 줘" 로 다음 판을 다시 산출하라고 안내한다.
+   - `cannot_check`(2), JSON 으로 읽히지 않거나 uvx 가 실패 — 확인하지 못했으니 보내도 된다고 하지 않는다(통과도 위반도 아니다). `message` 를 그대로 알리고 원인을
+     해결한 뒤 다시 돌리게 한다.
 
 ## 미리보기
 

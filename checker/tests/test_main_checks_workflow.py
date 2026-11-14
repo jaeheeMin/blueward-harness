@@ -213,3 +213,26 @@ def test_doc_guard_직전_커밋을_못_구하거나_비교가_실패하면_전�
     assert "git diff ${BEFORE_SHA" in branch
     assert "${err}" in branch
     assert "check_changed.py" not in branch
+
+
+def test_srs_export_는_엑셀을_추가한_push_만_비교하고_불일치를_이슈로_알린다():
+    # #976: 내용 PR 이 병합된 push 에서는 엑셀이 낡은 게 정상이라 비교하지 않는다. 판단은 엔진(push-check)이 추가 파일 목록으로 한다.
+    step = _step("srs-export")
+    assert step["continue-on-error"] is True and step["if"] == "steps.changed.outputs.has_doc_guard != 'false'"
+    run = step["run"]
+    assert "--diff-filter=A" in run and 'diff --name-only --no-renames --diff-filter=A "$BEFORE_SHA" HEAD' in run
+    assert "checker.srs_export_check push-check --added-file added.txt" in run
+    assert "0) status=pass" in run and "status=fail" in run and "status=unknown" in run
+    issue = _step("srs-export-issue")
+    assert issue["continue-on-error"] is True
+    assert issue["if"] == "steps.srs-export.outputs.status == 'fail' && github.ref == 'refs/heads/main'"
+    assert "main 의 산출 엑셀이 SRS 와 다르다:" in issue["run"]
+    assert _index("doc-guard-issue") < _index("srs-export") < _index("srs-export-issue") < _index("risk-gate")
+
+
+def test_srs_export_결과를_종합이_판정하고_이슈_실패도_센다():
+    summary = _steps()[-1]
+    assert summary["env"]["S_SRS_EXPORT"] == "${{ steps.srs-export.outputs.status }}"
+    assert summary["env"]["OUTCOME_ISSUE_SRS_EXPORT"] == "${{ steps.srs-export-issue.outcome }}"
+    assert 'judge "srs-export" "$S_SRS_EXPORT" "$R_SRS_EXPORT"' in summary["run"]
+    assert 'issue_failed "srs-export"' in summary["run"]

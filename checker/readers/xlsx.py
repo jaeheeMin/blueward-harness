@@ -72,6 +72,17 @@ def read_xlsx(path: Path) -> dict:
     return {"sheets": list(wb.sheetnames), "_path": str(path)}
 
 
+def read_values(path: Path, sheet: str, first_row: int) -> list[tuple] | None:
+    """한 시트의 `first_row` 행부터 끝까지를 가공하지 않은 값(캐시된 값)의 행 목록으로 읽는다. 시트가 없으면 None.
+
+    산출 엑셀을 칸 값으로 비교할 때 쓴다(#976). 행 길이는 같지 않을 수 있다.
+    """
+    wb = _workbook(path)
+    if sheet not in wb.sheetnames:
+        return None
+    return [tuple(r) for r in wb[sheet].iter_rows(min_row=first_row, values_only=True)]
+
+
 def read_row(path: Path, sheet: str, row: int) -> list[str] | None:
     """한 시트의 한 행을 값 목록으로 읽는다. 시트가 없으면 None.
 

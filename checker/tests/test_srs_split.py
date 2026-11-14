@@ -70,6 +70,14 @@ def proj(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _엑셀_비교는_따로_본다(monkeypatch):
+    """check_changed 통합 시험의 엑셀은 진짜 xlsx 가 아니다. 산출 엑셀 비교(#976)는 test_srs_export_check.py 가 따로 본다."""
+    from checker import srs_export_check
+
+    monkeypatch.setattr(srs_export_check, "compare", lambda root: {"status": "same", "forms": []})
+
+
 def rules(result: dict) -> list[str]:
     return [v["rule"] for v in result["violations"]]
 

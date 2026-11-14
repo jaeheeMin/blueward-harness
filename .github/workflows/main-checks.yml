@@ -30,6 +30,9 @@
 # `risk-gate`·`ssot-approval` 로 단다. 엔진과 훅이 읽는 것은 아니고(PR head 의 status 를 읽는다), 병합된 커밋
 # 화면에서 사람이 결과를 보게 하려는 것이다. 다니 `statuses: write` 가 필요하다.
 #
+# srs-export 단계(#976)는 이 push 가 Backlog 엑셀을 추가했을 때만 SRS 로 엑셀을 다시 만들어 칸 값을 비교하고, 다르면 이슈를 연다(doc-guard 와
+# 같은 `has_doc_guard` 가 `false` 가 아닐 때 돈다). 산출 PR 을 연 뒤 내용 PR 이 먼저 병합돼 엑셀이 낡은 채 웹 화면 병합으로 들어온 것을 잡는다.
+#
 # doc-guard 의 paths 는 트리거가 아니라 단계 `if` 다. push 이전·이후 커밋(`github.event.before`..`github.sha`)
 # 사이 바뀐 파일을 `gh api compare` 로 한 번 받아 pr-checks.yml 과 같은 `DOC_GUARD_PATHS` 로 평가한다. 목록을 못
 # 받으면(이전 커밋이 사라진 강제 push, 파일 300개 이상으로 API 가 잘림 등) `unknown` 이고 건너뛰지 않고 돌린다.
@@ -455,6 +458,74 @@ jobs:
             gh issue create --title "$title" --body "$body"
           fi
 
+      # ── 산출 엑셀 확인 (#976) ────────────────────────────────────────────────
+      # 산출 PR 을 연 뒤 다른 내용 PR 이 먼저 병합되면 충돌 없이 병합돼 Backlog 엑셀이 main SRS 보다 낡을 수 있다. 사람이 웹 화면에서
+      # 병합하면 `gh pr merge` 훅이 못 막으므로 병합 뒤에도 본다. 이 push 가 Backlog 엑셀을 **추가**한 경우에만 SRS 로 엑셀을 다시 만들어
+      # 칸 값을 비교한다(내용 PR 이 병합된 push 에서는 엑셀이 낡은 게 정상이라 돌리지 않는다). 다르면 이슈를 연다.
+      - name: 산출 엑셀이 SRS 와 같은 판인지 확인
+        id: srs-export
+        if: steps.changed.outputs.has_doc_guard != 'false'
+        continue-on-error: true
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set +e
+          status=unknown
+          reason="산출 엑셀 확인이 결과를 내지 못했다. job 로그를 본다."
+          if [ -z "$BEFORE_SHA" ] || [ -z "${BEFORE_SHA//0/}" ]; then
+            reason="push 이전 커밋(BEFORE_SHA)이 비었거나 0 으로만 되어 있어 이 push 가 Backlog 엑셀을 추가했는지 알 수 없다."
+          elif ! git -c core.quotepath=false diff --name-only --no-renames --diff-filter=A "$BEFORE_SHA" HEAD > added.txt 2> srs-export-err.txt; then
+            reason="이 push 가 추가한 파일 목록을 구하지 못했다. $(head -c 200 srs-export-err.txt | tr '\r\n' '  ')"
+          else
+            uv run --project .harness-engine python -P -m checker.srs_export_check push-check --added-file added.txt > srs-export.json 2> srs-export-error.txt
+            code=$?
+            cat srs-export-error.txt >&2 || true
+            cat srs-export.json || true
+            case "$code" in
+              0) status=pass; reason="" ;;
+              1)
+                status=fail
+                reason="main 의 Backlog 엑셀이 같은 판 SRS 내용과 다르다(엑셀을 만든 뒤 SRS 가 바뀐 채 병합됐다). 고객에게 보내지 말고 다시 산출한다. job 로그를 본다."
+                ;;
+              *) status=unknown; reason="산출 엑셀이 SRS 와 같은지 확인하지 못했다(종료코드 $code). 통과로 보지 않는다. job 로그를 본다." ;;
+            esac
+          fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: 산출 엑셀 불일치를 이슈로 알리기
+        id: srs-export-issue
+        if: steps.srs-export.outputs.status == 'fail' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          sha_short="${GITHUB_SHA:0:7}"
+          prefix="main 의 산출 엑셀이 SRS 와 다르다:"
+          title="$prefix $sha_short"
+          body="커밋: ${GITHUB_SHA} ($COMMIT_URL)
+          워크플로 실행: $RUN_URL
+
+          산출 PR 을 연 뒤 SRS 내용이 바뀐 채 병합돼 main 의 Backlog 엑셀이 같은 판 SRS 와 다르다. 이 엑셀을 고객에게 보내지 않는다.
+          main 위에서 '백로그 뽑아 줘' 로 다음 판을 다시 산출한다. 다른 칸은 job 로그의 JSON 을 본다."
+          existing_number="$(gh issue list --state open --json number,title \
+            --jq ".[] | select(.title | startswith(\"$prefix\")) | .number" | head -n1)"
+          if [ -n "$existing_number" ]; then
+            gh issue comment "$existing_number" --body "$body"
+            exit 0
+          fi
+          if gh label list --json name --jq '.[].name' 2>/dev/null | grep -qxF "type:fix"; then
+            gh issue create --title "$title" --body "$body" --label "type:fix"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
+
       # ── risk-gate after-merge (옛 risk-gate.yml 의 after-merge job) ──────────
       - name: risk-gate merge 뒤 위험도·승인 확인
         id: risk-gate
@@ -737,6 +808,8 @@ jobs:
           R_GITLEAKS: ${{ steps.gitleaks.outputs.reason }}
           S_DOC_GUARD: ${{ steps.doc-guard.outputs.status }}
           R_DOC_GUARD: ${{ steps.doc-guard.outputs.reason }}
+          S_SRS_EXPORT: ${{ steps.srs-export.outputs.status }}
+          R_SRS_EXPORT: ${{ steps.srs-export.outputs.reason }}
           S_RISK: ${{ steps.risk-gate.outputs.status }}
           R_RISK: ${{ steps.risk-gate.outputs.reason }}
           S_SSOT: ${{ steps.ssot-approval.outputs.status }}
@@ -750,6 +823,7 @@ jobs:
           OUTCOME_ST_RISK: ${{ steps.risk-gate-status.outcome }}
           OUTCOME_ST_SSOT: ${{ steps.ssot-approval-status.outcome }}
           OUTCOME_ISSUE_DG: ${{ steps.doc-guard-issue.outcome }}
+          OUTCOME_ISSUE_SRS_EXPORT: ${{ steps.srs-export-issue.outcome }}
           OUTCOME_ISSUE_RISK: ${{ steps.risk-gate-issue.outcome }}
           OUTCOME_ISSUE_SSOT: ${{ steps.ssot-approval-issue.outcome }}
         run: |
@@ -796,6 +870,7 @@ jobs:
           judge "gitleaks" "$S_GITLEAKS" "$R_GITLEAKS" false
           dg_na=false; [ "$HAS_DOC_GUARD" = "false" ] && dg_na=true
           judge "doc-guard" "$S_DOC_GUARD" "$R_DOC_GUARD" "$dg_na"
+          judge "srs-export" "$S_SRS_EXPORT" "$R_SRS_EXPORT" "$dg_na"
           judge "risk-gate" "$S_RISK" "$R_RISK" false
           judge "ssot-approval" "$S_SSOT" "$R_SSOT" false
           # 입력을 켜지 않은 저장소는 따로 부르는 ledger-complete.yml 이 맡으니 대상이 아니다.
@@ -809,6 +884,7 @@ jobs:
             fail=1
           }
           [ "$OUTCOME_ISSUE_DG" = "failure" ] && issue_failed "doc-guard"
+          [ "$OUTCOME_ISSUE_SRS_EXPORT" = "failure" ] && issue_failed "srs-export"
           [ "$OUTCOME_ISSUE_RISK" = "failure" ] && issue_failed "risk-gate"
           [ "$OUTCOME_ISSUE_SSOT" = "failure" ] && issue_failed "ssot-approval"
           [ "$OUTCOME_ISSUE_LEDGER" = "failure" ] && issue_failed "ledger-complete"
