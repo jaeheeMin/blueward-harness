@@ -74,6 +74,7 @@
     "shortlog": ["-s", "-n", "-e", "--summary", "--numbered", "--email", "--no-merges"]
   },
   "git_global_options_ok": ["--no-pager"],
+  "git_fetch_options": ["-q", "--quiet", "-p", "--prune", "--tags", "--no-tags", "--all", "-v", "--verbose", "--"],
   "git_add_options": ["-A", "--all", "-u", "--update", "-v", "--verbose", "-n", "--dry-run", "--"],
   "git_commit_options": ["-m", "--message=.+", "-s", "--signoff", "-q", "--quiet", "--allow-empty", "--"],
   "git_force_flags": ["-f", "--force", "--discard-changes", "--merge", "-m", "-B", "-C"],

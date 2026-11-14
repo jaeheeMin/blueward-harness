@@ -362,6 +362,15 @@ def _git_sub(args: list[str]):
         return SAFE, "git 으로 상태를 읽기만 해"
     if sub == "push":
         return IRREVERSIBLE, "GitHub에 코드를 올리려 해"
+    if sub == "fetch":  # 원격 변경을 받아 원격 추적 브랜치만 바꾼다. 작업 사본·내 브랜치는 그대로(#953)
+        if not _opts_ok(rest, _regexes(RULES.get("git_fetch_options"))):
+            return UNKNOWN, "git fetch 에 목록에 없는 옵션이 있어"
+        pos = [a for a in rest if not a.startswith("-")]
+        # 원격 이름과 브랜치 이름만. 주소(://·@·경로)나 refspec(: +)은 내 브랜치를 바꾸거나 다른 곳에서 받을 수 있어 판정하지 않는다
+        if len(pos) > 2 or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*" if k == 0 else r"[A-Za-z0-9][A-Za-z0-9._/-]*", a)
+                               or ".." in a for k, a in enumerate(pos)):
+            return UNKNOWN, "git fetch 는 원격 이름과 브랜치 이름만 판정해"
+        return SAFE, "원격 변경을 받아 오기만 해(작업 중인 파일은 안 바뀌어)"
     if sub == "clean":
         if "f" in flags or "--force" in rest:
             return IRREVERSIBLE, "추적하지 않는 파일을 지우려 해"
@@ -707,9 +716,10 @@ def _is_plan_file(real_path: str, plan_dir: str, cwd: str = "", config_roots=())
     return any(parts[0].lower().endswith(s) for s in _names("plan_file_suffixes"))
 
 
-def classify(tool_name, tool_input, cwd, plan_dir: str = "", config_roots=()) -> tuple[str, str]:
+def classify(tool_name, tool_input, cwd, plan_dir: str = "", config_roots=(), read_roots=()) -> tuple[str, str]:
     """plan_dir 는 계획 모드인 세션에서만 넘긴다(<설정 폴더>/plans). 그 폴더 바로 아래 계획 파일 쓰기만 safe 로 본다.
-    config_roots 는 plans 가 링크일 때 받아 줄 실제 설정 폴더들(CLAUDE_CONFIG_DIR·~/.claude). 순수 함수라 환경은 호출한 쪽이 읽는다."""
+    config_roots 는 plans 가 링크일 때 받아 줄 실제 설정 폴더들(CLAUDE_CONFIG_DIR·~/.claude). 순수 함수라 환경은 호출한 쪽이 읽는다.
+    read_roots 는 작업 폴더 밖이어도 읽기 도구(Read·Glob·Grep)로 읽어도 되는 폴더(하네스 플러그인 폴더, #953)."""
     name = tool_name if isinstance(tool_name, str) else ""
     cwd = cwd if isinstance(cwd, str) else ""
     if name.startswith("mcp__"):
@@ -739,13 +749,17 @@ def classify(tool_name, tool_input, cwd, plan_dir: str = "", config_roots=()) ->
     if name in _names("path_tools"):
         if not cwd:
             return UNKNOWN, "작업 폴더를 몰라서 판정 못 했어"
-        ctx = {"base": cwd, "cur": [cwd], "bs": False}
         paths = [v for k, v in (tool_input.items() if isinstance(tool_input, dict) else []) if k in ("file_path", "notebook_path", "path") and isinstance(v, str) and v]
         if name == "Glob" and isinstance(tool_input, dict) and isinstance(tool_input.get("pattern"), str):
             paths.append(tool_input["pattern"])
-        if not all(_path_ok(p, ctx) for p in paths):
-            return UNKNOWN, "작업 폴더 밖이거나 비밀값 모양 파일을 읽으려 해"
-        return SAFE, "읽기만 해"
+        if all(_path_ok(p, {"base": cwd, "cur": [cwd], "bs": False}) for p in paths):
+            return SAFE, "읽기만 해"
+        # 하네스 플러그인 폴더 안 읽기(스킬이 자기 플러그인의 다른 스킬 문서를 읽는 일, #953). 읽기 도구만이고 쓰기는 그대로 묻는다.
+        # 경로는 모두 그 폴더 안이어야 하고(상대 경로는 그 폴더 기준), 훅·설정 같은 보호 경로와 비밀값 모양은 여기서도 묻는다
+        for root in read_roots:
+            if root and paths and all(_path_ok(p, {"base": root, "cur": [root], "bs": False}) for p in paths):
+                return SAFE, "하네스 플러그인 문서를 읽기만 해"
+        return UNKNOWN, "작업 폴더 밖이거나 비밀값 모양 파일을 읽으려 해"
     if name == "WebFetch":
         url = tool_input.get("url") if isinstance(tool_input, dict) else None
         return (SAFE, "공개 웹 주소를 읽기만 해") if _public_web_url(url) else (UNKNOWN, "공개 웹 주소가 아니거나 읽지 못해 판정 못 했어")
