@@ -22,5 +22,10 @@ scaffold 가 블루어드 사내 표준을 기본값으로 두 파일 만들어 
 | `naming.md` | SAP S/4HANA Public Cloud & BTP 객체 이름 규칙(Naming Guide v1.2 정리) |
 | `cap-ui5.md` | CAP·SAPUI5 개발 표준(코딩 규칙, 폴더 구조, 이름 규칙)(개발표준 정의서 v1.0 정리) |
 
+두 파일은 SAP 공식 문서를 근거로 맞춰져 있고(규칙마다 근거와 검사 세기를 적었다),
+같은 대상을 정하는 곳(Control ID, 상수, 변수 접두어, 내부 함수 등)은 같은 규칙으로
+통일했다. ABAP 에 배포하는 UI5 앱은 `naming.md`, CAP 프로젝트 안의 앱은
+`cap-ui5.md` 를 우선한다.
+
 고객사 표준이 정해지면 이 두 파일을 고친다. 이미 같은 이름의 파일이 있으면
 scaffold 는 덮어쓰지 않는다.
