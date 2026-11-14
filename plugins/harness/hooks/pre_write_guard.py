@@ -24,6 +24,7 @@ Windows 에서 CRLF 와 한글 인코딩을 다루기 쉽다. 이 저장소의 b
 """
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import subprocess
@@ -86,7 +87,12 @@ NEXT_RETRY = (
 )
 
 
+_PENDING_NOTICE = ""  # UI5 개발 표준 경고(#944). 이 훅이 끝까지 통과로 답할 때 함께 알린다.
+
+
 def allow() -> None:
+    if _PENDING_NOTICE:
+        allow_with_notice(_PENDING_NOTICE)
     sys.exit(ALLOW)
 
 
@@ -106,6 +112,8 @@ def allow_with_notice(notice: str) -> None:
     `permissionDecision` 은 싣지 않는다 — 허용을 이 훅이 선언하지 않고 평소 권한
     흐름에 맡기며, 알림만 `additionalContext` 로 덧붙인다.
     """
+    if _PENDING_NOTICE and _PENDING_NOTICE not in notice:
+        notice = _PENDING_NOTICE + "\n\n" + notice
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -379,6 +387,175 @@ def _check_code(path: Path, content: str) -> None:
     )
 
 
+UI5_CONFIG = "conventions/cap-ui5.yaml"
+
+
+def _ui5_target(path: Path) -> bool:
+    """CAP·UI5 개발 표준 검사 대상 파일인가(#944). 이름 끝으로만 판정한다.
+
+    `checker/ui5_rules.py` 의 `target_kind` 와 같아야 하는 손으로 옮긴 사본이다(훅은 엔진을 import 하지 않는다).
+    `.xml` 은 `.view.xml`·`.fragment.xml` 만 본다 — abapGit 메타(`.clas.xml` 등)는 걸리지 않는다.
+    """
+    parts = path.as_posix().lower().split("/")
+    name = parts[-1]
+    if name.endswith((".view.xml", ".fragment.xml")):
+        return True
+    if name.endswith(".properties"):
+        return len(parts) >= 2 and parts[-2] == "i18n"
+    return name.endswith(".js") and not name.endswith(".min.js") and "webapp" in parts[:-1]
+
+
+def _find_ui5_config(path: Path) -> Path | None:
+    """저장하려는 파일에서 위로 올라가며 `conventions/cap-ui5.yaml` 을 찾는다. `.git` 이 있는 폴더에서 멈춘다.
+
+    파일이 없으면 None — UI5 표준을 검사하지 않는 지금 동작 그대로다. 훅은 pyyaml 이 없어 읽지 않고 있는지만 본다.
+    """
+    try:
+        start = path.parent.resolve()
+    except OSError:
+        start = path.parent
+    for parent in [start, *start.parents]:
+        if (parent / UI5_CONFIG).is_file():
+            return parent / UI5_CONFIG
+        if (parent / ".git").exists():
+            return None
+    return None
+
+
+def _changed_line_numbers(old: str | None, new: str) -> list[int]:
+    """저장하면 새로 생기거나 바뀌는 줄의 번호(1부터). `old` 가 None 이면 새 파일이라 전체 줄이다.
+
+    줄바꿈 종류(CRLF·LF)만 다른 줄은 같은 줄로 본다.
+    """
+    new_lines = [ln.rstrip("\r") for ln in new.split("\n")]
+    if old is None:
+        return list(range(1, len(new_lines) + 1))
+    old_lines = [ln.rstrip("\r") for ln in old.split("\n")]
+    changed: list[int] = []
+    for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False).get_opcodes():
+        if tag in ("replace", "insert"):
+            changed.extend(range(j1 + 1, j2 + 1))
+    return changed
+
+
+def _line_spec(numbers: list[int]) -> str:
+    """`[1,2,3,7]` → `1-3,7`."""
+    parts: list[str] = []
+    start = prev = None
+    for n in numbers:
+        if start is None:
+            start = prev = n
+        elif n == prev + 1:
+            prev = n
+        else:
+            parts.append(f"{start}-{prev}" if prev != start else str(start))
+            start = prev = n
+    if start is not None:
+        parts.append(f"{start}-{prev}" if prev != start else str(start))
+    return ",".join(parts)
+
+
+def _format_ui5_findings(report: dict, level: str) -> str:
+    lines = []
+    for f in report.get("findings", []):
+        if (f.get("level") == "violation") != (level == "violation"):
+            continue
+        lines.append(f"  - [{f.get('rule')}] {f.get('file')}:{f.get('line')}:{f.get('col')} {f.get('message')}")
+        if f.get("fix"):
+            lines.append(f"      고치기: {f['fix']}")
+    return "\n".join(lines)
+
+
+def _check_ui5(tool: str, tool_input: dict, path: Path) -> None:
+    """CAP·UI5 개발 표준(`conventions/cap-ui5.md`)을 **바뀐 줄에만** 적용한다(#944).
+
+    프로젝트에 `conventions/cap-ui5.yaml` 이 있을 때만 엔진(`checker.ui5_rules`, uvx)을 부른다. 디스크의 현재 내용과
+    저장할 내용을 줄 단위로 비교해 새로 생기거나 바뀐 줄 번호만 `--lines` 로 넘기므로, 기존 줄의 옛 위반 때문에 편집이
+    막히지 않는다. 새 파일이면 전체 줄이 대상이다. violation 규칙이 걸리면 거절하고, warn 은 알림만 남긴다(`allow()` 가
+    함께 알린다). 검사 불능(설정 오류·XML 이 깨짐·엔진을 못 부름)은 통과가 아니라 거절이다(원칙 7).
+    """
+    global _PENDING_NOTICE
+    if not _ui5_target(path) or _find_ui5_config(path) is None:
+        return
+    content = proposed_content(tool, tool_input, path)
+    if content is None:
+        return
+    old: str | None = None
+    if path.exists():
+        try:
+            old = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            deny(
+                "harness 가 저장하려는 파일의 현재 내용을 읽지 못해 어느 줄이 바뀌는지 알 수 없어 UI5 개발 표준을 "
+                f"확인할 수 없었습니다.\n사유: {exc}\n확인되지 않는 상태로 통과시키지 않습니다.\n\n" + NEXT_RETRY
+            )
+    numbers = _changed_line_numbers(old, content)
+    if not numbers:
+        return  # 바뀌는 줄이 없다
+
+    with tempfile.TemporaryDirectory(prefix="doc-guard-ui5-") as tmp:
+        staged = Path(tmp) / path.name
+        staged.write_text(content, encoding="utf-8")
+        cmd = [
+            "uvx", "--from", engine_spec(), "python", "-P", "-m", "checker.ui5_rules", "check", str(staged),
+            "--as", path.resolve().as_posix(), "--root", str(path.resolve().parent), "--lines", _line_spec(numbers),
+        ]
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+        try:
+            done = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8", env=env, timeout=ENGINE_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            deny(
+                "harness 가 UI5 개발 표준 검사 엔진을 받거나 실행하지 못해 이 파일을 확인할 수 없었습니다.\n"
+                f"사유: {exc}\n확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+                + engine_hint() + NEXT_ENGINE_FAIL
+            )
+
+    try:
+        report = json.loads(done.stdout)
+        if not isinstance(report, dict):
+            raise ValueError("JSON 객체가 아니다")
+    except ValueError:
+        deny(
+            "UI5 개발 표준 검사기의 출력을 해석하지 못했습니다.\n"
+            f"{(done.stderr or done.stdout or '').strip()[:500]}\n"
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n" + engine_hint() + NEXT_RETRY
+        )
+    for f in report.get("findings", []):
+        f["file"] = str(path)
+
+    warnings = _format_ui5_findings(report, "warn")
+    warn_notice = (
+        "harness 경고(막지 않음): CAP·UI5 개발 표준(conventions/cap-ui5.md) 경고가 있습니다(바뀐 줄만 봅니다).\n" + warnings
+        if warnings else ""
+    )
+
+    if done.returncode == 0:
+        _PENDING_NOTICE = warn_notice
+        return
+    if done.returncode == 1:
+        deny(
+            "harness: 이 파일이 CAP·UI5 개발 표준을 어겼습니다(conventions/cap-ui5.md, 이번에 바꾸는 줄만 봅니다).\n\n"
+            + _format_ui5_findings(report, "violation")
+            + "\n\n다음: Claude 가 위 항목을 고쳐 다시 저장하십시오. 표준에 없는 정당한 예외면 사람이 결정해 "
+              f"{UI5_CONFIG} 의 `규칙`(심각도 바꾸기)이나 `예외`(경로)에 넣은 뒤 다시 시도하십시오."
+            + (("\n\n" + warn_notice) if warn_notice else "")
+        )
+    if done.returncode == 2:
+        deny(
+            "UI5 개발 표준을 확인하지 못했습니다(검사 불능).\n"
+            f"사유: {report.get('message') or (done.stderr or '').strip()[:300] or '종료코드 2'}\n"
+            "확인되지 않는 상태로 통과시키지 않습니다.\n\n"
+            f"다음: 사유가 파일 내용(XML 문법, 인코딩)의 문제라면 Claude 가 고쳐 다시 저장하십시오. {UI5_CONFIG} 을 "
+            "고쳐야 하는 사유라면 🚨 직접 해 주세요: 이 Project Repository 의 설정을 고칠 수 있는 담당자가 파일을 고칩니다."
+        )
+    deny(
+        f"UI5 개발 표준 검사기가 알 수 없는 종료코드({done.returncode})로 끝나 이 파일을 확인할 수 없었습니다.\n"
+        "확인되지 않는 상태로 통과시키지 않습니다.\n\n" + NEXT_RETRY
+    )
+
+
 def _check_activation_gate(path: Path) -> None:
     """저장소 루트의 `src/` 아래에 쓰려는데 활성화되지 않은 ABAP 오브젝트가 있으면 막는다(#190).
 
@@ -447,6 +624,10 @@ def _main() -> None:
     suffix = path.suffix.lower()
 
     _check_activation_gate(path)
+
+    # CAP·UI5 개발 표준(#944)은 프로젝트에 conventions/cap-ui5.yaml 이 있을 때만, 바뀌는 줄에만 적용한다. .xml·.properties
+    # 는 아래 어느 검사 소관도 아니라 그대로 통과했던 자리다. 통과하면 경고를 남기고 아래 절차를 이어 간다.
+    _check_ui5(tool, tool_input, path)
 
     if suffix in CODE_SUFFIXES:
         # 공통 개발 규칙(#54)은 문서 검사와 소관이 다르다 — 기준 폴더를 요구하지

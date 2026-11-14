@@ -26,14 +26,34 @@ recommendation", Fiori tools eslint 규칙) ③ public-cloud 실제 코드 ④ �
 
 ### 0.2 기계 검사 세기
 
-규칙 옆 표시는 PR 에서 어떻게 검사되는지를 뜻한다. 이름은 새로 만든 객체만, 코드는
+규칙 옆 표시는 PR 과 저장 직전 훅에서 어떻게 검사되는지를 뜻한다. 이름은 새로 만든 객체만, 코드는
 PR 에서 추가·변경된 줄만 본다.
 
 | 표시 | 뜻 |
 |---|---|
 | `[막기]` | 위반이면 검사가 실패한다. console.* 사용, `==`/`!=` 사용, Control ID 의 하이픈, 화면 XML 에 한글 직접 쓰기 |
 | `[경고]` | 기계로 판정할 수 있어 경고만 낸다. 병합은 막지 않는다 |
-| `[리뷰]` | 맥락이 필요해 사람이 리뷰에서 본다 |
+| `[리뷰]` | 지금은 사람이 리뷰에서 본다(맥락이 필요하거나 아직 기계 검사를 만들지 않았다) |
+
+검사는 프로젝트에 `conventions/cap-ui5.yaml` 이 있을 때 켜진다(예시는 하네스의
+`conventions/cap-ui5.example.yaml`). 파일이 없으면 검사하지 않고, 있는데 못 읽으면
+검사 불능이다. 규칙별 심각도와 예외 경로는 그 파일에서 바꾼다.
+
+| 규칙 id | 검사 | 기본 |
+|---|---|---|
+| UI5-001 | `console.*` 호출 | 막기 |
+| UI5-002 | `==` / `!=` | 막기 |
+| UI5-003 | Control ID 의 하이픈 | 막기 |
+| UI5-004 | 화면 XML 속성에 한글 직접 쓰기 | 막기 |
+| UI5-101 | `icon` 속성이 `sap-icon://`·URL 이 아님 | 경고 |
+| UI5-102 | 자기 닫힘 `/>` 앞 공백 | 경고 |
+| UI5-103 | DOM 직접 접근(`document.getElementById` 등) | 경고 |
+| UI5-104 | UI5 private(`_` 로 시작) 멤버 사용 | 경고 |
+| UI5-105 | 들여쓰기에 공백 사용 | 경고 |
+| UI5-106 | 지역변수 이름 접두어 | 경고 |
+| UI5-108 | i18n 키 형식 `[화면].[Type].[key]` | 경고 |
+| UI5-109 | i18n 문구 윗줄 텍스트 종류 주석 | 경고 |
+| UI5-110 | i18n 한글 메시지 `~세요.`·`~주시오.` 끝맺음 | 경고 |
 
 ## 1. 개요
 
@@ -98,26 +118,26 @@ PR 에서 추가·변경된 줄만 본다.
 
 | 대상 | 형식 | 표기법 | 예시 | 근거 · 검사 |
 |---|---|---|---|---|
-| Project Folder | `<프로젝트 접두어>` + [단어][단어]... | Upper CamelCase | `<프로젝트 접두어>CustomerManagement`, `<프로젝트 접두어>OrderManagement` | 사내 규칙 `[경고]` |
-| UI5 App Folder (CAP 프로젝트 `app/` 안) | [단어][단어]... + `App` | Lower CamelCase | `customerManagementApp`, `orderManagementApp` (원문 예시는 `<프로젝트 접두어>CustomerManagement`; 형식에 맞춰 바꾼 예시) | 사내 규칙 `[경고]` |
-| UI5 App Folder (ABAP 에 배포하는 앱, `src/ui5/`) | `naming.md` 5.2 형식(`z` + 영역 + `u` + 번호) | - | `zppu0010` | 사내 규칙 `[경고]` |
+| Project Folder | `<프로젝트 접두어>` + [단어][단어]... | Upper CamelCase | `<프로젝트 접두어>CustomerManagement`, `<프로젝트 접두어>OrderManagement` | 사내 규칙 `[리뷰]` |
+| UI5 App Folder (CAP 프로젝트 `app/` 안) | [단어][단어]... + `App` | Lower CamelCase | `customerManagementApp`, `orderManagementApp` (원문 예시는 `<프로젝트 접두어>CustomerManagement`; 형식에 맞춰 바꾼 예시) | 사내 규칙 `[리뷰]` |
+| UI5 App Folder (ABAP 에 배포하는 앱, `src/ui5/`) | `naming.md` 5.2 형식(`z` + 영역 + `u` + 번호) | - | `zppu0010` | 사내 규칙 `[리뷰]` |
 | Project name | Project folder name 과 같게. 임의 변경 불허 | - | - | 사내 규칙 `[리뷰]` |
 | Domain 파일 | 기본 예시는 `schema.cds` | Lower case | - | 사내 규칙 `[리뷰]` |
 | Namespace (Domain) | `<회사약어>` 또는 `<회사약어>.<모듈>` 둘 다 허용. 임의 수정 불허 | - | - | 사내 규칙 `[리뷰]`. 참고: CAP 은 조직 이름처럼 바뀔 수 있는 말을 namespace 에 쓰지 말라고 한다(SAP 공식: CAP Domain Modeling) |
-| Context | [단어] | Lower Case | `common`, `expense`, `financial` | 사내 규칙 `[경고]` |
-| Entity (Domain) | 대문자로 시작하는 복수형 | Upper CamelCase | `Customers`, `Orders` | SAP 공식: CAP Domain Modeling `[경고]` |
-| element (Domain) | 소문자로 시작 | Lower CamelCase | `deliveryDate`, `orderDate` | SAP 공식: CAP Domain Modeling `[경고]` |
+| Context | [단어] | Lower Case | `common`, `expense`, `financial` | 사내 규칙 `[리뷰]` |
+| Entity (Domain) | 대문자로 시작하는 복수형 | Upper CamelCase | `Customers`, `Orders` | SAP 공식: CAP Domain Modeling `[리뷰]` |
+| element (Domain) | 소문자로 시작 | Lower CamelCase | `deliveryDate`, `orderDate` | SAP 공식: CAP Domain Modeling `[리뷰]` |
 | type (Domain) | 단수형 | Upper CamelCase | `Address` | SAP 공식: CAP Domain Modeling `[리뷰]` |
-| Service Definition 파일 | 서비스별 이름 `<이름>-service.cds` | - | `OrderManagement-service.cds` | SAP 공식: CAP Core Services(예 `cat-service.cds`) `[경고]` |
-| Service Implementation 파일 | Service Definition 과 같은 이름에 확장자만 `.js` | - | `OrderManagement-service.js` | SAP 공식: CAP Core Services `[경고]` |
-| service | [단어][단어]... + `Service` | Upper CamelCase | `OrderService`, `DeliveryService` | SAP 공식: CAP Core Services(`service CatalogService`) `[경고]` |
-| entity (Service) | [단어][단어][단어]... | Upper CamelCase | `Books`, `Authors`, `Orders` | SAP 공식: CAP Domain Modeling `[경고]` |
-| action | [단어][단어][단어] | Lower CamelCase | `addCustomer`, `createOrder`, `cancelOrder` | 사내 규칙(CAP 공식 예시 `cancelOrder` 와 같다) `[경고]` |
-| function | [단어][단어][단어] | Lower CamelCase | `getStock`, `sum`, `countOrders` | 사내 규칙(CAP 공식 예시 `countOrders` 와 같다) `[경고]` |
+| Service Definition 파일 | 서비스별 이름 `<이름>-service.cds` | - | `OrderManagement-service.cds` | SAP 공식: CAP Core Services(예 `cat-service.cds`) `[리뷰]` |
+| Service Implementation 파일 | Service Definition 과 같은 이름에 확장자만 `.js` | - | `OrderManagement-service.js` | SAP 공식: CAP Core Services `[리뷰]` |
+| service | [단어][단어]... + `Service` | Upper CamelCase | `OrderService`, `DeliveryService` | SAP 공식: CAP Core Services(`service CatalogService`) `[리뷰]` |
+| entity (Service) | [단어][단어][단어]... | Upper CamelCase | `Books`, `Authors`, `Orders` | SAP 공식: CAP Domain Modeling `[리뷰]` |
+| action | [단어][단어][단어] | Lower CamelCase | `addCustomer`, `createOrder`, `cancelOrder` | 사내 규칙(CAP 공식 예시 `cancelOrder` 와 같다) `[리뷰]` |
+| function | [단어][단어][단어] | Lower CamelCase | `getStock`, `sum`, `countOrders` | 사내 규칙(CAP 공식 예시 `countOrders` 와 같다) `[리뷰]` |
 
 - Domain CDS 는 업무 영역 구분이 필요하면 `context` 구문을 쓴다. 이름은 전체 30자를
   넘지 않게 구성한다. HANA 식별자 한도는 127자(SAP 공식)이고, 30자는 사내 규칙이다.
-  `[경고]` (사내 규칙)
+  `[리뷰]` (사내 규칙)
 - Domain CDS 로 만들어지는 DB Object 의 이름은 Namespace, Context, Entity name 을
   조합하므로 전체 길이를 고려해 명명한다. `[리뷰]` (사내 규칙)
 - Service Definition 은 용도별로 서비스를 나눠야 하면 `service` 구문으로 나눈다.
@@ -132,19 +152,19 @@ PR 에서 추가·변경된 줄만 본다.
 
 공통:
 
-- 특별한 경우를 빼고 최대 15자를 넘지 않게 한다. `[경고]` (사내 규칙)
+- 특별한 경우를 빼고 최대 15자를 넘지 않게 한다. `[리뷰]` (사내 규칙)
 - 형식에 구분자가 있거나 표기법이 지정된 경우를 빼고는 Lower CamelCase 로 쓴다.
-  `[경고]` (사내 규칙)
+  `[리뷰]` (사내 규칙)
 - 단어를 쓰거나 상세를 적을 때는 의미를 짐작할 수 있게 짓는다. `[리뷰]` (사내 규칙)
 
 | 대상 | 형식 | 표기법 | 예시 | 근거 · 검사 |
 |---|---|---|---|---|
-| Control ID | 하이픈 없는 lowerCamel. 뜻이 보이게 짓는다. Control 약어는 넣어도 빼도 된다 | Lower CamelCase | `goodsNameInput`, `listBtnSearch`, `mainTblList`, `detailMiEmail` | SAP 공식: SAPUI5 ID Handling(하이픈은 UI5 가 붙이는 구분자라 쓰지 않는다). 하이픈 `[막기]`, 나머지 `[경고]` |
-| Constant | 대문자와 밑줄. `CONST_` 접두어를 붙인 형태와 붙이지 않은 형태 둘 다 허용 | Upper Case | `CONST_MAX_COUNT`, `CONST_LIMIT`, `MAX_LENGTH`, `SUCCESS` | 사내 규칙 `[경고]` |
+| Control ID | 하이픈 없는 lowerCamel. 뜻이 보이게 짓는다. Control 약어는 넣어도 빼도 된다 | Lower CamelCase | `goodsNameInput`, `listBtnSearch`, `mainTblList`, `detailMiEmail` | SAP 공식: SAPUI5 ID Handling(하이픈은 UI5 가 붙이는 구분자라 쓰지 않는다). 하이픈 `[막기]`, 나머지 `[리뷰]` |
+| Constant | 대문자와 밑줄. `CONST_` 접두어를 붙인 형태와 붙이지 않은 형태 둘 다 허용 | Upper Case | `CONST_MAX_COUNT`, `CONST_LIMIT`, `MAX_LENGTH`, `SUCCESS` | 사내 규칙 `[리뷰]` |
 | Variable | [Datatype Prefix][단어][단어] | 접두어 뒤 대문자로 이어 쓰는 camelCase | `sId`, `oUserInfo`, `iCount`, `aRow`, `dToday`, `fRate`, `bEnabled`, `rDate`, `vVariant` | SAP 공식: openui5 guidelines.md(강한 권장) `[경고]` |
-| Event handler | `on` 으로 시작. Control 약어를 넣은 `on` + [Control 약어] + [Event Name] 과 약어 없는 `on` + [기능] + [Event Name] 둘 다 허용 | `on` 뒤는 Upper CamelCase | `onBtnSavePress`, `onNewItemPress`, `onTblCellClick`, `onItemSelected` | 사내 규칙 `[경고]` |
-| 내부(private) 함수 | `_` 로 시작 하나 + [동사][단어][단어] | 동사, 단어는 Lower CamelCase | `_searchUserList`, `_calcAmount`, `_getAccessToken` | SAP 공식: openui5 guidelines.md(private 은 `_`) `[경고]` |
-| Parameter | Variable 과 같게 적용 | - | - | 사내 규칙 `[경고]` |
+| Event handler | `on` 으로 시작. Control 약어를 넣은 `on` + [Control 약어] + [Event Name] 과 약어 없는 `on` + [기능] + [Event Name] 둘 다 허용 | `on` 뒤는 Upper CamelCase | `onBtnSavePress`, `onNewItemPress`, `onTblCellClick`, `onItemSelected` | 사내 규칙 `[리뷰]` |
+| 내부(private) 함수 | `_` 로 시작 하나 + [동사][단어][단어] | 동사, 단어는 Lower CamelCase | `_searchUserList`, `_calcAmount`, `_getAccessToken` | SAP 공식: openui5 guidelines.md(private 은 `_`) `[리뷰]` |
+| Parameter | Variable 과 같게 적용 | - | - | 사내 규칙 `[리뷰]` |
 
 - 고정(stable) ID 를 다는 것이 기본이다. 뷰와 Fragment 에서 만드는 Control 에는 뜻이
   보이는 ID 를 붙인다. `[리뷰]` (SAP 공식: SAPUI5 Use Stable IDs)
@@ -213,12 +233,12 @@ detail.message.requiredTitle=제목을 입력하십시오.
 
 ### 5.1 기본
 
-- 전역변수를 만들지 않는다. 모듈(`sap.ui.define`)로 감싼다. `[경고]` (SAP 공식: openui5
+- 전역변수를 만들지 않는다. 모듈(`sap.ui.define`)로 감싼다. `[리뷰]` (SAP 공식: openui5
   guidelines.md, Fiori tools eslint `sap-no-global-variable`)
 - 동적 Control 을 만들 때는 Controller 의 `createId()` 로 ID 를 만든다. `[리뷰]`
   (SAP 공식: SAPUI5 ID Handling)
 - 해당 Controller 에서만 쓰는 private 변수·함수의 이름은 underscore(`_`)로 시작한다.
-  예: `this._bFinalized`, `this._reRenderTable()` `[경고]` (SAP 공식: openui5 guidelines.md)
+  예: `this._bFinalized`, `this._reRenderTable()` `[리뷰]` (SAP 공식: openui5 guidelines.md)
 - DOM 을 직접 다루지 않는다(`document.getElementById` 등). Control 은 `this.byId()` 등
   UI5 API 로 가져온다. 꼭 DOM 이 필요하면 jQuery 선택자를 쓰고, ID 에 특수문자가 있을
   수 있으면 `jQuery(window.document.getElementById(sId))` 로 감싼다. `[경고]` (SAP 공식:
@@ -231,14 +251,14 @@ detail.message.requiredTitle=제목을 입력하십시오.
 - 들여쓰기는 탭 문자로 한다. 칸 수는 정하지 않으며, 파일 안의 기존 방식이 다르면 그
   방식을 따른다. `[경고]` (SAP 공식: openui5 guidelines.md)
 - Control 이 같은 레벨이면 Tab 개수를 같게 하고, 하위 레벨이면 1 Tab 더 들여쓴다.
-  `[경고]` (사내 규칙)
+  `[리뷰]` (사내 규칙)
 - Control 의 Attribute 가 많으면 줄을 바꾼 뒤 같은 Tab 개수를 적용한다. `[리뷰]` (사내 규칙)
-- Control 간 구분을 위한 빈 줄은 하나까지 허용하고 그 이상은 두지 않는다. `[경고]` (사내 규칙)
-- 모든 구문 뒤의 세미콜론을 생략하지 않는다. `[경고]` (SAP 공식: openui5 guidelines.md)
-- 소괄호 앞에는 space 를 두지 않는다. `[경고]` (SAP 공식: openui5 guidelines.md)
+- Control 간 구분을 위한 빈 줄은 하나까지 허용하고 그 이상은 두지 않는다. `[리뷰]` (사내 규칙)
+- 모든 구문 뒤의 세미콜론을 생략하지 않는다. `[리뷰]` (SAP 공식: openui5 guidelines.md)
+- 소괄호 앞에는 space 를 두지 않는다. `[리뷰]` (SAP 공식: openui5 guidelines.md)
 - `if/else/for/while/do/switch/try/catch/finally` 뒤, 중괄호와 연산자 앞뒤, 콤마 뒤에는
-  space 를 둔다. `[경고]` (SAP 공식: openui5 guidelines.md)
-- `function/for/if-else/switch` 와 중괄호 시작은 같은 줄에 둔다. `[경고]` (SAP 공식:
+  space 를 둔다. `[리뷰]` (SAP 공식: openui5 guidelines.md)
+- `function/for/if-else/switch` 와 중괄호 시작은 같은 줄에 둔다. `[리뷰]` (SAP 공식:
   openui5 guidelines.md)
 - 값 비교는 `===`, `!==` 를 쓴다. `[막기]` (SAP 공식: openui5 guidelines.md, Fiori tools
   eslint `eqeqeq`)
@@ -297,10 +317,11 @@ App 유형.
   쓰지 않는다. private 으로 보호되는 대상이라 SAPUI5 Core Lib. 가 갱신될 때 이름이나
   내부 코드가 바뀌어 App 오류가 날 수 있다. `[경고]` (SAP 공식: openui5 guidelines.md,
   Fiori tools eslint `sap-ui5-no-private-prop`. 내 private 도 `_` 로 시작해 기계가
-  구분하지 못하므로 막지 않는다)
+  완전히 구분하지 못하므로 막지 않고 경고만 한다. `this`·`that`·`self` 의 멤버와 그 파일
+  안에서 정의한 이름은 경고하지 않는다)
 - OData 에서 CRUD 처리용 Primary Key 문자열을 손으로 만들지 않는다. V4 모델(우리
   앱 전부)은 `getKeyPredicate`/`requestKeyPredicate`(1.107.0 부터)나 binding context 를
-  쓴다. `createKey` 는 V2 모델 전용이다. `[경고]` (SAP 공식: `sap.ui.model.odata.v4.ODataModel`
+  쓴다. `createKey` 는 V2 모델 전용이다. `[리뷰]` (SAP 공식: `sap.ui.model.odata.v4.ODataModel`
   API)
 
 공통 Library.
@@ -373,7 +394,7 @@ UI side 메시지.
 - MessageToast 는 성공·완료 알림에만 쓴다. 예: 저장되었습니다. 오류·경고·필수입력
   검증 메시지는 MessageToast 로 띄우지 않고 MessageBox 또는 입력칸 상태(MessageManager)로
   표현한다. 예: 적용할 설비를 선택해 주십시오. / 다운로드 할 데이터가 없습니다.
-  `[경고]` (SAP 공식: Fiori Design Guidelines Message Toast, "Don't use the toast to:
+  `[리뷰]` (SAP 공식: Fiori Design Guidelines Message Toast, "Don't use the toast to:
   Display an error or warning message")
 - 확인 요청은 MessageBox 로 표현한다. 예: 저장하시겠습니까? `[리뷰]` (사내 규칙)
 - MaskInput Control 로 입력 내용을 안내할 수 있다. `[리뷰]` (사내 규칙)

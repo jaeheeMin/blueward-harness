@@ -94,6 +94,35 @@ def test_doc_guard_paths_는_엔진이_보는_파일을_덮는다():
                 assert _triggered(paths, f), (lang, f)
 
 
+def test_doc_guard_paths_는_UI5_개발_표준_검사_대상을_덮는다():
+    """#944: webapp JS, 화면 XML, i18n properties 만 바뀐 PR 에서도 doc-guard 단계가 돌아야 UI5 검사가 돈다."""
+    paths = _doc_guard_paths()
+    for f in (
+        "src/ui5/zppu0010/webapp/controller/Main.controller.js",
+        "src/ui5/zppu0010/webapp/view/Main.view.xml",
+        "src/ui5/zppu0010/webapp/ext/Dialog.fragment.xml",
+        "src/ui5/zppu0010/webapp/i18n/i18n.properties",
+        "app/orders/webapp/i18n/i18n_ko.properties",
+        "Main.view.xml",
+    ):
+        assert _triggered(paths, f), f
+    # abapGit 메타 xml 이나 i18n 밖 properties 는 트리거가 아니다
+    for f in ("src/zcl_order.clas.xml", "src/package.devc.xml", "config/application.properties"):
+        assert not _triggered(paths, f), f
+
+
+def test_UI5_검사가_보는_파일은_모두_doc_guard_paths_안에_있다():
+    from checker import ui5_rules
+
+    paths = _doc_guard_paths()
+    for f in (
+        "app/a/webapp/Component.js", "app/a/webapp/view/A.view.xml", "app/a/webapp/fragment/B.fragment.xml",
+        "app/a/webapp/i18n/i18n.properties",
+    ):
+        assert ui5_rules.target_kind(f), f
+        assert _triggered(paths, f), f
+
+
 def test_doc_guard_paths_는_검사_대상이_아닌_파일만_바뀐_PR_에서는_안_뜬다():
     paths = _doc_guard_paths()
     for f in ("README.md", ".github/risk-gate.yaml", "package.json", "src/logo.png", "env/README.md"):

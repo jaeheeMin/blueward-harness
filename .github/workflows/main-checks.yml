@@ -130,6 +130,9 @@ jobs:
             **/*.asdcls
             **/*.astabldt
             **/*.asbdef
+            **/*.view.xml
+            **/*.fragment.xml
+            **/i18n/*.properties
             **/*_v*.xlsx
             **/*_v*.docx
             **/*_v*.pptx

@@ -229,6 +229,13 @@ Z, Y 같은 이름 접두어와 그 프로젝트만의 네이밍 규칙은 공�
 객체를 고치는 PR 은 막지 않는다). 파일이 없으면 검사하지 않는다. 쓰는 법과 예시는
 하네스의 `conventions/naming.example.yaml` 에 있다.
 
+**CAP·UI5 코드 표준 검사(선택, #944)**: 프로젝트가 `conventions/cap-ui5.yaml` 을 두면
+`conventions/cap-ui5.md` 의 규칙 중 기계로 판정되는 것(console.* 금지, `==` 금지,
+Control ID 하이픈, 화면 XML 한글 직접 쓰기 등)을 UI5 JS(`webapp/`)·`*.view.xml`·
+`*.fragment.xml`·`i18n/*.properties` 에서 검사한다. 저장 직전 훅과 PR 이 **추가·변경된
+줄만** 본다(기존 위반은 막지 않는다). 규칙별 심각도·예외는 그 파일에서 바꾸고, 예시는
+하네스의 `conventions/cap-ui5.example.yaml` 이다. 파일이 없으면 검사하지 않는다.
+
 **기계 검사**: 문서로만.
 
 ## CR-009 데이터를 바꾸는 앱은 권한을 검사한다

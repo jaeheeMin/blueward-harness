@@ -51,6 +51,9 @@ def render(report: dict, code: int) -> str:
     naming = report.get("naming")
     if naming:
         text += "\n" + "\n".join(_render_naming(naming))
+    ui5 = report.get("ui5")
+    if ui5:
+        text += "\n" + "\n".join(_render_ui5(ui5))
     cross = report.get("cross_checks")
     if cross:
         text += "\n" + "\n".join(_render_cross_checks(cross))
@@ -83,6 +86,55 @@ def _render_naming(result: dict) -> list[str]:
         out.append(
             f"| `{item.get('file')}` | {item.get('type')} | `{item.get('name')}` | {_cell('; '.join(item.get('reasons') or []))} |"
         )
+    return out
+
+
+def _ui5_table(items: list[dict]) -> list[str]:
+    out = ["| 위치 | 규칙 | 내용 | 고치는 법 |", "|---|---|---|---|"]
+    for item in items:
+        out.append(
+            f"| `{item.get('file')}:{item.get('line')}` | {item.get('rule')} | "
+            f"{_cell(item.get('message'))} | {_cell(item.get('fix'))} |"
+        )
+    return out
+
+
+def _render_ui5(result: dict) -> list[str]:
+    """CAP·UI5 개발 표준 절(#944). `result` 는 `checker.ui5_rules.evaluate_files` 의 결과다.
+
+    violation 규칙은 병합을 막는 위반으로, warn 규칙은 종료코드를 바꾸지 않는 경고로 나눠 보인다.
+    """
+    out = ["", "---", "", "## CAP·UI5 개발 표준", ""]
+    findings = result.get("findings") or []
+    violations = [f for f in findings if f.get("level") == "violation"]
+    warnings = [f for f in findings if f.get("level") != "violation"]
+
+    if result.get("status") == "cannot_check":
+        out += [
+            "### ⚠️ 검사 불능", "",
+            "```", str(result.get("message") or "UI5 개발 표준을 확인하지 못했습니다.").strip(), "```", "",
+            "바뀐 UI5 파일이 `conventions/cap-ui5.yaml` 의 표준에 맞는지 확인하지 못했습니다. 통과도 위반도 아닙니다. "
+            "설정 파일이나 깨진 파일을 고쳐야 합니다. 설정 파일이면 `conventions/cap-ui5.yaml` 을 관리하는 담당자에게 알리십시오.",
+        ]
+    elif violations:
+        out += [
+            "### ❌ 표준에 맞지 않는 줄", "",
+            f"**{len(violations)}건**입니다. 이 PR 이 추가하거나 바꾼 줄만 봅니다. 이미 있던 줄은 해당하지 않습니다.", "",
+        ]
+        out += _ui5_table(violations)
+    elif not warnings:
+        out.append(f"바뀐 UI5 파일 {result.get('checked', 0)}개의 추가·변경된 줄이 표준에 맞습니다.")
+    else:
+        out.append(f"바뀐 UI5 파일 {result.get('checked', 0)}개의 추가·변경된 줄에 위반은 없습니다.")
+
+    if violations and result.get("status") == "cannot_check":
+        out += ["", "### ❌ 표준에 맞지 않는 줄", "", f"**{len(violations)}건**입니다.", ""] + _ui5_table(violations)
+    if warnings:
+        out += [
+            "", "### 참고 — 경고 (통과에는 영향 없음)", "",
+            f"**{len(warnings)}건**입니다. 병합을 막지 않습니다. 고치는 것이 좋습니다.", "",
+        ]
+        out += _ui5_table(warnings)
     return out
 
 
@@ -439,7 +491,7 @@ def exit2_cause(report: dict) -> str:
     code_rules = report.get("code_rules")
     if code_rules and code_rules.get("exit") not in (0, 1):
         return "config"
-    for key in ("pairing", "overlap", "naming"):
+    for key in ("pairing", "overlap", "naming", "ui5"):
         if (report.get(key) or {}).get("status") == "cannot_check":
             return "config"
     if report.get("cross_checks"):
