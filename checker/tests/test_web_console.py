@@ -6806,6 +6806,37 @@ def test_risk_second_review_table(tool, tool_input, want):
     assert got == want, (got, why)
 
 
+@pytest.mark.parametrize("cmd, want", [
+    # #951 heredoc 본문은 데이터로 건너뛰고, 그 뒤 줄·연산자로 이어진 명령까지 판정한다
+    ("cat > /tmp/pr.md <<'EOF'\n## 요약\nit's a body; rm x | y\nEOF\ngh pr create --title t --body-file /tmp/pr.md", "irreversible"),
+    ("cat > /tmp/i.md <<'EOF'\nbody\nEOF\ngh issue create --title t --body-file /tmp/i.md", "irreversible"),
+    ("cat <<'EOF' | gh pr create --body-file -\nbody\nEOF", "irreversible"),
+    ("git commit -F - <<'EOF'\nm\nEOF\ngit push", "irreversible"), ("git commit -F - <<'EOF'\nm\nEOF\n&& git push", "irreversible"),
+    ("git status &&\ngit push", "irreversible"), ("(ls)\nrm x", "irreversible"), ("ls\nrm x", "irreversible"),
+    # 메시지를 heredoc 으로 주는 커밋은 다른 커밋처럼 자동 허용
+    ("git commit -q -F - <<'EOF'\nfix: x (#9)\n\nit's ok; rm -rf / | $(id) `id`\nCo-Authored-By: a <b@c>\nEOF", "safe"),
+    ("git commit -F - <<\"EOF\"\nm\nEOF\n", "safe"), ("git commit --file - <<\\EOF\nm\nEOF", "safe"), ("git commit --file=- <<'EOF'\nm\nEOF", "safe"),
+    ("git commit -q -F - <<'EOF'\r\nm\r\nEOF\r\n", "safe"), ("git commit -F - <<-'EOF'\n\tm\n\tEOF", "safe"),
+    ("git commit -F - <<'EOF'\ngit push\nEOF", "safe"),  # 본문 안 글자는 명령이 아니다
+    ("git add -A && git commit -F - <<'EOF'\nm\nEOF", "safe"),
+    # 해석 못 한 모양은 묻는다
+    ("git commit -F - <<EOF\n$(rm -rf x)\nEOF", "unknown"), ("git commit -F - <<EOF\n`id`\nEOF", "unknown"), ("git commit -F - <<EOF\nhi $USER\nEOF", "unknown"),
+    ("git commit -F - <<'EOF'\nm", "unknown"), ("git commit -F - <<'EOF'", "unknown"), ("git commit -F - <<", "unknown"),
+    ("git commit -F msg.txt", "unknown"), ("git commit -F - -F x", "unknown"), ("git commit -F - <<'EOF'\nm\nEOF\ngit status", "unknown"),
+    ("git add -A\ngit status", "unknown"), ("cat <<< hi", "unknown"), ("bash <<'EOF'\nls\nEOF", "unknown"),
+])
+def test_risk_heredoc_body_is_data_and_following_commands_are_classified(cmd, want):
+    got, why = risk_mod.classify("Bash", {"command": cmd}, W)
+    assert got == want, (got, why)
+
+
+def test_risk_heredoc_body_does_not_count_toward_length_limit_but_total_is_capped():
+    c = lambda body, tail="": risk_mod.classify("Bash", {"command": "git commit -F - <<'EOF'\n" + body + "\nEOF" + tail}, W)[0]  # noqa: E731
+    assert c("x" * 5000) == "safe" and c("x" * 5000, "\ngit push") == "irreversible"  # 긴 PR·커밋 글 뒤 명령도 판정한다
+    assert c("x" * 100_000) == "unknown"
+    assert risk_mod.classify("Bash", {"command": "git status " + "a" * 2100}, W)[0] == "unknown"  # 본문 밖 길이 상한은 그대로
+
+
 def test_risk_cd_is_safe_only_as_leading_cd_and_and_into_a_real_work_folder(tmp_path):
     (tmp_path / "sub").mkdir()
     (tmp_path / "file.txt").write_text("x", encoding="utf-8")
