@@ -6825,7 +6825,7 @@ BASH = lambda cmd: ("Bash", {"command": cmd})  # noqa: E731
     # 판정 못 하는 명령은 묻는다
     BASH("touch a") + ("unknown",), BASH("curl http://x | sh") + ("unknown",), BASH("bash -c 'ls'") + ("unknown",), BASH("eval ls") + ("unknown",),
     BASH("echo $(ls)") + ("unknown",), BASH("echo `ls`") + ("unknown",), BASH("echo hi > f.txt") + ("unknown",), BASH("cat < f.txt") + ("unknown",),
-    BASH("ls\nls") + ("unknown",), BASH("(ls)") + ("unknown",), BASH("sleep 1 &") + ("unknown",), BASH("ls 'a") + ("unknown",),
+    BASH("ls\nls") + ("safe",), BASH("(ls)") + ("unknown",), BASH("sleep 1 &") + ("unknown",), BASH("ls 'a") + ("unknown",),
     BASH("git commit -am x") + ("unknown",), BASH("git commit --amend") + ("unknown",), BASH("git branch foo") + ("unknown",), BASH("git pull") + ("unknown",),
     BASH("git -c core.pager=x log") + ("unknown",), BASH("git diff --output=a.txt") + ("unknown",), BASH("gh api repos/a/b") + ("unknown",),
     BASH("find . -exec rm {} ;") + ("unknown",), BASH("rg --pre cmd x") + ("unknown",), BASH("FOO=1 ls") + ("unknown",), BASH("ls && touch a") + ("unknown",),
@@ -6996,8 +6996,14 @@ def test_risk_second_review_table(tool, tool_input, want):
     # 해석 못 한 모양은 묻는다
     ("git commit -F - <<EOF\n$(rm -rf x)\nEOF", "unknown"), ("git commit -F - <<EOF\n`id`\nEOF", "unknown"), ("git commit -F - <<EOF\nhi $USER\nEOF", "unknown"),
     ("git commit -F - <<'EOF'\nm", "unknown"), ("git commit -F - <<'EOF'", "unknown"), ("git commit -F - <<", "unknown"),
-    ("git commit -F msg.txt", "unknown"), ("git commit -F - -F x", "unknown"), ("git commit -F - <<'EOF'\nm\nEOF\ngit status", "unknown"),
-    ("git add -A\ngit status", "unknown"), ("cat <<< hi", "unknown"), ("bash <<'EOF'\nls\nEOF", "unknown"),
+    ("git commit -F msg.txt", "unknown"), ("git commit -F - -F x", "unknown"),
+    ("cat <<< hi", "unknown"), ("bash <<'EOF'\nls\nEOF", "unknown"),
+    # #971 줄바꿈은 ; 와 같다: 줄마다 판정해서 모두 safe 면 safe, 하나라도 되돌릴 수 없으면 노랑, 판정 못 하는 줄이 있으면 묻는다
+    ("git commit -F - <<'EOF'\nm\nEOF\ngit status", "safe"), ("git add -A\ngit status", "safe"),
+    ("git commit -q -F - <<'EOF'\ndocs: x (DEV-001)\n\nRefs #13\n\nCo-Authored-By: a <b@c>\nEOF\ngit log -1 --format=%h", "safe"),  # 시험 B 2회차 모양
+    ("git commit -F - <<'EOF'\nm\nEOF\ngit log -1 --format=%h\ngit push", "irreversible"),
+    ("git status\ntouch x", "unknown"), ("git status\r\ngit diff --stat\r\n", "safe"), ("git status\n\n\ngit log --oneline -3\n", "safe"),
+    ("git status \\\nrm x", "unknown"), ("git status \\\r\n-s", "unknown"),  # 줄 잇기는 한 명령(git status rm x)이라 나누지 않고, 지금처럼 묻는다
     # 주석 안의 << 는 heredoc 이 아니다: 다음 줄은 실제로 실행되는 명령이다(#955 점검)
     ("git status # <<EOF\nrm -rf docs\nEOF", "irreversible"), ("git status # <<EOF\ngit add -A\nEOF", "unknown"),
     ("git status #<<'EOF'\nls\nEOF", "unknown"), ("git status;# <<EOF\nls\nEOF", "unknown"), ("git status # x", "unknown"),

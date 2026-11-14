@@ -6,7 +6,7 @@ classify(tool_name, tool_input, cwd) -> (판정, 사유)
   unknown       목록에 없거나 해석하지 못한 것. 허용으로 뭉개지 않고 사람에게 묻는다(CLAUDE.md 7).
 원칙: 애매하면 unknown. safe 명령은 옵션 허용 목록 방식이라 목록에 없는 옵션이 하나라도 있으면 unknown 이다.
 셸 명령은 ; && || | 와 줄바꿈으로 조각을 나눠 조각이 모두 safe 일 때만 safe 다. 따옴표 밖의 $( ` 리디렉션은 해석하지 않고 unknown 이다.
-heredoc 본문은 데이터라 건너뛴다. 그 밖에서 줄바꿈 뒤에 명령이 더 있으면 unknown 이지만, 조각 하나라도 되돌릴 수 없으면 irreversible 이다.
+heredoc 본문은 데이터라 건너뛴다. 줄바꿈은 ; 와 같아서 여러 줄 명령도 줄마다 판정하고(#971), 조각 하나라도 되돌릴 수 없으면 irreversible 이다.
 읽기 명령의 경로 인자가 작업 폴더 밖이거나 비밀값 모양 파일이면 unknown 이다.
 """
 from __future__ import annotations
@@ -115,8 +115,8 @@ def _heredoc_bodies(command: str, i: int, heredocs: list):
 
 def tokenize(command: str):
     """(토큰 목록, 해석 못 할 사유, heredoc 본문 글자 수). 따옴표 밖의 $( ·백틱·괄호가 있거나 따옴표가 안 닫히면 사유가 있다.
-    따옴표 밖 줄바꿈은 ; 처럼 명령을 나누는 "\\n" 연산자다(#951). heredoc 본문은 건너뛰고, 그 밖에서 줄바꿈 뒤에 명령이 더 있으면
-    "여러 줄 명령" 사유를 남긴다 — 사유가 있어도 조각은 끝까지 나눠 두어 뒤 줄의 되돌릴 수 없는 명령을 가려낸다."""
+    따옴표 밖 줄바꿈은 bash 처럼 ; 와 같은 "\\n" 연산자다(#951). heredoc 본문은 건너뛰고, 줄마다 다른 조각으로 판정한다(#971).
+    줄 잇기 \\·주석·heredoc·따옴표 안 줄바꿈은 따로 다룬다. 사유가 있어도 조각은 끝까지 나눠 두어 뒤 줄의 되돌릴 수 없는 명령을 가려낸다."""
     tokens: list[Token] = []
     cur: list[str] = []
     has_word = False
@@ -145,8 +145,6 @@ def tokenize(command: str):
                 heredocs = []
                 unsafe = unsafe or why
                 i = end; continue
-            if command[i + 1:].strip():
-                unsafe = unsafe or "여러 줄 명령이야"
             i += 1; continue
         if c in " \t":
             flush(); spaced = True; i += 1; continue
@@ -160,7 +158,13 @@ def tokenize(command: str):
             if i + 1 < n and command[i + 1] not in "\r\n":
                 cur.append(command[i + 1]); has_word = True; i += 2; continue
             unsafe = unsafe or "줄을 잇는 \\ 가 있어"
-            i += 1; continue
+            # 줄 잇기: 뒤 줄바꿈은 명령을 나누지 않는다(bash 는 두 줄을 한 명령으로 잇는다, #971)
+            i += 1
+            if command.startswith("\r\n", i):
+                i += 2
+            elif i < n and command[i] in "\r\n":
+                i += 1
+            continue
         if c == "'":
             j = command.find("'", i + 1)
             if j < 0:
