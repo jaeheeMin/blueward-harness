@@ -333,17 +333,61 @@ finish_carryover() {
   fi
 }
 
+# 충돌 파일이 docs/ssot/SRS.md 하나뿐이고 양쪽이 같은 자리에 줄만 추가한 것이면 엔진
+# (checker.srs_automerge, #977)이 main 줄 먼저 → 내 줄로 합치고 git add 까지 한다. 합쳤으면 0,
+# 아니면(조건 밖, 엔진 실패, 검사 불능 포함) 1 — 통과로 뭉개지 않고 호출한 쪽이 abort 한다.
+# 커밋·rebase --continue 는 호출한 쪽이 한다. 합친 충돌 수는 srs_auto_n 에 쌓는다.
+srs_auto_used=0
+srs_auto_n=0
+try_srs_automerge() {
+  local mode="$1" engine out rc=0 n
+  [ "$(git diff --name-only --diff-filter=U 2>/dev/null | tr -d '\r')" = "docs/ssot/SRS.md" ] || return 1
+  command -v uvx >/dev/null 2>&1 || return 1
+  if [ -n "${DOC_GUARD_ENGINE:-}" ]; then
+    engine="$DOC_GUARD_ENGINE"
+  else
+    engine="$(uv run --no-project python "${plugin_root}/hooks/engine_spec.py" 2>/dev/null | tr -d '\r')" || engine=""
+  fi
+  [ -n "$engine" ] || return 1
+  out="$(uvx --from "$engine" python -P -m checker.srs_automerge --mode "$mode" --root . 2>/dev/null </dev/null)" || rc=$?
+  [ "$rc" -eq 0 ] || return 1
+  out="${out//$'\r'/}"
+  case "$out" in *'"status": "merged"'*) ;; *) return 1 ;; esac
+  n="$(printf '%s' "$out" | grep -o '"conflicts": *[0-9]*' | grep -o '[0-9]*$' || true)"
+  srs_auto_used=1
+  srs_auto_n=$((srs_auto_n + ${n:-0}))
+  return 0
+}
+
+# 자동으로 합쳤으면 승인이 낡는다는 것을 알린다(합친 커밋은 SRS 승인을 낡게 만든다).
+srs_auto_note() {
+  [ "$srs_auto_used" -eq 1 ] || return 0
+  add "SRS 에서 양쪽이 줄만 추가한 충돌 ${srs_auto_n}곳을 자동으로 합쳤어 — 올리면 승인을 다시 받아야 해"
+}
+
 # 리베이스를 실행하고 성공·충돌·그 밖의 실패를 메시지로 남긴다. 실패해도
 # 이 함수 자체는 항상 0 을 반환한다 — set -e 때문에 스크립트 전체가
 # 죽어 세션 시작 요약이 통째로 사라지는 것을 막기 위해서다.
 run_rebase() {
   local target="$1"
   local success_msg="$2"
-  local rebase_output
+  local rebase_output tries=0
   if rebase_output="$(git rebase "$target" 2>&1)"; then
     add "$success_msg"
     return 0
   fi
+  # SRS 줄 추가 충돌뿐이면 자동으로 합치고 이어 간다. 커밋이 여럿이면 또 충돌할 수 있어 상한(20)까지 되풀이한다.
+  srs_auto_used=0
+  srs_auto_n=0
+  while [ "$tries" -lt 20 ] && { [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; }; do
+    tries=$((tries + 1))
+    try_srs_automerge rebase || break
+    if rebase_output="$(GIT_EDITOR=true git rebase --continue 2>&1)"; then
+      add "$success_msg"
+      srs_auto_note
+      return 0
+    fi
+  done
   # 리베이스가 중간에 멈췄으면 되돌린다. 세션을 매끄럽게 시작하려고 만든
   # 훅이 저장소를 충돌 상태로 남겨 두면, 그다음에 무엇을 해도 막힌다.
   if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; then
@@ -377,6 +421,14 @@ run_merge() {
   fi
   # 합치다 멈췄으면 되돌린다. 충돌 상태로 남기면 그다음에 무엇을 해도 막힌다.
   if [ -f "$git_dir/MERGE_HEAD" ]; then
+    # SRS 줄 추가 충돌뿐이면 자동으로 합치고 커밋한다. 커밋까지 못 하면 아래에서 되돌린다.
+    srs_auto_used=0
+    srs_auto_n=0
+    if try_srs_automerge merge && git commit -q -m "chore: main 의 새 변경 합쳐 받기" >/dev/null 2>&1; then
+      add "$target 의 새 변경을 합쳐 받았습니다(이미 올린 브랜치라 리베이스하지 않고 합쳤습니다)."
+      srs_auto_note
+      return 0
+    fi
     merge_files="$(git diff --name-only --diff-filter=U 2>/dev/null | head -n 10 | paste -sd, - | sed 's/,/, /g')"
     if git merge --abort >/dev/null 2>&1; then
       add "$target 을 합치다 충돌해 원래 상태로 되돌렸습니다. 충돌 파일: ${merge_files:-확인하지 못했습니다}. 다음: /harness:sync 로 상황을 확인하십시오."

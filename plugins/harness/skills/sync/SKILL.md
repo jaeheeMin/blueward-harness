@@ -87,8 +87,11 @@ compatibility: git 과 origin 원격이 필요하다.
       인덱스를 모두 비운다. 이 사실을 보고에 한 줄 넣는다.
 7. **맞추기와 합치기.** 순서대로 한다.
    1. `HEAD..{target}` 이 0 보다 크면 `git rebase {target}` 을 실행한다.
-      **충돌이 나면 스스로 해결하지 않는다.**
+      **충돌이 나면 스스로 해결하지 않는다.** 예외는 하나 — 아래 "SRS 줄 추가 충돌" 이다.
       1. `git diff --name-only --diff-filter=U` 로 충돌 파일 목록을 모은다.
+         목록이 `docs/ssot/SRS.md` 하나뿐이면 먼저 "SRS 줄 추가 충돌" 절차를 한다(mode=`rebase`).
+         `merged` 면 `GIT_EDITOR=true git rebase --continue` 로 잇고, 또 충돌하면 다시 이 1번부터(상한 20번).
+         그 밖이면 2번으로 간다.
       2. `git rebase --abort` 로 리베이스 전 상태로 되돌린다.
       3. 6단계에서 (b) 로 임시 커밋을 만들었다면, 위 6-4·6-5 와 같이
          HEAD 제목을 확인하고 `git reset --mixed HEAD~1` 로 원상 복구한다.
@@ -102,8 +105,11 @@ compatibility: git 과 origin 원격이 필요하다.
       `git merge --no-edit -m "chore: main 의 새 변경 합쳐 받기" origin/{base}`
       로 합친다(메시지는 `commit-and-pr.md` 형식 — 명사형 제목. 훅이
       거부하면 `--no-verify` 로 우회하지 않고 거부 사실을 그대로 보고하고
-      멈춘다). **충돌이 나면 스스로 해결하지 않는다.**
+      멈춘다). **충돌이 나면 스스로 해결하지 않는다.** 예외는 하나 — 아래 "SRS 줄 추가 충돌" 이다.
       1. `git diff --name-only --diff-filter=U` 로 충돌 파일 목록을 모은다.
+         목록이 `docs/ssot/SRS.md` 하나뿐이면 먼저 "SRS 줄 추가 충돌" 절차를 한다(mode=`merge`).
+         `merged` 면 `git commit -m "chore: main 의 새 변경 합쳐 받기"` 로 커밋하고 끝낸다(`--no-verify` 금지).
+         그 밖이면 2번으로 간다.
       2. `git merge --abort` 로 합치기 전 상태로 되돌린다.
       3. 충돌 파일 목록과 함께 실패를 보고한다. **`git merge --abort` 가
          실패하면 성공한 것처럼 보고하지 않는다** — 실패 사실과 함께
@@ -162,6 +168,23 @@ auto-update runs"). 그 차이를 알려 준다. 플러그인을 이 스킬이 �
      않는다.
    세 버전을 모두 보고에 적는다.
 
+## SRS 줄 추가 충돌(#977)
+
+충돌 파일이 `docs/ssot/SRS.md` 하나뿐일 때만 엔진이 자동으로 합친다. 양쪽이 같은 자리에 줄만 추가했고, `버전:` 줄·표 머리글이
+아니고, 새 REQ/DEV 번호가 겹치지 않고, 표 행의 열 수가 맞고, 합친 결과가 SRS 모양 검사와 같은 줄 중복 검사를 통과할 때다.
+순서는 main 줄 먼저 → 내 줄이다. 직접 고치지 말고 엔진을 부른다.
+
+```
+e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "SRS 자동 합치기 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
+uvx --from "$e" python -P -m checker.srs_automerge --mode merge --root .
+```
+
+(리베이스 중이면 `--mode rebase`.) 방식마다 ours/theirs 가 반대라 `--mode` 를 반드시 맞게 준다. 결과 JSON 의 `status` 로 판단한다.
+
+- `merged`(종료코드 0): 작업 폴더에 쓰고 `git add` 까지 했다. 위 절차대로 커밋하거나 `rebase --continue` 한다.
+  보고에 "SRS 에서 양쪽이 줄만 추가한 충돌 N곳을 자동으로 합쳤어 — 올리면 승인을 다시 받아야 해" 를 넣는다(합친 커밋은 SRS 승인을 낡게 만든다).
+- `refused`(1)·`cannot_check`(2)·엔진을 못 부름: 합치지 않았다. 통과로 보지 말고 지금처럼 abort 하고 충돌 파일 목록과 `reason` 을 보고한다.
+
 ## 하지 않는 것
 
 이 스킬은 로컬 브랜치만 바꾼다. 다음은 하지 않는다.
@@ -169,7 +192,7 @@ auto-update runs"). 그 차이를 알려 준다. 플러그인을 이 스킬이 �
 - `--force` / `--force-with-lease` 푸시 — 이 스킬은 애초에 푸시하지 않는다.
 - `git reset --hard`
 - 올린 브랜치를 `origin/{base}` 로 리베이스(합치기는 `git merge` 로만 한다)
-- 병합 충돌을 스스로 푸는 것(`merge --abort` 로 되돌리고 보고만 한다)
+- 병합 충돌을 스스로 푸는 것(`merge --abort` 로 되돌리고 보고만 한다. 예외: 위 "SRS 줄 추가 충돌" 을 엔진이 `merged` 로 합친 것)
 - `git stash` (위 6단계 이유 참고)
 - upstream 을 임의로 설정하는 것(`git branch --set-upstream-to` 등)
 
