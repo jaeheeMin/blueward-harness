@@ -5442,6 +5442,25 @@ def test_touched_files_dedupe_separators_skip_outside_cwd_and_late_baseline(tmp_
     ("끝났습니다.", False),
     ("끝났습니다. 질문 있나요? 없으면 마칩니다.", False),
     ("", False),
+    # #954 물음표 없이 답을 달라는 말투
+    ("Spec 을 저장했습니다.\n\n표시 항목을 확인하셨거나 \"이대로 올려\" 라고 하시면 `/harness:deliver` 로 PR 을 만들겠습니다. "
+     "항목을 바꾸려면 알려 주세요. Spec 을 고친 다음에 올립니다.", True),
+    ("두 안을 정리했어.\n\n어느 쪽으로 할지 알려 줘.", True),
+    ("A 와 B 중에 골라 주세요.", True),
+    ("**어느 쪽으로 갈지 정해 줘.**", True),
+    ("승인해 주시면 병합하겠습니다.", True),
+    ("'이대로 올려' 라고 하면 PR 만들게.", True),
+    ("검토했어.\n- 이상 없음\n\n고칠 게 있으면 말해 줘. 없으면 다음으로 넘어갈게.", True),
+    # 잡으면 안 되는 끝맺음
+    ("다 끝났어. 더 필요한 게 있으면 알려 줘.", False),
+    ("정리했습니다. 궁금한 점이 있으면 언제든 말씀해 주세요.", False),
+    ("다른 게 필요하면 말해 줘.", False),
+    ("검사가 끝나면 알려 줄게.", False),
+    ("PR 을 올렸어. 병합되면 정리할게.", False),
+    ("시험이 모두 통과했어.", False),
+    ("알려 줘서 고마워. 반영했어.", False),
+    ("PR 링크를 확인해 주세요.", False),
+    ("어느 쪽으로 할지 알려 줘.\n\n그 사이 951 을 고쳤어.\n시험도 통과했어.\nPR 도 올렸어.\n558 에 점검을 맡겼어.", False),  # 끝 문장 몇 개만 본다
 ])
 def test_report_asks_follows_last_line_question_mark(report, asks):
     from store import report_asks

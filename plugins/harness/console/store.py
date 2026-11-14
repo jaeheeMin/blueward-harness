@@ -765,13 +765,31 @@ def mark_check(s: dict, cid: str, state: str = CHECK_DONE) -> bool:
 REPORT_TAIL_TRIM = " \t*_`~\"'”’)」』>]"
 
 
+# 답을 달라는 말투(#954). 답할 말(알려·골라·정해…)을 달라는 요청과, 사용자가 무엇을 하면 그다음을 하겠다는 제안만 잡는다.
+# "확인해 주세요" 처럼 답 없이 끝나는 부탁, "끝나면 알려 줄게" 처럼 내가 할 일은 잡지 않는다.
+_ASK_REQUEST = re.compile(r"(알려|말해|말씀해|골라|정해|답해|선택해)\s?(주세요|주십시오|주시겠어요|줘|주라)(?![가-힣])")
+_ASK_OFFER = re.compile(r"((하|주)시면|라고\s?(하면|해\s?주면)|(알려|말해|골라|정해)\s?주면)\s.*(겠습니다|[가-힣]게요?)(?![가-힣])")
+# 끝인사로 늘 붙는 "필요하면 말해 줘" 류는 답을 기다리는 게 아니다
+_ASK_GENERIC = re.compile(r"(필요(하|한|해|할)|궁금|언제든|더\s?(있|필요|궁금|도움)|다른\s?(것|거|게|건)|추가로)")
+REPORT_ASK_SENTENCES = 3  # 끝에서 몇 문장까지 보나
+
+
 def report_asks(report: str) -> bool:
-    """마지막 결과 보고가 질문으로 끝났는가(추정). 끝 줄의 끝 글자가 물음표이면 그렇다고 본다. 도구 질문창(AskUserQuestion)이 아니라
-    글로 물은 경우를 잡으려는 것이라 틀릴 수 있고, 화면은 이를 추정으로 보여 준다."""
+    """마지막 결과 보고가 내 답을 기다리며 끝났는가(추정). 도구 질문창(AskUserQuestion)이 아니라 글로 물은 경우를 잡으려는 것이라
+    틀릴 수 있고, 화면은 이를 추정으로 보여 준다. 끝 줄의 끝 글자가 물음표이거나, 끝 문장 몇 개에 답을 달라는 말투
+    ("알려 주세요", "골라 줘", "…하시면 …겠습니다", "'이대로 올려' 라고 하면 …할게")가 있으면 그렇다고 본다(#954)."""
     lines = [ln.strip() for ln in str(report or "").splitlines() if ln.strip()]
     if not lines:
         return False
-    return lines[-1].rstrip(REPORT_TAIL_TRIM).endswith(("?", "？"))
+    if lines[-1].rstrip(REPORT_TAIL_TRIM).endswith(("?", "？")):
+        return True
+    sentences = [x.strip() for x in re.split(r"(?<=[.!。！])\s+|\n+", "\n".join(lines[-REPORT_ASK_SENTENCES:])) if x.strip()]
+    for sent in sentences[-REPORT_ASK_SENTENCES:]:
+        if _ASK_GENERIC.search(sent):
+            continue
+        if _ASK_REQUEST.search(sent) or _ASK_OFFER.search(sent):
+            return True
+    return False
 
 
 def _skipped(s: dict, p: str) -> bool:
