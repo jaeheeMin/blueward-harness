@@ -48,6 +48,12 @@ out_of_scope 로 빠지기 때문이다. 이 워크플로를 부르는 저장소
 추가 파일 목록 경로)가 있고 프로젝트에 `conventions/naming.yaml` 이 있으면, `src/` 에 새로 생긴 객체 이름만
 `checker.naming_rules` 로 검사해 `naming` 키로 합친다. 이미 있는 객체를 고치는 PR 은 막지 않는다. 설정이
 없으면 대상이 아니라 키도 없고, 설정이나 목록을 읽지 못하면 검사 불능(2)이다.
+
+**CAP·UI5 개발 표준 검사(#944)**: 환경변수 `DOC_GUARD_DIFF_FILE`(PR 이벤트에서 워크플로가 `git diff -U0 --no-renames` 로 만든
+diff 파일 경로)가 있고 프로젝트에 `conventions/cap-ui5.yaml` 이 있으면, 바뀐 파일 중 UI5 대상(`webapp/` 의 JS,
+`*.view.xml`, `*.fragment.xml`, `i18n/*.properties`)의 **추가·변경된 줄만** `checker.ui5_rules` 로 검사해 `ui5` 키로 합친다.
+violation 규칙이 걸리면 종료코드 1, warn 은 종료코드를 바꾸지 않는다. 설정이 없으면(또는 push·로컬처럼 환경변수가 없으면)
+대상이 아니라 키도 없고, 설정이나 diff 를 읽지 못하면 검사 불능(2)이다. diff 를 못 읽었다고 파일 전체 검사로 넘어가지 않는다.
 """
 from __future__ import annotations
 
@@ -63,6 +69,7 @@ from checker.code_rules import exit_code_for as _code_exit_code
 from checker.code_rules import language_for_suffix
 from checker.model import ConfigError
 from checker.naming_rules import evaluate_files as _evaluate_naming
+from checker import ui5_rules
 from checker.cross_switches import DISABLED, SwitchError, load_switches
 from checker.overlap import check_overlap
 from checker.pairing import CANNOT_CHECK, LEDGER_DIR, SKIPPED, SPEC_DIR, SRS_PATH, check_pairing
@@ -72,6 +79,7 @@ from checker.version_overlap import NOT_NEEDED, check_version_overlap, read_fail
 OPEN_PRS_ENV = "DOC_GUARD_OPEN_PRS"  # 열린 PR 정보 JSON 경로(PR 이벤트에서만 워크플로가 채움)
 PR_NUMBER_ENV = "DOC_GUARD_PR_NUMBER"
 ADDED_FILES_ENV = "DOC_GUARD_ADDED_FILES"  # 이 PR 이 새로 추가한 파일 목록 경로(PR 이벤트에서 워크플로가 채움, #943)
+DIFF_FILE_ENV = "DOC_GUARD_DIFF_FILE"  # 이 PR 의 `git diff -U0 --no-renames` 출력 경로(PR 이벤트에서 워크플로가 채움, #944)
 
 EMPTY_REPORT = (
     '{"summary": {"scoped": 0, "passed": 0, "violations": 0, "skipped": 0,'
@@ -140,6 +148,33 @@ def _check_naming_for_added(added_path: str | None) -> dict | None:
         return {"status": CANNOT_CHECK, "message": f"추가된 파일 목록 {added_path} 를 읽지 못했습니다: {exc}"}
     result = _evaluate_naming([ln.strip() for ln in lines if ln.strip()], Path.cwd())
     return None if result["status"] == "not_applicable" else result
+
+
+def _check_ui5_for_diff(diff_path: str | None, found: list[str]) -> dict | None:
+    """바뀐 UI5 파일의 추가·변경된 줄만 `conventions/cap-ui5.yaml` 로 본다(#944). 대상이 아니면 None.
+
+    환경변수가 없거나(push, 로컬) 설정 파일이 없거나 바뀐 UI5 파일이 없으면 대상이 아니라 키도 만들지 않는다.
+    설정을 읽지 못하거나 diff 를 읽지 못하면 검사 불능이다 — 줄을 모르면서 파일 전체 검사로 넘어가지 않는다.
+    """
+    if not diff_path:
+        return None
+    root = Path.cwd()
+    config_path = ui5_rules.find_config(root)
+    if config_path is None:
+        return None
+    names = [n for n in found if ui5_rules.target_kind(Path(n).as_posix())]
+    if not names:
+        return None
+    try:
+        added = ui5_rules.diff_added_lines(Path(diff_path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        return {"status": CANNOT_CHECK, "message": f"바뀐 줄 목록(diff) {diff_path} 를 읽지 못했습니다: {exc}", "findings": [], "unchecked": []}
+    result = ui5_rules.evaluate_files([Path(n).as_posix() for n in names], root, added, config_path)
+    if result["status"] == "not_applicable" or (
+        result["status"] == "pass" and not result.get("checked") and not result.get("findings")
+    ):
+        return None
+    return result
 
 
 def split_listing(text: str) -> tuple[list[str], list[str]]:
@@ -227,6 +262,9 @@ def main_entry(argv: list[str] | None = None) -> int:
         return EXIT_PASS
 
     doc_files, code_files = split_by_language(found)
+    # UI5 의 화면 XML·i18n properties 는 문서가 아니다(#944). doc-guard 로 보내 봤자 out_of_scope 로 떨어지고, 기준 폴더가 없는
+    # 저장소에서는 이 가드가 검사 불능으로 막기만 한다. UI5 검사(`ui5` 키)가 따로 본다.
+    doc_files = [n for n in doc_files if not ui5_rules.target_kind(Path(n).as_posix())]
 
     if doc_files and not has_standards_root(Path.cwd()):
         # 바뀐 문서가 있는데 대조할 기준 폴더가 하나도 없다. 지금까지는 모든 문서가
@@ -279,9 +317,16 @@ def main_entry(argv: list[str] | None = None) -> int:
             version_result = _check_version_overlap(Path(open_prs_path))
 
     naming_result = _check_naming_for_added(os.environ.get(ADDED_FILES_ENV))
-    extras = [r for r in (pairing_result, overlap_result, version_result, switch_error, naming_result) if r is not None]
+    ui5_result = _check_ui5_for_diff(os.environ.get(DIFF_FILE_ENV), found)
+    extras = [
+        r for r in (pairing_result, overlap_result, version_result, switch_error, naming_result, ui5_result)
+        if r is not None
+    ]
     if not code_files and not extras:
         # 코드 파일도 교차 검사 대상도 없다. doc-guard 만 있던 예전 그대로 동작한다.
+        if not doc_files:
+            print(EMPTY_REPORT)  # 바뀐 것이 전부 UI5 파일(검사 대상 설정이 없다)이라 doc-guard 가 볼 문서가 없다
+            return EXIT_PASS
         return main(["--auto", *doc_files])
 
     try:
@@ -312,6 +357,8 @@ def main_entry(argv: list[str] | None = None) -> int:
         combined["cross_checks"] = switch_error
     if naming_result:
         combined["naming"] = naming_result
+    if ui5_result:
+        combined["ui5"] = ui5_result
     extra_exits = [_pairing_exit_code(r) for r in extras]  # 겹침은 위반이 없어 0 또는 2
     print(json.dumps(combined, ensure_ascii=False))
 

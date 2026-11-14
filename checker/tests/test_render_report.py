@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from render_report import render  # noqa: E402
+from render_report import exit2_cause, render  # noqa: E402
 
 
 def _report(scoped: int, violations: int, files: list[dict] | None = None) -> dict:
@@ -336,3 +336,46 @@ def test_이름_규칙_검사_불능은_통과도_위반도_아니라고_말한�
     report["naming"] = {"status": "cannot_check", "message": "설정이 깨졌다"}
     text = render(report, 2)
     assert "검사 불능" in text and "통과도 위반도 아닙니다" in text
+
+
+def _ui5_finding(rule: str, level: str, line: int = 3) -> dict:
+    """`checker.ui5_rules` finding 하나(#944)."""
+    return {
+        "rule": rule, "level": level, "file": "src/ui5/zx/webapp/Main.js", "line": line, "col": 1,
+        "message": "console.* 를 쓰지 않는다 — console.log", "fix": "sap.base.Log 를 쓴다.",
+    }
+
+
+def test_ui5_위반은_표로_보이고_경고는_따로_통과에_영향이_없다고_한다():
+    report = _report(0, 0)
+    report["ui5"] = {
+        "status": "violation", "checked": 2,
+        "findings": [_ui5_finding("UI5-001", "violation"), _ui5_finding("UI5-106", "warn", 9)],
+        "unchecked": [],
+    }
+    text = render(report, 1)
+    assert "## CAP·UI5 개발 표준" in text
+    assert "### ❌ 표준에 맞지 않는 줄" in text and "`src/ui5/zx/webapp/Main.js:3`" in text
+    assert "### 참고 — 경고 (통과에는 영향 없음)" in text and "UI5-106" in text
+
+
+def test_ui5_경고만_있으면_위반_표_없이_경고만_보인다():
+    report = _report(0, 0)
+    report["ui5"] = {"status": "pass", "checked": 1, "findings": [_ui5_finding("UI5-106", "warn")], "unchecked": []}
+    text = render(report, 0)
+    assert "위반은 없습니다" in text and "### 참고 — 경고" in text
+    assert "표준에 맞지 않는 줄" not in text
+
+
+def test_ui5_통과는_한_줄이다():
+    report = _report(0, 0)
+    report["ui5"] = {"status": "pass", "checked": 3, "findings": [], "unchecked": []}
+    assert "UI5 파일 3개의 추가·변경된 줄이 표준에 맞습니다" in render(report, 0)
+
+
+def test_ui5_검사_불능은_통과도_위반도_아니라고_말한다():
+    report = _report(0, 0)
+    report["ui5"] = {"status": "cannot_check", "message": "설정이 깨졌다", "findings": [], "unchecked": []}
+    text = render(report, 2)
+    assert "검사 불능" in text and "통과도 위반도 아닙니다" in text
+    assert exit2_cause(report) == "config"

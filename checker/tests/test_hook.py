@@ -429,6 +429,11 @@ def missing_template_root(tmp_path) -> Path:
     return root
 
 
+def _decision(out: dict | None) -> str | None:
+    """알림만 있는 응답(permissionDecision 없음)도 읽는다."""
+    return (out or {}).get("hookSpecificOutput", {}).get("permissionDecision")
+
+
 def _notice(out: dict | None) -> str:
     assert out is not None and "permissionDecision" not in out["hookSpecificOutput"]
     return out["hookSpecificOutput"]["additionalContext"]
@@ -485,3 +490,155 @@ def test_설정이_정상이면_규칙_파일_수정도_알림_없이_평소대�
         installed_hook, _write_payload(target, PROPOSAL_RULES), str(ENGINE_ROOT)
     )
     assert code == 0 and out is None
+
+
+# --- CAP·UI5 개발 표준(#944): 바뀌는 줄에만 적용 ------------------------------------
+
+UI5_VIEW = "app/webapp/view/Main.view.xml"
+UI5_JS = "app/webapp/controller/Main.controller.js"  # webapp 아래 JS 만 UI5 검사 대상이다
+UI5_I18N = "app/webapp/i18n/i18n.properties"
+VIEW_OPEN = '<mvc:View xmlns="sap.m" xmlns:mvc="sap.ui.core.mvc">\n'
+
+
+@pytest.fixture()
+def ui5_project(tmp_path) -> Path:
+    root = tmp_path / "ui5-project"
+    (root / ".git").mkdir(parents=True)
+    _write(root / "conventions" / "cap-ui5.yaml", "")
+    return root
+
+
+def _edit_payload(path: Path, old: str, new: str) -> dict:
+    return {"tool_name": "Edit", "tool_input": {"file_path": str(path), "old_string": old, "new_string": new}}
+
+
+def _decision(out: dict | None) -> str | None:
+    """알림만 있는 응답(permissionDecision 없음)도 읽는다."""
+    return (out or {}).get("hookSpecificOutput", {}).get("permissionDecision")
+
+
+def _notice(out: dict | None) -> str:
+    return (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
+
+
+def test_ui5_새_화면_XML_의_위반은_막고_규칙과_고치는_법을_알린다(installed_hook, ui5_project):
+    target = ui5_project / UI5_VIEW
+    content = VIEW_OPEN + '\t<Button id="list-btn-search" text="저장"/>\n</mvc:View>\n'
+    code, out = run_hook(installed_hook, _write_payload(target, content), str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "UI5-003" in reason and "UI5-004" in reason and "고치기:" in reason and "다음:" in reason
+    assert str(target) in reason  # 임시 경로가 아니라 저장하려던 경로
+
+
+def test_ui5_표준에_맞는_파일은_조용히_통과한다(installed_hook, ui5_project):
+    target = ui5_project / UI5_VIEW
+    content = VIEW_OPEN + '\t<Button id="listBtnSearch" text="{i18n>main.button.search}"/>\n</mvc:View>\n'
+    code, out = run_hook(installed_hook, _write_payload(target, content), str(ENGINE_ROOT))
+    assert code == 0 and out is None
+
+
+def test_ui5_설정_파일이_없으면_검사하지_않는다(installed_hook, tmp_path):
+    root = tmp_path / "no-config"
+    (root / ".git").mkdir(parents=True)
+    target = root / UI5_VIEW
+    code, out = run_hook(installed_hook, _write_payload(target, VIEW_OPEN + '<Button id="a-b"/>\n</mvc:View>\n'), str(ENGINE_ROOT))
+    assert code == 0 and out is None
+
+
+def test_ui5_기존_파일의_옛_위반은_편집을_막지_않고_새로_생긴_위반만_막는다(installed_hook, ui5_project):
+    target = ui5_project / UI5_JS
+    _write(target, "var a = 1;\nconsole.log('old');\nvar sB = 2;\n")
+    ok = run_hook(installed_hook, _edit_payload(target, "var sB = 2;", "var sB = 3;"), str(ENGINE_ROOT))[1]
+    assert _decision(ok) is None and "UI5-001" not in _notice(ok)  # 옛 console.log 는 이 편집이 바꾸지 않았다
+    bad = run_hook(installed_hook, _edit_payload(target, "var sB = 2;", "console.log(2);"), str(ENGINE_ROOT))[1]
+    assert decision(bad) == "deny"
+    assert "UI5-001" in bad["hookSpecificOutput"]["permissionDecisionReason"]
+    assert ":4:" not in bad["hookSpecificOutput"]["permissionDecisionReason"]  # 바뀐 줄은 3번째 줄
+    assert ":3:" in bad["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_ui5_Write_로_덮어써도_바뀌지_않은_옛_줄은_안_본다(installed_hook, ui5_project):
+    target = ui5_project / UI5_JS
+    _write(target, "console.log('old');\nvar sA = 1;\n")
+    code, out = run_hook(installed_hook, _write_payload(target, "console.log('old');\nvar sA = 2;\n"), str(ENGINE_ROOT))
+    assert code == 0 and out is None
+
+
+def test_ui5_경고는_막지_않고_알림으로_남긴다(installed_hook, ui5_project):
+    target = ui5_project / UI5_JS
+    code, out = run_hook(installed_hook, _write_payload(target, "var name = 'x';\n"), str(ENGINE_ROOT))
+    assert code == 0 and _decision(out) is None
+    assert "UI5-106" in _notice(out) and "막지 않음" in _notice(out)
+
+
+def test_ui5_코드_규칙과_UI5_경고를_함께_알린다(installed_hook, ui5_project):
+    target = ui5_project / UI5_JS
+    # CR-001(한글 이름)은 막고, UI5 경고는 그 거절 안에 같이 실린다
+    code, out = run_hook(installed_hook, _write_payload(target, "var 이름 = 1;\nvar name = 2;\n"), str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    assert "CR-001" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_ui5_properties_의_경고는_알림이다(installed_hook, ui5_project):
+    target = ui5_project / UI5_I18N
+    code, out = run_hook(installed_hook, _write_payload(target, "main.button.save=저장\n"), str(ENGINE_ROOT))
+    assert code == 0 and _decision(out) is None and "UI5-109" in _notice(out)
+
+
+def test_ui5_설정이_깨졌으면_통과가_아니라_거절한다(installed_hook, tmp_path):
+    root = tmp_path / "broken-config"
+    (root / ".git").mkdir(parents=True)
+    _write(root / "conventions" / "cap-ui5.yaml", "모르는키: 1\n")
+    code, out = run_hook(installed_hook, _write_payload(root / UI5_VIEW, VIEW_OPEN + "</mvc:View>\n"), str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "검사 불능" in reason and "확인되지 않는 상태로 통과시키지 않습니다" in reason and "다음:" in reason
+
+
+def test_ui5_XML_이_깨졌으면_통과가_아니라_거절한다(installed_hook, ui5_project):
+    code, out = run_hook(installed_hook, _write_payload(ui5_project / UI5_VIEW, "<mvc:View><Button></mvc:View>\n"), str(ENGINE_ROOT))
+    assert decision(out) == "deny"
+    assert "검사 불능" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_ui5_엔진을_받을_수_없으면_거절한다(installed_hook, ui5_project, tmp_path):
+    code, out = run_hook(installed_hook, _write_payload(ui5_project / UI5_VIEW, VIEW_OPEN + "</mvc:View>\n"), str(tmp_path / "없는-경로"))
+    assert decision(out) == "deny"
+    assert "확인되지 않는 상태로 통과시키지 않습니다" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("name", ["src/zcl_order.clas.xml", "src/package.devc.xml", "srv/service.js", "config/app.properties"])
+def test_ui5_대상이_아닌_파일은_설정이_있어도_통과한다(installed_hook, ui5_project, name):
+    content = '<abapGit id="a-b" x="한글"/>\n' if name.endswith(".xml") else "console.log(1);\n"
+    code, out = run_hook(installed_hook, _write_payload(ui5_project / name, content), str(ENGINE_ROOT))
+    assert code == 0 and out is None
+
+
+def test_ui5_바뀌는_줄이_없으면_엔진을_부르지_않고_통과한다(installed_hook, ui5_project, tmp_path):
+    target = ui5_project / UI5_I18N
+    _write(target, "main.button.save=저장\n")
+    # 엔진을 받을 수 없는 경로를 줘도 바뀌는 줄이 없으면 부르지 않으므로 거절하지 않는다
+    code, out = run_hook(installed_hook, _write_payload(target, "main.button.save=저장\n"), str(tmp_path / "없는-경로"))
+    assert code == 0 and out is None
+
+
+def test_ui5_훅의_대상_판정은_엔진과_같다():
+    import importlib.util
+
+    from checker import ui5_rules
+
+    spec = importlib.util.spec_from_file_location("pre_write_guard_ui5_probe", PLUGIN_SRC / "hooks" / "pre_write_guard.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(PLUGIN_SRC / "hooks"))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(PLUGIN_SRC / "hooks"))
+    for name in (
+        "app/webapp/controller/A.controller.js", "webapp/Component.js", "app/webapp/view/A.view.xml",
+        "app/webapp/x/B.fragment.xml", "app/webapp/i18n/i18n_ko.properties", "srv/service.js",
+        "src/zcl_a.clas.xml", "src/package.devc.xml", "config/app.properties", "webapp/lib/v.min.js",
+        "docs/a.md", "src/zcl_a.clas.abap", "APP/WEBAPP/VIEW/A.VIEW.XML",
+    ):
+        assert module._ui5_target(Path(name)) is bool(ui5_rules.target_kind(name)), name

@@ -22,9 +22,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["checker"]
-# code_rules.py 가 실행 중에 checker/code_checks.yaml 을 읽는다(#54). hatchling 의 기본
+# code_rules.py 가 실행 중에 checker/code_checks.yaml 을, ui5_rules.py 가 checker/ui5_checks.yaml 을 읽는다(#54, #944). hatchling 의 기본
 # 포함 규칙에 기대지 않고 명시한다 — 빠지면 uvx 로 설치한 엔진에서만 조용히 깨진다.
-force-include = { "checker/code_checks.yaml" = "checker/code_checks.yaml" }
+force-include = { "checker/code_checks.yaml" = "checker/code_checks.yaml", "checker/ui5_checks.yaml" = "checker/ui5_checks.yaml" }
 
 [tool.pytest.ini_options]
 testpaths = ["checker/tests"]

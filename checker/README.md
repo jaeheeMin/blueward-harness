@@ -39,6 +39,11 @@ checker/
                     같은 함수(`build_report`)를 쓴다
   code_checks.yaml  code_rules.py 의 설정. 언어별 확장자와, 그 언어에 어느
                     CR 을 적용할지, 그 CR 이 위반(`violation`)인지 경고(`warn`)인지(`level`)가 데이터로 있다
+  ui5_rules.py      CAP·UI5 개발 표준(`conventions/cap-ui5.md`)을 UI5 JS·view/fragment
+                    XML·i18n properties 에서 검사한다(#944). 프로젝트의
+                    `conventions/cap-ui5.yaml` 이 있을 때만 켜지고, 추가·변경된
+                    줄만 본다. 훅과 `scripts/check_changed.py` 가 부른다
+  ui5_checks.yaml   ui5_rules.py 의 규칙 목록(id·제목·기본 level·고치는 법)
   readers/          형식별 본문 추출 (md, docx, xlsx, pptx)
   tests/
     make_fixtures.py  픽스처 생성. 결과물은 커밋하지 않는다

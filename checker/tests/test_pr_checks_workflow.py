@@ -323,6 +323,16 @@ def test_doc_guard_바뀐_파일은_갈라진_지점부터_세_점으로_구하�
     assert fetch_lines and all("--depth" not in line for line in fetch_lines)
 
 
+def test_doc_guard_는_바뀐_줄_목록을_구해_UI5_검사에_넘기고_못_구하면_검사_불능이다():
+    # #944: UI5 개발 표준은 추가·변경된 줄만 본다. 줄 목록을 못 구했다고 파일 전체 검사로 넘어가지 않는다.
+    run = _step("doc-guard")["run"]
+    assert 'diff -U0 --no-renames "$base"...HEAD > diff.txt 2> changed-err-diff.txt' in run
+    assert "export DOC_GUARD_DIFF_FILE=diff.txt" in run
+    block = run.split('diff -U0 --no-renames "$base"...HEAD', 1)[1].split("export DOC_GUARD_DIFF_FILE", 1)[0]
+    assert "diff_ok=false" in block and "cp changed-err-diff.txt changed-err.txt" in block
+    assert run.index("DOC_GUARD_DIFF_FILE") < run.index("check_changed.py")
+
+
 def test_doc_guard_바뀐_파일을_못_구하면_전체_파일로_넘어가지_않고_검사_불능이다():
     # #518: `|| git ls-files` 는 "바뀐 파일을 못 구함" 을 "전부 바뀜" 으로 바꿔 검사했다(원칙 7 위반).
     run = _step("doc-guard")["run"]
