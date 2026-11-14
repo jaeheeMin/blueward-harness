@@ -27,6 +27,7 @@ def test_규칙_종류_열이_등록된다():
         "required_sections",
         "required_sheets",
         "slide_layouts",
+        "srs_shape",
         "table_headers",
     }
 
