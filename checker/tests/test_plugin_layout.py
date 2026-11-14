@@ -1288,12 +1288,16 @@ def _init_temp_git_repo(repo: Path) -> None:
 
 
 def _run_session_start_sync(
-    repo: Path, project_dir: Path | None = None, stdin_cwd: str | None = None
+    repo: Path,
+    project_dir: Path | None = None,
+    stdin_cwd: str | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> str:
     env = {
         **os.environ,
         "CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT),
         "CLAUDE_PROJECT_DIR": str(project_dir if project_dir is not None else repo),
+        **(extra_env or {}),
     }
     # stdin_cwd 를 명시하지 않으면 cwd 필드 없는 "{}" 를 보낸다 — jq 유무와
     # 무관하게 CLAUDE_PROJECT_DIR 로 그대로 대체되어(#71) 기존 동작과 같다.
@@ -1684,6 +1688,124 @@ def test_upstream_없는_브랜치는_main_이_앞서도_합치지_않고_리베
     ).stdout.strip()
     assert merges == ""
     assert _is_ancestor(work, "origin/main", "HEAD")
+
+
+# --- 원격 브랜치가 지워진 브랜치·원격보다 앞선 로컬 main(#978) ----------------
+#
+# gone 브랜치는 합쳐 받지 않고 끝난 작업이라고 알린다(병합 판정은 gh). gh 가 안 되면 검사 불능.
+# 로컬 main 이 origin/main 보다 앞서 있으면 "최신" 이라 하지 않는다. 가짜 gh 를 PATH 맨 앞에 끼운다.
+
+
+def _fake_gh_env(tmp_path: Path, stdout: str, exit_code: int) -> dict[str, str]:
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text(
+        f"#!/usr/bin/env bash\nprintf '%s\\n' '{stdout}'\nexit {exit_code}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+
+
+def _setup_gone_feature(tmp_path: Path) -> tuple[Path, Path]:
+    """upstream 이 있던 feature/1-thing 이 원격에서 지워지고 main 은 앞서간 (seed, work)."""
+    seed, work = _setup_pushed_feature(tmp_path)
+    subprocess.run(
+        ["git", "--git-dir", str(tmp_path / "origin.git"), "branch", "-q", "-D", "feature/1-thing"],
+        check=True,
+    )
+    (seed / "main.txt").write_text("from main\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "feat: second commit on main")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+    return seed, work
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_gone_브랜치가_병합됐으면_합치지_않고_끝난_작업이라_알린다(tmp_path):
+    seed, work = _setup_gone_feature(tmp_path)
+    before_head = _rev(work, "HEAD")
+
+    out = _run_session_start_sync(work, extra_env=_fake_gh_env(tmp_path, "123", 0))
+
+    assert "끝난 작업입니다(PR #123 병합됨" in out
+    assert "/harness:start" in out
+    assert "이미 최신 상태입니다" not in out
+    assert "합쳐 받았습니다" not in out
+    assert _rev(work, "HEAD") == before_head
+    assert not (work / "main.txt").exists()
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_gone_브랜치인데_gh_가_실패하면_검사_불능으로_알리고_합치지_않는다(tmp_path):
+    seed, work = _setup_gone_feature(tmp_path)
+    before_head = _rev(work, "HEAD")
+
+    out = _run_session_start_sync(
+        work, extra_env=_fake_gh_env(tmp_path, "HTTP 401: bad credentials", 1)
+    )
+
+    assert "병합됐는지 확인하지 못했습니다(검사 불능" in out
+    assert "bad credentials" in out
+    assert "끝난 작업입니다" not in out
+    assert "이미 최신 상태입니다" not in out
+    assert _rev(work, "HEAD") == before_head
+    assert not (work / "main.txt").exists()
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_gone_브랜치인데_병합된_PR_이_없으면_그대로_알리고_합치지_않는다(tmp_path):
+    seed, work = _setup_gone_feature(tmp_path)
+    before_head = _rev(work, "HEAD")
+
+    out = _run_session_start_sync(work, extra_env=_fake_gh_env(tmp_path, "", 0))
+
+    assert "병합된 PR 을 찾지 못했습니다" in out
+    assert "끝난 작업입니다" not in out
+    assert _rev(work, "HEAD") == before_head
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_정상_추적_브랜치는_gh_없이_지금처럼_합쳐_받는다(tmp_path):
+    seed, work = _setup_pushed_feature(tmp_path)
+    (seed / "main.txt").write_text("from main\n", encoding="utf-8", newline="\n")
+    _commit_all(seed, "feat: second commit on main")
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=seed, check=True)
+
+    # gh 가 실패해도 gone 이 아니면 부르지 않으므로 결과가 같아야 한다.
+    out = _run_session_start_sync(work, extra_env=_fake_gh_env(tmp_path, "boom", 1))
+
+    assert "origin/main 의 새 변경을 합쳐 받았습니다" in out
+    assert "끝난 작업" not in out
+    assert "병합됐는지 확인하지 못했습니다" not in out
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_로컬_main_이_원격보다_앞서면_최신이라_하지_않고_커밋_수를_알린다(tmp_path):
+    seed, work = _setup_pushed_feature(tmp_path)
+    subprocess.run(["git", "switch", "-q", "main"], cwd=work, check=True)
+    (work / "local.txt").write_text("stray\n", encoding="utf-8", newline="\n")
+    _commit_all(work, "chore: stray commit on local main")
+    (work / "local2.txt").write_text("stray2\n", encoding="utf-8", newline="\n")
+    _commit_all(work, "chore: second stray commit")
+    before_head = _rev(work, "HEAD")
+
+    out = _run_session_start_sync(work)
+
+    assert "로컬 main 에 origin/main 에 없는 커밋이 2개 있습니다" in out
+    assert "섞입니다" in out
+    assert "이미 최신 상태입니다" not in out
+    assert _rev(work, "HEAD") == before_head
+
+
+@pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
+def test_로컬_main_이_원격과_같으면_지금처럼_최신이라_알린다(tmp_path):
+    seed, work = _setup_pushed_feature(tmp_path)
+    subprocess.run(["git", "switch", "-q", "main"], cwd=work, check=True)
+
+    out = _run_session_start_sync(work)
+
+    assert "이미 최신 상태입니다(origin/main 기준)" in out
+    assert "섞입니다" not in out
 
 
 # --- 미커밋 판정에서 인계 메모 제외(#59) ------------------------------------
