@@ -293,6 +293,22 @@ Project Repository `rules/ssot.yaml`·`rules/spec.yaml` 에 켠다. 먼저 켜�
 - 검사 불능(종료코드 2): diff·추가 목록을 못 읽음, 바뀐 파일 목록엔 SRS.md 가 있는데 diff 에 구역이 없음, 기준(main)에 `버전:` 줄이 없는데 줄이 바뀜, 양식 지도를 못 읽거나 파일명 자리를 알 수 없음. 통과로 넘기지 않는다.
 - 스위치 `SRS_분리` 로 끈다.
 
+### `srs_export_check` — 산출 엑셀이 SRS 와 같은 판인지(#976)
+
+산출 PR 을 연 뒤 다른 내용 PR 이 먼저 병합되면 충돌 없이 병합돼 Backlog 엑셀이 main SRS 보다 낡을 수 있다(ruleset `strict:false`, GitHub 는 base 가 바뀌어도 검사를 다시 돌리지 않는다).
+`checker/srs_export_check.py` 가 같은 비교를 네 곳에서 쓴다. 비교는 **칸 값**이다(바이트 아님 — 저장 환경에 따라 압축 바이트가 다르다). 지금 작업 폴더의 `docs/ssot/SRS.md` 로
+`checker.export` 의 `--out` 으로 저장소 밖 임시 경로에 엑셀을 다시 만들고, SRS `버전:` 판 이름의 저장소 엑셀과, 양식 지도 표가 쓰는 시트·열의 머리글 행부터 끝까지 값을 견준다
+(빈 칸은 같은 것으로, 줄바꿈·앞뒤 공백·정수로 떨어지는 실수는 맞춘다). 산출은 날짜 같은 바뀌는 값을 넣지 않아 같은 SRS 면 칸 값이 같다.
+
+| 부르는 곳 | 명령 | 결과 |
+|---|---|---|
+| srs 스킬(병합 뒤 보내기 전) | `python -P -m checker.srs_export_check compare --root .` | `status` same(0) / differ(1, `forms[].cells` 에 다른 칸 10개까지) / cannot_check(2) |
+| PR 검사 | `scripts/check_changed.py` 가 `srs_split` 결과에 합침 | 이 PR 이 Backlog 엑셀을 **추가**했을 때만. differ → 위반 `stale_xlsx`(1), cannot_check → 검사 불능(2). PR 검사는 병합 결과(`refs/pull/N/merge`)를 받으므로 검사 시점 main 내용이 들어 있다. 스위치 `SRS_분리` 를 같이 쓴다 |
+| 병합 직전 훅(`pre-bash-git-guard.sh`) | `merge-guard --repo R --pr N` | 산출 PR 이 아니면 0. 산출 PR 인데 PR head 의 SRS.md 와 base 브랜치(GitHub 쪽 최신)의 SRS.md 가 `버전:` 줄 말고 다르면 stale(1)이라 거부. gh 실패는 검사 불능(2)이라 거부 |
+| 병합 뒤 `main-checks.yml` | `push-check --added-file F` | push 가 Backlog 엑셀을 추가했을 때만 compare. differ 면 이슈("main 의 산출 엑셀이 SRS 와 다르다:"). 내용 PR 이 병합된 push 에서는 돌리지 않는다(엑셀이 낡은 게 정상) |
+
+양식 지도를 못 읽거나 엑셀이 없거나 다시 만들지 못하면(SRS 내용이 산출 규칙에 걸림 등) cannot_check 다 — 같다고도 다르다고도 하지 않는다.
+
 ### 교차 검사 스위치
 
 `pairing`·`overlap`·`version_overlap`·`srs_split` 은 Project Repository 의 `rules/cross-checks/switches.yaml` 로 각각 끈다(`checker/cross_switches.py`).

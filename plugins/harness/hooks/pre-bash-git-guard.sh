@@ -695,6 +695,44 @@ $rg_err"
     deny "PR #$pr_number 의 위험도를 확인하지 못해 merge 를 막습니다(종료코드 $rg_rc). 검사 불능이므로 통과시키지 않습니다. $next_retry 자세히: $rg_detail"
   fi
   fi
+
+  # 0-3) SRS 산출 PR(Backlog 엑셀을 추가한 PR)인데 엑셀을 만든 뒤 base 브랜치의 SRS 내용이 바뀌었으면 거부한다(#976).
+  #      산출 PR 을 연 뒤 다른 내용 PR 이 먼저 병합되면 충돌 없이 병합돼 엑셀만 낡는다(GitHub 는 base 가 바뀌어도 검사를 다시 돌리지
+  #      않는다). 엔진(checker.srs_export_check merge-guard)이 gh 로 PR head 와 base 의 SRS.md 를 읽어 `버전:` 줄 말고 같은지 본다.
+  #      산출 PR 이 아니면 통과(종료코드 0). 1 은 낡음, 그 밖은 검사 불능이라 통과가 아니라 거부다. 자동 병합 예약에도 같이 건다.
+  se_err_file="$(mktemp 2>/dev/null)" || {
+    deny "임시 파일을 만들지 못해 PR #$pr_number 의 산출 엑셀이 SRS 와 같은 판인지 확인하지 못했습니다. 확인되지 않는 상태로 통과시키지 않습니다. 다음: 같은 명령을 다시 시도하십시오. 계속되면 사람이 TEMP 폴더의 빈 공간과 쓰기 권한을 확인하십시오."
+  }
+  set +e
+  se_out="$(uvx --from "$engine" python -P -m checker.srs_export_check merge-guard --repo "$repo" --pr "$pr_number" 2>"$se_err_file")"
+  se_rc=$?
+  set -e
+  se_err="$(cat "$se_err_file" 2>/dev/null)" || se_err=""
+  rm -f "$se_err_file"
+
+  se_json_ok=0
+  if printf '%s' "$se_out" | jq -e . >/dev/null 2>&1; then
+    se_json_ok=1
+  fi
+
+  if [ "$se_json_ok" -eq 1 ] && [ "$se_rc" -eq 0 ]; then
+    : # 산출 PR 이 아니거나 엑셀과 SRS 가 같은 판이다.
+  elif [ "$se_json_ok" -eq 1 ] && [ "$se_rc" -eq 1 ]; then
+    se_reason="$(printf '%s' "$se_out" | jq -r '.reason // empty' 2>/dev/null | tr -d '\r"\\`$')" || true
+    deny "SRS 산출 PR #$pr_number 의 엑셀이 낡아 merge 를 막습니다. 엑셀을 만든 뒤 main 의 SRS 가 바뀌었다 — main 위로 옮겨 백로그 뽑아 줘 로 다시 산출하십시오. 사유: $se_reason 다음: /harness:sync 로 main 위로 옮기고 백로그 뽑아 줘 로 새 판을 산출해 이 PR 을 다시 올리십시오."
+  else
+    se_detail_raw="$se_out"
+    if [ -n "$se_err" ]; then
+      if [ -n "$se_detail_raw" ]; then
+        se_detail_raw="$se_detail_raw
+$se_err"
+      else
+        se_detail_raw="$se_err"
+      fi
+    fi
+    se_detail="$(printf '%s' "$se_detail_raw" | tr -d '"\\`$' | tr '\n' ' ' | cut -c1-300)"
+    deny "PR #$pr_number 의 산출 엑셀이 SRS 와 같은 판인지 확인하지 못해 merge 를 막습니다(종료코드 $se_rc). 검사 불능이므로 통과시키지 않습니다. $next_retry 자세히: $se_detail"
+  fi
 }
 
 # 0-0) 작성자가 지금 gh 로그인 계정과 다른 PR 을 바꾸는 gh pr 명령을 거부한다(#150).

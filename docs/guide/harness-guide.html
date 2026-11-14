@@ -902,7 +902,14 @@ claude plugin update harness@blueward-harness --scope project</pre><span class="
       <li>엑셀을 넣었는데 <code>버전:</code> 이 그 판으로 안 바뀜 → 거절</li>
       <li>바뀐 줄이나 양식 지도를 못 읽음 → 검사 불능(통과도 거절도 아냐)</li>
     </ul>
-    <p class="small" style="margin-top:10px">새로 만든 SRS 의 첫 PR 만 예외야(<code>버전: 0.1</code> 줄이 새로 생기는 거라).</p>
+    <p class="small" style="margin-top:10px">새로 만든 SRS 의 첫 PR 만 예외야(<code>버전:</code> 줄이 새로 생기는 거라).</p>
+    <p class="small" style="margin:10px 0 6px">산출 PR 을 연 뒤 다른 내용 PR 이 먼저 병합되면 엑셀이 낡아 — 세 번 막고 한 번 확인해</p>
+    <ul class="todo">
+      <li><b>PR 검사</b>: PR 이 병합된 뒤의 SRS 로 엑셀을 다시 만들어 칸 값(바이트 아님)을 비교해. 다르면 거절, 다시 만들지 못하면 검사 불능이야.</li>
+      <li><b>병합 직전(Claude 의 <code>gh pr merge</code>)</b>: 엑셀을 만든 뒤 main 의 SRS 내용이 바뀌었으면 막아. main 위로 옮겨 "백로그 뽑아 줘" 로 다시 산출해. 확인하지 못해도 막아.</li>
+      <li><b>병합 뒤(웹 화면 병합 대비)</b>: 산출 엑셀이 들어온 push 만 같은 비교를 하고, 다르면 이슈가 열려. 내용 PR 이 병합된 뒤에는 안 돌려(그때는 엑셀이 낡은 게 정상이야).</li>
+      <li><b>보내기 전</b>: 병합 뒤 main 에서 같은 비교를 돌려 같을 때만 "고객에게 보내도 돼" 라고 말해. 다르거나 확인하지 못하면 보내지 말고 다시 산출해.</li>
+    </ul>
   </section>
 
   <section class="box">

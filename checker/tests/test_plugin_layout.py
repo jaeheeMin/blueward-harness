@@ -2099,3 +2099,74 @@ def test_순서_검사_엔진이_JSON_아닌_출력으로_실패해도_거부한
 def test_순서_검사가_ok_인데_종료코드가_이상하면_거부한다(tmp_path):
     out, _ = _merge_with_queue(tmp_path, json.dumps({"status": "ok", "pr": 123, "before": []}), 3)
     assert "확인하지 못해" in _reason(out)
+
+
+# --- 병합 가드: 산출 엑셀이 낡은 SRS 산출 PR(#976) -----------------------------
+#
+# 가짜 uvx 가 `checker.srs_export_check merge-guard` 에만 정한 답을 내고, 나머지(SRS 승인 등)는 모두 통과시킨다.
+
+
+def _make_export_guard_uvx(tmp_path: Path, stdout: str, rc: int) -> Path:
+    bin_dir = tmp_path / "export-guard-bin"
+    bin_dir.mkdir()
+    ok_b64 = base64.b64encode(
+        json.dumps({"touches_ssot": False, "approved": True, "requires_human": False, "paths": []}).encode("utf-8")
+    ).decode("ascii")
+    out_b64 = base64.b64encode(stdout.encode("utf-8")).decode("ascii")
+    script = bin_dir / "uvx"
+    script.write_text(
+        _fake_uvx_prelude()
+        + 'case "$*" in\n'
+        f"  *checker.srs_export_check*merge-guard*) printf '%s' '{out_b64}' | base64 -d; exit {rc} ;;\n"
+        f"  *) printf '%s' '{ok_b64}' | base64 -d; exit 0 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    script.chmod(0o755)
+    _add_fake_gh(bin_dir)
+    return bin_dir
+
+
+@_needs_hook_env
+def test_산출_PR_이_아니면_엑셀_확인을_통과한다(tmp_path):
+    bin_dir = _make_export_guard_uvx(tmp_path, json.dumps({"status": "pass", "reason": "not_applicable"}), 0)
+    log = tmp_path / "uvx.log"
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir, {"FAKE_UVX_LOG": str(log)})
+    assert code == 0 and out is None
+    assert "checker.srs_export_check merge-guard --repo owner/repo --pr 123" in log.read_text(encoding="utf-8")
+
+
+@_needs_hook_env
+def test_산출_PR_의_SRS_가_main_과_같으면_엑셀_확인을_통과한다(tmp_path):
+    bin_dir = _make_export_guard_uvx(tmp_path, json.dumps({"status": "pass", "reason": "산출 PR 의 SRS 가 base 와 같습니다"}), 0)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert code == 0 and out is None
+
+
+@_needs_hook_env
+def test_엑셀을_만든_뒤_main_의_SRS_가_바뀌었으면_병합을_거부한다(tmp_path):
+    stale = json.dumps({"status": "stale", "reason": "엑셀을 만든 뒤 main 의 SRS 가 바뀌었습니다.", "next": "다음: x"})
+    bin_dir = _make_export_guard_uvx(tmp_path, stale, 1)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert code == 0 and out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "엑셀을 만든 뒤 main 의 SRS 가 바뀌었다" in reason and "백로그 뽑아 줘" in reason and "다음:" in reason
+
+
+@_needs_hook_env
+def test_엑셀_확인이_검사_불능이면_통과가_아니라_거부한다(tmp_path):
+    cannot = json.dumps({"status": "cannot_check", "message": "gh 실패"})
+    bin_dir = _make_export_guard_uvx(tmp_path, cannot, 2)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert out is not None and out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "확인하지 못해" in reason and "통과시키지 않습니다" in reason
+
+
+@_needs_hook_env
+def test_엑셀_확인_출력이_json_이_아니면_거부한다(tmp_path):
+    bin_dir = _make_export_guard_uvx(tmp_path, "이것은 JSON 이 아니다", 0)
+    code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
+    assert out is not None and out["hookSpecificOutput"]["permissionDecision"] == "deny"

@@ -80,8 +80,8 @@ def _render_srs_split(result: dict) -> list[str]:
         out.append("`버전:` 줄·Backlog 엑셀과 내용이 약속대로 나뉘어 있습니다.")
         return out
     out += [
-        "### ❌ 고치기와 주기가 섞였습니다", "",
-        f"**{len(violations)}건**입니다. 내용 PR 은 `버전:` 줄과 엑셀 없이, 산출 PR 은 `버전:`(+0.1)과 그 판 엑셀만 냅니다.", "",
+        "### ❌ 고치기와 주기가 약속대로 나뉘지 않았습니다", "",
+        f"**{len(violations)}건**입니다. 내용 PR 은 `버전:` 줄과 엑셀 없이, 산출 PR 은 `버전:`(+0.1)과 그 판 엑셀만 내고, 엑셀은 SRS 내용과 같아야 합니다.", "",
     ]
     for item in violations:
         out.append(f"- {_cell(str(item.get('reason') or ''))}")
