@@ -765,13 +765,32 @@ def mark_check(s: dict, cid: str, state: str = CHECK_DONE) -> bool:
 REPORT_TAIL_TRIM = " \t*_`~\"'”’)」』>]"
 
 
-# 답을 달라는 말투(#954). 답할 말(알려·골라·정해…)을 달라는 요청과, 사용자가 무엇을 하면 그다음을 하겠다는 제안만 잡는다.
+# 답을 달라는 말투(#954). 답할 말(알려·골라·정해…)을 달라는 요청과, 사용자가 답하면 그다음을 하겠다는 제안만 잡는다.
 # "확인해 주세요" 처럼 답 없이 끝나는 부탁, "끝나면 알려 줄게" 처럼 내가 할 일은 잡지 않는다.
-_ASK_REQUEST = re.compile(r"(알려|말해|말씀해|골라|정해|답해|선택해)\s?(주세요|주십시오|주시겠어요|줘|주라)(?![가-힣])")
-_ASK_OFFER = re.compile(r"((하|주)시면|라고\s?(하면|해\s?주면)|(알려|말해|골라|정해)\s?주면)\s.*(겠습니다|[가-힣]게요?)(?![가-힣])")
+_ASK_REQUEST = re.compile(r"((알려|말해|말씀해|골라|정해|답해|선택해)\s?|라고\s?(해|말해)\s?)(주세요|주십시오|주시겠어요|줘|주라)(?![가-힣])")
+# 제안은 답에 해당하는 동사로만: "재시작하시면 적용되겠습니다" 같은 설명은 잡지 않는다(#964 점검)
+_ASK_OFFER = re.compile(r"((알려|말해|말씀해|골라|정해|승인해|허락해|확인해)\s?주(시)?면|(원하|말씀하)시면|라고\s?(하시면|하면|해\s?주(시)?면))"
+                        r"\s.*(겠습니다|[가-힣]게요?)(?![가-힣])")
+# 사용자가 아무 말 없을 때 할 일을 미리 말하는 꼴("없으면 다음으로 넘어갈게")도 답을 기다리는 신호다
+_ASK_DEFAULT = re.compile(r"(없|괜찮|좋)(으시)?(으)?면\s.*(넘어갈게|넘어가겠습니다|진행할게|진행하겠습니다|올릴게|올리겠습니다)")
 # 끝인사로 늘 붙는 "필요하면 말해 줘" 류는 답을 기다리는 게 아니다
 _ASK_GENERIC = re.compile(r"(필요(하|한|해|할)|궁금|언제든|더\s?(있|필요|궁금|도움)|다른\s?(것|거|게|건)|추가로)")
+# 요청 앞의 조건절("문제가 생기면·끝나면·막히면 알려 줘")은 일이 생길 때 알려 달라는 끝인사다. 허락을 묻는 조건("괜찮으면")만 남긴다
+_ASK_CONDITION = re.compile(r"[가-힣]+면\s")
+_ASK_APPROVAL = re.compile(r"(괜찮|좋|원하|맞|동의하)(으시|시)?(으)?면\s")
 REPORT_ASK_SENTENCES = 3  # 끝에서 몇 문장까지 보나
+
+
+def _sentence_asks(sent: str) -> bool:
+    if _ASK_GENERIC.search(sent):
+        return False
+    if _ASK_OFFER.search(sent) or _ASK_DEFAULT.search(sent):
+        return True
+    m = _ASK_REQUEST.search(sent)
+    if not m:
+        return False
+    before = sent[:m.start()]
+    return not _ASK_CONDITION.search(before) or bool(_ASK_APPROVAL.search(before))
 
 
 def report_asks(report: str) -> bool:
@@ -784,12 +803,7 @@ def report_asks(report: str) -> bool:
     if lines[-1].rstrip(REPORT_TAIL_TRIM).endswith(("?", "？")):
         return True
     sentences = [x.strip() for x in re.split(r"(?<=[.!。！])\s+|\n+", "\n".join(lines[-REPORT_ASK_SENTENCES:])) if x.strip()]
-    for sent in sentences[-REPORT_ASK_SENTENCES:]:
-        if _ASK_GENERIC.search(sent):
-            continue
-        if _ASK_REQUEST.search(sent) or _ASK_OFFER.search(sent):
-            return True
-    return False
+    return any(_sentence_asks(sent) for sent in sentences[-REPORT_ASK_SENTENCES:])
 
 
 def _skipped(s: dict, p: str) -> bool:

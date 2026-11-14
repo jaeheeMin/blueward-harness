@@ -5461,6 +5461,22 @@ def test_touched_files_dedupe_separators_skip_outside_cwd_and_late_baseline(tmp_
     ("알려 줘서 고마워. 반영했어.", False),
     ("PR 링크를 확인해 주세요.", False),
     ("어느 쪽으로 할지 알려 줘.\n\n그 사이 951 을 고쳤어.\n시험도 통과했어.\nPR 도 올렸어.\n558 에 점검을 맡겼어.", False),  # 끝 문장 몇 개만 본다
+    # #964 점검: 일이 생기면 알려 달라는 조건절 끝인사, 사용자가 할 일을 설명하는 평서문은 잡지 않는다
+    ("다 고쳤어. 문제가 생기면 알려 줘.", False),
+    ("PR 을 올렸어. 에러가 나면 말해 줘.", False),
+    ("작업을 시작했어. 막히면 알려 줘.", False),
+    ("배포 스크립트를 돌렸어. 끝나면 알려 줘.", False),
+    ("이상한 점이 보이면 말씀해 주세요.", False),
+    ("재시작하시면 새 판이 적용되겠습니다.", False),
+    ("적용하시면 바로 반영되겠습니다.", False),
+    # 허락·선택·답을 구하는 말은 잡는다
+    ("괜찮으면 \"진행\" 이라고 해 줘. 바로 올릴게.", True),
+    ("원하시면 이슈로 남기겠습니다.", True),
+    ("둘 중 어느 쪽으로 할지 정해 줘.", True),
+    ("수정할 부분을 알려 주시면 반영하겠습니다.", True),
+    ("REQ 번호를 알려 줘.", True),
+    ("고칠 게 없으면 이대로 올릴게.", True),
+    ("필요하면 \"다시 봐 줘\"라고 해 줘.", False),
 ])
 def test_report_asks_follows_last_line_question_mark(report, asks):
     from store import report_asks
