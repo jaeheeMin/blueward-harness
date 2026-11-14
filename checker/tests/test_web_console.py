@@ -5494,6 +5494,11 @@ def test_touched_files_dedupe_separators_skip_outside_cwd_and_late_baseline(tmp_
     ("값이 다르면 알려 줘.", False),
     ("파일이 길어지면 알려 줘.", False),
     ("PR 을 내면 알려 줘.", False),
+    # 조건절 안의 의문사는 질문이 아니다
+    ("무슨 문제가 생기면 알려 줘.", False),
+    ("어떤 오류든 나면 말해 줘.", False),
+    ("어떻게 되든 끝나면 알려 줘.", False),
+    ("시안이 두 개면 어느 쪽이 나은지 알려 줘.", True),
 ])
 def test_report_asks_follows_last_line_question_mark(report, asks):
     from store import report_asks

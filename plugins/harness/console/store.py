@@ -782,12 +782,17 @@ _ASK_CONDITION = re.compile(r"([가-힣]+)면\s")
 _MYEON_NOUNS = frozenset("화측장정표전양방국단후외반평곡")
 _ASK_APPROVAL = re.compile(r"(괜찮|좋|원하|맞|동의하)(으시|시)?(으)?면\s")
 _ASK_LATER = re.compile(r"(나중에|아니면)")  # "괜찮으면 나중에 알려 줘" · "좋으면 두고, 아니면 알려 줘" 는 끝인사에 가깝다
-_ASK_CHOICE = re.compile(r"(골라|정해|선택해)\s?(주|줘)|어느|어떤|어떻게|무엇|뭘|무슨")  # 고르기·정하기나 의문사가 있으면 진짜 질문
+# 고르기·정하기 요청이나, 마지막 조건절과 요청 사이의 의문사("…두 개면 어느 쪽인지 골라 줘")는 진짜 질문이다.
+# 조건절 안의 의문사("무슨 문제가 생기면 알려 줘")는 세지 않는다(#964 점검)
+_ASK_CHOICE_VERB = re.compile(r"(골라|정해|선택해)\s?(주|줘)")
+_ASK_INTERROGATIVE = re.compile(r"어느|어떤|어떻게|무엇|뭘|무슨")
 REPORT_ASK_SENTENCES = 3  # 끝에서 몇 문장까지 보나
 
 
-def _has_condition(text: str) -> bool:
-    return any(m.group(1)[-1] not in _MYEON_NOUNS for m in _ASK_CONDITION.finditer(text))
+def _last_condition_end(text: str) -> int:
+    """동사 활용 조건절(…면 )이 끝나는 마지막 위치. 없으면 -1. '면' 으로 끝나는 명사(화면·측면…)는 조건절이 아니다."""
+    ends = [m.end() for m in _ASK_CONDITION.finditer(text) if m.group(1)[-1] not in _MYEON_NOUNS]
+    return ends[-1] if ends else -1
 
 
 def _sentence_asks(sent: str) -> bool:
@@ -799,7 +804,8 @@ def _sentence_asks(sent: str) -> bool:
     if not m:
         return False
     before = sent[:m.start()]
-    if not _has_condition(before) or _ASK_CHOICE.search(sent):
+    cond_end = _last_condition_end(before)
+    if cond_end < 0 or _ASK_CHOICE_VERB.search(sent) or _ASK_INTERROGATIVE.search(before[cond_end:]):
         return True
     return bool(_ASK_APPROVAL.search(before)) and not _ASK_LATER.search(sent)
 
