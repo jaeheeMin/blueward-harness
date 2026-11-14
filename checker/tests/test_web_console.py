@@ -1047,6 +1047,123 @@ def test_control_request_permission_deny_is_bridged(tmp_path):
     assert proc.written[0]["response"]["response"] == {"behavior": "deny", "message": "싫음"}
 
 
+def _late_hook_setup(tmp_path):
+    now = [1000.0]
+    store = Store(None, clock=lambda: now[0])
+    proc = FakeProc()
+    m = managed.Manager(store, lambda: None, "/p")
+    store.ensure("s1", str(tmp_path))["managed"] = True
+    hooks = Hooks(store, clock=lambda: now[0], poll=0.02)
+    return now, store, proc, m, hooks
+
+
+def _hook_in_thread(hooks, body):
+    holder = {}
+    t = threading.Thread(target=lambda: holder.update(r=hooks.handle("permission", body, lambda: True)), daemon=True)
+    t.start()
+    return t, holder
+
+
+@pytest.mark.parametrize("behavior", ["allow", "deny"])
+def test_late_hook_after_quick_answer_is_passed_without_new_card(tmp_path, behavior):
+    """#952: control_request 로 온 승인에 사람이 빨리 답한 뒤 PermissionRequest 훅이 늦게 오면 카드도 답도 없이 넘긴다.
+    claude 는 control 쪽 답으로 이미 진행했다(훅이 빈 응답이어도 control 답으로 도구가 돈다, 11-14 실측)."""
+    now, store, proc, m, hooks = _late_hook_setup(tmp_path)
+    m.on_event(proc, control_event())
+    (req,) = store.pending_for("s1")
+    reply = permission_reply({"behavior": behavior} if behavior == "allow" else {"behavior": "deny", "message": "싫음"})
+    store.resolve(req.rid, reply, "답함")
+    wait_for(lambda: proc.written, timeout=60)
+    now[0] += 4  # 훅은 몇 초 늦게 온다
+    t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w"))
+    t.join(60)
+    assert not t.is_alive() and holder["r"] == (200, None)  # 앞 답을 넘기지 않는다
+    assert store.pending_for("s1") == [] and len(store.requests) == 1  # 새 카드가 없다
+    assert len([e for e in store.get("s1")["chat"] if e.get("kind") == "permission"]) == 1
+    assert req.sources == {"control", "hook"}
+
+
+@pytest.mark.parametrize("command", ["rm -rf docs", "python deploy.py"])
+def test_next_calls_hook_before_its_control_never_gets_previous_answer(tmp_path, command):
+    """#957 점검: A 를 control 로 허용했는데 A 의 훅이 안 오고, 30초 안 같은 명령 B 의 훅이 B 의 control 보다 먼저 와도
+    B 는 A 의 허락을 받지 않는다. 훅은 빈 응답으로 넘기고 B 의 control_request 가 카드를 띄운다(노랑·판정 못 함 모두)."""
+    now, store, proc, m, hooks = _late_hook_setup(tmp_path)
+    m.risk_of = hooks.risk_of
+    event = {"type": "control_request", "request_id": "r1",
+             "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": command}}}
+    m.on_event(proc, event)
+    (a,) = store.pending_for("s1")
+    store.resolve(a.rid, permission_reply({"behavior": "allow"}), "허용함")
+    wait_for(lambda: proc.written, timeout=60)
+    now[0] += 3
+    t, holder = _hook_in_thread(hooks, perm_body("s1", command, cwd="/w"))  # B 의 훅이 먼저 온다
+    t.join(60)
+    assert holder["r"] == (200, None)  # 허락을 넘기지 않는다
+    m.on_event(proc, dict(event, request_id="r2"))  # B 의 control_request
+    (b,) = store.pending_for("s1")
+    assert b.rid != a.rid and b.risk == a.risk  # B 는 카드로 묻는다
+    assert len(proc.written) == 1  # B 에는 아직 답하지 않았다
+    store.resolve(b.rid, permission_reply({"behavior": "deny"}), "거부함")
+    wait_for(lambda: len(proc.written) == 2, timeout=60)
+    assert proc.written[1]["response"]["response"]["behavior"] == "deny"
+
+
+def test_late_hook_pass_is_once_per_request_and_only_within_window(tmp_path):
+    """#952: 늦은 훅은 control 만 기다린 요청 하나에 한 번만 넘긴다. 짝 없는 훅, 제안이 다른 훅, 시간이 지난 훅은 묻는다."""
+    now, store, proc, m, hooks = _late_hook_setup(tmp_path)
+    m.on_event(proc, control_event())
+    (req,) = store.pending_for("s1")
+    store.resolve(req.rid, permission_reply({"behavior": "allow"}), "허용함")
+    # 같은 경로(control)로 같은 명령이 다시 오면 새 카드
+    m.on_event(proc, control_event())
+    (again,) = store.pending_for("s1")
+    assert again.rid != req.rid
+    store.resolve(again.rid, permission_reply({"behavior": "allow"}), "허용함")
+    # 제안이 다른 훅은 넘기지 않고 묻는다(위조 제안이 '다시 묻지 않기' 로 쓰이지 않게)
+    t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w", permission_suggestions=[{"type": "addRules"}]))
+    wait_for(lambda: len(store.pending_for("s1")) == 1, timeout=60)
+    (forged,) = store.pending_for("s1")
+    assert forged.rid not in (req.rid, again.rid)
+    store.resolve(forged.rid, permission_reply({"behavior": "deny"}), "거부함")
+    t.join(60)
+    # 앞의 두 호출(req·again)에 늦게 온 훅을 하나씩 넘긴다. 셋째 훅은 짝이 없어 새 카드
+    for _ in range(2):
+        t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w"))
+        t.join(60)
+        assert holder["r"] == (200, None) and store.pending_for("s1") == []
+    assert req.sources == again.sources == {"control", "hook"}
+    t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w"))
+    wait_for(lambda: len(store.pending_for("s1")) == 1, timeout=60)
+    store.resolve(store.pending_for("s1")[0].rid, permission_reply({"behavior": "deny"}), "거부함")
+    t.join(60)
+    # 답한 지 LATE_JOIN_SECONDS 가 지나 온 훅은 묻는다
+    m.on_event(proc, control_event())
+    (late,) = store.pending_for("s1")
+    store.resolve(late.rid, permission_reply({"behavior": "allow"}), "허용함")
+    import store as store_mod
+    now[0] += store_mod.LATE_JOIN_SECONDS + 1
+    t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w"))
+    wait_for(lambda: len(store.pending_for("s1")) == 1, timeout=60)
+    assert store.pending_for("s1")[0].rid != late.rid
+    store.resolve(store.pending_for("s1")[0].rid, permission_reply({"behavior": "deny"}), "거부함")
+    t.join(60)
+
+
+def test_hook_only_session_repeated_command_still_asks_each_time(tmp_path):
+    """#952: 터미널 세션처럼 훅 하나로만 묻는 곳에서 같은 명령을 곧 다시 실행해도 앞 답을 쓰지 않는다."""
+    now, store, proc, m, hooks = _late_hook_setup(tmp_path)
+    t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w"))
+    wait_for(lambda: len(store.pending_for("s1")) == 1, timeout=60)
+    store.resolve(store.pending_for("s1")[0].rid, permission_reply({"behavior": "allow"}), "허용함")
+    t.join(60)
+    now[0] += 2
+    t, holder = _hook_in_thread(hooks, perm_body("s1", "touch x", cwd="/w"))
+    wait_for(lambda: len(store.pending_for("s1")) == 1, timeout=60)
+    store.resolve(store.pending_for("s1")[0].rid, permission_reply({"behavior": "deny"}), "거부함")
+    t.join(60)
+    assert holder["r"][1]["hookSpecificOutput"]["decision"]["behavior"] == "deny"
+
+
 PLAN_INPUT = {"plan": "## 계획\n1. 문서 고치기\n2. 검사 돌리기", "planFilePath": "C:\\w\\.claude\\plans\\x.md"}
 
 

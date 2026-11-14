@@ -22,6 +22,7 @@ REQUEST_KEEP = 200
 SAVE_INTERVAL = 2.0
 MAX_SESSIONS = 500
 MAX_PENDING_REQUESTS = 100
+LATE_JOIN_SECONDS = 30  # 사람이 control 쪽 요청에 답한 뒤 늦게 온 승인 훅을 카드 없이 넘기는 시간(#952)
 MAX_SKILL_STATES = 100
 MAX_SUBAGENTS = 200
 MAX_PENDING_STOP = 20
@@ -340,6 +341,7 @@ class Request:
         self.outcome = ""  # 화면에 보여 줄 처리 결과
         self.response = None  # 훅에 돌려줄 값(answered 일 때)
         self.answered_at = None
+        self.sources: set[str] = set()  # 이 요청을 기다린 승인 경로("hook" | "control"). control 만 기다린 요청이면 늦게 온 훅 하나를 카드 없이 넘긴다(#952)
         self.waiters = 0
         self.event = threading.Event()
 
@@ -645,24 +647,30 @@ class Store:
 
     # ---- 요청 ----
     def add_request(self, sid, kind, tool_name, tool_input, suggestions, key, risk: str = "", risk_note: str = "",
-                    mcp: dict | None = None) -> tuple[Request, bool]:
+                    mcp: dict | None = None, source: str = "") -> tuple[Request, bool]:
         """같은 세션·도구·입력의 동시 호출은 요청 하나로 합친다. (요청, 새로 만들었는지) 를 돌려준다.
-        mcp 는 claude 가 준 MCP 서버 이름·display_name({"server", "display"}). 합쳐질 때 먼저 온 요청에 없던 정보만 채운다."""
+        mcp 는 claude 가 준 MCP 서버 이름·display_name({"server", "display"}). 합쳐질 때 먼저 온 요청에 없던 정보만 채운다.
+        source 는 승인이 온 경로("hook" | "control"). 늦게 온 훅은 late_hook_after_control 로 먼저 거른다(#952)."""
+        same_suggestions = suggestions if isinstance(suggestions, list) else []
         with self.lock:
             sid = self.resolve_id(sid)
             for r in self.requests.values():
                 # 제안(permission_suggestions)이 다르면 합치지 않는다. 합치면 먼저 온 위조 요청의 제안이
                 # 진짜 요청의 '다시 묻지 않기' 답으로 적용된다.
                 if (r.status == "pending" and r.session_id == sid and r.kind == kind and r.key == key
-                        and r.suggestions == (suggestions if isinstance(suggestions, list) else [])):
+                        and r.suggestions == same_suggestions):
                     if mcp and not r.mcp:
                         r.mcp = dict(mcp)
+                    if source:
+                        r.sources.add(source)
                     return r, False
             if sum(1 for r in self.requests.values() if r.status == "pending") >= MAX_PENDING_REQUESTS:
                 raise RequestLimit("대기 중인 요청이 너무 많아.")
             r = Request(uuid.uuid4().hex[:12], sid, kind, tool_name, tool_input, suggestions, key, self.clock())
             r.risk, r.risk_note = risk, risk_note
             r.mcp = dict(mcp) if mcp else {}
+            if source:
+                r.sources.add(source)
             self.requests[r.rid] = r
             s = self.sessions.get(sid)
             if s is not None:
@@ -671,6 +679,25 @@ class Store:
         self.publish("request", {"id": r.rid, "sessionId": sid})
         self.publish("session", {"id": sid})
         return r, True
+
+    def late_hook_after_control(self, sid, kind, key, suggestions) -> bool:
+        """콘솔이 띄운 세션은 같은 도구 호출의 승인이 control_request 로 바로, PermissionRequest 훅으로 몇 초 늦게 온다(#952).
+        사람이 그 사이 control 쪽 요청에 답했으면 늦은 훅이 합칠 대기 요청이 없어 카드를 또 만들었다. 이 훅이면 True —
+        부른 쪽은 카드도 답도 없이 빈 응답을 돌려준다. 훅 입력엔 호출 id(tool_use_id)가 없어(11-14 실측) 이 훅이 그 호출 것인지
+        모르므로 앞 답을 넘기지 않는다: 앞 호출의 훅이면 claude 는 이미 control 답으로 진행했고, 같은 명령의 다음 호출 훅이면
+        claude 가 그 호출의 control_request 로 넘어가 거기서 카드가 뜬다. control 만 기다린 요청 하나에 훅 한 번, LATE_JOIN_SECONDS 안에서만."""
+        same_suggestions = suggestions if isinstance(suggestions, list) else []
+        with self.lock:
+            sid = self.resolve_id(sid)
+            now = self.clock()
+            late = [r for r in self.requests.values()
+                    if r.status == "answered" and r.session_id == sid and r.kind == kind and r.key == key
+                    and r.suggestions == same_suggestions and r.sources == {"control"}
+                    and r.answered_at is not None and 0 <= now - r.answered_at <= LATE_JOIN_SECONDS]
+            if not late:
+                return False
+            max(late, key=lambda x: x.answered_at).sources.add("hook")
+            return True
 
     def _prune_requests(self) -> None:
         done = [r for r in self.requests.values() if r.status != "pending"]

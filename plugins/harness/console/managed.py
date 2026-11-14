@@ -881,7 +881,7 @@ class Manager:
                    "display": str(req.get("display_name") or "") if req.get("display_name") != tool else ""}
         try:
             r, created = self.store.add_request(s["id"], "permission", tool, tool_input, req.get("permission_suggestions"),
-                                                tool_key(tool, tool_input), risk=risk, risk_note=note, mcp=mcp)
+                                                tool_key(tool, tool_input), risk=risk, risk_note=note, mcp=mcp, source="control")
         except RequestLimit:  # 조용히 허용하지 않고 거부한다
             with self.store.lock:
                 self.store.add_log(s, f"대기 요청이 너무 많아 거부함: {tool}")

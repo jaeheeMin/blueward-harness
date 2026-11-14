@@ -185,11 +185,15 @@ class Hooks:
         tool_input = body.get("tool_input")
         if self.auto_allowed(s, tool, tool_input):
             return 200, permission_reply({"behavior": "allow"})  # 사람 카드 없이 바로 허용
+        if s["managed"] and self.store.late_hook_after_control(
+                s["id"], "permission", tool_key(tool, tool_input), body.get("permission_suggestions")):
+            self.store.add_log(s, f"늦게 온 승인 훅은 넘김(이미 답한 요청): {tool}")
+            return 200, None  # 카드도 답도 없이 넘긴다. claude 는 control_request 쪽 답을 쓴다(#952)
         risk, why = self.risk_of(s, tool, tool_input)
         try:
             req, created = self.store.add_request(
                 s["id"], "permission", tool, tool_input, body.get("permission_suggestions"), tool_key(tool, tool_input),
-                risk=risk, risk_note=why)
+                risk=risk, risk_note=why, source="hook")
         except RequestLimit:
             self.store.add_log(s, f"대기 요청이 너무 많아 터미널로 넘김: {tool}")
             return 200, None  # 조용히 허용하지 않는다. 빈 응답은 터미널 승인 창으로 넘어간다
