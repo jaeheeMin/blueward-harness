@@ -23,6 +23,19 @@ ASK_LEVELS = ("needed", "edits", "all")
 ASK_DEFAULT = "needed"
 AGENT_TOOLS = {"Agent", "Task"}  # 서브에이전트를 띄우는 도구(버전에 따라 이름이 다르다)
 MAX_PENDING_AGENTS = 50  # 아직 SubagentStart 와 짝을 못 지은 Agent 호출
+
+
+def plugin_read_roots(console_file: str = __file__) -> tuple[str, ...]:
+    """읽기 도구로 묻지 않고 읽어도 되는 하네스 플러그인 폴더(#953). 설치본이면 판 폴더들을 담은
+    <설정 폴더>/plugins/cache/<마켓>/harness 하나(세션이 콘솔과 다른 판을 쓸 수 있어), 아니면 이 플러그인 폴더(plugins/harness)."""
+    root = Path(console_file).resolve().parents[1]
+    parent = root.parent
+    if parent.name == "harness" and parent.parent.parent.name == "cache":
+        return (str(parent),)
+    return (str(root),)
+
+
+PLUGIN_READ_ROOTS = plugin_read_roots()
 MAX_AGENT_TEXT = 200  # description·type 글자 상한
 MAX_AGENT_PROMPT = 120  # 프롬프트는 첫 줄만, 이만큼까지
 
@@ -148,7 +161,7 @@ class Hooks:
         # 계획 모드면 그 세션의 설정 폴더 plans/ 의 계획 파일 쓰기를 묻지 않는다(#878). 설정 폴더는 대화 기록 경로로, 없으면 CLAUDE_CONFIG_DIR·~/.claude
         plan_dir = plan_dir_of(session_alive.config_dir(str(s.get("transcriptPath") or ""))) if s.get("permissionMode") == "plan" else ""
         roots = (os.environ.get("CLAUDE_CONFIG_DIR") or "", str(Path.home() / ".claude")) if plan_dir else ()  # plans 링크로 받아 줄 실제 설정 폴더(#911)
-        verdict, why = classify(tool, tool_input, s.get("cwd") or "", plan_dir=plan_dir, config_roots=roots)
+        verdict, why = classify(tool, tool_input, s.get("cwd") or "", plan_dir=plan_dir, config_roots=roots, read_roots=PLUGIN_READ_ROOTS)
         if verdict == IRREVERSIBLE:
             return "ask", IRREVERSIBLE, why
         if verdict == SAFE and level != "all" and not (level == "edits" and tool in EDIT_TOOLS):
