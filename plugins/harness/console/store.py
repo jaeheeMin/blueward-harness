@@ -765,13 +765,62 @@ def mark_check(s: dict, cid: str, state: str = CHECK_DONE) -> bool:
 REPORT_TAIL_TRIM = " \t*_`~\"'”’)」』>]"
 
 
+# 답을 달라는 말투(#954). 답할 말(알려·골라·정해…)을 달라는 요청과, 사용자가 답하면 그다음을 하겠다는 제안만 잡는다.
+# "확인해 주세요" 처럼 답 없이 끝나는 부탁, "끝나면 알려 줄게" 처럼 내가 할 일은 잡지 않는다.
+_ASK_REQUEST = re.compile(r"((알려|말해|말씀해|골라|정해|답해|선택해)\s?|라고\s?(해|말해)\s?)(주세요|주십시오|주시겠어요|줘|주라)(?![가-힣])")
+# 제안은 답에 해당하는 동사로만: "재시작하시면 적용되겠습니다" 같은 설명은 잡지 않는다(#964 점검)
+_ASK_OFFER = re.compile(r"((알려|말해|말씀해|골라|정해|승인해|허락해|확인해)\s?주(시)?면|(원하|말씀하)시면|라고\s?(하시면|하면|해\s?주(시)?면))"
+                        r"\s.*(겠습니다|[가-힣]게요?)(?![가-힣])")
+# 사용자가 아무 말 없을 때 할 일을 미리 말하는 꼴("없으면 다음으로 넘어갈게")도 답을 기다리는 신호다
+_ASK_DEFAULT = re.compile(r"(없|괜찮|좋|맞)(으시)?(으)?면\s.*(넘어갈게|넘어가겠습니다|진행할게|진행하겠습니다|올릴게|올리겠습니다)")
+# 끝인사로 늘 붙는 "필요하면 말해 줘" 류는 답을 기다리는 게 아니다
+_ASK_GENERIC = re.compile(r"(필요(하|한|해|할)|궁금|언제든|더\s?(있|필요|궁금|도움)|다른\s?(것|거|게|건)|추가로)")
+# 요청 앞의 조건절("문제가 생기면·끝나면·막히면 알려 줘")은 일이 생길 때 알려 달라는 끝인사다. 허락을 묻는 조건("괜찮으면")만 남긴다.
+# '면' 으로 끝나는 명사(화면·측면…)는 조건절이 아니다(#964 점검)
+_ASK_CONDITION = re.compile(r"([가-힣]+)면\s")
+# 면 앞 글자. -이면·-다면·-지면·-내면 처럼 동사 활용과 겹치는 글자는 넣지 않는다
+_MYEON_NOUNS = frozenset("화측장정표전양방국단후외반평곡")
+_ASK_APPROVAL = re.compile(r"(괜찮|좋|원하|맞|동의하)(으시|시)?(으)?면\s")
+_ASK_LATER = re.compile(r"(나중에|아니면)")  # "괜찮으면 나중에 알려 줘" · "좋으면 두고, 아니면 알려 줘" 는 끝인사에 가깝다
+# 고르기·정하기 요청이나, 마지막 조건절과 요청 사이의 의문사("…두 개면 어느 쪽인지 골라 줘")는 진짜 질문이다.
+# 조건절 안의 의문사("무슨 문제가 생기면 알려 줘")는 세지 않는다(#964 점검)
+_ASK_CHOICE_VERB = re.compile(r"(골라|정해|선택해)\s?(주|줘)")
+_ASK_INTERROGATIVE = re.compile(r"어느|어떤|어떻게|무엇|뭘|무슨")
+REPORT_ASK_SENTENCES = 3  # 끝에서 몇 문장까지 보나
+
+
+def _last_condition_end(text: str) -> int:
+    """동사 활용 조건절(…면 )이 끝나는 마지막 위치. 없으면 -1. '면' 으로 끝나는 명사(화면·측면…)는 조건절이 아니다."""
+    ends = [m.end() for m in _ASK_CONDITION.finditer(text) if m.group(1)[-1] not in _MYEON_NOUNS]
+    return ends[-1] if ends else -1
+
+
+def _sentence_asks(sent: str) -> bool:
+    if _ASK_GENERIC.search(sent):
+        return False
+    if _ASK_OFFER.search(sent) or _ASK_DEFAULT.search(sent):
+        return True
+    m = _ASK_REQUEST.search(sent)
+    if not m:
+        return False
+    before = sent[:m.start()]
+    cond_end = _last_condition_end(before)
+    if cond_end < 0 or _ASK_CHOICE_VERB.search(sent) or _ASK_INTERROGATIVE.search(before[cond_end:]):
+        return True
+    return bool(_ASK_APPROVAL.search(before)) and not _ASK_LATER.search(sent)
+
+
 def report_asks(report: str) -> bool:
-    """마지막 결과 보고가 질문으로 끝났는가(추정). 끝 줄의 끝 글자가 물음표이면 그렇다고 본다. 도구 질문창(AskUserQuestion)이 아니라
-    글로 물은 경우를 잡으려는 것이라 틀릴 수 있고, 화면은 이를 추정으로 보여 준다."""
+    """마지막 결과 보고가 내 답을 기다리며 끝났는가(추정). 도구 질문창(AskUserQuestion)이 아니라 글로 물은 경우를 잡으려는 것이라
+    틀릴 수 있고, 화면은 이를 추정으로 보여 준다. 끝 줄의 끝 글자가 물음표이거나, 끝 문장 몇 개에 답을 달라는 말투
+    ("알려 주세요", "골라 줘", "…하시면 …겠습니다", "'이대로 올려' 라고 하면 …할게")가 있으면 그렇다고 본다(#954)."""
     lines = [ln.strip() for ln in str(report or "").splitlines() if ln.strip()]
     if not lines:
         return False
-    return lines[-1].rstrip(REPORT_TAIL_TRIM).endswith(("?", "？"))
+    if lines[-1].rstrip(REPORT_TAIL_TRIM).endswith(("?", "？")):
+        return True
+    sentences = [x.strip() for x in re.split(r"(?<=[.!。！])\s+|\n+", "\n".join(lines[-REPORT_ASK_SENTENCES:])) if x.strip()]
+    return any(_sentence_asks(sent) for sent in sentences[-REPORT_ASK_SENTENCES:])
 
 
 def _skipped(s: dict, p: str) -> bool:
