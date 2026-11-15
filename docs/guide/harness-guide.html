@@ -1930,7 +1930,7 @@ Closes #143</pre>
   <div class="callouts">
     <div class="callout ok"><span class="k">사람이 Merge</span><div>운영 경로를 바꾼 PR 이나 SRS(Software Requirements Specification) 변경 PR 은 Claude 의 <code>gh pr merge</code> 가 거절돼. 사람이 GitHub 화면에서 Merge 버튼을 눌러.</div></div>
     <div class="callout warn"><span class="k">병합 순서</span><div>먼저 병합해야 하는 PR(다른 PR 위에 쌓은 것, 본문 <code>먼저: #n</code>, 같은 DEV(Development) 의 SRS → Spec → 개발 순, 하네스는 plugin.json 판 순)이 아직 열려 있으면 Claude 의 <code>gh pr merge</code> 가 거절돼. 거절 메시지가 앞 PR 과 이유를 알려 줘. 앞 PR 부터 병합하거나, 순서가 틀렸으면 PR 본문의 <code>먼저:</code> 줄을 고쳐. 순서를 못 정하거나(순환, GitHub 못 읽음) 때도 통과시키지 않아. 사람이 GitHub 화면에서 병합하는 것은 막을 수 없으니 <code>/harness:prs</code> 로 순서를 보고 지켜.</div></div>
-    <div class="callout warn"><span class="k">남의 PR</span><div>작성자가 지금 로그인한 계정과 다른 PR 은 Claude 가 병합·수정·댓글하지 않아. 읽고 내 작업에 주는 영향만 알려. 사람이 웹이나 터미널에서 하면 훅이 못 막아서, 작성자가 아닌 계정의 push 와 리뷰 해제를 나중에 이슈·Teams 로 알려 줘.</div></div>
+    <div class="callout warn"><span class="k">남의 PR</span><div>작성자가 지금 로그인한 계정과 다른 PR 은 Claude 가 병합·수정·댓글하지 않아. 읽고 내 작업에 주는 영향만 알려. 저장소 관리자(admin) 계정만 예외라서 남의 PR 도 고치고 댓글을 달 수 있어. 사람이 웹이나 터미널에서 하면 훅이 못 막아서, 작성자가 아닌 계정의 push 와 리뷰 해제를 나중에 이슈·Teams 로 알려 줘.</div></div>
   </div>
 
   <div class="next"><button data-go="gate">← 검사 · 승인 받기</button><button data-go="wrapup">다음: 못 끝낸 일 남기기 →</button></div>
@@ -2155,7 +2155,7 @@ Closes #143</pre>
 
   <div class="eli5"><div class="tag">쉽게<br>말하면</div><div>
     <p>관리자는 public-cloud 의 Owner 야. 팀원 PR(Pull Request) 의 승인과 병합, Actions 가 연 알림 이슈, 팀원이 직접 못 올리는 운영 파일을 맡아.</p>
-    <p>남의 PR 을 대신 고치지는 않아. 막힌 이유를 찾아 주인에게 알려 주는 게 관리자 몫이야.</p>
+    <p>팀원은 남의 PR 을 고칠 수 없지만 관리자는 어느 PR 이든 고치고 댓글을 달 수 있어. 그래도 먼저 막힌 이유를 찾아 주인에게 알려 주고, 필요할 때만 직접 고쳐.</p>
   </div></div>
 
   <section class="diagram">
@@ -2205,7 +2205,7 @@ Closes #143</pre>
   </div>
 
   <div class="callouts">
-    <div class="callout stop"><span class="k">남의 PR</span><div>다른 계정의 PR 에 push · 리베이스 · 검사 재실행 · 병합을 하지 않아. 영향만 알리고 주인이 하게 해.</div></div>
+    <div class="callout warn"><span class="k">남의 PR</span><div>관리자 계정은 다른 계정의 PR 에도 push · 리베이스 · 검사 재실행 · 병합 · 댓글을 할 수 있어(훅도 관리자는 통과시켜). 남의 작업을 바꾸는 일이라 먼저 주인에게 알리고, 필요할 때만 직접 해.</div></div>
     <div class="callout stop"><span class="k">자기 승인</span><div>관리자도 자기 PR 을 자기가 승인하지 않아. 작성자가 아닌 승인자가 Approve 해.</div></div>
     <div class="callout warn"><span class="k">우회</span><div>ruleset bypass 는 검사가 고장 나 막혔을 때만 써. 쓰면 왜 썼는지 이슈에 남겨.</div></div>
     <div class="callout warn"><span class="k">검사 불능</span><div>Actions 분이 바닥나거나 검사가 못 돈 건 통과가 아니야. 다시 돌려 결과를 확인한 뒤 병합해.</div></div>
