@@ -51,6 +51,35 @@ def element_diffs(key: str, expected: dict | None, actual: dict | None, override
     return out
 
 
+def borrow_later_mockup(expected: dict, screens: dict, width: str, overrides: dict | None) -> dict:
+    """나중 시안이 기능을 더해 바꾼 요소의 기대값을 그 시안에서 가져온다(앞 시안에도 그 기능이 있는 것으로 본다).
+
+    overrides 의 요소 설정에 {"from": "G-24"} 가 있으면 그 요소의 기대값 전체를 G-24 시안(같은 너비)에서 가져온다.
+    {"below": {"screen": "G-24", "element": "tile"}} 가 있으면 그 요소는 element 아래에 놓인 것으로 보고,
+    element 의 높이가 나중 시안에서 늘어난 만큼 세로 위치(y·tcy) 기대값을 내린다(나중 시안에서 그 사이에 더한 줄이 있어 y 를 통째로 가져올 수 없을 때).
+    원본 expected 는 바꾸지 않는다.
+    """
+    out = dict(expected)
+    for key, ov in (overrides or {}).items():
+        if not ov:
+            continue
+        if ov.get("from"):
+            out[key] = screens[ov["from"]]["widths"][width].get(key)
+        below = ov.get("below")
+        if below and out.get(key):
+            later = screens[below["screen"]]["widths"][width].get(below["element"]) or {}
+            own = expected.get(below["element"]) or {}
+            if later.get("h") is None or own.get("h") is None:
+                continue
+            dy = later["h"] - own["h"]
+            v = dict(out[key])
+            v["y"] = round(v["y"] + dy, 1)
+            if v.get("tcy") is not None:
+                v["tcy"] = round(v["tcy"] + dy, 1)
+            out[key] = v
+    return out
+
+
 def rel_y(meas: dict) -> dict:
     """세로 위치를 헤더 아래끝 기준으로 바꾼다. 맨 위 알림 띠(.ann)가 있고 없고는 상태에 따라 달라서 요소 위치를 밀기 때문이다."""
     hdr = meas.get("header")
