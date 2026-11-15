@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from .cdp import Browser, find_browser
-from .compare import fmt, screen_diffs
+from .compare import borrow_later_mockup, fmt, screen_diffs
 from .measure_lib import HERE, WIDTHS, measure, selectors
 from .screen_config import COLOR_EXCEPTIONS, SCREEN_CONFIG
 
@@ -76,7 +76,7 @@ def check_screen(br, lib, screen: str, baseline: dict, builders: dict, shots: Pa
         got[w] = meas
         if shots:
             br.screenshot(shots / f"{screen}-{w}.png")
-        exp = baseline["screens"][screen]["widths"][str(w)]
+        exp = borrow_later_mockup(baseline["screens"][screen]["widths"][str(w)], baseline["screens"], str(w), ov)
         for d in screen_diffs(exp, meas, ov, cex):
             (unmeasured if d.get("kind") == "unmeasured" else fails).append(fmt(screen, w, d))
         for ex in cfg.get("expect", []):

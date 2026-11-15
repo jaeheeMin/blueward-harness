@@ -2,6 +2,9 @@
 
 elements  요소 키별 덮어쓰기. None 이면 그 화면에서 건너뜀, {"console": 선택자} 로 콘솔 쪽 선택자 변경,
           {"props": (...)} 로 비교 항목 변경, {"tol": {"w": 4}} 로 허용 오차 변경.
+          기능을 더한 나중 시안이 같은 요소를 바꿨으면 {"from": "G-24"} 로 그 시안의 기대값을 쓰고, 그 아래에 놓인 요소는
+          {"below": {"screen": "G-24", "element": "tile"}} 로 높이가 늘어난 만큼 내린 위치를 기대한다(compare.borrow_later_mockup).
+          앞 시안에도 그 기능이 있는 것으로 보는 사용자 결정이 있을 때만 쓰고, 결정 날짜·이슈를 옆에 적는다.
 expect    기능·글자 확인: {"sel": CSS 선택자, "text": 포함돼야 할 글, "why": 설명}. 선택자에 맞는 요소 중 하나라도 그 글을 가지면 통과("exact": True 면 글이 정확히 같아야 통과).
           시안의 견본 글이 아니라, 상태 만들기(fake_console/screens.py)가 만드는 화면에서 꼭 있어야 하는 판정·단추만 적는다.
 
@@ -60,7 +63,14 @@ SCREEN_CONFIG.update({
         {"sel": ".main button", "text": "작업 멈추기", "why": "일하는 중에만 있는 [작업 멈추기]"},
         {"sel": "aside.sess-side", "text": "SRS.md", "why": "오른쪽 칸에 쓰는 중인 문서"}]},
     # 시안 G-11 노란 '네 차례' 카드(.ask)는 콘솔 홈에서 .call 이다.
-    "G-11": {"ready": ".tile2, .tile", "elements": {"ask": {"console": ".call"}}, "expect": [NAV_4,
+    # 홈 숫자 칸(2026-11-15 사용자 결정, #993): G-11 은 기록 기능 전 시안이라 네 칸이고, 나중 시안 G-24 는 '팀 기록' 을 더한 다섯 칸이다.
+    # 메뉴 다섯 칸과 같이 나중 시안을 정답으로 본다 - 칸(tile) 기대값은 G-24 에서 가져오고, 그 아래 '내 세션' 판(light)은
+    # 칸이 높아진 만큼(G-24 tile.h - G-11 tile.h) 내려간 위치를 기대한다. 다섯째 칸이 있는지는 글자 확인으로 본다.
+    # ready: '승인 기다리는 PR' 칸은 gh 를 읽은 뒤에야 보인다. 전에는 칸(.tile2)만 기다려서 이 칸이 늦게 뜨면 네 칸 상태로 재어
+    # 너비가 잴 때마다 달랐다(#993 에서 같은 코드로 한 번은 1280 만 다섯 칸, 다음엔 두 너비 모두 네 칸으로 잰 것을 확인).
+    "G-11": {"ready": "[data-pr-tile]:not([hidden])", "elements": {"ask": {"console": ".call"}, "tile": {"from": "G-24"},
+                                                      "light": {"below": {"screen": "G-24", "element": "tile"}}}, "expect": [NAV_4,
+        {"sel": "main.main", "text": "아직 안 풀린 문제", "why": "다섯째 칸 '팀 기록'(시안 G-24)"},
         {"sel": ".main h1", "text": "오늘 내 일", "why": "시안 G-11 제목"},
         {"sel": "main.main", "text": "내 차례", "why": "내 차례 칸"},
         {"sel": ".ann", "text": "내 차례 1건", "why": "맨 위 띠"},
