@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -945,6 +946,67 @@ const cases = {
     assert.ok(n.kind === 'limit_unknown' && n.body.includes('mystery'));
     assert.strictEqual(A.notice({ status: 'idle' }, now), null);
   },
+  notice_logic_bubble_dismiss_verbs_and_limits() {
+    const N = require(path.join(dir, 'notice-logic.js'));
+    const items = [{ id: 'req:a' }, { id: 'blk:s:blocked:1' }, { id: 'api:s:1' }];
+    assert.strictEqual(N.pickBubble(items, {}).id, 'req:a');  // 급한 순서(목록 순서) 첫 건
+    assert.strictEqual(N.pickBubble(items, { 'req:a': true }).id, 'blk:s:blocked:1');  // 닫은 건 건너뛴다
+    assert.strictEqual(N.pickBubble(items, { 'req:a': true, 'blk:s:blocked:1': true, 'api:s:1': true }), null);
+    assert.strictEqual(N.pickBubble([], {}), null);
+    // 더는 없는 알림의 닫은 표시는 잊어 같은 일이 다시 생기면 다시 뜨고, 화면 따라 있다 없다 하는 알림(ver·merged)은 지우지 않는다
+    assert.deepStrictEqual(N.pruneDismissed({ 'req:a': true, 'req:gone': true, 'ver:1': true, 'merged:s': true }, items), { 'req:a': true, 'ver:1': true, 'merged:s': true });
+    // 승인 단추 말: 기본 / 지우기 / 올리기 (승인 화면과 같다)
+    assert.deepStrictEqual(N.permVerbs({ toolInput: { command: 'touch a' } }), ['이번만 허락', '하지 마']);
+    assert.deepStrictEqual(N.permVerbs({ risk: 'irreversible', toolInput: { command: 'rm -rf x' } }), ['이번만 지워', '지우지 마']);
+    assert.deepStrictEqual(N.permVerbs({ risk: 'irreversible', toolInput: { command: 'git push origin main' } }), ['이번만 올려', '올리지 마']);
+    assert.strictEqual(N.canAllowSession({ risk: 'irreversible' }), false);
+    assert.strictEqual(N.canAllowSession({ permissionSuggestions: [] }), false);
+    assert.strictEqual(N.canAllowSession({ toolInput: {} }), true);
+    assert.strictEqual(N.isInstantQuestion([{ question: 'q', options: [{ label: 'a' }] }]), true);
+    assert.strictEqual(N.isInstantQuestion([{ question: 'q', multiSelect: true, options: [{ label: 'a' }] }]), false);
+    assert.strictEqual(N.isInstantQuestion([{ question: 'q', options: [{ label: 'a' }] }, { question: 'r', options: [{ label: 'b' }] }]), false);
+    // 한도: 값이 없으면 "알 수 없음" — 0% 로 꾸미지 않는다
+    const now = new Date(2026, 10, 10, 9, 0).getTime(), sec = ms => Math.floor(ms / 1000);
+    const at = sec(new Date(2026, 10, 10, 15, 5).getTime()), later = sec(new Date(2026, 10, 12, 8, 30).getTime());
+    let v = N.limitView([], now, false);
+    assert.ok(v.unknown && v.text === '한도 알 수 없어' && !v.text.includes('%') && v.title.includes('0% 라는 뜻이 아니야'));
+    assert.ok(N.limitView(undefined, now, true).title.includes('읽지 못했어'));
+    // 값이 있으면 종류별로: 쓴 비율 · 풀리는 시각, 경고·참은 모양(⚠ ✕)이 붙는다
+    v = N.limitView([{ type: 'five_hour', status: 'allowed', utilization: 0.42, resetsAt: at, t: sec(now) - 60 },
+      { type: 'seven_day', status: 'allowed_warning', utilization: 0.91, resetsAt: later, t: sec(now) - 3600 }], now);
+    assert.ok(!v.unknown && v.chips.length === 2);
+    assert.strictEqual(v.chips[0].text, '5시간 42% · 15:05'); assert.strictEqual(v.chips[0].tone, ''); assert.strictEqual(v.chips[0].stale, false);
+    assert.strictEqual(v.chips[1].text, '⚠ 주간 91% · 11월 12일 08:30'); assert.strictEqual(v.chips[1].tone, 'warn');
+    assert.ok(v.chips[1].stale && v.chips[1].title.includes('오래된 값') && v.chips[0].title.includes('08:59 에 받은 값'));
+    v = N.limitView([{ type: 'five_hour', status: 'rejected', utilization: 1, resetsAt: at, t: sec(now) }], now);
+    assert.ok(v.chips[0].tone === 'err' && v.chips[0].text.startsWith('✕ ') && v.chips[0].title.includes('한도가 찼어'));
+    // 쓴 비율을 안 알려 준 값은 ? — 퍼센트를 지어내지 않는다
+    v = N.limitView([{ type: 'five_hour', status: 'allowed', utilization: null, resetsAt: at, t: sec(now) }], now);
+    assert.strictEqual(v.chips[0].text, '5시간 ? · 15:05'); assert.ok(v.chips[0].title.includes('알려 주지 않았어') && !/\d%/.test(v.text));
+    v = N.limitView([{ type: 'five_hour', status: 'mystery', utilization: 0.1, resetsAt: at, t: sec(now) }], now);
+    assert.ok(v.chips[0].tone === 'unk' && v.chips[0].title.includes('상태를 몰라(mystery)'));
+    // 풀릴 시각이 지난 값은 지금 쓴 비율이 아니라서 버린다(그것뿐이면 알 수 없음)
+    assert.ok(N.limitView([{ type: 'five_hour', status: 'allowed', utilization: 0.9, resetsAt: sec(now) - 60, t: sec(now) - 7200 }], now).unknown);
+    // 단위 방어: 0~1 은 비율, 1 초과 100 이하는 이미 퍼센트, 그 밖(음수·100 초과·숫자 아님)은 ?
+    const one = u => N.limitView([{ type: 'five_hour', status: 'allowed', utilization: u, resetsAt: at, t: sec(now) }], now).chips[0].text;
+    assert.strictEqual(one(0), '5시간 0% · 15:05'); assert.strictEqual(one(1), '5시간 100% · 15:05'); assert.strictEqual(one(42), '5시간 42% · 15:05'); assert.strictEqual(one(100), '5시간 100% · 15:05');
+    for (const bad of [-0.1, 100.5, 250, 'x', true, NaN, Infinity]) assert.strictEqual(one(bad), '5시간 ? · 15:05', String(bad));
+    // 빈 status 는 managed.py 처럼 allowed
+    v = N.limitView([{ type: 'five_hour', status: '', utilization: 0.5, resetsAt: at, t: sec(now) }], now);
+    assert.ok(v.chips[0].tone === '' && v.chips[0].title.includes('여유 있어') && v.chips[0].text === '5시간 50% · 15:05');
+    // 닫은 알림 표시가 100개를 넘으면 최근 것을 남긴다(저장 때 slice(-100) 과 같다)
+    const many = {}; for (let i = 0; i < 120; i++) many['ver:' + i] = true;
+    const kept = Object.keys(N.pruneDismissed(many, []));
+    assert.strictEqual(kept.length, 100); assert.strictEqual(kept[0], 'ver:20'); assert.strictEqual(kept[99], 'ver:119');
+    // 팝업에서 다 보여 줄 수 있는 승인만 빠른 허락 단추를 둔다
+    assert.strictEqual(N.fitsPopup({ toolName: 'Bash', toolInput: { command: 'touch a' } }), true);
+    assert.strictEqual(N.fitsPopup({ toolName: 'Bash', toolInput: { command: 'x'.repeat(600) } }), true);
+    for (const r of [{ toolName: 'Bash', toolInput: { command: 'x'.repeat(601) } }, { toolName: 'Bash', toolInput: { command: 'a', dangerouslyDisableSandbox: true } },
+      { toolName: 'Bash', toolInput: { command: 'a', run_in_background: true } }, { toolName: 'Write', toolInput: { file_path: 'a', content: 'b' } }, { toolName: 'Edit', toolInput: { file_path: 'a' } },
+      { toolName: 'ExitPlanMode', toolInput: { plan: 'p' } }, { toolName: 'Bash', mcp: { server: 's' }, toolInput: { command: 'a' } }, { toolName: 'Bash', toolInput: {} }, null]) {
+      assert.strictEqual(N.fitsPopup(r), false, JSON.stringify(r));
+    }
+  },
   notify_events_compare_previous_and_next() {
     const on = { turn: true, blocked: true, done: true }, off = { turn: false, blocked: false, done: false };
     const base = { id: 's1', title: '구매오더', group: 'idle', pendingRequestIds: [], lastBlock: null };
@@ -1114,14 +1176,22 @@ const store = seed ? JSON.parse(seed) : {};
 global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
 const style = {};
 global.window = {};
-global.document = { documentElement: { style } };
+const dataset = {}, events = [];
+global.CustomEvent = function (n, o) { this.type = n; this.detail = o && o.detail; };
+global.document = { documentElement: { style, dataset }, dispatchEvent: e => events.push(e.detail) };
 require(file);
 const BH = window.BH;
-const out = { first: BH.getScale(), zoom: style.zoom, keys: Object.keys(BH).sort().join(',') };
+const out = { first: BH.getScale(), zoom: style.zoom, keys: Object.keys(BH).sort().join(','), theme0: [BH.getTheme(), dataset.theme] };
 BH.setScale('1.15');
 out.afterSet = [BH.getScale(), store['bh-zoom'], style.zoom];
 BH.setScale('nonsense');
 out.afterBad = [BH.getScale(), style.zoom];
+BH.setTheme('post');
+out.themePost = [BH.getTheme(), store['bh-theme'], dataset.theme];
+BH.setTheme('nonsense');
+out.themeBad = [BH.getTheme(), store['bh-theme'], dataset.theme];
+out.themeIds = BH.THEMES.map(x => x.id).join(',');
+out.events = events.join(',');
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -1137,7 +1207,7 @@ def _theme_run(seed: dict | None = None) -> dict:
 def test_theme_js_only_keeps_text_scale():
     r = _theme_run()
     assert r["first"] == "1" and r["zoom"] == "1"  # 시안(가)대로 보통 = 배율 없음(#721)
-    assert r["keys"] == "SCALES,getScale,read,setScale,write"  # 옛 테마 표·디자인 전환은 없다
+    assert r["keys"] == "SCALES,THEMES,getScale,getTheme,read,setScale,setTheme,write"  # 글자 크기 + 테마(#1013). 옛 디자인 전환은 없다
     assert r["afterSet"] == ["1.15", "1.15", "1.15"]
     assert r["afterBad"] == ["1.15", "1.15"]  # 모르는 값은 저장도 적용도 하지 않는다(바로 앞 값 유지)
     assert _theme_run({"bh-zoom": "0.9"})["zoom"] == "0.9"
@@ -1145,15 +1215,39 @@ def test_theme_js_only_keeps_text_scale():
     assert _theme_run({"bh-scale": "1.15"})["first"] == "1"  # 옛 키(보통이 1.15 였다)는 읽지 않는다
 
 
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_theme_js_saves_and_applies_theme():
+    # 테마 저장·적용(#1013): 기본 sauce, 모르는 값은 sauce, 바뀌면 이벤트
+    r = _theme_run()
+    assert r["theme0"] == ["sauce", "sauce"]  # 기본은 Sauce, 첫 페인트 전에 html[data-theme] 으로 걸린다
+    assert r["themeIds"] == "sauce,post"
+    assert r["themePost"] == ["post", "post", "post"]
+    assert r["themeBad"] == ["post", "post", "post"]  # 모르는 값은 저장도 적용도 하지 않는다
+    assert r["events"] == "sauce,post"  # 바뀔 때 bh-theme 이벤트(장면이 새로 고침 없이 붙고 떨어진다)
+    assert _theme_run({"bh-theme": "post"})["theme0"] == ["post", "post"]
+    assert _theme_run({"bh-theme": "zzz"})["theme0"] == ["sauce", "sauce"]  # 모르는 저장값은 Sauce
+
+
+def test_post_theme_css_stays_under_data_theme_post():
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    body = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    for sel in re.findall(r"([^{}]+)\{", body):
+        for part in sel.split(","):
+            assert part.strip().startswith(':root[data-theme="post"]'), part.strip()  # Sauce 에는 한 줄도 닿지 않는다
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert html.index('src="/theme.js"') < html.index("</head>") and 'src="/theme.js"' in html.split("</head>")[0]  # 첫 페인트 전 동기 로드
+    assert 'href="/theme-post.css"' in html and 'src="/theme-post.js"' in html
+
+
 def test_no_theme_or_design_switch_left():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     theme = (STATIC / "theme.js").read_text(encoding="utf-8")
-    for needle in ("data-design", "data-tone", "design-quick", "getTheme", "getDesign", "setDesign", "BH.THEMES", "BH.DESIGNS"):
+    for needle in ("data-design", "data-tone", "design-quick", "getDesign", "setDesign", "BH.DESIGNS"):  # 테마(getTheme·BH.THEMES)는 #1013 에서 다시 생겼다
         assert needle not in app and needle not in css and needle not in theme, needle
-    # 설정 화면에는 글자 크기만 남는다
+    # 설정 화면에는 글자 크기와 테마(#1013)가 있고 디자인 고르기는 없다
     settings = app[app.index("function settingsView"):app.index("/* ---------- 시작 ---------- */")]
-    assert "글자 크기" in settings and "테마" not in settings and "디자인" not in settings
+    assert "글자 크기" in settings and "BH.THEMES" in settings and "디자인" not in settings
 
 
 def _lum(hex_color: str) -> float:
@@ -2618,3 +2712,255 @@ def test_elicitation_waiting_in_chat_is_drawn_in_place_as_form(tmp_path):
     text, dump = got["text"], got["dump"]
     assert dump.count("<div.qgroup>") == 1 and "연결 도구(asksrv)가 묻는 것" in text and dump.count("<button.qopt>") == 4
     assert "연결 도구(asksrv)가 묻는 것: 지난 질문 → 보냄: color=red" in text and "승인 요청:" not in text
+
+
+# ---- 알림 말풍선 · 팝업 · 헤더 계정 한도(#1016) ----
+
+def _q_session(sid="s1", rid="q1", title="구매오더 조회 앱 요구사항"):
+    s = _session(sid, title=title, status="waiting", pendingRequestIds=[rid])
+    q = {"id": rid, "sessionId": sid, "kind": "question", "status": "pending",
+         "questions": [{"question": "요구사항을 올릴지 정해 주세요", "options": [{"label": "올려"}, {"label": "나중에"}]}]}
+    return s, q
+
+
+def _perm_session(sid="s2", rid="p1", title="권한 일"):
+    s = _session(sid, title=title, status="waiting", pendingRequestIds=[rid])
+    r = {"id": rid, "sessionId": sid, "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "touch a", "description": "파일 만들기"}}
+    return s, r
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_bubble_shows_most_urgent_one_line_with_dot_on_every_screen(tmp_path):
+    s, q = _q_session()
+    for route in ("", "s/s1", "settings", "docs"):
+        got = _smoke(tmp_path, route, [s], [q])
+        assert got["bubble"].startswith("내 차례 1건: 요구사항을 올릴지 정해 주세요"), (route, got["bubble"])
+        assert got["dot"] == 1, route  # 알림이 있으면 단추에 점
+        assert "<div.nb-bubble>" not in got["dump"]  # (말풍선은 머리줄에 있다 — 본문에 겹쳐 그리지 않는다)
+    got = _smoke(tmp_path, "", [s], [q])
+    assert '<div class="nb-bubble"' not in got["head"] and "알림" not in got["limits"]
+    # 알림이 없으면 말풍선도 점도 없다(단추는 늘 있다)
+    calm = _smoke(tmp_path, "", [_session("s1")])
+    assert calm["bubble"] == "" and calm["dot"] == 0
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_bubble_priority_follows_strip_order(tmp_path):
+    """말풍선 우선순위는 띠 순서: 내 차례 → 막힘 → API 오류. 막힘·오류만 있으면 막힘이 먼저."""
+    s, q = _q_session()
+    blocked = _session("s3", title="막힌 일", status="idle", lastBlock={"t": 2, "kind": "blocked", "open": True})
+    api = _session("s4", title="로그인 일", status="idle", apiIssue={"kind": "auth", "status": 401, "t": 5})
+    got = _smoke(tmp_path, "", [api, blocked, s], [q])
+    assert got["bubble"].startswith("내 차례 1건:")
+    got = _smoke(tmp_path, "", [api, blocked])
+    assert got["bubble"].startswith("막힌 일 1건: “막힌 일” 세션부터 보자")
+    got = _smoke(tmp_path, "", [api])
+    assert got["bubble"].startswith("⚠ 오류 1건: “로그인 일” 세션 — 로그인이 풀렸어")
+    # 같은 알림이 홈 띠와 말풍선 두 군데 겹치지 않게 띠는 감춘다(DOM 에만 있다)
+    assert got["annBubble"] == "1" and "로그인이 풀렸어" in got["ann"]  # 띠 데이터는 DOM 에 남기고(.ann-slot[data-bubble] 로 감춘다) 말풍선만 보인다
+    assert got["dot"] == 1
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_bubble_close_remembers_by_id_and_new_notice_shows_again(tmp_path):
+    s, q = _q_session()
+    got = _smoke(tmp_path, "", [s], [q], actions=[{"click": ".nb-x"}])
+    assert got["bubble"] == "" and got["dot"] == 1  # 말풍선은 닫혀도 점은 남는다(알림이 아직 있다)
+    assert json.loads(got["ss"]["bh-nb-dismissed"]) == ["req:q1"]
+    # 새로고침해도 같은 알림은 다시 안 뜬다
+    again = _smoke(tmp_path, "", [s], [q], extra={"__ss": {"bh-nb-dismissed": '["req:q1"]'}})
+    assert again["bubble"] == "" and again["dot"] == 1
+    # 새 알림은 뜬다
+    s2, p = _perm_session()
+    new = _smoke(tmp_path, "", [s, s2], [q, p], extra={"__ss": {"bh-nb-dismissed": '["req:q1"]'}})
+    assert new["bubble"].startswith("내 차례 2건: 권한 일 · ") and "내 차례 2건" in new["bubble"]
+    # 풀린(더는 없는) 알림의 닫은 표시는 잊어서 같은 일이 다시 생기면 다시 뜬다
+    gone = _smoke(tmp_path, "", [_session("s1")], extra={"__ss": {"bh-nb-dismissed": '["req:gone","ver:9"]'}})
+    assert json.loads(gone["ss"]["bh-nb-dismissed"]) == ["ver:9"]
+    # 닫은 뒤 초점은 알림 단추로
+    assert got["activeK"] == "nb-btn"
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_popup_answers_permission_with_existing_answer_api(tmp_path):
+    s, p = _perm_session()
+    got = _smoke(tmp_path, "", [s], [p], actions=[{"click": ".nb-say"}])
+    d = got["dialog"]
+    assert "승인 요청 · 권한 일" in d and "touch a" in d and "이번만 허락" in d and "하지 마" in d
+    assert "다시 묻지 않기" not in d  # 추가될 규칙(suggestionText)을 못 보여 주면 이 단추를 두지 않는다(#1016 검토)
+    assert 'role="dialog"' not in d and "<div.nb-dialog>" in got["dialogDump"]
+    assert "1/" not in d  # 한 건이면 n/m 은 없다
+    done = _smoke(tmp_path, "", [s], [p], extra={"POST /api/requests/p1/answer": {"ok": True}}, actions=[{"click": ".nb-say"}, {"click": "[data-k=allow]"}])
+    assert ["POST", "/api/requests/p1/answer", '{"decision":"allow"}'] in done["posts"]  # 새 경로 없이 기존 응답 API
+    assert "허락했어." in done["dialog"] and "답할 알림이 더 없어" in done["dialog"]
+    deny = _smoke(tmp_path, "", [s], [p], extra={"POST /api/requests/p1/answer": {"ok": True}}, actions=[{"click": ".nb-btn"}, {"click": "[data-k=deny]"}])
+    assert ["POST", "/api/requests/p1/answer", '{"decision":"deny"}'] in deny["posts"]
+    ps = dict(p, suggestionText=["Bash(touch a:*)"])  # 추가될 규칙을 먼저 보여 줄 수 있으면 "다시 묻지 않기" 를 둔다
+    sess = _smoke(tmp_path, "", [s], [ps], extra={"POST /api/requests/p1/answer": {"ok": True}}, actions=[{"click": ".nb-btn"}, {"click": "[data-k=allow_session]"}])
+    assert ["POST", "/api/requests/p1/answer", '{"decision":"allow_session"}'] in sess["posts"]
+    shown = _smoke(tmp_path, "", [s], [ps], actions=[{"click": ".nb-btn"}])
+    assert "Bash(touch a:*)" in shown["dialog"] and shown["dialog"].index("Bash(touch a:*)") < shown["dialog"].index("이번만 허락")  # 규칙을 먼저 보여 준 뒤 단추
+    # 응답이 실패하면 오류를 보이고 닫지 않는다(여기선 서버가 없는 요청이라고 답한 경우)
+    fail = _smoke(tmp_path, "", [s], [p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=allow]"}])
+    assert "이미 처리됐거나 닫힌 요청이야" in fail["dialog"] and "이번만 허락" in fail["dialog"] and "답할 알림이 더 없어" not in fail["dialog"]
+    assert all(p_[0] == "POST" and "/answer" in p_[1] for p_ in fail["posts"])
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_popup_question_options_send_answers_and_irreversible_verbs(tmp_path):
+    s, q = _q_session()
+    got = _smoke(tmp_path, "", [s], [q], extra={"POST /api/requests/q1/answer": {"ok": True}}, actions=[{"click": ".nb-say"}])
+    assert "질문 · 구매오더 조회 앱 요구사항" in got["dialog"] and "올려" in got["dialog"] and "나중에" in got["dialog"] and "답 보내기" not in got["dialog"]
+    sent = _smoke(tmp_path, "", [s], [q], extra={"POST /api/requests/q1/answer": {"ok": True}}, actions=[{"click": ".nb-say"}, {"click": "[data-k=opt-0-1]"}])
+    assert ["POST", "/api/requests/q1/answer", '{"answers":{"요구사항을 올릴지 정해 주세요":"나중에"}}'] in sent["posts"]  # 보기 하나가 곧 답
+    assert "세션에 답을 전달했어." in sent["dialog"]
+    # 여러 가지를 묻거나 여러 개 고르는 질문은 골라 두고 [답 보내기]
+    multi = dict(q, questions=[{"question": "색은?", "multiSelect": True, "options": [{"label": "빨강"}, {"label": "파랑"}]}])
+    pick = _smoke(tmp_path, "", [s], [multi], actions=[{"click": ".nb-btn"}])
+    assert "답 보내기" in pick["dialog"] and "답 보내기" in pick["dialogDisabled"]
+    two = _smoke(tmp_path, "", [s], [multi], extra={"POST /api/requests/q1/answer": {"ok": True}}, actions=[{"click": ".nb-btn"}, {"click": "[data-k=opt-0-0]"}, {"click": "[data-k=opt-0-1]"}, {"click": "[data-k=send]"}])
+    assert ["POST", "/api/requests/q1/answer", '{"answers":{"색은?":"빨강, 파랑"}}'] in two["posts"]
+    # 되돌릴 수 없는 일은 승인 화면과 같은 말로 묻고 "다시 묻지 않기" 는 없다
+    s2, p = _perm_session()
+    irrev = dict(p, risk="irreversible", riskNote="파일을 지워", toolInput={"command": "rm -rf build"})
+    got = _smoke(tmp_path, "", [s2], [irrev], actions=[{"click": ".nb-btn"}])
+    assert "이번만 지워" in got["dialog"] and "지우지 마" in got["dialog"] and "다시 묻지 않기" not in got["dialog"] and "되돌릴 수 없는 일" in got["dialog"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_popup_pages_between_items_and_other_kinds_open_session(tmp_path):
+    s, q = _q_session()
+    s2, p = _perm_session()
+    blocked = _session("s3", title="막힌 일", status="idle", lastBlock={"t": 2, "kind": "blocked", "open": True})
+    api = _session("s4", title="로그인 일", status="idle", apiIssue={"kind": "auth", "status": 401, "t": 5})
+    base = [s, s2, blocked, api]
+    got = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}])
+    assert "1/4" in got["dialog"] and "질문" in got["dialog"]
+    nxt = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=next]"}])
+    assert "2/4" in nxt["dialog"] and "승인 요청 · 권한 일" in nxt["dialog"]
+    blk = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=next]"}, {"click": "[data-k=next]"}])
+    assert "3/4" in blk["dialog"] and "✕ 막힘" in blk["dialog"] and "세션 열기" in blk["dialog"]
+    err = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=prev]"}])  # 처음에서 이전은 끝으로
+    assert "4/4" in err["dialog"] and "로그인이 풀렸어" in err["dialog"] and "/login" in err["dialog"] and "세션 열기" in err["dialog"]
+    # 세션 열기는 팝업을 닫고 그 세션으로 간다
+    opened = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=prev]"}, {"click": "[data-k=open]"}])
+    assert opened["dialog"] == "" and opened["path"] == "/s/s4"
+    # 말풍선의 글자를 누르면 그 알림부터 연다
+    api_only = _smoke(tmp_path, "", [blocked, api], actions=[{"click": ".nb-say"}])
+    assert "1/2" in api_only["dialog"] and "✕ 막힘" in api_only["dialog"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_popup_closes_with_esc_and_keeps_focus_inside(tmp_path):
+    s, p = _perm_session()
+    s2, q = _q_session()
+    got = _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"click": ".nb-btn"}])
+    assert got["dialog"] and got["activeK"] == "nb-h"  # 열면 제목으로 초점(키보드로 열고 Enter 한 번에 승인되지 않게)
+    esc = _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"click": ".nb-btn"}, {"key": "Escape"}])
+    assert esc["dialog"] == "" and esc["activeK"] == "nb-btn"  # 닫으면 연 단추로 초점을 돌려준다
+    close = _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"click": ".nb-btn"}, {"click": "[data-k=close]"}])
+    assert close["dialog"] == ""
+    # Tab 이 끝 단추에서 처음으로, Shift+Tab 이 처음에서 끝으로 돈다(팝업 밖으로 초점이 나가지 않는다)
+    assert _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"click": ".nb-btn"}, {"focus": "[data-k=detail]"}, {"key": "Tab"}])["activeK"] == "prev"
+    assert _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"click": ".nb-btn"}, {"focus": "[data-k=prev]"}, {"key": "Tab", "shift": True}])["activeK"] == "detail"
+    empty = _smoke(tmp_path, "", [_session("s1")], actions=[{"click": ".nb-btn"}])
+    assert "지금 알릴 게 없어." in empty["dialog"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_header_shows_account_limits_or_says_unknown(tmp_path):
+    import time
+    now = time.time()
+    far = 4102444800  # 2100년: 풀릴 시각이 지나지 않은 값
+    unknown = _smoke(tmp_path, "", [_session("s1")], extra={"GET /api/account-limits": {"windows": [], "source": "rate_limit_event"}})
+    assert unknown["limits"] == "한도 알 수 없어" and "%" not in unknown["limits"] and "0% 라는 뜻이 아니야" in unknown["limitsTitle"]
+    failed = _smoke(tmp_path, "", [_session("s1")])  # 한도 API 를 못 읽어도 0% 로 꾸미지 않는다
+    assert failed["limits"] == "한도 알 수 없어" and "읽지 못했어" in failed["limitsTitle"]
+    wins = [{"type": "five_hour", "status": "allowed", "utilization": 0.42, "resetsAt": far, "t": now},
+            {"type": "seven_day", "status": "allowed_warning", "utilization": 0.91, "resetsAt": far, "t": now - 7200}]
+    got = _smoke(tmp_path, "", [_session("s1")], extra={"GET /api/account-limits": {"windows": wins}})
+    assert "5시간 42%" in got["limits"] and "⚠ 주간 91%" in got["limits"] and "알 수 없음" not in got["limits"]
+    assert "오래된 값" in got["limitsTitle"] and "에 받은 값" in got["limitsTitle"]
+    rej = _smoke(tmp_path, "", [_session("s1")], extra={"GET /api/account-limits": {"windows": [dict(wins[0], status="rejected", utilization=1.0)]}})
+    assert "✕ 5시간 100%" in rej["limits"]
+    # 다른 화면에서도 늘 보인다
+    assert "5시간 42%" in _smoke(tmp_path, "settings", [_session("s1")], extra={"GET /api/account-limits": {"windows": wins}})["limits"]
+
+
+def test_notice_assets_wired_and_css_uses_variables_only():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert html.index('src="/api-notice.js"') < html.index('src="/notice-logic.js"') < html.index('src="/app.js"')
+    css = (STATIC / "app.css").read_text(encoding="utf-8").split("알림 말풍선 · 팝업 · 헤더 계정 한도(#1016)", 1)[1]
+    assert "prefers-reduced-motion: no-preference" in css and "animation: nb-in" in css  # 움직임 줄이기면 등장 효과 없음
+    assert ".nb-bubble[hidden]" in css and "max-width: min(460px, calc(100vw - 32px))" in css  # 좁은 화면에서 넘치지 않게
+    body = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    assert not re.findall(r"#[0-9a-fA-F]{3,8}\b", re.sub(r"--nb-err:[^;]+;", "", re.sub(r"\.nb-warn[^}]*\}|rgba\([^)]*\)", "", body)))  # 색은 변수(단, 경고 글자 두 색·그림자는 예외)
+    post = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert "--bub-bg" in post and "--bub-ink" in post and "--bub-dot" in post  # Post 도 변수만 덮는다
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    nb = app[app.index("알림 말풍선 · 팝업 · 계정 한도(#1016)"):app.index("첫 화면 · 자동 점검 (시안 01)")]
+    assert "innerHTML" not in nb and 'role: \'dialog\'' in nb and "aria-modal" in nb and "'Escape'" in nb
+    # 검토 반영: NodeList 에는 filter 가 없다(진짜 브라우저), 같은 알림이면 팝업을 통째로 다시 만들지 않는다, 답하는 동안은 넘기지 않는다
+    assert "Array.prototype.slice.call(nb.dlg.querySelectorAll" in nb and not re.search(r"querySelectorAll\([^)]*\)\.(filter|map)", nb)
+    assert "patchChildren(nb.dlg" in nb and "clear(nb.dlg)" not in nb
+    assert re.search(r"function nbMove\(step\) \{[^}]*nb\.busy", nb)
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_popup_does_not_quick_allow_what_it_cannot_show_in_full(tmp_path):
+    """#1016 검토: 팝업에서 내용을 다 못 보여 주는 승인(파일 쓰기·MCP·샌드박스 해제·백그라운드·긴 명령·계획)은 빠른 허락 단추 없이 [자세히 보기]·[거절] 만."""
+    def pop(**kw):
+        s, r = _perm_session()
+        r = dict(r, **kw)
+        return _smoke(tmp_path, "", [s], [r], actions=[{"click": ".nb-btn"}])
+    cases = {
+        "write": dict(toolName="Write", toolInput={"file_path": "docs/a.md", "content": "본문"}),
+        "edit": dict(toolName="Edit", toolInput={"file_path": "docs/a.md", "old_string": "a", "new_string": "b"}),
+        "mcp": dict(toolName="mcp__abap__write", toolInput={"x": 1}, mcp={"server": "abap", "tool": "write"}),
+        "sandbox": dict(toolInput={"command": "ls", "dangerouslyDisableSandbox": True}),
+        "background": dict(toolInput={"command": "sleep 9", "run_in_background": True}),
+        "long": dict(toolInput={"command": "echo " + "x" * 700}),
+    }
+    for name, kw in cases.items():
+        got = pop(**kw)["dialog"]
+        assert "이번만 허락" not in got and "다시 묻지 않기" not in got, name
+        assert "팝업에서 내용을 다 보여 줄 수 없어" in got and "자세히 보기" in got and "하지 마" in got, name
+    # 계획은 [계획 보기 · 진행 정하기] 만(고쳐 달라고 하기는 이유가 필요해 전체 화면에서)
+    plan = pop(toolName="ExitPlanMode", toolInput={"plan": "## 계획"})["dialog"]
+    assert "계획 보기 · 진행 정하기" in plan and "이 계획대로 진행" not in plan and "하지 마" not in plan
+    # 다 보이는 명령(600자 이하)은 자르지 않고 전체를 보인다. 되돌릴 수 없는 일은 승인 화면과 같은 말
+    full = "echo " + "y" * 590
+    ok = pop(toolInput={"command": full})["dialog"]
+    assert full in ok and "이번만 허락" in ok
+    assert "되돌릴 수 없는 일" in pop(risk="irreversible", toolInput={"command": "rm -rf build"})["dialog"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_popup_locks_then_moves_on_when_item_is_handled_elsewhere(tmp_path):
+    """#1016 검토: 보던 알림이 다른 곳에서 처리돼 사라지면 안내와 함께 잠깐 단추를 막은 뒤 다음 알림을 보인다(눈 깜짝할 새 다른 알림에 답하지 않게)."""
+    s, q = _q_session()
+    s2, p = _perm_session()
+    handled = dict(s, status="idle", pendingRequestIds=[])
+    got = _smoke(tmp_path, "", [s, s2], [q, p], actions=[{"click": ".nb-btn"}, {"set": {"GET /api/sessions/s1": handled}}, {"emit": ["session", {"id": "s1"}]}])
+    assert "이 알림은 이미 처리됐어" in got["dialog"] and "이번만 허락" not in got["dialog"]  # 다음 알림을 바로 그리지 않는다
+    assert "다음 알림을 불러올게" in got["dialog"] and "허락" not in got["dialog"].replace("이미 처리됐어", "")  # 잠긴 동안은 눌러 답할 단추가 없다
+    after = _smoke(tmp_path, "", [s, s2], [q, p], actions=[{"click": ".nb-btn"}, {"set": {"GET /api/sessions/s1": handled}}, {"emit": ["session", {"id": "s1"}]}, {"wait": 1300}])
+    assert "이 알림은 이미 처리됐어" not in after["dialog"] and "승인 요청 · 권한 일" in after["dialog"] and "이번만 허락" in after["dialog"]
+    # 내가 답해서 사라진 알림은 안내 없이 바로 다음으로(결과 안내는 한 번)
+    mine = _smoke(tmp_path, "", [s, s2], [q, p], extra={"POST /api/requests/q1/answer": {"ok": True}}, actions=[{"click": ".nb-btn"}, {"click": "[data-k=opt-0-0]"}])
+    assert "이미 처리됐어" not in mine["dialog"] and "세션에 답을 전달했어." in mine["dialog"] and "승인 요청 · 권한 일" in mine["dialog"]
+    # 다른 알림으로 넘기면 안내·고른 답은 비워진다
+    multi = dict(q, questions=[{"question": "색은?", "multiSelect": True, "options": [{"label": "빨강"}, {"label": "파랑"}]}])
+    moved = _smoke(tmp_path, "", [s, s2], [multi, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=opt-0-0]"}, {"click": "[data-k=next]"}, {"click": "[data-k=prev]"}])
+    assert "답 보내기" in moved["dialogDisabled"]  # 처음으로 돌아와도 고른 것이 없다
+    kept = _smoke(tmp_path, "", [s, s2], [multi, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=opt-0-0]"}, {"emit": ["session", {"id": "s2"}]}])
+    assert "답 보내기" not in kept["dialogDisabled"]  # 같은 알림이면 다른 세션 갱신에 고른 답이 지워지지 않는다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_dismiss_id_for_api_error_without_time_uses_kind_and_status(tmp_path):
+    api = _session("s4", title="로그인 일", status="idle", apiIssue={"kind": "auth", "status": 401})  # 받은 때(t)를 모른다
+    got = _smoke(tmp_path, "", [api], actions=[{"click": ".nb-x"}])
+    assert json.loads(got["ss"]["bh-nb-dismissed"]) == ["api:s4:auth:401"]
+    other = _smoke(tmp_path, "", [_session("s4", title="로그인 일", status="idle", apiIssue={"kind": "other", "status": 500})], extra={"__ss": {"bh-nb-dismissed": '["api:s4:auth:401"]'}})
+    assert other["bubble"].startswith("⚠ 오류 1건")  # 종류가 다른 새 오류는 다시 뜬다

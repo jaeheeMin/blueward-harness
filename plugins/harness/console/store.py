@@ -990,3 +990,19 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "context": context_usage.for_session(s),
             "compact": {k: v for k, v in s["compact"].items() if k in ("state", "pre", "post", "auto", "reason")} if isinstance(s.get("compact"), dict) else None,
         })
+
+
+def account_limits(store: Store) -> list[dict]:
+    """계정 사용 한도(헤더 표시용). 한도는 계정 단위라 세션마다 받은 rate_limit_event 값(s["rateWindows"], 종류별)을 모아
+    종류마다 가장 늦게 받은 값 하나만 낸다. 5시간 · 7일 · 그 밖 순. 받은 적이 없으면 빈 목록(= 모름. 0% 가 아니다)."""
+    best: dict[str, dict] = {}
+    with store.lock:
+        for s in store.sessions.values():
+            wins = s.get("rateWindows")
+            if not isinstance(wins, dict):
+                continue
+            for kind, w in wins.items():
+                if isinstance(w, dict) and (kind not in best or (w.get("t") or 0) > (best[kind].get("t") or 0)):
+                    best[kind] = dict(w, type=kind)
+    order = {"five_hour": 0, "seven_day": 1}
+    return sorted(best.values(), key=lambda w: (order.get(w["type"], 9), w["type"]))

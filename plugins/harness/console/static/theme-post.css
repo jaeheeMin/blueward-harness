@@ -1,0 +1,102 @@
+/* 테마 Post(우체국, 밝게 한 벌). 규칙은 모두 :root[data-theme="post"] 아래에만 둔다 — Sauce(data-theme 없음·sauce)는 이 파일에 닿지 않는다.
+   app.css 가 쓰는 변수를 우체국 색으로 덮고, 변수만으로 안 되는 자리(어두운 판 위 강조색 글자 따위)만 따로 고친다. */
+
+:root[data-theme="post"] {
+  --bg: #F6F1E7; --surface: #EFE7D8; --deep: #E8DFCF; --text: #24304A; --sec: #445069; --muted: #5B647D;
+  --accent: #C73E31; --accent2: #2F7D5B; --onaccent: #FFFFFF; --attn: #9A5400; --btn: #C73E31; --btnink: #FFFFFF;
+  --brand: #C73E31;
+  --line: rgba(36,48,74,.13); --line2: rgba(36,48,74,.3); --soft: rgba(36,48,74,.07); --edge: #8A8FA3;
+  --track: #DDD2BE;
+  --light: #FFFCF6; --lightink: #24304A; --lmuted: #5B647D; --lline: #DDD2BE; --card: #FFFFFF; --stbg: #EFE7D8; --okbg: #DCEFE4; --okink: #1F5C42;
+  --st-now: #2F7D5B; --st-now-bg: #E1F0E8; --st-done: #2F7D5B; --st-done-bg: #E1F0E8;
+  --st-turn: #9A5400; --st-turn-bg: #FBEBC8; --st-turn-btn: #C73E31; --st-turn-ink: #FFFFFF;
+  --st-fail: #C2372C; --st-fail-ink: #A82A20; --st-fail-bg: #FBE3DF;
+  --st-unk: #6550B8; --st-unk-ink: #5A47A8; --st-unk-bg: #ECE8F8;
+  --danger: #C2372C;
+  --rb: 10px; --rc: 14px; --rbig: 18px;
+  --post-yellow: #FFD66B;
+  color-scheme: light;
+}
+:root[data-theme="post"] .ptitle h1 { font-weight: 800; letter-spacing: -.03em; }
+
+/* 판: 흰 종이에 얇은 테두리 */
+:root[data-theme="post"] .light { border: 1.5px solid #D9CDB8; box-shadow: 0 1px 0 #E8DFCF, 0 10px 24px -18px rgba(36,48,74,.35); }
+:root[data-theme="post"] .brand-logo { box-sizing: border-box; height: 30px; padding: 5px 9px; border-radius: 6px; background: #24304A; }
+
+/* 어두운 알약·고른 칸: Sauce 는 어두운 바탕에 초록 글자 — Post 는 우체국 빨강 바탕에 흰 글자 */
+:root[data-theme="post"] .pill.dark,
+:root[data-theme="post"] .light .chip[aria-pressed="true"],
+:root[data-theme="post"] .qopt[aria-pressed="true"],
+:root[data-theme="post"] .flowchoose .btn[aria-pressed="true"],
+:root[data-theme="post"] .textbtn.qo[aria-pressed="true"],
+:root[data-theme="post"] .seg button[aria-checked="true"],
+:root[data-theme="post"] .docs-pane .chip[aria-pressed="true"],
+:root[data-theme="post"] .docs-pane .pill.dark,
+:root[data-theme="post"] .pickrow input[type=checkbox]:checked,
+:root[data-theme="post"] .proj .pi, :root[data-theme="post"] .dresult .pi,
+:root[data-theme="post"] .light .cand input[type=checkbox]:checked, :root[data-theme="post"] .light .browser input[type=checkbox]:checked {
+  border-color: var(--accent); background: var(--accent); color: #fff;
+}
+:root[data-theme="post"] .pill.dark:hover { color: #fff; }
+:root[data-theme="post"] .qopt[aria-pressed="true"] small { color: #fff; }
+:root[data-theme="post"] .light .cand input[type=checkbox]:checked::after, :root[data-theme="post"] .light .browser input[type=checkbox]:checked::after { color: #fff; }
+:root[data-theme="post"] .sw.on { background: var(--accent); }
+:root[data-theme="post"] .sw.on::after { background: #fff; }
+:root[data-theme="post"] .chip[aria-pressed="true"], :root[data-theme="post"] .opt[aria-pressed="true"], :root[data-theme="post"] .scale[aria-pressed="true"] { background: #FBE8E4; }
+:root[data-theme="post"] .tbar li.now { background: var(--accent); }
+
+/* 노랑 채움(내 차례 띠·꼬리표): 어두운 호박색이 바탕일 땐 남색 글자가 안 읽혀 밝은 우체통 노랑으로 */
+:root[data-theme="post"] .banner, :root[data-theme="post"] .call, :root[data-theme="post"] .tag, :root[data-theme="post"] .ann.note,
+:root[data-theme="post"] .chip2.warn, :root[data-theme="post"] .tagx.err, :root[data-theme="post"] .bad .tagx,
+:root[data-theme="post"] .crow.wait .mk, :root[data-theme="post"] .prcard .crow.wait .mk { background: var(--post-yellow); color: #24304A; }
+:root[data-theme="post"] .crow.wait .mk, :root[data-theme="post"] .prcard .crow.wait .mk { border-color: #9A5400; }
+:root[data-theme="post"] .ann.note:hover { color: #24304A; }
+:root[data-theme="post"] .rail-ring.bk.err::after, :root[data-theme="post"] .rail-ring.turn::after { background: #E09A28; }
+
+/* AI 질문 카드: 글자가 흰색이라 바탕은 남색 */
+:root[data-theme="post"] .ask { background: #24304A; }
+:root[data-theme="post"] .light .ask .eb, :root[data-theme="post"] .ask .eb { color: var(--post-yellow); }
+:root[data-theme="post"] .ask .skiplink { color: #C9D0E0; }
+:root[data-theme="post"] .ask .skiplink:hover:not(:disabled) { color: #fff; }
+
+/* 우편 소인풍 모서리: 점선 */
+:root[data-theme="post"] .srow[aria-current="page"] { border-color: var(--accent); border-style: dashed; background: #FFFCF6; }
+
+/* 설정의 테마 카드 */
+:root[data-theme="post"] .theme-card[aria-checked="true"] { border-color: var(--accent); }
+
+/* ---------- 우체국 장면 ---------- */
+:root[data-theme="post"] .po-stage { position: relative; margin: 0 0 16px; border-radius: 12px; background: #F6F1E7; }
+:root[data-theme="post"] .po-stage[hidden] { display: none; }
+:root[data-theme="post"] .po { position: relative; --s: 1; }
+:root[data-theme="post"] .po-band { position: absolute; left: 0; top: 0; width: 1600px; height: 240px; transform-origin: 0 0; overflow: hidden; border-radius: 10px; }
+:root[data-theme="post"] .po-band > img, :root[data-theme="post"] .po-people img { position: absolute; pointer-events: none; }
+:root[data-theme="post"] .po-people { position: absolute; inset: 0; }
+:root[data-theme="post"] .po-sign { position: absolute; display: grid; place-items: center; font: 800 14px/1 var(--font); color: #24304A; letter-spacing: -.01em; white-space: nowrap; }
+:root[data-theme="post"] .po-s { position: absolute; display: block; transform: translateX(-50%); text-decoration: none; z-index: 5; }
+:root[data-theme="post"] .po-s img { position: absolute; inset: 0; width: 100%; height: 100%; }
+:root[data-theme="post"] .po-tag { position: absolute; left: 50%; bottom: calc(100% - 4px); transform: translateX(-50%); display: grid; justify-items: center; gap: 1px; padding: 4px 10px 5px; border-radius: 9px; background: #FFFCF6; border: 2px solid #24304A; box-shadow: 0 3px 0 #24304A; white-space: nowrap; font-family: var(--font); font-size: calc(11px / var(--s)); line-height: 1.2; }
+:root[data-theme="post"] .po-tag b { color: #24304A; font-weight: 800; }
+:root[data-theme="post"] .po-tag small { color: #5B647D; font-weight: 700; font-size: .85em; }
+:root[data-theme="post"] .po-tag i { position: absolute; top: -.8em; right: -.8em; width: 1.7em; height: 1.7em; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 900; font-size: .85em; border: 2px solid #24304A; background: #fff; color: #24304A; }
+:root[data-theme="post"] .b-turn .po-tag { background: #FFD66B; }
+:root[data-theme="post"] .b-turn .po-tag b { font-size: 1.1em; }
+:root[data-theme="post"] .b-turn .po-tag small { color: #24304A; }
+:root[data-theme="post"] .b-turn .po-tag i { background: #C73E31; color: #fff; }
+:root[data-theme="post"] .b-blocked .po-tag { background: #FFD9D3; }
+:root[data-theme="post"] .b-blocked .po-tag i { background: #C73E31; color: #fff; border-radius: 4px; }
+:root[data-theme="post"] .b-unk .po-tag { border-style: dashed; }
+:root[data-theme="post"] .b-unk .po-tag i { background: #fff; color: #6550B8; }
+:root[data-theme="post"] .b-done .po-tag i { background: #2F7D5B; color: #fff; }
+:root[data-theme="post"] .b-wait .po-tag i { background: #fff; color: #3D6FB6; }
+:root[data-theme="post"] .b-run .po-tag small { color: #1F6B49; }
+:root[data-theme="post"] .po-s:hover img, :root[data-theme="post"] .po-s:focus-visible img { filter: drop-shadow(0 0 3px #C73E31); }
+:root[data-theme="post"] .po-plaq { position: absolute; left: 0; right: 0; bottom: 0; height: 50px; }
+:root[data-theme="post"] .po-plaq span { position: absolute; top: 8px; left: calc(var(--x) * var(--s) * 1px); transform: translateX(-50%); display: grid; justify-items: center; white-space: nowrap; font-family: var(--font); }
+:root[data-theme="post"] .po-plaq b { font-size: 13px; font-weight: 800; color: var(--text); }
+:root[data-theme="post"] .po-plaq small { font-size: 12px; font-weight: 500; color: var(--muted); }
+
+/* 알림 말풍선(#1016): 우체통 노랑 바탕에 남색 글자, 점은 우체국 빨강 */
+:root[data-theme="post"] { --bub-bg: var(--post-yellow); --bub-ink: #24304A; --bub-dot: #C73E31; }
+:root[data-theme="post"] .nb-bubble { box-shadow: 0 8px 20px -12px rgba(36,48,74,.55); }
+:root[data-theme="post"] .nb-dialog { border: 1.5px solid #D9CDB8; }

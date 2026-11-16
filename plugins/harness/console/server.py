@@ -36,7 +36,7 @@ from hooks_api import ASK_DEFAULT, ASK_LEVELS, Hooks, permission_reply, question
 from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
                      PERMISSION_VALUES, Manager)
 from standards_scan import customer_forms, has_standard_folder  # noqa: F401
-from store import (CHECK_SKIPPED, MAX_PENDING_STOP, START_CHECK_IDS, Store, can_send, display_title, elicitation_fields, mark_check,
+from store import (CHECK_SKIPPED, account_limits, MAX_PENDING_STOP, START_CHECK_IDS, Store, can_send, display_title, elicitation_fields, mark_check,
                    public_session, remember_touched, set_baseline)
 
 APP_NAME = "harness-console"
@@ -165,6 +165,7 @@ def judge_version(loaded: str, latest: str | None) -> dict:
     return {"state": "ok", "detail": loaded}
 
 
+POST_ASSET = re.compile(r"/post/(?:[A-Za-z0-9_][\w-]*/){0,3}[A-Za-z0-9_][\w-]*\.(?:svg|js)")
 SPA_PATHS = re.compile(r"^/(s/[^/]+|r/[^/]+|new|settings|docs|troubles(/new|/[^/]+/[^/]+/\d+)?)?$")
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
@@ -941,6 +942,10 @@ class App:
             return {"visible": True, "state": COND_YES, "reason": ""}
         got = state_of(requires)
         return {"visible": got["state"] != COND_NO, "state": got["state"], "reason": got["reason"]}  # 판정 불능은 숨기지 않는다
+
+    def a_account_limits(self, g, q, b):
+        """헤더의 계정 한도. 출처는 콘솔이 관리하는 세션이 받은 rate_limit_event(상태줄 입력의 rate_limits 는 쓰지 않는다)."""
+        return 200, {"windows": account_limits(self.store), "source": "rate_limit_event"}
 
     def a_flows(self, g, q, b):
         """갈래·단계·도구 데이터. cwd(아는 작업 폴더)를 주면 그 폴더·이 사용자 기준의 노출 여부(exposure)를 더한다."""
@@ -2205,6 +2210,7 @@ ROUTES = [
     ("GET", re.compile(rf"/api/sessions/{S}/files/download"), App.a_file_download),
     ("POST", re.compile(rf"/api/sessions/{S}/files/open"), App.a_file_open),
     ("POST", re.compile(r"/api/folders/worktree"), App.a_worktree),
+    ("GET", re.compile(r"/api/account-limits"), App.a_account_limits),
     ("GET", re.compile(r"/api/flows"), App.a_flows),
     ("GET", re.compile(r"/api/approvals"), App.a_approvals),
     ("GET", re.compile(r"/api/my-prs"), App.a_my_prs),
@@ -2415,6 +2421,8 @@ class Handler(BaseHTTPRequestHandler):
         else:
             rest = path[len("/static"):] if path.startswith("/static/") else path
             if re.fullmatch(r"/(fonts/)?[\w.-]+", rest):  # fonts/ 한 단계만 연다
+                name = rest[1:]
+            elif POST_ASSET.fullmatch(rest):  # Post 테마 장면 부품(post/people/mint/walk-1.svg 처럼 하위 폴더)
                 name = rest[1:]
         f = app.static_dir / name if name else None
         if not f or not f.is_file() or not platform_compat.is_within(f, app.static_dir):
