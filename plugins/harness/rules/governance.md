@@ -106,7 +106,7 @@ PR 검사는 이름이 `pr-checks` 인 job 하나이고, 비밀정보·문서·S
 Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험도를 판정한다. 위험 경로(`docs/ssot/`, `rules/`, `.github/` 등과
 `.github/human-merge-paths`)를 바꿀 때, 추가된 줄에 비밀값 모양이 있을 때, 다른 검사가
 실패했거나 진행 중일 때 그 PR 은 위험하다. `docs/spec/` 은 **새로 만든 Spec 파일(PR files 의 status 가 `added`)만** 위험 경로로 센다
-— 이미 있는 Spec 을 고치거나 옮기거나 지우는 것은 승인 대상이 아니다(#736). status 가 없거나 처음 보는 값이면 새 파일로 본다(검사 불능을 통과로 뭉개지 않는다). SRS(`docs/ssot/`)는 그대로 고치면 승인 대상이다.
+— 이미 있는 Spec 을 고치거나 옮기거나 지우는 것은 승인 대상이 아니다(#736). status 가 없거나 처음 보는 값이면 새 파일로 본다(검사 불능을 통과로 뭉개지 않는다). Spec 에 딸린 그림(`docs/spec/img/` 의 `.png` 등)은 판마다 새 파일로 생기므로 새 파일이어도 세지 않는다(#1005). SRS(`docs/ssot/`)는 그대로 고치면 승인 대상이다.
 바뀐 줄이 300 을 넘거나 파일이 10개를 넘는 것(크기)은 `size_gate`(기본 `false`) 때문에 **경고만** 한다. 결과의 `notes`·PR 코멘트의
 "참고(승인 필요 없음)" 로 보일 뿐 승인 사유가 아니다. `size_gate: true` 로 켠 저장소에서만 크기 초과가 승인 사유다. 위험하지 않은 PR 은 승인 없이 병합할 수 있고,
 위험한 PR 은 `.github/ssot-approvers` 의 사람 가운데 **작성자가 아닌 사람이 PR 의 마지막
