@@ -19,6 +19,11 @@ IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", 
 # 열기(open)를 허용하는 확장자. 실행 파일·스크립트·바로가기(.bat .cmd .exe .ps1 .js .vbs .lnk ...)는 여기 없다(위치 보기 reveal 만 된다).
 OPEN_EXTS = {".md", ".txt", ".csv", ".xlsx", ".pptx", ".docx", ".pdf", ".png", ".jpg", ".jpeg", ".gif"}  # .xlsm(매크로)·.xls·.svg(스크립트)는 위치 보기만
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", ".vscode", "dist", "build", ".mypy_cache", ".pytest_cache"}
+# AI 가 지시(시스템 프롬프트)로 읽는 파일은 사용자 산출물이 아니라서 목록에서 아예 뺀다(#998). 판정은 is_ai_instruction 한 곳이다.
+AI_FILE_NAMES = {"claude.md", "agents.md", "skill.md"}   # 어느 폴더에 있든 이 이름이면 뺀다(소문자로 비교)
+AI_DIR_NAMES = {".claude"}                                # 이 폴더 아래는 전부 뺀다(어느 깊이든)
+PLUGIN_DIR_NAMES = {"rules", "skills", "agents", "hooks"}  # plugins/<이름>/ 바로 아래 이 폴더들은 뺀다
+PROJECT_RULE_DIR = "rules"                                # Project Repository 루트의 검사 규칙 폴더(templates/·docs/ 는 산출물이라 안 뺀다)
 VERSIONED = re.compile(r"^(?P<stem>.+)_v(?P<ver>\d+(?:\.\d+)*)(?P<ext>\.[^.]+)$")
 
 MAX_LISTED = 300
@@ -71,6 +76,23 @@ def _version_key(ver: str) -> tuple[int, ...]:
     return tuple(int(x) for x in ver.split("."))
 
 
+def is_ai_instruction(rel: str) -> bool:
+    """작업 폴더 기준 상대 경로(/ 구분)가 AI 지시 파일인가. 이름·폴더 위치만 본다(내용은 읽지 않는다)."""
+    parts = [p for p in rel.replace("\\", "/").split("/") if p]
+    if not parts:
+        return False
+    low = [p.lower() for p in parts]
+    if low[-1] in AI_FILE_NAMES or any(p in AI_DIR_NAMES for p in low[:-1]):
+        return True
+    if len(low) > 1 and low[0] == PROJECT_RULE_DIR:
+        return True
+    if len(low) > 3 and low[0] == "plugins" and low[2] in PLUGIN_DIR_NAMES:
+        return True
+    if "memory" in low[:-1] and "projects" in low[:low.index("memory")]:  # Claude 메모리(.../projects/<폴더>/memory/*.md)
+        return True
+    return False
+
+
 def _entry(cwd: str, rel: str, changed: bool) -> dict | None:
     try:
         st = os.stat(os.path.join(cwd, *rel.split("/")))
@@ -88,7 +110,7 @@ def _rel_key(cwd: str, real_cwd: str, raw) -> tuple[str, str] | None:
         return None
     rel = os.path.relpath(os.path.realpath(full), real_cwd).replace("\\", "/")
     parts = rel.split("/")
-    if any(p in SKIP_DIRS for p in parts[:-1]) or parts[-1].startswith("~$"):
+    if any(p in SKIP_DIRS for p in parts[:-1]) or parts[-1].startswith("~$") or is_ai_instruction(rel):
         return None
     return os.path.normcase(rel), rel
 

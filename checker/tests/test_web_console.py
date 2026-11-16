@@ -5370,16 +5370,79 @@ def test_files_list_keeps_session_files_after_commit_with_relative_paths(tmp_pat
     (c.work / "b").mkdir()
     (c.work / "a" / "README.md").write_text("a", encoding="utf-8")
     (c.work / "b" / "README.md").write_text("b", encoding="utf-8")
-    (c.work / "CLAUDE.md").write_text("c", encoding="utf-8")
-    c.event("s1", "PostToolUse", tool_name="Write", tool_input={"file_path": str(c.work / "CLAUDE.md")})
+    (c.work / "NOTES.md").write_text("c", encoding="utf-8")
+    c.event("s1", "PostToolUse", tool_name="Write", tool_input={"file_path": str(c.work / "NOTES.md")})
     c.holder["status"] = "?? a/README.md\0?? b/README.md\0"
     body = c.call("GET", "/api/sessions/s1/files")[1]
-    assert {f["path"] for f in body["files"]} == {"a/README.md", "b/README.md", "CLAUDE.md"}
-    assert all(f["changed"] for f in body["files"] if f["path"] != "CLAUDE.md")
+    assert {f["path"] for f in body["files"]} == {"a/README.md", "b/README.md", "NOTES.md"}
+    assert all(f["changed"] for f in body["files"] if f["path"] != "NOTES.md")
     c.holder["status"] = ""  # 커밋한 뒤
     body = c.call("GET", "/api/sessions/s1/files")[1]
-    assert {f["path"] for f in body["files"]} == {"a/README.md", "b/README.md", "CLAUDE.md"}
+    assert {f["path"] for f in body["files"]} == {"a/README.md", "b/README.md", "NOTES.md"}
     assert not any(f["changed"] for f in body["files"])  # 커밋됐으니 '바뀜' 이 아니다
+
+
+def test_is_ai_instruction_hides_ai_files_but_keeps_user_deliverables():
+    import docfiles
+    hidden = ["CLAUDE.md", "sub/AGENTS.md", ".claude/settings.json", ".claude/commands/a.md", "x/.claude/y.md", "a/SKILL.md", "skill.md",
+              "plugins/harness/rules/branching.md", "plugins/harness/skills/start/SKILL.md", "plugins/harness/agents/a.md", "plugins/harness/hooks/hooks.json",
+              "rules/rules.yaml", "rules/README.md", "projects/-Users-me-proj/memory/MEMORY.md", "home/projects/x/memory/a.md"]
+    kept = ["docs/ssot/SRS_v0.1.md", "docs/ssot/개발사양서_v0.1.xlsx", "templates/SRS.xlsx", "docs/rules-guide.md", "docs/rules/a.md", "plugins/harness/README.md",
+            "plugins/harness/console/a.md", "notes/memory/a.md", "src/skills.md", "README.md", "env/adt.yaml"]
+    assert [p for p in hidden if not docfiles.is_ai_instruction(p)] == []
+    assert [p for p in kept if docfiles.is_ai_instruction(p)] == []
+
+
+def test_files_list_omits_ai_instruction_files_even_when_session_touched_them(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request)
+    for d in (".claude", "rules", "docs/ssot", "templates", "plugins/harness/skills/x"):
+        (c.work / d).mkdir(parents=True)
+    names = [".claude/settings.json", "CLAUDE.md", "rules/rules.yaml", "plugins/harness/skills/x/SKILL.md", "docs/ssot/SRS_v0.1.md", "templates/양식.md", "AGENTS.md"]
+    for n in names:
+        (c.work / n).write_text("x", encoding="utf-8")
+        c.event("s1", "PostToolUse", tool_name="Write", tool_input={"file_path": str(c.work / n)})
+    c.holder["status"] = "".join(f"?? {n}\0" for n in names)
+    body = c.call("GET", "/api/sessions/s1/files")[1]
+    assert {f["path"] for f in body["files"]} == {"docs/ssot/SRS_v0.1.md", "templates/양식.md"}
+
+
+def attach_chat(c, sid="s1"):
+    """대화 기록에 첨부 메타를 가진 내 말을 넣는다(콘솔이 보낸 것과 같은 모양: attachments.meta)."""
+    s = c.app.store.ensure(sid, str(c.work))
+    meta = attach_mod.meta(attach_mod.parse([att("화면.png", "image/png", PNG_1PX), att("계약서.pdf", "application/pdf", PDF_MIN)]))
+    with c.app.store.lock:
+        c.app.store.add_chat(s, "me", "봐 줘", attachments=meta)
+    return meta
+
+
+def test_files_list_shows_attachment_name_and_size_only_and_pick_persists(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request)
+    meta = attach_chat(c)
+    got = c.call("GET", "/api/sessions/s1/files")[1]["attachments"]
+    assert [(a["name"], a["type"], a["size"], a["listed"]) for a in got] == [("화면.png", "image/png", 48, True), ("계약서.pdf", "application/pdf", 49, True)]  # 기본은 목록에 넣음
+    assert set(got[0]) == {"id", "name", "type", "size", "listed"}  # 원본(data)은 없다
+    first = meta[0]["id"]
+    st, data, _ = c.call("POST", "/api/sessions/s1/attachments/pick", {"id": first, "listed": False})
+    assert st == 200 and [a["listed"] for a in data["attachments"]] == [False, True]
+    assert [a["listed"] for a in c.call("GET", "/api/sessions/s1/files?cache=1")[1]["attachments"]] == [False, True]  # 캐시도 바로 바뀐다
+    c.app.store.save(force=True)
+    saved = (c.state / "sessions.json").read_text(encoding="utf-8")
+    assert first in saved and PNG_1PX not in saved and PDF_MIN not in saved
+    assert c.call("POST", "/api/sessions/s1/attachments/pick", {"id": first, "listed": True})[1]["attachments"][0]["listed"] is True
+    c.app.store.get("s1")["attachPicks"]["gone"] = False  # 대화 기록에서 잘려 사라진 첨부의 옛 값
+    c.call("POST", "/api/sessions/s1/attachments/pick", {"id": first, "listed": True})
+    assert set(c.app.store.get("s1")["attachPicks"]) == {first}  # 다음에 고를 때 지워져 쌓이지 않는다
+    assert c.call("POST", "/api/sessions/s1/attachments/pick", {"id": "nope", "listed": True})[0] == 404
+    assert c.call("POST", "/api/sessions/s1/attachments/pick", {"id": first, "listed": "yes"})[0] == 400
+    assert c.call("POST", "/api/sessions/nope/attachments/pick", {"id": first, "listed": True})[0] == 404
+
+
+def test_attachment_pick_needs_cookie_like_other_session_posts(tmp_path, monkeypatch, request):
+    c = files_console(tmp_path, monkeypatch, request)
+    attach_chat(c)
+    assert c.call("POST", "/api/sessions/s1/attachments/pick", {"id": "x", "listed": True}, cookie=False)[0] == 401
+    assert c.call("POST", "/api/sessions/s1/attachments/pick", {"id": "x", "listed": True}, headers={"Origin": "http://evil.example"})[0] == 403
+    assert c.call("POST", "/api/sessions/s1/attachments/pick", {"id": "x", "listed": True}, json_type=False)[0] == 415
 
 
 def test_touched_files_skip_baseline_skip_dirs_and_report_truncation(tmp_path, monkeypatch, request):
@@ -7729,7 +7792,8 @@ def test_message_with_attachments_reaches_claude_as_content_array_and_history_ha
     # 기록: 이름·형식·크기만, 원본 없음
     chat = [x for x in c.call("GET", f"/api/sessions/{sid}")[1]["chat"] if x.get("role") == "me" and x.get("attachments")]
     assert chat[0]["text"] == "이 화면 봐 줘"
-    assert chat[0]["attachments"] == [{"name": "화면.png", "type": "image/png", "size": 48}, {"name": "계약서.pdf", "type": "application/pdf", "size": 49}]
+    assert [{k: v for k, v in a.items() if k != "id"} for a in chat[0]["attachments"]] == [{"name": "화면.png", "type": "image/png", "size": 48}, {"name": "계약서.pdf", "type": "application/pdf", "size": 49}]
+    assert all(isinstance(a["id"], str) and a["id"] for a in chat[0]["attachments"])
     c.app.store.save()
     saved = (c.state / "sessions.json").read_text(encoding="utf-8") if hasattr(c, "state") else ""
     assert PNG_1PX not in json.dumps(c.app.store.get(sid), ensure_ascii=False) and PDF_MIN not in saved and PNG_1PX not in saved

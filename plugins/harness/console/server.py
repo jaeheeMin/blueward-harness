@@ -1361,7 +1361,9 @@ class App:
             touched = list(s.get("touchedFiles") or [])
             truncated, gap = bool(s.get("touchedTruncated")), s.get("touchedGap")
         listed = docfiles.collect(cwd, touched, None if (why or not_repo) else paths)
-        out = {"files": listed}
+        with self.store.lock:
+            picked = attachments.listed(s.get("chat"), s.get("attachPicks"))
+        out = {"files": listed, "attachments": picked}
         self.annotate_upload(cwd, root, listed, why or ("git 저장소가 아니라 올렸는지 알 수 없어." if not_repo else ""))
         if truncated:
             out["truncated"] = True  # 쌓아 두는 상한에 닿아 더 있는 문서가 빠졌다
@@ -1372,6 +1374,26 @@ class App:
         elif isinstance(gap, dict) and now - gap.get("at", 0) <= GAP_NOTICE_SECONDS:  # 지금은 읽었다. 못 읽은 동안 커밋된 문서가 빠졌을 수 있다는 안내만 하고(note) 파일별 칩은 덮지 않는다. 영구 경고는 피하려 일정 시간만 알린다
             out["note"] = f"{time.strftime('%H:%M', time.localtime(gap['at']))} 에 git 상태를 읽지 못해 그 사이 커밋된 문서가 빠졌을 수 있어."
         return out
+
+    def a_attach_pick(self, g, q, b):
+        """첨부 항목을 '내가 만든 문서' 목록에 넣거나 뺀다(#998). 고른 값은 세션 데이터에 남는다. 첨부 원본은 건드리지도 저장하지도 않는다."""
+        s = self.get_session(g[0])
+        aid, on = b.get("id"), b.get("listed")
+        if not isinstance(aid, str) or not isinstance(on, bool):
+            raise HttpError(400, "id 와 listed(true/false) 가 필요해.")
+        with self.store.lock:
+            if not any(a["id"] == aid for a in attachments.listed(s.get("chat"), None)):
+                raise HttpError(404, "없는 첨부야.")
+            known = {a["id"] for a in attachments.listed(s.get("chat"), None)}
+            picks = {k: v for k, v in (s.get("attachPicks") or {}).items() if k in known}  # 대화 기록에서 잘려 사라진 첨부의 값은 쌓지 않는다
+            picks[aid] = on
+            s["attachPicks"] = picks
+            picked = attachments.listed(s.get("chat"), picks)
+        with self.lock:
+            self.files_cache.pop(("session-files", g[0]), None)
+            self.files_cache.pop(("session-files", s["id"]), None)
+        self.store.touch(s)
+        return 200, {"attachments": picked}
 
     def a_file_preview(self, g, q, b):
         _, real, rel = self.file_target(g[0], q.get("path", [""])[0])
@@ -2132,6 +2154,7 @@ ROUTES = [
     ("POST", re.compile(r"/api/reload-all"), App.a_reload_all),
     ("POST", re.compile(rf"/api/sessions/{S}/checks/{S}/skip"), App.a_check_skip),
     ("GET", re.compile(rf"/api/sessions/{S}/files"), App.a_session_files),
+    ("POST", re.compile(rf"/api/sessions/{S}/attachments/pick"), App.a_attach_pick),
     ("GET", re.compile(rf"/api/sessions/{S}/files/preview"), App.a_file_preview),
     ("GET", re.compile(rf"/api/sessions/{S}/files/raw"), App.a_file_raw),
     ("GET", re.compile(rf"/api/sessions/{S}/files/download"), App.a_file_download),

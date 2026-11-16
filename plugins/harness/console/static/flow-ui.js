@@ -571,6 +571,32 @@
       return box;
     }
 
+    /* ---------- 첨부한 파일(#998): 이름·크기만 보인다. 원본은 저장하지 않아 열기·미리보기·내려받기가 없다. 목록에 넣고 빼는 값은 서버가 기억한다 ---------- */
+    function attachBlock(session, items, onChange) {
+      var list = (items || []).filter(function (a) { return a && a.id; });
+      if (!list.length) return null;
+      function pickIt(a, on) {
+        api('POST', '/api/sessions/' + sid(session) + '/attachments/pick', { id: a.id, listed: on }).then(function (d) { onChange(kit.listOf(d, 'attachments')); },
+          function () { onChange(null); });
+      }
+      function row(a) {
+        var kind = /pdf/i.test(a.type) ? 'PDF' : '이미지';
+        return h('div', { class: 'drow attach', 'data-attach': a.id },
+          h('span', { class: 'dn' }, h('b', { class: 'wrap-any', text: a.name }), h('small', { text: [kind, a.size != null ? kit.fmtSize(a.size) : ''].filter(Boolean).join(' · ') })),
+          h('button', { type: 'button', class: 'pill line xs', text: a.listed ? '빼기' : '넣기', onClick: function () { pickIt(a, !a.listed); } }));
+      }
+      var on = list.filter(function (a) { return a.listed; }), off = list.filter(function (a) { return !a.listed; });
+      var box = h('div', { class: 'attach-list' }, h('span', { class: 'eb', text: '첨부한 파일' }));
+      on.forEach(function (a) { box.appendChild(row(a)); });
+      if (off.length) {
+        var det = h('details', { class: 'more docs-old' }, h('summary', { text: '뺀 첨부 ' + off.length + '개' }));
+        off.forEach(function (a) { det.appendChild(row(a)); });
+        box.appendChild(det);
+      }
+      box.appendChild(h('span', { class: 'dnote', text: '첨부한 파일은 콘솔에 저장하지 않아서 열 수 없어. 이름과 크기만 보여.' }));
+      return box;
+    }
+
     /* ---------- 산출물 화면 (/docs): 모든 세션이 만든 문서를 한 곳에서 ---------- */
     // 새 서버 API 는 없다. 세션마다 /files 를 불러 모은다(최근에 바뀐 세션 DOCS_PAGE_MAX 개까지).
     var DOCS_PAGE_MAX = 12;
@@ -588,7 +614,7 @@
         if (loading) return;
         loading = true; loadedAt = Date.now(); st.sig = sig();
         Promise.all(pool().map(function (s) {
-          return api('GET', '/api/sessions/' + sid(s) + '/files?cache=1').then(function (d) { return { session: s, files: kit.listOf(d, 'files'), unknown: !!(d && d.unknown), note: d && d.note ? String(d.note) : '' }; },
+          return api('GET', '/api/sessions/' + sid(s) + '/files?cache=1').then(function (d) { return { session: s, files: kit.listOf(d, 'files'), attachments: kit.listOf(d, 'attachments'), unknown: !!(d && d.unknown), note: d && d.note ? String(d.note) : '' }; },
             function (e) { return { session: s, files: [], unknown: true, failed: e }; });
         })).then(function (parts) { st.parts = parts; }).then(function () {
           loading = false;
@@ -747,6 +773,12 @@
         return box;
       }
 
+      // 첨부는 세션마다 따로 읽은 것이라 세션별로 한 칸씩. 넣고 뺀 결과가 오면 그 세션 몫만 바꿔 다시 그린다.
+      function attachBoxes() {
+        return (st.parts || []).map(function (p) {
+          return attachBlock(p.session, p.attachments, function (list) { if (list) p.attachments = list; else loadedAt = 0; if (alive) draw(); });
+        }).filter(Boolean);
+      }
       function title(eb, h1, line) {
         return h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: eb }), h('h1', { text: h1 }), line ? h('span', { class: 'line', text: line }) : null);
       }
@@ -760,7 +792,7 @@
         if (failed.length) notes.push(h('p', { class: 'note-attn', role: 'status', text: failed.length + '개 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
         else if (unsure.length) notes.push(h('p', { class: 'note-attn', role: 'status', text: unsure.length + '개 세션은 git 상태를 읽지 못해서 올림 여부를 "확인 못 함"으로 보여.' }));
         st.parts.forEach(function (p) { if (p.note && !p.unknown) notes.push(h('p', { class: 'note-muted', role: 'status', text: p.note })); });  // 칩은 그대로 두고 안내만 한 줄 더한다
-        if (!all.length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(h('section', { class: 'light dsec' }, notes, h('p', { class: 'note-muted', text: '아직 만든 문서가 없어.' }))); return; }
+        if (!all.length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(h('section', { class: 'light dsec' }, notes, h('p', { class: 'note-muted', text: '아직 만든 문서가 없어.' }), attachBoxes())); return; }
         // 시안 G-15: 방금 고객 양식 xlsx 를 뽑았으면(가장 최근 산출물이 그 파일) 목록 없이 결과 화면을 먼저 보인다. '문서 목록 보기' 로 나가면 시안 G-14 목록 화면.
         var fresh = st.view === 'list' ? null : L.latestFormXlsx(all);
         if (fresh && (!st.sel || st.sel === fresh.key || st.inResult)) {
@@ -780,7 +812,9 @@
           setTimeout(function () { if (alive && !st.sel) pick(first); }, 0);
         }
         var cur = selected();
-        sec.appendChild(h('div', { class: 'dgrid' }, listBox(all),
+        var lb = listBox(all);
+        attachBoxes().forEach(function (b) { lb.appendChild(b); });
+        sec.appendChild(h('div', { class: 'dgrid' }, lb,
           cur ? previewBox(cur) : h('div', { class: 'dprev' }, h('p', { class: 'empty-line', text: '왼쪽에서 문서를 골라 줘. 미리보기와 고치기 입력칸이 여기에 나와.' }))));
         page.appendChild(sec);
       }
@@ -805,7 +839,7 @@
       function fetchFiles(s) {
         if (loading) return;
         loading = true; st.at = Date.now();
-        api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { st.files = L.docList(kit.listOf(d, 'files')); st.error = null; st.unknown = d && d.unknown ? String(d.reason || '') : null; st.note = d && d.note ? String(d.note) : ''; st.truncated = !!(d && d.truncated); },
+        api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { st.files = L.docList(kit.listOf(d, 'files')); st.attach = kit.listOf(d, 'attachments'); st.error = null; st.unknown = d && d.unknown ? String(d.reason || '') : null; st.note = d && d.note ? String(d.note) : ''; st.truncated = !!(d && d.truncated); },
           function (e) { st.error = e; }).then(function () { loading = false; if (alive) { drawList(); autoPick(); } });
       }
       function selectFile(f) {
@@ -837,8 +871,15 @@
       }
       // 시안 G-07·16·18: 보여 줄 문서(또는 확인 못 했다는 말)가 없으면 세션 화면이 이 칸을 아예 두지 않는다.
       // 처음 불러오는 동안은 "불러오는 중이에요" 와 함께 칸을 두고, 다 읽은 뒤에 비어 있으면 거둔다.
-      function has() { return !st.files || !!(st.error || st.files.length || st.unknown != null || st.truncated || st.note); }
-      function drawList() { drawListBody(); if (onShape) onShape(); }
+      function has() { return !st.files || !!(st.error || st.files.length || (st.attach || []).length || st.unknown != null || st.truncated || st.note); }
+      function drawList() {
+        drawListBody();
+        if (last && st.files) {
+          var ab = attachBlock(last, st.attach, function (list) { if (list) st.attach = list; else st.at = 0; if (alive) drawList(); });
+          if (ab) listBox.appendChild(ab);
+        }
+        if (onShape) onShape();
+      }
       function drawListBody() {
         clear(listBox);
         if (st.error && !st.files) { listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.error, '문서 목록') })); return; }
