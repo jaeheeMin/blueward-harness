@@ -162,8 +162,10 @@ PreToolUse `*`(async)와 PreToolUse `AskUserQuestion`(동기)은 질문 도구�
 
 ```
 claude -p --input-format stream-json --output-format stream-json --verbose
-       --permission-prompt-tool stdio --plugin-dir <플러그인 폴더>
+       --permission-prompt-tool stdio --append-system-prompt <명령 단순 지시> --plugin-dir <플러그인 폴더>
 ```
+
+- **명령 단순 지시(#1018)**: `--append-system-prompt` 로 고정 문장(`managed.SIMPLE_COMMANDS_PROMPT`)을 덧붙인다 — 셸 명령은 하나씩, 명령 치환·반복문·여러 명령 잇기 대신 도구 호출을 나눠 쓰라는 것. 판정기는 `$( )`·반복문이 든 명령을 안전한지 알 수 없어 승인을 묻기 때문이다(2차 실사용 시험 11번 중 2번). 사용자 결정(11-17). 문장은 고정이라 사용자 입력이 섞이지 않고 셸 특수문자가 없다.
 
 - 작업 폴더를 `cwd` 로 띄운다. 터미널 창 없이 stdin/stdout 만 쓴다.
 - **되돌리기(#862)**: 띄울 때 환경에 `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=1` 을 더한다(없으면 `rewind_files` 가 `canRewind:false` 로 답한다) **[시험]**. 보내는 user 메시지마다 `uuid` 를 붙이고 대화의 내 말 항목(`chat[].uuid`)에 남긴다 — 이 uuid 가 되돌릴 지점이다. `POST /api/sessions/:id/rewind` body `{uuid, dryRun?}` 가 `control_request{subtype:"rewind_files", user_message_id, dry_run}` 로 넘어가고, 응답은 `{canRewind, error, filesChanged[], insertions, deletions, dryRun}` 이다. `canRewind:false`(체크포인트 없음 등)는 200 으로 claude 가 준 이유를 그대로 돌려준다. 터미널 세션·대화에 없는 uuid·끝난 세션·AI 가 일하는 중이면 409/404, claude 가 답하지 않으면 502(되돌려졌는지 알 수 없다고 적는다). 파일만 돌아가며 대화·git 은 그대로다(공식 문서: Bash 로만 바뀐 파일·서브에이전트 편집은 추적 안 됨). 화면은 내 말 아래 단추 → 확인 카드([되돌리기]/[취소]) → 결과 한 줄. 실제 되돌리기 결과는 대화에도 `note` 한 줄로 남긴다(됐음 `tone:ok` · 못 함 `bad` · 답 없음 `warn`, dry_run 은 남기지 않는다). AI 가 일하는 중·끝난 세션에서는 내 말마다 잠긴 단추를 붙이지 않고 단추를 그리지 않는다(시안 G-18).

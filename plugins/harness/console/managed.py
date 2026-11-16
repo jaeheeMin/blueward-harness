@@ -18,8 +18,13 @@ from hooks_api import tool_key
 from store import (CHECK_DONE, RequestLimit, Store, TITLE_PROMPT, chat_clean, elicitation_fields, mark_check, mcp_servers_of,
                    new_start_checks, prompt_title)
 
+# 콘솔 세션 AI 에게 덧붙이는 지시(#1018, 사용자 결정 11-17). 명령 치환·반복문·여러 명령 잇기는 판정기가 안전한지 알 수 없어
+# 승인 카드가 뜨므로, 명령을 하나씩 나눠 쓰게 한다. 고정 문자열이라 사용자 입력이 섞이지 않는다.
+SIMPLE_COMMANDS_PROMPT = ("셸 명령은 짧고 단순하게 하나씩 실행해. 명령 치환, 반복문, 여러 명령을 잇는 대신 도구 호출을 나눠 써. "
+                          "기다릴 일은 반복문으로 재지 말고 한 번 확인한 뒤 결과를 보고 다시 확인해. "
+                          "이렇게 해야 사용자가 승인 없이 빨리 진행할 수 있어.")
 FLAGS = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-         "--permission-prompt-tool", "stdio"]
+         "--permission-prompt-tool", "stdio", "--append-system-prompt", SIMPLE_COMMANDS_PROMPT]
 # 별칭 말고 정식 이름을 직접 적을 때 받는 모양. 인자로만 넘기고 셸을 거치지 않으며, 맨 앞이 영문·숫자라 옵션으로 읽히지 않는다.
 MODEL_NAME = re.compile(r"^claude-[a-z0-9][a-z0-9.\-]{0,62}(\[1m\])?$")
 # 화면에서 고를 수 있는 모델(claude --model 별칭). 빈 값은 Claude Code 설정을 따른다는 뜻이다.

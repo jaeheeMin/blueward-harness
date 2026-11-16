@@ -24,6 +24,8 @@
 
 보완 3(두 번째 실사용 시험): `git checkout <이름>`·`git switch <이름>` 은 이름 하나가 이 저장소의 로컬 브랜치(`refs/heads/<이름>` 파일 또는 `packed-refs`, worktree 는 commondir 까지)일 때만 safe(파일 이름·`--`·`-f`·여럿·원격 브랜치는 그대로 unknown/irreversible). 엔진 `e="$(…engine_spec.py)"` 대입은 명령 안 어느 조각 위치든 한 번 받고 `$e` 는 그 조각 뒤에서만 인정(두 번·앞쪽 사용·표지 글자 직접 쓰기는 unknown). 설치본 `grep -n -A25 …` 읽기는 고칠 것 없이 safe 였고(`_harness_read_ok` 는 grep 에도 적용) 시험으로 못 박았다. `echo "auto=$(gh api …)"`·`for i in $(seq …)` 는 unknown 유지. 시험: `test_1018_second_field_round_commands`.
 
+보완 4(11-17 사용자 결정): 2차 시험에서 남은 즉석 셸 스크립트 2개(`r=…; echo "$(gh api …)"`, `for i in $(seq …)`)는 판정기로 안전을 가릴 수 없어 unknown 그대로 두고, 대신 콘솔이 띄우는 세션에 `--append-system-prompt` 로 "셸 명령은 하나씩, 명령 치환·반복문 대신 도구 호출을 나눠 써" 고정 지시를 덧붙였다(`managed.SIMPLE_COMMANDS_PROMPT`). 터미널 세션에는 붙지 않는다.
+
 ## 공식 문서 근거(9번)
 
 code.claude.com/docs/en/hooks, PermissionRequest 의 "Permission update entries"(2026-11-16 확인):

@@ -896,6 +896,10 @@ def test_managed_launch_command_has_required_flags(tmp_path):
     assert args[args.index("--plugin-dir") + 1] == "/plug" and args[args.index("--model") + 1] == "haiku"
     assert "hi" not in args  # 사용자 입력은 stdin 으로만 간다
     assert "--dangerously-skip-permissions" not in args
+    # 명령을 하나씩 쓰라는 고정 지시가 붙는다(#1018). 셸 특수문자가 없어 어느 OS 에서도 그대로 넘어간다.
+    prompt = args[args.index("--append-system-prompt") + 1]
+    assert prompt == managed.SIMPLE_COMMANDS_PROMPT and "하나씩" in prompt
+    assert not set(prompt) & set('"$`|&<>^%')
 
 
 def launch(c, text):
