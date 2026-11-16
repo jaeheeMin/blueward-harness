@@ -147,11 +147,66 @@ def reap_launched(timeout: float) -> None:
         _launched.remove(proc)
 
 
+# 성공했지만 사용자에게 보여야 하는 안내(판이 다름·확인 못 함). main 이 성공 줄 뒤에 낸다(#999).
+notices: list[str] = []
+
+
+def plugin_version() -> str:
+    """지금 이 open.py 가 속한 플러그인의 판(plugin.json). 읽지 못하면 빈 문자열."""
+    try:
+        meta = json.loads((Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        return str(meta.get("version", ""))
+    except (OSError, ValueError):
+        return ""
+
+
+def version_key(text) -> tuple[int, ...] | None:
+    parts = text.split(".") if isinstance(text, str) else []
+    return tuple(int(p) for p in parts) if parts and all(p.isdigit() for p in parts) else None
+
+
+def judge_running(health: dict | None, mine: str) -> tuple[str, str]:
+    """떠 있는 우리 서버를 어떻게 할지. ("same"|"restart"|"keep", 안내). same 은 안내가 없다.
+    restart 는 서버가 플러그인보다 옛 판이고 대기 요청이 0 일 때만이다. 서버가 같거나 더 새 판이면 그대로 쓴다
+    (플러그인은 폴더마다 판이 다를 수 있어, 옛 폴더에서 열 때 새 서버를 내리거나 폴더를 오가며 계속 다시 띄우지 않게).
+    판이나 대기 수를 읽지 못하면 같은 판으로 치지 않고 확인 못 함으로 알린다."""
+    health = health or {}
+    ver, pending = health.get("version"), health.get("pending")
+    if version_key(mine) is None:
+        return "keep", "웹 콘솔 서버 판을 확인 못 했어(플러그인 판을 읽지 못함). 떠 있는 서버를 그대로 열었어."
+    if not isinstance(ver, str) or not ver:
+        # health 에 판이 없다. 이 판의 서버는 항상 판을 내므로 이전 형식이거나 판을 못 읽은 것이다. 옛 판인지 새 판인지 알 수 없어 확인 못 함으로 둔다.
+        return "keep", "웹 콘솔 서버 판을 확인 못 했어(응답에 판이 없음). 떠 있는 서버를 그대로 열었어."
+    if version_key(ver) is None:
+        return "keep", f"웹 콘솔 서버 판 '{ver}' 을 읽지 못해 확인 못 했어. 떠 있는 서버를 그대로 열었어."
+    if version_key(ver) >= version_key(mine):
+        return "same", ""
+    if isinstance(pending, bool) or not isinstance(pending, int):
+        # 판은 있는데 대기 수가 없는 서버(0.10.164 등 pending 을 넣기 전 판)도 여기로 온다
+        return "keep", f"웹 콘솔 서버가 옛 판이야({ver} → {mine}). 대기 중인 요청 수는 확인 못 해 끄지 않았어. 대기 요청을 처리한 뒤 open.py --stop 후 다시 열어 줘."
+    if pending > 0:
+        return "keep", (f"웹 콘솔 서버가 옛 판이야({ver} → {mine}). 대기 중인 승인·질문 {pending}건이 있어 다시 띄우지 않았어. "
+                        "처리한 뒤 open.py --stop 으로 끄고 /harness:open 을 다시 해 줘.")
+    return "restart", f"웹 콘솔 서버가 옛 판이라({ver} → {mine}) 새 판으로 다시 띄웠어."
+
+
 def ensure_server(port: int, wait: float = 20.0) -> str | None:
-    """서버가 떠 있게 한다. 실패하면 이유를, 성공하면 None 을 돌려준다."""
+    """서버가 떠 있게 한다. 실패하면 이유를, 성공하면 None 을 돌려준다.
+    이미 떠 있는 서버가 플러그인보다 옛 판이면 대기 요청이 없을 때 끄고 새로 띄운다(#999). 그 밖의 안내는 notices 에 남긴다."""
     state = probe(port)
     if state == "ours":
-        return None
+        _, health = request(port, "GET", "/api/health")
+        action, text = judge_running(health, plugin_version())
+        if action != "restart":
+            if text:
+                notices.append(text)
+            return None
+        stopped = stop_server(port)
+        if probe(port) == "ours":  # 못 껐다 -> 옛 서버를 그대로 열고 알린다
+            notices.append(f"웹 콘솔 서버가 옛 판이지만 끄지 못해 다시 띄우지 못했어({stopped}). 떠 있는 서버를 그대로 열었어.")
+            return None
+        notices.append(text)
+        state = probe(port)
     if state == "other":
         return f"포트 {port} 를 다른 프로그램이 쓰고 있어 웹 콘솔을 띄울 수 없어."
     wait_port_released(port, START_PORT_WAIT)  # 방금 끈 서버의 포트가 풀리기를 잠깐 기다린다. 끝내 안 풀려도 띄워 원인을 남기게 한다
@@ -212,6 +267,8 @@ def main(argv: list[str]) -> int:
     if result.status in ("made", "fixed"):
         line += " " + result.text
     print(line)
+    for text in notices:
+        print(text)  # 판이 다르거나 확인 못 한 안내. 콘솔은 열렸다
     if result.status == "failed":
         print(result.text)  # 콘솔은 이미 열렸다. 바로가기를 못 만든 것만 한 줄 더 알린다
     return 0

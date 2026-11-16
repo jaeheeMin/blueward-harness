@@ -540,6 +540,11 @@ class Store:
                 self.add_folder(cwd)
             return s
 
+    def pending_count(self) -> int:
+        """답을 기다리는 승인·질문 요청 수."""
+        with self.lock:
+            return sum(1 for r in self.requests.values() if r.status == "pending")
+
     def _make_room(self) -> None:
         """세션이 상한을 넘으면 오래된 끝난 세션부터, 그다음 쉬는 세션 순으로 지운다. 대기 요청이 있거나 도는 세션은 지우지 않는다."""
         over = len(self.sessions) - MAX_SESSIONS + 1
