@@ -7369,7 +7369,11 @@ def test_risk_reads_inside_harness_plugin_folder_are_safe_but_writes_and_outside
     assert c("Read", {"file_path": str(tmp_path / "conf" / "settings.json")}) == "unknown"
     assert c("Glob", {"pattern": "../../**/*.md", "path": str(plugin)}) == "unknown"
     assert c("Glob", {"pattern": "**/*.md", "path": str(tmp_path / "conf")}) == "unknown"
-    assert c("Bash", {"command": f"cat {skill}"}) == "unknown"  # 셸 읽기는 넓히지 않는다
+    # #1018: 셸 읽기(cat)도 설치본 안이면 묻지 않는다(Read 도구와 같은 기준). \ 가 든 경로와 설치본 밖은 그대로 묻는다
+    posix_skill = Path(skill).as_posix()
+    assert c("Bash", {"command": f'cat "{posix_skill}"'}) == "safe"
+    assert c("Bash", {"command": f'cat "{(tmp_path / "conf" / "settings.json").as_posix()}"'}) == "unknown"
+    assert c("Bash", {"command": f'cat "{(plugin / ".env").as_posix()}"'}) == "unknown"
 
 
 def _dir_link(link, target):

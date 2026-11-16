@@ -529,3 +529,36 @@ def test_1018_second_field_round_commands(tmp_path):
     # 4) 그대로 묻는 것
     assert run('r=1; echo "auto=$(gh api repos/a/b)"')[0] != "safe" and run('echo "auto=$(gh api repos/a/b)"')[0] != "safe"
     assert run('for i in $(seq 1 30); do echo $i; done')[0] != "safe" and run('for i in 1 2; do gh pr view $i; done')[0] != "safe"
+
+
+# ---- 점검(11-17): 작업 폴더 안 링크가 밖을 가리키면 읽기·쓰기 모두 밖으로 본다(platform_compat.is_within 이 링크를 풀어 막는다, 지키는 시험) ----
+def _dir_link(link: Path, target: Path) -> bool:
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        if os.name == "nt":  # 권한 없이 만들 수 있는 정션
+            import subprocess
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True, check=False)
+    return link.exists()
+
+
+def test_link_inside_work_folder_pointing_outside_is_not_safe(tmp_path):
+    work, outside = tmp_path / "work", tmp_path / "outside"
+    work.mkdir()
+    outside.mkdir()
+    (outside / "a.md").write_text("x", encoding="utf-8")
+    (work / "docs").mkdir()
+    (work / "docs" / "b.md").write_text("x", encoding="utf-8")
+    if not _dir_link(work / "lnk", outside):
+        pytest.skip("이 환경에서는 폴더 링크를 만들 수 없다")
+    cwd = str(work)
+    run = lambda cmd: risk.classify("Bash", {"command": cmd}, cwd)[0]  # noqa: E731
+    # 링크 아닌 폴더 안은 그대로 safe
+    assert run("cat docs/b.md") == "safe" and run("echo hi > docs/c.md") == "safe"
+    assert risk.classify("Write", {"file_path": str(work / "docs" / "c.md")}, cwd)[0] == "safe"
+    # 링크를 거치면 밖이다
+    assert run("cat lnk/a.md") != "safe"
+    assert run("echo hi > lnk/new.md") != "safe" and run("echo hi >> lnk/a.md") != "safe"
+    assert risk.classify("Write", {"file_path": str(work / "lnk" / "new.md")}, cwd)[0] == "irreversible"
+    assert risk.classify("Edit", {"file_path": str(work / "lnk" / "a.md"), "old_string": "x", "new_string": "y"}, cwd)[0] == "irreversible"
+    assert risk.classify("Read", {"file_path": str(work / "lnk" / "a.md")}, cwd)[0] != "safe"
