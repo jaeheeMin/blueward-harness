@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import uuid
 
 MAX_COUNT = 5                       # 한 번에 붙이는 개수
 MAX_IMAGE = 5 << 20                 # 이미지 한 장. Claude API 가 이미지 한 장을 5MB 까지 받는다
@@ -89,4 +90,19 @@ def content_blocks(text: str, attachments: list[dict]) -> list[dict]:
 
 def meta(attachments: list[dict]) -> list[dict]:
     """대화 기록에 남길 것. base64 원본은 넣지 않는다."""
-    return [{"name": a["name"], "type": a["media_type"], "size": a["size"]} for a in attachments]
+    return [{"id": uuid.uuid4().hex[:12], "name": a["name"], "type": a["media_type"], "size": a["size"]} for a in attachments]
+
+
+def listed(chat, picks) -> list[dict]:
+    """대화 기록의 첨부 메타에서 '내가 만든 문서' 칸에 보일 항목 [{id, name, type, size, listed}] (#998). 이름·형식·크기뿐이고 원본은 어디에도 없다.
+    picks 는 사용자가 고른 {id: 넣음 여부}. 고른 적 없으면 넣은 것으로 본다. id 가 없는 옛 기록은 가리킬 수 없어 뺀다."""
+    picks = picks if isinstance(picks, dict) else {}
+    out = []
+    for c in chat if isinstance(chat, list) else []:
+        if not isinstance(c, dict) or c.get("role") != "me":
+            continue
+        for a in c.get("attachments") or []:
+            if isinstance(a, dict) and isinstance(a.get("id"), str) and a.get("name"):
+                out.append({"id": a["id"], "name": str(a["name"]), "type": str(a.get("type") or ""), "size": a.get("size") if isinstance(a.get("size"), int) else None,
+                            "listed": picks.get(a["id"], True) is not False})
+    return out

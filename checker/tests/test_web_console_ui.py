@@ -785,6 +785,31 @@ const cases = {
     assert.deepStrictEqual(L.weekPool(ss, now, 20).map(s => s.id), ['new', 'mid']);
     assert.deepStrictEqual(L.weekPool(ss, now, 1).map(s => s.id), ['new']);
   },
+  async dom_docs_attach() {
+    // 첨부(#998): 이름·크기만 보이고 열기·내려받기·미리보기가 없다. 빼기·넣기는 서버에 보내고, 답으로 다시 그린다.
+    const s1 = { id: 's1', title: '계약 세션', cwd: '/w/p', updatedAt: 9, canSend: true };
+    const att = [{ id: 'a1', name: '화면.png', type: 'image/png', size: 2048, listed: true }, { id: 'a2', name: '계약서.pdf', type: 'application/pdf', size: 1000, listed: false }];
+    const files = { files: [{ path: 'docs/SRS_v0.1.md', kind: 'md', size: 100, mtime: 20, changed: true, versions: [] }], attachments: att };
+    const { kit, calls } = makeKit({ 'GET /api/sessions/s1/files': files, 'GET /api/sessions/s1/files/preview': { kind: 'md', text: '# SRS' },
+      'POST /api/sessions/s1/attachments/pick': b => { att.forEach(a => { if (a.id === b.id) a.listed = b.listed; }); return { attachments: att.map(a => Object.assign({}, a)) }; } }, [s1]);
+    window.BHMarkdown = { render: t => h('div', { text: t }) };
+    const root = h('div');
+    const view = loadUI(kit).docsPage(root); for (let i = 0; i < 6; i++) await tick();
+    const rows = () => find(root, e => e.attrs['data-attach']);
+    assert.deepStrictEqual(rows().map(e => e.attrs['data-attach']), ['a1', 'a2']);  // 뺀 것은 '뺀 첨부' 접힘 안에
+    assert.ok(root.textContent.includes('첨부한 파일') && root.textContent.includes('화면.png') && root.textContent.includes('2048B') && root.textContent.includes('뺀 첨부 1개'));
+    const first = rows()[0];
+    assert.ok(!first.textContent.includes('열기') && find(first, e => e.tag === 'a').length === 0);  // 열 수 없다
+    assert.deepStrictEqual(find(first, e => e.tag === 'button').map(e => e.textContent), ['빼기']);
+    assert.ok(root.textContent.includes('열 수 없어'));
+    find(first, e => e.tag === 'button')[0].click(); await tick(); await tick();
+    assert.ok(calls.some(c => c[0] === 'POST' && c[1] === '/api/sessions/s1/attachments/pick' && c[2].id === 'a1' && c[2].listed === false));
+    assert.ok(root.textContent.includes('뺀 첨부 2개'));
+    find(rows().filter(e => e.attrs['data-attach'] === 'a2')[0], e => e.tag === 'button')[0].click(); await tick(); await tick();
+    assert.ok(calls.some(c => c[2] && c[2].id === 'a2' && c[2].listed === true) && root.textContent.includes('뺀 첨부 1개'));
+    view.destroy();
+    process.exit(0);
+  },
   async dom_docs_page() {
     const s1 = { id: 's1', title: 'SRS 세션', cwd: '/w/p', updatedAt: 9, canSend: true, flowPr: { number: 6, state: 'OPEN' } };
     const files = { files: [

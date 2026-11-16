@@ -961,6 +961,7 @@ details.fold > [data-r]:empty { display: none; }
 .drow:first-of-type { border-top: 0; }
 .drow:hover { background: var(--stbg); }
 .drow.on { width: calc(100% + 16px); margin: 0 -8px; padding: 8px; background: var(--okbg); }
+.drow.attach, .drow.attach:hover, .sess-side .docs-list .drow.attach:hover { background: transparent; }  /* 첨부 줄은 눌러 여는 줄이 아니다(#998) */
 .drow.sub { margin-left: 14px; width: calc(100% - 14px); }
 .drow.sub.on { margin: 0 -8px 0 6px; width: calc(100% - 14px + 16px); }  /* 고른 하위 줄도 들여쓰기 유지 */
 .dn { flex: 1; min-width: 0; display: flex; flex-direction: column; }
