@@ -16,6 +16,7 @@ import context_usage
 import flows
 import platform_compat
 from docfiles import SKIP_DIRS
+from secrets_mask import mask_secrets
 
 LOG_LIMIT = 200
 REQUEST_KEEP = 200
@@ -322,6 +323,17 @@ def describe_suggestions(suggestions) -> list[str]:
     return out
 
 
+def session_suggestions(suggestions) -> list[dict]:
+    """'이 세션에서 다시 묻지 않기' 로 돌려줄 제안(#1018). 허용 규칙 추가(addRules, behavior allow)만 남기고 저장 위치를 session 으로 바꾼다.
+    공식 문서(hooks, Permission update entries): destination session 은 "in-memory only, discarded when the session ends" 이고
+    localSettings·projectSettings·userSettings 는 설정 파일에 쓴다. setMode(acceptEdits 등)는 세션 전체 쓰기 자동 허용이라 넘기지 않는다."""
+    out = []
+    for sug in suggestions or []:
+        if isinstance(sug, dict) and sug.get("type") == "addRules" and sug.get("behavior") == "allow" and isinstance(sug.get("rules"), list) and sug["rules"]:
+            out.append(dict(sug, destination="session"))
+    return out
+
+
 class Request:
     """승인 또는 질문 하나. 훅 연결이 이 객체의 event 를 기다린다."""
 
@@ -338,7 +350,8 @@ class Request:
         self.risk_note = ""  # 무엇을 하려는지 쉬운 말
         self.mcp: dict = {}  # MCP 도구 승인이면 claude 가 준 {"server", "display"}(훅으로만 온 요청은 비어 있고 도구 이름에서 읽는다)
         self.status = "pending"  # pending | answered | closed
-        self.outcome = ""  # 화면에 보여 줄 처리 결과
+        self.outcome = ""  # 화면에 보여 줄 처리 결과(한글 글, 판정에는 쓰지 않는다)
+        self.resolution = ""  # 처리 결과 코드: allow allow_session deny answered closed terminal handoff expired (MCP 질문은 accept decline cancel). 대기 중이면 빈 값(#1018).
         self.response = None  # 훅에 돌려줄 값(answered 일 때)
         self.answered_at = None
         self.sources: set[str] = set()  # 이 요청을 기다린 승인 경로("hook" | "control"). control 만 기다린 요청이면 늦게 온 훅 하나를 카드 없이 넘긴다(#952)
@@ -352,15 +365,18 @@ class Request:
             "kind": self.kind,
             "toolName": self.tool_name,
             "toolInput": self.tool_input,
-            "hasSuggestions": bool(self.suggestions),
-            "suggestionText": describe_suggestions(self.suggestions),
+            "hasSuggestions": bool(session_suggestions(self.suggestions)),
+            "suggestionText": describe_suggestions(session_suggestions(self.suggestions)),
             "status": self.status,
             "outcome": self.outcome,
+            "resolution": self.resolution,
             "createdAt": self.created,
             "answeredAt": self.answered_at,
         }
         if self.risk:
             data["risk"], data["riskNote"] = self.risk, self.risk_note
+        elif self.risk_note:
+            data["note"] = self.risk_note
         mcp = mcp_request_info(self.tool_name, self.mcp)
         if mcp:
             data["mcp"] = mcp
@@ -424,6 +440,8 @@ class Store:
                     # 비어도 rank 는 그대로 둔다 — 첫 요청은 이미 지나갔으니 대화 중간 말("응 계속 해")이 이름이
                     # 되지 않고 display_title 의 브랜치·스킬·폴더 이름으로 보이게 한다
                     s["title"] = " ".join(prompt_title(str(s.get("title") or "")).split())[:60]
+                if s.get("title"):
+                    s["title"] = mask_secrets(str(s["title"]))  # 옛 버전이 가리지 않고 저장한 제목(#1018)
                 self.sessions[s["id"]] = s
         self.folders = [p for p in data.get("folders", []) if isinstance(p, str)]
 
@@ -562,19 +580,21 @@ class Store:
             self.publish("removed", {"kind": "session", "id": s["id"]})
 
     def set_title(self, s: dict, title: str, rank: int) -> None:
-        title = " ".join(str(title).split())[:60]
+        title = mask_secrets(" ".join(str(title).split()))[:60]  # 비밀값은 저장 전에 가린다(#1018). 가린 뒤 자르니 값이 반쯤 남지 않는다
         if title and rank >= s.get("title_rank", 0):
             s["title"], s["title_rank"] = title, rank
 
     def add_log(self, s: dict, text: str) -> None:
         with self.lock:
-            s["log"].append({"time": self.clock(), "text": str(text)[:500]})
+            s["log"].append({"time": self.clock(), "text": mask_secrets(str(text))[:500]})  # 비밀값은 저장 전에 가린다(#1018)
             del s["log"][:-LOG_LIMIT]
 
     def add_chat(self, s: dict, role: str, text: str = "", **extra) -> bool:
         """대화 목록(s["chat"], 오래된 것부터)에 항목을 더한다. 바로 앞 항목이 같은 role·같은 글이면 더하지 않는다
         (훅과 콘솔 전송, 콘솔 마지막 블록과 Stop 보고가 같은 글을 두 번 알린다). 더했으면 True."""
-        text = str(text or "").strip()[:CHAT_TEXT_LIMIT]
+        text = mask_secrets(str(text or "")).strip()[:CHAT_TEXT_LIMIT]  # 비밀값은 저장 전에 가린다(#1018)
+        if isinstance(extra.get("fix"), str):
+            extra["fix"] = mask_secrets(extra["fix"])
         if role != "req" and not text:
             return False
         with self.lock:
@@ -710,25 +730,25 @@ class Store:
             self.requests.pop(r.rid, None)
             self.publish("removed", {"kind": "request", "id": r.rid})
 
-    def resolve(self, rid: str, response, outcome: str) -> bool:
-        """답변을 확정한다. 이미 닫혔으면 False(먼저 처리한 쪽이 이긴다)."""
+    def resolve(self, rid: str, response, outcome: str, code: str = "answered") -> bool:
+        """답변을 확정한다. 이미 닫혔으면 False(먼저 처리한 쪽이 이긴다). code 는 화면이 결과를 가르는 코드(Request.resolution)."""
         with self.lock:
             r = self.requests.get(rid)
             if r is None or r.status != "pending":
                 return False
-            r.status, r.response, r.outcome, r.answered_at = "answered", response, outcome, self.clock()
+            r.status, r.response, r.outcome, r.answered_at, r.resolution = "answered", response, outcome, self.clock(), code
             self._chat_answer(r)
             r.event.set()
         self.publish("request", {"id": rid, "sessionId": r.session_id})
         self.publish("session", {"id": r.session_id})
         return True
 
-    def close(self, rid: str, outcome: str) -> bool:
+    def close(self, rid: str, outcome: str, code: str = "closed") -> bool:
         with self.lock:
             r = self.requests.get(rid)
             if r is None or r.status != "pending":
                 return False
-            r.status, r.outcome, r.answered_at = "closed", outcome, self.clock()
+            r.status, r.outcome, r.answered_at, r.resolution = "closed", outcome, self.clock(), code
             self._chat_answer(r)
             r.event.set()
         self.publish("request", {"id": rid, "sessionId": r.session_id})
@@ -741,12 +761,12 @@ class Store:
             return sorted((r for r in self.requests.values() if r.session_id == sid and r.status == "pending"),
                           key=lambda r: r.created)
 
-    def close_session(self, sid: str, outcome: str, before: float | None = None) -> int:
+    def close_session(self, sid: str, outcome: str, before: float | None = None, code: str = "closed") -> int:
         """before 가 있으면 그 시각까지 만들어진 요청만 닫는다(늦게 도착한 이벤트가 새 요청을 닫지 않게)."""
         n = 0
         for r in self.pending_for(sid):
             if before is None or r.created <= before:
-                n += self.close(r.rid, outcome)
+                n += self.close(r.rid, outcome, code)
         return n
 
     def get_request(self, rid: str) -> Request | None:

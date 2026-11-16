@@ -37,7 +37,7 @@ from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, P
                      PERMISSION_VALUES, Manager)
 from standards_scan import customer_forms, has_standard_folder  # noqa: F401
 from store import (CHECK_SKIPPED, account_limits, MAX_PENDING_STOP, START_CHECK_IDS, Store, can_send, display_title, elicitation_fields, mark_check,
-                   public_session, remember_touched, set_baseline)
+                   public_session, remember_touched, session_suggestions, set_baseline)
 
 APP_NAME = "harness-console"
 COOKIE = "harness_console"
@@ -806,7 +806,7 @@ class App:
         data = r.public()
         s = self.store.get(r.session_id)
         data["sessionTitle"] = display_title(s) if s else ""
-        data["suggestions"] = r.suggestions
+        data["suggestions"] = session_suggestions(r.suggestions)  # 화면이 보여 주는 것은 실제로 돌려줄 제안(세션 한정 허용 규칙)뿐이다
         return 200, data
 
     def a_answer(self, g, q, b):
@@ -816,26 +816,30 @@ class App:
         if r.kind == "permission":
             decision = b.get("decision")
             if decision == "allow":
-                reply, outcome = {"behavior": "allow"}, "허용함"
+                reply, outcome, code = {"behavior": "allow"}, "허용함", "allow"
             elif decision == "allow_session":
                 if r.risk == "irreversible":
                     raise HttpError(400, "되돌릴 수 없는 일은 '다시 묻지 않기'로 허용할 수 없어. 이번만 허락해 줘.")
-                if not r.suggestions:
-                    raise HttpError(400, "이 요청에는 '다시 묻지 않기' 제안이 없어.")
-                reply, outcome = {"behavior": "allow", "updatedPermissions": r.suggestions}, "허용하고 이 세션에서 다시 묻지 않음"
+                # 공식 문서(hooks, Permission update entries): destination "session" 은 메모리에만 있다가 세션이 끝나면 사라진다.
+                # claude 가 준 제안은 설정 파일에 쓰는 위치(localSettings 등)나 setMode 일 수 있어, 허용 규칙만 session 으로 바꿔 돌려준다(#1018)
+                mine = session_suggestions(r.suggestions)
+                if not mine:
+                    raise HttpError(400, "이 요청에는 이 세션에서만 쓸 수 있는 '다시 묻지 않기' 규칙이 없어.")
+                reply, outcome, code = {"behavior": "allow", "updatedPermissions": mine}, "허용하고 이 세션에서 다시 묻지 않음", "allow_session"
             elif decision == "deny":
                 reason = b.get("reason") if isinstance(b.get("reason"), str) and b["reason"].strip() else (
                     "계획을 고쳐 달라고 했어." if r.tool_name == "ExitPlanMode" else "콘솔에서 거부했어.")
-                reply, outcome = {"behavior": "deny", "message": reason}, "거부함"
+                reply, outcome, code = {"behavior": "deny", "message": reason}, "거부함", "deny"
             else:
                 raise HttpError(400, "decision 은 allow, allow_session, deny 중 하나여야 해.")
             response = permission_reply(reply)
         elif r.kind == "elicitation":
             response, outcome = self.check_elicitation(r, b)
+            code = {"accept": "accept", "decline": "decline"}.get(response.get("action"), "cancel")
         else:
             response = question_reply(r.tool_input["questions"], self.check_answers(r, b.get("answers")))
-            outcome = "답변함"
-        if not self.store.resolve(r.rid, response, outcome):
+            outcome, code = "답변함", "answered"
+        if not self.store.resolve(r.rid, response, outcome, code):
             raise HttpError(409, f"이미 처리된 요청이야: {r.outcome}")
         return 200, r.public()
 

@@ -12,6 +12,7 @@
   "protected_file_prefixes": [".env"],
   "protected_file_suffixes": [".pth"],
   "protected_parent_suffixes": {"hooks": [".py", ".sh"]},
+  "read_protected": {"dir_names": [".git", ".claude"], "file_names": [".mcp.json"], "file_prefixes": [".env"]},
   "secret_name_patterns": [".env*", "*.env", "id_*", "id_rsa*", "*.p12", "*.pfx", "*.key*", "*.pem*", "*secret*", "*token*", "*credential*", "*.tfvars", "service-account*.json", ".netrc", "_netrc", ".git-credentials", ".npmrc"],
   "secret_name_samples": [".env", "x.env", "id_rsa", "id_ed25519", "x.pem", "x.key", "x.p12", "x.pfx", "credentials", "secret", "token", "x.tfvars", "service-account.json", ".netrc", "_netrc", ".git-credentials", ".npmrc"],
   "secret_path_suffixes": [".docker/config.json"],
@@ -40,6 +41,7 @@
     "setPrettyPrinterSetting", "fixEdits"
   ],
   "bash_plain_commands": {"pwd": [], "which": [], "echo": ["-n", "-e", "-ne", "-en"], "printf": []},
+  "bash_dash_text_commands": ["echo"],
   "bash_read": {
     "ls": {"paths": true, "options": ["-[laAhtrSdF1]+", "--color(=\\w+)?", "--all", "--almost-all", "--human-readable"]},
     "dir": {"paths": true, "options": ["--color(=\\w+)?"]},
@@ -74,11 +76,31 @@
     "shortlog": ["-s", "-n", "-e", "--summary", "--numbered", "--email", "--no-merges"]
   },
   "git_global_options_ok": ["--no-pager"],
+  "assign_blocked_names": ["PATH", "IFS", "BASH_ENV", "ENV", "PS4", "PS1", "CDPATH", "HOME", "SHELLOPTS", "BASHOPTS", "GLOBIGNORE", "PROMPT_COMMAND", "TMPDIR", "PYTHONPATH", "PYTHONHOME", "NODE_OPTIONS", "GIT_DIR", "GIT_WORK_TREE", "GIT_EXEC_PATH"],
+  "assign_blocked_prefixes": ["LD_", "DYLD_", "BASH_", "GIT_", "PYTHON", "NODE_"],
+  "git_worktree_list_options": ["--porcelain", "-v", "--verbose", "-z"],
+  "git_pull_options": ["--ff-only", "--rebase", "-r", "--no-rebase", "-q", "--quiet", "-v", "--verbose"],
   "git_fetch_options": ["-q", "--quiet", "-p", "--prune", "--tags", "--no-tags", "--all", "-v", "--verbose", "--"],
   "git_add_options": ["-A", "--all", "-u", "--update", "-v", "--verbose", "-n", "--dry-run", "--"],
   "git_commit_options": ["-m", "--message=.+", "-s", "--signoff", "-q", "--quiet", "--allow-empty", "--"],
   "git_force_flags": ["-f", "--force", "--discard-changes", "--merge", "-m", "-B", "-C"],
-  "gh_read": {"pr": ["view", "list", "checks", "diff", "status"], "issue": ["view", "list", "status"], "run": ["view", "list"]},
+  "gh_read": {"pr": ["view", "list", "checks", "diff", "status"], "issue": ["view", "list", "status"], "run": ["view", "list"],
+    "repo": ["view"], "label": ["list"], "release": ["list", "view"], "workflow": ["list", "view"], "auth": ["status"]},
+  "gh_read_blocked_flags": {"auth": ["-t", "--show-token"]},
+  "harness_engine_url": "git\\+https://github\\.com/jaeheeMin/blueward-harness@v\\d+\\.\\d+\\.\\d+",
+  "harness_scripts": {
+    "hooks/engine_spec.py": {},
+    "hooks/installed_version.py": {"options": ["--all", "--json", "--all-entries", "--remote"], "root_options": ["--loaded-root"], "value_patterns": {"--latest": "\\d+(\\.\\d+)*"}},
+    "hooks/activation_gate.py": {"subcommands": {"check": {"max_positional": 1, "paths": true}}},
+    "skills/start/reserve_number.py": {"subcommands": {"list": {}, "next": {}, "review-reason": {"value_patterns": {"--dev": "(DEV-)?\\d+"}}}}
+  },
+  "harness_modules": {
+    "pr_queue": {"options": ["--mine", "--all", "--json", "--verbose", "--team", "--no-ledger", "--quiet-empty"], "value_patterns": {"--repo": "[\\w.-]+/[\\w.-]+", "--pr": "\\d+", "--max-rows": "\\d+", "--days": "\\d+", "--stale-days": "\\d+"}},
+    "pr_approvals": {"options": ["--json", "--quiet-empty"], "value_patterns": {"--repo": "[\\w.-]+/[\\w.-]+"}},
+    "branch_growth": {"options": ["--json"], "value_patterns": {"--base": "[A-Za-z0-9][A-Za-z0-9._/-]*"}, "path_options": ["--repo"]},
+    "cli": {"options": ["--auto"], "path_options": ["--rules", "--root"], "max_positional": 50, "paths": true},
+    "role_check": {"path_options": ["--workbook", "--root", "--spec", "--spec-dir"], "value_options": ["--form", "--sheet", "--table", "--column", "--spec-section", "--spec-column", "--tile-column"]}
+  },
   "gh_write": {
     "pr": ["create", "merge", "close", "edit", "comment", "review", "ready", "reopen"],
     "issue": ["create", "close", "edit", "comment", "reopen", "delete", "transfer"]

@@ -938,7 +938,7 @@ class Manager:
             if (s.get("compact") or {}).get("state") == "running":
                 self._compact_failed(s, "세션 프로세스가 끝났어")
             s.update(managed_alive=False, starting=False, turn_running=False, ended=True)
-            self.store.close_session(s["id"], "세션이 끝나서 닫힘")
+            self.store.close_session(s["id"], "세션이 끝나서 닫힘", code="expired")  # 결과 코드(#1018)
             self.store.add_log(s, "세션 프로세스가 끝남")
         self.store.touch(s)
         self.store.touch_peers(s)

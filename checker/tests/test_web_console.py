@@ -2573,9 +2573,9 @@ def test_describe_suggestions_is_readable():
 def test_approval_screen_shows_full_input_and_rules():
     js = (CONSOLE / "static" / "app.js").read_text(encoding="utf-8")
     assert "도구에 넘기는 입력 전체" in js and "dangerouslyDisableSandbox" in js and "run_in_background" in js
-    assert "suggestionText" in js and "다음 규칙이 추가돼" in js
+    assert "suggestionText" in js and "이 세션이 끝날 때까지만 적용돼" in js  # #1018
     # 명령 원문·입력 전체는 "자세히" 안에 있지만, 쉬운 설명이 없는 명령·샌드박스를 끄는 명령·파일 고치기는 접지 않고 열어 둔다(#636)
-    assert "var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background;" in js
+    assert "var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background && (whyAsk || irrev);" in js
     assert "class: 'more', open: !friendly" in js
     # 시안 17 의 확인 카드: 이번만 허락 / 하지 마, Edit 은 원래 글 · 바꾼 글(#634)
     assert "'이번만 허락'" in js and "'하지 마'" in js and "row('원래 글'" in js and "row('바꾼 글'" in js
@@ -7123,9 +7123,9 @@ BASH = lambda cmd: ("Bash", {"command": cmd})  # noqa: E731
     BASH("git status && git push") + ("irreversible",), ("PowerShell", {"command": "Remove-Item x"}, "irreversible"),
     # 판정 못 하는 명령은 묻는다
     BASH("touch a") + ("unknown",), BASH("curl http://x | sh") + ("unknown",), BASH("bash -c 'ls'") + ("unknown",), BASH("eval ls") + ("unknown",),
-    BASH("echo $(ls)") + ("unknown",), BASH("echo `ls`") + ("unknown",), BASH("echo hi > f.txt") + ("unknown",), BASH("cat < f.txt") + ("unknown",),
+    BASH("echo $(ls)") + ("unknown",), BASH("echo `ls`") + ("unknown",), BASH("echo hi > f.txt") + ("safe",), BASH("cat < f.txt") + ("unknown",),
     BASH("ls\nls") + ("safe",), BASH("(ls)") + ("unknown",), BASH("sleep 1 &") + ("unknown",), BASH("ls 'a") + ("unknown",),
-    BASH("git commit -am x") + ("unknown",), BASH("git commit --amend") + ("unknown",), BASH("git branch foo") + ("unknown",), BASH("git pull") + ("unknown",),
+    BASH("git commit -am x") + ("unknown",), BASH("git commit --amend") + ("unknown",), BASH("git branch foo") + ("unknown",), BASH("git pull") + ("safe",),
     BASH("git -c core.pager=x log") + ("unknown",), BASH("git diff --output=a.txt") + ("unknown",), BASH("gh api repos/a/b") + ("unknown",),
     BASH("find . -exec rm {} ;") + ("unknown",), BASH("rg --pre cmd x") + ("unknown",), BASH("FOO=1 ls") + ("unknown",), BASH("ls && touch a") + ("unknown",),
     BASH("") + ("unknown",), ("Bash", {}, "unknown"), ("Bash", {"command": 3}, "unknown"), ("PowerShell", {"command": "Get-ChildItem"}, "unknown"),
@@ -7241,7 +7241,7 @@ def test_risk_classify_table(tool, tool_input, want):
     BASH("echo hi") + ("safe",), BASH("echo hi 2>&1") + ("safe",), BASH("echo hi > /dev/null") + ("safe",), BASH("printf hello") + ("safe",),
     BASH("echo $HOME") + ("unknown",), BASH("echo ${HOME}") + ("unknown",), BASH("echo %PATH%") + ("unknown",), BASH("echo ~") + ("unknown",), BASH("echo \"$USER\"") + ("unknown",),
     BASH("echo `id`") + ("unknown",), BASH("printf '%s' x") + ("unknown",), BASH("printf '%s' $HOME") + ("unknown",), BASH("echo hi >nul") + ("unknown",),
-    BASH("echo hi > nul") + ("unknown",), BASH("echo hi >NUL") + ("unknown",), BASH("echo hi 2>nul") + ("unknown",), BASH("echo -E hi") + ("unknown",),
+    BASH("echo hi > nul") + ("unknown",), BASH("echo hi >NUL") + ("unknown",), BASH("echo hi 2>nul") + ("unknown",), BASH("echo -E hi") + ("safe",),
     # ---- ⑧ 재귀 읽기 · --hidden ----
     BASH("grep -r x .") + ("unknown",), BASH("grep -R x .") + ("unknown",), BASH("grep --recursive x .") + ("unknown",), BASH("grep -rn x a.py") + ("unknown",),
     BASH("grep -n x a.py") + ("safe",), BASH("grep -n -e x a.py") + ("safe",), BASH("grep -A 3 x a.py") + ("safe",),
@@ -7250,7 +7250,7 @@ def test_risk_classify_table(tool, tool_input, want):
     BASH("rg -e foo a.py") + ("unknown",), BASH("rg --files") + ("unknown",),
     BASH("ls -R") + ("unknown",), BASH("ls -lR") + ("unknown",), BASH("ls -l") + ("safe",),
     # git 위치 인자 · 경로
-    BASH("git show HEAD:.env") + ("unknown",), BASH("git show HEAD:.git/config") + ("unknown",), BASH("git show HEAD:CLAUDE.md") + ("unknown",),
+    BASH("git show HEAD:.env") + ("unknown",), BASH("git show HEAD:.git/config") + ("unknown",), BASH("git show HEAD:CLAUDE.md") + ("safe",),
     BASH("git cat-file -p HEAD:.env") + ("unknown",), BASH("git cat-file -p HEAD") + ("unknown",),
     BASH("git diff -- .env") + ("unknown",), BASH("git diff -- secrets/token.txt") + ("unknown",), BASH("git log -p -- .env") + ("unknown",),
     BASH("git log -p -- id_rsa") + ("unknown",), BASH("git log -p -- ssh/id_ed25519") + ("unknown",), BASH("git ls-files .env") + ("unknown",),
@@ -7258,10 +7258,11 @@ def test_risk_classify_table(tool, tool_input, want):
     BASH("git show HEAD:src/a.py") + ("safe",), BASH("git diff -- src/a.py") + ("safe",), BASH("git log -p -- docs/a.md") + ("safe",),
     BASH("git remote get-url origin") + ("unknown",), BASH("git remote -v") + ("unknown",), BASH("git remote") + ("unknown",),
     BASH("git config user.email") + ("unknown",), BASH("git config --get remote.origin.url") + ("unknown",),
-    # 읽기 금지 경로(쓰기 보호 목록 + .git)
-    BASH("cat .git/config") + ("unknown",), BASH("cat .git/HEAD") + ("unknown",), BASH("cat CLAUDE.md") + ("unknown",), BASH("cat package.json") + ("unknown",),
-    BASH("cat .claude/settings.json") + ("unknown",), BASH("cat Makefile") + ("unknown",), BASH("head -n 3 conftest.py") + ("unknown",), BASH("cat .github/workflows/ci.yml") + ("unknown",),
-    BASH("cat .mcp.json") + ("unknown",), BASH("sed -n '1,3p' .gitconfig") + ("unknown",),
+    # 읽기 금지 경로(읽기 보호 목록: .git · .claude · .mcp.json · .env*). 쓰기 보호 목록의 나머지는 읽기가 safe(#1018)
+    BASH("cat .git/config") + ("unknown",), BASH("cat .git/HEAD") + ("unknown",), BASH("cat CLAUDE.md") + ("safe",), BASH("cat package.json") + ("safe",),
+    BASH("cat .claude/settings.json") + ("unknown",), BASH("cat Makefile") + ("safe",), BASH("head -n 3 conftest.py") + ("safe",), BASH("cat .github/workflows/ci.yml") + ("safe",),
+    BASH("cat .mcp.json") + ("unknown",), BASH("sed -n '1,3p' .gitconfig") + ("safe",), BASH("cat pyproject.toml") + ("safe",), BASH("cat AGENTS.md") + ("safe",),
+    BASH("cat plugins/harness/hooks/a.py") + ("safe",), BASH("cat .claude/commands/x.md") + ("unknown",), BASH("git log -p -- .claude/settings.json") + ("unknown",),
     # 비밀값 이름
     *[BASH(f"cat {n}") + ("unknown",) for n in (
         "id_ed25519", "id_ecdsa", "id_rsa", "id_rsa.pub", "a.p12", "server.key.bak", "server.key", "cert.pem.bak", "cert.pem", "my-secrets.txt", "api_token.txt", "TOKEN.md",
@@ -7356,7 +7357,8 @@ def test_risk_reads_inside_harness_plugin_folder_are_safe_but_writes_and_outside
     assert c("Read", {"file_path": str(harness / "0.10.284" / "skills" / "a.md")}) == "safe"  # 콘솔과 다른 판의 세션
     assert risk_mod.classify("Read", {"file_path": skill}, str(work))[0] == "unknown"  # 읽기 폴더를 안 넘기면 지금처럼 묻는다
     assert c("Edit", {"file_path": skill}) == "irreversible" and c("Write", {"file_path": skill}) == "irreversible"  # 쓰기는 그대로
-    assert c("Read", {"file_path": str(plugin / "hooks" / "guard.py")}) == "unknown"  # 훅 같은 보호 경로는 묻는다
+    assert c("Read", {"file_path": str(plugin / "hooks" / "guard.py")}) == "safe"  # 훅 파일도 읽기는 묻지 않는다(쓰기 보호 목록은 읽기에 적용하지 않는다, #1018)
+    assert c("Read", {"file_path": str(plugin / ".claude" / "settings.json")}) == "unknown"  # 읽기 보호 경로는 여전히 묻는다
     assert c("Read", {"file_path": str(plugin / ".env")}) == "unknown"  # 비밀값 모양
     assert c("Read", {"file_path": str(harness.parent / "other" / "x.md")}) == "unknown"  # 다른 플러그인
     assert c("Read", {"file_path": str(harness / ".." / "other" / "x.md")}) == "unknown"
@@ -8564,3 +8566,129 @@ def test_continue_bad_requests(mconsole):
     assert c.call("POST", f"/api/sessions/{managed_sid}/continue", {"mode": "fork", "text": "a"})[0] == 409
     c.app.store.get(sid)["cwd"] = ""
     assert c.call("POST", f"/api/sessions/{sid}/continue", {"mode": "resume", "text": "a"})[0] == 409
+
+
+# ---- #1018 승인 화면 자료: 사유 note, 결과 코드 resolution, 세션 한정 다시 묻지 않기, 우회 문장·비밀값 ----
+def test_plain_card_carries_the_korean_reason_as_note_and_irreversible_keeps_risk_note(browser):
+    browser.event("m1", "SessionStart")
+    holder = browser.hook_async("permission", {"session_id": "m1", "cwd": str(browser.work), "tool_name": "Bash", "tool_input": {"command": "touch a", "description": "Create a file"}})
+    req = wait_for(lambda: (browser.pending("m1") or [None])[0])
+    pub = browser.call("GET", f"/api/requests/{req.rid}")[1]
+    assert pub["note"] and "touch" in pub["note"] and "riskNote" not in pub and pub["resolution"] == ""  # 판정기 한글 사유, 처리 전엔 결과 코드 없음
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow"})
+    holder["t"].join(30)
+    assert browser.call("GET", f"/api/requests/{req.rid}")[1]["resolution"] == "allow"
+    holder = browser.hook_async("permission", {"session_id": "m1", "cwd": str(browser.work), "tool_name": "Bash", "tool_input": {"command": "rm a"}})
+    req = wait_for(lambda: (browser.pending("m1") or [None])[0])
+    pub = browser.call("GET", f"/api/requests/{req.rid}")[1]
+    assert pub["risk"] == "irreversible" and pub["riskNote"] and "note" not in pub
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "deny"})
+    holder["t"].join(30)
+    assert browser.call("GET", f"/api/requests/{req.rid}")[1]["resolution"] == "deny"
+
+
+def test_resolution_codes_for_each_way_a_request_ends(browser):
+    sugg = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "touch:*"}], "behavior": "allow", "destination": "localSettings"}]
+    h = browser.hook_async("permission", perm_body("m2", permission_suggestions=sugg))
+    req = wait_for(lambda: (browser.pending("m2") or [None])[0])
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow_session"})
+    h["t"].join(5)
+    assert browser.call("GET", f"/api/requests/{req.rid}")[1]["resolution"] == "allow_session"
+    h = browser.hook_async("question", ask_body("m2"))
+    q = wait_for(lambda: (browser.pending("m2") or [None])[0])
+    browser.call("POST", f"/api/requests/{q.rid}/answer", {"answers": {"색은?": "Red"}})
+    h["t"].join(5)
+    assert browser.call("GET", f"/api/requests/{q.rid}")[1]["resolution"] == "answered"
+    # 터미널에서 먼저 처리: 같은 도구의 PostToolUse 가 오면 terminal
+    h = browser.hook_async("permission", perm_body("m2", command="touch b"))
+    t = wait_for(lambda: (browser.pending("m2") or [None])[0])
+    browser.event("m2", "PostToolUse", tool_name="Bash", tool_input={"command": "touch b"})
+    h["t"].join(5)
+    assert browser.call("GET", f"/api/requests/{t.rid}")[1]["resolution"] == "terminal"
+    # 세션이 끝나서 닫힘
+    h = browser.hook_async("permission", perm_body("m2", command="touch c"))
+    e = wait_for(lambda: (browser.pending("m2") or [None])[0])
+    browser.event("m2", "SessionEnd")
+    h["t"].join(5)
+    assert browser.call("GET", f"/api/requests/{e.rid}")[1]["resolution"] == "expired"
+
+
+def test_allow_session_returns_only_allow_rules_stored_in_session_never_settings_or_mode(browser):
+    sugg = [{"type": "setMode", "mode": "acceptEdits", "destination": "session"},
+            {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "touch:*"}], "behavior": "allow", "destination": "localSettings"},
+            {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "rm:*"}], "behavior": "deny", "destination": "userSettings"},
+            {"type": "addDirectories", "directories": ["/x"], "destination": "projectSettings"}]
+    h = browser.hook_async("permission", perm_body("m3", permission_suggestions=sugg))
+    req = wait_for(lambda: (browser.pending("m3") or [None])[0])
+    pub = browser.call("GET", f"/api/requests/{req.rid}")[1]
+    assert pub["hasSuggestions"] and pub["suggestionText"] == ["이 세션: 허용 규칙 추가 - Bash(touch:*)"]  # 화면이 보여 주는 것 = 실제로 돌려줄 것
+    assert [x["destination"] for x in pub["suggestions"]] == ["session"] and "setMode" not in json.dumps(pub["suggestions"])
+    assert browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow_session"})[0] == 200
+    h["t"].join(5)
+    got = h["r"][1]["hookSpecificOutput"]["decision"]["updatedPermissions"]
+    assert got == [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "touch:*"}], "behavior": "allow", "destination": "session"}]
+
+
+def test_allow_session_without_usable_rules_is_refused_and_button_is_hidden(browser):
+    only_mode = [{"type": "setMode", "mode": "acceptEdits", "destination": "session"}]
+    h = browser.hook_async("permission", perm_body("m4", permission_suggestions=only_mode))
+    req = wait_for(lambda: (browser.pending("m4") or [None])[0])
+    pub = browser.call("GET", f"/api/requests/{req.rid}")[1]
+    assert pub["hasSuggestions"] is False and pub["suggestionText"] == []
+    assert browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow_session"})[0] == 400
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow"})
+    h["t"].join(5)
+    assert h["r"][1]["hookSpecificOutput"]["decision"] == {"behavior": "allow"}  # 이번만 허락은 그대로, 모드는 안 바뀐다
+
+
+def test_session_suggestions_pure_function():
+    from store import session_suggestions
+    assert session_suggestions(None) == [] and session_suggestions([{"type": "addRules", "behavior": "allow", "rules": []}]) == []
+    src = {"type": "addRules", "behavior": "allow", "rules": [{"toolName": "Read"}], "destination": "userSettings"}
+    assert session_suggestions([src]) == [dict(src, destination="session")] and src["destination"] == "userSettings"  # 원본은 바꾸지 않는다
+    assert session_suggestions(["x", 3, {"type": "replaceRules", "behavior": "allow", "rules": [{"toolName": "Bash"}]}]) == []
+
+
+def test_blocked_fix_drops_bypass_sentences_but_raw_reason_keeps_them(browser):
+    reason = ("푸시는 /harness:deliver 스킬이 수행합니다. 다음: /harness:deliver 를 실행하십시오. "
+              "이미 그 스킬 절차를 따르는 중이라면 명령 앞에 DELIVER=1 을 붙여 다시 실행하십시오.")
+    assert _blocked(browser, "m5", reason)[0] == 200
+    item, = _chat(browser, "m5")
+    assert item["fix"] == "/harness:deliver 를 실행하십시오." and "DELIVER" not in item["fix"]
+    assert "DELIVER=1" in item["text"]  # 원문은 검사 원문에 그대로
+    assert _blocked(browser, "m6", "막혔습니다.\n다음: 훅을 끄고 다시 하십시오.\n문서를 고치십시오. git commit --no-verify 로 건너뛰십시오.")[0] == 200
+    item, = _chat(browser, "m6")
+    assert "--no-verify" not in item["fix"] and "훅을 끄" not in item["fix"] and "문서를 고치십시오." in item["fix"]
+
+
+def test_strip_bypass_and_phrases_data():
+    import bypass_filter as bf
+    assert bf.PATTERNS  # 목록은 데이터 파일에서 읽는다
+    assert bf.strip_bypass("a 를 고치십시오. DELIVER=1 을 붙이십시오.") == "a 를 고치십시오."
+    assert bf.strip_bypass("DELIVER=1 로 우회하십시오.") == "" and bf.strip_bypass("") == "" and bf.strip_bypass("평범한 안내입니다.") == "평범한 안내입니다."
+    assert bf.strip_bypass("첫 줄\n--no-verify 를 쓰십시오.\n셋째 줄") == "첫 줄\n셋째 줄"
+    assert bf.strip_bypass("engine_spec.py 를 확인하십시오.") == "engine_spec.py 를 확인하십시오."  # 점이 든 이름에서 문장을 끊지 않는다
+
+
+def test_secrets_are_masked_before_title_log_and_chat_are_stored(browser):
+    fake = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2"  # 가짜 값
+    browser.event("m7", "UserPromptSubmit", prompt=f"배포해 줘 password=hunter2hunter token={fake}")
+    s = browser.call("GET", "/api/sessions/m7")[1]
+    assert "hunter2hunter" not in s["title"] and fake not in s["title"] and "••••" in s["title"]
+    blob = json.dumps(s, ensure_ascii=False)
+    assert "hunter2hunter" not in blob and fake not in blob
+    assert any("••••" in c["text"] for c in s["chat"] if c["role"] == "me")
+    assert all("hunter2hunter" not in l["text"] for l in s["log"])
+    browser.event("m7", "SessionStart", session_title="api_key=abcd1234efgh5678")
+    assert "abcd1234efgh5678" not in json.dumps(browser.call("GET", "/api/sessions/m7")[1], ensure_ascii=False)
+    assert _blocked(browser, "m8", "토큰 token=zzzz9999yyyy 가 보여 막았습니다.\n다음: token=zzzz9999yyyy 를 지우십시오.")[0] == 200
+    item, = _chat(browser, "m8")
+    assert "zzzz9999yyyy" not in item["text"] and "zzzz9999yyyy" not in item["fix"]
+
+
+def test_secret_rules_json_is_the_one_source_for_server_masks():
+    import secrets_mask
+    import trouble
+    assert trouble.mask_secrets is secrets_mask.mask_secrets and trouble.SECRET_ASSIGN is secrets_mask.SECRET_ASSIGN  # trouble.py 에 따로 둔 사본이 없다
+    rules = json.loads((CONSOLE / "secret_rules.json").read_text(encoding="utf-8"))
+    assert secrets_mask.MASK == rules["mask"] and len(secrets_mask.SECRET_OTHER) == len(rules["other"]) >= 8

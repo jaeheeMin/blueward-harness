@@ -164,8 +164,21 @@
     [/\b(?:pre_write_guard|mcp_source_guard|agent_delegation_guard)\b/g, '하네스 검사']
     // 이름 모양만 보고 바꾸지 않는다("jaeheeMin/blueward-harness" 같은 저장소 이름·고유 명사가 망가진다). 아는 이름만 바꾼다.
   ];
+  /* ---- 우회 안내 문장 빼기(#1018) ----
+     훅 사유에 든 "DELIVER=1 을 붙여 다시 실행" 같은 우회 문장은 카드와 "그렇게 고쳐 줘" 로 가는 글에서 뺀다. 원문은 "검사 원문" 안에만 남는다.
+     목록은 서버 bypass_phrases.json 과 같다(시험이 맞춰 본다). */
+  var BYPASS_PATTERNS = ['DELIVER\\s*=\\s*1', '--no-verify', '--no-gpg-sign', 'core\\.hooksPath', '(훅|hook|검사|가드)[^.\\n]{0,30}(끄|끈|꺼|비활성|우회|건너뛰|무시)', '우회', '\\bbypass'];
+  var BYPASS_RX = BYPASS_PATTERNS.map(function (p) { return new RegExp(p, 'i'); });
+  function stripBypass(text) {
+    var out = [];
+    String(text == null ? '' : text).split('\n').forEach(function (line) {
+      var joined = line.split(/(?<=[.!?。])\s+/).filter(function (s) { return !BYPASS_RX.some(function (r) { return r.test(s); }); }).join(' ').trim();
+      if (joined || !line.trim()) out.push(joined);
+    });
+    return out.join('\n').trim();
+  }
   function plainReason(text) {
-    var out = String(text == null ? '' : text);
+    var out = stripBypass(text);
     PLAIN_WORDS.forEach(function (r) { out = out.replace(r[0], r[1]); });
     return out;
   }
@@ -709,7 +722,7 @@
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice,
     formsNotice: formsNotice, FORMS_MISSING_SHORT: FORMS_MISSING_SHORT, FORMS_MISSING_TEXT: FORMS_MISSING_TEXT,
-    plainReason: plainReason, plainAction: plainAction, hideSkillLine: hideSkillLine, reloadStrip: reloadStrip, reloadResult: reloadResult,
+    plainReason: plainReason, stripBypass: stripBypass, BYPASS_PATTERNS: BYPASS_PATTERNS, plainAction: plainAction, hideSkillLine: hideSkillLine, reloadStrip: reloadStrip, reloadResult: reloadResult,
     startChecks: startChecks, autoChecksOpen: autoChecksOpen, normPath: normPath, otherSessions: otherSessions, workingSessions: workingSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
     mergeApprovals: mergeApprovals, prBadge: prBadge, prNeedsFix: prNeedsFix, runningSubCount: runningSubCount,

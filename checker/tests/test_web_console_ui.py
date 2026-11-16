@@ -1499,18 +1499,106 @@ def test_work_screen_question_shows_each_sentence_once(tmp_path):
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_work_screen_permission_card_and_edit_names(tmp_path):
     bash = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "cwd": "C:/w/proj",
-            "toolInput": {"command": "rm x.xlsx", "description": "옛 파일 지우기"}, "permissionSuggestions": [1], "suggestionText": ["Bash(rm *) 허용 규칙 추가"]}
+            "toolInput": {"command": "rm x.xlsx", "description": "옛 파일 지우기"}, "permissionSuggestions": [1], "note": "touch 는 목록에 없어", "suggestionText": ["Bash(rm *) 허용 규칙 추가"]}
     edit = {"id": "p2", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Edit", "toolInput": {"file_path": "docs/a.md", "old_string": "가", "new_string": "나"}}
     risky = {"id": "p3", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "curl x", "dangerouslyDisableSandbox": True}}
     sess = [_session("s1", pendingRequestIds=["p1", "p2", "p3"])]
     got = _smoke(tmp_path, "r/p1", sess, [bash, edit, risky])
-    for need in ("확인 필요", "옛 파일 지우기", "자세히 (명령 원문)", "이번만 허락", "하지 마", "다음 규칙이 추가돼", "도구에 넘기는 입력 전체"):
+    for need in ("확인 필요", "옛 파일 지우기", "자세히 (명령 원문)", "이번만 허락", "하지 마", "이 세션이 끝날 때까지만 적용돼", "묻는 이유: touch 는 목록에 없어", "도구에 넘기는 입력 전체"):  # #1018
         assert need in got["text"], need
     assert "<details.more>" in got["dump"] and "<details[open].more>" not in got["dump"]  # 쉬운 설명이 있는 명령은 원문을 접어 둔다
     got = _smoke(tmp_path, "r/p2", sess, [bash, edit, risky])
     assert "원래 글가바꾼 글나" in got["text"] and "<details[open].more>" in got["dump"]  # #634 이름, 고치는 일은 열어 둔다
     got = _smoke(tmp_path, "r/p3", sess, [bash, edit, risky])
     assert "샌드박스를 끄고 실행해" in got["text"] and "<details[open].more>" in got["dump"]  # 위험 표시는 접지 않는다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_1018_card_explains_with_korean_reason_and_moves_ai_description_into_details(tmp_path):
+    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "note": "touch 는 목록에 없어",
+           "toolInput": {"command": "touch a", "description": "Create the file"}, "hasSuggestions": True, "suggestionText": ["이 세션: 허용 규칙 추가 - Bash(touch:*)"]}
+    got = _smoke(tmp_path, "r/p1", [_session("s1", pendingRequestIds=["p1"])], [req])
+    text = got["text"]
+    assert text.index("묻는 이유: touch 는 목록에 없어") < text.index("자세히 (명령 원문)") < text.index("Create the file")  # 영어 설명은 "자세히" 안에만
+    assert "<span.sm>Create the file" not in got["dump"] and "<details.more>" in got["dump"]
+    nonote = dict(req, id="p2", note="")
+    got = _smoke(tmp_path, "r/p2", [_session("s1", pendingRequestIds=["p2"])], [nonote])
+    assert "묻는 이유" not in got["text"] and "<details[open].more>" in got["dump"]  # 쉬운 말 이유가 없으면 AI 설명이 유일한 안내라 펼쳐 둔다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_1018_just_handled_request_title_is_the_result_not_already_handled(tmp_path):
+    perm = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "touch a"}, "note": "x"}
+    sess = [_session("s1", pendingRequestIds=["p1"])]
+    ok = _smoke(tmp_path, "r/p1", sess, [perm], extra={"POST /api/requests/p1/answer": {}}, actions=[{"click": "[data-decide=allow]"}])
+    assert "허락했어." in ok["text"] and "이미 처리된 요청이야" not in ok["text"]
+    no = _smoke(tmp_path, "r/p1", sess, [perm], extra={"POST /api/requests/p1/answer": {}}, actions=[{"click": "[data-decide=deny]"}])
+    assert "하지 말라고 했어." in no["text"] and "이미 처리된 요청이야" not in no["text"]
+    plan = {"id": "pl1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "ExitPlanMode", "toolInput": {"plan": "# 계획\n- a"}}
+    ok = _smoke(tmp_path, "r/pl1", [_session("s1", pendingRequestIds=["pl1"])], [plan], extra={"POST /api/requests/pl1/answer": {}}, actions=[{"click": "[data-decide=allow]"}])
+    assert "이 계획대로 진행하기로 했어." in ok["text"] and "이미 처리된 계획이야" not in ok["text"]
+    old = dict(perm, status="answered", resolution="allow", outcome="허용함")  # 다시 열어 본 처리된 요청은 예전 글 그대로
+    got = _smoke(tmp_path, "r/p1", sess, [old])
+    assert "이미 처리된 요청이야" in got["text"] and "허락했어." in got["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+@pytest.mark.parametrize("res, title", [("allow", "허락했어."), ("allow_session", "허락했어."), ("deny", "하지 말라고 했어."), ("closed", "닫힌 요청"),
+                                       ("terminal", "터미널에서 처리됨"), ("handoff", "터미널로 넘어감"), ("expired", "닫힌 요청"), ("", "닫힌 요청"), ("zzz", "닫힌 요청")])
+def test_1018_result_comes_from_resolution_code_not_korean_outcome_text(tmp_path, res, title):
+    # 한글 outcome 이 무엇이든(예: 허용함) 코드가 없으면 허락으로 읽지 않는다 — 코드만 본다
+    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "closed" if res in ("closed", "terminal", "handoff", "expired", "") else "answered",
+           "toolName": "Bash", "toolInput": {"command": "touch a"}, "outcome": "허용함", "resolution": res}
+    got = _smoke(tmp_path, "r/p1", [_session("s1")], [req])
+    assert title in got["text"]
+    if res in ("", "zzz"):
+        assert "허락했어." not in got["text"]
+    if res == "allow_session":
+        assert "이 세션에서는 같은 작업을 다시 묻지 않아." in got["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_1018_bypass_phrases_js_matches_json_and_strips_same_as_server():
+    import json
+    import subprocess
+    js = r"""
+const L = require(process.argv[1] + '/flow-logic.js');
+const s = ['a 를 고치십시오. DELIVER=1 을 붙이십시오.', 'DELIVER=1 로 우회하십시오.', '첫 줄\n--no-verify 를 쓰십시오.\n셋째 줄', 'engine_spec.py 를 확인하십시오.', '훅을 끄고 다시 하십시오.', '평범해.'];
+process.stdout.write(JSON.stringify({ patterns: L.BYPASS_PATTERNS, out: s.map(L.stripBypass), plain: L.plainReason('DELIVER=1 을 붙여 다시 실행하십시오.') }));
+"""
+    run = subprocess.run([NODE, "-e", js, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert run.returncode == 0, run.stderr
+    got = json.loads(run.stdout)
+    rules = json.loads((STATIC.parent / "bypass_phrases.json").read_text(encoding="utf-8"))
+    assert got["patterns"] == rules["patterns"]  # 화면 목록과 서버 데이터 파일이 같은 목록
+    import sys
+    sys.path.insert(0, str(STATIC.parent))
+    import bypass_filter
+    samples = ['a 를 고치십시오. DELIVER=1 을 붙이십시오.', 'DELIVER=1 로 우회하십시오.', '첫 줄\n--no-verify 를 쓰십시오.\n셋째 줄', 'engine_spec.py 를 확인하십시오.', '훅을 끄고 다시 하십시오.', '평범해.']
+    assert got["out"] == [bypass_filter.strip_bypass(x) for x in samples]
+    assert got["plain"] == ""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_1018_block_card_hides_bypass_sentence_and_does_not_send_it_to_ai(tmp_path):
+    reason = "푸시는 /harness:deliver 스킬이 수행합니다.\n다음: /harness:deliver 를 실행하십시오. 이미 그 스킬 절차를 따르는 중이라면 명령 앞에 DELIVER=1 을 붙여 다시 실행하십시오."
+    chat = [{"t": 1, "role": "block", "text": reason, "hook": "pre-bash-git-guard", "kind": "blocked", "fix": "/harness:deliver 를 실행하십시오."}]
+    s = _session("s1", chat=chat, canSend=True)
+    got = _smoke(tmp_path, "s/s1", [s], extra={"POST /api/sessions/s1/messages": {}}, actions=[{"click": "[data-block-send]"}])
+    assert "DELIVER=1" not in got["text"] and "/harness:deliver 를 실행하십시오." in got["text"]
+    assert got["posts"] and "DELIVER" not in got["posts"][0][2] and "deliver 를 실행하십시오" in got["posts"][0][2]
+    raw = _smoke(tmp_path, "s/s1", [s], actions=[{"click": "[data-block-raw]"}])
+    assert "DELIVER=1" in raw["text"]  # 원문은 "검사 원문" 안에만
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_1018_session_title_and_log_lines_are_masked_on_screen(tmp_path):
+    fake = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2"
+    s = _session("s1", title=f"배포 token={fake} password=hunter2hunter", log=[{"time": 1, "text": f"요청: password=hunter2hunter {fake}"}])
+    for route in ("s/s1", "/"):
+        got = _smoke(tmp_path, route, [s])
+        assert "hunter2hunter" not in got["text"] and fake not in got["text"], route
+    assert "••••" in _smoke(tmp_path, "s/s1", [s])["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")

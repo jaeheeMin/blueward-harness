@@ -435,10 +435,10 @@ def test_ai_draft_is_written_from_session_chat_with_secrets_hidden(tmp_path, mon
             return draft_out(solution="deliver 로 푸시\npassword: hunter2hunter2")
         c.app.trouble_claude = fake
         status, body, _ = c.call("POST", "/api/trouble/ai-draft", {"sessionId": "s1"})
-        assert status == 200 and body["hidden"] == 2
-        assert "client_secret=Ab12cd34ef56" not in seen["prompt"] and trouble.HIDDEN_LINE in seen["prompt"] and "푸시해 줘" in seen["prompt"]  # 모델에 보내기 전에 가린다
+        assert status == 200 and body["hidden"] == 1  # 대화의 client_secret 은 저장 전에 이미 가려져(#1018) 가린 줄은 모델이 쓴 password 하나
+        assert "client_secret=Ab12cd34ef56" not in seen["prompt"] and "client_secret=" + trouble.MASK in seen["prompt"] and "푸시해 줘" in seen["prompt"]  # 모델에 보내기 전에 가린다(#1018)
         d = c.call("GET", "/api/trouble/draft?id=" + body["id"])[1]
-        assert d["repo"] == SLUG and d["stage"] == "개발" and d["title"] == "맨손 git push 가 막힘" and d["solved"] is True and d["hidden"] == 2
+        assert d["repo"] == SLUG and d["stage"] == "개발" and d["title"] == "맨손 git push 가 막힘" and d["solved"] is True and d["hidden"] == 1
         assert "hunter2" not in d["solution"] and trouble.HIDDEN_LINE in d["solution"]  # 모델이 쓴 글도 가린다
         assert not trouble.scan_secrets({k: d[k] for k in ("title", "symptom", "cause", "solution")})
     finally:
