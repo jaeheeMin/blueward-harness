@@ -2725,6 +2725,19 @@ def test_check_result_drops_rule_breaking_choices_and_work_method_questions(tmp_
     assert got["메인 화면은 어떻게 보여 줄까?"] == ["메인 화면 직접 만들기", "목록 먼저"]  # '메인' 만으로는 걸리지 않는다
 
 
+def test_check_result_keeps_sap_business_questions_about_approval_inspection_and_main_screen(tmp_path):
+    # 558 점검(#1011): 업무 결재·품질 검사 생략, 메인 화면, 파일 올리기, 푸시 알림, 구매요청(PR) 은 SAP 업무 결정이라 남아야 한다
+    keep = ["main 화면에 바로 보여 줄까?", "Main 메뉴에서 직접 들어가게 할까?", "구매 승인 단계를 생략할 수 있게 할까?",
+            "결재 승인을 건너뛰는 예외 사용자를 둘까?", "검사 항목 중 생략할 것이 있어?", "품질 검사를 생략하는 자재 유형이 있어?",
+            "리뷰 화면을 생략하고 바로 저장할까?", "엑셀 파일을 올리는 방식은 어떻게 할까?", "푸시 알림 방식은 무엇으로 할까?",
+            "PR 승인 단계를 생략할까?", "PR 을 올리는 방식은?", "구매요청(PR) 승인 없이 PO 를 만들게 할까?"]
+    data = {"understood": "u", "candidates": [], "extraQuestions": [{"question": q, "options": ["예", "아니오"]} for q in keep]}
+    out = analysis.check_result(data, str(tmp_path))
+    assert [q["question"] for q in out["extraQuestions"]] == keep
+    for bad in ("승인 없이 병합한다", "검토 없이 머지한다", "main 브랜치에 바로 올린다", "메인 브랜치에 직접 넣어"):
+        assert analysis.break_rule(bad), bad
+
+
 def test_analysis_block_file_has_a_reason_for_every_pattern_and_compiles():
     data = json.loads((Path(analysis.__file__).with_name("analysis_block.json")).read_text(encoding="utf-8"))
     for group in ("text", "question"):

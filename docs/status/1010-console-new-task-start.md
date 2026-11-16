@@ -27,6 +27,11 @@
 
 분석 지시문의 "관리자가 프로젝트 구조 만들기를 해야 한다" 와 `flow-logic.js projectNotice` 의 "관리자가 처음에 한 번 기본 폴더 구조를 만들어 줘야 해" 는 이 결정(팀원은 관리자에게 말한다)과 이미 맞아서 고치지 않았다.
 
+### 558 점검 반영 (머리 765bfd3 뒤)
+
+- 시안 대조 G-03 이 23/24 로 떨어졌다: 시안용 가짜 콘솔(`checker/tests/console_mockup/fake_console/serve.py` 의 `fake_gh`)이 `gh api repos/{owner}/{repo} --jq .permissions.admin` 을 몰라 "확인 못 함" 화면이 그려졌다. 시안 G-03 은 관리자 화면이라 `true` 를 답하게 했다.
+- `analysis_block.json` 이 SAP 업무 질문을 지웠다("구매 승인 단계를 생략할 수 있게 할까?", "품질 검사를 생략하는 자재 유형이 있어?", "main 화면에 바로 보여 줄까?" 등 7개). 승인·검사·검토 생략 규칙은 병합·머지·커밋·푸시·브랜치·doc-guard·risk-gate·하네스 낱말과 짝일 때만, `main … 바로/직접` 은 `main 브랜치` + 올리기·커밋 동사와 짝일 때만 걸리게 좁혔다. SAP 에서 PR 은 구매요청(Purchase Requisition)이기도 해서 승인·올리기 규칙에서 `PR` 낱말을 뺐다. 업무 질문 12개가 남는 시험(`test_check_result_keeps_sap_business_questions_…`)을 더했다.
+
 ## 시험
 
 - `checker/tests/console_ui_smoke.js`: `scrollIntoView` 흉내와 `scrolled`·`active`·`ariaDisabled` 출력 추가.
