@@ -14,7 +14,7 @@
 | `plugins/harness/console/static/app.js` | 설정 "테마" 구역, 홈 위 장면 띠(`sceneList` 가 실제 세션을 손님으로 바꾼다) |
 | `plugins/harness/console/static/app.css` | 머리 주석 정정, 새 클래스(`.theme-grid`·`.theme-card`)만 끝에 추가. 기존 규칙은 그대로 |
 | `plugins/harness/console/static/index.html` | theme-post.css·theme-post.js 연결(theme.js 는 head 동기 그대로) |
-| `plugins/harness/console/whats_new.json`, `.claude-plugin/plugin.json` | 0.10.299 → 0.10.303(main 0.10.300, 열린 PR 이 0.10.301·0.10.302 를 쓰고 있다) |
+| `plugins/harness/console/whats_new.json`, `.claude-plugin/plugin.json` | 0.10.299 → 0.10.304(11-16 #1015 가 0.10.302 로 먼저 병합되고 #1011 이 0.10.303 이라 main 위로 옮기며 올림. #1011 다음에 병합) |
 | `docs/guide/harness-guide.html` | 웹 콘솔 "화면 모양"·"산출물·설정" 에 테마 고르기 설명 |
 | `checker/tests/test_web_console.py`, `test_web_console_ui.py` | 테마 저장·적용, static 하위 폴더 제공, Sauce 규칙 보호 시험 |
 
