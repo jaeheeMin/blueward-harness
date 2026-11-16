@@ -653,6 +653,20 @@ class Manager:
             if s is not None:
                 self.store.add_log(s, text)
 
+    def _rate_window(self, s: dict, info: dict, status: str) -> None:
+        """계정 한도 표시용: 종류(rateLimitType)별 마지막으로 받은 값을 allowed 일 때도 남긴다(s["rateLimit"] 은 경고·한도 참만 남기고 그대로).
+        utilization 은 Claude Code 가 실을 때만 있다 — 없으면 None(0 으로 꾸미지 않는다). 종류를 모르는 이벤트는 남기지 않는다."""
+        kind = str(info.get("rateLimitType") or "")[:40]
+        if not kind:
+            return
+        num = lambda v: v if isinstance(v, (int, float)) and not isinstance(v, bool) else None  # noqa: E731
+        used = num(info.get("utilization"))
+        # 0~1 이면 비율 그대로, 1 초과 100 이하면 이미 퍼센트라 100 으로 나눈다. 그 밖(음수·100 초과·NaN)은 모름 — 화면(notice-logic.js)도 같은 규칙
+        used = None if used is None or not 0 <= used <= 100 else (used if used <= 1 else used / 100)
+        wins = s.get("rateWindows") if isinstance(s.get("rateWindows"), dict) else {}
+        wins[kind] = {"status": (status or "allowed")[:40], "resetsAt": num(info.get("resetsAt")), "utilization": used, "t": self.store.clock()}  # 빈 status 는 기존 처리처럼 allowed
+        s["rateWindows"] = dict(list(wins.items())[-8:])
+
     def on_event(self, proc: Proc, e: dict) -> None:
         if e.get("type") == "result":
             proc.last_result = e["result"] if isinstance(e.get("result"), str) else ""
@@ -715,6 +729,7 @@ class Manager:
             elif kind == "rate_limit_event":
                 info = e.get("rate_limit_info") if isinstance(e.get("rate_limit_info"), dict) else {}
                 status = str(info.get("status") or "")
+                self._rate_window(s, info, status)
                 if status in ("", "allowed"):
                     s.pop("rateLimit", None)
                 else:  # allowed_warning(곧 한도) · rejected(한도 참) · 모르는 값도 그대로 실어 화면이 "알 수 없음" 으로 보이게 한다

@@ -21,7 +21,13 @@ function matchSimple(el, sel) {
     return q[2] === undefined || el.attrs[q[1]] === q[2];
   });
 }
-function El(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.parentNode = null; this._text = null; this.listeners = {}; this.dataset = {}; this.style = {}; this.value = ''; this.disabled = false; this.checked = false; this.open = false; this.readOnly = false; }
+/* 진짜 NodeList 처럼 length·인덱스·item·forEach·for-of 만 있고 filter·map 은 없다. app.js 가 배열 메서드를 바로 쓰면 시험이 TypeError 로 잡는다. */
+function nodeList(arr) {
+  const nl = { length: arr.length, item: i => arr[i] || null, forEach: (f, t) => arr.forEach(f, t), [Symbol.iterator]: () => arr[Symbol.iterator]() };
+  arr.forEach((e, i) => { nl[i] = e; });
+  return nl;
+}
+function El(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.parentNode = null; this._text = null; this.listeners = {}; this.dataset = {}; this.style = {}; this.value = ''; this.checked = false; this.open = false; this.readOnly = false; }
 El.prototype = {
   nodeType: 1,
   get tagName() { return this.tag.toUpperCase(); },
@@ -46,6 +52,7 @@ El.prototype = {
     return this.children.every((c, i) => c.isEqualNode(o.children[i]));
   },
   get className() { return this.attrs['class'] || ''; }, set className(v) { this.attrs['class'] = v; },
+  get disabled() { return 'disabled' in this.attrs; }, set disabled(v) { if (v) this.attrs.disabled = ''; else delete this.attrs.disabled; },  // 진짜 DOM 처럼 속성과 같이 움직인다(patchChildren 이 달라진 단추를 알아채게)
   get hidden() { return 'hidden' in this.attrs; }, set hidden(v) { if (v) this.attrs.hidden = ''; else delete this.attrs.hidden; },
   set textContent(v) { this.children.forEach(c => { c.parentNode = null; }); this.children = []; this._text = null; if (String(v) !== '') this.appendChild(new Text(v)); },  // 진짜 DOM 처럼 글 노드 하나를 자식으로 둔다(patchChildren 이 고칠 수 있게)
   get textContent() { return this._text !== null ? this._text : this.children.map(t => t.nodeType === 3 ? t.text : t.textContent).join(''); },
@@ -55,10 +62,10 @@ El.prototype = {
   contains(o) { while (o) { if (o === this) return true; o = o.parentNode; } return false; },
   get clientWidth() { return 1200; },
   querySelectorAll(sel) {
-    if (sel.includes(',')) { const seen = new Set(); return sel.split(',').flatMap(s => this.querySelectorAll(s.trim())).filter(e => !seen.has(e) && seen.add(e)); }  // 쉼표로 이은 목록
+    if (sel.includes(',')) { const seen = new Set(); return nodeList(sel.split(',').flatMap(s => Array.from(this.querySelectorAll(s.trim()))).filter(e => !seen.has(e) && seen.add(e))); }  // 쉼표로 이은 목록
     const chain = sel.split(/\s+/).filter(Boolean), out = [];
     const walk = (e, anc) => { e.children.forEach(c => { if (c.nodeType !== 1) return; if (matches(c, chain, anc)) out.push(c); walk(c, anc.concat(c)); }); };
-    walk(this, []); return out;
+    walk(this, []); return nodeList(out);
   },
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
   click() { (this.listeners.click || []).forEach(f => f({ preventDefault() {}, target: this, currentTarget: this, button: 0 })); }
@@ -69,16 +76,19 @@ function matches(el, chain, anc) {
   while (i >= 0) { while (a >= 0 && !matchSimple(anc[a], chain[i])) a--; if (a < 0) return false; i--; a--; }
   return true;
 }
+const DOC_LISTENERS = {};  // document 에 건 리스너(팝업의 Esc·Tab 시험용: {"key": "Escape"} 동작이 부른다)
 const root = new El('div'); root.attrs.id = 'root';
 global.document = { createElement: t => new El(t), createElementNS: (n, t) => new El(t), createTextNode: s => new Text(s), body: new El('body'),
   documentElement: new El('html'), activeElement: null, hidden: false,
   getElementById: id => { const all = root.querySelectorAll('#' + id); return all[0] || (id === 'root' ? root : null); },
-  addEventListener() {}, removeEventListener() {}, set title(v) { this._t = v; }, get title() { return this._t; } };
+  addEventListener(n, f) { (DOC_LISTENERS[n] = DOC_LISTENERS[n] || []).push(f); }, removeEventListener(n, f) { DOC_LISTENERS[n] = (DOC_LISTENERS[n] || []).filter(x => x !== f); }, set title(v) { this._t = v; }, get title() { return this._t; } };
 document.body.appendChild(root);
 root.parentNode = document.body;
 global.window = global; window.scrollTo = () => {};
 const LS = {};  // 시험이 data.json 의 "__ls" 로 미리 넣어 두고 out.ls 로 읽는다(새로고침 흉내)
 global.localStorage = { getItem: k => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); }, removeItem: k => { delete LS[k]; } };
+const SS = {};  // sessionStorage 흉내(닫은 알림 표시). 시험이 data.json 의 "__ss" 로 미리 넣고 out.ss 로 읽는다
+global.sessionStorage = { getItem: k => (k in SS ? SS[k] : null), setItem: (k, v) => { SS[k] = String(v); }, removeItem: k => { delete SS[k]; } };
 global.location = { pathname: '/', search: '' };
 global.history = { pushState(_, __, p) { const u = new URL(p, 'http://x'); location.pathname = u.pathname; location.search = u.search; }, replaceState(_, __, p) { this.pushState(_, __, p); } };
 global.addEventListener = () => {};
@@ -91,6 +101,7 @@ global.Event = function () {};
 
 const DATA = JSON.parse(require('fs').readFileSync(process.argv[4], 'utf8'));
 Object.assign(LS, DATA['__ls'] || {});
+Object.assign(SS, DATA['__ss'] || {});
 const calls = [];
 global.fetch = (url, opts) => {
   const method = (opts && opts.method) || 'GET', p = url.split('?')[0];
@@ -119,7 +130,7 @@ console.warn = () => {};
 process.on('unhandledRejection', e => errors.push('unhandled ' + (e && e.stack || e)));
 { const parts = (process.argv[5] || '').split('?'); location.pathname = '/' + parts[0]; location.search = parts[1] ? '?' + parts[1] : ''; }
 
-for (const f of ['theme.js', 'md.js', 'flow-logic.js', 'api-notice.js', 'flow-ui.js', 'trouble.js', 'attach.js', 'app.js']) { const m = require(path.join(dir, f)); if (f === 'flow-logic.js') window.BHLogic = m; if (f === 'api-notice.js') window.BHApiNotice = m; if (f === 'attach.js') window.BHAttach = m; }
+for (const f of ['theme.js', 'md.js', 'flow-logic.js', 'api-notice.js', 'notice-logic.js', 'flow-ui.js', 'trouble.js', 'attach.js', 'app.js']) { const m = require(path.join(dir, f)); if (f === 'flow-logic.js') window.BHLogic = m; if (f === 'api-notice.js') window.BHApiNotice = m; if (f === 'notice-logic.js') window.BHNotice = m; if (f === 'attach.js') window.BHAttach = m; }
 const tick = (n) => new Promise(r => setTimeout(r, n || 20));
 (async () => {
   await tick(80);
@@ -132,6 +143,8 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
     if (act.set) { Object.assign(DATA, act.set); continue; }
     if (act.wait) { await tick(act.wait); continue; }  // {"wait": 밀리초} 시간이 지나기를 기다린다(다시 묻기 시험)
     if (act.es) { if (!ES_LAST) errors.push('EventSource 없음'); else { const f = ES_LAST['on' + act.es]; if (f) f(); } await tick(200); continue; }  // {"es": "error"|"open"} 연결 끊김·다시 붙음 흉내
+    if (act.key) { (DOC_LISTENERS.keydown || []).slice().forEach(f => f({ key: act.key, shiftKey: !!act.shift, preventDefault() {} })); await tick(80); continue; }  // {"key": "Escape"|"Tab", "shift": bool} 키보드
+    if (act.focus) { const f = document.body.querySelector(act.focus); if (f) f.focus(); else errors.push('초점 줄 곳이 없음 ' + act.focus); continue; }  // {"focus": 선택자}
     if (act.visible !== undefined) { document.visibilityState = act.visible ? 'visible' : 'hidden'; document.hasFocus = () => !!act.visible; continue; }
     if (act.emit) { const f = ES_LISTENERS[act.emit[0]]; if (f) f({ data: JSON.stringify(act.emit[1]) }); else errors.push('이벤트 구독 없음 ' + act.emit[0]); await tick(400); continue; }
     if (act.clickNote !== undefined) { const o = noteObjs[act.clickNote]; if (o && o.onclick) o.onclick(); else errors.push('누를 알림이 없음'); await tick(80); continue; }
@@ -141,7 +154,7 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
       el.value = act.value; (el.listeners.input || []).forEach(f => f({ target: el, currentTarget: el })); await tick(80);
       out_values.push(el.value); continue;
     }
-    const hit = root.querySelectorAll(act.click)[act.index || 0];
+    const hit = document.body.querySelectorAll(act.click)[act.index || 0];  // 알림 팝업은 body 바로 밑에 붙는다
     if (!hit) { errors.push('누를 곳이 없음 ' + act.click); continue; }
     hit.click(); await tick(80);
   }
@@ -152,12 +165,18 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
   out.notes = notes; out.asked = asked.length; out.focused = focused.length; out.path = location.pathname; out.ls = Object.assign({}, LS);
   out.posts =calls.filter(c => c[0] !== 'GET').map(c => [c[0], c[1], c[2] || '']);
   out.scrolled = scrolled; out.active = document.activeElement ? [document.activeElement.tag, document.activeElement.attrs['data-flow'] || ''] : null;
-  out.ariaDisabled = root.querySelectorAll('button').filter(b => b.attrs['aria-disabled'] === 'true').map(b => b.textContent);
-  out.disabledButtons = root.querySelectorAll('button').filter(b => b.disabled).map(b => b.textContent);  // 눌러도 되는지(#885)
-  out.links = root.querySelectorAll('a').map(a => [a.attrs.href || '', a.attrs.target || '', a.attrs.rel || '']);
+  out.ariaDisabled = Array.from(root.querySelectorAll('button')).filter(b => b.attrs['aria-disabled'] === 'true').map(b => b.textContent);
+  out.disabledButtons = Array.from(root.querySelectorAll('button')).filter(b => b.disabled).map(b => b.textContent);  // 눌러도 되는지(#885)
+  out.links = Array.from(root.querySelectorAll('a')).map(a => [a.attrs.href || '', a.attrs.target || '', a.attrs.rel || '']);
   out.side = root.querySelector('.side') ? root.querySelector('.side').textContent : '';
   out.sideDump = root.querySelector('.side') ? dump(root.querySelector('.side'), 0) : '';
   out.ann = root.querySelector('.ann-slot') ? root.querySelector('.ann-slot').textContent : '';
+  const back = document.body.querySelector('.nb-back');  // 알림 팝업(열려 있을 때)
+  out.dialog = back ? back.textContent : ''; out.dialogDisabled = back ? Array.from(back.querySelectorAll('button')).filter(b => b.disabled).map(b => b.textContent) : []; out.annBubble = root.querySelector('.ann-slot') ? root.querySelector('.ann-slot').attrs['data-bubble'] || '' : ''; out.dialogDump = back ? dump(back, 0) : ''; out.activeK = document.activeElement && document.activeElement.attrs ? (document.activeElement.attrs['data-k'] || document.activeElement.attrs['class'] || document.activeElement.attrs.id || '') : ''; out.ss = Object.assign({}, SS);
+  out.bubble = root.querySelector('.nb-bubble') ? root.querySelector('.nb-bubble').textContent : '';
+  out.dot = root.querySelectorAll('.nb-dot').length;
+  out.limits = root.querySelector('.lim') ? root.querySelector('.lim').textContent : '';
+  out.limitsTitle = root.querySelector('.lim') ? root.querySelector('.lim').attrs.title : '';
   out.head =root.querySelector('header') ? root.querySelector('header').textContent : '';
   
   require('fs').writeFileSync(process.argv[6], JSON.stringify(out, null, 1), 'utf8');

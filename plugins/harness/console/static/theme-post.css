@@ -95,3 +95,8 @@
 :root[data-theme="post"] .po-plaq span { position: absolute; top: 8px; left: calc(var(--x) * var(--s) * 1px); transform: translateX(-50%); display: grid; justify-items: center; white-space: nowrap; font-family: var(--font); }
 :root[data-theme="post"] .po-plaq b { font-size: 13px; font-weight: 800; color: var(--text); }
 :root[data-theme="post"] .po-plaq small { font-size: 12px; font-weight: 500; color: var(--muted); }
+
+/* 알림 말풍선(#1016): 우체통 노랑 바탕에 남색 글자, 점은 우체국 빨강 */
+:root[data-theme="post"] { --bub-bg: var(--post-yellow); --bub-ink: #24304A; --bub-dot: #C73E31; }
+:root[data-theme="post"] .nb-bubble { box-shadow: 0 8px 20px -12px rgba(36,48,74,.55); }
+:root[data-theme="post"] .nb-dialog { border: 1.5px solid #D9CDB8; }

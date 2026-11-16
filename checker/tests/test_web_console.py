@@ -8071,6 +8071,51 @@ def test_rate_limit_event_warning_and_allowed(tmp_path):
     assert s["rateLimit"]["status"] == "rejected" and s["rateLimit"]["resetsAt"] is None and s["rateLimit"]["utilization"] is None
 
 
+def test_rate_windows_keep_allowed_values_per_type(tmp_path):
+    """#1016: 계정 한도 표시용으로 종류별 마지막 값을 allowed 일 때도 남긴다. s["rateLimit"](경고·한도 참 안내)은 그대로 allowed 에서 지운다."""
+    store, m, s = _api_manager(tmp_path)
+    allowed = {"type": "rate_limit_event", "session_id": "s1", "rate_limit_info": {"status": "allowed", "resetsAt": 1794344400, "rateLimitType": "five_hour", "utilization": 0.42}}
+    m.on_event(FakeProc(), allowed)
+    assert "rateLimit" not in s
+    assert s["rateWindows"]["five_hour"] == {"status": "allowed", "resetsAt": 1794344400, "utilization": 0.42, "t": s["rateWindows"]["five_hour"]["t"]}
+    m.on_event(FakeProc(), _RATE_WARN)
+    assert set(s["rateWindows"]) == {"five_hour", "seven_day"} and s["rateWindows"]["seven_day"]["status"] == "allowed_warning"
+    # utilization 이 안 오면 None — 0 으로 꾸미지 않는다. 종류를 모르는 이벤트는 남기지 않는다
+    m.on_event(FakeProc(), {"type": "rate_limit_event", "session_id": "s1", "rate_limit_info": {"status": "allowed", "resetsAt": 1794344400, "rateLimitType": "five_hour"}})
+    assert s["rateWindows"]["five_hour"]["utilization"] is None
+    m.on_event(FakeProc(), {"type": "rate_limit_event", "session_id": "s1", "rate_limit_info": {"status": "allowed"}})
+    assert set(s["rateWindows"]) == {"five_hour", "seven_day"}
+    m.on_event(FakeProc(), {"type": "rate_limit_event", "session_id": "s1", "rate_limit_info": {"status": "allowed", "rateLimitType": "five_hour", "resetsAt": "x", "utilization": True}})
+    assert s["rateWindows"]["five_hour"]["resetsAt"] is None and s["rateWindows"]["five_hour"]["utilization"] is None
+    # 단위 방어: 0~1 은 비율 그대로, 1 초과 100 이하는 퍼센트라 100 으로 나눈다, 그 밖(음수·100 초과·NaN)은 모름. 빈 status 는 allowed
+    for raw, want in ((0, 0), (0.42, 0.42), (1, 1), (42, 0.42), (100, 1.0), (-0.1, None), (100.5, None), (250, None), (float("nan"), None), ("42", None)):
+        m.on_event(FakeProc(), {"type": "rate_limit_event", "session_id": "s1", "rate_limit_info": {"status": "allowed", "rateLimitType": "five_hour", "utilization": raw}})
+        got = s["rateWindows"]["five_hour"]["utilization"]
+        assert got == want or (want is None and got is None), (raw, got)
+    m.on_event(FakeProc(), {"type": "rate_limit_event", "session_id": "s1", "rate_limit_info": {"status": "", "rateLimitType": "seven_day", "utilization": 0.1}})
+    assert s["rateWindows"]["seven_day"]["status"] == "allowed" and "rateLimit" not in s  # 빈 status 는 기존 처리(rateLimit 안내 없음)와 같게 allowed
+
+
+def test_account_limits_merges_sessions_and_api(tmp_path, monkeypatch):
+    """#1016: 한도는 계정 단위라 세션들의 값을 종류별로 모아 가장 늦게 받은 값을 낸다. 값이 없으면 빈 목록(= 모름, 0% 가 아님)."""
+    c = Console(tmp_path, monkeypatch)
+    try:
+        c.login()
+        assert c.call("GET", "/api/account-limits")[1] == {"windows": [], "source": "rate_limit_event"}  # 모르면 0% 가 아니라 빈 목록
+        a, b = c.app.store.ensure("a", str(c.work)), c.app.store.ensure("b", str(c.work))
+        a["rateWindows"] = {"seven_day": {"status": "allowed", "resetsAt": 5, "utilization": 0.1, "t": 10.0}, "five_hour": {"status": "allowed", "resetsAt": 9, "utilization": 0.2, "t": 10.0}}
+        b["rateWindows"] = {"seven_day": {"status": "allowed_warning", "resetsAt": 6, "utilization": 0.9, "t": 20.0}, "weird": "x"}
+        status, body, _ = c.call("GET", "/api/account-limits")
+        assert status == 200
+        got = {w["type"]: w for w in body["windows"]}
+        assert [w["type"] for w in body["windows"]] == ["five_hour", "seven_day"]  # 5시간 → 7일 순
+        assert got["seven_day"]["utilization"] == 0.9 and got["seven_day"]["status"] == "allowed_warning"  # 더 늦은 값이 이긴다
+        assert got["five_hour"]["utilization"] == 0.2
+        assert c.call("GET", "/api/account-limits", cookie=False)[0] == 401  # 다른 API 처럼 로그인이 있어야
+    finally:
+        c.close()
+
+
 # ---- MCP 연결 상태와 MCP 도구 승인(#864). 입력은 실제 claude 2.1.321 stream-json 실측 모양 ----
 
 MCP_INIT = {"type": "system", "subtype": "init", "session_id": "s1",

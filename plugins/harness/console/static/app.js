@@ -55,7 +55,7 @@
   }
   var SVGNS = 'http://www.w3.org/2000/svg';
   var ICONS = {
-    chev: { d: 'M9 5l7 7-7 7', w: 2 }, back: { d: 'M15 5l-7 7 7 7', w: 2 }, close: { d: 'M6 6l12 12M18 6L6 18', w: 2 },
+    menu: { d: 'M4 7h16M4 12h16M4 17h10', w: 2 }, chev: { d: 'M9 5l7 7-7 7', w: 2 }, back: { d: 'M15 5l-7 7 7 7', w: 2 }, close: { d: 'M6 6l12 12M18 6L6 18', w: 2 },
     brand: { d: 'M4 6l7 6-7 6M13 6l7 6-7 6', w: 2.2 },
     settings: { d: 'M4 7h10M18 7h2M4 17h2M10 17h10', w: 1.8, extra: [['circle', { cx: 16, cy: 7, r: 2 }], ['circle', { cx: 8, cy: 17, r: 2 }]] },
     folder: { d: 'M3 6h6l2 2h10v11H3z', w: 1.8 }, plus: { d: 'M12 5v14M5 12h14', w: 2 },
@@ -271,7 +271,7 @@
       var openNow = route.name === 'session' && route.id === id;  // 대화(chat)는 지금 열어 본 세션만 받는다. 목록 갱신은 받아 둔 대화를 지우지 않는다
       api('GET', '/api/sessions/' + encodeURIComponent(id) + (openNow ? '' : '?chat=0&lite=1')).then(function (d) {
         d = d && d.session ? d.session : d;
-        if (d && d.id) { mergeSession(d); scheduleSide(); if (view && view.onSession) view.onSession(d.id); }
+        if (d && d.id) { mergeSession(d); scheduleSide(); loadLimits(); if (view && view.onSession) view.onSession(d.id); }
       }, function (e) { if (e.status === 404) { sessions.delete(id); scheduleSide(); if (view && view.onRemoved) view.onRemoved(id); } });
     }, wait);
   }
@@ -290,7 +290,7 @@
       list.forEach(function (s) { if (s && s.id) { seen[s.id] = true; mergeSession(s); } });
       Array.from(sessions.keys()).forEach(function (id) { if (!seen[id]) sessions.delete(id); });
       loadedOnce = true;
-      scheduleSide();
+      scheduleSide(); loadLimits(true);
       if (view && view.onData) view.onData();
     });
   }
@@ -516,23 +516,24 @@
       var title = s.title || baseName(s.cwd) || '이름 없는 세션';
       var bk = window.BHLogic.blockOf(s);  // 훅이 막아 아직 안 풀린 세션은 내 차례와 따로 센다(#790)
       var an = apiNote(s);
-      if (!bk && an && an.sideTone === 'err') errs.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), side: an.side, t: s.updatedAt });
+      if (!bk && an && an.sideTone === 'err') errs.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), side: an.side, t: s.updatedAt, it: (s.apiIssue && s.apiIssue.t) || (s.rateLimit && s.rateLimit.t) || 0,
+        ik: an.kind + ':' + ((s.apiIssue && s.apiIssue.status) || (s.rateLimit && s.rateLimit.status) || '') });  // 받은 때를 모르면 종류·상태로 다시 생긴 오류를 구별한다
       if (!bk && an && an.side && g !== 'todo') {
         (g === 'running' ? run : idle).push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: an.side, t: s.updatedAt });
       } else if (bk) {
-        blocked.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), kind: bk.kind, t: s.updatedAt });
+        blocked.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), kind: bk.kind, t: s.updatedAt, bt: bk.t || 0 });
       } else if (g === 'todo') {
         var ids = s.pendingRequestIds || [];
         if (ids.length) {
           ids.forEach(function (rid) {
             var r = requests.get(rid);
             if (r && r.status && r.status !== 'pending') return;
-            todo.push({ sname: title, href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : answersAsk(r) ? '답하기' : isPlan(r) ? '계획 확인하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
+            todo.push({ sname: title, sid: s.id, rid: rid, href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : answersAsk(r) ? '답하기' : isPlan(r) ? '계획 확인하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
           });
         } else if (!s.askedInText && window.BHLogic.prNeedsFix(s)) {  // 시안 G-24: 검사 실패한 내 PR 을 고칠 차례
-          todo.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), verb: 'PR 고치기', title: title, sub: sub, t: s.updatedAt, fix: true });
+          todo.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), verb: 'PR 고치기', title: title, sub: sub, t: s.updatedAt, fix: true });
         } else {
-          todo.push({ sname: title, href: '/s/' + encodeURIComponent(s.id), verb: s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기', title: title, sub: sub, t: s.updatedAt });
+          todo.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), verb: s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기', title: title, sub: sub, t: s.updatedAt });
         }
       } else if (g === 'running') {
         run.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: (s.currentAction ? window.BHLogic.plainAction(s.currentAction, skillLabel) : (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중')) + subagentSummary(s), t: s.updatedAt });
@@ -616,6 +617,249 @@
     if (startData && startData.newVersion) {
       annEl.appendChild(link('/settings', { class: 'ann note', role: 'status' },
         h('span', { text: '하네스 새 판 ' + startData.newVersion + '이 있어 — 터미널에서 /harness:update 를 해 줘' })));
+    }
+  }
+
+  /* ---------- 알림 말풍선 · 팝업 · 계정 한도(#1016) ----------
+     헤더 오른쪽 알림 단추(≡)에서 꼬리가 나온 말풍선으로 가장 급한 알림 한 줄을 띄우고, 누르면 팝업이 열려 버튼으로 바로 답한다.
+     알림의 출처는 홈 띠(buildAnn)와 같은 sideData 라 같은 알림이 두 군데 겹치지 않게 띠는 감춘다(.ann-slot[data-bubble]).
+     patchChildren 이 머리줄의 옛 노드와 그 이벤트 핸들러를 남기므로, 여기 핸들러는 닫힌 값이 아니라 모듈 상태만 읽는다. */
+  var curNotices = [], bubbleItem = null, dismissed = readDismissed();
+  var limits = { windows: [], failed: false, at: 0, busy: false };
+  function readDismissed() {
+    var out = {};
+    try { (JSON.parse(sessionStorage.getItem('bh-nb-dismissed') || '[]') || []).forEach(function (id) { if (typeof id === 'string') out[id] = true; }); } catch (e) { console.warn('닫은 알림 표시를 읽지 못했어(sessionStorage) — 닫은 알림이 다시 보일 수 있어', e); }
+    return out;
+  }
+  function writeDismissed() {
+    try { sessionStorage.setItem('bh-nb-dismissed', JSON.stringify(Object.keys(dismissed).slice(-100))); } catch (e) { console.warn('닫은 알림을 브라우저에 남기지 못했어(sessionStorage) — 새로고침하면 다시 보일 수 있어', e); }
+  }
+  /* 알림 목록, 급한 순서: 내 차례(질문·승인·계획·답 필요·PR 고치기) → 막힘·확인 못 함 → API 오류 → 합쳐짐 → 하네스 새 판. 홈 띠와 같은 순서다. */
+  function buildNotices(d) {
+    var items = [], nTodo = d.todo.length;
+    d.todo.forEach(function (x) {
+      var r = x.rid ? requests.get(x.rid) : null;
+      var kind = x.rid ? (!r ? 'req' : isPlan(r) ? 'plan' : kindOf(r) === 'elicitation' ? 'elicit' : kindOf(r) === 'question' ? 'question' : 'perm') : x.fix ? 'fix' : 'turn';
+      var line = x.rid ? (kind === 'question' || kind === 'plan' ? x.title : x.sname + ' · ' + x.title) : x.fix ? '“' + x.sname + '” PR 의 검사 실패를 고쳐야 해' : '“' + x.sname + '” 세션에서 답이 필요해';
+      items.push({ id: x.rid ? 'req:' + x.rid : (x.fix ? 'fix:' : 'turn:') + x.sid, kind: kind, rid: x.rid || '', sid: x.sid, href: x.href, sname: x.sname, title: x.rid ? x.title : line, line: '내 차례 ' + nTodo + '건: ' + line });
+    });
+    var bl = d.blocked || [], nB = bl.filter(function (b) { return b.kind === 'blocked'; }).length, nC = bl.length - nB;
+    bl.filter(function (b) { return b.kind === 'blocked'; }).concat(bl.filter(function (b) { return b.kind !== 'blocked'; })).forEach(function (b) {
+      var blocked = b.kind === 'blocked';
+      items.push({ id: 'blk:' + b.sid + ':' + b.kind + ':' + b.bt, kind: blocked ? 'blocked' : 'cannot', sid: b.sid, href: b.href, sname: b.sname,
+        title: blocked ? '하네스 검사가 막았어' : '검사를 못 해서 통과도 위반도 아니야', line: (blocked ? '막힌 일 ' + nB : '확인 못 한 검사 ' + nC) + '건: “' + b.sname + '” 세션부터 보자' });
+    });
+    (d.errs || []).forEach(function (e) {
+      items.push({ id: 'api:' + e.sid + ':' + (e.it || e.ik), kind: 'api', sid: e.sid, href: e.href, sname: e.sname, title: e.side.replace(/^⚠\s*(오류 · )?/, ''), line: '⚠ 오류 ' + d.errs.length + '건: “' + e.sname + '” 세션 — ' + e.side.replace(/^⚠\s*(오류 · )?/, '') });
+    });
+    if (route && route.name === 'session') {  // 시안 G-12: 합쳐진 갈래의 세션 화면을 보는 동안만
+      var cs = sessions.get(route.id), band = cs ? window.BHLogic.finishedBand(cs) : '';
+      if (band) items.push({ id: 'merged:' + cs.id, kind: 'other', sid: cs.id, href: '/s/' + encodeURIComponent(cs.id), sname: sessionTitle(cs), title: band, line: band });
+    }
+    if (startData && startData.newVersion) {
+      var vl = '하네스 새 판 ' + startData.newVersion + '이 있어 — 터미널에서 /harness:update 를 해 줘';
+      items.push({ id: 'ver:' + startData.newVersion, kind: 'other', sid: '', href: '/settings', sname: '', title: vl, line: vl });
+    }
+    return items;
+  }
+  function refreshNotices(d) {
+    curNotices = buildNotices(d);
+    if (loadedOnce && window.BHNotice) {  // 목록을 아직 못 읽었을 땐 정리하지 않는다(닫은 표시가 지워져 다시 뜨는 것을 막는다)
+      var kept = window.BHNotice.pruneDismissed(dismissed, curNotices);
+      if (Object.keys(kept).length !== Object.keys(dismissed).length) { dismissed = kept; writeDismissed(); }
+    }
+    bubbleItem = window.BHNotice ? window.BHNotice.pickBubble(curNotices, dismissed) : null;
+  }
+  function dismissBubble() {
+    if (!bubbleItem) return;
+    dismissed[bubbleItem.id] = true; writeDismissed();
+    bubbleItem = window.BHNotice.pickBubble(curNotices, dismissed);
+    renderHead(location.pathname);
+    var b = headEl && headEl.querySelector('.nb-btn');
+    if (b) b.focus();  // 닫은 ✕ 가 사라지니 초점을 알림 단추로 옮긴다
+  }
+  /* 헤더 오른쪽 알림 단추 + 말풍선. 말풍선 자리(role=status)는 늘 두고 내용만 바꿔야 읽어 준다. */
+  function noticeHost() {
+    var n = curNotices.length, it = bubbleItem;
+    var btn = h('button', { type: 'button', class: 'nb-btn', 'aria-haspopup': 'dialog', title: n ? '알림 ' + n + '건 열기' : '알림 열기', 'aria-label': n ? '알림 ' + n + '건 열기' : '알림 열기',
+      onClick: function (e) { openNotices(null, e.currentTarget); } }, icon('menu', 18), n ? h('i', { class: 'nb-dot', 'aria-hidden': 'true' }) : null);
+    var bubble = h('div', { class: 'nb-bubble', role: 'status', hidden: !it },
+      it ? h('button', { type: 'button', class: 'nb-say', title: it.line, onClick: function (e) { openNotices(bubbleItem && bubbleItem.id, headEl.querySelector('.nb-btn') || e.currentTarget); } }, h('span', { text: it.line })) : null,
+      it ? h('button', { type: 'button', class: 'nb-x', 'aria-label': '이 알림 닫기', title: '이 알림 닫기', onClick: dismissBubble }, icon('close', 12)) : null);
+    return h('span', { class: 'nb-host' }, btn, bubble);
+  }
+  function limitEl() {
+    var lv = window.BHNotice.limitView(limits.windows, Date.now(), limits.failed);
+    return h('span', { class: 'lim' + (lv.unknown ? ' unk' : ''), role: 'group', title: lv.title, 'aria-label': '계정 사용 한도: ' + lv.text },
+      lv.unknown ? h('span', { class: 'lim-i unk', text: lv.text }) : lv.chips.map(function (c) { return h('span', { class: 'lim-i' + (c.tone ? ' ' + c.tone : '') + (c.stale ? ' stale' : ''), text: c.text }); }));
+  }
+  var LIMITS_GAP_MS = 20000;
+  function loadLimits(force) {
+    if (limits.busy || (!force && Date.now() - limits.at < LIMITS_GAP_MS)) return;
+    limits.busy = true; limits.at = Date.now();
+    api('GET', '/api/account-limits').then(function (d) {
+      limits.windows = d && Array.isArray(d.windows) ? d.windows : []; limits.failed = false;
+    }, function () { limits.windows = []; limits.failed = true; }).then(function () { limits.busy = false; if (headEl) renderHead(location.pathname); });
+  }
+
+  /* 팝업(#1016): 알림 한 건씩 보고 버튼으로 바로 답한다. 승인·질문은 승인 화면(requestView)과 같은 API 를 부른다. */
+  /* flashFor/errFor: 응답 결과 안내는 그 응답을 보낸 알림에만 붙는다. own: 내가 답해서 목록에서 사라진 알림 id(→ 말없이 다음으로).
+     gone: 다른 곳에서 처리돼 사라진 알림을 보고 있을 때(잠깐 단추를 막고 안내한 뒤 다음으로). shownId: 지금 그려 둔 알림 id. */
+  var nb = { open: false, id: null, idx: 0, err: '', errFor: '', flash: '', flashFor: '', busy: false, picked: {}, own: '', gone: false, goneTimer: null, shownId: null, back: null, dlg: null, onKey: null, opener: null };
+  var GONE_LOCK_MS = 1000;
+  function openNotices(id, opener) {
+    closeNotices(true);
+    nb.open = true; nb.id = id || (curNotices[0] && curNotices[0].id) || null; nb.err = ''; nb.errFor = ''; nb.flash = ''; nb.flashFor = ''; nb.busy = false; nb.picked = {}; nb.own = ''; nb.gone = false; nb.shownId = null; nb.opener = opener || null;
+    nb.dlg = h('div', { class: 'nb-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'nb-h' });
+    nb.back = h('div', { class: 'nb-back', onMousedown: function (e) { if (e.target === nb.back) closeNotices(); } }, nb.dlg);
+    nb.onKey = function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); closeNotices(); return; }
+      if (e.key !== 'Tab') return;
+      var f = Array.prototype.slice.call(nb.dlg.querySelectorAll('button, a[href], input')).filter(function (x) { return !x.disabled && !x.hidden; });  // NodeList 에는 filter 가 없다
+      if (!f.length) return;
+      var cur = document.activeElement, inside = nb.dlg.contains(cur);
+      if (e.shiftKey ? (!inside || cur === f[0]) : (!inside || cur === f[f.length - 1])) { e.preventDefault(); (e.shiftKey ? f[f.length - 1] : f[0]).focus(); }
+    };
+    document.addEventListener('keydown', nb.onKey);
+    document.body.appendChild(nb.back);
+    if (appEl) appEl.setAttribute('inert', '');  // 뒤 화면에는 초점이 가지 않게
+    drawNotice();
+    var title = nb.dlg.querySelector('#nb-h');
+    if (title) title.focus();  // 처음 초점은 제목: 키보드로 열고 Enter 한 번에 승인되지 않게
+  }
+  function closeNotices(quiet) {
+    if (!nb.open) return;
+    nb.open = false;
+    clearTimeout(nb.goneTimer); nb.gone = false;
+    document.removeEventListener('keydown', nb.onKey);
+    if (nb.back && nb.back.parentNode) nb.back.parentNode.removeChild(nb.back);
+    if (appEl) appEl.removeAttribute('inert');
+    nb.back = nb.dlg = null;
+    if (!quiet) { var b = (headEl && headEl.querySelector('.nb-btn')) || nb.opener; if (b) b.focus(); }  // 연 곳으로 초점을 돌려준다
+  }
+  function nbMove(step) {
+    var n = curNotices.length; if (n < 2 || nb.busy || nb.gone) return;  // 답을 보내는 동안·잠긴 동안은 넘기지 않는다
+    nb.idx = (nb.idx + step + n) % n; nb.id = curNotices[nb.idx].id; nb.flash = ''; nb.flashFor = ''; drawNotice();
+  }
+  function nbLink(href, text, cls, k) { return h('a', { href: href, class: cls || 'pill dark', 'data-k': k || 'open', onClick: function (e) { closeNotices(true); onLinkClick(e); }, text: text }); }
+  function nbAnswer(it, body, done) {
+    if (nb.busy || nb.gone) return;
+    nb.busy = true; nb.err = ''; nb.errFor = ''; nb.flash = ''; nb.flashFor = ''; drawNotice();
+    api('POST', '/api/requests/' + encodeURIComponent(it.rid) + '/answer', body).then(function () {
+      var r = requests.get(it.rid);
+      if (r) requests.set(it.rid, Object.assign({}, r, { status: 'answered' }));
+      nb.flash = done; nb.flashFor = it.id; nb.own = it.id; nb.picked = {};
+    }, function (e) {
+      nb.errFor = it.id;
+      if (e.status === 404 || e.status === 409 || e.status === 410) { nb.err = '이미 처리됐거나 닫힌 요청이야. 목록을 새로 읽을게.'; refreshRequest(it.rid); }
+      else nb.err = '전달하지 못했어: ' + e.message;  // 실패하면 닫지 않고 오류를 보인다
+    }).then(function () { nb.busy = false; renderSide(); });
+  }
+  function nbPermBody(it) {
+    var r = requests.get(it.rid), box = [];
+    if (!r) return [h('p', { class: 'sub', role: 'status', text: '요청을 불러오는 중이야.' }), nbLink(it.href, '자세히 보기', 'pill line sm', 'detail')];
+    var input = r.toolInput || r.tool_input || r.input || {}, tool = r.toolName || r.tool_name || '도구', plan = isPlan(r), N = window.BHNotice;
+    var verbs = N.permVerbs(r), acts = [];
+    function deny() { return h('button', { type: 'button', class: 'pill line', 'data-k': 'deny', disabled: nb.busy, text: verbs[1], onClick: function () { nbAnswer(it, { decision: 'deny' }, '하지 말라고 했어.'); } }); }
+    if (r.risk === 'irreversible') box.push(h('p', { class: 'nb-warn', text: '되돌릴 수 없는 일이라 하네스가 꼭 사람에게 물어.' }));
+    if (!N.fitsPopup(r)) {
+      /* 팝업에서 내용을 다 보여 줄 수 없는 요청(계획·MCP·파일 쓰기·샌드박스 해제·백그라운드·긴 명령)은 빠른 허락 단추를 두지 않는다.
+         무엇을 허락하는지 다 안 보이는 채로 누르게 하지 않고, 전체 화면(/r/<id>)에서 보고 정하게 한다. */
+      box.push(h('p', { class: 'sub', 'data-nb-toobig': '1', text: '이 요청은 팝업에서 내용을 다 보여 줄 수 없어. 전체 화면에서 확인하고 정해 줘.' }));
+      acts.push(nbLink(it.href, plan ? '계획 보기 · 진행 정하기' : '자세히 보기', 'pill dark', 'detail'));
+      if (!plan) acts.push(deny());
+      return box.concat(h('div', { class: 'acts' }, acts));
+    }
+    var what = String(input.command || input.file_path || input.pattern || input.url || input.query || '');
+    if (input.description) box.push(h('p', { class: 'sub', text: MS(str(input.description)) }));
+    box.push(h('pre', { class: 'box scroll', tabindex: '0', 'aria-label': tool + ' 입력 전체', text: MS(what) }));
+    var sugg = Array.isArray(r.suggestionText) ? r.suggestionText.filter(function (x) { return x; }) : [];
+    var canSess = N.canAllowSession(r) && sugg.length > 0;  // 추가될 규칙을 먼저 보여 줄 수 있을 때만 "다시 묻지 않기" 를 둔다(승인 화면과 같다)
+    if (canSess) box.push(h('div', { class: 'sugg', role: 'group', 'aria-label': '다시 묻지 않기로 추가되는 규칙' },
+      h('p', { class: 'sub', text: '"허용하고 이 세션에서 다시 묻지 않기"를 누르면 다음 규칙이 추가돼' }),
+      h('ul', { class: 'sugg-l' }, sugg.map(function (x) { return h('li', { class: 'mono', text: MS(x) }); }))));
+    acts.push(h('button', { type: 'button', class: 'pill dark', 'data-k': 'allow', disabled: nb.busy, text: verbs[0], onClick: function () { nbAnswer(it, { decision: 'allow' }, '허락했어.'); } }), deny());
+    if (canSess) acts.push(h('button', { type: 'button', class: 'pill line', 'data-k': 'allow_session', disabled: nb.busy, text: '허용하고 이 세션에서 다시 묻지 않기', onClick: function () { nbAnswer(it, { decision: 'allow_session' }, '허락했어. 이 세션에서는 같은 작업을 다시 묻지 않아.'); } }));
+    acts.push(nbLink(it.href, '자세히 보기', 'pill line sm', 'detail'));
+    return box.concat(h('div', { class: 'acts' }, acts));
+  }
+  function nbQuestionBody(it) {
+    var r = requests.get(it.rid), qs_ = questionsOf(r), N = window.BHNotice;
+    if (!qs_.length) return [h('p', { class: 'sub', text: '질문 내용을 읽지 못했어.' }), nbLink(it.href, '자세히 보기', 'pill line sm', 'detail')];
+    var instant = N.isInstantQuestion(qs_), out = [];
+    function ans(i) { return (nb.picked[i] || []).join(', '); }
+    qs_.forEach(function (q, i) {
+      out.push(h('b', { class: 'nb-q', text: (qs_.length > 1 ? (i + 1) + '/' + qs_.length + ' · ' : '') + (q.question || q.header || '질문이 있어') }));
+      out.push(h('div', { class: 'qo', role: 'group', 'aria-label': q.question || '보기' }, (q.options || []).map(function (o, j) {
+        var label = typeof o === 'string' ? o : o.label, on = (nb.picked[i] || []).indexOf(label) >= 0;
+        return h('button', { type: 'button', class: 'qopt', 'data-k': 'opt-' + i + '-' + j, 'aria-pressed': instant ? null : String(on), disabled: nb.busy, onClick: function () {
+          if (instant) { var a = {}; a[q.question] = label; nbAnswer(it, { answers: a }, '세션에 답을 전달했어.'); return; }
+          var cur = nb.picked[i] || [], on = cur.indexOf(label) >= 0;  // 머리줄·본문은 달라진 곳만 고치므로 누른 때의 값을 다시 읽는다
+          nb.picked[i] = q.multiSelect ? (on ? cur.filter(function (x) { return x !== label; }) : cur.concat(label)) : (on ? [] : [label]);
+          drawNotice();
+        } }, h('span', { class: 't', text: label }), o && o.description ? h('small', { text: o.description }) : null);
+      })));
+    });
+    var acts = [];
+    if (!instant) acts.push(h('button', { type: 'button', class: 'pill dark', 'data-k': 'send', disabled: nb.busy || qs_.some(function (q, i) { return !ans(i); }), text: '답 보내기', onClick: function () {
+      var a = {}; qs_.forEach(function (q, i) { a[q.question] = ans(i); }); nbAnswer(it, { answers: a }, '세션에 답을 전달했어.');
+    } }));
+    acts.push(nbLink(it.href, '직접 적어 답하기', 'pill line sm', 'detail'));
+    return out.concat(h('div', { class: 'acts' }, acts));
+  }
+  function nbBody(it) {
+    var kindWord = { perm: '승인 요청', plan: '계획 확인', question: '질문', elicit: '연결 도구의 질문', req: '요청', turn: '내 차례', fix: 'PR 고치기', blocked: '✕ 막힘', cannot: '? 확인 못 함', api: '⚠ 오류', other: '알림' }[it.kind] || '알림';
+    var out = [h('span', { class: 'eb', text: kindWord + (it.sname && it.kind !== 'other' ? ' · ' + it.sname : '') }), h('p', { class: 'nb-title', text: it.title })];
+    if (it.kind === 'perm' || it.kind === 'plan') return out.concat(nbPermBody(it));
+    if (it.kind === 'question') return out.concat(nbQuestionBody(it));
+    if (it.kind === 'req') return out.concat(h('p', { class: 'sub', role: 'status', text: '요청을 불러오는 중이야.' }), nbLink(it.href, '자세히 보기', 'pill line sm', 'detail'));
+    if (it.kind === 'elicit') return out.concat(h('p', { class: 'sub', text: '연결 도구가 값을 물어봤어. 입력칸이 있어서 전체 화면에서 답해 줘.' }), h('div', { class: 'acts' }, nbLink(it.href, '답하러 열기', 'pill dark', 'open')));
+    var s = it.sid ? sessions.get(it.sid) : null, an = s ? apiNote(s) : null;
+    var note = it.kind === 'api' ? (an ? an.title + '. ' + an.body : '세션에서 오류가 났어.') : it.kind === 'blocked' ? '하네스 훅이 막았어. 세션에서 고친 뒤 이어서 하면 돼.' : it.kind === 'cannot' ? '검사를 못 해서 통과인지 위반인지 몰라. 세션에서 확인해 줘.'
+      : it.kind === 'turn' ? '네가 답하거나 확인할 차례야.' : it.kind === 'fix' ? '검사가 실패한 PR 이야. 고쳐서 다시 올려야 넘어가.' : '';
+    if (note) out.push(h('p', { class: 'sub', text: MS(note) }));
+    out.push(h('div', { class: 'acts' }, nbLink(it.href, it.kind === 'other' ? '열기' : '세션 열기', 'pill dark', 'open')));
+    return out;
+  }
+  function drawNotice() {
+    if (!nb.open || !nb.dlg) return;
+    var items = curNotices, idx = -1, focusK = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute('data-k') : null;  // 다시 그리기 전에 초점 자리를 적어 둔다
+    items.forEach(function (x, i) { if (x.id === nb.id) idx = i; });
+    if (idx >= 0 && nb.gone) { nb.gone = false; clearTimeout(nb.goneTimer); }
+    if (idx < 0 && !nb.gone) {
+      if (nb.id && nb.own !== nb.id && nb.shownId === nb.id) {
+        /* 보던 알림이 다른 곳에서 처리돼 사라졌다. 같은 자리에 다음 알림을 바로 그리면 눈 깜짝할 새 다른 알림에 답할 수 있으니,
+           안내와 함께 잠깐 단추를 막은 뒤 다음 알림을 보인다. */
+        nb.gone = true; nb.picked = {}; nb.flash = ''; nb.flashFor = ''; nb.err = ''; nb.errFor = '';
+        clearTimeout(nb.goneTimer);
+        nb.goneTimer = setTimeout(function () { nb.gone = false; nb.goneTimer = null; nb.id = null; drawNotice(); }, GONE_LOCK_MS);
+      } else {
+        if (nb.own === nb.id) nb.own = '';  // 내가 답해서 사라진 알림은 말없이 다음으로
+        if (items.length) idx = Math.min(nb.idx, items.length - 1);
+      }
+    }
+    var gone = nb.gone, it = !gone && idx >= 0 ? items[idx] : null;
+    if (!gone) { nb.idx = Math.max(idx, 0); nb.id = it ? it.id : null; }
+    if (!gone && nb.shownId !== nb.id) { nb.picked = {}; nb.shownId = nb.id; }  // 알림이 바뀌면 고른 답을 비운다
+    var locked = nb.busy || gone, box = h('div');
+    box.appendChild(h('div', { class: 'nb-head' },
+      h('h2', { id: 'nb-h', tabindex: '-1', text: '알림' }),
+      items.length > 1 ? h('span', { class: 'nb-pager' },
+        h('button', { type: 'button', class: 'nb-nav', 'data-k': 'prev', 'aria-label': '이전 알림', disabled: locked, onClick: function () { nbMove(-1); } }, icon('back', 14)),
+        h('span', { class: 'nb-count', 'data-nb-count': '1', text: (gone ? '·' : idx + 1) + '/' + items.length }),
+        h('button', { type: 'button', class: 'nb-nav', 'data-k': 'next', 'aria-label': '다음 알림', disabled: locked, onClick: function () { nbMove(1); } }, icon('chev', 14))) : null,
+      h('button', { type: 'button', class: 'nb-close', 'data-k': 'close', 'aria-label': '닫기', onClick: function () { closeNotices(); } }, icon('close', 14))));
+    // 응답 결과 안내는 그 응답을 보낸 알림에만 붙는다(그 알림이 사라졌으면 다음 알림 위에 한 번 보인다)
+    if (nb.flash && !gone && (nb.flashFor === nb.id || !items.some(function (x) { return x.id === nb.flashFor; }))) box.appendChild(h('p', { class: 'nb-flash', role: 'status', text: nb.flash }));
+    box.appendChild(h('div', { class: 'nb-body' }, gone ? h('p', { class: 'nb-flash', role: 'status', 'data-nb-gone': '1', text: '이 알림은 이미 처리됐어. 다음 알림을 불러올게.' })
+      : it ? nbBody(it) : h('p', { class: 'sub', text: nb.flash ? '답할 알림이 더 없어.' : '지금 알릴 게 없어.' })));
+    if (nb.err && nb.errFor === nb.id && !gone) box.appendChild(h('p', { class: 'nb-err', role: 'alert', text: nb.err }));
+    patchChildren(nb.dlg, Array.prototype.slice.call(box.childNodes));  // 같은 알림이면 바뀐 곳만 고친다(초점·스크롤·alert 반복 읽기 방지)
+    var cur = document.activeElement;
+    if (!cur || !nb.dlg.contains(cur)) {
+      var again = focusK && nb.dlg.querySelector('[data-k="' + focusK + '"]');
+      var target = again && !again.disabled ? again : nb.dlg.querySelector('#nb-h');  // 눌렀던 단추가 사라지면 제목으로
+      if (target) target.focus();
     }
   }
 
@@ -832,7 +1076,9 @@
     out.appendChild(h('span', { class: 'sp' }));
     var proj = projectOf();
     if (proj) out.appendChild(h('span', { class: 'eb proj', title: '프로젝트', text: proj }));
+    if (window.BHNotice) out.appendChild(limitEl());  // 계정 한도: 늘 보인다(#1016)
     out.appendChild(link('/settings', { class: 'pill ghost', 'aria-current': cur === '/settings' ? 'page' : null, text: '설정' }));  // 시안 헤더: 아이콘 없는 글자 단추(.bs)
+    if (window.BHNotice) out.appendChild(noticeHost());
     patchChildren(headEl, Array.prototype.slice.call(out.childNodes));
   }
   // 접기·펼치기 단추 하나: 접힌 칸과 펼친 칸 모두 목록 맨 위, 같은 자리·같은 크기. 화살표 방향만 반대다(SVG).
@@ -852,7 +1098,7 @@
     if (!sideEl) return;
     var d = sideData(), col = isCollapsed(), cur = location.pathname;
     appEl.dataset.collapsed = col ? 'true' : 'false';
-    renderAnn(d); renderHead(cur);
+    renderAnn(d); refreshNotices(d); renderHead(cur); drawNotice();
     if (postScene) postScene.update();
     if (sideMode !== col) { clear(sideEl); sideMode = col; }  // 접힘·펼침이 바뀌면 처음부터 다시 만든다(단추 핸들러가 다르다)
     if (col) { patchChildren(sideEl, [renderRail(d, cur)]); return; }  // 달라진 곳만 고친다(이벤트마다 목록을 통째로 다시 만들지 않는다, #793)
@@ -3239,7 +3485,7 @@
     appEl = h('div', { id: 'app', 'data-collapsed': 'false' });
     sideEl = h('aside', { class: 'side' });
     mainEl = h('main', { class: 'main', id: 'main' });
-    annEl = h('div', { class: 'ann-slot' });
+    annEl = h('div', { class: 'ann-slot', 'data-bubble': window.BHNotice ? '1' : null });  // 알림 말풍선이 같은 알림을 보이니 띠는 감춘다(#1016)
     headEl = h('header', { class: 'top' });
     appEl.appendChild(annEl); appEl.appendChild(headEl);
     appEl.appendChild(h('div', { class: 'shell' }, sideEl, mainEl));
@@ -3250,6 +3496,7 @@
     loadStart(false).then(function () { first(); wn(); }, function () { first(); wn(); });
     setTimeout(first, 1200);
     loadSessions().then(function () { connectEvents(); }, function (e) { if (e.status !== 401) { connectEvents(); scheduleRetryIfDown(); } });
+    setInterval(function () { if (headEl && renderedOnce) renderHead(location.pathname); }, 60000);  // 한도 풀리는 시각이 지나면 값을 내린다
     if (window.ResizeObserver) new ResizeObserver(function () { if (collapsed === null) scheduleSide(); }).observe(root);
   }
   function scheduleRetryIfDown() { if (conn.state === 'down') scheduleRetry(); }
