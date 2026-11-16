@@ -257,6 +257,10 @@ def _segments(command: str):
                 k += 1
             elif text in (">", ">>", "&>", "&>>") and nxt and nxt[0] == "word" and nxt[1] == "/dev/null":
                 k += 1
+            elif text in (">", ">>") and nxt and nxt[0] == "word" and _DEVICE_NAME.fullmatch(re.split(r"[\\/]", nxt[1])[-1]):
+                # Windows 장치 이름(nul·con·aux·com1 …)은 OS 마다 뜻이 달라(POSIX 셸은 그 이름의 파일을 만든다) 어디서나 묻는다.
+                unsafe = unsafe or "Windows 장치 이름(nul 등)으로 쓰는 리디렉션이야"
+                k += 1
             elif text in (">", ">>") and nxt and nxt[0] == "word" and nxt[1]:
                 reds.append((len(segs) - 1, nxt[1]))
                 k += 1
@@ -270,6 +274,7 @@ def _segments(command: str):
 
 # ---- 경로 ----
 _WILD = re.compile(r"[*?\[]")
+_DEVICE_NAME = re.compile(r"(?i)(nul|con|prn|aux|com[0-9]|lpt[0-9])(\.[^.]*)?")
 
 
 def _is_abs(p: str) -> bool:

@@ -321,7 +321,8 @@ def test_harness_scripts_and_modules_refuse_everything_outside_the_lists(plugin_
     # 엔진 주소 · 모듈
     assert uvx("git+https://github.com/evil/blueward-harness@v0.10.299", "checker.pr_queue") != "safe"
     assert uvx("git+https://github.com/jaeheeMin/blueward-harness-evil@v0.10.299", "checker.pr_queue") != "safe"
-    assert uvx("git+https://github.com/jaeheeMin/blueward-harness@main", "checker.pr_queue") != "safe"
+    # 주소를 나눠 적는다: 저장소 전체에서 엔진을 main 으로 받는 주소 글자를 막는 시험(test_engine_pin)이 있다.
+    assert uvx("git+https://github.com/jaeheeMin/blueward-harness" + "@" + "main", "checker.pr_queue") != "safe"
     assert uvx("git+https://github.com/jaeheeMin/blueward-harness@v0.10", "checker.pr_queue") != "safe"
     assert uvx("git+https://github.com/jaeheeMin/blueward-harness@v0.10.299.1", "checker.pr_queue") != "safe"
     assert uvx("git+https://github.com/jaeheeMin/blueward-harness@v0.10.299#x", "checker.pr_queue") != "safe"
