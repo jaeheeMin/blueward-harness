@@ -44,6 +44,11 @@
               취소, 시간 초과, 돌지 않음을 뭉개지 않고 나눠 적는다(#360).
               없거나 끝나지 않았으면 대기로 본다. 단 `ai_review_paths` 가 비어 있지 않은데 PR 이 바꾼
               파일 가운데 그 접두어 아래가 하나도 없으면 AI 리뷰 대상이 아니라 대기 없이 통과로 본다(#411).
+- `remembered` 이 PR 의 이전 커밋(강제 푸시로 덮인 옛 head 포함)에서 `ai_review`·`paths`·`secret` 사유로 위험 판정을 받은
+              기록이 있으면, 지금은 사유가 없어도 승인을 요구한다(#1004). 기억 근거는 봇(github-actions[bot])이 이전 SHA 에 단
+              `risk-gate` failure commit status 의 description 맨 앞 `[위험: 코드,…]` 다(작성자가 지울 수 없다). SHA 는 PR 커밋 목록,
+              브랜치 활동 기록(`activity?ref=`, PR 생성 뒤 것만), 호출자가 준 `--before-sha` 의 합이다. 사유 코드가 없는 옛 failure 와
+              `checks`·`size` 등의 failure 는 기억하지 않는다. 조회 실패·SHA 50개 초과·다른 저장소 head 는 판정 불가(2)다.
 
 위험한 PR 은 승인자 목록(`approvers_file`, 기본 `.github/ssot-approvers`)에서 **그 PR 작성자에게
 정해진 승인자(작성자 본인 제외)가 PR 의 마지막 커밋에 Approve** 해야 통과한다. 목록은
@@ -97,6 +102,7 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Callable
+from urllib.parse import quote
 
 import yaml
 
@@ -192,6 +198,27 @@ _BOOL_KEYS = ("secret_scan", "require_checks_green", "ai_review", "srs_split_hin
 _LIST_KEYS = ("high_risk_paths", "ai_review_paths", "size_warn_only_paths", "size_exclude_paths")
 
 _MAX_LISTED = 5  # 사유에 이름을 나열하는 최대 개수
+
+# 한 번이라도 이 사유로 위험 판정(failure)을 받은 PR 은 사유가 사라져도 승인을 요구한다(#1004). 기억 근거는 PR 의 커밋들에
+# 봇이 단 `risk-gate` commit status 의 failure 다 — status description 맨 앞에 `[위험: ai_review,paths]` 로 사유 코드를 적는다
+# (GitHub 가 description 을 140자로 자르므로 앞에 둔다). 코드가 없는 옛 failure(대부분 다른 검사 진행 중이던 기록)와
+# `checks`·`size` 등의 failure 는 기억하지 않는다.
+REMEMBER_LABELS = {"ai_review": "AI 리뷰 심각 지적", "paths": "위험 경로 변경", "secret": "비밀정보"}
+BOT_LOGIN = "github-actions[bot]"
+MAX_HISTORY_SHAS = 50  # 이보다 많은 커밋을 다 못 읽으면 검사 불능
+_RISK_CODES_RE = re.compile(r"^\[위험: ([a-z_,]+)\]")
+_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def risk_codes(findings: list["Finding"]) -> list[str]:
+    """이번 판정의 위험 사유 가운데 기억 대상 코드(진행 중 대기·참고는 뺀다). status description 에 적는다."""
+    codes = [f.criterion for f in findings if f.criterion in REMEMBER_LABELS and not f.waiting and not f.note]
+    return list(dict.fromkeys(codes))
+
+
+def parse_risk_codes(description: str) -> list[str]:
+    m = _RISK_CODES_RE.match(description or "")
+    return [c for c in m.group(1).split(",") if c in REMEMBER_LABELS] if m else []
 
 
 class ConfigError(RuntimeError):
@@ -834,6 +861,8 @@ class Context:
     merge_base: Callable[[], str | None] | None = None
     # PR 코멘트 목록. `ai_review` 기준이 ai-review 결과 표식을 읽는 데만 쓴다(#360). 없으면 표식 없음으로 본다.
     load_comments: Callable[[], list[dict]] | None = None
+    # 이 PR 의 이전 커밋들에 봇이 단 risk-gate 위험 기록 [(sha, 사유 코드들)]. `remembered` 기준만 쓴다(#1004). 없으면 기억 없음.
+    load_history: Callable[[], list[tuple[str, list[str]]]] | None = None
     _check_runs: list[dict] | None = field(default=None, repr=False)
 
     @property
@@ -1039,6 +1068,27 @@ def _crit_ai_review(ctx: Context) -> list[Finding]:
     return [Finding("ai_review", r) for r in flagged] + [Finding("ai_review", r, waiting=True) for r in waiting]
 
 
+@criterion("remembered")
+def _crit_remembered(ctx: Context) -> list[Finding]:
+    """이전 커밋에서 위험 판정(AI 리뷰 심각 지적·위험 경로·비밀정보)을 받은 PR 은 사유가 사라져도 승인을 요구한다(#1004)."""
+    if ctx.load_history is None:
+        return []
+    hits = ctx.load_history()
+    if not hits:
+        return []
+    labels: list[str] = []
+    for _sha, codes in hits:
+        for code in codes:
+            if REMEMBER_LABELS[code] not in labels:
+                labels.append(REMEMBER_LABELS[code])
+    first = hits[0][0]
+    where = "같은 커밋의 이전 검사" if first == ctx.head_ref else f"이전 커밋 {first[:7]}"
+    return [Finding(
+        "remembered",
+        f"이 PR 은 {where} 에서 {', '.join(labels)} 로 위험 판정을 받았다 — 고친 내용을 승인자가 마지막 커밋에서 봐야 한다",
+    )]
+
+
 def evaluate(ctx: Context) -> list[Finding]:
     """등록된 모든 기준을 돌려 위험 사유를 모은다. 사유가 없으면 위험하지 않다."""
     findings: list[Finding] = []
@@ -1077,6 +1127,11 @@ def build_next(findings: list[Finding], approval: str, approvers_file: str, admi
         steps.append(
             "승인자가 새로 넣거나 바꾼 harness:allow 주석의 이유·결정자가 맞는지 확인하십시오. 예외가 아니면 "
             "Claude 가 주석을 지우고 지적을 고치십시오"
+        )
+    if "remembered" in kinds:
+        steps.append(
+            "승인자가 이전에 위험 판정을 받은 사유가 마지막 커밋에서 실제로 고쳐졌는지 확인하고 Approve 하십시오"
+            "(사유가 사라져도 승인 없이는 풀리지 않습니다)"
         )
     waiting = any(f.waiting for f in findings)
     failing = any(f.criterion == "checks" and not f.waiting for f in findings)
@@ -1172,6 +1227,68 @@ def fetch_check_runs(client: GhClient, repo: str, sha: str) -> list[dict]:
     return runs
 
 
+def fetch_history_shas(client: GhClient, repo: str, pr: int, info: dict, extra: tuple[str, ...] = ()) -> list[str]:
+    """이 PR 이 거쳐 간 head SHA 들. PR 커밋 목록 + 브랜치 활동 기록(강제 푸시로 덮인 옛 head 포함, PR 생성 뒤 것만)
+    + 호출자가 아는 직전 head(`extra`). 조회가 안 되면 GhError(검사 불능), 상한을 넘어도 GhError."""
+    shas: list[str] = []
+
+    def add(sha) -> None:
+        sha = (sha or "").lower()
+        if _SHA_RE.match(sha) and not set(sha) <= {"0"} and sha not in shas:
+            shas.append(sha)
+
+    for c in client.get_all(f"repos/{repo}/pulls/{pr}/commits"):
+        add(c.get("sha") if isinstance(c, dict) else None)
+    for sha in extra:
+        add(sha)
+    head = info.get("head") or {}
+    head_repo = (head.get("repo") or {}).get("full_name")
+    branch = head.get("ref")
+    if head_repo and head_repo != repo:
+        raise GhError(f"PR #{pr} 의 head 가 다른 저장소({head_repo})라 강제 푸시 기록을 읽을 수 없다")
+    if not branch:
+        raise GhError(f"PR #{pr} 의 head 브랜치 이름을 응답에서 찾지 못했다")
+    created = info.get("created_at") or ""
+    per_page = 100
+    activity = client.get_json(f"repos/{repo}/activity?ref=refs/heads/{quote(branch, safe='/')}&per_page={per_page}") or []
+    if not isinstance(activity, list):
+        raise GhError("브랜치 활동 기록 응답이 목록이 아니다")
+    if len(activity) >= per_page:
+        raise GhError(f"브랜치 활동 기록이 {per_page}건 이상이라 다 읽지 못했다")
+    for item in activity:
+        # PR 을 열기 전 기록(같은 브랜치 이름의 옛 PR 등)은 이 PR 의 이력이 아니다.
+        if created and (item.get("timestamp") or "") < created:
+            continue
+        add(item.get("before"))
+        add(item.get("after"))
+    if len(shas) > MAX_HISTORY_SHAS:
+        raise GhError(f"PR #{pr} 의 이전 head 가 {len(shas)}개라 상한({MAX_HISTORY_SHAS})을 넘어 다 읽지 못했다")
+    return shas
+
+
+def fetch_risk_history(
+    client: GhClient, repo: str, pr: int, info: dict, extra: tuple[str, ...] = ()
+) -> list[tuple[str, list[str]]]:
+    """이 PR 의 head SHA 들 중 봇이 `risk-gate` failure 에 사유 코드를 적어 단 것을 [(sha, 코드들)] 로(#1004).
+
+    commit status 는 목록 API 가 덧쓴 이력까지 준다. 만든 이가 봇이 아닌 status 는 무시한다(작성자가 같은 이름으로
+    위조해도 소용없다). 현재 head 의 이력도 본다 — 같은 커밋에서 검사를 다시 돌려 지적을 지우는 길을 막는다."""
+    hits: list[tuple[str, list[str]]] = []
+    for sha in fetch_history_shas(client, repo, pr, info, extra):
+        codes: list[str] = []
+        for s in client.get_all(f"repos/{repo}/commits/{sha}/statuses"):
+            if not isinstance(s, dict) or s.get("context") != "risk-gate" or s.get("state") != "failure":
+                continue
+            if ((s.get("creator") or {}).get("login") or "") != BOT_LOGIN:
+                continue
+            for code in parse_risk_codes(s.get("description") or ""):
+                if code not in codes:
+                    codes.append(code)
+        if codes:
+            hits.append((sha, codes))
+    return hits
+
+
 # --- 판정 ---------------------------------------------------------------------
 
 
@@ -1207,6 +1324,8 @@ def _result_from(findings: list[Finding], approval_state: str, approved: bool | 
         "waiting_on_checks": waiting_only,
         "approval_note": note,
         "next": build_next(findings, approval_state, approvers_file, admin_only),
+        # 이번 판정의 기억 대상 사유 코드. 워크플로가 risk-gate failure status description 맨 앞에 적는다(#1004).
+        "risk_codes": risk_codes(findings),
     }
 
 
@@ -1235,11 +1354,14 @@ def _judge_approval(
     return "missing", False, note, []
 
 
-def decide_pr(client: GhClient, repo: str, pr: int, config_ref: str | None = None) -> dict:
+def decide_pr(
+    client: GhClient, repo: str, pr: int, config_ref: str | None = None, extra_shas: tuple[str, ...] = ()
+) -> dict:
     """PR 하나의 위험도와 승인 여부를 판정한다.
 
     `config_ref` 를 주면 기준·승인자 목록을 그 ref 에서 읽는다(병합 뒤 감지는 병합 직전
-    main 을 준다). 생략하면 PR 의 base 브랜치다.
+    main 을 준다). 생략하면 PR 의 base 브랜치다. `extra_shas` 는 호출자가 아는 직전 head(synchronize 의
+    `event.before`)로, 이전 위험 판정을 찾는 SHA 에 더한다(#1004).
     """
     info = fetch_pr_info(client, repo, pr)
     ref = config_ref or (info.get("base") or {}).get("ref") or "main"
@@ -1264,6 +1386,7 @@ def decide_pr(client: GhClient, repo: str, pr: int, config_ref: str | None = Non
         # `ref` 는 기준 브랜치의 지금 끝(또는 병합 직전 main)이라 PR 이 갈라진 뒤 main 이 앞서가면 PR 이
         # 건드리지 않은 줄까지 달라 보인다. SRS 비교는 갈라진 지점을 기준으로 한다.
         merge_base=lambda: fetch_merge_base(client, repo, ref, head_sha),
+        load_history=lambda: fetch_risk_history(client, repo, pr, info, extra_shas),
     )
     evaluated = evaluate(ctx)
     findings = [f for f in evaluated if not f.note]
@@ -1289,11 +1412,12 @@ def decide_pr_waiting(
     interval: int = 20,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
+    extra_shas: tuple[str, ...] = (),
 ) -> dict:
     """`decide_pr` 를 부르되, 사유가 진행 중인 검사뿐이면 `wait_seconds` 안에서 기다려 다시 판정한다."""
     deadline = clock() + wait_seconds
     while True:
-        result = decide_pr(client, repo, pr)
+        result = decide_pr(client, repo, pr, extra_shas=extra_shas) if extra_shas else decide_pr(client, repo, pr)
         if not result.get("waiting_on_checks") or clock() + interval > deadline:
             return result
         print(f"다른 검사가 끝나길 기다린다: {'; '.join(result['reasons'])}", file=sys.stderr)
@@ -1517,10 +1641,13 @@ def _unexpected(exc: Exception) -> dict:
 
 def cmd_check_pr(args: argparse.Namespace) -> int:
     client = GhClient()
+    before = (getattr(args, "before_sha", "") or "").strip().lower()
+    extra = {"extra_shas": (before,)} if before else {}
     try:
         result = decide_pr_waiting(
             client, args.repo, args.pr, getattr(args, "wait_checks", 0) or 0,
             getattr(args, "wait_interval", 20) or 20,
+            **extra,
         )
     except (GhError, ConfigError) as exc:
         _print(_unknown(exc))
@@ -1585,6 +1712,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="사유가 다른 검사의 진행 중뿐이면 이 시간(초) 안에서 끝나길 기다린다. 기본 0(기다리지 않음)",
     )
     check_pr.add_argument("--wait-interval", type=int, default=20, metavar="SECONDS", help="기다리는 동안 다시 보는 간격")
+    check_pr.add_argument(
+        "--before-sha", default="", help="직전 head SHA(synchronize 의 event.before). 이전 위험 판정을 찾는 SHA 에 더한다",
+    )
     check_pr.set_defaults(func=cmd_check_pr)
 
     precheck = sub.add_parser(

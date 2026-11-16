@@ -708,15 +708,20 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           WAIT_CHECKS: ${{ inputs.wait-checks }}
+          # synchronize 의 직전 head. 이전 위험 판정(commit status)을 찾는 SHA 에 더한다(#1004). 다른 이벤트에선 비어 있다.
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set +e
           uv run --project .harness-engine python .harness-engine/scripts/risk_gate.py \
             check-pr --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --wait-checks "$WAIT_CHECKS" \
+            --before-sha "$BEFORE_SHA" \
             > risk-result.json 2> risk-error.txt
           code=$?
           echo "exit-code=$code" >> "$GITHUB_OUTPUT"
           cat risk-error.txt >&2 || true
           cat risk-result.json || true
+          # 위험 사유 코드(ai_review,paths,secret). failure status description 맨 앞에 적어 다음 커밋이 이 판정을 기억하게 한다(#1004).
+          echo "codes=$(jq -r '(.risk_codes // []) | join(",")' risk-result.json 2>/dev/null)" >> "$GITHUB_OUTPUT"
           case "$code" in
             0)
               echo "status=pass" >> "$GITHUB_OUTPUT"
@@ -743,6 +748,7 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           RESULT: ${{ steps.risk-gate.outputs.status }}
           REASON: ${{ steps.risk-gate.outputs.reason }}
+          CODES: ${{ steps.risk-gate.outputs.codes }}
           TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           result="${RESULT:-unknown}"
@@ -750,6 +756,8 @@ jobs:
           if [ -z "$desc" ]; then
             if [ "$result" = "pass" ]; then desc="통과"; else desc="단계가 결과를 내지 못했다"; fi
           fi
+          # 위험 판정(fail)이면 사유 코드를 맨 앞에 적는다 — 140자로 잘려도 남게. 엔진이 이 코드로 이전 판정을 기억한다(#1004).
+          if [ "$result" = "fail" ] && [ -n "$CODES" ]; then desc="[위험: $CODES] $desc"; fi
           python3 .harness-engine/scripts/step_status.py \
             --repo "$GITHUB_REPOSITORY" --sha "$SHA" --context risk-gate --result "$result" \
             --description "$desc" --target-url "$TARGET_URL"

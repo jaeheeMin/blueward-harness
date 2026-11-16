@@ -29,6 +29,18 @@ def _no_previous_spec(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_risk_history(request, monkeypatch):
+    """risk-gate 의 `remembered` 기준(#1004)은 PR 커밋·브랜치 활동·commit status 를 더 읽는다. 가짜 GhClient 로 decide_pr 를
+    부르는 시험은 그 경로를 몰라 KeyError 가 나므로 기본은 "이전 위험 기록 없음" 으로 둔다.
+    그 기준 자체를 시험하는 모듈은 모듈 변수 `REAL_RISK_HISTORY = True` 로 이것을 끈다."""
+    if getattr(request.module, "REAL_RISK_HISTORY", False):
+        return
+    from checker import risk_gate
+
+    monkeypatch.setattr(risk_gate, "fetch_risk_history", lambda *a, **k: [])
+
+
+@pytest.fixture(autouse=True)
 def _clear_xlsx_cache():
     """xlsx 리더가 열어 둔 통합문서는 프로세스 단위로 재사용된다(#515). 시험끼리 섞이지 않게, 그리고 Windows 에서 임시 파일을 지울 수 있게 매번 닫는다."""
     from checker.readers import xlsx

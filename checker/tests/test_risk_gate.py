@@ -1375,7 +1375,7 @@ def test_main_인자를_해석한다(monkeypatch):
 
 def test_기준_등록부는_이름이_겹치지_않는다():
     names = [n for n, _ in rg.CRITERIA]
-    assert names == ["size", "paths", "secret", "split_hint", "write_auth", "allow", "checks", "ai_review"]
+    assert names == ["size", "paths", "secret", "split_hint", "write_auth", "allow", "checks", "ai_review", "remembered"]
     assert len(names) == len(set(names))
 
 
