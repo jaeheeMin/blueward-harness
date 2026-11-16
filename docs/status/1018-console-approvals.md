@@ -26,6 +26,25 @@
 
 보완 4(11-17 사용자 결정): 2차 시험에서 남은 즉석 셸 스크립트 2개(`r=…; echo "$(gh api …)"`, `for i in $(seq …)`)는 판정기로 안전을 가릴 수 없어 unknown 그대로 두고, 대신 콘솔이 띄우는 세션에 `--append-system-prompt` 로 "셸 명령은 하나씩, 명령 치환·반복문 대신 도구 호출을 나눠 써" 고정 지시를 덧붙였다(`managed.SIMPLE_COMMANDS_PROMPT`). 터미널 세션에는 붙지 않는다.
 
+보완 5(3차 실사용 시험에서 찾은 결함): 설정 폴더의 `plugins` 가 정션·링크면(이 PC 의 Orca 프로필 `…/home/plugins` → `~/.claude/plugins`) 콘솔이 `Path.resolve()` 로 푼 경로만 하네스 설치본으로 알아서, AI 가 푼 앞 경로로 부르는 하네스 자체 스크립트(`engine_spec.py`, `activation_gate.py check .`)를 묻고 있었다. `hooks_api.plugin_read_roots` 가 푼 앞 경로와 푼 경로를 둘 다 낸다(실제 경로 검사 `_real_within` 은 양쪽을 풀어 비교하므로 넓어지지 않는다). 시험 `test_plugin_read_roots_keep_the_unresolved_path_when_plugins_is_a_link`(Windows 는 정션으로 만든다, 푼 경로만이면 unknown 인 것도 확인).
+
+## 3차 실사용 시험(11-17, 화면 직접 + 진짜 claude)
+
+시험 저장소에서 "README.md 맨 아래에 … 한 줄을 더하고 올려 줘" 를 콘솔 [새 작업] 으로 시작, 승인 카드는 시험 도구(`loop.py`, 병합 승인 앞에서 멈춤)가 눌렀다. 고친 코드를 설치본 옆 판 폴더로 복사해 띄웠다(아직 태그가 없는 0.10.306 이름이면 doc-guard 훅이 엔진을 못 받아 파일 쓰기를 막으므로 엔진이 같은 0.10.305 이름을 썼다).
+
+| 회차 | 승인 카드 | 묻은 것 |
+|---|---|---|
+| 고치기 전(11-16) | 13 | 대부분 읽기 |
+| 2차(11-16) | 11 | 판정기 보완 전 |
+| 3차 1회(보완 5 전) | 8 | 이슈 본문 파일 쓰기(%TEMP%), `gh issue create`, `engine_spec.py`, `activation_gate.py check .`, `git push`, PR 본문 파일 쓰기, `gh pr create`, `gh api …/allow_auto_merge` |
+| 3차 2회(보완 5 뒤) | **6** | 이슈 본문 파일 쓰기(`.git/`), `gh issue create`, `git push`, PR 본문 파일 쓰기, `gh pr create`, `gh api …/allow_auto_merge` |
+
+- 남은 6개 중 3개(이슈 만들기·푸시·PR 만들기)는 승인 절차가 있는 GitHub 쓰기라 묻는 게 맞다.
+- 본문 파일 쓰기 2개는 AI 가 작업 폴더 밖(`%TEMP%`)이나 쓰기 보호(`.git/`)에 써서 묻는다(규칙대로).
+- `gh api` GET 1개는 판정기가 아직 읽기로 보지 않는다.
+- 두 회 모두 `$( )`·반복문 명령은 나오지 않았다(명령 단순 지시 뒤, 표본 2회). 승인 화면의 "묻는 이유" 한 줄·방금 처리 제목은 화면에서 보였다.
+- 따로 본 것(이 이슈 밖): 콘솔 세션 AI 가 영어로 답하는 때가 있다(이전 시험에도 있었다). 병합 뒤에도 단계가 "2 / 4 고치기" 로 남는 것은 3순위.
+
 ## 공식 문서 근거(9번)
 
 code.claude.com/docs/en/hooks, PermissionRequest 의 "Permission update entries"(2026-11-16 확인):
@@ -60,5 +79,5 @@ code.claude.com/docs/en/hooks, PermissionRequest 의 "Permission update entries"
 
 ## 남은 것
 
-- 완료 조건의 실사용 확인(같은 "양식 올리기" 작업을 Windows 시험 콘솔에서 진짜 claude 로 돌려 승인 횟수 전후 비교, 우회 문장·비밀값이 화면에 안 남는 것)은 하지 못했다.
+- 실사용 확인은 위 "3차 실사용 시험" 의 README 작업으로 했다. 우회 문장·비밀값이 화면에 안 남는 것은 자동 시험으로만 확인했다(실사용에서 그런 글이 나오지 않았다).
 - 길잡이(`docs/guide/harness-guide.html`)는 이 PR 에서 고쳤고, 병합 뒤 아티팩트에 다시 올려야 한다.

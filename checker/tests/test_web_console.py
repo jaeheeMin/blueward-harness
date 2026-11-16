@@ -7412,9 +7412,43 @@ def test_risk_plugin_folder_reads_are_judged_by_the_path_the_tool_really_opens(t
 def test_plugin_read_roots_cover_all_versions_of_installed_harness_or_the_dev_plugin(tmp_path):
     import hooks_api as hooks_mod
     installed = tmp_path / "conf" / "plugins" / "cache" / "blueward-harness" / "harness" / "0.10.285" / "console" / "hooks_api.py"
-    assert hooks_mod.plugin_read_roots(str(installed)) == (str((tmp_path / "conf" / "plugins" / "cache" / "blueward-harness" / "harness").resolve()),)
+    assert str((tmp_path / "conf" / "plugins" / "cache" / "blueward-harness" / "harness").resolve()) in hooks_mod.plugin_read_roots(str(installed))
     dev = tmp_path / "repo" / "plugins" / "harness" / "console" / "hooks_api.py"
-    assert hooks_mod.plugin_read_roots(str(dev)) == (str((tmp_path / "repo" / "plugins" / "harness").resolve()),)
+    assert str((tmp_path / "repo" / "plugins" / "harness").resolve()) in hooks_mod.plugin_read_roots(str(dev))
+    for roots in (hooks_mod.plugin_read_roots(str(installed)), hooks_mod.plugin_read_roots(str(dev))):
+        assert all(r.endswith("harness") for r in roots) and len(roots) == len(set(roots))
+
+
+def test_plugin_read_roots_keep_the_unresolved_path_when_plugins_is_a_link(tmp_path):
+    # Orca 프로필처럼 <설정 폴더>/plugins 가 ~/.claude/plugins 를 가리키는 링크면, AI 는 링크를 푼 앞 경로로 하네스 스크립트를
+    # 부른다. 그 경로도 설치본으로 봐야 하네스 자체 읽기 스크립트를 묻지 않는다(#1018 3차 실사용 시험에서 찾음).
+    import hooks_api as hooks_mod
+    import risk as risk_mod
+    real = tmp_path / "real-plugins"
+    ver = real / "cache" / "blueward-harness" / "harness" / "0.10.285"
+    (ver / "hooks").mkdir(parents=True)
+    (ver / "console").mkdir()
+    (ver / "hooks" / "engine_spec.py").write_text("", encoding="utf-8")
+    conf = tmp_path / "profile"
+    conf.mkdir()
+    link = conf / "plugins"
+    try:
+        os.symlink(real, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        if os.name == "nt":  # 권한 없이 만들 수 있는 정션(Orca 프로필이 실제로 쓰는 링크 종류)
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(real)], capture_output=True, check=False)
+        if not link.exists():
+            pytest.skip("이 환경에서는 폴더 링크를 만들 수 없다")
+    via_link = link / "cache" / "blueward-harness" / "harness" / "0.10.285"
+    roots = hooks_mod.plugin_read_roots(str(via_link / "console" / "hooks_api.py"))
+    assert str(link / "cache" / "blueward-harness" / "harness") in roots
+    work = tmp_path / "work"
+    work.mkdir()
+    cmd = f'uv run --no-project python "{via_link.as_posix()}/hooks/engine_spec.py"'
+    assert risk_mod.classify("Bash", {"command": cmd}, str(work), read_roots=roots)[0] == "safe"
+    # 링크를 푼 경로만 있으면 같은 명령을 판정하지 못했다(고치기 전 모양).
+    resolved_only = tuple(r for r in roots if "real-plugins" in r)
+    assert risk_mod.classify("Bash", {"command": cmd}, str(work), read_roots=resolved_only)[0] == "unknown"
 
 
 def test_risk_cd_is_safe_only_as_leading_cd_and_and_into_a_real_work_folder(tmp_path):

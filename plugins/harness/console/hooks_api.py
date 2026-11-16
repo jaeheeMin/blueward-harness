@@ -28,12 +28,17 @@ MAX_PENDING_AGENTS = 50  # 아직 SubagentStart 와 짝을 못 지은 Agent 호�
 
 def plugin_read_roots(console_file: str = __file__) -> tuple[str, ...]:
     """읽기 도구로 묻지 않고 읽어도 되는 하네스 플러그인 폴더(#953). 설치본이면 판 폴더들을 담은
-    <설정 폴더>/plugins/cache/<마켓>/harness 하나(세션이 콘솔과 다른 판을 쓸 수 있어), 아니면 이 플러그인 폴더(plugins/harness)."""
-    root = Path(console_file).resolve().parents[1]
-    parent = root.parent
-    if parent.name == "harness" and parent.parent.parent.name == "cache":
-        return (str(parent),)
-    return (str(root),)
+    <설정 폴더>/plugins/cache/<마켓>/harness 하나(세션이 콘솔과 다른 판을 쓸 수 있어), 아니면 이 플러그인 폴더(plugins/harness).
+    링크를 푼 경로와 푼 앞 경로를 둘 다 낸다(#1018): 설정 폴더의 plugins 가 정션·링크(예: Orca 프로필 → ~/.claude/plugins)면
+    AI 가 명령에 쓰는 경로는 푼 앞 경로라, 푼 경로만 두면 하네스 자체 스크립트도 설치본 밖으로 보여 승인을 묻는다.
+    실제 경로 검사(risk._real_within)는 양쪽 다 링크를 풀어 비교하므로 넓어지지 않는다."""
+    roots: list[str] = []
+    for root in (Path(os.path.abspath(console_file)).parents[1], Path(console_file).resolve().parents[1]):
+        parent = root.parent
+        found = str(parent) if parent.name == "harness" and parent.parent.parent.name == "cache" else str(root)
+        if found not in roots:
+            roots.append(found)
+    return tuple(roots)
 
 
 PLUGIN_READ_ROOTS = plugin_read_roots()
