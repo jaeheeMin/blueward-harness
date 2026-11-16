@@ -10,7 +10,7 @@
     { name: '요구사항', hint: '무엇을 만들지 쓰기' }, { name: '개발 Spec', hint: '어떻게 만들지 설계' },
     { name: '개발', hint: 'AI가 만드는 중' }, { name: '검토', hint: '팀 승인 받기' }, { name: '합쳐짐', hint: '끝, 반영됨' }
   ];
-  var LABEL = { turn: '내 답이 필요해요', blocked: '막혔어요', unk: '확인 못 함', run: '일하는 중', wait: '승인 기다림', done: '끝났어요', idle: '쉬는 중' };
+  var LABEL = { turn: '내 답이 필요해', blocked: '막혔어', unk: '확인 못 함', run: '일하는 중', wait: '승인 기다림', done: '끝났어', idle: '쉬는 중' };
   var GLYPH = { turn: '!', blocked: '✕', unk: '?', done: '✓', wait: '…' };
   var WHO = ['mint', 'navy', 'rose', 'sunny', 'sky', 'sage', 'kid'];
   var MAX_PEOPLE = 14;
@@ -139,9 +139,9 @@
       });
     }
     function describe(list) {
-      var shown = list.length, cut = shown > MAX_PEOPLE ? '(그림에는 ' + MAX_PEOPLE + '개만 그렸어요)' : '';
+      var shown = list.length, cut = shown > MAX_PEOPLE ? '(그림에는 ' + MAX_PEOPLE + '개만 그렸어)' : '';
       var turn = list.filter(function (s) { return s.state === 'turn'; }).length;
-      wrap.setAttribute('aria-label', '우체국 장면. 세션 ' + shown + '개가 다섯 창구(요구사항 · 개발 Spec · 개발 · 검토 · 합쳐짐) 앞에 서 있어요' + cut + (turn ? ' · 내 차례 ' + turn + '개' : '') + '. 같은 내용이 왼쪽 세션 목록에 있어요.');
+      wrap.setAttribute('aria-label', '우체국 장면. 세션 ' + shown + '개가 다섯 창구(요구사항 · 개발 Spec · 개발 · 검토 · 합쳐짐) 앞에 서 있어' + cut + (turn ? ' · 내 차례 ' + turn + '개' : '') + '. 같은 내용이 왼쪽 세션 목록에 있어.');
     }
 
     function fit() {

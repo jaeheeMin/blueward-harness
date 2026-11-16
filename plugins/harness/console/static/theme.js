@@ -11,7 +11,7 @@
   var THEME_KEY = 'bh-theme';
   var THEMES = [
     { id: 'sauce', name: 'Sauce', tagline: '기본 · 어두운 바탕에 초록 강조' },
-    { id: 'post', name: 'Post', tagline: '우체국 · 세션이 창구 앞에 서 있어요' }
+    { id: 'post', name: 'Post', tagline: '우체국 · 세션이 창구 앞에 서 있어' }
   ];
   var DEFAULT_THEME = 'sauce';
 
