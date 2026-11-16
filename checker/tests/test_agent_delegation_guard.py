@@ -39,21 +39,23 @@ def assert_allowed(code: int, out: dict | None) -> None:
     assert out is None
 
 
-def test_model_을_넘기면_거절한다():
-    code, out = call({"subagent_type": "harness:researcher", "prompt": "x", "model": "sonnet"})
+def stripped(out: dict | None) -> dict:
+    assert out is not None, "model 을 뺀 출력이 없다"
+    spec = out["hookSpecificOutput"]
+    assert spec["permissionDecision"] == "allow"
+    return spec["updatedInput"]
+
+
+@pytest.mark.parametrize("model", ["sonnet", "opus", "haiku", ""])
+def test_model_을_넘기면_빼고_통과시킨다(model):
+    code, out = call({"subagent_type": "harness:researcher", "prompt": "x", "model": model})
     assert code == 0
-    text = reason(out)
-    assert "model" in text and "정의 파일" in text and "빼고" in text
+    assert stripped(out) == {"subagent_type": "harness:researcher", "prompt": "x"}
 
 
-@pytest.mark.parametrize("model", ["opus", "haiku"])
-def test_어떤_model_값이든_거절한다(model):
-    _, out = call({"subagent_type": "harness:implementer", "prompt": "x", "model": model})
-    assert "model" in reason(out)
-
-
-def test_빈_model_은_넘기지_않은_것으로_본다():
-    assert_allowed(*call({"subagent_type": "harness:researcher", "prompt": "x", "model": ""}))
+def test_model_을_넘겨도_기본_에이전트면_거절한다():
+    _, out = call({"subagent_type": "general-purpose", "prompt": "x", "model": "sonnet"})
+    assert "harness:researcher" in reason(out)
 
 
 @pytest.mark.parametrize("kind", ["general-purpose", "General-Purpose", "claude"])

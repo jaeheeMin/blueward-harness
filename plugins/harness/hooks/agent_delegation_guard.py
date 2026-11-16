@@ -4,6 +4,8 @@
 
 1. 호출 때 `model` 을 넘기지 않는다. 넘긴 값이 정의 파일(`agents/*.md`)의 model 보다
    우선하므로(공식 문서의 우선순위), 정의 파일이 정한 `sonnet` 고정이 깨진다.
+   넘겼으면 거절하지 않고 `updatedInput` 으로 `model` 만 빼고 통과시킨다 — 거절하면
+   같은 호출을 model 없이 다시 부르는 일만 생기고 오류가 화면에 뜬다.
 2. `general-purpose`·`claude` 같은 기본 에이전트나 `subagent_type` 없는 호출을 쓰지 않는다.
    정의 파일이 모델과 도구를 고정하는 `harness:researcher`·`implementer`·`reviewer` 를 쓴다.
 
@@ -55,6 +57,21 @@ def deny(reason: str) -> None:
     sys.exit(0)
 
 
+def strip_model(tool_input: dict) -> None:
+    """`model` 을 뺀 입력으로 바꿔 통과시킨다. 정의 파일의 model 이 적용된다."""
+    updated = {k: v for k, v in tool_input.items() if k != "model"}
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": updated,
+        }
+    }
+    json.dump(payload, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    sys.exit(0)
+
+
 def _force_utf8_io() -> None:
     for stream in (sys.stdin, sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -76,14 +93,6 @@ def _main() -> None:
             "(검사 불능).\n확인되지 않는 상태로 통과시키지 않습니다.\n\n" + NEXT_RETRY
         )
 
-    model = tool_input.get("model")
-    if model is not None and model != "":
-        deny(
-            f"Agent 호출에 model({model!r})을 넘겼습니다. 서브에이전트 모델은 정의 파일이 "
-            "정합니다. 호출 때 넘긴 model 이 정의 파일의 `sonnet` 고정보다 우선하기 때문입니다"
-            "(rules/delegation.md).\n\n다음: model 을 빼고 다시 부르십시오."
-        )
-
     subagent_type = tool_input.get("subagent_type")
     if not isinstance(subagent_type, str) or not subagent_type.strip():
         deny(
@@ -95,6 +104,9 @@ def _main() -> None:
             f"Agent 호출이 기본 에이전트({subagent_type.strip()})를 씁니다. 이 에이전트는 "
             "모델·도구 고정이 걸리지 않습니다(rules/delegation.md).\n\n" + NEXT_USE_DEFINED
         )
+
+    if "model" in tool_input:
+        strip_model(tool_input)
 
     sys.exit(0)
 
