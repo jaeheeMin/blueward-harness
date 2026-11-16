@@ -1,7 +1,7 @@
 /* 글꼴은 static/fonts/ 에 들어 있다(OFL 라이선스 파일 동봉). 서버가 같은 곳에서 내보내므로 CSP font-src 'self' 로 된다. */
 @font-face { font-family: 'Pretendard'; src: url('/fonts/PretendardVariable.woff2') format('woff2'); font-weight: 45 920; font-style: normal; font-display: swap; }
 @font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
-/* 디자인 "Sauce": 흑요석 바탕, 네온 그린 강조, 본문 큰 판만 밝은 색. 색은 이 한 벌뿐이다(테마 고르기 없음).
+/* 디자인 "Sauce": 흑요석 바탕, 네온 그린 강조, 본문 큰 판만 밝은 색. 이 :root 가 기본 테마 Sauce 의 색이다. 설정에서 고르는 다른 테마(Post)는 theme-post.css 가 :root[data-theme="post"] 아래에서 덮는다(#1013).
    상태는 색 + 모양/기호로 구분한다: 지금(채운 점) / 끝남(✓) / 내 차례(노랑 !) / 실패(빨강 ✕) / 확인 못 함(보라 점선 ?). 어떤 글자도 22px 를 넘기지 않는다. */
 :root {
   --bg: #132322; --surface: #0e1a19; --deep: #070f0f; --text: #f3faf8; --sec: #c4d3cf; --muted: #9fb3ae;
@@ -1132,3 +1132,22 @@ details.fold > [data-r]:empty { display: none; }
 .docs-page .docs-pane .md table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .docs-page .docs-pane .md :is(th, td) { padding: 6px 8px; border: 0; border-bottom: 1px solid #e3e8e6; text-align: left; line-height: 1.75; }
 .docs-page .docs-pane .md th { background: transparent; color: #6f807b; font-weight: 400; }
+
+/* 설정의 테마 고르기(#1013): 글자 크기 고르기와 같은 방식, 칸마다 미리보기 · 이름 · 한 줄 설명. 미리보기는 테마가 바뀌어도 제 색이다. */
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.theme-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px; border: 1.5px solid var(--lline); border-radius: 14px; background: var(--card); color: var(--lightink); text-align: left; }
+.theme-card:hover { border-color: var(--lightink); }
+.theme-card[aria-checked="true"] { border-color: var(--lightink); box-shadow: inset 0 0 0 1px var(--lightink); }
+.theme-card b { font-size: 14px; font-weight: 600; }
+.theme-card small { font-size: 12px; color: var(--lmuted); }
+.tc-prev { display: flex; align-items: flex-end; gap: 4px; width: 100%; height: 54px; margin-bottom: 4px; padding: 8px; border-radius: 8px; }
+.tc-prev i { flex: 1; height: 10px; border-radius: 3px; }
+.tc-prev.tc-sauce { background: #132322; }
+.tc-prev.tc-sauce i:nth-child(1) { height: 22px; background: #3ddc91; }
+.tc-prev.tc-sauce i:nth-child(2) { background: #edf7f5; }
+.tc-prev.tc-sauce i:nth-child(3) { background: #97ddbc; }
+.tc-prev.tc-post { background: repeating-linear-gradient(135deg, #D9483B 0 8px, #FFFCF6 8px 16px, #3D6FB6 16px 24px, #FFFCF6 24px 32px) 0 0 / 100% 6px no-repeat, #F6F1E7; }
+.tc-prev.tc-post i:nth-child(1) { height: 22px; background: #C73E31; }
+.tc-prev.tc-post i:nth-child(2) { background: #FFFCF6; box-shadow: inset 0 0 0 1px #D9CDB8; }
+.tc-prev.tc-post i:nth-child(3) { background: #24304A; }
+@media (prefers-reduced-motion: no-preference) { .theme-card { transition: border-color .12s; } }

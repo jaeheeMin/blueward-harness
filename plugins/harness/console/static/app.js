@@ -853,6 +853,7 @@
     var d = sideData(), col = isCollapsed(), cur = location.pathname;
     appEl.dataset.collapsed = col ? 'true' : 'false';
     renderAnn(d); renderHead(cur);
+    if (postScene) postScene.update();
     if (sideMode !== col) { clear(sideEl); sideMode = col; }  // 접힘·펼침이 바뀌면 처음부터 다시 만든다(단추 핸들러가 다르다)
     if (col) { patchChildren(sideEl, [renderRail(d, cur)]); return; }  // 달라진 곳만 고친다(이벤트마다 목록을 통째로 다시 만들지 않는다, #793)
 
@@ -959,14 +960,40 @@
       whatsNote ? h('p', { class: 'wn-note', text: whatsNote }) : null,
       h('div', { class: 'wn-acts' }, acts)));
   }
+  /* Post 테마 장면(theme-post.js)에 올릴 세션 줄. 상태는 사이드 목록과 같은 기준(막힘 > 내 차례 > 일하는 중 > 승인 기다림 > 끝), 창구는 갈래의 지금 단계다. */
+  var SCENE_STATION = { srs: 0, spec: 1, deliver: 3, merge: 3 };  // 그 밖의 단계(start·implement·fix 따위)와 갈래가 없는 세션은 2(개발)
+  function sceneList() {
+    var L = window.BHLogic, out = [];
+    sortedSessions().forEach(function (s) {
+      if (s.status === 'ended') return;
+      var bk = L.blockOf(s), g = L.groupOf(s), state;
+      if (bk) state = bk.kind === 'cannot_check' ? 'unk' : 'blocked';
+      else if (g === 'todo') state = 'turn';
+      else if (g === 'running') state = 'run';
+      else if (s.phase === 'approval') state = 'wait';
+      else if (s.phase === 'finished') state = 'done';
+      else state = 'idle';
+      var station = 2, step = (s.flowSteps || [])[s.stepIndex];
+      if (s.phase === 'finished' || s.flowFinished) station = 4;
+      else if (s.phase === 'approval') station = 3;
+      else if (step && SCENE_STATION[step.id] != null) station = SCENE_STATION[step.id];
+      var title = sessionTitle(s);
+      out.push({ id: s.id, title: title, state: state, station: station, tag: title.length > 7 ? title.slice(0, 6) + '…' : title });
+    });
+    return out;
+  }
+  var postScene = null;  // Post 테마 장면 제어(theme-post.js). 홈을 떠나면 destroy 한다
   function homeView(root) {
     whatsSlot = h('div', { class: 'wn-slot' });
     var rest = h('div');
-    root.appendChild(whatsSlot); root.appendChild(rest);
+    var sceneHost = h('div', { class: 'po-stage', hidden: true });
+    root.appendChild(sceneHost); root.appendChild(whatsSlot); root.appendChild(rest);
+    postScene = window.BHPostScene ? window.BHPostScene.attach(sceneHost, { list: sceneList, onNavigate: function (href) { go(href); } }) : null;
     drawWhatsNew();
     var v = ui.homeView(rest);
-    if (v && v.destroy) { var d0 = v.destroy; v.destroy = function () { whatsSlot = null; d0(); }; }
-    else v = Object.assign({}, v, { destroy: function () { whatsSlot = null; } });
+    function leave() { whatsSlot = null; if (postScene) { postScene.destroy(); postScene = null; } }
+    if (v && v.destroy) { var d0 = v.destroy; v.destroy = function () { leave(); d0(); }; }
+    else v = Object.assign({}, v, { destroy: leave });
     return v;
   }
   function docsView(root) { return ui.docsPage(root); }
@@ -3057,7 +3084,7 @@
   }
 
   /* ---------- 설정 ---------- */
-  /* 시안 19: 글자 크기 · AI가 묻는 범위 · 알림(스위치 셋, 서버 notify.json) · 연결 상태 · 고급. 화면 밝기(다크 한 벌뿐)는 넣지 않았다. */
+  /* 시안 19: 글자 크기 · 테마(#1013) · AI가 묻는 범위 · 알림(스위치 셋, 서버 notify.json) · 연결 상태 · 고급. 화면 밝기(다크 한 벌뿐)는 넣지 않았다. */
   function settingsView(root) {
     var alive = true, conn = { gh: '불러오는 중이야', ver: '불러오는 중이야', proj: '불러오는 중이야' };
     function set(label, body) {
@@ -3125,6 +3152,16 @@
         return h('button', { type: 'button', role: 'radio', class: 'scale', 'aria-checked': String(z[1] === scale), text: z[0], onClick: function () { BH.setScale(z[1]); draw(); } });
       }));
       sec.appendChild(set('글자 크기', seg));
+
+      /* 테마(#1013): 글자 크기와 같은 방식(브라우저에 저장, 바로 적용). 미리보기 칸은 테마가 바뀌어도 제 색이라 색을 그대로 적는다. */
+      var themeNow = BH.getTheme();
+      var themeGrid = h('div', { class: 'theme-grid', role: 'radiogroup', 'aria-label': '테마' }, BH.THEMES.map(function (th) {
+        return h('button', { type: 'button', role: 'radio', class: 'theme-card', 'aria-checked': String(th.id === themeNow), 'data-theme-opt': th.id,
+          onClick: function () { BH.setTheme(th.id); draw(); } },
+          h('span', { class: 'tc-prev tc-' + th.id, 'aria-hidden': 'true' }, h('i'), h('i'), h('i')),
+          h('b', { text: th.name }), h('small', { text: th.tagline }));
+      }));
+      sec.appendChild(set('테마', themeGrid));
 
       /* 시안 19 "AI가 묻는 범위": 서버 ask.json 과 이어진다. 읽기 전(askCfg 없음)에는 고르지 못한다. */
       var askNow = askCfg && askCfg.level;

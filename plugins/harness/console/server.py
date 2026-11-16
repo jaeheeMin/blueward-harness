@@ -165,6 +165,7 @@ def judge_version(loaded: str, latest: str | None) -> dict:
     return {"state": "ok", "detail": loaded}
 
 
+POST_ASSET = re.compile(r"/post/(?:[A-Za-z0-9_][\w-]*/){0,3}[A-Za-z0-9_][\w-]*\.(?:svg|js)")
 SPA_PATHS = re.compile(r"^/(s/[^/]+|r/[^/]+|new|settings|docs|troubles(/new|/[^/]+/[^/]+/\d+)?)?$")
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
@@ -2415,6 +2416,8 @@ class Handler(BaseHTTPRequestHandler):
         else:
             rest = path[len("/static"):] if path.startswith("/static/") else path
             if re.fullmatch(r"/(fonts/)?[\w.-]+", rest):  # fonts/ 한 단계만 연다
+                name = rest[1:]
+            elif POST_ASSET.fullmatch(rest):  # Post 테마 장면 부품(post/people/mint/walk-1.svg 처럼 하위 폴더)
                 name = rest[1:]
         f = app.static_dir / name if name else None
         if not f or not f.is_file() or not platform_compat.is_within(f, app.static_dir):

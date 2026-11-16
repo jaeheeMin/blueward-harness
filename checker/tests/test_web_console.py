@@ -1660,6 +1660,29 @@ def test_fonts_served_as_woff2_regardless_of_registry(console, monkeypatch, name
         assert resp.getheader("X-Content-Type-Options") == "nosniff"
 
 
+def test_post_theme_assets_served_from_subfolders(console):
+    # Post 테마 장면 부품(#1013): static/post/ 아래 하위 폴더의 svg·manifest.js 를 낸다. 형식은 맞고 CSP 는 그대로다.
+    for prefix in ("/static/post/", "/post/"):
+        status, body, resp = console.call("GET", prefix + "people/mint/walk-1.svg", cookie=False, binary=True)
+        assert status == 200 and body.lstrip()[:4] in (b"<svg", b"<?xm"), prefix
+        assert resp.getheader("Content-Type") == "image/svg+xml"
+        assert "img-src 'self'" in resp.getheader("Content-Security-Policy")
+        status, body, resp = console.call("GET", prefix + "manifest.js", cookie=False, binary=True)
+        assert status == 200 and body.startswith(b"window.BWPOST")
+        assert resp.getheader("Content-Type").startswith("text/javascript")
+    manifest = (CONSOLE / "static" / "post" / "manifest.js").read_text(encoding="utf-8")
+    for rel in re.findall(r'"([\w/.-]+\.svg)":\[', manifest):
+        assert (CONSOLE / "static" / "post" / rel).is_file(), rel  # manifest 가 가리키는 부품이 모두 있다
+
+
+def test_post_theme_assets_do_not_open_other_paths(console):
+    # 하위 폴더를 열어도 위로 올라가거나 다른 확장자·4단계 넘는 경로는 열지 않는다
+    for bad in ("/static/post/", "/static/post/none.svg", "/static/post/../server.py", "/static/post/%2e%2e/server.py", "/static/post/a/b/c/d/e.svg",
+                "/static/post/people/../../server.py", "/static/post/manifest.py", "/static/post/people/mint", "/static/post//people/mint/walk-1.svg",
+                "/static/post/.hidden.svg"):
+        assert console.call("GET", bad, cookie=False, binary=True)[0] == 404, bad
+
+
 def test_fonts_folder_does_not_open_other_paths(console):
     for bad in ("/fonts/", "/fonts/none.woff2", "/fonts/../server.py", "/fonts/a/b.woff2", "/fonts/%2e%2e/server.py", "/static/fonts/../server.py"):
         assert console.call("GET", bad, cookie=False, binary=True)[0] == 404, bad

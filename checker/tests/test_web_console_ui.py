@@ -1114,14 +1114,22 @@ const store = seed ? JSON.parse(seed) : {};
 global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
 const style = {};
 global.window = {};
-global.document = { documentElement: { style } };
+const dataset = {}, events = [];
+global.CustomEvent = function (n, o) { this.type = n; this.detail = o && o.detail; };
+global.document = { documentElement: { style, dataset }, dispatchEvent: e => events.push(e.detail) };
 require(file);
 const BH = window.BH;
-const out = { first: BH.getScale(), zoom: style.zoom, keys: Object.keys(BH).sort().join(',') };
+const out = { first: BH.getScale(), zoom: style.zoom, keys: Object.keys(BH).sort().join(','), theme0: [BH.getTheme(), dataset.theme] };
 BH.setScale('1.15');
 out.afterSet = [BH.getScale(), store['bh-zoom'], style.zoom];
 BH.setScale('nonsense');
 out.afterBad = [BH.getScale(), style.zoom];
+BH.setTheme('post');
+out.themePost = [BH.getTheme(), store['bh-theme'], dataset.theme];
+BH.setTheme('nonsense');
+out.themeBad = [BH.getTheme(), store['bh-theme'], dataset.theme];
+out.themeIds = BH.THEMES.map(x => x.id).join(',');
+out.events = events.join(',');
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -1137,7 +1145,7 @@ def _theme_run(seed: dict | None = None) -> dict:
 def test_theme_js_only_keeps_text_scale():
     r = _theme_run()
     assert r["first"] == "1" and r["zoom"] == "1"  # 시안(가)대로 보통 = 배율 없음(#721)
-    assert r["keys"] == "SCALES,getScale,read,setScale,write"  # 옛 테마 표·디자인 전환은 없다
+    assert r["keys"] == "SCALES,THEMES,getScale,getTheme,read,setScale,setTheme,write"  # 글자 크기 + 테마(#1013). 옛 디자인 전환은 없다
     assert r["afterSet"] == ["1.15", "1.15", "1.15"]
     assert r["afterBad"] == ["1.15", "1.15"]  # 모르는 값은 저장도 적용도 하지 않는다(바로 앞 값 유지)
     assert _theme_run({"bh-zoom": "0.9"})["zoom"] == "0.9"
@@ -1145,15 +1153,39 @@ def test_theme_js_only_keeps_text_scale():
     assert _theme_run({"bh-scale": "1.15"})["first"] == "1"  # 옛 키(보통이 1.15 였다)는 읽지 않는다
 
 
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_theme_js_saves_and_applies_theme():
+    # 테마 저장·적용(#1013): 기본 sauce, 모르는 값은 sauce, 바뀌면 이벤트
+    r = _theme_run()
+    assert r["theme0"] == ["sauce", "sauce"]  # 기본은 Sauce, 첫 페인트 전에 html[data-theme] 으로 걸린다
+    assert r["themeIds"] == "sauce,post"
+    assert r["themePost"] == ["post", "post", "post"]
+    assert r["themeBad"] == ["post", "post", "post"]  # 모르는 값은 저장도 적용도 하지 않는다
+    assert r["events"] == "sauce,post"  # 바뀔 때 bh-theme 이벤트(장면이 새로 고침 없이 붙고 떨어진다)
+    assert _theme_run({"bh-theme": "post"})["theme0"] == ["post", "post"]
+    assert _theme_run({"bh-theme": "zzz"})["theme0"] == ["sauce", "sauce"]  # 모르는 저장값은 Sauce
+
+
+def test_post_theme_css_stays_under_data_theme_post():
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    body = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    for sel in re.findall(r"([^{}]+)\{", body):
+        for part in sel.split(","):
+            assert part.strip().startswith(':root[data-theme="post"]'), part.strip()  # Sauce 에는 한 줄도 닿지 않는다
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert html.index('src="/theme.js"') < html.index("</head>") and 'src="/theme.js"' in html.split("</head>")[0]  # 첫 페인트 전 동기 로드
+    assert 'href="/theme-post.css"' in html and 'src="/theme-post.js"' in html
+
+
 def test_no_theme_or_design_switch_left():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     theme = (STATIC / "theme.js").read_text(encoding="utf-8")
-    for needle in ("data-design", "data-tone", "design-quick", "getTheme", "getDesign", "setDesign", "BH.THEMES", "BH.DESIGNS"):
+    for needle in ("data-design", "data-tone", "design-quick", "getDesign", "setDesign", "BH.DESIGNS"):  # 테마(getTheme·BH.THEMES)는 #1013 에서 다시 생겼다
         assert needle not in app and needle not in css and needle not in theme, needle
-    # 설정 화면에는 글자 크기만 남는다
+    # 설정 화면에는 글자 크기와 테마(#1013)가 있고 디자인 고르기는 없다
     settings = app[app.index("function settingsView"):app.index("/* ---------- 시작 ---------- */")]
-    assert "글자 크기" in settings and "테마" not in settings and "디자인" not in settings
+    assert "글자 크기" in settings and "BH.THEMES" in settings and "디자인" not in settings
 
 
 def _lum(hex_color: str) -> float:
