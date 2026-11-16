@@ -66,6 +66,8 @@ def fake_gh(args, cwd):
         return tb
     if a[:2] == ["repo", "view"]:
         return 0, "ADMIN\n"
+    if a[:2] == ["api", "repos/{owner}/{repo}"] and ".permissions.admin" in a:
+        return 0, "true\n"  # 시안 G-03 은 관리자 화면([만들기]·[나중에])이다(#1010)
     prs = st["prs"]
     if a[:2] == ["pr", "view"]:
         hit = next((p for p in prs if str(p["number"]) == a[2]), None)

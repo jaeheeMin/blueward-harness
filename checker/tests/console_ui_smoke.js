@@ -51,7 +51,7 @@ El.prototype = {
   get textContent() { return this._text !== null ? this._text : this.children.map(t => t.nodeType === 3 ? t.text : t.textContent).join(''); },
   addEventListener(n, f) { (this.listeners[n] = this.listeners[n] || []).push(f); },
   get isConnected() { let e = this; while (e.parentNode) e = e.parentNode; return e === document.body || e === root; },
-  focus() { document.activeElement = this; }, setSelectionRange() {}, dispatchEvent() {},
+  focus() { document.activeElement = this; }, setSelectionRange() {}, dispatchEvent() {}, scrollIntoView(o) { scrolled.push([this.attrs['class'] || this.tag, JSON.stringify(o || {})]); },
   contains(o) { while (o) { if (o === this) return true; o = o.parentNode; } return false; },
   get clientWidth() { return 1200; },
   querySelectorAll(sel) {
@@ -109,7 +109,7 @@ if (ENV.notification && ENV.notification !== 'absent') {
   Notification.permission = ENV.notification;
   Notification.requestPermission = () => { asked.push(1); Notification.permission = ENV.ask || 'denied'; return Promise.resolve(Notification.permission); };
 }
-const focused = [];
+const focused = [], scrolled = [];  // scrolled: scrollIntoView 호출 기록
 global.focus = () => { focused.push(1); };
 document.visibilityState = ENV.visible ? 'visible' : 'hidden';
 document.hasFocus = () => !!ENV.visible;
@@ -130,6 +130,7 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
   const out_values = [];  // type 동작 뒤 입력칸에 남은 값(가림 확인용)
   for (const act of JSON.parse(process.argv[7] || '[]')) {
     if (act.set) { Object.assign(DATA, act.set); continue; }
+    if (act.wait) { await tick(act.wait); continue; }  // {"wait": 밀리초} 시간이 지나기를 기다린다(다시 묻기 시험)
     if (act.es) { if (!ES_LAST) errors.push('EventSource 없음'); else { const f = ES_LAST['on' + act.es]; if (f) f(); } await tick(200); continue; }  // {"es": "error"|"open"} 연결 끊김·다시 붙음 흉내
     if (act.visible !== undefined) { document.visibilityState = act.visible ? 'visible' : 'hidden'; document.hasFocus = () => !!act.visible; continue; }
     if (act.emit) { const f = ES_LISTENERS[act.emit[0]]; if (f) f({ data: JSON.stringify(act.emit[1]) }); else errors.push('이벤트 구독 없음 ' + act.emit[0]); await tick(400); continue; }
@@ -150,6 +151,8 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
   out.dump = main ? dump(main, 0) : '';
   out.notes = notes; out.asked = asked.length; out.focused = focused.length; out.path = location.pathname; out.ls = Object.assign({}, LS);
   out.posts =calls.filter(c => c[0] !== 'GET').map(c => [c[0], c[1], c[2] || '']);
+  out.scrolled = scrolled; out.active = document.activeElement ? [document.activeElement.tag, document.activeElement.attrs['data-flow'] || ''] : null;
+  out.ariaDisabled = root.querySelectorAll('button').filter(b => b.attrs['aria-disabled'] === 'true').map(b => b.textContent);
   out.disabledButtons = root.querySelectorAll('button').filter(b => b.disabled).map(b => b.textContent);  // 눌러도 되는지(#885)
   out.links = root.querySelectorAll('a').map(a => [a.attrs.href || '', a.attrs.target || '', a.attrs.rel || '']);
   out.side = root.querySelector('.side') ? root.querySelector('.side').textContent : '';

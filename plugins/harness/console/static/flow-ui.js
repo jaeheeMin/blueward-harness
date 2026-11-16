@@ -984,7 +984,9 @@
       var tail = h('span', { class: 'flow-tail' });
       var grid = h('div', { class: 'flowgrid', hidden: true });
       var open = false, alive = true, last = null;
-      function nameOf(flows, id) { var f = flows.filter(function (x) { return x.id === id; })[0]; return f ? f.name : id; }
+      // 갈래 목록에서 못 찾으면 서버 분석 결과가 준 이름(found.name · alternativeName)을 쓰고, 그것도 없으면 일반 말을 쓴다. id 는 화면에 내지 않는다.
+      function nameOf(flows, id, fallback) { var f = flows.filter(function (x) { return x.id === id; })[0]; return (f && f.name) || fallback || '다른 일'; }
+      function foundName(found, id) { return found && (id === found.id ? found.name : id === found.alternativeId ? found.alternativeName : '') || ''; }
       function draw(r) {
         clear(el); clear(line); clear(tail); clear(grid);
         el.hidden = true; grid.hidden = true;
@@ -999,13 +1001,13 @@
         // 종류 버튼으로 고른 갈래를 AI 가 다르게 보면 조용히 덮어쓰지 않고 먼저 묻는다(#668).
         var conflict = !last.userPicked && L.kindConflict(found, last.kindFlowId);
         if (conflict) {
-          var aiName = nameOf(flows, conflict.id);
+          var aiName = nameOf(flows, conflict.id, foundName(found, conflict.id));
           el.hidden = false;
           el.appendChild(askCard({
             id: 'flow', label: 'AI 추천 확인',
             lead: ['AI 는 ', h('b', { text: aiName }), ' 부터 하자고 해' + (conflict.reason ? ' — ' + conflict.reason : '')],
             block: last.insist ? L.devBlock(last.kindFlowId, last.ready) : '',
-            switchText: aiName + ' 쪽으로 바꾸기 (추천)', keepText: last.kindName || '그래도 ' + nameOf(flows, last.kindFlowId),
+            switchText: aiName + ' 쪽으로 바꾸기 (추천)', keepText: last.kindName || '그래도 ' + nameOf(flows, last.kindFlowId, ''),
             onSwitch: function () { last.onPick(conflict.id); }, onKeep: function () { last.onKeep(); }
           }));
           return;
@@ -1015,7 +1017,7 @@
           el.appendChild(h('p', { class: 'note-muted', text: '어느 쪽에 더 가까운지 골라 줘. ' + (found.reason || '') }));
           var two = h('div', { class: 'chips' });
           [found.id, found.alternativeId].forEach(function (id) {
-            two.appendChild(h('button', { type: 'button', class: 'btn', 'aria-pressed': String(picked === id), 'data-flow': id, text: nameOf(flows, id), onClick: function () { last.onPick(id); } }));
+            two.appendChild(h('button', { type: 'button', class: 'btn', 'aria-pressed': String(picked === id), 'data-flow': id, text: nameOf(flows, id, foundName(found, id)), onClick: function () { last.onPick(id); } }));
           });
           el.appendChild(two);
         } else if (cur && cur.id === L.NO_FLOW_ID) {

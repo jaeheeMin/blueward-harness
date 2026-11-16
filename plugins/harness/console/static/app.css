@@ -610,7 +610,7 @@ table.list .unk { color: #5a4bc2; }
 .pill.big { padding: 9px 30px; }
 .pill.off { border: 1.5px dashed var(--lline); background: transparent; color: var(--lmuted); cursor: not-allowed; }
 .pill.off small { font-size: 11px; }
-.pill:disabled { opacity: .5; cursor: not-allowed; }
+.pill:disabled, .pill[aria-disabled="true"] { cursor: not-allowed; opacity: .5; }
 
 .titlerow { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
 .titlecol { flex: 1; min-width: 280px; }
