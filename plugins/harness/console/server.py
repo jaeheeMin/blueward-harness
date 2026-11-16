@@ -2308,7 +2308,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/health" and method == "GET":
-            return self.send_json(200, {"app": APP_NAME, "version": app.version})
+            return self.send_json(200, {"app": APP_NAME, "version": app.version, "pending": app.store.pending_count()})  # 인증 없이 보이므로 판과 숫자만(#999)
         if path == "/auth" and method == "GET":
             return self.auth(query)
 
