@@ -387,6 +387,14 @@ PR 이 바꾼 `.abap` 파일의 diff 추가 줄에 `harness:allow CR-0NN` 이 �
 사유를 낸다. base 와 같은 주석과 지운 주석은 사유가 아니고, 이유만 바꾸거나 옮긴 주석은 사유다. patch 가 없을 만큼 큰 diff 면
 "확인하지 못함" 사유를 낸다. 이 기준도 설정 키가 없다.
 
+`remembered` 기준(#1004)은 한 번 위험 판정을 받은 PR 을 기억한다. 이 PR 의 head SHA 들(PR 커밋 목록 + `GET /repos/{r}/activity?ref=refs/heads/<head ref>`
+의 before/after(PR 생성 시각 이후만, 강제 푸시로 덮인 옛 head 포함) + `check-pr --before-sha`(synchronize 의 `event.before`))에서
+봇(github-actions[bot])이 단 `risk-gate` failure commit status 의 description 이 `[위험: ai_review,paths,secret]` 로 시작하면(현재 head 의 이력도 본다)
+지금 사유가 없어도 승인을 요구한다. 결과 JSON 의 `risk_codes` 가 이번 판정의 기억 대상 코드이고, 워크플로(`pr-checks`·`pr-review`)가 failure status
+description 맨 앞에 적는다(140자 절단 대비). 코드가 없는 옛 failure, `checks`·`size` 사유, 봇이 아닌 계정의 status 는 기억하지 않는다. status 목록·활동 기록
+조회 실패, SHA 50개 초과, 활동 기록 100건 이상(한 쪽을 다 못 읽음), 다른 저장소 head(fork)는 판정 불가(2)다. 병합 뒤 감지(`decide_commit`)는 `decide_pr` 를
+PR 번호로 불러 같은 판정을 한다. 필요한 권한은 `contents: read`·`pull-requests: read`·`statuses`(caller 가 이미 `write` 를 준다)다.
+
 ## 출력
 
 stdout 에 JSON 리포트를 낸다. 플러그인 훅 출력과 PR 코멘트가 같은 내용을 쓴다.

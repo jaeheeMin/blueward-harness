@@ -116,6 +116,13 @@ Project Repository 에 `.github/risk-gate.yaml` 이 있으면 PR 마다 위험�
 없으니 한 명 이상 적어 둔다. 승인자 파일이 없거나 비어 있으면 저장소 관리자(admin)만 승인자로 본다
 (작성자 제외, 권한을 읽지 못하면 검사 불능).
 
+**한 번 받은 위험 판정은 기억한다(#1004).** AI 리뷰 심각 지적·위험 경로 변경·비밀정보 중 하나로 위험 판정(`risk-gate` failure)을 한 번이라도
+받은 PR 은, 이후 커밋(강제 푸시로 앞 커밋이 덮여도)에서 그 사유가 사라져도 **작성자가 아닌 승인자가 마지막 커밋에 Approve** 할 때까지 승인을
+요구한다. 사유를 고친 커밋을 사람이 한 번도 보지 않은 채 자동 병합되는 것을 막으려는 것이다. 근거는 이전 커밋들에 github-actions 봇이 단
+`risk-gate` failure status 의 description 맨 앞 `[위험: ai_review,paths,secret]` 코드다 — 작성자가 지울 수 없다(라벨·코멘트·Actions 실행 기록은
+지울 수 있어 쓰지 않는다). 코드가 없는 옛 failure(이 변경 전 기록. 대부분 다른 검사가 진행 중이던 기록)와 다른 검사 실패·진행 중으로 난
+failure 는 기억하지 않는다. 이전 커밋을 읽지 못하거나 50개를 넘으면 통과로 보지 않고 검사 불능이다.
+
 기준은 `.github/risk-gate.yaml`(`max_changed_lines`, `max_changed_files`, `high_risk_paths`,
 `secret_scan`, `require_checks_green`, `ai_review`, `size_gate`, `size_exclude_paths`, `size_warn_only_paths`, `srs_split_hint`, `approvers_file`)에서 고친다.
 `max_changed_*` 는 `size_gate: false` 면 경고 기준이고 `size_gate: true` 면 승인 기준이다. 아래 `size_exclude_paths`·`size_warn_only_paths` 는 `size_gate: true` 일 때만 의미가 있다(false 면 크기는 어차피 경고만 낸다).

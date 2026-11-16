@@ -2293,6 +2293,7 @@ Closes #143</pre>
       <tr><td>AI(Artificial Intelligence) 리뷰가 심각한 지적을 했거나, 일부만 봤거나, 못 돌렸다(취소·시간 초과·검사 불능 포함). 새 줄에 비밀값 모양이 있어 AI 에 보내지 않고 건너뛴 경우도 여기에 든다("비밀값 의심이라 AI 리뷰를 돌리지 않음 — 승인자가 직접 확인"). 이유는 risk-gate 사유에 나눠 적혀</td><td><span class="pill w">필요</span></td></tr>
       <tr><td>위 어디에도 안 걸린다</td><td><span class="pill g">검사는 안 요구해</span></td><td>—</td></tr>
     </table></div>
+    <p class="small" style="margin-top:10px"><b>한 번 위험 판정을 받으면 기억해.</b> AI(Artificial Intelligence) 리뷰 심각 지적, 위험 경로 변경, 비밀값 중 하나로 위험 판정을 받은 PR 은 그 뒤 커밋(강제 푸시로 앞 커밋이 덮여도)에서 사유를 고쳐 깨끗해 보여도, 작성자가 아닌 승인자가 마지막 커밋에 Approve 할 때까지 승인을 계속 요구해. 사유를 고친 걸 사람이 한 번도 안 보고 자동 병합되는 걸 막으려는 거야. 기억 근거는 GitHub Actions 봇이 앞 커밋에 단 <code>risk-gate</code> 실패 상태(status)라서 작성자가 지울 수 없어. 다른 검사가 돌던 중 난 실패나 이 기능 전의 옛 기록은 기억하지 않아. 앞 커밋을 읽지 못하면 통과가 아니라 검사 불능이야.</p>
     <p class="small" style="margin-top:10px">그래서 새 Spec 파일(<code>docs/spec/</code>)을 올리는 PR 은 승인이 필요하지만, 이미 있는 Spec 을 고치는 PR 은 승인이 필요 없어. 코드(<code>src/</code>)만 조금 바꾼 PR 은 검사가 승인을 요구하지 않아.</p>
     <p class="small" style="margin-top:6px">SRS 에 새 요구사항이 들어왔는데 기존 요구사항을 넓힌 것처럼 보이면 PR 에 근거가 붙어. 막는 게 아니라 승인자가 "정말 별개인가" 를 확인하라는 표시야.</p>
     <p class="small" style="margin-top:6px">Approve 를 요구하지 않는 위험하지 않은 PR 은 검사가 통과하면 자동으로 합쳐져(<code>.github/human-merge-paths</code> 경로를 바꾼 PR 은 사람이 직접 합쳐). risk-gate 설정이 없는 저장소(하네스 저장소 포함)는 자동 병합 대상이 아니라서 <b>작성자가 아닌 사람이 읽고 직접 병합</b>해. Claude 가 연 PR 은 내가 읽고 Merge 를 누르는 게 그 "다른 사람" 이야.</p>
