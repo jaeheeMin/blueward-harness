@@ -20,7 +20,7 @@
               파일이 모두 그 접두어 아래면 승인 사유가 아니라 참고(note)로만 낸다(#436, 결과의 `notes`).
 - `paths`     `high_risk_paths` 와 `.github/human-merge-paths` 의 경로를 바꿨는가. `docs/spec/` 아래는 새 파일만
               센다(#736). 고친 것이 확실한 status(`modified`·`renamed`·`removed`·`changed`·`unchanged`)만 빼고, status 가
-              없거나 처음 보는 값이면 새 파일로 본다.
+              없거나 처음 보는 값이면 새 파일로 본다. Spec 그림(`.png` 등)은 새 파일이어도 세지 않는다(#1005).
 - `secret`    추가된 줄에 토큰·키·비밀번호·웹훅 주소 모양이 있는가(CR-004 의 기계 검사).
               보고에는 파일:줄과 패턴 이름만 담고 값은 절대 담지 않는다.
 - `checks`    이 PR 의 다른 검사(check run, commit status)가 실패했거나 진행 중인가.
@@ -294,6 +294,15 @@ _SPEC_EDIT_STATUSES = frozenset({"modified", "renamed", "removed", "changed", "u
 
 def _is_spec_path(path: str) -> bool:
     return _normalize(path).startswith(SPEC_PREFIX)
+
+
+# Spec 에 딸린 그림(#1005). spec 스킬은 캡처를 `docs/spec/img/<이름>_v<판>.png` 로 판마다 새 파일로 남기므로, 이미 있는
+# Spec 을 고쳐도 새 그림 파일이 생긴다. 승인 대상은 새 Spec 문서뿐이고, 새 Spec 과 함께 온 그림은 그 문서가 이미 위험이다.
+_SPEC_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"})
+
+
+def _is_spec_image(path: str) -> bool:
+    return _is_spec_path(path) and PurePosixPath(_normalize(path)).suffix.lower() in _SPEC_IMAGE_SUFFIXES
 
 
 def path_reasons(files: list[str], prefixes: list[str]) -> list[str]:
@@ -881,10 +890,12 @@ def _crit_size(ctx: Context) -> list[Finding]:
 def _crit_paths(ctx: Context) -> list[Finding]:
     # `docs/spec/` 은 새 파일만 센다(#736). 고치거나 옮기거나 지운 Spec 은 위험 경로가 아니다. 상태를 모르면
     # (없음·처음 보는 값) 새 파일로 보고 센다 — 확인 못 한 것을 승인 불필요로 뭉개지 않는다(원칙 7).
+    # Spec 그림은 상태와 상관없이 세지 않는다(#1005). 새 Spec 인지는 Spec 문서로 가린다.
     names = [
         f.get("filename") or ""
         for f in ctx.files
-        if not _is_spec_path(f.get("filename") or "") or f.get("status") not in _SPEC_EDIT_STATUSES
+        if not _is_spec_image(f.get("filename") or "")
+        and (not _is_spec_path(f.get("filename") or "") or f.get("status") not in _SPEC_EDIT_STATUSES)
     ]
     return [Finding("paths", r) for r in path_reasons(names, ctx.prefixes)]
 

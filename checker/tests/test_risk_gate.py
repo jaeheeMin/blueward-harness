@@ -755,6 +755,28 @@ def test_Spec_상태를_모르면_새_파일처럼_위험():
         assert result["risk"] == "high" and "docs/spec/DEV-001-a.md" in result["reasons"][0], status
 
 
+def test_기존_Spec_수정에_새_그림이_와도_위험이_아니다():
+    # #1005: 캡처 그림은 판마다 새 파일(`_v0.5.png`)이라, 기존 Spec 을 고칠 때도 added 로 온다.
+    files = [_file("docs/spec/DEV-001-a.md", status="modified"),
+             _file("docs/spec/img/DEV-001-list_v0.5.png", status="added"),
+             _file("docs/spec/img/DEV-001-detail_v0.5.PNG", status="added")]
+    result = rg.decide_pr(_client(files=files), "o/r", 5)
+    assert result["risk"] == "low" and result["requires_approval"] is False
+    only_image = rg.decide_pr(_client(files=[_file("docs/spec/img/a_v0.2.png", status=None)]), "o/r", 5)
+    assert only_image["risk"] == "low"
+
+
+def test_새_Spec_은_그림이_같이_와도_Spec_문서로_위험():
+    files = [_file("docs/spec/DEV-002-b.md", status="added"), _file("docs/spec/img/DEV-002-b_v0.1.png", status="added")]
+    reason = next(r for r in rg.decide_pr(_client(files=files), "o/r", 5)["reasons"] if "위험 경로" in r)
+    assert "docs/spec/DEV-002-b.md" in reason and "img/" not in reason
+
+
+def test_Spec_폴더의_그림이_아닌_새_파일은_그대로_위험():
+    result = rg.decide_pr(_client(files=[_file("docs/spec/img/notes.md", status="added")]), "o/r", 5)
+    assert result["risk"] == "high"
+
+
 def test_Spec_수정만_센_파일_수에는_그대로_든다():
     files = [_file(f"docs/spec/DEV-{i:03d}-a.md", 1, 0, status="modified") for i in range(11)]
     result = rg.decide_pr(_client(config=SG, files=files), "o/r", 5)

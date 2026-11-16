@@ -21,7 +21,7 @@ size_gate: false
 # .github/human-merge-paths 의 경로도 언제나 위험 경로로 본다.
 high_risk_paths:
   - docs/ssot/
-  - docs/spec/   # 새 Spec 파일(added)만 승인 대상이다. 이미 있는 Spec 을 고치거나 옮기거나 지우는 것은 위험이 아니다(#736).
+  - docs/spec/   # 새 Spec 파일(added)만 승인 대상이다. 이미 있는 Spec 을 고치거나 옮기거나 지우는 것은 위험이 아니다(#736). 그림(.png 등)은 새 파일이어도 세지 않는다(#1005).
   - rules/
   - templates/
   - conventions/
