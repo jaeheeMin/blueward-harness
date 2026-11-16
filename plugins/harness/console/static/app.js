@@ -2526,7 +2526,7 @@
     var customQ = {};  // 고를 보기가 있는 질문에서 '직접 쓰기' 를 연 것
     var starting = false, startedId = null, startErr = '', alive = true, browseBusy = false, modelErr = false, advOpen = false;
     var BL = window.BHLogic, ready = null, readyCwd = null, readySig = 'null';
-    var recentTimer = null, recentTries = 0, intro = null;  // intro: 준비 안 된 폴더를 처음 골랐을 때 보이는 "프로젝트 준비" 안내가 가리키는 폴더
+    var recentTimer = null, recentTries = 0, intro = null, introAdmin = null, introChecking = false, introTimer = null, introTries = 0, INTRO_MAX_TRIES = 10;  // intro: 준비 안 된 폴더를 처음 골랐을 때 보이는 "프로젝트 준비" 안내가 가리키는 폴더
     if (firstPickFolder) {  // 첫 실행 02 에서 준비 안 된 폴더를 골라 왔다: 그 폴더로 바로 03(프로젝트 준비) 안내를 확인한다
       draft.cwd = firstPickFolder; draft.picked = null;
       var firstP = firstPickFolder; firstPickFolder = null;
@@ -2551,8 +2551,18 @@
     // 시작할 수 없는 사유. 묻는 카드에 답하지 않았거나, 종류 버튼으로 개발을 골랐는데 Spec 이 없다고 확실할 때.
     function startBlock() {
       if (kindConflict()) return '위에서 AI 추천을 어떻게 할지 먼저 골라 줘.';
+      // AI 가 확신 없이 두 갈래를 내놓았는데 사용자도 종류 버튼도 고르지 않았으면 고를 때까지 시작하지 않는다.
+      var f = res().flow;
+      if (!draft.flowUser && !draft.kindFlowId && f && f.confident === false && f.alternativeId) return '어느 쪽에 더 가까운지 위에서 먼저 골라 줘.';
       if (draft.kindFlowId === 'dev' && effectiveFlow() === 'dev') return BL.devBlock('dev', ready) || '';
       return '';
+    }
+    // 시작이 막혀 있을 때 단추를 누르면 골라야 할 카드로 화면을 옮기고, 그 안 첫 단추에 초점을 둔다.
+    function focusChooser() {
+      var el = chooser.el;
+      if (!el || el.hidden) return;
+      el.scrollIntoView({ block: 'center' });
+      var b = el.querySelector('button'); if (b) b.focus();
     }
     function keepKind() {
       if (BL.devBlock(draft.kindFlowId, ready)) { draft.insist = true; draw(); return; }
@@ -2669,23 +2679,37 @@
         startedId = (d && (d.id || d.sessionId || (d.session && d.session.id))) || '';
         if (startedId) { mergeSession({ id: startedId }); }
         history.replaceState(null, '', '/new');
+        // 시작에 성공하면 그 세션 화면으로 바로 넘어간다. id 를 못 받았을 때만 아래 링크를 보인다. 이동하면 이 화면은 destroy 되어 draw 가 막힌다(alive).
+        if (startedId) go('/s/' + encodeURIComponent(startedId));
       }, function (e) { startErr = '시작하지 못했어: ' + e.message; }).then(function () { starting = false; draw(); });
     }
 
     /* 폴더 */
     function useFolder(p) { draft.cwd = p; draft.picked = null; picking = false; browsing = false; fsRows = null; dir = ''; customMsg = ''; intro = null; draw(); checkIntro(p); }
     // 고른 폴더가 준비 안 됨(no)이고 이 폴더로 안내를 본 적이 없으면 서버가 show 를 true 로 준다. 확인 못 함이면 안내하지 않는다.
+    // 서버는 관리자 여부(gh)를 기다리지 않고 바로 답한다. adminChecking 이면 1.5초마다 최대 10번 다시 묻고, 그래도 못 읽으면 확인 못 함으로 그린다.
     function checkIntro(p) {
+      clearTimeout(introTimer); introTries = 0; introChecking = false;
       if (step !== 'write') return;
+      askIntro(p);
+    }
+    function askIntro(p) {
       api('GET', '/api/folders/intro' + qs({ path: p })).then(function (d) {
-        if (!alive || draft.cwd !== p || step !== 'write' || !d || d.show !== true) return;
-        intro = p; draw();
-        if (mainEl) mainEl.scrollTop = 0;  // 목록을 내려서 골랐어도 안내 제목과 [만들기] 가 먼저 보이게
-        window.scrollTo(0, 0);
-        api('POST', '/api/folders/intro/seen', { path: p }).then(null, function (e) { console.debug('안내 표시를 남기지 못했습니다', e); });  // 보여 줬다고 서버에 남긴다(브라우저 저장소가 아니다)
+        if (!alive || draft.cwd !== p || step !== 'write') return;
+        if (!d || d.show !== true) { if (intro === p) { intro = null; introChecking = false; draw(); } return; }
+        var checking = d.adminChecking === true && d.canSetup == null && introTries < INTRO_MAX_TRIES;
+        var first = intro !== p;
+        intro = p; introChecking = checking; introAdmin = d.canSetup === true ? true : d.canSetup === false ? false : null; draw();
+        if (first) {
+          if (mainEl) mainEl.scrollTop = 0;  // 목록을 내려서 골랐어도 안내 제목과 [만들기] 가 먼저 보이게
+          window.scrollTo(0, 0);
+        }
+        if (checking) { introTries++; introTimer = setTimeout(function () { askIntro(p); }, 1500); return; }
+        api('POST', '/api/folders/intro/seen', { path: p }).then(null, function (e) { console.debug('안내 표시를 남기지 못했습니다', e); });  // 최종 화면을 그린 뒤 한 번만, 보여 줬다고 서버에 남긴다(브라우저 저장소가 아니다)
       }, function () {});
     }
     function introDone(create) {
+      clearTimeout(introTimer); introChecking = false;
       intro = null;
       if (create) { draft.text = skillCommand(skillInfo || { plugin: DEFAULT_PLUGIN }, 'scaffold'); draft.kind = -1; begin(); }
       else draw();
@@ -2694,6 +2718,22 @@
       var nm = baseName(draft.cwd) || draft.cwd;
       page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '1단계 · 프로젝트 준비' }), h('h1', { title: draft.cwd, text: nm + ' 준비하기' }), h('p', { class: 'line', text: '이 폴더엔 아직 하네스 구조가 없어' })));  // 전체 경로는 제목 title 로(시안 G-03 엔 경로 줄이 없다)
       var panel = h('section', { class: 'light newbox', 'data-folder-intro': '1' });
+      // 표준 구조는 저장소 관리자(GitHub admin)가 만든다. 팀원(false)이나 확인 못 함(null)이면 만들기 없이 관리자에게 말하라고만 한다.
+      if (introChecking) {  // 서버가 관리자 여부를 읽는 중(gh 는 몇 초 걸린다). 단추 없이 한 줄만 보이고 결과가 오면 바뀐다
+        panel.appendChild(h('div', { class: 'ask', 'data-intro-checking': '1' },
+          h('span', { class: 'eb', text: '알려 줄게' }),
+          h('b', { role: 'status', text: '관리자인지 확인하는 중이야.' })));
+        page.appendChild(panel);
+        return;
+      }
+      if (introAdmin !== true) {
+        panel.appendChild(h('div', { class: 'ask', 'data-intro-member': '1' },
+          h('span', { class: 'eb', text: '알려 줄게' }),
+          h('b', { text: '이 폴더는 아직 하네스 준비가 안 됐어. 관리자에게 준비해 달라고 말해 줘.' + (introAdmin === null ? ' (관리자인지 확인하지 못했어)' : '') }),
+          h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill acc', 'data-intro-ok': '1', text: '확인', onClick: function () { introDone(false); } }))));
+        page.appendChild(panel);
+        return;
+      }
       panel.appendChild(h('div', { class: 'ask' },
         h('span', { class: 'eb', text: '네 차례' }),
         h('b', { text: '표준 구조를 만들까? 한 번만 하면 돼' }),
@@ -2860,10 +2900,10 @@
       panel.appendChild(h('span', { class: 'eb', text: '이렇게 진행돼' }));
       panel.appendChild(preview.el);
       var k = KINDS[draft.kind];
-      preview.update({ cwd: draft.cwd, flowId: kindFlow(), note: !k ? '어떤 순서로 할지는 AI가 요청을 읽은 다음 알려 줘. 위에서 종류를 고르면 그 순서를 미리 볼 수 있어.' : '이 종류는 정해진 순서 없이 그 도구 스킬로 바로 시작해.' });
+      preview.update({ cwd: draft.cwd, flowId: kindFlow(), note: !k ? '어떤 순서로 할지는 AI가 요청을 읽은 다음 알려 줘. 위에서 종류를 고르면 그 순서를 미리 볼 수 있어.' : !k[2] && !k[3] ? 'AI가 요청을 읽고 어떤 순서로 할지 정해 줘.' : '이 종류는 정해진 순서 없이 그 도구 스킬로 바로 시작해.' });
       var folderLine = folderBar(panel);
       panel.appendChild(folderWarn.el);
-      folderWarn.update(draft.cwd, window.BHLogic.otherSessions(draft.cwd, Array.from(sessions.values()), null).length > 0, useFolder);
+      folderWarn.update(draft.cwd, window.BHLogic.workingSessions(draft.cwd, Array.from(sessions.values())).length > 0, useFolder);
       modelChoice(); effortChoice(); permissionChoice();
       panel.appendChild(h('div', { class: 'bottom' }, folderLine, h('span', { class: 'sp' }),
         h('button', { type: 'button', class: 'pill dark big', text: '작업 시작', onClick: begin })));
@@ -2973,7 +3013,7 @@
         panel.appendChild(h('div', { class: 'acts end' }, chooser.tail,
           h('button', { type: 'button', class: 'pill line', text: '다른 걸로 할래', onClick: function () { clearTimeout(pollTimer); step = 'write'; aid = null; history.replaceState(null, '', '/new'); draw(); } }),
           startBlock() ? h('span', { class: 'note-attn', role: 'status', text: startBlock() }) : null,
-          h('button', { type: 'button', class: 'pill dark big', disabled: starting || !!startBlock(), text: starting ? '시작하는 중' : '이대로 시작', onClick: start })));
+          h('button', { type: 'button', class: 'pill dark big', disabled: starting, 'aria-disabled': startBlock() ? 'true' : null, text: starting ? '시작하는 중' : '이대로 시작', onClick: function () { if (startBlock()) focusChooser(); else start(); } })));
       } else {
         panel.appendChild(h('div', { class: 'started', role: 'status' }, h('span', { text: '작업을 시작했어.' }), link(startedId ? '/s/' + encodeURIComponent(startedId) : '/', { text: '작업 화면으로 이동' })));
       }
@@ -3012,7 +3052,7 @@
     } else { draw(); loadRecent(); loadModels(); }
     return {
       title: function () { return '새 작업'; },
-      destroy: function () { alive = false; clearTimeout(pollTimer); clearTimeout(recentTimer); clearTimeout(previewTimer); tools.destroy(); folderWarn.destroy(); chooser.destroy(); preview.destroy(); if (startedId !== null) draft = { text: '', cwd: draft.cwd, note: '', answers: {}, picked: null, extraPaths: [], kind: -1 }; }
+      destroy: function () { alive = false; clearTimeout(pollTimer); clearTimeout(recentTimer); clearTimeout(introTimer); clearTimeout(previewTimer); tools.destroy(); folderWarn.destroy(); chooser.destroy(); preview.destroy(); if (startedId !== null) draft = { text: '', cwd: draft.cwd, note: '', answers: {}, picked: null, extraPaths: [], kind: -1 }; }
     };
   }
 

@@ -58,6 +58,7 @@ MAX_ADVANCE_ROUNDS = 4  # 갈래 진행 판정에서 증거를 읽고 다시 판
 UPCOMING_REFRESH = 30.0  # 진행 중 세션의 다음 갈래(upcoming)를 SRS 에서 다시 읽는 간격(초, #858). 판정마다 파일을 읽지 않게
 COND_YES, COND_NO, COND_UNKNOWN = "yes", "no", "unknown"
 LOADING_REASON = "GitHub 에서 읽는 중이야."
+ADMIN_RETRY_SECONDS = 10.0  # 관리자 여부를 못 읽었으면 이만큼은 다시 읽지 않고 확인 못 함으로 답한다(화면이 1.5초마다 다시 묻는다)
 HIDDEN_SKILLS = {"update", "scaffold", "open"}
 # 모델 이름 형식·에포트·권한 모드 허용 값은 managed.py 에 있다(띄울 때도 한 번 더 검사한다).
 # @ 파일 찾기 한도와 건너뛰는 큰 폴더
@@ -247,6 +248,7 @@ class App:
         self.jobs: dict[str, dict] = {}  # 다음 갈래 넘기기 작업(메모리에만 둔다)
         self.reload_queue: set[str] = set()  # 턴이 끝나기를 기다리는 다시 불러오기
         self.cache: dict = {}
+        self.admin_failed: dict = {}  # 관리자 여부를 읽다 못 읽은 때(key -> 시각). 잠깐 동안 다시 읽지 않고 "확인 못 함" 으로 답한다
         self.files_cache: dict = {}  # 세션 산출물 목록(?cache=1)의 마지막 결과(#793)
         self.last: dict = {}     # 마지막으로 읽은 값(못 읽은 것 포함). 새로 읽는 동안 이전 값으로 보여 준다
         self.inflight: dict = {}  # 지금 계산 중인 key -> Event
@@ -1864,6 +1866,7 @@ class App:
             raise HttpError(400, info["error"])
         self.store.add_folder(info["path"])
         self.save_last_folder(info["path"])
+        self.warm_admin(info["path"])
         return 200, {"path": info["path"], "name": info["name"]}
 
     def a_shortcut_make(self, g, q, b):
@@ -1998,6 +2001,8 @@ class App:
         out = []
         for p in paths:
             r = self.folder_ready(p)
+            if r["state"] == COND_NO:
+                self.repo_admin(p)  # 준비 안 된 폴더는 관리자 여부를 미리 읽어 둔다(백그라운드, 기다리지 않는다)
             # 양식 안내는 준비됨일 때만 따진다. 준비 판정이 아직 읽는 중이면 양식도 읽지 않는다(둘 다 기다리지 않는다).
             forms = self.folder_forms(p)["state"] if r["state"] == COND_YES and not r["checking"] else COND_NO
             out.append({"path": p, "name": os.path.basename(p) or p, "ready": r["state"], "checking": r["checking"], "sessions": self.folder_sessions(p),
@@ -2045,7 +2050,46 @@ class App:
             raise HttpError(400, "path 가 필요해.")
         root = self.known_root(q["path"][0])
         state = self.folder_ready(root, fresh=True)["state"]
-        return 200, {"ready": state, "seen": self.intro_seen(root), "show": state == COND_NO and not self.intro_seen(root)}
+        seen = self.intro_seen(root)
+        out = {"ready": state, "seen": seen, "show": state == COND_NO and not seen}
+        if out["show"]:
+            # gh 는 기다리지 않는다(실측 약 3.8초). 읽은 값이 있으면 true/false, 아니면 null + adminChecking(화면이 다시 묻는다)
+            admin, checking = self.repo_admin(root)
+            out["canSetup"], out["adminChecking"] = admin, checking
+        return 200, out
+
+    def repo_admin(self, root: str) -> tuple[bool | None, bool]:
+        """그 폴더 저장소에서 내가 GitHub 관리자(admin 권한)인가. (True/False/None, 읽는 중인가). 기다리지 않고 읽기는 백그라운드로 시작한다.
+        None 이고 읽는 중이 아니면 gh 가 못 읽은 것(확인 못 함)이다. 읽은 값은 60초 기억하고 못 읽은 값은 기억하지 않는다."""
+        key = ("repo-admin", os.path.normcase(os.path.realpath(root)))
+
+        def read() -> dict:
+            rc, out = self.run(["gh", "api", "repos/{owner}/{repo}", "--jq", ".permissions.admin"], root)
+            v = out.strip().lower() if rc == 0 else ""
+            state = COND_YES if v == "true" else COND_NO if v == "false" else COND_UNKNOWN
+            with self.lock:
+                if state == COND_UNKNOWN:
+                    self.admin_failed[key] = self.clock()
+                else:
+                    self.admin_failed.pop(key, None)
+            return {"state": state}
+        with self.lock:
+            failed = self.admin_failed.get(key)
+        if failed is not None and self.clock() - failed < ADMIN_RETRY_SECONDS:
+            return None, False
+        got = self.cached(key, read, wait=False)
+        admin = {COND_YES: True, COND_NO: False}.get(got["state"])
+        return admin, admin is None and bool(got.get("loading"))
+
+    def warm_admin(self, root: str) -> None:
+        """폴더가 알려지는 순간 준비 안 된 폴더의 관리자 여부를 미리 읽어 둔다(백그라운드). 03 안내가 gh 를 기다리지 않게 한다."""
+        def job() -> None:
+            try:
+                if self.folder_ready(root, fresh=True)["state"] == COND_NO:
+                    self.repo_admin(root)
+            except Exception:  # noqa: BLE001 - 미리 읽기는 덤이다. 실패해도 intro 가 다시 읽는다
+                pass
+        self.spawn(job)
 
     def a_folder_intro_seen(self, g, q, b):
         root = self.known_root(b.get("path"))
@@ -2076,6 +2120,7 @@ class App:
         info = self.folder_info(b.get("path"))
         if info["ok"]:
             self.store.add_folder(info["path"])
+            self.warm_admin(info["path"])
         return 200, info
 
     def a_fs(self, g, q, b):

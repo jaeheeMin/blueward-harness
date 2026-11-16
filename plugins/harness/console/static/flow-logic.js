@@ -279,6 +279,10 @@
     var key = normPath(cwd);
     return key ? list.filter(function (s) { return s.id !== selfId && s.status !== LIVE_ENDED && !s.handedOffTo && normPath(s.cwd) === key; }) : [];
   }
+  // 새 작업 화면의 같은 폴더 경고용: 실제로 일하는(running·starting) 세션만 센다. 쉬는 세션은 파일을 덮어쓸 일이 없다.
+  function workingSessions(cwd, list) {
+    return otherSessions(cwd, list, null).filter(function (s) { return s.status === 'running' || s.status === 'starting'; });
+  }
   function sameFolderBusy(s, list) {
     if (!s || s.handedOffTo) return false;
     if (arr(s.sameFolder).length) return true;
@@ -706,7 +710,7 @@
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice,
     formsNotice: formsNotice, FORMS_MISSING_SHORT: FORMS_MISSING_SHORT, FORMS_MISSING_TEXT: FORMS_MISSING_TEXT,
     plainReason: plainReason, plainAction: plainAction, hideSkillLine: hideSkillLine, reloadStrip: reloadStrip, reloadResult: reloadResult,
-    startChecks: startChecks, autoChecksOpen: autoChecksOpen, normPath: normPath, otherSessions: otherSessions, sameFolderBusy: sameFolderBusy,
+    startChecks: startChecks, autoChecksOpen: autoChecksOpen, normPath: normPath, otherSessions: otherSessions, workingSessions: workingSessions, sameFolderBusy: sameFolderBusy,
     previewKind: previewKind, kindBadge: kindBadge, docList: docList, versionPaths: versionPaths, normPreview: normPreview,
     mergeApprovals: mergeApprovals, prBadge: prBadge, prNeedsFix: prNeedsFix, runningSubCount: runningSubCount,
     DOC_GROUPS: DOC_GROUPS, docGroup: docGroup, docChip: docChip, mergeDocs: mergeDocs, weekDocCount: weekDocCount, weekPool: weekPool, isFormOutput: isFormOutput, docLabel: docLabel, latestFormXlsx: latestFormXlsx, formInfo: formInfo, formSubtitle: formSubtitle, formCells: formCells

@@ -28,7 +28,9 @@ SCHEMA = {
 PROMPT_BODY = (
     "아래는 사용자가 맡기려는 새 작업의 요청 글이다. 이 폴더를 읽기만 하고(파일을 만들거나 고치지 않는다), "
     "요청을 어떻게 이해했는지 한두 문장으로 적고, 작업에 필요해 보이는 이 폴더 안의 파일을 상대 경로로 고르고 이유를 적고, "
-    "작업 전에 사용자에게 물어야 할 것이 있으면 선택지와 함께 묻는다. 없으면 질문은 비운다."
+    "작업 전에 사용자에게 물어야 할 것이 있으면 선택지와 함께 묻는다. 없으면 질문은 비운다. "
+    "물을 것은 무엇을 만들지·어떤 자료를 쓸지 같은 내용 결정만 묻는다. 브랜치·커밋·푸시·PR·승인·훅 같은 작업 방식은 하네스가 정해 뒀으니 질문이나 보기로 내지 않는다. "
+    "main 에 바로 커밋·푸시, --force, --no-verify, 승인·검사 건너뛰기는 절대 내지 않는다."
 )
 PROMPT_TAIL = "\n\n요청 글:\n"
 PROMPT = PROMPT_BODY + PROMPT_TAIL
@@ -112,6 +114,22 @@ def check_flow(raw, flows: dict[str, str]) -> tuple[dict | None, str, dict | Non
     return flow, "", question
 
 
+def _load_block() -> tuple[list[re.Pattern], list[re.Pattern]]:
+    """analysis_block.json 의 규칙 위반 정규식을 읽는다. (질문·보기 둘 다에 쓰는 것, 질문 글에만 쓰는 것)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "analysis_block.json")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return ([re.compile(r["pattern"], re.I) for r in data["text"]], [re.compile(r["pattern"], re.I) for r in data["question"]])
+
+
+BLOCK_TEXT, BLOCK_QUESTION = _load_block()
+
+
+def break_rule(text: str, question: bool = False) -> bool:
+    """질문·보기 글이 하네스가 정해 둔 작업 방식(main 직접 커밋, --force, 훅 우회 등)을 고르게 하는가."""
+    return any(p.search(text) for p in BLOCK_TEXT + (BLOCK_QUESTION if question else []))
+
+
 def check_result(data, cwd: str, flows: dict[str, str] | None = None) -> dict | None:
     """분석 결과를 검증한다. 작업 폴더 밖의 경로는 버린다. 형식이 틀리면 None.
     flows(갈래 id -> 이름)를 주면 분류도 검증해 결과에 flow 를 넣는다. 확신이 없고 후보가 둘이면 그 둘을 묻는 질문을 맨 앞에 둔다."""
@@ -131,6 +149,11 @@ def check_result(data, cwd: str, flows: dict[str, str] | None = None) -> dict | 
     for q in data.get("extraQuestions") or []:
         if isinstance(q, dict) and isinstance(q.get("question"), str):
             opts = [str(o) for o in q.get("options") or [] if isinstance(o, (str, int))]
+            kept = [o for o in opts if not break_rule(o)]
+            # 질문 글 자체가 작업 방식을 고르게 하거나, 보기가 있었는데 다 빠졌으면 질문도 뺀다
+            if break_rule(q["question"], True) or (opts and not kept):
+                continue
+            opts = kept
             questions.append({"question": q["question"], "options": opts})
     flow, flow_error, flow_question = check_flow(data.get("flow"), flows or {})
     if flow_question:

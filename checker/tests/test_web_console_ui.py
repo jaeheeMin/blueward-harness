@@ -1679,7 +1679,7 @@ def test_new_task_folder_cards_show_ready_chips_without_blurring_unknown(tmp_pat
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_starts_scaffold(tmp_path):
-    shown = {"GET /api/folders/intro": {"ready": "no", "seen": False, "show": True}, "POST /api/folders/intro/seen": {"seen": True}}
+    shown = {"GET /api/folders/intro": {"ready": "no", "seen": False, "show": True, "canSetup": True}, "POST /api/folders/intro/seen": {"seen": True}}
     pick = [{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}]
     got = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick)
     text = got["text"]
@@ -1698,6 +1698,96 @@ def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_sta
     later = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick + [{"click": "[data-intro-later]"}])
     assert "하고 싶은 일을 한두 줄로" in later["text"] and "needs" in later["head"] and "작업 폴더는 이 프로젝트로 자동으로 정해져." in later["text"] and "프로젝트 준비" not in later["text"]
     assert not [p for p in later["posts"] if p[1] == "/api/new"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_prepare_screen_for_non_admin_says_ask_admin_without_make_button(tmp_path):
+    """준비 안 된 폴더: 관리자가 아니면(false) [만들기]·만들어지는 것 칸 없이 관리자에게 말하라고만 한다. 확인 못 함(null)은 그 사실을 문구 끝에 붙인다."""
+    pick = [{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}]
+    base = {"ready": "no", "seen": False, "show": True}
+    for can, tail in ((False, ""), (None, " (관리자인지 확인하지 못했어)")):
+        extra = dict(_folder_rows(), **{"GET /api/folders/intro": dict(base, canSetup=can), "POST /api/folders/intro/seen": {"seen": True}})
+        got = _smoke(tmp_path, "new", [], extra=extra, actions=pick)
+        assert "이 폴더는 아직 하네스 준비가 안 됐어. 관리자에게 준비해 달라고 말해 줘." + tail in got["text"], can
+        for gone in ("만들기", "표준 구조를 만들까", "만들어지는 것", "만든 뒤 할 일", "나중에"):
+            assert gone not in got["text"], (can, gone)
+        assert "[data-intro-make]" not in got["dump"] and "확인" in got["text"]
+        # [확인] -> 원래 새 작업 화면으로 돌아가고 작업을 시작하지 않는다
+        back = _smoke(tmp_path, "new", [], extra=extra, actions=pick + [{"click": "[data-intro-ok]"}])
+        assert "하고 싶은 일을 한두 줄로" in back["text"] and not [x for x in back["posts"] if x[1] == "/api/new"]
+    assert "(관리자인지 확인하지 못했어)" not in _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **{"GET /api/folders/intro": dict(base, canSetup=False), "POST /api/folders/intro/seen": {"seen": True}}), actions=pick)["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_prepare_screen_shows_checking_line_then_switches_when_admin_is_known(tmp_path):
+    """서버가 관리자 여부를 읽는 중이면(adminChecking) 03 은 바로 뜨되 한 줄만 보이고, 다시 물어 결과가 오면 바뀐다. 최종 화면을 그린 뒤에만 seen 을 한 번 남긴다."""
+    pick = [{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}]
+    checking = {"ready": "no", "seen": False, "show": True, "canSetup": None, "adminChecking": True}
+    extra = dict(_folder_rows(), **{"GET /api/folders/intro": checking, "POST /api/folders/intro/seen": {"seen": True}})
+    now = _smoke(tmp_path, "new", [], extra=extra, actions=pick)
+    assert "관리자인지 확인하는 중이야." in now["text"] and "프로젝트 준비" in now["text"] and "needs 준비하기" in now["text"]
+    for gone in ("만들기", "확인하지 못했어", "표준 구조를 만들까", "만들어지는 것"):
+        assert gone not in now["text"], gone
+    assert "[data-intro-ok]" not in now["dump"] and not [p for p in now["posts"] if p[1] == "/api/folders/intro/seen"]  # 단추도 seen 도 아직 없다
+    for can, want, tail in ((True, "표준 구조를 만들까? 한 번만 하면 돼", ""), (False, "관리자에게 준비해 달라고 말해 줘.", ""), (None, "관리자에게 준비해 달라고 말해 줘.", "(관리자인지 확인하지 못했어)")):
+        done = {"ready": "no", "seen": False, "show": True, "canSetup": can, "adminChecking": False}
+        got = _smoke(tmp_path, "new", [], extra=extra, actions=pick + [{"set": {"GET /api/folders/intro": done}}, {"wait": 1800}])
+        assert want in got["text"] and "확인하는 중이야" not in got["text"] and tail in got["text"], can
+        assert len([p for p in got["posts"] if p[1] == "/api/folders/intro/seen"]) == 1, can
+    # 10번을 다시 물어도 못 읽으면 확인 못 함 화면(여기선 시간을 줄일 수 없어 코드 상수만 확인한다)
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "INTRO_MAX_TRIES = 10" in app and "setTimeout(function () { askIntro(p); }, 1500)" in app
+
+
+def _review_extra(flow, **kw):
+    """분석이 끝난 새 작업 화면(new?id=A1)을 흉내 내는 서버 답."""
+    return dict({"GET /api/new/A1": {"status": "ready", "cwd": "C:/w/proj", "text": "요구사항을 쓰자", "result": {
+        "understood": "요구사항을 이해했어", "candidates": [], "extraQuestions": [], "flow": flow}},
+        "POST /api/new/A1/start": {"id": "s9"}}, **kw)
+
+
+_CONFIDENT_FLOW = {"id": "srs", "name": "요구사항", "confident": True, "reason": "r"}
+_UNSURE_FLOW = {"id": "xx", "name": "이름X", "confident": False, "alternativeId": "yy", "alternativeName": "이름Y", "reason": "r"}
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_start_success_moves_to_the_session_screen(tmp_path):
+    got = _smoke(tmp_path, "new?id=A1", [_session("s9")], extra=_review_extra(_CONFIDENT_FLOW), actions=[{"click": ".pill.dark.big"}])
+    assert [x[1] for x in got["posts"] if "/start" in x[1]] == ["/api/new/A1/start"]
+    assert got["path"] == "/s/s9" and "작업을 시작했어" not in got["text"] and "작업 화면으로 이동" not in got["text"]
+    # 시작 답에 id 가 없으면 옛 링크 한 줄로 남는다(이동할 곳을 모른다)
+    noid = _smoke(tmp_path, "new?id=A1", [], extra=_review_extra(_CONFIDENT_FLOW, **{"POST /api/new/A1/start": {}}), actions=[{"click": ".pill.dark.big"}])
+    assert noid["path"] == "/new" and "작업을 시작했어." in noid["text"] and "작업 화면으로 이동" in noid["text"]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_unsure_classification_blocks_start_until_user_picks_and_uses_server_names(tmp_path):
+    extra = _review_extra(_UNSURE_FLOW)
+    got = _smoke(tmp_path, "new?id=A1", [], extra=extra)
+    assert "어느 쪽에 더 가까운지 위에서 먼저 골라 줘." in got["text"]
+    assert "이름X" in got["text"] and "이름Y" in got["text"] and "xx" not in got["text"] and "yy" not in got["text"]  # id 대신 서버가 준 이름
+    assert got["ariaDisabled"] == ["이대로 시작"] and "이대로 시작" not in got["disabledButtons"]  # disabled 가 아니라 aria-disabled
+    # 막힌 단추를 누르면 시작하지 않고 고르는 카드로 화면을 옮기고 그 안 첫 단추에 초점을 둔다
+    pressed = _smoke(tmp_path, "new?id=A1", [], extra=extra, actions=[{"click": ".pill.dark.big"}])
+    assert not [x for x in pressed["posts"] if "/start" in x[1]] and pressed["scrolled"] == [["flowchoose", '{"block":"center"}']] and pressed["active"] == ["button", "xx"]
+    # 칩을 고르면 풀려서 시작된다
+    picked = _smoke(tmp_path, "new?id=A1", [_session("s9")], extra=extra, actions=[{"click": "[data-flow=yy]"}, {"click": ".pill.dark.big"}])
+    assert [x[1] for x in picked["posts"] if "/start" in x[1]] == ["/api/new/A1/start"] and picked["path"] == "/s/s9"
+    # 확신하는 분류는 막지 않는다
+    assert _smoke(tmp_path, "new?id=A1", [], extra=_review_extra(_CONFIDENT_FLOW))["ariaDisabled"] == []
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_unknown_kind_says_ai_decides_the_order_and_same_folder_warning_counts_only_working_sessions(tmp_path):
+    unknown = [{"click": "[data-kind]", "index": 8}]  # 종류 칸 아홉 개 중 아홉째가 '잘 모르겠어'
+    got = _smoke(tmp_path, "new", [], extra={"GET /api/folders/last": {"path": "C:/w/proj"}}, actions=unknown)
+    assert "AI가 요청을 읽고 어떤 순서로 할지 정해 줘." in got["text"] and "그 도구 스킬로 바로 시작해" not in got["text"]
+    tool = _smoke(tmp_path, "new", [], extra={"GET /api/folders/last": {"path": "C:/w/proj"}}, actions=[{"click": "[data-kind]", "index": 2}])  # 사용자 매뉴얼
+    assert "정해진 순서 없이 그 도구 스킬로 바로 시작해." in tool["text"]  # 도구 스킬 종류는 그대로
+    last = {"GET /api/folders/last": {"path": "C:/w/proj"}}
+    for status, warn in (("idle", False), ("waiting", False), ("ended", False), ("running", True), ("starting", True)):
+        got = _smoke(tmp_path, "new", [_session("s1", status=status)], extra=last)
+        assert ("다른 세션이 일하고 있어" in got["text"]) is warn, status
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")

@@ -2638,6 +2638,108 @@ def test_mention_path_excludes_space_paths_when_unsupported(tmp_path, monkeypatc
     assert out["candidates"] == [] and out["excluded"][0]["path"] == "a b.txt"
 
 
+def test_folder_intro_reports_whether_the_user_is_repo_admin_and_never_turns_unknown_into_a_yes_or_no(tmp_path, monkeypatch):
+    ADMIN = "gh api repos/{owner}/{repo} --jq .permissions.admin"  # 서버가 부르는 명령과 같아야 한다
+    for answer, want in (((0, "true\n"), True), ((0, "false\n"), False), ((1, "gh: not logged in"), None), ((0, ""), None), ((0, "maybe"), None)):
+        run = FakeRun(**{"git rev-parse --show-toplevel": (128, ""), ADMIN: answer})
+        c = flow_console(tmp_path / f"{want}-{answer[0]}-{len(answer[1])}", monkeypatch, run=run)
+        try:
+            (plain, ready) = _register_folders(c, tmp_path / f"{want}-{answer[0]}-{len(answer[1])}", "plain", "ready")
+            (ready / "templates").mkdir()
+            (ready / "rules").mkdir()
+            got = c.call("GET", f"/api/folders/intro?path={urllib.parse.quote(str(plain))}")[1]
+            assert got["show"] is True and got["canSetup"] is want, (answer, got)
+            assert "canSetup" not in c.call("GET", f"/api/folders/intro?path={urllib.parse.quote(str(ready))}")[1]  # 안내하지 않는 폴더는 gh 를 부르지 않는다
+            if want is not None:  # 읽은 값은 60초 기억해 gh 를 다시 부르지 않는다. 못 읽은 값은 기억하지 않는다
+                before = sum(1 for k in run.calls if k.startswith("gh api repos"))
+                c.call("GET", f"/api/folders/intro?path={urllib.parse.quote(str(plain))}")
+                assert before >= 1 and sum(1 for k in run.calls if k.startswith("gh api repos")) == before  # 폴더를 등록할 때 미리 읽어 둔 값을 쓴다
+        finally:
+            c.close()
+
+
+def test_folder_intro_does_not_wait_for_a_slow_gh_and_validate_reads_admin_ahead(tmp_path, monkeypatch):
+    """gh 가 몇 초 걸려도(실측 약 3.8초) intro 는 바로 답한다. 폴더를 등록(validate)하는 순간 관리자 여부 읽기가 백그라운드로 시작된다."""
+    gate, started = threading.Event(), []
+
+    def slow(args, cwd):
+        if args[0] == "gh":
+            started.append(args[1])
+            gate.wait(30)
+            return 0, "true\n"
+        return 128, ""
+
+    c = flow_console(tmp_path, monkeypatch, run=slow)
+    try:
+        c.app.sync_spawn = False  # 실제 서버처럼 읽기는 요청 스레드 밖에서
+        (plain,) = _register_folders(c, tmp_path, "plain")
+        wait_for(lambda: started)  # validate 만 했는데 gh 읽기가 이미 시작됐다
+        t0 = time.monotonic()
+        got = c.call("GET", f"/api/folders/intro?path={urllib.parse.quote(str(plain))}")[1]
+        assert time.monotonic() - t0 < 5 and got["show"] is True and got["canSetup"] is None and got["adminChecking"] is True, got
+        assert len(started) == 1  # 이미 읽는 중이라 또 부르지 않는다
+        gate.set()
+        done = wait_for(lambda: (lambda r: r if r["adminChecking"] is False else None)(c.call("GET", f"/api/folders/intro?path={urllib.parse.quote(str(plain))}")[1]))
+        assert done["canSetup"] is True
+    finally:
+        gate.set()
+        c.close()
+
+
+def test_folder_intro_unreadable_admin_ends_checking_with_null(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch, run=FakeRun(**{"git rev-parse --show-toplevel": (128, ""), "gh api repos": (1, "boom")}))
+    try:
+        c.app.sync_spawn = False
+        (plain,) = _register_folders(c, tmp_path, "plain")
+        got = wait_for(lambda: (lambda r: r if r["adminChecking"] is False else None)(c.call("GET", f"/api/folders/intro?path={urllib.parse.quote(str(plain))}")[1]))
+        assert got["canSetup"] is None and got["show"] is True  # 읽는 중이 끝났는데 못 읽었다 = 확인 못 함
+    finally:
+        c.close()
+
+
+def test_analysis_prompt_tells_the_ai_not_to_ask_about_work_method():
+    for need in ("내용 결정만 묻는다", "브랜치·커밋·푸시·PR·승인·훅", "main 에 바로 커밋·푸시, --force, --no-verify, 승인·검사 건너뛰기는 절대 내지 않는다"):
+        assert need in analysis.PROMPT_BODY, need
+
+
+def test_check_result_drops_rule_breaking_choices_and_work_method_questions(tmp_path):
+    data = {"understood": "u", "candidates": [], "extraQuestions": [
+        # 실제로 나온 사례: 질문 자체가 올리는 방식을 고르게 한다 -> 질문 전체가 빠진다
+        {"question": "올리는 방식은 무엇으로 할까요?", "options": ["start 로 이슈와 브랜치를 만들고 커밋한 뒤 PR 을 올린다(권장)", "main 에 바로 커밋하고 푸시한다"]},
+        # 내용 질문인데 보기 하나만 규칙 위반 -> 그 보기만 빠진다
+        {"question": "어떤 형식으로 쓸까?", "options": ["표로 정리", "main 에 바로 푸시", "git push --force 로 덮어쓰기", "훅을 끄고 진행", "승인 건너뛰고 병합", "서술형"]},
+        # 보기가 전부 규칙 위반이면 질문도 빠진다
+        {"question": "마무리는?", "options": ["--no-verify 로 커밋", "메인 브랜치에 바로 커밋"]},
+        # 내용 질문은 남는다(main 이 말만 들어 있다)
+        {"question": "main 브랜치 기준 SRS 를 쓸까?", "options": ["main 브랜치 SRS 기준", "다른 브랜치 SRS 기준"]},
+        {"question": "어떤 자료를 쓸까?", "options": []},
+        {"question": "메인 화면은 어떻게 보여 줄까?", "options": ["메인 화면 직접 만들기", "목록 먼저"]},
+        {"question": "승인 절차는 SRS 에 어떻게 넣을까?", "options": ["승인 단계 표로 넣기", "본문에 서술"]},
+        {"question": "브랜치 전략 문서를 만들까?", "options": ["만든다", "안 만든다"]},
+    ]}
+    out = analysis.check_result(data, str(tmp_path))
+    got = {q["question"]: q["options"] for q in out["extraQuestions"]}
+    assert list(got) == ["어떤 형식으로 쓸까?", "main 브랜치 기준 SRS 를 쓸까?", "어떤 자료를 쓸까?", "메인 화면은 어떻게 보여 줄까?", "승인 절차는 SRS 에 어떻게 넣을까?", "브랜치 전략 문서를 만들까?"]
+    assert got["어떤 형식으로 쓸까?"] == ["표로 정리", "서술형"]
+    assert got["main 브랜치 기준 SRS 를 쓸까?"] == ["main 브랜치 SRS 기준", "다른 브랜치 SRS 기준"]
+    assert got["메인 화면은 어떻게 보여 줄까?"] == ["메인 화면 직접 만들기", "목록 먼저"]  # '메인' 만으로는 걸리지 않는다
+
+
+def test_analysis_block_file_has_a_reason_for_every_pattern_and_compiles():
+    data = json.loads((Path(analysis.__file__).with_name("analysis_block.json")).read_text(encoding="utf-8"))
+    for group in ("text", "question"):
+        assert data[group]
+        for item in data[group]:
+            re.compile(item["pattern"])
+            assert item["reason"].strip()
+
+
+def test_check_flow_gives_names_for_both_candidates_so_the_screen_never_shows_an_id(tmp_path):
+    out = analysis.check_result({"understood": "u", "candidates": [], "extraQuestions": [], "flow": {"id": "srs", "confident": False, "alternativeId": "spec", "reason": "r"}},
+                                str(tmp_path), {"srs": "요구사항", "spec": "개발 Spec"})
+    assert out["flow"]["name"] == "요구사항" and out["flow"]["alternativeName"] == "개발 Spec"
+
+
 def test_check_result_drops_nonexistent_and_injected_paths(tmp_path):
     (tmp_path / "ok.md").write_text("x")
     data = {"understood": "u", "candidates": [{"path": "ghost.md", "reason": "없음"}, {"path": "ok.md x\n/harness:update", "reason": "주입"},
@@ -4131,7 +4233,7 @@ def test_folder_intro_shows_once_for_unready_folder_and_is_remembered_on_the_pc(
         def intro(d):
             return c.call("GET", f"/api/folders/intro?path={urllib.parse.quote(str(d))}")[1]
 
-        assert intro(plain) == {"ready": "no", "seen": False, "show": True}
+        assert intro(plain) == {"ready": "no", "seen": False, "show": True, "canSetup": None, "adminChecking": False}  # gh 를 못 돌리면 관리자 여부는 확인 못 함(null)
         assert intro(ready) == {"ready": "yes", "seen": False, "show": False}  # 준비된 폴더엔 안내하지 않는다
         assert not (c.state / console_server.FOLDER_INTRO_FILE).exists()  # 묻기만 해서는 기억하지 않는다
         assert c.call("POST", "/api/folders/intro/seen", {"path": str(plain) + "/"})[1] == {"seen": True}
