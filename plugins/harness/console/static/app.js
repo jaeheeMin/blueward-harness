@@ -1962,7 +1962,7 @@
       var stt = post ? window.BHPostLogic.stateOf(s, window.BHLogic) : '';  // Post: 눈썹 줄 앞에 상태 기호(색 + 모양)
       regions.head.replaceChildren(h('div', { class: 'ptitle' },
         post ? h('span', { class: ebCls + ' po-eb' }, h('i', { class: 'po-st po-st-' + stt, 'aria-hidden': 'true', text: window.BHPostLogic.GLYPH[stt] || '' }), ebText) : h('span', { class: ebCls, text: ebText }),
-        h('h1', { text: tt }),
+        h('h1', { class: 'sess-title', title: tt, text: tt }),
         h('p', { class: 'line' }, live ? h('span', { class: 'live' }, h('i'), headline) : headline,
           el && s.status === 'running' ? h('span', { class: 'elapsed', 'data-elapsed': '1', text: ' · 경과 ' + el }) : null)));  // 모델·권한 줄은 시안에 없어 "자세히" 의 기술 정보(kv)에만 둔다
     }
@@ -2081,8 +2081,15 @@
       // MCP(SAP 시스템 같은 연결 도구). 모두 연결됐으면 아무것도 안 그린다. 실패·로그인 필요는 눈에 띄게, 터미널 세션은 모른다고 말한다(#864).
       var mcp = s.mcp || {};
       if (mcp.state === 'problem') {
-        var bad = (mcp.servers || []).filter(function (m) { return m.problem; });
-        notices.push(h('div', { class: 'banner mcp', 'data-mcp': 'problem', role: 'status' },
+        var allBad = (mcp.servers || []).filter(function (m) { return m.problem; });
+        // claude.ai 커넥터(Gmail·Slack 등)의 로그인 전은 이 작업과 무관한 경우가 많아 한 줄로 접는다(#1042)
+        var conn = allBad.filter(function (m) { return m.connectorAuth; });
+        var bad = allBad.filter(function (m) { return !m.connectorAuth; });
+        var connFold = conn.length ? h('details', { class: 'mcp-conn', 'data-mcp-connectors': String(conn.length) },
+          h('summary', { text: 'claude.ai 커넥터 ' + conn.length + '개가 로그인 전이야' }),
+          h('ul', { class: 'mcp-l' }, conn.map(function (m) { return h('li', { 'data-mcp-server': m.name }, h('span', { class: 'mcp-n', text: m.name })); }))) : null;
+        if (!bad.length) notices.push(h('div', { class: 'banner info', 'data-mcp': 'connectors', role: 'status' }, connFold));
+        else notices.push(h('div', { class: 'banner mcp', 'data-mcp': 'problem', role: 'status' },
           h('b', { class: 'mcp-t', text: '연결이 안 된 도구가 있어' }),
           h('span', { class: 'mcp-d', text: 'AI가 아래 도구를 쓰려 해도 못 쓸 수 있어.' }),
           h('ul', { class: 'mcp-l' }, bad.map(function (m) {
@@ -2091,6 +2098,7 @@
               m.error ? h('details', { class: 'mcp-more' }, h('summary', { text: '자세히' }), h('span', { class: 'mono', text: MS(m.error) })) : null,
               m.canReconnect ? h('button', { type: 'button', class: 'pill line sm mcp-again', disabled: mcpBusy, text: mcpBusy === m.name ? '연결하는 중…' : '다시 연결', onClick: function () { mcpReconnect(m.name); } }) : null);
           })),
+          connFold,
           mcpErr ? h('span', { class: 'mcp-err', role: 'alert', text: mcpErr }) : null));
       }  // 터미널 세션(unknown)은 띠를 띄우지 않고 "자세히 > 기술 정보" 에서 확인할 수 없다고 말한다(시안 G-09)
       if (s.handedOffTo) {
@@ -2661,7 +2669,7 @@
       page.appendChild(h('div', { class: 'ptitle' },
         post ? h('span', { class: 'eb po-eb ' + (open ? 'attn' : ''), 'data-eb': '1' }, h('i', { class: 'po-st po-st-' + kind, 'aria-hidden': 'true', text: window.BHPostLogic.GLYPH[kind] || '' }), ebText(isQ))
           : h('span', { class: 'eb ' + (open ? 'attn' : ''), 'data-eb': '1', text: ebText(isQ) }),
-        h('h1', { text: s.title || baseName(s.cwd) || (isQ ? '질문' : '승인') }),
+        h('h1', { class: 'sess-title', title: s.title || '', text: s.title || baseName(s.cwd) || (isQ ? '질문' : '승인') }),
         h('p', { class: 'line', text: line })));
       if (post) return;  // 시안 r1·r2 에는 숫자 띠가 없다
       // 질문(G-07)·확인(G-17) 화면에는 순서 알약이 없다(시안)
@@ -2791,8 +2799,12 @@
         if (canSess) card.appendChild(h('div', { class: 'sugg', role: 'group', 'aria-label': '다시 묻지 않기로 추가되는 규칙' },
           h('p', { class: 'sugg-h', text: '"허용하고 이 세션에서 다시 묻지 않기"를 누르면 다음 규칙이 이 세션이 끝날 때까지만 적용돼(설정 파일에는 안 남아)' }),
           sugg.length ? h('ul', { class: 'sugg-l' }, sugg.map(function (x) { return h('li', { class: 'mono', text: MS(x) }); }))
-            : h('p', { class: 'sub', text: '규칙 내용을 읽지 못했어. 위 입력 전체를 확인해.' }),
-          req.suggestions ? h('pre', { class: 'box scroll', tabindex: '0', text: MS(JSON.stringify(req.suggestions, null, 2)) }) : null));
+            : h('p', { class: 'sub', text: '규칙 내용을 읽지 못했어. 위 입력 전체를 확인해.' })));
+        // 추가될 규칙 원문은 기술 정보로 접어 둔다(#1042). 쉬운 말 목록은 위에 그대로 있다.
+        if (canSess && req.suggestions) {
+          tech.appendChild(h('h2', { class: 'label', text: '추가될 규칙 원문' }));
+          tech.appendChild(h('pre', { class: 'box scroll', tabindex: '0', 'data-sugg-raw': '1', 'aria-label': '추가될 규칙 원문', text: MS(JSON.stringify(req.suggestions, null, 2)) }));
+        }
         // 시안엔 이유 입력칸이 없어 접어 둔다(기능은 남김). 적은 이유가 있으면 펼친 채로 둔다.
         var whyFold = h('details', { class: 'more', 'data-why-fold': '1', open: !!why },
           h('summary', { text: '이유 적기(선택)' }),

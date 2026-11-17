@@ -8957,3 +8957,26 @@ def test_pr_created_is_only_the_pr_this_session_made(browser):
     browser.event("pc", "PostToolUse", tool_name="Bash", tool_input={"command": "gh pr view 32"},
                   tool_response={"stdout": "https://github.com/o/r/pull/32"})
     assert s["prCreated"] == "https://github.com/o/r/pull/34"  # 다른 PR 을 본 출력은 덮지 않는다
+
+
+def test_1042_mcp_view_marks_claude_ai_connector_auth_only():
+    from store import mcp_view, mcp_servers_of
+    servers = mcp_servers_of([{"name": "claude.ai Gmail", "status": "needs-auth"}, {"name": "x", "status": "needs-auth", "scope": "claude.ai"},
+                              {"name": "claude.ai Slack", "status": "failed"}, {"name": "sap", "status": "needs-auth", "scope": "project"}])
+    by = {x["name"]: x for x in mcp_view({"managed": True, "managed_alive": True, "mcpServers": servers})["servers"]}
+    assert by["claude.ai Gmail"]["connectorAuth"] and by["x"]["connectorAuth"]
+    assert not by["claude.ai Slack"]["connectorAuth"] and by["claude.ai Slack"]["problem"]  # 실패는 접지 않는다
+    assert not by["sap"]["connectorAuth"] and by["sap"]["problem"]
+
+
+def test_1042_session_title_priority_and_analysis_title_passthrough(tmp_path):
+    t = analysis.session_title
+    assert t("구매요청 승인 현황 조회 앱 요구사항", "u", "요청") == "구매요청 승인 현황 조회 앱 요구사항"
+    assert t("가" * 50, "u", "요청") == "가" * 30
+    assert t("", "구매오더를 조회해. 그리고 더 한다.", "요청") == "구매오더를 조회해."
+    assert t(None, "가" * 50, "요청") == "가" * 30
+    assert t(None, "", "첫 줄\n둘째 줄") == "첫 줄"  # 분석이 비면 지금처럼 요청 첫 줄
+    base = {"understood": "u", "candidates": [], "extraQuestions": []}
+    assert analysis.check_result(dict(base, title="짧은 제목"), str(tmp_path))["title"] == "짧은 제목"
+    assert analysis.check_result(base, str(tmp_path))["title"] == "u"  # title 이 없는 옛 결과도 유효
+    assert "title" in analysis.SCHEMA["properties"] and "title" not in analysis.SCHEMA["required"]

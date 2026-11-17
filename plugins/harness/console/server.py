@@ -1877,7 +1877,7 @@ class App:
         with job["start_lock"]:  # 시작 버튼을 두 번 눌러도 세션은 하나만 뜬다
             sid = job.get("session_id")
             if sid is None:
-                sid = self.manager.launch(job["cwd"], message, title=job["text"].split("\n", 1)[0], model=model, effort=effort, permission=permission)
+                sid = self.manager.launch(job["cwd"], message, title=analysis.session_title((job.get("result") or {}).get("title"), (job.get("result") or {}).get("understood"), job["text"]), model=model, effort=effort, permission=permission)
                 if sid is None:
                     raise HttpError(502, "claude 세션을 띄우지 못했어. " + platform_compat.CLAUDE_MISSING)
                 job["session_id"] = sid

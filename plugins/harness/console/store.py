@@ -260,8 +260,14 @@ def mcp_servers_of(raw) -> list[dict]:
     for item in raw:
         if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]:
             out.append({"name": item["name"][:100], "status": str(item.get("status") or "")[:40],
-                        "error": str(item.get("error") or "")[:300]})
+                        "error": str(item.get("error") or "")[:300],
+                        "scope": str(item.get("scope") or item.get("source") or "")[:40]})  # 출처 필드가 오면 커넥터 구분에 쓴다(없으면 이름으로)
     return out
+
+
+def mcp_is_connector(sv: dict) -> bool:
+    """claude.ai 계정에 연결된 커넥터(Gmail·Slack 등)인가. 프로젝트 .mcp.json·플러그인 서버와 구분한다(#1042)."""
+    return str(sv.get("name") or "").lower().startswith("claude.ai ") or str(sv.get("scope") or "").lower() == "claude.ai"
 
 
 def mcp_view(s: dict) -> dict:
@@ -276,7 +282,8 @@ def mcp_view(s: dict) -> dict:
     for sv in servers:
         text, bad = MCP_STATUS_TEXT.get(sv.get("status"), (f"상태를 확인하지 못했어({sv.get('status') or '비어 있음'})", True))
         items.append({"name": sv["name"], "status": sv.get("status", ""), "label": text, "problem": bad, "error": sv.get("error", ""),
-                      "canReconnect": sv.get("status") == "failed" or text.startswith("상태를")})  # 로그인은 다시 연결로 안 풀린다
+                      "canReconnect": sv.get("status") == "failed" or text.startswith("상태를"),  # 로그인은 다시 연결로 안 풀린다
+                      "connectorAuth": sv.get("status") == "needs-auth" and mcp_is_connector(sv)})  # 화면이 한 줄로 접는다(#1042)
     bad_any = any(i["problem"] for i in items)
     return {"state": "problem" if bad_any else "ok", "servers": items, "canReconnect": True}
 

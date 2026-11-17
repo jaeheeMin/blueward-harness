@@ -16,6 +16,7 @@ SCHEMA = {
     "type": "object",
     "properties": {
         "understood": {"type": "string"},
+        "title": {"type": "string"},
         "candidates": {"type": "array", "items": {"type": "object", "properties": {
             "path": {"type": "string"}, "reason": {"type": "string"}}, "required": ["path", "reason"]}},
         "extraQuestions": {"type": "array", "items": {"type": "object", "properties": {
@@ -27,7 +28,7 @@ SCHEMA = {
 
 PROMPT_BODY = (
     "아래는 사용자가 맡기려는 새 작업의 요청 글이다. 이 폴더를 읽기만 하고(파일을 만들거나 고치지 않는다), "
-    "요청을 어떻게 이해했는지 한두 문장으로 적고, 작업에 필요해 보이는 이 폴더 안의 파일을 상대 경로로 고르고 이유를 적고, "
+    "요청을 어떻게 이해했는지 한두 문장으로 적고, 세션 제목을 title 에 30자 이내 명사형 한 구절로 적고(예: 구매요청 승인 현황 조회 앱 요구사항), 작업에 필요해 보이는 이 폴더 안의 파일을 상대 경로로 고르고 이유를 적고, "
     "작업 전에 사용자에게 물어야 할 것이 있으면 선택지와 함께 묻는다. 없으면 질문은 비운다. "
     "물을 것은 무엇을 만들지·어떤 자료를 쓸지 같은 내용 결정만 묻는다. 브랜치·커밋·푸시·PR·승인·훅 같은 작업 방식은 하네스가 정해 뒀으니 질문이나 보기로 내지 않는다. "
     "main 에 바로 커밋·푸시, --force, --no-verify, 승인·검사 건너뛰기는 절대 내지 않는다."
@@ -130,6 +131,23 @@ def break_rule(text: str, question: bool = False) -> bool:
     return any(p.search(text) for p in BLOCK_TEXT + (BLOCK_QUESTION if question else []))
 
 
+TITLE_MAX = 30
+
+
+def session_title(title, understood, request_text: str) -> str:
+    """새 작업 세션 제목: 분석이 준 title, 없으면 understood 첫 문장, 그것도 없으면 요청 첫 줄. 모두 30자로 자른다(요청 첫 줄은 그대로)."""
+    def one(x) -> str:
+        return " ".join(x.split()) if isinstance(x, str) else ""
+    t = one(title)
+    if t:
+        return t[:TITLE_MAX]
+    u = one(understood)
+    if u:
+        first = re.split(r"(?<=[.!?。])\s|(?<=다\.)", u, maxsplit=1)[0].strip()
+        return (first or u)[:TITLE_MAX]
+    return request_text.split("\n", 1)[0]
+
+
 def check_result(data, cwd: str, flows: dict[str, str] | None = None) -> dict | None:
     """분석 결과를 검증한다. 작업 폴더 밖의 경로는 버린다. 형식이 틀리면 None.
     flows(갈래 id -> 이름)를 주면 분류도 검증해 결과에 flow 를 넣는다. 확신이 없고 후보가 둘이면 그 둘을 묻는 질문을 맨 앞에 둔다."""
@@ -158,7 +176,7 @@ def check_result(data, cwd: str, flows: dict[str, str] | None = None) -> dict | 
     flow, flow_error, flow_question = check_flow(data.get("flow"), flows or {})
     if flow_question:
         questions.insert(0, flow_question)
-    return {"understood": data["understood"], "candidates": candidates, "extraQuestions": questions, "excluded": excluded,
+    return {"understood": data["understood"], "title": session_title(data.get("title"), data["understood"], ""), "candidates": candidates, "extraQuestions": questions, "excluded": excluded,
             "flow": flow, "flowError": flow_error}
 
 

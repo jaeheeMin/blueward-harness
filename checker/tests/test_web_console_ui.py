@@ -3402,3 +3402,34 @@ def test_post_home_deck_restores_focus_after_redraw():
     assert "var mark = focusMark();" in paint and "focusBack(mark);" in paint  # 덱을 다시 그려도 포커스를 돌려놓는다
     assert "CSS.escape(id)" in js  # pickTop 의 선택자
     assert "stampKind" in js and "it.stampKind === 'plan'" in js  # 도장이 찍힌 카드의 종류 글
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_1042_rule_raw_json_lives_in_details_tech_info_not_in_the_card(tmp_path):
+    raw = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "touch:*"}], "behavior": "allow", "destination": "session"}]
+    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "note": "touch 는 목록에 없어",
+           "toolInput": {"command": "touch a", "description": "Create the file"}, "hasSuggestions": True,
+           "suggestionText": ["이 세션: 허용 규칙 추가 - Bash(touch:*)"], "suggestions": raw}
+    text = _smoke(tmp_path, "r/p1", [_session("s1", pendingRequestIds=["p1"])], [req])["text"]
+    assert text.count('"addRules"') == 1 and "추가될 규칙 원문" in text
+    assert text.index("기술 정보") < text.index("추가될 규칙 원문") < text.index('"addRules"')  # 원문은 기술 정보 안
+    assert "이 세션: 허용 규칙 추가 - Bash(touch:*)" in text  # 쉬운 말 목록은 그대로
+    none = _smoke(tmp_path, "r/p1", [_session("s1", pendingRequestIds=["p1"])], [dict(req, suggestions=None)])["text"]
+    assert "추가될 규칙 원문" not in none and "이 세션: 허용 규칙 추가" in none
+
+
+_MCP_CONN = {"state": "problem", "canReconnect": True, "servers": [
+    {"name": "claude.ai Gmail", "status": "needs-auth", "label": "로그인이 필요해", "problem": True, "error": "", "canReconnect": False, "connectorAuth": True},
+    {"name": "claude.ai Slack", "status": "needs-auth", "label": "로그인이 필요해", "problem": True, "error": "", "canReconnect": False, "connectorAuth": True}]}
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_1042_claude_ai_connectors_fold_into_one_line_project_mcp_stays_loud(tmp_path):
+    only = _smoke(tmp_path, "s/s1", [_session("s1", mcp=_MCP_CONN)])
+    assert "claude.ai 커넥터 2개가 로그인 전이야" in only["text"] and "연결이 안 된 도구가 있어" not in only["text"]
+    assert "<div.banner.mcp>" not in only["dump"] and "<details.mcp-conn>" in only["dump"]
+    mixed_mcp = dict(_MCP_CONN, servers=_MCP_CONN["servers"] + [_MCP_BAD["servers"][0]])
+    mixed = _smoke(tmp_path, "s/s1", [_session("s1", mcp=mixed_mcp)])
+    assert "연결이 안 된 도구가 있어" in mixed["text"] and "abap-adt — 연결하지 못했어" in mixed["text"] and "claude.ai 커넥터 2개가 로그인 전이야" in mixed["text"]
+    assert "<div.banner.mcp>" in mixed["dump"] and "<details.mcp-conn>" in mixed["dump"]
+    assert "claude.ai Gmail — 로그인이 필요해" not in mixed["text"]  # 큰 목록에 커넥터가 따로 오르지 않는다
