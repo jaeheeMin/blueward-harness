@@ -17,19 +17,16 @@ compatibility: GitHub CLI(gh, 로그인 상태)와 uv 가 필요하다. 읽기�
 
 ## 절차
 
-1. 저장소 루트에서 엔진 판을 정하고 부른다. Bash 도구로 실행한다.
+1. 저장소 루트에서 엔진을 부른다. Bash·PowerShell 도구 어느 쪽에서든 같은 한 줄이다. 엔진 판은 래퍼가 정한다.
 
    ```bash
-   e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "승인 대기 PR 확인 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" python -P -m checker.pr_approvals
+   uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" pr_approvals
    ```
 
-   첫 줄이 실패하거나 빈 값이면 `uvx` 로 넘어가지 말고 멈춰서 사유를 알리고 "승인 대기 PR 확인 불능" 이라고
-   말한다. `@main` 이나 다른 판으로 대신 받지 않는다. PowerShell 도구는 `$e = uv run --no-project python
-   "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py"; if ($LASTEXITCODE -ne 0 -or -not $e) { throw "승인 대기 PR 확인 불능" }`
-   로 정한 뒤 `uvx --from $e python -P -m checker.pr_approvals` 로 부른다. 다른 저장소를 보려면
-   `--repo owner/repo` 를 더한다(없으면 현재 폴더의 저장소).
-2. 종료코드가 2 이거나 출력이 "승인 대기 PR 확인 불능" 으로 시작하면 **그 문구와 사유를 그대로 전하고 멈춘다.**
+   엔진 판을 정하지 못하면 래퍼가 `확인 불능: …` 사유를 내고 종료코드 2 로 끝난다. 그러면 멈춰서 사유를 알리고
+   "승인 대기 PR 확인 불능" 이라고 말한다. `@main` 이나 다른 판으로 대신 받지 않는다. 한 줄을 `$( )` 로 풀어 쓰지 않는다.
+   다른 저장소를 보려면 `--repo owner/repo` 를 더한다(없으면 현재 폴더의 저장소).
+2. 종료코드가 2 이거나 출력이 "승인 대기 PR 확인 불능" 또는 "확인 불능" 으로 시작하면 **그 문구와 사유를 그대로 전하고 멈춘다.**
    "승인할 PR 이 없다" 로 말하지 않는다. 다음 할 일은 `gh auth status` 확인, 네트워크 확인, 다시 시도다.
 3. 결과를 구분해서 전한다.
    - "이 저장소에서 나는 승인자가 아님" — 승인자 파일에 내용이 있는데 내 이름이 없다. "승인할 PR 없음" 이 아니다.

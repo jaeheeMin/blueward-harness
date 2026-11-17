@@ -269,17 +269,13 @@ Spec 을 만들거나 고친 뒤 사용자가 양식 파일을 원할 때("양�
 그대로 두고 값만 바꾼다(지도 `화면:` 영역에 `#### … 그림` 을 그릴 때만 그 영역에 서식·병합을 더한다). 양식이 없는 Spec 에는 쓰지 않는다.
 
 ```bash
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-uvx --from "$e" \
-  python -P -m checker.export --spec docs/spec/DEV-001-<요약>.md --root "$(git rev-parse --show-toplevel)"
+uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" export --spec docs/spec/DEV-001-<요약>.md --root "$(git rev-parse --show-toplevel)"
 ```
 
-Bash 도구로 실행한다(Windows Git Bash 에서도 같다). 엔진 판은 플러그인 판과 같은 태그(`v{version}`)이고
-`engine_spec.py` 가 정한다(`DOC_GUARD_ENGINE` 이 있으면 그것이 우선). 첫 줄이 실패하거나 빈 값이면(uv 가 없거나
-플러그인 설치가 깨져 판을 정하지 못함) `uvx` 로 넘어가지 말고 거기서 멈춰 사유(`engine_spec.py` 가 낸 stderr)를
-알리고 "산출 불능" 이라고 말한다. `@main` 이나 다른 판으로 대신 받지 않는다. PowerShell 도구는 `$e = uv run --no-project python
-"${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py"; if ($LASTEXITCODE -ne 0 -or -not $e) { throw "산출 불능: 엔진 판을 정하지 못했다" }`
-로 정한 뒤 `uvx --from $e python -P -m checker.export --spec … --root …` 로 부른다.
+Bash·PowerShell 도구 어느 쪽에서든 같은 한 줄이다(Windows Git Bash 에서도 같다). 엔진 판은 플러그인 판과 같은 태그(`v{version}`)이고
+`run_engine.py` 가 `engine_spec.py` 로 정해 `uvx` 를 부른다(`DOC_GUARD_ENGINE` 이 있으면 그것이 우선). 판을 정하지 못하면(uv 가 없거나
+플러그인 설치가 깨짐) 래퍼가 `확인 불능: …` 사유를 stderr 에 내고 종료코드 2 로 끝난다. 그러면 거기서 멈춰 사유를
+알리고 "산출 불능" 이라고 말한다. `@main` 이나 다른 판으로 대신 받지 않는다. 판을 `$( )` 로 따로 구해 `uvx --from` 에 넣는 식으로 풀어 쓰지 않는다.
 양식이 여럿이면 모두 만들고, 하나만 만들려면 `--form <양식 이름 또는 지도 파일 경로>` 를 더한다
 (`--form Backlog` 와 `--form templates/forms/Backlog.yaml` 은 같다. 경로는 `--root` 기준 상대 또는 절대이고
 `templates/forms/` 안의 지도 파일이어야 한다. 없는 파일이면 종료코드 2). 같은 이름 산출 파일이 이미 있으면

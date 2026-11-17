@@ -7291,7 +7291,7 @@ BASH = lambda cmd: ("Bash", {"command": cmd})  # noqa: E731
     BASH("echo $(ls)") + ("unknown",), BASH("echo `ls`") + ("unknown",), BASH("echo hi > f.txt") + ("safe",), BASH("cat < f.txt") + ("unknown",),
     BASH("ls\nls") + ("safe",), BASH("(ls)") + ("unknown",), BASH("sleep 1 &") + ("unknown",), BASH("ls 'a") + ("unknown",),
     BASH("git commit -am x") + ("unknown",), BASH("git commit --amend") + ("unknown",), BASH("git branch foo") + ("unknown",), BASH("git pull") + ("safe",),
-    BASH("git -c core.pager=x log") + ("unknown",), BASH("git diff --output=a.txt") + ("unknown",), BASH("gh api repos/a/b") + ("unknown",),
+    BASH("git -c core.pager=x log") + ("unknown",), BASH("git diff --output=a.txt") + ("unknown",), BASH("gh api user") + ("unknown",), BASH("gh api user --jq .login") + ("unknown",),
     BASH("find . -exec rm {} ;") + ("unknown",), BASH("rg --pre cmd x") + ("unknown",), BASH("FOO=1 ls") + ("unknown",), BASH("ls && touch a") + ("unknown",),
     BASH("") + ("unknown",), ("Bash", {}, "unknown"), ("Bash", {"command": 3}, "unknown"), ("PowerShell", {"command": "Get-ChildItem"}, "unknown"),
     BASH("echo \\\"; touch x") + ("unknown",),

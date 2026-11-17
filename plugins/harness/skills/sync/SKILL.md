@@ -175,8 +175,7 @@ auto-update runs"). 그 차이를 알려 준다. 플러그인을 이 스킬이 �
 순서는 main 줄 먼저 → 내 줄이다. 직접 고치지 말고 엔진을 부른다.
 
 ```
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "SRS 자동 합치기 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-uvx --from "$e" python -P -m checker.srs_automerge --mode merge --root .
+uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" srs_automerge --mode merge --root .
 ```
 
 (리베이스 중이면 `--mode rebase`.) 방식마다 ours/theirs 가 반대라 `--mode` 를 반드시 맞게 준다. 결과 JSON 의 `status` 로 판단한다.

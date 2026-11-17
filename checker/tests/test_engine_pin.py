@@ -114,10 +114,12 @@ def test_훅에_main_엔진_주소가_남아_있지_않다(name):
 
 
 @pytest.mark.parametrize("name", ["srs", "spec", "manual", "cts", "role", "unittest"])
-def test_스킬이_main_엔진_주소를_쓰지_않고_engine_spec_을_부른다(name):
+def test_스킬이_main_엔진_주소를_쓰지_않고_run_engine_래퍼로_부른다(name):
+    # #1043 — 스킬은 `e="$(…engine_spec.py)"` + `uvx --from "$e"` 두 줄 대신 run_engine.py 한 줄을 부른다(래퍼가 engine_spec 으로 판을 정한다)
     text = (PLUGIN_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
     assert "blueward-harness@main" not in text
-    assert "hooks/engine_spec.py" in text
+    assert "hooks/run_engine.py" in text
+    assert 'uvx --from "$e"' not in text and 'e="$(uv run' not in text
 
 
 def test_훅과_스킬은_엔진을_콘솔_스크립트_exe_가_아니라_python_m_으로_부른다():
@@ -133,8 +135,10 @@ def test_훅과_스킬은_엔진을_콘솔_스크립트_exe_가_아니라_python
             calls += 1
             if m.group(1) != "python":
                 bad.append(f"{p.relative_to(ROOT)}: {m.group(0)}")
-    assert calls >= 20  # 정규식이 줄잇기 모양을 놓쳐 0 건으로 통과하지 않게
+    assert calls >= 10  # 정규식이 줄잇기 모양을 놓쳐 0 건으로 통과하지 않게(스킬은 run_engine.py 로 옮겨 가서 훅 쪽만 센다, #1043)
     assert bad == []
+    # run_engine.py 는 리스트로 만든다 — 그 모양도 python -P -m 이다
+    assert '"python", "-P", "-m", f"checker.{module}"' in (HOOKS / "run_engine.py").read_text(encoding="utf-8")
 
 
 def test_저장소_어디에도_엔진을_main_으로_받는_주소가_없다():

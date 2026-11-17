@@ -114,7 +114,7 @@ docs/manual/img/Production/조회조건_v0.1.png
    적는다. 시험하지 못한 동작은 Spec·`audit/changes/` 에 확인했다고 적힌 만큼만 쓴다.
 3. **양식 지도를 찾는다.** `templates/forms/*.yaml` 중 `템플릿` 이 `.pptx` 인 지도(`쪽` 목록이 있다)를 모두 읽는다.
    - 지도 폴더가 없거나 pptx 지도가 하나도 없으면 **멈추고** 지도가 없다고 알린다. 안내만 한다: 양식 pptx 를 `templates/` 에 넣고
-     `python -P -m checker.export_pptx --dump <양식.pptx>`(엔진 호출은 아래 "산출" 과 같은 `uvx`)로 쪽마다 도형의 글자·위치와 `찾기` 가
+     `export_pptx --dump <양식.pptx>`(엔진 호출은 아래 "산출" 과 같은 `run_engine.py`)로 쪽마다 도형의 글자·위치와 `찾기` 가
      유일한지 본 뒤 `form-map.md` "pptx 지도" 대로 지도를 쓴다. 지도를 이 스킬이 대신 추측해 만들지 않는다.
    - 읽지 못한 지도(파싱 오류, `쪽` 없음)가 있으면 목록에서 조용히 빼지 않고 어느 파일이 왜 안 읽히는지 알리고 멈춘다.
    - pptx 지도가 여럿이면 `양식`·`설명` 을 보여 주고 고르게 한다. 하나면 그것으로 한다.
@@ -219,12 +219,10 @@ Start-Process "C:\Program Files\Google\Chrome\Application\chrome.exe" -ArgumentL
 ### 3. 캡처를 돈다
 
 ```bash
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "캡처 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-uvx --from "$e" \
-  python -P -m checker.manual_capture --list "docs/manual/<LoB>/<번호>.<업무 제목>.capture.yaml" --root "$(git rev-parse --show-toplevel)" [--check] [--screen "<화면 이름>"] [--allow-write]
+uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" manual_capture --list "docs/manual/<LoB>/<번호>.<업무 제목>.capture.yaml" --root "$(git rev-parse --show-toplevel)" [--check] [--screen "<화면 이름>"] [--allow-write]
 ```
 
-엔진 판·`uvx`·PowerShell 호출 방법은 `<이 스킬의 base directory>/../spec/SKILL.md` "양식 파일 산출" 과 같다. 먼저 `--check`(브라우저에 붙지 않고 목록·작업본 소절·주소를 확인),
+엔진 호출(판 정하기·`uvx` 는 `run_engine.py` 가 한다) 방법은 `<이 스킬의 base directory>/../spec/SKILL.md` "양식 파일 산출" 과 같다. 먼저 `--check`(브라우저에 붙지 않고 목록·작업본 소절·주소를 확인),
 통과하면 `--check` 를 빼고 돈다. 한 화면만 다시 찍을 때는 `--screen`. stdout 은 JSON 한 줄이고 종료코드는 다음과 같다.
 
 - `0` `ok` — 모든 화면을 찍었고 요소를 다 그렸다. 그림은 `docs/manual/img/<LoB>/<화면 이름>_v<판>.png`(판은 작업본 머리 `버전:`)에 저장되고, 작업본의
@@ -353,12 +351,10 @@ Remove-Item -Recurse -Force -LiteralPath "\\?\$env:TEMP\manual-chrome"
 쓰지 않는다.
 
 ```bash
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-uvx --from "$e" \
-  python -P -m checker.export --spec "docs/manual/<LoB>/<번호>.<업무 제목>.md" --root "$(git rev-parse --show-toplevel)" --check
+uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" export --spec "docs/manual/<LoB>/<번호>.<업무 제목>.md" --root "$(git rev-parse --show-toplevel)" --check
 ```
 
-`--check` 가 거부 없이 끝나면 `--check` 를 빼고 같은 명령을 다시 돈다. 엔진 판·`uvx`·PowerShell 호출 방법·stdout JSON 한 줄·`산출 불능`
+`--check` 가 거부 없이 끝나면 `--check` 를 빼고 같은 명령을 다시 돈다. 엔진 호출 방법·stdout JSON 한 줄·`산출 불능`
 처리는 `<이 스킬의 base directory>/../spec/SKILL.md` "양식 파일 산출" 과 같다(`@main` 이나 다른 판으로 대신 받지 않는다). 양식이 여럿이면
 `--form <양식 이름>` 을 더한다. 산출 pptx 는 `산출.폴더`(예: `docs/manual/<LoB>/`)에 `산출.파일명` 으로 생긴다. `git fetch origin` 이나
 `/harness:sync` 로 `origin/main` 을 최신으로 맞춘 뒤 산출한다 — 이미 있는 판이 main 에 있는지 엔진이 거기서 본다.
@@ -406,12 +402,10 @@ doc-guard 통과가 아니다.
   LoB·업무 제목·판을 얻으므로 규칙과 다르면 읽지 못한다(종료코드 2). 올린 파일은 저장소 안 어디에 있어도 된다.
 - **엔진을 부르기 전에 묶을 DEV 를 묻는다.** 이 매뉴얼이 다루는 개발 건(DEV) 번호를 사용자에게 먼저 묻고 `--dev DEV-012,DEV-013` 으로 넘긴다(번호는 `DEV-` 뒤 숫자 3자리 이상,
   아니면 종료코드 2). 모르면 `--dev` 를 빼고 부른 뒤 나중에 채운다.
-- **엔진 호출.** 판 정하기·`uvx`·PowerShell 호출은 위 "캡처" 3 과 같다(`engine_spec.py`). 먼저 `--check`, 거부 없이 끝나면 `--check` 를 빼고 돈다.
+- **엔진 호출.** 판 정하기·`uvx` 는 위 "캡처" 3 과 같다(`run_engine.py`). 먼저 `--check`, 거부 없이 끝나면 `--check` 를 빼고 돈다.
 
   ```bash
-  e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "읽기 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-  uvx --from "$e" \
-    python -P -m checker.import_pptx --pptx "<올린 pptx 경로>" --root "$(git rev-parse --show-toplevel)" [--form "<양식 이름>"] [--dev "<DEV-번호,…>"] --check
+  uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" import_pptx --pptx "<올린 pptx 경로>" --root "$(git rev-parse --show-toplevel)" [--form "<양식 이름>"] [--dev "<DEV-번호,…>"] --check
   ```
 
   pptx 지도가 여럿이면 `--form` 이 필요하다. 쓰기 전에 0단계(브랜치 확인)를 한다 — 작업 설명은 "매뉴얼 — `<LoB>` `<업무 제목>`" 이다. stdout 은 JSON 한 줄이다.

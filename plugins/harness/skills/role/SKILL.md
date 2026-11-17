@@ -127,12 +127,10 @@ SAP 에서 Role·카탈로그가 실제로 어떻게 배정돼 있는지는 이 
 ## Spec 대조
 
 메뉴 배정을 정리한 뒤, 또 사용자가 "빠진 거 없어?" 라고 하면, Spec 에 있는 카탈로그가 작업본에 없는지 엔진 명령으로 대조한다.
-읽기만 하고 파일을 쓰지 않는다. 엔진 판·`uvx` 호출은 아래 "산출" 과 같다.
+읽기만 하고 파일을 쓰지 않는다. 엔진 호출은 아래 "산출" 과 같다.
 
 ```bash
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "대조 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-uvx --from "$e" \
-  python -P -m checker.role_check --workbook "docs/권한관리/사용자권한관리_User_Role Mapping.md" --form 사용자권한관리 \
+uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" role_check --workbook "docs/권한관리/사용자권한관리_User_Role Mapping.md" --form 사용자권한관리 \
   --sheet "Role to Area Menu" --table "메뉴 배정" --column Catalog --root "$(git rev-parse --show-toplevel)" --spec-dir docs/spec
 ```
 
@@ -171,12 +169,10 @@ uvx --from "$e" \
 `--check` 는 파일을 쓰지 않는다.
 
 ```bash
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-uvx --from "$e" \
-  python -P -m checker.export --spec "docs/권한관리/사용자권한관리_User_Role Mapping.md" --form "사용자권한관리" --root "$(git rev-parse --show-toplevel)" --check
+uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" export --spec "docs/권한관리/사용자권한관리_User_Role Mapping.md" --form "사용자권한관리" --root "$(git rev-parse --show-toplevel)" --check
 ```
 
-`--check` 가 거부 없이 끝나면 `--check` 를 빼고 같은 명령을 다시 돈다. 엔진 판·`uvx`·PowerShell 호출 방법·stdout JSON 한 줄·`산출 불능`
+`--check` 가 거부 없이 끝나면 `--check` 를 빼고 같은 명령을 다시 돈다. 엔진 호출 방법·stdout JSON 한 줄·`산출 불능`
 처리는 `<이 스킬의 base directory>/../spec/SKILL.md` "양식 파일 산출" 과 같다(`@main` 이나 다른 판으로 대신 받지 않는다). 산출 xlsx 는 지도
 `산출.폴더` 인 `docs/권한관리/` 에 `사용자권한관리_User_Role Mapping_v<버전>.xlsx` 로 생긴다.
 

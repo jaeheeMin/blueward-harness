@@ -527,6 +527,8 @@ def _git_sub(args: list[str], ctx=None):
     if sub == "branch":
         if "-D" in rest or "-d" in rest or "--delete" in rest or any(re.fullmatch(r"-[A-Za-z]*[dD][A-Za-z]*", a) for a in rest):
             return IRREVERSIBLE, "브랜치를 지우려 해"
+        if rest[:1] == ["--unset-upstream"] and len(rest) <= 2 and all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", a) and ".." not in a for a in rest[1:]):
+            return SAFE, "브랜치의 추적 설정만 풀어(커밋·파일은 그대로야)"  # #1043
         readonly = {"-a", "-r", "-v", "-vv", "--list", "-l", "--show-current", "--merged", "--no-merged", "--contains", "--all", "--remotes", "--verbose"}
         return (SAFE, "브랜치 목록을 읽기만 해") if all(a in readonly or not a.startswith("-") and "--list" in rest for a in rest) else (UNKNOWN, "git branch 는 판정 못 했어")
     if sub in ("add", "commit"):
@@ -547,6 +549,8 @@ def _git_sub(args: list[str], ctx=None):
         if sub == "checkout" and ("--" in rest or rest[:1] == ["."]):
             return IRREVERSIBLE, "저장하지 않은 변경을 버리려 해"
         new = "-b" if sub == "checkout" else "-c"
+        if rest[:1] == [new] and len(rest) >= 3 and rest.count("--no-track") == 1 and rest[2] == "--no-track":
+            rest = [a for a in rest if a != "--no-track"]  # 시작점을 추적하지 않고 만드는 --no-track 은 이름 검사에서 뺀다(#1043)
         if (rest[:1] == [new] and 2 <= len(rest) <= 3 and not any(a.startswith("-") for a in rest[1:])
                 and all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", a) and ".." not in a for a in rest[1:])):  # 이름은 브랜치 이름 모양만(시작점 하나까지)
             return SAFE, "새 브랜치를 만들 뿐이야"
@@ -575,13 +579,38 @@ def _gh_flags_write(args: list[str]) -> bool:
     return False
 
 
+def _gh_api_read(args: list[str]):
+    """저장소 설정을 읽는 GET 경로(safe_tools.json gh_api_read_paths)에 --jq 단순 식만 붙은 `gh api` 는 읽기다(#1043). 나머지는 판정 못 함."""
+    if args[:1] != ["api"]:
+        return UNKNOWN, "gh api 앞에 다른 옵션이 있어"
+    rest, jq = args[1:], RULES.get("gh_api_jq")
+    paths = _regexes(RULES.get("gh_api_read_paths"))
+    pos, k = [], 0
+    while k < len(rest):
+        a = rest[k]
+        if a in ("--jq", "-q"):
+            if k + 1 >= len(rest) or not isinstance(jq, str) or not re.fullmatch(jq, rest[k + 1]):
+                return UNKNOWN, "gh api 의 --jq 가 단순한 필드 이름(.allow_auto_merge)이 아니야"
+            k += 2
+            continue
+        if a.startswith("-"):
+            return UNKNOWN, f"gh api 에 목록에 없는 옵션({a[:20]})이 있어"
+        pos.append(a)
+        k += 1
+    if len(pos) != 1 or ".." in pos[0] or not any(p.fullmatch(pos[0]) for p in paths):
+        return UNKNOWN, "gh api 읽기는 저장소 설정 경로만 판정해"
+    return SAFE, "GitHub 저장소 설정을 읽기만 해"
+
+
 def _gh(args: list[str]):
     pos = [a for a in args if not a.startswith("-")]
     if not pos:
         return UNKNOWN, "gh 명령을 읽지 못했어"
     area, sub = pos[0], pos[1] if len(pos) > 1 else ""
     if area == "api":
-        return (IRREVERSIBLE, "GitHub 에 쓰는 API 호출이야") if _gh_flags_write(args) else (UNKNOWN, "gh api 읽기는 판정 못 했어")
+        if _gh_flags_write(args):
+            return IRREVERSIBLE, "GitHub 에 쓰는 API 호출이야"
+        return _gh_api_read(args)
     if sub in _table("gh_write").get(area, frozenset()):
         return IRREVERSIBLE, "GitHub 의 PR·이슈를 바꾸려 해" if area in ("pr", "issue") else "GitHub 에 쓰려 해"
     if sub in _table("gh_read").get(area, frozenset()):
@@ -760,7 +789,20 @@ def _uv(args: list[str], ctx: dict):
     rel = "/".join(parts) if parts else ""
     if not rel or not isinstance(scripts, dict) or rel not in scripts or not rel.endswith(".py"):
         return UNKNOWN, "하네스 설치본의 목록에 있는 스크립트가 아니라 판정 못 했어"
-    verdict, why = _check_args(scripts[rel], args[4:], ctx)
+    spec, rest = scripts[rel], args[4:]
+    if isinstance(spec, dict) and spec.get("engine_module"):  # run_engine.py <모듈> 인자… — 모듈별 규칙은 harness_modules 를 그대로 쓴다(#1043)
+        modules = RULES.get("harness_modules")
+        if rest[:1] == ["--timeout"] and len(rest) >= 3 and re.fullmatch(r"\d{1,4}", rest[1]):
+            rest = rest[2:]  # 시간 제한(초)은 읽기·쓰기를 바꾸지 않는다
+        mod = rest[0] if rest else ""
+        if not re.fullmatch(r"[a-z_][a-z0-9_]*", mod) or not isinstance(modules, dict) or mod not in modules:
+            return UNKNOWN, f"{mod[:40] or '모듈 없음'} 는 읽기만 하는 엔진 모듈 목록에 없어"
+        verdict, why = _check_args(modules[mod], rest[1:], ctx)
+        return (SAFE, f"하네스 엔진의 {mod} 로 읽고 판정만 해") if verdict == SAFE else (verdict, f"{mod}: {why}")
+    writes = spec.get("irreversible_subcommands") if isinstance(spec, dict) else None
+    if isinstance(writes, dict) and rest and isinstance(writes.get(rest[0]), str):
+        return IRREVERSIBLE, writes[rest[0]]
+    verdict, why = _check_args(spec, rest, ctx)
     return (SAFE, f"하네스 {rel} 를 읽기만 하게 실행해") if verdict == SAFE else (verdict, f"{rel}: {why}")
 
 
