@@ -978,9 +978,9 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
         asks = bool(not pending and not running and not s["ended"] and not s.get("starting")
                     and s.get("reportFresh") and report_asks(s["report"]))  # 이번 턴에 받은 보고일 때만
         phase = flows.phase_of(s) if not (pending or asks or running or s.get("starting") or s["ended"]) else ""
-        # 내 차례는 사람이 답할 대기 요청이 있는 세션만이다(#1027 D5). git 상태로 짐작한 start·deliver 차례(turn_skill)와
-        # 글로 물은 듯한 보고(asks)는 내 차례로 세지 않는다(화면 본문에 참고로만 둔다). 시작하는 중도 일하는 중 묶음이다.
-        if pending:
+        # 내 차례는 사람이 답할 대기 요청이 있는 세션, 그리고 작업 브랜치에 올릴 변경이 있는 세션(deliver 차례, 시안 G-11 "요구사항 올리기")이다(#1027 D5).
+        # main 에서 쉬는 세션(start 짐작)·남의 승인을 기다리는 세션(prs 짐작)과 글로 물은 듯한 보고(asks)는 내 차례가 아니다. 시작하는 중도 일하는 중 묶음이다.
+        if pending or (turn_skill == "deliver" and not running and not s["ended"] and not s.get("starting") and not phase):
             group = "todo"
         elif running or (s.get("starting") and not s["ended"]):
             group = "running"
@@ -999,7 +999,8 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "rateLimit": dict(s["rateLimit"]) if isinstance(s.get("rateLimit"), dict) else None,
             "currentSkill": s["currentSkill"], "currentAction": s["currentAction"],
             "startedAt": s["startedAt"], "updatedAt": s["updatedAt"], "log": list(s["log"]), "report": s["report"],
-            "changedFiles": list(s["changedFiles"]), "prLinks": list(s["prLinks"]), "subagents": list(s["subagents"]),
+            "changedFiles": list(s["changedFiles"]), "prLinks": list(s["prLinks"]), "prCreated": str(s.get("prCreated") or ""),
+            "subagents": list(s["subagents"]),
             "flow": flow, "turnSkill": turn_skill, "turnUnknown": bool(s["turn"].get("unknown")),
             "askedInText": asks, "lastBlock": last_block, "phase": phase,
             "pendingRequestIds": pending, "canSend": ok, "cannotSendReason": why,

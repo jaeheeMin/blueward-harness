@@ -547,6 +547,10 @@
             todo.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), verb: 'PR 고치기', title: title, sub: sub, t: s.updatedAt, fix: true });
             return;
           }
+          if (it.kind === 'turn') {  // 시안 G-11: 작업 브랜치에 올릴 변경이 있는 세션(deliver 차례)
+            todo.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), verb: skillLabel(s.turnSkill), title: title, sub: sub, t: s.updatedAt });
+            return;
+          }
           var r = requests.get(it.rid);
           todo.push({ sname: title, sid: s.id, rid: it.rid, href: '/r/' + encodeURIComponent(it.rid), verb: !r ? '요청 확인하기' : answersAsk(r) ? '답하기' : isPlan(r) ? '계획 확인하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
         });
@@ -586,7 +590,7 @@
     if (g !== 'running' && s.status !== 'ended' && L.prNeedsFix(s) && !firstPending(s)) return { tone: g === 'todo' ? 'attn' : '', fix: true, text: 'PR #' + s.flowPr.number + ' 고쳐야 함' };
     if (g === 'todo') {
       var p = firstPending(s);
-      var verb = p ? (!p.r ? '요청 확인하기' : answersAsk(p.r) ? '답하기' : isPlan(p.r) ? '계획 확인하기' : '승인하기') : '확인하기';
+      var verb = p ? (!p.r ? '요청 확인하기' : answersAsk(p.r) ? '답하기' : isPlan(p.r) ? '계획 확인하기' : '승인하기') : s.turnSkill === 'deliver' ? skillLabel(s.turnSkill) : '확인하기';
       return { tone: 'attn', text: '내 차례 · ' + verb };
     }
     var ph = window.BHLogic.phaseSide(s);  // 승인 기다림 · PR #n / 끝 · PR #n 합쳐짐(내 차례로 세지 않는다)

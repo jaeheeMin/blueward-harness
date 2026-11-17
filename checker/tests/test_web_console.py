@@ -761,9 +761,12 @@ def test_group_rules(browser):
     s["turn"] = {"skill": "deliver", "unknown": False}
     browser.event("t2", "SessionStart")
     browser.app.store.get("t2")["turn"] = {"skill": "deliver", "unknown": False}
-    # #1027 D5: git 으로 짐작한 차례(turnSkill)는 내 차례가 아니다. 사람이 답할 대기 요청이 있을 때만 todo 다
-    assert browser.call("GET", "/api/sessions/t2")[1]["group"] == "idle"
+    # #1027 D5: 올릴 변경이 있는 작업 브랜치(deliver 짐작)는 내 차례다(시안 G-11). main 에서 쉬는 세션(start)·남의 승인 대기(prs)는 아니다
+    assert browser.call("GET", "/api/sessions/t2")[1]["group"] == "todo"
     assert browser.call("GET", "/api/sessions/t2")[1]["turnSkill"] == "deliver"
+    for guess in ("start", "prs"):
+        browser.app.store.get("t2")["turn"] = {"skill": guess, "unknown": False}
+        assert browser.call("GET", "/api/sessions/t2")[1]["group"] == "idle", guess
     browser.app.store.get("t2")["starting"] = True  # 시작하는 중은 쉬는 중이 아니라 일하는 중 묶음이다
     got = browser.call("GET", "/api/sessions/t2")[1]
     assert got["status"] == "starting" and got["group"] == "running"
@@ -1497,7 +1500,7 @@ def test_turn_state_is_refreshed_on_stop(tmp_path, monkeypatch):
         c.event("t1", "UserPromptSubmit", prompt="x")
         c.hook("stop", {"session_id": "t1", "cwd": str(c.work), "last_assistant_message": "r"})
         s = c.call("GET", "/api/sessions/t1")[1]
-        assert s["turnSkill"] == "deliver" and s["turnUnknown"] is True and s["group"] == "idle"  # git 짐작 차례는 내 차례가 아니다(#1027)
+        assert s["turnSkill"] == "deliver" and s["turnUnknown"] is True and s["group"] == "todo"  # 올릴 차례는 내 차례다(#1027 D5, 시안 G-11)
         assert s["repo"] == "r" and s["changedFiles"] == ["x.py"] and calls
     finally:
         c.close()
@@ -5298,6 +5301,15 @@ def test_checks_summary_does_not_count_human_approval_gates_as_failures():
     assert gitstate.summarize_checks([ok, {"context": "doc-guard", "state": "FAILURE"}] + gate_fail) == "fail"
     assert gitstate.summarize_checks([{"name": "pr-checks / risk-gate", "status": "COMPLETED", "conclusion": "FAILURE"}, ok]) == "pass"
     assert gitstate.summarize_checks([{"context": "risk-gate", "state": "PENDING"}, ok]) == "pending"  # 아직 도는 중인 것은 그대로
+    # 실사용 시험(시험 저장소 PR #32) 모양: 승인 관문만 실패해도 검사 묶음 job(pr-checks / check)이 실패로 온다 — 고칠 PR 이 아니다
+    pr32 = [{"name": "pr-checks / check", "status": "COMPLETED", "conclusion": "FAILURE"},
+            {"context": "risk-gate", "state": "FAILURE"}, {"context": "ssot-approval", "state": "FAILURE"},
+            {"context": "doc-guard", "state": "SUCCESS"}, {"context": "gitleaks", "state": "SUCCESS"}, {"context": "merge-order", "state": "SUCCESS"}]
+    assert gitstate.summarize_checks(pr32) == "pass" and gitstate.awaiting_approval(pr32) is True
+    assert gitstate.summarize_checks(pr32[:3] + [{"context": "doc-guard", "state": "FAILURE"}]) == "fail"  # 단계 status 의 진짜 실패는 그대로
+    assert gitstate.summarize_checks([{"name": "pr-checks / check", "status": "IN_PROGRESS", "conclusion": ""}]) == "pending"
+    assert gitstate.summarize_checks([{"name": "test (ubuntu-latest)", "status": "COMPLETED", "conclusion": "FAILURE"}]) == "fail"  # 묶음 job 이 아닌 job 실패는 그대로
+    assert gitstate.summarize_checks([{"context": "merge-order", "state": "FAILURE"}, ok]) == "pass"  # 순서 표시는 세지 않는다
     assert gitstate.awaiting_approval([ok]) is False and gitstate.awaiting_approval(None) is False
     item = gitstate._pr_item(pr_json("OPEN", [ok] + gate_fail))
     assert item["checks"] == "pass" and item["awaitApproval"] is True
@@ -5319,6 +5331,9 @@ def test_open_pr_moves_a_work_step_to_waiting_for_merge_without_pressing_done(tm
         assert m["stepIndex"] == 1 and states(m)[1] == "active" and m["flowPr"] is None  # 고치는 중
         listed["data"] = [pr_json("OPEN")]
         m = c.call("POST", "/api/sessions/p1/flow/refresh", {})[1]
+        assert m["stepIndex"] == 1 and m["flowPr"] is None  # 이 세션이 만든 PR 이 아니면(브랜치로만 찾음) 넘기지 않는다
+        c.app.store.get("p1")["prCreated"] = "https://github.com/o/r/pull/7"  # AI 가 gh pr create 로 만든 PR(hooks_api 가 남긴다)
+        m = c.call("POST", "/api/sessions/p1/flow/refresh", {})[1]
         assert m["stepIndex"] == 3 and states(m) == ["done", "done", "done", "active"] and m["flowPr"]["number"] == 7
         assert m["phase"] == "approval" and m["group"] == "idle"
         listed["data"] = [pr_json("MERGED")]
@@ -5329,14 +5344,29 @@ def test_open_pr_moves_a_work_step_to_waiting_for_merge_without_pressing_done(tm
 
 
 def test_closed_pr_does_not_skip_work_steps(tmp_path, monkeypatch):
-    run = FakeRun(gh_pr_list=lambda a: (0, json.dumps([pr_json("CLOSED")])))
+    run = FakeRun(gh_pr_list=lambda a: (0, json.dumps([pr_json("CLOSED")])), gh_pr_view=lambda a: (0, json.dumps(pr_json("CLOSED"))))
     c = flow_console(tmp_path, monkeypatch, run=run)
     try:
         turn(c, "p2")
         set_flow(c, "p2", "fix")
         c.git["changedFiles"] = ["a.md"]
+        c.app.store.get("p2")["prCreated"] = "https://github.com/o/r/pull/7"
         m = c.call("POST", "/api/sessions/p2/flow/refresh", {})[1]
         assert m["stepIndex"] == 0 and m["flowPr"]["state"] == "CLOSED"
+    finally:
+        c.close()
+
+
+def test_merged_pr_of_an_old_branch_does_not_finish_a_new_flow(tmp_path, monkeypatch):
+    """#1027 실사용 시험: 앞 작업의 병합된 브랜치에 남은 채 새 작업을 시작하자, 그 브랜치의 PR #34 로 첫 단계부터 "4 / 4 끝" 이 됐다.
+    이 세션이 만든 PR 이 아니면 단계를 넘기지 않고 세션의 PR 정보도 그 PR 로 바꾸지 않는다."""
+    run = FakeRun(gh_pr_list=lambda a: (0, json.dumps([pr_json("MERGED")])), gh_pr_view=lambda a: (0, json.dumps(pr_json("MERGED"))))
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    try:
+        turn(c, "p3")
+        set_flow(c, "p3", "fix")
+        m = c.call("POST", "/api/sessions/p3/flow/refresh", {})[1]
+        assert m["stepIndex"] == 0 and not m["flowFinished"] and m["flowPr"] is None
     finally:
         c.close()
 
@@ -6204,15 +6234,13 @@ def test_start_checks_follow_skill_events_and_can_be_skipped(mconsole):
     assert c.call("GET", "/api/sessions/terminal-1")[1]["startChecks"] == []  # 콘솔이 새로 띄운 세션만 점검 목록을 가진다
 
 
-def test_new_work_start_does_not_make_start_checks(mconsole):
-    # #1027 D7: 새 작업에는 시작 점검 두 줄을 만들지 않는다(다음 갈래 넘기기·launch 기본값은 그대로)
+def test_new_work_start_gives_start_checks(mconsole):
+    # 시안 G-13: 새 작업 세션도 시작 점검 목록을 가진다(11-17 사용자 결정 — D7 "새 작업엔 안 만듦" 대신 시안대로, #1027)
     c = mconsole
     jid = c.call("POST", "/api/new", {"text": "계획 세워줘", "cwd": str(c.work)})[1]["id"]
     wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
     sid = c.call("POST", f"/api/new/{jid}/start", {})[1]["id"]
-    assert c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"] == []
-    c.event(sid, "PreToolUse", tool_name="Skill", tool_input={"skill": "harness:sync"})
-    assert c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"] == []
+    assert [x["id"] for x in c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"]] == ["sync", "version", "update", "reload"]
 
 
 # ---- 플러그인 다시 불러오기 ----
@@ -8887,6 +8915,11 @@ def test_pr_ticker_rechecks_only_sessions_watching_a_pr(tmp_path):
         s = app.store.ensure(sid, str(tmp_path))
         s.update(flowState=st, ended=ended)
     assert app.refresh_open_prs() == 1 and seen == ["a"]
+    fixing = {"finished": False, "pr": None, "stepIndex": 0, "steps": [{"name": "고치기", "state": "now", "done": ["has_changes", "manual"]}]}
+    e = app.store.ensure("e", str(tmp_path))
+    e.update(flowState=fixing, prCreated="https://github.com/o/r/pull/9")  # 턴 중간에 PR 을 만든 세션
+    seen.clear()
+    assert app.refresh_open_prs() == 2 and sorted(seen) == ["a", "e"]
     app.start_pr_ticker(every=3600)
     assert app.ticker_stop is not None and not app.ticker_stop.is_set()
     app.shutdown()
@@ -8908,3 +8941,19 @@ def test_flow_early_pr_read_failure_leaves_no_unknown_on_steps_without_pr():
                "steps": [{"name": "합쳐지기", "kind": "wait", "state": "now", "done": ["pr_merged"], "confirmed": False, "skillDone": False}]}
     flows.evaluate(waiting, fetch, lambda name: "yes", 0.0)
     assert "gh 로 PR 을 읽지 못했어." in waiting["unknown"]
+
+
+def test_pr_created_is_only_the_pr_this_session_made(browser):
+    """#1027 D-1 실사용 시험: PR 목록 출력에 스친 남의 PR(#32)이 아니라 이 세션이 gh pr create 로 만든 PR(#34)만 prCreated 가 된다."""
+    browser.event("pc", "SessionStart")
+    browser.event("pc", "PostToolUse", tool_name="Bash", tool_input={"command": "uvx --from x python -P -m checker.pr_queue --mine"},
+                  tool_response={"stdout": "| [#32](https://github.com/o/r/pull/32) docs: 남의 PR |"})
+    s = browser.app.store.get("pc")
+    assert "https://github.com/o/r/pull/32" in s["prLinks"] and not s.get("prCreated")
+    browser.event("pc", "PostToolUse", tool_name="Bash", tool_input={"command": 'gh pr create --base main --title "x" --body "y"'},
+                  tool_response={"stdout": "https://github.com/o/r/pull/34\n"})
+    assert s["prCreated"] == "https://github.com/o/r/pull/34"
+    assert browser.call("GET", "/api/sessions/pc")[1]["prCreated"] == "https://github.com/o/r/pull/34"
+    browser.event("pc", "PostToolUse", tool_name="Bash", tool_input={"command": "gh pr view 32"},
+                  tool_response={"stdout": "https://github.com/o/r/pull/32"})
+    assert s["prCreated"] == "https://github.com/o/r/pull/34"  # 다른 PR 을 본 출력은 덮지 않는다

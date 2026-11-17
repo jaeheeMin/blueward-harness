@@ -266,7 +266,7 @@ class Manager:
 
     def launch(self, cwd: str, first_message: str | None, resume: str | None = None, title: str = "",
                model: str | None = None, effort: str | None = None, permission: str | None = None,
-               attachments: list[dict] | None = None, fork_of: str | None = None, start_checks: bool = True) -> str | None:
+               attachments: list[dict] | None = None, fork_of: str | None = None) -> str | None:
         """세션을 띄우고 첫 메시지를 보낸다. 세션 id(임시 또는 실제)를 돌려준다. 못 띄우면 None.
         model 은 --model 별칭이다. 이어서 띄울 때(resume) 안 주면 그 세션에 기억된 모델을 쓴다.
         같은 세션을 다시 띄우는 요청(resume)은 세션 단위로 직렬화하고, 이미 살아 있으면 새로 띄우지 않고 메시지만 보낸다.
@@ -280,11 +280,10 @@ class Manager:
                         return None
                     return self.store.resolve_id(resume)
                 return self._launch(cwd, first_message, resume, title, model, effort, permission, attachments)
-        return self._launch(cwd, first_message, resume, title, model, effort, permission, attachments, start_checks=start_checks)
+        return self._launch(cwd, first_message, resume, title, model, effort, permission, attachments)
 
     def _launch(self, cwd: str, first_message: str | None, resume: str | None, title: str, model: str | None,
-                effort: str | None = None, permission: str | None = None, attachments: list[dict] | None = None, fork_of: str | None = None,
-                start_checks: bool = True) -> str | None:
+                effort: str | None = None, permission: str | None = None, attachments: list[dict] | None = None, fork_of: str | None = None) -> str | None:
         source = resume or fork_of
         if model is None and source:
             model = self.remembered_model(source)
@@ -311,7 +310,7 @@ class Manager:
             s["permissionChoice"] = permission or ""
             if fork_of:
                 s["forkedFrom"] = fork_of  # 터미널 세션을 갈라서 이어 간 새 세션(#867). 화면에 '갈라서 이어 감' 을 밝힌다
-            if not resume and not fork_of and start_checks:  # 새 작업 시작은 점검 두 줄을 만들지 않는다(#1027 D7)
+            if not resume and not fork_of:
                 s["startChecks"] = new_start_checks()  # 새 세션 점검 체크리스트(이어서 띄운 세션에는 새로 만들지 않는다)
             title = prompt_title(title) if title else ""
             if title:

@@ -290,15 +290,24 @@ def evaluate(state: dict, fetch: Fetch, cond: Cond, now: float) -> bool:
             break  # 조건을 확인하지 못한 단계는 끝내지도 건너뛰지도 않는다
         # PR 이 열렸거나 병합됐으면 올리기까지 끝난 것이다. 병합을 기다리는 단계 앞은 [끝났어] 를 안 눌러도 넘긴다(#1027 D-1).
         # 어느 단계에 있든 PR 을 한 번 읽어 state["pr"] 를 채우므로 홈·상태 칸·단계가 같은 값을 쓴다.
-        needs_pr = any(t in ("pr_exists", "pr_merged") for t in st["done"])
-        unknown_before = list(state["unknown"])
-        early = "pr_merged" not in st["done"] and _token(state, st, "pr_exists", fetch)
-        if not needs_pr:  # PR 이 필요 없는 단계에서 미리 읽다 못 읽은 사유는 남기지 않는다(그 단계는 PR 없이도 판정된다)
-            state["unknown"][:] = unknown_before
-        if early and str((state.get("pr") or {}).get("state") or "").upper() in ("OPEN", "MERGED"):
-            st["state"], st["doneAt"] = DONE, now
-            changed = True
-            continue
+        # 단, 이 세션이 gh pr create 로 만든 PR(createdPr)일 때만이다. 브랜치로 찾은 PR 은 이전 작업의 것일 수 있다
+        # (실사용 시험: 앞 세션의 병합된 브랜치에서 새 작업을 시작하자 그 PR #34 로 첫 단계부터 "끝" 이 됐다).
+        created = state.get("createdPr")
+        if created and "pr_merged" not in st["done"]:
+            needs_pr = any(t in ("pr_exists", "pr_merged") for t in st["done"])
+            saved = (state.get("pr"), state.get("prNumber"), list(state["unknown"]))
+            early = _token(state, st, "pr_exists", fetch)
+            pr = state.get("pr") or {}
+            if early and pr.get("number") == created and str(pr.get("state") or "").upper() in ("OPEN", "MERGED"):
+                st["state"], st["doneAt"] = DONE, now
+                changed = True
+                continue
+            if early is not None and pr.get("number") != created:  # 다른 PR 을 읽었으면 세션의 PR 정보를 바꾸지 않는다
+                state["pr"], state["prNumber"] = saved[0], saved[1]
+                if saved[1] is None:
+                    state.pop("prNumber", None)
+            if not needs_pr:  # PR 이 필요 없는 단계에서 미리 읽다 못 읽은 사유는 남기지 않는다(그 단계는 PR 없이도 판정된다)
+                state["unknown"][:] = saved[2]
         values = [_token(state, st, t, fetch) for t in st["done"]]
         if not all(v is True for v in values):
             break

@@ -1455,7 +1455,7 @@
         if (!turns.length) page.appendChild(h('p', { class: 'quiet', 'data-no-turn': '1', role: 'status', text: L.NO_TURN_TEXT }));
 
         // 내 차례 카드는 세션마다 하나(요청이 여럿이면 첫 요청). 고칠 PR 은 위 fixBox 에 따로 있어 카드에서 뺀다.
-        var todo = list.filter(function (s) { return turns.some(function (t) { return t.s === s && t.kind === 'request'; }); });
+        var todo = list.filter(function (s) { return turns.some(function (t) { return t.s === s && (t.kind === 'request' || t.kind === 'turn'); }); });  // 올릴 차례도 카드(시안 G-11)
         // 내 차례는 가장 오래 기다린 한 건만 카드로 두고, 나머지는 "외 n건" 을 눌러 펼친다(펼침 상태는 이 화면에서만 기억).
         var waiting = todo.slice().sort(function (a, b) { return (a.updatedAt || 0) - (b.updatedAt || 0); });
         function callCard(s) {
@@ -1463,7 +1463,7 @@
           var href = pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id);
           var plan = !!(pend && pend.r && kit.isPlan && kit.isPlan(pend.r));  // 계획 확인 요청(#861)
           var verb = pend && pend.r && (kit.kindOf(pend.r) === 'elicitation' || kit.kindOf(pend.r) === 'question') ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
-          var what = pend ? (kit.requestTitle ? kit.requestTitle(pend.r) : (pend.r && pend.r.title) || '요청을 확인해 줘') : '내 차례야';
+          var what = pend ? (kit.requestTitle ? kit.requestTitle(pend.r) : (pend.r && pend.r.title) || '요청을 확인해 줘') : s.turnSkill === 'deliver' ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례야';  // 글은 전과 같다
           return h('div', { class: 'call', 'data-call': s.id },
             h('div', { class: 'ct' }, h('span', { class: 'eb', text: '네 차례 · ' + name }), h('b', { text: what })),
             kit.link(href, { class: 'pill dark', text: verb }));

@@ -292,15 +292,32 @@ def _json(out: str):
 # 사람 승인을 기다리느라 실패로 보이는 검사(pr-checks.yml·pr-review.yml 의 commit status 이름. checker/pr_queue.py GATE_GROUPS 와 같다).
 # 이 둘의 실패는 고칠 일이 아니라 승인자를 기다리는 일이라 "검사 실패" 로 세지 않는다(#1027).
 APPROVAL_GATES = frozenset({"risk-gate", "ssot-approval"})
+# 검사 묶음 job(pr-checks·pr-review·main-checks)의 실패는 안에 든 단계 status(doc-guard·gitleaks·승인 관문 등)의 실패를 다시 보인 것이라
+# 실패로 세지 않는다 — 승인 관문만 실패해도 job 이 실패해 "고쳐야 할 PR" 로 보였다(#1027 실사용 시험). 엔진 checker.risk_gate 의
+# EXCLUDED_CHECK_GROUPS 와 같다. merge-order·pr-queue 는 순서 표시라 아예 세지 않는다(checker.pr_queue 와 같다).
+JOB_GROUPS = frozenset({"pr-checks", "pr-review", "main-checks"})
+ORDER_GROUPS = frozenset({"merge-order", "pr-queue"})
 
 
-def _rollup_name(item: dict) -> str:
-    return str(item.get("context") or item.get("name") or "").rsplit(" / ", 1)[-1].strip()
+def _rollup_group(item: dict) -> str:
+    """`pr-checks / check` 처럼 워크플로 이름이 앞에 붙은 이름의 앞 조각(엔진 checker.risk_gate._check_group 과 같다)."""
+    return str(item.get("context") or item.get("name") or "").split(" / ", 1)[0].strip()
+
+
+def _rollup_failed(item: dict) -> bool:
+    return str(item.get("conclusion") or item.get("state") or "").upper() in FAILED_CONCLUSIONS
 
 
 def _is_gate_failure(item: dict) -> bool:
-    conclusion = str(item.get("conclusion") or item.get("state") or "").upper()
-    return _rollup_name(item) in APPROVAL_GATES and conclusion in FAILED_CONCLUSIONS
+    return _rollup_group(item) in APPROVAL_GATES and _rollup_failed(item)
+
+
+def _ignored(item: dict) -> bool:
+    """요약에서 빼는 줄: 순서 표시, 알림 job, 승인 관문·검사 묶음 job 의 실패(실패만. 진행 중이면 기다림으로 센다)."""
+    group, name = _rollup_group(item), str(item.get("context") or item.get("name") or "")
+    if group in ORDER_GROUPS or name.rsplit(" / ", 1)[-1].strip() == "alert":
+        return True
+    return (group in APPROVAL_GATES or group in JOB_GROUPS) and _rollup_failed(item)
 
 
 def awaiting_approval(rollup) -> bool:
@@ -315,7 +332,7 @@ def summarize_checks(rollup) -> str:
     pending = False
     counted = 0
     for item in rollup:
-        if not isinstance(item, dict) or _is_gate_failure(item):
+        if not isinstance(item, dict) or _ignored(item):
             continue
         counted += 1
         status = str(item.get("status") or "")

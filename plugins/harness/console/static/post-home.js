@@ -34,7 +34,7 @@
         var bk = L.blockOf(s), pend = HK.pendingOf(s);
         if (bk) { bad.push({ id: s.id, kind: bk.kind === 'cannot_check' ? 'unk' : 'blocked', s: s, t: bk.t }); return; }
         // 내 차례는 Sauce 홈·띠와 같은 목록(BHLogic.turnItems)으로 정한다. 답할 요청이 있는 세션만(#1027 D5). PR 고치기는 따로 칸이 있어 뺀다
-        if (L.turnItems([s], HK.openIds).some(function (t) { return t.kind === 'request'; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: pend });
+        if (L.turnItems([s], HK.openIds).some(function (t) { return t.kind === 'request' || t.kind === 'turn'; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: pend });
       });
       turn.sort(function (a, b) { return (a.s.updatedAt || 0) - (b.s.updatedAt || 0); });
       // 방금 답해 도장이 찍힌 카드는 처리됨으로 바뀐 뒤에도 잠깐 남긴다(도장이 보이도록)
@@ -71,7 +71,7 @@
         if (q) { b.appendChild(q); return b; }
       }
       var plan = !!(r && kit.isPlan(r)), ask = k === 'question' || k === 'elicitation';
-      var what = pend ? kit.requestTitle(r) : '내 차례야';
+      var what = pend ? kit.requestTitle(r) : s.turnSkill === 'deliver' ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례야';
       var verb = ask ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
       b.appendChild(h('p', { class: 'po-dc-q', text: what }));
       b.appendChild(h('div', { class: 'po-dc-act' }, kit.link(pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id), { class: 'pill acc', text: verb })));

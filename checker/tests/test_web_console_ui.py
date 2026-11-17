@@ -194,8 +194,12 @@ const cases = {
     assert.strictEqual(L.summaryText(L.counts([])), '세션 0개 · 일하는 중 0 · 내 차례 0 · 쉬는 중 0');
   },
   my_turn_is_only_real_requests() {
-    // #1027 D5·D-3: git 짐작 차례(turnSkill)·글로 물은 추정(askedInText)·서버가 todo 라 해도 답할 요청이 없으면 내 차례가 아니다
-    assert.strictEqual(L.groupOf({ id: 1, status: 'idle', turnSkill: 'deliver' }), 'idle');
+    // #1027 D5·D-3: main 에서 쉬는 세션(start)·남의 승인 대기(prs) 짐작, 글로 물은 추정(askedInText), 답할 요청 없는 서버 todo 는 내 차례가 아니다.
+    // 올릴 변경이 있는 작업 브랜치(deliver)는 내 차례다(시안 G-11)
+    assert.strictEqual(L.groupOf({ id: 1, status: 'idle', turnSkill: 'deliver' }), 'todo');
+    assert.strictEqual(L.groupOf({ id: 11, status: 'idle', turnSkill: 'start' }), 'idle');
+    assert.strictEqual(L.groupOf({ id: 12, status: 'idle', turnSkill: 'prs' }), 'idle');
+    assert.strictEqual(L.groupOf({ id: 13, status: 'running', turnSkill: 'deliver' }), 'running');
     assert.strictEqual(L.groupOf({ id: 2, status: 'idle', askedInText: true }), 'idle');
     assert.strictEqual(L.groupOf({ id: 3, status: 'idle', group: 'todo' }), 'idle');
     assert.strictEqual(L.groupOf({ id: 4, status: 'starting' }), 'running');
@@ -213,7 +217,8 @@ const cases = {
     ];
     // 띠·알림·레일·홈 타일은 이 한 목록의 길이를 쓴다: 요청 둘 + 고칠 PR 하나. 추정·끝난 세션·막힘은 뺀다
     assert.deepStrictEqual(L.turnItems(list).map(t => t.s.id + ':' + t.kind + ':' + t.rid), ['a:request:r1', 'a:request:r2', 'c:fix:']);
-    assert.strictEqual(L.turnItems([{ id: 'x', status: 'idle', turnSkill: 'deliver' }]).length, 0);
+    assert.deepStrictEqual(L.turnItems([{ id: 'x', status: 'idle', turnSkill: 'deliver' }]).map(t => t.kind), ['turn']);
+    assert.deepStrictEqual(L.turnItems([{ id: 'y', status: 'idle', turnSkill: 'deliver', flowPr: pr }]).map(t => t.kind), ['fix']);  // 고칠 PR 이 먼저
     assert.strictEqual(L.NO_TURN_TEXT, '지금 네가 할 일은 없어');
   },
   session_order_is_stable_within_a_group() {
@@ -234,13 +239,15 @@ const cases = {
     assert.deepStrictEqual(got.map(c => c.state + ':' + c.label), ['skipped:건너뜀', 'todo:아직']);
   },
   pr_cell_prefers_session_pr_links() {
-    // #1027 D-1: flowPr 가 없어도 세션이 만든 PR 주소가 있으면 "PR 아직" 이 아니라 번호를 보인다
+    // #1027 D-1: flowPr 가 없어도 이 세션이 gh pr create 로 만든 PR(prCreated)이 있으면 "PR 아직" 이 아니라 번호를 보인다.
+    // 갈래 세션은 prLinks(출력에 스친 남의 PR 주소)를 쓰지 않는다 — 실사용 시험에서 다른 브랜치의 #32 가 보였다
     const steps = [{ id: 's', name: 's', state: 'active' }];
     const cell = (extra) => L.sessionStrip(Object.assign({ flowId: 'f', flowSteps: steps }, extra)).slice(-1)[0];
-    assert.strictEqual(cell({ prLinks: ['https://github.com/o/r/pull/77'] }).value, 'PR #77');
-    assert.strictEqual(cell({ prLinks: [{ url: 'https://github.com/o/r/pull/78' }], flowUnknown: ['gh'] }).value, 'PR #78');
+    assert.strictEqual(cell({ prCreated: 'https://github.com/o/r/pull/77' }).value, 'PR #77');
+    assert.strictEqual(cell({ prCreated: 'https://github.com/o/r/pull/78', flowUnknown: ['gh'] }).value, 'PR #78');
+    assert.strictEqual(cell({ prLinks: ['https://github.com/o/r/pull/32'] }).value, 'PR 아직');
     assert.strictEqual(cell({}).value, 'PR 아직');
-    assert.strictEqual(cell({ flowPr: { number: 5, state: 'OPEN' }, prLinks: ['https://github.com/o/r/pull/77'] }).value, 'PR #5 검토 중');
+    assert.strictEqual(cell({ flowPr: { number: 5, state: 'OPEN' }, prCreated: 'https://github.com/o/r/pull/77' }).value, 'PR #5 검토 중');
   },
   pr_badge_says_waiting_for_approval() {
     // #1027 항목 12: 승인 대기 검사의 실패는 서버가 checks 에서 빼고 awaitApproval 로 알린다 — 고치기가 아니라 승인 기다림
@@ -249,6 +256,9 @@ const cases = {
     assert.strictEqual(L.prBadge({ number: 3, state: 'OPEN', checks: 'fail', awaitApproval: true }).text, '검사 실패');
     assert.strictEqual(L.prNeedsFix({ flowPr: pr }), false);
     assert.strictEqual(L.groupOf({ id: 1, status: 'idle', flowPr: pr }), 'idle');
+    // 실사용 시험: 합쳐진 PR 이 표에서 "검사 진행 중" 으로 보였다 — 병합·닫힘이 검사 상태보다 먼저다
+    assert.strictEqual(L.prBadge({ number: 34, state: 'MERGED', checks: 'pending' }).text, '합쳐짐');
+    assert.strictEqual(L.prBadge({ number: 35, state: 'CLOSED', checks: 'fail' }).text, '닫힘');
   },
   fix_pr_counts_as_todo() {
     // 시안 G-24: 검사 실패한 내 PR 세션은 내 차례. 일하는 중·끝난 세션·막힘은 아니다
