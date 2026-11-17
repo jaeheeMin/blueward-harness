@@ -30,6 +30,8 @@ MAX_PENDING_STOP = 20
 MAX_CHANGED_FILES = 500
 MAX_PR_LINKS = 50
 CHAT_LIMIT = 200  # 세션마다 남기는 대화 항목 수
+# managed.py _launch 가 임시 세션에 적는 키. rekey 가 실제 id 세션과 합칠 때 옮긴다. ended 는 일부러 뺐다(init 이 왔으니 살아 있는 세션이라, 실제 세션 기본값 False 가 맞다)
+LAUNCH_KEYS = ("starting", "managed_alive", "modelChoice", "effortChoice", "permissionChoice", "forkedFrom", "startChecks")
 CHAT_TEXT_LIMIT = 8000  # 항목 하나의 글자 수
 SUBSCRIBER_MAXSIZE = 1000
 TERMINAL_IDLE_SECONDS = 600.0  # 터미널 세션은 이만큼 신호가 없으면 쉬는 상태로 본다(Esc 로 끊으면 Stop 이 오지 않는다)
@@ -645,6 +647,9 @@ class Store:
             existing = self.sessions.get(new)
             if existing:
                 existing["managed"] = True
+                for key in LAUNCH_KEYS:  # 콘솔이 띄울 때 적은 값. 훅이 먼저 만든 세션엔 없거나 기본값이라 임시 세션 쪽이 이긴다(#1073)
+                    if key in s:
+                        existing[key] = s[key]
                 existing["cwd"] = existing["cwd"] or s["cwd"]
                 existing["startedAt"] = min(existing["startedAt"], s["startedAt"])
                 if s.get("startChecks") and not existing.get("startChecks"):  # 훅이 먼저 실제 id 로 등록했어도 새 세션 점검 목록을 잃지 않는다

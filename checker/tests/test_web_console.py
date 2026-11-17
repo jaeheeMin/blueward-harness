@@ -3908,6 +3908,23 @@ def test_permission_change_ended_session_applies_on_resume(mconsole):
     assert c.app.store.get(sid)["permissionMode"] == "acceptEdits"  # 새 프로세스가 --permission-mode acceptEdits 로 떴다
 
 
+def test_rekey_merge_keeps_launch_choices_when_hook_came_first(tmp_path):
+    """훅이 init 보다 먼저 실제 id 로 세션을 만들어도 콘솔이 띄울 때 적은 값은 합칠 때 남는다(#1073)."""
+    store = Store(None)
+    with store.lock:
+        s = store.ensure("m-abc", str(tmp_path))
+        s.update(managed=True, starting=True, ended=False, managed_alive=True)
+        s["modelChoice"], s["effortChoice"], s["permissionChoice"] = "opus", "high", "plan"
+        s["forkedFrom"] = "src-1"
+        s["startChecks"] = [{"id": "c1"}]
+    store.ensure("real-1", str(tmp_path))  # 훅(UserPromptSubmit 등)이 stdout init 보다 먼저 도착
+    target = store.rekey("m-abc", "real-1")
+    assert target is store.get("real-1") and "m-abc" not in store.sessions
+    assert target["managed"] is True and target["starting"] is True and target["managed_alive"] is True
+    assert target["modelChoice"] == "opus" and target["effortChoice"] == "high" and target["permissionChoice"] == "plan"
+    assert target["forkedFrom"] == "src-1" and target["startChecks"] == [{"id": "c1"}]
+
+
 @pytest.mark.parametrize("mode", ["bypassPermissions", "dontAsk", "AUTO", "bogus", 3, None, ["plan"]])
 def test_permission_change_rejects_values_outside_allowed_set(mconsole, mode):
     c = mconsole
