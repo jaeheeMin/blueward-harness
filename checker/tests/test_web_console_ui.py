@@ -912,12 +912,44 @@ const cases = {
     assert.ok(L.isFormOutput({ path: 'out\\BW_Backlog List_v0.1.xlsx' }) && L.isFormOutput({ path: 'C:\\w\\p\\a.DOCX' }) && !L.isFormOutput({ path: 'docs\\status\\a.md' }) && !L.isFormOutput({ path: 'audit\\a.xlsx' }));
     process.exit(0);
   },
+  async dom_home_recent_forms_only() {
+    // #1067: 홈 "최근 산출물" 목록과 "이번 주 산출물" 숫자도 양식 파일(xlsx·pptx·docx)만 센다. 없으면 탭과 같은 안내
+    const now = Math.floor(Date.now() / 1000);
+    const s1 = { id: 's1', title: '세션', cwd: '/w/p', updatedAt: now, canSend: true };
+    async function run(files) {
+      const { kit } = makeKit({ 'GET /api/sessions/s1/files': { files } }, [s1]);
+      const box = h('div'); let week = 'none';
+      loadUI(kit).homeKit.recentCard(box, n => { week = n; });
+      for (let i = 0; i < 6; i++) await tick();
+      return { text: box.textContent, rows: find(box, e => e.attrs['data-doc']).map(e => e.attrs['data-doc']), week };
+    }
+    const a = await run([{ path: 'docs/SRS_v0.1.md', kind: 'md', size: 9, mtime: now - 5 }, { path: 'out/a.pdf', kind: 'pdf', size: 1, mtime: now - 4 }]);
+    assert.deepStrictEqual(a.rows, []); assert.strictEqual(a.week, 0);
+    assert.ok(a.text.includes('아직 양식으로 뽑은 산출물이 없어.') && !a.text.includes('SRS_v0.1'));
+    const b = await run([{ path: 'docs/SRS_v0.1.md', kind: 'md', size: 9, mtime: now - 1 }, { path: 'out/BW_Backlog_v0.1.xlsx', kind: 'xlsx', size: 9, mtime: now - 3 }, { path: 'out/m.pptx', kind: 'pptx', size: 9, mtime: now - 2 }]);
+    assert.deepStrictEqual(b.rows, ['out/m.pptx', 'out/BW_Backlog_v0.1.xlsx']); assert.strictEqual(b.week, 2);
+    process.exit(0);
+  },
+  async dom_docs_page_forms_only_empty() {
+    // #1067: 산출물 탭에 md·작업 파일만 있으면 목록은 비고 안내만 보인다(양식 파일이 하나도 없을 때)
+    const s1 = { id: 's1', title: '세션', cwd: '/w/p', updatedAt: 9, canSend: true };
+    const { kit, calls } = makeKit({ 'GET /api/sessions/s1/files': { files: [{ path: 'docs/SRS_v0.1.md', kind: 'md', size: 9, mtime: 5, changed: true }, { path: 'notes.txt', kind: 'txt', size: 1, mtime: 4 }] } }, [s1]);
+    window.BHMarkdown = { render: t => h('div', { text: t }) };
+    const root = h('div');
+    const view = loadUI(kit).docsPage(root); for (let i = 0; i < 5; i++) await tick();
+    assert.ok(root.textContent.includes('아직 양식으로 뽑은 산출물이 없어.'));
+    assert.ok(!root.textContent.includes('SRS_v0.1') && !root.textContent.includes('notes.txt') && find(root, e => (e.attrs['class'] || '').includes('drow')).length === 0);
+    assert.ok(!calls.some(c => /preview/.test(c[1])));
+    view.destroy();
+    process.exit(0);
+  },
   async dom_docs_page() {
     const s1 = { id: 's1', title: 'SRS 세션', cwd: '/w/p', updatedAt: 9, canSend: true, flowPr: { number: 6, state: 'OPEN' } };
     const files = { files: [
       { path: 'docs/SRS_v0.2.md', kind: 'md', size: 100, mtime: 20, changed: false, versions: ['docs/SRS_v0.1.md', 'docs/SRS_v0.2.md'] },
-      { path: 'out/BW_Backlog_v0.1.xlsx', kind: 'xlsx', size: 18000, mtime: 30, changed: true },
-      { path: 'audit/log.md', kind: 'md', size: 5, mtime: 10, changed: true }] };
+      { path: 'out/BW_Backlog_v0.1.xlsx', kind: 'xlsx', size: 18000, mtime: 30, changed: true, versions: ['out/BW_Backlog_v0.0.xlsx', 'out/BW_Backlog_v0.1.xlsx'] },
+      { path: 'audit/log.md', kind: 'md', size: 5, mtime: 10, changed: true }, { path: 'out/note.pdf', kind: 'pdf', size: 5, mtime: 40 },
+      { path: 'out/매뉴얼_v0.1.pptx', kind: 'pptx', size: 7, mtime: 8, changed: false }] };
     const table = { kind: 'table', sheets: [{ name: 'Backlog', rows: [['ID', 'Title', 'Source'], ['R1', 'a', ''], ['R2', 'b', 'x']] }] };
     const { kit, calls } = makeKit({ 'GET /api/sessions/s1/files': files,
       'GET /api/sessions/s1/files/preview': (b, url) => (/xlsx/.test(url) ? table : { kind: 'md', text: '# SRS\n\n버전: 0.2\n\n본문' }),
@@ -943,20 +975,12 @@ const cases = {
     inp.listeners.input[0]({ target: { value: '출처는 구매팀' } });
     btn('보내기').click(); await tick(); await tick();
     assert.ok(sentTo().length === 1 && sentTo()[0][2].text.includes('out/BW_Backlog_v0.1.xlsx') && sentTo()[0][2].text.includes('비어 있는 칸') && sentTo()[0][2].text.includes('출처는 구매팀'));
-    // '문서 목록 보기' → 시안 G-14: 왼쪽 목록 + 가장 최근 글 문서 미리보기
+    // '문서 목록 보기' → 목록에는 양식 파일(xlsx·pptx·docx)만. md·기록 폴더 파일·pdf 는 없다(#1067)
     btn('문서 목록 보기').click(); for (let i = 0; i < 4; i++) await tick();
-    for (const need of ['내가 만든 문서', '요구사항 · 설계', '고객 양식', '기록', 'SRS', 'v0.2 · md', 'BW_Backlog', 'v0.1 · xlsx', 'log.md', '검토 중', '안 올림', '이전 판 1개', '안 올림 = 내 PC에만 · 검토 중 = 승인 기다림 · 합쳐짐 = 팀 공용본']) assert.ok(root.textContent.includes(need), need);
-    assert.ok(!root.textContent.includes('고객 양식으로 뽑았어') && !root.textContent.includes('확인 못 함 = 알 수 없음'));
-    assert.ok(btn('열기') && btn('폴더에서 보기') && btn('xlsx로 뽑기'));
-    assert.ok(root.textContent.includes('SRS_v0.2.md · v0.2') && root.textContent.includes('세션 SRS 세션'));
-    btn('xlsx로 뽑기').click(); await tick(); await tick();
-    assert.ok(sentTo().length === 2 && sentTo()[1][2].text.includes('docs/SRS_v0.2.md') && sentTo()[1][2].text.includes('고객 양식'));  // 콘솔이 직접 뽑지 않고 세션에 말을 보낸다
-    assert.ok(root.textContent.includes('세션에 보냈어'));
-    // 고쳐 달라고 하기
-    find(root, e => e.attrs.id === 'doc-ask')[0].listeners.input[0]({ target: { value: '납품일 추가' } });
-    btn('보내기').click(); await tick(); await tick();
-    const fix = sentTo()[2];
-    assert.ok(fix && fix[2].text.includes('납품일 추가') && fix[2].text.includes('고쳐 줘'));
+    for (const need of ['내가 만든 문서', '고객 양식', 'BW_Backlog', 'v0.1 · xlsx', '매뉴얼', '검토 중', '안 올림', '이전 판 1개', '안 올림 = 내 PC에만 · 검토 중 = 승인 기다림 · 합쳐짐 = 팀 공용본']) assert.ok(root.textContent.includes(need), need);
+    for (const no of ['요구사항 · 설계', '기록', 'SRS', 'log.md', 'note.pdf', '고객 양식으로 뽑았어', '확인 못 함 = 알 수 없음']) assert.ok(!root.textContent.includes(no), no);
+    assert.deepStrictEqual(find(root, e => (e.attrs['class'] || '').includes('drow') && !(e.attrs['class'] || '').includes('sub')).map(e => e.attrs['data-path']).sort(), ['out/BW_Backlog_v0.1.xlsx', 'out/매뉴얼_v0.1.pptx']);
+    assert.ok(!btn('xlsx로 뽑기') && !btn('열기'));
     // 목록에서 xlsx 를 고르면 고객 양식 결과 카드(뽑기 버튼 없음), 목록은 그대로
     find(root, e => e.attrs['data-path'] === 'out/BW_Backlog_v0.1.xlsx')[0].click(); await tick(); await tick();
     const card = find(root, e => e.attrs['data-form-card'])[0];
@@ -1622,6 +1646,8 @@ def test_post_outputs_tab_lists_each_file_once():
     assert "regions.files" not in re.search(r"sec\('만든 산출물'[^\n]*", app).group(0).split("//")[0]
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
     assert ".filter(L.isFormOutput)" in ui and "아직 양식으로 뽑은 산출물이 없어" in ui
+    # #1067: 산출물 탭(/docs, docsPage)도 같은 함수로 거르고 빈 안내가 같다
+    assert "files: kit.listOf(d, 'files').filter(L.isFormOutput)" in ui and "'아직 양식으로 뽑은 산출물이 없어.'" in ui
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     assert re.search(r"\.sess-side \.docs-pane \.preview \{[^}]*font-size: 13px", css)
 
@@ -2412,8 +2438,9 @@ def test_new_task_prepare_screen_not_shown_when_seen_ready_or_unknown(tmp_path):
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_docs_screen_groups_files_and_has_menu(tmp_path):
     got = _smoke(tmp_path, "docs", [_session("s1")])
-    for need in ("내가 만든 문서", "요구사항 · 설계", "SRS.md", "안 올림"):  # 시안 G-14: 처음엔 최근 글 문서를 골라 미리보기까지 보인다(빈 안내 대신)
+    for need in ("내가 만든 문서", "아직 양식으로 뽑은 산출물이 없어."):  # #1067: 기본 시험 세션의 파일은 SRS.md 하나뿐이라 양식 파일이 없다
         assert need in got["text"], need
+    assert "SRS.md" not in got["text"] and "요구사항 · 설계" not in got["text"]
     assert "산출물" in got["head"] and "GET /api/sessions/s1/files?cache=1" in got["calls"]  # 새 서버 API 없이 세션별 문서 목록을 모은다(서버 기억을 쓰는 ?cache=1, #793)
 
 
