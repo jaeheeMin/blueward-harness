@@ -29,6 +29,7 @@ import flows
 import gitstate
 import handoff
 import limits_setup  # 한도 표시 켜기·끄기(#1039)
+import pipeline
 import platform_compat
 import session_alive
 import shortcut
@@ -170,7 +171,7 @@ def judge_version(loaded: str, latest: str | None) -> dict:
 
 
 POST_ASSET = re.compile(r"/post/(?:[A-Za-z0-9_][\w-]*/){0,3}[A-Za-z0-9_][\w-]*\.(?:svg|js)")
-SPA_PATHS = re.compile(r"^/(s/[^/]+|r/[^/]+|new|settings|docs|troubles(/new|/[^/]+/[^/]+/\d+)?)?$")
+SPA_PATHS = re.compile(r"^/(s/[^/]+|r/[^/]+|new|settings|docs|pipeline|troubles(/new|/[^/]+/[^/]+/\d+)?)?$")
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
@@ -1178,6 +1179,17 @@ class App:
         if not q.get("cwd"):
             raise HttpError(400, "cwd 가 필요해.")
         return 200, devready.srs_status(self.run, self.known_root(q["cwd"][0]))
+
+    def a_pipeline(self, g, q, b):
+        """요구사항 파이프라인(Post 파이프라인 탭). 같은 저장소의 worktree 들은 한 번만 읽도록 git 공통 폴더로 기억하고(60초),
+        요청 스레드는 기다리지 않는다(읽는 중이면 loading: true). repo 는 화면이 폴더들을 저장소별로 묶는 데 쓴다.
+        state: yes(읽음) / no(SRS·원장 없는 저장소 등 해당 없음) / unknown(읽지 못함)."""
+        if not q.get("cwd"):
+            raise HttpError(400, "cwd 가 필요해.")
+        cwd = self.known_root(q["cwd"][0])
+        key, name = pipeline.repo_key(self.run, cwd)
+        got = self.cached(("pipeline", key), lambda: pipeline.read(self.run, self.slow_run, cwd), wait=False)
+        return 200, dict(got, repo={"key": key, "name": name})
 
     # ---- 시작 점검(첫 화면) ----
     def first_run_file(self) -> Path | None:
@@ -2450,6 +2462,7 @@ ROUTES = [
     ("GET", re.compile(r"/api/my-prs"), App.a_my_prs),
     ("GET", re.compile(r"/api/dev-ready"), App.a_dev_ready),
     ("GET", re.compile(r"/api/srs-status"), App.a_srs_status),
+    ("GET", re.compile(r"/api/pipeline"), App.a_pipeline),
     ("GET", re.compile(r"/api/start-checks"), App.a_start_checks),
     ("POST", re.compile(r"/api/start-checks/seen"), App.a_start_seen),
     ("GET", re.compile(r"/api/whats-new"), App.a_whats_new),

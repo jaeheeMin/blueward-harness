@@ -381,6 +381,7 @@
     if (p === '/new') return { name: 'new' };
     if (p === '/settings') return { name: 'settings' };
     if (p === '/docs') return { name: 'docs' };
+    if (p === '/pipeline') return { name: 'pipeline' };
     if (p === '/troubles') return { name: 'troubles' };
     if (p === '/troubles/new') return { name: 'troubleNew', draft: new URLSearchParams(location.search).get('draft') || '' };
     if ((m = /^\/troubles\/([^/]+)\/([^/]+)\/(\d+)$/.exec(p))) return { name: 'troubleItem', repo: decodeURIComponent(m[1]) + '/' + decodeURIComponent(m[2]), number: m[3] };
@@ -427,7 +428,7 @@
     var root = h('div');
     mainEl.appendChild(connBanner());
     mainEl.appendChild(root);
-    var v = ({ home: homeView, session: sessionView, request: requestView, 'new': newView, settings: settingsView, docs: docsView, troubles: troubleList, troubleNew: troubleNew, troubleItem: troubleItem, missing: missingView })[route.name](root);
+    var v = ({ home: homeView, session: sessionView, request: requestView, 'new': newView, settings: settingsView, docs: docsView, pipeline: pipelineView, troubles: troubleList, troubleNew: troubleNew, troubleItem: troubleItem, missing: missingView })[route.name](root);
     view = v || null;
     if (v && v.tick) tick = setInterval(v.tick, 15000);
     scheduleSide();
@@ -1154,6 +1155,7 @@
       link(newHref(), { class: 'prail-new', 'aria-current': nm === 'new' ? 'page' : null }, icon('plus', 22), h('span', { text: '새 작업' })),
       item('/', '오늘', 'inbox', nm === 'home', n),
       item(work, '세션', 'rows', nm === 'session' || nm === 'request', 0),
+      item('/pipeline', '파이프라인', 'route', nm === 'pipeline', 0),
       item('/docs', '산출물', 'doc', nm === 'docs', 0),
       item('/troubles', '팀 기록', 'lifebuoy', /^trouble/.test(nm), 0),
       h('span', { class: 'prail-sp' }),
@@ -1418,6 +1420,17 @@
     return v;
   }
   function docsView(root) { return ui.docsPage(root); }
+  /* Post 파이프라인 탭(post-pipeline.js). Sauce 에는 이 탭이 없어서 주소로 들어오면 안내만 한다. */
+  var postPipe = null;
+  function pipelineView(root) {
+    if (!isPostTheme() || !window.BHPostPipeline) {
+      root.appendChild(stateBox('warn', '파이프라인은 Post 테마에서 보여', '설정에서 테마를 Post 로 바꾸면 요구사항이 어느 칸에 있는지 볼 수 있어.', link('/', { class: 'btn', text: '처음 화면으로' })));
+      return null;
+    }
+    if (!postPipe) postPipe = window.BHPostPipeline.create({ h: h, clear: clear, link: link, api: api, qs: qs, L: window.BHLogic, PL: window.BHPostLogic,
+      sessions: function () { return Array.from(sessions.values()); }, loaded: function () { return loadedOnce; }, loadingBox: loadingBox });
+    return postPipe.view(root);
+  }
   /* 문제·해결 기록 화면(trouble.js) */
   var tb = window.BHTrouble.create({ h: h, clear: clear, api: api, qs: qs, link: link, go: go, safeHttp: safeHttp, loadingBox: loadingBox });
   function troubleList(root) { return tb.listView(root); }

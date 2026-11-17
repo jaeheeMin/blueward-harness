@@ -3633,3 +3633,66 @@ def test_post_verify_c_state_uses_open_ids_and_filter_name_differs_from_turn():
     assert out["turnItems"] == 3 and out["counts"]["todo"] == 2 and out["counts"]["unsure"] == 1 and out["counts"]["running"] == 1
     assert out["filter"] == {"all": 5, "turn": 3, "run": 1, "done": 1}
 
+
+
+# ---- Post 파이프라인 탭(post-pipeline.js) ----
+_POST_PIPELINE_NODE = r"""
+const path = require('path');
+const dir = process.argv[1];
+const L = require(path.join(dir, 'flow-logic.js'));
+const PL = require(path.join(dir, 'post-logic.js'));
+const P = require(path.join(dir, 'post-pipeline.js'));
+const it = (n, o) => Object.assign({ number: n, req: 'REQ-00' + n, dev: 'DEV-00' + n, title: 't' + n, kind: '', spec: false, prs: [] }, o);
+const items = [
+  it(1, { spec: true }), it(2, { prs: [{ number: 9, kind: 'spec' }] }), it(3, { spec: true, prs: [{ number: 10, kind: 'work' }] }), it(4, { kind: '설정' }),
+  it(5, { unsure: true, prs: [{ number: 11, kind: 'spec' }] }), it(6, { done: true, prs: [{ number: 12, kind: 'work' }] }), it(7), it(8, { spec: true }), it(9, { spec: true })
+];
+const sessions = [
+  { id: 'a', title: 'Spec 쓰기 DEV-007', flowId: 'spec', status: 'running', group: 'running', updatedAt: 1 },
+  { id: 'b', branch: 'feat/40-dev008-list', status: 'idle', group: 'todo', pendingRequestIds: ['r'], updatedAt: 1 },
+  { id: 'c', flowPr: { number: 10, state: 'OPEN' }, status: 'idle', group: 'idle', updatedAt: 1 },
+  { id: 'd', flowReason: '이전 세션에서 넘김 DEV-009', status: 'idle', group: 'idle', lastBlock: { kind: 'blocked', open: true }, updatedAt: 1 },
+  { id: 'e', title: 'DEV-009 다시', status: 'running', group: 'running', updatedAt: 5 },
+  { id: 'f', title: 'DEV-001 넘김', status: 'running', group: 'running', handedOffTo: 'g', updatedAt: 9 }
+];
+const out = {};
+out.nums = P.numsIn('feat: DEV-013 (DEV-013) feat/881-dev013-x REQ-19 device12 DEV-1234567');
+out.lanes = P.board(items, sessions, L, PL).map(l => l.map(c => c.item.number + ':' + c.state + (c.session ? '@' + c.session.id : '')));
+out.lane = [P.laneOf(it(1, { done: true, kind: '설정' })), P.laneOf(it(2), [{ flowId: 'spec' }]), P.laneOf(it(3, { unsure: true }), [{ flowId: 'spec' }])];
+out.sub = [P.summary({ items, hidden: 2 }), P.summary({ items: [it(1, { req: '' })] })];
+out.groups = P.groups([{ cwd: '/a', data: { repo: { key: 'k', name: 'r' }, state: 'yes', loading: true } }, { cwd: '/b', data: { repo: { key: 'k', name: 'r' }, state: 'yes' } },
+  { cwd: '/c', data: { repo: { key: 'z', name: 'z' }, state: 'no' } }, { cwd: '/d', error: { status: 403 } }]).map(g => g.key + ':' + g.cwds.join('+') + ':' + !!g.data.loading);
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason="node 가 없다")
+def test_post_pipeline_attaches_sessions_and_places_lanes():
+    r = subprocess.run([NODE, "-e", _POST_PIPELINE_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["nums"] == [13, 19]  # 브랜치의 dev013 도 번호, device12·일곱 자리는 아니다
+    # 칸: 1 요구사항(미정·아무것도 없음) · 2 Spec(Spec PR·Spec 세션) · 3 개발(Spec 있음·설정) · 4 검토(작업 PR) · 5 합쳐짐
+    # 세션: 이름(a)·브랜치(b)·세션 PR 번호(c)·갈래 사유(d) 로 붙는다. 넘긴 세션(f)은 붙이지 않는다. 한 건에 여럿이면 막힘이 앞선다(d > e)
+    # 칸 안: 막힘 > 내 차례 > 번호순
+    assert out["lanes"] == [["5:idle"], ["2:idle", "7:run@a"], ["9:blocked@d", "8:turn@b", "1:idle", "4:idle"], ["3:wait@c"], ["6:idle"]]
+    assert out["lane"] == [4, 1, 0]  # 완료가 먼저, 다음 단계 미정이면 Spec 세션이 있어도 요구사항 칸
+    assert out["sub"] == ["SRS 9건 · Spec 있는 개발 건 4 · 설정 1 · 표준 0 · 보류·취소 2건 뺌", "원장 1건 · Spec 있는 개발 건 0 · 설정 0 · 표준 0"]
+    assert out["groups"] == ["k:/a+/b:false", "z:/c:false"]  # 같은 저장소 worktree 는 한 판, 다 읽은 값이 읽는 중 값을 대신한다
+
+
+def test_post_pipeline_wiring_route_rail_and_scoped_css():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    order = [html.index(f'src="/{n}"') for n in ("flow-logic.js", "post-logic.js", "post-home.js", "post-pipeline.js", "app.js")]
+    assert order == sorted(order) and '<link rel="stylesheet" href="/post-pipeline.css">' in html
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "if (p === '/pipeline') return { name: 'pipeline' };" in app and "pipeline: pipelineView" in app
+    assert "item('/pipeline', '파이프라인', 'route', nm === 'pipeline', 0)" in app
+    assert "!isPostTheme() || !window.BHPostPipeline" in app  # Sauce 로 주소를 치고 오면 안내만 한다
+    js = (STATIC / "post-pipeline.js").read_text(encoding="utf-8")
+    assert "innerHTML" not in js and "'/api/pipeline'" in js and "하네스는 이 순서를 지키게 해." in js
+    assert "요구사항을 확인하지 못했어." in js  # 못 읽은 저장소는 빈 판이 아니라 이유를 보인다
+    css = (STATIC / "post-pipeline.css").read_text(encoding="utf-8")
+    rules = [ln for ln in css.splitlines() if "{" in ln and not ln.lstrip().startswith(("@media", "/*"))]
+    assert rules and all(ln.lstrip().startswith(':root[data-theme="post"] .po-pl') or ln.lstrip().startswith(':root[data-theme="post"] a.po-pl') or ln.lstrip().startswith(':root[data-theme="post"] button.po-pl') for ln in rules)
+    assert "border-left" not in css and "--bg:" not in css  # 시안에 없는 강조선·토큰 복사 없음
