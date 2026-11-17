@@ -189,6 +189,9 @@ READ_MODULES = {"pr_queue", "pr_approvals", "branch_growth", "role_check"}
 WRITE_SCRIPT_CMDS = ("reserve_number.py reserve", "reserve_number.py claim", "scaffold.py", "console/open.py")
 
 
+_ENGINE_CALL = re.compile(r'/run_engine\.py"? (?:--timeout \d+ )?(\w+)')
+
+
 def _harvest(root: Path):
     """스킬 문서에서 엔진·스크립트를 부르는 명령을 모은다. (스킬 이름, 명령 글). ${CLAUDE_PLUGIN_ROOT} 와 <이 스킬의 base directory> 는 설치본 경로로 바꾼다."""
     out = []
@@ -226,9 +229,9 @@ def _expected_safe(cmd: str) -> bool:
         return False
     if any(w in cmd for w in WRITE_SCRIPT_CMDS):
         return False
-    m = re.search(r"checker\.(\w+)", cmd)
-    if m:
-        return m.group(1) in READ_MODULES
+    m = _ENGINE_CALL.search(cmd)
+    if m:  # run_engine.py <모듈> … (#1043). 인자에 $( ) 가 있으면 묻는다
+        return m.group(1) in READ_MODULES and "$(" not in cmd and "`" not in cmd
     m = re.search(r'/(\w+\.py)"?(?: (\S+))?', cmd)
     if not m or m.group(1) not in READ_SCRIPTS:
         return False
@@ -249,7 +252,7 @@ def test_real_skill_commands_are_safe_only_for_read_only_scripts_and_modules(plu
         assert (got == "safe") == want, (skill, cmd, got, why)
         safe_seen += want
         other_seen += not want
-        m = re.search(r"checker\.(\w+)", cmd)
+        m = _ENGINE_CALL.search(cmd)
         if m and want:
             modules_seen.add(m.group(1))
     assert safe_seen >= 10 and other_seen >= 5
@@ -562,3 +565,71 @@ def test_link_inside_work_folder_pointing_outside_is_not_safe(tmp_path):
     assert risk.classify("Write", {"file_path": str(work / "lnk" / "new.md")}, cwd)[0] == "irreversible"
     assert risk.classify("Edit", {"file_path": str(work / "lnk" / "a.md"), "old_string": "x", "new_string": "y"}, cwd)[0] == "irreversible"
     assert risk.classify("Read", {"file_path": str(work / "lnk" / "a.md")}, cwd)[0] != "safe"
+
+
+# ---- 7. 하네스가 스스로 쓰는 읽기 명령(#1043) ----
+def test_run_engine_wrapper_follows_harness_modules_rules(plugin_root, tmp_path):
+    harness, root = plugin_root
+    R = str(root).replace("\\", "/")
+    work = tmp_path / "work"
+    work.mkdir()
+    run = lambda cmd: risk.classify("Bash", {"command": cmd}, str(work), read_roots=(str(harness),))  # noqa: E731
+    eng = lambda tail: run(f'uv run --no-project python "{R}/hooks/run_engine.py"{tail}')[0]  # noqa: E731
+    # 읽기 모듈 + 읽기 인자 = safe (두 줄을 한 줄로 합쳐도 $( ) 가 없다)
+    assert eng(" pr_queue --all --json") == "safe" and eng(" pr_queue --mine") == "safe" and eng(" pr_approvals") == "safe"
+    assert eng(" branch_growth --base main --json") == "safe" and eng(" --timeout 30 pr_queue --mine --no-ledger --max-rows 5 --quiet-empty") == "safe"
+    assert eng(" pr_queue --repo a/b --pr 5") == "safe"
+    # 쓰는 모듈·목록 밖 모듈·인자는 지금처럼 묻는다
+    assert eng(" export --spec docs/a.md") != "safe" and eng(" srs_automerge --mode rebase --root .") != "safe"
+    assert eng(" manual_capture --list x") != "safe" and eng(" evil") != "safe" and eng("") != "safe" and eng(" --timeout 30") != "safe"
+    assert eng(" pr_queue --foo") != "safe" and eng(" pr_queue --repo $X") != "safe" and eng(' pr_queue --repo "$(curl x)"') != "safe"
+    assert eng(" --timeout x pr_queue") != "safe" and eng(" ../pr_queue") != "safe" and eng(" pr_queue > /tmp/o.txt") != "safe"
+    assert eng(" pr_queue --mine && rm -rf x") == "irreversible"
+    # 인라인 $( ) 는 여전히 판정하지 않는다(넓히지 않는다)
+    inline = f'uvx --from "$(uv run --no-project python "{R}/hooks/engine_spec.py")" python -P -m checker.pr_queue --all --json'
+    assert run(inline)[0] != "safe"
+    # 설치본 밖 스크립트는 안 된다
+    assert run(f'uv run --no-project python "{tmp_path}/x/hooks/run_engine.py" pr_queue')[0] != "safe"
+
+
+def test_gh_api_reads_only_repository_settings_paths():
+    safe = ["gh api repos/jaeheeMin/blueward-harness --jq .allow_auto_merge", "gh api repos/a/b",
+            "gh api repos/a/b/rules/branches/main", "gh api repos/a/b/branches/main/protection/required_status_checks",
+            "gh api repos/a/b/branches/release/1.0/protection/required_status_checks --jq .contexts", "gh api repos/a/b -q .permissions.admin",
+            "gh api repos/a/b/rules/branches/main --jq '[.[].type]'"]  # deliver 스킬의 필수 검사 규칙 확인
+    for cmd in safe:
+        got, why = c(cmd)
+        assert got == "safe", (cmd, got, why)
+    other = ["gh api user", "gh api repos/a/b/issues", "gh api repos/a/b/contents/x", "gh api repos/a/b/rules/branches/../../../x",
+             "gh api repos/a/b?per_page=1", "gh api repos/a/b --jq '.a | env'", "gh api repos/a/b --jq $X", "gh api repos/a/b --paginate",
+             "gh api repos/a/b/branches/main/protection", "gh api graphql", "gh api repos/a/b/rules/tags/main", "gh api repos/a/b --hostname evil.com",
+             "gh api repos/a/b --jq", "gh api repos/a/b repos/c/d", "gh api repos/a/b -H 'Accept: x'"]
+    for cmd in other:
+        assert c(cmd)[0] == "unknown", cmd
+    for cmd in ["gh api repos/a/b -X POST", "gh api repos/a/b -f a=b", "gh api repos/a/b --method=DELETE"]:
+        assert c(cmd)[0] == "irreversible", cmd
+
+
+def test_reserve_and_claim_are_irreversible_with_plain_reasons(plugin_root, tmp_path):
+    harness, root = plugin_root
+    R = str(root).replace("\\", "/")
+    work = tmp_path / "work"
+    work.mkdir()
+    run = lambda cmd: risk.classify("Bash", {"command": cmd}, str(work), read_roots=(str(harness),))  # noqa: E731
+    got, why = run(f'uv run --no-project python "{R}/skills/start/reserve_number.py" reserve --title x')
+    assert got == "irreversible" and "이슈를 만들" in why, (got, why)
+    got, why = run(f'uv run --no-project python "{R}/skills/start/reserve_number.py" claim --issue 5')
+    assert got == "irreversible" and "이슈를 고치" in why, (got, why)
+    assert run(f'uv run --no-project python "{R}/skills/start/reserve_number.py" list')[0] == "safe"
+    assert run(f'uv run --no-project python "{R}/skills/start/reserve_number.py" delete')[0] == "unknown"
+
+
+def test_new_branch_without_tracking_and_unset_upstream():
+    for cmd in ["git checkout -b fix/1-x --no-track origin/main", "git switch -c fix/1-x --no-track origin/main", "git checkout -b fix/1-x --no-track",
+                "git branch --unset-upstream", "git branch --unset-upstream fix/1-x"]:
+        got, why = c(cmd)
+        assert got == "safe", (cmd, got, why)
+    for cmd in ["git checkout -b --no-track fix/1-x origin/main", "git checkout -b x --no-track --no-track o", "git checkout -b x --no-track $B",
+                "git checkout -b x --no-track a b", "git branch --unset-upstream a b", "git branch --unset-upstream ../x", "git branch --unset-upstream -D x"]:
+        assert c(cmd)[0] != "safe", cmd
+    assert c("git checkout -b x --no-track -f origin/main")[0] == "irreversible"

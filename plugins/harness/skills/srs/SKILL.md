@@ -228,12 +228,10 @@ SRS 를 쓰기 전에 고객사 산출물 양식(예: Backlog List)이 있는지
    관리하지 않는다.
 
    ```bash
-   e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" \
-     python -P -m checker.export --root "$(git rev-parse --show-toplevel)" --form <지도 이름> --list-values
+   uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" export --root "$(git rev-parse --show-toplevel)" --form <지도 이름> --list-values
    ```
 
-   첫 줄이 실패하거나 빈 값이면 `uvx` 로 넘어가지 말고 멈춰 사유를 알린다("산출 불능", `@main` 으로 대신 받지 않는다).
+   엔진 판을 못 정해 `확인 불능` 이 나오면(종료코드 2) 멈춰 사유를 알린다("산출 불능", `@main` 으로 대신 받지 않는다).
 
    stdout 은 JSON 한 줄이다. `sheets[].columns[]` 의 `column`(지도 열 이름)별 `allowed` 가 허용 값이다.
    그 열은 사용자에게 허용 값을 보기로 보여 주고 고르게 한다(대응표가 걸린 열은 위 "Type 으로 정해지는 다음 단계" 대로 갈래를 함께 보여 준다. `AskUserQuestion` 을 쓸 수 있으면 쓴다. 값이 많으면
@@ -361,8 +359,7 @@ SRS 를 쓰기 전에 고객사 산출물 양식(예: Backlog List)이 있는지
    main 위에서 칸 값 비교를 돌린다. 엔진 판을 정하는 방법은 아래 "양식 파일 산출" 1 과 같다.
 
    ```bash
-   e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" python -P -m checker.srs_export_check compare --root "$(git rev-parse --show-toplevel)"
+   uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" srs_export_check compare --root "$(git rev-parse --show-toplevel)"
    ```
 
    결과는 stdout 의 JSON 한 줄이고 `status` 로 읽는다. 저장소 안에는 아무 파일도 만들지 않는다(임시 폴더에 다시 만들어 비교하고 지운다).
@@ -395,15 +392,11 @@ SRS 를 쓰기 전에 고객사 산출물 양식(예: Backlog List)이 있는지
 1. 먼저 파일을 쓰지 않는 확인을 한다.
 
    ```bash
-   e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" \
-     python -P -m checker.export --spec docs/ssot/SRS.md --root "$(git rev-parse --show-toplevel)" --form <지도 이름> --check
+   uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" export --spec docs/ssot/SRS.md --root "$(git rev-parse --show-toplevel)" --form <지도 이름> --check
    ```
 
-2. 문제가 없으면 `--check` 를 빼고 같은 명령으로 산출한다. 명령 실행 방법(PowerShell 이면 `$e = uv run --no-project python
-   "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py"; if ($LASTEXITCODE -ne 0 -or -not $e) { throw "산출 불능" }` 로 정해
-   `uvx --from $e …`. 판을 못 정하면 uvx 로 넘어가지 않고 멈춘다)은 `<이 스킬의 base directory>/../spec/SKILL.md`
-   의 "양식 파일 산출" 과 같다. 결과는 stdout 의 JSON 한 줄이다. JSON 으로 읽히지 않으면(uvx 실패 등) 종료코드와
+2. 문제가 없으면 `--check` 를 빼고 같은 명령으로 산출한다. 명령 실행 방법(판을 못 정하면 래퍼가 종료코드 2 로 멈춘다)은
+   `<이 스킬의 base directory>/../spec/SKILL.md` 의 "양식 파일 산출" 과 같다. 결과는 stdout 의 JSON 한 줄이다. JSON 으로 읽히지 않으면(uvx 실패 등) 종료코드와
    무관하게 "산출 불능" 이라고 알린다. 통과로도 위반으로도 넘기지 않는다.
 3. 결과를 읽는다.
    - `status: ok` (0) — `files` 의 경로를 알리고 엑셀로 열어 드롭다운과 4행부터의 요구사항을 확인하라고 권한다.

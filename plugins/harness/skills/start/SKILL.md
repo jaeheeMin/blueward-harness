@@ -14,7 +14,8 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
    열려 main 이 다른 worktree 에 체크아웃돼 있으면 `git checkout main` 이
    `'main' is already used by worktree` 로 실패한다. 이때는 그 main 을 건드리지 않고
    `git fetch origin` 만 한 뒤, 4단계에서 브랜치를 `origin/main` 에서 바로 딴다
-   (`git checkout -b <브랜치> origin/main`).
+   (`git checkout -b <브랜치> --no-track origin/main`; `--no-track` 이 없으면 새 브랜치가 `origin/main` 을
+   upstream 으로 잡아 푸시 때 어긋난다).
 3. 사용자가 설명한 작업 내용으로 GitHub 이슈를 만든다. 제목과 본문과 라벨을
    `<이 스킬의 base directory>/../../rules/issue-and-release.md` 의 형식에
    맞춘다. `<이 스킬의 base directory>` 는 이 스킬이 로드될 때 위에 표시되는
@@ -39,10 +40,10 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 **시작을 막지 않는다.** GitHub 원격이 아니거나 `gh` 가 안 되면 이 절을 건너뛴다.
 
 ```bash
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] && timeout 30 uvx --from "$e" python -P -m checker.pr_queue --mine --no-ledger --max-rows 5 --quiet-empty
+uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" --timeout 30 pr_queue --mine --no-ledger --max-rows 5 --quiet-empty
 ```
 
-`timeout` 은 처음 엔진을 받느라 시작이 오래 붙들리지 않게 하려는 것이다. `timeout` 명령이 없는 환경이면 이 절을 건너뛴다.
+`--timeout 30` 은 처음 엔진을 받느라 시작이 오래 붙들리지 않게 하려는 것이다(시간이 넘으면 종료코드 124 — 이 절을 건너뛴다). 엔진 판을 정하지 못해 `확인 불능` 이 나와도 건너뛴다.
 `--no-ledger` 는 PR 마다 이슈·원장을 읽는 원장 미완료 판정(#454)을 끈다. 시간이 제한된 이 호출이 그것 때문에 늦어지지 않게 하려는 것이고, 그 판정은 세션 시작 알림과 `/harness:prs` 가 한다.
 
 - 출력이 비면(내 열린 PR 이 없음) 아무 말도 하지 않는다.

@@ -18,15 +18,14 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
    최근 커밋은 이 저장소의 메시지 문체를 맞추기 위한 참고 자료다.
 2. 현재 브랜치가 main 이면 거부하고 `/harness:start` 를 안내한다. 변경이 없으면 그
    사실을 알리고 멈춘다. **예외(#454): 미커밋 변경이 없어도 이 브랜치의 열린 PR 이 "대표 `[DEV-xxx]` 이슈를 Closes
-   하는데 PR head 의 원장 행이 `완료` 가 아님"이면 멈추지 않는다.** 확인은 "병합 순서 기록" 1항처럼 엔진 판을 정해 부른다.
+   하는데 PR head 의 원장 행이 `완료` 가 아님"이면 멈추지 않는다.** 확인은 "병합 순서 기록" 1항처럼 엔진을 부른다.
 
    ```bash
-   e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "원장 확인 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" python -P -m checker.pr_queue --mine --json
+   uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" pr_queue --mine --json
    ```
 
    결과의 `prs` 에서 **`head` 가 지금 브랜치인 항목**을 고르고(그 항목의 `number` 가 이 PR 번호다), 그 항목의 `ledger`
-   에 `status` 가 `pending` 인 것이 있으면 예외 경로다. 첫 줄이 실패하거나 종료코드가 0 이 아니면(`status` 가
+   에 `status` 가 `pending` 인 것이 있으면 예외 경로다. 엔진 판을 못 정해 종료코드가 0 이 아니면(`status` 가
    `cannot_check` 포함) "변경 없음" 으로 멈추지 말고 **"원장 확인 불능"** 과 사유를 알리고 멈춘다. 하위 작업 PR 이거나
    이미 `완료` 이거나 `ledger` 가 비었으면 지금처럼 변경 없음을 알리고 멈추고, `unknown`(판정 불능)이면 사유를 전하고
    멈춘다. 예외 경로는 9단계의 "옛 판 PR 의 원장 고치기" 로 간다.
@@ -39,8 +38,8 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
    있을 때만 리베이스한다.
 4. 새 커밋이 있으면 `git rebase origin/{base}` 를 수행한다. **리베이스
    충돌이 나면 스스로 해결하지 않는다.** 예외는 하나다. `git diff --name-only --diff-filter=U` 가
-   `docs/ssot/SRS.md` 하나뿐이면 `uvx --from "$e" python -P -m checker.srs_automerge --mode rebase --root .`
-   (`e` 는 위 2단계와 같이 `engine_spec.py` 로 구한다)를 부른다. 결과가 `merged` 면 `GIT_EDITOR=true git rebase --continue`
+   `docs/ssot/SRS.md` 하나뿐이면 `uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" srs_automerge --mode rebase --root .`
+   를 부른다. 결과가 `merged` 면 `GIT_EDITOR=true git rebase --continue`
    로 이어 가고(또 충돌하면 같은 방법으로 되풀이, 상한 20번), PR 보고에 "SRS 에서 양쪽이 줄만 추가한 충돌 N곳을 자동으로 합쳤어 —
    올리면 승인을 다시 받아야 해" 를 넣는다(합친 커밋은 SRS 승인을 낡게 만든다). `refused`·`cannot_check`·엔진 호출 실패면 합치지 않은 것이다
    — 아래대로 보고하고 중단한다. 그 밖의 충돌은 충돌 파일 목록과 상황을 사용자에게
@@ -83,8 +82,7 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
      것만)을 센다. 기준은 대상 저장소 `.github/branch-growth.yaml` 의 `notify_src_lines`(없으면 1,000)이다.
 
      ```bash
-     e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "변경 크기 확인 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-     uvx --from "$e" python -P -m checker.branch_growth --base {base} --json
+     uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" branch_growth --base {base} --json
      ```
 
      결과 `status` 가 `ok`·`not_applicable` 이면 그냥 넘어간다. `over`(종료코드 1)면 아래 판단 순서에서 2 와 4 에 쓴다.
@@ -239,11 +237,10 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
 1. 열린 PR 을 읽는다. Bash 도구로 실행한다.
 
    ```bash
-   e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "병합 순서 확인 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" python -P -m checker.pr_queue --all --json
+   uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" pr_queue --all --json
    ```
 
-   첫 줄이 실패하거나 종료코드가 2(`status` 가 `cannot_check`)면 `uvx` 로 넘어가지 말고 "병합 순서 확인 불능"
+   종료코드가 2(`status` 가 `cannot_check`, 엔진 판을 못 정한 `확인 불능` 포함)면 "병합 순서 확인 불능"
    과 사유를 사용자에게 알린다. 순서 절을 빼고 계속할지는 사용자에게 묻는다. 없다고 가정하지 않는다.
 2. 결과의 `prs` 에서 이 PR 보다 **먼저** 병합돼야 하는 열린 PR 을 고른다.
    - `head` 가 지금 `--base` 브랜치인 PR(기준이 main 이 아닌 경우). 그 위에 쌓은 작업이다.
@@ -252,7 +249,7 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
      엔진이 `after_reasons` 에 "같은 DEV-003 의 SRS 단계" 처럼 적어 준다.
 3. 고른 PR 이 있으면 본문에 `## 병합 순서` 절을 넣고 `먼저: #n, #m` 줄을 적는다(PR 번호 앞에 이유를 한 줄씩
    덧붙여도 된다). 없으면 절을 넣지 않는다. 이미 있는 PR 을 갱신하는 경우 앞 PR 이 병합돼 열려 있지 않으면 그 번호는 뺀다.
-4. 이 PR 을 만든 뒤 `uvx --from "$e" python -P -m checker.pr_queue --mine` 을 불러 이 PR 의 순서와 앞 PR 을
+4. 이 PR 을 만든 뒤 `uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" pr_queue --mine` 을 불러 이 PR 의 순서와 앞 PR 을
    확인하고 12단계에서 알린다. "먼저:" 줄이 서로를 가리켜 순환이면 엔진이 "순서 판정 불능(순환)" 이라고 하니, 그대로 알리고
    본문을 고치게 한다.
 

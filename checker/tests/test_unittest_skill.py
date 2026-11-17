@@ -200,7 +200,7 @@ def test_규칙_사본은_스킬_폴더에_있고_읽힌다():
 
 def test_SKILL_은_사람_칸과_공식_문서_원칙을_적고_엔진_판을_engine_spec_으로_받는다():
     text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-    assert "blueward-harness@" + "main" not in text and "hooks/engine_spec.py" in text
+    assert "blueward-harness@" + "main" not in text and "hooks/run_engine.py" in text
     assert "공식 문서" in text and "확인 필요" in text and "블로그와" in text
     assert "사람 정보는 이 저장소에 두지 않는다" in text and "다른 스킬이 부르는 브랜치 확인" in text
 

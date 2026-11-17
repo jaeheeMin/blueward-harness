@@ -148,12 +148,10 @@ LoB: Production
 `Test 대상 여부` 가 `Yes`/`No` 인지. 빠진 짝은 산출 전에 사용자에게 알린다(엔진은 짝을 보지 않는다). 이어서 `--check` 로 확인한 뒤 산출한다. `--check` 는 파일을 쓰지 않는다.
 
 ```bash
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-uvx --from "$e" \
-  python -P -m checker.export --spec "docs/unittest/<LoB>.md" --form "단위테스트 List" --root "$(git rev-parse --show-toplevel)" --check
+uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" export --spec "docs/unittest/<LoB>.md" --form "단위테스트 List" --root "$(git rev-parse --show-toplevel)" --check
 ```
 
-`--check` 가 거부 없이 끝나면 `--check` 를 빼고 같은 명령을 다시 돈다. 엔진 판·`uvx`·PowerShell 호출 방법·stdout JSON 한 줄·`산출 불능` 처리는
+`--check` 가 거부 없이 끝나면 `--check` 를 빼고 같은 명령을 다시 돈다. 엔진 호출 방법·stdout JSON 한 줄·`산출 불능` 처리는
 `<이 스킬의 base directory>/../spec/SKILL.md` "양식 파일 산출" 과 같다(`@main` 이나 다른 판으로 대신 받지 않는다). 산출 xlsx 는 지도 `산출.폴더` 인 `docs/unittest/` 에
 `BW_단위테스트 List_<LoB>_v<버전>.xlsx` 로 생긴다.
 

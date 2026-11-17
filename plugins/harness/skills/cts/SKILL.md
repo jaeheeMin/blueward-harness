@@ -131,9 +131,7 @@ Project Repository 의 `templates/` 에 있고 양식 지도는 `templates/forms
 4. **엔진을 부른다.** 먼저 `--check`, 문제없으면 `--check` 를 빼고 다시.
 
    ```bash
-   e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "채우기 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" \
-     python -P -m checker.cts_fill --root "$(git rev-parse --show-toplevel)" --transports "<adt.json 경로>" [--transports "<다른 설정 응답 경로>"] --adt \
+   uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" cts_fill --root "$(git rev-parse --show-toplevel)" --transports "<adt.json 경로>" [--transports "<다른 설정 응답 경로>"] --adt \
      --spec "docs/CTS관리대장/CTS관리대장_<종류>.md" [--spec "docs/CTS관리대장/CTS관리대장_<다른 종류>.md"] --check
    ```
 
@@ -174,12 +172,10 @@ Project Repository 의 `templates/` 에 있고 양식 지도는 `templates/forms
 작업본이 채워지고 사용자가 xlsx 를 원하면("관리대장 엑셀로 뽑아줘") 먼저 `--check` 로 확인한 뒤 산출한다. `--check` 는 파일을 쓰지 않는다.
 
 ```bash
-e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "산출 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-uvx --from "$e" \
-  python -P -m checker.export --spec "docs/CTS관리대장/CTS관리대장_<종류>.md" --form "CTS_관리대장_<종류>" --root "$(git rev-parse --show-toplevel)" --check
+uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" export --spec "docs/CTS관리대장/CTS관리대장_<종류>.md" --form "CTS_관리대장_<종류>" --root "$(git rev-parse --show-toplevel)" --check
 ```
 
-`--check` 가 거부 없이 끝나면 `--check` 를 빼고 같은 명령을 다시 돈다. 엔진 판·`uvx`·PowerShell 호출 방법·stdout JSON 한 줄·`산출 불능`
+`--check` 가 거부 없이 끝나면 `--check` 를 빼고 같은 명령을 다시 돈다. 엔진 호출 방법·stdout JSON 한 줄·`산출 불능`
 처리는 `<이 스킬의 base directory>/../spec/SKILL.md` "양식 파일 산출" 과 같다(`@main` 이나 다른 판으로 대신 받지 않는다). 산출 xlsx 는 지도
 `산출.폴더` 인 `docs/CTS관리대장/` 에 `CTS관리대장_<종류>_v<버전>.xlsx` 로 생긴다. 한 번에 한 종류만 산출한다(`--form` 으로 고른다).
 

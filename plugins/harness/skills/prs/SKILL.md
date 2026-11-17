@@ -17,19 +17,16 @@ GitHub 에서 한 번에 하고, 세션을 시작할 때 나오는 "내 PR" 알�
 
 ## 절차
 
-1. 저장소 루트에서 엔진 판을 정하고 부른다. Bash 도구로 실행한다.
+1. 저장소 루트에서 엔진을 부른다. Bash·PowerShell 도구 어느 쪽에서든 같은 한 줄이다. 엔진 판은 래퍼가 정한다.
 
    ```bash
-   e="$(uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py")" && [ -n "$e" ] || { echo "PR 상태 확인 불능: 엔진 판을 정하지 못했다" >&2; exit 1; }
-   uvx --from "$e" python -P -m checker.pr_queue --mine      # --all 이면 --mine 대신 --all
+   uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" pr_queue --mine      # --all 이면 --mine 대신 --all
    ```
 
-   첫 줄이 실패하거나 빈 값이면 `uvx` 로 넘어가지 말고 멈춰서 사유를 알리고 "PR 상태 확인 불능" 이라고
-   말한다. `@main` 이나 다른 판으로 대신 받지 않는다. PowerShell 도구는 `$e = uv run --no-project python
-   "${CLAUDE_PLUGIN_ROOT}/hooks/engine_spec.py"; if ($LASTEXITCODE -ne 0 -or -not $e) { throw "PR 상태 확인 불능" }`
-   로 정한 뒤 `uvx --from $e python -P -m checker.pr_queue --mine` 으로 부른다. 다른 저장소를 보려면
-   `--repo owner/repo` 를 더한다(없으면 현재 폴더의 저장소).
-2. 종료코드가 2 이거나 출력이 "PR 상태 확인 불능" 으로 시작하면 **그 문구와 사유를 그대로 전하고 멈춘다.**
+   엔진 판을 정하지 못하면 래퍼가 `확인 불능: …` 사유를 내고 종료코드 2 로 끝난다. 그러면 멈춰서 사유를 알리고
+   "PR 상태 확인 불능" 이라고 말한다. `@main` 이나 다른 판으로 대신 받지 않는다. 한 줄을 `$( )` 로 풀어 쓰지 않는다.
+   다른 저장소를 보려면 `--repo owner/repo` 를 더한다(없으면 현재 폴더의 저장소).
+2. 종료코드가 2 이거나 출력이 "PR 상태 확인 불능" 또는 "확인 불능" 으로 시작하면 **그 문구와 사유를 그대로 전하고 멈춘다.**
    "PR 이 없다", "문제없다" 로 말하지 않는다. 다음 할 일은 `gh auth status` 확인, 네트워크 확인, 다시 시도다.
 3. **엔진이 낸 표를 답의 맨 앞에 고치지 말고 그대로 붙인다.** 엔진 출력은 Claude 만 보고 사용자는 Claude 의 답을
    보므로, 표를 붙이지 않으면 사용자에게 표가 보이지 않는다(#901). 제목 줄·두 표·기호 범례·`⚠`·주의 줄까지 엔진이 낸

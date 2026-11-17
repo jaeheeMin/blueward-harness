@@ -92,8 +92,11 @@
     "hooks/engine_spec.py": {},
     "hooks/installed_version.py": {"options": ["--all", "--json", "--all-entries", "--remote"], "root_options": ["--loaded-root"], "value_patterns": {"--latest": "\\d+(\\.\\d+)*"}},
     "hooks/activation_gate.py": {"subcommands": {"check": {"max_positional": 1, "paths": true}}},
-    "skills/start/reserve_number.py": {"subcommands": {"list": {}, "next": {}, "review-reason": {"value_patterns": {"--dev": "(DEV-)?\\d+"}}}}
+    "hooks/run_engine.py": {"engine_module": true},
+    "skills/start/reserve_number.py": {"irreversible_subcommands": {"reserve": "GitHub 에 이슈를 만들려 해", "claim": "GitHub 의 이슈를 고치려 해"}, "subcommands": {"list": {}, "next": {}, "review-reason": {"value_patterns": {"--dev": "(DEV-)?\\d+"}}}}
   },
+  "gh_api_read_paths": ["repos/[\\w.-]+/[\\w.-]+", "repos/[\\w.-]+/[\\w.-]+/rules/branches/[A-Za-z0-9][A-Za-z0-9._/-]*", "repos/[\\w.-]+/[\\w.-]+/branches/[A-Za-z0-9][A-Za-z0-9._/-]*/protection/required_status_checks"],
+  "gh_api_jq": "\\.[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*|\\[\\.\\[\\]\\.type\\]",
   "harness_modules": {
     "pr_queue": {"options": ["--mine", "--all", "--json", "--verbose", "--team", "--no-ledger", "--quiet-empty"], "value_patterns": {"--repo": "[\\w.-]+/[\\w.-]+", "--pr": "\\d+", "--max-rows": "\\d+", "--days": "\\d+", "--stale-days": "\\d+"}},
     "pr_approvals": {"options": ["--json", "--quiet-empty"], "value_patterns": {"--repo": "[\\w.-]+/[\\w.-]+"}},
