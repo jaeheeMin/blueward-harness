@@ -41,11 +41,24 @@ add() {
 "
 }
 
+# 시작 때 한 최신 내용 받기의 결과를 웹 콘솔에 알린다(#1059). 콘솔이 띄운 새 세션의 "시작 점검" 이 이 결과로 채워진다.
+# sync_code 는 결과 코드(console/start_sync_post.py 가 상태·사유 글로 바꾼다)다. 세션 시작을 늦추지 않게 뒤에서 보내고,
+# 모든 fd 를 닫아 훅 실행기의 파이프를 붙들지 않는다. 콘솔이 없거나 uv 가 없거나 실패해도 조용히 지나가며 이 훅의 출력·종료 코드는 그대로다.
+sync_code="unknown"
+send_console_sync() {
+  command -v uv >/dev/null 2>&1 || return 0
+  [ -f "${plugin_root}/console/start_sync_post.py" ] || return 0
+  (printf '%s' "$input" | uv run --no-project python "${plugin_root}/console/start_sync_post.py" "$sync_code") </dev/null >/dev/null 2>&1 &
+  return 0
+}
+
 if [ -n "$tools_notice" ]; then
   add "$tools_notice"
 fi
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  sync_code="not_repo"
+  send_console_sync
   printf '%s' "$lines"
   echo "이 디렉터리는 git 저장소가 아닙니다. harness 의 자동 동기화가 동작하지 않습니다. 다음: 작업할 프로젝트 폴더(git 저장소)에서 Claude Code 를 다시 여십시오."
   exit 0
@@ -374,6 +387,7 @@ run_rebase() {
   local rebase_output tries=0
   if rebase_output="$(git rebase "$target" 2>&1)"; then
     add "$success_msg"
+    sync_code="synced"
     return 0
   fi
   # SRS 줄 추가 충돌뿐이면 자동으로 합치고 이어 간다. 커밋이 여럿이면 또 충돌할 수 있어 상한(20)까지 되풀이한다.
@@ -384,13 +398,16 @@ run_rebase() {
     try_srs_automerge rebase || break
     if rebase_output="$(GIT_EDITOR=true git rebase --continue 2>&1)"; then
       add "$success_msg"
+      sync_code="synced"
       srs_auto_note
       return 0
     fi
   done
   # 리베이스가 중간에 멈췄으면 되돌린다. 세션을 매끄럽게 시작하려고 만든
   # 훅이 저장소를 충돌 상태로 남겨 두면, 그다음에 무엇을 해도 막힌다.
+  sync_code="failed"
   if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; then
+    sync_code="conflict"
     if git rebase --abort >/dev/null 2>&1; then
       add "$target 기준 리베이스가 충돌해 원래 상태로 되돌렸습니다. 원격과의 차이는 /harness:sync 로 다시 확인하십시오."
     else
@@ -417,15 +434,19 @@ run_merge() {
   local merge_output merge_files
   if merge_output="$(git merge --no-edit -m "chore: main 의 새 변경 합쳐 받기" "$target" 2>&1)"; then
     add "$target 의 새 변경을 합쳐 받았습니다(이미 올린 브랜치라 리베이스하지 않고 합쳤습니다)."
+    sync_code="synced"
     return 0
   fi
   # 합치다 멈췄으면 되돌린다. 충돌 상태로 남기면 그다음에 무엇을 해도 막힌다.
+  sync_code="failed"
   if [ -f "$git_dir/MERGE_HEAD" ]; then
+    sync_code="conflict"
     # SRS 줄 추가 충돌뿐이면 자동으로 합치고 커밋한다. 커밋까지 못 하면 아래에서 되돌린다.
     srs_auto_used=0
     srs_auto_n=0
     if try_srs_automerge merge && git commit -q -m "chore: main 의 새 변경 합쳐 받기" >/dev/null 2>&1; then
       add "$target 의 새 변경을 합쳐 받았습니다(이미 올린 브랜치라 리베이스하지 않고 합쳤습니다)."
+      sync_code="synced"
       srs_auto_note
       return 0
     fi
@@ -501,6 +522,7 @@ fi
 # 알아야 하므로). ok: fetch 성공, none: 원격이 없어 가져올 것이 없다, 그 밖: 판정하지 않는다.
 fetch_state="skipped"
 if [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ] || [ -f "$git_dir/MERGE_HEAD" ]; then
+  sync_code="in_progress"
   add "이미 리베이스나 병합이 진행 중이라 자동 동기화를 건너뜁니다. 다음: git status 로 상태를 확인하고 git rebase --continue(또는 --abort), git merge --abort 로 마무리한 뒤 /harness:sync 를 실행하십시오."
 elif git remote get-url origin >/dev/null 2>&1; then
   # fetch 는 작업 트리를 건드리지 않으므로 미커밋 변경이 있어도 한다. 건너뛰는
@@ -521,17 +543,21 @@ elif git remote get-url origin >/dev/null 2>&1; then
       fi
     fi
     if [ "$upstream_track" = "[gone]" ]; then
+      sync_code="gone"
       report_gone_branch
     elif [ "$main_ahead" != "0" ]; then
+      sync_code="main_ahead"
       main_behind_cnt="$(git rev-list --count "HEAD..${main_ref}" 2>/dev/null || echo 0)"
       add "로컬 main 에 ${main_ref} 에 없는 커밋이 ${main_ahead}개 있습니다(${main_ref} 보다 ${main_behind_cnt}개 뒤). 이대로 새 브랜치를 따면 그 커밋이 섞입니다. 최신 상태라고 볼 수 없어 자동으로 맞추지 않았습니다. 다음: git log ${main_ref}..main 으로 확인하고 사람이 처리한 뒤 /harness:start 를 실행하십시오."
     elif [ -n "$changed" ]; then
+      sync_code="dirty"
       add "커밋되지 않은 변경이 있어 자동 동기화(리베이스)를 건너뛰었습니다. /harness:sync 로 당겨받으십시오."
     elif [ -n "$upstream" ]; then
       behind="$(git rev-list --count "HEAD..$upstream" 2>/dev/null || echo 0)"
       up_ok=1
       if [ "$behind" = "0" ]; then
         up_msg="이미 최신 상태입니다($upstream 기준)."
+        sync_code="latest"
       else
         up_msg=""
         # run_rebase 는 항상 0 이므로 실패 여부는 리베이스가 남긴 진행 상태가 아니라 HEAD 로 본다.
@@ -556,19 +582,23 @@ elif git remote get-url origin >/dev/null 2>&1; then
     elif git rev-parse --verify -q origin/main >/dev/null 2>&1; then
       behind="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
       if [ "$behind" = "0" ]; then
+        sync_code="latest"
         add "이미 최신 상태입니다(origin/main 기준). 원격 짝 브랜치가 없어 origin/main 을 기준으로 확인했습니다."
       else
         run_rebase origin/main "원격 짝 브랜치가 없어 origin/main 기준으로 맞췄습니다."
       fi
     else
+      sync_code="no_main"
       add "원격 짝 브랜치가 없고 origin/main 도 없어 자동 동기화를 건너뜁니다. 다음: 원격에 main 브랜치가 있는지 확인하고, 작업을 마칠 때 /harness:deliver 로 푸시하십시오."
     fi
   else
+    sync_code="fetch_failed"
     fetch_err="$(printf '%s\n' "$fetch_output" | head -n1)"
     add "fetch 에 실패했습니다: ${fetch_err:-원인을 알 수 없습니다}. 다음: 네트워크를 확인하고 gh auth status 로 로그인 상태를 보십시오(로그인 안 됨이면 사람이 gh auth login 실행). 확인한 뒤 /harness:sync 를 실행하십시오."
   fi
 else
   fetch_state="none"
+  sync_code="no_remote"
   add "원격 저장소가 연결되어 있지 않습니다. 푸시와 PR 과 이슈 관련 동작은 원격을 연결한 뒤에 가능합니다. 다음: 🚨 직접 해 주세요: 프로젝트의 GitHub 저장소 주소를 확인해 git remote add origin 주소 로 연결하십시오."
 fi
 
@@ -725,6 +755,7 @@ if [ -d conventions ]; then
   fi
 fi
 
+send_console_sync
 printf '%s' "$lines"
 
 # 전달이 끝난 뒤에 지운다. 지우고 나서 출력에 실패하면 경고가 사라진다.

@@ -37,8 +37,8 @@ from hooks_api import ASK_DEFAULT, ASK_LEVELS, Hooks, permission_reply, question
 from managed import (EFFORT_OPTIONS, EFFORT_VALUES, MODEL_NAME, MODEL_OPTIONS, PERMISSION_OPTIONS,  # noqa: F401
                      PERMISSION_VALUES, Manager)
 from standards_scan import customer_forms, has_standard_folder  # noqa: F401
-from store import (CHECK_SKIPPED, account_limits, MAX_PENDING_STOP, START_CHECK_IDS, Store, can_send, display_title, elicitation_fields, mark_check,
-                   public_session, remember_touched, session_suggestions, set_baseline)
+from store import (CHECK_DONE, CHECK_FAIL, CHECK_PENDING, CHECK_SKIPPED, CHECK_UNKNOWN, account_limits, MAX_PENDING_STOP, START_CHECK_IDS, Store, can_send, display_title, elicitation_fields, mark_check,
+                   public_session, record_check, remember_touched, session_suggestions, set_baseline)
 
 APP_NAME = "harness-console"
 COOKIE = "harness_console"
@@ -56,6 +56,7 @@ HEARTBEAT = 10.0
 FILES_CACHE_SECONDS = 3.0  # 세션 산출물 목록(?cache=1)을 이만큼 기억한다. git 을 여러 번 실행해 느리다(#793)
 CACHE_SECONDS = 60.0 # 승인자 판정과 승인 대기 PR 목록은 gh 를 자주 부르지 않게 이만큼 기억한다
 MAX_ADVANCE_ROUNDS = 4  # 갈래 진행 판정에서 증거를 읽고 다시 판정하는 최대 횟수(증거 종류가 둘뿐이라 넉넉하다)
+MAX_PR_LOOKUPS = 5  # 저장소 목록(최근 100개)에 없는 PR 을 번호로 따로 읽는 상한(저장소마다 1분에)
 PR_REFRESH_SECONDS = 60.0  # 열린 PR 이 있는 세션의 갈래를 다시 판정하는 간격(초, #1027 D8). 서버 PR 캐시(CACHE_SECONDS)와 같다
 UPCOMING_REFRESH = 30.0  # 진행 중 세션의 다음 갈래(upcoming)를 SRS 에서 다시 읽는 간격(초, #858). 판정마다 파일을 읽지 않게
 COND_YES, COND_NO, COND_UNKNOWN = "yes", "no", "unknown"
@@ -289,6 +290,9 @@ class App:
         self.hooks = Hooks(self.store, clock, poll, question_wait, refresh_git=self.refresh_git, ask_level=self.read_ask)
         self.manager.auto_allowed = self.hooks.auto_allowed  # 콘솔 세션의 can_use_tool 요청도 같은 판정을 쓴다
         self.manager.risk_of = self.hooks.risk_of
+        self.manager.on_start_init = self.check_start_version  # 새 세션이 뜨면 하네스 판 점검을 판정한다(#1059)
+        self.version_checking: set[str] = set()  # 하네스 판 점검을 판정하는 중인 세션
+        self.pr_list_errors: dict[str, str] = {}  # 저장소 -> 마지막으로 stderr 에 남긴 PR 목록 읽기 실패 사유(같은 사유를 1분마다 되풀이하지 않는다)
         self.tokens: dict[str, float] = {}
         self.cookies: dict[str, float] = {}  # 쿠키 값 -> 만료 시각(서버 쪽에서도 COOKIE_MAX_AGE 를 지킨다)
         self.lock = threading.Lock()
@@ -638,15 +642,90 @@ class App:
         cur = flows.current(state)
         return bool(cur and any(t in ("pr_exists", "pr_merged") for t in cur.get("done", [])))
 
+    @staticmethod
+    def pr_number_of(s: dict) -> int | None:
+        """이 세션이 지켜볼 PR 번호: 갈래가 아는 번호, 아니면 이 세션이 gh pr create 로 만든 PR."""
+        state = s.get("flowState") or {}
+        made = re.search(r"/pull/(\d+)", str(s.get("prCreated") or ""))
+        return state.get("prNumber") or (state.get("pr") or {}).get("number") or (int(made.group(1)) if made else None)
+
     def refresh_open_prs(self) -> int:
-        """지켜볼 세션마다 갈래를 다시 판정한다(검사 결과·병합이 화면에 저절로 반영되게). 다시 판정한 세션 수."""
+        """지켜볼 세션마다 PR 상태를 다시 읽는다(검사 결과·병합·닫힘이 화면에 저절로 반영되게). 다시 판정한 세션 수(PR 값을 실제로 읽어 맞춘 끝난 세션 포함).
+        돌고 있는 세션은 갈래를 다시 판정하고(브랜치·변경 포함), 끝난 세션은 저장소 단위로 한꺼번에 읽은 PR 값만 맞춘다(#1059)."""
+        live, ended = [], []
         with self.store.lock:
-            # 갈래가 PR 을 아직 못 읽었어도 이 세션이 PR 을 만들었으면(prCreated) 지켜본다 — 턴 중간(승인 대기)에는 훅이 판정을 다시 부르지 않는다
-            targets = [s for s in self.store.sessions.values() if not s.get("ended") and s.get("cwd") and (
-                self.watches_pr(s.get("flowState")) or (s.get("prCreated") and s.get("flowState") and not s["flowState"].get("finished")))]
-        for s in targets:
+            for s in self.store.sessions.values():
+                state = s.get("flowState")
+                if not s.get("cwd") or not state:
+                    continue
+                if not s.get("ended"):
+                    # 갈래가 PR 을 아직 못 읽었어도 이 세션이 PR 을 만들었으면(prCreated) 지켜본다 — 턴 중간(승인 대기)에는 훅이 판정을 다시 부르지 않는다
+                    if self.watches_pr(state) or (s.get("prCreated") and not state.get("finished")):
+                        live.append(s)
+                elif str((state.get("pr") or {}).get("state") or "").upper() in ("OPEN", "") and self.pr_number_of(s):
+                    ended.append(s)  # 마지막으로 본 PR 이 열려 있던 끝난 세션: 그 뒤 GitHub 에서 닫히거나 합쳐졌을 수 있다
+        for s in live:
             self.refresh_git_now(s)  # 브랜치(이슈 번호)·변경도 함께 다시 읽는다 — 턴 중간에는 훅이 브랜치를 갱신하지 않는다(실사용 시험: 새 이슈 #37 이 #35 로 보임)
-        return len(targets)
+        return len(live) + self.refresh_ended_prs(ended)
+
+    def pr_list_failed(self, root: str, reason: str) -> None:
+        """PR 을 읽지 못했다. 기존 값은 그대로 두고(확인 못 함을 통과·닫힘으로 바꾸지 않는다) 사유만 stderr 에 남긴다."""
+        if self.pr_list_errors.get(root) != reason:
+            self.pr_list_errors[root] = reason
+            if sys.stderr is not None:
+                print(f"PR 상태 다시 읽기 실패({root}): {reason}", file=sys.stderr)
+
+    def refresh_ended_prs(self, ended: list[dict]) -> int:
+        """끝난 세션의 PR 값을 저장소마다 gh 한 번으로 맞춘다. 끝난 세션의 폴더는 이미 다른 브랜치일 수 있어 브랜치·git 상태는 읽지 않는다. 값을 맞춘 세션 수를 돌려준다."""
+        done = 0
+        roots: dict[str, list[dict]] = {}
+        for s in ended:
+            root = gitstate.repo_root(self.run, s["cwd"])
+            if root:
+                roots.setdefault(root, []).append(s)
+            else:
+                self.pr_list_failed(s["cwd"], "git 저장소 폴더를 찾지 못해 PR 을 다시 읽지 못했어.")
+        for root, items in roots.items():
+            got = gitstate.repo_prs(self.run, root)
+            if got["state"] != "ok":
+                self.pr_list_failed(root, got["reason"])
+                continue
+            self.pr_list_errors.pop(root, None)
+            lookups = 0
+            for s in items:
+                number = self.pr_number_of(s)
+                pr = got["prs"].get(number)
+                if pr is None:  # 최근 목록에 없으면 번호로 읽는다(호출 수를 제한한다)
+                    if lookups >= MAX_PR_LOOKUPS:
+                        continue
+                    lookups += 1
+                    one = gitstate.pr_status(self.run, root, "", number)
+                    if one["state"] != "ok" or not one["pr"]:
+                        self.pr_list_failed(root, one["reason"] or f"PR #{number} 를 찾지 못했어.")
+                        continue
+                    pr = one["pr"]
+                self.apply_pr_only(s, pr)
+                done += 1
+        return done
+
+    def apply_pr_only(self, s: dict, pr: dict) -> None:
+        """끝난 세션의 갈래에 PR 값을 반영하고, PR 증거만으로 판정이 되는 단계는 넘긴다(병합이면 갈래가 끝난다).
+        git 변경·브랜치·조건(onlyIf)은 읽지 않으므로 그 증거가 필요한 단계는 그대로 둔다(확인 못 함을 지어내지 않는다)."""
+        with self.store.lock:
+            state = s.get("flowState")
+            if not s.get("ended") or not state:
+                return  # 그새 다시 돌기 시작한 세션은 돌고 있는 세션의 판정이 맡는다
+            before = (state.get("pr"), state.get("finished"), state.get("stepIndex"))
+            made = re.search(r"/pull/(\d+)", str(s.get("prCreated") or ""))
+            state["createdPr"] = int(made.group(1)) if made else None
+            state["pr"], state["prNumber"] = pr, pr["number"]
+            if not state["finished"] and self.flow_data is not None:
+                unknown = list(state.get("unknown") or [])
+                flows.evaluate(state, lambda kind: {"state": "ok", "pr": pr} if kind == "pr" else None, lambda name: None, self.clock())
+                state["unknown"] = unknown
+            changed = before != (state.get("pr"), state.get("finished"), state.get("stepIndex"))
+        if changed:
+            self.store.touch(s)
 
     def start_pr_ticker(self, every: float = PR_REFRESH_SECONDS) -> None:
         self.ticker_stop = threading.Event()
@@ -1146,6 +1225,37 @@ class App:
         checks = [gh, ver, claude]
         return {"state": "ok", "checks": checks, "blocking": any(c["state"] == "fail" for c in checks),
                 "newVersion": ver.get("latest") if ver["state"] == "old" else None}
+
+    def check_start_version(self, sid: str) -> None:
+        """콘솔이 띄운 새 세션의 점검 "하네스 판"을 판정한다(#1059). 세션에 실린 판(init 의 pluginVersions, 없으면 콘솔 판)과 원격 최신 판을
+        비교해 같으면 done, 낡았으면 fail(사유), 못 읽으면 unknown 이다. 원격 조회(ls-remote)는 느려서 스레드로 하고, 결과는 60초 기억한다.
+        점검 목록이 없는 세션(터미널·이어서 띄운 세션)이나 이미 판정된 세션은 아무것도 하지 않는다."""
+        with self.store.lock:
+            s = self.store.get(sid)
+            item = next((c for c in (s or {}).get("startChecks") or [] if c["id"] == "version"), None)
+            if s is None or item is None or item["state"] != CHECK_PENDING or s["id"] in self.version_checking:
+                return
+            real = s["id"]
+            self.version_checking.add(real)
+            loaded = next((p["version"] for p in s.get("pluginVersions") or [] if p["name"] == self.plugin_name and p["version"]), "") or self.version
+
+        def run():
+            try:
+                got = self.cached(("remote-latest",), lambda: {"latest": self.remote_latest()})
+                ver = judge_version(loaded, got.get("latest") if isinstance(got, dict) else None)
+                state = CHECK_DONE if ver["state"] == "ok" else CHECK_FAIL if ver["state"] == "old" else CHECK_UNKNOWN
+                reason = f"더 새 판이 있어({ver['latest']})" if state == CHECK_FAIL else "" if state == CHECK_DONE else str(ver.get("detail") or "")
+                with self.store.lock:
+                    target = self.store.get(real)
+                    if target is not None:
+                        record_check(target, "version", state, reason)
+                if target is not None:
+                    self.store.touch(target)
+            finally:
+                with self.store.lock:
+                    self.version_checking.discard(real)
+
+        self.spawn(run)
 
     def a_start_checks(self, g, q, b):
         """첫 화면과 맨 위 알림에 쓰는 점검 결과. 점검은 백그라운드에서 하고(60초 기억), 읽는 중이면 loading: true.

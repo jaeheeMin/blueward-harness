@@ -13,8 +13,8 @@ import flows
 import session_alive
 from bypass_filter import strip_bypass
 from risk import IRREVERSIBLE, SAFE, classify, plan_dir_of
-from store import (CHECK_DONE, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
-                   TITLE_PROMPT, TITLE_SESSION, chat_clean, mark_check, prompt_title, remember_touched)
+from store import (CHECK_DONE, CHECK_FAIL, CHECK_UNKNOWN, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
+                   TITLE_PROMPT, TITLE_SESSION, chat_clean, mark_check, prompt_title, record_check, remember_touched)
 
 QUESTION_WAIT = 300.0
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
@@ -335,6 +335,8 @@ class Hooks:
             self.refresh_git(s["id"])
             store.add_log(s, "세션 시작")
             store.touch_peers(s)
+        elif name == "HarnessStartSync":
+            self._start_sync(s, body)
         elif name == "UserPromptSubmit":
             if not late:
                 s["turn_running"], s["ended"] = True, False
@@ -404,6 +406,15 @@ class Hooks:
             store.flush()
         store.touch(s)
         return 200, None
+
+    def _start_sync(self, s: dict, body: dict) -> None:
+        """SessionStart 훅(session-start-sync.sh)이 한 최신 내용 받기의 결과를 새 세션 점검 "최신 내용 받기" 에 올린다(#1059).
+        ok(받음·이미 최신) → done, behind·fail(충돌 되돌림·실패·뒤처짐) → fail(다시 필요), 그 밖(판정 못 함) → unknown(확인 못 함)."""
+        raw = body.get("state") if isinstance(body.get("state"), str) else ""
+        reason = body.get("reason") if isinstance(body.get("reason"), str) else ""
+        state = CHECK_DONE if raw == "ok" else CHECK_FAIL if raw in ("behind", "fail") else CHECK_UNKNOWN
+        record_check(s, "sync", state, " ".join(reason.split())[:200])  # 점검 목록이 아직 없으면(실제 id 로 이어지기 전) 보관만 하고 이어질 때 반영한다
+        self.store.add_log(s, f"시작 때 최신 내용 받기: {raw or '알 수 없음'}")
 
     def _agent_called(self, s: dict, body: dict, tool_input) -> None:
         """Agent·Task 호출의 맡은 일을 적어 둔다. 곧 오는 SubagentStart 와 짝을 맞춘다."""

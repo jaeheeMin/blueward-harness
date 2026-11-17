@@ -90,6 +90,7 @@ class Console:
                                       claude_cmd=claude_cmd or (lambda: None), git_inspect=inspect, poll=0.02,
                                       question_wait=300.0, sync_spawn=True, run=run or (lambda args, cwd: (127, "")),
                                       flows_path=flows_path or tmp_path / "no-flows.json", **(app_kw or {}))
+        self.app.remote_latest = lambda: None  # 시험이 원격(ls-remote)을 건드리지 않게 한다. 판 확인 시험은 바꿔 끼운다
         self.server = console_server.make_server(self.app, 0)
         self.port = self.server.server_address[1]
         self.app.set_port(self.port)
@@ -6220,7 +6221,8 @@ def test_start_checks_follow_skill_events_and_can_be_skipped(mconsole):
     sid = launch(c, "점검")
     ids = ["sync", "version", "update", "reload"]
     got = c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"]
-    assert got == [{"id": i, "state": "pending"} for i in ids]
+    assert [x["id"] for x in got] == ids and [x["state"] for x in got if x["id"] != "version"] == ["pending"] * 3
+    assert [x["state"] for x in got if x["id"] == "version"] == ["unknown"]  # 하네스 판은 init 에서 판정된다(시험 콘솔은 원격 최신 판을 못 읽는다, #1059)
     c.event(sid, "PreToolUse", tool_name="Skill", tool_input={"skill": "harness:sync"})
     c.event(sid, "UserPromptExpansion", command_name="harness:version")
     states_ = {x["id"]: x["state"] for x in c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"]}
@@ -9054,3 +9056,308 @@ def test_1042_session_title_priority_and_analysis_title_passthrough(tmp_path):
     assert analysis.check_result(dict(base, title="짧은 제목"), str(tmp_path))["title"] == "짧은 제목"
     assert analysis.check_result(base, str(tmp_path))["title"] == "u"  # title 이 없는 옛 결과도 유효
     assert "title" in analysis.SCHEMA["properties"] and "title" not in analysis.SCHEMA["required"]
+
+
+# ---- #1059: 끝난 세션의 PR 다시 읽기 · 시작 점검 결과 전달 ----
+
+def _wait_step(number=None, state="OPEN"):
+    """병합을 기다리는 단계에 선 갈래 상태(손으로 만든 것). PR 증거만으로 판정이 되는 단계다."""
+    step = {"id": "w", "name": "합쳐지기 기다리기", "kind": "wait", "state": "active", "done": ["pr_merged"], "skill": None, "skillDone": False, "confirmed": False}
+    return {"id": "fix", "name": "고치기", "reason": "", "finished": False, "unknown": [], "stepIndex": 0, "steps": [step], "next": None, "prNumber": number,
+            "pr": {"number": number, "state": state, "url": "", "title": "t", "checks": "pass", "stepChecks": {}, "awaitApproval": False} if number else None}
+
+
+def _ended_pr_console(tmp_path, monkeypatch, listing, root=True):
+    """저장소 폴더를 git 이 알려 주는 콘솔. listing["data"] 가 gh pr list 의 답, 못 읽게 하려면 listing["rc"]=1."""
+    views = []
+    run = FakeRun(**{"git rev-parse --show-toplevel": (0, str(tmp_path / "work") + "\n") if root else (128, ""),
+                     "gh pr list": lambda a: (listing.get("rc", 0), json.dumps(listing["data"])),
+                     "gh pr view": lambda a: views.append(a[3]) or (0, json.dumps(next(p for p in listing["all"] if str(p["number"]) == a[3])))})
+    c = Console(tmp_path, monkeypatch, run=run, flows_path=FLOWS_FILE, skills=REAL_SKILLS)
+    c.login()
+    c.views = views
+    return c
+
+
+def _add_ended(c, sid, number, state="OPEN", **kw):
+    s = c.app.store.ensure(sid, str(c.work))
+    s.update(flowState=_wait_step(number, state), ended=True, **kw)
+    return s
+
+
+def _pr(number, state):
+    d = pr_json(state)
+    d["number"] = number
+    return d
+
+
+def test_ended_sessions_pr_is_reread_once_per_repo_and_flow_follows_it(tmp_path, monkeypatch):
+    """#1059: 콘솔을 껐다 켜면 이전 세션이 모두 끝난 세션이다. 그 뒤 닫히거나 합쳐진 PR 도 저장소마다 gh 한 번으로 맞춘다."""
+    listing = {"data": [_pr(7, "MERGED"), _pr(8, "CLOSED"), _pr(9, "OPEN")]}
+    c = _ended_pr_console(tmp_path, monkeypatch, listing)
+    try:
+        for sid, n in (("e7", 7), ("e8", 8), ("e9", 9)):
+            _add_ended(c, sid, n)
+        calls = c.app.run.calls
+        inspected = []
+        c.app.git_inspect = lambda cwd: inspected.append(cwd)
+        assert c.app.refresh_open_prs() == 3
+        listed = [x for x in calls if x.startswith("gh pr list --state all --author @me")]
+        assert len(listed) == 1 and "--json" in listed[0]  # 세션이 셋이어도 저장소 하나는 gh 한 번
+        assert not c.views and inspected == []  # 목록에 다 있으니 따로 읽지 않고, 끝난 세션의 브랜치는 읽지 않는다
+        assert not any(x.startswith(("git status", "git rev-parse --abbrev-ref", "git fetch")) for x in calls)
+        m7, m8, m9 = sess(c, "e7"), sess(c, "e8"), sess(c, "e9")
+        assert m7["flowPr"]["state"] == "MERGED" and m7["flowFinished"] is True and m7["status"] == "ended"  # 병합이면 갈래가 끝난다
+        assert m8["flowPr"]["state"] == "CLOSED" and m8["flowFinished"] is False  # 닫힘은 끝난 것이 아니다. 화면 칩이 "PR #8 닫힘" 이 된다
+        assert m9["flowPr"]["state"] == "OPEN" and m9["flowFinished"] is False
+        assert m7["flowUnknown"] == [] and m8["flowUnknown"] == []  # 읽지 않은 증거(변경·조건)를 확인 못 함 사유로 남기지 않는다
+        calls.clear()
+        assert c.app.refresh_open_prs() == 1  # 합쳐짐·닫힘은 이제 다시 읽지 않는다. 열린 것(9)만 다시 본다
+        assert len([x for x in calls if x.startswith("gh pr list")]) == 1
+    finally:
+        c.close()
+
+
+def test_ended_session_pr_missing_from_list_is_read_by_number_with_a_cap(tmp_path, monkeypatch):
+    listing = {"data": [], "all": [_pr(n, "CLOSED") for n in range(20, 30)]}
+    c = _ended_pr_console(tmp_path, monkeypatch, listing)
+    try:
+        for n in range(20, 30):
+            _add_ended(c, f"x{n}", n)
+        assert c.app.refresh_open_prs() == console_server.MAX_PR_LOOKUPS
+        assert len(c.views) == console_server.MAX_PR_LOOKUPS  # 목록(최근 100개)에 없는 PR 의 번호 조회는 저장소마다 상한이 있다
+    finally:
+        c.close()
+
+
+def test_ended_session_pr_keeps_old_value_and_logs_reason_when_gh_fails(tmp_path, monkeypatch, capsys):
+    listing = {"data": [], "rc": 1}
+    c = _ended_pr_console(tmp_path, monkeypatch, listing)
+    try:
+        _add_ended(c, "g1", 7)
+        assert c.app.refresh_open_prs() == 0
+        m = sess(c, "g1")
+        assert m["flowPr"]["state"] == "OPEN" and m["flowFinished"] is False  # 못 읽은 것을 통과·닫힘으로 바꾸지 않는다
+        err = capsys.readouterr().err
+        assert "PR 상태 다시 읽기 실패" in err and "종료코드 1" in err
+        c.app.refresh_open_prs()
+        assert capsys.readouterr().err == ""  # 같은 사유를 1분마다 되풀이하지 않는다
+        listing.update(rc=0, data=[_pr(7, "MERGED")])  # 다시 읽히면 값을 맞춘다
+        assert c.app.refresh_open_prs() == 1 and sess(c, "g1")["flowPr"]["state"] == "MERGED"
+    finally:
+        c.close()
+
+
+def test_ended_session_in_a_folder_that_is_not_a_repo_is_skipped_quietly(tmp_path, monkeypatch, capsys):
+    c = _ended_pr_console(tmp_path, monkeypatch, {"data": [_pr(7, "MERGED")]}, root=False)
+    try:
+        _add_ended(c, "n1", 7)
+        assert c.app.refresh_open_prs() == 0 and sess(c, "n1")["flowPr"]["state"] == "OPEN"
+        assert "git 저장소 폴더를 찾지 못해" in capsys.readouterr().err
+    finally:
+        c.close()
+
+
+def test_live_session_pr_refresh_still_rereads_git_and_ended_one_does_not(tmp_path, monkeypatch):
+    listing = {"data": [_pr(7, "MERGED"), _pr(8, "OPEN")], "all": [_pr(8, "OPEN")]}
+    c = _ended_pr_console(tmp_path, monkeypatch, listing)
+    try:
+        _add_ended(c, "old", 7)
+        live = c.app.store.ensure("live", str(c.work))
+        live.update(flowState=_wait_step(8), ended=False)
+        inspected = []
+        c.app.git_inspect = lambda cwd: inspected.append(cwd) or dict(GIT_INFO)
+        assert c.app.refresh_open_prs() == 2
+        assert inspected == [str(c.work)]  # 돌고 있는 세션 하나만 브랜치·변경을 다시 읽는다
+        assert sess(c, "old")["flowFinished"] is True
+    finally:
+        c.close()
+
+
+def test_session_that_resumed_meanwhile_is_left_to_the_live_judgement(tmp_path, monkeypatch):
+    c = _ended_pr_console(tmp_path, monkeypatch, {"data": [_pr(7, "MERGED")]})
+    try:
+        s = _add_ended(c, "r1", 7)
+        s["ended"] = False
+        c.app.apply_pr_only(s, _pr(7, "MERGED"))  # 그새 다시 돌기 시작했다
+        assert s["flowState"]["pr"]["state"] == "OPEN" and s["flowState"]["finished"] is False
+    finally:
+        c.close()
+
+
+def _check_states(c, sid):
+    return {x["id"]: (x["state"], x.get("reason", "")) for x in sess(c, sid)["startChecks"]}
+
+
+def _with_checks(c, sid):
+    s = c.app.store.ensure(sid, str(c.work))
+    s["startChecks"] = managed.new_start_checks()
+    return s
+
+
+def test_start_sync_result_maps_to_check_states(mconsole):
+    c = mconsole
+    for sid, state, want in (("k1", "ok", "done"), ("k2", "behind", "fail"), ("k3", "fail", "fail"), ("k4", "unknown", "unknown"), ("k5", "엉뚱", "unknown")):
+        _with_checks(c, sid)
+        c.event(sid, "HarnessStartSync", state=state, reason="한 줄\n사유")
+        assert _check_states(c, sid)["sync"] == (want, "한 줄 사유"), sid
+        assert _check_states(c, sid)["version"] == ("pending", "")  # 다른 항목은 건드리지 않는다
+
+
+def test_start_sync_result_does_not_overwrite_done_or_skipped_and_skill_can_fix_failure(mconsole):
+    c = mconsole
+    _with_checks(c, "k6")
+    skill_event(c, "k6", "sync")  # 스킬로 이미 했음
+    c.event("k6", "HarnessStartSync", state="fail", reason="늦게 온 실패")
+    assert _check_states(c, "k6")["sync"] == ("done", "")
+    s = _with_checks(c, "k7")
+    s["startChecks"][0]["state"] = "skipped"
+    c.event("k7", "HarnessStartSync", state="ok", reason="받음")
+    assert _check_states(c, "k7")["sync"][0] == "skipped"
+    _with_checks(c, "k8")
+    c.event("k8", "HarnessStartSync", state="fail", reason="충돌")
+    assert _check_states(c, "k8")["sync"] == ("fail", "충돌")
+    skill_event(c, "k8", "sync")  # 다시 필요인 항목은 그 스킬을 직접 하면 했음이 된다
+    assert _check_states(c, "k8")["sync"] == ("done", "")
+
+
+def test_start_sync_result_is_kept_when_it_arrives_before_the_temp_id_becomes_real(mconsole):
+    """콘솔이 띄운 세션은 임시 id(m-…)로 시작해 init 때 실제 id 로 이어진다. 훅 결과가 그 앞에 와도 잃지 않는다."""
+    c = mconsole
+    store = c.app.store
+    temp = store.ensure("m-aaa", str(c.work))
+    temp["startChecks"] = managed.new_start_checks()
+    temp["managed"] = True
+    c.event("real-1", "HarnessStartSync", state="ok", reason="이미 최신이야")  # 이어지기 전: 실제 id 로 먼저 들어온다
+    assert not store.get("real-1").get("startChecks")  # 점검 목록은 아직 임시 id 쪽에 있다
+    store.rekey("m-aaa", "real-1")
+    assert _check_states(c, "real-1")["sync"] == ("done", "이미 최신이야")
+    assert [x["id"] for x in sess(c, "real-1")["startChecks"]] == ["sync", "version", "update", "reload"]
+    assert store.get("m-aaa") is store.get("real-1")  # 이전 id 도 이어진다
+
+
+def test_start_sync_result_attaches_when_it_arrives_after_the_temp_id_becomes_real(mconsole):
+    c = mconsole
+    store = c.app.store
+    temp = store.ensure("m-bbb", str(c.work))
+    temp["startChecks"] = managed.new_start_checks()
+    store.rekey("m-bbb", "real-2")  # 이어진 뒤
+    c.event("real-2", "HarnessStartSync", state="fail", reason="충돌해서 되돌렸어")
+    assert _check_states(c, "real-2")["sync"] == ("fail", "충돌해서 되돌렸어")
+    c.event("m-bbb", "HarnessStartSync", state="ok", reason="임시 id 로 와도 같은 세션")  # 정해진 항목은 바꾸지 않는다
+    assert _check_states(c, "real-2")["sync"] == ("fail", "충돌해서 되돌렸어")
+
+
+def test_start_sync_result_for_terminal_session_changes_nothing_visible(mconsole):
+    c = mconsole
+    c.event("term-1", "SessionStart")
+    c.event("term-1", "HarnessStartSync", state="ok", reason="받음")
+    assert sess(c, "term-1")["startChecks"] == []  # 점검 목록이 없는 세션은 그대로다
+
+
+def test_start_sync_event_with_wrong_shaped_fields_is_not_a_pass(mconsole):
+    c = mconsole
+    _with_checks(c, "k9")
+    assert c.hook("event", {"session_id": "k9", "cwd": str(c.work), "hook_event_name": "HarnessStartSync", "state": ["ok"], "reason": 3})[0] == 200
+    assert _check_states(c, "k9")["sync"] == ("unknown", "")  # 모양이 틀리면 됐다고 하지 않는다
+
+
+def _version_session(c, sid, plugins=None, checks=True):
+    s = c.app.store.ensure(sid, str(c.work))
+    if checks:
+        s["startChecks"] = managed.new_start_checks()
+    if plugins is not None:
+        s["pluginVersions"] = plugins
+    return s
+
+
+def test_start_version_check_compares_session_version_with_remote_latest(mconsole):
+    c = mconsole
+    asked = []
+    c.app.remote_latest = lambda: asked.append(1) or "0.10.5"
+    _version_session(c, "v1", [{"name": "harness", "version": "0.10.1"}, {"name": "other", "version": "9.0.0"}])
+    c.app.check_start_version("v1")
+    assert _check_states(c, "v1")["version"] == ("fail", "더 새 판이 있어(0.10.5)")
+    _version_session(c, "v2", [{"name": "harness", "version": "0.10.5"}])
+    c.app.check_start_version("v2")
+    assert _check_states(c, "v2")["version"] == ("done", "")
+    assert len(asked) == 1  # 원격 최신 판은 기억해 두고 쓴다(ls-remote 는 느리다)
+
+
+def test_start_version_check_uses_console_version_when_session_reports_none_and_unknown_when_unreadable(mconsole):
+    c = mconsole
+    c.app.remote_latest = lambda: "9.9.9"  # 콘솔 판(Console 의 plugin.json)과 같다
+    _version_session(c, "v3", [{"name": "harness", "version": ""}])
+    c.app.check_start_version("v3")
+    assert _check_states(c, "v3")["version"][0] == "done"
+    c.app.cache.clear()
+    c.app.remote_latest = lambda: None
+    _version_session(c, "v4")
+    c.app.check_start_version("v4")
+    state, reason = _check_states(c, "v4")["version"]
+    assert state == "unknown" and "최신 판은 확인 못 함" in reason  # 못 읽은 것을 낡았다고도 최신이라고도 하지 않는다
+    c.app.cache.clear()
+
+    def boom():
+        raise RuntimeError("x")
+    c.app.remote_latest = boom
+    _version_session(c, "v5")
+    c.app.check_start_version("v5")
+    assert _check_states(c, "v5")["version"][0] == "unknown"
+
+
+def test_start_version_check_ignores_sessions_without_checks_or_already_decided(mconsole):
+    c = mconsole
+    asked = []
+    c.app.remote_latest = lambda: asked.append(1) or "9.9.9"
+    _version_session(c, "v6", checks=False)
+    c.app.check_start_version("v6")
+    s = _version_session(c, "v7")
+    s["startChecks"][1]["state"] = "skipped"
+    c.app.check_start_version("v7")
+    c.app.check_start_version("nobody")
+    assert asked == [] and sess(c, "v6")["startChecks"] == [] and _check_states(c, "v7")["version"][0] == "skipped"
+    skill_event(c, "v7", "version")  # 건너뛴 점검은 스킬 이벤트로도 안 바뀐다(전과 같다)
+    assert _check_states(c, "v7")["version"][0] == "skipped"
+
+
+@pytest.mark.parametrize("latest,want", [("9.9.9", "done"), ("9.9.99", "fail")])
+def test_managed_session_init_triggers_version_check_and_hook_result_lands_on_it(tmp_path, monkeypatch, latest, want):
+    """콘솔이 새로 띄운 세션: init 에서 하네스 판 점검이 판정되고, 훅의 최신 받기 결과도 같은 세션에 붙는다."""
+    c = Console(tmp_path, monkeypatch, claude_cmd=fake_cmd)
+    c.app.remote_latest = lambda: latest
+    c.login()
+    try:
+        sid = launch(c, "점검")
+        wait_for(lambda: _check_states(c, sid)["version"][0] == want)
+        if want == "fail":
+            assert latest in _check_states(c, sid)["version"][1]
+        c.event(sid, "HarnessStartSync", state="ok", reason="받아서 최신으로 맞췄어")
+        assert _check_states(c, sid)["sync"] == ("done", "받아서 최신으로 맞췄어")
+    finally:
+        c.close()
+
+
+def test_manager_on_start_init_failure_does_not_kill_the_reader(tmp_path, monkeypatch, capsys):
+    c = Console(tmp_path, monkeypatch, claude_cmd=fake_cmd)
+    c.login()
+    try:
+        def boom(sid):
+            raise RuntimeError("판정 실패")
+        c.app.manager.on_start_init = boom
+        sid = launch(c, "점검")
+        wait_for(lambda: c.app.store.get(sid)["report"] == "echo: 점검")  # 읽기 스레드가 살아서 다음 줄을 읽는다
+        assert "새 세션 점검(하네스 판) 판정 실패" in capsys.readouterr().err
+    finally:
+        c.close()
+
+
+def test_gitstate_repo_prs_reads_all_states_in_one_call_and_unknown_on_failure():
+    seen = []
+    run = lambda a, cwd: seen.append(a) or (0, json.dumps([_pr(1, "OPEN"), _pr(2, "MERGED"), {"title": "번호 없음"}]))
+    got = gitstate.repo_prs(run, "/x")
+    assert got["state"] == "ok" and sorted(got["prs"]) == [1, 2] and got["prs"][2]["state"] == "MERGED" and len(seen) == 1
+    assert seen[0][:7] == ["gh", "pr", "list", "--state", "all", "--author", "@me"]
+    bad = gitstate.repo_prs(lambda a, cwd: (1, "oops"), "/x")
+    assert bad["state"] == "unknown" and bad["prs"] == {} and "종료코드 1" in bad["reason"]
+    assert gitstate.repo_prs(lambda a, cwd: (0, "not json"), "/x")["state"] == "unknown"

@@ -195,6 +195,8 @@ class Manager:
         # 서버가 끼워 준다(hooks_api.Hooks). 없으면 묻지 않고 허용하는 일이 없고 위험 표시도 없다.
         self.auto_allowed: Callable[[dict, str, object], bool] | None = None
         self.risk_of: Callable[[dict, str, object], tuple[str, str]] | None = None
+        # 서버가 끼워 준다. 세션이 첫 init 을 보내면(임시 id 가 실제 id 로 이어진 뒤) 새 세션 점검 중 하네스 판을 판정하게 부른다(#1059)
+        self.on_start_init: Callable[[str], None] | None = None
 
     # ---- 시작 ----
     def command(self, resume: str | None = None, model: str | None = None, effort: str | None = None,
@@ -693,6 +695,7 @@ class Manager:
                 self.store.rekey(proc.temp_id, sid)
         control = None
         mcp_check = False
+        start_init = False
         with self.store.lock:  # 세션 데이터 변경은 store.lock 안에서 한다. 자식 프로세스에 쓰는 일은 잠금 밖에서 한다.
             s = self.store.get(proc.session_id or proc.temp_id)
             if s is None:
@@ -707,6 +710,7 @@ class Manager:
                     self.store.add_log(s, "계획 승인: 권한 모드가 계획만 세우기에서 " + ("기본" if e["permissionMode"] == DEFAULT_MODE_NAME else e["permissionMode"][:40]) + "(으)로 바뀜")
             if kind == "system" and e.get("subtype") == "init":
                 s["starting"] = False
+                start_init = True
                 s.pop("apiIssue", None)
                 if isinstance(e.get("permissionMode"), str):
                     s["permissionMode"] = e["permissionMode"]
@@ -800,6 +804,12 @@ class Manager:
         self.store.touch(control or s)
         if mcp_check:
             self._mcp_refresh_later(proc, s["id"])
+        if start_init and self.on_start_init is not None:
+            try:
+                self.on_start_init(s["id"])
+            except Exception as err:  # 점검 판정이 실패해도 세션 출력을 읽는 스레드를 죽이지 않는다
+                if sys.stderr is not None:
+                    print(f"새 세션 점검(하네스 판) 판정 실패: {type(err).__name__}: {err}", file=sys.stderr)
 
     def _failed_issue(self, s: dict, e: dict) -> dict:
         """is_error result 를 오류 카드 모델로 만든다. assistant 오류 이벤트·재시도로 이미 알던 것을 이어받는다.

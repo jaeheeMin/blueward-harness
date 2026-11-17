@@ -19,7 +19,7 @@
   var CHECK_NAMES = { sync: '최신 내용 받기', version: '하네스 판', update: '갱신', reload: '다시 불러오기' };
   // 시안 G-13: 새 세션이 스스로 하는 점검은 이 두 줄뿐이다. 갱신·다시 불러오기는 도구 줄(자세히)에서 직접 한다.
   var AUTO_CHECKS = ['sync', 'version'];
-  var CHECK_STATES = { done: ['ok', 'done', 'pass', 'passed', 'fresh', 'same'], run: ['running', 'active', 'doing'], fail: ['fail', 'failed', 'error', 'stale', 'differs', 'old'] };
+  var CHECK_STATES = { done: ['ok', 'done', 'pass', 'passed', 'fresh', 'same'], run: ['running', 'active', 'doing'], fail: ['fail', 'failed', 'error', 'stale', 'differs', 'old'], unknown: ['unknown'] };
   var JOB_OK = ['done', 'ready', 'complete', 'completed', 'ok', 'success', 'succeeded'];
   var JOB_FAIL = ['error', 'fail', 'failed', 'cancelled', 'canceled'];
   var PREVIEW_KINDS = ['md', 'table', 'slides', 'image'];
@@ -299,10 +299,11 @@
     if (CHECK_STATES.done.indexOf(st) >= 0) return 'done';
     if (CHECK_STATES.run.indexOf(st) >= 0) return 'run';
     if (CHECK_STATES.fail.indexOf(st) >= 0) return 'fail';
+    if (CHECK_STATES.unknown.indexOf(st) >= 0) return 'unknown';  // 훅이 결과를 판정하지 못했다. 됐다고도 안 됐다고도 하지 않는다(#1059)
     if (st === 'skipped') return 'skipped';
     return 'todo';
   }
-  var CHECK_LABEL = { done: '됐어', run: '하는 중', fail: '다시 필요', skipped: '건너뜀', todo: '아직' };
+  var CHECK_LABEL = { done: '됐어', run: '하는 중', fail: '다시 필요', unknown: '확인 못 함', skipped: '건너뜀', todo: '아직' };
   // 자동 점검이 아직 안 끝났는가(새 세션이 첫 일을 하기 전). 건너뛴 항목은 끝난 것으로 본다.
   function autoChecksOpen(s) {
     return arr(s && s.startChecks).some(function (c) { return c && AUTO_CHECKS.indexOf(c.id) >= 0 && lower(c.state) === 'pending'; });
@@ -314,7 +315,7 @@
       var hit = list.filter(function (c) { return c && c.id === id; })[0];
       if (!hit) return null;
       var state = checkState(hit.state);
-      return { id: id, name: CHECK_NAMES[id], state: state, label: CHECK_LABEL[state], kind: id === 'reload' ? 'console' : 'skill' };
+      return { id: id, name: CHECK_NAMES[id], state: state, label: CHECK_LABEL[state], reason: String(hit.reason || ''), kind: id === 'reload' ? 'console' : 'skill' };
     }).filter(Boolean);
   }
 

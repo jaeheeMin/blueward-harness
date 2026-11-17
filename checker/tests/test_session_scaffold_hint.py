@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -158,3 +159,111 @@ def test_양식_판정_스크립트가_없으면_양식을_안내하지_않는�
     out = _run(root, repo)  # 판정을 못 하면 "없음" 으로 말하지 않는다
     assert FORMS_HINT not in out
     assert "현재 브랜치:" in out
+
+
+# ---- 시작 때 최신 받기 결과를 웹 콘솔에 알린다(#1059) ----
+
+import http.server
+import threading
+import time
+
+
+@pytest.fixture
+def sync_plugin_root(tmp_path) -> Path:
+    root = tmp_path / "sync-root" / "harness"
+    (root / "hooks").mkdir(parents=True)
+    (root / "console").mkdir()
+    shutil.copy(PLUGIN_ROOT / "hooks" / "session-start-sync.sh", root / "hooks" / "session-start-sync.sh")
+    shutil.copy(PLUGIN_ROOT / "console" / "start_sync_post.py", root / "console" / "start_sync_post.py")
+    return root
+
+
+class _FakeConsole:
+    def __init__(self):
+        self.got = []
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                outer.got.append((self.path, json.loads(self.rfile.read(n).decode("utf-8"))))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), H)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def wait(self, timeout=60.0):
+        end = time.monotonic() + timeout
+        while time.monotonic() < end and not self.got:
+            time.sleep(0.1)
+        return self.got
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def _run_with_session(root: Path, cwd: Path, **extra_env: str) -> subprocess.CompletedProcess:
+    env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(root), **extra_env}
+    env.pop("CLAUDE_PROJECT_DIR", None)
+    return subprocess.run([_BASH, str(root / "hooks" / "session-start-sync.sh")],
+                          input=json.dumps({"cwd": str(cwd), "session_id": "sess-1", "hook_event_name": "SessionStart"}),
+                          capture_output=True, text=True, encoding="utf-8", env=env, timeout=120)
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv 가 없으면 콘솔로 보내는 스크립트를 돌릴 수 없다")
+def test_원격이_없으면_콘솔에_확인_못_함으로_알린다(sync_plugin_root, tmp_path):
+    fake = _FakeConsole()
+    try:
+        done = _run_with_session(sync_plugin_root, _git_repo(tmp_path), HARNESS_CONSOLE_PORT=str(fake.port))
+        assert done.returncode == 0, done.stderr
+        got = fake.wait()
+    finally:
+        fake.close()
+    assert got, "콘솔이 결과를 받지 못했다"
+    path, body = got[0]
+    assert path == "/hooks/event" and body["hook_event_name"] == "HarnessStartSync" and body["session_id"] == "sess-1"
+    assert body["state"] == "unknown" and body["reason"] and body["cwd"]
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv 가 없으면 콘솔로 보내는 스크립트를 돌릴 수 없다")
+def test_원격과_같으면_콘솔에_됐음으로_알린다(sync_plugin_root, tmp_path):
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    repo = _git_repo(tmp_path)
+    git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t"]
+    (repo / "a.txt").write_text("a", encoding="utf-8")
+    subprocess.run(git + ["add", "."], cwd=repo, check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "init"], cwd=repo, check=True)
+    subprocess.run(["git", "branch", "-M", "feat/1-a"], cwd=repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-q", "-u", "origin", "feat/1-a"], cwd=repo, check=True)
+    fake = _FakeConsole()
+    try:
+        done = _run_with_session(sync_plugin_root, repo, HARNESS_CONSOLE_PORT=str(fake.port))
+        assert done.returncode == 0, done.stderr
+        got = fake.wait()
+    finally:
+        fake.close()
+    assert got and got[0][1]["state"] == "ok" and "최신" in got[0][1]["reason"]
+
+
+def test_콘솔이_없어도_훅_출력과_종료_코드는_그대로다(sync_plugin_root, session_plugin_root, tmp_path):
+    repo = _git_repo(tmp_path)
+    quiet = _run_with_session(sync_plugin_root, repo, HARNESS_CONSOLE_PORT="1")  # 아무도 듣지 않는 포트
+    bare = _run_with_session(session_plugin_root, repo)  # 콘솔로 보내는 스크립트가 아예 없는 플러그인 폴더
+    assert quiet.returncode == 0 and bare.returncode == 0
+    same = lambda r, root: r.stdout.replace(str(root), "ROOT").replace("\\", "/")  # 플러그인 폴더 경로만 다르다
+    assert same(quiet, sync_plugin_root) == same(bare, session_plugin_root) and "현재 브랜치:" in quiet.stdout
+    assert quiet.stderr == bare.stderr
+
+
+def test_콘솔로_보내는_스크립트는_입력이_이상해도_조용히_끝난다():
+    for raw in (b"", b"not json", b"[1]", json.dumps({"cwd": "/x"}).encode()):
+        done = subprocess.run([sys.executable, "-I", str(PLUGIN_ROOT / "console" / "start_sync_post.py"), "latest"], input=raw, capture_output=True, timeout=30)
+        assert done.returncode == 0 and done.stdout == b"" and done.stderr == b""

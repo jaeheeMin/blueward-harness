@@ -297,6 +297,13 @@ const cases = {
     assert.strictEqual(L.autoChecksOpen({ startChecks: [{ id: 'sync', state: 'done' }, { id: 'version', state: 'skipped' }, { id: 'update', state: 'pending' }] }), false);
     assert.strictEqual(L.autoChecksOpen({}), false);
   },
+  start_checks_unknown_and_fail_with_reason() {
+    // 훅·판 확인 결과: 확인 못 함(unknown)·다시 필요(fail)와 사유(#1059). 점검이 끝나지 않은 것(pending)과는 다르다
+    const got = L.startChecks({ startChecks: [{ id: 'sync', state: 'unknown', reason: '원격이 없어' }, { id: 'version', state: 'fail', reason: '더 새 판이 있어(0.10.9)' }] });
+    assert.deepStrictEqual(got.map(c => [c.state, c.label, c.reason]), [['unknown', '확인 못 함', '원격이 없어'], ['fail', '다시 필요', '더 새 판이 있어(0.10.9)']]);
+    assert.strictEqual(L.startChecks({ startChecks: [{ id: 'sync', state: 'pending' }] })[0].label, '아직');
+    assert.strictEqual(L.startChecks({ startChecks: [{ id: 'sync', state: 'done' }] })[0].reason, '');
+  },
   next_flow_and_job() {
     const s = { nextFlow: { options: [{ flow: 'spec', label: '개발 Spec 만들기', value: '개발', count: 3 }, { flow: null, label: '권한(준비 중)', disabled: true }, { flow: null, label: '끝' }], hint: 'h', unknown: '' } };
     const o = L.nextOptions(s).options;
@@ -993,6 +1000,9 @@ const cases = {
     assert.strictEqual(find(p.el, e => e.tag === 'button').length, 0);  // 스스로 하는 줄이라 버튼이 없다(잘못됐을 때만 다시 하기)
     p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'done' }, { id: 'version', state: 'fail' }] });
     assert.deepStrictEqual(find(p.el, e => e.tag === 'button').map(b => b.textContent), ['다시 하기']);
+    p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'unknown', reason: '원격이 없어' }, { id: 'version', state: 'fail', reason: '더 새 판이 있어(0.10.9)' }] });
+    assert.deepStrictEqual(find(p.el, e => e.attrs['data-check']).map(e => e.attrs['data-check'] + ':' + e.attrs['class']), ['sync:crow unk', 'version:crow fail']);
+    assert.ok(p.el.textContent.includes('확인 못 함') && p.el.textContent.includes('원격이 없어') && p.el.textContent.includes('다시 필요') && p.el.textContent.includes('더 새 판이 있어(0.10.9)'));
     p.update({ id: 's1', startChecks: [] }); assert.ok(p.el.hidden);
     p.destroy();
     // 검사 실패는 ✕ 막힘, 결과를 못 읽으면 ? 확인 못 함, 통과·진행 중에는 둘 다 없다
@@ -1488,7 +1498,8 @@ out.spread = new Set(ids.map(P.personOf)).size;
 out.states = [
   mk({ pendingRequestIds: ['r1'] }), mk({ status: 'running' }), mk({ lastBlock: { kind: 'blocked', open: true } }), mk({ lastBlock: { kind: 'cannot_check', open: true } }),
   mk({ flowPr: { number: 3, state: 'OPEN', checks: 'pass' } }), mk({ flowPr: { number: 3, state: 'MERGED' } }), mk({ status: 'ended' }), mk({}),
-  mk({ status: 'running', pendingRequestIds: ['r1'] }), mk({ flowPr: { number: 3, state: 'OPEN', checks: 'fail' } })
+  mk({ status: 'running', pendingRequestIds: ['r1'] }), mk({ flowPr: { number: 3, state: 'OPEN', checks: 'fail' } }),
+  mk({ status: 'ended', flowPr: { number: 3, state: 'OPEN', checks: 'pass' } }), mk({ status: 'ended', flowPr: { number: 3, state: 'CLOSED' } })
 ].map(s => P.stateOf(s, L));
 const st = (flowId, name, extra) => mk(Object.assign({ flowId, flowSteps: [{ id: 'x', name }], stepIndex: 0 }, extra));
 out.stations = [
@@ -1513,7 +1524,9 @@ def test_post_logic_person_state_station():
     # 가이드 6.3 의 해시(h = h*31 + 문자코드, 부호 없는 32비트)와 같은 값: 'a' = 97 % 7 = 6 → kid
     assert out["p"][0] == "kid" and out["p"][3] == "mint"
     # 6.2: 내 차례 > 막힘 > 확인 못 함 > 일하는 중 > 승인 기다림 > 끝 > 쉬는 중. 일하는 중인 세션은 대기 요청이 있어도 내 차례다(groupOf 가 먼저).
-    assert out["states"] == ["turn", "run", "blocked", "unk", "wait", "done", "done", "idle", "turn", "turn"]
+    assert out["states"] == ["turn", "run", "blocked", "unk", "wait", "done", "done", "idle", "turn", "turn", "done", "done"]
+    # 끝난 세션은 PR 이 열려 있어도 끝남이다 — 승인 기다림(일하는 중 칸)에 넣지 않는다(#1059)
+    assert out["states"][10] == "done" and out["states"][4] == "wait"
     # 6.1: 합쳐짐 4 · 검토 3 · 개발 2 · 설계 1 · 쓰기 0 · 갈래 없음 2
     assert out["stations"] == [2, 0, 0, 1, 2, 2, 2, 2, 3, 3, 0, 4, 4, 3, 2]
     assert out["poses"] == "ask,stuck,stuck,walk,wait,done,walk" and out["tones"] == "turn,blocked,,,,done,"  # 세션·요청 화면 규칙은 아래 test_post_session_logic_filters_info_and_seals

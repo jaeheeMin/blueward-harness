@@ -393,6 +393,19 @@ def pr_status(run: Runner, cwd: str, branch: str, number: int | None = None) -> 
     return {"state": "ok", "pr": None, "reason": ""}
 
 
+REPO_PR_LIMIT = 100
+
+
+def repo_prs(run: Runner, root: str, limit: int = REPO_PR_LIMIT) -> dict:
+    """저장소 하나에서 내가 올린 PR 을 열림·닫힘·합쳐짐 가리지 않고 한꺼번에 읽는다(gh 한 번, #1059).
+    {"state": "ok"|"unknown", "reason", "prs": {번호: pr_status 의 pr 항목과 같은 모양}}. 못 읽으면 빈 목록이 아니라 unknown 이다."""
+    rc, out = run(["gh", "pr", "list", "--state", "all", "--author", "@me", "--limit", str(limit), "--json", PR_FIELDS], root)
+    data = _json(out) if rc == 0 else None
+    if not isinstance(data, list):
+        return {"state": "unknown", "reason": f"gh 로 PR 목록을 읽지 못했어(종료코드 {rc}).", "prs": {}}
+    return {"state": "ok", "reason": "", "prs": {d["number"]: _pr_item(d) for d in data if isinstance(d, dict) and d.get("number")}}
+
+
 def parse_approvers(text: str | None) -> tuple[dict[str, set[str]], set[str], bool]:
     """`.github/ssot-approvers` 읽기. checker.ssot_approval.parse_approvers 와 같은 형식이다(엔진은 이 플러그인 밖이라 따로 둔다).
     (작성자별 승인자, 기본 승인자, 내용이 있는가)."""
