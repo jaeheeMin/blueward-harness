@@ -887,7 +887,7 @@
       function fetchFiles(s) {
         if (loading) return;
         loading = true; st.at = Date.now();
-        api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { st.files = L.docList(kit.listOf(d, 'files')); st.attach = kit.listOf(d, 'attachments'); st.error = null; st.unknown = d && d.unknown ? String(d.reason || '') : null; st.note = d && d.note ? String(d.note) : ''; st.truncated = !!(d && d.truncated); },
+        api('GET', '/api/sessions/' + sid(s) + '/files').then(function (d) { st.files = L.docList(kit.listOf(d, 'files')).filter(L.isFormOutput); st.attach = kit.listOf(d, 'attachments'); st.error = null; st.unknown = d && d.unknown ? String(d.reason || '') : null; st.note = d && d.note ? String(d.note) : ''; st.truncated = !!(d && d.truncated); },
           function (e) { st.error = e; }).then(function () { loading = false; if (alive) { drawList(); autoPick(); } });
       }
       function selectFile(f) {
@@ -910,12 +910,11 @@
             h('small', { text: [L.kindBadge(f), f.size != null ? kit.fmtSize(f.size) : '', f.mtime ? kit.clock(f.mtime) : ''].filter(Boolean).join(' · ') })),
           c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text }) : null);
       }
-      // 시안 G-09: 처음엔 가장 최근 글 문서(md)를 흰 종이로 미리 보여 준다. 사람이 닫을 방법은 없다(다른 문서를 고르면 바뀐다).
+      // 처음엔 가장 최근 양식 파일(xlsx·pptx·docx)을 미리 보여 준다(#1037: md 는 이 목록에 없다). 사람이 닫을 방법은 없다(다른 문서를 고르면 바뀐다).
       function autoPick() {
         if (st.selected || st.auto || !st.files || !st.files.length) return;
-        var md = st.files.filter(function (f) { return /\.(md|markdown|txt)$/i.test(f.path); })[0];
         st.auto = true;
-        if (md) selectFile(md);
+        selectFile(st.files[0]);
       }
       // 시안 G-07·16·18: 보여 줄 문서(또는 확인 못 했다는 말)가 없으면 세션 화면이 이 칸을 아예 두지 않는다.
       // 처음 불러오는 동안은 "불러오는 중이에요" 와 함께 칸을 두고, 다 읽은 뒤에 비어 있으면 거둔다.
@@ -935,7 +934,7 @@
         if (st.unknown != null) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '바뀐 문서를 확인하지 못했어.' + (st.unknown ? ' (' + st.unknown + ')' : '') + ' 아래 목록에 빠진 문서가 있을 수 있어.' }));
         if (st.note) listBox.appendChild(h('p', { class: 'note-muted', role: 'status', text: st.note }));
         if (st.truncated) listBox.appendChild(h('p', { class: 'note-attn', role: 'status', text: '문서가 너무 많아 목록이 잘렸어. 더 있을 수 있어.' }));
-        if (!st.files.length) { listBox.appendChild(h('p', { class: 'note-muted', text: st.unknown != null ? '확인된 문서가 없어.' : '아직 만든 문서가 없어.' })); return; }
+        if (!st.files.length) { listBox.appendChild(h('p', { class: 'note-muted', text: st.unknown != null ? '확인된 산출물이 없어.' : '아직 양식으로 뽑은 산출물이 없어.' })); return; }
         // 시안 G-08(일하는 중): 오른쪽은 문서 미리보기 한 장 — 다른 문서 목록은 눌렀을 때만 펼친다(고를 수 있게 남겨 둔다).
         // G-09(일을 마치고 내 차례): 미리보기 아래에 문서 줄 목록을 보인다.
         if (st.selected && !st.showList && last && last.status === 'running') {

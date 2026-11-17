@@ -1647,7 +1647,7 @@
       var PL = window.BHPostLogic;
       regions.here = h('div', { class: 'po-here-slot' });
       regions.check = h('div', { 'data-r': 'check' }); regions.memInfo = h('div', { 'data-r': 'meminfo' });
-      regions.noDocs = h('p', { class: 'empty', text: '아직 만든 문서가 없어.', hidden: true });
+      regions.noDocs = h('p', { class: 'empty', text: '아직 양식으로 뽑은 산출물이 없어.', hidden: true });
       talk.className = 'light talk po-stream';
       var header = h('header', { class: 'po-sh' }, h('div', { class: 'po-sh-main' }, titleCol, regions.strip), regions.here);
       talk.insertBefore(regions.notices, talk.firstChild);
@@ -1657,11 +1657,11 @@
       talk.insertBefore(regions.subs, regions.after);
       var sec = function (title, nodes) { return [h('h3', { class: 'po-ih', text: title })].concat(nodes); };
       var bodies = [
-        sec('만든 산출물', [regions.side, regions.noDocs, regions.files]),
+        sec('만든 산출물', [regions.side, regions.noDocs]),  // 바뀐 파일 목록(regions.files)은 기술 탭에 둔다(같은 파일이 두 번 나오지 않게, #1037)
         sec('PR 검사', [regions.check]),
         sec('기억과 한도', [regions.memInfo, regions.memory]),
         sec('이 세션에서 일어난 일', [regions.log]),
-        sec('기술 정보', [regions.tech, regions.perm, regions.tools])
+        sec('기술 정보', [regions.files, regions.tech, regions.perm, regions.tools])
       ];
       var panels = bodies.map(function (b, i) { return h('section', { class: 'light po-ipanel', role: 'tabpanel', id: 'po-pan-' + i, 'aria-labelledby': 'po-tab-' + i, hidden: i !== inspTab }, b); });
       function pick(i, focus) {
