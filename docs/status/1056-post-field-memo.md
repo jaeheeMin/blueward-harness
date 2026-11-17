@@ -11,7 +11,7 @@ Post 점검 시안(세 안 중 C안 "현장 메모")에서 사용자가 범위�
 | `plugins/harness/console/static/app.js` | `attachScene(host, extra)` 로 `onFocus` 를 넘기는 길, 홈 뷰가 `slots.scene()` 을 준다 |
 | `plugins/harness/console/static/theme-post.css` | 장면 틀·메모·꼬리(`.is-flip`)·메모 칩 글자색. 760px 이하 static |
 | `plugins/harness/console/static/post/office/office-post.js` | 번들(onFocus·focus·끌어 보기, ai-office-iso) |
-| `plugins/harness/.claude-plugin/plugin.json`, `console/whats_new.json` | 0.10.316(whats_new 는 이 범위 두 줄) |
+| `plugins/harness/.claude-plugin/plugin.json`, `console/whats_new.json` | 0.10.319(열린 PR #1052·#1054·#1050 이 0.10.316~0.10.318 을 써서 그 다음. whats_new 는 이 범위 줄) |
 | `docs/guide/harness-guide.html` | 웹 콘솔 탭의 Post 오늘 화면 설명(틀 안 폭 가득, 끌어 보기, 메모) |
 | `checker/tests/test_web_console_ui.py` | `test_post_home_field_memo_layout`: 메모·틀·focus 연결 + 장면 칸 밖은 그대로(덱·숫자 칸·`HK.homeTable`·범례·팀 줄·레일 배지) |
 
