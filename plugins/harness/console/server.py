@@ -47,8 +47,8 @@ GAP_NOTICE_SECONDS = 1800.0  # git 상태를 못 읽은 일을 만든 문서 목
 TOKEN_TTL = 60.0
 API_BODY_LIMIT = 1 << 20
 HOOK_BODY_LIMIT = 32 << 20
-ATTACH_BODY_LIMIT = HOOK_BODY_LIMIT  # 이어서 요청의 첨부(base64). 합계 20MB 원본이 약 26.7MB 라 이 안에 든다(attachments.py)
-ATTACH_PATH = re.compile(r"/api/sessions/[^/]+/messages")
+ATTACH_BODY_LIMIT = HOOK_BODY_LIMIT  # 이어서 요청과 새 작업 시작의 첨부(base64). 합계 20MB 원본이 약 26.7MB 라 이 안에 든다(attachments.py)
+ATTACH_PATH = re.compile(r"/api/sessions/[^/]+/messages|/api/new/[^/]+/start")
 DRAIN_LIMIT = 1 << 20   # 오류 응답 전에 버려 읽는 본문의 상한
 DRAIN_SECONDS = 1.0     # 버려 읽는 데 쓰는 총 시간
 HEARTBEAT = 10.0
@@ -1869,6 +1869,10 @@ class App:
         if effort is None:
             effort = job.get("effort")
         permission = self.requested_permission(b)
+        try:
+            files = attachments.parse(b.get("attachments"))  # 이어서 요청(a_message)과 같은 검사. 세션을 띄우기 전에 거른다
+        except attachments.AttachmentError as e:
+            raise HttpError(e.status, str(e))
         flow_id, flow_reason = self.chosen_flow(job, b)
         found = (job.get("result") or {}).get("flow") or {}
         tool_only = not flow_id and (b.get("flow") == analysis.NO_FLOW or (b.get("flow") is None and (
@@ -1877,7 +1881,7 @@ class App:
         with job["start_lock"]:  # 시작 버튼을 두 번 눌러도 세션은 하나만 뜬다
             sid = job.get("session_id")
             if sid is None:
-                sid = self.manager.launch(job["cwd"], message, title=analysis.session_title((job.get("result") or {}).get("title"), (job.get("result") or {}).get("understood"), job["text"]), model=model, effort=effort, permission=permission)
+                sid = self.manager.launch(job["cwd"], message, title=analysis.session_title((job.get("result") or {}).get("title"), (job.get("result") or {}).get("understood"), job["text"]), model=model, effort=effort, permission=permission, attachments=files or None)
                 if sid is None:
                     raise HttpError(502, "claude 세션을 띄우지 못했어. " + platform_compat.CLAUDE_MISSING)
                 job["session_id"] = sid

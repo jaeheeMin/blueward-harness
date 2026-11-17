@@ -8166,6 +8166,80 @@ def test_message_attachment_errors_over_http(mconsole):
     assert st == 413 and "5MB" in data["error"]  # 본문 상한(1MB)이 아니라 첨부 검사가 답한다
 
 
+def new_job(c, text="계획 세워줘"):
+    jid = c.call("POST", "/api/new", {"text": text, "cwd": str(c.work)})[1]["id"]
+    wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
+    return jid
+
+
+def test_new_task_start_with_attachments_reaches_claude_with_first_message(mconsole, monkeypatch, tmp_path):
+    """새 작업 시작(#1038): 첨부가 첫 요청에 content 블록으로 간다. Windows 경로·한글·공백 이름도 같게 정리된다."""
+    log = tmp_path / "content.log"
+    monkeypatch.setenv("FAKE_CONTENT_LOG", str(log))
+    c = mconsole
+    jid = new_job(c)
+    files = [att("C:\\Users\\민재희\\바탕 화면\\화면 캡처 1.png", "image/png", PNG_1PX), att("/home/a/계약서 v1.pdf", "application/pdf", PDF_MIN)]
+    st, body, _ = c.call("POST", f"/api/new/{jid}/start", {"picked": [], "attachments": files})
+    assert st == 202 and body["id"]
+    wait_for(lambda: log.exists() and log.read_text(encoding="utf-8").strip())
+    blocks = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
+    assert [b["type"] for b in blocks] == ["image", "document", "text"]
+    assert blocks[0]["source"] == {"type": "base64", "media_type": "image/png", "data": PNG_1PX}
+    assert "계획 세워줘" in blocks[2]["text"]  # 첫 요청 글과 함께 간다
+    chat = [x for x in c.call("GET", f"/api/sessions/{body['id']}")[1]["chat"] if x.get("role") == "me" and x.get("attachments")]
+    assert [a["name"] for a in chat[0]["attachments"]] == ["화면 캡처 1.png", "계약서 v1.pdf"]  # 경로는 떼고 이름만(\\ 도 / 도)
+    assert PNG_1PX not in json.dumps(c.app.store.get(body["id"]), ensure_ascii=False)
+
+
+def test_new_task_start_without_attachments_is_unchanged(mconsole, monkeypatch, tmp_path):
+    log = tmp_path / "content.log"
+    monkeypatch.setenv("FAKE_CONTENT_LOG", str(log))
+    c = mconsole
+    for extra in ({}, {"attachments": []}, {"attachments": None}):
+        jid = new_job(c)
+        assert c.call("POST", f"/api/new/{jid}/start", dict({"picked": []}, **extra))[0] == 202
+    assert not log.exists()  # 글만이면 content 배열이 아니다
+
+
+def test_new_task_start_rejects_bad_attachments_before_launching(mconsole):
+    c = mconsole
+    jid = new_job(c)
+    big = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * (5 * 1024 * 1024)).decode()
+    for items, status in (([att("a.exe", "application/x-msdownload", PNG_1PX)], 400),
+                          ([att("a.png", "image/png", PDF_MIN)], 400),             # 이름·형식은 png 인데 내용은 PDF
+                          ([att("a.png", "image/png", "!!!")], 400),
+                          ([att("big.png", "image/png", big)], 413),                # 본문 상한(1MB)이 아니라 첨부 검사가 답한다
+                          ([att(f"{i}.png", "image/png", PNG_1PX) for i in range(6)], 400),
+                          ("not a list", 400)):
+        st, data, _ = c.call("POST", f"/api/new/{jid}/start", {"picked": [], "attachments": items})
+        assert st == status and data["error"], (items if isinstance(items, str) else items[0]["name"])
+    assert c.app.get_job(jid).get("session_id") is None  # 거절된 요청은 세션을 띄우지 않았다
+    # 거절된 뒤에도 같은 작업을 올바른 첨부로 시작할 수 있다(세션은 하나)
+    assert c.call("POST", f"/api/new/{jid}/start", {"picked": [], "attachments": [att("a.png", "image/png", PNG_1PX)]})[0] == 202
+
+
+def test_attachment_body_limit_path_covers_new_task_start():
+    pat = console_server.ATTACH_PATH
+    assert pat.fullmatch("/api/new/abc123/start") and pat.fullmatch("/api/sessions/s-1/messages")
+    for other in ("/api/new", "/api/new/abc123", "/api/new/abc123/preview", "/api/new/abc123/start/x", "/api/new//start", "/api/sessions/s1/attachments/pick"):
+        assert not pat.fullmatch(other), other
+
+
+def test_new_task_start_accepts_body_over_1mb_but_not_over_32mb(mconsole):
+    c = mconsole
+    jid = new_job(c)
+    two_mb = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * (2 * 1024 * 1024)).decode()  # JSON 본문이 1MB 를 넘는다
+    assert len(two_mb) > console_server.API_BODY_LIMIT
+    assert c.call("POST", f"/api/new/{jid}/start", {"picked": [], "attachments": [att("큰 그림.png", "image/png", two_mb)]})[0] == 202
+    # 이 경로도 32MB 를 넘으면 본문을 읽기 전에 거부한다. 다른 새 작업 경로는 1MB 그대로.
+    for path, limit in ((f"/api/new/{jid}/start", console_server.ATTACH_BODY_LIMIT), ("/api/new", console_server.API_BODY_LIMIT)):
+        sock = socket.create_connection(("127.0.0.1", c.port))
+        sock.sendall((f"POST {path} HTTP/1.0\r\nHost: 127.0.0.1:{c.port}\r\nCookie: harness_console={c.cookie}\r\nContent-Type: application/json\r\n"
+                      f"Content-Length: {limit + 1}\r\n\r\n").encode())
+        assert sock.recv(64).startswith(b"HTTP/1.0 413"), path
+        sock.close()
+
+
 def test_terminal_session_cannot_receive_attachments(browser):
     browser.event("t1", "UserPromptSubmit", prompt="작업")
     assert browser.call("GET", "/api/sessions/t1")[1]["canAttach"] is False

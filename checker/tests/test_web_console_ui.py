@@ -1147,6 +1147,28 @@ const cases = {
     (c.field.listeners.input || []).forEach(f => f({ target: { value: '한 줄\n두 줄' } })); assert.strictEqual(typed, '한 줄\n두 줄');
     assert.ok(A.enterSends({ key: 'Enter' }) && !A.enterSends({ key: 'Enter', shiftKey: true }) && !A.enterSends({ key: 'Enter', isComposing: true }));
   },
+  attach_plain_option_for_new_task_field() {
+    // 새 작업 입력칸(#1038): 같은 composer 를 쓰되 Enter 는 줄바꿈(보내지 않음)이고 높이는 바깥 CSS 가 정한다. 칸 모양은 cls·rows 로 고른다.
+    delete require.cache[require.resolve(path.join(dir, 'attach.js'))];
+    const A = require(path.join(dir, 'attach.js'));
+    window.FileReader = function () { this.readAsDataURL = (f) => { this.result = 'data:' + f.type + ';base64,QUJD'; setTimeout(() => this.onload(), 0); }; };
+    let sent = 0, typed = null;
+    const c = A.composer(h, { id: 'brief', cls: 'textarea', rows: '3', plain: true, placeholder: '', onInput: v => { typed = v; }, onSend() { sent++; } });
+    assert.strictEqual(c.field.attrs.id, 'brief'); assert.strictEqual(c.field.attrs.rows, '3'); assert.ok(c.field.className.includes('textarea') && !c.field.className.includes('comp-in'));
+    let prevented = false;
+    (c.field.listeners.keydown || []).forEach(f => f({ key: 'Enter', keyCode: 13, preventDefault() { prevented = true; } }));
+    assert.strictEqual(prevented, false); assert.strictEqual(sent, 0);
+    assert.ok(!c.field.style || !c.field.style.height);  // 높이를 자동으로 바꾸지 않는다
+    (c.field.listeners.input || []).forEach(f => f({ target: { value: '한 줄\n두 줄' } })); assert.strictEqual(typed, '한 줄\n두 줄');
+    // 다시 그릴 때 첨부·글·안내가 새 칸으로 이어진다(keep/restore)
+    c.add([{ name: '화면.png', type: 'image/png', size: 10 }, { name: 'a.docx', type: 'application/x', size: 10 }]);
+    const kept = c.keep(), note = c.keptNote();
+    assert.ok(note.includes('a.docx'));
+    const d = A.composer(h, { id: 'brief', cls: 'textarea', rows: '3', plain: true, placeholder: '' });
+    d.restore(kept, '이어진 글', note);
+    assert.strictEqual(d.field.value, '이어진 글'); assert.strictEqual(d.count(), 1); assert.ok(d.chips.hidden === false);
+    return tick().then(() => { assert.deepStrictEqual(d.payload().map(a => a.name), ['화면.png']); assert.ok(!d.busy()); });  // 읽던 첨부는 같은 객체에 채워진다
+  },
   attach_chips_limits_and_remove() {
     delete require.cache[require.resolve(path.join(dir, 'attach.js'))];
     const A = require(path.join(dir, 'attach.js'));
@@ -2119,6 +2141,32 @@ def test_work_screen_new_task_has_kinds_flow_and_advanced_fold(tmp_path):
     # 시안 순서: 고급 설정은 작업 시작 줄 아래
     assert text.index("작업 시작") < text.index("고급 설정")
     assert "<details.more>" in got["dump"]  # 모델·생각 깊이·권한은 접힌 "고급" 안에 그대로 있다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_has_folder_pick_button_and_attach(tmp_path):
+    """새 작업 화면(#1038): 클립 단추는 "작업 폴더에서 고르기", 내 컴퓨터의 그림·PDF 는 첨부 단추. 눌러도 @ 는 하나만 남는다.
+    가짜 화면(console_ui_smoke.js)은 Post 새 작업 배치(classList)를 그리지 못해 Sauce 만 본다. Post 는 실제 브라우저로 확인했다."""
+    acts = [{"click": ".refbox"}, {"read": "#brief"}, {"click": ".refbox"}, {"read": "#brief"}]
+    got = _smoke(tmp_path, "new", [], extra={"GET /api/folders/last": {"path": "C:/w/proj"}}, actions=acts)
+    assert "작업 폴더에서 고르기" in got["text"] and "그림(png·jpg·gif·webp)과 PDF 만 붙일 수 있어" in got["text"]
+    assert "<span.attach-pick>" in got["dump"] and "<textarea.textarea" in got["dump"] and "<div.attach-box" in got["dump"]
+    assert got["values"] == ["@", "@"]  # 두 번 눌러도 "@ @" 가 되지 않는다(목록 열고 닫기는 브라우저 실측)
+    assert [x for x in got["posts"] if "/start" in x[1]] == []
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_start_sends_no_attachments_key_when_none_attached(tmp_path):
+    got = _smoke(tmp_path, "new?id=A1", [_session("s9")], extra=_review_extra(_CONFIDENT_FLOW), actions=[{"click": ".pill.dark.big"}])
+    body = json.loads([x[2] for x in got["posts"] if "/start" in x[1]][0])
+    assert "attachments" not in body
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_new_task_file_list_request_is_not_queued_behind_other_gets():
+    src = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "UNQUEUED_GET = /^\\/api\\/files\\?/" in src and "UNQUEUED_GET.test(path)" in src
+    assert "'/api/files' + qs(" in src  # 목록 요청은 이 주소 모양이라 줄 세우지 않는 규칙에 걸린다
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
