@@ -1,5 +1,6 @@
 /* Post(우체국) 테마의 오늘(홈) 화면. Sauce 홈(flow-ui.js homeView)과 같은 데이터·같은 칸(승인 기다리는 PR·최근 산출물·고쳐야 할 내 PR·프로젝트 준비)을 쓰고,
    모양만 시안대로 다시 짠다: 인사 → "지금 세션들"(장면 + 범례) → "내 차례 N건" 덱 → 숫자 칸 → 아래 칸들.
+   장면 칸(#1056, 시안 C "현장 메모"): 사무실 장면이 테두리·둥근 모서리 틀 안에 폭 전체로 보이고, 그 위에 내 차례 메모가 뜬다(장면이 알려 준 좌표 옆).
    데이터가 없는 칸은 지어내지 않고 뺀다. 화면은 이벤트마다 통째로 다시 그리되(Sauce 홈과 같다) 장면 패널은 한 번만 만들어 둔다(장면은 매번 새로 만들지 않는다).
    app.js 가 create(kit) 로 한 번 만들고, 홈에 들어올 때마다 view(root, slots) 를 부른다. 덱의 질문 카드는 답이 성공하면 도장이 찍힌 채 잠깐 남는다(app.js stampStub). */
 (function () {
@@ -9,6 +10,12 @@
   var LEGEND = ['turn', 'run', 'wait', 'blocked', 'unk', 'done'];
   /* 사무실 장면(office-post.js) 아래 팀 요약. 갈래(flowId) → 팀. 갈래가 없는 세션은 어느 팀에도 세지 않는다. */
   var TEAMS = [['요구분석팀', ['srs', 'srs-export']], ['설계팀', ['spec']], ['개발팀', ['dev']], ['기능컨설팅팀', ['config']], ['표준화팀', ['standard']], ['유지보수팀', ['fix']]];
+  var NARROW = '(max-width: 760px)';  // 이 폭 이하에서는 메모가 장면 아래로 내려온다(시안 media query)
+
+  function teamOf(flow) {
+    for (var i = 0; i < TEAMS.length; i++) if (TEAMS[i][1].indexOf(flow) >= 0) return TEAMS[i][0];
+    return '';
+  }
 
   function dateLine(d) {
     var hr = d.getHours(), ap = hr < 12 ? '오전' : '오후', h12 = hr % 12 === 0 ? 12 : hr % 12, mm = d.getMinutes();
@@ -56,30 +63,37 @@
       return kit.isPlan(r) ? '계획' : k === 'question' || k === 'elicitation' ? '질문' : '승인';
     }
 
-    function cardBody(it) {
-      var s = it.s, name = s.title || HK.folderName(s) || '이름 없는 세션', b = h('div', { class: 'po-dc-b' });
+    /* 덱 카드와 메모가 같은 문장·같은 동작을 쓴다: { q: 문장 } 또는 { node: 바로 답하는 질문 폼 }, 그리고 { href, verb }.
+       inline 이 false(메모)면 질문 폼을 그리지 않고 문장 + 답하러 가는 링크만 준다(덱의 폼과 같은 칸이 두 번 생기지 않게). */
+    function cardAct(it, inline) {
+      var s = it.s;
       if (it.kind !== 'turn') {
         var cant = it.kind === 'unk';
-        b.appendChild(h('p', { class: 'po-dc-q', text: cant ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자' }));
-        b.appendChild(h('div', { class: 'po-dc-act' }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'pill acc', text: '가서 보기' })));
-        return b;
+        return { q: cant ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자', href: '/s/' + encodeURIComponent(s.id), verb: '가서 보기' };
       }
       var pend = it.pend, r = pend && pend.r, k = r && kit.kindOf(r);
-      if (it.stampRid) { var sq = qc.inlineQuestion(it.stampRid); if (sq) { b.appendChild(sq); return b; } }
-      if (pend && r && k === 'question') {
+      if (inline && it.stampRid) { var sq = qc.inlineQuestion(it.stampRid); if (sq) return { node: sq }; }
+      if (inline && pend && r && k === 'question') {
         var q = qc.inlineQuestion(pend.rid);  // 보기를 바로 고른다(세션 화면과 같은 폼)
-        if (q) { b.appendChild(q); return b; }
+        if (q) return { node: q };
       }
       var plan = !!(r && kit.isPlan(r)), ask = k === 'question' || k === 'elicitation';
       var what = pend ? kit.requestTitle(r) : s.turnSkill === 'deliver' ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례야';
       var verb = ask ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
-      b.appendChild(h('p', { class: 'po-dc-q', text: what }));
-      b.appendChild(h('div', { class: 'po-dc-act' }, kit.link(pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id), { class: 'pill acc', text: verb })));
+      return { q: what, href: pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id), verb: verb };
+    }
+
+    function cardBody(it) {
+      var a = cardAct(it, true), b = h('div', { class: 'po-dc-b' });
+      if (a.node) { b.appendChild(a.node); return b; }
+      b.appendChild(h('p', { class: 'po-dc-q', text: a.q }));
+      b.appendChild(h('div', { class: 'po-dc-act' }, kit.link(a.href, { class: 'pill acc', text: a.verb })));
       return b;
     }
 
+    /* slots: { sceneHost, whatsSlot, scene() — 지금 붙은 장면 제어(focus(id) 를 줄 수 있으면 준다) } */
     function view(root, slots) {
-      var gone = false, topId = null, items = [];
+      var gone = false, topId = null, items = [], officeOn = false, foc = null, focusId = null, memoId = null;
       var approvals = h('div', { class: 'approvals light po-panel po-mini' });
       var recent = h('div', { class: 'light po-panel po-mini', 'data-recent': '1' });
       var projects = h('div', { class: 'projects' });
@@ -91,9 +105,11 @@
       var sceneSub = h('span', { class: 'po-sub' });
       var calmList = h('ul', { class: 'po-maplist', 'aria-label': '지금 세션들' });  // 차분(fx=0)일 때 장면 대신 보이는 세션 목록(시안 mapFallback)
       var teamRow = h('ul', { class: 'po-teams', 'aria-label': '팀별 세션 수', hidden: true });  // 사무실 장면이 있을 때만(창구 요약 줄 자리)
+      var memo = h('div', { class: 'po-memo', role: 'group', 'aria-label': '내 차례 메모', hidden: true });  // 장면 위에 띄우는 내 차례 메모(시안 .memo)
+      var stageFrame = h('div', { class: 'po-stagew' }, slots.sceneHost, memo);  // 사무실 장면이 보이면 테두리·둥근 모서리 틀(시안 .stage), 메모는 이 틀 안에서 뜬다
       var scenePanel = h('section', { class: 'light po-panel po-scenep', 'aria-labelledby': 'po-scene-h' },
         h('header', { class: 'po-ph' }, h('h2', { id: 'po-scene-h', text: '지금 세션들' }), sceneSub),
-        slots.sceneHost, teamRow, calmList,
+        stageFrame, teamRow, calmList,
         h('ul', { class: 'po-legend', 'aria-label': '상태 표시' }, LEGEND.map(function (k) { return h('li', null, stMark(k), PS.LABEL[k]); })));
       var deckSlot = h('div');
       var restSlot = h('div', { class: 'po-rest' });
@@ -102,7 +118,7 @@
       var body = h('div', { class: 'page home po-home' }, helloSlot, scenePanel, deckSlot, restSlot);
       root.appendChild(body);
 
-      function pickTop(id) { topId = id; paintDeck(); var q = '"' + CSS.escape(id) + '"', c = deckSlot.querySelector('[data-call=' + q + '], [data-call-block=' + q + ']'); if (c) { var f = c.querySelector('a, button'); if (f) f.focus(); } }
+      function pickTop(id) { topId = id; paintDeck(); paintMemo(); var q = '"' + CSS.escape(id) + '"', c = deckSlot.querySelector('[data-call=' + q + '], [data-call-block=' + q + ']'); if (c) { var f = c.querySelector('a, button'); if (f) f.focus(); } }
       function step(d) {
         if (items.length < 2) return;
         var i = 0; items.forEach(function (it, n) { if (it.id === topId) i = n; });
@@ -129,6 +145,56 @@
         var c = Array.prototype.filter.call(deckSlot.querySelectorAll('[data-call], [data-call-block]'), function (x) { return cardId(x) === m.id; })[0];
         var t = c && c.querySelectorAll(FOCUSABLE)[m.i];
         if (t) t.focus({ preventScroll: true });
+      }
+
+      /* 장면에 "이 사람을 보여 줘" 를 알린다. 번들이 옛 판이라 focus 가 없으면 아무것도 안 하고 메모는 기본 위치에 있다. */
+      function syncFocus(id) {
+        if (focusId === id) return;
+        focusId = id;
+        if (!id) foc = null;
+        var sc = slots.scene && slots.scene();
+        if (sc && typeof sc.focus === 'function') sc.focus(id);
+      }
+
+      /* 메모 자리: 장면이 알려 준 머리 위 좌표(host 기준 px) 오른쪽에 두고, 모자라면 왼쪽으로 뒤집는다. 좌표가 없으면 CSS 기본 자리(시안). 좁은 화면은 CSS 가 장면 아래에 둔다. */
+      function placeMemo() {
+        if (memo.hidden) return;
+        var narrow = typeof matchMedia === 'function' && matchMedia(NARROW).matches;
+        if (!foc || narrow || foc.id !== memoId) { memo.style.left = ''; memo.style.top = ''; memo.style.removeProperty('--tail'); memo.classList.remove('is-flip'); return; }
+        var host = slots.sceneHost, W = stageFrame.clientWidth, H = stageFrame.clientHeight, mw = memo.offsetWidth, mh = memo.offsetHeight;
+        var ox = host.offsetLeft, oy = host.offsetTop, hx = ox + foc.x, hy = oy + foc.y;
+        var x = hx + 24, flip = false, y = hy - 44;
+        if (x + mw > W - 8) { x = hx - 24 - mw; flip = true; }
+        x = Math.max(8, Math.min(x, W - 8 - mw)); y = Math.max(8, Math.min(y, H - 8 - mh));
+        memo.style.left = Math.round(x) + 'px'; memo.style.top = Math.round(y) + 'px';
+        memo.style.setProperty('--tail', Math.round(Math.max(14, Math.min(hy - y - 6, mh - 26))) + 'px');
+        memo.classList.toggle('is-flip', flip);
+      }
+      function onFocus(f) { foc = f && typeof f.x === 'number' && typeof f.y === 'number' ? f : null; placeMemo(); }
+
+      /* 내 차례 메모(시안 .memo): 덱과 같은 순서의 topId 한 건. 사무실 장면이 보일 때만(차분이거나 번들이 없으면 없다). 여러 건이면 "다음" 으로 돌린다(J·K 도 된다).
+         덱은 그대로 아래에 있다. 메모의 동작은 덱 카드와 같은 문장·같은 링크다. */
+      function paintMemo() {
+        var a0 = document.activeElement, fi = a0 && a0 !== document.body && memo.contains(a0) ? Array.prototype.indexOf.call(memo.querySelectorAll(FOCUSABLE), a0) : -1;
+        var it = officeOn ? items.filter(function (x) { return x.id === topId; })[0] : null;
+        clear(memo);
+        memo.hidden = !it;
+        memoId = it ? it.id : null;
+        syncFocus(memoId);
+        if (!it) return;
+        var s = it.s, name = s.title || HK.folderName(s) || '이름 없는 세션', team = teamOf(s.flowId), a = cardAct(it, false);
+        var from = it.pend && it.pend.r ? (it.pend.r.createdAt || it.pend.r.createdAtMs) : (it.t || s.updatedAt), w = kit.waited(from);
+        var head = it.kind === 'turn' ? [team || '내 차례', w] : [kindLabel(it), team, w];
+        var i = 0; items.forEach(function (x, n) { if (x.id === topId) i = n; });
+        var sessionHref = '/s/' + encodeURIComponent(s.id), same = a.href === sessionHref;  // 가는 곳이 세션이면 "세션으로" 를 따로 두지 않는다
+        memo.className = 'po-memo po-memo-' + it.kind;
+        memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(it.kind), h('span', { class: 'po-memo-kind', text: head.filter(Boolean).join(' · ') }),
+          items.length > 1 ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '다음 일 보기', text: '다음 ' + (i + 1) + '/' + items.length, onClick: function () { step(1); } }) : null));
+        memo.appendChild(h('p', { class: 'po-memo-q', text: a.q }));
+        memo.appendChild(h('p', { class: 'po-memo-s', text: name }));
+        memo.appendChild(h('div', { class: 'po-memo-acts' }, kit.link(a.href, { class: 'pill acc', text: a.verb }), same ? null : kit.link(sessionHref, { class: 'po-link', text: '세션으로' })));
+        placeMemo();
+        if (fi >= 0) { var t = memo.querySelectorAll(FOCUSABLE)[fi]; if (t) t.focus({ preventScroll: true }); }
       }
 
       function paintDeck() {
@@ -187,19 +253,21 @@
       function draw() {
         if (gone) return;
         if (!kit.loaded()) {
-          scenePanel.hidden = true; clear(helloSlot); clear(deckSlot); clear(restSlot);
+          scenePanel.hidden = true; memo.hidden = true; syncFocus(null); clear(helloSlot); clear(deckSlot); clear(restSlot);
           restSlot.appendChild(kit.conn() === 'down' ? kit.stateBox('warn', '서버에 연결할 수 없어', '서버가 꺼졌을 수 있어. 다시 연결을 시도하고 있어.') : kit.loadingBox('세션을 불러오는 중이야.'));
           return;
         }
         var list = HK.sessionList();
         clear(helloSlot); clear(restSlot);
         if (!list.length) {  // 세션이 없으면 Sauce 와 같은 첫 작업 안내(시안: C단계가 다듬는다)
-          scenePanel.hidden = true; clear(deckSlot); clear(prSlot); items = []; delete approvals.dataset.compact; approvals.className = 'approvals light po-panel po-mini';
+          scenePanel.hidden = true; memo.hidden = true; syncFocus(null); clear(deckSlot); clear(prSlot); items = []; delete approvals.dataset.compact; approvals.className = 'approvals light po-panel po-mini';
           HK.emptyHome(restSlot, approvals, projects);
           HK.approvalCard(approvals, stats.showPr); HK.projectCard(projects);
           return;
         }
         scenePanel.hidden = false;
+        officeOn = !!window.BHOfficeScene && !PS.calm();  // 사무실 장면이 보일 때만 틀·메모(차분이거나 번들이 없으면 지금 그대로)
+        stageFrame.classList.toggle('is-office', officeOn);
         approvals.className = 'approvals'; approvals.dataset.compact = '1';  // 검토 요청 칸 안에서는 줄로 그린다(Sauce 홈과 같다)
         clear(prSlot); prSlot.appendChild(h('div', { class: 'light po-panel po-mini' }, HK.homePrBox(list, approvals)));
         var c = L.counts(list, HK.openIds), turnCount = L.turnItems(list, HK.openIds).length;  // 내 차례 숫자는 Sauce 홈·띠와 같은 목록 길이(#1027)
@@ -213,6 +281,7 @@
           turnCount ? h('b', { text: '네 답을 기다리는 일이 ' + turnCount + '건 있어.' }) : L.NO_TURN_TEXT + '.'));
         items = deckItems(list);
         paintDeck();
+        paintMemo();
         restSlot.appendChild(h('div', { class: 'tiles2 po-tiles' }, tile('내 차례', String(turnCount), turnCount ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), stats.prTile, stats.weekTile, stats.tbTile));
         restSlot.appendChild(HK.homeTable(list));  // 내 세션 표(작업·단계·번호·기억·상태): Sauce 홈과 같은 칸
         restSlot.appendChild(foot);
@@ -225,6 +294,8 @@
       redrawNow = function () { if (!gone) draw(); };
       function onPref(ev) { if (ev && ev.detail === 'fx') redrawNow(); }  // 효과 강도가 바뀌면 장면 ↔ 목록
       document.addEventListener('bh-pref', onPref);
+      var ro = typeof ResizeObserver === 'function' ? new ResizeObserver(function () { placeMemo(); }) : null;  // 폭이 바뀌면(창 크기·760px 경계) 메모 자리를 다시 잡는다
+      if (ro) ro.observe(stageFrame);
       draw();
 
       // 세션 이벤트가 초당 수십 번 와도 0.5초에 한 번, 프레임에 맞춰 다시 그린다. 덱의 입력칸에 쓰는 중이면 쓰기가 끝날 때까지 미룬다.
@@ -243,10 +314,10 @@
         }, Math.max(0, (typing() ? 1000 : 500) - (Date.now() - soonLast)));
       }
       return {
-        onData: drawSoon, onSession: drawSoon, onRequest: drawSoon, onRemoved: draw,
+        onData: drawSoon, onSession: drawSoon, onRequest: drawSoon, onRemoved: draw, onFocus: onFocus,
         tick: function () { if (!typing()) draw(); },  // 날짜 줄·기다린 시간을 고친다
         title: function () { return ''; },
-        destroy: function () { gone = true; redrawNow = function () {}; document.removeEventListener('keydown', onKey); document.removeEventListener('bh-pref', onPref); }
+        destroy: function () { gone = true; redrawNow = function () {}; if (ro) ro.disconnect(); document.removeEventListener('keydown', onKey); document.removeEventListener('bh-pref', onPref); }
       };
     }
 

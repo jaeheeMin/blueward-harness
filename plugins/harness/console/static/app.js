@@ -1382,9 +1382,9 @@
     return out;
   }
   /* 장면 붙이기: 사무실 장면이 실렸으면 그것으로, 아니면 우체국 장면으로. 사무실 장면의 말풍선은 제목을 textContent 로 쓴다(HTML 로 해석하지 않는다). */
-  function attachScene(host) {
+  function attachScene(host, extra) {  // extra.onFocus(f): 사무실 장면이 주인공 머리 위 좌표({id,x,y} | null)를 알린다(홈의 내 차례 메모 자리)
     var PS = window.BHPostScene, O = window.BHOfficeScene;
-    return PS.attach(host, { list: sceneList, onNavigate: function (href) { go(href); } }, O || null);
+    return PS.attach(host, Object.assign({ list: sceneList, onNavigate: function (href) { go(href); } }, extra || {}), O || null);
   }
   var postScene = null;  // Post 테마 장면 제어(theme-post.js). 홈을 떠나면 destroy 한다(세션·요청 화면의 Post 배치는 sessionView·requestView 안)
   /* Post 의 오늘 화면(post-home.js). 틀(레일·위쪽 줄)은 renderSide 가 맡고 여기는 본문만 그린다. 장면은 "지금 세션들" 패널 안에 붙는다. */
@@ -1394,9 +1394,10 @@
       sceneList: sceneList, requestTitle: requestTitle, skillLabel: skillLabel, waited: function (v) { return waitedText(v).replace(/^ · /, ''); }, projectOf: projectOf,
       loaded: function () { return loadedOnce; }, conn: function () { return conn.state; }, stateBox: stateBox, loadingBox: loadingBox });
     var sceneHost = h('div', { class: 'po-stage', hidden: true });
-    postScene = attachScene(sceneHost);
+    var hv = null;
+    postScene = attachScene(sceneHost, { onFocus: function (f) { if (hv && hv.onFocus) hv.onFocus(f); } });
     whatsSlot = h('div', { class: 'wn-slot' });
-    var v = postHome.view(root, { sceneHost: sceneHost, whatsSlot: whatsSlot });
+    var v = hv = postHome.view(root, { sceneHost: sceneHost, whatsSlot: whatsSlot, scene: function () { return postScene; } });
     drawWhatsNew();
     var d0 = v.destroy;
     v.destroy = function () { whatsSlot = null; if (postScene) { postScene.destroy(); postScene = null; } d0(); };
