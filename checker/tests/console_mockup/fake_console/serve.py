@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -54,7 +55,27 @@ def fake_trouble_gh(a, cwd):
         return (0, json.dumps(dict(hit, labels=[{"name": "type:trouble"}]), ensure_ascii=False)) if hit else (1, "could not resolve to an issue")
     if a[:2] == ["label", "list"]:
         return 0, json.dumps([{"name": n} for n in ts.get("labels", [])])
-    return None
+    # 쓰기(새 기록·이력 댓글·해결 방법 고치기): trouble_state.json 에 그대로 적어 다음 읽기에 보이게 한다
+    items = ts["issues"].setdefault(slug, [])
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    if a[:2] == ["issue", "create"]:
+        n = max([i["number"] for i in items] + [0]) + 1
+        items.insert(0, {"number": n, "title": opt(a, "--title"), "state": "OPEN", "author": {"login": gh_state().get("login", "jaeheemin")},
+                         "body": opt(a, "--body") or "", "createdAt": now, "url": f"https://github.com/{slug}/issues/{n}", "comments": []})
+        out = (0, f"https://github.com/{slug}/issues/{n}")
+    elif a[:2] in (["issue", "comment"], ["issue", "edit"]):
+        hit = next((i for i in items if str(i["number"]) == a[2]), None)
+        if hit is None:
+            return 1, "could not resolve to an issue"
+        if a[1] == "comment":
+            hit["comments"].append({"id": f"c{hit['number']}-{len(hit['comments'])}", "author": {"login": gh_state().get("login", "jaeheemin")}, "createdAt": now, "body": opt(a, "--body")})
+        else:
+            hit["body"] = opt(a, "--body")
+        out = (0, hit["url"])
+    else:
+        return None
+    (RUN / "trouble_state.json").write_text(json.dumps(ts, ensure_ascii=False), encoding="utf-8")
+    return out
 
 
 def fake_gh(args, cwd):

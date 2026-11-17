@@ -69,7 +69,7 @@
   var STATUS_WORD = { allowed: '여유 있어', allowed_warning: '곧 한도에 닿아', rejected: '한도가 찼어' };
 
   /* 서버 /api/account-limits 의 windows 를 헤더 글자로. failed 는 읽기 실패.
-     { unknown, text, title, chips: [{ type, tone: ''|'warn'|'err'|'unk', stale, text, title }] }
+     { unknown, text, title, chips: [{ type, name, pct(숫자 또는 모름 null), tone: ''|'warn'|'err'|'unk', stale, text, title }] }
      받은 값이 없거나 풀릴 시각이 이미 지난 값뿐이면 unknown — 0% 로 꾸미지 않는다. */
   function limitView(windows, nowMs, failed) {
     var now = nowMs == null ? Date.now() : nowMs, chips = [];
@@ -85,7 +85,7 @@
         p ? '쓴 비율 ' + p : '쓴 비율은 Claude Code 가 알려 주지 않았어',
         when ? when + ' 에 풀려' : '풀리는 시각은 몰라',
         age == null ? '언제 받은 값인지 몰라' : clockOf(w.t, now).replace(/^오늘 /, '') + ' 에 받은 값' + (stale ? '(오래된 값이야)' : '')].join('\n');
-      chips.push({ type: w.type, tone: tone, stale: stale, title: title,
+      chips.push({ type: w.type, name: name, pct: p ? parseInt(p, 10) : null, tone: tone, stale: stale, title: title,
         text: (tone === 'err' ? '✕ ' : tone === 'warn' ? '⚠ ' : tone === 'unk' ? '? ' : '') + name + ' ' + (p || '?') + (when ? ' · ' + when.replace(/^오늘 /, '') : '') });
     });
     if (!chips.length) {

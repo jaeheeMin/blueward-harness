@@ -79,10 +79,13 @@
       if (!openModal) return;
       document.removeEventListener('keydown', openModal.onKey);
       if (openModal.el.parentNode) openModal.el.parentNode.removeChild(openModal.el);
+      var back = openModal.opener;
       openModal = null;
+      if (back && back.isConnected && window.BH && window.BH.getTheme && window.BH.getTheme() === 'post') back.focus();  // Post: 연 곳으로 초점을 돌려준다
     }
     function modal(o) {
       closeModal();
+      var opener = document.activeElement;
       var err = h('p', { class: 'note-attn', role: 'alert', hidden: true });
       var ok = h('button', { type: 'button', class: 'btn primary', text: o.confirmText || '확인', onClick: function () {
         var bad = o.validate ? o.validate() : '';
@@ -97,10 +100,18 @@
         h('h2', { id: 'modal-h', class: 'sect-h', text: o.title }), o.body, err,
         h('div', { class: 'btn-row mt-24' }, h('button', { type: 'button', class: 'btn', text: '취소', onClick: dismiss }), extras, ok));
       var el = h('div', { class: 'modal-back', onMousedown: function (e) { if (e.target === el) dismiss(); } }, box);
-      var onKey = function (e) { if (e.key === 'Escape') dismiss(); };
+      var onKey = function (e) {
+        if (e.key === 'Escape') { dismiss(); return; }
+        if (e.key !== 'Tab' || !(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post')) return;
+        // Post: 초점이 판 밖으로 나가지 않게 가둔다
+        var f = Array.prototype.slice.call(box.querySelectorAll('button, a[href], input, textarea, select')).filter(function (x) { return !x.disabled && !x.hidden; });
+        if (!f.length) return;
+        var cur = document.activeElement, inside = box.contains(cur);
+        if (e.shiftKey ? (!inside || cur === f[0]) : (!inside || cur === f[f.length - 1])) { e.preventDefault(); (e.shiftKey ? f[f.length - 1] : f[0]).focus(); }
+      };
       document.addEventListener('keydown', onKey);
       document.body.appendChild(el);
-      openModal = { el: el, onKey: onKey };
+      openModal = { el: el, onKey: onKey, opener: opener };
       var focus = box.querySelector('textarea, input, .btn.primary');
       if (focus) focus.focus();
     }
@@ -665,11 +676,21 @@
         var f = entry.file;
         return [f.path, f.size != null ? kit.fmtSize(f.size) : '', entry.session.title || ''].filter(Boolean).join(' · ');
       }
+      // Post: 줄 앞에 형식 배지(확장자)와 둘째 줄(판 · 바뀐 시각 — 파일에 있는 값만)을 더한다. 다른 테마는 그대로.
+      function isPost() { return !!(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post'); }
+      function when(v) {
+        if (!v) return '';
+        var d = new Date(v > 1e12 ? v : v * 1000);
+        if (isNaN(d.getTime())) return '';
+        return d.toDateString() === new Date().toDateString() ? kit.clock(v) : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + kit.clock(v);
+      }
       function row(entry, sub) {
-        var f = entry.file, on = st.sel === entry.key, c = entry.chip, lb = L.docLabel(f.path);
+        var f = entry.file, on = st.sel === entry.key, c = entry.chip, lb = L.docLabel(f.path), post = isPost();
         var tail = lb.ver ? ' v' + lb.ver + ' · ' + lb.ext : '';
+        var second = post ? [lb.ver ? 'v' + lb.ver : '', when(f.mtime)].filter(Boolean).join(' · ') : '';
         return h('button', { type: 'button', class: 'drow' + (on ? ' on' : '') + (sub ? ' sub' : ''), 'aria-pressed': String(on), 'data-path': f.path, title: rowTitle(entry), onClick: function () { pick(entry); } },
-          h('span', { class: 'dn' }, h('span', { class: 'dl' }, h('b', { text: lb.name }), tail ? h('span', { class: 'dv', text: tail }) : null)),
+          post ? h('span', { class: 'ext ext-' + (lb.ext || 'doc'), 'aria-hidden': 'true', text: (lb.ext || '문서').toUpperCase() }) : null,
+          h('span', { class: 'dn' }, h('span', { class: 'dl' }, h('b', { text: lb.name }), tail && !post ? h('span', { class: 'dv', text: tail }) : null), second ? h('small', { text: second }) : null),
           c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text }) : null);
       }
       function listBox(all) {
@@ -773,6 +794,31 @@
         return box;
       }
 
+      // Post 의 오른쪽 칸(시안 dmeta): 판 이력 · 문서 검사 · 할 수 있는 일. 콘솔에 있는 데이터·동작만 그리고, 없는 칸은 그리지 않는다. 한 칸도 없으면 null.
+      var DL_EXT = /\.(md|txt|csv|xlsx|pptx|docx|pdf|png|jpe?g|gif)$/i;
+      function metaBox(entry) {
+        var f = entry.file, s = entry.session, olds = L.versionPaths(f), secs = [];
+        if (olds.length) {  // 판 이력: 지금 판 + 파일명에 남은 이전 판(서버가 아는 것만)
+          var items = [{ path: f.path, mtime: f.mtime, chip: entry.chip }].concat(olds);
+          secs.push(h('section', { class: 'dm-sec' }, h('h3', { text: '판 이력' }),
+            h('ol', { class: 'vers' }, items.map(function (v, i) {
+              var vl = L.docLabel(v.path), tx = [when(v.mtime), v.chip ? v.chip.text : ''].filter(Boolean).join(' · ');
+              return h('li', { class: i === 0 ? 'on' : '' }, h('b', { text: vl.ver ? 'v' + vl.ver : kit.baseName(v.path) }), tx ? h('span', { text: tx }) : null);
+            }))));
+        }
+        if (L.isFormOutput(f) && /\.xlsx$/i.test(f.path)) {  // 문서 검사: 양식 칸을 세어 본 결과(고객 양식 xlsx 만)
+          var cells = st.preview ? L.formCells(st.preview) : st.previewError ? { known: false } : { known: false, pending: true };
+          var kind = !cells.known ? 'unk' : cells.empty ? 'wait' : 'done';
+          secs.push(h('section', { class: 'dm-sec' }, h('h3', { text: '문서 검사' }),
+            h('ul', { class: 'dchk' }, h('li', null, h('i', { class: 'po-st po-st-' + kind, 'aria-hidden': 'true', text: kind === 'unk' ? '?' : kind === 'wait' ? '' : '✓' }), h('span', { text: cellsText(cells) })))));
+        }
+        var acts = [];
+        // 양식으로 뽑기는 머리와 미리보기 줄에 이미 있어 여기서는 되풀이하지 않는다
+        if (DL_EXT.test(f.path)) acts.push(h('a', { class: 'pill line sm', href: '/api/sessions/' + sid(s) + '/files/download' + kit.qs({ path: f.path }), download: kit.baseName(f.path), text: '내려받기' }));
+        if (acts.length) secs.push(h('section', { class: 'dm-sec' }, h('h3', { text: '할 수 있는 일' }), h('div', { class: 'toolrow' }, acts)));
+        return secs.length ? h('aside', { class: 'dmeta', 'aria-label': '문서 정보' }, secs) : null;
+      }
+
       // 첨부는 세션마다 따로 읽은 것이라 세션별로 한 칸씩. 넣고 뺀 결과가 오면 그 세션 몫만 바꿔 다시 그린다.
       function attachBoxes() {
         return (st.parts || []).map(function (p) {
@@ -815,7 +861,8 @@
         var lb = listBox(all);
         attachBoxes().forEach(function (b) { lb.appendChild(b); });
         sec.appendChild(h('div', { class: 'dgrid' }, lb,
-          cur ? previewBox(cur) : h('div', { class: 'dprev' }, h('p', { class: 'empty-line', text: '왼쪽에서 문서를 골라 줘. 미리보기와 고치기 입력칸이 여기에 나와.' }))));
+          cur ? previewBox(cur) : h('div', { class: 'dprev' }, h('p', { class: 'empty-line', text: '왼쪽에서 문서를 골라 줘. 미리보기와 고치기 입력칸이 여기에 나와.' })),
+          cur && isPost() ? metaBox(cur) : null));
         page.appendChild(sec);
       }
       draw(); refresh();
@@ -947,13 +994,16 @@
     function flowCells(flow, o) {
       o = o || {};
       var steps = kit.listOf(flow, 'steps');
+      // Post: 번호를 동그라미 칩으로 따로 그린다(글자는 "1 이름" 그대로, 시안 new 의 순서 판)
+      var post = !!(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post');
+      function label(n, t) { return post ? [h('span', { class: 'fs-n', text: String(n) }), ' ' + t] : (n + ' ' + t); }
       var cells = steps.map(function (st, i) {
         var note = o.review ? (i === 0 ? '이번 세션' : st.brief || st.easy || '') : st.easy || '';
         if (!note && STEP_NOTE[st.kind]) note = STEP_NOTE[st.kind](st);
-        return h('div', { class: 'fs' + (o.review && i === 0 ? ' now' : '') }, h('b', { text: (i + 1) + ' ' + (st.plain || st.short || st.name || st.id) }), note ? h('small', { text: note }) : null);
+        return h('div', { class: 'fs' + (o.review && i === 0 ? ' now' : '') }, h('b', null, label(i + 1, st.plain || st.short || st.name || st.id)), note ? h('small', { text: note }) : null);
       });
       var nx = o.review ? nextFlowOf(flow, o.flows) : null;
-      if (nx) cells.push(h('div', { class: 'fs next', 'data-next-flow': nx.id }, h('b', { text: (steps.length + 1) + ' ' + nx.name }), h('small', { text: '다음 세션' })));
+      if (nx) cells.push(h('div', { class: 'fs next', 'data-next-flow': nx.id }, h('b', null, label(steps.length + 1, nx.name)), h('small', { text: '다음 세션' })));
       return h('div', { class: 'flow', 'data-flow-cells': flow.id }, cells);
     }
     // update({cwd, flowId, note}): 갈래 id 가 있으면 그 갈래의 순서를, 없으면 note 를 보인다.
@@ -1289,10 +1339,9 @@
         h('div', { class: 'srow2' }, h('b', { class: 'lu', text: '? 확인 못 함' }), h('span', { text: '검사 못 함, 통과로도 실패로도 안 침' })),
         h('div', { class: 'srow2' }, h('b', { class: 'lw', text: '! 내 차례' }), h('span', { text: '네 답이나 확인이 필요' })));
     }
-    function homeView(root) {
-      var approvals = h('div', { class: 'approvals' });
-      var recent = h('div', { class: 'lt', 'data-recent': '1' });
-      var projects = h('div', { class: 'projects' });
+    /* 홈 숫자 칸의 "승인 기다리는 PR"·"이번 주 산출물"·"팀 기록" 세 칸과 그 값을 채우는 함수. Sauce 홈과 Post 홈(post-home.js)이 같이 쓴다.
+       load() 를 부르면 팀 기록 숫자를 읽어 온다. */
+    function homeStats() {
       var prVal = h('span', { class: 'v', text: '…' });
       var prTile = h('div', { class: 'tile2', 'data-pr-tile': '1' }, h('span', { class: 'eb', text: '승인 기다리는 PR' }), prVal);
       prTile.hidden = true;
@@ -1329,14 +1378,61 @@
           showTrouble(d);
         }, function (e) { showTrouble(null, e && e.message || '읽지 못했어'); });
       }
-      loadTrouble(0);
-      var fixBox = h('div', { class: 'fixbox' });
-      var homeOpen = false;  // "외 n건" 펼침. 이 화면에서만 기억한다
       function showPr(merged) {
         if (merged.state === 'yes') { prVal.textContent = String(merged.items.length); prTile.className = 'tile2'; prTile.hidden = false; }
         else if (merged.state === 'unknown') { prVal.textContent = '확인 못 함'; prTile.className = 'tile2 unk'; prTile.hidden = false; }
         else prTile.hidden = true;
       }
+      return { prTile: prTile, weekTile: weekTile, tbTile: tbTile, showPr: showPr, showWeek: showWeek, load: function () { loadTrouble(0); } };
+    }
+    /* 홈의 "내 세션" 표와 "검토 요청(PR)" 칸. Sauce 홈과 Post 홈(post-home.js)이 같은 데이터·같은 칸을 쓴다. */
+    function homeTable(list) {
+        var head = h('tr', null, ['작업', '단계', '번호', '기억', '상태'].map(function (t) { return h('th', { scope: 'col', text: t }); }));
+        var rows = list.map(function (s) {
+          var g = L.groupOf(s), todoRow = g === 'todo' && !L.blockOf(s), ended = s.status === 'ended';
+          var title = s.title || folderName(s) || '이름 없는 세션';
+          var subs = L.runningSubCount(s);
+          var rowPend = todoRow ? pendingOf(s) : null, rowPlan = !!(rowPend && rowPend.r && kit.isPlan && kit.isPlan(rowPend.r));
+          var doing = ended ? '끝난 세션' : rowPlan ? '계획 확인 기다림' : s.currentAction ? L.plainAction(s.currentAction, kit.skillLabel) : (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해(추정)' : '내 차례야') : g === 'running' ? '작업하는 중' : '쉬는 중');
+          var tip = doing + (subs ? ' · 서브에이전트 ' + subs + '개 실행 중' : '');  // 둘째 줄 대신 칩 title 로(시안: 상태 칸은 칩 하나)
+          var bk = L.blockOf(s);
+          var fixRow = !bk && !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)
+          var an = !bk && window.BHApiNotice ? window.BHApiNotice.notice(s) : null;  // API 오류(#865)는 '끝남'·'쉬는 중' 이 아니라 ⚠ 오류로
+          var chip = an && an.sideTone === 'err' ? h('span', { class: 'tagx err', title: an.title, text: an.side }) : bk ? h('span', { class: 'tagx ' + (bk.kind === 'cannot_check' ? 'unk' : 'fail'), title: bk.kind === 'cannot_check' ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자', text: bk.kind === 'cannot_check' ? '? 확인 못 함' : '✕ 막힘' })
+            : todoRow || fixRow ? h('span', { class: 'tag', title: tip, text: fixRow ? '고쳐야 함' : '내 차례' }) : h('span', { class: 'tag ok', title: tip, text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
+          var issue = issueOf(s), pr = prChip(s);
+          var nums = h('td', { 'data-l': '번호' }, issue ? h('span', { class: 'mono', text: '이슈 #' + issue }) : null, pr, !issue && !pr ? h('span', { class: 'none', text: '–' }) : null);
+          return h('tr', { class: todoRow ? 'attn' : '', 'data-session': s.id },
+            h('td', { 'data-l': '작업' }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'rt', text: title }),
+              h('span', { class: 'rs', text: s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음', title: s.cwd || null })),
+            h('td', { 'data-l': '단계' }, tbar(s)),
+            nums,
+            h('td', { 'data-l': '기억' }, (function () {
+              var m = L.memoryOf(s);
+              return h('span', { class: 'mono' + (m.kind === 'unknown' ? ' unk' : '') + (m.level ? ' ' + m.level : ''), title: m.title, text: m.text });
+            })()),
+            h('td', { 'data-l': '상태' }, chip));
+        });
+        return h('section', { class: 'light tablebox' }, h('h2', { text: '내 세션' }),
+          h('table', { class: 'list' }, h('thead', null, head), h('tbody', null, rows)));
+    }
+    function homePrBox(list, approvals) {
+        var own = list.filter(function (s) { return s.flowPr && s.flowPr.number; }).slice(0, 4);
+        return h('div', { class: 'lt', 'data-pr-box': '1' }, h('span', { class: 'eb', text: '검토 요청(PR)' }),
+          own.length ? own.map(function (s) {
+            var pr = L.prBadge(s.flowPr);
+            return h('div', { class: 'srow2' }, h('span', { class: 'lm', text: 'PR #' + pr.number + (pr.title ? ' ' + pr.title : '') }), h('span', { text: pr.text }));
+          }) : h('span', { class: 'quiet', text: '이 콘솔의 세션에 연결된 검토 요청이 없어.' }),
+          approvals);
+    }
+    function homeView(root) {
+      var approvals = h('div', { class: 'approvals' });
+      var recent = h('div', { class: 'lt', 'data-recent': '1' });
+      var projects = h('div', { class: 'projects' });
+      var hs = homeStats(), prTile = hs.prTile, weekTile = hs.weekTile, tbTile = hs.tbTile, showPr = hs.showPr, showWeek = hs.showWeek;
+      hs.load();
+      var fixBox = h('div', { class: 'fixbox' });
+      var homeOpen = false;  // "외 n건" 펼침. 이 화면에서만 기억한다
       function draw() {
         clear(root);
         if (!kit.loaded()) {
@@ -1391,44 +1487,11 @@
             kit.link('/s/' + encodeURIComponent(s.id), { class: 'pill dark', text: '가서 보기' })));
         });
 
-        var head = h('tr', null, ['작업', '단계', '번호', '기억', '상태'].map(function (t) { return h('th', { scope: 'col', text: t }); }));
-        var rows = list.map(function (s) {
-          var g = L.groupOf(s), todoRow = g === 'todo' && !L.blockOf(s), ended = s.status === 'ended';
-          var title = s.title || folderName(s) || '이름 없는 세션';
-          var subs = L.runningSubCount(s);
-          var rowPend = todoRow ? pendingOf(s) : null, rowPlan = !!(rowPend && rowPend.r && kit.isPlan && kit.isPlan(rowPend.r));
-          var doing = ended ? '끝난 세션' : rowPlan ? '계획 확인 기다림' : s.currentAction ? L.plainAction(s.currentAction, kit.skillLabel) : (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해(추정)' : '내 차례야') : g === 'running' ? '작업하는 중' : '쉬는 중');
-          var tip = doing + (subs ? ' · 서브에이전트 ' + subs + '개 실행 중' : '');  // 둘째 줄 대신 칩 title 로(시안: 상태 칸은 칩 하나)
-          var bk = L.blockOf(s);
-          var fixRow = !bk && !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)
-          var an = !bk && window.BHApiNotice ? window.BHApiNotice.notice(s) : null;  // API 오류(#865)는 '끝남'·'쉬는 중' 이 아니라 ⚠ 오류로
-          var chip = an && an.sideTone === 'err' ? h('span', { class: 'tagx err', title: an.title, text: an.side }) : bk ? h('span', { class: 'tagx ' + (bk.kind === 'cannot_check' ? 'unk' : 'fail'), title: bk.kind === 'cannot_check' ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자', text: bk.kind === 'cannot_check' ? '? 확인 못 함' : '✕ 막힘' })
-            : todoRow || fixRow ? h('span', { class: 'tag', title: tip, text: fixRow ? '고쳐야 함' : '내 차례' }) : h('span', { class: 'tag ok', title: tip, text: ended ? '끝남' : g === 'running' ? '일하는 중' : '쉬는 중' });
-          var issue = issueOf(s), pr = prChip(s);
-          var nums = h('td', { 'data-l': '번호' }, issue ? h('span', { class: 'mono', text: '이슈 #' + issue }) : null, pr, !issue && !pr ? h('span', { class: 'none', text: '–' }) : null);
-          return h('tr', { class: todoRow ? 'attn' : '', 'data-session': s.id },
-            h('td', { 'data-l': '작업' }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'rt', text: title }),
-              h('span', { class: 'rs', text: s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음', title: s.cwd || null })),
-            h('td', { 'data-l': '단계' }, tbar(s)),
-            nums,
-            h('td', { 'data-l': '기억' }, (function () {
-              var m = L.memoryOf(s);
-              return h('span', { class: 'mono' + (m.kind === 'unknown' ? ' unk' : '') + (m.level ? ' ' + m.level : ''), title: m.title, text: m.text });
-            })()),
-            h('td', { 'data-l': '상태' }, chip));
-        });
-        page.appendChild(h('section', { class: 'light tablebox' }, h('h2', { text: '내 세션' }),
-          h('table', { class: 'list' }, h('thead', null, head), h('tbody', null, rows))));
+        page.appendChild(homeTable(list));
         // 시안 G-11 표 아래 두 칸: 왼쪽 검토 요청(PR) 줄, 오른쪽 최근 산출물 줄
         approvals.className = 'approvals';
         approvals.dataset.compact = '1';  // 검토 요청 칸 안에서는 줄로 그린다(시안 G-11)
-        var own = list.filter(function (s) { return s.flowPr && s.flowPr.number; }).slice(0, 4);
-        var prBox = h('div', { class: 'lt', 'data-pr-box': '1' }, h('span', { class: 'eb', text: '검토 요청(PR)' }),
-          own.length ? own.map(function (s) {
-            var pr = L.prBadge(s.flowPr);
-            return h('div', { class: 'srow2' }, h('span', { class: 'lm', text: 'PR #' + pr.number + (pr.title ? ' ' + pr.title : '') }), h('span', { text: pr.text }));
-          }) : h('span', { class: 'quiet', text: '이 콘솔의 세션에 연결된 검토 요청이 없어.' }),
-          approvals);
+        var prBox = homePrBox(list, approvals);
         page.appendChild(h('div', { class: 'grid3' }, prBox, recent));
         page.appendChild(projects);
         root.appendChild(page);
@@ -1452,7 +1515,9 @@
 
     return {
       stepBar: stepBar, prCard: prCard, flowPreview: flowPreview, toolsRow: toolsRow, startChecksPanel: startChecksPanel, flowPanel: flowPanel, folderNotice: folderNotice,
-      docsPanel: docsPanel, docsPage: docsPage, flowsFor: flowsFor, approvalsFor: approvalsFor, flowChooser: flowChooser, devReadyFor: devReadyFor, askCard: askCard, homeView: homeView, legend: legend, closeModal: closeModal
+      docsPanel: docsPanel, docsPage: docsPage, flowsFor: flowsFor, approvalsFor: approvalsFor, flowChooser: flowChooser, devReadyFor: devReadyFor, askCard: askCard, homeView: homeView, legend: legend, closeModal: closeModal,
+      // Post 홈(post-home.js)이 Sauce 홈과 같은 데이터·칸을 쓰려고 꺼내 준다
+      homeKit: { sessionList: sessionList, folderName: folderName, pendingOf: pendingOf, approvalCard: approvalCard, recentCard: recentCard, fixCard: fixCard, projectCard: projectCard, emptyHome: emptyHome, homeStats: homeStats, today: today, homeTable: homeTable, homePrBox: homePrBox }
     };
   }
 })();

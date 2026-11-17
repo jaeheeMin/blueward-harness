@@ -258,6 +258,22 @@ def test_token_expires_after_60_seconds(console):
     assert console.call("GET", "/auth?t=nope", cookie=False)[0] == 403
 
 
+def test_blocked_navigation_pages_are_console_html_not_raw_text(console):
+    """링크 만료·없는 페이지는 날것의 글자가 아니라 콘솔 정적 파일(app.css·theme-post.css·theme.js)을 불러 쓰는 작은 HTML 로 낸다(#1025).
+    응답 코드와 안내 뜻은 그대로, 인라인 스크립트는 없고 CSP 가 붙는다. API 경로의 오류는 계속 JSON 이다."""
+    status, body, resp = console.call("GET", "/auth?t=nope", cookie=False)
+    assert status == 403 and resp.getheader("Content-Type").startswith("text/html")
+    assert "script-src 'self'" in resp.getheader("Content-Security-Policy")
+    assert "링크가 만료됐거나 이미 썼어" in body and "<code>/harness:open</code>" in body
+    assert 'href="/app.css"' in body and 'href="/theme-post.css"' in body and 'src="/theme.js"' in body
+    assert body.count("<script") == 1 and "onclick" not in body.lower()  # theme.js 하나뿐, 인라인 없음
+    status, body, resp = console.call("GET", "/nothing-here", cookie=False)
+    assert status == 404 and resp.getheader("Content-Type").startswith("text/html")
+    assert "없는 페이지야." in body and 'href="/"' in body and "처음 화면으로" in body
+    status, body, resp = console.call("GET", "/api/nothing-here", cookie=False)
+    assert status == 401 and resp.getheader("Content-Type").startswith("application/json") and isinstance(body, dict)
+
+
 def test_auth_cookie_flags(console):
     console.call("POST", "/api/open", {})
     token = console.opened[-1].split("t=")[1]

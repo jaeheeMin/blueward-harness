@@ -60,7 +60,17 @@
     settings: { d: 'M4 7h10M18 7h2M4 17h2M10 17h10', w: 1.8, extra: [['circle', { cx: 16, cy: 7, r: 2 }], ['circle', { cx: 8, cy: 17, r: 2 }]] },
     folder: { d: 'M3 6h6l2 2h10v11H3z', w: 1.8 }, plus: { d: 'M12 5v14M5 12h14', w: 2 },
     panel: { d: 'M4 5h16v14H4zM9 5v14', w: 1.8 }, warn: { d: 'M12 4l9 16H3zM12 10v4M12 17v.5', w: 1.6 },
-    plug: { d: 'M9 3v5M15 3v5M6 8h12v3a6 6 0 01-12 0zM12 17v4', w: 1.6 }
+    plug: { d: 'M9 3v5M15 3v5M6 8h12v3a6 6 0 01-12 0zM12 17v4', w: 1.6 },
+    // Post 레일·위쪽 줄
+    inbox: { d: 'M4 13l2-7h12l2 7v5H4zM4 13h5l1 2h4l1-2h5', w: 1.8 }, rows: { d: 'M4 6h16v5H4zM4 14h16v5H4z', w: 1.8 },
+    doc: { d: 'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5', w: 1.8 },
+    lifebuoy: { d: 'M5.6 5.6l3.5 3.5M14.9 14.9l3.5 3.5M18.4 5.6l-3.5 3.5M9.1 14.9l-3.5 3.5', w: 1.8, extra: [['circle', { cx: 12, cy: 12, r: 9 }], ['circle', { cx: 12, cy: 12, r: 3.5 }]] },
+    // Post 새 작업 종류 칩·참고 파일·보내기·찾기
+    clip: { d: 'M20 11.5l-8 8a5 5 0 01-7-7l8.5-8.5a3.3 3.3 0 014.7 4.7L9.7 17.2a1.7 1.7 0 01-2.4-2.4L15 7', w: 1.8 }, send: { d: 'M21 3L10 14M21 3l-7 18-4-7-7-4z', w: 1.8 },
+    search: { d: 'M16 16l5 5', w: 1.8, extra: [['circle', { cx: 11, cy: 11, r: 6.5 }]] }, shield: { d: 'M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z', w: 1.8 },
+    wrench: { d: 'M14.5 6.5a4 4 0 005 5l-9.7 9.7a2.1 2.1 0 01-3-3L16.5 8.5', w: 1.8 }, help: { d: 'M9.5 9.5a2.5 2.5 0 114 2c-1 .7-1.5 1.2-1.5 2.5M12 17.5v.5', w: 1.8, extra: [['circle', { cx: 12, cy: 12, r: 9 }]] },
+    route: { d: 'M6 9v3a3 3 0 003 3h6a3 3 0 013 3', w: 1.8, extra: [['circle', { cx: 6, cy: 6, r: 2.5 }], ['circle', { cx: 18, cy: 19, r: 2.5 }]] },
+    palette: { d: 'M12 3a9 9 0 100 18c1.6 0 2.2-1.1 1.6-2.2-.6-1.1 0-2.3 1.4-2.3h2a3 3 0 003-3c0-5.4-3.8-10.5-8-10.5z', w: 1.8, extra: [['circle', { cx: 8, cy: 11, r: .8 }], ['circle', { cx: 12, cy: 7.5, r: .8 }], ['circle', { cx: 16, cy: 10, r: .8 }]] }
   };
   function icon(name, size) {
     var def = ICONS[name], s = document.createElementNS(SVGNS, 'svg');
@@ -361,6 +371,7 @@
   var view = null, tick = null;
   var mainEl = null, sideEl = null, appEl = null;
 
+  function isPostTheme() { return !!(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post'); }
   function parseRoute() {
     var p = location.pathname.replace(/\/+$/, '') || '/', m;
     if (p === '/') return { name: 'home' };
@@ -395,6 +406,7 @@
 
   function renderRoute() {
     route = parseRoute();
+    if (appEl) appEl.setAttribute('data-page', route.name);  // Post 틀이 화면마다 다르게 보이는 곳(세션·요청 화면만 세션 목록을 둔다)에 쓴다
     if (route.name === 'home' || route.name === 'new') lastProjectAsked = false;  // 마지막 폴더는 화면에 들어올 때마다 다시 읽는다
     if (view && view.destroy) view.destroy();
     clearInterval(tick); tick = null;
@@ -456,7 +468,7 @@
   }
   function stateBox(glyph, title, body, action) {
     return h('div', { class: 'state' },
-      h('div', { class: 'glyph' }, icon(glyph, 28)),
+      h('div', { class: 'glyph ' + glyph }, icon(glyph, 28)),
       h('h1', { text: title }),
       h('p', null, body),
       action || null);
@@ -700,7 +712,7 @@
     limits.busy = true; limits.at = Date.now();
     api('GET', '/api/account-limits').then(function (d) {
       limits.windows = d && Array.isArray(d.windows) ? d.windows : []; limits.failed = false;
-    }, function () { limits.windows = []; limits.failed = true; }).then(function () { limits.busy = false; if (headEl) renderHead(location.pathname); });
+    }, function () { limits.windows = []; limits.failed = true; }).then(function () { limits.busy = false; if (headEl) renderHead(location.pathname); if (view && view.onLimits) view.onLimits(); });
   }
 
   /* 팝업(#1016): 알림 한 건씩 보고 버튼으로 바로 답한다. 승인·질문은 승인 화면(requestView)과 같은 API 를 부른다. */
@@ -1063,6 +1075,7 @@
 
   /* 상단 헤더. 내 일 = 처음 화면, 작업 = 가장 위 세션(내 차례가 먼저), 산출물 = /docs, 새 작업 = /new. */
   function renderHead(cur) {
+    if (isPostTheme()) return renderPostHead();
     var out = h('div');  // 새 모양을 따로 만들고 머리줄에는 달라진 곳만 반영한다(로고 그림이 매번 다시 만들어지지 않게, #793)
     var rows = sortedSessions(), work = rows[0] ? '/s/' + encodeURIComponent(rows[0].id) : null;
     var inWork = route.name === 'session' || route.name === 'request';
@@ -1082,6 +1095,112 @@
     if (window.BHNotice) out.appendChild(noticeHost());
     patchChildren(headEl, Array.prototype.slice.call(out.childNodes));
   }
+  /* ---------- Post 틀: 왼쪽 레일 + 위쪽 줄(theme-post.css 가 :root[data-theme="post"] 아래에서 그린다) ----------
+     Post 일 때만 만든다. 알림 말풍선·한도·판 알림은 기능 그대로 위쪽 줄에 옮겨 둔다. 세션 목록(.side)은 세션·요청 화면에서만 보인다(CSS). */
+  var railEl = null, postVer = '', postVerAsked = false;
+  function loadPostVer() {
+    if (postVerAsked) return; postVerAsked = true;
+    api('GET', '/api/health').then(function (d) { postVer = d && d.version ? String(d.version) : ''; if (headEl) renderHead(location.pathname); }, function () { /* 못 읽으면 판 표시만 뺀다 */ });
+  }
+  function postFolder() {
+    var s = null;
+    if (route.name === 'session') s = sessions.get(route.id);
+    else if (route.name === 'request') { var r = requests.get(route.id); s = r && sessions.get(r.sessionId || r.session_id); }
+    if (!s && route.name === 'new' && draft.cwd) return folderLabel(draft.cwd);  // 새 작업은 고른 작업 폴더(프로젝트 이름과 같은 기준)
+    return s ? folderLabel(s.cwd) : '';  // 세션이 없는 화면은 엉뚱한 세션의 폴더로 대신하지 않고 비운다
+  }
+  function postLimits() {
+    var lv = window.BHNotice.limitView(limits.windows, Date.now(), limits.failed);
+    var attrs = { class: 'ptop-lim' + (lv.unknown ? ' unk' : ''), role: 'group', title: lv.title, 'aria-label': '계정 사용 한도: ' + lv.text };
+    if (lv.unknown) return h('span', attrs, h('span', { class: 'ptop-m unk', text: lv.text }));
+    return h('span', attrs, lv.chips.map(function (c) {
+      var mark = c.tone === 'err' ? '✕ ' : c.tone === 'warn' ? '⚠ ' : c.tone === 'unk' ? '? ' : '';
+      return h('span', { class: 'ptop-m' + (c.tone ? ' ' + c.tone : '') + (c.stale ? ' stale' : '') },
+        h('em', { text: mark + c.name + ' 한도' }),
+        h('span', { class: 'ptop-bar' + (c.pct == null ? ' unk' : '') }, c.pct == null ? null : h('i', { style: 'width:' + Math.min(100, c.pct) + '%' })),
+        h('b', { text: c.pct == null ? '?' : c.pct + '%' }));
+    }));
+  }
+  function nextTheme() {
+    var T = window.BH.THEMES, cur = window.BH.getTheme(), i = 0;
+    T.forEach(function (x, n) { if (x.id === cur) i = n; });
+    return T[(i + 1) % T.length];
+  }
+  function renderPostHead() {
+    loadPostVer();
+    var out = h('div'), proj = projectOf(), folder = postFolder(), cur = window.BH.THEMES.filter(function (x) { return x.id === window.BH.getTheme(); })[0], nx = nextTheme();
+    out.appendChild(h('div', { class: 'ptop-proj' }, h('i', { class: 'ptop-dot', 'aria-hidden': 'true' }), h('b', { text: proj || 'Blueward Harness' }), folder && folder !== proj ? h('small', { text: folder }) : null));
+    out.appendChild(h('span', { class: 'sp' }));
+    if (window.BHNotice) out.appendChild(postLimits());  // 계정 한도: 늘 보인다(#1016)
+    if (postVer) out.appendChild(link('/settings', { class: 'ptop-ver', title: startData && startData.newVersion ? '새 판 ' + startData.newVersion + ' 이 있어 — 터미널에서 /harness:update 를 해 줘' : '지금 판 ' + postVer, 'aria-label': '하네스 ' + postVer + (startData && startData.newVersion ? ' · 새 판 ' + startData.newVersion + ' 이 있어' : '') },
+      'v' + postVer, startData && startData.newVersion ? h('i', { class: 'ptop-vdot', 'aria-hidden': 'true' }) : null));
+    if (window.BHNotice) out.appendChild(noticeHost());
+    out.appendChild(h('button', { type: 'button', class: 'ptop-theme', title: '테마 바꾸기 · 누르면 ' + nx.name, 'aria-label': '테마 ' + (cur ? cur.name : '') + ' · 누르면 ' + nx.name + '(으)로 바뀌어', onClick: function () { var n = nextTheme(); window.BH.setTheme(n.id); } },
+      icon('palette', 16), h('span', { text: cur ? cur.name : '' })));
+    patchChildren(headEl, Array.prototype.slice.call(out.childNodes));
+  }
+  function renderPostRail(d) {
+    var n = d.todo.length, rows = sortedSessions(), work = rows[0] ? '/s/' + encodeURIComponent(rows[0].id) : '/new', nm = route.name;
+    function item(href, label, ic, on, badge) {
+      return link(href, { class: 'prail-item', 'aria-current': on ? 'page' : null, 'aria-label': badge ? label + ' · 내 차례 ' + badge + '건' : null }, icon(ic, 22), h('span', { text: label }), badge ? h('i', { class: 'prail-badge', 'aria-hidden': 'true', text: String(badge) }) : null);
+    }
+    patchChildren(railEl, [
+      link('/', { class: 'prail-logo', 'aria-label': 'Blueward Harness 처음 화면' }, h('span', { class: 'prail-mark', 'aria-hidden': 'true' }), h('span', { class: 'prail-word', text: 'Blueward' })),
+      link(newHref(), { class: 'prail-new', 'aria-current': nm === 'new' ? 'page' : null }, icon('plus', 22), h('span', { text: '새 작업' })),
+      item('/', '오늘', 'inbox', nm === 'home', n),
+      item(work, '세션', 'rows', nm === 'session' || nm === 'request', 0),
+      item('/docs', '산출물', 'doc', nm === 'docs', 0),
+      item('/troubles', '팀 기록', 'lifebuoy', /^trouble/.test(nm), 0),
+      h('span', { class: 'prail-sp' }),
+      item('/settings', '설정', 'settings', nm === 'settings', 0)
+    ]);
+  }
+  function syncPostFrame(d) {
+    if (!isPostTheme()) { if (railEl && railEl.parentNode) railEl.parentNode.removeChild(railEl); return; }
+    if (!railEl) railEl = h('nav', { class: 'prail', 'aria-label': '주 메뉴' });
+    if (railEl.parentNode !== appEl) appEl.insertBefore(railEl, appEl.firstChild);
+    renderPostRail(d);
+  }
+  /* 테마를 바꿔 화면을 다시 만들 때 입력 상태를 옮긴다. 글 칸(id 가 있는 input·textarea)의 글·커서·포커스·스크롤은 여기서 한꺼번에 보존하고,
+     글이 아닌 뷰 상태(첨부·고른 답 따위)는 뷰의 keep() 이 돌려주는 값을 새 뷰가 takeCarry 로 받아 복원한다. */
+  var carry = null;
+  function takeCarry(name, id) { return carry && carry.name === name && carry.id === id ? carry.state : null; }
+  var FOCUS_ATTRS = ['data-theme-opt', 'data-post-opt'];
+  function snapFields() {
+    var out = { fields: {}, focus: '', top: mainEl ? mainEl.scrollTop : 0, win: window.scrollY || 0 };
+    if (!mainEl) return out;
+    mainEl.querySelectorAll('input[id], textarea[id]').forEach(function (el) {
+      if (el.type === 'file' || el.type === 'password') return;
+      out.fields[el.id] = { v: el.value, s: el.selectionStart, e: el.selectionEnd };
+    });
+    var a = document.activeElement;
+    if (a && a !== document.body && mainEl.contains(a)) {
+      if (a.id) out.focus = '#' + CSS.escape(a.id);
+      else FOCUS_ATTRS.forEach(function (k) { if (!out.focus && a.getAttribute(k)) out.focus = '[' + k + '="' + CSS.escape(a.getAttribute(k)) + '"]'; });
+    }
+    return out;
+  }
+  function restoreFields(snap) {
+    if (!mainEl) return;
+    Object.keys(snap.fields).forEach(function (id) {
+      var el = mainEl.querySelector('#' + CSS.escape(id)), f = snap.fields[id];
+      if (!el) return;
+      if (el.value !== f.v) { el.value = f.v; el.dispatchEvent(new Event('input', { bubbles: true })); }  // 글이 비어 다시 만들어졌으면 채우고, 그 칸의 onInput 이 제 상태도 따라 고치게 한다
+      if (f.s != null && el.setSelectionRange) el.setSelectionRange(f.s, f.e);  // 숫자 칸처럼 선택 범위가 없는 칸은 null 이라 건너뛴다
+    });
+    if (snap.focus) { var t = mainEl.querySelector(snap.focus); if (t && t.focus) t.focus({ preventScroll: true }); }
+    mainEl.scrollTop = snap.top; window.scrollTo(0, snap.win);
+  }
+  // 테마가 바뀌면 새로 고침 없이 틀이 바뀐다. isPost 로 구조를 짓는 화면이 많아 모든 화면을 그 자리에서 다시 그리되, 입력하던 것은 그대로 둔다.
+  document.addEventListener('bh-theme', function () {
+    if (!appEl) return;
+    sideMode = null; scheduleSide();
+    if (!renderedOnce || !route) return;
+    var snap = snapFields();
+    carry = { name: route.name, id: route.id, state: view && view.keep ? view.keep() : null };
+    try { renderRoute(); } finally { carry = null; }
+    restoreFields(snap);
+  });
   // 접기·펼치기 단추 하나: 접힌 칸과 펼친 칸 모두 목록 맨 위, 같은 자리·같은 크기. 화살표 방향만 반대다(SVG).
   function foldBtn(collapsed) {
     return h('button', { type: 'button', class: 'fold-btn', 'aria-label': collapsed ? '목록 펼치기' : '목록 접기', title: (collapsed ? '목록 펼치기' : '목록 접기') + ' ( [ )',
@@ -1099,12 +1218,13 @@
     if (!sideEl) return;
     var d = sideData(), col = isCollapsed(), cur = location.pathname;
     appEl.dataset.collapsed = col ? 'true' : 'false';
-    renderAnn(d); refreshNotices(d); renderHead(cur); drawNotice();
+    renderAnn(d); refreshNotices(d); renderHead(cur); syncPostFrame(d); drawNotice();
     if (postScene) postScene.update();
     if (sideMode !== col) { clear(sideEl); sideMode = col; }  // 접힘·펼침이 바뀌면 처음부터 다시 만든다(단추 핸들러가 다르다)
     if (col) { patchChildren(sideEl, [renderRail(d, cur)]); return; }  // 달라진 곳만 고친다(이벤트마다 목록을 통째로 다시 만들지 않는다, #793)
 
     var rows = sortedSessions(), L = window.BHLogic;
+    if (isPostTheme() && window.BHPostScene) { patchChildren(sideEl, [postSideList(rows, cur)]); return; }
     var nav = h('nav', { class: 'nav', 'aria-label': '세션 목록' });
     nav.appendChild(h('div', { class: 'sh' }, h('span', { class: 'eb', text: '세션 ' + rows.length }), h('span', { class: 'eb', text: '단계 · 기억' }), foldBtn(false)));
     var list = h('div', { class: 'nav-list' });
@@ -1132,6 +1252,45 @@
     nav.appendChild(foot);
     patchChildren(sideEl, [nav]);
   }
+  /* Post 세션 목록: 위에 걸러보기(전체·내 차례·일하는 중·끝남), 행마다 손님 아바타 + 기억 링 + 제목 + 상태 기호·문구 + 단계 막대.
+     고른 걸러보기는 이 파일이 쥐고, 누름은 sideEl 한 곳에서 받는다(patchChildren 이 옛 노드의 핸들러를 남기므로 노드마다 핸들러를 달지 않는다). */
+  var postFilter = 'all';
+  function postSideList(rows, cur) {
+    var L = window.BHLogic, PL = window.BHPostLogic, PS = window.BHPostScene;
+    var states = rows.map(function (s) { return PL.stateOf(s, L); }), cnt = PL.filterCounts(states);
+    var tabs = h('div', { class: 'po-ftabs', role: 'tablist', 'aria-label': '세션 걸러보기' }, PL.FILTERS.map(function (f) {
+      return h('button', { type: 'button', role: 'tab', 'data-pf': f.id, 'aria-selected': String(postFilter === f.id), text: f.label + ' ' + cnt[f.id] });
+    }), foldBtn(false));
+    var list = h('div', { class: 'nav-list', role: 'tabpanel' });
+    var shown = 0;
+    rows.forEach(function (s, i) {
+      var state = states[i];
+      if (!PL.filterMatch(postFilter, state)) return;
+      shown++;
+      var st = sideStatus(s), p = firstPending(s), steps = s.flowId ? L.barSteps(s) : [];
+      var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid));
+      var bar = null;
+      if (steps.length) {
+        var now = steps.filter(function (x) { return x.state === 'now'; })[0];
+        bar = h('span', { class: 'bar', role: 'img', 'aria-label': '진행 순서 ' + steps.length + '단계' + (now ? ', 지금 ' + now.name : '') },
+          steps.map(function (x) { return h('i', { class: x.state === 'now' ? 'n' : x.state === 'done' || x.state === 'skipped' ? 'd' : '', title: x.name + ' · ' + x.label }); }));
+      }
+      list.appendChild(link('/s/' + encodeURIComponent(s.id), { class: 'srow po-si po-si-' + state + (s.status === 'ended' ? ' ended' : ''), 'aria-current': onThis ? 'page' : null },
+        PS.avatar(s.id, state, { size: 'sm' }), memRing(s),
+        h('span', { class: 'sinfo' },
+          h('span', { class: 'n', text: sessionTitle(s) }),
+          h('small', { class: 'po-ss', title: st.text }, h('i', { class: 'po-st po-st-' + state, 'aria-hidden': 'true', text: PL.GLYPH[state] || '' }), PL.statusText(st.text)),
+          bar)));
+    });
+    if (!rows.length && loadedOnce) list.appendChild(h('p', { class: 's-empty', text: '아직 세션이 없어. 새 작업을 시작하면 여기에 생겨.' }));
+    else if (rows.length && !shown) list.appendChild(h('p', { class: 's-empty', text: '이 걸러보기에 맞는 세션이 없어.' }));
+    return h('nav', { class: 'nav po-slist', 'aria-label': '세션 목록' }, tabs, list, h('div', { class: 'nav-foot' }, link(newHref(), { class: 'snew', text: '+ 새 세션' })));
+  }
+  function onPostFilter(e) {
+    var b = e.target && e.target.closest ? e.target.closest('[data-pf]') : null;
+    if (!b) return;
+    postFilter = b.getAttribute('data-pf'); scheduleSide();
+  }
   function renderRail(d, cur) {
     var n = d.todo.length, rows = sortedSessions();
     return h('nav', { class: 'rail', 'aria-label': '세션 목록 (접힘)' },
@@ -1142,7 +1301,7 @@
         var st = sideStatus(s), p = firstPending(s), name = sessionTitle(s);
         var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid));
         return link('/s/' + encodeURIComponent(s.id), { class: 'rail-ring' + (st.tone === 'attn' ? ' turn' : st.tone === 'fail' || st.tone === 'unk' || st.tone === 'err' ? ' bk ' + st.tone : '') + (s.status === 'ended' ? ' ended' : ''), 'aria-label': name + ' · ' + st.text, title: name + ' · ' + st.text, 'aria-current': onThis ? 'page' : null },
-          h('span', { class: 'ring unk' }, h('b', { text: '?' })));
+          isPostTheme() && window.BHPostScene ? window.BHPostScene.avatar(s.id, window.BHPostLogic.stateOf(s, window.BHLogic), { size: 'sm' }) : h('span', { class: 'ring unk' }, h('b', { text: '?' })));  // Post: 접힌 칸에도 그 세션의 손님
       }),
       h('span', { class: 'rail-sp' }),
       link(newHref(), { class: 'rail-add', 'aria-label': '새 세션', title: '새 세션' }, icon('plus', 14)));
@@ -1207,30 +1366,34 @@
       whatsNote ? h('p', { class: 'wn-note', text: whatsNote }) : null,
       h('div', { class: 'wn-acts' }, acts)));
   }
-  /* Post 테마 장면(theme-post.js)에 올릴 세션 줄. 상태는 사이드 목록과 같은 기준(막힘 > 내 차례 > 일하는 중 > 승인 기다림 > 끝), 창구는 갈래의 지금 단계다. */
-  var SCENE_STATION = { srs: 0, spec: 1, deliver: 3, merge: 3 };  // 그 밖의 단계(start·implement·fix 따위)와 갈래가 없는 세션은 2(개발)
+  /* Post 테마 장면(theme-post.js)에 올릴 세션 줄. 상태·창구는 post-logic.js 의 stateOf·stationOf(가이드 6.1·6.2) — 아바타와 같은 규칙이다. 끝난(ended) 세션은 그리지 않는다. */
   function sceneList() {
-    var L = window.BHLogic, out = [];
+    var L = window.BHLogic, PL = window.BHPostLogic, out = [];
     sortedSessions().forEach(function (s) {
       if (s.status === 'ended') return;
-      var bk = L.blockOf(s), g = L.groupOf(s), state;
-      if (bk) state = bk.kind === 'cannot_check' ? 'unk' : 'blocked';
-      else if (g === 'todo') state = 'turn';
-      else if (g === 'running') state = 'run';
-      else if (s.phase === 'approval') state = 'wait';
-      else if (s.phase === 'finished') state = 'done';
-      else state = 'idle';
-      var station = 2, step = (s.flowSteps || [])[s.stepIndex];
-      if (s.phase === 'finished' || s.flowFinished) station = 4;
-      else if (s.phase === 'approval') station = 3;
-      else if (step && SCENE_STATION[step.id] != null) station = SCENE_STATION[step.id];
       var title = sessionTitle(s);
-      out.push({ id: s.id, title: title, state: state, station: station, tag: title.length > 7 ? title.slice(0, 6) + '…' : title });
+      out.push({ id: s.id, title: title, state: PL.stateOf(s, L), station: PL.stationOf(s, L), tag: title.length > 7 ? title.slice(0, 6) + '…' : title });
     });
     return out;
   }
-  var postScene = null;  // Post 테마 장면 제어(theme-post.js). 홈을 떠나면 destroy 한다
+  var postScene = null;  // Post 테마 장면 제어(theme-post.js). 홈을 떠나면 destroy 한다(세션·요청 화면의 Post 배치는 sessionView·requestView 안)
+  /* Post 의 오늘 화면(post-home.js). 틀(레일·위쪽 줄)은 renderSide 가 맡고 여기는 본문만 그린다. 장면은 "지금 세션들" 패널 안에 붙는다. */
+  var postHome = null;
+  function postHomeView(root) {
+    if (!postHome) postHome = window.BHPostHome.create({ h: h, clear: clear, link: link, L: window.BHLogic, home: ui.homeKit, questionCards: questionCards, kindOf: kindOf, isPlan: isPlan,
+      sceneList: sceneList, requestTitle: requestTitle, skillLabel: skillLabel, waited: function (v) { return waitedText(v).replace(/^ · /, ''); }, projectOf: projectOf,
+      loaded: function () { return loadedOnce; }, conn: function () { return conn.state; }, stateBox: stateBox, loadingBox: loadingBox });
+    var sceneHost = h('div', { class: 'po-stage', hidden: true });
+    postScene = window.BHPostScene.attach(sceneHost, { list: sceneList, onNavigate: function (href) { go(href); } });
+    whatsSlot = h('div', { class: 'wn-slot' });
+    var v = postHome.view(root, { sceneHost: sceneHost, whatsSlot: whatsSlot });
+    drawWhatsNew();
+    var d0 = v.destroy;
+    v.destroy = function () { whatsSlot = null; if (postScene) { postScene.destroy(); postScene = null; } d0(); };
+    return v;
+  }
   function homeView(root) {
+    if (isPostTheme() && window.BHPostHome && window.BHPostScene) return postHomeView(root);
     whatsSlot = h('div', { class: 'wn-slot' });
     var rest = h('div');
     var sceneHost = h('div', { class: 'po-stage', hidden: true });
@@ -1250,6 +1413,122 @@
   function troubleNew(root) { return tb.newView(root, { draft: route.draft }); }
   function troubleItem(root) { return tb.itemView(root, route.repo, route.number); }
 
+  /* ---------- 우체국 도장(Post) ----------
+     요청 처리 API 가 성공한 뒤에만 찍는다. 요청 id 별로 한 번이고, 처리된 요청은 카드가 곧 사라지니 인라인 카드는 3초 동안 도장 찍힌 모습을 남긴다.
+     { decision, kind, k(창구), at, until, shown, title, lines } — shown 이 true 면 다시 그릴 때 도장이 또 튕기지 않는다. */
+  var stamps = {}, STAMP_MS = 3000;
+  function markStamp(rid, kind, decision, info) {
+    if (!isPostTheme() || stamps[rid]) return;  // 카드마다 한 번만
+    Object.keys(stamps).forEach(function (k) {  // 오래된 도장 정리: 시간이 지났고 요청이 이미 처리됐거나 목록에서 사라진 것(아직 pending 이면 다시 찍히지 않게 남긴다)
+      var q = requests.get(k);
+      if (!stampActive(k) && !(q && (!q.status || q.status === 'pending'))) delete stamps[k];
+    });
+    var r = requests.get(rid), s = sessions.get(r && (r.sessionId || r.session_id)), PL = window.BHPostLogic;
+    stamps[rid] = { decision: decision, kind: kind, k: s ? PL.stationOf(s, window.BHLogic) : 2, sid: s && s.id, at: new Date(), until: Date.now() + STAMP_MS, shown: false, title: info && info.title || '', lines: info && info.lines || [] };
+    setTimeout(function () { if (view && view.onData) view.onData(); }, STAMP_MS + 100);  // 시간이 지나면 인라인 카드를 거둔다
+  }
+  function stampInfo(rid) { var st = stamps[rid]; return st ? Object.assign({}, st, { still: st.shown }) : null; }
+  function stampActive(rid) { var st = stamps[rid]; return !!(st && Date.now() < st.until); }
+  /* 방금 처리돼 이미 pending 이 아닌 인라인 카드의 자리를 지키는 도장 찍힌 카드. 시간이 지났거나 Post 가 아니면 null. */
+  function stampStub(rid) {
+    if (!stampActive(rid) || !window.BHPostSession) return null;
+    var st = stamps[rid], info = stampInfo(rid);
+    var box = h('div', { class: 'qgroup po-stub', 'data-ask': rid, 'data-stamped': '1' },
+      h('b', { text: st.title || '요청을 처리했어' }), st.lines.map(function (l) { return h('span', { class: 'sub', text: l }); }));
+    window.BHPostSession.stamp(box, info); st.shown = true;
+    return box;
+  }
+  /* 지금 도장이 찍혀 남아 있는 요청들(홈 덱이 처리된 카드를 잠깐 더 보여 줄 때 쓴다) */
+  function activeStamps() { return Object.keys(stamps).filter(stampActive).map(function (rid) { return { rid: rid, sid: stamps[rid].sid, kind: stamps[rid].kind }; }); }
+
+  /* 질문 카드(askCard)와 그 자리에서 고르는 질문 폼(inlineQuestion). 세션 화면과 Post 홈 "내 차례" 카드가 같이 쓴다.
+     redraw: 고른 값·보내는 중이 바뀔 때 부르는 다시 그리기, after: 답이 간 뒤 부르는 다시 읽기. 고른 값은 이 묶음 안에서 요청 id 별로 기억한다. */
+  function questionCards(redraw, after, opts) {
+    function askCard(rid) {
+      var r = requests.get(rid);
+      if (r && r.status && r.status !== 'pending') return stampStub(rid);
+      var q = r && kindOf(r) === 'question', el = r && kindOf(r) === 'elicitation';
+      return h('div', { class: 'ask', 'data-ask': rid },
+        askHead(r, opts),
+        h('b', { text: r ? requestTitle(r) : '확인해야 할 요청이 있어' }),
+        h('span', { class: 'sub', text: r ? (q ? 'AI가 물어본 게 있어. 답하면 이어서 일해.' : el ? 'AI가 쓰는 연결 도구가 값을 물어봐. 답하면 이어서 일해.' : isPlan(r) ? 'AI가 계획을 세웠어. 읽어 보고 진행할지 정해 줘.' : 'AI가 허락을 기다려. 확인하고 정해 줘.') : '요청 내용을 불러오는 중이거나 읽지 못했어.' }),
+        h('div', { class: 'acts' }, link('/r/' + encodeURIComponent(rid), { class: 'pill acc', text: r ? (q || el ? '답하기' : isPlan(r) ? '계획 보기' : '승인하기') : '열기' })));
+    }
+    // 시안 G-13: 질문은 대화 안에서 바로 고른다. 질문이 하나이고 하나만 고르는 것이면 보기를 누르는 순간 답이 간다.
+    // 여러 개를 묻거나 여러 개를 고르게 하면 모두 고른 뒤 [답 보내기]. 직접 적은 답은 [직접 적어 답하기](/r/…)에서.
+    var qInline = {};  // 요청 id -> { picked: {칸 번호: [고른 것]}, busy, err }
+    function inlineQuestion(rid) {
+      var r = requests.get(rid);
+      if (stampActive(rid) || (r && r.status && r.status !== 'pending')) return stampStub(rid);  // 방금 도장을 찍었으면 서버가 처리됨을 알리기 전에도 도장 찍힌 카드로 둔다
+      var qsList = r && kindOf(r) === 'question' ? questionsOf(r) : [];
+      if (!qsList.length) return askCard(rid);
+      var st = qInline[rid] || (qInline[rid] = { picked: {}, text: {}, busy: false, err: '' }), multi = qsList.length > 1;
+      // 시안 G-07: '직접 적기' 를 고르면 그 질문 카드 안에 입력칸이 열리고, 적은 글이 답이 된다. 질문이 이 보기를 안 주면 콘솔이 더한다.
+      var OTHER = '직접 적기';
+      function typed(i) { return String(st.text[i] || '').trim(); }
+      function ans(i, q) {
+        var p = (st.picked[i] || []).map(function (x) { return x === OTHER ? typed(i) : x; }).filter(Boolean);
+        return q.multiSelect ? p.join(', ') : (p[0] || '');
+      }
+      function usesOther(i) { return (st.picked[i] || []).indexOf(OTHER) >= 0; }
+      function send() {
+        var body = {};
+        qsList.forEach(function (q, i) { body[q.question] = ans(i, q); });
+        st.busy = true; st.err = ''; redraw();
+        api('POST', '/api/requests/' + encodeURIComponent(rid) + '/answer', { answers: body }).then(function () {
+          st.done = true;
+          markStamp(rid, 'question', 'answer', { title: '질문에 답을 보냈어', lines: qsList.map(function (q) { return (q.question || '질문') + ' → ' + body[q.question]; }) });  // 성공한 뒤에만(Post)
+        },
+          function (e) { st.err = (e.status === 404 || e.status === 409 || e.status === 410) ? '이미 처리된 질문이야.' : '전달하지 못했어: ' + e.message; }).then(function () { st.busy = false; after(); redraw(); });
+      }
+      var cards = qsList.map(function (q, i) {
+        var opts = (q.options || []).slice();
+        if (!opts.some(function (o) { return (typeof o === 'string' ? o : o.label) === OTHER; })) opts.push(OTHER);
+        var list = h('div', { class: 'qo' }, opts.map(function (o) {
+          var label = typeof o === 'string' ? o : o.label, on = (st.picked[i] || []).indexOf(label) >= 0;
+          return h('button', { type: 'button', class: 'qopt', 'aria-pressed': String(on), disabled: st.busy, title: o && o.description || null, onClick: function () {
+            var p = st.picked[i] || [];
+            st.picked[i] = q.multiSelect ? (on ? p.filter(function (x) { return x !== label; }) : p.concat(label)) : (on ? [] : [label]);
+            if (label === OTHER && !on) st.focus = i;
+            if (!multi && !q.multiSelect && st.picked[i].length && !usesOther(i)) send(); else redraw();
+          } }, h('span', { class: 't', text: label }));
+        }));
+        var box = h('div', { class: 'q', role: 'group', 'data-q': rid, 'aria-labelledby': 'iq-' + rid + '-' + i },
+          h('span', { class: 'eb', text: (multi ? '질문 ' + (i + 1) + ' / ' + qsList.length : '질문') + (q.header ? ' · ' + q.header : '') + (q.multiSelect ? ' · 여러 개 선택' : '') }),
+          h('b', { id: 'iq-' + rid + '-' + i, text: q.question || '질문이 있어' }), list);
+        if (usesOther(i)) {
+          var box_in = h('input', { class: 'input q-other', 'aria-label': '직접 적은 답', value: st.text[i] || '', placeholder: '예: 구매팀 김OO, 10/28 회의', autocomplete: 'off', disabled: st.busy,
+            onInput: function (e) { st.text[i] = e.target.value; syncFoot(); } });
+          box.appendChild(box_in);
+          if (st.focus === i) { st.focus = null; setTimeout(function () { box_in.focus(); }, 0); }
+        }
+        return box;
+      });
+      // 시안 G-07: [답 보내기] 는 카드들 아래 오른쪽 진한 알약. 질문이 하나이고 하나만 고르는 것이면 보기를 누르는 순간 답이 가니 단추가 없다(직접 적을 때는 있다).
+      var need = multi || qsList[0].multiSelect || usesOther(0);
+      var sendBtn = need ? h('button', { type: 'button', class: 'pill dark', text: '답 보내기', onClick: send }) : null;
+      var leftNote = need ? h('span', { class: 'quiet' }) : null;
+      function syncFoot() {
+        var left = qsList.filter(function (q, i) { return !ans(i, q); }).length;
+        if (sendBtn) sendBtn.disabled = st.busy || left > 0;
+        if (leftNote) { leftNote.textContent = left ? '아직 답하지 않은 질문이 ' + left + '개 있어.' : ''; leftNote.hidden = !left; }
+      }
+      syncFoot();
+      var foot = h('div', { class: 'acts', 'data-q-foot': rid }, leftNote, sendBtn,
+        st.err ? h('span', { class: 'note-attn', role: 'alert', text: st.err }) : null);
+      return h('div', { class: 'qgroup', 'data-ask': rid }, cards, foot);
+    }
+    return { askCard: askCard, inlineQuestion: inlineQuestion, stamped: activeStamps,
+      keep: function () { return qInline; }, adopt: function (o) { if (o) qInline = o; } };  // 테마를 바꿔 뷰를 다시 만들 때 고른 값을 넘긴다
+  }
+  /* 내 차례 카드 머리의 손님 아바타(Post, 가이드 2.2). 눈썹 줄을 그대로 두고 앞에 붙인다. 홈 덱처럼 이미 아바타가 있는 곳은 opts.noAvatar. */
+  function askHead(r, opts) {
+    var eb = h('span', { class: 'eb', text: '네 차례' + waitedText(r && (r.createdAt || r.createdAtMs)) });
+    if (!isPostTheme() || (opts && opts.noAvatar) || !window.BHPostScene) return eb;
+    var sid = r && (r.sessionId || r.session_id);
+    return h('div', { class: 'po-ask-h' }, window.BHPostScene.avatar(sid || '', 'turn'), eb);
+  }
+
   /* ---------- 세션 (/s/:id) ---------- */
   function sessionView(root) {
     var id = route.id, detail = null, errored = null, fetching = false, timer = null;
@@ -1257,6 +1536,8 @@
     var contInfo = {};  // 쉬는 터미널 세션 이어 가기(#867): 세션별 {state, why, checked, loading, busy, error, text}
     var srsCache = {};  // 작업 폴더별 SRS Status 응답(설정·표준 갈래 세션의 "SRS 상태" 칸)
     var chatAll = false, chatOpen = {}, chatKey = null;  // 앞 대화를 펼쳤는지 · 긴 AI 말을 펼친 것(시각별) · 마지막으로 그린 대화 모양(새 항목 감지)
+    var kept = takeCarry('session', id);  // 테마를 바꿔 다시 만드는 중이면 쓰던 입력 상태(이어서 요청 글 · 첨부 · 질문 카드에서 고른 값)
+    if (kept) followVal = kept.followVal;
 
     function cur() { return sessions.get(id) || {}; }
     function fetchDetail() {
@@ -1281,8 +1562,9 @@
 
     /* 위에서부터: 제목 블록 · 순서 알약 · 숫자 띠 · 알림 · 새 세션 점검 · (대화 판 + 만든 산출물) · 도구 줄 · 폴더 알림 · 서브에이전트 · 권한 · 파일 · 기록 · 기술 정보 */
     function build() {
-      built = true; clear(root);
-      var page = h('div', { class: 'page sess' });
+      built = true; clear(root); postSig = '';  // 안내판 칸(regions.here)도 새로 만들어지니 지난 서명은 버린다
+      post = isPostTheme() && !!window.BHPostSession;  // Post 는 같은 칸들을 3칸(목록 · 대화 판 · 점검 탭)으로 다시 배치한다
+      var page = h('div', { class: 'page sess' + (post ? ' po-sess' : '') });
       function region(k, parent) { regions[k] = h('div', { 'data-r': k }); (parent || page).appendChild(regions[k]); return regions[k]; }
       region('memtop');  // 시안 G-18: 기억 배너는 제목 위 맨 꼭대기
       // 시안 G-09·12: 제목 블록(눈썹·제목·상태 줄·순서 알약) 오른쪽에 층 그림. 순서(갈래)가 있을 때만 그림이 보인다.
@@ -1290,7 +1572,8 @@
       regions.head = h('div', { 'data-r': 'head' }); regions.stages = h('div', { 'data-r': 'stages' });
       titleCol.appendChild(regions.head); titleCol.appendChild(regions.stages);
       regions.iso = h('div', { class: 'iso', 'aria-hidden': 'true', hidden: true }, ['l1', 'l2', 'l3', 'l4'].map(function (c) { return h('i', { class: 'ly ' + c }); }));
-      page.appendChild(h('div', { class: 'titlerow' }, titleCol, regions.iso));
+      var titlerow = h('div', { class: 'titlerow' }, titleCol, regions.iso);
+      page.appendChild(titlerow);
       ['strip', 'notices'].forEach(function (k) { region(k); });
       // 갈래·도구·점검·문서 칸은 한 번 만들어 두고 세션이 바뀔 때 update 만 부른다. 새 세션 점검은 대화 판 맨 위 카드다(시안 13).
       parts.checks = ui.startChecksPanel();
@@ -1303,6 +1586,7 @@
         onInput: function (v) { followVal = v; followNote = ''; paintFollowNote(); },
         onSend: function () { sendFollow(); }, isBlocked: function () { return !!(followAssist && followAssist.isOpen()); } });
       var input = comp.field;
+      if (kept) comp.restore(kept.items, followVal);
       followAssist = withAssist(input, function () { return cur().cwd; });
       var btn = h('button', { type: 'button', class: 'pill dark', text: '보내기', onClick: sendFollow });
       // 시안: 시작 점검 카드 · 대화 · 다음 일 카드가 모두 한 .msgs 안에서 12px 간격으로 이어진다. 대화 칸(msgsList)만 다시 그리고, 점검·갈래 칸은 그대로 둔다.
@@ -1335,6 +1619,7 @@
       ['tools', 'perm', 'memory', 'files', 'log', 'tech'].forEach(function (k) { region(k, fold); });
       parts.tools = ui.toolsRow(function () { var s = cur(); return { session: s.id ? s : null, cwd: s.cwd }; }); regions.tools.appendChild(parts.tools.el);
       parts.folder = ui.folderNotice(); regions.folder.appendChild(parts.folder.el);
+      if (post) postLayout(page, talk, titlerow, titleCol, fold);
       root.appendChild(page);
       // 권한 모드 고르개도 다시 그리지 않는다(열린 목록이 닫히지 않게).
       var sel = h('select', { id: 'perm-mode', class: 'input', 'aria-describedby': 'perm-note', onChange: changePermission },
@@ -1343,6 +1628,74 @@
       regions.perm.appendChild(h('section', { class: 'mt-32', 'data-perm': '1' },
         h('label', { for: 'perm-mode', class: 'label', text: '권한 모드' }), sel,
         h('p', { class: 'note-muted', id: 'perm-note', role: 'status', 'data-perm-note': '1' })));
+    }
+
+    /* ---------- Post 배치 ----------
+       Sauce 와 같은 칸(regions)을 다른 자리에 둔다. 가운데 대화 판 안에 머리(눈썹 · 제목 · 한 줄 · 순서 알약 · 정보 줄 + 창구 안내판) · 알림 · 대화 · 입력칸이 있고,
+       오른쪽 점검 탭이 산출물 · 검사 · 기억 · 기록 · 기술에 옛 "자세히" 안의 칸을 나눠 담는다. 칸은 그대로 두고 부모만 바꾸니 부분 갱신은 그대로다. */
+    var post = false, inspTab = 0, postSig = '';
+    function postLayout(page, talk, titlerow, titleCol, fold) {
+      var PL = window.BHPostLogic;
+      regions.here = h('div', { class: 'po-here-slot' });
+      regions.check = h('div', { 'data-r': 'check' }); regions.memInfo = h('div', { 'data-r': 'meminfo' });
+      regions.noDocs = h('p', { class: 'empty', text: '아직 만든 문서가 없어.', hidden: true });
+      talk.className = 'light talk po-stream';
+      var header = h('header', { class: 'po-sh' }, h('div', { class: 'po-sh-main' }, titleCol, regions.strip), regions.here);
+      talk.insertBefore(regions.notices, talk.firstChild);
+      talk.insertBefore(regions.memtop, talk.firstChild);
+      talk.insertBefore(header, talk.firstChild);
+      talk.insertBefore(regions.folder, regions.after);  // 폴더 알림 · 서브에이전트는 대화 바로 아래
+      talk.insertBefore(regions.subs, regions.after);
+      var sec = function (title, nodes) { return [h('h3', { class: 'po-ih', text: title })].concat(nodes); };
+      var bodies = [
+        sec('만든 산출물', [regions.side, regions.noDocs, regions.files]),
+        sec('PR 검사', [regions.check]),
+        sec('기억과 한도', [regions.memInfo, regions.memory]),
+        sec('이 세션에서 일어난 일', [regions.log]),
+        sec('기술 정보', [regions.tech, regions.perm, regions.tools])
+      ];
+      var panels = bodies.map(function (b, i) { return h('section', { class: 'light po-ipanel', role: 'tabpanel', id: 'po-pan-' + i, 'aria-labelledby': 'po-tab-' + i, hidden: i !== inspTab }, b); });
+      function pick(i, focus) {
+        inspTab = i;
+        tabs.querySelectorAll('[role="tab"]').forEach(function (t, n) { t.setAttribute('aria-selected', String(n === i)); t.tabIndex = n === i ? 0 : -1; if (focus && n === i) t.focus(); });
+        panels.forEach(function (pn, n) { pn.hidden = n !== i; });
+      }
+      var tabs = h('div', { class: 'po-itabs', role: 'tablist', 'aria-label': '점검' }, PL.INSP.map(function (t, i) {
+        return h('button', { type: 'button', role: 'tab', id: 'po-tab-' + i, 'aria-controls': 'po-pan-' + i, 'aria-selected': String(i === inspTab), tabindex: i === inspTab ? '0' : '-1', text: t,
+          onClick: function () { pick(i); },
+          onKeydown: function (e) {
+            var d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+            if (e.key === 'Home') { e.preventDefault(); pick(0, true); } else if (e.key === 'End') { e.preventDefault(); pick(PL.INSP.length - 1, true); }
+            else if (d) { e.preventDefault(); pick((i + d + PL.INSP.length) % PL.INSP.length, true); }
+          } });
+      }));
+      var insp = h('aside', { class: 'po-insp', 'aria-label': '점검' }, tabs, panels);
+      while (page.firstChild) page.removeChild(page.firstChild);
+      page.appendChild(h('div', { class: 'po-sgrid' }, talk, insp));
+      page.appendChild(regions.legend);
+    }
+    // 창구 안내판: 세션이 바뀐 것(세션·상태·창구)이 있을 때만 다시 만든다(이벤트마다 손님 그림을 다시 만들지 않는다)
+    function paintHere(s) {
+      if (!post || !regions.here) return;
+      var PL = window.BHPostLogic, L = window.BHLogic, state = PL.stateOf(s, L), k = PL.stationOf(s, L), sig = s.id + '|' + state + '|' + k;
+      if (sig === postSig) return;
+      postSig = sig;
+      regions.here.replaceChildren(window.BHPostSession.here(s.id, state, k));
+    }
+    // 점검 탭 "검사"(이 세션의 PR 검사)와 "기억"(기억 링 · 토큰 · 한도). 요약해서 계속하기는 paintMemory 가 같은 자리에 둔다.
+    function paintInsp(s) {
+      if (!post || !regions.check) return;
+      var L = window.BHLogic, card = ui.prCard(s);
+      regions.check.replaceChildren.apply(regions.check, [card || h('p', { class: 'empty', text: '이 세션에 연결된 검토 요청이 없어.' })]);
+      var mem = L.memoryOf(s), win = s.context && s.context.window;
+      var words = mem.kind === 'unknown' ? '확인 못 함' : mem.words;
+      var sub = mem.kind === 'pct' && win ? '컨텍스트 창 ' + (win >= 10000 ? Math.round(win / 10000) + '만' : win) + ' 중' : mem.kind === 'unknown' ? mem.title : '창 크기는 확인 못 함';
+      var lv = window.BHNotice ? window.BHNotice.limitView(limits.windows, Date.now(), limits.failed) : null;
+      var meters = lv && !lv.unknown ? lv.chips.map(function (c) {
+        return h('div', { class: 'po-meter' + (c.tone ? ' ' + c.tone : '') + (c.stale ? ' stale' : ''), title: c.title },
+          h('span', { text: c.name + ' 한도' }), h('span', { class: 'ptop-bar' + (c.pct == null ? ' unk' : '') }, c.pct == null ? null : h('i', { style: 'width:' + Math.min(100, c.pct) + '%' })), h('b', { text: c.pct == null ? '?' : c.pct + '%' }));
+      }) : [h('p', { class: 'note-muted', text: lv ? lv.text : '한도는 확인 못 함' })];
+      regions.memInfo.replaceChildren(h('div', { class: 'po-mem' }, memRing(s), h('div', null, h('b', { text: words }), h('small', { text: sub }))), h('div', { class: 'po-meters' }, meters));
     }
 
     function paintPerm(s) {
@@ -1596,8 +1949,10 @@
       var tt = s.title || baseName(s.cwd) || '세션';
       var eb = eyebrowFor(s), el = elapsedStr(s.startedAt), pend = (s.pendingRequestIds || []).length;
       var live = s.status === 'running' && !pend, headline = headlineFor(s);
+      var ebText = (s.flowName ? s.flowName + ' · ' : '') + eb[1], ebCls = 'eb ' + (eb[0] === 'attn' ? 'attn' : eb[0] === 'accent' ? 'accent' : '');
+      var stt = post ? window.BHPostLogic.stateOf(s, window.BHLogic) : '';  // Post: 눈썹 줄 앞에 상태 기호(색 + 모양)
       regions.head.replaceChildren(h('div', { class: 'ptitle' },
-        h('span', { class: 'eb ' + (eb[0] === 'attn' ? 'attn' : eb[0] === 'accent' ? 'accent' : ''), text: (s.flowName ? s.flowName + ' · ' : '') + eb[1] }),
+        post ? h('span', { class: ebCls + ' po-eb' }, h('i', { class: 'po-st po-st-' + stt, 'aria-hidden': 'true', text: window.BHPostLogic.GLYPH[stt] || '' }), ebText) : h('span', { class: ebCls, text: ebText }),
         h('h1', { text: tt }),
         h('p', { class: 'line' }, live ? h('span', { class: 'live' }, h('i'), headline) : headline,
           el && s.status === 'running' ? h('span', { class: 'elapsed', 'data-elapsed': '1', text: ' · 경과 ' + el }) : null)));  // 모델·권한 줄은 시안에 없어 "자세히" 의 기술 정보(kv)에만 둔다
@@ -1612,14 +1967,18 @@
       return s.turnSkill === 'deliver' && s.phase !== 'approval' && s.status !== 'running' && !(s.pendingRequestIds || []).length;
     }
     function paintStages(s) {
-      var bar = s.flowId && (s.flowSteps || []).length && stagesShown(s) ? ui.stepBar(s, true) : null;
-      if (bar) {
+      var bar = s.flowId && (s.flowSteps || []).length && (post || stagesShown(s)) ? ui.stepBar(s, true) : null;  // Post: 순서 알약이 머리에 늘 있다
+      if (bar && post && window.BHLogic.blockOf(s)) {  // 막힘·확인 못 함은 지금 알약이 ✕ / ?
+        var cannot = window.BHLogic.blockOf(s).kind === 'cannot_check', nowLi = bar.querySelector('.step.now .snm');
+        if (nowLi) { bar.querySelector('.step.now').classList.add(cannot ? 'unk' : 'blk'); nowLi.textContent = (cannot ? '? ' : '✕ ') + nowLi.textContent; }
+      }
+      if (bar && (!post || s.flowFinished || s.upcomingFlow)) {
         // 끝난 갈래는 nextFlow, 진행 중(G-09 올릴 차례)은 서버가 SRS 를 읽어 미리 계산한 upcomingFlow(#858). 모르면 알약을 만들지 않는다
         var nx = window.BHLogic.nextOptions({ nextFlow: s.flowFinished ? s.nextFlow : s.upcomingFlow }).options.filter(function (o) { return !o.disabled; })[0];
         if (nx) bar.appendChild(h('li', { class: 'step next' }, h('span', { class: 'snm', text: '→ 다음: ' + window.BHLogic.nextShort(nx.label) })));
       }
       regions.stages.replaceChildren.apply(regions.stages, bar ? [bar] : []);
-      regions.iso.hidden = !bar;
+      regions.iso.hidden = !bar || post;
     }
 
     // 설정·표준 갈래 세션의 "SRS 상태" 칸(#718): 작업 폴더 SRS 의 Status 를 읽어 온다. 못 받은 동안은 칸을 비우고, 받으면 다시 그린다.
@@ -1639,6 +1998,13 @@
     }
     function paintStrip(s) {
       var cells = window.BHLogic.sessionStrip(s, srsFor(s));
+      if (post) {  // Post: 정보 줄. 단계 · 요구사항 · 개발 번호 · 작업 기록 · 검토 요청(없으면 –)
+        var cs = window.BHLogic.currentStep(s);
+        regions.strip.replaceChildren(h('dl', { class: 'po-info', role: 'list', 'aria-label': '진행 정보' }, window.BHPostLogic.infoRow(cells, cs ? window.BHLogic.shortStepName(cs.name) : '').map(function (c) {
+          return h('div', { role: 'listitem', 'data-cell': c.id }, h('dt', { text: c.label }), h('dd', { class: c.tone, text: c.value }));
+        })));
+        return;
+      }
       regions.strip.replaceChildren(h('div', { class: 'strip', role: 'list', 'aria-label': '진행 숫자' }, cells.map(function (c) {
         return h('div', { role: 'listitem', 'data-cell': c.id, title: c.title || null }, h('span', { class: 'eb', text: c.label }), h('span', { class: 'x ' + (c.tone || ''), text: c.value }));
       })));
@@ -1789,87 +2155,20 @@
       if (long) box.appendChild(h('button', { type: 'button', class: 'disclose', 'aria-expanded': String(open), onClick: function () { chatOpen[key] = !open; paintMsgs(cur()); } }, icon('chev', 14), open ? '접기' : '전체 보기'));
       return box;
     }
-    function askCard(rid) {
-      var r = requests.get(rid);
-      if (r && r.status && r.status !== 'pending') return null;
-      var q = r && kindOf(r) === 'question', el = r && kindOf(r) === 'elicitation';
-      return h('div', { class: 'ask', 'data-ask': rid },
-        h('span', { class: 'eb', text: '네 차례' + waitedText(r && (r.createdAt || r.createdAtMs)) }),
-        h('b', { text: r ? requestTitle(r) : '확인해야 할 요청이 있어' }),
-        h('span', { class: 'sub', text: r ? (q ? 'AI가 물어본 게 있어. 답하면 이어서 일해.' : el ? 'AI가 쓰는 연결 도구가 값을 물어봐. 답하면 이어서 일해.' : isPlan(r) ? 'AI가 계획을 세웠어. 읽어 보고 진행할지 정해 줘.' : 'AI가 허락을 기다려. 확인하고 정해 줘.') : '요청 내용을 불러오는 중이거나 읽지 못했어.' }),
-        h('div', { class: 'acts' }, link('/r/' + encodeURIComponent(rid), { class: 'pill acc', text: r ? (q || el ? '답하기' : isPlan(r) ? '계획 보기' : '승인하기') : '열기' })));
-    }
-    // 시안 G-13: 질문은 대화 안에서 바로 고른다. 질문이 하나이고 하나만 고르는 것이면 보기를 누르는 순간 답이 간다.
-    // 여러 개를 묻거나 여러 개를 고르게 하면 모두 고른 뒤 [답 보내기]. 직접 적은 답은 [직접 적어 답하기](/r/…)에서.
-    var qInline = {};  // 요청 id -> { picked: {칸 번호: [고른 것]}, busy, err }
-    function inlineQuestion(rid) {
-      var r = requests.get(rid);
-      if (r && r.status && r.status !== 'pending') return null;
-      var qsList = r && kindOf(r) === 'question' ? questionsOf(r) : [];
-      if (!qsList.length) return askCard(rid);
-      var st = qInline[rid] || (qInline[rid] = { picked: {}, text: {}, busy: false, err: '' }), multi = qsList.length > 1;
-      // 시안 G-07: '직접 적기' 를 고르면 그 질문 카드 안에 입력칸이 열리고, 적은 글이 답이 된다. 질문이 이 보기를 안 주면 콘솔이 더한다.
-      var OTHER = '직접 적기';
-      function typed(i) { return String(st.text[i] || '').trim(); }
-      function ans(i, q) {
-        var p = (st.picked[i] || []).map(function (x) { return x === OTHER ? typed(i) : x; }).filter(Boolean);
-        return q.multiSelect ? p.join(', ') : (p[0] || '');
-      }
-      function usesOther(i) { return (st.picked[i] || []).indexOf(OTHER) >= 0; }
-      function send() {
-        var body = {};
-        qsList.forEach(function (q, i) { body[q.question] = ans(i, q); });
-        st.busy = true; st.err = ''; draw();
-        api('POST', '/api/requests/' + encodeURIComponent(rid) + '/answer', { answers: body }).then(function () { st.done = true; },
-          function (e) { st.err = (e.status === 404 || e.status === 409 || e.status === 410) ? '이미 처리된 질문이야.' : '전달하지 못했어: ' + e.message; }).then(function () { st.busy = false; refetchSoon(); draw(); });
-      }
-      var cards = qsList.map(function (q, i) {
-        var opts = (q.options || []).slice();
-        if (!opts.some(function (o) { return (typeof o === 'string' ? o : o.label) === OTHER; })) opts.push(OTHER);
-        var list = h('div', { class: 'qo' }, opts.map(function (o) {
-          var label = typeof o === 'string' ? o : o.label, on = (st.picked[i] || []).indexOf(label) >= 0;
-          return h('button', { type: 'button', class: 'qopt', 'aria-pressed': String(on), disabled: st.busy, title: o && o.description || null, onClick: function () {
-            var p = st.picked[i] || [];
-            st.picked[i] = q.multiSelect ? (on ? p.filter(function (x) { return x !== label; }) : p.concat(label)) : (on ? [] : [label]);
-            if (label === OTHER && !on) st.focus = i;
-            if (!multi && !q.multiSelect && st.picked[i].length && !usesOther(i)) send(); else draw();
-          } }, h('span', { class: 't', text: label }));
-        }));
-        var box = h('div', { class: 'q', role: 'group', 'data-q': rid, 'aria-labelledby': 'iq-' + rid + '-' + i },
-          h('span', { class: 'eb', text: (multi ? '질문 ' + (i + 1) + ' / ' + qsList.length : '질문') + (q.header ? ' · ' + q.header : '') + (q.multiSelect ? ' · 여러 개 선택' : '') }),
-          h('b', { id: 'iq-' + rid + '-' + i, text: q.question || '질문이 있어' }), list);
-        if (usesOther(i)) {
-          var box_in = h('input', { class: 'input q-other', 'aria-label': '직접 적은 답', value: st.text[i] || '', placeholder: '예: 구매팀 김OO, 10/28 회의', autocomplete: 'off', disabled: st.busy,
-            onInput: function (e) { st.text[i] = e.target.value; syncFoot(); } });
-          box.appendChild(box_in);
-          if (st.focus === i) { st.focus = null; setTimeout(function () { box_in.focus(); }, 0); }
-        }
-        return box;
-      });
-      // 시안 G-07: [답 보내기] 는 카드들 아래 오른쪽 진한 알약. 질문이 하나이고 하나만 고르는 것이면 보기를 누르는 순간 답이 가니 단추가 없다(직접 적을 때는 있다).
-      var need = multi || qsList[0].multiSelect || usesOther(0);
-      var sendBtn = need ? h('button', { type: 'button', class: 'pill dark', text: '답 보내기', onClick: send }) : null;
-      var leftNote = need ? h('span', { class: 'quiet' }) : null;
-      function syncFoot() {
-        var left = qsList.filter(function (q, i) { return !ans(i, q); }).length;
-        if (sendBtn) sendBtn.disabled = st.busy || left > 0;
-        if (leftNote) { leftNote.textContent = left ? '아직 답하지 않은 질문이 ' + left + '개 있어.' : ''; leftNote.hidden = !left; }
-      }
-      syncFoot();
-      var foot = h('div', { class: 'acts', 'data-q-foot': rid }, leftNote, sendBtn,
-        st.err ? h('span', { class: 'note-attn', role: 'alert', text: st.err }) : null);
-      return h('div', { class: 'qgroup', 'data-ask': rid }, cards, foot);
-    }
+    var qc = questionCards(function () { draw(); }, function () { refetchSoon(); });
+    if (kept) qc.adopt(kept.qInline);
+    var askCard = qc.askCard, inlineQuestion = qc.inlineQuestion;
     // MCP 질문(#885): 대화 안에서 바로 폼으로 답한다. 내용을 아직 못 받았으면 '네 차례' 카드로
     function inlineElicit(rid) {
       var r = requests.get(rid);
-      if (r && r.status && r.status !== 'pending') return null;
+      if (stampActive(rid) || (r && r.status && r.status !== 'pending')) return stampStub(rid);
       return elicitCard(rid, draw, refetchSoon) || askCard(rid);
     }
     // 질문·승인 요청: 기다리는 중이면 질문은 그 자리에서 고르고 승인은 '네 차례' 카드(여기서 한 번만), 끝났으면 답을 한 줄로
     function chatReq(c, s, drawn) {
       var pend = (s.pendingRequestIds || []).indexOf(c.id) >= 0;
-      if (pend && !c.answer) { drawn[c.id] = true; return c.kind === 'question' ? inlineQuestion(c.id) : c.kind === 'elicitation' ? inlineElicit(c.id) : askCard(c.id); }
+      var stamped = stampActive(c.id) && (c.kind === 'question' || c.kind === 'elicitation');  // 방금 답해서 도장이 찍힌 카드는 처리됨으로 바뀐 뒤에도 잠깐 남긴다(Post)
+      if ((pend && !c.answer) || stamped) { drawn[c.id] = true; return c.kind === 'question' ? inlineQuestion(c.id) : c.kind === 'elicitation' ? inlineElicit(c.id) : askCard(c.id); }
       var label = c.kind === 'question' ? '질문' : '승인 요청', plan = c.title === '계획 확인' || c.kind === 'elicitation';  // MCP 질문은 제목에 이미 "연결 도구(…)가 묻는 것" 이 있다
       return h('div', { class: 'reqnote', 'data-chat': 'req', 'data-chat-req': c.id },
         (plan ? '' : label + ': ') + MS(c.title || '') + ' → ' + (c.answer ? MS(c.answer) : '처리 결과를 알 수 없어'));
@@ -2038,6 +2337,7 @@
       var tt = s.title || baseName(s.cwd) || '세션';
       setTitle(tt);
       paintHead(s); paintStages(s); paintStrip(s); paintNotices(s);
+      paintHere(s);
       paintMsgs(s);
       paintSubs(s);
       paintPerm(s);
@@ -2050,6 +2350,7 @@
       paintFiles(s);
       paintLog(s);
       paintTech(s);
+      paintInsp(s);
       syncLegend();
     }
 
@@ -2057,6 +2358,7 @@
     // 승인 기다림(G-10)·끝남(G-12)·새 세션 점검(G-13)에는 없다.
     function syncSide() {
       var s = cur();
+      if (post) { regions.side.hidden = !parts.docs.has(); regions.noDocs.hidden = parts.docs.has(); return; }  // Post: 산출물 탭 안에 늘 있다
       regions.side.hidden = !!s.phase || window.BHLogic.autoChecksOpen(s) || !parts.docs.has();
       regions.side.className = 'sess-side' + (s.status === 'running' ? ' run' : '');
     }
@@ -2127,7 +2429,7 @@
       ].filter(function (r) { return r[1]; });
       var dl = h('dl', { class: 'kv' });
       rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { class: r[0] === '서브에이전트' ? '' : 'mono', text: r[1] })); });
-      var d = h('details', { class: 'tech', open: open }, h('summary', { text: '기술 정보 보기' }), dl);
+      var d = post ? h('div', { class: 'tech' }, dl) : h('details', { class: 'tech', open: open }, h('summary', { text: '기술 정보 보기' }), dl);  // Post: 기술 탭 안이라 접지 않는다
       regions.tech.replaceChildren(d);
     }
 
@@ -2148,6 +2450,8 @@
       onSession: function (sid) { if (sid === id) drawSoon(); },
       onRequest: function () { drawSoon(); },
       onData: function () { drawSoon(); },
+      onLimits: function () { if (built) paintInsp(cur()); },
+      keep: function () { return built ? { followVal: followVal, items: regions.followComp.keep(), qInline: qc.keep() } : null; },
       onRemoved: function (rid) { if (rid === id) { errored = new ApiError(404, ''); built = false; draw(); } },
       tick: function () {
         var el = regions.head && regions.head.querySelector('[data-elapsed]');
@@ -2166,7 +2470,7 @@
   var ELICIT_RES = { accept: ['답을 보냈어.', '연결 도구가 받은 값으로 이어 가.'], decline: ['거절했어.', '연결 도구는 답을 못 받고 이어 가.'], cancel: ['닫았어.', '연결 도구는 답을 못 받고 이어 가.'] };
   var FORMAT_HINT = { email: '예: name@example.com', uri: '예: https://example.com', date: '예: 2026-11-12', 'date-time': '예: 2026-11-12T09:00:00' };
   function safeHttpUrl(u) { try { var x = new URL(String(u)); return x.protocol === 'http:' || x.protocol === 'https:' ? x.href : ''; } catch (e) { return ''; } }
-  function elicitCard(rid, redraw, done) {
+  function elicitCard(rid, redraw, done, plain) {
     var r = requests.get(rid), info = r && r.elicitation;
     if (!info) return null;
     var fields = Array.isArray(info.fields) ? info.fields : [], isUrl = info.mode === 'url';
@@ -2203,11 +2507,15 @@
       var body = { action: action };
       if (action === 'accept' && !isUrl) body.content = content();
       st.busy = true; st.err = ''; redraw();
-      api('POST', '/api/requests/' + encodeURIComponent(rid) + '/answer', body).then(function () { if (done) done(action); },
+      api('POST', '/api/requests/' + encodeURIComponent(rid) + '/answer', body).then(function () {
+          markStamp(rid, 'elicitation', action, { title: ELICIT_RES[action][0], lines: ELICIT_RES[action].slice(1).filter(Boolean) });  // 성공한 뒤에만(Post)
+          if (done) done(action);
+        },
         function (e) { st.err = (e.status === 404 || e.status === 409 || e.status === 410) ? '이미 처리된 질문이야.' : '전달하지 못했어: ' + e.message; }).then(function () { st.busy = false; redraw(); });
     }
+    var ebText = h('span', { class: 'eb', text: '연결 도구(' + (info.server || '?') + ')가 묻는 것' });
     var top = h('div', { class: 'q', role: 'group', 'data-elicit': rid, 'aria-labelledby': 'el-' + rid },
-      h('span', { class: 'eb', text: '연결 도구(' + (info.server || '?') + ')가 묻는 것' }),
+      isPostTheme() && !plain && window.BHPostScene ? h('div', { class: 'po-ask-h' }, window.BHPostScene.avatar(r.sessionId || r.session_id || '', 'turn'), ebText) : ebText,
       h('b', { id: 'el-' + rid, text: info.message || '값을 알려 달라고 해' }));
     if (isUrl) {
       var href = safeHttpUrl(info.url);
@@ -2272,8 +2580,10 @@
     function isPending() { return req && (!req.status || req.status === 'pending' || req.status === 'waiting') && !outcome; }
     function sessionOf() { return req && (sessions.get(req.sessionId || req.session_id) || {}); }
 
+    var post = false;  // Post 일 때만 요청 화면을 시안 틀(뒤로 · 눈썹 · 제목 · 창구 직원 · 요청 카드 · 오른쪽 최근 대화)로 짠다. 그릴 때마다 정한다
     function draw() {
       clear(root);
+      post = isPostTheme() && !!window.BHPostSession;
       if (!req) {
         if (errored && errored.status === 404) return root.appendChild(stateBox('warn', '요청을 찾을 수 없어', '이미 지나간 요청이거나 콘솔이 다시 시작되어 기록이 없어.', link('/', { class: 'btn', text: '처음 화면으로' })));
         if (errored) return root.appendChild(stateBox('warn', '요청을 불러오지 못했어', errored.message, h('button', { type: 'button', class: 'btn', text: '다시 시도', onClick: function () { errored = null; draw(); fetchReq(); } })));
@@ -2291,6 +2601,8 @@
     /* 시안 G-07·17: 그 세션의 최근 대화(내 말 · AI 말)와 카드 아래 "AI에게 말하기" 입력창. 세션 화면의 대화 모양과 이어 요청을 그대로 따른다.
        대화는 세션 상세에만 있어 한 번 따로 읽는다. 못 읽으면 대화 없이 카드만 보인다. */
     var detail = null, detailTried = false, sayVal = '', sayNote = '', sayBusy = false, CHAT_SHOWN = 3;
+    var kept = takeCarry('request', rid);  // 테마를 바꿔 다시 만드는 중이면 쓰던 입력 상태(고른 답 · 이유 · 말하기 글)를 받는다
+    if (kept) { why = kept.why; picked = kept.picked; otherTexts = kept.otherTexts; planOpen = kept.planOpen; planRevise = kept.planRevise; sayVal = kept.sayVal; }
     function fetchDetail() {
       if (detailTried || !req || !sid()) return;
       detailTried = true;
@@ -2336,10 +2648,13 @@
     /* 위 제목 블록(갈래 · 지금 하는 일, 세션 이름, 한 줄 상태) + 순서 알약 + 숫자 띠. 세션 화면과 같은 모양이다. */
     function head(page, isQ, line) {
       var s = sessionOf() || {}, open = isPending();
+      var kind = open ? 'turn' : 'done';
       page.appendChild(h('div', { class: 'ptitle' },
-        h('span', { class: 'eb ' + (open ? 'attn' : ''), 'data-eb': '1', text: ebText(isQ) }),
+        post ? h('span', { class: 'eb po-eb ' + (open ? 'attn' : ''), 'data-eb': '1' }, h('i', { class: 'po-st po-st-' + kind, 'aria-hidden': 'true', text: window.BHPostLogic.GLYPH[kind] || '' }), ebText(isQ))
+          : h('span', { class: 'eb ' + (open ? 'attn' : ''), 'data-eb': '1', text: ebText(isQ) }),
         h('h1', { text: s.title || baseName(s.cwd) || (isQ ? '질문' : '승인') }),
         h('p', { class: 'line', text: line })));
+      if (post) return;  // 시안 r1·r2 에는 숫자 띠가 없다
       // 질문(G-07)·확인(G-17) 화면에는 순서 알약이 없다(시안)
       if (s.id) {
         var cells = window.BHLogic.sessionStrip(s);
@@ -2379,11 +2694,37 @@
         (r.lines || []).map(function (l) { return h('p', { class: 'sub', text: l }); }), backToSession(sid()));
     }
 
+    /* 요청 화면의 마무리. Sauce 는 대화 판(panel) 한 장에 카드와 "AI에게 말하기" 를 담는다.
+       Post 는 시안 r1·r2 처럼 뒤로 · 눈썹 · 제목 · 창구 안내 한 줄 · 요청 카드(.focus-card) · 접는 칸 + 오른쪽 최근 대화 · 세션 · AI에게 말하기.
+       kind: permission · plan · question · elicitation. folds: 카드 아래로 뺀 접는 칸(자세히 · 이유). */
+    function finish(page, panel, msgs, kind, folds) {
+      if (!post) { panel.appendChild(msgs); if (isPending()) panel.appendChild(sayBox()); page.appendChild(panel); root.appendChild(page); return; }
+      var PL = window.BHPostLogic, PSS = window.BHPostSession, L = window.BHLogic, s = sessData(), k = PL.stationOf(s, L);
+      var main = h('section', { class: 'po-rmain' });
+      while (page.firstChild) main.appendChild(page.firstChild);  // head() 가 쌓아 둔 제목 블록
+      if (isPending()) main.appendChild(PSS.clerk(kind, sid(), k));
+      msgs.className = 'msgs focus-card po-focus';
+      var info = stampInfo(rid);
+      if (info) { PSS.stamp(msgs, info); stamps[rid].shown = true; }  // 요청 처리가 성공한 뒤에만 도장(markStamp)
+      main.appendChild(msgs);
+      (folds || []).forEach(function (f) { main.appendChild(f); });
+      var cs = L.currentStep(s), mem = L.memoryOf(s), kv = h('dl', { class: 'tech' });
+      [['브랜치', s.branch], ['단계', cs ? L.shortStepName(cs.name) : ''], ['기억', mem.kind === 'unknown' ? '확인 못 함' : mem.text]].forEach(function (r) {
+        if (r[1]) kv.appendChild(h('div', null, h('dt', { text: r[0] }), h('dd', { text: String(r[1]) })));
+      });
+      var chat = recentChat();
+      var side = h('aside', { class: 'light po-rside', 'aria-label': '이 요청의 세션' }, h('h3', { text: '최근 대화' }), chat.length ? h('div', { class: 'msgs' }, chat) : h('p', { class: 'empty', text: '아직 대화가 없어.' }), h('h3', { text: '세션' }), kv, isPending() ? sayBox() : null);
+      page.className = 'page po-req';
+      page.appendChild(link('/', { class: 'po-back' }, icon('back', 14), '오늘로'));
+      page.appendChild(h('div', { class: 'po-rgrid' }, main, side));
+      root.appendChild(page);
+    }
+
     /* 승인: 시안의 "확인 필요" 카드. 한 줄 요약은 바로 보이고, 명령 원문·입력 전체는 "자세히" 에 있다.
        쉬운 설명이 없는 명령, 샌드박스를 끄거나 백그라운드로 도는 명령, 파일을 쓰고 고치는 일은 접지 않고 열어 둔다(무엇을 허락하는지 가려지면 안 된다). */
     var TOOL_FIELDS = { Bash: ['명령', 'command'], Write: ['파일', 'file_path'], Edit: ['파일', 'file_path'], MultiEdit: ['파일', 'file_path'], Read: ['파일', 'file_path'], NotebookEdit: ['노트북', 'notebook_path'], WebFetch: ['주소', 'url'], Glob: ['패턴', 'pattern'], Grep: ['검색어', 'pattern'], WebSearch: ['검색어', 'query'] };
     function drawPermission() {
-      var page = h('div', { class: 'page sess req' });
+      var page = h('div', { class: 'page sess req' }), folds = [];
       var tool = req.toolName || req.tool_name || '도구', input = req.toolInput || req.tool_input || req.input || {};
       head(page, false, isPending() ? 'AI가 네 허락을 기다리고 있어' : doneLine('이미 처리된 요청이야'));
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
@@ -2433,7 +2774,7 @@
       tech.appendChild(h('h2', { class: 'label', text: '도구에 넘기는 입력 전체' }));
       tech.appendChild(h('pre', { class: 'box scroll', tabindex: '0', 'aria-label': '도구 입력 전체', text: MS(JSON.stringify(input, null, 2)) }));
       det.appendChild(tech);
-      card.appendChild(det);
+      if (post) folds.push(det); else card.appendChild(det);  // Post: 자세히 · 이유는 카드 아래 접는 칸
 
       if (isPending()) {
         var canSess = !(irrev || req.canAllowSession === false || req.hasSuggestions === false || (Array.isArray(req.permissionSuggestions) && !req.permissionSuggestions.length) || (Array.isArray(req.permission_suggestions) && !req.permission_suggestions.length));
@@ -2444,10 +2785,11 @@
             : h('p', { class: 'sub', text: '규칙 내용을 읽지 못했어. 위 입력 전체를 확인해.' }),
           req.suggestions ? h('pre', { class: 'box scroll', tabindex: '0', text: MS(JSON.stringify(req.suggestions, null, 2)) }) : null));
         // 시안엔 이유 입력칸이 없어 접어 둔다(기능은 남김). 적은 이유가 있으면 펼친 채로 둔다.
-        card.appendChild(h('details', { class: 'more', 'data-why-fold': '1', open: !!why },
+        var whyFold = h('details', { class: 'more', 'data-why-fold': '1', open: !!why },
           h('summary', { text: '이유 적기(선택)' }),
           h('label', { for: 'why', class: 'field-label', text: verbs[1] + ' 를 누를 때 AI에게 전달할 이유' }),
-          h('input', { id: 'why', class: 'input', value: why, placeholder: '예: 리뷰가 끝난 뒤에 해 줘', autocomplete: 'off', onInput: function (e) { why = e.target.value; } })));
+          h('input', { id: 'why', class: 'input', value: why, placeholder: '예: 리뷰가 끝난 뒤에 해 줘', autocomplete: 'off', onInput: function (e) { why = e.target.value; } }));
+        if (post) folds.push(whyFold); else card.appendChild(whyFold);
         if (sendErr) card.appendChild(h('p', { class: 'note-attn', role: 'alert', text: sendErr }));
         card.appendChild(h('div', { class: 'acts' },
           h('button', { type: 'button', class: 'pill dark', 'data-decide': 'allow', disabled: busy, text: verbs[0], onClick: function () { decide('allow'); } }),
@@ -2455,15 +2797,12 @@
           canSess ? h('button', { type: 'button', class: 'pill line', disabled: busy, text: '허용하고 이 세션에서 다시 묻지 않기', onClick: function () { decide('allow_session'); } }) : null));
         msgs.appendChild(card);
       } else { msgs.appendChild(card); msgs.appendChild(resultBlock()); }
-      panel.appendChild(msgs);
-      if (isPending()) panel.appendChild(sayBox());
-      page.appendChild(panel);
-      root.appendChild(page);
+      finish(page, panel, msgs, 'permission', folds);
     }
     /* 계획 확인(#861): 계획 본문은 AI 말과 같은 마크다운으로 보인다. 긴 계획은 접어 두고, 명령·도구 입력은 "자세히" 에만 둔다.
        [이 계획대로 진행] = 허락(권한 모드는 AI 쪽에서 기본으로 돌아온다) / [고쳐 달라고 하기] = 사유를 적어 거절(사유가 AI 에게 간다). */
     function drawPlan() {
-      var page = h('div', { class: 'page sess req' }), input = req.toolInput || req.tool_input || req.input || {}, open = isPending();
+      var page = h('div', { class: 'page sess req' }), folds = [], input = req.toolInput || req.tool_input || req.input || {}, open = isPending();
       head(page, false, open ? 'AI가 계획을 세웠어 · 읽고 진행할지 정해 줘' : doneLine('이미 처리된 계획이야'));
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
       // Windows 에서 계획 파일 맨 앞에 BOM 이 붙어 오면 첫 제목 줄이 제목으로 안 그려진다(실측)
@@ -2485,7 +2824,7 @@
       });
       var det = h('details', { class: 'more', 'data-tech-fold': '1' }, h('summary', { text: '자세히 (도구 입력 전체)' }), rows,
         h('pre', { class: 'box scroll', tabindex: '0', 'aria-label': '도구 입력 전체', text: MS(JSON.stringify(input, null, 2)) }));
-      card.appendChild(det);
+      if (post) folds.push(det); else card.appendChild(det);
       if (open) {
         if (planRevise) {
           var send = h('button', { type: 'button', class: 'pill dark', 'data-decide': 'deny', disabled: busy || !why.trim(), text: '고쳐 달라고 보내기', onClick: function () { decide('deny'); } });
@@ -2504,10 +2843,7 @@
         }
         msgs.appendChild(card);
       } else { msgs.appendChild(card); msgs.appendChild(resultBlock()); }
-      panel.appendChild(msgs);
-      if (open) panel.appendChild(sayBox());
-      page.appendChild(panel);
-      root.appendChild(page);
+      finish(page, panel, msgs, 'plan', folds);
     }
     function decide(d) {
       busy = true; sendErr = ''; var reason = why.trim(); draw();
@@ -2515,6 +2851,7 @@
       api('POST', '/api/requests/' + encodeURIComponent(rid) + '/answer', body).then(function () {
         var r = resTable()[d].slice(); if (d === 'deny' && reason) r[1] = '전달한 이유: ' + reason;
         outcome = { title: r[0], note: r[1] };
+        markStamp(rid, isPlan(req) ? 'plan' : 'permission', d);  // 성공한 뒤에만(Post)
       }, function (e) { afterFail(e); }).then(function () { busy = false; draw(); });
     }
     function afterFail(e) {
@@ -2543,7 +2880,7 @@
       var multi = qsList.length > 1, open = isPending();
       head(page, true, open ? (multi ? 'AI가 ' + qsList.length + '가지를 물어봤어 · 답하면 이어서 일해' : 'AI가 물어본 게 있어 · 답하면 이어서 일해') : doneLine('이미 처리된 질문이야'));
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
-      recentChat().forEach(function (el) { msgs.appendChild(el); });  // 시안 G-07: 질문 카드 위에 그 세션의 최근 대화
+      if (!post) recentChat().forEach(function (el) { msgs.appendChild(el); });  // 시안 G-07: 질문 카드 위에 그 세션의 최근 대화(Post 는 오른쪽 칸)
       qsList.forEach(function (q, i) {
         var opts = q.options || [], hasPrev = opts.some(function (o) { return o && o.preview; });
         var card = h('div', { class: 'q', role: 'group', 'aria-labelledby': 'qh-' + i });
@@ -2578,10 +2915,7 @@
         msgs.appendChild(h('p', { class: 'q-status', id: 'qstat', role: 'status' }));
         if (sendErr) msgs.appendChild(h('p', { class: 'note-attn', role: 'alert', text: sendErr }));
       } else msgs.appendChild(resultBlock());
-      panel.appendChild(msgs);
-      if (open) panel.appendChild(sayBox());
-      page.appendChild(panel);
-      root.appendChild(page);
+      finish(page, panel, msgs, 'question');
       syncSend();
     }
     /* MCP 질문: 대화 위 질문 카드와 같은 폼. 칸 모양은 서버가 정리해 준 elicitation.fields 로만 그린다. */
@@ -2589,15 +2923,12 @@
       var page = h('div', { class: 'page sess req' }), open = isPending();
       head(page, true, open ? '연결 도구가 값을 물어봤어 · 답하면 이어서 일해' : doneLine('이미 처리된 질문이야'));
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
-      recentChat().forEach(function (el) { msgs.appendChild(el); });
+      if (!post) recentChat().forEach(function (el) { msgs.appendChild(el); });
       if (open) {
-        var card = elicitCard(rid, draw, function (action) { var r = ELICIT_RES[action]; outcome = { title: r[0], note: r[1] }; });
+        var card = elicitCard(rid, draw, function (action) { var r = ELICIT_RES[action]; outcome = { title: r[0], note: r[1] }; }, post);
         msgs.appendChild(card || h('p', { class: 'note-attn', role: 'alert', text: '질문 내용을 읽지 못했어. 닫고 다시 시도해 줘.' }));
       } else msgs.appendChild(resultBlock());
-      panel.appendChild(msgs);
-      if (open) panel.appendChild(sayBox());
-      page.appendChild(panel);
-      root.appendChild(page);
+      finish(page, panel, msgs, 'elicitation');
     }
     function allAnswered() { return questionsOf(req).every(function (q, i) { return !!answerOf(i, q); }); }
     function syncSend() {
@@ -2612,6 +2943,7 @@
       busy = true; sendErr = ''; draw();
       api('POST', '/api/requests/' + encodeURIComponent(rid) + '/answer', { answers: ans }).then(function () {
         outcome = { title: '세션에 답을 전달했어.', note: '', lines: lines };
+        markStamp(rid, 'question', 'answer');  // 성공한 뒤에만(Post)
       }, afterFail).then(function () { busy = false; draw(); });
     }
 
@@ -2619,12 +2951,13 @@
     draw();
     return {
       title: function () { return ''; },
+      keep: function () { return { why: why, picked: picked, otherTexts: otherTexts, planOpen: planOpen, planRevise: planRevise, sayVal: sayVal }; },
       onRequest: function (id) { if (id === rid) { req = requests.get(rid); draw(); } },
       /* 세션 정보가 뒤늦게 오면 제목 블록만 채우려고 다시 그린다. 이미 있을 때는 입력 중인 칸을 지우지 않게 그대로 둔다. */
       onSession: function () { if (req && !hadSession && (sessionOf() || {}).id) draw(); },
       onData: function () { if (req && !hadSession && (sessionOf() || {}).id) draw(); },
       onRemoved: function (id) { if (id === rid) { req = requests.get(rid) || req; draw(); } },
-      tick: function () { var e = root.querySelector('[data-eb]'); if (e && isPending()) e.textContent = ebText(kindOf(req) !== 'permission'); }
+      tick: function () { var e = root.querySelector('[data-eb]'); if (e && isPending()) { var t = ebText(kindOf(req) !== 'permission'); if (e.lastChild && e.lastChild.nodeType === 3) e.lastChild.nodeValue = t; else e.textContent = t; } }
     };
   }
 
@@ -2659,24 +2992,29 @@
   }
   function skillCommand(info, name) { return '/' + info.plugin + ':' + name + ' '; }
   /* 입력칸을 감싸 / 와 @ 자동완성 목록을 붙인다. getRoot 는 @ 로 찾을 작업 폴더를 돌려준다. */
-  function withAssist(field, getRoot) {
+  function withAssist(field, getRoot, opts) {
     var box = h('ul', { class: 'assist', role: 'listbox', hidden: true });
-    var state = { items: [], index: 0, token: null, seq: 0 }, timer = null;
+    var state = { items: [], index: 0, token: null, seq: 0, msg: '' }, timer = null;
     function isOpen() { return !box.hidden; }
-    function close() { clearTimeout(timer); state.seq++; state.items = []; state.token = null; box.hidden = true; }
+    function close() { clearTimeout(timer); state.seq++; state.items = []; state.msg = ''; state.token = null; box.hidden = true; }
+    // Post: 파일 목록은 제목 있는 팝업이고, 빈 폴더·읽는 중·못 읽음도 글로 알린다(Sauce 는 예전 그대로 비면 닫힘)
+    function filePopup() { return isPostTheme() && state.token && state.token.kind === '@'; }
     function render() {
       clear(box);
+      if (filePopup()) box.appendChild(h('li', { role: 'presentation', class: 'assist-title', text: '작업 폴더 파일 고르기' }));
+      if (filePopup() && !state.items.length && state.msg) box.appendChild(h('li', { role: 'presentation', class: 'assist-empty', text: state.msg }));
       state.items.forEach(function (it, i) {
         box.appendChild(h('li', { role: 'option', class: 'assist-item', 'aria-selected': String(i === state.index), onMousedown: function (e) { e.preventDefault(); pick(i); } },
           h('span', { class: 'nm', text: it.label }), it.hint ? h('span', { class: 'hint', text: it.hint }) : null));
       });
-      box.hidden = !state.items.length;
+      box.hidden = !state.items.length && !(filePopup() && state.msg);
     }
-    function show(items) { state.items = items; state.index = 0; render(); }
+    function show(items, msg) { state.items = items; state.msg = msg || ''; state.index = 0; render(); }
     function pick(i) {
       var it = state.items[i], t = state.token;
       if (!it || !t) return;
       var next = field.value.slice(0, t.start) + it.insert + field.value.slice(t.end);
+      if (t.kind === '@' && it.path && opts && opts.onFile) opts.onFile(it.path, it.insert.trim());
       close();
       setFieldValue(field, next, t.start + it.insert.length);
     }
@@ -2715,12 +3053,13 @@
         return;
       }
       var root = getRoot();
-      if (!root) { show([]); return; }
+      if (!root) { show([], '작업 폴더를 먼저 골라 줘.'); return; }
+      if (isPostTheme() && !state.items.length) show([], '파일을 찾는 중이야.');
       timer = setTimeout(function () {
         api('GET', '/api/files' + qs({ root: root, q: t.query })).then(function (d) {
           if (mine !== state.seq || !document.body.contains(field)) return;
-          show(listOf(d, 'files').slice(0, ASSIST_MAX_ITEMS * 2).map(function (p) { return { label: p, hint: '', insert: fileInsert(p) }; }));
-        }, function (e) { console.warn('파일을 찾지 못했습니다', e); if (mine === state.seq) show([]); });
+          show(listOf(d, 'files').slice(0, ASSIST_MAX_ITEMS * 2).map(function (p) { return { label: p, hint: '', insert: fileInsert(p), path: p }; }), t.query ? '맞는 파일이 없어. 다른 글자로 찾아 봐.' : '이 작업 폴더에서 고를 파일이 없어.');
+        }, function (e) { console.warn('파일을 찾지 못했습니다', e); if (mine === state.seq) show([], '파일 목록을 읽지 못했어. 다시 눌러 줘.'); });
       }, ASSIST_FILE_DELAY);
     }
     field.addEventListener('input', update);
@@ -2729,6 +3068,7 @@
     field.addEventListener('keyup', function (e) { if (CARET_KEYS.indexOf(e.key) >= 0) update(); });
     field.addEventListener('keydown', function (e) {
       if (!isOpen() || e.isComposing || e.keyCode === 229) return;
+      if (!state.items.length) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } return; }  // 글만 있는 안내 팝업은 Esc 로만 닫고 Enter 는 줄바꿈 그대로
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         state.index = (state.index + (e.key === 'ArrowDown' ? 1 : state.items.length - 1)) % state.items.length;
@@ -3098,10 +3438,12 @@
         renderHead(location.pathname);
         return;
       }
-      var t = TITLES[step] || TITLES.review;
-      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: step === 'write' ? 'eb' : 'eb accent', text: t[0] }), h('h1', { text: t[1] }), t[2] ? h('p', { class: 'line', text: t[2] }) : null));
-      var panel = h('section', { class: 'light newbox' + (step === 'review' ? ' rv' : '') });
-      if (step === 'write') drawWrite(panel);
+      var t = TITLES[step] || TITLES.review, post = isPostTheme();
+      if (post) page.classList.add('po-new');  // Post: 시안 new 배치(눈썹 · 큰 질문 · 입력 판 · 종류 격자 + 순서 판)
+      var eyebrow = post && step === 'write' && projectOf() ? t[0] + ' · ' + projectOf() : t[0];
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: step === 'write' ? 'eb' : 'eb accent', text: eyebrow }), h('h1', { text: t[1] }), t[2] ? h('p', { class: 'line', text: t[2] }) : null));
+      var panel = h('section', { class: post && step === 'write' ? 'po-nwrap' : 'light newbox' + (step === 'review' ? ' rv' : '') });
+      if (step === 'write') drawWrite(panel, post);
       else if (step === 'analyzing') drawAnalyzing(panel);
       else if (step === 'failed') drawFailed(panel);
       else drawReview(panel);
@@ -3149,18 +3491,23 @@
       if (f) { f.focus(); try { f.setSelectionRange(f.value.length, f.value.length); } catch (e) { console.debug('커서 위치를 되돌리지 못했습니다', e); } }
     }
     function kindFlow() { var k = KINDS[draft.kind]; return k ? k[2] : ''; }
-    function drawWrite(panel) {
+    var KIND_ICONS = ['doc', 'route', 'doc', 'rows', 'shield', 'wrench', 'warn', 'wrench', 'help'];  // Post 종류 카드의 아이콘 칩(KINDS 앞쪽 아홉 개 순서)
+    /* post 이면 Post 배치(시안 new): 입력 판 → 종류 격자 + 오른쪽 순서 판. 같은 부분(요소)을 순서만 다르게 붙인다. 아니면 예전 순서 그대로. */
+    function drawWrite(panel, post) {
+      var parts = [];  // [자리, 요소]: 예전 순서대로 쌓아 두었다가 아래에서 테마에 맞게 붙인다
+      function put(slot, el) { if (el) parts.push([slot, el]); }
       function kindBtn(k, i) {
         var hint = BL.kindHint(k[2], ready);  // 판정 대상이 아니거나 확인 못 하면 null 이라 예전 그대로
         return h('button', { type: 'button', class: 'kind' + (hint ? ' ' + hint.tone : ''), 'data-kind': k[0], 'aria-pressed': String(draft.kind === i), onClick: function () { pickKind(i); } },
+          post ? h('span', { class: 'kind-ic', 'aria-hidden': 'true' }, icon(KIND_ICONS[i] || 'doc', 18)) : null,
           h('b', { text: k[0] }), h('small', { text: k[1] }), hint ? h('small', { class: 'khint', 'data-hint': k[2], text: hint.text }) : null);
       }
       // 시안 G-05 의 아홉 개만 칸으로 두고, 나머지(설정하기·표준 기능)는 단추 줄 아래 한 줄에 둔다(칸 줄 수가 시안과 같게)
-      panel.appendChild(h('div', { class: 'kinds', role: 'group', 'aria-label': '하고 싶은 일의 종류' }, KINDS.slice(0, KINDS_GRID).map(function (k, i) { return kindBtn(k, i); })));
+      put('kinds', h('div', { class: 'kinds', role: 'group', 'aria-label': '하고 싶은 일의 종류' }, KINDS.slice(0, KINDS_GRID).map(function (k, i) { return kindBtn(k, i); })));
       // 개발하기를 눌렀는데 Spec 있는 건이 없다고 확실하면 분석 전에 바로 알린다.
       if (kindFlow() === 'dev' && BL.devBlock('dev', ready)) {
         var specIdx = KINDS.map(function (k) { return k[2]; }).indexOf('spec');
-        panel.appendChild(ui.askCard({
+        put('devask', ui.askCard({
           id: 'dev-nospec', label: '개발 시작 확인',
           lead: ['Spec 있는 개발 건이 아직 없어. 개발은 ', h('b', { text: '개발 Spec' }), ' 이 승인돼 있어야 시작할 수 있어.'],
           block: draft.insist ? BL.devBlock('dev', ready) : '',
@@ -3168,27 +3515,48 @@
           onSwitch: function () { pickKind(specIdx); }, onKeep: function () { draft.insist = true; draw(); }
         }));
       }
-      panel.appendChild(h('label', { for: 'brief', class: 'field-label', text: '하고 싶은 일을 한두 줄로' }));
+      put('label', post ? null : h('label', { for: 'brief', class: 'field-label', text: '하고 싶은 일을 한두 줄로' }));
       var brief = h('textarea', { id: 'brief', class: 'textarea', rows: '3', value: draft.text, placeholder: '예: 구매요청을 올리면 팀장에게 승인 메일이 가면 좋겠어  (/ 로 스킬, @ 로 파일)',
         onInput: function (e) { draft.text = e.target.value; if (textErr) { textErr = false; var m = root.querySelector('[data-terr]'); if (m) m.hidden = true; } } });
-      panel.appendChild(withAssist(brief, function () { return draft.cwd; }).wrap);
-      panel.appendChild(h('p', { class: 'note-attn', 'data-terr': '1', role: 'alert', text: '어떤 일인지 한 줄이라도 적어 줘.', hidden: !textErr }));
-      panel.appendChild(h('button', { type: 'button', class: 'refbox', text: '참고 파일(회의록 · 고객 메일 · 기존 양식)은 여기를 눌러 작업 폴더에서 골라 넣어', onClick: function () {
+      // Post: 목록에서 고른 파일은 입력칸의 @경로 로 들어가고, 칸 아래에 칩(빼기 ×)으로도 보인다. 글에서 @경로 를 지우면 칩도 사라진다.
+      var refRow = h('div', { class: 'ref-chips', 'data-ref-chips': '1', hidden: true });
+      function mentionOf(p) { return /\s/.test(p) ? '@' + MENTION_QUOTE + p + MENTION_QUOTE : '@' + p; }
+      function paintRefs() {
+        draft.refs = (draft.refs || []).filter(function (p) { return draft.text.indexOf(mentionOf(p)) >= 0; });
+        clear(refRow);
+        draft.refs.forEach(function (p) {
+          refRow.appendChild(h('span', { class: 'ref-chip' }, h('span', { class: 'nm', text: p }),
+            h('button', { type: 'button', class: 'ref-x', 'aria-label': '빼기: ' + p, text: '×', onClick: function () {
+              var m = mentionOf(p), at = draft.text.indexOf(m);
+              if (at >= 0) { var end = at + m.length; if (draft.text.charAt(end) === ' ') end++; setFieldValue(brief, draft.text.slice(0, at) + draft.text.slice(end), at); }
+              paintRefs();
+            } })));
+        });
+        refRow.hidden = !draft.refs.length;
+      }
+      brief.addEventListener('input', function () { if (post) paintRefs(); });
+      put('brief', withAssist(brief, function () { return draft.cwd; }, { onFile: function (p) { draft.refs = draft.refs || []; if (draft.refs.indexOf(p) < 0) draft.refs.push(p); setTimeout(paintRefs, 0); } }).wrap);
+      if (post) { paintRefs(); put('refchips', refRow); }
+      put('terr', h('p', { class: 'note-attn', 'data-terr': '1', role: 'alert', text: '어떤 일인지 한 줄이라도 적어 줘.', hidden: !textErr }));
+      // 참고 파일 점선 칸: Post 는 시안 글자, Sauce 는 예전 글자
+      var refText = post ? '작업 폴더에서 참고 파일 골라 넣기 (회의록 · 고객 메일 · 기존 양식)' : '참고 파일(회의록 · 고객 메일 · 기존 양식)은 여기를 눌러 작업 폴더에서 골라 넣어';
+      put('ref', h('button', { type: 'button', class: 'refbox', onClick: function () {
         var f = document.getElementById('brief'); if (!f) return;
         var v = f.value + (f.value && !/\s$/.test(f.value) ? ' ' : '') + '@';
         setFieldValue(f, v, v.length);
-      } }));
-      panel.appendChild(h('span', { class: 'eb', text: '이렇게 진행돼' }));
-      panel.appendChild(preview.el);
+      } }, post ? icon('clip', 16) : null, refText));
+      put('flowlabel', post ? null : h('span', { class: 'eb', text: '이렇게 진행돼' }));
+      put('preview', preview.el);
       var k = KINDS[draft.kind];
       preview.update({ cwd: draft.cwd, flowId: kindFlow(), note: !k ? '어떤 순서로 할지는 AI가 요청을 읽은 다음 알려 줘. 위에서 종류를 고르면 그 순서를 미리 볼 수 있어.' : !k[2] && !k[3] ? 'AI가 요청을 읽고 어떤 순서로 할지 정해 줘.' : '이 종류는 정해진 순서 없이 그 도구 스킬로 바로 시작해.' });
-      var folderLine = folderBar(panel);
-      panel.appendChild(folderWarn.el);
+      var folderLine = folderBar({ appendChild: function (el) { put('pick', el); } });  // 폴더 고르기 목록은 열렸을 때만 붙는다
+      put('warn', folderWarn.el);
       folderWarn.update(draft.cwd, window.BHLogic.workingSessions(draft.cwd, Array.from(sessions.values())).length > 0, useFolder);
       modelChoice(); effortChoice(); permissionChoice();
-      panel.appendChild(h('div', { class: 'bottom' }, folderLine, h('span', { class: 'sp' }),
-        h('button', { type: 'button', class: 'pill dark big', text: '작업 시작', onClick: begin })));
-      if (KINDS.length > KINDS_GRID) panel.appendChild(h('div', { class: 'kinds-more', role: 'group', 'aria-label': '그 밖의 종류' }, h('span', { class: 'lm', text: '그 밖의 종류' }),
+      var startBtn = h('button', { type: 'button', class: 'pill dark big', text: '작업 시작', onClick: begin });
+      if (post) startBtn.prepend(icon('send', 16));
+      put('bottom', post ? null : h('div', { class: 'bottom' }, folderLine, h('span', { class: 'sp' }), startBtn));
+      if (KINDS.length > KINDS_GRID) put('more', h('div', { class: 'kinds-more', role: 'group', 'aria-label': '그 밖의 종류' }, h('span', { class: 'lm', text: '그 밖의 종류' }),
         KINDS.slice(KINDS_GRID).map(function (k, j) { var i = KINDS_GRID + j; return h('button', { type: 'button', class: 'chip', 'data-kind': k[0], title: k[1], 'aria-pressed': String(draft.kind === i), text: k[0], onClick: function () { pickKind(i); } }); })));
       var adv = h('details', { class: 'more', open: advOpen, onToggle: function (e) { advOpen = e.target.open; } }, h('summary', { text: '고급 설정 (모델 · 생각 깊이 · 권한)' }));
       adv.appendChild(h('div', { class: 'field-pair' },
@@ -3217,8 +3585,16 @@
           h('select', { id: 'permission', class: 'input', onChange: function (e) { draft.permission = e.target.value; window.BH.write('bh-permission', draft.permission); } },
             permissionOptions().map(function (o) { return h('option', { value: o.value, selected: o.value === draft.permission, text: o.label }); })))));
       adv.appendChild(h('p', { class: 'note-muted', text: '요청을 살펴볼 때와 작업을 진행할 때 같은 모델과 에포트(생각의 깊이)를 써. 권한 모드는 작업을 진행하는 Claude Code 세션에만 적용돼.' }));
-      panel.appendChild(adv);
-      if (startedId !== null) panel.appendChild(h('div', { class: 'started', role: 'status' }, h('span', { text: '이전 작업을 시작했어.' }), link(startedId ? '/s/' + encodeURIComponent(startedId) : '/', { text: '작업 화면으로 이동' })));
+      put('adv', adv);
+      if (startedId !== null) put('started', h('div', { class: 'started', role: 'status' }, h('span', { text: '이전 작업을 시작했어.' }), link(startedId ? '/s/' + encodeURIComponent(startedId) : '/', { text: '작업 화면으로 이동' })));
+      if (!post) { parts.forEach(function (p) { panel.appendChild(p[1]); }); return; }
+      function slot(n) { return parts.filter(function (p) { return p[0] === n; }).map(function (p) { return p[1]; }); }
+      // Post(시안 new): 큰 입력 판(입력 · 참고 파일 점선 칸 · 빨간 작업 시작) → 종류 카드 격자 + 오른쪽 순서 판(작업 폴더 · 고급 설정)
+      panel.appendChild(h('div', { class: 'light po-launch' }, slot('brief'), slot('refchips'), slot('terr'), h('div', { class: 'po-compbar' }, slot('ref'), h('span', { class: 'sp' }), startBtn)));
+      panel.appendChild(h('div', { class: 'po-ngrid' },
+        h('div', { class: 'po-nleft' }, slot('devask'), slot('kinds'), slot('more')),
+        h('aside', { class: 'light po-flow' }, h('h3', { class: 'po-fh', text: '이렇게 진행돼' }), slot('preview'),
+          h('div', { class: 'po-folder' }, icon('folder', 16), folderLine), slot('pick'), slot('warn'), slot('adv'), slot('started'))));
     }
     function drawAnalyzing(panel) {
       panel.appendChild(h('p', { class: 'quiet', text: '필요한 자료를 고르면 확인을 요청할게.' }));
@@ -3226,7 +3602,8 @@
       panel.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line sm', text: '요청 고치기', onClick: function () { clearTimeout(pollTimer); aid = null; step = 'write'; history.replaceState(null, '', '/new'); draw(); } })));
     }
     function drawFailed(panel) {
-      panel.appendChild(h('div', { class: 'bad' }, h('span', { class: 'tagx', text: '확인 못 함' }), h('b', { class: 'bt', text: 'Claude Code가 요청을 살펴보지 못했어' }), h('span', { class: 'sm', text: err || '알 수 없는 오류야.' })));
+      var post = isPostTheme();  // Post: 확인 못 함은 ? 보라 점선(막힘 카드와 같은 부품)
+      panel.appendChild(h('div', { class: post ? 'bad q unsure' : 'bad' }, h('span', { class: post ? 'tagx unk' : 'tagx', text: post ? '? 확인 못 함' : '확인 못 함' }), h('b', { class: 'bt', text: 'Claude Code가 요청을 살펴보지 못했어' }), h('span', { class: 'sm', text: err || '알 수 없는 오류야.' })));
       panel.appendChild(h('div', { class: 'acts end' },
         h('button', { type: 'button', class: 'pill line', text: '요청 고치기', onClick: function () { step = 'write'; history.replaceState(null, '', '/new'); draw(); } }),
         h('button', { type: 'button', class: 'pill dark', text: '다시 시도', onClick: begin })));
@@ -3417,6 +3794,19 @@
       }));
       sec.appendChild(set('테마', themeGrid));
 
+      /* Post 전용(D단계): 효과 강도 · 밝기. 다른 테마에는 이 칸이 없다. 둘 다 브라우저에 저장하고 바로 적용한다(bh-fx · bh-mode). */
+      if (themeNow === 'post') {
+        var postSeg = function (label, list, cur, apply) {
+          return h('div', { class: 'seg', role: 'radiogroup', 'aria-label': label }, list.map(function (o) {
+            return h('button', { type: 'button', role: 'radio', class: 'scale', 'aria-checked': String(o[0] === cur), 'data-post-opt': o[0], text: o[1], onClick: function () { apply(o[0]); draw(); } });
+          }));
+        };
+        sec.appendChild(set('효과 강도', h('div', null, postSeg('효과 강도', BH.FX, BH.getFx(), BH.setFx),
+          h('p', { class: 'note-muted', text: '차분은 장면 대신 세션 목록을 보이고 움직임을 모두 끄고, 화려는 창문 구름까지 움직여. 운영체제의 동작 줄이기도 차분처럼 따라가.' }))));
+        sec.appendChild(set('밝기', h('div', null, postSeg('밝기', BH.MODES, BH.getMode(), BH.setMode),
+          h('p', { class: 'note-muted', text: '테마 기본은 밝게야. 어둡게를 골라도 장면 그림은 낮 우체국 그대로 두고 둘레만 어두워져.' }))));
+      }
+
       /* 시안 19 "AI가 묻는 범위": 서버 ask.json 과 이어진다. 읽기 전(askCfg 없음)에는 고르지 못한다. */
       var askNow = askCfg && askCfg.level;
       var askRadios = h('div', { class: 'radios', role: 'radiogroup', 'aria-label': 'AI가 묻는 범위' }, ASK_OPTIONS.map(function (o) {
@@ -3496,6 +3886,7 @@
     annEl = h('div', { class: 'ann-slot', 'data-bubble': window.BHNotice ? '1' : null });  // 알림 말풍선이 같은 알림을 보이니 띠는 감춘다(#1016)
     headEl = h('header', { class: 'top' });
     appEl.appendChild(annEl); appEl.appendChild(headEl);
+    sideEl.addEventListener('click', onPostFilter);
     appEl.appendChild(h('div', { class: 'shell' }, sideEl, mainEl));
     root.appendChild(appEl);
     // 점검 결과(첫 실행인지)가 오면 그 화면으로 처음부터 그린다. 늦거나 못 읽으면 홈을 막지 않고 그대로 그린다.
