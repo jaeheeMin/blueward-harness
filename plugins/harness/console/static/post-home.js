@@ -7,6 +7,8 @@
 
   var DAYS = ['일', '월', '화', '수', '목', '금', '토'];
   var LEGEND = ['turn', 'run', 'wait', 'blocked', 'unk', 'done'];
+  /* 사무실 장면(office-post.js) 아래 팀 요약. 갈래(flowId) → 팀. 갈래가 없는 세션은 어느 팀에도 세지 않는다. */
+  var TEAMS = [['요구분석팀', ['srs', 'srs-export']], ['설계팀', ['spec']], ['개발팀', ['dev']], ['기능컨설팅팀', ['config']], ['표준화팀', ['standard']], ['유지보수팀', ['fix']]];
 
   function dateLine(d) {
     var hr = d.getHours(), ap = hr < 12 ? '오전' : '오후', h12 = hr % 12 === 0 ? 12 : hr % 12, mm = d.getMinutes();
@@ -87,9 +89,10 @@
       var helloSlot = h('div', { class: 'po-hello' });
       var sceneSub = h('span', { class: 'po-sub' });
       var calmList = h('ul', { class: 'po-maplist', 'aria-label': '지금 세션들' });  // 차분(fx=0)일 때 장면 대신 보이는 세션 목록(시안 mapFallback)
+      var teamRow = h('ul', { class: 'po-teams', 'aria-label': '팀별 세션 수', hidden: true });  // 사무실 장면이 있을 때만(창구 요약 줄 자리)
       var scenePanel = h('section', { class: 'light po-panel po-scenep', 'aria-labelledby': 'po-scene-h' },
         h('header', { class: 'po-ph' }, h('h2', { id: 'po-scene-h', text: '지금 세션들' }), sceneSub),
-        slots.sceneHost, calmList,
+        slots.sceneHost, teamRow, calmList,
         h('ul', { class: 'po-legend', 'aria-label': '상태 표시' }, LEGEND.map(function (k) { return h('li', null, stMark(k), PS.LABEL[k]); })));
       var deckSlot = h('div');
       var restSlot = h('div', { class: 'po-rest' });
@@ -168,6 +171,18 @@
         if (!calmList.firstChild) calmList.appendChild(h('li', { class: 'quiet', text: '지금 일하는 세션이 없어.' }));
       }
 
+      /* 사무실 장면 아래 팀 이름과 인원 수. 장면이 안 그려지는 차분(fx=0)이거나 사무실 장면이 없으면 숨긴다. */
+      function paintTeams() {
+        clear(teamRow);
+        teamRow.hidden = !window.BHOfficeScene || PS.calm();
+        if (teamRow.hidden) return;
+        var list = kit.sceneList();
+        TEAMS.forEach(function (t) {
+          var n = list.filter(function (s) { return t[1].indexOf(s.flow) >= 0; }).length;
+          teamRow.appendChild(h('li', { class: n ? 'has' : '' }, h('b', { text: t[0] }), h('span', { text: n + '명' })));
+        });
+      }
+
       function draw() {
         if (gone) return;
         if (!kit.loaded()) {
@@ -189,6 +204,7 @@
         var c = L.counts(list);
         sceneSub.textContent = c.total + '개';
         paintCalm();
+        paintTeams();
         var proj = kit.projectOf() || HK.folderName(list[0]);
         helloSlot.appendChild(h('p', { class: 'po-date', text: dateLine(new Date()) + (proj ? ' · ' + proj : '') }));
         helloSlot.appendChild(h('h1', { text: '오늘 내 일' }));

@@ -191,15 +191,28 @@
   }
 
   /* 홈이 부른다. host 는 빈 div. 테마가 post 일 때만 장면이 있고, 테마가 바뀌면 붙거나 떨어진다.
-     opts: { list(): 장면에 올릴 세션 목록, onNavigate(href) } */
-  function attach(host, opts) {
+     opts: { list(): 장면에 올릴 세션 목록, onNavigate(href) }. office(window.BHOfficeScene)를 주면 우체국 장면 대신 사무실 장면을 붙인다. */
+  function attach(host, opts, office) {
     var scene = null, dead = false, reduce = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
-    function drop() { if (scene) { scene.destroy(); scene = null; } host.hidden = true; }
+    var waitRo = null;
+    function drop() { if (waitRo) { waitRo.disconnect(); waitRo = null; } if (scene) { scene.destroy(); scene = null; } host.classList.remove('is-office'); host.hidden = true; }
     function sync() {
       if (dead) return;
       if (!isPost() || calm()) return drop();  // 차분 = 장면을 그리지 않고 세션 목록(post-home.js)이 대신한다
-      if (scene) return;
+      if (scene || waitRo) return;
       host.hidden = false;
+      if (office) {  // AI 오피스 장면(post/office/office-post.js): 부품 목록을 안 받고 바로 붙는다. 팀 요약 줄은 post-home.js 가 그린다
+        host.classList.add('is-office');
+        // 칸이 숨겨져 폭이 0 일 때 붙이면 장면이 scale(Infinity) 로 그려져 콘솔 오류가 난다 — 폭이 생길 때까지 기다렸다 붙인다
+        var mount = function () {
+          if (dead || scene || !host.clientWidth) return;
+          if (waitRo) { waitRo.disconnect(); waitRo = null; }
+          var o = office.attach(host, opts);
+          scene = { update: function () { o.update(); }, destroy: function () { o.destroy(); } };
+        };
+        if (!host.clientWidth && typeof ResizeObserver === 'function') { if (!waitRo) { waitRo = new ResizeObserver(mount); waitRo.observe(host); } } else mount();
+        return;
+      }
       loadManifest(function (ok) {
         if (dead || scene || !isPost() || calm()) return;
         if (!ok) { host.hidden = true; return; }
