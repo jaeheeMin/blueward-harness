@@ -242,7 +242,7 @@
       var el = h('div', { class: 'q startchecks', 'aria-label': '새 세션 점검', hidden: true });
       var note = h('p', { class: 'note-muted', role: 'status', hidden: true });
       var last = null, alive = true;
-      var CROW = { done: 'ok', run: 'run', fail: 'fail', skipped: 'todo', todo: 'todo' };
+      var CROW = { done: 'ok', run: 'run', fail: 'fail', unknown: 'unk', skipped: 'todo', todo: 'todo' };
       function draw() {
         var s = last, checks = s ? L.startChecks(s) : [];
         el.hidden = !checks.length;
@@ -253,7 +253,8 @@
         checks.forEach(function (c) {
           el.appendChild(h('div', { class: 'crow ' + CROW[c.state], 'data-check': c.id },
             h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: c.name }), h('span', { class: 'ct', text: c.label }),
-            c.state === 'fail' ? h('button', { type: 'button', class: 'pill line sm', disabled: s.canSend === false, text: '다시 하기',
+            c.reason && (c.state === 'fail' || c.state === 'unknown') ? h('span', { class: 'ct', text: c.reason }) : null,
+            c.state === 'fail' || c.state === 'unknown' ? h('button', { type: 'button', class: 'pill line sm', disabled: s.canSend === false, text: '다시 하기',
               onClick: function () {
                 note.hidden = false; note.textContent = c.name + ' 요청을 보내는 중이야.';
                 runTool(s, c.id, c.name).then(function (msg) { if (alive) { note.textContent = msg; kit.refreshSession(s.id); } });

@@ -38,6 +38,7 @@ REPLACE_RETRY_DELAY = 0.05
 # 새 세션 점검 항목(sync, version, update, reload). 상태: pending(대기) / done(했음) / skipped(건너뜀)
 START_CHECK_IDS = ("sync", "version", "update", "reload")
 CHECK_PENDING, CHECK_DONE, CHECK_SKIPPED = "pending", "done", "skipped"
+CHECK_FAIL, CHECK_UNKNOWN = "fail", "unknown"  # 훅·판 확인 결과: 다시 필요 / 확인 못 함(#1059)
 
 # 제목 우선순위: SessionStart 의 session_title > 첫 요청 글 > 폴더 이름
 TITLE_FOLDER, TITLE_PROMPT, TITLE_SESSION = 1, 2, 3
@@ -646,6 +647,11 @@ class Store:
                 existing["managed"] = True
                 existing["cwd"] = existing["cwd"] or s["cwd"]
                 existing["startedAt"] = min(existing["startedAt"], s["startedAt"])
+                if s.get("startChecks") and not existing.get("startChecks"):  # 훅이 먼저 실제 id 로 등록했어도 새 세션 점검 목록을 잃지 않는다
+                    existing["startChecks"] = s["startChecks"]
+                if s.get("checkResults"):
+                    existing["checkResults"] = {**s["checkResults"], **(existing.get("checkResults") or {})}
+                apply_check_results(existing)  # 먼저 와서 보관해 둔 훅 결과를 이제 점검 목록에 반영한다
                 if s["title_rank"] > existing["title_rank"]:
                     existing["title"], existing["title_rank"] = s["title"], s["title_rank"]
                 existing["log"] = (s["log"] + existing["log"])[-LOG_LIMIT:]
@@ -785,13 +791,33 @@ def new_start_checks() -> list[dict]:
     return [{"id": cid, "state": CHECK_PENDING} for cid in START_CHECK_IDS]
 
 
-def mark_check(s: dict, cid: str, state: str = CHECK_DONE) -> bool:
-    """새 세션 점검 한 항목을 대기에서 바꾼다. 이미 했거나 건너뛴 항목, 없는 항목은 그대로 둔다. 바뀌었으면 True."""
+def mark_check(s: dict, cid: str, state: str = CHECK_DONE, reason: str = "", retry: bool = True) -> bool:
+    """새 세션 점검 한 항목을 대기에서 바꾼다. 이미 했거나 건너뛴 항목, 없는 항목은 그대로 둔다. 바뀌었으면 True.
+    다시 필요(fail)·확인 못 함(unknown)인 항목은 그 스킬을 직접 해서 했음(done)이 될 수 있다(retry). 훅 결과는 대기 항목만 바꾼다. reason 은 화면에 보일 한 줄 사유다(#1059)."""
     for item in s.get("startChecks") or []:
-        if item["id"] == cid and item["state"] == CHECK_PENDING:
+        if item["id"] != cid:
+            continue
+        if item["state"] == CHECK_PENDING or (retry and state == CHECK_DONE and item["state"] in (CHECK_FAIL, CHECK_UNKNOWN)):
             item["state"] = state
+            if reason:
+                item["reason"] = reason[:200]
+            else:
+                item.pop("reason", None)
             return True
     return False
+
+
+def record_check(s: dict, cid: str, state: str, reason: str = "") -> bool:
+    """훅이 알려 준 점검 결과를 세션에 남기고, 점검 목록이 있으면 바로 반영한다. 콘솔이 띄운 세션은 임시 id 로 시작했다가 실제 id 로 이어지는데
+    (rekey) 훅 결과가 이어지기 전에 오면 점검 목록이 아직 없다. 그래서 결과를 따로 보관했다가 rekey 가 반영한다(apply_check_results)."""
+    s.setdefault("checkResults", {})[cid] = {"state": state, "reason": reason[:200]}
+    return mark_check(s, cid, state, reason, retry=False)
+
+
+def apply_check_results(s: dict) -> None:
+    for cid, r in (s.get("checkResults") or {}).items():
+        if isinstance(r, dict):
+            mark_check(s, cid, str(r.get("state") or ""), str(r.get("reason") or ""), retry=False)
 
 
 REPORT_TAIL_TRIM = " \t*_`~\"'”’)」』>]"

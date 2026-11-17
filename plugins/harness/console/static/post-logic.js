@@ -32,8 +32,9 @@
     if (!bk && s.status !== 'ended' && L.groupOf(s) === 'todo') return 'turn';
     if (bk) return bk.kind === 'cannot_check' ? 'unk' : 'blocked';
     if (s.status === 'running' || s.status === 'starting') return 'run';
+    if (s.status === 'ended') return 'done';  // 실제로 돌지 않는 세션은 PR 이 열려 있어도 끝남이다(#1059). 승인 기다림(일하는 중 칸)에 넣지 않는다
     if (prState(s) === 'OPEN' || s.phase === 'approval') return 'wait';
-    if (s.status === 'ended' || prState(s) === 'MERGED' || s.phase === 'finished' || s.flowFinished) return 'done';
+    if (prState(s) === 'MERGED' || s.phase === 'finished' || s.flowFinished) return 'done';
     return 'idle';
   }
 
