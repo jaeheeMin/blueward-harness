@@ -25,11 +25,16 @@
   function upper(v) { return String(v == null ? '' : v).toUpperCase(); }
   function prState(s) { var pr = s && s.flowPr; return pr && pr.number ? upper(pr.state) : ''; }
 
-  /* 세션 상태(가이드 6.2). L 은 BHLogic. */
-  function stateOf(s, L) {
+  /* 내 차례 계산에 쓰는 "아직 답 안 한 요청 번호" 함수(app.js·flow-ui.js 의 openIds). 화면이 한 번 알려 주면 stateOf 가 늘 이걸로 센다.
+     없으면 서버가 준 pendingRequestIds 를 그대로 믿어, 방금 답한 요청이 다음 목록 갱신 전까지 내 차례로 남는다(홈 덱·띠와 어긋남). */
+  var openIdsFn = null;
+  function useOpenIds(fn) { openIdsFn = typeof fn === 'function' ? fn : null; }
+
+  /* 세션 상태(가이드 6.2). L 은 BHLogic. openIds 를 안 주면 useOpenIds 로 받은 것을 쓴다(띠·알림·홈과 같은 내 차례 기준, #1027 D5). */
+  function stateOf(s, L, openIds) {
     if (!s) return 'idle';
     var bk = L.blockOf(s);
-    if (!bk && s.status !== 'ended' && L.groupOf(s) === 'todo') return 'turn';
+    if (!bk && s.status !== 'ended' && L.groupOf(s, openIds || openIdsFn || undefined) === 'todo') return 'turn';
     if (bk) return bk.kind === 'cannot_check' ? 'unk' : 'blocked';
     if (s.status === 'running' || s.status === 'starting') return 'run';
     if (s.status === 'ended') return 'done';  // 실제로 돌지 않는 세션은 PR 이 열려 있어도 끝남이다(#1059). 승인 기다림(일하는 중 칸)에 넣지 않는다
@@ -57,8 +62,9 @@
 
   /* ---------- 세션·요청 화면(B단계): 목록 걸러보기 · 창구 안내 · 정보 줄 · 도장 글자 ---------- */
 
-  /* 세션 목록 위의 걸러보기. 내 차례 = 내 답·막힘·확인 못 함(시안은 넷을 한 묶음으로 센다), 일하는 중 = 일하는 중·승인 기다림. 쉬는 중은 "전체" 에만 있다. */
-  var FILTERS = [{ id: 'all', label: '전체' }, { id: 'turn', label: '내 차례' }, { id: 'run', label: '일하는 중' }, { id: 'done', label: '끝남' }];
+  /* 세션 목록 위의 걸러보기. 할 일 = 내 답·막힘·확인 못 함(시안은 넷을 한 묶음으로 센다), 일하는 중 = 일하는 중·승인 기다림. 쉬는 중은 "전체" 에만 있다.
+     묶음 이름이 "내 차례" 면 홈·띠·알림의 "내 차례 N건"(막힘·확인 못 함은 따로 셈)과 같은 이름에 다른 숫자가 나온다. 그래서 "할 일" 이다(내 차례 + 막힘 + 확인 못 함, 세션 수). */
+  var FILTERS = [{ id: 'all', label: '전체' }, { id: 'turn', label: '할 일' }, { id: 'run', label: '일하는 중' }, { id: 'done', label: '끝남' }];
   var FILTER_OF = { turn: 'turn', blocked: 'turn', unk: 'turn', run: 'run', wait: 'run', done: 'done' };
   function filterMatch(f, state) { return f === 'all' || FILTER_OF[state] === f; }
   function filterCounts(states) {
@@ -108,7 +114,7 @@
   function sealDesk(kind, k) { return kind === 'question' || kind === 'elicitation' ? STATION[Math.max(0, Math.min(4, k | 0))].desk : STATION[3].desk; }
 
   var api = { FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
-    clerkLine: clerkLine, sealOf: sealOf, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
+    clerkLine: clerkLine, sealOf: sealOf, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;
 })(typeof window !== 'undefined' ? window : this);

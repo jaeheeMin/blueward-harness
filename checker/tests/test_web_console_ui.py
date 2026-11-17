@@ -1751,7 +1751,7 @@ def test_event_storm_is_coalesced_not_redrawn_per_event():
     assert "function patchChildren" in app and "function keepLeading" in app  # 바뀐 곳만 고친다
     recent = flow[flow.index("function recentCard"):flow.index("function recentCard") + 3000]
     assert "5000 - (Date.now() -" in recent and "box._later" in recent  # 최근 산출물은 5초에 한 번까지만 다시 읽는다
-    assert flow.count("/files?cache=1") == 2  # 목록·홈이 세션마다 부르는 /files 는 서버 기억(3초)을 쓴다
+    assert flow.count("/files?cache=1") == 1 and flow.count("return sessionDocs(s)") == 2  # 목록·홈이 세션마다 부르는 /files 는 서버 기억(3초)을 쓴다(한 함수로 부른다)
 
 
 def test_design_states_have_shape_cues_not_only_color():
@@ -3576,3 +3576,60 @@ def test_1042_claude_ai_connectors_fold_into_one_line_project_mcp_stays_loud(tmp
     assert "연결이 안 된 도구가 있어" in mixed["text"] and "abap-adt — 연결하지 못했어" in mixed["text"] and "claude.ai 커넥터 2개가 로그인 전이야" in mixed["text"]
     assert "<div.banner.mcp>" in mixed["dump"] and "<details.mcp-conn>" in mixed["dump"]
     assert "claude.ai Gmail — 로그인이 필요해" not in mixed["text"]  # 큰 목록에 커넥터가 따로 오르지 않는다
+
+
+# ---- Post 테마 검증 갈래 C(2026-11-18): 상태·숫자 정합 ----
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_post_verify_c_docs_gone_folder_is_not_failure_and_not_asked_again(tmp_path):
+    """작업 폴더가 없어진 세션(서버 409)은 "읽기 실패" 와 따로 "폴더가 없어 읽지 못함" 으로 알리고, 다시 그려도 또 묻지 않는다."""
+    extra = {"__status": {"GET /api/sessions/s2/files": 409}, "GET /api/sessions/s2/files": {"error": "세션의 작업 폴더가 없어."}}
+    got = _smoke(tmp_path, "docs", [_session("s1"), _session("s2", cwd="C:/w/gone")], extra=extra)
+    assert "1개 세션은 작업 폴더가 없어져서(지운 폴더 등) 문서를 읽지 못했어." in got["text"]
+    assert "세션의 문서를 읽지 못했어" not in got["text"] and "git 상태를 읽지 못해서" not in got["text"]  # 서버 오류·git 못 읽음과 섞지 않는다
+    assert "아직 양식으로 뽑은 산출물이 없어." in got["text"]
+    flow = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert "GONE_RECHECK_MS" in flow and "goneDirs[key] = Date.now()" in flow  # 같은 세션·폴더는 잠깐 다시 묻지 않는다
+
+
+_POST_C_NODE = r"""
+const path = require('path');
+const L = require(path.join(process.argv[1], 'flow-logic.js'));
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const out = {};
+const s = { id: 'a', status: 'idle', group: 'todo', pendingRequestIds: ['r1'] };
+const answered = sess => (sess.pendingRequestIds || []).filter(r => r !== 'r1');  // r1 은 이미 답한 요청
+out.plain = P.stateOf(s, L);
+out.passed = P.stateOf(s, L, answered);
+P.useOpenIds(answered);
+out.registered = P.stateOf(s, L);
+P.useOpenIds(null);
+out.reset = P.stateOf(s, L);
+out.label = P.FILTERS.map(f => f.label).join(',');
+// 같은 순간: 내 차례 세션 2(대기 요청 2건 세션 + 올릴 차례 세션), 확인 못 함 1, 일하는 중 1, 끝남 1
+const list = [
+  { id: 'q', status: 'idle', group: 'todo', pendingRequestIds: ['r2', 'r3'] },
+  { id: 'd', status: 'idle', group: 'todo', turnSkill: 'deliver', pendingRequestIds: [] },
+  { id: 'u', status: 'idle', group: 'idle', pendingRequestIds: [], lastBlock: { kind: 'cannot_check', open: true } },
+  { id: 'r', status: 'running', group: 'running', pendingRequestIds: [] },
+  { id: 'e', status: 'ended', group: 'idle', pendingRequestIds: [] }];
+out.turnItems = L.turnItems(list).length;
+out.counts = L.counts(list);
+out.filter = P.filterCounts(list.map(x => P.stateOf(x, L)));
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_post_verify_c_state_uses_open_ids_and_filter_name_differs_from_turn():
+    r = subprocess.run([NODE, "-e", _POST_C_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    # 이미 답한 요청만 남은 세션은 내 차례가 아니다 — 직접 넘기든 화면이 알려 두든(useOpenIds) 같고, 안 알리면 서버 값을 믿는다
+    assert out["plain"] == "turn" and out["passed"] == "idle" and out["registered"] == "idle" and out["reset"] == "turn"
+    # 목록 걸러보기는 내 차례 + 막힘 + 확인 못 함 묶음이라 "내 차례" 가 아니라 "할 일" 이다(홈·띠의 내 차례 N건과 이름이 겹치지 않게)
+    assert out["label"] == "전체,할 일,일하는 중,끝남"
+    # 내 차례 건수(요청·올릴 차례 하나하나) 3 = 홈 타일·띠·알림의 내 차례, 할 일(세션 수) 3 = 내 차례 세션 2 + 확인 못 함 1
+    assert out["turnItems"] == 3 and out["counts"]["todo"] == 2 and out["counts"]["unsure"] == 1 and out["counts"]["running"] == 1
+    assert out["filter"] == {"all": 5, "turn": 3, "run": 1, "done": 1}
+

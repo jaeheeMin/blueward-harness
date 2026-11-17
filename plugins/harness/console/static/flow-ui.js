@@ -72,6 +72,20 @@
     }
     function sid(s) { return encodeURIComponent(s.id); }
     function sessionList() { return Array.from(kit.sessions.values()); }
+    /* 산출물 탭·홈 최근 산출물이 세션마다 부르는 문서 목록. 작업 폴더가 없어진 세션(지운 worktree 등)은 서버가 409 를 준다.
+       다시 물어도 같은 답이라 세션 id·폴더별로 GONE_RECHECK_MS 동안 기억해 두고 묻지 않는다(목록이 바뀔 때마다 409 가 반복되지 않게).
+       이건 읽기 실패(failed)와 따로 센다(gone) — 서버 오류가 아니라 읽을 폴더가 없는 것이고, 그 세션의 문서는 "읽지 못함" 이다. */
+    var GONE_RECHECK_MS = 5 * 60000, goneDirs = {};
+    function sessionDocs(s) {
+      var key = s.id + '\n' + (s.cwd || ''), at = goneDirs[key];
+      if (at && Date.now() - at < GONE_RECHECK_MS) return Promise.reject({ status: 409, gone: true });
+      return api('GET', '/api/sessions/' + sid(s) + '/files?cache=1').then(function (d) { delete goneDirs[key]; return d; }, function (e) {
+        if (e && e.status === 409) { goneDirs[key] = Date.now(); e.gone = true; }
+        throw e;
+      });
+    }
+    function docsMiss(s, e) { return e && e.gone ? { session: s, files: [], gone: true } : { session: s, files: [], unknown: true, failed: e }; }
+    function goneNote(n) { return n + '개 세션은 작업 폴더가 없어져서(지운 폴더 등) 문서를 읽지 못했어. 그 세션의 문서는 목록에 없어.'; }
     function folderName(s) { return kit.baseName(s.cwd) || '폴더 모름'; }
 
     /* 대화상자: 확인·취소. body 는 노드 목록, validate 는 오류 글을 돌려준다. */
@@ -627,8 +641,8 @@
         if (loading) return;
         loading = true; loadedAt = Date.now(); st.sig = sig();
         Promise.all(pool().map(function (s) {
-          return api('GET', '/api/sessions/' + sid(s) + '/files?cache=1').then(function (d) { return { session: s, files: kit.listOf(d, 'files').filter(L.isFormOutput), attachments: kit.listOf(d, 'attachments'), unknown: !!(d && d.unknown), note: d && d.note ? String(d.note) : '' }; },
-            function (e) { return { session: s, files: [], unknown: true, failed: e }; });
+          return sessionDocs(s).then(function (d) { return { session: s, files: kit.listOf(d, 'files').filter(L.isFormOutput), attachments: kit.listOf(d, 'attachments'), unknown: !!(d && d.unknown), note: d && d.note ? String(d.note) : '' }; },
+            function (e) { return docsMiss(s, e); });
         })).then(function (parts) { st.parts = parts; }).then(function () {
           loading = false;
           if (alive && sig() !== st.sig) { load(); return; }  // 읽는 동안 세션이 늘거나 줄었으면 다시 모은다
@@ -829,10 +843,11 @@
         if (!kit.loaded()) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.loadingBox('세션을 불러오는 중이야.')); return; }
         if (!pool().length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.stateBox('folder', '아직 만든 문서가 없어', '작업을 시작하면 세션이 만든 문서가 여기에 모여.', kit.link('/new', { class: 'btn', text: '새 작업 시작' }))); return; }
         if (!st.parts) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.loadingBox('문서를 모으는 중이야.')); return; }
-        var all = docs(), failed = st.parts.filter(function (p) { return p.failed; }), unsure = st.parts.filter(function (p) { return p.unknown && !p.failed; });
+        var all = docs(), failed = st.parts.filter(function (p) { return p.failed; }), unsure = st.parts.filter(function (p) { return p.unknown && !p.failed; }), gone = st.parts.filter(function (p) { return p.gone; });
         var notes = [];
         if (failed.length) notes.push(h('p', { class: 'note-attn', role: 'status', text: failed.length + '개 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
         else if (unsure.length) notes.push(h('p', { class: 'note-attn', role: 'status', text: unsure.length + '개 세션은 git 상태를 읽지 못해서 올림 여부를 "확인 못 함"으로 보여.' }));
+        if (gone.length) notes.push(h('p', { class: 'note-muted', role: 'status', 'data-docs-gone': String(gone.length), text: goneNote(gone.length) }));
         st.parts.forEach(function (p) { if (p.note && !p.unknown) notes.push(h('p', { class: 'note-muted', role: 'status', text: p.note })); });  // 칩은 그대로 두고 안내만 한 줄 더한다
         if (!all.length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(h('section', { class: 'light dsec' }, notes, h('p', { class: 'note-muted', text: '아직 양식으로 뽑은 산출물이 없어.' }), attachBoxes())); return; }
         // 시안 G-15: 방금 고객 양식 xlsx 를 뽑았으면(가장 최근 산출물이 그 파일) 목록 없이 결과 화면을 먼저 보인다. '문서 목록 보기' 로 나가면 시안 G-14 목록 화면.
@@ -1248,24 +1263,25 @@
       box.dataset.sig = sig;
       if (!box.dataset.ready) { clear(box); box.appendChild(h('span', { class: 'eb', text: '최근 산출물' })); box.appendChild(h('span', { class: 'quiet', role: 'status', text: '불러오는 중이야.' })); }
       Promise.all(pool.map(function (s) {
-        return api('GET', '/api/sessions/' + sid(s) + '/files?cache=1').then(function (d) { return { session: s, files: kit.listOf(d, 'files').filter(L.isFormOutput), unknown: !!(d && d.unknown) }; },  // 산출물 탭·세션 칸과 같은 기준(#1067)
-          function (e) { return { session: s, files: [], unknown: true, failed: e }; });
+        return sessionDocs(s).then(function (d) { return { session: s, files: kit.listOf(d, 'files').filter(L.isFormOutput), unknown: !!(d && d.unknown) }; },  // 산출물 탭·세션 칸과 같은 기준(#1067)
+          function (e) { return docsMiss(s, e); });
       })).then(function (parts) {
         if (box.dataset.sig !== sig || !box.isConnected) return;
         box.dataset.ready = '1';
         clear(box);
         box.appendChild(h('span', { class: 'eb', text: '최근 산출물' }));
-        var failed = parts.filter(function (p) { return p.failed; }).length;
-        var allDocs = L.mergeDocs(parts);
-        if (onWeek) onWeek(failed === parts.length && parts.length ? null : L.weekDocCount(allDocs, Date.now() / 1000));
+        var failed = parts.filter(function (p) { return p.failed; }).length, gone = parts.filter(function (p) { return p.gone; }).length;
+        var allDocs = L.mergeDocs(parts), none = parts.length && failed + gone === parts.length;  // 한 세션도 못 읽었으면 "없음" 이 아니라 확인 못 함
+        if (onWeek) onWeek(none ? null : L.weekDocCount(allDocs, Date.now() / 1000));
         var docs = allDocs.slice(0, RECENT_ROWS);
-        if (failed === parts.length && parts.length) { box.appendChild(h('span', { class: 'note-attn', role: 'status', text: '확인 못 함 · 문서 목록을 읽지 못했어.' })); return; }
+        if (none) { box.appendChild(h('span', { class: 'note-attn', role: 'status', text: '확인 못 함 · 문서 목록을 읽지 못했어.' })); return; }
         if (!docs.length) box.appendChild(h('span', { class: 'quiet', text: '아직 양식으로 뽑은 산출물이 없어.' }));
         docs.forEach(function (d) {
           box.appendChild(h('div', { class: 'srow2', 'data-doc': d.file.path }, h('span', { class: 'lm', title: d.session.title || null, text: kit.baseName(d.file.path) }),
             h('span', { class: 'chip2 ' + d.chip.tone, title: d.chip.title, text: d.chip.text })));
         });
         if (failed) box.appendChild(h('span', { class: 'quiet', role: 'status', text: '일부 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
+        if (gone) box.appendChild(h('span', { class: 'quiet', role: 'status', 'data-docs-gone': String(gone), text: goneNote(gone) }));
       });
     }
 
@@ -1301,6 +1317,7 @@
     function openIds(s) {
       return (s.pendingRequestIds || []).filter(function (rid) { var r = kit.requests.get(rid); return !(r && r.status && r.status !== 'pending'); });
     }
+    if (window.BHPostLogic) window.BHPostLogic.useOpenIds(openIds);  // Post 의 상태(stateOf: 목록 걸러보기·아바타·장면)도 처리된 요청을 내 차례로 세지 않게 같은 기준을 쓴다
     function emptyHome(root, approvals, projects) {
       var page = h('div', { class: 'page home' });
       var sub = h('p', { class: 'line', text: 'Claude Code 세션을 시작하면 왼쪽 목록에 생겨. 지금 바로 맡길 일이 있으면 아래에서 시작해.' });

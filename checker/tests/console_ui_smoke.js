@@ -111,7 +111,7 @@ global.fetch = (url, opts) => {
   const key = method + ' ' + p;
   let body = DATA[key];
   if (body === undefined) body = DATA['*'] === undefined ? undefined : (typeof DATA['*'] === 'function' ? DATA['*'](key) : DATA['*']);
-  const status = body === undefined ? 404 : 200;
+  const status = (DATA.__status || {})[key] || (body === undefined ? 404 : 200);  // __status: {"GET /경로": 409} 로 오류 응답을 흉내 낸다
   return Promise.resolve({ status, ok: status < 400, text: () => Promise.resolve(body === undefined ? '' : JSON.stringify(body)) });
 };
 // 브라우저 알림 가짜. DATA.__env = {notification: granted|denied|default|absent, ask: 물었을 때 답, visible: bool}
