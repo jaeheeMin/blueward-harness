@@ -1453,10 +1453,14 @@ def test_post_home_field_memo_layout():
     assert "onFocus: onFocus" in home and "typeof sc.focus === 'function'" in home and "sc.focus(id)" in home
     assert "matchMedia(NARROW)" in home and "(max-width: 760px)" in home
     # 장면 칸 밖은 그대로: 덱·숫자 카드 줄·Sauce 와 같은 홈 표·범례·팀 요약 줄
-    for keep in ("paintDeck()", "tiles2 po-tiles", "HK.homeTable(list)", "po-legend", "po-teams", "네 답을 기다리는 일이 "):
+    for keep in ("paintDeck()", "tiles2 po-tiles", "po-legend", "po-teams", "네 답을 기다리는 일이 "):
         assert keep in home
-    for gone in ("sessionsPanel", "po-strip", "po-mine", "po-kyul", "po-stc"):
-        assert gone not in home
+    # 내 세션(#1065): Post 는 두 단 목록, 위쪽 띠·strip 은 없다. Sauce 표는 그대로
+    for need in ("sessionsPanel(list)", "po-mine", "po-kyul", "po-stc", "po-ava", "L.barSteps(s)", "L.stepShort(", "'정해진 갈래 없음'", "'내 세션 ' + list.length + '개'"):
+        assert need in home
+    assert "appendChild(HK.homeTable(" not in home and "po-strip" not in home and "표로 보기" not in home
+    for chip in ("내 차례", "일하는 중", "승인 기다림", "쉬는 중", "끝남", "확인 못 함", "막힘"):
+        assert f"'{chip}'" in home
     flow_ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
     assert "function homeTable(list)" in flow_ui and "['작업', '단계', '번호', '기억', '상태']" in flow_ui  # Sauce 홈 표
     app = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -1468,11 +1472,23 @@ def test_post_home_field_memo_layout():
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     for needle in (".po-memo", ".po-memo.is-flip::before", ".po-stagew.is-office", "@media (max-width: 760px)", ".po-tiles .tile2", ".po-legend", ".po-teams"):
         assert needle in css
-    for gone in (".po-strip", ".po-kyul", ".po-stc", ".nb-chip", ".prail-dot", "po-mine", "po-cols"):
+    for need in (".po-kyul", ".po-kyulc", ".po-stc-blocked", "ul.po-mine", "columns: 2", "columns: 1", ".po-memo.is-loose::before", ".po-stagew:has(.bh-office-away) .po-memo"):
+        assert need in css  # 두 단·1100px 이하 한 단·결재란 자리·꼬리 없는 메모·작은 창(PiP) 중 메모 숨김
+    for gone in (".po-strip", ".nb-chip", ".prail-dot"):
         assert gone not in css
     for line in css.splitlines():
         if line.startswith(":root[data-theme=\"post\"] .po-memo"):
             assert not any(f"font-size: {n}px" in line for n in range(23, 100))  # 글자 22px 이하
+
+
+def test_post_home_memo_follows_scene_bundle():
+    # 메모가 사람 옆에 안 붙던 원인(#1065): 갈래 없는 세션은 리셉션 한 자리뿐이라 메모 세션이 안 그려졌다. 번들이 focus(id) 한 세션을 먼저 앉히고 다시 그린다
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    for bad in ("innerHTML", "eval(", "new Function", "import("):
+        assert bad not in bundle
+    assert "wantId" in bundle and "bh-office-away" in bundle  # 작은 창(PiP) 중 메모 숨김은 이 줄을 CSS :has() 로 본다
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert "is-loose" in home and "foc.id !== memoId" in home
 
 
 def test_main_scroller_is_containing_block_for_sr_only():

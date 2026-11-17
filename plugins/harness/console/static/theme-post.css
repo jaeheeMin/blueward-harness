@@ -260,7 +260,9 @@
 :root[data-theme="post"] .po-stagew.is-office .po-stage { margin: 0; border-radius: 0; }
 :root[data-theme="post"] .po-memo { position: absolute; left: 21%; top: 12%; z-index: 3; box-sizing: border-box; width: 320px; max-width: calc(100% - 32px); max-height: calc(100% - 16px); overflow-y: auto; padding: 16px 20px 20px; border: 1px solid var(--bd); border-radius: 12px; background: var(--paper); color: var(--text); box-shadow: 0 12px 32px -16px rgba(36,48,74,.45); }
 :root[data-theme="post"] .po-memo[hidden] { display: none; }
+:root[data-theme="post"] .po-stagew:has(.bh-office-away) .po-memo { display: none; }  /* 장면이 작은 창(PiP)에 가 있는 동안: 패널엔 한 줄만 남아 메모가 그 위에 겹쳐 잘린다. 덱이 아래에 그대로 있다 */
 :root[data-theme="post"] .po-memo::before { content: ""; position: absolute; left: -7px; top: var(--tail, 44px); width: 12px; height: 12px; background: var(--paper); border-left: 1px solid var(--bd); border-bottom: 1px solid var(--bd); transform: rotate(45deg); }
+:root[data-theme="post"] .po-memo.is-loose::before { display: none; }
 :root[data-theme="post"] .po-memo.is-flip::before { left: auto; right: -7px; border-left: 0; border-bottom: 0; border-right: 1px solid var(--bd); border-top: 1px solid var(--bd); }
 :root[data-theme="post"] .po-memo-h { display: flex; align-items: center; gap: 8px; }
 :root[data-theme="post"] .po-memo-next { margin-left: auto; }
@@ -277,6 +279,51 @@
 @media (max-width: 760px) {
   :root[data-theme="post"] .po-memo { position: static; width: auto; max-width: none; max-height: none; margin: 12px; box-shadow: none; }
   :root[data-theme="post"] .po-memo::before { display: none; }
+}
+
+:root[data-theme="post"] .po-cols { padding: 20px 0 8px; gap: 8px; }
+:root[data-theme="post"] .po-cols > .po-ph { padding: 0 24px; }
+:root[data-theme="post"] ul.po-mine { list-style: none; margin: 0; padding: 0 0 8px; columns: 2; column-gap: 0; }
+:root[data-theme="post"] ul.po-mine li { break-inside: avoid; border-top: 1px solid var(--line); }
+:root[data-theme="post"] .po-ssa { display: flex; align-items: center; gap: 12px; padding: 12px 24px; color: inherit; text-decoration: none; transition: background-color .15s; }
+:root[data-theme="post"] .po-ssa:hover { background: var(--soft); color: inherit; }
+:root[data-theme="post"] .po-ava { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1px var(--bd); font-size: 12px; font-weight: 600; color: var(--text); }
+:root[data-theme="post"] .po-rt { flex: 1; min-width: 0; }
+:root[data-theme="post"] .po-rt .t1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+:root[data-theme="post"] .po-rt .t2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; }
+:root[data-theme="post"] .po-mine .po-stc { flex: none; width: 92px; }
+/* 결재란(시안 .kyul): 칸 폭 고정(64px), 자리(.po-kyulc)는 목록에서 가장 긴 결재란 폭. 끝난 칸은 붉은 도장, 지금 칸은 남색 줄 */
+:root[data-theme="post"] .po-kyulc { display: flex; flex: none; }
+:root[data-theme="post"] .po-kyul { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 64px; flex: none; border: 1px solid var(--bd); border-radius: 6px; overflow: hidden; background: var(--paper); }
+:root[data-theme="post"] .po-kyul > span { display: grid; grid-template-rows: 14px 22px; min-width: 0; text-align: center; border-left: 1px solid var(--bd); }
+:root[data-theme="post"] .po-kyul > span:first-child { border-left: 0; }
+:root[data-theme="post"] .po-kyul small { overflow: hidden; text-overflow: ellipsis; padding: 0 4px; font-size: 10px; line-height: 14px; white-space: nowrap; color: var(--muted); background: var(--paper2); border-bottom: 1px solid var(--bd); }
+:root[data-theme="post"] .po-kyul em { display: grid; place-items: center; font-style: normal; }
+:root[data-theme="post"] .po-kyul .done em::after { content: ""; width: 16px; height: 16px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--accent-fill); background: radial-gradient(circle, var(--accent-fill) 0 3px, transparent 3.5px); }
+:root[data-theme="post"] .po-kyul .now em::after { content: ""; width: 12px; height: 2px; border-radius: 1px; background: var(--text); }
+:root[data-theme="post"] .po-kyul .now { background: var(--soft); }
+/* 상태 칩(시안 .st): 색 + 모양 */
+:root[data-theme="post"] .po-stc { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--sec); white-space: nowrap; }
+:root[data-theme="post"] .po-stc::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+:root[data-theme="post"] .po-stc-turn { color: var(--attn); }
+:root[data-theme="post"] .po-stc-turn::before { width: 0; height: 0; border-radius: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid #C47A12; }
+:root[data-theme="post"] .po-stc-run { color: var(--st-now); }
+:root[data-theme="post"] .po-stc-run::before { background: var(--st-now); }
+:root[data-theme="post"] .po-stc-idle::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+:root[data-theme="post"] .po-stc-wait { color: var(--wait); }
+:root[data-theme="post"] .po-stc-wait::before { border-radius: 2px; background: var(--wait); }
+:root[data-theme="post"] .po-stc-blocked { color: var(--st-fail-ink); }
+:root[data-theme="post"] .po-stc-blocked::before { width: 7px; height: 7px; border-radius: 1px; background: var(--st-fail-ink); transform: rotate(45deg); }
+:root[data-theme="post"] .po-stc-unk { color: var(--st-unk-ink); }
+:root[data-theme="post"] .po-stc-unk::before { box-sizing: border-box; background: transparent; border: 1.5px dashed var(--st-unk); }
+:root[data-theme="post"] .po-stc-done { color: var(--okink); }
+:root[data-theme="post"] .po-stc-done::before { content: "✓"; width: auto; height: auto; background: none; font-size: 11px; line-height: 1; font-weight: 800; color: var(--st-done); }
+@media (max-width: 1100px) { :root[data-theme="post"] ul.po-mine { columns: 1; } }
+@media (max-width: 760px) {
+  :root[data-theme="post"] .po-cols > .po-ph { padding: 0 16px; }
+  :root[data-theme="post"] .po-ssa { padding: 12px 16px; }
+  :root[data-theme="post"] .po-kyulc { display: none; }
+  :root[data-theme="post"] .po-mine .po-stc { width: auto; }
 }
 
 :root[data-theme="post"] .po-tiles .tile2 { padding: 16px 18px; border: 1.5px solid var(--bd); border-radius: var(--rc); background: var(--paper); box-shadow: 0 1px 0 var(--bd2), 0 10px 24px -18px rgba(36,48,74,.35); }
