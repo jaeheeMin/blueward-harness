@@ -148,10 +148,11 @@
     return '요청을 처리하지 못했어 (' + status + ')';
   }
   /* 브라우저는 한 서버에 HTTP/1.x 연결을 6개까지만 연다(SSE 가 1개씩 차지한다). 읽기(GET)는 동시에 MAX_GETS 개까지만 보내고
-     나머지는 줄 세워, 느린 응답 몇 개가 연결을 다 쓰고 다른 요청을 막지 않게 한다. 쓰기(POST 등)는 줄 세우지 않는다. */
-  var MAX_GETS = 3, getsActive = 0, getsWaiting = [], GET_TIMEOUT_MS = 45000;
+     나머지는 줄 세워, 느린 응답 몇 개가 연결을 다 쓰고 다른 요청을 막지 않게 한다. 쓰기(POST 등)는 줄 세우지 않는다.
+     @ 파일 목록(/api/files)은 사람이 누른 즉시 답이 보여야 해서 줄 세우지 않는다(#1038). 한 번에 하나뿐이라 연결을 다 쓰지 않는다. */
+  var MAX_GETS = 3, getsActive = 0, getsWaiting = [], GET_TIMEOUT_MS = 45000, UNQUEUED_GET = /^\/api\/files\?/;
   function api(method, path, body) {
-    if (method !== 'GET') return send(method, path, body);
+    if (method !== 'GET' || UNQUEUED_GET.test(path)) return send(method, path, body);
     return new Promise(function (resolve, reject) {
       function go() {
         getsActive++;
@@ -3014,12 +3015,13 @@
   function skillCommand(info, name) { return '/' + info.plugin + ':' + name + ' '; }
   /* 입력칸을 감싸 / 와 @ 자동완성 목록을 붙인다. getRoot 는 @ 로 찾을 작업 폴더를 돌려준다. */
   function withAssist(field, getRoot, opts) {
-    var box = h('ul', { class: 'assist', role: 'listbox', hidden: true });
+    // opts.filePopup: 어느 테마에서든 @ 목록을 제목 있는 팝업으로 보이고 찾는 중·빈 폴더도 글로 알린다. opts.inline: 입력칸 아래 제자리를 차지해 아래 단추를 덮지 않는다(새 작업).
+    var box = h('ul', { class: 'assist' + (opts && opts.inline ? ' assist-inline' : ''), role: 'listbox', hidden: true });
     var state = { items: [], index: 0, token: null, seq: 0, msg: '' }, timer = null;
     function isOpen() { return !box.hidden; }
     function close() { clearTimeout(timer); state.seq++; state.items = []; state.msg = ''; state.token = null; box.hidden = true; }
     // Post: 파일 목록은 제목 있는 팝업이고, 빈 폴더·읽는 중·못 읽음도 글로 알린다(Sauce 는 예전 그대로 비면 닫힘)
-    function filePopup() { return isPostTheme() && state.token && state.token.kind === '@'; }
+    function filePopup() { return (isPostTheme() || !!(opts && opts.filePopup)) && state.token && state.token.kind === '@'; }
     function render() {
       clear(box);
       if (filePopup()) box.appendChild(h('li', { role: 'presentation', class: 'assist-title', text: '작업 폴더 파일 고르기' }));
@@ -3075,7 +3077,7 @@
       }
       var root = getRoot();
       if (!root) { show([], '작업 폴더를 먼저 골라 줘.'); return; }
-      if (isPostTheme() && !state.items.length) show([], '파일을 찾는 중이야.');
+      if (filePopup() && !state.items.length) show([], '파일을 찾는 중이야.');
       timer = setTimeout(function () {
         api('GET', '/api/files' + qs({ root: root, q: t.query })).then(function (d) {
           if (mine !== state.seq || !document.body.contains(field)) return;
@@ -3097,7 +3099,18 @@
       } else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(state.index); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
     });
-    return { wrap: h('div', { class: 'assist-wrap' }, field, box), isOpen: isOpen };
+    /* 클립 버튼: 입력칸 끝에 @ 를 넣어 바로 목록(또는 안내)을 연다. 목록이 열려 있으면 다시 눌러 닫고, 그때 단독 @ 는 지운다(@ 만 남지 않게). */
+    function toggleFiles() {
+      var v = field.value, bare = /(^|\s)@$/.test(v);
+      if (isOpen() && state.token && state.token.kind === '@') {
+        close();
+        if (bare) setFieldValue(field, v.slice(0, -1), v.length - 1); else field.focus();
+        return;
+      }
+      var next = bare ? v : v + (v && !/\s$/.test(v) ? ' ' : '') + '@';
+      setFieldValue(field, next, next.length);
+    }
+    return { wrap: h('div', { class: 'assist-wrap' }, field, box), isOpen: isOpen, toggleFiles: toggleFiles, refresh: update };
   }
 
   /* ---------- 새 작업 ---------- */
@@ -3161,11 +3174,14 @@
     }
     return draft.effort;
   }
+  var ATTACH_READING = '첨부를 아직 읽는 중이야. 잠깐 뒤에 다시 눌러 줘.';
+  var ATTACH_HINT = '그림(png·jpg·gif·webp)과 PDF 만 붙일 수 있어. 붙여 넣기·끌어 놓기도 돼.';
   function newView(root) {
     var step = 'write', aid = null, data = null, err = '', textErr = false;
     var recent = null, picking = false, custom = '', customMsg = '', customBusy = false;
     var browsing = false, dir = '', fsRows = null, fsErr = '', pollTimer = null, previewText = '', previewOpen = false, previewTimer = null;
     var customQ = {};  // 고를 보기가 있는 질문에서 '직접 쓰기' 를 연 것
+    var newComp = null, briefAssist = null, attachMsg = '';  // 새 작업 입력칸(첨부 포함, #1038): 그릴 때마다 새로 만들되 첨부(keep/restore)는 이어 간다. attachMsg: 첨부를 읽는 중이라 못 보낼 때의 안내
     var starting = false, startedId = null, startErr = '', alive = true, browseBusy = false, modelErr = false, advOpen = false;
     var BL = window.BHLogic, ready = null, readyCwd = null, readySig = 'null';
     var recentTimer = null, recentTries = 0, intro = null, introAdmin = null, introChecking = false, introTimer = null, introTries = 0, INTRO_MAX_TRIES = 10;  // intro: 준비 안 된 폴더를 처음 골랐을 때 보이는 "프로젝트 준비" 안내가 가리키는 폴더
@@ -3266,6 +3282,8 @@
       if (!draft.text.trim()) { textErr = true; draw(); return; }
       if (draft.modelCustom && !customOk()) { modelErr = true; draw(); return; }
       if (!draft.cwd) { picking = true; err = ''; draw(); return; }
+      if (newComp && newComp.busy()) { attachMsg = ATTACH_READING; draw(); return; }
+      attachMsg = '';
       // 종류 버튼의 갈래는 AI 추천과 겹쳐 보기 전까지 사용자가 확정한 선택이 아니다(#668).
       step = 'analyzing'; err = ''; draft.kindFlowId = kindFlow() || ''; draft.flowId = null; draft.flowUser = false; draft.insist = false; draw();
       api('POST', '/api/new', { text: draft.text.trim(), cwd: draft.cwd, model: modelChoice(), effort: effortChoice() }).then(function (d) {
@@ -3316,8 +3334,12 @@
     }
 
     function start() {
+      if (newComp && newComp.busy()) { startErr = ATTACH_READING; draw(); return; }
       starting = true; startErr = ''; draw();
-      api('POST', '/api/new/' + encodeURIComponent(aid) + '/start', { picked: pickedAll(), extraAnswers: answerMap(), note: draft.note.trim(), model: modelChoice(), effort: effortChoice(), permission: permissionChoice(), flow: draft.flowUser || draft.kindFlowId ? effectiveFlow() : undefined }).then(function (d) {
+      var files = newComp ? newComp.payload() : [];
+      var body = { picked: pickedAll(), extraAnswers: answerMap(), note: draft.note.trim(), model: modelChoice(), effort: effortChoice(), permission: permissionChoice(), flow: draft.flowUser || draft.kindFlowId ? effectiveFlow() : undefined };
+      if (files.length) body.attachments = files;  // 그림·PDF 는 첫 요청과 함께 간다. 서버가 한 번 더 검사한다
+      api('POST', '/api/new/' + encodeURIComponent(aid) + '/start', body).then(function (d) {
         startedId = (d && (d.id || d.sessionId || (d.session && d.session.id))) || '';
         if (startedId) { mergeSession({ id: startedId }); }
         history.replaceState(null, '', '/new');
@@ -3451,6 +3473,7 @@
       if (!alive) return;
       checkReady();
       var keepFocus = document.activeElement && document.activeElement.id, selStart = document.activeElement && document.activeElement.selectionStart;
+      var reopenFiles = !!(briefAssist && briefAssist.isOpen()); briefAssist = null;  // 다시 그려도 열려 있던 목록은 이어 보인다
       clear(root);
       var page = h('div', { class: 'page sess newp' });
       if (intro && intro === draft.cwd && step === 'write') {
@@ -3473,6 +3496,7 @@
       root.appendChild(page);
       renderHead(location.pathname);  // 헤더의 프로젝트 이름이 지금 고른 작업 폴더를 따라가게
       if (keepFocus) { var f = document.getElementById(keepFocus); if (f && f !== document.activeElement) { f.focus(); try { if (selStart != null) f.setSelectionRange(selStart, selStart); } catch (e) { console.debug('커서 위치를 되돌리지 못했습니다', e); } } }
+      if (reopenFiles && briefAssist && step === 'write') briefAssist.refresh();
     }
     function folderBar(page) {
       // 시안 G-05: 작은 muted 한 줄 + 오른쪽 작업 시작 단추. 목록은 [바꾸기]·[고르기] 를 눌러야 펼친다(폴더 없이 작업 시작을 누를 때도 펼침).
@@ -3537,8 +3561,12 @@
         }));
       }
       put('label', post ? null : h('label', { for: 'brief', class: 'field-label', text: '하고 싶은 일을 한두 줄로' }));
-      var brief = h('textarea', { id: 'brief', class: 'textarea', rows: '3', value: draft.text, placeholder: '예: 구매요청을 올리면 팀장에게 승인 메일이 가면 좋겠어  (/ 로 스킬, @ 로 파일)',
-        onInput: function (e) { draft.text = e.target.value; if (textErr) { textErr = false; var m = root.querySelector('[data-terr]'); if (m) m.hidden = true; } } });
+      // 입력칸은 첨부(고르기·붙여 넣기·끌어 놓기)를 함께 받는 attach.js 입력칸이다. 다시 그리기 전의 첨부와 글을 새 칸으로 옮긴다.
+      var kept = newComp ? newComp.keep() : [], keptNote = newComp ? newComp.keptNote() : '';
+      newComp =window.BHAttach.composer(h, { id: 'brief', cls: 'textarea', rows: '3', plain: true, placeholder: '예: 구매요청을 올리면 팀장에게 승인 메일이 가면 좋겠어  (/ 로 스킬, @ 로 파일)',
+        onInput: function (v) { draft.text = v; attachMsg = ''; if (textErr) { textErr = false; var m = root.querySelector('[data-terr]'); if (m) m.hidden = true; } } });
+      newComp.restore(kept, draft.text, keptNote);
+      var brief = newComp.field;
       // Post: 목록에서 고른 파일은 입력칸의 @경로 로 들어가고, 칸 아래에 칩(빼기 ×)으로도 보인다. 글에서 @경로 를 지우면 칩도 사라진다.
       var refRow = h('div', { class: 'ref-chips', 'data-ref-chips': '1', hidden: true });
       function mentionOf(p) { return /\s/.test(p) ? '@' + MENTION_QUOTE + p + MENTION_QUOTE : '@' + p; }
@@ -3556,16 +3584,22 @@
         refRow.hidden = !draft.refs.length;
       }
       brief.addEventListener('input', function () { if (post) paintRefs(); });
-      put('brief', withAssist(brief, function () { return draft.cwd; }, { onFile: function (p) { draft.refs = draft.refs || []; if (draft.refs.indexOf(p) < 0) draft.refs.push(p); setTimeout(paintRefs, 0); } }).wrap);
+      briefAssist = withAssist(brief, function () { return draft.cwd; }, { filePopup: true, inline: true, onFile: function (p) { draft.refs = draft.refs || []; if (draft.refs.indexOf(p) < 0) draft.refs.push(p); setTimeout(paintRefs, 0); } });
+      put('brief', briefAssist.wrap);
       if (post) { paintRefs(); put('refchips', refRow); }
+      put('attachchips', newComp.chips);
+      newComp.bindDrop(panel);
       put('terr', h('p', { class: 'note-attn', 'data-terr': '1', role: 'alert', text: '어떤 일인지 한 줄이라도 적어 줘.', hidden: !textErr }));
-      // 참고 파일 점선 칸: Post 는 시안 글자, Sauce 는 예전 글자
-      var refText = post ? '작업 폴더에서 참고 파일 골라 넣기 (회의록 · 고객 메일 · 기존 양식)' : '참고 파일(회의록 · 고객 메일 · 기존 양식)은 여기를 눌러 작업 폴더에서 골라 넣어';
-      put('ref', h('button', { type: 'button', class: 'refbox', onClick: function () {
-        var f = document.getElementById('brief'); if (!f) return;
-        var v = f.value + (f.value && !/\s$/.test(f.value) ? ' ' : '') + '@';
-        setFieldValue(f, v, v.length);
-      } }, post ? icon('clip', 16) : null, refText));
+      // 참고 파일 점선 칸(작업 폴더 파일 목록을 여는 단추): Post 는 시안 글자, Sauce 는 예전 글자. 둘 다 "작업 폴더에서 고르기" 임을 먼저 말한다.
+      var refText = post ? '작업 폴더에서 고르기 (회의록 · 고객 메일 · 기존 양식)' : '작업 폴더에서 고르기: 참고 파일(회의록 · 고객 메일 · 기존 양식)은 여기를 눌러 골라 넣어';
+      put('ref', h('button', { type: 'button', class: 'refbox', 'data-ref-pick': '1', 'aria-label': '작업 폴더에서 참고 파일 고르기', title: '작업 폴더의 파일 목록을 열어 참고 파일을 골라. 내 컴퓨터의 그림·PDF 는 옆의 첨부 단추로.',
+        onMousedown: function (e) { e.preventDefault(); },  // 입력칸의 초점을 뺏지 않는다(초점이 빠지면 목록이 닫혀 누른 뒤 @ 만 남는다)
+        onClick: function () { briefAssist.toggleFiles(); } }, post ? icon('clip', 16) : null, refText));
+      // 그림·PDF 첨부(내 컴퓨터에서): 고르기 단추 + 한 줄 안내. Post 는 단추 줄에, Sauce 는 점선 칸 아래 한 줄에 둔다.
+      var attachHint = h('p', { class: 'attach-hint note-muted', 'data-attach-hint': '1', text: ATTACH_HINT });
+      put('attachpick', post ? newComp.pick : null);
+      put('attachhint', post ? attachHint : h('div', { class: 'attach-line' }, newComp.pick, attachHint));
+      put('attachmsg', h('p', { class: 'note-attn', 'data-attach-msg': '1', role: 'alert', text: attachMsg, hidden: !attachMsg }));
       put('flowlabel', post ? null : h('span', { class: 'eb', text: '이렇게 진행돼' }));
       put('preview', preview.el);
       var k = KINDS[draft.kind];
@@ -3611,7 +3645,7 @@
       if (!post) { parts.forEach(function (p) { panel.appendChild(p[1]); }); return; }
       function slot(n) { return parts.filter(function (p) { return p[0] === n; }).map(function (p) { return p[1]; }); }
       // Post(시안 new): 큰 입력 판(입력 · 참고 파일 점선 칸 · 빨간 작업 시작) → 종류 카드 격자 + 오른쪽 순서 판(작업 폴더 · 고급 설정)
-      panel.appendChild(h('div', { class: 'light po-launch' }, slot('brief'), slot('refchips'), slot('terr'), h('div', { class: 'po-compbar' }, slot('ref'), h('span', { class: 'sp' }), startBtn)));
+      panel.appendChild(h('div', { class: 'light po-launch' }, slot('brief'), slot('refchips'), slot('attachchips'), slot('terr'), h('div', { class: 'po-compbar' }, slot('ref'), slot('attachpick'), h('span', { class: 'sp' }), startBtn), slot('attachhint'), slot('attachmsg')));
       panel.appendChild(h('div', { class: 'po-ngrid' },
         h('div', { class: 'po-nleft' }, slot('devask'), slot('kinds'), slot('more')),
         h('aside', { class: 'light po-flow' }, h('h3', { class: 'po-fh', text: '이렇게 진행돼' }), slot('preview'),
@@ -3632,6 +3666,7 @@
     function drawReview(panel) {
       var msgs = h('div', { class: 'msgs' });
       if (draft.text.trim()) msgs.appendChild(h('div', { class: 'me', text: draft.text.trim() }));
+      if (newComp && newComp.count()) msgs.appendChild(window.BHAttach.chatChips(h, newComp.meta()));  // 붙인 그림·PDF 는 시작할 때 첫 요청과 함께 간다
       // 시안 G-06: 이해한 글과 갈래 설명(chooser.line)이 AI 말 한 줄로 이어진다
       msgs.appendChild(h('div', { class: 'ai' }, h('span', { class: 'eb', text: 'AI' }), res().understood || '', chooser.line));
       panel.appendChild(msgs);

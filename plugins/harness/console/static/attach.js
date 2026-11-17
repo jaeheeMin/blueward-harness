@@ -68,10 +68,11 @@
 
   function composer(h, opts) {
     var items = [], enabled = true, pendingReads = 0, noteText = '';
-    var field = h('textarea', { id: opts.id, class: 'comp-in', rows: '1', placeholder: opts.placeholder, autocomplete: 'off',
+    // opts.plain: 새 작업 입력칸처럼 크기·Enter 를 바깥이 정하는 칸(높이 자동 조절 없음, Enter 는 줄바꿈). cls·rows 로 모양을 고른다.
+    var field = h('textarea', { id: opts.id, class: opts.cls || 'comp-in', rows: opts.rows || '1', placeholder: opts.placeholder, autocomplete: 'off',
       onInput: function (e) { grow(); noteText = ''; paint(); if (opts.onInput) opts.onInput(e.target.value); },
       onKeydown: function (e) {
-        if (!enterSends(e) || (opts.isBlocked && opts.isBlocked())) return;
+        if (opts.plain || !enterSends(e) || (opts.isBlocked && opts.isBlocked())) return;
         e.preventDefault();
         opts.onSend();
       },
@@ -88,7 +89,7 @@
     var pick = h('span', { class: 'attach-pick' }, btn, input);
 
     function grow() {
-      if (!field.style) return;
+      if (opts.plain || !field.style) return;
       field.style.height = 'auto';
       var need = field.scrollHeight || 0;
       field.style.height = (need ? Math.min(need, MAX_FIELD_PX) : 20) + 'px';
@@ -145,7 +146,8 @@
       meta: function () { return items.map(function (a) { return { name: a.name, type: a.type, size: a.size }; }); },
       // 뷰를 다시 만들 때(테마 전환) 쓰던 첨부와 글을 새 입력칸으로 옮긴다. 아직 읽는 중인 첨부는 읽기가 끝나면 같은 객체에 데이터가 채워진다.
       keep: function () { return items.slice(); },
-      restore: function (list, text) { items = Array.isArray(list) ? list.slice() : []; field.value = text || ''; grow(); paint(); },
+      restore: function (list, text, note) { items = Array.isArray(list) ? list.slice() : []; field.value = text || ''; noteText = note || ''; grow(); paint(); },
+      keptNote: function () { return noteText; },
       reset: function () { items = []; noteText = ''; field.value = ''; grow(); paint(); },
       note: function (t) { noteText = t || ''; paint(); },
       // 터미널에서 연 세션은 첨부를 보낼 수 없다: 단추를 감추고 붙여 넣기·끌어 놓기는 안내만 한다

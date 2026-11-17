@@ -1215,3 +1215,9 @@ details.fold > [data-r]:empty { display: none; }
 .nb-flash { padding: 8px 12px; border-radius: 10px; background: var(--okbg); color: var(--okink); font-size: 13.5px; }
 .nb-warn { font-size: 13px; color: #7a5600; }
 .nb-err { font-size: 13.5px; font-weight: 500; color: var(--nb-err); }
+/* 새 작업 입력칸(#1038): @ 목록은 입력칸 아래 제자리에 펼쳐서 아래 단추·종류 카드를 덮지 않는다. Sauce 에서도 제목·안내 줄을 쓴다. */
+.assist.assist-inline { position: static; margin: 6px 0 0; max-height: 220px; background: var(--card); color: var(--lightink); }
+.assist-title { padding: 6px 10px 4px; font-size: 12px; font-weight: 700; color: var(--lmuted); }
+.assist-empty { padding: 8px 10px 10px; font-size: 13px; color: var(--lmuted); }
+.attach-line { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; }
+.attach-hint { margin: 0; font-size: 12.5px; color: var(--lmuted); }
