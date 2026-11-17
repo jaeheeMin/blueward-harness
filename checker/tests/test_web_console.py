@@ -6658,6 +6658,58 @@ def test_whats_new_lists_versions_between_seen_and_current_newest_first_skipping
         c.close()
 
 
+def _wn_fragment(c, name, text):
+    d = c.app.plugin_root / "console" / "whats_new.d"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(text if isinstance(text, str) else json.dumps(text, ensure_ascii=False), encoding="utf-8")
+
+
+def test_whats_new_reads_fragment_files_with_whats_new_json(tmp_path, monkeypatch):
+    c = _wn_console(tmp_path, monkeypatch, {"9.9.7": ["옛 파일 줄"]}, seen="9.9.6", version="9.9.9")
+    try:
+        _wn_fragment(c, "1074.json", {"version": "9.9.9", "lines": ["조각 줄"]})
+        _wn_fragment(c, "1080.json", {"version": "9.9.8", "lines": ["다른 조각"]})
+        body = c.call("GET", "/api/whats-new")[1]
+        assert body["items"] == [{"version": "9.9.9", "lines": ["조각 줄"]}, {"version": "9.9.8", "lines": ["다른 조각"]},
+                                 {"version": "9.9.7", "lines": ["옛 파일 줄"]}] and "skipped" not in body
+    finally:
+        c.close()
+
+
+def test_whats_new_joins_lines_of_the_same_version_from_json_and_fragments(tmp_path, monkeypatch):
+    c = _wn_console(tmp_path, monkeypatch, {"9.9.9": ["파일 줄"]}, seen="9.9.0", version="9.9.9")
+    try:
+        _wn_fragment(c, "20.json", {"version": "9.9.9", "lines": ["스물"]})
+        _wn_fragment(c, "3.json", {"version": "9.9.9", "lines": ["셋"]})
+        assert c.call("GET", "/api/whats-new")[1]["items"] == [{"version": "9.9.9", "lines": ["파일 줄", "셋", "스물"]}]  # 파일 줄 먼저, 조각은 이슈 번호 순
+    finally:
+        c.close()
+
+
+def test_whats_new_skips_only_the_broken_fragment_and_shows_the_rest(tmp_path, monkeypatch):
+    c = _wn_console(tmp_path, monkeypatch, {"9.9.9": ["파일 줄"]}, seen="9.9.0", version="9.9.9")
+    try:
+        _wn_fragment(c, "1.json", "{깨짐")
+        _wn_fragment(c, "2.json", {"version": "9.9.9", "lines": "목록 아님"})
+        _wn_fragment(c, "3.json", {"version": "x.y", "lines": ["판 이상"]})
+        _wn_fragment(c, "4.json", ["배열"])
+        _wn_fragment(c, "5.json", {"version": "9.9.8", "lines": ["살아 있는 조각"]})
+        body = c.call("GET", "/api/whats-new")[1]
+        assert body["items"] == [{"version": "9.9.9", "lines": ["파일 줄"]}, {"version": "9.9.8", "lines": ["살아 있는 조각"]}]
+        assert body["skipped"] == ["1.json", "2.json", "3.json", "4.json"]
+    finally:
+        c.close()
+
+
+def test_whats_new_fragments_in_repo_are_well_formed():
+    """저장소의 실제 조각(`whats_new.d/*.json`)은 `{"version": 판, "lines": [문자열…]}` 이고 줄이 비지 않았다."""
+    folder = Path(console_server.__file__).resolve().parent / "whats_new.d"
+    for f in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        assert console_server.parse_version(data["version"]) and data["lines"], f.name
+        assert all(isinstance(x, str) and x.strip() for x in data["lines"]), f.name
+
+
 def test_whats_new_version_without_entry_is_left_out(tmp_path, monkeypatch):
     c = _wn_console(tmp_path, monkeypatch, {"9.9.9": ["a"]}, seen="9.9.5")
     try:
