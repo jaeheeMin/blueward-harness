@@ -1465,6 +1465,14 @@ def test_post_home_field_memo_layout():
             assert not any(f"font-size: {n}px" in line for n in range(23, 100))  # 글자 22px 이하
 
 
+def test_main_scroller_is_containing_block_for_sr_only():
+    # 문서가 안쪽 .main 스크롤 칸보다 더 내려가던 문제: .sr-only 는 absolute 1px 이라 .main 이 위치 기준이 아니면 스크롤 칸 밖(문서)으로 빠져 문서 스크롤 높이를 늘린다
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    assert ".sr-only { position: absolute;" in css
+    main_rule = [ln for ln in css.splitlines() if ln.startswith(".main { overflow-y: auto") or ln.startswith(".main { position: relative; overflow-y: auto")]
+    assert main_rule and main_rule[0].startswith(".main { position: relative; overflow-y: auto")
+
+
 _POST_LOGIC_NODE = r"""
 const path = require('path');
 const dir = process.argv[1];
