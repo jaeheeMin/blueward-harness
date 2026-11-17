@@ -84,13 +84,13 @@
       var title = [name + ' 한도 · ' + (STATUS_WORD[status] || '상태를 몰라(' + status + ')'),
         p ? '쓴 비율 ' + p : '쓴 비율은 Claude Code 가 알려 주지 않았어',
         when ? when + ' 에 풀려' : '풀리는 시각은 몰라',
-        age == null ? '언제 받은 값인지 몰라' : clockOf(w.t, now).replace(/^오늘 /, '') + ' 에 받은 값' + (stale ? '(오래된 값이야)' : '')].join('\n');
+        age == null ? '언제 받은 값인지 몰라' : clockOf(w.t, now).replace(/^오늘 /, '') + ' 에 받은 값' + (w.source === 'statusline' ? '(상태줄에서)' : '') + (stale ? '(오래된 값이야)' : '')].join('\n');
       chips.push({ type: w.type, name: name, pct: p ? parseInt(p, 10) : null, tone: tone, stale: stale, title: title,
         text: (tone === 'err' ? '✕ ' : tone === 'warn' ? '⚠ ' : tone === 'unk' ? '? ' : '') + name + ' ' + (p || '?') + (when ? ' · ' + when.replace(/^오늘 /, '') : '') });
     });
     if (!chips.length) {
       return { unknown: true, chips: [], text: '한도 알 수 없어',
-        title: failed ? '계정 한도를 읽지 못했어. 0% 라는 뜻이 아니야.' : '아직 Claude Code 가 계정 한도를 알려 주지 않았어. 콘솔에서 연 작업이 한 번 돌면 보여. 0% 라는 뜻이 아니야.' };
+        title: failed ? '계정 한도를 읽지 못했어. 0% 라는 뜻이 아니야.' : '아직 Claude Code 가 계정 한도를 알려 주지 않았어. 콘솔에서 연 작업이 한 번 돌거나, 설정의 "계정 한도 표시" 를 켠 뒤 Orca·터미널 세션이 한 번 응답하면 보여. 0% 라는 뜻이 아니야.' };
     }
     return { unknown: false, chips: chips, text: chips.map(function (c) { return c.text; }).join(' · '), title: chips.map(function (c) { return c.title; }).join('\n\n') };
   }

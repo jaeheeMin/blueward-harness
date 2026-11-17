@@ -2358,7 +2358,7 @@ def test_settings_screen_matches_design(tmp_path):
     assert dump.count("<button.scale>") == 3 and dump.count("<button.radio>") >= 1  # 시안 .seg / .radio 모양, 기본 위젯 없음
     assert "<select" not in dump and "<input" not in dump
     assert "화면 밝기" not in text  # 다크 한 벌뿐이라 넣지 않았다
-    assert dump.count("<button.swrow>") == 3 and "내 차례가 오면" in text  # 알림 스위치 셋(#651)은 별도 시험에서 본다
+    assert dump.count("<button.swrow>") == 4 and "내 차례가 오면" in text and "헤더에 계정 한도 보이기" in text  # 알림 스위치 셋(#651, 별도 시험에서 본다) + 한도 표시 하나(#1039)
     assert "연결돼 있어" in text and "준비 여부 확인 못 함" in text  # 조건 값이 없으면 준비됐다고 단정하지 않는다
 
 
@@ -2793,7 +2793,7 @@ def test_settings_notify_group_shows_three_switches_and_permission_line(tmp_path
     text, dump = got["text"], got["dump"]
     for need in ("알림", "내 차례가 오면", "막히거나 확인 못 한 일이 생기면", "AI가 일을 끝낼 때마다", "브라우저 알림 · 허용됨", "콘솔 탭이 열려 있을 때만"):
         assert need in text, need
-    assert dump.count("<button.swrow>") == 3 and "<input" not in dump  # 기본 checkbox 가 아니라 스위치 모양
+    assert dump.count("<button.swrow>") == 4 and "<input" not in dump  # 기본 checkbox 가 아니라 스위치 모양(알림 셋 + 한도 표시 하나(#1039))
     assert dump.count("<i.sw.on>") == 1  # 서버에 저장된 값(turn)만 켜져 있다
     assert "GET /api/settings/notify" in got["calls"]
     default = _smoke(tmp_path, "settings", [_session("s1")], extra=_notify_env("default"))

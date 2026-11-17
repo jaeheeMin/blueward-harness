@@ -1022,9 +1022,39 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
         })
 
 
+def statusline_windows(state_dir: Path | None) -> dict[str, dict]:
+    """상태줄 감싸개(statusline_wrap.py, #1039)가 남긴 한도. 상태줄 입력의 used_percentage(0~100)를 rate_limit_event 의
+    utilization(0~1)과 같은 단위로 바꾼다. 파일이 없거나 깨졌으면 빈 값(= 모름). 받은 시각은 감싸개가 적은 t."""
+    if not state_dir:
+        return {}
+    try:
+        doc = json.loads((Path(state_dir) / "statusline_limits.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rl = doc.get("rate_limits") if isinstance(doc, dict) else None
+    t = doc.get("t") if isinstance(doc, dict) else None
+    if not isinstance(rl, dict) or not isinstance(t, (int, float)) or isinstance(t, bool):
+        return {}
+    num = lambda v: v if isinstance(v, (int, float)) and not isinstance(v, bool) else None  # noqa: E731
+    out = {}
+    for kind in ("five_hour", "seven_day"):
+        w = rl.get(kind)
+        if not isinstance(w, dict):
+            continue
+        used, reset = num(w.get("used_percentage")), num(w.get("resets_at"))
+        if used is not None and not 0 <= used <= 100:
+            used = None
+        if used is None and reset is None:
+            continue
+        out[kind] = {"type": kind, "status": "allowed", "resetsAt": reset, "utilization": None if used is None else used / 100,
+                     "t": t, "source": "statusline"}
+    return out
+
+
 def account_limits(store: Store) -> list[dict]:
-    """계정 사용 한도(헤더 표시용). 한도는 계정 단위라 세션마다 받은 rate_limit_event 값(s["rateWindows"], 종류별)을 모아
-    종류마다 가장 늦게 받은 값 하나만 낸다. 5시간 · 7일 · 그 밖 순. 받은 적이 없으면 빈 목록(= 모름. 0% 가 아니다)."""
+    """계정 사용 한도(헤더 표시용). 한도는 계정 단위라 세션마다 받은 rate_limit_event 값(s["rateWindows"], 종류별)과
+    상태줄 감싸개가 남긴 값(statusline_limits.json)을 모아 종류마다 가장 늦게 받은 값 하나만 낸다.
+    5시간 · 7일 · 그 밖 순. 받은 적이 없으면 빈 목록(= 모름. 0% 가 아니다)."""
     best: dict[str, dict] = {}
     with store.lock:
         for s in store.sessions.values():
@@ -1033,6 +1063,9 @@ def account_limits(store: Store) -> list[dict]:
                 continue
             for kind, w in wins.items():
                 if isinstance(w, dict) and (kind not in best or (w.get("t") or 0) > (best[kind].get("t") or 0)):
-                    best[kind] = dict(w, type=kind)
+                    best[kind] = dict(w, type=kind, source="rate_limit_event")
+    for kind, w in statusline_windows(store.dir).items():
+        if kind not in best or (w.get("t") or 0) > (best[kind].get("t") or 0):
+            best[kind] = w
     order = {"five_hour": 0, "seven_day": 1}
     return sorted(best.values(), key=lambda w: (order.get(w["type"], 9), w["type"]))

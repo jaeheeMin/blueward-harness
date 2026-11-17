@@ -3801,6 +3801,42 @@
       }).then(paintConn);
     }
     function paintConn() { if (alive) draw(); }
+    // 한도 표시(#1039): 켜기는 바뀔 내용을 보여 주고 [바꾸기] 를 눌러야 settings.json 을 바꾼다. 끄기는 바로 원래대로.
+    var limCfg = null, limErr = '', limAsk = false, limBusy = false, limNote = '';
+    function loadLimits() {
+      return api('GET', '/api/settings/limits').then(function (d) { limCfg = d; limErr = ''; },
+        function (e) { limCfg = null; limErr = '한도 표시 상태를 읽지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
+    }
+    function saveLimits(on) {
+      limBusy = true; limErr = ''; limNote = ''; draw();
+      api('PUT', '/api/settings/limits', on ? { enabled: true, confirmed: true } : { enabled: false }).then(function (d) {
+        limCfg = d; limAsk = false; limNote = d.note || (on ? '켰어. 세션이 다음 응답을 받으면 헤더에 한도가 떠.' : '껐어. settings.json 의 statusLine 을 켜기 전 그대로 돌려놨어.');
+      }, function (e) { limErr = (on ? '켜지 못했어' : '끄지 못했어') + ' · ' + (e && e.message || ''); }).then(function () { limBusy = false; if (alive) draw(); });
+    }
+    function limitsSection() {
+      var c = limCfg, on = !!(c && c.enabled);
+      function cmdBox(label, text) { return h('div', { class: 'lcmd' }, h('span', { text: label }), h('code', { 'data-limits-cmd': label, text: text })); }
+      var body = [h('button', { type: 'button', role: 'switch', class: 'swrow', 'aria-checked': String(on), 'data-limits-switch': '1', disabled: !c || limBusy || (!on && !c.canEnable),
+        onClick: function () { if (on) saveLimits(false); else { limAsk = !limAsk; limNote = ''; draw(); } } },
+        h('i', { class: 'sw' + (on ? ' on' : ''), 'aria-hidden': 'true' }), h('b', { text: '헤더에 계정 한도 보이기' }))];
+      if (c) body.push(h('p', { class: 'note-muted', 'data-limits-path': '1', text: '바꾸는 파일 · ' + c.settingsPath }));
+      if (c && c.problem) body.push(h('p', { class: 'note-attn', role: 'alert', 'data-limits-problem': '1', text: c.problem }));
+      if (c && limAsk && !on && c.canEnable) {
+        body.push(h('div', { class: 'limits-confirm', role: 'group', 'aria-label': '켜기 전에 확인', 'data-limits-confirm': '1' },
+          h('p', { class: 'note-muted', text: '켜면 위 파일의 statusLine 이 아래처럼 바뀌어. 이미 쓰던 상태줄은 화면 그대로 나오고, 입력에 들어 있는 한도 값만 콘솔이 따로 받아 가.' }),
+          cmdBox('지금', c.current ? JSON.stringify(c.current) : '(statusLine 없음)'),
+          cmdBox('바꾼 뒤', JSON.stringify(c.current && typeof c.current === 'object' ? Object.assign({}, c.current, { command: c.newCommand }) : { type: 'command', command: c.newCommand })),
+          h('p', { class: 'note-muted', text: '끄면 지금 값 그대로 돌려놔(없던 설정이면 지워). 원래 값은 하네스 상태 폴더에 기억해 둬.' }),
+          h('div', { class: 'row' },
+            h('button', { type: 'button', class: 'pill', 'data-limits-confirm-yes': '1', disabled: limBusy, text: '바꾸기', onClick: function () { saveLimits(true); } }),
+            h('button', { type: 'button', class: 'pill line', 'data-limits-confirm-no': '1', text: '취소', onClick: function () { limAsk = false; draw(); } }))));
+      }
+      if (limNote) body.push(h('p', { class: 'note-muted', role: 'status', 'data-limits-note': '1', text: limNote }));
+      if (limErr) body.push(h('p', { class: 'note-attn', role: 'alert', text: limErr }));
+      body.push(h('p', { class: 'note-muted', text: on ? '켜져 있어' + (c.receivedAt ? ' · 마지막으로 한도를 받은 때 ' + new Date(c.receivedAt * 1000).toLocaleString('ko-KR') : ' · 아직 받은 한도가 없어(세션이 첫 응답을 받아야 와)')
+        : '꺼져 있어 · 지금은 콘솔이 연 세션이 받은 값으로만 한도를 보여 줘. Orca·터미널 세션의 한도는 켜야 보여.' }));
+      return set('계정 한도 표시', h('div', null, body));
+    }
     var notifyErr = '', notifyAskState = '';  // notifyAskState: '' | waiting(허용창 답 기다림) | dismissed(답 없이 닫음)
     function saveNotify(key, val) {
       var body = {}; body[key] = val;
@@ -3902,6 +3938,8 @@
         notifyErr ? h('p', { class: 'note-attn', role: 'alert', text: notifyErr }) : null,
         h('p', { class: 'note-muted', text: '콘솔 탭이 열려 있을 때만 알려 줘. 지금 보고 있는 화면에서는 보내지 않아.' }))));
 
+      sec.appendChild(limitsSection());
+
       sec.appendChild(set('연결 상태', h('div', null, crow('GitHub', conn.gh), crow('하네스 판', conn.ver), crow('프로젝트', conn.proj))));
 
       sec.appendChild(set('처음 화면', h('div', null,
@@ -3930,6 +3968,7 @@
     function again() { if (alive && loadedOnce && (cwdNow() || '') !== lastCwd) loadConn(false); }
     api('GET', '/api/settings/notify').then(function (d) { notifyCfg = d; }, function (e) { notifyErr = '알림 설정을 읽지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
     api('GET', '/api/settings/ask').then(function (d) { askCfg = d; }, function (e) { askErr = '묻는 범위를 읽지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
+    loadLimits();
     setTitle('설정'); loadModelsOnce(); loadConn(true); draw();
     return { onData: again, onSession: again, destroy: function () { alive = false; } };
   }
