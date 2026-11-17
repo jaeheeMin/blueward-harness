@@ -209,7 +209,7 @@ select.input option { background: var(--surface); color: var(--text); }
 
 .report-body { padding: 8px 20px 18px; }
 .report-body.clip { max-height: 26em; overflow: hidden; }
-.md { font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }
+.md { font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }  /* 좁은 세션 오른쪽 칸은 아래 .sess-side 규칙이 줄인다 */
 .md > * + * { margin-top: .75em; }
 .md .md-h { font-size: 15px; font-weight: 600; margin-top: 1.2em; }
 .md h3.md-h { font-size: 17px; }
@@ -750,6 +750,12 @@ table.list .unk { color: #5a4bc2; }
 .docs-pane .note-muted, .docs-pane .note-accent { padding: 0 16px; color: #55625f; }
 .docs-pane .preview { margin: 0; padding: 20px 26px; font-size: 13.5px; line-height: 1.75; }
 .docs-pane .md { color: #14201e; }
+/* 세션 오른쪽 좁은 칸의 미리보기는 글자를 줄인다(#1037) */
+.sess-side .docs-pane .preview { padding: 14px 16px; font-size: 13px; line-height: 1.65; }
+.sess-side .docs-pane .md { font-size: 13px; }
+.sess-side .docs-pane .md .md-h { font-size: 13px; }
+.sess-side .docs-pane .md h1.md-h, .sess-side .docs-pane .md h2.md-h, .sess-side .docs-pane .md h3.md-h { font-size: 14px; }
+.sess-side .docs-pane table.sheet { font-size: 12px; }
 .docs-pane .md a { color: #0e6b45; }
 .docs-pane .md code { background: #eef3f1; color: #14201e; }
 .docs-pane .md pre { background: #f2f5f4; border-color: #e3e8e6; }

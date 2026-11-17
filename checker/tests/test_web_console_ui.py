@@ -878,6 +878,33 @@ const cases = {
     view.destroy();
     process.exit(0);
   },
+  async dom_docs_panel_forms_only() {
+    // #1037: 세션 오른쪽 "만든 산출물" 에는 양식 파일(xlsx·pptx·docx)만 보인다. md·그 밖의 파일은 목록에서 빠진다.
+    const s1 = { id: 's1', title: '세션', cwd: '/w/p', updatedAt: 9, canSend: true, status: 'idle' };
+    window.BHMarkdown = { render: t => h('div', { text: t }) };
+    async function run(files) {
+      const { kit, calls } = makeKit({ 'GET /api/sessions/s1/files': { files }, 'GET /api/sessions/s1/files/preview': { kind: 'table', sheets: [{ name: 'Backlog', rows: [['ID'], ['R1']] }] } }, [s1]);
+      const panel = loadUI(kit).docsPanel(() => {});
+      panel.update(s1); for (let i = 0; i < 6; i++) await tick();
+      return { panel, calls, rows: find(panel.el, e => (e.attrs['class'] || '').includes('drow')).map(e => e.attrs['data-path']) };
+    }
+    // md 만 있는 세션: 목록에 md 가 없고 안내만, 미리보기 요청도 없다
+    const a = await run([{ path: 'docs/status/1037-x.md', kind: 'md', size: 9, mtime: 5, changed: true }, { path: 'notes.txt', kind: 'txt', size: 1, mtime: 4 }]);
+    assert.deepStrictEqual(a.rows, []);
+    assert.ok(a.panel.el.textContent.includes('아직 양식으로 뽑은 산출물이 없어'));
+    assert.ok(!a.panel.el.textContent.includes('1037-x.md') && !a.calls.some(c => /preview/.test(c[1])));
+    assert.strictEqual(a.panel.has(), false);  // Sauce 는 이 칸을 두지 않고, Post 는 산출물 탭에 같은 안내(noDocs)를 보인다
+    // 양식 파일이 있는 세션: 그 파일만 보이고 가장 최근 양식 파일이 미리보기로 열린다(md 가 더 최근이어도)
+    const b = await run([{ path: 'docs/status/1037-x.md', kind: 'md', size: 9, mtime: 50, changed: true }, { path: 'out/BW_Backlog List_v0.1.xlsx', kind: 'xlsx', size: 18000, mtime: 30, changed: true },
+      { path: 'out/old.pptx', kind: 'pptx', size: 5, mtime: 10 }, { path: 'out/note.pdf', kind: 'pdf', size: 5, mtime: 60 }]);
+    assert.deepStrictEqual(b.rows, ['out/BW_Backlog List_v0.1.xlsx', 'out/old.pptx']);
+    assert.ok(b.calls.some(c => c[0] === 'GET' && c[1].startsWith('/api/sessions/s1/files/preview') && decodeURIComponent(c[1]).includes('BW_Backlog List_v0.1.xlsx')));
+    assert.ok(!b.panel.el.textContent.includes('1037-x.md') && !b.panel.el.textContent.includes('아직 양식으로'));
+    assert.strictEqual(b.panel.has(), true);
+    // Windows 경로 표기(\)여도 확장자·폴더 판정이 같다
+    assert.ok(L.isFormOutput({ path: 'out\\BW_Backlog List_v0.1.xlsx' }) && L.isFormOutput({ path: 'C:\\w\\p\\a.DOCX' }) && !L.isFormOutput({ path: 'docs\\status\\a.md' }) && !L.isFormOutput({ path: 'audit\\a.xlsx' }));
+    process.exit(0);
+  },
   async dom_docs_page() {
     const s1 = { id: 's1', title: 'SRS 세션', cwd: '/w/p', updatedAt: 9, canSend: true, flowPr: { number: 6, state: 'OPEN' } };
     const files = { files: [
@@ -1495,6 +1522,18 @@ def test_post_session_ui_wiring():
     assert "font-size: 22px" in re.search(r"\.po-seal b \{[^}]*\}", css).group(0)
     assert "scale(2.4)" in css and "prefers-reduced-motion" in css
     assert "width: 112px" in css  # 좁은 화면 창구 안내판
+
+
+def test_post_outputs_tab_lists_each_file_once():
+    # #1037: 산출물 탭은 양식 파일 목록(docs 칸)과 빈 안내만 둔다. "바뀐 파일" 목록(regions.files)은 기술 탭에만 있다.
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "sec('만든 산출물', [regions.side, regions.noDocs])" in app
+    assert "sec('기술 정보', [regions.files, regions.tech, regions.perm, regions.tools])" in app
+    assert "regions.files" not in re.search(r"sec\('만든 산출물'[^\n]*", app).group(0).split("//")[0]
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert ".filter(L.isFormOutput)" in ui and "아직 양식으로 뽑은 산출물이 없어" in ui
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    assert re.search(r"\.sess-side \.docs-pane \.preview \{[^}]*font-size: 13px", css)
 
 
 def test_post_scripts_loaded_in_order_and_use_shared_logic():

@@ -481,7 +481,8 @@
     if (!total) return { known: false, reason: '내용이 있는 줄이 없어.' };
     return { known: true, total: total, filled: filled, empty: total - filled, blankNames: order };
   }
-  function isFormOutput(f) { return docGroup(f) === 'form' && /\.(xlsx|pptx|docx)$/i.test(f.path || ''); }
+  // 고객 양식 산출물(xlsx·pptx·docx)인가. 경로 구분자가 \ 여도(Windows) 폴더·확장자 판정이 같다
+  function isFormOutput(f) { var p = String((f && f.path) || '').replace(/\\/g, '/'); return docGroup({ path: p }) === 'form' && /\.(xlsx|pptx|docx)$/i.test(p); }
 
   /* ---- 승인 카드 ---- */
   function mergeApprovals(list) {
