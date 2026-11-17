@@ -8380,7 +8380,7 @@ def test_account_limits_merges_sessions_and_api(tmp_path, monkeypatch):
     c = Console(tmp_path, monkeypatch)
     try:
         c.login()
-        assert c.call("GET", "/api/account-limits")[1] == {"windows": [], "source": "rate_limit_event"}  # 모르면 0% 가 아니라 빈 목록
+        assert c.call("GET", "/api/account-limits")[1] == {"windows": [], "source": "latest"}  # 모르면 0% 가 아니라 빈 목록
         a, b = c.app.store.ensure("a", str(c.work)), c.app.store.ensure("b", str(c.work))
         a["rateWindows"] = {"seven_day": {"status": "allowed", "resetsAt": 5, "utilization": 0.1, "t": 10.0}, "five_hour": {"status": "allowed", "resetsAt": 9, "utilization": 0.2, "t": 10.0}}
         b["rateWindows"] = {"seven_day": {"status": "allowed_warning", "resetsAt": 6, "utilization": 0.9, "t": 20.0}, "weird": "x"}

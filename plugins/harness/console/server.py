@@ -28,6 +28,7 @@ import docfiles
 import flows
 import gitstate
 import handoff
+import limits_setup  # 한도 표시 켜기·끄기(#1039)
 import platform_compat
 import session_alive
 import shortcut
@@ -272,6 +273,8 @@ class App:
         self.last: dict = {}     # 마지막으로 읽은 값(못 읽은 것 포함). 새로 읽는 동안 이전 값으로 보여 준다
         self.inflight: dict = {}  # 지금 계산 중인 key -> Event
         self.flow_data, self.flow_error = self.load_flows(flows_path)
+        if state_dir:  # 한도 표시를 켠 적이 있으면 상태 폴더의 감싸개 복사본을 이 판으로 맞춘다(#1039)
+            limits_setup.refresh_script(Path(state_dir), Path(__file__).resolve().parent)
         self.browser_open = browser_open
         self.git_inspect = git_inspect
         self.sync_spawn = sync_spawn
@@ -1011,8 +1014,30 @@ class App:
         return {"visible": got["state"] != COND_NO, "state": got["state"], "reason": got["reason"]}  # 판정 불능은 숨기지 않는다
 
     def a_account_limits(self, g, q, b):
-        """헤더의 계정 한도. 출처는 콘솔이 관리하는 세션이 받은 rate_limit_event(상태줄 입력의 rate_limits 는 쓰지 않는다)."""
-        return 200, {"windows": account_limits(self.store), "source": "rate_limit_event"}
+        """헤더의 계정 한도. 콘솔이 관리하는 세션이 받은 rate_limit_event 와 상태줄 감싸개가 남긴 값(#1039) 중 종류별 최신."""
+        return 200, {"windows": account_limits(self.store), "source": "latest"}
+
+    def limits_state(self) -> dict:
+        if not self.store.dir:
+            raise HttpError(409, "상태 폴더가 없는 실행이라 한도 표시를 켤 수 없어.")
+        return limits_setup.status(self.store.dir)
+
+    def a_limits_get(self, g, q, b):
+        return 200, self.limits_state()
+
+    def a_limits_put(self, g, q, b):
+        """설정 "한도 표시" 켜기·끄기(#1039). 켜기는 화면이 바뀔 내용을 보여 주고 확인받은 뒤에만(confirmed: true) 바꾼다."""
+        if not isinstance(b, dict) or not isinstance(b.get("enabled"), bool):
+            raise HttpError(400, "enabled 는 true/false 여야 해.")
+        self.limits_state()  # 상태 폴더가 없으면 여기서 409
+        if b["enabled"] and b.get("confirmed") is not True:
+            raise HttpError(400, "켜기는 바뀔 내용을 확인받은 뒤에만 해(confirmed: true).")
+        try:
+            if b["enabled"]:
+                return 200, limits_setup.enable(self.store.dir, Path(__file__).resolve().parent)
+            return 200, limits_setup.disable(self.store.dir)
+        except limits_setup.LimitsError as e:
+            raise HttpError(409, str(e))
 
     def a_flows(self, g, q, b):
         """갈래·단계·도구 데이터. cwd(아는 작업 폴더)를 주면 그 폴더·이 사용자 기준의 노출 여부(exposure)를 더한다."""
@@ -2301,6 +2326,8 @@ ROUTES = [
     ("GET", re.compile(r"/api/folders/last"), App.a_last_folder),
     ("POST", re.compile(r"/api/folders/last"), App.a_last_folder_set),
     ("POST", re.compile(r"/api/settings/shortcut"), App.a_shortcut_make),
+    ("GET", re.compile(r"/api/settings/limits"), App.a_limits_get),  # #1039
+    ("PUT", re.compile(r"/api/settings/limits"), App.a_limits_put),
     ("GET", re.compile(r"/api/settings/notify"), App.a_notify_get),
     ("PUT", re.compile(r"/api/settings/notify"), App.a_notify_put),
     ("GET", re.compile(r"/api/settings/ask"), App.a_ask_get),

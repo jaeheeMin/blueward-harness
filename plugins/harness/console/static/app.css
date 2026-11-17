@@ -176,6 +176,12 @@ kbd { min-width: 12px; padding: 1px 7px; border-radius: 5px; border: 1px solid v
 .note-accent { margin-top: 8px; font-size: 13.5px; color: var(--accent); }
 .note-attn { margin-top: 8px; font-size: 13.5px; font-weight: 500; color: var(--attn); }
 .note-muted { margin-top: 8px; font-size: 13.5px; color: var(--sec); }
+/* 설정 "계정 한도 표시" 켜기 확인(#1039): 바꾸는 파일·명령은 긴 경로라 줄을 바꿔 가며 전부 보인다 */
+.limits-confirm { margin-top: 10px; }
+.limits-confirm .lcmd { margin-top: 10px; }
+.limits-confirm .lcmd > span { display: block; font-size: 12.5px; color: #55625f; }
+.limits-confirm .lcmd > code { display: block; margin-top: 4px; font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.limits-confirm .row { display: flex; gap: 8px; margin-top: 12px; }
 
 /* 버튼과 입력 */
 .btn { display: inline-flex; align-items: center; justify-content: center; padding: 8px 16px; border-radius: var(--rb); border: 1.5px solid currentColor; background: transparent; color: var(--text); font-size: 14px; }
