@@ -3710,13 +3710,16 @@ def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
     assert "fix: true" in home and "return '고쳐야 함'" in home and "turnN = Math.max(cardN, turnTotal)" in home and "turnTotal = turnCount;" in home
     assert "'요청 +' + it.more" in home and ".po-dc-wait + .po-dc-wait" in (STATIC / "theme-post.css").read_text(encoding="utf-8")
     # 열린 PR 상태를 홈이 열려 있는 동안 1분마다 다시 읽고, 홈을 떠나면 멈춘다(Sauce 홈과 같은 간격)
-    assert "MY_PRS_POLL_MS = 61000" in home and "clearInterval(prTimer)" in home and "delete fixBox.dataset.ready" in home
+    assert "MY_PRS_POLL_MS = 20000" in home and "clearInterval(prTimer)" in home and "delete fixBox.dataset.ready" in home
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
-    assert "MY_PRS_POLL_MS = CACHE_MS + 1000" in ui  # 61000 = 60000 + 1000. 이 값이 바뀌면 위 상수도 맞춘다
+    assert "var CACHE_MS = 60000;" in ui  # 확인 주기(20초)는 이 캐시(60초)보다 짧아야 캐시가 풀린 뒤 곧 새로 읽는다
     # #1066: 작은 아바타는 잘린 직원 그림이 아니라 글자, 기억을 모르는 점선 ? 링은 Post 에서 뺀다
     js = (STATIC / "theme-post.js").read_text(encoding="utf-8")
     assert "if (size === 'sm') return letterAvatar(opts.name);" in js and "po-av-letter" in js
+    assert "Intl.Segmenter" in js and "letterOf: letterOf" in js and "(PS.letterOf ? PS.letterOf(name)" in home  # 국기·가족 이모지·제로폭 시작 제목도 한 글자, 홈 표와 같은 함수
+    assert "title: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어'" in home
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     logic = (STATIC / "flow-logic.js").read_text(encoding="utf-8")
+    assert ".po-rest > .wn-slot:empty { display: none; }" in css and ".po-stc-err { width: 150px;" in css.replace(".po-mine .po-stc-err", ".po-stc-err")  # 빈 새 소식 칸 간격·오류 칩 줄바꿈
     m = re.search(r'\.po-si \.ring\.unk\[title="([^"]+)"\] \{ display: none; \}', css)
     assert m and f"title: '{m.group(1)}'" in logic  # CSS 가 가리키는 문구가 memoryOf 의 unknown title 과 같아야 한다

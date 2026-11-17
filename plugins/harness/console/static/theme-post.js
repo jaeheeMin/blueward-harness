@@ -248,7 +248,13 @@
   /* 세션 목록(사이드·접힌 레일·차분 목록)의 작은 아바타(#1066): 우체국 직원 그림을 30×36 칸에 잘라 넣으면 손 흔드는 팔·소품이 겹쳐 팔이 여러 개처럼 보인다.
      그래서 'sm' 는 그림 대신 제목 첫 글자를 둥근 칸에 쓴다(홈 "내 세션" 목록의 글자 아바타와 같은 모양). 이름은 opts.name 으로 받고,
      app.js 의 사이드 목록은 이름을 안 넘기므로(아바타만 부른다) 같은 줄의 제목에서 읽어 채운다(fillLetters). 큰 그림(카드 머리·세션 머리)은 잘리지 않으니 그대로다. */
-  function letterOf(name) { return Array.from(String(name || '').trim())[0] || ''; }
+  /* 제목의 첫 글자 하나. 앞 공백·제로폭 문자는 건너뛰고, 국기·가족 이모지·키캡처럼 여러 코드 조각이 한 글자인 것은 한 글자로 센다(Intl.Segmenter 가 없으면 코드 한 개). */
+  function letterOf(name) {
+    var t = String(name || '').replace(/^[\s\u200b-\u200d\u2060\ufeff]+/, '');
+    if (!t) return '';
+    try { if (typeof Intl !== 'undefined' && Intl.Segmenter) return new Intl.Segmenter().segment(t)[Symbol.iterator]().next().value.segment; } catch (e) { console.debug('첫 글자를 나누지 못해 코드 한 개로 대신함', e); }
+    return Array.from(t)[0];
+  }
   function nameAround(av) {
     var row = av.closest('.po-si'), n = row && row.querySelector('.sinfo .n');
     if (n) return n.textContent;
@@ -257,7 +263,7 @@
   }
   function fillLetters() {
     var list = document.querySelectorAll('.po-av-letter:not([data-fixed])');
-    for (var i = 0; i < list.length; i++) { var c = letterOf(nameAround(list[i])); if (list[i].textContent !== c) list[i].textContent = c; }
+    for (var i = 0; i < list.length; i++) { var nm = nameAround(list[i]), c = nm ? letterOf(nm) || '?' : ''; if (list[i].textContent !== c) list[i].textContent = c; }  // 이름이 있는데 글자가 없으면(공백뿐) 홈 목록과 같이 ?
   }
   var letterWatch = null;
   function watchLetters() {
@@ -266,7 +272,7 @@
     letterWatch.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title'] });
   }
   function letterAvatar(name) {
-    var span = el('span', 'po-av po-av-letter sm', letterOf(name));
+    var span = el('span', 'po-av po-av-letter sm', name ? letterOf(name) || '?' : '');
     span.setAttribute('aria-hidden', 'true');
     if (name) span.setAttribute('data-fixed', '1'); else watchLetters();
     return span;
@@ -287,5 +293,5 @@
   }
 
   /* 다른 화면이 쓰는 것: personOf·stateOf·stationOf(post-logic.js 와 같은 함수), avatar, isPost, STEP(창구 이름·풀이) */
-  window.BHPostScene = { attach: attach, STEP: STEP, avatar: avatar, isPost: isPost, calm: calm, animOn: animOn, personOf: PL.personOf, stateOf: PL.stateOf, stationOf: PL.stationOf, poseOf: PL.poseOf, LABEL: PL.LABEL, GLYPH: PL.GLYPH };
+  window.BHPostScene = { attach: attach, STEP: STEP, avatar: avatar, isPost: isPost, calm: calm, animOn: animOn, letterOf: letterOf, personOf: PL.personOf, stateOf: PL.stateOf, stationOf: PL.stationOf, poseOf: PL.poseOf, LABEL: PL.LABEL, GLYPH: PL.GLYPH };
 })();

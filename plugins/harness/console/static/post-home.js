@@ -10,7 +10,7 @@
   var LEGEND = ['turn', 'run', 'wait', 'blocked', 'unk', 'done'];
   /* 사무실 장면(office-post.js) 아래 팀 요약. 갈래(flowId) → 팀. 갈래가 없는 세션은 어느 팀에도 세지 않는다. */
   var TEAMS = [['요구분석팀', ['srs', 'srs-export']], ['설계팀', ['spec']], ['개발팀', ['dev']], ['기능컨설팅팀', ['config']], ['표준화팀', ['standard']], ['유지보수팀', ['fix']]];
-  var MY_PRS_POLL_MS = 61000;  // 열린 PR 상태를 다시 읽는 간격. Sauce 홈(flow-ui.js MY_PRS_POLL_MS)과 같다: 서버·프런트 캐시(60초)가 끝난 뒤에 묻는다
+  var MY_PRS_POLL_MS = 20000;  // 열린 PR 상태를 확인하는 간격. 읽기는 flow-ui.js 가 60초 캐시로 막아 주고(고른 칸만 다시 그리고 네트워크는 안 부른다), 그 캐시를 여기서 비울 수 없어서 Sauce 홈의 61초 한 번 대신 짧게 자주 본다 — 캐시가 풀린 뒤 최대 20초 안에 새로 읽는다
   var NARROW = '(max-width: 760px)';  // 이 폭 이하에서는 메모가 장면 아래로 내려온다(시안 media query)
 
   function teamOf(flow) {
@@ -107,7 +107,7 @@
       var bk = L.blockOf(s), an = !bk && window.BHApiNotice ? window.BHApiNotice.notice(s) : null;
       if (an && an.sideTone === 'err') return h('span', { class: 'po-stc po-stc-err', title: an.title, text: an.side });
       var g = L.groupOf(s, HK.openIds);
-      if (!bk && s.status !== 'ended' && g !== 'running' && !HK.pendingOf(s) && L.prNeedsFix(s)) return h('span', { class: 'po-stc po-stc-turn', text: '고쳐야 함' });
+      if (!bk && s.status !== 'ended' && g !== 'running' && !HK.pendingOf(s) && L.prNeedsFix(s)) return h('span', { class: 'po-stc po-stc-turn', title: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어', text: '고쳐야 함' });
       return stChip(st);
     }
 
@@ -142,7 +142,7 @@
         var s = x.s, st = PS.stateOf(s, L), name = s.title || HK.folderName(s) || '이름 없는 세션';
         var sub = teamOf(s.flowId) || (s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음');
         return h('li', { 'data-session': s.id }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ssa' },
-          h('span', { class: 'po-ava', 'aria-hidden': 'true', text: Array.from(name)[0] || '?' }),
+          h('span', { class: 'po-ava', 'aria-hidden': 'true', text: (PS.letterOf ? PS.letterOf(name) : Array.from(name)[0]) || '?' }),
           h('div', { class: 'po-rt' }, h('div', { class: 't1', text: name, title: name }), h('div', { class: 't2', text: sub }), metaLine(s)),
           h('span', { class: 'po-kyulc', style: 'width:' + (maxN ? maxN * KYUL_CELL + 2 : 0) + 'px' }, kyul(x.steps)),
           rowChip(s, st)));
@@ -365,8 +365,8 @@
       if (ro) ro.observe(stageFrame);
       draw();
 
-      /* 열린 PR 의 상태(검사 통과·실패·병합)는 GitHub 에서 바뀌므로 홈이 열려 있는 동안 1분마다 다시 읽는다(Sauce 홈과 같다, #1027 D8). 홈을 떠나면 멈춘다.
-         flow-ui.js 의 캐시는 60초가 지나면 스스로 낡은 것으로 치니, 읽었다는 표시만 지우고 다시 부른다. */
+      /* 열린 PR 의 상태(검사 통과·실패·병합)는 GitHub 에서 바뀌므로 홈이 열려 있는 동안 다시 읽는다(Sauce 홈과 같은 일, #1027 D8). 홈을 떠나면 멈춘다.
+         flow-ui.js 의 캐시는 60초가 지나면 스스로 낡은 것으로 치니, 읽었다는 표시만 지우고 부르면 된다(캐시 안이면 네트워크 없이 같은 값을 다시 그린다). */
       var prTimer = setInterval(function () {
         if (gone || !fixBox.isConnected || document.hidden) return;
         delete fixBox.dataset.ready;
