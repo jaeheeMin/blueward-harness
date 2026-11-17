@@ -108,7 +108,8 @@ def test_subagent_edit_guard_does_not_report_when_it_passes(browser, repo):
 @pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
 @pytest.mark.skipif(not _HAS_JQ, reason="jq 가 없으면 사유를 시험 입력대로 읽을 수 없다")
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv 가 없으면 bash 훅이 보고를 보낼 수 없다")
-def test_stop_deliver_block_shows_blocked_card(browser, repo):
+def test_stop_deliver_block_shows_a_note_not_a_blocked_card(browser, repo):
+    """#1027 D6: 마무리 확인(커밋 안 된 변경)은 막힘 카드가 아니라 대화 기록 한 줄(note)이다. 훅 동작(Claude 에게 block)은 그대로다."""
     (repo / "a.txt").write_text("x\n", encoding="utf-8")  # 커밋 안 된 변경
     stdin = json.dumps({"session_id": SID, "hook_event_name": "Stop", "cwd": str(repo), "stop_hook_active": False})
 
@@ -123,8 +124,9 @@ def test_stop_deliver_block_shows_blocked_card(browser, repo):
     assert (up.returncode, up.stdout, up.stderr) == (down.returncode, down.stdout, down.stderr)
     out = json.loads(up.stdout.decode("utf-8"))
     assert out["decision"] == "block"
-    card = _only_card(browser, "blocked", "stop-deliver")
-    assert card["text"] == out["reason"]
+    assert _blocks(browser) == []  # 막힘 카드가 아니다
+    notes = [c for c in browser.call("GET", f"/api/sessions/{SID}")[1]["chat"] if c["role"] == "note"]
+    assert len(notes) == 1 and notes[0]["text"] == out["reason"][:600]
 
 
 @pytest.mark.skipif(not _HAS_BASH, reason="bash 가 없으면 훅을 실행해 볼 수 없다")
