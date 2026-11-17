@@ -22,6 +22,7 @@
   color-scheme: light;
 }
 :root[data-theme="post"] .ptitle h1 { font-weight: 800; letter-spacing: -.03em; }
+:root[data-theme="post"] .ptitle h1.sess-title { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }  /* 긴 세션 제목은 한 줄(#1042) */
 
 /* 판: 흰 종이에 얇은 테두리 */
 :root[data-theme="post"] .light { border: 1.5px solid var(--bd); box-shadow: 0 1px 0 var(--bd2), 0 10px 24px -18px rgba(36,48,74,.35); }

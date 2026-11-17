@@ -465,6 +465,9 @@ table.sheet td { padding: 4px 10px; border: 1px solid var(--line); vertical-alig
 .home > * + * { margin-top: 16px; }
 .ptitle { display: flex; flex-direction: column; gap: 0; }
 .ptitle h1 { font-size: 20px; line-height: 1.5; font-weight: 500; letter-spacing: -0.3px; overflow-wrap: anywhere; }
+.ptitle h1.sess-title { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }  /* 긴 세션 제목은 한 줄로 줄이고 전체는 title 로(#1042) */
+.banner.mcp .mcp-conn { flex: 1 1 100%; font-size: 13px; }
+.banner.info .mcp-conn .mcp-l { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
 .ptitle .line { font-size: 13.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 /* 홈·새 작업 제목은 시안 구조 그대로: 한 줄 상자 안에 머리글자(eb)·제목(h1)·부제가 흐른다(eb·부제는 줄 상자 안 인라인) */
 .page.home .ptitle, .newp .ptitle { display: block; }
