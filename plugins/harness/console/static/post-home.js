@@ -35,14 +35,18 @@
       return h('div', { class: 'tile2' + (cls ? ' ' + cls : '') }, h('span', { class: 'eb', text: label }), h('span', { class: 'v', text: value }));
     }
 
-    /* 덱에 올릴 카드. 내 차례(오래 기다린 순) 다음에 막힘·확인 못 함. PR 고치기 차례는 "고쳐야 할 내 PR" 칸이 따로 보이니 Sauce 홈처럼 뺀다. */
+    /* 덱에 올릴 카드. 내 차례(오래 기다린 순) 다음에 막힘·확인 못 함. PR 검사가 실패한 세션(고쳐야 함)도 내 차례라 카드로 올린다 —
+       타일·알림 띠·"오늘 내 일" 문장의 내 차례 숫자(BHLogic.turnItems)와 덱 머리 숫자가 어긋나지 않게(실사용 시험: 덱 2건·타일 3건). "고쳐야 할 내 PR" 칸은 따로 그대로 있다. */
     function deckItems(list) {
       var turn = [], bad = [];
       list.forEach(function (s) {
         var bk = L.blockOf(s), pend = HK.pendingOf(s);
         if (bk) { bad.push({ id: s.id, kind: bk.kind === 'cannot_check' ? 'unk' : 'blocked', s: s, t: bk.t }); return; }
-        // 내 차례는 Sauce 홈·띠와 같은 목록(BHLogic.turnItems)으로 정한다. 답할 요청이 있는 세션만(#1027 D5). PR 고치기는 따로 칸이 있어 뺀다
-        if (L.turnItems([s], HK.openIds).some(function (t) { return t.kind === 'request' || t.kind === 'turn'; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: pend });
+        // 내 차례는 Sauce 홈·띠와 같은 목록(BHLogic.turnItems)으로 정한다. 답할 요청이 있는 세션(#1027 D5)과 PR 검사가 실패한 세션
+        var mine = L.turnItems([s], HK.openIds);
+        var asks = mine.filter(function (t) { return t.kind === 'request'; }).length;  // 한 세션에 답할 요청이 여럿이면 카드는 하나, "요청 +N" 으로 알린다(머리 숫자는 요청마다 센다)
+        if (mine.some(function (t) { return t.kind === 'request' || t.kind === 'turn'; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: pend, more: Math.max(0, asks - 1) });
+        else if (mine.length && L.prNeedsFix(s)) turn.push({ id: s.id, kind: 'turn', s: s, pend: null, fix: true });
       });
       turn.sort(function (a, b) { return (a.s.updatedAt || 0) - (b.s.updatedAt || 0); });
       // 방금 답해 도장이 찍힌 카드는 처리됨으로 바뀐 뒤에도 잠깐 남긴다(도장이 보이도록)
@@ -57,6 +61,7 @@
     function kindLabel(it) {
       if (it.kind === 'blocked') return '막힘';
       if (it.kind === 'unk') return '확인 못 함';
+      if (it.fix) return '고쳐야 함';
       var r = it.pend && it.pend.r;
       if (it.stampRid) return it.stampKind === 'plan' ? '계획' : it.stampKind === 'permission' ? '승인' : '질문';  // 도장이 찍힌 카드는 그 요청의 종류(markStamp 의 kind)로
       if (!r) return '확인';
@@ -73,6 +78,7 @@
         return { q: cant ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자', href: '/s/' + encodeURIComponent(s.id), verb: '가서 보기' };
       }
       var pend = it.pend, r = pend && pend.r, k = r && kit.kindOf(r);
+      if (it.fix) return { q: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어 — 고친 뒤 다시 올리자', href: '/s/' + encodeURIComponent(s.id), verb: '가서 고치기' };
       if (inline && it.stampRid) { var sq = qc.inlineQuestion(it.stampRid); if (sq) return { node: sq }; }
       if (inline && pend && r && k === 'question') {
         var q = qc.inlineQuestion(pend.rid);  // 보기를 바로 고른다(세션 화면과 같은 폼)
@@ -148,7 +154,7 @@
 
     /* slots: { sceneHost, whatsSlot, scene() — 지금 붙은 장면 제어(focus(id) 를 줄 수 있으면 준다) } */
     function view(root, slots) {
-      var gone = false, topId = null, items = [], officeOn = false, foc = null, focusId = null, memoId = null;
+      var gone = false, topId = null, items = [], turnTotal = 0, officeOn = false, foc = null, focusId = null, memoId = null;
       var approvals = h('div', { class: 'approvals light po-panel po-mini' });
       var recent = h('div', { class: 'light po-panel po-mini', 'data-recent': '1' });
       var projects = h('div', { class: 'projects' });
@@ -256,7 +262,7 @@
       function paintDeck() {
         var mark = focusMark();
         clear(deckSlot);
-        var turnN = items.filter(function (it) { return it.kind === 'turn'; }).length, badN = items.length - turnN;
+        var cardN = items.filter(function (it) { return it.kind === 'turn'; }).length, badN = items.length - cardN, turnN = Math.max(cardN, turnTotal);  // 머리 숫자 = 타일·띠와 같은 내 차례 건수
         if (!items.some(function (it) { return it.id === topId; })) topId = items[0] ? items[0].id : null;
         var nBlocked = items.filter(function (it) { return it.kind === 'blocked'; }).length, nUnk = items.filter(function (it) { return it.kind === 'unk'; }).length;
         var head = h('header', { class: 'po-ph' }, h('h2', null, '내 차례 ', h('b', { class: 'po-num', text: String(turnN) }), ' 건'),
@@ -272,6 +278,7 @@
           var attrs = it.kind === 'turn' ? { 'data-call': s.id } : { 'data-call-block': s.id, 'data-block-kind': it.kind === 'unk' ? 'cannot_check' : 'blocked' };
           var hd = h('div', { class: 'po-dc-h' }, PS.avatar(s.id, st), stMark(it.kind),
             h('span', { class: 'po-dc-kind', text: kindLabel(it) }), kit.link(href, { class: 'po-dc-s', text: name }),
+            it.more ? h('span', { class: 'po-dc-wait', text: '요청 +' + it.more }) : null,
             w ? h('span', { class: 'po-dc-wait', text: w }) : null,
             top ? null : h('button', { type: 'button', class: 'pill line sm', 'aria-expanded': 'false', 'aria-label': name + ' 펼치기', text: '열기', onClick: function () { pickTop(it.id); } }));
           stack.appendChild(h('article', Object.assign({ class: 'po-dc po-dc-' + it.kind + (top ? ' is-top' : '') }, attrs), hd, top ? cardBody(it) : null));
@@ -338,6 +345,7 @@
         helloSlot.appendChild(h('p', { class: 'po-lede' }, '세션 ' + c.total + '개 중 ' + c.running + '개가 일하고 있어. ',
           turnCount ? h('b', { text: '네 답을 기다리는 일이 ' + turnCount + '건 있어.' }) : L.NO_TURN_TEXT + '.'));
         items = deckItems(list);
+        turnTotal = turnCount;
         paintDeck();
         paintMemo();
         restSlot.appendChild(h('div', { class: 'tiles2 po-tiles' }, tile('내 차례', String(turnCount), turnCount ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), stats.prTile, stats.weekTile, stats.tbTile));

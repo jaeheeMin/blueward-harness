@@ -247,6 +247,7 @@
 :root[data-theme="post"] .po-dc-wait { flex: none; margin-left: auto; font-size: 12px; color: var(--lmuted); white-space: nowrap; }
 :root[data-theme="post"] .po-dc-h .pill { flex: none; margin-left: auto; }
 :root[data-theme="post"] .po-dc-wait + .pill { margin-left: 0; }
+:root[data-theme="post"] .po-dc-wait + .po-dc-wait { margin-left: 10px; }
 :root[data-theme="post"] .po-dc-b { display: grid; gap: 12px; margin-top: 14px; }
 :root[data-theme="post"] .po-dc-q { margin: 0; font-size: 18px; line-height: 1.4; font-weight: 800; letter-spacing: -.02em; overflow-wrap: anywhere; }
 :root[data-theme="post"] .po-dc-act { display: flex; flex-wrap: wrap; gap: 8px; }

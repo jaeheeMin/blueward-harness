@@ -3706,6 +3706,9 @@ def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
     assert "L.prNeedsFix(s)" in home and "'고쳐야 함'" in home and "BHApiNotice.notice(s)" in home
     # 새 소식 칸은 세션이 없을 때·불러오는 중에도 붙고, 세션이 생기면 foot 으로 되돌린다
     assert home.count("restSlot.appendChild(slots.whatsSlot)") == 2 and "foot.appendChild(slots.whatsSlot)" in home
+    # 덱 머리 숫자는 타일·띠·문장과 같은 내 차례 건수(BHLogic.turnItems 길이)다: 검사가 실패한 PR 세션도 카드로 올리고, 한 세션의 요청 여럿은 "요청 +N"
+    assert "fix: true" in home and "return '고쳐야 함'" in home and "turnN = Math.max(cardN, turnTotal)" in home and "turnTotal = turnCount;" in home
+    assert "'요청 +' + it.more" in home and ".po-dc-wait + .po-dc-wait" in (STATIC / "theme-post.css").read_text(encoding="utf-8")
     # 열린 PR 상태를 홈이 열려 있는 동안 1분마다 다시 읽고, 홈을 떠나면 멈춘다(Sauce 홈과 같은 간격)
     assert "MY_PRS_POLL_MS = 61000" in home and "clearInterval(prTimer)" in home and "delete fixBox.dataset.ready" in home
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
