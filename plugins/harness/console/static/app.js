@@ -3236,6 +3236,7 @@
     var browsing = false, dir = '', fsRows = null, fsErr = '', pollTimer = null, previewText = '', previewOpen = false, previewTimer = null;
     var customQ = {};  // 고를 보기가 있는 질문에서 '직접 쓰기' 를 연 것
     var newComp = null, briefAssist = null, attachMsg = '';  // 새 작업 입력칸(첨부 포함, #1038): 그릴 때마다 새로 만들되 첨부(keep/restore)는 이어 간다. attachMsg: 첨부를 읽는 중이라 못 보낼 때의 안내
+    var drawnStep = null, errNet = false, beginRun = 0;  // errNet: 시작 요청이 콘솔 서버에 닿지 못해 실패(분석 실패와 다른 말을 한다)
     var starting = false, startedId = null, startErr = '', alive = true, browseBusy = false, modelErr = false, advOpen = false;
     var BL = window.BHLogic, ready = null, readyCwd = null, readySig = 'null';
     var recentTimer = null, recentTries = 0, intro = null, introAdmin = null, introChecking = false, introTimer = null, introTries = 0, INTRO_MAX_TRIES = 10;  // intro: 준비 안 된 폴더를 처음 골랐을 때 보이는 "프로젝트 준비" 안내가 가리키는 폴더
@@ -3339,18 +3340,26 @@
       if (el) { el.scrollIntoView({ block: 'center' }); if (el.focus) el.focus({ preventScroll: true }); }
     }
     function begin() {
-      if (!draft.text.trim()) { textErr = true; draw(); return; }
+      if (!draft.text.trim()) { textErr = true; draw(); showBlock('#brief'); return; }
       if (draft.modelCustom && !customOk()) { modelErr = true; if (isPostTheme()) advOpen = true; draw(); showBlock('#model-custom'); return; }  // 고급 설정이 닫혀 있으면 오류도 그 안에 숨는다
       if (!draft.cwd) { picking = true; err = ''; draw(); showBlock('[data-folder-toggle]'); return; }
       if (newComp && newComp.busy()) { attachMsg = ATTACH_READING; draw(); return; }
       attachMsg = '';
       // 종류 버튼의 갈래는 AI 추천과 겹쳐 보기 전까지 사용자가 확정한 선택이 아니다(#668).
-      step = 'analyzing'; err = ''; draft.kindFlowId = kindFlow() || ''; draft.flowId = null; draft.flowUser = false; draft.insist = false; draw();
+      step = 'analyzing'; err = ''; errNet = false; var run = ++beginRun; draft.kindFlowId = kindFlow() || ''; draft.flowId = null; draft.flowUser = false; draft.insist = false; draw();
       api('POST', '/api/new', { text: draft.text.trim(), cwd: draft.cwd, model: modelChoice(), effort: effortChoice() }).then(function (d) {
         aid = d && (d.id || d.analysisId); if (!aid) throw new ApiError(0, '분석을 시작하지 못했어.');
         history.replaceState(null, '', '/new?id=' + encodeURIComponent(aid));
         data = d; poll();
-      }, function (e) { if (!alive) return; step = 'failed'; err = e.message; draw(); });
+      }, function (e) { if (!alive) return; if (e.status === 400 && isPostTheme()) { folderCheck(e, run); return; } step = 'failed'; err = e.message; errNet = e.status === 0; draw(); });
+    }
+    /* Post: 서버가 시작 요청을 400 으로 거절했을 때 까닭이 작업 폴더(고른 뒤 지워짐 등)면 "Claude Code 가 살펴보지 못했어" 가 아니라 폴더 고르기로 돌려보낸다 */
+    function folderCheck(e, run) {
+      api('POST', '/api/folders/validate', { path: draft.cwd }).then(function (v) { return v && v.ok === false ? String(v.error || '') : ''; }, function () { return ''; }).then(function (why) {
+        if (!alive || run !== beginRun || step !== 'analyzing') return;  // 그 사이 요청을 고치거나 다시 시작했으면 늦게 온 답은 버린다
+        if (!why) { step = 'failed'; err = e.message; draw(); return; }
+        step = 'write'; picking = true; customMsg = '고른 작업 폴더를 쓸 수 없어: ' + why + ' 다른 폴더를 골라 줘.'; history.replaceState(null, '', '/new'); draw(); showBlock('#custom');
+      });
     }
     function norm(st) {
       st = String(st || '').toLowerCase();
@@ -3405,7 +3414,13 @@
         history.replaceState(null, '', '/new');
         // 시작에 성공하면 그 세션 화면으로 바로 넘어간다. id 를 못 받았을 때만 아래 링크를 보인다. 이동하면 이 화면은 destroy 되어 draw 가 막힌다(alive).
         if (startedId) go('/s/' + encodeURIComponent(startedId));
-      }, function (e) { startErr = '시작하지 못했어: ' + e.message; }).then(function () { starting = false; draw(); });
+      }, function (e) {
+        startErr = '시작하지 못했어: ' + e.message;
+        if (isPostTheme() && files.length && (e.status === 400 || e.status === 413)) startErr += ' 첨부를 바꾸려면 "다른 걸로 할래" 로 돌아가서 빼 줘.';  // 이 화면의 첨부 칩에는 빼기(×)가 없다
+      }).then(function () {
+        starting = false; draw();
+        if (startErr && isPostTheme() && document.activeElement === document.body) { var sb = document.getElementById('start-go'); if (sb) sb.focus(); }  // 눌렀던 단추가 다시 그려져 초점이 문서 맨 위로 튀지 않게
+      });
     }
 
     /* 폴더 */
@@ -3475,6 +3490,11 @@
         }))));
       page.appendChild(panel);
     }
+    // Post: 누른 단추가 처리 중에 비활성으로 다시 그려져 초점이 문서 맨 위로 튄 채 끝났으면 그 칸으로 되돌린다(키보드만 쓰는 사람)
+    function backFocus(id) {
+      if (!isPostTheme() || document.activeElement !== document.body) return;
+      var el = document.getElementById(id); if (el) el.focus({ preventScroll: true });
+    }
     function validateCustom() {
       var p = custom.trim(); if (!p) return;
       customBusy = true; customMsg = ''; draw();
@@ -3482,7 +3502,7 @@
         var ok = d && (d.ok === true || d.valid === true);
         if (ok) { custom = ''; useFolder(d.path || d.realpath || p); }
         else customMsg = (d && (d.error || d.reason || d.message)) || '이 폴더를 사용할 수 없어.';
-      }, function (e) { customMsg = e.message; }).then(function () { customBusy = false; if (alive) draw(); });
+      }, function (e) { customMsg = e.message; }).then(function () { customBusy = false; if (alive) { draw(); backFocus('custom'); } });
     }
     function browseFolder() {
       if (browseBusy) return;
@@ -3495,7 +3515,7 @@
           if (v && (v.ok === true || v.valid === true)) useFolder(v.path || v.realpath || p);
           else customMsg = (v && (v.error || v.reason || v.message)) || '이 폴더를 사용할 수 없어.';
         });
-      }).then(null, function (e) { customMsg = e.message; }).then(function () { browseBusy = false; if (alive) draw(); });
+      }).then(null, function (e) { customMsg = e.message; }).then(function () { browseBusy = false; if (alive) { draw(); backFocus('folder-browse'); } });
     }
     function loadFs() {
       fsRows = null; fsErr = ''; draw();
@@ -3533,6 +3553,7 @@
       if (!alive) return;
       checkReady();
       var keepFocus = document.activeElement && document.activeElement.id, selStart = document.activeElement && document.activeElement.selectionStart;
+      var stepMoved = drawnStep !== null && drawnStep !== step; drawnStep = step;  // 화면 단계가 바뀌면 누른 단추가 사라져 초점이 문서 맨 위로 튄다: Post 는 새 제목으로 옮긴다
       var reopenFiles = !!(briefAssist && briefAssist.isOpen()); briefAssist = null;  // 다시 그려도 열려 있던 목록은 이어 보인다
       clear(root);
       var page = h('div', { class: 'page sess newp' });
@@ -3545,7 +3566,7 @@
       var t = TITLES[step] || TITLES.review, post = isPostTheme();
       if (post) page.classList.add('po-new');  // Post: 시안 new 배치(눈썹 · 큰 질문 · 입력 판 · 종류 격자 + 순서 판)
       var eyebrow = post && step === 'write' && projectOf() ? t[0] + ' · ' + projectOf() : t[0];
-      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: step === 'write' ? 'eb' : 'eb accent', text: eyebrow }), h('h1', { text: t[1] }), t[2] ? h('p', { class: 'line', text: t[2] }) : null));
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: step === 'write' ? 'eb' : 'eb accent', text: eyebrow }), h('h1', { id: post ? 'new-title' : null, tabindex: post ? '-1' : null, text: t[1] }), t[2] ? h('p', { class: 'line', text: t[2] }) : null));  // Post: 단계가 바뀔 때 초점을 받는 제목(아래 stepMoved)
       var panel = h('section', { class: post && step === 'write' ? 'po-nwrap' : 'light newbox' + (step === 'review' ? ' rv' : '') });
       if (step === 'write') drawWrite(panel, post);
       else if (step === 'analyzing') drawAnalyzing(panel);
@@ -3555,6 +3576,7 @@
       if (step === 'write' || step === 'review') { page.appendChild(tools.el); tools.update(); }
       root.appendChild(page);
       renderHead(location.pathname);  // 헤더의 프로젝트 이름이 지금 고른 작업 폴더를 따라가게
+      if (stepMoved && isPostTheme() && !intro && (!document.activeElement || document.activeElement === document.body)) { var hd = document.getElementById('new-title'); if (hd) { hd.focus({ preventScroll: true }); keepFocus = ''; } }
       if (keepFocus) { var f = document.getElementById(keepFocus); if (f && f !== document.activeElement) { f.focus(); try { if (selStart != null) f.setSelectionRange(selStart, selStart); } catch (e) { console.debug('커서 위치를 되돌리지 못했습니다', e); } } }
       if (reopenFiles && briefAssist && step === 'write') briefAssist.refresh();
     }
@@ -3574,7 +3596,7 @@
           (function () { var c = readyChip(f); return h('span', { class: ('chip2 ' + c.cls).trim(), 'data-ready': f.ready || 'unknown', text: c.text }); })()));
       });
       if (recent && !recent.length) box.appendChild(h('p', { class: 'note-muted', text: '최근에 쓴 폴더가 없어. 아래에 경로를 적어 줘.' }));
-      box.appendChild(h('button', { type: 'button', class: 'folder-opt proj add', disabled: browseBusy, onClick: browseFolder },  // 시안 G-02: 점선 "다른 폴더 찾아보기" 줄
+      box.appendChild(h('button', { type: 'button', id: 'folder-browse', class: 'folder-opt proj add', disabled: browseBusy, onClick: browseFolder },  // 시안 G-02: 점선 "다른 폴더 찾아보기" 줄
         h('span', { class: 'pi', 'aria-hidden': 'true', text: '+' }), h('span', { class: 'pn' }, h('span', { text: browseBusy ? '창 여는 중' : '다른 폴더 찾아보기' }))));
       box.appendChild(h('label', { for: 'custom', class: 'field-label', text: '다른 폴더 경로' }));
       box.appendChild(h('div', { class: 'inline-row' },
@@ -3718,7 +3740,7 @@
     }
     function drawFailed(panel) {
       var post = isPostTheme();  // Post: 확인 못 함은 ? 보라 점선(막힘 카드와 같은 부품)
-      panel.appendChild(h('div', { class: post ? 'bad q unsure' : 'bad' }, h('span', { class: post ? 'tagx unk' : 'tagx', text: post ? '? 확인 못 함' : '확인 못 함' }), h('b', { class: 'bt', text: 'Claude Code가 요청을 살펴보지 못했어' }), h('span', { class: 'sm', text: err || '알 수 없는 오류야.' })));
+      panel.appendChild(h('div', { class: post ? 'bad q unsure' : 'bad' }, h('span', { class: post ? 'tagx unk' : 'tagx', text: post ? '? 확인 못 함' : '확인 못 함' }), h('b', { class: 'bt', text: post && errNet ? '콘솔 서버에 연결하지 못했어' : 'Claude Code가 요청을 살펴보지 못했어' }), h('span', { class: 'sm', text: err || '알 수 없는 오류야.' })));
       panel.appendChild(h('div', { class: 'acts end' },
         h('button', { type: 'button', class: 'pill line', text: '요청 고치기', onClick: function () { step = 'write'; history.replaceState(null, '', '/new'); draw(); } }),
         h('button', { type: 'button', class: 'pill dark', text: '다시 시도', onClick: begin })));
@@ -3787,7 +3809,7 @@
         panel.appendChild(h('div', { class: 'acts end' }, chooser.tail,
           h('button', { type: 'button', class: 'pill line', text: '다른 걸로 할래', onClick: function () { clearTimeout(pollTimer); step = 'write'; aid = null; history.replaceState(null, '', '/new'); draw(); } }),
           startBlock() ? h('span', { class: 'note-attn', role: 'status', text: startBlock() }) : null,
-          h('button', { type: 'button', class: 'pill dark big', disabled: starting, 'aria-disabled': startBlock() ? 'true' : null, text: starting ? '시작하는 중' : '이대로 시작', onClick: function () { if (startBlock()) focusChooser(); else start(); } })));
+          h('button', { type: 'button', id: 'start-go', class: 'pill dark big', disabled: starting, 'aria-disabled': startBlock() ? 'true' : null, text: starting ? '시작하는 중' : '이대로 시작', onClick: function () { if (startBlock()) focusChooser(); else start(); } })));
       } else {
         panel.appendChild(h('div', { class: 'started', role: 'status' }, h('span', { text: '작업을 시작했어.' }), link(startedId ? '/s/' + encodeURIComponent(startedId) : '/', { text: '작업 화면으로 이동' })));
       }

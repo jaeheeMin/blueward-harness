@@ -3762,3 +3762,26 @@ def test_post_verify_B2_memo_count_teams_and_session_fixes():
     assert "background-color: var(--field); color: var(--text); border-radius: 10px; }" in css and ".folder-pick .folder-opt .pn small.mono { display: -webkit-box;" in css and "title: isPostTheme() ? f.path : null" in app
     assert "attrs['aria-label'] = '계정 사용 한도: ' + lv.chips.map" in app and "(상태줄의 쓴 비율로 판단)" in app  # 칩 풀이·묶음 이름도 같은 판정
     assert "var a = calmList.querySelectorAll('a')[CALM_MAX]; if (a) a.focus();" in home  # 더 보기를 누르면 새로 보인 첫 줄로 포커스
+
+
+def test_post_new_task_extra_cases_X1():
+    # 2026-11-18 Post 새 작업 못 본 케이스 점검 1회차. post-*.js 는 가짜 DOM 시험이 안 불러와서 원문 확인이고, 본체는 Aside 실화면이다(docs/status/2026-11-18-post-extra-newwork.md).
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 작업 폴더가 고른 뒤 지워져 시작이 400 으로 거절되면 "Claude Code 가 못 살펴봤어" 가 아니라 폴더 고르기로 돌려보낸다(Post 만)
+    assert "if (e.status === 400 && isPostTheme()) { folderCheck(e, run); return; }" in app and "function folderCheck(e, run)" in app
+    assert "customMsg = '고른 작업 폴더를 쓸 수 없어: ' + why + ' 다른 폴더를 골라 줘.'" in app and "showBlock('#custom')" in app
+    # 서버에 닿지 못한 시작은 분석 실패와 다른 말을 한다
+    assert "errNet = e.status === 0" in app and "post && errNet ? '콘솔 서버에 연결하지 못했어'" in app
+    # 키보드: 단계가 바뀌면 초점이 문서 맨 위로 튀지 않게 제목으로, 시작 오류·글 비어 있음·폴더 창 취소 뒤에는 누른 칸으로
+    assert "id: post ? 'new-title' : null, tabindex: post ? '-1' : null" in app and "document.getElementById('new-title')" in app and "drawnStep !== step" in app
+    assert "if (startErr && isPostTheme() && document.activeElement === document.body) { var sb = document.getElementById('start-go'); if (sb) sb.focus(); }" in app
+    assert "folderCheck(e, run)" in app and "run !== beginRun || step !== 'analyzing'" in app  # 늦게 온 폴더 확인이 다시 시작한 요청을 덮지 않게 and "id: 'start-go'" in app
+    assert "textErr = true; draw(); showBlock('#brief'); return;" in app
+    assert "backFocus('folder-browse')" in app and "backFocus('custom')" in app and "function backFocus(id)" in app
+    # 첨부가 서버에서 거절되면 그 화면의 칩에는 빼기(×)가 없어 돌아가는 길을 알려 준다
+    assert "files.length && (e.status === 400 || e.status === 413)" in app and '"다른 걸로 할래" 로 돌아가서 빼 줘.' in app
+    # 아주 긴 폴더 이름: 제목·눈썹은 어디서든 줄을 바꾸고, 위쪽 줄은 알림·테마 단추 대신 이름만 줄어든다
+    assert ':root[data-theme="post"] .ptitle .eb, :root[data-theme="post"] .ptitle h1 { overflow-wrap: anywhere; }' in css
+    assert ':root[data-theme="post"] #app > .top > :not(.ptop-proj):not(.sp):not(.ptop-lim) { flex-shrink: 0; }' in css and ".ptop-proj b { flex: 0 1 auto; min-width: 0;" in css
+    assert ':root[data-theme="post"] #new-title:focus { outline: none; }' in css
