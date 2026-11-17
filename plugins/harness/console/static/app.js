@@ -245,6 +245,7 @@
     var prev = sessions.get(s.id);
     var old = prev || {};
     var m = Object.assign({}, old, s);
+    if (typeof m.title === 'string' && m.title) m.title = MS(m.title);  // 세션 제목에 든 비밀값은 어느 화면에서든 가려 보인다(#1018). 서버도 저장 전에 가린다
     sessions.set(s.id, m);
     (m.pendingRequestIds || []).forEach(ensureRequest);
     if (loadedOnce) notifyChange(prev, m);  // 첫 목록은 비교 기준만 잡는다
@@ -1906,9 +1907,13 @@
       var head1 = m ? m[1] : first, head = m && m[2] ? head1 + ' ' + (m2 ? m2[1] : m[2]) : head1;
       var more = ((m2 ? m2[2] : '') + (rest ? '\n' + rest : '')).trim();
       // 영문 도구·훅 이름은 카드 본문에 그대로 두지 않고 쉬운 말로 바꿔 보인다(#794). 원문은 "검사 원문" 안에만 있고, AI 에게 보내는 글도 원문을 쓴다.
+      // 우회 안내 문장(DELIVER=1 등)은 카드와 AI 에게 보내는 글에서 뺀다. 원문은 "검사 원문" 안에만 있다(#1018).
+      var SB = window.BHLogic.stripBypass, origHead = head, origFix = fix, origMore = more;
+      head = SB(head); fix = SB(fix); more = SB(more);
+      var dropped = head !== origHead.trim() || fix !== origFix.trim() || more !== origMore.trim() || SB(text) !== text.trim();  // 서버가 이미 뺀 문장도 원문(text)에는 남아 있으니 "검사 원문" 에서 볼 수 있게
       var PW = window.BHLogic.plainReason, headShow = MS(PW(head)), fixShow = MS(PW(fix)), moreShow = MS(PW(more));
       var changed = headShow !== head || fixShow !== fix || moreShow !== more;
-      var rawShow = MS(changed ? (head + (more ? '\n' + more : '') + (fix ? '\n고치는 법: ' + fix : '')).trim() : more);
+      var rawShow = MS(dropped ? text : changed ? (head + (more ? '\n' + more : '') + (fix ? '\n고치는 법: ' + fix : '')).trim() : more);
       var card = h('div', { class: 'bad q ' + (cannot ? 'unsure' : 'blocked'), 'data-chat': 'block', 'data-block-kind': cannot ? 'cannot_check' : 'blocked' });
       card.appendChild(h('span', { class: 'tagx ' + (cannot ? 'unk' : 'fail'), text: cannot ? '? 확인 못 함' : '✕ 막힘' }));
       card.appendChild(h('b', { class: 'bt', text: (cannot ? '검사를 못 해서 멈췄어 · ' : '하네스 검사가 막았어 · ') + name }));
@@ -2095,7 +2100,7 @@
       var sec = h('section', { class: 'mt-64' }, h('h2', { class: 'label', text: '이 세션에서 일어난 일' }));
       if (!log.length) sec.appendChild(h('p', { class: 'note-muted', text: '아직 기록이 없어.' }));
       else {
-        sec.appendChild(h('ul', { class: 'logs' }, shown.map(function (l) { return h('li', null, h('time', { text: clock(l.time) }), h('span', { text: l.text })); })));
+        sec.appendChild(h('ul', { class: 'logs' }, shown.map(function (l) { return h('li', null, h('time', { text: clock(l.time) }), h('span', { text: MS(l.text) })); })));
         if (log.length > shown.length) sec.appendChild(h('button', { type: 'button', class: 'disclose', onClick: function () { logAll = true; paintLog(cur()); } }, icon('chev', 14), '이전 기록 ' + (log.length - shown.length) + '개 더 보기'));
       }
       regions.log.replaceChildren(sec);
@@ -2159,7 +2164,6 @@
      redraw: 상태가 바뀔 때 다시 그리는 함수, done: 답이 간 뒤 부르는 함수(action 을 준다). */
   var elicitSt = {};  // 요청 id -> { vals: {칸 이름: 값}, busy, err }
   var ELICIT_RES = { accept: ['답을 보냈어.', '연결 도구가 받은 값으로 이어 가.'], decline: ['거절했어.', '연결 도구는 답을 못 받고 이어 가.'], cancel: ['닫았어.', '연결 도구는 답을 못 받고 이어 가.'] };
-  var ELICIT_OUT = { '보냄': 'accept', '거절함': 'decline', '닫음': 'cancel' };
   var FORMAT_HINT = { email: '예: name@example.com', uri: '예: https://example.com', date: '예: 2026-11-12', 'date-time': '예: 2026-11-12T09:00:00' };
   function safeHttpUrl(u) { try { var x = new URL(String(u)); return x.protocol === 'http:' || x.protocol === 'https:' ? x.href : ''; } catch (e) { return ''; } }
   function elicitCard(rid, redraw, done) {
@@ -2357,13 +2361,15 @@
     var PLAN_RES = Object.assign({}, RES, { allow: ['이 계획대로 진행하기로 했어.', '권한 모드가 기본으로 돌아가고, AI가 계획대로 일을 시작해.'],
       deny: ['고쳐 달라고 전했어.', 'AI가 적어 준 말을 보고 계획을 다시 세워.'] });
     function resTable() { return isPlan(req) ? PLAN_RES : RES; }
+    /* 방금 이 화면에서 처리했으면 제목 줄에 "이미 처리된 …" 대신 결과 제목(허락했어 등)을 쓴다(#1018). 다시 열어 본 처리된 요청은 예전 글 그대로. */
+    function doneLine(old) { return outcome && outcome.title ? outcome.title : old; }
     function resultOf() {
       if (outcome) return outcome;
-      if (kindOf(req) === 'elicitation' && ELICIT_OUT[req.outcome]) { var er = ELICIT_RES[ELICIT_OUT[req.outcome]]; return { title: er[0], note: er[1], extra: '' }; }
-      var code = String(req.outcome || req.closedReason || req.resolution && req.resolution.code || req.status || 'closed').toLowerCase();
-      var key = /terminal|처리/.test(code) ? (/hand|넘/.test(code) ? 'handoff' : 'terminal') : /hand/.test(code) ? 'handoff' : /allowed_session|allow_session/.test(code) ? 'allow_session' : /allow/.test(code) ? 'allow' : /den/.test(code) ? 'deny' : /answer/.test(code) ? 'answered' : /expire|timeout/.test(code) ? 'expired' : 'closed';
-      var r = resTable()[key].slice();
-      var custom = req.resultText || (req.resolution && (req.resolution.text || req.resolution.message)) || (typeof req.resolution === 'string' ? req.resolution : '');
+      /* 서버가 내려 주는 결과 코드(req.resolution)로만 가른다. 한글 outcome 글은 보지 않는다(#1018). 코드가 없거나 모르는 값이면 닫힌 요청. */
+      var code = typeof req.resolution === 'string' ? req.resolution : '';
+      if (kindOf(req) === 'elicitation' && ELICIT_RES[code]) { var er = ELICIT_RES[code]; return { title: er[0], note: er[1], extra: '' }; }
+      var r = (Object.prototype.hasOwnProperty.call(resTable(), code) ? resTable()[code] : resTable().closed).slice();
+      var custom = req.resultText || '';
       if (custom) r[1] = custom;
       return { title: r[0], note: r[1], extra: req.reason ? '전달한 이유: ' + req.reason : '' };
     }
@@ -2379,7 +2385,7 @@
     function drawPermission() {
       var page = h('div', { class: 'page sess req' });
       var tool = req.toolName || req.tool_name || '도구', input = req.toolInput || req.tool_input || req.input || {};
-      head(page, false, isPending() ? 'AI가 네 허락을 기다리고 있어' : '이미 처리된 요청이야');
+      head(page, false, isPending() ? 'AI가 네 허락을 기다리고 있어' : doneLine('이미 처리된 요청이야'));
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
       /* 시안 17: 되돌릴 수 없는 일(서버가 req.risk = 'irreversible' 과 쉬운 말 사유 riskNote 를 준다)은 같은 카드에 꼬리표와 한 줄 설명을 더한다. */
       var irrev = req.risk === 'irreversible';
@@ -2399,7 +2405,9 @@
       card.appendChild(h('b', { class: 'bt', text: mcpInfo && !(irrev && req.riskNote) ? mcpAsk(mcpInfo) : req.title || (irrev && req.riskNote ? req.riskNote : 'Claude Code가 ' + tool + ' 도구를 쓰려고 해. 허락할까?') }));  // MCP 는 서버 제목보다 쉬운 문장(#864)
       // 시안 17: 하네스 안내 줄은 강조 없이 연한 보통 글. 그 밖의 경고(req.risk 글)는 예전처럼 강조한다.
       if (risk) card.appendChild(h('span', { class: irrev ? 'muted-line' : 'warn-line', text: typeof risk === 'string' ? risk : (risk.text || risk.message || '') }));
-      if (input && input.description) card.appendChild(h('span', { class: 'sm', text: MS(str(input.description)) }));
+      /* 설명 줄은 하네스가 쉬운 말로 적은 이유(req.note, 판정기 사유)다. AI 가 적은 영어 description 은 아래 "자세히" 의 설명 칸으로 옮겼다(#1018). */
+      var whyAsk = !irrev && typeof req.note === 'string' ? req.note.trim() : '';
+      if (whyAsk) card.appendChild(h('span', { class: 'muted-line', 'data-note': '1', text: '묻는 이유: ' + MS(whyAsk) }));
       if (f && input && input[f[1]] != null && tool !== 'Bash') card.appendChild(h('span', { class: 'sm' }, f[0] + ': ', h('b', { text: MS(str(input[f[1]])) })));
       if (input && input.dangerouslyDisableSandbox) card.appendChild(h('span', { class: 'warn-line', text: '샌드박스를 끄고 실행해(dangerouslyDisableSandbox)' }));
       if (input && input.run_in_background) card.appendChild(h('span', { class: 'sm', text: '백그라운드로 실행해(run_in_background)' }));
@@ -2415,7 +2423,7 @@
       if (input && typeof input.new_string === 'string') row('바꾼 글', input.new_string, true, true);
       var s = sessionOf() || {};
       row('작업 폴더', req.cwd || s.cwd, true);
-      var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background;
+      var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background && (whyAsk || irrev);  // 쉬운 말 이유가 없으면 AI 설명이 유일한 안내라 펼쳐 둔다
       if (mcpInfo) friendly = !irrev;  // MCP 도구는 문장으로 묻고 원문 이름·넘기는 값은 접어 둔다(#864). 되돌릴 수 없는 요청(SAP 쓰기 등)은 펼쳐서 넘기는 값을 보고 정하게 한다
       var det = h('details', { class: 'more', open: !friendly }, h('summary', { text: tool === 'Bash' ? '자세히 (명령 원문)' : mcpInfo ? '자세히 (도구 이름·넘기는 값)' : '자세히 (바뀌는 내용)' }), rows);
       var kv = h('dl', { class: 'kv' });
@@ -2431,7 +2439,7 @@
         var canSess = !(irrev || req.canAllowSession === false || req.hasSuggestions === false || (Array.isArray(req.permissionSuggestions) && !req.permissionSuggestions.length) || (Array.isArray(req.permission_suggestions) && !req.permission_suggestions.length));
         var sugg = Array.isArray(req.suggestionText) ? req.suggestionText : [];
         if (canSess) card.appendChild(h('div', { class: 'sugg', role: 'group', 'aria-label': '다시 묻지 않기로 추가되는 규칙' },
-          h('p', { class: 'sugg-h', text: '"허용하고 이 세션에서 다시 묻지 않기"를 누르면 다음 규칙이 추가돼' }),
+          h('p', { class: 'sugg-h', text: '"허용하고 이 세션에서 다시 묻지 않기"를 누르면 다음 규칙이 이 세션이 끝날 때까지만 적용돼(설정 파일에는 안 남아)' }),
           sugg.length ? h('ul', { class: 'sugg-l' }, sugg.map(function (x) { return h('li', { class: 'mono', text: MS(x) }); }))
             : h('p', { class: 'sub', text: '규칙 내용을 읽지 못했어. 위 입력 전체를 확인해.' }),
           req.suggestions ? h('pre', { class: 'box scroll', tabindex: '0', text: MS(JSON.stringify(req.suggestions, null, 2)) }) : null));
@@ -2456,7 +2464,7 @@
        [이 계획대로 진행] = 허락(권한 모드는 AI 쪽에서 기본으로 돌아온다) / [고쳐 달라고 하기] = 사유를 적어 거절(사유가 AI 에게 간다). */
     function drawPlan() {
       var page = h('div', { class: 'page sess req' }), input = req.toolInput || req.tool_input || req.input || {}, open = isPending();
-      head(page, false, open ? 'AI가 계획을 세웠어 · 읽고 진행할지 정해 줘' : '이미 처리된 계획이야');
+      head(page, false, open ? 'AI가 계획을 세웠어 · 읽고 진행할지 정해 줘' : doneLine('이미 처리된 계획이야'));
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
       // Windows 에서 계획 파일 맨 앞에 BOM 이 붙어 오면 첫 제목 줄이 제목으로 안 그려진다(실측)
       var has = typeof input.plan === 'string' && input.plan.replace(/^\uFEFF/, '').trim() !== '';  // claude 가 계획 파일을 안 쓰면 input 이 {} 로 온다(실측)
@@ -2533,7 +2541,7 @@
       initAnswers();
       var qsList = questionsOf(req), page = h('div', { class: 'page sess req' });
       var multi = qsList.length > 1, open = isPending();
-      head(page, true, open ? (multi ? 'AI가 ' + qsList.length + '가지를 물어봤어 · 답하면 이어서 일해' : 'AI가 물어본 게 있어 · 답하면 이어서 일해') : '이미 처리된 질문이야');
+      head(page, true, open ? (multi ? 'AI가 ' + qsList.length + '가지를 물어봤어 · 답하면 이어서 일해' : 'AI가 물어본 게 있어 · 답하면 이어서 일해') : doneLine('이미 처리된 질문이야'));
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
       recentChat().forEach(function (el) { msgs.appendChild(el); });  // 시안 G-07: 질문 카드 위에 그 세션의 최근 대화
       qsList.forEach(function (q, i) {
@@ -2579,7 +2587,7 @@
     /* MCP 질문: 대화 위 질문 카드와 같은 폼. 칸 모양은 서버가 정리해 준 elicitation.fields 로만 그린다. */
     function drawElicitation() {
       var page = h('div', { class: 'page sess req' }), open = isPending();
-      head(page, true, open ? '연결 도구가 값을 물어봤어 · 답하면 이어서 일해' : '이미 처리된 질문이야');
+      head(page, true, open ? '연결 도구가 값을 물어봤어 · 답하면 이어서 일해' : doneLine('이미 처리된 질문이야'));
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
       recentChat().forEach(function (el) { msgs.appendChild(el); });
       if (open) {

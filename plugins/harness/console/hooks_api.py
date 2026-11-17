@@ -11,6 +11,7 @@ from typing import Callable
 import context_usage
 import flows
 import session_alive
+from bypass_filter import strip_bypass
 from risk import IRREVERSIBLE, SAFE, classify, plan_dir_of
 from store import (CHECK_DONE, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS, MAX_SKILL_STATES, MAX_SUBAGENTS, RequestLimit, Store,
                    TITLE_PROMPT, TITLE_SESSION, chat_clean, mark_check, prompt_title, remember_touched)
@@ -27,12 +28,17 @@ MAX_PENDING_AGENTS = 50  # 아직 SubagentStart 와 짝을 못 지은 Agent 호�
 
 def plugin_read_roots(console_file: str = __file__) -> tuple[str, ...]:
     """읽기 도구로 묻지 않고 읽어도 되는 하네스 플러그인 폴더(#953). 설치본이면 판 폴더들을 담은
-    <설정 폴더>/plugins/cache/<마켓>/harness 하나(세션이 콘솔과 다른 판을 쓸 수 있어), 아니면 이 플러그인 폴더(plugins/harness)."""
-    root = Path(console_file).resolve().parents[1]
-    parent = root.parent
-    if parent.name == "harness" and parent.parent.parent.name == "cache":
-        return (str(parent),)
-    return (str(root),)
+    <설정 폴더>/plugins/cache/<마켓>/harness 하나(세션이 콘솔과 다른 판을 쓸 수 있어), 아니면 이 플러그인 폴더(plugins/harness).
+    링크를 푼 경로와 푼 앞 경로를 둘 다 낸다(#1018): 설정 폴더의 plugins 가 정션·링크(예: Orca 프로필 → ~/.claude/plugins)면
+    AI 가 명령에 쓰는 경로는 푼 앞 경로라, 푼 경로만 두면 하네스 자체 스크립트도 설치본 밖으로 보여 승인을 묻는다.
+    실제 경로 검사(risk._real_within)는 양쪽 다 링크를 풀어 비교하므로 넓어지지 않는다."""
+    roots: list[str] = []
+    for root in (Path(os.path.abspath(console_file)).parents[1], Path(console_file).resolve().parents[1]):
+        parent = root.parent
+        found = str(parent) if parent.name == "harness" and parent.parent.parent.name == "cache" else str(root)
+        if found not in roots:
+            roots.append(found)
+    return tuple(roots)
 
 
 PLUGIN_READ_ROOTS = plugin_read_roots()
@@ -131,10 +137,10 @@ class Hooks:
                     with self.store.lock:
                         others = req.waiters - 1
                     if others <= 0:
-                        self.store.close(req.rid, "연결이 끊겨 닫힘(터미널에서 거부하거나 취소함)")
+                        self.store.close(req.rid, "연결이 끊겨 닫힘(터미널에서 거부하거나 취소함)", "closed")  # 결과 코드(#1018)
                     return
                 if deadline is not None and self.clock() >= deadline:
-                    self.store.close(req.rid, "터미널로 넘어감")
+                    self.store.close(req.rid, "터미널로 넘어감", "handoff")
                     return
         finally:
             with self.store.lock:
@@ -169,9 +175,9 @@ class Hooks:
         return "ask", "", why
 
     def risk_of(self, s: dict, tool: str, tool_input) -> tuple[str, str]:
-        """카드에 붙일 (risk, 쉬운 말 사유). 되돌릴 수 없는 일이 아니면 ("", "")."""
+        """카드에 붙일 (risk, 쉬운 말 사유). 되돌릴 수 없는 일이 아니면 risk 는 "" 이고 사유는 하네스가 묻는 이유(판정 못 한 이유)다(#1018)."""
         _, risk, why = self.decide(s, tool, tool_input)
-        return (risk, why) if risk else ("", "")
+        return risk, why
 
     def auto_allowed(self, s: dict, tool: str, tool_input) -> bool:
         """콘솔이 카드를 띄울 경로에서만 부른다. 허용이면 세션 기록에 한 줄 남긴다(같은 호출을 훅과 콘솔 연결이 둘 다 물을 수 있어 한 번만)."""
@@ -256,7 +262,7 @@ class Hooks:
         s["currentAction"] = ""
         asking = any(r.kind == "question" for r in self.store.pending_for(s["id"]))  # 질문 대기 중의 Stop 은 스킬 끝이 아니다(아래에서 닫기 전에 본다)
         if not s["managed"]:
-            self.store.close_session(s["id"], "터미널에서 처리됨")
+            self.store.close_session(s["id"], "터미널에서 처리됨", code="terminal")
         for name, state in list(s["skillStates"].items()):
             if state == "active":
                 s["skillStates"][name] = "done"
@@ -302,7 +308,7 @@ class Hooks:
         kind = block_kind(reason)
         fix = ""
         if "다음:" in reason:
-            fix = reason.split("다음:", 1)[1].strip()
+            fix = strip_bypass(reason.split("다음:", 1)[1].strip())  # 우회 안내 문장은 카드·AI 전달 글에서 뺀다(원문 reason 은 그대로 남는다, #1018)
         if self.store.add_chat(s, "block", reason, hook=hook[:80], kind=kind, fix=fix[:2000], tool=tool[:120]):
             self.store.add_log(s, ("검사 못 해 멈춤: " if kind == "cannot_check" else "하네스 훅이 막음: ") + reason.split("\n", 1)[0][:200])
             self.store.touch(s)
@@ -328,7 +334,7 @@ class Hooks:
                 s["reportFresh"] = False  # 새 턴이 시작됐다. 이전 보고는 화면에 남아도 질문 판정에는 쓰지 않는다
             prompt = body.get("prompt") if isinstance(body.get("prompt"), str) else ""
             if not s["managed"]:
-                store.close_session(s["id"], "터미널에서 처리됨", before=ts)  # 늦게 온 프롬프트가 그 뒤의 새 요청을 닫지 않게 한다
+                store.close_session(s["id"], "터미널에서 처리됨", before=ts, code="terminal")  # 늦게 온 프롬프트가 그 뒤의 새 요청을 닫지 않게 한다
             if prompt and s.get("title_rank", 0) < TITLE_PROMPT:
                 title = prompt_title(prompt)
                 if title:
@@ -385,7 +391,7 @@ class Hooks:
             if ts is not None:
                 s["boundaryTs"] = max(ts, s.get("boundaryTs", 0.0))
             s["ended"], s["turn_running"], s["currentAction"] = True, False, ""
-            store.close_session(s["id"], "세션이 끝나서 닫힘")
+            store.close_session(s["id"], "세션이 끝나서 닫힘", code="expired")
             store.add_log(s, "세션 끝")
             store.touch_peers(s)
             store.flush()
@@ -455,7 +461,7 @@ class Hooks:
         for r in self.store.pending_for(s["id"]):
             # 늦게 온 PostToolUse 가 그 뒤에 같은 도구·입력으로 새로 생긴 요청을 닫으면 안 된다
             if r.kind == "permission" and r.tool_name == tool and r.key == key and (ts is None or r.created <= ts):
-                self.store.close(r.rid, "터미널에서 처리됨")  # 훅 연결은 끊기지 않으므로 여기서 닫는다
+                self.store.close(r.rid, "터미널에서 처리됨", "terminal")  # 훅 연결은 끊기지 않으므로 여기서 닫는다
         if tool in EDIT_TOOLS and isinstance(tool_input, dict):
             path = tool_input.get("file_path") or tool_input.get("notebook_path")
             if isinstance(path, str) and path not in s["changedFiles"] and len(s["changedFiles"]) < MAX_CHANGED_FILES:
