@@ -1375,6 +1375,16 @@ def test_post_home_uses_office_scene():
     assert ".po-stage.is-office" in css and "aspect-ratio" in css
 
 
+def test_office_bundle_supports_pip():
+    # 사무실 장면 번들이 작은 창(Document PiP)을 지원한다(#1036). 번들은 innerHTML 계열을 쓰지 않고, 테마를 바꾸면 theme-post.js 가 PiP 를 닫는다
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    assert "documentPictureInPicture" in bundle and "작은 창으로 보기" in bundle and "여기로 돌려놓기" in bundle
+    for bad in ("innerHTML", "outerHTML", "insertAdjacentHTML", "eval(", "new Function"):
+        assert bad not in bundle
+    scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    assert "documentPictureInPicture" in scene and "closePip(); return drop()" in scene
+
+
 _POST_LOGIC_NODE = r"""
 const path = require('path');
 const dir = process.argv[1];

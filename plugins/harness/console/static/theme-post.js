@@ -192,13 +192,18 @@
 
   /* 홈이 부른다. host 는 빈 div. 테마가 post 일 때만 장면이 있고, 테마가 바뀌면 붙거나 떨어진다.
      opts: { list(): 장면에 올릴 세션 목록, onNavigate(href) }. office(window.BHOfficeScene)를 주면 우체국 장면 대신 사무실 장면을 붙인다. */
+  // 사무실 번들의 작은 창(Document PiP)은 번들 안에 닫기 API 가 없어 브라우저 API 로 닫는다(PiP 는 이 장면만 쓴다)
+  function closePip() {
+    try { var w = window.documentPictureInPicture && window.documentPictureInPicture.window; if (w) w.close(); } catch (e) { console.warn('작은 창(PiP)을 닫지 못함', e); }
+  }
+
   function attach(host, opts, office) {
     var scene = null, dead = false, reduce = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
     var waitRo = null;
     function drop() { if (waitRo) { waitRo.disconnect(); waitRo = null; } if (scene) { scene.destroy(); scene = null; } host.classList.remove('is-office'); host.hidden = true; }
     function sync() {
       if (dead) return;
-      if (!isPost() || calm()) return drop();  // 차분 = 장면을 그리지 않고 세션 목록(post-home.js)이 대신한다
+      if (!isPost() || calm()) { closePip(); return drop(); }  // 차분 = 장면을 그리지 않고 세션 목록(post-home.js)이 대신한다. 작은 창(PiP)도 함께 닫는다(홈을 떠날 때의 destroy 는 PiP 를 살려 둔다)
       if (scene || waitRo) return;
       host.hidden = false;
       if (office) {  // AI 오피스 장면(post/office/office-post.js): 부품 목록을 안 받고 바로 붙는다. 팀 요약 줄은 post-home.js 가 그린다
