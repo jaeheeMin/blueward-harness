@@ -68,7 +68,8 @@ choose_config() {
     fi
     if [ -n "$base_entry" ]; then
       tmp_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
-      config="$(mktemp "$tmp_dir/gitleaks-base-XXXXXX.toml")" || fail_error "임시 설정 파일을 만들 수 없다."
+      # BSD(macOS) mktemp 는 X 가 템플릿 맨 끝에 있어야 바꾼다. 확장자(.toml)를 살리려고 임시 폴더를 만들어 그 안에 둔다.
+      config="$(mktemp -d "$tmp_dir/gitleaks-base.XXXXXX")/gitleaks.toml" || fail_error "임시 설정 파일을 만들 수 없다."
       git show "$BASE_SHA:.gitleaks.toml" > "$config" || fail_error "base 커밋의 .gitleaks.toml 을 읽을 수 없다."
       echo "설정: base($BASE_SHA)의 .gitleaks.toml (하네스 규칙을 유지하려면 [extend] path = \"$HARNESS_CONFIG\")"
       return
