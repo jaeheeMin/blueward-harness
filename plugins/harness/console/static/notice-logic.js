@@ -85,7 +85,7 @@
         p ? '쓴 비율 ' + p : '쓴 비율은 Claude Code 가 알려 주지 않았어',
         when ? when + ' 에 풀려' : '풀리는 시각은 몰라',
         age == null ? '언제 받은 값인지 몰라' : clockOf(w.t, now).replace(/^오늘 /, '') + ' 에 받은 값' + (w.source === 'statusline' ? '(상태줄에서)' : '') + (stale ? '(오래된 값이야)' : '')].join('\n');
-      chips.push({ type: w.type, name: name, pct: p ? parseInt(p, 10) : null, tone: tone, stale: stale, title: title,
+      chips.push({ type: w.type, name: name, pct: p ? parseInt(p, 10) : null, tone: tone, stale: stale, title: title, when: when ? when.replace(/^오늘 /, '') : '', source: w.source || '',
         text: (tone === 'err' ? '✕ ' : tone === 'warn' ? '⚠ ' : tone === 'unk' ? '? ' : '') + name + ' ' + (p || '?') + (when ? ' · ' + when.replace(/^오늘 /, '') : '') });
     });
     if (!chips.length) {

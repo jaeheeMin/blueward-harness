@@ -490,7 +490,8 @@
     if (collapsed !== null) return collapsed;
     return appEl ? appEl.parentNode.clientWidth <= 760 : false;
   }
-  function setCollapsed(v) { collapsed = v; window.BH.write('bh-side', v ? '1' : '0'); scheduleSide(); }
+  var foldRefocus = false;  // Post: 접기·펴기 단추를 눌러 목록을 다시 만들면 새 단추로 포커스를 돌려준다(키보드 사용자가 자리를 잃지 않게)
+  function setCollapsed(v) { collapsed = v; window.BH.write('bh-side', v ? '1' : '0'); foldRefocus = isPostTheme() && !!(document.activeElement && document.activeElement.closest && document.activeElement.closest('.fold-btn')); scheduleSide(); }
   var sideQueued = false;
   function scheduleSide() {
     if (sideQueued) return;
@@ -1119,12 +1120,18 @@
     var lv = window.BHNotice.limitView(limits.windows, Date.now(), limits.failed);
     var attrs = { class: 'ptop-lim' + (lv.unknown ? ' unk' : ''), role: 'group', title: lv.title, 'aria-label': '계정 사용 한도: ' + lv.text };
     if (lv.unknown) return h('span', attrs, h('span', { class: 'ptop-m unk', text: lv.text }));
-    return h('span', attrs, lv.chips.map(function (c) {
-      var mark = c.tone === 'err' ? '✕ ' : c.tone === 'warn' ? '⚠ ' : c.tone === 'unk' ? '? ' : '';
-      return h('span', { class: 'ptop-m' + (c.tone ? ' ' + c.tone : '') + (c.stale ? ' stale' : '') },
+    // 상태줄에서 읽은 값은 서버가 status 를 늘 allowed 로 둔다(store.statusline_windows: 상태줄은 비율만 안다) — 비율로 주의·막힘을 매긴다(96% 가 42% 와 같은 모양이던 것).
+    // 칩 title·묶음 aria-label 도 같은 판정으로 고쳐 쓴다(화면은 ⚠ 인데 풀이가 "여유" 이지 않게)
+    var tones = lv.chips.map(function (c) { return c.tone || (c.source === 'statusline' && c.pct != null ? (c.pct >= 100 ? 'err' : c.pct >= 80 ? 'warn' : '') : ''); });
+    attrs['aria-label'] = '계정 사용 한도: ' + lv.chips.map(function (c, i) { return (tones[i] === 'err' ? '다 씀 ' : tones[i] === 'warn' ? '주의 ' : '') + c.name + ' ' + (c.pct == null ? '?' : c.pct + '%') + (c.when ? ' · ' + c.when + ' 에 풀려' : ''); }).join(', ');
+    return h('span', attrs, lv.chips.map(function (c, i) {
+      var tone = tones[i], fixed = tone && tone !== c.tone;
+      var mark = tone === 'err' ? '✕ ' : tone === 'warn' ? '⚠ ' : tone === 'unk' ? '? ' : '';
+      return h('span', { class: 'ptop-m' + (tone ? ' ' + tone : '') + (c.stale ? ' stale' : ''), title: fixed ? c.name + ' 한도 · ' + (tone === 'err' ? '다 썼어' : '거의 찼어') + '(상태줄의 쓴 비율로 판단)\n' + c.title.split('\n').slice(1).join('\n') : null },
         h('em', { text: mark + c.name + ' 한도' }),
         h('span', { class: 'ptop-bar' + (c.pct == null ? ' unk' : '') }, c.pct == null ? null : h('i', { style: 'width:' + Math.min(100, c.pct) + '%' })),
-        h('b', { text: c.pct == null ? '?' : c.pct + '%' }));
+        h('b', { text: c.pct == null ? '?' : c.pct + '%' }),
+        (tone === 'warn' || tone === 'err') && c.when ? h('small', { class: 'ptop-when', text: c.when.replace(/^\d+월 /, '') + ' 풀림' }) : null);  // 급할 때만 풀리는 시각을 칩에(그 밖에는 title·aria-label). 좁은 폭에선 마우스를 올릴 수 없다
     }));
   }
   function nextTheme() {
@@ -1227,11 +1234,11 @@
     appEl.dataset.collapsed = col ? 'true' : 'false';
     renderAnn(d); refreshNotices(d); renderHead(cur); syncPostFrame(d); drawNotice();
     if (postScene) postScene.update();
-    if (sideMode !== col) { clear(sideEl); sideMode = col; }  // 접힘·펼침이 바뀌면 처음부터 다시 만든다(단추 핸들러가 다르다)
-    if (col) { patchChildren(sideEl, [renderRail(d, cur)]); return; }  // 달라진 곳만 고친다(이벤트마다 목록을 통째로 다시 만들지 않는다, #793)
+    if (sideMode !== col) { clear(sideEl); sideMode = col; sideShownFor = ''; }  // 접힘·펼침이 바뀌면 처음부터 다시 만든다(단추 핸들러가 다르다)
+    if (col) { patchChildren(sideEl, [renderRail(d, cur)]); postSideAfter(cur); return; }  // 달라진 곳만 고친다(이벤트마다 목록을 통째로 다시 만들지 않는다, #793)
 
     var rows = sortedSessions(), L = window.BHLogic;
-    if (isPostTheme() && window.BHPostScene) { patchChildren(sideEl, [postSideList(rows, cur)]); return; }
+    if (isPostTheme() && window.BHPostScene) { patchChildren(sideEl, [postSideList(rows, cur)]); postSideAfter(cur); return; }
     var nav = h('nav', { class: 'nav', 'aria-label': '세션 목록' });
     nav.appendChild(h('div', { class: 'sh' }, h('span', { class: 'eb', text: '세션 ' + rows.length }), h('span', { class: 'eb', text: '단계 · 기억' }), foldBtn(false)));
     var list = h('div', { class: 'nav-list' });
@@ -1266,7 +1273,7 @@
     var L = window.BHLogic, PL = window.BHPostLogic, PS = window.BHPostScene;
     var states = rows.map(function (s) { return PL.stateOf(s, L); }), cnt = PL.filterCounts(states);
     var tabs = h('div', { class: 'po-ftabs', role: 'tablist', 'aria-label': '세션 걸러보기' }, PL.FILTERS.map(function (f) {
-      return h('button', { type: 'button', role: 'tab', 'data-pf': f.id, 'aria-selected': String(postFilter === f.id), text: f.label + ' ' + cnt[f.id] });
+      return h('button', { type: 'button', role: 'tab', 'data-pf': f.id, 'aria-selected': String(postFilter === f.id), tabindex: postFilter === f.id ? '0' : '-1', text: f.label + ' ' + cnt[f.id] });
     }), foldBtn(false));
     var list = h('div', { class: 'nav-list', role: 'tabpanel' });
     var shown = 0;
@@ -1283,7 +1290,7 @@
           steps.map(function (x) { return h('i', { class: x.state === 'now' ? 'n' : x.state === 'done' || x.state === 'skipped' ? 'd' : '', title: x.name + ' · ' + x.label }); }));
       }
       list.appendChild(link('/s/' + encodeURIComponent(s.id), { class: 'srow po-si po-si-' + state + (s.status === 'ended' ? ' ended' : ''), 'aria-current': onThis ? 'page' : null },
-        PS.avatar(s.id, state, { size: 'sm' }), memRing(s),
+        PS.avatar(s.id, state, { size: 'sm', name: sessionTitle(s) }), memRing(s),
         h('span', { class: 'sinfo' },
           h('span', { class: 'n', text: sessionTitle(s) }),
           h('small', { class: 'po-ss', title: st.text }, h('i', { class: 'po-st po-st-' + state, 'aria-hidden': 'true', text: PL.GLYPH[state] || '' }), PL.statusText(st.text)),
@@ -1293,10 +1300,34 @@
     else if (rows.length && !shown) list.appendChild(h('p', { class: 's-empty', text: '이 걸러보기에 맞는 세션이 없어.' }));
     return h('nav', { class: 'nav po-slist', 'aria-label': '세션 목록' }, tabs, list, h('div', { class: 'nav-foot' }, link(newHref(), { class: 'snew', text: '+ 새 세션' })));
   }
+  /* Post 세션 목록을 그린 뒤: 접기 단추 포커스 되돌리기, 그리고 화면(주소)이 바뀌었을 때만 지금 세션 줄이 목록 창 안에 보이게 한다
+     (세션이 수십 개면 지금 줄이 목록 아래에 묻혀 어디인지 안 보였다. 사용자가 목록을 굴린 뒤에는 건드리지 않는다). */
+  var sideShownFor = '';
+  function postSideAfter(cur) {
+    if (!isPostTheme()) return;
+    if (foldRefocus) { foldRefocus = false; var fb = sideEl.querySelector('.fold-btn'); if (fb) fb.focus(); }
+    if (sideShownFor === cur) return;
+    var list = sideEl.querySelector('.po-slist .nav-list'), row = list && list.querySelector('[aria-current="page"]');
+    if (!list || (!row && !loadedOnce)) return;  // 세션을 아직 못 읽었으면 다음 그리기에서 다시 본다
+    sideShownFor = cur;
+    if (!row) return;
+    var lr = list.getBoundingClientRect(), rr = row.getBoundingClientRect();
+    if (rr.top < lr.top || rr.bottom > lr.bottom) list.scrollTop += rr.top - lr.top - Math.max(0, (list.clientHeight - row.offsetHeight) / 2);
+  }
+  /* 걸러보기 탭(role=tablist): 방향키·Home·End 로 고르고, 고른 탭만 Tab 이 선다(나머지는 tabindex -1) */
+  function onPostFilterKey(e) {
+    var b = e.target && e.target.closest ? e.target.closest('[data-pf]') : null;
+    if (!b || ['ArrowLeft', 'ArrowRight', 'Home', 'End'].indexOf(e.key) < 0) return;
+    var ids = window.BHPostLogic.FILTERS.map(function (f) { return f.id; }), i = ids.indexOf(b.getAttribute('data-pf'));
+    i = e.key === 'Home' ? 0 : e.key === 'End' ? ids.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + ids.length) % ids.length;
+    e.preventDefault();
+    postFilter = ids[i]; sideShownFor = ''; renderSide();
+    var t = sideEl.querySelector('[data-pf="' + ids[i] + '"]'); if (t) t.focus();
+  }
   function onPostFilter(e) {
     var b = e.target && e.target.closest ? e.target.closest('[data-pf]') : null;
     if (!b) return;
-    postFilter = b.getAttribute('data-pf'); scheduleSide();
+    postFilter = b.getAttribute('data-pf'); sideShownFor = ''; scheduleSide();
   }
   function renderRail(d, cur) {
     var n = d.todo.length, rows = sortedSessions();
@@ -1308,7 +1339,7 @@
         var st = sideStatus(s), p = firstPending(s), name = sessionTitle(s);
         var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid));
         return link('/s/' + encodeURIComponent(s.id), { class: 'rail-ring' + (st.tone === 'attn' ? ' turn' : st.tone === 'fail' || st.tone === 'unk' || st.tone === 'err' ? ' bk ' + st.tone : '') + (s.status === 'ended' ? ' ended' : ''), 'aria-label': name + ' · ' + st.text, title: name + ' · ' + st.text, 'aria-current': onThis ? 'page' : null },
-          isPostTheme() && window.BHPostScene ? window.BHPostScene.avatar(s.id, window.BHPostLogic.stateOf(s, window.BHLogic), { size: 'sm' }) : h('span', { class: 'ring unk' }, h('b', { text: '?' })));  // Post: 접힌 칸에도 그 세션의 손님
+          isPostTheme() && window.BHPostScene ? window.BHPostScene.avatar(s.id, window.BHPostLogic.stateOf(s, window.BHLogic), { size: 'sm', name: sessionTitle(s) }) : h('span', { class: 'ring unk' }, h('b', { text: '?' })));  // Post: 접힌 칸에도 그 세션의 손님
       }),
       h('span', { class: 'rail-sp' }),
       link(newHref(), { class: 'rail-add', 'aria-label': '새 세션', title: '새 세션' }, icon('plus', 14)));
@@ -1393,7 +1424,7 @@
   var postHome = null;
   function postHomeView(root) {
     if (!postHome) postHome = window.BHPostHome.create({ h: h, clear: clear, link: link, L: window.BHLogic, home: ui.homeKit, questionCards: questionCards, kindOf: kindOf, isPlan: isPlan,
-      sceneList: sceneList, requestTitle: requestTitle, skillLabel: skillLabel, waited: function (v) { return waitedText(v).replace(/^ · /, ''); }, projectOf: projectOf,
+      sceneList: sceneList, requestTitle: requestTitle, skillLabel: skillLabel, waited: function (v) { var m = minutesSince(v); return m != null && m >= 1440 ? Math.floor(m / 1440) + '일째' : waitedText(v).replace(/^ · /, ''); }, projectOf: projectOf,  // Post 홈 덱·메모: 하루가 넘으면 "72시간째" 대신 "3일째"
       loaded: function () { return loadedOnce; }, conn: function () { return conn.state; }, stateBox: stateBox, loadingBox: loadingBox });
     var sceneHost = h('div', { class: 'po-stage', hidden: true });
     var hv = null;
@@ -1451,7 +1482,10 @@
     stamps[rid] = { decision: decision, kind: kind, k: s ? PL.stationOf(s, window.BHLogic) : 2, sid: s && s.id, at: new Date(), until: Date.now() + STAMP_MS, shown: false, title: info && info.title || '', lines: info && info.lines || [] };
     setTimeout(function () { if (view && view.onData) view.onData(); }, STAMP_MS + 100);  // 시간이 지나면 인라인 카드를 거둔다
   }
-  function stampInfo(rid) { var st = stamps[rid]; return st ? Object.assign({}, st, { still: st.shown }) : null; }
+  /* still: 이미 다 찍힌 도장(다시 그릴 때 또 튕기지 않게). 찍힌 직후 다른 이벤트로 곧바로 다시 그리면(처리 응답 → onRequest) 튕김이 6ms 만에 끊겨
+     멈춘 도장만 보였다 — 튕기는 시간(STAMP_ANIM_MS) 안에는 still 로 치지 않고, 새 도장이 지난 시간만큼 앞당겨 이어서 튕긴다(post-session.js seal). */
+  var STAMP_ANIM_MS = 400;
+  function stampInfo(rid) { var st = stamps[rid]; return st ? Object.assign({}, st, { still: st.shown && Date.now() - st.at.getTime() >= STAMP_ANIM_MS }) : null; }
   function stampActive(rid) { var st = stamps[rid]; return !!(st && Date.now() < st.until); }
   /* 방금 처리돼 이미 pending 이 아닌 인라인 카드의 자리를 지키는 도장 찍힌 카드. 시간이 지났거나 Post 가 아니면 null. */
   function stampStub(rid) {
@@ -2678,11 +2712,17 @@
       return (s.flowName ? s.flowName + ' · ' : '') + (open ? (isQ ? '내 답을 기다리는 중' : plan ? '내 계획 확인을 기다리는 중' : '내 승인을 기다리는 중') + waitedText(req.createdAt || req.createdAtMs) : (isQ ? '처리된 질문' : plan ? '처리된 계획 확인' : '처리된 승인 요청'));
     }
     /* 위 제목 블록(갈래 · 지금 하는 일, 세션 이름, 한 줄 상태) + 순서 알약 + 숫자 띠. 세션 화면과 같은 모양이다. */
+    /* Post: 콘솔에서 답하지 않고 닫힌 요청(터미널로 넘어감·터미널에서 처리됨·시간 지남·닫힘). 초록 ✓ "처리된 질문 / 이미 처리된 질문이야" 로 보이면
+       내가 답한 것처럼 읽힌다 — 머리는 체크 없이 "여기서 답하지 않은 …", 둘째 줄은 결과 제목(터미널로 넘어감 등)으로 쓴다. */
+    var MINE_CODES = ['allow', 'allow_session', 'always', 'deny', 'answered', 'accept', 'decline', 'cancel'];
+    function notMine() { return !isPending() && !outcome && MINE_CODES.indexOf(typeof req.resolution === 'string' ? req.resolution : '') < 0; }
     function head(page, isQ, line) {
-      var s = sessionOf() || {}, open = isPending();
-      var kind = open ? 'turn' : 'done';
+      var s = sessionOf() || {}, open = isPending(), away = post && notMine();
+      var kind = open ? 'turn' : away ? 'idle' : 'done';
+      if (away) line = resultOf().title;
+      var awayEb = (s.flowName ? s.flowName + ' · ' : '') + (isQ ? '여기서 답하지 않은 질문' : !isQ && isPlan(req) ? '여기서 정하지 않은 계획' : '여기서 답하지 않은 승인 요청');
       page.appendChild(h('div', { class: 'ptitle' },
-        post ? h('span', { class: 'eb po-eb ' + (open ? 'attn' : ''), 'data-eb': '1' }, h('i', { class: 'po-st po-st-' + kind, 'aria-hidden': 'true', text: window.BHPostLogic.GLYPH[kind] || '' }), ebText(isQ))
+        post ? h('span', { class: 'eb po-eb ' + (open ? 'attn' : ''), 'data-eb': '1' }, h('i', { class: 'po-st po-st-' + kind, 'aria-hidden': 'true', text: window.BHPostLogic.GLYPH[kind] || '' }), away ? awayEb : ebText(isQ))
           : h('span', { class: 'eb ' + (open ? 'attn' : ''), 'data-eb': '1', text: ebText(isQ) }),
         h('h1', { class: 'sess-title', title: s.title || '', text: s.title || baseName(s.cwd) || (isQ ? '질문' : '승인') }),
         h('p', { class: 'line', text: line })));
@@ -3292,10 +3332,16 @@
     }
 
     /* 분석 상태 */
+    /* Post: 막힌 까닭이 있는 칸으로 화면을 옮긴다. 좁은 폭(한 단)에서는 오른쪽 패널(모델·작업 폴더)이 맨 아래라 오류가 화면 밖에 떠서 "작업 시작" 이 아무 반응 없는 것처럼 보였다 */
+    function showBlock(sel) {
+      if (!isPostTheme()) return;
+      var el = root.querySelector(sel);
+      if (el) { el.scrollIntoView({ block: 'center' }); if (el.focus) el.focus({ preventScroll: true }); }
+    }
     function begin() {
       if (!draft.text.trim()) { textErr = true; draw(); return; }
-      if (draft.modelCustom && !customOk()) { modelErr = true; draw(); return; }
-      if (!draft.cwd) { picking = true; err = ''; draw(); return; }
+      if (draft.modelCustom && !customOk()) { modelErr = true; if (isPostTheme()) advOpen = true; draw(); showBlock('#model-custom'); return; }  // 고급 설정이 닫혀 있으면 오류도 그 안에 숨는다
+      if (!draft.cwd) { picking = true; err = ''; draw(); showBlock('[data-folder-toggle]'); return; }
       if (newComp && newComp.busy()) { attachMsg = ATTACH_READING; draw(); return; }
       attachMsg = '';
       // 종류 버튼의 갈래는 AI 추천과 겹쳐 보기 전까지 사용자가 확정한 선택이 아니다(#668).
@@ -3523,7 +3569,7 @@
         var nm = baseName(f.path) || f.path;
         box.appendChild(h('button', { type: 'button', class: 'folder-opt proj', 'aria-pressed': String(f.path === draft.cwd), onClick: function () { useFolder(f.path); } },
           h('span', { class: 'pi', 'aria-hidden': 'true', text: nm.replace(/[^A-Za-z0-9가-힣]/g, '').slice(0, 2).toUpperCase() || '··' }),
-          h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', text: f.path }),
+          h('span', { class: 'pn' }, h('b', { text: nm }), h('small', { class: 'mono', title: isPostTheme() ? f.path : null, text: f.path }),  // Post 는 경로를 두 줄로 자른다(theme-post.css)
             f.ready === 'yes' && f.formsMissing === 'yes' ? h('small', { class: 'forms-hint', 'data-forms-missing': '1', title: BL.FORMS_MISSING_TEXT, text: BL.FORMS_MISSING_SHORT }) : null),
           (function () { var c = readyChip(f); return h('span', { class: ('chip2 ' + c.cls).trim(), 'data-ready': f.ready || 'unknown', text: c.text }); })()));
       });
@@ -3997,6 +4043,7 @@
     headEl = h('header', { class: 'top' });
     appEl.appendChild(annEl); appEl.appendChild(headEl);
     sideEl.addEventListener('click', onPostFilter);
+    sideEl.addEventListener('keydown', onPostFilterKey);
     appEl.appendChild(h('div', { class: 'shell' }, sideEl, mainEl));
     root.appendChild(appEl);
     // 점검 결과(첫 실행인지)가 오면 그 화면으로 처음부터 그린다. 늦거나 못 읽으면 홈을 막지 않고 그대로 그린다.

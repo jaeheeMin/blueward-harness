@@ -76,7 +76,8 @@
   function statusText(t) { return String(t == null ? '' : t).replace(/^[✕?!]\s*/, ''); }
 
   /* 세션 머리 오른쪽 안내판(figure.po-here). 첫 줄 "{k+1}번 창구 · {창구 이름}", 둘째 줄은 상태별 반말(가이드 2.4). */
-  var HERE = { turn: '편지를 들고 네 답을 기다려', blocked: '창구에서 막혀 있어', wait: '의자에 앉아 승인을 기다려', done: '편지를 다 부쳤어', unk: '어디 있는지 확인 못 했어' };
+  /* 확인 못 함(unk)은 blockOf 의 cannot_check — 검사를 못 돌린 것이지 손님 자리를 모르는 게 아니다(첫 줄이 이미 "N번 창구"). 쉬는 중은 걷지 않는다(장면에서도 서 있다) */
+  var HERE = { turn: '편지를 들고 네 답을 기다려', blocked: '창구에서 막혀 있어', wait: '의자에 앉아 승인을 기다려', done: '편지를 다 부쳤어', unk: '검사를 못 해서 멈췄어', idle: '창구 앞에서 쉬고 있어' };
   function hereTitle(k) { var i = Math.max(0, Math.min(4, k | 0)); return (i + 1) + '번 창구 · ' + STATION[i].desk; }
   function hereLine(state) { return HERE[state] || '다음 창구로 걸어가'; }
 

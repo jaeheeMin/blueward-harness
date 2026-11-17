@@ -8,10 +8,11 @@
 
   var DAYS = ['일', '월', '화', '수', '목', '금', '토'];
   var LEGEND = ['turn', 'run', 'wait', 'blocked', 'unk', 'done'];
-  /* 사무실 장면(office-post.js) 아래 팀 요약. 갈래(flowId) → 팀. 갈래가 없는 세션은 어느 팀에도 세지 않는다. */
+  /* 사무실 장면(office-post.js) 아래 팀 요약. 갈래(flowId) → 팀. 갈래가 없거나 팀이 없는 갈래의 세션은 끝에 "팀 없음" 으로 따로 센다(paintTeams). */
   var TEAMS = [['요구분석팀', ['srs', 'srs-export']], ['설계팀', ['spec']], ['개발팀', ['dev']], ['기능컨설팅팀', ['config']], ['표준화팀', ['standard']], ['유지보수팀', ['fix']]];
   var MY_PRS_POLL_MS = 20000;  // 열린 PR 상태를 확인하는 간격. 읽기는 flow-ui.js 가 60초 캐시로 막아 주고(고른 칸만 다시 그리고 네트워크는 안 부른다), 그 캐시를 여기서 비울 수 없어서 Sauce 홈의 61초 한 번 대신 짧게 자주 본다 — 캐시가 풀린 뒤 최대 20초 안에 새로 읽는다
   var NARROW = '(max-width: 760px)';  // 이 폭 이하에서는 메모가 장면 아래로 내려온다(시안 media query)
+  var CALM_MAX = 12;  // 차분 목록에 처음 보이는 세션 수(나머지는 "더 보기")
 
   function teamOf(flow) {
     for (var i = 0; i < TEAMS.length; i++) if (TEAMS[i][1].indexOf(flow) >= 0) return TEAMS[i][0];
@@ -45,15 +46,16 @@
         // 내 차례는 Sauce 홈·띠와 같은 목록(BHLogic.turnItems)으로 정한다. 답할 요청이 있는 세션(#1027 D5)과 PR 검사가 실패한 세션
         var mine = L.turnItems([s], HK.openIds);
         var asks = mine.filter(function (t) { return t.kind === 'request'; }).length;  // 한 세션에 답할 요청이 여럿이면 카드는 하나, "요청 +N" 으로 알린다(머리 숫자는 요청마다 센다)
-        if (mine.some(function (t) { return t.kind === 'request' || t.kind === 'turn'; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: pend, more: Math.max(0, asks - 1) });
-        else if (mine.length && L.prNeedsFix(s)) turn.push({ id: s.id, kind: 'turn', s: s, pend: null, fix: true });
+        // n = 이 카드가 맡은 내 차례 건수(turnItems 항목 수). 덱 머리 "내 차례 N건" 은 이 n 의 합이라 메모가 "내 차례 2–3/6" 처럼 같은 단위로 센다
+        if (mine.some(function (t) { return t.kind === 'request' || t.kind === 'turn'; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: pend, more: Math.max(0, asks - 1), n: mine.length });
+        else if (mine.length && L.prNeedsFix(s)) turn.push({ id: s.id, kind: 'turn', s: s, pend: null, fix: true, n: mine.length });
       });
       turn.sort(function (a, b) { return (a.s.updatedAt || 0) - (b.s.updatedAt || 0); });
       // 방금 답해 도장이 찍힌 카드는 처리됨으로 바뀐 뒤에도 잠깐 남긴다(도장이 보이도록)
       qc.stamped().forEach(function (x) {
         if (turn.some(function (it) { return it.s.id === x.sid && it.pend && it.pend.rid === x.rid; })) { turn.forEach(function (it) { if (it.s.id === x.sid) { it.stampRid = x.rid; it.stampKind = x.kind; } }); return; }
         var s = list.filter(function (q) { return q.id === x.sid; })[0];
-        if (s && !turn.concat(bad).some(function (it) { return it.s.id === s.id; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: null, stampRid: x.rid, stampKind: x.kind });
+        if (s && !turn.concat(bad).some(function (it) { return it.s.id === s.id; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: null, stampRid: x.rid, stampKind: x.kind, n: 0 });  // 이미 처리됨: 내 차례 건수에 안 든다
       });
       return turn.concat(bad);
     }
@@ -80,6 +82,7 @@
       var pend = it.pend, r = pend && pend.r, k = r && kit.kindOf(r);
       if (it.fix) return { q: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어 — 고친 뒤 다시 올리자', href: '/s/' + encodeURIComponent(s.id), verb: '가서 고치기' };
       if (inline && it.stampRid) { var sq = qc.inlineQuestion(it.stampRid); if (sq) return { node: sq }; }
+      if (it.stampRid && !pend) return { q: '방금 답했어 — 처리됐어', href: '/s/' + encodeURIComponent(s.id), verb: '세션 보기' };  // 도장이 잠깐 남은 카드(메모에는 폼이 없다)
       if (inline && pend && r && k === 'question') {
         var q = qc.inlineQuestion(pend.rid);  // 보기를 바로 고른다(세션 화면과 같은 폼)
         if (q) return { node: q };
@@ -116,7 +119,9 @@
     function metaLine(s) {
       var issue = L.issueOf(s), pr = L.prBadge(s.flowPr), m = L.memoryOf(s), parts = [];
       if (issue) parts.push(h('span', { class: 'mono', text: '이슈 #' + issue }));
-      if (pr) parts.push(h('span', { class: 'prchip ' + pr.checks, text: 'PR #' + pr.number + ' · ' + pr.text }));
+      // 칩 색·기호는 검사 결과(checks)로 정하지만 합쳐진·닫힌 PR 은 남은 검사 결과가 아니라 상태로(닫힌 PR 이 빨간 ✕ "닫힘" 으로 보이지 않게)
+      var prSt = pr && String(s.flowPr.state || '').toUpperCase(), prCls = prSt === 'MERGED' ? 'pass' : prSt === 'CLOSED' ? 'none' : pr && pr.checks;
+      if (pr) parts.push(h('span', { class: 'prchip ' + prCls, text: 'PR #' + pr.number + ' · ' + pr.text }));
       if (m.kind !== 'unknown') parts.push(h('span', { class: 'mono' + (m.level ? ' ' + m.level : ''), title: m.title, text: '기억 ' + m.text }));
       return parts.length ? h('div', { class: 't3' }, parts) : null;
     }
@@ -154,7 +159,7 @@
 
     /* slots: { sceneHost, whatsSlot, scene() — 지금 붙은 장면 제어(focus(id) 를 줄 수 있으면 준다) } */
     function view(root, slots) {
-      var gone = false, topId = null, items = [], turnTotal = 0, officeOn = false, foc = null, focusId = null, memoId = null;
+      var calmAll = false, gone = false, topId = null, items = [], turnTotal = 0, officeOn = false, foc = null, focusId = null, memoId = null;
       var approvals = h('div', { class: 'approvals light po-panel po-mini' });
       var recent = h('div', { class: 'light po-panel po-mini', 'data-recent': '1' });
       var projects = h('div', { class: 'projects' });
@@ -179,11 +184,12 @@
       var body = h('div', { class: 'page home po-home' }, helloSlot, scenePanel, deckSlot, restSlot);
       root.appendChild(body);
 
-      function pickTop(id) { topId = id; paintDeck(); paintMemo(); var q = '"' + CSS.escape(id) + '"', c = deckSlot.querySelector('[data-call=' + q + '], [data-call-block=' + q + ']'); if (c) { var f = c.querySelector('a, button'); if (f) f.focus(); } }
-      function step(d) {
+      /* stay: 메모의 "다음" 처럼 포커스를 그 자리에 두고 싶을 때. 덱 카드로 포커스를 옮기면 화면이 덱까지 스크롤돼 방금 누른 메모가 밀려 나간다 */
+      function pickTop(id, stay) { topId = id; paintDeck(); paintMemo(); if (stay) return; var q = '"' + CSS.escape(id) + '"', c = deckSlot.querySelector('[data-call=' + q + '], [data-call-block=' + q + ']'); if (c) { var f = c.querySelector('a, button'); if (f) f.focus(); } }
+      function step(d, stay) {
         if (items.length < 2) return;
         var i = 0; items.forEach(function (it, n) { if (it.id === topId) i = n; });
-        pickTop(items[(i + d + items.length) % items.length].id);
+        pickTop(items[(i + d + items.length) % items.length].id, stay);
       }
       function onKey(e) {
         if ((e.key !== 'j' && e.key !== 'k') || e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -234,6 +240,19 @@
       }
       function onFocus(f) { foc = f && typeof f.x === 'number' && typeof f.y === 'number' ? f : null; placeMemo(); }
 
+      /* 메모 머리의 몇 번째인지: 덱 머리와 같은 묶음·같은 단위로 센다. 내 차례는 건수(한 카드가 요청 여럿이면 "2–3/6"), 막힘·확인 못 함은 덱 머리처럼 따로.
+         카드 수(내 차례 + 막힘 + 확인 못 함)로 세면 "다음 1/7" 이 덱 머리 "내 차례 5건" 과 어긋나 보인다(갈래 C 실화면). 묶음에 하나뿐이면 숫자 없이 이름만. */
+      function memoCount(it) {
+        if (it.kind === 'turn') {
+          if (!it.n) return '처리됨';
+          var at = 1; items.some(function (x) { if (x === it) return true; if (x.kind === 'turn') at += x.n || 0; return false; });
+          var end = at + it.n - 1;
+          return turnTotal > 1 ? '내 차례 ' + (end > at ? at + '–' + end : at) + '/' + turnTotal : '내 차례';
+        }
+        var same = items.filter(function (x) { return x.kind === it.kind; }), name = it.kind === 'unk' ? '확인 못 한 검사' : '막힌 일';
+        return same.length > 1 ? name + ' ' + (same.indexOf(it) + 1) + '/' + same.length : name;
+      }
+
       /* 내 차례 메모(시안 .memo): 덱과 같은 순서의 topId 한 건. 사무실 장면이 보일 때만(차분이거나 번들이 없으면 없다). 여러 건이면 "다음" 으로 돌린다(J·K 도 된다).
          덱은 그대로 아래에 있다. 메모의 동작은 덱 카드와 같은 문장·같은 링크다. */
       function paintMemo() {
@@ -246,12 +265,12 @@
         if (!it) return;
         var s = it.s, name = s.title || HK.folderName(s) || '이름 없는 세션', team = teamOf(s.flowId), a = cardAct(it, false);
         var from = it.pend && it.pend.r ? (it.pend.r.createdAt || it.pend.r.createdAtMs) : (it.t || s.updatedAt), w = kit.waited(from);
-        var head = it.kind === 'turn' ? [team || '내 차례', w] : [kindLabel(it), team, w];
         var i = 0; items.forEach(function (x, n) { if (x.id === topId) i = n; });
+        var head = [memoCount(it), team, w];
         var sessionHref = '/s/' + encodeURIComponent(s.id), same = a.href === sessionHref;  // 가는 곳이 세션이면 "세션으로" 를 따로 두지 않는다
         memo.className = 'po-memo po-memo-' + it.kind;
         memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(it.kind), h('span', { class: 'po-memo-kind', text: head.filter(Boolean).join(' · ') }),
-          items.length > 1 ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '다음 일 보기', text: '다음 ' + (i + 1) + '/' + items.length, onClick: function () { step(1); } }) : null));
+          items.length > 1 ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '다음 일 보기 (덱 카드 ' + items.length + '장 중 ' + (i + 1) + '번째)', text: '다음', onClick: function () { step(1, true); } }) : null));
         memo.appendChild(h('p', { class: 'po-memo-q', text: a.q }));
         memo.appendChild(h('p', { class: 'po-memo-s', text: name }));
         memo.appendChild(h('div', { class: 'po-memo-acts' }, kit.link(a.href, { class: 'pill acc', text: a.verb }), same ? null : kit.link(sessionHref, { class: 'po-link', text: '세션으로' })));
@@ -292,12 +311,15 @@
         clear(calmList);
         calmList.hidden = !PS.calm();
         if (calmList.hidden) return;
-        kit.sceneList().forEach(function (s) {
+        // 세션이 많으면(수십 개) 목록이 덱을 몇 화면 아래로 밀어낸다. 앞(내 차례·막힘·일하는 중 순)만 보이고 나머지는 펼쳐 본다
+        var all = kit.sceneList(), shown = calmAll ? all : all.slice(0, CALM_MAX);
+        shown.forEach(function (s) {
           var name = s.title || '이름 없는 세션', k = Math.max(0, Math.min(4, s.station | 0));
           calmList.appendChild(h('li', { class: 'po-ml po-ml-' + s.state },
             kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ml-a' }, PS.avatar(s.id, s.state, { size: 'sm', name: name }),
               h('span', null, h('b', { text: name }), h('small', null, stMark(s.state), PS.LABEL[s.state] + ' · ' + (k + 1) + '번 창구 ' + PL.STATION[k].name)))));
         });
+        if (all.length > shown.length) calmList.appendChild(h('li', { class: 'po-ml-more' }, h('button', { type: 'button', class: 'pill line sm', text: '나머지 ' + (all.length - shown.length) + '개 더 보기', onClick: function () { calmAll = true; paintCalm(); var a = calmList.querySelectorAll('a')[CALM_MAX]; if (a) a.focus(); } })));  // 단추가 사라지니 포커스는 새로 보인 첫 줄로
         if (!calmList.firstChild) calmList.appendChild(h('li', { class: 'quiet', text: '지금 일하는 세션이 없어.' }));
       }
 
@@ -311,6 +333,9 @@
           var n = list.filter(function (s) { return t[1].indexOf(s.flow) >= 0; }).length;
           teamRow.appendChild(h('li', { class: n ? 'has' : '' }, h('b', { text: t[0] }), h('span', { text: n + '명' })));
         });
+        // 갈래가 없거나 팀이 없는 갈래의 세션(실제로 대부분). 빼면 팀 칸 합이 장면 인원보다 적어 보인다. 장면은 이들을 리셉션·카페에 세운다
+        var free = list.filter(function (s) { return !teamOf(s.flow); }).length;
+        if (free) teamRow.appendChild(h('li', { class: 'has po-team-free', title: '정해진 갈래가 없거나 팀이 없는 갈래의 세션' }, h('b', { text: '팀 없음' }), h('span', { text: free + '명' })));
       }
 
       function draw() {
@@ -336,7 +361,7 @@
         approvals.className = 'approvals'; approvals.dataset.compact = '1';  // 검토 요청 칸 안에서는 줄로 그린다(Sauce 홈과 같다)
         clear(prSlot); prSlot.appendChild(h('div', { class: 'light po-panel po-mini' }, HK.homePrBox(list, approvals)));
         var c = L.counts(list, HK.openIds), turnCount = L.turnItems(list, HK.openIds).length;  // 내 차례 숫자는 Sauce 홈·띠와 같은 목록 길이(#1027)
-        sceneSub.textContent = c.total + '개';
+        sceneSub.textContent = kit.sceneList().length + '개';  // 장면·차분 목록에 서는 세션 수(끝난 세션은 장면에 없다). 인사 문장의 "세션 N개" 는 끝난 것까지
         paintCalm();
         paintTeams();
         var proj = kit.projectOf() || HK.folderName(list[0]);

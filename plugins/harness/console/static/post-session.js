@@ -43,6 +43,8 @@
   /* 도장 한 개. info = { decision, kind, k, still }. still 이면 이미 한 번 보여 준 도장이라 튕기는 동작 없이 바로 보인다(다시 그릴 때 또 찍히지 않게). */
   function seal(info) {
     var s = PL.sealOf(info.decision), sp = el('span', 'po-seal po-seal-' + s.tone + (info.still || !PS.animOn() ? ' still' : ''));  // 차분·움직임 줄이기 = 튕김 없이 바로 보임
+    var gone = !info.still && info.at instanceof Date ? Date.now() - info.at.getTime() : 0;
+    if (gone > 0) sp.style.animationDelay = -gone + 'ms';  // 튕기는 중에 다시 그려졌으면 처음부터가 아니라 이어서 튕긴다
     sp.setAttribute('role', 'status');
     sp.appendChild(el('b', null, s.text));
     sp.appendChild(el('small', null, PL.sealSub(info.at || new Date(), PL.sealDesk(info.kind, info.k))));

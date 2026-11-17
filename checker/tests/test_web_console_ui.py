@@ -1471,7 +1471,7 @@ def test_office_bundle_supports_pip():
 def test_post_home_field_memo_layout():
     # Post 오늘 화면 장면 칸(#1056, 시안 C): 사무실 장면이 틀 안에 폭 전체로 보이고 그 위에 내 차례 메모가 뜬다. 나머지(덱·숫자 칸·표·범례·팀 줄·띠·배지)는 그대로
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
-    for needle in ("po-memo", "po-stagew", "paintMemo()", "'다음 '", "세션으로", "cardAct(it, false)", "cardAct(it, true)"):
+    for needle in ("po-memo", "po-stagew", "paintMemo()", "text: '다음'", "세션으로", "cardAct(it, false)", "cardAct(it, true)"):
         assert needle in home
     # 메모 자리: 번들의 onFocus 좌표를 받고, 보여 주는 항목이 바뀌면 scene.focus(id). 옛 번들(focus 없음)도 동작
     assert "onFocus: onFocus" in home and "typeof sc.focus === 'function'" in home and "sc.focus(id)" in home
@@ -1607,7 +1607,7 @@ def test_post_session_logic_filters_info_and_seals():
     assert out["status"] == ["막힘 · 고친 뒤 이어서", "확인 못 함 · 검사를 못 했어", "내 차례 · 승인하기", "", ""]
     assert out["here"] == ["1번 창구 · 쓰기 책상", "4번 창구 · 검토 창구", "5번 창구 · 발송 우체통", "5번 창구 · 발송 우체통", "1번 창구 · 쓰기 책상"]
     # 가이드 2.4 둘째 줄(반말). STATES 순서: turn blocked unk run wait done idle
-    assert out["lines"] == ["편지를 들고 네 답을 기다려", "창구에서 막혀 있어", "어디 있는지 확인 못 했어", "다음 창구로 걸어가", "의자에 앉아 승인을 기다려", "편지를 다 부쳤어", "다음 창구로 걸어가"]
+    assert out["lines"] == ["편지를 들고 네 답을 기다려", "창구에서 막혀 있어", "검사를 못 해서 멈췄어", "다음 창구로 걸어가", "의자에 앉아 승인을 기다려", "편지를 다 부쳤어", "창구 앞에서 쉬고 있어"]
     # 정보 줄은 늘 다섯 칸(없으면 –) 뒤에 숫자 띠의 나머지 칸(AI 진행 따위)
     assert out["info"][:5] == [["단계", "SRS 쓰기", "g"], ["요구사항", "REQ-007", ""], ["개발 번호", "–", ""], ["작업 기록", "–", ""], ["검토 요청", "PR #301", "w"]]
     assert out["info"][5] == ["AI 진행", "40%", ""] and len(out["info"]) == 6
@@ -3721,5 +3721,44 @@ def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     logic = (STATIC / "flow-logic.js").read_text(encoding="utf-8")
     assert ".po-rest > .wn-slot:empty { display: none; }" in css and ".po-stc-err { width: 150px;" in css.replace(".po-mine .po-stc-err", ".po-stc-err")  # 빈 새 소식 칸 간격·오류 칩 줄바꿈
-    m = re.search(r'\.po-si \.ring\.unk\[title="([^"]+)"\] \{ display: none; \}', css)
+    m = re.search(r'\.po-si \.ring\.unk\[title="([^"]+)"\] \{ visibility: hidden; \}', css)  # 2회차: 자리는 남긴다(제목 줄 정렬)
     assert m and f"title: '{m.group(1)}'" in logic  # CSS 가 가리키는 문구가 memoryOf 의 unknown title 과 같아야 한다
+
+
+def test_post_verify_B2_memo_count_teams_and_session_fixes():
+    # 2026-11-18 Post 검증 B 2회차. post-*.js 는 가짜 DOM 시험이 안 불러와서 원문 확인이고, 본체는 Aside 실화면이다(docs/status/2026-11-18-post-verify-B.md).
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    # 메모의 몇 번째는 덱 머리와 같은 묶음·단위: 내 차례는 건수(카드가 요청 여럿이면 범위), 막힘·확인 못 함은 따로. 카드 수로 세지 않는다
+    assert "function memoCount(it)" in home and "n: mine.length" in home and "'내 차례 ' + (end > at ? at + '–' + end : at) + '/' + turnTotal" in home
+    assert "'다음 ' + (i + 1) + '/' + items.length" not in home and "text: '다음', onClick: function () { step(1, true); }" in home
+    # 메모의 "다음" 은 포커스를 덱 카드로 옮기지 않는다(화면이 덱까지 튀어 메모가 밀려 나간다). J·K 는 그대로 덱 카드로
+    assert "function pickTop(id, stay)" in home and "if (stay) return;" in home
+    # 팀 칸: 갈래가 없거나 팀이 없는 세션은 "팀 없음" 으로 세어 합이 장면 인원(= 머리 "N개")과 같다
+    assert "'팀 없음'" in home and "!teamOf(s.flow)" in home and "sceneSub.textContent = kit.sceneList().length + '개';" in home
+    # 닫힌·합쳐진 PR 칩은 남은 검사 결과 색이 아니라 상태로
+    assert "prSt === 'CLOSED' ? 'none'" in home and "prSt === 'MERGED' ? 'pass'" in home
+    # 차분 목록은 앞 12개 + 더 보기
+    assert "CALM_MAX = 12" in home and "'나머지 ' + (all.length - shown.length) + '개 더 보기'" in home
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "m >= 1440 ? Math.floor(m / 1440) + '일째'" in app  # Post 홈 덱·메모의 오래 기다린 요청은 "N일째"
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert ':root[data-theme="post"] .po-eb .po-st-idle { display: none; }' in css and ".po-maplist .po-ml-more { grid-column: 1 / -1; }" in css
+    # 틀: 상태줄 한도는 비율로 주의·막힘(서버가 status 를 allowed 로 고정), 급할 때만 풀리는 시각을 칩에
+    assert "c.source === 'statusline' && c.pct != null ? (c.pct >= 100 ? 'err' : c.pct >= 80 ? 'warn' : '')" in app and "class: 'ptop-when'" in app
+    notice = (STATIC / "notice-logic.js").read_text(encoding="utf-8")
+    assert "when: when ? when.replace(/^오늘 /, '') : '', source: w.source || ''," in notice
+    # 사이드 목록: 접기 단추 포커스 되돌림, 지금 세션 줄을 목록 창 안으로, 걸러보기 탭 방향키·roving tabindex, 글자 아바타에 이름을 넘김
+    assert "function postSideAfter(cur)" in app and "sideMode = col; sideShownFor = '';" in app and "foldRefocus" in app and "function onPostFilterKey(e)" in app and "sideEl.addEventListener('keydown', onPostFilterKey);" in app
+    assert "tabindex: postFilter === f.id ? '0' : '-1'" in app and "{ size: 'sm', name: sessionTitle(s) }" in app
+    # 요청 화면: 도장 튕김이 다시 그리기로 끊기지 않게(STAMP_ANIM_MS 안에는 still 이 아니고, 지난 시간만큼 앞당겨 이어서), 여기서 답하지 않은 요청은 체크 없이
+    assert "still: st.shown && Date.now() - st.at.getTime() >= STAMP_ANIM_MS" in app
+    sess = (STATIC / "post-session.js").read_text(encoding="utf-8")
+    assert "sp.style.animationDelay = -gone + 'ms'" in sess
+    assert "function notMine()" in app and "'여기서 답하지 않은 질문'" in app and "if (away) line = resultOf().title;" in app
+    assert ':root[data-theme="post"] .qopt { border-radius: 22px; }' in css
+    # 새 작업: 막힌 까닭이 있는 칸으로 화면을 옮기고(좁은 폭에서 오류가 화면 밖), 고급 설정이 닫혀 있으면 연다. select 화살표는 반복·자리까지 함께
+    assert "function showBlock(sel)" in app and "if (isPostTheme()) advOpen = true; draw(); showBlock('#model-custom');" in app and "showBlock('[data-folder-toggle]')" in app
+    assert ':root[data-theme="post"] select.input, :root[data-theme="post"] .light select.input { background-repeat: no-repeat;' in css
+    assert "background-color: var(--field); color: var(--text); border-radius: 10px; }" in css and ".folder-pick .folder-opt .pn small.mono { display: -webkit-box;" in css and "title: isPostTheme() ? f.path : null" in app
+    assert "attrs['aria-label'] = '계정 사용 한도: ' + lv.chips.map" in app and "(상태줄의 쓴 비율로 판단)" in app  # 칩 풀이·묶음 이름도 같은 판정
+    assert "var a = calmList.querySelectorAll('a')[CALM_MAX]; if (a) a.focus();" in home  # 더 보기를 누르면 새로 보인 첫 줄로 포커스

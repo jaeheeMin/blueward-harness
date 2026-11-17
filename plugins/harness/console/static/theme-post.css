@@ -151,6 +151,7 @@
 :root[data-theme="post"] .ptop-m.err em, :root[data-theme="post"] .ptop-m.err b { color: var(--st-fail-ink); }
 :root[data-theme="post"] .ptop-m.unk, :root[data-theme="post"] .ptop-m.unk em { color: var(--muted); }
 :root[data-theme="post"] .ptop-m.stale { opacity: .7; }
+:root[data-theme="post"] .ptop-when { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 :root[data-theme="post"] .ptop-bar { width: 44px; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
 :root[data-theme="post"] .ptop-bar i { display: block; height: 100%; border-radius: 2px; background: var(--sec); }
 :root[data-theme="post"] .ptop-bar.unk { background: transparent; border: 1px dashed var(--line2); }
@@ -197,6 +198,7 @@
 :root[data-theme="post"] .po-st-blocked { background: var(--fail-fill); color: #fff; border-radius: 4px; }
 :root[data-theme="post"] .po-st-unk { border: 1.5px dashed var(--st-unk); color: var(--st-unk-ink); }
 :root[data-theme="post"] .po-st-run { background: transparent; }
+:root[data-theme="post"] .po-eb .po-st-idle { display: none; }  /* 쉬는 중은 기호가 없다(범례에도 없음). 세션 머리 한 줄에 빈 칸만 남아 들여써지지 않게(목록 줄은 글 정렬을 위해 자리를 둔다) */
 :root[data-theme="post"] .po-st-run::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--st-now); }
 :root[data-theme="post"] .po-st-wait { border: 1.5px solid var(--wait); font-size: 0; }
 :root[data-theme="post"] .po-st-wait::after { content: ""; width: 6px; height: 1.5px; background: var(--wait); }
@@ -375,8 +377,9 @@
 :root[data-theme="post"] .po-si { gap: 10px; padding: 9px 10px; background: transparent; border-radius: 12px; }
 :root[data-theme="post"] .po-si:hover { background: var(--soft); border-color: transparent; }
 :root[data-theme="post"] .po-si[aria-current="page"] { background: var(--paper); }
-/* 기억 %·토큰 수를 알 때만 링을 둔다(#1066). 모르면 점선 "?" 원이 거의 모든 줄에 붙어 소음이라 뺀다. 문구는 flow-logic.js memoryOf 의 unknown title 과 같아야 한다 */
-:root[data-theme="post"] .po-si .ring.unk[title="기억 사용량 확인 못 함"] { display: none; }
+/* 기억 %·토큰 수를 알 때만 링을 보인다(#1066). 모르면 점선 "?" 원이 거의 모든 줄에 붙어 소음이라 감춘다. 문구는 flow-logic.js memoryOf 의 unknown title 과 같아야 한다.
+   자리는 남긴다 — 빼면 그 줄만 제목이 왼쪽으로 당겨져 목록의 제목 줄이 들쭉날쭉해진다 */
+:root[data-theme="post"] .po-si .ring.unk[title="기억 사용량 확인 못 함"] { visibility: hidden; }
 :root[data-theme="post"] .po-si .ring { width: 36px; height: 36px; }
 :root[data-theme="post"] .po-si .ring b { width: 28px; height: 28px; background: var(--bg); font-size: 9.5px; }
 :root[data-theme="post"] .po-si[aria-current="page"] .ring b { background: var(--paper); }
@@ -526,6 +529,7 @@
 :root[data-theme="post"] .po-focus .bad .tagx { background: var(--st-fail-bg); color: var(--st-fail-ink); }
 :root[data-theme="post"] .po-focus .bad.irrev .tagx { background: var(--st-fail-bg); }
 :root[data-theme="post"] .po-focus .qopt { padding: 12px 16px; }
+:root[data-theme="post"] .qopt { border-radius: 22px; }  /* 한 줄이면 알약 그대로, 보기·설명이 여러 줄이면 999px 알약은 타원으로 늘어나 글자가 테두리에 닿는다 */
 :root[data-theme="post"] .po-focus .q { padding: 0; border: 0; background: transparent; }
 :root[data-theme="post"] .po-focus .q > b { font-size: 22px; line-height: 1.35; font-weight: 800; letter-spacing: -.02em; }
 :root[data-theme="post"] .po-focus .q + .q { padding-top: 14px; border-top: 1px solid var(--line); border-radius: 0; }
@@ -595,10 +599,12 @@
 :root[data-theme="post"] .pill.dark, :root[data-theme="post"] .pill.acc, :root[data-theme="post"] .wn-acts .pill.dark { background: var(--accent-fill); color: #fff; }
 :root[data-theme="post"] .pill.dark:hover, :root[data-theme="post"] .pill.acc:hover, :root[data-theme="post"] a.pill.dark:hover, :root[data-theme="post"] .dresult a.pill.dark:hover { color: #fff; opacity: .92; }
 :root[data-theme="post"] .pill.off, :root[data-theme="post"] .chip.off { border-color: var(--bd); color: var(--lmuted); }
-:root[data-theme="post"] .input, :root[data-theme="post"] .textarea, :root[data-theme="post"] .light .input, :root[data-theme="post"] .light .textarea, :root[data-theme="post"] .tb-fld { border: 1.5px solid var(--bd); background: var(--field); color: var(--text); border-radius: 10px; }
+:root[data-theme="post"] .input, :root[data-theme="post"] .textarea, :root[data-theme="post"] .light .input, :root[data-theme="post"] .light .textarea, :root[data-theme="post"] .tb-fld { border: 1.5px solid var(--bd); background-color: var(--field); color: var(--text); border-radius: 10px; }
 :root[data-theme="post"] .textarea { border-radius: 12px; }
 :root[data-theme="post"] .input:focus, :root[data-theme="post"] .textarea:focus, :root[data-theme="post"] .tb-fld:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-:root[data-theme="post"] select.input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23445069' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+/* 드롭다운 화살표: background 줄임말(위 칸·app.css .light .input)이 그림·반복·자리를 지워 라이트에선 화살표가 없고 다크에선 그림이 칸 전체에 깔렸다 — 넷을 함께, .light 안에서도 이기게 */
+:root[data-theme="post"] select.input, :root[data-theme="post"] .light select.input { background-repeat: no-repeat; background-position: right 18px center; background-size: 12px 8px; }
+:root[data-theme="post"] select.input, :root[data-theme="post"] .light select.input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23445069' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 :root[data-theme="post"] .light .chip, :root[data-theme="post"] .chip { border: 1.5px solid var(--bd); background: var(--paper); color: var(--text); }
 :root[data-theme="post"] .light .chip:hover:not(:disabled), :root[data-theme="post"] .chip:hover:not(:disabled) { background: var(--paper2); }
 :root[data-theme="post"] .light .chip[aria-pressed="true"], :root[data-theme="post"] .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-fill); color: #fff; }
@@ -934,6 +940,7 @@
 :root[data-theme="post"] .po-maplist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
 :root[data-theme="post"] .po-maplist[hidden] { display: none; }
 :root[data-theme="post"] .po-maplist .quiet { grid-column: 1 / -1; margin: 0; }
+:root[data-theme="post"] .po-maplist .po-ml-more { grid-column: 1 / -1; }
 :root[data-theme="post"] .po-ml-a { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px; border-radius: 10px; color: var(--lightink); text-decoration: none; }
 :root[data-theme="post"] .po-ml-a:hover { background: var(--soft); }
 :root[data-theme="post"] .po-ml-a > span:last-child { display: grid; min-width: 0; }
@@ -983,8 +990,9 @@
 }
 :root[data-theme="post"][data-mode="dark"] .po-stage { background: var(--paper2); }
 :root[data-theme="post"][data-mode="dark"] .light, :root[data-theme="post"][data-mode="dark"] .po-tiles .tile2, :root[data-theme="post"][data-mode="dark"] .strip > div { box-shadow: none; }
-:root[data-theme="post"][data-mode="dark"] select.input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23CFC8B8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+:root[data-theme="post"][data-mode="dark"] select.input, :root[data-theme="post"][data-mode="dark"] .light select.input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23CFC8B8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 :root[data-theme="post"][data-mode="dark"] .srow.ended { opacity: 1; }
 :root[data-theme="post"][data-mode="dark"] .srow.ended .po-av { opacity: .6; }
 :root[data-theme="post"][data-mode="dark"] .modal-back, :root[data-theme="post"][data-mode="dark"] .nb-back { background: rgba(8,11,18,.6); }
 :root[data-theme="post"][data-mode="dark"] .ask, :root[data-theme="post"][data-mode="dark"] .tb-page .tb-ai.ask { background: #2D364B; }
+:root[data-theme="post"] .folder-pick .folder-opt .pn small.mono { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }  /* 긴 경로(임시 폴더·Windows 사용자 폴더)가 좁은 폭에서 8~10줄로 늘어나 목록이 길어졌다. 이름은 굵은 글씨로 따로 있다. 첫 실행 폴더 고르기([data-pick])는 이미 한 줄 말줄임이라 빼고, 전체 경로는 title */
