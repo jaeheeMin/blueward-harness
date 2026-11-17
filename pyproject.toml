@@ -14,7 +14,10 @@ dependencies = [
 doc-guard = "checker.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-xdist>=3.5",
+]
 
 [build-system]
 requires = ["hatchling"]
