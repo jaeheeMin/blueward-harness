@@ -1372,9 +1372,14 @@
     sortedSessions().forEach(function (s) {
       if (s.status === 'ended') return;
       var title = sessionTitle(s);
-      out.push({ id: s.id, title: title, state: PL.stateOf(s, L), station: PL.stationOf(s, L), tag: title.length > 7 ? title.slice(0, 6) + '…' : title });
+      out.push({ id: s.id, title: title, state: PL.stateOf(s, L), station: PL.stationOf(s, L), tag: title.length > 7 ? title.slice(0, 6) + '…' : title, flow: s.flowId || '', t: s.updatedAt });
     });
     return out;
+  }
+  /* 장면 붙이기: 사무실 장면이 실렸으면 그것으로, 아니면 우체국 장면으로. 사무실 장면의 말풍선은 제목을 textContent 로 쓴다(HTML 로 해석하지 않는다). */
+  function attachScene(host) {
+    var PS = window.BHPostScene, O = window.BHOfficeScene;
+    return PS.attach(host, { list: sceneList, onNavigate: function (href) { go(href); } }, O || null);
   }
   var postScene = null;  // Post 테마 장면 제어(theme-post.js). 홈을 떠나면 destroy 한다(세션·요청 화면의 Post 배치는 sessionView·requestView 안)
   /* Post 의 오늘 화면(post-home.js). 틀(레일·위쪽 줄)은 renderSide 가 맡고 여기는 본문만 그린다. 장면은 "지금 세션들" 패널 안에 붙는다. */
@@ -1384,7 +1389,7 @@
       sceneList: sceneList, requestTitle: requestTitle, skillLabel: skillLabel, waited: function (v) { return waitedText(v).replace(/^ · /, ''); }, projectOf: projectOf,
       loaded: function () { return loadedOnce; }, conn: function () { return conn.state; }, stateBox: stateBox, loadingBox: loadingBox });
     var sceneHost = h('div', { class: 'po-stage', hidden: true });
-    postScene = window.BHPostScene.attach(sceneHost, { list: sceneList, onNavigate: function (href) { go(href); } });
+    postScene = attachScene(sceneHost);
     whatsSlot = h('div', { class: 'wn-slot' });
     var v = postHome.view(root, { sceneHost: sceneHost, whatsSlot: whatsSlot });
     drawWhatsNew();
@@ -1398,7 +1403,7 @@
     var rest = h('div');
     var sceneHost = h('div', { class: 'po-stage', hidden: true });
     root.appendChild(sceneHost); root.appendChild(whatsSlot); root.appendChild(rest);
-    postScene = window.BHPostScene ? window.BHPostScene.attach(sceneHost, { list: sceneList, onNavigate: function (href) { go(href); } }) : null;
+    postScene = window.BHPostScene ? attachScene(sceneHost) : null;
     drawWhatsNew();
     var v = ui.homeView(rest);
     function leave() { whatsSlot = null; if (postScene) { postScene.destroy(); postScene = null; } }

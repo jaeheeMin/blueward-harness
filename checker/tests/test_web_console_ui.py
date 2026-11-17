@@ -1287,6 +1287,26 @@ def test_post_theme_css_stays_under_data_theme_post():
     assert 'href="/theme-post.css"' in html and 'src="/theme-post.js"' in html
 
 
+def test_post_home_uses_office_scene():
+    # 오늘 화면 장면은 사무실(#1033): index 가 싣고, sceneList 가 flow·t 를 주고, 팀 요약이 창구 요약 줄을 대신하며, 차분이면 목록이 남는다
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert html.index('src="/post/office/office-post.js"') < html.index('src="/theme-post.js"') < html.index('src="/app.js"')
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "flow: s.flowId || ''" in app and "t: s.updatedAt" in app
+    assert "window.BHOfficeScene" in app and "attachScene(sceneHost)" in app
+    assert "officeList" not in app and "list: sceneList" in app  # 제목을 이스케이프하지 않고 그대로 준다(장면이 textContent 로 쓴다)
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    assert "innerHTML" not in bundle and "outerHTML" not in bundle and "insertAdjacentHTML" not in bundle  # 제목의 <b>·& 가 글자 그대로 보인다
+    scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    assert "function attach(host, opts, office)" in scene and "office.attach(host, opts)" in scene and "calm()" in scene
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    for team in ("요구분석팀", "설계팀", "개발팀", "기능컨설팅팀", "표준화팀", "유지보수팀"):
+        assert team in home
+    assert "paintTeams()" in home and "paintCalm()" in home and "po-maplist" in home
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert ".po-stage.is-office" in css and "aspect-ratio" in css
+
+
 _POST_LOGIC_NODE = r"""
 const path = require('path');
 const dir = process.argv[1];

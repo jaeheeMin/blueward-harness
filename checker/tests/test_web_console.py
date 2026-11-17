@@ -1695,6 +1695,18 @@ def test_post_theme_assets_served_from_subfolders(console):
         assert (CONSOLE / "static" / "post" / rel).is_file(), rel  # manifest 가 가리키는 부품이 모두 있다
 
 
+def test_post_office_scene_script_served(console):
+    # Post 오늘 화면의 사무실 장면(#1033): post/office/office-post.js 를 낸다. 외부 의존·eval 이 없어야 CSP script-src 'self' 를 지킨다.
+    for prefix in ("/static/post/", "/post/"):
+        status, body, resp = console.call("GET", prefix + "office/office-post.js", cookie=False, binary=True)
+        assert status == 200 and body.startswith(b"var BHOfficeScene="), prefix
+        assert resp.getheader("Content-Type").startswith("text/javascript")
+        assert "script-src 'self'" in resp.getheader("Content-Security-Policy")
+    src = (CONSOLE / "static" / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    assert "window.BHOfficeScene=" in src and "eval(" not in src and "new Function" not in src and "import(" not in src
+    assert not re.search(r"https?://(?!www\.w3\.org)", src)  # 외부 주소로 가져오는 것이 없다(SVG 이름공간만)
+
+
 def test_post_theme_assets_do_not_open_other_paths(console):
     # 하위 폴더를 열어도 위로 올라가거나 다른 확장자·4단계 넘는 경로는 열지 않는다
     for bad in ("/static/post/", "/static/post/none.svg", "/static/post/../server.py", "/static/post/%2e%2e/server.py", "/static/post/a/b/c/d/e.svg",
