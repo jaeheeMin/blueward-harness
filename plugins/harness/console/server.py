@@ -105,7 +105,8 @@ STATIC_TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "te
                 ".svg": "image/svg+xml", ".json": "application/json", ".map": "application/json", ".woff2": "font/woff2"}
 FIRST_RUN_FILE = "first-run.json"  # 이 PC 에서 첫 화면(시작하기)을 이미 본 표시. 상태 폴더 아래, 브라우저와 무관
 SEEN_VERSION_FILE = "seen-version.json"  # 바뀐 점 안내를 마지막으로 본 판. 상태 폴더 아래, 브라우저와 무관
-WHATS_NEW_FILE = "whats_new.json"  # 판별 바뀐 점(플러그인 console 폴더). 판을 올리는 PR 이 줄을 더한다
+WHATS_NEW_FILE = "whats_new.json"  # 판별 바뀐 점(플러그인 console 폴더). 옛 방식 — 새 PR 은 아래 조각 폴더에 쓴다
+WHATS_NEW_DIR = "whats_new.d"  # 판을 올리는 PR 이 `<이슈번호>.json` 한 파일 `{"version","lines"}` 로 더한다(PR 끼리 충돌하지 않게, #1074)
 LAST_FOLDER_FILE ="last-folder.json"  # 새 작업에서 마지막으로 시작한 작업 폴더. 상태 폴더 아래, 브라우저와 무관
 NOTIFY_FILE = "notify.json"  # 브라우저 알림 설정(내 차례·막힘·끝남). 상태 폴더 아래, 브라우저와 무관
 NOTIFY_KEYS = ("turn", "blocked", "done")
@@ -1326,8 +1327,9 @@ class App:
                 raise ValueError("versions 가 목록이 아니야")
         except (OSError, ValueError, KeyError, TypeError) as e:
             return 200, {"current": current, "seen": seen, "items": [], "reason": f"바뀐 점 목록을 못 읽었어: {e}"}
+        merged, skipped = self.read_whats_new_fragments(versions)
         found = []
-        for ver, lines in versions.items():
+        for ver, lines in merged.items():
             k = parse_version(ver)
             if k is None or not (seen_key < k <= cur_key) or not isinstance(lines, list):
                 continue
@@ -1335,7 +1337,33 @@ class App:
             if lines:
                 found.append((k, {"version": ver, "lines": lines}))
         found.sort(key=lambda t: t[0], reverse=True)
-        return 200, {"current": current, "seen": seen, "items": [x for _, x in found]}
+        body = {"current": current, "seen": seen, "items": [x for _, x in found]}
+        if skipped:
+            body["skipped"] = skipped  # 못 읽은 조각 파일 이름. 그 조각만 빠지고 나머지는 보인다
+        return 200, body
+
+    def read_whats_new_fragments(self, versions: dict) -> tuple[dict, list[str]]:
+        """whats_new.json 의 판별 줄에 조각 파일(`whats_new.d/*.json`)의 줄을 이어 붙인다. 같은 판이 여럿이면 줄을 잇는다."""
+        merged = {ver: list(lines) if isinstance(lines, list) else lines for ver, lines in versions.items()}
+        skipped: list[str] = []
+        folder = self.plugin_root / "console" / WHATS_NEW_DIR
+        try:
+            files = sorted(folder.glob("*.json"), key=lambda p: (0, int(p.stem), p.name) if p.stem.isdecimal() else (1, 0, p.name))
+        except OSError:
+            return merged, skipped
+        for f in files:
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                ver, lines = data["version"], data["lines"]
+                if not isinstance(ver, str) or parse_version(ver) is None or not isinstance(lines, list):
+                    raise ValueError("version 이나 lines 모양이 달라")
+            except (OSError, ValueError, KeyError, TypeError):
+                skipped.append(f.name)
+                continue
+            if not isinstance(merged.get(ver), list):
+                merged[ver] = []
+            merged[ver].extend(lines)
+        return merged, skipped
 
     def a_whats_new_seen(self, g, q, b):
         if parse_version(self.version) is None:

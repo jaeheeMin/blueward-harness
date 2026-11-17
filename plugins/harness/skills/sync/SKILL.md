@@ -87,9 +87,11 @@ compatibility: git 과 origin 원격이 필요하다.
       인덱스를 모두 비운다. 이 사실을 보고에 한 줄 넣는다.
 7. **맞추기와 합치기.** 순서대로 한다.
    1. `HEAD..{target}` 이 0 보다 크면 `git rebase {target}` 을 실행한다.
-      **충돌이 나면 스스로 해결하지 않는다.** 예외는 하나 — 아래 "SRS 줄 추가 충돌" 이다.
+      **충돌이 나면 스스로 해결하지 않는다.** 예외는 둘 — 아래 "SRS 줄 추가 충돌"·"판 번호 충돌" 이다.
       1. `git diff --name-only --diff-filter=U` 로 충돌 파일 목록을 모은다.
          목록이 `docs/ssot/SRS.md` 하나뿐이면 먼저 "SRS 줄 추가 충돌" 절차를 한다(mode=`rebase`).
+         목록이 `plugins/harness/.claude-plugin/plugin.json`(과 있으면 `plugins/harness/console/whats_new.json`)뿐이면
+         "판 번호 충돌" 절차를 한다(mode=`rebase`).
          `merged` 면 `GIT_EDITOR=true git rebase --continue` 로 잇고, 또 충돌하면 다시 이 1번부터(상한 20번).
          그 밖이면 2번으로 간다.
       2. `git rebase --abort` 로 리베이스 전 상태로 되돌린다.
@@ -105,9 +107,11 @@ compatibility: git 과 origin 원격이 필요하다.
       `git merge --no-edit -m "chore: main 의 새 변경 합쳐 받기" origin/{base}`
       로 합친다(메시지는 `commit-and-pr.md` 형식 — 명사형 제목. 훅이
       거부하면 `--no-verify` 로 우회하지 않고 거부 사실을 그대로 보고하고
-      멈춘다). **충돌이 나면 스스로 해결하지 않는다.** 예외는 하나 — 아래 "SRS 줄 추가 충돌" 이다.
+      멈춘다). **충돌이 나면 스스로 해결하지 않는다.** 예외는 둘 — 아래 "SRS 줄 추가 충돌"·"판 번호 충돌" 이다.
       1. `git diff --name-only --diff-filter=U` 로 충돌 파일 목록을 모은다.
          목록이 `docs/ssot/SRS.md` 하나뿐이면 먼저 "SRS 줄 추가 충돌" 절차를 한다(mode=`merge`).
+         목록이 `plugins/harness/.claude-plugin/plugin.json`(과 있으면 `plugins/harness/console/whats_new.json`)뿐이면
+         "판 번호 충돌" 절차를 한다(mode=`merge`).
          `merged` 면 `git commit -m "chore: main 의 새 변경 합쳐 받기"` 로 커밋하고 끝낸다(`--no-verify` 금지).
          그 밖이면 2번으로 간다.
       2. `git merge --abort` 로 합치기 전 상태로 되돌린다.
@@ -184,6 +188,23 @@ uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" srs_autom
   보고에 "SRS 에서 양쪽이 줄만 추가한 충돌 N곳을 자동으로 합쳤어 — 올리면 승인을 다시 받아야 해" 를 넣는다(합친 커밋은 SRS 승인을 낡게 만든다).
 - `refused`(1)·`cannot_check`(2)·엔진을 못 부름: 합치지 않았다. 통과로 보지 말고 지금처럼 abort 하고 충돌 파일 목록과 `reason` 을 보고한다.
 
+## 판 번호 충돌(#1074)
+
+충돌 파일이 `plugins/harness/.claude-plugin/plugin.json`(과 있으면 `plugins/harness/console/whats_new.json`)뿐이고 plugin.json 의
+충돌이 version 줄뿐일 때만 엔진이 판을 다시 매긴다. 새 판은 기준 브랜치(`origin/{base}`) 판과 다른 열린 PR(gh 로 읽음, 이 브랜치 PR 제외)
+판 중 가장 큰 것의 다음 값이다. plugin.json 을 새 판으로 쓰고, whats_new.json 은 양쪽 판 블록을 살리고 내 블록을 새 판 키 맨 위에 둔다.
+이 브랜치가 더한 `whats_new.d/*.json` 조각의 version 도 새 판으로 바꾼다. 직접 고치지 말고 엔진을 부른다.
+
+```
+uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" version_rebase --mode rebase --root .
+```
+
+(병합 중이면 `--mode merge`.) 기준 브랜치가 `main` 이 아니면 `--base {base}` 를 더한다. 결과 JSON 의 `status` 로 판단한다.
+
+- `merged`(종료코드 0): 작업 폴더에 쓰고 `git add` 까지 했다. 위 절차대로 커밋하거나 `GIT_EDITOR=true git rebase --continue` 한다.
+  보고에 "판 번호만 겹쳐 0.10.x 로 다시 매겼어"(결과의 `version`)를 넣는다.
+- `refused`(1)·`not_applicable`(1)·`cannot_check`(2, gh 로 열린 PR 을 못 읽는 경우 포함)·엔진을 못 부름: 풀지 않았다. 통과로 보지 말고 지금처럼 abort 하고 충돌 파일 목록과 `reason` 을 보고한다.
+
 ## 하지 않는 것
 
 이 스킬은 로컬 브랜치만 바꾼다. 다음은 하지 않는다.
@@ -191,7 +212,7 @@ uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" srs_autom
 - `--force` / `--force-with-lease` 푸시 — 이 스킬은 애초에 푸시하지 않는다.
 - `git reset --hard`
 - 올린 브랜치를 `origin/{base}` 로 리베이스(합치기는 `git merge` 로만 한다)
-- 병합 충돌을 스스로 푸는 것(`merge --abort` 로 되돌리고 보고만 한다. 예외: 위 "SRS 줄 추가 충돌" 을 엔진이 `merged` 로 합친 것)
+- 병합 충돌을 스스로 푸는 것(`merge --abort` 로 되돌리고 보고만 한다. 예외: 위 "SRS 줄 추가 충돌"·"판 번호 충돌" 을 엔진이 `merged` 로 푼 것)
 - `git stash` (위 6단계 이유 참고)
 - upstream 을 임의로 설정하는 것(`git branch --set-upstream-to` 등)
 

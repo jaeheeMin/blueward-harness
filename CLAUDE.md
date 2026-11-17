@@ -40,7 +40,8 @@
    설치본이 갱신되지 않고, 병합해도 엔진 태그 `v{version}` 과 `stable` 이 새로 붙지
    않아 훅·Project Repository 에 배포되지 않는다. 훅은 엔진을 plugin.json version
    과 같은 태그로, caller workflow 는 `@stable` 로 받는다(병합하면 Actions 가 태그를
-   자동으로 붙인다, #149).
+   자동으로 붙인다, #149). 팀원이 알 만한 변경의 새 소식은 `plugins/harness/console/whats_new.d/<이슈번호>.json`
+   에 쓰고(PR 끼리 충돌하지 않게), 다른 PR 과 판만 겹친 충돌은 deliver·sync 가 판을 다시 매긴다(#1074).
 9. **스킬·규칙·훅 동작을 바꾸면 길잡이도 고친다.**
    `docs/guide/harness-guide.html` 의 해당 탭을 같은 PR 에서 고치고, 병합 뒤
    아티팩트에 다시 올린다(`docs/guide/README.md`). public-cloud 쪽 변경은 이

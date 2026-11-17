@@ -580,7 +580,7 @@ def test_run_engine_wrapper_follows_harness_modules_rules(plugin_root, tmp_path)
     assert eng(" branch_growth --base main --json") == "safe" and eng(" --timeout 30 pr_queue --mine --no-ledger --max-rows 5 --quiet-empty") == "safe"
     assert eng(" pr_queue --repo a/b --pr 5") == "safe"
     # 쓰는 모듈·목록 밖 모듈·인자는 지금처럼 묻는다
-    assert eng(" export --spec docs/a.md") != "safe" and eng(" srs_automerge --mode rebase --root .") != "safe"
+    assert eng(" export --spec docs/a.md") != "safe" and eng(" srs_automerge --mode rebase --root .") != "safe" and eng(" version_rebase --mode rebase --root .") != "safe"
     assert eng(" manual_capture --list x") != "safe" and eng(" evil") != "safe" and eng("") != "safe" and eng(" --timeout 30") != "safe"
     assert eng(" pr_queue --foo") != "safe" and eng(" pr_queue --repo $X") != "safe" and eng(' pr_queue --repo "$(curl x)"') != "safe"
     assert eng(" --timeout x pr_queue") != "safe" and eng(" ../pr_queue") != "safe" and eng(" pr_queue > /tmp/o.txt") != "safe"

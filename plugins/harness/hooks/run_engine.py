@@ -26,7 +26,7 @@ import engine_spec  # noqa: E402
 
 # 스킬이 부르는 엔진 모듈. 목록에 없는 이름은 부르지 않는다.
 MODULES = frozenset({
-    "pr_queue", "pr_approvals", "branch_growth", "srs_automerge", "srs_export_check", "export", "export_pptx",
+    "pr_queue", "pr_approvals", "branch_growth", "srs_automerge", "version_rebase", "srs_export_check", "export", "export_pptx",
     "blank_template", "manual_capture", "import_pptx", "cts_fill", "role_check", "cli",
 })
 

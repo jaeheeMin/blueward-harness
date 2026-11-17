@@ -35,6 +35,9 @@
 위에 얹는다. 다른 사람의 변경을 확인하지 않고 푸시하면 뒤늦게 충돌을
 발견하게 된다.
 
+리베이스가 plugin.json version 줄(과 `whats_new.json`)에서만 충돌하면 `/harness:deliver`·`/harness:sync` 가 판을 다시 매기고 계속 간다(#1074,
+`issue-and-release.md`). 그 밖의 충돌은 스스로 풀지 않는다.
+
 ## `--force` 금지, `--force-with-lease` 만 허용
 
 리베이스로 이력이 바뀌어 강제 푸시가 필요할 때는 `--force-with-lease` 를

@@ -175,6 +175,18 @@ main 병합이 아니라 태그 기준이다 — 병합 뒤 `release-tag` 가 �
 - 결과 JSON `status`: `merged`(종료코드 0) / `refused`(1, 조건 밖) / `cannot_check`(2, 읽거나 돌리지 못함 — 통과가 아니다). 앞의 둘 아닌 것은 아무것도 바꾸지 않는다.
 - 합친 커밋은 SRS 승인을 낡게 만든다(`ssot_approval`). 호출한 쪽이 "올리면 승인을 다시 받아야 해" 를 알린다.
 
+## `version_rebase` — 판 번호만 겹친 충돌을 새 판으로 다시 매긴다(#1074)
+
+CLI 다(`python -m checker.version_rebase --mode merge|rebase --root . [--base main] [--branch 이름]`). deliver(rebase)·sync(rebase·merge)가 충돌을 만났을 때
+abort 하기 전에 부른다. 충돌 파일이 `plugins/harness/.claude-plugin/plugin.json`(과 있으면 `console/whats_new.json`)뿐이고 plugin.json 의 충돌 덩어리가
+모두 `"version"` 줄일 때만 푼다.
+
+- 새 판 = max(`origin/{base}` 의 판, 다른 열린 PR head 판들)의 patch+1. 열린 PR 은 gh 로 읽는다(`--branch` 또는 진행 중인 브랜치의 PR 은 뺀다). 한 건이라도 못 읽으면 `cannot_check`.
+- plugin.json 은 충돌 덩어리를 새 판 줄로 바꾼다(들여쓰기·줄바꿈 그대로). whats_new.json 은 stage 로 읽어 양쪽 판 블록을 살리고 내 쪽이 더한 블록을 새 판 키 맨 위로 옮긴다
+  (base 블록을 내가 고쳤으면 거절). 이 브랜치가 `origin/{base}` 에 없던 `whats_new.d/*.json` 조각의 version 도 새 판으로 바꾼다.
+- 결과 JSON `status`: `merged`(0, `version`·`files`·`fragments`) / `refused`(1) / `not_applicable`(1, plugin.json 없는 저장소) / `cannot_check`(2). merged 가 아니면 아무것도 바꾸지 않는다.
+- `git add` 까지만 한다. 커밋·`rebase --continue` 는 부른 쪽이 한다. 새 소식 조각은 콘솔(`server.py` 의 `read_whats_new_fragments`)이 whats_new.json 과 합쳐 읽는다.
+
 ## `form_columns` — 양식 밖 열·소제목이 원본에 들어오지 못하게 한다(#316)
 
 산출물은 고객사 양식(`templates/forms/<양식>.yaml`)을 따른다. 양식 지도에 없는 열이 원본 md 에 들어오면 엑셀로 갈

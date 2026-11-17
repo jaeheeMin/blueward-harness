@@ -37,8 +37,13 @@ compatibility: git 과 GitHub CLI(gh, 로그인 상태)가 필요하다.
    `git rev-list HEAD..origin/{base} --count` 로 새 커밋이 있는지 확인하고,
    있을 때만 리베이스한다.
 4. 새 커밋이 있으면 `git rebase origin/{base}` 를 수행한다. **리베이스
-   충돌이 나면 스스로 해결하지 않는다.** 예외는 하나다. `git diff --name-only --diff-filter=U` 가
-   `docs/ssot/SRS.md` 하나뿐이면 `uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" srs_automerge --mode rebase --root .`
+   충돌이 나면 스스로 해결하지 않는다.** 예외는 둘이다. `git diff --name-only --diff-filter=U` 가
+   `plugins/harness/.claude-plugin/plugin.json`(과 있으면 `plugins/harness/console/whats_new.json`)뿐이면
+   `uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" version_rebase --mode rebase --root .`
+   를 부른다(판 번호만 겹친 충돌을 엔진이 새 판으로 다시 매긴다). 결과가 `merged` 면 `GIT_EDITOR=true git rebase --continue`
+   로 이어 가고(또 충돌하면 같은 방법으로 되풀이, 상한 20번), PR 보고에 "판 번호만 겹쳐 0.10.x 로 다시 매겼어" 를 넣는다(결과의 `version`).
+   `refused`·`cannot_check`·`not_applicable`·엔진 호출 실패면 풀지 않은 것이다 — 아래대로 보고하고 중단한다.
+   다른 하나는 충돌 목록이 `docs/ssot/SRS.md` 하나뿐일 때다. 그러면 `uv run --no-project python "${CLAUDE_PLUGIN_ROOT}/hooks/run_engine.py" srs_automerge --mode rebase --root .`
    를 부른다. 결과가 `merged` 면 `GIT_EDITOR=true git rebase --continue`
    로 이어 가고(또 충돌하면 같은 방법으로 되풀이, 상한 20번), PR 보고에 "SRS 에서 양쪽이 줄만 추가한 충돌 N곳을 자동으로 합쳤어 —
    올리면 승인을 다시 받아야 해" 를 넣는다(합친 커밋은 SRS 승인을 낡게 만든다). `refused`·`cannot_check`·엔진 호출 실패면 합치지 않은 것이다
