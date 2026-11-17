@@ -67,7 +67,7 @@ ul, ol { padding: 0; }
 .shell { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; padding: 0 28px 0 20px; }
 #app[data-collapsed="true"] .shell { grid-template-columns: 64px minmax(0, 1fr); }
 .side { min-width: 0; min-height: 0; overflow: hidden; }
-.main { overflow-y: auto; min-width: 0; padding: 0 0 28px; }
+.main { position: relative; overflow-y: auto; min-width: 0; padding: 0 0 28px; }  /* relative: 안쪽 .sr-only(absolute 1px)가 스크롤 칸 밖(문서)으로 빠져 문서 스크롤 높이를 늘리지 않게 한다 */
 .page { margin: 0; } /* 시안(가 G-01~19)처럼 세션 목록 옆에서 오른쪽 끝까지 찬다. 폭 상한을 두지 않는다(#721) */
 
 @container shell (max-width: 760px) {

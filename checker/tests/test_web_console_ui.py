@@ -1434,6 +1434,45 @@ def test_office_bundle_supports_pip():
     assert "documentPictureInPicture" in scene and "closePip(); return drop()" in scene
 
 
+def test_post_home_field_memo_layout():
+    # Post 오늘 화면 장면 칸(#1056, 시안 C): 사무실 장면이 틀 안에 폭 전체로 보이고 그 위에 내 차례 메모가 뜬다. 나머지(덱·숫자 칸·표·범례·팀 줄·띠·배지)는 그대로
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    for needle in ("po-memo", "po-stagew", "paintMemo()", "'다음 '", "세션으로", "cardAct(it, false)", "cardAct(it, true)"):
+        assert needle in home
+    # 메모 자리: 번들의 onFocus 좌표를 받고, 보여 주는 항목이 바뀌면 scene.focus(id). 옛 번들(focus 없음)도 동작
+    assert "onFocus: onFocus" in home and "typeof sc.focus === 'function'" in home and "sc.focus(id)" in home
+    assert "matchMedia(NARROW)" in home and "(max-width: 760px)" in home
+    # 장면 칸 밖은 그대로: 덱·숫자 카드 줄·Sauce 와 같은 홈 표·범례·팀 요약 줄
+    for keep in ("paintDeck()", "tiles2 po-tiles", "HK.homeTable(list)", "po-legend", "po-teams", "네 답을 기다리는 일이 "):
+        assert keep in home
+    for gone in ("sessionsPanel", "po-strip", "po-mine", "po-kyul", "po-stc"):
+        assert gone not in home
+    flow_ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert "function homeTable(list)" in flow_ui and "['작업', '단계', '번호', '기억', '상태']" in flow_ui  # Sauce 홈 표
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "function attachScene(host, extra)" in app and "Object.assign({ list: sceneList" in app and "onFocus: function (f)" in app
+    assert "scene: function () { return postScene; }" in app
+    assert "prail-badge" in app and "prail-dot" not in app and "nb-chip" not in app  # 위쪽 띠(말풍선)와 레일 숫자 배지는 그대로
+    scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    assert "office.attach(host, opts)" in scene and "typeof o.focus === 'function'" in scene and "focus: function (id)" in scene
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    for needle in (".po-memo", ".po-memo.is-flip::before", ".po-stagew.is-office", "@media (max-width: 760px)", ".po-tiles .tile2", ".po-legend", ".po-teams"):
+        assert needle in css
+    for gone in (".po-strip", ".po-kyul", ".po-stc", ".nb-chip", ".prail-dot", "po-mine", "po-cols"):
+        assert gone not in css
+    for line in css.splitlines():
+        if line.startswith(":root[data-theme=\"post\"] .po-memo"):
+            assert not any(f"font-size: {n}px" in line for n in range(23, 100))  # 글자 22px 이하
+
+
+def test_main_scroller_is_containing_block_for_sr_only():
+    # 문서가 안쪽 .main 스크롤 칸보다 더 내려가던 문제: .sr-only 는 absolute 1px 이라 .main 이 위치 기준이 아니면 스크롤 칸 밖(문서)으로 빠져 문서 스크롤 높이를 늘린다
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    assert ".sr-only { position: absolute;" in css
+    main_rule = [ln for ln in css.splitlines() if ln.startswith(".main { overflow-y: auto") or ln.startswith(".main { position: relative; overflow-y: auto")]
+    assert main_rule and main_rule[0].startswith(".main { position: relative; overflow-y: auto")
+
+
 _POST_LOGIC_NODE = r"""
 const path = require('path');
 const dir = process.argv[1];
