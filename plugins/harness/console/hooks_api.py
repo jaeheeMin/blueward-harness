@@ -18,6 +18,7 @@ from store import (CHECK_DONE, MAX_CHANGED_FILES, MAX_PENDING_STOP, MAX_PR_LINKS
 
 QUESTION_WAIT = 300.0
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
+PR_CREATE = re.compile(r"(?:^|[\s;&|(])gh\s+pr\s+create\b")  # 이 세션이 PR 을 만든 명령
 EDIT_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 # 설정 "AI가 묻는 범위"(#649): needed 꼭 필요할 때만(기본) / edits 문서를 바꿀 때마다 / all 모든 명령마다
 ASK_LEVELS = ("needed", "edits", "all")
@@ -305,6 +306,12 @@ class Hooks:
         reason = reason.strip()
         if not reason:
             return 400, {"error": "reason 이 없습니다."}
+        if hook == "stop-deliver":
+            # 마무리 확인(커밋 안 된 변경 알림)은 막힘이 아니라 안내다(#1027 D6). 막힘 카드·막힘 수에 넣지 않고 대화 기록 한 줄로만 쌓는다.
+            if self.store.add_chat(s, "note", reason[:600], tone="warn"):
+                self.store.add_log(s, "마무리 안내: " + reason.split("\n", 1)[0][:200])
+                self.store.touch(s)
+            return 200, None
         kind = block_kind(reason)
         fix = ""
         if "다음:" in reason:
@@ -469,9 +476,14 @@ class Hooks:
             remember_touched(s, [path])
         response = body.get("tool_response")
         text = response if isinstance(response, str) else json.dumps(response, ensure_ascii=False, default=str)
-        for url in PR_URL.findall(text or ""):
+        found = PR_URL.findall(text or "")
+        for url in found:
             if url not in s["prLinks"] and len(s["prLinks"]) < MAX_PR_LINKS:
                 s["prLinks"].append(url)
+        # 이 세션이 직접 만든 PR(#1027 D-1). prLinks 는 PR 목록·상태 출력에 스친 남의 PR 주소까지 담으므로 PR 칸은 이 값을 쓴다
+        command = tool_input.get("command") if isinstance(tool_input, dict) else None
+        if found and tool == "Bash" and isinstance(command, str) and PR_CREATE.search(command):
+            s["prCreated"] = found[-1]
 
 
 def _clip(value, limit: int) -> str:

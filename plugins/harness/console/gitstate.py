@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from typing import Callable
 
 from platform_compat import hidden_window_kwargs
@@ -173,11 +174,26 @@ def _tree_blobs(run: Runner, cwd: str, ref: str, rels: list[str]) -> dict[str, s
     return blobs
 
 
+BASE_FETCH_GAP = 60.0  # 같은 폴더에서 origin/<기본> 을 이 간격(초)보다 자주 가져오지 않는다
+_base_fetched: dict[tuple[str, str], float] = {}
+
+
+def _refresh_base(run: Runner, cwd: str, base: str, now: Callable[[], float] = time.monotonic) -> None:
+    """판정 전에 `git fetch origin <기본>` 을 한 번 한다. 실패해도(오프라인 등) 진행한다 — 그 뒤 origin ref 를 읽는 쪽이 unknown 을 말한다.
+    시도한 시각을 폴더·브랜치별로 기억해 BASE_FETCH_GAP 안에는 다시 가져오지 않는다."""
+    key, t = (os.path.normcase(os.path.realpath(cwd)), base), now()
+    last = _base_fetched.get(key)
+    if last is not None and t - last < BASE_FETCH_GAP:
+        return
+    _base_fetched[key] = t
+    _git(run, cwd, "fetch", "--quiet", "origin", base)
+
+
 def upload_states(run: Runner, cwd: str, files: list[tuple[str, bool]], open_prs: Callable[[], dict]) -> dict[str, dict]:
     """산출물 파일마다 {"state": local|merged|review|committed|unknown, "prs": [{number,url}], "reason"}. files 는 (cwd 기준 상대 경로, 커밋 안 됨).
     저장소가 squash 병합이라 커밋 조상 관계로는 합쳐짐을 알 수 없어 내용(blob)으로 본다. 순서:
     1 커밋 안 됨 -> local. 2 origin/<기본> 의 같은 경로 blob 이 HEAD 와 같음 -> merged. 3 열린 PR 의 바뀐 파일에 있음 -> review.
-    4 그 밖 -> committed. git 실패 -> unknown. origin/<기본> 이 없으면 2 는 건너뛴다(원격 없는 저장소는 gh 도 안 돼 3 에서 unknown).
+    4 그 밖 -> committed. git 실패 -> unknown. 판정 전에 origin/<기본> 을 한 번 가져온다(60초에 한 번, 실패해도 진행). origin/<기본> 을 못 읽으면 "안 올림" 이 아니라 unknown.
     gh 실패는 3 이 필요한 파일만 unknown(2 까지는 gh 없이 판정). 파일 수만큼 git 을 부르지 않고 ls-tree 를 묶어 한 번씩 부른다."""
     out: dict[str, dict] = {}
     rest = []
@@ -204,11 +220,15 @@ def upload_states(run: Runner, cwd: str, files: list[tuple[str, bool]], open_prs
         fail("git 으로 커밋된 파일을 읽지 못했어.")
         return out
     base = default_branch(run, cwd)
+    _refresh_base(run, cwd, base)  # 옛 로컬 origin/<기본> 과 비교하면 이미 병합된 문서가 "안 올림" 으로 보인다(#1027 D-8)
     rc, _ = _git(run, cwd, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{base}")
     if rc == GIT_UNAVAILABLE:
         fail("git 을 실행하지 못했어.")
         return out
-    main_blobs = _tree_blobs(run, cwd, f"origin/{base}", rest) if rc == 0 else {}
+    if rc != 0:  # 비교할 main 을 못 읽었다 = 올렸는지 알 수 없다. "안 올림" 으로 단정하지 않는다
+        fail(f"origin/{base} 를 읽지 못해 main 에 합쳐졌는지 알 수 없어.")
+        return out
+    main_blobs = _tree_blobs(run, cwd, f"origin/{base}", rest)
     if main_blobs is None:
         fail(f"git 으로 origin/{base} 의 파일을 읽지 못했어.")
         return out
@@ -269,20 +289,60 @@ def _json(out: str):
         return None
 
 
+# 사람 승인을 기다리느라 실패로 보이는 검사(pr-checks.yml·pr-review.yml 의 commit status 이름. checker/pr_queue.py GATE_GROUPS 와 같다).
+# 이 둘의 실패는 고칠 일이 아니라 승인자를 기다리는 일이라 "검사 실패" 로 세지 않는다(#1027).
+APPROVAL_GATES = frozenset({"risk-gate", "ssot-approval"})
+# 검사 묶음 job(pr-checks·pr-review·main-checks)의 실패는 안에 든 단계 status(doc-guard·gitleaks·승인 관문 등)의 실패를 다시 보인 것이라
+# 실패로 세지 않는다 — 승인 관문만 실패해도 job 이 실패해 "고쳐야 할 PR" 로 보였다(#1027 실사용 시험). 엔진 checker.risk_gate 의
+# EXCLUDED_CHECK_GROUPS 와 같다. merge-order·pr-queue 는 순서 표시라 아예 세지 않는다(checker.pr_queue 와 같다).
+JOB_GROUPS = frozenset({"pr-checks", "pr-review", "main-checks"})
+ORDER_GROUPS = frozenset({"merge-order", "pr-queue"})
+
+
+def _rollup_group(item: dict) -> str:
+    """`pr-checks / check` 처럼 워크플로 이름이 앞에 붙은 이름의 앞 조각(엔진 checker.risk_gate._check_group 과 같다)."""
+    return str(item.get("context") or item.get("name") or "").split(" / ", 1)[0].strip()
+
+
+def _rollup_failed(item: dict) -> bool:
+    return str(item.get("conclusion") or item.get("state") or "").upper() in FAILED_CONCLUSIONS
+
+
+def _is_gate_failure(item: dict) -> bool:
+    return _rollup_group(item) in APPROVAL_GATES and _rollup_failed(item)
+
+
+def _ignored(item: dict) -> bool:
+    """요약에서 빼는 줄: 순서 표시, 알림 job, 승인 관문·검사 묶음 job 의 실패(실패만. 진행 중이면 기다림으로 센다)."""
+    group, name = _rollup_group(item), str(item.get("context") or item.get("name") or "")
+    if group in ORDER_GROUPS or name.rsplit(" / ", 1)[-1].strip() == "alert":
+        return True
+    return (group in APPROVAL_GATES or group in JOB_GROUPS) and _rollup_failed(item)
+
+
+def awaiting_approval(rollup) -> bool:
+    """사람 승인을 기다리는 검사(risk-gate·ssot-approval)가 실패 상태로 있는가."""
+    return isinstance(rollup, list) and any(isinstance(i, dict) and _is_gate_failure(i) for i in rollup)
+
+
 def summarize_checks(rollup) -> str:
-    """statusCheckRollup 을 fail/pending/pass/none 으로 줄인다."""
+    """statusCheckRollup 을 fail/pending/pass/none 으로 줄인다. 승인 대기 검사의 실패는 세지 않는다(awaiting_approval 이 따로 말한다)."""
     if not isinstance(rollup, list) or not rollup:
         return "none"
     pending = False
+    counted = 0
     for item in rollup:
-        if not isinstance(item, dict):
+        if not isinstance(item, dict) or _ignored(item):
             continue
+        counted += 1
         status = str(item.get("status") or "")
         conclusion = str(item.get("conclusion") or item.get("state") or "").upper()
         if conclusion in FAILED_CONCLUSIONS:
             return "fail"
         if (status and status != "COMPLETED") or conclusion not in PASSED_CONCLUSIONS:
             pending = True
+    if not counted:
+        return "none"
     return "pending" if pending else "pass"
 
 
@@ -308,7 +368,7 @@ def step_checks(rollup) -> dict:
 def _pr_item(raw: dict) -> dict:
     return {"number": raw.get("number"), "state": str(raw.get("state") or "").upper(), "url": raw.get("url", ""),
             "title": raw.get("title", ""), "checks": summarize_checks(raw.get("statusCheckRollup")),
-            "stepChecks": step_checks(raw.get("statusCheckRollup"))}
+            "stepChecks": step_checks(raw.get("statusCheckRollup")), "awaitApproval": awaiting_approval(raw.get("statusCheckRollup"))}
 
 
 def pr_status(run: Runner, cwd: str, branch: str, number: int | None = None) -> dict:
@@ -410,6 +470,8 @@ def approval_prs(run: Runner, cwd: str, rel_file: str, when_no_file: str) -> dic
     """내 승인을 기다리는 열린 PR. {"state": "ok"|"no"|"unknown", "reason", "login", "items"}. 병합 순서는 계산하지 않는다(/harness:approvals 가 한다)."""
     info = _approver_rules(run, cwd, rel_file, when_no_file)
     out_base = {"state": info["state"], "reason": info["reason"], "login": info["login"], "items": []}
+    if info.get("github") is False:  # GitHub 저장소가 아니라서 'no' 인 것과 승인자가 아니라서 'no' 인 것을 화면이 가르게 한다(#1027 D-9)
+        out_base["github"] = False
     if info["state"] != "yes":
         return out_base
     rc, out = run(["gh", "pr", "list", "--state", "open", "--limit", str(PR_LIST_LIMIT), "--json",
@@ -448,6 +510,6 @@ def my_open_prs(run: Runner, cwd: str) -> dict:
     if not isinstance(data, list):
         return {"state": "unknown", "reason": "gh 로 내 PR 목록을 읽지 못했어(gh 로그인·네트워크 확인).", "items": []}
     items = [{"number": d.get("number"), "title": d.get("title", ""), "url": d.get("url", ""), "branch": d.get("headRefName", ""),
-              "checks": summarize_checks(d.get("statusCheckRollup"))} for d in data if isinstance(d, dict) and d.get("number")]
+              "checks": summarize_checks(d.get("statusCheckRollup")), "awaitApproval": awaiting_approval(d.get("statusCheckRollup"))} for d in data if isinstance(d, dict) and d.get("number")]
     items.sort(key=lambda i: i["number"])
     return {"state": "ok", "reason": "", "items": items}

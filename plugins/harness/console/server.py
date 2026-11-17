@@ -55,6 +55,7 @@ HEARTBEAT = 10.0
 FILES_CACHE_SECONDS = 3.0  # 세션 산출물 목록(?cache=1)을 이만큼 기억한다. git 을 여러 번 실행해 느리다(#793)
 CACHE_SECONDS = 60.0 # 승인자 판정과 승인 대기 PR 목록은 gh 를 자주 부르지 않게 이만큼 기억한다
 MAX_ADVANCE_ROUNDS = 4  # 갈래 진행 판정에서 증거를 읽고 다시 판정하는 최대 횟수(증거 종류가 둘뿐이라 넉넉하다)
+PR_REFRESH_SECONDS = 60.0  # 열린 PR 이 있는 세션의 갈래를 다시 판정하는 간격(초, #1027 D8). 서버 PR 캐시(CACHE_SECONDS)와 같다
 UPCOMING_REFRESH = 30.0  # 진행 중 세션의 다음 갈래(upcoming)를 SRS 에서 다시 읽는 간격(초, #858). 판정마다 파일을 읽지 않게
 COND_YES, COND_NO, COND_UNKNOWN = "yes", "no", "unknown"
 LOADING_REASON = "GitHub 에서 읽는 중이야."
@@ -345,27 +346,27 @@ class App:
         s = self.store.get(sid)
         if s is None or not s["cwd"]:
             return
+        self.spawn(lambda: self.refresh_git_now(s))
 
-        def work():
-            info = self.git_inspect(s["cwd"])
-            try:
-                seen, why = gitstate.status_paths(self.run, s["cwd"])  # 커밋 전에 만든 파일을 쌓아 둔다(만든 문서 목록용)
-            except Exception as e:
-                seen, why = [], f"git 상태를 읽다 오류가 났어({type(e).__name__})."
-            with self.store.lock:
-                if why:  # 못 읽은 동안 커밋된 파일은 목록에서 빠질 수 있다. 빈 목록을 '바뀐 것 없음' 으로 읽지 않게 시각과 함께 표시를 남긴다
-                    s["touchedGap"] = {"reason": why, "at": self.store.clock()}
-                else:
-                    set_baseline(s, seen)  # 처음 본 때 이미 바뀌어 있던 파일은 이 세션 것으로 치지 않는다
-                    remember_touched(s, seen, from_status=True)
-                s["repo"], s["branch"] = info["repo"], info["branch"]
-                s["turn"] = {"skill": info["skill"], "unknown": info["unknown"]}
-                if info["isRepo"]:
-                    s["changedFiles"] = info["changedFiles"]
-            self.advance_flow(s, info)
-            self.store.touch(s)
-
-        self.spawn(work)
+    def refresh_git_now(self, s: dict) -> None:
+        """브랜치·변경을 다시 읽고 갈래를 다시 판정한다. 훅은 refresh_git 이 스레드로, 1분 다시 판정(refresh_open_prs)은 바로 부른다."""
+        info = self.git_inspect(s["cwd"])
+        try:
+            seen, why = gitstate.status_paths(self.run, s["cwd"])  # 커밋 전에 만든 파일을 쌓아 둔다(만든 문서 목록용)
+        except Exception as e:
+            seen, why = [], f"git 상태를 읽다 오류가 났어({type(e).__name__})."
+        with self.store.lock:
+            if why:  # 못 읽은 동안 커밋된 파일은 목록에서 빠질 수 있다. 빈 목록을 '바뀐 것 없음' 으로 읽지 않게 시각과 함께 표시를 남긴다
+                s["touchedGap"] = {"reason": why, "at": self.store.clock()}
+            else:
+                set_baseline(s, seen)  # 처음 본 때 이미 바뀌어 있던 파일은 이 세션 것으로 치지 않는다
+                remember_touched(s, seen, from_status=True)
+            s["repo"], s["branch"] = info["repo"], info["branch"]
+            s["turn"] = {"skill": info["skill"], "unknown": info["unknown"]}
+            if info["isRepo"]:
+                s["changedFiles"] = info["changedFiles"]
+        self.advance_flow(s, info)
+        self.store.touch(s)
 
     # ---- 갈래(플러그인의 workflow.json) ----
     def load_flows(self, path) -> tuple[dict | None, str]:
@@ -411,7 +412,10 @@ class App:
 
         def compute():
             try:
-                value = fn()
+                try:
+                    value = fn()
+                except Exception as e:  # 계산이 예외로 끝나도 last 에 사유를 남긴다. 안 남기면 화면이 영영 "읽는 중" 에 머문다(#1027 D-7)
+                    value = {"state": COND_UNKNOWN, "reason": f"읽는 중 오류가 났어({type(e).__name__}).", "login": "", "items": []}
                 with self.lock:
                     self.last[key] = value
                     if value.get("state") != COND_UNKNOWN:  # 못 읽은 결과는 기억하지 않는다(화면에 보여 주려고 last 에만 둔다)
@@ -433,7 +437,8 @@ class App:
             running = key in self.inflight
         if value is None:
             return {"state": COND_UNKNOWN, "reason": LOADING_REASON, "login": "", "items": [], "loading": True}
-        return dict(value, loading=True) if running else value
+        # 이전에 못 읽은 결과(사유가 있는 unknown)는 다시 읽는 동안에도 "읽는 중" 으로 덮지 않고 사유를 바로 보인다(#1027 D-7)
+        return dict(value, loading=True) if running and value.get("state") != COND_UNKNOWN else value
 
     def cond_state(self, name: str, cwd: str, wait: bool = True) -> dict:
         """조건 하나의 판정. {"state": yes/no/unknown, "reason", "label"}. 못 읽으면 unknown 이고 없음(no)으로 두지 않는다.
@@ -484,6 +489,9 @@ class App:
         if not state or state["finished"] or not s["cwd"] or self.flow_data is None:
             return
         cwd, memo = s["cwd"], {}
+        made = re.search(r"/pull/(\d+)", str(s.get("prCreated") or ""))
+        with self.store.lock:  # 이 세션이 만든 PR 번호. 갈래가 PR 이 열려 단계를 넘기는 근거는 이 PR 뿐이다(#1027 D-1, flows.evaluate)
+            state["createdPr"] = int(made.group(1)) if made else None
         cond = self.cond_snapshot(cwd, state)
         for _ in range(MAX_ADVANCE_ROUNDS):
             missing: set[str] = set()
@@ -526,7 +534,8 @@ class App:
                 return {"state": "unknown", "reason": "git 저장소가 아니어서 브랜치를 확인하지 못했어."}
             return {"state": "ok", "value": not got.get("onBase", False)}
         branch = (info or {}).get("branch") or s["branch"]
-        return gitstate.pr_status(self.run, s["cwd"], branch, state.get("prNumber"))
+        # 이 세션이 만든 PR 이 있으면 브랜치로 찾지 않고 그 번호로 읽는다(브랜치에 이전 작업의 PR 이 있을 수 있다, #1027)
+        return gitstate.pr_status(self.run, s["cwd"], branch, state.get("prNumber") or state.get("createdPr"))
 
     def assign_flow(self, s: dict, fid, reason: str) -> None:
         data = self.require_flows()
@@ -609,8 +618,45 @@ class App:
         return [os.path.realpath(p) for p in paths if os.path.isdir(p)]
 
     def shutdown(self) -> None:
+        stop = getattr(self, "ticker_stop", None)
+        if stop is not None:
+            stop.set()
         self.manager.shutdown()
         self.store.flush()
+
+    # ---- 열린 PR 자동 다시 판정(#1027 D8) ----
+    @staticmethod
+    def watches_pr(state: dict | None) -> bool:
+        """세션 밖(GitHub)에서 바뀔 PR 을 지켜볼 갈래인가: 끝나지 않았고, PR 이 열려 있거나 지금 단계가 PR 을 근거로 끝나는 단계다."""
+        if not state or state.get("finished"):
+            return False
+        if str((state.get("pr") or {}).get("state") or "").upper() == "OPEN":
+            return True
+        cur = flows.current(state)
+        return bool(cur and any(t in ("pr_exists", "pr_merged") for t in cur.get("done", [])))
+
+    def refresh_open_prs(self) -> int:
+        """지켜볼 세션마다 갈래를 다시 판정한다(검사 결과·병합이 화면에 저절로 반영되게). 다시 판정한 세션 수."""
+        with self.store.lock:
+            # 갈래가 PR 을 아직 못 읽었어도 이 세션이 PR 을 만들었으면(prCreated) 지켜본다 — 턴 중간(승인 대기)에는 훅이 판정을 다시 부르지 않는다
+            targets = [s for s in self.store.sessions.values() if not s.get("ended") and s.get("cwd") and (
+                self.watches_pr(s.get("flowState")) or (s.get("prCreated") and s.get("flowState") and not s["flowState"].get("finished")))]
+        for s in targets:
+            self.refresh_git_now(s)  # 브랜치(이슈 번호)·변경도 함께 다시 읽는다 — 턴 중간에는 훅이 브랜치를 갱신하지 않는다(실사용 시험: 새 이슈 #37 이 #35 로 보임)
+        return len(targets)
+
+    def start_pr_ticker(self, every: float = PR_REFRESH_SECONDS) -> None:
+        self.ticker_stop = threading.Event()
+
+        def loop():
+            while not self.ticker_stop.wait(every):
+                try:
+                    self.refresh_open_prs()
+                except Exception as e:  # 한 번 실패해도 다음 주기에 다시 한다. 조용히 삼키지 않고 남긴다
+                    if sys.stderr is not None:
+                        print(f"열린 PR 다시 판정 실패: {type(e).__name__}: {e}", file=sys.stderr)
+
+        threading.Thread(target=loop, daemon=True).start()
 
     # ---- API ----
     def api(self, method: str, path: str, query: dict, body: dict):
@@ -2543,6 +2589,7 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    app.start_pr_ticker()  # 열린 PR 이 있는 세션을 1분마다 다시 판정한다(#1027 D8). 시험은 App 만 만들어 이 타이머가 돌지 않는다
     try:
         server.serve_forever()
     finally:

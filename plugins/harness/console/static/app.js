@@ -495,7 +495,11 @@
     sideQueued = true;
     requestAnimationFrame(function () { sideQueued = false; renderSide(); });
   }
-  function groupOf(s) { return window.BHLogic.groupOf(s); }
+  // 아직 답 안 한 요청 번호(이미 처리된 요청은 뺀다). 내 차례 계산의 기준이라 띠·알림·레일·홈이 같은 값을 쓴다(#1027 D5)
+  function openIds(s) {
+    return (s.pendingRequestIds || []).filter(function (rid) { var r = requests.get(rid); return !(r && r.status && r.status !== 'pending'); });
+  }
+  function groupOf(s) { return window.BHLogic.groupOf(s, openIds); }
   // 계획 모드에서 AI 가 계획을 다 세우고 "이대로 진행해도 되나" 묻는 요청(ExitPlanMode, #861)
   function isPlan(r) { return !!r && (r.toolName || r.tool_name) === 'ExitPlanMode'; }
   function requestTitle(r) {
@@ -524,8 +528,10 @@
   function subagentSummary(s) { var n = runningSubagents(s).length; return n ? ' · 서브에이전트 ' + n + '개 실행 중' : ''; }
   function sideData() {
     var todo = [], run = [], idle = [], blocked = [], errs = [];
+    var turnOf = {};  // 내 차례 항목은 BHLogic.turnItems 한 곳에서 정한다(띠·알림·레일·홈 타일이 같은 목록을 쓴다)
+    window.BHLogic.turnItems(Array.from(sessions.values()), openIds).forEach(function (it) { (turnOf[it.s.id] = turnOf[it.s.id] || []).push(it); });
     sessions.forEach(function (s) {
-      var g = groupOf(s), sub = s.branch || baseName(s.cwd) || '';
+      var g = turnOf[s.id] ? 'todo' : groupOf(s) === 'todo' ? 'idle' : groupOf(s), sub = s.branch || baseName(s.cwd) || '';
       var title = s.title || baseName(s.cwd) || '이름 없는 세션';
       var bk = window.BHLogic.blockOf(s);  // 훅이 막아 아직 안 풀린 세션은 내 차례와 따로 센다(#790)
       var an = apiNote(s);
@@ -536,18 +542,18 @@
       } else if (bk) {
         blocked.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), kind: bk.kind, t: s.updatedAt, bt: bk.t || 0 });
       } else if (g === 'todo') {
-        var ids = s.pendingRequestIds || [];
-        if (ids.length) {
-          ids.forEach(function (rid) {
-            var r = requests.get(rid);
-            if (r && r.status && r.status !== 'pending') return;
-            todo.push({ sname: title, sid: s.id, rid: rid, href: '/r/' + encodeURIComponent(rid), verb: !r ? '요청 확인하기' : answersAsk(r) ? '답하기' : isPlan(r) ? '계획 확인하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
-          });
-        } else if (!s.askedInText && window.BHLogic.prNeedsFix(s)) {  // 시안 G-24: 검사 실패한 내 PR 을 고칠 차례
-          todo.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), verb: 'PR 고치기', title: title, sub: sub, t: s.updatedAt, fix: true });
-        } else {
-          todo.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), verb: s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기', title: title, sub: sub, t: s.updatedAt });
-        }
+        turnOf[s.id].forEach(function (it) {
+          if (it.kind === 'fix') {  // 시안 G-24: 검사 실패한 내 PR 을 고칠 차례
+            todo.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), verb: 'PR 고치기', title: title, sub: sub, t: s.updatedAt, fix: true });
+            return;
+          }
+          if (it.kind === 'turn') {  // 시안 G-11: 작업 브랜치에 올릴 변경이 있는 세션(deliver 차례)
+            todo.push({ sname: title, sid: s.id, href: '/s/' + encodeURIComponent(s.id), verb: skillLabel(s.turnSkill), title: title, sub: sub, t: s.updatedAt });
+            return;
+          }
+          var r = requests.get(it.rid);
+          todo.push({ sname: title, sid: s.id, rid: it.rid, href: '/r/' + encodeURIComponent(it.rid), verb: !r ? '요청 확인하기' : answersAsk(r) ? '답하기' : isPlan(r) ? '계획 확인하기' : '승인하기', title: requestTitle(r), sub: title, t: s.updatedAt });
+        });
       } else if (g === 'running') {
         run.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: (s.currentAction ? window.BHLogic.plainAction(s.currentAction, skillLabel) : (s.currentSkill ? skillLabel(s.currentSkill) : '작업 중')) + subagentSummary(s), t: s.updatedAt });
       } else {
@@ -557,13 +563,11 @@
     return { todo: todo, run: run, idle: idle, blocked: blocked, errs: errs };
   }
   var annEl = null, headEl = null;
-  var SIDE_ORDER = { todo: 0, running: 1, idle: 2 };
-  function sessionRank(s) { return s.status === 'ended' ? 3 : window.BHLogic.blockOf(s) ? 0 : SIDE_ORDER[groupOf(s)]; }
   function sessionTitle(s) { return s.title || baseName(s.cwd) || '이름 없는 세션'; }
   function sortedSessions() {
     var arr = [];
     sessions.forEach(function (s) { arr.push(s); });
-    arr.sort(function (a, b) { return (sessionRank(a) - sessionRank(b)) || ((b.updatedAt || 0) - (a.updatedAt || 0)); });
+    arr.sort(function (a, b) { return window.BHLogic.sessionOrder(a, b, openIds); });  // 묶음 안에서는 시작 시각으로 고정(#1027 D-6)
     return arr;
   }
   function firstPending(s) {
@@ -586,7 +590,7 @@
     if (g !== 'running' && s.status !== 'ended' && L.prNeedsFix(s) && !firstPending(s)) return { tone: g === 'todo' ? 'attn' : '', fix: true, text: 'PR #' + s.flowPr.number + ' 고쳐야 함' };
     if (g === 'todo') {
       var p = firstPending(s);
-      var verb = p ? (!p.r ? '요청 확인하기' : answersAsk(p.r) ? '답하기' : isPlan(p.r) ? '계획 확인하기' : '승인하기') : s.askedInText ? '답하기(추정)' : s.turnSkill ? skillLabel(s.turnSkill) : '확인하기';
+      var verb = p ? (!p.r ? '요청 확인하기' : answersAsk(p.r) ? '답하기' : isPlan(p.r) ? '계획 확인하기' : '승인하기') : s.turnSkill === 'deliver' ? skillLabel(s.turnSkill) : '확인하기';
       return { tone: 'attn', text: '내 차례 · ' + verb };
     }
     var ph = window.BHLogic.phaseSide(s);  // 승인 기다림 · PR #n / 끝 · PR #n 합쳐짐(내 차례로 세지 않는다)
@@ -3741,6 +3745,7 @@
         var d = r.ok ? r.data : null;
         conn.gh = !r.ok ? '확인 못 함 · ' + (r.error && r.error.message || '읽지 못했어')
           : d && d.state === 'unknown' ? '확인 못 함 · ' + (d.reason || 'gh 로 읽지 못했어')
+          : d && d.state === 'no' && d.github === false ? 'GitHub 저장소가 아니야(' + (d.reason || '원격이 GitHub 가 아니야') + ')'  // 승인자가 아니라서 'no' 인 것과 다르다(github 가 false 일 때만)
           : d && d.loading ? '확인하는 중이야' : '연결돼 있어 (gh 로 PR 정보를 읽었어)';
       }).then(paintConn);
       ui.flowsFor(cwd).then(function (r) {

@@ -30,14 +30,45 @@
   function arr(v) { return Array.isArray(v) ? v : []; }
   function lower(v) { return String(v == null ? '' : v).toLowerCase(); }
 
-  function groupOf(s) {
-    var g;
+  /* 내 차례(#1027 D5): 사람이 실제로 답할 대기 요청(승인·질문·계획·MCP 질문)이 있는 세션만 센다.
+     main 에서 쉬는 세션의 start·deliver 추정(turnSkill)과 글로 물은 듯하다는 추정(askedInText)은 내 차례가 아니다(D-3). 남의 승인 대기도 아니다.
+     openIds(s) 는 화면이 아는 아직 답 안 한 요청 번호 목록(없으면 서버가 준 pendingRequestIds). 서버가 todo 라고 해도 이게 비면 내 차례가 아니다. */
+  var NO_TURN_TEXT = '지금 네가 할 일은 없어';
+  function openIdsOf(s, openIds) { return arr(typeof openIds === 'function' ? openIds(s) : s.pendingRequestIds); }
+  // 작업 브랜치에 올릴 변경이 있는 세션(deliver 차례)은 내 차례다(시안 G-11 "요구사항 올리기"). main 에서 쉬는 세션(start)·남의 승인 대기(prs)는 아니다(D5)
+  function deliverTurn(s) { return s.turnSkill === 'deliver' && s.status !== 'running' && s.status !== 'starting' && s.status !== 'ended'; }
+  function groupOf(s, openIds) {
+    var busy = s.status === 'running' || s.status === 'starting', g;
     if (s.group === 'todo' || s.group === 'running' || s.group === 'idle') g = s.group;
-    else if (arr(s.pendingRequestIds).length || s.turnSkill || s.askedInText) g = 'todo';
-    else g = s.status === 'running' || s.status === 'starting' ? 'running' : 'idle';
+    else g = arr(s.pendingRequestIds).length || deliverTurn(s) ? 'todo' : busy ? 'running' : 'idle';
+    if (g === 'todo' && !openIdsOf(s, openIds).length && !deliverTurn(s)) g = busy ? 'running' : 'idle';
     // 시안 G-24: 내 PR 의 검사가 실패한 세션(일하는 중 아님·끝난 세션 아님)은 고칠 차례라 내 차례로 센다. 막힘(✕·?)은 호출한 쪽이 따로 거른다.
     if (g === 'idle' && s.status !== 'ended' && prNeedsFix(s)) return 'todo';
     return g;
+  }
+  /* 내 차례 항목 목록: 띠·알림·레일·홈 타일이 모두 이 목록의 길이를 쓴다. 항목 하나 = 답할 요청 하나, 고칠 PR 하나, 또는 올릴 차례 하나.
+     { s, rid, kind: 'request' | 'fix' | 'turn' }. 막힘·확인 못 함·끝난 세션은 따로 센다. */
+  function turnItems(list, openIds) {
+    var out = [];
+    arr(list).forEach(function (s) {
+      if (!s || s.status === 'ended' || blockOf(s) || groupOf(s, openIds) !== 'todo') return;
+      var ids = openIdsOf(s, openIds);
+      if (ids.length) ids.forEach(function (rid) { out.push({ s: s, rid: rid, kind: 'request' }); });
+      else if (prNeedsFix(s) || !deliverTurn(s)) out.push({ s: s, rid: '', kind: 'fix' });  // 고칠 PR 이 올릴 차례보다 먼저(전과 같은 순서)
+      else out.push({ s: s, rid: '', kind: 'turn' });  // 올릴 차례(시안 G-11)
+    });
+    return out;
+  }
+  /* 목록 순서(#1027 D-6): 묶음(내 차례·막힘 → 일하는 중 → 쉬는 중 → 끝남)은 지키고, 같은 묶음 안에서는 세션 시작 시각(없으면 id)으로 고정한다.
+     상태가 바뀌어도(updatedAt 이 움직여도) 같은 묶음 안에서 순서가 흔들리지 않는다. */
+  var GROUP_RANK = { todo: 0, running: 1, idle: 2 };
+  function sessionRank(s, openIds) { return s.status === 'ended' ? 3 : blockOf(s) ? 0 : GROUP_RANK[groupOf(s, openIds)]; }
+  function sessionOrder(a, b, openIds) {
+    var d = sessionRank(a, openIds) - sessionRank(b, openIds);
+    if (d) return d;
+    var ta = typeof a.startedAt === 'number' ? a.startedAt : 0, tb = typeof b.startedAt === 'number' ? b.startedAt : 0;
+    if (ta !== tb) return tb - ta;
+    return String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0;
   }
 
   /* 훅이 막아 아직 풀리지 않은 세션(#790). { kind: 'blocked'(✕ 막힘) | 'cannot_check'(? 확인 못 함), t } 또는 null.
@@ -59,12 +90,12 @@
     return b && b.open === true ? { kind: b.kind === 'cannot_check' ? 'cannot_check' : 'blocked', t: b.t } : null;
   }
   /* 세션을 세는 갈래. 막힘·확인 못 함은 내 차례와 따로 센다(내 차례 숫자에 섞지 않는다). */
-  function counts(list) {
+  function counts(list, openIds) {
     var c = { total: 0, running: 0, todo: 0, idle: 0, blocked: 0, unsure: 0 };
     list.forEach(function (s) {
       c.total++;
       var b = blockOf(s);
-      if (b) c[b.kind === 'cannot_check' ? 'unsure' : 'blocked']++; else c[groupOf(s)]++;
+      if (b) c[b.kind === 'cannot_check' ? 'unsure' : 'blocked']++; else c[groupOf(s, openIds)]++;
     });
     return c;
   }
@@ -268,9 +299,10 @@
     if (CHECK_STATES.done.indexOf(st) >= 0) return 'done';
     if (CHECK_STATES.run.indexOf(st) >= 0) return 'run';
     if (CHECK_STATES.fail.indexOf(st) >= 0) return 'fail';
+    if (st === 'skipped') return 'skipped';
     return 'todo';
   }
-  var CHECK_LABEL = { done: '됐어', run: '하는 중', fail: '다시 필요', todo: '아직' };
+  var CHECK_LABEL = { done: '됐어', run: '하는 중', fail: '다시 필요', skipped: '건너뜀', todo: '아직' };
   // 자동 점검이 아직 안 끝났는가(새 세션이 첫 일을 하기 전). 건너뛴 항목은 끝난 것으로 본다.
   function autoChecksOpen(s) {
     return arr(s && s.startChecks).some(function (c) { return c && AUTO_CHECKS.indexOf(c.id) >= 0 && lower(c.state) === 'pending'; });
@@ -467,9 +499,14 @@
   /* ---- 세션 카드 ---- */
   function prBadge(pr) {
     if (!pr || !pr.number) return null;
-    return { number: pr.number, url: pr.url || '', title: pr.title || '', text: CHECK_TEXT[pr.checks] || CHECK_TEXT.none, checks: pr.checks || 'none' };
+    var text = CHECK_TEXT[pr.checks] || CHECK_TEXT.none, st = String(pr.state || '').toUpperCase();
+    if (pr.awaitApproval && pr.checks !== 'fail' && pr.checks !== 'pending') text = '승인 기다리는 중';
+    if (st === 'MERGED') text = '합쳐짐';  // 병합·닫힌 PR 에 남은 검사 상태(진행 중 등)를 보이지 않는다(#1027 실사용 시험: 합쳐진 PR 이 "검사 진행 중")
+    else if (st === 'CLOSED') text = '닫힘';
+    return { number: pr.number, url: pr.url || '', title: pr.title || '', text: text, checks: pr.checks || 'none' };
   }
   // 내 PR 이 열려 있고 자동 검사가 실패했다 = 고쳐야 할 PR(홈 G-24). 검사 결과가 없거나 진행 중이면 아니다.
+  // 사람 승인을 기다리는 검사(risk-gate·ssot-approval)의 실패는 서버가 checks 에 넣지 않는다(awaitApproval 로 따로 알린다) — 고칠 일이 아니라 승인 대기다(#1027).
   function prNeedsFix(s) {
     var pr = s && s.flowPr;
     return !!(pr && pr.number && String(pr.state || '').toUpperCase() === 'OPEN' && pr.checks === 'fail');
@@ -500,6 +537,10 @@
       var st = String(pr.state || '').toUpperCase();
       return st === 'MERGED' ? { value: 'PR #' + pr.number + ' 합쳐짐', tone: 'g' } : st === 'CLOSED' ? { value: 'PR #' + pr.number + ' 닫힘', tone: 'w' } : { value: 'PR #' + pr.number + ' 검토 중', tone: 'g' };
     }
+    // flowPr 를 아직 못 읽었어도 이 세션이 gh pr create 로 만든 PR(prCreated)이 있으면 번호를 먼저 보인다(#1027 D-1).
+    // prLinks 는 PR 목록·상태 출력에 스친 남의 PR 주소까지 담아(실사용 시험: 다른 브랜치의 #32 가 보임) 갈래 세션에는 쓰지 않는다
+    var made = /\/pull\/(\d+)/.exec(String(s && s.prCreated || ''));
+    if (made) return { value: 'PR #' + made[1], tone: '' };
     if (arr(s && s.flowUnknown).length) return { value: '확인 못 함', tone: 'u' };
     if (s && s.flowId) return { value: 'PR 아직', tone: 'w' };
     var link = arr(s && s.prLinks).map(function (p) { return typeof p === 'string' ? p : p && p.url; }).map(function (u) { return /\/pull\/(\d+)/.exec(u || ''); }).filter(Boolean)[0];
@@ -718,7 +759,7 @@
     notifyEvents: notifyEvents,
     devReadyView: devReadyView, kindHint: kindHint, devBlock: devBlock, kindConflict: kindConflict,
     memoryOf: memoryOf, issueOf: issueOf, reqIds: reqIds, progressOf: progressOf, sessionStrip: sessionStrip, shortStepName: shortStepName, stepShort: stepShort, prLines: prLines, checksFailed: checksFailed, phaseSide: phaseSide, finishedBand: finishedBand, phaseLine: phaseLine, nextFirst: nextFirst, nextShort: nextShort, nextBase: nextBase, ASK_TEXT: ASK_TEXT, hasBatchim: hasBatchim, prMerged: prMerged,
-    BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, blockOf: blockOf, counts: counts, summaryText: summaryText,
+    BAR_LABEL: BAR_LABEL, DEFAULT_TOOLS: DEFAULT_TOOLS, groupOf: groupOf, turnItems: turnItems, sessionRank: sessionRank, sessionOrder: sessionOrder, NO_TURN_TEXT: NO_TURN_TEXT, blockOf: blockOf, counts: counts, summaryText: summaryText,
     barSteps: barSteps, currentStep: currentStep, orderText: orderText, nextAction: nextAction, skipReasonError: skipReasonError,
     NO_FLOW_ID: NO_FLOW_ID, nextOptions: nextOptions, jobOutcome: jobOutcome, visibleTools: visibleTools, projectNotice: projectNotice,
     formsNotice: formsNotice, FORMS_MISSING_SHORT: FORMS_MISSING_SHORT, FORMS_MISSING_TEXT: FORMS_MISSING_TEXT,

@@ -189,9 +189,76 @@ const cases = {
     assert.ok(L.reloadResult({ queued: true }).includes('끝나면'));
   },
   summary_counts() {
-    const list = [{ id: 1, group: 'todo' }, { id: 2, group: 'running' }, { id: 3, status: 'running' }, { id: 4 }, { id: 5, pendingRequestIds: ['r'] }];
+    const list = [{ id: 1, group: 'todo', pendingRequestIds: ['q'] }, { id: 2, group: 'running' }, { id: 3, status: 'running' }, { id: 4 }, { id: 5, pendingRequestIds: ['r'] }];
     assert.strictEqual(L.summaryText(L.counts(list)), '세션 5개 · 일하는 중 2 · 내 차례 2 · 쉬는 중 1');
     assert.strictEqual(L.summaryText(L.counts([])), '세션 0개 · 일하는 중 0 · 내 차례 0 · 쉬는 중 0');
+  },
+  my_turn_is_only_real_requests() {
+    // #1027 D5·D-3: main 에서 쉬는 세션(start)·남의 승인 대기(prs) 짐작, 글로 물은 추정(askedInText), 답할 요청 없는 서버 todo 는 내 차례가 아니다.
+    // 올릴 변경이 있는 작업 브랜치(deliver)는 내 차례다(시안 G-11)
+    assert.strictEqual(L.groupOf({ id: 1, status: 'idle', turnSkill: 'deliver' }), 'todo');
+    assert.strictEqual(L.groupOf({ id: 11, status: 'idle', turnSkill: 'start' }), 'idle');
+    assert.strictEqual(L.groupOf({ id: 12, status: 'idle', turnSkill: 'prs' }), 'idle');
+    assert.strictEqual(L.groupOf({ id: 13, status: 'running', turnSkill: 'deliver' }), 'running');
+    assert.strictEqual(L.groupOf({ id: 2, status: 'idle', askedInText: true }), 'idle');
+    assert.strictEqual(L.groupOf({ id: 3, status: 'idle', group: 'todo' }), 'idle');
+    assert.strictEqual(L.groupOf({ id: 4, status: 'starting' }), 'running');
+    assert.strictEqual(L.groupOf({ id: 5, status: 'waiting', group: 'todo', pendingRequestIds: ['r1'] }), 'todo');
+    // 화면이 이미 처리됐다고 아는 요청(openIds 가 비움)이면 서버가 todo 라 해도 내 차례가 아니다
+    assert.strictEqual(L.groupOf({ id: 6, status: 'waiting', group: 'todo', pendingRequestIds: ['r1'] }, () => []), 'idle');
+    assert.strictEqual(L.groupOf({ id: 7, status: 'running', group: 'todo', pendingRequestIds: ['r1'] }, () => []), 'running');
+    const pr = { number: 9, state: 'OPEN', checks: 'fail' };
+    const list = [
+      { id: 'a', status: 'waiting', group: 'todo', pendingRequestIds: ['r1', 'r2'] },
+      { id: 'b', status: 'idle', turnSkill: 'start', askedInText: true },
+      { id: 'c', status: 'idle', flowPr: pr },
+      { id: 'd', status: 'ended', pendingRequestIds: ['r3'] },
+      { id: 'e', status: 'idle', flowPr: pr, lastBlock: { kind: 'blocked', open: true } }
+    ];
+    // 띠·알림·레일·홈 타일은 이 한 목록의 길이를 쓴다: 요청 둘 + 고칠 PR 하나. 추정·끝난 세션·막힘은 뺀다
+    assert.deepStrictEqual(L.turnItems(list).map(t => t.s.id + ':' + t.kind + ':' + t.rid), ['a:request:r1', 'a:request:r2', 'c:fix:']);
+    assert.deepStrictEqual(L.turnItems([{ id: 'x', status: 'idle', turnSkill: 'deliver' }]).map(t => t.kind), ['turn']);
+    assert.deepStrictEqual(L.turnItems([{ id: 'y', status: 'idle', turnSkill: 'deliver', flowPr: pr }]).map(t => t.kind), ['fix']);  // 고칠 PR 이 먼저
+    assert.strictEqual(L.NO_TURN_TEXT, '지금 네가 할 일은 없어');
+  },
+  session_order_is_stable_within_a_group() {
+    // #1027 D-6: 묶음은 지키고 같은 묶음 안에서는 시작 시각(없으면 id)으로 고정 — updatedAt 이 움직여도 순서는 그대로
+    const mk = (id, startedAt, updatedAt, extra) => Object.assign({ id, status: 'idle', startedAt, updatedAt }, extra || {});
+    const list = [mk('old', 100, 900), mk('new', 300, 100), mk('mid', 200, 500), mk('run', 50, 1, { status: 'running' }),
+      mk('done', 400, 1, { status: 'ended' }), mk('ask', 10, 1, { status: 'waiting', pendingRequestIds: ['r'] })];
+    const order = (l) => l.slice().sort((a, b) => L.sessionOrder(a, b)).map(s => s.id).join(',');
+    assert.strictEqual(order(list), 'ask,run,new,mid,old,done');
+    list.forEach(s => { s.updatedAt = 1000 - s.updatedAt; });  // 상태가 바뀌어 updatedAt 이 뒤집혀도
+    assert.strictEqual(order(list), 'ask,run,new,mid,old,done');
+    // 시작 시각이 없으면 id
+    assert.strictEqual(['b', 'a'].map(id => ({ id, status: 'idle' })).sort((x, y) => L.sessionOrder(x, y)).map(s => s.id).join(','), 'a,b');
+  },
+  check_state_knows_skipped() {
+    // #1027 B-3: 건너뛴 점검을 "아직" 으로 읽지 않는다
+    const got = L.startChecks({ startChecks: [{ id: 'sync', state: 'skipped' }, { id: 'version', state: 'pending' }] });
+    assert.deepStrictEqual(got.map(c => c.state + ':' + c.label), ['skipped:건너뜀', 'todo:아직']);
+  },
+  pr_cell_prefers_session_pr_links() {
+    // #1027 D-1: flowPr 가 없어도 이 세션이 gh pr create 로 만든 PR(prCreated)이 있으면 "PR 아직" 이 아니라 번호를 보인다.
+    // 갈래 세션은 prLinks(출력에 스친 남의 PR 주소)를 쓰지 않는다 — 실사용 시험에서 다른 브랜치의 #32 가 보였다
+    const steps = [{ id: 's', name: 's', state: 'active' }];
+    const cell = (extra) => L.sessionStrip(Object.assign({ flowId: 'f', flowSteps: steps }, extra)).slice(-1)[0];
+    assert.strictEqual(cell({ prCreated: 'https://github.com/o/r/pull/77' }).value, 'PR #77');
+    assert.strictEqual(cell({ prCreated: 'https://github.com/o/r/pull/78', flowUnknown: ['gh'] }).value, 'PR #78');
+    assert.strictEqual(cell({ prLinks: ['https://github.com/o/r/pull/32'] }).value, 'PR 아직');
+    assert.strictEqual(cell({}).value, 'PR 아직');
+    assert.strictEqual(cell({ flowPr: { number: 5, state: 'OPEN' }, prCreated: 'https://github.com/o/r/pull/77' }).value, 'PR #5 검토 중');
+  },
+  pr_badge_says_waiting_for_approval() {
+    // #1027 항목 12: 승인 대기 검사의 실패는 서버가 checks 에서 빼고 awaitApproval 로 알린다 — 고치기가 아니라 승인 기다림
+    const pr = { number: 3, state: 'OPEN', checks: 'pass', awaitApproval: true };
+    assert.strictEqual(L.prBadge(pr).text, '승인 기다리는 중');
+    assert.strictEqual(L.prBadge({ number: 3, state: 'OPEN', checks: 'fail', awaitApproval: true }).text, '검사 실패');
+    assert.strictEqual(L.prNeedsFix({ flowPr: pr }), false);
+    assert.strictEqual(L.groupOf({ id: 1, status: 'idle', flowPr: pr }), 'idle');
+    // 실사용 시험: 합쳐진 PR 이 표에서 "검사 진행 중" 으로 보였다 — 병합·닫힘이 검사 상태보다 먼저다
+    assert.strictEqual(L.prBadge({ number: 34, state: 'MERGED', checks: 'pending' }).text, '합쳐짐');
+    assert.strictEqual(L.prBadge({ number: 35, state: 'CLOSED', checks: 'fail' }).text, '닫힘');
   },
   fix_pr_counts_as_todo() {
     // 시안 G-24: 검사 실패한 내 PR 세션은 내 차례. 일하는 중·끝난 세션·막힘은 아니다
@@ -512,9 +579,9 @@ const cases = {
     assert.strictEqual(find(root4, e => e.attrs['data-call']).length, 0);
     // 내 차례가 여러 건이어도 카드는 한 장(가장 오래 기다린 것) + "외 n건" 알약. 누르면 펼치고 다시 누르면 접는다. (#667)
     const many = [
-      { id: 'n1', title: '새것', cwd: '/w/a', group: 'todo', updatedAt: 300 },
-      { id: 'n2', title: '가장 오래', cwd: '/w/b', group: 'todo', updatedAt: 100 },
-      { id: 'n3', title: '중간', cwd: '/w/c', group: 'todo', updatedAt: 200 },
+      { id: 'n1', title: '새것', cwd: '/w/a', group: 'todo', pendingRequestIds: ['q1'], updatedAt: 300 },
+      { id: 'n2', title: '가장 오래', cwd: '/w/b', group: 'todo', pendingRequestIds: ['q2'], updatedAt: 100 },
+      { id: 'n3', title: '중간', cwd: '/w/c', group: 'todo', pendingRequestIds: ['q3'], updatedAt: 200 },
     ];
     const { kit: k5 } = makeKit({ 'GET /api/approvals': { state: 'no' } }, many);
     const root5 = h('div'); loadUI(k5).homeView(root5); await tick(); await tick();
@@ -1118,6 +1185,7 @@ const cases = {
   const name = process.argv[3];
   assert.ok(cases[name], '없는 시험 ' + name);
   await cases[name]();
+  process.exit(0);  // 홈의 1분 타이머(setInterval)가 node 를 붙잡아 두지 않게
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });
 """
 
