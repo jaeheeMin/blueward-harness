@@ -91,6 +91,41 @@
       return b;
     }
 
+    /* 상태 칩(시안 .st): 색 + 모양. 내 차례 세모 · 일하는 중 채운 동그라미 · 승인 기다림 네모 · 쉬는 중 빈 동그라미 · 막힘 마름모 · 확인 못 함 점선 동그라미 · 끝 체크 */
+    var ST_TEXT = { turn: '내 차례', run: '일하는 중', wait: '승인 기다림', idle: '쉬는 중', blocked: '막힘', unk: '확인 못 함', done: '끝남' };
+    function stChip(state) { return h('span', { class: 'po-stc po-stc-' + state, text: ST_TEXT[state] || PS.LABEL[state] }); }
+
+    /* 결재란(시안 .kyul): 칸은 그 세션 갈래의 실제 단계(BHLogic.barSteps — 홈 표의 단계 막대와 같은 값)이고 이름은 짧은 이름(stepShort).
+       끝난 칸은 붉은 도장, 지금 칸은 남색 줄. 갈래가 없으면 칸이 없고 자리만 비운다(줄 정렬이 흔들리지 않게 자리 폭은 목록에서 가장 긴 결재란에 맞춘다). */
+    var KYUL_CELL = 64;  // 칸 하나의 폭(px). 갈래 단계의 짧은 이름은 여섯 글자 이하(workflow.json)
+    function kyul(steps) {
+      if (!steps.length) return null;
+      var now = steps.filter(function (x) { return x.state === 'now'; })[0], fin = steps.every(function (x) { return x.state === 'done' || x.state === 'skipped'; });
+      return h('span', { class: 'po-kyul', role: 'img', 'aria-label': '결재란: ' + (fin ? '모든 단계 끝' : now ? L.stepShort(now) + ' 단계' : '단계 확인 못 함') },
+        steps.map(function (st) {
+          return h('span', { class: st.state === 'done' ? 'done' : st.state === 'now' ? 'now' : '', title: st.name }, h('small', { text: L.stepShort(st) }), h('em'));
+        }));
+    }
+
+    /* 내 세션(시안 section.panel.cols + ul.ss): 두 단(1100px 이하 한 단). 줄 전체가 그 세션 링크. 줄 순서는 Sauce 홈 표와 같은 목록이다.
+       둘째 줄은 팀 이름, 갈래는 있어도 팀이 없으면 갈래 이름, 갈래가 없으면 "정해진 갈래 없음"(Sauce 표의 둘째 줄과 같은 글). */
+    function sessionsPanel(list) {
+      var maxN = 0, rows;
+      var all = list.map(function (s) { var steps = s.flowId ? L.barSteps(s) : []; if (steps.length > maxN) maxN = steps.length; return { s: s, steps: steps }; });
+      rows = all.map(function (x) {
+        var s = x.s, st = PS.stateOf(s, L), name = s.title || HK.folderName(s) || '이름 없는 세션';
+        var sub = teamOf(s.flowId) || (s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음');
+        return h('li', { 'data-session': s.id }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ssa' },
+          h('span', { class: 'po-ava', 'aria-hidden': 'true', text: Array.from(name)[0] || '?' }),
+          h('div', { class: 'po-rt' }, h('div', { class: 't1', text: name, title: name }), h('div', { class: 't2', text: sub })),
+          h('span', { class: 'po-kyulc', style: 'width:' + (maxN ? maxN * KYUL_CELL + 2 : 0) + 'px' }, kyul(x.steps)),
+          stChip(st)));
+      });
+      return h('section', { class: 'light po-panel po-cols', 'aria-labelledby': 'po-ss-h' },
+        h('div', { class: 'po-ph' }, h('h2', { id: 'po-ss-h', text: '내 세션 ' + list.length + '개' })),
+        h('ul', { class: 'po-mine' }, rows));
+    }
+
     /* slots: { sceneHost, whatsSlot, scene() — 지금 붙은 장면 제어(focus(id) 를 줄 수 있으면 준다) } */
     function view(root, slots) {
       var gone = false, topId = null, items = [], officeOn = false, foc = null, focusId = null, memoId = null;
@@ -160,13 +195,14 @@
       function placeMemo() {
         if (memo.hidden) return;
         var narrow = typeof matchMedia === 'function' && matchMedia(NARROW).matches;
-        if (!foc || narrow || foc.id !== memoId) { memo.style.left = ''; memo.style.top = ''; memo.style.removeProperty('--tail'); memo.classList.remove('is-flip'); return; }
+        if (!foc || narrow || foc.id !== memoId) { memo.style.left = ''; memo.style.top = ''; memo.style.removeProperty('--tail'); memo.classList.remove('is-flip'); memo.classList.toggle('is-loose', !narrow); return; }  // 그 세션이 장면에 없으면 기본 자리에 꼬리 없이(is-loose)
         var host = slots.sceneHost, W = stageFrame.clientWidth, H = stageFrame.clientHeight, mw = memo.offsetWidth, mh = memo.offsetHeight;
         var ox = host.offsetLeft, oy = host.offsetTop, hx = ox + foc.x, hy = oy + foc.y;
         var x = hx + 24, flip = false, y = hy - 44;
         if (x + mw > W - 8) { x = hx - 24 - mw; flip = true; }
         x = Math.max(8, Math.min(x, W - 8 - mw)); y = Math.max(8, Math.min(y, H - 8 - mh));
         memo.style.left = Math.round(x) + 'px'; memo.style.top = Math.round(y) + 'px';
+        memo.classList.remove('is-loose');
         memo.style.setProperty('--tail', Math.round(Math.max(14, Math.min(hy - y - 6, mh - 26))) + 'px');
         memo.classList.toggle('is-flip', flip);
       }
@@ -283,7 +319,7 @@
         paintDeck();
         paintMemo();
         restSlot.appendChild(h('div', { class: 'tiles2 po-tiles' }, tile('내 차례', String(turnCount), turnCount ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), stats.prTile, stats.weekTile, stats.tbTile));
-        restSlot.appendChild(HK.homeTable(list));  // 내 세션 표(작업·단계·번호·기억·상태): Sauce 홈과 같은 칸
+        restSlot.appendChild(sessionsPanel(list));  // 내 세션 두 단 목록(글자 아바타·결재란·상태 칩). Sauce 홈은 표(HK.homeTable) 그대로
         restSlot.appendChild(foot);
         restSlot.appendChild(projects);
         HK.recentCard(recent, stats.showWeek);
