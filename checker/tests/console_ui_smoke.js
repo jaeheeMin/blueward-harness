@@ -32,6 +32,7 @@ El.prototype = {
   nodeType: 1,
   get tagName() { return this.tag.toUpperCase(); },
   appendChild(c) { if (c.parentNode) c.parentNode.removeChild(c); c.parentNode = this; this.children.push(c); this._text = null; return c; },
+  insertBefore(c, ref) { if (c.parentNode) c.parentNode.removeChild(c); const i = ref ? this.children.indexOf(ref) : -1; c.parentNode = this; if (i < 0) this.children.push(c); else this.children.splice(i, 0, c); this._text = null; return c; },
   removeChild(c) { const i = this.children.indexOf(c); if (i >= 0) this.children.splice(i, 1); c.parentNode = null; return c; },
   get firstChild() { return this.children[0] || null; },
   get lastChild() { return this.children[this.children.length - 1] || null; },
@@ -58,7 +59,7 @@ El.prototype = {
   get textContent() { return this._text !== null ? this._text : this.children.map(t => t.nodeType === 3 ? t.text : t.textContent).join(''); },
   addEventListener(n, f) { (this.listeners[n] = this.listeners[n] || []).push(f); },
   get isConnected() { let e = this; while (e.parentNode) e = e.parentNode; return e === document.body || e === root; },
-  focus() { document.activeElement = this; }, setSelectionRange() {}, dispatchEvent() {}, scrollIntoView(o) { scrolled.push([this.attrs['class'] || this.tag, JSON.stringify(o || {})]); },
+  focus() { document.activeElement = this; }, setSelectionRange() {}, dispatchEvent(e) { (this.listeners[e && e.type] || []).forEach(f => f({ target: this, currentTarget: this })); }, scrollIntoView(o) { scrolled.push([this.attrs['class'] || this.tag, JSON.stringify(o || {})]); },
   contains(o) { while (o) { if (o === this) return true; o = o.parentNode; } return false; },
   get clientWidth() { return 1200; },
   querySelectorAll(sel) {
@@ -97,7 +98,8 @@ const ES_LISTENERS = {};  // 시험이 서버 이벤트(SSE)를 흉내 내려고
 let ES_LAST = null;
 global.EventSource = function () { ES_LAST = this; this.addEventListener = (n, f) => { ES_LISTENERS[n] = f; }; this.close = () => {}; };
 global.AbortController = AbortController;
-global.Event = function () {};
+global.Event = function (type) { this.type = type; };
+global.CSS = { escape: s => String(s).replace(/[^\w-]/g, c => '\\' + c) };  // 브라우저 CSS.escape 흉내(선택자 해석기는 \ 를 풀지 않으니 시험은 글자·숫자·-·_ 만 쓴다)
 
 const DATA = JSON.parse(require('fs').readFileSync(process.argv[4], 'utf8'));
 Object.assign(LS, DATA['__ls'] || {});
@@ -148,6 +150,8 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
     if (act.visible !== undefined) { document.visibilityState = act.visible ? 'visible' : 'hidden'; document.hasFocus = () => !!act.visible; continue; }
     if (act.emit) { const f = ES_LISTENERS[act.emit[0]]; if (f) f({ data: JSON.stringify(act.emit[1]) }); else errors.push('이벤트 구독 없음 ' + act.emit[0]); await tick(400); continue; }
     if (act.clickNote !== undefined) { const o = noteObjs[act.clickNote]; if (o && o.onclick) o.onclick(); else errors.push('누를 알림이 없음'); await tick(80); continue; }
+    if (act.theme) { window.BH.setTheme(act.theme); (DOC_LISTENERS['bh-theme'] || []).slice().forEach(f => f({ detail: act.theme })); await tick(80); continue; }  // {"theme": "post"|"sauce"} 테마 바꾸기(가짜 document 는 이벤트를 안 쏘니 리스너를 직접 부른다)
+    if (act.read) { const el = root.querySelectorAll(act.read)[act.index || 0]; out_values.push(el ? el.value : null); continue; }  // {"read": 선택자} 입력칸의 지금 값
     if (act.type) {  // {"type": 선택자, "value": 글, "index": n} 입력칸에 글을 넣고 input 이벤트를 보낸다(붙여 넣기 흉내)
       const el = root.querySelectorAll(act.type)[act.index || 0];
       if (!el) { errors.push('입력칸이 없음 ' + act.type); continue; }
@@ -177,6 +181,8 @@ const tick = (n) => new Promise(r => setTimeout(r, n || 20));
   out.dot = root.querySelectorAll('.nb-dot').length;
   out.limits = root.querySelector('.lim') ? root.querySelector('.lim').textContent : '';
   out.limitsTitle = root.querySelector('.lim') ? root.querySelector('.lim').attrs.title : '';
+  out.activeId = document.activeElement && document.activeElement.attrs ? document.activeElement.attrs.id || '' : '';
+  out.pressed =Array.from(root.querySelectorAll('.qopt')).map(b => b.attrs['aria-pressed']);
   out.head =root.querySelector('header') ? root.querySelector('header').textContent : '';
   
   require('fs').writeFileSync(process.argv[6], JSON.stringify(out, null, 1), 'utf8');

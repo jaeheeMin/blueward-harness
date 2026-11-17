@@ -1176,11 +1176,12 @@ const store = seed ? JSON.parse(seed) : {};
 global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
 const style = {};
 global.window = {};
-const dataset = {}, events = [];
+const dataset = {}, events = [], attrs = {};
 global.CustomEvent = function (n, o) { this.type = n; this.detail = o && o.detail; };
-global.document = { documentElement: { style, dataset }, dispatchEvent: e => events.push(e.detail) };
+global.document = { documentElement: { style, dataset, setAttribute: (k, v) => { attrs[k] = String(v); }, removeAttribute: k => { delete attrs[k]; } }, dispatchEvent: e => events.push(e.detail) };
 require(file);
 const BH = window.BH;
+const attrsInit = Object.assign({}, attrs), prefsInit = [BH.getFx(), BH.getMode(), BH.modeOf()];
 const out = { first: BH.getScale(), zoom: style.zoom, keys: Object.keys(BH).sort().join(','), theme0: [BH.getTheme(), dataset.theme] };
 BH.setScale('1.15');
 out.afterSet = [BH.getScale(), store['bh-zoom'], style.zoom];
@@ -1192,6 +1193,20 @@ BH.setTheme('nonsense');
 out.themeBad = [BH.getTheme(), store['bh-theme'], dataset.theme];
 out.themeIds = BH.THEMES.map(x => x.id).join(',');
 out.events = events.join(',');
+// Post 전용 설정: 효과 강도(bh-fx) · 밝기(bh-mode). html[data-fx]·[data-mode] 는 Post 일 때만 걸린다.
+out.attrs0 = attrsInit;
+out.prefs0 = prefsInit;
+BH.setFx('2'); BH.setFx('9');
+out.fx = [BH.getFx(), store['bh-fx'], attrs['data-fx']];
+BH.setMode('dark'); BH.setMode('zzz');
+out.mode = [BH.getMode(), store['bh-mode'], attrs['data-mode'], BH.modeOf()];
+BH.setMode('auto');
+out.modeAuto = [BH.getMode(), attrs['data-mode'], BH.modeOf()];
+BH.setTheme('sauce');
+out.attrsSauce = Object.assign({}, attrs);
+BH.setTheme('post');
+out.attrsBack = Object.assign({}, attrs);
+out.events2 = events.slice(2).join(',');
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -1207,7 +1222,7 @@ def _theme_run(seed: dict | None = None) -> dict:
 def test_theme_js_only_keeps_text_scale():
     r = _theme_run()
     assert r["first"] == "1" and r["zoom"] == "1"  # 시안(가)대로 보통 = 배율 없음(#721)
-    assert r["keys"] == "SCALES,THEMES,getScale,getTheme,read,setScale,setTheme,write"  # 글자 크기 + 테마(#1013). 옛 디자인 전환은 없다
+    assert r["keys"] == "FX,MODES,SCALES,THEMES,getFx,getMode,getScale,getTheme,modeOf,read,setFx,setMode,setScale,setTheme,write"  # 글자 크기 + 테마(#1013). 옛 디자인 전환은 없다
     assert r["afterSet"] == ["1.15", "1.15", "1.15"]
     assert r["afterBad"] == ["1.15", "1.15"]  # 모르는 값은 저장도 적용도 하지 않는다(바로 앞 값 유지)
     assert _theme_run({"bh-zoom": "0.9"})["zoom"] == "0.9"
@@ -1228,15 +1243,172 @@ def test_theme_js_saves_and_applies_theme():
     assert _theme_run({"bh-theme": "zzz"})["theme0"] == ["sauce", "sauce"]  # 모르는 저장값은 Sauce
 
 
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_theme_js_saves_post_fx_and_mode():
+    # Post 전용 설정(D단계): 효과 강도 0·1·2(기본 1) · 밝기 auto·light·dark(기본 auto = 테마 기본 = 밝게). Sauce 에는 data 속성이 걸리지 않는다.
+    r = _theme_run()
+    assert r["attrs0"] == {}  # 기본 테마는 Sauce 라서 data-fx·data-mode 가 없다
+    assert r["prefs0"] == ["1", "auto", "light"]
+    assert r["fx"] == ["2", "2", "2"]  # 고르면 저장하고 바로 건다(모르는 '9' 는 저장도 적용도 하지 않는다)
+    assert r["mode"] == ["dark", "dark", "dark", "dark"]
+    assert r["modeAuto"] == ["auto", "light", "light"]  # 테마 기본 = Post 의 기본 밝기(밝게). 운영체제 설정은 따르지 않는다
+    assert r["attrsSauce"] == {}  # Sauce 로 바꾸면 속성을 뗀다
+    assert r["attrsBack"] == {"data-fx": "2", "data-mode": "light"}  # 다시 Post 면 저장된 값으로
+    assert r["events2"] == "fx,mode,mode,sauce,post"  # 바뀔 때 bh-pref(fx·mode) 이벤트 — 장면과 오늘 화면이 새로 고침 없이 반영
+    post = _theme_run({"bh-theme": "post", "bh-fx": "0", "bh-mode": "dark"})
+    assert post["attrs0"] == {"data-fx": "0", "data-mode": "dark"}  # 첫 페인트 전에 건다
+    assert post["prefs0"] == ["0", "dark", "dark"]
+    bad = _theme_run({"bh-theme": "post", "bh-fx": "9", "bh-mode": "zzz"})
+    assert bad["attrs0"] == {"data-fx": "1", "data-mode": "light"}  # 모르는 저장값은 기본
+
+
+def test_post_fx_and_dark_rules_are_post_only():
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert css.count(':root[data-theme="post"][data-mode="dark"] {') == 1  # 어두운 값은 이 한 블록
+    assert ':root[data-theme="post"][data-fx="0"]' in css  # 차분(움직임 0)
+    scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    assert "window-b.svg" in scene and "calm()" in scene and "bh-pref" in scene  # 화려 = 창문 구름, 차분 = 장면 없음, 설정이 바뀌면 다시
+    settings = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "themeNow === 'post'" in settings and "BH.setFx" in settings and "BH.setMode" in settings
+
+
 def test_post_theme_css_stays_under_data_theme_post():
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     body = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    body = re.sub(r"@keyframes\s+[\w-]+\s*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}", "", body)  # 키프레임 이름은 post 전용(po-*)이라 통째로 뺀다
+    assert all(k.startswith("po-") for k in re.findall(r"@keyframes\s+([\w-]+)", css))
     for sel in re.findall(r"([^{}]+)\{", body):
+        if sel.strip().startswith("@"):  # @media·@container 는 안의 규칙이 따로 검사된다
+            continue
         for part in sel.split(","):
             assert part.strip().startswith(':root[data-theme="post"]'), part.strip()  # Sauce 에는 한 줄도 닿지 않는다
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert html.index('src="/theme.js"') < html.index("</head>") and 'src="/theme.js"' in html.split("</head>")[0]  # 첫 페인트 전 동기 로드
     assert 'href="/theme-post.css"' in html and 'src="/theme-post.js"' in html
+
+
+_POST_LOGIC_NODE = r"""
+const path = require('path');
+const dir = process.argv[1];
+const L = require(path.join(dir, 'flow-logic.js'));
+const P = require(path.join(dir, 'post-logic.js'));
+const mk = o => Object.assign({ id: 's', status: 'idle' }, o);
+const out = {};
+out.who = P.WHO.join(',');
+out.p = ['a', 'fake-f0906301', 'fake-2c31bdc7', ''].map(P.personOf);
+out.same = P.personOf('fake-f0906301') === P.personOf('fake-f0906301');
+const ids = Array.from({ length: 200 }, (_, i) => 'sess-' + i);
+out.spread = new Set(ids.map(P.personOf)).size;
+out.states = [
+  mk({ pendingRequestIds: ['r1'] }), mk({ status: 'running' }), mk({ lastBlock: { kind: 'blocked', open: true } }), mk({ lastBlock: { kind: 'cannot_check', open: true } }),
+  mk({ flowPr: { number: 3, state: 'OPEN', checks: 'pass' } }), mk({ flowPr: { number: 3, state: 'MERGED' } }), mk({ status: 'ended' }), mk({}),
+  mk({ status: 'running', pendingRequestIds: ['r1'] }), mk({ flowPr: { number: 3, state: 'OPEN', checks: 'fail' } })
+].map(s => P.stateOf(s, L));
+const st = (flowId, name, extra) => mk(Object.assign({ flowId, flowSteps: [{ id: 'x', name }], stepIndex: 0 }, extra));
+out.stations = [
+  mk({}), st('srs', 'SRS 쓰기'), st('srs-export', '백로그 엑셀 뽑기'), st('spec', 'Spec 쓰기'), st('dev', '구현'), st('fix', '고치기'), st('config', '설정'), st('standard', '표준'),
+  st('srs', '올리고 검토 요청하기', { flowPr: { number: 3, state: 'OPEN' } }), st('dev', '합쳐지기 기다리기', { flowPr: { number: 3, state: 'OPEN' } }),
+  st('srs', '올리고 검토 요청하기'), st('spec', 'Spec 쓰기', { flowPr: { number: 3, state: 'MERGED' } }), st('dev', '구현', { flowFinished: true }), mk({ phase: 'approval' }), st('mystery', 'x')
+].map(s => P.stationOf(s, L));
+out.poses = P.STATES.map(P.poseOf).join(',');
+out.tones = P.STATES.map(P.toneOf).join(',');
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason="node 가 없다")
+def test_post_logic_person_state_station():
+    r = subprocess.run([NODE, "-e", _POST_LOGIC_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["who"] == "mint,navy,rose,sunny,sky,sage,kid"
+    assert out["same"] and out["spread"] == 7  # 세션 id 해시: 같은 id 는 늘 같은 사람, 여럿이면 일곱 명이 고루 나온다
+    assert all(x in out["who"].split(",") for x in out["p"])
+    # 가이드 6.3 의 해시(h = h*31 + 문자코드, 부호 없는 32비트)와 같은 값: 'a' = 97 % 7 = 6 → kid
+    assert out["p"][0] == "kid" and out["p"][3] == "mint"
+    # 6.2: 내 차례 > 막힘 > 확인 못 함 > 일하는 중 > 승인 기다림 > 끝 > 쉬는 중. 일하는 중인 세션은 대기 요청이 있어도 내 차례다(groupOf 가 먼저).
+    assert out["states"] == ["turn", "run", "blocked", "unk", "wait", "done", "done", "idle", "turn", "turn"]
+    # 6.1: 합쳐짐 4 · 검토 3 · 개발 2 · 설계 1 · 쓰기 0 · 갈래 없음 2
+    assert out["stations"] == [2, 0, 0, 1, 2, 2, 2, 2, 3, 3, 0, 4, 4, 3, 2]
+    assert out["poses"] == "ask,stuck,stuck,walk,wait,done,walk" and out["tones"] == "turn,blocked,,,,done,"  # 세션·요청 화면 규칙은 아래 test_post_session_logic_filters_info_and_seals
+
+
+_POST_SESSION_NODE = r"""
+const path = require('path');
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const out = {};
+out.filters = P.FILTERS.map(f => f.id).join(',');
+const states = ['turn', 'blocked', 'unk', 'run', 'wait', 'idle', 'done', 'turn'];
+out.counts = P.filterCounts(states);
+out.match = P.FILTERS.map(f => states.map(s => P.filterMatch(f.id, s) ? 1 : 0).join(''));
+out.status = ['✕ 막힘 · 고친 뒤 이어서', '? 확인 못 함 · 검사를 못 했어', '내 차례 · 승인하기', '', null].map(P.statusText);
+out.here = [0, 3, 4, 9, -2].map(P.hereTitle);
+out.lines = P.STATES.map(P.hereLine);
+const cell = (id, value, tone) => ({ id, label: id === 'progress' ? 'AI 진행' : id, value, tone: tone || '' });
+out.info = P.infoRow([cell('step', '1 / 3 쓰기', 'g'), cell('req', 'REQ-007'), cell('pr', 'PR #301', 'w'), cell('progress', '40%')], 'SRS 쓰기').map(c => [c.label, c.value, c.tone]);
+out.infoEmpty = P.infoRow([], '').map(c => c.value).join('|');
+out.insp = P.INSP.join(',');
+out.seal = ['allow', 'allow_session', 'deny', 'answer', 'accept', 'decline', 'cancel', 'nothing'].map(d => P.sealOf(d).text + ':' + P.sealOf(d).tone);
+out.sub = P.sealSub(new Date(2026, 10, 7), '검토 창구');
+out.desk = [['permission', 1], ['plan', 1], ['question', 1], ['elicitation', 4]].map(a => P.sealDesk(a[0], a[1]));
+out.clerk = [P.clerkLine('permission', 0), P.clerkLine('plan', 0), P.clerkLine('question', 0), P.clerkLine('elicitation', 2)];
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason="node 가 없다")
+def test_post_session_logic_filters_info_and_seals():
+    r = subprocess.run([NODE, "-e", _POST_SESSION_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    # 걸러보기: 내 차례 = 내 답 · 막힘 · 확인 못 함, 일하는 중 = 일하는 중 · 승인 기다림, 쉬는 중은 전체에만
+    assert out["filters"] == "all,turn,run,done"
+    assert out["counts"] == {"all": 8, "turn": 4, "run": 2, "done": 1}
+    assert out["match"] == ["11111111", "11100001", "00011000", "00000010"]
+    assert out["status"] == ["막힘 · 고친 뒤 이어서", "확인 못 함 · 검사를 못 했어", "내 차례 · 승인하기", "", ""]
+    assert out["here"] == ["1번 창구 · 쓰기 책상", "4번 창구 · 검토 창구", "5번 창구 · 발송 우체통", "5번 창구 · 발송 우체통", "1번 창구 · 쓰기 책상"]
+    # 가이드 2.4 둘째 줄(반말). STATES 순서: turn blocked unk run wait done idle
+    assert out["lines"] == ["편지를 들고 네 답을 기다려", "창구에서 막혀 있어", "어디 있는지 확인 못 했어", "다음 창구로 걸어가", "의자에 앉아 승인을 기다려", "편지를 다 부쳤어", "다음 창구로 걸어가"]
+    # 정보 줄은 늘 다섯 칸(없으면 –) 뒤에 숫자 띠의 나머지 칸(AI 진행 따위)
+    assert out["info"][:5] == [["단계", "SRS 쓰기", "g"], ["요구사항", "REQ-007", ""], ["개발 번호", "–", ""], ["작업 기록", "–", ""], ["검토 요청", "PR #301", "w"]]
+    assert out["info"][5] == ["AI 진행", "40%", ""] and len(out["info"]) == 6
+    assert out["infoEmpty"] == "–|–|–|–|–" and out["insp"] == "산출물,검사,기억,기록,기술"
+    # 도장: 승인 주 버튼 보냄 · 질문 답 접수 · 거절·아니오·닫기 반송
+    assert out["seal"] == ["보냄:ok", "보냄:ok", "반송:no", "접수:ok", "접수:ok", "반송:no", "반송:no", "접수:ok"]
+    assert out["sub"] == "11.07 · 검토 창구"
+    assert out["desk"] == ["검토 창구", "검토 창구", "설계 창구", "발송 우체통"]
+    assert out["clerk"] == ["검토 창구 직원이 네 도장을 기다려. 누르면 도장이 찍혀"] * 2 + ["1번 창구 앞에서 손님이 편지를 흔들며 네 답을 기다려", "3번 창구 앞에서 손님이 편지를 흔들며 네 답을 기다려"]
+
+
+def test_post_session_ui_wiring():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    order = [html.index(f'src="/{n}"') for n in ("post-logic.js", "theme-post.js", "post-session.js", "post-home.js", "app.js")]
+    assert order == sorted(order)
+    js = (STATIC / "post-session.js").read_text(encoding="utf-8")
+    assert "innerHTML" not in js and "'role', 'status'" in js and "PL.sealOf" in js
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    # 도장은 처리 API 가 성공한 뒤(.then)에만 찍는다 — 실패 쪽에서는 markStamp 를 부르지 않는다
+    for call in ("markStamp(rid, 'question', 'answer'", "markStamp(rid, isPlan(req) ? 'plan' : 'permission', d)", "markStamp(rid, 'elicitation', action"):
+        i = app.index(call)
+        assert ".then(function" in app[max(0, i - 400):i], call
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    seal = re.search(r"\.po-seal \{[^}]*\}", css).group(0)
+    assert "width: 108px" in seal and "height: 108px" in seal and "border: 4px double" in seal and "rotate(-14deg)" in seal and ".38s" in seal
+    assert "font-size: 22px" in re.search(r"\.po-seal b \{[^}]*\}", css).group(0)
+    assert "scale(2.4)" in css and "prefers-reduced-motion" in css
+    assert "width: 112px" in css  # 좁은 화면 창구 안내판
+
+
+def test_post_scripts_loaded_in_order_and_use_shared_logic():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    order = [html.index(f'src="/{n}"') for n in ("flow-logic.js", "post-logic.js", "theme-post.js", "post-home.js", "app.js")]
+    assert order == sorted(order)
+    scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    assert "PL.personOf(s.id)" in scene and "i % WHO.length" not in scene  # 손님은 세션 id 로 고정(목록 순번 아님)
+    assert "BHPostScene = {" in scene and "avatar: avatar" in scene
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    for needle in (".prail", ".ptop-", ".po-av", ".po-dc", "@container shell (max-width: 760px)", '#app[data-intro="1"]'):
+        assert needle in css, needle
 
 
 def test_no_theme_or_design_switch_left():
@@ -1282,7 +1454,7 @@ def test_sauce_text_contrast_is_at_least_4_5():
     low = [(f, b, round(_ratio(v[f], v[b]), 2)) for f, b in _TEXT_PAIRS if _ratio(v[f], v[b]) < 4.5]
     assert not low, low
     assert _ratio(v["edge"], v["surface"]) >= 3 and _ratio(v["edge"], v["bg"]) >= 3  # 입력·버튼 테두리
-    assert v["bg"] == "#132322" and v["surface"] == "#0e1a19" and v["accent"] == "#3ddc91" and v["light"] == "#edf7f5" and v["attn"] == "#ffcd48"
+    assert v["bg"] == "#131a19" and v["surface"] == "#0e1a19" and v["accent"] == "#3ddc91" and v["light"] == "#edf7f5" and v["attn"] == "#ffcd48"
 
 
 def test_no_text_larger_than_22px_and_no_native_widgets():
@@ -1831,7 +2003,7 @@ def test_new_task_default_folder_priority(tmp_path):
     assert "C:/other/busy" not in got["text"]  # 후보 목록은 [고르기] 를 눌러야 보인다
     # 4) 새 세션 버튼은 세션 화면에서만 출처 세션을 넘긴다
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "'/new?from=' + encodeURIComponent(sid)" in app and app.count("link(newHref(),") == 3  # 헤더 메뉴 · 목록 아래 + 새 세션 · 접힌 레일 +
+    assert "'/new?from=' + encodeURIComponent(sid)" in app and app.count("link(newHref(),") == 5  # 헤더 메뉴 · 목록 아래 + 새 세션 · 접힌 레일 + · Post 레일 새 작업 · Post 목록 아래 + 새 세션
     assert "recent[0]" not in app
 
 
@@ -3052,3 +3224,44 @@ def test_notice_dismiss_id_for_api_error_without_time_uses_kind_and_status(tmp_p
     assert json.loads(got["ss"]["bh-nb-dismissed"]) == ["api:s4:auth:401"]
     other = _smoke(tmp_path, "", [_session("s4", title="로그인 일", status="idle", apiIssue={"kind": "other", "status": 500})], extra={"__ss": {"bh-nb-dismissed": '["api:s4:auth:401"]'}})
     assert other["bubble"].startswith("⚠ 오류 1건")  # 종류가 다른 새 오류는 다시 뜬다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_theme_switch_keeps_session_input_choices_and_focus(tmp_path):
+    """테마를 바꿔 화면을 다시 만들어도 이어서 요청 글·질문 카드에서 고른 값이 남는다(Post 위쪽 줄 테마 단추가 부르는 경로)."""
+    q1 = {"id": "q1", "sessionId": "s1", "kind": "question", "status": "pending", "questions": [{"question": "색은?", "multiSelect": True, "options": [{"label": "빨강"}, {"label": "파랑"}]}]}
+    chat = [{"t": 5, "role": "req", "id": "q1", "kind": "question", "title": "색은?", "answer": None}]
+    sess = [_session("s1", chat=chat, pendingRequestIds=["q1"], status="waiting")]
+    acts = [{"type": "#follow", "value": "표 순서를 바꿔 줘"}, {"click": ".qopt", "index": 1}, {"focus": "#follow"}, {"theme": "post"}, {"theme": "sauce"}, {"read": "#follow"}]
+    got = _smoke(tmp_path, "s/s1", sess, [q1], actions=acts)
+    assert got["values"][-1] == "표 순서를 바꿔 줘"  # 글이 두 번 바뀐 뒤에도
+    assert got["pressed"][:2] == ["false", "true"]  # 고른 보기가 그대로
+    assert got["activeId"] == "follow"  # 포커스도 돌아온다
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_theme_switch_keeps_request_screen_inputs(tmp_path):
+    plan = {"id": "pl1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "ExitPlanMode", "toolInput": {"plan": "1. 문서 고치기"}}
+    sess = [_session("s1", status="waiting", pendingRequestIds=["pl1"])]
+    got = _smoke(tmp_path, "r/pl1", sess, [plan], actions=[{"click": "[data-plan-revise]"}, {"type": "#plan-why", "value": "문서만 먼저"}, {"type": "#say", "value": "잠깐만"},
+                                                         {"theme": "post"}, {"read": "#plan-why"}, {"read": "#say"}])
+    assert got["values"][-2:] == ["문서만 먼저", "잠깐만"]  # 이유 칸은 열린 채, 말하기 칸 글도 그대로
+
+
+def test_theme_switch_rerenders_every_route_and_resets_post_sig():
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    handler = app[app.index("document.addEventListener('bh-theme'"):]
+    handler = handler[:handler.index("});")]
+    assert "route.name ===" not in handler and "renderRoute()" in handler  # 홈·세션·요청·새 작업만이 아니라 모든 화면
+    assert "snapFields()" in handler and "view.keep" in handler and "restoreFields(snap)" in handler
+    build = app[app.index("function build() {"):]
+    assert "postSig = ''" in build[:build.index("post = isPostTheme()")]  # 다시 만든 안내판 칸이 빈 채 남지 않게
+    assert "keep: function () { return built" in app and "keep: function () { return { why: why" in app
+
+
+def test_post_home_deck_restores_focus_after_redraw():
+    js = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    paint = js[js.index("function paintDeck()"):js.index("/* 차분:")]
+    assert "var mark = focusMark();" in paint and "focusBack(mark);" in paint  # 덱을 다시 그려도 포커스를 돌려놓는다
+    assert "CSS.escape(id)" in js  # pickTop 의 선택자
+    assert "stampKind" in js and "it.stampKind === 'plan'" in js  # 도장이 찍힌 카드의 종류 글

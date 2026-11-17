@@ -176,6 +176,23 @@ class HttpError(Exception):
         self.status, self.message = status, message
 
 
+_PAGE_ICON = ('<svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" '
+              'stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 01-12 0zM12 17v4"/></svg>')
+
+
+def error_page(title: str, message: str, action: tuple[str, str] | None = None) -> bytes:
+    """주소창으로 연 화면이 막혔을 때 보이는 작은 HTML. 콘솔 정적 파일만 불러 쓰고(스크립트는 theme.js 하나, 인라인 없음)
+    저장된 테마(bh-theme)대로 Sauce·Post 모양이 된다. message 안의 `/harness:open` 은 코드 모양으로 보인다."""
+    esc = lambda t: t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")  # noqa: E731
+    body = "<code>/harness:open</code>".join(esc(p) for p in message.split("/harness:open"))
+    act = f'<a class="btn primary" href="{esc(action[0])}">{esc(action[1])}</a>' if action else ""
+    return ('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+            f"<title>{esc(title)} · Blueward Harness</title>"
+            '<link rel="stylesheet" href="/app.css"><link rel="stylesheet" href="/theme-post.css"><script src="/theme.js"></script></head>'
+            f'<body><main class="sv-page" role="alert"><div class="state"><div class="glyph">{_PAGE_ICON}</div><h1>{esc(title)}</h1><p>{body}</p>{act}</div></main></body></html>'
+            ).encode("utf-8")
+
+
 class Raw:
     """JSON 이 아닌 본문으로 답하는 API 의 반환값(이미지 원본)."""
 
@@ -2337,7 +2354,12 @@ class Handler(BaseHTTPRequestHandler):
             self.dispatch()
         except HttpError as e:
             self.drain_body()
-            self.send_json(e.status, {"error": e.message})
+            if self.command == "GET" and not urlsplit(self.path).path.startswith(("/api/", "/hooks/")):
+                titles = {403: "열 수 없는 주소야", 404: "페이지를 찾을 수 없어"}  # 브라우저 주소창으로 연 화면은 글자 대신 콘솔 모양으로 보여 준다
+                self.send(e.status, error_page(titles.get(e.status, "화면을 열 수 없어"), e.message, ("/", "처음 화면으로") if e.status == 404 else None),
+                          "text/html; charset=utf-8", {"Content-Security-Policy": CSP})
+            else:
+                self.send_json(e.status, {"error": e.message})
         except (BrokenPipeError, ConnectionError, TimeoutError):
             pass
         except Exception as e:  # 한 요청의 오류로 서버가 죽지 않게 한다
@@ -2413,8 +2435,8 @@ class Handler(BaseHTTPRequestHandler):
     def auth(self, query) -> None:
         value = self.app.consume_token((query.get("t") or [""])[0])
         if value is None:
-            return self.send(403, "링크가 만료됐거나 이미 썼어. 바탕화면의 Blueward Harness 를 다시 눌러 줘(없으면 /harness:open).".encode("utf-8"),
-                             "text/plain; charset=utf-8")
+            return self.send(403, error_page("콘솔을 다시 열어 줘", "링크가 만료됐거나 이미 썼어. 바탕화면의 Blueward Harness 를 다시 눌러 줘(없으면 /harness:open)."),
+                             "text/html; charset=utf-8", {"Content-Security-Policy": CSP})
         self.send(302, b"", headers={"Location": "/", "Set-Cookie": f"{COOKIE}={value}; HttpOnly; SameSite=Strict; Path=/; Max-Age={COOKIE_MAX_AGE}"})
 
     def static(self, path: str) -> None:

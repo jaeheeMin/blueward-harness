@@ -10,10 +10,9 @@
     { name: '요구사항', hint: '무엇을 만들지 쓰기' }, { name: '개발 Spec', hint: '어떻게 만들지 설계' },
     { name: '개발', hint: 'AI가 만드는 중' }, { name: '검토', hint: '팀 승인 받기' }, { name: '합쳐짐', hint: '끝, 반영됨' }
   ];
-  var LABEL = { turn: '내 답이 필요해', blocked: '막혔어', unk: '확인 못 함', run: '일하는 중', wait: '승인 기다림', done: '끝났어', idle: '쉬는 중' };
-  var GLYPH = { turn: '!', blocked: '✕', unk: '?', done: '✓', wait: '…' };
-  var WHO = ['mint', 'navy', 'rose', 'sunny', 'sky', 'sage', 'kid'];
   var MAX_PEOPLE = 14;
+  var PL = window.BHPostLogic;  // 손님 고정 배정·상태·창구 규칙(post-logic.js). 장면과 모든 화면의 아바타가 같은 함수를 쓴다
+  var LABEL = PL.LABEL, GLYPH = PL.GLYPH;
 
   var manifest = null, loading = null;
   function loadManifest(cb) {
@@ -31,12 +30,16 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function reducedMotion() { return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches; }
   function isPost() { return !!(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post'); }
+  /* 효과 강도(theme.js): '0' 차분 · '1' 보통 · '2' 화려. 움직이는지는 anim = fx !== '0' && !reduced(가이드 2.7) */
+  function fxLevel() { return window.BH && window.BH.getFx ? window.BH.getFx() : '1'; }
+  function calm() { return fxLevel() === '0'; }
+  function animOn() { return !calm() && !reducedMotion(); }
 
   /* 장면 하나(띠 + 창구 이름표). list 는 [{ id, title, state, station, tag }]. */
   function Scene(host, opts) {
     var M = manifest, L = M.layout, F = M.files, P = {};
     L.people.forEach(function (q) { P[q.name] = q; });
-    var anim = !reducedMotion();
+    var anim = !reducedMotion(), rich = anim && fxLevel() === '2';  // 차분(0)은 장면 자체를 그리지 않는다(attach). 움직임 줄이기는 멈춘 한 장면
     var anims = [], peopleSig = null, raf = 0, alive = true, ro = null;
     var wrap = el('div', 'po'), band = el('div', 'po-band'), plaq = el('div', 'po-plaq');
     var peopleLayer = el('div', 'po-people');
@@ -54,7 +57,11 @@
 
     /* 바뀌지 않는 배경·창구·소품 */
     put('bg/wall.svg', 800, 120);
-    L.windows.forEach(function (w) { put('bg/window-a.svg', w.x, w.y); });
+    // 화려(fx=2)에서만 창문마다 구름이 4초 주기로 바뀐다(창문 사이 0.37 위상차)
+    L.windows.forEach(function (w, i) {
+      var wa = put('bg/window-a.svg', w.x, w.y);
+      if (rich) flip([wa, put('bg/window-b.svg', w.x, w.y, 0)], (L.poseTiming && L.poseTiming.window) || 4, i * .37);
+    });
     var ck = L.clock; put(ck.face, ck.x, ck.y);
     var hh = put(ck.hour, ck.x, ck.y), mm = put(ck.minute, ck.x, ck.y);
     [hh, mm].forEach(function (im, i) { var e = F[i ? ck.minute : ck.hour]; im.style.transformOrigin = e[2] + 'px ' + e[3] + 'px'; });
@@ -93,7 +100,7 @@
       peopleAnims = [];
       var per = [0, 0, 0, 0, 0], ln = L.lanes.front;
       list.slice(0, MAX_PEOPLE).forEach(function (s, i) {
-        var k = Math.max(0, Math.min(4, s.station | 0)), j = per[k]++, sta = L.stations[k], info = P[WHO[i % WHO.length]];
+        var k = Math.max(0, Math.min(4, s.station | 0)), j = per[k]++, sta = L.stations[k], info = P[PL.personOf(s.id)] || P[PL.WHO[0]];
         var x0 = sta.standX + (j % 2 ? -1 : 1) * 112 * Math.ceil(j / 2), w = info.w, h = info.h;  // 0, -112, 112, -224, 224 … 겹치지 않게 번갈아 선다
         var a = el('a', 'po-s b-' + s.state);
         a.href = '/s/' + encodeURIComponent(s.id); a.tabIndex = -1;
@@ -190,31 +197,46 @@
     function drop() { if (scene) { scene.destroy(); scene = null; } host.hidden = true; }
     function sync() {
       if (dead) return;
-      if (!isPost()) return drop();
+      if (!isPost() || calm()) return drop();  // 차분 = 장면을 그리지 않고 세션 목록(post-home.js)이 대신한다
       if (scene) return;
       host.hidden = false;
       loadManifest(function (ok) {
-        if (dead || scene || !isPost()) return;
+        if (dead || scene || !isPost() || calm()) return;
         if (!ok) { host.hidden = true; return; }
         scene = Scene(host, opts);
         scene.update(opts.list()); scene.start();
       });
     }
     function onTheme() { sync(); }
-    function onMotion() { drop(); sync(); }  // 움직임 설정이 바뀌면 다시 만든다
+    function onMotion() { drop(); sync(); }  // 움직임·효과 강도 설정이 바뀌면 다시 만든다
+    function onPref(ev) { if (ev && ev.detail === 'fx') onMotion(); }
     document.addEventListener('bh-theme', onTheme);
+    document.addEventListener('bh-pref', onPref);
     if (reduce && reduce.addEventListener) reduce.addEventListener('change', onMotion);
     host.hidden = true;
     sync();
     return {
       update: function () { if (scene) scene.update(opts.list()); },
       destroy: function () {
-        dead = true; document.removeEventListener('bh-theme', onTheme);
+        dead = true; document.removeEventListener('bh-theme', onTheme); document.removeEventListener('bh-pref', onPref);
         if (reduce && reduce.removeEventListener) reduce.removeEventListener('change', onMotion);
         drop();
       }
     };
   }
 
-  window.BHPostScene = { attach: attach, STEP: STEP };
+  /* 세션 손님 아바타(span.po-av). 장면의 손님과 같은 사람이다(personOf). 자세는 상태로 정한다(내 차례 = 편지를 흔듦 · 막힘/확인 못 함 = 머리를 긁음 · 승인 기다림 = 앉음 · 끝 = 엄지 척 · 그 밖 = 서 있음).
+     opts.size: 'sm'(30×36, 세션 목록) · 'lg'(88×104, 세션 머리) · 생략(34×40, 카드 머리). Post 가 아니어도 만들 수 있지만 보이는 것은 Post 일 때뿐이다(CSS). */
+  function avatar(sessionId, state, opts) {
+    var who = PL.personOf(sessionId), pose = PL.poseOf(state), tone = PL.toneOf(state), size = opts && opts.size;
+    var span = el('span', 'po-av' + (tone ? ' po-av-' + tone : '') + (size ? ' ' + size : ''));
+    span.setAttribute('aria-hidden', 'true');
+    function img(n, cls) { var im = new Image(); im.alt = ''; im.decoding = 'async'; im.src = BASE + 'people/' + who + '/' + n + '.svg'; if (cls) im.className = cls; span.appendChild(im); }
+    img(pose === 'ask' ? 'ask-1' : pose === 'stuck' ? 'stuck-1' : pose === 'walk' ? 'walk-1' : pose);
+    if (pose === 'ask' && animOn()) img('ask-2', 'po-av-b');  // 두 장을 번갈아 편지를 흔든다. 움직임 줄이기·차분이면 한 장
+    return span;
+  }
+
+  /* 다른 화면이 쓰는 것: personOf·stateOf·stationOf(post-logic.js 와 같은 함수), avatar, isPost, STEP(창구 이름·풀이) */
+  window.BHPostScene = { attach: attach, STEP: STEP, avatar: avatar, isPost: isPost, calm: calm, animOn: animOn, personOf: PL.personOf, stateOf: PL.stateOf, stationOf: PL.stationOf, poseOf: PL.poseOf, LABEL: PL.LABEL, GLYPH: PL.GLYPH };
 })();
