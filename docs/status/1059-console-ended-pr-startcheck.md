@@ -20,7 +20,7 @@
 | `plugins/harness/hooks/session-start-sync.sh` | 끝에서(그리고 git 저장소가 아닐 때) 결과 코드를 뒤에서 보낸다. 훅 stdout·종료 코드는 그대로 |
 | `plugins/harness/console/static/flow-logic.js`, `flow-ui.js` | 점검 상태 `unknown`("확인 못 함")·`fail`("다시 필요") 라벨과 사유 줄, 다시 하기 단추 |
 | `docs/design/web-console.md`, `docs/guide/harness-guide.html` | 새 세션 점검·PR 1분 다시 판정·끝난 세션 설명 |
-| `plugins/harness/console/whats_new.json`, `plugin.json` | 0.10.319 → 0.10.320 |
+| `plugins/harness/console/whats_new.json`, `plugin.json` | 0.10.319 → 0.10.322 |
 | `checker/tests/test_web_console.py`, `test_web_console_ui.py`, `test_session_scaffold_hint.py` | 아래 시험 |
 
 ## 판단
