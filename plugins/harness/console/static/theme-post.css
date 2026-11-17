@@ -186,6 +186,8 @@
 :root[data-theme="post"] .po-av.sm img { width: 82px; top: -26px; }
 :root[data-theme="post"] .po-av.lg { width: 88px; height: 104px; border-radius: 44px 44px 10px 10px; }
 :root[data-theme="post"] .po-av.lg img { width: 92px; top: 0; }
+/* 글자 아바타(작은 크기, #1066): 홈 "내 세션" 목록의 .po-ava 와 같은 모양. 그림은 안 쓴다 */
+:root[data-theme="post"] .po-av.po-av-letter { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1px var(--bd); font-size: 12px; font-weight: 600; color: var(--text); }
 @keyframes po-wave { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { :root[data-theme="post"] .po-av .po-av-b { animation: none; opacity: 0; } }
 
@@ -291,6 +293,10 @@
 :root[data-theme="post"] .po-rt { flex: 1; min-width: 0; }
 :root[data-theme="post"] .po-rt .t1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 :root[data-theme="post"] .po-rt .t2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; }
+:root[data-theme="post"] .po-rt .t3 { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin-top: 3px; color: var(--muted); font-size: 12px; }
+:root[data-theme="post"] .po-rt .t3 .mono.warn { color: var(--attn); }
+:root[data-theme="post"] .po-rt .t3 .mono.hot { color: var(--st-fail-ink); }
+:root[data-theme="post"] .po-rt .t3 .prchip { padding: 1px 8px; font-size: 11.5px; }
 :root[data-theme="post"] .po-mine .po-stc { flex: none; width: 92px; }
 /* 결재란(시안 .kyul): 칸 폭 고정(64px), 자리(.po-kyulc)는 목록에서 가장 긴 결재란 폭. 끝난 칸은 붉은 도장, 지금 칸은 남색 줄 */
 :root[data-theme="post"] .po-kyulc { display: flex; flex: none; }
@@ -310,6 +316,8 @@
 :root[data-theme="post"] .po-stc-run { color: var(--st-now); }
 :root[data-theme="post"] .po-stc-run::before { background: var(--st-now); }
 :root[data-theme="post"] .po-stc-idle::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+:root[data-theme="post"] .po-stc-err { color: var(--attn); }
+:root[data-theme="post"] .po-stc-err::before { border-radius: 2px; background: var(--attn); }
 :root[data-theme="post"] .po-stc-wait { color: var(--wait); }
 :root[data-theme="post"] .po-stc-wait::before { border-radius: 2px; background: var(--wait); }
 :root[data-theme="post"] .po-stc-blocked { color: var(--st-fail-ink); }
@@ -362,6 +370,8 @@
 :root[data-theme="post"] .po-si { gap: 10px; padding: 9px 10px; background: transparent; border-radius: 12px; }
 :root[data-theme="post"] .po-si:hover { background: var(--soft); border-color: transparent; }
 :root[data-theme="post"] .po-si[aria-current="page"] { background: var(--paper); }
+/* 기억 %·토큰 수를 알 때만 링을 둔다(#1066). 모르면 점선 "?" 원이 거의 모든 줄에 붙어 소음이라 뺀다. 문구는 flow-logic.js memoryOf 의 unknown title 과 같아야 한다 */
+:root[data-theme="post"] .po-si .ring.unk[title="기억 사용량 확인 못 함"] { display: none; }
 :root[data-theme="post"] .po-si .ring { width: 36px; height: 36px; }
 :root[data-theme="post"] .po-si .ring b { width: 28px; height: 28px; background: var(--bg); font-size: 9.5px; }
 :root[data-theme="post"] .po-si[aria-current="page"] .ring b { background: var(--paper); }

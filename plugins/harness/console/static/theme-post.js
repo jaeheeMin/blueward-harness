@@ -245,10 +245,39 @@
     };
   }
 
+  /* 세션 목록(사이드·접힌 레일·차분 목록)의 작은 아바타(#1066): 우체국 직원 그림을 30×36 칸에 잘라 넣으면 손 흔드는 팔·소품이 겹쳐 팔이 여러 개처럼 보인다.
+     그래서 'sm' 는 그림 대신 제목 첫 글자를 둥근 칸에 쓴다(홈 "내 세션" 목록의 글자 아바타와 같은 모양). 이름은 opts.name 으로 받고,
+     app.js 의 사이드 목록은 이름을 안 넘기므로(아바타만 부른다) 같은 줄의 제목에서 읽어 채운다(fillLetters). 큰 그림(카드 머리·세션 머리)은 잘리지 않으니 그대로다. */
+  function letterOf(name) { return Array.from(String(name || '').trim())[0] || ''; }
+  function nameAround(av) {
+    var row = av.closest('.po-si'), n = row && row.querySelector('.sinfo .n');
+    if (n) return n.textContent;
+    var rail = av.closest('.rail-ring');  // 접힌 레일 링크의 title 은 "이름 · 상태"
+    return rail ? rail.getAttribute('title') || '' : '';
+  }
+  function fillLetters() {
+    var list = document.querySelectorAll('.po-av-letter:not([data-fixed])');
+    for (var i = 0; i < list.length; i++) { var c = letterOf(nameAround(list[i])); if (list[i].textContent !== c) list[i].textContent = c; }
+  }
+  var letterWatch = null;
+  function watchLetters() {
+    if (letterWatch || typeof MutationObserver !== 'function' || !document.body) return;
+    letterWatch = new MutationObserver(fillLetters);  // 글자를 쓰는 것도 변경이지만 같은 값이면 다시 쓰지 않아 한 번에 멈춘다
+    letterWatch.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title'] });
+  }
+  function letterAvatar(name) {
+    var span = el('span', 'po-av po-av-letter sm', letterOf(name));
+    span.setAttribute('aria-hidden', 'true');
+    if (name) span.setAttribute('data-fixed', '1'); else watchLetters();
+    return span;
+  }
+
   /* 세션 손님 아바타(span.po-av). 장면의 손님과 같은 사람이다(personOf). 자세는 상태로 정한다(내 차례 = 편지를 흔듦 · 막힘/확인 못 함 = 머리를 긁음 · 승인 기다림 = 앉음 · 끝 = 엄지 척 · 그 밖 = 서 있음).
-     opts.size: 'sm'(30×36, 세션 목록) · 'lg'(88×104, 세션 머리) · 생략(34×40, 카드 머리). Post 가 아니어도 만들 수 있지만 보이는 것은 Post 일 때뿐이다(CSS). */
+     opts.size: 'sm'(글자 아바타, opts.name 의 첫 글자 — 아래 letterAvatar) · 'lg'(88×104, 세션 머리) · 생략(34×40, 카드 머리). Post 가 아니어도 만들 수 있지만 보이는 것은 Post 일 때뿐이다(CSS). */
   function avatar(sessionId, state, opts) {
-    var who = PL.personOf(sessionId), pose = PL.poseOf(state), tone = PL.toneOf(state), size = opts && opts.size;
+    var size = opts && opts.size;
+    if (size === 'sm') return letterAvatar(opts.name);
+    var who = PL.personOf(sessionId), pose = PL.poseOf(state), tone = PL.toneOf(state);
     var span = el('span', 'po-av' + (tone ? ' po-av-' + tone : '') + (size ? ' ' + size : ''));
     span.setAttribute('aria-hidden', 'true');
     function img(n, cls) { var im = new Image(); im.alt = ''; im.decoding = 'async'; im.src = BASE + 'people/' + who + '/' + n + '.svg'; if (cls) im.className = cls; span.appendChild(im); }

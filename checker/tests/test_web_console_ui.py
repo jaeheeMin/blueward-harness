@@ -3696,3 +3696,24 @@ def test_post_pipeline_wiring_route_rail_and_scoped_css():
     rules = [ln for ln in css.splitlines() if "{" in ln and not ln.lstrip().startswith(("@media", "/*"))]
     assert rules and all(ln.lstrip().startswith(':root[data-theme="post"] .po-pl') or ln.lstrip().startswith(':root[data-theme="post"] a.po-pl') or ln.lstrip().startswith(':root[data-theme="post"] button.po-pl') for ln in rules)
     assert "border-left" not in css and "--bg:" not in css  # 시안에 없는 강조선·토큰 복사 없음
+
+
+def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
+    # 2026-11-18 Post 홈 검증 B. post-*.js 는 가짜 DOM 시험이 안 불러와서 원문 확인에 더해 Aside 실화면으로 봤다(docs/status/2026-11-18-post-verify-B.md).
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    # 세션 표: 번호·기억·API 오류·고쳐야 함 칩. 기억을 모르면 ? 를 지어내지 않고 뺀다
+    assert "L.issueOf(s)" in home and "L.prBadge(s.flowPr)" in home and "L.memoryOf(s)" in home and "m.kind !== 'unknown'" in home
+    assert "L.prNeedsFix(s)" in home and "'고쳐야 함'" in home and "BHApiNotice.notice(s)" in home
+    # 새 소식 칸은 세션이 없을 때·불러오는 중에도 붙고, 세션이 생기면 foot 으로 되돌린다
+    assert home.count("restSlot.appendChild(slots.whatsSlot)") == 2 and "foot.appendChild(slots.whatsSlot)" in home
+    # 열린 PR 상태를 홈이 열려 있는 동안 1분마다 다시 읽고, 홈을 떠나면 멈춘다(Sauce 홈과 같은 간격)
+    assert "MY_PRS_POLL_MS = 61000" in home and "clearInterval(prTimer)" in home and "delete fixBox.dataset.ready" in home
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert "MY_PRS_POLL_MS = CACHE_MS + 1000" in ui  # 61000 = 60000 + 1000. 이 값이 바뀌면 위 상수도 맞춘다
+    # #1066: 작은 아바타는 잘린 직원 그림이 아니라 글자, 기억을 모르는 점선 ? 링은 Post 에서 뺀다
+    js = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    assert "if (size === 'sm') return letterAvatar(opts.name);" in js and "po-av-letter" in js
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    logic = (STATIC / "flow-logic.js").read_text(encoding="utf-8")
+    m = re.search(r'\.po-si \.ring\.unk\[title="([^"]+)"\] \{ display: none; \}', css)
+    assert m and f"title: '{m.group(1)}'" in logic  # CSS 가 가리키는 문구가 memoryOf 의 unknown title 과 같아야 한다

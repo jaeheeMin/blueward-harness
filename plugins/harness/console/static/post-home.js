@@ -10,6 +10,7 @@
   var LEGEND = ['turn', 'run', 'wait', 'blocked', 'unk', 'done'];
   /* 사무실 장면(office-post.js) 아래 팀 요약. 갈래(flowId) → 팀. 갈래가 없는 세션은 어느 팀에도 세지 않는다. */
   var TEAMS = [['요구분석팀', ['srs', 'srs-export']], ['설계팀', ['spec']], ['개발팀', ['dev']], ['기능컨설팅팀', ['config']], ['표준화팀', ['standard']], ['유지보수팀', ['fix']]];
+  var MY_PRS_POLL_MS = 61000;  // 열린 PR 상태를 다시 읽는 간격. Sauce 홈(flow-ui.js MY_PRS_POLL_MS)과 같다: 서버·프런트 캐시(60초)가 끝난 뒤에 묻는다
   var NARROW = '(max-width: 760px)';  // 이 폭 이하에서는 메모가 장면 아래로 내려온다(시안 media query)
 
   function teamOf(flow) {
@@ -94,6 +95,25 @@
     /* 상태 칩(시안 .st): 색 + 모양. 내 차례 세모 · 일하는 중 채운 동그라미 · 승인 기다림 네모 · 쉬는 중 빈 동그라미 · 막힘 마름모 · 확인 못 함 점선 동그라미 · 끝 체크 */
     var ST_TEXT = { turn: '내 차례', run: '일하는 중', wait: '승인 기다림', idle: '쉬는 중', blocked: '막힘', unk: '확인 못 함', done: '끝남' };
     function stChip(state) { return h('span', { class: 'po-stc po-stc-' + state, text: ST_TEXT[state] || PS.LABEL[state] }); }
+    /* 세션 표의 상태 칩: Sauce 표(flow-ui.js homeTable)와 같은 판정이다. API 오류(#865)는 '끝남'·'쉬는 중' 이 아니라 오류로, PR 검사가 실패한 세션은 "내 차례" 가 아니라 "고쳐야 함" 으로 말한다.
+       (막힘·확인 못 함은 stateOf 가 이미 가린다.) */
+    function rowChip(s, st) {
+      var bk = L.blockOf(s), an = !bk && window.BHApiNotice ? window.BHApiNotice.notice(s) : null;
+      if (an && an.sideTone === 'err') return h('span', { class: 'po-stc po-stc-err', title: an.title, text: an.side });
+      var g = L.groupOf(s, HK.openIds);
+      if (!bk && s.status !== 'ended' && g !== 'running' && !HK.pendingOf(s) && L.prNeedsFix(s)) return h('span', { class: 'po-stc po-stc-turn', text: '고쳐야 함' });
+      return stChip(st);
+    }
+
+    /* 번호·기억(Sauce 표의 '번호'·'기억' 칸): 이슈 번호는 브랜치 이름에서, PR 은 연결된 것만, 기억은 % 나 토큰 수를 알 때만. 모르는 값은 지어내지 않고 뺀다(점선 ? 는 소음, #1066).
+       줄 전체가 세션 링크라 안에 링크를 둘 수 없다 — PR 은 글자만 보이고 주소는 PR 칸에서 간다. */
+    function metaLine(s) {
+      var issue = L.issueOf(s), pr = L.prBadge(s.flowPr), m = L.memoryOf(s), parts = [];
+      if (issue) parts.push(h('span', { class: 'mono', text: '이슈 #' + issue }));
+      if (pr) parts.push(h('span', { class: 'prchip ' + pr.checks, text: 'PR #' + pr.number + ' · ' + pr.text }));
+      if (m.kind !== 'unknown') parts.push(h('span', { class: 'mono' + (m.level ? ' ' + m.level : ''), title: m.title, text: '기억 ' + m.text }));
+      return parts.length ? h('div', { class: 't3' }, parts) : null;
+    }
 
     /* 결재란(시안 .kyul): 칸은 그 세션 갈래의 실제 단계(BHLogic.barSteps — 홈 표의 단계 막대와 같은 값)이고 이름은 짧은 이름(stepShort).
        끝난 칸은 붉은 도장, 지금 칸은 남색 줄. 갈래가 없으면 칸이 없고 자리만 비운다(줄 정렬이 흔들리지 않게 자리 폭은 목록에서 가장 긴 결재란에 맞춘다). */
@@ -117,9 +137,9 @@
         var sub = teamOf(s.flowId) || (s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음');
         return h('li', { 'data-session': s.id }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ssa' },
           h('span', { class: 'po-ava', 'aria-hidden': 'true', text: Array.from(name)[0] || '?' }),
-          h('div', { class: 'po-rt' }, h('div', { class: 't1', text: name, title: name }), h('div', { class: 't2', text: sub })),
+          h('div', { class: 'po-rt' }, h('div', { class: 't1', text: name, title: name }), h('div', { class: 't2', text: sub }), metaLine(s)),
           h('span', { class: 'po-kyulc', style: 'width:' + (maxN ? maxN * KYUL_CELL + 2 : 0) + 'px' }, kyul(x.steps)),
-          stChip(st)));
+          rowChip(s, st)));
       });
       return h('section', { class: 'light po-panel po-cols', 'aria-labelledby': 'po-ss-h' },
         h('div', { class: 'po-ph' }, h('h2', { id: 'po-ss-h', text: '내 세션 ' + list.length + '개' })),
@@ -268,7 +288,7 @@
         kit.sceneList().forEach(function (s) {
           var name = s.title || '이름 없는 세션', k = Math.max(0, Math.min(4, s.station | 0));
           calmList.appendChild(h('li', { class: 'po-ml po-ml-' + s.state },
-            kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ml-a' }, PS.avatar(s.id, s.state, { size: 'sm' }),
+            kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ml-a' }, PS.avatar(s.id, s.state, { size: 'sm', name: name }),
               h('span', null, h('b', { text: name }), h('small', null, stMark(s.state), PS.LABEL[s.state] + ' · ' + (k + 1) + '번 창구 ' + PL.STATION[k].name)))));
         });
         if (!calmList.firstChild) calmList.appendChild(h('li', { class: 'quiet', text: '지금 일하는 세션이 없어.' }));
@@ -291,6 +311,7 @@
         if (!kit.loaded()) {
           scenePanel.hidden = true; memo.hidden = true; syncFocus(null); clear(helloSlot); clear(deckSlot); clear(restSlot);
           restSlot.appendChild(kit.conn() === 'down' ? kit.stateBox('warn', '서버에 연결할 수 없어', '서버가 꺼졌을 수 있어. 다시 연결을 시도하고 있어.') : kit.loadingBox('세션을 불러오는 중이야.'));
+          restSlot.appendChild(slots.whatsSlot);  // 새 소식은 세션이 없어도·불러오는 중에도 보인다(Sauce 홈과 같다)
           return;
         }
         var list = HK.sessionList();
@@ -299,6 +320,7 @@
           scenePanel.hidden = true; memo.hidden = true; syncFocus(null); clear(deckSlot); clear(prSlot); items = []; delete approvals.dataset.compact; approvals.className = 'approvals light po-panel po-mini';
           HK.emptyHome(restSlot, approvals, projects);
           HK.approvalCard(approvals, stats.showPr); HK.projectCard(projects);
+          restSlot.appendChild(slots.whatsSlot);
           return;
         }
         scenePanel.hidden = false;
@@ -320,6 +342,7 @@
         paintMemo();
         restSlot.appendChild(h('div', { class: 'tiles2 po-tiles' }, tile('내 차례', String(turnCount), turnCount ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), stats.prTile, stats.weekTile, stats.tbTile));
         restSlot.appendChild(sessionsPanel(list));  // 내 세션 두 단 목록(글자 아바타·결재란·상태 칩). Sauce 홈은 표(HK.homeTable) 그대로
+        if (slots.whatsSlot.parentNode !== foot) foot.appendChild(slots.whatsSlot);  // 세션이 없던 동안 restSlot 으로 옮겨 갔으면 되돌린다
         restSlot.appendChild(foot);
         restSlot.appendChild(projects);
         HK.recentCard(recent, stats.showWeek);
@@ -333,6 +356,14 @@
       var ro = typeof ResizeObserver === 'function' ? new ResizeObserver(function () { placeMemo(); }) : null;  // 폭이 바뀌면(창 크기·760px 경계) 메모 자리를 다시 잡는다
       if (ro) ro.observe(stageFrame);
       draw();
+
+      /* 열린 PR 의 상태(검사 통과·실패·병합)는 GitHub 에서 바뀌므로 홈이 열려 있는 동안 1분마다 다시 읽는다(Sauce 홈과 같다, #1027 D8). 홈을 떠나면 멈춘다.
+         flow-ui.js 의 캐시는 60초가 지나면 스스로 낡은 것으로 치니, 읽었다는 표시만 지우고 다시 부른다. */
+      var prTimer = setInterval(function () {
+        if (gone || !fixBox.isConnected || document.hidden) return;
+        delete fixBox.dataset.ready;
+        HK.fixCard(fixBox);
+      }, MY_PRS_POLL_MS);
 
       // 세션 이벤트가 초당 수십 번 와도 0.5초에 한 번, 프레임에 맞춰 다시 그린다. 덱의 입력칸에 쓰는 중이면 쓰기가 끝날 때까지 미룬다.
       var soonOn = false, soonLast = 0;
@@ -353,7 +384,7 @@
         onData: drawSoon, onSession: drawSoon, onRequest: drawSoon, onRemoved: draw, onFocus: onFocus,
         tick: function () { if (!typing()) draw(); },  // 날짜 줄·기다린 시간을 고친다
         title: function () { return ''; },
-        destroy: function () { gone = true; redrawNow = function () {}; if (ro) ro.disconnect(); document.removeEventListener('keydown', onKey); document.removeEventListener('bh-pref', onPref); }
+        destroy: function () { gone = true; clearInterval(prTimer); redrawNow = function () {}; if (ro) ro.disconnect(); document.removeEventListener('keydown', onKey); document.removeEventListener('bh-pref', onPref); }
       };
     }
 
