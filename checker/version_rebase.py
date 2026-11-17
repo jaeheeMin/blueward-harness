@@ -96,9 +96,17 @@ def _next_patch(version: tuple[int, ...]) -> str:
     return ".".join(str(p) for p in (*version[:-1], version[-1] + 1))
 
 
+def _no_dup_keys(pairs: list[tuple]) -> dict:
+    keys = [k for k, _ in pairs]
+    dups = sorted({k for k in keys if keys.count(k) > 1})
+    if dups:
+        raise ValueError(f"같은 키가 두 번 있다: {', '.join(dups)}")  # 웹 충돌 해결이 version 줄을 둘 남긴 일이 있었다(#1075)
+    return dict(pairs)
+
+
 def _version_of(text: str, what: str) -> str:
     try:
-        version = json.loads(text)["version"]
+        version = json.loads(text, object_pairs_hook=_no_dup_keys)["version"]
         parse_version(version)
     except (ValueError, KeyError, TypeError) as exc:
         raise _Cannot(f"{what} 의 version 을 읽지 못했다: {exc}") from exc

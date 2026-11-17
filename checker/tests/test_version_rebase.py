@@ -16,7 +16,7 @@ import pytest
 
 from checker.plugin_version import PLUGIN_JSON
 from checker.ssot_approval import GhError
-from checker.version_rebase import CANNOT_CHECK, MERGED, NOT_APPLICABLE, REFUSED, WHATS_NEW, main, rebase_version
+from checker.version_rebase import CANNOT_CHECK, MERGED, NOT_APPLICABLE, REFUSED, WHATS_NEW, _Cannot, _resolve_plugin_json, main, rebase_version
 
 FRAG = "plugins/harness/console/whats_new.d/"
 
@@ -272,3 +272,10 @@ def test_cli_종료코드와_json(tmp_path, capsys, monkeypatch):
     (tmp_path / "b").mkdir()
     repo2 = conflict(tmp_path / "b", "rebase")
     assert main(["--mode", "rebase", "--root", str(repo2)]) == 2
+
+
+def test_덩어리_밖에_version_줄이_또_있으면_고친_결과를_내지_않는다():
+    """웹 충돌 해결이 version 줄을 둘 남긴 일(#1075). 고친 결과에 같은 키가 두 번이면 검사 불능."""
+    raw = '{\n<<<<<<< a\n  "version": "0.10.1",\n=======\n  "version": "0.10.2",\n>>>>>>> b\n  "version": "0.10.2",\n  "name": "x"\n}\n'
+    with pytest.raises(_Cannot, match="두 번"):
+        _resolve_plugin_json(raw.encode("utf-8"), "0.10.3")

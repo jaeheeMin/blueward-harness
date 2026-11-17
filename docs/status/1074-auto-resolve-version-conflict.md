@@ -23,3 +23,8 @@
 - 이 브랜치가 더한 조각이 뒤 커밋에서 오고 plugin.json 충돌이 앞 커밋에서만 나면, 조각 version 이 옛 판으로 남을 수 있다(조각은 판 키 없이 콘솔이 version 만 본다). 한 PR 한 커밋 흐름이면 같은 커밋이다.
 - 조각 파일은 쌓인다(옛 판은 콘솔이 안 띄운다). 오래된 조각을 `whats_new.json` 으로 접는 정리는 하지 않았다.
 - 세션 시작 훅(session-start-sync.sh)의 자동 맞춤은 이 엔진을 부르지 않는다.
+
+## main 바로잡기(같은 PR)
+#1075 병합 직전 GitHub 웹 충돌 해결 커밋(d973801)이 main 에 `plugin.json` version 줄 둘(0.10.325·0.10.324)과 `],` 가 빠진 `whats_new.json` 을 남겼다. 이 PR 에서 version 을 한 줄 0.10.326 으로, whats_new.json 을 고쳤다(깨진 main 이 0.10.325 로 퍼졌을 수 있어 판을 하나 더 올림).
+- 엔진: plugin.json 을 읽을 때 같은 키가 두 번이면 검사 불능(`_version_of`). 고친 결과에 덩어리 밖 version 줄이 남는 경우도 여기서 걸린다.
+- 시험: `test_plugin_layout.py` 가 plugin.json·whats_new.json·조각이 JSON 으로 읽히고 키가 겹치지 않는지 본다(깨진 main 파일로 실패 확인).

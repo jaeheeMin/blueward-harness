@@ -2293,3 +2293,17 @@ def test_엑셀_확인_출력이_json_이_아니면_거부한다(tmp_path):
     bin_dir = _make_export_guard_uvx(tmp_path, "이것은 JSON 이 아니다", 0)
     code, out = _run_guard_with_fake_uvx("gh pr merge 123 -R owner/repo", bin_dir)
     assert out is not None and out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_plugin_json_과_새_소식_파일은_JSON_으로_읽히고_키가_겹치지_않는다():
+    """#1075 병합 때 웹 충돌 해결이 version 줄 둘과 깨진 whats_new.json 을 main 에 남겼다. 같은 일을 PR 검사에서 막는다."""
+    def strict(pairs):
+        keys = [k for k, _ in pairs]
+        assert len(keys) == len(set(keys)), f"같은 키가 두 번 있다: {keys}"
+        return dict(pairs)
+
+    console = PLUGIN_ROOT / "console"
+    for path in [PLUGIN_ROOT / ".claude-plugin" / "plugin.json", console / "whats_new.json", *sorted((console / "whats_new.d").glob("*.json"))]:
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=strict)
+        if path.parent.name == "whats_new.d":
+            assert isinstance(data.get("version"), str) and isinstance(data.get("lines"), list), path.name
