@@ -116,8 +116,8 @@ def _start(tmp_path: Path, repo: Path, bin_dir: Path, fake: Path | None = None, 
     if hide_timeout:
         # msys bash 는 PATH 와 무관하게 /usr/bin 을 붙여서 timeout 을 PATH 에서 뺄 수 없다.
         # 복사본에서 timeout 이 있는지 보는 검사만 없는 명령으로 바꿔 "timeout 없음" 경로를 탄다.
-        assert "command -v timeout" in script
-        script = script.replace("command -v timeout", "command -v timeout-is-not-installed")
+        assert "timeout --version" in script
+        script = script.replace("timeout --version", "timeout-is-not-installed --version")
     (root / "hooks" / "session-start-sync.sh").write_bytes(script.replace("\r\n", "\n").encode("utf-8"))
     env = {
         "PATH": str(bin_dir),
@@ -260,15 +260,38 @@ def test_pr_block_timeout_is_recorded_as_rc124(tmp_path):
     assert _wait_result(repo).startswith("rc=124\n")
 
 
-def test_pr_block_without_timeout_command_is_cannot_check(tmp_path):
+def test_pr_block_without_timeout_command_still_runs_with_own_limit(tmp_path):
+    # macOS 에는 timeout 이 기본으로 없다. 없어도 기능을 버리지 않고 훅이 직접 시간을 제한해야 한다.
     repo = _repo(tmp_path, "github")
     fake = _fake(tmp_path, out="o/r 내 PR 1개\n", rc=0)
     out, _ = _start(tmp_path, repo, _shim_dir(tmp_path, timeout=False), fake, hide_timeout=True)
-    assert ("PR 상태 확인 불능(timeout 명령이 없어 시간을 제한할 수 없음) - /harness:prs 로 다시 확인하십시오."
-            in out)
-    assert "뒤에서 확인하는 중" not in out
-    assert _calls(fake) == []
-    assert not list((repo / ".git").glob("harness-pr-table.*"))
+    assert "내 PR 상태를 뒤에서 확인하는 중입니다" in out
+    assert "확인 불능" not in out
+    assert _wait_result(repo) == "rc=0\no/r 내 PR 1개\n"
+
+
+def test_pr_block_without_timeout_command_limit_is_recorded_as_rc124(tmp_path):
+    repo = _repo(tmp_path, "github")
+    fake = _fake(tmp_path, sleep=30)
+    _, elapsed = _start(tmp_path, repo, _shim_dir(tmp_path, timeout=False), fake, hide_timeout=True,
+                        HARNESS_PR_TIMEOUT="1")
+    assert elapsed < 15
+    assert _wait_result(repo).startswith("rc=124\n")
+
+
+def test_pr_block_ignores_windows_style_timeout_and_uses_own_limit(tmp_path):
+    # Windows 에서 PATH 에 기본 timeout.exe(대기 명령)가 잡히면 GNU 문법으로 부르면 엔진이 돌지 않는다.
+    # --version 이 실패하는 timeout 은 쓰지 않고 훅이 직접 시간을 제한해야 한다.
+    repo = _repo(tmp_path, "github")
+    fake = _fake(tmp_path, out="o/r 내 PR 1개\n", rc=0)
+    bin_dir = _shim_dir(tmp_path, timeout=False)
+    (bin_dir / "timeout").write_text("#!/bin/sh\necho 'ERROR: Invalid syntax.' >&2\nexit 1\n", encoding="utf-8", newline="\n")
+    (bin_dir / "timeout").chmod(0o755)
+    script_has_gnu_check = "timeout --version" in HOOK.read_bytes().decode("utf-8")
+    assert script_has_gnu_check
+    out, _ = _start(tmp_path, repo, bin_dir, fake)
+    assert "확인 불능" not in out
+    assert _wait_result(repo) == "rc=0\no/r 내 PR 1개\n"
 
 
 def test_pr_block_without_session_id_is_cannot_check_and_runs_nothing(tmp_path):

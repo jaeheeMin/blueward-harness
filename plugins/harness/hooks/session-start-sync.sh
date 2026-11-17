@@ -452,7 +452,7 @@ report_gone_branch() {
     gone_out="gh 가 없음"
   else
     local gone_wrap=()
-    if command -v timeout >/dev/null 2>&1; then gone_wrap=(timeout 30); fi
+    if timeout --version >/dev/null 2>&1; then gone_wrap=(timeout 30); fi  # Windows 기본 timeout.exe 가 잡히면 --version 이 실패한다 — 그땐 제한 없이 부른다
     gone_out="$(${gone_wrap[@]+"${gone_wrap[@]}"} gh pr list --head "$branch" --state merged --json number --limit 1 --jq '.[0].number // empty' 2>&1 </dev/null)" || gone_rc=$?
   fi
   gone_out="$(printf '%s' "$gone_out" | tr -d '\r')"
@@ -600,6 +600,37 @@ fi
 # 이름을 붙이므로 `.tmp` 만 있으면 아직 진행 중이다. 엔진을 부르기 전에 알 수 있는 불능(uvx·gh
 # 없음, 엔진 판 결정 실패)은 여기서 바로 "확인 불능" 으로 낸다(원칙 7: 통과·문제없음으로 뭉개지 않는다).
 # 어떤 경우에도 exit 0 이다.
+# 시간 제한: GNU timeout 이 있으면 그것을 쓰고(macOS 에는 기본으로 없다), 없으면 감시 프로세스가
+# 제한 시간 뒤 TERM 을 보낸다. 어느 쪽이든 시간이 다 되면 종료 코드는 124 다.
+# Windows 에서 PATH 에 기본 timeout.exe(대기 명령, 뜻이 다르다)가 잡히면 --version 이 실패하므로 감시 쪽으로 간다.
+run_limited() {
+  local limit="$1" cpid wpid rc=0
+  shift
+  if timeout --version >/dev/null 2>&1; then
+    timeout "$limit" "$@" || rc=$?
+    return "$rc"
+  fi
+  "$@" &
+  cpid=$!
+  (
+    waited=0
+    while kill -0 "$cpid" 2>/dev/null; do
+      if [ "$waited" -ge "$limit" ]; then
+        command -v pkill >/dev/null 2>&1 && pkill -TERM -P "$cpid" 2>/dev/null
+        kill -TERM "$cpid" 2>/dev/null
+        exit 0
+      fi
+      sleep 1
+      waited=$((waited + 1))
+    done
+  ) </dev/null >/dev/null 2>&1 &
+  wpid=$!
+  wait "$cpid" || rc=$?
+  kill "$wpid" 2>/dev/null || true
+  wait "$wpid" 2>/dev/null || true
+  if [ "$rc" -eq 143 ]; then rc=124; fi
+  return "$rc"
+}
 if [ "$fetch_state" = "ok" ] && git remote get-url origin 2>/dev/null | grep -q "github\.com"; then
   pr_note=""
   pr_rc=0
@@ -608,10 +639,6 @@ if [ "$fetch_state" = "ok" ] && git remote get-url origin 2>/dev/null | grep -q 
   if ! command -v uvx >/dev/null 2>&1 || ! command -v gh >/dev/null 2>&1; then
     pr_rc=127
     pr_note="uvx 나 gh 가 없음"
-  elif ! command -v timeout >/dev/null 2>&1; then
-    # 시간 제한 없이 뒤에서 돌리면 끝나지 않는 프로세스가 남을 수 있다. 건너뛰고 불능으로 알린다.
-    pr_rc=1
-    pr_note="timeout 명령이 없어 시간을 제한할 수 없음"
   elif [ -n "${DOC_GUARD_ENGINE:-}" ]; then
     pr_engine="$DOC_GUARD_ENGINE"
   else
@@ -643,13 +670,11 @@ if [ "$fetch_state" = "ok" ] && git remote get-url origin 2>/dev/null | grep -q 
       # 하루 넘은 옛 파일(끝난 세션이 남긴 것)을 치운다.
       find "$pr_gitdir" -maxdepth 1 -name 'harness-pr-table.*' -mmin +1440 -exec rm -f {} + >/dev/null 2>&1 || true
       rm -f "$pr_file" "${pr_file}.tmp"
-      pr_wrap=()
-      if command -v nohup >/dev/null 2>&1; then pr_wrap=(nohup); fi
-      pr_wrap=(${pr_wrap[@]+"${pr_wrap[@]}"} timeout "$pr_timeout")
       # 모든 fd 를 닫아 훅이 끝나도 백그라운드가 훅 실행기의 파이프를 붙들지 않게 한다.
       (
+        trap '' HUP
         pr_bg_rc=0
-        pr_bg_out="$(${pr_wrap[@]+"${pr_wrap[@]}"} uvx --from "$pr_engine" python -P -m checker.pr_queue --mine --quiet-empty --max-rows 10 2>/dev/null </dev/null)" || pr_bg_rc=$?
+        pr_bg_out="$(run_limited "$pr_timeout" uvx --from "$pr_engine" python -P -m checker.pr_queue --mine --quiet-empty --max-rows 10 2>/dev/null </dev/null)" || pr_bg_rc=$?
         pr_bg_out="$(printf '%s' "$pr_bg_out" | tr -d '\r')"
         { printf 'rc=%s\n' "$pr_bg_rc"; if [ -n "$pr_bg_out" ]; then printf '%s\n' "$pr_bg_out"; fi; } > "${pr_file}.tmp"
         mv -f "${pr_file}.tmp" "$pr_file"

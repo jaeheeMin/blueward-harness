@@ -316,8 +316,13 @@ def test_push_안_한_커밋이_계속_있으면_시작마다_알린다(session_
 def test_사본을_못_뜨면_확인_불능으로_알린다(session_root, tmp_path):
     repo = _repo(tmp_path)
     _write(repo, "new.txt", "new\n")
-    # 임시 index 를 만들 수 없게 TMPDIR 을 없는 곳으로 돌린다.
-    _stop(repo, TMPDIR=str(tmp_path / "없는폴더"), TMP=str(tmp_path / "없는폴더"), TEMP=str(tmp_path / "없는폴더"))
+    # 임시 index 를 만들 수 없게, 항상 실패하는 mktemp shim 을 PATH 맨 앞에 둔다.
+    # (TMPDIR 을 없는 곳으로 돌리는 방법은 macOS 의 mktemp 가 TMPDIR 을 무시하고 사용자 임시 폴더로 돌아가 통하지 않는다.)
+    shim = tmp_path / "shim-bin"
+    shim.mkdir()
+    (shim / "mktemp").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8", newline="\n")
+    (shim / "mktemp").chmod(0o755)
+    _stop(repo, PATH=f"{shim}{os.pathsep}{os.environ['PATH']}")
     assert _fields(repo)["snap_failed"] == ["1"]
     (repo / "new.txt").unlink()
 
