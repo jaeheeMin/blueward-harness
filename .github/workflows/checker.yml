@@ -100,7 +100,8 @@ jobs:
       - name: 테스트
         # -rs: 건너뛴 시험의 이름과 이유를 로그 끝에 남긴다. 팀원 PC(Windows)에서 건너뛰는
         # 시험(심볼릭 링크 권한 등)이 여기서는 실제로 돌았는지 로그로 확인하려는 것이다(#636).
-        run: uv run pytest -q -rs
+        # 측정용(#1060): 러너 코어 수만큼 병렬로 돌리고 느린 시험 30개를 남긴다. 병합하지 않는다.
+        run: uv run pytest -q -rs -n auto --durations=30
 
       - name: CLI 계약 확인 (통과는 0)
         shell: bash
