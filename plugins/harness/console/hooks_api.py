@@ -305,6 +305,12 @@ class Hooks:
         reason = reason.strip()
         if not reason:
             return 400, {"error": "reason 이 없습니다."}
+        if hook == "stop-deliver":
+            # 마무리 확인(커밋 안 된 변경 알림)은 막힘이 아니라 안내다(#1027 D6). 막힘 카드·막힘 수에 넣지 않고 대화 기록 한 줄로만 쌓는다.
+            if self.store.add_chat(s, "note", reason[:600], tone="warn"):
+                self.store.add_log(s, "마무리 안내: " + reason.split("\n", 1)[0][:200])
+                self.store.touch(s)
+            return 200, None
         kind = block_kind(reason)
         fix = ""
         if "다음:" in reason:

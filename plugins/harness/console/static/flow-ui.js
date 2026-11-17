@@ -2,7 +2,8 @@
 (function () {
   'use strict';
 
-  var CACHE_MS = 30000;
+  var CACHE_MS = 60000;  // 서버 server.py CACHE_SECONDS(60초)와 같다. 더 짧게 물어도 서버가 같은 답을 주고, 더 길면 서버보다 오래 묵는다(#1027)
+  var MY_PRS_POLL_MS = CACHE_MS + 1000;  // 홈이 열려 있는 동안 내 PR 상태를 다시 읽는 간격. 서버·프런트 캐시가 모두 끝난 뒤에 묻는다(D8)
   var LOADING_POLL_MS = 2000;  // 서버가 gh 를 읽는 중(loading)이라고 할 때 다시 묻는 간격
   var LOADING_POLL_MAX = 15;
   var JOB_POLL_MS = 1000;
@@ -241,7 +242,7 @@
       var el = h('div', { class: 'q startchecks', 'aria-label': '새 세션 점검', hidden: true });
       var note = h('p', { class: 'note-muted', role: 'status', hidden: true });
       var last = null, alive = true;
-      var CROW = { done: 'ok', run: 'run', fail: 'fail', todo: 'todo' };
+      var CROW = { done: 'ok', run: 'run', fail: 'fail', skipped: 'todo', todo: 'todo' };
       function draw() {
         var s = last, checks = s ? L.startChecks(s) : [];
         el.hidden = !checks.length;
@@ -1274,7 +1275,6 @@
       });
     }
 
-    var GROUP_ORDER = { todo: 0, running: 1, idle: 2 };
     // 자주 하는 일: 누르면 새 작업 화면의 입력칸에 이 문장을 미리 넣어 간다(새 작업 화면은 종류를 미리 고르는 인자를 받지 않는다).
     var KINDS = [
       ['요구사항정의서', '고객 요구를 SRS 로', '요구사항정의서(SRS)를 만들고 싶어. '],
@@ -1302,6 +1302,10 @@
     function pendingOf(s) {
       return (s.pendingRequestIds || []).map(function (rid) { return { rid: rid, r: kit.requests.get(rid) }; })
         .filter(function (x) { return !(x.r && x.r.status && x.r.status !== 'pending'); })[0] || null;
+    }
+    // 아직 답 안 한 요청 번호. 내 차례 계산(BHLogic.turnItems·groupOf)이 띠·알림·레일과 같은 값을 쓰게 app.js 의 openIds 와 같은 규칙이다(#1027 D5)
+    function openIds(s) {
+      return (s.pendingRequestIds || []).filter(function (rid) { var r = kit.requests.get(rid); return !(r && r.status && r.status !== 'pending'); });
     }
     function emptyHome(root, approvals, projects) {
       var page = h('div', { class: 'page home' });
@@ -1389,11 +1393,11 @@
     function homeTable(list) {
         var head = h('tr', null, ['작업', '단계', '번호', '기억', '상태'].map(function (t) { return h('th', { scope: 'col', text: t }); }));
         var rows = list.map(function (s) {
-          var g = L.groupOf(s), todoRow = g === 'todo' && !L.blockOf(s), ended = s.status === 'ended';
+          var g = L.groupOf(s, openIds), todoRow = g === 'todo' && !L.blockOf(s), ended = s.status === 'ended';
           var title = s.title || folderName(s) || '이름 없는 세션';
           var subs = L.runningSubCount(s);
           var rowPend = todoRow ? pendingOf(s) : null, rowPlan = !!(rowPend && rowPend.r && kit.isPlan && kit.isPlan(rowPend.r));
-          var doing = ended ? '끝난 세션' : rowPlan ? '계획 확인 기다림' : s.currentAction ? L.plainAction(s.currentAction, kit.skillLabel) : (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? (s.askedInText ? '답을 기다리는 듯해(추정)' : '내 차례야') : g === 'running' ? '작업하는 중' : '쉬는 중');
+          var doing = ended ? '끝난 세션' : rowPlan ? '계획 확인 기다림' : s.currentAction ? L.plainAction(s.currentAction, kit.skillLabel) : (s.currentSkill ? kit.skillLabel(s.currentSkill) + ' 진행 중' : todoRow ? '내 차례야' : g === 'running' ? '작업하는 중' : '쉬는 중');
           var tip = doing + (subs ? ' · 서브에이전트 ' + subs + '개 실행 중' : '');  // 둘째 줄 대신 칩 title 로(시안: 상태 칸은 칩 하나)
           var bk = L.blockOf(s);
           var fixRow = !bk && !ended && g !== 'running' && !pendingOf(s) && L.prNeedsFix(s);  // 시안 G-24: PR 검사가 실패한 세션(일하는 중이 아닐 때)
@@ -1441,15 +1445,17 @@
         }
         var list = sessionList();
         if (!list.length) { emptyHome(root, approvals, projects); approvalCard(approvals, showPr); projectCard(projects); return; }
-        var rankOf = function (s) { return L.blockOf(s) ? 0 : GROUP_ORDER[L.groupOf(s)]; };
-        list.sort(function (a, b) { return (rankOf(a) - rankOf(b)) || ((b.updatedAt || 0) - (a.updatedAt || 0)); });
-        var c = L.counts(list), page = h('div', { class: 'page home' });
+        list.sort(function (a, b) { return L.sessionOrder(a, b, openIds); });  // 묶음 안에서는 시작 시각으로 고정(#1027 D-6)
+        var c = L.counts(list, openIds), page = h('div', { class: 'page home' });
+        var turns = L.turnItems(list, openIds);  // 내 차례: 사이드 띠·알림·레일과 같은 목록(막힘·확인 못 함은 따로, #790)
         var proj = folderName(list[0]);
         page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: today() + ' · ' + proj }), h('h1', { text: '오늘 내 일' })));  // "세션 n개 · …" 줄은 시안에 없다(타일이 같은 숫자를 보인다)
-        page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), prTile, weekTile, tbTile));  // 시안 G-11 순서 + G-24 다섯째 칸
+        page.appendChild(h('div', { class: 'tiles2' }, tile('내 차례', String(turns.length), turns.length ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), prTile, weekTile, tbTile));  // 시안 G-11 순서 + G-24 다섯째 칸
         page.appendChild(fixBox);  // 시안 G-24: 타일 줄 바로 아래
+        if (!turns.length) page.appendChild(h('p', { class: 'quiet', 'data-no-turn': '1', role: 'status', text: L.NO_TURN_TEXT }));
 
-        var todo = list.filter(function (s) { return L.groupOf(s) === 'todo' && !L.blockOf(s) && !(L.prNeedsFix(s) && !pendingOf(s) && !s.askedInText); });  // 막힘·확인 못 함은 내 차례 숫자와 따로(#790)
+        // 내 차례 카드는 세션마다 하나(요청이 여럿이면 첫 요청). 고칠 PR 은 위 fixBox 에 따로 있어 카드에서 뺀다.
+        var todo = list.filter(function (s) { return turns.some(function (t) { return t.s === s && t.kind === 'request'; }); });
         // 내 차례는 가장 오래 기다린 한 건만 카드로 두고, 나머지는 "외 n건" 을 눌러 펼친다(펼침 상태는 이 화면에서만 기억).
         var waiting = todo.slice().sort(function (a, b) { return (a.updatedAt || 0) - (b.updatedAt || 0); });
         function callCard(s) {
@@ -1457,7 +1463,7 @@
           var href = pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id);
           var plan = !!(pend && pend.r && kit.isPlan && kit.isPlan(pend.r));  // 계획 확인 요청(#861)
           var verb = pend && pend.r && (kit.kindOf(pend.r) === 'elicitation' || kit.kindOf(pend.r) === 'question') ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
-          var what = pend ? (kit.requestTitle ? kit.requestTitle(pend.r) : (pend.r && pend.r.title) || '요청을 확인해 줘') : s.askedInText ? '답을 기다리는 듯해(추정)' : s.turnSkill ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례야';
+          var what = pend ? (kit.requestTitle ? kit.requestTitle(pend.r) : (pend.r && pend.r.title) || '요청을 확인해 줘') : '내 차례야';
           return h('div', { class: 'call', 'data-call': s.id },
             h('div', { class: 'ct' }, h('span', { class: 'eb', text: '네 차례 · ' + name }), h('b', { text: what })),
             kit.link(href, { class: 'pill dark', text: verb }));
@@ -1510,14 +1516,21 @@
           requestAnimationFrame(function () { soonOn = false; soonLast = Date.now(); if (!gone) draw(); });
         }, Math.max(0, 500 - (Date.now() - soonLast)));
       }
-      return { onData: drawSoon, onSession: drawSoon, onRequest: drawSoon, onRemoved: draw, title: function () { return ''; }, destroy: function () { gone = true; } };
+      // 열린 PR 의 상태(검사 통과·실패·병합)는 GitHub 에서 바뀌므로 홈이 열려 있는 동안 1분마다 다시 읽는다(#1027 D8). 홈을 떠나면 멈춘다.
+      var prTimer = setInterval(function () {
+        if (gone || !fixBox.isConnected || document.hidden) return;
+        cache.myPrs = {};
+        delete fixBox.dataset.ready;
+        fixCard(fixBox);
+      }, MY_PRS_POLL_MS);
+      return { onData: drawSoon, onSession: drawSoon, onRequest: drawSoon, onRemoved: draw, title: function () { return ''; }, destroy: function () { gone = true; clearInterval(prTimer); } };
     }
 
     return {
       stepBar: stepBar, prCard: prCard, flowPreview: flowPreview, toolsRow: toolsRow, startChecksPanel: startChecksPanel, flowPanel: flowPanel, folderNotice: folderNotice,
       docsPanel: docsPanel, docsPage: docsPage, flowsFor: flowsFor, approvalsFor: approvalsFor, flowChooser: flowChooser, devReadyFor: devReadyFor, askCard: askCard, homeView: homeView, legend: legend, closeModal: closeModal,
       // Post 홈(post-home.js)이 Sauce 홈과 같은 데이터·칸을 쓰려고 꺼내 준다
-      homeKit: { sessionList: sessionList, folderName: folderName, pendingOf: pendingOf, approvalCard: approvalCard, recentCard: recentCard, fixCard: fixCard, projectCard: projectCard, emptyHome: emptyHome, homeStats: homeStats, today: today, homeTable: homeTable, homePrBox: homePrBox }
+      homeKit: { sessionList: sessionList, folderName: folderName, pendingOf: pendingOf, openIds: openIds, approvalCard: approvalCard, recentCard: recentCard, fixCard: fixCard, projectCard: projectCard, emptyHome: emptyHome, homeStats: homeStats, today: today, homeTable: homeTable, homePrBox: homePrBox }
     };
   }
 })();

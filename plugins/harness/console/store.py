@@ -978,9 +978,11 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
         asks = bool(not pending and not running and not s["ended"] and not s.get("starting")
                     and s.get("reportFresh") and report_asks(s["report"]))  # 이번 턴에 받은 보고일 때만
         phase = flows.phase_of(s) if not (pending or asks or running or s.get("starting") or s["ended"]) else ""
-        if pending or asks or (turn_skill and not running and not s["ended"] and not phase):
+        # 내 차례는 사람이 답할 대기 요청이 있는 세션만이다(#1027 D5). git 상태로 짐작한 start·deliver 차례(turn_skill)와
+        # 글로 물은 듯한 보고(asks)는 내 차례로 세지 않는다(화면 본문에 참고로만 둔다). 시작하는 중도 일하는 중 묶음이다.
+        if pending:
             group = "todo"
-        elif running:
+        elif running or (s.get("starting") and not s["ended"]):
             group = "running"
         else:
             group = "idle"

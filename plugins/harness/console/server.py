@@ -55,6 +55,7 @@ HEARTBEAT = 10.0
 FILES_CACHE_SECONDS = 3.0  # 세션 산출물 목록(?cache=1)을 이만큼 기억한다. git 을 여러 번 실행해 느리다(#793)
 CACHE_SECONDS = 60.0 # 승인자 판정과 승인 대기 PR 목록은 gh 를 자주 부르지 않게 이만큼 기억한다
 MAX_ADVANCE_ROUNDS = 4  # 갈래 진행 판정에서 증거를 읽고 다시 판정하는 최대 횟수(증거 종류가 둘뿐이라 넉넉하다)
+PR_REFRESH_SECONDS = 60.0  # 열린 PR 이 있는 세션의 갈래를 다시 판정하는 간격(초, #1027 D8). 서버 PR 캐시(CACHE_SECONDS)와 같다
 UPCOMING_REFRESH = 30.0  # 진행 중 세션의 다음 갈래(upcoming)를 SRS 에서 다시 읽는 간격(초, #858). 판정마다 파일을 읽지 않게
 COND_YES, COND_NO, COND_UNKNOWN = "yes", "no", "unknown"
 LOADING_REASON = "GitHub 에서 읽는 중이야."
@@ -411,7 +412,10 @@ class App:
 
         def compute():
             try:
-                value = fn()
+                try:
+                    value = fn()
+                except Exception as e:  # 계산이 예외로 끝나도 last 에 사유를 남긴다. 안 남기면 화면이 영영 "읽는 중" 에 머문다(#1027 D-7)
+                    value = {"state": COND_UNKNOWN, "reason": f"읽는 중 오류가 났어({type(e).__name__}).", "login": "", "items": []}
                 with self.lock:
                     self.last[key] = value
                     if value.get("state") != COND_UNKNOWN:  # 못 읽은 결과는 기억하지 않는다(화면에 보여 주려고 last 에만 둔다)
@@ -433,7 +437,8 @@ class App:
             running = key in self.inflight
         if value is None:
             return {"state": COND_UNKNOWN, "reason": LOADING_REASON, "login": "", "items": [], "loading": True}
-        return dict(value, loading=True) if running else value
+        # 이전에 못 읽은 결과(사유가 있는 unknown)는 다시 읽는 동안에도 "읽는 중" 으로 덮지 않고 사유를 바로 보인다(#1027 D-7)
+        return dict(value, loading=True) if running and value.get("state") != COND_UNKNOWN else value
 
     def cond_state(self, name: str, cwd: str, wait: bool = True) -> dict:
         """조건 하나의 판정. {"state": yes/no/unknown, "reason", "label"}. 못 읽으면 unknown 이고 없음(no)으로 두지 않는다.
@@ -609,8 +614,44 @@ class App:
         return [os.path.realpath(p) for p in paths if os.path.isdir(p)]
 
     def shutdown(self) -> None:
+        stop = getattr(self, "ticker_stop", None)
+        if stop is not None:
+            stop.set()
         self.manager.shutdown()
         self.store.flush()
+
+    # ---- 열린 PR 자동 다시 판정(#1027 D8) ----
+    @staticmethod
+    def watches_pr(state: dict | None) -> bool:
+        """세션 밖(GitHub)에서 바뀔 PR 을 지켜볼 갈래인가: 끝나지 않았고, PR 이 열려 있거나 지금 단계가 PR 을 근거로 끝나는 단계다."""
+        if not state or state.get("finished"):
+            return False
+        if str((state.get("pr") or {}).get("state") or "").upper() == "OPEN":
+            return True
+        cur = flows.current(state)
+        return bool(cur and any(t in ("pr_exists", "pr_merged") for t in cur.get("done", [])))
+
+    def refresh_open_prs(self) -> int:
+        """지켜볼 세션마다 갈래를 다시 판정한다(검사 결과·병합이 화면에 저절로 반영되게). 다시 판정한 세션 수."""
+        with self.store.lock:
+            targets = [s for s in self.store.sessions.values() if not s.get("ended") and s.get("cwd") and self.watches_pr(s.get("flowState"))]
+        for s in targets:
+            self.advance_flow(s)
+            self.store.touch(s)
+        return len(targets)
+
+    def start_pr_ticker(self, every: float = PR_REFRESH_SECONDS) -> None:
+        self.ticker_stop = threading.Event()
+
+        def loop():
+            while not self.ticker_stop.wait(every):
+                try:
+                    self.refresh_open_prs()
+                except Exception as e:  # 한 번 실패해도 다음 주기에 다시 한다. 조용히 삼키지 않고 남긴다
+                    if sys.stderr is not None:
+                        print(f"열린 PR 다시 판정 실패: {type(e).__name__}: {e}", file=sys.stderr)
+
+        threading.Thread(target=loop, daemon=True).start()
 
     # ---- API ----
     def api(self, method: str, path: str, query: dict, body: dict):
@@ -1831,7 +1872,8 @@ class App:
         with job["start_lock"]:  # 시작 버튼을 두 번 눌러도 세션은 하나만 뜬다
             sid = job.get("session_id")
             if sid is None:
-                sid = self.manager.launch(job["cwd"], message, title=job["text"].split("\n", 1)[0], model=model, effort=effort, permission=permission)
+                sid = self.manager.launch(job["cwd"], message, title=job["text"].split("\n", 1)[0], model=model, effort=effort, permission=permission,
+                                          start_checks=False)
                 if sid is None:
                     raise HttpError(502, "claude 세션을 띄우지 못했어. " + platform_compat.CLAUDE_MISSING)
                 job["session_id"] = sid
@@ -2543,6 +2585,7 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    app.start_pr_ticker()  # 열린 PR 이 있는 세션을 1분마다 다시 판정한다(#1027 D8). 시험은 App 만 만들어 이 타이머가 돌지 않는다
     try:
         server.serve_forever()
     finally:

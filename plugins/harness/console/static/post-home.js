@@ -33,7 +33,8 @@
       list.forEach(function (s) {
         var bk = L.blockOf(s), pend = HK.pendingOf(s);
         if (bk) { bad.push({ id: s.id, kind: bk.kind === 'cannot_check' ? 'unk' : 'blocked', s: s, t: bk.t }); return; }
-        if (L.groupOf(s) === 'todo' && !(L.prNeedsFix(s) && !pend && !s.askedInText)) turn.push({ id: s.id, kind: 'turn', s: s, pend: pend });
+        // 내 차례는 Sauce 홈·띠와 같은 목록(BHLogic.turnItems)으로 정한다. 답할 요청이 있는 세션만(#1027 D5). PR 고치기는 따로 칸이 있어 뺀다
+        if (L.turnItems([s], HK.openIds).some(function (t) { return t.kind === 'request'; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: pend });
       });
       turn.sort(function (a, b) { return (a.s.updatedAt || 0) - (b.s.updatedAt || 0); });
       // 방금 답해 도장이 찍힌 카드는 처리됨으로 바뀐 뒤에도 잠깐 남긴다(도장이 보이도록)
@@ -70,7 +71,7 @@
         if (q) { b.appendChild(q); return b; }
       }
       var plan = !!(r && kit.isPlan(r)), ask = k === 'question' || k === 'elicitation';
-      var what = pend ? kit.requestTitle(r) : s.askedInText ? '답을 기다리는 듯해(추정)' : s.turnSkill ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례야';
+      var what = pend ? kit.requestTitle(r) : '내 차례야';
       var verb = ask ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
       b.appendChild(h('p', { class: 'po-dc-q', text: what }));
       b.appendChild(h('div', { class: 'po-dc-act' }, kit.link(pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id), { class: 'pill acc', text: verb })));
@@ -201,7 +202,7 @@
         scenePanel.hidden = false;
         approvals.className = 'approvals'; approvals.dataset.compact = '1';  // 검토 요청 칸 안에서는 줄로 그린다(Sauce 홈과 같다)
         clear(prSlot); prSlot.appendChild(h('div', { class: 'light po-panel po-mini' }, HK.homePrBox(list, approvals)));
-        var c = L.counts(list);
+        var c = L.counts(list, HK.openIds), turnCount = L.turnItems(list, HK.openIds).length;  // 내 차례 숫자는 Sauce 홈·띠와 같은 목록 길이(#1027)
         sceneSub.textContent = c.total + '개';
         paintCalm();
         paintTeams();
@@ -209,10 +210,10 @@
         helloSlot.appendChild(h('p', { class: 'po-date', text: dateLine(new Date()) + (proj ? ' · ' + proj : '') }));
         helloSlot.appendChild(h('h1', { text: '오늘 내 일' }));
         helloSlot.appendChild(h('p', { class: 'po-lede' }, '세션 ' + c.total + '개 중 ' + c.running + '개가 일하고 있어. ',
-          c.todo ? h('b', { text: '네 답을 기다리는 일이 ' + c.todo + '건 있어.' }) : '지금 네 답을 기다리는 일은 없어.'));
+          turnCount ? h('b', { text: '네 답을 기다리는 일이 ' + turnCount + '건 있어.' }) : L.NO_TURN_TEXT + '.'));
         items = deckItems(list);
         paintDeck();
-        restSlot.appendChild(h('div', { class: 'tiles2 po-tiles' }, tile('내 차례', String(c.todo), c.todo ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), stats.prTile, stats.weekTile, stats.tbTile));
+        restSlot.appendChild(h('div', { class: 'tiles2 po-tiles' }, tile('내 차례', String(turnCount), turnCount ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), stats.prTile, stats.weekTile, stats.tbTile));
         restSlot.appendChild(HK.homeTable(list));  // 내 세션 표(작업·단계·번호·기억·상태): Sauce 홈과 같은 칸
         restSlot.appendChild(foot);
         restSlot.appendChild(projects);

@@ -761,8 +761,12 @@ def test_group_rules(browser):
     s["turn"] = {"skill": "deliver", "unknown": False}
     browser.event("t2", "SessionStart")
     browser.app.store.get("t2")["turn"] = {"skill": "deliver", "unknown": False}
-    assert browser.call("GET", "/api/sessions/t2")[1]["group"] == "todo"  # 턴이 끝났고 이번 차례가 있다
+    # #1027 D5: git 으로 짐작한 차례(turnSkill)는 내 차례가 아니다. 사람이 답할 대기 요청이 있을 때만 todo 다
+    assert browser.call("GET", "/api/sessions/t2")[1]["group"] == "idle"
     assert browser.call("GET", "/api/sessions/t2")[1]["turnSkill"] == "deliver"
+    browser.app.store.get("t2")["starting"] = True  # 시작하는 중은 쉬는 중이 아니라 일하는 중 묶음이다
+    got = browser.call("GET", "/api/sessions/t2")[1]
+    assert got["status"] == "starting" and got["group"] == "running"
 
 
 def test_sessions_persist_atomically_and_requests_do_not(browser):
@@ -1493,7 +1497,7 @@ def test_turn_state_is_refreshed_on_stop(tmp_path, monkeypatch):
         c.event("t1", "UserPromptSubmit", prompt="x")
         c.hook("stop", {"session_id": "t1", "cwd": str(c.work), "last_assistant_message": "r"})
         s = c.call("GET", "/api/sessions/t1")[1]
-        assert s["turnSkill"] == "deliver" and s["turnUnknown"] is True and s["group"] == "todo"
+        assert s["turnSkill"] == "deliver" and s["turnUnknown"] is True and s["group"] == "idle"  # git 짐작 차례는 내 차례가 아니다(#1027)
         assert s["repo"] == "r" and s["changedFiles"] == ["x.py"] and calls
     finally:
         c.close()
@@ -5285,6 +5289,104 @@ def test_gitstate_pr_status_and_checks_summary():
     assert gitstate.summarize_checks([{"status": "COMPLETED", "conclusion": "SUCCESS"}, {"status": "COMPLETED", "conclusion": "FAILURE"}]) == "fail"
 
 
+def test_checks_summary_does_not_count_human_approval_gates_as_failures():
+    ok = {"status": "COMPLETED", "conclusion": "SUCCESS"}
+    gate_fail = [{"context": "risk-gate", "state": "FAILURE"}, {"context": "ssot-approval", "state": "FAILURE"}]
+    assert gitstate.summarize_checks([ok] + gate_fail) == "pass" and gitstate.awaiting_approval([ok] + gate_fail) is True
+    assert gitstate.summarize_checks(gate_fail) == "none"  # 센 검사가 하나도 없다
+    # 코드·문서 검사의 실패는 그대로 실패다(승인 대기와 따로 센다)
+    assert gitstate.summarize_checks([ok, {"context": "doc-guard", "state": "FAILURE"}] + gate_fail) == "fail"
+    assert gitstate.summarize_checks([{"name": "pr-checks / risk-gate", "status": "COMPLETED", "conclusion": "FAILURE"}, ok]) == "pass"
+    assert gitstate.summarize_checks([{"context": "risk-gate", "state": "PENDING"}, ok]) == "pending"  # 아직 도는 중인 것은 그대로
+    assert gitstate.awaiting_approval([ok]) is False and gitstate.awaiting_approval(None) is False
+    item = gitstate._pr_item(pr_json("OPEN", [ok] + gate_fail))
+    assert item["checks"] == "pass" and item["awaitApproval"] is True
+    assert gitstate._pr_item(pr_json("OPEN"))["awaitApproval"] is False
+
+
+def test_open_pr_moves_a_work_step_to_waiting_for_merge_without_pressing_done(tmp_path, monkeypatch):
+    """#1027 D-1: fix 갈래가 '고치기'(has_changes+manual)에 머물러도 PR 이 열리면 병합 기다리기로, 병합되면 끝으로 간다."""
+    listed = {"data": []}
+    run = FakeRun(gh_pr_list=lambda a: (0, json.dumps(listed["data"])), gh_pr_view=lambda a: (0, json.dumps(listed["data"][0])))
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    try:
+        turn(c, "p1")
+        set_flow(c, "p1", "fix")
+        c.git["changedFiles"] = ["a.md"]
+        skill_event(c, "p1", "start")
+        stop(c, "p1")
+        m = c.call("POST", "/api/sessions/p1/flow/refresh", {})[1]
+        assert m["stepIndex"] == 1 and states(m)[1] == "active" and m["flowPr"] is None  # 고치는 중
+        listed["data"] = [pr_json("OPEN")]
+        m = c.call("POST", "/api/sessions/p1/flow/refresh", {})[1]
+        assert m["stepIndex"] == 3 and states(m) == ["done", "done", "done", "active"] and m["flowPr"]["number"] == 7
+        assert m["phase"] == "approval" and m["group"] == "idle"
+        listed["data"] = [pr_json("MERGED")]
+        m = c.call("POST", "/api/sessions/p1/flow/refresh", {})[1]
+        assert m["flowFinished"] is True and states(m) == ["done"] * 4 and m["flowPr"]["state"] == "MERGED"
+    finally:
+        c.close()
+
+
+def test_closed_pr_does_not_skip_work_steps(tmp_path, monkeypatch):
+    run = FakeRun(gh_pr_list=lambda a: (0, json.dumps([pr_json("CLOSED")])))
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    try:
+        turn(c, "p2")
+        set_flow(c, "p2", "fix")
+        c.git["changedFiles"] = ["a.md"]
+        m = c.call("POST", "/api/sessions/p2/flow/refresh", {})[1]
+        assert m["stepIndex"] == 0 and m["flowPr"]["state"] == "CLOSED"
+    finally:
+        c.close()
+
+
+def test_gitstate_upload_states_fetches_base_once_and_unknown_without_origin_ref(tmp_path, monkeypatch):
+    gitstate._base_fetched.clear()
+    ok_blob = "100644 blob abc\tdocs/a.md\n"
+    table = {"git rev-parse --show-prefix": (0, "\nHEADSHA\n"), "git ls-tree -z HEAD": (0, ok_blob.replace("\n", "\0").replace("\t", "\t")),
+             "git symbolic-ref": (0, "origin/main\n"), "git fetch": (0, ""), "git rev-parse --verify": (0, "")}
+    run = FakeRun(**{k.replace(" ", "_"): v for k, v in table.items()})
+    run.table["git ls-tree -z origin/main"] = (0, ok_blob.replace("\n", "\0"))
+    got = gitstate.upload_states(run, str(tmp_path), [("docs/a.md", False)], lambda: {"state": "ok", "prs": []})
+    assert got["docs/a.md"]["state"] == "merged"
+    assert [c for c in run.calls if c.startswith("git fetch")] == ["git fetch --quiet origin main"]
+    gitstate.upload_states(run, str(tmp_path), [("docs/a.md", False)], lambda: {"state": "ok", "prs": []})
+    assert len([c for c in run.calls if c.startswith("git fetch")]) == 1  # 60초 안에는 다시 가져오지 않는다
+    # origin/<기본> 을 못 읽으면 "안 올림"(committed) 이 아니라 unknown. fetch 가 실패해도 판정은 진행한다
+    gitstate._base_fetched.clear()
+    run2 = FakeRun(**{k.replace(" ", "_"): v for k, v in table.items()})
+    run2.table["git fetch"] = (1, "fatal")
+    run2.table["git rev-parse --verify"] = (1, "")
+    got = gitstate.upload_states(run2, str(tmp_path), [("docs/a.md", False)], lambda: {"state": "ok", "prs": []})
+    assert got["docs/a.md"]["state"] == "unknown" and "origin/main" in got["docs/a.md"]["reason"]
+    gitstate._base_fetched.clear()
+
+
+def test_cached_keeps_an_error_reason_when_the_computation_raises(tmp_path, monkeypatch):
+    c = flow_console(tmp_path, monkeypatch)
+    try:
+        def boom():
+            raise RuntimeError("gh 폭발")
+
+        got = c.app.cached(("boom",), boom, wait=True)
+        assert got["state"] == "unknown" and "RuntimeError" in got["reason"] and not got.get("loading")
+        again = c.app.cached(("boom",), boom, wait=False)  # 다시 읽는 동안에도 "읽는 중" 으로 덮지 않고 사유를 보인다
+        assert again["state"] == "unknown" and "RuntimeError" in again["reason"]
+    finally:
+        c.close()
+
+
+def test_stop_deliver_report_is_a_note_not_a_block(browser):
+    browser.event("sd", "SessionStart")
+    status, _, _ = _blocked(browser, "sd", "커밋 안 된 변경이 있어. 다음: /harness:deliver", hook="stop-deliver", tool="")
+    assert status == 200
+    s = browser.call("GET", "/api/sessions/sd")[1]
+    chat = browser.call("GET", "/api/sessions/sd")[1]["chat"]
+    assert [c["role"] for c in chat][-1] == "note" and "커밋 안 된 변경" in chat[-1]["text"]
+    assert not any(c["role"] == "block" for c in chat) and s["lastBlock"] is None
+
+
 def test_gitstate_inspect_reports_commits_ahead(tmp_path):
     info = gitstate.inspect(str(tmp_path), fake_runner(git_table(**{"git rev-list --count @{u}": (0, "3\n")})))
     assert info["ahead"] == 3 and info["skill"] == "deliver"
@@ -5836,11 +5938,11 @@ def test_report_asks_follows_last_line_question_mark(report, asks):
     assert report_asks(report) is asks
 
 
-def test_session_asked_in_text_moves_to_todo_and_marks_estimate(browser):
+def test_session_asked_in_text_is_marked_estimate_but_not_my_turn(browser):
     browser.event("t1", "UserPromptSubmit", prompt="작업")
     browser.hook("stop", {"session_id": "t1", "cwd": "/w", "last_assistant_message": "결과예요.\n이대로 진행할까요?"})
     s = browser.call("GET", "/api/sessions/t1")[1]
-    assert s["askedInText"] is True and s["group"] == "todo" and s["status"] == "idle"
+    assert s["askedInText"] is True and s["group"] == "idle" and s["status"] == "idle"  # 추정은 내 차례 숫자에 넣지 않는다(#1027 D-3)
     browser.event("t1", "UserPromptSubmit", prompt="네")
     s = browser.call("GET", "/api/sessions/t1")[1]
     assert s["askedInText"] is False and s["group"] == "running"
@@ -6102,12 +6204,15 @@ def test_start_checks_follow_skill_events_and_can_be_skipped(mconsole):
     assert c.call("GET", "/api/sessions/terminal-1")[1]["startChecks"] == []  # 콘솔이 새로 띄운 세션만 점검 목록을 가진다
 
 
-def test_new_work_start_gives_start_checks(mconsole):
+def test_new_work_start_does_not_make_start_checks(mconsole):
+    # #1027 D7: 새 작업에는 시작 점검 두 줄을 만들지 않는다(다음 갈래 넘기기·launch 기본값은 그대로)
     c = mconsole
     jid = c.call("POST", "/api/new", {"text": "계획 세워줘", "cwd": str(c.work)})[1]["id"]
     wait_for(lambda: c.call("GET", f"/api/new/{jid}")[1]["status"] != "running")
     sid = c.call("POST", f"/api/new/{jid}/start", {})[1]["id"]
-    assert [x["id"] for x in c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"]] == ["sync", "version", "update", "reload"]
+    assert c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"] == []
+    c.event(sid, "PreToolUse", tool_name="Skill", tool_input={"skill": "harness:sync"})
+    assert c.call("GET", f"/api/sessions/{sid}")[1]["startChecks"] == []
 
 
 # ---- 플러그인 다시 불러오기 ----
@@ -8762,3 +8867,44 @@ def test_secret_rules_json_is_the_one_source_for_server_masks():
     assert trouble.mask_secrets is secrets_mask.mask_secrets and trouble.SECRET_ASSIGN is secrets_mask.SECRET_ASSIGN  # trouble.py 에 따로 둔 사본이 없다
     rules = json.loads((CONSOLE / "secret_rules.json").read_text(encoding="utf-8"))
     assert secrets_mask.MASK == rules["mask"] and len(secrets_mask.SECRET_OTHER) == len(rules["other"]) >= 8
+
+
+def test_pr_ticker_rechecks_only_sessions_watching_a_pr(tmp_path):
+    """#1027 D8: 열린 PR 이 있거나 PR 을 근거로 끝나는 단계에 있는 세션만 1분마다 다시 판정한다. 타이머는 실제 서버 main 에서만 켠다."""
+    W = console_server.App.watches_pr
+    assert W(None) is False and W({"finished": True, "pr": {"state": "OPEN"}}) is False
+    assert W({"finished": False, "pr": {"state": "OPEN"}, "steps": [], "stepIndex": 0}) is True
+    waiting = {"finished": False, "pr": None, "steps": [{"name": "합쳐지기", "state": "now", "done": ["pr_merged"]}], "stepIndex": 0}
+    fixing = {"finished": False, "pr": None, "steps": [{"name": "고치기", "state": "now", "done": ["has_changes", "manual"]}], "stepIndex": 0}
+    assert W(waiting) is True and W(fixing) is False  # PR 을 근거로 끝나는 단계면 PR 이 아직 없어도 지켜본다
+    app = console_server.App(0, None, Path(console_server.__file__).resolve().parent.parent)
+    assert getattr(app, "ticker_stop", None) is None  # App 을 만들기만 해서는 타이머가 돌지 않는다
+    seen = []
+    app.advance_flow = lambda s, info=None: seen.append(s["id"])
+    open_pr = {"finished": False, "pr": {"state": "OPEN", "number": 3}, "steps": [], "stepIndex": 0}
+    merged = {"finished": False, "pr": {"state": "MERGED", "number": 4}, "steps": [], "stepIndex": 0}
+    for sid, st, ended in (("a", open_pr, False), ("b", merged, False), ("c", dict(open_pr), True), ("d", None, False)):
+        s = app.store.ensure(sid, str(tmp_path))
+        s.update(flowState=st, ended=ended)
+    assert app.refresh_open_prs() == 1 and seen == ["a"]
+    app.start_pr_ticker(every=3600)
+    assert app.ticker_stop is not None and not app.ticker_stop.is_set()
+    app.shutdown()
+    assert app.ticker_stop.is_set()
+
+
+def test_flow_early_pr_read_failure_leaves_no_unknown_on_steps_without_pr():
+    """#1027: 단계와 무관하게 PR 을 미리 읽다가 못 읽어도, PR 이 필요 없는 단계(고치기)에는 "PR 확인 못 함" 사유를 남기지 않는다.
+    PR 을 근거로 끝나는 단계(합쳐지기)는 그대로 사유를 남긴다."""
+    def fetch(kind):
+        if kind == "pr":
+            return {"state": "unknown", "reason": "gh 로 PR 을 읽지 못했어."}
+        return {"state": "ok", "value": False}
+    fixing = {"finished": False, "unknown": [], "pr": None, "stepIndex": 0,
+              "steps": [{"name": "고치기", "kind": "work", "state": "now", "done": ["has_changes", "manual"], "confirmed": False, "skillDone": False}]}
+    flows.evaluate(fixing, fetch, lambda name: "yes", 0.0)
+    assert fixing["unknown"] == [] and fixing["stepIndex"] == 0
+    waiting = {"finished": False, "unknown": [], "pr": None, "stepIndex": 0,
+               "steps": [{"name": "합쳐지기", "kind": "wait", "state": "now", "done": ["pr_merged"], "confirmed": False, "skillDone": False}]}
+    flows.evaluate(waiting, fetch, lambda name: "yes", 0.0)
+    assert "gh 로 PR 을 읽지 못했어." in waiting["unknown"]
