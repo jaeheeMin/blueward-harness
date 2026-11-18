@@ -81,3 +81,36 @@
 
 ### 시험
 `test_web_console_ui.py` 끝에 2건(Sauce 접힌 목록에 링크 없음 — 가짜 DOM, Post 원문 확인 1). 1회차 원문 확인 두 줄(`back.focus`·`det.open = !!st.oldOpen…`)은 바뀐 코드에 맞게 고쳤다. `uv run pytest checker/tests/test_web_console.py checker/tests/test_web_console_ui.py -q` 1558 passed, 2 skipped(6분 9초), main(#1070) 위로 rebase 뒤 1564 passed, 2 skipped. rebase 뒤 Aside 로 산출물 포커스·접힌 목록 링크(라이트·다크×1440·390, Sauce 0개)·그 줄 지우기 다시 확인.
+
+## 3회차 — 판정 대기로 넘긴 것을 Post 에서 되게(2026-11-18)
+
+사용자 지시(2회차 뒤): "post 테마만 고치는건 맞지만 하네스 플러그인의 기능들이 다 되어야해". 앞 회차가 「Sauce 와 같이 쓰는 코드」라며 넘긴 것 중 Post 화면에서 실제로 안 되거나 틀리게 보이는 것을 Post 분기(`isPostTheme()`·`isPostNow()`)로 가르거나, Sauce 를 깨지 않는 순수 결함 수정이면 공유 코드를 그대로 고쳤다. 브랜치 `post/X2c`, 포트 4924(`localhost`). 세계는 1·2회차 `wx.py`에 가짜 gh 가 `issue close` 를 받게 하고(해결 뒤 모습을 보려고), 팀 기록 `/api/trouble` 의 `q` 에 `slow` 가 든 요청만 4초 늦추는 프록시(4925)를 더했다. push·PR·이슈·판 올리기·whats_new 없음.
+
+### 찾아서 고친 것
+| # | 화면 | 결함(실화면 재현) | 고친 곳 |
+|---|---|---|---|
+| 1 | 팀 기록 목록 | 느린 찾기(`slow`)를 누르고 바로 `ATC` 를 찾으면 빠른 결과가 먼저 그려졌다가 4초 뒤 옛 결과(빈 결과)가 덮어 입력칸은 `ATC` 인데 목록은 "조건에 맞는 기록이 없어." | `trouble.js` `waitFor` 에 순번(`state.seq`) — 마지막 요청만 그림. 순수 결함 수정이라 Sauce 도 같다(Sauce 도 같은 재현에서 고침 확인) |
+| 2 | MCP url 요청 | 다 했어·거절·닫기를 키보드로 누르면 카드가 도장으로 바뀌다 사라지며 포커스가 body(세션 화면 +200ms 에 BODY, `/r/:id` 도 BODY) | `app.js` `focusAfterAnswer`(Post, 포커스가 비었을 때만): 다음 요청 카드 → 결과 칸(`.result[role=status]`, tabindex -1) → 대화 입력칸 `#follow`. 못 갔으면 누른 단추. `/r/:id` 는 답 뒤 서버 알림으로 한 번 더 다시 그려 포커스가 다시 빠지던 것을 `resultFocusUntil`(1.5초)로 잡음 |
+| 3 | 팀 기록 한 건·새 기록 | [올리기]는 비활성이 되며 포커스를 잃고(Chrome 이 비활성 단추의 포커스를 거둠), [이걸로 해결]은 해결되면 단추가 사라지고, 새 기록 [GitHub 에 올리기] 뒤엔 화면이 바뀌어 포커스가 body | `trouble.js` 한 건: 누를 때 `after` 를 적어 두고 다시 그린 뒤 이어 쓸 자리로 — [올리기] → 내 이야기 칸, [이걸로 해결] → 해결됐으면 제목(`h1`, tabindex -1)·아니면 그 단추. 새 기록: 올리기 성공 → 올린 기록 화면의 제목(`carry.landed`), 실패 → [GitHub 에 올리기] |
+| 4 | MCP url 요청 | 도장 문구 "연결 도구가 받은 값으로 이어 가"가 값이 없는 url 모드에 안 맞음 | `app.js` `elicitRes`(Post + url + accept 만): "마쳤다고 알렸어. / 연결 도구가 그 뒤를 이어 가." 세 곳(카드 도장·`/r` 결과·처리된 요청 다시 열기)이 같은 함수. Sauce 는 `ELICIT_RES` 그대로 |
+| 5 | 산출물 | 깨진 문서 미리보기 문구가 파이썬 예외 이름("엑셀 문서를 읽지 못했어: BadZipFile") | `docfiles.py` `unreadable()` — "엑셀 문서를 읽지 못했어: 파일이 깨졌거나 엑셀 형식이 아니야"(깨진 압축·XML·열 수 없음·값 오류 별로). 서버 문구라 Sauce 도 바뀜 — 기존 시험·화면은 예외 이름을 잡는 곳이 없어 영향 없음 |
+| 6 | 팀 기록 새 기록 | 증상·원인·해결 방법 칸의 aria-label 이 영어 키(`symptom`·`cause`·`solution`) | `trouble.js` `fieldLabel`(Post 만 「증상」「원인」「해결 방법」, Sauce 는 영어 키 그대로 — 기존 시험이 `[aria-label=symptom]` 을 잡음). 2회차 `focusField` 도 같은 함수로 칸을 찾음 |
+| 8b | 산출물 | (독립 리뷰 경미 2) 「이전 판 N개」에 포커스를 둔 채 새 판이 생기면 글이 바뀌어 포커스가 고른 문서 줄로 감 | `flow-ui.js` `focusBack` — `SUMMARY` 는 글이 달라져도 같은 자리의 접는 칸으로. Aside: 포커스 → 새 v0.0 파일 + 세션 갱신 → 「이전 판 2개」에 포커스 그대로 |
+
+### 결함 아님(이유)
+- **7 긴 파일명 부제목**: 실제 규칙 이름에서도 생긴다(`BW_개발사양서_CO-006-01_예산관리_v0.1.xlsx` → "개발 Spec v0.1 → 고객사 개발사양서_CO-006-01_예산관리 양식(xlsx)"). 1440·390 모두 줄바꿈되고 가로 넘침 0 이라 화면은 정상이고, 글이 프로그램 이름까지 "양식" 에 넣어 어색할 뿐 기능·접근성 결함이 아니다. `formSubtitle` 은 Sauce 와 같이 쓰는 글이라 손대지 않음.
+- **8a 닫는 순간 `toggle` 경쟁**: 사람이 칸을 닫은 뒤 `toggle` 이벤트가 오기 전에 폴링 다시 그리기가 끼어야 하는데, 그 사이가 한 작업 단위(ms 이하)라 실화면에서 만들 수 없었다(폴링은 7초 간격). 손대지 않음.
+- **8c 닫힌 칸 안 줄 되돌리기 실패**: 포커스가 줄에 있으려면 칸이 열려 있어야 하고, 사람이 닫으면 그 순간 브라우저가 포커스를 거둔다 — 되돌릴 포커스가 처음부터 없다. 결함 아님.
+
+### 확인(Aside)
+- 1: 프록시 4925 로 느린 찾기 → 빠른 찾기, Post 고치기 전 입력 `ATC`·목록 빈 결과(결함), 고친 뒤 4초 지나도 `ATC` 결과 그대로, Sauce 도 같음.
+- 2·4: 세션 화면에서 다 했어·거절·닫기 Enter → 포커스 `#follow`(+0.25초·3.5초 뒤도), 도장 "마쳤다고 알렸어. / 연결 도구가 그 뒤를 이어 가.(접수)"·"거절했어.(반송)"·"닫았어.(반송)". `/r/:id` 다 했어 Enter → 결과 칸에 포커스(+0.3·3.8초). Sauce `/r/:id`: 포커스 body, 문구 "답을 보냈어. / 연결 도구가 받은 값으로 이어 가." 그대로.
+- 3·6: 한 건 [올리기] Enter → 내 이야기 칸(비움, 이력 마지막 항목 추가), [이걸로 해결] Enter → 해결됨 칩, 포커스 제목 `h1`. 새 기록 [GitHub 에 올리기] Enter → 올린 기록 제목에 포커스(Post 라이트 1440·다크 390 둘 다). 새 기록 칸 이름 Post `증상|원인|해결 방법`, Sauce `symptom|cause|solution`. Sauce 의 [올리기] 뒤엔 body(전과 같음).
+- 5: 깨진 xlsx 미리보기 "엑셀 문서를 읽지 못했어: 파일이 깨졌거나 엑셀 형식이 아니야".
+- 쓸기: Post 라이트·다크 × 1440·390 × (/troubles·/troubles/…/838·/troubles/new·/docs 결과 화면) 가로 넘침 0, `page.console.logs()` 오류 0.
+
+### 시험
+`test_web_console.py` 끝에 1건(미리보기 실패 문구), `test_web_console_ui.py` 끝에 1건(원문 확인 — 순번·포커스 자리·aria-label·url 문구·SUMMARY). 앞 회차 원문 확인 두 줄(`var label = k === 'title' ? '제목' : fieldLabel(k)`·`var key = focusKey(page)` 개수·`isPostNow()`)은 바뀐 코드에 맞추기만 했다.
+
+### 독립 리뷰(서브에이전트 sonnet, 읽기 전용)
+막을 결함 없음: `waitFor` 는 목록 한 곳만 쓰고 순번·로딩 폴링·`destroy` 가 어긋나지 않음, `focusAfterAnswer` 와 `/r` 의 `resultFocusUntil` 은 서로 덮지 않고 둘 다 Post 로 막힘(다음 카드 후보의 첫 칸은 "답하기" 링크라 Enter 한 번에 승인되지 않음), `fieldLabel` 을 코드·시험이 영어 키로 직접 찾는 곳 없음, Sauce DOM·동작 불변. 경미(고치지 않음): `server.py` 의 `a_file_preview` 등 `OSError` 가 읽기 함수 밖에서 나면 "파일을 읽지 못했어: PermissionError" 처럼 예외 이름이 나가는 곳이 셋 더 있다(`1664`·`1677`·`1692`, 파일 자체를 못 여는 드문 경우로 이번 대상 5번(깨진 문서 문구) 밖), 접는 칸이 둘 이상일 때 글이 바뀐 SUMMARY 는 같은 순번 칸으로 감, `carry.landed` 가 한 건 화면이 안 열리면 다음 한 건 화면 제목으로 한 번 포커스.

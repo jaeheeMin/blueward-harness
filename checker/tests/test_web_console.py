@@ -9601,3 +9601,19 @@ def test_repo_info_unknown_when_git_fails_inside_a_repo(tmp_path):
     assert pipeline.repo_info(fail, str(tmp_path / "repo" / "docs"))["state"] == "unknown"
     assert pipeline.repo_info(fail, str(tmp_path / "repo" / ".git"))["state"] == "unknown"
     assert pipeline.repo_info(fail, str(tmp_path / "plain"))["state"] == "no"
+
+
+def test_preview_failure_says_why_in_words_not_exception_names(tmp_path):
+    # 2026-11-18 X2 3회차. 깨진 문서의 미리보기 실패 문구에 파이썬 예외 이름(BadZipFile 등)이 그대로 나오던 것.
+    (tmp_path / "a.xlsx").write_bytes(b"not a zip")
+    with pytest.raises(docfiles.PreviewError) as e:
+        docfiles.read_xlsx(str(tmp_path / "a.xlsx"))
+    assert str(e.value) == "엑셀 문서를 읽지 못했어: 파일이 깨졌거나 엑셀 형식이 아니야"
+    (tmp_path / "a.pptx").write_bytes(b"not a zip")
+    with pytest.raises(docfiles.PreviewError) as e:
+        docfiles.read_pptx(str(tmp_path / "a.pptx"))
+    assert str(e.value) == "파워포인트 문서를 읽지 못했어: 파일이 깨졌거나 파워포인트 형식이 아니야"
+    with pytest.raises(docfiles.PreviewError) as e:
+        docfiles.read_xlsx(str(tmp_path / "없는 파일.xlsx"))
+    assert str(e.value) == "엑셀 문서를 읽지 못했어: 파일을 열 수 없어"
+    assert "Error" not in docfiles.unreadable("엑셀", docfiles.ET.ParseError("x")) and "Error" not in docfiles.unreadable("엑셀", ValueError("x"))

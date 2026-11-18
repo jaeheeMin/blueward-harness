@@ -864,12 +864,13 @@
         if (!isPost() || !a || a === page || !page.contains(a)) return null;
         if (a.classList.contains('drow')) return { dkey: a.getAttribute('data-dkey') };
         if (a.id) return { id: a.id };
-        return { tag: a.tagName, cls: a.className, text: a.textContent, i: sameAs(a.tagName, a.className, a.textContent).indexOf(a) };
+        return { tag: a.tagName, cls: a.className, text: a.textContent, i: sameAs(a.tagName, a.className, a.textContent).indexOf(a), j: [].indexOf.call(page.querySelectorAll(a.tagName), a) };
       }
       function focusBack(k) {
         if (!k) return;
         var t = k.dkey ? [].filter.call(page.querySelectorAll('.drow'), function (b) { return b.getAttribute('data-dkey') === k.dkey; })[0]
           : k.id ? document.getElementById(k.id) : sameAs(k.tag, k.cls, k.text)[k.i];
+        if (!t && k.tag === 'SUMMARY') t = page.querySelectorAll('summary')[k.j];  // 「이전 판 N개」 는 판이 늘면 글이 바뀐다 — 글이 달라져도 같은 자리의 접는 칸으로
         if (!t || t.disabled || !page.contains(t)) t = page.querySelector('.drow.on') || page.querySelector('.drow');
         if (t) t.focus({ preventScroll: true });
       }

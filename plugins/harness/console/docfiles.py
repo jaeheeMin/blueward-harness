@@ -43,6 +43,19 @@ class PreviewError(Exception):
     """문서를 읽지 못했다(깨졌거나 너무 크거나 형식이 다르다)."""
 
 
+def unreadable(what: str, e: Exception) -> str:
+    """문서를 못 읽은 이유를 사람 말로. 파이썬 예외 이름(BadZipFile 등)은 화면에 내지 않는다."""
+    if isinstance(e, zipfile.BadZipFile):
+        why = f"파일이 깨졌거나 {what} 형식이 아니야"
+    elif isinstance(e, ET.ParseError):
+        why = "문서 안의 내용이 깨져 있어"
+    elif isinstance(e, OSError):
+        why = "파일을 열 수 없어"
+    else:
+        why = "문서 안의 값이 올바르지 않아"
+    return f"{what} 문서를 읽지 못했어: {why}"
+
+
 class PathRefused(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(message)
@@ -419,7 +432,7 @@ def read_xlsx(full: str) -> dict:
                 rows, truncated = _read_sheet(zf, path, shared, dates, is1904)
                 sheets.append({"name": name, "rows": rows, "truncated": truncated})
     except (zipfile.BadZipFile, ET.ParseError, OSError, ValueError) as e:
-        raise PreviewError(f"엑셀 문서를 읽지 못했어: {type(e).__name__}")
+        raise PreviewError(unreadable("엑셀", e))
     return {"kind": "table", "sheets": sheets}
 
 
@@ -439,7 +452,7 @@ def read_pptx(full: str) -> dict:
                             el.clear()
                 slides.append({"index": number, "texts": texts})
     except (zipfile.BadZipFile, ET.ParseError, OSError, ValueError) as e:
-        raise PreviewError(f"파워포인트 문서를 읽지 못했어: {type(e).__name__}")
+        raise PreviewError(unreadable("파워포인트", e))
     return {"kind": "slides", "slides": slides}
 
 

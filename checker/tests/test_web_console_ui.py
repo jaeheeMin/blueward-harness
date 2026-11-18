@@ -3829,8 +3829,8 @@ def test_post_x2_data_screens_source_and_css():
     assert ":root[data-theme=\"post\"] .ext { display: inline-grid; place-items: center; flex: none; width: 44px;" in css and ".ext-docx { background: #2B579A;" in css
     assert ".docs-page .dprev { scroll-margin-top: 88px; }" in css and ".docs-page .drow .dn small { font-size: 11.5px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;" in css
     # 팀 기록: 거르기·찾기·종류 고르기로 화면을 다시 그려도(목록·한 건·새 기록 셋 다) Post 에서는 누르던 칸에 포커스가 남는다
-    assert "function focusKey(page)" in tb and "function focusBack(page, key)" in tb and tb.count("focusBack(page, key);") == 3 and tb.count("var key = focusKey(page);") == 3 and "sameButtons(page, a.className, a.textContent).indexOf(a)" in tb
-    assert "getTheme() === 'post'" in tb[tb.index("function focusKey(page)"):tb.index("function focusBack(page, key)")]
+    assert "function focusKey(page)" in tb and "function focusBack(page, key)" in tb and tb.count("focusBack(page, key);") == 3 and tb.count("var key = focusKey(page)") == 3 and "sameButtons(page, a.className, a.textContent).indexOf(a)" in tb
+    assert "!isPostNow()" in tb[tb.index("function focusKey(page)"):tb.index("function focusBack(page, key)")] and "getTheme() === 'post'" in tb[tb.index("function isPostNow()"):tb.index("function focusKey(page)")]
     # MCP url 모드: 열 수 없는 주소(javascript: 등)는 Post 에서 [다 했어] 도 막고, 긴 주소는 줄을 바꾼다
     assert "var cantOpen = isUrl && !href && isPostTheme();" in app and "sendBtn.disabled = st.busy || n > 0 || cantOpen;" in app
     assert ":root[data-theme=\"post\"] [data-elicit-url] { overflow-wrap: anywhere; word-break: break-all; }" in css
@@ -3917,7 +3917,7 @@ def test_post_x2b_regression_source_and_css():
     assert "if (!isPost() || !a || a === page || !page.contains(a)) return null;" in draw and "if (a.id) return { id: a.id };" in draw
     assert "sameAs(a.tagName, a.className, a.textContent).indexOf(a)" in draw and "t = page.querySelector('.drow.on') || page.querySelector('.drow');" in draw
     # 팀 기록 새 기록: [그 줄 지우기] 뒤 포커스는 줄을 지운 칸으로(Post)
-    assert "focusField(masked[0].field);" in tb and "focusField(first.field);" in tb and "var label = k === 'title' ? '제목' : k" in tb
+    assert "focusField(masked[0].field);" in tb and "focusField(first.field);" in tb and "var label = k === 'title' ? '제목' : fieldLabel(k)" in tb
     assert "getTheme() === 'post'" in tb[tb.index("function focusField(k)"):tb.index("function drawSimilar()")]
     # 건너뛰기: 접힌 목록에도 Post 만 링크, 포커스가 오면 위 링크와 같은 자리. 건너뛴 본문 머리가 좁은 화면의 위 메뉴줄에 가리지 않게
     assert "isPostTheme() ? h('a', { class: 'po-skip po-skip-rail', href: '#main', 'data-skip': '1', text: '세션 목록 건너뛰기' }) : null," in app
@@ -4073,3 +4073,30 @@ def test_post_new_task_extra_cases_X3_round3():
     assert "document.addEventListener('dragover', guardOver); document.addEventListener('drop', guardDrop);" in app and "document.removeEventListener('drop', guardDrop);" in app
     assert "var NON_PRINT = (function () { try { return new RegExp(" in app and "/u'" not in app and "sayClear = setTimeout(function () { if (sayEl) sayEl.textContent = ''; }, 6000);" in app
     assert "x.lm === file.lastModified" in attach and "lm: file.lastModified" in attach and ".attach-note { color: var(--attn); font-weight: 500; overflow-wrap: anywhere; }" in css
+
+
+def test_post_x2c_remaining_defects_source():
+    # 2026-11-18 X2 3회차. 앞 회차가 판정 대기로 넘긴 것 중 Post 에서 안 되던 것. 원문 확인이고 본체는 Aside 실화면(docs/status/2026-11-18-post-extra-datascreens.md 「3회차」).
+    tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    # 1) 찾기·거르기를 잇달아 하면 마지막 요청만 그린다(순수 결함 수정이라 Sauce 도 같다)
+    wf = tb[tb.index("function waitFor(fetch, draw, state)"):tb.index("// Post: 화면을 통째로")]
+    assert "mine = state.seq = (state.seq || 0) + 1" in wf and wf.count("state.seq !== mine") == 2 and "state.seq === mine) draw(null, e)" in wf
+    # 3) 올리기·이걸로 해결·GitHub 에 올리기 뒤 포커스(Post). 6) 새 기록 칸 이름은 Post 만 한글, Sauce 는 영어 키 그대로
+    assert "after = 'text'" in tb and "'resolve:' + [].indexOf.call(page.querySelectorAll('button.tb-small'), ev.currentTarget)" in tb
+    assert "if (then && isPostNow() && !page.contains(document.activeElement)) focusAfter(then, d);" in tb
+    assert "carry.landed = true;" in tb and "var after = carry.landed ? 'title' : '';" in tb
+    assert "isPostNow() && !page.contains(document.activeElement) && slots.submit" in tb
+    assert "var FIELD_NAME = { symptom: '증상', cause: '원인', solution: '해결 방법' };" in tb
+    assert "function fieldLabel(k) { return isPostNow() && FIELD_NAME[k] ? FIELD_NAME[k] : k; }" in tb and "'aria-label': fieldLabel(k) }" in tb
+    # 2) MCP 요청에 답한 뒤 포커스가 비었을 때만 다음 요청 카드 → 결과 칸 → 대화 입력칸(Post)
+    fa = app[app.index("function focusAfterAnswer(rid, sent, action)"):app.index("var ebText = h('span'")]
+    assert "if (a && a !== document.body) return;" in fa and "document.getElementById('follow')" in fa and ".result[role=\"status\"]" in fa
+    assert "if (isPostTheme()) focusAfterAnswer(rid, sent, action);" in app and "resultFocusUntil = Date.now() + 1500;" in app
+    # 4) url 모드 [다 했어] 의 결과 문구는 Post 만 값을 받는다는 말을 빼고, Sauce 는 ELICIT_RES 그대로
+    er = app[app.index("function elicitRes(action, info)"):app.index("var FORMAT_HINT")]
+    assert "info.mode === 'url' && isPostTheme()" in er and "return ELICIT_RES[action];" in er and "'마쳤다고 알렸어.'" in er
+    assert "ELICIT_RES[action][0]" not in app and "ELICIT_RES[code]) { var er = elicitRes(code, req.elicitation)" in app
+    # 8) 「이전 판 N개」 접는 칸은 판이 늘어 글이 바뀌어도 같은 자리에서 포커스를 되찾는다
+    assert "if (!t && k.tag === 'SUMMARY') t = page.querySelectorAll('summary')[k.j];" in ui

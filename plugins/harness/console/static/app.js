@@ -2617,6 +2617,11 @@
      redraw: 상태가 바뀔 때 다시 그리는 함수, done: 답이 간 뒤 부르는 함수(action 을 준다). */
   var elicitSt = {};  // 요청 id -> { vals: {칸 이름: 값}, busy, err }
   var ELICIT_RES = { accept: ['답을 보냈어.', '연결 도구가 받은 값으로 이어 가.'], decline: ['거절했어.', '연결 도구는 답을 못 받고 이어 가.'], cancel: ['닫았어.', '연결 도구는 답을 못 받고 이어 가.'] };
+  // Post: url 모드의 [다 했어] 는 값을 보내지 않고 "주소에서 할 일을 마쳤다" 고 알리는 것이라, 값을 받아 이어 간다는 글이 맞지 않는다.
+  function elicitRes(action, info) {
+    if (action === 'accept' && info && info.mode === 'url' && isPostTheme()) return ['마쳤다고 알렸어.', '연결 도구가 그 뒤를 이어 가.'];
+    return ELICIT_RES[action];
+  }
   var FORMAT_HINT = { email: '예: name@example.com', uri: '예: https://example.com', date: '예: 2026-11-12', 'date-time': '예: 2026-11-12T09:00:00' };
   function safeHttpUrl(u) { try { var x = new URL(String(u)); return x.protocol === 'http:' || x.protocol === 'https:' ? x.href : ''; } catch (e) { return ''; } }
   function elicitCard(rid, redraw, done, plain) {
@@ -2655,12 +2660,31 @@
     function send(action) {
       var body = { action: action };
       if (action === 'accept' && !isUrl) body.content = content();
+      var sent = false;
       st.busy = true; st.err = ''; redraw();
       api('POST', '/api/requests/' + encodeURIComponent(rid) + '/answer', body).then(function () {
-          markStamp(rid, 'elicitation', action, { title: ELICIT_RES[action][0], lines: ELICIT_RES[action].slice(1).filter(Boolean) });  // 성공한 뒤에만(Post)
+          sent = true;
+          var res = elicitRes(action, info);
+          markStamp(rid, 'elicitation', action, { title: res[0], lines: res.slice(1).filter(Boolean) });  // 성공한 뒤에만(Post)
           if (done) done(action);
         },
-        function (e) { st.err = (e.status === 404 || e.status === 409 || e.status === 410) ? '이미 처리된 질문이야.' : '전달하지 못했어: ' + e.message; }).then(function () { st.busy = false; redraw(); });
+        function (e) { st.err = (e.status === 404 || e.status === 409 || e.status === 410) ? '이미 처리된 질문이야.' : '전달하지 못했어: ' + e.message; }).then(function () { st.busy = false; redraw(); if (isPostTheme()) focusAfterAnswer(rid, sent, action); });
+    }
+    // Post: 누른 단추는 보내는 동안 비활성이 되고, 답이 가면 카드가 도장으로 바뀌다 사라져 포커스가 body 로 떨어진다. 포커스가 비었을 때만 이어 갈 자리로 옮긴다
+    // (다른 곳에 두었으면 건드리지 않는다). 답이 갔으면 다음 요청 카드 → 결과 칸 → 대화 입력칸, 못 갔으면 누른 단추 자리.
+    function focusAfterAnswer(rid, sent, action) {
+      var a = document.activeElement;
+      if (a && a !== document.body) return;
+      var t = null;
+      if (sent) {
+        var next = [].filter.call(document.querySelectorAll('#main [data-ask]'), function (n) { return n.getAttribute('data-ask') !== rid && !n.hasAttribute('data-stamped'); })[0];
+        t = next && next.querySelector('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled])');
+        if (!t) { t = document.querySelector('#main .result[role="status"]'); if (t) t.setAttribute('tabindex', '-1'); }
+        if (!t) t = document.getElementById('follow');
+      } else {
+        t = document.querySelector('#main [data-ask="' + rid.replace(/["\\]/g, '') + '"] [data-elicit-' + (action === 'accept' ? 'send' : action) + ']');
+      }
+      if (t && !t.disabled) t.focus({ preventScroll: true });
     }
     var ebText = h('span', { class: 'eb', text: '연결 도구(' + (info.server || '?') + ')가 묻는 것' });
     var top = h('div', { class: 'q', role: 'group', 'data-elicit': rid, 'aria-labelledby': 'el-' + rid },
@@ -2719,6 +2743,7 @@
   function requestView(root) {
     var rid = route.id, req = requests.get(rid) || null, errored = null, outcome = null, busy = false;
     var why = '', answers = null, picked = null, otherTexts = null, sendErr = '', hadSession = false;
+    var resultFocusUntil = 0;  // Post: MCP 질문에 답한 직후 결과 칸에 포커스를 두는 시한(ms)
     var planOpen = false, planRevise = false;  // 계획 카드: 긴 계획 펼침 · "고쳐 달라고 하기" 입력칸 열림(#861)
 
     function fetchReq() {
@@ -2838,7 +2863,7 @@
       if (outcome) return outcome;
       /* 서버가 내려 주는 결과 코드(req.resolution)로만 가른다. 한글 outcome 글은 보지 않는다(#1018). 코드가 없거나 모르는 값이면 닫힌 요청. */
       var code = typeof req.resolution === 'string' ? req.resolution : '';
-      if (kindOf(req) === 'elicitation' && ELICIT_RES[code]) { var er = ELICIT_RES[code]; return { title: er[0], note: er[1], extra: '' }; }
+      if (kindOf(req) === 'elicitation' && ELICIT_RES[code]) { var er = elicitRes(code, req.elicitation); return { title: er[0], note: er[1], extra: '' }; }
       var r = (Object.prototype.hasOwnProperty.call(resTable(), code) ? resTable()[code] : resTable().closed).slice();
       var custom = req.resultText || '';
       if (custom) r[1] = custom;
@@ -3085,10 +3110,15 @@
       var panel = h('section', { class: 'light talk' }), msgs = h('div', { class: 'msgs' });
       if (!post) recentChat().forEach(function (el) { msgs.appendChild(el); });
       if (open) {
-        var card = elicitCard(rid, draw, function (action) { var r = ELICIT_RES[action]; outcome = { title: r[0], note: r[1] }; }, post);
+        var card = elicitCard(rid, draw, function (action) { var r = elicitRes(action, req && req.elicitation); outcome = { title: r[0], note: r[1] }; resultFocusUntil = Date.now() + 1500; }, post);
         msgs.appendChild(card || h('p', { class: 'note-attn', role: 'alert', text: '질문 내용을 읽지 못했어. 닫고 다시 시도해 줘.' }));
       } else msgs.appendChild(resultBlock());
       finish(page, panel, msgs, 'elicitation');
+      // Post: 답이 간 뒤 서버 알림으로 한 번 더 다시 그려져도 포커스가 결과 칸에 남게(그 사이 사용자가 다른 곳에 두었으면 건드리지 않는다)
+      if (post && resultFocusUntil > Date.now() && (!document.activeElement || document.activeElement === document.body)) {
+        var rb = root.querySelector('.result[role="status"]');
+        if (rb) { rb.setAttribute('tabindex', '-1'); rb.focus({ preventScroll: true }); }
+      }
     }
     function allAnswered() { return questionsOf(req).every(function (q, i) { return !!answerOf(i, q); }); }
     function syncSend() {
