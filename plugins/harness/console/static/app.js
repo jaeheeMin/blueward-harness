@@ -1542,7 +1542,7 @@
   var postPipe = null;
   function pipelineView(root) {
     if (!isPostTheme() || !window.BHPostPipeline) {
-      root.appendChild(stateBox('warn', '파이프라인은 Post 테마에서 보여', '설정에서 테마를 Post 로 바꾸면 요구사항이 어느 칸에 있는지 볼 수 있어.', link('/', { class: 'btn', text: '처음 화면으로' })));
+      root.appendChild(stateBox('warn', '파이프라인은 Cozy Office 테마에서 보여', '설정에서 테마를 Cozy Office 로 바꾸면 요구사항이 어느 칸에 있는지 볼 수 있어.', link('/', { class: 'btn', text: '처음 화면으로' })));
       return null;
     }
     if (!postPipe) postPipe = window.BHPostPipeline.create({ h: h, clear: clear, link: link, api: api, qs: qs, L: window.BHLogic, PL: window.BHPostLogic,
@@ -4187,7 +4187,7 @@
         sec.appendChild(set('효과 강도', h('div', null, postSeg('효과 강도', BH.FX, BH.getFx(), BH.setFx),
           h('p', { class: 'note-muted', text: '차분은 장면 대신 세션 목록을 보이고 움직임을 모두 끄고, 화려는 창문 구름까지 움직여. 운영체제의 동작 줄이기도 차분처럼 따라가.' }))));
         sec.appendChild(set('밝기', h('div', null, postSeg('밝기', BH.MODES, BH.getMode(), BH.setMode),
-          h('p', { class: 'note-muted', text: '테마 기본은 밝게야. 어둡게를 골라도 장면 그림은 낮 우체국 그대로 두고 둘레만 어두워져.' }))));
+          h('p', { class: 'note-muted', text: '테마 기본은 밝게야. 어둡게를 골라도 장면 그림은 낮 모습 그대로 두고 둘레만 어두워져.' }))));
       }
 
       /* 시안 19 "AI가 묻는 범위": 서버 ask.json 과 이어진다. 읽기 전(askCfg 없음)에는 고르지 못한다. */

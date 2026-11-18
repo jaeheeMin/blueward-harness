@@ -4182,3 +4182,19 @@ def test_post_regress_sweep_fixes():
     assert "'일 목록: 이 세션의 작업 폴더가 없어져서(지운 폴더 등) 일을 고를 수 없어.'" in pick and ": failText(r.error, '일 목록') }));" in pick
     # 4. 팀 기록에서 못 읽은 프로젝트 줄이 「? 확인 못 함 · projC · 확인 못 함 — …」 로 같은 말을 두 번
     assert "' · ' + p.name + (isPostNow() ? ' — ' : ' · 확인 못 함 — ') + p.reason" in tb  # Sauce 는 전 문구 그대로
+
+
+def test_cozy_office_display_name():
+    # 2026-11-18: 테마 표시 이름이 Post → Cozy Office. 내부 id(post)·저장 값·선택자는 그대로(이미 고른 사람의 설정이 깨지지 않게)
+    theme = (STATIC / "theme.js").read_text(encoding="utf-8")
+    assert "{ id: 'post', name: 'Cozy Office', tagline: '사무실 · 세션이 팀 자리에 앉아 일해', mode: 'light' }" in theme
+    assert "name: 'Post'" not in theme and "THEME_KEY = 'bh-theme'" in theme
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "'파이프라인은 Cozy Office 테마에서 보여', '설정에서 테마를 Cozy Office 로 바꾸면" in app
+    assert "장면 그림은 낮 모습 그대로 두고" in app and "낮 우체국" not in app
+    assert "themeNow === 'post'" in app and "data-theme-opt" in app  # 내부 id 는 그대로
+    # 위쪽 줄 테마 단추는 이름을 THEMES 에서 읽는다(글자를 따로 적지 않는다)
+    assert "'테마 바꾸기 · 누르면 ' + nx.name" in app and "'테마 ' + (cur ? cur.name : '')" in app
+    guide = (ROOT / "docs" / "guide" / "harness-guide.html").read_text(encoding="utf-8")
+    assert "테마(Sauce · Cozy Office)" in guide and "Cozy Office 를 고르면 새로 고침 없이" in guide
+    assert "Post" not in guide and "우체국" not in guide
