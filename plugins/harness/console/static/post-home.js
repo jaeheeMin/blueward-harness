@@ -170,7 +170,7 @@
         var s = x.s, st = PS.stateOf(s, L), name = s.title || HK.folderName(s) || '이름 없는 세션';
         var sub = teamOf(PL.teamFlowOf(s)) || (s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음');
         return h('li', { 'data-session': s.id }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ssa' },
-          h('span', { class: 'po-ava', 'aria-hidden': 'true', text: (PS.letterOf ? PS.letterOf(name) : Array.from(name)[0]) || '?' }),
+          PS.avatar(s.id, st, { size: 'sm', name: name }),  // 사무실 장면의 그 사람(작은 칸은 안 움직인다). 번들이 없으면 제목 첫 글자
           h('div', { class: 'po-rt' }, h('div', { class: 't1', text: name, title: name }), h('div', { class: 't2' }, sub, kit.projectTag ? kit.projectTag(s) : null), metaLine(s)),  // 같은 저장소의 다른 폴더·저장소 확인 못 함 표(#1070)
           h('span', { class: 'po-kyulc', style: 'width:' + (maxN ? maxN * KYUL_CELL + 2 : 0) + 'px' }, kyul(x.steps)),
           rowChip(s, st)));

@@ -254,9 +254,9 @@
     };
   }
 
-  /* 세션 목록(사이드·접힌 레일·차분 목록)의 작은 아바타(#1066): 직원 그림을 30×36 칸에 잘라 넣으면 손 흔드는 팔·소품이 겹쳐 팔이 여러 개처럼 보인다.
-     그래서 'sm' 는 그림 대신 제목 첫 글자를 둥근 칸에 쓴다(홈 "내 세션" 목록의 글자 아바타와 같은 모양). 이름은 opts.name 으로 받고,
-     app.js 의 사이드 목록은 이름을 안 넘기므로(아바타만 부른다) 같은 줄의 제목에서 읽어 채운다(fillLetters). 큰 그림(카드 머리·세션 머리)은 잘리지 않으니 그대로다. */
+  /* 사무실 번들이 없을 때의 작은 아바타(#1066): 라인아트 직원 그림을 30×36 칸에 잘라 넣으면 손 흔드는 팔·소품이 겹쳐 팔이 여러 개처럼 보인다.
+     그래서 번들이 없으면 'sm' 는 그림 대신 제목 첫 글자를 둥근 칸에 쓴다. 이름은 opts.name 으로 받고, 이름을 안 넘긴 곳은 같은 줄의 제목에서 읽어 채운다(fillLetters).
+     번들이 있으면 작은 칸도 장면의 그 사람 얼굴이다(아래 avatar). */
   /* 제목의 첫 글자 하나. 앞 공백·제로폭 문자는 건너뛰고, 국기·가족 이모지·키캡처럼 여러 코드 조각이 한 글자인 것은 한 글자로 센다(Intl.Segmenter 가 없으면 코드 한 개). */
   function letterOf(name) {
     var t = String(name || '').replace(/^[\s\u200b-\u200d\u2060\ufeff]+/, '');
@@ -287,12 +287,58 @@
     return span;
   }
 
-  /* 세션 사람 아바타(span.po-av). 장면의 사람과 같다(personOf). 자세는 상태로 정한다(내 차례 = 손을 흔듦 · 막힘/확인 못 함 = 머리를 긁음 · 승인 기다림 = 앉음 · 끝 = 엄지 척 · 그 밖 = 서 있음).
-     opts.size: 'sm'(글자 아바타, opts.name 의 첫 글자 — 아래 letterAvatar) · 'lg'(88×104, 세션 머리) · 생략(34×40, 카드 머리). Post 가 아니어도 만들 수 있지만 보이는 것은 Post 일 때뿐이다(CSS). */
+  /* 사무실 장면(office-post.js)이 그 세션에 그리는 바로 그 사람을 따로 그린 그림(svg). 생김새(피부·머리·옷)는 세션 id 로 정해져 장면과 어긋날 수 없고(같은 코드 — BHOfficeScene.lookOf),
+     몸짓은 상태를 따른다(답을 기다림 = 손 흔듦 · 막힘/확인 못 함 = 머리에 손 · 일하는 중 = 타자 · 승인 기다림 = 서 있음 · 끝 = 손 들고 활짝 · 쉼 = 찻잔).
+     crop: 'bust'(머리·어깨) · 'half'(허리까지). movable 이 참이면 움직여도 되는 자리다 — 효과 강도가 차분이 아니고 움직임 줄이기가 꺼져 있을 때(animOn) 숨쉬고 깜빡이고 손을 흔든다
+     (그림이 페이지에서 빠지면 번들이 스스로 멈춘다). 그 설정이 화면이 떠 있는 동안 바뀌면 이미 그려진 그림도 그 자리에서 다시 그린다(refreshPortraits).
+     번들이 안 실렸거나 옛 번들이면(portrait 없음) null — 부르는 쪽이 옛 그림(라인아트·글자)으로 대신한다. */
+  var drawn = typeof WeakMap === 'function' ? new WeakMap() : null, watching = false;  // drawn: 움직여도 되는 그림 → 다시 그릴 때 쓸 값
+  function portraitOf(sessionId, state, crop, movable) {
+    var O = window.BHOfficeScene;
+    if (!O || typeof O.portrait !== 'function') return null;
+    try {
+      var id = String(sessionId == null ? '' : sessionId), move = !!movable && animOn();
+      var svg = O.portrait(id, { state: state, crop: crop, animate: move });
+      if (!svg) return null;
+      if (svg.setAttribute) svg.setAttribute('preserveAspectRatio', 'xMidYMax slice');  // 칸 비율이 그림(0.85 : 1)과 조금 달라도 빈 띠 없이 채우고 아래를 맞춘다
+      if (movable && drawn) { drawn.set(svg, { id: id, state: state, crop: crop, move: move }); watchMotion(); }
+      return svg;
+    } catch (e) { console.warn('세션 프로필 그림을 그리지 못해 옛 그림으로 대신함', e); return null; }
+  }
+  /* 효과 강도·움직임 줄이기가 바뀌면 화면에 있는 그림 가운데 움직임이 지금 설정과 다른 것만 새로 그려 갈아 끼운다(차분으로 바꿨는데 계속 손을 흔들지 않게). */
+  function refreshPortraits() {
+    if (!drawn || typeof document.querySelectorAll !== 'function') return;
+    var list = document.querySelectorAll('.po-av-pic > svg'), on = animOn();
+    for (var i = 0; i < list.length; i++) {
+      var old = list[i], was = drawn.get(old);
+      if (!was || was.move === on || !old.parentNode) continue;
+      var fresh = portraitOf(was.id, was.state, was.crop, true);
+      if (fresh) old.parentNode.replaceChild(fresh, old);
+    }
+  }
+  function watchMotion() {
+    if (watching || typeof document.addEventListener !== 'function') return;
+    watching = true;
+    document.addEventListener('bh-pref', function (ev) { if (ev && ev.detail === 'fx') refreshPortraits(); });
+    var mq = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+    if (mq && mq.addEventListener) mq.addEventListener('change', refreshPortraits);
+  }
+
+  /* 세션 사람 아바타(span.po-av). 어느 화면에서든 사무실 장면의 그 사람이다(portraitOf). 바탕색은 상태 갈래(toneOf)다.
+     opts.size: 'sm'(30×36, 목록 줄 — 세션이 100개가 넘을 수 있어 움직이지 않는다) · 'lg'(88×104, 세션 머리, 허리까지) · 생략(34×40, 카드 머리).
+     opts.still: 참이면 안 움직인다. Post 가 아니어도 만들 수 있지만 보이는 것은 Post 일 때뿐이다(CSS).
+     번들이 없으면 옛 그림이다: 'sm' 는 글자 아바타(opts.name 의 첫 글자 — 위 letterAvatar), 나머지는 라인아트 직원(personOf). */
   function avatar(sessionId, state, opts) {
-    var size = opts && opts.size;
+    var size = opts && opts.size, tone = PL.toneOf(state);
+    var pic = portraitOf(sessionId, state, size === 'lg' ? 'half' : 'bust', size !== 'sm' && !(opts && opts.still));
+    if (pic) {
+      var box = el('span', 'po-av po-av-pic' + (tone ? ' po-av-' + tone : '') + (size ? ' ' + size : ''));
+      box.setAttribute('aria-hidden', 'true');
+      box.appendChild(pic);
+      return box;
+    }
     if (size === 'sm') return letterAvatar(opts.name);
-    var who = PL.personOf(sessionId), pose = PL.poseOf(state), tone = PL.toneOf(state);
+    var who = PL.personOf(sessionId), pose = PL.poseOf(state);
     var span = el('span', 'po-av' + (tone ? ' po-av-' + tone : '') + (size ? ' ' + size : '') + (who === 'kid' ? ' is-kid' : ''));  // 어린이 그림은 작게 그려져 있어 자르는 자리가 다르다(theme-post.css)
     span.setAttribute('aria-hidden', 'true');
     function img(n, cls) { var im = new Image(); im.alt = ''; im.decoding = 'async'; im.src = BASE + 'people/' + who + '/' + n + '.svg'; if (cls) im.className = cls; span.appendChild(im); }
@@ -301,6 +347,6 @@
     return span;
   }
 
-  /* 다른 화면이 쓰는 것: personOf·stateOf·stationOf(post-logic.js 와 같은 함수), avatar, isPost, STEP(단계 이름·풀이) */
-  window.BHPostScene = { attach: attach, STEP: STEP, avatar: avatar, isPost: isPost, calm: calm, animOn: animOn, letterOf: letterOf, personOf: PL.personOf, stateOf: PL.stateOf, stationOf: PL.stationOf, poseOf: PL.poseOf, LABEL: PL.LABEL, GLYPH: PL.GLYPH };
+  /* 다른 화면이 쓰는 것: personOf·stateOf·stationOf(post-logic.js 와 같은 함수), avatar, portraitOf, isPost, STEP(단계 이름·풀이) */
+  window.BHPostScene = { attach: attach, STEP: STEP, avatar: avatar, portraitOf: portraitOf, isPost: isPost, calm: calm, animOn: animOn, letterOf: letterOf, personOf: PL.personOf, stateOf: PL.stateOf, stationOf: PL.stationOf, poseOf: PL.poseOf, LABEL: PL.LABEL, GLYPH: PL.GLYPH };
 })();

@@ -1501,7 +1501,7 @@ def test_post_home_field_memo_layout():
     for keep in ("paintDeck()", "tiles2 po-tiles", "po-legend", "po-teams", "네 답을 기다리는 일이 "):
         assert keep in home
     # 내 세션(#1065): Post 는 두 단 목록, 위쪽 띠·strip 은 없다. Sauce 표는 그대로
-    for need in ("sessionsPanel(list)", "po-mine", "po-kyul", "po-stc", "po-ava", "L.barSteps(s)", "L.stepShort(", "'정해진 갈래 없음'", "'내 세션 ' + list.length + '개'"):
+    for need in ("sessionsPanel(list)", "po-mine", "po-kyul", "po-stc", "PS.avatar(s.id, st, { size: 'sm', name: name })", "L.barSteps(s)", "L.stepShort(", "'정해진 갈래 없음'", "'내 세션 ' + list.length + '개'"):
         assert need in home
     assert "appendChild(HK.homeTable(" not in home and "po-strip" not in home and "표로 보기" not in home
     for chip in ("내 차례", "일하는 중", "승인 기다림", "쉬는 중", "끝남", "확인 못 함", "막힘"):
@@ -1640,8 +1640,8 @@ def test_post_session_logic_filters_info_and_seals():
     assert out["seal"] == ["보냄:ok", "보냄:ok", "반송:no", "접수:ok", "접수:ok", "반송:no", "반송:no", "접수:ok"]
     assert out["sub"] == "11.07 · 리뷰 룸"
     assert out["desk"] == ["리뷰 룸", "리뷰 룸", "설계팀 자리", "완료", "유지보수팀 자리", "", "리뷰 룸"]
-    # 승인·계획은 리뷰 룸의 검토 담당, 질문은 그 세션이 앉은 곳(팀·리뷰 룸을 모르면 곳 이름 없이)
-    assert out["clerk"] == ["리뷰 룸에서 검토 담당이 네 승인을 기다려. 누르면 승인 도장이 찍혀"] * 2 + [
+    # 어느 요청이든 그 세션 사람이 손을 든다(옛 장면의 「리뷰 룸 검토 담당」 은 새 장면에 없다). 질문은 그 세션이 앉은 곳(팀·리뷰 룸을 모르면 곳 이름 없이)
+    assert out["clerk"] == ["세션이 손을 들고 네 승인을 기다려. 누르면 승인 도장이 찍혀"] * 2 + [
         "요구분석팀 자리에서 손을 들고 네 답을 기다려", "표준화팀 자리에서 손을 들고 네 답을 기다려", "세션이 손을 들고 네 답을 기다려", "리뷰 룸에서 손을 들고 네 답을 기다려", "세션이 손을 들고 네 답을 기다려"]
     # 우체국 말(창구·편지·손님)은 Cozy Office 화면 글에 없다
     for name in ("post-logic.js", "post-session.js", "post-home.js", "post-pipeline.js", "theme-post.js", "theme-post.css", "app.js", "app.css", "index.html", "post/manifest.js"):
@@ -3838,10 +3838,10 @@ def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
     assert "MY_PRS_POLL_MS = 20000" in home and "clearInterval(prTimer)" in home and "delete fixBox.dataset.ready" in home
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
     assert "var CACHE_MS = 60000;" in ui  # 확인 주기(20초)는 이 캐시(60초)보다 짧아야 캐시가 풀린 뒤 곧 새로 읽는다
-    # #1066: 작은 아바타는 잘린 직원 그림이 아니라 글자, 기억을 모르는 점선 ? 링은 Post 에서 뺀다
+    # #1066: 사무실 번들이 없을 때의 작은 아바타는 잘린 라인아트 직원 그림이 아니라 글자(번들이 있으면 장면의 그 사람 얼굴 — test_cozy_portraits_are_the_scene_person), 기억을 모르는 점선 ? 링은 Post 에서 뺀다
     js = (STATIC / "theme-post.js").read_text(encoding="utf-8")
     assert "if (size === 'sm') return letterAvatar(opts.name);" in js and "po-av-letter" in js
-    assert "Intl.Segmenter" in js and "letterOf: letterOf" in js and "(PS.letterOf ? PS.letterOf(name)" in home  # 국기·가족 이모지·제로폭 시작 제목도 한 글자, 홈 표와 같은 함수
+    assert "Intl.Segmenter" in js and "letterOf: letterOf" in js and "po-ava" not in home  # 국기·가족 이모지·제로폭 시작 제목도 한 글자. 홈 「내 세션」 도 같은 avatar() 를 쓴다(따로 만든 글자 칸 .po-ava 는 없앴다)
     assert "title: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어'" in home
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     logic = (STATIC / "flow-logic.js").read_text(encoding="utf-8")
@@ -4335,6 +4335,126 @@ def test_cozy_office_display_name():
     # 사무실 번들이 없을 때만 쓰는 옛 라인아트 장면의 읽기 프로그램 안내·로그도 우체국 말이 아니다
     tp = (STATIC / "theme-post.js").read_text(encoding="utf-8")
     assert "우체국" not in tp and "창구" not in tp and "'세션 장면. 세션 '" in tp
+
+
+_POST_PORTRAIT_NODE = r"""
+const path = require('path');
+const dir = process.argv[1];
+function mkEl(tag) {
+  const e = { tagName: String(tag).toUpperCase(), className: '', attrs: {}, children: [], textContent: '',
+    setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+    appendChild(c) { this.children.push(c); return c; } };
+  return e;
+}
+let fx = '1', reduced = false, pics = [];
+const listeners = {};
+global.document = { createElement: mkEl, addEventListener(t, f) { (listeners[t] = listeners[t] || []).push(f); }, querySelectorAll() { return pics; }, body: null };
+global.Image = function () { return mkEl('img'); };
+const mqHear = [];
+global.matchMedia = () => ({ matches: reduced, addEventListener(t, f) { mqHear.push(f); } });
+global.window = { BHPostLogic: require(path.join(dir, 'post-logic.js')), BH: { getTheme: () => 'post', getFx: () => fx } };
+require(path.join(dir, 'theme-post.js'));
+require(path.join(dir, 'post-session.js'));
+const PS = window.BHPostScene, PSS = window.BHPostSession;
+const calls = [];
+const bundle = { portrait(id, o) { calls.push([id, o.state, o.crop, o.animate]); const s = mkEl('svg'); s.who = id; return s; }, lookOf() { return {}; } };
+const show = (e) => ({ cls: e.className, kid: e.children.map((c) => c.tagName + (c.who != null ? ':' + c.who : '') + (c.src ? ':' + c.src : '') + (c.attrs.preserveAspectRatio ? ':' + c.attrs.preserveAspectRatio : '')), text: e.textContent, hidden: e.attrs['aria-hidden'] });
+const out = {};
+// 1. 번들이 있다: 어느 크기든 장면의 그 사람
+window.BHOfficeScene = bundle;
+out.card = show(PS.avatar('s-1', 'turn'));
+out.head = show(PS.avatar('s-1', 'done', { size: 'lg' }));
+out.row = show(PS.avatar('s-1', 'blocked', { size: 'sm', name: '구매오더' }));
+out.plain = show(PS.avatar('s-1', 'run'));
+out.still = show(PS.avatar('s-1', 'turn', { still: true }));
+out.noId = show(PS.avatar(null, 'turn'));
+fx = '0'; out.calm = show(PS.avatar('s-1', 'turn')); fx = '1';
+reduced = true; out.reduced = show(PS.avatar('s-1', 'turn')); reduced = false;
+const fig = (f) => ({ cls: f.className, box: show(f.children[0]), cap: f.children[1].textContent });
+out.clerkQ = fig(PSS.clerk('question', 's-1', 0, 'srs'));
+out.clerkP = fig(PSS.clerk('permission', 's-1', 2, 'dev'));
+out.here = show(PSS.here('s-1', 'unk', 0, 'srs').children[0]);
+out.calls = calls.slice();
+// 1-1. 화면이 떠 있는 동안 효과 강도가 바뀌면 움직이던 그림만 그 자리에서 멈춘 그림으로 갈아 끼운다(목록 줄은 처음부터 멈춘 그림이라 그대로)
+calls.length = 0;
+const boxA = PS.avatar('s-9', 'turn'), boxB = PS.avatar('s-9', 'turn', { size: 'sm' });
+[boxA, boxB].forEach((b) => { b.replaceChild = function (n, o) { this.children[this.children.indexOf(o)] = n; n.parentNode = this; o.parentNode = null; }; b.children[0].parentNode = b; });
+pics = [boxA.children[0], boxB.children[0]];
+const firstA = pics[0], firstB = pics[1];
+(listeners['bh-pref'] || []).forEach((f) => f({ detail: 'mode' }));
+out.swapMode = boxA.children[0] === firstA;
+fx = '0'; (listeners['bh-pref'] || []).forEach((f) => f({ detail: 'fx' }));
+out.swap = [boxA.children[0] !== firstA, boxB.children[0] === firstB, calls.map((c) => c[3])];
+pics = [boxA.children[0], boxB.children[0]]; const stillA = pics[0];
+fx = '1'; (listeners['bh-pref'] || []).forEach((f) => f({ detail: 'fx' }));
+out.swapBack = [boxA.children[0] !== stillA, calls.map((c) => c[3]), (listeners['bh-pref'] || []).length];
+// 운영체제의 움직임 줄이기가 켜지면(matchMedia change) 같은 식으로 멈춘 그림으로. 문서에서 빠진 그림(parentNode 없음)은 건너뛴다
+pics = [boxA.children[0], firstA]; const movingA = pics[0]; calls.length = 0;
+reduced = true; mqHear.forEach((f) => f());
+out.swapReduced = [boxA.children[0] !== movingA, calls.map((c) => c[3]), mqHear.length];
+reduced = false; pics = [];
+// 2. 번들이 그리다 죽는다: 옛 그림으로
+window.BHOfficeScene = { portrait() { throw new Error('boom'); } };
+const warn = console.warn; let warned = 0; console.warn = () => { warned++; };
+out.broken = show(PS.avatar('s-1', 'turn', { size: 'sm', name: '구매오더' }));
+console.warn = warn; out.warned = warned;
+window.BHOfficeScene = { portrait() { return null; } };  // 번들이 아무것도 안 돌려준다: 옛 그림으로(예외도 경고도 없이)
+out.empty = show(PS.avatar('s-1', 'turn', { size: 'sm', name: '구매오더' }));
+// 3. 번들이 없다(옛 번들 포함): 작은 칸은 글자, 큰 칸은 라인아트 직원, 요청 화면도 라인아트 직원이 손을 든다(검토 담당 그림이 아니다)
+for (const b of [undefined, { attach() {} }]) {
+  window.BHOfficeScene = b;
+  const k = b ? 'old' : 'none';
+  out[k + 'Row'] = show(PS.avatar('s-1', 'turn', { size: 'sm', name: ' 구매오더' }));
+  out[k + 'Card'] = show(PS.avatar('s-1', 'turn'));
+  out[k + 'Clerk'] = fig(PSS.clerk('permission', 's-1', 2, 'dev'));
+}
+out.who = window.BHPostLogic.personOf('s-1');
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_cozy_portraits_are_the_scene_person():
+    # 2026-11-19 합류 2: 세션을 나타내는 사람 그림은 어느 화면에서든 사무실 장면의 그 사람(BHOfficeScene.portrait). 기록 docs/status/2026-11-19-cozy-office-portraits.md
+    r = subprocess.run([NODE, "-e", _POST_PORTRAIT_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    pic = "SVG:s-1:xMidYMax slice"  # 칸 비율이 그림과 조금 달라도 빈 띠 없이 아래를 맞춘다
+    # 카드 머리(34×40) = 머리·어깨, 세션 머리(88×104) = 허리까지, 목록 줄(30×36) = 머리·어깨. 바탕색 갈래는 상태(내 답 · 막힘 · 끝)
+    assert out["card"] == {"cls": "po-av po-av-pic po-av-turn", "kid": [pic], "text": "", "hidden": "true"}
+    assert out["head"]["cls"] == "po-av po-av-pic po-av-done lg" and out["head"]["kid"] == [pic]
+    assert out["row"]["cls"] == "po-av po-av-pic po-av-blocked sm" and out["row"]["kid"] == [pic] and out["row"]["text"] == ""  # 글자 아바타가 아니다
+    assert out["plain"]["cls"] == "po-av po-av-pic" and out["noId"]["kid"] == ["SVG::xMidYMax slice"]  # id 가 없어도 죽지 않는다
+    # 요청 화면: 질문도 승인도 그 세션 사람이 손을 든다(같은 바탕색). 세션 머리는 avatar 의 큰 그림
+    for k, cap in (("clerkQ", "요구분석팀 자리에서 손을 들고 네 답을 기다려"), ("clerkP", "세션이 손을 들고 네 승인을 기다려. 누르면 승인 도장이 찍혀")):
+        assert out[k] == {"cls": "po-clerk is-ask", "box": {"cls": "po-av-pic po-av-turn", "kid": [pic], "text": ""}, "cap": cap}, k  # 칸이 아니라 figure 가 aria-hidden
+    assert out["here"]["cls"] == "po-av po-av-pic lg" and out["here"]["kid"] == [pic]
+    # 번들에 넘기는 값: 상태 그대로(몸짓은 번들이 정한다), 자르기, 움직임. 목록 줄·still·차분·움직임 줄이기는 안 움직인다
+    assert out["calls"] == [
+        ["s-1", "turn", "bust", True], ["s-1", "done", "half", True], ["s-1", "blocked", "bust", False], ["s-1", "run", "bust", True], ["s-1", "turn", "bust", False], ["", "turn", "bust", True],
+        ["s-1", "turn", "bust", False], ["s-1", "turn", "bust", False], ["s-1", "turn", "half", True], ["s-1", "turn", "half", True], ["s-1", "unk", "half", True]]
+    # 효과 강도를 차분으로 바꾸면 움직이던 그림이 멈춘 그림으로, 되돌리면 다시 움직이는 그림으로 바뀐다. 밝기 변경은 건드리지 않고, 듣는 곳은 한 번만 건다
+    assert out["swapMode"] is True and out["swap"] == [True, True, [True, False, False]] and out["swapBack"] == [True, [True, False, False, True], 1]
+    assert out["swapReduced"] == [True, [False], 1]  # 움직임 줄이기 변경도 듣는다(한 번만 건다). 문서에서 빠진 옛 그림은 다시 그리지 않는다
+    assert out["empty"] == {"cls": "po-av po-av-letter sm", "kid": [], "text": "구", "hidden": "true"}
+    # 번들이 죽거나 없으면 옛 그림: 작은 칸은 제목 첫 글자, 큰 칸·요청 화면은 라인아트 직원
+    who = out["who"]
+    assert out["broken"] == {"cls": "po-av po-av-letter sm", "kid": [], "text": "구", "hidden": "true"} and out["warned"] == 1
+    for k in ("none", "old"):
+        assert out[k + "Row"] == {"cls": "po-av po-av-letter sm", "kid": [], "text": "구", "hidden": "true"}, k
+        assert out[k + "Card"]["cls"].startswith("po-av po-av-turn") and "po-av-pic" not in out[k + "Card"]["cls"], k
+        assert out[k + "Card"]["kid"] == [f"IMG:/static/post/people/{who}/ask-1.svg", f"IMG:/static/post/people/{who}/ask-2.svg"], k
+        assert out[k + "Clerk"]["cls"].startswith("po-clerk is-ask") and out[k + "Clerk"]["box"]["kid"] == [f"IMG:/static/post/people/{who}/ask-1.svg", f"IMG:/static/post/people/{who}/ask-2.svg"], k
+    # 번들에 portrait · lookOf 가 실제로 있고, 그림 규칙은 svg 를 칸에 꽉 채운다. 옛 검토 담당 도장 그림(.po-c1 · .po-c2)은 요청 화면에서 뺐다
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    assert "portrait:" in bundle and "lookOf:" in bundle
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert ':root[data-theme="post"] .po-av-pic > svg { display: block; width: 100%; height: 100%; }' in css
+    assert ".po-c1" not in css and "po-st1" not in css and ".po-ava " not in css and ".po-clerk span.po-av-turn {" in css
+    sess = (STATIC / "post-session.js").read_text(encoding="utf-8")
+    assert "clerk/idle.svg" not in sess and "PS.portraitOf(sessionId, 'turn', 'half', true)" in sess
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert "PS.avatar(s.id, st, { size: 'sm', name: name })" in home and "PS.avatar(s.id, s.state, { size: 'sm', name: name })" in home and "PS.avatar(s.id, st)" in home  # 내 세션 · 차분 목록 · 덱 카드
 
 
 def test_cozy_diorama_bundle_wired_to_memo():

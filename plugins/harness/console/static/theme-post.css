@@ -235,7 +235,9 @@
 
 /* ---------- 사람 아바타(BHPostScene.avatar) ---------- */
 :root[data-theme="post"] .po-av { position: relative; flex: none; width: 34px; height: 40px; overflow: hidden; border-radius: 10px 10px 4px 4px; background: #EFE4CF; box-shadow: inset 0 -3px 0 #D9CDB8; }
-:root[data-theme="post"] .po-av img { position: absolute; left: 50%; top: -30px; width: 92px; height: auto; max-width: none; transform: translateX(-50%); }
+:root[data-theme="post"] .po-av img { position: absolute; left: 50%; top: -30px; width: 92px; height: auto; max-width: none; transform: translateX(-50%); }  /* 번들이 없을 때의 옛 라인아트 그림. .is-kid · .po-av-b 도 */
+/* 사무실 장면의 그 사람(BHOfficeScene.portrait 의 svg, theme-post.js portraitOf): 칸을 꽉 채운다. 바탕은 투명이라 상태 바탕색이 비친다 */
+:root[data-theme="post"] .po-av-pic > svg { display: block; width: 100%; height: 100%; }
 :root[data-theme="post"] .po-av-turn { background: #CFE0F6; box-shadow: inset 0 -3px 0 #9DBBE6; }  /* 답을 기다리는 사람: 알림(파랑) 바탕 */
 :root[data-theme="post"] .po-av-blocked { background: #FFD9D3; box-shadow: inset 0 -3px 0 #E7A79E; }
 :root[data-theme="post"] .po-av-done { background: #D8EBDD; box-shadow: inset 0 -3px 0 #A9CDB4; }
@@ -247,7 +249,7 @@
 /* 어린이(kid) 그림은 어른의 0.725배로 작고 머리가 아래에 있어 같은 자리로 자르면 머리가 칸 밖으로 나갔다 — 크게 키워 어른과 같은 자리에 머리를 둔다 */
 :root[data-theme="post"] .po-av.is-kid img { width: 127px; top: -79px; }
 :root[data-theme="post"] .po-av.lg.is-kid img { width: 127px; top: -49px; }
-/* 글자 아바타(작은 크기, #1066): 홈 "내 세션" 목록의 .po-ava 와 같은 모양. 그림은 안 쓴다 */
+/* 글자 아바타(작은 크기, #1066): 사무실 번들이 없을 때만 쓴다(theme-post.js letterAvatar) */
 :root[data-theme="post"] .po-av.po-av-letter { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1px var(--bd); font-size: 12px; font-weight: 600; color: var(--text); }
 @keyframes po-wave { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { :root[data-theme="post"] .po-av .po-av-b { animation: none; opacity: 0; } }
@@ -381,7 +383,6 @@
 :root[data-theme="post"] ul.po-mine li { break-inside: avoid; border-top: 1px solid var(--line); }
 :root[data-theme="post"] .po-ssa { display: flex; align-items: center; gap: 12px; padding: 12px 24px; color: inherit; text-decoration: none; transition: background-color .15s; }
 :root[data-theme="post"] .po-ssa:hover { background: var(--soft); color: inherit; }
-:root[data-theme="post"] .po-ava { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1px var(--bd); font-size: 12px; font-weight: 600; color: var(--text); }
 :root[data-theme="post"] .po-rt { flex: 1; min-width: 0; }
 :root[data-theme="post"] .po-rt .t1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 :root[data-theme="post"] .po-rt .t2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; }
@@ -628,14 +629,11 @@
 :root[data-theme="post"] .po-clerk { display: flex; align-items: center; gap: 12px; margin: 4px 0 -6px; }
 :root[data-theme="post"] .po-clerk span { position: relative; flex: none; width: 56px; height: 64px; overflow: hidden; border-radius: 28px 28px 8px 8px; background: #EFE4CF; box-shadow: inset 0 -3px 0 #D9CDB8; }
 :root[data-theme="post"] .po-clerk img { position: absolute; left: 50%; top: -36px; width: 104px; height: auto; max-width: none; transform: translateX(-50%); }  /* 머리부터 허리까지 크게(그림 80×112 의 사람은 아래 2/3 에 서 있어 72px 로 그리면 칸 아래쪽에 작게 잘려 보였다) */
+:root[data-theme="post"] .po-clerk span.po-av-turn { background: #CFE0F6; box-shadow: inset 0 -3px 0 #9DBBE6; }  /* 손 든 세션 사람: 다른 화면의 그 사람 칸(.po-av-turn)과 같은 바탕 */
 :root[data-theme="post"] .po-clerk.is-ask img { top: -24px; }
 :root[data-theme="post"] .po-clerk.is-ask.is-kid img { width: 144px; top: -79px; }  /* 손을 든 사람은 손끝까지 보이게 조금 내린다 */
 :root[data-theme="post"] .po-clerk .po-av-b { animation: po-wave .7s steps(1) infinite; }
-:root[data-theme="post"] .po-c1 { animation: po-st1 1.2s steps(1) infinite; }
-:root[data-theme="post"] .po-c2 { animation: po-st2 1.2s steps(1) infinite; }
 :root[data-theme="post"] .po-clerk figcaption { font-size: 13px; font-weight: 700; color: var(--sec); }
-@keyframes po-st1 { 0%, 24% { opacity: 0; } 25%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
-@keyframes po-st2 { 0%, 49% { opacity: 0; } 50%, 74% { opacity: 1; } 75%, 100% { opacity: 0; } }
 :root[data-theme="post"] .po-focus { position: relative; gap: 14px; padding: 22px 24px; border: 1.5px solid var(--bd); border-radius: var(--rc); background: var(--paper); box-shadow: 0 1px 0 var(--bd2), 0 10px 24px -18px rgba(36,48,74,.35); }
 :root[data-theme="post"] .po-focus > .bad, :root[data-theme="post"] .po-focus > .bad.plan { padding: 0; border: 0; background: transparent; }
 :root[data-theme="post"] .po-focus > .ai { max-width: none; font-size: 14px; color: var(--sec); }
@@ -670,7 +668,7 @@
 @keyframes po-stamp { from { transform: rotate(-14deg) scale(2.4); opacity: 0; } 60% { opacity: 1; } to { transform: rotate(-14deg) scale(1); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   :root[data-theme="post"] .po-seal { animation: none; }
-  :root[data-theme="post"] .po-clerk .po-av-b, :root[data-theme="post"] .po-c1, :root[data-theme="post"] .po-c2 { animation: none; opacity: 0; }
+  :root[data-theme="post"] .po-clerk .po-av-b { animation: none; opacity: 0; }
   :root[data-theme="post"] .po-ask-h .po-av .po-av-b { animation: none; opacity: 0; }
 }
 
@@ -1123,9 +1121,8 @@
    D단계: 효과 강도(html[data-fx]) · 차분 세션 목록 · 어두운 모드(html[data-mode="dark"])
    ====================================================================== */
 
-/* 차분(fx=0): 아바타·검토 담당·도장은 남기되 움직임 0. 장면은 그리지 않고(theme-post.js) 세션 목록이 대신한다. */
-:root[data-theme="post"][data-fx="0"] .po-av .po-av-b, :root[data-theme="post"][data-fx="0"] .po-clerk .po-av-b,
-:root[data-theme="post"][data-fx="0"] .po-c1, :root[data-theme="post"][data-fx="0"] .po-c2 { animation: none; opacity: 0; }
+/* 차분(fx=0): 아바타·도장은 남기되 움직임 0(프로필 그림은 theme-post.js 가 멈춘 그림으로 그린다 — 아래는 번들이 없을 때의 옛 두 장 번갈이). 장면은 그리지 않고(theme-post.js) 세션 목록이 대신한다. */
+:root[data-theme="post"][data-fx="0"] .po-av .po-av-b, :root[data-theme="post"][data-fx="0"] .po-clerk .po-av-b { animation: none; opacity: 0; }
 :root[data-theme="post"][data-fx="0"] .po-seal { animation: none; }
 :root[data-theme="post"] .po-maplist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
 :root[data-theme="post"] .po-maplist[hidden] { display: none; }

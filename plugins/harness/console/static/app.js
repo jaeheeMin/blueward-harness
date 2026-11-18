@@ -2982,7 +2982,7 @@
     function isPending() { return req && (!req.status || req.status === 'pending' || req.status === 'waiting') && !outcome; }
     function sessionOf() { return req && (sessions.get(req.sessionId || req.session_id) || {}); }
 
-    var post = false;  // Post 일 때만 요청 화면을 시안 틀(뒤로 · 눈썹 · 제목 · 리뷰 룸 검토 담당 · 요청 카드 · 오른쪽 최근 대화)로 짠다. 그릴 때마다 정한다
+    var post = false;  // Post 일 때만 요청 화면을 시안 틀(뒤로 · 눈썹 · 제목 · 손 든 세션 사람 · 요청 카드 · 오른쪽 최근 대화)로 짠다. 그릴 때마다 정한다
     function draw() {
       clear(root);
       post = isPostTheme() && !!window.BHPostSession;
