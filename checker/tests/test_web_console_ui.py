@@ -3822,7 +3822,7 @@ def test_post_x2_data_screens_source_and_css():
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     # 산출물: 같은 이름의 파일이 여러 세션에서 오면 둘째 줄에 세션 이름, 다시 그려도 키보드 포커스 유지, 좁은 화면에서 고르면 미리보기로, 미리보기 못 하는 문서의 안내가 버튼 위치와 맞게
     assert "multiSess ? entry.session.title || kit.baseName(entry.session.cwd) : ''" in ui and "multiSess = isPost() && all.reduce(" in ui
-    assert "back.focus({ preventScroll: true })" in ui and "ae.classList.contains('drow')" in ui and "'data-dkey': post ? entry.key : null" in ui  # 같은 경로 파일이 다른 세션에 있어도 키(폴더|경로)로 되돌림
+    assert "t.focus({ preventScroll: true })" in ui and "if (a.classList.contains('drow')) return { dkey: a.getAttribute('data-dkey') };" in ui and "'data-dkey': post ? entry.key : null" in ui  # 같은 경로 파일이 다른 세션에 있어도 키(폴더|경로)로 되돌림(2회차에 줄 밖 칸까지 넓힘)
     assert "function pick(entry, byUser)" in ui and "pv.scrollIntoView({ block: 'start' })" in ui and "pick(entry, true)" in ui
     assert "(ctx.btnAt || '아래') + ' 버튼으로 열어 봐.'" in ui and ui.count("btnAt: isPost() ? '위' : ''") == 2
     assert "data-docs-more" in ui and "isPost() ? sessionList().filter(" in ui
@@ -3843,7 +3843,7 @@ def test_post_x2_data_screens_source_and_css():
 def test_post_x2_docs_old_versions_stay_open_when_picked():
     # 이전 판을 고르면 목록이 다시 그려져 접힌 칸 안에 고른 줄이 숨던 것: Post 는 고른 이전 판이 든 칸을 열어 두고, 연 상태를 기억한다
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
-    assert "det.open = !!st.oldOpen[d.key] || oldKeys.indexOf(st.sel) >= 0;" in ui and "st.oldOpen[d.key] = det.open;" in ui and "oldOpen: {}" in ui
+    assert "det.open = d.key in st.oldOpen ? st.oldOpen[d.key] : oldKeys.indexOf(st.sel) >= 0;" in ui and "st.oldOpen[d.key] = det.open;" in ui and "oldOpen: {}" in ui  # 2회차: 사람이 닫은 칸은 다시 그려도 닫힌 채
 
 
 _POST_PROJECT_NODE = r"""
@@ -3897,3 +3897,29 @@ def test_post_project_pipeline_follows_picked_project_and_rechecks_unsure_folder
     assert "var last = (kit.home && kit.home()) || st.last;" in pipe and "if (last && !seen[last]) out.push(last);" in pipe
     assert "loaded: function () { return loadedOnce && repos.tried; }" in app and "home: function () { var pj = postProject(); return pj ? pj.path : ''; } });" in app
     assert "if (unsure) repos.again = setTimeout(function () { repos.sig = null; scheduleSide(); }, 60000);" in app
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_post_x2b_sauce_folded_rail_has_no_skip_link(tmp_path):
+    # 2026-11-18 X2 2회차. 접힌 세션 목록(좁은 화면은 늘 접힘)에도 Post 는 「세션 목록 건너뛰기」를 두지만, 같이 쓰는 renderRail 의 Sauce 는 그대로.
+    got = _smoke(tmp_path, "s/s1", [_session("s1"), _session("s2")], ls={"bh-side": "1"})
+    assert got["sideDump"].startswith("<aside.side><nav.rail><button.fold-btn>") and "po-skip" not in got["sideDump"] and "건너뛰기" not in got["side"]
+
+
+def test_post_x2b_regression_source_and_css():
+    # 2026-11-18 X2 2회차(독립 시선 회귀). Post 전용 분기라 원문 확인이다. 본체는 Aside 실화면(docs/status/2026-11-18-post-extra-datascreens.md 「2회차」).
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 산출물: 문서 줄만이 아니라 시트 탭·이전 판 칸·단추(폴더에서 보기)·입력칸도 다시 그린 뒤(세션이 움직여 다시 모을 때 포함) 포커스 유지, 누르던 곳이 없어지면 고른 문서 줄로
+    draw = ui[ui.index("function sameAs(tag, cls, text)"):ui.index("function drawNow()")]
+    assert "if (!isPost() || !a || a === page || !page.contains(a)) return null;" in draw and "if (a.id) return { id: a.id };" in draw
+    assert "sameAs(a.tagName, a.className, a.textContent).indexOf(a)" in draw and "t = page.querySelector('.drow.on') || page.querySelector('.drow');" in draw
+    # 팀 기록 새 기록: [그 줄 지우기] 뒤 포커스는 줄을 지운 칸으로(Post)
+    assert "focusField(masked[0].field);" in tb and "focusField(first.field);" in tb and "var label = k === 'title' ? '제목' : k" in tb
+    assert "getTheme() === 'post'" in tb[tb.index("function focusField(k)"):tb.index("function drawSimilar()")]
+    # 건너뛰기: 접힌 목록에도 Post 만 링크, 포커스가 오면 위 링크와 같은 자리. 건너뛴 본문 머리가 좁은 화면의 위 메뉴줄에 가리지 않게
+    assert "isPostTheme() ? h('a', { class: 'po-skip po-skip-rail', href: '#main', 'data-skip': '1', text: '세션 목록 건너뛰기' }) : null," in app
+    assert ':root[data-theme="post"] .po-skip-top:focus, :root[data-theme="post"] .po-skip-rail:focus { position: fixed; top: 8px; left: 8px; z-index: 200; }' in css
+    assert ':root[data-theme="post"] #main { scroll-margin-top: 88px; }' in css

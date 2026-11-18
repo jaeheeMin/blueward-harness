@@ -1013,5 +1013,6 @@
 /* Tab 키 건너뛰기 링크: 평소엔 안 보이고(키보드 포커스가 올 때만 보인다) 본문으로 바로 간다. 머리 맨 앞 하나 + 세션 목록 맨 앞 하나. */
 :root[data-theme="post"] .po-skip:not(:focus) { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 :root[data-theme="post"] .po-skip { display: block; padding: 8px 14px; border: 1.5px solid var(--bd); border-radius: 10px; background: var(--paper); color: var(--text); font-size: 13px; font-weight: 600; text-decoration: none; }
-:root[data-theme="post"] .po-skip-top:focus { position: fixed; top: 8px; left: 8px; z-index: 200; }
+:root[data-theme="post"] .po-skip-top:focus, :root[data-theme="post"] .po-skip-rail:focus { position: fixed; top: 8px; left: 8px; z-index: 200; }  /* 접힌 칸은 좁아 그 안에 펼치면 고리가 밀리니 위 링크와 같은 자리에 띄운다 */
 :root[data-theme="post"] #main:focus { outline: none; }
+:root[data-theme="post"] #main { scroll-margin-top: 88px; }  /* 좁은 화면에서 건너뛰어 내려오면 위에 붙는 메뉴줄에 본문 머리가 가리지 않게(산출물 미리보기와 같은 값) */

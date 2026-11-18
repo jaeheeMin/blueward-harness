@@ -434,7 +434,7 @@
             h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어 · 가렸어' }),
             h('span', { class: 'tb-s135', text: where(masked) + '의 값을 ' + ((window.BHLogic && window.BHLogic.MASK) || '••••••••') + ' 로 바꿨어.' + more(masked) + ' 필요 없는 줄이면 지워 줘.' }),
             h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', text: masked.length > 1 ? '그 줄들 지우기' : '그 줄 지우기', onClick: function () {
-              dropLines(masked); maskNote = ''; draw(); recheck();
+              dropLines(masked); maskNote = ''; draw(); recheck(); focusField(masked[0].field);
             } }))));
           return;
         }
@@ -444,8 +444,16 @@
           h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어' }),
           h('span', { class: 'tb-s135', text: where(real) + " '" + first.label + "'." + more(real) + ' 지우고 올려 줘.' }),
           h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', text: real.length > 1 ? '그 줄들 지우기' : '그 줄 지우기', onClick: function () {
-            dropLines(real); hits = []; draw(); recheck();
+            dropLines(real); hits = []; draw(); recheck(); focusField(first.field);
           } }))));
+      }
+      // Post: [그 줄 지우기] 를 누르면 카드째 사라져 포커스가 body 로 떨어진다. 줄을 지운 칸으로 옮긴다(제목은 '제목', 나머지는 칸 이름이 aria-label). 커서는 칸 끝에.
+      function focusField(k) {
+        if (!(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post')) return;
+        var label = k === 'title' ? '제목' : k, el = [].filter.call(page.querySelectorAll('input, textarea'), function (n) { return n.getAttribute('aria-label') === label; })[0];
+        if (!el) return;
+        el.focus();
+        try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { console.debug('커서를 칸 끝으로 옮기지 못했어', e); }
       }
       function drawSimilar() {
         var s = slots.similar; if (!s) return; clear(s);

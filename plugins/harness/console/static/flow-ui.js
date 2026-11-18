@@ -727,8 +727,8 @@
               var det = h('details', { class: 'more docs-old' }, h('summary', { text: '이전 판 ' + olds.length + '개' }));
               var oldKeys = olds.map(function (v) { return d.key.split('|')[0] + '|' + v.path.toLowerCase(); });
               olds.forEach(function (v, i) { det.appendChild(row({ key: oldKeys[i], file: v, session: d.session, chip: null }, true)); });
-              if (isPost()) {  // 다시 그려도(이전 판을 고르면 미리보기를 읽고 새로 그린다) 연 채로 두고, 고른 이전 판이 접힌 칸 안에 숨지 않게 한다
-                det.open = !!st.oldOpen[d.key] || oldKeys.indexOf(st.sel) >= 0;
+              if (isPost()) {  // 다시 그려도(이전 판을 고르면 미리보기를 읽고 새로 그린다) 연 채로 두고, 고른 이전 판이 접힌 칸 안에 숨지 않게 한다. 사람이 열고 닫은 것이 있으면 그대로(닫은 칸을 다시 그릴 때 저절로 열지 않는다)
+                det.open = d.key in st.oldOpen ? st.oldOpen[d.key] : oldKeys.indexOf(st.sel) >= 0;
                 det.addEventListener('toggle', function () { st.oldOpen[d.key] = det.open; });
               }
               box.appendChild(det);
@@ -847,11 +847,27 @@
       function title(eb, h1, line) {
         return h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: eb }), h('h1', { text: h1 }), line ? h('span', { class: 'line', text: line }) : null);
       }
-      // Post: 다시 그려도(고르기·판 바뀜·읽기 끝) 키보드로 누르던 문서 줄에 포커스가 남게 한다. 줄이 새 노드라 그대로면 body 로 떨어진다.
+      // Post: 다시 그려도(고르기·판 바뀜·읽기 끝·세션이 움직여 다시 모으기) 키보드로 누르던 곳에 포커스가 남게 한다. 노드가 새로 생겨 그대로면 body 로 떨어진다.
+      // 알아보는 값: 문서 줄은 data-dkey, 입력칸은 id, 나머지(시트 탭·이전 판 칸·단추·링크)는 태그·class·글과 몇 번째인지. 누르던 곳이 없어졌으면(결과 화면 → 목록) 고른 문서 줄로.
+      function sameAs(tag, cls, text) { return [].filter.call(page.querySelectorAll(tag), function (n) { return n.className === cls && n.textContent === text; }); }
+      function focusKey() {
+        var a = document.activeElement;
+        if (!isPost() || !a || a === page || !page.contains(a)) return null;
+        if (a.classList.contains('drow')) return { dkey: a.getAttribute('data-dkey') };
+        if (a.id) return { id: a.id };
+        return { tag: a.tagName, cls: a.className, text: a.textContent, i: sameAs(a.tagName, a.className, a.textContent).indexOf(a) };
+      }
+      function focusBack(k) {
+        if (!k) return;
+        var t = k.dkey ? [].filter.call(page.querySelectorAll('.drow'), function (b) { return b.getAttribute('data-dkey') === k.dkey; })[0]
+          : k.id ? document.getElementById(k.id) : sameAs(k.tag, k.cls, k.text)[k.i];
+        if (!t || t.disabled || !page.contains(t)) t = page.querySelector('.drow.on') || page.querySelector('.drow');
+        if (t) t.focus({ preventScroll: true });
+      }
       function draw() {
-        var ae = document.activeElement, keep = isPost() && ae && ae.classList && ae.classList.contains('drow') && page.contains(ae) ? ae.getAttribute('data-dkey') : null;
+        var k = focusKey();
         drawNow();
-        if (keep) { var back = [].filter.call(page.querySelectorAll('.drow'), function (b) { return b.getAttribute('data-dkey') === keep; })[0]; if (back) back.focus({ preventScroll: true }); }
+        focusBack(k);
       }
       function drawNow() {
         clear(page);

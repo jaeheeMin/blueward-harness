@@ -1408,6 +1408,7 @@
   function renderRail(d, cur) {
     var n = d.todo.length, rows = sortedSessions();
     return h('nav', { class: 'rail', 'aria-label': '세션 목록 (접힘)' },
+      isPostTheme() ? h('a', { class: 'po-skip po-skip-rail', href: '#main', 'data-skip': '1', text: '세션 목록 건너뛰기' }) : null,  // Post: 접힌 칸(좁은 화면은 늘 접힘)도 세션마다 고리가 있어 펼친 목록처럼 건너뛰게 한다
       foldBtn(true),
       link(d.todo.length ? d.todo[0].href : '/', { class: 'rail-count' + (n ? ' has' : ''), 'aria-label': '내가 할 일 ' + n + '건', title: '내가 할 일 ' + n + '건' },
         h('span', { class: 'n', text: String(n) }), h('span', { class: 'l', text: '내가 할 일' })),
