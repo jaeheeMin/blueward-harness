@@ -175,24 +175,27 @@
     function draw() {
       if (!st || !rootEl) return;
       var narrow = !!(mq && mq.matches), page = [];
+      // J11: 프로젝트를 바꾼 직후엔 앞 프로젝트 폴더의 결과가 남아 잠깐 그 칸이 보였다 — 지금 볼 폴더의 결과만 그리고, 하나도 없으면 새 결과를 읽는 중으로 둔다
+      var want = folders(), res = st.results ? st.results.filter(function (r) { return want.indexOf(r.cwd) >= 0; }) : null;
+      if (res && !res.length && st.results.length && want.length) res = null;
       page.push(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '파이프라인' }), h('h1', { text: '요구사항이 지금 어디까지 왔나' }),
         h('p', { class: 'line po-pl-lead', text: 'SRS → 개발 Spec → 개발 → 검토 → 합쳐짐. 하네스는 이 순서를 지키게 해.' })));
-      if (!st.results) {
+      if (!res) {
         page.push(kit.loadingBox('요구사항을 읽는 중이야.'));
       } else {
-        var gs = groups(st.results), shown = gs.filter(function (g) { return g.data.state !== 'no'; });
+        var gs = groups(res), shown = gs.filter(function (g) { return g.data.state !== 'no'; });
         var skipped = [], gone = [], failed = [];
         gs.forEach(function (g) { if (g.data.state === 'no' && skipped.indexOf(g.name) < 0) skipped.push(g.name); });
-        st.results.forEach(function (r) {  // 403 = 서버가 아는 작업 폴더가 아니다(지운 worktree 따위). 그 밖은 읽지 못한 것
+        res.forEach(function (r) {  // 403 = 서버가 아는 작업 폴더가 아니다(지운 worktree 따위). 그 밖은 읽지 못한 것
           if (r.error) (r.error.status === 403 ? gone : failed).push(r.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() + (r.error.status === 403 ? '' : '(' + (r.error.message || '오류') + ')'));
         });
         shown.forEach(function (g) { page.push(panel(g, narrow)); });
         if (!shown.length) {
           page.push(h('section', { class: 'light po-panel po-pl po-pl-empty', 'aria-labelledby': 'po-pl-empty-h' },
-            h('header', { class: 'po-ph' }, h('h2', { id: 'po-pl-empty-h', text: st.results.length ? '보일 요구사항이 없어' : '아직 연 프로젝트 폴더가 없어' })),
-            note(st.results.length ? 'origin/main 에 SRS(docs/ssot/SRS.md)나 진행 원장(audit/ledger/)이 있는 프로젝트 폴더에서 세션을 열면 요구사항이 여기 칸별로 보여.'
+            h('header', { class: 'po-ph' }, h('h2', { id: 'po-pl-empty-h', text: res.length ? '보일 요구사항이 없어' : '아직 연 프로젝트 폴더가 없어' })),
+            note(res.length ? 'origin/main 에 SRS(docs/ssot/SRS.md)나 진행 원장(audit/ledger/)이 있는 프로젝트 폴더에서 세션을 열면 요구사항이 여기 칸별로 보여.'
               : '프로젝트 폴더에서 새 작업을 시작하면 그 폴더의 요구사항이 여기 칸별로 보여.'),
-            st.results.length ? null : h('div', { class: 'acts' }, kit.link('/new', { class: 'btn', text: '새 작업' }))));
+            res.length ? null : h('div', { class: 'acts' }, kit.link('/new', { class: 'btn', text: '새 작업' }))));
         }
         if (skipped.length) page.push(note('SRS·진행 원장이 없는 폴더는 뺐어: ' + skipped.join(', '), 'skip'));
         if (gone.length) page.push(note('없어진 작업 폴더는 뺐어: ' + gone.join(', '), 'skip'));
@@ -209,7 +212,7 @@
       if (mq && mq.addEventListener) mq.addEventListener('change', draw);
       draw();
       kit.api('GET', '/api/folders/last').then(function (d) { if (my === st && d && d.path) st.last = d.path; }, function () {}).then(function () { if (my === st && kit.loaded()) load(); });
-      function onData() { if (!st || !kit.loaded()) return; if (!st.results || folders().join('|') !== st.sig) load(); else draw(); }
+      function onData() { if (!st || !kit.loaded()) return; if (!st.results || folders().join('|') !== st.sig) load(); draw(); }  // 폴더가 바뀌면 읽기 시작과 함께 앞 결과를 걷어 낸다(J11)
       return {
         title: function () { return '파이프라인'; },
         onData: onData, onSession: onData, onRemoved: onData,

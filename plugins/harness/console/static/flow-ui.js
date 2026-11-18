@@ -654,8 +654,12 @@
       var page = h('div', { class: 'page docs-page' });
       root.appendChild(page);
 
+      // J14: Cozy Office 는 고른 문서의 세션이 최근 DOCS_PAGE_MAX 개 밖으로 밀려도 그 세션은 계속 모은다(목록에서 고르던 문서가 빠지고 포커스가 body 로 갔다)
       function pool() {
-        return sessionList().filter(function (s) { return !s.handedOffTo; }).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }).slice(0, DOCS_PAGE_MAX);
+        var all = sessionList().filter(function (s) { return !s.handedOffTo; }).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }), top = all.slice(0, DOCS_PAGE_MAX);
+        var pin = isPost() && st.picked && st.picked.session ? st.picked.session.id : '';
+        if (pin && !top.some(function (s) { return s.id === pin; })) top = top.concat(all.filter(function (s) { return s.id === pin; }));
+        return top;
       }
       function sig() { return pool().map(function (s) { return s.id; }).join('|'); }
       function load() {
@@ -906,7 +910,7 @@
         if (gone.length) notes.push(h('p', { class: 'note-muted', role: 'status', 'data-docs-gone': String(gone.length), text: goneNote(gone.length) }));
         // Post: 세션이 DOCS_PAGE_MAX 개를 넘으면 오래된 세션의 문서는 읽지 않는다. 말 없이 빠지면 "없다" 로 읽히니 몇 개가 빠졌는지 알린다.
         var rest = isPost() ? sessionList().filter(function (s) { return !s.handedOffTo; }).length - pool().length : 0;
-        if (rest > 0) notes.push(h('p', { class: 'note-muted', role: 'status', 'data-docs-more': String(rest), text: '최근에 움직인 세션 ' + pool().length + '개의 문서만 모았어. 더 오래된 세션 ' + rest + '개의 문서는 여기에 안 나와.' }));
+        if (rest > 0) notes.push(h('p', { class: 'note-muted', role: 'status', 'data-docs-more': String(rest), text: '최근에 움직인 세션 ' + Math.min(pool().length, DOCS_PAGE_MAX) + '개' + (pool().length > DOCS_PAGE_MAX ? '(와 고른 문서의 세션)' : '') + '의 문서만 모았어. 더 오래된 세션 ' + rest + '개의 문서는 여기에 안 나와.' }));
         st.parts.forEach(function (p) { if (p.note && !p.unknown) notes.push(h('p', { class: 'note-muted', role: 'status', text: p.note })); });  // 칩은 그대로 두고 안내만 한 줄 더한다
         if (!all.length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(h('section', { class: 'light dsec' }, notes, h('p', { class: 'note-muted', text: rest > 0 ? '모은 세션에는 양식으로 뽑은 산출물이 없어.' : '아직 양식으로 뽑은 산출물이 없어.' }), attachBoxes())); return; }
         // 시안 G-15: 방금 고객 양식 xlsx 를 뽑았으면(가장 최근 산출물이 그 파일) 목록 없이 결과 화면을 먼저 보인다. '문서 목록 보기' 로 나가면 시안 G-14 목록 화면.
@@ -1382,7 +1386,9 @@
       var sub = h('p', { class: 'line', text: 'Claude Code 세션을 시작하면 왼쪽 목록에 생겨. 지금 바로 맡길 일이 있으면 아래에서 시작해.' });
       page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '내 일' }), h('h1', { text: '아직 시작한 작업이 없어' }), sub));
       // 시안 G-04: 서버가 기억한 마지막 폴더가 준비됐으면 "프로젝트 준비 끝 · 이름". 못 읽거나 준비됨이 아니면 위 문구 그대로.
-      api('GET', '/api/folders/last').then(function (d) {
+      // J11(6회차): Cozy Office 에서 프로젝트를 골랐으면 서버의 마지막 폴더가 아니라 그 프로젝트(kit.projectPath)로 말한다
+      var chosen = kit.projectPath ? kit.projectPath() : '';
+      (chosen ? Promise.resolve({ path: chosen, name: kit.baseName(chosen) }) : api('GET', '/api/folders/last')).then(function (d) {
         if (!d || !d.path) return null;
         return api('GET', '/api/folders/recent').then(function (r) {
           var hit = kit.listOf(r, 'folders').filter(function (f) { return f && f.path === d.path && f.ready === 'yes'; })[0];
@@ -1446,18 +1452,37 @@
         tbLine.appendChild(h('b', { class: n ? 'w' : null, text: n + '건' }));
         if (badP.length) tbLine.title = badP.map(function (p) { return p.name; }).join(', ') + ' 는 읽지 못해 세지 못했어.';
       }
-      function loadTrouble(n) {
-        api('GET', '/api/trouble?limit=1').then(function (d) {
-          if (d && d.loading && n < 30) { if ((d.projects || []).some(function (p) { return p.ok; })) showTrouble(d); setTimeout(function () { loadTrouble(n + 1); }, 1500); return; }
+      /* J11(Cozy Office): 프로젝트를 골랐으면 그 저장소의 기록만 센다(전에는 이 PC 가 아는 모든 저장소 합). kit.troubleScope() 가
+         null 이면 거르지 않고(Sauce·모든 저장소), { key, has(root) } 면 그 저장소 기록 줄의 열린 수, 'wait' 면 아직 저장소 판정 전이라 기다린다. */
+      var tbGen = 0, tbKey = null;
+      function scopeKey() { var sc = kit.troubleScope ? kit.troubleScope() : null; return sc === 'wait' ? null : sc ? sc.key : ''; }
+      function scoped(d) {
+        var sc = kit.troubleScope ? kit.troubleScope() : null;
+        if (!sc || sc === 'wait' || !d) return Promise.resolve(d);
+        var mine = (d.projects || []).filter(function (p) { return p && sc.has(p.root); }), ok = mine.filter(function (p) { return p.ok && p.slug; })[0];
+        if (!ok) return Promise.resolve({ projects: mine, stats: {}, loading: d.loading });
+        return api('GET', '/api/trouble' + kit.qs({ limit: 1, status: 'open', project: ok.slug })).then(function (e) { return { projects: mine, stats: { open: (e && e.matched) || 0 }, loading: d.loading }; });
+      }
+      function loadTrouble(n, gen) {
+        if (gen == null) {
+          gen = ++tbGen;
+          if (tbKey !== null && scopeKey() !== tbKey) { clear(tbLine); tbLine.title = ''; tbLine.textContent = '불러오는 중이야'; tbTile.className = 'tile2'; }  // 프로젝트를 바꿨으면 앞 프로젝트 숫자를 남기지 않는다
+          tbKey = scopeKey();
+        }
+        if (tbKey === null) return;  // 저장소 판정 뒤 refresh 가 다시 부른다
+        api('GET', '/api/trouble?limit=1').then(scoped).then(function (d) {
+          if (gen !== tbGen) return;  // 그 사이 프로젝트를 바꿔 다시 읽기 시작했다
+          if (d && d.loading && n < 30) { if ((d.projects || []).some(function (p) { return p.ok; })) showTrouble(d); setTimeout(function () { loadTrouble(n + 1, gen); }, 1500); return; }
           showTrouble(d);
-        }, function (e) { showTrouble(null, e && e.message || '읽지 못했어'); });
+        }, function (e) { if (gen === tbGen) showTrouble(null, e && e.message || '읽지 못했어'); });
       }
       function showPr(merged) {
         if (merged.state === 'yes') { prVal.textContent = String(merged.items.length); prTile.className = 'tile2'; prTile.hidden = false; }
         else if (merged.state === 'unknown') { prVal.textContent = '확인 못 함'; prTile.className = 'tile2 unk'; prTile.hidden = false; }
         else prTile.hidden = true;
       }
-      return { prTile: prTile, weekTile: weekTile, tbTile: tbTile, showPr: showPr, showWeek: showWeek, load: function () { loadTrouble(0); } };
+      return { prTile: prTile, weekTile: weekTile, tbTile: tbTile, showPr: showPr, showWeek: showWeek, load: function () { loadTrouble(0); },
+        refresh: function () { if (scopeKey() !== tbKey) loadTrouble(0); } };  // 고른 프로젝트가 바뀌었을 때만 다시 센다
     }
     /* 홈의 "내 세션" 표와 "검토 요청(PR)" 칸. Sauce 홈과 Post 홈(post-home.js)이 같은 데이터·같은 칸을 쓴다. */
     function homeTable(list) {

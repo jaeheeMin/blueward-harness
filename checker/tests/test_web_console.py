@@ -9500,6 +9500,7 @@ def test_pipeline_gives_issue_dev_numbers_and_pr_branch_for_cozy_teams(tmp_path,
         assert body["issues"] == {"state": "ok", "reason": "", "byIssue": {"40": {"dev": 2, "main": True}, "41": {"dev": 2, "main": False}}}
         items = {i["number"]: i for i in body["items"]}
         assert items[2]["prs"][0]["branch"] == "feat/20-dev002-list"
+        assert body["workPrefix"] == "src/"  # 화면(post-logic.js reqFlowOf)이 작업 PR 판정과 같은 코드 폴더를 쓴다(Cozy Office 8회차 J13)
     finally:
         c.close()
     c = flow_console(tmp_path / "b", monkeypatch, run=pipe_run(work, gh_issue_list=(1, "")))

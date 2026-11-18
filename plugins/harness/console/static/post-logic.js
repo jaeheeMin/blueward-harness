@@ -202,7 +202,7 @@
      d = 그 세션 폴더의 /api/pipeline 결과(요구사항 items·열린 PR·열린 이슈의 DEV 번호). 근거가 갈래를 정하지 못하면 ''(팀 없음) — 짐작하지 않는다.
      1) 브랜치 `{type}/{이슈번호}-…`(branching.md)의 이슈 제목에 `[DEV-xxx]`(개발 본체) 나 `(DEV-xxx)`(하위 작업)가 있어야 한다(start·spec 스킬이 붙인다).
      2) 그 번호의 SRS 다음 단계가 설정·표준이면 config·standard(그 갈래는 [DEV-xxx] 로 start 하고 Spec 이 없다).
-     3) 개발 요구사항이면: 이 브랜치가 src/ 를 바꿨으면(작업 중 변경·같은 브랜치 열린 작업 PR) dev, 그 번호의 Spec 파일만 바꿨으면 spec.
+     3) 개발 요구사항이면: 이 브랜치가 코드 폴더(d.workPrefix, 기본 src/)를 바꿨으면(작업 중 변경·같은 브랜치 열린 작업 PR) dev, 그 번호의 Spec 파일만 바꿨으면 spec.
         바꾼 게 없으면 맨 앞 [DEV-xxx] 본체 이슈이고 Spec·요구사항이 main 에 있을 때만 dev(start: "SRS·Spec 단계는 그 이슈를 브랜치에 쓰지 않는다",
         Spec·요구사항이 없으면 개발을 시작하지 않고 spec 스킬이 같은 DEV 브랜치를 이어 쓸 수 있다). 그 밖(하위 작업이 아직 아무것도 안 바꿈)은 못 가른다.
      브랜치 접두어(feat/fix/docs)·이슈 라벨(type:*)·start 뒤 도구 스킬(atc·cts·role·unittest·manual)은 갈래를 정하지 않아 쓰지 않는다. 유지보수(fix 갈래)는 근거가 없어 콘솔에서 고른 세션만 앉는다. */
@@ -220,7 +220,8 @@
     if (it.kind === '표준') return 'standard';
     if (it.unsure || (it.req && it.next !== '개발')) return '';  // 다음 단계 미정·빈 칸: 개발인지 모른다
     var specRe = new RegExp('^docs/spec/(DEV-0*' + iss.dev + '(?![0-9])|$)'), prs = (Array.isArray(it.prs) ? it.prs : []).filter(function (p) { return p && p.branch && p.branch === s.branch; });
-    if (touches(s.changedFiles, function (p) { return /^src\//.test(p); }) || prs.some(function (p) { return p.kind === 'work'; })) return 'dev';
+    var work = typeof d.workPrefix === 'string' && d.workPrefix ? d.workPrefix : 'src/';  // 코드 폴더: 서버(pipeline.py WORK_PREFIX)가 작업 PR 을 가르는 값과 같게(J13)
+    if (touches(s.changedFiles, function (p) { return p.indexOf(work) === 0; }) || prs.some(function (p) { return p.kind === 'work'; })) return 'dev';
     if (touches(s.changedFiles, function (p) { return specRe.test(p); }) || prs.some(function (p) { return p.kind === 'spec'; })) return 'spec';
     return iss.main && it.spec && it.req ? 'dev' : '';  // Spec·요구사항이 main 에 있는 본체 이슈만 바꾼 게 없어도 개발(없으면 spec 스킬이 이어 쓰는 중일 수 있다)
   }

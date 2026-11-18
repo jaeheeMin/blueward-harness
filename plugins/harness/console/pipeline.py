@@ -26,7 +26,7 @@ ISSUE_SUB_RE = re.compile(r"\(DEV-(\d+)\)\s*$")  # 같은 파일 SUBTASK_RE(하�
 SPEC_FILE_RE = re.compile(r"^docs/spec/DEV-(\d+)[^/]*\.md$")
 # 제목·브랜치의 번호: `DEV-013`, `REQ-019`, 브랜치의 `dev013`. 앞이 글자면(device 따위) 번호로 보지 않는다
 NUM_RE = re.compile(r"(?<![A-Za-z])(?:REQ|DEV)-?(\d{1,6})(?!\d)", re.IGNORECASE)
-WORK_PREFIX = "src/"
+WORK_PREFIX = "src/"  # 코드 폴더(Project Repository 표준 구조·scaffold). 화면(post-logic.js reqFlowOf)도 응답의 workPrefix 로 같은 값을 쓴다
 DONE_SRS = "done"
 HIDDEN_STATUS = {"dropped", "duplicate", "on hold"}  # 보류·취소된 요구사항은 판에 올리지 않고 수만 센다
 
@@ -173,4 +173,4 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
             "prs": prs["byNumber"].get(n, []),
         })
     return {"state": "yes", "reason": "", "items": items, "hidden": hidden, "srsCount": len(srs),
-            "prs": {"state": prs["state"], "reason": prs["reason"]}, "issues": open_issues(run, root)}
+            "prs": {"state": prs["state"], "reason": prs["reason"]}, "issues": open_issues(run, root), "workPrefix": WORK_PREFIX}

@@ -125,19 +125,39 @@
   function setConn(s) { if (conn.state !== s) { if (s === 'down' && !offSince) offSince = Date.now() / 1000; conn.state = s; onConn(); } }
   /* 콘솔 연결이 끊긴(또는 숨겨진 탭이 닫은) 사이 서버가 승인·질문을 터미널로 넘기면 세션 기록에 한 줄 남긴다(hooks_api._terminal_without_browser).
      다시 붙었을 때 그 사이 시각의 기록만 세어 알린다. 이 탭이 열리기 전에 넘어간 건 알 수 없어 세지 않는다. */
-  var offSince = 0, handoffNote = '', HANDOFF_MARK = '콘솔이 연결돼 있지 않아 터미널로 넘김';
+  var offSince = 0, offClosed = false, handoffWait = 0, handoffNote = '', HANDOFF_MARK = '콘솔이 연결돼 있지 않아 터미널로 넘김';
+  /* J12(Cozy Office): 승인·질문 카드는 브라우저가 붙어 있을 때만 생긴다(없으면 서버가 터미널로 넘긴다 — 서버 설계). 브라우저를 닫았다 다시 열면
+     그 사이 넘어간 요청이 말없이 사라져 보였다. 콘솔이 붙어 있던 마지막 때를 이 브라우저(localStorage bh-post-seen, 탭끼리 같이 씀)에 적어 두고,
+     다시 열면 그 뒤에 터미널로 넘어간 요청을 연결이 끊겼을 때와 같은 안내로 센다. 하루가 지난 기록은 세지 않는다. Sauce 는 전처럼 끊김만 센다. */
+  var SEEN_KEY = 'bh-post-seen', SEEN_MAX_S = 86400, seenRead = false;
+  function markSeen() {
+    if (!isPostTheme() || !es || eventsPaused || conn.state !== 'ok') return;
+    try { localStorage.setItem(SEEN_KEY, String(Math.floor(Date.now() / 1000))); } catch (e) { console.debug('콘솔을 본 때를 브라우저에 남기지 못했어(localStorage)', e); }
+  }
+  function readSeen() {
+    if (seenRead) return;
+    seenRead = true;
+    if (!isPostTheme() || offSince) return;
+    var t = 0;
+    try { t = Number(localStorage.getItem(SEEN_KEY)) || 0; } catch (e) { console.debug('콘솔을 본 때를 읽지 못했어(localStorage)', e); }
+    if (t && Date.now() / 1000 - t < SEEN_MAX_S) { offSince = t; offClosed = true; }
+  }
+  setInterval(markSeen, 20000);
+  if (window.addEventListener) window.addEventListener('pagehide', markSeen);  // 시험의 가짜 window 엔 없을 수 있다
   function checkHandoff() {
-    var since = offSince; offSince = 0;
-    if (!since) return;
+    if (!offSince) return;
+    if (isPostTheme() && !(projectWant && projectWant.all) && !repos.tried && handoffWait++ < 25) { setTimeout(checkHandoff, 400); return; }  // J11: 고른 프로젝트의 세션만 센다 — 저장소 판정을 받은 뒤에
+    var since = offSince, closed = offClosed; offSince = 0; offClosed = false; handoffWait = 0;
+    markSeen();
     var n = 0;
-    sessions.forEach(function (s) {
+    scopedSessions().forEach(function (s) {  // Post 는 고른 프로젝트의 세션만(J11), Sauce 는 모든 세션 그대로
       (s.log || []).forEach(function (l) {
         var t = toDate(l && l.time);
         if (l && typeof l.text === 'string' && l.text.indexOf(HANDOFF_MARK) === 0 && t && t.getTime() / 1000 >= since - 2) n++;
       });
     });
     if (!n) return;
-    handoffNote = '연결이 끊긴 사이 AI가 ' + n + '번 허락이나 질문을 터미널에서 물었어. 터미널에서 답했는지 확인해 줘. (콘솔에서 받지 못한 건 여기서 답할 수 없어)';
+    handoffNote = (closed ? '콘솔을 닫아 둔 사이' : '연결이 끊긴 사이') + ' AI가 ' + n + '번 허락이나 질문을 터미널에서 물었어. 터미널에서 답했는지 확인해 줘. (콘솔에서 받지 못한 건 여기서 답할 수 없어)';
     onConn();
   }
   function errMessage(data, status) {
@@ -252,6 +272,29 @@
     });
   }
 
+  /* J11: Post 에서 저장소 판정을 아직 못 받은 폴더의 세션 알림은 판정을 받은 뒤 보낸다(전에는 보이는 쪽으로 쳐서 다른 저장소 세션 알림이 1초 안에 한 번 떴다).
+     판정을 끝내 못 받아도 5초 뒤에는 보낸다(같은 저장소 세션의 알림을 잃지 않게). 모든 저장소를 보거나 Sauce 면 기다리지 않는다. */
+  var notifyHeld = [], notifyHeldTimer = 0, NOTIFY_HOLD_MS = 5000;
+  function repoPending(s) { return isPostTheme() && !!window.BHPostLogic && !(projectWant && projectWant.all) && !!(s && s.cwd) && !(repos.folders && repos.folders[s.cwd]); }
+  function notifyInProject(prev, m) {
+    if (!prev || !notifyActive()) return;
+    if (repoPending(m)) {
+      notifyHeld.push([prev, m]);
+      if (!notifyHeldTimer) notifyHeldTimer = setTimeout(function () { flushNotify(true); }, NOTIFY_HOLD_MS);
+      ensureRepos();  // 새 폴더 판정을 바로 받으러 간다(알림이 필요한 숨은 탭은 그리기(requestAnimationFrame)가 돌지 않는다). 받는 중이면 끝난 뒤 폴더가 바뀐 것을 보고 다시 묻는다
+      return;
+    }
+    if (inProject(m)) notifyChange(prev, m);
+  }
+  function flushNotify(force) {
+    var keep = [];
+    notifyHeld.splice(0).forEach(function (p) {
+      if (!force && repoPending(p[1])) { keep.push(p); return; }
+      if (inProject(p[1])) notifyChange(p[0], p[1]);
+    });
+    notifyHeld = keep;
+    if (!keep.length || force) { clearTimeout(notifyHeldTimer); notifyHeldTimer = 0; }
+  }
   function mergeSession(s) {
     if (!s || !s.id) return null;
     var prev = sessions.get(s.id);
@@ -260,7 +303,7 @@
     if (typeof m.title === 'string' && m.title) m.title = MS(m.title);  // 세션 제목에 든 비밀값은 어느 화면에서든 가려 보인다(#1018). 서버도 저장 전에 가린다
     sessions.set(s.id, m);
     (m.pendingRequestIds || []).forEach(ensureRequest);
-    if (loadedOnce && inProject(m)) notifyChange(prev, m);  // 첫 목록은 비교 기준만 잡는다. Post 는 고른 프로젝트 밖 세션을 알리지 않는다(#1070)
+    if (loadedOnce) notifyInProject(prev, m);  // 첫 목록은 비교 기준만 잡는다. Post 는 고른 프로젝트 밖 세션을 알리지 않는다(#1070)
     return m;
   }
   function ensureRequest(rid) {
@@ -315,7 +358,7 @@
     clearTimeout(retryTimer);
     if (document.hidden && !notifyActive()) { eventsPaused = true; return; }  // 숨겨진 탭은 붙지 않는다(보이면 붙는다). 알림을 켰으면 숨겨져도 붙어 있어야 알림이 온다
     try { es = new EventSource('/api/events'); } catch (e) { return scheduleRetry(); }
-    es.onopen = function () { retry = 0; setConn('ok'); loadSessions().then(checkHandoff, function (e) { console.warn('세션 목록을 불러오지 못했습니다', e); }); };
+    es.onopen = function () { retry = 0; readSeen(); setConn('ok'); loadSessions().then(checkHandoff, function (e) { console.warn('세션 목록을 불러오지 못했습니다', e); }); };
     es.addEventListener('session', function (ev) {
       var d = parse(ev.data); if (!d) return;
       d = d.session || d;
@@ -586,6 +629,9 @@
         idle.push({ href: '/s/' + encodeURIComponent(s.id), title: title, sub: s.status === 'ended' ? '끝난 세션' : sub, t: s.updatedAt });
       }
     });
+    // J10: Cozy Office 는 내 차례를 홈 덱(post-home.js deckItems)과 같은 순서(세션이 오래 기다린 순)로 둔다 — 말풍선·알림 창 1/N·띠의 첫 항목이 덱 1/N 과 같게.
+    // 한 세션의 요청 여럿은 받은 순서 그대로(같은 값이면 원래 순서). Sauce 는 전처럼 목록 순서
+    if (isPostTheme()) todo = todo.map(function (x, i) { return [x, i]; }).sort(function (a, b) { return ((a[0].t || 0) - (b[0].t || 0)) || a[1] - b[1]; }).map(function (p) { return p[0]; });
     return { todo: todo, run: run, idle: idle, blocked: blocked, errs: errs };
   }
   var annEl = null, headEl = null;
@@ -620,6 +666,23 @@
   }
   function scopedSessions() { return projectScope().list; }
   function inProject(s) { return !isPostTheme() || !window.BHPostLogic || window.BHPostLogic.projectView([s], repos.folders, postProject()).list.length > 0; }
+  /* 팀 기록 칸을 고른 프로젝트로 거를 때(J11): 기록 저장소의 폴더(trouble.py collect 의 root, realpath)가 고른 저장소인가.
+     판정받은 폴더의 맨 위 폴더(top)와 같거나 그 안이면 그 폴더의 저장소로 본다. Sauce·모든 저장소면 null, 판정 전이면 'wait' */
+  function troubleScope() {
+    if (!isPostTheme() || !window.BHPostLogic || (projectWant && projectWant.all)) return null;
+    if (!repos.tried) return 'wait';
+    var pj = postProject();
+    if (!pj) return null;
+    return { key: pj.key, has: function (root) {
+      root = String(root || '');
+      var best = null;
+      Object.keys(repos.folders || {}).forEach(function (p) {
+        var f = repos.folders[p], t = f && f.state === 'yes' ? String(f.top || '') : '';
+        if (t && (root === t || root.indexOf(t + '/') === 0 || root.indexOf(t + '\\') === 0) && (!best || t.length > best.top.length)) best = f;
+      });
+      return !!best && best.key === pj.key;
+    } };
+  }
   // 세션 줄에 붙일 작은 표(같은 저장소의 다른 폴더 이름, git 저장소 아님, 저장소 확인 못 함). 붙일 게 없으면 null
   function projectTagEl(s, tags) {
     var t = (tags || projectScope().tag)[s.id];
@@ -641,7 +704,7 @@
       if (unsure) repos.again = setTimeout(function () { repos.sig = null; scheduleSide(); }, 60000);
     }, function () {
       repos.sig = gen === repos.gen ? sig : null; setTimeout(function () { repos.sig = null; scheduleSide(); }, 30000);
-    }).then(function () { repos.busy = false; repos.tried = true; scheduleSide(); if (view && view.onData) view.onData(); });
+    }).then(function () { repos.busy = false; repos.tried = true; flushNotify(false); if (notifyHeld.length) ensureRepos(); scheduleSide(); if (view && view.onData) view.onData(); });
   }
   /* Cozy Office 팀 배정(J15 나머지): 갈래 없는 세션이 앉을 팀은 그 폴더 요구사항 판(/api/pipeline — 브랜치 이슈의 DEV 번호·SRS 다음 단계·Spec·PR)으로 정한다(post-logic.js reqFlowOf).
      갈래 스킬(srs·spec)을 안 쓰고 `{type}/{이슈번호}-…` 브랜치에 있는 세션의 폴더만 묻는다. 폴더마다 2분 기억하되, 브랜치가 바뀌면 바로, 그 이슈가 판에 아직 없으면(방금 만든 이슈) 20초 뒤 다시 묻는다
@@ -1334,8 +1397,25 @@
     mainEl.scrollTop = snap.top; window.scrollTo(0, snap.win);
   }
   // 테마가 바뀌면 새로 고침 없이 틀이 바뀐다. isPost 로 구조를 짓는 화면이 많아 모든 화면을 그 자리에서 다시 그리되, 입력하던 것은 그대로 둔다.
+  /* J14: 본문 밖(위쪽 줄 테마 단추·건너뛰기 링크)에 초점이 있는 채 테마를 바꾸면 그 단추가 새 틀에 없어 초점이 body 로 떨어졌다
+     (Cozy Office 위쪽 줄 테마 단추로 Sauce 로 바꾸면 늘 그랬다). 틀을 다시 그린 뒤 같은 단추가 있으면 그리로, 없으면 본문 제목으로 옮긴다. */
+  function themeRefocus(was) {
+    var tries = 0;
+    (function look() {  // 위쪽 줄은 다음 그리기(scheduleSide)에서 바뀌니 잠깐 지켜본다. 초점이 다른 곳으로 옮겨 갔으면 건드리지 않는다
+      var a = document.activeElement;
+      if (a === was && was.isConnected) { if (++tries < 15) setTimeout(look, 100); return; }
+      if (a && a !== document.body) return;  // 초점이 떨어진 때(body)만 옮긴다. 다른 곳(본문 칸 되돌리기 등)이 옮겼으면 그대로
+      var cls = was && typeof was.className === 'string' ? was.className.trim().split(/\s+/).filter(function (c) { return /^(ptop-|po-skip|nb-btn)/.test(c); }).pop() : '';
+      var t = cls ? document.querySelector('.' + cls) : null;
+      if (!t && mainEl) { t = mainEl.querySelector('h1'); if (t && !t.hasAttribute('tabindex')) t.setAttribute('tabindex', '-1'); }
+      if (t && t.focus) t.focus({ preventScroll: true });
+      if (t && document.activeElement !== t && mainEl) { var h1 = mainEl.querySelector('h1'); if (h1) { if (!h1.hasAttribute('tabindex')) h1.setAttribute('tabindex', '-1'); h1.focus({ preventScroll: true }); } }  // 같은 단추가 있어도 숨어 있어 초점을 못 받으면 제목으로
+    })();
+  }
   document.addEventListener('bh-theme', function () {
     if (!appEl) return;
+    var was = document.activeElement;
+    if (was && was !== document.body && mainEl && typeof mainEl.contains === 'function' && !mainEl.contains(was)) themeRefocus(was);
     sideMode = null; scheduleSide();
     if (!renderedOnce || !route) return;
     var snap = snapFields();
@@ -1399,18 +1479,29 @@
   /* Post 세션 목록: 위에 걸러보기(전체·내 차례·일하는 중·끝남), 행마다 사람 아바타 + 기억 링 + 제목 + 상태 기호·문구 + 단계 막대.
      고른 걸러보기는 이 파일이 쥐고, 누름은 sideEl 한 곳에서 받는다(patchChildren 이 옛 노드의 핸들러를 남기므로 노드마다 핸들러를 달지 않는다). */
   var postFilter = 'all';
+  /* J6: 고른 프로젝트 밖의 세션을 주소로 열면(다른 프로젝트 세션 링크·알림) 거른 목록에 지금 세션이 없어 어디인지 안 보였다.
+     보는 프로젝트(고른 값)는 바꾸지 않고, 지금 세션 한 줄만 목록 맨 위에 「다른 프로젝트 · 이름」 표와 함께 덧붙인다. 걸러보기 숫자에는 안 센다. */
+  function postGuest(rows) {
+    if (!isPostTheme() || !route || route.name !== 'session') return null;
+    var s = sessions.get(route.id);
+    if (!s || rows.some(function (x) { return x.id === s.id; })) return null;
+    var f = repoOf(s.cwd);
+    return { s: s, tag: { kind: 'other', text: '다른 프로젝트' + (f ? ' · ' + f.name : '') } };
+  }
   function postSideList(rows, cur) {
-    var L = window.BHLogic, PL = window.BHPostLogic, PS = window.BHPostScene;
+    var L = window.BHLogic, PL = window.BHPostLogic, PS = window.BHPostScene, guest = postGuest(rows);
     var states = rows.map(function (s) { return PL.stateOf(s, L); }), cnt = PL.filterCounts(states), tags = projectScope().tag;
+    if (guest) { tags = Object.assign({}, tags); tags[guest.s.id] = guest.tag; }
     var tabs = h('div', { class: 'po-ftabs', role: 'tablist', 'aria-label': '세션 걸러보기' }, PL.FILTERS.map(function (f) {
       return h('button', { type: 'button', role: 'tab', 'data-pf': f.id, 'aria-selected': String(postFilter === f.id), tabindex: postFilter === f.id ? '0' : '-1', text: f.label + ' ' + cnt[f.id] });
     }), foldBtn(false));
     var list = h('div', { class: 'nav-list', role: 'tabpanel' });
     var shown = 0;
+    if (guest) { rows = [guest.s].concat(rows); states = [PL.stateOf(guest.s, L)].concat(states); }
     rows.forEach(function (s, i) {
       var state = states[i];
-      if (!PL.filterMatch(postFilter, state)) return;
-      shown++;
+      if (!(guest && i === 0) && !PL.filterMatch(postFilter, state)) return;  // 덧붙인 지금 세션 줄은 걸러보기와 상관없이 보인다
+      if (!(guest && i === 0)) shown++;
       var st = sideStatus(s), p = firstPending(s), steps = s.flowId ? L.barSteps(s) : [];
       var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid));
       var bar = null;
@@ -1426,8 +1517,8 @@
           h('small', { class: 'po-ss', title: st.text }, h('i', { class: 'po-st po-st-' + state, 'aria-hidden': 'true', text: PL.GLYPH[state] || '' }), PL.statusText(st.text), projectTagEl(s, tags)),
           bar)));
     });
-    if (!rows.length && loadedOnce) list.appendChild(h('p', { class: 's-empty', text: '아직 세션이 없어. 새 작업을 시작하면 여기에 생겨.' }));
-    else if (rows.length && !shown) list.appendChild(h('p', { class: 's-empty', text: '이 걸러보기에 맞는 세션이 없어.' }));
+    if (rows.length === (guest ? 1 : 0) && loadedOnce) list.appendChild(h('p', { class: 's-empty', text: guest ? '보는 프로젝트에는 아직 세션이 없어.' : '아직 세션이 없어. 새 작업을 시작하면 여기에 생겨.' }));
+    else if (rows.length > (guest ? 1 : 0) && !shown) list.appendChild(h('p', { class: 's-empty', text: '이 걸러보기에 맞는 세션이 없어.' }));
     return h('nav', { class: 'nav po-slist', 'aria-label': '세션 목록' }, h('a', { class: 'po-skip', href: '#main', 'data-skip': '1', text: '세션 목록 건너뛰기' }), tabs, list, h('div', { class: 'nav-foot' }, link(newHref(), { class: 'snew', text: '+ 새 세션' })));
   }
   /* Post 세션 목록을 그린 뒤: 접기 단추 포커스 되돌리기, 그리고 화면(주소)이 바뀌었을 때만 지금 세션 줄이 목록 창 안에 보이게 한다
@@ -1437,13 +1528,18 @@
     if (!isPostTheme()) return;
     if (foldRefocus) { foldRefocus = false; var fb = sideEl.querySelector('.fold-btn'); if (fb) fb.focus(); }
     if (sideShownFor === cur) return;
-    var list = sideEl.querySelector('.po-slist .nav-list'), row = list && list.querySelector('[aria-current="page"]');
+    var rail = sideEl.querySelector('.rail');  // J7: 좁은 화면의 접힌 목록(고리 한 줄, 옆으로 민다)도 지금 세션 고리가 줄 안에 보이게
+    var list = rail || sideEl.querySelector('.po-slist .nav-list'), row = list && list.querySelector('[aria-current="page"]');
     if (!list || (!row && !loadedOnce)) return;  // 세션을 아직 못 읽었으면 다음 그리기에서 다시 본다
     var ss = route.name === 'session' ? sessions.get(route.id) : null;
     if (ss && !ss.cwd) return;  // 막 시작한 세션은 내용을 받기 전이라 목록 자리가 아직 아니다 — 받은 뒤 그 자리로 굴린다(먼저 굴리면 줄이 옮겨 가 창 밖에 남았다)
     sideShownFor = cur;
     if (!row) return;
     var lr = list.getBoundingClientRect(), rr = row.getBoundingClientRect();
+    if (rail) {  // 넓은 화면 세로 고리는 넘치지 않아 그대로
+      if (rail.scrollWidth > rail.clientWidth + 1 && (rr.left < lr.left || rr.right > lr.right)) rail.scrollLeft += rr.left - lr.left - Math.max(0, (rail.clientWidth - row.offsetWidth) / 2);
+      return;
+    }
     if (rr.top < lr.top || rr.bottom > lr.bottom) list.scrollTop += rr.top - lr.top - Math.max(0, (list.clientHeight - row.offsetHeight) / 2);
   }
   /* 걸러보기 탭(role=tablist): 방향키·Home·End 로 고르고, 고른 탭만 Tab 이 선다(나머지는 tabindex -1) */
@@ -1462,11 +1558,13 @@
     postFilter = b.getAttribute('data-pf'); sideShownFor = ''; scheduleSide();
   }
   function renderRail(d, cur) {
-    var n = d.todo.length, rows = sortedSessions(), countHref = d.todo.length ? d.todo[0].href : '/';
+    var n = d.todo.length, rows = sortedSessions(), countHref = d.todo.length ? d.todo[0].href : '/', guest = null;
     if (isPostTheme() && window.BHPostScene) {  // Post: 펼친 목록 걸러보기 "할 일"(내 차례 + 막힘 + 확인 못 함, 세션 수)과 같은 수 — 접으면 숫자가 바뀌지 않게
       var turnRows = rows.filter(function (s) { return window.BHPostLogic.filterMatch('turn', window.BHPostLogic.stateOf(s, window.BHLogic)); });
       n = turnRows.length;
       if (!d.todo.length && turnRows.length) countHref = '/s/' + encodeURIComponent(turnRows[0].id);
+      guest = postGuest(rows);  // J6: 다른 프로젝트 세션을 보고 있으면 그 고리도 맨 앞에(숫자에는 안 센다)
+      if (guest) rows = [guest.s].concat(rows);
     }
     return h('nav', { class: 'rail', 'aria-label': '세션 목록 (접힘)' },
       isPostTheme() ? h('a', { class: 'po-skip po-skip-rail', href: '#main', 'data-skip': '1', text: '세션 목록 건너뛰기' }) : null,  // Post: 접힌 칸(좁은 화면은 늘 접힘)도 세션마다 고리가 있어 펼친 목록처럼 건너뛰게 한다
@@ -1475,8 +1573,8 @@
         h('span', { class: 'n', text: String(n) }), h('span', { class: 'l', text: '내가 할 일' })),
       rows.map(function (s) {
         var st = sideStatus(s), p = firstPending(s), name = sessionTitle(s);
-        var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid));
-        return link('/s/' + encodeURIComponent(s.id), { class: 'rail-ring' + (st.tone === 'attn' ? ' turn' : st.tone === 'fail' || st.tone === 'unk' || st.tone === 'err' ? ' bk ' + st.tone : '') + (s.status === 'ended' ? ' ended' : ''), 'aria-label': name + ' · ' + st.text, title: name + ' · ' + st.text, 'aria-current': onThis ? 'page' : null },
+        var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid)), say = name + ' · ' + st.text + (guest && guest.s === s ? ' · ' + guest.tag.text : '');
+        return link('/s/' + encodeURIComponent(s.id), { class: 'rail-ring' + (st.tone === 'attn' ? ' turn' : st.tone === 'fail' || st.tone === 'unk' || st.tone === 'err' ? ' bk ' + st.tone : '') + (s.status === 'ended' ? ' ended' : ''), 'aria-label': say, title: say, 'aria-current': onThis ? 'page' : null },
           isPostTheme() && window.BHPostScene ? window.BHPostScene.avatar(s.id, window.BHPostLogic.stateOf(s, window.BHLogic), { size: 'sm', name: sessionTitle(s) }) : h('span', { class: 'ring unk' }, h('b', { text: '?' })));  // Post: 접힌 칸에도 그 세션의 사람
       }),
       h('span', { class: 'rail-sp' }),
@@ -1507,7 +1605,8 @@
     baseName: baseName, fmtSize: fmtSize, clock: clock, safeHttp: safeHttp, mergeSession: mergeSession, refreshSession: refreshSession,
     kindOf: kindOf, isPlan: isPlan, skillLabel: skillLabel, requestTitle: requestTitle, topline: topline,
     startNew: function (text) { if (text && text.trim()) draft.text = text.trim(); go('/new'); }, stateBox: stateBox, loadingBox: loadingBox,
-    loaded: function () { return loadedOnce; }, conn: function () { return conn.state; }
+    loaded: function () { return loadedOnce; }, conn: function () { return conn.state; },
+    troubleScope: troubleScope, projectPath: function () { var pj = isPostTheme() ? postProject() : null; return pj ? pj.path : ''; }  // Cozy Office 프로젝트 거르기(J11)
   });
   /* 판이 바뀐 뒤 처음 여는 홈에 "이번에 바뀐 것" 카드 하나(#647). 서버가 지난번 본 판과 비교해 줄 것만 주고, [알겠어]로 본 판을 남긴다.
      첫 실행 화면이 뜨는 동안에는 부르지도 않는다(boot). 카드를 못 읽으면 홈은 그대로다. */
@@ -1869,6 +1968,7 @@
           } });
       }));
       var insp = h('aside', { class: 'po-insp', 'aria-label': '점검' }, tabs, panels);
+      regions.pickInsp = function (i) { pick(i, true); insp.scrollIntoView({ block: 'nearest' }); };  // 대화의 PR 메모 단추(J9): 그 탭을 열고 초점을 옮긴다(좁은 화면은 점검 칸이 대화 아래라 그리로 내려간다)
       while (page.firstChild) page.removeChild(page.firstChild);
       page.appendChild(h('div', { class: 'po-sgrid' }, talk, insp));
       page.appendChild(regions.legend);
@@ -1895,6 +1995,22 @@
           h('span', { text: c.name + ' 한도' }), h('span', { class: 'ptop-bar' + (c.pct == null ? ' unk' : '') }, c.pct == null ? null : h('i', { style: 'width:' + Math.min(100, c.pct) + '%' })), h('b', { text: c.pct == null ? '?' : c.pct + '%' }));
       }) : [h('p', { class: 'note-muted', text: lv ? lv.text : '한도는 확인 못 함' })];
       regions.memInfo.replaceChildren(h('div', { class: 'po-mem' }, memRing(s), h('div', null, h('b', { text: words }), h('small', { text: sub }))), h('div', { class: 'po-meters' }, meters));
+    }
+
+    /* J9: Cozy Office 는 PR 카드 전체를 점검 탭 「검사」 에만 둔다(대화와 검사 탭에 같은 카드가 두 번 나왔다). 대화에는 PR 이름과 지금 상태 한 줄 + 검사 탭으로 가는 단추.
+       막힘·확인 못 함은 카드와 같은 표시(q blocked/unsure)를 달아 표시 약속 칸(syncLegend)도 그대로 뜬다. */
+    var PR_CHECKS = { pass: '검사 통과', pending: '검사 도는 중', fail: '검사 실패', none: '검사 없음' };
+    function prMemo(s) {
+      var card = ui.prCard(s);
+      if (!card) return null;
+      var pr = s.flowPr, lines = window.BHLogic.prLines(pr, s.flowId), team = lines[lines.length - 1];
+      var failed = /(^| )blocked( |$)/.test(card.className), unsure = /(^| )unsure( |$)/.test(card.className), why = card.querySelector('.sub');
+      var say = why ? why.textContent : (PR_CHECKS[pr.checks] || '검사 확인 못 함') + (team ? ' · ' + String(team.text).split(' · ')[0] : '');
+      return h('div', { class: 'q prcard po-prmemo' + (failed ? ' blocked' : unsure ? ' unsure' : ''), 'data-pr-memo': '1' },
+        failed ? h('span', { class: 'tagx fail', text: '✕ 막힘' }) : unsure ? h('span', { class: 'tagx unk', text: '? 확인 못 함' }) : null,
+        h('div', { class: 'qh' }, h('b', { text: 'PR #' + pr.number + (pr.title ? ' · ' + pr.title : '') }),
+          h('button', { type: 'button', class: 'pill line sm', text: '검사 탭에서 보기', onClick: function () { if (regions.pickInsp) regions.pickInsp(1); } })),
+        h('span', { class: 'sub', text: say }));
     }
 
     function paintPerm(s) {
@@ -2522,7 +2638,7 @@
       var note = askedNote(s);
       if (note) out.push(note);
       if (s.status === 'running') { var td = todoCard(s); if (td) out.push(td); }
-      var prc = s.phase === 'finished' ? null : ui.prCard(s);  // 합쳐진 뒤에는 PR 카드를 두지 않는다(시안 G-12)
+      var prc = s.phase === 'finished' ? null : post ? prMemo(s) : ui.prCard(s);  // 합쳐진 뒤에는 PR 카드를 두지 않는다(시안 G-12). Cozy Office 는 대화에 한 줄 메모(J9)
       if (prc) out.push(prc);
       if (s.phase === 'approval') out.push(h('div', { class: 'ai muted', 'data-approval-note': '1' }, '합쳐지면 여기와 홈에서 알려 줄게. 그동안 다른 작업을 해도 돼.'));
       (s.pendingRequestIds || []).forEach(function (rid) {

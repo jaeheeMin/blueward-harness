@@ -193,6 +193,10 @@
   :root[data-theme="post"] #app > .shell, :root[data-theme="post"] #app[data-collapsed="true"] > .shell { display: block; padding: 0 16px 24px; }
   :root[data-theme="post"] #app .main { padding: 16px 0 40px; }
   :root[data-theme="post"] #app[data-intro="1"] > .shell { padding: 0 16px; }
+  /* J7: 세션 화면 위 접힌 목록(세션 고리)은 한 줄로 두고 옆으로 민다. 여러 줄로 쌓으면 세션이 많을 때 본문이 한참 아래로 밀렸다(112개면 17줄 · 본문 1116px 아래).
+     지금 세션 고리는 app.js postSideAfter 가 줄 안으로 굴린다. 넘침은 이 줄 안에서만 생긴다(화면 가로 넘침 아님) */
+  :root[data-theme="post"] .side .rail { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; padding: 4px 4px 6px; }  /* 안쪽 여백: 넘침을 자르는 줄이라 초점 윤곽선(바깥 2px + 간격 2px)이 잘리지 않게 */
+  :root[data-theme="post"] .side .rail > * { flex: none; }
 }
 
 /* ---------- 사람 아바타(BHPostScene.avatar) ---------- */

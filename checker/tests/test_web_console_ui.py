@@ -3900,7 +3900,7 @@ def test_post_project_scope_only_in_post_and_feeds_every_count():
     assert "var all = scopedSessions();" in app and "window.BHLogic.turnItems(all, openIds)" in app  # 띠·알림·레일·덱 숫자
     assert "var arr = scopedSessions();" in app  # 사이드 목록·장면(sceneList)·레일
     assert "sessions: { values: scopedSessions }, requests: requests," in app and "sessions: scopedSessions, loaded:" in app  # 홈·산출물, 파이프라인
-    assert "if (loadedOnce && inProject(m)) notifyChange(prev, m);" in app
+    assert "if (loadedOnce) notifyInProject(prev, m);" in app and "if (inProject(m)) notifyChange(prev, m);" in app  # 판정 전 폴더 알림은 판정 뒤에(J11)
     assert "if (isPostTheme() && startCwd) setProject({ path: startCwd });" in app and "class: 'ptop-pick'" in app
     assert "kit.projectTag ? kit.projectTag(s) : null" in (STATIC / "post-home.js").read_text(encoding="utf-8")
     assert ':root[data-theme="post"] .po-ptag {' in (STATIC / "theme-post.css").read_text(encoding="utf-8")
@@ -4439,3 +4439,49 @@ def test_cozy_office_design_g1_to_g10(tmp_path):
     assert "방금 답했어 — 처리됐어" not in (STATIC / "post-home.js").read_text(encoding="utf-8") and "decision: stamps[rid].decision" in app
     # G10: 세션 없을 때 새 소식도 단으로, 점검 탭 빈 칸은 간격을 먹지 않는다
     assert ".po-rest > .wn-slot .wn-list { display: block; column-width: 300px;" in css and ".po-ipanel > [data-r]:empty { display: none; }" in css
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_cozy_office_judge_j6_to_j14():
+    """Cozy Office 8회차: 판정 대기 J6~J14 중 고친 것(진행 기록 docs/status/2026-11-18-cozy-office-judge.md)."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    pipe = (STATIC / "post-pipeline.js").read_text(encoding="utf-8")
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    # J6: 고른 프로젝트 밖 세션을 주소로 열면 그 세션 한 줄만 목록·고리 맨 앞에(다른 프로젝트 표, 걸러보기 숫자에는 안 셈). 보는 프로젝트는 그대로
+    assert "function postGuest(rows)" in app and "'다른 프로젝트' + (f ? ' · ' + f.name : '')" in app
+    assert "var states = rows.map(function (s) { return PL.stateOf(s, L); }), cnt = PL.filterCounts(states)" in app and "if (guest) { rows = [guest.s].concat(rows);" in app
+    assert "guest = postGuest(rows);" in app and "setProject(" not in app.split("function postGuest(rows)")[1].split("function postSideList")[0]
+    # J7: 좁은 화면 고리는 한 줄 + 옆으로 밀기, 지금 고리는 줄 안으로
+    assert ":root[data-theme=\"post\"] .side .rail { flex-wrap: nowrap; overflow-x: auto;" in css
+    assert "var list = rail || sideEl.querySelector('.po-slist .nav-list')" in app and "rail.scrollLeft += rr.left - lr.left" in app
+    # J9: 대화에는 PR 메모 한 줄(검사 탭으로), 카드 전체는 검사 탭에만
+    assert "post ? prMemo(s) : ui.prCard(s)" in app and "'검사 탭에서 보기'" in app and "regions.pickInsp = function (i)" in app
+    assert "'q prcard po-prmemo' + (failed ? ' blocked' : unsure ? ' unsure' : '')" in app  # 표시 약속 칸(syncLegend)이 그대로 뜬다
+    # J10: Cozy Office 내 차례는 덱과 같은 순서(세션이 오래 기다린 순, 같으면 원래 순서)
+    assert "if (isPostTheme()) todo = todo.map(function (x, i) { return [x, i]; }).sort(" in app
+    assert "turn.sort(function (a, b) { return (a.s.updatedAt || 0) - (b.s.updatedAt || 0); });" in home
+    # J11: 판정 전 폴더 알림은 판정 뒤(최대 5초), 터미널로 넘어간 요청 수·팀 기록은 고른 프로젝트, 파이프라인은 지금 폴더 결과만, 빈 홈은 고른 프로젝트
+    assert "function repoPending(s)" in app and "flushNotify(false); if (notifyHeld.length) ensureRepos();" in app and "NOTIFY_HOLD_MS = 5000" in app
+    assert "      ensureRepos();  // 새 폴더 판정을 바로 받으러 간다" in app  # 숨은 탭은 그리기가 돌지 않아 scheduleSide 로는 판정을 못 받는다(리뷰)
+    assert "padding: 4px 4px 6px; }  /* 안쪽 여백" in css and "'불러오는 중이야'; tbTile.className = 'tile2'; }" in ui
+    assert "scopedSessions().forEach(function (s) {  // Post 는 고른 프로젝트의 세션만(J11)" in app
+    assert "troubleScope: troubleScope" in app and "if (!repos.tried) return 'wait';" in app
+    assert "kit.qs({ limit: 1, status: 'open', project: ok.slug })" in ui and "if (stats.refresh) stats.refresh();" in home
+    assert "res = st.results ? st.results.filter(function (r) { return want.indexOf(r.cwd) >= 0; }) : null;" in pipe
+    assert "var chosen = kit.projectPath ? kit.projectPath() : '';" in ui
+    # J12: 브라우저를 닫아 둔 사이 터미널로 넘어간 요청도 다시 열면 알린다(Cozy Office)
+    assert "SEEN_KEY = 'bh-post-seen'" in app and "readSeen(); setConn('ok');" in app and "(closed ? '콘솔을 닫아 둔 사이' : '연결이 끊긴 사이')" in app
+    # J14: 본문 밖 초점(테마 단추·건너뛰기)이 테마 전환으로 떨어지면 같은 단추나 본문 제목으로, 고른 문서의 세션은 12개 밖이어도 모은다
+    assert "function themeRefocus(was)" in app and "if (a && a !== document.body) return;" in app
+    assert "var pin = isPost() && st.picked && st.picked.session ? st.picked.session.id : '';" in ui
+    # J13: 코드 폴더는 서버 값(workPrefix)을 따른다
+    out = json.loads(subprocess.run([NODE, "-e", """
+      const P = require(process.argv[1]);
+      const it = { number: 2, req: 'REQ-002', kind: '', spec: false, next: '개발', unsure: false, prs: [] };
+      const d = (wp) => Object.assign({ state: 'yes', items: [it], issues: { state: 'ok', byIssue: { '41': { dev: 2, main: false } } } }, wp ? { workPrefix: wp } : {});
+      const s = (f) => ({ branch: 'feat/41-x', changedFiles: [f] });
+      console.log(JSON.stringify([P.reqFlowOf(s('src/a.abap'), d()), P.reqFlowOf(s('app/a.abap'), d()), P.reqFlowOf(s('app/a.abap'), d('app/')), P.reqFlowOf(s('src/a.abap'), d('app/'))]));
+    """, str(STATIC / "post-logic.js")], capture_output=True, text=True, encoding="utf-8", check=True).stdout)
+    assert out == ["dev", "", "dev", ""]

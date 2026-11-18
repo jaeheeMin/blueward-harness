@@ -439,6 +439,7 @@
         turnTotal = turnCount;
         paintDeck();
         paintMemo();
+        if (stats.refresh) stats.refresh();  // 고른 프로젝트가 바뀌었으면 팀 기록 수를 다시 센다(J11)
         restSlot.appendChild(h('div', { class: 'tiles2 po-tiles' }, tile('내 차례', String(turnCount), turnCount ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), stats.prTile, stats.weekTile, stats.tbTile));
         restSlot.appendChild(sessionsPanel(list));  // 내 세션 두 단 목록(글자 아바타·결재란·상태 칩). Sauce 홈은 표(HK.homeTable) 그대로
         if (slots.whatsSlot.parentNode !== foot) foot.appendChild(slots.whatsSlot);  // 세션이 없던 동안 restSlot 으로 옮겨 갔으면 되돌린다
