@@ -259,7 +259,7 @@
     if (typeof m.title === 'string' && m.title) m.title = MS(m.title);  // 세션 제목에 든 비밀값은 어느 화면에서든 가려 보인다(#1018). 서버도 저장 전에 가린다
     sessions.set(s.id, m);
     (m.pendingRequestIds || []).forEach(ensureRequest);
-    if (loadedOnce) notifyChange(prev, m);  // 첫 목록은 비교 기준만 잡는다
+    if (loadedOnce && inProject(m)) notifyChange(prev, m);  // 첫 목록은 비교 기준만 잡는다. Post 는 고른 프로젝트 밖 세션을 알리지 않는다(#1070)
     return m;
   }
   function ensureRequest(rid) {
@@ -532,8 +532,9 @@
   function sideData() {
     var todo = [], run = [], idle = [], blocked = [], errs = [];
     var turnOf = {};  // 내 차례 항목은 BHLogic.turnItems 한 곳에서 정한다(띠·알림·레일·홈 타일이 같은 목록을 쓴다)
-    window.BHLogic.turnItems(Array.from(sessions.values()), openIds).forEach(function (it) { (turnOf[it.s.id] = turnOf[it.s.id] || []).push(it); });
-    sessions.forEach(function (s) {
+    var all = scopedSessions();  // Post 는 고른 프로젝트의 세션만(#1070). Sauce 는 모든 세션 그대로
+    window.BHLogic.turnItems(all, openIds).forEach(function (it) { (turnOf[it.s.id] = turnOf[it.s.id] || []).push(it); });
+    all.forEach(function (s) {
       var g = turnOf[s.id] ? 'todo' : groupOf(s) === 'todo' ? 'idle' : groupOf(s), sub = s.branch || baseName(s.cwd) || '';
       var title = s.title || baseName(s.cwd) || '이름 없는 세션';
       var bk = window.BHLogic.blockOf(s);  // 훅이 막아 아직 안 풀린 세션은 내 차례와 따로 센다(#790)
@@ -568,10 +569,81 @@
   var annEl = null, headEl = null;
   function sessionTitle(s) { return s.title || baseName(s.cwd) || '이름 없는 세션'; }
   function sortedSessions() {
-    var arr = [];
-    sessions.forEach(function (s) { arr.push(s); });
+    var arr = scopedSessions();
     arr.sort(function (a, b) { return window.BHLogic.sessionOrder(a, b, openIds); });  // 묶음 안에서는 시작 시각으로 고정(#1027 D-6)
     return arr;
+  }
+  /* Post 프로젝트 거르기(#1070). 세션 목록·오늘 화면·알림·파이프라인·산출물이 같은 거른 목록(scopedSessions)을 써서 숫자가 서로 어긋나지 않는다.
+     저장소 판정은 서버 /api/repos(git 공통 폴더 — 같은 저장소의 worktree 는 한 프로젝트), 거르는 규칙은 post-logic.js projectView.
+     고른 프로젝트는 이 브라우저(localStorage bh-post-project: {path} 또는 {all: true})에 두고, 고른 적이 없으면 서버가 기억한 마지막 폴더다.
+     판정을 못 읽었거나 마지막 폴더가 저장소가 아니면 거르지 않는다. Sauce 는 거르지 않는다(scopedSessions 가 모든 세션을 그대로 돌려준다). */
+  var repos = { folders: null, last: '', sig: null, busy: false, tried: false, again: 0 }, PROJECT_KEY = 'bh-post-project', projectWant;
+  try { projectWant = JSON.parse(localStorage.getItem(PROJECT_KEY) || 'null'); } catch (e) { projectWant = null; }
+  function setProject(v) {
+    projectWant = v;
+    try { localStorage.setItem(PROJECT_KEY, JSON.stringify(v)); } catch (e) { console.warn('고른 프로젝트를 브라우저에 남기지 못했어(localStorage) — 새로 고치면 마지막 폴더로 돌아가', e); }
+    scheduleSide(); if (view && view.onData) view.onData();
+  }
+  function repoOf(path) { var f = repos.folders && path ? repos.folders[path] : null; return f && f.state === 'yes' ? f : null; }
+  // 지금 보는 프로젝트 { path, key, name, top }, 모든 저장소를 보면 null
+  function postProject() {
+    var w = projectWant && typeof projectWant === 'object' ? projectWant : null;
+    if (w && w.all) return null;
+    var path = w && repoOf(w.path) ? w.path : repos.last, f = repoOf(path);
+    return f ? { path: path, key: f.key, name: f.name, top: f.top } : null;
+  }
+  function projectScope() {
+    var all = Array.from(sessions.values());
+    return isPostTheme() && window.BHPostLogic ? window.BHPostLogic.projectView(all, repos.folders, postProject()) : { list: all, tag: {} };
+  }
+  function scopedSessions() { return projectScope().list; }
+  function inProject(s) { return !isPostTheme() || !window.BHPostLogic || window.BHPostLogic.projectView([s], repos.folders, postProject()).list.length > 0; }
+  // 세션 줄에 붙일 작은 표(같은 저장소의 다른 폴더 이름, git 저장소 아님, 저장소 확인 못 함). 붙일 게 없으면 null
+  function projectTagEl(s, tags) {
+    var t = (tags || projectScope().tag)[s.id];
+    return t ? h('small', { class: 'po-ptag po-ptag-' + t.kind, title: t.kind === 'folder' ? '같은 저장소의 다른 폴더 · ' + t.text : t.text, text: t.text }) : null;
+  }
+  // 세션 폴더가 바뀌었을 때만 서버에 다시 묻는다. 못 읽으면 거르지 않고(모든 세션을 보인다) 30초 뒤, 판정 못 한 폴더가 있으면 60초 뒤 다시 묻는다
+  function ensureRepos() {
+    if (!isPostTheme() || repos.busy || !loadedOnce) return;
+    var seen = {}, cwds = [];
+    sessions.forEach(function (s) { if (s.cwd && !seen[s.cwd]) { seen[s.cwd] = 1; cwds.push(s.cwd); } });
+    var sig = cwds.sort().join('\n');
+    if (sig === repos.sig) return;
+    repos.busy = true;
+    api('GET', '/api/repos').then(function (d) {
+      repos.folders = (d && d.folders) || {}; repos.last = (d && d.last) || ''; repos.sig = sig;
+      var unsure = Object.keys(repos.folders).some(function (p) { return repos.folders[p] && repos.folders[p].state !== 'yes'; });
+      clearTimeout(repos.again);  // 저장소 아님·확인 못 함은 고쳐질 수 있다(git init, 잠깐 없던 폴더, git 시간 초과) — 그대로 두지 않고 다시 묻는다
+      if (unsure) repos.again = setTimeout(function () { repos.sig = null; scheduleSide(); }, 60000);
+    }, function () {
+      repos.sig = sig; setTimeout(function () { repos.sig = null; scheduleSide(); }, 30000);
+    }).then(function () { repos.busy = false; repos.tried = true; scheduleSide(); if (view && view.onData) view.onData(); });
+  }
+  function onProjectPick(e) {
+    var v = e.target && e.target.value;
+    if (v === '*') { setProject({ all: true }); return; }
+    var c = projectChoices().filter(function (x) { return x.key === v; })[0];
+    if (c) setProject({ path: c.path });
+  }
+  // 고를 수 있는 프로젝트: 판정된 저장소마다 하나, 대표 폴더는 마지막 폴더 → 최근 폴더 → 세션 폴더 순으로 처음 본 것
+  function projectChoices() {
+    var by = {}, out = [];
+    function add(p) { var f = repoOf(p); if (!f || by[f.key]) return; by[f.key] = { path: p, key: f.key, name: f.name }; out.push(by[f.key]); }
+    if (repos.last) add(repos.last);
+    Object.keys(repos.folders || {}).forEach(add);
+    var names = {};
+    out.forEach(function (c) { names[c.name] = (names[c.name] || 0) + 1; });
+    out.forEach(function (c) { c.label = names[c.name] > 1 ? c.name + ' (' + folderLabel(c.path) + ')' : c.name; });
+    return out;
+  }
+  function projectPicker() {
+    var cs = repos.folders ? projectChoices() : [];
+    if (!cs.length) return null;
+    var cur = postProject();
+    return h('select', { class: 'ptop-pick', 'aria-label': '보는 프로젝트 · 바꾸면 세션 목록과 오늘 화면이 그 프로젝트로 바뀌어', title: '보는 프로젝트', onChange: onProjectPick },
+      cs.map(function (c) { return h('option', { value: c.key, selected: cur && cur.key === c.key ? 'selected' : null, text: c.label }); }),
+      h('option', { value: '*', selected: cur ? null : 'selected', text: '모든 저장소' }));
   }
   function firstPending(s) {
     var ids = s.pendingRequestIds || [];
@@ -1142,7 +1214,8 @@
   function renderPostHead() {
     loadPostVer();
     var out = h('div'), proj = projectOf(), folder = postFolder(), cur = window.BH.THEMES.filter(function (x) { return x.id === window.BH.getTheme(); })[0], nx = nextTheme();
-    out.appendChild(h('div', { class: 'ptop-proj' }, h('i', { class: 'ptop-dot', 'aria-hidden': 'true' }), h('b', { text: proj || 'Blueward Harness' }), folder && folder !== proj ? h('small', { text: folder }) : null));
+    var pick = projectPicker(), pj = postProject();  // 저장소를 판정했으면 보는 프로젝트를 고르는 칸(#1070), 아니면 지금처럼 이름만
+    out.appendChild(h('div', { class: 'ptop-proj' }, h('i', { class: 'ptop-dot', 'aria-hidden': 'true' }), pick || h('b', { text: proj || 'Blueward Harness' }), folder && folder !== (pick ? pj && pj.name : proj) ? h('small', { text: folder }) : null));
     out.appendChild(h('span', { class: 'sp' }));
     if (window.BHNotice) out.appendChild(postLimits());  // 계정 한도: 늘 보인다(#1016)
     if (postVer) out.appendChild(link('/settings', { class: 'ptop-ver', title: startData && startData.newVersion ? '새 판 ' + startData.newVersion + ' 이 있어 — 터미널에서 /harness:update 를 해 줘' : '지금 판 ' + postVer, 'aria-label': '하네스 ' + postVer + (startData && startData.newVersion ? ' · 새 판 ' + startData.newVersion + ' 이 있어' : '') },
@@ -1151,6 +1224,8 @@
     out.appendChild(h('button', { type: 'button', class: 'ptop-theme', title: '테마 바꾸기 · 누르면 ' + nx.name, 'aria-label': '테마 ' + (cur ? cur.name : '') + ' · 누르면 ' + nx.name + '(으)로 바뀌어', onClick: function () { var n = nextTheme(); window.BH.setTheme(n.id); } },
       icon('palette', 16), h('span', { text: cur ? cur.name : '' })));
     patchChildren(headEl, Array.prototype.slice.call(out.childNodes));
+    var sel = headEl.querySelector('.ptop-pick');  // 남은 옛 칸은 속성만 고쳐져 고른 값이 안 따라오므로 값을 맞춘다
+    if (sel) sel.value = pj ? pj.key : '*';
   }
   function renderPostRail(d) {
     var n = d.todo.length, rows = sortedSessions(), work = rows[0] ? '/s/' + encodeURIComponent(rows[0].id) : '/new', nm = route.name;
@@ -1230,6 +1305,7 @@
   var sideMode = null;
   function renderSide() {
     if (!sideEl) return;
+    ensureRepos();  // Post: 세션 폴더가 바뀌었으면 저장소 판정을 다시 받는다(#1070)
     var d = sideData(), col = isCollapsed(), cur = location.pathname;
     appEl.dataset.collapsed = col ? 'true' : 'false';
     renderAnn(d); refreshNotices(d); renderHead(cur); syncPostFrame(d); drawNotice();
@@ -1271,7 +1347,7 @@
   var postFilter = 'all';
   function postSideList(rows, cur) {
     var L = window.BHLogic, PL = window.BHPostLogic, PS = window.BHPostScene;
-    var states = rows.map(function (s) { return PL.stateOf(s, L); }), cnt = PL.filterCounts(states);
+    var states = rows.map(function (s) { return PL.stateOf(s, L); }), cnt = PL.filterCounts(states), tags = projectScope().tag;
     var tabs = h('div', { class: 'po-ftabs', role: 'tablist', 'aria-label': '세션 걸러보기' }, PL.FILTERS.map(function (f) {
       return h('button', { type: 'button', role: 'tab', 'data-pf': f.id, 'aria-selected': String(postFilter === f.id), tabindex: postFilter === f.id ? '0' : '-1', text: f.label + ' ' + cnt[f.id] });
     }), foldBtn(false));
@@ -1293,7 +1369,7 @@
         PS.avatar(s.id, state, { size: 'sm', name: sessionTitle(s) }), memRing(s),
         h('span', { class: 'sinfo' },
           h('span', { class: 'n', text: sessionTitle(s) }),
-          h('small', { class: 'po-ss', title: st.text }, h('i', { class: 'po-st po-st-' + state, 'aria-hidden': 'true', text: PL.GLYPH[state] || '' }), PL.statusText(st.text)),
+          h('small', { class: 'po-ss', title: st.text }, h('i', { class: 'po-st po-st-' + state, 'aria-hidden': 'true', text: PL.GLYPH[state] || '' }), PL.statusText(st.text), projectTagEl(s, tags)),
           bar)));
     });
     if (!rows.length && loadedOnce) list.appendChild(h('p', { class: 's-empty', text: '아직 세션이 없어. 새 작업을 시작하면 여기에 생겨.' }));
@@ -1365,7 +1441,7 @@
 
   /* ---------- 홈과 갈래 화면 조각(flow-ui.js) ---------- */
   var ui = window.BHFlowUI.create({
-    h: h, clear: clear, api: api, qs: qs, listOf: listOf, icon: icon, link: link, go: go, sessions: sessions, requests: requests,
+    h: h, clear: clear, api: api, qs: qs, listOf: listOf, icon: icon, link: link, go: go, sessions: { values: scopedSessions }, requests: requests,  // 홈·산출물은 Post 에서 고른 프로젝트의 세션만(#1070)
     baseName: baseName, fmtSize: fmtSize, clock: clock, safeHttp: safeHttp, mergeSession: mergeSession, refreshSession: refreshSession,
     kindOf: kindOf, isPlan: isPlan, skillLabel: skillLabel, requestTitle: requestTitle, topline: topline,
     startNew: function (text) { if (text && text.trim()) draft.text = text.trim(); go('/new'); }, stateBox: stateBox, loadingBox: loadingBox,
@@ -1424,8 +1500,8 @@
   var postHome = null;
   function postHomeView(root) {
     if (!postHome) postHome = window.BHPostHome.create({ h: h, clear: clear, link: link, L: window.BHLogic, home: ui.homeKit, questionCards: questionCards, kindOf: kindOf, isPlan: isPlan,
-      sceneList: sceneList, requestTitle: requestTitle, skillLabel: skillLabel, waited: function (v) { var m = minutesSince(v); return m != null && m >= 1440 ? Math.floor(m / 1440) + '일째' : waitedText(v).replace(/^ · /, ''); }, projectOf: projectOf,  // Post 홈 덱·메모: 하루가 넘으면 "72시간째" 대신 "3일째"
-      loaded: function () { return loadedOnce; }, conn: function () { return conn.state; }, stateBox: stateBox, loadingBox: loadingBox });
+      sceneList: sceneList, projectTag: function (s) { return projectTagEl(s); }, requestTitle: requestTitle, skillLabel: skillLabel, waited: function (v) { var m = minutesSince(v); return m != null && m >= 1440 ? Math.floor(m / 1440) + '일째' : waitedText(v).replace(/^ · /, ''); }, projectOf: function () { var pj = postProject(); return pj ? pj.name : projectOf(); },  // 날짜 줄: 고른 프로젝트(#1070)  // Post 홈 덱·메모: 하루가 넘으면 "72시간째" 대신 "3일째"
+      loaded: function () { return loadedOnce && (repos.tried || !isPostTheme()); }, conn: function () { return conn.state; }, stateBox: stateBox, loadingBox: loadingBox });  // 저장소 판정 전에는 거르기 전 숫자를 그리지 않는다(#1070)
     var sceneHost = h('div', { class: 'po-stage', hidden: true });
     var hv = null;
     postScene = attachScene(sceneHost, { onFocus: function (f) { if (hv && hv.onFocus) hv.onFocus(f); } });
@@ -1459,7 +1535,8 @@
       return null;
     }
     if (!postPipe) postPipe = window.BHPostPipeline.create({ h: h, clear: clear, link: link, api: api, qs: qs, L: window.BHLogic, PL: window.BHPostLogic,
-      sessions: function () { return Array.from(sessions.values()); }, loaded: function () { return loadedOnce; }, loadingBox: loadingBox });
+      sessions: scopedSessions, loaded: function () { return loadedOnce && repos.tried; }, loadingBox: loadingBox,  // 저장소 판정 뒤에 읽는다(거르기 전 저장소까지 읽지 않게, #1070)
+      home: function () { var pj = postProject(); return pj ? pj.path : ''; } });
     return postPipe.view(root);
   }
   /* 문제·해결 기록 화면(trouble.js) */
@@ -3421,8 +3498,10 @@
       var files = newComp ? newComp.payload() : [];
       var body = { picked: pickedAll(), extraAnswers: answerMap(), note: draft.note.trim(), model: modelChoice(), effort: effortChoice(), permission: permissionChoice(), flow: draft.flowUser || draft.kindFlowId ? effectiveFlow() : undefined };
       if (files.length) body.attachments = files;  // 그림·PDF 는 첫 요청과 함께 간다. 서버가 한 번 더 검사한다
+      var startCwd = draft.cwd;
       api('POST', '/api/new/' + encodeURIComponent(aid) + '/start', body).then(function (d) {
         startedId = (d && (d.id || d.sessionId || (d.session && d.session.id))) || '';
+        if (isPostTheme() && startCwd) setProject({ path: startCwd });  // Post: 새 작업을 시작한 폴더의 프로젝트를 본다(#1070)
         if (startedId) { mergeSession({ id: startedId }); }
         history.replaceState(null, '', '/new');
         // 시작에 성공하면 그 세션 화면으로 바로 넘어간다. id 를 못 받았을 때만 아래 링크를 보인다. 이동하면 이 화면은 destroy 되어 draw 가 막힌다(alive).

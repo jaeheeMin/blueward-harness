@@ -24,7 +24,7 @@
     return d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월 ' + d.getDate() + '일 ' + DAYS[d.getDay()] + '요일 · ' + ap + ' ' + h12 + ':' + (mm < 10 ? '0' + mm : mm);
   }
 
-  /* kit: { h, clear, link, requests, L(BHLogic), home(ui.homeKit), questionCards, kindOf, isPlan, requestTitle, skillLabel, waited(v), projectOf(), loaded(), conn(), stateBox, loadingBox, sceneAttach(host) } */
+  /* kit: { h, clear, link, requests, L(BHLogic), home(ui.homeKit), questionCards, kindOf, isPlan, requestTitle, skillLabel, waited(v), projectOf(), projectTag(s), loaded(), conn(), stateBox, loadingBox, sceneAttach(host) } */
   function create(kit) {
     var h = kit.h, clear = kit.clear, L = kit.L, HK = kit.home, PS = window.BHPostScene, PL = window.BHPostLogic;
     var redrawNow = function () {};
@@ -148,7 +148,7 @@
         var sub = teamOf(s.flowId) || (s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음');
         return h('li', { 'data-session': s.id }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ssa' },
           h('span', { class: 'po-ava', 'aria-hidden': 'true', text: (PS.letterOf ? PS.letterOf(name) : Array.from(name)[0]) || '?' }),
-          h('div', { class: 'po-rt' }, h('div', { class: 't1', text: name, title: name }), h('div', { class: 't2', text: sub }), metaLine(s)),
+          h('div', { class: 'po-rt' }, h('div', { class: 't1', text: name, title: name }), h('div', { class: 't2' }, sub, kit.projectTag ? kit.projectTag(s) : null), metaLine(s)),  // 같은 저장소의 다른 폴더·저장소 확인 못 함 표(#1070)
           h('span', { class: 'po-kyulc', style: 'width:' + (maxN ? maxN * KYUL_CELL + 2 : 0) + 'px' }, kyul(x.steps)),
           rowChip(s, st)));
       });

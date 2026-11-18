@@ -96,6 +96,29 @@
     return out;
   }
 
+  /* 고른 프로젝트(저장소)로 세션 거르기(#1070). folders: 서버 /api/repos 의 폴더별 판정 { cwd: { state, key, name, top, folder } },
+     project: { key, top }(고른 저장소와 고른 폴더의 맨 위 폴더) 또는 null(거르지 않음). 돌려주는 값: { list: 보이는 세션(순서 그대로), tag: { 세션 id: { kind, text } } }.
+     같은 저장소면 보이고, 고른 폴더와 맨 위 폴더가 다르면(같은 저장소의 작업용 폴더·worktree) 폴더 이름을 붙인다. 다른 저장소는 뺀다.
+     git 저장소가 아니거나(no) 판정하지 못한(unknown, 폴더 없음 등) 세션은 감추지도 어느 저장소라고 지어내지도 않고 보이되 그렇다고 붙인다.
+     아직 판정을 받지 못한 폴더(목록에 없음)는 보이고 아무것도 붙이지 않는다(곧 받는다). */
+  var PROJECT_TAG = { no: 'git 저장소 아님', unknown: '저장소 확인 못 함' };
+  function projectView(list, folders, project) {
+    var tag = {};
+    if (!project || !project.key || !folders) return { list: list.slice(), tag: tag };
+    var out = list.filter(function (s) {
+      var f = s && s.cwd ? folders[s.cwd] : { state: 'unknown' };
+      if (!f) return true;
+      if (f.state === 'yes') {
+        if (f.key !== project.key) return false;
+        if (f.top && project.top && f.top !== project.top) tag[s.id] = { kind: 'folder', text: f.folder || f.top };
+        return true;
+      }
+      tag[s.id] = { kind: f.state === 'no' ? 'nogit' : 'unknown', text: PROJECT_TAG[f.state] || PROJECT_TAG.unknown };
+      return true;
+    });
+    return { list: out, tag: tag };
+  }
+
   var INSP = ['산출물', '검사', '기억', '기록', '기술'];
 
   /* 요청 화면 한 줄(가이드 2.5): 승인·계획은 검토 창구 직원, 질문은 그 세션 손님. */
@@ -114,7 +137,7 @@
   /* 도장을 찍을 창구: 승인·계획은 검토 창구, 질문·MCP 질문은 그 세션이 선 창구. */
   function sealDesk(kind, k) { return kind === 'question' || kind === 'elicitation' ? STATION[Math.max(0, Math.min(4, k | 0))].desk : STATION[3].desk; }
 
-  var api = { FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
+  var api = { projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
     clerkLine: clerkLine, sealOf: sealOf, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;

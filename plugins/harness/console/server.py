@@ -1191,6 +1191,16 @@ class App:
         got = self.cached(("pipeline", key), lambda: pipeline.read(self.run, self.slow_run, cwd), wait=False)
         return 200, dict(got, repo={"key": key, "name": name})
 
+    def a_repos(self, g, q, b):
+        """Post 테마의 프로젝트(저장소) 거르기(#1070). 세션 작업 폴더·최근 폴더·마지막 폴더마다 어느 저장소인지(pipeline.repo_info)와
+        지금 볼 프로젝트의 기본값(마지막 폴더). 거르는 일은 화면(app.js)이 한다 — 세션 목록(/api/sessions)은 그대로라 Sauce 는 바뀌지 않는다.
+        폴더마다 60초 기억하고, 판정하지 못한 폴더(unknown)는 기억하지 않는다(다음에 다시 본다)."""
+        with self.store.lock:
+            paths = list(self.store.folders) + [s["cwd"] for s in self.store.sessions.values() if s["cwd"]]  # 최근 폴더(고른 순서)가 먼저: 화면이 저장소마다 대표 폴더로 쓴다
+        last = self.a_last_folder(g, q, b)[1]["path"]
+        out = {p: self.cached(("repo", p), lambda p=p: pipeline.repo_info(self.run, p)) for p in dict.fromkeys(paths + ([last] if last else []))}
+        return 200, {"folders": out, "last": last}
+
     # ---- 시작 점검(첫 화면) ----
     def first_run_file(self) -> Path | None:
         return self.store.dir / FIRST_RUN_FILE if self.store.dir else None
@@ -2463,6 +2473,7 @@ ROUTES = [
     ("GET", re.compile(r"/api/dev-ready"), App.a_dev_ready),
     ("GET", re.compile(r"/api/srs-status"), App.a_srs_status),
     ("GET", re.compile(r"/api/pipeline"), App.a_pipeline),
+    ("GET", re.compile(r"/api/repos"), App.a_repos),
     ("GET", re.compile(r"/api/start-checks"), App.a_start_checks),
     ("POST", re.compile(r"/api/start-checks/seen"), App.a_start_seen),
     ("GET", re.compile(r"/api/whats-new"), App.a_whats_new),

@@ -38,6 +38,36 @@ def repo_key(run: gitstate.Runner, cwd: str) -> tuple[str, str]:
     return os.path.normcase(common), name
 
 
+def _has_git_above(cwd: str) -> bool:
+    p = os.path.realpath(cwd)
+    while True:
+        if os.path.exists(os.path.join(p, ".git")) or os.path.basename(p) == ".git":
+            return True
+        up = os.path.dirname(p)
+        if up == p:
+            return False
+        p = up
+
+
+def repo_info(run: gitstate.Runner, cwd: str) -> dict:
+    """세션 작업 폴더가 어느 저장소인가(#1070, Post 의 프로젝트 거르기). repo_key 와 같은 기준(git 공통 폴더)이라 같은 저장소의 worktree 는 같은 key 다.
+    state: yes(저장소, key·name·top(그 폴더의 맨 위 폴더)·folder(맨 위 폴더 이름)) / no(폴더는 있는데 git 저장소가 아님)
+    / unknown(폴더가 없거나 git 을 실행하지 못함, .git 이 있는데 git 이 못 읽음 — 어느 저장소라고 지어내지 않는다)."""
+    if not cwd or not os.path.isdir(cwd):
+        return {"state": "unknown", "reason": "작업 폴더가 없어."}
+    rc, out = run(["git", "rev-parse", "--git-common-dir", "--show-toplevel"], cwd)
+    if rc == gitstate.GIT_UNAVAILABLE:
+        return {"state": "unknown", "reason": "git 을 실행하지 못했어."}
+    lines = [x.strip() for x in out.splitlines() if x.strip()] if rc == 0 else []
+    if not lines:
+        if _has_git_above(cwd):  # .git 은 있는데 git 이 못 읽었다(소유자 검사 dubious ownership, 권한, .git 안쪽 폴더) — 저장소 아님으로 단정하지 않는다
+            return {"state": "unknown", "reason": "git 이 이 폴더의 저장소를 읽지 못했어."}
+        return {"state": "no", "reason": "git 저장소가 아니야."}
+    key, name = repo_key(lambda a, c: (0, lines[0]), cwd)
+    top = os.path.realpath(lines[1] if len(lines) > 1 else cwd)
+    return {"state": "yes", "key": key, "name": name, "top": top, "folder": os.path.basename(top) or top}
+
+
 def nums_in(text: str) -> set[int]:
     return {int(m.group(1)) for m in NUM_RE.finditer(text or "")}
 

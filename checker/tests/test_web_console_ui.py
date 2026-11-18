@@ -3844,3 +3844,56 @@ def test_post_x2_docs_old_versions_stay_open_when_picked():
     # 이전 판을 고르면 목록이 다시 그려져 접힌 칸 안에 고른 줄이 숨던 것: Post 는 고른 이전 판이 든 칸을 열어 두고, 연 상태를 기억한다
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
     assert "det.open = !!st.oldOpen[d.key] || oldKeys.indexOf(st.sel) >= 0;" in ui and "st.oldOpen[d.key] = det.open;" in ui and "oldOpen: {}" in ui
+
+
+_POST_PROJECT_NODE = r"""
+const path = require('path');
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const folders = {
+  '/w/a': { state: 'yes', key: 'K1', name: 'a', top: '/w/a', folder: 'a' },
+  '/w/a/sub': { state: 'yes', key: 'K1', name: 'a', top: '/w/a', folder: 'a' },
+  '/w/a-wt': { state: 'yes', key: 'K1', name: 'a', top: '/w/a-wt', folder: 'a-wt' },
+  '/w/b': { state: 'yes', key: 'K2', name: 'b', top: '/w/b', folder: 'b' },
+  '/w/plain': { state: 'no', reason: 'x' },
+  '/w/gone': { state: 'unknown', reason: 'y' }
+};
+const list = ['/w/a', '/w/a/sub', '/w/a-wt', '/w/b', '/w/plain', '/w/gone', '/w/new', ''].map((cwd, i) => ({ id: 's' + i, cwd }));
+const v = P.projectView(list, folders, { key: 'K1', top: '/w/a' });
+const all = P.projectView(list, folders, null), before = P.projectView(list, null, { key: 'K1', top: '/w/a' });
+process.stdout.write(JSON.stringify({ ids: v.list.map(s => s.id), tag: v.tag, all: all.list.length, allTags: Object.keys(all.tag).length, before: before.list.length, copy: v.list !== list && all.list !== list }));
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason="node 가 없다")
+def test_post_project_view_filters_by_repo_and_tags_other_folders():
+    """#1070: 같은 저장소(worktree 포함)만 보이고 다른 폴더엔 폴더 이름, 다른 저장소는 뺀다. git 아님·판정 못 함은 감추지 않고 표를 붙이고,
+    아직 판정을 못 받은 폴더는 그대로 보인다. 프로젝트가 없거나 판정 전이면 거르지 않는다."""
+    r = subprocess.run([NODE, "-e", _POST_PROJECT_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["ids"] == ["s0", "s1", "s2", "s4", "s5", "s6", "s7"]  # s3(다른 저장소)만 빠진다
+    assert out["tag"] == {"s2": {"kind": "folder", "text": "a-wt"}, "s4": {"kind": "nogit", "text": "git 저장소 아님"},
+                          "s5": {"kind": "unknown", "text": "저장소 확인 못 함"}, "s7": {"kind": "unknown", "text": "저장소 확인 못 함"}}
+    assert out["all"] == 8 and out["allTags"] == 0 and out["before"] == 8 and out["copy"] is True
+
+
+def test_post_project_scope_only_in_post_and_feeds_every_count():
+    """#1070: 거르기는 Post 에서만(Sauce 는 모든 세션 그대로), 그리고 사이드 목록·알림(sideData)·홈(flow-ui kit)·파이프라인이 같은 거른 목록을 쓴다."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "return isPostTheme() && window.BHPostLogic ? window.BHPostLogic.projectView(all, repos.folders, postProject()) : { list: all, tag: {} };" in app
+    assert "var all = scopedSessions();" in app and "window.BHLogic.turnItems(all, openIds)" in app  # 띠·알림·레일·덱 숫자
+    assert "var arr = scopedSessions();" in app  # 사이드 목록·장면(sceneList)·레일
+    assert "sessions: { values: scopedSessions }, requests: requests," in app and "sessions: scopedSessions, loaded:" in app  # 홈·산출물, 파이프라인
+    assert "if (loadedOnce && inProject(m)) notifyChange(prev, m);" in app
+    assert "if (isPostTheme() && startCwd) setProject({ path: startCwd });" in app and "class: 'ptop-pick'" in app
+    assert "kit.projectTag ? kit.projectTag(s) : null" in (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert ':root[data-theme="post"] .po-ptag {' in (STATIC / "theme-post.css").read_text(encoding="utf-8")
+
+
+def test_post_project_pipeline_follows_picked_project_and_rechecks_unsure_folders():
+    """#1070 리뷰: 파이프라인은 마지막 폴더 대신 고른 프로젝트 폴더를, 저장소 판정 뒤에 읽는다. 판정 못 한 폴더가 있으면 다시 묻는다."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    pipe = (STATIC / "post-pipeline.js").read_text(encoding="utf-8")
+    assert "var last = (kit.home && kit.home()) || st.last;" in pipe and "if (last && !seen[last]) out.push(last);" in pipe
+    assert "loaded: function () { return loadedOnce && repos.tried; }" in app and "home: function () { var pj = postProject(); return pj ? pj.path : ''; } });" in app
+    assert "if (unsure) repos.again = setTimeout(function () { repos.sig = null; scheduleSide(); }, 60000);" in app

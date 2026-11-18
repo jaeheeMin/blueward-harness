@@ -9549,3 +9549,55 @@ def test_elicitation_url_mode_unsafe_scheme_still_makes_a_card_and_answers_pass_
     assert c.call("POST", f"/api/requests/{req.rid}/answer", {"action": "decline"})[0] == 200
     wait_for(lambda: proc.written)
     assert proc.written[0]["response"]["response"] == {"action": "decline"}
+
+
+def test_repos_groups_session_folders_by_repo_for_post_project_filter(tmp_path, monkeypatch):
+    """#1070: /api/repos 는 세션 폴더마다 저장소(git 공통 폴더)를 준다. 같은 저장소의 worktree 는 같은 key, git 아님은 no,
+    폴더 없음은 unknown(어느 저장소라고 지어내지 않는다)."""
+    main, wt, other, plain, gone = (tmp_path / n for n in ("projA", "projA-wt", "projB", "plain", "gone"))
+    for d in (main, wt, other, plain):
+        d.mkdir()
+    common = {str(main): (".git", str(main)), str(wt): (str(main / ".git"), str(wt)), str(other): (".git", str(other))}
+    calls = []
+
+    def run(args, cwd):
+        if args[:2] == ["git", "rev-parse"] and "--git-common-dir" in args:
+            calls.append(cwd)
+            return (0, "\n".join(common[cwd]) + "\n") if cwd in common else (128, "")
+        return 127, ""
+
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    try:
+        for sid, d in (("a", main), ("b", wt), ("c", other), ("d", plain), ("e", gone)):
+            c.event(sid, "SessionStart", cwd=str(d))
+        status, body, _ = c.call("GET", "/api/repos")
+        f = body["folders"]
+        assert status == 200 and "last" in body
+        assert f[str(main)]["state"] == "yes" and f[str(main)]["key"] == f[str(wt)]["key"] and f[str(main)]["name"] == f[str(wt)]["name"] == "projA"
+        assert f[str(wt)]["folder"] == "projA-wt" and f[str(wt)]["top"] != f[str(main)]["top"]
+        assert f[str(other)]["state"] == "yes" and f[str(other)]["key"] != f[str(main)]["key"]
+        assert f[str(plain)]["state"] == "no" and f[str(gone)]["state"] == "unknown" and "key" not in f[str(gone)] and f[str(gone)]["reason"]
+        n = len(calls)
+        c.call("GET", "/api/repos")
+        assert calls[n:] == []  # 판정한 폴더는 60초 기억한다(폴더 없음은 기억하지 않지만 git 을 부르지도 않는다)
+    finally:
+        c.close()
+
+
+def test_repo_info_says_unknown_when_git_cannot_run(tmp_path):
+    import pipeline
+    assert pipeline.repo_info(lambda a, cwd: (127, ""), str(tmp_path))["state"] == "unknown"
+    assert pipeline.repo_info(lambda a, cwd: (128, ""), str(tmp_path))["state"] == "no"
+    assert pipeline.repo_info(lambda a, cwd: (0, ".git\n"), str(tmp_path))["top"] == os.path.realpath(str(tmp_path))  # 맨 위 폴더를 못 받으면 그 폴더
+
+
+def test_repo_info_unknown_when_git_fails_inside_a_repo(tmp_path):
+    """#1070 리뷰: .git 이 있는데 git 이 못 읽으면(dubious ownership·권한 — 종료코드 128) 저장소 아님이 아니라 확인 못 함."""
+    import pipeline
+    (tmp_path / "repo" / ".git").mkdir(parents=True)
+    (tmp_path / "repo" / "docs").mkdir()
+    (tmp_path / "plain").mkdir()
+    fail = lambda a, cwd: (128, "")
+    assert pipeline.repo_info(fail, str(tmp_path / "repo" / "docs"))["state"] == "unknown"
+    assert pipeline.repo_info(fail, str(tmp_path / "repo" / ".git"))["state"] == "unknown"
+    assert pipeline.repo_info(fail, str(tmp_path / "plain"))["state"] == "no"

@@ -145,6 +145,13 @@
 :root[data-theme="post"] .ptop-proj b { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 15px; line-height: 1.2; font-weight: 700; }
 :root[data-theme="post"] .ptop-proj small { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
 :root[data-theme="post"] #app > .top > :not(.ptop-proj):not(.sp):not(.ptop-lim) { flex-shrink: 0; }  /* 프로젝트 이름이 아주 길어도 알림·테마 단추가 찌그러지지 않게(이름만 줄어든다) */
+:root[data-theme="post"] .ptop-pick { flex: 0 1 auto; min-width: 0; max-width: 260px; padding: 4px 26px 4px 8px; border: 1px solid transparent; border-radius: 8px; background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%235B647D' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 9px center; color: var(--text); font: 700 15px/1.2 var(--font); text-overflow: ellipsis; appearance: none; -webkit-appearance: none; cursor: pointer; }
+:root[data-theme="post"] .ptop-pick:hover { border-color: var(--line2); }
+:root[data-theme="post"] .ptop-pick option { color: var(--text); background: var(--bg); font-weight: 400; }
+/* 세션 줄의 작은 표(#1070): 같은 저장소의 다른 폴더 이름, git 저장소 아님, 저장소 확인 못 함 */
+:root[data-theme="post"] .po-ptag { flex: 0 1 auto; min-width: 0; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; border: 1px solid var(--line2); border-radius: 6px; color: var(--sec); font-size: 11px; line-height: 16px; font-style: normal; }
+:root[data-theme="post"] .po-ptag-nogit, :root[data-theme="post"] .po-ptag-unknown { border-style: dashed; color: var(--muted); }
+:root[data-theme="post"] .po-rt .t2 .po-ptag { display: inline-block; margin-left: 6px; vertical-align: 1px; }
 :root[data-theme="post"] .ptop-dot { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-fill); }
 :root[data-theme="post"] .ptop-lim { display: inline-flex; align-items: center; gap: 14px; }
 :root[data-theme="post"] .ptop-m { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }

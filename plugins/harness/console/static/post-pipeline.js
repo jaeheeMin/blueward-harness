@@ -90,7 +90,7 @@
     return parts.join(' · ');
   }
 
-  /* kit: { h, clear, link, api, qs, L(BHLogic), PL(BHPostLogic), sessions(), loaded(), loadingBox } */
+  /* kit: { h, clear, link, api, qs, L(BHLogic), PL(BHPostLogic), sessions(), loaded(), loadingBox, home()(고른 프로젝트 폴더 — 있으면 마지막 폴더 대신 쓴다, #1070) } */
   function create(kit) {
     var h = kit.h, L = kit.L, PL = kit.PL;
     var shut = {};  // 좁은 폭에서 접은 칸: 저장소 열쇠 + 칸 번호. 다시 그려도 그대로 둔다
@@ -153,7 +153,8 @@
       kit.sessions().filter(function (s) { return s && s.cwd && !s.handedOffTo; })
         .sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); })
         .forEach(function (s) { if (!seen[s.cwd]) { seen[s.cwd] = 1; out.push(s.cwd); } });
-      if (st.last && !seen[st.last]) out.push(st.last);
+      var last = (kit.home && kit.home()) || st.last;  // 고른 프로젝트가 있으면 그 저장소, 없으면(모든 저장소) 서버가 기억한 마지막 폴더
+      if (last && !seen[last]) out.push(last);
       return out.slice(0, MAX_FOLDERS);
     }
     function load() {
