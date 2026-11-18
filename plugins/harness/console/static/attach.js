@@ -125,7 +125,7 @@
         };
         rd.readAsDataURL(file);
       });
-      if (bad.length) noteText = bad[0] + (bad.length > 1 ? ' (외 ' + (bad.length - 1) + '개도 못 붙였어)' : '');
+      noteText = bad.length ? bad[0] + (bad.length > 1 ? ' (외 ' + (bad.length - 1) + '개도 못 붙였어)' : '') : '';  // 새로 붙이면 앞의 못 붙인 이유는 지운다(다음 입력까지 남아 있지 않게)
       paint();
     }
     function bindDrop(el) {

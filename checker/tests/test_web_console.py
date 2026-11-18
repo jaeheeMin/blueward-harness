@@ -9617,3 +9617,22 @@ def test_preview_failure_says_why_in_words_not_exception_names(tmp_path):
         docfiles.read_xlsx(str(tmp_path / "없는 파일.xlsx"))
     assert str(e.value) == "엑셀 문서를 읽지 못했어: 파일을 열 수 없어"
     assert "Error" not in docfiles.unreadable("엑셀", docfiles.ET.ParseError("x")) and "Error" not in docfiles.unreadable("엑셀", ValueError("x"))
+
+
+def test_cozy_defects_deny_reason_kept_and_error_texts_without_exception_names(browser):
+    # 2026-11-18 Cozy Office 3회차(D3·D2·D16). 거절 이유를 새로 고친 뒤에도 요청이 내놓고, 항목 이름 뒤 은/는을 붙여 쓰고, 파일 읽기 실패에 예외 이름을 안 낸다.
+    h = browser.hook_async("permission", perm_body("t1"))
+    req = wait_for(lambda: (browser.pending("t1") or [None])[0])
+    assert "reason" not in browser.call("GET", f"/api/requests/{req.rid}")[1]
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "deny", "reason": "  파일부터 확인해 줘  "})
+    h["t"].join(5)
+    assert browser.call("GET", f"/api/requests/{req.rid}")[1]["reason"] == "파일부터 확인해 줘"
+    h2 = browser.hook_async("permission", perm_body("t2"))
+    req2 = wait_for(lambda: (browser.pending("t2") or [None])[0])
+    browser.call("POST", f"/api/requests/{req2.rid}/answer", {"decision": "deny"})  # 이유를 안 적으면 기본 문구를 「전달한 이유」로 내지 않는다
+    h2["t"].join(5)
+    assert "reason" not in browser.call("GET", f"/api/requests/{req2.rid}")[1]
+    assert console_server.topic("담당자 이름") == "담당자 이름은" and console_server.topic("메모") == "메모는" and console_server.topic("ID") == "ID은(는)"
+    for exc, word in ((PermissionError(13, "x"), "권한"), (FileNotFoundError(2, "x"), "없어"), (IsADirectoryError(21, "x"), "폴더"), (OSError(5, "x"), "디스크")):
+        text = console_server.read_error_text(exc)
+        assert text.startswith("파일을 읽지 못했어.") and word in text and "Error" not in text

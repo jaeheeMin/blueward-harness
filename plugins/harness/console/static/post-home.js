@@ -174,7 +174,9 @@
       var calmList = h('ul', { class: 'po-maplist', 'aria-label': '지금 세션들' });  // 차분(fx=0)일 때 장면 대신 보이는 세션 목록(시안 mapFallback)
       var teamRow = h('ul', { class: 'po-teams', 'aria-label': '팀별 세션 수', hidden: true });  // 사무실 장면이 있을 때만(창구 요약 줄 자리)
       var memo = h('div', { class: 'po-memo', role: 'group', 'aria-label': '내 차례 메모', hidden: true });  // 장면 위에 띄우는 내 차례 메모(시안 .memo)
-      var stageFrame = h('div', { class: 'po-stagew' }, slots.sceneHost, memo);  // 사무실 장면이 보이면 테두리·둥근 모서리 틀(시안 .stage), 메모는 이 틀 안에서 뜬다
+      var memoLive = h('p', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'data-memo-live': '1' });  // 메모가 바뀌면 읽기 프로그램에 알린다(메모 자신은 hidden 이 되기도 하고 다시 그려져 알림이 안 간다)
+      var memoSaid = '';
+      var stageFrame = h('div', { class: 'po-stagew' }, slots.sceneHost, memo, memoLive);  // 사무실 장면이 보이면 테두리·둥근 모서리 틀(시안 .stage), 메모는 이 틀 안에서 뜬다
       var scenePanel = h('section', { class: 'light po-panel po-scenep', 'aria-labelledby': 'po-scene-h' },
         h('header', { class: 'po-ph' }, h('h2', { id: 'po-scene-h', text: '지금 세션들' }), sceneSub),
         stageFrame, teamRow, calmList,
@@ -257,6 +259,15 @@
 
       /* 내 차례 메모(시안 .memo): 덱과 같은 순서의 topId 한 건. 사무실 장면이 보일 때만(차분이거나 번들이 없으면 없다). 여러 건이면 "다음" 으로 돌린다(J·K 도 된다).
          덱은 그대로 아래에 있다. 메모의 동작은 덱 카드와 같은 문장·같은 링크다. */
+      function announceMemo() {
+        if (!memoId) { memoSaid = ''; return; }  // 메모가 없어졌다가 같은 것이 다시 뜨면 다시 알린다
+        if (memo.hidden) return;
+        var pick = function (c) { var n = memo.querySelector(c); return n ? n.textContent : ''; };
+        var key = [memoId, memo.getAttribute('aria-label'), pick('.po-memo-q'), pick('.po-memo-s')].join('|');  // 지난 시간(몇 분째)은 빼고 판단해 분마다 다시 읽지 않는다
+        if (key === memoSaid) return;
+        memoSaid = key;
+        memoLive.textContent = [memo.getAttribute('aria-label'), pick('.po-memo-kind'), pick('.po-memo-q'), pick('.po-memo-s')].filter(Boolean).join(' · ');
+      }
       function paintMemo() {
         var a0 = document.activeElement, fi = a0 && a0 !== document.body && memo.contains(a0) ? Array.prototype.indexOf.call(memo.querySelectorAll(FOCUSABLE), a0) : -1;
         var ps = officeOn && pickId ? sceneSession(pickId) : null;
@@ -269,7 +280,7 @@
         memo.hidden = memoHidden();
         syncFocus(memoId);
         if (ps) personMemo(ps);
-        if (!it) { if (ps && fi >= 0) { var pt = memo.querySelectorAll(FOCUSABLE)[fi]; if (pt) pt.focus({ preventScroll: true }); } return; }
+        if (!it) { announceMemo(); if (ps && fi >= 0) { var pt = memo.querySelectorAll(FOCUSABLE)[fi]; if (pt) pt.focus({ preventScroll: true }); } return; }
         memo.setAttribute('aria-label', '내 차례 메모');
         var s = it.s, name = s.title || HK.folderName(s) || '이름 없는 세션', team = teamOf(s.flowId), a = cardAct(it, false);
         var from = it.pend && it.pend.r ? (it.pend.r.createdAt || it.pend.r.createdAtMs) : (it.t || s.updatedAt), w = kit.waited(from);
@@ -283,6 +294,7 @@
         memo.appendChild(h('p', { class: 'po-memo-s', text: name }));
         memo.appendChild(h('div', { class: 'po-memo-acts' }, kit.link(a.href, { class: 'pill acc', text: a.verb }), same ? null : kit.link(sessionHref, { class: 'po-link', text: '세션으로' })));
         placeMemo();
+        announceMemo();
         if (fi >= 0) { var t = memo.querySelectorAll(FOCUSABLE)[fi]; if (t) t.focus({ preventScroll: true }); }
       }
 

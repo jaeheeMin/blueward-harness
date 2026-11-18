@@ -403,8 +403,8 @@
     if (unknown) return { text: '확인 못 함', tone: 'unk', title: 'git 상태를 읽지 못해 올렸는지 알 수 없어.' };
     if (f && f.changed) return { text: '안 올림', tone: 'warn', title: '아직 커밋 안 됨 · 내 PC에만 있어.' };
     var pr = s && s.flowPr, st = pr && pr.number ? String(pr.state || '').toUpperCase() : '';
-    if (st === 'MERGED') return { text: '합쳐짐', tone: 'ok', title: '이 세션의 PR #' + pr.number + ' 이 합쳐졌어.' };
-    if (st === 'OPEN') return { text: '검토 중', tone: 'ok', title: '이 세션의 PR #' + pr.number + ' 이 승인을 기다려.' };
+    if (st === 'MERGED') return { text: '합쳐짐', tone: 'ok', title: '이 세션의 ' + prSubject(pr.number, true) + ' 합쳐졌어.' };
+    if (st === 'OPEN') return { text: '검토 중', tone: 'ok', title: '이 세션의 ' + prSubject(pr.number, true) + ' 승인을 기다려.' };
     return { text: '확인 못 함', tone: 'unk', title: '커밋은 됐지만 이 세션에서 PR 상태를 알 수 없어.' };
   }
   // 홈 숫자 칸 "이번 주 산출물"(시안 G-11): mergeDocs 결과 중 최근 7일 안에 바뀐 문서 수. 시각은 초·밀리초 둘 다 받는다.

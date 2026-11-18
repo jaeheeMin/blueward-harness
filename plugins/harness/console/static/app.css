@@ -416,6 +416,7 @@ dd.scroll { white-space: pre-wrap; padding: 8px 10px; border-radius: 8px; backgr
 .tool { min-height: 36px; padding: 0 14px; border-radius: var(--rb); border: 1px solid var(--line); background: transparent; font-size: 12.5px; color: var(--sec); }
 .tool:hover:not(:disabled) { background: var(--soft); color: var(--text); }
 .tools-note { margin-top: 6px; font-size: 12.5px; }
+.tools-why { margin-top: 6px; font-size: 12.5px; }
 .reload-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0 0 8px; padding: 4px 12px; border-radius: 10px; border: 1px solid var(--attn); color: var(--attn); font-size: 13px; font-weight: 500; }
 
 /* 같은 폴더 알림 */

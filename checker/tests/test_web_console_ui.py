@@ -3784,7 +3784,7 @@ def test_post_new_task_extra_cases_X1():
     # 아주 긴 폴더 이름: 제목·눈썹은 어디서든 줄을 바꾸고, 위쪽 줄은 알림·테마 단추 대신 이름만 줄어든다
     assert ':root[data-theme="post"] .ptitle .eb, :root[data-theme="post"] .ptitle h1 { overflow-wrap: anywhere; }' in css
     assert ':root[data-theme="post"] #app > .top > :not(.ptop-proj):not(.sp):not(.ptop-lim) { flex-shrink: 0; }' in css and ".ptop-proj b { flex: 0 1 auto; min-width: 0;" in css
-    assert ':root[data-theme="post"] #new-title:focus { outline: none; }' in css
+    assert ':root[data-theme="post"] #new-title:focus, :root[data-theme="post"] main h1[tabindex="-1"]:focus' in css
 
 
 def test_post_new_task_extra_cases_X3():
@@ -3793,7 +3793,7 @@ def test_post_new_task_extra_cases_X3():
     # 느린 분석 시작(윈도우 git) 중 요청 고치기·다시 시작을 누르면 늦게 온 시작·폴링 답은 버린다(쓰던 화면이 확인 화면으로 튀지 않게)
     assert "function late(run) { return isPostTheme() && (!alive || run !== beginRun || step !== 'analyzing'); }" in app
     assert "if (isPostTheme() && (!alive || aid !== resume)) { if (alive) loadRecent(); return; }" in app  # 주소 ?id= 로 이어 보는 첫 답도
-    assert "if (late(run)) return;\n        aid = d && (d.id || d.analysisId);" in app and "if (!alive || late(run)) return; if (e.status === 400 && isPostTheme())" in app
+    assert "if (handedOver || late(run)) return;\n        aid = d && (d.id || d.analysisId);" in app and "if (handedOver || !alive || late(run)) return; if (e.status === 400 && isPostTheme())" in app
     assert "function gone() { return !alive || (isPostTheme() && (id !== aid || step !== 'analyzing')); }" in app
     # 폴더 탓 400 안내·지난 시작 오류는 새 분석을 시작하면 지운다
     assert "if (isPostTheme()) { customMsg = ''; startErr = ''; startFolderWhy = ''; }" in app  # 3회차: 폴더 탓 시작 실패 까닭도
@@ -4063,7 +4063,7 @@ def test_post_new_task_extra_cases_X3_round3():
     # 서버가 줄인 첨부 이름(100자·인쇄 못 하는 글자)도 첨부 탓으로 알아본다
     assert "function serverName(n)" in app and "m.indexOf(serverName(f.name) + ':') === 0" in app
     # 테마를 바꿔도 폴더 안내·실패·시작 오류가 이어진다
-    assert "var kept0 = takeCarry('new', route.id);" in app and "keep: function () { return { step: step, aid: aid, err: err" in app
+    assert "var kept0 = takeCarry('new', route.id);" in app and "step: step, aid: aid, err: err, errNet: errNet" in app
     # 같은 파일 두 번은 칩 하나, 글 칸 밖(제목 등)에 끌어 놓아도 첨부(Post)
     assert "opts.dedupe && items.some(function (x) { return x.name === file.name && x.size === file.size" in attach and "dedupe: post," in app and "dedupe: isPostTheme()," in app
     assert "if (step === 'write') { drawWrite(panel, post); if (post) newComp.bindDrop(page); }" in app and "if (!post) newComp.bindDrop(panel);" in app
@@ -4086,7 +4086,7 @@ def test_post_x2c_remaining_defects_source():
     # 3) 올리기·이걸로 해결·GitHub 에 올리기 뒤 포커스(Post). 6) 새 기록 칸 이름은 Post 만 한글, Sauce 는 영어 키 그대로
     assert "after = 'text'" in tb and "'resolve:' + [].indexOf.call(page.querySelectorAll('button.tb-small'), ev.currentTarget)" in tb
     assert "if (then && isPostNow() && !page.contains(document.activeElement)) focusAfter(then, d);" in tb
-    assert "carry.landed = true;" in tb and "var after = carry.landed ? 'title' : '';" in tb
+    assert "carry.landed = itemHref(r.repo, r.number);" in tb and "var after = carry.landed && carry.landed === itemHref(repo, number) ? 'title' : '';" in tb
     assert "isPostNow() && !page.contains(document.activeElement) && slots.submit" in tb
     assert "var FIELD_NAME = { symptom: '증상', cause: '원인', solution: '해결 방법' };" in tb
     assert "function fieldLabel(k) { return isPostNow() && FIELD_NAME[k] ? FIELD_NAME[k] : k; }" in tb and "'aria-label': fieldLabel(k) }" in tb
@@ -4098,8 +4098,8 @@ def test_post_x2c_remaining_defects_source():
     er = app[app.index("function elicitRes(action, info)"):app.index("var FORMAT_HINT")]
     assert "info.mode === 'url' && isPostTheme()" in er and "return ELICIT_RES[action];" in er and "'마쳤다고 알렸어.'" in er
     assert "ELICIT_RES[action][0]" not in app and "ELICIT_RES[code]) { var er = elicitRes(code, req.elicitation)" in app
-    # 8) 「이전 판 N개」 접는 칸은 판이 늘어 글이 바뀌어도 같은 자리에서 포커스를 되찾는다
-    assert "if (!t && k.tag === 'SUMMARY') t = page.querySelectorAll('summary')[k.j];" in ui
+    # 8) 「이전 판 N개」 접는 칸은 판이 늘어 글이 바뀌어도 어느 문서 것인지(data-sumkey)로 포커스를 되찾는다
+    assert "k.sum ? [].filter.call(page.querySelectorAll('summary'), function (n) { return n.getAttribute('data-sumkey') === k.sum; })[0]" in ui
 
 
 def test_post_settings_first_run_and_limits_fixes():
@@ -4227,3 +4227,38 @@ def test_cozy_survey_memo_person_click_drag_hide_and_small_fixes():
     assert "title: function () { return '설정'; }, destroy: function () { alive = false; } };" in app
     guide = (ROOT / "docs" / "guide" / "harness-guide.html").read_text(encoding="utf-8")
     assert "사람을 누르면 그 사람의 메모가 떠" in guide and "사람을 누르면 그 세션으로 가." not in guide
+
+
+def test_cozy_defects_round3_source():
+    # 2026-11-18 Cozy Office 3회차 결함 D1~D16·D18. 원문 확인이고 본체는 Aside 실화면(docs/status/2026-11-18-cozy-office-defects.md).
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    logic = (STATIC / "flow-logic.js").read_text(encoding="utf-8")
+    tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    att = (STATIC / "attach.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # D1 끝난 세션엔 갈래 고르기를 안 띄운다 · D4 흐린 도구의 까닭이 눈에 보인다 · D5 단계 단추를 누르면 입력칸 아래 앞 안내를 치운다
+    assert "else if (s.status === 'ended' && s.canSend === false) el.appendChild(h('p', { class: 'note-muted', 'data-flow-ended': '1'" in ui
+    assert "data-tools-why" in ui and "' 까닭은 입력칸 아래에 있어.'" in ui
+    assert "opts.onAct()" in ui and "onAct: function () { if (/전달했어|이어서 할게/.test(followNote)) { followNote = ''; paintFollowNote(); } }" in app
+    # D2 묻는 이유의 백틱 · D6 PR 배지 조사 · D7 한도 묶음 title · D9 처음 화면 문구 · D10 한도 켠 직후 문구
+    assert "function NOTICK(t)" in app and "NOTICK(req.note).trim()" in app
+    assert "prSubject(pr.number, true) + ' 합쳐졌어.'" in logic and "' 이 합쳐졌어.'" not in logic
+    assert "attrs.title = lv.chips.map(chipTitle).join('\\n\\n');" in app
+    assert "'쓴 폴더가 아직 없어. '" in app and "d.receivedAt ? '켰어. 세션이 응답을 받을 때마다 헤더 한도가" in app
+    # D8 좁은 화면 연결 끊김 띠는 메뉴줄 아래
+    assert ':root[data-theme="post"] .conn { z-index: 46; top: 82px; }' in css
+    # D11 직접 추가 줄을 빼면 다음 줄·앞 줄·「다른 자료 직접 고르기」로 초점 · D12 진행 중인 요청과 화면 상태를 테마 전환 때 넘김 · 첨부 안내는 새로 붙이면 지움 · D13 화면을 옮긴 뒤 제목으로 초점
+    assert "function dropExtra(p)" in app and "'data-extra-x': '1'" in app and "'data-more-paths': '1'" in app
+    assert "function watchBegin(req, run)" in app and "function watchStart(sr)" in app and "claim: function () { handedOver = true; }" in app
+    assert "beginPending: beginPending, startPending: startPending" in app and "advOpen: advOpen, intro: intro" in app
+    assert "noteText = bad.length ? bad[0]" in att
+    assert "function focusPageTitle()" in app and "renderRoute();\n    focusPageTitle();" in app
+    # D14 한글 조합 중엔 목록을 다시 그리지 않는다 · D15 접는 칸은 어느 문서 것인지로 · 올린 기록 표시는 그 기록 주소로만
+    assert "if (composing && input.isConnected) { deferred = [d, e]; return; }" in tb
+    assert "carry.landed = itemHref(r.repo, r.number);" in tb
+    assert "'data-sumkey': 'old|' + d.key" in ui and "'data-sumkey': 'off|' + sid(session)" in ui
+    # D18 메모가 바뀌면 읽기 프로그램에 알린다(지난 시간은 빼고 판단)
+    assert "'data-memo-live': '1'" in home and "function announceMemo()" in home
+    assert home.count("announceMemo();") == 2  # 사람 메모 경로 + 덱 메모 경로

@@ -195,8 +195,9 @@
       var strip = h('div', { class: 'reload-strip', role: 'status', hidden: true });
       var project = h('p', { class: 'note-attn project-notice', role: 'status', hidden: true, 'data-project-notice': '1' });
       var list = h('div', { class: 'tools-list' });
+      var why = h('p', { class: 'note-muted tools-why', 'data-tools-why': '1', hidden: true });  // 도구 단추가 흐린 까닭을 눈에 보이게(title 은 읽기 프로그램·터치가 모른다)
       var note = h('p', { class: 'note-muted tools-note', role: 'status', hidden: true });
-      el.appendChild(strip); el.appendChild(project); el.appendChild(list); el.appendChild(note);
+      el.appendChild(strip); el.appendChild(project); el.appendChild(list); el.appendChild(why); el.appendChild(note);
       var data = { flows: null, approvals: null, key: null }, alive = true;
 
       function say(text) { note.textContent = text; note.hidden = !text; }
@@ -222,6 +223,7 @@
         var pn = L.projectNotice(data.flows) || L.formsNotice(data.flows);
         project.hidden = !pn;
         project.textContent = pn ? pn.text : '';
+        why.textContent = blocked && tools.length ? '지금은 이 세션에 요청을 보낼 수 없어서 도구를 누를 수 없어.' + (s.phase === 'approval' ? '' : ' 까닭은 입력칸 아래에 있어.') : ''; why.hidden = !(blocked && tools.length);  // 까닭 글은 입력칸 아래에 한 번만 두고(#867) 여기서는 흐린 이유와 어디 있는지만
         clear(list);
         tools.forEach(function (t) {
           var isConsole = t.kind === 'console';
@@ -284,6 +286,7 @@
     }
 
     /* ---------- 갈래 칸(세션 화면) ---------- */
+    // opts.onAct: 단계 단추를 눌러 요청을 보내는 순간 부른다.
     // opts.compact: 세션 화면처럼 제목 아래에 순서 알약을 따로 두는 쪽에서 쓴다(갈래 이름·순서 막대를 이 칸에서 뺀다).
     function flowPanel(opts) {
       var compact = !!(opts && opts.compact);
@@ -298,6 +301,7 @@
       }
       function act(promise, okMsg) {
         st.busy = true; st.msg = ''; draw();
+        if (opts && typeof opts.onAct === 'function') opts.onAct();  // 입력칸 아래의 앞 안내(이 작업에 전달했어 등)를 치운다
         return promise.then(function (d) {
           if (d && d.id && d.id === last.id) kit.mergeSession(d);
           st.msg = okMsg || '';
@@ -522,7 +526,9 @@
         var hold = L.blockOf(s); if (hold && st.skipHold[s.id + ':' + hold.t]) hold = null;  // 새 막힘이 오면 다시 안내한다
         var apiHold = hold ? null : apiHoldOf(s);
         if (!s.flowId) {
-          if (hold) drawHold(s, hold); else if (apiHold) drawApiHold(s, apiHold); else { ensurePicker(s); drawPicker(s); }
+          if (hold) drawHold(s, hold); else if (apiHold) drawApiHold(s, apiHold);
+          else if (s.status === 'ended' && s.canSend === false) el.appendChild(h('p', { class: 'note-muted', 'data-flow-ended': '1', text: '끝난 세션이라 일을 새로 고를 수 없어. 새 작업에서 시작해 줘.' }));  // 끝난 세션에 갈래를 붙여도 이어 갈 수 없다
+          else { ensurePicker(s); drawPicker(s); }
         } else {
           if (!compact) {
             el.appendChild(h('div', { class: 'flow-head' },
@@ -627,7 +633,7 @@
       var box = h('div', { class: 'attach-list' }, h('span', { class: 'eb', text: '첨부한 파일' }));
       on.forEach(function (a) { box.appendChild(row(a)); });
       if (off.length) {
-        var det = h('details', { class: 'more docs-old' }, h('summary', { text: '뺀 첨부 ' + off.length + '개' }));
+        var det = h('details', { class: 'more docs-old' }, h('summary', { 'data-sumkey': 'off|' + sid(session), text: '뺀 첨부 ' + off.length + '개' }));
         off.forEach(function (a) { det.appendChild(row(a)); });
         box.appendChild(det);
       }
@@ -735,7 +741,7 @@
             box.appendChild(row(d, false));
             var olds = L.versionPaths(d.file);
             if (olds.length) {
-              var det = h('details', { class: 'more docs-old' }, h('summary', { text: '이전 판 ' + olds.length + '개' }));
+              var det = h('details', { class: 'more docs-old' }, h('summary', { 'data-sumkey': 'old|' + d.key, text: '이전 판 ' + olds.length + '개' }));
               var oldKeys = olds.map(function (v) { return d.key.split('|')[0] + '|' + v.path.toLowerCase(); });
               olds.forEach(function (v, i) { det.appendChild(row({ key: oldKeys[i], file: v, session: d.session, chip: null }, true)); });
               if (isPost()) {  // 다시 그려도(이전 판을 고르면 미리보기를 읽고 새로 그린다) 연 채로 두고, 고른 이전 판이 접힌 칸 안에 숨지 않게 한다. 사람이 열고 닫은 것이 있으면 그대로(닫은 칸을 다시 그릴 때 저절로 열지 않는다)
@@ -866,13 +872,14 @@
         if (!isPost() || !a || a === page || !page.contains(a)) return null;
         if (a.classList.contains('drow')) return { dkey: a.getAttribute('data-dkey') };
         if (a.id) return { id: a.id };
-        return { tag: a.tagName, cls: a.className, text: a.textContent, i: sameAs(a.tagName, a.className, a.textContent).indexOf(a), j: [].indexOf.call(page.querySelectorAll(a.tagName), a) };
+        if (a.tagName === 'SUMMARY' && a.getAttribute('data-sumkey')) return { sum: a.getAttribute('data-sumkey') };  // 접는 칸은 어느 문서·세션 것인지로 알아본다(글이 바뀌거나 위 칸이 생기고 없어져도)
+        return { tag: a.tagName, cls: a.className, text: a.textContent, i: sameAs(a.tagName, a.className, a.textContent).indexOf(a) };
       }
       function focusBack(k) {
         if (!k) return;
         var t = k.dkey ? [].filter.call(page.querySelectorAll('.drow'), function (b) { return b.getAttribute('data-dkey') === k.dkey; })[0]
+          : k.sum ? [].filter.call(page.querySelectorAll('summary'), function (n) { return n.getAttribute('data-sumkey') === k.sum; })[0]  // 「이전 판 N개」 는 판이 늘면 글이 바뀌니 글이 아니라 어느 문서 것인지로
           : k.id ? document.getElementById(k.id) : sameAs(k.tag, k.cls, k.text)[k.i];
-        if (!t && k.tag === 'SUMMARY') t = page.querySelectorAll('summary')[k.j];  // 「이전 판 N개」 는 판이 늘면 글이 바뀐다 — 글이 달라져도 같은 자리의 접는 칸으로
         if (!t || t.disabled || !page.contains(t)) t = page.querySelector('.drow.on') || page.querySelector('.drow');
         if (t) t.focus({ preventScroll: true });
       }
@@ -1005,7 +1012,7 @@
           listBox.appendChild(item(f, false));
           var olds = L.versionPaths(f);
           if (olds.length) {
-            var det = h('details', { class: 'tech flat docs-old' }, h('summary', { text: '이전 판 ' + olds.length + '개' }));
+            var det = h('details', { class: 'tech flat docs-old' }, h('summary', { 'data-sumkey': 'old|' + f.path, text: '이전 판 ' + olds.length + '개' }));
             olds.forEach(function (v) { det.appendChild(item(v, true)); });
             listBox.appendChild(det);
           }

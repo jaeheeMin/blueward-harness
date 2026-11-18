@@ -361,6 +361,7 @@ class Request:
         self.mcp: dict = {}  # MCP 도구 승인이면 claude 가 준 {"server", "display"}(훅으로만 온 요청은 비어 있고 도구 이름에서 읽는다)
         self.status = "pending"  # pending | answered | closed
         self.outcome = ""  # 화면에 보여 줄 처리 결과(한글 글, 판정에는 쓰지 않는다)
+        self.reason = ""  # 거절할 때 사용자가 적어 보낸 이유(새로 고쳐도 결과 화면이 다시 보여 주게)
         self.resolution = ""  # 처리 결과 코드: allow allow_session deny answered closed terminal handoff expired (MCP 질문은 accept decline cancel). 대기 중이면 빈 값(#1018).
         self.response = None  # 훅에 돌려줄 값(answered 일 때)
         self.answered_at = None
@@ -383,6 +384,8 @@ class Request:
             "createdAt": self.created,
             "answeredAt": self.answered_at,
         }
+        if self.reason:
+            data["reason"] = self.reason
         if self.risk:
             data["risk"], data["riskNote"] = self.risk, self.risk_note
         elif self.risk_note:
@@ -748,13 +751,14 @@ class Store:
             self.requests.pop(r.rid, None)
             self.publish("removed", {"kind": "request", "id": r.rid})
 
-    def resolve(self, rid: str, response, outcome: str, code: str = "answered") -> bool:
+    def resolve(self, rid: str, response, outcome: str, code: str = "answered", reason: str = "") -> bool:
         """답변을 확정한다. 이미 닫혔으면 False(먼저 처리한 쪽이 이긴다). code 는 화면이 결과를 가르는 코드(Request.resolution)."""
         with self.lock:
             r = self.requests.get(rid)
             if r is None or r.status != "pending":
                 return False
             r.status, r.response, r.outcome, r.answered_at, r.resolution = "answered", response, outcome, self.clock(), code
+            r.reason = reason
             self._chat_answer(r)
             r.event.set()
         self.publish("request", {"id": rid, "sessionId": r.session_id})

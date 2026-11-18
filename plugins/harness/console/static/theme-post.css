@@ -23,7 +23,7 @@
 }
 :root[data-theme="post"] .ptitle h1 { font-weight: 800; letter-spacing: -.03em; }
 :root[data-theme="post"] .ptitle .eb, :root[data-theme="post"] .ptitle h1 { overflow-wrap: anywhere; }  /* 공백 없는 아주 긴 폴더 이름이 좁은 폭에서 화면 밖으로 밀지 않게 */
-:root[data-theme="post"] #new-title:focus { outline: none; }
+:root[data-theme="post"] #new-title:focus, :root[data-theme="post"] main h1[tabindex="-1"]:focus, :root[data-theme="post"] .main h1[tabindex="-1"]:focus { outline: none; }
 :root[data-theme="post"] .newp .note-attn { overflow-wrap: anywhere; }  /* 오류 문구에 든 공백 없는 긴 파일·폴더 이름이 좁은 폭에서 화면 밖으로 밀지 않게 */
 :root[data-theme="post"] .ptitle h1.sess-title { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }  /* 긴 세션 제목은 한 줄(#1042) */
 
@@ -176,7 +176,7 @@
 @container shell (max-width: 760px) {
   :root[data-theme="post"] #app, :root[data-theme="post"] #app[data-collapsed="true"] { display: block; height: auto; }
   :root[data-theme="post"] #app > .prail { position: sticky; top: 0; z-index: 45; flex-direction: row; gap: 6px; padding: 8px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); }  /* z-index: 스크롤할 때 머리 줄 말풍선(.nb-bubble 40)·도장(.po-seal 6)이 메뉴줄을 덮지 않게. 대화상자(50)·알림 창(60)보다는 아래 */
-  :root[data-theme="post"] .conn { z-index: 46; }  /* 연결 끊김 띠(sticky)는 전처럼 메뉴줄 위에 — 메뉴줄이 45 로 올라 스크롤하면 그 뒤에 숨었다 */
+  :root[data-theme="post"] .conn { z-index: 46; top: 82px; }  /* 연결 끊김 띠(sticky)는 메뉴줄(높이 73px) 바로 아래에 붙는다 — 전에는 top 8px 라 스크롤하면 메뉴줄 위에 떠서 일부를 가렸다 */
   :root[data-theme="post"] .prail-logo, :root[data-theme="post"] .prail-sp { display: none; }
   :root[data-theme="post"] .prail-new, :root[data-theme="post"] .prail-item { flex: none; min-width: 64px; margin: 0; }
   :root[data-theme="post"] .prail-badge { right: 10px; }
