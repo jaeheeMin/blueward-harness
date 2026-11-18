@@ -1298,7 +1298,7 @@
     });
     if (!rows.length && loadedOnce) list.appendChild(h('p', { class: 's-empty', text: '아직 세션이 없어. 새 작업을 시작하면 여기에 생겨.' }));
     else if (rows.length && !shown) list.appendChild(h('p', { class: 's-empty', text: '이 걸러보기에 맞는 세션이 없어.' }));
-    return h('nav', { class: 'nav po-slist', 'aria-label': '세션 목록' }, tabs, list, h('div', { class: 'nav-foot' }, link(newHref(), { class: 'snew', text: '+ 새 세션' })));
+    return h('nav', { class: 'nav po-slist', 'aria-label': '세션 목록' }, h('a', { class: 'po-skip', href: '#main', 'data-skip': '1', text: '세션 목록 건너뛰기' }), tabs, list, h('div', { class: 'nav-foot' }, link(newHref(), { class: 'snew', text: '+ 새 세션' })));
   }
   /* Post 세션 목록을 그린 뒤: 접기 단추 포커스 되돌리기, 그리고 화면(주소)이 바뀌었을 때만 지금 세션 줄이 목록 창 안에 보이게 한다
      (세션이 수십 개면 지금 줄이 목록 아래에 묻혀 어디인지 안 보였다. 사용자가 목록을 굴린 뒤에는 건드리지 않는다). */
@@ -2583,12 +2583,13 @@
     var top = h('div', { class: 'q', role: 'group', 'data-elicit': rid, 'aria-labelledby': 'el-' + rid },
       isPostTheme() && !plain && window.BHPostScene ? h('div', { class: 'po-ask-h' }, window.BHPostScene.avatar(r.sessionId || r.session_id || '', 'turn'), ebText) : ebText,
       h('b', { id: 'el-' + rid, text: info.message || '값을 알려 달라고 해' }));
+    var href = isUrl ? safeHttpUrl(info.url) : '';
+    var cantOpen = isUrl && !href && isPostTheme();  // Post: 열 수 없는 주소(javascript: 등)는 마칠 수가 없으니 [다 했어] 로 완료했다고 답하게 두지 않는다
     if (isUrl) {
-      var href = safeHttpUrl(info.url);
       // 주소는 글자로 보이고, 누를 곳은 [주소 열기] 단추로 따로 둔다(회색 글자 링크는 누를 수 있는지 안 보여서, 558 지적)
       top.appendChild(h('span', { class: 'sub mono', 'data-elicit-url': '1', text: href || String(info.url || '') }));
       top.appendChild(href ? h('div', { class: 'acts' }, h('a', { class: 'pill line', href: href, target: '_blank', rel: 'noopener noreferrer', 'data-elicit-open': '1', text: '주소 열기' }))
-        : h('span', { class: 'note-attn', role: 'alert', text: '열 수 없는 주소야' }));
+        : h('span', { class: 'note-attn', role: 'alert', text: cantOpen ? '열 수 없는 주소야. 마칠 수 없으니 거절하거나 닫아 줘.' : '열 수 없는 주소야' }));
       if (href) top.appendChild(h('span', { class: 'sub', text: '주소를 열어 마친 다음 [다 했어]를 눌러 줘.' }));
     }
     var cards = fields.map(function (f, i) {
@@ -2620,7 +2621,7 @@
     var leftNote = h('span', { class: 'quiet' });
     function syncFoot() {
       var n = isUrl ? 0 : missing();
-      sendBtn.disabled = st.busy || n > 0;
+      sendBtn.disabled = st.busy || n > 0 || cantOpen;
       leftNote.textContent = n ? '아직 채우지 못한 항목이 ' + n + '개 있어.' : ''; leftNote.hidden = !n;
     }
     syncFoot();
@@ -4097,11 +4098,26 @@
     mainEl = h('main', { class: 'main', id: 'main' });
     annEl = h('div', { class: 'ann-slot', 'data-bubble': window.BHNotice ? '1' : null });  // 알림 말풍선이 같은 알림을 보이니 띠는 감춘다(#1016)
     headEl = h('header', { class: 'top' });
+    // Post: 키보드로 사이드 목록·머리를 지나치지 않고 본문으로 바로 가는 링크(평소엔 안 보이고 포커스가 오면 보인다). 기본(Sauce) 테마에는 두지 않는다.
+    var skipEl = h('a', { class: 'po-skip po-skip-top', href: '#main', 'data-skip': '1', text: '본문으로 건너뛰기' });
+    function syncSkip() {  // Sauce 에는 아예 붙이지 않는다(테마를 바꾸면 붙이고 뗀다)
+      var on = isPostTheme(), r = document.getElementById('root');
+      if (on && !skipEl.parentNode && r) r.insertBefore(skipEl, r.firstChild);
+      else if (!on && skipEl.parentNode) skipEl.parentNode.removeChild(skipEl);
+    }
+    document.addEventListener('bh-theme', syncSkip);
+    document.addEventListener('click', function (e) {  // 목록 안의 링크는 patchChildren 이 핸들러를 남기므로 한 곳에서 받는다
+      var a = e.target && e.target.closest ? e.target.closest('[data-skip]') : null;
+      if (!a || !isPostTheme()) return;
+      e.preventDefault();
+      mainEl.setAttribute('tabindex', '-1'); mainEl.focus();
+      mainEl.addEventListener('blur', function () { mainEl.removeAttribute('tabindex'); }, { once: true });
+    });
     appEl.appendChild(annEl); appEl.appendChild(headEl);
     sideEl.addEventListener('click', onPostFilter);
     sideEl.addEventListener('keydown', onPostFilterKey);
     appEl.appendChild(h('div', { class: 'shell' }, sideEl, mainEl));
-    root.appendChild(appEl);
+    root.appendChild(appEl); syncSkip();  // 건너뛰기 링크는 #root 맨 앞 = 레일(#app 맨 앞에 끼워 넣는 메뉴)보다도 앞
     // 점검 결과(첫 실행인지)가 오면 그 화면으로 처음부터 그린다. 늦거나 못 읽으면 홈을 막지 않고 그대로 그린다.
     var first = function () { if (!renderedOnce) renderRoute(); };
     var wn = function () { if (!(startData && startData.firstRun)) loadWhatsNew(); };  // 첫 실행 화면이 뜨는 동안엔 바뀐 점을 띄우지 않는다

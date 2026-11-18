@@ -3805,3 +3805,42 @@ def test_post_new_task_extra_cases_X3():
     assert "var mark = isPostTheme() && !keepFocus ? focusMark() : null;" in app and "function focusMark()" in app and "return el.className === m.cls;" in app
     assert "if (isPostTheme()) placeFocus(stepMoved, keepFocus, selStart, mark);" in app and "screen = showIntro ? 'intro' : step" in app  # 안내 화면도 있던 칸을 먼저 되돌린다
     assert "h('h1', { id: isPostTheme() ? 'new-title' : null, tabindex: isPostTheme() ? '-1' : null, title: draft.cwd" in app
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_post_x2_docs_many_sessions_sauce_has_no_truncation_note(tmp_path):
+    # 2026-11-18 Post 데이터 있는 화면 점검(X2). 산출물 탭은 최근 12개 세션만 읽는다 — Post 만 몇 개가 빠졌는지 알린다(Sauce 는 그대로).
+    got = _smoke(tmp_path, "docs", [_session(f"s{i}", updatedAt=1700000100 + i) for i in range(14)])
+    assert "더 오래된 세션" not in got["text"] and "data-docs-more" not in json.dumps(got, ensure_ascii=False)
+
+
+def test_post_x2_data_screens_source_and_css():
+    # post-*.js 와 Post 전용 분기는 가짜 DOM 시험이 안 불러와서 원문 확인이다. 본체는 Aside 실화면(docs/status/2026-11-18-post-extra-datascreens.md).
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 산출물: 같은 이름의 파일이 여러 세션에서 오면 둘째 줄에 세션 이름, 다시 그려도 키보드 포커스 유지, 좁은 화면에서 고르면 미리보기로, 미리보기 못 하는 문서의 안내가 버튼 위치와 맞게
+    assert "multiSess ? entry.session.title || kit.baseName(entry.session.cwd) : ''" in ui and "multiSess = isPost() && all.reduce(" in ui
+    assert "back.focus({ preventScroll: true })" in ui and "ae.classList.contains('drow')" in ui and "'data-dkey': post ? entry.key : null" in ui  # 같은 경로 파일이 다른 세션에 있어도 키(폴더|경로)로 되돌림
+    assert "function pick(entry, byUser)" in ui and "pv.scrollIntoView({ block: 'start' })" in ui and "pick(entry, true)" in ui
+    assert "(ctx.btnAt || '아래') + ' 버튼으로 열어 봐.'" in ui and ui.count("btnAt: isPost() ? '위' : ''") == 2
+    assert "data-docs-more" in ui and "isPost() ? sessionList().filter(" in ui
+    assert ":root[data-theme=\"post\"] .ext { display: inline-grid; place-items: center; flex: none; width: 44px;" in css and ".ext-docx { background: #2B579A;" in css
+    assert ".docs-page .dprev { scroll-margin-top: 88px; }" in css and ".docs-page .drow .dn small { font-size: 11.5px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;" in css
+    # 팀 기록: 거르기·찾기·종류 고르기로 화면을 다시 그려도(목록·한 건·새 기록 셋 다) Post 에서는 누르던 칸에 포커스가 남는다
+    assert "function focusKey(page)" in tb and "function focusBack(page, key)" in tb and tb.count("focusBack(page, key);") == 3 and tb.count("var key = focusKey(page);") == 3 and "sameButtons(page, a.className, a.textContent).indexOf(a)" in tb
+    assert "getTheme() === 'post'" in tb[tb.index("function focusKey(page)"):tb.index("function focusBack(page, key)")]
+    # MCP url 모드: 열 수 없는 주소(javascript: 등)는 Post 에서 [다 했어] 도 막고, 긴 주소는 줄을 바꾼다
+    assert "var cantOpen = isUrl && !href && isPostTheme();" in app and "sendBtn.disabled = st.busy || n > 0 || cantOpen;" in app
+    assert ":root[data-theme=\"post\"] [data-elicit-url] { overflow-wrap: anywhere; word-break: break-all; }" in css
+    # Tab 건너뛰기 링크: Post 만(Sauce 에서는 hidden), 레일보다도 앞, 목록 맨 앞에 하나 더, 포커스가 올 때만 보임
+    assert "var on = isPostTheme(), r = document.getElementById('root');" in app and "document.addEventListener('bh-theme', syncSkip);" in app and "skipEl.parentNode.removeChild(skipEl)" in app  # Sauce 에는 붙이지 않는다
+    assert "root.appendChild(appEl); syncSkip();" in app and "text: '세션 목록 건너뛰기' }), tabs, list," in app and "text: '본문으로 건너뛰기'" in app
+    assert ":root[data-theme=\"post\"] .po-skip:not(:focus) { position: absolute; width: 1px; height: 1px;" in css and ":root[data-theme=\"post\"] #main:focus { outline: none; }" in css
+
+
+def test_post_x2_docs_old_versions_stay_open_when_picked():
+    # 이전 판을 고르면 목록이 다시 그려져 접힌 칸 안에 고른 줄이 숨던 것: Post 는 고른 이전 판이 든 칸을 열어 두고, 연 상태를 기억한다
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert "det.open = !!st.oldOpen[d.key] || oldKeys.indexOf(st.sel) >= 0;" in ui and "st.oldOpen[d.key] = det.open;" in ui and "oldOpen: {}" in ui

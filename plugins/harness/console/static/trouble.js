@@ -54,6 +54,25 @@
       }
       once();
     }
+    // Post: 화면을 통째로 다시 그려도(거르기·찾기·종류 고르기·올린 뒤 다시 읽기) 키보드로 누르던 칸에 포커스가 남게 한다. 새로 그린 노드는 포커스가 없어 body 로 떨어진다.
+    // 칸을 알아보는 값: 입력칸은 id·aria-label, 단추는 모양(태그·class·글).
+    function focusKey(page) {
+      var a = document.activeElement;
+      if (!a || !page.contains(a) || !(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post')) return null;
+      if (a.id) return ['id', a.id];
+      if (a.getAttribute('aria-label') && /^(SELECT|TEXTAREA|INPUT)$/.test(a.tagName)) return ['label', a.tagName, a.getAttribute('aria-label')];
+      if (a.tagName === 'BUTTON') return ['button', a.className, a.textContent, sameButtons(page, a.className, a.textContent).indexOf(a)];  // 같은 단추가 여럿(후보마다 '이걸로 해결')이면 몇 번째인지까지
+      return null;
+    }
+    function sameButtons(page, cls, text) { return [].filter.call(page.querySelectorAll('button'), function (n) { return n.className === cls && n.textContent === text; }); }
+    function focusBack(page, key) {
+      if (!key) return;
+      var found = null;
+      if (key[0] === 'id') found = document.getElementById(key[1]);
+      else if (key[0] === 'label') found = [].filter.call(page.querySelectorAll(key[1].toLowerCase()), function (n) { return n.getAttribute('aria-label') === key[2]; })[0];
+      else found = sameButtons(page, key[1], key[2])[key[3]];
+      if (found && !found.disabled && page.contains(found)) found.focus({ preventScroll: true });
+    }
     function errBox(e, title) {
       var msg = e && e.status === 404 ? e.message : (e && e.message) || '읽지 못했어';
       return h('div', { class: 'tb-empty tb-unk' }, h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }), ' · ' + (title || '') + msg);
@@ -81,6 +100,11 @@
       input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); search(); } });
 
       function draw(d, e) {
+        var key = focusKey(page);
+        drawNow(d, e);
+        focusBack(page, key);
+      }
+      function drawNow(d, e) {
         clear(page);
         if (!d) {
           page.appendChild(h('section', { class: 'light' }, errBox(e, '기록 목록을 ')));
@@ -167,6 +191,11 @@
         return h('div', { class: 'set tb-set96' }, h('span', { class: 'tb-lm', text: label }), content || h('span', { class: 'tb-lm', text: '' }));
       }
       function draw(d) {
+        var key = focusKey(page);
+        drawNow(d);
+        focusBack(page, key);
+      }
+      function drawNow(d) {
         title = '기록 #' + d.number + ' ' + M(d.title);
         clear(page);
         var meta = h('div', { class: 'tb-meta' }, chip(d.solved));
@@ -485,6 +514,11 @@
       }
 
       function draw() {
+        var key = focusKey(page);
+        drawNow();
+        focusBack(page, key);
+      }
+      function drawNow() {
         clear(page);
         if (!projects.length) {
           page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '새 기록' }), h('h1', { text: '기록을 남길 프로젝트가 없어' })));

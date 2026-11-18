@@ -9535,3 +9535,17 @@ def test_pipeline_repo_key_joins_worktrees_and_pr_numbers():
 def test_spa_paths_include_pipeline():
     from plugins.harness.console import server as srv
     assert srv.SPA_PATHS.match("/pipeline") and not srv.SPA_PATHS.match("/pipeline/x")
+
+
+def test_elicitation_url_mode_unsafe_scheme_still_makes_a_card_and_answers_pass_through(mconsole):
+    """2026-11-18(X2): javascript: 같은 주소도 서버는 요청 카드로 넘기고(열지 말지는 화면이 정한다 — 열기 링크를 만들지 않고 Post 는 [다 했어] 도 막는다),
+    거절·닫기는 그대로 돌아간다. 빈 주소는 카드 없이 cancel(위 시험)."""
+    c = mconsole
+    proc = elicit_setup(c)
+    c.app.manager.on_event(proc, elicit_url_event("u9", url="javascript:alert(1)"))
+    (req,) = c.app.store.pending_for("s1")
+    status, detail, _ = c.call("GET", f"/api/requests/{req.rid}")
+    assert status == 200 and detail["elicitation"]["mode"] == "url" and detail["elicitation"]["url"] == "javascript:alert(1)"
+    assert c.call("POST", f"/api/requests/{req.rid}/answer", {"action": "decline"})[0] == 200
+    wait_for(lambda: proc.written)
+    assert proc.written[0]["response"]["response"] == {"action": "decline"}

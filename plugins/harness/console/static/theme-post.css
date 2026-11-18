@@ -793,6 +793,8 @@
 :root[data-theme="post"] .docs-page .drow.on .dn { color: var(--text); }
 :root[data-theme="post"] .docs-page .dlist .dnote { margin-top: 14px; font-size: 12px; color: var(--muted); }
 :root[data-theme="post"] .docs-page .dprev { padding: 20px 22px; border: 1.5px solid var(--bd); border-radius: var(--rc); background: var(--paper); box-shadow: 0 1px 0 var(--bd2), 0 10px 24px -18px rgba(36,48,74,.35); }
+:root[data-theme="post"] .docs-page .dprev { scroll-margin-top: 88px; }  /* 좁은 화면에서 눌러 내려올 때 위에 붙는 메뉴줄에 머리가 가리지 않게 */
+:root[data-theme="post"] [data-elicit-url] { overflow-wrap: anywhere; word-break: break-all; }  /* MCP 정보 요청의 긴 주소가 줄을 못 바꿔 화면을 옆으로 밀지 않게 */
 :root[data-theme="post"] .docs-page .dhead h2 { font-size: 18px; font-weight: 800; letter-spacing: -.02em; }
 :root[data-theme="post"] .docs-page .dres { padding: 20px 22px; }
 :root[data-theme="post"] .docs-page .dsec > p.note-muted { padding: 14px; border: 1.5px dashed var(--bd); border-radius: var(--rc); }
@@ -958,11 +960,12 @@
 /* 산출물: 형식 배지 · 둘째 줄 · 오른쪽 칸(판 이력 · 문서 검사 · 할 수 있는 일) */
 :root[data-theme="post"] .docs-page .drow { justify-content: flex-start; }
 :root[data-theme="post"] .docs-page .drow .chip2 { margin-left: auto; }
-:root[data-theme="post"] .ext { display: inline-grid; place-items: center; flex: none; min-width: 36px; height: 22px; padding: 0 5px; border-radius: 6px; font: 700 10px/1 var(--font); letter-spacing: 0; background: var(--surface); color: var(--sec); }
+:root[data-theme="post"] .ext { display: inline-grid; place-items: center; flex: none; width: 44px; height: 22px; padding: 0 5px; border-radius: 6px; font: 700 10px/1 var(--font); letter-spacing: 0; background: var(--surface); color: var(--sec); }
 :root[data-theme="post"] .ext-xlsx { background: #1F6F43; color: #E6FFF0; }
 :root[data-theme="post"] .ext-pptx { background: #B5472B; color: #FFF1EC; }
+:root[data-theme="post"] .ext-docx { background: #2B579A; color: #EAF1FF; }
 :root[data-theme="post"] .ext-md { background: #2F4F7F; color: #EAF1FF; }
-:root[data-theme="post"] .docs-page .drow .dn small { font-size: 11.5px; color: var(--muted); }
+:root[data-theme="post"] .docs-page .drow .dn small { font-size: 11.5px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 :root[data-theme="post"] .docs-page .dmeta { flex: 1 1 240px; max-width: 280px; display: grid; gap: 18px; align-content: start; }
 :root[data-theme="post"] .dm-sec { display: grid; gap: 8px; }
 :root[data-theme="post"] .dmeta h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
@@ -999,3 +1002,9 @@
 :root[data-theme="post"][data-mode="dark"] .modal-back, :root[data-theme="post"][data-mode="dark"] .nb-back { background: rgba(8,11,18,.6); }
 :root[data-theme="post"][data-mode="dark"] .ask, :root[data-theme="post"][data-mode="dark"] .tb-page .tb-ai.ask { background: #2D364B; }
 :root[data-theme="post"] .folder-pick .folder-opt .pn small.mono { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }  /* 긴 경로(임시 폴더·Windows 사용자 폴더)가 좁은 폭에서 8~10줄로 늘어나 목록이 길어졌다. 이름은 굵은 글씨로 따로 있다. 첫 실행 폴더 고르기([data-pick])는 이미 한 줄 말줄임이라 빼고, 전체 경로는 title */
+
+/* Tab 키 건너뛰기 링크: 평소엔 안 보이고(키보드 포커스가 올 때만 보인다) 본문으로 바로 간다. 머리 맨 앞 하나 + 세션 목록 맨 앞 하나. */
+:root[data-theme="post"] .po-skip:not(:focus) { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+:root[data-theme="post"] .po-skip { display: block; padding: 8px 14px; border: 1.5px solid var(--bd); border-radius: 10px; background: var(--paper); color: var(--text); font-size: 13px; font-weight: 600; text-decoration: none; }
+:root[data-theme="post"] .po-skip-top:focus { position: fixed; top: 8px; left: 8px; z-index: 200; }
+:root[data-theme="post"] #main:focus { outline: none; }
