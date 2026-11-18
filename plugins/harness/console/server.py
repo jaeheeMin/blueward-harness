@@ -176,6 +176,26 @@ CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';
        "connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
+def topic(name: str) -> str:
+    """항목 이름 뒤에 은/는 을 붙인다(받침 따라). 한글로 안 끝나면 은(는)."""
+    name = str(name)
+    c = name[-1:]
+    if "가" <= c <= "힣":
+        return name + ("은" if (ord(c) - 0xAC00) % 28 else "는")
+    return name + "은(는)"
+
+
+def read_error_text(e: OSError) -> str:
+    """파일을 못 읽었다는 안내. 예외 클래스 이름을 화면에 내지 않고 이유를 말로 쓴다."""
+    if isinstance(e, PermissionError):
+        return "파일을 읽지 못했어. 읽을 권한이 없거나 다른 프로그램이 쓰고 있어."
+    if isinstance(e, FileNotFoundError):
+        return "파일을 읽지 못했어. 파일이 없어졌거나 옮겨졌어."
+    if isinstance(e, IsADirectoryError):
+        return "파일을 읽지 못했어. 파일이 아니라 폴더야."
+    return "파일을 읽지 못했어. 다른 프로그램이 쓰고 있거나 디스크 문제일 수 있어."
+
+
 class HttpError(Exception):
     def __init__(self, status: int, message: str):
         self.status, self.message = status, message
@@ -374,6 +394,7 @@ class App:
             s["turn"] = {"skill": info["skill"], "unknown": info["unknown"]}
             if info["isRepo"]:
                 s["changedFiles"] = info["changedFiles"]
+            s["branchTouch"] = pipeline.branch_touch(info.get("branchFiles")) if info["isRepo"] else None  # 커밋한 뒤 푸시 전에도 바꾼 곳을 안다(Cozy Office 팀 배정)
         self.advance_flow(s, info)
         self.store.touch(s)
 
@@ -960,6 +981,7 @@ class App:
         r = self.store.get_request(g[0])
         if r is None:
             raise HttpError(404, "없는 요청이야.")
+        given = ""  # 사용자가 적은 거절 이유(적지 않았으면 빈 값 — 기본 문구는 결과 화면에 "전달한 이유" 로 내지 않는다)
         if r.kind == "permission":
             decision = b.get("decision")
             if decision == "allow":
@@ -974,6 +996,7 @@ class App:
                     raise HttpError(400, "이 요청에는 이 세션에서만 쓸 수 있는 '다시 묻지 않기' 규칙이 없어.")
                 reply, outcome, code = {"behavior": "allow", "updatedPermissions": mine}, "허용하고 이 세션에서 다시 묻지 않음", "allow_session"
             elif decision == "deny":
+                given = b["reason"].strip() if isinstance(b.get("reason"), str) else ""
                 reason = b.get("reason") if isinstance(b.get("reason"), str) and b["reason"].strip() else (
                     "계획을 고쳐 달라고 했어." if r.tool_name == "ExitPlanMode" else "콘솔에서 거부했어.")
                 reply, outcome, code = {"behavior": "deny", "message": reason}, "거부함", "deny"
@@ -986,7 +1009,7 @@ class App:
         else:
             response = question_reply(r.tool_input["questions"], self.check_answers(r, b.get("answers")))
             outcome, code = "답변함", "answered"
-        if not self.store.resolve(r.rid, response, outcome, code):
+        if not self.store.resolve(r.rid, response, outcome, code, given):
             raise HttpError(409, f"이미 처리된 요청이야: {r.outcome}")
         return 200, r.public()
 
@@ -1026,9 +1049,9 @@ class App:
                 if not isinstance(v, str):
                     raise HttpError(400, f"글자로 보내야 해: {name}")
                 if f.get("minLength") is not None and len(v) < f["minLength"]:
-                    raise HttpError(400, f"{name} 은 {int(f['minLength'])}글자 이상이어야 해.")
+                    raise HttpError(400, f"{topic(name)} {int(f['minLength'])}글자 이상이어야 해.")
                 if f.get("maxLength") is not None and len(v) > f["maxLength"]:
-                    raise HttpError(400, f"{name} 은 {int(f['maxLength'])}글자 이하여야 해.")
+                    raise HttpError(400, f"{topic(name)} {int(f['maxLength'])}글자 이하여야 해.")
             elif t in ("number", "integer"):
                 if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")):
                     raise HttpError(400, f"숫자로 보내야 해: {name}")
@@ -1037,9 +1060,9 @@ class App:
                         raise HttpError(400, f"정수여야 해: {name}")
                     v = int(v)
                 if f.get("minimum") is not None and v < f["minimum"]:
-                    raise HttpError(400, f"{name} 은 {f['minimum']:g} 이상이어야 해.")
+                    raise HttpError(400, f"{topic(name)} {f['minimum']:g} 이상이어야 해.")
                 if f.get("maximum") is not None and v > f["maximum"]:
-                    raise HttpError(400, f"{name} 은 {f['maximum']:g} 이하여야 해.")
+                    raise HttpError(400, f"{topic(name)} {f['maximum']:g} 이하여야 해.")
             elif t == "boolean":
                 if not isinstance(v, bool):
                     raise HttpError(400, f"예·아니오로 보내야 해: {name}")
@@ -1053,9 +1076,9 @@ class App:
                 if f["required"] and not v:
                     raise HttpError(400, f"꼭 채워야 하는 항목이 비었어: {name}")
                 if f.get("minItems") is not None and len(v) < f["minItems"]:
-                    raise HttpError(400, f"{name} 은 {int(f['minItems'])}개 이상 골라야 해.")
+                    raise HttpError(400, f"{topic(name)} {int(f['minItems'])}개 이상 골라야 해.")
                 if f.get("maxItems") is not None and len(v) > f["maxItems"]:
-                    raise HttpError(400, f"{name} 은 {int(f['maxItems'])}개 이하로 골라야 해.")
+                    raise HttpError(400, f"{topic(name)} {int(f['maxItems'])}개 이하로 골라야 해.")
             out[k] = v
         return {"action": "accept", "content": out}, "보냄"
 
@@ -1661,7 +1684,7 @@ class App:
         except docfiles.PreviewError as e:
             raise HttpError(422, str(e))
         except OSError as e:
-            raise HttpError(500, f"파일을 읽지 못했어: {type(e).__name__}")
+            raise HttpError(500, read_error_text(e))
 
     def a_file_raw(self, g, q, b):
         _, real, rel = self.file_target(g[0], q.get("path", [""])[0])
@@ -1674,7 +1697,7 @@ class App:
             with open(real, "rb") as fh:
                 body = fh.read()
         except OSError as e:
-            raise HttpError(500, f"파일을 읽지 못했어: {type(e).__name__}")
+            raise HttpError(500, read_error_text(e))
         # SVG 안의 스크립트가 이 출처에서 돌지 못하게 한다
         return 200, Raw(body, docfiles.IMAGE_MIME[ext], {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox"})
 
@@ -1689,7 +1712,7 @@ class App:
             with open(real, "rb") as fh:
                 body = fh.read()
         except OSError as e:
-            raise HttpError(500, f"파일을 읽지 못했어: {type(e).__name__}")
+            raise HttpError(500, read_error_text(e))
         name = os.path.basename(rel)
         return 200, Raw(body, "application/octet-stream",
                         {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name, safe='')}"})  # nosniff 는 send 가 모든 응답에 붙인다

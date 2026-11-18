@@ -39,7 +39,7 @@
   function create(kit) {
     var h = kit.h, clear = kit.clear, api = kit.api, qs = kit.qs, link = kit.link, go = kit.go;
     var filter = { status: 'all', q: '', project: '', author: '' };
-    var carry = { warnings: [] };  /* 방금 올린 기록의 경고를 한 건 화면이 한 번 보여 준다 */
+    var carry = { warnings: [], landed: '' };  /* 방금 올린 기록의 경고를 한 건 화면이 한 번 보여 준다 */
 
     function chip(done) { return h('span', { class: done ? 'tag ok' : 'tag', text: done ? '해결됨' : '아직 안 풀림' }); }
     function waitFor(fetch, draw, state) {
@@ -100,7 +100,12 @@
       var input = h('input', { class: 'comp-in', id: 'tb-q', placeholder: '오류 문구나 낱말로 찾기', value: filter.q });
       input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); search(); } });
 
+      // 찾기칸에 한글을 조합하는 동안 목록을 다시 그리면(읽는 중 폴링) 입력칸이 떼어졌다 붙어 조합이 끊긴다. 조합이 끝날 때까지 미루고, 끝나면 마지막 것만 그린다.
+      var composing = false, deferred = null;
+      input.addEventListener('compositionstart', function () { composing = true; });
+      input.addEventListener('compositionend', function () { composing = false; if (deferred) { var x = deferred; deferred = null; draw(x[0], x[1]); } });
       function draw(d, e) {
+        if (composing && input.isConnected) { deferred = [d, e]; return; }
         var key = focusKey(page);
         drawNow(d, e);
         focusBack(page, key);
@@ -169,8 +174,8 @@
     function itemView(root, repo, number) {
       var state = { dead: false }, page = h('div', { class: 'tb-page' }), title = '문제·해결 기록';
       var compose = { kind: 'candidate', text: '', busy: false, note: '' };
-      var after = carry.landed ? 'title' : '';  // Post: 누른 단추가 비활성이 되거나 사라지면 다시 그린 뒤 이어 갈 자리('title' 제목 · 'text' 이야기 칸 · 'resolve:N' N번째 [이걸로 해결])
-      carry.landed = false;
+      var after = carry.landed && carry.landed === itemHref(repo, number) ? 'title' : '';  // Post: 누른 단추가 비활성이 되거나 사라지면 다시 그린 뒤 이어 갈 자리('title' 제목 · 'text' 이야기 칸 · 'resolve:N' N번째 [이걸로 해결])
+      carry.landed = '';  // 올린 바로 그 기록 화면만 제목으로 포커스를 받는다(다른 기록을 먼저 열면 이 표시는 버린다)
       root.appendChild(page);
       page.appendChild(kit.loadingBox('기록을 읽는 중이야'));
 
@@ -523,8 +528,8 @@
           solution: f.solution, solved: f.solved }).then(function (r) {
           store(DRAFT_KEY, null);
           carry.warnings = r.warnings || [];
-          carry.landed = true;  // Post: 올린 기록 화면의 제목으로 포커스(눌렀던 단추가 있던 화면은 사라진다)
-          go(itemHref(r.repo, r.number));
+          carry.landed = itemHref(r.repo, r.number);  // Post: 올린 기록 화면의 제목으로 포커스(눌렀던 단추가 있던 화면은 사라진다)
+          go(carry.landed);
         }, function (e) {
           busy = false; err = { kind: e.status === 409 ? 'label' : e.status === 504 ? 'unsure' : 'fail', text: e.message }; drawSubmit(); drawErr();
           if (isPostNow() && !page.contains(document.activeElement) && slots.submit && !slots.submit.disabled) slots.submit.focus({ preventScroll: true });  // 올리는 동안 비활성이던 단추가 포커스를 잃었다

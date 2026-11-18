@@ -17,6 +17,7 @@ from store import (CHECK_DONE, CHECK_FAIL, CHECK_UNKNOWN, MAX_CHANGED_FILES, MAX
                    TITLE_PROMPT, TITLE_SESSION, chat_clean, mark_check, prompt_title, record_check, remember_touched)
 
 QUESTION_WAIT = 300.0
+HARNESS_NS = "harness"  # 이 플러그인 스킬의 네임스페이스(plugin.json name)
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 PR_CREATE = re.compile(r"(?:^|[\s;&|(])gh\s+pr\s+create\b")  # 이 세션이 PR 을 만든 명령
 EDIT_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
@@ -459,13 +460,20 @@ class Hooks:
     def _skill_started(self, s: dict, command) -> None:
         if not isinstance(command, str) or not command:
             return
-        skill = command.split(":", 1)[-1].lstrip("/")
+        name = command.lstrip("/")
+        ns, colon, base = name.partition(":")
+        # 하네스 스킬(`harness:spec`)만 네임스페이스를 뗀다. 다른 플러그인의 `foo:spec` 까지 spec 으로 적으면 하네스 스킬을 쓴 것으로 셈되고
+        # (스킬 줄·갈래 진행·Cozy Office 팀) 하네스 갈래가 움직인다. 그런 스킬은 `foo:spec` 이름 그대로 남긴다
+        skill = base if colon and ns == HARNESS_NS else name
+        if not skill:
+            return
         for name, state in list(s["skillStates"].items()):
             if state == "active":
                 s["skillStates"][name] = "done"
         if skill not in s["skillStates"] and len(s["skillStates"]) >= MAX_SKILL_STATES:
             for old in [n for n, v in s["skillStates"].items() if v != "active"][:len(s["skillStates"]) - MAX_SKILL_STATES + 1]:
                 del s["skillStates"][old]
+        s["skillStates"].pop(skill, None)  # 다시 쓴 스킬은 맨 뒤로(usedSkills 가 쓴 차례를 낸다)
         s["skillStates"][skill] = "active"
         s["currentSkill"] = skill
         flows.skill_started(s, skill)

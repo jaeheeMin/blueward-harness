@@ -1439,11 +1439,11 @@ def test_post_theme_css_stays_under_data_theme_post():
 
 
 def test_post_home_uses_office_scene():
-    # 오늘 화면 장면은 사무실(#1033): index 가 싣고, sceneList 가 flow·t 를 주고, 팀 요약이 창구 요약 줄을 대신하며, 차분이면 목록이 남는다
+    # 오늘 화면 장면은 사무실(#1033): index 가 싣고, sceneList 가 flow·t 를 주고, 팀 요약이 옛 단계 요약 줄을 대신하며, 차분이면 목록이 남는다
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert html.index('src="/post/office/office-post.js"') < html.index('src="/theme-post.js"') < html.index('src="/app.js"')
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "flow: s.flowId || ''" in app and "t: s.updatedAt" in app
+    assert "flow: PL.teamFlowOf(s)" in app and "t: s.updatedAt" in app
     assert "window.BHOfficeScene" in app and "attachScene(sceneHost)" in app
     assert "officeList" not in app and "list: sceneList" in app  # 제목을 이스케이프하지 않고 그대로 준다(장면이 textContent 로 쓴다)
     bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
@@ -1451,8 +1451,10 @@ def test_post_home_uses_office_scene():
     scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
     assert "function attach(host, opts, office)" in scene and "office.attach(host, opts)" in scene and "calm()" in scene
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    logic = (STATIC / "post-logic.js").read_text(encoding="utf-8")  # 팀 표는 post-logic.js 한 곳(홈 팀 요약·세션 화면 안내판이 같이 읽는다)
     for team in ("요구분석팀", "설계팀", "개발팀", "기능컨설팅팀", "표준화팀", "유지보수팀"):
-        assert team in home
+        assert team in logic
+    assert "window.BHPostLogic.TEAMS" in home
     assert "paintTeams()" in home and "paintCalm()" in home and "po-maplist" in home
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     assert ".po-stage.is-office" in css and "aspect-ratio" in css
@@ -1581,16 +1583,17 @@ const states = ['turn', 'blocked', 'unk', 'run', 'wait', 'idle', 'done', 'turn']
 out.counts = P.filterCounts(states);
 out.match = P.FILTERS.map(f => states.map(s => P.filterMatch(f.id, s) ? 1 : 0).join(''));
 out.status = ['✕ 막힘 · 고친 뒤 이어서', '? 확인 못 함 · 검사를 못 했어', '내 차례 · 승인하기', '', null].map(P.statusText);
-out.here = [0, 3, 4, 9, -2].map(P.hereTitle);
+out.here = [[0, 'srs'], [1, 'spec'], [2, 'config'], [2, ''], [2, undefined], [3, 'dev'], [4, 'srs'], [9, 'dev'], [-2, 'srs-export']].map(a => P.hereTitle(a[0], a[1]));
 out.lines = P.STATES.map(P.hereLine);
 const cell = (id, value, tone) => ({ id, label: id === 'progress' ? 'AI 진행' : id, value, tone: tone || '' });
 out.info = P.infoRow([cell('step', '1 / 3 쓰기', 'g'), cell('req', 'REQ-007'), cell('pr', 'PR #301', 'w'), cell('progress', '40%')], 'SRS 쓰기').map(c => [c.label, c.value, c.tone]);
 out.infoEmpty = P.infoRow([], '').map(c => c.value).join('|');
 out.insp = P.INSP.join(',');
 out.seal = ['allow', 'allow_session', 'deny', 'answer', 'accept', 'decline', 'cancel', 'nothing'].map(d => P.sealOf(d).text + ':' + P.sealOf(d).tone);
-out.sub = P.sealSub(new Date(2026, 10, 7), '검토 창구');
-out.desk = [['permission', 1], ['plan', 1], ['question', 1], ['elicitation', 4]].map(a => P.sealDesk(a[0], a[1]));
-out.clerk = [P.clerkLine('permission', 0), P.clerkLine('plan', 0), P.clerkLine('question', 0), P.clerkLine('elicitation', 2)];
+out.sub = P.sealSub(new Date(2026, 10, 7), '리뷰 룸'); out.subNone = P.sealSub(new Date(2026, 10, 7), '');
+out.desk = [['permission', 1, 'spec'], ['plan', 1, 'spec'], ['question', 1, 'spec'], ['elicitation', 4, 'spec'], ['question', 2, 'fix'], ['question', 2, ''], ['question', 3, 'dev']].map(a => P.sealDesk(a[0], a[1], a[2]));
+out.clerk = [P.clerkLine('permission', 0), P.clerkLine('plan', 0), P.clerkLine('question', 0, 'srs'), P.clerkLine('elicitation', 2, 'standard'), P.clerkLine('question', 2, ''), P.clerkLine('question', 3, 'dev'), P.clerkLine('question', 4, 'dev')];
+out.teams = [P.teamOf('srs-export'), P.teamOf('fix'), P.teamOf(''), P.teamOf(undefined)];
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -1605,18 +1608,31 @@ def test_post_session_logic_filters_info_and_seals():
     assert out["counts"] == {"all": 8, "turn": 4, "run": 2, "done": 1}
     assert out["match"] == ["11111111", "11100001", "00011000", "00000010"]
     assert out["status"] == ["막힘 · 고친 뒤 이어서", "확인 못 함 · 검사를 못 했어", "내 차례 · 승인하기", "", ""]
-    assert out["here"] == ["1번 창구 · 쓰기 책상", "4번 창구 · 검토 창구", "5번 창구 · 발송 우체통", "5번 창구 · 발송 우체통", "1번 창구 · 쓰기 책상"]
+    # 안내판 첫 줄은 앉은 곳: 팀 자리(0~2)는 세션의 팀 이름 + 단계(설정 갈래도 단계 번호 2 라 개발팀이 아니라 자기 팀, 단계 이름은 설정 — 9회차 ②), 리뷰 룸·완료는 팀과 무관, 팀이 없으면 "팀 없음"
+    assert out["here"] == ["요구분석팀 · 요구사항", "설계팀 · 개발 Spec", "기능컨설팅팀 · 설정", "팀 없음", "팀 없음", "리뷰 룸 · 검토", "완료 · 합쳐짐", "완료 · 합쳐짐", "요구분석팀 · 요구사항"]
+    assert out["teams"] == ["요구분석팀", "유지보수팀", "", ""]
     # 가이드 2.4 둘째 줄(반말). STATES 순서: turn blocked unk run wait done idle
-    assert out["lines"] == ["편지를 들고 네 답을 기다려", "창구에서 막혀 있어", "검사를 못 해서 멈췄어", "다음 창구로 걸어가", "의자에 앉아 승인을 기다려", "편지를 다 부쳤어", "창구 앞에서 쉬고 있어"]
+    assert out["lines"] == ["네 답을 기다리고 있어", "막혀서 멈춰 있어", "검사를 못 해서 멈췄어", "지금 일하고 있어", "의자에 앉아 승인을 기다려", "일을 다 마쳤어", "잠깐 쉬고 있어"]
     # 정보 줄은 늘 다섯 칸(없으면 –) 뒤에 숫자 띠의 나머지 칸(AI 진행 따위)
     assert out["info"][:5] == [["단계", "SRS 쓰기", "g"], ["요구사항", "REQ-007", ""], ["개발 번호", "–", ""], ["작업 기록", "–", ""], ["검토 요청", "PR #301", "w"]]
     assert out["info"][5] == ["AI 진행", "40%", ""] and len(out["info"]) == 6
     assert out["infoEmpty"] == "–|–|–|–|–" and out["insp"] == "산출물,검사,기억,기록,기술"
     # 도장: 승인 주 버튼 보냄 · 질문 답 접수 · 거절·아니오·닫기 반송
     assert out["seal"] == ["보냄:ok", "보냄:ok", "반송:no", "접수:ok", "접수:ok", "반송:no", "반송:no", "접수:ok"]
-    assert out["sub"] == "11.07 · 검토 창구"
-    assert out["desk"] == ["검토 창구", "검토 창구", "설계 창구", "발송 우체통"]
-    assert out["clerk"] == ["검토 창구 직원이 네 도장을 기다려. 누르면 도장이 찍혀"] * 2 + ["1번 창구 앞에서 손님이 편지를 흔들며 네 답을 기다려", "3번 창구 앞에서 손님이 편지를 흔들며 네 답을 기다려"]
+    assert out["sub"] == "11.07 · 리뷰 룸"
+    assert out["desk"] == ["리뷰 룸", "리뷰 룸", "설계팀 자리", "완료", "유지보수팀 자리", "", "리뷰 룸"]
+    # 승인·계획은 리뷰 룸의 검토 담당, 질문은 그 세션이 앉은 곳(팀·리뷰 룸을 모르면 곳 이름 없이)
+    assert out["clerk"] == ["리뷰 룸에서 검토 담당이 네 승인을 기다려. 누르면 승인 도장이 찍혀"] * 2 + [
+        "요구분석팀 자리에서 손을 들고 네 답을 기다려", "표준화팀 자리에서 손을 들고 네 답을 기다려", "세션이 손을 들고 네 답을 기다려", "리뷰 룸에서 손을 들고 네 답을 기다려", "세션이 손을 들고 네 답을 기다려"]
+    # 우체국 말(창구·편지·손님)은 Cozy Office 화면 글에 없다
+    for name in ("post-logic.js", "post-session.js", "post-home.js", "post-pipeline.js", "theme-post.js", "theme-post.css", "app.js", "app.css", "index.html", "post/manifest.js"):
+        txt = (STATIC / name).read_text(encoding="utf-8")
+        assert not any(w in txt for w in ("창구", "편지", "손님", "우체", "발송")), name
+    # 도장 밑줄은 자리를 모르면(팀 없음) 날짜만, 안내판은 flow 가 바뀌면 다시 그린다, 도장은 flow 를 자리 이름에 넘긴다
+    assert out["subNone"] == "11.07"
+    app_js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "sig = s.id + '|' + state + '|' + k + '|' + flow" in app_js
+    assert "PL.sealDesk(info.kind, info.k, info.flow)" in (STATIC / "post-session.js").read_text(encoding="utf-8")
 
 
 def test_post_session_ui_wiring():
@@ -1635,7 +1651,7 @@ def test_post_session_ui_wiring():
     assert "width: 108px" in seal and "height: 108px" in seal and "border: 4px double" in seal and "rotate(-14deg)" in seal and ".38s" in seal
     assert "font-size: 22px" in re.search(r"\.po-seal b \{[^}]*\}", css).group(0)
     assert "scale(2.4)" in css and "prefers-reduced-motion" in css
-    assert "width: 112px" in css  # 좁은 화면 창구 안내판
+    assert "width: 112px" in css  # 좁은 화면 자리 안내판
 
 
 def test_post_outputs_tab_lists_each_file_once():
@@ -3708,7 +3724,7 @@ def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
     assert home.count("restSlot.appendChild(slots.whatsSlot)") == 2 and "foot.appendChild(slots.whatsSlot)" in home
     # 덱 머리 숫자는 타일·띠·문장과 같은 내 차례 건수(BHLogic.turnItems 길이)다: 검사가 실패한 PR 세션도 카드로 올리고, 한 세션의 요청 여럿은 "요청 +N"
     assert "fix: true" in home and "return '고쳐야 함'" in home and "turnN = Math.max(cardN, turnTotal)" in home and "turnTotal = turnCount;" in home
-    assert "'요청 +' + it.more" in home and ".po-dc-wait + .po-dc-wait" in (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert "'요청 +' + it.more" in home and "].filter(Boolean).join(' · ')" in home  # G3: 요청 수와 시각은 한 묶음(좁은 폭에서 시각만 다음 줄로 떨어지지 않게)
     # 열린 PR 상태를 홈이 열려 있는 동안 1분마다 다시 읽고, 홈을 떠나면 멈춘다(Sauce 홈과 같은 간격)
     assert "MY_PRS_POLL_MS = 20000" in home and "clearInterval(prTimer)" in home and "delete fixBox.dataset.ready" in home
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
@@ -3784,7 +3800,7 @@ def test_post_new_task_extra_cases_X1():
     # 아주 긴 폴더 이름: 제목·눈썹은 어디서든 줄을 바꾸고, 위쪽 줄은 알림·테마 단추 대신 이름만 줄어든다
     assert ':root[data-theme="post"] .ptitle .eb, :root[data-theme="post"] .ptitle h1 { overflow-wrap: anywhere; }' in css
     assert ':root[data-theme="post"] #app > .top > :not(.ptop-proj):not(.sp):not(.ptop-lim) { flex-shrink: 0; }' in css and ".ptop-proj b { flex: 0 1 auto; min-width: 0;" in css
-    assert ':root[data-theme="post"] #new-title:focus { outline: none; }' in css
+    assert ':root[data-theme="post"] #new-title:focus, :root[data-theme="post"] main h1[tabindex="-1"]:focus' in css
 
 
 def test_post_new_task_extra_cases_X3():
@@ -3793,7 +3809,7 @@ def test_post_new_task_extra_cases_X3():
     # 느린 분석 시작(윈도우 git) 중 요청 고치기·다시 시작을 누르면 늦게 온 시작·폴링 답은 버린다(쓰던 화면이 확인 화면으로 튀지 않게)
     assert "function late(run) { return isPostTheme() && (!alive || run !== beginRun || step !== 'analyzing'); }" in app
     assert "if (isPostTheme() && (!alive || aid !== resume)) { if (alive) loadRecent(); return; }" in app  # 주소 ?id= 로 이어 보는 첫 답도
-    assert "if (late(run)) return;\n        aid = d && (d.id || d.analysisId);" in app and "if (!alive || late(run)) return; if (e.status === 400 && isPostTheme())" in app
+    assert "if (handedOver || late(run)) return;\n        aid = d && (d.id || d.analysisId);" in app and "if (handedOver || !alive || late(run)) return; if (e.status === 400 && isPostTheme())" in app
     assert "function gone() { return !alive || (isPostTheme() && (id !== aid || step !== 'analyzing')); }" in app
     # 폴더 탓 400 안내·지난 시작 오류는 새 분석을 시작하면 지운다
     assert "if (isPostTheme()) { customMsg = ''; startErr = ''; startFolderWhy = ''; }" in app  # 3회차: 폴더 탓 시작 실패 까닭도
@@ -3884,7 +3900,7 @@ def test_post_project_scope_only_in_post_and_feeds_every_count():
     assert "var all = scopedSessions();" in app and "window.BHLogic.turnItems(all, openIds)" in app  # 띠·알림·레일·덱 숫자
     assert "var arr = scopedSessions();" in app  # 사이드 목록·장면(sceneList)·레일
     assert "sessions: { values: scopedSessions }, requests: requests," in app and "sessions: scopedSessions, loaded:" in app  # 홈·산출물, 파이프라인
-    assert "if (loadedOnce && inProject(m)) notifyChange(prev, m);" in app
+    assert "if (loadedOnce) notifyInProject(prev, m);" in app and "if (inProject(m)) notifyChange(prev, m);" in app  # 판정 전 폴더 알림은 판정 뒤에(J11)
     assert "if (isPostTheme() && startCwd) setProject({ path: startCwd });" in app and "class: 'ptop-pick'" in app
     assert "kit.projectTag ? kit.projectTag(s) : null" in (STATIC / "post-home.js").read_text(encoding="utf-8")
     assert ':root[data-theme="post"] .po-ptag {' in (STATIC / "theme-post.css").read_text(encoding="utf-8")
@@ -3954,7 +3970,7 @@ def test_post_sweep_design_fixes_css():
     assert ':root[data-theme="post"] .po-prslot a.lm, :root[data-theme="post"] .approvals a.lm { color: var(--lightink); text-decoration: underline; text-underline-offset: 3px; }' in css
     # 홈 새 소식은 아래 칸 한 줄을 다 쓰고 300px 단으로 흐른다(좁은 칸 하나에 700px 넘게 서지 않게)
     assert ':root[data-theme="post"] .po-foot > .wn-slot { grid-column: 1 / -1; }' in css
-    assert ':root[data-theme="post"] .po-foot .wn-list { display: block; column-width: 300px; column-gap: 28px; }' in css
+    assert ':root[data-theme="post"] .po-foot .wn-list, :root[data-theme="post"] .po-rest > .wn-slot .wn-list { display: block; column-width: 300px; column-gap: 28px; }' in css
 
 
 _POST_TURN_NODE = r"""
@@ -4063,7 +4079,7 @@ def test_post_new_task_extra_cases_X3_round3():
     # 서버가 줄인 첨부 이름(100자·인쇄 못 하는 글자)도 첨부 탓으로 알아본다
     assert "function serverName(n)" in app and "m.indexOf(serverName(f.name) + ':') === 0" in app
     # 테마를 바꿔도 폴더 안내·실패·시작 오류가 이어진다
-    assert "var kept0 = takeCarry('new', route.id);" in app and "keep: function () { return { step: step, aid: aid, err: err" in app
+    assert "var kept0 = takeCarry('new', route.id);" in app and "step: step, aid: aid, err: err, errNet: errNet" in app
     # 같은 파일 두 번은 칩 하나, 글 칸 밖(제목 등)에 끌어 놓아도 첨부(Post)
     assert "opts.dedupe && items.some(function (x) { return x.name === file.name && x.size === file.size" in attach and "dedupe: post," in app and "dedupe: isPostTheme()," in app
     assert "if (step === 'write') { drawWrite(panel, post); if (post) newComp.bindDrop(page); }" in app and "if (!post) newComp.bindDrop(panel);" in app
@@ -4086,7 +4102,7 @@ def test_post_x2c_remaining_defects_source():
     # 3) 올리기·이걸로 해결·GitHub 에 올리기 뒤 포커스(Post). 6) 새 기록 칸 이름은 Post 만 한글, Sauce 는 영어 키 그대로
     assert "after = 'text'" in tb and "'resolve:' + [].indexOf.call(page.querySelectorAll('button.tb-small'), ev.currentTarget)" in tb
     assert "if (then && isPostNow() && !page.contains(document.activeElement)) focusAfter(then, d);" in tb
-    assert "carry.landed = true;" in tb and "var after = carry.landed ? 'title' : '';" in tb
+    assert "carry.landed = itemHref(r.repo, r.number);" in tb and "var after = carry.landed && carry.landed === itemHref(repo, number) ? 'title' : '';" in tb
     assert "isPostNow() && !page.contains(document.activeElement) && slots.submit" in tb
     assert "var FIELD_NAME = { symptom: '증상', cause: '원인', solution: '해결 방법' };" in tb
     assert "function fieldLabel(k) { return isPostNow() && FIELD_NAME[k] ? FIELD_NAME[k] : k; }" in tb and "'aria-label': fieldLabel(k) }" in tb
@@ -4098,8 +4114,8 @@ def test_post_x2c_remaining_defects_source():
     er = app[app.index("function elicitRes(action, info)"):app.index("var FORMAT_HINT")]
     assert "info.mode === 'url' && isPostTheme()" in er and "return ELICIT_RES[action];" in er and "'마쳤다고 알렸어.'" in er
     assert "ELICIT_RES[action][0]" not in app and "ELICIT_RES[code]) { var er = elicitRes(code, req.elicitation)" in app
-    # 8) 「이전 판 N개」 접는 칸은 판이 늘어 글이 바뀌어도 같은 자리에서 포커스를 되찾는다
-    assert "if (!t && k.tag === 'SUMMARY') t = page.querySelectorAll('summary')[k.j];" in ui
+    # 8) 「이전 판 N개」 접는 칸은 판이 늘어 글이 바뀌어도 어느 문서 것인지(data-sumkey)로 포커스를 되찾는다
+    assert "k.sum ? [].filter.call(page.querySelectorAll('summary'), function (n) { return n.getAttribute('data-sumkey') === k.sum; })[0]" in ui
 
 
 def test_post_settings_first_run_and_limits_fixes():
@@ -4182,3 +4198,370 @@ def test_post_regress_sweep_fixes():
     assert "'일 목록: 이 세션의 작업 폴더가 없어져서(지운 폴더 등) 일을 고를 수 없어.'" in pick and ": failText(r.error, '일 목록') }));" in pick
     # 4. 팀 기록에서 못 읽은 프로젝트 줄이 「? 확인 못 함 · projC · 확인 못 함 — …」 로 같은 말을 두 번
     assert "' · ' + p.name + (isPostNow() ? ' — ' : ' · 확인 못 함 — ') + p.reason" in tb  # Sauce 는 전 문구 그대로
+
+
+def test_cozy_office_display_name():
+    # 2026-11-18: 테마 표시 이름이 Post → Cozy Office. 내부 id(post)·저장 값·선택자는 그대로(이미 고른 사람의 설정이 깨지지 않게)
+    theme = (STATIC / "theme.js").read_text(encoding="utf-8")
+    assert "{ id: 'post', name: 'Cozy Office', tagline: '사무실 · 세션이 팀 자리에 앉아 일해', mode: 'light' }" in theme
+    assert "name: 'Post'" not in theme and "THEME_KEY = 'bh-theme'" in theme
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "'파이프라인은 Cozy Office 테마에서 보여', '설정에서 테마를 Cozy Office 로 바꾸면" in app
+    assert "장면 그림은 낮 모습 그대로 두고" in app and "낮 우체국" not in app
+    assert "themeNow === 'post'" in app and "data-theme-opt" in app  # 내부 id 는 그대로
+    # 위쪽 줄 테마 단추는 이름을 THEMES 에서 읽는다(글자를 따로 적지 않는다)
+    assert "'테마 바꾸기 · 누르면 ' + nx.name" in app and "'테마 ' + (cur ? cur.name : '')" in app
+    guide = (ROOT / "docs" / "guide" / "harness-guide.html").read_text(encoding="utf-8")
+    assert "테마(Sauce · Cozy Office)" in guide and "Cozy Office 를 고르면 새로 고침 없이" in guide
+    assert "Post" not in guide and "우체국" not in guide
+    # 길잡이의 Cozy Office 장면 말은 사무실 말(창구·손님·편지는 다른 탭의 비유에만 있다)
+    assert "1번 창구" not in guide and "검토 창구 직원" not in guide and "그 세션의 손님" not in guide and "요구분석팀 · 요구사항" in guide
+    # 설정 테마 카드 미리보기(.tc-post)는 항공우편 줄무늬(135deg)가 아니라 창문 줄 + 책상
+    appcss = (STATIC / "app.css").read_text(encoding="utf-8")
+    assert ".tc-prev.tc-post {" in appcss and "135deg" not in appcss[appcss.index(".tc-prev.tc-post {"):appcss.index(".tc-prev.tc-post {") + 300]
+    # 사무실 번들이 없을 때만 쓰는 옛 라인아트 장면의 읽기 프로그램 안내·로그도 우체국 말이 아니다
+    tp = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    assert "우체국" not in tp and "창구" not in tp and "'세션 장면. 세션 '" in tp
+
+
+def test_cozy_survey_memo_person_click_drag_hide_and_small_fixes():
+    # 2026-11-18 Cozy Office 2회차(사용자 보고): 사무실 장면에서 사람을 누르면 세션으로 바로 가지 않고 그 사람의 메모, 메모의 「가서 확인하기」로 세션 이동, 장면을 끌면 메모 숨김
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "onNavigate: function (href) { if (!(hv && hv.onPerson && hv.onPerson(href))) go(href); }" in app  # 홈 장면만 가로챈다(세션·요청 화면은 그대로)
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert "onFocus: onFocus, onPerson: onPerson," in home
+    person = home[home.index("function onPerson(href)"):home.index("function paintDeck()")]
+    assert "if (gone || !m || !officeOn || stageFrame.querySelector('.bh-office-away')) return false;" in person  # 작은 창(PiP)·홈을 떠난 뒤 PiP 클릭은 전처럼 세션으로
+    assert "pickTop(id, true); return true;" in person  # 덱에 있는 세션이면 덱 메모를 그 세션으로
+    assert "pickId = id; away = false; paintMemo();" in person
+    assert "Math.hypot(dx, dy) < 4 || (drag.touch && Math.abs(dy) > Math.abs(dx))" in person  # 번들과 같은 문턱, 터치 세로는 스크롤
+    assert "if (memo.hidden || narrowNow()) return;" in person  # 떠 있는 메모만, 좁은 화면은 메모가 장면 아래라 숨기지 않는다
+    assert "slots.sceneHost.addEventListener('dblclick', back);" in person and "now - lastTap < 320" in person  # 두 번 누르기(터치는 번들과 같은 320ms)면 되돌린다
+    paint = home[home.index("function paintMemo()"):home.index("function personMemo(s)")]
+    assert "if (next !== memoId) away = false;" in paint and "memo.hidden = memoHidden();" in paint  # 끈 뒤 다시 그려도 숨김 유지, 메모 대상이 바뀌면 다시 보인다
+    assert "function memoHidden() { return !memoId || (away && !narrowNow()); }" in home
+    assert "new ResizeObserver(function () { memo.hidden = memoHidden(); placeMemo(); })" in home  # 넓게 끌어 숨긴 뒤 창을 줄이면 장면 아래 메모가 보인다
+    assert "memo.hidden = true; syncFocus(null);" not in home  # 메모를 치우는 곳은 memoId 도 비운다(크기 바뀜에 옛 메모가 되살아나지 않게)
+    assert "function pickTop(id, stay) { topId = id; pickId = null; away = false;" in home  # J·K·다음이면 다시 뜬다
+    pm = home[home.index("function personMemo(s)"):home.index("function onPerson(href)")]
+    assert "'가서 확인하기'" in pm and "'세션 메모'" in pm and "'/s/' + encodeURIComponent(s.id)" in pm
+    # 날짜 줄: 모든 저장소를 보면 첫 세션 폴더 이름(projC 따위)으로 채우지 않는다
+    assert "projectWant && projectWant.all ? '모든 저장소' : projectOf()" in app
+    # 설정 화면 탭 제목: renderRoute 가 title() 로 다시 써서 '설정' 이 지워지던 것
+    assert "title: function () { return '설정'; }, destroy: function () { alive = false; } };" in app
+    guide = (ROOT / "docs" / "guide" / "harness-guide.html").read_text(encoding="utf-8")
+    assert "사람을 누르면 그 사람의 메모가 떠" in guide and "사람을 누르면 그 세션으로 가." not in guide
+
+
+def test_cozy_defects_round3_source():
+    # 2026-11-18 Cozy Office 3회차 결함 D1~D16·D18. 원문 확인이고 본체는 Aside 실화면(docs/status/2026-11-18-cozy-office-defects.md).
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    logic = (STATIC / "flow-logic.js").read_text(encoding="utf-8")
+    tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    att = (STATIC / "attach.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # D1 끝난 세션엔 갈래 고르기를 안 띄운다 · D4 흐린 도구의 까닭이 눈에 보인다 · D5 단계 단추를 누르면 입력칸 아래 앞 안내를 치운다
+    assert "else if (s.status === 'ended' && s.canSend === false) el.appendChild(h('p', { class: 'note-muted', 'data-flow-ended': '1'" in ui
+    assert "data-tools-why" in ui and "' 까닭은 입력칸 아래에 있어.'" in ui
+    assert "opts.onAct()" in ui and "onAct: function () { if (/전달했어|이어서 할게/.test(followNote)) { followNote = ''; paintFollowNote(); } }" in app
+    # D2 묻는 이유의 백틱 · D6 PR 배지 조사 · D7 한도 묶음 title · D9 처음 화면 문구 · D10 한도 켠 직후 문구
+    assert "function NOTICK(t)" in app and "NOTICK(req.note).trim()" in app
+    assert "prSubject(pr.number, true) + ' 합쳐졌어.'" in logic and "' 이 합쳐졌어.'" not in logic
+    assert "attrs.title = lv.chips.map(chipTitle).join('\\n\\n');" in app
+    assert "'쓴 폴더가 아직 없어. '" in app and "d.receivedAt ? '켰어. 세션이 응답을 받을 때마다 헤더 한도가" in app
+    # D8 좁은 화면 연결 끊김 띠는 메뉴줄 아래
+    assert ':root[data-theme="post"] .conn { z-index: 46; top: 82px; }' in css
+    # D11 직접 추가 줄을 빼면 다음 줄·앞 줄·「다른 자료 직접 고르기」로 초점 · D12 진행 중인 요청과 화면 상태를 테마 전환 때 넘김 · 첨부 안내는 새로 붙이면 지움 · D13 화면을 옮긴 뒤 제목으로 초점
+    assert "function dropExtra(p)" in app and "'data-extra-x': '1'" in app and "'data-more-paths': '1'" in app
+    assert "function watchBegin(req, run)" in app and "function watchStart(sr)" in app and "claim: function () { handedOver = true; }" in app
+    assert "beginPending: beginPending, startPending: startPending" in app and "advOpen: advOpen, intro: intro" in app
+    assert "noteText = bad.length ? bad[0]" in att
+    assert "function focusPageTitle()" in app and "renderRoute();\n    focusPageTitle();" in app
+    # D14 한글 조합 중엔 목록을 다시 그리지 않는다 · D15 접는 칸은 어느 문서 것인지로 · 올린 기록 표시는 그 기록 주소로만
+    assert "if (composing && input.isConnected) { deferred = [d, e]; return; }" in tb
+    assert "carry.landed = itemHref(r.repo, r.number);" in tb
+    assert "'data-sumkey': 'old|' + d.key" in ui and "'data-sumkey': 'off|' + sid(session)" in ui
+    # D18 메모가 바뀌면 읽기 프로그램에 알린다(지난 시간은 빼고 판단)
+    assert "'data-memo-live': '1'" in home and "function announceMemo()" in home
+    assert home.count("announceMemo();") == 2  # 사람 메모 경로 + 덱 메모 경로
+
+
+_POST_TEAM_NODE = r"""
+const path = require('path'), fs = require('fs');
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const out = {
+  fixed: P.teamFlowOf({ flowId: 'dev', currentSkill: 'srs', usedSkills: ['srs'] }),          // 갈래가 있으면 그대로
+  srs: P.teamFlowOf({ flowId: null, currentSkill: 'srs', usedSkills: ['srs'] }),
+  spec: P.teamFlowOf({ currentSkill: 'spec', usedSkills: ['spec'] }),
+  usedLater: P.teamFlowOf({ currentSkill: 'deliver', usedSkills: ['srs', 'deliver'] }),       // 지금은 도구 스킬이어도 앞서 쓴 갈래 스킬
+  latest: P.teamFlowOf({ currentSkill: 'deliver', usedSkills: ['srs', 'spec', 'deliver'] }),    // 둘 다 썼으면 나중 것
+  current: P.teamFlowOf({ currentSkill: 'srs', usedSkills: ['spec', 'srs'] }),
+  tool: P.teamFlowOf({ currentSkill: 'deliver', usedSkills: ['start', 'deliver', 'open'] }),
+  none: P.teamFlowOf({}), nul: P.teamFlowOf(null),
+  stSrs: P.stationOf({ currentSkill: 'srs', usedSkills: ['srs'] }, null), stSpec: P.stationOf({ usedSkills: ['spec', 'deliver'] }, null), stNone: P.stationOf({ usedSkills: ['deliver'] }, null),  // 창구도 같은 팀을 따른다
+  map: P.SKILL_TEAM_FLOW,
+};
+console.log(JSON.stringify(out));
+"""
+
+
+def test_cozy_teams_terminal_session_sits_in_team_by_used_flow_skill():
+    # 2026-11-18 Cozy Office 4회차(J15 사용자 판정): 터미널 세션도 쓴 갈래 스킬로 맞는 팀에 앉힌다. 갈래(flowId)가 있으면 그대로.
+    r = subprocess.run([NODE, "-e", _POST_TEAM_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["fixed"] == "dev" and out["srs"] == "srs" and out["spec"] == "spec"
+    assert out["usedLater"] == "srs" and out["latest"] == "spec" and out["current"] == "srs"
+    assert out["stSrs"] == 0 and out["stSpec"] == 1 and out["stNone"] == 2
+    assert out["tool"] == "" and out["none"] == "" and out["nul"] == ""  # start·deliver 같은 도구·공용 스킬은 팀을 정하지 않는다
+    # 스킬 → 팀 표는 workflow.json 에서 읽은 것만: 그 스킬을 단계로 가진 갈래가 모두 같은 팀일 때만 들어 있다(start 는 개발·설정·표준·유지보수가 같이 써서 빠진다)
+    wf = json.loads((STATIC.parents[1] / "workflow.json").read_text(encoding="utf-8"))
+    logic = (STATIC / "post-logic.js").read_text(encoding="utf-8")
+    teams = {fid: t for t, ids in re.findall(r"\['([^']+)', \[([^\]]*)\]\]", logic[logic.index("var TEAMS"):logic.index("function teamOf")])
+             for fid in re.findall(r"'([^']+)'", ids)}
+    skill_teams = {}
+    for f in wf["flows"]:
+        for st in f["steps"]:
+            if st.get("skill"):
+                skill_teams.setdefault(st["skill"], set()).add(teams.get(f["id"]))
+    derivable = {sk for sk, ts in skill_teams.items() if len(ts) == 1 and None not in ts}
+    assert derivable == set(out["map"]) == {"srs", "spec"}, (derivable, out["map"])
+    for sk, fid in out["map"].items():
+        assert teams[fid] in skill_teams[sk]
+    # 목록 API 가 쓴 스킬을 낸다 · 장면 줄·팀 줄·메모·세션 줄이 같은 판정을 쓴다
+    store = (STATIC.parent / "store.py").read_text(encoding="utf-8")
+    assert '"usedSkills": list(s["skillStates"])' in store
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "flow: PL.teamFlowOf(s), t: s.updatedAt" in app
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert home.count("teamOf(PL.teamFlowOf(s))") == 3
+    # 우체국 말을 사무실 말로(2026-11-18 5회차): 안내판·요청 줄·도장 밑줄이 세션의 팀(teamFlowOf)을 같이 받는다
+    assert "window.BHPostSession.here(s.id, state, k, flow)" in app and "PSS.clerk(kind, sid(), k, PL.teamFlowOf(s))" in app and "flow: s ? PL.teamFlowOf(s) : ''" in app
+    assert "PL.hereTitle(k, s.flow)" in home
+
+
+_POST_REQ_TEAM_NODE = r"""
+const path = require('path');
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const it = (n, o) => Object.assign({ number: n, req: 'REQ-' + n, kind: '', spec: false, next: '개발', unsure: false, prs: [] }, o || {});
+const D = { state: 'yes', items: [it(2, { spec: true, prs: [{ number: 21, kind: 'work', branch: 'feat/41-x' }, { number: 22, kind: 'spec', branch: 'docs/42-y' }] }),
+  it(3, { kind: '설정', next: '설정' }), it(6, { kind: '표준', next: '표준' }), it(5, { unsure: true, next: '' }), it(7), it(8, { req: '', spec: true })],
+  issues: { state: 'ok', byIssue: { '40': { dev: 2, main: true }, '41': { dev: 2, main: false }, '42': { dev: 2, main: false }, '43': { dev: 2, main: false },
+    '30': { dev: 3, main: true }, '31': { dev: 3, main: false }, '60': { dev: 6, main: true }, '50': { dev: 5, main: true }, '70': { dev: 7, main: false }, '71': { dev: 7, main: true }, '80': { dev: 8, main: true }, '90': { dev: 99, main: true } } } };
+const q = (branch, o, d) => P.reqFlowOf(Object.assign({ branch: branch, changedFiles: [] }, o || {}), d === undefined ? D : d);
+const out = {
+  devMain: q('feat/40-dev-body'), cfg: q('feat/30-cfg'), cfgSub: q('docs/31-cfg-note'), std: q('chore/60-std'),
+  subWorkPr: q('feat/41-x'), subSpecPr: q('docs/42-y'), subSrc: q('fix/43-z', { changedFiles: ['src/zsd/a.abap'] }),
+  subSpecFile: q('docs/43-z', { changedFiles: ['docs/spec/DEV-002-판매.md'] }), subOtherSpec: q('docs/43-z', { changedFiles: ['docs/spec/DEV-0021-x.md'] }),
+  subNothing: q('feat/43-z'), subNoSpec: q('feat/70-spec-draft'), subNoSpecFile: q('docs/70-spec-draft', { changedFiles: ['docs/spec/'] }), ledgerOnly: q('feat/80-x'),
+  mainNoSpec: q('feat/71-x'), mainNoSpecSrc: q('feat/71-x', { changedFiles: ['src/zsd/b.abap'] }), mainNoSpecSpec: q('feat/71-x', { changedFiles: ['docs/spec/DEV-007-반품.md'] }),
+  unsure: q('feat/50-x'), noItem: q('feat/90-x'), noIssue: q('feat/12-x'), prefixOnly: q('fix/x-y'), main: q('main'),
+  issuesUnknown: q('feat/40-x', {}, Object.assign({}, D, { issues: { state: 'unknown', byIssue: {} } })), notProject: q('feat/40-x', {}, { state: 'no' }), noData: q('feat/40-x', {}, null),
+};
+// 콘솔 갈래 > 요구사항 근거(useReqs 로 받은 폴더 판) > 쓴 갈래 스킬(9회차 ④)
+P.useReqs(cwd => cwd === '/p' ? D : null);
+out.viaTeam = P.teamFlowOf({ cwd: '/p', branch: 'feat/30-cfg', usedSkills: ['start'] });
+out.skillFirst = P.teamFlowOf({ cwd: '/p', branch: 'feat/30-cfg', usedSkills: ['spec', 'start'] });
+out.flowFirst = P.teamFlowOf({ cwd: '/p', branch: 'feat/30-cfg', flowId: 'fix' });
+out.otherCwd = P.teamFlowOf({ cwd: '/q', branch: 'feat/30-cfg' });
+out.station = P.stationOf({ cwd: '/p', branch: 'feat/40-x' }, null);
+out.title = P.hereTitle(P.stationOf({ cwd: '/p', branch: 'chore/60-std' }, null), P.teamFlowOf({ cwd: '/p', branch: 'chore/60-std' }));
+P.useReqs(null);
+out.off = P.teamFlowOf({ cwd: '/p', branch: 'feat/30-cfg' });
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_cozy_teams_terminal_session_sits_in_team_by_requirement_of_branch_issue():
+    # 2026-11-18 Cozy Office 7회차(J15 나머지): 갈래 스킬을 안 쓴 터미널 세션은 브랜치 이슈의 DEV 번호 → SRS 다음 단계·Spec·바꾼 파일로 개발·설정·표준(·설계) 팀.
+    r = subprocess.run([NODE, "-e", _POST_REQ_TEAM_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["devMain"] == "dev" and out["cfg"] == "config" and out["cfgSub"] == "config" and out["std"] == "standard"
+    assert out["subWorkPr"] == "dev" and out["subSpecPr"] == "spec" and out["subSrc"] == "dev" and out["subSpecFile"] == "spec"
+    assert out["subOtherSpec"] == "" and out["subNothing"] == ""  # Spec 이 main 에 있고 아직 바꾼 게 없는 하위 작업은 개발·Spec 수정 중 어느 것인지 못 가른다
+    assert out["subNoSpecFile"] == "spec" and out["mainNoSpecSrc"] == "dev" and out["mainNoSpecSpec"] == "spec"
+    # Spec·요구사항이 main 에 없는 본체 이슈와 아직 아무것도 안 바꾼 하위 작업은 spec 스킬이 이어 쓰는지·문서 일인지 못 가른다(리뷰 반영)
+    for k in ("subNoSpec", "ledgerOnly", "mainNoSpec", "unsure", "noItem", "noIssue", "prefixOnly", "main", "issuesUnknown", "notProject", "noData", "otherCwd", "off"):
+        assert out[k] == "", k  # 근거가 없거나 못 읽으면 팀 없음(브랜치 접두어로 짐작하지 않는다)
+    # 9회차 ④: 근거가 쓴 갈래 스킬보다 먼저(spec 을 쓴 뒤 start 로 설정 건을 시작하면 설정 건의 팀)
+    assert out["viaTeam"] == "config" and out["skillFirst"] == "config" and out["flowFirst"] == "fix"
+    assert out["station"] == 2 and out["title"].startswith("표준화팀")
+    # 배선: Cozy Office 에서만 폴더 요구사항 판을 받아 post-logic 에 알린다(Sauce 는 묻지 않는다). smoke 는 post-*.js 를 안 실어 BHPostLogic 을 확인하고 부른다
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    body = app[app.index("function ensureReqs()"):app.index("function onProjectPick(e)")]
+    assert "if (!isPostTheme() || !loadedOnce || !window.BHPostLogic) return;" in body and "PL.useReqs(" in body and "PL.SKILL_TEAM_FLOW[k]" not in body and "got.state !== 'unknown'" in body and "'/api/pipeline?cwd='" in body
+    assert "ensureReqs();" in app[app.index("function renderSide()"):]
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_cozy_office_design_g1_to_g10(tmp_path):
+    """Cozy Office 디자인 다듬기(2026-11-18 6회차, G1~G10). 모양은 Aside 실화면으로 봤고, 여기서는 규칙·문구·자산이 돌아가지 않게 묶는다."""
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    # G1: 사람 그림에서 우편 물건(봉투)·검토 담당의 우편 모자띠를 뺐다 — 새로 그리지 않고 그 묶음만 지움. 자르기는 머리부터 허리까지, 어린이 그림은 따로
+    for f in (STATIC / "post" / "people").glob("*/*.svg"):
+        assert "M-7.6 -5 L0 1 L7.6 -5" not in f.read_text(encoding="utf-8"), f
+    for f in (STATIC / "post" / "clerk").glob("*.svg"):
+        assert "#4E9C9A" not in f.read_text(encoding="utf-8"), f
+    assert ".po-clerk img { position: absolute; left: 50%; top: -36px; width: 104px;" in css and ".po-clerk.is-ask img { top: -24px; }" in css
+    assert ".po-av.is-kid img { width: 127px; top: -79px; }" in css and "(who === 'kid' ? ' is-kid' : '')" in (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    # G2: 좁은 폭 위쪽 줄은 화면마다 같은 자리(프로젝트 + 테마 / 한도 · 판 · 알림)
+    assert "#app > .top > .ptop-proj { flex: 1 1 100%; }" in css and "#app > .top > .ptop-theme { margin-left: auto; }" in css and ".ptop-theme { order" not in css  # 순서는 DOM 그대로(Tab 순서)
+    # G3: 요청 수와 시각은 한 묶음, 좁은 폭 카드 머리는 격자(열기는 둘째 줄)
+    assert ".po-dc-h { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr) auto; }" in css and ".po-dc-wait + .po-dc-wait" not in css
+    # G4: 단계 칸은 짧은 이름(전체 이름은 title), 칸은 열 맞춘 격자
+    assert "PL.infoRow(PL.teamCells(cells, s, PL.stationOf(s, window.BHLogic)), cs ? window.BHLogic.stepShort(cs) : '')" in app and ".po-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));" in css
+    # G5·G6: 처음 화면 세 단계는 좁은 폭에서 한 줄씩, 폴더 이름은 두 줄까지
+    assert ".num3 { grid-template-columns: minmax(0, 1fr); gap: 8px; }" in css and ".folder-opt.proj .pn b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;" in css
+    # G7: 처리 알림 실패 줄만 실패색
+    assert ".light .note-accent.is-err" in css and "function noteCls(t)" in (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    chat = [{"t": 1, "role": "block", "text": "그냥 git push 는 쓸 수 없어.\n다음: 올리기 단계로 푸시해.", "hook": "pre-bash-git-guard", "kind": "blocked", "fix": "올리기 단계로 푸시해."}]
+    s = _session("s1", chat=chat, canSend=True)
+    got = _smoke(tmp_path, "s/s1", [s], extra={"__status": {"POST /api/sessions/s1/messages": 500}, "POST /api/sessions/s1/messages": {"error": "세션이 응답하지 않아"}}, actions=[{"click": "[data-block-send]"}])
+    assert "보내지 못했어: 세션이 응답하지 않아" in got["text"] and "<p.note-accent.is-err" in got["dump"], got["dump"][-800:]
+    ok = _smoke(tmp_path, "s/s1", [s], extra={"POST /api/sessions/s1/messages": {}}, actions=[{"click": "[data-block-send]"}])
+    assert "이 작업에 전달했어" in ok["text"] and "is-err" not in ok["dump"]
+    # G8: Post 는 요약 결과를 누른 자리(기억 칸·기억 배너) 아래에
+    assert "compactButton(s, 'pill line sm', 'panel'), compactSay(s, 'panel')" in app and "compactSay(s, 'banner')" in app and "(from === 'banner' && !compactErr)" in app
+    assert ".banner.mem > [data-compact-note] { flex: 1 1 100%;" in css and "note === COPY_FAIL ? ' is-err' : ''" in app
+    assert "title: c.id === 'step' && full && full !== c.value ? full : c.title || null" in app and "var full = cs ? String(cs.name || '') : ''" in app
+    # G9: 도장이 남은 카드 문구는 찍힌 도장 글자로, 한도 풀리는 시각은 도장 밑줄과 같은 MM.DD
+    out = json.loads(subprocess.run([NODE, "-e", """
+      const P = require(process.argv[1]), N = require(process.argv[2]);
+      console.log(JSON.stringify({ a: P.stampedLine('allow'), d: P.stampedLine('deny'), q: P.stampedLine('answer'),
+        w1: N.whenShort('11월 21일 09:00'), w2: N.whenShort('09:00'), w3: N.whenShort('1월 3일 23:05') }));
+    """, str(STATIC / "post-logic.js"), str(STATIC / "notice-logic.js")], capture_output=True, text=True, encoding="utf-8", check=True).stdout)
+    assert out == {"a": "방금 승인했어 — 보냄 도장을 찍었어", "d": "방금 돌려보냈어 — 반송 도장을 찍었어", "q": "방금 답했어 — 접수 도장을 찍었어",
+                   "w1": "11.21 09:00", "w2": "09:00", "w3": "01.03 23:05"}
+    assert "방금 답했어 — 처리됐어" not in (STATIC / "post-home.js").read_text(encoding="utf-8") and "decision: stamps[rid].decision" in app
+    # G10: 세션 없을 때 새 소식도 단으로, 점검 탭 빈 칸은 간격을 먹지 않는다
+    assert ".po-rest > .wn-slot .wn-list { display: block; column-width: 300px;" in css and ".po-ipanel > [data-r]:empty { display: none; }" in css
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_cozy_office_judge_j6_to_j14():
+    """Cozy Office 8회차: 판정 대기 J6~J14 중 고친 것(진행 기록 docs/status/2026-11-18-cozy-office-judge.md)."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    pipe = (STATIC / "post-pipeline.js").read_text(encoding="utf-8")
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    # J6: 고른 프로젝트 밖 세션을 주소로 열면 그 세션 한 줄만 목록·고리 맨 앞에(다른 프로젝트 표, 걸러보기 숫자에는 안 셈). 보는 프로젝트는 그대로
+    assert "function postGuest(rows)" in app and "'다른 프로젝트' + (f ? ' · ' + f.name : '')" in app
+    assert "var states = rows.map(function (s) { return PL.stateOf(s, L); }), cnt = PL.filterCounts(states)" in app and "if (guest) { rows = [guest.s].concat(rows);" in app
+    assert "guest = postGuest(rows);" in app and "setProject(" not in app.split("function postGuest(rows)")[1].split("function postSideList")[0]
+    # J7: 좁은 화면 고리는 한 줄 + 옆으로 밀기, 지금 고리는 줄 안으로
+    assert ":root[data-theme=\"post\"] .side .rail { flex-wrap: nowrap; overflow-x: auto;" in css
+    assert "var list = rail || sideEl.querySelector('.po-slist .nav-list')" in app and "rail.scrollLeft += rr.left - lr.left" in app
+    # J9: 대화에는 PR 메모 한 줄(검사 탭으로), 카드 전체는 검사 탭에만
+    assert "post ? prMemo(s) : ui.prCard(s)" in app and "'검사 탭에서 보기'" in app and "regions.pickInsp = function (i)" in app
+    assert "'q prcard po-prmemo' + (failed ? ' blocked' : unsure ? ' unsure' : '')" in app  # 표시 약속 칸(syncLegend)이 그대로 뜬다
+    # J10: Cozy Office 내 차례는 덱과 같은 순서(세션이 오래 기다린 순, 같으면 원래 순서)
+    assert "if (isPostTheme()) todo = todo.map(function (x, i) { return [x, i]; }).sort(" in app
+    assert "turn.sort(function (a, b) { return (a.s.updatedAt || 0) - (b.s.updatedAt || 0); });" in home
+    # J11: 판정 전 폴더 알림은 판정 뒤(최대 5초), 터미널로 넘어간 요청 수·팀 기록은 고른 프로젝트, 파이프라인은 지금 폴더 결과만, 빈 홈은 고른 프로젝트
+    assert "function repoPending(s)" in app and "flushNotify(false); if (notifyHeld.length) ensureRepos();" in app and "NOTIFY_HOLD_MS = 5000" in app
+    assert "      ensureRepos();  // 새 폴더 판정을 바로 받으러 간다" in app  # 숨은 탭은 그리기가 돌지 않아 scheduleSide 로는 판정을 못 받는다(리뷰)
+    assert "padding: 4px 4px 6px; }  /* 안쪽 여백" in css and "'불러오는 중이야'; tbTile.className = 'tile2'; }" in ui
+    assert "scopedSessions().forEach(function (s) {  // Post 는 고른 프로젝트의 세션만(J11)" in app
+    assert "troubleScope: troubleScope" in app and "if (!repos.tried) return 'wait';" in app
+    assert "kit.qs({ limit: 1, status: 'open', project: ok.slug })" in ui and "if (stats.refresh) stats.refresh();" in home
+    assert "res = st.results ? st.results.filter(function (r) { return want.indexOf(r.cwd) >= 0; }) : null;" in pipe
+    assert "var chosen = kit.projectPath ? kit.projectPath() : '';" in ui
+    # J12: 브라우저를 닫아 둔 사이 터미널로 넘어간 요청도 다시 열면 알린다(Cozy Office)
+    assert "SEEN_KEY = 'bh-post-seen'" in app and "readSeen(); setConn('ok');" in app and "(closed ? '콘솔을 닫아 둔 사이' : '연결이 끊긴 사이')" in app
+    # J14: 본문 밖 초점(테마 단추·건너뛰기)이 테마 전환으로 떨어지면 같은 단추나 본문 제목으로, 고른 문서의 세션은 12개 밖이어도 모은다
+    assert "function themeRefocus(was)" in app and "if (a && a !== document.body) return;" in app
+    assert "var pin = isPost() && st.picked && st.picked.session ? st.picked.session.id : '';" in ui
+    # J13: 코드 폴더는 서버 값(workPrefix)을 따른다
+    out = json.loads(subprocess.run([NODE, "-e", """
+      const P = require(process.argv[1]);
+      const it = { number: 2, req: 'REQ-002', kind: '', spec: false, next: '개발', unsure: false, prs: [] };
+      const d = (wp) => Object.assign({ state: 'yes', items: [it], issues: { state: 'ok', byIssue: { '41': { dev: 2, main: false } } } }, wp ? { workPrefix: wp } : {});
+      const s = (f) => ({ branch: 'feat/41-x', changedFiles: [f] });
+      console.log(JSON.stringify([P.reqFlowOf(s('src/a.abap'), d()), P.reqFlowOf(s('app/a.abap'), d()), P.reqFlowOf(s('app/a.abap'), d('app/')), P.reqFlowOf(s('src/a.abap'), d('app/'))]));
+    """, str(STATIC / "post-logic.js")], capture_output=True, text=True, encoding="utf-8", check=True).stdout)
+    assert out == ["dev", "", "dev", ""]
+
+
+_POST_TEAMS3_NODE = r"""
+const path = require('path');
+const P = require(path.join(process.argv[1], 'post-logic.js')), PP = require(path.join(process.argv[1], 'post-pipeline.js'));
+const it = (n, o) => Object.assign({ number: n, req: 'REQ-00' + n, dev: 'DEV-00' + n, kind: '', spec: false, next: '개발', unsure: false, prs: [] }, o || {});
+const D = { state: 'yes', items: [it(2, { spec: true }), it(3, { kind: '설정', next: '설정' }), it(6, { kind: '표준', next: '표준' }), it(7), it(5, { unsure: true, next: '' })],
+  issues: { state: 'ok', byIssue: { '40': { dev: 2, main: true }, '44': { dev: 2, main: false }, '30': { dev: 3, main: true }, '31': { dev: 3, main: false }, '60': { dev: 6, main: true },
+    '70': { dev: 7, main: false }, '50': { dev: 5, main: true }, '90': { dev: 99, main: true } } } };
+P.useReqs(cwd => cwd === '/p' ? D : null);
+const S = (branch, o) => Object.assign({ cwd: '/p', branch: branch, changedFiles: [] }, o || {});
+const out = {
+  // ④ 순서: 콘솔 갈래 > 이슈·요구사항 근거 > 쓴 갈래 스킬
+  flowFirst: P.teamFlowOf(S('chore/30-x', { flowId: 'fix', currentSkill: 'srs' })),
+  reqOverSkill: P.teamFlowOf(S('chore/31-x', { currentSkill: 'srs', usedSkills: ['srs'] })),
+  skillWhenNoBasis: P.teamFlowOf(S('docs/13-srs', { usedSkills: ['srs', 'deliver'] })),
+  // C: 갈래 스킬 뒤에 start 를 쓰면(새 일) 앞 갈래 스킬은 팀을 정하지 않는다. 지금 쓰는 갈래 스킬은 늘 정한다
+  cStart: P.teamFlowOf(S('fix/12-x', { usedSkills: ['srs', 'start'] })), cStartDeliver: P.teamFlowOf(S('fix/12-x', { usedSkills: ['srs', 'start', 'deliver'] })),
+  cAgain: P.teamFlowOf(S('fix/12-x', { usedSkills: ['start', 'srs'] })), cNow: P.teamFlowOf(S('fix/12-x', { currentSkill: 'spec', usedSkills: ['spec', 'start'] })),
+  // B: 다른 플러그인 스킬 이름(foo:spec)은 서버가 그대로 남기니 갈래 스킬이 아니다
+  foreign: P.teamFlowOf(S('docs/13-x', { usedSkills: ['foo:spec'] })),
+  // ③ 커밋 뒤 푸시 전: changedFiles 가 비어도 branchTouch 로
+  commitCode: P.teamFlowOf(S('feat/44-x', { branchTouch: { code: true, specs: [] } })), commitSpec: P.teamFlowOf(S('docs/70-x', { branchTouch: { code: false, specs: [7] } })),
+  commitOtherSpec: P.teamFlowOf(S('docs/70-x', { branchTouch: { code: false, specs: [8] } })), commitNone: P.teamFlowOf(S('feat/44-x', { branchTouch: null })),
+  // ① 근거와 번호
+  basisCfg: P.teamBasisOf(S('chore/30-x')), basisNoTeam: P.teamBasisOf(S('feat/50-x')), basisNoItem: P.teamBasisOf(S('feat/90-x')), basisSkill: P.teamBasisOf(S('docs/13-x', { usedSkills: ['srs'] })),
+  cellsCfg: P.infoRow(P.teamCells([{ id: 'step', label: '단계', value: '정해진 갈래 없음' }, { id: 'issue', label: '작업 기록', value: '이슈 #30' }], S('chore/30-x'), 2), ''),
+  cellsSkill: P.infoRow(P.teamCells([{ id: 'step', label: '단계', value: '정해진 갈래 없음' }], S('docs/13-x', { usedSkills: ['srs'] }), 0), ''),
+  cellsNone: P.infoRow(P.teamCells([{ id: 'step', label: '단계', value: '정해진 갈래 없음' }], S('feat/50-x'), 2), ''),
+  cellsHas: P.teamCells([{ id: 'step', label: '단계', value: '정해진 갈래 없음' }, { id: 'req', label: '요구사항', value: 'REQ-009' }], S('chore/30-x'), 2).filter(c => c.id === 'req').map(c => c.value),
+  cellsFlow: P.teamCells([{ id: 'step', label: '단계', value: '2 / 4 구현' }], S('chore/30-x', { flowId: 'dev' }), 2),
+  // ② 단계 이름
+  here: [P.hereTitle(2, 'config'), P.hereTitle(2, 'standard'), P.hereTitle(2, 'fix'), P.hereTitle(2, 'dev'), P.hereTitle(1, 'spec'), P.hereTitle(3, 'config'), P.hereTitle(2, '')],
+  // D: 장면에서 팀 자리에 앉는 상태
+  desk: ['turn', 'blocked', 'unk', 'run', 'wait', 'done', 'idle'].map(P.atDesk),
+  // E: 파이프라인 칸 — Spec 쓰는 세션은 팀 판정으로, 브랜치 이슈의 DEV 번호로도 붙는다
+  laneSkill: PP.laneOf(it(7), [{ usedSkills: ['spec'] }], P), laneOld: PP.laneOf(it(7), [{ usedSkills: ['spec'] }]),
+  laneBasis: PP.board([it(7)], [S('docs/70-x', { changedFiles: ['docs/spec/DEV-007-반품.md'] })], { reqIds: () => [] }, Object.assign({}, P, { stateOf: () => 'run' }))[1].map(c => c.item.number),
+};
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_cozy_teams3_order_basis_stage_desk_and_lane():
+    # 2026-11-19 사용자 판정(Cozy Office 9회차): 7회차 본 것 ①~④ + 4회차 판정 대기 B·C·D·E. 진행 기록 docs/status/2026-11-19-cozy-office-teams3.md
+    r = subprocess.run([NODE, "-e", _POST_TEAMS3_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["flowFirst"] == "fix" and out["reqOverSkill"] == "config" and out["skillWhenNoBasis"] == "srs"
+    assert out["cStart"] == "" and out["cStartDeliver"] == "" and out["cAgain"] == "srs" and out["cNow"] == "spec"
+    assert out["foreign"] == ""
+    assert out["commitCode"] == "dev" and out["commitSpec"] == "spec" and out["commitOtherSpec"] == "" and out["commitNone"] == ""
+    assert out["basisCfg"] == {"flow": "config", "by": "req", "issue": "30", "devNo": 3, "dev": "DEV-003", "req": "REQ-003"}
+    assert out["basisNoTeam"]["flow"] == "" and out["basisNoTeam"]["dev"] == "DEV-005"  # 팀은 못 정해도 이슈가 가리키는 번호는 사실
+    assert out["basisNoItem"] == {"flow": "", "by": "", "issue": "90", "devNo": 99, "dev": "DEV-099", "req": ""}
+    assert out["basisSkill"]["flow"] == "srs" and out["basisSkill"]["by"] == "skill" and out["basisSkill"]["skill"] == "srs"
+    cells = {c["id"]: c for c in out["cellsCfg"]}
+    assert cells["step"]["value"] == "설정" and "브랜치 이슈 #30 의 DEV-003" in cells["step"]["title"] and "기능컨설팅팀" in cells["step"]["title"]
+    assert cells["req"]["value"] == "REQ-003" and cells["dev"]["value"] == "DEV-003" and cells["issue"]["value"] == "이슈 #30"
+    skill = {c["id"]: c for c in out["cellsSkill"]}
+    assert skill["step"]["value"] == "요구사항" and "/harness:srs" in skill["step"]["title"] and skill["dev"]["value"] == "–"
+    none = {c["id"]: c for c in out["cellsNone"]}
+    assert none["step"]["value"] == "정해진 갈래 없음" and none["dev"]["value"] == "DEV-005"
+    assert out["cellsHas"] == ["REQ-009"]  # 이미 있는 칸(다음 갈래 번호)은 덮지도 겹치지도 않는다
+    assert out["cellsFlow"] == [{"id": "step", "label": "단계", "value": "2 / 4 구현"}]  # 콘솔 갈래 세션은 그대로
+    assert out["here"] == ["기능컨설팅팀 · 설정", "표준화팀 · 표준", "유지보수팀 · 수정", "개발팀 · 개발", "설계팀 · 개발 Spec", "리뷰 룸 · 검토", "팀 없음"]
+    assert out["desk"] == [True, True, True, True, False, False, False]
+    assert out["laneSkill"] == 1 and out["laneOld"] == 0 and out["laneBasis"] == [7]
+    # 장면 번들(외부 빌드본)이 사람을 세우는 규칙과 atDesk 가 같다: wait → 리뷰 룸, done → 완료, idle → 카페(rest), 그 밖 → 팀 자리
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    assert 'e.state==="wait"?C("review").push(e):e.state==="done"?C("done").push(e):e.state==="idle"?C("rest").push(e)' in bundle
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    body = home[home.index("function paintTeams()"):home.index("function draw()")]
+    assert "PL.atDesk(s.state)" in body and "카페·리뷰 룸·완료에 " in body
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "PL.teamCells(cells, s, PL.stationOf(s, window.BHLogic))" in app
+    body = app[app.index("function ensureReqs()"):app.index("function onProjectPick(e)")]
+    assert "key = cwd + '|' + br" in body and "reqs.at[key] = got && got.loading" in body and "reqs.br" not in body  # 같은 폴더에 브랜치가 다른 세션이 있어도 번갈아 묻지 않게(리뷰 반영)

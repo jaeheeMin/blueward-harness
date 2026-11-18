@@ -725,6 +725,9 @@ def test_skill_detection_from_both_paths(browser):
     browser.hook("stop", {"session_id": "t1", "cwd": "/w", "last_assistant_message": "x"})
     s = browser.call("GET", "/api/sessions/t1")[1]
     assert s["currentSkill"] == "" and {f["skill"]: f["state"] for f in s["flow"]}["prs"] == "done"
+    assert s["usedSkills"] == ["deliver", "prs"]  # 턴이 끝나 currentSkill 이 비어도 쓴 스킬은 남는다(Cozy Office 팀 배정, 2026-11-18)
+    browser.event("t1", "UserPromptExpansion", command_name="harness:deliver", expansion_type="slash_command")
+    assert browser.call("GET", "/api/sessions/t1")[1]["usedSkills"] == ["prs", "deliver"]  # 다시 쓴 스킬은 맨 뒤로(가장 나중에 쓴 갈래 스킬을 가리려고)
 
 
 def test_post_tool_use_collects_changed_files_and_pr_links(browser):
@@ -9485,6 +9488,31 @@ def test_pipeline_reads_requirements_ledger_and_open_prs_from_origin_main(tmp_pa
         c.close()
 
 
+def test_pipeline_gives_issue_dev_numbers_and_pr_branch_for_cozy_teams(tmp_path, monkeypatch):
+    # Cozy Office 7회차(J15 나머지): 열린 이슈 제목의 DEV 번호(맨 앞 [DEV-xxx] = 본체, 끝 (DEV-xxx) = 하위 작업)와 PR 의 브랜치 이름
+    issues = [{"number": 40, "title": "[DEV-002] 판매오더 조회"}, {"number": 41, "title": "목록 화면 개발 (DEV-002)"},
+              {"number": 42, "title": "SRS 변경 — 반품 요구사항 추가"}, {"number": 43, "title": "DEV-003 메모만 (DEV-003) 덧붙임"}, {"title": "번호 없음"}]
+    work = tmp_path / "work"
+    c = flow_console(tmp_path, monkeypatch, run=pipe_run(work, gh_issue_list=(0, json.dumps(issues))))
+    (work / "audit" / "ledger").mkdir(parents=True)
+    try:
+        body = pipe_get(c)[1]
+        assert body["issues"] == {"state": "ok", "reason": "", "byIssue": {"40": {"dev": 2, "main": True}, "41": {"dev": 2, "main": False}}}
+        items = {i["number"]: i for i in body["items"]}
+        assert items[2]["prs"][0]["branch"] == "feat/20-dev002-list"
+        assert body["workPrefix"] == "src/"  # 화면(post-logic.js reqFlowOf)이 작업 PR 판정과 같은 코드 폴더를 쓴다(Cozy Office 8회차 J13)
+    finally:
+        c.close()
+    c = flow_console(tmp_path / "b", monkeypatch, run=pipe_run(work, gh_issue_list=(1, "")))
+    try:
+        issues = pipe_get(c)[1]["issues"]
+        assert issues["state"] == "unknown" and issues["reason"] and issues["byIssue"] == {}  # 못 읽으면 이슈 없음으로 뭉개지 않는다
+    finally:
+        c.close()
+    import pipeline
+    assert pipeline.open_issues(lambda a, cwd: (0, "origin\t/x/bare.git (fetch)\n") if "remote" in a else (0, "[]"), "/x")["state"] == "no"  # GitHub 원격이 없으면 이슈를 보지 않는다
+
+
 def test_pipeline_says_prs_unknown_instead_of_empty_review_lane(tmp_path, monkeypatch):
     work = tmp_path / "work"
     c = flow_console(tmp_path, monkeypatch, run=pipe_run(work, gh=(1, "")))
@@ -9617,3 +9645,56 @@ def test_preview_failure_says_why_in_words_not_exception_names(tmp_path):
         docfiles.read_xlsx(str(tmp_path / "없는 파일.xlsx"))
     assert str(e.value) == "엑셀 문서를 읽지 못했어: 파일을 열 수 없어"
     assert "Error" not in docfiles.unreadable("엑셀", docfiles.ET.ParseError("x")) and "Error" not in docfiles.unreadable("엑셀", ValueError("x"))
+
+
+def test_cozy_defects_deny_reason_kept_and_error_texts_without_exception_names(browser):
+    # 2026-11-18 Cozy Office 3회차(D3·D2·D16). 거절 이유를 새로 고친 뒤에도 요청이 내놓고, 항목 이름 뒤 은/는을 붙여 쓰고, 파일 읽기 실패에 예외 이름을 안 낸다.
+    h = browser.hook_async("permission", perm_body("t1"))
+    req = wait_for(lambda: (browser.pending("t1") or [None])[0])
+    assert "reason" not in browser.call("GET", f"/api/requests/{req.rid}")[1]
+    browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "deny", "reason": "  파일부터 확인해 줘  "})
+    h["t"].join(5)
+    assert browser.call("GET", f"/api/requests/{req.rid}")[1]["reason"] == "파일부터 확인해 줘"
+    h2 = browser.hook_async("permission", perm_body("t2"))
+    req2 = wait_for(lambda: (browser.pending("t2") or [None])[0])
+    browser.call("POST", f"/api/requests/{req2.rid}/answer", {"decision": "deny"})  # 이유를 안 적으면 기본 문구를 「전달한 이유」로 내지 않는다
+    h2["t"].join(5)
+    assert "reason" not in browser.call("GET", f"/api/requests/{req2.rid}")[1]
+    assert console_server.topic("담당자 이름") == "담당자 이름은" and console_server.topic("메모") == "메모는" and console_server.topic("ID") == "ID은(는)"
+    for exc, word in ((PermissionError(13, "x"), "권한"), (FileNotFoundError(2, "x"), "없어"), (IsADirectoryError(21, "x"), "폴더"), (OSError(5, "x"), "디스크")):
+        text = console_server.read_error_text(exc)
+        assert text.startswith("파일을 읽지 못했어.") and word in text and "Error" not in text
+
+
+def test_cozy_teams3_branch_touch_and_foreign_skill_names(tmp_path, monkeypatch):
+    # Cozy Office 9회차 ③: 커밋하면 git status(changedFiles)가 비어 푸시 전 하위 작업 세션이 잠깐 팀 없음이었다 → 이 브랜치가 커밋한 파일의 작은 요약
+    t = git_table(**{"git diff --name-only origin/main...HEAD": (0, "src/zsd/print.abap\ndocs/spec/DEV-007-반품.md\nREADME.md\n")})
+    assert gitstate.inspect(str(tmp_path), fake_runner(t))["branchFiles"] == ["src/zsd/print.abap", "docs/spec/DEV-007-반품.md", "README.md"]
+    t = git_table(**{"git diff --name-only main...HEAD": (0, "a.md\n")})  # 원격 기본 브랜치가 없으면 로컬 기본 브랜치와 견준다
+    assert gitstate.inspect(str(tmp_path), fake_runner(t))["branchFiles"] == ["a.md"]
+    assert gitstate.inspect(str(tmp_path), fake_runner(git_table()))["branchFiles"] is None  # 못 읽으면 None(바꾼 게 없다고 하지 않는다)
+    assert gitstate.inspect(str(tmp_path), fake_runner(git_table(**{"git rev-parse --abbrev-ref HEAD": (0, "main\n")})))["branchFiles"] is None
+    import pipeline
+    assert pipeline.branch_touch(["src/a.abap", "docs/spec/DEV-007-x.md", "docs/spec/DEV-012-y.md", "docs/spec/notes/DEV-3.md"]) == {"code": True, "specs": [7, 12]}
+    assert pipeline.branch_touch([]) == {"code": False, "specs": []} and pipeline.branch_touch(None) is None
+    files = {"now": ["docs/spec/DEV-007-반품.md", "src/zsd/print.abap"]}
+    c = Console(tmp_path, monkeypatch, git_inspect=lambda cwd: {"isRepo": True, "repo": "r", "branch": "feat/44-x", "changedFiles": [], "skill": "deliver", "unknown": False,
+                                                                "branchFiles": files["now"]})
+    try:
+        c.login()
+        c.event("t1", "UserPromptSubmit", prompt="x")
+        c.hook("stop", {"session_id": "t1", "cwd": str(c.work), "last_assistant_message": "r"})
+        s = [x for x in c.call("GET", "/api/sessions")[1] if x["id"] == "t1"][0]
+        assert s["branchTouch"] == {"code": True, "specs": [7]} and s["changedFiles"] == []  # 목록에도 실린다(경로 목록이 아니라 요약)
+        files["now"] = None
+        c.hook("stop", {"session_id": "t1", "cwd": str(c.work), "last_assistant_message": "r"})
+        assert c.call("GET", "/api/sessions/t1")[1]["branchTouch"] is None
+        # B: 하네스 스킬만 네임스페이스를 뗀다. 다른 플러그인의 foo:spec 은 그 이름 그대로(하네스 spec 을 쓴 것으로 세지 않는다)
+        c.event("t2", "PreToolUse", tool_name="Skill", tool_input={"skill": "foo:spec"})
+        c.event("t2", "UserPromptExpansion", command_name="/harness:srs", expansion_type="slash_command")
+        c.event("t2", "UserPromptExpansion", command_name="sync", expansion_type="slash_command")
+        s = c.call("GET", "/api/sessions/t2")[1]
+        assert s["usedSkills"] == ["foo:spec", "srs", "sync"]
+        assert {f["skill"]: f["state"] for f in s["flow"]}.get("spec", "idle") == "idle"
+    finally:
+        c.close()

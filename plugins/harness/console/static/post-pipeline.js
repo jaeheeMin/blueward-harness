@@ -1,4 +1,4 @@
-/* Post(우체국) 테마의 파이프라인 탭(시안 pipeline-mockup/pipeline.html). 요구사항마다 다섯 칸(요구사항 → 개발 Spec → 개발 → 검토 → 합쳐짐) 중 어디에 있는지 보인다.
+/* Post(Cozy Office) 테마의 파이프라인 탭(시안 pipeline-mockup/pipeline.html). 요구사항마다 다섯 칸(요구사항 → 개발 Spec → 개발 → 검토 → 합쳐짐) 중 어디에 있는지 보인다.
    사실은 서버 /api/pipeline(pipeline.py: origin/main 의 SRS·원장·Spec, 열린 PR)이 주고, 여기서는 세션을 요구사항에 붙이고 칸을 정한다.
    세션 → 요구사항: 세션 이름·갈래 사유·브랜치의 REQ-/DEV- 번호, 다음 갈래 옵션의 번호(BHLogic.reqIds), 세션 PR 번호가 그 요구사항의 열린 PR 인 것.
    폴더는 세션들의 작업 폴더(+ 마지막 폴더)이고, 같은 저장소의 worktree 는 서버가 준 repo.key 로 한 판에 모은다. 없는 데이터는 지어내지 않는다.
@@ -22,22 +22,25 @@
     while ((m = NUM_RE.exec(String(text || '')))) { var n = parseInt(m[2], 10); if (out.indexOf(n) < 0) out.push(n); }
     return out;
   }
-  /* 세션이 다루는 요구사항 번호 */
-  function sessionNums(s, L) {
+  /* 세션이 다루는 요구사항 번호. 브랜치 이슈 제목의 DEV 번호(팀 배정 근거, PL.teamBasisOf)도 — 안내판·정보 칸이 보이는 번호와 같은 카드에 붙는다 */
+  function sessionNums(s, L, PL) {
     var out = numsIn([s.title, s.flowReason, s.branch].join(' '));
     (L && L.reqIds ? L.reqIds(s) : []).forEach(function (id) { var n = parseInt(String(id).slice(4), 10); if (out.indexOf(n) < 0) out.push(n); });
+    var b = PL && PL.teamBasisOf ? PL.teamBasisOf(s) : null;
+    if (b && b.devNo && out.indexOf(b.devNo) < 0) out.push(b.devNo);
     return out;
   }
 
   /* 칸(0~4): 원장 완료·SRS Done → 합쳐짐 / 작업 PR 열림 → 검토 / Spec 이 origin/main 에 있거나 설정·표준 건 → 개발(설정·표준은 Spec 칸을 건너뛴다)
      / 다음 단계 미정 → 요구사항 / Spec 쓰는 세션이나 Spec PR 이 있음 → 개발 Spec / 그 밖 → 요구사항 */
-  function laneOf(it, sess) {
+  function laneOf(it, sess, PL) {
     var prs = arr(it.prs);
     if (it.done) return 4;
     if (prs.some(function (p) { return p.kind === 'work'; })) return 3;
     if (it.kind || it.spec) return 2;
     if (it.unsure) return 0;
-    if (arr(sess).some(function (s) { return s.flowId === 'spec'; }) || prs.some(function (p) { return p.kind === 'spec'; })) return 1;
+    // Spec 쓰는 세션: 오늘 화면·안내판과 같은 팀 판정(PL.teamFlowOf — 콘솔 갈래 > 이슈 근거 > 쓴 갈래 스킬, 9회차 E). PL 이 없으면 콘솔 갈래만
+    if (arr(sess).some(function (s) { return (PL && PL.teamFlowOf ? PL.teamFlowOf(s) : s.flowId) === 'spec'; }) || prs.some(function (p) { return p.kind === 'spec'; })) return 1;
     return 0;
   }
   function rank(state) { return state === 'blocked' ? 0 : state === 'turn' ? 1 : 2; }
@@ -48,7 +51,7 @@
     arr(items).forEach(function (it) { arr(it.prs).forEach(function (p) { (prOwner[p.number] = prOwner[p.number] || []).push(it.number); }); });
     arr(sessions).forEach(function (s) {
       if (!s || s.handedOffTo) return;  // 다음 세션에 넘긴 세션은 그 세션이 대신한다
-      var nums = sessionNums(s, L), pr = s.flowPr && s.flowPr.number;
+      var nums = sessionNums(s, L, PL), pr = s.flowPr && s.flowPr.number;
       if (pr && prOwner[pr]) prOwner[pr].forEach(function (n) { if (nums.indexOf(n) < 0) nums.push(n); });
       nums.forEach(function (n) { (byNum[n] = byNum[n] || []).push(s); });
     });
@@ -59,7 +62,7 @@
         var st = PL.stateOf(s, L), a = PICK.indexOf(st), b = PICK.indexOf(bestState);
         if (!best || a < b || (a === b && (s.updatedAt || 0) > (best.updatedAt || 0))) { best = s; bestState = st; }
       });
-      lanes[laneOf(it, ss)].push({ item: it, session: best, state: best ? bestState : 'idle' });
+      lanes[laneOf(it, ss, PL)].push({ item: it, session: best, state: best ? bestState : 'idle' });
     });
     lanes.forEach(function (l) { l.sort(function (a, b) { return rank(a.state) - rank(b.state) || a.item.number - b.item.number; }); });
     return lanes;
@@ -175,24 +178,27 @@
     function draw() {
       if (!st || !rootEl) return;
       var narrow = !!(mq && mq.matches), page = [];
+      // J11: 프로젝트를 바꾼 직후엔 앞 프로젝트 폴더의 결과가 남아 잠깐 그 칸이 보였다 — 지금 볼 폴더의 결과만 그리고, 하나도 없으면 새 결과를 읽는 중으로 둔다
+      var want = folders(), res = st.results ? st.results.filter(function (r) { return want.indexOf(r.cwd) >= 0; }) : null;
+      if (res && !res.length && st.results.length && want.length) res = null;
       page.push(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '파이프라인' }), h('h1', { text: '요구사항이 지금 어디까지 왔나' }),
         h('p', { class: 'line po-pl-lead', text: 'SRS → 개발 Spec → 개발 → 검토 → 합쳐짐. 하네스는 이 순서를 지키게 해.' })));
-      if (!st.results) {
+      if (!res) {
         page.push(kit.loadingBox('요구사항을 읽는 중이야.'));
       } else {
-        var gs = groups(st.results), shown = gs.filter(function (g) { return g.data.state !== 'no'; });
+        var gs = groups(res), shown = gs.filter(function (g) { return g.data.state !== 'no'; });
         var skipped = [], gone = [], failed = [];
         gs.forEach(function (g) { if (g.data.state === 'no' && skipped.indexOf(g.name) < 0) skipped.push(g.name); });
-        st.results.forEach(function (r) {  // 403 = 서버가 아는 작업 폴더가 아니다(지운 worktree 따위). 그 밖은 읽지 못한 것
+        res.forEach(function (r) {  // 403 = 서버가 아는 작업 폴더가 아니다(지운 worktree 따위). 그 밖은 읽지 못한 것
           if (r.error) (r.error.status === 403 ? gone : failed).push(r.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() + (r.error.status === 403 ? '' : '(' + (r.error.message || '오류') + ')'));
         });
         shown.forEach(function (g) { page.push(panel(g, narrow)); });
         if (!shown.length) {
           page.push(h('section', { class: 'light po-panel po-pl po-pl-empty', 'aria-labelledby': 'po-pl-empty-h' },
-            h('header', { class: 'po-ph' }, h('h2', { id: 'po-pl-empty-h', text: st.results.length ? '보일 요구사항이 없어' : '아직 연 프로젝트 폴더가 없어' })),
-            note(st.results.length ? 'origin/main 에 SRS(docs/ssot/SRS.md)나 진행 원장(audit/ledger/)이 있는 프로젝트 폴더에서 세션을 열면 요구사항이 여기 칸별로 보여.'
+            h('header', { class: 'po-ph' }, h('h2', { id: 'po-pl-empty-h', text: res.length ? '보일 요구사항이 없어' : '아직 연 프로젝트 폴더가 없어' })),
+            note(res.length ? 'origin/main 에 SRS(docs/ssot/SRS.md)나 진행 원장(audit/ledger/)이 있는 프로젝트 폴더에서 세션을 열면 요구사항이 여기 칸별로 보여.'
               : '프로젝트 폴더에서 새 작업을 시작하면 그 폴더의 요구사항이 여기 칸별로 보여.'),
-            st.results.length ? null : h('div', { class: 'acts' }, kit.link('/new', { class: 'btn', text: '새 작업' }))));
+            res.length ? null : h('div', { class: 'acts' }, kit.link('/new', { class: 'btn', text: '새 작업' }))));
         }
         if (skipped.length) page.push(note('SRS·진행 원장이 없는 폴더는 뺐어: ' + skipped.join(', '), 'skip'));
         if (gone.length) page.push(note('없어진 작업 폴더는 뺐어: ' + gone.join(', '), 'skip'));
@@ -209,7 +215,7 @@
       if (mq && mq.addEventListener) mq.addEventListener('change', draw);
       draw();
       kit.api('GET', '/api/folders/last').then(function (d) { if (my === st && d && d.path) st.last = d.path; }, function () {}).then(function () { if (my === st && kit.loaded()) load(); });
-      function onData() { if (!st || !kit.loaded()) return; if (!st.results || folders().join('|') !== st.sig) load(); else draw(); }
+      function onData() { if (!st || !kit.loaded()) return; if (!st.results || folders().join('|') !== st.sig) load(); draw(); }  // 폴더가 바뀌면 읽기 시작과 함께 앞 결과를 걷어 낸다(J11)
       return {
         title: function () { return '파이프라인'; },
         onData: onData, onSession: onData, onRemoved: onData,

@@ -225,8 +225,8 @@ def display_title(s: dict) -> str:
     cwd = str(s.get("cwd") or "")
     folder = re.split(r"[\\/]", cwd.rstrip("/\\"))[-1] or cwd  # Windows 경로를 Linux 에서 읽어도 폴더 이름만
     tail = f" · {folder}" if folder else ""
-    if skill:
-        name = skill.split(":", 1)[-1]
+    if skill:  # 하네스 스킬만 네임스페이스를 뗀다. 다른 플러그인 스킬(`foo:spec`)엔 하네스 제목을 붙이지 않는다(훅의 스킬 이름과 같은 규칙, Cozy Office 9회차 B)
+        name = skill.split(":", 1)[1] if skill.startswith("harness:") else skill
         return SKILL_TITLES.get(name, name) + tail  # 같은 스킬 세션이 여럿이어도 폴더로 가려 본다
     return "이름 없는 세션" + tail
 
@@ -361,6 +361,7 @@ class Request:
         self.mcp: dict = {}  # MCP 도구 승인이면 claude 가 준 {"server", "display"}(훅으로만 온 요청은 비어 있고 도구 이름에서 읽는다)
         self.status = "pending"  # pending | answered | closed
         self.outcome = ""  # 화면에 보여 줄 처리 결과(한글 글, 판정에는 쓰지 않는다)
+        self.reason = ""  # 거절할 때 사용자가 적어 보낸 이유(새로 고쳐도 결과 화면이 다시 보여 주게)
         self.resolution = ""  # 처리 결과 코드: allow allow_session deny answered closed terminal handoff expired (MCP 질문은 accept decline cancel). 대기 중이면 빈 값(#1018).
         self.response = None  # 훅에 돌려줄 값(answered 일 때)
         self.answered_at = None
@@ -383,6 +384,8 @@ class Request:
             "createdAt": self.created,
             "answeredAt": self.answered_at,
         }
+        if self.reason:
+            data["reason"] = self.reason
         if self.risk:
             data["risk"], data["riskNote"] = self.risk, self.risk_note
         elif self.risk_note:
@@ -748,13 +751,14 @@ class Store:
             self.requests.pop(r.rid, None)
             self.publish("removed", {"kind": "request", "id": r.rid})
 
-    def resolve(self, rid: str, response, outcome: str, code: str = "answered") -> bool:
+    def resolve(self, rid: str, response, outcome: str, code: str = "answered", reason: str = "") -> bool:
         """답변을 확정한다. 이미 닫혔으면 False(먼저 처리한 쪽이 이긴다). code 는 화면이 결과를 가르는 코드(Request.resolution)."""
         with self.lock:
             r = self.requests.get(rid)
             if r is None or r.status != "pending":
                 return False
             r.status, r.response, r.outcome, r.answered_at, r.resolution = "answered", response, outcome, self.clock(), code
+            r.reason = reason
             self._chat_answer(r)
             r.event.set()
         self.publish("request", {"id": rid, "sessionId": r.session_id})
@@ -1036,8 +1040,11 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "apiIssue": dict(s["apiIssue"]) if isinstance(s.get("apiIssue"), dict) else None,  # API 오류·재시도(#865). 훅 막힘(lastBlock)과 따로
             "rateLimit": dict(s["rateLimit"]) if isinstance(s.get("rateLimit"), dict) else None,
             "currentSkill": s["currentSkill"], "currentAction": s["currentAction"],
+            "usedSkills": list(s["skillStates"]),  # 이 세션이 쓴 스킬 이름(쓴 차례대로, 목록에도). Cozy Office 가 터미널 세션도 쓴 갈래 스킬로 팀에 앉힌다
             "startedAt": s["startedAt"], "updatedAt": s["updatedAt"], "log": list(s["log"]), "report": s["report"],
             "changedFiles": list(s["changedFiles"]), "prLinks": list(s["prLinks"]), "prCreated": str(s.get("prCreated") or ""),
+            # 이 브랜치가 커밋한 파일의 요약 {code, specs}(pipeline.branch_touch). 커밋하면 changedFiles 가 비어도 Cozy Office 가 팀을 정할 수 있게
+            "branchTouch": dict(s["branchTouch"]) if isinstance(s.get("branchTouch"), dict) else None,
             "subagents": list(s["subagents"]),
             "flow": flow, "turnSkill": turn_skill, "turnUnknown": bool(s["turn"].get("unknown")),
             "askedInText": asks, "lastBlock": last_block, "phase": phase,
