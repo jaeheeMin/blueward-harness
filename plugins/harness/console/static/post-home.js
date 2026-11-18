@@ -25,7 +25,7 @@
     var redrawNow = function () {};
     var qc = kit.questionCards(function () { redrawNow(); }, function () {}, { noAvatar: true });  // 고른 값은 홈을 떠났다 와도 기억한다. 카드 머리에 사람이 이미 있다
 
-    function stMark(kind) { return h('i', { class: 'po-st po-st-' + kind, 'aria-hidden': 'true', text: PS.GLYPH[kind] || '' }); }
+    function stMark(kind, tone) { return h('i', { class: 'po-st po-st-' + kind, 'data-color-role': tone || null, 'aria-hidden': 'true', text: PS.GLYPH[kind] || '' }); }
 
     function tile(label, value, cls) {
       return h('div', { class: 'tile2' + (cls ? ' ' + cls : '') }, h('span', { class: 'eb', text: label }), h('span', { class: 'v', text: value }));
@@ -55,6 +55,14 @@
       return turn.concat(bad);
     }
 
+    /* 덱 카드·메모의 역할 색(theme-post.css [data-color-role]): 막힘·검사 실패는 오류, 확인 못 함은 보라, 승인·계획은 경고(승인 전 확인), 질문·확인은 알림.
+       알림 말풍선(notice-logic.js kindMeta)과 같은 배정이다 — 같은 일이 자리마다 다른 색이면 안 된다. */
+    function toneOf(it) {
+      if (it.kind === 'blocked' || it.fix) return 'err';
+      if (it.kind === 'unk') return 'unk';
+      var lb = kindLabel(it);
+      return lb === '승인' || lb === '계획' ? 'warn' : 'ask';
+    }
     function kindLabel(it) {
       if (it.kind === 'blocked') return '막힘';
       if (it.kind === 'unk') return '확인 못 함';
@@ -99,15 +107,15 @@
 
     /* 상태 칩(시안 .st): 색 + 모양. 내 차례 세모 · 일하는 중 채운 동그라미 · 승인 기다림 네모 · 쉬는 중 빈 동그라미 · 막힘 마름모 · 확인 못 함 점선 동그라미 · 끝 체크 */
     var ST_TEXT = { turn: '내 차례', run: '일하는 중', wait: '승인 기다림', idle: '쉬는 중', blocked: '막힘', unk: '확인 못 함', done: '끝남' };
-    function stChip(state) { return h('span', { class: 'po-stc po-stc-' + state, text: ST_TEXT[state] || PS.LABEL[state] }); }
+    function stChip(state, tone) { return h('span', { class: 'po-stc po-stc-' + state, 'data-color-role': tone || null, text: ST_TEXT[state] || PS.LABEL[state] }); }
     /* 세션 표의 상태 칩: Sauce 표(flow-ui.js homeTable)와 같은 판정이다. API 오류(#865)는 '끝남'·'쉬는 중' 이 아니라 오류로, PR 검사가 실패한 세션은 "내 차례" 가 아니라 "고쳐야 함" 으로 말한다.
        (막힘·확인 못 함은 stateOf 가 이미 가린다.) */
     function rowChip(s, st) {
       var bk = L.blockOf(s), an = !bk && window.BHApiNotice ? window.BHApiNotice.notice(s) : null;
       if (an && an.sideTone === 'err') return h('span', { class: 'po-stc po-stc-err', title: an.title, text: an.side });
       var g = L.groupOf(s, HK.openIds);
-      if (!bk && s.status !== 'ended' && g !== 'running' && !HK.pendingOf(s) && L.prNeedsFix(s)) return h('span', { class: 'po-stc po-stc-turn', title: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어', text: '고쳐야 함' });
-      return stChip(st);
+      if (!bk && s.status !== 'ended' && g !== 'running' && !HK.pendingOf(s) && L.prNeedsFix(s)) return h('span', { class: 'po-stc po-stc-turn', 'data-color-role': 'err', title: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어', text: '고쳐야 함' });
+      return stChip(st, st === 'turn' && kit.turnTone ? kit.turnTone(s) : '');
     }
 
     /* 번호·기억(Sauce 표의 '번호'·'기억' 칸): 이슈 번호는 브랜치 이름에서, PR 은 연결된 것만, 기억은 % 나 토큰 수를 알 때만. 모르는 값은 지어내지 않고 뺀다(점선 ? 는 소음, #1066).
@@ -282,8 +290,8 @@
         var i = 0; items.forEach(function (x, n) { if (x.id === topId) i = n; });
         var head = [memoCount(it), team, w];
         var sessionHref = '/s/' + encodeURIComponent(s.id), same = a.href === sessionHref;  // 가는 곳이 세션이면 "세션으로" 를 따로 두지 않는다
-        memo.className = 'po-memo po-memo-' + it.kind;
-        memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(it.kind), h('span', { class: 'po-memo-kind', text: head.filter(Boolean).join(' · ') }),
+        memo.className = 'po-memo po-memo-' + it.kind; memo.setAttribute('data-color-role', toneOf(it));
+        memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(it.kind, toneOf(it)), h('span', { class: 'po-memo-kind', text: head.filter(Boolean).join(' · ') }),
           items.length > 1 ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '다음 일 보기 (덱 카드 ' + items.length + '장 중 ' + (i + 1) + '번째)', text: '다음', onClick: function () { step(1, true); } }) : null));
         memo.appendChild(h('p', { class: 'po-memo-q', text: a.q }));
         memo.appendChild(h('p', { class: 'po-memo-s', text: name }));
@@ -301,7 +309,7 @@
       function sceneSession(id) { return HK.sessionList().filter(function (x) { return x.id === id && x.status !== 'ended'; })[0] || null; }  // 장면에 선 세션(끝난 세션은 장면에 없다). 장면은 이벤트 즉시 바뀌니 다시 그리기를 기다리지 않고 지금 목록에서 찾는다
       function personMemo(s) {
         var st = PS.stateOf(s, L), name = s.title || HK.folderName(s) || '이름 없는 세션', w = kit.waited(s.updatedAt);
-        memo.className = 'po-memo po-memo-' + st;
+        memo.className = 'po-memo po-memo-' + st; memo.removeAttribute('data-color-role');
         memo.setAttribute('aria-label', '세션 메모');
         memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(st), h('span', { class: 'po-memo-kind', text: [ST_TEXT[st] || PS.LABEL[st], teamOf(PL.teamFlowOf(s)), w].filter(Boolean).join(' · ') }),
           items.length ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '내 차례 메모로 돌아가기', text: '내 차례', onClick: function () { pickTop(topId, true); } }) : null));
@@ -362,11 +370,11 @@
           var from = it.pend && it.pend.r ? (it.pend.r.createdAt || it.pend.r.createdAtMs) : (it.t || s.updatedAt);
           var w = kit.waited(from);
           var attrs = it.kind === 'turn' ? { 'data-call': s.id } : { 'data-call-block': s.id, 'data-block-kind': it.kind === 'unk' ? 'cannot_check' : 'blocked' };
-          var hd = h('div', { class: 'po-dc-h' }, PS.avatar(s.id, st), stMark(it.kind),
+          var hd = h('div', { class: 'po-dc-h' }, PS.avatar(s.id, st), stMark(it.kind, toneOf(it)),
             h('span', { class: 'po-dc-kind', text: kindLabel(it) }), kit.link(href, { class: 'po-dc-s', text: name }),
             it.more || w ? h('span', { class: 'po-dc-wait', text: [it.more ? '요청 +' + it.more : '', w].filter(Boolean).join(' · ') }) : null,  // 한 묶음(좁은 폭에서 시각만 다음 줄로 떨어져 왼쪽에 붙지 않게)
             top ? null : h('button', { type: 'button', class: 'pill line sm', 'aria-expanded': 'false', 'aria-label': name + ' 펼치기', text: '열기', onClick: function () { pickTop(it.id); } }));
-          stack.appendChild(h('article', Object.assign({ class: 'po-dc po-dc-' + it.kind + (top ? ' is-top' : '') }, attrs), hd, top ? cardBody(it) : null));
+          stack.appendChild(h('article', Object.assign({ class: 'po-dc po-dc-' + it.kind + (top ? ' is-top' : ''), 'data-color-role': toneOf(it) }, attrs), hd, top ? cardBody(it) : null));
         });
         deckSlot.appendChild(h('section', { class: 'light po-panel po-deck', 'aria-label': '내 차례' }, head, stack));
         focusBack(mark);
@@ -381,9 +389,9 @@
         var all = kit.sceneList(), shown = calmAll ? all : all.slice(0, CALM_MAX);
         shown.forEach(function (s) {
           var name = s.title || '이름 없는 세션', k = Math.max(0, Math.min(4, s.station | 0));
-          calmList.appendChild(h('li', { class: 'po-ml po-ml-' + s.state },
+          calmList.appendChild(h('li', { class: 'po-ml po-ml-' + s.state, 'data-color-role': s.state === 'turn' ? s.tone || null : null },
             kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ml-a' }, PS.avatar(s.id, s.state, { size: 'sm', name: name }),
-              h('span', null, h('b', { text: name }), h('small', null, stMark(s.state), PS.LABEL[s.state] + ' · ' + PL.hereTitle(k, s.flow))))));
+              h('span', null, h('b', { text: name }), h('small', null, stMark(s.state, s.state === 'turn' ? s.tone : ''), PS.LABEL[s.state] + ' · ' + PL.hereTitle(k, s.flow))))));
         });
         if (all.length > shown.length) calmList.appendChild(h('li', { class: 'po-ml-more' }, h('button', { type: 'button', class: 'pill line sm', text: '나머지 ' + (all.length - shown.length) + '개 더 보기', onClick: function () { calmAll = true; paintCalm(); var a = calmList.querySelectorAll('a')[CALM_MAX]; if (a) a.focus(); } })));  // 단추가 사라지니 포커스는 새로 보인 첫 줄로
         if (!calmList.firstChild) calmList.appendChild(h('li', { class: 'quiet', text: '지금 일하는 세션이 없어.' }));

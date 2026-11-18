@@ -1,24 +1,45 @@
 /* 테마 Post(Cozy Office, 밝게 한 벌). 규칙은 모두 :root[data-theme="post"] 아래에만 둔다 — Sauce(data-theme 없음·sauce)는 이 파일에 닿지 않는다.
-   app.css 가 쓰는 변수를 Post 색(빨강·남색·크림)으로 덮고, 변수만으로 안 되는 자리(어두운 판 위 강조색 글자 따위)만 따로 고친다. */
+   app.css 가 쓰는 변수를 Post 색(남색·크림)으로 덮고, 변수만으로 안 되는 자리(어두운 판 위 강조색 글자 따위)만 따로 고친다.
+
+   색은 역할로만 쓴다(2026-11-19, 기록 docs/status/2026-11-19-cozy-office-roles.md). 색만 봐도 무슨 종류인지 알 수 있어야 하고, 색만으로 전하지 않게 기호·글자를 같이 둔다.
+     주(--pri)       남색   주 동작 버튼 · 고른 것 · 지금 하는 단계 · 일하는 중
+     보조            크림 종이 + 남색 선(버튼 기본 모양)
+     알림(--ask)     파랑   답을 기다려요(질문·차례) · 새 소식 · 글 링크
+     경고(--warn)    노랑   승인 전 확인 · 한도·기억이 거의 참 · 연결 끊김 · 되돌릴 수 없는 일
+     오류(--err)     빨강   막힘 · 검사 실패 · API 오류 · 한도 참 · 지우는 동작
+     승인/성공(--ok) 초록   허락 버튼 · 통과 · 합쳐짐 · 끝남 · 승인 도장
+     확인 못 함(--unk) 보라 점선   검사를 못 해 통과도 위반도 아님
+     중립            회남색 쉬는 중 · 남의 승인을 기다림 · 끝난 세션
+   빨강(--brand)은 로고에만 남는다. 역할마다 글자(--x) · 채움(--x-fill, 그 위 글자 --on-x) · 옅은 바탕(--x-bg) · 선(--x-line) 네 값을 둔다. */
 
 :root[data-theme="post"] {
   --bg: #F6F1E7; --surface: #EFE7D8; --deep: #E8DFCF; --text: #24304A; --sec: #445069; --muted: #5B647D;
-  --accent: #C73E31; --accent2: #2F7D5B; --onaccent: #FFFFFF; --attn: #9A5400; --btn: #C73E31; --btnink: #FFFFFF;
+  --pri: #24304A; --pri-hover: #2E3B5C; --pri-drop: #121A2C; --on-pri: #FFFCF6; --pri-soft: #E7EAF1;
+  --ask: #2F5FA6; --ask-fill: #2F5FA6; --on-ask: #FFFFFF; --ask-bg: #E3ECF8; --ask-line: #2F5FA6;
+  --warn: #8A4B00; --warn-fill: #FFD66B; --on-warn: #24304A; --warn-bg: #FFF1C9; --warn-line: #C47A12;
+  --err: #A82A20; --err-fill: #C2372C; --on-err: #FFFFFF; --err-bg: #FBE3DF; --err-line: #C2372C;
+  --ok: #1F5C42; --ok-fill: #2F7D5B; --on-ok: #FFFFFF; --ok-bg: #DCEFE4; --ok-line: #2F7D5B;
+  --unk: #5A47A8; --unk-bg: #ECE8F8; --unk-line: #6550B8;
+  --focus: #3D6FB6;
+  /* 버튼 말씨(사무실 장면의 버튼과 같다): 남색 선 1.5px + 아래 단단한 그림자, 올리면 살짝 뜨고 누르면 내려간다 */
+  --btn-edge: #24304A; --btn-drop: #24304A; --btn-lift: #FFF3C8; --btn-face: #FFFCF6;
+  /* app.css 가 쓰는 옛 변수는 역할로 잇는다 */
+  --accent: var(--pri); --accent2: var(--ok-fill); --onaccent: var(--on-pri); --attn: var(--warn); --btn: var(--pri); --btnink: var(--on-pri);
   --brand: #C73E31;
   --line: rgba(36,48,74,.13); --line2: rgba(36,48,74,.3); --soft: rgba(36,48,74,.07); --edge: #8A8FA3;
   --track: #DDD2BE;
-  --light: #FFFCF6; --lightink: #24304A; --lmuted: #5B647D; --lline: #DDD2BE; --card: #FFFFFF; --stbg: #EFE7D8; --okbg: #DCEFE4; --okink: #1F5C42;
-  --st-now: #2F7D5B; --st-now-bg: #E1F0E8; --st-done: #2F7D5B; --st-done-bg: #E1F0E8;
-  --st-turn: #9A5400; --st-turn-bg: #FBEBC8; --st-turn-btn: #C73E31; --st-turn-ink: #FFFFFF;
-  --st-fail: #C2372C; --st-fail-ink: #A82A20; --st-fail-bg: #FBE3DF;
-  --st-unk: #6550B8; --st-unk-ink: #5A47A8; --st-unk-bg: #ECE8F8;
-  --danger: #C2372C;
+  --light: #FFFCF6; --lightink: #24304A; --lmuted: #5B647D; --lline: #DDD2BE; --card: #FFFFFF; --stbg: #EFE7D8; --okbg: var(--ok-bg); --okink: var(--ok);
+  --st-now: var(--pri); --st-now-bg: var(--pri-soft); --st-done: var(--ok-fill); --st-done-bg: var(--ok-bg);
+  --st-turn: var(--warn); --st-turn-bg: var(--warn-bg); --st-turn-btn: var(--pri); --st-turn-ink: var(--on-pri);  /* app.css 는 --st-turn 을 기억 고리·끊김 띠 같은 경고에 쓴다. 답을 기다리는 표시는 아래에서 --ask 로 따로 칠한다 */
+  --st-fail: var(--err-line); --st-fail-ink: var(--err); --st-fail-bg: var(--err-bg);
+  --st-unk: var(--unk-line); --st-unk-ink: var(--unk); --st-unk-bg: var(--unk-bg);
+  --danger: var(--err-fill);
   --rb: 10px; --rc: 14px; --rbig: 18px;
   --post-yellow: #FFD66B;
   /* 어두운 모드(:root[data-theme="post"][data-mode="dark"], 파일 끝)가 따로 덮는 값: 종이·테두리·말풍선·글자 바탕 */
-  --paper: #FFFCF6; --paper2: #FBF6EC; --bd: #D9CDB8; --bd2: #E8DFCF; --field: #FFFFFF; --me-bg: #F3ECDF; --accent-soft: #FBE8E4; --wait: #3D6FB6;
-  /* 채움(흰 글자가 올라가는 바탕)은 어두운 모드에서도 같다 — 글자로 쓰는 --accent·--attn·--st-* 만 밝아진다 */
-  --accent-fill: #C73E31; --attn-fill: #9A5400; --fail-fill: #C2372C; --done-fill: #2F7D5B;
+  --paper: #FFFCF6; --paper2: #FBF6EC; --bd: #D9CDB8; --bd2: #E8DFCF; --field: #FFFFFF; --me-bg: #F3ECDF; --accent-soft: var(--pri-soft); --wait: var(--muted);
+  /* 채움(그 위에 글자가 올라가는 바탕). 옛 이름은 역할 채움으로 잇는다 */
+  --accent-fill: var(--pri); --attn-fill: var(--warn-line); --fail-fill: var(--err-fill); --done-fill: var(--ok-fill);
   color-scheme: light;
 }
 :root[data-theme="post"] .ptitle h1 { font-weight: 800; letter-spacing: -.03em; }
@@ -31,7 +52,7 @@
 :root[data-theme="post"] .light { border: 1.5px solid var(--bd); box-shadow: 0 1px 0 var(--bd2), 0 10px 24px -18px rgba(36,48,74,.35); }
 :root[data-theme="post"] .brand-logo { box-sizing: border-box; height: 30px; padding: 5px 9px; border-radius: 6px; background: #24304A; }
 
-/* 어두운 알약·고른 칸: Sauce 는 어두운 바탕에 초록 글자 — Post 는 빨강 바탕에 흰 글자 */
+/* 주 버튼·고른 칸: Sauce 는 어두운 바탕에 초록 글자 — Post 는 주 색(남색) 바탕에 크림 글자 */
 :root[data-theme="post"] .pill.dark,
 :root[data-theme="post"] .light .chip[aria-pressed="true"],
 :root[data-theme="post"] .qopt[aria-pressed="true"],
@@ -43,27 +64,40 @@
 :root[data-theme="post"] .pickrow input[type=checkbox]:checked,
 :root[data-theme="post"] .proj .pi, :root[data-theme="post"] .dresult .pi,
 :root[data-theme="post"] .light .cand input[type=checkbox]:checked, :root[data-theme="post"] .light .browser input[type=checkbox]:checked {
-  border-color: var(--accent); background: var(--accent-fill); color: #fff;
+  border-color: var(--pri); background: var(--pri); color: var(--on-pri);
 }
-:root[data-theme="post"] .pill.dark:hover { color: #fff; }
-:root[data-theme="post"] .qopt[aria-pressed="true"] small { color: #fff; }
-:root[data-theme="post"] .light .cand input[type=checkbox]:checked::after, :root[data-theme="post"] .light .browser input[type=checkbox]:checked::after { color: #fff; }
-:root[data-theme="post"] .sw.on { background: var(--accent-fill); }
-:root[data-theme="post"] .sw.on::after { background: #fff; }
+:root[data-theme="post"] .pill.dark:hover { color: var(--on-pri); }
+:root[data-theme="post"] .qopt[aria-pressed="true"] small { color: var(--on-pri); }
+:root[data-theme="post"] .light .cand input[type=checkbox]:checked::after, :root[data-theme="post"] .light .browser input[type=checkbox]:checked::after { color: var(--on-pri); }
+:root[data-theme="post"] .sw.on { background: var(--pri); }
+:root[data-theme="post"] .sw.on::after { background: var(--on-pri); }
 :root[data-theme="post"] .chip[aria-pressed="true"], :root[data-theme="post"] .opt[aria-pressed="true"], :root[data-theme="post"] .scale[aria-pressed="true"] { background: var(--accent-soft); }
 :root[data-theme="post"] .tbar li.now { background: var(--accent-fill); }
 
-/* 노랑 채움(내 차례 띠·꼬리표): 어두운 호박색이 바탕일 땐 남색 글자가 안 읽혀 밝은 노랑으로 */
-:root[data-theme="post"] .banner, :root[data-theme="post"] .call, :root[data-theme="post"] .tag, :root[data-theme="post"] .ann.note,
-:root[data-theme="post"] .chip2.warn, :root[data-theme="post"] .tagx.err, :root[data-theme="post"] .bad .tagx,
-:root[data-theme="post"] .crow.wait .mk, :root[data-theme="post"] .prcard .crow.wait .mk { background: var(--post-yellow); color: #24304A; }
-:root[data-theme="post"] .crow.wait .mk, :root[data-theme="post"] .prcard .crow.wait .mk { border-color: #9A5400; }
-:root[data-theme="post"] .ann.note:hover { color: #24304A; }
-:root[data-theme="post"] .rail-ring.bk.err::after, :root[data-theme="post"] .rail-ring.turn::after { background: #E09A28; }
+/* 경고(노랑 채움): 기억·연결 띠, 승인 전 "확인 필요" 꼬리표, 주의 칩. 노랑은 경고에만 쓴다 — 답을 기다리는 표시는 알림(파랑), API 오류 꼬리표는 오류(빨강) */
+:root[data-theme="post"] .banner, :root[data-theme="post"] .tag, :root[data-theme="post"] .ann.note,
+:root[data-theme="post"] .chip2.warn, :root[data-theme="post"] .tagx.warn, :root[data-theme="post"] .bad .tagx { background: var(--warn-fill); color: var(--on-warn); }
+:root[data-theme="post"] .ann.note:hover { color: var(--on-warn); }
+:root[data-theme="post"] .tagx.err, :root[data-theme="post"] .q.apierr.err .tagx { background: var(--err-fill); color: var(--on-err); }
+:root[data-theme="post"] .q.apierr.warn .tagx { background: var(--warn-fill); color: var(--on-warn); }
+:root[data-theme="post"] .q.apierr.info .tagx { background: var(--ask-bg); color: var(--ask); }
+:root[data-theme="post"] .q.apierr.err { border-color: var(--err-line); }
+/* 기다리는 검사 줄: 아직 결과가 없는 중립(전에는 노랑 채움이라 경고로 읽혔다) */
+:root[data-theme="post"] .crow.wait .mk, :root[data-theme="post"] .prcard .crow.wait .mk { border: 1.5px dashed var(--muted); background: transparent; color: var(--muted); }
+/* 나를 부르는 칸(네 차례 카드·승인할 PR·접힌 목록의 점과 수): 알림 */
+:root[data-theme="post"] .call { border: 1.5px solid var(--ask-line); background: var(--ask-bg); color: var(--text); }
+:root[data-theme="post"] .call:hover { color: var(--text); }
+:root[data-theme="post"] .approval-card { border: 1.5px solid var(--ask-line); background: var(--ask-bg); }
+:root[data-theme="post"] .approval-card.unknown { border: 1.5px dashed var(--unk-line); background: var(--unk-bg); }
+:root[data-theme="post"] .rail-ring.turn::after { background: var(--ask-fill); }
+:root[data-theme="post"] .rail-ring.turn[data-color-role="warn"]::after { background: var(--warn-fill); }
+:root[data-theme="post"] .rail-ring.turn[data-color-role="err"]::after { background: var(--err-fill); }
+:root[data-theme="post"] .rail-ring.bk.err::after { background: var(--err-fill); }
+:root[data-theme="post"] .rail-count.has { color: var(--ask); }
 
 /* AI 질문 카드: 글자가 흰색이라 바탕은 남색 */
 :root[data-theme="post"] .ask { background: #24304A; }
-:root[data-theme="post"] .light .ask .eb, :root[data-theme="post"] .ask .eb { color: var(--post-yellow); }
+:root[data-theme="post"] .light .ask .eb, :root[data-theme="post"] .ask .eb { color: #D5DBE8; }  /* 남색 판 위 눈썹 글: 노랑은 경고라 옅은 중립색으로 */
 :root[data-theme="post"] .ask .skiplink { color: #C9D0E0; }
 :root[data-theme="post"] .ask .skiplink:hover:not(:disabled) { color: #fff; }
 
@@ -87,26 +121,25 @@
 :root[data-theme="post"] .po-tag b { color: #24304A; font-weight: 800; }
 :root[data-theme="post"] .po-tag small { color: #5B647D; font-weight: 700; font-size: .85em; }
 :root[data-theme="post"] .po-tag i { position: absolute; top: -.8em; right: -.8em; width: 1.7em; height: 1.7em; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 900; font-size: .85em; border: 2px solid #24304A; background: #fff; color: #24304A; }
-:root[data-theme="post"] .b-turn .po-tag { background: #FFD66B; }
+:root[data-theme="post"] .b-turn .po-tag { background: #E3ECF8; }
 :root[data-theme="post"] .b-turn .po-tag b { font-size: 1.1em; }
 :root[data-theme="post"] .b-turn .po-tag small { color: #24304A; }
-:root[data-theme="post"] .b-turn .po-tag i { background: #C73E31; color: #fff; }
+:root[data-theme="post"] .b-turn .po-tag i { background: #2F5FA6; color: #fff; }
 :root[data-theme="post"] .b-blocked .po-tag { background: #FFD9D3; }
-:root[data-theme="post"] .b-blocked .po-tag i { background: #C73E31; color: #fff; border-radius: 4px; }
+:root[data-theme="post"] .b-blocked .po-tag i { background: #C2372C; color: #fff; border-radius: 4px; }  /* 막힘 = 오류 빨강(장면은 밝게 고정이라 값으로 적는다). 로고 빨강과 다른 값 */
 :root[data-theme="post"] .b-unk .po-tag { border-style: dashed; }
 :root[data-theme="post"] .b-unk .po-tag i { background: #fff; color: #6550B8; }
 :root[data-theme="post"] .b-done .po-tag i { background: #2F7D5B; color: #fff; }
-:root[data-theme="post"] .b-wait .po-tag i { background: #fff; color: #3D6FB6; }
+:root[data-theme="post"] .b-wait .po-tag i { background: #fff; color: #5B647D; }
 :root[data-theme="post"] .b-run .po-tag small { color: #1F6B49; }
-:root[data-theme="post"] .po-s:hover img, :root[data-theme="post"] .po-s:focus-visible img { filter: drop-shadow(0 0 3px #C73E31); }
+:root[data-theme="post"] .po-s:hover img, :root[data-theme="post"] .po-s:focus-visible img { filter: drop-shadow(0 0 3px #24304A); }
 :root[data-theme="post"] .po-plaq { position: absolute; left: 0; right: 0; bottom: 0; height: 50px; }
 :root[data-theme="post"] .po-plaq span { position: absolute; top: 8px; left: calc(var(--x) * var(--s) * 1px); transform: translateX(-50%); display: grid; justify-items: center; white-space: nowrap; font-family: var(--font); }
 :root[data-theme="post"] .po-plaq b { font-size: 13px; font-weight: 800; color: var(--text); }
 :root[data-theme="post"] .po-plaq small { font-size: 12px; font-weight: 500; color: var(--muted); }
 
-/* 알림 말풍선(#1016): 노랑 바탕에 남색 글자, 점은 빨강 */
-:root[data-theme="post"] { --bub-bg: var(--post-yellow); --bub-ink: #24304A; --bub-dot: #C73E31; }
-:root[data-theme="post"] .nb-bubble { box-shadow: 0 8px 20px -12px rgba(36,48,74,.55); }
+/* 알림 말풍선(#1016) 기본값: 종이 바탕·남색 글자. 알림 종류에 따라 아래 「알림 말풍선」 절이 --bub-* 를 역할 색으로 바꾼다 */
+:root[data-theme="post"] { --bub-bg: var(--btn-face); --bub-ink: var(--text); --bub-dot: var(--ask-fill); --bub-on-dot: var(--on-ask); }
 :root[data-theme="post"] .nb-dialog { border: 1.5px solid var(--bd); }
 
 /* ---------- Post 틀: 왼쪽 레일 + 위쪽 줄 + 본문(시안 base.css 의 .app) ----------
@@ -130,16 +163,17 @@
 
 :root[data-theme="post"] .prail { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-height: 0; padding: 14px 10px; overflow-y: auto; background: var(--surface); border-right: 1px solid var(--line); }
 :root[data-theme="post"] .prail-logo { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 4px 0 14px; }
-:root[data-theme="post"] .prail-mark { width: 26px; height: 26px; border-radius: 4px; background: var(--accent-fill); box-shadow: 0 0 0 3px var(--paper), 0 0 0 4.5px var(--accent); }
+:root[data-theme="post"] .prail-mark { width: 26px; height: 26px; border-radius: 4px; background: var(--brand); box-shadow: 0 0 0 3px var(--paper), 0 0 0 4.5px var(--brand); }  /* 로고: 빨강은 여기에만 남는다 */
 :root[data-theme="post"] .prail-word { font: 600 11px/1 var(--font); letter-spacing: .02em; color: var(--sec); }
 :root[data-theme="post"] .prail-new, :root[data-theme="post"] .prail-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; border-radius: 12px; font-size: 11.5px; line-height: 1.3; font-weight: 500; color: var(--muted); text-align: center; }
-:root[data-theme="post"] .prail-new { margin-bottom: 10px; background: var(--accent-fill); color: var(--onaccent); font-weight: 600; }
-:root[data-theme="post"] .prail-new:hover { color: var(--onaccent); opacity: .92; }
-:root[data-theme="post"] .prail-new[aria-current="page"] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--accent); }
+:root[data-theme="post"] .prail-new { margin-bottom: 12px; background: var(--pri); color: var(--on-pri); font-weight: 700; box-shadow: 0 2px 0 var(--pri-drop); transition: transform .08s, box-shadow .08s, background-color .12s; }
+:root[data-theme="post"] .prail-new:hover { color: var(--on-pri); background: var(--pri-hover); transform: translateY(-1px); box-shadow: 0 3px 0 var(--pri-drop); }
+:root[data-theme="post"] .prail-new:active { transform: translateY(2px); box-shadow: 0 0 0 var(--pri-drop); }
+:root[data-theme="post"] .prail-new[aria-current="page"] { box-shadow: 0 2px 0 var(--pri-drop), 0 0 0 2px var(--surface), 0 0 0 3.5px var(--pri); }
 :root[data-theme="post"] .prail-item:hover { color: var(--text); background: var(--soft); }
 :root[data-theme="post"] .prail-item[aria-current="page"] { color: var(--text); background: var(--paper); box-shadow: inset 0 0 0 1.5px var(--bd); }
 :root[data-theme="post"] .prail-item[aria-current="page"] svg { color: var(--accent); }
-:root[data-theme="post"] .prail-badge { position: absolute; top: 4px; right: 12px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--attn-fill); color: #fff; font: 700 11px/18px var(--font); font-style: normal; text-align: center; }
+:root[data-theme="post"] .prail-badge { position: absolute; top: 4px; right: 12px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--ask-fill); color: var(--on-ask); font: 700 11px/18px var(--font); font-style: normal; text-align: center; }
 :root[data-theme="post"] .prail-sp { flex: 1; }
 
 :root[data-theme="post"] .ptop-proj { display: flex; align-items: baseline; gap: 8px; min-width: 0; white-space: nowrap; }
@@ -153,7 +187,7 @@
 :root[data-theme="post"] .po-ptag { flex: 0 1 auto; min-width: 0; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; border: 1px solid var(--line2); border-radius: 6px; color: var(--sec); font-size: 11px; line-height: 16px; font-style: normal; }
 :root[data-theme="post"] .po-ptag-nogit, :root[data-theme="post"] .po-ptag-unknown { border-style: dashed; color: var(--muted); }
 :root[data-theme="post"] .po-rt .t2 .po-ptag { display: inline-block; margin-left: 6px; vertical-align: 1px; }
-:root[data-theme="post"] .ptop-dot { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-fill); }
+:root[data-theme="post"] .ptop-dot { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--pri); }
 :root[data-theme="post"] .ptop-lim { display: inline-flex; align-items: center; gap: 14px; }
 :root[data-theme="post"] .ptop-m { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 :root[data-theme="post"] .ptop-m em { font-style: normal; }
@@ -168,10 +202,10 @@
 :root[data-theme="post"] .ptop-bar.unk { background: transparent; border: 1px dashed var(--line2); }
 :root[data-theme="post"] .ptop-ver { position: relative; font-size: 12px; color: var(--muted); }
 :root[data-theme="post"] .ptop-ver:hover { color: var(--text); }
-:root[data-theme="post"] .ptop-vdot { position: absolute; top: -2px; right: -7px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn-fill); }
-:root[data-theme="post"] .ptop-theme { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border: 1.5px solid var(--bd); border-radius: 10px; background: var(--paper); color: var(--sec); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
-:root[data-theme="post"] .ptop-theme:hover { color: var(--text); border-color: var(--line2); }
-:root[data-theme="post"] .top .nb-btn { border-radius: 10px; border: 1.5px solid var(--bd); background: var(--paper); }
+:root[data-theme="post"] .ptop-vdot { position: absolute; top: -2px; right: -7px; width: 6px; height: 6px; border-radius: 50%; background: var(--ask-fill); }  /* 새 판 = 새 소식(알림) */
+:root[data-theme="post"] .ptop-theme { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border: 1.5px solid var(--btn-edge); border-radius: 10px; background: var(--btn-face); color: var(--text); box-shadow: 0 2px 0 var(--btn-drop); font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: transform .08s, box-shadow .08s, background-color .12s; }
+:root[data-theme="post"] .ptop-theme:hover { background: var(--btn-lift); transform: translateY(-1px); box-shadow: 0 3px 0 var(--btn-drop); }
+:root[data-theme="post"] .ptop-theme:active { transform: translateY(2px); box-shadow: 0 0 0 transparent; }
 
 @container shell (max-width: 760px) {
   :root[data-theme="post"] #app, :root[data-theme="post"] #app[data-collapsed="true"] { display: block; height: auto; }
@@ -202,7 +236,7 @@
 /* ---------- 사람 아바타(BHPostScene.avatar) ---------- */
 :root[data-theme="post"] .po-av { position: relative; flex: none; width: 34px; height: 40px; overflow: hidden; border-radius: 10px 10px 4px 4px; background: #EFE4CF; box-shadow: inset 0 -3px 0 #D9CDB8; }
 :root[data-theme="post"] .po-av img { position: absolute; left: 50%; top: -30px; width: 92px; height: auto; max-width: none; transform: translateX(-50%); }
-:root[data-theme="post"] .po-av-turn { background: #FFD66B; box-shadow: inset 0 -3px 0 #E0A93A; }
+:root[data-theme="post"] .po-av-turn { background: #CFE0F6; box-shadow: inset 0 -3px 0 #9DBBE6; }  /* 답을 기다리는 사람: 알림(파랑) 바탕 */
 :root[data-theme="post"] .po-av-blocked { background: #FFD9D3; box-shadow: inset 0 -3px 0 #E7A79E; }
 :root[data-theme="post"] .po-av-done { background: #D8EBDD; box-shadow: inset 0 -3px 0 #A9CDB4; }
 :root[data-theme="post"] .po-av .po-av-b { animation: po-wave .7s steps(1) infinite; }
@@ -220,8 +254,8 @@
 
 /* ---------- 상태 표시(색 + 모양): 범례·카드 머리 ---------- */
 :root[data-theme="post"] .po-st { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; font: 800 11px/1 var(--font); font-style: normal; }
-:root[data-theme="post"] .po-st-turn { background: var(--attn-fill); color: #fff; }
-:root[data-theme="post"] .po-st-blocked { background: var(--fail-fill); color: #fff; border-radius: 4px; }
+:root[data-theme="post"] .po-st-turn { background: var(--ask-fill); color: var(--on-ask); }
+:root[data-theme="post"] .po-st-blocked { background: var(--err-fill); color: var(--on-err); border-radius: 4px; }
 :root[data-theme="post"] .po-st-unk { border: 1.5px dashed var(--st-unk); color: var(--st-unk-ink); }
 :root[data-theme="post"] .po-st-run { background: transparent; }
 :root[data-theme="post"] .po-eb .po-st-idle { display: none; }  /* 쉬는 중은 기호가 없다(범례에도 없음). 세션 머리 한 줄에 빈 칸만 남아 들여써지지 않게(목록 줄은 글 정렬을 위해 자리를 둔다) */
@@ -229,6 +263,9 @@
 :root[data-theme="post"] .po-st-wait { border: 1.5px solid var(--wait); font-size: 0; }
 :root[data-theme="post"] .po-st-wait::after { content: ""; width: 6px; height: 1.5px; background: var(--wait); }
 :root[data-theme="post"] .po-st-done { background: var(--okbg); color: var(--okink); }
+/* 답을 기다리는 일 안에서도 종류를 가른다(덱 카드·메모의 [data-color-role], post-home.js toneOf): 승인·계획 = 경고, PR 검사 실패 = 오류 */
+:root[data-theme="post"] .po-st-turn[data-color-role="warn"] { background: var(--warn-fill); color: var(--on-warn); }
+:root[data-theme="post"] .po-st-turn[data-color-role="err"] { background: var(--err-fill); color: var(--on-err); }
 
 /* ---------- 오늘(홈) ---------- */
 :root[data-theme="post"] .po-home { display: grid; gap: 20px; max-width: 1600px; margin: 0 auto; }
@@ -245,7 +282,7 @@
 :root[data-theme="post"] .po-panel[hidden] { display: none; }
 :root[data-theme="post"] .po-ph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 :root[data-theme="post"] .po-ph h2 { margin: 0; font-size: 16px; font-weight: 700; }
-:root[data-theme="post"] .po-num { margin: 0 2px; font-size: 22px; font-weight: 800; color: var(--attn); }
+:root[data-theme="post"] .po-num { margin: 0 2px; font-size: 22px; font-weight: 800; color: var(--ask); }
 :root[data-theme="post"] .po-sub { font-size: 12.5px; color: var(--lmuted); }
 :root[data-theme="post"] .po-hint { margin-left: auto; font-size: 12px; color: var(--lmuted); }
 :root[data-theme="post"] .po-scenep .po-stage { margin: 0; border-radius: 10px; }
@@ -265,11 +302,18 @@
 :root[data-theme="post"] .po-legend .po-st-run::after { width: 6px; height: 6px; }
 :root[data-theme="post"] .po-stack { display: grid; gap: 10px; }
 :root[data-theme="post"] .po-dc { min-width: 0; padding: 12px 16px; border: 1.5px solid var(--bd); border-radius: 12px; background: var(--paper); color: var(--lightink); }
-:root[data-theme="post"] .po-dc.is-top { padding: 18px 20px; border: 2px dashed var(--accent); outline: 6px solid var(--paper); outline-offset: -9px; box-shadow: 0 0 0 1px var(--bd2), 0 14px 30px -20px rgba(199,62,49,.6); }
+:root[data-theme="post"] .po-dc.is-top { padding: 18px 20px; border: 2px dashed var(--ask-line); outline: 6px solid var(--paper); outline-offset: -9px; box-shadow: 0 0 0 1px var(--bd2), 0 14px 30px -20px rgba(47,95,166,.55); }
 :root[data-theme="post"] .po-dc-blocked.is-top { border-style: solid; border-color: var(--st-fail); }
 :root[data-theme="post"] .po-dc-unk { border-style: dashed; border-color: var(--st-unk); }
+:root[data-theme="post"] .po-dc[data-color-role="warn"].is-top { border-color: var(--warn-line); box-shadow: 0 0 0 1px var(--bd2), 0 14px 30px -20px rgba(196,122,18,.55); }
+:root[data-theme="post"] .po-dc[data-color-role="err"].is-top { border-color: var(--err-line); box-shadow: 0 0 0 1px var(--bd2), 0 14px 30px -20px rgba(194,55,44,.5); }
+:root[data-theme="post"] .po-dc[data-color-role="unk"].is-top { box-shadow: 0 0 0 1px var(--bd2), 0 14px 30px -20px rgba(101,80,184,.45); }
+:root[data-theme="post"] .po-dc[data-color-role="ask"] .po-dc-kind { color: var(--ask); }
+:root[data-theme="post"] .po-dc[data-color-role="warn"] .po-dc-kind { color: var(--warn); }
+:root[data-theme="post"] .po-dc[data-color-role="err"] .po-dc-kind { color: var(--err); }
+:root[data-theme="post"] .po-dc[data-color-role="unk"] .po-dc-kind { color: var(--unk); }
 :root[data-theme="post"] .po-dc-h { display: flex; align-items: center; gap: 8px; min-width: 0; }
-:root[data-theme="post"] .po-dc-kind { flex: none; font-size: 12px; font-weight: 600; color: var(--lmuted); }
+:root[data-theme="post"] .po-dc-kind { flex: none; font-size: 12px; font-weight: 700; color: var(--lmuted); }
 :root[data-theme="post"] .po-dc-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 :root[data-theme="post"] .po-dc-s:hover { text-decoration: underline; text-underline-offset: 3px; }
 :root[data-theme="post"] .po-dc-wait { flex: none; margin-left: auto; font-size: 12px; color: var(--lmuted); white-space: nowrap; }
@@ -303,7 +347,9 @@
 :root[data-theme="post"] .po-link { padding: 0; border: 0; background: none; color: var(--sec); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--bd); cursor: pointer; }
 :root[data-theme="post"] .po-link:hover { color: var(--text); }
 :root[data-theme="post"] .po-memo-kind { font-size: 13px; font-weight: 500; color: var(--sec); }
-:root[data-theme="post"] .po-memo-turn .po-memo-kind { color: var(--attn); }
+:root[data-theme="post"] .po-memo-turn .po-memo-kind { color: var(--ask); }
+:root[data-theme="post"] .po-memo[data-color-role="warn"] .po-memo-kind { color: var(--warn); }
+:root[data-theme="post"] .po-memo[data-color-role="err"] .po-memo-kind { color: var(--err); }
 :root[data-theme="post"] .po-memo-blocked .po-memo-kind { color: var(--st-fail-ink); }
 :root[data-theme="post"] .po-memo-unk .po-memo-kind { color: var(--st-unk-ink); }
 @media (max-width: 760px) {
@@ -326,30 +372,34 @@
 :root[data-theme="post"] .po-rt .t3 .mono.hot { color: var(--st-fail-ink); }
 :root[data-theme="post"] .po-rt .t3 .prchip { padding: 1px 8px; font-size: 11.5px; }
 :root[data-theme="post"] .po-mine .po-stc { flex: none; width: 92px; }
-/* 결재란(시안 .kyul): 칸 폭 고정(64px), 자리(.po-kyulc)는 목록에서 가장 긴 결재란 폭. 끝난 칸은 붉은 도장, 지금 칸은 남색 줄 */
+/* 결재란(시안 .kyul): 칸 폭 고정(64px), 자리(.po-kyulc)는 목록에서 가장 긴 결재란 폭. 끝난 칸은 초록 도장(승인/성공), 지금 칸은 남색 줄(주) */
 :root[data-theme="post"] .po-kyulc { display: flex; flex: none; }
 :root[data-theme="post"] .po-kyul { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 64px; flex: none; border: 1px solid var(--bd); border-radius: 6px; overflow: hidden; background: var(--paper); }
 :root[data-theme="post"] .po-kyul > span { display: grid; grid-template-rows: 14px 22px; min-width: 0; text-align: center; border-left: 1px solid var(--bd); }
 :root[data-theme="post"] .po-kyul > span:first-child { border-left: 0; }
 :root[data-theme="post"] .po-kyul small { overflow: hidden; text-overflow: ellipsis; padding: 0 4px; font-size: 10px; line-height: 14px; white-space: nowrap; color: var(--muted); background: var(--paper2); border-bottom: 1px solid var(--bd); }
 :root[data-theme="post"] .po-kyul em { display: grid; place-items: center; font-style: normal; }
-:root[data-theme="post"] .po-kyul .done em::after { content: ""; width: 16px; height: 16px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--accent-fill); background: radial-gradient(circle, var(--accent-fill) 0 3px, transparent 3.5px); }
+:root[data-theme="post"] .po-kyul .done em::after { content: ""; width: 16px; height: 16px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ok-fill); background: radial-gradient(circle, var(--ok-fill) 0 3px, transparent 3.5px); }
 :root[data-theme="post"] .po-kyul .now em::after { content: ""; width: 12px; height: 2px; border-radius: 1px; background: var(--text); }
 :root[data-theme="post"] .po-kyul .now { background: var(--soft); }
 /* 상태 칩(시안 .st): 색 + 모양 */
 :root[data-theme="post"] .po-stc { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--sec); white-space: nowrap; }
 :root[data-theme="post"] .po-stc::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-:root[data-theme="post"] .po-stc-turn { color: var(--attn); }
-:root[data-theme="post"] .po-stc-turn::before { width: 0; height: 0; border-radius: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid #C47A12; }
+:root[data-theme="post"] .po-stc-turn { color: var(--ask); }
+:root[data-theme="post"] .po-stc-turn::before { width: 0; height: 0; border-radius: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid var(--ask-fill); }
+:root[data-theme="post"] .po-stc-turn[data-color-role="warn"] { color: var(--warn); }
+:root[data-theme="post"] .po-stc-turn[data-color-role="warn"]::before { border-bottom-color: var(--warn-line); }
+:root[data-theme="post"] .po-stc-turn[data-color-role="err"] { color: var(--err); }
+:root[data-theme="post"] .po-stc-turn[data-color-role="err"]::before { border-bottom-color: var(--err-fill); }
 :root[data-theme="post"] .po-stc-run { color: var(--st-now); }
 :root[data-theme="post"] .po-stc-run::before { background: var(--st-now); }
 :root[data-theme="post"] .po-stc-idle::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
-:root[data-theme="post"] .po-stc-err { color: var(--attn); }
-:root[data-theme="post"] .po-stc-err::before { border-radius: 2px; background: var(--attn); }
+:root[data-theme="post"] .po-stc-err { color: var(--err); }
+:root[data-theme="post"] .po-stc-err::before { border-radius: 2px; background: var(--err-fill); }
 /* API 오류 문구("⚠ 오류 · 로그인이 풀렸어")는 다른 상태 글보다 길어 92px 한 줄에 안 들어간다 — 줄을 바꿔 칸 안에 둔다 */
 :root[data-theme="post"] .po-mine .po-stc-err { width: 150px; min-width: 0; white-space: normal; line-height: 1.3; }
 :root[data-theme="post"] .po-stc-wait { color: var(--wait); }
-:root[data-theme="post"] .po-stc-wait::before { border-radius: 2px; background: var(--wait); }
+:root[data-theme="post"] .po-stc-wait::before { border-radius: 2px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--wait); }
 :root[data-theme="post"] .po-stc-blocked { color: var(--st-fail-ink); }
 :root[data-theme="post"] .po-stc-blocked::before { width: 7px; height: 7px; border-radius: 1px; background: var(--st-fail-ink); transform: rotate(45deg); }
 :root[data-theme="post"] .po-stc-unk { color: var(--st-unk-ink); }
@@ -369,7 +419,7 @@
 :root[data-theme="post"] .po-tiles .tile2.unk { border-style: dashed; border-color: var(--st-unk); }
 :root[data-theme="post"] .po-tiles .tile2 .eb { font-family: var(--font); font-size: 12.5px; letter-spacing: 0; text-transform: none; color: var(--lmuted); }
 :root[data-theme="post"] .po-tiles .tile2 .v { font-size: 22px; font-weight: 800; letter-spacing: -.02em; color: var(--text); }
-:root[data-theme="post"] .po-tiles .tile2.warn .v { color: var(--attn); }
+:root[data-theme="post"] .po-tiles .tile2.warn .v { color: var(--ask); }  /* 답을 기다리는 일 수 */
 :root[data-theme="post"] .po-tiles .tile2.unk .v { font-size: 14px; font-weight: 600; color: var(--st-unk-ink); }
 :root[data-theme="post"] .po-foot { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); align-items: start; gap: 20px; }
 :root[data-theme="post"] .po-foot > :empty { display: none; }
@@ -419,7 +469,9 @@
 :root[data-theme="post"] .po-ss { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; color: var(--muted); }
 :root[data-theme="post"] .po-ss .po-st { width: 14px; height: 14px; font-size: 9px; }
 :root[data-theme="post"] .po-ss .po-st-run::after { width: 6px; height: 6px; }
-:root[data-theme="post"] .po-si-turn .po-ss { color: var(--attn); }
+:root[data-theme="post"] .po-si-turn .po-ss { color: var(--ask); }
+:root[data-theme="post"] .po-si .po-ss[data-color-role="warn"] { color: var(--warn); }
+:root[data-theme="post"] .po-si .po-ss[data-color-role="err"] { color: var(--err); }
 :root[data-theme="post"] .po-si-blocked .po-ss { color: var(--st-fail-ink); font-weight: 600; }
 :root[data-theme="post"] .po-si-unk .po-ss { color: var(--st-unk-ink); font-weight: 600; }
 :root[data-theme="post"] .po-si-run .po-ss { color: var(--st-now); }
@@ -449,7 +501,15 @@
 :root[data-theme="post"] .po-sh [data-r="stages"]:not(:empty) { margin-top: 12px; }
 :root[data-theme="post"] .po-sh [data-r="stages"]:empty, :root[data-theme="post"] .po-sh [data-r="strip"]:empty { display: none; }
 :root[data-theme="post"] .po-eb { display: flex; align-items: center; gap: 8px; font-family: var(--font); font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--muted); }
-:root[data-theme="post"] .po-eb.attn { color: var(--attn); }
+/* 머리 줄 상태 글: 상태 기호와 같은 역할 색(전에는 무엇이든 호박색이었다) */
+:root[data-theme="post"] .eb.po-eb.attn, :root[data-theme="post"] .light .eb.po-eb.attn, :root[data-theme="post"] .eb.po-eb[data-state="turn"] { color: var(--ask); }
+:root[data-theme="post"] .eb.po-eb[data-color-role="warn"], :root[data-theme="post"] .light .eb.po-eb[data-color-role="warn"] { color: var(--warn); }
+:root[data-theme="post"] .eb.po-eb[data-color-role="err"], :root[data-theme="post"] .light .eb.po-eb[data-color-role="err"], :root[data-theme="post"] .eb.po-eb[data-state="blocked"], :root[data-theme="post"] .light .eb.po-eb[data-state="blocked"] { color: var(--err); }
+:root[data-theme="post"] .eb.po-eb[data-state="unk"], :root[data-theme="post"] .light .eb.po-eb[data-state="unk"] { color: var(--unk); }
+:root[data-theme="post"] .eb.po-eb[data-state="done"] { color: var(--ok); }
+/* 역할이 따로 붙은 머리 줄(API 오류로 멈춤 · 승인 전 확인)은 상태 색보다 먼저다 — 끝난 세션이 오류로 멈췄으면 초록이 아니라 빨강 */
+:root[data-theme="post"] .eb.po-eb[data-state][data-color-role="err"] { color: var(--err); }
+:root[data-theme="post"] .eb.po-eb[data-state][data-color-role="warn"] { color: var(--warn); }
 :root[data-theme="post"] .po-eb .po-st { width: 18px; height: 18px; }
 :root[data-theme="post"] .po-sh .ptitle h1 { font-size: 22px; line-height: 1.35; }
 :root[data-theme="post"] .po-sh .ptitle .line { margin-top: 2px; font-size: 14px; color: var(--sec); }
@@ -531,7 +591,7 @@
 :root[data-theme="post"] .po-stream .bad { border-color: var(--bd); background: var(--paper); }
 :root[data-theme="post"] .po-stream .bad .tagx.fail, :root[data-theme="post"] .po-stream .q.blocked { border-color: var(--st-fail); }
 :root[data-theme="post"] .po-stream .qopt { border-radius: 12px; background: var(--paper2); border-color: var(--bd); }
-:root[data-theme="post"] .po-stream .qopt[aria-pressed="true"] small { color: #fff; }
+:root[data-theme="post"] .po-stream .qopt[aria-pressed="true"] small { color: var(--on-pri); }
 
 /* 내 차례 카드 머리의 사람 */
 :root[data-theme="post"] .po-ask-h { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -562,8 +622,7 @@
 :root[data-theme="post"] .po-focus > .bad, :root[data-theme="post"] .po-focus > .bad.plan { padding: 0; border: 0; background: transparent; }
 :root[data-theme="post"] .po-focus > .ai { max-width: none; font-size: 14px; color: var(--sec); }
 :root[data-theme="post"] .po-focus .bad .bt { font-size: 22px; line-height: 1.35; font-weight: 800; letter-spacing: -.02em; }
-:root[data-theme="post"] .po-focus .bad .tagx { background: var(--st-fail-bg); color: var(--st-fail-ink); }
-:root[data-theme="post"] .po-focus .bad.irrev .tagx { background: var(--st-fail-bg); }
+:root[data-theme="post"] .po-focus .bad .tagx { background: var(--warn-fill); color: var(--on-warn); }  /* 승인 전 "확인 필요": 경고. 오류가 아니라 빨강을 쓰지 않는다 */
 :root[data-theme="post"] .po-focus .qopt { padding: 12px 16px; }
 :root[data-theme="post"] .qopt { border-radius: 22px; }  /* 한 줄이면 알약 그대로, 보기·설명이 여러 줄이면 999px 알약은 타원으로 늘어나 글자가 테두리에 닿는다 */
 :root[data-theme="post"] .po-focus .q { padding: 0; border: 0; background: transparent; }
@@ -581,8 +640,8 @@
 :root[data-theme="post"] .po-rside .msgs { font-size: 13.5px; }
 :root[data-theme="post"] .po-rside .me { max-width: none; align-self: stretch; background: var(--me-bg); }
 
-/* ---------- 도장(요청 처리가 성공한 뒤에만) ---------- */
-:root[data-theme="post"] .po-seal { position: absolute; right: 28px; top: 22px; z-index: 6; display: grid; place-items: center; align-content: center; gap: 2px; width: 108px; height: 108px; box-sizing: border-box; border-radius: 50%; border: 4px double var(--accent); color: var(--accent); transform: rotate(-14deg); pointer-events: none; animation: po-stamp .38s cubic-bezier(.2, 1.6, .4, 1) both; background: radial-gradient(color-mix(in srgb, var(--paper) 85%, transparent), color-mix(in srgb, var(--paper) 60%, transparent)); }
+/* ---------- 도장(요청 처리가 성공한 뒤에만): 허락·보냄은 승인(초록), 거절·반송은 중립 ---------- */
+:root[data-theme="post"] .po-seal { position: absolute; right: 28px; top: 22px; z-index: 6; display: grid; place-items: center; align-content: center; gap: 2px; width: 108px; height: 108px; box-sizing: border-box; border-radius: 50%; border: 4px double var(--ok-line); color: var(--ok); transform: rotate(-14deg); pointer-events: none; animation: po-stamp .38s cubic-bezier(.2, 1.6, .4, 1) both; background: radial-gradient(color-mix(in srgb, var(--paper) 85%, transparent), color-mix(in srgb, var(--paper) 60%, transparent)); }
 :root[data-theme="post"] .po-seal b { font-size: 22px; font-weight: 900; letter-spacing: .08em; line-height: 1.1; }
 :root[data-theme="post"] .po-seal small { max-width: 84px; font-size: 10px; font-weight: 700; line-height: 1.2; text-align: center; }
 :root[data-theme="post"] .po-seal.po-seal-no { color: var(--sec); border-color: var(--sec); }
@@ -627,25 +686,35 @@
 :root[data-theme="post"] .light .eb, :root[data-theme="post"] .lt .eb, :root[data-theme="post"] .intro-box .eb { color: var(--lmuted); }
 :root[data-theme="post"] .light .eb.accent, :root[data-theme="post"] .eb.accent { color: var(--accent); }
 :root[data-theme="post"] .light .eb.attn, :root[data-theme="post"] .eb.attn { color: var(--attn); }
-:root[data-theme="post"] .btn { border-width: 1.5px; border-color: var(--bd); background: var(--paper); color: var(--text); }
-:root[data-theme="post"] .btn:hover:not(:disabled) { background: var(--paper2); }
-:root[data-theme="post"] .btn.primary { background: var(--btn); border-color: var(--btn); color: var(--btnink); }
-:root[data-theme="post"] .btn.primary:hover:not(:disabled) { background: var(--btn); opacity: .92; }
-:root[data-theme="post"] .pill.line, :root[data-theme="post"] .pill.ghost { border: 1.5px solid var(--bd); background: var(--paper); color: var(--text); }
-:root[data-theme="post"] .pill.line:hover, :root[data-theme="post"] .pill.ghost:hover { background: var(--paper2); color: var(--text); }
-:root[data-theme="post"] .pill.dark, :root[data-theme="post"] .pill.acc, :root[data-theme="post"] .wn-acts .pill.dark { background: var(--accent-fill); color: #fff; }
-:root[data-theme="post"] .pill.dark:hover, :root[data-theme="post"] .pill.acc:hover, :root[data-theme="post"] a.pill.dark:hover, :root[data-theme="post"] .dresult a.pill.dark:hover { color: #fff; opacity: .92; }
-:root[data-theme="post"] .pill[data-limits-confirm-yes] { background: var(--accent-fill); color: #fff; }  /* 설정 · 계정 한도 켜기 확인의 "바꾸기"(모양 클래스 없는 단추라 브라우저 기본 회색 = 꺼진 단추처럼 보였다) — 주 단추 모양 */
-:root[data-theme="post"] .pill.off, :root[data-theme="post"] .chip.off { border-color: var(--bd); color: var(--lmuted); }
+/* 버튼(사무실 장면의 버튼과 같은 말씨): 남색 선 1.5px + 아래 단단한 그림자, 올리면 살짝 뜨고 누르면 내려간다.
+   보조 = 크림 종이, 주 = 남색 채움, 승인 = 초록 채움([data-color-role="ok"]), 위험 = 빨강 채움([data-color-role="err"], 지우기처럼 되돌릴 수 없는 동작에만) */
+:root[data-theme="post"] .btn, :root[data-theme="post"] .pill.line, :root[data-theme="post"] .pill.ghost, :root[data-theme="post"] .pill.dark, :root[data-theme="post"] .pill.acc, :root[data-theme="post"] .pill[data-limits-confirm-yes] {
+  border: 1.5px solid var(--btn-edge); background: var(--btn-face); color: var(--text); box-shadow: 0 2px 0 var(--btn-drop); transition: transform .08s, box-shadow .08s, background-color .12s; }
+:root[data-theme="post"] .btn:hover:not(:disabled), :root[data-theme="post"] .pill.line:hover:not(:disabled), :root[data-theme="post"] .pill.ghost:hover:not(:disabled) { background: var(--btn-lift); color: var(--text); transform: translateY(-1px); box-shadow: 0 3px 0 var(--btn-drop); }
+:root[data-theme="post"] .btn.primary, :root[data-theme="post"] .pill.dark, :root[data-theme="post"] .pill.acc, :root[data-theme="post"] .wn-acts .pill.dark, :root[data-theme="post"] .docs-pane .pill.dark, :root[data-theme="post"] .pill[data-limits-confirm-yes] {
+  border-color: var(--pri); background: var(--pri); color: var(--on-pri); box-shadow: 0 2px 0 var(--pri-drop); font-weight: 600; }
+:root[data-theme="post"] .btn.primary:hover:not(:disabled), :root[data-theme="post"] .pill.dark:hover:not(:disabled), :root[data-theme="post"] .pill.acc:hover:not(:disabled), :root[data-theme="post"] a.pill.dark:hover, :root[data-theme="post"] .dresult a.pill.dark:hover, :root[data-theme="post"] .pill[data-limits-confirm-yes]:hover:not(:disabled) {
+  background: var(--pri-hover); color: var(--on-pri); opacity: 1; transform: translateY(-1px); box-shadow: 0 3px 0 var(--pri-drop); }
+:root[data-theme="post"] .pill[data-color-role="ok"] { border-color: var(--ok-fill); background: var(--ok-fill); color: var(--on-ok); box-shadow: 0 2px 0 #1B4E38; }
+:root[data-theme="post"] .pill[data-color-role="ok"]:hover:not(:disabled) { background: #286D4F; color: var(--on-ok); box-shadow: 0 3px 0 #1B4E38; }
+:root[data-theme="post"] .pill[data-color-role="err"] { border-color: var(--err-fill); background: var(--err-fill); color: var(--on-err); box-shadow: 0 2px 0 #84231B; }
+:root[data-theme="post"] .pill[data-color-role="err"]:hover:not(:disabled) { background: #B03126; color: var(--on-err); box-shadow: 0 3px 0 #84231B; }
+:root[data-theme="post"] .btn:active:not(:disabled), :root[data-theme="post"] .pill.line:active:not(:disabled), :root[data-theme="post"] .pill.ghost:active:not(:disabled), :root[data-theme="post"] .pill.dark:active:not(:disabled), :root[data-theme="post"] .pill.acc:active:not(:disabled), :root[data-theme="post"] .pill[data-limits-confirm-yes]:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 0 0 transparent; }
+:root[data-theme="post"] .btn:disabled, :root[data-theme="post"] .pill:disabled, :root[data-theme="post"] .pill[aria-disabled="true"] { box-shadow: none; transform: none; }
+:root[data-theme="post"] .pill.off, :root[data-theme="post"] .chip.off { border: 1.5px dashed var(--bd); background: transparent; color: var(--lmuted); box-shadow: none; }
+:root[data-theme="post"] .pill.quiet-edge { border-color: transparent; box-shadow: none; }
+/* 초점: 버튼 선이 남색이라 초점 고리는 파랑으로 따로 보인다 */
+:root[data-theme="post"] :focus-visible { outline: 2.5px solid var(--focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { :root[data-theme="post"] .btn, :root[data-theme="post"] .pill, :root[data-theme="post"] .prail-new, :root[data-theme="post"] .nb-bubble, :root[data-theme="post"] .nb-btn, :root[data-theme="post"] .ptop-theme { transition: none; } }
 :root[data-theme="post"] .input, :root[data-theme="post"] .textarea, :root[data-theme="post"] .light .input, :root[data-theme="post"] .light .textarea, :root[data-theme="post"] .tb-fld { border: 1.5px solid var(--bd); background-color: var(--field); color: var(--text); border-radius: 10px; }
 :root[data-theme="post"] .textarea { border-radius: 12px; }
-:root[data-theme="post"] .input:focus, :root[data-theme="post"] .textarea:focus, :root[data-theme="post"] .tb-fld:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+:root[data-theme="post"] .input:focus, :root[data-theme="post"] .textarea:focus, :root[data-theme="post"] .tb-fld:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
 /* 드롭다운 화살표: background 줄임말(위 칸·app.css .light .input)이 그림·반복·자리를 지워 라이트에선 화살표가 없고 다크에선 그림이 칸 전체에 깔렸다 — 넷을 함께, .light 안에서도 이기게 */
 :root[data-theme="post"] select.input, :root[data-theme="post"] .light select.input { background-repeat: no-repeat; background-position: right 18px center; background-size: 12px 8px; }
 :root[data-theme="post"] select.input, :root[data-theme="post"] .light select.input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23445069' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 :root[data-theme="post"] .light .chip, :root[data-theme="post"] .chip { border: 1.5px solid var(--bd); background: var(--paper); color: var(--text); }
 :root[data-theme="post"] .light .chip:hover:not(:disabled), :root[data-theme="post"] .chip:hover:not(:disabled) { background: var(--paper2); }
-:root[data-theme="post"] .light .chip[aria-pressed="true"], :root[data-theme="post"] .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-fill); color: #fff; }
+:root[data-theme="post"] .light .chip[aria-pressed="true"], :root[data-theme="post"] .chip[aria-pressed="true"] { border-color: var(--pri); background: var(--pri); color: var(--on-pri); }
 :root[data-theme="post"] .opt, :root[data-theme="post"] .light .opt { border: 1.5px solid var(--bd); background: var(--paper); color: var(--text); }
 :root[data-theme="post"] .opt:hover, :root[data-theme="post"] .light .opt:hover { border-color: var(--line2); background: var(--paper2); }
 :root[data-theme="post"] .opt[aria-pressed="true"], :root[data-theme="post"] .light .opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: none; }
@@ -679,24 +748,28 @@
 :root[data-theme="post"] .strip .x.w { color: var(--attn); }
 :root[data-theme="post"] .strip .x.r { color: var(--st-fail-ink); }
 :root[data-theme="post"] .strip .x.u { color: var(--st-unk-ink); }
-:root[data-theme="post"] .tag { background: var(--post-yellow); color: #24304A; border: 0; }
+:root[data-theme="post"] .tag { background: var(--warn-fill); color: var(--on-warn); border: 0; }
 :root[data-theme="post"] .tag.ok, :root[data-theme="post"] .tagx.ok, :root[data-theme="post"] .chip2.ok { background: var(--okbg); color: var(--okink); }
-:root[data-theme="post"] .tagx.fail { background: var(--fail-fill); color: #fff; }
+:root[data-theme="post"] .tagx.fail { background: var(--err-fill); color: var(--on-err); }
 :root[data-theme="post"] .tagx.unk, :root[data-theme="post"] .bad .tagx.unk { background: transparent; border: 1.5px dashed var(--st-unk); color: var(--st-unk-ink); }
-:root[data-theme="post"] .tagx.warn, :root[data-theme="post"] .tagx.err { background: var(--post-yellow); color: #24304A; }
 :root[data-theme="post"] .tag.tb-dk { background: var(--surface); color: var(--text); }
 :root[data-theme="post"] .chip2 { background: var(--paper); box-shadow: inset 0 0 0 1.5px var(--bd); color: var(--text); }
-:root[data-theme="post"] .chip2.warn { background: var(--post-yellow); color: #24304A; box-shadow: none; }
+:root[data-theme="post"] .chip2.warn { background: var(--warn-fill); color: var(--on-warn); box-shadow: none; }
 :root[data-theme="post"] .chip2.unk { border: 1.5px dashed var(--st-unk); color: var(--st-unk-ink); background: transparent; }
 :root[data-theme="post"] .light .prchip { border-color: var(--bd); color: var(--lmuted); }
-:root[data-theme="post"] .light .prchip.pass { border-color: var(--st-done); color: var(--st-done); }
-:root[data-theme="post"] .light .prchip.pending { border-color: var(--attn); color: var(--attn); }
+:root[data-theme="post"] .prchip.pass, :root[data-theme="post"] .light .prchip.pass { border-color: var(--ok-line); color: var(--ok); }
+:root[data-theme="post"] .prchip.pending, :root[data-theme="post"] .light .prchip.pending { border-color: var(--line2); color: var(--sec); }  /* 검사 진행 중: 아직 결과가 없는 중립 */
+:root[data-theme="post"] .prchip.fail { border-color: var(--err-line); background: var(--err-bg); color: var(--err); }
 :root[data-theme="post"] .light .prchip.fail { border-color: var(--st-fail); background: var(--st-fail-bg); color: var(--st-fail-ink); }
 :root[data-theme="post"] .legend .lf, :root[data-theme="post"] .tb-bad-t { color: var(--st-fail-ink); }
 :root[data-theme="post"] .legend .lu, :root[data-theme="post"] table.list .unk, :root[data-theme="post"] .tagx.unk, :root[data-theme="post"] .crow.unk .mk { color: var(--st-unk-ink); }
-:root[data-theme="post"] .legend .lw, :root[data-theme="post"] .lt .lw, :root[data-theme="post"] .light .note-attn, :root[data-theme="post"] .askcard .note-attn, :root[data-theme="post"] .bad .warn-line, :root[data-theme="post"] .light .attn-text, :root[data-theme="post"] .nb-warn,
+:root[data-theme="post"] .legend .lw { color: var(--ask); }  /* 표시 약속의 "답을 기다리는 일" 줄 */
+:root[data-theme="post"] .lt:not(.legend) .lw, :root[data-theme="post"] .light .note-attn, :root[data-theme="post"] .askcard .note-attn, :root[data-theme="post"] .bad .warn-line, :root[data-theme="post"] .light .attn-text, :root[data-theme="post"] .nb-warn,
 :root[data-theme="post"] .light .folder-bar .v.none, :root[data-theme="post"] .kind.dim .khint, :root[data-theme="post"] .light .sub.attn { color: var(--attn); }
-:root[data-theme="post"] .light .started span, :root[data-theme="post"] .light .cand-extra b, :root[data-theme="post"] .light .md a, :root[data-theme="post"] .docs-pane .md a { color: var(--accent); }
+/* 실패를 알리는 줄(보내지 못했어요 · 읽지 못했어요)은 오류. 주의만 주는 줄은 위처럼 경고 */
+:root[data-theme="post"] .note-attn[role="alert"], :root[data-theme="post"] .light .note-attn[role="alert"], :root[data-theme="post"] .askcard .note-attn[role="alert"], :root[data-theme="post"] .note-attn[data-alert], :root[data-theme="post"] .light .note-attn[data-alert] { color: var(--err); }
+:root[data-theme="post"] .light .started span, :root[data-theme="post"] .light .cand-extra b { color: var(--pri); }
+:root[data-theme="post"] .md a, :root[data-theme="post"] .light .md a, :root[data-theme="post"] .docs-pane .md a, :root[data-theme="post"] .plain-list a { color: var(--ask); text-decoration: underline; text-underline-offset: 3px; }  /* 글 링크 = 알림 파랑 + 밑줄 */
 :root[data-theme="post"] .light .started { border-color: var(--accent); }
 :root[data-theme="post"] .light .note-accent { color: var(--lightink); }  /* 처리 알림 한 줄(전달했어·건너뛰었어·되돌렸어, 거절 사유도 같은 칸). Post 강조색(빨강)은 실패 색과 거의 같아 "전달했어" 도 오류로 읽혔다 — 성공·실패 어느 쪽 색도 아닌 본문 글자색 */
 :root[data-theme="post"] .note-accent.is-err, :root[data-theme="post"] .light .note-accent.is-err, :root[data-theme="post"] .docs-pane .note-accent.is-err { color: var(--st-fail-ink); }  /* 실패 줄(보내지 못했어 · 열기: … · 요약 실패)만 실패색 — 성공 줄은 위처럼 본문색 */
@@ -720,13 +793,43 @@
 :root[data-theme="post"] .subs-run .sub-run { border-left: 0; padding-left: 0; background: transparent; border-radius: 0; }
 :root[data-theme="post"] .iso { display: none; }
 
-/* ---------- 알림 말풍선: 위쪽 줄 안(알림 단추 왼쪽)에 둔다 — 아래 화면(점검 탭·세션 목록)을 가리지 않는다 ---------- */
-:root[data-theme="post"] .top .nb-host { position: static; flex-direction: row-reverse; gap: 12px; min-width: 0; }
-:root[data-theme="post"] .top .nb-bubble { position: relative; top: auto; right: auto; max-width: min(380px, 30vw); padding: 7px 8px 7px 16px; box-shadow: none; }
-:root[data-theme="post"] .top .nb-bubble::before { top: calc(50% - 7px); right: -6px; border-radius: 0 3px 0 0; }
+/* ---------- 알림 말풍선: 위쪽 줄 안(알림 단추 왼쪽)에 둔다 — 아래 화면(점검 탭·세션 목록)을 가리지 않는다 ----------
+   모양은 버튼이다(남색 선 + 단단한 그림자, 올리면 뜨고 누르면 내려감). 누르면 그 알림이 팝업으로 열린다는 것을 끝의 › 가 알린다.
+   색은 알림 종류의 역할을 따른다([data-color-role], notice-logic.js kindMeta): ask 답을 기다려요(파랑) · warn 승인 전 확인(노랑) · err 막힘·검사 실패·오류(빨강)
+   · unk 확인하지 못했어요(보라 점선) · ok 합쳐졌어요(초록) · info 새 판(종이). 색만으로 전하지 않게 아이콘과 이름표(.nb-kind)를 같이 둔다.
+   오른쪽 「나중에」(.nb-x)는 이 알림을 말풍선에서만 접는다 — 알림 목록(≡)에는 남고, 다음 알림이 있으면 그게 뜬다. */
+:root[data-theme="post"] .top .nb-host { position: static; flex-direction: row-reverse; gap: 14px; min-width: 0; }
+:root[data-theme="post"] .top .nb-bubble { position: relative; top: auto; right: auto; display: flex; align-items: stretch; gap: 0; box-sizing: border-box; height: 36px; max-width: min(460px, 36vw); padding: 0; border: 1.5px solid var(--btn-edge); border-radius: 10px; background: var(--bub-bg); color: var(--bub-ink); box-shadow: 0 2px 0 var(--btn-drop); font-size: 13px; line-height: 1.3; transition: transform .08s, box-shadow .08s; }
+:root[data-theme="post"] .top .nb-bubble[hidden] { display: none; }
+:root[data-theme="post"] .top .nb-bubble::before { top: calc(50% - 5.5px); right: -6.5px; width: 10px; height: 10px; box-sizing: border-box; border-radius: 0 2px 0 0; background: var(--bub-bg); border-top: 1.5px solid var(--btn-edge); border-right: 1.5px solid var(--btn-edge); }  /* 꼬리: 알림 단추(≡)를 가리킨다 */
+:root[data-theme="post"] .top .nb-bubble[data-color-role="ask"] { --bub-bg: var(--ask-fill); --bub-ink: var(--on-ask); --bub-hover: #29548F; }
+:root[data-theme="post"] .top .nb-bubble[data-color-role="warn"] { --bub-bg: var(--warn-fill); --bub-ink: var(--on-warn); --bub-hover: #FFE08A; }
+:root[data-theme="post"] .top .nb-bubble[data-color-role="err"] { --bub-bg: var(--err-fill); --bub-ink: var(--on-err); --bub-hover: #B03126; }
+:root[data-theme="post"] .top .nb-bubble[data-color-role="ok"] { --bub-bg: var(--ok-fill); --bub-ink: var(--on-ok); --bub-hover: #286D4F; }
+:root[data-theme="post"] .top .nb-bubble[data-color-role="unk"] { --bub-bg: var(--unk-bg); --bub-ink: var(--unk); --bub-hover: var(--unk-bg); border-style: dashed; border-color: var(--unk-line); box-shadow: 0 2px 0 var(--unk-line); }
+:root[data-theme="post"] .top .nb-bubble[data-color-role="unk"]::before { border-color: var(--unk-line); }
+:root[data-theme="post"] .top .nb-bubble[data-color-role="info"] { --bub-bg: var(--btn-face); --bub-ink: var(--text); --bub-hover: var(--btn-lift); }
+:root[data-theme="post"] .top .nb-bubble:has(.nb-say:hover) { transform: translateY(-1px); box-shadow: 0 3px 0 var(--btn-drop); }
+:root[data-theme="post"] .top .nb-bubble:has(.nb-say:active) { transform: translateY(2px); box-shadow: 0 0 0 transparent; }
+:root[data-theme="post"] .top .nb-bubble[data-color-role="unk"]:has(.nb-say:hover) { box-shadow: 0 3px 0 var(--unk-line); }
+:root[data-theme="post"] .top .nb-say { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; padding: 0 8px 0 7px; border: 0; border-radius: 8.5px 0 0 8.5px; background: transparent; color: inherit; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+:root[data-theme="post"] .top .nb-say:hover { background: var(--bub-hover, transparent); }
+:root[data-theme="post"] .top .nb-say:hover span { text-decoration: none; }  /* 링크가 아니라 버튼이다 */
+:root[data-theme="post"] .top .nb-say span { display: inline; overflow: visible; white-space: nowrap; }
+:root[data-theme="post"] .top .nb-ic { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bub-ink); color: var(--bub-bg); }
+:root[data-theme="post"] .top .nb-bubble[data-color-role="info"] .nb-ic { background: var(--ask-bg); color: var(--ask); }
+:root[data-theme="post"] .top .nb-bubble[data-color-role="unk"] .nb-ic { background: transparent; color: var(--unk); box-shadow: inset 0 0 0 1.5px var(--unk-line); }
+:root[data-theme="post"] .top .nb-kind { flex: none; font-weight: 800; }
+:root[data-theme="post"] .top .nb-say span.nb-line { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+:root[data-theme="post"] .top .nb-more { flex: none; display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: color-mix(in srgb, currentColor 16%, transparent); font-size: 11.5px; font-weight: 800; font-style: normal; font-variant-numeric: tabular-nums; }
+:root[data-theme="post"] .top .nb-go { flex: none; margin-left: -2px; }
+:root[data-theme="post"] .top .nb-x { flex: none; display: inline-flex; align-items: center; width: auto; height: auto; padding: 0 11px 0 10px; border: 0; border-left: 1.5px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 0 8.5px 8.5px 0; background: transparent; color: inherit; font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+:root[data-theme="post"] .top .nb-x:hover { background: color-mix(in srgb, currentColor 14%, transparent); color: inherit; }
+:root[data-theme="post"] .top .nb-bubble :focus-visible { outline: 2.5px solid var(--focus); outline-offset: 3px; }
 @container shell (max-width: 760px) {
   :root[data-theme="post"] .top .nb-host:has(.nb-bubble:not([hidden])) { order: 9; flex: 1 1 100%; }
   :root[data-theme="post"] .top .nb-host .nb-bubble { flex: 1 1 auto; max-width: none; margin: 0; left: auto; right: auto; width: auto; min-width: 0; }
+  :root[data-theme="post"] .top .nb-more { display: none; }  /* 좁은 폭: 남은 건수는 알림 단추 배지에 있으니 내용 글에 자리를 준다 */
   :root[data-theme="post"] .prail { gap: 2px; padding: 6px 8px; overflow-x: hidden; }
   :root[data-theme="post"] .prail-new, :root[data-theme="post"] .prail-item { flex: 1 1 0; min-width: 0; padding: 8px 2px; font-size: 11px; }
   :root[data-theme="post"] .prail-badge { right: 50%; margin-right: -22px; }
@@ -854,8 +957,6 @@
 :root[data-theme="post"] .docs-page .docs-pane .md th, :root[data-theme="post"] .docs-page .docs-pane .md td { border-bottom-color: var(--bd2); }
 :root[data-theme="post"] .dsheet table.sheet { background: var(--field); color: var(--text); }
 :root[data-theme="post"] .dsheet table.sheet td, :root[data-theme="post"] .dsheet table.sheet th { border-color: var(--bd2); }
-:root[data-theme="post"] .docs-pane .pill.dark { background: var(--accent-fill); }
-:root[data-theme="post"] .docs-pane .md a { color: var(--accent); }
 :root[data-theme="post"] .sess-side .docs-list .drow.on, :root[data-theme="post"] .drow.on { background: var(--paper); }
 :root[data-theme="post"] .drow:hover { background: var(--soft); }
 :root[data-theme="post"] .drow, :root[data-theme="post"] .light .md hr, :root[data-theme="post"] .light .md th, :root[data-theme="post"] .light .md td { border-color: var(--bd2); }
@@ -928,7 +1029,8 @@
 /* 오류·알림 문구(E단계): 상태는 색 + 기호. 전달 실패·읽기 실패(alert)는 주의 ! 호박, 확인 못 함 카드의 글은 ? 보라 */
 :root[data-theme="post"] .note-attn[role="alert"]::before, :root[data-theme="post"] .note-attn[data-alert]::before, :root[data-theme="post"] .nb-err::before, :root[data-theme="post"] .tb-askerr::before, :root[data-theme="post"] .mcp-err::before, :root[data-theme="post"] .conn > span:first-child::before { content: "! "; font-weight: 800; }
 :root[data-theme="post"] .approval-card.unknown .note-attn::before { content: "? "; font-weight: 800; }
-:root[data-theme="post"] .nb-err, :root[data-theme="post"] .mcp-err { color: var(--attn); }
+:root[data-theme="post"] .nb-err { color: var(--err); }
+:root[data-theme="post"] .mcp-err { color: var(--attn); }
 :root[data-theme="post"] .reload-strip, :root[data-theme="post"] .folder-notice { border: 1.5px solid var(--attn); background: var(--st-turn-bg); color: var(--text); }
 :root[data-theme="post"] .banner.info { border: 1.5px solid var(--bd); background: transparent; color: var(--sec); }
 :root[data-theme="post"] .wn { border: 1.5px solid var(--bd); background: var(--paper); box-shadow: 0 1px 0 var(--bd2), 0 10px 24px -18px rgba(36,48,74,.35); }
@@ -940,12 +1042,31 @@
 :root[data-theme="post"] .nb-back { place-items: center; padding: 16px; }  /* 알림 팝업도 모달이라 가운데 판 */
 :root[data-theme="post"] .nb-dialog { border: 1.5px solid var(--bd); background: var(--paper); color: var(--text); max-height: calc(100vh - 32px); }
 :root[data-theme="post"] .nb-pager { font-family: var(--font); }
-:root[data-theme="post"] .nb-nav, :root[data-theme="post"] .nb-close { border-color: var(--bd); }
-:root[data-theme="post"] .nb-nav:hover, :root[data-theme="post"] .nb-close:hover { background: var(--surface); }
+:root[data-theme="post"] .nb-nav, :root[data-theme="post"] .nb-close { border-color: var(--btn-edge); border-radius: 8px; background: var(--btn-face); box-shadow: 0 2px 0 var(--btn-drop); }
+:root[data-theme="post"] .nb-nav:hover:not(:disabled), :root[data-theme="post"] .nb-close:hover { background: var(--btn-lift); }
+:root[data-theme="post"] .nb-nav:disabled { box-shadow: none; }
 :root[data-theme="post"] .nb-dialog pre.box { background: var(--paper2); color: var(--text); }
-:root[data-theme="post"] .nb-btn { border: 1.5px solid var(--bd); background: var(--paper); color: var(--sec); }
-:root[data-theme="post"] .nb-btn:hover { background: var(--paper2); color: var(--text); }
-:root[data-theme="post"] .nb-dot { border-color: var(--bg); }
+/* 알림 단추(≡): 버튼 말씨. 알림이 있으면 건수 배지를 달고, 배지 색은 가장 급한 알림의 역할 색 */
+:root[data-theme="post"] .nb-btn { border: 1.5px solid var(--btn-edge); border-radius: 10px; background: var(--btn-face); color: var(--text); box-shadow: 0 2px 0 var(--btn-drop); transition: transform .08s, box-shadow .08s, background-color .12s; }
+:root[data-theme="post"] .nb-btn:hover { background: var(--btn-lift); color: var(--text); transform: translateY(-1px); box-shadow: 0 3px 0 var(--btn-drop); }
+:root[data-theme="post"] .nb-btn:active { transform: translateY(2px); box-shadow: 0 0 0 transparent; }
+:root[data-theme="post"] .nb-dot { top: -8px; right: -8px; display: grid; place-items: center; box-sizing: border-box; width: auto; min-width: 20px; height: 20px; padding: 0 4px; border: 2px solid var(--bg); border-radius: 10px; background: var(--bub-dot); color: var(--bub-on-dot); font: 800 11px/1 var(--font); font-style: normal; font-variant-numeric: tabular-nums; }
+:root[data-theme="post"] .nb-dot[data-color-role="warn"] { --bub-dot: var(--warn-fill); --bub-on-dot: var(--on-warn); }
+:root[data-theme="post"] .nb-dot[data-color-role="err"] { --bub-dot: var(--err-fill); --bub-on-dot: var(--on-err); }
+:root[data-theme="post"] .nb-dot[data-color-role="ok"] { --bub-dot: var(--ok-fill); --bub-on-dot: var(--on-ok); }
+:root[data-theme="post"] .nb-dot[data-color-role="unk"] { --bub-dot: var(--unk-line); --bub-on-dot: var(--bg); }
+:root[data-theme="post"] .nb-dot[data-color-role="info"] { --bub-dot: var(--ask-fill); --bub-on-dot: var(--on-ask); }  /* 새 판 = 새 소식(알림의 조용한 꼴): 말풍선은 종이 바탕에 파란 아이콘, 배지·팝업 이름표·판 옆 점은 파랑 */
+/* 알림 팝업의 종류 줄: 말풍선과 같은 역할 색 · 아이콘 · 이름표 */
+:root[data-theme="post"] .nb-dialog .nb-eb { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 700; color: var(--nb-tone, var(--sec)); overflow-wrap: anywhere; }
+:root[data-theme="post"] .nb-eb .nb-ic { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--nb-chip, var(--surface)); color: var(--nb-on-chip, var(--text)); }
+:root[data-theme="post"] .nb-eb[data-color-role="ask"] { --nb-tone: var(--ask); --nb-chip: var(--ask-fill); --nb-on-chip: var(--on-ask); }
+:root[data-theme="post"] .nb-eb[data-color-role="warn"] { --nb-tone: var(--warn); --nb-chip: var(--warn-fill); --nb-on-chip: var(--on-warn); }
+:root[data-theme="post"] .nb-eb[data-color-role="err"] { --nb-tone: var(--err); --nb-chip: var(--err-fill); --nb-on-chip: var(--on-err); }
+:root[data-theme="post"] .nb-eb[data-color-role="ok"] { --nb-tone: var(--ok); --nb-chip: var(--ok-fill); --nb-on-chip: var(--on-ok); }
+:root[data-theme="post"] .nb-eb[data-color-role="unk"] { --nb-tone: var(--unk); --nb-chip: transparent; --nb-on-chip: var(--unk); }
+:root[data-theme="post"] .nb-eb[data-color-role="unk"] .nb-ic { box-shadow: inset 0 0 0 1.5px var(--unk-line); }
+:root[data-theme="post"] .nb-eb[data-color-role="info"] { --nb-tone: var(--ask); --nb-chip: var(--ask-bg); --nb-on-chip: var(--ask); }
+:root[data-theme="post"] .nb-dialog .acts { gap: 10px; }
 :root[data-theme="post"] .lim-i { font-family: var(--font); border-color: var(--bd); }
 :root[data-theme="post"] .assist { border: 1.5px solid var(--bd); border-radius: 12px; background: var(--paper); color: var(--text); box-shadow: 0 1px 0 var(--bd2), 0 14px 28px -14px rgba(36,48,74,.5); }
 :root[data-theme="post"] .assist-title { padding: 6px 10px 4px; font-size: 12px; font-weight: 700; color: var(--sec); }
@@ -969,7 +1090,7 @@
 :root[data-theme="post"] .attach-note::before { content: "! "; font-weight: 800; }
 :root[data-theme="post"] .comp { border: 1.5px solid var(--bd); background: var(--field); }
 :root[data-theme="post"] .comp-in { color: var(--text); }
-:root[data-theme="post"] .comp:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+:root[data-theme="post"] .comp:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
 :root[data-theme="post"] .comp { position: relative; }
 :root[data-theme="post"] .comp .assist-wrap { position: static; }  /* `/`·`@` 목록이 입력칸(좁은 화면에서 200px 남짓)이 아니라 입력 줄 전체 너비를 쓴다 — 390 에서 설명이 한두 글자씩 끊겼다 */
 :root[data-theme="post"] .contbox .cont-in { border-color: var(--bd); color: var(--text); background: var(--field); }
@@ -999,7 +1120,9 @@
 :root[data-theme="post"] .po-ml small { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--lmuted); }
 :root[data-theme="post"] .po-ml small .po-st { width: 14px; height: 14px; font-size: 9px; }
 :root[data-theme="post"] .po-ml small .po-st-run::after { width: 6px; height: 6px; }
-:root[data-theme="post"] .po-ml-turn small { color: var(--attn); }
+:root[data-theme="post"] .po-ml-turn small { color: var(--ask); }
+:root[data-theme="post"] .po-ml-turn[data-color-role="warn"] small { color: var(--warn); }
+:root[data-theme="post"] .po-ml-turn[data-color-role="err"] small { color: var(--err); }
 :root[data-theme="post"] .po-ml-blocked small { color: var(--st-fail-ink); }
 :root[data-theme="post"] .po-ml-unk small { color: var(--st-unk-ink); }
 
@@ -1024,20 +1147,26 @@
 :root[data-theme="post"] .dmeta .dchk li { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--sec); }
 :root[data-theme="post"] .dmeta .toolrow { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* 어두운 모드: 가이드 5절 어두운 값. 글자로 쓰는 색(--attn · --st-* · --accent)은 어두운 판 위에서 4.5:1 이 되도록 밝게 하고,
-   흰 글자가 올라가는 채움(--accent-fill 따위)은 밝을 때와 같게 둔다. 장면 그림(SVG)·사람 아바타 바탕·장면 안 이름표·노랑 꼬리표는 낮 모습 그대로다. */
+/* 어두운 모드: 역할 색의 글자(--ask · --warn · --err · --ok · --unk)는 어두운 판 위에서 4.5:1 이 되도록 밝게 하고,
+   흰 글자가 올라가는 채움(--x-fill)은 밝을 때와 같게 둔다(알림 채움만 흰 글자 대비에 맞춰 조금 밝다). 주 색(--pri)은 남색 바탕에서 안 보이니 크림으로 뒤집고 그 위 글자를 어둡게 한다.
+   옛 변수(--accent · --attn · --st-*)는 위에서 역할로 이어 두어 여기서 다시 정하지 않는다. 장면 그림(SVG)·사람 아바타 바탕·장면 안 이름표·노랑 꼬리표는 낮 모습 그대로다. */
 :root[data-theme="post"][data-mode="dark"] {
   --bg: #161B27; --surface: #1B2130; --deep: #1B2130; --text: #F3EEE3; --sec: #CFC8B8; --muted: #9CA3B5;
-  --accent: #F0685A; --attn: #F2B24C; --btn: #C73E31; --brand: #F0685A;
+  --pri: #F3EEE3; --pri-hover: #FFFFFF; --pri-drop: #8E897E; --on-pri: #161B27; --pri-soft: #2D364B;
+  --ask: #9CC0F5; --ask-fill: #3D6FB6; --ask-bg: #1F2D47; --ask-line: #6F9BE0;
+  --warn: #F2B24C; --warn-bg: #3A3020; --warn-line: #C98A2B;
+  --err: #FF9A90; --err-bg: #3F2630; --err-line: #E5675C;
+  --ok: #8FD9B4; --ok-bg: #1F3A30; --ok-line: #5FC79B;
+  --unk: #BDB0F5; --unk-bg: #2E2A4A; --unk-line: #A596E6;
+  --focus: #8DB4F0;
+  --btn-edge: #AEB6C8; --btn-drop: #0A0D14; --btn-lift: #343E57; --btn-face: #262E41;
+  --brand: #F0685A;
   --line: #2A3245; --line2: #3A4459; --soft: rgba(243,238,227,.07); --edge: #7C849A;
   --track: #2D364B;
-  --light: #202738; --lightink: #F3EEE3; --lmuted: #9CA3B5; --lline: #3A4459; --card: #202738; --stbg: #262E41; --okbg: #1F3A30; --okink: #8FD9B4;
-  --st-now: #5FC79B; --st-now-bg: #1F3A30; --st-done: #5FC79B; --st-done-bg: #1F3A30;
-  --st-turn: #F2B24C; --st-turn-bg: #3A3020;
-  --st-fail: #E5675C; --st-fail-ink: #FF9A90; --st-fail-bg: #3F2630;
-  --st-unk: #A596E6; --st-unk-ink: #BDB0F5; --st-unk-bg: #2E2A4A;
-  --danger: #FF8A7E;
-  --paper: #202738; --paper2: #262E41; --bd: #2F384E; --bd2: #2A3245; --field: #1B2130; --me-bg: #262E41; --accent-soft: #3F2A2E; --wait: #8DB4F0;
+  --light: #202738; --lightink: #F3EEE3; --lmuted: #9CA3B5; --lline: #3A4459; --card: #202738; --stbg: #262E41;
+  --st-done: #5FC79B;
+  --danger: #E5675C;
+  --paper: #202738; --paper2: #262E41; --bd: #2F384E; --bd2: #2A3245; --field: #1B2130; --me-bg: #262E41;
   color-scheme: dark;
 }
 :root[data-theme="post"][data-mode="dark"] .po-stage { background: var(--paper2); }
@@ -1057,7 +1186,7 @@
 :root[data-theme="post"] #main:focus { outline: none; }
 :root[data-theme="post"] #main { scroll-margin-top: 88px; }  /* 좁은 화면에서 건너뛰어 내려오면 위에 붙는 메뉴줄에 본문 머리가 가리지 않게(산출물 미리보기와 같은 값) */
 /* 노란 띠(MCP 연결 안 됨)는 어두운 모드에서도 밝은 노랑이라, 띠 안 「다시 연결하지 못했어」 는 어두운 모드의 밝은 --attn 대신 라이트와 같은 진한 갈색(6회차 실화면) */
-:root[data-theme="post"] .banner .mcp-err { color: #9A5400; }
+:root[data-theme="post"] .banner .mcp-err { color: #8A4B00; }  /* 노랑(#FFD66B) 위 4.5:1 이상. 밝은 모드의 --warn 과 같은 값 */
 /* 설정 · 계정 한도 켜기 확인의 「지금」「바꾼 뒤」 이름표: app.css 의 Sauce 색(#55625f)이라 어두운 바탕에서 거의 안 보였다 → Post 흐린 글 색. 아래 안내 문장이 명령 글에 붙어 있던 것도 위 문장과 같은 간격(7회차 실화면) */
 :root[data-theme="post"] .limits-confirm .lcmd > span { color: var(--lmuted); }
 :root[data-theme="post"] .limits-confirm .lcmd + p { margin-top: 10px; }

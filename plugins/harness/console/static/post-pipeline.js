@@ -112,8 +112,9 @@
     function card(c) {
       var it = c.item, s = c.session, st = c.state;
       var cls = 'po-pl-req' + (st === 'turn' ? ' turn' : st === 'blocked' ? ' blocked' : '');
+      var tone = st === 'turn' && s && kit.turnTone ? kit.turnTone(s) || null : null;  // 승인·계획 = 경고, PR 검사 실패 = 오류(theme-post.css [data-color-role])
       var kids = [
-        h('i', { class: 'po-st po-st-' + st, 'aria-hidden': 'true', text: PL.GLYPH[st] || '' }),
+        h('i', { class: 'po-st po-st-' + st, 'data-color-role': tone, 'aria-hidden': 'true', text: PL.GLYPH[st] || '' }),
         h('span', { class: 'po-pl-rid', text: (it.req ? it.req + ' · ' : '') + it.dev }),
         h('b', { class: 'po-pl-t', text: it.title }),
         it.kind ? h('span', { class: 'po-pl-kind', text: it.kind }) : null,
@@ -121,7 +122,7 @@
       ];
       var prs = arr(it.prs).map(function (p) { return '#' + p.number; }).join(', ');
       var tip = prs ? '열린 PR ' + prs : null;
-      var node = s ? kit.link('/s/' + encodeURIComponent(s.id), { class: cls, title: tip }, kids) : h('div', { class: cls, title: tip }, kids);
+      var node = s ? kit.link('/s/' + encodeURIComponent(s.id), { class: cls, title: tip, 'data-color-role': tone }, kids) : h('div', { class: cls, title: tip }, kids);
       return h('li', { 'data-req': String(it.number) }, node);
     }
     function lanesEl(g, narrow) {

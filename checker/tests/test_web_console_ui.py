@@ -1081,6 +1081,25 @@ const cases = {
     assert.strictEqual(N.pickBubble(items, { 'req:a': true }).id, 'blk:s:blocked:1');  // 닫은 건 건너뛴다
     assert.strictEqual(N.pickBubble(items, { 'req:a': true, 'blk:s:blocked:1': true, 'api:s:1': true }), null);
     assert.strictEqual(N.pickBubble([], {}), null);
+    // 알림 종류 → 역할 색 · 이름표 · 아이콘(말풍선·팝업·배지가 같이 쓴다). 답을 기다림 = 알림, 승인·계획 = 경고, 막힘·검사 실패·API 오류 = 오류, 확인 못 함 = 보라, 합쳐짐 = 성공, 새 판 = 새 소식
+    const tones = k => N.kindMeta(k).tone;
+    assert.deepStrictEqual(['question', 'elicit', 'req', 'turn'].map(tones), ['ask', 'ask', 'ask', 'ask']);
+    assert.deepStrictEqual(['perm', 'plan'].map(tones), ['warn', 'warn']);
+    assert.deepStrictEqual(['fix', 'blocked', 'api'].map(tones), ['err', 'err', 'err']);
+    assert.deepStrictEqual(['cannot', 'merged', 'ver'].map(tones), ['unk', 'ok', 'info']);
+    assert.deepStrictEqual(N.kindMeta('zzz'), { tone: 'info', word: '알림', icon: 'bell' });  // 모르는 종류에 급한 색을 지어내지 않는다
+    assert.deepStrictEqual(N.kindMeta('toString'), N.kindMeta('zzz'));  // 물려받은 이름에 속지 않는다
+    ['question', 'elicit', 'req', 'turn', 'perm', 'plan', 'fix', 'blocked', 'api', 'cannot', 'merged', 'ver'].forEach(k => { const m = N.kindMeta(k); assert.ok(m.word && m.icon && !/내 차례/.test(m.word), k); });  // 색만으로 전하지 않게 이름표·아이콘이 늘 있다
+    assert.strictEqual(N.bubbleLine({ kind: 'perm', text: '권한 일 · 파일 만들기' }, 3), '승인 요청 · 권한 일 · 파일 만들기 외 2건');
+    assert.strictEqual(N.bubbleLine({ kind: 'turn', text: '질문 일' }, 1), '답을 기다려요 · 질문 일');
+    assert.strictEqual(N.bubbleLine({ kind: 'ver', text: '' }, 1), '새 판');
+    assert.strictEqual(N.bubbleLine(null, 3), '');
+    assert.strictEqual(N.apiLine('auth'), '로그인이 풀렸어요');
+    assert.strictEqual(N.apiLine('mystery'), '알 수 없는 오류예요');  // 모르는 오류를 아는 오류로 뭉개지 않는다
+    // 허락 단추 색: 지우는 일만 위험(빨강), 그 밖은 승인(초록)
+    assert.strictEqual(N.allowRole({ toolInput: { command: 'touch a' } }), 'ok');
+    assert.strictEqual(N.allowRole({ risk: 'irreversible', toolInput: { command: 'rm -rf x' } }), 'err');
+    assert.strictEqual(N.allowRole({ risk: 'irreversible', toolInput: { command: 'git push origin main' } }), 'ok');
     // 더는 없는 알림의 닫은 표시는 잊어 같은 일이 다시 생기면 다시 뜨고, 화면 따라 있다 없다 하는 알림(ver·merged)은 지우지 않는다
     assert.deepStrictEqual(N.pruneDismissed({ 'req:a': true, 'req:gone': true, 'ver:1': true, 'merged:s': true }, items), { 'req:a': true, 'ver:1': true, 'merged:s': true });
     // 승인 단추 말: 기본 / 지우기 / 올리기 (승인 화면과 같다)
@@ -3290,7 +3309,7 @@ def test_notice_bubble_shows_most_urgent_one_line_with_dot_on_every_screen(tmp_p
     s, q = _q_session()
     for route in ("", "s/s1", "settings", "docs"):
         got = _smoke(tmp_path, route, [s], [q])
-        assert got["bubble"].startswith("내 차례 1건: 요구사항을 올릴지 정해 주세요"), (route, got["bubble"])
+        assert got["bubble"].startswith("질문 · 구매오더 조회 앱 요구사항 · 요구사항을 올릴지 정해 주세요"), (route, got["bubble"])  # 이름표 · 세션 · 내용(「내 차례」 는 쓰지 않는다)
         assert got["dot"] == 1, route  # 알림이 있으면 단추에 점
         assert "<div.nb-bubble>" not in got["dump"]  # (말풍선은 머리줄에 있다 — 본문에 겹쳐 그리지 않는다)
     got = _smoke(tmp_path, "", [s], [q])
@@ -3307,11 +3326,11 @@ def test_notice_bubble_priority_follows_strip_order(tmp_path):
     blocked = _session("s3", title="막힌 일", status="idle", lastBlock={"t": 2, "kind": "blocked", "open": True})
     api = _session("s4", title="로그인 일", status="idle", apiIssue={"kind": "auth", "status": 401, "t": 5})
     got = _smoke(tmp_path, "", [api, blocked, s], [q])
-    assert got["bubble"].startswith("내 차례 1건:")
+    assert got["bubble"].startswith("질문 · ") and got["bubble"].endswith(" 외 2건")  # 다른 알림이 더 있으면 건수를 뒤에
     got = _smoke(tmp_path, "", [api, blocked])
-    assert got["bubble"].startswith("막힌 일 1건: “막힌 일” 세션부터 보자")
+    assert got["bubble"].startswith("막혔어요 · 막힌 일 · 고친 뒤 이어서 할 수 있어요")
     got = _smoke(tmp_path, "", [api])
-    assert got["bubble"].startswith("⚠ 오류 1건: “로그인 일” 세션 — 로그인이 풀렸어")
+    assert got["bubble"] == "오류 · 로그인 일 · 로그인이 풀렸어요"
     # 같은 알림이 홈 띠와 말풍선 두 군데 겹치지 않게 띠는 감춘다(DOM 에만 있다)
     assert got["annBubble"] == "1" and "로그인이 풀렸어" in got["ann"]  # 띠 데이터는 DOM 에 남기고(.ann-slot[data-bubble] 로 감춘다) 말풍선만 보인다
     assert got["dot"] == 1
@@ -3329,7 +3348,7 @@ def test_notice_bubble_close_remembers_by_id_and_new_notice_shows_again(tmp_path
     # 새 알림은 뜬다
     s2, p = _perm_session()
     new = _smoke(tmp_path, "", [s, s2], [q, p], extra={"__ss": {"bh-nb-dismissed": '["req:q1"]'}})
-    assert new["bubble"].startswith("내 차례 2건: 권한 일 · ") and "내 차례 2건" in new["bubble"]
+    assert new["bubble"].startswith("승인 요청 · 권한 일 · ") and new["bubble"].endswith(" 외 1건") and "내 차례" not in new["bubble"]
     # 풀린(더는 없는) 알림의 닫은 표시는 잊어서 같은 일이 다시 생기면 다시 뜬다
     gone = _smoke(tmp_path, "", [_session("s1")], extra={"__ss": {"bh-nb-dismissed": '["req:gone","ver:9"]'}})
     assert json.loads(gone["ss"]["bh-nb-dismissed"]) == ["ver:9"]
@@ -3348,7 +3367,7 @@ def test_notice_popup_answers_permission_with_existing_answer_api(tmp_path):
     assert "1/" not in d  # 한 건이면 n/m 은 없다
     done = _smoke(tmp_path, "", [s], [p], extra={"POST /api/requests/p1/answer": {"ok": True}}, actions=[{"click": ".nb-say"}, {"click": "[data-k=allow]"}])
     assert ["POST", "/api/requests/p1/answer", '{"decision":"allow"}'] in done["posts"]  # 새 경로 없이 기존 응답 API
-    assert "허락했어." in done["dialog"] and "답할 알림이 더 없어" in done["dialog"]
+    assert "허락했어요." in done["dialog"] and "답할 알림이 더 없어요" in done["dialog"]
     deny = _smoke(tmp_path, "", [s], [p], extra={"POST /api/requests/p1/answer": {"ok": True}}, actions=[{"click": ".nb-btn"}, {"click": "[data-k=deny]"}])
     assert ["POST", "/api/requests/p1/answer", '{"decision":"deny"}'] in deny["posts"]
     ps = dict(p, suggestionText=["Bash(touch a:*)"])  # 추가될 규칙을 먼저 보여 줄 수 있으면 "다시 묻지 않기" 를 둔다
@@ -3358,7 +3377,7 @@ def test_notice_popup_answers_permission_with_existing_answer_api(tmp_path):
     assert "Bash(touch a:*)" in shown["dialog"] and shown["dialog"].index("Bash(touch a:*)") < shown["dialog"].index("이번만 허락")  # 규칙을 먼저 보여 준 뒤 단추
     # 응답이 실패하면 오류를 보이고 닫지 않는다(여기선 서버가 없는 요청이라고 답한 경우)
     fail = _smoke(tmp_path, "", [s], [p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=allow]"}])
-    assert "이미 처리됐거나 닫힌 요청이야" in fail["dialog"] and "이번만 허락" in fail["dialog"] and "답할 알림이 더 없어" not in fail["dialog"]
+    assert "이미 처리됐거나 닫힌 요청이에요" in fail["dialog"] and "이번만 허락" in fail["dialog"] and "답할 알림이 더 없어" not in fail["dialog"]
     assert all(p_[0] == "POST" and "/answer" in p_[1] for p_ in fail["posts"])
 
 
@@ -3369,7 +3388,7 @@ def test_notice_popup_question_options_send_answers_and_irreversible_verbs(tmp_p
     assert "질문 · 구매오더 조회 앱 요구사항" in got["dialog"] and "올려" in got["dialog"] and "나중에" in got["dialog"] and "답 보내기" not in got["dialog"]
     sent = _smoke(tmp_path, "", [s], [q], extra={"POST /api/requests/q1/answer": {"ok": True}}, actions=[{"click": ".nb-say"}, {"click": "[data-k=opt-0-1]"}])
     assert ["POST", "/api/requests/q1/answer", '{"answers":{"요구사항을 올릴지 정해 주세요":"나중에"}}'] in sent["posts"]  # 보기 하나가 곧 답
-    assert "세션에 답을 전달했어." in sent["dialog"]
+    assert "세션에 답을 전했어요." in sent["dialog"]
     # 여러 가지를 묻거나 여러 개 고르는 질문은 골라 두고 [답 보내기]
     multi = dict(q, questions=[{"question": "색은?", "multiSelect": True, "options": [{"label": "빨강"}, {"label": "파랑"}]}])
     pick = _smoke(tmp_path, "", [s], [multi], actions=[{"click": ".nb-btn"}])
@@ -3395,7 +3414,7 @@ def test_notice_popup_pages_between_items_and_other_kinds_open_session(tmp_path)
     nxt = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=next]"}])
     assert "2/4" in nxt["dialog"] and "승인 요청 · 권한 일" in nxt["dialog"]
     blk = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=next]"}, {"click": "[data-k=next]"}])
-    assert "3/4" in blk["dialog"] and "✕ 막힘" in blk["dialog"] and "세션 열기" in blk["dialog"]
+    assert "3/4" in blk["dialog"] and "막혔어요 · 막힌 일" in blk["dialog"] and "세션 열기" in blk["dialog"]
     err = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=prev]"}])  # 처음에서 이전은 끝으로
     assert "4/4" in err["dialog"] and "로그인이 풀렸어" in err["dialog"] and "/login" in err["dialog"] and "세션 열기" in err["dialog"]
     # 세션 열기는 팝업을 닫고 그 세션으로 간다
@@ -3403,7 +3422,7 @@ def test_notice_popup_pages_between_items_and_other_kinds_open_session(tmp_path)
     assert opened["dialog"] == "" and opened["path"] == "/s/s4"
     # 말풍선의 글자를 누르면 그 알림부터 연다
     api_only = _smoke(tmp_path, "", [blocked, api], actions=[{"click": ".nb-say"}])
-    assert "1/2" in api_only["dialog"] and "✕ 막힘" in api_only["dialog"]
+    assert "1/2" in api_only["dialog"] and "막혔어요 · 막힌 일" in api_only["dialog"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -3420,7 +3439,7 @@ def test_notice_popup_closes_with_esc_and_keeps_focus_inside(tmp_path):
     assert _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"click": ".nb-btn"}, {"focus": "[data-k=detail]"}, {"key": "Tab"}])["activeK"] == "prev"
     assert _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"click": ".nb-btn"}, {"focus": "[data-k=prev]"}, {"key": "Tab", "shift": True}])["activeK"] == "detail"
     empty = _smoke(tmp_path, "", [_session("s1")], actions=[{"click": ".nb-btn"}])
-    assert "지금 알릴 게 없어." in empty["dialog"]
+    assert "지금은 알릴 게 없어요." in empty["dialog"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -3441,6 +3460,96 @@ def test_header_shows_account_limits_or_says_unknown(tmp_path):
     assert "✕ 5시간 100%" in rej["limits"]
     # 다른 화면에서도 늘 보인다
     assert "5시간 42%" in _smoke(tmp_path, "settings", [_session("s1")], extra={"GET /api/account-limits": {"windows": wins}})["limits"]
+
+
+def _post_vars(block: str) -> dict:
+    return {k: v.strip() for k, v in re.findall(r"(--[a-z0-9-]+):\s*([^;]+);", block)}
+
+
+def test_post_colors_are_assigned_by_role():
+    """Cozy Office 색은 역할로만 쓴다(2026-11-19): 주 = 남색, 알림 = 파랑, 경고 = 노랑, 오류 = 빨강, 승인/성공 = 초록, 확인 못 함 = 보라. 빨강은 로고와 오류에만."""
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    light = _post_vars(css.split(':root[data-theme="post"] {', 1)[1].split("\n}", 1)[0])
+    dark = dict(light, **_post_vars(css.split(':root[data-theme="post"][data-mode="dark"] {', 1)[1].split("\n}", 1)[0]))
+    # 옛 변수는 역할로 이어진다 — 주 버튼·고른 칸이 빨강이 아니다
+    assert light["--accent"] == "var(--pri)" and light["--btn"] == "var(--pri)" and light["--accent-fill"] == "var(--pri)" and light["--pri"] == "#24304A"
+    assert light["--attn"] == "var(--warn)" and light["--danger"] == "var(--err-fill)" and light["--st-now"] == "var(--pri)"
+    assert "--accent" not in _post_vars(css.split(':root[data-theme="post"][data-mode="dark"] {', 1)[1].split("\n}", 1)[0])  # 어두운 모드는 역할 값만 바꾼다
+    assert css.count("#C73E31") == 1 and "--brand: #C73E31" in css  # 로고 빨강 한 곳
+    # 글자 4.5:1 — 역할 글자색은 바탕·종이·옅은 바탕 위에서, 채움 위 글자는 채움 위에서(밝게·어둡게 둘 다)
+    for name, v in (("light", light), ("dark", dark)):
+        def ratio(a, b):
+            x, y = sorted((_lum(v[a] if a.startswith("--") else a), _lum(v[b] if b.startswith("--") else b)), reverse=True)
+            return (x + 0.05) / (y + 0.05)
+        for role in ("ask", "warn", "err", "ok", "unk"):
+            for ground in ("--bg", "--paper", "--surface", f"--{role}-bg"):
+                assert ratio(f"--{role}", ground) >= 4.5, (name, role, ground, ratio(f"--{role}", ground))
+        for role in ("ask", "err", "ok"):
+            assert ratio(v.get(f"--on-{role}", "#FFFFFF"), f"--{role}-fill") >= 4.5, (name, role)
+        assert ratio("--on-warn", "--warn-fill") >= 4.5 and ratio("--on-pri", "--pri") >= 4.5, name
+    # 버튼 말씨: 남색 선 + 아래 단단한 그림자, 승인(초록)·위험(빨강)은 역할 속성으로만
+    assert "border: 1.5px solid var(--btn-edge); background: var(--btn-face); color: var(--text); box-shadow: 0 2px 0 var(--btn-drop);" in css
+    assert '.pill[data-color-role="ok"] { border-color: var(--ok-fill); background: var(--ok-fill);' in css and '.pill[data-color-role="err"] { border-color: var(--err-fill); background: var(--err-fill);' in css
+    assert ':root[data-theme="post"] :focus-visible { outline: 2.5px solid var(--focus); outline-offset: 2px; }' in css
+    # 답을 기다리는 표시는 알림(파랑), 그 안에서 승인·계획은 경고, PR 검사 실패는 오류
+    assert ".po-st-turn { background: var(--ask-fill); color: var(--on-ask); }" in css and '.po-st-turn[data-color-role="warn"] { background: var(--warn-fill);' in css and '.po-st-turn[data-color-role="err"] { background: var(--err-fill);' in css
+    assert ".po-stc-err { color: var(--err); }" in css and ".prail-badge" in css and "background: var(--ask-fill); color: var(--on-ask); font: 700 11px/18px" in css
+    # 도장·결재란: 승인/성공 = 초록(전에는 강조색 빨강)
+    assert "border: 4px double var(--ok-line); color: var(--ok);" in css and "box-shadow: inset 0 0 0 1.5px var(--ok-fill);" in css
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "'data-color-role': N.allowRole(r)" in app and "'data-color-role': verbs[0] === '이번만 지워' ? 'err' : 'ok'" in app and "'data-color-role': 'ok', disabled: busy, text: '이 계획대로 진행'" in app
+    assert "function turnTone(s)" in app and "turnTone: turnTone" in app
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert "function toneOf(it)" in home and "'data-color-role': toneOf(it)" in home
+
+
+def test_post_notice_bubble_is_a_button_colored_by_kind():
+    """햄버거 옆 알림 말풍선(Cozy Office): 종류의 역할 색 · 아이콘 · 이름표 · › 가 있는 버튼 모양, 옆 단추는 하는 일을 글자로 말한다(「나중에」 = 말풍선에서만 접기)."""
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    for tone in ("ask", "warn", "err", "ok", "unk", "info"):
+        assert f'.top .nb-bubble[data-color-role="{tone}"] {{ --bub-bg:' in css, tone
+    assert ".top .nb-say:hover span { text-decoration: none; }" in css  # 링크처럼 밑줄이 생기지 않는다
+    assert ".top .nb-bubble:has(.nb-say:hover) { transform: translateY(-1px);" in css and ".top .nb-bubble:has(.nb-say:active) { transform: translateY(2px);" in css  # 올리면 뜨고 누르면 내려간다
+    assert ".top .nb-bubble :focus-visible { outline: 2.5px solid var(--focus);" in css
+    nb = css.split("알림 말풍선: 위쪽 줄 안", 1)[1].split("새 작업(시안 new)", 1)[0]
+    assert not re.findall(r"#[0-9a-fA-F]{6}\b", re.sub(r"--bub-hover: #[0-9A-Fa-f]{6}", "", re.sub(r"/\*.*?\*/", "", nb, flags=re.S)))  # 색은 역할 변수로만(올렸을 때 채움 넷은 예외)
+    root = css.split(':root[data-theme="post"] {', 1)[1].split("\n}", 1)[0]
+    for tone in ("ask", "warn", "err", "ok"):  # 값으로 적은 올렸을 때 채움도 그 위 글자와 4.5:1
+        hov = re.search(r'\.nb-bubble\[data-color-role="%s"\] \{[^}]*--bub-hover: (#[0-9A-Fa-f]{6});' % tone, css).group(1)
+        ink = re.search(r"--on-%s: (#[0-9A-Fa-f]{6});" % tone, root).group(1)
+        assert _ratio(ink, hov) >= 4.5, (tone, ink, hov)
+    for tone in ("warn", "err"):  # 같은 일은 자리마다 같은 색: 접힌 목록 동그라미 · 차분 목록 · 세션 머리 줄도 역할을 따른다
+        assert f'.rail-ring.turn[data-color-role="{tone}"]::after {{ background: var(--{tone}-fill); }}' in css
+        assert f'.po-ml-turn[data-color-role="{tone}"] small {{ color: var(--{tone}); }}' in css
+        assert f'.eb.po-eb[data-state][data-color-role="{tone}"] {{ color: var(--{tone}); }}' in css
+    assert '.nb-dot[data-color-role="info"] { --bub-dot: var(--ask-fill);' in css and ".ptop-vdot" in css and '.nb-eb[data-color-role="info"] { --nb-tone: var(--ask);' in css  # 새 판 = 새 소식(파랑)으로 한 가지
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    host = app[app.index("function noticeHost()"):app.index("function limitEl()")]
+    assert "class: 'nb-ic'" in host and "class: 'nb-kind', text: it.word" in host and "class: 'nb-line', text: it.text" in host and "icon('chev', 14)" in host
+    assert "class: 'nb-x'" in host and "text: '나중에'" in host and "onClick: dismissBubble" in host and "이 알림 닫기" not in app
+    assert "var NB_LATER = '말풍선에서만 접어요. 알림 목록(≡)에는 남아 있어요';" in app  # ✕ 가 하던 일(지우기·읽음이 아니라 이 탭에서 말풍선만 접기)을 이름표로
+    assert "'data-color-role': it ? it.tone : null" in host and "'data-color-role': top.tone" in host  # 말풍선과 알림 단추 배지가 같은 역할 색
+    assert "return ['attn', '오류로 멈춤', 'err'];" in app and "'data-color-role': eb[2] || (stt === 'turn' ? turnTone(s) || null : null)" in app  # API 오류로 멈춘 세션의 머리 줄 = 오류 빨강
+    assert "'data-color-role': st.tone === 'attn' ? turnTone(s) || null : null, 'aria-label': say" in app and "tone: turnTone(s), station:" in app
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_bubble_line_and_post_button_parts(tmp_path):
+    s, p = _perm_session()
+    got = _smoke(tmp_path, "", [s], [p])
+    assert got["bubble"] == "승인 요청 · 권한 일 · Bash 사용을 허용할까?"  # 한 건이면 「외 N건」 이 없다
+    # Cozy Office 로 바꾸면 같은 알림이 버튼 모양으로 다시 그려진다: 이름표 · 내용 · (+N) · 「나중에」 가 따로 있다(Post 분기를 실제로 돌린다)
+    post = _smoke(tmp_path, "", [s], [p], actions=[{"theme": "post"}])
+    assert post["bubble"] == "승인 요청권한 일 · Bash 사용을 허용할까?나중에", post["bubble"]
+    s2, q = _q_session()
+    two = _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"theme": "post"}])
+    assert two["bubble"].endswith("+1나중에") and "외 1건" not in two["bubble"], two["bubble"]  # 남은 건수는 +N 배지로
+    later = _smoke(tmp_path, "", [s], [p], actions=[{"theme": "post"}, {"click": ".nb-x"}])
+    assert later["bubble"] == "" and later["dot"] == 1 and any(k.startswith("req:") for k in json.loads(later["ss"].get("bh-nb-dismissed", "[]")))  # 「나중에」 = 말풍선만 접고 알림 단추의 배지는 남는다
+    blocked = _session("s3", title="막힌 일", status="idle", lastBlock={"t": 2, "kind": "cannot_check", "open": True})
+    assert _smoke(tmp_path, "", [blocked])["bubble"] == "확인하지 못했어요 · 막힌 일 · 통과도 위반도 아니에요"  # 검사 불능을 막힘으로 뭉개지 않는다
+    done = _smoke(tmp_path, "", [s], [p], extra={"POST /api/requests/p1/answer": {"ok": True}}, actions=[{"click": ".nb-say"}])
+    assert "승인 요청 · 권한 일" in done["dialog"] and "이번만 허락" in done["dialog"]
 
 
 def test_notice_assets_wired_and_css_uses_variables_only():
@@ -3480,7 +3589,7 @@ def test_notice_popup_does_not_quick_allow_what_it_cannot_show_in_full(tmp_path)
     for name, kw in cases.items():
         got = pop(**kw)["dialog"]
         assert "이번만 허락" not in got and "다시 묻지 않기" not in got, name
-        assert "팝업에서 내용을 다 보여 줄 수 없어" in got and "자세히 보기" in got and "하지 마" in got, name
+        assert "여기서 내용을 다 보여 줄 수 없어요" in got and "자세히 보기" in got and "하지 마" in got, name
     # 계획은 [계획 보기 · 진행 정하기] 만(고쳐 달라고 하기는 이유가 필요해 전체 화면에서)
     plan = pop(toolName="ExitPlanMode", toolInput={"plan": "## 계획"})["dialog"]
     assert "계획 보기 · 진행 정하기" in plan and "이 계획대로 진행" not in plan and "하지 마" not in plan
@@ -3499,12 +3608,12 @@ def test_notice_popup_locks_then_moves_on_when_item_is_handled_elsewhere(tmp_pat
     handled = dict(s, status="idle", pendingRequestIds=[])
     got = _smoke(tmp_path, "", [s, s2], [q, p], actions=[{"click": ".nb-btn"}, {"set": {"GET /api/sessions/s1": handled}}, {"emit": ["session", {"id": "s1"}]}])
     assert "이 알림은 이미 처리됐어" in got["dialog"] and "이번만 허락" not in got["dialog"]  # 다음 알림을 바로 그리지 않는다
-    assert "다음 알림을 불러올게" in got["dialog"] and "허락" not in got["dialog"].replace("이미 처리됐어", "")  # 잠긴 동안은 눌러 답할 단추가 없다
+    assert "다음 알림을 불러올게요" in got["dialog"] and "허락" not in got["dialog"].replace("이미 처리됐어", "")  # 잠긴 동안은 눌러 답할 단추가 없다
     after = _smoke(tmp_path, "", [s, s2], [q, p], actions=[{"click": ".nb-btn"}, {"set": {"GET /api/sessions/s1": handled}}, {"emit": ["session", {"id": "s1"}]}, {"wait": 1300}])
     assert "이 알림은 이미 처리됐어" not in after["dialog"] and "승인 요청 · 권한 일" in after["dialog"] and "이번만 허락" in after["dialog"]
     # 내가 답해서 사라진 알림은 안내 없이 바로 다음으로(결과 안내는 한 번)
     mine = _smoke(tmp_path, "", [s, s2], [q, p], extra={"POST /api/requests/q1/answer": {"ok": True}}, actions=[{"click": ".nb-btn"}, {"click": "[data-k=opt-0-0]"}])
-    assert "이미 처리됐어" not in mine["dialog"] and "세션에 답을 전달했어." in mine["dialog"] and "승인 요청 · 권한 일" in mine["dialog"]
+    assert "이미 처리됐어" not in mine["dialog"] and "세션에 답을 전했어요." in mine["dialog"] and "승인 요청 · 권한 일" in mine["dialog"]
     # 다른 알림으로 넘기면 안내·고른 답은 비워진다
     multi = dict(q, questions=[{"question": "색은?", "multiSelect": True, "options": [{"label": "빨강"}, {"label": "파랑"}]}])
     moved = _smoke(tmp_path, "", [s, s2], [multi, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=opt-0-0]"}, {"click": "[data-k=next]"}, {"click": "[data-k=prev]"}])
@@ -3519,7 +3628,7 @@ def test_notice_dismiss_id_for_api_error_without_time_uses_kind_and_status(tmp_p
     got = _smoke(tmp_path, "", [api], actions=[{"click": ".nb-x"}])
     assert json.loads(got["ss"]["bh-nb-dismissed"]) == ["api:s4:auth:401"]
     other = _smoke(tmp_path, "", [_session("s4", title="로그인 일", status="idle", apiIssue={"kind": "other", "status": 500})], extra={"__ss": {"bh-nb-dismissed": '["api:s4:auth:401"]'}})
-    assert other["bubble"].startswith("⚠ 오류 1건")  # 종류가 다른 새 오류는 다시 뜬다
+    assert other["bubble"].startswith("오류 · 로그인 일 · 서버가 오류를 돌려줬어요")  # 종류가 다른 새 오류는 다시 뜬다
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -3899,7 +4008,7 @@ def test_post_project_scope_only_in_post_and_feeds_every_count():
     assert "return isPostTheme() && window.BHPostLogic ? window.BHPostLogic.projectView(all, repos.folders, postProject()) : { list: all, tag: {} };" in app
     assert "var all = scopedSessions();" in app and "window.BHLogic.turnItems(all, openIds)" in app  # 띠·알림·레일·덱 숫자
     assert "var arr = scopedSessions();" in app  # 사이드 목록·장면(sceneList)·레일
-    assert "sessions: { values: scopedSessions }, requests: requests," in app and "sessions: scopedSessions, loaded:" in app  # 홈·산출물, 파이프라인
+    assert "sessions: { values: scopedSessions }, requests: requests," in app and "sessions: scopedSessions, turnTone: turnTone, loaded:" in app  # 홈·산출물, 파이프라인
     assert "if (loadedOnce) notifyInProject(prev, m);" in app and "if (inProject(m)) notifyChange(prev, m);" in app  # 판정 전 폴더 알림은 판정 뒤에(J11)
     assert "if (isPostTheme() && startCwd) setProject({ path: startCwd });" in app and "class: 'ptop-pick'" in app
     assert "kit.projectTag ? kit.projectTag(s) : null" in (STATIC / "post-home.js").read_text(encoding="utf-8")
@@ -3966,7 +4075,8 @@ def test_post_sweep_design_fixes_css():
     assert ':root[data-theme="post"] .comp { position: relative; }' in css and ':root[data-theme="post"] .comp .assist-wrap { position: static; }' in css
     # 설정 계정 한도 확인의 「바꾸기」는 주 단추, 홈 검토 요청 칸의 PR 링크는 밑줄
     assert "class: 'pill', 'data-limits-confirm-yes': '1'" in app
-    assert ':root[data-theme="post"] .pill[data-limits-confirm-yes] { background: var(--accent-fill); color: #fff; }' in css
+    yes = re.search(r"([^{}]*\.pill\[data-limits-confirm-yes\] \{)\s*border-color: var\(--pri\); background: var\(--pri\); color: var\(--on-pri\);", css)
+    assert yes and ".pill.dark" in yes.group(1)  # 주 단추(.pill.dark)와 같은 규칙에 묶여 있다(역할 색: 주 = 남색)
     assert ':root[data-theme="post"] .po-prslot a.lm, :root[data-theme="post"] .approvals a.lm { color: var(--lightink); text-decoration: underline; text-underline-offset: 3px; }' in css
     # 홈 새 소식은 아래 칸 한 줄을 다 쓰고 300px 단으로 흐른다(좁은 칸 하나에 700px 넘게 서지 않게)
     assert ':root[data-theme="post"] .po-foot > .wn-slot { grid-column: 1 / -1; }' in css
@@ -4022,9 +4132,12 @@ def test_post_turn_text_follows_flow_step():
 def test_post_mcp_error_readable_on_yellow_banner_in_dark():
     # 6회차 실화면: 어두운 모드에서 노란 MCP 띠 안 실패 문구가 밝은 --attn(#F2B24C)이라 바탕과 같은 색이었다. Post 전용 CSS 라 원문 확인
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
-    assert ':root[data-theme="post"] .banner, :root[data-theme="post"] .call,' in css  # 띠는 두 모드 모두 밝은 노랑 + 남색 글자
-    assert ':root[data-theme="post"] .banner .mcp-err { color: #9A5400; }' in css
-    assert css.index(':root[data-theme="post"] .banner .mcp-err {') > css.index(':root[data-theme="post"] .nb-err, :root[data-theme="post"] .mcp-err { color: var(--attn); }')
+    assert re.search(r':root\[data-theme="post"\] \.banner, :root\[data-theme="post"\] \.tag,[^{}]*\{ background: var\(--warn-fill\); color: var\(--on-warn\); \}', css)  # 띠는 두 모드 모두 밝은 노랑 + 남색 글자(경고) — 한 규칙 안에서
+    assert "--warn-fill" not in css.split('[data-mode="dark"] {', 1)[1].split("}", 1)[0]  # 어두운 모드도 같은 노랑 채움
+    m = re.search(r':root\[data-theme="post"\] \.banner \.mcp-err \{ color: (#[0-9A-Fa-f]{6}); \}', css)
+    fill = re.search(r"--warn-fill: (#[0-9A-Fa-f]{6});", css).group(1)
+    assert m and _ratio(m.group(1), fill) >= 4.5, (m and m.group(1), fill)  # 노랑 위 글자 4.5:1(전 값 #9A5400 은 4.1 이었다)
+    assert css.index(':root[data-theme="post"] .banner .mcp-err {') > css.index(':root[data-theme="post"] .mcp-err { color: var(--attn); }')
 
 
 _POST_PR_SUBJECT_NODE = r"""
