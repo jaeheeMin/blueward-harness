@@ -28,7 +28,7 @@
     return parts.join(' · ');
   }
   // 비밀처럼 보이는 값은 입력칸에서도 화면에서도 `••••••••` 로 바꾼다(flow-logic.js 의 maskSecrets, 서버 trouble.py 와 같은 규칙).
-  var MASK_NOTE = '비밀처럼 보이는 값을 가렸어.';
+  var MASK_NOTE = '비밀처럼 보이는 값을 가렸어요.';
   function M(t) { return window.BHLogic && window.BHLogic.maskSecrets ? window.BHLogic.maskSecrets(t) : String(t == null ? '' : t); }
   function stored(key) { try { return window.localStorage.getItem(key); } catch (e) { return null; } }
   function store(key, value) {
@@ -75,8 +75,8 @@
       if (found && !found.disabled && page.contains(found)) found.focus({ preventScroll: true });
     }
     function errBox(e, title) {
-      var msg = e && e.status === 404 ? e.message : (e && e.message) || '읽지 못했어';
-      return h('div', { class: 'tb-empty tb-unk' }, h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }), ' · ' + (title || '') + msg);
+      var msg = e && e.status === 404 ? e.message : (e && e.message) || '읽지 못했어요';
+      return h('div', { class: 'tb-empty tb-unk' }, h('span', { class: 'tb-unk-t', text: '? 확인하지 못했어요' }), ' · ' + (title || '') + msg);
     }
     function selectPill(label, value, options, onPick) {
       var sel = h('select', { class: 'tb-selnat', 'aria-label': label }, h('option', { value: '', text: '전체' }),
@@ -119,7 +119,7 @@
         var ok = d.projects.filter(function (p) { return p.ok; }), bad = d.projects.filter(function (p) { return !p.ok; });
         var st = d.stats;
         page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '문제·해결 기록' }), h('h1', { text: '팀이 겪은 문제와 푼 방법' }),
-          h('span', { class: 'line', text: d.loading && !d.projects.length ? '읽는 중이야' : '프로젝트 ' + ok.length + '곳 · 기록 ' + st.total + '건' + (isPostNow() ? '' : ' · 아직 안 풀린 것 ' + st.open) +  // Post: 안 풀린 수는 바로 아래 「아직 안 풀림」 칸 한 곳에만
+          h('span', { class: 'line', text: d.loading && !d.projects.length ? '읽는 중이에요' : '프로젝트 ' + ok.length + '곳 · 기록 ' + st.total + '건' + (isPostNow() ? '' : ' · 아직 안 풀린 것 ' + st.open) +  // Post: 안 풀린 수는 바로 아래 「아직 안 풀림」 칸 한 곳에만
             (st.truncated && st.truncated.length ? ' (최근 ' + st.limit + '건만 읽은 곳 있음)' : '') })));
         page.appendChild(h('div', { class: 'strip' },
           h('div', null, h('span', { class: 'eb', text: '이번 달 기록' }), h('span', { class: 'x', text: String(st.month) })),
@@ -148,21 +148,21 @@
             h('span', { class: 'cnt', text: counts(it) })));
         });
         if (!d.items.length && !d.loading) {
-          var msg = !d.roots ? '아직 열어 본 프로젝트 폴더가 없어. 새 작업을 시작하면 그 폴더의 기록이 여기 모여.'
-            : !st.total && !bad.length ? '아직 기록이 없어. 문제를 겪으면 [+ 새 기록] 으로 남겨 줘.'
-            : st.total ? '조건에 맞는 기록이 없어.' : '';
+          var msg = !d.roots ? '아직 열어 본 프로젝트 폴더가 없어요. 새 작업을 시작하면 그 폴더의 기록이 여기 모여요.'
+            : !st.total && !bad.length ? '아직 기록이 없어요. 문제를 겪으면 [+ 새 기록] 으로 남겨 주세요.'
+            : st.total ? '조건에 맞는 기록이 없어요.' : '';
           if (msg) rows.appendChild(h('div', { class: 'tb-empty', text: msg }));
         }
-        if (d.loading && !d.items.length) rows.appendChild(h('div', { class: 'tb-empty', role: 'status', text: 'GitHub 에서 읽는 중이야…' }));
+        if (d.loading && !d.items.length) rows.appendChild(h('div', { class: 'tb-empty', role: 'status', text: 'GitHub 에서 읽는 중이에요…' }));
         light.appendChild(rows);
         bad.forEach(function (p) {
-          light.appendChild(h('div', { class: 'tb-empty' }, h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }), ' · ' + p.name + (isPostNow() ? ' — ' : ' · 확인 못 함 — ') + p.reason + ' ',  // Post: 앞 표시(? 확인 못 함)와 같은 말을 한 줄에 두 번 쓰지 않는다
+          light.appendChild(h('div', { class: 'tb-empty' }, h('span', { class: 'tb-unk-t', text: '? 확인하지 못했어요' }), ' · ' + p.name + (isPostNow() ? ' — ' : ' · 확인하지 못했어요 — ') + p.reason + ' ',  // Post: 앞 표시(? 확인 못 함)와 같은 말을 한 줄에 두 번 쓰지 않는다
             h('button', { type: 'button', class: 'tb-again', text: '다시 확인', onClick: function () { reload(true); } })));
         });
         if (d.items.length || ok.length) {
           light.appendChild(h('span', { class: 'tb-foot', text: '최근 순 ' + d.items.length + '건을 보는 중' + (d.matched > d.items.length ? ' (맞는 ' + d.matched + '건 중)' : '') +
-            (bad.length && ok.length ? ' · ' + ok.map(function (p) { return p.name; }).join(', ') + ' 기록만 읽었어' : '') +
-            (st.truncated && st.truncated.length ? ' · ' + st.truncated.join(', ') + ' 은 최근 ' + st.limit + '건만 읽었어' : '') }));
+            (bad.length && ok.length ? ' · ' + ok.map(function (p) { return p.name; }).join(', ') + ' 기록만 읽었어요' : '') +
+            (st.truncated && st.truncated.length ? ' · ' + st.truncated.join(', ') + ' 은 최근 ' + st.limit + '건만 읽었어요' : '') }));
         }
         page.appendChild(light);
       }
@@ -177,7 +177,7 @@
       var after = carry.landed && carry.landed === itemHref(repo, number) ? 'title' : '';  // Post: 누른 단추가 비활성이 되거나 사라지면 다시 그린 뒤 이어 갈 자리('title' 제목 · 'text' 이야기 칸 · 'resolve:N' N번째 [이걸로 해결])
       carry.landed = '';  // 올린 바로 그 기록 화면만 제목으로 포커스를 받는다(다른 기록을 먼저 열면 이 표시는 버린다)
       root.appendChild(page);
-      page.appendChild(kit.loadingBox('기록을 읽는 중이야'));
+      page.appendChild(kit.loadingBox('기록을 읽는 중이에요'));
 
       function post(path, body) { return api('POST', path, body); }
       function afterWrite(res) {
@@ -191,7 +191,7 @@
         api('GET', '/api/trouble/item' + qs({ repo: repo, number: number })).then(function (d) { if (!state.dead) draw(d); }, function (e) {
           if (state.dead) return;
           clear(page);
-          page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '기록 번호 #' + number }), h('h1', { text: e.status === 404 ? '이 기록을 찾지 못했어' : '기록을 읽지 못했어' })));
+          page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '기록 번호 #' + number }), h('h1', { text: e.status === 404 ? '이 기록을 찾지 못했어요' : '기록을 읽지 못했어요' })));
           page.appendChild(h('section', { class: 'light' }, errBox(e, ''), link('/troubles', { class: 'linkbtn', text: '목록으로' })));
         });
       }
@@ -224,14 +224,14 @@
 
         var left = h('div', { class: 'tb-left' }), right = h('div', { class: 'tb-right' });
         if (carry.warnings.length) {
-          left.appendChild(h('div', { class: 'tb-bad', role: 'status' }, h('span', { class: 'tagx fail', text: '! 일부만 됐어' }), h('span', { text: carry.warnings.join(' · ') })));
+          left.appendChild(h('div', { class: 'tb-bad', role: 'status' }, h('span', { class: 'tagx fail', text: '! 일부만 됐어요' }), h('span', { text: carry.warnings.join(' · ') })));
           carry.warnings = [];
         }
         left.appendChild(h('div', { class: 'lt' }, h('span', { class: 'eb', text: '요약' }),
-          summaryRow('증상', h('span', { class: 'mono tb-sym', text: M(d.symptom) || '(적지 않았어)' })),
-          summaryRow('원인', h('span', { text: M(d.cause) || '아직 몰라' })),
+          summaryRow('증상', h('span', { class: 'mono tb-sym', text: M(d.symptom) || '(적지 않았어요)' })),
+          summaryRow('원인', h('span', { text: M(d.cause) || '아직 몰라요' })),
           summaryRow('해결 방법', d.solution ? h('span', { text: M(d.solution) }) :
-            h('span', { class: 'tb-lm', text: "아직 없어 — 아래 후보 중 하나를 '이걸로 해결' 하면 여기 채워져" }))));
+            h('span', { class: 'tb-lm', text: "아직 없어요 — 아래 후보 중 하나를 '이걸로 해결' 하면 여기 채워져요" }))));
         var hist = h('div', { class: 'lt' }, h('span', { class: 'eb', text: '이력' }));
         d.history.forEach(function (c) {
           var k = KIND[c.kind] || KIND.note, text = h('span');
@@ -248,11 +248,11 @@
         });
         left.appendChild(hist);
 
-        var kinds = [['try', '시도해 봤어'], ['candidate', '해결 후보'], ['solved', '해결됐어']];
-        var ta = h('textarea', { class: 'tb-fld', rows: 3, placeholder: '무엇을 해 봤는지, 어떻게 됐는지 적어 줘. 비밀번호·키는 빼고.', value: compose.text, 'aria-label': '내 이야기' });
+        var kinds = [['try', '시도해 봤어요'], ['candidate', '해결 후보'], ['solved', '해결됐어요']];
+        var ta = h('textarea', { class: 'tb-fld', rows: 3, placeholder: '무엇을 해 봤는지, 어떻게 됐는지 적어 주세요. 비밀번호·키는 빼고요.', value: compose.text, 'aria-label': '내 이야기' });
         var send = h('button', { type: 'button', class: 'pill dark', text: '올리기' });
         var kindName = (kinds.filter(function (o) { return o[0] === compose.kind; })[0] || kinds[1])[1];
-        var hint = h('span', { class: 'tb-lm tb-hint', role: 'status', text: compose.note || "'" + kindName + "' 로 올라가. 다르면 위에서 골라 줘." });
+        var hint = h('span', { class: 'tb-lm tb-hint', role: 'status', text: compose.note || "'" + kindName + "' 로 올라가요. 다르면 위에서 골라 주세요." });
         var opts = h('span', { class: 'qo' }, kinds.map(function (o) {
           return h('button', { type: 'button', class: 'qopt', 'aria-pressed': String(compose.kind === o[0]), text: o[1], onClick: function () { compose.text = ta.value; compose.kind = o[0]; draw(d); } });
         }));
@@ -273,7 +273,7 @@
 
         var pr = d.pr;
         var prCard = h('div', { class: 'lt' }, h('span', { class: 'eb', text: '관련 PR' }));
-        if (!d.prNumber) prCard.appendChild(h('span', { class: 'tb-lm', text: '이 기록에는 PR 이 없어' }));
+        if (!d.prNumber) prCard.appendChild(h('span', { class: 'tb-lm', text: '이 기록에는 PR 이 없어요' }));
         else if (pr && pr.state === 'ok') {
           prCard.appendChild(h('b', { class: 'tb-b6', text: '#' + pr.number + ' ' + pr.title }));
           prCard.appendChild(h('div', { class: 'tb-row' }, h('span', { text: '상태' }), h('span', { class: pr.label === '합쳐짐' ? 'tag ok' : 'tag', text: pr.label })));
@@ -287,20 +287,20 @@
           prCard.appendChild(h('span', { class: 'tb-lm', text: pr.reason }));
         } else {
           prCard.appendChild(h('b', { class: 'tb-b6', text: '#' + d.prNumber + (d.prTitle ? ' ' + d.prTitle : '') }));
-          prCard.appendChild(h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }));
+          prCard.appendChild(h('span', { class: 'tb-unk-t', text: '? 확인하지 못했어요' }));
           prCard.appendChild(h('span', { class: 'tb-lm', text: pr ? pr.reason : '' }));
         }
         right.appendChild(prCard);
         var sim = h('div', { class: 'lt' }, h('span', { class: 'eb', text: '비슷한 기록' }));
-        if (d.similarOk === false) sim.appendChild(h('span', null, h('span', { class: 'tb-unk-t', text: '? ' }), h('span', { class: 'tb-lm', text: '비슷한 기록을 확인 못 함 — 목록을 읽지 못했어' })));
-        else if (!d.similar.length) sim.appendChild(h('span', { class: 'tb-lm', text: '비슷한 기록이 아직 없어' }));
+        if (d.similarOk === false) sim.appendChild(h('span', null, h('span', { class: 'tb-unk-t', text: '? ' }), h('span', { class: 'tb-lm', text: '비슷한 기록을 확인하지 못했어요 — 목록을 읽지 못했어요' })));
+        else if (!d.similar.length) sim.appendChild(h('span', { class: 'tb-lm', text: '비슷한 기록이 아직 없어요' }));
         d.similar.forEach(function (s) {
           sim.appendChild(link(itemHref(s.repo, s.number), { class: 'tb-row tb-simrow' }, h('span', { text: '#' + s.number + ' ' + M(s.title) }), chip(s.solved)));
         });
         right.appendChild(sim);
         var gh = kit.safeHttp(d.url);
         if (gh) right.appendChild(h('a', { class: 'tb-gh', href: gh, target: '_blank', rel: 'noopener noreferrer', text: 'GitHub 에서 보기 ↗' }));
-        right.appendChild(h('span', { class: 'tb-note', text: '이 기록은 ' + d.project + ' 이슈 #' + d.number + ' 로 남아 있어. 팀원 모두 볼 수 있어.' }));
+        right.appendChild(h('span', { class: 'tb-note', text: '이 기록은 ' + d.project + ' 이슈 #' + d.number + ' 로 남아 있어요. 팀원 모두 볼 수 있어요.' }));
         page.appendChild(h('section', { class: 'light' }, h('div', { class: 'tb-split' }, left, right)));
       }
       fetchItem();
@@ -315,7 +315,7 @@
       var prInfo = null, prTimer = null, hits = [], checkTimer = null, similarList = [], simTimer = null, busy = false, err = null, simFail = false, draftNote = '', maskNote = '';
       var projects = [];
       root.appendChild(page);
-      page.appendChild(kit.loadingBox('프로젝트를 읽는 중이야'));
+      page.appendChild(kit.loadingBox('프로젝트를 읽는 중이에요'));
 
       function applySeed(d) {
         ['repo', 'pr', 'stage', 'title', 'symptom', 'cause', 'solution'].forEach(function (k) { if (d[k]) f[k] = String(d[k]); });
@@ -326,11 +326,11 @@
       }
       function boot() {
         var saved = null;
-        var pend = opts.draft ? api('GET', '/api/trouble/draft' + qs({ id: opts.draft })).then(function (d) { aiSource = (d.source && d.source.title) || ''; applySeed(d); if (d.hidden) draftNote = '초안에서 비밀처럼 보인 ' + d.hidden + '줄을 가렸어. 필요하면 다시 적어 줘.'; },function (e) { draftNote = '초안을 읽지 못했어 · ' + (e && e.message || '') + ' (빈 칸에서 시작해)'; }) : Promise.resolve();
+        var pend = opts.draft ? api('GET', '/api/trouble/draft' + qs({ id: opts.draft })).then(function (d) { aiSource = (d.source && d.source.title) || ''; applySeed(d); if (d.hidden) draftNote = '초안에서 비밀처럼 보인 ' + d.hidden + '줄을 가렸어요. 필요하면 다시 적어 주세요.'; },function (e) { draftNote = '초안을 읽지 못했어요 · ' + (e && e.message || '') + ' (빈 칸에서 시작해요)'; }) : Promise.resolve();
         pend.then(function () {
           if (!opts.draft) {
             try { saved = JSON.parse(stored(DRAFT_KEY) || 'null'); } catch (e) { saved = null; }
-            if (saved && typeof saved === 'object') { applySeed(saved); savedNote = '나중에 쓰려고 저장해 둔 글을 불러왔어.'; }
+            if (saved && typeof saved === 'object') { applySeed(saved); savedNote = '나중에 쓰려고 저장해 둔 글을 불러왔어요.'; }
           }
           return api('GET', '/api/trouble');
         }).then(function wait(d) {
@@ -362,7 +362,7 @@
           api('POST', '/api/trouble/check', { fields: { title: f.title, symptom: f.symptom, cause: f.cause, solution: f.solution } }).then(function (r) {
             if (state.dead) return;
             hits = r.hits || []; drawBad(); drawMirror(); drawSubmit(); drawPreview();
-          }, function (e) { hits = [{ field: '', line: 0, label: '비밀 검사를 못 했어 · ' + e.message, unknown: true }]; drawBad(); drawSubmit(); });
+          }, function (e) { hits = [{ field: '', line: 0, label: '비밀 검사를 못 했어요 · ' + e.message, unknown: true }]; drawBad(); drawSubmit(); });
         }, 300);
       }
       function findSimilar() {
@@ -410,8 +410,8 @@
         if (!f.pr.trim() || !prInfo) return;
         if (prInfo.state === 'loading') s.appendChild(h('span', { class: 'tb-lm', text: '확인하는 중…' }));
         else if (prInfo.state === 'ok') s.appendChild(h('span', { class: 'tag ok', text: '✓ #' + prInfo.number + ' ' + prInfo.title + ' · ' + (prInfo.checks === 'fail' ? '검사 실패' : prInfo.label) }));
-        else if (prInfo.state === 'missing') s.appendChild(h('span', { class: 'tag', text: '✕ ' + prInfo.reason }));
-        else s.appendChild(h('span', { class: 'tag', text: '? 확인 못 함 · ' + prInfo.reason }));
+        else if (prInfo.state === 'missing') s.appendChild(h('span', { class: 'tag tb-tag-err', text: '✕ ' + prInfo.reason }));  // 없는 PR = 오류 역할(Cozy Office 는 빨강, theme-post.css)
+        else s.appendChild(h('span', { class: 'tag tb-tag-unk', text: '? 확인하지 못했어요 · ' + prInfo.reason }));  // 확인 못 함 = 보라 점선(통과도 없음도 아니다)
       }
       function lines(k) { return (f[k] || '').split('\n'); }
       // 이미 `••••••••` 로 가린 줄(시안 G-22 의 비밀 줄 카드를 이 줄로 보인다, #827). 가린 값은 비밀로 치지 않으니 올리기는 잠그지 않는다.
@@ -444,7 +444,7 @@
         var s = slots.bad; if (!s) return; clear(s);
         var real = hits.filter(function (x) { return !x.unknown; });
         if (hits.some(function (x) { return x.unknown; })) {
-          s.appendChild(h('div', { class: 'tb-empty tb-unk' }, h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }), ' · ' + hits[0].label));
+          s.appendChild(h('div', { class: 'tb-empty tb-unk' }, h('span', { class: 'tb-unk-t', text: '? 확인하지 못했어요' }), ' · ' + hits[0].label));
         }
         var names = { title: '제목', symptom: '증상', cause: '원인', solution: '해결 방법', text: '댓글' };
         function where(list) { var first = list[0]; return (names[first.field] || first.field) + ' ' + first.line + '번째 줄'; }
@@ -452,9 +452,9 @@
         var masked = real.length ? [] : maskedLines();
         if (slots.mask) slots.mask.textContent = masked.length ? '' : maskNote;  // 가린 줄 카드가 보이면 아래 알림 줄은 겹치니 비운다
         if (masked.length) {
-          s.appendChild(h('div', { class: 'tb-bad tb-masked' }, h('span', { class: 'tagx warn', text: '! 확인하고 올려 줘' }),
-            h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어 · 가렸어' }),
-            h('span', { class: 'tb-s135', text: where(masked) + '의 값을 ' + ((window.BHLogic && window.BHLogic.MASK) || '••••••••') + ' 로 바꿨어.' + more(masked) + ' 필요 없는 줄이면 지워 줘.' }),
+          s.appendChild(h('div', { class: 'tb-bad tb-masked' }, h('span', { class: 'tagx warn', text: '! 확인하고 올려 주세요' }),
+            h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어요 · 가렸어요' }),
+            h('span', { class: 'tb-s135', text: where(masked) + '의 값을 ' + ((window.BHLogic && window.BHLogic.MASK) || '••••••••') + ' 로 바꿨어요.' + more(masked) + ' 필요 없는 줄이면 지워 주세요.' }),
             h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', text: masked.length > 1 ? '그 줄들 지우기' : '그 줄 지우기', onClick: function () {
               dropLines(masked); maskNote = ''; draw(); recheck(); focusField(masked[0].field);
             } }))));
@@ -462,9 +462,9 @@
         }
         if (!real.length) return;
         var first = real[0];
-        s.appendChild(h('div', { class: 'tb-bad' }, h('span', { class: 'tagx fail', text: '✕ 올리기 전에 지워 줘' }),
-          h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어' }),
-          h('span', { class: 'tb-s135', text: where(real) + " '" + first.label + "'." + more(real) + ' 지우고 올려 줘.' }),
+        s.appendChild(h('div', { class: 'tb-bad' }, h('span', { class: 'tagx fail', text: '✕ 올리기 전에 지워 주세요' }),
+          h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어요' }),
+          h('span', { class: 'tb-s135', text: where(real) + " '" + first.label + "'." + more(real) + ' 지우고 올려 주세요.' }),
           h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', text: real.length > 1 ? '그 줄들 지우기' : '그 줄 지우기', onClick: function () {
             dropLines(real); hits = []; draw(); recheck(); focusField(first.field);
           } }))));
@@ -481,10 +481,10 @@
         var s = slots.similar; if (!s) return; clear(s);
         var it = similarList[0];
         if (!it) {
-          if (simFail) s.appendChild(h('span', { class: 'tb-s125' }, h('span', { class: 'tb-unk-t', text: '? ' }), '비슷한 기록을 확인 못 함 — 목록을 읽지 못했어'));
+          if (simFail) s.appendChild(h('span', { class: 'tb-s125' }, h('span', { class: 'tb-unk-t', text: '? ' }), '비슷한 기록을 확인하지 못했어요 — 목록을 읽지 못했어요'));
           return;
         }
-        s.appendChild(h('div', { class: 'lt' }, h('span', { class: 'eb', text: '이미 비슷한 기록이 있어' }), h('b', { class: 'tb-b6', text: '#' + it.number + ' ' + M(it.title) }),
+        s.appendChild(h('div', { class: 'lt' }, h('span', { class: 'eb', text: '이미 비슷한 기록이 있어요' }), h('b', { class: 'tb-b6', text: '#' + it.number + ' ' + M(it.title) }),
           h('span', { class: 'tb-s125', text: it.author + ' · ' + dateText(it.createdAt) + ' · ' + (it.solved ? '해결됨' : '아직 안 풀림') }),
           h('div', { class: 'acts' }, link(itemHref(it.repo, it.number), { class: 'pill line', text: '거기에 더하기' }))));
       }
@@ -503,12 +503,12 @@
         var w = slots.why;
         if (w) {
           var m = missing(), secret = hits.some(function (x) { return !x.unknown; });
-          w.textContent = busy || canSubmit() ? '' : m.length ? '아직 못 올려. 비어 있는 칸: ' + m.join(', ') + (f.solved && !f.solution.trim() ? " (해결 방법을 모르면 상태를 '아직이야' 로)" : '') : secret ? '아직 못 올려. 비밀번호처럼 보이는 줄을 지워 줘.' : '';
+          w.textContent = busy || canSubmit() ? '' : m.length ? '아직 못 올려요. 비어 있는 칸: ' + m.join(', ') + (f.solved && !f.solution.trim() ? " (해결 방법을 모르면 상태를 '아직이에요' 로)" : '') : secret ? '아직 못 올려요. 비밀번호처럼 보이는 줄을 지워 주세요.' : '';
         }
         var n = slots.note; if (!n) return;
         var proj = projects.filter(function (p) { return p.slug === f.repo; })[0];
-        n.textContent = '올리면 ' + (proj ? proj.name : '') + ' 이슈로 남고 팀원 모두 볼 수 있어.' +
-          (hits.some(function (x) { return !x.unknown; }) ? ' 비밀번호 줄을 지우면 올릴 수 있어.' : '');
+        n.textContent = '올리면 ' + (proj ? proj.name : '') + ' 이슈로 남고 팀원 모두 볼 수 있어요.' +
+          (hits.some(function (x) { return !x.unknown; }) ? ' 비밀번호 줄을 지우면 올릴 수 있어요.' : '');
       }
       function drawPreview() {
         var s = slots.preview; if (!s) return; clear(s);
@@ -518,7 +518,7 @@
           h('h3', { text: '증상' }), h('span', { class: 'mono', text: (firstLine.slice(0, 60) || '(비어 있음)') + (more ? '…' : '') })];
         if (f.cause.trim()) parts.push(h('h3', { text: '원인' }), h('span', { text: f.cause.trim() }));
         if (f.solution.trim()) parts.push(h('h3', { text: f.solved ? '해결 방법' : '해결 후보' }), h('span', { text: f.solution.trim() }));
-        s.appendChild(h('div', { class: 'tb-paper' }, h('div', { class: 'tb-ptool' }, h('span', { text: 'GitHub 에 이렇게 올라가' }), h('span', { class: 'tb-sp' }),
+        s.appendChild(h('div', { class: 'tb-paper' }, h('div', { class: 'tb-ptool' }, h('span', { text: 'GitHub 에 이렇게 올라가요' }), h('span', { class: 'tb-sp' }),
           h('span', { class: 'tag ok', text: 'type:trouble' })), h('div', { class: 'tb-pbody' }, parts)));
       }
       function submit() {
@@ -538,9 +538,9 @@
       function drawErr() {
         var s = slots.err; if (!s) return; clear(s);
         if (!err) return;
-        if (err.kind === 'unsure') s.appendChild(h('div', { class: 'tb-empty tb-unk', role: 'alert' }, h('span', { class: 'tb-unk-t', text: '? 올렸는지 확인 못 함' }), ' · ' + err.text + ' ',
+        if (err.kind === 'unsure') s.appendChild(h('div', { class: 'tb-empty tb-unk', role: 'alert' }, h('span', { class: 'tb-unk-t', text: '? 올렸는지 확인하지 못했어요' }), ' · ' + err.text + ' ',
           h('button', { type: 'button', class: 'tb-again', text: '목록 보기', onClick: function () { go('/troubles'); } })));
-        else s.appendChild(h('div', { class: 'tb-bad', role: 'alert' }, h('span', { class: 'tagx fail', text: err.kind === 'label' ? '✕ 라벨이 없어' : err.kind === 'save' ? '✕ 저장하지 않았어' : '✕ 올리지 못했어' }),
+        else s.appendChild(h('div', { class: 'tb-bad', role: 'alert' }, h('span', { class: 'tagx fail', text: err.kind === 'label' ? '✕ 라벨이 없어요' : err.kind === 'save' ? '✕ 저장하지 않았어요' : '✕ 올리지 못했어요' }),
           h('span', { class: 'tb-s135', text: err.text }),
           err.kind === 'label' ? h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', text: '다시 시도', onClick: submit })) : null));
       }
@@ -553,13 +553,13 @@
       function drawNow() {
         clear(page);
         if (!projects.length) {
-          page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '새 기록' }), h('h1', { text: '기록을 남길 프로젝트가 없어' })));
-          page.appendChild(h('section', { class: 'light' }, h('div', { class: 'tb-empty', text: 'GitHub 저장소를 읽은 프로젝트가 없어서 지금은 올릴 수 없어. 목록에서 확인 못 한 이유를 봐 줘.' }), link('/troubles', { class: 'linkbtn', text: '목록으로' })));
+          page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '새 기록' }), h('h1', { text: '기록을 남길 프로젝트가 없어요' })));
+          page.appendChild(h('section', { class: 'light' }, h('div', { class: 'tb-empty', text: 'GitHub 저장소를 읽은 프로젝트가 없어서 지금은 올릴 수 없어요. 목록에서 확인하지 못한 이유를 봐 주세요.' }), link('/troubles', { class: 'linkbtn', text: '목록으로' })));
           return;
         }
-        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '새 기록' }), h('h1', { text: '어떤 문제였어?' })));
+        page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '새 기록' }), h('h1', { text: '어떤 문제였어요?' })));
         var light = h('section', { class: 'light tb-light' });
-        if (aiSource) light.appendChild(h('div', { class: 'ask tb-ai' }, h('span', { class: 'eb', text: 'AI 초안' }), h('span', { class: 'tb-grow', text: "세션 '" + aiSource + "' 대화로 AI 가 미리 채웠어. 틀린 곳만 고쳐 줘." })));
+        if (aiSource) light.appendChild(h('div', { class: 'ask tb-ai' }, h('span', { class: 'eb', text: 'AI 초안' }), h('span', { class: 'tb-grow', text: "세션 '" + aiSource + "' 대화로 AI 가 미리 채웠어요. 틀린 곳만 고쳐 주세요." })));
         var prIn = h('input', { class: 'tb-fld tb-pr', value: f.pr, 'aria-label': '관련 PR 번호', inputmode: 'numeric' });
         prIn.addEventListener('input', function () { f.pr = prIn.value; checkPr(); drawPreview(); drawSubmit(); });
         var titleIn = h('input', { class: 'tb-fld', value: f.title, 'aria-label': '제목' });
@@ -571,9 +571,9 @@
           setRow('관련 PR', '', h('span', { class: 'tb-prline' }, prIn, slot('prchip'))),
           setRow('단계', '', radios(STAGES.map(function (s) { return { value: s, text: s }; }), f.stage, function (v) { f.stage = v; draw(); })),
           setRow('제목', '', titleIn),
-          setRow('증상', '오류 문구를 붙여 넣어', h('div', { class: 'tb-symwrap' }, mirror, symTa)),
-          setRow('원인', '모르면 비워 둬', textarea('cause', 2)),
-          setRow('상태', '', radios([{ value: 'yes', text: '해결됐어' }, { value: 'no', text: '아직이야 — 후보만 있어' }], f.solved ? 'yes' : 'no', function (v) { f.solved = v === 'yes'; draw(); })),
+          setRow('증상', '오류 문구를 붙여 넣어 주세요', h('div', { class: 'tb-symwrap' }, mirror, symTa)),
+          setRow('원인', '모르면 비워 두세요', textarea('cause', 2)),
+          setRow('상태', '', radios([{ value: 'yes', text: '해결됐어요' }, { value: 'no', text: '아직이에요 — 후보만 있어요' }], f.solved ? 'yes' : 'no', function (v) { f.solved = v === 'yes'; draw(); })),
           setRow('해결 방법', '또는 후보', textarea('solution', 2)));
         var left = h('div', { class: 'tb-left' }, form, slot('bad'));
         var right = h('div', { class: 'tb-right tb-right280' }, slot('similar'), slot('preview'));
@@ -584,9 +584,9 @@
         slots.why = h('span', { class: 'tb-note125', role: 'status' });
         light.appendChild(h('div', { class: 'tb-actions' }, submitBtn, slots.why,
           h('button', { type: 'button', class: 'pill line', text: '나중에 쓰기', onClick: function () {
-            if (hits.some(function (x) { return !x.unknown; })) { err = { kind: 'save', text: '비밀번호·키처럼 보이는 글이 있어 저장하지 않았어. 그 줄을 지우고 저장해 줘.' }; drawErr(); return; }
+            if (hits.some(function (x) { return !x.unknown; })) { err = { kind: 'save', text: '비밀번호·키처럼 보이는 글이 있어 저장하지 않았어요. 그 줄을 지우고 저장해 주세요.' }; drawErr(); return; }
             var ok = store(DRAFT_KEY, JSON.stringify(f));
-            if (ok) go('/troubles'); else { err = { kind: 'save', text: '이 브라우저에서는 저장할 수 없어서 나중에 쓰기를 못 했어.' }; drawErr(); }
+            if (ok) go('/troubles'); else { err = { kind: 'save', text: '이 브라우저에서는 저장할 수 없어서 나중에 쓰기를 못 했어요.' }; drawErr(); }
           } }),
           h('button', { type: 'button', class: 'pill line tb-quiet', text: '취소', onClick: function () { go('/troubles'); } })));
         slots.note = h('span', { class: 'tb-note125' });
@@ -617,7 +617,7 @@
       }
       if (st.state === 'loading' || (st.state === 'ok' && !st.items.length)) return null;
       var line = h('span', { 'data-similar-line': '1' });
-      if (st.state === 'fail') line.appendChild(h('span', { class: 'tb-unk-t', text: '? 비슷한 기록 확인 못 함' + (st.reason ? ' · ' + st.reason : '') }));
+      if (st.state === 'fail') line.appendChild(h('span', { class: 'tb-unk-t', text: '? 비슷한 기록을 확인하지 못했어요' + (st.reason ? ' · ' + st.reason : '') }));
       else {
         line.appendChild(document.createTextNode('비슷한 기록 ' + st.items.length + '건 — '));
         st.items.forEach(function (it, i) {
@@ -639,17 +639,17 @@
       function write() {
         st.busy = true; st.err = ''; redraw();
         api('POST', '/api/trouble/ai-draft', { sessionId: s.id }).then(function (d) { skip(); st.busy = false; go('/troubles/new?draft=' + encodeURIComponent(d.id)); },
-          function (e) { st.busy = false; st.err = (e && e.message) || '초안을 못 만들었어'; redraw(); });
+          function (e) { st.busy = false; st.err = (e && e.message) || '초안을 못 만들었어요'; redraw(); });
       }
       return h('div', { class: 'ask', 'data-trouble-ask': sug.kind },
-        h('span', { class: 'eb', text: '기록해 둘까?' }),
-        h('b', { text: '방금 푼 문제를 팀 기록으로 남길까?' }),
-        h('span', { class: 'sub', text: st.busy ? 'AI 가 이 대화를 읽고 초안을 쓰는 중이야. 조금 걸려.' : 'AI 가 대화로 초안을 써 둘게. 너는 확인만 하면 돼.' }),
+        h('span', { class: 'eb', text: '기록해 둘까요?' }),
+        h('b', { text: '방금 푼 문제를 팀 기록으로 남길까요?' }),
+        h('span', { class: 'sub', text: st.busy ? 'AI 가 이 대화를 읽고 초안을 쓰는 중이에요. 조금 걸려요.' : 'AI 가 대화로 초안을 써 둬요. 확인만 하면 돼요.' }),
         st.err ? h('span', { class: 'sub tb-askerr', role: 'alert', text: st.err }) : null,
         h('div', { class: 'acts' },
           h('button', { type: 'button', class: 'pill acc', 'data-trouble-write': '1', disabled: st.busy, text: st.busy ? '초안 쓰는 중…' : '기록하기', onClick: write }),
           st.err ? link('/troubles/new', { class: 'pill line', 'data-trouble-blank': '1', text: '빈 칸으로 쓰기' }) : null,
-          h('button', { type: 'button', class: 'pill line', 'data-trouble-skip': '1', disabled: st.busy, text: '괜찮아', onClick: function () { skip(); redraw(); } })));
+          h('button', { type: 'button', class: 'pill line', 'data-trouble-skip': '1', disabled: st.busy, text: '괜찮아요', onClick: function () { skip(); redraw(); } })));
     }
 
     return { listView: listView, itemView: itemView, newView: newView, similarRow: similarRow, suggestCard: suggestCard };

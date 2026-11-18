@@ -7,7 +7,7 @@
   var WHO = ['mint', 'navy', 'rose', 'sunny', 'sky', 'sage', 'kid'];
   /* 상태 순서(위가 먼저): 내 차례 > 막힘 > 확인 못 함 > 일하는 중 > 승인 기다림 > 끝 > 쉬는 중 */
   var STATES = ['turn', 'blocked', 'unk', 'run', 'wait', 'done', 'idle'];
-  var LABEL = { turn: '내 답이 필요해', blocked: '막혔어', unk: '확인 못 함', run: '일하는 중', wait: '승인 기다림', done: '끝났어', idle: '쉬는 중' };
+  var LABEL = { turn: '답을 기다려요', blocked: '막혔어요', unk: '확인하지 못했어요', run: '일하는 중이에요', wait: '승인을 기다려요', done: '끝났어요', idle: '쉬는 중이에요' };  // 장면 번들(office-post.ts LABEL)과 같은 말 — 상태 칩·정리 줄·메모·파이프라인 카드가 다 이것을 쓴다(문구 6회차)
   var GLYPH = { turn: '!', blocked: '✕', unk: '?', done: '✓', wait: '…' };
   /* desk = 팀과 무관한 곳(검토 3 = 리뷰 룸, 끝 4 = 완료). 0~2 는 세션의 팀 이름으로 부른다(hereTitle·placeOf·sealDesk). */
   var STATION = [
@@ -80,9 +80,10 @@
 
   /* ---------- 세션·요청 화면(B단계): 목록 걸러보기 · 자리 안내 · 정보 줄 · 도장 글자 ---------- */
 
-  /* 세션 목록 위의 걸러보기. 할 일 = 내 답·막힘·확인 못 함(시안은 넷을 한 묶음으로 센다), 일하는 중 = 일하는 중·승인 기다림. 쉬는 중은 "전체" 에만 있다.
-     묶음 이름이 "내 차례" 면 홈·띠·알림의 "내 차례 N건"(막힘·확인 못 함은 따로 셈)과 같은 이름에 다른 숫자가 나온다. 그래서 "할 일" 이다(내 차례 + 막힘 + 확인 못 함, 세션 수). */
-  var FILTERS = [{ id: 'all', label: '전체' }, { id: 'turn', label: '할 일' }, { id: 'run', label: '일하는 중' }, { id: 'done', label: '끝남' }];
+  /* 세션 목록 위의 걸러보기. 나를 찾는 사람 = 답을 기다려요·막혔어요·확인하지 못했어요(시안은 한 묶음으로 센다), 일하는 중 = 일하는 중·승인 기다림. 쉬는 중은 "전체" 에만 있다.
+     이 묶음(세션 수)은 장면 버튼·덱 머리 「나를 찾는 사람」 과 같은 사람들이라 같은 이름이다(문구 6회차 — 전에는 「할 일」).
+     띠·알림 설정의 「답을 기다리는 일 N건」 은 답할 요청 건수(막힘·확인 못 함 빼고)라 다른 이름이다. */
+  var FILTERS = [{ id: 'all', label: '전체' }, { id: 'turn', label: '나를 찾는 사람' }, { id: 'run', label: '일하는 중' }, { id: 'done', label: '끝남' }];
   var FILTER_OF = { turn: 'turn', blocked: 'turn', unk: 'turn', run: 'run', wait: 'run', done: 'done' };
   function filterMatch(f, state) { return f === 'all' || FILTER_OF[state] === f; }
   function filterCounts(states) {
@@ -101,9 +102,8 @@
   /* 세션 한 줄 상태 글에서 맨 앞 기호(✕ ? !)를 뗀다 — 기호는 상태 표시(po-st)가 따로 그린다. */
   function statusText(t) { return String(t == null ? '' : t).replace(/^[✕?!]\s*/, ''); }
 
-  /* 세션 머리 오른쪽 안내판(figure.po-here). 첫 줄은 지금 앉은 곳 "{팀} · {단계}"(리뷰 룸·완료는 "리뷰 룸 · 검토"·"완료 · 합쳐짐", 팀이 없으면 "팀 없음"), 둘째 줄은 상태별 반말(가이드 2.4). */
-  /* 확인 못 함(unk)은 blockOf 의 cannot_check — 검사를 못 돌린 것이지 자리를 모르는 게 아니다(첫 줄이 이미 앉은 곳). 쉬는 중은 걷지 않는다(장면에서도 앉아 있다) */
-  var HERE = { turn: '네 답을 기다리고 있어', blocked: '막혀서 멈춰 있어', wait: '의자에 앉아 승인을 기다려', done: '일을 다 마쳤어', unk: '검사를 못 해서 멈췄어', idle: '잠깐 쉬고 있어' };
+  /* 세션 머리 오른쪽 안내판(figure.po-here). 지금 앉은 곳 "{팀} · {단계}"(리뷰 룸·완료는 "리뷰 룸 · 검토"·"완료 · 합쳐짐", 팀이 없으면 "팀 없음") 한 줄이다.
+     상태 한 줄(hereLine)은 요약 정리(5회차)에서 화면에서 빠졌고 문구 6회차에서 지웠다 — 상태는 머리 상태 표시가 말한다. */
   /* k = 단계 번호(0~4), flow = 세션의 팀을 정한 갈래(teamFlowOf). 번호 0~2 인데 팀이 없으면(갈래 없는 세션은 단계 2 로 두지만 팀 자리는 없다) "팀 없음". */
   function hereTitle(k, flow) {
     var i = Math.max(0, Math.min(4, k | 0));
@@ -112,7 +112,6 @@
     var team = teamOf(flow);
     return team ? team + ' · ' + stageName(i, flow) : '팀 없음';
   }
-  function hereLine(state) { return HERE[state] || '지금 일하고 있어'; }
 
   /* 정보 줄: 단계 · 요구사항 · 개발 번호 · 작업 기록 · 검토 요청. 값이 없는 칸은 지어내지 않고 "–" 로 둔다. cells 는 BHLogic.sessionStrip 의 칸들. */
   var INFO = [['단계', 'step'], ['요구사항', 'req'], ['개발 번호', 'dev'], ['작업 기록', 'issue'], ['검토 요청', 'pr']];
@@ -154,7 +153,7 @@
 
   var INSP = ['산출물', '검사', '기억', '기록', '기술'];
 
-  /* 요청 화면 한 줄(가이드 2.5): 그림이 그 세션 사람이라(post-session.js clerk) 글도 세션이 주어다. 질문은 그 세션이 앉은 곳을 붙이고, 앉은 곳을 모르면(팀 없음·완료) 곳 이름 없이 말한다.
+  /* 요청 화면 한 줄(가이드 2.5): 그림이 그 세션 사람이라(post-session.js clerk) 글도 세션이 주어다. 질문·승인·계획 모두 그 세션이 앉은 곳을 붙이고(문구 6회차부터 승인·계획도), 앉은 곳을 모르면(팀 없음·완료) 곳 이름 없이 말한다.
      승인·계획에 있던 「리뷰 룸에서 검토 담당이」 는 뺐다 — 새 사무실 장면에는 검토 담당이 없고 승인을 기다리는 세션도 자기 자리에서 손을 든다. */
   function placeOf(k, flow) {
     var i = Math.max(0, Math.min(4, k | 0));
@@ -162,8 +161,9 @@
     return i < 3 && teamOf(flow) ? teamOf(flow) + ' 자리' : '';
   }
   function clerkLine(kind, k, flow) {
-    if (kind === 'question' || kind === 'elicitation') { var at = placeOf(k, flow); return (at ? at + '에서 ' : '세션이 ') + '손을 들고 네 답을 기다려'; }
-    return '세션이 손을 들고 네 승인을 기다려. 누르면 승인 도장이 찍혀';
+    var at = placeOf(k, flow), who = at ? at + '에서 ' : '세션이 ';  // 승인·계획도 질문처럼 앉은 곳을 붙인다(도장 아랫줄 sealDesk 와 같은 곳)
+    if (kind === 'question' || kind === 'elicitation') return who + '손을 들고 답을 기다려요';
+    return who + '손을 들고 승인을 기다려요. 누르면 승인 도장이 찍혀요';
   }
 
   /* 도장 글자. 승인 주 버튼(허락·올리기·계획대로 진행) = 보냄, 질문·MCP 질문에 답을 보냄 = 접수, 거절·아니오·닫기·고쳐 달라고 하기 = 반송.
@@ -172,13 +172,13 @@
   function sealOf(decision) { var t = SEAL_TEXT[decision] || '접수'; return { text: t, tone: t === '반송' ? 'no' : 'ok' }; }
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
   /* 도장이 잠깐 남은 홈 카드의 한 줄: 한 일 + 찍힌 도장 글자(카드 위 도장과 같은 말). */
-  var STAMP_DID = { '보냄': '승인했어', '접수': '답했어', '반송': '돌려보냈어' };
-  function stampedLine(decision) { var t = sealOf(decision).text; return '방금 ' + STAMP_DID[t] + ' — ' + t + ' 도장을 찍었어'; }
+  var STAMP_DID = { '보냄': '승인했어요', '접수': '답했어요', '반송': '돌려보냈어요' };
+  function stampedLine(decision) { var t = sealOf(decision).text; return '방금 ' + STAMP_DID[t] + ' — ' + t + ' 도장을 찍었어요'; }
   /* 도장 아래 작은 줄 "MM.DD · 자리 이름"(오늘 날짜). 자리를 모르면(name 이 빈 글) 날짜만. */
   function sealSub(d, name) { return pad2(d.getMonth() + 1) + '.' + pad2(d.getDate()) + (name ? ' · ' + name : ''); }
-  /* 도장을 찍는 곳: 승인·계획은 리뷰 룸, 질문·MCP 질문은 그 세션이 앉은 곳(팀 자리·리뷰 룸·완료, 팀이 없으면 빈 글 — 요청 줄(clerkLine)처럼 곳 이름 없이). */
+  /* 도장을 찍는 곳: 요청 종류와 상관없이 그 세션이 앉은 곳(팀 자리·리뷰 룸·완료, 팀이 없으면 빈 글 — 요청 줄(clerkLine)처럼 곳 이름 없이).
+     승인·계획을 「리뷰 룸」 으로 적던 것은 옛 장면의 비유였다 — 새 사무실 장면에서 승인을 묻는 세션은 자기 자리에서 손을 든다(문구 6회차). kind 는 부르는 쪽 호환으로 받기만 한다. */
   function sealDesk(kind, k, flow) {
-    if (kind !== 'question' && kind !== 'elicitation') return STATION[3].desk;
     var i = Math.max(0, Math.min(4, k | 0));
     return i >= 3 ? STATION[i].desk : teamOf(flow) ? teamOf(flow) + ' 자리' : '';
   }
@@ -195,7 +195,7 @@
   function turnLine(s, L) {
     var t = flowNow(s, L);
     if (!t || (t.deliver && s.turnSkill === 'deliver')) return null;
-    return t.wait ? '지금은 ' + t.name + ' 단계야.' : '이제 ' + t.name + ' 차례야.';
+    return t.wait ? '지금은 ' + t.name + ' 단계예요.' : '이제 ' + t.name + ' 차례예요.';
   }
   /* 사이드 줄 "내 차례 · …" 의 뒤 글: 올리기 단계가 아니면 갈래 단계 짧은 이름(구현·설정·기록 …). */
   function turnVerb(s, L) {
@@ -237,7 +237,7 @@
     var b = teamBasisOf(s), has = function (id) { return out.some(function (c) { return c.id === id; }); };
     if (b.flow && teamOf(b.flow)) {
       var why = b.by === 'skill' ? '쓴 스킬 /harness:' + b.skill : '브랜치 이슈 #' + b.issue + ' 의 ' + b.dev;
-      out = out.map(function (c) { return c.id === 'step' ? { id: 'step', label: c.label, tone: '', value: stageName(k, b.flow), title: '콘솔에서 고른 갈래가 아니야. ' + teamOf(b.flow) + '을 정한 근거: ' + why } : c; });
+      out = out.map(function (c) { return c.id === 'step' ? { id: 'step', label: c.label, tone: '', value: stageName(k, b.flow), title: '콘솔에서 고른 갈래가 아니에요. ' + teamOf(b.flow) + '을 정한 근거: ' + why } : c; });
     }
     if (b.req && !has('req')) out.push({ id: 'req', label: '요구사항', tone: '', value: b.req });
     if (b.dev && !has('dev')) out.push({ id: 'dev', label: '개발 번호', tone: '', value: b.dev });
@@ -280,7 +280,7 @@
   }
   function reqFlowOf(s, d) { return reqBasisOf(s, d).flow; }
 
-  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, teamBasisOf: teamBasisOf, teamCells: teamCells, stageName: stageName, atDesk: atDesk, reqFlowOf: reqFlowOf, reqBasisOf: reqBasisOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, byWait: byWait, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
+  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, teamBasisOf: teamBasisOf, teamCells: teamCells, stageName: stageName, atDesk: atDesk, reqFlowOf: reqFlowOf, reqBasisOf: reqBasisOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, byWait: byWait, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, infoRow: infoRow, INSP: INSP,
     clerkLine: clerkLine, sealOf: sealOf, stampedLine: stampedLine, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;

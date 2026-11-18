@@ -47,17 +47,17 @@
     return kindMeta(it.kind).word + (it.text ? ' · ' + it.text : '') + (rest > 0 ? ' 외 ' + rest + '건' : '');
   }
   /* 허락 단추의 역할 색: 지우는 일이면 오류·위험('err', 빨강), 그 밖은 승인('ok', 초록). permVerbs 와 같은 판정을 쓴다. */
-  function allowRole(req) { return permVerbs(req)[0] === '이번만 지워' ? 'err' : 'ok'; }
+  function allowRole(req) { return permVerbs(req)[0] === '이번만 지우기' ? 'err' : 'ok'; }
 
   /* ---------- 팝업 선택지: 승인 요청 화면(requestView)과 같은 규칙 ---------- */
   /* 되돌릴 수 없는 일이면 지우기·올리기를 가려 단추에 그대로 쓴다. */
   function permVerbs(req) {
-    var verbs = ['이번만 허락', '하지 마'];
+    var verbs = ['이번만 허락', '하지 않기'];
     if (req && req.risk === 'irreversible') {
       var input = req.toolInput || req.tool_input || req.input || {};
       var text = String((input && (input.command || input.file_path)) || '') + ' ' + String(req.riskNote || req.title || '');
-      if (/(^|[\s;&|])(rm|rmdir|del|erase|unlink)\s|Remove-Item|지우|삭제/i.test(text)) verbs = ['이번만 지워', '지우지 마'];
-      else if (/git\s+push|gh\s+pr\s+(create|merge)|올리|푸시/i.test(text)) verbs = ['이번만 올려', '올리지 마'];
+      if (/(^|[\s;&|])(rm|rmdir|del|erase|unlink)\s|Remove-Item|지우|삭제/i.test(text)) verbs = ['이번만 지우기', '지우지 않기'];
+      else if (/git\s+push|gh\s+pr\s+(create|merge)|올리|푸시/i.test(text)) verbs = ['이번만 올리기', '올리지 않기'];
     }
     return verbs;
   }
@@ -92,7 +92,7 @@
     return Math.round(u <= 1 ? u * 100 : u) + '%';
   }
   function clockOf(sec, now) { return A ? A.clockText(sec, now) : ''; }
-  var STATUS_WORD = { allowed: '여유 있어', allowed_warning: '곧 한도에 닿아', rejected: '한도가 찼어' };
+  var STATUS_WORD = { allowed: '여유 있어요', allowed_warning: '곧 한도에 닿아요', rejected: '한도가 찼어요' };
 
   /* 서버 /api/account-limits 의 windows 를 헤더 글자로. failed 는 읽기 실패.
      { unknown, text, title, chips: [{ type, name, pct(숫자 또는 모름 null), tone: ''|'warn'|'err'|'unk', stale, text, title }] }
@@ -107,16 +107,16 @@
       var name = LIMIT_NAME[w.type] || w.type, p = pctText(w.utilization), when = clockOf(w.resetsAt, now);
       var tone = status === 'rejected' ? 'err' : status === 'allowed_warning' ? 'warn' : status === 'allowed' ? '' : 'unk';
       var age = typeof w.t === 'number' && w.t > 0 ? Math.max(0, now / 1000 - w.t) : null, stale = age == null || age > STALE_SEC;
-      var title = [name + ' 한도 · ' + (STATUS_WORD[status] || '상태를 몰라(' + status + ')'),
-        p ? '쓴 비율 ' + p : '쓴 비율은 Claude Code 가 알려 주지 않았어',
-        when ? when + ' 에 풀려' : '풀리는 시각은 몰라',
-        age == null ? '언제 받은 값인지 몰라' : clockOf(w.t, now).replace(/^오늘 /, '') + ' 에 받은 값' + (w.source === 'statusline' ? '(상태줄에서)' : '') + (stale ? '(오래된 값이야)' : '')].join('\n');
+      var title = [name + ' 한도 · ' + (STATUS_WORD[status] || '상태를 몰라요(' + status + ')'),
+        p ? '쓴 비율 ' + p : '쓴 비율은 Claude Code 가 알려 주지 않았어요',
+        when ? when + ' 에 풀려요' : '풀리는 시각은 몰라요',
+        age == null ? '언제 받은 값인지 몰라요' : clockOf(w.t, now).replace(/^오늘 /, '') + ' 에 받은 값' + (w.source === 'statusline' ? '(상태줄에서)' : '') + (stale ? '(오래된 값이에요)' : '')].join('\n');
       chips.push({ type: w.type, name: name, pct: p ? parseInt(p, 10) : null, tone: tone, stale: stale, title: title, when: when ? when.replace(/^오늘 /, '') : '', source: w.source || '',
         text: (tone === 'err' ? '✕ ' : tone === 'warn' ? '⚠ ' : tone === 'unk' ? '? ' : '') + name + ' ' + (p || '?') + (when ? ' · ' + when.replace(/^오늘 /, '') : '') });
     });
     if (!chips.length) {
-      return { unknown: true, chips: [], text: '한도 알 수 없어',
-        title: failed ? '계정 한도를 읽지 못했어. 0% 라는 뜻이 아니야.' : '아직 Claude Code 가 계정 한도를 알려 주지 않았어. 콘솔에서 연 작업이 한 번 돌거나, 설정의 "계정 한도 표시" 를 켠 뒤 Orca·터미널 세션이 한 번 응답하면 보여. 0% 라는 뜻이 아니야.' };
+      return { unknown: true, chips: [], text: '한도 알 수 없음',
+        title: failed ? '계정 한도를 읽지 못했어요. 0% 라는 뜻이 아니에요.' : '아직 Claude Code 가 계정 한도를 알려 주지 않았어요. 콘솔에서 연 작업이 한 번 돌거나, 설정의 "계정 한도 표시" 를 켠 뒤 Orca·터미널 세션이 한 번 응답하면 보여요. 0% 라는 뜻이 아니에요.' };
     }
     return { unknown: false, chips: chips, text: chips.map(function (c) { return c.text; }).join(' · '), title: chips.map(function (c) { return c.title; }).join('\n\n') };
   }

@@ -128,7 +128,7 @@
         } else img('walk-1', 1);
         var tag = el('span', 'po-tag');
         if (GLYPH[st]) tag.appendChild(el('i', null, GLYPH[st]));
-        tag.appendChild(el('b', null, st === 'turn' ? '내 차례!' : s.tag));
+        tag.appendChild(el('b', null, st === 'turn' ? LABEL.turn : s.tag));
         tag.appendChild(el('small', null, st === 'turn' ? s.tag : LABEL[st]));
         a.appendChild(tag);
         peopleLayer.appendChild(a);
@@ -146,9 +146,9 @@
       });
     }
     function describe(list) {
-      var shown = list.length, cut = shown > MAX_PEOPLE ? '(그림에는 ' + MAX_PEOPLE + '개만 그렸어)' : '';
+      var shown = list.length, cut = shown > MAX_PEOPLE ? '(그림에는 ' + MAX_PEOPLE + '개만 그렸어요)' : '';
       var turn = list.filter(function (s) { return s.state === 'turn'; }).length;
-      wrap.setAttribute('aria-label', '세션 장면. 세션 ' + shown + '개가 다섯 단계(요구사항 · 개발 Spec · 개발 · 검토 · 합쳐짐) 중 어디에 있는지 보여 줘' + cut + (turn ? ' · 내 차례 ' + turn + '개' : '') + '. 같은 내용이 왼쪽 세션 목록에 있어.');
+      wrap.setAttribute('aria-label', '세션 장면. 세션 ' + shown + '개가 다섯 단계(요구사항 · 개발 Spec · 개발 · 검토 · 합쳐짐) 중 어디에 있는지 보여 줘요' + cut + (turn ? ' · 답을 기다리는 세션 ' + turn + '개' : '') + '. 같은 내용이 왼쪽 세션 목록에 있어요.');
     }
 
     function fit() {

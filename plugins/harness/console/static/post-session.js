@@ -1,5 +1,5 @@
 /* Post(Cozy Office) 테마의 세션·요청 화면 부품(B단계). 데이터를 읽거나 고치지 않고, 받은 값으로 DOM 조각만 만든다.
-   - here: 세션 머리 오른쪽 안내판(큰 사람 그림(사무실 장면의 그 사람) + "{팀} · {단계}" + 상태별 한 줄)
+   - here: 세션 머리 오른쪽 안내판(큰 사람 그림(사무실 장면의 그 사람) + "{팀} · {단계}")
    - clerk: 요청 카드 위에서 손을 든 그 세션 사람(승인·계획·질문 모두)
    - seal: 요청 처리가 성공한 뒤에만 카드에 찍는 도장(role="status")
    글자·도장 판정은 post-logic.js 의 순수 함수가 정하고 여기서는 그리기만 한다. 보이는 것은 Post 일 때뿐이다(CSS). */
@@ -17,7 +17,7 @@
     var f = el('figure', 'po-here');
     f.appendChild(PS.avatar(sessionId, state, { size: 'lg' }));
     var cap = el('figcaption');
-    cap.appendChild(el('b', null, PL.hereTitle(k, flow)));  // 안내판은 앉은 곳만 말한다. 상태 한 줄(hereLine — 「네 답을 기다리고 있어」)은 뺐다: 같은 화면의 머리 상태 표시와 그 아래 문장이 이미 말한다(요약 정리, 2026-11-19)
+    cap.appendChild(el('b', null, PL.hereTitle(k, flow)));  // 안내판은 앉은 곳만 말한다. 상태 한 줄(옛 hereLine)은 뺐다(문구 6회차에 함수도 지움): 같은 화면의 머리 상태 표시와 그 아래 문장이 이미 말한다(요약 정리, 2026-11-19)
     f.appendChild(cap);
     return f;
   }

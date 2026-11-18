@@ -2621,7 +2621,7 @@ def test_approval_screen_shows_full_input_and_rules():
     assert "var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background && (whyAsk || irrev);" in js
     assert "class: 'more', open: !friendly" in js
     # 시안 17 의 확인 카드: 이번만 허락 / 하지 마, Edit 은 원래 글 · 바꾼 글(#634)
-    assert "'이번만 허락'" in js and "'하지 마'" in js and "row('원래 글'" in js and "row('바꾼 글'" in js
+    assert "'이번만 허락'" in js and "'하지 않기'" in js and "row('원래 글'" in js and "row('바꾼 글'" in js
     assert "바꿀 내용" not in js and "바뀌는 부분" not in js
     css = (CONSOLE / "static" / "app.css").read_text(encoding="utf-8")
     assert ".scroll" in css and "max-height" in css

@@ -23,14 +23,14 @@
   // 후보 파일 하나를 지금 목록(cur: [{size}])에 더해도 되는지. 안 되면 한 줄 이유를 돌려준다. 되면 ''.
   function whyNot(file, cur) {
     var type = typeOf(file), name = file.name || '첨부';
-    if (!type) return name + ': 이미지(png·jpg·gif·webp)와 PDF 만 붙일 수 있어.';
-    if (cur.length >= MAX_COUNT) return '첨부는 한 번에 ' + MAX_COUNT + '개까지야.';
+    if (!type) return name + ': 이미지(png·jpg·gif·webp)와 PDF 만 붙일 수 있어요.';
+    if (cur.length >= MAX_COUNT) return '첨부는 한 번에 ' + MAX_COUNT + '개까지예요.';
     var limit = isPdf(type) ? MAX_PDF : MAX_IMAGE;
-    if (file.size > limit) return name + ': 너무 커(' + sizeText(file.size) + '). ' + (isPdf(type) ? 'PDF 는 20MB' : '이미지는 한 장에 5MB') + '까지야.';
-    if (!file.size) return name + ': 빈 파일이야.';
+    if (file.size > limit) return name + ': 너무 커요(' + sizeText(file.size) + '). ' + (isPdf(type) ? 'PDF 는 20MB' : '이미지는 한 장에 5MB') + '까지예요.';
+    if (!file.size) return name + ': 빈 파일이에요.';
     var total = file.size;
     cur.forEach(function (c) { total += c.size; });
-    if (total > MAX_TOTAL) return '첨부 합계가 너무 커. 합쳐서 20MB 까지야.';
+    if (total > MAX_TOTAL) return '첨부 합계가 너무 커요. 합쳐서 20MB 까지예요.';
     return '';
   }
 
@@ -85,7 +85,7 @@
     var chips = h('div', { class: 'attach-box', 'data-attach-box': '1', hidden: true });
     var input = h('input', { type: 'file', class: 'sr-only', multiple: true, accept: 'image/png,image/jpeg,image/gif,image/webp,application/pdf', tabindex: '-1', 'aria-hidden': 'true',
       onChange: function (e) { add(fileList(e.target)); e.target.value = ''; } });
-    var btn = h('button', { type: 'button', class: 'attach-btn', 'aria-label': '이미지나 PDF 붙이기', title: '이미지·PDF 붙이기 (붙여 넣기·끌어 놓기도 돼)', text: '첨부', onClick: function () { input.click(); } });
+    var btn = h('button', { type: 'button', class: 'attach-btn', 'aria-label': '이미지나 PDF 붙이기', title: '이미지·PDF 붙이기 (붙여 넣기·끌어 놓기도 돼요)', text: '첨부', onClick: function () { input.click(); } });
     var pick = h('span', { class: 'attach-pick' }, btn, input);
 
     function grow() {
@@ -103,11 +103,11 @@
       chips.hidden = !kids.length;
     }
     function add(files) {
-      if (!enabled) { noteText = '터미널에서 연 세션에는 첨부를 보낼 수 없어.'; paint(); return; }
+      if (!enabled) { noteText = '터미널에서 연 세션에는 첨부를 보낼 수 없어요.'; paint(); return; }
       var bad = [], tooMany = 0;
       files.forEach(function (file) {
         var why = whyNot(file, items);
-        if (!why && opts.dedupe && items.some(function (x) { return x.name === file.name && x.size === file.size && x.type === typeOf(file) && x.lm === file.lastModified; })) why = file.name + ': 이미 붙였어.';  // opts.dedupe(Post): 같은 파일을 두 번 고르거나 끌어 놓아도 칩이 둘로 붙지 않게
+        if (!why && opts.dedupe && items.some(function (x) { return x.name === file.name && x.size === file.size && x.type === typeOf(file) && x.lm === file.lastModified; })) why = file.name + ': 이미 붙였어요.';  // opts.dedupe(Post): 같은 파일을 두 번 고르거나 끌어 놓아도 칩이 둘로 붙지 않게
         if (why) { bad.push(why); return; }
         var a = { name: file.name || (typeOf(file).indexOf('image/') === 0 ? '붙여 넣은 그림' : '첨부'), type: typeOf(file), size: file.size, lm: file.lastModified, data: '' };  // lm: 붙여 넣은 다른 그림이 이름·크기가 같아도 같은 파일로 보지 않게
         items.push(a);
@@ -121,11 +121,11 @@
         };
         rd.onerror = function () {
           items = items.filter(function (x) { return x !== a; });
-          pendingReads--; noteText = (a.name) + ': 파일을 읽지 못했어.'; paint();
+          pendingReads--; noteText = (a.name) + ': 파일을 읽지 못했어요.'; paint();
         };
         rd.readAsDataURL(file);
       });
-      noteText = bad.length ? bad[0] + (bad.length > 1 ? ' (외 ' + (bad.length - 1) + '개도 못 붙였어)' : '') : '';  // 새로 붙이면 앞의 못 붙인 이유는 지운다(다음 입력까지 남아 있지 않게)
+      noteText = bad.length ? bad[0] + (bad.length > 1 ? ' (외 ' + (bad.length - 1) + '개도 못 붙였어요)' : '') : '';  // 새로 붙이면 앞의 못 붙인 이유는 지운다(다음 입력까지 남아 있지 않게)
       paint();
     }
     function bindDrop(el) {

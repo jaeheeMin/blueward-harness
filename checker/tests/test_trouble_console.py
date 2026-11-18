@@ -260,15 +260,15 @@ const kit={h,clear:el=>{el.children=[];el._t=null;return el;},qs:o=>'',link:(hre
  api:(m,u)=>Promise.resolve(u.indexOf('/api/trouble')===0?list:{})};
 const tb=T.create(kit); const root=h('div'); const v=tb.listView(root);
 setTimeout(()=>{const t=root.textContent; assert.ok(t.includes('팀이 겪은 문제와 푼 방법')&&t.includes('아직 안 풀림')&&t.includes('시도 2 · 후보 1'),t);
- assert.ok(t.includes('? 확인 못 함')&&t.includes('GitHub 로그인이 필요해')&&t.includes('프로젝트 1곳'),t); v.destroy();
+ assert.ok(t.includes('? 확인하지 못했어요')&&t.includes('GitHub 로그인이 필요해')&&t.includes('프로젝트 1곳'),t); v.destroy();
  /* 새 기록: 단계는 처음부터 골라져 있고, 올리기가 잠긴 이유를 단추 옆에 말한다 */
  const nroot=h('div'); const nv=tb.newView(nroot,{});
  setTimeout(()=>{const nt=nroot.textContent;
-  assert.ok(nt.includes('아직 못 올려. 비어 있는 칸: 제목, 증상')&&!nt.includes('비어 있는 칸: 단계'),nt); nv.destroy();
+  assert.ok(nt.includes('아직 못 올려요. 비어 있는 칸: 제목, 증상')&&!nt.includes('비어 있는 칸: 단계'),nt); nv.destroy();
   /* 한 건: 번호는 이름을 붙여 쓰고, 댓글 종류 기본값을 올리기 옆에서 말한다 */
   const iroot=h('div'); const iapi=Object.assign({},kit,{api:(m,u)=>Promise.resolve({number:15,title:'막힘',project:'PROJ',solved:false,author:'sora',createdAt:'2026-11-05T05:00:00Z',stage:'개발',symptom:'x',history:[],similar:[]})});
   const iv=T.create(iapi).itemView(iroot,'o/p',15);
-  setTimeout(()=>{const it=iroot.textContent; assert.ok(it.includes('기록 번호 #15 · 프로젝트 PROJ')&&it.includes("'해결 후보' 로 올라가. 다르면 위에서 골라 줘."),it); iv.destroy(); console.log('ok');},50);
+  setTimeout(()=>{const it=iroot.textContent; assert.ok(it.includes('기록 번호 #15 · 프로젝트 PROJ')&&it.includes("'해결 후보' 로 올라가요. 다르면 위에서 골라 주세요."),it); iv.destroy(); console.log('ok');},50);
  },50);},50);
 """
     out = subprocess.run([NODE, "-e", script, "--", str(STATIC)], capture_output=True, text=True, encoding="utf-8", timeout=60)

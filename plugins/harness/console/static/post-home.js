@@ -88,8 +88,8 @@
       return lb === '승인' || lb === '계획' ? 'warn' : 'ask';
     }
     function kindLabel(it) {
-      if (it.kind === 'blocked') return '막힘';
-      if (it.kind === 'unk') return '확인 못 함';
+      if (it.kind === 'blocked') return PL.LABEL.blocked;  // 막힘·확인 못 함은 요청 종류가 아니라 상태라 상태 이름(「막혔어요」·「확인하지 못했어요」)으로 부른다
+      if (it.kind === 'unk') return PL.LABEL.unk;
       if (it.fix) return '고쳐야 함';
       var r = it.pend && it.pend.r;
       if (it.stampRid) return it.stampKind === 'plan' ? '계획' : it.stampKind === 'permission' ? '승인' : '질문';  // 도장이 찍힌 카드는 그 요청의 종류(markStamp 의 kind)로
@@ -104,10 +104,10 @@
       var s = it.s;
       if (it.kind !== 'turn') {
         var cant = it.kind === 'unk';
-        return { q: cant ? '검사를 못 해서 멈췄어 — 통과도 실패도 아니야' : '하네스 검사가 막았어 — 고친 뒤 이어서 하자', href: '/s/' + encodeURIComponent(s.id), verb: '가서 보기' };
+        return { q: cant ? '검사를 못 해서 멈췄어요 — 통과도 실패도 아니에요' : '하네스 검사가 막았어요 — 고친 뒤 이어서 해요', href: '/s/' + encodeURIComponent(s.id), verb: '가서 보기' };
       }
       var pend = it.pend, r = pend && pend.r, k = r && kit.kindOf(r);
-      if (it.fix) return { q: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어 — 고친 뒤 다시 올리자', href: '/s/' + encodeURIComponent(s.id), verb: '가서 고치기' };
+      if (it.fix) return { q: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어요 — 고친 뒤 다시 올려요', href: '/s/' + encodeURIComponent(s.id), verb: '가서 고치기' };
       if (inline && it.stampRid) { var sq = qc.inlineQuestion(it.stampRid); if (sq) return { node: sq }; }
       if (it.stampRid && !pend) return { q: PL.stampedLine(it.stampDecision), href: '/s/' + encodeURIComponent(s.id), verb: '세션 보기' };  // 도장이 잠깐 남은 카드(메모에는 폼이 없다). 카드에 찍힌 도장 글자로 말한다
       if (inline && pend && r && k === 'question') {
@@ -116,7 +116,7 @@
       }
       var plan = !!(r && kit.isPlan(r)), ask = k === 'question' || k === 'elicitation';
       // 올릴 차례(turnSkill deliver)는 올리기가 끝난 게 아니라 올릴지 정할 때다. 갈래 세션은 지금 단계(PL.turnLine), 올리기 단계면 세션 카드와 같은 질문
-      var what = pend ? kit.requestTitle(r) : (PL && PL.turnLine(s, L)) || (s.turnSkill !== 'deliver' ? '내 차례야' : s.flowId ? L.ASK_TEXT.deliver.q : '이제 ' + kit.skillLabel(s.turnSkill) + ' 차례야.');
+      var what = pend ? kit.requestTitle(r) : (PL && PL.turnLine(s, L)) || (s.turnSkill !== 'deliver' ? '확인할 일이 있어요' : s.flowId ? L.ASK_TEXT.deliver.q : '이제 ' + kit.skillLabel(s.turnSkill) + ' 차례예요.');
       var verb = ask ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
       return { q: what, href: pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id), verb: verb };
     }
@@ -129,16 +129,16 @@
       return b;
     }
 
-    /* 상태 칩(시안 .st): 색 + 모양. 내 차례 세모 · 일하는 중 채운 동그라미 · 승인 기다림 네모 · 쉬는 중 빈 동그라미 · 막힘 마름모 · 확인 못 함 점선 동그라미 · 끝 체크 */
-    var ST_TEXT = { turn: '내 차례', run: '일하는 중', wait: '승인 기다림', idle: '쉬는 중', blocked: '막힘', unk: '확인 못 함', done: '끝남' };
-    function stChip(state, tone) { return h('span', { class: 'po-stc po-stc-' + state, 'data-color-role': tone || null, text: ST_TEXT[state] || PS.LABEL[state] }); }
+    /* 상태 칩(시안 .st): 색 + 모양. 답을 기다려요 세모 · 일하는 중 채운 동그라미 · 승인 기다림 네모 · 쉬는 중 빈 동그라미 · 막힘 마름모 · 확인 못 함 점선 동그라미 · 끝 체크.
+       글은 장면·정리 줄·메모와 같은 상태 이름(PS.LABEL — 번들 LABEL 과 같은 해요체)이다. 칩만 따로 짧은 이름(「내 차례」·「끝남」)을 쓰던 것을 문구 6회차에 하나로 합쳤다. */
+    function stChip(state, tone) { return h('span', { class: 'po-stc po-stc-' + state, 'data-color-role': tone || null, text: PS.LABEL[state] || '' }); }
     /* 세션 표의 상태 칩: Sauce 표(flow-ui.js homeTable)와 같은 판정이다. API 오류(#865)는 '끝남'·'쉬는 중' 이 아니라 오류로, PR 검사가 실패한 세션은 "내 차례" 가 아니라 "고쳐야 함" 으로 말한다.
        (막힘·확인 못 함은 stateOf 가 이미 가린다.) */
     function rowChip(s, st) {
       var bk = L.blockOf(s), an = !bk && window.BHApiNotice ? window.BHApiNotice.notice(s) : null;
       if (an && an.sideTone === 'err') return h('span', { class: 'po-stc po-stc-err', title: an.title, text: an.side });
       var g = L.groupOf(s, HK.openIds);
-      if (!bk && s.status !== 'ended' && g !== 'running' && !HK.pendingOf(s) && L.prNeedsFix(s)) return h('span', { class: 'po-stc po-stc-turn', 'data-color-role': 'err', title: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어', text: '고쳐야 함' });
+      if (!bk && s.status !== 'ended' && g !== 'running' && !HK.pendingOf(s) && L.prNeedsFix(s)) return h('span', { class: 'po-stc po-stc-turn', 'data-color-role': 'err', title: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어요', text: '고쳐야 함' });
       return stChip(st, st === 'turn' && kit.turnTone ? kit.turnTone(s) : '');
     }
 
@@ -211,7 +211,7 @@
       var calmList = h('ul', { class: 'po-maplist', 'aria-label': '지금 세션들' });  // 차분(fx=0)일 때 장면 대신 보이는 세션 목록(시안 mapFallback)
       var teamRow = h('ul', { class: 'po-teams', 'aria-label': '팀별 세션 수', hidden: true });  // 사무실 장면이 있을 때만(옛 요약 줄 자리)
       var sumRow = h('ul', { class: 'po-sum', 'aria-label': '상태별 세션 수' });  // 장면 아래 정리 줄: 상태 기호 + 이름 + 수(범례를 겸한다). 차분 목록 아래에도 같은 줄이 있다
-      var memo = h('div', { class: 'po-memo', role: 'group', 'aria-label': '내 차례 메모', hidden: true });  // 장면 위에 띄우는 내 차례 메모(시안 .memo)
+      var memo = h('div', { class: 'po-memo', role: 'group', 'aria-label': '나를 찾는 사람 메모', hidden: true });  // 장면 위에 띄우는 나를 찾는 사람 메모(시안 .memo — 덱 맨 위와 같은 사람)
       var memoLive = h('p', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'data-memo-live': '1' });  // 메모가 바뀌면 읽기 프로그램에 알린다(메모 자신은 hidden 이 되기도 하고 다시 그려져 알림이 안 간다)
       var memoSaid = '';
       var stageFrame = h('div', { class: 'po-stagew' }, slots.sceneHost, memo, memoLive);  // 사무실 장면이 보이면 테두리·둥근 모서리 틀(시안 .stage), 메모는 이 틀 안에서 뜬다
@@ -368,7 +368,7 @@
         syncFocus(pickId ? pickId : lead ? null : next);
         if (ps) personMemo(ps);
         if (!it) { if (!ps) placeMemo(); announceMemo(); if (ps) focusIn(fi); reconcile(); return; }
-        memo.setAttribute('aria-label', '내 차례 메모');
+        memo.setAttribute('aria-label', '나를 찾는 사람 메모');
         var s = it.s, name = s.title || HK.folderName(s) || '이름 없는 세션', team = teamOf(PL.teamFlowOf(s)), a = cardAct(it, false);
         var from = it.pend && it.pend.r ? (it.pend.r.createdAt || it.pend.r.createdAtMs) : (it.t || s.updatedAt), w = kit.waited(from);
         var i = items.indexOf(it);
@@ -394,7 +394,7 @@
       }
 
       /* 장면에서 누른 사람이 덱(내 차례·막힘·확인 못 함)에 없는 세션일 때의 메모: 상태 · 팀 · 지난 시간, 제목, 세션으로 가는 링크. */
-      var PERSON_LINE = { run: 'AI가 일하는 중이야', wait: '팀 승인을 기다리는 중이야', idle: '쉬는 중이야 — 이어서 할 일이 있으면 세션에서 말해', done: '이 세션의 일은 끝났어' };
+      var PERSON_LINE = { run: 'AI가 일하고 있어요', wait: '팀 승인을 기다리고 있어요', idle: '이어서 할 일이 있으면 세션에서 말해 주세요', done: '이 세션의 일은 끝났어요' };  // 머리 첫 글이 이미 상태 이름(「쉬는 중이에요」 …)이라 같은 말을 되풀이하지 않는다
       var inScene = false;  // 메모의 세션이 장면에 서 있는가(placeMemo)
       function narrowNow() { return (typeof matchMedia === 'function' && matchMedia(NARROW).matches) || stageFrame.clientWidth < UNDER_W; }
       function memoHidden() { return !memoId || over || shutId === memoId; }
@@ -415,8 +415,8 @@
         var st = PS.stateOf(s, L), name = s.title || HK.folderName(s) || '이름 없는 세션', w = kit.waited(s.updatedAt);
         memo.className = 'po-memo po-memo-' + st; memo.removeAttribute('data-color-role');
         memo.setAttribute('aria-label', '세션 메모');
-        memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(st), h('span', { class: 'po-memo-kind', text: [ST_TEXT[st] || PS.LABEL[st], teamOf(PL.teamFlowOf(s)), w].filter(Boolean).join(' · ') }),
-          items.length ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '내 차례 메모로 돌아가기', text: '내 차례', onClick: function () { pickTop(topId, true); } }) : null, closeBtn()));
+        memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(st), h('span', { class: 'po-memo-kind', text: [PS.LABEL[st], teamOf(PL.teamFlowOf(s)), w].filter(Boolean).join(' · ') }),
+          items.length ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '나를 찾는 사람 메모로 돌아가기', text: '나를 찾는 사람', onClick: function () { pickTop(topId, true); } }) : null, closeBtn()));
         memo.appendChild(h('p', { class: 'po-memo-q', text: PERSON_LINE[st] || PS.LABEL[st] || '' }));
         memo.appendChild(h('p', { class: 'po-memo-s', text: name, title: name }));
         memo.appendChild(h('div', { class: 'po-memo-acts' }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'pill acc', text: '가서 확인하기' })));
@@ -447,7 +447,7 @@
         var head = h('header', { class: 'po-ph' }, h('h2', { text: '나를 찾는 사람' }),
           items.length > 1 ? h('span', { class: 'po-hint', text: 'J · K 다음 · 이전' }) : null);
         var stack = h('div', { class: 'po-stack' });
-        if (!items.length) stack.appendChild(h('p', { class: 'quiet', text: '지금 네 답을 기다리는 일이 없어.' }));
+        if (!items.length) stack.appendChild(h('p', { class: 'quiet', text: '지금은 나를 찾는 사람이 없어요.' }));
         items.forEach(function (it) {
           var s = it.s, top = it.id === topId, name = s.title || HK.folderName(s) || '이름 없는 세션';
           var st = PS.stateOf(s, L), href = '/s/' + encodeURIComponent(s.id);
@@ -478,7 +478,7 @@
               h('span', null, h('b', { text: name }), h('small', null, stMark(s.state, s.state === 'turn' ? s.tone : ''), PS.LABEL[s.state] + ' · ' + PL.hereTitle(k, s.flow))))));
         });
         if (all.length > shown.length) calmList.appendChild(h('li', { class: 'po-ml-more' }, h('button', { type: 'button', class: 'pill line sm', text: '나머지 ' + (all.length - shown.length) + '개 더 보기', onClick: function () { calmAll = true; paintCalm(); var a = calmList.querySelectorAll('a')[CALM_MAX]; if (a) a.focus(); } })));  // 단추가 사라지니 포커스는 새로 보인 첫 줄로
-        if (!calmList.firstChild) calmList.appendChild(h('li', { class: 'quiet', text: '지금 일하는 세션이 없어.' }));
+        if (!calmList.firstChild) calmList.appendChild(h('li', { class: 'quiet', text: '지금 일하는 세션이 없어요.' }));
       }
 
       /* 사무실 장면 아래 팀 이름과 인원 수. 장면이 안 그려지는 차분(fx=0)이거나 사무실 장면이 없으면 숨긴다. */
@@ -517,7 +517,7 @@
         if (gone) return;
         if (!kit.loaded()) {
           scenePanel.hidden = true; noMemo(); clear(helloSlot); clear(deckSlot); clear(restSlot);
-          restSlot.appendChild(kit.conn() === 'down' ? kit.stateBox('warn', '서버에 연결할 수 없어', '서버가 꺼졌을 수 있어. 다시 연결을 시도하고 있어.') : kit.loadingBox('세션을 불러오는 중이야.'));
+          restSlot.appendChild(kit.conn() === 'down' ? kit.stateBox('warn', '서버에 연결할 수 없어요', '서버가 꺼졌을 수 있어요. 다시 연결을 시도하고 있어요.') : kit.loadingBox('세션을 불러오는 중이에요.'));
           restSlot.appendChild(slots.whatsSlot);  // 새 소식은 세션이 없어도·불러오는 중에도 보인다(Sauce 홈과 같다)
           return;
         }

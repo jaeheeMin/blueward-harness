@@ -777,6 +777,8 @@
 :root[data-theme="post"] .tagx.fail { background: var(--err-fill); color: var(--on-err); }
 :root[data-theme="post"] .tagx.unk, :root[data-theme="post"] .bad .tagx.unk { background: transparent; border: 1.5px dashed var(--st-unk); color: var(--st-unk-ink); }
 :root[data-theme="post"] .tag.tb-dk { background: var(--surface); color: var(--text); }
+:root[data-theme="post"] .tag.tb-tag-err { background: var(--err-fill); color: var(--on-err); }  /* 팀 기록 새 기록의 PR 칩: 없는 PR(✕)은 오류, 확인 못 함(?)은 보라 점선 — .tag 기본(노랑 경고)으로 두지 않는다 */
+:root[data-theme="post"] .tag.tb-tag-unk { background: transparent; border: 1.5px dashed var(--st-unk); color: var(--st-unk-ink); }
 :root[data-theme="post"] .chip2 { background: var(--paper); box-shadow: inset 0 0 0 1.5px var(--bd); color: var(--text); }
 :root[data-theme="post"] .chip2.warn { background: var(--warn-fill); color: var(--on-warn); box-shadow: none; }
 :root[data-theme="post"] .chip2.unk { border: 1.5px dashed var(--st-unk); color: var(--st-unk-ink); background: transparent; }
