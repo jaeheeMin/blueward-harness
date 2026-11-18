@@ -725,6 +725,9 @@ def test_skill_detection_from_both_paths(browser):
     browser.hook("stop", {"session_id": "t1", "cwd": "/w", "last_assistant_message": "x"})
     s = browser.call("GET", "/api/sessions/t1")[1]
     assert s["currentSkill"] == "" and {f["skill"]: f["state"] for f in s["flow"]}["prs"] == "done"
+    assert s["usedSkills"] == ["deliver", "prs"]  # 턴이 끝나 currentSkill 이 비어도 쓴 스킬은 남는다(Cozy Office 팀 배정, 2026-11-18)
+    browser.event("t1", "UserPromptExpansion", command_name="harness:deliver", expansion_type="slash_command")
+    assert browser.call("GET", "/api/sessions/t1")[1]["usedSkills"] == ["prs", "deliver"]  # 다시 쓴 스킬은 맨 뒤로(가장 나중에 쓴 갈래 스킬을 가리려고)
 
 
 def test_post_tool_use_collects_changed_files_and_pr_links(browser):

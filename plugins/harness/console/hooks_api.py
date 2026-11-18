@@ -466,6 +466,7 @@ class Hooks:
         if skill not in s["skillStates"] and len(s["skillStates"]) >= MAX_SKILL_STATES:
             for old in [n for n, v in s["skillStates"].items() if v != "active"][:len(s["skillStates"]) - MAX_SKILL_STATES + 1]:
                 del s["skillStates"][old]
+        s["skillStates"].pop(skill, None)  # 다시 쓴 스킬은 맨 뒤로(usedSkills 가 쓴 차례를 낸다)
         s["skillStates"][skill] = "active"
         s["currentSkill"] = skill
         flows.skill_started(s, skill)

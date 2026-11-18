@@ -146,7 +146,7 @@
       var all = list.map(function (s) { var steps = s.flowId ? L.barSteps(s) : []; if (steps.length > maxN) maxN = steps.length; return { s: s, steps: steps }; });
       rows = all.map(function (x) {
         var s = x.s, st = PS.stateOf(s, L), name = s.title || HK.folderName(s) || '이름 없는 세션';
-        var sub = teamOf(s.flowId) || (s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음');
+        var sub = teamOf(PL.teamFlowOf(s)) || (s.flowId ? (s.flowName || s.flowId) : '정해진 갈래 없음');
         return h('li', { 'data-session': s.id }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ssa' },
           h('span', { class: 'po-ava', 'aria-hidden': 'true', text: (PS.letterOf ? PS.letterOf(name) : Array.from(name)[0]) || '?' }),
           h('div', { class: 'po-rt' }, h('div', { class: 't1', text: name, title: name }), h('div', { class: 't2' }, sub, kit.projectTag ? kit.projectTag(s) : null), metaLine(s)),  // 같은 저장소의 다른 폴더·저장소 확인 못 함 표(#1070)
@@ -282,7 +282,7 @@
         if (ps) personMemo(ps);
         if (!it) { announceMemo(); if (ps && fi >= 0) { var pt = memo.querySelectorAll(FOCUSABLE)[fi]; if (pt) pt.focus({ preventScroll: true }); } return; }
         memo.setAttribute('aria-label', '내 차례 메모');
-        var s = it.s, name = s.title || HK.folderName(s) || '이름 없는 세션', team = teamOf(s.flowId), a = cardAct(it, false);
+        var s = it.s, name = s.title || HK.folderName(s) || '이름 없는 세션', team = teamOf(PL.teamFlowOf(s)), a = cardAct(it, false);
         var from = it.pend && it.pend.r ? (it.pend.r.createdAt || it.pend.r.createdAtMs) : (it.t || s.updatedAt), w = kit.waited(from);
         var i = 0; items.forEach(function (x, n) { if (x.id === topId) i = n; });
         var head = [memoCount(it), team, w];
@@ -308,7 +308,7 @@
         var st = PS.stateOf(s, L), name = s.title || HK.folderName(s) || '이름 없는 세션', w = kit.waited(s.updatedAt);
         memo.className = 'po-memo po-memo-' + st;
         memo.setAttribute('aria-label', '세션 메모');
-        memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(st), h('span', { class: 'po-memo-kind', text: [ST_TEXT[st] || PS.LABEL[st], teamOf(s.flowId), w].filter(Boolean).join(' · ') }),
+        memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(st), h('span', { class: 'po-memo-kind', text: [ST_TEXT[st] || PS.LABEL[st], teamOf(PL.teamFlowOf(s)), w].filter(Boolean).join(' · ') }),
           items.length ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '내 차례 메모로 돌아가기', text: '내 차례', onClick: function () { pickTop(topId, true); } }) : null));
         memo.appendChild(h('p', { class: 'po-memo-q', text: PERSON_LINE[st] || PS.LABEL[st] || '' }));
         memo.appendChild(h('p', { class: 'po-memo-s', text: name }));

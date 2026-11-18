@@ -1040,6 +1040,7 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "apiIssue": dict(s["apiIssue"]) if isinstance(s.get("apiIssue"), dict) else None,  # API 오류·재시도(#865). 훅 막힘(lastBlock)과 따로
             "rateLimit": dict(s["rateLimit"]) if isinstance(s.get("rateLimit"), dict) else None,
             "currentSkill": s["currentSkill"], "currentAction": s["currentAction"],
+            "usedSkills": list(s["skillStates"]),  # 이 세션이 쓴 스킬 이름(쓴 차례대로, 목록에도). Cozy Office 가 터미널 세션도 쓴 갈래 스킬로 팀에 앉힌다
             "startedAt": s["startedAt"], "updatedAt": s["updatedAt"], "log": list(s["log"]), "report": s["report"],
             "changedFiles": list(s["changedFiles"]), "prLinks": list(s["prLinks"]), "prCreated": str(s.get("prCreated") or ""),
             "subagents": list(s["subagents"]),

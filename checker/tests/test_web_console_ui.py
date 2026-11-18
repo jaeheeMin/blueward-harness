@@ -1443,7 +1443,7 @@ def test_post_home_uses_office_scene():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert html.index('src="/post/office/office-post.js"') < html.index('src="/theme-post.js"') < html.index('src="/app.js"')
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "flow: s.flowId || ''" in app and "t: s.updatedAt" in app
+    assert "flow: PL.teamFlowOf(s)" in app and "t: s.updatedAt" in app
     assert "window.BHOfficeScene" in app and "attachScene(sceneHost)" in app
     assert "officeList" not in app and "list: sceneList" in app  # 제목을 이스케이프하지 않고 그대로 준다(장면이 textContent 로 쓴다)
     bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
@@ -4262,3 +4262,53 @@ def test_cozy_defects_round3_source():
     # D18 메모가 바뀌면 읽기 프로그램에 알린다(지난 시간은 빼고 판단)
     assert "'data-memo-live': '1'" in home and "function announceMemo()" in home
     assert home.count("announceMemo();") == 2  # 사람 메모 경로 + 덱 메모 경로
+
+
+_POST_TEAM_NODE = r"""
+const path = require('path'), fs = require('fs');
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const out = {
+  fixed: P.teamFlowOf({ flowId: 'dev', currentSkill: 'srs', usedSkills: ['srs'] }),          // 갈래가 있으면 그대로
+  srs: P.teamFlowOf({ flowId: null, currentSkill: 'srs', usedSkills: ['srs'] }),
+  spec: P.teamFlowOf({ currentSkill: 'spec', usedSkills: ['spec'] }),
+  usedLater: P.teamFlowOf({ currentSkill: 'deliver', usedSkills: ['srs', 'deliver'] }),       // 지금은 도구 스킬이어도 앞서 쓴 갈래 스킬
+  latest: P.teamFlowOf({ currentSkill: 'deliver', usedSkills: ['srs', 'spec', 'deliver'] }),    // 둘 다 썼으면 나중 것
+  current: P.teamFlowOf({ currentSkill: 'srs', usedSkills: ['spec', 'srs'] }),
+  tool: P.teamFlowOf({ currentSkill: 'deliver', usedSkills: ['start', 'deliver', 'open'] }),
+  none: P.teamFlowOf({}), nul: P.teamFlowOf(null),
+  stSrs: P.stationOf({ currentSkill: 'srs', usedSkills: ['srs'] }, null), stSpec: P.stationOf({ usedSkills: ['spec', 'deliver'] }, null), stNone: P.stationOf({ usedSkills: ['deliver'] }, null),  // 창구도 같은 팀을 따른다
+  map: P.SKILL_TEAM_FLOW,
+};
+console.log(JSON.stringify(out));
+"""
+
+
+def test_cozy_teams_terminal_session_sits_in_team_by_used_flow_skill():
+    # 2026-11-18 Cozy Office 4회차(J15 사용자 판정): 터미널 세션도 쓴 갈래 스킬로 맞는 팀에 앉힌다. 갈래(flowId)가 있으면 그대로.
+    r = subprocess.run([NODE, "-e", _POST_TEAM_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["fixed"] == "dev" and out["srs"] == "srs" and out["spec"] == "spec"
+    assert out["usedLater"] == "srs" and out["latest"] == "spec" and out["current"] == "srs"
+    assert out["stSrs"] == 0 and out["stSpec"] == 1 and out["stNone"] == 2
+    assert out["tool"] == "" and out["none"] == "" and out["nul"] == ""  # start·deliver 같은 도구·공용 스킬은 팀을 정하지 않는다
+    # 스킬 → 팀 표는 workflow.json 에서 읽은 것만: 그 스킬을 단계로 가진 갈래가 모두 같은 팀일 때만 들어 있다(start 는 개발·설정·표준·유지보수가 같이 써서 빠진다)
+    wf = json.loads((STATIC.parents[1] / "workflow.json").read_text(encoding="utf-8"))
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    teams = {fid: t for t, ids in re.findall(r"\['([^']+)', \[([^\]]*)\]\]", home[home.index("var TEAMS"):home.index("function teamOf")])
+             for fid in re.findall(r"'([^']+)'", ids)}
+    skill_teams = {}
+    for f in wf["flows"]:
+        for st in f["steps"]:
+            if st.get("skill"):
+                skill_teams.setdefault(st["skill"], set()).add(teams.get(f["id"]))
+    derivable = {sk for sk, ts in skill_teams.items() if len(ts) == 1 and None not in ts}
+    assert derivable == set(out["map"]) == {"srs", "spec"}, (derivable, out["map"])
+    for sk, fid in out["map"].items():
+        assert teams[fid] in skill_teams[sk]
+    # 목록 API 가 쓴 스킬을 낸다 · 장면 줄·팀 줄·메모·세션 줄이 같은 판정을 쓴다
+    store = (STATIC.parent / "store.py").read_text(encoding="utf-8")
+    assert '"usedSkills": list(s["skillStates"])' in store
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "flow: PL.teamFlowOf(s), t: s.updatedAt" in app
+    assert home.count("teamOf(PL.teamFlowOf(s))") == 3

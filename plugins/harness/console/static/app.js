@@ -1521,7 +1521,7 @@
     sortedSessions().forEach(function (s) {
       if (s.status === 'ended') return;
       var title = sessionTitle(s);
-      out.push({ id: s.id, title: title, state: PL.stateOf(s, L), station: PL.stationOf(s, L), tag: title.length > 7 ? title.slice(0, 6) + '…' : title, flow: s.flowId || '', t: s.updatedAt });
+      out.push({ id: s.id, title: title, state: PL.stateOf(s, L), station: PL.stationOf(s, L), tag: title.length > 7 ? title.slice(0, 6) + '…' : title, flow: PL.teamFlowOf(s), t: s.updatedAt });
     });
     return out;
   }

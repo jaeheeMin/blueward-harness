@@ -50,7 +50,8 @@
     if (prState(s) === 'MERGED' || s.flowFinished || s.phase === 'finished') return 4;
     var step = L && L.currentStep ? L.currentStep(s) : null, name = step ? String(step.name || step.id || '') : '';
     if (s.phase === 'approval' || (prState(s) === 'OPEN' && /올리고|합쳐지기/.test(name))) return 3;
-    if (s.flowId && FLOW_STATION[s.flowId] != null) return FLOW_STATION[s.flowId];
+    var tf = teamFlowOf(s);  // 터미널 세션은 쓴 갈래 스킬의 팀(J15)
+    if (tf && FLOW_STATION[tf] != null) return FLOW_STATION[tf];
     return 2;
   }
 
@@ -157,7 +158,21 @@
     return t && !t.deliver ? t.short : null;
   }
 
-  var api = { turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
+  /* 팀 배정(J15, 2026-11-18 사용자 판정): 갈래(flowId)가 있으면 그대로, 없으면(터미널에서 연 세션) 쓴 갈래 스킬로 맞는 팀의 갈래를 돌려준다.
+     스킬 → 팀은 workflow.json 에서 그 스킬이 어느 갈래의 단계인지로 정한 것 중 팀이 하나로 정해지는 것만이다(srs → 요구분석팀, spec → 설계팀).
+     start·deliver 처럼 여러 갈래가 같이 쓰는 스킬과 도구 스킬은 팀을 정하지 않는다(개발·설정·표준·유지보수 갈래의 첫 단계는 모두 start 라 스킬만으로는 못 가른다).
+     여러 스킬을 썼으면 지금 쓰는 스킬, 없으면 가장 나중에 쓴 갈래 스킬. 없으면 ''(팀 없음). */
+  var SKILL_TEAM_FLOW = { srs: 'srs', spec: 'spec' };
+  function teamFlowOf(s) {
+    if (!s) return '';
+    if (s.flowId) return s.flowId;
+    if (s.currentSkill && SKILL_TEAM_FLOW[s.currentSkill]) return SKILL_TEAM_FLOW[s.currentSkill];
+    var used = Array.isArray(s.usedSkills) ? s.usedSkills : [];
+    for (var i = used.length - 1; i >= 0; i--) if (SKILL_TEAM_FLOW[used[i]]) return SKILL_TEAM_FLOW[used[i]];
+    return '';
+  }
+
+  var api = { teamFlowOf: teamFlowOf, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
     clerkLine: clerkLine, sealOf: sealOf, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;
