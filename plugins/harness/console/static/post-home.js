@@ -88,7 +88,8 @@
         if (q) return { node: q };
       }
       var plan = !!(r && kit.isPlan(r)), ask = k === 'question' || k === 'elicitation';
-      var what = pend ? kit.requestTitle(r) : s.turnSkill === 'deliver' ? kit.skillLabel(s.turnSkill) + ' 끝남 — 다음을 정해 줘' : '내 차례야';
+      // 올릴 차례(turnSkill deliver)는 올리기가 끝난 게 아니라 올릴지 정할 때다. 갈래 세션은 지금 단계(PL.turnLine), 올리기 단계면 세션 카드와 같은 질문
+      var what = pend ? kit.requestTitle(r) : (PL && PL.turnLine(s, L)) || (s.turnSkill !== 'deliver' ? '내 차례야' : s.flowId ? L.ASK_TEXT.deliver.q : '이제 ' + kit.skillLabel(s.turnSkill) + ' 차례야.');
       var verb = ask ? '가서 답하기' : plan ? '가서 계획 보기' : pend ? '가서 승인하기' : '가서 확인하기';
       return { q: what, href: pend ? '/r/' + encodeURIComponent(pend.rid) : '/s/' + encodeURIComponent(s.id), verb: verb };
     }

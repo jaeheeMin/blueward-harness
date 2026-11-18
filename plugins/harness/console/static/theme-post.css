@@ -1026,3 +1026,5 @@
 :root[data-theme="post"] .po-skip-top:focus, :root[data-theme="post"] .po-skip-rail:focus { position: fixed; top: 8px; left: 8px; z-index: 200; }  /* 접힌 칸은 좁아 그 안에 펼치면 고리가 밀리니 위 링크와 같은 자리에 띄운다 */
 :root[data-theme="post"] #main:focus { outline: none; }
 :root[data-theme="post"] #main { scroll-margin-top: 88px; }  /* 좁은 화면에서 건너뛰어 내려오면 위에 붙는 메뉴줄에 본문 머리가 가리지 않게(산출물 미리보기와 같은 값) */
+/* 노란 띠(MCP 연결 안 됨)는 어두운 모드에서도 밝은 노랑이라, 띠 안 「다시 연결하지 못했어」 는 어두운 모드의 밝은 --attn 대신 라이트와 같은 진한 갈색(6회차 실화면) */
+:root[data-theme="post"] .banner .mcp-err { color: #9A5400; }

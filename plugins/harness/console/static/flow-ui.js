@@ -151,6 +151,7 @@
       return h('span', { class: 'prchip ' + pr.checks }, url ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer', text: label }) : label);
     }
 
+    function postTheme() { return !!(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post'); }
     /* 올림·승인 기다림·합쳐짐: 검토 요청(PR) 카드. 줄은 데이터에 있는 것만(검사는 합친 한 값, 승인은 PR 상태에서 읽는다). */
     function prCard(s) {
       var pr = s && s.flowPr, lines = L.prLines(pr, s && s.flowId);
@@ -159,9 +160,12 @@
       var label = 'PR #' + pr.number + (pr.title ? ' · ' + pr.title : '');
       // 검사가 실패했으면 ✕ 막힘(빨간 테두리), 결과를 못 읽었으면 ? 확인 못 함(보라 점선). 통과·실패 어느 쪽으로도 치지 않는다.
       var failed = pr.checks === 'fail' || lines.some(function (ln) { return ln.state === 'fail'; }), unsure = !failed && lines.some(function (ln) { return ln.state === 'unk'; });
+      // Post: 합쳐지지 않고 닫힌 PR 은 팀 승인 줄이 실패라 검사 실패 문구가 붙었다(검사는 아직 도는 중이어도). 닫힘을 그대로 말한다
+      var closed = postTheme() && String(pr.state || '').toUpperCase() === 'CLOSED';
       return h('div', { class: 'q prcard' + (failed ? ' blocked' : unsure ? ' unsure' : ''), 'data-pr-card': '1' },
         failed ? h('span', { class: 'tagx fail', text: '✕ 막힘' }) : unsure ? h('span', { class: 'tagx unk', text: '? 확인 못 함' }) : null,
-        failed ? h('span', { class: 'sub', text: '자동 검사가 잘못을 찾았어. 고쳐서 다시 올려야 넘어가.' }) : unsure ? h('span', { class: 'sub', text: '검사 결과를 못 읽었어. 통과도 실패도 아니야.' }) : null,
+        closed ? h('span', { class: 'sub', text: '이 검토 요청(PR)은 합쳐지지 않고 닫혔어. GitHub 에서 다시 열거나 새로 올려야 넘어가.' })
+          : failed ? h('span', { class: 'sub', text: '자동 검사가 잘못을 찾았어. 고쳐서 다시 올려야 넘어가.' }) : unsure ? h('span', { class: 'sub', text: '검사 결과를 못 읽었어. 통과도 실패도 아니야.' }) : null,
         h('div', { class: 'qh' }, h('b', { text: label }), url ? h('a', { class: 'pill line sm', href: url, target: '_blank', rel: 'noopener noreferrer', text: 'GitHub에서 보기' }) : null),
         lines.map(function (ln) {
           return h('div', { class: 'crow ' + ln.state, 'data-line': ln.id }, h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: ln.name }), h('span', { class: 'ct', text: ln.text }));
@@ -433,7 +437,12 @@
         if (nx.unknown) { box.appendChild(h('span', { class: 'eb', text: '다음 일' })); box.appendChild(h('b', { text: '이 일은 끝났어' })); box.appendChild(h('p', { class: 'sub attn', role: 'alert', text: '판정 불능 · ' + nx.unknown })); }
         var main = nx.options.filter(function (o) { return o.clickable; })[0];
         if (nx.hint && !nx.options.length) { box.appendChild(h('span', { class: 'eb', text: '다음 일' })); box.appendChild(h('b', { text: '이 일은 끝났어' })); box.appendChild(h('p', { class: 'sub', text: nx.hint })); }
-        if (nx.options.length) {
+        if (nx.options.length && s.handedOffTo && postTheme()) {
+          // Post: 이미 다음 세션으로 넘겼으면 넘기기 단추를 다시 두지 않는다(또 누르면 같은 일을 하는 세션이 하나 더 생긴다). 기억 띠도 넘긴 세션엔 넘기기를 숨긴다
+          box.appendChild(h('span', { class: 'eb', text: '다음 일' }));
+          box.appendChild(h('b', { text: '다음 일은 새 세션으로 넘겼어' }));
+          box.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', 'data-next-handed': '1', text: '새 세션 보기', onClick: function () { kit.go('/s/' + encodeURIComponent(s.handedOffTo)); } })));
+        } else if (nx.options.length) {
           var mem = L.memoryOf(s), first = L.nextFirst(s) || { short: main ? L.nextShort(main.label) : '', label: main ? main.label : '' };
           if (st.stay[s.id]) {
             // [여기서 계속]: 이 세션에서 이어 가기로 했다. 다시 넘기고 싶으면 한 줄에서 되돌린다.

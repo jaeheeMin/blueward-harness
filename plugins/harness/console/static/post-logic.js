@@ -137,7 +137,27 @@
   /* 도장을 찍을 창구: 승인·계획은 검토 창구, 질문·MCP 질문은 그 세션이 선 창구. */
   function sealDesk(kind, k) { return kind === 'question' || kind === 'elicitation' ? STATION[Math.max(0, Math.min(4, k | 0))].desk : STATION[3].desk; }
 
-  var api = { projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
+  /* 갈래 세션의 차례 글(세션 머리 제목·사이드 줄·홈 덱). 서버의 차례(turnSkill)는 git 상태로 짐작한 start·deliver·prs 라 갈래 단계와 어긋난다:
+     srs·spec 첫 단계는 main 에서 시작해 "작업 시작", 구현 중 변경이 있으면 "올릴 준비". Post 는 갈래의 지금 단계를 따른다.
+     갈래가 없거나 끝났거나 지금 단계를 모르면 null(원래 글). 올리기 단계에 올릴 변경이 있으면(G-09) 원래 글이 맞아 null. */
+  function flowNow(s, L) {
+    if (!s || !s.flowId || s.flowFinished || !L) return null;
+    var st = L.currentStep(s);
+    if (!st) return null;
+    return { name: L.shortStepName(st.name || st.id), short: L.stepShort(st), deliver: st.kind === 'skill' && st.skill === 'deliver', wait: st.kind === 'wait' };
+  }
+  function turnLine(s, L) {
+    var t = flowNow(s, L);
+    if (!t || (t.deliver && s.turnSkill === 'deliver')) return null;
+    return t.wait ? '지금은 ' + t.name + ' 단계야.' : '이제 ' + t.name + ' 차례야.';
+  }
+  /* 사이드 줄 "내 차례 · …" 의 뒤 글: 올리기 단계가 아니면 갈래 단계 짧은 이름(구현·설정·기록 …). */
+  function turnVerb(s, L) {
+    var t = flowNow(s, L);
+    return t && !t.deliver ? t.short : null;
+  }
+
+  var api = { turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
     clerkLine: clerkLine, sealOf: sealOf, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;

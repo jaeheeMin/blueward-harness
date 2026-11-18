@@ -3955,3 +3955,92 @@ def test_post_sweep_design_fixes_css():
     # 홈 새 소식은 아래 칸 한 줄을 다 쓰고 300px 단으로 흐른다(좁은 칸 하나에 700px 넘게 서지 않게)
     assert ':root[data-theme="post"] .po-foot > .wn-slot { grid-column: 1 / -1; }' in css
     assert ':root[data-theme="post"] .po-foot .wn-list { display: block; column-width: 300px; column-gap: 28px; }' in css
+
+
+_POST_TURN_NODE = r"""
+const path = require('path');
+const L = require(path.join(process.argv[1], 'flow-logic.js'));
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const dev = [{ id: 'start', name: '개발 건 고르고 작업 시작하기(작업 기록과 작업 공간을 자동으로 만들어)', short: '시작', kind: 'skill', skill: 'start' },
+  { id: 'implement', name: '구현(SAP 080 에서 개발·활성화)', short: '구현', kind: 'work' },
+  { id: 'deliver', name: '올리고 검토 요청하기', short: '올리기', kind: 'skill', skill: 'deliver' },
+  { id: 'merge', name: '합쳐지기 기다리기', short: '합치기', kind: 'wait' }];
+const spec = [{ id: 'spec', name: 'Spec 쓰기', short: '쓰기', kind: 'skill', skill: 'spec' }].concat(dev.slice(2));
+const s = (steps, i, turn, extra) => Object.assign({ id: 'x', flowId: 'f', flowSteps: steps, stepIndex: i, turnSkill: turn }, extra || {});
+const both = x => [P.turnLine(x, L), P.turnVerb(x, L)];
+process.stdout.write(JSON.stringify({
+  specFirst: both(s(spec, 0, 'start')), implement: both(s(dev, 1, 'deliver')), deliver: both(s(dev, 2, 'deliver')),
+  deliverNoChange: both(s(dev, 2, 'start')), wait: both(s(dev, 3, 'start')), finished: both(s(dev, 3, 'start', { flowFinished: true })),
+  noFlow: both({ id: 'y', turnSkill: 'deliver' })
+}));
+"""
+
+
+def test_post_turn_text_follows_flow_step():
+    # 2026-11-18 6회차: 갈래 세션의 머리 제목·사이드 줄·홈 덱이 git 으로 짐작한 차례(turnSkill)를 따라
+    # spec 첫 단계(main)에 "이제 작업 시작 차례야", 구현 중(변경 있음)에 "AI가 올릴 준비를 마치고…"·"내 차례 · 제출하기", 덱에 "제출하기 끝남" 이 나왔다.
+    r = subprocess.run([NODE, "-e", _POST_TURN_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert got["specFirst"] == ["이제 Spec 쓰기 차례야.", "쓰기"]
+    assert got["implement"] == ["이제 구현 차례야.", "구현"]
+    assert got["deliver"] == [None, None]  # 올릴 변경이 있는 올리기 단계는 원래 글(G-09 "AI가 올릴 준비를 마치고…")
+    assert got["deliverNoChange"] == ["이제 올리고 검토 요청하기 차례야.", None]
+    assert got["wait"] == ["지금은 합쳐지기 기다리기 단계야.", "합치기"]
+    assert got["finished"] == [None, None] and got["noFlow"] == [None, None]
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    # Sauce 는 그대로: Post 일 때만 부른다
+    assert "var flowLine = isPostTheme() && window.BHPostLogic ? window.BHPostLogic.turnLine(s, window.BHLogic) : null;" in app
+    assert app.index("var flowLine = isPostTheme()") < app.index("if (s.turnSkill === 'deliver' && s.flowId) return 'AI가 올릴 준비를 마치고 네 답을 기다리는 중';")
+    # 확인 대기·승인 기다림(phase)·일하는 중은 갈래 글보다 먼저 걸러진다
+    head = app.split("function headlineFor(s) {", 1)[1].split("\n    }\n", 1)[0]
+    assert head.index("if (pend) return") < head.index("if (s.phase) return window.BHLogic.phaseLine(s, isPostTheme());") < head.index("var flowLine = isPostTheme()")
+    assert head.index("if (s.status === 'running')") < head.index("var flowLine = isPostTheme()")
+    assert "var flowVerb = !p && isPostTheme() && window.BHPostLogic ? window.BHPostLogic.turnVerb(s, L) : null;" in app
+    assert ": flowVerb || (s.turnSkill === 'deliver' ? skillLabel(s.turnSkill) : '확인하기');" in app
+    assert "끝남 — 다음을 정해 줘" not in home
+    assert "(PL && PL.turnLine(s, L)) || (s.turnSkill !== 'deliver' ? '내 차례야' : s.flowId ? L.ASK_TEXT.deliver.q : '이제 ' + kit.skillLabel(s.turnSkill) + ' 차례야.')" in home
+
+
+def test_post_mcp_error_readable_on_yellow_banner_in_dark():
+    # 6회차 실화면: 어두운 모드에서 노란 MCP 띠 안 실패 문구가 밝은 --attn(#F2B24C)이라 바탕과 같은 색이었다. Post 전용 CSS 라 원문 확인
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert ':root[data-theme="post"] .banner, :root[data-theme="post"] .call,' in css  # 띠는 두 모드 모두 밝은 노랑 + 남색 글자
+    assert ':root[data-theme="post"] .banner .mcp-err { color: #9A5400; }' in css
+    assert css.index(':root[data-theme="post"] .banner .mcp-err {') > css.index(':root[data-theme="post"] .nb-err, :root[data-theme="post"] .mcp-err { color: var(--attn); }')
+
+
+_POST_PR_SUBJECT_NODE = r"""
+const path = require('path');
+const L = require(path.join(process.argv[1], 'flow-logic.js'));
+const s = n => ({ phase: 'finished', flowPr: { number: n, state: 'MERGED' }, nextFlow: { options: [{ flow: 'spec', label: '개발 Spec 만들기' }] } });
+process.stdout.write(JSON.stringify({
+  sauce502: L.phaseLine(s(502)), post502: L.phaseLine(s(502), true), post501: L.phaseLine(s(501), true),
+  bandSauce: L.finishedBand(s(502)), bandPost: L.finishedBand(s(502), true), bandPost10: L.finishedBand(s(10), true)
+}));
+"""
+
+
+def test_post_shared_flow_text_fixes():
+    # 6회차: 공유 코드라 미뤘던 Post 화면의 틀린 글 넷을 Post 분기로 고쳤다(Sauce 는 그대로). 본체는 Aside 실화면(docs/status/2026-11-18-post-verify-sweep2.md)
+    r = subprocess.run([NODE, "-e", _POST_PR_SUBJECT_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    # 1. PR 번호 뒤 조사: Post 만 읽는 소리대로(#502가, #501이, #10이). Sauce 는 전과 같은 '이'
+    assert got["sauce502"].startswith("PR #502이 합쳐졌어.") and got["bandSauce"].startswith("PR #502이 합쳐졌어")
+    assert got["post502"].startswith("PR #502가 합쳐졌어.") and got["post501"].startswith("PR #501이 합쳐졌어.")
+    assert got["bandPost"].startswith("PR #502가 합쳐졌어") and got["bandPost10"].startswith("PR #10이 합쳐졌어")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    flow = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert app.count("window.BHLogic.finishedBand(cs, isPostTheme())") == 2 and "window.BHLogic.phaseLine(s, isPostTheme())" in app
+    # 2. MCP 다시 연결 실패: 서버 글(「MCP 를 다시 연결하지 못했어: …」) 앞에 같은 말을 또 붙이지 않는다(Post 만)
+    assert "mcpErr = (isPostTheme() && /다시 연결하지 못했어/.test(e.message) ? '' : '다시 연결하지 못했어: ') + e.message; }).then(function () { mcpBusy = ''; paintNotices(cur()); });  // Post:" in app  # 주석이 .then 을 삼키지 않게(리뷰가 잡음)
+    # 3. 합쳐지지 않고 닫힌 PR 카드는 검사 실패가 아니라 닫힘을 말한다(Post 만)
+    assert "var closed = postTheme() && String(pr.state || '').toUpperCase() === 'CLOSED';" in flow
+    assert "closed ? h('span', { class: 'sub', text: '이 검토 요청(PR)은 합쳐지지 않고 닫혔어. GitHub 에서 다시 열거나 새로 올려야 넘어가.' })" in flow
+    assert ": failed ? h('span', { class: 'sub', text: '자동 검사가 잘못을 찾았어. 고쳐서 다시 올려야 넘어가.' })" in flow
+    # 4. 이미 다음 세션으로 넘긴 세션의 끝난 갈래 카드는 넘기기 단추 대신 새 세션 보기(Post 만)
+    assert "if (nx.options.length && s.handedOffTo && postTheme()) {" in flow
+    assert "'data-next-handed': '1', text: '새 세션 보기'" in flow
+    assert flow.index("if (nx.options.length && s.handedOffTo && postTheme()) {") < flow.index("'data-next-start': '1'")

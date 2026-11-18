@@ -655,17 +655,19 @@
     return '';
   }
   // 맨 위 띠(갈래가 끝난 세션을 보고 있을 때): PR #n이 합쳐졌어 — 다음은 <다음 갈래>
-  function finishedBand(s) {
+  // fix(Post 가 넘긴다): PR 번호 뒤 조사를 읽는 소리대로(#502가). 안 넘기면 전과 같은 '이'
+  function prSubject(n, fix) { return 'PR #' + n + (fix && !hasBatchim(String(n)) ? '가' : '이'); }
+  function finishedBand(s, fix) {
     var n = prMerged(s);
     if (!s || s.phase !== 'finished' || !n) return '';
     var nx = nextFirst(s);
-    return 'PR #' + n + '이 합쳐졌어' + (nx ? ' — 다음은 ' + nx.short : '');
+    return prSubject(n, fix) + ' 합쳐졌어' + (nx ? ' — 다음은 ' + nx.short : '');
   }
-  function phaseLine(s) {
+  function phaseLine(s, fix) {
     if (s && s.phase === 'approval') return 'GitHub에 올렸어 · 팀 승인을 기다리는 중';
     if (s && s.phase === 'finished') {
       var n = prMerged(s), nx = nextFirst(s);
-      return (n ? 'PR #' + n + '이 합쳐졌어.' : '이 일은 끝났어.') + (nx ? ' 다음 갈래는 ' + nx.short + (hasBatchim(nx.short) ? '이야' : '야') : '');
+      return (n ? prSubject(n, fix) + ' 합쳐졌어.' : '이 일은 끝났어.') + (nx ? ' 다음 갈래는 ' + nx.short + (hasBatchim(nx.short) ? '이야' : '야') : '');
     }
     return '';
   }

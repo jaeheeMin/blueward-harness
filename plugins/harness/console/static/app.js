@@ -665,7 +665,8 @@
     if (g !== 'running' && s.status !== 'ended' && L.prNeedsFix(s) && !firstPending(s)) return { tone: g === 'todo' ? 'attn' : '', fix: true, text: 'PR #' + s.flowPr.number + ' 고쳐야 함' };
     if (g === 'todo') {
       var p = firstPending(s);
-      var verb = p ? (!p.r ? '요청 확인하기' : answersAsk(p.r) ? '답하기' : isPlan(p.r) ? '계획 확인하기' : '승인하기') : s.turnSkill === 'deliver' ? skillLabel(s.turnSkill) : '확인하기';
+      var flowVerb = !p && isPostTheme() && window.BHPostLogic ? window.BHPostLogic.turnVerb(s, L) : null;  // Post: 구현 단계면 "내 차례 · 구현"
+      var verb = p ? (!p.r ? '요청 확인하기' : answersAsk(p.r) ? '답하기' : isPlan(p.r) ? '계획 확인하기' : '승인하기') : flowVerb || (s.turnSkill === 'deliver' ? skillLabel(s.turnSkill) : '확인하기');
       return { tone: 'attn', text: '내 차례 · ' + verb };
     }
     var ph = window.BHLogic.phaseSide(s);  // 승인 기다림 · PR #n / 끝 · PR #n 합쳐짐(내 차례로 세지 않는다)
@@ -702,7 +703,7 @@
     }
     // 시안 G-12: 합쳐진 갈래의 세션 화면을 보는 동안은 초록 띠 "PR #n이 합쳐졌어 — 다음은 …"
     if (route && route.name === 'session') {
-      var cs = sessions.get(route.id), band = cs ? window.BHLogic.finishedBand(cs) : '';
+      var cs = sessions.get(route.id), band = cs ? window.BHLogic.finishedBand(cs, isPostTheme()) : '';
       if (band) annEl.appendChild(link('/s/' + encodeURIComponent(cs.id), { class: 'ann', role: 'status', 'data-ann': 'merged' }, h('span', { text: band })));
     }
     // 막지 않는 문제(하네스 새 판)는 홈을 그대로 열고 띠 한 줄로만 알린다. 내 차례 띠와 같이 있으면 둘 다 보인다.
@@ -745,7 +746,7 @@
       items.push({ id: 'api:' + e.sid + ':' + (e.it || e.ik), kind: 'api', sid: e.sid, href: e.href, sname: e.sname, title: e.side.replace(/^⚠\s*(오류 · )?/, ''), line: '⚠ 오류 ' + d.errs.length + '건: “' + e.sname + '” 세션 — ' + e.side.replace(/^⚠\s*(오류 · )?/, '') });
     });
     if (route && route.name === 'session') {  // 시안 G-12: 합쳐진 갈래의 세션 화면을 보는 동안만
-      var cs = sessions.get(route.id), band = cs ? window.BHLogic.finishedBand(cs) : '';
+      var cs = sessions.get(route.id), band = cs ? window.BHLogic.finishedBand(cs, isPostTheme()) : '';
       if (band) items.push({ id: 'merged:' + cs.id, kind: 'other', sid: cs.id, href: '/s/' + encodeURIComponent(cs.id), sname: sessionTitle(cs), title: band, line: band });
     }
     if (startData && startData.newVersion) {
@@ -2056,7 +2057,9 @@
       if (s.status === 'starting') return '세션을 시작하고 있어';
       if (s.status === 'ended') return '세션이 끝났어';
       if (s.askedInText) return '내 답을 기다리는 듯해(추정).';
-      if (s.phase) return window.BHLogic.phaseLine(s);
+      if (s.phase) return window.BHLogic.phaseLine(s, isPostTheme());
+      var flowLine = isPostTheme() && window.BHPostLogic ? window.BHPostLogic.turnLine(s, window.BHLogic) : null;  // Post: git 추정 차례 대신 갈래의 지금 단계
+      if (flowLine) return flowLine;
       if (s.turnSkill === 'deliver' && s.flowId) return 'AI가 올릴 준비를 마치고 네 답을 기다리는 중';
       if (s.turnSkill) return '이제 ' + skillLabel(s.turnSkill, flowItem(s, s.turnSkill)) + ' 차례야.';
       return '다음 요청을 기다리고 있어';
@@ -2155,7 +2158,7 @@
         if (d && d.session && d.session.id) mergeSession(Object.assign({}, d.session, { id: id }));
         var still = ((cur().mcp || {}).servers || []).filter(function (m) { return m.name === name && m.problem; });
         if (still.length) mcpErr = name + ' 은(는) 아직 연결되지 않았어. 잠시 뒤에 다시 눌러 봐.';
-      }, function (e) { mcpErr = '다시 연결하지 못했어: ' + e.message; }).then(function () { mcpBusy = ''; paintNotices(cur()); });
+      }, function (e) { mcpErr = (isPostTheme() && /다시 연결하지 못했어/.test(e.message) ? '' : '다시 연결하지 못했어: ') + e.message; }).then(function () { mcpBusy = ''; paintNotices(cur()); });  // Post: 서버 글이 이미 같은 말로 시작하면 접두를 두 번 붙이지 않는다
     }
 
     // 기억 요약(#863): 일하는 중·요약 중에는 누를 수 없다. 서버도 한 번 더 막는다.
