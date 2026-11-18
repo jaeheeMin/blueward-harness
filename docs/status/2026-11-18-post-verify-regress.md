@@ -49,7 +49,7 @@
 - 앞 회차 「판정 대기」 목록은 그대로.
 
 ## 시험
-`uv run pytest checker/tests/test_web_console.py checker/tests/test_web_console_ui.py -q` — 결과는 아래 「정리」 위에 적는다.
+`uv run pytest checker/tests/test_web_console.py checker/tests/test_web_console_ui.py -q` — **1575 passed, 2 skipped**(6분 8초, 리뷰 반영 뒤 최종 커밋). 리뷰 반영 전 첫 회차도 1575 passed, 2 skipped.
 
 ## 정리
 - 4931 시험 서버는 listener pid 로 껐다. 사용자 4873·다른 세션 서버는 건드리지 않았다.
