@@ -299,8 +299,8 @@ const cases = {
   },
   start_checks_unknown_and_fail_with_reason() {
     // 훅·판 확인 결과: 확인 못 함(unknown)·다시 필요(fail)와 사유(#1059). 점검이 끝나지 않은 것(pending)과는 다르다
-    const got = L.startChecks({ startChecks: [{ id: 'sync', state: 'unknown', reason: '원격이 없어' }, { id: 'version', state: 'fail', reason: '더 새 판이 있어(0.10.9)' }] });
-    assert.deepStrictEqual(got.map(c => [c.state, c.label, c.reason]), [['unknown', '확인 못 함', '원격이 없어'], ['fail', '다시 필요', '더 새 판이 있어(0.10.9)']]);
+    const got = L.startChecks({ startChecks: [{ id: 'sync', state: 'unknown', reason: '원격이 없어' }, { id: 'version', state: 'fail', reason: '더 새 판이 있어요(0.10.9)' }] });
+    assert.deepStrictEqual(got.map(c => [c.state, c.label, c.reason]), [['unknown', '확인 못 함', '원격이 없어'], ['fail', '다시 필요', '더 새 판이 있어요(0.10.9)']]);
     assert.strictEqual(L.startChecks({ startChecks: [{ id: 'sync', state: 'pending' }] })[0].label, '아직');
     assert.strictEqual(L.startChecks({ startChecks: [{ id: 'sync', state: 'done' }] })[0].reason, '');
   },
@@ -1024,9 +1024,9 @@ const cases = {
     assert.strictEqual(find(p.el, e => e.tag === 'button').length, 0);  // 스스로 하는 줄이라 버튼이 없다(잘못됐을 때만 다시 하기)
     p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'done' }, { id: 'version', state: 'fail' }] });
     assert.deepStrictEqual(find(p.el, e => e.tag === 'button').map(b => b.textContent), ['다시 하기']);
-    p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'unknown', reason: '원격이 없어' }, { id: 'version', state: 'fail', reason: '더 새 판이 있어(0.10.9)' }] });
+    p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'unknown', reason: '원격이 없어' }, { id: 'version', state: 'fail', reason: '더 새 판이 있어요(0.10.9)' }] });
     assert.deepStrictEqual(find(p.el, e => e.attrs['data-check']).map(e => e.attrs['data-check'] + ':' + e.attrs['class']), ['sync:crow unk', 'version:crow fail']);
-    assert.ok(p.el.textContent.includes('확인 못 함') && p.el.textContent.includes('원격이 없어') && p.el.textContent.includes('다시 필요') && p.el.textContent.includes('더 새 판이 있어(0.10.9)'));
+    assert.ok(p.el.textContent.includes('확인 못 함') && p.el.textContent.includes('원격이 없어') && p.el.textContent.includes('다시 필요') && p.el.textContent.includes('더 새 판이 있어요(0.10.9)'));
     p.update({ id: 's1', startChecks: [] }); assert.ok(p.el.hidden);
     p.destroy();
     // 검사 실패는 ✕ 막혔어요, 결과를 못 읽으면 ? 확인하지 못했어요, 통과·진행 중에는 둘 다 없다
@@ -1959,12 +1959,12 @@ def test_work_screen_question_shows_each_sentence_once(tmp_path):
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_work_screen_permission_card_and_edit_names(tmp_path):
     bash = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "cwd": "C:/w/proj",
-            "toolInput": {"command": "rm x.xlsx", "description": "옛 파일 지우기"}, "permissionSuggestions": [1], "note": "touch 는 목록에 없어", "suggestionText": ["Bash(rm *) 허용 규칙 추가"]}
+            "toolInput": {"command": "rm x.xlsx", "description": "옛 파일 지우기"}, "permissionSuggestions": [1], "note": "touch 는 목록에 없어요", "suggestionText": ["Bash(rm *) 허용 규칙 추가"]}
     edit = {"id": "p2", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Edit", "toolInput": {"file_path": "docs/a.md", "old_string": "가", "new_string": "나"}}
     risky = {"id": "p3", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "curl x", "dangerouslyDisableSandbox": True}}
     sess = [_session("s1", pendingRequestIds=["p1", "p2", "p3"])]
     got = _smoke(tmp_path, "r/p1", sess, [bash, edit, risky])
-    for need in ("확인 필요", "옛 파일 지우기", "자세히 (명령 원문)", "이번만 허락", "하지 않기", "이 세션이 끝날 때까지만 적용돼", "묻는 이유: touch 는 목록에 없어", "도구에 넘기는 입력 전체"):  # #1018
+    for need in ("확인 필요", "옛 파일 지우기", "자세히 (명령 원문)", "이번만 허락", "하지 않기", "이 세션이 끝날 때까지만 적용돼", "묻는 이유: touch 는 목록에 없어요", "도구에 넘기는 입력 전체"):  # #1018
         assert need in got["text"], need
     assert "<details.more>" in got["dump"] and "<details[open].more>" not in got["dump"]  # 쉬운 설명이 있는 명령은 원문을 접어 둔다
     got = _smoke(tmp_path, "r/p2", sess, [bash, edit, risky])
@@ -1975,11 +1975,11 @@ def test_work_screen_permission_card_and_edit_names(tmp_path):
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_1018_card_explains_with_korean_reason_and_moves_ai_description_into_details(tmp_path):
-    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "note": "touch 는 목록에 없어",
+    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "note": "touch 는 목록에 없어요",
            "toolInput": {"command": "touch a", "description": "Create the file"}, "hasSuggestions": True, "suggestionText": ["이 세션: 허용 규칙 추가 - Bash(touch:*)"]}
     got = _smoke(tmp_path, "r/p1", [_session("s1", pendingRequestIds=["p1"])], [req])
     text = got["text"]
-    assert text.index("묻는 이유: touch 는 목록에 없어") < text.index("자세히 (명령 원문)") < text.index("Create the file")  # 영어 설명은 "자세히" 안에만
+    assert text.index("묻는 이유: touch 는 목록에 없어요") < text.index("자세히 (명령 원문)") < text.index("Create the file")  # 영어 설명은 "자세히" 안에만
     assert "<span.sm>Create the file" not in got["dump"] and "<details.more>" in got["dump"]
     nonote = dict(req, id="p2", note="")
     got = _smoke(tmp_path, "r/p2", [_session("s1", pendingRequestIds=["p2"])], [nonote])
@@ -2064,13 +2064,13 @@ def test_1018_session_title_and_log_lines_are_masked_on_screen(tmp_path):
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_work_screen_irreversible_card_is_yellow_and_cannot_be_remembered(tmp_path):
     """시안 17: 되돌릴 수 없는 일 카드. 꼬리표, 쉬운 말 제목, 하네스 안내, 이번만 허락 / 하지 않기만."""
-    rm = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "risk": "irreversible", "riskNote": "작업 폴더 밖 파일을 쓰려 해",
+    rm = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "risk": "irreversible", "riskNote": "작업 폴더 밖 파일을 쓰려 해요",
           "toolInput": {"command": 'rm "C:/Users/x/Desktop/old.xlsx"'}, "permissionSuggestions": [1], "hasSuggestions": True, "suggestionText": ["Bash(rm *) 허용 규칙 추가"]}
     plain = {"id": "p2", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "touch a"}, "hasSuggestions": True}
     sess = [_session("s1", pendingRequestIds=["p1", "p2"])]
     got = _smoke(tmp_path, "r/p1", sess, [rm, plain])
     text, dump = got["text"], got["dump"]
-    for need in ("확인 필요 · 되돌릴 수 없음", "작업 폴더 밖 파일을 쓰려 해", "하네스는 되돌릴 수 없는 일은 항상 사람에게 물어요.", "이번만 지우기", "지우지 않기", "자세히 (명령 원문)", "이유 적기(선택)"):
+    for need in ("확인 필요 · 되돌릴 수 없음", "작업 폴더 밖 파일을 쓰려 해요", "하네스는 되돌릴 수 없는 일은 항상 사람에게 물어요.", "이번만 지우기", "지우지 않기", "자세히 (명령 원문)", "이유 적기(선택)"):
         assert need in text, need  # 단추는 행동을 그대로 말한다(시안 17)
     assert "이번만 허락" not in text
     assert "<div.bad.irrev>" in dump and "<span.muted-line>" in dump and "<span.warn-line>" not in dump  # 하네스 안내 줄은 강조 없이 연한 글
@@ -2147,7 +2147,7 @@ def test_session_screen_shows_auto_mode_unavailable_note(tmp_path):
 
 
 _MCP_BAD = {"state": "problem", "canReconnect": True, "servers": [
-    {"name": "abap-adt", "status": "failed", "label": "연결하지 못했어", "problem": True, "error": "Connection closed", "canReconnect": True},
+    {"name": "abap-adt", "status": "failed", "label": "연결하지 못했어요", "problem": True, "error": "Connection closed", "canReconnect": True},
     {"name": "echosrv", "status": "connected", "label": "연결됨", "problem": False, "error": "", "canReconnect": False}]}
 
 
@@ -2159,7 +2159,7 @@ def test_session_screen_mcp_status_quiet_when_ok_loud_when_failed_honest_for_ter
     none = _smoke(tmp_path, "s/s1", [_session("s1", mcp={"state": "none", "servers": [], "canReconnect": False})])
     assert "data-mcp" not in none["dump"]
     bad = _smoke(tmp_path, "s/s1", [_session("s1", mcp=_MCP_BAD)])
-    assert "연결이 안 된 도구가 있어요" in bad["text"] and "abap-adt — 연결하지 못했어" in bad["text"] and "다시 연결" in bad["text"]
+    assert "연결이 안 된 도구가 있어요" in bad["text"] and "abap-adt — 연결하지 못했어요" in bad["text"] and "다시 연결" in bad["text"]
     assert "Connection closed" in bad["text"] and "echosrv" not in bad["text"]  # 사유는 "자세히" 안, 멀쩡한 서버는 안 보인다
     assert "<details.mcp-more>" in bad["dump"] and "<div.banner.mcp>" in bad["dump"]
     term = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, mcp={"state": "unknown", "servers": [], "canReconnect": False})])
@@ -2168,7 +2168,7 @@ def test_session_screen_mcp_status_quiet_when_ok_loud_when_failed_honest_for_ter
     assert "여기서는 연결됐는지 확인할 수 없어" in term["text"] and "모두 연결됨" not in term["text"]
     assert "모두 연결됨" in ok["text"] and "연결 안 됨: abap-adt" in bad["text"]
     auth = _smoke(tmp_path, "s/s1", [_session("s1", mcp={"state": "problem", "canReconnect": True, "servers": [
-        {"name": "notion", "status": "needs-auth", "label": "로그인이 필요해(터미널에서 /mcp 로 로그인해 줘)", "problem": True, "error": "", "canReconnect": False}]})])
+        {"name": "notion", "status": "needs-auth", "label": "로그인이 필요해요(터미널에서 /mcp 로 로그인해 주세요)", "problem": True, "error": "", "canReconnect": False}]})])
     assert "로그인이 필요해" in auth["text"] and "다시 연결" not in auth["text"]
 
 
@@ -2513,8 +2513,8 @@ def test_settings_ask_range_has_three_steps_tied_to_server_and_default_permissio
                   actions=[{"click": "[data-ask-opt=edits]"}])
     assert any(p[0] == "PUT" and p[1] == "/api/settings/ask" and '"level":"edits"' in p[2].replace(" ", "") for p in pick["posts"]), pick["posts"]
     # 서버가 설정 파일을 못 읽어 가장 엄격한 단계로 물러났으면 그 이유를 보인다
-    strict = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(perms, **{"GET /api/settings/ask": {"level": "all", "problem": "설정을 읽지 못해 모든 명령마다 물어"}}))
-    assert "설정을 읽지 못해 모든 명령마다 물어" in strict["text"]
+    strict = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(perms, **{"GET /api/settings/ask": {"level": "all", "problem": "설정을 읽지 못해 모든 명령마다 물어요"}}))
+    assert "설정을 읽지 못해 모든 명령마다 물어요" in strict["text"]
     assert "설정을 읽지 못해" not in text  # 정상이면 안 보인다
     # 서버 설정을 읽지 못하면 고르지 못하게 둔다(고른 척하지 않는다)
     broken = _smoke(tmp_path, "settings", [_session("s1")], extra=perms)
@@ -2592,7 +2592,7 @@ def test_intro_screen_first_run_and_blocking(tmp_path):
     assert "<div.ptitle>" not in dump and "<section.light.intro-box>" in dump  # 홈을 그리지 않고 가운데 판 하나(헤더·목록은 CSS 가 숨긴다)
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     assert '#app[data-intro="1"] .top' in css and '#app[data-intro="1"] .side' in css
-    blocked = [dict(_OK_CHECKS[0], state="fail", detail="로그인이 안 돼 있어", fix="터미널에서 gh auth login 을 하고 다시 점검해 줘.")] + _OK_CHECKS[1:]
+    blocked = [dict(_OK_CHECKS[0], state="fail", detail="로그인이 안 돼 있어요", fix="터미널에서 gh auth login 을 하고 다시 점검해 주세요.")] + _OK_CHECKS[1:]
     got = _smoke(tmp_path, "", [_session("s1")], extra=_start(blocking=True, checks=blocked))  # 첫 실행이 아니어도 막는 문제면 뜬다
     assert "먼저 고칠 게 있어요" in got["text"] and "gh auth login" in got["text"] and "다시 점검" in got["text"] and "<div.crow.fail>" in got["dump"]
     assert "시작하기" not in got["text"]
@@ -2758,10 +2758,10 @@ def test_memory_banner_compact_button_states_and_chat_note(tmp_path):
     assert "지난번 요약은 실패했어" in failed["text"]
     term = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, context=hot)])
     assert "요약해서 계속하기" not in term["text"] and "/harness:handoff" in term["text"]
-    chat = [{"t": 1, "role": "me", "text": "요약해 줘"}, {"t": 2, "role": "note", "text": "기억을 요약했어 · 35,779 → 8,449 토큰", "tone": "ok"},
-            {"t": 3, "role": "note", "text": "기억을 요약하지 못했어", "tone": "bad"}]
+    chat = [{"t": 1, "role": "me", "text": "요약해 줘"}, {"t": 2, "role": "note", "text": "기억을 요약했어요 · 35,779 → 8,449 토큰", "tone": "ok"},
+            {"t": 3, "role": "note", "text": "기억을 요약하지 못했어요", "tone": "bad"}]
     noted = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)])
-    assert "기억을 요약했어 · 35,779 → 8,449 토큰" in noted["text"] and "<div.reqnote.chat-note>" in noted["dump"] and "기억을 요약하지 못했어" in noted["text"]
+    assert "기억을 요약했어요 · 35,779 → 8,449 토큰" in noted["text"] and "<div.reqnote.chat-note>" in noted["dump"] and "기억을 요약하지 못했어요" in noted["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -2900,8 +2900,8 @@ def test_session_meets_trouble_records_g23(tmp_path):
     assert "기록해 둘까?" not in _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat[:2])], extra=extra)["text"]
     assert "기록해 둘까?" not in _smoke(tmp_path, "s/s1", [_session("s1", status="running", chat=chat)], extra=extra)["text"]
     # 기록 목록을 못 읽으면 "없음" 이 아니라 확인 못 함
-    unknown = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra={"GET /api/trouble/similar": {"ok": False, "reason": "GitHub 로그인이 필요해", "items": []}})
-    assert "? 비슷한 기록을 확인하지 못했어요 · GitHub 로그인이 필요해" in unknown["text"]
+    unknown = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra={"GET /api/trouble/similar": {"ok": False, "reason": "GitHub 로그인이 필요해요", "items": []}})
+    assert "? 비슷한 기록을 확인하지 못했어요 · GitHub 로그인이 필요해요" in unknown["text"]
     # 초안을 못 만들면 이유와 빈 칸 쓰기를 보인다(지어내지 않는다)
     failed = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra={"GET /api/trouble/similar": sim}, actions=[{"click": "[data-trouble-write]"}])
     assert "빈 칸으로 쓰기" in failed["text"] and failed["path"] != "/troubles/new"
@@ -3675,7 +3675,7 @@ def test_post_home_deck_restores_focus_after_redraw():
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_1042_rule_raw_json_lives_in_details_tech_info_not_in_the_card(tmp_path):
     raw = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "touch:*"}], "behavior": "allow", "destination": "session"}]
-    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "note": "touch 는 목록에 없어",
+    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "note": "touch 는 목록에 없어요",
            "toolInput": {"command": "touch a", "description": "Create the file"}, "hasSuggestions": True,
            "suggestionText": ["이 세션: 허용 규칙 추가 - Bash(touch:*)"], "suggestions": raw}
     text = _smoke(tmp_path, "r/p1", [_session("s1", pendingRequestIds=["p1"])], [req])["text"]
@@ -3698,7 +3698,7 @@ def test_1042_claude_ai_connectors_fold_into_one_line_project_mcp_stays_loud(tmp
     assert "<div.banner.mcp>" not in only["dump"] and "<details.mcp-conn>" in only["dump"]
     mixed_mcp = dict(_MCP_CONN, servers=_MCP_CONN["servers"] + [_MCP_BAD["servers"][0]])
     mixed = _smoke(tmp_path, "s/s1", [_session("s1", mcp=mixed_mcp)])
-    assert "연결이 안 된 도구가 있어요" in mixed["text"] and "abap-adt — 연결하지 못했어" in mixed["text"] and "claude.ai 커넥터 2개가 로그인 전이에요" in mixed["text"]
+    assert "연결이 안 된 도구가 있어요" in mixed["text"] and "abap-adt — 연결하지 못했어요" in mixed["text"] and "claude.ai 커넥터 2개가 로그인 전이에요" in mixed["text"]
     assert "<div.banner.mcp>" in mixed["dump"] and "<details.mcp-conn>" in mixed["dump"]
     assert "claude.ai Gmail — 로그인이 필요해" not in mixed["text"]  # 큰 목록에 커넥터가 따로 오르지 않는다
 
@@ -3708,7 +3708,7 @@ def test_1042_claude_ai_connectors_fold_into_one_line_project_mcp_stays_loud(tmp
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_post_verify_c_docs_gone_folder_is_not_failure_and_not_asked_again(tmp_path):
     """작업 폴더가 없어진 세션(서버 409)은 "읽기 실패" 와 따로 "폴더가 없어 읽지 못함" 으로 알리고, 다시 그려도 또 묻지 않는다."""
-    extra = {"__status": {"GET /api/sessions/s2/files": 409}, "GET /api/sessions/s2/files": {"error": "세션의 작업 폴더가 없어."}}
+    extra = {"__status": {"GET /api/sessions/s2/files": 409}, "GET /api/sessions/s2/files": {"error": "세션의 작업 폴더가 없어요."}}
     got = _smoke(tmp_path, "docs", [_session("s1"), _session("s2", cwd="C:/w/gone")], extra=extra)
     assert "1개 세션은 작업 폴더가 없어져서(지운 폴더 등) 문서를 읽지 못했어요." in got["text"]
     assert "세션의 문서를 읽지 못했어요" not in got["text"] and "git 상태를 읽지 못해서" not in got["text"]  # 서버 오류·git 못 읽음과 섞지 않는다
@@ -4260,11 +4260,11 @@ const body = src.split('function limText(t) {')[1].split('\n    }\n')[0];
 const run = (post, path, t) => new Function('isPostTheme', 'limCfg', 't', body)(() => post, { settingsPath: path }, t);
 const P = 'C:\\Users\\김\\.claude\\settings.json';
 process.stdout.write(JSON.stringify({
-  json: run(true, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어(x).'),
-  read: run(true, P, '끄지 못했어 · ' + P + ' 를 읽지 못했어요: e'),
-  top: run(true, P, P + ' 의 맨 위가 객체가 아니어서 건드리지 않았어.'),
-  sauce: run(false, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어(x).'),
-  other: run(true, P, '지금 statusLine 이 command 형식이 아니라서 감싸지 않았어.'),
+  json: run(true, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어요(x).'),
+  read: run(true, P, '끄지 못했어요 · ' + P + ' 를 읽지 못했어요: e'),
+  top: run(true, P, P + ' 의 맨 위가 객체가 아니어서 건드리지 않았어요.'),
+  sauce: run(false, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어요(x).'),
+  other: run(true, P, '지금 statusLine 이 command 형식이 아니라서 감싸지 않았어요.'),
   empty: run(true, P, '')
 }));
 """
@@ -4275,11 +4275,11 @@ def test_post_limits_text_shortens_settings_path_only_in_post():
     r = subprocess.run([NODE, "-e", _POST_LIMTEXT_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     got = json.loads(r.stdout)
-    assert got["json"] == "이 파일이 올바른 JSON 이 아니어서 건드리지 않았어(x)."
-    assert got["read"] == "끄지 못했어 · 이 파일을 읽지 못했어요: e"
-    assert got["top"] == "이 파일의 맨 위가 객체가 아니어서 건드리지 않았어."
+    assert got["json"] == "이 파일이 올바른 JSON 이 아니어서 건드리지 않았어요(x)."
+    assert got["read"] == "끄지 못했어요 · 이 파일을 읽지 못했어요: e"
+    assert got["top"] == "이 파일의 맨 위가 객체가 아니어서 건드리지 않았어요."
     assert got["sauce"].startswith("C:\\Users\\김\\.claude\\settings.json 가 ")  # Sauce 는 서버 글 그대로
-    assert got["other"] == "지금 statusLine 이 command 형식이 아니라서 감싸지 않았어." and got["empty"] == ""
+    assert got["other"] == "지금 statusLine 이 command 형식이 아니라서 감싸지 않았어요." and got["empty"] == ""
 
 
 def test_post_regress_sweep_fixes():

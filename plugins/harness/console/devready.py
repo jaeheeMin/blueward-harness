@@ -67,18 +67,18 @@ def _unknown(reason: str) -> dict:
 def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
     root, failed = gitstate.repo_root_checked(run, cwd)
     if failed:
-        return _unknown("git 을 실행하지 못해 개발 준비 상태를 확인하지 못했어.")
+        return _unknown("git 을 실행하지 못해 개발 준비 상태를 확인하지 못했어요.")
     if not root:
-        return {"state": "no", "reason": "git 저장소가 아니라 개발 준비 상태를 따지지 않아."}
+        return {"state": "no", "reason": "git 저장소가 아니라 개발 준비 상태를 따지지 않아요."}
     if not (os.path.isdir(os.path.join(root, "audit", "ledger")) or os.path.isfile(os.path.join(root, "docs", "ssot", "SRS.md"))):
-        return {"state": "no", "reason": "audit/ledger/ 도 docs/ssot/SRS.md 도 없는 저장소라 개발 준비 상태를 따지지 않아."}
+        return {"state": "no", "reason": "audit/ledger/ 도 docs/ssot/SRS.md 도 없는 저장소라 개발 준비 상태를 따지지 않아요."}
     rc, out = slow_run(["git", "fetch", "origin", "main"], root)
     if rc != 0:
-        return _unknown("origin/main 을 받지 못해 Spec 이 있는지 확인하지 못했어.")
+        return _unknown("origin/main 을 받지 못해 Spec 이 있는지 확인하지 못했어요.")
     rc, tree = run(["git", "-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "origin/main", "--",
                     "docs/ssot/SRS.md", "docs/spec", "audit/ledger"], root)
     if rc != 0:
-        return _unknown("origin/main 의 파일 목록을 읽지 못했어.")
+        return _unknown("origin/main 의 파일 목록을 읽지 못했어요.")
 
     def show(path: str) -> str | None:
         rc, text = run(["git", "show", f"origin/main:{path}"], root)
@@ -94,7 +94,7 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
         if line == "docs/ssot/SRS.md":
             text = show(line)
             if text is None:
-                return _unknown("origin/main 의 SRS 를 읽지 못했어.")
+                return _unknown("origin/main 의 SRS 를 읽지 못했어요.")
             for n, row in _rows(text, REQ_ROW_RE):
                 entry(n)["srs"] = {"title": _pick(row, "Title", "요구사항"), "next": _pick(row, "다음 단계"), "status": _pick(row, "Status", "상태")}
                 # RICEFW ID 칸이 가리키는 DEV 번호도 요구사항이 있는 번호다(PR 검사 spec-ready 와 같다, #837)
@@ -107,7 +107,7 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
         elif line.startswith("audit/ledger/") and line.endswith(".md"):
             text = show(line)
             if text is None:
-                return _unknown("origin/main 의 진행 원장을 읽지 못했어.")
+                return _unknown("origin/main 의 진행 원장을 읽지 못했어요.")
             for n, row in _rows(text, DEV_ROW_RE):
                 entry(n).setdefault("ledger", {"title": _pick(row, "내용"), "spec": _pick(row, "Spec"), "status": _pick(row, "상태")})
 
@@ -149,14 +149,14 @@ def srs_status(run: gitstate.Runner, cwd: str) -> dict:
     state: yes(읽음, items = {"REQ-002": {"status", "next"}}) / no(SRS 가 없음) / unknown(읽지 못함, 지어내지 않는다)."""
     root, failed = gitstate.repo_root_checked(run, cwd)
     if failed:
-        return _unknown("git 을 실행하지 못해 SRS 를 찾지 못했어.")
+        return _unknown("git 을 실행하지 못해 SRS 를 찾지 못했어요.")
     path = os.path.join(root or cwd, "docs", "ssot", "SRS.md")
     if not os.path.isfile(path):
-        return {"state": "no", "reason": "작업 폴더에 docs/ssot/SRS.md 가 없어."}
+        return {"state": "no", "reason": "작업 폴더에 docs/ssot/SRS.md 가 없어요."}
     try:
         with open(path, encoding="utf-8") as f:
             text = f.read()
     except (OSError, UnicodeDecodeError):
-        return _unknown("작업 폴더의 SRS 를 읽지 못했어.")
+        return _unknown("작업 폴더의 SRS 를 읽지 못했어요.")
     items = {f"REQ-{n:03d}": {"status": _pick(row, "Status", "상태"), "next": _pick(row, "다음 단계")} for n, row in _rows(text, REQ_ROW_RE)}
     return {"state": "yes", "reason": "", "items": items}

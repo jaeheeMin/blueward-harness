@@ -44,7 +44,7 @@ FLOW_PROMPT = (
 NO_FLOW = "none"  # 갈래 없이 도구만 쓰는 일("순서 없이 이 도구만")
 NO_FLOW_NAME = "순서 없이 이 도구만"
 DIRECT_SKILL = re.compile(r"^/[A-Za-z][\w-]*:[\w-]+(?=\s|$)")  # 사용자가 글 맨 앞에 플러그인 스킬(/harness:scaffold)을 직접 적었다
-FLOW_QUESTION = "어떤 갈래로 진행할까?"
+FLOW_QUESTION = "어떤 갈래로 진행할까요?"
 
 
 # claude 2.1.309 에서 `@"a b.txt"` 로 공백이 든 파일 이름을 넘기면 파일을 읽는 것을 확인했다(haiku, 1회).
@@ -73,24 +73,24 @@ def mention_path(cwd: str, path) -> tuple[str, str]:
     존재하는 작업 폴더 안의 파일만 받는다. 줄바꿈·제어문자·`@`·따옴표·역슬래시가 든 경로는 `@` 멘션 방식으로
     넘기면 형식이 깨지거나 다른 지시로 읽힐 수 있어 받지 않는다. 구분자는 `/` 로 통일한다."""
     if not isinstance(path, str) or not path:
-        return "", "경로가 비어 있어."
+        return "", "경로가 비어 있어요."
     if os.path.isabs(path) or path.startswith(("/", "\\")) or (len(path) > 1 and path[1] == ":"):
-        return "", "절대 경로야."
+        return "", "절대 경로예요."
     rel = posixpath.normpath(path.replace(os.sep, "/"))
     for ch in rel:
         if ord(ch) < 32 or ord(ch) == 127 or (ch.isspace() and ch != " "):
-            return "", "공백이 아닌 공백 문자나 제어문자가 들어 있어."
+            return "", "공백이 아닌 공백 문자나 제어문자가 들어 있어요."
     if "@" in rel or '"' in rel or "\\" in rel:
-        return "", "@, 따옴표, 역슬래시가 들어 있어 @ 멘션으로 넘길 수 없어."
+        return "", "@, 따옴표, 역슬래시가 들어 있어 @ 멘션으로 넘길 수 없어요."
     if rel == ".." or rel.startswith("../") or rel == ".":
-        return "", "작업 폴더 밖이거나 파일이 아니야."
+        return "", "작업 폴더 밖이거나 파일이 아니에요."
     full = os.path.join(cwd, *rel.split("/"))
     if not is_within(full, cwd):
-        return "", "작업 폴더 밖이야."
+        return "", "작업 폴더 밖이에요."
     if not os.path.isfile(full):
-        return "", "존재하는 파일이 아니야."
+        return "", "존재하는 파일이 아니에요."
     if " " in rel and not SPACE_MENTION_SUPPORTED:
-        return "", "공백이 든 경로는 @ 멘션으로 넘길 수 없어."
+        return "", "공백이 든 경로는 @ 멘션으로 넘길 수 없어요."
     return rel, ""
 
 
@@ -103,7 +103,7 @@ def check_flow(raw, flows: dict[str, str]) -> tuple[dict | None, str, dict | Non
     if raw is None or not flows:
         return None, "", None
     if not isinstance(raw, dict) or raw.get("id") not in flows:
-        return None, "분류 결과가 갈래 목록에 없어 버렸어.", None
+        return None, "분류 결과가 갈래 목록에 없어 버렸어요.", None
     fid = raw["id"]
     alt = raw.get("alternativeId") if raw.get("alternativeId") in flows and raw.get("alternativeId") != fid else None
     confident = raw.get("confident") is not False
@@ -185,16 +185,16 @@ def parse_output(stdout: str):
     try:
         data = json.loads(stdout)
     except ValueError:
-        return None, "분석 결과를 읽을 수 없어."
+        return None, "분석 결과를 읽을 수 없어요."
     if isinstance(data, list):
         data = next((d for d in reversed(data) if isinstance(d, dict) and d.get("type") == "result"), None)
     if not isinstance(data, dict):
-        return None, "분석 결과를 읽을 수 없어."
+        return None, "분석 결과를 읽을 수 없어요."
     if data.get("is_error"):
-        return None, str(data.get("result") or "분석이 실패했어.")[:300]
+        return None, str(data.get("result") or "분석이 실패했어요.")[:300]
     out = data.get("structured_output")
     if out is None:
-        return None, "분석 결과에 구조화된 답이 없어."
+        return None, "분석 결과에 구조화된 답이 없어요."
     return out, ""
 
 
@@ -296,15 +296,15 @@ class Analyses:
             done = subprocess.run(args, input=self.prompt(job["flows"], job.get("context", "")) + job["text"], cwd=job["cwd"], capture_output=True, text=True,
                                   encoding="utf-8", errors="replace", timeout=self.timeout, **hidden_window_kwargs())
         except subprocess.TimeoutExpired:
-            job.update(status="failed", error="분석이 시간 안에 끝나지 않았어.")
+            job.update(status="failed", error="분석이 시간 안에 끝나지 않았어요.")
             return
         except OSError as e:
-            job.update(status="failed", error=f"claude 를 실행하지 못했어: {e}")
+            job.update(status="failed", error=f"claude 를 실행하지 못했어요: {e}")
             return
         out, why = parse_output(done.stdout)
         checked = check_result(out, job["cwd"], {fid: f.get("name", fid) for fid, f in job["flows"].items()}) if out is not None else None
         if checked is None:
-            job.update(status="failed", error=why or "분석 결과의 형식이 맞지 않아.")
+            job.update(status="failed", error=why or "분석 결과의 형식이 맞지 않아요.")
         else:
             job.update(status="done", result=checked)
 

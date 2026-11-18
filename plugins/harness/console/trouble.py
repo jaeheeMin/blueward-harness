@@ -169,12 +169,12 @@ def parse_time(s):
         return None
 
 
-def why(rc: int, out: str, what: str = "gh 로 읽지 못했어") -> str:
+def why(rc: int, out: str, what: str = "gh 로 읽지 못했어요") -> str:
     low = (out or "").lower()
     if rc == gitstate.GIT_UNAVAILABLE and not low:
-        return "gh(GitHub CLI)를 실행하지 못했어(없거나 시간 초과)"
+        return "gh(GitHub CLI)를 실행하지 못했어요(없거나 시간 초과)"
     if any(k in low for k in LOGIN_WORDS):
-        return "GitHub 로그인이 필요해"
+        return "GitHub 로그인이 필요해요"
     return what + (" · " + gitstate.summarize_error(out)[-120:] if (out or "").strip() else "")
 
 
@@ -206,7 +206,7 @@ def read_repo(app, root: str) -> dict:
         return {"state": "yes", "result": {"ok": True, "slug": slug, "at": app.clock()}}
     if rc != 0 and any(k in (out or "").lower() for k in NOT_GITHUB):
         return {"state": "yes", "result": {"ok": True, "slug": None, "at": app.clock()}}  # GitHub 저장소가 아닌 폴더는 기록 대상이 아니다
-    return {"state": "yes", "result": {"ok": False, "reason": why(rc, out, "저장소 주소를 읽지 못했어"), "at": app.clock()}}
+    return {"state": "yes", "result": {"ok": False, "reason": why(rc, out, "저장소 주소를 읽지 못했어요"), "at": app.clock()}}
 
 
 def read_issues(app, slug: str, root: str) -> dict:
@@ -292,11 +292,11 @@ def collect(app, wait: bool = False, refresh: bool = False) -> dict:
 
 def repo_root(app, slug: str) -> str:
     if not isinstance(slug, str) or not SLUG.fullmatch(slug):
-        raise HttpError(400, "repo 가 올바르지 않아.")
+        raise HttpError(400, "repo 가 올바르지 않아요.")
     for p in collect(app, wait=True)["projects"]:
         if p["slug"] == slug:
             return p["root"]
-    raise HttpError(403, "콘솔이 아는 프로젝트의 저장소가 아니야.")
+    raise HttpError(403, "콘솔이 아는 프로젝트의 저장소가 아니에요.")
 
 
 def public(item: dict) -> dict:
@@ -332,10 +332,10 @@ def view_issue(app, slug: str, root: str, number: int) -> dict:
     data = _json(out) if rc == 0 else None
     if not isinstance(data, dict):
         if rc != 0 and "could not resolve" in (out or "").lower():
-            raise HttpError(404, "이 기록을 찾지 못했어.")
+            raise HttpError(404, "이 기록을 찾지 못했어요.")
         raise HttpError(502, "확인 못 함 · " + why(rc, out))
     if LABEL not in [l.get("name") for l in data.get("labels") or [] if isinstance(l, dict)]:
-        raise HttpError(404, "문제·해결 기록 이슈가 아니야.")
+        raise HttpError(404, "문제·해결 기록 이슈가 아니에요.")
     return data
 
 
@@ -352,14 +352,14 @@ def pr_info(app, slug: str, root: str, number: int) -> dict:
                 "prState": state, "checks": checks, "failed": failed}
     low = (out or "").lower()
     if rc != 0 and ("could not resolve" in low or "no pull requests found" in low):
-        return {"state": "missing", "number": number, "reason": f"PR #{number} 를 이 저장소에서 찾지 못했어"}
-    return {"state": "unknown", "number": number, "reason": why(rc, out, f"PR #{number} 를 읽지 못했어")}
+        return {"state": "missing", "number": number, "reason": f"PR #{number} 를 이 저장소에서 찾지 못했어요"}
+    return {"state": "unknown", "number": number, "reason": why(rc, out, f"PR #{number} 를 읽지 못했어요")}
 
 
 def int_arg(q, name="number") -> int:
     v = (q.get(name) or [""])[0]
     if not v.isdigit():
-        raise HttpError(400, f"{name} 가 필요해.")
+        raise HttpError(400, f"{name} 가 필요해요.")
     return int(v)
 
 
@@ -370,7 +370,7 @@ def a_item(app, g, q, b):
     data = view_issue(app, slug, root, number)
     parsed = parse_body(data.get("body"))
     history = [{"id": "open", "kind": "open", "author": (data.get("author") or {}).get("login", ""), "createdAt": data.get("createdAt", ""),
-                "text": "문제를 등록했어"}]
+                "text": "문제를 등록했어요"}]
     for c in data.get("comments") or []:
         if isinstance(c, dict):
             kind, text = classify(c.get("body"))
@@ -412,28 +412,28 @@ def a_similar(app, g, q, b):
         slug = slug_of_cwd(app, cwd, got["projects"])
         if not slug:
             bad = next((p for p in got["projects"] if not p["ok"]), None)
-            return 200, {"ok": False, "reason": bad["reason"] if bad else "이 폴더가 GitHub 저장소인지 확인 못 했어", "items": []}
+            return 200, {"ok": False, "reason": bad["reason"] if bad else "이 폴더가 GitHub 저장소인지 확인 못 했어요", "items": []}
     ok = any(p["ok"] and (not slug or p["slug"] == slug) for p in got["projects"])
-    reason = "" if ok else next((p["reason"] for p in got["projects"] if not p["ok"] and (not slug or p["slug"] == slug)), "기록 목록을 읽지 못했어")
+    reason = "" if ok else next((p["reason"] for p in got["projects"] if not p["ok"] and (not slug or p["slug"] == slug)), "기록 목록을 읽지 못했어요")
     return 200, {"ok": ok, "reason": reason, "slug": slug, "items": similar([i for i in got["items"] if not slug or i["repo"] == slug], text)}
 
 
 def a_check(app, g, q, b):
     fields = b.get("fields")
     if not isinstance(fields, dict):
-        raise HttpError(400, "fields 가 필요해.")
+        raise HttpError(400, "fields 가 필요해요.")
     return 200, {"hits": scan_secrets({str(k): v for k, v in fields.items() if isinstance(v, str)})}
 
 
 def text_arg(b: dict, name: str, required: bool = False, limit: int = FIELD_MAX) -> str:
     v = b.get(name, "")
     if not isinstance(v, str):
-        raise HttpError(400, f"{name} 는 글이어야 해.")
+        raise HttpError(400, f"{name} 는 글이어야 해요.")
     v = v.replace("\r\n", "\n").strip()
     if required and not v:
-        raise HttpError(400, f"{name} 가 비었어.")
+        raise HttpError(400, f"{name} 가 비었어요.")
     if len(v) > limit:
-        raise HttpError(413, f"{name} 가 너무 길어.")
+        raise HttpError(413, f"{name} 가 너무 길어요.")
     return v
 
 
@@ -443,7 +443,7 @@ FIELD_NAMES = {"title": "제목", "symptom": "증상", "cause": "원인", "solut
 def refuse_secrets(fields: dict) -> None:
     hits = scan_secrets(fields)
     if hits:
-        raise HttpError(422, "비밀번호·키처럼 보이는 글이 있어 올리지 않았어. 지우고 다시 올려 줘. (" + ", ".join(
+        raise HttpError(422, "비밀번호·키처럼 보이는 글이 있어 올리지 않았어요. 지우고 다시 올려 주세요. (" + ", ".join(
             f"{FIELD_NAMES.get(h['field'], h['field'])} {h['line']}번째 줄 {h['label']}" for h in hits[:3]) + ")")
 
 
@@ -453,7 +453,7 @@ def invalidate(app, slug: str) -> None:
         app.last.pop(key_of("list", slug), None)
 
 
-UNSURE = "올렸는지 확인 못 함 — gh 가 제때 답하지 않았어. 목록을 새로고침해서 확인해 줘."
+UNSURE = "올렸는지 확인 못 함 — gh 가 제때 답하지 않았어요. 목록을 새로고침해서 확인해 주세요."
 
 
 def gh_write(app, args: list[str], root: str, what: str, slug: str = "", create: bool = False) -> str:
@@ -462,9 +462,9 @@ def gh_write(app, args: list[str], root: str, what: str, slug: str = "", create:
     if rc == gitstate.GIT_UNAVAILABLE and not (out or "").strip():
         if slug:
             invalidate(app, slug)
-        raise HttpError(504, UNSURE + (" 같은 제목의 기록이 방금 생겼는지 목록에서 먼저 보고, 없을 때만 다시 눌러 줘." if create else ""))
+        raise HttpError(504, UNSURE + (" 같은 제목의 기록이 방금 생겼는지 목록에서 먼저 보고, 없을 때만 다시 눌러 주세요." if create else ""))
     if rc != 0:
-        raise HttpError(502, f"{what} 못 했어 · " + why(rc, out, "gh 가 실패했어"))
+        raise HttpError(502, f"{what} 못 했어요 · " + why(rc, out, "gh 가 실패했어요"))
     return out
 
 
@@ -472,9 +472,9 @@ def has_label(app, slug: str, root: str) -> None:
     rc, out = app.check_run(["gh", "label", "list", "-R", slug, "--search", "trouble", "--json", "name", "--limit", "100"], root)
     data = _json(out) if rc == 0 else None
     if not isinstance(data, list):
-        raise HttpError(502, "확인 못 함 · 라벨을 읽지 못해서 올리지 않았어 · " + why(rc, out))
+        raise HttpError(502, "확인 못 함 · 라벨을 읽지 못해서 올리지 않았어요 · " + why(rc, out))
     if LABEL not in [l.get("name") for l in data if isinstance(l, dict)]:
-        raise HttpError(409, f"{slug} 에 {LABEL} 라벨이 없어 올리지 않았어. 터미널에서 `gh label create {LABEL} -R {slug}` 로 만든 뒤 다시 눌러 줘.")
+        raise HttpError(409, f"{slug} 에 {LABEL} 라벨이 없어 올리지 않았어요. 터미널에서 `gh label create {LABEL} -R {slug}` 로 만든 뒤 다시 눌러 주세요.")
 
 
 def a_create(app, g, q, b):
@@ -483,14 +483,14 @@ def a_create(app, g, q, b):
     title = clean_title(text_arg(b, "title", True, TITLE_MAX))
     stage = text_arg(b, "stage", True, 20)
     if stage not in STAGES:
-        raise HttpError(400, "단계가 올바르지 않아.")
+        raise HttpError(400, "단계가 올바르지 않아요.")
     pr_raw = text_arg(b, "pr", False, 20).lstrip("#")
     if pr_raw and not pr_raw.isdigit():
-        raise HttpError(400, "PR 번호는 숫자여야 해.")
+        raise HttpError(400, "PR 번호는 숫자여야 해요.")
     symptom, cause, solution = text_arg(b, "symptom", True), text_arg(b, "cause"), text_arg(b, "solution")
     solved = b.get("solved") is True
     if solved and not solution:
-        raise HttpError(400, "해결됐다면 해결 방법을 적어 줘.")
+        raise HttpError(400, "해결됐다면 해결 방법을 적어 주세요.")
     refuse_secrets({"title": title, "symptom": symptom, "cause": cause, "solution": solution})
     has_label(app, slug, root)
     body = build_body(int(pr_raw) if pr_raw else None, stage, symptom, cause, solved and solution or "")
@@ -498,7 +498,7 @@ def a_create(app, g, q, b):
     m = re.search(r"/issues/(\d+)", out)
     invalidate(app, slug)
     if not m:
-        raise HttpError(502, "올렸는지 확인 못 함 · gh 가 이슈 주소를 알려 주지 않았어. GitHub 에서 확인해 줘.")
+        raise HttpError(502, "올렸는지 확인 못 함 · gh 가 이슈 주소를 알려 주지 않았어요. GitHub 에서 확인해 주세요.")
     number, warnings = int(m.group(1)), []
     if solution:
         try:
@@ -531,10 +531,10 @@ def a_comment(app, g, q, b):
     root = repo_root(app, slug)
     number = b.get("number")
     if not isinstance(number, int) or isinstance(number, bool):
-        raise HttpError(400, "number 가 필요해.")
+        raise HttpError(400, "number 가 필요해요.")
     kind = b.get("kind")
     if kind not in KIND_MARK:
-        raise HttpError(400, "kind 는 try / candidate / solved 중 하나여야 해.")
+        raise HttpError(400, "kind 는 try / candidate / solved 중 하나여야 해요.")
     text = text_arg(b, "text", True)
     refuse_secrets({"text": text})
     data = view_issue(app, slug, root, number)
@@ -551,15 +551,15 @@ def a_resolve(app, g, q, b):
     root = repo_root(app, slug)
     number, cid = b.get("number"), b.get("commentId")
     if not isinstance(number, int) or isinstance(number, bool) or not isinstance(cid, str) or not cid:
-        raise HttpError(400, "number 와 commentId 가 필요해.")
+        raise HttpError(400, "number 와 commentId 가 필요해요.")
     data = view_issue(app, slug, root, number)
     for c in data.get("comments") or []:
         if isinstance(c, dict) and c.get("id") == cid:
             kind, text = classify(c.get("body"))
             if kind != "candidate" or not text:
-                raise HttpError(400, "해결 후보 댓글이 아니야.")
+                raise HttpError(400, "해결 후보 댓글이 아니에요.")
             return 200, {"ok": True, "warnings": resolve(app, slug, root, number, data, text)}
-    raise HttpError(404, "그 댓글을 찾지 못했어.")
+    raise HttpError(404, "그 댓글을 찾지 못했어요.")
 
 
 def drafts(app) -> dict:
@@ -583,7 +583,7 @@ def a_draft_put(app, g, q, b):
 def a_draft_get(app, g, q, b):
     d = drafts(app).get((q.get("id") or [""])[0])
     if d is None:
-        raise HttpError(404, "없는 초안이야.")
+        raise HttpError(404, "없는 초안이에요.")
     return 200, d
 
 
@@ -637,7 +637,7 @@ def run_claude(app, prompt: str, cwd: str) -> str:
     """읽기 전용 claude 를 한 번 불러 JSON 결과 글을 받는다. 못 부르면 HttpError(확인 못 함)."""
     base = app.analyses.claude_cmd()
     if not base:
-        raise HttpError(503, "초안을 못 만들었어 · " + CLAUDE_MISSING)
+        raise HttpError(503, "초안을 못 만들었어요 · " + CLAUDE_MISSING)
     args = [*base, "-p", "--permission-mode", "plan", "--output-format", "json", "--json-schema", json.dumps(DRAFT_SCHEMA),
             "--no-session-persistence", "--settings", json.dumps({"disableAllHooks": True})]  # 훅이 붙으면 콘솔에 유령 세션이 생긴다
     if app.analyses.model:
@@ -646,9 +646,9 @@ def run_claude(app, prompt: str, cwd: str) -> str:
         done = subprocess.run(args, input=prompt, cwd=cwd if cwd and os.path.isdir(cwd) else None, capture_output=True, text=True, encoding="utf-8",
                               errors="replace", timeout=DRAFT_TIMEOUT, **hidden_window_kwargs())
     except subprocess.TimeoutExpired:
-        raise HttpError(504, "초안을 못 만들었어 · 시간 안에 끝나지 않았어")
+        raise HttpError(504, "초안을 못 만들었어요 · 시간 안에 끝나지 않았어요")
     except OSError as e:
-        raise HttpError(502, f"초안을 못 만들었어 · claude 를 실행하지 못했어({e})")
+        raise HttpError(502, f"초안을 못 만들었어요 · claude 를 실행하지 못했어요({e})")
     return done.stdout
 
 
@@ -664,20 +664,20 @@ def a_ai_draft(app, g, q, b):
         chat, cwd = [dict(c) for c in s.get("chat") or [] if isinstance(c, dict)], s.get("cwd") or ""
     text, hidden = transcript_of(chat)
     if not text.strip():
-        raise HttpError(422, "이 세션엔 초안으로 쓸 대화가 아직 없어. 빈 칸으로 써 줘.")
+        raise HttpError(422, "이 세션엔 초안으로 쓸 대화가 아직 없어요. 빈 칸으로 써 주세요.")
     info = app.model_of(s)
     slug = slug_of_cwd(app, cwd, collect(app, wait=True)["projects"])
     run = getattr(app, "trouble_claude", None) or run_claude
     out, why = analysis.parse_output(run(app, DRAFT_PROMPT + text, cwd))
     if not isinstance(out, dict):
-        raise HttpError(502, "초안을 못 만들었어 · " + (why or "결과 형식이 맞지 않아"))
+        raise HttpError(502, "초안을 못 만들었어요 · " + (why or "결과 형식이 맞지 않아요"))
     fields, hidden_n = {}, hidden
     for k in ("title", "symptom", "cause", "solution"):
         fields[k], n = redact(clip(out.get(k), TITLE_MAX if k == "title" else FIELD_MAX))  # 모델이 쓴 글도 비밀 검사를 거친다
         hidden_n += n
     fields["title"] = clean_title(fields["title"].split("\n")[0])
     if not fields["title"] or not fields["symptom"]:
-        raise HttpError(502, "초안을 못 만들었어 · 대화에서 막힌 일을 찾지 못했어")
+        raise HttpError(502, "초안을 못 만들었어요 · 대화에서 막힌 일을 찾지 못했어요")
     stage = out.get("stage")
     pr = (info.get("flowPr") or {}).get("number")
     did = "d-" + uuid.uuid4().hex[:12]

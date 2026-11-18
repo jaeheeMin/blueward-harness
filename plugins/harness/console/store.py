@@ -247,11 +247,11 @@ def mcp_request_info(tool_name, known: dict | None = None) -> dict:
 
 # claude 가 알려 주는 MCP 서버 상태(init·mcp_status)를 쉬운 말로. (쉬운 말, 문제인가)
 MCP_STATUS_TEXT = {
-    "connected": ("연결됨", False),
-    "failed": ("연결하지 못했어", True),
-    "needs-auth": ("로그인이 필요해(터미널에서 /mcp 로 로그인해 줘)", True),
-    "pending": ("연결하는 중이야", False),
-    "disabled": ("꺼져 있어", False),
+    "connected": ("연결됐어요", False),
+    "failed": ("연결하지 못했어요", True),
+    "needs-auth": ("로그인이 필요해요(터미널에서 /mcp 로 로그인해 주세요)", True),
+    "pending": ("연결하는 중이에요", False),
+    "disabled": ("꺼져 있어요", False),
 }
 
 
@@ -283,7 +283,7 @@ def mcp_view(s: dict) -> dict:
         return {"state": "none", "servers": [], "canReconnect": False}
     items = []
     for sv in servers:
-        text, bad = MCP_STATUS_TEXT.get(sv.get("status"), (f"상태를 확인하지 못했어({sv.get('status') or '비어 있음'})", True))
+        text, bad = MCP_STATUS_TEXT.get(sv.get("status"), (f"상태를 확인하지 못했어요({sv.get('status') or '비어 있음'})", True))
         items.append({"name": sv["name"], "status": sv.get("status", ""), "label": text, "problem": bad, "error": sv.get("error", ""),
                       "canReconnect": sv.get("status") == "failed" or text.startswith("상태를"),  # 로그인은 다시 연결로 안 풀린다
                       "connectorAuth": sv.get("status") == "needs-auth" and mcp_is_connector(sv)})  # 화면이 한 줄로 접는다(#1042)
@@ -442,7 +442,7 @@ class Store:
                     s.pop("apiIssue")  # 콘솔을 다시 켠 뒤에는 "다시 시도하는 중" 일 수 없다
                 if isinstance(s.get("compact"), dict) and s["compact"].get("state") == "running":
                     # 요약 중에 콘솔이 꺼졌다. 끝났는지 모르니 "확인 못 함" 으로 두어 단추가 잠긴 채 남지 않게 한다(#863)
-                    s["compact"] = {"state": "unknown", "at": s["compact"].get("at"), "reason": "요약 중에 콘솔이 꺼져서 결과를 확인 못 했어"}
+                    s["compact"] = {"state": "unknown", "at": s["compact"].get("at"), "reason": "요약 중에 콘솔이 꺼져서 결과를 확인 못 했어요"}
                     if s.get("currentAction") == "Compact":
                         s["currentAction"] = ""
                 if not isinstance(s.get("chat"), list):
@@ -711,7 +711,7 @@ class Store:
                         r.sources.add(source)
                     return r, False
             if sum(1 for r in self.requests.values() if r.status == "pending") >= MAX_PENDING_REQUESTS:
-                raise RequestLimit("대기 중인 요청이 너무 많아.")
+                raise RequestLimit("대기 중인 요청이 너무 많아요.")
             r = Request(uuid.uuid4().hex[:12], sid, kind, tool_name, tool_input, suggestions, key, self.clock())
             r.risk, r.risk_note = risk, risk_note
             r.mcp = dict(mcp) if mcp else {}

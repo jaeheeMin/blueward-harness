@@ -2529,7 +2529,7 @@
         return h('div', { class: 'me', 'data-chat': 'me' }, text && text !== window.BHAttach.PLACEHOLDER ? h('div', { text: text }) : null, chips);  // 첨부는 이름·형식·크기만 기록에 있다
       });
     }
-    // 콘솔이 알리는 한 줄(예: 기억을 요약했어 · 35,779 → 8,449 토큰). 실패·확인 못 함은 tone 으로 구분한다.
+    // 콘솔이 알리는 한 줄(예: 기억을 요약했어요 · 35,779 → 8,449 토큰). 실패·확인 못 함은 tone 으로 구분한다.
     function chatNote(c) { return h('div', { class: 'reqnote chat-note', 'data-chat': 'note', 'data-note-tone': c.tone || '', text: String(c.text || '') }); }
     function chatAi(c) {
       return chatCached('ai|' + String(c.t) + '|' + (chatOpen[String(c.t)] ? 1 : 0) + '|' + String(c.text), function () { return chatAiBuild(c); });

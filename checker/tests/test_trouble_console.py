@@ -254,13 +254,13 @@ assert.strictEqual(T.counts({tries:2,candidates:1,solvedNotes:0}),'시도 2 · �
 assert.strictEqual(T.dateText('2026-11-05T05:00:00Z').length,5);
 function h(tag,props){const el=new El(tag);Object.keys(props||{}).forEach(k=>{const v=props[k];if(v==null||v===false)return;if(k==='class')el.attrs['class']=v;else if(k==='text')el.textContent=v;else if(k.slice(0,2)==='on'&&typeof v==='function')el.addEventListener(k.slice(2).toLowerCase(),v);else el[k]=v;});
  const add=c=>{if(c==null||c===false)return;if(Array.isArray(c))return c.forEach(add);el.appendChild(typeof c==='object'?c:document.createTextNode(c));};for(let i=2;i<arguments.length;i++)add(arguments[i]);return el;}
-const list={loading:false,roots:1,projects:[{slug:'o/p',name:'p',ok:true},{slug:null,name:'b',ok:false,reason:'GitHub 로그인이 필요해'}],authors:['sora'],stats:{total:1,month:1,open:1,solved:0,topStage:'SAP 운송'},matched:1,
+const list={loading:false,roots:1,projects:[{slug:'o/p',name:'p',ok:true},{slug:null,name:'b',ok:false,reason:'GitHub 로그인이 필요해요'}],authors:['sora'],stats:{total:1,month:1,open:1,solved:0,topStage:'SAP 운송'},matched:1,
  items:[{repo:'o/p',project:'p',number:1,title:'막힘',solved:false,author:'sora',createdAt:'2026-11-05T05:00:00Z',stage:'SAP 운송',pr:812,prTitle:'앱',tries:2,candidates:1,solvedNotes:0}]};
 const kit={h,clear:el=>{el.children=[];el._t=null;return el;},qs:o=>'',link:(href,p,...r)=>h('a',Object.assign({href},p),...r),go(){},safeHttp:u=>u,loadingBox:()=>h('div'),
  api:(m,u)=>Promise.resolve(u.indexOf('/api/trouble')===0?list:{})};
 const tb=T.create(kit); const root=h('div'); const v=tb.listView(root);
 setTimeout(()=>{const t=root.textContent; assert.ok(t.includes('팀이 겪은 문제와 푼 방법')&&t.includes('아직 안 풀림')&&t.includes('시도 2 · 후보 1'),t);
- assert.ok(t.includes('? 확인하지 못했어요')&&t.includes('GitHub 로그인이 필요해')&&t.includes('프로젝트 1곳'),t); v.destroy();
+ assert.ok(t.includes('? 확인하지 못했어요')&&t.includes('GitHub 로그인이 필요해요')&&t.includes('프로젝트 1곳'),t); v.destroy();
  /* 새 기록: 단계는 처음부터 골라져 있고, 올리기가 잠긴 이유를 단추 옆에 말한다 */
  const nroot=h('div'); const nv=tb.newView(nroot,{});
  setTimeout(()=>{const nt=nroot.textContent;
@@ -455,11 +455,11 @@ def test_ai_draft_failures_are_reported_not_faked(tmp_path, monkeypatch):
         session_with_chat(c, ("ai", "막혔어"))
         c.app.trouble_claude = lambda app, prompt, cwd: "not json"
         status, body, _ = c.call("POST", "/api/trouble/ai-draft", {"sessionId": "s1"})
-        assert status == 502 and "초안을 못 만들었어" in body["error"]
+        assert status == 502 and "초안을 못 만들었어요" in body["error"]
         c.app.trouble_claude = lambda app, prompt, cwd: draft_out(symptom="")
         assert c.call("POST", "/api/trouble/ai-draft", {"sessionId": "s1"})[0] == 502
         def boom(app, prompt, cwd):
-            raise trouble.HttpError(504, "초안을 못 만들었어 · 시간 안에 끝나지 않았어")
+            raise trouble.HttpError(504, "초안을 못 만들었어요 · 시간 안에 끝나지 않았어요")
         c.app.trouble_claude = boom
         assert c.call("POST", "/api/trouble/ai-draft", {"sessionId": "s1"})[0] == 504
         assert not c.app.__dict__.get("trouble_drafts")  # 실패하면 초안이 남지 않는다
