@@ -3777,7 +3777,7 @@ def test_post_new_task_extra_cases_X1():
     assert "id: post ? 'new-title' : null, tabindex: post ? '-1' : null" in app and "document.getElementById('new-title')" in app and "drawnStep !== screen" in app  # 2회차: 프로젝트 준비 안내도 한 단계
     assert "if (startErr && isPostTheme() && document.activeElement === document.body) { var sb = document.getElementById('start-go'); if (sb) sb.focus(); }" in app
     assert "folderCheck(e, run)" in app and "run !== beginRun || step !== 'analyzing'" in app  # 늦게 온 폴더 확인이 다시 시작한 요청을 덮지 않게 and "id: 'start-go'" in app
-    assert "textErr = true; draw(); showBlock('#brief'); return;" in app
+    assert "textErr = true; said.terr = ''; draw(); showBlock('#brief'); return;" in app  # 3회차: 같은 오류도 다시 읽어 준다
     assert "backFocus('folder-browse')" in app and "backFocus('custom')" in app and "function backFocus(id)" in app
     # 첨부가 서버에서 거절되면 그 화면의 칩에는 빼기(×)가 없어 돌아가는 길을 알려 준다
     assert "files.length && attachRejected(e, files)" in app and '"다른 걸로 할래" 로 돌아가서 빼 줘.' in app  # 2회차: 첨부 탓인 400·413 에만
@@ -3796,14 +3796,14 @@ def test_post_new_task_extra_cases_X3():
     assert "if (late(run)) return;\n        aid = d && (d.id || d.analysisId);" in app and "if (!alive || late(run)) return; if (e.status === 400 && isPostTheme())" in app
     assert "function gone() { return !alive || (isPostTheme() && (id !== aid || step !== 'analyzing')); }" in app
     # 폴더 탓 400 안내·지난 시작 오류는 새 분석을 시작하면 지운다
-    assert "if (isPostTheme()) { customMsg = ''; startErr = ''; }" in app
+    assert "if (isPostTheme()) { customMsg = ''; startErr = ''; startFolderWhy = ''; }" in app  # 3회차: 폴더 탓 시작 실패 까닭도
     # 분석 뒤 폴더가 지워진 채 시작하면 "claude 를 찾을 수 없어" 대신 폴더를 확인해 말하고, 첨부 안내는 첨부 탓일 때만
     assert "function attachRejected(e, files)" in app and "e.status === 400 || e.status === 502) return api('POST', '/api/folders/validate'" in app
-    assert "'시작하지 못했어: 고른 작업 폴더를 쓸 수 없어: ' + String(v.error || '') + ' \"다른 걸로 할래\" 로 돌아가서 다른 폴더를 골라 줘.'" in app
+    assert "startFolderWhy = String(v.error || ''); startErr = '시작하지 못했어: 고른 작업 폴더를 쓸 수 없어: ' + startFolderWhy + ' \"다른 걸로 할래\" 로 돌아가서 다른 폴더를 골라 줘.';" in app  # 3회차: 까닭을 남겨 돌아갈 때 폴더 고르기로
     # 키보드: 폴더를 고르면 목록을 열었던 단추로, id 없는 칸(바꾸기·체크·답 단추)도 다시 그린 뒤 같은 자리로, 프로젝트 준비 안내는 그 제목으로
     assert "draw(); backFocus('folder-toggle'); checkIntro(p); }" in app and "id: isPostTheme() ? 'folder-toggle' : null" in app
     assert "var mark = isPostTheme() && !keepFocus ? focusMark() : null;" in app and "function focusMark()" in app and "return el.className === m.cls;" in app
-    assert "if (isPostTheme()) placeFocus(stepMoved, keepFocus, selStart, mark);" in app and "screen = showIntro ? 'intro' : step" in app  # 안내 화면도 있던 칸을 먼저 되돌린다
+    assert "if (isPostTheme()) { placeFocus(stepMoved, keepFocus, selStart, mark); sayNew({}); }" in app and "screen = showIntro ? 'intro' : step" in app  # 안내 화면도 있던 칸을 먼저 되돌린다
     assert "h('h1', { id: isPostTheme() ? 'new-title' : null, tabindex: isPostTheme() ? '-1' : null, title: draft.cwd" in app
 
 
@@ -4044,3 +4044,32 @@ def test_post_shared_flow_text_fixes():
     assert "if (nx.options.length && s.handedOffTo && postTheme()) {" in flow
     assert "'data-next-handed': '1', text: '새 세션 보기'" in flow
     assert flow.index("if (nx.options.length && s.handedOffTo && postTheme()) {") < flow.index("'data-next-start': '1'")
+
+
+def test_post_new_task_extra_cases_X3_round3():
+    # 2026-11-18 Post 새 작업 3회차: "Post 에서 하네스 기능은 다 돼야 한다" 에 따라 2회차가 내려놓은 것을 고침. 본체는 Aside 실화면(docs/status/2026-11-18-post-extra-newwork.md 「3회차」).
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    attach = (STATIC / "attach.js").read_text(encoding="utf-8")
+    # 오류 문구 칸은 다시 그릴 때마다 새로 생긴다: Post 는 보이는 칸에 role=alert 를 달지 않고 늘 같은 안내 칸 하나로 새 문구만 읽어 준다(「!」 표시는 data-alert 로)
+    assert "function alertRole() { return isPostTheme() ? null : 'alert'; }" in app and "function sayNew(cur)" in app and "'data-new-say': '1'" in app
+    assert app.count("role: alertRole(), 'data-alert': '1',") == 6 and '.note-attn[data-alert]::before' in css
+    assert "if (sayEl && sayEl.parentNode) sayEl.parentNode.removeChild(sayEl);" in app  # 화면을 떠나면 안내 칸도 치운다
+    # 이대로 시작이 폴더 탓으로 실패한 뒤 「다른 걸로 할래」 는 폴더 고르기로
+    assert "var why = isPostTheme() ? startFolderWhy : ''; startFolderWhy = '';" in app and "draw(); if (why) showBlock('#custom');" in app
+    # 멈춤 방지: 분석 id 없음·빈 폴링 본문·시작 처리 중 오류
+    assert "if (!aid) { step = 'failed'; err = '분석을 시작하지 못했어.'; draw(); return; }" in app and "var st = norm(d && d.status);" in app
+    assert "}).then(null, function (e) { console.error('새 작업 시작을 마무리하지 못했습니다', e); }).then(function () {" in app
+    # 서버가 줄인 첨부 이름(100자·인쇄 못 하는 글자)도 첨부 탓으로 알아본다
+    assert "function serverName(n)" in app and "m.indexOf(serverName(f.name) + ':') === 0" in app
+    # 테마를 바꿔도 폴더 안내·실패·시작 오류가 이어진다
+    assert "var kept0 = takeCarry('new', route.id);" in app and "keep: function () { return { step: step, aid: aid, err: err" in app
+    # 같은 파일 두 번은 칩 하나, 글 칸 밖(제목 등)에 끌어 놓아도 첨부(Post)
+    assert "opts.dedupe && items.some(function (x) { return x.name === file.name && x.size === file.size" in attach and "dedupe: post," in app and "dedupe: isPostTheme()," in app
+    assert "if (step === 'write') { drawWrite(panel, post); if (post) newComp.bindDrop(page); }" in app and "if (!post) newComp.bindDrop(panel);" in app
+    assert ':root[data-theme="post"] .newp .note-attn { overflow-wrap: anywhere; }' in css  # 오류 문구 속 긴 이름이 390 에서 넘치지 않게
+    # 리뷰 반영: 이어 보기 첫 답 빈 본문, 테마 전환 첨부 이어받기, 화면 밖 끌어놓기 막기, 오래된 브라우저 정규식, 안내 칸 비우기, 붙여 넣은 다른 그림
+    assert "d = d || {};  // 빈 본문이어도" in app and "files: newComp ? newComp.keep() : null" in app and "newComp.restore(kept0.files, draft.text, '');" in app
+    assert "document.addEventListener('dragover', guardOver); document.addEventListener('drop', guardDrop);" in app and "document.removeEventListener('drop', guardDrop);" in app
+    assert "var NON_PRINT = (function () { try { return new RegExp(" in app and "/u'" not in app and "sayClear = setTimeout(function () { if (sayEl) sayEl.textContent = ''; }, 6000);" in app
+    assert "x.lm === file.lastModified" in attach and "lm: file.lastModified" in attach and ".attach-note { color: var(--attn); font-weight: 500; overflow-wrap: anywhere; }" in css
