@@ -1230,7 +1230,7 @@
         h('em', { text: mark + c.name + ' 한도' }),
         h('span', { class: 'ptop-bar' + (c.pct == null ? ' unk' : '') }, c.pct == null ? null : h('i', { style: 'width:' + Math.min(100, c.pct) + '%' })),
         h('b', { text: c.pct == null ? '?' : c.pct + '%' }),
-        (tone === 'warn' || tone === 'err') && c.when ? h('small', { class: 'ptop-when', text: c.when.replace(/^\d+월 /, '') + ' 풀림' }) : null);  // 급할 때만 풀리는 시각을 칩에(그 밖에는 title·aria-label). 좁은 폭에선 마우스를 올릴 수 없다
+        (tone === 'warn' || tone === 'err') && c.when ? h('small', { class: 'ptop-when', text: window.BHNotice.whenShort(c.when) + ' 풀림' }) : null);  // 급할 때만 풀리는 시각을 칩에(그 밖에는 title·aria-label). 좁은 폭에선 마우스를 올릴 수 없다
     }));
   }
   function nextTheme() {
@@ -1610,7 +1610,7 @@
     return box;
   }
   /* 지금 도장이 찍혀 남아 있는 요청들(홈 덱이 처리된 카드를 잠깐 더 보여 줄 때 쓴다) */
-  function activeStamps() { return Object.keys(stamps).filter(stampActive).map(function (rid) { return { rid: rid, sid: stamps[rid].sid, kind: stamps[rid].kind }; }); }
+  function activeStamps() { return Object.keys(stamps).filter(stampActive).map(function (rid) { return { rid: rid, sid: stamps[rid].sid, kind: stamps[rid].kind, decision: stamps[rid].decision }; }); }
 
   /* 질문 카드(askCard)와 그 자리에서 고르는 질문 폼(inlineQuestion). 세션 화면과 Post 홈 "내 차례" 카드가 같이 쓴다.
      redraw: 고른 값·보내는 중이 바뀔 때 부르는 다시 그리기, after: 답이 간 뒤 부르는 다시 읽기. 고른 값은 이 묶음 안에서 요청 id 별로 기억한다. */
@@ -1703,7 +1703,8 @@
   /* ---------- 세션 (/s/:id) ---------- */
   function sessionView(root) {
     var id = route.id, detail = null, errored = null, fetching = false, timer = null;
-    var memDismissed = {}, regions = {}, parts = {}, syncLegend = function () {}, followVal = '', followNote = '', reportOpen = false, logAll = false, built = false, interruptAsk = false, rw = null, permBusy = false, permNote = '', sent = [], compactSending = false;
+    var COPY_FAIL = '복사하지 못했어. 위 문구를 직접 골라 복사해 줘.';  // 막힘 카드 복사 실패(실패 줄만 is-err)
+    var memDismissed = {}, regions = {}, parts = {}, syncLegend = function () {}, followVal = '', followNote = '', followErr = false, compactNote = '', compactErr = false, compactFrom = '', compactAt = 0, reportOpen = false, logAll = false, built = false, interruptAsk = false, rw = null, permBusy = false, permNote = '', sent = [], compactSending = false;
     var contInfo = {};  // 쉬는 터미널 세션 이어 가기(#867): 세션별 {state, why, checked, loading, busy, error, text}
     var srsCache = {};  // 작업 폴더별 SRS Status 응답(설정·표준 갈래 세션의 "SRS 상태" 칸)
     var chatAll = false, chatOpen = {}, chatKey = null;  // 앞 대화를 펼쳤는지 · 긴 AI 말을 펼친 것(시각별) · 마지막으로 그린 대화 모양(새 항목 감지)
@@ -1983,7 +1984,7 @@
 
     function paintFollowNote() {
       var n = regions.follow && regions.follow.querySelector('[data-note]');
-      if (n) { n.textContent = followNote; n.hidden = !followNote; }
+      if (n) { n.textContent = followNote; n.hidden = !followNote; n.className = 'note-accent' + (followNote && followErr ? ' is-err' : ''); }  // 실패만 Post 에서 실패색(theme-post.css)
     }
 
     // over 가 글이면 입력칸 대신 그 글을 보낸다(막힘 카드의 "그렇게 고쳐 줘" 버튼)
@@ -1996,16 +1997,16 @@
       api('POST', '/api/sessions/' + encodeURIComponent(id) + '/messages', files.length ? { text: text, attachments: files } : { text: text }).then(function () {
         if (typed) { followVal = ''; comp.reset(); }
         sent.push({ text: text || window.BHAttach.PLACEHOLDER, at: Date.now() / 1000, attachments: meta });
-        followNote = (s.status === 'running') ? '지금 단계가 끝나면 이어서 할게.' : '이 작업에 전달했어.';
-      }, function (e) { followNote = '보내지 못했어: ' + e.message; }).then(function () {
+        followNote = (s.status === 'running') ? '지금 단계가 끝나면 이어서 할게.' : '이 작업에 전달했어.'; followErr = false;
+      }, function (e) { followNote = '보내지 못했어: ' + e.message; followErr = true; }).then(function () {
         regions.followBtn.disabled = cur().canSend === false; paintFollowNote(); paintMsgs(cur());
       });
     }
 
     function interrupt() {
       interruptAsk = false;
-      api('POST', '/api/sessions/' + encodeURIComponent(id) + '/interrupt', {}).then(function () { followNote = '중단을 요청했어.'; paintFollowNote(); refetchSoon(); },
-        function (e) { followNote = '중단하지 못했어: ' + e.message; paintFollowNote(); });
+      api('POST', '/api/sessions/' + encodeURIComponent(id) + '/interrupt', {}).then(function () { followNote = '중단을 요청했어.'; followErr = false; paintFollowNote(); refetchSoon(); },
+        function (e) { followNote = '중단하지 못했어: ' + e.message; followErr = true; paintFollowNote(); });
       draw();
     }
 
@@ -2173,8 +2174,9 @@
       var cells = window.BHLogic.sessionStrip(s, srsFor(s));
       if (post) {  // Post: 정보 줄. 단계 · 요구사항 · 개발 번호 · 작업 기록 · 검토 요청(없으면 –)
         var cs = window.BHLogic.currentStep(s);
-        regions.strip.replaceChildren(h('dl', { class: 'po-info', role: 'list', 'aria-label': '진행 정보' }, window.BHPostLogic.infoRow(cells, cs ? window.BHLogic.shortStepName(cs.name) : '').map(function (c) {
-          return h('div', { role: 'listitem', 'data-cell': c.id }, h('dt', { text: c.label }), h('dd', { class: c.tone, text: c.value }));
+        var full = cs ? String(cs.name || '') : '';  // 단계 칸은 위 단계 알약과 같은 짧은 이름(긴 이름이면 칸이 두 줄로 접혔다), 전체 이름(알약 title 과 같은 st.name)은 title
+        regions.strip.replaceChildren(h('dl', { class: 'po-info', role: 'list', 'aria-label': '진행 정보' }, window.BHPostLogic.infoRow(cells, cs ? window.BHLogic.stepShort(cs) : '').map(function (c) {
+          return h('div', { role: 'listitem', 'data-cell': c.id, title: c.id === 'step' && full && full !== c.value ? full : null }, h('dt', { text: c.label }), h('dd', { class: c.tone, text: c.value }));
         })));
         return;
       }
@@ -2194,16 +2196,26 @@
     }
 
     // 기억 요약(#863): 일하는 중·요약 중에는 누를 수 없다. 서버도 한 번 더 막는다.
-    function compactButton(s, cls) {
+    // from: 누른 자리('banner' 기억 배너 · 'panel' 기억 칸). Post 는 결과 한 줄을 누른 자리 바로 아래에 둔다(입력칸 아래는 기억 탭에서 멀다). Sauce 는 전처럼 입력칸 아래.
+    function compactButton(s, cls, from) {
       var squeezing = !!(s.compact && s.compact.state === 'running'), busy = s.status === 'running' || s.status === 'starting' || (s.pendingRequestIds || []).length > 0;
       return h('button', { type: 'button', class: cls, 'data-compact': '1', disabled: squeezing || busy || compactSending, text: squeezing ? '요약하는 중…' : '요약해서 계속하기',
         title: squeezing ? '기억을 요약하는 중이야.' : busy ? '일하는 중에는 요약할 수 없어. 끝난 뒤에 눌러 줘.' : '앞 대화를 짧게 줄여서 이 세션을 이어 가.',
         onClick: function () {
           if (squeezing || busy || compactSending) return;
           compactSending = true; paintNotices(cur()); paintMemory(cur());
-          api('POST', '/api/sessions/' + encodeURIComponent(id) + '/compact', {}).then(function () { followNote = '기억을 요약하는 중이야. 조금 걸려.'; },
-            function (e) { followNote = e.message; }).then(function () { compactSending = false; paintFollowNote(); refetchSoon(); paintNotices(cur()); paintMemory(cur()); });
+          var post = isPostTheme(), say = function (t, err) { if (post) { compactNote = t; compactErr = err; compactFrom = from; compactAt = Date.now(); } else { followNote = t; followErr = err; } };
+          api('POST', '/api/sessions/' + encodeURIComponent(id) + '/compact', {}).then(function () { say('기억을 요약하는 중이야. 조금 걸려.', false); },
+            function (e) { say(e.message, true); }).then(function () { compactSending = false; paintFollowNote(); refetchSoon(); paintNotices(cur()); paintMemory(cur()); });
         } });
+    }
+    // Post: 요약 결과 한 줄(누른 자리에만). 누른 뒤 요약이 끝나거나 실패해 칸 글(방금 요약했어 · 지난번 요약은 실패했어)이 바뀌면 거둔다.
+    // 배너는 실패 줄만 — 요약 중이면 배너 글이 이미 "기억을 요약하는 중이야" 라 같은 말이 두 번 뜬다.
+    function compactSay(s, from) {
+      if (!compactNote || compactFrom !== from || (from === 'banner' && !compactErr)) return null;
+      var c = s.compact, settled = c && c.state !== 'running' && (c.at || 0) * 1000 >= compactAt - 2000;
+      if (settled) return null;
+      return h('p', { class: 'note-accent' + (compactErr ? ' is-err' : ''), role: 'status', 'data-compact-note': from, text: compactNote });
     }
     // 자세히 안의 기억 칸: 기억 사용량과 같은 [요약해서 계속하기]
     function paintMemory(s) {
@@ -2215,7 +2227,7 @@
       var last = s.compact && s.compact.state === 'failed' ? ' · 지난번 요약은 실패했어' : s.compact && s.compact.state === 'done' ? ' · 방금 요약했어' : '';
       box.replaceChildren(h('section', { class: 'mt-32', 'data-memory-panel': '1' }, h('span', { class: 'label', text: '기억 요약' }),
         h('p', { class: 'note-muted', text: (mem.kind === 'unknown' ? '기억 사용량은 확인 못 함' : mem.kind === 'pct' ? mem.pct + '% 사용(' + mem.words + ')' : mem.words + ' 사용') + last }),
-        compactButton(s, 'pill line sm')));
+        compactButton(s, 'pill line sm', 'panel'), compactSay(s, 'panel')));
     }
 
     function paintNotices(s) {
@@ -2232,9 +2244,10 @@
             : '더 길어지면 앞 내용을 잊고 실수할 수 있어. ' + (s.managed ? '정해진 갈래가 없어서 여기서는 넘길 수 없어. 기억을 요약해서 이어 가거나 새 작업으로 시작해 줘.' : '터미널 세션이라 여기서는 넘길 수 없어. 터미널에서 /harness:handoff 를 불러 줘.')
               + (s.compact && s.compact.state === 'failed' ? ' (지난번 요약은 실패했어.)' : '') }),
           h('span', { class: 'acts mem-acts' },
-            s.managed ? compactButton(s, 'pill line mem-compact') : null,
+            s.managed ? compactButton(s, 'pill line mem-compact', 'banner') : null,
             canHand ? h('button', { type: 'button', class: 'pill dark mem-go', text: '새 세션으로 넘기기', onClick: function () { parts.flow.handoffSame(cur()); } }) : null,
-            h('button', { type: 'button', class: 'pill line mem-stay', text: '계속하기', onClick: function () { memDismissed[s.id] = true; lsSet('bh-mem-ok:' + s.id, '1'); paintNotices(cur()); } }))));
+            h('button', { type: 'button', class: 'pill line mem-stay', text: '계속하기', onClick: function () { memDismissed[s.id] = true; lsSet('bh-mem-ok:' + s.id, '1'); paintNotices(cur()); } })),
+          compactSay(s, 'banner')));
       }
       if (s.bypassPermissions || /bypass/i.test(String(s.permissionMode || ''))) {
         notices.push(h('div', { class: 'banner info' }, h('span', { text: '권한 우회 모드로 실행 중인 세션이야. 이 세션은 승인 요청이 발생하지 않아 콘솔에 승인 화면이 뜨지 않아.' })));
@@ -2427,7 +2440,7 @@
            h('button', { type: 'button', class: 'pill line', 'data-block-admin': '1', text: '관리자에게 알리기',
               onClick: function () {
                 var msg = '[하네스 검사 못 함] ' + name + '\n' + MS(text) + (s.cwd ? '\n폴더: ' + s.cwd : '');  // 메신저로 나가는 글이라 비밀 값을 가린다(#827)
-                var done = function (ok) { chatOpen['n' + String(c.t)] = ok ? '보낼 내용을 복사했어. 팀 메신저에 붙여 넣어 관리자에게 알려 줘.' : '복사하지 못했어. 위 문구를 직접 골라 복사해 줘.'; paintMsgs(cur()); };
+                var done = function (ok) { chatOpen['n' + String(c.t)] = ok ? '보낼 내용을 복사했어. 팀 메신저에 붙여 넣어 관리자에게 알려 줘.' : COPY_FAIL; paintMsgs(cur()); };
                 try { navigator.clipboard.writeText(msg).then(function () { done(true); }, function () { done(false); }); } catch (e) { done(false); }
               } })]
         : [send ? h('button', { type: 'button', class: 'pill dark', 'data-block-send': '1', text: '그렇게 고쳐 줘',
@@ -2437,7 +2450,7 @@
            raw];
       card.appendChild(h('div', { class: 'acts' }, acts));
       if (terminal) card.appendChild(terminal);
-      if (note) card.appendChild(h('p', { class: 'note-accent', role: 'status', text: note }));
+      if (note) card.appendChild(h('p', { class: 'note-accent' + (note === COPY_FAIL ? ' is-err' : ''), role: 'status', text: note }));
       if (simRow) card.appendChild(simRow);
       return card;
     }

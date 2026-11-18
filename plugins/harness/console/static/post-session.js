@@ -25,10 +25,11 @@
 
   /* 요청 카드 바로 위 한 줄. kind: permission · plan · question · elicitation. 승인·계획은 리뷰 룸 검토 담당(가만히 서 있다가 1.2초 주기로 도장을 찍는다), 질문은 그 세션 사람이 손을 든다. */
   function clerk(kind, sessionId, k, flow) {
-    var f = el('figure', 'po-clerk'), box = el('span'), anim = PS.animOn();  // 차분·움직임 줄이기면 한 장 그림
+    var ask = kind === 'question' || kind === 'elicitation';
+    var who = ask ? PL.personOf(sessionId) : '';
+    var f = el('figure', 'po-clerk' + (ask ? ' is-ask' : '') + (who === 'kid' ? ' is-kid' : '')), box = el('span'), anim = PS.animOn();  // 차분·움직임 줄이기면 한 장 그림
     f.setAttribute('aria-hidden', 'true');
-    if (kind === 'question' || kind === 'elicitation') {
-      var who = PL.personOf(sessionId);
+    if (ask) {
       box.appendChild(img(BASE + 'people/' + who + '/ask-1.svg'));
       if (anim) box.appendChild(img(BASE + 'people/' + who + '/ask-2.svg', 'po-av-b'));
     } else {

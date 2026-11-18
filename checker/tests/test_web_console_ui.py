@@ -3724,7 +3724,7 @@ def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
     assert home.count("restSlot.appendChild(slots.whatsSlot)") == 2 and "foot.appendChild(slots.whatsSlot)" in home
     # 덱 머리 숫자는 타일·띠·문장과 같은 내 차례 건수(BHLogic.turnItems 길이)다: 검사가 실패한 PR 세션도 카드로 올리고, 한 세션의 요청 여럿은 "요청 +N"
     assert "fix: true" in home and "return '고쳐야 함'" in home and "turnN = Math.max(cardN, turnTotal)" in home and "turnTotal = turnCount;" in home
-    assert "'요청 +' + it.more" in home and ".po-dc-wait + .po-dc-wait" in (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert "'요청 +' + it.more" in home and "].filter(Boolean).join(' · ')" in home  # G3: 요청 수와 시각은 한 묶음(좁은 폭에서 시각만 다음 줄로 떨어지지 않게)
     # 열린 PR 상태를 홈이 열려 있는 동안 1분마다 다시 읽고, 홈을 떠나면 멈춘다(Sauce 홈과 같은 간격)
     assert "MY_PRS_POLL_MS = 20000" in home and "clearInterval(prTimer)" in home and "delete fixBox.dataset.ready" in home
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
@@ -3970,7 +3970,7 @@ def test_post_sweep_design_fixes_css():
     assert ':root[data-theme="post"] .po-prslot a.lm, :root[data-theme="post"] .approvals a.lm { color: var(--lightink); text-decoration: underline; text-underline-offset: 3px; }' in css
     # 홈 새 소식은 아래 칸 한 줄을 다 쓰고 300px 단으로 흐른다(좁은 칸 하나에 700px 넘게 서지 않게)
     assert ':root[data-theme="post"] .po-foot > .wn-slot { grid-column: 1 / -1; }' in css
-    assert ':root[data-theme="post"] .po-foot .wn-list { display: block; column-width: 300px; column-gap: 28px; }' in css
+    assert ':root[data-theme="post"] .po-foot .wn-list, :root[data-theme="post"] .po-rest > .wn-slot .wn-list { display: block; column-width: 300px; column-gap: 28px; }' in css
 
 
 _POST_TURN_NODE = r"""
@@ -4340,3 +4340,48 @@ def test_cozy_teams_terminal_session_sits_in_team_by_used_flow_skill():
     # 우체국 말을 사무실 말로(2026-11-18 5회차): 안내판·요청 줄·도장 밑줄이 세션의 팀(teamFlowOf)을 같이 받는다
     assert "window.BHPostSession.here(s.id, state, k, flow)" in app and "PSS.clerk(kind, sid(), k, PL.teamFlowOf(s))" in app and "flow: s ? PL.teamFlowOf(s) : ''" in app
     assert "PL.hereTitle(k, s.flow)" in home
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_cozy_office_design_g1_to_g10(tmp_path):
+    """Cozy Office 디자인 다듬기(2026-11-18 6회차, G1~G10). 모양은 Aside 실화면으로 봤고, 여기서는 규칙·문구·자산이 돌아가지 않게 묶는다."""
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    # G1: 사람 그림에서 우편 물건(봉투)·검토 담당의 우편 모자띠를 뺐다 — 새로 그리지 않고 그 묶음만 지움. 자르기는 머리부터 허리까지, 어린이 그림은 따로
+    for f in (STATIC / "post" / "people").glob("*/*.svg"):
+        assert "M-7.6 -5 L0 1 L7.6 -5" not in f.read_text(encoding="utf-8"), f
+    for f in (STATIC / "post" / "clerk").glob("*.svg"):
+        assert "#4E9C9A" not in f.read_text(encoding="utf-8"), f
+    assert ".po-clerk img { position: absolute; left: 50%; top: -36px; width: 104px;" in css and ".po-clerk.is-ask img { top: -24px; }" in css
+    assert ".po-av.is-kid img { width: 127px; top: -79px; }" in css and "(who === 'kid' ? ' is-kid' : '')" in (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    # G2: 좁은 폭 위쪽 줄은 화면마다 같은 자리(프로젝트 + 테마 / 한도 · 판 · 알림)
+    assert "#app > .top > .ptop-proj { flex: 1 1 100%; }" in css and "#app > .top > .ptop-theme { margin-left: auto; }" in css and ".ptop-theme { order" not in css  # 순서는 DOM 그대로(Tab 순서)
+    # G3: 요청 수와 시각은 한 묶음, 좁은 폭 카드 머리는 격자(열기는 둘째 줄)
+    assert ".po-dc-h { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr) auto; }" in css and ".po-dc-wait + .po-dc-wait" not in css
+    # G4: 단계 칸은 짧은 이름(전체 이름은 title), 칸은 열 맞춘 격자
+    assert "infoRow(cells, cs ? window.BHLogic.stepShort(cs) : '')" in app and ".po-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));" in css
+    # G5·G6: 처음 화면 세 단계는 좁은 폭에서 한 줄씩, 폴더 이름은 두 줄까지
+    assert ".num3 { grid-template-columns: minmax(0, 1fr); gap: 8px; }" in css and ".folder-opt.proj .pn b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;" in css
+    # G7: 처리 알림 실패 줄만 실패색
+    assert ".light .note-accent.is-err" in css and "function noteCls(t)" in (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    chat = [{"t": 1, "role": "block", "text": "그냥 git push 는 쓸 수 없어.\n다음: 올리기 단계로 푸시해.", "hook": "pre-bash-git-guard", "kind": "blocked", "fix": "올리기 단계로 푸시해."}]
+    s = _session("s1", chat=chat, canSend=True)
+    got = _smoke(tmp_path, "s/s1", [s], extra={"__status": {"POST /api/sessions/s1/messages": 500}, "POST /api/sessions/s1/messages": {"error": "세션이 응답하지 않아"}}, actions=[{"click": "[data-block-send]"}])
+    assert "보내지 못했어: 세션이 응답하지 않아" in got["text"] and "<p.note-accent.is-err" in got["dump"], got["dump"][-800:]
+    ok = _smoke(tmp_path, "s/s1", [s], extra={"POST /api/sessions/s1/messages": {}}, actions=[{"click": "[data-block-send]"}])
+    assert "이 작업에 전달했어" in ok["text"] and "is-err" not in ok["dump"]
+    # G8: Post 는 요약 결과를 누른 자리(기억 칸·기억 배너) 아래에
+    assert "compactButton(s, 'pill line sm', 'panel'), compactSay(s, 'panel')" in app and "compactSay(s, 'banner')" in app and "(from === 'banner' && !compactErr)" in app
+    assert ".banner.mem > [data-compact-note] { flex: 1 1 100%;" in css and "note === COPY_FAIL ? ' is-err' : ''" in app
+    assert "title: c.id === 'step' && full && full !== c.value ? full : null" in app and "var full = cs ? String(cs.name || '') : ''" in app
+    # G9: 도장이 남은 카드 문구는 찍힌 도장 글자로, 한도 풀리는 시각은 도장 밑줄과 같은 MM.DD
+    out = json.loads(subprocess.run([NODE, "-e", """
+      const P = require(process.argv[1]), N = require(process.argv[2]);
+      console.log(JSON.stringify({ a: P.stampedLine('allow'), d: P.stampedLine('deny'), q: P.stampedLine('answer'),
+        w1: N.whenShort('11월 21일 09:00'), w2: N.whenShort('09:00'), w3: N.whenShort('1월 3일 23:05') }));
+    """, str(STATIC / "post-logic.js"), str(STATIC / "notice-logic.js")], capture_output=True, text=True, encoding="utf-8", check=True).stdout)
+    assert out == {"a": "방금 승인했어 — 보냄 도장을 찍었어", "d": "방금 돌려보냈어 — 반송 도장을 찍었어", "q": "방금 답했어 — 접수 도장을 찍었어",
+                   "w1": "11.21 09:00", "w2": "09:00", "w3": "01.03 23:05"}
+    assert "방금 답했어 — 처리됐어" not in (STATIC / "post-home.js").read_text(encoding="utf-8") and "decision: stamps[rid].decision" in app
+    # G10: 세션 없을 때 새 소식도 단으로, 점검 탭 빈 칸은 간격을 먹지 않는다
+    assert ".po-rest > .wn-slot .wn-list { display: block; column-width: 300px;" in css and ".po-ipanel > [data-r]:empty { display: none; }" in css

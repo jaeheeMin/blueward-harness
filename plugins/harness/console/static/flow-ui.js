@@ -25,9 +25,13 @@
 
     /* ---------- 공통 ---------- */
     function failText(e, what) {
-      if (e && NOT_READY_STATUS.indexOf(e.status) >= 0) return (what ? what + ': ' : '') + NOT_READY;
-      return (what ? what + ': ' : '') + (e && e.message ? e.message : '요청을 처리하지 못했어.');
+      if (e && NOT_READY_STATUS.indexOf(e.status) >= 0) return failed((what ? what + ': ' : '') + NOT_READY);
+      return failed((what ? what + ': ' : '') + (e && e.message ? e.message : '요청을 처리하지 못했어.'));
     }
+    /* 처리 알림 한 줄(note-accent)은 성공·실패가 같은 칸을 쓴다. 실패 글을 기억해 두고 그 줄에만 is-err 를 단다(Post 만 실패색, theme-post.css) */
+    var failedNotes = {};
+    function failed(t) { failedNotes[t] = 1; return t; }
+    function noteCls(t) { return 'note-accent' + (failedNotes[t] ? ' is-err' : ''); }
     /* 같은 주소는 CACHE_MS 안에 한 번만 부른다(진행 중인 요청도 같이 쓴다). 서버가 loading 을 주면 gh 가 아직 읽는 중이다:
        wait 면 그동안 가벼운 재요청으로 끝나기를 기다리고, 아니면 받은 값을 바로 쓰고 캐시만 짧게 둔다. */
     function cached(store, key, url, wait) {
@@ -370,7 +374,7 @@
           if (!out.done && n < JOB_POLL_MAX) { pollTimer = setTimeout(function () { pollJob(jobId, n + 1); }, JOB_POLL_MS); return; }
           st.busy = false; st.job = '';
           if (out.done && out.ok) { kit.go('/s/' + encodeURIComponent(out.sessionId)); return; }
-          st.msg = out.done ? '새 세션으로 넘기지 못했어: ' + out.error : '새 세션이 아직 준비되지 않았어. 잠시 뒤 다시 확인해 줘.';
+          st.msg = out.done ? failed('새 세션으로 넘기지 못했어: ' + out.error) : '새 세션이 아직 준비되지 않았어. 잠시 뒤 다시 확인해 줘.';
           if (alive) draw();
         }, function (e) { st.busy = false; st.job = ''; st.msg = failText(e, '진행 상태 확인'); if (alive) draw(); });
       }
@@ -542,7 +546,7 @@
           if (hold) drawHold(s, hold); else if (apiHold && !s.flowFinished) drawApiHold(s, apiHold); else if (s.flowFinished) drawFinished(s); else if (!(s.pendingRequestIds || []).length && s.phase !== 'approval') drawAction(s);
         }
         if (st.job) el.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.job }));
-        if (st.msg) el.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.msg }));
+        if (st.msg) el.appendChild(h('p', { class: noteCls(st.msg), role: 'status', text: st.msg }));
       }
       return {
         el: el,
@@ -568,7 +572,7 @@
           el.appendChild(h('p', { text: '이 폴더에서 다른 세션이 일하고 있어. 같은 파일을 고치면 서로 덮어쓸 수 있어.' }));
           el.appendChild(h('button', { type: 'button', class: 'btn sm', disabled: state.busy, text: state.busy ? '만드는 중' : '이 작업용 폴더 따로 만들기', onClick: make }));
         }
-        if (state.msg) el.appendChild(h('p', { class: 'note-accent', text: state.msg }));
+        if (state.msg) el.appendChild(h('p', { class: noteCls(state.msg), text: state.msg }));
       }
       function make() {
         state.busy = true; state.msg = ''; draw();
@@ -781,7 +785,7 @@
           sheetName = st.preview.sheets[si].name || ('시트 ' + (si + 1));
         }
         if (isX) out.push(h('span', { class: 'eb', text: '미리보기' + (sheetName ? ' · ' + sheetName + ' 시트' : '') }));
-        if (st.note) out.push(h('p', { class: 'note-accent', role: 'status', text: st.note }));
+        if (st.note) out.push(h('p', { class: noteCls(st.note), role: 'status', text: st.note }));
         if (st.previewError) out.push(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
         else if (!st.preview) out.push(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' }));
         else out.push(h('div', { class: 'dsheet' }, renderPreview(st.preview, { sheet: st.sheet, name: kit.baseName(f.path), header: true, btnAt: isPost() ? '위' : '', setSheet: function (i) { st.sheet = i; draw(); } })));
@@ -792,7 +796,7 @@
         }
         out.push(composer(entry, can, '"' + f.path + '" 의 비어 있는 칸을 채워서 다시 뽑아 줘: ', '예: 출처는 구매팀 김OO, 10/28 회의야'));
         if (!can) out.push(h('p', { class: 'note-muted', text: entry.session.cannotSendReason || '이 세션에는 지금 말을 보낼 수 없어.' }));
-        if (st.say) out.push(h('p', { class: 'note-accent', role: 'status', text: st.say }));
+        if (st.say) out.push(h('p', { class: noteCls(st.say), role: 'status', text: st.say }));
         return out;
       }
       function composer(entry, can, prefix, placeholder) {
@@ -815,7 +819,7 @@
           form ? null : h('button', { type: 'button', class: 'pill line sm', text: '폴더에서 보기', onClick: function () { openFile(entry, 'reveal'); } }),
           null));
         if (form) { resultBody(entry, can).forEach(function (n) { box.appendChild(n); }); return box; }
-        if (st.note) box.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.note }));
+        if (st.note) box.appendChild(h('p', { class: noteCls(st.note), role: 'status', text: st.note }));
         var pane = h('div', { class: 'docs-pane' });
         pane.appendChild(h('div', { class: 'ptool' }, h('span', { text: lb.base + (ver ? ' · v' + ver : '') }),
           c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text === '안 올림' ? '아직 안 올림' : c.text }) : null,
@@ -826,7 +830,7 @@
         box.appendChild(pane);
         box.appendChild(composer(entry, can, '"' + f.path + '" 을(를) 고쳐 줘: ', '이 문서 고쳐 달라고 하기 — 예: 표시 항목에 납품일 추가'));
         if (!can) box.appendChild(h('p', { class: 'note-muted', text: s.cannotSendReason || '이 세션에는 지금 말을 보낼 수 없어.' }));
-        if (st.say) box.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.say }));
+        if (st.say) box.appendChild(h('p', { class: noteCls(st.say), role: 'status', text: st.say }));
         return box;
       }
 
@@ -1030,7 +1034,7 @@
           h('span', { class: 'sp' }),
           h('button', { type: 'button', class: 'pill line sm', text: '열기', onClick: function () { openFile('open'); } }),
           h('button', { type: 'button', class: 'pill line sm', text: '탐색기에서 위치 보기', onClick: function () { openFile('reveal'); } })));
-        if (st.note) pane.appendChild(h('p', { class: 'note-accent', role: 'status', text: st.note }));
+        if (st.note) pane.appendChild(h('p', { class: noteCls(st.note), role: 'status', text: st.note }));
         if (st.previewError) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
         else if (!st.preview) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' }));
         else pane.appendChild(drawPreview(st.preview));

@@ -48,9 +48,9 @@
       turn.sort(function (a, b) { return (a.s.updatedAt || 0) - (b.s.updatedAt || 0); });
       // 방금 답해 도장이 찍힌 카드는 처리됨으로 바뀐 뒤에도 잠깐 남긴다(도장이 보이도록)
       qc.stamped().forEach(function (x) {
-        if (turn.some(function (it) { return it.s.id === x.sid && it.pend && it.pend.rid === x.rid; })) { turn.forEach(function (it) { if (it.s.id === x.sid) { it.stampRid = x.rid; it.stampKind = x.kind; } }); return; }
+        if (turn.some(function (it) { return it.s.id === x.sid && it.pend && it.pend.rid === x.rid; })) { turn.forEach(function (it) { if (it.s.id === x.sid) { it.stampRid = x.rid; it.stampKind = x.kind; it.stampDecision = x.decision; } }); return; }
         var s = list.filter(function (q) { return q.id === x.sid; })[0];
-        if (s && !turn.concat(bad).some(function (it) { return it.s.id === s.id; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: null, stampRid: x.rid, stampKind: x.kind, n: 0 });  // 이미 처리됨: 내 차례 건수에 안 든다
+        if (s && !turn.concat(bad).some(function (it) { return it.s.id === s.id; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: null, stampRid: x.rid, stampKind: x.kind, stampDecision: x.decision, n: 0 });  // 이미 처리됨: 내 차례 건수에 안 든다
       });
       return turn.concat(bad);
     }
@@ -77,7 +77,7 @@
       var pend = it.pend, r = pend && pend.r, k = r && kit.kindOf(r);
       if (it.fix) return { q: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어 — 고친 뒤 다시 올리자', href: '/s/' + encodeURIComponent(s.id), verb: '가서 고치기' };
       if (inline && it.stampRid) { var sq = qc.inlineQuestion(it.stampRid); if (sq) return { node: sq }; }
-      if (it.stampRid && !pend) return { q: '방금 답했어 — 처리됐어', href: '/s/' + encodeURIComponent(s.id), verb: '세션 보기' };  // 도장이 잠깐 남은 카드(메모에는 폼이 없다)
+      if (it.stampRid && !pend) return { q: PL.stampedLine(it.stampDecision), href: '/s/' + encodeURIComponent(s.id), verb: '세션 보기' };  // 도장이 잠깐 남은 카드(메모에는 폼이 없다). 카드에 찍힌 도장 글자로 말한다
       if (inline && pend && r && k === 'question') {
         var q = qc.inlineQuestion(pend.rid);  // 보기를 바로 고른다(세션 화면과 같은 폼)
         if (q) return { node: q };
@@ -364,8 +364,7 @@
           var attrs = it.kind === 'turn' ? { 'data-call': s.id } : { 'data-call-block': s.id, 'data-block-kind': it.kind === 'unk' ? 'cannot_check' : 'blocked' };
           var hd = h('div', { class: 'po-dc-h' }, PS.avatar(s.id, st), stMark(it.kind),
             h('span', { class: 'po-dc-kind', text: kindLabel(it) }), kit.link(href, { class: 'po-dc-s', text: name }),
-            it.more ? h('span', { class: 'po-dc-wait', text: '요청 +' + it.more }) : null,
-            w ? h('span', { class: 'po-dc-wait', text: w }) : null,
+            it.more || w ? h('span', { class: 'po-dc-wait', text: [it.more ? '요청 +' + it.more : '', w].filter(Boolean).join(' · ') }) : null,  // 한 묶음(좁은 폭에서 시각만 다음 줄로 떨어져 왼쪽에 붙지 않게)
             top ? null : h('button', { type: 'button', class: 'pill line sm', 'aria-expanded': 'false', 'aria-label': name + ' 펼치기', text: '열기', onClick: function () { pickTop(it.id); } }));
           stack.appendChild(h('article', Object.assign({ class: 'po-dc po-dc-' + it.kind + (top ? ' is-top' : '') }, attrs), hd, top ? cardBody(it) : null));
         });

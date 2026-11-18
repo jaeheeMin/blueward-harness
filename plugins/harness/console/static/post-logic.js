@@ -152,6 +152,9 @@
   var SEAL_TEXT = { allow: '보냄', allow_session: '보냄', answer: '접수', accept: '접수', deny: '반송', decline: '반송', cancel: '반송' };
   function sealOf(decision) { var t = SEAL_TEXT[decision] || '접수'; return { text: t, tone: t === '반송' ? 'no' : 'ok' }; }
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+  /* 도장이 잠깐 남은 홈 카드의 한 줄: 한 일 + 찍힌 도장 글자(카드 위 도장과 같은 말). */
+  var STAMP_DID = { '보냄': '승인했어', '접수': '답했어', '반송': '돌려보냈어' };
+  function stampedLine(decision) { var t = sealOf(decision).text; return '방금 ' + STAMP_DID[t] + ' — ' + t + ' 도장을 찍었어'; }
   /* 도장 아래 작은 줄 "MM.DD · 자리 이름"(오늘 날짜). 자리를 모르면(name 이 빈 글) 날짜만. */
   function sealSub(d, name) { return pad2(d.getMonth() + 1) + '.' + pad2(d.getDate()) + (name ? ' · ' + name : ''); }
   /* 도장을 찍는 곳: 승인·계획은 리뷰 룸, 질문·MCP 질문은 그 세션이 앉은 곳(팀 자리·리뷰 룸·완료, 팀이 없으면 빈 글 — 요청 줄(clerkLine)처럼 곳 이름 없이). */
@@ -196,7 +199,7 @@
   }
 
   var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
-    clerkLine: clerkLine, sealOf: sealOf, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
+    clerkLine: clerkLine, sealOf: sealOf, stampedLine: stampedLine, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;
 })(typeof window !== 'undefined' ? window : this);

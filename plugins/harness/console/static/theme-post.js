@@ -284,7 +284,7 @@
     var size = opts && opts.size;
     if (size === 'sm') return letterAvatar(opts.name);
     var who = PL.personOf(sessionId), pose = PL.poseOf(state), tone = PL.toneOf(state);
-    var span = el('span', 'po-av' + (tone ? ' po-av-' + tone : '') + (size ? ' ' + size : ''));
+    var span = el('span', 'po-av' + (tone ? ' po-av-' + tone : '') + (size ? ' ' + size : '') + (who === 'kid' ? ' is-kid' : ''));  // 어린이 그림은 작게 그려져 있어 자르는 자리가 다르다(theme-post.css)
     span.setAttribute('aria-hidden', 'true');
     function img(n, cls) { var im = new Image(); im.alt = ''; im.decoding = 'async'; im.src = BASE + 'people/' + who + '/' + n + '.svg'; if (cls) im.className = cls; span.appendChild(im); }
     img(pose === 'ask' ? 'ask-1' : pose === 'stuck' ? 'stuck-1' : pose === 'walk' ? 'walk-1' : pose);

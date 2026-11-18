@@ -95,7 +95,10 @@
     return { unknown: false, chips: chips, text: chips.map(function (c) { return c.text; }).join(' · '), title: chips.map(function (c) { return c.title; }).join('\n\n') };
   }
 
-  var api = { pickBubble: pickBubble, pruneDismissed: pruneDismissed, permVerbs: permVerbs, canAllowSession: canAllowSession,
+  /* 위쪽 줄 칩의 풀리는 시각(Post): limitView 의 "M월 D일 HH:MM"(오늘이면 "HH:MM")을 도장 밑줄과 같은 "MM.DD HH:MM" 으로. 달이 바뀌어도 헷갈리지 않는다(전에는 월을 떼 "21일 09:00") */
+  function whenShort(w) { return String(w || '').replace(/^(\d+)월 (\d+)일 /, function (_, m, d) { return (m < 10 ? '0' : '') + m + '.' + (d < 10 ? '0' : '') + d + ' '; }); }
+
+  var api = { whenShort: whenShort, pickBubble: pickBubble, pruneDismissed: pruneDismissed, permVerbs: permVerbs, canAllowSession: canAllowSession,
     isInstantQuestion: isInstantQuestion, fitsPopup: fitsPopup, limitView: limitView, STALE_SEC: STALE_SEC };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHNotice = api;
