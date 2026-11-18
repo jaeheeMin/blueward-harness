@@ -119,7 +119,7 @@
         var ok = d.projects.filter(function (p) { return p.ok; }), bad = d.projects.filter(function (p) { return !p.ok; });
         var st = d.stats;
         page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '문제·해결 기록' }), h('h1', { text: '팀이 겪은 문제와 푼 방법' }),
-          h('span', { class: 'line', text: d.loading && !d.projects.length ? '읽는 중이야' : '프로젝트 ' + ok.length + '곳 · 기록 ' + st.total + '건 · 아직 안 풀린 것 ' + st.open +
+          h('span', { class: 'line', text: d.loading && !d.projects.length ? '읽는 중이야' : '프로젝트 ' + ok.length + '곳 · 기록 ' + st.total + '건' + (isPostNow() ? '' : ' · 아직 안 풀린 것 ' + st.open) +  // Post: 안 풀린 수는 바로 아래 「아직 안 풀림」 칸 한 곳에만
             (st.truncated && st.truncated.length ? ' (최근 ' + st.limit + '건만 읽은 곳 있음)' : '') })));
         page.appendChild(h('div', { class: 'strip' },
           h('div', null, h('span', { class: 'eb', text: '이번 달 기록' }), h('span', { class: 'x', text: String(st.month) })),

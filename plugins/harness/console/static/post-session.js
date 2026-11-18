@@ -17,8 +17,7 @@
     var f = el('figure', 'po-here');
     f.appendChild(PS.avatar(sessionId, state, { size: 'lg' }));
     var cap = el('figcaption');
-    cap.appendChild(el('b', null, PL.hereTitle(k, flow)));
-    cap.appendChild(el('small', null, PL.hereLine(state)));
+    cap.appendChild(el('b', null, PL.hereTitle(k, flow)));  // 안내판은 앉은 곳만 말한다. 상태 한 줄(hereLine — 「네 답을 기다리고 있어」)은 뺐다: 같은 화면의 머리 상태 표시와 그 아래 문장이 이미 말한다(요약 정리, 2026-11-19)
     f.appendChild(cap);
     return f;
   }

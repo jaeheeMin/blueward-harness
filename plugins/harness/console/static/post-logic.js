@@ -90,6 +90,14 @@
     states.forEach(function (st) { if (FILTER_OF[st]) c[FILTER_OF[st]]++; });
     return c;
   }
+  /* 나를 찾는 사람(내 차례 · 막힘 · 확인 못 함)의 순서. 오늘 화면의 덱(post-home.js deckItems) · 알림(app.js buildNotices) · 장면 번들(office-post.js group(list, 'ask'))이 같은 순서다:
+     가장 오래 기다린 사람부터(t 오름차순 — 숫자나 날짜 글, 모르면 맨 뒤), 같으면 장면 목록 순서(seat), 그래도 같으면 받은 순서. rows: [{ t, seat, … }] → 새 배열. */
+  function waitTime(t) { return typeof t === 'number' ? t : t ? Date.parse(t) || Infinity : Infinity; }
+  function byWait(rows) {
+    return (rows || []).map(function (r, i) { return [r, i]; }).sort(function (a, b) {
+      return (waitTime(a[0].t) - waitTime(b[0].t)) || ((a[0].seat || 0) - (b[0].seat || 0)) || (a[1] - b[1]);  // 둘 다 모르면 Infinity − Infinity = NaN 이라 다음 기준으로 넘어간다
+    }).map(function (p) { return p[0]; });
+  }
   /* 세션 한 줄 상태 글에서 맨 앞 기호(✕ ? !)를 뗀다 — 기호는 상태 표시(po-st)가 따로 그린다. */
   function statusText(t) { return String(t == null ? '' : t).replace(/^[✕?!]\s*/, ''); }
 
@@ -272,7 +280,7 @@
   }
   function reqFlowOf(s, d) { return reqBasisOf(s, d).flow; }
 
-  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, teamBasisOf: teamBasisOf, teamCells: teamCells, stageName: stageName, atDesk: atDesk, reqFlowOf: reqFlowOf, reqBasisOf: reqBasisOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
+  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, teamBasisOf: teamBasisOf, teamCells: teamCells, stageName: stageName, atDesk: atDesk, reqFlowOf: reqFlowOf, reqBasisOf: reqBasisOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, byWait: byWait, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
     clerkLine: clerkLine, sealOf: sealOf, stampedLine: stampedLine, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;

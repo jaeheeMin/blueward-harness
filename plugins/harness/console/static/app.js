@@ -855,19 +855,26 @@
   function buildNotices(d) {
     var items = [], N = window.BHNotice;
     function add(it) { var m = N ? N.kindMeta(it.kind) : { tone: 'info', word: '알림', icon: 'bell' }; it.tone = m.tone; it.word = m.word; it.icon = m.icon; items.push(it); }
+    /* 나를 찾는 일(답을 기다리는 일 · 막힘 · 확인 못 함). Sauce 는 답을 기다리는 일 다음에 막힘·확인 못 함. Cozy Office 는 오늘 화면의 덱·장면과 같은 순서로 섞는다:
+       가장 오래 기다린 사람부터(post-home.js deckItems, 번들 group(list, 'ask')) — 말풍선·알림 창 1/N 의 첫 항목이 덱 맨 위 카드·장면의 메모와 같은 사람이게. */
+    var asks = [], seatOf = {};
+    if (isPostTheme()) sortedSessions().forEach(function (s, i) { seatOf[s.id] = i; });  // 같은 시각이면 장면 목록 순서(덱과 같은 기준)
+    function ask(t, it) { asks.push({ t: t, seat: seatOf[it.sid] == null ? 1e9 : seatOf[it.sid], it: it }); }
     d.todo.forEach(function (x) {
       var r = x.rid ? requests.get(x.rid) : null;
       var kind = x.rid ? (!r ? 'req' : isPlan(r) ? 'plan' : kindOf(r) === 'elicitation' ? 'elicit' : kindOf(r) === 'question' ? 'question' : 'perm') : x.fix ? 'fix' : 'turn';
       var title = x.rid ? x.title : x.fix ? '“' + x.sname + '” PR 의 검사가 실패했어요' : '“' + x.sname + '” 세션이 답을 기다려요';
-      add({ id: x.rid ? 'req:' + x.rid : (x.fix ? 'fix:' : 'turn:') + x.sid, kind: kind, rid: x.rid || '', sid: x.sid, href: x.href, sname: x.sname, title: title,
+      ask(x.t, { id: x.rid ? 'req:' + x.rid : (x.fix ? 'fix:' : 'turn:') + x.sid, kind: kind, rid: x.rid || '', sid: x.sid, href: x.href, sname: x.sname, title: title,
         text: x.rid ? (kind === 'req' ? x.sname : x.sname + ' · ' + x.title) : x.fix ? x.sname + ' · 고쳐서 다시 올려 주세요' : x.sname });
     });
     var bl = d.blocked || [];
     bl.filter(function (b) { return b.kind === 'blocked'; }).concat(bl.filter(function (b) { return b.kind !== 'blocked'; })).forEach(function (b) {
       var blocked = b.kind === 'blocked';
-      add({ id: 'blk:' + b.sid + ':' + b.kind + ':' + b.bt, kind: blocked ? 'blocked' : 'cannot', sid: b.sid, href: b.href, sname: b.sname,
+      ask(b.t, { id: 'blk:' + b.sid + ':' + b.kind + ':' + b.bt, kind: blocked ? 'blocked' : 'cannot', sid: b.sid, href: b.href, sname: b.sname,
         title: blocked ? '하네스 검사가 막았어요' : '검사를 하지 못했어요. 통과도 위반도 아니에요', text: b.sname + (blocked ? ' · 고친 뒤 이어서 할 수 있어요' : ' · 통과도 위반도 아니에요') });
     });
+    if (isPostTheme() && window.BHPostLogic) asks = window.BHPostLogic.byWait(asks);
+    asks.forEach(function (x) { add(x.it); });
     (d.errs || []).forEach(function (e) {
       var al = N ? N.apiLine(String(e.ik || '').split(':')[0]) : '오류가 났어요';
       add({ id: 'api:' + e.sid + ':' + (e.it || e.ik), kind: 'api', sid: e.sid, href: e.href, sname: e.sname, title: al, text: e.sname + ' · ' + al });
@@ -913,10 +920,10 @@
       n ? h('i', { class: 'nb-dot', 'aria-hidden': 'true', 'data-color-role': top.tone, text: post ? (n > 99 ? '99+' : String(n)) : null }) : null);
     var say = null, later = null;
     if (it && post) {
-      var rest = n - 1;
-      say = h('button', { type: 'button', class: 'nb-say', title: it.line + ' — 눌러서 열기', onClick: open },
+      // 알림이 모두 몇 건인지는 바로 옆 알림 단추의 숫자 한 곳에만 있다. 전에는 말풍선에도 「+N」(= 그 수 − 1, 「나중에」 로 접은 알림까지 셈)이 나란히 있었다
+      say = h('button', { type: 'button', class: 'nb-say', title: it.word + (it.text ? ' · ' + it.text : '') + ' — 눌러서 열기', onClick: open },
         h('i', { class: 'nb-ic', 'aria-hidden': 'true' }, icon(it.icon, 14)), h('b', { class: 'nb-kind', text: it.word }), it.text ? h('span', { class: 'nb-line', text: it.text }) : null,
-        rest > 0 ? h('i', { class: 'nb-more', title: '알림이 ' + rest + '건 더 있어요', 'aria-label': '외 ' + rest + '건', text: '+' + rest }) : null, h('i', { class: 'nb-go', 'aria-hidden': 'true' }, icon('chev', 14)));
+        h('i', { class: 'nb-go', 'aria-hidden': 'true' }, icon('chev', 14)));
       later = h('button', { type: 'button', class: 'nb-x', 'aria-label': '이 알림 나중에 보기 — ' + NB_LATER, title: NB_LATER, onClick: dismissBubble, text: '나중에' });
     } else if (it) {
       say = h('button', { type: 'button', class: 'nb-say', title: it.line, onClick: open }, h('span', { text: it.line }));
@@ -1379,20 +1386,24 @@
     if (sel) sel.value = pj ? pj.key : '*';
   }
   function renderPostRail(d) {
-    var n = d.todo.length, rows = sortedSessions(), work = rows[0] ? '/s/' + encodeURIComponent(rows[0].id) : '/new', nm = route.name;
-    function item(href, label, ic, on, badge) {
-      return link(href, { class: 'prail-item', 'aria-current': on ? 'page' : null, 'aria-label': badge ? label + ' · 내 차례 ' + badge + '건' : null }, icon(ic, 22), h('span', { text: label }), badge ? h('i', { class: 'prail-badge', 'aria-hidden': 'true', text: String(badge) }) : null);
+    var rows = sortedSessions(), work = rows[0] ? '/s/' + encodeURIComponent(rows[0].id) : '/new', nm = route.name;
+    /* 「오늘」 의 표시는 숫자 없는 점이다: 오늘 화면에 나를 찾는 사람(내 차례 · 막힘 · 확인 못 함 — 덱에 카드가 있다)이 있다는 것만 알린다.
+       몇 건인지는 위쪽 알림 단추(알림 수)와 오늘 화면의 장면(상태별 수) 한 곳씩에만 있다 — 전에는 여기 숫자(내 차례 건수)가 알림 단추 숫자와 달라 보였다.
+       오늘 화면을 보는 동안은 화면이 직접 말하니 점도 두지 않는다. 뜻은 색이 아니라 aria-label·title 의 글로 전한다. */
+    var calls = nm !== 'home' && (d.todo.length || (d.blocked || []).length) ? '나를 찾는 사람이 있어요' : '';
+    function item(href, label, ic, on, note) {
+      return link(href, { class: 'prail-item', 'aria-current': on ? 'page' : null, 'aria-label': note ? label + ' · ' + note : null, title: note || null }, icon(ic, 22), h('span', { text: label }), note ? h('i', { class: 'prail-badge', 'aria-hidden': 'true' }) : null);
     }
     patchChildren(railEl, [
       link('/', { class: 'prail-logo', 'aria-label': 'Blueward Harness 처음 화면' }, h('span', { class: 'prail-mark', 'aria-hidden': 'true' }), h('span', { class: 'prail-word', text: 'Blueward' })),
       link(newHref(), { class: 'prail-new', 'aria-current': nm === 'new' ? 'page' : null }, icon('plus', 22), h('span', { text: '새 작업' })),
-      item('/', '오늘', 'inbox', nm === 'home', n),
-      item(work, '세션', 'rows', nm === 'session' || nm === 'request', 0),
-      item('/pipeline', '파이프라인', 'route', nm === 'pipeline', 0),
-      item('/docs', '산출물', 'doc', nm === 'docs', 0),
-      item('/troubles', '팀 기록', 'lifebuoy', /^trouble/.test(nm), 0),
+      item('/', '오늘', 'inbox', nm === 'home', calls),
+      item(work, '세션', 'rows', nm === 'session' || nm === 'request', ''),
+      item('/pipeline', '파이프라인', 'route', nm === 'pipeline', ''),
+      item('/docs', '산출물', 'doc', nm === 'docs', ''),
+      item('/troubles', '팀 기록', 'lifebuoy', /^trouble/.test(nm), ''),
       h('span', { class: 'prail-sp' }),
-      item('/settings', '설정', 'settings', nm === 'settings', 0)
+      item('/settings', '설정', 'settings', nm === 'settings', '')
     ]);
   }
   function syncPostFrame(d) {

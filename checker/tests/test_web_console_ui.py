@@ -1497,11 +1497,11 @@ def test_post_home_field_memo_layout():
     # 메모 자리: 번들의 onFocus 좌표를 받고, 볼 사람이 바뀌면 scene.focus(세션 id | null — 장면이 스스로 고름). 옛 번들(focus 없음)도 동작
     assert "onFocus: onFocus" in home and "typeof sc.focus === 'function'" in home and "sc.focus(want)" in home
     assert "matchMedia(NARROW)" in home and "(max-width: 760px)" in home
-    # 장면 칸 밖은 그대로: 덱·숫자 카드 줄·Sauce 와 같은 홈 표·범례·팀 요약 줄
-    for keep in ("paintDeck()", "tiles2 po-tiles", "po-legend", "po-teams", "네 답을 기다리는 일이 "):
+    # 장면 칸 밖: 덱·팀 요약 줄은 그대로. 범례는 숫자를 붙인 정리 줄(po-sum)이 됐고, 숫자 카드 줄·인사 문장은 없앴다(요약 정리 — test_cozy_summary_one_place)
+    for keep in ("paintDeck()", "po-sum", "po-teams"):
         assert keep in home
     # 내 세션(#1065): Post 는 두 단 목록, 위쪽 띠·strip 은 없다. Sauce 표는 그대로
-    for need in ("sessionsPanel(list)", "po-mine", "po-kyul", "po-stc", "PS.avatar(s.id, st, { size: 'sm', name: name })", "L.barSteps(s)", "L.stepShort(", "'정해진 갈래 없음'", "'내 세션 ' + list.length + '개'"):
+    for need in ("sessionsPanel(list)", "po-mine", "po-kyul", "po-stc", "PS.avatar(s.id, st, { size: 'sm', name: name })", "L.barSteps(s)", "L.stepShort(", "'정해진 갈래 없음'", "text: '내 세션' }"):
         assert need in home
     assert "appendChild(HK.homeTable(" not in home and "po-strip" not in home and "표로 보기" not in home
     for chip in ("내 차례", "일하는 중", "승인 기다림", "쉬는 중", "끝남", "확인 못 함", "막힘"):
@@ -1511,11 +1511,11 @@ def test_post_home_field_memo_layout():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "function attachScene(host, extra)" in app and "Object.assign({ list: sceneList" in app and "onFocus: function (f)" in app
     assert "scene: function () { return postScene; }" in app
-    assert "prail-badge" in app and "prail-dot" not in app and "nb-chip" not in app  # 위쪽 띠(말풍선)와 레일 숫자 배지는 그대로
+    assert "prail-badge" in app and "prail-dot" not in app and "nb-chip" not in app  # 위쪽 띠(말풍선)와 레일 표시는 그대로(표시는 숫자 없는 점이 됐다)
     scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
     assert "office.attach(host, opts)" in scene and "typeof o.focus === 'function'" in scene and "focus: function (id)" in scene
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
-    for needle in (".po-memo", ".po-memo.is-flip::before", ".po-stagew.is-office", "@media (max-width: 760px)", ".po-tiles .tile2", ".po-legend", ".po-teams"):
+    for needle in (".po-memo", ".po-memo.is-flip::before", ".po-stagew.is-office", "@media (max-width: 760px)", ".po-tiles .tile2", ".po-sum", ".po-teams"):
         assert needle in css
     for need in (".po-kyul", ".po-kyulc", ".po-stc-blocked", "ul.po-mine", "columns: 2", "columns: 1", ".po-memo.is-loose::before", ".po-stagew:has(.bh-office-away) .po-memo"):
         assert need in css  # 두 단·1100px 이하 한 단·결재란 자리·꼬리 없는 메모·작은 창(PiP) 중 메모 숨김
@@ -3493,7 +3493,7 @@ def test_post_colors_are_assigned_by_role():
     assert ':root[data-theme="post"] :focus-visible { outline: 2.5px solid var(--focus); outline-offset: 2px; }' in css
     # 답을 기다리는 표시는 알림(파랑), 그 안에서 승인·계획은 경고, PR 검사 실패는 오류
     assert ".po-st-turn { background: var(--ask-fill); color: var(--on-ask); }" in css and '.po-st-turn[data-color-role="warn"] { background: var(--warn-fill);' in css and '.po-st-turn[data-color-role="err"] { background: var(--err-fill);' in css
-    assert ".po-stc-err { color: var(--err); }" in css and ".prail-badge" in css and "background: var(--ask-fill); color: var(--on-ask); font: 700 11px/18px" in css
+    assert ".po-stc-err { color: var(--err); }" in css and ".prail-badge { position: absolute; top: 8px; right: 16px; width: 10px; height: 10px; border-radius: 50%; background: var(--ask-fill); }" in css
     # 도장·결재란: 승인/성공 = 초록(전에는 강조색 빨강)
     assert "border: 4px double var(--ok-line); color: var(--ok);" in css and "box-shadow: inset 0 0 0 1.5px var(--ok-fill);" in css
     app = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -3543,7 +3543,7 @@ def test_notice_bubble_line_and_post_button_parts(tmp_path):
     assert post["bubble"] == "승인 요청권한 일 · Bash 사용을 허용할까?나중에", post["bubble"]
     s2, q = _q_session()
     two = _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"theme": "post"}])
-    assert two["bubble"].endswith("+1나중에") and "외 1건" not in two["bubble"], two["bubble"]  # 남은 건수는 +N 배지로
+    assert two["bubble"].endswith("나중에") and "+1" not in two["bubble"] and "외 1건" not in two["bubble"], two["bubble"]  # 알림이 몇 건인지는 옆 알림 단추 숫자 한 곳에만(말풍선의 +N 은 뺐다)
     later = _smoke(tmp_path, "", [s], [p], actions=[{"theme": "post"}, {"click": ".nb-x"}])
     assert later["bubble"] == "" and later["dot"] == 1 and any(k.startswith("req:") for k in json.loads(later["ss"].get("bh-nb-dismissed", "[]")))  # 「나중에」 = 말풍선만 접고 알림 단추의 배지는 남는다
     blocked = _session("s3", title="막힌 일", status="idle", lastBlock={"t": 2, "kind": "cannot_check", "open": True})
@@ -3812,7 +3812,7 @@ def test_post_pipeline_wiring_route_rail_and_scoped_css():
     assert order == sorted(order) and '<link rel="stylesheet" href="/post-pipeline.css">' in html
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "if (p === '/pipeline') return { name: 'pipeline' };" in app and "pipeline: pipelineView" in app
-    assert "item('/pipeline', '파이프라인', 'route', nm === 'pipeline', 0)" in app
+    assert "item('/pipeline', '파이프라인', 'route', nm === 'pipeline', '')" in app
     assert "!isPostTheme() || !window.BHPostPipeline" in app  # Sauce 로 주소를 치고 오면 안내만 한다
     js = (STATIC / "post-pipeline.js").read_text(encoding="utf-8")
     assert "innerHTML" not in js and "'/api/pipeline'" in js and "하네스는 이 순서를 지키게 해." in js
@@ -3831,8 +3831,8 @@ def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
     assert "L.prNeedsFix(s)" in home and "'고쳐야 함'" in home and "BHApiNotice.notice(s)" in home
     # 새 소식 칸은 세션이 없을 때·불러오는 중에도 붙고, 세션이 생기면 foot 으로 되돌린다
     assert home.count("restSlot.appendChild(slots.whatsSlot)") == 2 and "foot.appendChild(slots.whatsSlot)" in home
-    # 덱 머리 숫자는 타일·띠·문장과 같은 내 차례 건수(BHLogic.turnItems 길이)다: 검사가 실패한 PR 세션도 카드로 올리고, 한 세션의 요청 여럿은 "요청 +N"
-    assert "fix: true" in home and "return '고쳐야 함'" in home and "turnN = Math.max(cardN, turnTotal)" in home and "turnTotal = turnCount;" in home
+    # 검사가 실패한 PR 세션도 카드로 올리고, 한 세션의 요청 여럿은 "요청 +N". 덱 머리에는 숫자가 없다(요약 정리 — 수는 장면 아래 정리 줄에)
+    assert "fix: true" in home and "return '고쳐야 함'" in home and "turnTotal" not in home and "h('h2', { text: '나를 찾는 사람' })" in home
     assert "'요청 +' + it.more" in home and "].filter(Boolean).join(' · ')" in home  # G3: 요청 수와 시각은 한 묶음(좁은 폭에서 시각만 다음 줄로 떨어지지 않게)
     # 열린 PR 상태를 홈이 열려 있는 동안 1분마다 다시 읽고, 홈을 떠나면 멈춘다(Sauce 홈과 같은 간격)
     assert "MY_PRS_POLL_MS = 20000" in home and "clearInterval(prTimer)" in home and "delete fixBox.dataset.ready" in home
@@ -3853,8 +3853,8 @@ def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
 def test_post_verify_B2_memo_count_teams_and_session_fixes():
     # 2026-11-18 Post 검증 B 2회차. post-*.js 는 가짜 DOM 시험이 안 불러와서 원문 확인이고, 본체는 Aside 실화면이다(docs/status/2026-11-18-post-verify-B.md).
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
-    # 메모의 몇 번째는 덱 머리와 같은 묶음·단위: 내 차례는 건수(카드가 요청 여럿이면 범위), 막힘·확인 못 함은 따로. 카드 수로 세지 않는다
-    assert "function memoCount(it)" in home and "n: mine.length" in home and "'내 차례 ' + (end > at ? at + '–' + end : at) + '/' + turnTotal" in home
+    # 메모 머리는 덱 카드와 같은 종류 이름이다. 몇 번째인지(1/N)는 장면 버튼 한 곳에만 있다(요약 정리 — 전에는 「내 차례 1/4」 와 버튼 「1/6」 이 나란히 달랐다)
+    assert "function memoKind(it)" in home and "n: mine.length" in home and "memoCount" not in home and "var head = [memoKind(it), team, w];" in home
     assert "'다음 ' + (i + 1) + '/' + items.length" not in home and "text: '다음', onClick: function () { step(1, true); }" in home
     # 메모의 "다음" 은 포커스를 덱 카드로 옮기지 않는다(화면이 덱까지 튀어 메모가 밀려 나간다). J·K 는 그대로 덱 카드로
     assert "function pickTop(id, stay)" in home and "if (stay) return;" in home
@@ -4497,7 +4497,7 @@ def test_cozy_diorama_bundle_wired_to_memo():
     assert "pickKindOf(pi.state) !== pickKind" in home and "syncFocus(pickId ? pickId : lead ? null : next);" in home
     assert "if (over || told === want) return;" in home and "sc.setMemoOpen(open)" in home
     # 장면이 작은 창에서 다른 사람을 고른 채 돌아오면(콘솔은 못 들었다) 다시 그린 뒤에도 어긋난 것을 보고 장면을 따른다 — 메모가 숨은 채 남지 않게
-    rec = home[home.index("function reconcile()"):home.index("/* 메모 머리의 몇 번째인지")]
+    rec = home[home.index("function reconcile()"):home.index("/* 메모 머리의 첫 글")]
     assert "chased !== foc.id || adopted === foc.id" in rec and "if (!over && memoId && !inScene) return;" in rec and "setPick(foc.id); paintDeck(); paintMemo();" in rec
     assert home.count("reconcile();") == 2  # 덱 메모·사람 메모(또는 메모 없음) 두 갈래 끝
     assert "if (memo.hidden || memo.style.visibility === 'hidden') return;" in home  # 숨은 메모는 읽기 프로그램에 알리지 않는다
@@ -4753,7 +4753,9 @@ def test_cozy_office_judge_j6_to_j14():
     assert "'q prcard po-prmemo' + (failed ? ' blocked' : unsure ? ' unsure' : '')" in app  # 표시 약속 칸(syncLegend)이 그대로 뜬다
     # J10: Cozy Office 내 차례는 덱과 같은 순서(세션이 오래 기다린 순, 같으면 원래 순서)
     assert "if (isPostTheme()) todo = todo.map(function (x, i) { return [x, i]; }).sort(" in app
-    assert "turn.sort(function (a, b) { return (a.s.updatedAt || 0) - (b.s.updatedAt || 0); });" in home
+    # 덱은 장면과 같은 순서(가장 오래 기다린 사람부터, 막힘·확인 못 함도 섞어)이고 알림도 그 순서다(요약 정리)
+    assert "return PL.byWait(live).map(function (r) { return r.it; }).concat(left);" in home
+    assert "if (isPostTheme() && window.BHPostLogic) asks = window.BHPostLogic.byWait(asks);" in app
     # J11: 판정 전 폴더 알림은 판정 뒤(최대 5초), 터미널로 넘어간 요청 수·팀 기록은 고른 프로젝트, 파이프라인은 지금 폴더 결과만, 빈 홈은 고른 프로젝트
     assert "function repoPending(s)" in app and "flushNotify(false); if (notifyHeld.length) ensureRepos();" in app and "NOTIFY_HOLD_MS = 5000" in app
     assert "      ensureRepos();  // 새 폴더 판정을 바로 받으러 간다" in app  # 숨은 탭은 그리기가 돌지 않아 scheduleSide 로는 판정을 못 받는다(리뷰)
@@ -4857,3 +4859,71 @@ def test_cozy_teams3_order_basis_stage_desk_and_lane():
     assert "PL.teamCells(cells, s, PL.stationOf(s, window.BHLogic))" in app
     body = app[app.index("function ensureReqs()"):app.index("function onProjectPick(e)")]
     assert "key = cwd + '|' + br" in body and "reqs.at[key] = got && got.loading" in body and "reqs.br" not in body  # 같은 폴더에 브랜치가 다른 세션이 있어도 번갈아 묻지 않게(리뷰 반영)
+
+
+def test_cozy_summary_one_place():
+    # 요약 정리(2026-11-19, docs/status/2026-11-19-cozy-office-summary.md): 같은 정보는 한 화면에서 한 자리에만.
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 세션 수는 장면 머리, 상태별 수는 장면 아래 정리 줄(범례 겸용, 장면과 같은 목록·같은 상태 판정). 일곱 상태를 다 세어 더하면 장면 머리 수다
+    assert "var SUM = ['turn', 'blocked', 'unk', 'run', 'wait', 'done', 'idle'];" in home
+    body = home[home.index("function paintSum()"):home.index("function noMemo()")]
+    assert "kit.sceneList().forEach(function (s) { n[s.state] = (n[s.state] || 0) + 1; });" in body and "'data-sum': k" in body and "PS.LABEL[k]" in body
+    assert "sceneSub.textContent = kit.sceneList().length + '개';" in home and "stageFrame, calmList, sumRow, teamRow);" in home  # 차분 목록 아래에도 같은 줄
+    # 같은 수를 되풀이하던 자리는 없다: 인사 문장 · 덱 머리 숫자 · 숫자 카드 줄 · 「내 세션 N개」
+    for gone in ("po-lede", "네 답을 기다리는 일이 ' +", "따로 셈", "tiles2 po-tiles", "'내 세션 ' + list.length", "L.counts(", "stats.prTile", "stats.weekTile", "po-legend"):
+        assert gone not in home, gone
+    assert ".po-lede" not in css and ".po-legend" not in css and ".nb-more" not in css
+    # 숫자 카드 줄에만 있던 정보는 자리를 옮겼다: 이번 주 산출물 → 최근 산출물 칸, 팀 기록 → 아래 칸들 옆
+    assert "HK.recentCard(recent, showWeek);" in home and "'이번 주에 ' + n + '개 뽑았어요'" in home and "h('div', { class: 'po-tiles po-tb' }, stats.tbTile)" in home
+    assert "fixBox, recent, prSlot, tbSlot, slots.whatsSlot" in home
+    assert "'끝난 세션 ' + ended + '개도 같이 보여요'" in home  # 내 세션 목록이 장면 머리 수보다 긴 까닭만 말한다
+    # 왼쪽 메뉴 「오늘」 은 숫자 없는 점(오늘 화면에서는 없음), 뜻은 aria-label·title 글로. 알림 수는 알림 단추 한 곳, 말풍선에 +N 없음
+    rail = app[app.index("function renderPostRail(d)"):app.index("function syncPostFrame(d)")]
+    assert "nm !== 'home' && (d.todo.length || (d.blocked || []).length) ? '나를 찾는 사람이 있어요' : ''" in rail
+    assert "'aria-label': note ? label + ' · ' + note : null, title: note || null" in rail and "text: String(badge)" not in app
+    host = app[app.index("function noticeHost()"):app.index("function limitEl()")]
+    assert "nb-more" not in host and "text: post ? (n > 99 ? '99+' : String(n)) : null" in host
+    # 세션 화면 안내판은 앉은 곳만(상태 한 줄은 머리 상태 표시가 말한다), 팀 기록 머리 문장은 Post 에서 안 풀린 수를 되풀이하지 않는다
+    sess = (STATIC / "post-session.js").read_text(encoding="utf-8")
+    assert "PL.hereTitle(k, flow)" in sess and "PL.hereLine(state)));" not in sess
+    assert "(isPostNow() ? '' : ' · 아직 안 풀린 것 ' + st.open)" in (STATIC / "trouble.js").read_text(encoding="utf-8")
+    # 작은 창 목록(번들): 정리 줄과 같은 묶음을 이름까지 — 나를 찾는 사람 · 끝낸 일 · 일하는 사람, 쉬는 중은 수
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    for need in ("나를 찾는 사람", "지금은 나를 찾는 사람이 없어요.", "일하는 사람", "지금은 일하는 사람이 없어요.", "쉬는 중 "):
+        assert need in bundle, need
+    assert "답을 기다리는 일" not in bundle
+
+
+def test_cozy_ask_order_is_one_rule(tmp_path):
+    # 나를 찾는 사람의 순서는 한 함수(post-logic.js byWait)다: 덱 · 알림이 이것을 쓰고, 장면 번들의 group(list, 'ask') 과 같은 결과를 낸다
+    # (t 오름차순 — 모르면 맨 뒤, 같으면 장면 목록 순서, 그래도 같으면 받은 순서). 막힘 · 확인 못 함도 내 차례와 섞인다.
+    script = tmp_path / "bywait.js"
+    script.write_text("""
+const assert = require('assert');
+const P = require(process.argv[2]);
+// 번들 규칙을 그대로 옮긴 것(ai-office-iso src/office-post.ts group · src/diorama/seating.ts timeOf)
+const timeOf = (s) => (typeof s.t === 'number' ? s.t : s.t ? Date.parse(s.t) || Infinity : Infinity);
+const group = (list) => list.map((s, i) => ({ s, i })).sort((a, b) => timeOf(a.s) - timeOf(b.s) || a.i - b.i).map(({ s }) => s.id);
+const scene = [  // 장면 목록 순서(seat = 여기서 몇 번째)
+  { id: 'q-new', t: 500 }, { id: 'blk-old', t: 100 }, { id: 'tie-b', t: 300 }, { id: 'unk', t: 200 }, { id: 'tie-a', t: 300 },
+  { id: 'none-1' }, { id: 'iso', t: '1970-01-01T00:00:00.150Z' }, { id: 'none-2', t: null }, { id: 'zero', t: 0 }];
+const want = group(scene);
+assert.deepStrictEqual(want, ['zero', 'blk-old', 'iso', 'unk', 'tie-b', 'tie-a', 'q-new', 'none-1', 'none-2']);  // 숫자 0 은 숫자다(번들과 같다). 값이 없으면 맨 뒤
+const rows = scene.map((s, i) => ({ t: s.t, seat: i, id: s.id }));
+// 받은 순서가 달라도(덱: 내 차례 다음 막힘, 알림: 요청마다) 결과는 장면 순서와 같다
+for (const order of [rows, rows.slice().reverse(), [rows[4], rows[2], rows[8], rows[0], rows[7], rows[1], rows[5], rows[3], rows[6]]]) {
+  assert.deepStrictEqual(P.byWait(order).map((r) => r.id), want);
+}
+// 한 세션의 요청 여럿(같은 t · 같은 seat)은 받은 순서 그대로
+assert.deepStrictEqual(P.byWait([{ t: 5, seat: 1, id: 'r1' }, { t: 5, seat: 1, id: 'r2' }, { t: 1, seat: 9, id: 'x' }]).map((r) => r.id), ['x', 'r1', 'r2']);
+assert.deepStrictEqual(P.byWait([]), []);
+const src = [{ t: 2, seat: 0 }, { t: 1, seat: 1 }]; P.byWait(src); assert.strictEqual(src[0].t, 2);  // 받은 배열은 안 바꾼다
+console.log('ok');
+""", encoding="utf-8")
+    out = subprocess.run(["node", str(script), str(STATIC / "post-logic.js")], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0 and out.stdout.strip() == "ok", out.stderr
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    # 도장만 남은 카드(이미 처리됨)는 순서에 넣지 않고 끝에: 맨 위 카드는 늘 장면이 스스로 고르는 사람
+    assert "left = all.filter(function (it) { return it.kind === 'turn' && !it.n; });" in home

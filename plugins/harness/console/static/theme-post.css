@@ -173,7 +173,8 @@
 :root[data-theme="post"] .prail-item:hover { color: var(--text); background: var(--soft); }
 :root[data-theme="post"] .prail-item[aria-current="page"] { color: var(--text); background: var(--paper); box-shadow: inset 0 0 0 1.5px var(--bd); }
 :root[data-theme="post"] .prail-item[aria-current="page"] svg { color: var(--accent); }
-:root[data-theme="post"] .prail-badge { position: absolute; top: 4px; right: 12px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--ask-fill); color: var(--on-ask); font: 700 11px/18px var(--font); font-style: normal; text-align: center; }
+/* 「오늘」 의 점: 나를 찾는 사람이 있다는 것만 알린다(숫자는 위쪽 알림 단추와 오늘 화면의 장면에 한 곳씩). 뜻은 그 메뉴의 aria-label·title 글이 전한다 */
+:root[data-theme="post"] .prail-badge { position: absolute; top: 8px; right: 16px; width: 10px; height: 10px; border-radius: 50%; background: var(--ask-fill); }
 :root[data-theme="post"] .prail-sp { flex: 1; }
 
 :root[data-theme="post"] .ptop-proj { display: flex; align-items: baseline; gap: 8px; min-width: 0; white-space: nowrap; }
@@ -213,7 +214,7 @@
   :root[data-theme="post"] .conn { z-index: 46; top: 82px; }  /* 연결 끊김 띠(sticky)는 메뉴줄(높이 73px) 바로 아래에 붙는다 — 전에는 top 8px 라 스크롤하면 메뉴줄 위에 떠서 일부를 가렸다 */
   :root[data-theme="post"] .prail-logo, :root[data-theme="post"] .prail-sp { display: none; }
   :root[data-theme="post"] .prail-new, :root[data-theme="post"] .prail-item { flex: none; min-width: 64px; margin: 0; }
-  :root[data-theme="post"] .prail-badge { right: 10px; }
+  :root[data-theme="post"] .prail-badge { right: 14px; }
   :root[data-theme="post"] #app > .top { flex-wrap: wrap; gap: 8px 12px; padding: 10px 16px; }
   /* 좁은 폭 위쪽 줄은 화면마다 같은 자리: 첫 줄 프로젝트(한 줄을 다 쓰고 줄어듦), 둘째 줄 한도 · 판 … ≡ · 테마, 말풍선이 있으면 셋째 줄에 말풍선 + ≡.
      전에는 폴더 이름 길이에 따라 줄바꿈이 달라져 오늘 화면은 테마가 첫 줄, 세션·새 작업 화면은 둘째 줄이었다. 줄만 나누고 순서는 DOM 그대로(Tab 순서 = 보이는 순서) */
@@ -278,8 +279,6 @@
 :root[data-theme="post"] .po-hello { display: grid; gap: 4px; }
 :root[data-theme="post"] .po-date { margin: 0; font-size: 13px; color: var(--muted); }
 :root[data-theme="post"] .po-hello h1 { margin: 0; font-size: 22px; line-height: 1.3; font-weight: 800; letter-spacing: -.03em; }
-:root[data-theme="post"] .po-lede { margin: 0; font-size: 14px; color: var(--sec); }
-:root[data-theme="post"] .po-lede b { font-weight: 700; color: var(--text); }
 :root[data-theme="post"] .po-panel { gap: 14px; padding: 20px 22px; border-radius: var(--rc); background: var(--paper); min-width: 0; }
 :root[data-theme="post"] .po-panel[hidden] { display: none; }
 :root[data-theme="post"] .po-ph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
@@ -304,10 +303,19 @@
 :root[data-theme="post"] .po-teams b { font-size: 13px; font-weight: 800; color: var(--text); }
 :root[data-theme="post"] .po-teams span { font-size: 12px; font-weight: 500; color: var(--muted); }
 :root[data-theme="post"] .po-teams li.has span { color: var(--text); font-weight: 700; }
-:root[data-theme="post"] .po-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--lmuted); }
-:root[data-theme="post"] .po-legend li { display: inline-flex; align-items: center; gap: 6px; }
-:root[data-theme="post"] .po-legend .po-st { width: 14px; height: 14px; font-size: 9px; }
-:root[data-theme="post"] .po-legend .po-st-run::after { width: 6px; height: 6px; }
+/* 장면 아래 정리 줄(post-home.js paintSum): 상태 기호 + 이름 + 수. 범례를 겸하고, 상태별 수를 말하는 한 곳이다. 0 인 상태는 흐리게(범례로는 남는다) */
+:root[data-theme="post"] .po-sum { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; padding: 0; list-style: none; font-size: 13px; color: var(--lmuted); }
+:root[data-theme="post"] .po-sum li { display: inline-flex; align-items: center; gap: 6px; }
+:root[data-theme="post"] .po-sum li.has { color: var(--text); }
+:root[data-theme="post"] .po-sum b { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+:root[data-theme="post"] .po-sum li.has b { font-weight: 800; }
+:root[data-theme="post"] .po-sum .po-st { width: 16px; height: 16px; font-size: 10px; }
+:root[data-theme="post"] .po-sum .po-st-run::after { width: 7px; height: 7px; }
+:root[data-theme="post"] .po-sum .po-st-idle::after { content: ""; width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--muted); }
+:root[data-theme="post"] .po-week { font-size: 12.5px; color: var(--lmuted); }
+/* 팀 기록 칸(숫자 칸 줄에서 아래 칸들 옆으로 옮겼다): 옆 칸들과 같은 머리 글자·안쪽 여백 */
+:root[data-theme="post"] .po-tb .tile2 { padding: 18px 20px; }
+:root[data-theme="post"] .po-tb .tile2 .eb { font-size: 16px; font-weight: 700; color: var(--lightink); }
 :root[data-theme="post"] .po-stack { display: grid; gap: 10px; }
 :root[data-theme="post"] .po-dc { min-width: 0; padding: 12px 16px; border: 1.5px solid var(--bd); border-radius: 12px; background: var(--paper); color: var(--lightink); }
 :root[data-theme="post"] .po-dc.is-top { padding: 18px 20px; border: 2px dashed var(--ask-line); outline: 6px solid var(--paper); outline-offset: -9px; box-shadow: 0 0 0 1px var(--bd2), 0 14px 30px -20px rgba(47,95,166,.55); }
@@ -837,7 +845,6 @@
 :root[data-theme="post"] .top .nb-bubble[data-color-role="unk"] .nb-ic { background: transparent; color: var(--unk); box-shadow: inset 0 0 0 1.5px var(--unk-line); }
 :root[data-theme="post"] .top .nb-kind { flex: none; font-weight: 800; }
 :root[data-theme="post"] .top .nb-say span.nb-line { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-:root[data-theme="post"] .top .nb-more { flex: none; display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: color-mix(in srgb, currentColor 16%, transparent); font-size: 11.5px; font-weight: 800; font-style: normal; font-variant-numeric: tabular-nums; }
 :root[data-theme="post"] .top .nb-go { flex: none; margin-left: -2px; }
 :root[data-theme="post"] .top .nb-x { flex: none; display: inline-flex; align-items: center; width: auto; height: auto; padding: 0 11px 0 10px; border: 0; border-left: 1.5px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 0 8.5px 8.5px 0; background: transparent; color: inherit; font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 :root[data-theme="post"] .top .nb-x:hover { background: color-mix(in srgb, currentColor 14%, transparent); color: inherit; }
@@ -845,10 +852,9 @@
 @container shell (max-width: 760px) {
   :root[data-theme="post"] .top .nb-host:has(.nb-bubble:not([hidden])) { order: 9; flex: 1 1 100%; }
   :root[data-theme="post"] .top .nb-host .nb-bubble { flex: 1 1 auto; max-width: none; margin: 0; left: auto; right: auto; width: auto; min-width: 0; }
-  :root[data-theme="post"] .top .nb-more { display: none; }  /* 좁은 폭: 남은 건수는 알림 단추 배지에 있으니 내용 글에 자리를 준다 */
   :root[data-theme="post"] .prail { gap: 2px; padding: 6px 8px; overflow-x: hidden; }
   :root[data-theme="post"] .prail-new, :root[data-theme="post"] .prail-item { flex: 1 1 0; min-width: 0; padding: 8px 2px; font-size: 11px; }
-  :root[data-theme="post"] .prail-badge { right: 50%; margin-right: -22px; }
+  :root[data-theme="post"] .prail-badge { right: 50%; margin-right: -18px; }
 }
 
 /* ---------- 새 작업(시안 new): 눈썹 · 큰 질문 · 큰 입력 판 · 종류 카드 격자 + 순서 판 ---------- */

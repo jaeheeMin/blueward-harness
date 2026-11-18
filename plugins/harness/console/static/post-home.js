@@ -1,5 +1,7 @@
 /* Post(Cozy Office) 테마의 오늘(홈) 화면. Sauce 홈(flow-ui.js homeView)과 같은 데이터·같은 칸(승인 기다리는 PR·최근 산출물·고쳐야 할 내 PR·프로젝트 준비)을 쓰고,
-   모양만 시안대로 다시 짠다: 인사 → "지금 세션들"(장면 + 범례) → "내 차례 N건" 덱 → 숫자 칸 → 아래 칸들.
+   모양만 시안대로 다시 짠다: 인사 → "지금 세션들"(장면 + 그 아래 정리) → "나를 찾는 사람" 덱 → 내 세션 → 아래 칸들.
+   한 정보는 한 자리에만 둔다(요약 정리, 2026-11-19): 세션 수는 장면 머리, 상태별 수는 장면 아래 정리 줄(범례에 숫자를 붙였다), 몇 번째인지는 장면 버튼 —
+   인사 문장·덱 머리·숫자 칸 줄·메모 머리에 같은 숫자를 되풀이하지 않는다. 덱 카드 순서는 장면이 사람을 돌아보는 순서와 같다(deckItems).
    장면 칸(#1056, 시안 C "현장 메모"): 사무실 장면이 테두리·둥근 모서리 틀 안에 폭 전체로 보이고, 그 위에 내 차례 메모가 뜬다(장면이 알려 준 좌표 옆).
    장면은 디오라마 번들(post/office/office-post.js, 계약 version 2)이고 메모는 여기서 그린다: 번들이 보는 사람 자리(onFocus)·누른 사람(onPick)·빈 바닥(onBackground)·전체 보기(onOverview)를 알려 준다.
    데이터가 없는 칸은 지어내지 않고 뺀다. 화면은 이벤트마다 통째로 다시 그리되(Sauce 홈과 같다) 장면 패널은 한 번만 만들어 둔다(장면은 매번 새로 만들지 않는다).
@@ -8,7 +10,8 @@
   'use strict';
 
   var DAYS = ['일', '월', '화', '수', '목', '금', '토'];
-  var LEGEND = ['turn', 'run', 'wait', 'blocked', 'unk', 'done'];
+  /* 장면 아래 정리 줄에 서는 상태 순서: 나를 찾는 사람(내 차례·막힘·확인 못 함 — 장면 버튼 「나를 찾는 사람」 이 세는 묶음) → 일하는 중·승인 기다림 → 끝·쉬는 중. 일곱 수를 더하면 장면 머리의 세션 수다 */
+  var SUM = ['turn', 'blocked', 'unk', 'run', 'wait', 'done', 'idle'];
   /* 사무실 장면(office-post.js) 아래 팀 요약. 갈래(flowId) → 팀 표는 post-logic.js 에 있다(세션 화면 안내판과 같은 표). 갈래가 없거나 팀이 없는 갈래의 세션은 끝에 "팀 없음" 으로 따로 센다(paintTeams). */
   var TEAMS = window.BHPostLogic.TEAMS, teamOf = window.BHPostLogic.teamOf;
   var MY_PRS_POLL_MS = 20000;  // 열린 PR 상태를 확인하는 간격. 읽기는 flow-ui.js 가 60초 캐시로 막아 주고(고른 칸만 다시 그리고 네트워크는 안 부른다), 그 캐시를 여기서 비울 수 없어서 Sauce 홈의 61초 한 번 대신 짧게 자주 본다 — 캐시가 풀린 뒤 최대 20초 안에 새로 읽는다
@@ -46,12 +49,9 @@
 
     function stMark(kind, tone) { return h('i', { class: 'po-st po-st-' + kind, 'data-color-role': tone || null, 'aria-hidden': 'true', text: PS.GLYPH[kind] || '' }); }
 
-    function tile(label, value, cls) {
-      return h('div', { class: 'tile2' + (cls ? ' ' + cls : '') }, h('span', { class: 'eb', text: label }), h('span', { class: 'v', text: value }));
-    }
-
-    /* 덱에 올릴 카드. 내 차례(오래 기다린 순) 다음에 막힘·확인 못 함. PR 검사가 실패한 세션(고쳐야 함)도 내 차례라 카드로 올린다 —
-       타일·알림 띠·"오늘 내 일" 문장의 내 차례 숫자(BHLogic.turnItems)와 덱 머리 숫자가 어긋나지 않게(실사용 시험: 덱 2건·타일 3건). "고쳐야 할 내 PR" 칸은 따로 그대로 있다. */
+    /* 덱에 올릴 카드: 나를 찾는 사람 — 내 차례·막힘·확인 못 함. PR 검사가 실패한 세션(고쳐야 함)도 내 차례라 카드로 올린다("고쳐야 할 내 PR" 칸은 따로 그대로 있다).
+       순서는 장면과 같다: 가장 오래 기다린 사람부터, 막힘·확인 못 함도 같이 섞어(번들 group(list, 'ask') — t 오름차순, 같으면 장면 목록 순서).
+       그래서 덱 맨 위 카드 = 장면이 스스로 고른 사람 = 메모의 사람이고, J·K 와 장면 버튼 「나를 찾는 사람」 이 같은 차례로 돈다(전에는 내 차례 다음에 막힘이라 메모와 덱 맨 위가 달랐다). */
     function deckItems(list) {
       var turn = [], bad = [];
       list.forEach(function (s) {
@@ -64,14 +64,19 @@
         if (mine.some(function (t) { return t.kind === 'request' || t.kind === 'turn'; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: pend, more: Math.max(0, asks - 1), n: mine.length });
         else if (mine.length && L.prNeedsFix(s)) turn.push({ id: s.id, kind: 'turn', s: s, pend: null, fix: true, n: mine.length });
       });
-      turn.sort(function (a, b) { return (a.s.updatedAt || 0) - (b.s.updatedAt || 0); });
       // 방금 답해 도장이 찍힌 카드는 처리됨으로 바뀐 뒤에도 잠깐 남긴다(도장이 보이도록)
       qc.stamped().forEach(function (x) {
         if (turn.some(function (it) { return it.s.id === x.sid && it.pend && it.pend.rid === x.rid; })) { turn.forEach(function (it) { if (it.s.id === x.sid) { it.stampRid = x.rid; it.stampKind = x.kind; it.stampDecision = x.decision; } }); return; }
         var s = list.filter(function (q) { return q.id === x.sid; })[0];
         if (s && !turn.concat(bad).some(function (it) { return it.s.id === s.id; })) turn.push({ id: s.id, kind: 'turn', s: s, pend: null, stampRid: x.rid, stampKind: x.kind, stampDecision: x.decision, n: 0 });  // 이미 처리됨: 내 차례 건수에 안 든다
       });
-      return turn.concat(bad);
+      var at = {};
+      kit.sceneList().forEach(function (x, i) { at[x.id] = i; });
+      function seat(it) { return at[it.id] == null ? 1e9 : at[it.id]; }  // 장면에 없는 세션은 같은 시각이면 뒤로
+      // 방금 답해 도장만 남은 카드(이미 처리됨 — 장면에서는 더는 손 든 사람이 아니다)는 순서에 넣지 않고 끝에 둔다: 맨 위 카드는 늘 장면이 스스로 고르는 사람이다
+      var all = turn.concat(bad), left = all.filter(function (it) { return it.kind === 'turn' && !it.n; });
+      var live = all.filter(function (it) { return left.indexOf(it) < 0; }).map(function (it) { return { t: it.s.updatedAt, seat: seat(it), it: it }; });
+      return PL.byWait(live).map(function (r) { return r.it; }).concat(left);
     }
 
     /* 덱 카드·메모의 역할 색(theme-post.css [data-color-role]): 막힘·검사 실패는 오류, 확인 못 함은 보라, 승인·계획은 경고(승인 전 확인), 질문·확인은 알림.
@@ -164,7 +169,7 @@
     /* 내 세션(시안 section.panel.cols + ul.ss): 두 단(1100px 이하 한 단). 줄 전체가 그 세션 링크. 줄 순서는 Sauce 홈 표와 같은 목록이다.
        둘째 줄은 팀 이름, 갈래는 있어도 팀이 없으면 갈래 이름, 갈래가 없으면 "정해진 갈래 없음"(Sauce 표의 둘째 줄과 같은 글). */
     function sessionsPanel(list) {
-      var maxN = 0, rows;
+      var maxN = 0, rows, ended = list.filter(function (s) { return s.status === 'ended'; }).length;
       var all = list.map(function (s) { var steps = s.flowId ? L.barSteps(s) : []; if (steps.length > maxN) maxN = steps.length; return { s: s, steps: steps }; });
       rows = all.map(function (x) {
         var s = x.s, st = PS.stateOf(s, L), name = s.title || HK.folderName(s) || '이름 없는 세션';
@@ -176,13 +181,14 @@
           rowChip(s, st)));
       });
       return h('section', { class: 'light po-panel po-cols', 'aria-labelledby': 'po-ss-h' },
-        h('div', { class: 'po-ph' }, h('h2', { id: 'po-ss-h', text: '내 세션 ' + list.length + '개' })),
+        // 세션 수는 장면 머리 한 곳에만 있다("지금 세션들 N개" — 끝난 세션은 장면에 없다). 여기는 그 수와 달라지는 까닭(끝난 세션)만 말한다
+        h('div', { class: 'po-ph' }, h('h2', { id: 'po-ss-h', text: '내 세션' }), ended ? h('span', { class: 'po-sub', 'data-ended': String(ended), text: '끝난 세션 ' + ended + '개도 같이 보여요' }) : null),
         h('ul', { class: 'po-mine' }, rows));
     }
 
     /* slots: { sceneHost, whatsSlot, scene() — 지금 붙은 장면 제어(focus(id) 를 줄 수 있으면 준다) } */
     function view(root, slots) {
-      var calmAll = false, gone = false, topId = null, items = [], turnTotal = 0, officeOn = false, foc = null, memoId = null;
+      var calmAll = false, gone = false, topId = null, items = [], officeOn = false, foc = null, memoId = null;
       /* 메모가 누구 것인가(승인된 동작 시안): 고른 사람이 없으면 장면이 스스로 고른 사람(가장 오래 기다린 사람 — 번들의 auto 와 같은 사람)의 메모다.
          pickId: 사용자가 고른 세션(장면의 사람·버튼, 메모의 「다음」, J·K, 덱의 「열기」). pickKind: 고를 때 그 사람이 손을 들고 있었는지('ask')·끝냈는지('done') —
                  그 상태가 풀리면 번들이 스스로 놓고 다음 사람으로 가니(letGo) 여기도 같이 놓는다.
@@ -193,6 +199,8 @@
       var pickId = null, pickKind = '', shutId = null, over = false, told = null, saidOpen = false;
       var approvals = h('div', { class: 'approvals light po-panel po-mini' });
       var recent = h('div', { class: 'light po-panel po-mini', 'data-recent': '1' });
+      /* 이번 주에 뽑은 산출물 수: 숫자 칸 줄에 따로 있던 것을 최근 산출물 칸 머리 바로 아래로 옮겼다(recentCard 가 머리를 그린 직후 부른다). 0 개와 확인 못 함은 그 칸의 문장이 이미 말한다 */
+      function showWeek(n) { if (n > 0) recent.appendChild(h('span', { class: 'po-week', 'data-week': String(n), text: '이번 주에 ' + n + '개 뽑았어요' })); }
       var projects = h('div', { class: 'projects' });
       var fixBox = h('div', { class: 'fixbox' });
       var stats = HK.homeStats();
@@ -202,18 +210,19 @@
       var sceneSub = h('span', { class: 'po-sub' });
       var calmList = h('ul', { class: 'po-maplist', 'aria-label': '지금 세션들' });  // 차분(fx=0)일 때 장면 대신 보이는 세션 목록(시안 mapFallback)
       var teamRow = h('ul', { class: 'po-teams', 'aria-label': '팀별 세션 수', hidden: true });  // 사무실 장면이 있을 때만(옛 요약 줄 자리)
+      var sumRow = h('ul', { class: 'po-sum', 'aria-label': '상태별 세션 수' });  // 장면 아래 정리 줄: 상태 기호 + 이름 + 수(범례를 겸한다). 차분 목록 아래에도 같은 줄이 있다
       var memo = h('div', { class: 'po-memo', role: 'group', 'aria-label': '내 차례 메모', hidden: true });  // 장면 위에 띄우는 내 차례 메모(시안 .memo)
       var memoLive = h('p', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'data-memo-live': '1' });  // 메모가 바뀌면 읽기 프로그램에 알린다(메모 자신은 hidden 이 되기도 하고 다시 그려져 알림이 안 간다)
       var memoSaid = '';
       var stageFrame = h('div', { class: 'po-stagew' }, slots.sceneHost, memo, memoLive);  // 사무실 장면이 보이면 테두리·둥근 모서리 틀(시안 .stage), 메모는 이 틀 안에서 뜬다
       var scenePanel = h('section', { class: 'light po-panel po-scenep', 'aria-labelledby': 'po-scene-h' },
         h('header', { class: 'po-ph' }, h('h2', { id: 'po-scene-h', text: '지금 세션들' }), sceneSub),
-        stageFrame, teamRow, calmList,
-        h('ul', { class: 'po-legend', 'aria-label': '상태 표시' }, LEGEND.map(function (k) { return h('li', null, stMark(k), PS.LABEL[k]); })));
+        stageFrame, calmList, sumRow, teamRow);
       var deckSlot = h('div');
       var restSlot = h('div', { class: 'po-rest' });
       var prSlot = h('div', { class: 'po-prslot' });  // 검토 요청(PR) 칸: Sauce 홈과 같은 줄들 + 그 안에 승인 기다리는 PR
-      var foot = h('div', { class: 'po-foot' }, fixBox, recent, prSlot, slots.whatsSlot);
+      var tbSlot = h('div', { class: 'po-tiles po-tb' }, stats.tbTile);  // 팀 기록(아직 안 풀린 문제 수 · 보기): 숫자 칸 줄에서 아래 칸들 옆으로 옮겼다
+      var foot = h('div', { class: 'po-foot' }, fixBox, recent, prSlot, tbSlot, slots.whatsSlot);
       var body = h('div', { class: 'page home po-home' }, helloSlot, scenePanel, deckSlot, restSlot);
       root.appendChild(body);
 
@@ -322,18 +331,9 @@
         setPick(foc.id); paintDeck(); paintMemo();
       }
 
-      /* 메모 머리의 몇 번째인지: 덱 머리와 같은 묶음·같은 단위로 센다. 내 차례는 건수(한 카드가 요청 여럿이면 "2–3/6"), 막힘·확인 못 함은 덱 머리처럼 따로.
-         카드 수(내 차례 + 막힘 + 확인 못 함)로 세면 "다음 1/7" 이 덱 머리 "내 차례 5건" 과 어긋나 보인다(갈래 C 실화면). 묶음에 하나뿐이면 숫자 없이 이름만. */
-      function memoCount(it) {
-        if (it.kind === 'turn') {
-          if (!it.n) return '처리됨';
-          var at = 1; items.some(function (x) { if (x === it) return true; if (x.kind === 'turn') at += x.n || 0; return false; });
-          var end = at + it.n - 1;
-          return turnTotal > 1 ? '내 차례 ' + (end > at ? at + '–' + end : at) + '/' + turnTotal : '내 차례';
-        }
-        var same = items.filter(function (x) { return x.kind === it.kind; }), name = it.kind === 'unk' ? '확인 못 한 검사' : '막힌 일';
-        return same.length > 1 ? name + ' ' + (same.indexOf(it) + 1) + '/' + same.length : name;
-      }
+      /* 메모 머리의 첫 글: 덱 카드와 같은 종류 이름(질문·승인·계획·확인·고쳐야 함·막힘·확인 못 함). 몇 번째인지(1/6)는 장면 버튼 「나를 찾는 사람」 한 곳에만 있다 —
+         전에는 여기 「내 차례 1/4」(건수)와 버튼 「1/6」(사람)이 나란히 다른 수를 보였다. 방금 답해 도장이 남은 카드는 「처리됨」. */
+      function memoKind(it) { return it.kind === 'turn' && !it.n ? '처리됨' : kindLabel(it); }
 
       /* 내 차례 메모(시안 .memo): 덱과 같은 순서의 topId 한 건. 사무실 장면이 보일 때만(차분이거나 번들이 없으면 없다). 여러 건이면 "다음" 으로 돌린다(J·K 도 된다).
          덱은 그대로 아래에 있다. 메모의 동작은 덱 카드와 같은 문장·같은 링크다. */
@@ -372,7 +372,7 @@
         var s = it.s, name = s.title || HK.folderName(s) || '이름 없는 세션', team = teamOf(PL.teamFlowOf(s)), a = cardAct(it, false);
         var from = it.pend && it.pend.r ? (it.pend.r.createdAt || it.pend.r.createdAtMs) : (it.t || s.updatedAt), w = kit.waited(from);
         var i = items.indexOf(it);
-        var head = [memoCount(it), team, w];
+        var head = [memoKind(it), team, w];
         var sessionHref = '/s/' + encodeURIComponent(s.id), same = a.href === sessionHref;  // 가는 곳이 세션이면 "세션으로" 를 따로 두지 않는다
         memo.className = 'po-memo po-memo-' + it.kind; memo.setAttribute('data-color-role', toneOf(it));
         memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(it.kind, toneOf(it)), h('span', { class: 'po-memo-kind', text: head.filter(Boolean).join(' · ') }),
@@ -442,11 +442,9 @@
       function paintDeck() {
         var mark = focusMark();
         clear(deckSlot);
-        var cardN = items.filter(function (it) { return it.kind === 'turn'; }).length, badN = items.length - cardN, turnN = Math.max(cardN, turnTotal);  // 머리 숫자 = 타일·띠와 같은 내 차례 건수
         if (!items.some(function (it) { return it.id === topId; })) topId = items[0] ? items[0].id : null;
-        var nBlocked = items.filter(function (it) { return it.kind === 'blocked'; }).length, nUnk = items.filter(function (it) { return it.kind === 'unk'; }).length;
-        var head = h('header', { class: 'po-ph' }, h('h2', null, '내 차례 ', h('b', { class: 'po-num', text: String(turnN) }), ' 건'),
-          badN ? h('span', { class: 'po-sub', text: [nBlocked ? '막힌 일 ' + nBlocked + '건' : '', nUnk ? '확인 못 한 검사 ' + nUnk + '건' : ''].filter(Boolean).join(' · ') + ' · 따로 셈' }) : null,
+        // 머리에는 숫자를 두지 않는다: 몇 명인지는 장면 아래 정리 줄(상태별)과 장면 버튼 「나를 찾는 사람 N」 이 말한다. 이름은 그 버튼과 같다(같은 사람들, 같은 순서)
+        var head = h('header', { class: 'po-ph' }, h('h2', { text: '나를 찾는 사람' }),
           items.length > 1 ? h('span', { class: 'po-hint', text: 'J · K 다음 · 이전' }) : null);
         var stack = h('div', { class: 'po-stack' });
         if (!items.length) stack.appendChild(h('p', { class: 'quiet', text: '지금 네 답을 기다리는 일이 없어.' }));
@@ -462,7 +460,7 @@
             top ? null : h('button', { type: 'button', class: 'pill line sm', 'aria-expanded': 'false', 'aria-label': name + ' 펼치기', text: '열기', onClick: function () { pickTop(it.id); } }));
           stack.appendChild(h('article', Object.assign({ class: 'po-dc po-dc-' + it.kind + (top ? ' is-top' : ''), 'data-color-role': toneOf(it) }, attrs), hd, top ? cardBody(it) : null));
         });
-        deckSlot.appendChild(h('section', { class: 'light po-panel po-deck', 'aria-label': '내 차례' }, head, stack));
+        deckSlot.appendChild(h('section', { class: 'light po-panel po-deck', 'aria-label': '나를 찾는 사람' }, head, stack));
         focusBack(mark);
       }
 
@@ -502,6 +500,18 @@
         if (free.some(function (s) { return PL.atDesk(s.state); })) teamRow.appendChild(cell('팀 없음', free, 'po-team-free', '팀이 정해지지 않아 리셉션에 있는 사람'));
       }
 
+      /* 장면 아래 정리 줄. 장면에 선 세션(kit.sceneList — 장면·차분 목록·장면 버튼과 같은 목록, 같은 상태 판정)을 상태별로 센다: 단위는 사람(세션)이다.
+         답할 요청이 여럿인 세션도 한 사람이라 요청 건수와는 다른 수다 — 건수는 그 카드의 「요청 +N」 이 말한다. 0 인 상태도 범례라 흐리게 남긴다. */
+      function paintSum() {
+        var n = {};
+        kit.sceneList().forEach(function (s) { n[s.state] = (n[s.state] || 0) + 1; });
+        clear(sumRow);
+        SUM.forEach(function (k) {
+          var c = n[k] || 0;
+          sumRow.appendChild(h('li', { class: c ? 'has' : null, 'data-sum': k }, stMark(k), h('span', { text: PS.LABEL[k] }), h('b', { text: String(c) }), h('span', { class: 'sr-only', text: '명' })));
+        });
+      }
+
       function noMemo() { memo.hidden = true; memoId = null; pickId = null; pickKind = ''; syncFocus(null); tellOpen(); }  // 장면 칸이 없는 화면(불러오는 중·세션 없음)
       function draw() {
         if (gone) return;
@@ -516,7 +526,7 @@
         if (!list.length) {  // 세션이 없으면 Sauce 와 같은 첫 작업 안내(시안: C단계가 다듬는다)
           scenePanel.hidden = true; noMemo(); clear(deckSlot); clear(prSlot); items = []; delete approvals.dataset.compact; approvals.className = 'approvals light po-panel po-mini';
           HK.emptyHome(restSlot, approvals, projects);
-          HK.approvalCard(approvals, stats.showPr); HK.projectCard(projects);
+          HK.approvalCard(approvals); HK.projectCard(projects);
           restSlot.appendChild(slots.whatsSlot);
           return;
         }
@@ -525,27 +535,25 @@
         stageFrame.classList.toggle('is-office', officeOn);
         approvals.className = 'approvals'; approvals.dataset.compact = '1';  // 검토 요청 칸 안에서는 줄로 그린다(Sauce 홈과 같다)
         clear(prSlot); prSlot.appendChild(h('div', { class: 'light po-panel po-mini' }, HK.homePrBox(list, approvals)));
-        var c = L.counts(list, HK.openIds), turnCount = L.turnItems(list, HK.openIds).length;  // 내 차례 숫자는 Sauce 홈·띠와 같은 목록 길이(#1027)
-        sceneSub.textContent = kit.sceneList().length + '개';  // 장면·차분 목록에 서는 세션 수(끝난 세션은 장면에 없다). 인사 문장의 "세션 N개" 는 끝난 것까지
+        sceneSub.textContent = kit.sceneList().length + '개';  // 장면·차분 목록에 서는 세션 수(끝난 세션은 장면에 없다). 세션 수를 말하는 곳은 여기 하나다
         paintCalm();
+        paintSum();
         paintTeams();
         var proj = kit.projectOf() || HK.folderName(list[0]);
         helloSlot.appendChild(h('p', { class: 'po-date', text: dateLine(new Date()) + (proj ? ' · ' + proj : '') }));
         helloSlot.appendChild(h('h1', { text: '오늘 내 일' }));
-        helloSlot.appendChild(h('p', { class: 'po-lede' }, '세션 ' + c.total + '개 중 ' + c.running + '개가 일하고 있어. ',
-          turnCount ? h('b', { text: '네 답을 기다리는 일이 ' + turnCount + '건 있어.' }) : L.NO_TURN_TEXT + '.'));
+        // 인사 아래 문장("세션 N개 중 N개가 일하고 있어. 네 답을 기다리는 일이 N건 있어.")은 뺐다 — 같은 수를 장면 머리와 장면 아래 정리 줄이 말한다
         items = deckItems(list);
-        turnTotal = turnCount;
         paintDeck();
         paintMemo();
         if (stats.refresh) stats.refresh();  // 고른 프로젝트가 바뀌었으면 팀 기록 수를 다시 센다(J11)
-        restSlot.appendChild(h('div', { class: 'tiles2 po-tiles' }, tile('내 차례', String(turnCount), turnCount ? 'warn' : ''), tile('AI가 일하는 중', String(c.running), ''), stats.prTile, stats.weekTile, stats.tbTile));
+        // 숫자 칸 줄은 없앴다: 내 차례·AI가 일하는 중은 장면 아래 정리 줄에, 승인 기다리는 PR 은 검토 요청(PR) 칸의 줄들이, 이번 주 산출물은 최근 산출물 칸에, 팀 기록은 아래 칸들 옆에(tbSlot)
         restSlot.appendChild(sessionsPanel(list));  // 내 세션 두 단 목록(글자 아바타·결재란·상태 칩). Sauce 홈은 표(HK.homeTable) 그대로
         if (slots.whatsSlot.parentNode !== foot) foot.appendChild(slots.whatsSlot);  // 세션이 없던 동안 restSlot 으로 옮겨 갔으면 되돌린다
         restSlot.appendChild(foot);
         restSlot.appendChild(projects);
-        HK.recentCard(recent, stats.showWeek);
-        HK.approvalCard(approvals, stats.showPr);
+        HK.recentCard(recent, showWeek);
+        HK.approvalCard(approvals);
         HK.projectCard(projects);
         HK.fixCard(fixBox);
       }
