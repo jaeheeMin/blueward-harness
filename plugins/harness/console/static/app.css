@@ -1163,8 +1163,8 @@ details.fold > [data-r]:empty { display: none; }
 .tc-prev.tc-sauce i:nth-child(1) { height: 22px; background: #3ddc91; }
 .tc-prev.tc-sauce i:nth-child(2) { background: #edf7f5; }
 .tc-prev.tc-sauce i:nth-child(3) { background: #97ddbc; }
-.tc-prev.tc-post { background: repeating-linear-gradient(135deg, #D9483B 0 8px, #FFFCF6 8px 16px, #3D6FB6 16px 24px, #FFFCF6 24px 32px) 0 0 / 100% 6px no-repeat, #F6F1E7; }
-.tc-prev.tc-post i:nth-child(1) { height: 22px; background: #C73E31; }
+.tc-prev.tc-post { background: repeating-linear-gradient(90deg, #A9C8E6 0 16px, #FFFCF6 16px 19px) 0 0 / 100% 7px no-repeat, #F6F1E7; }
+.tc-prev.tc-post i:nth-child(1) { height: 22px; background: #C9A27A; }
 .tc-prev.tc-post i:nth-child(2) { background: #FFFCF6; box-shadow: inset 0 0 0 1px #D9CDB8; }
 .tc-prev.tc-post i:nth-child(3) { background: #24304A; }
 @media (prefers-reduced-motion: no-preference) { .theme-card { transition: border-color .12s; } }

@@ -1369,7 +1369,7 @@
     nav.appendChild(foot);
     patchChildren(sideEl, [nav]);
   }
-  /* Post 세션 목록: 위에 걸러보기(전체·내 차례·일하는 중·끝남), 행마다 손님 아바타 + 기억 링 + 제목 + 상태 기호·문구 + 단계 막대.
+  /* Post 세션 목록: 위에 걸러보기(전체·내 차례·일하는 중·끝남), 행마다 사람 아바타 + 기억 링 + 제목 + 상태 기호·문구 + 단계 막대.
      고른 걸러보기는 이 파일이 쥐고, 누름은 sideEl 한 곳에서 받는다(patchChildren 이 옛 노드의 핸들러를 남기므로 노드마다 핸들러를 달지 않는다). */
   var postFilter = 'all';
   function postSideList(rows, cur) {
@@ -1450,7 +1450,7 @@
         var st = sideStatus(s), p = firstPending(s), name = sessionTitle(s);
         var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid));
         return link('/s/' + encodeURIComponent(s.id), { class: 'rail-ring' + (st.tone === 'attn' ? ' turn' : st.tone === 'fail' || st.tone === 'unk' || st.tone === 'err' ? ' bk ' + st.tone : '') + (s.status === 'ended' ? ' ended' : ''), 'aria-label': name + ' · ' + st.text, title: name + ' · ' + st.text, 'aria-current': onThis ? 'page' : null },
-          isPostTheme() && window.BHPostScene ? window.BHPostScene.avatar(s.id, window.BHPostLogic.stateOf(s, window.BHLogic), { size: 'sm', name: sessionTitle(s) }) : h('span', { class: 'ring unk' }, h('b', { text: '?' })));  // Post: 접힌 칸에도 그 세션의 손님
+          isPostTheme() && window.BHPostScene ? window.BHPostScene.avatar(s.id, window.BHPostLogic.stateOf(s, window.BHLogic), { size: 'sm', name: sessionTitle(s) }) : h('span', { class: 'ring unk' }, h('b', { text: '?' })));  // Post: 접힌 칸에도 그 세션의 사람
       }),
       h('span', { class: 'rail-sp' }),
       link(newHref(), { class: 'rail-add', 'aria-label': '새 세션', title: '새 세션' }, icon('plus', 14)));
@@ -1515,7 +1515,7 @@
       whatsNote ? h('p', { class: 'wn-note', text: whatsNote }) : null,
       h('div', { class: 'wn-acts' }, acts)));
   }
-  /* Post 테마 장면(theme-post.js)에 올릴 세션 줄. 상태·창구는 post-logic.js 의 stateOf·stationOf(가이드 6.1·6.2) — 아바타와 같은 규칙이다. 끝난(ended) 세션은 그리지 않는다. */
+  /* Post 테마 장면(theme-post.js)에 올릴 세션 줄. 상태·단계는 post-logic.js 의 stateOf·stationOf(가이드 6.1·6.2) — 아바타와 같은 규칙이다. 끝난(ended) 세션은 그리지 않는다. */
   function sceneList() {
     var L = window.BHLogic, PL = window.BHPostLogic, out = [];
     sortedSessions().forEach(function (s) {
@@ -1525,7 +1525,7 @@
     });
     return out;
   }
-  /* 장면 붙이기: 사무실 장면이 실렸으면 그것으로, 아니면 우체국 장면으로. 사무실 장면의 말풍선은 제목을 textContent 로 쓴다(HTML 로 해석하지 않는다). */
+  /* 장면 붙이기: 사무실 장면이 실렸으면 그것으로, 아니면 옛 라인아트 장면(static/post/)으로. 사무실 장면의 말풍선은 제목을 textContent 로 쓴다(HTML 로 해석하지 않는다). */
   function attachScene(host, extra) {  // extra.onFocus(f): 사무실 장면이 주인공 머리 위 좌표({id,x,y} | null)를 알린다(홈의 내 차례 메모 자리)
     var PS = window.BHPostScene, O = window.BHOfficeScene;
     return PS.attach(host, Object.assign({ list: sceneList, onNavigate: function (href) { go(href); } }, extra || {}), O || null);
@@ -1581,9 +1581,9 @@
   function troubleNew(root) { return tb.newView(root, { draft: route.draft }); }
   function troubleItem(root) { return tb.itemView(root, route.repo, route.number); }
 
-  /* ---------- 우체국 도장(Post) ----------
+  /* ---------- 승인 도장(Post) ----------
      요청 처리 API 가 성공한 뒤에만 찍는다. 요청 id 별로 한 번이고, 처리된 요청은 카드가 곧 사라지니 인라인 카드는 3초 동안 도장 찍힌 모습을 남긴다.
-     { decision, kind, k(창구), at, until, shown, title, lines } — shown 이 true 면 다시 그릴 때 도장이 또 튕기지 않는다. */
+     { decision, kind, k(단계 번호), flow(팀 갈래), at, until, shown, title, lines } — shown 이 true 면 다시 그릴 때 도장이 또 튕기지 않는다. */
   var stamps = {}, STAMP_MS = 3000;
   function markStamp(rid, kind, decision, info) {
     if (!isPostTheme() || stamps[rid]) return;  // 카드마다 한 번만
@@ -1592,7 +1592,7 @@
       if (!stampActive(k) && !(q && (!q.status || q.status === 'pending'))) delete stamps[k];
     });
     var r = requests.get(rid), s = sessions.get(r && (r.sessionId || r.session_id)), PL = window.BHPostLogic;
-    stamps[rid] = { decision: decision, kind: kind, k: s ? PL.stationOf(s, window.BHLogic) : 2, sid: s && s.id, at: new Date(), until: Date.now() + STAMP_MS, shown: false, title: info && info.title || '', lines: info && info.lines || [] };
+    stamps[rid] = { decision: decision, kind: kind, k: s ? PL.stationOf(s, window.BHLogic) : 2, flow: s ? PL.teamFlowOf(s) : '', sid: s && s.id, at: new Date(), until: Date.now() + STAMP_MS, shown: false, title: info && info.title || '', lines: info && info.lines || [] };
     setTimeout(function () { if (view && view.onData) view.onData(); }, STAMP_MS + 100);  // 시간이 지나면 인라인 카드를 거둔다
   }
   /* still: 이미 다 찍힌 도장(다시 그릴 때 또 튕기지 않게). 찍힌 직후 다른 이벤트로 곧바로 다시 그리면(처리 응답 → onRequest) 튕김이 6ms 만에 끊겨
@@ -1692,7 +1692,7 @@
     return { askCard: askCard, inlineQuestion: inlineQuestion, stamped: activeStamps,
       keep: function () { return qInline; }, adopt: function (o) { if (o) qInline = o; } };  // 테마를 바꿔 뷰를 다시 만들 때 고른 값을 넘긴다
   }
-  /* 내 차례 카드 머리의 손님 아바타(Post, 가이드 2.2). 눈썹 줄을 그대로 두고 앞에 붙인다. 홈 덱처럼 이미 아바타가 있는 곳은 opts.noAvatar. */
+  /* 내 차례 카드 머리의 사람 아바타(Post, 가이드 2.2). 눈썹 줄을 그대로 두고 앞에 붙인다. 홈 덱처럼 이미 아바타가 있는 곳은 opts.noAvatar. */
   function askHead(r, opts) {
     var eb = h('span', { class: 'eb', text: '네 차례' + waitedText(r && (r.createdAt || r.createdAtMs)) });
     if (!isPostTheme() || (opts && opts.noAvatar) || !window.BHPostScene) return eb;
@@ -1802,7 +1802,7 @@
     }
 
     /* ---------- Post 배치 ----------
-       Sauce 와 같은 칸(regions)을 다른 자리에 둔다. 가운데 대화 판 안에 머리(눈썹 · 제목 · 한 줄 · 순서 알약 · 정보 줄 + 창구 안내판) · 알림 · 대화 · 입력칸이 있고,
+       Sauce 와 같은 칸(regions)을 다른 자리에 둔다. 가운데 대화 판 안에 머리(눈썹 · 제목 · 한 줄 · 순서 알약 · 정보 줄 + 자리 안내판) · 알림 · 대화 · 입력칸이 있고,
        오른쪽 점검 탭이 산출물 · 검사 · 기억 · 기록 · 기술에 옛 "자세히" 안의 칸을 나눠 담는다. 칸은 그대로 두고 부모만 바꾸니 부분 갱신은 그대로다. */
     var post = false, inspTab = 0, postSig = '';
     function postLayout(page, talk, titlerow, titleCol, fold) {
@@ -1845,13 +1845,13 @@
       page.appendChild(h('div', { class: 'po-sgrid' }, talk, insp));
       page.appendChild(regions.legend);
     }
-    // 창구 안내판: 세션이 바뀐 것(세션·상태·창구)이 있을 때만 다시 만든다(이벤트마다 손님 그림을 다시 만들지 않는다)
+    // 자리 안내판: 세션이 바뀐 것(세션·상태·단계·팀)이 있을 때만 다시 만든다(이벤트마다 사람 그림을 다시 만들지 않는다)
     function paintHere(s) {
       if (!post || !regions.here) return;
-      var PL = window.BHPostLogic, L = window.BHLogic, state = PL.stateOf(s, L), k = PL.stationOf(s, L), sig = s.id + '|' + state + '|' + k;
+      var PL = window.BHPostLogic, L = window.BHLogic, state = PL.stateOf(s, L), k = PL.stationOf(s, L), flow = PL.teamFlowOf(s), sig = s.id + '|' + state + '|' + k + '|' + flow;
       if (sig === postSig) return;
       postSig = sig;
-      regions.here.replaceChildren(window.BHPostSession.here(s.id, state, k));
+      regions.here.replaceChildren(window.BHPostSession.here(s.id, state, k, flow));
     }
     // 점검 탭 "검사"(이 세션의 PR 검사)와 "기억"(기억 링 · 토큰 · 한도). 요약해서 계속하기는 paintMemory 가 같은 자리에 둔다.
     function paintInsp(s) {
@@ -2787,7 +2787,7 @@
     function isPending() { return req && (!req.status || req.status === 'pending' || req.status === 'waiting') && !outcome; }
     function sessionOf() { return req && (sessions.get(req.sessionId || req.session_id) || {}); }
 
-    var post = false;  // Post 일 때만 요청 화면을 시안 틀(뒤로 · 눈썹 · 제목 · 창구 직원 · 요청 카드 · 오른쪽 최근 대화)로 짠다. 그릴 때마다 정한다
+    var post = false;  // Post 일 때만 요청 화면을 시안 틀(뒤로 · 눈썹 · 제목 · 리뷰 룸 검토 담당 · 요청 카드 · 오른쪽 최근 대화)로 짠다. 그릴 때마다 정한다
     function draw() {
       clear(root);
       post = isPostTheme() && !!window.BHPostSession;
@@ -2908,14 +2908,14 @@
     }
 
     /* 요청 화면의 마무리. Sauce 는 대화 판(panel) 한 장에 카드와 "AI에게 말하기" 를 담는다.
-       Post 는 시안 r1·r2 처럼 뒤로 · 눈썹 · 제목 · 창구 안내 한 줄 · 요청 카드(.focus-card) · 접는 칸 + 오른쪽 최근 대화 · 세션 · AI에게 말하기.
+       Post 는 시안 r1·r2 처럼 뒤로 · 눈썹 · 제목 · 자리 안내 한 줄 · 요청 카드(.focus-card) · 접는 칸 + 오른쪽 최근 대화 · 세션 · AI에게 말하기.
        kind: permission · plan · question · elicitation. folds: 카드 아래로 뺀 접는 칸(자세히 · 이유). */
     function finish(page, panel, msgs, kind, folds) {
       if (!post) { panel.appendChild(msgs); if (isPending()) panel.appendChild(sayBox()); page.appendChild(panel); root.appendChild(page); return; }
       var PL = window.BHPostLogic, PSS = window.BHPostSession, L = window.BHLogic, s = sessData(), k = PL.stationOf(s, L);
       var main = h('section', { class: 'po-rmain' });
       while (page.firstChild) main.appendChild(page.firstChild);  // head() 가 쌓아 둔 제목 블록
-      if (isPending()) main.appendChild(PSS.clerk(kind, sid(), k));
+      if (isPending()) main.appendChild(PSS.clerk(kind, sid(), k, PL.teamFlowOf(s)));
       msgs.className = 'msgs focus-card po-focus';
       var info = stampInfo(rid);
       if (info) { PSS.stamp(msgs, info); stamps[rid].shown = true; }  // 요청 처리가 성공한 뒤에만 도장(markStamp)

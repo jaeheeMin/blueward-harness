@@ -1,4 +1,4 @@
-/* Post(우체국) 테마의 파이프라인 탭(시안 pipeline-mockup/pipeline.html). 요구사항마다 다섯 칸(요구사항 → 개발 Spec → 개발 → 검토 → 합쳐짐) 중 어디에 있는지 보인다.
+/* Post(Cozy Office) 테마의 파이프라인 탭(시안 pipeline-mockup/pipeline.html). 요구사항마다 다섯 칸(요구사항 → 개발 Spec → 개발 → 검토 → 합쳐짐) 중 어디에 있는지 보인다.
    사실은 서버 /api/pipeline(pipeline.py: origin/main 의 SRS·원장·Spec, 열린 PR)이 주고, 여기서는 세션을 요구사항에 붙이고 칸을 정한다.
    세션 → 요구사항: 세션 이름·갈래 사유·브랜치의 REQ-/DEV- 번호, 다음 갈래 옵션의 번호(BHLogic.reqIds), 세션 PR 번호가 그 요구사항의 열린 PR 인 것.
    폴더는 세션들의 작업 폴더(+ 마지막 폴더)이고, 같은 저장소의 worktree 는 서버가 준 repo.key 로 한 판에 모은다. 없는 데이터는 지어내지 않는다.

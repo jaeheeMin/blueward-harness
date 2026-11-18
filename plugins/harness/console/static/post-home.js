@@ -1,4 +1,4 @@
-/* Post(우체국) 테마의 오늘(홈) 화면. Sauce 홈(flow-ui.js homeView)과 같은 데이터·같은 칸(승인 기다리는 PR·최근 산출물·고쳐야 할 내 PR·프로젝트 준비)을 쓰고,
+/* Post(Cozy Office) 테마의 오늘(홈) 화면. Sauce 홈(flow-ui.js homeView)과 같은 데이터·같은 칸(승인 기다리는 PR·최근 산출물·고쳐야 할 내 PR·프로젝트 준비)을 쓰고,
    모양만 시안대로 다시 짠다: 인사 → "지금 세션들"(장면 + 범례) → "내 차례 N건" 덱 → 숫자 칸 → 아래 칸들.
    장면 칸(#1056, 시안 C "현장 메모"): 사무실 장면이 테두리·둥근 모서리 틀 안에 폭 전체로 보이고, 그 위에 내 차례 메모가 뜬다(장면이 알려 준 좌표 옆).
    데이터가 없는 칸은 지어내지 않고 뺀다. 화면은 이벤트마다 통째로 다시 그리되(Sauce 홈과 같다) 장면 패널은 한 번만 만들어 둔다(장면은 매번 새로 만들지 않는다).
@@ -8,16 +8,11 @@
 
   var DAYS = ['일', '월', '화', '수', '목', '금', '토'];
   var LEGEND = ['turn', 'run', 'wait', 'blocked', 'unk', 'done'];
-  /* 사무실 장면(office-post.js) 아래 팀 요약. 갈래(flowId) → 팀. 갈래가 없거나 팀이 없는 갈래의 세션은 끝에 "팀 없음" 으로 따로 센다(paintTeams). */
-  var TEAMS = [['요구분석팀', ['srs', 'srs-export']], ['설계팀', ['spec']], ['개발팀', ['dev']], ['기능컨설팅팀', ['config']], ['표준화팀', ['standard']], ['유지보수팀', ['fix']]];
+  /* 사무실 장면(office-post.js) 아래 팀 요약. 갈래(flowId) → 팀 표는 post-logic.js 에 있다(세션 화면 안내판과 같은 표). 갈래가 없거나 팀이 없는 갈래의 세션은 끝에 "팀 없음" 으로 따로 센다(paintTeams). */
+  var TEAMS = window.BHPostLogic.TEAMS, teamOf = window.BHPostLogic.teamOf;
   var MY_PRS_POLL_MS = 20000;  // 열린 PR 상태를 확인하는 간격. 읽기는 flow-ui.js 가 60초 캐시로 막아 주고(고른 칸만 다시 그리고 네트워크는 안 부른다), 그 캐시를 여기서 비울 수 없어서 Sauce 홈의 61초 한 번 대신 짧게 자주 본다 — 캐시가 풀린 뒤 최대 20초 안에 새로 읽는다
   var NARROW = '(max-width: 760px)';  // 이 폭 이하에서는 메모가 장면 아래로 내려온다(시안 media query)
   var CALM_MAX = 12;  // 차분 목록에 처음 보이는 세션 수(나머지는 "더 보기")
-
-  function teamOf(flow) {
-    for (var i = 0; i < TEAMS.length; i++) if (TEAMS[i][1].indexOf(flow) >= 0) return TEAMS[i][0];
-    return '';
-  }
 
   function dateLine(d) {
     var hr = d.getHours(), ap = hr < 12 ? '오전' : '오후', h12 = hr % 12 === 0 ? 12 : hr % 12, mm = d.getMinutes();
@@ -28,7 +23,7 @@
   function create(kit) {
     var h = kit.h, clear = kit.clear, L = kit.L, HK = kit.home, PS = window.BHPostScene, PL = window.BHPostLogic;
     var redrawNow = function () {};
-    var qc = kit.questionCards(function () { redrawNow(); }, function () {}, { noAvatar: true });  // 고른 값은 홈을 떠났다 와도 기억한다. 카드 머리에 손님이 이미 있다
+    var qc = kit.questionCards(function () { redrawNow(); }, function () {}, { noAvatar: true });  // 고른 값은 홈을 떠났다 와도 기억한다. 카드 머리에 사람이 이미 있다
 
     function stMark(kind) { return h('i', { class: 'po-st po-st-' + kind, 'aria-hidden': 'true', text: PS.GLYPH[kind] || '' }); }
 
@@ -128,7 +123,7 @@
     }
 
     /* 결재란(시안 .kyul): 칸은 그 세션 갈래의 실제 단계(BHLogic.barSteps — 홈 표의 단계 막대와 같은 값)이고 이름은 짧은 이름(stepShort).
-       끝난 칸은 붉은 도장, 지금 칸은 남색 줄. 갈래가 없으면 칸이 없고 자리만 비운다(줄 정렬이 흔들리지 않게 자리 폭은 목록에서 가장 긴 결재란에 맞춘다). */
+       끝난 칸은 붉은 도장(결재 도장), 지금 칸은 남색 줄. 갈래가 없으면 칸이 없고 자리만 비운다(줄 정렬이 흔들리지 않게 자리 폭은 목록에서 가장 긴 결재란에 맞춘다). */
     var KYUL_CELL = 64;  // 칸 하나의 폭(px). 갈래 단계의 짧은 이름은 여섯 글자 이하(workflow.json)
     function kyul(steps) {
       if (!steps.length) return null;
@@ -172,7 +167,7 @@
       var helloSlot = h('div', { class: 'po-hello' });
       var sceneSub = h('span', { class: 'po-sub' });
       var calmList = h('ul', { class: 'po-maplist', 'aria-label': '지금 세션들' });  // 차분(fx=0)일 때 장면 대신 보이는 세션 목록(시안 mapFallback)
-      var teamRow = h('ul', { class: 'po-teams', 'aria-label': '팀별 세션 수', hidden: true });  // 사무실 장면이 있을 때만(창구 요약 줄 자리)
+      var teamRow = h('ul', { class: 'po-teams', 'aria-label': '팀별 세션 수', hidden: true });  // 사무실 장면이 있을 때만(옛 요약 줄 자리)
       var memo = h('div', { class: 'po-memo', role: 'group', 'aria-label': '내 차례 메모', hidden: true });  // 장면 위에 띄우는 내 차례 메모(시안 .memo)
       var memoLive = h('p', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'data-memo-live': '1' });  // 메모가 바뀌면 읽기 프로그램에 알린다(메모 자신은 hidden 이 되기도 하고 다시 그려져 알림이 안 간다)
       var memoSaid = '';
@@ -378,7 +373,7 @@
         focusBack(mark);
       }
 
-      /* 차분: 장면이 없는 대신 같은 세션(장면에 올리는 것과 같은 줄)을 목록으로. 손님 아바타는 정지 그림, 둘째 줄은 상태 기호 + 상태 글 · 창구. */
+      /* 차분: 장면이 없는 대신 같은 세션(장면에 올리는 것과 같은 줄)을 목록으로. 사람 아바타는 정지 그림, 둘째 줄은 상태 기호 + 상태 글 · 앉은 곳. */
       function paintCalm() {
         clear(calmList);
         calmList.hidden = !PS.calm();
@@ -389,7 +384,7 @@
           var name = s.title || '이름 없는 세션', k = Math.max(0, Math.min(4, s.station | 0));
           calmList.appendChild(h('li', { class: 'po-ml po-ml-' + s.state },
             kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ml-a' }, PS.avatar(s.id, s.state, { size: 'sm', name: name }),
-              h('span', null, h('b', { text: name }), h('small', null, stMark(s.state), PS.LABEL[s.state] + ' · ' + (k + 1) + '번 창구 ' + PL.STATION[k].name)))));
+              h('span', null, h('b', { text: name }), h('small', null, stMark(s.state), PS.LABEL[s.state] + ' · ' + PL.hereTitle(k, s.flow))))));
         });
         if (all.length > shown.length) calmList.appendChild(h('li', { class: 'po-ml-more' }, h('button', { type: 'button', class: 'pill line sm', text: '나머지 ' + (all.length - shown.length) + '개 더 보기', onClick: function () { calmAll = true; paintCalm(); var a = calmList.querySelectorAll('a')[CALM_MAX]; if (a) a.focus(); } })));  // 단추가 사라지니 포커스는 새로 보인 첫 줄로
         if (!calmList.firstChild) calmList.appendChild(h('li', { class: 'quiet', text: '지금 일하는 세션이 없어.' }));

@@ -1,5 +1,5 @@
-/* Post(우체국) 테마의 장면. 홈 위쪽 띠에 라인아트 부품(static/post/)을 manifest 좌표대로 쌓는다.
-   창구 다섯 개가 순서의 다섯 단계이고, 세션은 그 앞에 선 손님이다. 장식이 아니라 세션 상태를 그대로 옮긴다
+/* Post(Cozy Office) 테마의 옛 라인아트 장면(사무실 번들이 안 실렸을 때만 쓰는 대체). 홈 위쪽 띠에 라인아트 부품(static/post/)을 manifest 좌표대로 쌓는다.
+   칸 다섯 개가 순서의 다섯 단계이고, 세션은 그 앞에 선 사람이다. 장식이 아니라 세션 상태를 그대로 옮긴다
    (내 차례 = 손을 흔든다 · 막힘/확인 못 함 = 머뭇거린다 · 일하는 중 = 걷는다 · 승인 기다림 = 선다 · 끝 = 손을 든다).
    Post 일 때만 그린다. 테마가 바뀌면 bh-theme 이벤트로 새로 고침 없이 붙고 떨어진다. prefers-reduced-motion 이면 멈춘 한 장면이다. */
 (function () {
@@ -11,7 +11,7 @@
     { name: '개발', hint: 'AI가 만드는 중' }, { name: '검토', hint: '팀 승인 받기' }, { name: '합쳐짐', hint: '끝, 반영됨' }
   ];
   var MAX_PEOPLE = 14;
-  var PL = window.BHPostLogic;  // 손님 고정 배정·상태·창구 규칙(post-logic.js). 장면과 모든 화면의 아바타가 같은 함수를 쓴다
+  var PL = window.BHPostLogic;  // 사람 고정 배정·상태·단계 규칙(post-logic.js). 장면과 모든 화면의 아바타가 같은 함수를 쓴다
   var LABEL = PL.LABEL, GLYPH = PL.GLYPH;
 
   var manifest = null, loading = null;
@@ -23,7 +23,7 @@
     sc.src = BASE + 'manifest.js';
     function done(ok) { manifest = ok ? window.BWPOST : null; var l = loading; loading = null; l.forEach(function (f) { f(!!manifest); }); }
     sc.onload = function () { done(!!window.BWPOST); };
-    sc.onerror = function () { console.debug('우체국 장면 부품 목록을 읽지 못했습니다'); done(false); };
+    sc.onerror = function () { console.debug('세션 장면 부품 목록을 읽지 못했습니다'); done(false); };
     document.head.appendChild(sc);
   }
 
@@ -35,7 +35,7 @@
   function calm() { return fxLevel() === '0'; }
   function animOn() { return !calm() && !reducedMotion(); }
 
-  /* 장면 하나(띠 + 창구 이름표). list 는 [{ id, title, state, station, tag }]. */
+  /* 장면 하나(띠 + 단계 이름표). list 는 [{ id, title, state, station, tag }]. */
   function Scene(host, opts) {
     var M = manifest, L = M.layout, F = M.files, P = {};
     L.people.forEach(function (q) { P[q.name] = q; });
@@ -55,7 +55,7 @@
     }
     function flip(list, per, ph) { anims.push(function (t) { var k = Math.floor(t / per + (ph || 0)) % list.length; list.forEach(function (im, i) { im.style.opacity = i === k ? 1 : 0; }); }); }
 
-    /* 바뀌지 않는 배경·창구·소품 */
+    /* 바뀌지 않는 배경·칸·소품 */
     put('bg/wall.svg', 800, 120);
     // 화려(fx=2)에서만 창문마다 구름이 4초 주기로 바뀐다(창문 사이 0.37 위상차)
     L.windows.forEach(function (w, i) {
@@ -93,7 +93,7 @@
     L.props.forEach(function (q) { put(q.file, q.x, q.y); });
     band.appendChild(peopleLayer);
 
-    /* 세션 손님. 바뀐 것이 있을 때만 이 층을 다시 만든다. */
+    /* 세션 사람. 바뀐 것이 있을 때만 이 층을 다시 만든다. */
     var peopleAnims = [];
     function drawPeople(list) {
       while (peopleLayer.firstChild) peopleLayer.removeChild(peopleLayer.firstChild);
@@ -148,7 +148,7 @@
     function describe(list) {
       var shown = list.length, cut = shown > MAX_PEOPLE ? '(그림에는 ' + MAX_PEOPLE + '개만 그렸어)' : '';
       var turn = list.filter(function (s) { return s.state === 'turn'; }).length;
-      wrap.setAttribute('aria-label', '우체국 장면. 세션 ' + shown + '개가 다섯 창구(요구사항 · 개발 Spec · 개발 · 검토 · 합쳐짐) 앞에 서 있어' + cut + (turn ? ' · 내 차례 ' + turn + '개' : '') + '. 같은 내용이 왼쪽 세션 목록에 있어.');
+      wrap.setAttribute('aria-label', '세션 장면. 세션 ' + shown + '개가 다섯 단계(요구사항 · 개발 Spec · 개발 · 검토 · 합쳐짐) 중 어디에 있는지 보여 줘' + cut + (turn ? ' · 내 차례 ' + turn + '개' : '') + '. 같은 내용이 왼쪽 세션 목록에 있어.');
     }
 
     function fit() {
@@ -191,7 +191,7 @@
   }
 
   /* 홈이 부른다. host 는 빈 div. 테마가 post 일 때만 장면이 있고, 테마가 바뀌면 붙거나 떨어진다.
-     opts: { list(): 장면에 올릴 세션 목록, onNavigate(href), onFocus(f) — 사무실 장면이 메모 자리를 알린다 }. office(window.BHOfficeScene)를 주면 우체국 장면 대신 사무실 장면을 붙인다. */
+     opts: { list(): 장면에 올릴 세션 목록, onNavigate(href), onFocus(f) — 사무실 장면이 메모 자리를 알린다 }. office(window.BHOfficeScene)를 주면 옛 라인아트 장면 대신 사무실 장면을 붙인다. */
   // 사무실 번들의 작은 창(Document PiP)은 번들 안에 닫기 API 가 없어 브라우저 API 로 닫는다(PiP 는 이 장면만 쓴다)
   function closePip() {
     try { var w = window.documentPictureInPicture && window.documentPictureInPicture.window; if (w) w.close(); } catch (e) { console.warn('작은 창(PiP)을 닫지 못함', e); }
@@ -236,7 +236,7 @@
     sync();
     return {
       update: function () { if (scene) scene.update(opts.list()); },
-      focus: function (id) { wantFocus = id || null; if (scene && scene.focus) scene.focus(wantFocus); },  // 사무실 장면이 그 세션의 주인공을 보여 준다(우체국 장면은 아무것도 안 한다)
+      focus: function (id) { wantFocus = id || null; if (scene && scene.focus) scene.focus(wantFocus); },  // 사무실 장면이 그 세션의 주인공을 보여 준다(옛 라인아트 장면은 아무것도 안 한다)
       destroy: function () {
         dead = true; document.removeEventListener('bh-theme', onTheme); document.removeEventListener('bh-pref', onPref);
         if (reduce && reduce.removeEventListener) reduce.removeEventListener('change', onMotion);
@@ -245,7 +245,7 @@
     };
   }
 
-  /* 세션 목록(사이드·접힌 레일·차분 목록)의 작은 아바타(#1066): 우체국 직원 그림을 30×36 칸에 잘라 넣으면 손 흔드는 팔·소품이 겹쳐 팔이 여러 개처럼 보인다.
+  /* 세션 목록(사이드·접힌 레일·차분 목록)의 작은 아바타(#1066): 직원 그림을 30×36 칸에 잘라 넣으면 손 흔드는 팔·소품이 겹쳐 팔이 여러 개처럼 보인다.
      그래서 'sm' 는 그림 대신 제목 첫 글자를 둥근 칸에 쓴다(홈 "내 세션" 목록의 글자 아바타와 같은 모양). 이름은 opts.name 으로 받고,
      app.js 의 사이드 목록은 이름을 안 넘기므로(아바타만 부른다) 같은 줄의 제목에서 읽어 채운다(fillLetters). 큰 그림(카드 머리·세션 머리)은 잘리지 않으니 그대로다. */
   /* 제목의 첫 글자 하나. 앞 공백·제로폭 문자는 건너뛰고, 국기·가족 이모지·키캡처럼 여러 코드 조각이 한 글자인 것은 한 글자로 센다(Intl.Segmenter 가 없으면 코드 한 개). */
@@ -278,7 +278,7 @@
     return span;
   }
 
-  /* 세션 손님 아바타(span.po-av). 장면의 손님과 같은 사람이다(personOf). 자세는 상태로 정한다(내 차례 = 편지를 흔듦 · 막힘/확인 못 함 = 머리를 긁음 · 승인 기다림 = 앉음 · 끝 = 엄지 척 · 그 밖 = 서 있음).
+  /* 세션 사람 아바타(span.po-av). 장면의 사람과 같다(personOf). 자세는 상태로 정한다(내 차례 = 손을 흔듦 · 막힘/확인 못 함 = 머리를 긁음 · 승인 기다림 = 앉음 · 끝 = 엄지 척 · 그 밖 = 서 있음).
      opts.size: 'sm'(글자 아바타, opts.name 의 첫 글자 — 아래 letterAvatar) · 'lg'(88×104, 세션 머리) · 생략(34×40, 카드 머리). Post 가 아니어도 만들 수 있지만 보이는 것은 Post 일 때뿐이다(CSS). */
   function avatar(sessionId, state, opts) {
     var size = opts && opts.size;
@@ -288,10 +288,10 @@
     span.setAttribute('aria-hidden', 'true');
     function img(n, cls) { var im = new Image(); im.alt = ''; im.decoding = 'async'; im.src = BASE + 'people/' + who + '/' + n + '.svg'; if (cls) im.className = cls; span.appendChild(im); }
     img(pose === 'ask' ? 'ask-1' : pose === 'stuck' ? 'stuck-1' : pose === 'walk' ? 'walk-1' : pose);
-    if (pose === 'ask' && animOn()) img('ask-2', 'po-av-b');  // 두 장을 번갈아 편지를 흔든다. 움직임 줄이기·차분이면 한 장
+    if (pose === 'ask' && animOn()) img('ask-2', 'po-av-b');  // 두 장을 번갈아 손을 흔든다. 움직임 줄이기·차분이면 한 장
     return span;
   }
 
-  /* 다른 화면이 쓰는 것: personOf·stateOf·stationOf(post-logic.js 와 같은 함수), avatar, isPost, STEP(창구 이름·풀이) */
+  /* 다른 화면이 쓰는 것: personOf·stateOf·stationOf(post-logic.js 와 같은 함수), avatar, isPost, STEP(단계 이름·풀이) */
   window.BHPostScene = { attach: attach, STEP: STEP, avatar: avatar, isPost: isPost, calm: calm, animOn: animOn, letterOf: letterOf, personOf: PL.personOf, stateOf: PL.stateOf, stationOf: PL.stationOf, poseOf: PL.poseOf, LABEL: PL.LABEL, GLYPH: PL.GLYPH };
 })();

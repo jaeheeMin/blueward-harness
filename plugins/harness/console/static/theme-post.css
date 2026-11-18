@@ -1,5 +1,5 @@
-/* 테마 Post(우체국, 밝게 한 벌). 규칙은 모두 :root[data-theme="post"] 아래에만 둔다 — Sauce(data-theme 없음·sauce)는 이 파일에 닿지 않는다.
-   app.css 가 쓰는 변수를 우체국 색으로 덮고, 변수만으로 안 되는 자리(어두운 판 위 강조색 글자 따위)만 따로 고친다. */
+/* 테마 Post(Cozy Office, 밝게 한 벌). 규칙은 모두 :root[data-theme="post"] 아래에만 둔다 — Sauce(data-theme 없음·sauce)는 이 파일에 닿지 않는다.
+   app.css 가 쓰는 변수를 Post 색(빨강·남색·크림)으로 덮고, 변수만으로 안 되는 자리(어두운 판 위 강조색 글자 따위)만 따로 고친다. */
 
 :root[data-theme="post"] {
   --bg: #F6F1E7; --surface: #EFE7D8; --deep: #E8DFCF; --text: #24304A; --sec: #445069; --muted: #5B647D;
@@ -31,7 +31,7 @@
 :root[data-theme="post"] .light { border: 1.5px solid var(--bd); box-shadow: 0 1px 0 var(--bd2), 0 10px 24px -18px rgba(36,48,74,.35); }
 :root[data-theme="post"] .brand-logo { box-sizing: border-box; height: 30px; padding: 5px 9px; border-radius: 6px; background: #24304A; }
 
-/* 어두운 알약·고른 칸: Sauce 는 어두운 바탕에 초록 글자 — Post 는 우체국 빨강 바탕에 흰 글자 */
+/* 어두운 알약·고른 칸: Sauce 는 어두운 바탕에 초록 글자 — Post 는 빨강 바탕에 흰 글자 */
 :root[data-theme="post"] .pill.dark,
 :root[data-theme="post"] .light .chip[aria-pressed="true"],
 :root[data-theme="post"] .qopt[aria-pressed="true"],
@@ -53,7 +53,7 @@
 :root[data-theme="post"] .chip[aria-pressed="true"], :root[data-theme="post"] .opt[aria-pressed="true"], :root[data-theme="post"] .scale[aria-pressed="true"] { background: var(--accent-soft); }
 :root[data-theme="post"] .tbar li.now { background: var(--accent-fill); }
 
-/* 노랑 채움(내 차례 띠·꼬리표): 어두운 호박색이 바탕일 땐 남색 글자가 안 읽혀 밝은 우체통 노랑으로 */
+/* 노랑 채움(내 차례 띠·꼬리표): 어두운 호박색이 바탕일 땐 남색 글자가 안 읽혀 밝은 노랑으로 */
 :root[data-theme="post"] .banner, :root[data-theme="post"] .call, :root[data-theme="post"] .tag, :root[data-theme="post"] .ann.note,
 :root[data-theme="post"] .chip2.warn, :root[data-theme="post"] .tagx.err, :root[data-theme="post"] .bad .tagx,
 :root[data-theme="post"] .crow.wait .mk, :root[data-theme="post"] .prcard .crow.wait .mk { background: var(--post-yellow); color: #24304A; }
@@ -73,7 +73,7 @@
 /* 설정의 테마 카드 */
 :root[data-theme="post"] .theme-card[aria-checked="true"] { border-color: var(--accent); }
 
-/* ---------- 우체국 장면 ---------- */
+/* ---------- 옛 라인아트 장면(사무실 번들이 없을 때 대체) ---------- */
 :root[data-theme="post"] .po-stage { position: relative; margin: 0 0 16px; border-radius: 12px; background: var(--bg); }
 :root[data-theme="post"] .po-stage[hidden] { display: none; }
 :root[data-theme="post"] .po { position: relative; --s: 1; }
@@ -104,7 +104,7 @@
 :root[data-theme="post"] .po-plaq b { font-size: 13px; font-weight: 800; color: var(--text); }
 :root[data-theme="post"] .po-plaq small { font-size: 12px; font-weight: 500; color: var(--muted); }
 
-/* 알림 말풍선(#1016): 우체통 노랑 바탕에 남색 글자, 점은 우체국 빨강 */
+/* 알림 말풍선(#1016): 노랑 바탕에 남색 글자, 점은 빨강 */
 :root[data-theme="post"] { --bub-bg: var(--post-yellow); --bub-ink: #24304A; --bub-dot: #C73E31; }
 :root[data-theme="post"] .nb-bubble { box-shadow: 0 8px 20px -12px rgba(36,48,74,.55); }
 :root[data-theme="post"] .nb-dialog { border: 1.5px solid var(--bd); }
@@ -188,7 +188,7 @@
   :root[data-theme="post"] #app[data-intro="1"] > .shell { padding: 0 16px; }
 }
 
-/* ---------- 손님 아바타(BHPostScene.avatar) ---------- */
+/* ---------- 사람 아바타(BHPostScene.avatar) ---------- */
 :root[data-theme="post"] .po-av { position: relative; flex: none; width: 34px; height: 40px; overflow: hidden; border-radius: 10px 10px 4px 4px; background: #EFE4CF; box-shadow: inset 0 -3px 0 #D9CDB8; }
 :root[data-theme="post"] .po-av img { position: absolute; left: 50%; top: -30px; width: 92px; height: auto; max-width: none; transform: translateX(-50%); }
 :root[data-theme="post"] .po-av-turn { background: #FFD66B; box-shadow: inset 0 -3px 0 #E0A93A; }
@@ -462,7 +462,7 @@
 :root[data-theme="post"] .po-info dd.r { color: var(--st-fail-ink); }
 :root[data-theme="post"] .po-info dd.u { color: var(--st-unk-ink); }
 
-/* 창구 안내판 */
+/* 자리 안내판 */
 :root[data-theme="post"] .po-here-slot { flex: none; }
 :root[data-theme="post"] .po-here { display: grid; justify-items: center; gap: 6px; margin: 0; width: 150px; }
 :root[data-theme="post"] .po-here figcaption { display: grid; justify-items: center; text-align: center; gap: 2px; padding: 6px 10px; border-radius: 8px; background: var(--paper); border: 1.5px solid var(--text); box-shadow: 0 2px 0 var(--text); }
@@ -517,7 +517,7 @@
 :root[data-theme="post"] .po-stream .qopt { border-radius: 12px; background: var(--paper2); border-color: var(--bd); }
 :root[data-theme="post"] .po-stream .qopt[aria-pressed="true"] small { color: #fff; }
 
-/* 내 차례 카드 머리의 손님 */
+/* 내 차례 카드 머리의 사람 */
 :root[data-theme="post"] .po-ask-h { display: flex; align-items: center; gap: 10px; min-width: 0; }
 :root[data-theme="post"] .po-ask-h .po-av { margin: 0; }
 
@@ -957,7 +957,7 @@
    D단계: 효과 강도(html[data-fx]) · 차분 세션 목록 · 어두운 모드(html[data-mode="dark"])
    ====================================================================== */
 
-/* 차분(fx=0): 아바타·창구 직원·도장은 남기되 움직임 0. 장면은 그리지 않고(theme-post.js) 세션 목록이 대신한다. */
+/* 차분(fx=0): 아바타·검토 담당·도장은 남기되 움직임 0. 장면은 그리지 않고(theme-post.js) 세션 목록이 대신한다. */
 :root[data-theme="post"][data-fx="0"] .po-av .po-av-b, :root[data-theme="post"][data-fx="0"] .po-clerk .po-av-b,
 :root[data-theme="post"][data-fx="0"] .po-c1, :root[data-theme="post"][data-fx="0"] .po-c2 { animation: none; opacity: 0; }
 :root[data-theme="post"][data-fx="0"] .po-seal { animation: none; }
@@ -998,7 +998,7 @@
 :root[data-theme="post"] .dmeta .toolrow { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* 어두운 모드: 가이드 5절 어두운 값. 글자로 쓰는 색(--attn · --st-* · --accent)은 어두운 판 위에서 4.5:1 이 되도록 밝게 하고,
-   흰 글자가 올라가는 채움(--accent-fill 따위)은 밝을 때와 같게 둔다. 장면 그림(SVG)·손님 아바타 바탕·장면 안 이름표·노랑 꼬리표는 낮 우체국 그대로다. */
+   흰 글자가 올라가는 채움(--accent-fill 따위)은 밝을 때와 같게 둔다. 장면 그림(SVG)·사람 아바타 바탕·장면 안 이름표·노랑 꼬리표는 낮 모습 그대로다. */
 :root[data-theme="post"][data-mode="dark"] {
   --bg: #161B27; --surface: #1B2130; --deep: #1B2130; --text: #F3EEE3; --sec: #CFC8B8; --muted: #9CA3B5;
   --accent: #F0685A; --attn: #F2B24C; --btn: #C73E31; --brand: #F0685A;

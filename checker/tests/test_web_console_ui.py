@@ -1439,7 +1439,7 @@ def test_post_theme_css_stays_under_data_theme_post():
 
 
 def test_post_home_uses_office_scene():
-    # 오늘 화면 장면은 사무실(#1033): index 가 싣고, sceneList 가 flow·t 를 주고, 팀 요약이 창구 요약 줄을 대신하며, 차분이면 목록이 남는다
+    # 오늘 화면 장면은 사무실(#1033): index 가 싣고, sceneList 가 flow·t 를 주고, 팀 요약이 옛 단계 요약 줄을 대신하며, 차분이면 목록이 남는다
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert html.index('src="/post/office/office-post.js"') < html.index('src="/theme-post.js"') < html.index('src="/app.js"')
     app = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -1451,8 +1451,10 @@ def test_post_home_uses_office_scene():
     scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
     assert "function attach(host, opts, office)" in scene and "office.attach(host, opts)" in scene and "calm()" in scene
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    logic = (STATIC / "post-logic.js").read_text(encoding="utf-8")  # 팀 표는 post-logic.js 한 곳(홈 팀 요약·세션 화면 안내판이 같이 읽는다)
     for team in ("요구분석팀", "설계팀", "개발팀", "기능컨설팅팀", "표준화팀", "유지보수팀"):
-        assert team in home
+        assert team in logic
+    assert "window.BHPostLogic.TEAMS" in home
     assert "paintTeams()" in home and "paintCalm()" in home and "po-maplist" in home
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     assert ".po-stage.is-office" in css and "aspect-ratio" in css
@@ -1581,16 +1583,17 @@ const states = ['turn', 'blocked', 'unk', 'run', 'wait', 'idle', 'done', 'turn']
 out.counts = P.filterCounts(states);
 out.match = P.FILTERS.map(f => states.map(s => P.filterMatch(f.id, s) ? 1 : 0).join(''));
 out.status = ['✕ 막힘 · 고친 뒤 이어서', '? 확인 못 함 · 검사를 못 했어', '내 차례 · 승인하기', '', null].map(P.statusText);
-out.here = [0, 3, 4, 9, -2].map(P.hereTitle);
+out.here = [[0, 'srs'], [1, 'spec'], [2, 'config'], [2, ''], [2, undefined], [3, 'dev'], [4, 'srs'], [9, 'dev'], [-2, 'srs-export']].map(a => P.hereTitle(a[0], a[1]));
 out.lines = P.STATES.map(P.hereLine);
 const cell = (id, value, tone) => ({ id, label: id === 'progress' ? 'AI 진행' : id, value, tone: tone || '' });
 out.info = P.infoRow([cell('step', '1 / 3 쓰기', 'g'), cell('req', 'REQ-007'), cell('pr', 'PR #301', 'w'), cell('progress', '40%')], 'SRS 쓰기').map(c => [c.label, c.value, c.tone]);
 out.infoEmpty = P.infoRow([], '').map(c => c.value).join('|');
 out.insp = P.INSP.join(',');
 out.seal = ['allow', 'allow_session', 'deny', 'answer', 'accept', 'decline', 'cancel', 'nothing'].map(d => P.sealOf(d).text + ':' + P.sealOf(d).tone);
-out.sub = P.sealSub(new Date(2026, 10, 7), '검토 창구');
-out.desk = [['permission', 1], ['plan', 1], ['question', 1], ['elicitation', 4]].map(a => P.sealDesk(a[0], a[1]));
-out.clerk = [P.clerkLine('permission', 0), P.clerkLine('plan', 0), P.clerkLine('question', 0), P.clerkLine('elicitation', 2)];
+out.sub = P.sealSub(new Date(2026, 10, 7), '리뷰 룸'); out.subNone = P.sealSub(new Date(2026, 10, 7), '');
+out.desk = [['permission', 1, 'spec'], ['plan', 1, 'spec'], ['question', 1, 'spec'], ['elicitation', 4, 'spec'], ['question', 2, 'fix'], ['question', 2, ''], ['question', 3, 'dev']].map(a => P.sealDesk(a[0], a[1], a[2]));
+out.clerk = [P.clerkLine('permission', 0), P.clerkLine('plan', 0), P.clerkLine('question', 0, 'srs'), P.clerkLine('elicitation', 2, 'standard'), P.clerkLine('question', 2, ''), P.clerkLine('question', 3, 'dev'), P.clerkLine('question', 4, 'dev')];
+out.teams = [P.teamOf('srs-export'), P.teamOf('fix'), P.teamOf(''), P.teamOf(undefined)];
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -1605,18 +1608,31 @@ def test_post_session_logic_filters_info_and_seals():
     assert out["counts"] == {"all": 8, "turn": 4, "run": 2, "done": 1}
     assert out["match"] == ["11111111", "11100001", "00011000", "00000010"]
     assert out["status"] == ["막힘 · 고친 뒤 이어서", "확인 못 함 · 검사를 못 했어", "내 차례 · 승인하기", "", ""]
-    assert out["here"] == ["1번 창구 · 쓰기 책상", "4번 창구 · 검토 창구", "5번 창구 · 발송 우체통", "5번 창구 · 발송 우체통", "1번 창구 · 쓰기 책상"]
+    # 안내판 첫 줄은 앉은 곳: 팀 자리(0~2)는 세션의 팀 이름 + 단계(설정 갈래도 단계 번호 2 라 개발팀이 아니라 자기 팀), 리뷰 룸·완료는 팀과 무관, 팀이 없으면 "팀 없음"
+    assert out["here"] == ["요구분석팀 · 요구사항", "설계팀 · 개발 Spec", "기능컨설팅팀 · 개발", "팀 없음", "팀 없음", "리뷰 룸 · 검토", "완료 · 합쳐짐", "완료 · 합쳐짐", "요구분석팀 · 요구사항"]
+    assert out["teams"] == ["요구분석팀", "유지보수팀", "", ""]
     # 가이드 2.4 둘째 줄(반말). STATES 순서: turn blocked unk run wait done idle
-    assert out["lines"] == ["편지를 들고 네 답을 기다려", "창구에서 막혀 있어", "검사를 못 해서 멈췄어", "다음 창구로 걸어가", "의자에 앉아 승인을 기다려", "편지를 다 부쳤어", "창구 앞에서 쉬고 있어"]
+    assert out["lines"] == ["네 답을 기다리고 있어", "막혀서 멈춰 있어", "검사를 못 해서 멈췄어", "지금 일하고 있어", "의자에 앉아 승인을 기다려", "일을 다 마쳤어", "잠깐 쉬고 있어"]
     # 정보 줄은 늘 다섯 칸(없으면 –) 뒤에 숫자 띠의 나머지 칸(AI 진행 따위)
     assert out["info"][:5] == [["단계", "SRS 쓰기", "g"], ["요구사항", "REQ-007", ""], ["개발 번호", "–", ""], ["작업 기록", "–", ""], ["검토 요청", "PR #301", "w"]]
     assert out["info"][5] == ["AI 진행", "40%", ""] and len(out["info"]) == 6
     assert out["infoEmpty"] == "–|–|–|–|–" and out["insp"] == "산출물,검사,기억,기록,기술"
     # 도장: 승인 주 버튼 보냄 · 질문 답 접수 · 거절·아니오·닫기 반송
     assert out["seal"] == ["보냄:ok", "보냄:ok", "반송:no", "접수:ok", "접수:ok", "반송:no", "반송:no", "접수:ok"]
-    assert out["sub"] == "11.07 · 검토 창구"
-    assert out["desk"] == ["검토 창구", "검토 창구", "설계 창구", "발송 우체통"]
-    assert out["clerk"] == ["검토 창구 직원이 네 도장을 기다려. 누르면 도장이 찍혀"] * 2 + ["1번 창구 앞에서 손님이 편지를 흔들며 네 답을 기다려", "3번 창구 앞에서 손님이 편지를 흔들며 네 답을 기다려"]
+    assert out["sub"] == "11.07 · 리뷰 룸"
+    assert out["desk"] == ["리뷰 룸", "리뷰 룸", "설계팀 자리", "완료", "유지보수팀 자리", "", "리뷰 룸"]
+    # 승인·계획은 리뷰 룸의 검토 담당, 질문은 그 세션이 앉은 곳(팀·리뷰 룸을 모르면 곳 이름 없이)
+    assert out["clerk"] == ["리뷰 룸에서 검토 담당이 네 승인을 기다려. 누르면 승인 도장이 찍혀"] * 2 + [
+        "요구분석팀 자리에서 손을 들고 네 답을 기다려", "표준화팀 자리에서 손을 들고 네 답을 기다려", "세션이 손을 들고 네 답을 기다려", "리뷰 룸에서 손을 들고 네 답을 기다려", "세션이 손을 들고 네 답을 기다려"]
+    # 우체국 말(창구·편지·손님)은 Cozy Office 화면 글에 없다
+    for name in ("post-logic.js", "post-session.js", "post-home.js", "post-pipeline.js", "theme-post.js", "theme-post.css", "app.js", "app.css", "index.html", "post/manifest.js"):
+        txt = (STATIC / name).read_text(encoding="utf-8")
+        assert not any(w in txt for w in ("창구", "편지", "손님", "우체", "발송")), name
+    # 도장 밑줄은 자리를 모르면(팀 없음) 날짜만, 안내판은 flow 가 바뀌면 다시 그린다, 도장은 flow 를 자리 이름에 넘긴다
+    assert out["subNone"] == "11.07"
+    app_js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "sig = s.id + '|' + state + '|' + k + '|' + flow" in app_js
+    assert "PL.sealDesk(info.kind, info.k, info.flow)" in (STATIC / "post-session.js").read_text(encoding="utf-8")
 
 
 def test_post_session_ui_wiring():
@@ -1635,7 +1651,7 @@ def test_post_session_ui_wiring():
     assert "width: 108px" in seal and "height: 108px" in seal and "border: 4px double" in seal and "rotate(-14deg)" in seal and ".38s" in seal
     assert "font-size: 22px" in re.search(r"\.po-seal b \{[^}]*\}", css).group(0)
     assert "scale(2.4)" in css and "prefers-reduced-motion" in css
-    assert "width: 112px" in css  # 좁은 화면 창구 안내판
+    assert "width: 112px" in css  # 좁은 화면 자리 안내판
 
 
 def test_post_outputs_tab_lists_each_file_once():
@@ -4198,6 +4214,14 @@ def test_cozy_office_display_name():
     guide = (ROOT / "docs" / "guide" / "harness-guide.html").read_text(encoding="utf-8")
     assert "테마(Sauce · Cozy Office)" in guide and "Cozy Office 를 고르면 새로 고침 없이" in guide
     assert "Post" not in guide and "우체국" not in guide
+    # 길잡이의 Cozy Office 장면 말은 사무실 말(창구·손님·편지는 다른 탭의 비유에만 있다)
+    assert "1번 창구" not in guide and "검토 창구 직원" not in guide and "그 세션의 손님" not in guide and "요구분석팀 · 요구사항" in guide
+    # 설정 테마 카드 미리보기(.tc-post)는 항공우편 줄무늬(135deg)가 아니라 창문 줄 + 책상
+    appcss = (STATIC / "app.css").read_text(encoding="utf-8")
+    assert ".tc-prev.tc-post {" in appcss and "135deg" not in appcss[appcss.index(".tc-prev.tc-post {"):appcss.index(".tc-prev.tc-post {") + 300]
+    # 사무실 번들이 없을 때만 쓰는 옛 라인아트 장면의 읽기 프로그램 안내·로그도 우체국 말이 아니다
+    tp = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    assert "우체국" not in tp and "창구" not in tp and "'세션 장면. 세션 '" in tp
 
 
 def test_cozy_survey_memo_person_click_drag_hide_and_small_fixes():
@@ -4294,8 +4318,8 @@ def test_cozy_teams_terminal_session_sits_in_team_by_used_flow_skill():
     assert out["tool"] == "" and out["none"] == "" and out["nul"] == ""  # start·deliver 같은 도구·공용 스킬은 팀을 정하지 않는다
     # 스킬 → 팀 표는 workflow.json 에서 읽은 것만: 그 스킬을 단계로 가진 갈래가 모두 같은 팀일 때만 들어 있다(start 는 개발·설정·표준·유지보수가 같이 써서 빠진다)
     wf = json.loads((STATIC.parents[1] / "workflow.json").read_text(encoding="utf-8"))
-    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
-    teams = {fid: t for t, ids in re.findall(r"\['([^']+)', \[([^\]]*)\]\]", home[home.index("var TEAMS"):home.index("function teamOf")])
+    logic = (STATIC / "post-logic.js").read_text(encoding="utf-8")
+    teams = {fid: t for t, ids in re.findall(r"\['([^']+)', \[([^\]]*)\]\]", logic[logic.index("var TEAMS"):logic.index("function teamOf")])
              for fid in re.findall(r"'([^']+)'", ids)}
     skill_teams = {}
     for f in wf["flows"]:
@@ -4311,4 +4335,8 @@ def test_cozy_teams_terminal_session_sits_in_team_by_used_flow_skill():
     assert '"usedSkills": list(s["skillStates"])' in store
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "flow: PL.teamFlowOf(s), t: s.updatedAt" in app
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
     assert home.count("teamOf(PL.teamFlowOf(s))") == 3
+    # 우체국 말을 사무실 말로(2026-11-18 5회차): 안내판·요청 줄·도장 밑줄이 세션의 팀(teamFlowOf)을 같이 받는다
+    assert "window.BHPostSession.here(s.id, state, k, flow)" in app and "PSS.clerk(kind, sid(), k, PL.teamFlowOf(s))" in app and "flow: s ? PL.teamFlowOf(s) : ''" in app
+    assert "PL.hereTitle(k, s.flow)" in home
