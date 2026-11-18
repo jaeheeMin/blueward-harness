@@ -3923,3 +3923,11 @@ def test_post_x2b_regression_source_and_css():
     assert "isPostTheme() ? h('a', { class: 'po-skip po-skip-rail', href: '#main', 'data-skip': '1', text: '세션 목록 건너뛰기' }) : null," in app
     assert ':root[data-theme="post"] .po-skip-top:focus, :root[data-theme="post"] .po-skip-rail:focus { position: fixed; top: 8px; left: 8px; z-index: 200; }' in css
     assert ':root[data-theme="post"] #main { scroll-margin-top: 88px; }' in css
+
+
+def test_post_side_list_scrolls_to_new_session_after_its_data_arrives():
+    """새 작업을 시작해 바로 넘어간 세션은 내용을 받기 전이라 목록 자리가 아직 아니다 — 그때 굴리면 줄이 옮겨 가 창 밖에 남았다(Aside 실화면)."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    body = app.split("function postSideAfter(cur) {", 1)[1].split("\n  }\n", 1)[0]
+    assert "var ss = route.name === 'session' ? sessions.get(route.id) : null;" in body and "if (ss && !ss.cwd) return;" in body
+    assert body.index("if (ss && !ss.cwd) return;") < body.index("sideShownFor = cur;")

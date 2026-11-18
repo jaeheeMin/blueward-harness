@@ -1385,6 +1385,8 @@
     if (sideShownFor === cur) return;
     var list = sideEl.querySelector('.po-slist .nav-list'), row = list && list.querySelector('[aria-current="page"]');
     if (!list || (!row && !loadedOnce)) return;  // 세션을 아직 못 읽었으면 다음 그리기에서 다시 본다
+    var ss = route.name === 'session' ? sessions.get(route.id) : null;
+    if (ss && !ss.cwd) return;  // 막 시작한 세션은 내용을 받기 전이라 목록 자리가 아직 아니다 — 받은 뒤 그 자리로 굴린다(먼저 굴리면 줄이 옮겨 가 창 밖에 남았다)
     sideShownFor = cur;
     if (!row) return;
     var lr = list.getBoundingClientRect(), rr = row.getBoundingClientRect();
