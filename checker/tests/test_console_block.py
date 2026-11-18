@@ -99,9 +99,24 @@ def test_report_with_slow_server_gives_up_quickly(monkeypatch, capfd):
 
 def test_report_ignores_bad_input_and_bad_port(monkeypatch, capfd):
     monkeypatch.setenv("HARNESS_CONSOLE_PORT", "abc")
+    ports = []
+
+    class Refused:  # 실제 4873 에 보내면 사용자 콘솔에 가짜 세션(s1, 폴더 /w)이 남는다. 연결 대신 포트만 적고 거부한다
+        def __init__(self, host, port, timeout=None):
+            ports.append(port)
+
+        def connect(self):
+            raise ConnectionRefusedError
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(console_block.http.client, "HTTPConnection", Refused)
     for payload in (None, "x", {}, {"session_id": ""}, {"session_id": 3}):
         console_block.report(payload, "h", "사유")
+    assert ports == []
     console_block.report(PAYLOAD, "h", "사유")  # 포트가 숫자가 아니면 4873 으로 간다. 거기 콘솔이 없어도 조용하다
+    assert ports == [4873]
     out = capfd.readouterr()
     assert out.out == "" and out.err == ""
 

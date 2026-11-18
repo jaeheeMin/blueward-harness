@@ -107,8 +107,9 @@
       var bad = [], tooMany = 0;
       files.forEach(function (file) {
         var why = whyNot(file, items);
+        if (!why && opts.dedupe && items.some(function (x) { return x.name === file.name && x.size === file.size && x.type === typeOf(file) && x.lm === file.lastModified; })) why = file.name + ': 이미 붙였어.';  // opts.dedupe(Post): 같은 파일을 두 번 고르거나 끌어 놓아도 칩이 둘로 붙지 않게
         if (why) { bad.push(why); return; }
-        var a = { name: file.name || (typeOf(file).indexOf('image/') === 0 ? '붙여 넣은 그림' : '첨부'), type: typeOf(file), size: file.size, data: '' };
+        var a = { name: file.name || (typeOf(file).indexOf('image/') === 0 ? '붙여 넣은 그림' : '첨부'), type: typeOf(file), size: file.size, lm: file.lastModified, data: '' };  // lm: 붙여 넣은 다른 그림이 이름·크기가 같아도 같은 파일로 보지 않게
         items.push(a);
         pendingReads++;
         var rd = new root.FileReader();

@@ -25,11 +25,16 @@
   function upper(v) { return String(v == null ? '' : v).toUpperCase(); }
   function prState(s) { var pr = s && s.flowPr; return pr && pr.number ? upper(pr.state) : ''; }
 
-  /* 세션 상태(가이드 6.2). L 은 BHLogic. */
-  function stateOf(s, L) {
+  /* 내 차례 계산에 쓰는 "아직 답 안 한 요청 번호" 함수(app.js·flow-ui.js 의 openIds). 화면이 한 번 알려 주면 stateOf 가 늘 이걸로 센다.
+     없으면 서버가 준 pendingRequestIds 를 그대로 믿어, 방금 답한 요청이 다음 목록 갱신 전까지 내 차례로 남는다(홈 덱·띠와 어긋남). */
+  var openIdsFn = null;
+  function useOpenIds(fn) { openIdsFn = typeof fn === 'function' ? fn : null; }
+
+  /* 세션 상태(가이드 6.2). L 은 BHLogic. openIds 를 안 주면 useOpenIds 로 받은 것을 쓴다(띠·알림·홈과 같은 내 차례 기준, #1027 D5). */
+  function stateOf(s, L, openIds) {
     if (!s) return 'idle';
     var bk = L.blockOf(s);
-    if (!bk && s.status !== 'ended' && L.groupOf(s) === 'todo') return 'turn';
+    if (!bk && s.status !== 'ended' && L.groupOf(s, openIds || openIdsFn || undefined) === 'todo') return 'turn';
     if (bk) return bk.kind === 'cannot_check' ? 'unk' : 'blocked';
     if (s.status === 'running' || s.status === 'starting') return 'run';
     if (s.status === 'ended') return 'done';  // 실제로 돌지 않는 세션은 PR 이 열려 있어도 끝남이다(#1059). 승인 기다림(일하는 중 칸)에 넣지 않는다
@@ -57,8 +62,9 @@
 
   /* ---------- 세션·요청 화면(B단계): 목록 걸러보기 · 창구 안내 · 정보 줄 · 도장 글자 ---------- */
 
-  /* 세션 목록 위의 걸러보기. 내 차례 = 내 답·막힘·확인 못 함(시안은 넷을 한 묶음으로 센다), 일하는 중 = 일하는 중·승인 기다림. 쉬는 중은 "전체" 에만 있다. */
-  var FILTERS = [{ id: 'all', label: '전체' }, { id: 'turn', label: '내 차례' }, { id: 'run', label: '일하는 중' }, { id: 'done', label: '끝남' }];
+  /* 세션 목록 위의 걸러보기. 할 일 = 내 답·막힘·확인 못 함(시안은 넷을 한 묶음으로 센다), 일하는 중 = 일하는 중·승인 기다림. 쉬는 중은 "전체" 에만 있다.
+     묶음 이름이 "내 차례" 면 홈·띠·알림의 "내 차례 N건"(막힘·확인 못 함은 따로 셈)과 같은 이름에 다른 숫자가 나온다. 그래서 "할 일" 이다(내 차례 + 막힘 + 확인 못 함, 세션 수). */
+  var FILTERS = [{ id: 'all', label: '전체' }, { id: 'turn', label: '할 일' }, { id: 'run', label: '일하는 중' }, { id: 'done', label: '끝남' }];
   var FILTER_OF = { turn: 'turn', blocked: 'turn', unk: 'turn', run: 'run', wait: 'run', done: 'done' };
   function filterMatch(f, state) { return f === 'all' || FILTER_OF[state] === f; }
   function filterCounts(states) {
@@ -70,7 +76,8 @@
   function statusText(t) { return String(t == null ? '' : t).replace(/^[✕?!]\s*/, ''); }
 
   /* 세션 머리 오른쪽 안내판(figure.po-here). 첫 줄 "{k+1}번 창구 · {창구 이름}", 둘째 줄은 상태별 반말(가이드 2.4). */
-  var HERE = { turn: '편지를 들고 네 답을 기다려', blocked: '창구에서 막혀 있어', wait: '의자에 앉아 승인을 기다려', done: '편지를 다 부쳤어', unk: '어디 있는지 확인 못 했어' };
+  /* 확인 못 함(unk)은 blockOf 의 cannot_check — 검사를 못 돌린 것이지 손님 자리를 모르는 게 아니다(첫 줄이 이미 "N번 창구"). 쉬는 중은 걷지 않는다(장면에서도 서 있다) */
+  var HERE = { turn: '편지를 들고 네 답을 기다려', blocked: '창구에서 막혀 있어', wait: '의자에 앉아 승인을 기다려', done: '편지를 다 부쳤어', unk: '검사를 못 해서 멈췄어', idle: '창구 앞에서 쉬고 있어' };
   function hereTitle(k) { var i = Math.max(0, Math.min(4, k | 0)); return (i + 1) + '번 창구 · ' + STATION[i].desk; }
   function hereLine(state) { return HERE[state] || '다음 창구로 걸어가'; }
 
@@ -87,6 +94,29 @@
       if (!INFO.some(function (x) { return x[1] === c.id; })) out.push({ id: c.id, label: c.label, value: String(c.value), tone: c.tone || '' });
     });
     return out;
+  }
+
+  /* 고른 프로젝트(저장소)로 세션 거르기(#1070). folders: 서버 /api/repos 의 폴더별 판정 { cwd: { state, key, name, top, folder } },
+     project: { key, top }(고른 저장소와 고른 폴더의 맨 위 폴더) 또는 null(거르지 않음). 돌려주는 값: { list: 보이는 세션(순서 그대로), tag: { 세션 id: { kind, text } } }.
+     같은 저장소면 보이고, 고른 폴더와 맨 위 폴더가 다르면(같은 저장소의 작업용 폴더·worktree) 폴더 이름을 붙인다. 다른 저장소는 뺀다.
+     git 저장소가 아니거나(no) 판정하지 못한(unknown, 폴더 없음 등) 세션은 감추지도 어느 저장소라고 지어내지도 않고 보이되 그렇다고 붙인다.
+     아직 판정을 받지 못한 폴더(목록에 없음)는 보이고 아무것도 붙이지 않는다(곧 받는다). */
+  var PROJECT_TAG = { no: 'git 저장소 아님', unknown: '저장소 확인 못 함' };
+  function projectView(list, folders, project) {
+    var tag = {};
+    if (!project || !project.key || !folders) return { list: list.slice(), tag: tag };
+    var out = list.filter(function (s) {
+      var f = s && s.cwd ? folders[s.cwd] : { state: 'unknown' };
+      if (!f) return true;
+      if (f.state === 'yes') {
+        if (f.key !== project.key) return false;
+        if (f.top && project.top && f.top !== project.top) tag[s.id] = { kind: 'folder', text: f.folder || f.top };
+        return true;
+      }
+      tag[s.id] = { kind: f.state === 'no' ? 'nogit' : 'unknown', text: PROJECT_TAG[f.state] || PROJECT_TAG.unknown };
+      return true;
+    });
+    return { list: out, tag: tag };
   }
 
   var INSP = ['산출물', '검사', '기억', '기록', '기술'];
@@ -107,8 +137,28 @@
   /* 도장을 찍을 창구: 승인·계획은 검토 창구, 질문·MCP 질문은 그 세션이 선 창구. */
   function sealDesk(kind, k) { return kind === 'question' || kind === 'elicitation' ? STATION[Math.max(0, Math.min(4, k | 0))].desk : STATION[3].desk; }
 
-  var api = { FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
-    clerkLine: clerkLine, sealOf: sealOf, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
+  /* 갈래 세션의 차례 글(세션 머리 제목·사이드 줄·홈 덱). 서버의 차례(turnSkill)는 git 상태로 짐작한 start·deliver·prs 라 갈래 단계와 어긋난다:
+     srs·spec 첫 단계는 main 에서 시작해 "작업 시작", 구현 중 변경이 있으면 "올릴 준비". Post 는 갈래의 지금 단계를 따른다.
+     갈래가 없거나 끝났거나 지금 단계를 모르면 null(원래 글). 올리기 단계에 올릴 변경이 있으면(G-09) 원래 글이 맞아 null. */
+  function flowNow(s, L) {
+    if (!s || !s.flowId || s.flowFinished || !L) return null;
+    var st = L.currentStep(s);
+    if (!st) return null;
+    return { name: L.shortStepName(st.name || st.id), short: L.stepShort(st), deliver: st.kind === 'skill' && st.skill === 'deliver', wait: st.kind === 'wait' };
+  }
+  function turnLine(s, L) {
+    var t = flowNow(s, L);
+    if (!t || (t.deliver && s.turnSkill === 'deliver')) return null;
+    return t.wait ? '지금은 ' + t.name + ' 단계야.' : '이제 ' + t.name + ' 차례야.';
+  }
+  /* 사이드 줄 "내 차례 · …" 의 뒤 글: 올리기 단계가 아니면 갈래 단계 짧은 이름(구현·설정·기록 …). */
+  function turnVerb(s, L) {
+    var t = flowNow(s, L);
+    return t && !t.deliver ? t.short : null;
+  }
+
+  var api = { turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
+    clerkLine: clerkLine, sealOf: sealOf, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;
 })(typeof window !== 'undefined' ? window : this);

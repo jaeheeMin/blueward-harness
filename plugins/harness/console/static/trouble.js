@@ -43,16 +43,36 @@
 
     function chip(done) { return h('span', { class: done ? 'tag ok' : 'tag', text: done ? '해결됨' : '아직 안 풀림' }); }
     function waitFor(fetch, draw, state) {
-      var tries = 0;
+      var tries = 0, mine = state.seq = (state.seq || 0) + 1;  // 찾기·거르기를 잇달아 하면 늦게 온 옛 응답이 새 결과를 덮지 않게 마지막 요청만 그린다
       function once() {
-        if (state.dead) return;
+        if (state.dead || state.seq !== mine) return;
         fetch().then(function (data) {
-          if (state.dead) return;
+          if (state.dead || state.seq !== mine) return;
           draw(data);
           if (data && data.loading && tries++ < 30) state.timer = setTimeout(once, 1500);
-        }, function (e) { if (!state.dead) draw(null, e); });
+        }, function (e) { if (!state.dead && state.seq === mine) draw(null, e); });
       }
       once();
+    }
+    // Post: 화면을 통째로 다시 그려도(거르기·찾기·종류 고르기·올린 뒤 다시 읽기) 키보드로 누르던 칸에 포커스가 남게 한다. 새로 그린 노드는 포커스가 없어 body 로 떨어진다.
+    // 칸을 알아보는 값: 입력칸은 id·aria-label, 단추는 모양(태그·class·글).
+    function isPostNow() { return !!(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post'); }
+    function focusKey(page) {
+      var a = document.activeElement;
+      if (!a || !page.contains(a) || !isPostNow()) return null;
+      if (a.id) return ['id', a.id];
+      if (a.getAttribute('aria-label') && /^(SELECT|TEXTAREA|INPUT)$/.test(a.tagName)) return ['label', a.tagName, a.getAttribute('aria-label')];
+      if (a.tagName === 'BUTTON') return ['button', a.className, a.textContent, sameButtons(page, a.className, a.textContent).indexOf(a)];  // 같은 단추가 여럿(후보마다 '이걸로 해결')이면 몇 번째인지까지
+      return null;
+    }
+    function sameButtons(page, cls, text) { return [].filter.call(page.querySelectorAll('button'), function (n) { return n.className === cls && n.textContent === text; }); }
+    function focusBack(page, key) {
+      if (!key) return;
+      var found = null;
+      if (key[0] === 'id') found = document.getElementById(key[1]);
+      else if (key[0] === 'label') found = [].filter.call(page.querySelectorAll(key[1].toLowerCase()), function (n) { return n.getAttribute('aria-label') === key[2]; })[0];
+      else found = sameButtons(page, key[1], key[2])[key[3]];
+      if (found && !found.disabled && page.contains(found)) found.focus({ preventScroll: true });
     }
     function errBox(e, title) {
       var msg = e && e.status === 404 ? e.message : (e && e.message) || '읽지 못했어';
@@ -81,6 +101,11 @@
       input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); search(); } });
 
       function draw(d, e) {
+        var key = focusKey(page);
+        drawNow(d, e);
+        focusBack(page, key);
+      }
+      function drawNow(d, e) {
         clear(page);
         if (!d) {
           page.appendChild(h('section', { class: 'light' }, errBox(e, '기록 목록을 ')));
@@ -126,7 +151,7 @@
         if (d.loading && !d.items.length) rows.appendChild(h('div', { class: 'tb-empty', role: 'status', text: 'GitHub 에서 읽는 중이야…' }));
         light.appendChild(rows);
         bad.forEach(function (p) {
-          light.appendChild(h('div', { class: 'tb-empty' }, h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }), ' · ' + p.name + ' · 확인 못 함 — ' + p.reason + ' ',
+          light.appendChild(h('div', { class: 'tb-empty' }, h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }), ' · ' + p.name + (isPostNow() ? ' — ' : ' · 확인 못 함 — ') + p.reason + ' ',  // Post: 앞 표시(? 확인 못 함)와 같은 말을 한 줄에 두 번 쓰지 않는다
             h('button', { type: 'button', class: 'tb-again', text: '다시 확인', onClick: function () { reload(true); } })));
         });
         if (d.items.length || ok.length) {
@@ -144,6 +169,8 @@
     function itemView(root, repo, number) {
       var state = { dead: false }, page = h('div', { class: 'tb-page' }), title = '문제·해결 기록';
       var compose = { kind: 'candidate', text: '', busy: false, note: '' };
+      var after = carry.landed ? 'title' : '';  // Post: 누른 단추가 비활성이 되거나 사라지면 다시 그린 뒤 이어 갈 자리('title' 제목 · 'text' 이야기 칸 · 'resolve:N' N번째 [이걸로 해결])
+      carry.landed = false;
       root.appendChild(page);
       page.appendChild(kit.loadingBox('기록을 읽는 중이야'));
 
@@ -167,6 +194,21 @@
         return h('div', { class: 'set tb-set96' }, h('span', { class: 'tb-lm', text: label }), content || h('span', { class: 'tb-lm', text: '' }));
       }
       function draw(d) {
+        var key = focusKey(page), then = after;
+        after = '';
+        drawNow(d);
+        focusBack(page, key);
+        if (then && isPostNow() && !page.contains(document.activeElement)) focusAfter(then, d);
+      }
+      // [올리기] 는 비활성이 되며 포커스를 잃고, [이걸로 해결] 은 해결되면 사라진다 — 그래서 누른 단추를 되찾지 않고 이어 쓸 자리로 보낸다. 새 기록에서 막 넘어왔을 땐 제목.
+      function focusAfter(then, d) {
+        var el = null;
+        if (then === 'text') el = page.querySelector('textarea[aria-label="내 이야기"]');
+        else if (then.indexOf('resolve:') === 0 && !d.solved) el = page.querySelectorAll('button.tb-small')[Number(then.slice(8))];
+        if (!el && then !== 'text') { el = page.querySelector('h1'); if (el) el.setAttribute('tabindex', '-1'); }
+        if (el && !el.disabled) el.focus({ preventScroll: then === 'text' });
+      }
+      function drawNow(d) {
         title = '기록 #' + d.number + ' ' + M(d.title);
         clear(page);
         var meta = h('div', { class: 'tb-meta' }, chip(d.solved));
@@ -191,8 +233,9 @@
           if (k.tag) { text.appendChild(h('span', { class: 'tagx ' + k.cls, text: k.tag })); text.appendChild(h('br')); }
           text.appendChild(document.createTextNode(M(c.text)));
           if (c.kind === 'candidate' && !d.solved) {
-            text.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill dark tb-small', text: '이걸로 해결', disabled: compose.busy, onClick: function () {
+            text.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill dark tb-small', text: '이걸로 해결', disabled: compose.busy, onClick: function (ev) {
               compose.busy = true; compose.note = '';
+              after = 'resolve:' + [].indexOf.call(page.querySelectorAll('button.tb-small'), ev.currentTarget);
               post('/api/trouble/resolve', { repo: repo, number: Number(number), commentId: c.id }).then(afterWrite, failed);
             } })));
           }
@@ -215,7 +258,7 @@
         ta.addEventListener('input', sync);
         send.addEventListener('click', function () {
           sync(); if (send.disabled) return;
-          compose.busy = true; compose.note = '';
+          compose.busy = true; compose.note = ''; after = 'text';
           post('/api/trouble/comment', { repo: repo, number: Number(number), kind: compose.kind, text: ta.value }).then(afterWrite, failed);
           send.disabled = true;
         });
@@ -329,8 +372,11 @@
       var slots = {};
       function slot(name, cls) { return (slots[name] = h('div', { class: cls || '' })); }
       function setField(k, v) { f[k] = v; recheck(); drawBad(); drawPreview(); drawSubmit(); if (k === 'title' || k === 'symptom') findSimilar(); }  // drawBad: 가린 줄 카드는 서버 검사를 기다리지 않고 바로 보인다
+      // 칸 이름(aria-label). Sauce 는 영어 키 그대로(기존 시험이 잡는다), Post 는 스크린 리더가 읽을 말로.
+      var FIELD_NAME = { symptom: '증상', cause: '원인', solution: '해결 방법' };
+      function fieldLabel(k) { return isPostNow() && FIELD_NAME[k] ? FIELD_NAME[k] : k; }
       function textarea(k, rows, extra) {
-        var ta = h('textarea', { class: 'tb-fld' + (extra ? ' ' + extra : ''), rows: rows, value: f[k], 'aria-label': k });
+        var ta = h('textarea', { class: 'tb-fld' + (extra ? ' ' + extra : ''), rows: rows, value: f[k], 'aria-label': fieldLabel(k) });
         function grow() { ta.style.height = ''; if (ta.scrollHeight > ta.clientHeight + 1) ta.style.height = ta.scrollHeight + 2 + 'px'; }
         ta.addEventListener('input', function () { setField(k, maskInput(ta)); grow(); });
         setTimeout(grow, 0);
@@ -405,7 +451,7 @@
             h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어 · 가렸어' }),
             h('span', { class: 'tb-s135', text: where(masked) + '의 값을 ' + ((window.BHLogic && window.BHLogic.MASK) || '••••••••') + ' 로 바꿨어.' + more(masked) + ' 필요 없는 줄이면 지워 줘.' }),
             h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', text: masked.length > 1 ? '그 줄들 지우기' : '그 줄 지우기', onClick: function () {
-              dropLines(masked); maskNote = ''; draw(); recheck();
+              dropLines(masked); maskNote = ''; draw(); recheck(); focusField(masked[0].field);
             } }))));
           return;
         }
@@ -415,8 +461,16 @@
           h('b', { class: 'tb-b15', text: '비밀번호·키처럼 보이는 글이 있어' }),
           h('span', { class: 'tb-s135', text: where(real) + " '" + first.label + "'." + more(real) + ' 지우고 올려 줘.' }),
           h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', text: real.length > 1 ? '그 줄들 지우기' : '그 줄 지우기', onClick: function () {
-            dropLines(real); hits = []; draw(); recheck();
+            dropLines(real); hits = []; draw(); recheck(); focusField(first.field);
           } }))));
+      }
+      // Post: [그 줄 지우기] 를 누르면 카드째 사라져 포커스가 body 로 떨어진다. 줄을 지운 칸으로 옮긴다(제목은 '제목', 나머지는 칸 이름이 aria-label). 커서는 칸 끝에.
+      function focusField(k) {
+        if (!(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post')) return;
+        var label = k === 'title' ? '제목' : fieldLabel(k), el = [].filter.call(page.querySelectorAll('input, textarea'), function (n) { return n.getAttribute('aria-label') === label; })[0];
+        if (!el) return;
+        el.focus();
+        try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { console.debug('커서를 칸 끝으로 옮기지 못했어', e); }
       }
       function drawSimilar() {
         var s = slots.similar; if (!s) return; clear(s);
@@ -469,9 +523,11 @@
           solution: f.solution, solved: f.solved }).then(function (r) {
           store(DRAFT_KEY, null);
           carry.warnings = r.warnings || [];
+          carry.landed = true;  // Post: 올린 기록 화면의 제목으로 포커스(눌렀던 단추가 있던 화면은 사라진다)
           go(itemHref(r.repo, r.number));
         }, function (e) {
           busy = false; err = { kind: e.status === 409 ? 'label' : e.status === 504 ? 'unsure' : 'fail', text: e.message }; drawSubmit(); drawErr();
+          if (isPostNow() && !page.contains(document.activeElement) && slots.submit && !slots.submit.disabled) slots.submit.focus({ preventScroll: true });  // 올리는 동안 비활성이던 단추가 포커스를 잃었다
         });
       }
       function drawErr() {
@@ -485,6 +541,11 @@
       }
 
       function draw() {
+        var key = focusKey(page);
+        drawNow();
+        focusBack(page, key);
+      }
+      function drawNow() {
         clear(page);
         if (!projects.length) {
           page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '새 기록' }), h('h1', { text: '기록을 남길 프로젝트가 없어' })));

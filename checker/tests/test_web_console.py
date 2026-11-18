@@ -9430,3 +9430,190 @@ def test_gitstate_repo_prs_reads_all_states_in_one_call_and_unknown_on_failure()
     bad = gitstate.repo_prs(lambda a, cwd: (1, "oops"), "/x")
     assert bad["state"] == "unknown" and bad["prs"] == {} and "종료코드 1" in bad["reason"]
     assert gitstate.repo_prs(lambda a, cwd: (0, "not json"), "/x")["state"] == "unknown"
+
+
+# ---- 요구사항 파이프라인 GET /api/pipeline (Post 파이프라인 탭) ----
+PIPE_LEDGER = READY_LEDGER + "| DEV-001 | 구매오더 조회 | docs/spec/DEV-001-구매.md | 김 | 완료 |\n"
+PIPE_PRS = [
+    {"number": 21, "title": "feat: DEV-002 판매오더 조회 화면 (DEV-002)", "url": "u21", "headRefName": "feat/20-dev002-list", "isDraft": False,
+     "files": [{"path": "src/zsd/list.abap"}], "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "FAILURE", "name": "doc-guard"}]},
+    {"number": 22, "title": "docs: 반품 Spec", "url": "u22", "headRefName": "docs/30-spec", "isDraft": False,
+     "files": [{"path": "docs/spec/DEV-005-반품.md"}], "statusCheckRollup": []},
+    {"number": 23, "title": "chore: 무관한 정리", "url": "u23", "headRefName": "chore/31-x", "isDraft": False, "files": [{"path": "README.md"}], "statusCheckRollup": []},
+]
+
+
+def pipe_run(work, gh=(0, json.dumps(PIPE_PRS)), **over):
+    files = {"docs/ssot/SRS.md": READY_SRS, "audit/ledger/a.md": PIPE_LEDGER}
+
+    def show(args):
+        path = args[-1].split(":", 1)[1]
+        return (0, files[path]) if path in files else (128, "")
+
+    table = {"git rev-parse --git-common-dir": (0, ".git\n"), "git remote -v": (0, "origin\thttps://github.com/o/r.git (fetch)\n"), "gh pr list": gh,
+             "git show": show, "git ls-tree": (0, "docs/ssot/SRS.md\naudit/ledger/a.md\ndocs/spec/DEV-001-구매.md\ndocs/spec/DEV-002-판매.md\n")}
+    table.update(over)
+    return ready_run(work, **table)
+
+
+def pipe_get(c):
+    c.event("p1", "SessionStart")
+    return c.call("GET", "/api/pipeline?cwd=" + urllib.parse.quote(str(c.work)))
+
+
+def test_pipeline_reads_requirements_ledger_and_open_prs_from_origin_main(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    run = pipe_run(work)
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    (work / "audit" / "ledger").mkdir(parents=True)
+    try:
+        status, body, _ = pipe_get(c)
+        assert status == 200 and body["state"] == "yes" and body["prs"]["state"] == "ok"
+        assert body["repo"]["name"] == "work" and body["repo"]["key"]
+        items = {i["number"]: i for i in body["items"]}
+        assert 4 not in items and body["hidden"] == 1  # Dropped 는 판에 올리지 않고 센다
+        assert items[1]["done"] is True and items[1]["req"] == "REQ-001" and items[1]["title"] == "구매오더 조회"  # 원장 상태 완료 = 합쳐짐
+        assert items[2]["spec"] is True and [(p["number"], p["kind"], p["checks"]) for p in items[2]["prs"]] == [(21, "work", "fail")]
+        assert items[3]["kind"] == "설정" and items[6]["kind"] == "표준"
+        assert items[5]["unsure"] is True and items[5]["prs"][0]["kind"] == "spec"  # 다음 단계 미정 + Spec PR(바뀐 Spec 파일 이름의 번호)
+        assert not any(p["number"] == 23 for i in body["items"] for p in i["prs"])  # 번호가 없는 PR 은 어느 요구사항에도 붙이지 않는다
+        assert "git fetch origin main" in run.calls
+        n = len(run.calls)
+        pipe_get(c)
+        assert not [x for x in run.calls[n:] if x.startswith(("git fetch", "git show", "gh pr list"))]  # 60초 안에는 다시 읽지 않는다
+    finally:
+        c.close()
+
+
+def test_pipeline_says_prs_unknown_instead_of_empty_review_lane(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    c = flow_console(tmp_path, monkeypatch, run=pipe_run(work, gh=(1, "")))
+    (work / "audit" / "ledger").mkdir(parents=True)
+    try:
+        body = pipe_get(c)[1]
+        assert body["state"] == "yes" and body["prs"]["state"] == "unknown" and body["prs"]["reason"]
+        assert all(i["prs"] == [] for i in body["items"])
+    finally:
+        c.close()
+
+
+@pytest.mark.parametrize("over", [{"git fetch origin main": (1, "")}, {"git show": (128, "")}])
+def test_pipeline_unknown_when_origin_main_cannot_be_read(tmp_path, monkeypatch, over):
+    work = tmp_path / "work"
+    c = flow_console(tmp_path, monkeypatch, run=pipe_run(work, **over))
+    (work / "audit" / "ledger").mkdir(parents=True)
+    try:
+        body = pipe_get(c)[1]
+        assert body["state"] == "unknown" and body["reason"] and "items" not in body  # 빈 판·0건으로 뭉개지 않는다
+    finally:
+        c.close()
+
+
+def test_pipeline_not_applicable_without_srs_or_ledger_and_rejects_unknown_folder(tmp_path, monkeypatch):
+    work = tmp_path / "work"  # audit/ledger 도 SRS 도 없다
+    c = flow_console(tmp_path, monkeypatch, run=pipe_run(work))
+    try:
+        body = pipe_get(c)[1]
+        assert body["state"] == "no" and body["reason"] and body["repo"]["name"] == "work"
+        other = tmp_path / "other"
+        other.mkdir()
+        assert c.call("GET", "/api/pipeline?cwd=" + urllib.parse.quote(str(other)))[0] == 403
+        assert c.call("GET", "/api/pipeline")[0] == 400
+    finally:
+        c.close()
+
+
+def test_pipeline_repo_key_joins_worktrees_and_pr_numbers():
+    import pipeline
+    main = pipeline.repo_key(lambda a, cwd: (0, ".git\n"), "/x/proj")
+    wt = pipeline.repo_key(lambda a, cwd: (0, "/x/proj/.git\n"), "/x/proj-wt")
+    assert main == wt and main[1] == "proj"
+    assert pipeline.repo_key(lambda a, cwd: (128, ""), "/x/plain")[1] == "plain"
+    assert pipeline.nums_in("feat: DEV-013 x (DEV-013) feat/881-dev013-credit REQ-19 device12") == {13, 19}
+
+
+def test_spa_paths_include_pipeline():
+    from plugins.harness.console import server as srv
+    assert srv.SPA_PATHS.match("/pipeline") and not srv.SPA_PATHS.match("/pipeline/x")
+
+
+def test_elicitation_url_mode_unsafe_scheme_still_makes_a_card_and_answers_pass_through(mconsole):
+    """2026-11-18(X2): javascript: 같은 주소도 서버는 요청 카드로 넘기고(열지 말지는 화면이 정한다 — 열기 링크를 만들지 않고 Post 는 [다 했어] 도 막는다),
+    거절·닫기는 그대로 돌아간다. 빈 주소는 카드 없이 cancel(위 시험)."""
+    c = mconsole
+    proc = elicit_setup(c)
+    c.app.manager.on_event(proc, elicit_url_event("u9", url="javascript:alert(1)"))
+    (req,) = c.app.store.pending_for("s1")
+    status, detail, _ = c.call("GET", f"/api/requests/{req.rid}")
+    assert status == 200 and detail["elicitation"]["mode"] == "url" and detail["elicitation"]["url"] == "javascript:alert(1)"
+    assert c.call("POST", f"/api/requests/{req.rid}/answer", {"action": "decline"})[0] == 200
+    wait_for(lambda: proc.written)
+    assert proc.written[0]["response"]["response"] == {"action": "decline"}
+
+
+def test_repos_groups_session_folders_by_repo_for_post_project_filter(tmp_path, monkeypatch):
+    """#1070: /api/repos 는 세션 폴더마다 저장소(git 공통 폴더)를 준다. 같은 저장소의 worktree 는 같은 key, git 아님은 no,
+    폴더 없음은 unknown(어느 저장소라고 지어내지 않는다)."""
+    main, wt, other, plain, gone = (tmp_path / n for n in ("projA", "projA-wt", "projB", "plain", "gone"))
+    for d in (main, wt, other, plain):
+        d.mkdir()
+    common = {str(main): (".git", str(main)), str(wt): (str(main / ".git"), str(wt)), str(other): (".git", str(other))}
+    calls = []
+
+    def run(args, cwd):
+        if args[:2] == ["git", "rev-parse"] and "--git-common-dir" in args:
+            calls.append(cwd)
+            return (0, "\n".join(common[cwd]) + "\n") if cwd in common else (128, "")
+        return 127, ""
+
+    c = flow_console(tmp_path, monkeypatch, run=run)
+    try:
+        for sid, d in (("a", main), ("b", wt), ("c", other), ("d", plain), ("e", gone)):
+            c.event(sid, "SessionStart", cwd=str(d))
+        status, body, _ = c.call("GET", "/api/repos")
+        f = body["folders"]
+        assert status == 200 and "last" in body
+        assert f[str(main)]["state"] == "yes" and f[str(main)]["key"] == f[str(wt)]["key"] and f[str(main)]["name"] == f[str(wt)]["name"] == "projA"
+        assert f[str(wt)]["folder"] == "projA-wt" and f[str(wt)]["top"] != f[str(main)]["top"]
+        assert f[str(other)]["state"] == "yes" and f[str(other)]["key"] != f[str(main)]["key"]
+        assert f[str(plain)]["state"] == "no" and f[str(gone)]["state"] == "unknown" and "key" not in f[str(gone)] and f[str(gone)]["reason"]
+        n = len(calls)
+        c.call("GET", "/api/repos")
+        assert calls[n:] == []  # 판정한 폴더는 60초 기억한다(폴더 없음은 기억하지 않지만 git 을 부르지도 않는다)
+    finally:
+        c.close()
+
+
+def test_repo_info_says_unknown_when_git_cannot_run(tmp_path):
+    import pipeline
+    assert pipeline.repo_info(lambda a, cwd: (127, ""), str(tmp_path))["state"] == "unknown"
+    assert pipeline.repo_info(lambda a, cwd: (128, ""), str(tmp_path))["state"] == "no"
+    assert pipeline.repo_info(lambda a, cwd: (0, ".git\n"), str(tmp_path))["top"] == os.path.realpath(str(tmp_path))  # 맨 위 폴더를 못 받으면 그 폴더
+
+
+def test_repo_info_unknown_when_git_fails_inside_a_repo(tmp_path):
+    """#1070 리뷰: .git 이 있는데 git 이 못 읽으면(dubious ownership·권한 — 종료코드 128) 저장소 아님이 아니라 확인 못 함."""
+    import pipeline
+    (tmp_path / "repo" / ".git").mkdir(parents=True)
+    (tmp_path / "repo" / "docs").mkdir()
+    (tmp_path / "plain").mkdir()
+    fail = lambda a, cwd: (128, "")
+    assert pipeline.repo_info(fail, str(tmp_path / "repo" / "docs"))["state"] == "unknown"
+    assert pipeline.repo_info(fail, str(tmp_path / "repo" / ".git"))["state"] == "unknown"
+    assert pipeline.repo_info(fail, str(tmp_path / "plain"))["state"] == "no"
+
+
+def test_preview_failure_says_why_in_words_not_exception_names(tmp_path):
+    # 2026-11-18 X2 3회차. 깨진 문서의 미리보기 실패 문구에 파이썬 예외 이름(BadZipFile 등)이 그대로 나오던 것.
+    (tmp_path / "a.xlsx").write_bytes(b"not a zip")
+    with pytest.raises(docfiles.PreviewError) as e:
+        docfiles.read_xlsx(str(tmp_path / "a.xlsx"))
+    assert str(e.value) == "엑셀 문서를 읽지 못했어: 파일이 깨졌거나 엑셀 형식이 아니야"
+    (tmp_path / "a.pptx").write_bytes(b"not a zip")
+    with pytest.raises(docfiles.PreviewError) as e:
+        docfiles.read_pptx(str(tmp_path / "a.pptx"))
+    assert str(e.value) == "파워포인트 문서를 읽지 못했어: 파일이 깨졌거나 파워포인트 형식이 아니야"
+    with pytest.raises(docfiles.PreviewError) as e:
+        docfiles.read_xlsx(str(tmp_path / "없는 파일.xlsx"))
+    assert str(e.value) == "엑셀 문서를 읽지 못했어: 파일을 열 수 없어"
+    assert "Error" not in docfiles.unreadable("엑셀", docfiles.ET.ParseError("x")) and "Error" not in docfiles.unreadable("엑셀", ValueError("x"))

@@ -1471,7 +1471,7 @@ def test_office_bundle_supports_pip():
 def test_post_home_field_memo_layout():
     # Post 오늘 화면 장면 칸(#1056, 시안 C): 사무실 장면이 틀 안에 폭 전체로 보이고 그 위에 내 차례 메모가 뜬다. 나머지(덱·숫자 칸·표·범례·팀 줄·띠·배지)는 그대로
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
-    for needle in ("po-memo", "po-stagew", "paintMemo()", "'다음 '", "세션으로", "cardAct(it, false)", "cardAct(it, true)"):
+    for needle in ("po-memo", "po-stagew", "paintMemo()", "text: '다음'", "세션으로", "cardAct(it, false)", "cardAct(it, true)"):
         assert needle in home
     # 메모 자리: 번들의 onFocus 좌표를 받고, 보여 주는 항목이 바뀌면 scene.focus(id). 옛 번들(focus 없음)도 동작
     assert "onFocus: onFocus" in home and "typeof sc.focus === 'function'" in home and "sc.focus(id)" in home
@@ -1607,7 +1607,7 @@ def test_post_session_logic_filters_info_and_seals():
     assert out["status"] == ["막힘 · 고친 뒤 이어서", "확인 못 함 · 검사를 못 했어", "내 차례 · 승인하기", "", ""]
     assert out["here"] == ["1번 창구 · 쓰기 책상", "4번 창구 · 검토 창구", "5번 창구 · 발송 우체통", "5번 창구 · 발송 우체통", "1번 창구 · 쓰기 책상"]
     # 가이드 2.4 둘째 줄(반말). STATES 순서: turn blocked unk run wait done idle
-    assert out["lines"] == ["편지를 들고 네 답을 기다려", "창구에서 막혀 있어", "어디 있는지 확인 못 했어", "다음 창구로 걸어가", "의자에 앉아 승인을 기다려", "편지를 다 부쳤어", "다음 창구로 걸어가"]
+    assert out["lines"] == ["편지를 들고 네 답을 기다려", "창구에서 막혀 있어", "검사를 못 해서 멈췄어", "다음 창구로 걸어가", "의자에 앉아 승인을 기다려", "편지를 다 부쳤어", "창구 앞에서 쉬고 있어"]
     # 정보 줄은 늘 다섯 칸(없으면 –) 뒤에 숫자 띠의 나머지 칸(AI 진행 따위)
     assert out["info"][:5] == [["단계", "SRS 쓰기", "g"], ["요구사항", "REQ-007", ""], ["개발 번호", "–", ""], ["작업 기록", "–", ""], ["검토 요청", "PR #301", "w"]]
     assert out["info"][5] == ["AI 진행", "40%", ""] and len(out["info"]) == 6
@@ -1751,7 +1751,7 @@ def test_event_storm_is_coalesced_not_redrawn_per_event():
     assert "function patchChildren" in app and "function keepLeading" in app  # 바뀐 곳만 고친다
     recent = flow[flow.index("function recentCard"):flow.index("function recentCard") + 3000]
     assert "5000 - (Date.now() -" in recent and "box._later" in recent  # 최근 산출물은 5초에 한 번까지만 다시 읽는다
-    assert flow.count("/files?cache=1") == 2  # 목록·홈이 세션마다 부르는 /files 는 서버 기억(3초)을 쓴다
+    assert flow.count("/files?cache=1") == 1 and flow.count("return sessionDocs(s)") == 2  # 목록·홈이 세션마다 부르는 /files 는 서버 기억(3초)을 쓴다(한 함수로 부른다)
 
 
 def test_design_states_have_shape_cues_not_only_color():
@@ -3576,3 +3576,609 @@ def test_1042_claude_ai_connectors_fold_into_one_line_project_mcp_stays_loud(tmp
     assert "연결이 안 된 도구가 있어" in mixed["text"] and "abap-adt — 연결하지 못했어" in mixed["text"] and "claude.ai 커넥터 2개가 로그인 전이야" in mixed["text"]
     assert "<div.banner.mcp>" in mixed["dump"] and "<details.mcp-conn>" in mixed["dump"]
     assert "claude.ai Gmail — 로그인이 필요해" not in mixed["text"]  # 큰 목록에 커넥터가 따로 오르지 않는다
+
+
+# ---- Post 테마 검증 갈래 C(2026-11-18): 상태·숫자 정합 ----
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_post_verify_c_docs_gone_folder_is_not_failure_and_not_asked_again(tmp_path):
+    """작업 폴더가 없어진 세션(서버 409)은 "읽기 실패" 와 따로 "폴더가 없어 읽지 못함" 으로 알리고, 다시 그려도 또 묻지 않는다."""
+    extra = {"__status": {"GET /api/sessions/s2/files": 409}, "GET /api/sessions/s2/files": {"error": "세션의 작업 폴더가 없어."}}
+    got = _smoke(tmp_path, "docs", [_session("s1"), _session("s2", cwd="C:/w/gone")], extra=extra)
+    assert "1개 세션은 작업 폴더가 없어져서(지운 폴더 등) 문서를 읽지 못했어." in got["text"]
+    assert "세션의 문서를 읽지 못했어" not in got["text"] and "git 상태를 읽지 못해서" not in got["text"]  # 서버 오류·git 못 읽음과 섞지 않는다
+    assert "아직 양식으로 뽑은 산출물이 없어." in got["text"]
+    flow = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert "GONE_RECHECK_MS" in flow and "goneDirs[key] = Date.now()" in flow  # 같은 세션·폴더는 잠깐 다시 묻지 않는다
+
+
+_POST_C_NODE = r"""
+const path = require('path');
+const L = require(path.join(process.argv[1], 'flow-logic.js'));
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const out = {};
+const s = { id: 'a', status: 'idle', group: 'todo', pendingRequestIds: ['r1'] };
+const answered = sess => (sess.pendingRequestIds || []).filter(r => r !== 'r1');  // r1 은 이미 답한 요청
+out.plain = P.stateOf(s, L);
+out.passed = P.stateOf(s, L, answered);
+P.useOpenIds(answered);
+out.registered = P.stateOf(s, L);
+P.useOpenIds(null);
+out.reset = P.stateOf(s, L);
+out.label = P.FILTERS.map(f => f.label).join(',');
+// 같은 순간: 내 차례 세션 2(대기 요청 2건 세션 + 올릴 차례 세션), 확인 못 함 1, 일하는 중 1, 끝남 1
+const list = [
+  { id: 'q', status: 'idle', group: 'todo', pendingRequestIds: ['r2', 'r3'] },
+  { id: 'd', status: 'idle', group: 'todo', turnSkill: 'deliver', pendingRequestIds: [] },
+  { id: 'u', status: 'idle', group: 'idle', pendingRequestIds: [], lastBlock: { kind: 'cannot_check', open: true } },
+  { id: 'r', status: 'running', group: 'running', pendingRequestIds: [] },
+  { id: 'e', status: 'ended', group: 'idle', pendingRequestIds: [] }];
+out.turnItems = L.turnItems(list).length;
+out.counts = L.counts(list);
+out.filter = P.filterCounts(list.map(x => P.stateOf(x, L)));
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_post_verify_c_state_uses_open_ids_and_filter_name_differs_from_turn():
+    r = subprocess.run([NODE, "-e", _POST_C_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    # 이미 답한 요청만 남은 세션은 내 차례가 아니다 — 직접 넘기든 화면이 알려 두든(useOpenIds) 같고, 안 알리면 서버 값을 믿는다
+    assert out["plain"] == "turn" and out["passed"] == "idle" and out["registered"] == "idle" and out["reset"] == "turn"
+    # 목록 걸러보기는 내 차례 + 막힘 + 확인 못 함 묶음이라 "내 차례" 가 아니라 "할 일" 이다(홈·띠의 내 차례 N건과 이름이 겹치지 않게)
+    assert out["label"] == "전체,할 일,일하는 중,끝남"
+    # 내 차례 건수(요청·올릴 차례 하나하나) 3 = 홈 타일·띠·알림의 내 차례, 할 일(세션 수) 3 = 내 차례 세션 2 + 확인 못 함 1
+    assert out["turnItems"] == 3 and out["counts"]["todo"] == 2 and out["counts"]["unsure"] == 1 and out["counts"]["running"] == 1
+    assert out["filter"] == {"all": 5, "turn": 3, "run": 1, "done": 1}
+
+
+
+# ---- Post 파이프라인 탭(post-pipeline.js) ----
+_POST_PIPELINE_NODE = r"""
+const path = require('path');
+const dir = process.argv[1];
+const L = require(path.join(dir, 'flow-logic.js'));
+const PL = require(path.join(dir, 'post-logic.js'));
+const P = require(path.join(dir, 'post-pipeline.js'));
+const it = (n, o) => Object.assign({ number: n, req: 'REQ-00' + n, dev: 'DEV-00' + n, title: 't' + n, kind: '', spec: false, prs: [] }, o);
+const items = [
+  it(1, { spec: true }), it(2, { prs: [{ number: 9, kind: 'spec' }] }), it(3, { spec: true, prs: [{ number: 10, kind: 'work' }] }), it(4, { kind: '설정' }),
+  it(5, { unsure: true, prs: [{ number: 11, kind: 'spec' }] }), it(6, { done: true, prs: [{ number: 12, kind: 'work' }] }), it(7), it(8, { spec: true }), it(9, { spec: true })
+];
+const sessions = [
+  { id: 'a', title: 'Spec 쓰기 DEV-007', flowId: 'spec', status: 'running', group: 'running', updatedAt: 1 },
+  { id: 'b', branch: 'feat/40-dev008-list', status: 'idle', group: 'todo', pendingRequestIds: ['r'], updatedAt: 1 },
+  { id: 'c', flowPr: { number: 10, state: 'OPEN' }, status: 'idle', group: 'idle', updatedAt: 1 },
+  { id: 'd', flowReason: '이전 세션에서 넘김 DEV-009', status: 'idle', group: 'idle', lastBlock: { kind: 'blocked', open: true }, updatedAt: 1 },
+  { id: 'e', title: 'DEV-009 다시', status: 'running', group: 'running', updatedAt: 5 },
+  { id: 'f', title: 'DEV-001 넘김', status: 'running', group: 'running', handedOffTo: 'g', updatedAt: 9 }
+];
+const out = {};
+out.nums = P.numsIn('feat: DEV-013 (DEV-013) feat/881-dev013-x REQ-19 device12 DEV-1234567');
+out.lanes = P.board(items, sessions, L, PL).map(l => l.map(c => c.item.number + ':' + c.state + (c.session ? '@' + c.session.id : '')));
+out.lane = [P.laneOf(it(1, { done: true, kind: '설정' })), P.laneOf(it(2), [{ flowId: 'spec' }]), P.laneOf(it(3, { unsure: true }), [{ flowId: 'spec' }])];
+out.sub = [P.summary({ items, hidden: 2 }), P.summary({ items: [it(1, { req: '' })] })];
+out.groups = P.groups([{ cwd: '/a', data: { repo: { key: 'k', name: 'r' }, state: 'yes', loading: true } }, { cwd: '/b', data: { repo: { key: 'k', name: 'r' }, state: 'yes' } },
+  { cwd: '/c', data: { repo: { key: 'z', name: 'z' }, state: 'no' } }, { cwd: '/d', error: { status: 403 } }]).map(g => g.key + ':' + g.cwds.join('+') + ':' + !!g.data.loading);
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason="node 가 없다")
+def test_post_pipeline_attaches_sessions_and_places_lanes():
+    r = subprocess.run([NODE, "-e", _POST_PIPELINE_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["nums"] == [13, 19]  # 브랜치의 dev013 도 번호, device12·일곱 자리는 아니다
+    # 칸: 1 요구사항(미정·아무것도 없음) · 2 Spec(Spec PR·Spec 세션) · 3 개발(Spec 있음·설정) · 4 검토(작업 PR) · 5 합쳐짐
+    # 세션: 이름(a)·브랜치(b)·세션 PR 번호(c)·갈래 사유(d) 로 붙는다. 넘긴 세션(f)은 붙이지 않는다. 한 건에 여럿이면 막힘이 앞선다(d > e)
+    # 칸 안: 막힘 > 내 차례 > 번호순
+    assert out["lanes"] == [["5:idle"], ["2:idle", "7:run@a"], ["9:blocked@d", "8:turn@b", "1:idle", "4:idle"], ["3:wait@c"], ["6:idle"]]
+    assert out["lane"] == [4, 1, 0]  # 완료가 먼저, 다음 단계 미정이면 Spec 세션이 있어도 요구사항 칸
+    assert out["sub"] == ["SRS 9건 · Spec 있는 개발 건 4 · 설정 1 · 표준 0 · 보류·취소 2건 뺌", "원장 1건 · Spec 있는 개발 건 0 · 설정 0 · 표준 0"]
+    assert out["groups"] == ["k:/a+/b:false", "z:/c:false"]  # 같은 저장소 worktree 는 한 판, 다 읽은 값이 읽는 중 값을 대신한다
+
+
+def test_post_pipeline_wiring_route_rail_and_scoped_css():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    order = [html.index(f'src="/{n}"') for n in ("flow-logic.js", "post-logic.js", "post-home.js", "post-pipeline.js", "app.js")]
+    assert order == sorted(order) and '<link rel="stylesheet" href="/post-pipeline.css">' in html
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "if (p === '/pipeline') return { name: 'pipeline' };" in app and "pipeline: pipelineView" in app
+    assert "item('/pipeline', '파이프라인', 'route', nm === 'pipeline', 0)" in app
+    assert "!isPostTheme() || !window.BHPostPipeline" in app  # Sauce 로 주소를 치고 오면 안내만 한다
+    js = (STATIC / "post-pipeline.js").read_text(encoding="utf-8")
+    assert "innerHTML" not in js and "'/api/pipeline'" in js and "하네스는 이 순서를 지키게 해." in js
+    assert "요구사항을 확인하지 못했어." in js  # 못 읽은 저장소는 빈 판이 아니라 이유를 보인다
+    css = (STATIC / "post-pipeline.css").read_text(encoding="utf-8")
+    rules = [ln for ln in css.splitlines() if "{" in ln and not ln.lstrip().startswith(("@media", "/*"))]
+    assert rules and all(ln.lstrip().startswith(':root[data-theme="post"] .po-pl') or ln.lstrip().startswith(':root[data-theme="post"] a.po-pl') or ln.lstrip().startswith(':root[data-theme="post"] button.po-pl') for ln in rules)
+    assert "border-left" not in css and "--bg:" not in css  # 시안에 없는 강조선·토큰 복사 없음
+
+
+def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
+    # 2026-11-18 Post 홈 검증 B. post-*.js 는 가짜 DOM 시험이 안 불러와서 원문 확인에 더해 Aside 실화면으로 봤다(docs/status/2026-11-18-post-verify-B.md).
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    # 세션 표: 번호·기억·API 오류·고쳐야 함 칩. 기억을 모르면 ? 를 지어내지 않고 뺀다
+    assert "L.issueOf(s)" in home and "L.prBadge(s.flowPr)" in home and "L.memoryOf(s)" in home and "m.kind !== 'unknown'" in home
+    assert "L.prNeedsFix(s)" in home and "'고쳐야 함'" in home and "BHApiNotice.notice(s)" in home
+    # 새 소식 칸은 세션이 없을 때·불러오는 중에도 붙고, 세션이 생기면 foot 으로 되돌린다
+    assert home.count("restSlot.appendChild(slots.whatsSlot)") == 2 and "foot.appendChild(slots.whatsSlot)" in home
+    # 덱 머리 숫자는 타일·띠·문장과 같은 내 차례 건수(BHLogic.turnItems 길이)다: 검사가 실패한 PR 세션도 카드로 올리고, 한 세션의 요청 여럿은 "요청 +N"
+    assert "fix: true" in home and "return '고쳐야 함'" in home and "turnN = Math.max(cardN, turnTotal)" in home and "turnTotal = turnCount;" in home
+    assert "'요청 +' + it.more" in home and ".po-dc-wait + .po-dc-wait" in (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 열린 PR 상태를 홈이 열려 있는 동안 1분마다 다시 읽고, 홈을 떠나면 멈춘다(Sauce 홈과 같은 간격)
+    assert "MY_PRS_POLL_MS = 20000" in home and "clearInterval(prTimer)" in home and "delete fixBox.dataset.ready" in home
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert "var CACHE_MS = 60000;" in ui  # 확인 주기(20초)는 이 캐시(60초)보다 짧아야 캐시가 풀린 뒤 곧 새로 읽는다
+    # #1066: 작은 아바타는 잘린 직원 그림이 아니라 글자, 기억을 모르는 점선 ? 링은 Post 에서 뺀다
+    js = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    assert "if (size === 'sm') return letterAvatar(opts.name);" in js and "po-av-letter" in js
+    assert "Intl.Segmenter" in js and "letterOf: letterOf" in js and "(PS.letterOf ? PS.letterOf(name)" in home  # 국기·가족 이모지·제로폭 시작 제목도 한 글자, 홈 표와 같은 함수
+    assert "title: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어'" in home
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    logic = (STATIC / "flow-logic.js").read_text(encoding="utf-8")
+    assert ".po-rest > .wn-slot:empty { display: none; }" in css and ".po-stc-err { width: 150px;" in css.replace(".po-mine .po-stc-err", ".po-stc-err")  # 빈 새 소식 칸 간격·오류 칩 줄바꿈
+    m = re.search(r'\.po-si \.ring\.unk\[title="([^"]+)"\] \{ visibility: hidden; \}', css)  # 2회차: 자리는 남긴다(제목 줄 정렬)
+    assert m and f"title: '{m.group(1)}'" in logic  # CSS 가 가리키는 문구가 memoryOf 의 unknown title 과 같아야 한다
+
+
+def test_post_verify_B2_memo_count_teams_and_session_fixes():
+    # 2026-11-18 Post 검증 B 2회차. post-*.js 는 가짜 DOM 시험이 안 불러와서 원문 확인이고, 본체는 Aside 실화면이다(docs/status/2026-11-18-post-verify-B.md).
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    # 메모의 몇 번째는 덱 머리와 같은 묶음·단위: 내 차례는 건수(카드가 요청 여럿이면 범위), 막힘·확인 못 함은 따로. 카드 수로 세지 않는다
+    assert "function memoCount(it)" in home and "n: mine.length" in home and "'내 차례 ' + (end > at ? at + '–' + end : at) + '/' + turnTotal" in home
+    assert "'다음 ' + (i + 1) + '/' + items.length" not in home and "text: '다음', onClick: function () { step(1, true); }" in home
+    # 메모의 "다음" 은 포커스를 덱 카드로 옮기지 않는다(화면이 덱까지 튀어 메모가 밀려 나간다). J·K 는 그대로 덱 카드로
+    assert "function pickTop(id, stay)" in home and "if (stay) return;" in home
+    # 팀 칸: 갈래가 없거나 팀이 없는 세션은 "팀 없음" 으로 세어 합이 장면 인원(= 머리 "N개")과 같다
+    assert "'팀 없음'" in home and "!teamOf(s.flow)" in home and "sceneSub.textContent = kit.sceneList().length + '개';" in home
+    # 닫힌·합쳐진 PR 칩은 남은 검사 결과 색이 아니라 상태로
+    assert "prSt === 'CLOSED' ? 'none'" in home and "prSt === 'MERGED' ? 'pass'" in home
+    # 차분 목록은 앞 12개 + 더 보기
+    assert "CALM_MAX = 12" in home and "'나머지 ' + (all.length - shown.length) + '개 더 보기'" in home
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "m >= 1440 ? Math.floor(m / 1440) + '일째'" in app  # Post 홈 덱·메모의 오래 기다린 요청은 "N일째"
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert ':root[data-theme="post"] .po-eb .po-st-idle { display: none; }' in css and ".po-maplist .po-ml-more { grid-column: 1 / -1; }" in css
+    # 틀: 상태줄 한도는 비율로 주의·막힘(서버가 status 를 allowed 로 고정), 급할 때만 풀리는 시각을 칩에
+    assert "c.source === 'statusline' && c.pct != null ? (c.pct >= 100 ? 'err' : c.pct >= 80 ? 'warn' : '')" in app and "class: 'ptop-when'" in app
+    notice = (STATIC / "notice-logic.js").read_text(encoding="utf-8")
+    assert "when: when ? when.replace(/^오늘 /, '') : '', source: w.source || ''," in notice
+    # 사이드 목록: 접기 단추 포커스 되돌림, 지금 세션 줄을 목록 창 안으로, 걸러보기 탭 방향키·roving tabindex, 글자 아바타에 이름을 넘김
+    assert "function postSideAfter(cur)" in app and "sideMode = col; sideShownFor = '';" in app and "foldRefocus" in app and "function onPostFilterKey(e)" in app and "sideEl.addEventListener('keydown', onPostFilterKey);" in app
+    assert "tabindex: postFilter === f.id ? '0' : '-1'" in app and "{ size: 'sm', name: sessionTitle(s) }" in app
+    # 요청 화면: 도장 튕김이 다시 그리기로 끊기지 않게(STAMP_ANIM_MS 안에는 still 이 아니고, 지난 시간만큼 앞당겨 이어서), 여기서 답하지 않은 요청은 체크 없이
+    assert "still: st.shown && Date.now() - st.at.getTime() >= STAMP_ANIM_MS" in app
+    sess = (STATIC / "post-session.js").read_text(encoding="utf-8")
+    assert "sp.style.animationDelay = -gone + 'ms'" in sess
+    assert "function notMine()" in app and "'여기서 답하지 않은 질문'" in app and "if (away) line = resultOf().title;" in app
+    assert ':root[data-theme="post"] .qopt { border-radius: 22px; }' in css
+    # 새 작업: 막힌 까닭이 있는 칸으로 화면을 옮기고(좁은 폭에서 오류가 화면 밖), 고급 설정이 닫혀 있으면 연다. select 화살표는 반복·자리까지 함께
+    assert "function showBlock(sel)" in app and "if (isPostTheme()) advOpen = true; draw(); showBlock('#model-custom');" in app and "showBlock('[data-folder-toggle]')" in app
+    assert ':root[data-theme="post"] select.input, :root[data-theme="post"] .light select.input { background-repeat: no-repeat;' in css
+    assert "background-color: var(--field); color: var(--text); border-radius: 10px; }" in css and ".folder-pick .folder-opt .pn small.mono { display: -webkit-box;" in css and "title: isPostTheme() ? f.path : null" in app
+    assert "attrs['aria-label'] = '계정 사용 한도: ' + lv.chips.map" in app and "(상태줄의 쓴 비율로 판단)" in app  # 칩 풀이·묶음 이름도 같은 판정
+    assert "var a = calmList.querySelectorAll('a')[CALM_MAX]; if (a) a.focus();" in home  # 더 보기를 누르면 새로 보인 첫 줄로 포커스
+
+
+def test_post_new_task_extra_cases_X1():
+    # 2026-11-18 Post 새 작업 못 본 케이스 점검 1회차. post-*.js 는 가짜 DOM 시험이 안 불러와서 원문 확인이고, 본체는 Aside 실화면이다(docs/status/2026-11-18-post-extra-newwork.md).
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 작업 폴더가 고른 뒤 지워져 시작이 400 으로 거절되면 "Claude Code 가 못 살펴봤어" 가 아니라 폴더 고르기로 돌려보낸다(Post 만)
+    assert "if (e.status === 400 && isPostTheme()) { folderCheck(e, run); return; }" in app and "function folderCheck(e, run)" in app
+    assert "customMsg = '고른 작업 폴더를 쓸 수 없어: ' + why + ' 다른 폴더를 골라 줘.'" in app and "showBlock('#custom')" in app
+    # 서버에 닿지 못한 시작은 분석 실패와 다른 말을 한다
+    assert "errNet = e.status === 0" in app and "post && errNet ? '콘솔 서버에 연결하지 못했어'" in app
+    # 키보드: 단계가 바뀌면 초점이 문서 맨 위로 튀지 않게 제목으로, 시작 오류·글 비어 있음·폴더 창 취소 뒤에는 누른 칸으로
+    assert "id: post ? 'new-title' : null, tabindex: post ? '-1' : null" in app and "document.getElementById('new-title')" in app and "drawnStep !== screen" in app  # 2회차: 프로젝트 준비 안내도 한 단계
+    assert "if (startErr && isPostTheme() && document.activeElement === document.body) { var sb = document.getElementById('start-go'); if (sb) sb.focus(); }" in app
+    assert "folderCheck(e, run)" in app and "run !== beginRun || step !== 'analyzing'" in app  # 늦게 온 폴더 확인이 다시 시작한 요청을 덮지 않게 and "id: 'start-go'" in app
+    assert "textErr = true; said.terr = ''; draw(); showBlock('#brief'); return;" in app  # 3회차: 같은 오류도 다시 읽어 준다
+    assert "backFocus('folder-browse')" in app and "backFocus('custom')" in app and "function backFocus(id)" in app
+    # 첨부가 서버에서 거절되면 그 화면의 칩에는 빼기(×)가 없어 돌아가는 길을 알려 준다
+    assert "files.length && attachRejected(e, files)" in app and '"다른 걸로 할래" 로 돌아가서 빼 줘.' in app  # 2회차: 첨부 탓인 400·413 에만
+    # 아주 긴 폴더 이름: 제목·눈썹은 어디서든 줄을 바꾸고, 위쪽 줄은 알림·테마 단추 대신 이름만 줄어든다
+    assert ':root[data-theme="post"] .ptitle .eb, :root[data-theme="post"] .ptitle h1 { overflow-wrap: anywhere; }' in css
+    assert ':root[data-theme="post"] #app > .top > :not(.ptop-proj):not(.sp):not(.ptop-lim) { flex-shrink: 0; }' in css and ".ptop-proj b { flex: 0 1 auto; min-width: 0;" in css
+    assert ':root[data-theme="post"] #new-title:focus { outline: none; }' in css
+
+
+def test_post_new_task_extra_cases_X3():
+    # 2026-11-18 Post 새 작업 못 본 케이스 2회차(1회차 수정분 독립 재확인). 본체는 Aside 실화면(docs/status/2026-11-18-post-extra-newwork.md 「2회차」).
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    # 느린 분석 시작(윈도우 git) 중 요청 고치기·다시 시작을 누르면 늦게 온 시작·폴링 답은 버린다(쓰던 화면이 확인 화면으로 튀지 않게)
+    assert "function late(run) { return isPostTheme() && (!alive || run !== beginRun || step !== 'analyzing'); }" in app
+    assert "if (isPostTheme() && (!alive || aid !== resume)) { if (alive) loadRecent(); return; }" in app  # 주소 ?id= 로 이어 보는 첫 답도
+    assert "if (late(run)) return;\n        aid = d && (d.id || d.analysisId);" in app and "if (!alive || late(run)) return; if (e.status === 400 && isPostTheme())" in app
+    assert "function gone() { return !alive || (isPostTheme() && (id !== aid || step !== 'analyzing')); }" in app
+    # 폴더 탓 400 안내·지난 시작 오류는 새 분석을 시작하면 지운다
+    assert "if (isPostTheme()) { customMsg = ''; startErr = ''; startFolderWhy = ''; }" in app  # 3회차: 폴더 탓 시작 실패 까닭도
+    # 분석 뒤 폴더가 지워진 채 시작하면 "claude 를 찾을 수 없어" 대신 폴더를 확인해 말하고, 첨부 안내는 첨부 탓일 때만
+    assert "function attachRejected(e, files)" in app and "e.status === 400 || e.status === 502) return api('POST', '/api/folders/validate'" in app
+    assert "startFolderWhy = String(v.error || ''); startErr = '시작하지 못했어: 고른 작업 폴더를 쓸 수 없어: ' + startFolderWhy + ' \"다른 걸로 할래\" 로 돌아가서 다른 폴더를 골라 줘.';" in app  # 3회차: 까닭을 남겨 돌아갈 때 폴더 고르기로
+    # 키보드: 폴더를 고르면 목록을 열었던 단추로, id 없는 칸(바꾸기·체크·답 단추)도 다시 그린 뒤 같은 자리로, 프로젝트 준비 안내는 그 제목으로
+    assert "draw(); backFocus('folder-toggle'); checkIntro(p); }" in app and "id: isPostTheme() ? 'folder-toggle' : null" in app
+    assert "var mark = isPostTheme() && !keepFocus ? focusMark() : null;" in app and "function focusMark()" in app and "return el.className === m.cls;" in app
+    assert "if (isPostTheme()) { placeFocus(stepMoved, keepFocus, selStart, mark); sayNew({}); }" in app and "screen = showIntro ? 'intro' : step" in app  # 안내 화면도 있던 칸을 먼저 되돌린다
+    assert "h('h1', { id: isPostTheme() ? 'new-title' : null, tabindex: isPostTheme() ? '-1' : null, title: draft.cwd" in app
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_post_x2_docs_many_sessions_sauce_has_no_truncation_note(tmp_path):
+    # 2026-11-18 Post 데이터 있는 화면 점검(X2). 산출물 탭은 최근 12개 세션만 읽는다 — Post 만 몇 개가 빠졌는지 알린다(Sauce 는 그대로).
+    got = _smoke(tmp_path, "docs", [_session(f"s{i}", updatedAt=1700000100 + i) for i in range(14)])
+    assert "더 오래된 세션" not in got["text"] and "data-docs-more" not in json.dumps(got, ensure_ascii=False)
+
+
+def test_post_x2_data_screens_source_and_css():
+    # post-*.js 와 Post 전용 분기는 가짜 DOM 시험이 안 불러와서 원문 확인이다. 본체는 Aside 실화면(docs/status/2026-11-18-post-extra-datascreens.md).
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 산출물: 같은 이름의 파일이 여러 세션에서 오면 둘째 줄에 세션 이름, 다시 그려도 키보드 포커스 유지, 좁은 화면에서 고르면 미리보기로, 미리보기 못 하는 문서의 안내가 버튼 위치와 맞게
+    assert "multiSess ? entry.session.title || kit.baseName(entry.session.cwd) : ''" in ui and "multiSess = isPost() && all.reduce(" in ui
+    assert "t.focus({ preventScroll: true })" in ui and "if (a.classList.contains('drow')) return { dkey: a.getAttribute('data-dkey') };" in ui and "'data-dkey': post ? entry.key : null" in ui  # 같은 경로 파일이 다른 세션에 있어도 키(폴더|경로)로 되돌림(2회차에 줄 밖 칸까지 넓힘)
+    assert "function pick(entry, byUser)" in ui and "pv.scrollIntoView({ block: 'start' })" in ui and "pick(entry, true)" in ui
+    assert "(ctx.btnAt || '아래') + ' 버튼으로 열어 봐.'" in ui and ui.count("btnAt: isPost() ? '위' : ''") == 2
+    assert "data-docs-more" in ui and "isPost() ? sessionList().filter(" in ui
+    assert ":root[data-theme=\"post\"] .ext { display: inline-grid; place-items: center; flex: none; width: 44px;" in css and ".ext-docx { background: #2B579A;" in css
+    assert ".docs-page .dprev { scroll-margin-top: 88px; }" in css and ".docs-page .drow .dn small { font-size: 11.5px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;" in css
+    # 팀 기록: 거르기·찾기·종류 고르기로 화면을 다시 그려도(목록·한 건·새 기록 셋 다) Post 에서는 누르던 칸에 포커스가 남는다
+    assert "function focusKey(page)" in tb and "function focusBack(page, key)" in tb and tb.count("focusBack(page, key);") == 3 and tb.count("var key = focusKey(page)") == 3 and "sameButtons(page, a.className, a.textContent).indexOf(a)" in tb
+    assert "!isPostNow()" in tb[tb.index("function focusKey(page)"):tb.index("function focusBack(page, key)")] and "getTheme() === 'post'" in tb[tb.index("function isPostNow()"):tb.index("function focusKey(page)")]
+    # MCP url 모드: 열 수 없는 주소(javascript: 등)는 Post 에서 [다 했어] 도 막고, 긴 주소는 줄을 바꾼다
+    assert "var cantOpen = isUrl && !href && isPostTheme();" in app and "sendBtn.disabled = st.busy || n > 0 || cantOpen;" in app
+    assert ":root[data-theme=\"post\"] [data-elicit-url] { overflow-wrap: anywhere; word-break: break-all; }" in css
+    # Tab 건너뛰기 링크: Post 만(Sauce 에서는 hidden), 레일보다도 앞, 목록 맨 앞에 하나 더, 포커스가 올 때만 보임
+    assert "var on = isPostTheme(), r = document.getElementById('root');" in app and "document.addEventListener('bh-theme', syncSkip);" in app and "skipEl.parentNode.removeChild(skipEl)" in app  # Sauce 에는 붙이지 않는다
+    assert "root.appendChild(appEl); syncSkip();" in app and "text: '세션 목록 건너뛰기' }), tabs, list," in app and "text: '본문으로 건너뛰기'" in app
+    assert ":root[data-theme=\"post\"] .po-skip:not(:focus) { position: absolute; width: 1px; height: 1px;" in css and ":root[data-theme=\"post\"] #main:focus { outline: none; }" in css
+
+
+def test_post_x2_docs_old_versions_stay_open_when_picked():
+    # 이전 판을 고르면 목록이 다시 그려져 접힌 칸 안에 고른 줄이 숨던 것: Post 는 고른 이전 판이 든 칸을 열어 두고, 연 상태를 기억한다
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert "det.open = d.key in st.oldOpen ? st.oldOpen[d.key] : oldKeys.indexOf(st.sel) >= 0;" in ui and "st.oldOpen[d.key] = det.open;" in ui and "oldOpen: {}" in ui  # 2회차: 사람이 닫은 칸은 다시 그려도 닫힌 채
+
+
+_POST_PROJECT_NODE = r"""
+const path = require('path');
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const folders = {
+  '/w/a': { state: 'yes', key: 'K1', name: 'a', top: '/w/a', folder: 'a' },
+  '/w/a/sub': { state: 'yes', key: 'K1', name: 'a', top: '/w/a', folder: 'a' },
+  '/w/a-wt': { state: 'yes', key: 'K1', name: 'a', top: '/w/a-wt', folder: 'a-wt' },
+  '/w/b': { state: 'yes', key: 'K2', name: 'b', top: '/w/b', folder: 'b' },
+  '/w/plain': { state: 'no', reason: 'x' },
+  '/w/gone': { state: 'unknown', reason: 'y' }
+};
+const list = ['/w/a', '/w/a/sub', '/w/a-wt', '/w/b', '/w/plain', '/w/gone', '/w/new', ''].map((cwd, i) => ({ id: 's' + i, cwd }));
+const v = P.projectView(list, folders, { key: 'K1', top: '/w/a' });
+const all = P.projectView(list, folders, null), before = P.projectView(list, null, { key: 'K1', top: '/w/a' });
+process.stdout.write(JSON.stringify({ ids: v.list.map(s => s.id), tag: v.tag, all: all.list.length, allTags: Object.keys(all.tag).length, before: before.list.length, copy: v.list !== list && all.list !== list }));
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason="node 가 없다")
+def test_post_project_view_filters_by_repo_and_tags_other_folders():
+    """#1070: 같은 저장소(worktree 포함)만 보이고 다른 폴더엔 폴더 이름, 다른 저장소는 뺀다. git 아님·판정 못 함은 감추지 않고 표를 붙이고,
+    아직 판정을 못 받은 폴더는 그대로 보인다. 프로젝트가 없거나 판정 전이면 거르지 않는다."""
+    r = subprocess.run([NODE, "-e", _POST_PROJECT_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["ids"] == ["s0", "s1", "s2", "s4", "s5", "s6", "s7"]  # s3(다른 저장소)만 빠진다
+    assert out["tag"] == {"s2": {"kind": "folder", "text": "a-wt"}, "s4": {"kind": "nogit", "text": "git 저장소 아님"},
+                          "s5": {"kind": "unknown", "text": "저장소 확인 못 함"}, "s7": {"kind": "unknown", "text": "저장소 확인 못 함"}}
+    assert out["all"] == 8 and out["allTags"] == 0 and out["before"] == 8 and out["copy"] is True
+
+
+def test_post_project_scope_only_in_post_and_feeds_every_count():
+    """#1070: 거르기는 Post 에서만(Sauce 는 모든 세션 그대로), 그리고 사이드 목록·알림(sideData)·홈(flow-ui kit)·파이프라인이 같은 거른 목록을 쓴다."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "return isPostTheme() && window.BHPostLogic ? window.BHPostLogic.projectView(all, repos.folders, postProject()) : { list: all, tag: {} };" in app
+    assert "var all = scopedSessions();" in app and "window.BHLogic.turnItems(all, openIds)" in app  # 띠·알림·레일·덱 숫자
+    assert "var arr = scopedSessions();" in app  # 사이드 목록·장면(sceneList)·레일
+    assert "sessions: { values: scopedSessions }, requests: requests," in app and "sessions: scopedSessions, loaded:" in app  # 홈·산출물, 파이프라인
+    assert "if (loadedOnce && inProject(m)) notifyChange(prev, m);" in app
+    assert "if (isPostTheme() && startCwd) setProject({ path: startCwd });" in app and "class: 'ptop-pick'" in app
+    assert "kit.projectTag ? kit.projectTag(s) : null" in (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert ':root[data-theme="post"] .po-ptag {' in (STATIC / "theme-post.css").read_text(encoding="utf-8")
+
+
+def test_post_project_pipeline_follows_picked_project_and_rechecks_unsure_folders():
+    """#1070 리뷰: 파이프라인은 마지막 폴더 대신 고른 프로젝트 폴더를, 저장소 판정 뒤에 읽는다. 판정 못 한 폴더가 있으면 다시 묻는다."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    pipe = (STATIC / "post-pipeline.js").read_text(encoding="utf-8")
+    assert "var last = (kit.home && kit.home()) || st.last;" in pipe and "if (last && !seen[last]) out.push(last);" in pipe
+    assert "loaded: function () { return loadedOnce && repos.tried; }" in app and "home: function () { var pj = postProject(); return pj ? pj.path : ''; } });" in app
+    assert "if (unsure) repos.again = setTimeout(function () { repos.sig = null; scheduleSide(); }, 60000);" in app
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_post_x2b_sauce_folded_rail_has_no_skip_link(tmp_path):
+    # 2026-11-18 X2 2회차. 접힌 세션 목록(좁은 화면은 늘 접힘)에도 Post 는 「세션 목록 건너뛰기」를 두지만, 같이 쓰는 renderRail 의 Sauce 는 그대로.
+    got = _smoke(tmp_path, "s/s1", [_session("s1"), _session("s2")], ls={"bh-side": "1"})
+    assert got["sideDump"].startswith("<aside.side><nav.rail><button.fold-btn>") and "po-skip" not in got["sideDump"] and "건너뛰기" not in got["side"]
+
+
+def test_post_x2b_regression_source_and_css():
+    # 2026-11-18 X2 2회차(독립 시선 회귀). Post 전용 분기라 원문 확인이다. 본체는 Aside 실화면(docs/status/2026-11-18-post-extra-datascreens.md 「2회차」).
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 산출물: 문서 줄만이 아니라 시트 탭·이전 판 칸·단추(폴더에서 보기)·입력칸도 다시 그린 뒤(세션이 움직여 다시 모을 때 포함) 포커스 유지, 누르던 곳이 없어지면 고른 문서 줄로
+    draw = ui[ui.index("function sameAs(tag, cls, text)"):ui.index("function drawNow()")]
+    assert "if (!isPost() || !a || a === page || !page.contains(a)) return null;" in draw and "if (a.id) return { id: a.id };" in draw
+    assert "sameAs(a.tagName, a.className, a.textContent).indexOf(a)" in draw and "t = page.querySelector('.drow.on') || page.querySelector('.drow');" in draw
+    # 팀 기록 새 기록: [그 줄 지우기] 뒤 포커스는 줄을 지운 칸으로(Post)
+    assert "focusField(masked[0].field);" in tb and "focusField(first.field);" in tb and "var label = k === 'title' ? '제목' : fieldLabel(k)" in tb
+    assert "getTheme() === 'post'" in tb[tb.index("function focusField(k)"):tb.index("function drawSimilar()")]
+    # 건너뛰기: 접힌 목록에도 Post 만 링크, 포커스가 오면 위 링크와 같은 자리. 건너뛴 본문 머리가 좁은 화면의 위 메뉴줄에 가리지 않게
+    assert "isPostTheme() ? h('a', { class: 'po-skip po-skip-rail', href: '#main', 'data-skip': '1', text: '세션 목록 건너뛰기' }) : null," in app
+    assert ':root[data-theme="post"] .po-skip-top:focus, :root[data-theme="post"] .po-skip-rail:focus { position: fixed; top: 8px; left: 8px; z-index: 200; }' in css
+    assert ':root[data-theme="post"] #main { scroll-margin-top: 88px; }' in css
+
+
+def test_post_side_list_scrolls_to_new_session_after_its_data_arrives():
+    """새 작업을 시작해 바로 넘어간 세션은 내용을 받기 전이라 목록 자리가 아직 아니다 — 그때 굴리면 줄이 옮겨 가 창 밖에 남았다(Aside 실화면)."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    body = app.split("function postSideAfter(cur) {", 1)[1].split("\n  }\n", 1)[0]
+    assert "var ss = route.name === 'session' ? sessions.get(route.id) : null;" in body and "if (ss && !ss.cwd) return;" in body
+    assert body.index("if (ss && !ss.cwd) return;") < body.index("sideShownFor = cur;")
+
+
+def test_post_sweep_design_fixes_css():
+    # 2026-11-18 하네스 기능 전수 실화면 점검(5회차). Post 전용 CSS 라 원문 확인이다. 본체는 Aside 실화면(docs/status/2026-11-18-post-verify-sweep.md).
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    # 세션 오른쪽 기술·기록 탭: app.css 의 .mt-* 가 !important 라 Post 의 12px 도 !important 여야 위 빈 칸이 사라진다. 기록 탭 제목은 한 번만
+    assert ".mt-16 { margin-top: 16px !important; }" in (STATIC / "app.css").read_text(encoding="utf-8")
+    assert ':root[data-theme="post"] .po-ipanel .mt-64 { margin-top: 12px !important; }' in css
+    assert ':root[data-theme="post"] .po-ipanel [data-r="log"] > section > h2.label { display: none; }' in css
+    assert "var sec = h('section', { class: 'mt-64' }, h('h2', { class: 'label', text: '이 세션에서 일어난 일' }));" in app
+    # 처리 알림 한 줄(전달했어·건너뛰었어·되돌렸어·거절 사유)은 실패 색과 거의 같은 강조 빨강이 아니라 본문 글자색
+    assert ':root[data-theme="post"] .light .note-accent { color: var(--lightink); }' in css
+    assert ':root[data-theme="post"] .light .note-accent,' not in css
+    # `/`·`@` 목록: 이름 칸이 눌려 끊기지 않고, 목록은 입력 줄 전체 너비
+    assert ':root[data-theme="post"] .assist-item .nm { font-family: var(--code); flex: 0 0 auto; max-width: 60%; }' in css
+    assert ':root[data-theme="post"] .comp { position: relative; }' in css and ':root[data-theme="post"] .comp .assist-wrap { position: static; }' in css
+    # 설정 계정 한도 확인의 「바꾸기」는 주 단추, 홈 검토 요청 칸의 PR 링크는 밑줄
+    assert "class: 'pill', 'data-limits-confirm-yes': '1'" in app
+    assert ':root[data-theme="post"] .pill[data-limits-confirm-yes] { background: var(--accent-fill); color: #fff; }' in css
+    assert ':root[data-theme="post"] .po-prslot a.lm, :root[data-theme="post"] .approvals a.lm { color: var(--lightink); text-decoration: underline; text-underline-offset: 3px; }' in css
+    # 홈 새 소식은 아래 칸 한 줄을 다 쓰고 300px 단으로 흐른다(좁은 칸 하나에 700px 넘게 서지 않게)
+    assert ':root[data-theme="post"] .po-foot > .wn-slot { grid-column: 1 / -1; }' in css
+    assert ':root[data-theme="post"] .po-foot .wn-list { display: block; column-width: 300px; column-gap: 28px; }' in css
+
+
+_POST_TURN_NODE = r"""
+const path = require('path');
+const L = require(path.join(process.argv[1], 'flow-logic.js'));
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const dev = [{ id: 'start', name: '개발 건 고르고 작업 시작하기(작업 기록과 작업 공간을 자동으로 만들어)', short: '시작', kind: 'skill', skill: 'start' },
+  { id: 'implement', name: '구현(SAP 080 에서 개발·활성화)', short: '구현', kind: 'work' },
+  { id: 'deliver', name: '올리고 검토 요청하기', short: '올리기', kind: 'skill', skill: 'deliver' },
+  { id: 'merge', name: '합쳐지기 기다리기', short: '합치기', kind: 'wait' }];
+const spec = [{ id: 'spec', name: 'Spec 쓰기', short: '쓰기', kind: 'skill', skill: 'spec' }].concat(dev.slice(2));
+const s = (steps, i, turn, extra) => Object.assign({ id: 'x', flowId: 'f', flowSteps: steps, stepIndex: i, turnSkill: turn }, extra || {});
+const both = x => [P.turnLine(x, L), P.turnVerb(x, L)];
+process.stdout.write(JSON.stringify({
+  specFirst: both(s(spec, 0, 'start')), implement: both(s(dev, 1, 'deliver')), deliver: both(s(dev, 2, 'deliver')),
+  deliverNoChange: both(s(dev, 2, 'start')), wait: both(s(dev, 3, 'start')), finished: both(s(dev, 3, 'start', { flowFinished: true })),
+  noFlow: both({ id: 'y', turnSkill: 'deliver' })
+}));
+"""
+
+
+def test_post_turn_text_follows_flow_step():
+    # 2026-11-18 6회차: 갈래 세션의 머리 제목·사이드 줄·홈 덱이 git 으로 짐작한 차례(turnSkill)를 따라
+    # spec 첫 단계(main)에 "이제 작업 시작 차례야", 구현 중(변경 있음)에 "AI가 올릴 준비를 마치고…"·"내 차례 · 제출하기", 덱에 "제출하기 끝남" 이 나왔다.
+    r = subprocess.run([NODE, "-e", _POST_TURN_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert got["specFirst"] == ["이제 Spec 쓰기 차례야.", "쓰기"]
+    assert got["implement"] == ["이제 구현 차례야.", "구현"]
+    assert got["deliver"] == [None, None]  # 올릴 변경이 있는 올리기 단계는 원래 글(G-09 "AI가 올릴 준비를 마치고…")
+    assert got["deliverNoChange"] == ["이제 올리고 검토 요청하기 차례야.", None]
+    assert got["wait"] == ["지금은 합쳐지기 기다리기 단계야.", "합치기"]
+    assert got["finished"] == [None, None] and got["noFlow"] == [None, None]
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    # Sauce 는 그대로: Post 일 때만 부른다
+    assert "var flowLine = isPostTheme() && window.BHPostLogic ? window.BHPostLogic.turnLine(s, window.BHLogic) : null;" in app
+    assert app.index("var flowLine = isPostTheme()") < app.index("if (s.turnSkill === 'deliver' && s.flowId) return 'AI가 올릴 준비를 마치고 네 답을 기다리는 중';")
+    # 확인 대기·승인 기다림(phase)·일하는 중은 갈래 글보다 먼저 걸러진다
+    head = app.split("function headlineFor(s) {", 1)[1].split("\n    }\n", 1)[0]
+    assert head.index("if (pend) return") < head.index("if (s.phase) return window.BHLogic.phaseLine(s, isPostTheme());") < head.index("var flowLine = isPostTheme()")
+    assert head.index("if (s.status === 'running')") < head.index("var flowLine = isPostTheme()")
+    assert "var flowVerb = !p && isPostTheme() && window.BHPostLogic ? window.BHPostLogic.turnVerb(s, L) : null;" in app
+    assert ": flowVerb || (s.turnSkill === 'deliver' ? skillLabel(s.turnSkill) : '확인하기');" in app
+    assert "끝남 — 다음을 정해 줘" not in home
+    assert "(PL && PL.turnLine(s, L)) || (s.turnSkill !== 'deliver' ? '내 차례야' : s.flowId ? L.ASK_TEXT.deliver.q : '이제 ' + kit.skillLabel(s.turnSkill) + ' 차례야.')" in home
+
+
+def test_post_mcp_error_readable_on_yellow_banner_in_dark():
+    # 6회차 실화면: 어두운 모드에서 노란 MCP 띠 안 실패 문구가 밝은 --attn(#F2B24C)이라 바탕과 같은 색이었다. Post 전용 CSS 라 원문 확인
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert ':root[data-theme="post"] .banner, :root[data-theme="post"] .call,' in css  # 띠는 두 모드 모두 밝은 노랑 + 남색 글자
+    assert ':root[data-theme="post"] .banner .mcp-err { color: #9A5400; }' in css
+    assert css.index(':root[data-theme="post"] .banner .mcp-err {') > css.index(':root[data-theme="post"] .nb-err, :root[data-theme="post"] .mcp-err { color: var(--attn); }')
+
+
+_POST_PR_SUBJECT_NODE = r"""
+const path = require('path');
+const L = require(path.join(process.argv[1], 'flow-logic.js'));
+const s = n => ({ phase: 'finished', flowPr: { number: n, state: 'MERGED' }, nextFlow: { options: [{ flow: 'spec', label: '개발 Spec 만들기' }] } });
+process.stdout.write(JSON.stringify({
+  sauce502: L.phaseLine(s(502)), post502: L.phaseLine(s(502), true), post501: L.phaseLine(s(501), true),
+  bandSauce: L.finishedBand(s(502)), bandPost: L.finishedBand(s(502), true), bandPost10: L.finishedBand(s(10), true)
+}));
+"""
+
+
+def test_post_shared_flow_text_fixes():
+    # 6회차: 공유 코드라 미뤘던 Post 화면의 틀린 글 넷을 Post 분기로 고쳤다(Sauce 는 그대로). 본체는 Aside 실화면(docs/status/2026-11-18-post-verify-sweep2.md)
+    r = subprocess.run([NODE, "-e", _POST_PR_SUBJECT_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    # 1. PR 번호 뒤 조사: Post 만 읽는 소리대로(#502가, #501이, #10이). Sauce 는 전과 같은 '이'
+    assert got["sauce502"].startswith("PR #502이 합쳐졌어.") and got["bandSauce"].startswith("PR #502이 합쳐졌어")
+    assert got["post502"].startswith("PR #502가 합쳐졌어.") and got["post501"].startswith("PR #501이 합쳐졌어.")
+    assert got["bandPost"].startswith("PR #502가 합쳐졌어") and got["bandPost10"].startswith("PR #10이 합쳐졌어")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    flow = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    assert app.count("window.BHLogic.finishedBand(cs, isPostTheme())") == 2 and "window.BHLogic.phaseLine(s, isPostTheme())" in app
+    # 2. MCP 다시 연결 실패: 서버 글(「MCP 를 다시 연결하지 못했어: …」) 앞에 같은 말을 또 붙이지 않는다(Post 만)
+    assert "mcpErr = (isPostTheme() && /다시 연결하지 못했어/.test(e.message) ? '' : '다시 연결하지 못했어: ') + e.message; }).then(function () { mcpBusy = ''; paintNotices(cur()); });  // Post:" in app  # 주석이 .then 을 삼키지 않게(리뷰가 잡음)
+    # 3. 합쳐지지 않고 닫힌 PR 카드는 검사 실패가 아니라 닫힘을 말한다(Post 만)
+    assert "var closed = postTheme() && String(pr.state || '').toUpperCase() === 'CLOSED';" in flow
+    assert "closed ? h('span', { class: 'sub', text: '이 검토 요청(PR)은 합쳐지지 않고 닫혔어. GitHub 에서 다시 열거나 새로 올려야 넘어가.' })" in flow
+    assert ": failed ? h('span', { class: 'sub', text: '자동 검사가 잘못을 찾았어. 고쳐서 다시 올려야 넘어가.' })" in flow
+    # 4. 이미 다음 세션으로 넘긴 세션의 끝난 갈래 카드는 넘기기 단추 대신 새 세션 보기(Post 만)
+    assert "if (nx.options.length && s.handedOffTo && postTheme()) {" in flow
+    assert "'data-next-handed': '1', text: '새 세션 보기'" in flow
+    assert flow.index("if (nx.options.length && s.handedOffTo && postTheme()) {") < flow.index("'data-next-start': '1'")
+
+
+def test_post_new_task_extra_cases_X3_round3():
+    # 2026-11-18 Post 새 작업 3회차: "Post 에서 하네스 기능은 다 돼야 한다" 에 따라 2회차가 내려놓은 것을 고침. 본체는 Aside 실화면(docs/status/2026-11-18-post-extra-newwork.md 「3회차」).
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    attach = (STATIC / "attach.js").read_text(encoding="utf-8")
+    # 오류 문구 칸은 다시 그릴 때마다 새로 생긴다: Post 는 보이는 칸에 role=alert 를 달지 않고 늘 같은 안내 칸 하나로 새 문구만 읽어 준다(「!」 표시는 data-alert 로)
+    assert "function alertRole() { return isPostTheme() ? null : 'alert'; }" in app and "function sayNew(cur)" in app and "'data-new-say': '1'" in app
+    assert app.count("role: alertRole(), 'data-alert': '1',") == 6 and '.note-attn[data-alert]::before' in css
+    assert "if (sayEl && sayEl.parentNode) sayEl.parentNode.removeChild(sayEl);" in app  # 화면을 떠나면 안내 칸도 치운다
+    # 이대로 시작이 폴더 탓으로 실패한 뒤 「다른 걸로 할래」 는 폴더 고르기로
+    assert "var why = isPostTheme() ? startFolderWhy : ''; startFolderWhy = '';" in app and "draw(); if (why) showBlock('#custom');" in app
+    # 멈춤 방지: 분석 id 없음·빈 폴링 본문·시작 처리 중 오류
+    assert "if (!aid) { step = 'failed'; err = '분석을 시작하지 못했어.'; draw(); return; }" in app and "var st = norm(d && d.status);" in app
+    assert "}).then(null, function (e) { console.error('새 작업 시작을 마무리하지 못했습니다', e); }).then(function () {" in app
+    # 서버가 줄인 첨부 이름(100자·인쇄 못 하는 글자)도 첨부 탓으로 알아본다
+    assert "function serverName(n)" in app and "m.indexOf(serverName(f.name) + ':') === 0" in app
+    # 테마를 바꿔도 폴더 안내·실패·시작 오류가 이어진다
+    assert "var kept0 = takeCarry('new', route.id);" in app and "keep: function () { return { step: step, aid: aid, err: err" in app
+    # 같은 파일 두 번은 칩 하나, 글 칸 밖(제목 등)에 끌어 놓아도 첨부(Post)
+    assert "opts.dedupe && items.some(function (x) { return x.name === file.name && x.size === file.size" in attach and "dedupe: post," in app and "dedupe: isPostTheme()," in app
+    assert "if (step === 'write') { drawWrite(panel, post); if (post) newComp.bindDrop(page); }" in app and "if (!post) newComp.bindDrop(panel);" in app
+    assert ':root[data-theme="post"] .newp .note-attn { overflow-wrap: anywhere; }' in css  # 오류 문구 속 긴 이름이 390 에서 넘치지 않게
+    # 리뷰 반영: 이어 보기 첫 답 빈 본문, 테마 전환 첨부 이어받기, 화면 밖 끌어놓기 막기, 오래된 브라우저 정규식, 안내 칸 비우기, 붙여 넣은 다른 그림
+    assert "d = d || {};  // 빈 본문이어도" in app and "files: newComp ? newComp.keep() : null" in app and "newComp.restore(kept0.files, draft.text, '');" in app
+    assert "document.addEventListener('dragover', guardOver); document.addEventListener('drop', guardDrop);" in app and "document.removeEventListener('drop', guardDrop);" in app
+    assert "var NON_PRINT = (function () { try { return new RegExp(" in app and "/u'" not in app and "sayClear = setTimeout(function () { if (sayEl) sayEl.textContent = ''; }, 6000);" in app
+    assert "x.lm === file.lastModified" in attach and "lm: file.lastModified" in attach and ".attach-note { color: var(--attn); font-weight: 500; overflow-wrap: anywhere; }" in css
+
+
+def test_post_x2c_remaining_defects_source():
+    # 2026-11-18 X2 3회차. 앞 회차가 판정 대기로 넘긴 것 중 Post 에서 안 되던 것. 원문 확인이고 본체는 Aside 실화면(docs/status/2026-11-18-post-extra-datascreens.md 「3회차」).
+    tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    # 1) 찾기·거르기를 잇달아 하면 마지막 요청만 그린다(순수 결함 수정이라 Sauce 도 같다)
+    wf = tb[tb.index("function waitFor(fetch, draw, state)"):tb.index("// Post: 화면을 통째로")]
+    assert "mine = state.seq = (state.seq || 0) + 1" in wf and wf.count("state.seq !== mine") == 2 and "state.seq === mine) draw(null, e)" in wf
+    # 3) 올리기·이걸로 해결·GitHub 에 올리기 뒤 포커스(Post). 6) 새 기록 칸 이름은 Post 만 한글, Sauce 는 영어 키 그대로
+    assert "after = 'text'" in tb and "'resolve:' + [].indexOf.call(page.querySelectorAll('button.tb-small'), ev.currentTarget)" in tb
+    assert "if (then && isPostNow() && !page.contains(document.activeElement)) focusAfter(then, d);" in tb
+    assert "carry.landed = true;" in tb and "var after = carry.landed ? 'title' : '';" in tb
+    assert "isPostNow() && !page.contains(document.activeElement) && slots.submit" in tb
+    assert "var FIELD_NAME = { symptom: '증상', cause: '원인', solution: '해결 방법' };" in tb
+    assert "function fieldLabel(k) { return isPostNow() && FIELD_NAME[k] ? FIELD_NAME[k] : k; }" in tb and "'aria-label': fieldLabel(k) }" in tb
+    # 2) MCP 요청에 답한 뒤 포커스가 비었을 때만 다음 요청 카드 → 결과 칸 → 대화 입력칸(Post)
+    fa = app[app.index("function focusAfterAnswer(rid, sent, action)"):app.index("var ebText = h('span'")]
+    assert "if (a && a !== document.body) return;" in fa and "document.getElementById('follow')" in fa and ".result[role=\"status\"]" in fa
+    assert "if (isPostTheme()) focusAfterAnswer(rid, sent, action);" in app and "resultFocusUntil = Date.now() + 1500;" in app
+    # 4) url 모드 [다 했어] 의 결과 문구는 Post 만 값을 받는다는 말을 빼고, Sauce 는 ELICIT_RES 그대로
+    er = app[app.index("function elicitRes(action, info)"):app.index("var FORMAT_HINT")]
+    assert "info.mode === 'url' && isPostTheme()" in er and "return ELICIT_RES[action];" in er and "'마쳤다고 알렸어.'" in er
+    assert "ELICIT_RES[action][0]" not in app and "ELICIT_RES[code]) { var er = elicitRes(code, req.elicitation)" in app
+    # 8) 「이전 판 N개」 접는 칸은 판이 늘어 글이 바뀌어도 같은 자리에서 포커스를 되찾는다
+    assert "if (!t && k.tag === 'SUMMARY') t = page.querySelectorAll('summary')[k.j];" in ui
+
+
+def test_post_settings_first_run_and_limits_fixes():
+    # 7회차: 가짜 HOME·CLAUDE_CONFIG_DIR 로 띄운 시험 서버에서 한도 켜기·끄기와 첫 화면 끝까지 실화면 확인(docs/status/2026-11-18-post-verify-settings.md). Sauce 는 그대로
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 1. 첫 화면 [이 프로젝트로]: Post 는 고른 폴더를 보는 프로젝트로 두고 저장소 판정을 다시 받는다(전에는 고르기 전 마지막 폴더가 머리 줄에 남았다)
+    pick = app.split("function confirmPick() {", 1)[1].split("\n    function draw() {", 1)[0]
+    assert "if (isPostTheme()) { repos.gen++; repos.sig = null; setProject({ path: p }); }" in pick
+    # 판정을 받는 중에 눌렀으면 늦게 온 옛 응답이 sig 를 덮어 다시 받지 않는 일이 없게 세대 번호로 가른다(리뷰)
+    ens = app.split("function ensureRepos() {", 1)[1].split("\n  function onProjectPick", 1)[0]
+    assert "var gen = repos.gen;" in ens and ens.count("repos.sig = gen === repos.gen ? sig : null;") == 2
+    assert pick.index("var p = (d && d.path) || sel;") < pick.index("setProject({ path: p })") < pick.index("api('POST', '/api/start-checks/seen'")
+    # 2. 한도: 켜진 채 되돌릴 수 없으면(원래 값 기억 파일 없음) Post 는 스위치를 막는다 — 눌러도 같은 말이 한 번 더 떴다
+    assert "disabled: !c || limBusy || (!on && !c.canEnable) || (isPostTheme() && on && !c.canEnable)," in app
+    # 3. 한도 문구의 긴 settings.json 경로는 위 「바꾸는 파일 · 경로」 와 겹치니 Post 만 「이 파일」 로 줄인다(조사도 맞춘다)
+    lim = app.split("function limText(t) {", 1)[1].split("\n    }\n", 1)[0]
+    assert "if (!t || !p || !isPostTheme()) return t;" in lim
+    assert "split(p + ' 가 ').join('이 파일이 ')" in lim and "split(p + ' 를 ').join('이 파일을 ')" in lim and "split(p + ' 의 ').join('이 파일의 ')" in lim
+    assert "'data-limits-problem': '1', text: limText(c.problem) })" in app and "role: 'alert', text: limText(limErr) })" in app
+    # 4. 한도 켜기 확인의 「지금」「바꾼 뒤」 이름표가 어두운 바탕에서 Sauce 색(#55625f)이라 안 보였다 → Post 흐린 글 색, 아래 문장 간격
+    assert ':root[data-theme="post"] .limits-confirm .lcmd > span { color: var(--lmuted); }' in css
+    assert ':root[data-theme="post"] .limits-confirm .lcmd + p { margin-top: 10px; }' in css
+
+
+_POST_LIMTEXT_NODE = r"""
+const src = require('fs').readFileSync(require('path').join(process.argv[1], 'app.js'), 'utf8');
+const body = src.split('function limText(t) {')[1].split('\n    }\n')[0];
+const run = (post, path, t) => new Function('isPostTheme', 'limCfg', 't', body)(() => post, { settingsPath: path }, t);
+const P = 'C:\\Users\\김\\.claude\\settings.json';
+process.stdout.write(JSON.stringify({
+  json: run(true, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어(x).'),
+  read: run(true, P, '끄지 못했어 · ' + P + ' 를 읽지 못했어: e'),
+  top: run(true, P, P + ' 의 맨 위가 객체가 아니어서 건드리지 않았어.'),
+  sauce: run(false, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어(x).'),
+  other: run(true, P, '지금 statusLine 이 command 형식이 아니라서 감싸지 않았어.'),
+  empty: run(true, P, '')
+}));
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_post_limits_text_shortens_settings_path_only_in_post():
+    r = subprocess.run([NODE, "-e", _POST_LIMTEXT_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert got["json"] == "이 파일이 올바른 JSON 이 아니어서 건드리지 않았어(x)."
+    assert got["read"] == "끄지 못했어 · 이 파일을 읽지 못했어: e"
+    assert got["top"] == "이 파일의 맨 위가 객체가 아니어서 건드리지 않았어."
+    assert got["sauce"].startswith("C:\\Users\\김\\.claude\\settings.json 가 ")  # Sauce 는 서버 글 그대로
+    assert got["other"] == "지금 statusLine 이 command 형식이 아니라서 감싸지 않았어." and got["empty"] == ""
+
+
+def test_post_regress_sweep_fixes():
+    # 8회차 전 화면 회귀 재훑기(docs/status/2026-11-18-post-verify-regress.md). 모두 Post 분기·Post 선택자라 Sauce 는 그대로
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 1. 접힌 세션 칸(390 은 늘 접힘)의 「내가 할 일」이 내 차례 요청 수라 펼친 목록 「할 일」(내 차례 + 막힘 + 확인 못 함, 세션 수)과 달랐다
+    rail = app.split("function renderRail(d, cur) {", 1)[1].split("\n  }\n", 1)[0]
+    assert "if (isPostTheme() && window.BHPostScene) {" in rail
+    assert "window.BHPostLogic.filterMatch('turn', window.BHPostLogic.stateOf(s, window.BHLogic))" in rail and "n = turnRows.length;" in rail
+    assert "countHref = d.todo.length ? d.todo[0].href : '/'" in rail and "link(countHref, { class: 'rail-count'" in rail
+    assert rail.index("var n = d.todo.length") < rail.index("if (isPostTheme()")  # Sauce 는 요청 수 그대로
+    # 2. 좁은 화면에서 붙어 있는 위 메뉴줄(z 5)을 스크롤할 때 머리 줄 말풍선(.nb-bubble 40)·도장(.po-seal 6)이 덮었다
+    #    → 메뉴줄을 그 위로, 대화상자·알림 창·연결 끊김 띠(.conn, 전처럼 메뉴줄 위)는 그보다 위
+    acss = (STATIC / "app.css").read_text(encoding="utf-8")
+    narrow = [b for b in css.split("@container shell (max-width: 760px) {")[1:] if '#app > .prail { position: sticky;' in b.split("\n}", 1)[0]]
+    assert len(narrow) == 1
+    block = narrow[0].split("\n}", 1)[0]
+    def z(text, sel):
+        return int(re.search(r"z-index: (\d+)", text.split(sel, 1)[1].split("}", 1)[0]).group(1))
+    zr = z(block, '#app > .prail {')
+    assert z(acss, ".nb-bubble {") < zr and z(css, ':root[data-theme="post"] .po-seal {') < zr
+    assert zr < z(acss, ".modal-back {") and zr < z(acss, ".nb-back {") and zr < z(block, ':root[data-theme="post"] .conn {')
+    # 3. 작업 폴더가 없어진 세션의 갈래 고르기 칸이 「일 목록: 고른 작업 폴더가 아니야.」(서버 403) — Post 는 폴더가 없어졌다고 말한다
+    pick = ui.split("function drawPicker(s) {", 1)[1].split("\n      }\n", 1)[0]
+    assert "postTheme() && s.cwd && r.error && r.error.status === 403" in pick
+    assert "'일 목록: 이 세션의 작업 폴더가 없어져서(지운 폴더 등) 일을 고를 수 없어.'" in pick and ": failText(r.error, '일 목록') }));" in pick
+    # 4. 팀 기록에서 못 읽은 프로젝트 줄이 「? 확인 못 함 · projC · 확인 못 함 — …」 로 같은 말을 두 번
+    assert "' · ' + p.name + (isPostNow() ? ' — ' : ' · 확인 못 함 — ') + p.reason" in tb  # Sauce 는 전 문구 그대로

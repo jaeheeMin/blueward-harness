@@ -72,6 +72,20 @@
     }
     function sid(s) { return encodeURIComponent(s.id); }
     function sessionList() { return Array.from(kit.sessions.values()); }
+    /* 산출물 탭·홈 최근 산출물이 세션마다 부르는 문서 목록. 작업 폴더가 없어진 세션(지운 worktree 등)은 서버가 409 를 준다.
+       다시 물어도 같은 답이라 세션 id·폴더별로 GONE_RECHECK_MS 동안 기억해 두고 묻지 않는다(목록이 바뀔 때마다 409 가 반복되지 않게).
+       이건 읽기 실패(failed)와 따로 센다(gone) — 서버 오류가 아니라 읽을 폴더가 없는 것이고, 그 세션의 문서는 "읽지 못함" 이다. */
+    var GONE_RECHECK_MS = 5 * 60000, goneDirs = {};
+    function sessionDocs(s) {
+      var key = s.id + '\n' + (s.cwd || ''), at = goneDirs[key];
+      if (at && Date.now() - at < GONE_RECHECK_MS) return Promise.reject({ status: 409, gone: true });
+      return api('GET', '/api/sessions/' + sid(s) + '/files?cache=1').then(function (d) { delete goneDirs[key]; return d; }, function (e) {
+        if (e && e.status === 409) { goneDirs[key] = Date.now(); e.gone = true; }
+        throw e;
+      });
+    }
+    function docsMiss(s, e) { return e && e.gone ? { session: s, files: [], gone: true } : { session: s, files: [], unknown: true, failed: e }; }
+    function goneNote(n) { return n + '개 세션은 작업 폴더가 없어져서(지운 폴더 등) 문서를 읽지 못했어. 그 세션의 문서는 목록에 없어.'; }
     function folderName(s) { return kit.baseName(s.cwd) || '폴더 모름'; }
 
     /* 대화상자: 확인·취소. body 는 노드 목록, validate 는 오류 글을 돌려준다. */
@@ -137,6 +151,7 @@
       return h('span', { class: 'prchip ' + pr.checks }, url ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer', text: label }) : label);
     }
 
+    function postTheme() { return !!(window.BH && window.BH.getTheme && window.BH.getTheme() === 'post'); }
     /* 올림·승인 기다림·합쳐짐: 검토 요청(PR) 카드. 줄은 데이터에 있는 것만(검사는 합친 한 값, 승인은 PR 상태에서 읽는다). */
     function prCard(s) {
       var pr = s && s.flowPr, lines = L.prLines(pr, s && s.flowId);
@@ -145,9 +160,12 @@
       var label = 'PR #' + pr.number + (pr.title ? ' · ' + pr.title : '');
       // 검사가 실패했으면 ✕ 막힘(빨간 테두리), 결과를 못 읽었으면 ? 확인 못 함(보라 점선). 통과·실패 어느 쪽으로도 치지 않는다.
       var failed = pr.checks === 'fail' || lines.some(function (ln) { return ln.state === 'fail'; }), unsure = !failed && lines.some(function (ln) { return ln.state === 'unk'; });
+      // Post: 합쳐지지 않고 닫힌 PR 은 팀 승인 줄이 실패라 검사 실패 문구가 붙었다(검사는 아직 도는 중이어도). 닫힘을 그대로 말한다
+      var closed = postTheme() && String(pr.state || '').toUpperCase() === 'CLOSED';
       return h('div', { class: 'q prcard' + (failed ? ' blocked' : unsure ? ' unsure' : ''), 'data-pr-card': '1' },
         failed ? h('span', { class: 'tagx fail', text: '✕ 막힘' }) : unsure ? h('span', { class: 'tagx unk', text: '? 확인 못 함' }) : null,
-        failed ? h('span', { class: 'sub', text: '자동 검사가 잘못을 찾았어. 고쳐서 다시 올려야 넘어가.' }) : unsure ? h('span', { class: 'sub', text: '검사 결과를 못 읽었어. 통과도 실패도 아니야.' }) : null,
+        closed ? h('span', { class: 'sub', text: '이 검토 요청(PR)은 합쳐지지 않고 닫혔어. GitHub 에서 다시 열거나 새로 올려야 넘어가.' })
+          : failed ? h('span', { class: 'sub', text: '자동 검사가 잘못을 찾았어. 고쳐서 다시 올려야 넘어가.' }) : unsure ? h('span', { class: 'sub', text: '검사 결과를 못 읽었어. 통과도 실패도 아니야.' }) : null,
         h('div', { class: 'qh' }, h('b', { text: label }), url ? h('a', { class: 'pill line sm', href: url, target: '_blank', rel: 'noopener noreferrer', text: 'GitHub에서 보기' }) : null),
         lines.map(function (ln) {
           return h('div', { class: 'crow ' + ln.state, 'data-line': ln.id }, h('i', { class: 'mk', 'aria-hidden': 'true' }), h('span', { class: 'cn', text: ln.name }), h('span', { class: 'ct', text: ln.text }));
@@ -359,7 +377,9 @@
         box.appendChild(h('p', { class: 'note-muted', text: '일을 고르면 그 순서대로만 진행해.' }));
         var r = st.picker;
         if (!r) box.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' }));
-        else if (!r.ok) box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: failText(r.error, '일 목록') }));
+        else if (!r.ok) box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: postTheme() && s.cwd && r.error && r.error.status === 403
+          ? '일 목록: 이 세션의 작업 폴더가 없어져서(지운 폴더 등) 일을 고를 수 없어.'  // Post: 서버는 세션 폴더가 있으면 늘 아는 폴더로 친다 — 세션 폴더로 403 이면 폴더가 없어진 것(고른 폴더가 틀린 게 아니다)
+          : failText(r.error, '일 목록') }));
         else {
           var flows = kit.listOf(r.data, 'flows').filter(function (f) { return !(f.exposure && f.exposure.visible === false); });
           var grid = h('div', { class: 'flowpick-grid' });
@@ -419,7 +439,12 @@
         if (nx.unknown) { box.appendChild(h('span', { class: 'eb', text: '다음 일' })); box.appendChild(h('b', { text: '이 일은 끝났어' })); box.appendChild(h('p', { class: 'sub attn', role: 'alert', text: '판정 불능 · ' + nx.unknown })); }
         var main = nx.options.filter(function (o) { return o.clickable; })[0];
         if (nx.hint && !nx.options.length) { box.appendChild(h('span', { class: 'eb', text: '다음 일' })); box.appendChild(h('b', { text: '이 일은 끝났어' })); box.appendChild(h('p', { class: 'sub', text: nx.hint })); }
-        if (nx.options.length) {
+        if (nx.options.length && s.handedOffTo && postTheme()) {
+          // Post: 이미 다음 세션으로 넘겼으면 넘기기 단추를 다시 두지 않는다(또 누르면 같은 일을 하는 세션이 하나 더 생긴다). 기억 띠도 넘긴 세션엔 넘기기를 숨긴다
+          box.appendChild(h('span', { class: 'eb', text: '다음 일' }));
+          box.appendChild(h('b', { text: '다음 일은 새 세션으로 넘겼어' }));
+          box.appendChild(h('div', { class: 'acts' }, h('button', { type: 'button', class: 'pill line', 'data-next-handed': '1', text: '새 세션 보기', onClick: function () { kit.go('/s/' + encodeURIComponent(s.handedOffTo)); } })));
+        } else if (nx.options.length) {
           var mem = L.memoryOf(s), first = L.nextFirst(s) || { short: main ? L.nextShort(main.label) : '', label: main ? main.label : '' };
           if (st.stay[s.id]) {
             // [여기서 계속]: 이 세션에서 이어 가기로 했다. 다시 넘기고 싶으면 한 줄에서 되돌린다.
@@ -580,7 +605,7 @@
       } else if (p.kind === 'image') {
         var okUrl = p.url.charAt(0) === '/' && p.url.charAt(1) !== '/' ? p.url : kit.safeHttp(p.url);
         box.appendChild(okUrl ? h('img', { class: 'preview-img', src: okUrl, alt: ctx.name }) : h('p', { class: 'note-muted', text: '그림 주소를 받지 못했어.' }));
-      } else box.appendChild(h('p', { class: 'note-muted', text: p.reason || '이 종류는 미리 볼 수 없어. 아래 버튼으로 열어 봐.' }));
+      } else box.appendChild(h('p', { class: 'note-muted', text: p.reason || '이 종류는 미리 볼 수 없어. ' + (ctx.btnAt || '아래') + ' 버튼으로 열어 봐.' }));
       return box;
     }
 
@@ -614,7 +639,7 @@
     // 새 서버 API 는 없다. 세션마다 /files 를 불러 모은다(최근에 바뀐 세션 DOCS_PAGE_MAX 개까지). 양식으로 뽑은 파일(L.isFormOutput)만 남긴다(#1067, 세션 칸 #1037 과 같은 기준).
     var DOCS_PAGE_MAX = 12;
     function docsPage(root) {
-      var st = { parts: null, sel: null, preview: null, previewError: null, sheet: 0, note: '', say: '' };
+      var st = { parts: null, sel: null, preview: null, previewError: null, sheet: 0, note: '', say: '', oldOpen: {} };
       var alive = true, loading = false, loadedAt = 0, timer = null, askVal = '';
       var page = h('div', { class: 'page docs-page' });
       root.appendChild(page);
@@ -627,8 +652,8 @@
         if (loading) return;
         loading = true; loadedAt = Date.now(); st.sig = sig();
         Promise.all(pool().map(function (s) {
-          return api('GET', '/api/sessions/' + sid(s) + '/files?cache=1').then(function (d) { return { session: s, files: kit.listOf(d, 'files').filter(L.isFormOutput), attachments: kit.listOf(d, 'attachments'), unknown: !!(d && d.unknown), note: d && d.note ? String(d.note) : '' }; },
-            function (e) { return { session: s, files: [], unknown: true, failed: e }; });
+          return sessionDocs(s).then(function (d) { return { session: s, files: kit.listOf(d, 'files').filter(L.isFormOutput), attachments: kit.listOf(d, 'attachments'), unknown: !!(d && d.unknown), note: d && d.note ? String(d.note) : '' }; },
+            function (e) { return docsMiss(s, e); });
         })).then(function (parts) { st.parts = parts; }).then(function () {
           loading = false;
           if (alive && sig() !== st.sig) { load(); return; }  // 읽는 동안 세션이 늘거나 줄었으면 다시 모은다
@@ -652,9 +677,12 @@
         if (hit) return hit;
         return st.picked || null;
       }
-      function pick(entry) {
+      function pick(entry, byUser) {
         st.sel = entry.key; st.picked = entry; st.preview = null; st.previewError = null; st.sheet = 0; st.note = ''; st.say = '';
         draw();
+        // Post 좁은 화면: 목록 아래에 쌓인 미리보기가 화면 밖이면 누른 문서의 미리보기로 내려 준다(눌러도 아무 일도 없어 보이지 않게). 처음 자동으로 고르는 것은 건드리지 않는다.
+        var pv = byUser && isPost() ? page.querySelector('.dprev') : null;
+        if (pv && pv.getBoundingClientRect().top > window.innerHeight * 0.75) pv.scrollIntoView({ block: 'start' });
         api('GET', '/api/sessions/' + sid(entry.session) + '/files/preview' + kit.qs({ path: entry.file.path })).then(function (d) { st.preview = L.normPreview(d); },
           function (e) { st.previewError = e; }).then(function () { if (alive && st.sel === entry.key) draw(); });
       }
@@ -686,11 +714,12 @@
         if (isNaN(d.getTime())) return '';
         return d.toDateString() === new Date().toDateString() ? kit.clock(v) : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + kit.clock(v);
       }
+      var multiSess = false;  // Post: 목록에 세션이 둘 이상 섞이면 같은 이름의 파일을 가르도록 둘째 줄에 세션 이름을 더한다
       function row(entry, sub) {
         var f = entry.file, on = st.sel === entry.key, c = entry.chip, lb = L.docLabel(f.path), post = isPost();
         var tail = lb.ver ? ' v' + lb.ver + ' · ' + lb.ext : '';
-        var second = post ? [lb.ver ? 'v' + lb.ver : '', when(f.mtime)].filter(Boolean).join(' · ') : '';
-        return h('button', { type: 'button', class: 'drow' + (on ? ' on' : '') + (sub ? ' sub' : ''), 'aria-pressed': String(on), 'data-path': f.path, title: rowTitle(entry), onClick: function () { pick(entry); } },
+        var second = post ? [lb.ver ? 'v' + lb.ver : '', when(f.mtime), multiSess ? entry.session.title || kit.baseName(entry.session.cwd) : ''].filter(Boolean).join(' · ') : '';
+        return h('button', { type: 'button', class: 'drow' + (on ? ' on' : '') + (sub ? ' sub' : ''), 'aria-pressed': String(on), 'data-path': f.path, title: rowTitle(entry), 'data-dkey': post ? entry.key : null, onClick: function () { pick(entry, true); } },
           post ? h('span', { class: 'ext ext-' + (lb.ext || 'doc'), 'aria-hidden': 'true', text: (lb.ext || '문서').toUpperCase() }) : null,
           h('span', { class: 'dn' }, h('span', { class: 'dl' }, h('b', { text: lb.name }), tail && !post ? h('span', { class: 'dv', text: tail }) : null), second ? h('small', { text: second }) : null),
           c ? h('span', { class: 'chip2 ' + c.tone, title: c.title, text: c.text }) : null);
@@ -707,7 +736,12 @@
             var olds = L.versionPaths(d.file);
             if (olds.length) {
               var det = h('details', { class: 'more docs-old' }, h('summary', { text: '이전 판 ' + olds.length + '개' }));
-              olds.forEach(function (v) { det.appendChild(row({ key: d.key.split('|')[0] + '|' + v.path.toLowerCase(), file: v, session: d.session, chip: null }, true)); });
+              var oldKeys = olds.map(function (v) { return d.key.split('|')[0] + '|' + v.path.toLowerCase(); });
+              olds.forEach(function (v, i) { det.appendChild(row({ key: oldKeys[i], file: v, session: d.session, chip: null }, true)); });
+              if (isPost()) {  // 다시 그려도(이전 판을 고르면 미리보기를 읽고 새로 그린다) 연 채로 두고, 고른 이전 판이 접힌 칸 안에 숨지 않게 한다. 사람이 열고 닫은 것이 있으면 그대로(닫은 칸을 다시 그릴 때 저절로 열지 않는다)
+                det.open = d.key in st.oldOpen ? st.oldOpen[d.key] : oldKeys.indexOf(st.sel) >= 0;
+                det.addEventListener('toggle', function () { st.oldOpen[d.key] = det.open; });
+              }
               box.appendChild(det);
             }
           });
@@ -744,7 +778,7 @@
         if (st.note) out.push(h('p', { class: 'note-accent', role: 'status', text: st.note }));
         if (st.previewError) out.push(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
         else if (!st.preview) out.push(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' }));
-        else out.push(h('div', { class: 'dsheet' }, renderPreview(st.preview, { sheet: st.sheet, name: kit.baseName(f.path), header: true, setSheet: function (i) { st.sheet = i; draw(); } })));
+        else out.push(h('div', { class: 'dsheet' }, renderPreview(st.preview, { sheet: st.sheet, name: kit.baseName(f.path), header: true, btnAt: isPost() ? '위' : '', setSheet: function (i) { st.sheet = i; draw(); } })));
         if (cells && cells.known && cells.empty) {
           var names = cells.blankNames.slice(0, 3).join(', ') + (cells.blankNames.length > 3 ? ' 외 ' + (cells.blankNames.length - 3) + '곳' : '');
           out.push(h('div', { class: 'banner', role: 'status' }, h('b', { text: '비어 있는 칸 ' + cells.empty + '개' }),
@@ -782,7 +816,7 @@
           h('span', { class: 'sp' }), h('span', { class: 'pt-m', text: '세션 ' + (s.title || kit.baseName(s.cwd) || '이름 없는 세션') }),));
         if (st.previewError) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: failText(st.previewError, '미리보기') }));
         else if (!st.preview) pane.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' }));
-        else pane.appendChild(renderPreview(st.preview, { sheet: st.sheet, name: kit.baseName(f.path), setSheet: function (i) { st.sheet = i; draw(); } }));
+        else pane.appendChild(renderPreview(st.preview, { sheet: st.sheet, name: kit.baseName(f.path), btnAt: isPost() ? '위' : '', setSheet: function (i) { st.sheet = i; draw(); } }));
         box.appendChild(pane);
         box.appendChild(composer(entry, can, '"' + f.path + '" 을(를) 고쳐 줘: ', '이 문서 고쳐 달라고 하기 — 예: 표시 항목에 납품일 추가'));
         if (!can) box.appendChild(h('p', { class: 'note-muted', text: s.cannotSendReason || '이 세션에는 지금 말을 보낼 수 없어.' }));
@@ -824,17 +858,46 @@
       function title(eb, h1, line) {
         return h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: eb }), h('h1', { text: h1 }), line ? h('span', { class: 'line', text: line }) : null);
       }
+      // Post: 다시 그려도(고르기·판 바뀜·읽기 끝·세션이 움직여 다시 모으기) 키보드로 누르던 곳에 포커스가 남게 한다. 노드가 새로 생겨 그대로면 body 로 떨어진다.
+      // 알아보는 값: 문서 줄은 data-dkey, 입력칸은 id, 나머지(시트 탭·이전 판 칸·단추·링크)는 태그·class·글과 몇 번째인지. 누르던 곳이 없어졌으면(결과 화면 → 목록) 고른 문서 줄로.
+      function sameAs(tag, cls, text) { return [].filter.call(page.querySelectorAll(tag), function (n) { return n.className === cls && n.textContent === text; }); }
+      function focusKey() {
+        var a = document.activeElement;
+        if (!isPost() || !a || a === page || !page.contains(a)) return null;
+        if (a.classList.contains('drow')) return { dkey: a.getAttribute('data-dkey') };
+        if (a.id) return { id: a.id };
+        return { tag: a.tagName, cls: a.className, text: a.textContent, i: sameAs(a.tagName, a.className, a.textContent).indexOf(a), j: [].indexOf.call(page.querySelectorAll(a.tagName), a) };
+      }
+      function focusBack(k) {
+        if (!k) return;
+        var t = k.dkey ? [].filter.call(page.querySelectorAll('.drow'), function (b) { return b.getAttribute('data-dkey') === k.dkey; })[0]
+          : k.id ? document.getElementById(k.id) : sameAs(k.tag, k.cls, k.text)[k.i];
+        if (!t && k.tag === 'SUMMARY') t = page.querySelectorAll('summary')[k.j];  // 「이전 판 N개」 는 판이 늘면 글이 바뀐다 — 글이 달라져도 같은 자리의 접는 칸으로
+        if (!t || t.disabled || !page.contains(t)) t = page.querySelector('.drow.on') || page.querySelector('.drow');
+        if (t) t.focus({ preventScroll: true });
+      }
       function draw() {
+        var k = focusKey();
+        drawNow();
+        focusBack(k);
+      }
+      function drawNow() {
         clear(page);
         if (!kit.loaded()) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.loadingBox('세션을 불러오는 중이야.')); return; }
         if (!pool().length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.stateBox('folder', '아직 만든 문서가 없어', '작업을 시작하면 세션이 만든 문서가 여기에 모여.', kit.link('/new', { class: 'btn', text: '새 작업 시작' }))); return; }
         if (!st.parts) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(kit.loadingBox('문서를 모으는 중이야.')); return; }
-        var all = docs(), failed = st.parts.filter(function (p) { return p.failed; }), unsure = st.parts.filter(function (p) { return p.unknown && !p.failed; });
+        var all = docs();
+        multiSess = isPost() && all.reduce(function (n, d) { return n.indexOf(d.session.id) < 0 ? n.concat(d.session.id) : n; }, []).length > 1;
+        var failed = st.parts.filter(function (p) { return p.failed; }), unsure = st.parts.filter(function (p) { return p.unknown && !p.failed; }), gone = st.parts.filter(function (p) { return p.gone; });
         var notes = [];
         if (failed.length) notes.push(h('p', { class: 'note-attn', role: 'status', text: failed.length + '개 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
         else if (unsure.length) notes.push(h('p', { class: 'note-attn', role: 'status', text: unsure.length + '개 세션은 git 상태를 읽지 못해서 올림 여부를 "확인 못 함"으로 보여.' }));
+        if (gone.length) notes.push(h('p', { class: 'note-muted', role: 'status', 'data-docs-gone': String(gone.length), text: goneNote(gone.length) }));
+        // Post: 세션이 DOCS_PAGE_MAX 개를 넘으면 오래된 세션의 문서는 읽지 않는다. 말 없이 빠지면 "없다" 로 읽히니 몇 개가 빠졌는지 알린다.
+        var rest = isPost() ? sessionList().filter(function (s) { return !s.handedOffTo; }).length - pool().length : 0;
+        if (rest > 0) notes.push(h('p', { class: 'note-muted', role: 'status', 'data-docs-more': String(rest), text: '최근에 움직인 세션 ' + pool().length + '개의 문서만 모았어. 더 오래된 세션 ' + rest + '개의 문서는 여기에 안 나와.' }));
         st.parts.forEach(function (p) { if (p.note && !p.unknown) notes.push(h('p', { class: 'note-muted', role: 'status', text: p.note })); });  // 칩은 그대로 두고 안내만 한 줄 더한다
-        if (!all.length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(h('section', { class: 'light dsec' }, notes, h('p', { class: 'note-muted', text: '아직 양식으로 뽑은 산출물이 없어.' }), attachBoxes())); return; }
+        if (!all.length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(h('section', { class: 'light dsec' }, notes, h('p', { class: 'note-muted', text: rest > 0 ? '모은 세션에는 양식으로 뽑은 산출물이 없어.' : '아직 양식으로 뽑은 산출물이 없어.' }), attachBoxes())); return; }
         // 시안 G-15: 방금 고객 양식 xlsx 를 뽑았으면(가장 최근 산출물이 그 파일) 목록 없이 결과 화면을 먼저 보인다. '문서 목록 보기' 로 나가면 시안 G-14 목록 화면.
         var fresh = st.view === 'list' ? null : L.latestFormXlsx(all);
         if (fresh && (!st.sel || st.sel === fresh.key || st.inResult)) {
@@ -1248,24 +1311,25 @@
       box.dataset.sig = sig;
       if (!box.dataset.ready) { clear(box); box.appendChild(h('span', { class: 'eb', text: '최근 산출물' })); box.appendChild(h('span', { class: 'quiet', role: 'status', text: '불러오는 중이야.' })); }
       Promise.all(pool.map(function (s) {
-        return api('GET', '/api/sessions/' + sid(s) + '/files?cache=1').then(function (d) { return { session: s, files: kit.listOf(d, 'files').filter(L.isFormOutput), unknown: !!(d && d.unknown) }; },  // 산출물 탭·세션 칸과 같은 기준(#1067)
-          function (e) { return { session: s, files: [], unknown: true, failed: e }; });
+        return sessionDocs(s).then(function (d) { return { session: s, files: kit.listOf(d, 'files').filter(L.isFormOutput), unknown: !!(d && d.unknown) }; },  // 산출물 탭·세션 칸과 같은 기준(#1067)
+          function (e) { return docsMiss(s, e); });
       })).then(function (parts) {
         if (box.dataset.sig !== sig || !box.isConnected) return;
         box.dataset.ready = '1';
         clear(box);
         box.appendChild(h('span', { class: 'eb', text: '최근 산출물' }));
-        var failed = parts.filter(function (p) { return p.failed; }).length;
-        var allDocs = L.mergeDocs(parts);
-        if (onWeek) onWeek(failed === parts.length && parts.length ? null : L.weekDocCount(allDocs, Date.now() / 1000));
+        var failed = parts.filter(function (p) { return p.failed; }).length, gone = parts.filter(function (p) { return p.gone; }).length;
+        var allDocs = L.mergeDocs(parts), none = parts.length && failed + gone === parts.length;  // 한 세션도 못 읽었으면 "없음" 이 아니라 확인 못 함
+        if (onWeek) onWeek(none ? null : L.weekDocCount(allDocs, Date.now() / 1000));
         var docs = allDocs.slice(0, RECENT_ROWS);
-        if (failed === parts.length && parts.length) { box.appendChild(h('span', { class: 'note-attn', role: 'status', text: '확인 못 함 · 문서 목록을 읽지 못했어.' })); return; }
+        if (none) { box.appendChild(h('span', { class: 'note-attn', role: 'status', text: '확인 못 함 · 문서 목록을 읽지 못했어.' })); return; }
         if (!docs.length) box.appendChild(h('span', { class: 'quiet', text: '아직 양식으로 뽑은 산출물이 없어.' }));
         docs.forEach(function (d) {
           box.appendChild(h('div', { class: 'srow2', 'data-doc': d.file.path }, h('span', { class: 'lm', title: d.session.title || null, text: kit.baseName(d.file.path) }),
             h('span', { class: 'chip2 ' + d.chip.tone, title: d.chip.title, text: d.chip.text })));
         });
         if (failed) box.appendChild(h('span', { class: 'quiet', role: 'status', text: '일부 세션의 문서를 읽지 못했어. 목록에 빠진 문서가 있을 수 있어.' }));
+        if (gone) box.appendChild(h('span', { class: 'quiet', role: 'status', 'data-docs-gone': String(gone), text: goneNote(gone) }));
       });
     }
 
@@ -1301,6 +1365,7 @@
     function openIds(s) {
       return (s.pendingRequestIds || []).filter(function (rid) { var r = kit.requests.get(rid); return !(r && r.status && r.status !== 'pending'); });
     }
+    if (window.BHPostLogic) window.BHPostLogic.useOpenIds(openIds);  // Post 의 상태(stateOf: 목록 걸러보기·아바타·장면)도 처리된 요청을 내 차례로 세지 않게 같은 기준을 쓴다
     function emptyHome(root, approvals, projects) {
       var page = h('div', { class: 'page home' });
       var sub = h('p', { class: 'line', text: 'Claude Code 세션을 시작하면 왼쪽 목록에 생겨. 지금 바로 맡길 일이 있으면 아래에서 시작해.' });
