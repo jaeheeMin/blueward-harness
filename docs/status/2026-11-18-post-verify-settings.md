@@ -51,7 +51,7 @@
 - 실제 Claude Code 가 상태줄 명령을 부르는 것: 같은 명령을 셸에서 같은 입력으로 불러 흉내 냈다.
 
 ## 시험
-`uv run pytest checker/tests/test_web_console.py checker/tests/test_web_console_ui.py -q` — 1571 passed, 2 skipped(약 6분). 첫 회차는 돌던 중에 리뷰 반영으로 app.js·시험을 바꿔 1 failed(섞인 결과)라 고친 뒤 다시 돌렸다.
+`uv run pytest checker/tests/test_web_console.py checker/tests/test_web_console_ui.py -q` — 1571 passed, 2 skipped(약 6분). 로컬 main(aa36af5)으로 rebase 한 뒤(다른 세션 시험 포함) 1574 passed, 2 skipped. 첫 회차는 돌던 중에 리뷰 반영으로 app.js·시험을 바꿔 1 failed(섞인 결과)라 고친 뒤 다시 돌렸다.
 
 ## 정리
 - 4931 시험 서버는 listener pid 로 껐다. 사용자 4873·다른 세션 서버는 건드리지 않았다.
