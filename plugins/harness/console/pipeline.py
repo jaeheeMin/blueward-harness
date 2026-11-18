@@ -1,6 +1,7 @@
 """요구사항 파이프라인(Post 테마 파이프라인 탭): 저장소의 요구사항마다 SRS → 개발 Spec → 개발 → 검토 → 합쳐짐 칸을 정할 사실을 읽는다.
 
-읽는 것: origin/main 의 SRS(제목·다음 단계·Status), 진행 원장(내용·상태), docs/spec/DEV-xxx 유무, 열린 PR(바뀐 파일·제목·브랜치의 번호, 검사 결과).
+읽는 것: origin/main 의 SRS(제목·다음 단계·Status), 진행 원장(내용·상태), docs/spec/DEV-xxx 유무, 열린 PR(바뀐 파일·제목·브랜치의 번호, 검사 결과),
+열린 이슈 제목의 DEV 번호(Cozy Office 가 터미널 세션을 팀에 앉히는 근거, post-logic.js reqFlowOf).
 설정·표준·Spec 판정은 devready.read 를 그대로 쓴다(새 작업 화면·PR 검사 spec-ready 와 같은 기준). 세션을 요구사항에 붙이는 일과
 칸 배정은 화면(post-pipeline.js)이 한다 — 세션 목록은 화면이 이미 가지고 있다.
 
@@ -19,6 +20,9 @@ import devready
 import gitstate
 
 PR_LIMIT = 100
+ISSUE_LIMIT = 300  # 이보다 오래된 열린 이슈는 표에 없다 — 그 브랜치 세션은 팀 없음(근거 없음)으로 떨어진다
+ISSUE_TAG_RE = re.compile(r"^\s*\[DEV-(\d+)\]")  # start 스킬 reserve_number.py TAG_RE(개발 본체 이슈)
+ISSUE_SUB_RE = re.compile(r"\(DEV-(\d+)\)\s*$")  # 같은 파일 SUBTASK_RE(하위 작업 이슈)
 SPEC_FILE_RE = re.compile(r"^docs/spec/DEV-(\d+)[^/]*\.md$")
 # 제목·브랜치의 번호: `DEV-013`, `REQ-019`, 브랜치의 `dev013`. 앞이 글자면(device 따위) 번호로 보지 않는다
 NUM_RE = re.compile(r"(?<![A-Za-z])(?:REQ|DEV)-?(\d{1,6})(?!\d)", re.IGNORECASE)
@@ -89,11 +93,32 @@ def open_prs(run: gitstate.Runner, root: str) -> dict:
         paths = [str(f.get("path")) for f in d.get("files") or [] if isinstance(f, dict) and f.get("path")]
         spec_nums = {int(m.group(1)) for m in (SPEC_FILE_RE.match(p) for p in paths) if m}
         work = any(p.startswith(WORK_PREFIX) for p in paths)
-        base = {"number": d["number"], "url": d.get("url", ""), "title": d.get("title", ""), "draft": bool(d.get("isDraft")),
+        base = {"number": d["number"], "url": d.get("url", ""), "title": d.get("title", ""), "draft": bool(d.get("isDraft")), "branch": d.get("headRefName", ""),
                 "checks": gitstate.summarize_checks(d.get("statusCheckRollup")), "awaitApproval": gitstate.awaiting_approval(d.get("statusCheckRollup"))}
         for n in sorted(spec_nums | nums_in(f"{d.get('title', '')} {d.get('headRefName', '')}")):
             by.setdefault(n, []).append(dict(base, kind="work" if work else "spec" if spec_nums else "doc"))
     return {"state": "ok", "reason": "", "byNumber": by}
+
+
+def open_issues(run: gitstate.Runner, root: str) -> dict:
+    """열린 이슈 중 DEV 번호가 붙은 것: {"state": "ok"|"no"|"unknown", "reason", "byIssue": {"이슈번호": {"dev": n, "main": bool}}}.
+    main: 제목 맨 앞 `[DEV-xxx]`(개발 본체 이슈 — start·srs 의 번호 찜), 아니면 제목 끝 `(DEV-xxx)`(하위 작업 이슈). 형식은 start 스킬
+    reserve_number.py 의 TAG_RE·SUBTASK_RE 와 같다. Cozy Office 가 세션 브랜치(`{type}/{이슈번호}-…`)의 이슈로 그 세션의 요구사항을 안다."""
+    if not gitstate.is_github_repo(run, root):
+        return {"state": "no", "reason": "git 원격이 GitHub 인 저장소가 아니라 이슈는 보지 않아.", "byIssue": {}}
+    rc, out = run(["gh", "issue", "list", "--state", "open", "--limit", str(ISSUE_LIMIT), "--json", "number,title"], root)
+    data = gitstate._json(out) if rc == 0 else None
+    if not isinstance(data, list):
+        return {"state": "unknown", "reason": "gh 로 열린 이슈를 읽지 못했어(gh 로그인·네트워크 확인).", "byIssue": {}}
+    by: dict[str, dict] = {}
+    for d in data:
+        if not isinstance(d, dict) or not d.get("number"):
+            continue
+        title = str(d.get("title") or "")
+        m, sub = ISSUE_TAG_RE.match(title), ISSUE_SUB_RE.search(title)
+        if m or sub:
+            by[str(d["number"])] = {"dev": int((m or sub).group(1)), "main": bool(m)}
+    return {"state": "ok", "reason": "", "byIssue": by}
 
 
 def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
@@ -148,4 +173,4 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
             "prs": prs["byNumber"].get(n, []),
         })
     return {"state": "yes", "reason": "", "items": items, "hidden": hidden, "srsCount": len(srs),
-            "prs": {"state": prs["state"], "reason": prs["reason"]}}
+            "prs": {"state": prs["state"], "reason": prs["reason"]}, "issues": open_issues(run, root)}

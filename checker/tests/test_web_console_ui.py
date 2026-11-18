@@ -4342,6 +4342,60 @@ def test_cozy_teams_terminal_session_sits_in_team_by_used_flow_skill():
     assert "PL.hereTitle(k, s.flow)" in home
 
 
+_POST_REQ_TEAM_NODE = r"""
+const path = require('path');
+const P = require(path.join(process.argv[1], 'post-logic.js'));
+const it = (n, o) => Object.assign({ number: n, req: 'REQ-' + n, kind: '', spec: false, next: '개발', unsure: false, prs: [] }, o || {});
+const D = { state: 'yes', items: [it(2, { spec: true, prs: [{ number: 21, kind: 'work', branch: 'feat/41-x' }, { number: 22, kind: 'spec', branch: 'docs/42-y' }] }),
+  it(3, { kind: '설정', next: '설정' }), it(6, { kind: '표준', next: '표준' }), it(5, { unsure: true, next: '' }), it(7), it(8, { req: '', spec: true })],
+  issues: { state: 'ok', byIssue: { '40': { dev: 2, main: true }, '41': { dev: 2, main: false }, '42': { dev: 2, main: false }, '43': { dev: 2, main: false },
+    '30': { dev: 3, main: true }, '31': { dev: 3, main: false }, '60': { dev: 6, main: true }, '50': { dev: 5, main: true }, '70': { dev: 7, main: false }, '71': { dev: 7, main: true }, '80': { dev: 8, main: true }, '90': { dev: 99, main: true } } } };
+const q = (branch, o, d) => P.reqFlowOf(Object.assign({ branch: branch, changedFiles: [] }, o || {}), d === undefined ? D : d);
+const out = {
+  devMain: q('feat/40-dev-body'), cfg: q('feat/30-cfg'), cfgSub: q('docs/31-cfg-note'), std: q('chore/60-std'),
+  subWorkPr: q('feat/41-x'), subSpecPr: q('docs/42-y'), subSrc: q('fix/43-z', { changedFiles: ['src/zsd/a.abap'] }),
+  subSpecFile: q('docs/43-z', { changedFiles: ['docs/spec/DEV-002-판매.md'] }), subOtherSpec: q('docs/43-z', { changedFiles: ['docs/spec/DEV-0021-x.md'] }),
+  subNothing: q('feat/43-z'), subNoSpec: q('feat/70-spec-draft'), subNoSpecFile: q('docs/70-spec-draft', { changedFiles: ['docs/spec/'] }), ledgerOnly: q('feat/80-x'),
+  mainNoSpec: q('feat/71-x'), mainNoSpecSrc: q('feat/71-x', { changedFiles: ['src/zsd/b.abap'] }), mainNoSpecSpec: q('feat/71-x', { changedFiles: ['docs/spec/DEV-007-반품.md'] }),
+  unsure: q('feat/50-x'), noItem: q('feat/90-x'), noIssue: q('feat/12-x'), prefixOnly: q('fix/x-y'), main: q('main'),
+  issuesUnknown: q('feat/40-x', {}, Object.assign({}, D, { issues: { state: 'unknown', byIssue: {} } })), notProject: q('feat/40-x', {}, { state: 'no' }), noData: q('feat/40-x', {}, null),
+};
+// 스킬 판정이 먼저, 요구사항 근거는 팀이 없을 때만(useReqs 로 받은 폴더 판)
+P.useReqs(cwd => cwd === '/p' ? D : null);
+out.viaTeam = P.teamFlowOf({ cwd: '/p', branch: 'feat/30-cfg', usedSkills: ['start'] });
+out.skillFirst = P.teamFlowOf({ cwd: '/p', branch: 'feat/30-cfg', usedSkills: ['spec', 'start'] });
+out.flowFirst = P.teamFlowOf({ cwd: '/p', branch: 'feat/30-cfg', flowId: 'fix' });
+out.otherCwd = P.teamFlowOf({ cwd: '/q', branch: 'feat/30-cfg' });
+out.station = P.stationOf({ cwd: '/p', branch: 'feat/40-x' }, null);
+out.title = P.hereTitle(P.stationOf({ cwd: '/p', branch: 'chore/60-std' }, null), P.teamFlowOf({ cwd: '/p', branch: 'chore/60-std' }));
+P.useReqs(null);
+out.off = P.teamFlowOf({ cwd: '/p', branch: 'feat/30-cfg' });
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_cozy_teams_terminal_session_sits_in_team_by_requirement_of_branch_issue():
+    # 2026-11-18 Cozy Office 7회차(J15 나머지): 갈래 스킬을 안 쓴 터미널 세션은 브랜치 이슈의 DEV 번호 → SRS 다음 단계·Spec·바꾼 파일로 개발·설정·표준(·설계) 팀.
+    r = subprocess.run([NODE, "-e", _POST_REQ_TEAM_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["devMain"] == "dev" and out["cfg"] == "config" and out["cfgSub"] == "config" and out["std"] == "standard"
+    assert out["subWorkPr"] == "dev" and out["subSpecPr"] == "spec" and out["subSrc"] == "dev" and out["subSpecFile"] == "spec"
+    assert out["subOtherSpec"] == "" and out["subNothing"] == ""  # Spec 이 main 에 있고 아직 바꾼 게 없는 하위 작업은 개발·Spec 수정 중 어느 것인지 못 가른다
+    assert out["subNoSpecFile"] == "spec" and out["mainNoSpecSrc"] == "dev" and out["mainNoSpecSpec"] == "spec"
+    # Spec·요구사항이 main 에 없는 본체 이슈와 아직 아무것도 안 바꾼 하위 작업은 spec 스킬이 이어 쓰는지·문서 일인지 못 가른다(리뷰 반영)
+    for k in ("subNoSpec", "ledgerOnly", "mainNoSpec", "unsure", "noItem", "noIssue", "prefixOnly", "main", "issuesUnknown", "notProject", "noData", "otherCwd", "off"):
+        assert out[k] == "", k  # 근거가 없거나 못 읽으면 팀 없음(브랜치 접두어로 짐작하지 않는다)
+    assert out["viaTeam"] == "config" and out["skillFirst"] == "spec" and out["flowFirst"] == "fix"
+    assert out["station"] == 2 and out["title"].startswith("표준화팀")
+    # 배선: Cozy Office 에서만 폴더 요구사항 판을 받아 post-logic 에 알린다(Sauce 는 묻지 않는다). smoke 는 post-*.js 를 안 실어 BHPostLogic 을 확인하고 부른다
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    body = app[app.index("function ensureReqs()"):app.index("function onProjectPick(e)")]
+    assert "if (!isPostTheme() || !loadedOnce || !window.BHPostLogic) return;" in body and "PL.useReqs(" in body and "PL.SKILL_TEAM_FLOW[k]" in body and "got.state !== 'unknown'" in body and "'/api/pipeline?cwd='" in body
+    assert "ensureReqs();" in app[app.index("function renderSide()"):]
+
+
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_cozy_office_design_g1_to_g10(tmp_path):
     """Cozy Office 디자인 다듬기(2026-11-18 6회차, G1~G10). 모양은 Aside 실화면으로 봤고, 여기서는 규칙·문구·자산이 돌아가지 않게 묶는다."""

@@ -643,6 +643,32 @@
       repos.sig = gen === repos.gen ? sig : null; setTimeout(function () { repos.sig = null; scheduleSide(); }, 30000);
     }).then(function () { repos.busy = false; repos.tried = true; scheduleSide(); if (view && view.onData) view.onData(); });
   }
+  /* Cozy Office 팀 배정(J15 나머지): 갈래 없는 세션이 앉을 팀은 그 폴더 요구사항 판(/api/pipeline — 브랜치 이슈의 DEV 번호·SRS 다음 단계·Spec·PR)으로 정한다(post-logic.js reqFlowOf).
+     갈래 스킬(srs·spec)을 안 쓰고 `{type}/{이슈번호}-…` 브랜치에 있는 세션의 폴더만 묻는다. 폴더마다 2분 기억하되, 브랜치가 바뀌면 바로, 그 이슈가 판에 아직 없으면(방금 만든 이슈) 20초 뒤 다시 묻는다
+     (서버도 저장소마다 60초 기억). 못 읽었으면(unknown) 앞서 읽은 판을 그대로 쓴다. Sauce 는 묻지 않는다. */
+  var reqs = { data: {}, at: {}, br: {}, busy: {}, hooked: false }, REQS_MS = 120000, REQS_MISS_MS = 20000;
+  function ensureReqs() {
+    if (!isPostTheme() || !loadedOnce || !window.BHPostLogic) return;
+    var PL = window.BHPostLogic, now = Date.now();
+    if (!reqs.hooked) { reqs.hooked = true; PL.useReqs(function (cwd) { return reqs.data[cwd] || null; }); }
+    sessions.forEach(function (s) {
+      var cwd = s.cwd, br = String(s.branch || ''), m = /^[a-z]+\/(\d+)-/.exec(br), skills = (s.usedSkills || []).concat(s.currentSkill || []);
+      if (!cwd || !m || s.flowId || reqs.busy[cwd] || skills.some(function (k) { return PL.SKILL_TEAM_FLOW[k]; })) return;
+      var d = reqs.data[cwd], miss = d && d.state === 'yes' && d.issues && d.issues.state === 'ok' && !(d.issues.byIssue || {})[m[1]];
+      if (reqs.br[cwd] === br && now - (reqs.at[cwd] || 0) < (miss ? REQS_MISS_MS : REQS_MS)) return;
+      reqs.busy[cwd] = true; reqs.br[cwd] = br;
+      api('GET', '/api/pipeline?cwd=' + encodeURIComponent(cwd)).then(function (got) {
+        var was = JSON.stringify(reqs.data[cwd] || null);
+        if (got && got.state !== 'unknown') reqs.data[cwd] = got;  // 다시 읽는 중(loading)이어도 이전 판은 쓴다. 못 읽음은 앞 판을 덮지 않는다
+        reqs.at[cwd] = got && got.loading ? now - REQS_MS + 2000 : now;  // 서버가 읽는 중이면 2초 뒤 다시 묻는다
+        if (got && got.loading) setTimeout(scheduleSide, 2100);
+        return was !== JSON.stringify(reqs.data[cwd] || null);
+      }).catch(function () { reqs.at[cwd] = now; return false; }).then(function (changed) {
+        reqs.busy[cwd] = false;
+        if (changed) { scheduleSide(); if (view && view.onData) view.onData(); }
+      });
+    });
+  }
   function onProjectPick(e) {
     var v = e.target && e.target.value;
     if (v === '*') { setProject({ all: true }); return; }
@@ -1333,6 +1359,7 @@
   function renderSide() {
     if (!sideEl) return;
     ensureRepos();  // Post: 세션 폴더가 바뀌었으면 저장소 판정을 다시 받는다(#1070)
+    ensureReqs();  // Post: 갈래 없는 세션이 앉을 팀의 근거(요구사항 판)를 받는다
     var d = sideData(), col = isCollapsed(), cur = location.pathname;
     appEl.dataset.collapsed = col ? 'true' : 'false';
     renderAnn(d); refreshNotices(d); renderHead(cur); syncPostFrame(d); drawNotice();

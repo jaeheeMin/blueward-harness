@@ -9488,6 +9488,30 @@ def test_pipeline_reads_requirements_ledger_and_open_prs_from_origin_main(tmp_pa
         c.close()
 
 
+def test_pipeline_gives_issue_dev_numbers_and_pr_branch_for_cozy_teams(tmp_path, monkeypatch):
+    # Cozy Office 7회차(J15 나머지): 열린 이슈 제목의 DEV 번호(맨 앞 [DEV-xxx] = 본체, 끝 (DEV-xxx) = 하위 작업)와 PR 의 브랜치 이름
+    issues = [{"number": 40, "title": "[DEV-002] 판매오더 조회"}, {"number": 41, "title": "목록 화면 개발 (DEV-002)"},
+              {"number": 42, "title": "SRS 변경 — 반품 요구사항 추가"}, {"number": 43, "title": "DEV-003 메모만 (DEV-003) 덧붙임"}, {"title": "번호 없음"}]
+    work = tmp_path / "work"
+    c = flow_console(tmp_path, monkeypatch, run=pipe_run(work, gh_issue_list=(0, json.dumps(issues))))
+    (work / "audit" / "ledger").mkdir(parents=True)
+    try:
+        body = pipe_get(c)[1]
+        assert body["issues"] == {"state": "ok", "reason": "", "byIssue": {"40": {"dev": 2, "main": True}, "41": {"dev": 2, "main": False}}}
+        items = {i["number"]: i for i in body["items"]}
+        assert items[2]["prs"][0]["branch"] == "feat/20-dev002-list"
+    finally:
+        c.close()
+    c = flow_console(tmp_path / "b", monkeypatch, run=pipe_run(work, gh_issue_list=(1, "")))
+    try:
+        issues = pipe_get(c)[1]["issues"]
+        assert issues["state"] == "unknown" and issues["reason"] and issues["byIssue"] == {}  # 못 읽으면 이슈 없음으로 뭉개지 않는다
+    finally:
+        c.close()
+    import pipeline
+    assert pipeline.open_issues(lambda a, cwd: (0, "origin\t/x/bare.git (fetch)\n") if "remote" in a else (0, "[]"), "/x")["state"] == "no"  # GitHub 원격이 없으면 이슈를 보지 않는다
+
+
 def test_pipeline_says_prs_unknown_instead_of_empty_review_lane(tmp_path, monkeypatch):
     work = tmp_path / "work"
     c = flow_console(tmp_path, monkeypatch, run=pipe_run(work, gh=(1, "")))

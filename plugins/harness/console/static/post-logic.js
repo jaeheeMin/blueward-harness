@@ -187,7 +187,7 @@
   /* 팀 배정(J15, 2026-11-18 사용자 판정): 갈래(flowId)가 있으면 그대로, 없으면(터미널에서 연 세션) 쓴 갈래 스킬로 맞는 팀의 갈래를 돌려준다.
      스킬 → 팀은 workflow.json 에서 그 스킬이 어느 갈래의 단계인지로 정한 것 중 팀이 하나로 정해지는 것만이다(srs → 요구분석팀, spec → 설계팀).
      start·deliver 처럼 여러 갈래가 같이 쓰는 스킬과 도구 스킬은 팀을 정하지 않는다(개발·설정·표준·유지보수 갈래의 첫 단계는 모두 start 라 스킬만으로는 못 가른다).
-     여러 스킬을 썼으면 지금 쓰는 스킬, 없으면 가장 나중에 쓴 갈래 스킬. 없으면 ''(팀 없음). */
+     여러 스킬을 썼으면 지금 쓰는 스킬, 없으면 가장 나중에 쓴 갈래 스킬. 갈래 스킬을 안 썼으면 아래 reqFlowOf(브랜치 이슈의 요구사항, 7회차), 그것도 못 정하면 ''(팀 없음). */
   var SKILL_TEAM_FLOW = { srs: 'srs', spec: 'spec' };
   function teamFlowOf(s) {
     if (!s) return '';
@@ -195,10 +195,37 @@
     if (s.currentSkill && SKILL_TEAM_FLOW[s.currentSkill]) return SKILL_TEAM_FLOW[s.currentSkill];
     var used = Array.isArray(s.usedSkills) ? s.usedSkills : [];
     for (var i = used.length - 1; i >= 0; i--) if (SKILL_TEAM_FLOW[used[i]]) return SKILL_TEAM_FLOW[used[i]];
-    return '';
+    return reqFlowOf(s, reqsFn ? reqsFn(s.cwd) : null);
   }
 
-  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
+  /* 팀 배정 J15 나머지(7회차): 갈래 스킬을 안 쓴 터미널 세션은 브랜치의 이슈가 가리키는 요구사항으로 개발·설정·표준(·설계) 팀을 정한다.
+     d = 그 세션 폴더의 /api/pipeline 결과(요구사항 items·열린 PR·열린 이슈의 DEV 번호). 근거가 갈래를 정하지 못하면 ''(팀 없음) — 짐작하지 않는다.
+     1) 브랜치 `{type}/{이슈번호}-…`(branching.md)의 이슈 제목에 `[DEV-xxx]`(개발 본체) 나 `(DEV-xxx)`(하위 작업)가 있어야 한다(start·spec 스킬이 붙인다).
+     2) 그 번호의 SRS 다음 단계가 설정·표준이면 config·standard(그 갈래는 [DEV-xxx] 로 start 하고 Spec 이 없다).
+     3) 개발 요구사항이면: 이 브랜치가 src/ 를 바꿨으면(작업 중 변경·같은 브랜치 열린 작업 PR) dev, 그 번호의 Spec 파일만 바꿨으면 spec.
+        바꾼 게 없으면 맨 앞 [DEV-xxx] 본체 이슈이고 Spec·요구사항이 main 에 있을 때만 dev(start: "SRS·Spec 단계는 그 이슈를 브랜치에 쓰지 않는다",
+        Spec·요구사항이 없으면 개발을 시작하지 않고 spec 스킬이 같은 DEV 브랜치를 이어 쓸 수 있다). 그 밖(하위 작업이 아직 아무것도 안 바꿈)은 못 가른다.
+     브랜치 접두어(feat/fix/docs)·이슈 라벨(type:*)·start 뒤 도구 스킬(atc·cts·role·unittest·manual)은 갈래를 정하지 않아 쓰지 않는다. 유지보수(fix 갈래)는 근거가 없어 콘솔에서 고른 세션만 앉는다. */
+  var reqsFn = null;
+  function useReqs(fn) { reqsFn = typeof fn === 'function' ? fn : null; }
+  var BRANCH_ISSUE = /^[a-z]+\/(\d+)-/;
+  function touches(paths, test) { return (Array.isArray(paths) ? paths : []).some(function (p) { return String(p).split(' -> ').some(test); }); }
+  function reqFlowOf(s, d) {
+    if (!s || !d || d.state !== 'yes' || !d.issues || d.issues.state !== 'ok') return '';
+    var m = BRANCH_ISSUE.exec(String(s.branch || '')), iss = m && d.issues.byIssue ? d.issues.byIssue[m[1]] : null;
+    if (!iss) return '';
+    var it = (Array.isArray(d.items) ? d.items : []).filter(function (x) { return x && x.number === iss.dev; })[0];
+    if (!it) return '';
+    if (it.kind === '설정') return 'config';
+    if (it.kind === '표준') return 'standard';
+    if (it.unsure || (it.req && it.next !== '개발')) return '';  // 다음 단계 미정·빈 칸: 개발인지 모른다
+    var specRe = new RegExp('^docs/spec/(DEV-0*' + iss.dev + '(?![0-9])|$)'), prs = (Array.isArray(it.prs) ? it.prs : []).filter(function (p) { return p && p.branch && p.branch === s.branch; });
+    if (touches(s.changedFiles, function (p) { return /^src\//.test(p); }) || prs.some(function (p) { return p.kind === 'work'; })) return 'dev';
+    if (touches(s.changedFiles, function (p) { return specRe.test(p); }) || prs.some(function (p) { return p.kind === 'spec'; })) return 'spec';
+    return iss.main && it.spec && it.req ? 'dev' : '';  // Spec·요구사항이 main 에 있는 본체 이슈만 바꾼 게 없어도 개발(없으면 spec 스킬이 이어 쓰는 중일 수 있다)
+  }
+
+  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, reqFlowOf: reqFlowOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
     clerkLine: clerkLine, sealOf: sealOf, stampedLine: stampedLine, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;
