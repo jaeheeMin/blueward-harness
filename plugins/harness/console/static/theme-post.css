@@ -362,10 +362,15 @@
 :root[data-theme="post"] .po-mini > .eb:first-child { font-family: var(--font); font-size: 16px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--lightink); }
 :root[data-theme="post"] .po-prslot .lt > .eb:first-child { font-family: var(--font); font-size: 16px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--lightink); }
 :root[data-theme="post"] .po-prslot .lt { gap: 8px; padding: 0; border: 0; background: none; box-shadow: none; }  /* 바깥 판(.po-mini)이 이미 판이라 안쪽 .lt 는 판 모양을 벗는다 */
+:root[data-theme="post"] .po-prslot a.lm, :root[data-theme="post"] .approvals a.lm { color: var(--lightink); text-decoration: underline; text-underline-offset: 3px; }  /* 승인할 PR·검토 요청 줄(세션이 없을 때 따로 선 승인 칸 포함)은 GitHub 링크인데 흐린 글자뿐이라 눌리는 줄로 안 보였다 — Post 의 다른 글자 링크(건너뛰기·되돌리기)처럼 밑줄 */
 :root[data-theme="post"] .po-foot .wn, :root[data-theme="post"] .po-rest > .wn-slot .wn { margin: 0; border: 1.5px solid var(--bd); background: var(--paper); color: var(--lightink); box-shadow: 0 1px 0 var(--bd2), 0 10px 24px -18px rgba(36,48,74,.35); }
 :root[data-theme="post"] .po-rest > .wn-slot:empty { display: none; }  /* 세션이 없거나 불러오는 중이면 새 소식 칸이 foot 밖(po-rest)에 붙는다 — 비어 있으면 격자 간격만 남지 않게 */
 :root[data-theme="post"] .po-foot .wn .eb, :root[data-theme="post"] .po-rest > .wn-slot .wn .eb { color: var(--lmuted); }
 :root[data-theme="post"] .po-foot .wn-ver li, :root[data-theme="post"] .po-rest > .wn-slot .wn-ver li { color: var(--sec); }
+:root[data-theme="post"] .po-foot > .wn-slot { grid-column: 1 / -1; }  /* 새 소식(최대 8줄)이 300px 칸 하나에 서면 700px 넘게 길어져 옆 칸들 아래가 통째로 비었다 — 아래 프로젝트 준비 칸처럼 한 줄을 다 쓴다 */
+:root[data-theme="post"] .po-foot .wn-list { display: block; column-width: 300px; column-gap: 28px; }
+:root[data-theme="post"] .po-foot .wn-ver, :root[data-theme="post"] .po-foot .wn-ver ul { display: block; }  /* 단 사이로 줄이 나뉘게 flex 대신 block */
+:root[data-theme="post"] .po-foot .wn-ver li { break-inside: avoid; margin-bottom: 8px; }
 @container shell (max-width: 760px) {
   :root[data-theme="post"] .po-panel { padding: 16px; }
   :root[data-theme="post"] .po-dc { padding: 12px; }
@@ -480,7 +485,8 @@
 :root[data-theme="post"] .po-ipanel .sess-side[hidden] { display: none; }
 :root[data-theme="post"] .po-ipanel .sess-side .docs-list { background: var(--surface); }
 :root[data-theme="post"] .po-ipanel [data-r="files"] section { margin-top: 12px; }
-:root[data-theme="post"] .po-ipanel .mt-32, :root[data-theme="post"] .po-ipanel .mt-40, :root[data-theme="post"] .po-ipanel .mt-64 { margin-top: 12px; }
+:root[data-theme="post"] .po-ipanel .mt-32, :root[data-theme="post"] .po-ipanel .mt-40, :root[data-theme="post"] .po-ipanel .mt-64 { margin-top: 12px !important; }  /* app.css 의 .mt-* 가 !important 라 같이 써야 이긴다(기술·기록 탭 위 빈 칸) */
+:root[data-theme="post"] .po-ipanel [data-r="log"] > section > h2.label { display: none; }  /* 탭 제목(.po-ih)이 이미 "이 세션에서 일어난 일" — 한 번만 */
 :root[data-theme="post"] .po-ipanel [data-r="tech"] .tech { margin: 0; border-top: 0; }
 :root[data-theme="post"] .po-ipanel [data-r="tech"] dl.kv { margin: 0; }
 :root[data-theme="post"] .po-ipanel [data-r="tools"] { margin-top: 4px; }
@@ -608,6 +614,7 @@
 :root[data-theme="post"] .pill.line:hover, :root[data-theme="post"] .pill.ghost:hover { background: var(--paper2); color: var(--text); }
 :root[data-theme="post"] .pill.dark, :root[data-theme="post"] .pill.acc, :root[data-theme="post"] .wn-acts .pill.dark { background: var(--accent-fill); color: #fff; }
 :root[data-theme="post"] .pill.dark:hover, :root[data-theme="post"] .pill.acc:hover, :root[data-theme="post"] a.pill.dark:hover, :root[data-theme="post"] .dresult a.pill.dark:hover { color: #fff; opacity: .92; }
+:root[data-theme="post"] .pill[data-limits-confirm-yes] { background: var(--accent-fill); color: #fff; }  /* 설정 · 계정 한도 켜기 확인의 "바꾸기"(모양 클래스 없는 단추라 브라우저 기본 회색 = 꺼진 단추처럼 보였다) — 주 단추 모양 */
 :root[data-theme="post"] .pill.off, :root[data-theme="post"] .chip.off { border-color: var(--bd); color: var(--lmuted); }
 :root[data-theme="post"] .input, :root[data-theme="post"] .textarea, :root[data-theme="post"] .light .input, :root[data-theme="post"] .light .textarea, :root[data-theme="post"] .tb-fld { border: 1.5px solid var(--bd); background-color: var(--field); color: var(--text); border-radius: 10px; }
 :root[data-theme="post"] .textarea { border-radius: 12px; }
@@ -662,8 +669,9 @@
 :root[data-theme="post"] .legend .lu, :root[data-theme="post"] table.list .unk, :root[data-theme="post"] .tagx.unk, :root[data-theme="post"] .crow.unk .mk { color: var(--st-unk-ink); }
 :root[data-theme="post"] .legend .lw, :root[data-theme="post"] .lt .lw, :root[data-theme="post"] .light .note-attn, :root[data-theme="post"] .askcard .note-attn, :root[data-theme="post"] .bad .warn-line, :root[data-theme="post"] .light .attn-text, :root[data-theme="post"] .nb-warn,
 :root[data-theme="post"] .light .folder-bar .v.none, :root[data-theme="post"] .kind.dim .khint, :root[data-theme="post"] .light .sub.attn { color: var(--attn); }
-:root[data-theme="post"] .light .note-accent, :root[data-theme="post"] .light .started span, :root[data-theme="post"] .light .cand-extra b, :root[data-theme="post"] .light .md a, :root[data-theme="post"] .docs-pane .md a { color: var(--accent); }
+:root[data-theme="post"] .light .started span, :root[data-theme="post"] .light .cand-extra b, :root[data-theme="post"] .light .md a, :root[data-theme="post"] .docs-pane .md a { color: var(--accent); }
 :root[data-theme="post"] .light .started { border-color: var(--accent); }
+:root[data-theme="post"] .light .note-accent { color: var(--lightink); }  /* 처리 알림 한 줄(전달했어·건너뛰었어·되돌렸어, 거절 사유도 같은 칸). Post 강조색(빨강)은 실패 색과 거의 같아 "전달했어" 도 오류로 읽혔다 — 성공·실패 어느 쪽 색도 아닌 본문 글자색 */
 :root[data-theme="post"] .light .progress i, :root[data-theme="post"] .progress i { background: var(--accent-fill); }
 :root[data-theme="post"] .light .progress, :root[data-theme="post"] .progress { background: var(--track); }
 :root[data-theme="post"] .crow .mk { border-color: var(--bd); }
@@ -921,7 +929,7 @@
 :root[data-theme="post"] .ref-chip .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--code); }
 :root[data-theme="post"] .ref-x { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--sec); font-size: 16px; line-height: 1; }
 :root[data-theme="post"] .ref-x:hover { background: var(--bd2); color: var(--text); }
-:root[data-theme="post"] .assist-item .nm { font-family: var(--code); }
+:root[data-theme="post"] .assist-item .nm { font-family: var(--code); flex: 0 0 auto; max-width: 60%; }  /* 설명이 긴 줄에서 스킬 이름이 눌려 "/appro|vals" 로 끊기지 않게. 긴 파일 경로는 60% 안에서 줄바꿈 */
 :root[data-theme="post"] .assist-item[aria-selected="true"], :root[data-theme="post"] .assist-item:hover { background: var(--paper2); }
 :root[data-theme="post"] .nb-flash { background: var(--okbg); color: var(--okink); }
 /* 첨부(이어서 요청 칸): 종이 + 1.5px 베이지, 붙이지 못한 이유는 주의 ! 호박 */
@@ -934,6 +942,8 @@
 :root[data-theme="post"] .comp { border: 1.5px solid var(--bd); background: var(--field); }
 :root[data-theme="post"] .comp-in { color: var(--text); }
 :root[data-theme="post"] .comp:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+:root[data-theme="post"] .comp { position: relative; }
+:root[data-theme="post"] .comp .assist-wrap { position: static; }  /* `/`·`@` 목록이 입력칸(좁은 화면에서 200px 남짓)이 아니라 입력 줄 전체 너비를 쓴다 — 390 에서 설명이 한두 글자씩 끊겼다 */
 :root[data-theme="post"] .contbox .cont-in { border-color: var(--bd); color: var(--text); background: var(--field); }
 
 /* 글자 링크 단추는 줄 전체로 늘어나지 않는다 · 기억 가득 배너의 단추는 좁은 화면에서 줄바꿈(C단계 마감) */

@@ -3931,3 +3931,27 @@ def test_post_side_list_scrolls_to_new_session_after_its_data_arrives():
     body = app.split("function postSideAfter(cur) {", 1)[1].split("\n  }\n", 1)[0]
     assert "var ss = route.name === 'session' ? sessions.get(route.id) : null;" in body and "if (ss && !ss.cwd) return;" in body
     assert body.index("if (ss && !ss.cwd) return;") < body.index("sideShownFor = cur;")
+
+
+def test_post_sweep_design_fixes_css():
+    # 2026-11-18 하네스 기능 전수 실화면 점검(5회차). Post 전용 CSS 라 원문 확인이다. 본체는 Aside 실화면(docs/status/2026-11-18-post-verify-sweep.md).
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    # 세션 오른쪽 기술·기록 탭: app.css 의 .mt-* 가 !important 라 Post 의 12px 도 !important 여야 위 빈 칸이 사라진다. 기록 탭 제목은 한 번만
+    assert ".mt-16 { margin-top: 16px !important; }" in (STATIC / "app.css").read_text(encoding="utf-8")
+    assert ':root[data-theme="post"] .po-ipanel .mt-64 { margin-top: 12px !important; }' in css
+    assert ':root[data-theme="post"] .po-ipanel [data-r="log"] > section > h2.label { display: none; }' in css
+    assert "var sec = h('section', { class: 'mt-64' }, h('h2', { class: 'label', text: '이 세션에서 일어난 일' }));" in app
+    # 처리 알림 한 줄(전달했어·건너뛰었어·되돌렸어·거절 사유)은 실패 색과 거의 같은 강조 빨강이 아니라 본문 글자색
+    assert ':root[data-theme="post"] .light .note-accent { color: var(--lightink); }' in css
+    assert ':root[data-theme="post"] .light .note-accent,' not in css
+    # `/`·`@` 목록: 이름 칸이 눌려 끊기지 않고, 목록은 입력 줄 전체 너비
+    assert ':root[data-theme="post"] .assist-item .nm { font-family: var(--code); flex: 0 0 auto; max-width: 60%; }' in css
+    assert ':root[data-theme="post"] .comp { position: relative; }' in css and ':root[data-theme="post"] .comp .assist-wrap { position: static; }' in css
+    # 설정 계정 한도 확인의 「바꾸기」는 주 단추, 홈 검토 요청 칸의 PR 링크는 밑줄
+    assert "class: 'pill', 'data-limits-confirm-yes': '1'" in app
+    assert ':root[data-theme="post"] .pill[data-limits-confirm-yes] { background: var(--accent-fill); color: #fff; }' in css
+    assert ':root[data-theme="post"] .po-prslot a.lm, :root[data-theme="post"] .approvals a.lm { color: var(--lightink); text-decoration: underline; text-underline-offset: 3px; }' in css
+    # 홈 새 소식은 아래 칸 한 줄을 다 쓰고 300px 단으로 흐른다(좁은 칸 하나에 700px 넘게 서지 않게)
+    assert ':root[data-theme="post"] .po-foot > .wn-slot { grid-column: 1 / -1; }' in css
+    assert ':root[data-theme="post"] .po-foot .wn-list { display: block; column-width: 300px; column-gap: 28px; }' in css
