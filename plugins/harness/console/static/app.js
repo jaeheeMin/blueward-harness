@@ -3346,17 +3346,22 @@
       if (newComp && newComp.busy()) { attachMsg = ATTACH_READING; draw(); return; }
       attachMsg = '';
       // 종류 버튼의 갈래는 AI 추천과 겹쳐 보기 전까지 사용자가 확정한 선택이 아니다(#668).
-      step = 'analyzing'; err = ''; errNet = false; var run = ++beginRun; draft.kindFlowId = kindFlow() || ''; draft.flowId = null; draft.flowUser = false; draft.insist = false; draw();
+      step = 'analyzing'; err = ''; errNet = false; var run = ++beginRun; draft.kindFlowId = kindFlow() || ''; draft.flowId = null; draft.flowUser = false; draft.insist = false;
+      if (isPostTheme()) { customMsg = ''; startErr = ''; }  // 지난번 폴더 안내·시작 오류는 새 분석과 상관없다(돌아와도, 새 확인 화면에도 다시 보이지 않게)
+      draw();
       api('POST', '/api/new', { text: draft.text.trim(), cwd: draft.cwd, model: modelChoice(), effort: effortChoice() }).then(function (d) {
+        if (late(run)) return;
         aid = d && (d.id || d.analysisId); if (!aid) throw new ApiError(0, '분석을 시작하지 못했어.');
         history.replaceState(null, '', '/new?id=' + encodeURIComponent(aid));
         data = d; poll();
-      }, function (e) { if (!alive) return; if (e.status === 400 && isPostTheme()) { folderCheck(e, run); return; } step = 'failed'; err = e.message; errNet = e.status === 0; draw(); });
+      }, function (e) { if (!alive || late(run)) return; if (e.status === 400 && isPostTheme()) { folderCheck(e, run); return; } step = 'failed'; err = e.message; errNet = e.status === 0; draw(); });
     }
+    // Post: 시작 요청이 느린 사이(윈도우의 느린 git) 요청을 고치거나 다시 시작했으면 늦게 온 답은 버린다. 안 그러면 쓰던 화면이 확인 화면으로 튄다
+    function late(run) { return isPostTheme() && (!alive || run !== beginRun || step !== 'analyzing'); }
     /* Post: 서버가 시작 요청을 400 으로 거절했을 때 까닭이 작업 폴더(고른 뒤 지워짐 등)면 "Claude Code 가 살펴보지 못했어" 가 아니라 폴더 고르기로 돌려보낸다 */
     function folderCheck(e, run) {
       api('POST', '/api/folders/validate', { path: draft.cwd }).then(function (v) { return v && v.ok === false ? String(v.error || '') : ''; }, function () { return ''; }).then(function (why) {
-        if (!alive || run !== beginRun || step !== 'analyzing') return;  // 그 사이 요청을 고치거나 다시 시작했으면 늦게 온 답은 버린다
+        if (!alive || late(run)) return;  // 그 사이 요청을 고치거나 다시 시작했으면 늦게 온 답은 버린다
         if (!why) { step = 'failed'; err = e.message; draw(); return; }
         step = 'write'; picking = true; customMsg = '고른 작업 폴더를 쓸 수 없어: ' + why + ' 다른 폴더를 골라 줘.'; history.replaceState(null, '', '/new'); draw(); showBlock('#custom');
       });
@@ -3369,14 +3374,16 @@
     }
     function poll() {
       clearTimeout(pollTimer);
+      var id = aid;
+      function gone() { return !alive || (isPostTheme() && (id !== aid || step !== 'analyzing')); }  // Post: 기다리는 사이 요청 고치기·다시 시작을 눌렀으면 이 답은 버린다
       api('GET', '/api/new/' + encodeURIComponent(aid)).then(function (d) {
-        if (!alive) return; data = d;
+        if (gone()) return; data = d;
         var st = norm(d.status);
         if (st === 'ready') { enterReview(); }
         else if (st === 'failed') { step = 'failed'; err = d.error || d.message || '분석에 실패했어.'; draw(); }
         else pollTimer = setTimeout(poll, 1200);
       }, function (e) {
-        if (!alive) return;
+        if (gone()) return;
         if (e.status === 404) { step = 'failed'; err = '분석 기록을 찾을 수 없어. 콘솔이 다시 시작되었을 수 있어.'; draw(); }
         else if (e.status === 401) return;
         else pollTimer = setTimeout(poll, 2500);
@@ -3402,6 +3409,11 @@
       }, 300);
     }
 
+    // 서버가 첨부 때문에 거절했는가: 너무 큼(413)이거나, 첨부 검사의 말("첨부 …", "<파일 이름>: …")일 때만. 다른 400 에 첨부 안내를 붙이지 않는다
+    function attachRejected(e, files) {
+      var m = String(e.message || '');
+      return e.status === 413 || /^첨부/.test(m) || files.some(function (f) { return m.indexOf(f.name + ':') === 0; });
+    }
     function start() {
       if (newComp && newComp.busy()) { startErr = ATTACH_READING; draw(); return; }
       starting = true; startErr = ''; draw();
@@ -3416,7 +3428,12 @@
         if (startedId) go('/s/' + encodeURIComponent(startedId));
       }, function (e) {
         startErr = '시작하지 못했어: ' + e.message;
-        if (isPostTheme() && files.length && (e.status === 400 || e.status === 413)) startErr += ' 첨부를 바꾸려면 "다른 걸로 할래" 로 돌아가서 빼 줘.';  // 이 화면의 첨부 칩에는 빼기(×)가 없다
+        if (!isPostTheme()) return;
+        if (files.length && attachRejected(e, files)) { startErr += ' 첨부를 바꾸려면 "다른 걸로 할래" 로 돌아가서 빼 줘.'; return; }  // 이 화면의 첨부 칩에는 빼기(×)가 없다
+        // Post: 분석 뒤 작업 폴더가 지워졌으면 서버는 "고른 파일이 없어"·"claude 를 찾을 수 없어" 처럼 엉뚱한 까닭을 댄다. 폴더를 확인해 바로 말한다
+        if (e.status === 400 || e.status === 502) return api('POST', '/api/folders/validate', { path: draft.cwd }).then(function (v) {
+          if (v && v.ok === false) startErr = '시작하지 못했어: 고른 작업 폴더를 쓸 수 없어: ' + String(v.error || '') + ' "다른 걸로 할래" 로 돌아가서 다른 폴더를 골라 줘.';
+        }, function () {});
       }).then(function () {
         starting = false; draw();
         if (startErr && isPostTheme() && document.activeElement === document.body) { var sb = document.getElementById('start-go'); if (sb) sb.focus(); }  // 눌렀던 단추가 다시 그려져 초점이 문서 맨 위로 튀지 않게
@@ -3424,7 +3441,7 @@
     }
 
     /* 폴더 */
-    function useFolder(p) { draft.cwd = p; draft.picked = null; picking = false; browsing = false; fsRows = null; dir = ''; customMsg = ''; intro = null; draw(); checkIntro(p); }
+    function useFolder(p) { draft.cwd = p; draft.picked = null; picking = false; browsing = false; fsRows = null; dir = ''; customMsg = ''; intro = null; draw(); backFocus('folder-toggle'); checkIntro(p); }  // 고른 줄이 목록과 함께 사라지니 목록을 열었던 단추로
     // 고른 폴더가 준비 안 됨(no)이고 이 폴더로 안내를 본 적이 없으면 서버가 show 를 true 로 준다. 확인 못 함이면 안내하지 않는다.
     // 서버는 관리자 여부(gh)를 기다리지 않고 바로 답한다. adminChecking 이면 1.5초마다 최대 10번 다시 묻고, 그래도 못 읽으면 확인 못 함으로 그린다.
     function checkIntro(p) {
@@ -3455,7 +3472,7 @@
     }
     function drawIntro(page) {
       var nm = baseName(draft.cwd) || draft.cwd;
-      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '1단계 · 프로젝트 준비' }), h('h1', { title: draft.cwd, text: nm + ' 준비하기' }), h('p', { class: 'line', text: '이 폴더엔 아직 하네스 구조가 없어' })));  // 전체 경로는 제목 title 로(시안 G-03 엔 경로 줄이 없다)
+      page.appendChild(h('div', { class: 'ptitle' }, h('span', { class: 'eb accent', text: '1단계 · 프로젝트 준비' }), h('h1', { id: isPostTheme() ? 'new-title' : null, tabindex: isPostTheme() ? '-1' : null, title: draft.cwd, text: nm + ' 준비하기' }), h('p', { class: 'line', text: '이 폴더엔 아직 하네스 구조가 없어' })));  // 전체 경로는 제목 title 로(시안 G-03 엔 경로 줄이 없다)
       var panel = h('section', { class: 'light newbox', 'data-folder-intro': '1' });
       // 표준 구조는 저장소 관리자(GitHub admin)가 만든다. 팀원(false)이나 확인 못 함(null)이면 만들기 없이 관리자에게 말하라고만 한다.
       if (introChecking) {  // 서버가 관리자 여부를 읽는 중(gh 는 몇 초 걸린다). 단추 없이 한 줄만 보이고 결과가 오면 바뀐다
@@ -3553,14 +3570,17 @@
       if (!alive) return;
       checkReady();
       var keepFocus = document.activeElement && document.activeElement.id, selStart = document.activeElement && document.activeElement.selectionStart;
-      var stepMoved = drawnStep !== null && drawnStep !== step; drawnStep = step;  // 화면 단계가 바뀌면 누른 단추가 사라져 초점이 문서 맨 위로 튄다: Post 는 새 제목으로 옮긴다
+      var showIntro = intro && intro === draft.cwd && step === 'write', screen = showIntro ? 'intro' : step;
+      var stepMoved = drawnStep !== null && drawnStep !== screen; drawnStep = screen;  // 화면 단계(프로젝트 준비 안내 포함)가 바뀌면 누른 단추가 사라져 초점이 문서 맨 위로 튄다: Post 는 새 제목으로 옮긴다
+      var mark = isPostTheme() && !keepFocus ? focusMark() : null;  // id 없는 칸(바꾸기·체크·답 단추)도 다시 그린 뒤 같은 자리로
       var reopenFiles = !!(briefAssist && briefAssist.isOpen()); briefAssist = null;  // 다시 그려도 열려 있던 목록은 이어 보인다
       clear(root);
       var page = h('div', { class: 'page sess newp' });
-      if (intro && intro === draft.cwd && step === 'write') {
+      if (showIntro) {
         drawIntro(page);
         root.appendChild(page);
         renderHead(location.pathname);
+        if (isPostTheme()) placeFocus(stepMoved, keepFocus, selStart, mark);  // 안내로 바뀌면 그 제목으로, 안내 안에서 다시 그리면 있던 칸으로
         return;
       }
       var t = TITLES[step] || TITLES.review, post = isPostTheme();
@@ -3576,15 +3596,28 @@
       if (step === 'write' || step === 'review') { page.appendChild(tools.el); tools.update(); }
       root.appendChild(page);
       renderHead(location.pathname);  // 헤더의 프로젝트 이름이 지금 고른 작업 폴더를 따라가게
-      if (stepMoved && isPostTheme() && !intro && (!document.activeElement || document.activeElement === document.body)) { var hd = document.getElementById('new-title'); if (hd) { hd.focus({ preventScroll: true }); keepFocus = ''; } }
-      if (keepFocus) { var f = document.getElementById(keepFocus); if (f && f !== document.activeElement) { f.focus(); try { if (selStart != null) f.setSelectionRange(selStart, selStart); } catch (e) { console.debug('커서 위치를 되돌리지 못했습니다', e); } } }
+      placeFocus(stepMoved, keepFocus, selStart, mark);
       if (reopenFiles && briefAssist && step === 'write') briefAssist.refresh();
     }
+    function placeFocus(moved, keep, selStart, mark) {
+      if (moved && isPostTheme() && (!document.activeElement || document.activeElement === document.body)) { var hd = document.getElementById('new-title'); if (hd) { hd.focus({ preventScroll: true }); keep = ''; } }
+      if (keep) { var f = document.getElementById(keep); if (f && f !== document.activeElement) { f.focus(); try { if (selStart != null) f.setSelectionRange(selStart, selStart); } catch (e) { console.debug('커서 위치를 되돌리지 못했습니다', e); } } }
+      if (mark && !moved && document.activeElement === document.body) { var again = sameKind(mark)[mark.n]; if (again && !again.disabled) again.focus({ preventScroll: true }); }
+    }
+    // 초점이 이 화면 안의 id 없는 칸에 있으면 "태그·클래스가 똑같은 칸 중 몇 번째" 로 적어 둔다(같은 화면을 다시 그리면 순서는 같다)
+    function focusMark() {
+      var a = document.activeElement;
+      if (!a || a === document.body || !root.contains(a)) return null;
+      var m = { tag: a.tagName, cls: a.className };
+      m.n = sameKind(m).indexOf(a);
+      return m;
+    }
+    function sameKind(m) { return Array.prototype.filter.call(root.getElementsByTagName(m.tag), function (el) { return el.className === m.cls; }); }
     function folderBar(page) {
       // 시안 G-05: 작은 muted 한 줄 + 오른쪽 작업 시작 단추. 목록은 [바꾸기]·[고르기] 를 눌러야 펼친다(폴더 없이 작업 시작을 누를 때도 펼침).
       var bar = h('span', { class: 'folder-bar', title: draft.cwd || null },
         h('span', { class: 'k', text: draft.cwd ? '작업 폴더는 이 프로젝트로 자동으로 정해져.' : recent === null ? '작업 폴더를 불러오는 중이야.' : '작업 폴더를 골라 줘.' }),
-        h('button', { type: 'button', class: 'textbtn', 'data-folder-toggle': '', 'aria-expanded': String(picking), onClick: function () { picking = !picking; draw(); } }, picking ? '닫기' : (draft.cwd ? '바꾸기' : '고르기')));
+        h('button', { type: 'button', id: isPostTheme() ? 'folder-toggle' : null, class: 'textbtn', 'data-folder-toggle': '', 'aria-expanded': String(picking), onClick: function () { picking = !picking; draw(); } }, picking ? '닫기' : (draft.cwd ? '바꾸기' : '고르기')));
       if (!picking) return bar;
       var box = h('div', { class: 'folder-pick' });
       (recent || []).forEach(function (f) {
@@ -3840,6 +3873,7 @@
     if (resume) {
       aid = resume; step = 'analyzing'; draw();
       api('GET', '/api/new/' + encodeURIComponent(aid)).then(function (d) {
+        if (isPostTheme() && (!alive || aid !== resume)) { if (alive) loadRecent(); return; }  // 그 사이 요청 고치기를 눌렀으면 이 답으로 확인 화면에 가지 않는다
         data = d; if (d.cwd) draft.cwd = d.cwd; if (d.text && !draft.text) draft.text = d.text;
         var st = norm(d.status);
         if (st === 'ready') enterReview(); else if (st === 'failed') { step = 'failed'; err = d.error || d.message || '분석에 실패했어.'; draw(); } else poll();

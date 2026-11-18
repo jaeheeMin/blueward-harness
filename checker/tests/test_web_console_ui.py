@@ -3774,14 +3774,34 @@ def test_post_new_task_extra_cases_X1():
     # 서버에 닿지 못한 시작은 분석 실패와 다른 말을 한다
     assert "errNet = e.status === 0" in app and "post && errNet ? '콘솔 서버에 연결하지 못했어'" in app
     # 키보드: 단계가 바뀌면 초점이 문서 맨 위로 튀지 않게 제목으로, 시작 오류·글 비어 있음·폴더 창 취소 뒤에는 누른 칸으로
-    assert "id: post ? 'new-title' : null, tabindex: post ? '-1' : null" in app and "document.getElementById('new-title')" in app and "drawnStep !== step" in app
+    assert "id: post ? 'new-title' : null, tabindex: post ? '-1' : null" in app and "document.getElementById('new-title')" in app and "drawnStep !== screen" in app  # 2회차: 프로젝트 준비 안내도 한 단계
     assert "if (startErr && isPostTheme() && document.activeElement === document.body) { var sb = document.getElementById('start-go'); if (sb) sb.focus(); }" in app
     assert "folderCheck(e, run)" in app and "run !== beginRun || step !== 'analyzing'" in app  # 늦게 온 폴더 확인이 다시 시작한 요청을 덮지 않게 and "id: 'start-go'" in app
     assert "textErr = true; draw(); showBlock('#brief'); return;" in app
     assert "backFocus('folder-browse')" in app and "backFocus('custom')" in app and "function backFocus(id)" in app
     # 첨부가 서버에서 거절되면 그 화면의 칩에는 빼기(×)가 없어 돌아가는 길을 알려 준다
-    assert "files.length && (e.status === 400 || e.status === 413)" in app and '"다른 걸로 할래" 로 돌아가서 빼 줘.' in app
+    assert "files.length && attachRejected(e, files)" in app and '"다른 걸로 할래" 로 돌아가서 빼 줘.' in app  # 2회차: 첨부 탓인 400·413 에만
     # 아주 긴 폴더 이름: 제목·눈썹은 어디서든 줄을 바꾸고, 위쪽 줄은 알림·테마 단추 대신 이름만 줄어든다
     assert ':root[data-theme="post"] .ptitle .eb, :root[data-theme="post"] .ptitle h1 { overflow-wrap: anywhere; }' in css
     assert ':root[data-theme="post"] #app > .top > :not(.ptop-proj):not(.sp):not(.ptop-lim) { flex-shrink: 0; }' in css and ".ptop-proj b { flex: 0 1 auto; min-width: 0;" in css
     assert ':root[data-theme="post"] #new-title:focus { outline: none; }' in css
+
+
+def test_post_new_task_extra_cases_X3():
+    # 2026-11-18 Post 새 작업 못 본 케이스 2회차(1회차 수정분 독립 재확인). 본체는 Aside 실화면(docs/status/2026-11-18-post-extra-newwork.md 「2회차」).
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    # 느린 분석 시작(윈도우 git) 중 요청 고치기·다시 시작을 누르면 늦게 온 시작·폴링 답은 버린다(쓰던 화면이 확인 화면으로 튀지 않게)
+    assert "function late(run) { return isPostTheme() && (!alive || run !== beginRun || step !== 'analyzing'); }" in app
+    assert "if (isPostTheme() && (!alive || aid !== resume)) { if (alive) loadRecent(); return; }" in app  # 주소 ?id= 로 이어 보는 첫 답도
+    assert "if (late(run)) return;\n        aid = d && (d.id || d.analysisId);" in app and "if (!alive || late(run)) return; if (e.status === 400 && isPostTheme())" in app
+    assert "function gone() { return !alive || (isPostTheme() && (id !== aid || step !== 'analyzing')); }" in app
+    # 폴더 탓 400 안내·지난 시작 오류는 새 분석을 시작하면 지운다
+    assert "if (isPostTheme()) { customMsg = ''; startErr = ''; }" in app
+    # 분석 뒤 폴더가 지워진 채 시작하면 "claude 를 찾을 수 없어" 대신 폴더를 확인해 말하고, 첨부 안내는 첨부 탓일 때만
+    assert "function attachRejected(e, files)" in app and "e.status === 400 || e.status === 502) return api('POST', '/api/folders/validate'" in app
+    assert "'시작하지 못했어: 고른 작업 폴더를 쓸 수 없어: ' + String(v.error || '') + ' \"다른 걸로 할래\" 로 돌아가서 다른 폴더를 골라 줘.'" in app
+    # 키보드: 폴더를 고르면 목록을 열었던 단추로, id 없는 칸(바꾸기·체크·답 단추)도 다시 그린 뒤 같은 자리로, 프로젝트 준비 안내는 그 제목으로
+    assert "draw(); backFocus('folder-toggle'); checkIntro(p); }" in app and "id: isPostTheme() ? 'folder-toggle' : null" in app
+    assert "var mark = isPostTheme() && !keepFocus ? focusMark() : null;" in app and "function focusMark()" in app and "return el.className === m.cls;" in app
+    assert "if (isPostTheme()) placeFocus(stepMoved, keepFocus, selStart, mark);" in app and "screen = showIntro ? 'intro' : step" in app  # 안내 화면도 있던 칸을 먼저 되돌린다
+    assert "h('h1', { id: isPostTheme() ? 'new-title' : null, tabindex: isPostTheme() ? '-1' : null, title: draft.cwd" in app
