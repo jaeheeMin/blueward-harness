@@ -1687,7 +1687,7 @@
     return out;
   }
   /* 장면 붙이기: 사무실 장면이 실렸으면 그것으로, 아니면 옛 라인아트 장면(static/post/)으로. 사무실 장면의 말풍선은 제목을 textContent 로 쓴다(HTML 로 해석하지 않는다). */
-  function attachScene(host, extra) {  // extra.onFocus(f): 사무실 장면이 주인공 머리 위 좌표({id,x,y} | null)를 알린다(홈의 내 차례 메모 자리)
+  function attachScene(host, extra) {  // extra: 홈의 메모가 받는 장면 콜백 — onFocus(f)(보는 사람 머리 가운데 좌표·반지름 {id,x,y,r} | null) · onPick(id, via) · onBackground() · onOverview()
     var PS = window.BHPostScene, O = window.BHOfficeScene;
     return PS.attach(host, Object.assign({ list: sceneList, onNavigate: function (href) { go(href); } }, extra || {}), O || null);
   }
@@ -1700,8 +1700,11 @@
       loaded: function () { return loadedOnce && (repos.tried || !isPostTheme()); }, conn: function () { return conn.state; }, stateBox: stateBox, loadingBox: loadingBox });  // 저장소 판정 전에는 거르기 전 숫자를 그리지 않는다(#1070)
     var sceneHost = h('div', { class: 'po-stage', hidden: true });
     var hv = null;
+    // 장면에서 사람·「나를 찾는 사람」·「끝낸 일」 을 누르면 세션으로 가지 않고 그 사람의 메모(post-home.js onPick), 메모의 링크로 간다. onPick 을 주면 번들은 onNavigate 를 작은 창 목록의 「가서 …」 버튼에서만 부른다(그때는 바로 세션으로)
     postScene = attachScene(sceneHost, { onFocus: function (f) { if (hv && hv.onFocus) hv.onFocus(f); },
-      onNavigate: function (href) { if (!(hv && hv.onPerson && hv.onPerson(href))) go(href); } });  // 사람을 누르면 세션으로 가지 않고 그 사람의 메모(post-home.js onPerson), 메모의 링크로 간다
+      onPick: function (id, via) { if (hv && hv.onPick) hv.onPick(id, via); },
+      onBackground: function () { if (hv && hv.onBackground) hv.onBackground(); },
+      onOverview: function () { if (postScene && postScene.noteOverview) postScene.noteOverview(); if (hv && hv.onOverview) hv.onOverview(); } });
     whatsSlot = h('div', { class: 'wn-slot' });
     var v = hv = postHome.view(root, { sceneHost: sceneHost, whatsSlot: whatsSlot, scene: function () { return postScene; } });
     drawWhatsNew();

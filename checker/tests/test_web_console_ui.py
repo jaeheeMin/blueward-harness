@@ -1494,8 +1494,8 @@ def test_post_home_field_memo_layout():
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
     for needle in ("po-memo", "po-stagew", "paintMemo()", "text: '다음'", "세션으로", "cardAct(it, false)", "cardAct(it, true)"):
         assert needle in home
-    # 메모 자리: 번들의 onFocus 좌표를 받고, 보여 주는 항목이 바뀌면 scene.focus(id). 옛 번들(focus 없음)도 동작
-    assert "onFocus: onFocus" in home and "typeof sc.focus === 'function'" in home and "sc.focus(id)" in home
+    # 메모 자리: 번들의 onFocus 좌표를 받고, 볼 사람이 바뀌면 scene.focus(세션 id | null — 장면이 스스로 고름). 옛 번들(focus 없음)도 동작
+    assert "onFocus: onFocus" in home and "typeof sc.focus === 'function'" in home and "sc.focus(want)" in home
     assert "matchMedia(NARROW)" in home and "(max-width: 760px)" in home
     # 장면 칸 밖은 그대로: 덱·숫자 카드 줄·Sauce 와 같은 홈 표·범례·팀 요약 줄
     for keep in ("paintDeck()", "tiles2 po-tiles", "po-legend", "po-teams", "네 답을 기다리는 일이 "):
@@ -4337,26 +4337,84 @@ def test_cozy_office_display_name():
     assert "우체국" not in tp and "창구" not in tp and "'세션 장면. 세션 '" in tp
 
 
-def test_cozy_survey_memo_person_click_drag_hide_and_small_fixes():
-    # 2026-11-18 Cozy Office 2회차(사용자 보고): 사무실 장면에서 사람을 누르면 세션으로 바로 가지 않고 그 사람의 메모, 메모의 「가서 확인하기」로 세션 이동, 장면을 끌면 메모 숨김
+def test_cozy_diorama_bundle_wired_to_memo():
+    # 2026-11-19 합류 1: 코드로 그린 디오라마 번들(BHOfficeScene version 2)을 오늘 화면 메모에 연결. 기록 docs/status/2026-11-19-cozy-office-merge.md
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    assert bundle.startswith("var BHOfficeScene=") and "window.BHOfficeScene=" in bundle
+    for need in ("setMemoOpen", "onBackground", "onOverview", "onPick", "나를 찾는 사람", "끝낸 일", "전체 보기", "작은 창", "of-btn", "of-tip", "--of-ask", "--of-done", "is-night"):
+        assert need in bundle, need
+    for old in ("bh-office-tools", "data-office-live", "ot-bubble", "Office layout", "hello, team"):
+        assert old not in bundle, old  # 옛 라인아트 장면의 부품·영어 그림 이름(V4)
+    assert "var(--of-ask" in bundle and "#C73E31" not in bundle  # 「?」 말풍선·숫자 배지는 알림 파랑(역할 색) — 빨강이 아니다
+    for bad in ("eval(", "new Function", "import(", "innerHTML"):
+        assert bad not in bundle
+    assert set(re.findall(r"https?://[^\s\"'`)]+", bundle)) == {"http://www.w3.org/2000/svg"}
+    # theme-post.js: 번들 제어를 focus·overview·setMemoOpen 까지 넘기고, 다시 붙을 때 마지막 값을 돌려준다
+    scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    for need in ("overview: function () { wantOver = true;", "setMemoOpen: function (open) { wantMemo = !!open;", "noteOverview: function () { wantOver = true; }",
+                 "if (wantOver) scene.overview(); else if (wantFocus) scene.focus(wantFocus);", "if (wantMemo) scene.setMemoOpen(true);"):
+        assert need in scene, need
+    # app.js: 사람·버튼(onPick)·빈 바닥(onBackground)·전체 보기(onOverview)를 홈에 넘긴다. onNavigate 는 작은 창 목록의 버튼만 부르니 바로 세션으로
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "onNavigate: function (href) { if (!(hv && hv.onPerson && hv.onPerson(href))) go(href); }" in app  # 홈 장면만 가로챈다(세션·요청 화면은 그대로)
+    for need in ("onPick: function (id, via)", "onBackground: function () { if (hv && hv.onBackground) hv.onBackground(); }", "postScene.noteOverview()", "hv.onOverview()"):
+        assert need in app, need
+    assert "Object.assign({ list: sceneList, onNavigate: function (href) { go(href); } }, extra || {})" in app
+    # post-home.js: 메모 닫기(Esc·빈 바닥·×)는 메모만 접고 장면에는 알리지 않는다(줌·조명 유지). 끌기로 숨기던 코드는 없다
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
-    assert "onFocus: onFocus, onPerson: onPerson," in home
-    person = home[home.index("function onPerson(href)"):home.index("function paintDeck()")]
-    assert "if (gone || !m || !officeOn || stageFrame.querySelector('.bh-office-away')) return false;" in person  # 작은 창(PiP)·홈을 떠난 뒤 PiP 클릭은 전처럼 세션으로
-    assert "pickTop(id, true); return true;" in person  # 덱에 있는 세션이면 덱 메모를 그 세션으로
-    assert "pickId = id; away = false; paintMemo();" in person
-    assert "Math.hypot(dx, dy) < 4 || (drag.touch && Math.abs(dy) > Math.abs(dx))" in person  # 번들과 같은 문턱, 터치 세로는 스크롤
-    assert "if (memo.hidden || narrowNow()) return;" in person  # 떠 있는 메모만, 좁은 화면은 메모가 장면 아래라 숨기지 않는다
-    assert "slots.sceneHost.addEventListener('dblclick', back);" in person and "now - lastTap < 320" in person  # 두 번 누르기(터치는 번들과 같은 320ms)면 되돌린다
+    assert "onPick: onPick, onBackground: onBackground, onOverview: onOverview," in home
+    close = home[home.index("function closeMemo()"):home.index("function closeBtn()")]
+    assert "shutId = memoId; memo.hidden = true;" in close and "sc.focus" not in close and "syncFocus" not in close
+    assert "memo.style.visibility === 'hidden' || !memo.getClientRects().length" in close  # 안 보이는 메모(자리 기다림·작은 창)에는 Esc 가 아무것도 안 한다
+    assert ".of-btn.is-ask:not(:disabled)" in close  # 초점이 메모 안에 있었으면 다시 여는 버튼으로
+    assert "'aria-label': '메모 닫기', title: '닫기 (Esc)'" in home and home.count("closeBtn()))") == 2  # 덱 메모·사람 메모 둘 다 ×
+    assert "if (e.key === 'Escape')" in home and "document.querySelector('.nb-back, .modal-back')" in home  # 팝업이 떠 있으면 그쪽 Esc
+    assert "function onBackground() { if (!gone && !narrowNow()) closeMemo(); }" in home  # 좁은 화면은 메모가 장면 아래라 바닥을 눌러도 그대로
+    assert "over = true; memo.hidden = memoHidden(); tellOpen();" in home  # 전체 보기
+    for gone in ("away = true", "addEventListener('dblclick'", "lastTap", "addEventListener('pointermove'"):
+        assert gone not in home, gone
+    # 장면과 같은 사람을 고른다: 고른 사람이 없으면 가장 오래 기다린 사람(번들 lead 와 같은 규칙), 손 든·끝낸 사람으로 고른 것은 그 상태가 풀리면 놓는다
+    assert "var ASK = { turn: 1, blocked: 1, unk: 1 };" in home and "function leadOf(list)" in home
+    assert "pickKindOf(pi.state) !== pickKind" in home and "syncFocus(pickId ? pickId : lead ? null : next);" in home
+    assert "if (over || told === want) return;" in home and "sc.setMemoOpen(open)" in home
+    # 장면이 작은 창에서 다른 사람을 고른 채 돌아오면(콘솔은 못 들었다) 다시 그린 뒤에도 어긋난 것을 보고 장면을 따른다 — 메모가 숨은 채 남지 않게
+    rec = home[home.index("function reconcile()"):home.index("/* 메모 머리의 몇 번째인지")]
+    assert "chased !== foc.id || adopted === foc.id" in rec and "if (!over && memoId && !inScene) return;" in rec and "setPick(foc.id); paintDeck(); paintMemo();" in rec
+    assert home.count("reconcile();") == 2  # 덱 메모·사람 메모(또는 메모 없음) 두 갈래 끝
+    assert "if (memo.hidden || memo.style.visibility === 'hidden') return;" in home  # 숨은 메모는 읽기 프로그램에 알리지 않는다
+    # 메모 자리: 머리 반지름 r 의 1.62배 옆(시안), 자리가 없으면 왼쪽, 아래 버튼 줄은 비운다. 그 사람이 틀 밖이면 자리만 숨긴다
+    place = home[home.index("function placeMemo()"):home.index("function onFocus(f)")]
+    for need in ("(foc.r > 0 ? foc.r : 21) * 1.62", "var flip = hx + gap + mw > W - 10", "H - mh - 58", "memo.style.visibility = 'hidden'", "memo.classList.toggle('is-flip', flip)"):
+        assert need in place, need
+    # theme-post.css: 장면 색 변수를 역할 토큰에 잇고, 옛 선택자·틀린 주석은 없다
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    rule = next(line for line in css.splitlines() if line.startswith(':root[data-theme="post"] .bh-office { --of-text'))
+    block = rule + css[css.index(rule) + len(rule):css.index(rule) + len(rule) + 200]
+    for need in ("--of-ask: var(--ask-fill)", "--of-done: var(--ok-fill)", "--of-focus: var(--focus)", "--of-paper: var(--btn-face)", "--of-line: var(--btn-edge)", "--of-shadow: var(--btn-drop)", "--of-hover: var(--btn-lift)"):
+        assert need in block, need
+    assert "data-office-live" not in css and "ot-bubble" not in css and "aspect-ratio 를 직접 넣는다" not in css and "장면 그림(SVG)·사람 아바타 바탕" not in css
+    assert ".po-memo-x" in css and ".po-stage.is-office { aspect-ratio: 2.4 / 1;" in css and "aspect-ratio: 1.6 / 1" in css
+    # 장면 틀이 좁으면(720px 미만) 메모는 장면 아래 블록, 떠 있는 메모는 질문 세 줄·제목 한 줄로 높이를 묶는다
+    assert "var UNDER_W = 720;" in home and "stageFrame.clientWidth < UNDER_W" in home and "stageFrame.classList.toggle('is-under', narrow)" in home
+    assert ".po-stagew.is-under .po-memo { position: static;" in css and ".po-stagew:not(.is-under) .po-memo-q { display: -webkit-box;" in css and "-webkit-line-clamp: 3" in css
+    assert "border-left" not in "".join(line for line in css.splitlines() if ".po-memo {" in line)  # 왼쪽 세로 강조선 없음(꼬리 ::before 만 선을 쓴다)
+
+
+def test_cozy_survey_memo_person_click_drag_hide_and_small_fixes():
+    # 2026-11-18 Cozy Office 2회차(사용자 보고): 사무실 장면에서 사람을 누르면 세션으로 바로 가지 않고 그 사람의 메모, 메모의 「가서 확인하기」로 세션 이동.
+    # 2026-11-19 디오라마 번들(계약 version 2) 연결: 사람·버튼은 onPick 으로 받고, 메모는 Esc·빈 바닥·× 로 닫는다(끌기로는 안 닫힌다) — test_cozy_diorama_bundle_wired_to_memo
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert "onPick: function (id, via) { if (hv && hv.onPick) hv.onPick(id, via); }" in app  # 홈 장면만 가로챈다(세션·요청 화면은 그대로)
+    assert "hv.onPerson" not in app and "function onPerson(" not in home
+    pick = home[home.index("function onPick(id)"):home.index("function paintDeck()")]
+    assert "if (gone || !officeOn) return;" in pick and "if (!sceneSession(id)) { if (over) { leaveOver(); paintMemo(); } return; }" in pick  # 홈을 떠난 뒤·콘솔이 모르는 세션은 메모를 안 띄운다
+    assert "pickTop(id, true); return;" in pick and "setPick(id); paintMemo();" in pick  # 덱에 있는 세션이면 덱 맨 위도 그 카드로
     paint = home[home.index("function paintMemo()"):home.index("function personMemo(s)")]
-    assert "if (next !== memoId) away = false;" in paint and "memo.hidden = memoHidden();" in paint  # 끈 뒤 다시 그려도 숨김 유지, 메모 대상이 바뀌면 다시 보인다
-    assert "function memoHidden() { return !memoId || (away && !narrowNow()); }" in home
-    assert "new ResizeObserver(function () { memo.hidden = memoHidden(); placeMemo(); })" in home  # 넓게 끌어 숨긴 뒤 창을 줄이면 장면 아래 메모가 보인다
-    assert "memo.hidden = true; syncFocus(null);" not in home  # 메모를 치우는 곳은 memoId 도 비운다(크기 바뀜에 옛 메모가 되살아나지 않게)
-    assert "function pickTop(id, stay) { topId = id; pickId = null; away = false;" in home  # J·K·다음이면 다시 뜬다
-    pm = home[home.index("function personMemo(s)"):home.index("function onPerson(href)")]
+    assert "if (next && next !== shutId) shutId = null;" in paint and "memo.hidden = memoHidden();" in paint  # 닫은 뒤 다시 그려도 닫힘 유지, 다른 사람이 메모에 오면 다시 보인다
+    assert "function memoHidden() { return !memoId || over || shutId === memoId; }" in home
+    assert "function noMemo() { memo.hidden = true; memoId = null; pickId = null;" in home  # 메모를 치우는 곳은 memoId 도 비운다(크기 바뀜에 옛 메모가 되살아나지 않게). 닫아 둔 사람(shutId)은 남긴다
+    assert "function pickTop(id, stay) { topId = id; setPick(id);" in home  # J·K·다음이면 다시 뜬다
+    pm = home[home.index("function personMemo(s)"):home.index("function onPick(id)")]
     assert "'가서 확인하기'" in pm and "'세션 메모'" in pm and "'/s/' + encodeURIComponent(s.id)" in pm
     # 날짜 줄: 모든 저장소를 보면 첫 세션 폴더 이름(projC 따위)으로 채우지 않는다
     assert "projectWant && projectWant.all ? '모든 저장소' : projectOf()" in app
@@ -4398,7 +4456,7 @@ def test_cozy_defects_round3_source():
     assert "'data-sumkey': 'old|' + d.key" in ui and "'data-sumkey': 'off|' + sid(session)" in ui
     # D18 메모가 바뀌면 읽기 프로그램에 알린다(지난 시간은 빼고 판단)
     assert "'data-memo-live': '1'" in home and "function announceMemo()" in home
-    assert home.count("announceMemo();") == 2  # 사람 메모 경로 + 덱 메모 경로
+    assert home.count("announceMemo();") == 4  # 사람 메모 경로 + 덱 메모 경로 + 메모가 자리를 잡아 보이게 될 때(placeMemo 의 장면 아래·떠 있는 두 갈래)
 
 
 _POST_TEAM_NODE = r"""
@@ -4670,7 +4728,8 @@ def test_cozy_teams3_order_basis_stage_desk_and_lane():
     assert out["laneSkill"] == 1 and out["laneOld"] == 0 and out["laneBasis"] == [7]
     # 장면 번들(외부 빌드본)이 사람을 세우는 규칙과 atDesk 가 같다: wait → 리뷰 룸, done → 완료, idle → 카페(rest), 그 밖 → 팀 자리
     bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
-    assert 'e.state==="wait"?C("review").push(e):e.state==="done"?C("done").push(e):e.state==="idle"?C("rest").push(e)' in bundle
+    # 디오라마 번들(계약 version 2)의 자리 규칙(ai-office-iso src/diorama/seating.ts placeOf). 축약 변수 이름은 빌드마다 달라질 수 있어 모양으로 본다
+    assert re.search(r'if\((\w+)\.state==="wait"\)return"review";if\(\1\.state==="done"\)return"done";if\(\1\.state==="idle"\)return"rest"', bundle)
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
     body = home[home.index("function paintTeams()"):home.index("function draw()")]
     assert "PL.atDesk(s.state)" in body and "카페·리뷰 룸·완료에 " in body

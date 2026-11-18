@@ -286,10 +286,16 @@
 :root[data-theme="post"] .po-sub { font-size: 12.5px; color: var(--lmuted); }
 :root[data-theme="post"] .po-hint { margin-left: auto; font-size: 12px; color: var(--lmuted); }
 :root[data-theme="post"] .po-scenep .po-stage { margin: 0; border-radius: 10px; }
-/* 사무실 장면(office-post.js): 아래 aspect-ratio 두 값은 장면이 붙기 전 자리 잡기용이다. 붙은 뒤에는 장면이 host 폭에 맞춰 host 의 aspect-ratio 를 직접 넣는다. */
+/* 사무실 장면(post/office/office-post.js, 디오라마 번들): 장면 틀의 비율은 여기서 정한다(가로 2.4:1 — 승인된 시안, 640px 아래는 1.6:1). 번들은 host 높이를 그대로 채우고,
+   장면이 작은 창(PiP)에 가 있는 동안만 host 의 aspect-ratio 를 auto 로 바꿔 한 줄(.bh-office-away)로 줄인다. */
 :root[data-theme="post"] .po-stage.is-office { aspect-ratio: 2.4 / 1; overflow: hidden; }
-:root[data-theme="post"] .po-stage.is-office .bh-office, :root[data-theme="post"] .po-stage.is-office [data-office-live] { height: 100%; }
+:root[data-theme="post"] .po-stage.is-office .bh-office { height: 100%; }
 @media (max-width: 640px) { :root[data-theme="post"] .po-stage.is-office { aspect-ratio: 1.6 / 1; } }
+/* 장면의 색 역할(--of-*)을 Cozy Office 역할 토큰에 잇는다(기록 docs/status/2026-11-19-cozy-office-merge.md): 나를 찾는 사람(「?」 말풍선 · 숫자 배지) = 알림 파랑,
+   끝낸 일(「✓」 · 숫자 배지) = 성공 초록, 초점 고리 = --focus, 버튼 = 콘솔 버튼 말씨(--btn-*). 토큰이 어두운 모드에서 스스로 바뀌니 밤 장면(.bh-office.is-night)도 이 한 줄이 덮는다.
+   눌린 버튼(--of-on) · 흐린 버튼(--of-off*) · 작은 창 목록(--of-soft · --of-dark*)은 번들 값 그대로다(작은 창에는 이 스타일시트가 닿지 않아 번들이 같은 값을 기본으로 갖고 있다). */
+:root[data-theme="post"] .bh-office { --of-text: var(--text); --of-sub: var(--muted); --of-paper: var(--btn-face); --of-line: var(--btn-edge); --of-shadow: var(--btn-drop); --of-hover: var(--btn-lift);
+  --of-ask: var(--ask-fill); --of-done: var(--ok-fill); --of-focus: var(--focus); }
 :root[data-theme="post"] .po-teams { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px 10px; margin: 0; padding: 8px 0 0; list-style: none; }
 :root[data-theme="post"] .po-teams[hidden] { display: none; }
 :root[data-theme="post"] .po-teams li { display: grid; justify-items: center; font-family: var(--font); }
@@ -332,16 +338,24 @@
 :root[data-theme="post"] .po-stagew { position: relative; }
 :root[data-theme="post"] .po-stagew.is-office { border: 1px solid var(--bd); border-radius: 16px; overflow: hidden; background: var(--surface); }
 :root[data-theme="post"] .po-stagew.is-office .po-stage { margin: 0; border-radius: 0; }
-:root[data-theme="post"] .po-memo { position: absolute; left: 21%; top: 12%; z-index: 3; box-sizing: border-box; width: 320px; max-width: calc(100% - 32px); max-height: calc(100% - 16px); overflow-y: auto; padding: 16px 20px 20px; border: 1px solid var(--bd); border-radius: 12px; background: var(--paper); color: var(--text); box-shadow: 0 12px 32px -16px rgba(36,48,74,.45); }
+:root[data-theme="post"] .po-memo { position: absolute; left: 21%; top: 12%; z-index: 3; box-sizing: border-box; width: 320px; max-width: calc(100% - 32px); max-height: calc(100% - 16px); padding: 14px 18px 16px; border: 1.5px solid var(--btn-edge); border-radius: 14px; background: var(--btn-face); color: var(--text); box-shadow: 0 3px 0 var(--btn-drop); }  /* 장면 위에 뜨는 것이라 장면 버튼과 같은 말씨(승인된 시안 .of-memo): 남색 선 + 아래 단단한 그림자 */
 :root[data-theme="post"] .po-memo[hidden] { display: none; }
 :root[data-theme="post"] .po-stagew:has(.bh-office-away) .po-memo { display: none; }  /* 장면이 작은 창(PiP)에 가 있는 동안: 패널엔 한 줄만 남아 메모가 그 위에 겹쳐 잘린다. 덱이 아래에 그대로 있다 */
-:root[data-theme="post"] .po-memo::before { content: ""; position: absolute; left: -7px; top: var(--tail, 44px); width: 12px; height: 12px; background: var(--paper); border-left: 1px solid var(--bd); border-bottom: 1px solid var(--bd); transform: rotate(45deg); }
+:root[data-theme="post"] .po-memo::before { content: ""; position: absolute; left: -7.5px; top: var(--tail, 44px); width: 12px; height: 12px; background: var(--btn-face); border-left: 1.5px solid var(--btn-edge); border-bottom: 1.5px solid var(--btn-edge); transform: translateY(-50%) rotate(45deg); }  /* 꼬리 끝이 그 사람 머리 높이(--tail)를 가리킨다 */
 :root[data-theme="post"] .po-memo.is-loose::before { display: none; }
-:root[data-theme="post"] .po-memo.is-flip::before { left: auto; right: -7px; border-left: 0; border-bottom: 0; border-right: 1px solid var(--bd); border-top: 1px solid var(--bd); }
+:root[data-theme="post"] .po-memo.is-flip::before { left: auto; right: -7.5px; border-left: 0; border-bottom: 0; border-right: 1.5px solid var(--btn-edge); border-top: 1.5px solid var(--btn-edge); }
 :root[data-theme="post"] .po-memo-h { display: flex; align-items: center; gap: 8px; }
-:root[data-theme="post"] .po-memo-next { margin-left: auto; }
+:root[data-theme="post"] .po-memo-kind { flex: 1 1 auto; min-width: 0; }
+:root[data-theme="post"] .po-memo-next { flex: none; }
+/* 메모 닫기(×): 누르면 메모만 접힌다(장면의 줌·조명은 그대로). 테두리 없는 작은 단추, 올리면 바탕이 생긴다 */
+:root[data-theme="post"] .po-memo-x { flex: none; display: grid; place-items: center; width: 28px; height: 28px; margin: -5px -8px -5px 0; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
+:root[data-theme="post"] .po-memo-x:hover { background: var(--surface); color: var(--text); }
+:root[data-theme="post"] .po-memo-x:focus-visible { outline: 2.5px solid var(--focus); outline-offset: 1px; }
 :root[data-theme="post"] .po-memo-q { margin: 8px 0 4px; font-size: 17px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
 :root[data-theme="post"] .po-memo-s { margin: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+/* 장면 위에 뜬 메모는 높이를 묶는다(긴 질문·긴 제목이 아래 버튼 줄을 덮거나 틀 밖으로 잘리지 않게): 질문 세 줄, 제목 한 줄. 꼬리가 상자 밖에 있어 상자를 스크롤 칸으로 만들 수는 없다. 전체 글은 title 과 아래 덱 카드에 있다 */
+:root[data-theme="post"] .po-stagew:not(.is-under) .po-memo-q { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+:root[data-theme="post"] .po-stagew:not(.is-under) .po-memo-s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :root[data-theme="post"] .po-memo-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
 :root[data-theme="post"] .po-memo-acts .po-link { margin-left: auto; }
 :root[data-theme="post"] .po-link { padding: 0; border: 0; background: none; color: var(--sec); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--bd); cursor: pointer; }
@@ -352,10 +366,14 @@
 :root[data-theme="post"] .po-memo[data-color-role="err"] .po-memo-kind { color: var(--err); }
 :root[data-theme="post"] .po-memo-blocked .po-memo-kind { color: var(--st-fail-ink); }
 :root[data-theme="post"] .po-memo-unk .po-memo-kind { color: var(--st-unk-ink); }
+/* 좁을 때는 메모가 장면 아래 블록이 된다: 화면이 760px 이하이거나, 장면 틀이 720px 보다 좁을 때(post-home.js 가 .is-under 를 붙인다 — 왼쪽 메뉴가 있는 화면은 창이 910px 쯤부터) */
 @media (max-width: 760px) {
-  :root[data-theme="post"] .po-memo { position: static; width: auto; max-width: none; max-height: none; margin: 12px; box-shadow: none; }
+  :root[data-theme="post"] .po-memo { position: static; width: auto; max-width: none; max-height: none; margin: 12px; }
   :root[data-theme="post"] .po-memo::before { display: none; }
+  :root[data-theme="post"] .po-memo-x { width: 36px; height: 36px; margin: -8px -10px -8px 0; }  /* 손가락으로 누르는 크기 */
 }
+:root[data-theme="post"] .po-stagew.is-under .po-memo { position: static; width: auto; max-width: none; max-height: none; margin: 12px; }
+:root[data-theme="post"] .po-stagew.is-under .po-memo::before { display: none; }
 
 :root[data-theme="post"] .po-cols { padding: 20px 0 8px; gap: 8px; }
 :root[data-theme="post"] .po-cols > .po-ph { padding: 0 24px; }
@@ -1149,7 +1167,7 @@
 
 /* 어두운 모드: 역할 색의 글자(--ask · --warn · --err · --ok · --unk)는 어두운 판 위에서 4.5:1 이 되도록 밝게 하고,
    흰 글자가 올라가는 채움(--x-fill)은 밝을 때와 같게 둔다(알림 채움만 흰 글자 대비에 맞춰 조금 밝다). 주 색(--pri)은 남색 바탕에서 안 보이니 크림으로 뒤집고 그 위 글자를 어둡게 한다.
-   옛 변수(--accent · --attn · --st-*)는 위에서 역할로 이어 두어 여기서 다시 정하지 않는다. 장면 그림(SVG)·사람 아바타 바탕·장면 안 이름표·노랑 꼬리표는 낮 모습 그대로다. */
+   옛 변수(--accent · --attn · --st-*)는 위에서 역할로 이어 두어 여기서 다시 정하지 않는다. 사무실 장면(디오라마 번들)은 밤 장면을 스스로 그린다(<html data-mode="dark"> 를 본다) — 버튼·배지 색만 위 역할 토큰으로 잇는다(.bh-office 의 --of-*). 사람 아바타 바탕·노랑 꼬리표는 낮 모습 그대로다. */
 :root[data-theme="post"][data-mode="dark"] {
   --bg: #161B27; --surface: #1B2130; --deep: #1B2130; --text: #F3EEE3; --sec: #CFC8B8; --muted: #9CA3B5;
   --pri: #F3EEE3; --pri-hover: #FFFFFF; --pri-drop: #8E897E; --on-pri: #161B27; --pri-soft: #2D364B;
