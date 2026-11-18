@@ -15,6 +15,12 @@
     { name: '개발', hint: 'AI가 만드는 중' }, { name: '검토', hint: '팀 승인 받기', desk: '리뷰 룸' },
     { name: '합쳐짐', hint: '끝, 반영됨', desk: '완료' }
   ];
+  /* 단계 번호 2 는 개발·설정·표준·유지보수 갈래가 같이 쓴다(장면의 자리는 팀마다 따로). 안내판·정보 칸의 단계 이름은 갈래 일에 맞게 부른다(9회차 ②). */
+  var STAGE_OF = { config: '설정', standard: '표준', fix: '수정' };
+  function stageName(k, flow) {
+    var i = Math.max(0, Math.min(4, k | 0));
+    return (i === 2 && STAGE_OF[flow]) || STATION[i].name;
+  }
   /* 사무실 장면(office-post.js) 아래 팀 요약과 같은 팀 표. 갈래(flowId) → 팀. 요구사항·Spec·개발 자리(0~2)는 세션의 팀 이름으로 부른다(설정·표준·유지보수 갈래도 개발 단계 번호 2 를 쓴다). */
   var TEAMS = [['요구분석팀', ['srs', 'srs-export']], ['설계팀', ['spec']], ['개발팀', ['dev']], ['기능컨설팅팀', ['config']], ['표준화팀', ['standard']], ['유지보수팀', ['fix']]];
   function teamOf(flow) {
@@ -57,10 +63,14 @@
     if (prState(s) === 'MERGED' || s.flowFinished || s.phase === 'finished') return 4;
     var step = L && L.currentStep ? L.currentStep(s) : null, name = step ? String(step.name || step.id || '') : '';
     if (s.phase === 'approval' || (prState(s) === 'OPEN' && /올리고|합쳐지기/.test(name))) return 3;
-    var tf = teamFlowOf(s);  // 터미널 세션은 쓴 갈래 스킬의 팀(J15)
+    var tf = teamFlowOf(s);  // 콘솔 갈래가 없는 세션은 근거·쓴 갈래 스킬로 정한 팀(J15)
     if (tf && FLOW_STATION[tf] != null) return FLOW_STATION[tf];
     return 2;
   }
+
+  /* 장면(office-post.js)이 사람을 세우는 곳: 승인 기다림은 리뷰 룸, 끝은 완료, 쉬는 중은 카페, 그 밖(내 차례·막힘·확인 못 함·일하는 중)은 팀 자리(팀이 없으면 리셉션).
+     홈 팀 칸 숫자는 이 기준으로 지금 그 자리에 있는 사람만 센다(9회차 D) — 소속 인원을 세면 쉬는 사람이 팀 칸엔 있고 장면의 그 책상엔 없다. */
+  function atDesk(state) { return state !== 'wait' && state !== 'done' && state !== 'idle'; }
 
   function poseOf(state) {
     return state === 'turn' ? 'ask' : state === 'blocked' || state === 'unk' ? 'stuck' : state === 'wait' ? 'wait' : state === 'done' ? 'done' : 'walk';
@@ -92,7 +102,7 @@
     if (i === 3) return STATION[3].desk + ' · ' + STATION[3].name;
     if (i === 4) return STATION[4].desk + ' · ' + STATION[4].name;
     var team = teamOf(flow);
-    return team ? team + ' · ' + STATION[i].name : '팀 없음';
+    return team ? team + ' · ' + stageName(i, flow) : '팀 없음';
   }
   function hereLine(state) { return HERE[state] || '지금 일하고 있어'; }
 
@@ -103,7 +113,7 @@
     (cells || []).forEach(function (c) { by[c.id] = c; });
     var out = INFO.map(function (x) {
       var c = by[x[1]], v = x[1] === 'step' && stepName ? stepName : c && c.value;
-      return { id: x[1], label: x[0], value: v == null || v === '' ? '–' : String(v), tone: c && c.tone || '' };
+      return { id: x[1], label: x[0], value: v == null || v === '' ? '–' : String(v), tone: c && c.tone || '', title: c && c.title || '' };
     });
     (cells || []).forEach(function (c) {  // 숫자 띠의 나머지 칸(AI 진행 · SRS 상태)도 잃지 않는다
       if (!INFO.some(function (x) { return x[1] === c.id; })) out.push({ id: c.id, label: c.label, value: String(c.value), tone: c.tone || '' });
@@ -184,21 +194,48 @@
     return t && !t.deliver ? t.short : null;
   }
 
-  /* 팀 배정(J15, 2026-11-18 사용자 판정): 갈래(flowId)가 있으면 그대로, 없으면(터미널에서 연 세션) 쓴 갈래 스킬로 맞는 팀의 갈래를 돌려준다.
-     스킬 → 팀은 workflow.json 에서 그 스킬이 어느 갈래의 단계인지로 정한 것 중 팀이 하나로 정해지는 것만이다(srs → 요구분석팀, spec → 설계팀).
-     start·deliver 처럼 여러 갈래가 같이 쓰는 스킬과 도구 스킬은 팀을 정하지 않는다(개발·설정·표준·유지보수 갈래의 첫 단계는 모두 start 라 스킬만으로는 못 가른다).
-     여러 스킬을 썼으면 지금 쓰는 스킬, 없으면 가장 나중에 쓴 갈래 스킬. 갈래 스킬을 안 썼으면 아래 reqFlowOf(브랜치 이슈의 요구사항, 7회차), 그것도 못 정하면 ''(팀 없음). */
+  /* 팀 배정. 순서(2026-11-19 사용자 판정, 9회차 ④): ① 콘솔에서 시작한 갈래(flowId) ② 이슈·요구사항 근거(reqBasisOf — 브랜치 이슈의 DEV 번호) ③ 쓴 갈래 스킬 ④ 팀 없음.
+     근거가 스킬보다 먼저다 — 요구사항을 쓴 세션이 같은 세션에서 start 로 설정 건을 시작하면 그 설정 건의 팀이다.
+     ③ 스킬 → 팀은 workflow.json 에서 그 스킬이 어느 갈래의 단계인지로 정한 것 중 팀이 하나로 정해지는 것만이다(srs → 요구분석팀, spec → 설계팀).
+     start·deliver 처럼 여러 갈래가 같이 쓰는 스킬과 도구 스킬은 팀을 정하지 않는다. 지금 쓰는 갈래 스킬, 없으면 가장 나중에 쓴 갈래 스킬인데,
+     그 뒤에 start 를 썼으면(새 일을 시작함) 앞 갈래 스킬은 팀을 정하지 않는다(9회차 C — 갈래 스킬을 한 번 쓰면 끝까지 그 팀에 남던 것).
+     돌려주는 값: { flow: 팀을 정한 갈래('' = 팀 없음), by: 'flow'|'req'|'skill'|'', skill, issue, dev, req, devNo } — 정보 칸이 같은 근거의 번호를 보인다(①). */
   var SKILL_TEAM_FLOW = { srs: 'srs', spec: 'spec' };
-  function teamFlowOf(s) {
-    if (!s) return '';
-    if (s.flowId) return s.flowId;
-    if (s.currentSkill && SKILL_TEAM_FLOW[s.currentSkill]) return SKILL_TEAM_FLOW[s.currentSkill];
+  function skillFlowOf(s) {
+    if (s.currentSkill && SKILL_TEAM_FLOW[s.currentSkill]) return s.currentSkill;
     var used = Array.isArray(s.usedSkills) ? s.usedSkills : [];
-    for (var i = used.length - 1; i >= 0; i--) if (SKILL_TEAM_FLOW[used[i]]) return SKILL_TEAM_FLOW[used[i]];
-    return reqFlowOf(s, reqsFn ? reqsFn(s.cwd) : null);
+    for (var i = used.length - 1; i >= 0; i--) {
+      if (used[i] === 'start') return '';
+      if (SKILL_TEAM_FLOW[used[i]]) return used[i];
+    }
+    return '';
+  }
+  function teamBasisOf(s) {
+    if (!s) return { flow: '', by: '' };
+    if (s.flowId) return { flow: s.flowId, by: 'flow' };
+    var b = reqBasisOf(s, reqsFn ? reqsFn(s.cwd) : null);
+    if (b.flow) return b;
+    var sk = skillFlowOf(s);
+    return sk ? Object.assign({}, b, { flow: SKILL_TEAM_FLOW[sk], by: 'skill', skill: sk }) : b;
+  }
+  function teamFlowOf(s) { return teamBasisOf(s).flow; }
+
+  /* 정보 칸(9회차 ①): 콘솔 갈래가 없는 세션은 단계 칸이 「정해진 갈래 없음」, 번호 칸이 비어 안내판의 팀과 달라 보였다.
+     팀을 정한 근거가 있으면 단계 칸은 안내판과 같은 단계 이름(풀이는 title), 요구사항·개발 번호 칸은 그 근거의 번호. 근거가 없으면 칸을 그대로 둔다. */
+  function teamCells(cells, s, k) {
+    var out = (cells || []).slice();
+    if (!s || s.flowId) return out;
+    var b = teamBasisOf(s), has = function (id) { return out.some(function (c) { return c.id === id; }); };
+    if (b.flow && teamOf(b.flow)) {
+      var why = b.by === 'skill' ? '쓴 스킬 /harness:' + b.skill : '브랜치 이슈 #' + b.issue + ' 의 ' + b.dev;
+      out = out.map(function (c) { return c.id === 'step' ? { id: 'step', label: c.label, tone: '', value: stageName(k, b.flow), title: '콘솔에서 고른 갈래가 아니야. ' + teamOf(b.flow) + '을 정한 근거: ' + why } : c; });
+    }
+    if (b.req && !has('req')) out.push({ id: 'req', label: '요구사항', tone: '', value: b.req });
+    if (b.dev && !has('dev')) out.push({ id: 'dev', label: '개발 번호', tone: '', value: b.dev });
+    return out;
   }
 
-  /* 팀 배정 J15 나머지(7회차): 갈래 스킬을 안 쓴 터미널 세션은 브랜치의 이슈가 가리키는 요구사항으로 개발·설정·표준(·설계) 팀을 정한다.
+  /* 팀 배정 J15 나머지(7회차, 9회차부터 갈래 스킬보다 먼저): 콘솔 갈래가 없는 세션은 브랜치의 이슈가 가리키는 요구사항으로 개발·설정·표준(·설계) 팀을 정한다.
      d = 그 세션 폴더의 /api/pipeline 결과(요구사항 items·열린 PR·열린 이슈의 DEV 번호). 근거가 갈래를 정하지 못하면 ''(팀 없음) — 짐작하지 않는다.
      1) 브랜치 `{type}/{이슈번호}-…`(branching.md)의 이슈 제목에 `[DEV-xxx]`(개발 본체) 나 `(DEV-xxx)`(하위 작업)가 있어야 한다(start·spec 스킬이 붙인다).
      2) 그 번호의 SRS 다음 단계가 설정·표준이면 config·standard(그 갈래는 [DEV-xxx] 로 start 하고 Spec 이 없다).
@@ -210,23 +247,31 @@
   function useReqs(fn) { reqsFn = typeof fn === 'function' ? fn : null; }
   var BRANCH_ISSUE = /^[a-z]+\/(\d+)-/;
   function touches(paths, test) { return (Array.isArray(paths) ? paths : []).some(function (p) { return String(p).split(' -> ').some(test); }); }
-  function reqFlowOf(s, d) {
-    if (!s || !d || d.state !== 'yes' || !d.issues || d.issues.state !== 'ok') return '';
+  function pad3(n) { var t = String(n); return t.length >= 3 ? t : ('00' + t).slice(-3); }
+  /* 근거와 번호: { flow, by: 'req'(팀을 정했을 때)|'', issue, dev, req, devNo }. 번호는 팀을 못 정해도 이슈가 가리키면 낸다(정보 칸은 사실만 보인다).
+     바꾼 파일은 작업 중 변경(changedFiles)과 이 브랜치가 커밋한 파일 요약(branchTouch {code, specs}, 서버 pipeline.branch_touch — 커밋 뒤 푸시 전에도 남는다, 9회차 ③). */
+  function reqBasisOf(s, d) {
+    var none = { flow: '', by: '' };
+    if (!s || !d || d.state !== 'yes' || !d.issues || d.issues.state !== 'ok') return none;
     var m = BRANCH_ISSUE.exec(String(s.branch || '')), iss = m && d.issues.byIssue ? d.issues.byIssue[m[1]] : null;
-    if (!iss) return '';
+    if (!iss) return none;
     var it = (Array.isArray(d.items) ? d.items : []).filter(function (x) { return x && x.number === iss.dev; })[0];
-    if (!it) return '';
-    if (it.kind === '설정') return 'config';
-    if (it.kind === '표준') return 'standard';
-    if (it.unsure || (it.req && it.next !== '개발')) return '';  // 다음 단계 미정·빈 칸: 개발인지 모른다
+    var b = { flow: '', by: '', issue: m[1], devNo: iss.dev, dev: it ? it.dev : 'DEV-' + pad3(iss.dev), req: it ? it.req || '' : '' };
+    function team(flow) { b.flow = flow; b.by = flow ? 'req' : ''; return b; }
+    if (!it) return b;
+    if (it.kind === '설정') return team('config');
+    if (it.kind === '표준') return team('standard');
+    if (it.unsure || (it.req && it.next !== '개발')) return b;  // 다음 단계 미정·빈 칸: 개발인지 모른다
     var specRe = new RegExp('^docs/spec/(DEV-0*' + iss.dev + '(?![0-9])|$)'), prs = (Array.isArray(it.prs) ? it.prs : []).filter(function (p) { return p && p.branch && p.branch === s.branch; });
     var work = typeof d.workPrefix === 'string' && d.workPrefix ? d.workPrefix : 'src/';  // 코드 폴더: 서버(pipeline.py WORK_PREFIX)가 작업 PR 을 가르는 값과 같게(J13)
-    if (touches(s.changedFiles, function (p) { return p.indexOf(work) === 0; }) || prs.some(function (p) { return p.kind === 'work'; })) return 'dev';
-    if (touches(s.changedFiles, function (p) { return specRe.test(p); }) || prs.some(function (p) { return p.kind === 'spec'; })) return 'spec';
-    return iss.main && it.spec && it.req ? 'dev' : '';  // Spec·요구사항이 main 에 있는 본체 이슈만 바꾼 게 없어도 개발(없으면 spec 스킬이 이어 쓰는 중일 수 있다)
+    var bt = s.branchTouch && typeof s.branchTouch === 'object' ? s.branchTouch : {};
+    if (bt.code || touches(s.changedFiles, function (p) { return p.indexOf(work) === 0; }) || prs.some(function (p) { return p.kind === 'work'; })) return team('dev');
+    if ((Array.isArray(bt.specs) && bt.specs.indexOf(iss.dev) >= 0) || touches(s.changedFiles, function (p) { return specRe.test(p); }) || prs.some(function (p) { return p.kind === 'spec'; })) return team('spec');
+    return team(iss.main && it.spec && it.req ? 'dev' : '');  // Spec·요구사항이 main 에 있는 본체 이슈만 바꾼 게 없어도 개발(없으면 spec 스킬이 이어 쓰는 중일 수 있다)
   }
+  function reqFlowOf(s, d) { return reqBasisOf(s, d).flow; }
 
-  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, reqFlowOf: reqFlowOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
+  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, teamBasisOf: teamBasisOf, teamCells: teamCells, stageName: stageName, atDesk: atDesk, reqFlowOf: reqFlowOf, reqBasisOf: reqBasisOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
     clerkLine: clerkLine, sealOf: sealOf, stampedLine: stampedLine, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;

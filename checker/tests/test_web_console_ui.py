@@ -1608,8 +1608,8 @@ def test_post_session_logic_filters_info_and_seals():
     assert out["counts"] == {"all": 8, "turn": 4, "run": 2, "done": 1}
     assert out["match"] == ["11111111", "11100001", "00011000", "00000010"]
     assert out["status"] == ["막힘 · 고친 뒤 이어서", "확인 못 함 · 검사를 못 했어", "내 차례 · 승인하기", "", ""]
-    # 안내판 첫 줄은 앉은 곳: 팀 자리(0~2)는 세션의 팀 이름 + 단계(설정 갈래도 단계 번호 2 라 개발팀이 아니라 자기 팀), 리뷰 룸·완료는 팀과 무관, 팀이 없으면 "팀 없음"
-    assert out["here"] == ["요구분석팀 · 요구사항", "설계팀 · 개발 Spec", "기능컨설팅팀 · 개발", "팀 없음", "팀 없음", "리뷰 룸 · 검토", "완료 · 합쳐짐", "완료 · 합쳐짐", "요구분석팀 · 요구사항"]
+    # 안내판 첫 줄은 앉은 곳: 팀 자리(0~2)는 세션의 팀 이름 + 단계(설정 갈래도 단계 번호 2 라 개발팀이 아니라 자기 팀, 단계 이름은 설정 — 9회차 ②), 리뷰 룸·완료는 팀과 무관, 팀이 없으면 "팀 없음"
+    assert out["here"] == ["요구분석팀 · 요구사항", "설계팀 · 개발 Spec", "기능컨설팅팀 · 설정", "팀 없음", "팀 없음", "리뷰 룸 · 검토", "완료 · 합쳐짐", "완료 · 합쳐짐", "요구분석팀 · 요구사항"]
     assert out["teams"] == ["요구분석팀", "유지보수팀", "", ""]
     # 가이드 2.4 둘째 줄(반말). STATES 순서: turn blocked unk run wait done idle
     assert out["lines"] == ["네 답을 기다리고 있어", "막혀서 멈춰 있어", "검사를 못 해서 멈췄어", "지금 일하고 있어", "의자에 앉아 승인을 기다려", "일을 다 마쳤어", "잠깐 쉬고 있어"]
@@ -4360,7 +4360,7 @@ const out = {
   unsure: q('feat/50-x'), noItem: q('feat/90-x'), noIssue: q('feat/12-x'), prefixOnly: q('fix/x-y'), main: q('main'),
   issuesUnknown: q('feat/40-x', {}, Object.assign({}, D, { issues: { state: 'unknown', byIssue: {} } })), notProject: q('feat/40-x', {}, { state: 'no' }), noData: q('feat/40-x', {}, null),
 };
-// 스킬 판정이 먼저, 요구사항 근거는 팀이 없을 때만(useReqs 로 받은 폴더 판)
+// 콘솔 갈래 > 요구사항 근거(useReqs 로 받은 폴더 판) > 쓴 갈래 스킬(9회차 ④)
 P.useReqs(cwd => cwd === '/p' ? D : null);
 out.viaTeam = P.teamFlowOf({ cwd: '/p', branch: 'feat/30-cfg', usedSkills: ['start'] });
 out.skillFirst = P.teamFlowOf({ cwd: '/p', branch: 'feat/30-cfg', usedSkills: ['spec', 'start'] });
@@ -4387,12 +4387,13 @@ def test_cozy_teams_terminal_session_sits_in_team_by_requirement_of_branch_issue
     # Spec·요구사항이 main 에 없는 본체 이슈와 아직 아무것도 안 바꾼 하위 작업은 spec 스킬이 이어 쓰는지·문서 일인지 못 가른다(리뷰 반영)
     for k in ("subNoSpec", "ledgerOnly", "mainNoSpec", "unsure", "noItem", "noIssue", "prefixOnly", "main", "issuesUnknown", "notProject", "noData", "otherCwd", "off"):
         assert out[k] == "", k  # 근거가 없거나 못 읽으면 팀 없음(브랜치 접두어로 짐작하지 않는다)
-    assert out["viaTeam"] == "config" and out["skillFirst"] == "spec" and out["flowFirst"] == "fix"
+    # 9회차 ④: 근거가 쓴 갈래 스킬보다 먼저(spec 을 쓴 뒤 start 로 설정 건을 시작하면 설정 건의 팀)
+    assert out["viaTeam"] == "config" and out["skillFirst"] == "config" and out["flowFirst"] == "fix"
     assert out["station"] == 2 and out["title"].startswith("표준화팀")
     # 배선: Cozy Office 에서만 폴더 요구사항 판을 받아 post-logic 에 알린다(Sauce 는 묻지 않는다). smoke 는 post-*.js 를 안 실어 BHPostLogic 을 확인하고 부른다
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     body = app[app.index("function ensureReqs()"):app.index("function onProjectPick(e)")]
-    assert "if (!isPostTheme() || !loadedOnce || !window.BHPostLogic) return;" in body and "PL.useReqs(" in body and "PL.SKILL_TEAM_FLOW[k]" in body and "got.state !== 'unknown'" in body and "'/api/pipeline?cwd='" in body
+    assert "if (!isPostTheme() || !loadedOnce || !window.BHPostLogic) return;" in body and "PL.useReqs(" in body and "PL.SKILL_TEAM_FLOW[k]" not in body and "got.state !== 'unknown'" in body and "'/api/pipeline?cwd='" in body
     assert "ensureReqs();" in app[app.index("function renderSide()"):]
 
 
@@ -4413,7 +4414,7 @@ def test_cozy_office_design_g1_to_g10(tmp_path):
     # G3: 요청 수와 시각은 한 묶음, 좁은 폭 카드 머리는 격자(열기는 둘째 줄)
     assert ".po-dc-h { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr) auto; }" in css and ".po-dc-wait + .po-dc-wait" not in css
     # G4: 단계 칸은 짧은 이름(전체 이름은 title), 칸은 열 맞춘 격자
-    assert "infoRow(cells, cs ? window.BHLogic.stepShort(cs) : '')" in app and ".po-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));" in css
+    assert "PL.infoRow(PL.teamCells(cells, s, PL.stationOf(s, window.BHLogic)), cs ? window.BHLogic.stepShort(cs) : '')" in app and ".po-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));" in css
     # G5·G6: 처음 화면 세 단계는 좁은 폭에서 한 줄씩, 폴더 이름은 두 줄까지
     assert ".num3 { grid-template-columns: minmax(0, 1fr); gap: 8px; }" in css and ".folder-opt.proj .pn b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;" in css
     # G7: 처리 알림 실패 줄만 실패색
@@ -4427,7 +4428,7 @@ def test_cozy_office_design_g1_to_g10(tmp_path):
     # G8: Post 는 요약 결과를 누른 자리(기억 칸·기억 배너) 아래에
     assert "compactButton(s, 'pill line sm', 'panel'), compactSay(s, 'panel')" in app and "compactSay(s, 'banner')" in app and "(from === 'banner' && !compactErr)" in app
     assert ".banner.mem > [data-compact-note] { flex: 1 1 100%;" in css and "note === COPY_FAIL ? ' is-err' : ''" in app
-    assert "title: c.id === 'step' && full && full !== c.value ? full : null" in app and "var full = cs ? String(cs.name || '') : ''" in app
+    assert "title: c.id === 'step' && full && full !== c.value ? full : c.title || null" in app and "var full = cs ? String(cs.name || '') : ''" in app
     # G9: 도장이 남은 카드 문구는 찍힌 도장 글자로, 한도 풀리는 시각은 도장 밑줄과 같은 MM.DD
     out = json.loads(subprocess.run([NODE, "-e", """
       const P = require(process.argv[1]), N = require(process.argv[2]);
@@ -4485,3 +4486,82 @@ def test_cozy_office_judge_j6_to_j14():
       console.log(JSON.stringify([P.reqFlowOf(s('src/a.abap'), d()), P.reqFlowOf(s('app/a.abap'), d()), P.reqFlowOf(s('app/a.abap'), d('app/')), P.reqFlowOf(s('src/a.abap'), d('app/'))]));
     """, str(STATIC / "post-logic.js")], capture_output=True, text=True, encoding="utf-8", check=True).stdout)
     assert out == ["dev", "", "dev", ""]
+
+
+_POST_TEAMS3_NODE = r"""
+const path = require('path');
+const P = require(path.join(process.argv[1], 'post-logic.js')), PP = require(path.join(process.argv[1], 'post-pipeline.js'));
+const it = (n, o) => Object.assign({ number: n, req: 'REQ-00' + n, dev: 'DEV-00' + n, kind: '', spec: false, next: '개발', unsure: false, prs: [] }, o || {});
+const D = { state: 'yes', items: [it(2, { spec: true }), it(3, { kind: '설정', next: '설정' }), it(6, { kind: '표준', next: '표준' }), it(7), it(5, { unsure: true, next: '' })],
+  issues: { state: 'ok', byIssue: { '40': { dev: 2, main: true }, '44': { dev: 2, main: false }, '30': { dev: 3, main: true }, '31': { dev: 3, main: false }, '60': { dev: 6, main: true },
+    '70': { dev: 7, main: false }, '50': { dev: 5, main: true }, '90': { dev: 99, main: true } } } };
+P.useReqs(cwd => cwd === '/p' ? D : null);
+const S = (branch, o) => Object.assign({ cwd: '/p', branch: branch, changedFiles: [] }, o || {});
+const out = {
+  // ④ 순서: 콘솔 갈래 > 이슈·요구사항 근거 > 쓴 갈래 스킬
+  flowFirst: P.teamFlowOf(S('chore/30-x', { flowId: 'fix', currentSkill: 'srs' })),
+  reqOverSkill: P.teamFlowOf(S('chore/31-x', { currentSkill: 'srs', usedSkills: ['srs'] })),
+  skillWhenNoBasis: P.teamFlowOf(S('docs/13-srs', { usedSkills: ['srs', 'deliver'] })),
+  // C: 갈래 스킬 뒤에 start 를 쓰면(새 일) 앞 갈래 스킬은 팀을 정하지 않는다. 지금 쓰는 갈래 스킬은 늘 정한다
+  cStart: P.teamFlowOf(S('fix/12-x', { usedSkills: ['srs', 'start'] })), cStartDeliver: P.teamFlowOf(S('fix/12-x', { usedSkills: ['srs', 'start', 'deliver'] })),
+  cAgain: P.teamFlowOf(S('fix/12-x', { usedSkills: ['start', 'srs'] })), cNow: P.teamFlowOf(S('fix/12-x', { currentSkill: 'spec', usedSkills: ['spec', 'start'] })),
+  // B: 다른 플러그인 스킬 이름(foo:spec)은 서버가 그대로 남기니 갈래 스킬이 아니다
+  foreign: P.teamFlowOf(S('docs/13-x', { usedSkills: ['foo:spec'] })),
+  // ③ 커밋 뒤 푸시 전: changedFiles 가 비어도 branchTouch 로
+  commitCode: P.teamFlowOf(S('feat/44-x', { branchTouch: { code: true, specs: [] } })), commitSpec: P.teamFlowOf(S('docs/70-x', { branchTouch: { code: false, specs: [7] } })),
+  commitOtherSpec: P.teamFlowOf(S('docs/70-x', { branchTouch: { code: false, specs: [8] } })), commitNone: P.teamFlowOf(S('feat/44-x', { branchTouch: null })),
+  // ① 근거와 번호
+  basisCfg: P.teamBasisOf(S('chore/30-x')), basisNoTeam: P.teamBasisOf(S('feat/50-x')), basisNoItem: P.teamBasisOf(S('feat/90-x')), basisSkill: P.teamBasisOf(S('docs/13-x', { usedSkills: ['srs'] })),
+  cellsCfg: P.infoRow(P.teamCells([{ id: 'step', label: '단계', value: '정해진 갈래 없음' }, { id: 'issue', label: '작업 기록', value: '이슈 #30' }], S('chore/30-x'), 2), ''),
+  cellsSkill: P.infoRow(P.teamCells([{ id: 'step', label: '단계', value: '정해진 갈래 없음' }], S('docs/13-x', { usedSkills: ['srs'] }), 0), ''),
+  cellsNone: P.infoRow(P.teamCells([{ id: 'step', label: '단계', value: '정해진 갈래 없음' }], S('feat/50-x'), 2), ''),
+  cellsHas: P.teamCells([{ id: 'step', label: '단계', value: '정해진 갈래 없음' }, { id: 'req', label: '요구사항', value: 'REQ-009' }], S('chore/30-x'), 2).filter(c => c.id === 'req').map(c => c.value),
+  cellsFlow: P.teamCells([{ id: 'step', label: '단계', value: '2 / 4 구현' }], S('chore/30-x', { flowId: 'dev' }), 2),
+  // ② 단계 이름
+  here: [P.hereTitle(2, 'config'), P.hereTitle(2, 'standard'), P.hereTitle(2, 'fix'), P.hereTitle(2, 'dev'), P.hereTitle(1, 'spec'), P.hereTitle(3, 'config'), P.hereTitle(2, '')],
+  // D: 장면에서 팀 자리에 앉는 상태
+  desk: ['turn', 'blocked', 'unk', 'run', 'wait', 'done', 'idle'].map(P.atDesk),
+  // E: 파이프라인 칸 — Spec 쓰는 세션은 팀 판정으로, 브랜치 이슈의 DEV 번호로도 붙는다
+  laneSkill: PP.laneOf(it(7), [{ usedSkills: ['spec'] }], P), laneOld: PP.laneOf(it(7), [{ usedSkills: ['spec'] }]),
+  laneBasis: PP.board([it(7)], [S('docs/70-x', { changedFiles: ['docs/spec/DEV-007-반품.md'] })], { reqIds: () => [] }, Object.assign({}, P, { stateOf: () => 'run' }))[1].map(c => c.item.number),
+};
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_cozy_teams3_order_basis_stage_desk_and_lane():
+    # 2026-11-19 사용자 판정(Cozy Office 9회차): 7회차 본 것 ①~④ + 4회차 판정 대기 B·C·D·E. 진행 기록 docs/status/2026-11-19-cozy-office-teams3.md
+    r = subprocess.run([NODE, "-e", _POST_TEAMS3_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["flowFirst"] == "fix" and out["reqOverSkill"] == "config" and out["skillWhenNoBasis"] == "srs"
+    assert out["cStart"] == "" and out["cStartDeliver"] == "" and out["cAgain"] == "srs" and out["cNow"] == "spec"
+    assert out["foreign"] == ""
+    assert out["commitCode"] == "dev" and out["commitSpec"] == "spec" and out["commitOtherSpec"] == "" and out["commitNone"] == ""
+    assert out["basisCfg"] == {"flow": "config", "by": "req", "issue": "30", "devNo": 3, "dev": "DEV-003", "req": "REQ-003"}
+    assert out["basisNoTeam"]["flow"] == "" and out["basisNoTeam"]["dev"] == "DEV-005"  # 팀은 못 정해도 이슈가 가리키는 번호는 사실
+    assert out["basisNoItem"] == {"flow": "", "by": "", "issue": "90", "devNo": 99, "dev": "DEV-099", "req": ""}
+    assert out["basisSkill"]["flow"] == "srs" and out["basisSkill"]["by"] == "skill" and out["basisSkill"]["skill"] == "srs"
+    cells = {c["id"]: c for c in out["cellsCfg"]}
+    assert cells["step"]["value"] == "설정" and "브랜치 이슈 #30 의 DEV-003" in cells["step"]["title"] and "기능컨설팅팀" in cells["step"]["title"]
+    assert cells["req"]["value"] == "REQ-003" and cells["dev"]["value"] == "DEV-003" and cells["issue"]["value"] == "이슈 #30"
+    skill = {c["id"]: c for c in out["cellsSkill"]}
+    assert skill["step"]["value"] == "요구사항" and "/harness:srs" in skill["step"]["title"] and skill["dev"]["value"] == "–"
+    none = {c["id"]: c for c in out["cellsNone"]}
+    assert none["step"]["value"] == "정해진 갈래 없음" and none["dev"]["value"] == "DEV-005"
+    assert out["cellsHas"] == ["REQ-009"]  # 이미 있는 칸(다음 갈래 번호)은 덮지도 겹치지도 않는다
+    assert out["cellsFlow"] == [{"id": "step", "label": "단계", "value": "2 / 4 구현"}]  # 콘솔 갈래 세션은 그대로
+    assert out["here"] == ["기능컨설팅팀 · 설정", "표준화팀 · 표준", "유지보수팀 · 수정", "개발팀 · 개발", "설계팀 · 개발 Spec", "리뷰 룸 · 검토", "팀 없음"]
+    assert out["desk"] == [True, True, True, True, False, False, False]
+    assert out["laneSkill"] == 1 and out["laneOld"] == 0 and out["laneBasis"] == [7]
+    # 장면 번들(외부 빌드본)이 사람을 세우는 규칙과 atDesk 가 같다: wait → 리뷰 룸, done → 완료, idle → 카페(rest), 그 밖 → 팀 자리
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    assert 'e.state==="wait"?C("review").push(e):e.state==="done"?C("done").push(e):e.state==="idle"?C("rest").push(e)' in bundle
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    body = home[home.index("function paintTeams()"):home.index("function draw()")]
+    assert "PL.atDesk(s.state)" in body and "카페·리뷰 룸·완료에 " in body
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "PL.teamCells(cells, s, PL.stationOf(s, window.BHLogic))" in app
+    body = app[app.index("function ensureReqs()"):app.index("function onProjectPick(e)")]
+    assert "key = cwd + '|' + br" in body and "reqs.at[key] = got && got.loading" in body and "reqs.br" not in body  # 같은 폴더에 브랜치가 다른 세션이 있어도 번갈아 묻지 않게(리뷰 반영)

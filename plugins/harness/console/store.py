@@ -225,8 +225,8 @@ def display_title(s: dict) -> str:
     cwd = str(s.get("cwd") or "")
     folder = re.split(r"[\\/]", cwd.rstrip("/\\"))[-1] or cwd  # Windows 경로를 Linux 에서 읽어도 폴더 이름만
     tail = f" · {folder}" if folder else ""
-    if skill:
-        name = skill.split(":", 1)[-1]
+    if skill:  # 하네스 스킬만 네임스페이스를 뗀다. 다른 플러그인 스킬(`foo:spec`)엔 하네스 제목을 붙이지 않는다(훅의 스킬 이름과 같은 규칙, Cozy Office 9회차 B)
+        name = skill.split(":", 1)[1] if skill.startswith("harness:") else skill
         return SKILL_TITLES.get(name, name) + tail  # 같은 스킬 세션이 여럿이어도 폴더로 가려 본다
     return "이름 없는 세션" + tail
 
@@ -1043,6 +1043,8 @@ def public_session(store: Store, s: dict, skills: list[str], include_chat: bool 
             "usedSkills": list(s["skillStates"]),  # 이 세션이 쓴 스킬 이름(쓴 차례대로, 목록에도). Cozy Office 가 터미널 세션도 쓴 갈래 스킬로 팀에 앉힌다
             "startedAt": s["startedAt"], "updatedAt": s["updatedAt"], "log": list(s["log"]), "report": s["report"],
             "changedFiles": list(s["changedFiles"]), "prLinks": list(s["prLinks"]), "prCreated": str(s.get("prCreated") or ""),
+            # 이 브랜치가 커밋한 파일의 요약 {code, specs}(pipeline.branch_touch). 커밋하면 changedFiles 가 비어도 Cozy Office 가 팀을 정할 수 있게
+            "branchTouch": dict(s["branchTouch"]) if isinstance(s.get("branchTouch"), dict) else None,
             "subagents": list(s["subagents"]),
             "flow": flow, "turnSkill": turn_skill, "turnUnknown": bool(s["turn"].get("unknown")),
             "askedInText": asks, "lastBlock": last_block, "phase": phase,

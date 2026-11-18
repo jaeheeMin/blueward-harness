@@ -22,22 +22,25 @@
     while ((m = NUM_RE.exec(String(text || '')))) { var n = parseInt(m[2], 10); if (out.indexOf(n) < 0) out.push(n); }
     return out;
   }
-  /* 세션이 다루는 요구사항 번호 */
-  function sessionNums(s, L) {
+  /* 세션이 다루는 요구사항 번호. 브랜치 이슈 제목의 DEV 번호(팀 배정 근거, PL.teamBasisOf)도 — 안내판·정보 칸이 보이는 번호와 같은 카드에 붙는다 */
+  function sessionNums(s, L, PL) {
     var out = numsIn([s.title, s.flowReason, s.branch].join(' '));
     (L && L.reqIds ? L.reqIds(s) : []).forEach(function (id) { var n = parseInt(String(id).slice(4), 10); if (out.indexOf(n) < 0) out.push(n); });
+    var b = PL && PL.teamBasisOf ? PL.teamBasisOf(s) : null;
+    if (b && b.devNo && out.indexOf(b.devNo) < 0) out.push(b.devNo);
     return out;
   }
 
   /* 칸(0~4): 원장 완료·SRS Done → 합쳐짐 / 작업 PR 열림 → 검토 / Spec 이 origin/main 에 있거나 설정·표준 건 → 개발(설정·표준은 Spec 칸을 건너뛴다)
      / 다음 단계 미정 → 요구사항 / Spec 쓰는 세션이나 Spec PR 이 있음 → 개발 Spec / 그 밖 → 요구사항 */
-  function laneOf(it, sess) {
+  function laneOf(it, sess, PL) {
     var prs = arr(it.prs);
     if (it.done) return 4;
     if (prs.some(function (p) { return p.kind === 'work'; })) return 3;
     if (it.kind || it.spec) return 2;
     if (it.unsure) return 0;
-    if (arr(sess).some(function (s) { return s.flowId === 'spec'; }) || prs.some(function (p) { return p.kind === 'spec'; })) return 1;
+    // Spec 쓰는 세션: 오늘 화면·안내판과 같은 팀 판정(PL.teamFlowOf — 콘솔 갈래 > 이슈 근거 > 쓴 갈래 스킬, 9회차 E). PL 이 없으면 콘솔 갈래만
+    if (arr(sess).some(function (s) { return (PL && PL.teamFlowOf ? PL.teamFlowOf(s) : s.flowId) === 'spec'; }) || prs.some(function (p) { return p.kind === 'spec'; })) return 1;
     return 0;
   }
   function rank(state) { return state === 'blocked' ? 0 : state === 'turn' ? 1 : 2; }
@@ -48,7 +51,7 @@
     arr(items).forEach(function (it) { arr(it.prs).forEach(function (p) { (prOwner[p.number] = prOwner[p.number] || []).push(it.number); }); });
     arr(sessions).forEach(function (s) {
       if (!s || s.handedOffTo) return;  // 다음 세션에 넘긴 세션은 그 세션이 대신한다
-      var nums = sessionNums(s, L), pr = s.flowPr && s.flowPr.number;
+      var nums = sessionNums(s, L, PL), pr = s.flowPr && s.flowPr.number;
       if (pr && prOwner[pr]) prOwner[pr].forEach(function (n) { if (nums.indexOf(n) < 0) nums.push(n); });
       nums.forEach(function (n) { (byNum[n] = byNum[n] || []).push(s); });
     });
@@ -59,7 +62,7 @@
         var st = PL.stateOf(s, L), a = PICK.indexOf(st), b = PICK.indexOf(bestState);
         if (!best || a < b || (a === b && (s.updatedAt || 0) > (best.updatedAt || 0))) { best = s; bestState = st; }
       });
-      lanes[laneOf(it, ss)].push({ item: it, session: best, state: best ? bestState : 'idle' });
+      lanes[laneOf(it, ss, PL)].push({ item: it, session: best, state: best ? bestState : 'idle' });
     });
     lanes.forEach(function (l) { l.sort(function (a, b) { return rank(a.state) - rank(b.state) || a.item.number - b.item.number; }); });
     return lanes;

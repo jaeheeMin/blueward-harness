@@ -9664,3 +9664,37 @@ def test_cozy_defects_deny_reason_kept_and_error_texts_without_exception_names(b
     for exc, word in ((PermissionError(13, "x"), "권한"), (FileNotFoundError(2, "x"), "없어"), (IsADirectoryError(21, "x"), "폴더"), (OSError(5, "x"), "디스크")):
         text = console_server.read_error_text(exc)
         assert text.startswith("파일을 읽지 못했어.") and word in text and "Error" not in text
+
+
+def test_cozy_teams3_branch_touch_and_foreign_skill_names(tmp_path, monkeypatch):
+    # Cozy Office 9회차 ③: 커밋하면 git status(changedFiles)가 비어 푸시 전 하위 작업 세션이 잠깐 팀 없음이었다 → 이 브랜치가 커밋한 파일의 작은 요약
+    t = git_table(**{"git diff --name-only origin/main...HEAD": (0, "src/zsd/print.abap\ndocs/spec/DEV-007-반품.md\nREADME.md\n")})
+    assert gitstate.inspect(str(tmp_path), fake_runner(t))["branchFiles"] == ["src/zsd/print.abap", "docs/spec/DEV-007-반품.md", "README.md"]
+    t = git_table(**{"git diff --name-only main...HEAD": (0, "a.md\n")})  # 원격 기본 브랜치가 없으면 로컬 기본 브랜치와 견준다
+    assert gitstate.inspect(str(tmp_path), fake_runner(t))["branchFiles"] == ["a.md"]
+    assert gitstate.inspect(str(tmp_path), fake_runner(git_table()))["branchFiles"] is None  # 못 읽으면 None(바꾼 게 없다고 하지 않는다)
+    assert gitstate.inspect(str(tmp_path), fake_runner(git_table(**{"git rev-parse --abbrev-ref HEAD": (0, "main\n")})))["branchFiles"] is None
+    import pipeline
+    assert pipeline.branch_touch(["src/a.abap", "docs/spec/DEV-007-x.md", "docs/spec/DEV-012-y.md", "docs/spec/notes/DEV-3.md"]) == {"code": True, "specs": [7, 12]}
+    assert pipeline.branch_touch([]) == {"code": False, "specs": []} and pipeline.branch_touch(None) is None
+    files = {"now": ["docs/spec/DEV-007-반품.md", "src/zsd/print.abap"]}
+    c = Console(tmp_path, monkeypatch, git_inspect=lambda cwd: {"isRepo": True, "repo": "r", "branch": "feat/44-x", "changedFiles": [], "skill": "deliver", "unknown": False,
+                                                                "branchFiles": files["now"]})
+    try:
+        c.login()
+        c.event("t1", "UserPromptSubmit", prompt="x")
+        c.hook("stop", {"session_id": "t1", "cwd": str(c.work), "last_assistant_message": "r"})
+        s = [x for x in c.call("GET", "/api/sessions")[1] if x["id"] == "t1"][0]
+        assert s["branchTouch"] == {"code": True, "specs": [7]} and s["changedFiles"] == []  # 목록에도 실린다(경로 목록이 아니라 요약)
+        files["now"] = None
+        c.hook("stop", {"session_id": "t1", "cwd": str(c.work), "last_assistant_message": "r"})
+        assert c.call("GET", "/api/sessions/t1")[1]["branchTouch"] is None
+        # B: 하네스 스킬만 네임스페이스를 뗀다. 다른 플러그인의 foo:spec 은 그 이름 그대로(하네스 spec 을 쓴 것으로 세지 않는다)
+        c.event("t2", "PreToolUse", tool_name="Skill", tool_input={"skill": "foo:spec"})
+        c.event("t2", "UserPromptExpansion", command_name="/harness:srs", expansion_type="slash_command")
+        c.event("t2", "UserPromptExpansion", command_name="sync", expansion_type="slash_command")
+        s = c.call("GET", "/api/sessions/t2")[1]
+        assert s["usedSkills"] == ["foo:spec", "srs", "sync"]
+        assert {f["skill"]: f["state"] for f in s["flow"]}.get("spec", "idle") == "idle"
+    finally:
+        c.close()

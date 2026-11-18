@@ -72,6 +72,15 @@ def repo_info(run: gitstate.Runner, cwd: str) -> dict:
     return {"state": "yes", "key": key, "name": name, "top": top, "folder": os.path.basename(top) or top}
 
 
+def branch_touch(paths: list[str] | None) -> dict | None:
+    """세션 목록에 싣는 작은 요약(Cozy Office 팀 배정 근거, post-logic.js reqBasisOf): 이 브랜치가 커밋한 파일 중 코드 폴더(WORK_PREFIX)가 있는가,
+    어느 DEV 번호의 Spec 파일을 바꿨는가. 경로 목록을 그대로 싣지 않는다(브랜치가 수백 파일을 바꿀 수 있다). 못 읽었으면 None."""
+    if paths is None:
+        return None
+    specs = sorted({int(m.group(1)) for m in (SPEC_FILE_RE.match(p) for p in paths) if m})
+    return {"code": any(p.startswith(WORK_PREFIX) for p in paths), "specs": specs}
+
+
 def nums_in(text: str) -> set[int]:
     return {int(m.group(1)) for m in NUM_RE.finditer(text or "")}
 

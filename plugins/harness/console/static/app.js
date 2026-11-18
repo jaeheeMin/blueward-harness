@@ -706,27 +706,27 @@
       repos.sig = gen === repos.gen ? sig : null; setTimeout(function () { repos.sig = null; scheduleSide(); }, 30000);
     }).then(function () { repos.busy = false; repos.tried = true; flushNotify(false); if (notifyHeld.length) ensureRepos(); scheduleSide(); if (view && view.onData) view.onData(); });
   }
-  /* Cozy Office 팀 배정(J15 나머지): 갈래 없는 세션이 앉을 팀은 그 폴더 요구사항 판(/api/pipeline — 브랜치 이슈의 DEV 번호·SRS 다음 단계·Spec·PR)으로 정한다(post-logic.js reqFlowOf).
-     갈래 스킬(srs·spec)을 안 쓰고 `{type}/{이슈번호}-…` 브랜치에 있는 세션의 폴더만 묻는다. 폴더마다 2분 기억하되, 브랜치가 바뀌면 바로, 그 이슈가 판에 아직 없으면(방금 만든 이슈) 20초 뒤 다시 묻는다
-     (서버도 저장소마다 60초 기억). 못 읽었으면(unknown) 앞서 읽은 판을 그대로 쓴다. Sauce 는 묻지 않는다. */
-  var reqs = { data: {}, at: {}, br: {}, busy: {}, hooked: false }, REQS_MS = 120000, REQS_MISS_MS = 20000;
+  /* Cozy Office 팀 배정(J15 나머지): 갈래 없는 세션이 앉을 팀은 그 폴더 요구사항 판(/api/pipeline — 브랜치 이슈의 DEV 번호·SRS 다음 단계·Spec·PR)으로 정한다(post-logic.js reqBasisOf).
+     근거가 쓴 갈래 스킬보다 먼저라(9회차 ④) 갈래 스킬을 쓴 세션도 `{type}/{이슈번호}-…` 브랜치에 있으면 그 폴더를 묻는다. 폴더마다 2분 기억하되, 브랜치가 바뀌면 바로, 그 이슈가 판에 아직 없으면(방금 만든 이슈) 20초 뒤 다시 묻는다
+     (서버도 저장소마다 60초 기억). 기억은 폴더+브랜치마다(같은 폴더에 브랜치가 다른 세션이 있어도 번갈아 다시 묻지 않게). 못 읽었으면(unknown) 앞서 읽은 판을 그대로 쓴다. Sauce 는 묻지 않는다. */
+  var reqs = { data: {}, at: {}, busy: {}, hooked: false }, REQS_MS = 120000, REQS_MISS_MS = 20000;
   function ensureReqs() {
     if (!isPostTheme() || !loadedOnce || !window.BHPostLogic) return;
     var PL = window.BHPostLogic, now = Date.now();
     if (!reqs.hooked) { reqs.hooked = true; PL.useReqs(function (cwd) { return reqs.data[cwd] || null; }); }
     sessions.forEach(function (s) {
-      var cwd = s.cwd, br = String(s.branch || ''), m = /^[a-z]+\/(\d+)-/.exec(br), skills = (s.usedSkills || []).concat(s.currentSkill || []);
-      if (!cwd || !m || s.flowId || reqs.busy[cwd] || skills.some(function (k) { return PL.SKILL_TEAM_FLOW[k]; })) return;
-      var d = reqs.data[cwd], miss = d && d.state === 'yes' && d.issues && d.issues.state === 'ok' && !(d.issues.byIssue || {})[m[1]];
-      if (reqs.br[cwd] === br && now - (reqs.at[cwd] || 0) < (miss ? REQS_MISS_MS : REQS_MS)) return;
-      reqs.busy[cwd] = true; reqs.br[cwd] = br;
+      var cwd = s.cwd, br = String(s.branch || ''), m = /^[a-z]+\/(\d+)-/.exec(br);
+      if (!cwd || !m || s.flowId || reqs.busy[cwd]) return;
+      var d = reqs.data[cwd], key = cwd + '|' + br, miss = d && d.state === 'yes' && d.issues && d.issues.state === 'ok' && !(d.issues.byIssue || {})[m[1]];
+      if (now - (reqs.at[key] || 0) < (miss ? REQS_MISS_MS : REQS_MS)) return;
+      reqs.busy[cwd] = true;
       api('GET', '/api/pipeline?cwd=' + encodeURIComponent(cwd)).then(function (got) {
         var was = JSON.stringify(reqs.data[cwd] || null);
         if (got && got.state !== 'unknown') reqs.data[cwd] = got;  // 다시 읽는 중(loading)이어도 이전 판은 쓴다. 못 읽음은 앞 판을 덮지 않는다
-        reqs.at[cwd] = got && got.loading ? now - REQS_MS + 2000 : now;  // 서버가 읽는 중이면 2초 뒤 다시 묻는다
+        reqs.at[key] = got && got.loading ? now - REQS_MS + 2000 : now;  // 서버가 읽는 중이면 2초 뒤 다시 묻는다
         if (got && got.loading) setTimeout(scheduleSide, 2100);
         return was !== JSON.stringify(reqs.data[cwd] || null);
-      }).catch(function () { reqs.at[cwd] = now; return false; }).then(function (changed) {
+      }).catch(function () { reqs.at[key] = now; return false; }).then(function (changed) {
         reqs.busy[cwd] = false;
         if (changed) { scheduleSide(); if (view && view.onData) view.onData(); }
       });
@@ -2318,8 +2318,9 @@
       if (post) {  // Post: 정보 줄. 단계 · 요구사항 · 개발 번호 · 작업 기록 · 검토 요청(없으면 –)
         var cs = window.BHLogic.currentStep(s);
         var full = cs ? String(cs.name || '') : '';  // 단계 칸은 위 단계 알약과 같은 짧은 이름(긴 이름이면 칸이 두 줄로 접혔다), 전체 이름(알약 title 과 같은 st.name)은 title
-        regions.strip.replaceChildren(h('dl', { class: 'po-info', role: 'list', 'aria-label': '진행 정보' }, window.BHPostLogic.infoRow(cells, cs ? window.BHLogic.stepShort(cs) : '').map(function (c) {
-          return h('div', { role: 'listitem', 'data-cell': c.id, title: c.id === 'step' && full && full !== c.value ? full : null }, h('dt', { text: c.label }), h('dd', { class: c.tone, text: c.value }));
+        var PL = window.BHPostLogic;  // 콘솔 갈래가 없는 세션은 안내판과 같은 팀 근거의 단계·번호(9회차 ①)
+        regions.strip.replaceChildren(h('dl', { class: 'po-info', role: 'list', 'aria-label': '진행 정보' }, PL.infoRow(PL.teamCells(cells, s, PL.stationOf(s, window.BHLogic)), cs ? window.BHLogic.stepShort(cs) : '').map(function (c) {
+          return h('div', { role: 'listitem', 'data-cell': c.id, title: c.id === 'step' && full && full !== c.value ? full : c.title || null }, h('dt', { text: c.label }), h('dd', { class: c.tone, text: c.value }));
         })));
         return;
       }

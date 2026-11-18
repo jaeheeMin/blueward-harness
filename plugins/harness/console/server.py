@@ -394,6 +394,7 @@ class App:
             s["turn"] = {"skill": info["skill"], "unknown": info["unknown"]}
             if info["isRepo"]:
                 s["changedFiles"] = info["changedFiles"]
+            s["branchTouch"] = pipeline.branch_touch(info.get("branchFiles")) if info["isRepo"] else None  # 커밋한 뒤 푸시 전에도 바꾼 곳을 안다(Cozy Office 팀 배정)
         self.advance_flow(s, info)
         self.store.touch(s)
 

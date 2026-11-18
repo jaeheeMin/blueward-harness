@@ -394,14 +394,18 @@
         clear(teamRow);
         teamRow.hidden = !window.BHOfficeScene || PS.calm();
         if (teamRow.hidden) return;
+        // 숫자는 지금 그 팀 자리에 있는 사람(9회차 D, 장면과 같은 기준 PL.atDesk). 쉬는(카페)·승인 기다리는(리뷰 룸)·끝난(완료) 소속은 title 로만 말한다
         var list = kit.sceneList();
+        function cell(name, members, cls, what) {
+          var n = members.filter(function (s) { return PL.atDesk(s.state); }).length, away = members.length - n;
+          return h('li', { class: (n ? 'has' : '') + (cls ? ' ' + cls : ''), title: what + ' ' + n + '명' + (away ? ' · 카페·리뷰 룸·완료에 ' + away + '명 더' : '') }, h('b', { text: name }), h('span', { text: n + '명' }));
+        }
         TEAMS.forEach(function (t) {
-          var n = list.filter(function (s) { return t[1].indexOf(s.flow) >= 0; }).length;
-          teamRow.appendChild(h('li', { class: n ? 'has' : '' }, h('b', { text: t[0] }), h('span', { text: n + '명' })));
+          teamRow.appendChild(cell(t[0], list.filter(function (s) { return t[1].indexOf(s.flow) >= 0; }), '', '지금 자리에서 일하는 사람'));
         });
-        // 갈래가 없거나 팀이 없는 갈래의 세션(실제로 대부분). 빼면 팀 칸 합이 장면 인원보다 적어 보인다. 장면은 이들을 리셉션·카페에 세운다
-        var free = list.filter(function (s) { return !teamOf(s.flow); }).length;
-        if (free) teamRow.appendChild(h('li', { class: 'has po-team-free', title: '정해진 갈래가 없거나 팀이 없는 갈래의 세션' }, h('b', { text: '팀 없음' }), h('span', { text: free + '명' })));
+        // 팀이 없는 세션(갈래·근거가 없음). 장면은 일하는 이들을 리셉션에 세운다
+        var free = list.filter(function (s) { return !teamOf(s.flow); });
+        if (free.some(function (s) { return PL.atDesk(s.state); })) teamRow.appendChild(cell('팀 없음', free, 'po-team-free', '팀이 정해지지 않아 리셉션에 있는 사람'));
       }
 
       function draw() {

@@ -39,10 +39,23 @@ def default_branch(run: Runner, cwd: str) -> str:
     return "main"
 
 
+def branch_files(run: Runner, cwd: str, base: str) -> list[str] | None:
+    """작업 브랜치가 기본 브랜치에서 갈라진 뒤(merge-base) 커밋한 파일. 커밋하면 git status 에서 사라지므로 푸시·PR 전에도 무엇을 바꿨는지 알려고 쓴다.
+    원격 기본 브랜치가 없으면 로컬 기본 브랜치와 견준다. 둘 다 못 읽으면 None(바꾼 게 없다고 하지 않는다)."""
+    for ref in (f"origin/{base}", base):
+        rc, out = _git(run, cwd, "diff", "--name-only", f"{ref}...HEAD", "--")
+        if rc == 0:
+            return [line.strip() for line in out.splitlines() if line.strip()]
+        if rc == GIT_UNAVAILABLE:  # git 이 없거나 시간 초과 — 다른 ref 로 또 기다리지 않는다
+            return None
+    return None
+
+
 def inspect(cwd: str, run: Runner = run_command) -> dict:
-    """{"isRepo", "repo", "branch", "changedFiles", "skill", "unknown", "ahead"}. skill 은 start/deliver/prs/None."""
+    """{"isRepo", "repo", "branch", "changedFiles", "skill", "unknown", "ahead", "branchFiles"}. skill 은 start/deliver/prs/None.
+    branchFiles: 작업 브랜치가 기본 브랜치에서 갈라진 뒤 커밋한 파일(저장소 맨 위 기준 경로). 기본 브랜치에 있거나 못 읽었으면 None."""
     result = {"isRepo": False, "repo": "", "branch": "", "changedFiles": [], "skill": None, "unknown": False, "ahead": 0,
-              "onBase": False}
+              "onBase": False, "branchFiles": None}
     if not cwd or not os.path.isdir(cwd):
         return result
     rc, top = _git(run, cwd, "rev-parse", "--show-toplevel")
@@ -68,6 +81,7 @@ def inspect(cwd: str, run: Runner = run_command) -> dict:
     if rc == 0 and out.strip().isdigit():
         ahead = int(out.strip())
     result["ahead"] = ahead
+    result["branchFiles"] = branch_files(run, cwd, base)
     if files or ahead:
         result["skill"] = "deliver"  # 3. 커밋 안 된 변경이나 원격보다 앞선 커밋
         return result
