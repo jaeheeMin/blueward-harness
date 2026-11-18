@@ -4151,3 +4151,34 @@ def test_post_limits_text_shortens_settings_path_only_in_post():
     assert got["top"] == "이 파일의 맨 위가 객체가 아니어서 건드리지 않았어."
     assert got["sauce"].startswith("C:\\Users\\김\\.claude\\settings.json 가 ")  # Sauce 는 서버 글 그대로
     assert got["other"] == "지금 statusLine 이 command 형식이 아니라서 감싸지 않았어." and got["empty"] == ""
+
+
+def test_post_regress_sweep_fixes():
+    # 8회차 전 화면 회귀 재훑기(docs/status/2026-11-18-post-verify-regress.md). 모두 Post 분기·Post 선택자라 Sauce 는 그대로
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
+    tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 1. 접힌 세션 칸(390 은 늘 접힘)의 「내가 할 일」이 내 차례 요청 수라 펼친 목록 「할 일」(내 차례 + 막힘 + 확인 못 함, 세션 수)과 달랐다
+    rail = app.split("function renderRail(d, cur) {", 1)[1].split("\n  }\n", 1)[0]
+    assert "if (isPostTheme() && window.BHPostScene) {" in rail
+    assert "window.BHPostLogic.filterMatch('turn', window.BHPostLogic.stateOf(s, window.BHLogic))" in rail and "n = turnRows.length;" in rail
+    assert "countHref = d.todo.length ? d.todo[0].href : '/'" in rail and "link(countHref, { class: 'rail-count'" in rail
+    assert rail.index("var n = d.todo.length") < rail.index("if (isPostTheme()")  # Sauce 는 요청 수 그대로
+    # 2. 좁은 화면에서 붙어 있는 위 메뉴줄(z 5)을 스크롤할 때 머리 줄 말풍선(.nb-bubble 40)·도장(.po-seal 6)이 덮었다
+    #    → 메뉴줄을 그 위로, 대화상자·알림 창·연결 끊김 띠(.conn, 전처럼 메뉴줄 위)는 그보다 위
+    acss = (STATIC / "app.css").read_text(encoding="utf-8")
+    narrow = [b for b in css.split("@container shell (max-width: 760px) {")[1:] if '#app > .prail { position: sticky;' in b.split("\n}", 1)[0]]
+    assert len(narrow) == 1
+    block = narrow[0].split("\n}", 1)[0]
+    def z(text, sel):
+        return int(re.search(r"z-index: (\d+)", text.split(sel, 1)[1].split("}", 1)[0]).group(1))
+    zr = z(block, '#app > .prail {')
+    assert z(acss, ".nb-bubble {") < zr and z(css, ':root[data-theme="post"] .po-seal {') < zr
+    assert zr < z(acss, ".modal-back {") and zr < z(acss, ".nb-back {") and zr < z(block, ':root[data-theme="post"] .conn {')
+    # 3. 작업 폴더가 없어진 세션의 갈래 고르기 칸이 「일 목록: 고른 작업 폴더가 아니야.」(서버 403) — Post 는 폴더가 없어졌다고 말한다
+    pick = ui.split("function drawPicker(s) {", 1)[1].split("\n      }\n", 1)[0]
+    assert "postTheme() && s.cwd && r.error && r.error.status === 403" in pick
+    assert "'일 목록: 이 세션의 작업 폴더가 없어져서(지운 폴더 등) 일을 고를 수 없어.'" in pick and ": failText(r.error, '일 목록') }));" in pick
+    # 4. 팀 기록에서 못 읽은 프로젝트 줄이 「? 확인 못 함 · projC · 확인 못 함 — …」 로 같은 말을 두 번
+    assert "' · ' + p.name + (isPostNow() ? ' — ' : ' · 확인 못 함 — ') + p.reason" in tb  # Sauce 는 전 문구 그대로

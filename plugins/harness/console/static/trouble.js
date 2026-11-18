@@ -151,7 +151,7 @@
         if (d.loading && !d.items.length) rows.appendChild(h('div', { class: 'tb-empty', role: 'status', text: 'GitHub 에서 읽는 중이야…' }));
         light.appendChild(rows);
         bad.forEach(function (p) {
-          light.appendChild(h('div', { class: 'tb-empty' }, h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }), ' · ' + p.name + ' · 확인 못 함 — ' + p.reason + ' ',
+          light.appendChild(h('div', { class: 'tb-empty' }, h('span', { class: 'tb-unk-t', text: '? 확인 못 함' }), ' · ' + p.name + (isPostNow() ? ' — ' : ' · 확인 못 함 — ') + p.reason + ' ',  // Post: 앞 표시(? 확인 못 함)와 같은 말을 한 줄에 두 번 쓰지 않는다
             h('button', { type: 'button', class: 'tb-again', text: '다시 확인', onClick: function () { reload(true); } })));
         });
         if (d.items.length || ok.length) {

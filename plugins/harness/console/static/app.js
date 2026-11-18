@@ -1411,11 +1411,16 @@
     postFilter = b.getAttribute('data-pf'); sideShownFor = ''; scheduleSide();
   }
   function renderRail(d, cur) {
-    var n = d.todo.length, rows = sortedSessions();
+    var n = d.todo.length, rows = sortedSessions(), countHref = d.todo.length ? d.todo[0].href : '/';
+    if (isPostTheme() && window.BHPostScene) {  // Post: 펼친 목록 걸러보기 "할 일"(내 차례 + 막힘 + 확인 못 함, 세션 수)과 같은 수 — 접으면 숫자가 바뀌지 않게
+      var turnRows = rows.filter(function (s) { return window.BHPostLogic.filterMatch('turn', window.BHPostLogic.stateOf(s, window.BHLogic)); });
+      n = turnRows.length;
+      if (!d.todo.length && turnRows.length) countHref = '/s/' + encodeURIComponent(turnRows[0].id);
+    }
     return h('nav', { class: 'rail', 'aria-label': '세션 목록 (접힘)' },
       isPostTheme() ? h('a', { class: 'po-skip po-skip-rail', href: '#main', 'data-skip': '1', text: '세션 목록 건너뛰기' }) : null,  // Post: 접힌 칸(좁은 화면은 늘 접힘)도 세션마다 고리가 있어 펼친 목록처럼 건너뛰게 한다
       foldBtn(true),
-      link(d.todo.length ? d.todo[0].href : '/', { class: 'rail-count' + (n ? ' has' : ''), 'aria-label': '내가 할 일 ' + n + '건', title: '내가 할 일 ' + n + '건' },
+      link(countHref, { class: 'rail-count' + (n ? ' has' : ''), 'aria-label': '내가 할 일 ' + n + '건', title: '내가 할 일 ' + n + '건' },
         h('span', { class: 'n', text: String(n) }), h('span', { class: 'l', text: '내가 할 일' })),
       rows.map(function (s) {
         var st = sideStatus(s), p = firstPending(s), name = sessionTitle(s);

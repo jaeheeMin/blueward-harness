@@ -377,7 +377,9 @@
         box.appendChild(h('p', { class: 'note-muted', text: '일을 고르면 그 순서대로만 진행해.' }));
         var r = st.picker;
         if (!r) box.appendChild(h('p', { class: 'note-muted', role: 'status', text: '불러오는 중이야.' }));
-        else if (!r.ok) box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: failText(r.error, '일 목록') }));
+        else if (!r.ok) box.appendChild(h('p', { class: 'note-attn', role: 'alert', text: postTheme() && s.cwd && r.error && r.error.status === 403
+          ? '일 목록: 이 세션의 작업 폴더가 없어져서(지운 폴더 등) 일을 고를 수 없어.'  // Post: 서버는 세션 폴더가 있으면 늘 아는 폴더로 친다 — 세션 폴더로 403 이면 폴더가 없어진 것(고른 폴더가 틀린 게 아니다)
+          : failText(r.error, '일 목록') }));
         else {
           var flows = kit.listOf(r.data, 'flows').filter(function (f) { return !(f.exposure && f.exposure.visible === false); });
           var grid = h('div', { class: 'flowpick-grid' });
