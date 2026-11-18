@@ -161,6 +161,7 @@
     /* slots: { sceneHost, whatsSlot, scene() — 지금 붙은 장면 제어(focus(id) 를 줄 수 있으면 준다) } */
     function view(root, slots) {
       var calmAll = false, gone = false, topId = null, items = [], turnTotal = 0, officeOn = false, foc = null, focusId = null, memoId = null;
+      var pickId = null, away = false;  // pickId: 장면에서 누른 사람(덱에 없는 세션이면 그 세션 메모), away: 장면을 끌어 둘러보는 동안 메모를 숨김(메모 대상이 바뀌면 풀린다)
       var approvals = h('div', { class: 'approvals light po-panel po-mini' });
       var recent = h('div', { class: 'light po-panel po-mini', 'data-recent': '1' });
       var projects = h('div', { class: 'projects' });
@@ -186,7 +187,7 @@
       root.appendChild(body);
 
       /* stay: 메모의 "다음" 처럼 포커스를 그 자리에 두고 싶을 때. 덱 카드로 포커스를 옮기면 화면이 덱까지 스크롤돼 방금 누른 메모가 밀려 나간다 */
-      function pickTop(id, stay) { topId = id; paintDeck(); paintMemo(); if (stay) return; var q = '"' + CSS.escape(id) + '"', c = deckSlot.querySelector('[data-call=' + q + '], [data-call-block=' + q + ']'); if (c) { var f = c.querySelector('a, button'); if (f) f.focus(); } }
+      function pickTop(id, stay) { topId = id; pickId = null; away = false; paintDeck(); paintMemo(); if (stay) return; var q = '"' + CSS.escape(id) + '"', c = deckSlot.querySelector('[data-call=' + q + '], [data-call-block=' + q + ']'); if (c) { var f = c.querySelector('a, button'); if (f) f.focus(); } }
       function step(d, stay) {
         if (items.length < 2) return;
         var i = 0; items.forEach(function (it, n) { if (it.id === topId) i = n; });
@@ -258,12 +259,18 @@
          덱은 그대로 아래에 있다. 메모의 동작은 덱 카드와 같은 문장·같은 링크다. */
       function paintMemo() {
         var a0 = document.activeElement, fi = a0 && a0 !== document.body && memo.contains(a0) ? Array.prototype.indexOf.call(memo.querySelectorAll(FOCUSABLE), a0) : -1;
-        var it = officeOn ? items.filter(function (x) { return x.id === topId; })[0] : null;
+        var ps = officeOn && pickId ? sceneSession(pickId) : null;
+        if (pickId && !ps) pickId = null;  // 누른 세션이 끝났거나 목록에서 빠졌으면 덱 메모로 돌아간다
+        var it = officeOn && !ps ? items.filter(function (x) { return x.id === topId; })[0] : null;
+        var next = it ? it.id : ps ? ps.id : null;
+        if (next !== memoId) away = false;  // 새 일(다른 세션)이 메모에 오면 끌어서 숨긴 것을 풀어 다시 보인다
         clear(memo);
-        memo.hidden = !it;
-        memoId = it ? it.id : null;
+        memoId = next;
+        memo.hidden = memoHidden();
         syncFocus(memoId);
-        if (!it) return;
+        if (ps) personMemo(ps);
+        if (!it) { if (ps && fi >= 0) { var pt = memo.querySelectorAll(FOCUSABLE)[fi]; if (pt) pt.focus({ preventScroll: true }); } return; }
+        memo.setAttribute('aria-label', '내 차례 메모');
         var s = it.s, name = s.title || HK.folderName(s) || '이름 없는 세션', team = teamOf(s.flowId), a = cardAct(it, false);
         var from = it.pend && it.pend.r ? (it.pend.r.createdAt || it.pend.r.createdAtMs) : (it.t || s.updatedAt), w = kit.waited(from);
         var i = 0; items.forEach(function (x, n) { if (x.id === topId) i = n; });
@@ -278,6 +285,58 @@
         placeMemo();
         if (fi >= 0) { var t = memo.querySelectorAll(FOCUSABLE)[fi]; if (t) t.focus({ preventScroll: true }); }
       }
+
+      /* 장면에서 누른 사람이 덱(내 차례·막힘·확인 못 함)에 없는 세션일 때의 메모: 상태 · 팀 · 지난 시간, 제목, 세션으로 가는 링크. */
+      var PERSON_LINE = { run: 'AI가 일하는 중이야', wait: '팀 승인을 기다리는 중이야', idle: '쉬는 중이야 — 이어서 할 일이 있으면 세션에서 말해', done: '이 세션의 일은 끝났어' };
+      function narrowNow() { return typeof matchMedia === 'function' && matchMedia(NARROW).matches; }
+      // 좁은 화면은 메모가 장면 아래에 붙어 그림을 가리지 않으니 끌어도 숨기지 않는다(넓게 끌어 숨긴 뒤 창을 줄여도 보인다)
+      function memoHidden() { return !memoId || (away && !narrowNow()); }
+      function sceneSession(id) { return HK.sessionList().filter(function (x) { return x.id === id && x.status !== 'ended'; })[0] || null; }  // 장면에 선 세션(끝난 세션은 장면에 없다). 장면은 이벤트 즉시 바뀌니 다시 그리기를 기다리지 않고 지금 목록에서 찾는다
+      function personMemo(s) {
+        var st = PS.stateOf(s, L), name = s.title || HK.folderName(s) || '이름 없는 세션', w = kit.waited(s.updatedAt);
+        memo.className = 'po-memo po-memo-' + st;
+        memo.setAttribute('aria-label', '세션 메모');
+        memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(st), h('span', { class: 'po-memo-kind', text: [ST_TEXT[st] || PS.LABEL[st], teamOf(s.flowId), w].filter(Boolean).join(' · ') }),
+          items.length ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '내 차례 메모로 돌아가기', text: '내 차례', onClick: function () { pickTop(topId, true); } }) : null));
+        memo.appendChild(h('p', { class: 'po-memo-q', text: PERSON_LINE[st] || PS.LABEL[st] || '' }));
+        memo.appendChild(h('p', { class: 'po-memo-s', text: name }));
+        memo.appendChild(h('div', { class: 'po-memo-acts' }, kit.link('/s/' + encodeURIComponent(s.id), { class: 'pill acc', text: '가서 확인하기' })));
+        placeMemo();
+      }
+      /* 장면에서 사람을 눌렀다(번들이 onNavigate('/s/<id>') 로 알린다): 세션으로 바로 가지 않고 그 사람의 메모를 띄운다. 메모의 링크로 세션에 간다.
+         덱에 있는 세션이면 덱 메모를 그 세션으로 돌린다. 장면이 작은 창(PiP)에 가 있으면 메모가 안 보이므로 전처럼 세션으로 간다(false). */
+      function onPerson(href) {
+        var m = /^\/s\/([^/?#]+)$/.exec(String(href || ''));
+        if (gone || !m || !officeOn || stageFrame.querySelector('.bh-office-away')) return false;  // 홈을 떠난 뒤에도 PiP 는 옛 장면 옵션으로 부른다 — 그때는 세션으로 간다
+        var id = decodeURIComponent(m[1]);
+        if (!sceneSession(id)) return false;
+        if (items.some(function (x) { return x.id === id; })) { pickTop(id, true); return true; }
+        pickId = id; away = false; paintMemo();
+        return true;
+      }
+      /* 장면을 끌어 둘러보면 떠 있는 메모를 숨긴다(번들과 같은 4px 문턱, 터치는 가로로 끌 때만 — 세로는 페이지 스크롤). 사람을 누르거나 J·K·다음, 장면 두 번 누르기(제자리로)면 다시 뜬다.
+         좁은 화면은 메모가 장면 아래에 붙어 그림을 가리지 않으니 숨기지 않는다. */
+      var drag = null, lastTap = 0;
+      function back() { if (away) { away = false; memo.hidden = memoHidden(); placeMemo(); } }
+      slots.sceneHost.addEventListener('pointerdown', function (e) { drag = e.button > 0 ? null : { id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch', moved: false }; });
+      slots.sceneHost.addEventListener('pointermove', function (e) {
+        if (!drag || e.pointerId !== drag.id || drag.moved) return;
+        var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+        if (Math.hypot(dx, dy) < 4 || (drag.touch && Math.abs(dy) > Math.abs(dx))) return;
+        drag.moved = true;
+        if (memo.hidden || narrowNow()) return;  // 떠 있는 메모가 있을 때만 숨긴다(없을 때 끈 것이 다음 새 일 메모까지 숨기지 않게)
+        away = true; memo.hidden = true;
+      });
+      function dragEnd(e, cancel) {
+        if (!drag || e.pointerId !== drag.id) return;
+        var d = drag; drag = null;
+        if (cancel || !d.touch || d.moved) return;
+        var now = Date.now();  // 번들은 터치 두 번 누르기를 dblclick 대신 320ms 안의 두 번째 누름으로 본다(제자리로) — 같은 기준으로 메모를 되돌린다
+        if (now - lastTap < 320) { lastTap = 0; back(); } else lastTap = now;
+      }
+      slots.sceneHost.addEventListener('pointerup', function (e) { dragEnd(e, false); });
+      slots.sceneHost.addEventListener('pointercancel', function (e) { dragEnd(e, true); });
+      slots.sceneHost.addEventListener('dblclick', back);
 
       function paintDeck() {
         var mark = focusMark();
@@ -342,7 +401,7 @@
       function draw() {
         if (gone) return;
         if (!kit.loaded()) {
-          scenePanel.hidden = true; memo.hidden = true; syncFocus(null); clear(helloSlot); clear(deckSlot); clear(restSlot);
+          scenePanel.hidden = true; memo.hidden = true; memoId = null; syncFocus(null); clear(helloSlot); clear(deckSlot); clear(restSlot);
           restSlot.appendChild(kit.conn() === 'down' ? kit.stateBox('warn', '서버에 연결할 수 없어', '서버가 꺼졌을 수 있어. 다시 연결을 시도하고 있어.') : kit.loadingBox('세션을 불러오는 중이야.'));
           restSlot.appendChild(slots.whatsSlot);  // 새 소식은 세션이 없어도·불러오는 중에도 보인다(Sauce 홈과 같다)
           return;
@@ -350,7 +409,7 @@
         var list = HK.sessionList();
         clear(helloSlot); clear(restSlot);
         if (!list.length) {  // 세션이 없으면 Sauce 와 같은 첫 작업 안내(시안: C단계가 다듬는다)
-          scenePanel.hidden = true; memo.hidden = true; syncFocus(null); clear(deckSlot); clear(prSlot); items = []; delete approvals.dataset.compact; approvals.className = 'approvals light po-panel po-mini';
+          scenePanel.hidden = true; memo.hidden = true; memoId = null; syncFocus(null); clear(deckSlot); clear(prSlot); items = []; delete approvals.dataset.compact; approvals.className = 'approvals light po-panel po-mini';
           HK.emptyHome(restSlot, approvals, projects);
           HK.approvalCard(approvals, stats.showPr); HK.projectCard(projects);
           restSlot.appendChild(slots.whatsSlot);
@@ -387,7 +446,7 @@
       redrawNow = function () { if (!gone) draw(); };
       function onPref(ev) { if (ev && ev.detail === 'fx') redrawNow(); }  // 효과 강도가 바뀌면 장면 ↔ 목록
       document.addEventListener('bh-pref', onPref);
-      var ro = typeof ResizeObserver === 'function' ? new ResizeObserver(function () { placeMemo(); }) : null;  // 폭이 바뀌면(창 크기·760px 경계) 메모 자리를 다시 잡는다
+      var ro = typeof ResizeObserver === 'function' ? new ResizeObserver(function () { memo.hidden = memoHidden(); placeMemo(); }) : null;  // 폭이 바뀌면(창 크기·760px 경계) 메모 자리를 다시 잡는다
       if (ro) ro.observe(stageFrame);
       draw();
 
@@ -415,7 +474,7 @@
         }, Math.max(0, (typing() ? 1000 : 500) - (Date.now() - soonLast)));
       }
       return {
-        onData: drawSoon, onSession: drawSoon, onRequest: drawSoon, onRemoved: draw, onFocus: onFocus,
+        onData: drawSoon, onSession: drawSoon, onRequest: drawSoon, onRemoved: draw, onFocus: onFocus, onPerson: onPerson,
         tick: function () { if (!typing()) draw(); },  // 날짜 줄·기다린 시간을 고친다
         title: function () { return ''; },
         destroy: function () { gone = true; clearInterval(prTimer); redrawNow = function () {}; if (ro) ro.disconnect(); document.removeEventListener('keydown', onKey); document.removeEventListener('bh-pref', onPref); }

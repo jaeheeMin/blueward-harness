@@ -1511,11 +1511,12 @@
   var postHome = null;
   function postHomeView(root) {
     if (!postHome) postHome = window.BHPostHome.create({ h: h, clear: clear, link: link, L: window.BHLogic, home: ui.homeKit, questionCards: questionCards, kindOf: kindOf, isPlan: isPlan,
-      sceneList: sceneList, projectTag: function (s) { return projectTagEl(s); }, requestTitle: requestTitle, skillLabel: skillLabel, waited: function (v) { var m = minutesSince(v); return m != null && m >= 1440 ? Math.floor(m / 1440) + '일째' : waitedText(v).replace(/^ · /, ''); }, projectOf: function () { var pj = postProject(); return pj ? pj.name : projectOf(); },  // 날짜 줄: 고른 프로젝트(#1070)  // Post 홈 덱·메모: 하루가 넘으면 "72시간째" 대신 "3일째"
+      sceneList: sceneList, projectTag: function (s) { return projectTagEl(s); }, requestTitle: requestTitle, skillLabel: skillLabel, waited: function (v) { var m = minutesSince(v); return m != null && m >= 1440 ? Math.floor(m / 1440) + '일째' : waitedText(v).replace(/^ · /, ''); }, projectOf: function () { var pj = postProject(); return pj ? pj.name : projectWant && projectWant.all ? '모든 저장소' : projectOf(); },  // 날짜 줄: 고른 프로젝트(#1070). 모든 저장소를 보면 그렇게(첫 세션 폴더 이름으로 채우지 않는다)  // Post 홈 덱·메모: 하루가 넘으면 "72시간째" 대신 "3일째"
       loaded: function () { return loadedOnce && (repos.tried || !isPostTheme()); }, conn: function () { return conn.state; }, stateBox: stateBox, loadingBox: loadingBox });  // 저장소 판정 전에는 거르기 전 숫자를 그리지 않는다(#1070)
     var sceneHost = h('div', { class: 'po-stage', hidden: true });
     var hv = null;
-    postScene = attachScene(sceneHost, { onFocus: function (f) { if (hv && hv.onFocus) hv.onFocus(f); } });
+    postScene = attachScene(sceneHost, { onFocus: function (f) { if (hv && hv.onFocus) hv.onFocus(f); },
+      onNavigate: function (href) { if (!(hv && hv.onPerson && hv.onPerson(href))) go(href); } });  // 사람을 누르면 세션으로 가지 않고 그 사람의 메모(post-home.js onPerson), 메모의 링크로 간다
     whatsSlot = h('div', { class: 'wn-slot' });
     var v = hv = postHome.view(root, { sceneHost: sceneHost, whatsSlot: whatsSlot, scene: function () { return postScene; } });
     drawWhatsNew();
@@ -4260,7 +4261,7 @@
     api('GET', '/api/settings/ask').then(function (d) { askCfg = d; }, function (e) { askErr = '묻는 범위를 읽지 못했어 · ' + (e && e.message || ''); }).then(function () { if (alive) draw(); });
     loadLimits();
     setTitle('설정'); loadModelsOnce(); loadConn(true); draw();
-    return { onData: again, onSession: again, destroy: function () { alive = false; } };
+    return { onData: again, onSession: again, title: function () { return '설정'; }, destroy: function () { alive = false; } };  // renderRoute 가 title() 로 탭 제목을 다시 쓴다(없으면 '설정' 이 지워진다)
   }
 
   /* ---------- 시작 ---------- */

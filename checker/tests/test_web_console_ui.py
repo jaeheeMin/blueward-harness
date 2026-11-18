@@ -4198,3 +4198,32 @@ def test_cozy_office_display_name():
     guide = (ROOT / "docs" / "guide" / "harness-guide.html").read_text(encoding="utf-8")
     assert "테마(Sauce · Cozy Office)" in guide and "Cozy Office 를 고르면 새로 고침 없이" in guide
     assert "Post" not in guide and "우체국" not in guide
+
+
+def test_cozy_survey_memo_person_click_drag_hide_and_small_fixes():
+    # 2026-11-18 Cozy Office 2회차(사용자 보고): 사무실 장면에서 사람을 누르면 세션으로 바로 가지 않고 그 사람의 메모, 메모의 「가서 확인하기」로 세션 이동, 장면을 끌면 메모 숨김
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "onNavigate: function (href) { if (!(hv && hv.onPerson && hv.onPerson(href))) go(href); }" in app  # 홈 장면만 가로챈다(세션·요청 화면은 그대로)
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert "onFocus: onFocus, onPerson: onPerson," in home
+    person = home[home.index("function onPerson(href)"):home.index("function paintDeck()")]
+    assert "if (gone || !m || !officeOn || stageFrame.querySelector('.bh-office-away')) return false;" in person  # 작은 창(PiP)·홈을 떠난 뒤 PiP 클릭은 전처럼 세션으로
+    assert "pickTop(id, true); return true;" in person  # 덱에 있는 세션이면 덱 메모를 그 세션으로
+    assert "pickId = id; away = false; paintMemo();" in person
+    assert "Math.hypot(dx, dy) < 4 || (drag.touch && Math.abs(dy) > Math.abs(dx))" in person  # 번들과 같은 문턱, 터치 세로는 스크롤
+    assert "if (memo.hidden || narrowNow()) return;" in person  # 떠 있는 메모만, 좁은 화면은 메모가 장면 아래라 숨기지 않는다
+    assert "slots.sceneHost.addEventListener('dblclick', back);" in person and "now - lastTap < 320" in person  # 두 번 누르기(터치는 번들과 같은 320ms)면 되돌린다
+    paint = home[home.index("function paintMemo()"):home.index("function personMemo(s)")]
+    assert "if (next !== memoId) away = false;" in paint and "memo.hidden = memoHidden();" in paint  # 끈 뒤 다시 그려도 숨김 유지, 메모 대상이 바뀌면 다시 보인다
+    assert "function memoHidden() { return !memoId || (away && !narrowNow()); }" in home
+    assert "new ResizeObserver(function () { memo.hidden = memoHidden(); placeMemo(); })" in home  # 넓게 끌어 숨긴 뒤 창을 줄이면 장면 아래 메모가 보인다
+    assert "memo.hidden = true; syncFocus(null);" not in home  # 메모를 치우는 곳은 memoId 도 비운다(크기 바뀜에 옛 메모가 되살아나지 않게)
+    assert "function pickTop(id, stay) { topId = id; pickId = null; away = false;" in home  # J·K·다음이면 다시 뜬다
+    pm = home[home.index("function personMemo(s)"):home.index("function onPerson(href)")]
+    assert "'가서 확인하기'" in pm and "'세션 메모'" in pm and "'/s/' + encodeURIComponent(s.id)" in pm
+    # 날짜 줄: 모든 저장소를 보면 첫 세션 폴더 이름(projC 따위)으로 채우지 않는다
+    assert "projectWant && projectWant.all ? '모든 저장소' : projectOf()" in app
+    # 설정 화면 탭 제목: renderRoute 가 title() 로 다시 써서 '설정' 이 지워지던 것
+    assert "title: function () { return '설정'; }, destroy: function () { alive = false; } };" in app
+    guide = (ROOT / "docs" / "guide" / "harness-guide.html").read_text(encoding="utf-8")
+    assert "사람을 누르면 그 사람의 메모가 떠" in guide and "사람을 누르면 그 세션으로 가." not in guide
