@@ -4100,3 +4100,54 @@ def test_post_x2c_remaining_defects_source():
     assert "ELICIT_RES[action][0]" not in app and "ELICIT_RES[code]) { var er = elicitRes(code, req.elicitation)" in app
     # 8) 「이전 판 N개」 접는 칸은 판이 늘어 글이 바뀌어도 같은 자리에서 포커스를 되찾는다
     assert "if (!t && k.tag === 'SUMMARY') t = page.querySelectorAll('summary')[k.j];" in ui
+
+
+def test_post_settings_first_run_and_limits_fixes():
+    # 7회차: 가짜 HOME·CLAUDE_CONFIG_DIR 로 띄운 시험 서버에서 한도 켜기·끄기와 첫 화면 끝까지 실화면 확인(docs/status/2026-11-18-post-verify-settings.md). Sauce 는 그대로
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 1. 첫 화면 [이 프로젝트로]: Post 는 고른 폴더를 보는 프로젝트로 두고 저장소 판정을 다시 받는다(전에는 고르기 전 마지막 폴더가 머리 줄에 남았다)
+    pick = app.split("function confirmPick() {", 1)[1].split("\n    function draw() {", 1)[0]
+    assert "if (isPostTheme()) { repos.gen++; repos.sig = null; setProject({ path: p }); }" in pick
+    # 판정을 받는 중에 눌렀으면 늦게 온 옛 응답이 sig 를 덮어 다시 받지 않는 일이 없게 세대 번호로 가른다(리뷰)
+    ens = app.split("function ensureRepos() {", 1)[1].split("\n  function onProjectPick", 1)[0]
+    assert "var gen = repos.gen;" in ens and ens.count("repos.sig = gen === repos.gen ? sig : null;") == 2
+    assert pick.index("var p = (d && d.path) || sel;") < pick.index("setProject({ path: p })") < pick.index("api('POST', '/api/start-checks/seen'")
+    # 2. 한도: 켜진 채 되돌릴 수 없으면(원래 값 기억 파일 없음) Post 는 스위치를 막는다 — 눌러도 같은 말이 한 번 더 떴다
+    assert "disabled: !c || limBusy || (!on && !c.canEnable) || (isPostTheme() && on && !c.canEnable)," in app
+    # 3. 한도 문구의 긴 settings.json 경로는 위 「바꾸는 파일 · 경로」 와 겹치니 Post 만 「이 파일」 로 줄인다(조사도 맞춘다)
+    lim = app.split("function limText(t) {", 1)[1].split("\n    }\n", 1)[0]
+    assert "if (!t || !p || !isPostTheme()) return t;" in lim
+    assert "split(p + ' 가 ').join('이 파일이 ')" in lim and "split(p + ' 를 ').join('이 파일을 ')" in lim and "split(p + ' 의 ').join('이 파일의 ')" in lim
+    assert "'data-limits-problem': '1', text: limText(c.problem) })" in app and "role: 'alert', text: limText(limErr) })" in app
+    # 4. 한도 켜기 확인의 「지금」「바꾼 뒤」 이름표가 어두운 바탕에서 Sauce 색(#55625f)이라 안 보였다 → Post 흐린 글 색, 아래 문장 간격
+    assert ':root[data-theme="post"] .limits-confirm .lcmd > span { color: var(--lmuted); }' in css
+    assert ':root[data-theme="post"] .limits-confirm .lcmd + p { margin-top: 10px; }' in css
+
+
+_POST_LIMTEXT_NODE = r"""
+const src = require('fs').readFileSync(require('path').join(process.argv[1], 'app.js'), 'utf8');
+const body = src.split('function limText(t) {')[1].split('\n    }\n')[0];
+const run = (post, path, t) => new Function('isPostTheme', 'limCfg', 't', body)(() => post, { settingsPath: path }, t);
+const P = 'C:\\Users\\김\\.claude\\settings.json';
+process.stdout.write(JSON.stringify({
+  json: run(true, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어(x).'),
+  read: run(true, P, '끄지 못했어 · ' + P + ' 를 읽지 못했어: e'),
+  top: run(true, P, P + ' 의 맨 위가 객체가 아니어서 건드리지 않았어.'),
+  sauce: run(false, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어(x).'),
+  other: run(true, P, '지금 statusLine 이 command 형식이 아니라서 감싸지 않았어.'),
+  empty: run(true, P, '')
+}));
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_post_limits_text_shortens_settings_path_only_in_post():
+    r = subprocess.run([NODE, "-e", _POST_LIMTEXT_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert got["json"] == "이 파일이 올바른 JSON 이 아니어서 건드리지 않았어(x)."
+    assert got["read"] == "끄지 못했어 · 이 파일을 읽지 못했어: e"
+    assert got["top"] == "이 파일의 맨 위가 객체가 아니어서 건드리지 않았어."
+    assert got["sauce"].startswith("C:\\Users\\김\\.claude\\settings.json 가 ")  # Sauce 는 서버 글 그대로
+    assert got["other"] == "지금 statusLine 이 command 형식이 아니라서 감싸지 않았어." and got["empty"] == ""

@@ -577,7 +577,7 @@
      저장소 판정은 서버 /api/repos(git 공통 폴더 — 같은 저장소의 worktree 는 한 프로젝트), 거르는 규칙은 post-logic.js projectView.
      고른 프로젝트는 이 브라우저(localStorage bh-post-project: {path} 또는 {all: true})에 두고, 고른 적이 없으면 서버가 기억한 마지막 폴더다.
      판정을 못 읽었거나 마지막 폴더가 저장소가 아니면 거르지 않는다. Sauce 는 거르지 않는다(scopedSessions 가 모든 세션을 그대로 돌려준다). */
-  var repos = { folders: null, last: '', sig: null, busy: false, tried: false, again: 0 }, PROJECT_KEY = 'bh-post-project', projectWant;
+  var repos = { folders: null, last: '', sig: null, busy: false, tried: false, again: 0, gen: 0 }, PROJECT_KEY = 'bh-post-project', projectWant;
   try { projectWant = JSON.parse(localStorage.getItem(PROJECT_KEY) || 'null'); } catch (e) { projectWant = null; }
   function setProject(v) {
     projectWant = v;
@@ -611,13 +611,14 @@
     var sig = cwds.sort().join('\n');
     if (sig === repos.sig) return;
     repos.busy = true;
+    var gen = repos.gen;  // 받는 동안 다시 받으라고 했으면(gen 이 바뀜) 이 응답으로 끝내지 않는다
     api('GET', '/api/repos').then(function (d) {
-      repos.folders = (d && d.folders) || {}; repos.last = (d && d.last) || ''; repos.sig = sig;
+      repos.folders = (d && d.folders) || {}; repos.last = (d && d.last) || ''; repos.sig = gen === repos.gen ? sig : null;
       var unsure = Object.keys(repos.folders).some(function (p) { return repos.folders[p] && repos.folders[p].state !== 'yes'; });
       clearTimeout(repos.again);  // 저장소 아님·확인 못 함은 고쳐질 수 있다(git init, 잠깐 없던 폴더, git 시간 초과) — 그대로 두지 않고 다시 묻는다
       if (unsure) repos.again = setTimeout(function () { repos.sig = null; scheduleSide(); }, 60000);
     }, function () {
-      repos.sig = sig; setTimeout(function () { repos.sig = null; scheduleSide(); }, 30000);
+      repos.sig = gen === repos.gen ? sig : null; setTimeout(function () { repos.sig = null; scheduleSide(); }, 30000);
     }).then(function () { repos.busy = false; repos.tried = true; scheduleSide(); if (view && view.onData) view.onData(); });
   }
   function onProjectPick(e) {
@@ -1048,6 +1049,7 @@
       var f = (recent || []).filter(function (x) { return x.path === sel; })[0] || {};
       api('POST', '/api/folders/last', { path: sel }).then(function (d) {
         var p = (d && d.path) || sel;
+        if (isPostTheme()) { repos.gen++; repos.sig = null; setProject({ path: p }); }  // Post: 고른 프로젝트를 본다(#1070). 마지막 폴더가 바뀌었으니 저장소 판정도 다시 받는다
         function leave(path) { if (path === location.pathname + location.search) renderRoute(); else go(path); }
         return api('POST', '/api/start-checks/seen', {}).then(function () { if (startData) startData.firstRun = false; }, function () { introSkip = true; /* 표시를 못 남겨도 홈으로 간다 */ }).then(function () {
           introForce = false; introPage = 'welcome'; lsSet('bh-intro-page', null);
@@ -4090,14 +4092,20 @@
         limCfg = d; limAsk = false; limNote = d.note || (on ? '켰어. 세션이 다음 응답을 받으면 헤더에 한도가 떠.' : '껐어. settings.json 의 statusLine 을 켜기 전 그대로 돌려놨어.');
       }, function (e) { limErr = (on ? '켜지 못했어' : '끄지 못했어') + ' · ' + (e && e.message || ''); }).then(function () { limBusy = false; if (alive) draw(); });
     }
+    // Post: 위에 「바꾸는 파일 · 경로」 가 이미 있으니 서버 글의 같은 긴 경로는 「이 파일」 로 줄인다(390 에서 경로가 두 번 네 줄씩 접혔다)
+    function limText(t) {
+      var p = limCfg && limCfg.settingsPath;
+      if (!t || !p || !isPostTheme()) return t;
+      return t.split(p + ' 가 ').join('이 파일이 ').split(p + ' 를 ').join('이 파일을 ').split(p + ' 의 ').join('이 파일의 ');
+    }
     function limitsSection() {
       var c = limCfg, on = !!(c && c.enabled);
       function cmdBox(label, text) { return h('div', { class: 'lcmd' }, h('span', { text: label }), h('code', { 'data-limits-cmd': label, text: text })); }
-      var body = [h('button', { type: 'button', role: 'switch', class: 'swrow', 'aria-checked': String(on), 'data-limits-switch': '1', disabled: !c || limBusy || (!on && !c.canEnable),
+      var body = [h('button', { type: 'button', role: 'switch', class: 'swrow', 'aria-checked': String(on), 'data-limits-switch': '1', disabled: !c || limBusy || (!on && !c.canEnable) || (isPostTheme() && on && !c.canEnable),  // Post: 켜진 채 되돌릴 수 없으면(원래 값 기억 파일 없음) 눌러도 같은 말이 한 번 더 뜰 뿐이라 막는다
         onClick: function () { if (on) saveLimits(false); else { limAsk = !limAsk; limNote = ''; draw(); } } },
         h('i', { class: 'sw' + (on ? ' on' : ''), 'aria-hidden': 'true' }), h('b', { text: '헤더에 계정 한도 보이기' }))];
       if (c) body.push(h('p', { class: 'note-muted', 'data-limits-path': '1', text: '바꾸는 파일 · ' + c.settingsPath }));
-      if (c && c.problem) body.push(h('p', { class: 'note-attn', role: 'alert', 'data-limits-problem': '1', text: c.problem }));
+      if (c && c.problem) body.push(h('p', { class: 'note-attn', role: 'alert', 'data-limits-problem': '1', text: limText(c.problem) }));
       if (c && limAsk && !on && c.canEnable) {
         body.push(h('div', { class: 'limits-confirm', role: 'group', 'aria-label': '켜기 전에 확인', 'data-limits-confirm': '1' },
           h('p', { class: 'note-muted', text: '켜면 위 파일의 statusLine 이 아래처럼 바뀌어. 이미 쓰던 상태줄은 화면 그대로 나오고, 입력에 들어 있는 한도 값만 콘솔이 따로 받아 가.' }),
@@ -4109,7 +4117,7 @@
             h('button', { type: 'button', class: 'pill line', 'data-limits-confirm-no': '1', text: '취소', onClick: function () { limAsk = false; draw(); } }))));
       }
       if (limNote) body.push(h('p', { class: 'note-muted', role: 'status', 'data-limits-note': '1', text: limNote }));
-      if (limErr) body.push(h('p', { class: 'note-attn', role: 'alert', text: limErr }));
+      if (limErr) body.push(h('p', { class: 'note-attn', role: 'alert', text: limText(limErr) }));
       body.push(h('p', { class: 'note-muted', text: on ? '켜져 있어' + (c.receivedAt ? ' · 마지막으로 한도를 받은 때 ' + new Date(c.receivedAt * 1000).toLocaleString('ko-KR') : ' · 아직 받은 한도가 없어(세션이 첫 응답을 받아야 와)')
         : '꺼져 있어 · 지금은 콘솔이 연 세션이 받은 값으로만 한도를 보여 줘. Orca·터미널 세션의 한도는 켜야 보여.' }));
       return set('계정 한도 표시', h('div', null, body));

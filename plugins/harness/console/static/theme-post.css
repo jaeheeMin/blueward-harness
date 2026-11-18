@@ -1029,3 +1029,6 @@
 :root[data-theme="post"] #main { scroll-margin-top: 88px; }  /* 좁은 화면에서 건너뛰어 내려오면 위에 붙는 메뉴줄에 본문 머리가 가리지 않게(산출물 미리보기와 같은 값) */
 /* 노란 띠(MCP 연결 안 됨)는 어두운 모드에서도 밝은 노랑이라, 띠 안 「다시 연결하지 못했어」 는 어두운 모드의 밝은 --attn 대신 라이트와 같은 진한 갈색(6회차 실화면) */
 :root[data-theme="post"] .banner .mcp-err { color: #9A5400; }
+/* 설정 · 계정 한도 켜기 확인의 「지금」「바꾼 뒤」 이름표: app.css 의 Sauce 색(#55625f)이라 어두운 바탕에서 거의 안 보였다 → Post 흐린 글 색. 아래 안내 문장이 명령 글에 붙어 있던 것도 위 문장과 같은 간격(7회차 실화면) */
+:root[data-theme="post"] .limits-confirm .lcmd > span { color: var(--lmuted); }
+:root[data-theme="post"] .limits-confirm .lcmd + p { margin-top: 10px; }
