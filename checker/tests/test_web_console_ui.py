@@ -3485,6 +3485,9 @@ def test_post_colors_are_assigned_by_role():
     assert light["--accent"] == "var(--pri)" and light["--btn"] == "var(--pri)" and light["--accent-fill"] == "var(--pri)" and light["--pri"] == "#24304A"
     assert light["--attn"] == "var(--warn)" and light["--danger"] == "var(--err-fill)" and light["--st-now"] == "var(--pri)"
     assert "--accent" not in _post_vars(css.split(':root[data-theme="post"][data-mode="dark"] {', 1)[1].split("\n}", 1)[0])  # 어두운 모드는 역할 값만 바꾼다
+    # 판정 D4 가: 덱 맨 위 카드는 메모와 같은 남색 실선 + 단단한 그림자, 점선은 확인하지 못했어요에만
+    assert '.po-dc.is-top { padding: 16px 20px; border: 1.5px solid var(--btn-edge);' in css and "box-shadow: 0 3px 0 var(--btn-drop); }" in css
+    assert '.po-dc-unk.is-top { border-style: dashed; border-color: var(--unk-line); }' in css and "dashed var(--ask-line)" not in css and "outline: 6px solid var(--paper)" not in css
     assert "#C73E31" not in css and light["--brand"] == "#3A8FCB" and dark["--brand"] == "#6BBCE8"  # 로고는 하늘색(판정 D5) — 빨강은 오류에만
     assert _ratio("#3A8FCB", light["--paper"]) >= 3 and _ratio("#6BBCE8", dark["--paper"]) >= 3  # 그림 대비 3:1
     # 글자 4.5:1 — 역할 글자색은 바탕·종이·옅은 바탕 위에서, 채움 위 글자는 채움 위에서(밝게·어둡게 둘 다)
