@@ -43,6 +43,24 @@
     if (arr(sess).some(function (s) { return (PL && PL.teamFlowOf ? PL.teamFlowOf(s) : s.flowId) === 'spec'; }) || prs.some(function (p) { return p.kind === 'spec'; })) return 1;
     return 0;
   }
+  /* 카드 아래 줄에 쓸 PR 상태(판정 P2). 일 PR 을 먼저, 여럿이면 급한 것(검사 실패 > 승인 대기 > 검사 중 > 그 밖). 서버 pipeline.py 가 준 checks · awaitApproval · draft 그대로 읽는다.
+     → { pr, g: 상태 기호(po-st-*), text, tone } 또는 null(PR 없음). */
+  var PR_RANK = { fail: 0, gate: 1, pending: 2, draft: 3, other: 4 };
+  function prKey(p) { return p.checks === 'fail' ? 'fail' : p.awaitApproval ? 'gate' : p.draft ? 'draft' : p.checks === 'pending' ? 'pending' : 'other'; }
+  function prLine(it) {
+    var prs = arr(it && it.prs).filter(function (p) { return p && p.number; });
+    if (!prs.length) return null;
+    var work = prs.filter(function (p) { return p.kind === 'work'; }), pool = work.length ? work : prs;
+    var p = pool.slice().sort(function (a, b) { return PR_RANK[prKey(a)] - PR_RANK[prKey(b)] || a.number - b.number; })[0], k = prKey(p);
+    if (k === 'fail') return { pr: p, g: 'blocked', tone: 'err', text: 'PR 검사가 실패했어요 · #' + p.number };
+    if (k === 'gate') return { pr: p, g: 'wait', tone: '', text: '승인을 기다려요 · PR #' + p.number };
+    if (k === 'draft') return { pr: p, g: 'idle', tone: '', text: '초안이에요 · PR #' + p.number };
+    if (k === 'pending') return { pr: p, g: 'run', tone: '', text: '검사 중이에요 · PR #' + p.number };
+    return { pr: p, g: 'wait', tone: '', text: '검토를 기다려요 · PR #' + p.number };
+  }
+  /* 카드 상태 글(판정 P4): 답을 기다리는 세션은 홈 덱과 같은 이름 — PR 검사 실패는 「고쳐야 해요」, 승인 · 계획 확인은 「승인을 기다려요」. tone = kit.turnTone(s). */
+  function sessLabel(st, tone) { return st === 'turn' && tone === 'err' ? '고쳐야 해요' : st === 'turn' && tone === 'warn' ? '승인을 기다려요' : LABEL[st] || ''; }
+
   function rank(state) { return state === 'blocked' ? 0 : state === 'turn' ? 1 : 2; }
 
   /* 판 하나: items(서버) + 그 저장소의 세션들 → 칸 다섯 개. 칸마다 [{ item, session, state }], 막힘 > 내 차례 > 번호순. */
@@ -111,18 +129,26 @@
     }
     function card(c) {
       var it = c.item, s = c.session, st = c.state;
-      var cls = 'po-pl-req' + (st === 'turn' ? ' turn' : st === 'blocked' ? ' blocked' : '');
       var tone = st === 'turn' && s && kit.turnTone ? kit.turnTone(s) || null : null;  // 승인·계획 = 경고, PR 검사 실패 = 오류(theme-post.css [data-color-role])
+      /* 아래 줄: 막힘 · 답 기다림 · 확인 못 함이면 세션 상태, 아니면 PR 상태(판정 P2 — 세션이 없어도 서버가 준 PR 상태를 그린다), 둘 다 없으면 세션 상태 */
+      var pl = st === 'blocked' || st === 'turn' || st === 'unk' ? null : prLine(it);
+      var g = pl ? pl.g : s ? st : it.done ? 'done' : 'idle';  // 끝난 일은 세션이 없어도 ✓(판정 P1)
+      var mark = pl && pl.tone === 'err' ? 'blocked' : st;
+      var cls = 'po-pl-req' + (mark === 'turn' ? ' turn' : mark === 'blocked' ? ' blocked' : '');
+      var line = pl ? pl.text : s ? sessLabel(st, tone) : '';
+      var slim = !line;  // 아래 줄이 없는 카드(세션도 PR 도 없는 일)는 한 줄로(판정 P3) — 제목이 잘리면 전체는 title 로
+      var gl = g === 'blocked' ? '✕' : g === 'done' ? '✓' : PL.GLYPH[g] || '';
       var kids = [
-        h('i', { class: 'po-st po-st-' + st, 'data-color-role': tone, 'aria-hidden': 'true', text: PL.GLYPH[st] || '' }),
-        h('span', { class: 'po-pl-rid', text: (it.req ? it.req + ' · ' : '') + it.dev }),
+        h('i', { class: 'po-st po-st-' + g, 'data-color-role': pl ? null : tone, 'aria-hidden': 'true', text: gl }),
+        h('span', { class: 'po-pl-rid', text: slim ? it.dev || it.req : (it.req ? it.req + ' · ' : '') + it.dev }),  // 한 줄 카드는 번호 하나(제목 자리를 남긴다), 둘 다는 title
         h('b', { class: 'po-pl-t', text: it.title }),
         it.kind ? h('span', { class: 'po-pl-kind', text: it.kind }) : null,
-        s ? h('span', { class: 'po-pl-sess' }, ring(s), h('span', { text: LABEL[st] || '' })) : null
+        line ? h('span', { class: 'po-pl-sess' + (pl && pl.tone ? ' ' + pl.tone : '') }, s ? ring(s) : null, h('span', { text: line })) : null
       ];
       var prs = arr(it.prs).map(function (p) { return '#' + p.number; }).join(', ');
-      var tip = prs ? '열린 PR ' + prs : null;
-      var node = s ? kit.link('/s/' + encodeURIComponent(s.id), { class: cls, title: tip, 'data-color-role': tone }, kids) : h('div', { class: cls, title: tip }, kids);
+      var tip = [slim ? (it.req ? it.req + ' · ' : '') + it.dev + ' ' + it.title + (it.done ? ' · 끝났어요' : '') : '', prs ? '열린 PR ' + prs : ''].filter(Boolean).join(' · ') || null;
+      cls += slim ? ' slim' : '';
+      var node = s ? kit.link('/s/' + encodeURIComponent(s.id), { class: cls, title: tip, 'data-color-role': pl ? (pl.tone || null) : tone }, kids) : h('div', { class: cls, title: tip, 'data-color-role': pl && pl.tone ? pl.tone : null }, kids);
       return h('li', { 'data-req': String(it.number) }, node);
     }
     function lanesEl(g, narrow) {
@@ -227,7 +253,7 @@
     return { view: view };
   }
 
-  var api = { LANES: LANES, LABEL: LABEL, numsIn: numsIn, sessionNums: sessionNums, laneOf: laneOf, board: board, groups: groups, summary: summary, create: create };
+  var api = { LANES: LANES, LABEL: LABEL, numsIn: numsIn, sessionNums: sessionNums, laneOf: laneOf, board: board, groups: groups, summary: summary, prLine: prLine, sessLabel: sessLabel, create: create };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.BHPostPipeline = api;
 })(typeof window !== 'undefined' ? window : this);

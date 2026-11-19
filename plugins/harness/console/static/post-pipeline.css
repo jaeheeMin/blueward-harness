@@ -34,6 +34,14 @@
 :root[data-theme="post"] .po-pl-t { grid-column: 2; font-weight: 600; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 :root[data-theme="post"] .po-pl-kind { grid-column: 2; justify-self: start; display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: 999px; background: var(--surface); color: var(--sec); font-size: 11px; font-weight: 600; }
 :root[data-theme="post"] .po-pl-sess { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--bd2); font-size: 11.5px; color: var(--sec); }
+/* PR 검사 실패 줄(판정 P2): 오류 글자색 */
+:root[data-theme="post"] .po-pl-sess.err { color: var(--err); font-weight: 600; }
+/* 세션도 PR 도 없는 일은 한 줄 카드(판정 P3): 기호 · 번호 · 제목(넘치면 … , 전체는 title) · 종류 */
+:root[data-theme="post"] .po-pl-req.slim { grid-template-columns: auto auto minmax(0, 1fr) auto; padding: 7px 10px; }
+:root[data-theme="post"] .po-pl-req.slim > .po-st { grid-row: auto; }
+:root[data-theme="post"] .po-pl-req.slim > .po-pl-rid { white-space: nowrap; overflow-wrap: normal; }
+:root[data-theme="post"] .po-pl-req.slim > .po-pl-t { grid-column: auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; overflow-wrap: normal; }
+:root[data-theme="post"] .po-pl-req.slim > .po-pl-kind { grid-column: auto; }
 /* 기억 고리(app.css .ring.pct) — 작게 */
 :root[data-theme="post"] .po-pl-sess .po-pl-ring { width: 20px; height: 20px; }
 :root[data-theme="post"] .po-pl-sess .po-pl-ring b { width: 12px; height: 12px; background: var(--paper); }

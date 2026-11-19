@@ -121,7 +121,10 @@ def test_gh_failure_is_unknown_not_empty(tmp_path, monkeypatch):
         body = c.call("GET", "/api/trouble")[1]
         assert body["items"] == [] and body["projects"] and not body["projects"][0]["ok"]
         assert "로그인" in body["projects"][0]["reason"]
-        assert c.call("GET", "/api/trouble/item?repo=o/proj&number=842")[0] == 403  # 저장소를 못 읽으면 아는 저장소로 치지 않는다
+        status, err, _ = c.call("GET", "/api/trouble/item?repo=o/proj&number=842")
+        assert status == 403  # 저장소를 못 읽으면 아는 저장소로 치지 않는다
+        # 다만 「모르는 저장소」 로 뭉개지 않고 목록과 같은 까닭을 말한다(데이터를 채운 점검 T1)
+        assert "확인하지 못했어요" in err["error"] and "로그인" in err["error"] and "아는 프로젝트의 저장소가 아니에요" not in err["error"]
     finally:
         c.close()
 

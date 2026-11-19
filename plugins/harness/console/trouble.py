@@ -293,9 +293,16 @@ def collect(app, wait: bool = False, refresh: bool = False) -> dict:
 def repo_root(app, slug: str) -> str:
     if not isinstance(slug, str) or not SLUG.fullmatch(slug):
         raise HttpError(400, "repo 가 올바르지 않아요.")
-    for p in collect(app, wait=True)["projects"]:
+    projects = collect(app, wait=True)["projects"]
+    for p in projects:
         if p["slug"] == slug:
             return p["root"]
+    # 저장소 주소를 못 읽은 프로젝트가 있으면 이 기록이 그 프로젝트 것일 수 있다 — 「모르는 저장소」 로 뭉개지 않고 못 읽은 까닭을 말한다(목록과 같은 말).
+    # 아는 저장소로 치지 않는 것(403)은 그대로다.
+    unread = [p for p in projects if not p["ok"] and not p["slug"]]
+    if unread:
+        raise HttpError(403, "이 기록의 프로젝트를 확인하지 못했어요. 저장소를 읽지 못한 프로젝트가 있어요: "
+                        + "; ".join(f"{p['name']} — {p['reason']}" for p in unread))
     raise HttpError(403, "콘솔이 아는 프로젝트의 저장소가 아니에요.")
 
 

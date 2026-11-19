@@ -109,11 +109,14 @@
   /* 세션 한 줄 상태 글에서 맨 앞 기호(✕ ? !)를 뗀다 — 기호는 상태 표시(po-st)가 따로 그린다. */
   function statusText(t) { return String(t == null ? '' : t).replace(/^[✕?!]\s*/, ''); }
 
-  /* 세션 머리 오른쪽 안내판(figure.po-here). 지금 앉은 곳 "{팀} · {단계}"(리뷰 룸·완료는 "리뷰 룸 · 검토"·"완료 · 합쳐짐", 팀이 없으면 "팀 없음") 한 줄이다.
+  /* 세션 머리 오른쪽 안내판(figure.po-here). 지금 선 곳 "{곳} · {단계}" 한 줄이다(곳 = 장면이 세운 곳 seatName).
      상태 한 줄(hereLine)은 요약 정리(5회차)에서 화면에서 빠졌고 문구 6회차에서 지웠다 — 상태는 머리 상태 표시가 말한다. */
   /* k = 단계 번호(0~4), flow = 세션의 팀을 정한 갈래(teamFlowOf). 번호 0~2 인데 팀이 없으면(갈래 없는 세션은 단계 2 로 두지만 팀 자리는 없다) "팀 없음". */
-  function hereTitle(k, flow) {
+  /* state 를 주면 곳은 장면이 그 사람을 세운 곳(seatName)이다(판정 D1) — PR 이 열린 채 답을 기다리는 사람은 「리뷰 룸」 이 아니라 그 팀 자리, 쉬는 사람은 카페.
+     단계 이름은 그대로 단계 번호로 부른다(검토 3 · 합쳐짐 4 · 0~2 는 갈래 일 이름). state 가 없으면 옛 식(단계 번호로 곳). */
+  function hereTitle(k, flow, state) {
     var i = Math.max(0, Math.min(4, k | 0));
+    if (state) { var at = seatName(state, flow); return i >= 3 ? at + ' · ' + STATION[i].name : teamOf(flow) ? at + ' · ' + stageName(i, flow) : at; }  // 팀이 없으면 단계를 지어내지 않는다
     if (i === 3) return STATION[3].desk + ' · ' + STATION[3].name;
     if (i === 4) return STATION[4].desk + ' · ' + STATION[4].name;
     var team = teamOf(flow);
@@ -236,9 +239,16 @@
   /* 정보 칸(9회차 ①): 콘솔 갈래가 없는 세션은 단계 칸이 「정해진 갈래 없음」, 번호 칸이 비어 안내판의 팀과 달라 보였다.
      팀을 정한 근거가 있으면 단계 칸은 안내판과 같은 단계 이름(풀이는 title), 요구사항·개발 번호 칸은 그 근거의 번호. 근거가 없으면 칸을 그대로 둔다. */
   function teamCells(cells, s, k) {
-    var out = (cells || []).slice();
-    if (!s || s.flowId) return out;
-    var b = teamBasisOf(s), has = function (id) { return out.some(function (c) { return c.id === id; }); };
+    var out = (cells || []).slice(), has = function (id) { return out.some(function (c) { return c.id === id; }); };
+    if (!s) return out;
+    if (s.flowId) {
+      // 콘솔 갈래 세션: 단계 칸은 갈래 것 그대로. 번호 칸은 갈래가 다음 갈래 안내에서만 채워서, 브랜치 이슈가 가리키는 요구사항이 있어도 「–」 였다(데이터를 채운 점검 S2) — 같은 근거로 채운다
+      var rb = reqBasisOf(s, reqsFn ? reqsFn(s.cwd) : null);
+      if (rb.req && !has('req')) out.push({ id: 'req', label: '요구사항', tone: '', value: rb.req });
+      if (rb.dev && !has('dev')) out.push({ id: 'dev', label: '개발 번호', tone: '', value: rb.dev });
+      return out;
+    }
+    var b = teamBasisOf(s);
     if (b.flow && teamOf(b.flow)) {
       var why = b.by === 'skill' ? '쓴 스킬 /harness:' + b.skill : '브랜치 이슈 #' + b.issue + ' 의 ' + b.dev;
       out = out.map(function (c) { return c.id === 'step' ? { id: 'step', label: c.label, tone: '', value: stageName(k, b.flow), title: '콘솔에서 고른 갈래가 아니에요. ' + teamOf(b.flow) + '을 정한 근거: ' + why } : c; });

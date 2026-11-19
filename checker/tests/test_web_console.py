@@ -1932,13 +1932,13 @@ def test_stop_waits_until_port_is_released_and_start_retries_while_in_use(tmp_pa
     ({"app": "harness-console", "version": "1.2.2", "pending": 0}, "restart", "1.2.2 → 1.2.3"),
     ({"app": "harness-console", "version": "1.2.2", "pending": 2}, "keep", "2건"),
     ({"app": "harness-console", "version": "1.2.2"}, "keep", "옛 판"),  # 옛 판이어도 대기 수를 모르면 끄지 않는다(0.10.164 가 이 모양)
-    ({"app": "harness-console", "version": "1.2.2", "pending": "x"}, "keep", "확인 못"),
+    ({"app": "harness-console", "version": "1.2.2", "pending": "x"}, "keep", "확인하지 못"),
     ({"app": "harness-console", "version": "1.3.0", "pending": 0}, "same", ""),  # 서버가 더 새 판이면 그대로 쓴다(폴더마다 플러그인 판이 다를 수 있다)
     ({"app": "harness-console", "version": "1.3.0", "pending": 4}, "same", ""),
     ({"app": "harness-console", "version": "1.2.10", "pending": 0}, "same", ""),  # 숫자로 비교한다(문자열이면 1.2.10 < 1.2.3)
-    ({"app": "harness-console"}, "keep", "판을 확인 못"),  # 판이 없으면 옛 판인지 알 수 없다
-    ({"app": "harness-console", "version": "abc", "pending": 0}, "keep", "확인 못"),
-    (None, "keep", "판을 확인 못"),
+    ({"app": "harness-console"}, "keep", "판을 확인하지 못"),  # 판이 없으면 옛 판인지 알 수 없다
+    ({"app": "harness-console", "version": "abc", "pending": 0}, "keep", "확인하지 못"),
+    (None, "keep", "판을 확인하지 못"),
 ])
 def test_open_judge_running(health, action, needle):
     got, text = console_open.judge_running(health, "1.2.3")
@@ -1948,10 +1948,10 @@ def test_open_judge_running(health, action, needle):
 
 def test_open_judge_running_unreadable_plugin_version():
     got, text = console_open.judge_running({"version": "1.2.3", "pending": 0}, "")
-    assert got == "keep" and "확인 못" in text  # 내 판을 모르면 같은 판으로 치지 않는다
+    assert got == "keep" and "확인하지 못" in text  # 내 판을 모르면 같은 판으로 치지 않는다
 
 
-def _running_server(monkeypatch, health, stop_result="웹 콘솔 서버를 껐어."):
+def _running_server(monkeypatch, health, stop_result="웹 콘솔 서버를 껐어요."):
     """떠 있는 우리 서버 하나를 흉내 낸다. (끈 횟수, 띄운 횟수) 를 돌려준다."""
     state = {"up": True, "stops": 0, "starts": 0}
     monkeypatch.setattr(console_open, "plugin_version", lambda: "1.2.3")
@@ -1960,7 +1960,7 @@ def _running_server(monkeypatch, health, stop_result="웹 콘솔 서버를 껐�
 
     def stop(p):
         state["stops"] += 1
-        state["up"] = stop_result != "웹 콘솔 서버를 껐어."
+        state["up"] = stop_result != "웹 콘솔 서버를 껐어요."
         return stop_result
 
     def start(p):
@@ -2008,7 +2008,7 @@ def test_ensure_server_keeps_newer_server_silently(monkeypatch):
 
 def test_ensure_server_notes_when_stop_fails(monkeypatch):
     state = _running_server(monkeypatch, {"app": "harness-console", "version": "1.2.2", "pending": 0},
-                            stop_result="웹 콘솔 서버가 아직 꺼지지 않았어.")
+                            stop_result="웹 콘솔 서버가 아직 꺼지지 않았어요.")
     assert console_open.ensure_server(1, wait=1) is None
     assert (state["stops"], state["starts"]) == (1, 0)
     assert "끄지 못해" in console_open.notices[0]
@@ -2040,7 +2040,7 @@ def test_open_starts_detached_server_and_stop(tmp_path, monkeypatch):
             assert len(console_open._launched) == 1  # 띄운 서버의 Popen 을 버리지 않고 들고 있다(#836)
             assert console_open.probe(port) == "ours"
             assert (tmp_path / "data" / "server.pid").exists()
-            assert console_open.stop_server(port) == "웹 콘솔 서버를 껐어."
+            assert console_open.stop_server(port) == "웹 콘솔 서버를 껐어요."
             assert console_open.probe(port) == "free"
             assert console_open._launched == []  # 같은 프로세스에서 끄면 끝난 서버를 거둔다
             gc.collect()
