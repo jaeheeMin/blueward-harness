@@ -1613,6 +1613,7 @@ out.sub = P.sealSub(new Date(2026, 10, 7), '리뷰 룸'); out.subNone = P.sealSu
 out.desk = [['permission', 1, 'spec'], ['plan', 1, 'spec'], ['question', 1, 'spec'], ['elicitation', 4, 'spec'], ['question', 2, 'fix'], ['question', 2, ''], ['question', 3, 'dev']].map(a => P.sealDesk(a[0], a[1], a[2]));
 out.clerk = [P.clerkLine('permission', 0), P.clerkLine('plan', 0), P.clerkLine('question', 0, 'srs'), P.clerkLine('elicitation', 2, 'standard'), P.clerkLine('question', 2, ''), P.clerkLine('question', 3, 'dev'), P.clerkLine('question', 4, 'dev')];
 out.teams = [P.teamOf('srs-export'), P.teamOf('fix'), P.teamOf(''), P.teamOf(undefined)];
+out.seat = [['turn', 'srs'], ['blocked', 'dev'], ['unk', ''], ['run', 'fix'], ['wait', 'srs'], ['done', 'spec'], ['idle', 'dev'], ['turn', undefined], ['turn', 'config'], ['run', 'standard'], ['blocked', 'x']].map(a => P.seatName(a[0], a[1]));
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -1639,10 +1640,13 @@ def test_post_session_logic_filters_info_and_seals():
     # 도장: 승인 주 버튼 보냄 · 질문 답 접수 · 거절·아니오·닫기 반송
     assert out["seal"] == ["보냄:ok", "보냄:ok", "반송:no", "접수:ok", "접수:ok", "반송:no", "반송:no", "접수:ok"]
     assert out["sub"] == "11.07 · 리뷰 룸"
-    assert out["desk"] == ["설계팀 자리", "설계팀 자리", "설계팀 자리", "완료", "유지보수팀 자리", "", "리뷰 룸"]
-    # 어느 요청이든 그 세션 사람이 손을 든다(옛 장면의 「리뷰 룸 검토 담당」 은 새 장면에 없다). 승인·계획·질문 모두 그 세션이 앉은 곳(팀·리뷰 룸을 모르면 「세션이」)
+    # 요청을 보낸 세션은 손 든 사람이라 장면에서 늘 팀 자리에 선다 — 단계 번호가 검토(3)·끝(4)이어도 「리뷰 룸」·「완료」 가 아니다(재검증 8회차)
+    assert out["desk"] == ["설계팀 자리", "설계팀 자리", "설계팀 자리", "설계팀 자리", "유지보수팀 자리", "", "개발팀 자리"]
+    # 어느 요청이든 그 세션 사람이 손을 든다(옛 장면의 「리뷰 룸 검토 담당」 은 새 장면에 없다). 승인·계획·질문 모두 그 세션이 앉은 팀 자리(팀을 모르면 「세션이」)
     assert out["clerk"] == ["세션이 손을 들고 승인을 기다려요. 누르면 승인 도장이 찍혀요"] * 2 + [
-        "요구분석팀 자리에서 손을 들고 답을 기다려요", "표준화팀 자리에서 손을 들고 답을 기다려요", "세션이 손을 들고 답을 기다려요", "리뷰 룸에서 손을 들고 답을 기다려요", "세션이 손을 들고 답을 기다려요"]
+        "요구분석팀 자리에서 손을 들고 답을 기다려요", "표준화팀 자리에서 손을 들고 답을 기다려요", "세션이 손을 들고 답을 기다려요", "개발팀 자리에서 손을 들고 답을 기다려요", "개발팀 자리에서 손을 들고 답을 기다려요"]
+    # 차분 목록의 앉은 곳은 장면 번들(seating.ts placeOf)이 세운 곳 그대로: 승인 기다림 리뷰 룸, 끝·쉬는 중 카페, 그 밖 팀 자리(팀 없으면 리셉션) — 갈래 V 결함 V2
+    assert out["seat"] == ["요구분석팀", "개발팀", "리셉션", "유지보수팀", "리뷰 룸", "카페", "카페", "리셉션", "기능컨설팅팀", "표준화팀", "리셉션"]  # 단계 번호를 받지 않는다 — PR 이 열린(검토 3) 사람도 손 들면 팀 자리
     # 우체국 말(창구·편지·손님)은 Cozy Office 화면 글에 없다
     for name in ("post-logic.js", "post-session.js", "post-home.js", "post-pipeline.js", "theme-post.js", "theme-post.css", "app.js", "app.css", "index.html", "post/manifest.js"):
         txt = (STATIC / name).read_text(encoding="utf-8")
@@ -4630,7 +4634,8 @@ def test_cozy_teams_terminal_session_sits_in_team_by_used_flow_skill():
     assert home.count("teamOf(PL.teamFlowOf(s))") == 3
     # 우체국 말을 사무실 말로(2026-11-18 5회차): 안내판·요청 줄·도장 밑줄이 세션의 팀(teamFlowOf)을 같이 받는다
     assert "window.BHPostSession.here(s.id, state, k, flow)" in app and "PSS.clerk(kind, sid(), k, PL.teamFlowOf(s))" in app and "flow: s ? PL.teamFlowOf(s) : ''" in app
-    assert "PL.hereTitle(k, s.flow)" in home
+    assert "PL.seatName(s.state, s.flow)" in home and "PL.hereTitle(" not in home  # 차분 목록은 단계 번호가 아니라 장면이 세운 곳(V2)
+    assert "'aria-label': '다음 일 보기'" in home and "덱 카드 ' + items.length" not in home  # 몇 번째는 장면 버튼 한 곳(V3)
 
 
 _POST_REQ_TEAM_NODE = r"""

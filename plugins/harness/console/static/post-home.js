@@ -371,12 +371,11 @@
         memo.setAttribute('aria-label', '나를 찾는 사람 메모');
         var s = it.s, name = s.title || HK.folderName(s) || '이름 없는 세션', team = teamOf(PL.teamFlowOf(s)), a = cardAct(it, false);
         var from = it.pend && it.pend.r ? (it.pend.r.createdAt || it.pend.r.createdAtMs) : (it.t || s.updatedAt), w = kit.waited(from);
-        var i = items.indexOf(it);
         var head = [memoKind(it), team, w];
         var sessionHref = '/s/' + encodeURIComponent(s.id), same = a.href === sessionHref;  // 가는 곳이 세션이면 "세션으로" 를 따로 두지 않는다
         memo.className = 'po-memo po-memo-' + it.kind; memo.setAttribute('data-color-role', toneOf(it));
         memo.appendChild(h('div', { class: 'po-memo-h' }, stMark(it.kind, toneOf(it)), h('span', { class: 'po-memo-kind', text: head.filter(Boolean).join(' · ') }),
-          items.length > 1 ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '다음 일 보기 (덱 카드 ' + items.length + '장 중 ' + (i + 1) + '번째)', text: '다음', onClick: function () { step(1, true); } }) : null, closeBtn()));
+          items.length > 1 ? h('button', { type: 'button', class: 'po-link po-memo-next', 'aria-label': '다음 일 보기', text: '다음', onClick: function () { step(1, true); } }) : null, closeBtn()));
         memo.appendChild(h('p', { class: 'po-memo-q', text: a.q, title: a.q }));  // 떠 있는 메모는 세 줄·한 줄에서 자른다(theme-post.css) — 전체 글은 title 과 아래 덱 카드에
         memo.appendChild(h('p', { class: 'po-memo-s', text: name, title: name }));
         memo.appendChild(h('div', { class: 'po-memo-acts' }, kit.link(a.href, { class: 'pill acc', text: a.verb }), same ? null : kit.link(sessionHref, { class: 'po-link', text: '세션으로' })));
@@ -472,10 +471,10 @@
         // 세션이 많으면(수십 개) 목록이 덱을 몇 화면 아래로 밀어낸다. 앞(내 차례·막힘·일하는 중 순)만 보이고 나머지는 펼쳐 본다
         var all = kit.sceneList(), shown = calmAll ? all : all.slice(0, CALM_MAX);
         shown.forEach(function (s) {
-          var name = s.title || '이름 없는 세션', k = Math.max(0, Math.min(4, s.station | 0));
+          var name = s.title || '이름 없는 세션';
           calmList.appendChild(h('li', { class: 'po-ml po-ml-' + s.state, 'data-color-role': s.state === 'turn' ? s.tone || null : null },
             kit.link('/s/' + encodeURIComponent(s.id), { class: 'po-ml-a' }, PS.avatar(s.id, s.state, { size: 'sm', name: name }),
-              h('span', null, h('b', { text: name }), h('small', null, stMark(s.state, s.state === 'turn' ? s.tone : ''), PS.LABEL[s.state] + ' · ' + PL.hereTitle(k, s.flow))))));
+              h('span', null, h('b', { text: name }), h('small', null, stMark(s.state, s.state === 'turn' ? s.tone : ''), PS.LABEL[s.state] + ' · ' + PL.seatName(s.state, s.flow))))));
         });
         if (all.length > shown.length) calmList.appendChild(h('li', { class: 'po-ml-more' }, h('button', { type: 'button', class: 'pill line sm', text: '나머지 ' + (all.length - shown.length) + '개 더 보기', onClick: function () { calmAll = true; paintCalm(); var a = calmList.querySelectorAll('a')[CALM_MAX]; if (a) a.focus(); } })));  // 단추가 사라지니 포커스는 새로 보인 첫 줄로
         if (!calmList.firstChild) calmList.appendChild(h('li', { class: 'quiet', text: '지금 일하는 세션이 없어요.' }));

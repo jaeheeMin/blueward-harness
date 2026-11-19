@@ -9,7 +9,7 @@
   var STATES = ['turn', 'blocked', 'unk', 'run', 'wait', 'done', 'idle'];
   var LABEL = { turn: '답을 기다려요', blocked: '막혔어요', unk: '확인하지 못했어요', run: '일하는 중이에요', wait: '승인을 기다려요', done: '끝났어요', idle: '쉬는 중이에요' };  // 장면 번들(office-post.ts LABEL)과 같은 말 — 상태 칩·정리 줄·메모·파이프라인 카드가 다 이것을 쓴다(문구 6회차)
   var GLYPH = { turn: '!', blocked: '✕', unk: '?', done: '✓', wait: '…' };
-  /* desk = 팀과 무관한 곳(검토 3 = 리뷰 룸, 끝 4 = 완료). 0~2 는 세션의 팀 이름으로 부른다(hereTitle·placeOf·sealDesk). */
+  /* desk = 팀과 무관한 곳(검토 3 = 리뷰 룸, 끝 4 = 완료). 0~2 는 세션의 팀 이름으로 부른다(hereTitle). 요청 화면(placeOf·sealDesk)과 차분 목록(seatName)은 장면이 세운 곳을 따른다. */
   var STATION = [
     { name: '요구사항', hint: '무엇을 만들지 쓰기' }, { name: '개발 Spec', hint: '어떻게 만들지 설계' },
     { name: '개발', hint: 'AI가 만드는 중' }, { name: '검토', hint: '팀 승인 받기', desk: '리뷰 룸' },
@@ -71,6 +71,13 @@
   /* 장면(office-post.js)이 사람을 세우는 곳: 승인 기다림은 리뷰 룸, 끝은 완료, 쉬는 중은 카페, 그 밖(내 차례·막힘·확인 못 함·일하는 중)은 팀 자리(팀이 없으면 리셉션).
      홈 팀 칸 숫자는 이 기준으로 지금 그 자리에 있는 사람만 센다(9회차 D) — 소속 인원을 세면 쉬는 사람이 팀 칸엔 있고 장면의 그 책상엔 없다. */
   function atDesk(state) { return state !== 'wait' && state !== 'done' && state !== 'idle'; }
+  /* 장면이 그 사람을 세운 곳의 이름(번들 seating.ts placeOf 와 같은 규칙, 표지판 글 그대로) — 장면 대신 보이는 차분 목록이 장면과 다른 곳을 말하지 않게(갈래 V 결함 V2).
+     단계 번호(stationOf)로 고르면 PR 이 열린 채 답을 기다리는 사람이 「리뷰 룸」 이 되는데, 장면은 그 사람을 팀 자리에 세운다. */
+  function seatName(state, flow) {
+    if (state === 'wait') return STATION[3].desk;
+    if (state === 'done' || state === 'idle') return '카페';
+    return teamOf(flow) || '리셉션';
+  }
 
   function poseOf(state) {
     return state === 'turn' ? 'ask' : state === 'blocked' || state === 'unk' ? 'stuck' : state === 'wait' ? 'wait' : state === 'done' ? 'done' : 'walk';
@@ -155,10 +162,10 @@
 
   /* 요청 화면 한 줄(가이드 2.5): 그림이 그 세션 사람이라(post-session.js clerk) 글도 세션이 주어다. 질문·승인·계획 모두 그 세션이 앉은 곳을 붙이고(문구 6회차부터 승인·계획도), 앉은 곳을 모르면(팀 없음·완료) 곳 이름 없이 말한다.
      승인·계획에 있던 「리뷰 룸에서 검토 담당이」 는 뺐다 — 새 사무실 장면에는 검토 담당이 없고 승인을 기다리는 세션도 자기 자리에서 손을 든다. */
+  /* 요청을 보낸 세션은 손을 든 사람(답을 기다려요·막혔어요·확인하지 못했어요)이라 장면에서는 늘 팀 자리에 선다(seatName) — 단계 번호 k 가 검토(3)·끝(4)이어도
+     「리뷰 룸」·「완료」 가 아니다(재검증 8회차, V2 와 같은 어긋남). k 는 부르는 쪽 호환으로 받기만 한다. */
   function placeOf(k, flow) {
-    var i = Math.max(0, Math.min(4, k | 0));
-    if (i === 3) return STATION[3].desk;
-    return i < 3 && teamOf(flow) ? teamOf(flow) + ' 자리' : '';
+    return teamOf(flow) ? teamOf(flow) + ' 자리' : '';
   }
   function clerkLine(kind, k, flow) {
     var at = placeOf(k, flow), who = at ? at + '에서 ' : '세션이 ';  // 승인·계획도 질문처럼 앉은 곳을 붙인다(도장 아랫줄 sealDesk 와 같은 곳)
@@ -176,12 +183,9 @@
   function stampedLine(decision) { var t = sealOf(decision).text; return '방금 ' + STAMP_DID[t] + ' — ' + t + ' 도장을 찍었어요'; }
   /* 도장 아래 작은 줄 "MM.DD · 자리 이름"(오늘 날짜). 자리를 모르면(name 이 빈 글) 날짜만. */
   function sealSub(d, name) { return pad2(d.getMonth() + 1) + '.' + pad2(d.getDate()) + (name ? ' · ' + name : ''); }
-  /* 도장을 찍는 곳: 요청 종류와 상관없이 그 세션이 앉은 곳(팀 자리·리뷰 룸·완료, 팀이 없으면 빈 글 — 요청 줄(clerkLine)처럼 곳 이름 없이).
+  /* 도장을 찍는 곳: 요청 종류와 상관없이 그 세션이 앉은 곳(손 든 사람이라 팀 자리, 팀이 없으면 빈 글 — 요청 줄(clerkLine)처럼 곳 이름 없이).
      승인·계획을 「리뷰 룸」 으로 적던 것은 옛 장면의 비유였다 — 새 사무실 장면에서 승인을 묻는 세션은 자기 자리에서 손을 든다(문구 6회차). kind 는 부르는 쪽 호환으로 받기만 한다. */
-  function sealDesk(kind, k, flow) {
-    var i = Math.max(0, Math.min(4, k | 0));
-    return i >= 3 ? STATION[i].desk : teamOf(flow) ? teamOf(flow) + ' 자리' : '';
-  }
+  function sealDesk(kind, k, flow) { return placeOf(k, flow); }
 
   /* 갈래 세션의 차례 글(세션 머리 제목·사이드 줄·홈 덱). 서버의 차례(turnSkill)는 git 상태로 짐작한 start·deliver·prs 라 갈래 단계와 어긋난다:
      srs·spec 첫 단계는 main 에서 시작해 "작업 시작", 구현 중 변경이 있으면 "올릴 준비". Post 는 갈래의 지금 단계를 따른다.
@@ -280,7 +284,7 @@
   }
   function reqFlowOf(s, d) { return reqBasisOf(s, d).flow; }
 
-  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, teamBasisOf: teamBasisOf, teamCells: teamCells, stageName: stageName, atDesk: atDesk, reqFlowOf: reqFlowOf, reqBasisOf: reqBasisOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, byWait: byWait, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, infoRow: infoRow, INSP: INSP,
+  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, teamBasisOf: teamBasisOf, teamCells: teamCells, stageName: stageName, atDesk: atDesk, reqFlowOf: reqFlowOf, reqBasisOf: reqBasisOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, byWait: byWait, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, seatName: seatName, infoRow: infoRow, INSP: INSP,
     clerkLine: clerkLine, sealOf: sealOf, stampedLine: stampedLine, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;
