@@ -270,7 +270,7 @@ def test_blocked_navigation_pages_are_console_html_not_raw_text(console):
     assert body.count("<script") == 1 and "onclick" not in body.lower()  # theme.js 하나뿐, 인라인 없음
     status, body, resp = console.call("GET", "/nothing-here", cookie=False)
     assert status == 404 and resp.getheader("Content-Type").startswith("text/html")
-    assert "없는 페이지야." in body and 'href="/"' in body and "처음 화면으로" in body
+    assert "없는 페이지예요." in body and 'href="/"' in body and "처음 화면으로" in body
     status, body, resp = console.call("GET", "/api/nothing-here", cookie=False)
     assert status == 401 and resp.getheader("Content-Type").startswith("application/json") and isinstance(body, dict)
 
@@ -2223,7 +2223,7 @@ def test_interrupted_turn_is_logged_as_interruption_not_empty_error(tmp_path):
     m.procs["s1"] = proc
     assert m.interrupt("s1") is True
     m.on_event(proc, {"type": "result", "is_error": True, "result": ""})
-    assert store.get("s1")["log"][-1]["text"] == "사용자가 작업을 중단했어."
+    assert store.get("s1")["log"][-1]["text"] == "사용자가 작업을 중단했어요."
     m.on_event(proc, {"type": "result", "is_error": True, "result": ""})  # 중단 표시는 한 번만 쓴다
     assert store.get("s1")["log"][-1]["text"] == "오류로 끝남"
 
@@ -2465,7 +2465,7 @@ def test_launcher_runs_open_py_hidden_and_reports_failure(tmp_path, monkeypatch)
     assert launcher.main() == 1
     assert ran[0][0][1:] == [str(base / "open.py"), "--from-shortcut"] and shown == ["포트 문제"]
     monkeypatch.setattr(launcher, "config_dir", lambda env=None: tmp_path / "none")
-    assert launcher.main() == 1 and "플러그인을 찾지 못했어." in shown[-1]
+    assert launcher.main() == 1 and "플러그인을 찾지 못했어요." in shown[-1]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows 의 셸 링크 COM 으로 실제 .lnk 를 만든다")
@@ -2621,7 +2621,7 @@ def test_approval_screen_shows_full_input_and_rules():
     assert "var friendly = tool === 'Bash' && input && input.description && !input.dangerouslyDisableSandbox && !input.run_in_background && (whyAsk || irrev);" in js
     assert "class: 'more', open: !friendly" in js
     # 시안 17 의 확인 카드: 이번만 허락 / 하지 마, Edit 은 원래 글 · 바꾼 글(#634)
-    assert "'이번만 허락'" in js and "'하지 마'" in js and "row('원래 글'" in js and "row('바꾼 글'" in js
+    assert "'이번만 허락'" in js and "'하지 않기'" in js and "row('원래 글'" in js and "row('바꾼 글'" in js
     assert "바꿀 내용" not in js and "바뀌는 부분" not in js
     css = (CONSOLE / "static" / "app.css").read_text(encoding="utf-8")
     assert ".scroll" in css and "max-height" in css
@@ -6008,8 +6008,8 @@ def test_status_paths_parse_z_output_rename_and_delete():
     paths, why = gitstate.status_paths(run, "/r")
     assert [p.replace("\\", "/") for p in paths] == ["/r/a b.md", "/r/new.md", "/r/새 폴더/c.md"] and why == ""
     assert gitstate.status_paths(FakeRun(**{"git rev-parse --show-toplevel": (128, "")}), "/r") == ([], "")  # 저장소가 아니다 = 사유 없음
-    assert gitstate.status_paths(FakeRun(), "/r") == ([], "git 을 실행하지 못했어.")  # git 실행 불능은 빈 목록과 구분한다
-    assert gitstate.status_paths(FakeRun(**{"git rev-parse --show-toplevel": (0, "/r\n"), "git status": (1, "")}), "/r") == ([], "git status 가 실패했어.")
+    assert gitstate.status_paths(FakeRun(), "/r") == ([], "git 을 실행하지 못했어요.")  # git 실행 불능은 빈 목록과 구분한다
+    assert gitstate.status_paths(FakeRun(**{"git rev-parse --show-toplevel": (0, "/r\n"), "git status": (1, "")}), "/r") == ([], "git status 가 실패했어요.")
 
 
 def test_file_preview_kinds_and_limits(tmp_path, monkeypatch, request):
@@ -6151,7 +6151,7 @@ def test_open_path_commands_per_os():
     def boom(args, **kw):
         raise OSError("no such")
 
-    assert "열지 못했어" in platform_compat.open_path("/u/a", "open", "linux", boom)
+    assert "열지 못했어요" in platform_compat.open_path("/u/a", "open", "linux", boom)
 
 
 # ---- 작업용 폴더 ----
@@ -7818,7 +7818,7 @@ def test_ask_setting_defaults_to_needed_and_validates_and_persists(authed):
     assert authed.call("GET", "/api/settings/ask")[1] == {"level": "edits"}
     saved = authed.state / console_server.ASK_FILE
     assert json.loads(saved.read_text(encoding="utf-8")) == {"level": "edits"}  # notify.json 처럼 상태 폴더에 둔다
-    strict = {"level": "all", "problem": "설정을 읽지 못해 모든 명령마다 물어"}
+    strict = {"level": "all", "problem": "설정을 읽지 못해 모든 명령마다 물어요"}
     for broken in ("not json", json.dumps({"level": "bogus"}), json.dumps([1]), "", json.dumps({})):  # 있는데 깨졌으면 가장 엄격하게
         saved.write_text(broken, encoding="utf-8")
         assert authed.call("GET", "/api/settings/ask")[1] == strict, broken
@@ -7835,7 +7835,7 @@ def test_needed_level_allows_safe_without_card_and_logs_once(browser):
     assert status == 200 and body == {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
     assert browser.pending("n1") == []
     s = browser.app.store.get("n1")
-    assert [e["text"] for e in s["log"] if e["text"].startswith("자동 허용")] == ["자동 허용: Bash: git status (git 으로 상태를 읽기만 해)"]
+    assert [e["text"] for e in s["log"] if e["text"].startswith("자동 허용")] == ["자동 허용: Bash: git status (git 으로 상태를 읽기만 해요)"]
     assert not [c for c in s.get("chat") or [] if c.get("role") == "req"]  # 대화에는 남기지 않는다
     _perm(browser, "n1", "Bash", {"command": "git status"})  # 같은 호출을 훅과 콘솔 연결이 둘 다 물어도 한 줄
     assert len([e for e in browser.app.store.get("n1")["log"] if e["text"].startswith("자동 허용")]) == 1
@@ -7886,7 +7886,7 @@ def test_irreversible_goes_to_yellow_card_and_cannot_be_remembered(browser):
                                                 "tool_input": {"command": "rm old.xlsx"}, "permission_suggestions": sugg})
     req = wait_for(lambda: (browser.pending("n3") or [None])[0])
     pub = browser.call("GET", f"/api/requests/{req.rid}")[1]
-    assert pub["risk"] == "irreversible" and pub["riskNote"] == "파일이나 폴더를 지우려 해"
+    assert pub["risk"] == "irreversible" and pub["riskNote"] == "파일이나 폴더를 지우려 해요"
     assert browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow_session"})[0] == 400  # 되돌릴 수 없는 일은 다시 묻지 않기로 허용하지 못한다
     assert browser.call("POST", f"/api/requests/{req.rid}/answer", {"decision": "allow"})[0] == 200
     holder["t"].join(30)
@@ -7976,7 +7976,7 @@ def test_risk_plan_file_is_safe_only_with_plan_dir_and_only_direct_md(tmp_path):
     plan_dir = risk_mod.plan_dir_of(conf)
     assert plan_dir == str(conf / "plans") and risk_mod.plan_dir_of("") == ""
     w = lambda p, pd=plan_dir, tool="Write": risk_mod.classify(tool, {"file_path": str(p)}, str(work), plan_dir=pd)  # noqa: E731
-    assert w(conf / "plans" / "wise-fox.md") == ("safe", "계획 모드에서 계획 파일을 쓸 뿐이야")
+    assert w(conf / "plans" / "wise-fox.md") == ("safe", "계획 모드에서 계획 파일을 쓸 뿐이에요")
     assert w(conf / "plans" / "WISE.MD")[0] == "safe" and w(conf / "plans" / "a.md", tool="Edit")[0] == "safe"
     for bad in (conf / "plans" / "sub" / "a.md",   # 하위 폴더
                 conf / "plans" / "a.py",           # 계획 파일 모양이 아니다
@@ -8020,7 +8020,7 @@ def test_risk_plan_dir_link_is_allowed_only_to_another_plans_outside_work(tmp_pa
     for name in ("CLAUDE.md", "AGENTS.md"):
         assert w(bad / "plans" / name, str(bad / "plans"))[0] != "safe", name
     # 보통 파일은 링크를 따라가면 작업 폴더 안이라 원래 규칙(작업 폴더 안 고치기)으로 허용될 뿐, 계획 파일로 보지 않는다
-    assert w(bad / "plans" / "notes.md", str(bad / "plans")) == ("safe", "작업 폴더 안 파일을 고쳐")
+    assert w(bad / "plans" / "notes.md", str(bad / "plans")) == ("safe", "작업 폴더 안 파일을 고쳐요")
     other = tmp_path / "elsewhere"
     other.mkdir()
     bad3 = tmp_path / "conf3"
@@ -8491,8 +8491,8 @@ def test_mcp_init_marks_failed_server_and_fetches_reason(tmp_path):
     view = mcp_view(store.get("s1"))
     assert view["state"] == "problem"
     by = {x["name"]: x for x in view["servers"]}
-    assert by["abap-adt"]["problem"] and by["abap-adt"]["canReconnect"] and "연결하지 못했어" in by["abap-adt"]["label"]
-    assert not by["echosrv"]["problem"] and by["echosrv"]["label"] == "연결됨"
+    assert by["abap-adt"]["problem"] and by["abap-adt"]["canReconnect"] and "연결하지 못했어요" in by["abap-adt"]["label"]
+    assert not by["echosrv"]["problem"] and by["echosrv"]["label"] == "연결됐어요"
     assert by["abap-adt"]["error"] == ""  # init 에는 사유가 없다
     wait_for(lambda: proc.written)  # 연결 안 된 서버가 있으면 사유를 mcp_status 로 받아 온다(읽기 스레드 밖에서)
     request = proc.written[0]
@@ -8629,7 +8629,7 @@ def test_compact_sends_command_and_boundary_updates_state_chat_and_memory(tmp_pa
     m.on_event(proc, {"type": "result", "subtype": "success", "is_error": False, "result": "", "session_id": "s1"})
     s = _ctx(store)
     assert s["compact"] == {"state": "done", "pre": 35779, "post": 8449, "auto": False} and s["status"] != "running"
-    assert s["chat"][-1]["role"] == "note" and s["chat"][-1]["text"] == "기억을 요약했어 · 35,779 → 8,449 토큰"
+    assert s["chat"][-1]["role"] == "note" and s["chat"][-1]["text"] == "기억을 요약했어요 · 35,779 → 8,449 토큰"
     assert s["context"]["tokens"] == 8449 and s["context"]["pct"] == 1  # 새 답이 오기 전에는 요약 뒤 크기로 맞춘다
     f.write_text(f.read_text(encoding="utf-8") + _asst(1, 0, 9100, model="claude-haiku-5-5") + "\n", encoding="utf-8")
     assert _ctx(store)["context"]["tokens"] == 9101  # 새 답이 오면 대화 기록 값
@@ -8742,7 +8742,7 @@ def test_rewind_passes_claude_reason_through_instead_of_hiding_it(mconsole, monk
     assert status == 200 and body["canRewind"] is False and body["error"] == "Failed to rewind: disk"
     assert any("되돌리지 못함: Failed to rewind: disk" in x["text"] for x in c.app.store.get(sid)["log"])
     note = [x for x in c.app.store.get(sid)["chat"] if x.get("role") == "note"][-1]
-    assert note["text"] == "되돌리지 못했어: Failed to rewind: disk" and note["tone"] == "bad"
+    assert note["text"] == "되돌리지 못했어요: Failed to rewind: disk" and note["tone"] == "bad"
 
 
 def test_rewind_without_answer_is_502_and_leaves_unknown_note(mconsole, monkeypatch):
@@ -9079,7 +9079,7 @@ def test_flow_early_pr_read_failure_leaves_no_unknown_on_steps_without_pr():
     PR 을 근거로 끝나는 단계(합쳐지기)는 그대로 사유를 남긴다."""
     def fetch(kind):
         if kind == "pr":
-            return {"state": "unknown", "reason": "gh 로 PR 을 읽지 못했어."}
+            return {"state": "unknown", "reason": "gh 로 PR 을 읽지 못했어요."}
         return {"state": "ok", "value": False}
     fixing = {"finished": False, "unknown": [], "pr": None, "stepIndex": 0,
               "steps": [{"name": "고치기", "kind": "work", "state": "now", "done": ["has_changes", "manual"], "confirmed": False, "skillDone": False}]}
@@ -9088,7 +9088,7 @@ def test_flow_early_pr_read_failure_leaves_no_unknown_on_steps_without_pr():
     waiting = {"finished": False, "unknown": [], "pr": None, "stepIndex": 0,
                "steps": [{"name": "합쳐지기", "kind": "wait", "state": "now", "done": ["pr_merged"], "confirmed": False, "skillDone": False}]}
     flows.evaluate(waiting, fetch, lambda name: "yes", 0.0)
-    assert "gh 로 PR 을 읽지 못했어." in waiting["unknown"]
+    assert "gh 로 PR 을 읽지 못했어요." in waiting["unknown"]
 
 
 def test_pr_created_is_only_the_pr_this_session_made(browser):
@@ -9300,10 +9300,10 @@ def test_start_sync_result_is_kept_when_it_arrives_before_the_temp_id_becomes_re
     temp = store.ensure("m-aaa", str(c.work))
     temp["startChecks"] = managed.new_start_checks()
     temp["managed"] = True
-    c.event("real-1", "HarnessStartSync", state="ok", reason="이미 최신이야")  # 이어지기 전: 실제 id 로 먼저 들어온다
+    c.event("real-1", "HarnessStartSync", state="ok", reason="이미 최신이에요")  # 이어지기 전: 실제 id 로 먼저 들어온다
     assert not store.get("real-1").get("startChecks")  # 점검 목록은 아직 임시 id 쪽에 있다
     store.rekey("m-aaa", "real-1")
-    assert _check_states(c, "real-1")["sync"] == ("done", "이미 최신이야")
+    assert _check_states(c, "real-1")["sync"] == ("done", "이미 최신이에요")
     assert [x["id"] for x in sess(c, "real-1")["startChecks"]] == ["sync", "version", "update", "reload"]
     assert store.get("m-aaa") is store.get("real-1")  # 이전 id 도 이어진다
 
@@ -9349,7 +9349,7 @@ def test_start_version_check_compares_session_version_with_remote_latest(mconsol
     c.app.remote_latest = lambda: asked.append(1) or "0.10.5"
     _version_session(c, "v1", [{"name": "harness", "version": "0.10.1"}, {"name": "other", "version": "9.0.0"}])
     c.app.check_start_version("v1")
-    assert _check_states(c, "v1")["version"] == ("fail", "더 새 판이 있어(0.10.5)")
+    assert _check_states(c, "v1")["version"] == ("fail", "더 새 판이 있어요(0.10.5)")
     _version_session(c, "v2", [{"name": "harness", "version": "0.10.5"}])
     c.app.check_start_version("v2")
     assert _check_states(c, "v2")["version"] == ("done", "")
@@ -9404,8 +9404,8 @@ def test_managed_session_init_triggers_version_check_and_hook_result_lands_on_it
         wait_for(lambda: _check_states(c, sid)["version"][0] == want)
         if want == "fail":
             assert latest in _check_states(c, sid)["version"][1]
-        c.event(sid, "HarnessStartSync", state="ok", reason="받아서 최신으로 맞췄어")
-        assert _check_states(c, sid)["sync"] == ("done", "받아서 최신으로 맞췄어")
+        c.event(sid, "HarnessStartSync", state="ok", reason="받아서 최신으로 맞췄어요")
+        assert _check_states(c, sid)["sync"] == ("done", "받아서 최신으로 맞췄어요")
     finally:
         c.close()
 
@@ -9636,14 +9636,14 @@ def test_preview_failure_says_why_in_words_not_exception_names(tmp_path):
     (tmp_path / "a.xlsx").write_bytes(b"not a zip")
     with pytest.raises(docfiles.PreviewError) as e:
         docfiles.read_xlsx(str(tmp_path / "a.xlsx"))
-    assert str(e.value) == "엑셀 문서를 읽지 못했어: 파일이 깨졌거나 엑셀 형식이 아니야"
+    assert str(e.value) == "엑셀 문서를 읽지 못했어요: 파일이 깨졌거나 엑셀 형식이 아니에요"
     (tmp_path / "a.pptx").write_bytes(b"not a zip")
     with pytest.raises(docfiles.PreviewError) as e:
         docfiles.read_pptx(str(tmp_path / "a.pptx"))
-    assert str(e.value) == "파워포인트 문서를 읽지 못했어: 파일이 깨졌거나 파워포인트 형식이 아니야"
+    assert str(e.value) == "파워포인트 문서를 읽지 못했어요: 파일이 깨졌거나 파워포인트 형식이 아니에요"
     with pytest.raises(docfiles.PreviewError) as e:
         docfiles.read_xlsx(str(tmp_path / "없는 파일.xlsx"))
-    assert str(e.value) == "엑셀 문서를 읽지 못했어: 파일을 열 수 없어"
+    assert str(e.value) == "엑셀 문서를 읽지 못했어요: 파일을 열 수 없어요"
     assert "Error" not in docfiles.unreadable("엑셀", docfiles.ET.ParseError("x")) and "Error" not in docfiles.unreadable("엑셀", ValueError("x"))
 
 
@@ -9663,7 +9663,7 @@ def test_cozy_defects_deny_reason_kept_and_error_texts_without_exception_names(b
     assert console_server.topic("담당자 이름") == "담당자 이름은" and console_server.topic("메모") == "메모는" and console_server.topic("ID") == "ID은(는)"
     for exc, word in ((PermissionError(13, "x"), "권한"), (FileNotFoundError(2, "x"), "없어"), (IsADirectoryError(21, "x"), "폴더"), (OSError(5, "x"), "디스크")):
         text = console_server.read_error_text(exc)
-        assert text.startswith("파일을 읽지 못했어.") and word in text and "Error" not in text
+        assert text.startswith("파일을 읽지 못했어요.") and word in text and "Error" not in text
 
 
 def test_cozy_teams3_branch_touch_and_foreign_skill_names(tmp_path, monkeypatch):

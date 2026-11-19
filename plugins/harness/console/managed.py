@@ -42,8 +42,8 @@ PERMISSION_LABELS = dict(PERMISSION_OPTIONS)
 # 살아 있는 세션에 set_permission_mode 를 보내고 control_response 를 기다리는 시간(초). 빈 값(기본)은 claude 쪽 이름 default 로 보낸다.
 MODE_REPLY_WAIT = 8.0
 AUTO_MODE = "auto"
-AUTO_UNAVAILABLE = ("auto 모드를 쓸 수 없는 것 같아. 관리자가 꺼 뒀거나, 이 모델·Claude Code 판이 지원하지 않을 수 있어. "
-                    "그래서 다른 모드로 시작됐어. 이유는 확인 못 함")
+AUTO_UNAVAILABLE = ("auto 모드를 쓸 수 없는 것 같아요. 관리자가 꺼 뒀거나, 이 모델·Claude Code 판이 지원하지 않을 수 있어요. "
+                    "그래서 다른 모드로 시작됐어요. 이유는 확인 못 함")
 DEFAULT_MODE_NAME = "default"
 # 플러그인 다시 불러오기: control_request(reload_plugins) 가 안 되면 user 메시지 /reload-plugins 로 대신한다(모델 비용 없는 합성 응답).
 RELOAD_SUBTYPE = "reload_plugins"
@@ -65,8 +65,8 @@ CHECKPOINT_ENV = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"
 REWIND_SUBTYPE = "rewind_files"
 REWIND_DRY_WAIT = 30.0
 REWIND_WAIT = 90.0
-NOT_DELIVERED = "실행 중인 프로세스에 보내지 못했어."
-NO_ANSWER = "세션이 답하지 않았어."
+NOT_DELIVERED = "실행 중인 프로세스에 보내지 못했어요."
+NO_ANSWER = "세션이 답하지 않았어요."
 
 
 def classify_api_error(error, status) -> str:
@@ -211,18 +211,18 @@ class Manager:
         chosen = self.model if model is None else model
         # 저장된 값이 상태 파일에서 어긋났을 수 있어 여기서 한 번 더 검사하고, 어긋나면 그 플래그만 뺀다.
         if chosen and chosen != self.model and chosen not in MODEL_ALIASES and not MODEL_NAME.fullmatch(chosen):
-            self._warn(resume, f"모델 값이 허용 형식이 아니라 --model 을 뺐다: {chosen[:60]!r}")
+            self._warn(resume, f"모델 값이 허용 형식이 아니라 --model 을 뺐어요: {chosen[:60]!r}")
             chosen = ""
         if chosen:
             args += ["--model", chosen]
         level = self.effort if effort is None else effort
         if level and level not in EFFORT_VALUES:
-            self._warn(resume, f"에포트 값이 허용 단계가 아니라 --effort 를 뺐다: {level[:60]!r}")
+            self._warn(resume, f"에포트 값이 허용 단계가 아니라 --effort 를 뺐어요: {level[:60]!r}")
             level = ""
         if level:
             args += ["--effort", level]
         if permission and permission not in PERMISSION_VALUES:
-            self._warn(resume, f"권한 모드 값이 허용 집합이 아니라 --permission-mode 를 뺐다: {permission[:60]!r}")
+            self._warn(resume, f"권한 모드 값이 허용 집합이 아니라 --permission-mode 를 뺐어요: {permission[:60]!r}")
             permission = ""
         if permission:
             args += ["--permission-mode", permission]
@@ -359,13 +359,13 @@ class Manager:
         """기억을 요약하라는 /compact 를 stdin 으로 보낸다. 일하는 중이거나 이미 요약 중이면 보내지 않는다. {"ok"} 또는 {"ok": False, "error", "busy"?}."""
         proc = self.proc_for(sid)
         if proc is None or not proc.alive():
-            return {"ok": False, "error": "실행 중인 프로세스가 없어."}
+            return {"ok": False, "error": "실행 중인 프로세스가 없어요."}
         with self.store.lock:
             s = self.store.get(sid)
             if s is None:
-                return {"ok": False, "error": "없는 세션이야."}
+                return {"ok": False, "error": "없는 세션이에요."}
             if s.get("turn_running") or (s.get("compact") or {}).get("state") == "running":
-                return {"ok": False, "busy": True, "error": "지금 일하는 중이야. 끝난 뒤에 요약해 줘."}
+                return {"ok": False, "busy": True, "error": "지금 일하는 중이에요. 끝난 뒤에 요약해 주세요."}
             s["compact"] = {"state": "running", "at": self.store.clock()}
             s.update(turn_running=True, currentAction=COMPACT_ACTION)
             self.store.add_log(s, "기억 요약을 요청함")
@@ -373,7 +373,7 @@ class Manager:
             with self.store.lock:
                 s.pop("compact", None)
                 s.update(turn_running=False, currentAction="")
-            return {"ok": False, "error": "세션에 보내지 못했어."}
+            return {"ok": False, "error": "세션에 보내지 못했어요."}
         self.store.touch(s)
         return {"ok": True}
 
@@ -396,14 +396,14 @@ class Manager:
             s["compact"] = {"state": "done", "pre": pre, "post": post, "at": self.store.clock(), "auto": meta.get("trigger") == "auto",
                             "stale": old["tokens"] if old else None}  # stale: 요약 전 대화 기록의 마지막 사용량(이 값이 그대로면 아직 새 답이 없다)
             s["currentAction"] = ""
-            text = "기억을 요약했어" + (f" · {pre:,} → {post:,} 토큰" if pre is not None and post is not None else "")
+            text = "기억을 요약했어요" + (f" · {pre:,} → {post:,} 토큰" if pre is not None and post is not None else "")
             self.store.add_log(s, text)
             self.store.add_chat(s, "note", text, tone="ok")
 
     def _compact_failed(self, s: dict, reason: str) -> None:
         s["compact"] = {"state": "failed", "at": self.store.clock(), "reason": reason}
         s["currentAction"] = ""
-        text = "기억을 요약하지 못했어" + (f" (원문: {reason})" if reason else "")
+        text = "기억을 요약하지 못했어요" + (f" (원문: {reason})" if reason else "")
         self.store.add_log(s, text)
         self.store.add_chat(s, "note", text, tone="bad")
 
@@ -413,7 +413,7 @@ class Manager:
         답을 못 받았으면 ok=False 와 error(되돌려졌는지 알 수 없다)."""
         proc = self.proc_for(sid)
         if proc is None or not proc.alive():
-            return {"ok": False, "error": "세션 프로세스가 끝났어."}
+            return {"ok": False, "error": "세션 프로세스가 끝났어요."}
         request = {"subtype": REWIND_SUBTYPE, "user_message_id": msg_uuid}
         if dry_run:
             request["dry_run"] = True
@@ -456,9 +456,9 @@ class Manager:
                    "request": {"subtype": "set_permission_mode", "mode": mode or DEFAULT_MODE_NAME}}
             try:
                 if not proc.write(json.dumps(req) + "\n"):
-                    return {"ok": False, "live": True, "error": "실행 중인 프로세스에 보내지 못했어."}
+                    return {"ok": False, "live": True, "error": "실행 중인 프로세스에 보내지 못했어요."}
                 if not wait["event"].wait(MODE_REPLY_WAIT):
-                    return {"ok": False, "live": True, "error": "세션이 권한 모드 변경에 답하지 않았어."}
+                    return {"ok": False, "live": True, "error": "세션이 권한 모드 변경에 답하지 않았어요."}
             finally:
                 with self.lock:
                     self.mode_waits.pop(request_id, None)
@@ -472,7 +472,7 @@ class Manager:
         with self.store.lock:
             s = self.store.get(real)
             if s is None:
-                return {"ok": False, "live": live, "error": "없는 세션이야."}
+                return {"ok": False, "live": live, "error": "없는 세션이에요."}
             s["permissionChoice"] = mode
             s["permissionNote"] = ""
             if live:
@@ -498,12 +498,12 @@ class Manager:
         proc0, before = marker
         proc = self.proc_for(sid)
         if proc is None:
-            return False, "", False, "세션 프로세스가 없어."
+            return False, "", False, "세션 프로세스가 없어요."
         base = before if proc is proc0 else 0
         if proc.results > base:
             return True, proc.last_result, proc.last_error, ""
         if not proc.alive():
-            return False, "", False, "세션 프로세스가 끝났어."
+            return False, "", False, "세션 프로세스가 끝났어요."
         return False, "", False, ""
 
     # ---- 플러그인 다시 불러오기 ----
@@ -533,7 +533,7 @@ class Manager:
         proc = self.proc_for(sid)
         real = self.store.resolve_id(sid)
         if proc is None or not proc.alive():
-            return {"ok": False, "dead": True, "error": "세션 프로세스가 끝났어."}
+            return {"ok": False, "dead": True, "error": "세션 프로세스가 끝났어요."}
         with proc.reload_lock:
             got = self.control_call(proc, {"subtype": RELOAD_SUBTYPE}, RELOAD_REPLY_WAIT)
             if got["ok"]:
@@ -557,17 +557,17 @@ class Manager:
             if s is not None:
                 s["turn_running"] = True
         if not self.send(real, RELOAD_COMMAND):
-            return {"ok": False, "error": "메시지를 보내지 못했어."}
+            return {"ok": False, "error": "메시지를 보내지 못했어요."}
         deadline = time.monotonic() + RELOAD_MESSAGE_WAIT
         while proc.results <= before:
             if not proc.alive():
-                return {"ok": False, "error": "세션 프로세스가 끝났어."}
+                return {"ok": False, "error": "세션 프로세스가 끝났어요."}
             if time.monotonic() > deadline:
-                return {"ok": False, "error": "답이 오지 않았어."}
+                return {"ok": False, "error": "답이 오지 않았어요."}
             time.sleep(RELOAD_POLL)
         text = proc.last_result
         if proc.last_error or not RELOADED.search(text):
-            return {"ok": False, "error": ("이 판은 지원하지 않는 듯해: " + text.strip()[:100]) if text.strip() else "빈 응답이야."}
+            return {"ok": False, "error": ("이 판은 지원하지 않는 듯해요: " + text.strip()[:100]) if text.strip() else "빈 응답이에요."}
         errors = RELOAD_ERRORS.search(text)
         with self.store.lock:
             s = self.store.get(real)
@@ -580,7 +580,7 @@ class Manager:
         """mcp_status 로 서버별 상태와 실패 사유를 새로 받는다. {"ok": True} 또는 {"ok": False, "error"}."""
         proc = self.proc_for(sid)
         if proc is None or not proc.alive():
-            return {"ok": False, "error": "세션 프로세스가 끝났어."}
+            return {"ok": False, "error": "세션 프로세스가 끝났어요."}
         with proc.mcp_lock:
             return self._mcp_status(proc, self.store.resolve_id(sid))
 
@@ -592,7 +592,7 @@ class Manager:
         with self.store.lock:
             s = self.store.get(real)
             if s is None:
-                return {"ok": False, "error": "없는 세션이야."}
+                return {"ok": False, "error": "없는 세션이에요."}
             s["mcpServers"] = servers
         self.store.touch(s)
         return {"ok": True}
@@ -602,7 +602,7 @@ class Manager:
         proc = self.proc_for(sid)
         real = self.store.resolve_id(sid)
         if proc is None or not proc.alive():
-            return {"ok": False, "error": "세션 프로세스가 끝났어."}
+            return {"ok": False, "error": "세션 프로세스가 끝났어요."}
         with proc.mcp_lock:
             got = self.control_call(proc, {"subtype": MCP_RECONNECT_SUBTYPE, "serverName": name}, MCP_REPLY_WAIT)
             with self.store.lock:
@@ -777,13 +777,13 @@ class Manager:
                         self._compact_failed(s, str(e.get("result") or e.get("subtype") or "")[:200])
                     else:
                         s["compact"] = {"state": "unknown", "at": self.store.clock()}
-                        self.store.add_chat(s, "note", "기억 요약이 끝났다는 신호는 왔는데 결과는 확인 못 했어", tone="warn")
+                        self.store.add_chat(s, "note", "기억 요약이 끝났다는 신호는 왔는데 결과는 확인 못 했어요", tone="warn")
                 if isinstance(e.get("result"), str) and e["result"] and not s.get("reportFresh") and not failed:
                     s["report"] = e["result"]  # Stop 훅이 이번 턴에 못 왔을 때를 위한 대비(턴마다 reportFresh 를 비우므로 이후 턴도 반영된다)
                     s["reportFresh"] = True
                     self.store.add_chat(s, "ai", e["result"])
                 if s.pop("interrupted", False):
-                    self.store.add_log(s, "사용자가 작업을 중단했어.")
+                    self.store.add_log(s, "사용자가 작업을 중단했어요.")
                 elif failed:
                     detail = str(e.get("result") or e.get("subtype") or "").strip()
                     self.store.add_log(s, "오류로 끝남" + (": " + detail[:200] if detail else ""))
@@ -948,10 +948,10 @@ class Manager:
                 return
             if s.get("starting") and s.get("permissionChoice") == AUTO_MODE:  # 시작 신호(init)도 못 보내고 끝났다
                 raw = proc.last_result.strip()[:300]
-                self._auto_note(s, f"auto 모드로 시작하다 끝났어. {AUTO_UNAVAILABLE.split('. ', 1)[0]}. "
+                self._auto_note(s, f"auto 모드로 시작하다 끝났어요. {AUTO_UNAVAILABLE.split('. ', 1)[0]}. "
                                    + (f"claude 가 낸 메시지 원문: {raw}" if raw else "claude 가 남긴 메시지가 없어서 이유는 확인 못 함"))
             if (s.get("compact") or {}).get("state") == "running":
-                self._compact_failed(s, "세션 프로세스가 끝났어")
+                self._compact_failed(s, "세션 프로세스가 끝났어요")
             s.update(managed_alive=False, starting=False, turn_running=False, ended=True)
             self.store.close_session(s["id"], "세션이 끝나서 닫힘", code="expired")  # 결과 코드(#1018)
             self.store.add_log(s, "세션 프로세스가 끝남")

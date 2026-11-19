@@ -46,33 +46,33 @@ def parse(items) -> list[dict]:
     if items in (None, []):
         return []
     if not isinstance(items, list):
-        raise AttachmentError("attachments 는 목록이어야 해.")
+        raise AttachmentError("attachments 는 목록이어야 해요.")
     if len(items) > MAX_COUNT:
-        raise AttachmentError(f"첨부는 한 번에 {MAX_COUNT}개까지 보낼 수 있어.")
+        raise AttachmentError(f"첨부는 한 번에 {MAX_COUNT}개까지 보낼 수 있어요.")
     out, total = [], 0
     for item in items:
         if not isinstance(item, dict):
-            raise AttachmentError("첨부 항목 모양이 올바르지 않아.")
+            raise AttachmentError("첨부 항목 모양이 올바르지 않아요.")
         media_type, data = item.get("media_type"), item.get("data")
         name = _clean_name(item.get("name"))
         if media_type not in _SIGNATURES:
-            raise AttachmentError(f"{name}: 이미지(png·jpg·gif·webp)와 PDF 만 보낼 수 있어.")
+            raise AttachmentError(f"{name}: 이미지(png·jpg·gif·webp)와 PDF 만 보낼 수 있어요.")
         if not isinstance(data, str) or not data:
-            raise AttachmentError(f"{name}: 내용이 비어 있어.")
+            raise AttachmentError(f"{name}: 내용이 비어 있어요.")
         limit = MAX_PDF if media_type == "application/pdf" else MAX_IMAGE
         if len(data) > limit * 4 // 3 + 8:  # 디코드하기 전에 크기부터 본다
-            raise AttachmentError(f"{name}: 너무 커. {'PDF 는 20MB' if media_type == 'application/pdf' else '이미지는 한 장에 5MB'}까지야.", 413)
+            raise AttachmentError(f"{name}: 너무 커요. {'PDF 는 20MB' if media_type == 'application/pdf' else '이미지는 한 장에 5MB'}까지예요.", 413)
         try:
             raw = base64.b64decode(data, validate=True)
         except (binascii.Error, ValueError):
-            raise AttachmentError(f"{name}: 파일 내용을 읽지 못했어(base64 가 아니야).")
+            raise AttachmentError(f"{name}: 파일 내용을 읽지 못했어요(base64 가 아니에요).")
         if len(raw) > limit:
-            raise AttachmentError(f"{name}: 너무 커. {'PDF 는 20MB' if media_type == 'application/pdf' else '이미지는 한 장에 5MB'}까지야.", 413)
+            raise AttachmentError(f"{name}: 너무 커요. {'PDF 는 20MB' if media_type == 'application/pdf' else '이미지는 한 장에 5MB'}까지예요.", 413)
         if not _matches(media_type, raw):
-            raise AttachmentError(f"{name}: 파일 내용이 {media_type} 가 아니야.")
+            raise AttachmentError(f"{name}: 파일 내용이 {media_type} 가 아니에요.")
         total += len(raw)
         if total > MAX_TOTAL:
-            raise AttachmentError("첨부 합계가 너무 커. 합쳐서 20MB 까지야.", 413)
+            raise AttachmentError("첨부 합계가 너무 커요. 합쳐서 20MB 까지예요.", 413)
         out.append({"name": name, "media_type": media_type, "data": data, "size": len(raw)})
     return out
 

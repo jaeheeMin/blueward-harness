@@ -25,8 +25,9 @@
 /* 카드(시안 .req). 세션이 있으면 a(그 세션으로), 없으면 div */
 :root[data-theme="post"] .po-pl-req { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; align-items: center; padding: 10px; border: 1.5px solid var(--bd); border-radius: 10px; background: var(--paper); color: var(--text); text-decoration: none; }
 :root[data-theme="post"] a.po-pl-req:hover { border-color: var(--line2); color: var(--text); }
-:root[data-theme="post"] .po-pl-req.turn { border-color: color-mix(in srgb, var(--attn) 55%, transparent); }
-:root[data-theme="post"] .po-pl-req.blocked { border-color: color-mix(in srgb, var(--st-fail) 60%, transparent); }
+:root[data-theme="post"] .po-pl-req.turn { border-color: color-mix(in srgb, var(--ask-line) 60%, transparent); }  /* 답을 기다리는 건: 알림 */
+:root[data-theme="post"] .po-pl-req.turn[data-color-role="warn"] { border-color: color-mix(in srgb, var(--warn-line) 70%, transparent); }
+:root[data-theme="post"] .po-pl-req.turn[data-color-role="err"], :root[data-theme="post"] .po-pl-req.blocked { border-color: color-mix(in srgb, var(--st-fail) 60%, transparent); }
 :root[data-theme="post"] .po-pl-req > .po-st { grid-row: span 2; width: 14px; height: 14px; font-size: 9px; }
 :root[data-theme="post"] .po-pl-req > .po-st-idle { border: 1.5px solid var(--line2); }
 :root[data-theme="post"] .po-pl-rid { font: 11px var(--font); color: var(--muted); overflow-wrap: anywhere; }

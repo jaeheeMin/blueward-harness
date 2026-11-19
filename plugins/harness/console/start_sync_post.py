@@ -19,18 +19,18 @@ CONNECT_LIMIT = 0.5
 
 # 코드 -> (상태, 화면에 보일 사유). ok 받음·이미 최신 / fail 다시 필요 / unknown 판정 못 함(확인 못 함)
 RESULTS = {
-    "latest": ("ok", "이미 최신이야"),
-    "synced": ("ok", "받아서 최신으로 맞췄어"),
-    "conflict": ("fail", "충돌해서 되돌렸어. 다시 받아야 해"),
-    "failed": ("fail", "받다가 실패했어. 다시 받아야 해"),
-    "fetch_failed": ("fail", "원격을 가져오지 못했어. 네트워크·로그인을 확인해야 해"),
-    "main_ahead": ("fail", "로컬 main 이 원격보다 앞서 있어서 맞추지 않았어"),
-    "gone": ("unknown", "원격 브랜치가 지워진 작업이라 받지 않았어"),
-    "dirty": ("unknown", "커밋 안 된 변경이 있어서 받지 않았어"),
-    "in_progress": ("unknown", "리베이스·병합이 진행 중이라 받지 않았어"),
-    "no_remote": ("unknown", "원격 저장소가 없어서 확인 못 했어"),
-    "no_main": ("unknown", "비교할 원격 main 이 없어서 확인 못 했어"),
-    "not_repo": ("unknown", "git 저장소가 아니라서 확인 못 했어"),
+    "latest": ("ok", "이미 최신이에요"),
+    "synced": ("ok", "받아서 최신으로 맞췄어요"),
+    "conflict": ("fail", "충돌해서 되돌렸어요. 다시 받아야 해요"),
+    "failed": ("fail", "받다가 실패했어요. 다시 받아야 해요"),
+    "fetch_failed": ("fail", "원격을 가져오지 못했어요. 네트워크·로그인을 확인해야 해요"),
+    "main_ahead": ("fail", "로컬 main 이 원격보다 앞서 있어서 맞추지 않았어요"),
+    "gone": ("unknown", "원격 브랜치가 지워진 작업이라 받지 않았어요"),
+    "dirty": ("unknown", "커밋 안 된 변경이 있어서 받지 않았어요"),
+    "in_progress": ("unknown", "리베이스·병합이 진행 중이라 받지 않았어요"),
+    "no_remote": ("unknown", "원격 저장소가 없어서 확인 못 했어요"),
+    "no_main": ("unknown", "비교할 원격 main 이 없어서 확인 못 했어요"),
+    "not_repo": ("unknown", "git 저장소가 아니라서 확인 못 했어요"),
 }
 
 
@@ -49,7 +49,7 @@ def build(raw: bytes, code: str) -> bytes | None:
     data = json.loads(raw.decode("utf-8", errors="replace"))
     if not isinstance(data, dict) or not isinstance(data.get("session_id"), str) or not data["session_id"]:
         return None
-    state, reason = RESULTS.get(code, ("unknown", "결과를 판정하지 못했어"))
+    state, reason = RESULTS.get(code, ("unknown", "결과를 판정하지 못했어요"))
     body = {"hook_event_name": "HarnessStartSync", "session_id": data["session_id"], "cwd": data.get("cwd") if isinstance(data.get("cwd"), str) else "",
             "state": state, "reason": reason}
     return json.dumps(body, ensure_ascii=False).encode("utf-8")

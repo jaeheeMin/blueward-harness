@@ -43,39 +43,39 @@
       var sec = typeof issue.delayMs === 'number' ? Math.max(1, Math.ceil(issue.delayMs / 1000)) : null;
       var n = issue.attempt != null ? issue.attempt + (issue.max ? '/' + issue.max : '') : '';
       return { kind: 'retry', tone: 'info', sideTone: '', tag: '다시 시도 중', title: '서버 연결을 다시 시도하는 중' + (n ? ' ' + n : ''),
-        body: (sec ? '다음 시도는 ' + sec + '초 뒤야. ' : '') + '잠깐 기다리면 돼. 계속 안 되면 인터넷 연결을 확인해 줘.',
+        body: (sec ? '다음 시도는 ' + sec + '초 뒤예요. ' : '') + '잠깐 기다리면 돼요. 계속 안 되면 인터넷 연결을 확인해 주세요.',
         raw: rawText(issue), side: '서버 연결 다시 시도 중' + (n ? ' ' + n : '') };
     }
     var limitHit = (issue && issue.kind === 'limit') || (rl && rl.status === 'rejected' && rlLive);
     if (limitHit) {
       var at = clockText(rl && rl.status === 'rejected' ? rl.resetsAt : null, now);
-      return { kind: 'limit', tone: 'err', sideTone: 'err', tag: '⚠ 사용 한도', title: '사용 한도에 걸렸어',
-        body: at ? at + ' 에 다시 쓸 수 있어. 그때까지는 기다려 줘.' : '언제 풀리는지는 확인 못 했어. 잠시 뒤 다시 해 봐.',
-        raw: issue ? rawText(issue) : '', side: '⚠ 사용 한도' + (at ? ' · ' + at + ' 에 풀려' : '') };
+      return { kind: 'limit', tone: 'err', sideTone: 'err', tag: '⚠ 사용 한도', title: '사용 한도에 걸렸어요',
+        body: at ? at + ' 에 다시 쓸 수 있어요. 그때까지는 기다려 주세요.' : '언제 풀리는지는 확인하지 못했어요. 잠시 뒤 다시 해 보세요.',
+        raw: issue ? rawText(issue) : '', side: '⚠ 사용 한도' + (at ? ' · ' + at + ' 에 풀려요' : '') };
     }
     if (issue) {
       if (issue.kind === 'auth') {
-        return { kind: 'auth', tone: 'err', sideTone: 'err', tag: '⚠ 로그인', title: '로그인이 풀렸어',
-          body: '터미널에서 claude 를 열어 /login 으로 다시 로그인해 줘. 그다음 여기서 이어서 말하면 돼.', raw: rawText(issue), side: '⚠ 오류 · 로그인이 풀렸어' };
+        return { kind: 'auth', tone: 'err', sideTone: 'err', tag: '⚠ 로그인', title: '로그인이 풀렸어요',
+          body: '터미널에서 claude 를 열어 /login 으로 다시 로그인해 주세요. 그다음 여기서 이어서 말하면 돼요.', raw: rawText(issue), side: '⚠ 오류 · 로그인이 풀렸어요' };
       }
       if (issue.kind === 'model') {
-        return { kind: 'model', tone: 'err', sideTone: 'err', tag: '⚠ 모델', title: '고른 모델을 쓸 수 없어',
-          body: '모델 이름이 없거나 이 계정에서 쓸 수 없는 것 같아. 새 작업 화면 아래 "고급 설정" 에서 다른 모델을 골라 새로 시작해 줘.', raw: rawText(issue), side: '⚠ 오류 · 모델을 쓸 수 없어' };
+        return { kind: 'model', tone: 'err', sideTone: 'err', tag: '⚠ 모델', title: '고른 모델을 쓸 수 없어요',
+          body: '모델 이름이 없거나 이 계정에서 쓸 수 없는 것 같아요. 새 작업 화면 아래 "고급 설정" 에서 다른 모델을 골라 새로 시작해 주세요.', raw: rawText(issue), side: '⚠ 오류 · 모델을 쓸 수 없어요' };
       }
       if (issue.kind === 'other') {
-        return { kind: 'other', tone: 'err', sideTone: 'err', tag: '⚠ 서버 오류', title: 'Claude Code 서버가 오류를 돌려줬어',
-          body: '잠시 뒤 다시 시켜 봐. 같은 오류가 계속되면 아래 원문을 관리자에게 보여 줘.', raw: rawText(issue), side: '⚠ 오류 · 서버가 오류를 돌려줬어' };
+        return { kind: 'other', tone: 'err', sideTone: 'err', tag: '⚠ 서버 오류', title: 'Claude Code 서버가 오류를 돌려줬어요',
+          body: '잠시 뒤 다시 시켜 보세요. 같은 오류가 계속되면 아래 원문을 관리자에게 보여 주세요.', raw: rawText(issue), side: '⚠ 오류 · 서버가 오류를 돌려줬어요' };
       }
       // 모르는 종류·모양: 성공으로 보지 않고 모른다고 말한다
-      return { kind: 'unknown', tone: 'err', sideTone: 'err', tag: '⚠ 알 수 없는 오류', title: '알 수 없는 오류로 끝났어',
-        body: '무슨 오류인지 확인 못 했어. 일이 잘 끝난 게 아니니 아래 원문을 보고 다시 시켜 줘.', raw: rawText(issue) || '(원문 없음)', side: '⚠ 오류 · 알 수 없는 오류' };
+      return { kind: 'unknown', tone: 'err', sideTone: 'err', tag: '⚠ 알 수 없는 오류', title: '알 수 없는 오류로 끝났어요',
+        body: '무슨 오류인지 확인하지 못했어요. 일이 잘 끝난 게 아니니 아래 원문을 보고 다시 시켜 주세요.', raw: rawText(issue) || '(원문 없음)', side: '⚠ 오류 · 알 수 없는 오류' };
     }
     if (rl && rlLive && rl.status !== 'allowed') {
       var name = LIMIT_NAME[rl.type] || '', p = pct(rl.utilization), when = clockText(rl.resetsAt, now);
       var warn = rl.status === 'allowed_warning';
-      return { kind: warn ? 'limit_warn' : 'limit_unknown', tone: 'warn', sideTone: '', tag: warn ? '곧 한도' : '한도 상태 모름', title: warn ? '사용 한도가 가까워졌어' : '사용 한도 상태를 알 수 없어',
-        body: warn ? (name ? name + ' ' : '') + '사용량이 ' + (p || '높은 수준') + ' 야.' + (when ? ' ' + when + ' 에 풀려.' : '') + ' 한도에 닿으면 일이 멈춰.'
-          : 'Claude Code 가 알려 준 상태(' + rl.status + ')를 몰라서 한도 여부는 확인 못 했어.',
+      return { kind: warn ? 'limit_warn' : 'limit_unknown', tone: 'warn', sideTone: '', tag: warn ? '곧 한도' : '한도 상태 모름', title: warn ? '사용 한도가 가까워졌어요' : '사용 한도 상태를 알 수 없어요',
+        body: warn ? (name ? name + ' ' : '') + (p ? '사용량이 ' + p + ' 까지 찼어요.' : '사용량이 높아요.') + (when ? ' ' + when + ' 에 풀려요.' : '') + ' 한도에 닿으면 일이 멈춰요.'
+          : 'Claude Code 가 알려 준 상태(' + rl.status + ')를 몰라서 한도 여부는 확인하지 못했어요.',
         raw: '', side: '' };
     }
     return null;

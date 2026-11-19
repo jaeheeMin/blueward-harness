@@ -112,12 +112,12 @@ const cases = {
     const skill = L.nextAction(at(0, [{ id: 'a', name: 'A', kind: 'skill', skill: 'srs', state: 'pending' }]));
     assert.strictEqual(skill.type, 'skill'); assert.strictEqual(skill.skill, 'srs'); assert.strictEqual(skill.label, '/harness:srs 실행'); assert.strictEqual(skill.disabled, false);
     const work = L.nextAction(at(0, [{ id: 'a', name: 'A', kind: 'work', state: 'active' }]));
-    assert.strictEqual(work.type, 'done'); assert.strictEqual(work.label, '끝났어'); assert.ok(!('skill' in work));
+    assert.strictEqual(work.type, 'done'); assert.strictEqual(work.label, '끝났어요'); assert.ok(!('skill' in work));
     const human = L.nextAction(at(0, [{ id: 'a', name: 'A', kind: 'human', state: 'active', hint: '넣기' }]));
     assert.strictEqual(human.type, 'human'); assert.strictEqual(human.refreshLabel, '다시 확인'); assert.strictEqual(human.hint, '넣기');
     const wait = L.nextAction(at(0, [{ id: 'a', name: 'A', kind: 'wait', state: 'active', helperSkill: 'prs' }]));
     assert.strictEqual(wait.type, 'wait'); assert.strictEqual(wait.label, '다시 확인'); assert.strictEqual(wait.helper, 'prs');
-    // Claude Code 가 일하는 중이거나 보낼 수 없으면 스킬 버튼은 막는다
+    // Claude Code 가 일하는 중이에요이거나 보낼 수 없으면 스킬 버튼은 막는다
     const busy = L.nextAction(Object.assign(at(0, [{ id: 'a', name: 'A', kind: 'skill', skill: 'srs', state: 'active' }]), { status: 'running' }));
     assert.strictEqual(busy.disabled, true);
     const noSend = L.nextAction(Object.assign(at(0, [{ id: 'a', name: 'A', kind: 'skill', skill: 'srs', state: 'pending' }]), { canSend: false, cannotSendReason: '끝난 세션' }));
@@ -162,7 +162,7 @@ const cases = {
   forms_notice_only_when_ready_and_server_says_missing() {
     const d = (state, forms) => ({ conditions: { 'project-ready': { state } }, formsMissing: forms });
     const n = L.formsNotice(d('yes', 'yes'));
-    assert.ok(n.text.includes('고객 양식이 아직 없어') && n.text.includes('templates/') && n.text.includes('md 로만 쓰는 프로젝트면 신경 안 써도 돼'));
+    assert.ok(n.text.includes('고객 양식이 아직 없어요') && n.text.includes('templates/') && n.text.includes('md 로만 쓰는 프로젝트면 신경 쓰지 않아도 돼요'));
     assert.strictEqual(n.short, '고객 양식 아직 없음');
     assert.strictEqual(L.formsNotice(d('yes', 'no')), null);       // 양식이 있다
     assert.strictEqual(L.formsNotice(d('yes', 'unknown')), null);  // 못 읽었으면 말하지 않는다
@@ -174,28 +174,28 @@ const cases = {
   pr_team_line_mentions_agent_merge_only_in_small_fix_flow() {
     const pr = { number: 6, state: 'OPEN', checks: 'pass' };
     const team = (flow) => L.prLines(pr, flow).find(l => l.id === 'team').text;
-    assert.ok(team('fix').includes('승인은 GitHub 에서 해') && team('fix').includes('문서만 바꾼 PR 은 검사가 통과하면 Claude Code 가 바로 병합하기도 해.'));
+    assert.ok(team('fix').includes('승인은 GitHub 에서 해') && team('fix').includes('문서만 바꾼 PR 은 검사가 통과하면 Claude Code 가 바로 병합하기도 해요.'));
     assert.ok(!team('srs').includes('바로 병합하기도'));  // SRS·Spec·개발 PR 은 늘 사람이 병합한다
     assert.ok(!team(undefined).includes('바로 병합하기도'));
-    assert.strictEqual(L.prLines({ number: 6, state: 'MERGED', checks: 'pass' }, 'fix').find(l => l.id === 'team').text, '합쳐졌어');
+    assert.strictEqual(L.prLines({ number: 6, state: 'MERGED', checks: 'pass' }, 'fix').find(l => l.id === 'team').text, '합쳐졌어요');
   },
   reload_strip_and_result() {
     const live = [{ id: 'a', status: 'idle' }, { id: 'b', status: 'ended' }, { id: 'c', status: 'running' }];
     assert.strictEqual(L.reloadStrip(false, live), null);
     assert.strictEqual(L.reloadStrip(true, [{ id: 'b', status: 'ended' }]), null);
     assert.deepStrictEqual(L.reloadStrip(true, live), { count: 2, text: '돌고 있는 세션 2개 다시 불러오기 필요' });
-    assert.strictEqual(L.reloadResult({ ok: true, harnessVersion: '0.10.140', plugins: [], errorCount: 0 }), 'harness 0.10.140 로 다시 불러왔어.');
-    assert.strictEqual(L.reloadResult({ ok: true, plugins: [{ name: 'harness', version: '0.10.9' }], errorCount: 2 }), 'harness 0.10.9 로 다시 불러왔어. (오류 2개)');
+    assert.strictEqual(L.reloadResult({ ok: true, harnessVersion: '0.10.140', plugins: [], errorCount: 0 }), 'harness 0.10.140 로 다시 불러왔어요.');
+    assert.strictEqual(L.reloadResult({ ok: true, plugins: [{ name: 'harness', version: '0.10.9' }], errorCount: 2 }), 'harness 0.10.9 로 다시 불러왔어요. (오류 2개)');
     assert.ok(L.reloadResult({ queued: true }).includes('끝나면'));
   },
   summary_counts() {
     const list = [{ id: 1, group: 'todo', pendingRequestIds: ['q'] }, { id: 2, group: 'running' }, { id: 3, status: 'running' }, { id: 4 }, { id: 5, pendingRequestIds: ['r'] }];
-    assert.strictEqual(L.summaryText(L.counts(list)), '세션 5개 · 일하는 중 2 · 내 차례 2 · 쉬는 중 1');
-    assert.strictEqual(L.summaryText(L.counts([])), '세션 0개 · 일하는 중 0 · 내 차례 0 · 쉬는 중 0');
+    assert.strictEqual(L.summaryText(L.counts(list)), '세션 5개 · 일하는 중 2 · 답을 기다리는 일 2 · 쉬는 중 1');
+    assert.strictEqual(L.summaryText(L.counts([])), '세션 0개 · 일하는 중 0 · 답을 기다리는 일 0 · 쉬는 중 0');
   },
   my_turn_is_only_real_requests() {
-    // #1027 D5·D-3: main 에서 쉬는 세션(start)·남의 승인 대기(prs) 짐작, 글로 물은 추정(askedInText), 답할 요청 없는 서버 todo 는 내 차례가 아니다.
-    // 올릴 변경이 있는 작업 브랜치(deliver)는 내 차례다(시안 G-11)
+    // #1027 D5·D-3: main 에서 쉬는 세션(start)·남의 승인 대기(prs) 짐작, 글로 물은 추정(askedInText), 답할 요청 없는 서버 todo 는 답을 기다리는 일가 아니다.
+    // 올릴 변경이 있는 작업 브랜치(deliver)는 답을 기다리는 일다(시안 G-11)
     assert.strictEqual(L.groupOf({ id: 1, status: 'idle', turnSkill: 'deliver' }), 'todo');
     assert.strictEqual(L.groupOf({ id: 11, status: 'idle', turnSkill: 'start' }), 'idle');
     assert.strictEqual(L.groupOf({ id: 12, status: 'idle', turnSkill: 'prs' }), 'idle');
@@ -204,7 +204,7 @@ const cases = {
     assert.strictEqual(L.groupOf({ id: 3, status: 'idle', group: 'todo' }), 'idle');
     assert.strictEqual(L.groupOf({ id: 4, status: 'starting' }), 'running');
     assert.strictEqual(L.groupOf({ id: 5, status: 'waiting', group: 'todo', pendingRequestIds: ['r1'] }), 'todo');
-    // 화면이 이미 처리됐다고 아는 요청(openIds 가 비움)이면 서버가 todo 라 해도 내 차례가 아니다
+    // 화면이 이미 처리됐다고 아는 요청(openIds 가 비움)이면 서버가 todo 라 해도 답을 기다리는 일가 아니다
     assert.strictEqual(L.groupOf({ id: 6, status: 'waiting', group: 'todo', pendingRequestIds: ['r1'] }, () => []), 'idle');
     assert.strictEqual(L.groupOf({ id: 7, status: 'running', group: 'todo', pendingRequestIds: ['r1'] }, () => []), 'running');
     const pr = { number: 9, state: 'OPEN', checks: 'fail' };
@@ -219,7 +219,7 @@ const cases = {
     assert.deepStrictEqual(L.turnItems(list).map(t => t.s.id + ':' + t.kind + ':' + t.rid), ['a:request:r1', 'a:request:r2', 'c:fix:']);
     assert.deepStrictEqual(L.turnItems([{ id: 'x', status: 'idle', turnSkill: 'deliver' }]).map(t => t.kind), ['turn']);
     assert.deepStrictEqual(L.turnItems([{ id: 'y', status: 'idle', turnSkill: 'deliver', flowPr: pr }]).map(t => t.kind), ['fix']);  // 고칠 PR 이 먼저
-    assert.strictEqual(L.NO_TURN_TEXT, '지금 네가 할 일은 없어');
+    assert.strictEqual(L.NO_TURN_TEXT, '지금 답을 기다리는 일이 없어요');
   },
   session_order_is_stable_within_a_group() {
     // #1027 D-6: 묶음은 지키고 같은 묶음 안에서는 시작 시각(없으면 id)으로 고정 — updatedAt 이 움직여도 순서는 그대로
@@ -261,7 +261,7 @@ const cases = {
     assert.strictEqual(L.prBadge({ number: 35, state: 'CLOSED', checks: 'fail' }).text, '닫힘');
   },
   fix_pr_counts_as_todo() {
-    // 시안 G-24: 검사 실패한 내 PR 세션은 내 차례. 일하는 중·끝난 세션·막힘은 아니다
+    // 시안 G-24: 검사 실패한 내 PR 세션은 답을 기다리는 일. 일하는 중이에요·끝난 세션·막힘은 아니다
     const pr = { number: 812, state: 'OPEN', checks: 'fail' };
     const fix = { id: 1, group: 'idle', status: 'idle', flowPr: pr };
     assert.strictEqual(L.groupOf(fix), 'todo');
@@ -299,8 +299,8 @@ const cases = {
   },
   start_checks_unknown_and_fail_with_reason() {
     // 훅·판 확인 결과: 확인 못 함(unknown)·다시 필요(fail)와 사유(#1059). 점검이 끝나지 않은 것(pending)과는 다르다
-    const got = L.startChecks({ startChecks: [{ id: 'sync', state: 'unknown', reason: '원격이 없어' }, { id: 'version', state: 'fail', reason: '더 새 판이 있어(0.10.9)' }] });
-    assert.deepStrictEqual(got.map(c => [c.state, c.label, c.reason]), [['unknown', '확인 못 함', '원격이 없어'], ['fail', '다시 필요', '더 새 판이 있어(0.10.9)']]);
+    const got = L.startChecks({ startChecks: [{ id: 'sync', state: 'unknown', reason: '원격이 없어' }, { id: 'version', state: 'fail', reason: '더 새 판이 있어요(0.10.9)' }] });
+    assert.deepStrictEqual(got.map(c => [c.state, c.label, c.reason]), [['unknown', '확인 못 함', '원격이 없어'], ['fail', '다시 필요', '더 새 판이 있어요(0.10.9)']]);
     assert.strictEqual(L.startChecks({ startChecks: [{ id: 'sync', state: 'pending' }] })[0].label, '아직');
     assert.strictEqual(L.startChecks({ startChecks: [{ id: 'sync', state: 'done' }] })[0].reason, '');
   },
@@ -378,9 +378,9 @@ const cases = {
       flowSteps: [{ id: 'a', name: '지금', kind, skill: kind === 'skill' ? 'srs' : undefined, state: 'active' }, { id: 'b', name: '다음', kind: 'skill', skill: 'deliver', state: 'pending' }] }, extra);
     const buttons = () => find(panel.el, e => e.tag === 'button').map(e => e.textContent);
     panel.update(sess('skill')); assert.deepStrictEqual(buttons(), ['/harness:srs 다시 실행', '이 단계 건너뛰기']);
-    panel.update(sess('work')); assert.deepStrictEqual(buttons(), ['끝났어', '이 단계 건너뛰기']);
+    panel.update(sess('work')); assert.deepStrictEqual(buttons(), ['끝났어요', '이 단계 건너뛰기']);
     panel.update(sess('wait')); assert.deepStrictEqual(buttons(), ['다시 확인', '이 단계 건너뛰기']);
-    panel.update(sess('human')); assert.deepStrictEqual(buttons(), ['끝났어', '다시 확인', '이 단계 건너뛰기']);
+    panel.update(sess('human')); assert.deepStrictEqual(buttons(), ['끝났어요', '다시 확인', '이 단계 건너뛰기']);
     // 순서 막대: 지금 단계 하나만 강조
     assert.strictEqual(find(panel.el, e => e.tag === 'li' && e.attrs['aria-current'] === 'step').length, 1);
     assert.strictEqual(find(panel.el, e => e.tag === 'li' && (e.attrs['class'] || '').includes('step')).length, 2);
@@ -389,13 +389,13 @@ const cases = {
     const fin = find(panel.el, e => e.tag === 'button');
     assert.deepStrictEqual(fin.map(b => b.textContent), ['새 세션에서 개발 Spec 시작', '넘길 내용 고치기', '여기서 계속', '권한 양식준비 중']);
     assert.ok(!fin[0].disabled && fin[3].disabled === true);
-    assert.ok(panel.el.textContent.includes('개발 Spec 만들기 — 새 세션에서 시작하길 권해') && panel.el.textContent.includes('새 세션에 넘길 것'));
+    assert.ok(panel.el.textContent.includes('개발 Spec 만들기 — 새 세션에서 시작하길 권해요') && panel.el.textContent.includes('새 세션에 넘길 것'));
     find(panel.el, e => e.attrs['data-next-stay'])[0].click();  // [여기서 계속] 은 이 세션에서 이어 가기(되돌리는 단추가 남는다)
-    assert.ok(panel.el.textContent.includes('이 세션에서 계속 이어 가는 중이야') && find(panel.el, e => e.attrs['data-next-again']).length === 1);
+    assert.ok(panel.el.textContent.includes('이 세션에서 계속 이어 가는 중이에요') && find(panel.el, e => e.attrs['data-next-again']).length === 1);
     // 시안 G-09: 올릴 차례는 질문 한 줄 + 단추 둘, 건너뛰기는 같은 줄의 글자 단추. [아직] 은 카드를 접는다
     panel.update(Object.assign(sess('skill'), { flowSteps: [{ id: 'd', name: '올리고 검토 요청하기', kind: 'skill', skill: 'deliver', state: 'pending' }] }));
     assert.deepStrictEqual(buttons(), ['올리고 검토 요청', '아직', '이 단계 건너뛰기']);
-    assert.ok(panel.el.textContent.includes('GitHub에 올려서 검토 요청(PR)을 만들까?') && panel.el.textContent.includes('네 차례'));
+    assert.ok(panel.el.textContent.includes('GitHub에 올려서 검토 요청(PR)을 만들까요?') && panel.el.textContent.includes('답을 기다려요'));
     find(panel.el, e => e.attrs['data-ask-later'])[0].click();
     assert.deepStrictEqual(buttons(), ['올리고 검토 요청', '이 단계 건너뛰기']);
     // 질문이 떠 있으면 같은 일의 할 일 카드를 두지 않고, 승인을 기다리는 동안에도 두지 않는다(시안 G-10·13)
@@ -413,7 +413,7 @@ const cases = {
     const panel = ui.flowPanel();
     panel.update({ id: 's1', cwd: '/w', status: 'idle' }); await tick(); await tick();
     assert.deepStrictEqual(find(panel.el, e => e.attrs['data-flow']).map(e => e.attrs['data-flow']), ['srs']);
-    assert.ok(panel.el.textContent.includes('어떤 일이야?'));
+    assert.ok(panel.el.textContent.includes('어떤 일이에요?'));
     panel.destroy();
     // 갈래 데이터를 못 쓰면(503) 준비 안 됨으로 알린다
     const err = Object.assign(new Error('x'), { status: 503 });
@@ -456,17 +456,17 @@ const cases = {
     assert.deepStrictEqual(L.prLines({ number: 6, state: 'OPEN', checks: 'pass' }).map(l => l.state), ['ok', 'ok', 'wait']);
     assert.deepStrictEqual(L.prLines({ number: 6, state: 'MERGED', checks: 'fail' }).map(l => l.state), ['unk', 'unk', 'ok']);
     const named = L.prLines({ number: 6, state: 'OPEN', checks: 'fail', stepChecks: { 'doc-guard': 'pass', 'gitleaks': 'fail' } });
-    assert.deepStrictEqual(named.map(l => [l.state, l.text]), [['ok', '양식에 맞아'], ['fail', '비밀값이 발견됐어'], ['wait', named[2].text]]);
+    assert.deepStrictEqual(named.map(l => [l.state, l.text]), [['ok', '양식에 맞아요'], ['fail', '비밀값이 발견됐어요'], ['wait', named[2].text]]);
     assert.ok(L.prLines({ number: 6, state: 'OPEN', checks: 'pending' }, 'srs')[2].text.startsWith('요구사항 문서라 승인자 확인이 필요 · 기다리는 중'));
-    // 승인 기다림·끝남의 글(시안 G-10·12)
+    // 승인 기다림·끝났어요의 글(시안 G-10·12)
     const done = { phase: 'finished', flowPr: { number: 6, state: 'MERGED' }, nextFlow: { options: [{ flow: 'spec', name: '개발 Spec', label: '개발 Spec 만들기', ids: ['REQ-001'] }] } };
-    assert.strictEqual(L.finishedBand(done), 'PR #6이 합쳐졌어 — 다음은 개발 Spec');
-    assert.strictEqual(L.phaseLine(done), 'PR #6이 합쳐졌어. 다음 갈래는 개발 Spec이야');
-    assert.strictEqual(L.phaseSide(done), '끝 · PR #6 합쳐짐');
-    assert.strictEqual(L.phaseSide({ phase: 'approval', flowPr: { number: 7, state: 'OPEN' } }), '승인 기다림 · PR #7');
-    assert.strictEqual(L.phaseLine({ phase: 'approval' }), 'GitHub에 올렸어 · 팀 승인을 기다리는 중');
+    assert.strictEqual(L.finishedBand(done), 'PR #6이 합쳐졌어요 — 다음은 개발 Spec');
+    assert.strictEqual(L.phaseLine(done), 'PR #6이 합쳐졌어요. 다음 갈래는 개발 Spec이에요');
+    assert.strictEqual(L.phaseSide(done), '끝났어요 · PR #6 합쳐짐');
+    assert.strictEqual(L.phaseSide({ phase: 'approval', flowPr: { number: 7, state: 'OPEN' } }), '승인을 기다려요 · PR #7');
+    assert.strictEqual(L.phaseLine({ phase: 'approval' }), 'GitHub에 올렸어요 · 팀 승인을 기다리는 중');
     assert.strictEqual(L.finishedBand({ phase: 'approval' }), ''); assert.strictEqual(L.finishedBand({ phase: 'finished', flowPr: null }), '');
-    assert.strictEqual(L.phaseLine({ phase: 'finished', flowPr: { number: 3, state: 'MERGED' }, nextFlow: { options: [{ flow: 'config', name: '설정', label: '설정하기' }] } }), 'PR #3이 합쳐졌어. 다음 갈래는 설정이야');
+    assert.strictEqual(L.phaseLine({ phase: 'finished', flowPr: { number: 3, state: 'MERGED' }, nextFlow: { options: [{ flow: 'config', name: '설정', label: '설정하기' }] } }), 'PR #3이 합쳐졌어요. 다음 갈래는 설정이에요');
     assert.strictEqual(L.checksFailed({ flowPr: { checks: 'fail' } }), true); assert.strictEqual(L.checksFailed({ flowPr: { checks: 'pass' } }), false);
   },
   memory_of_pct_tokens_unknown_and_levels() {
@@ -485,8 +485,8 @@ const cases = {
   async dom_flow_cells_use_easy_words_and_review_adds_next_flow() {
     // 순서 칸은 스킬 명령이 아니라 단계의 plain·easy(데이터)로 쓰고, 확인 화면은 첫 칸 강조 + brief + 다음 갈래 칸을 더한다(G-05·06)
     const steps = [
-      { id: 'srs', name: 'SRS 쓰기', short: '쓰기', plain: '요구사항 쓰기', easy: 'AI가 몇 가지 물어봐', kind: 'skill', skill: 'srs' },
-      { id: 'deliver', name: '올리고 검토 요청하기', short: '올리기', plain: 'GitHub에 올리기', easy: '올리기 전에 너한테 물어', brief: '올리기 전에 물어봐', kind: 'skill', skill: 'deliver' },
+      { id: 'srs', name: 'SRS 쓰기', short: '쓰기', plain: '요구사항 쓰기', easy: 'AI가 몇 가지 물어봐요', kind: 'skill', skill: 'srs' },
+      { id: 'deliver', name: '올리고 검토 요청하기', short: '올리기', plain: 'GitHub에 올리기', easy: '올리기 전에 물어봐요', brief: '올리기 전에 물어봐요', kind: 'skill', skill: 'deliver' },
       { id: 'merge', name: '승인받고 합쳐지기 기다리기', short: '승인·합치기', kind: 'wait' }];
     const flows = { flows: [{ id: 'srs', name: '요구사항', steps, next: { srsColumn: { branches: { '개발': { flow: 'spec', label: '개발 Spec 만들기' }, '미정': { flow: null, label: 'x' } } } } },
                             { id: 'spec', name: '개발 Spec', steps: [] }], tools: [] };
@@ -495,17 +495,17 @@ const cases = {
     const pv = ui.flowPreview();
     pv.update({ cwd: '/w', flowId: 'srs' }); await tick(); await tick();
     const cells = (el) => find(el, e => (e.attrs['class'] || '').split(' ').includes('fs')).map(e => e.textContent);
-    assert.deepStrictEqual(cells(pv.el), ['1 요구사항 쓰기AI가 몇 가지 물어봐', '2 GitHub에 올리기올리기 전에 너한테 물어', '3 승인·합치기밖에서 일이 끝나길 기다려']);
+    assert.deepStrictEqual(cells(pv.el), ['1 요구사항 쓰기AI가 몇 가지 물어봐요', '2 GitHub에 올리기올리기 전에 물어봐요', '3 승인·합치기밖에서 일이 끝나길 기다려요']);
     assert.ok(!pv.el.textContent.includes('/harness:'));
     pv.destroy();
     const ch = ui.flowChooser();
     ch.update({ cwd: '/w', found: { id: 'srs', confident: true, reason: '요구사항을 더하는 일' }, selected: 'srs', userPicked: false, kindFlowId: '', kindName: '', ready: null, insist: false, onPick: () => {}, onKeep: () => {} });
     await tick(); await tick();
-    assert.deepStrictEqual(cells(ch.el), ['1 요구사항 쓰기이번 세션', '2 GitHub에 올리기올리기 전에 물어봐', '3 승인·합치기밖에서 일이 끝나길 기다려', '4 개발 Spec다음 세션']);
+    assert.deepStrictEqual(cells(ch.el), ['1 요구사항 쓰기이번 세션', '2 GitHub에 올리기올리기 전에 물어봐요', '3 승인·합치기밖에서 일이 끝나길 기다려요', '4 개발 Spec다음 세션']);
     assert.ok(find(ch.el, e => (e.attrs['class'] || '').split(' ').includes('now')).length === 1);
-    // 갈래 설명은 AI 말 한 줄(line)로 합쳐지고, 따로 "어떤 일이야?" 제목이나 "이 일은" 줄은 없다
-    assert.ok(ch.line.textContent.includes('이 일은 요구사항 갈래야.') && ch.line.textContent.includes('요구사항을 더하는 일'));
-    assert.ok(!ch.el.textContent.includes('어떤 일이야?') && !ch.el.textContent.includes('이 일은'));
+    // 갈래 설명은 AI 말 한 줄(line)로 합쳐지고, 따로 "어떤 일이에요?" 제목이나 "이 일은" 줄은 없다
+    assert.ok(ch.line.textContent.includes('이 일은 요구사항 갈래예요.') && ch.line.textContent.includes('요구사항을 더하는 일'));
+    assert.ok(!ch.el.textContent.includes('어떤 일이에요?') && !ch.el.textContent.includes('이 일은'));
     // 다른 갈래로 바꾸기는 아래 단추 줄(tail)에, 고르는 칸은 grid 에
     assert.ok(ch.tail.textContent.includes('다른 갈래로 바꾸기'));
     ch.destroy();
@@ -552,20 +552,20 @@ const cases = {
     assert.ok(text.includes('PR #4 · 검사 통과') && text.includes('이슈 #636'));
     // 시안 G-11: 검토 요청(PR) 칸 안에서는 큰 카드 없이 줄 하나("내가 승인할 PR #n …"). 머리와 문장이 붙어 나오지 않는다
     assert.ok(text.includes('내가 승인할 PR #') && !text.includes('내가 승인할 PR 1건') && !text.includes('건지금'));
-    // 숫자 타일(시안 G-11): 내 차례 / 일하는 중 / 이번 주 산출물, 승인 기다리는 PR 은 데이터를 받은 뒤에만 보인다
+    // 숫자 타일(시안 G-11): 답을 기다리는 일 / 일하는 중이에요 / 이번 주 산출물, 승인 기다리는 PR 은 데이터를 받은 뒤에만 보인다
     const tiles = find(root, e => (e.attrs['class'] || '').split(' ').includes('tile2'));
-    assert.deepStrictEqual(tiles.slice(0, 2).map(t => t.textContent), ['내 차례1', 'AI가 일하는 중1']);
+    assert.deepStrictEqual(tiles.slice(0, 2).map(t => t.textContent), ['답을 기다리는 일1', 'AI가 일하는 중1']);
     const weekTile = find(root, e => e.attrs['data-week-tile'])[0];
     assert.ok(weekTile && weekTile.textContent.startsWith('이번 주 산출물') && !text.includes('쉬는 중0'));
     const prTile = find(root, e => e.attrs['data-pr-tile'])[0];
     assert.ok(!prTile.hidden && prTile.textContent === '승인 기다리는 PR1');
-    // 내 차례 노랑 카드는 요청 화면으로 보낸다. 기억 %는 데이터가 없어 지어내지 않는다.
+    // 답을 기다리는 일 노랑 카드는 요청 화면으로 보낸다. 기억 %는 데이터가 없어 지어내지 않는다.
     const call = find(root, e => e.attrs['data-call'] === 'a')[0];
     assert.ok(call && call.textContent.includes('가서 승인하기'));
     assert.strictEqual(find(call, e => e.tag === 'a')[0].attrs.href, '/r/r1');
     const row = find(root, e => e.attrs['data-session'] === 'a')[0];
     assert.ok((row.attrs['class'] || '').includes('attn'));
-    assert.ok(row.textContent.includes('내 차례'));
+    assert.ok(row.textContent.includes('답을 기다려요'));
     assert.strictEqual(find(row, e => e.tag === 'li' && e.attrs['aria-current'] === 'step').length, 1);
     const unk = find(row, e => (e.attrs['class'] || '').includes('unk'))[0];
     assert.ok(unk.textContent === '?' && unk.attrs.title === '기억 사용량 확인 못 함');
@@ -580,11 +580,11 @@ const cases = {
     const root3 = h('div'); loadUI(k3).homeView(root3); await tick(); await tick();
     assert.ok(root3.textContent.includes('판정 불능 · gh 로그인 안 됨'));
     assert.ok(find(root3, e => e.attrs['data-pr-tile'])[0].textContent.includes('확인 못 함'));
-    // 내 차례가 없으면 노랑 카드가 없다
+    // 답을 기다리는 일가 없으면 노랑 카드가 없다
     const { kit: k4 } = makeKit({ 'GET /api/approvals': { state: 'no' } }, [sessions[1]]);
     const root4 = h('div'); loadUI(k4).homeView(root4); await tick(); await tick();
     assert.strictEqual(find(root4, e => e.attrs['data-call']).length, 0);
-    // 내 차례가 여러 건이어도 카드는 한 장(가장 오래 기다린 것) + "외 n건" 알약. 누르면 펼치고 다시 누르면 접는다. (#667)
+    // 답을 기다리는 일가 여러 건이어도 카드는 한 장(가장 오래 기다린 것) + "외 n건" 알약. 누르면 펼치고 다시 누르면 접는다. (#667)
     const many = [
       { id: 'n1', title: '새것', cwd: '/w/a', group: 'todo', pendingRequestIds: ['q1'], updatedAt: 300 },
       { id: 'n2', title: '가장 오래', cwd: '/w/b', group: 'todo', pendingRequestIds: ['q2'], updatedAt: 100 },
@@ -630,9 +630,9 @@ const cases = {
     // 세션이 있고 보낼 수 있으면 그 세션에 말을 보낸다
     find(rows[0], e => e.tag === 'button')[0].click(); await tick(); await tick();
     assert.strictEqual(sent.length, 1); assert.ok(sent[0].includes('#812') && sent[0].includes('자동 검사가 실패'));
-    // 내 차례로 세지만(홈 타일 숫자) 노랑 내 차례 카드는 없다 — 빨간 줄이 그 일을 한다
+    // 답을 기다리는 일로 세지만(홈 타일 숫자) 노랑 답을 기다리는 일 카드는 없다 — 빨간 줄이 그 일을 한다
     assert.strictEqual(find(root, e => e.attrs['data-call']).length, 0);
-    assert.strictEqual(find(root, e => (e.attrs['class'] || '').includes('tile2') && e.textContent.startsWith('내 차례'))[0].textContent.replace(/\D+/g, ''), '1');
+    assert.strictEqual(find(root, e => (e.attrs['class'] || '').includes('tile2') && e.textContent.startsWith('답을 기다리는 일'))[0].textContent.replace(/\D+/g, ''), '1');
     // 세션 표 칩은 "고쳐야 함"
     assert.strictEqual(find(find(root, e => e.attrs['data-session'] === 'a')[0], e => (e.attrs['class'] || '') === 'tag')[0].textContent, '고쳐야 함');
     // 기록을 못 읽으면 0건이 아니라 확인 못 함, 내 PR 을 못 읽으면 줄이 아니라 확인 못 함 줄
@@ -644,7 +644,7 @@ const cases = {
     assert.ok(tb2.textContent.includes('확인 못 함 · gh 로그인 안 됨') && !tb2.textContent.includes('0건') && tb2.attrs['class'].includes('unk'));
     const rows2 = find(root2, e => e.attrs['data-fix-pr']);
     assert.deepStrictEqual(rows2.map(e => e.attrs['data-fix-pr']), ['unknown']);
-    assert.ok(rows2[0].textContent.includes('? 확인 못 함 · ') && rows2[0].textContent.includes('내 PR 목록을 읽지 못했습니다') && !find(rows2[0], e => e.tag === 'button').length);
+    assert.ok(rows2[0].textContent.includes('? 확인하지 못했어요 · ') && rows2[0].textContent.includes('내 PR 목록을 읽지 못했습니다') && !find(rows2[0], e => e.tag === 'button').length);
     // 실패한 PR 이 없으면 줄이 없다. 열린 문제가 0건이면 "0건"
     const none = Object.assign({}, routes, { 'GET /api/my-prs': { state: 'ok', items: [mine.items[1]] }, 'GET /api/trouble': { projects: [{ ok: true, name: 'r' }], stats: { open: 0 } } });
     const { kit: k3 } = makeKit(none, sessions);
@@ -689,7 +689,7 @@ const cases = {
   },
   standard_kind_hint_and_srs_status_cell() {
     // 숫자 띠·큰 순서 알약은 단계 이름 끝 괄호 설명을 뗀 짧은 이름(시안 G-09·12), 전체는 title
-    assert.strictEqual(L.shortStepName('표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어)'), '표준 건 작업 시작하기');
+    assert.strictEqual(L.shortStepName('표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어요)'), '표준 건 작업 시작하기');
     assert.strictEqual(L.shortStepName('SRS 쓰기'), 'SRS 쓰기');
     assert.strictEqual(L.shortStepName('(괄호만)'), '(괄호만)');  // 다 지워지면 원래 이름
     // step.short(workflow.json)가 있으면 그것, 없으면 괄호만 뗀 이름
@@ -698,9 +698,9 @@ const cases = {
     const shortStep = { flowId: 'srs', flowSteps: [{ name: 'SRS 쓰기', short: '쓰기', state: 'done' }, { name: '올리고 검토 요청하기', short: '올리기', state: 'now' }, { name: '승인받고 합쳐지기 기다리기', short: '승인·합치기', state: 'todo' }], stepIndex: 1 };
     const shortCell = L.sessionStrip(shortStep, undefined).find(c => c.id === 'step');
     if (shortCell && shortCell.value !== '확인 못 함') { assert.strictEqual(shortCell.value, '2 / 3 올리기'); assert.strictEqual(shortCell.title, '올리고 검토 요청하기'); }
-    const longStep = { flowId: 'standard', flowSteps: [{ name: '표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어)', state: 'now' }, { name: '올리기', state: 'todo' }], stepIndex: 0 };
+    const longStep = { flowId: 'standard', flowSteps: [{ name: '표준 건 작업 시작하기(그 [DEV-xxx] 로, 작업 기록과 작업 공간을 자동으로 만들어요)', state: 'now' }, { name: '올리기', state: 'todo' }], stepIndex: 0 };
     const stepCell = L.sessionStrip(longStep, undefined).find(c => c.id === 'step');
-    if (stepCell && stepCell.value !== '확인 못 함') { assert.ok(!stepCell.value.includes('(')); assert.ok(stepCell.title.includes('자동으로 만들어)')); }
+    if (stepCell && stepCell.value !== '확인 못 함') { assert.ok(!stepCell.value.includes('(')); assert.ok(stepCell.title.includes('자동으로 만들어요)')); }
     // 설정 수(setup)는 표준 건을 포함한다: 화면은 표준을 따로 세고 설정은 그만큼 뺀다(#718)
     const v = L.devReadyView({ state: 'yes', specReady: 1, setup: 3, standard: 2, needSpec: [], needSpecCount: 0 });
     assert.deepStrictEqual(L.kindHint('config', v), { tone: '', text: '설정 건 1개' });
@@ -749,7 +749,7 @@ const cases = {
     const ch = ui.flowChooser();
     ch.update(base); await tick(); await tick();
     // AI 와 다르면 갈래 카드 대신 묻는 카드: AI 이유와 두 버튼. 두 후보 고르기 칩은 없다.
-    assert.ok(ch.el.textContent.includes('AI 는 개발 Spec 부터 하자고 해 — Spec 이 없어서 먼저 해야 해'));
+    assert.ok(ch.el.textContent.includes('AI 는 개발 Spec 부터 하자고 해요 — Spec 이 없어서 먼저 해야 해'));
     assert.strictEqual(find(ch.el, e => e.attrs['data-flow']).length, 0);
     assert.strictEqual(find(ch.el, e => e.attrs['data-ask-block']).length, 0);
     const sw = find(ch.el, e => e.attrs['data-ask-switch'])[0], keep = find(ch.el, e => e.attrs['data-ask-keep'])[0];
@@ -758,7 +758,7 @@ const cases = {
     keep.click(); assert.strictEqual(keeps.length, 1);
     // Spec 없음이 확실하고 "그래도" 를 눌렀으면 막는 글
     ch.update(Object.assign({}, base, { insist: true })); await tick(); await tick();
-    assert.ok(find(ch.el, e => e.attrs['data-ask-block'])[0].textContent.includes('Spec 없이 개발은 시작할 수 없어. PR 검사(spec-ready)에서도 막혀'));
+    assert.ok(find(ch.el, e => e.attrs['data-ask-block'])[0].textContent.includes('Spec 없이 개발은 시작할 수 없어요. PR 검사(spec-ready)에서도 막혀요'));
     // 상태를 모르면(ready null) 막는 글 없이 추천 카드만
     ch.update(Object.assign({}, base, { insist: true, ready: null })); await tick(); await tick();
     assert.strictEqual(find(ch.el, e => e.attrs['data-ask-block']).length, 0);
@@ -781,12 +781,12 @@ const cases = {
     kit.startNew = t => went.push(t); kit.go = p => went.push('go:' + p);
     const root = h('div');
     loadUI(kit).homeView(root); await tick(); await tick();
-    assert.ok(root.textContent.includes('아직 시작한 작업이 없어'));
+    assert.ok(root.textContent.includes('아직 시작한 작업이 없어요'));
     // 자주 하는 일 6개 + 숫자 타일 3개(산출물 수는 구할 수 없어 확인 못 함)
     const kinds = find(root, e => e.attrs['data-kind']);
     assert.deepStrictEqual(kinds.map(k => k.attrs['data-kind']), ['요구사항정의서', '개발 Spec', '사용자 매뉴얼', 'CTS 관리대장', 'Role 정리', '개발하기']);
     const tiles = find(root, e => (e.attrs['class'] || '').split(' ').includes('tile2'));
-    assert.deepStrictEqual(tiles.map(t => t.textContent), ['내 차례0', '일하는 중0', '만든 산출물0']);  // 시안 G-04 는 세 타일 모두 0
+    assert.deepStrictEqual(tiles.map(t => t.textContent), ['답을 기다리는 일0', '일하는 중0', '만든 산출물0']);  // 시안 G-04 는 세 타일 모두 0
     kinds[0].click();
     assert.ok(went[0].includes('요구사항정의서'));
     // 입력창에 적은 글은 새 작업으로 넘어간다
@@ -925,7 +925,7 @@ const cases = {
     }
     const a = await run([{ path: 'docs/SRS_v0.1.md', kind: 'md', size: 9, mtime: now - 5 }, { path: 'out/a.pdf', kind: 'pdf', size: 1, mtime: now - 4 }]);
     assert.deepStrictEqual(a.rows, []); assert.strictEqual(a.week, 0);
-    assert.ok(a.text.includes('아직 양식으로 뽑은 산출물이 없어.') && !a.text.includes('SRS_v0.1'));
+    assert.ok(a.text.includes('아직 양식으로 뽑은 산출물이 없어요.') && !a.text.includes('SRS_v0.1'));
     const b = await run([{ path: 'docs/SRS_v0.1.md', kind: 'md', size: 9, mtime: now - 1 }, { path: 'out/BW_Backlog_v0.1.xlsx', kind: 'xlsx', size: 9, mtime: now - 3 }, { path: 'out/m.pptx', kind: 'pptx', size: 9, mtime: now - 2 }]);
     assert.deepStrictEqual(b.rows, ['out/m.pptx', 'out/BW_Backlog_v0.1.xlsx']); assert.strictEqual(b.week, 2);
     process.exit(0);
@@ -937,7 +937,7 @@ const cases = {
     window.BHMarkdown = { render: t => h('div', { text: t }) };
     const root = h('div');
     const view = loadUI(kit).docsPage(root); for (let i = 0; i < 5; i++) await tick();
-    assert.ok(root.textContent.includes('아직 양식으로 뽑은 산출물이 없어.'));
+    assert.ok(root.textContent.includes('아직 양식으로 뽑은 산출물이 없어요.'));
     assert.ok(!root.textContent.includes('SRS_v0.1') && !root.textContent.includes('notes.txt') && find(root, e => (e.attrs['class'] || '').includes('drow')).length === 0);
     assert.ok(!calls.some(c => /preview/.test(c[1])));
     view.destroy();
@@ -960,7 +960,7 @@ const cases = {
     const btn = txt => find(root, e => e.tag === 'button' && e.textContent === txt)[0];
     const sentTo = () => calls.filter(c => c[0] === 'POST' && c[1] === '/api/sessions/s1/messages');
     // 가장 최근 산출물이 고객 양식 xlsx 이면 목록 없이 결과 화면(시안 G-15): 제목 · 원본 → 양식 · 칸 수 · 넓은 미리보기 · 빈 칸 안내
-    for (const need of ['산출물 · 고객 양식', '고객 양식으로 뽑았어', '요구사항정의서 v0.1 → 고객사 Backlog 양식(xlsx)', 'BW_Backlog_v0.1.xlsx', '18000B', '양식 칸 6개 중 5개 채움',
+    for (const need of ['산출물 · 고객 양식', '고객 양식으로 뽑았어요', '요구사항정의서 v0.1 → 고객사 Backlog 양식(xlsx)', 'BW_Backlog_v0.1.xlsx', '18000B', '양식 칸 6개 중 5개 채움',
       '미리보기 · Backlog 시트', '비어 있는 칸 1개', 'Source 칸이 비어 있어', '폴더에서 보기', '내려받기', '문서 목록 보기']) assert.ok(root.textContent.includes(need), need);
     assert.ok(!root.textContent.includes('내가 만든 문서') && find(root, e => (e.attrs['class'] || '').includes('dlist')).length === 0);
     assert.strictEqual(find(root, e => (e.attrs['class'] || '') === 'sheet-tabs').length, 0);  // 시트가 하나면 시트 탭은 없다
@@ -978,7 +978,7 @@ const cases = {
     // '문서 목록 보기' → 목록에는 양식 파일(xlsx·pptx·docx)만. md·기록 폴더 파일·pdf 는 없다(#1067)
     btn('문서 목록 보기').click(); for (let i = 0; i < 4; i++) await tick();
     for (const need of ['내가 만든 문서', '고객 양식', 'BW_Backlog', 'v0.1 · xlsx', '매뉴얼', '검토 중', '안 올림', '이전 판 1개', '안 올림 = 내 PC에만 · 검토 중 = 승인 기다림 · 합쳐짐 = 팀 공용본']) assert.ok(root.textContent.includes(need), need);
-    for (const no of ['요구사항 · 설계', '기록', 'SRS', 'log.md', 'note.pdf', '고객 양식으로 뽑았어', '확인 못 함 = 알 수 없음']) assert.ok(!root.textContent.includes(no), no);
+    for (const no of ['요구사항 · 설계', '기록', 'SRS', 'log.md', 'note.pdf', '고객 양식으로 뽑았어요', '확인 못 함 = 알 수 없음']) assert.ok(!root.textContent.includes(no), no);
     assert.deepStrictEqual(find(root, e => (e.attrs['class'] || '').includes('drow') && !(e.attrs['class'] || '').includes('sub')).map(e => e.attrs['data-path']).sort(), ['out/BW_Backlog_v0.1.xlsx', 'out/매뉴얼_v0.1.pptx']);
     assert.ok(!btn('xlsx로 뽑기') && !btn('열기'));
     // 목록에서 xlsx 를 고르면 고객 양식 결과 카드(뽑기 버튼 없음), 목록은 그대로
@@ -1024,17 +1024,17 @@ const cases = {
     assert.strictEqual(find(p.el, e => e.tag === 'button').length, 0);  // 스스로 하는 줄이라 버튼이 없다(잘못됐을 때만 다시 하기)
     p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'done' }, { id: 'version', state: 'fail' }] });
     assert.deepStrictEqual(find(p.el, e => e.tag === 'button').map(b => b.textContent), ['다시 하기']);
-    p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'unknown', reason: '원격이 없어' }, { id: 'version', state: 'fail', reason: '더 새 판이 있어(0.10.9)' }] });
+    p.update({ id: 's1', canSend: true, startChecks: [{ id: 'sync', state: 'unknown', reason: '원격이 없어' }, { id: 'version', state: 'fail', reason: '더 새 판이 있어요(0.10.9)' }] });
     assert.deepStrictEqual(find(p.el, e => e.attrs['data-check']).map(e => e.attrs['data-check'] + ':' + e.attrs['class']), ['sync:crow unk', 'version:crow fail']);
-    assert.ok(p.el.textContent.includes('확인 못 함') && p.el.textContent.includes('원격이 없어') && p.el.textContent.includes('다시 필요') && p.el.textContent.includes('더 새 판이 있어(0.10.9)'));
+    assert.ok(p.el.textContent.includes('확인 못 함') && p.el.textContent.includes('원격이 없어') && p.el.textContent.includes('다시 필요') && p.el.textContent.includes('더 새 판이 있어요(0.10.9)'));
     p.update({ id: 's1', startChecks: [] }); assert.ok(p.el.hidden);
     p.destroy();
-    // 검사 실패는 ✕ 막힘, 결과를 못 읽으면 ? 확인 못 함, 통과·진행 중에는 둘 다 없다
+    // 검사 실패는 ✕ 막혔어요, 결과를 못 읽으면 ? 확인하지 못했어요, 통과·진행 중에는 둘 다 없다
     const card = checks => ui.prCard({ flowPr: { number: 6, state: 'OPEN', title: 't', checks } });
     const fail = card('fail'), unk = card('none');
-    assert.ok(fail.attrs['class'].includes('blocked') && fail.textContent.includes('✕ 막힘') && !fail.textContent.includes('? 확인 못 함'));
-    assert.ok(unk.attrs['class'].includes('unsure') && unk.textContent.includes('? 확인 못 함') && unk.textContent.includes('통과도 실패도 아니야'));
-    for (const c of ['pass', 'pending']) { const ok = card(c); assert.ok(!/blocked|unsure/.test(ok.attrs['class']) && !ok.textContent.includes('✕ 막힘') && !ok.textContent.includes('? 확인 못 함'), c); }
+    assert.ok(fail.attrs['class'].includes('blocked') && fail.textContent.includes('✕ 막혔어요') && !fail.textContent.includes('? 확인하지 못했어요'));
+    assert.ok(unk.attrs['class'].includes('unsure') && unk.textContent.includes('? 확인하지 못했어요') && unk.textContent.includes('통과도 실패도 아니에요'));
+    for (const c of ['pass', 'pending']) { const ok = card(c); assert.ok(!/blocked|unsure/.test(ok.attrs['class']) && !ok.textContent.includes('✕ 막혔어요') && !ok.textContent.includes('? 확인하지 못했어요'), c); }
   },
   api_notice_words_and_times() {
     const A = require(path.join(dir, 'api-notice.js'));
@@ -1057,7 +1057,7 @@ const cases = {
       n = A.notice(Object.assign({ apiIssue: { kind: k } }, idle), now);
       assert.strictEqual(n.kind, 'unknown'); assert.ok(n.title.includes('알 수 없는 오류') && n.raw === '(원문 없음)' && n.sideTone === 'err');
     }
-    // 재시도: 일하는 중에만, n/max 와 다음 시도 초
+    // 재시도: 일하는 중이에요에만, n/max 와 다음 시도 초
     const retry = { kind: 'retry', attempt: 3, max: 10, delayMs: 2060 };
     n = A.notice({ status: 'running', apiIssue: retry }, now);
     assert.ok(n.title.includes('다시 시도하는 중 3/10') && n.body.includes('3초 뒤') && n.sideTone === '');
@@ -1066,7 +1066,7 @@ const cases = {
     n = A.notice({ status: 'idle', rateLimit: { status: 'rejected', type: 'five_hour', resetsAt: sec(at) } }, now);
     assert.ok(n.kind === 'limit' && n.body.includes('오늘 15:05') && n.side.includes('오늘 15:05') && n.sideTone === 'err');
     n = A.notice({ status: 'idle', apiIssue: { kind: 'limit', status: 429 } }, now);
-    assert.ok(n.kind === 'limit' && n.body.includes('확인 못 했어'));
+    assert.ok(n.kind === 'limit' && n.body.includes('확인하지 못했어요'));
     n = A.notice({ status: 'running', rateLimit: { status: 'allowed_warning', type: 'seven_day', utilization: 0.99, resetsAt: sec(later) } }, now);
     assert.ok(n.kind === 'limit_warn' && n.tone === 'warn' && n.body.includes('7일 사용량이 99%') && n.body.includes('11월 12일 08:30') && n.side === '');
     assert.strictEqual(A.notice({ status: 'idle', rateLimit: { status: 'allowed_warning', resetsAt: sec(now) - 60 } }, now), null);
@@ -1081,12 +1081,31 @@ const cases = {
     assert.strictEqual(N.pickBubble(items, { 'req:a': true }).id, 'blk:s:blocked:1');  // 닫은 건 건너뛴다
     assert.strictEqual(N.pickBubble(items, { 'req:a': true, 'blk:s:blocked:1': true, 'api:s:1': true }), null);
     assert.strictEqual(N.pickBubble([], {}), null);
+    // 알림 종류 → 역할 색 · 이름표 · 아이콘(말풍선·팝업·배지가 같이 쓴다). 답을 기다림 = 알림, 승인·계획 = 경고, 막힘·검사 실패·API 오류 = 오류, 확인 못 함 = 보라, 합쳐짐 = 성공, 새 판 = 새 소식
+    const tones = k => N.kindMeta(k).tone;
+    assert.deepStrictEqual(['question', 'elicit', 'req', 'turn'].map(tones), ['ask', 'ask', 'ask', 'ask']);
+    assert.deepStrictEqual(['perm', 'plan'].map(tones), ['warn', 'warn']);
+    assert.deepStrictEqual(['fix', 'blocked', 'api'].map(tones), ['err', 'err', 'err']);
+    assert.deepStrictEqual(['cannot', 'merged', 'ver'].map(tones), ['unk', 'ok', 'info']);
+    assert.deepStrictEqual(N.kindMeta('zzz'), { tone: 'info', word: '알림', icon: 'bell' });  // 모르는 종류에 급한 색을 지어내지 않는다
+    assert.deepStrictEqual(N.kindMeta('toString'), N.kindMeta('zzz'));  // 물려받은 이름에 속지 않는다
+    ['question', 'elicit', 'req', 'turn', 'perm', 'plan', 'fix', 'blocked', 'api', 'cannot', 'merged', 'ver'].forEach(k => { const m = N.kindMeta(k); assert.ok(m.word && m.icon && !/답을 기다리는 일/.test(m.word), k); });  // 색만으로 전하지 않게 이름표·아이콘이 늘 있다
+    assert.strictEqual(N.bubbleLine({ kind: 'perm', text: '권한 일 · 파일 만들기' }, 3), '승인 요청 · 권한 일 · 파일 만들기 외 2건');
+    assert.strictEqual(N.bubbleLine({ kind: 'turn', text: '질문 일' }, 1), '답을 기다려요 · 질문 일');
+    assert.strictEqual(N.bubbleLine({ kind: 'ver', text: '' }, 1), '새 판');
+    assert.strictEqual(N.bubbleLine(null, 3), '');
+    assert.strictEqual(N.apiLine('auth'), '로그인이 풀렸어요');
+    assert.strictEqual(N.apiLine('mystery'), '알 수 없는 오류예요');  // 모르는 오류를 아는 오류로 뭉개지 않는다
+    // 허락 단추 색: 지우는 일만 위험(빨강), 그 밖은 승인(초록)
+    assert.strictEqual(N.allowRole({ toolInput: { command: 'touch a' } }), 'ok');
+    assert.strictEqual(N.allowRole({ risk: 'irreversible', toolInput: { command: 'rm -rf x' } }), 'err');
+    assert.strictEqual(N.allowRole({ risk: 'irreversible', toolInput: { command: 'git push origin main' } }), 'ok');
     // 더는 없는 알림의 닫은 표시는 잊어 같은 일이 다시 생기면 다시 뜨고, 화면 따라 있다 없다 하는 알림(ver·merged)은 지우지 않는다
     assert.deepStrictEqual(N.pruneDismissed({ 'req:a': true, 'req:gone': true, 'ver:1': true, 'merged:s': true }, items), { 'req:a': true, 'ver:1': true, 'merged:s': true });
     // 승인 단추 말: 기본 / 지우기 / 올리기 (승인 화면과 같다)
-    assert.deepStrictEqual(N.permVerbs({ toolInput: { command: 'touch a' } }), ['이번만 허락', '하지 마']);
-    assert.deepStrictEqual(N.permVerbs({ risk: 'irreversible', toolInput: { command: 'rm -rf x' } }), ['이번만 지워', '지우지 마']);
-    assert.deepStrictEqual(N.permVerbs({ risk: 'irreversible', toolInput: { command: 'git push origin main' } }), ['이번만 올려', '올리지 마']);
+    assert.deepStrictEqual(N.permVerbs({ toolInput: { command: 'touch a' } }), ['이번만 허락', '하지 않기']);
+    assert.deepStrictEqual(N.permVerbs({ risk: 'irreversible', toolInput: { command: 'rm -rf x' } }), ['이번만 지우기', '지우지 않기']);
+    assert.deepStrictEqual(N.permVerbs({ risk: 'irreversible', toolInput: { command: 'git push origin main' } }), ['이번만 올리기', '올리지 않기']);
     assert.strictEqual(N.canAllowSession({ risk: 'irreversible' }), false);
     assert.strictEqual(N.canAllowSession({ permissionSuggestions: [] }), false);
     assert.strictEqual(N.canAllowSession({ toolInput: {} }), true);
@@ -1097,8 +1116,8 @@ const cases = {
     const now = new Date(2026, 10, 10, 9, 0).getTime(), sec = ms => Math.floor(ms / 1000);
     const at = sec(new Date(2026, 10, 10, 15, 5).getTime()), later = sec(new Date(2026, 10, 12, 8, 30).getTime());
     let v = N.limitView([], now, false);
-    assert.ok(v.unknown && v.text === '한도 알 수 없어' && !v.text.includes('%') && v.title.includes('0% 라는 뜻이 아니야'));
-    assert.ok(N.limitView(undefined, now, true).title.includes('읽지 못했어'));
+    assert.ok(v.unknown && v.text === '한도 알 수 없음' && !v.text.includes('%') && v.title.includes('0% 라는 뜻이 아니에요'));
+    assert.ok(N.limitView(undefined, now, true).title.includes('읽지 못했어요'));
     // 값이 있으면 종류별로: 쓴 비율 · 풀리는 시각, 경고·참은 모양(⚠ ✕)이 붙는다
     v = N.limitView([{ type: 'five_hour', status: 'allowed', utilization: 0.42, resetsAt: at, t: sec(now) - 60 },
       { type: 'seven_day', status: 'allowed_warning', utilization: 0.91, resetsAt: later, t: sec(now) - 3600 }], now);
@@ -1110,9 +1129,9 @@ const cases = {
     assert.ok(v.chips[0].tone === 'err' && v.chips[0].text.startsWith('✕ ') && v.chips[0].title.includes('한도가 찼어'));
     // 쓴 비율을 안 알려 준 값은 ? — 퍼센트를 지어내지 않는다
     v = N.limitView([{ type: 'five_hour', status: 'allowed', utilization: null, resetsAt: at, t: sec(now) }], now);
-    assert.strictEqual(v.chips[0].text, '5시간 ? · 15:05'); assert.ok(v.chips[0].title.includes('알려 주지 않았어') && !/\d%/.test(v.text));
+    assert.strictEqual(v.chips[0].text, '5시간 ? · 15:05'); assert.ok(v.chips[0].title.includes('알려 주지 않았어요') && !/\d%/.test(v.text));
     v = N.limitView([{ type: 'five_hour', status: 'mystery', utilization: 0.1, resetsAt: at, t: sec(now) }], now);
-    assert.ok(v.chips[0].tone === 'unk' && v.chips[0].title.includes('상태를 몰라(mystery)'));
+    assert.ok(v.chips[0].tone === 'unk' && v.chips[0].title.includes('상태를 몰라요(mystery)'));
     // 풀릴 시각이 지난 값은 지금 쓴 비율이 아니라서 버린다(그것뿐이면 알 수 없음)
     assert.ok(N.limitView([{ type: 'five_hour', status: 'allowed', utilization: 0.9, resetsAt: sec(now) - 60, t: sec(now) - 7200 }], now).unknown);
     // 단위 방어: 0~1 은 비율, 1 초과 100 이하는 이미 퍼센트, 그 밖(음수·100 초과·숫자 아님)은 ?
@@ -1142,7 +1161,7 @@ const cases = {
     assert.deepStrictEqual(ev(undefined, Object.assign({}, base, { group: 'todo' })), []);  // 비교 기준이 없으면(첫 목록) 무알림
     // todo 로 새로 들어옴 / 새 요청(질문·승인) — 각각 한 번, 끈 스위치와 보이는 탭은 무알림
     let e = ev(base, Object.assign({}, base, { group: 'todo' }));
-    assert.strictEqual(e.length, 1); assert.strictEqual(e[0].kind, 'turn'); assert.strictEqual(e[0].title, '내 차례야 · 구매오더');
+    assert.strictEqual(e.length, 1); assert.strictEqual(e[0].kind, 'turn'); assert.strictEqual(e[0].title, '답을 기다려요 · 구매오더');
     assert.strictEqual(e[0].body, '다음 단계'); assert.strictEqual(e[0].path, '/s/s1');
     e = ev(base, Object.assign({}, base, { group: 'todo', pendingRequestIds: ['q1'] }));
     assert.strictEqual(e.length, 1); assert.strictEqual(e[0].body, '질문'); assert.strictEqual(e[0].path, '/r/q1'); assert.ok(e[0].tag.includes('s1') && e[0].tag.includes('q1'));
@@ -1153,13 +1172,13 @@ const cases = {
     assert.deepStrictEqual(ev(base, Object.assign({}, base, { group: 'todo' }), on, { visible: true }), []);
     // 새 block: 시각이 직전보다 새로울 때만. cannot_check 는 다른 제목
     const b1 = Object.assign({}, base, { lastBlock: { t: 10, kind: 'blocked' } });
-    e = ev(base, b1); assert.strictEqual(e.length, 1); assert.strictEqual(e[0].title, '막혔어 · 구매오더'); assert.strictEqual(e[0].path, '/s/s1');
+    e = ev(base, b1); assert.strictEqual(e.length, 1); assert.strictEqual(e[0].title, '막혔어요 · 구매오더'); assert.strictEqual(e[0].path, '/s/s1');
     assert.deepStrictEqual(ev(b1, Object.assign({}, b1)), []);
-    e = ev(b1, Object.assign({}, base, { lastBlock: { t: 11, kind: 'cannot_check' } })); assert.strictEqual(e[0].title, '확인 못 함 · 구매오더');
+    e = ev(b1, Object.assign({}, base, { lastBlock: { t: 11, kind: 'cannot_check' } })); assert.strictEqual(e[0].title, '확인하지 못했어요 · 구매오더');
     assert.deepStrictEqual(ev(base, b1, { turn: true, blocked: false, done: true }), []);
-    // running -> idle 은 끝남 한 번. running -> todo 는 내 차례가 대신 나가 겹치지 않는다
+    // running -> idle 은 끝났어요 한 번. running -> todo 는 답을 기다리는 일가 대신 나가 겹치지 않는다
     const run = Object.assign({}, base, { group: 'running' });
-    e = ev(run, base); assert.strictEqual(e.length, 1); assert.strictEqual(e[0].title, 'AI가 끝냈어 · 구매오더');
+    e = ev(run, base); assert.strictEqual(e.length, 1); assert.strictEqual(e[0].title, 'AI가 끝냈어요 · 구매오더');
     e = ev(run, Object.assign({}, base, { group: 'todo' })); assert.deepStrictEqual(e.map(x => x.kind), ['turn']);
     e = ev(run, Object.assign({}, base, { group: 'todo' }), { turn: false, blocked: false, done: true }); assert.deepStrictEqual(e.map(x => x.kind), ['done']);
     assert.deepStrictEqual(ev(base, run), []);  // 시작은 알리지 않는다
@@ -1471,32 +1490,32 @@ def test_office_bundle_supports_pip():
 
 
 def test_post_home_field_memo_layout():
-    # Post 오늘 화면 장면 칸(#1056, 시안 C): 사무실 장면이 틀 안에 폭 전체로 보이고 그 위에 내 차례 메모가 뜬다. 나머지(덱·숫자 칸·표·범례·팀 줄·띠·배지)는 그대로
+    # Post 오늘 화면 장면 칸(#1056, 시안 C): 사무실 장면이 틀 안에 폭 전체로 보이고 그 위에 답을 기다리는 일 메모가 뜬다. 나머지(덱·숫자 칸·표·범례·팀 줄·띠·배지)는 그대로
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
     for needle in ("po-memo", "po-stagew", "paintMemo()", "text: '다음'", "세션으로", "cardAct(it, false)", "cardAct(it, true)"):
         assert needle in home
-    # 메모 자리: 번들의 onFocus 좌표를 받고, 보여 주는 항목이 바뀌면 scene.focus(id). 옛 번들(focus 없음)도 동작
-    assert "onFocus: onFocus" in home and "typeof sc.focus === 'function'" in home and "sc.focus(id)" in home
+    # 메모 자리: 번들의 onFocus 좌표를 받고, 볼 사람이 바뀌면 scene.focus(세션 id | null — 장면이 스스로 고름). 옛 번들(focus 없음)도 동작
+    assert "onFocus: onFocus" in home and "typeof sc.focus === 'function'" in home and "sc.focus(want)" in home
     assert "matchMedia(NARROW)" in home and "(max-width: 760px)" in home
-    # 장면 칸 밖은 그대로: 덱·숫자 카드 줄·Sauce 와 같은 홈 표·범례·팀 요약 줄
-    for keep in ("paintDeck()", "tiles2 po-tiles", "po-legend", "po-teams", "네 답을 기다리는 일이 "):
+    # 장면 칸 밖: 덱·팀 요약 줄은 그대로. 범례는 숫자를 붙인 정리 줄(po-sum)이 됐고, 숫자 카드 줄·인사 문장은 없앴다(요약 정리 — test_cozy_summary_one_place)
+    for keep in ("paintDeck()", "po-sum", "po-teams"):
         assert keep in home
     # 내 세션(#1065): Post 는 두 단 목록, 위쪽 띠·strip 은 없다. Sauce 표는 그대로
-    for need in ("sessionsPanel(list)", "po-mine", "po-kyul", "po-stc", "po-ava", "L.barSteps(s)", "L.stepShort(", "'정해진 갈래 없음'", "'내 세션 ' + list.length + '개'"):
+    for need in ("sessionsPanel(list)", "po-mine", "po-kyul", "po-stc", "PS.avatar(s.id, st, { size: 'sm', name: name })", "L.barSteps(s)", "L.stepShort(", "'정해진 갈래 없음'", "text: '내 세션' }"):
         assert need in home
     assert "appendChild(HK.homeTable(" not in home and "po-strip" not in home and "표로 보기" not in home
-    for chip in ("내 차례", "일하는 중", "승인 기다림", "쉬는 중", "끝남", "확인 못 함", "막힘"):
-        assert f"'{chip}'" in home
+    # 칩 글은 상태 이름 한 벌(PS.LABEL = 번들 LABEL)을 쓴다 — 칩만 따로 두던 ST_TEXT(「내 차례」·「끝남」 …)는 없앴다
+    assert "var ST_TEXT" not in home and "ST_TEXT[" not in home and "text: PS.LABEL[state] || ''" in home
     flow_ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
     assert "function homeTable(list)" in flow_ui and "['작업', '단계', '번호', '기억', '상태']" in flow_ui  # Sauce 홈 표
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "function attachScene(host, extra)" in app and "Object.assign({ list: sceneList" in app and "onFocus: function (f)" in app
     assert "scene: function () { return postScene; }" in app
-    assert "prail-badge" in app and "prail-dot" not in app and "nb-chip" not in app  # 위쪽 띠(말풍선)와 레일 숫자 배지는 그대로
+    assert "prail-badge" in app and "prail-dot" not in app and "nb-chip" not in app  # 위쪽 띠(말풍선)와 레일 표시는 그대로(표시는 숫자 없는 점이 됐다)
     scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
     assert "office.attach(host, opts)" in scene and "typeof o.focus === 'function'" in scene and "focus: function (id)" in scene
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
-    for needle in (".po-memo", ".po-memo.is-flip::before", ".po-stagew.is-office", "@media (max-width: 760px)", ".po-tiles .tile2", ".po-legend", ".po-teams"):
+    for needle in (".po-memo", ".po-memo.is-flip::before", ".po-stagew.is-office", "@media (max-width: 760px)", ".po-tiles .tile2", ".po-sum", ".po-teams"):
         assert needle in css
     for need in (".po-kyul", ".po-kyulc", ".po-stc-blocked", "ul.po-mine", "columns: 2", "columns: 1", ".po-memo.is-loose::before", ".po-stagew:has(.bh-office-away) .po-memo"):
         assert need in css  # 두 단·1100px 이하 한 단·결재란 자리·꼬리 없는 메모·작은 창(PiP) 중 메모 숨김
@@ -1565,9 +1584,9 @@ def test_post_logic_person_state_station():
     assert all(x in out["who"].split(",") for x in out["p"])
     # 가이드 6.3 의 해시(h = h*31 + 문자코드, 부호 없는 32비트)와 같은 값: 'a' = 97 % 7 = 6 → kid
     assert out["p"][0] == "kid" and out["p"][3] == "mint"
-    # 6.2: 내 차례 > 막힘 > 확인 못 함 > 일하는 중 > 승인 기다림 > 끝 > 쉬는 중. 일하는 중인 세션은 대기 요청이 있어도 내 차례다(groupOf 가 먼저).
+    # 6.2: 답을 기다리는 일 > 막힘 > 확인 못 함 > 일하는 중이에요 > 승인 기다림 > 끝 > 쉬는 중이에요. 일하는 중이에요인 세션은 대기 요청이 있어도 답을 기다리는 일다(groupOf 가 먼저).
     assert out["states"] == ["turn", "run", "blocked", "unk", "wait", "done", "done", "idle", "turn", "turn", "done", "done"]
-    # 끝난 세션은 PR 이 열려 있어도 끝남이다 — 승인 기다림(일하는 중 칸)에 넣지 않는다(#1059)
+    # 끝난 세션은 PR 이 열려 있어도 끝났어요이다 — 승인 기다림(일하는 중이에요 칸)에 넣지 않는다(#1059)
     assert out["states"][10] == "done" and out["states"][4] == "wait"
     # 6.1: 합쳐짐 4 · 검토 3 · 개발 2 · 설계 1 · 쓰기 0 · 갈래 없음 2
     assert out["stations"] == [2, 0, 0, 1, 2, 2, 2, 2, 3, 3, 0, 4, 4, 3, 2]
@@ -1582,9 +1601,9 @@ out.filters = P.FILTERS.map(f => f.id).join(',');
 const states = ['turn', 'blocked', 'unk', 'run', 'wait', 'idle', 'done', 'turn'];
 out.counts = P.filterCounts(states);
 out.match = P.FILTERS.map(f => states.map(s => P.filterMatch(f.id, s) ? 1 : 0).join(''));
-out.status = ['✕ 막힘 · 고친 뒤 이어서', '? 확인 못 함 · 검사를 못 했어', '내 차례 · 승인하기', '', null].map(P.statusText);
+out.status = ['✕ 막혔어요 · 고친 뒤 이어서', '? 확인하지 못했어요 · 검사를 못 했어요', '답을 기다려요 · 승인하기', '', null].map(P.statusText);
 out.here = [[0, 'srs'], [1, 'spec'], [2, 'config'], [2, ''], [2, undefined], [3, 'dev'], [4, 'srs'], [9, 'dev'], [-2, 'srs-export']].map(a => P.hereTitle(a[0], a[1]));
-out.lines = P.STATES.map(P.hereLine);
+out.noHere = [typeof P.hereLine, typeof P.HERE];
 const cell = (id, value, tone) => ({ id, label: id === 'progress' ? 'AI 진행' : id, value, tone: tone || '' });
 out.info = P.infoRow([cell('step', '1 / 3 쓰기', 'g'), cell('req', 'REQ-007'), cell('pr', 'PR #301', 'w'), cell('progress', '40%')], 'SRS 쓰기').map(c => [c.label, c.value, c.tone]);
 out.infoEmpty = P.infoRow([], '').map(c => c.value).join('|');
@@ -1594,6 +1613,7 @@ out.sub = P.sealSub(new Date(2026, 10, 7), '리뷰 룸'); out.subNone = P.sealSu
 out.desk = [['permission', 1, 'spec'], ['plan', 1, 'spec'], ['question', 1, 'spec'], ['elicitation', 4, 'spec'], ['question', 2, 'fix'], ['question', 2, ''], ['question', 3, 'dev']].map(a => P.sealDesk(a[0], a[1], a[2]));
 out.clerk = [P.clerkLine('permission', 0), P.clerkLine('plan', 0), P.clerkLine('question', 0, 'srs'), P.clerkLine('elicitation', 2, 'standard'), P.clerkLine('question', 2, ''), P.clerkLine('question', 3, 'dev'), P.clerkLine('question', 4, 'dev')];
 out.teams = [P.teamOf('srs-export'), P.teamOf('fix'), P.teamOf(''), P.teamOf(undefined)];
+out.seat = [['turn', 'srs'], ['blocked', 'dev'], ['unk', ''], ['run', 'fix'], ['wait', 'srs'], ['done', 'spec'], ['idle', 'dev'], ['turn', undefined], ['turn', 'config'], ['run', 'standard'], ['blocked', 'x']].map(a => P.seatName(a[0], a[1]));
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -1603,16 +1623,16 @@ def test_post_session_logic_filters_info_and_seals():
     r = subprocess.run([NODE, "-e", _POST_SESSION_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     out = json.loads(r.stdout)
-    # 걸러보기: 내 차례 = 내 답 · 막힘 · 확인 못 함, 일하는 중 = 일하는 중 · 승인 기다림, 쉬는 중은 전체에만
+    # 걸러보기: 답을 기다리는 일 = 내 답 · 막힘 · 확인 못 함, 일하는 중이에요 = 일하는 중이에요 · 승인 기다림, 쉬는 중이에요은 전체에만
     assert out["filters"] == "all,turn,run,done"
     assert out["counts"] == {"all": 8, "turn": 4, "run": 2, "done": 1}
     assert out["match"] == ["11111111", "11100001", "00011000", "00000010"]
-    assert out["status"] == ["막힘 · 고친 뒤 이어서", "확인 못 함 · 검사를 못 했어", "내 차례 · 승인하기", "", ""]
+    assert out["status"] == ["막혔어요 · 고친 뒤 이어서", "확인하지 못했어요 · 검사를 못 했어요", "답을 기다려요 · 승인하기", "", ""]
     # 안내판 첫 줄은 앉은 곳: 팀 자리(0~2)는 세션의 팀 이름 + 단계(설정 갈래도 단계 번호 2 라 개발팀이 아니라 자기 팀, 단계 이름은 설정 — 9회차 ②), 리뷰 룸·완료는 팀과 무관, 팀이 없으면 "팀 없음"
     assert out["here"] == ["요구분석팀 · 요구사항", "설계팀 · 개발 Spec", "기능컨설팅팀 · 설정", "팀 없음", "팀 없음", "리뷰 룸 · 검토", "완료 · 합쳐짐", "완료 · 합쳐짐", "요구분석팀 · 요구사항"]
     assert out["teams"] == ["요구분석팀", "유지보수팀", "", ""]
-    # 가이드 2.4 둘째 줄(반말). STATES 순서: turn blocked unk run wait done idle
-    assert out["lines"] == ["네 답을 기다리고 있어", "막혀서 멈춰 있어", "검사를 못 해서 멈췄어", "지금 일하고 있어", "의자에 앉아 승인을 기다려", "일을 다 마쳤어", "잠깐 쉬고 있어"]
+    # 안내판 둘째 줄의 상태 글(hereLine·HERE)은 화면에서 쓰지 않아 없앴다 — 상태는 LABEL 한 벌만 쓴다
+    assert out["noHere"] == ["undefined", "undefined"]
     # 정보 줄은 늘 다섯 칸(없으면 –) 뒤에 숫자 띠의 나머지 칸(AI 진행 따위)
     assert out["info"][:5] == [["단계", "SRS 쓰기", "g"], ["요구사항", "REQ-007", ""], ["개발 번호", "–", ""], ["작업 기록", "–", ""], ["검토 요청", "PR #301", "w"]]
     assert out["info"][5] == ["AI 진행", "40%", ""] and len(out["info"]) == 6
@@ -1620,10 +1640,13 @@ def test_post_session_logic_filters_info_and_seals():
     # 도장: 승인 주 버튼 보냄 · 질문 답 접수 · 거절·아니오·닫기 반송
     assert out["seal"] == ["보냄:ok", "보냄:ok", "반송:no", "접수:ok", "접수:ok", "반송:no", "반송:no", "접수:ok"]
     assert out["sub"] == "11.07 · 리뷰 룸"
-    assert out["desk"] == ["리뷰 룸", "리뷰 룸", "설계팀 자리", "완료", "유지보수팀 자리", "", "리뷰 룸"]
-    # 승인·계획은 리뷰 룸의 검토 담당, 질문은 그 세션이 앉은 곳(팀·리뷰 룸을 모르면 곳 이름 없이)
-    assert out["clerk"] == ["리뷰 룸에서 검토 담당이 네 승인을 기다려. 누르면 승인 도장이 찍혀"] * 2 + [
-        "요구분석팀 자리에서 손을 들고 네 답을 기다려", "표준화팀 자리에서 손을 들고 네 답을 기다려", "세션이 손을 들고 네 답을 기다려", "리뷰 룸에서 손을 들고 네 답을 기다려", "세션이 손을 들고 네 답을 기다려"]
+    # 요청을 보낸 세션은 손 든 사람이라 장면에서 늘 팀 자리에 선다 — 단계 번호가 검토(3)·끝(4)이어도 「리뷰 룸」·「완료」 가 아니다(재검증 8회차)
+    assert out["desk"] == ["설계팀 자리", "설계팀 자리", "설계팀 자리", "설계팀 자리", "유지보수팀 자리", "", "개발팀 자리"]
+    # 어느 요청이든 그 세션 사람이 손을 든다(옛 장면의 「리뷰 룸 검토 담당」 은 새 장면에 없다). 승인·계획·질문 모두 그 세션이 앉은 팀 자리(팀을 모르면 「세션이」)
+    assert out["clerk"] == ["세션이 손을 들고 승인을 기다려요. 누르면 승인 도장이 찍혀요"] * 2 + [
+        "요구분석팀 자리에서 손을 들고 답을 기다려요", "표준화팀 자리에서 손을 들고 답을 기다려요", "세션이 손을 들고 답을 기다려요", "개발팀 자리에서 손을 들고 답을 기다려요", "개발팀 자리에서 손을 들고 답을 기다려요"]
+    # 차분 목록의 앉은 곳은 장면 번들(seating.ts placeOf)이 세운 곳 그대로: 승인 기다림 리뷰 룸, 끝·쉬는 중 카페, 그 밖 팀 자리(팀 없으면 리셉션) — 갈래 V 결함 V2
+    assert out["seat"] == ["요구분석팀", "개발팀", "리셉션", "유지보수팀", "리뷰 룸", "카페", "카페", "리셉션", "기능컨설팅팀", "표준화팀", "리셉션"]  # 단계 번호를 받지 않는다 — PR 이 열린(검토 3) 사람도 손 들면 팀 자리
     # 우체국 말(창구·편지·손님)은 Cozy Office 화면 글에 없다
     for name in ("post-logic.js", "post-session.js", "post-home.js", "post-pipeline.js", "theme-post.js", "theme-post.css", "app.js", "app.css", "index.html", "post/manifest.js"):
         txt = (STATIC / name).read_text(encoding="utf-8")
@@ -1663,7 +1686,7 @@ def test_post_outputs_tab_lists_each_file_once():
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
     assert ".filter(L.isFormOutput)" in ui and "아직 양식으로 뽑은 산출물이 없어" in ui
     # #1067: 산출물 탭(/docs, docsPage)도 같은 함수로 거르고 빈 안내가 같다
-    assert "files: kit.listOf(d, 'files').filter(L.isFormOutput)" in ui and "'아직 양식으로 뽑은 산출물이 없어.'" in ui
+    assert "files: kit.listOf(d, 'files').filter(L.isFormOutput)" in ui and "'아직 양식으로 뽑은 산출물이 없어요.'" in ui
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     assert re.search(r"\.sess-side \.docs-pane \.preview \{[^}]*font-size: 13px", css)
 
@@ -1738,9 +1761,9 @@ def test_no_text_larger_than_22px_and_no_native_widgets():
 
 def test_app_frame_ann_only_with_todo_and_menu_paths():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    # 맨 위 띠는 내 차례가 없으면 만들지 않는다(buildAnn 이 만들고 renderAnn 은 달라진 곳만 고친다, #793)
+    # 맨 위 띠는 답을 기다리는 일가 없으면 만들지 않는다(buildAnn 이 만들고 renderAnn 은 달라진 곳만 고친다, #793)
     ann =app[app.index("function renderAnn"):app.index("function projectOf")]
-    assert re.search(r"function buildAnn\(d, annEl\) \{\s*if \(d\.todo\.length\) \{", ann) and "내 차례 ' + d.todo.length + '건 — ' + (first.fix ?" in ann and "'“' + first.sname + '” 세션에서 답이 필요해'" in ann and "'“' + first.sname + '” PR 의 검사 실패를 고쳐야 해'" in ann  # 제목에 조사가 바로 붙지 않게(#790), 검사 실패 PR 은 고치라는 문구(G-24)
+    assert re.search(r"function buildAnn\(d, annEl\) \{\s*if \(d\.todo\.length\) \{", ann) and "답을 기다리는 일 ' + d.todo.length + '건 — ' + (first.fix ?" in ann and "'“' + first.sname + '” 세션이 답을 기다려요'" in ann and "'“' + first.sname + '” PR 의 검사 실패를 고쳐야 해요'" in ann  # 제목에 조사가 바로 붙지 않게(#790), 검사 실패 PR 은 고치라는 문구(G-24)
     # 메뉴: 내 일 → /, 작업 → 가장 위 세션, 산출물 → /docs, 새 작업 → /new, 설정 → /settings.
     head = app[app.index("function renderHead"):app.index("function renderSide")]
     assert "link('/', { text: '내 일'" in head and "link(newHref(), { text: '새 작업'" in head and "link('/settings'" in head
@@ -1752,7 +1775,7 @@ def test_app_frame_ann_only_with_todo_and_menu_paths():
     ring = app[app.index("function memRing"):app.index("function renderSide")]
     assert "text: '?'" in ring and "ring unk" in ring
     assert "기억 사용량 확인 못 함" in (STATIC / "flow-logic.js").read_text(encoding="utf-8")
-    assert "아직 세션이 없어. 새 작업을 시작하면 여기에 생겨." in side and "+ 새 세션" in side
+    assert "아직 세션이 없어요. 새 작업을 시작하면 여기에 생겨요." in side and "+ 새 세션" in side
     assert "logo-sauce.png" in head and (STATIC / "logo-sauce.png").is_file() and not (STATIC / "blueward-logo.png").exists()
 
 
@@ -1805,7 +1828,7 @@ _PR = {"number": 6, "state": "OPEN", "url": "https://github.com/o/r/pull/6", "ti
 def _session(sid, **extra):
     base = {"id": sid, "title": "구매오더 조회 앱 요구사항", "cwd": "C:/w/proj", "branch": "docs/4-req", "status": "idle", "managed": True, "canSend": True,
             "pendingRequestIds": [], "flowId": "srs", "flowName": "요구사항 만들기·바꾸기", "stepIndex": 1, "flowSteps": _STEPS, "flowPr": _PR,
-            "report": "## 다 썼어\n- REQ-001", "startedAt": 1700000000, "updatedAt": 1700000100, "log": [], "subagents": [], "prLinks": [], "changedFiles": []}
+            "report": "## 다 썼어요\n- REQ-001", "startedAt": 1700000000, "updatedAt": 1700000100, "log": [], "subagents": [], "prLinks": [], "changedFiles": []}
     base.update(extra)
     return base
 
@@ -1837,8 +1860,8 @@ def test_work_screen_session_matches_design(tmp_path):
     q = {"id": "q1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "rm x", "description": "옛 파일 지우기"}}
     got = _smoke(tmp_path, "s/s1", [_session("s1", status="running", managed=True, currentAction="Edit docs/SRS.md", pendingRequestIds=["q1"])], [q])
     text, dump = got["text"], got["dump"]
-    assert text.startswith("요구사항 만들기·바꾸기 · 내 응답을 기다리는 중구매오더 조회 앱 요구사항")
-    # 시안: 순서 알약·층 그림은 "올릴 차례"(G-09)·"갈래 끝남"(G-12)에만. 확인을 기다리는 화면(G-17)엔 없다
+    assert text.startswith("요구사항 만들기·바꾸기 · 답을 기다려요구매오더 조회 앱 요구사항")
+    # 시안: 순서 알약·층 그림은 "올릴 차례"(G-09)·"갈래 끝났어요"(G-12)에만. 확인을 기다리는 화면(G-17)엔 없다
     assert "<ol.stepbar.big>" not in dump and "<div.strip>" in dump
     turn = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", managed=True, turnSkill="deliver")])
     assert "<ol.stepbar.big>" in turn["dump"]
@@ -1846,7 +1869,7 @@ def test_work_screen_session_matches_design(tmp_path):
         assert cell in text, cell
     assert "요구사항REQ" not in text and "개발 번호" not in text  # 데이터가 없는 칸은 지어내지 않는다
     assert "<section.light.talk>" in dump and "<aside.sess-side.run>" in dump and "<div.comp>" in dump
-    for need in ("다 썼어", "이 일의 순서", "문서 검사", "양식에 맞아", "비밀값 검사", "팀 승인", "네 차례", "승인하기", "작업 멈추기", "만든 산출물", "docs/SRS.md"):
+    for need in ("다 썼어요", "이 일의 순서", "문서 검사", "양식에 맞아요", "비밀값 검사", "팀 승인", "답을 기다려요", "승인하기", "작업 멈추기", "만든 산출물", "docs/SRS.md"):
         assert need in text, need
     assert "기억" not in text.split("검토 요청PR")[0].split("단계")[-1]  # 숫자 띠에 기억 칸은 없다
 
@@ -1862,8 +1885,8 @@ def test_chat_screen_folds_before_the_last_12_and_hides_report_when_chat_exists(
     assert "… 앞 대화 3개 접힘" in text
     assert "대화00번" not in text and "대화02번" not in text and "대화03번" in text and "대화14번" in text
     assert dump.count("<div.me>") + dump.count("<div.ai>") == 12
-    assert "터미널에서 한 대화는 내 말과 AI 마지막 답만 보여." in text
-    assert "다 썼어" not in text  # 대화가 있으면 마지막 보고 하나만 따로 그리지 않는다
+    assert "터미널에서 한 대화는 내 말과 AI 마지막 답만 보여요." in text
+    assert "다 썼어요" not in text  # 대화가 있으면 마지막 보고 하나만 따로 그리지 않는다
     few = _smoke(tmp_path, "s/s1", [_session("s1", chat=_chat_items(12))])
     assert "앞 대화" not in few["text"] and "대화00번" in few["text"] and "터미널에서 한 대화" not in few["text"]
 
@@ -1883,16 +1906,16 @@ def test_chat_screen_draws_waiting_request_once_in_place_and_answers_as_one_line
     # 시안 G-07: 보기 + 콘솔이 더하는 '직접 적기'. 하나만 고르는 질문 하나라 [답 보내기] 는 '직접 적기' 를 고를 때만 생긴다
     assert dump.count("<button.qopt>") == 2 and "직접 적기" in text and "직접 적어 답하기" not in text and "답 보내기" not in text
     assert "질문: 색은? → Red" in text and "승인 요청: Bash 사용 → 허락함" in text
-    assert "승인 요청: Edit 사용 → 처리 결과를 알 수 없어" in text  # 답이 없고 대기도 아니면 지어내지 않는다
+    assert "승인 요청: Edit 사용 → 처리 결과를 알 수 없어요" in text  # 답이 없고 대기도 아니면 지어내지 않는다
     assert text.index("시작해 줘") < text.index("질문: 색은? → Red")
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_chat_screen_falls_back_to_report_for_sessions_without_chat(tmp_path):
     got = _smoke(tmp_path, "s/s1", [_session("s1", chat=[])])
-    assert "다 썼어" in got["text"] and "앞 대화" not in got["text"]
+    assert "다 썼어요" in got["text"] and "앞 대화" not in got["text"]
     got = _smoke(tmp_path, "s/s1", [_session("s1")])  # 옛 서버 응답엔 chat 키가 없다
-    assert "다 썼어" in got["text"]
+    assert "다 썼어요" in got["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -1914,14 +1937,14 @@ def test_work_screen_finished_session_shows_handoff_card(tmp_path):
     steps = [dict(s, state="done") for s in _STEPS]
     got = _smoke(tmp_path, "s/s2", [_session("s2", flowFinished=True, phase="finished", group="idle", stepIndex=2, flowSteps=steps, flowPr=dict(_PR, state="MERGED"), nextFlow=nxt)])
     text = got["text"]
-    for need in ("→ 다음: 개발 Spec", "요구사항 만들기·바꾸기 · 끝남", "PR #6이 합쳐졌어. 다음 갈래는 개발 Spec이야", "다음 일", "개발 Spec 만들기 — 새 세션에서 시작하길 권해", "새 세션에 넘길 것",
+    for need in ("→ 다음: 개발 Spec", "요구사항 만들기·바꾸기 · 끝났어요", "PR #6이 합쳐졌어요. 다음 갈래는 개발 Spec이에요", "다음 일", "개발 Spec 만들기 — 새 세션에서 시작하길 권해요", "새 세션에 넘길 것",
                  "REQ-001 — DEV-001 번호로 개발 Spec 하기", "새 세션에서 개발 Spec 시작", "넘길 내용 고치기", "여기서 계속", "새 세션은 최신 내용 받기와 플러그인 판 확인을 스스로 해", "권한 양식준비 중",
                  "요구사항REQ-001 확정", "개발 번호DEV-001", "단계3 / 3 끝", "PR #6 합쳐짐"):
         assert need in text, need
     assert "<div.nextflow.handoff>" in got["dump"] and "<ol.stepbar.big>" in got["dump"]
-    assert "AI 진행" not in text and "<div.q.prcard>" not in got["dump"] and "<aside.sess-side>" in got["dump"]  # 끝남: AI 진행 칸·PR 카드 없음, 산출물 칸은 숨김(hidden)
-    assert "내 차례" not in got["ann"] and "PR #6이 합쳐졌어 — 다음은 개발 Spec" in got["ann"]
-    assert "끝 · PR #6 합쳐짐" in got["side"]
+    assert "AI 진행" not in text and "<div.q.prcard>" not in got["dump"] and "<aside.sess-side>" in got["dump"]  # 끝났어요: AI 진행 칸·PR 카드 없음, 산출물 칸은 숨김(hidden)
+    assert "답을 기다리는 일" not in got["ann"] and "PR #6이 합쳐졌어요 — 다음은 개발 Spec" in got["ann"]
+    assert "끝났어요 · PR #6 합쳐짐" in got["side"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -1931,8 +1954,8 @@ def test_work_screen_question_shows_each_sentence_once(tmp_path):
     got = _smoke(tmp_path, "r/q1", [_session("s1", pendingRequestIds=["q1"])], [one])
     text = got["text"]
     assert text.count("이 앱은 얼마나 급해?") == 1  # 질문 문장이 제목과 카드에 두 번 나오지 않는다(#635)
-    assert text.startswith("요구사항 만들기·바꾸기 · 내 답을 기다리는 중구매오더 조회 앱 요구사항")
-    for need in ("질문 · 우선순위", "반드시 필요", "중요이번 달 안에", "다른 답이 있으면 직접 적어 줘", "답 보내기"):
+    assert text.startswith("요구사항 만들기·바꾸기 · 답을 기다려요구매오더 조회 앱 요구사항")
+    for need in ("질문 · 우선순위", "반드시 필요", "중요이번 달 안에", "다른 답이 있으면 직접 적어 주세요", "답 보내기"):
         assert need in text, need
     assert got["dump"].count("<button.qopt>") == 2 and "<div.q>" in got["dump"]
 
@@ -1940,12 +1963,12 @@ def test_work_screen_question_shows_each_sentence_once(tmp_path):
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_work_screen_permission_card_and_edit_names(tmp_path):
     bash = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "cwd": "C:/w/proj",
-            "toolInput": {"command": "rm x.xlsx", "description": "옛 파일 지우기"}, "permissionSuggestions": [1], "note": "touch 는 목록에 없어", "suggestionText": ["Bash(rm *) 허용 규칙 추가"]}
+            "toolInput": {"command": "rm x.xlsx", "description": "옛 파일 지우기"}, "permissionSuggestions": [1], "note": "touch 는 목록에 없어요", "suggestionText": ["Bash(rm *) 허용 규칙 추가"]}
     edit = {"id": "p2", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Edit", "toolInput": {"file_path": "docs/a.md", "old_string": "가", "new_string": "나"}}
     risky = {"id": "p3", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "curl x", "dangerouslyDisableSandbox": True}}
     sess = [_session("s1", pendingRequestIds=["p1", "p2", "p3"])]
     got = _smoke(tmp_path, "r/p1", sess, [bash, edit, risky])
-    for need in ("확인 필요", "옛 파일 지우기", "자세히 (명령 원문)", "이번만 허락", "하지 마", "이 세션이 끝날 때까지만 적용돼", "묻는 이유: touch 는 목록에 없어", "도구에 넘기는 입력 전체"):  # #1018
+    for need in ("확인 필요", "옛 파일 지우기", "자세히 (명령 원문)", "이번만 허락", "하지 않기", "이 세션이 끝날 때까지만 적용돼", "묻는 이유: touch 는 목록에 없어요", "도구에 넘기는 입력 전체"):  # #1018
         assert need in got["text"], need
     assert "<details.more>" in got["dump"] and "<details[open].more>" not in got["dump"]  # 쉬운 설명이 있는 명령은 원문을 접어 둔다
     got = _smoke(tmp_path, "r/p2", sess, [bash, edit, risky])
@@ -1956,11 +1979,11 @@ def test_work_screen_permission_card_and_edit_names(tmp_path):
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_1018_card_explains_with_korean_reason_and_moves_ai_description_into_details(tmp_path):
-    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "note": "touch 는 목록에 없어",
+    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "note": "touch 는 목록에 없어요",
            "toolInput": {"command": "touch a", "description": "Create the file"}, "hasSuggestions": True, "suggestionText": ["이 세션: 허용 규칙 추가 - Bash(touch:*)"]}
     got = _smoke(tmp_path, "r/p1", [_session("s1", pendingRequestIds=["p1"])], [req])
     text = got["text"]
-    assert text.index("묻는 이유: touch 는 목록에 없어") < text.index("자세히 (명령 원문)") < text.index("Create the file")  # 영어 설명은 "자세히" 안에만
+    assert text.index("묻는 이유: touch 는 목록에 없어요") < text.index("자세히 (명령 원문)") < text.index("Create the file")  # 영어 설명은 "자세히" 안에만
     assert "<span.sm>Create the file" not in got["dump"] and "<details.more>" in got["dump"]
     nonote = dict(req, id="p2", note="")
     got = _smoke(tmp_path, "r/p2", [_session("s1", pendingRequestIds=["p2"])], [nonote])
@@ -1972,19 +1995,19 @@ def test_1018_just_handled_request_title_is_the_result_not_already_handled(tmp_p
     perm = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "touch a"}, "note": "x"}
     sess = [_session("s1", pendingRequestIds=["p1"])]
     ok = _smoke(tmp_path, "r/p1", sess, [perm], extra={"POST /api/requests/p1/answer": {}}, actions=[{"click": "[data-decide=allow]"}])
-    assert "허락했어." in ok["text"] and "이미 처리된 요청이야" not in ok["text"]
+    assert "허락했어요." in ok["text"] and "이미 처리된 요청이에요" not in ok["text"]
     no = _smoke(tmp_path, "r/p1", sess, [perm], extra={"POST /api/requests/p1/answer": {}}, actions=[{"click": "[data-decide=deny]"}])
-    assert "하지 말라고 했어." in no["text"] and "이미 처리된 요청이야" not in no["text"]
+    assert "하지 말라고 했어요." in no["text"] and "이미 처리된 요청이에요" not in no["text"]
     plan = {"id": "pl1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "ExitPlanMode", "toolInput": {"plan": "# 계획\n- a"}}
     ok = _smoke(tmp_path, "r/pl1", [_session("s1", pendingRequestIds=["pl1"])], [plan], extra={"POST /api/requests/pl1/answer": {}}, actions=[{"click": "[data-decide=allow]"}])
-    assert "이 계획대로 진행하기로 했어." in ok["text"] and "이미 처리된 계획이야" not in ok["text"]
+    assert "이 계획대로 진행하기로 했어요." in ok["text"] and "이미 처리된 계획이에요" not in ok["text"]
     old = dict(perm, status="answered", resolution="allow", outcome="허용함")  # 다시 열어 본 처리된 요청은 예전 글 그대로
     got = _smoke(tmp_path, "r/p1", sess, [old])
-    assert "이미 처리된 요청이야" in got["text"] and "허락했어." in got["text"]
+    assert "이미 처리된 요청이에요" in got["text"] and "허락했어요." in got["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
-@pytest.mark.parametrize("res, title", [("allow", "허락했어."), ("allow_session", "허락했어."), ("deny", "하지 말라고 했어."), ("closed", "닫힌 요청"),
+@pytest.mark.parametrize("res, title", [("allow", "허락했어요."), ("allow_session", "허락했어요."), ("deny", "하지 말라고 했어요."), ("closed", "닫힌 요청"),
                                        ("terminal", "터미널에서 처리됨"), ("handoff", "터미널로 넘어감"), ("expired", "닫힌 요청"), ("", "닫힌 요청"), ("zzz", "닫힌 요청")])
 def test_1018_result_comes_from_resolution_code_not_korean_outcome_text(tmp_path, res, title):
     # 한글 outcome 이 무엇이든(예: 허용함) 코드가 없으면 허락으로 읽지 않는다 — 코드만 본다
@@ -1993,9 +2016,9 @@ def test_1018_result_comes_from_resolution_code_not_korean_outcome_text(tmp_path
     got = _smoke(tmp_path, "r/p1", [_session("s1")], [req])
     assert title in got["text"]
     if res in ("", "zzz"):
-        assert "허락했어." not in got["text"]
+        assert "허락했어요." not in got["text"]
     if res == "allow_session":
-        assert "이 세션에서는 같은 작업을 다시 묻지 않아." in got["text"]
+        assert "이 세션에서는 같은 작업을 다시 묻지 않아요." in got["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -2044,24 +2067,24 @@ def test_1018_session_title_and_log_lines_are_masked_on_screen(tmp_path):
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_work_screen_irreversible_card_is_yellow_and_cannot_be_remembered(tmp_path):
-    """시안 17: 되돌릴 수 없는 일 카드. 꼬리표, 쉬운 말 제목, 하네스 안내, 이번만 허락 / 하지 마만."""
-    rm = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "risk": "irreversible", "riskNote": "작업 폴더 밖 파일을 쓰려 해",
+    """시안 17: 되돌릴 수 없는 일 카드. 꼬리표, 쉬운 말 제목, 하네스 안내, 이번만 허락 / 하지 않기만."""
+    rm = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "risk": "irreversible", "riskNote": "작업 폴더 밖 파일을 쓰려 해요",
           "toolInput": {"command": 'rm "C:/Users/x/Desktop/old.xlsx"'}, "permissionSuggestions": [1], "hasSuggestions": True, "suggestionText": ["Bash(rm *) 허용 규칙 추가"]}
     plain = {"id": "p2", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "touch a"}, "hasSuggestions": True}
     sess = [_session("s1", pendingRequestIds=["p1", "p2"])]
     got = _smoke(tmp_path, "r/p1", sess, [rm, plain])
     text, dump = got["text"], got["dump"]
-    for need in ("확인 필요 · 되돌릴 수 없어", "작업 폴더 밖 파일을 쓰려 해", "하네스는 되돌릴 수 없는 일은 항상 사람에게 물어.", "이번만 지워", "지우지 마", "자세히 (명령 원문)", "이유 적기(선택)"):
+    for need in ("확인 필요 · 되돌릴 수 없음", "작업 폴더 밖 파일을 쓰려 해요", "하네스는 되돌릴 수 없는 일은 항상 사람에게 물어요.", "이번만 지우기", "지우지 않기", "자세히 (명령 원문)", "이유 적기(선택)"):
         assert need in text, need  # 단추는 행동을 그대로 말한다(시안 17)
     assert "이번만 허락" not in text
     assert "<div.bad.irrev>" in dump and "<span.muted-line>" in dump and "<span.warn-line>" not in dump  # 하네스 안내 줄은 강조 없이 연한 글
     assert "<details.more>" in dump and "AI에게 말하기" in text  # 이유 입력칸은 접혀 있고, 카드 아래에 말하기 입력창이 있다
     push = dict(rm, id="p4", toolInput={"command": "git push origin main"}, riskNote="GitHub 에 올리려 해")
     up = _smoke(tmp_path, "r/p4", [_session("s1", pendingRequestIds=["p4"])], [push])
-    assert "이번만 올려" in up["text"] and "올리지 마" in up["text"]
+    assert "이번만 올리기" in up["text"] and "올리지 않기" in up["text"]
     other = dict(rm, id="p5", toolInput={"command": "chmod 777 a"}, riskNote="권한을 바꾸려 해")
     gen = _smoke(tmp_path, "r/p5", [_session("s1", pendingRequestIds=["p5"])], [other])
-    assert "이번만 허락" in gen["text"] and "하지 마" in gen["text"]
+    assert "이번만 허락" in gen["text"] and "하지 않기" in gen["text"]
     assert "irreversible" not in text  # 값 그대로를 화면에 쓰지 않는다
     assert "다시 묻지 않기" not in text  # 되돌릴 수 없는 일은 기억시키지 못한다
     got = _smoke(tmp_path, "r/p2", sess, [rm, plain])
@@ -2077,7 +2100,7 @@ def test_plan_card_shows_plan_markdown_with_two_buttons_and_reason(tmp_path):
     sess = [_session("s1", pendingRequestIds=["pl1"])]
     got = _smoke(tmp_path, "r/pl1", sess, [plan])
     text, dump = got["text"], got["dump"]
-    for need in ("계획", "고칠 순서", "문서 먼저", "이 계획대로 진행", "고쳐 달라고 하기", "자세히 (도구 입력 전체)", "계획 파일", "AI에게 말하기", "내 계획 확인을 기다리는 중"):
+    for need in ("계획", "고칠 순서", "문서 먼저", "이 계획대로 진행", "고쳐 달라고 하기", "자세히 (도구 입력 전체)", "계획 파일", "AI에게 말하기", "답을 기다려요"):
         assert need in text, need
     assert "<div.bad.plan>" in dump
     assert "# 고칠 순서" not in text.split("자세히")[0] and "<h3.md-h>고칠 순서</h3>" in dump  # 마크다운으로 그려진다. Windows 계획 파일 맨 앞의 BOM 이 제목을 깨뜨리지 않는다(실측). 원문은 "자세히" 안에만
@@ -2085,13 +2108,13 @@ def test_plan_card_shows_plan_markdown_with_two_buttons_and_reason(tmp_path):
     assert "이유 적기" not in text and "고쳐 달라고 보내기" not in text  # 사유 칸은 [고쳐 달라고 하기] 를 눌러야 열린다
     ok = _smoke(tmp_path, "r/pl1", sess, [plan], extra={"POST /api/requests/pl1/answer": {}}, actions=[{"click": "[data-decide=allow]"}])
     assert ok["posts"] == [["POST", "/api/requests/pl1/answer", '{"decision":"allow"}']]
-    assert "이 계획대로 진행하기로 했어." in ok["text"] and "권한 모드가 기본으로 돌아가고" in ok["text"]
+    assert "이 계획대로 진행하기로 했어요." in ok["text"] and "권한 모드가 기본으로 돌아가고" in ok["text"]
     open_ = _smoke(tmp_path, "r/pl1", sess, [plan], actions=[{"click": "[data-plan-revise]"}])
-    assert "어떻게 고치면 좋을지 적어 줘" in open_["text"] and "고쳐 달라고 보내기" in open_["text"]
+    assert "어떻게 고치면 좋을지 적어 주세요" in open_["text"] and "고쳐 달라고 보내기" in open_["text"]
     sent = _smoke(tmp_path, "r/pl1", sess, [plan], extra={"POST /api/requests/pl1/answer": {}},
                   actions=[{"click": "[data-plan-revise]"}, {"type": "#plan-why", "value": "문서만 먼저 해 줘"}, {"click": "[data-decide=deny]"}])
     assert sent["posts"] == [["POST", "/api/requests/pl1/answer", '{"decision":"deny","reason":"문서만 먼저 해 줘"}']]
-    assert "고쳐 달라고 전했어." in sent["text"] and "전달한 이유: 문서만 먼저 해 줘" in sent["text"]
+    assert "고쳐 달라고 전했어요." in sent["text"] and "전달한 이유: 문서만 먼저 해 줘" in sent["text"]
     # 계획 글이 없으면(실측: 계획 파일을 안 쓰면 input 이 {}) 계획 카드에 "계획 본문이 없어" 를 사실대로 적는다. 빈 계획을 보여 주는 척하지 않는다
     for odd_input in ({}, {"plan": 3}, {"plan": "  "}):
         odd = _smoke(tmp_path, "r/pl1", sess, [dict(plan, toolInput=odd_input)])
@@ -2109,7 +2132,7 @@ def test_plan_waiting_is_told_in_plain_words_in_chat_side_and_home(tmp_path):
             "toolInput": {"plan": "## 계획\n- 하나"}}
     sess = [_session("s1", pendingRequestIds=["pl1"], status="idle", chat=[{"t": 3, "role": "req", "id": "pl1", "kind": "permission", "title": "계획 확인", "answer": None}])]
     work = _smoke(tmp_path, "s/s1", sess, [plan])
-    for need in ("내 계획 확인을 기다리는 중", "AI가 계획을 세웠어", "계획 보기"):
+    for need in ("계획 확인을 기다려요", "AI가 계획을 세웠어", "계획 보기"):
         assert need in work["text"], need
     assert "승인하기" not in work["text"]
     home = _smoke(tmp_path, "", sess, [plan])
@@ -2128,7 +2151,7 @@ def test_session_screen_shows_auto_mode_unavailable_note(tmp_path):
 
 
 _MCP_BAD = {"state": "problem", "canReconnect": True, "servers": [
-    {"name": "abap-adt", "status": "failed", "label": "연결하지 못했어", "problem": True, "error": "Connection closed", "canReconnect": True},
+    {"name": "abap-adt", "status": "failed", "label": "연결하지 못했어요", "problem": True, "error": "Connection closed", "canReconnect": True},
     {"name": "echosrv", "status": "connected", "label": "연결됨", "problem": False, "error": "", "canReconnect": False}]}
 
 
@@ -2140,7 +2163,7 @@ def test_session_screen_mcp_status_quiet_when_ok_loud_when_failed_honest_for_ter
     none = _smoke(tmp_path, "s/s1", [_session("s1", mcp={"state": "none", "servers": [], "canReconnect": False})])
     assert "data-mcp" not in none["dump"]
     bad = _smoke(tmp_path, "s/s1", [_session("s1", mcp=_MCP_BAD)])
-    assert "연결이 안 된 도구가 있어" in bad["text"] and "abap-adt — 연결하지 못했어" in bad["text"] and "다시 연결" in bad["text"]
+    assert "연결이 안 된 도구가 있어요" in bad["text"] and "abap-adt — 연결하지 못했어요" in bad["text"] and "다시 연결" in bad["text"]
     assert "Connection closed" in bad["text"] and "echosrv" not in bad["text"]  # 사유는 "자세히" 안, 멀쩡한 서버는 안 보인다
     assert "<details.mcp-more>" in bad["dump"] and "<div.banner.mcp>" in bad["dump"]
     term = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, mcp={"state": "unknown", "servers": [], "canReconnect": False})])
@@ -2149,7 +2172,7 @@ def test_session_screen_mcp_status_quiet_when_ok_loud_when_failed_honest_for_ter
     assert "여기서는 연결됐는지 확인할 수 없어" in term["text"] and "모두 연결됨" not in term["text"]
     assert "모두 연결됨" in ok["text"] and "연결 안 됨: abap-adt" in bad["text"]
     auth = _smoke(tmp_path, "s/s1", [_session("s1", mcp={"state": "problem", "canReconnect": True, "servers": [
-        {"name": "notion", "status": "needs-auth", "label": "로그인이 필요해(터미널에서 /mcp 로 로그인해 줘)", "problem": True, "error": "", "canReconnect": False}]})])
+        {"name": "notion", "status": "needs-auth", "label": "로그인이 필요해요(터미널에서 /mcp 로 로그인해 주세요)", "problem": True, "error": "", "canReconnect": False}]})])
     assert "로그인이 필요해" in auth["text"] and "다시 연결" not in auth["text"]
 
 
@@ -2160,9 +2183,9 @@ def test_session_screen_mcp_reconnect_button_posts_server_name(tmp_path):
     got = _smoke(tmp_path, "s/s1", [_session("s1", mcp=_MCP_BAD)], extra=extra, actions=[{"click": ".mcp-again"}])
     posts = [p for p in got["posts"] if p[1].endswith("/mcp/reconnect")]
     assert len(posts) == 1 and "abap-adt" in posts[0][2], got["posts"]
-    assert "연결이 안 된 도구가 있어" not in got["text"]  # 연결되면 알림이 사라진다
+    assert "연결이 안 된 도구가 있어요" not in got["text"]  # 연결되면 알림이 사라진다
     fail = _smoke(tmp_path, "s/s1", [_session("s1", mcp=_MCP_BAD)], actions=[{"click": ".mcp-again"}])  # 길이 없으면 404 로 실패한다
-    assert "연결이 안 된 도구가 있어" in fail["text"] and "다시 연결하지 못했어" in fail["text"]
+    assert "연결이 안 된 도구가 있어요" in fail["text"] and "다시 연결하지 못했어" in fail["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -2171,7 +2194,7 @@ def test_permission_card_for_mcp_tool_speaks_plainly_and_folds_raw_name(tmp_path
            "toolInput": {"objectSourceUrl": "/sap/bc/adt/x"}, "hasSuggestions": False,
            "mcp": {"server": "abap-adt", "tool": "getObjectSource", "display": "Get Object Source"}}
     got = _smoke(tmp_path, "r/m1", [_session("s1", pendingRequestIds=["m1"])], [req])
-    assert "SAP 시스템 도구(abap-adt)의 'Get Object Source' 을(를) 써도 될까?" in got["text"]
+    assert "SAP 시스템 도구(abap-adt)의 'Get Object Source' 을(를) 써도 될까요?" in got["text"]
     assert "Claude Code가 mcp__" not in got["text"] and "<details.more>" in got["dump"]
     assert "자세히 (도구 이름·넘기는 값)" in got["text"] and "<details[open].more>" not in got["dump"]  # 되돌릴 수 있는 요청은 접어 둔다
     # 되돌릴 수 없는 MCP 요청(SAP 소스 쓰기 등)은 넘기는 값을 보고 정하도록 펼쳐 둔다
@@ -2182,7 +2205,7 @@ def test_permission_card_for_mcp_tool_speaks_plainly_and_folds_raw_name(tmp_path
     assert "<details[open].more>" in got3["dump"] and "REPORT z." in got3["text"]
     other = dict(req, id="m2", mcp={"server": "notion", "tool": "search", "display": ""}, toolName="mcp__notion__search")
     got2 = _smoke(tmp_path, "r/m2", [_session("s1", pendingRequestIds=["m2"])], [other])
-    assert "연결 도구(notion)의 'search' 을(를) 써도 될까?" in got2["text"]  # SAP 이 아니면 SAP 이라 하지 않고 display_name 이 없으면 도구 이름
+    assert "연결 도구(notion)의 'search' 을(를) 써도 될까요?" in got2["text"]  # SAP 이 아니면 SAP 이라 하지 않고 display_name 이 없으면 도구 이름
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -2193,7 +2216,7 @@ def test_session_screen_api_error_card_side_and_ann(tmp_path):
     text, dump = got["text"], got["dump"]
     assert "<div.bad.q.apierr.err>" in dump and "로그인이 풀렸어" in text and "/login" in text
     assert "Invalid API key" not in text  # 원문은 자세히를 눌러야
-    assert "✕ 막힘" not in text and "? 확인 못 함" not in text
+    assert "✕ 막혔어요" not in text and "? 확인하지 못했어요" not in text
     assert "로그인이 풀렸어" in got["side"] and "끝난 세션" not in got["side"]
     assert "⚠ 오류 1건" in got["ann"] and "로그인이 풀렸어" in got["ann"]
     opened = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue=issue, chat=[{"t": 1, "role": "me", "text": "해 줘"}])], actions=[{"click": "[data-api-more]"}])
@@ -2207,7 +2230,7 @@ def test_session_screen_api_error_card_side_and_ann(tmp_path):
     assert "오류" not in retry["ann"] and "다시 시도 중 2/10" in retry["side"]
     clean = _smoke(tmp_path, "s/s1", [_session("s1")])
     assert "apierr" not in clean["dump"] and "오류" not in clean["ann"]
-    # 홈 표: 오류 세션의 상태 칩은 '끝남' 이 아니라 ⚠ 오류
+    # 홈 표: 오류 세션의 상태 칩은 '끝났어요' 이 아니라 ⚠ 오류
     home = _smoke(tmp_path, "", [_session("s1", status="ended", apiIssue=issue)], extra=_start())
     assert "<span.tagx.err>" in home["dump"] and "⚠ 오류 · 로그인이 풀렸어" in home["text"] and "<span.tag.ok>" not in home["dump"]
     # 혼자 있는 [자세히] 는 테두리 단추로 보인다(#900: quiet-edge 는 밝은 판에서 글자만 보였다)
@@ -2218,19 +2241,19 @@ def test_session_screen_api_error_card_side_and_ann(tmp_path):
 def test_api_error_holds_next_step_until_login_or_limit(tmp_path):
     """#900: 로그인 풀림·사용 한도·쓸 수 없는 모델이면 다음 단계 [실행] 대신 '먼저 할 일' 을 두고, 넘길 수도 있다. 다른 오류는 막지 않는다."""
     chat = [{"t": 1, "role": "me", "text": "해 줘"}]
-    for kind, title in (("auth", "로그인한 뒤 이어서 하자"), ("limit", "한도가 풀린 뒤 이어서 하자"), ("model", "다른 모델로 새로 시작하자")):
+    for kind, title in (("auth", "로그인한 뒤 이어서 해요"), ("limit", "한도가 풀린 뒤 이어서 해요"), ("model", "다른 모델로 새로 시작해요")):
         got = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": kind, "t": 5}, chat=chat)])
         assert "<div.nextstep.ask>" in got["dump"] and title in got["text"] and "다시 멈춰" in got["text"], kind
-        assert "네 차례" not in got["text"] and "⚠ 오류 · 먼저 할 일" in got["text"], kind
+        assert "답을 기다려요" not in got["text"] and "⚠ 오류 · 먼저 할 일" in got["text"], kind
     skipped = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "auth", "t": 5}, chat=chat)], actions=[{"click": "[data-hold-skip]"}])
-    assert "네 차례" in skipped["text"] and "로그인한 뒤 이어서 하자" not in skipped["text"]
+    assert "답을 기다려요" in skipped["text"] and "로그인한 뒤 이어서 해요" not in skipped["text"]
     nopick = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "auth", "t": 5}, chat=chat, flowId=None, flowName=None, flowSteps=[], stepIndex=0)])
-    assert "로그인한 뒤 이어서 하자" in nopick["text"] and "어떤 일이야?" not in nopick["text"] and "그래도 먼저 일 고르기" in nopick["text"]
+    assert "로그인한 뒤 이어서 해요" in nopick["text"] and "어떤 일이에요?" not in nopick["text"] and "그래도 먼저 일 고르기" in nopick["text"]
     other = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "other", "t": 5}, chat=chat)])
-    assert "먼저 할 일" not in other["text"] and "네 차례" in other["text"]  # 일시적일 수 있는 서버 오류는 다시 해 볼 수 있다
+    assert "먼저 할 일" not in other["text"] and "답을 기다려요" in other["text"]  # 일시적일 수 있는 서버 오류는 다시 해 볼 수 있다
     # 한도가 apiIssue 없이 rateLimit(rejected) 로만 와도 같다
     rl = _smoke(tmp_path, "s/s1", [_session("s1", rateLimit={"status": "rejected", "t": 6, "resetsAt": 4102444800}, chat=chat)])
-    assert "한도가 풀린 뒤 이어서 하자" in rl["text"]
+    assert "한도가 풀린 뒤 이어서 해요" in rl["text"]
     # 모델 오류 안내는 없는 '설정' 이 아니라 새 작업의 고급 설정을 가리킨다
     model = _smoke(tmp_path, "s/s1", [_session("s1", apiIssue={"kind": "model", "t": 5}, chat=chat)])
     assert "설정에서 다른 모델로" not in model["text"] and "고급 설정" in model["text"]
@@ -2240,12 +2263,12 @@ def test_api_error_holds_next_step_until_login_or_limit(tmp_path):
 def test_work_screen_new_task_has_kinds_flow_and_advanced_fold(tmp_path):
     got = _smoke(tmp_path, "new", [], extra={"GET /api/folders/last": {"path": "C:/w/proj"}})
     text = got["text"]
-    assert text.startswith("새 작업무엇을 할까?")
+    assert text.startswith("새 작업무엇을 할까요?")
     for kind in ("요구사항정의서", "개발 Spec", "사용자 매뉴얼", "CTS 관리대장", "Role 정리", "개발하기", "설정하기", "ATC 지적 고치기", "작은 수정", "잘 모르겠어"):
         assert kind in text, kind
     assert got["dump"].count("<button.kind") == 9  # 시안 G-05 의 아홉 칸. 설정하기·표준 기능은 "그 밖의 종류" 줄(칸 줄 수가 시안과 같게)
     assert "그 밖의 종류" in text and "<div.kinds-more" in got["dump"]
-    for need in ("하고 싶은 일을 한두 줄로", "참고 파일(회의록 · 고객 메일 · 기존 양식)", "이렇게 진행돼", "작업 폴더는 이 프로젝트로 자동으로 정해져.", "작업 시작", "고급 설정 (모델 · 생각 깊이 · 권한)", "권한 모드"):
+    for need in ("하고 싶은 일을 한두 줄로", "참고 파일(회의록 · 고객 메일 · 기존 양식)", "이렇게 진행돼", "작업 폴더는 이 프로젝트로 자동으로 정해져요.", "작업 시작", "고급 설정 (모델 · 생각 깊이 · 권한)", "권한 모드"):
         assert need in text, need
     assert "/harness:" not in text.split("이렇게 진행돼")[1].split("작업 폴더")[0]  # 순서 칸은 스킬 명령이 아니라 쉬운 말
     # 시안 순서: 고급 설정은 작업 시작 줄 아래
@@ -2287,14 +2310,14 @@ def test_new_task_default_folder_priority(tmp_path):
     recent = {"GET /api/folders/recent": {"folders": ["C:/other/busy", "C:/mine/repo"]}}
     # 1) 세션 화면에서 왔다
     got = _smoke(tmp_path, "new?from=s1", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": "C:/last/one"}}))
-    assert "repo" in got["head"] and "one" not in got["head"] and "작업 폴더는 이 프로젝트로 자동으로 정해져." in got["text"]  # 프로젝트 이름은 헤더(경로 조각이 아니라 이름)
+    assert "repo" in got["head"] and "one" not in got["head"] and "작업 폴더는 이 프로젝트로 자동으로 정해져요." in got["text"]  # 프로젝트 이름은 헤더(경로 조각이 아니라 이름)
     assert "GET /api/folders/last" not in got["calls"]  # 세션 폴더가 있으면 서버 기억을 묻지 않는다
     # 2) 그냥 새 작업: 서버가 기억한 마지막 폴더
     got = _smoke(tmp_path, "new", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": "C:/last/one"}}))
     assert "one" in got["head"] and "바꾸기" in got["text"] and "프로젝트를 고르" not in got["text"]
     # 3) 둘 다 없으면 기본값 없이 "폴더를 골라 줘 [고르기]" 한 줄(최근 폴더 첫 줄을 쓰지 않는다). 목록은 처음부터 펼치지 않는다(시안 G-05, #721)
     got = _smoke(tmp_path, "new", [other, mine], extra=dict(recent, **{"GET /api/folders/last": {"path": None}}))
-    assert "폴더를 골라 줘" in got["text"] and "busy" not in got["head"] and "고르기" in got["text"] and "닫기" not in got["text"]
+    assert "작업 폴더를 골라 주세요." in got["text"] and "busy" not in got["head"] and "고르기" in got["text"] and "닫기" not in got["text"]
     assert "C:/other/busy" not in got["text"]  # 후보 목록은 [고르기] 를 눌러야 보인다
     # 4) 새 세션 버튼은 세션 화면에서만 출처 세션을 넘긴다
     app = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -2332,8 +2355,8 @@ def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_sta
     pick = [{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}]
     got = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick)
     text = got["text"]
-    for need in ("프로젝트 준비", "needs 준비하기", "이 폴더엔 아직 하네스 구조가 없어", "네 차례", "표준 구조를 만들까? 한 번만 하면 돼",
-                 "만들고 나면 GitHub에 올려서 팀 승인을 받아. 그다음부터 문서를 쓸 수 있어.", "만들기", "나중에", "만들어지는 것",
+    for need in ("프로젝트 준비", "needs 준비하기", "이 폴더엔 아직 하네스 구조가 없어요", "먼저 할 일", "표준 구조를 만들까요? 한 번만 하면 돼요",
+                 "만들고 나면 GitHub에 올려서 팀 승인을 받아요. 그다음부터 문서를 쓸 수 있어요.", "만들기", "나중에", "만들어지는 것",
                  "templates/", "고객 양식 넣는 곳", "rules/", "문서 검사 기준", "docs/ssot/", "요구사항정의서 자리", "audit/", "변경 기록",
                  "만든 뒤 할 일", "고객 양식 파일을 templates/에 넣기", "GitHub에 올려 승인받기", "첫 작업 시작"):
         assert need in text, need
@@ -2345,7 +2368,7 @@ def test_new_task_first_pick_of_unready_folder_shows_prepare_screen_and_make_sta
     assert len(new) == 1 and "/harness:scaffold" in new[0][2] and "C:/p/needs" in new[0][2], new
     # [나중에] -> 원래 새 작업 화면으로 돌아가고 작업을 시작하지 않는다
     later = _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **shown), actions=pick + [{"click": "[data-intro-later]"}])
-    assert "하고 싶은 일을 한두 줄로" in later["text"] and "needs" in later["head"] and "작업 폴더는 이 프로젝트로 자동으로 정해져." in later["text"] and "프로젝트 준비" not in later["text"]
+    assert "하고 싶은 일을 한두 줄로" in later["text"] and "needs" in later["head"] and "작업 폴더는 이 프로젝트로 자동으로 정해져요." in later["text"] and "프로젝트 준비" not in later["text"]
     assert not [p for p in later["posts"] if p[1] == "/api/new"]
 
 
@@ -2354,17 +2377,17 @@ def test_new_task_prepare_screen_for_non_admin_says_ask_admin_without_make_butto
     """준비 안 된 폴더: 관리자가 아니면(false) [만들기]·만들어지는 것 칸 없이 관리자에게 말하라고만 한다. 확인 못 함(null)은 그 사실을 문구 끝에 붙인다."""
     pick = [{"click": "[data-folder-toggle]"}, {"click": ".folder-opt", "index": 2}]
     base = {"ready": "no", "seen": False, "show": True}
-    for can, tail in ((False, ""), (None, " (관리자인지 확인하지 못했어)")):
+    for can, tail in ((False, ""), (None, " (관리자인지 확인하지 못했어요)")):
         extra = dict(_folder_rows(), **{"GET /api/folders/intro": dict(base, canSetup=can), "POST /api/folders/intro/seen": {"seen": True}})
         got = _smoke(tmp_path, "new", [], extra=extra, actions=pick)
-        assert "이 폴더는 아직 하네스 준비가 안 됐어. 관리자에게 준비해 달라고 말해 줘." + tail in got["text"], can
+        assert "이 폴더는 아직 하네스 준비가 안 됐어요. 관리자에게 준비해 달라고 말해 주세요." + tail in got["text"], can
         for gone in ("만들기", "표준 구조를 만들까", "만들어지는 것", "만든 뒤 할 일", "나중에"):
             assert gone not in got["text"], (can, gone)
         assert "[data-intro-make]" not in got["dump"] and "확인" in got["text"]
         # [확인] -> 원래 새 작업 화면으로 돌아가고 작업을 시작하지 않는다
         back = _smoke(tmp_path, "new", [], extra=extra, actions=pick + [{"click": "[data-intro-ok]"}])
         assert "하고 싶은 일을 한두 줄로" in back["text"] and not [x for x in back["posts"] if x[1] == "/api/new"]
-    assert "(관리자인지 확인하지 못했어)" not in _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **{"GET /api/folders/intro": dict(base, canSetup=False), "POST /api/folders/intro/seen": {"seen": True}}), actions=pick)["text"]
+    assert "(관리자인지 확인하지 못했어요)" not in _smoke(tmp_path, "new", [], extra=dict(_folder_rows(), **{"GET /api/folders/intro": dict(base, canSetup=False), "POST /api/folders/intro/seen": {"seen": True}}), actions=pick)["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -2374,14 +2397,14 @@ def test_new_task_prepare_screen_shows_checking_line_then_switches_when_admin_is
     checking = {"ready": "no", "seen": False, "show": True, "canSetup": None, "adminChecking": True}
     extra = dict(_folder_rows(), **{"GET /api/folders/intro": checking, "POST /api/folders/intro/seen": {"seen": True}})
     now = _smoke(tmp_path, "new", [], extra=extra, actions=pick)
-    assert "관리자인지 확인하는 중이야." in now["text"] and "프로젝트 준비" in now["text"] and "needs 준비하기" in now["text"]
+    assert "관리자인지 확인하는 중이에요." in now["text"] and "프로젝트 준비" in now["text"] and "needs 준비하기" in now["text"]
     for gone in ("만들기", "확인하지 못했어", "표준 구조를 만들까", "만들어지는 것"):
         assert gone not in now["text"], gone
     assert "[data-intro-ok]" not in now["dump"] and not [p for p in now["posts"] if p[1] == "/api/folders/intro/seen"]  # 단추도 seen 도 아직 없다
-    for can, want, tail in ((True, "표준 구조를 만들까? 한 번만 하면 돼", ""), (False, "관리자에게 준비해 달라고 말해 줘.", ""), (None, "관리자에게 준비해 달라고 말해 줘.", "(관리자인지 확인하지 못했어)")):
+    for can, want, tail in ((True, "표준 구조를 만들까요? 한 번만 하면 돼요", ""), (False, "관리자에게 준비해 달라고 말해 주세요.", ""), (None, "관리자에게 준비해 달라고 말해 주세요.", "(관리자인지 확인하지 못했어요)")):
         done = {"ready": "no", "seen": False, "show": True, "canSetup": can, "adminChecking": False}
         got = _smoke(tmp_path, "new", [], extra=extra, actions=pick + [{"set": {"GET /api/folders/intro": done}}, {"wait": 1800}])
-        assert want in got["text"] and "확인하는 중이야" not in got["text"] and tail in got["text"], can
+        assert want in got["text"] and "확인하는 중이에요" not in got["text"] and tail in got["text"], can
         assert len([p for p in got["posts"] if p[1] == "/api/folders/intro/seen"]) == 1, can
     # 10번을 다시 물어도 못 읽으면 확인 못 함 화면(여기선 시간을 줄일 수 없어 코드 상수만 확인한다)
     app = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -2406,14 +2429,14 @@ def test_new_task_start_success_moves_to_the_session_screen(tmp_path):
     assert got["path"] == "/s/s9" and "작업을 시작했어" not in got["text"] and "작업 화면으로 이동" not in got["text"]
     # 시작 답에 id 가 없으면 옛 링크 한 줄로 남는다(이동할 곳을 모른다)
     noid = _smoke(tmp_path, "new?id=A1", [], extra=_review_extra(_CONFIDENT_FLOW, **{"POST /api/new/A1/start": {}}), actions=[{"click": ".pill.dark.big"}])
-    assert noid["path"] == "/new" and "작업을 시작했어." in noid["text"] and "작업 화면으로 이동" in noid["text"]
+    assert noid["path"] == "/new" and "작업을 시작했어요." in noid["text"] and "작업 화면으로 이동" in noid["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_new_task_unsure_classification_blocks_start_until_user_picks_and_uses_server_names(tmp_path):
     extra = _review_extra(_UNSURE_FLOW)
     got = _smoke(tmp_path, "new?id=A1", [], extra=extra)
-    assert "어느 쪽에 더 가까운지 위에서 먼저 골라 줘." in got["text"]
+    assert "어느 쪽에 더 가까운지 위에서 먼저 골라 주세요." in got["text"]
     assert "이름X" in got["text"] and "이름Y" in got["text"] and "xx" not in got["text"] and "yy" not in got["text"]  # id 대신 서버가 준 이름
     assert got["ariaDisabled"] == ["이대로 시작"] and "이대로 시작" not in got["disabledButtons"]  # disabled 가 아니라 aria-disabled
     # 막힌 단추를 누르면 시작하지 않고 고르는 카드로 화면을 옮기고 그 안 첫 단추에 초점을 둔다
@@ -2430,9 +2453,9 @@ def test_new_task_unsure_classification_blocks_start_until_user_picks_and_uses_s
 def test_new_task_unknown_kind_says_ai_decides_the_order_and_same_folder_warning_counts_only_working_sessions(tmp_path):
     unknown = [{"click": "[data-kind]", "index": 8}]  # 종류 칸 아홉 개 중 아홉째가 '잘 모르겠어'
     got = _smoke(tmp_path, "new", [], extra={"GET /api/folders/last": {"path": "C:/w/proj"}}, actions=unknown)
-    assert "AI가 요청을 읽고 어떤 순서로 할지 정해 줘." in got["text"] and "그 도구 스킬로 바로 시작해" not in got["text"]
+    assert "AI가 요청을 읽고 어떤 순서로 할지 정해 줘요." in got["text"] and "그 도구 스킬로 바로 시작해" not in got["text"]
     tool = _smoke(tmp_path, "new", [], extra={"GET /api/folders/last": {"path": "C:/w/proj"}}, actions=[{"click": "[data-kind]", "index": 2}])  # 사용자 매뉴얼
-    assert "정해진 순서 없이 그 도구 스킬로 바로 시작해." in tool["text"]  # 도구 스킬 종류는 그대로
+    assert "이 종류는 정해진 순서 없이 그 도구 스킬로 바로 시작해요." in tool["text"]  # 도구 스킬 종류는 그대로
     last = {"GET /api/folders/last": {"path": "C:/w/proj"}}
     for status, warn in (("idle", False), ("waiting", False), ("ended", False), ("running", True), ("starting", True)):
         got = _smoke(tmp_path, "new", [_session("s1", status=status)], extra=last)
@@ -2454,7 +2477,7 @@ def test_new_task_prepare_screen_not_shown_when_seen_ready_or_unknown(tmp_path):
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_docs_screen_groups_files_and_has_menu(tmp_path):
     got = _smoke(tmp_path, "docs", [_session("s1")])
-    for need in ("내가 만든 문서", "아직 양식으로 뽑은 산출물이 없어."):  # #1067: 기본 시험 세션의 파일은 SRS.md 하나뿐이라 양식 파일이 없다
+    for need in ("내가 만든 문서", "아직 양식으로 뽑은 산출물이 없어요."):  # #1067: 기본 시험 세션의 파일은 SRS.md 하나뿐이라 양식 파일이 없다
         assert need in got["text"], need
     assert "SRS.md" not in got["text"] and "요구사항 · 설계" not in got["text"]
     assert "산출물" in got["head"] and "GET /api/sessions/s1/files?cache=1" in got["calls"]  # 새 서버 API 없이 세션별 문서 목록을 모은다(서버 기억을 쓰는 ?cache=1, #793)
@@ -2469,7 +2492,7 @@ def test_settings_screen_matches_design(tmp_path):
     assert dump.count("<button.scale>") == 3 and dump.count("<button.radio>") >= 1  # 시안 .seg / .radio 모양, 기본 위젯 없음
     assert "<select" not in dump and "<input" not in dump
     assert "화면 밝기" not in text  # 다크 한 벌뿐이라 넣지 않았다
-    assert dump.count("<button.swrow>") == 4 and "내 차례가 오면" in text and "헤더에 계정 한도 보이기" in text  # 알림 스위치 셋(#651, 별도 시험에서 본다) + 한도 표시 하나(#1039)
+    assert dump.count("<button.swrow>") == 4 and "답을 기다리는 일이 생기면" in text and "헤더에 계정 한도 보이기" in text  # 알림 스위치 셋(#651, 별도 시험에서 본다) + 한도 표시 하나(#1039)
     assert "연결돼 있어" in text and "준비 여부 확인 못 함" in text  # 조건 값이 없으면 준비됐다고 단정하지 않는다
 
 
@@ -2481,7 +2504,7 @@ def test_settings_ask_range_has_three_steps_tied_to_server_and_default_permissio
     got = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(perms, **{"GET /api/settings/ask": {"level": "needed"}}))
     text, dump = got["text"], got["dump"]
     for need in ("AI가 묻는 범위", "꼭 필요할 때만 (권장)", "문서를 바꿀 때마다", "모든 명령마다",
-                 "어떤 걸 골라도 위험한 일(main에 바로 올리기 · 강제 덮어쓰기 · SAP 운영 쓰기)은 하네스가 막아."):
+                 "어떤 걸 골라도 위험한 일(main에 바로 올리기 · 강제 덮어쓰기 · SAP 운영 쓰기)은 하네스가 막아요."):
         assert need in text, need
     # 시안 G-19: 설정엔 "AI가 묻는 범위" 하나만. 권한 모드(계획만·auto 포함)는 새 작업 고급 설정에서 고른다
     assert "기본 권한" not in text and "data-perm-opt" not in dump
@@ -2494,12 +2517,12 @@ def test_settings_ask_range_has_three_steps_tied_to_server_and_default_permissio
                   actions=[{"click": "[data-ask-opt=edits]"}])
     assert any(p[0] == "PUT" and p[1] == "/api/settings/ask" and '"level":"edits"' in p[2].replace(" ", "") for p in pick["posts"]), pick["posts"]
     # 서버가 설정 파일을 못 읽어 가장 엄격한 단계로 물러났으면 그 이유를 보인다
-    strict = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(perms, **{"GET /api/settings/ask": {"level": "all", "problem": "설정을 읽지 못해 모든 명령마다 물어"}}))
-    assert "설정을 읽지 못해 모든 명령마다 물어" in strict["text"]
+    strict = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(perms, **{"GET /api/settings/ask": {"level": "all", "problem": "설정을 읽지 못해 모든 명령마다 물어요"}}))
+    assert "설정을 읽지 못해 모든 명령마다 물어요" in strict["text"]
     assert "설정을 읽지 못해" not in text  # 정상이면 안 보인다
     # 서버 설정을 읽지 못하면 고르지 못하게 둔다(고른 척하지 않는다)
     broken = _smoke(tmp_path, "settings", [_session("s1")], extra=perms)
-    assert "묻는 범위를 읽지 못했어" in broken["text"]
+    assert "묻는 범위를 읽지 못했어요" in broken["text"]
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "value: 'bypassPermissions'" not in app and "dangerously-skip-permissions" not in app  # bypass 는 고를 수 없다
 
@@ -2522,7 +2545,7 @@ def test_session_screen_checks_card_blocked_card_and_fold(tmp_path):
     dump, text = got["dump"], got["text"]
     assert dump.index("<section.light.talk>") < dump.index("<div.msgs>") < dump.index("<div.q.startchecks>") < dump.index("<div.msgs-list>")  # 시작 점검은 대화 맨 위 ✓ 줄 카드(같은 .msgs 안)
     assert "<div.crow.ok>" in dump and "<div.crow.todo>" in dump and "시작 점검 · 자동" in text
-    assert "<div.q.prcard.blocked>" in dump and "✕ 막힘" in text and "<div.q.prcard.unsure>" not in dump  # (아래 표시 약속 범례에도 같은 글이 있어 카드 모양으로 가린다)
+    assert "<div.q.prcard.blocked>" in dump and "✕ 막혔어요" in text and "<div.q.prcard.unsure>" not in dump  # (아래 표시 약속 범례에도 같은 글이 있어 카드 모양으로 가린다)
     # 시안에 없는 옛 칸은 모두 "자세히" 안으로 접힌다(기능은 그대로)
     fold = dump.index("<details.more.fold>")
     for block in ("<section.toolsrow>", "<select.input>", "<section.mt-64>", "<details.tech>"):  # 도구 줄 · 권한 모드 · 기록 · 기술 정보
@@ -2531,7 +2554,7 @@ def test_session_screen_checks_card_blocked_card_and_fold(tmp_path):
         assert need in text, need
     assert dump.index("<section.light.talk>") < fold
     got = _smoke(tmp_path, "s/s1", [_session("s1", flowPr=dict(_PR, checks="none"))])
-    assert "<div.q.prcard.unsure>" in got["dump"] and "? 확인 못 함" in got["text"] and "통과도 실패도 아니야" in got["text"]
+    assert "<div.q.prcard.unsure>" in got["dump"] and "? 확인하지 못했어요" in got["text"] and "통과도 실패도 아니에요" in got["text"]
 
 
 def test_third_chunk_css_and_legend():
@@ -2540,7 +2563,7 @@ def test_third_chunk_css_and_legend():
         assert needle in css, needle
     assert "border: 2px solid var(--danger)" in css and "border: 2px dashed var(--st-unk)" in css  # 막힘 = 빨간 실선, 확인 못 함 = 보라 점선
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
-    assert "표시 약속" in ui and "✕ 막힘" in ui and "? 확인 못 함" in ui and "내 차례" in ui
+    assert "표시 약속" in ui and "✕ 막혔어요" in ui and "? 확인하지 못했어요" in ui and "답을 기다리는 일" in ui
 
 
 def test_work_screen_css_blocks_and_responsive_rules():
@@ -2556,7 +2579,7 @@ def test_work_screen_css_blocks_and_responsive_rules():
 # 첫 화면(시안 01) 시험용 점검 결과
 _OK_CHECKS = [{"id": "github", "name": "GitHub 연결", "state": "ok", "detail": "me"},
               {"id": "version", "name": "하네스 판", "state": "ok", "detail": "0.10.168"},
-              {"id": "claude", "name": "Claude Code 로그인", "state": "unknown", "detail": "확인 못 함 · 콘솔이 로그인 상태를 읽을 수 없어"}]
+              {"id": "claude", "name": "Claude Code 로그인", "state": "unknown", "detail": "확인하지 못했어요 · 콘솔이 로그인 상태를 읽을 수 없어"}]
 
 
 def _start(**kw):
@@ -2567,25 +2590,25 @@ def _start(**kw):
 def test_intro_screen_first_run_and_blocking(tmp_path):
     got = _smoke(tmp_path, "", [_session("s1")], extra=_start(firstRun=True))
     text, dump = got["text"], got["dump"]
-    for need in ("처음 열었어", "Blueward Harness에 온 걸 환영해", "GitHub 연결", "하네스 판", "Claude Code 로그인", "확인 못 함", "이렇게 써", "프로젝트 고르기", "시작하기"):
+    for need in ("처음 열었어요", "Blueward Harness에 온 걸 환영해요", "GitHub 연결", "하네스 판", "Claude Code 로그인", "확인하지 못했어요", "이렇게 써요", "프로젝트 고르기", "시작하기"):
         assert need in text, need
     assert "<div.crow.ok>" in dump and "<div.crow.unk>" in dump and "다시 점검" not in text  # 확인 못 함은 ? 줄, 문제로 치지 않는다
     assert "<div.ptitle>" not in dump and "<section.light.intro-box>" in dump  # 홈을 그리지 않고 가운데 판 하나(헤더·목록은 CSS 가 숨긴다)
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     assert '#app[data-intro="1"] .top' in css and '#app[data-intro="1"] .side' in css
-    blocked = [dict(_OK_CHECKS[0], state="fail", detail="로그인이 안 돼 있어", fix="터미널에서 gh auth login 을 하고 다시 점검해 줘.")] + _OK_CHECKS[1:]
+    blocked = [dict(_OK_CHECKS[0], state="fail", detail="로그인이 안 돼 있어요", fix="터미널에서 gh auth login 을 하고 다시 점검해 주세요.")] + _OK_CHECKS[1:]
     got = _smoke(tmp_path, "", [_session("s1")], extra=_start(blocking=True, checks=blocked))  # 첫 실행이 아니어도 막는 문제면 뜬다
-    assert "먼저 고칠 게 있어" in got["text"] and "gh auth login" in got["text"] and "다시 점검" in got["text"] and "<div.crow.fail>" in got["dump"]
+    assert "먼저 고칠 게 있어요" in got["text"] and "gh auth login" in got["text"] and "다시 점검" in got["text"] and "<div.crow.fail>" in got["dump"]
     assert "시작하기" not in got["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_intro_not_shown_after_first_run_and_old_version_is_a_strip(tmp_path):
     got = _smoke(tmp_path, "", [_session("s1")], extra=_start())
-    assert "처음 열었어" not in got["text"] and "시작하기" not in got["text"]  # 이미 본 PC 는 홈이 그대로 열린다
+    assert "처음 열었어요" not in got["text"] and "시작하기" not in got["text"]  # 이미 본 PC 는 홈이 그대로 열린다
     got = _smoke(tmp_path, "", [_session("s1", pendingRequestIds=["q1"])], extra=_start(newVersion="0.10.169"),
                  requests=[{"id": "q1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "toolInput": {"command": "ls"}}])
-    assert "하네스 새 판 0.10.169" in got["ann"] and "/harness:update" in got["ann"] and "내 차례" in got["ann"]  # 내 차례 띠와 함께 둘 다 보인다
+    assert "하네스 새 판 0.10.169" in got["ann"] and "/harness:update" in got["ann"] and "답을 기다리는 일" in got["ann"]  # 답을 기다리는 일 띠와 함께 둘 다 보인다
     got = _smoke(tmp_path, "settings", [_session("s1")], extra=_start())
     assert "처음 화면 다시 보기" in got["text"]
 
@@ -2597,7 +2620,7 @@ def test_first_run_start_leads_to_project_pick_then_home_or_prepare_screen(tmp_p
     start = [{"click": "[data-intro-start]"}]
     got = _smoke(tmp_path, "", [], extra=extra, actions=start)
     text, dump = got["text"], got["dump"]
-    for need in ("1단계 · 프로젝트", "어느 고객사 프로젝트에서 일할까?", "최근에 쓴 폴더야. 처음이면 GitHub에서 받은 고객사 저장소 폴더를 골라.",
+    for need in ("1단계 · 프로젝트", "어느 고객사 프로젝트에서 일할까요?", "최근에 쓴 폴더예요. 처음이면 GitHub에서 받은 고객사 저장소 폴더를 골라 주세요.",
                  "ready2C:/p/ready2준비됨 · 세션 2", "needsC:/p/needs준비 필요", "다른 폴더 찾아보기", "뒤로", "이 프로젝트로"):
         assert need in text, need
     assert "환영해" not in text and not got["posts"]  # 아직 아무것도 기억시키지 않았다
@@ -2619,7 +2642,7 @@ def test_first_run_start_leads_to_project_pick_then_home_or_prepare_screen(tmp_p
     shown = dict(extra, **{"GET /api/folders/intro": {"ready": "no", "seen": False, "show": True}, "POST /api/folders/intro/seen": {"seen": True},
                            "POST /api/folders/last": {"path": "C:/p/needs", "name": "needs"}})
     prep = _smoke(tmp_path, "", [], extra=shown, actions=start + [{"click": "[data-pick-folder]", "index": 2}, {"click": "[data-pick-ok]"}])
-    assert prep["path"] == "/new" and "needs 준비하기" in prep["text"] and "이 폴더엔 아직 하네스 구조가 없어" in prep["text"]
+    assert prep["path"] == "/new" and "needs 준비하기" in prep["text"] and "이 폴더엔 아직 하네스 구조가 없어요" in prep["text"]
     # 안내를 이미 봤으면 홈
     seen = dict(shown, **{"GET /api/folders/intro": {"ready": "no", "seen": True, "show": False}})
     home = _smoke(tmp_path, "", [], extra=seen, actions=start + [{"click": "[data-pick-folder]", "index": 2}, {"click": "[data-pick-ok]"}])
@@ -2636,7 +2659,7 @@ def test_project_pick_without_recent_folders_and_settings_replay(tmp_path):
     assert "다른 폴더 찾아보기" in got["text"] and "<div.inline-row>" not in got["dump"] and "사용" not in got["text"]  # 시안 G-02: 경로 입력칸 없이 찾아보기만(선택 창을 못 열 때만 입력칸) and "<button.folder-opt.proj>" not in got["dump"]
     # 설정의 "처음 화면 다시 보기" 도 01 부터 시작해 02 로 이어진다
     again = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_start(), **_folder_rows()), actions=[{"click": "[data-intro-again]"}, {"click": "[data-intro-start]"}])
-    assert "어느 고객사 프로젝트에서 일할까?" in again["text"]
+    assert "어느 고객사 프로젝트에서 일할까요?" in again["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -2657,7 +2680,7 @@ def test_question_and_permission_screens_show_chat_and_say_box(tmp_path):
     dump, text = got["dump"], got["text"]
     assert "구매오더 앱 써 줘" in text and "두 가지만 물어볼게." in text and "AI에게 말하기" in text
     assert text.index("구매오더 앱 써 줘") < text.index("얼마나 급해?") < text.index("답 보내기") < text.index("AI에게 말하기")  # 대화 -> 질문 카드 -> 답 보내기 -> 말하기
-    assert "<input.input.q-other>" in dump and "<label.sr-only>" in dump and "다른 답이 있으면 직접 적어 줘" in text  # 보이는 글 없이 입력칸 하나(label 은 sr-only)
+    assert "<input.input.q-other>" in dump and "<label.sr-only>" in dump and "다른 답이 있으면 직접 적어 주세요" in text  # 보이는 글 없이 입력칸 하나(label 은 sr-only)
     # 보낼 수 없는 세션은 입력창이 막히고 이유가 보인다
     no = _smoke(tmp_path, "r/q1", [_session("s1", pendingRequestIds=["q1"], chat=chat, canSend=False, cannotSendReason="터미널에서 연 세션이라 콘솔에서 말할 수 없어.")], [q])
     assert "터미널에서 연 세션이라 콘솔에서 말할 수 없어." in no["text"]
@@ -2671,7 +2694,7 @@ def _wn(*versions, current="0.10.186"):
 def test_whats_new_card_text_and_ok_button_posts_seen(tmp_path):
     extra = dict(_start(), **_wn(("0.10.186", ["첫 줄이야"]), ("0.10.185", ["둘째 줄이야", "셋째 줄이야"])), **{"POST /api/whats-new/seen": {"seen": "0.10.186"}})
     got = _smoke(tmp_path, "", [_session("s1")], extra=extra)
-    for need in ("하네스가 새로 바뀌었어 · 이번에 바뀐 것", "첫 줄이야", "둘째 줄이야", "알겠어"):
+    for need in ("하네스가 새로 바뀌었어요 · 이번에 바뀐 것", "첫 줄이야", "둘째 줄이야", "확인"):
         assert need in got["text"], need
     assert "0.10.186" not in got["text"] and "0.10.185" not in got["text"]  # 판 번호는 글로 보이지 않는다(#794)
     assert "더 보기" not in got["text"]
@@ -2696,23 +2719,23 @@ def test_whats_new_card_hidden_when_empty_or_first_run_and_folds_long_lists(tmp_
 def test_memory_banner_ring_and_unknown_cases(tmp_path):
     hot = {"tokens": 920000, "window": 1000000, "pct": 92}
     got = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)])
-    assert "이 세션 기억이 거의 찼어 (92%)" in got["text"] and "새 세션으로 넘기기" in got["text"] and "계속하기" in got["text"]
+    assert "이 세션 기억이 거의 찼어요 (92%)" in got["text"] and "새 세션으로 넘기기" in got["text"] and "계속하기" in got["text"]
     assert "<span.ring.pct.hot>" in got["sideDump"] and "기억92%" not in got["text"]  # 링(사이드바)은 빨강, 숫자 띠에 기억 칸은 없다
     # 80% 초과 90% 미만은 노랑 링, 배너는 없다
     got = _smoke(tmp_path, "s/s1", [_session("s1", context={"tokens": 850000, "window": 1000000, "pct": 85})])
-    assert "<span.ring.pct.warn>" in got["sideDump"] and "기억이 거의 찼어" not in got["text"]
+    assert "<span.ring.pct.warn>" in got["sideDump"] and "기억이 거의 찼어요" not in got["text"]
     # 64% 는 기본 링
     got = _smoke(tmp_path, "s/s1", [_session("s1", context={"tokens": 640000, "window": 1000000, "pct": 64})])
-    assert "<span.ring.pct>" in got["sideDump"] and "기억이 거의 찼어" not in got["text"]
+    assert "<span.ring.pct>" in got["sideDump"] and "기억이 거의 찼어요" not in got["text"]
     # 창 크기를 모르면 % 없이 토큰 수만, 배너 없음
     got = _smoke(tmp_path, "s/s1", [_session("s1", context={"tokens": 241482, "window": None, "pct": None})])
-    assert "기억이 거의 찼어" not in got["text"] and "<span.ring.unk>" in got["sideDump"]
+    assert "기억이 거의 찼어요" not in got["text"] and "<span.ring.unk>" in got["sideDump"]
     # 읽지 못했으면 지금처럼 ? 와 확인 못 함
     got = _smoke(tmp_path, "s/s1", [_session("s1")])
-    assert "<span.ring.unk>" in got["sideDump"] and "기억이 거의 찼어" not in got["text"]
+    assert "<span.ring.unk>" in got["sideDump"] and "기억이 거의 찼어요" not in got["text"]
     # 터미널 세션은 넘기기 버튼 없이 안내만
     got = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, context=hot)])
-    assert "기억이 거의 찼어" in got["text"] and "새 세션으로 넘기기" not in got["text"] and "/harness:handoff" in got["text"]
+    assert "기억이 거의 찼어요" in got["text"] and "새 세션으로 넘기기" not in got["text"] and "/harness:handoff" in got["text"]
     # 홈 표의 기억 열
     got = _smoke(tmp_path, "", [_session("s1", context=hot)])
     assert "92%" in got["text"]
@@ -2720,7 +2743,7 @@ def test_memory_banner_ring_and_unknown_cases(tmp_path):
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_memory_banner_compact_button_states_and_chat_note(tmp_path):
-    """#863: 콘솔 세션의 기억 배너와 자세히 > 기억 칸에 [요약해서 계속하기]. 일하는 중·요약 중에는 보내지 않고, 터미널 세션엔 없다."""
+    """#863: 콘솔 세션의 기억 배너와 자세히 > 기억 칸에 [요약해서 계속하기]. 일하는 중이에요·요약 중에는 보내지 않고, 터미널 세션엔 없다."""
     hot = {"tokens": 920000, "window": 1000000, "pct": 92}
     url = "POST /api/sessions/s1/compact"
     idle = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)], extra={url: {"ok": True}}, actions=[{"click": ".mem-compact"}])
@@ -2730,19 +2753,19 @@ def test_memory_banner_compact_button_states_and_chat_note(tmp_path):
     panel = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)], extra={url: {"ok": True}}, actions=[{"click": "[data-compact]", "index": 1}])  # 0 은 배너, 1 은 자세히 안의 기억 칸
     assert any(p[1].endswith("/compact") for p in panel["posts"])
     working = _smoke(tmp_path, "s/s1", [_session("s1", status="running", context=hot)], extra={url: {"ok": True}}, actions=[{"click": ".mem-compact"}])
-    assert not any(p[1].endswith("/compact") for p in working["posts"])  # 일하는 중에는 보내지 않는다
+    assert not any(p[1].endswith("/compact") for p in working["posts"])  # 일하는 중이에요에는 보내지 않는다
     squeezing = _smoke(tmp_path, "s/s1", [_session("s1", status="running", currentAction="Compact", compact={"state": "running"}, context=hot)],
                        extra={url: {"ok": True}}, actions=[{"click": ".mem-compact"}])
-    assert "기억을 요약하는 중이야" in squeezing["text"] and "요약하는 중…" in squeezing["text"]
+    assert "기억을 요약하는 중이에요" in squeezing["text"] and "요약하는 중…" in squeezing["text"]
     assert not any(p[1].endswith("/compact") for p in squeezing["posts"])
     failed = _smoke(tmp_path, "s/s1", [_session("s1", context=hot, compact={"state": "failed", "reason": "x"})])
     assert "지난번 요약은 실패했어" in failed["text"]
     term = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, context=hot)])
     assert "요약해서 계속하기" not in term["text"] and "/harness:handoff" in term["text"]
-    chat = [{"t": 1, "role": "me", "text": "요약해 줘"}, {"t": 2, "role": "note", "text": "기억을 요약했어 · 35,779 → 8,449 토큰", "tone": "ok"},
-            {"t": 3, "role": "note", "text": "기억을 요약하지 못했어", "tone": "bad"}]
+    chat = [{"t": 1, "role": "me", "text": "요약해 줘"}, {"t": 2, "role": "note", "text": "기억을 요약했어요 · 35,779 → 8,449 토큰", "tone": "ok"},
+            {"t": 3, "role": "note", "text": "기억을 요약하지 못했어요", "tone": "bad"}]
     noted = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)])
-    assert "기억을 요약했어 · 35,779 → 8,449 토큰" in noted["text"] and "<div.reqnote.chat-note>" in noted["dump"] and "기억을 요약하지 못했어" in noted["text"]
+    assert "기억을 요약했어요 · 35,779 → 8,449 토큰" in noted["text"] and "<div.reqnote.chat-note>" in noted["dump"] and "기억을 요약하지 못했어요" in noted["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -2752,7 +2775,7 @@ def test_first_run_start_survives_reload_and_memory_banner_stays_closed(tmp_path
     started = _smoke(tmp_path, "", [], extra=extra, actions=[{"click": "[data-intro-start]"}])
     assert started["ls"].get("bh-intro-page") == "project"
     reloaded = _smoke(tmp_path, "", [], extra=extra, ls=started["ls"])
-    assert "어느 고객사 프로젝트에서 일할까?" in reloaded["text"] and "환영해" not in reloaded["text"]
+    assert "어느 고객사 프로젝트에서 일할까요?" in reloaded["text"] and "환영해" not in reloaded["text"]
     back = _smoke(tmp_path, "", [], extra=extra, ls=started["ls"], actions=[{"click": "[data-pick-back]"}])
     assert "환영해" in back["text"] and "bh-intro-page" not in back["ls"]
     done = _smoke(tmp_path, "", [], extra=dict(extra, **{"POST /api/folders/last": {"path": "C:/p/ready2", "name": "ready2"}, "POST /api/start-checks/seen": {"firstRun": False}}),
@@ -2761,11 +2784,11 @@ def test_first_run_start_survives_reload_and_memory_banner_stays_closed(tmp_path
     # 기억 90% 배너: 계속하기 -> 새로고침해도 닫힘, 다른 세션은 그대로 뜬다
     hot = {"tokens": 920000, "window": 1000000, "pct": 92}
     first = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)], actions=[{"click": ".mem-stay"}])
-    assert "기억이 거의 찼어" not in first["text"] and first["ls"].get("bh-mem-ok:s1") == "1"
+    assert "기억이 거의 찼어요" not in first["text"] and first["ls"].get("bh-mem-ok:s1") == "1"
     again = _smoke(tmp_path, "s/s1", [_session("s1", context=hot)], ls=first["ls"])
-    assert "기억이 거의 찼어" not in again["text"]
+    assert "기억이 거의 찼어요" not in again["text"]
     other = _smoke(tmp_path, "s/s2", [_session("s2", context=hot)], ls=first["ls"])
-    assert "기억이 거의 찼어" in other["text"]
+    assert "기억이 거의 찼어요" in other["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -2777,23 +2800,23 @@ def test_chat_draws_hook_block_cards_two_kinds_and_fix_button(tmp_path):
     got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)])
     text, dump = got["text"], got["dump"]
     assert "<div.bad.q.blocked>" in dump and "<div.bad.q.unsure>" in dump
-    assert "✕ 막힘" in text and "하네스 검사가 막았어 · 파일 쓰기 검사" in text
-    assert "? 확인 못 함" in text and "검사를 못 해서 멈췄어 · 마무리 확인" in text
+    assert "✕ 막혔어요" in text and "하네스 검사가 막았어요 · 파일 쓰기 검사" in text
+    assert "? 확인하지 못했어요" in text and "검사를 못 해서 멈췄어요 · 마무리 확인" in text
     assert "문서가 템플릿을 따르지 않습니다." in text and "자세한 위반 목록입니다." not in text  # 첫 문장만 크게, 나머지는 접힘
     assert "고치는 법: 개요 절을 추가하십시오." in text
-    # 시안 G-16 단추: 막힘 [그렇게 고쳐 줘] [내가 직접 볼게] [검사 원문] / 확인 못 함 [검사 다시 돌리기] [관리자에게 알리기]
-    assert text.count("그렇게 고쳐 줘") == 1 and "내가 직접 볼게" in text and "검사 원문" in text
+    # 시안 G-16 단추: 막힘 [그렇게 고치기] [직접 보기] [검사 원문] / 확인 못 함 [검사 다시 돌리기] [관리자에게 알리기]
+    assert text.count("그렇게 고치기") == 1 and "직접 보기" in text and "검사 원문" in text
     assert "검사 다시 돌리기" in text and "관리자에게 알리기" in text
     assert "<button.pill.dark>" in dump and "<button.pill.dark.sm>" not in dump  # 보내는 단추는 시안의 진한 단추(보통 크기)
     unsent = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, canSend=False)])
-    assert "그렇게 고쳐 줘" not in unsent["text"] and "검사 다시 돌리기" not in unsent["text"] and "✕ 막힘" in unsent["text"]
-    assert "내가 직접 볼게" in unsent["text"] and "관리자에게 알리기" in unsent["text"]  # 보내지 않는 단추는 남는다
+    assert "그렇게 고치기" not in unsent["text"] and "검사 다시 돌리기" not in unsent["text"] and "✕ 막혔어요" in unsent["text"]
+    assert "직접 보기" in unsent["text"] and "관리자에게 알리기" in unsent["text"]  # 보내지 않는 단추는 남는다
     mine = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-self]"}])
-    assert "직접 보기로 했어." in mine["text"] and mine["text"].count("내가 직접 볼게") == 0
+    assert "직접 보기로 했어요." in mine["text"] and mine["text"].count("직접 보기") == 1  # 「직접 보기로 했어요.」 한 문장뿐 — 단추 「직접 보기」 는 사라진다
     unknown = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="새_훅")])])
-    assert "하네스 검사가 막았어 · 새_훅" in unknown["text"]  # 이름표에 없는 한글 이름은 원래 이름
+    assert "하네스 검사가 막았어요 · 새_훅" in unknown["text"]  # 이름표에 없는 한글 이름은 원래 이름
     english = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="activation_gate", text="비활성 오브젝트가 있습니다. inactiveObjects 로 확인하십시오.", fix="inactiveObjects 로 확인하십시오.")])])
-    assert "하네스 검사가 막았어 · 활성화 확인" in english["text"] and "inactiveObjects" not in english["text"] and "activation_gate" not in english["text"]  # 영문 이름은 카드에 안 나온다(#794)
+    assert "하네스 검사가 막았어요 · 활성화 확인" in english["text"] and "inactiveObjects" not in english["text"] and "activation_gate" not in english["text"]  # 영문 이름은 카드에 안 나온다(#794)
     opened = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="activation_gate", text="비활성 오브젝트가 있습니다. inactiveObjects 로 확인하십시오.", fix="inactiveObjects 로 확인하십시오.")])], actions=[{"click": "[data-block-raw]"}])
     assert "inactiveObjects" in opened["text"]  # 원문은 [검사 원문] 안에만
     repo = _smoke(tmp_path, "s/s1", [_session("s1", chat=[dict(chat[1], hook="mcp_activation_tracker", text="계속되면 jaeheeMin/blueward-harness 저장소에 이슈로 알리십시오.", fix="")])])
@@ -2819,7 +2842,7 @@ def test_block_card_body_shows_first_two_sentences_and_folds_the_rest(tmp_path):
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_blocked_session_shows_apart_from_my_turn_in_home_side_and_banner(tmp_path):
-    """#790: 막힘(✕)·확인 못 함(?)은 홈 표·사이드바·맨 위 띠에서 내 차례와 따로 보이고, 내 차례 숫자에 섞이지 않는다."""
+    """#790: 막힘(✕)·확인 못 함(?)은 홈 표·사이드바·맨 위 띠에서 답을 기다리는 일와 따로 보이고, 답을 기다리는 일 숫자에 섞이지 않는다."""
     sessions = [_session("s1", title="막힌 일", status="idle", lastBlock={"t": 2, "kind": "blocked", "open": True}),
                 _session("s2", title="못 한 일", status="idle", lastBlock={"t": 3, "kind": "cannot_check", "open": True}),
                 _session("s3", title="풀린 일", status="idle", lastBlock={"t": 4, "kind": "blocked", "open": False}),
@@ -2827,14 +2850,14 @@ def test_blocked_session_shows_apart_from_my_turn_in_home_side_and_banner(tmp_pa
     q = {"id": "q1", "sessionId": "s4", "kind": "question", "status": "pending", "toolName": "AskUserQuestion", "toolInput": {"questions": [{"question": "어느 쪽?", "options": [{"label": "가"}]}]}}
     got = _smoke(tmp_path, "", sessions, [q])
     text, dump = got["text"], got["dump"]
-    assert "<span.tagx.fail>" in dump and "<span.tagx.unk>" in dump and "✕ 막힘" in text and "? 확인 못 함" in text
-    assert text.count("가서 보기") == 2 and "내 차례1" in text  # 막힘 둘은 내 차례 숫자에 안 들어가고, 묻는 요청이 있는 세션만 내 차례
-    assert "✕ 막힘 · 고친 뒤 이어서" in got["side"] and "? 확인 못 함 · 검사를 못 했어" in got["side"]  # 사이드바
+    assert "<span.tagx.fail>" in dump and "<span.tagx.unk>" in dump and "✕ 막혔어요" in text and "? 확인하지 못했어요" in text
+    assert text.count("가서 보기") == 2 and "답을 기다리는 일1" in text  # 막힘 둘은 답을 기다리는 일 숫자에 안 들어가고, 묻는 요청이 있는 세션만 답을 기다리는 일
+    assert "✕ 막혔어요 · 고친 뒤 이어서" in got["side"] and "? 확인하지 못했어요 · 검사를 못 했어요" in got["side"]  # 사이드바
     assert "막힌 일 1건 · 확인 못 한 검사 1건" in got["ann"]  # 시안 G-16: 둘을 세되 초록 띠 한 줄
-    assert "내 차례 1건 — “질문 일” 세션에서 답이 필요해" in got["ann"]  # 제목에 조사가 바로 붙지 않는다
+    assert "답을 기다리는 일 1건 — “질문 일” 세션이 답을 기다려요" in got["ann"]  # 제목에 조사가 바로 붙지 않는다
     # 풀린 막힘(뒤에 말이 이어짐)과 목록이 열림 여부를 안 알려 주는 옛 서버는 막힘으로 치지 않는다
     calm = _smoke(tmp_path, "", [_session("s3", status="idle", lastBlock={"t": 4, "kind": "blocked", "open": False}), _session("s5", status="idle", lastBlock={"t": 4, "kind": "blocked"})])
-    assert "<span.tagx.fail>" not in calm["dump"] and "✕ 막힘" not in calm["ann"]
+    assert "<span.tagx.fail>" not in calm["dump"] and "✕ 막혔어요" not in calm["ann"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -2842,47 +2865,47 @@ def test_open_block_card_comes_before_flow_picker_and_has_next_steps(tmp_path):
     """#791: 막힘이 열려 있으면 갈래 선택·다음 단계보다 "고친 뒤 이어서" 안내가 먼저, 직접 보기 뒤 다음 할 일과 되돌리기, 원문·고치는 법 중복 없음."""
     chat = [{"t": 1, "role": "me", "text": "문서 써 줘"}, _BLOCK]
     got = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, flowId=None, flowName=None, flowSteps=[], stepIndex=0)])
-    assert "막힌 걸 고친 뒤 이어서 하자" in got["text"] and "어떤 일이야?" not in got["text"] and "그래도 먼저 일 고르기" in got["text"]
+    assert "막힌 걸 고친 뒤 이어서 해요" in got["text"] and "어떤 일이에요?" not in got["text"] and "그래도 먼저 일 고르기" in got["text"]
     skipped = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat, flowId=None, flowName=None, flowSteps=[], stepIndex=0)], actions=[{"click": "[data-hold-skip]"}])
-    assert "어떤 일이야?" in skipped["text"] and "막힌 걸 고친 뒤 이어서 하자" not in skipped["text"]
+    assert "어떤 일이에요?" in skipped["text"] and "막힌 걸 고친 뒤 이어서 해요" not in skipped["text"]
     # 막힘이 풀리면(뒤에 AI 말) 안내가 사라진다
     solved = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat + [{"t": 4, "role": "ai", "text": "고쳤어."}], flowId=None, flowName=None, flowSteps=[], stepIndex=0)])
-    assert "막힌 걸 고친 뒤 이어서 하자" not in solved["text"] and "어떤 일이야?" in solved["text"]
-    # 직접 보기 뒤: 다음 할 일, [다 고쳤어, 이어서 해 줘], [다시 고르기]
+    assert "막힌 걸 고친 뒤 이어서 해요" not in solved["text"] and "어떤 일이에요?" in solved["text"]
+    # 직접 보기 뒤: 다음 할 일, [다 고쳤으니 이어서 하기], [다시 고르기]
     mine = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-self]"}])
-    assert "직접 보기로 했어." in mine["text"] and "다 고쳤어, 이어서 해 줘" in mine["text"] and "다시 고르기" in mine["text"]
+    assert "직접 보기로 했어요." in mine["text"] and "다 고쳤으니 이어서 하기" in mine["text"] and "다시 고르기" in mine["text"]
     back = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-self]"}, {"click": "[data-block-undo]"}])
-    assert "직접 보기로 했어." not in back["text"] and "내가 직접 볼게" in back["text"]
+    assert "직접 보기로 했어요." not in back["text"] and "직접 보기" in back["text"]
     # 원문을 펼쳐도 "다음:" 줄과 "고치는 법" 이 같은 글로 두 번 나오지 않는다
     raw = _smoke(tmp_path, "s/s1", [_session("s1", chat=chat)], actions=[{"click": "[data-block-raw]"}])
     assert "자세한 위반 목록입니다." in raw["text"] and raw["text"].count("개요 절을 추가하십시오.") == 1 and "다음: 개요" not in raw["text"]
     # 보낼 수 없는(터미널) 세션: 보내는 단추 대신 터미널에서 하라는 안내
-    term = _smoke(tmp_path, "s/s1", [_session("s1", chat=[_UNSURE], canSend=False, managed=False, cannotSendReason="쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어. 터미널에서 이어서 말해 줘.")])
-    assert "검사 다시 돌리기" not in term["text"] and "터미널에서 같은 일을 다시 시켜 줘" in term["text"]
+    term = _smoke(tmp_path, "s/s1", [_session("s1", chat=[_UNSURE], canSend=False, managed=False, cannotSendReason="쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어요. 터미널에서 이어서 말해 주세요.")])
+    assert "검사 다시 돌리기" not in term["text"] and "터미널에서 같은 일을 다시 시켜 주세요" in term["text"]
     term2 = _smoke(tmp_path, "s/s1", [_session("s1", chat=[_BLOCK], canSend=False, managed=False, cannotSendReason="쉬는 터미널 세션입니다.")])
-    assert "그렇게 고쳐 줘" not in term2["text"] and "터미널에서 고쳐 줘" in term2["text"] and "<p.note-attn>" in term2["dump"]
+    assert "그렇게 고치기" not in term2["text"] and "터미널에서 고쳐 주세요" in term2["text"] and "<p.note-attn>" in term2["dump"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_session_meets_trouble_records_g23(tmp_path):
     """시안 G-23: 막힘 카드 아래 비슷한 기록, 막힘이 풀리면 기록해 둘까? 카드, [기록하기] 는 눌러야 AI 초안."""
     block = {"t": 2, "role": "block", "hook": "pre-bash-git-guard", "kind": "blocked", "tool": "Bash", "text": "그냥 git push 는 쓸 수 없어.", "fix": "올리기 단계로 푸시하면 돼."}
-    chat = [{"t": 1, "role": "ai", "text": "푸시하려다 막혔어."}, block, {"t": 3, "role": "me", "text": "그렇게 고쳐 줘"}, {"t": 4, "role": "ai", "text": "다시 푸시했고 통과했어."}]
+    chat = [{"t": 1, "role": "ai", "text": "푸시하려다 막혔어."}, block, {"t": 3, "role": "me", "text": "그렇게 고치기"}, {"t": 4, "role": "ai", "text": "다시 푸시했고 통과했어."}]
     sim = {"ok": True, "slug": "o/p", "items": [{"number": 790, "repo": "o/p", "title": "deliver 가 git 명령 검사에 막힘", "solved": True}, {"number": 655, "repo": "o/p", "title": "맨손 git push 가 거절됨", "solved": False}]}
     extra = {"GET /api/trouble/similar": sim, "POST /api/trouble/ai-draft": {"id": "d-abc", "hidden": 0}}
     got = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra=extra)
     assert "비슷한 기록 2건 — #790 deliver 가 git 명령 검사에 막힘(해결됨) · #655 맨손 git push 가 거절됨(아직 안 풀림)" in got["text"]
-    assert "기록해 둘까?" in got["text"] and "방금 푼 문제를 팀 기록으로 남길까?" in got["text"] and "기록하기" in got["text"] and "괜찮아" in got["text"]
+    assert "기록해 둘까요?" in got["text"] and "방금 푼 문제를 팀 기록으로 남길까요?" in got["text"] and "기록하기" in got["text"] and "괜찮아요" in got["text"]
     assert not [p for p in got["posts"] if "ai-draft" in p[1]]  # 보기만 해서는 초안을 만들지 않는다(자동 실행 없음)
     assert any("cwd=" in c and "similar" in c for c in got["calls"])
     pressed = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra=extra, actions=[{"click": "[data-trouble-write]"}])
     assert [p[1] for p in pressed["posts"] if "ai-draft" in p[1]] == ["/api/trouble/ai-draft"] and pressed["path"] == "/troubles/new"
-    # 풀리기 전(막힘이 마지막)·일하는 중에는 제안 카드가 없다
+    # 풀리기 전(막힘이 마지막)·일하는 중이에요에는 제안 카드가 없다
     assert "기록해 둘까?" not in _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat[:2])], extra=extra)["text"]
     assert "기록해 둘까?" not in _smoke(tmp_path, "s/s1", [_session("s1", status="running", chat=chat)], extra=extra)["text"]
     # 기록 목록을 못 읽으면 "없음" 이 아니라 확인 못 함
-    unknown = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra={"GET /api/trouble/similar": {"ok": False, "reason": "GitHub 로그인이 필요해", "items": []}})
-    assert "? 비슷한 기록 확인 못 함 · GitHub 로그인이 필요해" in unknown["text"]
+    unknown = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra={"GET /api/trouble/similar": {"ok": False, "reason": "GitHub 로그인이 필요해요", "items": []}})
+    assert "? 비슷한 기록을 확인하지 못했어요 · GitHub 로그인이 필요해요" in unknown["text"]
     # 초안을 못 만들면 이유와 빈 칸 쓰기를 보인다(지어내지 않는다)
     failed = _smoke(tmp_path, "s/s1", [_session("s1", status="idle", chat=chat)], extra={"GET /api/trouble/similar": sim}, actions=[{"click": "[data-trouble-write]"}])
     assert "빈 칸으로 쓰기" in failed["text"] and failed["path"] != "/troubles/new"
@@ -2902,7 +2925,7 @@ def _notify_env(permission, cfg=None, **env):
 def test_settings_notify_group_shows_three_switches_and_permission_line(tmp_path):
     got = _smoke(tmp_path, "settings", [_session("s1")], extra=_notify_env("granted", {"turn": True, "blocked": False, "done": False}))
     text, dump = got["text"], got["dump"]
-    for need in ("알림", "내 차례가 오면", "막히거나 확인 못 한 일이 생기면", "AI가 일을 끝낼 때마다", "브라우저 알림 · 허용됨", "콘솔 탭이 열려 있을 때만"):
+    for need in ("알림", "답을 기다리는 일이 생기면", "막히거나 확인 못 한 일이 생기면", "AI가 일을 끝낼 때마다", "브라우저 알림 · 허용됨", "콘솔 탭이 열려 있을 때만"):
         assert need in text, need
     assert dump.count("<button.swrow>") == 4 and "<input" not in dump  # 기본 checkbox 가 아니라 스위치 모양(알림 셋 + 한도 표시 하나(#1039))
     assert dump.count("<i.sw.on>") == 1  # 서버에 저장된 값(turn)만 켜져 있다
@@ -2920,11 +2943,11 @@ def test_settings_notify_first_switch_asks_permission_and_saves_only_when_grante
     assert ok["dump"].count("<i.sw.on>") == 1
     no = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("default", ask="denied"), **saved), actions=sw)
     assert no["asked"] == 1 and not [p for p in no["posts"] if p[0] == "PUT"] and "<i.sw.on>" not in no["dump"]  # 막히면 켠 채 두지 않는다
-    assert "브라우저가 알림을 막았어 · 주소창 왼쪽 자물쇠에서 알림을 허용해 줘" in no["text"]
+    assert "브라우저가 알림을 막았어요 · 주소창 왼쪽 자물쇠에서 알림을 허용해 주세요" in no["text"]
     denied = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("denied"), **saved), actions=sw)
     assert denied["asked"] == 0 and not [p for p in denied["posts"] if p[0] == "PUT"] and "주소창 왼쪽 자물쇠" in denied["text"]
     gone = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("absent"), **saved), actions=sw)
-    assert "이 브라우저는 알림을 지원하지 않아" in gone["text"] and not [p for p in gone["posts"] if p[0] == "PUT"]
+    assert "이 브라우저는 알림을 지원하지 않아요" in gone["text"] and not [p for p in gone["posts"] if p[0] == "PUT"]
     off = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("granted", dict(_OFF, turn=True)), **{"PUT /api/settings/notify": _OFF}), actions=sw)
     assert any(p[0] == "PUT" and '"turn":false' in p[2].replace(" ", "") for p in off["posts"]) and off["asked"] == 0  # 끄는 건 묻지 않는다
 
@@ -2935,7 +2958,7 @@ def test_settings_notify_state_line_tells_waiting_dismissed_denied_and_granted_a
     saved = {"PUT /api/settings/notify": dict(_OFF, turn=True)}
     # 허용창에 답 없이 닫으면(default 로 돌아옴) 켜진 걸로 보이지 않고 닫았다고 말한다
     shut = _smoke(tmp_path, "settings", [_session("s1")], extra=dict(_notify_env("default", ask="default"), **saved), actions=sw)
-    assert "허용창을 답 없이 닫았어 (아직 안 켜졌어)" in shut["text"] and "<i.sw.on>" not in shut["dump"] and not [p for p in shut["posts"] if p[0] == "PUT"]
+    assert "허용창을 답 없이 닫았어요 (아직 안 켜졌어요)" in shut["text"] and "<i.sw.on>" not in shut["dump"] and not [p for p in shut["posts"] if p[0] == "PUT"]
     # 막힘: 켜는 법 한 줄. 서버엔 켜 둔 값이 있어도 켜짐으로 그리지 않고 따로 경고한다
     denied = _smoke(tmp_path, "settings", [_session("s1")], extra=_notify_env("denied", dict(_OFF, turn=True)))
     assert "막힘 · 알림이 오지 않아" in denied["text"] and "브라우저 설정의 사이트 알림" in denied["text"]
@@ -2977,24 +3000,24 @@ def _change(sid, **fields):
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_notify_sends_once_per_event_and_skips_first_list_visible_tab_and_off_switches(tmp_path):
-    # 첫 목록(이미 내 차례)은 기준만 잡고 보내지 않는다
+    # 첫 목록(이미 답을 기다리는 일)은 기준만 잡고 보내지 않는다
     assert _live(tmp_path, [_session("s1", group="todo")], [])["notes"] == []
-    # running -> idle: 끝남 한 번
+    # running -> idle: 끝났어요 한 번
     got = _live(tmp_path, [_session("s1", group="running")], _change("s1", group="idle"))
-    assert [n["title"] for n in got["notes"]] == ["AI가 끝냈어 · 구매오더 조회 앱 요구사항"] and got["notes"][0]["tag"] == "bh-done-s1"
+    assert [n["title"] for n in got["notes"]] == ["AI가 끝냈어요 · 구매오더 조회 앱 요구사항"] and got["notes"][0]["tag"] == "bh-done-s1"
     # 같은 상태로 다시 와도 더 보내지 않는다
     again = _live(tmp_path, [_session("s1", group="running")], _change("s1", group="idle") + _change("s1", group="idle"))
     assert len(again["notes"]) == 1
-    # 새 요청(질문): 내 차례 한 번, 본문은 질문, 누르면 창을 앞으로 하고 /r/<id> 로 간다
+    # 새 요청(질문): 답을 기다리는 일 한 번, 본문은 질문, 누르면 창을 앞으로 하고 /r/<id> 로 간다
     q = {"id": "q9", "sessionId": "s1", "kind": "question", "status": "pending", "questions": [{"question": "무엇을?"}]}
     got = _live(tmp_path, [_session("s1", group="running")], _change("s1", group="todo", pendingRequestIds=["q9"]) + [{"clickNote": 0}],
                 requests=[q])
-    assert [n["title"] for n in got["notes"]] == ["내 차례야 · 구매오더 조회 앱 요구사항"] and got["notes"][0]["body"] == "질문"
+    assert [n["title"] for n in got["notes"]] == ["답을 기다려요 · 구매오더 조회 앱 요구사항"] and got["notes"][0]["body"] == "질문"
     assert got["focused"] == 1 and got["path"] == "/r/q9"
     # 새 막힘 / 확인 못 함
     blk = _change("s1", lastBlock={"t": 50, "kind": "blocked"}) + _change("s1", lastBlock={"t": 60, "kind": "cannot_check"}) + _change("s1", lastBlock={"t": 60, "kind": "cannot_check"})
     got = _live(tmp_path, [_session("s1", lastBlock={"t": 40, "kind": "blocked"})], blk)
-    assert [n["title"].split(" · ")[0] for n in got["notes"]] == ["막혔어", "확인 못 함"]
+    assert [n["title"].split(" · ")[0] for n in got["notes"]] == ["막혔어요", "확인하지 못했어요"]
     # 끈 스위치 / 보이는 탭은 보내지 않는다
     assert _live(tmp_path, [_session("s1", group="running")], _change("s1", group="idle"), cfg=_OFF)["notes"] == []
     assert _live(tmp_path, [_session("s1", group="running")], _change("s1", group="idle"), visible=True)["notes"] == []
@@ -3014,7 +3037,7 @@ def test_header_keeps_work_menu_and_project_name_without_sessions(tmp_path):
     assert "harness-sandbox" in new["head"] and "Work/" not in new["head"]
 
 
-_IDLE_TERMINAL = "쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어. 터미널에서 이어서 말해 줘."
+_IDLE_TERMINAL = "쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어요. 터미널에서 이어서 말해 주세요."
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -3040,7 +3063,7 @@ def test_idle_terminal_notice_once_and_casual(tmp_path):
     for flow in ({}, {"turnSkill": "deliver"}):
         got = _smoke(tmp_path, "s/s1", [_session("s1", managed=False, canSend=False, cannotSendReason=_IDLE_TERMINAL, **flow)])
         # 아래 "콘솔에서 이어 가기" 칸과 어긋나지 않게 그 칸을 가리키는 말로 한 번만(#867)
-        shown = "쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어. 터미널에서 이어서 말하거나, 아래에서 콘솔로 이어 가."
+        shown = "쉬는 터미널 세션이라 여기서는 새로 시킬 수 없어요. 터미널에서 이어서 말하거나, 아래에서 콘솔로 이어 가세요."
         assert got["text"].count(shown) == 1 and _IDLE_TERMINAL not in got["text"], (flow, got["text"].count(shown))
     assert "입니다" not in _IDLE_TERMINAL and "십시오" not in _IDLE_TERMINAL
 
@@ -3069,7 +3092,7 @@ def test_idle_terminal_resume_panel_follows_the_liveness_check(tmp_path):
     alive =_smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=live("alive", "열림"))
     assert "아직 열려 있어" in alive["text"] and "두 갈래로 갈라져" in alive["text"] and "터미널이 닫힌 걸 확인했어" not in alive["text"]
     unknown = _smoke(tmp_path, "s/s1", [_session("s1", **_TERM)], extra=live("unknown", "세션 목록을 못 읽어."))
-    assert "세션 목록을 못 읽어." in unknown["text"] and "“갈라서 이어 가기” 를 써 줘" in unknown["text"]
+    assert "세션 목록을 못 읽어." in unknown["text"] and "“갈라서 이어 가기” 를 써 주세요" in unknown["text"]
     managed = _smoke(tmp_path, "s/s1", [_session("s1")])
     assert not [c for c in managed["calls"] if c.endswith("/liveness")] and "터미널이 닫힌 걸 확인했어" not in managed["text"]  # 콘솔 세션엔 확인도 없다(칸은 숨김)
     forked = _smoke(tmp_path, "s/s2", [_session("s2", forkedFrom="s1")])
@@ -3108,8 +3131,8 @@ def test_secret_values_are_masked_in_chat_and_record_form(tmp_path):
                   actions=[{"type": "[aria-label=symptom]", "value": "ATC 막힘\nclient_secret=abcd1234efgh"}])
     assert form["values"] == ["ATC 막힘\nclient_secret=••••••••"], form["errors"]  # 입력칸 값이 실제로 바뀐다
     # 시안 G-22 의 비밀 줄 카드는 "가렸어" 로 보인다. 가린 값은 비밀이 아니니 [GitHub 에 올리기] 는 잠그지 않고, 같은 말을 하는 아래 알림 줄은 비운다.
-    assert "비밀번호·키처럼 보이는 글이 있어 · 가렸어" in form["text"] and "증상 2번째 줄의 값을 •••••••• 로 바꿨어." in form["text"], form["text"]
-    assert "올리기 전에 지워 줘" not in form["text"] and "비밀처럼 보이는 값을 가렸어." not in form["text"]
+    assert "비밀번호·키처럼 보이는 글이 있어요 · 가렸어요" in form["text"] and "증상 2번째 줄의 값을 •••••••• 로 바꿨어요." in form["text"], form["text"]
+    assert "올리기 전에 지워 주세요" not in form["text"] and "비밀처럼 보이는 값을 가렸어요." not in form["text"]
     assert "비밀번호처럼 보이는 줄을 지워 줘" not in form["text"] and "비어 있는 칸: 프로젝트, 제목" in form["text"]  # 못 올리는 까닭은 빈 칸뿐이다(비밀 때문이 아니다)
     assert not [p for p in form["posts"] if "abcd1234efgh" in p[2]]  # 서버로 원래 값이 가지 않는다
     gone = _smoke(tmp_path, "troubles/new", [], extra={"GET /api/trouble": {"loading": False, "projects": [{"ok": True, "name": "r", "repo": "o/r"}], "stats": {"open": 0}},
@@ -3137,7 +3160,7 @@ def test_rewind_button_only_on_console_messages_and_blocked_while_running(tmp_pa
     old = _smoke(tmp_path, "s/s1", [_session("s1", chat=[{"t": 1, "role": "me", "text": "uuid 없는 옛 말"}])])
     assert "이 요청 이전으로 되돌리기" not in old["text"]
     run = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat(), status="running")])
-    # 일하는 중·끝난 세션은 내 말마다 잠긴 단추·안내를 붙이지 않는다(시안 G-18)
+    # 일하는 중이에요·끝난 세션은 내 말마다 잠긴 단추·안내를 붙이지 않는다(시안 G-18)
     assert "이 요청 이전으로 되돌리기" not in run["text"] and "되돌릴 수 없어" not in run["text"] and "<div.rewind>" not in run["dump"]
     ended = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat(), status="ended")])
     assert "이 요청 이전으로 되돌리기" not in ended["text"] and "되돌릴 수 없어" not in ended["text"]
@@ -3148,14 +3171,14 @@ def test_rewind_card_lists_files_and_limits_then_rewinds(tmp_path):
     api = {"POST /api/sessions/s1/rewind": {"canRewind": True, "error": "", "filesChanged": ["a.txt", "docs/b.md"], "insertions": 3, "deletions": 5, "dryRun": True}}
     got = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=api, actions=[{"click": "[data-rewind-open]"}])
     text = got["text"]
-    for need in ("되돌리기 확인", "파일 2개", "a.txt", "docs/b.md", "추가했던 3줄", "지웠던 5줄", "대화 내용은 그대로", "커밋하거나 푸시한 것은 안 돌아가.", "되돌리기", "취소"):
+    for need in ("되돌리기 확인", "파일 2개", "a.txt", "docs/b.md", "추가했던 3줄", "지웠던 5줄", "대화 내용은 그대로", "커밋하거나 푸시한 것은 안 돌아가요.", "되돌리기", "취소"):
         assert need in text, need
     first = [p for p in got["posts"] if p[1].endswith("/rewind")]
     assert len(first) == 1 and '"dryRun":true' in first[0][2].replace(" ", "")
     done = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=api, actions=[{"click": "[data-rewind-open]"}, {"click": "[data-rewind-go]"}])
     posts = [p for p in done["posts"] if p[1].endswith("/rewind")]
     assert len(posts) == 2 and "dryRun" not in posts[1][2] and "u-1" in posts[1][2]
-    assert "되돌렸어." in done["text"] and "대화는 그대로야" in done["text"]
+    assert "되돌렸어요." in done["text"] and "대화는 그대로예요" in done["text"]
     cancel = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=api, actions=[{"click": "[data-rewind-open]"}, {"click": "[data-rewind-cancel]"}])
     assert "되돌리기 확인" not in cancel["text"] and len([p for p in cancel["posts"] if p[1].endswith("/rewind")]) == 1  # 취소는 서버에 아무것도 안 보낸다
 
@@ -3164,7 +3187,7 @@ def test_rewind_card_lists_files_and_limits_then_rewinds(tmp_path):
 def test_rewind_shows_claude_reason_and_does_not_pass_silently(tmp_path):
     no = {"POST /api/sessions/s1/rewind": {"canRewind": False, "error": "File rewinding is not enabled.", "filesChanged": [], "insertions": 0, "deletions": 0, "dryRun": True}}
     got = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=no, actions=[{"click": "[data-rewind-open]"}])
-    assert "되돌릴 수 없어. 이유: File rewinding is not enabled." in got["text"] and "data-rewind-go" not in got["dump"]
+    assert "되돌릴 수 없어요. 이유: File rewinding is not enabled." in got["text"] and "data-rewind-go" not in got["dump"]
     empty = {"POST /api/sessions/s1/rewind": {"canRewind": True, "error": "", "filesChanged": [], "insertions": 0, "deletions": 0, "dryRun": True}}
     e = _smoke(tmp_path, "s/s1", [_session("s1", chat=_rewind_chat())], extra=empty, actions=[{"click": "[data-rewind-open]"}])
     assert "되돌릴 게 없어" in e["text"] and "data-rewind-go" not in e["dump"]
@@ -3191,8 +3214,8 @@ def test_elicitation_form_draws_fields_and_send_needs_required(tmp_path):
     sess = [_session("s1", pendingRequestIds=["e1"])]
     got = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM])
     text, dump = got["text"], got["dump"]
-    for need in ("연결 도구(asksrv)가 묻는 것", "좋아하는 색과 팀 인원을 알려 줘", "꼭 채워야 해", "안 채워도 돼", "빨강", "파랑", "팀 인원", "메모", "동의", "예", "아니오", "보내기", "거절", "닫기",
-                 "내 답을 기다리는 중", "아직 채우지 못한 항목이 1개 있어."):
+    for need in ("연결 도구(asksrv)가 묻는 것", "좋아하는 색과 팀 인원을 알려 줘", "꼭 채워야 해요", "안 채워도 돼요", "빨강", "파랑", "팀 인원", "메모", "동의", "예", "아니오", "보내기", "거절", "닫기",
+                 "답을 기다려요", "아직 채우지 못한 항목이 1개 있어요."):
         assert need in text, need
     assert dump.count("<button.qopt>") == 4 and "<div.qgroup>" in dump and "<div.q>" in dump and "<input.input.q-other>" in dump
     assert "보내기" in got["disabledButtons"] and "거절" not in got["disabledButtons"] and "닫기" not in got["disabledButtons"]
@@ -3215,7 +3238,7 @@ def test_elicitation_defaults_prefill_only_matching_values(tmp_path):
     bad = [dict(_ELICIT_FIELDS[0], default="green"), dict(_ELICIT_FIELDS[1], default="7"), dict(_ELICIT_FIELDS[2], default=3), dict(_ELICIT_FIELDS[3], default="yes")]
     form2 = dict(_ELICIT_FORM, elicitation=dict(_ELICIT_FORM["elicitation"], fields=bad))
     got = _smoke(tmp_path, "r/e1", sess, [form2])
-    assert "보내기" in got["disabledButtons"] and "아직 채우지 못한 항목이 1개 있어." in got["text"]  # 꼭 채울 색이 비어 있다
+    assert "보내기" in got["disabledButtons"] and "아직 채우지 못한 항목이 1개 있어요." in got["text"]  # 꼭 채울 색이 비어 있다
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -3236,27 +3259,27 @@ def test_elicitation_form_posts_values_and_decline_cancel(tmp_path):
                   actions=[{"click": ".qopt", "index": 1}, {"type": ".q-other", "value": "4", "index": 0}, {"type": ".q-other", "value": "a@b.kr", "index": 1},
                            {"click": ".qopt", "index": 2}, {"click": "[data-elicit-send]"}])
     assert sent["posts"] == [["POST", "/api/requests/e1/answer", '{"action":"accept","content":{"color":"blue","size":4,"note":"a@b.kr","ok":true}}']]
-    assert "답을 보냈어." in sent["text"]
+    assert "답을 보냈어요." in sent["text"]
     no = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM], extra=route, actions=[{"click": "[data-elicit-decline]"}])
-    assert no["posts"] == [["POST", "/api/requests/e1/answer", '{"action":"decline"}']] and "거절했어." in no["text"]
+    assert no["posts"] == [["POST", "/api/requests/e1/answer", '{"action":"decline"}']] and "거절했어요." in no["text"]
     cut = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM], extra=route, actions=[{"click": "[data-elicit-cancel]"}])
-    assert cut["posts"] == [["POST", "/api/requests/e1/answer", '{"action":"cancel"}']] and "닫았어." in cut["text"]
+    assert cut["posts"] == [["POST", "/api/requests/e1/answer", '{"action":"cancel"}']] and "닫았어요." in cut["text"]
     fail = _smoke(tmp_path, "r/e1", sess, [_ELICIT_FORM], actions=[{"click": "[data-elicit-decline]"}])  # 길이 없으면 404
-    assert "이미 처리된 질문이야." in fail["text"]
+    assert "이미 처리된 질문이에요." in fail["text"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_elicitation_url_mode_links_only_http_and_sends_without_content(tmp_path):
     sess = [_session("s1", pendingRequestIds=["e2"])]
     shown = _smoke(tmp_path, "r/e2", sess, [_elicit_url("https://example.com/login")])
-    assert ["https://example.com/login", "_blank", "noopener noreferrer"] in shown["links"] and "열 수 없는 주소야" not in shown["text"]
-    assert "연결 도구(asksrv)가 묻는 것" in shown["text"] and "다 했어" in shown["text"]
+    assert ["https://example.com/login", "_blank", "noopener noreferrer"] in shown["links"] and "열 수 없는 주소예요" not in shown["text"]
+    assert "연결 도구(asksrv)가 묻는 것" in shown["text"] and "다 했어요" in shown["text"]
     ok = _smoke(tmp_path, "r/e2", sess, [_elicit_url("https://example.com/login")], extra={"POST /api/requests/e2/answer": {}}, actions=[{"click": "[data-elicit-send]"}])
     assert ok["posts"] == [["POST", "/api/requests/e2/answer", '{"action":"accept"}']]
     for bad in ("javascript:alert(1)", "file:///C:/x", "data:text/html,x", "not a url"):
         got = _smoke(tmp_path, "r/e2", sess, [_elicit_url(bad)])
         assert all(l[0] != bad for l in got["links"]), bad  # 다른 스킴은 링크로 만들지 않는다
-        assert "열 수 없는 주소야" in got["text"] and bad in got["text"] and "다 했어" in got["text"], bad
+        assert "열 수 없는 주소예요" in got["text"] and bad in got["text"] and "다 했어요" in got["text"], bad
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -3290,7 +3313,7 @@ def test_notice_bubble_shows_most_urgent_one_line_with_dot_on_every_screen(tmp_p
     s, q = _q_session()
     for route in ("", "s/s1", "settings", "docs"):
         got = _smoke(tmp_path, route, [s], [q])
-        assert got["bubble"].startswith("내 차례 1건: 요구사항을 올릴지 정해 주세요"), (route, got["bubble"])
+        assert got["bubble"].startswith("질문 · 구매오더 조회 앱 요구사항 · 요구사항을 올릴지 정해 주세요"), (route, got["bubble"])  # 이름표 · 세션 · 내용(「답을 기다리는 일」 는 쓰지 않는다)
         assert got["dot"] == 1, route  # 알림이 있으면 단추에 점
         assert "<div.nb-bubble>" not in got["dump"]  # (말풍선은 머리줄에 있다 — 본문에 겹쳐 그리지 않는다)
     got = _smoke(tmp_path, "", [s], [q])
@@ -3302,16 +3325,16 @@ def test_notice_bubble_shows_most_urgent_one_line_with_dot_on_every_screen(tmp_p
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_notice_bubble_priority_follows_strip_order(tmp_path):
-    """말풍선 우선순위는 띠 순서: 내 차례 → 막힘 → API 오류. 막힘·오류만 있으면 막힘이 먼저."""
+    """말풍선 우선순위는 띠 순서: 답을 기다리는 일 → 막힘 → API 오류. 막힘·오류만 있으면 막힘이 먼저."""
     s, q = _q_session()
     blocked = _session("s3", title="막힌 일", status="idle", lastBlock={"t": 2, "kind": "blocked", "open": True})
     api = _session("s4", title="로그인 일", status="idle", apiIssue={"kind": "auth", "status": 401, "t": 5})
     got = _smoke(tmp_path, "", [api, blocked, s], [q])
-    assert got["bubble"].startswith("내 차례 1건:")
+    assert got["bubble"].startswith("질문 · ") and got["bubble"].endswith(" 외 2건")  # 다른 알림이 더 있으면 건수를 뒤에
     got = _smoke(tmp_path, "", [api, blocked])
-    assert got["bubble"].startswith("막힌 일 1건: “막힌 일” 세션부터 보자")
+    assert got["bubble"].startswith("막혔어요 · 막힌 일 · 고친 뒤 이어서 할 수 있어요")
     got = _smoke(tmp_path, "", [api])
-    assert got["bubble"].startswith("⚠ 오류 1건: “로그인 일” 세션 — 로그인이 풀렸어")
+    assert got["bubble"] == "오류 · 로그인 일 · 로그인이 풀렸어요"
     # 같은 알림이 홈 띠와 말풍선 두 군데 겹치지 않게 띠는 감춘다(DOM 에만 있다)
     assert got["annBubble"] == "1" and "로그인이 풀렸어" in got["ann"]  # 띠 데이터는 DOM 에 남기고(.ann-slot[data-bubble] 로 감춘다) 말풍선만 보인다
     assert got["dot"] == 1
@@ -3329,7 +3352,7 @@ def test_notice_bubble_close_remembers_by_id_and_new_notice_shows_again(tmp_path
     # 새 알림은 뜬다
     s2, p = _perm_session()
     new = _smoke(tmp_path, "", [s, s2], [q, p], extra={"__ss": {"bh-nb-dismissed": '["req:q1"]'}})
-    assert new["bubble"].startswith("내 차례 2건: 권한 일 · ") and "내 차례 2건" in new["bubble"]
+    assert new["bubble"].startswith("승인 요청 · 권한 일 · ") and new["bubble"].endswith(" 외 1건") and "답을 기다리는 일" not in new["bubble"]
     # 풀린(더는 없는) 알림의 닫은 표시는 잊어서 같은 일이 다시 생기면 다시 뜬다
     gone = _smoke(tmp_path, "", [_session("s1")], extra={"__ss": {"bh-nb-dismissed": '["req:gone","ver:9"]'}})
     assert json.loads(gone["ss"]["bh-nb-dismissed"]) == ["ver:9"]
@@ -3342,13 +3365,13 @@ def test_notice_popup_answers_permission_with_existing_answer_api(tmp_path):
     s, p = _perm_session()
     got = _smoke(tmp_path, "", [s], [p], actions=[{"click": ".nb-say"}])
     d = got["dialog"]
-    assert "승인 요청 · 권한 일" in d and "touch a" in d and "이번만 허락" in d and "하지 마" in d
+    assert "승인 요청 · 권한 일" in d and "touch a" in d and "이번만 허락" in d and "하지 않기" in d
     assert "다시 묻지 않기" not in d  # 추가될 규칙(suggestionText)을 못 보여 주면 이 단추를 두지 않는다(#1016 검토)
     assert 'role="dialog"' not in d and "<div.nb-dialog>" in got["dialogDump"]
     assert "1/" not in d  # 한 건이면 n/m 은 없다
     done = _smoke(tmp_path, "", [s], [p], extra={"POST /api/requests/p1/answer": {"ok": True}}, actions=[{"click": ".nb-say"}, {"click": "[data-k=allow]"}])
     assert ["POST", "/api/requests/p1/answer", '{"decision":"allow"}'] in done["posts"]  # 새 경로 없이 기존 응답 API
-    assert "허락했어." in done["dialog"] and "답할 알림이 더 없어" in done["dialog"]
+    assert "허락했어요." in done["dialog"] and "답할 알림이 더 없어요" in done["dialog"]
     deny = _smoke(tmp_path, "", [s], [p], extra={"POST /api/requests/p1/answer": {"ok": True}}, actions=[{"click": ".nb-btn"}, {"click": "[data-k=deny]"}])
     assert ["POST", "/api/requests/p1/answer", '{"decision":"deny"}'] in deny["posts"]
     ps = dict(p, suggestionText=["Bash(touch a:*)"])  # 추가될 규칙을 먼저 보여 줄 수 있으면 "다시 묻지 않기" 를 둔다
@@ -3358,7 +3381,7 @@ def test_notice_popup_answers_permission_with_existing_answer_api(tmp_path):
     assert "Bash(touch a:*)" in shown["dialog"] and shown["dialog"].index("Bash(touch a:*)") < shown["dialog"].index("이번만 허락")  # 규칙을 먼저 보여 준 뒤 단추
     # 응답이 실패하면 오류를 보이고 닫지 않는다(여기선 서버가 없는 요청이라고 답한 경우)
     fail = _smoke(tmp_path, "", [s], [p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=allow]"}])
-    assert "이미 처리됐거나 닫힌 요청이야" in fail["dialog"] and "이번만 허락" in fail["dialog"] and "답할 알림이 더 없어" not in fail["dialog"]
+    assert "이미 처리됐거나 닫힌 요청이에요" in fail["dialog"] and "이번만 허락" in fail["dialog"] and "답할 알림이 더 없어" not in fail["dialog"]
     assert all(p_[0] == "POST" and "/answer" in p_[1] for p_ in fail["posts"])
 
 
@@ -3369,7 +3392,7 @@ def test_notice_popup_question_options_send_answers_and_irreversible_verbs(tmp_p
     assert "질문 · 구매오더 조회 앱 요구사항" in got["dialog"] and "올려" in got["dialog"] and "나중에" in got["dialog"] and "답 보내기" not in got["dialog"]
     sent = _smoke(tmp_path, "", [s], [q], extra={"POST /api/requests/q1/answer": {"ok": True}}, actions=[{"click": ".nb-say"}, {"click": "[data-k=opt-0-1]"}])
     assert ["POST", "/api/requests/q1/answer", '{"answers":{"요구사항을 올릴지 정해 주세요":"나중에"}}'] in sent["posts"]  # 보기 하나가 곧 답
-    assert "세션에 답을 전달했어." in sent["dialog"]
+    assert "세션에 답을 전했어요." in sent["dialog"]
     # 여러 가지를 묻거나 여러 개 고르는 질문은 골라 두고 [답 보내기]
     multi = dict(q, questions=[{"question": "색은?", "multiSelect": True, "options": [{"label": "빨강"}, {"label": "파랑"}]}])
     pick = _smoke(tmp_path, "", [s], [multi], actions=[{"click": ".nb-btn"}])
@@ -3380,7 +3403,7 @@ def test_notice_popup_question_options_send_answers_and_irreversible_verbs(tmp_p
     s2, p = _perm_session()
     irrev = dict(p, risk="irreversible", riskNote="파일을 지워", toolInput={"command": "rm -rf build"})
     got = _smoke(tmp_path, "", [s2], [irrev], actions=[{"click": ".nb-btn"}])
-    assert "이번만 지워" in got["dialog"] and "지우지 마" in got["dialog"] and "다시 묻지 않기" not in got["dialog"] and "되돌릴 수 없는 일" in got["dialog"]
+    assert "이번만 지우기" in got["dialog"] and "지우지 않기" in got["dialog"] and "다시 묻지 않기" not in got["dialog"] and "되돌릴 수 없는 일" in got["dialog"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -3395,7 +3418,7 @@ def test_notice_popup_pages_between_items_and_other_kinds_open_session(tmp_path)
     nxt = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=next]"}])
     assert "2/4" in nxt["dialog"] and "승인 요청 · 권한 일" in nxt["dialog"]
     blk = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=next]"}, {"click": "[data-k=next]"}])
-    assert "3/4" in blk["dialog"] and "✕ 막힘" in blk["dialog"] and "세션 열기" in blk["dialog"]
+    assert "3/4" in blk["dialog"] and "막혔어요 · 막힌 일" in blk["dialog"] and "세션 열기" in blk["dialog"]
     err = _smoke(tmp_path, "", base, [q, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=prev]"}])  # 처음에서 이전은 끝으로
     assert "4/4" in err["dialog"] and "로그인이 풀렸어" in err["dialog"] and "/login" in err["dialog"] and "세션 열기" in err["dialog"]
     # 세션 열기는 팝업을 닫고 그 세션으로 간다
@@ -3403,7 +3426,7 @@ def test_notice_popup_pages_between_items_and_other_kinds_open_session(tmp_path)
     assert opened["dialog"] == "" and opened["path"] == "/s/s4"
     # 말풍선의 글자를 누르면 그 알림부터 연다
     api_only = _smoke(tmp_path, "", [blocked, api], actions=[{"click": ".nb-say"}])
-    assert "1/2" in api_only["dialog"] and "✕ 막힘" in api_only["dialog"]
+    assert "1/2" in api_only["dialog"] and "막혔어요 · 막힌 일" in api_only["dialog"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -3420,7 +3443,7 @@ def test_notice_popup_closes_with_esc_and_keeps_focus_inside(tmp_path):
     assert _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"click": ".nb-btn"}, {"focus": "[data-k=detail]"}, {"key": "Tab"}])["activeK"] == "prev"
     assert _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"click": ".nb-btn"}, {"focus": "[data-k=prev]"}, {"key": "Tab", "shift": True}])["activeK"] == "detail"
     empty = _smoke(tmp_path, "", [_session("s1")], actions=[{"click": ".nb-btn"}])
-    assert "지금 알릴 게 없어." in empty["dialog"]
+    assert "지금은 알릴 게 없어요." in empty["dialog"]
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -3429,9 +3452,9 @@ def test_header_shows_account_limits_or_says_unknown(tmp_path):
     now = time.time()
     far = 4102444800  # 2100년: 풀릴 시각이 지나지 않은 값
     unknown = _smoke(tmp_path, "", [_session("s1")], extra={"GET /api/account-limits": {"windows": [], "source": "rate_limit_event"}})
-    assert unknown["limits"] == "한도 알 수 없어" and "%" not in unknown["limits"] and "0% 라는 뜻이 아니야" in unknown["limitsTitle"]
+    assert unknown["limits"] == "한도 알 수 없음" and "%" not in unknown["limits"] and "0% 라는 뜻이 아니에요" in unknown["limitsTitle"]
     failed = _smoke(tmp_path, "", [_session("s1")])  # 한도 API 를 못 읽어도 0% 로 꾸미지 않는다
-    assert failed["limits"] == "한도 알 수 없어" and "읽지 못했어" in failed["limitsTitle"]
+    assert failed["limits"] == "한도 알 수 없음" and "읽지 못했어요" in failed["limitsTitle"]
     wins = [{"type": "five_hour", "status": "allowed", "utilization": 0.42, "resetsAt": far, "t": now},
             {"type": "seven_day", "status": "allowed_warning", "utilization": 0.91, "resetsAt": far, "t": now - 7200}]
     got = _smoke(tmp_path, "", [_session("s1")], extra={"GET /api/account-limits": {"windows": wins}})
@@ -3441,6 +3464,96 @@ def test_header_shows_account_limits_or_says_unknown(tmp_path):
     assert "✕ 5시간 100%" in rej["limits"]
     # 다른 화면에서도 늘 보인다
     assert "5시간 42%" in _smoke(tmp_path, "settings", [_session("s1")], extra={"GET /api/account-limits": {"windows": wins}})["limits"]
+
+
+def _post_vars(block: str) -> dict:
+    return {k: v.strip() for k, v in re.findall(r"(--[a-z0-9-]+):\s*([^;]+);", block)}
+
+
+def test_post_colors_are_assigned_by_role():
+    """Cozy Office 색은 역할로만 쓴다(2026-11-19): 주 = 남색, 알림 = 파랑, 경고 = 노랑, 오류 = 빨강, 승인/성공 = 초록, 확인 못 함 = 보라. 빨강은 로고와 오류에만."""
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    light = _post_vars(css.split(':root[data-theme="post"] {', 1)[1].split("\n}", 1)[0])
+    dark = dict(light, **_post_vars(css.split(':root[data-theme="post"][data-mode="dark"] {', 1)[1].split("\n}", 1)[0]))
+    # 옛 변수는 역할로 이어진다 — 주 버튼·고른 칸이 빨강이 아니다
+    assert light["--accent"] == "var(--pri)" and light["--btn"] == "var(--pri)" and light["--accent-fill"] == "var(--pri)" and light["--pri"] == "#24304A"
+    assert light["--attn"] == "var(--warn)" and light["--danger"] == "var(--err-fill)" and light["--st-now"] == "var(--pri)"
+    assert "--accent" not in _post_vars(css.split(':root[data-theme="post"][data-mode="dark"] {', 1)[1].split("\n}", 1)[0])  # 어두운 모드는 역할 값만 바꾼다
+    assert css.count("#C73E31") == 1 and "--brand: #C73E31" in css  # 로고 빨강 한 곳
+    # 글자 4.5:1 — 역할 글자색은 바탕·종이·옅은 바탕 위에서, 채움 위 글자는 채움 위에서(밝게·어둡게 둘 다)
+    for name, v in (("light", light), ("dark", dark)):
+        def ratio(a, b):
+            x, y = sorted((_lum(v[a] if a.startswith("--") else a), _lum(v[b] if b.startswith("--") else b)), reverse=True)
+            return (x + 0.05) / (y + 0.05)
+        for role in ("ask", "warn", "err", "ok", "unk"):
+            for ground in ("--bg", "--paper", "--surface", f"--{role}-bg"):
+                assert ratio(f"--{role}", ground) >= 4.5, (name, role, ground, ratio(f"--{role}", ground))
+        for role in ("ask", "err", "ok"):
+            assert ratio(v.get(f"--on-{role}", "#FFFFFF"), f"--{role}-fill") >= 4.5, (name, role)
+        assert ratio("--on-warn", "--warn-fill") >= 4.5 and ratio("--on-pri", "--pri") >= 4.5, name
+    # 버튼 말씨: 남색 선 + 아래 단단한 그림자, 승인(초록)·위험(빨강)은 역할 속성으로만
+    assert "border: 1.5px solid var(--btn-edge); background: var(--btn-face); color: var(--text); box-shadow: 0 2px 0 var(--btn-drop);" in css
+    assert '.pill[data-color-role="ok"] { border-color: var(--ok-fill); background: var(--ok-fill);' in css and '.pill[data-color-role="err"] { border-color: var(--err-fill); background: var(--err-fill);' in css
+    assert ':root[data-theme="post"] :focus-visible { outline: 2.5px solid var(--focus); outline-offset: 2px; }' in css
+    # 답을 기다리는 표시는 알림(파랑), 그 안에서 승인·계획은 경고, PR 검사 실패는 오류
+    assert ".po-st-turn { background: var(--ask-fill); color: var(--on-ask); }" in css and '.po-st-turn[data-color-role="warn"] { background: var(--warn-fill);' in css and '.po-st-turn[data-color-role="err"] { background: var(--err-fill);' in css
+    assert ".po-stc-err { color: var(--err); }" in css and ".prail-badge { position: absolute; top: 8px; right: 16px; width: 10px; height: 10px; border-radius: 50%; background: var(--ask-fill); }" in css
+    # 도장·결재란: 승인/성공 = 초록(전에는 강조색 빨강)
+    assert "border: 4px double var(--ok-line); color: var(--ok);" in css and "box-shadow: inset 0 0 0 1.5px var(--ok-fill);" in css
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "'data-color-role': N.allowRole(r)" in app and "'data-color-role': verbs[0] === '이번만 지우기' ? 'err' : 'ok'" in app and "'data-color-role': 'ok', disabled: busy, text: '이 계획대로 진행'" in app
+    assert "function turnTone(s)" in app and "turnTone: turnTone" in app
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert "function toneOf(it)" in home and "'data-color-role': toneOf(it)" in home
+
+
+def test_post_notice_bubble_is_a_button_colored_by_kind():
+    """햄버거 옆 알림 말풍선(Cozy Office): 종류의 역할 색 · 아이콘 · 이름표 · › 가 있는 버튼 모양, 옆 단추는 하는 일을 글자로 말한다(「나중에」 = 말풍선에서만 접기)."""
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    for tone in ("ask", "warn", "err", "ok", "unk", "info"):
+        assert f'.top .nb-bubble[data-color-role="{tone}"] {{ --bub-bg:' in css, tone
+    assert ".top .nb-say:hover span { text-decoration: none; }" in css  # 링크처럼 밑줄이 생기지 않는다
+    assert ".top .nb-bubble:has(.nb-say:hover) { transform: translateY(-1px);" in css and ".top .nb-bubble:has(.nb-say:active) { transform: translateY(2px);" in css  # 올리면 뜨고 누르면 내려간다
+    assert ".top .nb-bubble :focus-visible { outline: 2.5px solid var(--focus);" in css
+    nb = css.split("알림 말풍선: 위쪽 줄 안", 1)[1].split("새 작업(시안 new)", 1)[0]
+    assert not re.findall(r"#[0-9a-fA-F]{6}\b", re.sub(r"--bub-hover: #[0-9A-Fa-f]{6}", "", re.sub(r"/\*.*?\*/", "", nb, flags=re.S)))  # 색은 역할 변수로만(올렸을 때 채움 넷은 예외)
+    root = css.split(':root[data-theme="post"] {', 1)[1].split("\n}", 1)[0]
+    for tone in ("ask", "warn", "err", "ok"):  # 값으로 적은 올렸을 때 채움도 그 위 글자와 4.5:1
+        hov = re.search(r'\.nb-bubble\[data-color-role="%s"\] \{[^}]*--bub-hover: (#[0-9A-Fa-f]{6});' % tone, css).group(1)
+        ink = re.search(r"--on-%s: (#[0-9A-Fa-f]{6});" % tone, root).group(1)
+        assert _ratio(ink, hov) >= 4.5, (tone, ink, hov)
+    for tone in ("warn", "err"):  # 같은 일은 자리마다 같은 색: 접힌 목록 동그라미 · 차분 목록 · 세션 머리 줄도 역할을 따른다
+        assert f'.rail-ring.turn[data-color-role="{tone}"]::after {{ background: var(--{tone}-fill); }}' in css
+        assert f'.po-ml-turn[data-color-role="{tone}"] small {{ color: var(--{tone}); }}' in css
+        assert f'.eb.po-eb[data-state][data-color-role="{tone}"] {{ color: var(--{tone}); }}' in css
+    assert '.nb-dot[data-color-role="info"] { --bub-dot: var(--ask-fill);' in css and ".ptop-vdot" in css and '.nb-eb[data-color-role="info"] { --nb-tone: var(--ask);' in css  # 새 판 = 새 소식(파랑)으로 한 가지
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    host = app[app.index("function noticeHost()"):app.index("function limitEl()")]
+    assert "class: 'nb-ic'" in host and "class: 'nb-kind', text: it.word" in host and "class: 'nb-line', text: it.text" in host and "icon('chev', 14)" in host
+    assert "class: 'nb-x'" in host and "text: '나중에'" in host and "onClick: dismissBubble" in host and "이 알림 닫기" not in app
+    assert "var NB_LATER = '말풍선에서만 접어요. 알림 목록(≡)에는 남아 있어요';" in app  # ✕ 가 하던 일(지우기·읽음이 아니라 이 탭에서 말풍선만 접기)을 이름표로
+    assert "'data-color-role': it ? it.tone : null" in host and "'data-color-role': top.tone" in host  # 말풍선과 알림 단추 배지가 같은 역할 색
+    assert "return ['attn', '오류로 멈춤', 'err'];" in app and "'data-color-role': eb[2] || (stt === 'turn' ? turnTone(s) || null : null)" in app  # API 오류로 멈춘 세션의 머리 줄 = 오류 빨강
+    assert "'data-color-role': st.tone === 'attn' ? turnTone(s) || null : null, 'aria-label': say" in app and "tone: turnTone(s), station:" in app
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_notice_bubble_line_and_post_button_parts(tmp_path):
+    s, p = _perm_session()
+    got = _smoke(tmp_path, "", [s], [p])
+    assert got["bubble"] == "승인 요청 · 권한 일 · Bash 사용을 허용할까요?"  # 한 건이면 「외 N건」 이 없다
+    # Cozy Office 로 바꾸면 같은 알림이 버튼 모양으로 다시 그려진다: 이름표 · 내용 · (+N) · 「나중에」 가 따로 있다(Post 분기를 실제로 돌린다)
+    post = _smoke(tmp_path, "", [s], [p], actions=[{"theme": "post"}])
+    assert post["bubble"] == "승인 요청권한 일 · Bash 사용을 허용할까요?나중에", post["bubble"]
+    s2, q = _q_session()
+    two = _smoke(tmp_path, "", [s, s2], [p, q], actions=[{"theme": "post"}])
+    assert two["bubble"].endswith("나중에") and "+1" not in two["bubble"] and "외 1건" not in two["bubble"], two["bubble"]  # 알림이 몇 건인지는 옆 알림 단추 숫자 한 곳에만(말풍선의 +N 은 뺐다)
+    later = _smoke(tmp_path, "", [s], [p], actions=[{"theme": "post"}, {"click": ".nb-x"}])
+    assert later["bubble"] == "" and later["dot"] == 1 and any(k.startswith("req:") for k in json.loads(later["ss"].get("bh-nb-dismissed", "[]")))  # 「나중에」 = 말풍선만 접고 알림 단추의 배지는 남는다
+    blocked = _session("s3", title="막힌 일", status="idle", lastBlock={"t": 2, "kind": "cannot_check", "open": True})
+    assert _smoke(tmp_path, "", [blocked])["bubble"] == "확인하지 못했어요 · 막힌 일 · 통과도 위반도 아니에요"  # 검사 불능을 막힘으로 뭉개지 않는다
+    done = _smoke(tmp_path, "", [s], [p], extra={"POST /api/requests/p1/answer": {"ok": True}}, actions=[{"click": ".nb-say"}])
+    assert "승인 요청 · 권한 일" in done["dialog"] and "이번만 허락" in done["dialog"]
 
 
 def test_notice_assets_wired_and_css_uses_variables_only():
@@ -3480,10 +3593,10 @@ def test_notice_popup_does_not_quick_allow_what_it_cannot_show_in_full(tmp_path)
     for name, kw in cases.items():
         got = pop(**kw)["dialog"]
         assert "이번만 허락" not in got and "다시 묻지 않기" not in got, name
-        assert "팝업에서 내용을 다 보여 줄 수 없어" in got and "자세히 보기" in got and "하지 마" in got, name
+        assert "여기서 내용을 다 보여 줄 수 없어요" in got and "자세히 보기" in got and "하지 않기" in got, name
     # 계획은 [계획 보기 · 진행 정하기] 만(고쳐 달라고 하기는 이유가 필요해 전체 화면에서)
     plan = pop(toolName="ExitPlanMode", toolInput={"plan": "## 계획"})["dialog"]
-    assert "계획 보기 · 진행 정하기" in plan and "이 계획대로 진행" not in plan and "하지 마" not in plan
+    assert "계획 보기 · 진행 정하기" in plan and "이 계획대로 진행" not in plan and "하지 않기" not in plan
     # 다 보이는 명령(600자 이하)은 자르지 않고 전체를 보인다. 되돌릴 수 없는 일은 승인 화면과 같은 말
     full = "echo " + "y" * 590
     ok = pop(toolInput={"command": full})["dialog"]
@@ -3499,12 +3612,12 @@ def test_notice_popup_locks_then_moves_on_when_item_is_handled_elsewhere(tmp_pat
     handled = dict(s, status="idle", pendingRequestIds=[])
     got = _smoke(tmp_path, "", [s, s2], [q, p], actions=[{"click": ".nb-btn"}, {"set": {"GET /api/sessions/s1": handled}}, {"emit": ["session", {"id": "s1"}]}])
     assert "이 알림은 이미 처리됐어" in got["dialog"] and "이번만 허락" not in got["dialog"]  # 다음 알림을 바로 그리지 않는다
-    assert "다음 알림을 불러올게" in got["dialog"] and "허락" not in got["dialog"].replace("이미 처리됐어", "")  # 잠긴 동안은 눌러 답할 단추가 없다
+    assert "다음 알림을 불러올게요" in got["dialog"] and "허락" not in got["dialog"].replace("이미 처리됐어", "")  # 잠긴 동안은 눌러 답할 단추가 없다
     after = _smoke(tmp_path, "", [s, s2], [q, p], actions=[{"click": ".nb-btn"}, {"set": {"GET /api/sessions/s1": handled}}, {"emit": ["session", {"id": "s1"}]}, {"wait": 1300}])
     assert "이 알림은 이미 처리됐어" not in after["dialog"] and "승인 요청 · 권한 일" in after["dialog"] and "이번만 허락" in after["dialog"]
     # 내가 답해서 사라진 알림은 안내 없이 바로 다음으로(결과 안내는 한 번)
     mine = _smoke(tmp_path, "", [s, s2], [q, p], extra={"POST /api/requests/q1/answer": {"ok": True}}, actions=[{"click": ".nb-btn"}, {"click": "[data-k=opt-0-0]"}])
-    assert "이미 처리됐어" not in mine["dialog"] and "세션에 답을 전달했어." in mine["dialog"] and "승인 요청 · 권한 일" in mine["dialog"]
+    assert "이미 처리됐어" not in mine["dialog"] and "세션에 답을 전했어요." in mine["dialog"] and "승인 요청 · 권한 일" in mine["dialog"]
     # 다른 알림으로 넘기면 안내·고른 답은 비워진다
     multi = dict(q, questions=[{"question": "색은?", "multiSelect": True, "options": [{"label": "빨강"}, {"label": "파랑"}]}])
     moved = _smoke(tmp_path, "", [s, s2], [multi, p], actions=[{"click": ".nb-btn"}, {"click": "[data-k=opt-0-0]"}, {"click": "[data-k=next]"}, {"click": "[data-k=prev]"}])
@@ -3519,7 +3632,7 @@ def test_notice_dismiss_id_for_api_error_without_time_uses_kind_and_status(tmp_p
     got = _smoke(tmp_path, "", [api], actions=[{"click": ".nb-x"}])
     assert json.loads(got["ss"]["bh-nb-dismissed"]) == ["api:s4:auth:401"]
     other = _smoke(tmp_path, "", [_session("s4", title="로그인 일", status="idle", apiIssue={"kind": "other", "status": 500})], extra={"__ss": {"bh-nb-dismissed": '["api:s4:auth:401"]'}})
-    assert other["bubble"].startswith("⚠ 오류 1건")  # 종류가 다른 새 오류는 다시 뜬다
+    assert other["bubble"].startswith("오류 · 로그인 일 · 서버가 오류를 돌려줬어요")  # 종류가 다른 새 오류는 다시 뜬다
 
 
 @pytest.mark.skipif(not NODE, reason="node 없음")
@@ -3566,7 +3679,7 @@ def test_post_home_deck_restores_focus_after_redraw():
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_1042_rule_raw_json_lives_in_details_tech_info_not_in_the_card(tmp_path):
     raw = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "touch:*"}], "behavior": "allow", "destination": "session"}]
-    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "note": "touch 는 목록에 없어",
+    req = {"id": "p1", "sessionId": "s1", "kind": "permission", "status": "pending", "toolName": "Bash", "note": "touch 는 목록에 없어요",
            "toolInput": {"command": "touch a", "description": "Create the file"}, "hasSuggestions": True,
            "suggestionText": ["이 세션: 허용 규칙 추가 - Bash(touch:*)"], "suggestions": raw}
     text = _smoke(tmp_path, "r/p1", [_session("s1", pendingRequestIds=["p1"])], [req])["text"]
@@ -3585,11 +3698,11 @@ _MCP_CONN = {"state": "problem", "canReconnect": True, "servers": [
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_1042_claude_ai_connectors_fold_into_one_line_project_mcp_stays_loud(tmp_path):
     only = _smoke(tmp_path, "s/s1", [_session("s1", mcp=_MCP_CONN)])
-    assert "claude.ai 커넥터 2개가 로그인 전이야" in only["text"] and "연결이 안 된 도구가 있어" not in only["text"]
+    assert "claude.ai 커넥터 2개가 로그인 전이에요" in only["text"] and "연결이 안 된 도구가 있어요" not in only["text"]
     assert "<div.banner.mcp>" not in only["dump"] and "<details.mcp-conn>" in only["dump"]
     mixed_mcp = dict(_MCP_CONN, servers=_MCP_CONN["servers"] + [_MCP_BAD["servers"][0]])
     mixed = _smoke(tmp_path, "s/s1", [_session("s1", mcp=mixed_mcp)])
-    assert "연결이 안 된 도구가 있어" in mixed["text"] and "abap-adt — 연결하지 못했어" in mixed["text"] and "claude.ai 커넥터 2개가 로그인 전이야" in mixed["text"]
+    assert "연결이 안 된 도구가 있어요" in mixed["text"] and "abap-adt — 연결하지 못했어요" in mixed["text"] and "claude.ai 커넥터 2개가 로그인 전이에요" in mixed["text"]
     assert "<div.banner.mcp>" in mixed["dump"] and "<details.mcp-conn>" in mixed["dump"]
     assert "claude.ai Gmail — 로그인이 필요해" not in mixed["text"]  # 큰 목록에 커넥터가 따로 오르지 않는다
 
@@ -3599,11 +3712,11 @@ def test_1042_claude_ai_connectors_fold_into_one_line_project_mcp_stays_loud(tmp
 @pytest.mark.skipif(not NODE, reason="node 없음")
 def test_post_verify_c_docs_gone_folder_is_not_failure_and_not_asked_again(tmp_path):
     """작업 폴더가 없어진 세션(서버 409)은 "읽기 실패" 와 따로 "폴더가 없어 읽지 못함" 으로 알리고, 다시 그려도 또 묻지 않는다."""
-    extra = {"__status": {"GET /api/sessions/s2/files": 409}, "GET /api/sessions/s2/files": {"error": "세션의 작업 폴더가 없어."}}
+    extra = {"__status": {"GET /api/sessions/s2/files": 409}, "GET /api/sessions/s2/files": {"error": "세션의 작업 폴더가 없어요."}}
     got = _smoke(tmp_path, "docs", [_session("s1"), _session("s2", cwd="C:/w/gone")], extra=extra)
-    assert "1개 세션은 작업 폴더가 없어져서(지운 폴더 등) 문서를 읽지 못했어." in got["text"]
-    assert "세션의 문서를 읽지 못했어" not in got["text"] and "git 상태를 읽지 못해서" not in got["text"]  # 서버 오류·git 못 읽음과 섞지 않는다
-    assert "아직 양식으로 뽑은 산출물이 없어." in got["text"]
+    assert "1개 세션은 작업 폴더가 없어져서(지운 폴더 등) 문서를 읽지 못했어요." in got["text"]
+    assert "세션의 문서를 읽지 못했어요" not in got["text"] and "git 상태를 읽지 못해서" not in got["text"]  # 서버 오류·git 못 읽음과 섞지 않는다
+    assert "아직 양식으로 뽑은 산출물이 없어요." in got["text"]
     flow = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
     assert "GONE_RECHECK_MS" in flow and "goneDirs[key] = Date.now()" in flow  # 같은 세션·폴더는 잠깐 다시 묻지 않는다
 
@@ -3622,7 +3735,7 @@ out.registered = P.stateOf(s, L);
 P.useOpenIds(null);
 out.reset = P.stateOf(s, L);
 out.label = P.FILTERS.map(f => f.label).join(',');
-// 같은 순간: 내 차례 세션 2(대기 요청 2건 세션 + 올릴 차례 세션), 확인 못 함 1, 일하는 중 1, 끝남 1
+// 같은 순간: 답을 기다리는 일 세션 2(대기 요청 2건 세션 + 올릴 차례 세션), 확인 못 함 1, 일하는 중이에요 1, 끝났어요 1
 const list = [
   { id: 'q', status: 'idle', group: 'todo', pendingRequestIds: ['r2', 'r3'] },
   { id: 'd', status: 'idle', group: 'todo', turnSkill: 'deliver', pendingRequestIds: [] },
@@ -3641,11 +3754,11 @@ def test_post_verify_c_state_uses_open_ids_and_filter_name_differs_from_turn():
     r = subprocess.run([NODE, "-e", _POST_C_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     out = json.loads(r.stdout)
-    # 이미 답한 요청만 남은 세션은 내 차례가 아니다 — 직접 넘기든 화면이 알려 두든(useOpenIds) 같고, 안 알리면 서버 값을 믿는다
+    # 이미 답한 요청만 남은 세션은 답을 기다리는 일가 아니다 — 직접 넘기든 화면이 알려 두든(useOpenIds) 같고, 안 알리면 서버 값을 믿는다
     assert out["plain"] == "turn" and out["passed"] == "idle" and out["registered"] == "idle" and out["reset"] == "turn"
-    # 목록 걸러보기는 내 차례 + 막힘 + 확인 못 함 묶음이라 "내 차례" 가 아니라 "할 일" 이다(홈·띠의 내 차례 N건과 이름이 겹치지 않게)
-    assert out["label"] == "전체,할 일,일하는 중,끝남"
-    # 내 차례 건수(요청·올릴 차례 하나하나) 3 = 홈 타일·띠·알림의 내 차례, 할 일(세션 수) 3 = 내 차례 세션 2 + 확인 못 함 1
+    # 목록 걸러보기는 답을 기다리는 일 + 막힘 + 확인 못 함 묶음이라 "답을 기다리는 일" 가 아니라 "할 일" 이다(홈·띠의 답을 기다리는 일 N건과 이름이 겹치지 않게)
+    assert out["label"] == "전체,나를 찾는 사람,일하는 중,끝남"
+    # 답을 기다리는 일 건수(요청·올릴 차례 하나하나) 3 = 홈 타일·띠·알림의 답을 기다리는 일, 할 일(세션 수) 3 = 답을 기다리는 일 세션 2 + 확인 못 함 1
     assert out["turnItems"] == 3 and out["counts"]["todo"] == 2 and out["counts"]["unsure"] == 1 and out["counts"]["running"] == 1
     assert out["filter"] == {"all": 5, "turn": 3, "run": 1, "done": 1}
 
@@ -3690,7 +3803,7 @@ def test_post_pipeline_attaches_sessions_and_places_lanes():
     assert out["nums"] == [13, 19]  # 브랜치의 dev013 도 번호, device12·일곱 자리는 아니다
     # 칸: 1 요구사항(미정·아무것도 없음) · 2 Spec(Spec PR·Spec 세션) · 3 개발(Spec 있음·설정) · 4 검토(작업 PR) · 5 합쳐짐
     # 세션: 이름(a)·브랜치(b)·세션 PR 번호(c)·갈래 사유(d) 로 붙는다. 넘긴 세션(f)은 붙이지 않는다. 한 건에 여럿이면 막힘이 앞선다(d > e)
-    # 칸 안: 막힘 > 내 차례 > 번호순
+    # 칸 안: 막힘 > 답을 기다리는 일 > 번호순
     assert out["lanes"] == [["5:idle"], ["2:idle", "7:run@a"], ["9:blocked@d", "8:turn@b", "1:idle", "4:idle"], ["3:wait@c"], ["6:idle"]]
     assert out["lane"] == [4, 1, 0]  # 완료가 먼저, 다음 단계 미정이면 Spec 세션이 있어도 요구사항 칸
     assert out["sub"] == ["SRS 9건 · Spec 있는 개발 건 4 · 설정 1 · 표준 0 · 보류·취소 2건 뺌", "원장 1건 · Spec 있는 개발 건 0 · 설정 0 · 표준 0"]
@@ -3703,11 +3816,11 @@ def test_post_pipeline_wiring_route_rail_and_scoped_css():
     assert order == sorted(order) and '<link rel="stylesheet" href="/post-pipeline.css">' in html
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "if (p === '/pipeline') return { name: 'pipeline' };" in app and "pipeline: pipelineView" in app
-    assert "item('/pipeline', '파이프라인', 'route', nm === 'pipeline', 0)" in app
+    assert "item('/pipeline', '파이프라인', 'route', nm === 'pipeline', '')" in app
     assert "!isPostTheme() || !window.BHPostPipeline" in app  # Sauce 로 주소를 치고 오면 안내만 한다
     js = (STATIC / "post-pipeline.js").read_text(encoding="utf-8")
-    assert "innerHTML" not in js and "'/api/pipeline'" in js and "하네스는 이 순서를 지키게 해." in js
-    assert "요구사항을 확인하지 못했어." in js  # 못 읽은 저장소는 빈 판이 아니라 이유를 보인다
+    assert "innerHTML" not in js and "'/api/pipeline'" in js and "하네스는 이 순서를 지키게 해요." in js
+    assert "요구사항을 확인하지 못했어요." in js  # 못 읽은 저장소는 빈 판이 아니라 이유를 보인다
     css = (STATIC / "post-pipeline.css").read_text(encoding="utf-8")
     rules = [ln for ln in css.splitlines() if "{" in ln and not ln.lstrip().startswith(("@media", "/*"))]
     assert rules and all(ln.lstrip().startswith(':root[data-theme="post"] .po-pl') or ln.lstrip().startswith(':root[data-theme="post"] a.po-pl') or ln.lstrip().startswith(':root[data-theme="post"] button.po-pl') for ln in rules)
@@ -3722,18 +3835,18 @@ def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
     assert "L.prNeedsFix(s)" in home and "'고쳐야 함'" in home and "BHApiNotice.notice(s)" in home
     # 새 소식 칸은 세션이 없을 때·불러오는 중에도 붙고, 세션이 생기면 foot 으로 되돌린다
     assert home.count("restSlot.appendChild(slots.whatsSlot)") == 2 and "foot.appendChild(slots.whatsSlot)" in home
-    # 덱 머리 숫자는 타일·띠·문장과 같은 내 차례 건수(BHLogic.turnItems 길이)다: 검사가 실패한 PR 세션도 카드로 올리고, 한 세션의 요청 여럿은 "요청 +N"
-    assert "fix: true" in home and "return '고쳐야 함'" in home and "turnN = Math.max(cardN, turnTotal)" in home and "turnTotal = turnCount;" in home
+    # 검사가 실패한 PR 세션도 카드로 올리고, 한 세션의 요청 여럿은 "요청 +N". 덱 머리에는 숫자가 없다(요약 정리 — 수는 장면 아래 정리 줄에)
+    assert "fix: true" in home and "return '고쳐야 함'" in home and "turnTotal" not in home and "h('h2', { text: '나를 찾는 사람' })" in home
     assert "'요청 +' + it.more" in home and "].filter(Boolean).join(' · ')" in home  # G3: 요청 수와 시각은 한 묶음(좁은 폭에서 시각만 다음 줄로 떨어지지 않게)
     # 열린 PR 상태를 홈이 열려 있는 동안 1분마다 다시 읽고, 홈을 떠나면 멈춘다(Sauce 홈과 같은 간격)
     assert "MY_PRS_POLL_MS = 20000" in home and "clearInterval(prTimer)" in home and "delete fixBox.dataset.ready" in home
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
     assert "var CACHE_MS = 60000;" in ui  # 확인 주기(20초)는 이 캐시(60초)보다 짧아야 캐시가 풀린 뒤 곧 새로 읽는다
-    # #1066: 작은 아바타는 잘린 직원 그림이 아니라 글자, 기억을 모르는 점선 ? 링은 Post 에서 뺀다
+    # #1066: 사무실 번들이 없을 때의 작은 아바타는 잘린 라인아트 직원 그림이 아니라 글자(번들이 있으면 장면의 그 사람 얼굴 — test_cozy_portraits_are_the_scene_person), 기억을 모르는 점선 ? 링은 Post 에서 뺀다
     js = (STATIC / "theme-post.js").read_text(encoding="utf-8")
     assert "if (size === 'sm') return letterAvatar(opts.name);" in js and "po-av-letter" in js
-    assert "Intl.Segmenter" in js and "letterOf: letterOf" in js and "(PS.letterOf ? PS.letterOf(name)" in home  # 국기·가족 이모지·제로폭 시작 제목도 한 글자, 홈 표와 같은 함수
-    assert "title: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어'" in home
+    assert "Intl.Segmenter" in js and "letterOf: letterOf" in js and "po-ava" not in home  # 국기·가족 이모지·제로폭 시작 제목도 한 글자. 홈 「내 세션」 도 같은 avatar() 를 쓴다(따로 만든 글자 칸 .po-ava 는 없앴다)
+    assert "title: 'PR #' + s.flowPr.number + ' 의 자동 검사가 실패했어요'" in home
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     logic = (STATIC / "flow-logic.js").read_text(encoding="utf-8")
     assert ".po-rest > .wn-slot:empty { display: none; }" in css and ".po-stc-err { width: 150px;" in css.replace(".po-mine .po-stc-err", ".po-stc-err")  # 빈 새 소식 칸 간격·오류 칩 줄바꿈
@@ -3744,8 +3857,8 @@ def test_post_home_B_session_chips_whats_new_and_pr_poll_and_letter_avatar():
 def test_post_verify_B2_memo_count_teams_and_session_fixes():
     # 2026-11-18 Post 검증 B 2회차. post-*.js 는 가짜 DOM 시험이 안 불러와서 원문 확인이고, 본체는 Aside 실화면이다(docs/status/2026-11-18-post-verify-B.md).
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
-    # 메모의 몇 번째는 덱 머리와 같은 묶음·단위: 내 차례는 건수(카드가 요청 여럿이면 범위), 막힘·확인 못 함은 따로. 카드 수로 세지 않는다
-    assert "function memoCount(it)" in home and "n: mine.length" in home and "'내 차례 ' + (end > at ? at + '–' + end : at) + '/' + turnTotal" in home
+    # 메모 머리는 덱 카드와 같은 종류 이름이다. 몇 번째인지(1/N)는 장면 버튼 한 곳에만 있다(요약 정리 — 전에는 「답을 기다리는 일 1/4」 와 버튼 「1/6」 이 나란히 달랐다)
+    assert "function memoKind(it)" in home and "n: mine.length" in home and "memoCount" not in home and "var head = [memoKind(it), team, w];" in home
     assert "'다음 ' + (i + 1) + '/' + items.length" not in home and "text: '다음', onClick: function () { step(1, true); }" in home
     # 메모의 "다음" 은 포커스를 덱 카드로 옮기지 않는다(화면이 덱까지 튀어 메모가 밀려 나간다). J·K 는 그대로 덱 카드로
     assert "function pickTop(id, stay)" in home and "if (stay) return;" in home
@@ -3786,9 +3899,9 @@ def test_post_new_task_extra_cases_X1():
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     # 작업 폴더가 고른 뒤 지워져 시작이 400 으로 거절되면 "Claude Code 가 못 살펴봤어" 가 아니라 폴더 고르기로 돌려보낸다(Post 만)
     assert "if (e.status === 400 && isPostTheme()) { folderCheck(e, run); return; }" in app and "function folderCheck(e, run)" in app
-    assert "customMsg = '고른 작업 폴더를 쓸 수 없어: ' + why + ' 다른 폴더를 골라 줘.'" in app and "showBlock('#custom')" in app
+    assert "customMsg = '고른 작업 폴더를 쓸 수 없어요: ' + why + ' 다른 폴더를 골라 주세요.'" in app and "showBlock('#custom')" in app
     # 서버에 닿지 못한 시작은 분석 실패와 다른 말을 한다
-    assert "errNet = e.status === 0" in app and "post && errNet ? '콘솔 서버에 연결하지 못했어'" in app
+    assert "errNet = e.status === 0" in app and "post && errNet ? '콘솔 서버에 연결하지 못했어요'" in app
     # 키보드: 단계가 바뀌면 초점이 문서 맨 위로 튀지 않게 제목으로, 시작 오류·글 비어 있음·폴더 창 취소 뒤에는 누른 칸으로
     assert "id: post ? 'new-title' : null, tabindex: post ? '-1' : null" in app and "document.getElementById('new-title')" in app and "drawnStep !== screen" in app  # 2회차: 프로젝트 준비 안내도 한 단계
     assert "if (startErr && isPostTheme() && document.activeElement === document.body) { var sb = document.getElementById('start-go'); if (sb) sb.focus(); }" in app
@@ -3796,7 +3909,7 @@ def test_post_new_task_extra_cases_X1():
     assert "textErr = true; said.terr = ''; draw(); showBlock('#brief'); return;" in app  # 3회차: 같은 오류도 다시 읽어 준다
     assert "backFocus('folder-browse')" in app and "backFocus('custom')" in app and "function backFocus(id)" in app
     # 첨부가 서버에서 거절되면 그 화면의 칩에는 빼기(×)가 없어 돌아가는 길을 알려 준다
-    assert "files.length && attachRejected(e, files)" in app and '"다른 걸로 할래" 로 돌아가서 빼 줘.' in app  # 2회차: 첨부 탓인 400·413 에만
+    assert "files.length && attachRejected(e, files)" in app and '"다른 걸로 하기" 로 돌아가서 빼 주세요.' in app  # 2회차: 첨부 탓인 400·413 에만
     # 아주 긴 폴더 이름: 제목·눈썹은 어디서든 줄을 바꾸고, 위쪽 줄은 알림·테마 단추 대신 이름만 줄어든다
     assert ':root[data-theme="post"] .ptitle .eb, :root[data-theme="post"] .ptitle h1 { overflow-wrap: anywhere; }' in css
     assert ':root[data-theme="post"] #app > .top > :not(.ptop-proj):not(.sp):not(.ptop-lim) { flex-shrink: 0; }' in css and ".ptop-proj b { flex: 0 1 auto; min-width: 0;" in css
@@ -3815,7 +3928,7 @@ def test_post_new_task_extra_cases_X3():
     assert "if (isPostTheme()) { customMsg = ''; startErr = ''; startFolderWhy = ''; }" in app  # 3회차: 폴더 탓 시작 실패 까닭도
     # 분석 뒤 폴더가 지워진 채 시작하면 "claude 를 찾을 수 없어" 대신 폴더를 확인해 말하고, 첨부 안내는 첨부 탓일 때만
     assert "function attachRejected(e, files)" in app and "e.status === 400 || e.status === 502) return api('POST', '/api/folders/validate'" in app
-    assert "startFolderWhy = String(v.error || ''); startErr = '시작하지 못했어: 고른 작업 폴더를 쓸 수 없어: ' + startFolderWhy + ' \"다른 걸로 할래\" 로 돌아가서 다른 폴더를 골라 줘.';" in app  # 3회차: 까닭을 남겨 돌아갈 때 폴더 고르기로
+    assert "startFolderWhy = String(v.error || ''); startErr = '시작하지 못했어요: 고른 작업 폴더를 쓸 수 없어요: ' + startFolderWhy + ' \"다른 걸로 하기\" 로 돌아가서 다른 폴더를 골라 주세요.';" in app  # 3회차: 까닭을 남겨 돌아갈 때 폴더 고르기로
     # 키보드: 폴더를 고르면 목록을 열었던 단추로, id 없는 칸(바꾸기·체크·답 단추)도 다시 그린 뒤 같은 자리로, 프로젝트 준비 안내는 그 제목으로
     assert "draw(); backFocus('folder-toggle'); checkIntro(p); }" in app and "id: isPostTheme() ? 'folder-toggle' : null" in app
     assert "var mark = isPostTheme() && !keepFocus ? focusMark() : null;" in app and "function focusMark()" in app and "return el.className === m.cls;" in app
@@ -3840,14 +3953,14 @@ def test_post_x2_data_screens_source_and_css():
     assert "multiSess ? entry.session.title || kit.baseName(entry.session.cwd) : ''" in ui and "multiSess = isPost() && all.reduce(" in ui
     assert "t.focus({ preventScroll: true })" in ui and "if (a.classList.contains('drow')) return { dkey: a.getAttribute('data-dkey') };" in ui and "'data-dkey': post ? entry.key : null" in ui  # 같은 경로 파일이 다른 세션에 있어도 키(폴더|경로)로 되돌림(2회차에 줄 밖 칸까지 넓힘)
     assert "function pick(entry, byUser)" in ui and "pv.scrollIntoView({ block: 'start' })" in ui and "pick(entry, true)" in ui
-    assert "(ctx.btnAt || '아래') + ' 버튼으로 열어 봐.'" in ui and ui.count("btnAt: isPost() ? '위' : ''") == 2
+    assert "(ctx.btnAt || '아래') + ' 버튼으로 열어 보세요.'" in ui and ui.count("btnAt: isPost() ? '위' : ''") == 2
     assert "data-docs-more" in ui and "isPost() ? sessionList().filter(" in ui
     assert ":root[data-theme=\"post\"] .ext { display: inline-grid; place-items: center; flex: none; width: 44px;" in css and ".ext-docx { background: #2B579A;" in css
     assert ".docs-page .dprev { scroll-margin-top: 88px; }" in css and ".docs-page .drow .dn small { font-size: 11.5px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;" in css
     # 팀 기록: 거르기·찾기·종류 고르기로 화면을 다시 그려도(목록·한 건·새 기록 셋 다) Post 에서는 누르던 칸에 포커스가 남는다
     assert "function focusKey(page)" in tb and "function focusBack(page, key)" in tb and tb.count("focusBack(page, key);") == 3 and tb.count("var key = focusKey(page)") == 3 and "sameButtons(page, a.className, a.textContent).indexOf(a)" in tb
     assert "!isPostNow()" in tb[tb.index("function focusKey(page)"):tb.index("function focusBack(page, key)")] and "getTheme() === 'post'" in tb[tb.index("function isPostNow()"):tb.index("function focusKey(page)")]
-    # MCP url 모드: 열 수 없는 주소(javascript: 등)는 Post 에서 [다 했어] 도 막고, 긴 주소는 줄을 바꾼다
+    # MCP url 모드: 열 수 없는 주소(javascript: 등)는 Post 에서 [다 했어요] 도 막고, 긴 주소는 줄을 바꾼다
     assert "var cantOpen = isUrl && !href && isPostTheme();" in app and "sendBtn.disabled = st.busy || n > 0 || cantOpen;" in app
     assert ":root[data-theme=\"post\"] [data-elicit-url] { overflow-wrap: anywhere; word-break: break-all; }" in css
     # Tab 건너뛰기 링크: Post 만(Sauce 에서는 hidden), 레일보다도 앞, 목록 맨 앞에 하나 더, 포커스가 올 때만 보임
@@ -3899,7 +4012,7 @@ def test_post_project_scope_only_in_post_and_feeds_every_count():
     assert "return isPostTheme() && window.BHPostLogic ? window.BHPostLogic.projectView(all, repos.folders, postProject()) : { list: all, tag: {} };" in app
     assert "var all = scopedSessions();" in app and "window.BHLogic.turnItems(all, openIds)" in app  # 띠·알림·레일·덱 숫자
     assert "var arr = scopedSessions();" in app  # 사이드 목록·장면(sceneList)·레일
-    assert "sessions: { values: scopedSessions }, requests: requests," in app and "sessions: scopedSessions, loaded:" in app  # 홈·산출물, 파이프라인
+    assert "sessions: { values: scopedSessions }, requests: requests," in app and "sessions: scopedSessions, turnTone: turnTone, loaded:" in app  # 홈·산출물, 파이프라인
     assert "if (loadedOnce) notifyInProject(prev, m);" in app and "if (inProject(m)) notifyChange(prev, m);" in app  # 판정 전 폴더 알림은 판정 뒤에(J11)
     assert "if (isPostTheme() && startCwd) setProject({ path: startCwd });" in app and "class: 'ptop-pick'" in app
     assert "kit.projectTag ? kit.projectTag(s) : null" in (STATIC / "post-home.js").read_text(encoding="utf-8")
@@ -3966,7 +4079,8 @@ def test_post_sweep_design_fixes_css():
     assert ':root[data-theme="post"] .comp { position: relative; }' in css and ':root[data-theme="post"] .comp .assist-wrap { position: static; }' in css
     # 설정 계정 한도 확인의 「바꾸기」는 주 단추, 홈 검토 요청 칸의 PR 링크는 밑줄
     assert "class: 'pill', 'data-limits-confirm-yes': '1'" in app
-    assert ':root[data-theme="post"] .pill[data-limits-confirm-yes] { background: var(--accent-fill); color: #fff; }' in css
+    yes = re.search(r"([^{}]*\.pill\[data-limits-confirm-yes\] \{)\s*border-color: var\(--pri\); background: var\(--pri\); color: var\(--on-pri\);", css)
+    assert yes and ".pill.dark" in yes.group(1)  # 주 단추(.pill.dark)와 같은 규칙에 묶여 있다(역할 색: 주 = 남색)
     assert ':root[data-theme="post"] .po-prslot a.lm, :root[data-theme="post"] .approvals a.lm { color: var(--lightink); text-decoration: underline; text-underline-offset: 3px; }' in css
     # 홈 새 소식은 아래 칸 한 줄을 다 쓰고 300px 단으로 흐른다(좁은 칸 하나에 700px 넘게 서지 않게)
     assert ':root[data-theme="post"] .po-foot > .wn-slot { grid-column: 1 / -1; }' in css
@@ -3977,7 +4091,7 @@ _POST_TURN_NODE = r"""
 const path = require('path');
 const L = require(path.join(process.argv[1], 'flow-logic.js'));
 const P = require(path.join(process.argv[1], 'post-logic.js'));
-const dev = [{ id: 'start', name: '개발 건 고르고 작업 시작하기(작업 기록과 작업 공간을 자동으로 만들어)', short: '시작', kind: 'skill', skill: 'start' },
+const dev = [{ id: 'start', name: '개발 건 고르고 작업 시작하기(작업 기록과 작업 공간을 자동으로 만들어요)', short: '시작', kind: 'skill', skill: 'start' },
   { id: 'implement', name: '구현(SAP 080 에서 개발·활성화)', short: '구현', kind: 'work' },
   { id: 'deliver', name: '올리고 검토 요청하기', short: '올리기', kind: 'skill', skill: 'deliver' },
   { id: 'merge', name: '합쳐지기 기다리기', short: '합치기', kind: 'wait' }];
@@ -3994,37 +4108,40 @@ process.stdout.write(JSON.stringify({
 
 def test_post_turn_text_follows_flow_step():
     # 2026-11-18 6회차: 갈래 세션의 머리 제목·사이드 줄·홈 덱이 git 으로 짐작한 차례(turnSkill)를 따라
-    # spec 첫 단계(main)에 "이제 작업 시작 차례야", 구현 중(변경 있음)에 "AI가 올릴 준비를 마치고…"·"내 차례 · 제출하기", 덱에 "제출하기 끝남" 이 나왔다.
+    # spec 첫 단계(main)에 "이제 작업 시작 차례야", 구현 중(변경 있음)에 "AI가 올릴 준비를 마치고…"·"답을 기다려요 · 제출하기", 덱에 "제출하기 끝났어요" 이 나왔다.
     r = subprocess.run([NODE, "-e", _POST_TURN_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     got = json.loads(r.stdout)
-    assert got["specFirst"] == ["이제 Spec 쓰기 차례야.", "쓰기"]
-    assert got["implement"] == ["이제 구현 차례야.", "구현"]
+    assert got["specFirst"] == ["이제 Spec 쓰기 차례예요.", "쓰기"]
+    assert got["implement"] == ["이제 구현 차례예요.", "구현"]
     assert got["deliver"] == [None, None]  # 올릴 변경이 있는 올리기 단계는 원래 글(G-09 "AI가 올릴 준비를 마치고…")
-    assert got["deliverNoChange"] == ["이제 올리고 검토 요청하기 차례야.", None]
-    assert got["wait"] == ["지금은 합쳐지기 기다리기 단계야.", "합치기"]
+    assert got["deliverNoChange"] == ["이제 올리고 검토 요청하기 차례예요.", None]
+    assert got["wait"] == ["지금은 합쳐지기 기다리기 단계예요.", "합치기"]
     assert got["finished"] == [None, None] and got["noFlow"] == [None, None]
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
     # Sauce 는 그대로: Post 일 때만 부른다
     assert "var flowLine = isPostTheme() && window.BHPostLogic ? window.BHPostLogic.turnLine(s, window.BHLogic) : null;" in app
-    assert app.index("var flowLine = isPostTheme()") < app.index("if (s.turnSkill === 'deliver' && s.flowId) return 'AI가 올릴 준비를 마치고 네 답을 기다리는 중';")
-    # 확인 대기·승인 기다림(phase)·일하는 중은 갈래 글보다 먼저 걸러진다
+    assert app.index("var flowLine = isPostTheme()") < app.index("if (s.turnSkill === 'deliver' && s.flowId) return 'AI가 올릴 준비를 마치고 답을 기다려요';")
+    # 확인 대기·승인 기다림(phase)·일하는 중이에요은 갈래 글보다 먼저 걸러진다
     head = app.split("function headlineFor(s) {", 1)[1].split("\n    }\n", 1)[0]
     assert head.index("if (pend) return") < head.index("if (s.phase) return window.BHLogic.phaseLine(s, isPostTheme());") < head.index("var flowLine = isPostTheme()")
     assert head.index("if (s.status === 'running')") < head.index("var flowLine = isPostTheme()")
     assert "var flowVerb = !p && isPostTheme() && window.BHPostLogic ? window.BHPostLogic.turnVerb(s, L) : null;" in app
     assert ": flowVerb || (s.turnSkill === 'deliver' ? skillLabel(s.turnSkill) : '확인하기');" in app
-    assert "끝남 — 다음을 정해 줘" not in home
-    assert "(PL && PL.turnLine(s, L)) || (s.turnSkill !== 'deliver' ? '내 차례야' : s.flowId ? L.ASK_TEXT.deliver.q : '이제 ' + kit.skillLabel(s.turnSkill) + ' 차례야.')" in home
+    assert "끝났어요 — 다음을 정해 줘" not in home
+    assert "(PL && PL.turnLine(s, L)) || (s.turnSkill !== 'deliver' ? '확인할 일이 있어요' : s.flowId ? L.ASK_TEXT.deliver.q : '이제 ' + kit.skillLabel(s.turnSkill) + ' 차례예요.')" in home
 
 
 def test_post_mcp_error_readable_on_yellow_banner_in_dark():
     # 6회차 실화면: 어두운 모드에서 노란 MCP 띠 안 실패 문구가 밝은 --attn(#F2B24C)이라 바탕과 같은 색이었다. Post 전용 CSS 라 원문 확인
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
-    assert ':root[data-theme="post"] .banner, :root[data-theme="post"] .call,' in css  # 띠는 두 모드 모두 밝은 노랑 + 남색 글자
-    assert ':root[data-theme="post"] .banner .mcp-err { color: #9A5400; }' in css
-    assert css.index(':root[data-theme="post"] .banner .mcp-err {') > css.index(':root[data-theme="post"] .nb-err, :root[data-theme="post"] .mcp-err { color: var(--attn); }')
+    assert re.search(r':root\[data-theme="post"\] \.banner, :root\[data-theme="post"\] \.tag,[^{}]*\{ background: var\(--warn-fill\); color: var\(--on-warn\); \}', css)  # 띠는 두 모드 모두 밝은 노랑 + 남색 글자(경고) — 한 규칙 안에서
+    assert "--warn-fill" not in css.split('[data-mode="dark"] {', 1)[1].split("}", 1)[0]  # 어두운 모드도 같은 노랑 채움
+    m = re.search(r':root\[data-theme="post"\] \.banner \.mcp-err \{ color: (#[0-9A-Fa-f]{6}); \}', css)
+    fill = re.search(r"--warn-fill: (#[0-9A-Fa-f]{6});", css).group(1)
+    assert m and _ratio(m.group(1), fill) >= 4.5, (m and m.group(1), fill)  # 노랑 위 글자 4.5:1(전 값 #9A5400 은 4.1 이었다)
+    assert css.index(':root[data-theme="post"] .banner .mcp-err {') > css.index(':root[data-theme="post"] .mcp-err { color: var(--attn); }')
 
 
 _POST_PR_SUBJECT_NODE = r"""
@@ -4044,18 +4161,18 @@ def test_post_shared_flow_text_fixes():
     assert r.returncode == 0, r.stderr
     got = json.loads(r.stdout)
     # 1. PR 번호 뒤 조사: Post 만 읽는 소리대로(#502가, #501이, #10이). Sauce 는 전과 같은 '이'
-    assert got["sauce502"].startswith("PR #502이 합쳐졌어.") and got["bandSauce"].startswith("PR #502이 합쳐졌어")
-    assert got["post502"].startswith("PR #502가 합쳐졌어.") and got["post501"].startswith("PR #501이 합쳐졌어.")
-    assert got["bandPost"].startswith("PR #502가 합쳐졌어") and got["bandPost10"].startswith("PR #10이 합쳐졌어")
+    assert got["sauce502"].startswith("PR #502이 합쳐졌어요.") and got["bandSauce"].startswith("PR #502이 합쳐졌어요")
+    assert got["post502"].startswith("PR #502가 합쳐졌어요.") and got["post501"].startswith("PR #501이 합쳐졌어요.")
+    assert got["bandPost"].startswith("PR #502가 합쳐졌어요") and got["bandPost10"].startswith("PR #10이 합쳐졌어요")
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     flow = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
     assert app.count("window.BHLogic.finishedBand(cs, isPostTheme())") == 2 and "window.BHLogic.phaseLine(s, isPostTheme())" in app
     # 2. MCP 다시 연결 실패: 서버 글(「MCP 를 다시 연결하지 못했어: …」) 앞에 같은 말을 또 붙이지 않는다(Post 만)
-    assert "mcpErr = (isPostTheme() && /다시 연결하지 못했어/.test(e.message) ? '' : '다시 연결하지 못했어: ') + e.message; }).then(function () { mcpBusy = ''; paintNotices(cur()); });  // Post:" in app  # 주석이 .then 을 삼키지 않게(리뷰가 잡음)
+    assert "mcpErr = (isPostTheme() && /다시 연결하지 못했어/.test(e.message) ? '' : '다시 연결하지 못했어요: ') + e.message; }).then(function () { mcpBusy = ''; paintNotices(cur()); });  // Post:" in app  # 주석이 .then 을 삼키지 않게(리뷰가 잡음)
     # 3. 합쳐지지 않고 닫힌 PR 카드는 검사 실패가 아니라 닫힘을 말한다(Post 만)
     assert "var closed = postTheme() && String(pr.state || '').toUpperCase() === 'CLOSED';" in flow
-    assert "closed ? h('span', { class: 'sub', text: '이 검토 요청(PR)은 합쳐지지 않고 닫혔어. GitHub 에서 다시 열거나 새로 올려야 넘어가.' })" in flow
-    assert ": failed ? h('span', { class: 'sub', text: '자동 검사가 잘못을 찾았어. 고쳐서 다시 올려야 넘어가.' })" in flow
+    assert "closed ? h('span', { class: 'sub', text: '이 검토 요청(PR)은 합쳐지지 않고 닫혔어요. GitHub 에서 다시 열거나 새로 올려야 넘어가요.' })" in flow
+    assert ": failed ? h('span', { class: 'sub', text: '자동 검사가 잘못을 찾았어요. 고쳐서 다시 올려야 넘어가요.' })" in flow
     # 4. 이미 다음 세션으로 넘긴 세션의 끝난 갈래 카드는 넘기기 단추 대신 새 세션 보기(Post 만)
     assert "if (nx.options.length && s.handedOffTo && postTheme()) {" in flow
     assert "'data-next-handed': '1', text: '새 세션 보기'" in flow
@@ -4074,7 +4191,7 @@ def test_post_new_task_extra_cases_X3_round3():
     # 이대로 시작이 폴더 탓으로 실패한 뒤 「다른 걸로 할래」 는 폴더 고르기로
     assert "var why = isPostTheme() ? startFolderWhy : ''; startFolderWhy = '';" in app and "draw(); if (why) showBlock('#custom');" in app
     # 멈춤 방지: 분석 id 없음·빈 폴링 본문·시작 처리 중 오류
-    assert "if (!aid) { step = 'failed'; err = '분석을 시작하지 못했어.'; draw(); return; }" in app and "var st = norm(d && d.status);" in app
+    assert "if (!aid) { step = 'failed'; err = '분석을 시작하지 못했어요.'; draw(); return; }" in app and "var st = norm(d && d.status);" in app
     assert "}).then(null, function (e) { console.error('새 작업 시작을 마무리하지 못했습니다', e); }).then(function () {" in app
     # 서버가 줄인 첨부 이름(100자·인쇄 못 하는 글자)도 첨부 탓으로 알아본다
     assert "function serverName(n)" in app and "m.indexOf(serverName(f.name) + ':') === 0" in app
@@ -4110,9 +4227,9 @@ def test_post_x2c_remaining_defects_source():
     fa = app[app.index("function focusAfterAnswer(rid, sent, action)"):app.index("var ebText = h('span'")]
     assert "if (a && a !== document.body) return;" in fa and "document.getElementById('follow')" in fa and ".result[role=\"status\"]" in fa
     assert "if (isPostTheme()) focusAfterAnswer(rid, sent, action);" in app and "resultFocusUntil = Date.now() + 1500;" in app
-    # 4) url 모드 [다 했어] 의 결과 문구는 Post 만 값을 받는다는 말을 빼고, Sauce 는 ELICIT_RES 그대로
+    # 4) url 모드 [다 했어요] 의 결과 문구는 Post 만 값을 받는다는 말을 빼고, Sauce 는 ELICIT_RES 그대로
     er = app[app.index("function elicitRes(action, info)"):app.index("var FORMAT_HINT")]
-    assert "info.mode === 'url' && isPostTheme()" in er and "return ELICIT_RES[action];" in er and "'마쳤다고 알렸어.'" in er
+    assert "info.mode === 'url' && isPostTheme()" in er and "return ELICIT_RES[action];" in er and "'마쳤다고 알렸어요.'" in er
     assert "ELICIT_RES[action][0]" not in app and "ELICIT_RES[code]) { var er = elicitRes(code, req.elicitation)" in app
     # 8) 「이전 판 N개」 접는 칸은 판이 늘어 글이 바뀌어도 어느 문서 것인지(data-sumkey)로 포커스를 되찾는다
     assert "k.sum ? [].filter.call(page.querySelectorAll('summary'), function (n) { return n.getAttribute('data-sumkey') === k.sum; })[0]" in ui
@@ -4147,11 +4264,11 @@ const body = src.split('function limText(t) {')[1].split('\n    }\n')[0];
 const run = (post, path, t) => new Function('isPostTheme', 'limCfg', 't', body)(() => post, { settingsPath: path }, t);
 const P = 'C:\\Users\\김\\.claude\\settings.json';
 process.stdout.write(JSON.stringify({
-  json: run(true, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어(x).'),
-  read: run(true, P, '끄지 못했어 · ' + P + ' 를 읽지 못했어: e'),
-  top: run(true, P, P + ' 의 맨 위가 객체가 아니어서 건드리지 않았어.'),
-  sauce: run(false, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어(x).'),
-  other: run(true, P, '지금 statusLine 이 command 형식이 아니라서 감싸지 않았어.'),
+  json: run(true, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어요(x).'),
+  read: run(true, P, '끄지 못했어요 · ' + P + ' 를 읽지 못했어요: e'),
+  top: run(true, P, P + ' 의 맨 위가 객체가 아니어서 건드리지 않았어요.'),
+  sauce: run(false, P, P + ' 가 올바른 JSON 이 아니어서 건드리지 않았어요(x).'),
+  other: run(true, P, '지금 statusLine 이 command 형식이 아니라서 감싸지 않았어요.'),
   empty: run(true, P, '')
 }));
 """
@@ -4162,11 +4279,11 @@ def test_post_limits_text_shortens_settings_path_only_in_post():
     r = subprocess.run([NODE, "-e", _POST_LIMTEXT_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     got = json.loads(r.stdout)
-    assert got["json"] == "이 파일이 올바른 JSON 이 아니어서 건드리지 않았어(x)."
-    assert got["read"] == "끄지 못했어 · 이 파일을 읽지 못했어: e"
-    assert got["top"] == "이 파일의 맨 위가 객체가 아니어서 건드리지 않았어."
+    assert got["json"] == "이 파일이 올바른 JSON 이 아니어서 건드리지 않았어요(x)."
+    assert got["read"] == "끄지 못했어요 · 이 파일을 읽지 못했어요: e"
+    assert got["top"] == "이 파일의 맨 위가 객체가 아니어서 건드리지 않았어요."
     assert got["sauce"].startswith("C:\\Users\\김\\.claude\\settings.json 가 ")  # Sauce 는 서버 글 그대로
-    assert got["other"] == "지금 statusLine 이 command 형식이 아니라서 감싸지 않았어." and got["empty"] == ""
+    assert got["other"] == "지금 statusLine 이 command 형식이 아니라서 감싸지 않았어요." and got["empty"] == ""
 
 
 def test_post_regress_sweep_fixes():
@@ -4175,7 +4292,7 @@ def test_post_regress_sweep_fixes():
     ui = (STATIC / "flow-ui.js").read_text(encoding="utf-8")
     tb = (STATIC / "trouble.js").read_text(encoding="utf-8")
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
-    # 1. 접힌 세션 칸(390 은 늘 접힘)의 「내가 할 일」이 내 차례 요청 수라 펼친 목록 「할 일」(내 차례 + 막힘 + 확인 못 함, 세션 수)과 달랐다
+    # 1. 접힌 세션 칸(390 은 늘 접힘)의 「내가 할 일」이 답을 기다리는 일 요청 수라 펼친 목록 「할 일」(답을 기다리는 일 + 막힘 + 확인 못 함, 세션 수)과 달랐다
     rail = app.split("function renderRail(d, cur) {", 1)[1].split("\n  }\n", 1)[0]
     assert "if (isPostTheme() && window.BHPostScene) {" in rail
     assert "window.BHPostLogic.filterMatch('turn', window.BHPostLogic.stateOf(s, window.BHLogic))" in rail and "n = turnRows.length;" in rail
@@ -4195,18 +4312,18 @@ def test_post_regress_sweep_fixes():
     # 3. 작업 폴더가 없어진 세션의 갈래 고르기 칸이 「일 목록: 고른 작업 폴더가 아니야.」(서버 403) — Post 는 폴더가 없어졌다고 말한다
     pick = ui.split("function drawPicker(s) {", 1)[1].split("\n      }\n", 1)[0]
     assert "postTheme() && s.cwd && r.error && r.error.status === 403" in pick
-    assert "'일 목록: 이 세션의 작업 폴더가 없어져서(지운 폴더 등) 일을 고를 수 없어.'" in pick and ": failText(r.error, '일 목록') }));" in pick
-    # 4. 팀 기록에서 못 읽은 프로젝트 줄이 「? 확인 못 함 · projC · 확인 못 함 — …」 로 같은 말을 두 번
-    assert "' · ' + p.name + (isPostNow() ? ' — ' : ' · 확인 못 함 — ') + p.reason" in tb  # Sauce 는 전 문구 그대로
+    assert "'일 목록: 이 세션의 작업 폴더가 없어져서(지운 폴더 등) 일을 고를 수 없어요.'" in pick and ": failText(r.error, '일 목록') }));" in pick
+    # 4. 팀 기록에서 못 읽은 프로젝트 줄이 「? 확인하지 못했어요 · projC · 확인 못 함 — …」 로 같은 말을 두 번
+    assert "' · ' + p.name + (isPostNow() ? ' — ' : ' · 확인하지 못했어요 — ') + p.reason" in tb  # Sauce 는 전 문구 그대로
 
 
 def test_cozy_office_display_name():
     # 2026-11-18: 테마 표시 이름이 Post → Cozy Office. 내부 id(post)·저장 값·선택자는 그대로(이미 고른 사람의 설정이 깨지지 않게)
     theme = (STATIC / "theme.js").read_text(encoding="utf-8")
-    assert "{ id: 'post', name: 'Cozy Office', tagline: '사무실 · 세션이 팀 자리에 앉아 일해', mode: 'light' }" in theme
+    assert "{ id: 'post', name: 'Cozy Office', tagline: '사무실 · 세션이 팀 자리에 앉아 일해요', mode: 'light' }" in theme
     assert "name: 'Post'" not in theme and "THEME_KEY = 'bh-theme'" in theme
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "'파이프라인은 Cozy Office 테마에서 보여', '설정에서 테마를 Cozy Office 로 바꾸면" in app
+    assert "'파이프라인은 Cozy Office 테마에서 보여요', '설정에서 테마를 Cozy Office 로 바꾸면" in app
     assert "장면 그림은 낮 모습 그대로 두고" in app and "낮 우체국" not in app
     assert "themeNow === 'post'" in app and "data-theme-opt" in app  # 내부 id 는 그대로
     # 위쪽 줄 테마 단추는 이름을 THEMES 에서 읽는다(글자를 따로 적지 않는다)
@@ -4224,26 +4341,204 @@ def test_cozy_office_display_name():
     assert "우체국" not in tp and "창구" not in tp and "'세션 장면. 세션 '" in tp
 
 
-def test_cozy_survey_memo_person_click_drag_hide_and_small_fixes():
-    # 2026-11-18 Cozy Office 2회차(사용자 보고): 사무실 장면에서 사람을 누르면 세션으로 바로 가지 않고 그 사람의 메모, 메모의 「가서 확인하기」로 세션 이동, 장면을 끌면 메모 숨김
-    app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "onNavigate: function (href) { if (!(hv && hv.onPerson && hv.onPerson(href))) go(href); }" in app  # 홈 장면만 가로챈다(세션·요청 화면은 그대로)
+_POST_PORTRAIT_NODE = r"""
+const path = require('path');
+const dir = process.argv[1];
+function mkEl(tag) {
+  const e = { tagName: String(tag).toUpperCase(), className: '', attrs: {}, children: [], textContent: '',
+    setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+    appendChild(c) { this.children.push(c); return c; } };
+  return e;
+}
+let fx = '1', reduced = false, pics = [];
+const listeners = {};
+global.document = { createElement: mkEl, addEventListener(t, f) { (listeners[t] = listeners[t] || []).push(f); }, querySelectorAll() { return pics; }, body: null };
+global.Image = function () { return mkEl('img'); };
+const mqHear = [];
+global.matchMedia = () => ({ matches: reduced, addEventListener(t, f) { mqHear.push(f); } });
+global.window = { BHPostLogic: require(path.join(dir, 'post-logic.js')), BH: { getTheme: () => 'post', getFx: () => fx } };
+require(path.join(dir, 'theme-post.js'));
+require(path.join(dir, 'post-session.js'));
+const PS = window.BHPostScene, PSS = window.BHPostSession;
+const calls = [];
+const bundle = { portrait(id, o) { calls.push([id, o.state, o.crop, o.animate]); const s = mkEl('svg'); s.who = id; return s; }, lookOf() { return {}; } };
+const show = (e) => ({ cls: e.className, kid: e.children.map((c) => c.tagName + (c.who != null ? ':' + c.who : '') + (c.src ? ':' + c.src : '') + (c.attrs.preserveAspectRatio ? ':' + c.attrs.preserveAspectRatio : '')), text: e.textContent, hidden: e.attrs['aria-hidden'] });
+const out = {};
+// 1. 번들이 있다: 어느 크기든 장면의 그 사람
+window.BHOfficeScene = bundle;
+out.card = show(PS.avatar('s-1', 'turn'));
+out.head = show(PS.avatar('s-1', 'done', { size: 'lg' }));
+out.row = show(PS.avatar('s-1', 'blocked', { size: 'sm', name: '구매오더' }));
+out.plain = show(PS.avatar('s-1', 'run'));
+out.still = show(PS.avatar('s-1', 'turn', { still: true }));
+out.noId = show(PS.avatar(null, 'turn'));
+fx = '0'; out.calm = show(PS.avatar('s-1', 'turn')); fx = '1';
+reduced = true; out.reduced = show(PS.avatar('s-1', 'turn')); reduced = false;
+const fig = (f) => ({ cls: f.className, box: show(f.children[0]), cap: f.children[1].textContent });
+out.clerkQ = fig(PSS.clerk('question', 's-1', 0, 'srs'));
+out.clerkP = fig(PSS.clerk('permission', 's-1', 2, 'dev'));
+out.here = show(PSS.here('s-1', 'unk', 0, 'srs').children[0]);
+out.calls = calls.slice();
+// 1-1. 화면이 떠 있는 동안 효과 강도가 바뀌면 움직이던 그림만 그 자리에서 멈춘 그림으로 갈아 끼운다(목록 줄은 처음부터 멈춘 그림이라 그대로)
+calls.length = 0;
+const boxA = PS.avatar('s-9', 'turn'), boxB = PS.avatar('s-9', 'turn', { size: 'sm' });
+[boxA, boxB].forEach((b) => { b.replaceChild = function (n, o) { this.children[this.children.indexOf(o)] = n; n.parentNode = this; o.parentNode = null; }; b.children[0].parentNode = b; });
+pics = [boxA.children[0], boxB.children[0]];
+const firstA = pics[0], firstB = pics[1];
+(listeners['bh-pref'] || []).forEach((f) => f({ detail: 'mode' }));
+out.swapMode = boxA.children[0] === firstA;
+fx = '0'; (listeners['bh-pref'] || []).forEach((f) => f({ detail: 'fx' }));
+out.swap = [boxA.children[0] !== firstA, boxB.children[0] === firstB, calls.map((c) => c[3])];
+pics = [boxA.children[0], boxB.children[0]]; const stillA = pics[0];
+fx = '1'; (listeners['bh-pref'] || []).forEach((f) => f({ detail: 'fx' }));
+out.swapBack = [boxA.children[0] !== stillA, calls.map((c) => c[3]), (listeners['bh-pref'] || []).length];
+// 운영체제의 움직임 줄이기가 켜지면(matchMedia change) 같은 식으로 멈춘 그림으로. 문서에서 빠진 그림(parentNode 없음)은 건너뛴다
+pics = [boxA.children[0], firstA]; const movingA = pics[0]; calls.length = 0;
+reduced = true; mqHear.forEach((f) => f());
+out.swapReduced = [boxA.children[0] !== movingA, calls.map((c) => c[3]), mqHear.length];
+reduced = false; pics = [];
+// 2. 번들이 그리다 죽는다: 옛 그림으로
+window.BHOfficeScene = { portrait() { throw new Error('boom'); } };
+const warn = console.warn; let warned = 0; console.warn = () => { warned++; };
+out.broken = show(PS.avatar('s-1', 'turn', { size: 'sm', name: '구매오더' }));
+console.warn = warn; out.warned = warned;
+window.BHOfficeScene = { portrait() { return null; } };  // 번들이 아무것도 안 돌려준다: 옛 그림으로(예외도 경고도 없이)
+out.empty = show(PS.avatar('s-1', 'turn', { size: 'sm', name: '구매오더' }));
+// 3. 번들이 없다(옛 번들 포함): 작은 칸은 글자, 큰 칸은 라인아트 직원, 요청 화면도 라인아트 직원이 손을 든다(검토 담당 그림이 아니다)
+for (const b of [undefined, { attach() {} }]) {
+  window.BHOfficeScene = b;
+  const k = b ? 'old' : 'none';
+  out[k + 'Row'] = show(PS.avatar('s-1', 'turn', { size: 'sm', name: ' 구매오더' }));
+  out[k + 'Card'] = show(PS.avatar('s-1', 'turn'));
+  out[k + 'Clerk'] = fig(PSS.clerk('permission', 's-1', 2, 'dev'));
+}
+out.who = window.BHPostLogic.personOf('s-1');
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node 없음")
+def test_cozy_portraits_are_the_scene_person():
+    # 2026-11-19 합류 2: 세션을 나타내는 사람 그림은 어느 화면에서든 사무실 장면의 그 사람(BHOfficeScene.portrait). 기록 docs/status/2026-11-19-cozy-office-portraits.md
+    r = subprocess.run([NODE, "-e", _POST_PORTRAIT_NODE, str(STATIC)], capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    pic = "SVG:s-1:xMidYMax slice"  # 칸 비율이 그림과 조금 달라도 빈 띠 없이 아래를 맞춘다
+    # 카드 머리(34×40) = 머리·어깨, 세션 머리(88×104) = 허리까지, 목록 줄(30×36) = 머리·어깨. 바탕색 갈래는 상태(내 답 · 막힘 · 끝)
+    assert out["card"] == {"cls": "po-av po-av-pic po-av-turn", "kid": [pic], "text": "", "hidden": "true"}
+    assert out["head"]["cls"] == "po-av po-av-pic po-av-done lg" and out["head"]["kid"] == [pic]
+    assert out["row"]["cls"] == "po-av po-av-pic po-av-blocked sm" and out["row"]["kid"] == [pic] and out["row"]["text"] == ""  # 글자 아바타가 아니다
+    assert out["plain"]["cls"] == "po-av po-av-pic" and out["noId"]["kid"] == ["SVG::xMidYMax slice"]  # id 가 없어도 죽지 않는다
+    # 요청 화면: 질문도 승인도 그 세션 사람이 손을 든다(같은 바탕색). 세션 머리는 avatar 의 큰 그림
+    for k, cap in (("clerkQ", "요구분석팀 자리에서 손을 들고 답을 기다려요"), ("clerkP", "개발팀 자리에서 손을 들고 승인을 기다려요. 누르면 승인 도장이 찍혀요")):
+        assert out[k] == {"cls": "po-clerk is-ask", "box": {"cls": "po-av-pic po-av-turn", "kid": [pic], "text": ""}, "cap": cap}, k  # 칸이 아니라 figure 가 aria-hidden
+    assert out["here"]["cls"] == "po-av po-av-pic lg" and out["here"]["kid"] == [pic]
+    # 번들에 넘기는 값: 상태 그대로(몸짓은 번들이 정한다), 자르기, 움직임. 목록 줄·still·차분·움직임 줄이기는 안 움직인다
+    assert out["calls"] == [
+        ["s-1", "turn", "bust", True], ["s-1", "done", "half", True], ["s-1", "blocked", "bust", False], ["s-1", "run", "bust", True], ["s-1", "turn", "bust", False], ["", "turn", "bust", True],
+        ["s-1", "turn", "bust", False], ["s-1", "turn", "bust", False], ["s-1", "turn", "half", True], ["s-1", "turn", "half", True], ["s-1", "unk", "half", True]]
+    # 효과 강도를 차분으로 바꾸면 움직이던 그림이 멈춘 그림으로, 되돌리면 다시 움직이는 그림으로 바뀐다. 밝기 변경은 건드리지 않고, 듣는 곳은 한 번만 건다
+    assert out["swapMode"] is True and out["swap"] == [True, True, [True, False, False]] and out["swapBack"] == [True, [True, False, False, True], 1]
+    assert out["swapReduced"] == [True, [False], 1]  # 움직임 줄이기 변경도 듣는다(한 번만 건다). 문서에서 빠진 옛 그림은 다시 그리지 않는다
+    assert out["empty"] == {"cls": "po-av po-av-letter sm", "kid": [], "text": "구", "hidden": "true"}
+    # 번들이 죽거나 없으면 옛 그림: 작은 칸은 제목 첫 글자, 큰 칸·요청 화면은 라인아트 직원
+    who = out["who"]
+    assert out["broken"] == {"cls": "po-av po-av-letter sm", "kid": [], "text": "구", "hidden": "true"} and out["warned"] == 1
+    for k in ("none", "old"):
+        assert out[k + "Row"] == {"cls": "po-av po-av-letter sm", "kid": [], "text": "구", "hidden": "true"}, k
+        assert out[k + "Card"]["cls"].startswith("po-av po-av-turn") and "po-av-pic" not in out[k + "Card"]["cls"], k
+        assert out[k + "Card"]["kid"] == [f"IMG:/static/post/people/{who}/ask-1.svg", f"IMG:/static/post/people/{who}/ask-2.svg"], k
+        assert out[k + "Clerk"]["cls"].startswith("po-clerk is-ask") and out[k + "Clerk"]["box"]["kid"] == [f"IMG:/static/post/people/{who}/ask-1.svg", f"IMG:/static/post/people/{who}/ask-2.svg"], k
+    # 번들에 portrait · lookOf 가 실제로 있고, 그림 규칙은 svg 를 칸에 꽉 채운다. 옛 검토 담당 도장 그림(.po-c1 · .po-c2)은 요청 화면에서 뺐다
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    assert "portrait:" in bundle and "lookOf:" in bundle
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    assert ':root[data-theme="post"] .po-av-pic > svg { display: block; width: 100%; height: 100%; }' in css
+    assert ".po-c1" not in css and "po-st1" not in css and ".po-ava " not in css and ".po-clerk span.po-av-turn {" in css
+    sess = (STATIC / "post-session.js").read_text(encoding="utf-8")
+    assert "clerk/idle.svg" not in sess and "PS.portraitOf(sessionId, 'turn', 'half', true)" in sess
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
-    assert "onFocus: onFocus, onPerson: onPerson," in home
-    person = home[home.index("function onPerson(href)"):home.index("function paintDeck()")]
-    assert "if (gone || !m || !officeOn || stageFrame.querySelector('.bh-office-away')) return false;" in person  # 작은 창(PiP)·홈을 떠난 뒤 PiP 클릭은 전처럼 세션으로
-    assert "pickTop(id, true); return true;" in person  # 덱에 있는 세션이면 덱 메모를 그 세션으로
-    assert "pickId = id; away = false; paintMemo();" in person
-    assert "Math.hypot(dx, dy) < 4 || (drag.touch && Math.abs(dy) > Math.abs(dx))" in person  # 번들과 같은 문턱, 터치 세로는 스크롤
-    assert "if (memo.hidden || narrowNow()) return;" in person  # 떠 있는 메모만, 좁은 화면은 메모가 장면 아래라 숨기지 않는다
-    assert "slots.sceneHost.addEventListener('dblclick', back);" in person and "now - lastTap < 320" in person  # 두 번 누르기(터치는 번들과 같은 320ms)면 되돌린다
+    assert "PS.avatar(s.id, st, { size: 'sm', name: name })" in home and "PS.avatar(s.id, s.state, { size: 'sm', name: name })" in home and "PS.avatar(s.id, st)" in home  # 내 세션 · 차분 목록 · 덱 카드
+
+
+def test_cozy_diorama_bundle_wired_to_memo():
+    # 2026-11-19 합류 1: 코드로 그린 디오라마 번들(BHOfficeScene version 2)을 오늘 화면 메모에 연결. 기록 docs/status/2026-11-19-cozy-office-merge.md
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    assert bundle.startswith("var BHOfficeScene=") and "window.BHOfficeScene=" in bundle
+    for need in ("setMemoOpen", "onBackground", "onOverview", "onPick", "나를 찾는 사람", "끝낸 일", "전체 보기", "작은 창", "of-btn", "of-tip", "--of-ask", "--of-done", "is-night"):
+        assert need in bundle, need
+    for old in ("bh-office-tools", "data-office-live", "ot-bubble", "Office layout", "hello, team"):
+        assert old not in bundle, old  # 옛 라인아트 장면의 부품·영어 그림 이름(V4)
+    assert "var(--of-ask" in bundle and "#C73E31" not in bundle  # 「?」 말풍선·숫자 배지는 알림 파랑(역할 색) — 빨강이 아니다
+    for bad in ("eval(", "new Function", "import(", "innerHTML"):
+        assert bad not in bundle
+    assert set(re.findall(r"https?://[^\s\"'`)]+", bundle)) == {"http://www.w3.org/2000/svg"}
+    # theme-post.js: 번들 제어를 focus·overview·setMemoOpen 까지 넘기고, 다시 붙을 때 마지막 값을 돌려준다
+    scene = (STATIC / "theme-post.js").read_text(encoding="utf-8")
+    for need in ("overview: function () { wantOver = true;", "setMemoOpen: function (open) { wantMemo = !!open;", "noteOverview: function () { wantOver = true; }",
+                 "if (wantOver) scene.overview(); else if (wantFocus) scene.focus(wantFocus);", "if (wantMemo) scene.setMemoOpen(true);"):
+        assert need in scene, need
+    # app.js: 사람·버튼(onPick)·빈 바닥(onBackground)·전체 보기(onOverview)를 홈에 넘긴다. onNavigate 는 작은 창 목록의 버튼만 부르니 바로 세션으로
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    for need in ("onPick: function (id, via)", "onBackground: function () { if (hv && hv.onBackground) hv.onBackground(); }", "postScene.noteOverview()", "hv.onOverview()"):
+        assert need in app, need
+    assert "Object.assign({ list: sceneList, onNavigate: function (href) { go(href); } }, extra || {})" in app
+    # post-home.js: 메모 닫기(Esc·빈 바닥·×)는 메모만 접고 장면에는 알리지 않는다(줌·조명 유지). 끌기로 숨기던 코드는 없다
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert "onPick: onPick, onBackground: onBackground, onOverview: onOverview," in home
+    close = home[home.index("function closeMemo()"):home.index("function closeBtn()")]
+    assert "shutId = memoId; memo.hidden = true;" in close and "sc.focus" not in close and "syncFocus" not in close
+    assert "memo.style.visibility === 'hidden' || !memo.getClientRects().length" in close  # 안 보이는 메모(자리 기다림·작은 창)에는 Esc 가 아무것도 안 한다
+    assert ".of-btn.is-ask:not(:disabled)" in close  # 초점이 메모 안에 있었으면 다시 여는 버튼으로
+    assert "'aria-label': '메모 닫기', title: '닫기 (Esc)'" in home and home.count("closeBtn()))") == 2  # 덱 메모·사람 메모 둘 다 ×
+    assert "if (e.key === 'Escape')" in home and "document.querySelector('.nb-back, .modal-back')" in home  # 팝업이 떠 있으면 그쪽 Esc
+    assert "function onBackground() { if (!gone && !narrowNow()) closeMemo(); }" in home  # 좁은 화면은 메모가 장면 아래라 바닥을 눌러도 그대로
+    assert "over = true; memo.hidden = memoHidden(); tellOpen();" in home  # 전체 보기
+    for gone in ("away = true", "addEventListener('dblclick'", "lastTap", "addEventListener('pointermove'"):
+        assert gone not in home, gone
+    # 장면과 같은 사람을 고른다: 고른 사람이 없으면 가장 오래 기다린 사람(번들 lead 와 같은 규칙), 손 든·끝낸 사람으로 고른 것은 그 상태가 풀리면 놓는다
+    assert "var ASK = { turn: 1, blocked: 1, unk: 1 };" in home and "function leadOf(list)" in home
+    assert "pickKindOf(pi.state) !== pickKind" in home and "syncFocus(pickId ? pickId : lead ? null : next);" in home
+    assert "if (over || told === want) return;" in home and "sc.setMemoOpen(open)" in home
+    # 장면이 작은 창에서 다른 사람을 고른 채 돌아오면(콘솔은 못 들었다) 다시 그린 뒤에도 어긋난 것을 보고 장면을 따른다 — 메모가 숨은 채 남지 않게
+    rec = home[home.index("function reconcile()"):home.index("/* 메모 머리의 첫 글")]
+    assert "chased !== foc.id || adopted === foc.id" in rec and "if (!over && memoId && !inScene) return;" in rec and "setPick(foc.id); paintDeck(); paintMemo();" in rec
+    assert home.count("reconcile();") == 2  # 덱 메모·사람 메모(또는 메모 없음) 두 갈래 끝
+    assert "if (memo.hidden || memo.style.visibility === 'hidden') return;" in home  # 숨은 메모는 읽기 프로그램에 알리지 않는다
+    # 메모 자리: 머리 반지름 r 의 1.62배 옆(시안), 자리가 없으면 왼쪽, 아래 버튼 줄은 비운다. 그 사람이 틀 밖이면 자리만 숨긴다
+    place = home[home.index("function placeMemo()"):home.index("function onFocus(f)")]
+    for need in ("(foc.r > 0 ? foc.r : 21) * 1.62", "var flip = hx + gap + mw > W - 10", "H - mh - 58", "memo.style.visibility = 'hidden'", "memo.classList.toggle('is-flip', flip)"):
+        assert need in place, need
+    # theme-post.css: 장면 색 변수를 역할 토큰에 잇고, 옛 선택자·틀린 주석은 없다
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    rule = next(line for line in css.splitlines() if line.startswith(':root[data-theme="post"] .bh-office { --of-text'))
+    block = rule + css[css.index(rule) + len(rule):css.index(rule) + len(rule) + 200]
+    for need in ("--of-ask: var(--ask-fill)", "--of-done: var(--ok-fill)", "--of-focus: var(--focus)", "--of-paper: var(--btn-face)", "--of-line: var(--btn-edge)", "--of-shadow: var(--btn-drop)", "--of-hover: var(--btn-lift)"):
+        assert need in block, need
+    assert "data-office-live" not in css and "ot-bubble" not in css and "aspect-ratio 를 직접 넣는다" not in css and "장면 그림(SVG)·사람 아바타 바탕" not in css
+    assert ".po-memo-x" in css and ".po-stage.is-office { aspect-ratio: 2.4 / 1;" in css and "aspect-ratio: 1.6 / 1" in css
+    # 장면 틀이 좁으면(720px 미만) 메모는 장면 아래 블록, 떠 있는 메모는 질문 세 줄·제목 한 줄로 높이를 묶는다
+    assert "var UNDER_W = 720;" in home and "stageFrame.clientWidth < UNDER_W" in home and "stageFrame.classList.toggle('is-under', narrow)" in home
+    assert ".po-stagew.is-under .po-memo { position: static;" in css and ".po-stagew:not(.is-under) .po-memo-q { display: -webkit-box;" in css and "-webkit-line-clamp: 3" in css
+    assert "border-left" not in "".join(line for line in css.splitlines() if ".po-memo {" in line)  # 왼쪽 세로 강조선 없음(꼬리 ::before 만 선을 쓴다)
+
+
+def test_cozy_survey_memo_person_click_drag_hide_and_small_fixes():
+    # 2026-11-18 Cozy Office 2회차(사용자 보고): 사무실 장면에서 사람을 누르면 세션으로 바로 가지 않고 그 사람의 메모, 메모의 「가서 확인하기」로 세션 이동.
+    # 2026-11-19 디오라마 번들(계약 version 2) 연결: 사람·버튼은 onPick 으로 받고, 메모는 Esc·빈 바닥·× 로 닫는다(끌기로는 안 닫힌다) — test_cozy_diorama_bundle_wired_to_memo
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    assert "onPick: function (id, via) { if (hv && hv.onPick) hv.onPick(id, via); }" in app  # 홈 장면만 가로챈다(세션·요청 화면은 그대로)
+    assert "hv.onPerson" not in app and "function onPerson(" not in home
+    pick = home[home.index("function onPick(id)"):home.index("function paintDeck()")]
+    assert "if (gone || !officeOn) return;" in pick and "if (!sceneSession(id)) { if (over) { leaveOver(); paintMemo(); } return; }" in pick  # 홈을 떠난 뒤·콘솔이 모르는 세션은 메모를 안 띄운다
+    assert "pickTop(id, true); return;" in pick and "setPick(id); paintMemo();" in pick  # 덱에 있는 세션이면 덱 맨 위도 그 카드로
     paint = home[home.index("function paintMemo()"):home.index("function personMemo(s)")]
-    assert "if (next !== memoId) away = false;" in paint and "memo.hidden = memoHidden();" in paint  # 끈 뒤 다시 그려도 숨김 유지, 메모 대상이 바뀌면 다시 보인다
-    assert "function memoHidden() { return !memoId || (away && !narrowNow()); }" in home
-    assert "new ResizeObserver(function () { memo.hidden = memoHidden(); placeMemo(); })" in home  # 넓게 끌어 숨긴 뒤 창을 줄이면 장면 아래 메모가 보인다
-    assert "memo.hidden = true; syncFocus(null);" not in home  # 메모를 치우는 곳은 memoId 도 비운다(크기 바뀜에 옛 메모가 되살아나지 않게)
-    assert "function pickTop(id, stay) { topId = id; pickId = null; away = false;" in home  # J·K·다음이면 다시 뜬다
-    pm = home[home.index("function personMemo(s)"):home.index("function onPerson(href)")]
+    assert "if (next && next !== shutId) shutId = null;" in paint and "memo.hidden = memoHidden();" in paint  # 닫은 뒤 다시 그려도 닫힘 유지, 다른 사람이 메모에 오면 다시 보인다
+    assert "function memoHidden() { return !memoId || over || shutId === memoId; }" in home
+    assert "function noMemo() { memo.hidden = true; memoId = null; pickId = null;" in home  # 메모를 치우는 곳은 memoId 도 비운다(크기 바뀜에 옛 메모가 되살아나지 않게). 닫아 둔 사람(shutId)은 남긴다
+    assert "function pickTop(id, stay) { topId = id; setPick(id);" in home  # J·K·다음이면 다시 뜬다
+    pm = home[home.index("function personMemo(s)"):home.index("function onPick(id)")]
     assert "'가서 확인하기'" in pm and "'세션 메모'" in pm and "'/s/' + encodeURIComponent(s.id)" in pm
     # 날짜 줄: 모든 저장소를 보면 첫 세션 폴더 이름(projC 따위)으로 채우지 않는다
     assert "projectWant && projectWant.all ? '모든 저장소' : projectOf()" in app
@@ -4264,13 +4559,13 @@ def test_cozy_defects_round3_source():
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     # D1 끝난 세션엔 갈래 고르기를 안 띄운다 · D4 흐린 도구의 까닭이 눈에 보인다 · D5 단계 단추를 누르면 입력칸 아래 앞 안내를 치운다
     assert "else if (s.status === 'ended' && s.canSend === false) el.appendChild(h('p', { class: 'note-muted', 'data-flow-ended': '1'" in ui
-    assert "data-tools-why" in ui and "' 까닭은 입력칸 아래에 있어.'" in ui
+    assert "data-tools-why" in ui and "' 까닭은 입력칸 아래에 있어요.'" in ui
     assert "opts.onAct()" in ui and "onAct: function () { if (/전달했어|이어서 할게/.test(followNote)) { followNote = ''; paintFollowNote(); } }" in app
     # D2 묻는 이유의 백틱 · D6 PR 배지 조사 · D7 한도 묶음 title · D9 처음 화면 문구 · D10 한도 켠 직후 문구
     assert "function NOTICK(t)" in app and "NOTICK(req.note).trim()" in app
-    assert "prSubject(pr.number, true) + ' 합쳐졌어.'" in logic and "' 이 합쳐졌어.'" not in logic
+    assert "prSubject(pr.number, true) + ' 합쳐졌어요.'" in logic and "' 이 합쳐졌어요.'" not in logic
     assert "attrs.title = lv.chips.map(chipTitle).join('\\n\\n');" in app
-    assert "'쓴 폴더가 아직 없어. '" in app and "d.receivedAt ? '켰어. 세션이 응답을 받을 때마다 헤더 한도가" in app
+    assert "'쓴 폴더가 아직 없어요. '" in app and "d.receivedAt ? '켰어요. 세션이 응답을 받을 때마다 헤더 한도가" in app
     # D8 좁은 화면 연결 끊김 띠는 메뉴줄 아래
     assert ':root[data-theme="post"] .conn { z-index: 46; top: 82px; }' in css
     # D11 직접 추가 줄을 빼면 다음 줄·앞 줄·「다른 자료 직접 고르기」로 초점 · D12 진행 중인 요청과 화면 상태를 테마 전환 때 넘김 · 첨부 안내는 새로 붙이면 지움 · D13 화면을 옮긴 뒤 제목으로 초점
@@ -4285,7 +4580,7 @@ def test_cozy_defects_round3_source():
     assert "'data-sumkey': 'old|' + d.key" in ui and "'data-sumkey': 'off|' + sid(session)" in ui
     # D18 메모가 바뀌면 읽기 프로그램에 알린다(지난 시간은 빼고 판단)
     assert "'data-memo-live': '1'" in home and "function announceMemo()" in home
-    assert home.count("announceMemo();") == 2  # 사람 메모 경로 + 덱 메모 경로
+    assert home.count("announceMemo();") == 4  # 사람 메모 경로 + 덱 메모 경로 + 메모가 자리를 잡아 보이게 될 때(placeMemo 의 장면 아래·떠 있는 두 갈래)
 
 
 _POST_TEAM_NODE = r"""
@@ -4339,7 +4634,8 @@ def test_cozy_teams_terminal_session_sits_in_team_by_used_flow_skill():
     assert home.count("teamOf(PL.teamFlowOf(s))") == 3
     # 우체국 말을 사무실 말로(2026-11-18 5회차): 안내판·요청 줄·도장 밑줄이 세션의 팀(teamFlowOf)을 같이 받는다
     assert "window.BHPostSession.here(s.id, state, k, flow)" in app and "PSS.clerk(kind, sid(), k, PL.teamFlowOf(s))" in app and "flow: s ? PL.teamFlowOf(s) : ''" in app
-    assert "PL.hereTitle(k, s.flow)" in home
+    assert "PL.seatName(s.state, s.flow)" in home and "PL.hereTitle(" not in home  # 차분 목록은 단계 번호가 아니라 장면이 세운 곳(V2)
+    assert "'aria-label': '다음 일 보기'" in home and "덱 카드 ' + items.length" not in home  # 몇 번째는 장면 버튼 한 곳(V3)
 
 
 _POST_REQ_TEAM_NODE = r"""
@@ -4422,7 +4718,7 @@ def test_cozy_office_design_g1_to_g10(tmp_path):
     chat = [{"t": 1, "role": "block", "text": "그냥 git push 는 쓸 수 없어.\n다음: 올리기 단계로 푸시해.", "hook": "pre-bash-git-guard", "kind": "blocked", "fix": "올리기 단계로 푸시해."}]
     s = _session("s1", chat=chat, canSend=True)
     got = _smoke(tmp_path, "s/s1", [s], extra={"__status": {"POST /api/sessions/s1/messages": 500}, "POST /api/sessions/s1/messages": {"error": "세션이 응답하지 않아"}}, actions=[{"click": "[data-block-send]"}])
-    assert "보내지 못했어: 세션이 응답하지 않아" in got["text"] and "<p.note-accent.is-err" in got["dump"], got["dump"][-800:]
+    assert "보내지 못했어요: 세션이 응답하지 않아" in got["text"] and "<p.note-accent.is-err" in got["dump"], got["dump"][-800:]
     ok = _smoke(tmp_path, "s/s1", [s], extra={"POST /api/sessions/s1/messages": {}}, actions=[{"click": "[data-block-send]"}])
     assert "이 작업에 전달했어" in ok["text"] and "is-err" not in ok["dump"]
     # G8: Post 는 요약 결과를 누른 자리(기억 칸·기억 배너) 아래에
@@ -4435,7 +4731,7 @@ def test_cozy_office_design_g1_to_g10(tmp_path):
       console.log(JSON.stringify({ a: P.stampedLine('allow'), d: P.stampedLine('deny'), q: P.stampedLine('answer'),
         w1: N.whenShort('11월 21일 09:00'), w2: N.whenShort('09:00'), w3: N.whenShort('1월 3일 23:05') }));
     """, str(STATIC / "post-logic.js"), str(STATIC / "notice-logic.js")], capture_output=True, text=True, encoding="utf-8", check=True).stdout)
-    assert out == {"a": "방금 승인했어 — 보냄 도장을 찍었어", "d": "방금 돌려보냈어 — 반송 도장을 찍었어", "q": "방금 답했어 — 접수 도장을 찍었어",
+    assert out == {"a": "방금 승인했어요 — 보냄 도장을 찍었어요", "d": "방금 돌려보냈어요 — 반송 도장을 찍었어요", "q": "방금 답했어요 — 접수 도장을 찍었어요",
                    "w1": "11.21 09:00", "w2": "09:00", "w3": "01.03 23:05"}
     assert "방금 답했어 — 처리됐어" not in (STATIC / "post-home.js").read_text(encoding="utf-8") and "decision: stamps[rid].decision" in app
     # G10: 세션 없을 때 새 소식도 단으로, 점검 탭 빈 칸은 간격을 먹지 않는다
@@ -4460,13 +4756,15 @@ def test_cozy_office_judge_j6_to_j14():
     # J9: 대화에는 PR 메모 한 줄(검사 탭으로), 카드 전체는 검사 탭에만
     assert "post ? prMemo(s) : ui.prCard(s)" in app and "'검사 탭에서 보기'" in app and "regions.pickInsp = function (i)" in app
     assert "'q prcard po-prmemo' + (failed ? ' blocked' : unsure ? ' unsure' : '')" in app  # 표시 약속 칸(syncLegend)이 그대로 뜬다
-    # J10: Cozy Office 내 차례는 덱과 같은 순서(세션이 오래 기다린 순, 같으면 원래 순서)
+    # J10: Cozy Office 답을 기다리는 일는 덱과 같은 순서(세션이 오래 기다린 순, 같으면 원래 순서)
     assert "if (isPostTheme()) todo = todo.map(function (x, i) { return [x, i]; }).sort(" in app
-    assert "turn.sort(function (a, b) { return (a.s.updatedAt || 0) - (b.s.updatedAt || 0); });" in home
+    # 덱은 장면과 같은 순서(가장 오래 기다린 사람부터, 막힘·확인 못 함도 섞어)이고 알림도 그 순서다(요약 정리)
+    assert "return PL.byWait(live).map(function (r) { return r.it; }).concat(left);" in home
+    assert "if (isPostTheme() && window.BHPostLogic) asks = window.BHPostLogic.byWait(asks);" in app
     # J11: 판정 전 폴더 알림은 판정 뒤(최대 5초), 터미널로 넘어간 요청 수·팀 기록은 고른 프로젝트, 파이프라인은 지금 폴더 결과만, 빈 홈은 고른 프로젝트
     assert "function repoPending(s)" in app and "flushNotify(false); if (notifyHeld.length) ensureRepos();" in app and "NOTIFY_HOLD_MS = 5000" in app
     assert "      ensureRepos();  // 새 폴더 판정을 바로 받으러 간다" in app  # 숨은 탭은 그리기가 돌지 않아 scheduleSide 로는 판정을 못 받는다(리뷰)
-    assert "padding: 4px 4px 6px; }  /* 안쪽 여백" in css and "'불러오는 중이야'; tbTile.className = 'tile2'; }" in ui
+    assert "padding: 4px 4px 6px; }  /* 안쪽 여백" in css and "'불러오는 중이에요'; tbTile.className = 'tile2'; }" in ui
     assert "scopedSessions().forEach(function (s) {  // Post 는 고른 프로젝트의 세션만(J11)" in app
     assert "troubleScope: troubleScope" in app and "if (!repos.tried) return 'wait';" in app
     assert "kit.qs({ limit: 1, status: 'open', project: ok.slug })" in ui and "if (stats.refresh) stats.refresh();" in home
@@ -4557,7 +4855,8 @@ def test_cozy_teams3_order_basis_stage_desk_and_lane():
     assert out["laneSkill"] == 1 and out["laneOld"] == 0 and out["laneBasis"] == [7]
     # 장면 번들(외부 빌드본)이 사람을 세우는 규칙과 atDesk 가 같다: wait → 리뷰 룸, done → 완료, idle → 카페(rest), 그 밖 → 팀 자리
     bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
-    assert 'e.state==="wait"?C("review").push(e):e.state==="done"?C("done").push(e):e.state==="idle"?C("rest").push(e)' in bundle
+    # 디오라마 번들(계약 version 2)의 자리 규칙(ai-office-iso src/diorama/seating.ts placeOf). 축약 변수 이름은 빌드마다 달라질 수 있어 모양으로 본다
+    assert re.search(r'if\((\w+)\.state==="wait"\)return"review";if\(\1\.state==="done"\)return"done";if\(\1\.state==="idle"\)return"rest"', bundle)
     home = (STATIC / "post-home.js").read_text(encoding="utf-8")
     body = home[home.index("function paintTeams()"):home.index("function draw()")]
     assert "PL.atDesk(s.state)" in body and "카페·리뷰 룸·완료에 " in body
@@ -4565,3 +4864,71 @@ def test_cozy_teams3_order_basis_stage_desk_and_lane():
     assert "PL.teamCells(cells, s, PL.stationOf(s, window.BHLogic))" in app
     body = app[app.index("function ensureReqs()"):app.index("function onProjectPick(e)")]
     assert "key = cwd + '|' + br" in body and "reqs.at[key] = got && got.loading" in body and "reqs.br" not in body  # 같은 폴더에 브랜치가 다른 세션이 있어도 번갈아 묻지 않게(리뷰 반영)
+
+
+def test_cozy_summary_one_place():
+    # 요약 정리(2026-11-19, docs/status/2026-11-19-cozy-office-summary.md): 같은 정보는 한 화면에서 한 자리에만.
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
+    # 세션 수는 장면 머리, 상태별 수는 장면 아래 정리 줄(범례 겸용, 장면과 같은 목록·같은 상태 판정). 일곱 상태를 다 세어 더하면 장면 머리 수다
+    assert "var SUM = ['turn', 'blocked', 'unk', 'run', 'wait', 'done', 'idle'];" in home
+    body = home[home.index("function paintSum()"):home.index("function noMemo()")]
+    assert "kit.sceneList().forEach(function (s) { n[s.state] = (n[s.state] || 0) + 1; });" in body and "'data-sum': k" in body and "PS.LABEL[k]" in body
+    assert "sceneSub.textContent = kit.sceneList().length + '개';" in home and "stageFrame, calmList, sumRow, teamRow);" in home  # 차분 목록 아래에도 같은 줄
+    # 같은 수를 되풀이하던 자리는 없다: 인사 문장 · 덱 머리 숫자 · 숫자 카드 줄 · 「내 세션 N개」
+    for gone in ("po-lede", "네 답을 기다리는 일이 ' +", "따로 셈", "tiles2 po-tiles", "'내 세션 ' + list.length", "L.counts(", "stats.prTile", "stats.weekTile", "po-legend"):
+        assert gone not in home, gone
+    assert ".po-lede" not in css and ".po-legend" not in css and ".nb-more" not in css
+    # 숫자 카드 줄에만 있던 정보는 자리를 옮겼다: 이번 주 산출물 → 최근 산출물 칸, 팀 기록 → 아래 칸들 옆
+    assert "HK.recentCard(recent, showWeek);" in home and "'이번 주에 ' + n + '개 뽑았어요'" in home and "h('div', { class: 'po-tiles po-tb' }, stats.tbTile)" in home
+    assert "fixBox, recent, prSlot, tbSlot, slots.whatsSlot" in home
+    assert "'끝난 세션 ' + ended + '개도 같이 보여요'" in home  # 내 세션 목록이 장면 머리 수보다 긴 까닭만 말한다
+    # 왼쪽 메뉴 「오늘」 은 숫자 없는 점(오늘 화면에서는 없음), 뜻은 aria-label·title 글로. 알림 수는 알림 단추 한 곳, 말풍선에 +N 없음
+    rail = app[app.index("function renderPostRail(d)"):app.index("function syncPostFrame(d)")]
+    assert "nm !== 'home' && (d.todo.length || (d.blocked || []).length) ? '나를 찾는 사람이 있어요' : ''" in rail
+    assert "'aria-label': note ? label + ' · ' + note : null, title: note || null" in rail and "text: String(badge)" not in app
+    host = app[app.index("function noticeHost()"):app.index("function limitEl()")]
+    assert "nb-more" not in host and "text: post ? (n > 99 ? '99+' : String(n)) : null" in host
+    # 세션 화면 안내판은 앉은 곳만(상태 한 줄은 머리 상태 표시가 말한다), 팀 기록 머리 문장은 Post 에서 안 풀린 수를 되풀이하지 않는다
+    sess = (STATIC / "post-session.js").read_text(encoding="utf-8")
+    assert "PL.hereTitle(k, flow)" in sess and "PL.hereLine(state)));" not in sess
+    assert "(isPostNow() ? '' : ' · 아직 안 풀린 것 ' + st.open)" in (STATIC / "trouble.js").read_text(encoding="utf-8")
+    # 작은 창 목록(번들): 정리 줄과 같은 묶음을 이름까지 — 나를 찾는 사람 · 끝낸 일 · 일하는 사람, 쉬는 중이에요은 수
+    bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
+    for need in ("나를 찾는 사람", "지금은 나를 찾는 사람이 없어요.", "일하는 사람", "지금은 일하는 사람이 없어요.", "쉬는 중 "):
+        assert need in bundle, need
+    assert "답을 기다리는 일" not in bundle
+
+
+def test_cozy_ask_order_is_one_rule(tmp_path):
+    # 나를 찾는 사람의 순서는 한 함수(post-logic.js byWait)다: 덱 · 알림이 이것을 쓰고, 장면 번들의 group(list, 'ask') 과 같은 결과를 낸다
+    # (t 오름차순 — 모르면 맨 뒤, 같으면 장면 목록 순서, 그래도 같으면 받은 순서). 막힘 · 확인 못 함도 답을 기다리는 일와 섞인다.
+    script = tmp_path / "bywait.js"
+    script.write_text("""
+const assert = require('assert');
+const P = require(process.argv[2]);
+// 번들 규칙을 그대로 옮긴 것(ai-office-iso src/office-post.ts group · src/diorama/seating.ts timeOf)
+const timeOf = (s) => (typeof s.t === 'number' ? s.t : s.t ? Date.parse(s.t) || Infinity : Infinity);
+const group = (list) => list.map((s, i) => ({ s, i })).sort((a, b) => timeOf(a.s) - timeOf(b.s) || a.i - b.i).map(({ s }) => s.id);
+const scene = [  // 장면 목록 순서(seat = 여기서 몇 번째)
+  { id: 'q-new', t: 500 }, { id: 'blk-old', t: 100 }, { id: 'tie-b', t: 300 }, { id: 'unk', t: 200 }, { id: 'tie-a', t: 300 },
+  { id: 'none-1' }, { id: 'iso', t: '1970-01-01T00:00:00.150Z' }, { id: 'none-2', t: null }, { id: 'zero', t: 0 }];
+const want = group(scene);
+assert.deepStrictEqual(want, ['zero', 'blk-old', 'iso', 'unk', 'tie-b', 'tie-a', 'q-new', 'none-1', 'none-2']);  // 숫자 0 은 숫자다(번들과 같다). 값이 없으면 맨 뒤
+const rows = scene.map((s, i) => ({ t: s.t, seat: i, id: s.id }));
+// 받은 순서가 달라도(덱: 답을 기다리는 일 다음 막힘, 알림: 요청마다) 결과는 장면 순서와 같다
+for (const order of [rows, rows.slice().reverse(), [rows[4], rows[2], rows[8], rows[0], rows[7], rows[1], rows[5], rows[3], rows[6]]]) {
+  assert.deepStrictEqual(P.byWait(order).map((r) => r.id), want);
+}
+// 한 세션의 요청 여럿(같은 t · 같은 seat)은 받은 순서 그대로
+assert.deepStrictEqual(P.byWait([{ t: 5, seat: 1, id: 'r1' }, { t: 5, seat: 1, id: 'r2' }, { t: 1, seat: 9, id: 'x' }]).map((r) => r.id), ['x', 'r1', 'r2']);
+assert.deepStrictEqual(P.byWait([]), []);
+const src = [{ t: 2, seat: 0 }, { t: 1, seat: 1 }]; P.byWait(src); assert.strictEqual(src[0].t, 2);  // 받은 배열은 안 바꾼다
+console.log('ok');
+""", encoding="utf-8")
+    out = subprocess.run(["node", str(script), str(STATIC / "post-logic.js")], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0 and out.stdout.strip() == "ok", out.stderr
+    home = (STATIC / "post-home.js").read_text(encoding="utf-8")
+    # 도장만 남은 카드(이미 처리됨)는 순서에 넣지 않고 끝에: 맨 위 카드는 늘 장면이 스스로 고르는 사람
+    assert "left = all.filter(function (it) { return it.kind === 'turn' && !it.n; });" in home

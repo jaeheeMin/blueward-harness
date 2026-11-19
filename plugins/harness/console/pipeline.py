@@ -58,15 +58,15 @@ def repo_info(run: gitstate.Runner, cwd: str) -> dict:
     state: yes(저장소, key·name·top(그 폴더의 맨 위 폴더)·folder(맨 위 폴더 이름)) / no(폴더는 있는데 git 저장소가 아님)
     / unknown(폴더가 없거나 git 을 실행하지 못함, .git 이 있는데 git 이 못 읽음 — 어느 저장소라고 지어내지 않는다)."""
     if not cwd or not os.path.isdir(cwd):
-        return {"state": "unknown", "reason": "작업 폴더가 없어."}
+        return {"state": "unknown", "reason": "작업 폴더가 없어요."}
     rc, out = run(["git", "rev-parse", "--git-common-dir", "--show-toplevel"], cwd)
     if rc == gitstate.GIT_UNAVAILABLE:
-        return {"state": "unknown", "reason": "git 을 실행하지 못했어."}
+        return {"state": "unknown", "reason": "git 을 실행하지 못했어요."}
     lines = [x.strip() for x in out.splitlines() if x.strip()] if rc == 0 else []
     if not lines:
         if _has_git_above(cwd):  # .git 은 있는데 git 이 못 읽었다(소유자 검사 dubious ownership, 권한, .git 안쪽 폴더) — 저장소 아님으로 단정하지 않는다
-            return {"state": "unknown", "reason": "git 이 이 폴더의 저장소를 읽지 못했어."}
-        return {"state": "no", "reason": "git 저장소가 아니야."}
+            return {"state": "unknown", "reason": "git 이 이 폴더의 저장소를 읽지 못했어요."}
+        return {"state": "no", "reason": "git 저장소가 아니에요."}
     key, name = repo_key(lambda a, c: (0, lines[0]), cwd)
     top = os.path.realpath(lines[1] if len(lines) > 1 else cwd)
     return {"state": "yes", "key": key, "name": name, "top": top, "folder": os.path.basename(top) or top}
@@ -89,12 +89,12 @@ def open_prs(run: gitstate.Runner, root: str) -> dict:
     """열린 PR 을 요구사항 번호별로 묶는다. {"state": "ok"|"no"|"unknown", "reason", "byNumber": {번호: [{number,url,title,kind,checks,awaitApproval,draft}]}}.
     kind: work(src/ 를 바꿈) / spec(그 번호의 Spec 파일을 바꿈) / doc(그 밖)."""
     if not gitstate.is_github_repo(run, root):
-        return {"state": "no", "reason": "git 원격이 GitHub 인 저장소가 아니라 PR 은 보지 않아.", "byNumber": {}}
+        return {"state": "no", "reason": "git 원격이 GitHub 인 저장소가 아니라 PR 은 보지 않아요.", "byNumber": {}}
     rc, out = run(["gh", "pr", "list", "--state", "open", "--limit", str(PR_LIMIT), "--json",
                    "number,title,url,headRefName,isDraft,files,statusCheckRollup"], root)
     data = gitstate._json(out) if rc == 0 else None
     if not isinstance(data, list):
-        return {"state": "unknown", "reason": "gh 로 열린 PR 을 읽지 못했어(gh 로그인·네트워크 확인).", "byNumber": {}}
+        return {"state": "unknown", "reason": "gh 로 열린 PR 을 읽지 못했어요(gh 로그인·네트워크 확인).", "byNumber": {}}
     by: dict[int, list[dict]] = {}
     for d in data:
         if not isinstance(d, dict) or not d.get("number"):
@@ -114,11 +114,11 @@ def open_issues(run: gitstate.Runner, root: str) -> dict:
     main: 제목 맨 앞 `[DEV-xxx]`(개발 본체 이슈 — start·srs 의 번호 찜), 아니면 제목 끝 `(DEV-xxx)`(하위 작업 이슈). 형식은 start 스킬
     reserve_number.py 의 TAG_RE·SUBTASK_RE 와 같다. Cozy Office 가 세션 브랜치(`{type}/{이슈번호}-…`)의 이슈로 그 세션의 요구사항을 안다."""
     if not gitstate.is_github_repo(run, root):
-        return {"state": "no", "reason": "git 원격이 GitHub 인 저장소가 아니라 이슈는 보지 않아.", "byIssue": {}}
+        return {"state": "no", "reason": "git 원격이 GitHub 인 저장소가 아니라 이슈는 보지 않아요.", "byIssue": {}}
     rc, out = run(["gh", "issue", "list", "--state", "open", "--limit", str(ISSUE_LIMIT), "--json", "number,title"], root)
     data = gitstate._json(out) if rc == 0 else None
     if not isinstance(data, list):
-        return {"state": "unknown", "reason": "gh 로 열린 이슈를 읽지 못했어(gh 로그인·네트워크 확인).", "byIssue": {}}
+        return {"state": "unknown", "reason": "gh 로 열린 이슈를 읽지 못했어요(gh 로그인·네트워크 확인).", "byIssue": {}}
     by: dict[str, dict] = {}
     for d in data:
         if not isinstance(d, dict) or not d.get("number"):
@@ -142,7 +142,7 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
 
     rc, tree = run(["git", "-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "origin/main", "--", "docs/ssot/SRS.md", "audit/ledger"], root)
     if rc != 0:
-        return {"state": "unknown", "reason": "origin/main 의 파일 목록을 읽지 못했어."}
+        return {"state": "unknown", "reason": "origin/main 의 파일 목록을 읽지 못했어요."}
     srs: dict[int, dict] = {}
     ledger: dict[int, dict] = {}
     for line in tree.splitlines():
@@ -150,7 +150,7 @@ def read(run: gitstate.Runner, slow_run: gitstate.Runner, cwd: str) -> dict:
         if line == "docs/ssot/SRS.md" or (line.startswith("audit/ledger/") and line.endswith(".md")):
             text = show(line)
             if text is None:
-                return {"state": "unknown", "reason": f"origin/main 의 {line} 을 읽지 못했어."}
+                return {"state": "unknown", "reason": f"origin/main 의 {line} 을 읽지 못했어요."}
             if line == "docs/ssot/SRS.md":
                 for n, row in devready._rows(text, devready.REQ_ROW_RE):
                     srs[n] = {"title": devready._pick(row, "Title", "요구사항"), "status": devready._pick(row, "Status", "상태")}

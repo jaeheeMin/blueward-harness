@@ -7,7 +7,7 @@
   'use strict';
 
   var LANES = ['요구사항(SRS)', '개발 Spec', '개발', '검토(PR)', '합쳐짐'];
-  var LABEL = { turn: '내 차례', blocked: '막힘', unk: '확인 못 함', run: '일하는 중', wait: '승인 기다림', done: '끝남', idle: '쉬는 중' };
+  var LABEL = { turn: '답을 기다려요', blocked: '막혔어요', unk: '확인하지 못했어요', run: '일하는 중이에요', wait: '승인을 기다려요', done: '끝났어요', idle: '쉬는 중이에요' };  // post-logic.js LABEL·장면 번들과 같은 상태 이름(node 시험이 이 파일만 읽어 따로 둔다)
   /* 한 요구사항에 세션이 여럿이면 이 순서로 앞선 세션을 카드에 단다(같으면 최근 것) */
   var PICK = ['blocked', 'turn', 'unk', 'run', 'wait', 'idle', 'done'];
   var MAX_FOLDERS = 12;
@@ -112,8 +112,9 @@
     function card(c) {
       var it = c.item, s = c.session, st = c.state;
       var cls = 'po-pl-req' + (st === 'turn' ? ' turn' : st === 'blocked' ? ' blocked' : '');
+      var tone = st === 'turn' && s && kit.turnTone ? kit.turnTone(s) || null : null;  // 승인·계획 = 경고, PR 검사 실패 = 오류(theme-post.css [data-color-role])
       var kids = [
-        h('i', { class: 'po-st po-st-' + st, 'aria-hidden': 'true', text: PL.GLYPH[st] || '' }),
+        h('i', { class: 'po-st po-st-' + st, 'data-color-role': tone, 'aria-hidden': 'true', text: PL.GLYPH[st] || '' }),
         h('span', { class: 'po-pl-rid', text: (it.req ? it.req + ' · ' : '') + it.dev }),
         h('b', { class: 'po-pl-t', text: it.title }),
         it.kind ? h('span', { class: 'po-pl-kind', text: it.kind }) : null,
@@ -121,7 +122,7 @@
       ];
       var prs = arr(it.prs).map(function (p) { return '#' + p.number; }).join(', ');
       var tip = prs ? '열린 PR ' + prs : null;
-      var node = s ? kit.link('/s/' + encodeURIComponent(s.id), { class: cls, title: tip }, kids) : h('div', { class: cls, title: tip }, kids);
+      var node = s ? kit.link('/s/' + encodeURIComponent(s.id), { class: cls, title: tip, 'data-color-role': tone }, kids) : h('div', { class: cls, title: tip }, kids);
       return h('li', { 'data-req': String(it.number) }, node);
     }
     function lanesEl(g, narrow) {
@@ -140,12 +141,12 @@
       var d = g.data, hid = 'po-pl-h-' + g.key.replace(/[^A-Za-z0-9]/g, '').slice(-24), body = [];
       var sub = d.state === 'yes' ? (g.name ? g.name + ' · ' : '') + summary(d) : g.name;
       if (d.state === 'yes') {
-        if (d.loading) body.push(note('최신 상태를 다시 읽는 중이야.'));
-        if (d.prs && d.prs.state === 'unknown') body.push(note('열린 PR 을 읽지 못해 검토 칸이 비어 있을 수 있어. ' + (d.prs.reason || ''), 'unk'));
-        if (!arr(d.items).length) body.push(note('origin/main 에 올라간 요구사항이 아직 없어.'));
+        if (d.loading) body.push(note('최신 상태를 다시 읽는 중이에요.'));
+        if (d.prs && d.prs.state === 'unknown') body.push(note('열린 PR 을 읽지 못해 검토 칸이 비어 있을 수 있어요. ' + (d.prs.reason || ''), 'unk'));
+        if (!arr(d.items).length) body.push(note('origin/main 에 올라간 요구사항이 아직 없어요.'));
         else body.push(lanesEl(g, narrow));
-      } else if (d.loading) body.push(note('origin/main 과 열린 PR 을 읽는 중이야.'));
-      else body.push(note('요구사항을 확인하지 못했어. ' + (d.reason || ''), 'unk'));  // 못 읽은 것을 빈 판이나 0건으로 뭉개지 않는다
+      } else if (d.loading) body.push(note('origin/main 과 열린 PR 을 읽는 중이에요.'));
+      else body.push(note('요구사항을 확인하지 못했어요. ' + (d.reason || ''), 'unk'));  // 못 읽은 것을 빈 판이나 0건으로 뭉개지 않는다
       return h('section', { class: 'light po-panel po-pl', 'aria-labelledby': hid, 'data-repo': g.name },
         h('header', { class: 'po-ph' }, h('h2', { id: hid, text: '요구사항 파이프라인' }), sub ? h('span', { class: 'po-pl-sub', text: sub }) : null), body);
     }
@@ -182,9 +183,9 @@
       var want = folders(), res = st.results ? st.results.filter(function (r) { return want.indexOf(r.cwd) >= 0; }) : null;
       if (res && !res.length && st.results.length && want.length) res = null;
       page.push(h('div', { class: 'ptitle' }, h('span', { class: 'eb', text: '파이프라인' }), h('h1', { text: '요구사항이 지금 어디까지 왔나' }),
-        h('p', { class: 'line po-pl-lead', text: 'SRS → 개발 Spec → 개발 → 검토 → 합쳐짐. 하네스는 이 순서를 지키게 해.' })));
+        h('p', { class: 'line po-pl-lead', text: 'SRS → 개발 Spec → 개발 → 검토 → 합쳐짐. 하네스는 이 순서를 지키게 해요.' })));
       if (!res) {
-        page.push(kit.loadingBox('요구사항을 읽는 중이야.'));
+        page.push(kit.loadingBox('요구사항을 읽는 중이에요.'));
       } else {
         var gs = groups(res), shown = gs.filter(function (g) { return g.data.state !== 'no'; });
         var skipped = [], gone = [], failed = [];
@@ -195,13 +196,13 @@
         shown.forEach(function (g) { page.push(panel(g, narrow)); });
         if (!shown.length) {
           page.push(h('section', { class: 'light po-panel po-pl po-pl-empty', 'aria-labelledby': 'po-pl-empty-h' },
-            h('header', { class: 'po-ph' }, h('h2', { id: 'po-pl-empty-h', text: res.length ? '보일 요구사항이 없어' : '아직 연 프로젝트 폴더가 없어' })),
-            note(res.length ? 'origin/main 에 SRS(docs/ssot/SRS.md)나 진행 원장(audit/ledger/)이 있는 프로젝트 폴더에서 세션을 열면 요구사항이 여기 칸별로 보여.'
-              : '프로젝트 폴더에서 새 작업을 시작하면 그 폴더의 요구사항이 여기 칸별로 보여.'),
+            h('header', { class: 'po-ph' }, h('h2', { id: 'po-pl-empty-h', text: res.length ? '보일 요구사항이 없어요' : '아직 연 프로젝트 폴더가 없어요' })),
+            note(res.length ? 'origin/main 에 SRS(docs/ssot/SRS.md)나 진행 원장(audit/ledger/)이 있는 프로젝트 폴더에서 세션을 열면 요구사항이 여기 칸별로 보여요.'
+              : '프로젝트 폴더에서 새 작업을 시작하면 그 폴더의 요구사항이 여기 칸별로 보여요.'),
             res.length ? null : h('div', { class: 'acts' }, kit.link('/new', { class: 'btn', text: '새 작업' }))));
         }
-        if (skipped.length) page.push(note('SRS·진행 원장이 없는 폴더는 뺐어: ' + skipped.join(', '), 'skip'));
-        if (gone.length) page.push(note('없어진 작업 폴더는 뺐어: ' + gone.join(', '), 'skip'));
+        if (skipped.length) page.push(note('SRS·진행 원장이 없는 폴더는 뺐어요: ' + skipped.join(', '), 'skip'));
+        if (gone.length) page.push(note('없어진 작업 폴더는 뺐어요: ' + gone.join(', '), 'skip'));
         if (failed.length) page.push(note('요구사항을 읽지 못한 폴더: ' + failed.join(', '), 'skip unk'));
       }
       kit.clear(rootEl);

@@ -1,6 +1,6 @@
 /* Post(Cozy Office) 테마의 세션·요청 화면 부품(B단계). 데이터를 읽거나 고치지 않고, 받은 값으로 DOM 조각만 만든다.
-   - here: 세션 머리 오른쪽 안내판(큰 사람 그림 + "{팀} · {단계}" + 상태별 한 줄)
-   - clerk: 요청 카드 위의 리뷰 룸 검토 담당(승인·계획) 또는 그 세션 사람(질문)
+   - here: 세션 머리 오른쪽 안내판(큰 사람 그림(사무실 장면의 그 사람) + "{팀} · {단계}")
+   - clerk: 요청 카드 위에서 손을 든 그 세션 사람(승인·계획·질문 모두)
    - seal: 요청 처리가 성공한 뒤에만 카드에 찍는 도장(role="status")
    글자·도장 판정은 post-logic.js 의 순수 함수가 정하고 여기서는 그리기만 한다. 보이는 것은 Post 일 때뿐이다(CSS). */
 (function () {
@@ -17,24 +17,23 @@
     var f = el('figure', 'po-here');
     f.appendChild(PS.avatar(sessionId, state, { size: 'lg' }));
     var cap = el('figcaption');
-    cap.appendChild(el('b', null, PL.hereTitle(k, flow)));
-    cap.appendChild(el('small', null, PL.hereLine(state)));
+    cap.appendChild(el('b', null, PL.hereTitle(k, flow)));  // 안내판은 앉은 곳만 말한다. 상태 한 줄(옛 hereLine)은 뺐다(문구 6회차에 함수도 지움): 같은 화면의 머리 상태 표시와 그 아래 문장이 이미 말한다(요약 정리, 2026-11-19)
     f.appendChild(cap);
     return f;
   }
 
-  /* 요청 카드 바로 위 한 줄. kind: permission · plan · question · elicitation. 승인·계획은 리뷰 룸 검토 담당(가만히 서 있다가 1.2초 주기로 도장을 찍는다), 질문은 그 세션 사람이 손을 든다. */
+  /* 요청 카드 바로 위 한 줄. kind: permission · plan · question · elicitation. 어느 요청이든 그 세션 사람이 손을 든다 — 사무실 장면에서 손 든 바로 그 사람이다(PS.portraitOf, 허리까지).
+     옛 라인아트 장면의 「리뷰 룸 검토 담당」 그림은 새 장면에 없는 사람이라 여기서 뺐다. 번들이 없으면 옛 라인아트 직원이 손을 든다. */
   function clerk(kind, sessionId, k, flow) {
-    var ask = kind === 'question' || kind === 'elicitation';
-    var who = ask ? PL.personOf(sessionId) : '';
-    var f = el('figure', 'po-clerk' + (ask ? ' is-ask' : '') + (who === 'kid' ? ' is-kid' : '')), box = el('span'), anim = PS.animOn();  // 차분·움직임 줄이기면 한 장 그림
+    var anim = PS.animOn();  // 차분·움직임 줄이기면 멈춘 그림(프로필 그림은 portraitOf 가 스스로 본다)
+    var pic = PS.portraitOf ? PS.portraitOf(sessionId, 'turn', 'half', true) : null;
+    var who = pic ? '' : PL.personOf(sessionId);
+    var f = el('figure', 'po-clerk is-ask' + (who === 'kid' ? ' is-kid' : '')), box = el('span', pic ? 'po-av-pic po-av-turn' : '');
     f.setAttribute('aria-hidden', 'true');
-    if (ask) {
+    if (pic) box.appendChild(pic);
+    else {
       box.appendChild(img(BASE + 'people/' + who + '/ask-1.svg'));
       if (anim) box.appendChild(img(BASE + 'people/' + who + '/ask-2.svg', 'po-av-b'));
-    } else {
-      box.appendChild(img(BASE + 'clerk/idle.svg'));
-      if (anim) { box.appendChild(img(BASE + 'clerk/stamp-1.svg', 'po-c1')); box.appendChild(img(BASE + 'clerk/stamp-2.svg', 'po-c2')); }
     }
     f.appendChild(box);
     f.appendChild(el('figcaption', null, PL.clerkLine(kind, k, flow)));

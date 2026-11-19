@@ -93,7 +93,7 @@ def check(session_id: str, transcript_path: str = "", env: Mapping[str, str] | N
     except OSError:
         files = []
     if not folder.is_dir():
-        return UNKNOWN, "이 컴퓨터의 Claude Code 가 세션 목록(sessions 폴더)을 남기지 않아서 터미널이 열려 있는지 확인하지 못했어."
+        return UNKNOWN, "이 컴퓨터의 Claude Code 가 세션 목록(sessions 폴더)을 남기지 않아서 터미널이 열려 있는지 확인하지 못했어요."
     unreadable = 0
     for f in files:
         try:
@@ -105,7 +105,7 @@ def check(session_id: str, transcript_path: str = "", env: Mapping[str, str] | N
             continue
         pid = _int(data.get("pid"))
         if pid is not None and alive(pid, _int(data.get("procStart"))):
-            return ALIVE, "이 세션을 쥔 터미널(claude)이 아직 열려 있어."
+            return ALIVE, "이 세션을 쥔 터미널(claude)이 아직 열려 있어요."
     if unreadable:
-        return UNKNOWN, f"세션 목록 파일 {unreadable}개를 읽지 못해서 터미널이 닫혔는지 확인하지 못했어."
-    return ENDED, "이 세션을 쥔 터미널(claude)이 없어. 닫힌 것으로 확인했어."
+        return UNKNOWN, f"세션 목록 파일 {unreadable}개를 읽지 못해서 터미널이 닫혔는지 확인하지 못했어요."
+    return ENDED, "이 세션을 쥔 터미널(claude)이 없어요. 닫힌 것으로 확인했어요."

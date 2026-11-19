@@ -7,9 +7,9 @@
   var WHO = ['mint', 'navy', 'rose', 'sunny', 'sky', 'sage', 'kid'];
   /* 상태 순서(위가 먼저): 내 차례 > 막힘 > 확인 못 함 > 일하는 중 > 승인 기다림 > 끝 > 쉬는 중 */
   var STATES = ['turn', 'blocked', 'unk', 'run', 'wait', 'done', 'idle'];
-  var LABEL = { turn: '내 답이 필요해', blocked: '막혔어', unk: '확인 못 함', run: '일하는 중', wait: '승인 기다림', done: '끝났어', idle: '쉬는 중' };
+  var LABEL = { turn: '답을 기다려요', blocked: '막혔어요', unk: '확인하지 못했어요', run: '일하는 중이에요', wait: '승인을 기다려요', done: '끝났어요', idle: '쉬는 중이에요' };  // 장면 번들(office-post.ts LABEL)과 같은 말 — 상태 칩·정리 줄·메모·파이프라인 카드가 다 이것을 쓴다(문구 6회차)
   var GLYPH = { turn: '!', blocked: '✕', unk: '?', done: '✓', wait: '…' };
-  /* desk = 팀과 무관한 곳(검토 3 = 리뷰 룸, 끝 4 = 완료). 0~2 는 세션의 팀 이름으로 부른다(hereTitle·placeOf·sealDesk). */
+  /* desk = 팀과 무관한 곳(검토 3 = 리뷰 룸, 끝 4 = 완료). 0~2 는 세션의 팀 이름으로 부른다(hereTitle). 요청 화면(placeOf·sealDesk)과 차분 목록(seatName)은 장면이 세운 곳을 따른다. */
   var STATION = [
     { name: '요구사항', hint: '무엇을 만들지 쓰기' }, { name: '개발 Spec', hint: '어떻게 만들지 설계' },
     { name: '개발', hint: 'AI가 만드는 중' }, { name: '검토', hint: '팀 승인 받기', desk: '리뷰 룸' },
@@ -71,6 +71,13 @@
   /* 장면(office-post.js)이 사람을 세우는 곳: 승인 기다림은 리뷰 룸, 끝은 완료, 쉬는 중은 카페, 그 밖(내 차례·막힘·확인 못 함·일하는 중)은 팀 자리(팀이 없으면 리셉션).
      홈 팀 칸 숫자는 이 기준으로 지금 그 자리에 있는 사람만 센다(9회차 D) — 소속 인원을 세면 쉬는 사람이 팀 칸엔 있고 장면의 그 책상엔 없다. */
   function atDesk(state) { return state !== 'wait' && state !== 'done' && state !== 'idle'; }
+  /* 장면이 그 사람을 세운 곳의 이름(번들 seating.ts placeOf 와 같은 규칙, 표지판 글 그대로) — 장면 대신 보이는 차분 목록이 장면과 다른 곳을 말하지 않게(갈래 V 결함 V2).
+     단계 번호(stationOf)로 고르면 PR 이 열린 채 답을 기다리는 사람이 「리뷰 룸」 이 되는데, 장면은 그 사람을 팀 자리에 세운다. */
+  function seatName(state, flow) {
+    if (state === 'wait') return STATION[3].desk;
+    if (state === 'done' || state === 'idle') return '카페';
+    return teamOf(flow) || '리셉션';
+  }
 
   function poseOf(state) {
     return state === 'turn' ? 'ask' : state === 'blocked' || state === 'unk' ? 'stuck' : state === 'wait' ? 'wait' : state === 'done' ? 'done' : 'walk';
@@ -80,9 +87,10 @@
 
   /* ---------- 세션·요청 화면(B단계): 목록 걸러보기 · 자리 안내 · 정보 줄 · 도장 글자 ---------- */
 
-  /* 세션 목록 위의 걸러보기. 할 일 = 내 답·막힘·확인 못 함(시안은 넷을 한 묶음으로 센다), 일하는 중 = 일하는 중·승인 기다림. 쉬는 중은 "전체" 에만 있다.
-     묶음 이름이 "내 차례" 면 홈·띠·알림의 "내 차례 N건"(막힘·확인 못 함은 따로 셈)과 같은 이름에 다른 숫자가 나온다. 그래서 "할 일" 이다(내 차례 + 막힘 + 확인 못 함, 세션 수). */
-  var FILTERS = [{ id: 'all', label: '전체' }, { id: 'turn', label: '할 일' }, { id: 'run', label: '일하는 중' }, { id: 'done', label: '끝남' }];
+  /* 세션 목록 위의 걸러보기. 나를 찾는 사람 = 답을 기다려요·막혔어요·확인하지 못했어요(시안은 한 묶음으로 센다), 일하는 중 = 일하는 중·승인 기다림. 쉬는 중은 "전체" 에만 있다.
+     이 묶음(세션 수)은 장면 버튼·덱 머리 「나를 찾는 사람」 과 같은 사람들이라 같은 이름이다(문구 6회차 — 전에는 「할 일」).
+     띠·알림 설정의 「답을 기다리는 일 N건」 은 답할 요청 건수(막힘·확인 못 함 빼고)라 다른 이름이다. */
+  var FILTERS = [{ id: 'all', label: '전체' }, { id: 'turn', label: '나를 찾는 사람' }, { id: 'run', label: '일하는 중' }, { id: 'done', label: '끝남' }];
   var FILTER_OF = { turn: 'turn', blocked: 'turn', unk: 'turn', run: 'run', wait: 'run', done: 'done' };
   function filterMatch(f, state) { return f === 'all' || FILTER_OF[state] === f; }
   function filterCounts(states) {
@@ -90,12 +98,19 @@
     states.forEach(function (st) { if (FILTER_OF[st]) c[FILTER_OF[st]]++; });
     return c;
   }
+  /* 나를 찾는 사람(내 차례 · 막힘 · 확인 못 함)의 순서. 오늘 화면의 덱(post-home.js deckItems) · 알림(app.js buildNotices) · 장면 번들(office-post.js group(list, 'ask'))이 같은 순서다:
+     가장 오래 기다린 사람부터(t 오름차순 — 숫자나 날짜 글, 모르면 맨 뒤), 같으면 장면 목록 순서(seat), 그래도 같으면 받은 순서. rows: [{ t, seat, … }] → 새 배열. */
+  function waitTime(t) { return typeof t === 'number' ? t : t ? Date.parse(t) || Infinity : Infinity; }
+  function byWait(rows) {
+    return (rows || []).map(function (r, i) { return [r, i]; }).sort(function (a, b) {
+      return (waitTime(a[0].t) - waitTime(b[0].t)) || ((a[0].seat || 0) - (b[0].seat || 0)) || (a[1] - b[1]);  // 둘 다 모르면 Infinity − Infinity = NaN 이라 다음 기준으로 넘어간다
+    }).map(function (p) { return p[0]; });
+  }
   /* 세션 한 줄 상태 글에서 맨 앞 기호(✕ ? !)를 뗀다 — 기호는 상태 표시(po-st)가 따로 그린다. */
   function statusText(t) { return String(t == null ? '' : t).replace(/^[✕?!]\s*/, ''); }
 
-  /* 세션 머리 오른쪽 안내판(figure.po-here). 첫 줄은 지금 앉은 곳 "{팀} · {단계}"(리뷰 룸·완료는 "리뷰 룸 · 검토"·"완료 · 합쳐짐", 팀이 없으면 "팀 없음"), 둘째 줄은 상태별 반말(가이드 2.4). */
-  /* 확인 못 함(unk)은 blockOf 의 cannot_check — 검사를 못 돌린 것이지 자리를 모르는 게 아니다(첫 줄이 이미 앉은 곳). 쉬는 중은 걷지 않는다(장면에서도 앉아 있다) */
-  var HERE = { turn: '네 답을 기다리고 있어', blocked: '막혀서 멈춰 있어', wait: '의자에 앉아 승인을 기다려', done: '일을 다 마쳤어', unk: '검사를 못 해서 멈췄어', idle: '잠깐 쉬고 있어' };
+  /* 세션 머리 오른쪽 안내판(figure.po-here). 지금 앉은 곳 "{팀} · {단계}"(리뷰 룸·완료는 "리뷰 룸 · 검토"·"완료 · 합쳐짐", 팀이 없으면 "팀 없음") 한 줄이다.
+     상태 한 줄(hereLine)은 요약 정리(5회차)에서 화면에서 빠졌고 문구 6회차에서 지웠다 — 상태는 머리 상태 표시가 말한다. */
   /* k = 단계 번호(0~4), flow = 세션의 팀을 정한 갈래(teamFlowOf). 번호 0~2 인데 팀이 없으면(갈래 없는 세션은 단계 2 로 두지만 팀 자리는 없다) "팀 없음". */
   function hereTitle(k, flow) {
     var i = Math.max(0, Math.min(4, k | 0));
@@ -104,7 +119,6 @@
     var team = teamOf(flow);
     return team ? team + ' · ' + stageName(i, flow) : '팀 없음';
   }
-  function hereLine(state) { return HERE[state] || '지금 일하고 있어'; }
 
   /* 정보 줄: 단계 · 요구사항 · 개발 번호 · 작업 기록 · 검토 요청. 값이 없는 칸은 지어내지 않고 "–" 로 둔다. cells 는 BHLogic.sessionStrip 의 칸들. */
   var INFO = [['단계', 'step'], ['요구사항', 'req'], ['개발 번호', 'dev'], ['작업 기록', 'issue'], ['검토 요청', 'pr']];
@@ -146,15 +160,17 @@
 
   var INSP = ['산출물', '검사', '기억', '기록', '기술'];
 
-  /* 요청 화면 한 줄(가이드 2.5): 승인·계획은 리뷰 룸의 검토 담당, 질문은 그 세션이 앉은 곳. 앉은 곳을 모르면(팀 없음·완료) 곳 이름 없이 말한다. */
+  /* 요청 화면 한 줄(가이드 2.5): 그림이 그 세션 사람이라(post-session.js clerk) 글도 세션이 주어다. 질문·승인·계획 모두 그 세션이 앉은 곳을 붙이고(문구 6회차부터 승인·계획도), 앉은 곳을 모르면(팀 없음·완료) 곳 이름 없이 말한다.
+     승인·계획에 있던 「리뷰 룸에서 검토 담당이」 는 뺐다 — 새 사무실 장면에는 검토 담당이 없고 승인을 기다리는 세션도 자기 자리에서 손을 든다. */
+  /* 요청을 보낸 세션은 손을 든 사람(답을 기다려요·막혔어요·확인하지 못했어요)이라 장면에서는 늘 팀 자리에 선다(seatName) — 단계 번호 k 가 검토(3)·끝(4)이어도
+     「리뷰 룸」·「완료」 가 아니다(재검증 8회차, V2 와 같은 어긋남). k 는 부르는 쪽 호환으로 받기만 한다. */
   function placeOf(k, flow) {
-    var i = Math.max(0, Math.min(4, k | 0));
-    if (i === 3) return STATION[3].desk;
-    return i < 3 && teamOf(flow) ? teamOf(flow) + ' 자리' : '';
+    return teamOf(flow) ? teamOf(flow) + ' 자리' : '';
   }
   function clerkLine(kind, k, flow) {
-    if (kind === 'question' || kind === 'elicitation') { var at = placeOf(k, flow); return (at ? at + '에서 ' : '세션이 ') + '손을 들고 네 답을 기다려'; }
-    return '리뷰 룸에서 검토 담당이 네 승인을 기다려. 누르면 승인 도장이 찍혀';
+    var at = placeOf(k, flow), who = at ? at + '에서 ' : '세션이 ';  // 승인·계획도 질문처럼 앉은 곳을 붙인다(도장 아랫줄 sealDesk 와 같은 곳)
+    if (kind === 'question' || kind === 'elicitation') return who + '손을 들고 답을 기다려요';
+    return who + '손을 들고 승인을 기다려요. 누르면 승인 도장이 찍혀요';
   }
 
   /* 도장 글자. 승인 주 버튼(허락·올리기·계획대로 진행) = 보냄, 질문·MCP 질문에 답을 보냄 = 접수, 거절·아니오·닫기·고쳐 달라고 하기 = 반송.
@@ -163,16 +179,13 @@
   function sealOf(decision) { var t = SEAL_TEXT[decision] || '접수'; return { text: t, tone: t === '반송' ? 'no' : 'ok' }; }
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
   /* 도장이 잠깐 남은 홈 카드의 한 줄: 한 일 + 찍힌 도장 글자(카드 위 도장과 같은 말). */
-  var STAMP_DID = { '보냄': '승인했어', '접수': '답했어', '반송': '돌려보냈어' };
-  function stampedLine(decision) { var t = sealOf(decision).text; return '방금 ' + STAMP_DID[t] + ' — ' + t + ' 도장을 찍었어'; }
+  var STAMP_DID = { '보냄': '승인했어요', '접수': '답했어요', '반송': '돌려보냈어요' };
+  function stampedLine(decision) { var t = sealOf(decision).text; return '방금 ' + STAMP_DID[t] + ' — ' + t + ' 도장을 찍었어요'; }
   /* 도장 아래 작은 줄 "MM.DD · 자리 이름"(오늘 날짜). 자리를 모르면(name 이 빈 글) 날짜만. */
   function sealSub(d, name) { return pad2(d.getMonth() + 1) + '.' + pad2(d.getDate()) + (name ? ' · ' + name : ''); }
-  /* 도장을 찍는 곳: 승인·계획은 리뷰 룸, 질문·MCP 질문은 그 세션이 앉은 곳(팀 자리·리뷰 룸·완료, 팀이 없으면 빈 글 — 요청 줄(clerkLine)처럼 곳 이름 없이). */
-  function sealDesk(kind, k, flow) {
-    if (kind !== 'question' && kind !== 'elicitation') return STATION[3].desk;
-    var i = Math.max(0, Math.min(4, k | 0));
-    return i >= 3 ? STATION[i].desk : teamOf(flow) ? teamOf(flow) + ' 자리' : '';
-  }
+  /* 도장을 찍는 곳: 요청 종류와 상관없이 그 세션이 앉은 곳(손 든 사람이라 팀 자리, 팀이 없으면 빈 글 — 요청 줄(clerkLine)처럼 곳 이름 없이).
+     승인·계획을 「리뷰 룸」 으로 적던 것은 옛 장면의 비유였다 — 새 사무실 장면에서 승인을 묻는 세션은 자기 자리에서 손을 든다(문구 6회차). kind 는 부르는 쪽 호환으로 받기만 한다. */
+  function sealDesk(kind, k, flow) { return placeOf(k, flow); }
 
   /* 갈래 세션의 차례 글(세션 머리 제목·사이드 줄·홈 덱). 서버의 차례(turnSkill)는 git 상태로 짐작한 start·deliver·prs 라 갈래 단계와 어긋난다:
      srs·spec 첫 단계는 main 에서 시작해 "작업 시작", 구현 중 변경이 있으면 "올릴 준비". Post 는 갈래의 지금 단계를 따른다.
@@ -186,7 +199,7 @@
   function turnLine(s, L) {
     var t = flowNow(s, L);
     if (!t || (t.deliver && s.turnSkill === 'deliver')) return null;
-    return t.wait ? '지금은 ' + t.name + ' 단계야.' : '이제 ' + t.name + ' 차례야.';
+    return t.wait ? '지금은 ' + t.name + ' 단계예요.' : '이제 ' + t.name + ' 차례예요.';
   }
   /* 사이드 줄 "내 차례 · …" 의 뒤 글: 올리기 단계가 아니면 갈래 단계 짧은 이름(구현·설정·기록 …). */
   function turnVerb(s, L) {
@@ -228,7 +241,7 @@
     var b = teamBasisOf(s), has = function (id) { return out.some(function (c) { return c.id === id; }); };
     if (b.flow && teamOf(b.flow)) {
       var why = b.by === 'skill' ? '쓴 스킬 /harness:' + b.skill : '브랜치 이슈 #' + b.issue + ' 의 ' + b.dev;
-      out = out.map(function (c) { return c.id === 'step' ? { id: 'step', label: c.label, tone: '', value: stageName(k, b.flow), title: '콘솔에서 고른 갈래가 아니야. ' + teamOf(b.flow) + '을 정한 근거: ' + why } : c; });
+      out = out.map(function (c) { return c.id === 'step' ? { id: 'step', label: c.label, tone: '', value: stageName(k, b.flow), title: '콘솔에서 고른 갈래가 아니에요. ' + teamOf(b.flow) + '을 정한 근거: ' + why } : c; });
     }
     if (b.req && !has('req')) out.push({ id: 'req', label: '요구사항', tone: '', value: b.req });
     if (b.dev && !has('dev')) out.push({ id: 'dev', label: '개발 번호', tone: '', value: b.dev });
@@ -271,7 +284,7 @@
   }
   function reqFlowOf(s, d) { return reqBasisOf(s, d).flow; }
 
-  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, teamBasisOf: teamBasisOf, teamCells: teamCells, stageName: stageName, atDesk: atDesk, reqFlowOf: reqFlowOf, reqBasisOf: reqBasisOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, hereLine: hereLine, infoRow: infoRow, INSP: INSP,
+  var api = { TEAMS: TEAMS, teamOf: teamOf, teamFlowOf: teamFlowOf, teamBasisOf: teamBasisOf, teamCells: teamCells, stageName: stageName, atDesk: atDesk, reqFlowOf: reqFlowOf, reqBasisOf: reqBasisOf, useReqs: useReqs, SKILL_TEAM_FLOW: SKILL_TEAM_FLOW, turnLine: turnLine, turnVerb: turnVerb, projectView: projectView, FILTERS: FILTERS, byWait: byWait, filterMatch: filterMatch, filterCounts: filterCounts, statusText: statusText, hereTitle: hereTitle, seatName: seatName, infoRow: infoRow, INSP: INSP,
     clerkLine: clerkLine, sealOf: sealOf, stampedLine: stampedLine, sealSub: sealSub, sealDesk: sealDesk, WHO: WHO, STATES: STATES, LABEL: LABEL, GLYPH: GLYPH, STATION: STATION, personOf: personOf, stateOf: stateOf, useOpenIds: useOpenIds, stationOf: stationOf, poseOf: poseOf, toneOf: toneOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BHPostLogic = api;

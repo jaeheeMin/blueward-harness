@@ -38,7 +38,7 @@ def wrapper_command(state: Path) -> str:
     p = (state / WRAP_NAME).as_posix()  # Git Bash 는 따옴표 밖 역슬래시를 먹으니 슬래시로 쓴다(공식 문서 Windows configuration)
     bad = [c for c in UNSAFE if c in p]
     if bad:
-        raise LimitsError("상태 폴더 경로에 " + " ".join(bad) + " 가 있어서 상태줄 명령에 안전하게 쓸 수 없어: " + p)
+        raise LimitsError("상태 폴더 경로에 " + " ".join(bad) + " 가 있어서 상태줄 명령에 안전하게 쓸 수 없어요: " + p)
     return f'{LAUNCHER} "{p}"'
 
 
@@ -64,20 +64,20 @@ def _read_settings(path: Path) -> tuple[dict, dict]:
     except FileNotFoundError:
         return {}, fmt
     except OSError as e:
-        raise LimitsError(f"{path} 를 읽지 못했어: {e}")
+        raise LimitsError(f"{path} 를 읽지 못했어요: {e}")
     fmt["bom"] = raw.startswith(b"\xef\xbb\xbf")
     try:
         text = raw[3:].decode("utf-8") if fmt["bom"] else raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise LimitsError(f"{path} 가 UTF-8 이 아니어서 건드리지 않았어.")
+        raise LimitsError(f"{path} 가 UTF-8 이 아니어서 건드리지 않았어요.")
     if not text.strip():
         return {}, fmt
     try:
         data = json.loads(text)
     except ValueError as e:
-        raise LimitsError(f"{path} 가 올바른 JSON 이 아니어서 건드리지 않았어({e}).")
+        raise LimitsError(f"{path} 가 올바른 JSON 이 아니어서 건드리지 않았어요({e}).")
     if not isinstance(data, dict):
-        raise LimitsError(f"{path} 의 맨 위가 객체가 아니어서 건드리지 않았어.")
+        raise LimitsError(f"{path} 의 맨 위가 객체가 아니어서 건드리지 않았어요.")
     fmt["nl"] = "\r\n" if "\r\n" in text else "\n"
     m = re.search(r"\n([ \t]+)\S", text)
     if m:
@@ -99,7 +99,7 @@ def _write_bytes(path: Path, raw: bytes) -> None:
     try:
         _atomic_write(path, raw)
     except OSError as e:
-        raise LimitsError(f"{path} 를 쓰지 못했어: {e}")
+        raise LimitsError(f"{path} 를 쓰지 못했어요: {e}")
 
 
 def _sha(raw: bytes) -> str:
@@ -143,9 +143,9 @@ def status(state: Path, env=None, home: Path | None = None) -> dict:
     rec = _record(state)
     out["originalKept"] = rec is not None
     if out["enabled"] and rec is None:
-        out.update(canEnable=False, problem="이미 감싸개로 바뀌어 있는데 원래 값을 기억한 파일이 없어서 끄기로 되돌릴 수 없어. settings.json 의 statusLine 을 직접 고쳐 줘.")
+        out.update(canEnable=False, problem="이미 감싸개로 바뀌어 있는데 원래 값을 기억한 파일이 없어서 끄기로 되돌릴 수 없어요. settings.json 의 statusLine 을 직접 고쳐 주세요.")
     elif cur is not None and not out["enabled"] and not (isinstance(cur, dict) and out["currentCommand"].strip()):
-        out.update(canEnable=False, problem="지금 statusLine 이 command 형식이 아니라서 감싸지 않았어.")
+        out.update(canEnable=False, problem="지금 statusLine 이 command 형식이 아니라서 감싸지 않았어요.")
     return out
 
 
@@ -158,14 +158,14 @@ def enable(state: Path, console_dir: Path, env=None, home: Path | None = None) -
         refresh_script(state, console_dir)
         return status(state, env, home)
     if cur is not None and not (isinstance(cur, dict) and _command_of(cur).strip()):
-        raise LimitsError("지금 statusLine 이 command 형식이 아니라서 감싸지 않았어.")
+        raise LimitsError("지금 statusLine 이 command 형식이 아니라서 감싸지 않았어요.")
     state.mkdir(parents=True, exist_ok=True)
     data["statusLine"] = dict(cur, command=cmd) if cur is not None else {"type": "command", "command": cmd}
     new_raw = _settings_bytes(data, fmt)
     try:
         before = sp.read_bytes() if sp.exists() else None
     except OSError as e:
-        raise LimitsError(f"{sp} 를 읽지 못했어: {e}")
+        raise LimitsError(f"{sp} 를 읽지 못했어요: {e}")
     try:
         shutil.copyfile(console_dir / WRAP_NAME, state / (WRAP_NAME + ".tmp"))
         os.replace(state / (WRAP_NAME + ".tmp"), state / WRAP_NAME)
@@ -174,7 +174,7 @@ def enable(state: Path, console_dir: Path, env=None, home: Path | None = None) -
             "version": 1, "settingsPath": str(sp), "present": cur is not None, "value": cur, "command": cmd, "enabledAt": time.time(),
             "before": None if before is None else base64.b64encode(before).decode("ascii"), "afterSha": _sha(new_raw)}, ensure_ascii=False).encode("utf-8"))
     except OSError as e:
-        raise LimitsError(f"감싸개를 상태 폴더에 두지 못했어: {e}")
+        raise LimitsError(f"감싸개를 상태 폴더에 두지 못했어요: {e}")
     try:
         _write_bytes(sp, new_raw)
     except LimitsError:
@@ -197,20 +197,20 @@ def disable(state: Path, env=None, home: Path | None = None) -> dict:
             (state / ORIG_FILE).unlink()
         except OSError:
             pass
-        return dict(status(state, env, home), note="statusLine 이 이미 감싸개가 아니라서 settings.json 은 건드리지 않았어.")
+        return dict(status(state, env, home), note="statusLine 이 이미 감싸개가 아니라서 settings.json 은 건드리지 않았어요.")
     if rec is None:
-        raise LimitsError("원래 statusLine 값을 기억한 파일이 없어서 되돌릴 수 없어. settings.json 의 statusLine 을 직접 고쳐 줘.")
+        raise LimitsError("원래 statusLine 값을 기억한 파일이 없어서 되돌릴 수 없어요. settings.json 의 statusLine 을 직접 고쳐 주세요.")
     try:
         ours = sp.read_bytes()
     except OSError as e:
-        raise LimitsError(f"{sp} 를 읽지 못했어: {e}")
+        raise LimitsError(f"{sp} 를 읽지 못했어요: {e}")
     if rec.get("afterSha") == _sha(ours) and isinstance(rec.get("before"), str):  # 켠 뒤 아무도 안 고쳤다: 켜기 전 바이트 그대로
         _write_bytes(sp, base64.b64decode(rec["before"]))
     elif rec.get("afterSha") == _sha(ours) and rec.get("before") is None:  # 설정 파일 자체가 없었다
         try:
             sp.unlink()
         except OSError as e:
-            raise LimitsError(f"{sp} 를 지우지 못했어: {e}")
+            raise LimitsError(f"{sp} 를 지우지 못했어요: {e}")
     else:  # 그 사이 다른 설정이 바뀌었다: statusLine 만 되돌리고 나머지는 지금 값 그대로
         if rec["present"]:
             data["statusLine"] = rec.get("value")

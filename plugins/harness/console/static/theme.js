@@ -11,7 +11,7 @@
   var THEME_KEY = 'bh-theme';
   var THEMES = [
     { id: 'sauce', name: 'Sauce', tagline: '기본 · 어두운 바탕에 초록 강조' },
-    { id: 'post', name: 'Cozy Office', tagline: '사무실 · 세션이 팀 자리에 앉아 일해', mode: 'light' }
+    { id: 'post', name: 'Cozy Office', tagline: '사무실 · 세션이 팀 자리에 앉아 일해요', mode: 'light' }
   ];
   var DEFAULT_THEME = 'sauce';
 

@@ -106,14 +106,14 @@ def _heredoc_bodies(command: str, i: int, heredocs: list):
         start = pos
         while True:
             if pos >= n:
-                return n, "heredoc 이 닫히지 않았어"
+                return n, "heredoc 이 닫히지 않았어요"
             end = command.find("\n", pos)
             line_end = end if end >= 0 else n
             line = command[pos:line_end].rstrip("\r")
             if (line.lstrip("\t") if strip_tabs else line) == delim:
                 body = command[start:pos]
                 if not quoted and ("`" in body or "$" in body):
-                    why = why or "heredoc 본문에 변수나 다른 명령 실행($ 또는 백틱)이 있어"
+                    why = why or "heredoc 본문에 변수나 다른 명령 실행($ 또는 백틱)이 있어요"
                 last, pos = line_end, line_end + 1
                 break
             pos = line_end + 1
@@ -161,7 +161,7 @@ def tokenize(command: str):
         if c in " \t":
             flush(); spaced = True; i += 1; continue
         if c == "#" and not has_word:  # 낱말 첫머리 # 는 줄 끝까지 주석이다. 그 안의 << 로 heredoc 을 열면 다음 줄 명령을 본문으로 건너뛴다(#955 점검)
-            unsafe = unsafe or "주석(#)이 있어"
+            unsafe = unsafe or "주석(#)이 있어요"
             j = command.find("\n", i)
             i = n if j < 0 else j; continue
         if not has_word:
@@ -169,7 +169,7 @@ def tokenize(command: str):
         if c == "\\":
             if i + 1 < n and command[i + 1] not in "\r\n":
                 cur.append(command[i + 1]); has_word = True; esc_cur[0] = True; i += 2; continue
-            unsafe = unsafe or "줄을 잇는 \\ 가 있어"
+            unsafe = unsafe or "줄을 잇는 \\ 가 있어요"
             # 줄 잇기: \ 바로 뒤 \n 은 명령을 나누지 않는다(bash 는 두 줄을 한 명령으로 잇는다, #971).
             # \ 뒤가 \r\n 이면 bash 는 \r 만 이스케이프하고 \n 에서 끊으니 그대로 나눈다(#972 점검)
             i += 1
@@ -179,7 +179,7 @@ def tokenize(command: str):
         if c == "'":
             j = command.find("'", i + 1)
             if j < 0:
-                return tokens, "따옴표가 안 닫혔어", 0
+                return tokens, "따옴표가 안 닫혔어요", 0
             cur.append(command[i + 1:j]); has_word = True; spaced = False; i = j + 1; continue
         if c == '"':
             j, buf = i + 1, []
@@ -187,13 +187,13 @@ def tokenize(command: str):
                 if command[j] == "\\" and j + 1 < n and command[j + 1] in '"\\$`':
                     buf.append(command[j + 1]); j += 2; continue
                 if command[j] == "`" or (command[j] == "$" and command.startswith("$(", j)):
-                    unsafe = unsafe or "명령 안에서 다른 명령을 실행해($( 또는 백틱)"
+                    unsafe = unsafe or "명령 안에서 다른 명령을 실행해요($( 또는 백틱)"
                 buf.append(command[j]); j += 1
             if j >= n:
-                return tokens, "따옴표가 안 닫혔어", 0
+                return tokens, "따옴표가 안 닫혔어요", 0
             cur.append("".join(buf)); has_word = True; spaced = False; i = j + 1; continue
         if c == "`" or (c == "$" and command.startswith("$(", i)):
-            unsafe = unsafe or "명령 안에서 다른 명령을 실행해($( 또는 백틱)"
+            unsafe = unsafe or "명령 안에서 다른 명령을 실행해요($( 또는 백틱)"
             cur.append(c); has_word = True; spaced = False; i += 1; continue
         if c in "<>":
             if has_word and "".join(cur).isdigit() and not spaced:
@@ -208,14 +208,14 @@ def tokenize(command: str):
                 strip_tabs = j < n and command[j] == "-"
                 delim, quoted, j = _heredoc_word(command, j + 1 if strip_tabs else j)
                 if not delim:
-                    unsafe = unsafe or "heredoc 끝 표시를 읽지 못했어"
+                    unsafe = unsafe or "heredoc 끝 표시를 읽지 못했어요"
                 heredocs.append((delim, strip_tabs, quoted))
                 tokens.append(("heredoc", "<<", spaced)); spaced = False; i = j; continue
             tokens.append(("redir", command[i:j], spaced)); spaced = False; i = j; continue
         if c in "();&|":
             flush()
             if c in "()":
-                unsafe = unsafe or "괄호로 묶은 명령이야"
+                unsafe = unsafe or "괄호로 묶은 명령이에요"
                 tokens.append(("op", c, spaced)); i += 1; spaced = False; continue
             j = i
             while j < n and command[j] in _OPS:
@@ -224,7 +224,7 @@ def tokenize(command: str):
         cur.append(c); has_word = True; spaced = False; i += 1
     flush()
     if heredocs:
-        unsafe = unsafe or "heredoc 이 닫히지 않았어"
+        unsafe = unsafe or "heredoc 이 닫히지 않았어요"
     if tokens and tokens[-1][:2] == ("op", "\n"):
         tokens.pop()  # 끝 줄바꿈은 명령을 나누지 않는다
     return tokens, unsafe, body_chars
@@ -248,7 +248,7 @@ def _segments(command: str):
                 pass
             else:
                 if text == "&" or text.startswith("&") and text != "&&":
-                    unsafe = unsafe or "백그라운드로 도는 명령이야"
+                    unsafe = unsafe or "백그라운드로 도는 명령이에요"
                 ops.append(text)
                 segs.append([])
         else:  # 리디렉션: /dev/null 로 버리거나 출력을 합치는 것만 넘어간다(Windows 의 nul 은 POSIX 셸에서 파일을 만든다)
@@ -259,16 +259,16 @@ def _segments(command: str):
                 k += 1
             elif text in (">", ">>") and nxt and nxt[0] == "word" and _DEVICE_NAME.fullmatch(re.split(r"[\\/]", nxt[1])[-1]):
                 # Windows 장치 이름(nul·con·aux·com1 …)은 OS 마다 뜻이 달라(POSIX 셸은 그 이름의 파일을 만든다) 어디서나 묻는다.
-                unsafe = unsafe or "Windows 장치 이름(nul 등)으로 쓰는 리디렉션이야"
+                unsafe = unsafe or "Windows 장치 이름(nul 등)으로 쓰는 리디렉션이에요"
                 k += 1
             elif text in (">", ">>") and nxt and nxt[0] == "word" and nxt[1]:
                 reds.append((len(segs) - 1, nxt[1]))
                 k += 1
             else:
-                unsafe = unsafe or "파일로 쓰거나 읽는 리디렉션(> <)이 있어"
+                unsafe = unsafe or "파일로 쓰거나 읽는 리디렉션(> <)이 있어요"
         k += 1
     if any(not s for s in segs):
-        unsafe = unsafe or "빈 조각이 있어"
+        unsafe = unsafe or "빈 조각이 있어요"
     return segs, ops, unsafe, body_chars, reds
 
 
@@ -351,33 +351,33 @@ def _path_why(p: str, ctx: dict) -> str:
     심볼릭 링크는 실제 이름도 본다. ctx["bs"] 면(셸 명령) 경로에 \\ 가 있거나 따옴표 밖 \\ 이스케이프가 있었을 때 판정하지 않는다(#1018)."""
     base = ctx.get("base") or ""
     if not base:
-        return "작업 폴더를 몰라서 판정 못 했어"
+        return "작업 폴더를 몰라서 판정 못 했어요"
     if not p:
         return ""
     if ctx.get("bs") and (getattr(p, "esc", False) or "\\" in p):
-        return "경로에 \\ 가 있어 어디를 읽는지 판정 못 했어"
+        return "경로에 \\ 가 있어 어디를 읽는지 판정 못 했어요"
     if "$" in p or "`" in p or re.search(r"%[^%\s]+%", p) or p.startswith("~"):
-        return "변수나 ~ 를 쓴 경로라 어디를 읽는지 알 수 없어"
+        return "변수나 ~ 를 쓴 경로라 어디를 읽는지 알 수 없어요"
     p = _gitbash_path(p)
     full = p if _is_abs(p) else os.path.join(ctx["cur"][0], p)
     parts = re.split(r"[\\/]", full)
     wild = next((k for k, part in enumerate(parts) if _WILD.search(part)), None)
     if wild is not None:
         if ".." in parts[wild:]:
-            return "와일드카드 뒤에 .. 가 있어 어디를 읽는지 알 수 없어"
+            return "와일드카드 뒤에 .. 가 있어 어디를 읽는지 알 수 없어요"
         full = os.sep.join(parts[:wild]) or os.sep
         if _is_abs(p) and wild == 0:
-            return "작업 폴더 밖 경로야"
+            return "작업 폴더 밖 경로예요"
     if not platform_compat.is_within(full, base):
-        return "작업 폴더 밖 경로야"
+        return "작업 폴더 밖 경로예요"
     try:
         rel = os.path.relpath(os.path.realpath(full), os.path.realpath(base))
     except ValueError:
-        return "작업 폴더 밖 경로야"
+        return "작업 폴더 밖 경로예요"
     if _is_secret(p) or _is_secret(rel):
-        return "비밀값 모양 이름(.env·키·토큰 등)이라 열지 않아"
+        return "비밀값 모양 이름(.env·키·토큰 등)이라 열지 않아요"
     if _read_protected(rel):
-        return "git·Claude 설정 폴더나 .mcp.json·.env 라 열지 않아"
+        return "git·Claude 설정 폴더나 .mcp.json·.env 라 열지 않아요"
     return ""
 
 
@@ -386,23 +386,23 @@ def _write_target_why(p: str, ctx: dict) -> str:
     Write 도구로 폴더 안 파일을 쓰는 것과 같은 기준이다. 폴더 밖(/tmp 포함)은 쓰지 않는다(#1018)."""
     base = ctx.get("base") or ""
     if not base:
-        return "작업 폴더를 몰라서 판정 못 했어"
+        return "작업 폴더를 몰라서 판정 못 했어요"
     if getattr(p, "esc", False) or "\\" in p:
-        return "경로에 \\ 가 있어 어디에 쓰는지 판정 못 했어"
+        return "경로에 \\ 가 있어 어디에 쓰는지 판정 못 했어요"
     if "$" in p or "`" in p or "%" in p or p.startswith("~") or _WILD.search(p):
-        return "변수·~·와일드카드를 쓴 경로라 어디에 쓰는지 알 수 없어"
+        return "변수·~·와일드카드를 쓴 경로라 어디에 쓰는지 알 수 없어요"
     p = _gitbash_path(p)
     full = p if _is_abs(p) else os.path.join(ctx["cur"][0], p)
     if not platform_compat.is_within(full, base):
-        return "작업 폴더 밖에 쓰려 해"
+        return "작업 폴더 밖에 쓰려 해요"
     try:
         rel = os.path.relpath(os.path.realpath(full), os.path.realpath(base))
     except ValueError:
-        return "작업 폴더 밖에 쓰려 해"
+        return "작업 폴더 밖에 쓰려 해요"
     if _is_secret(p) or _is_secret(rel):
-        return "비밀값 모양 이름의 파일이야"
+        return "비밀값 모양 이름의 파일이에요"
     if _protected(rel):
-        return "훅·설정·실행 설정 같은 파일이라 판정 못 했어"
+        return "훅·설정·실행 설정 같은 파일이라 판정 못 했어요"
     return ""
 
 
@@ -466,7 +466,7 @@ def _git(args: list[str], ctx=None):
         i += step
     # git -c / -C / --exec-path 같은 전역 옵션은 다른 명령을 실행시키거나 다른 곳을 읽게 해서 읽기여도 판정 못 함으로 낮춘다
     if verdict == SAFE and any(a not in _names("git_global_options_ok") for a in lead):
-        return UNKNOWN, "git 전역 옵션이 붙어 판정 못 했어"
+        return UNKNOWN, "git 전역 옵션이 붙어 판정 못 했어요"
     return verdict, why
 
 
@@ -475,90 +475,90 @@ def _git_sub(args: list[str], ctx=None):
     while i < n and args[i].startswith("-"):
         i += 2 if args[i] in ("-C", "-c", "--git-dir", "--work-tree") else 1
     if i >= n:
-        return UNKNOWN, "git 명령을 읽지 못했어"
+        return UNKNOWN, "git 명령을 읽지 못했어요"
     sub, rest = args[i], args[i + 1:]
     flags = _clusters(rest)
     reads = RULES.get("git_read_options")
     value_opts = _names("git_value_options")
     if isinstance(reads, dict) and sub in reads:
         if not _opts_ok(rest, _regexes(reads[sub])):
-            return UNKNOWN, f"git {sub} 에 목록에 없는 옵션이 있어"
+            return UNKNOWN, f"git {sub} 에 목록에 없는 옵션이 있어요"
         if any(_name_blocked(a, read=True) for a in _positionals(rest, value_opts)):
-            return UNKNOWN, "비밀값이나 읽기 보호 경로(.git·.claude·.env)를 가리키는 인자가 있어"
-        return SAFE, "git 으로 상태를 읽기만 해"
+            return UNKNOWN, "비밀값이나 읽기 보호 경로(.git·.claude·.env)를 가리키는 인자가 있어요"
+        return SAFE, "git 으로 상태를 읽기만 해요"
     if sub == "worktree":  # 작업 사본 목록 보기만. add·remove·prune 은 목록에 없다(#1018)
         if rest[:1] == ["list"] and _opts_ok(rest[1:], _regexes(RULES.get("git_worktree_list_options"))) and len(rest) <= 2:
-            return SAFE, "작업 사본(worktree) 목록을 읽기만 해"
-        return UNKNOWN, "git worktree 는 list 만 판정해"  # #1018
+            return SAFE, "작업 사본(worktree) 목록을 읽기만 해요"
+        return UNKNOWN, "git worktree 는 list 만 판정해요"  # #1018
     if sub == "pull":  # 하네스 절차(start 스킬)가 쓰는 pull · pull --rebase 도 되돌릴 수 있어 허용. 단독 merge·rebase 명령은 그대로 묻는다(#1018)
         if not _opts_ok(rest, _regexes(RULES.get("git_pull_options"))):
-            return UNKNOWN, "git pull 에 목록에 없는 옵션이 있어"
+            return UNKNOWN, "git pull 에 목록에 없는 옵션이 있어요"
         pos = [a for a in rest if not a.startswith("-")]
         if len(pos) > 2 or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*" if k == 0 else r"[A-Za-z0-9][A-Za-z0-9._/-]*", a)
                                or ".." in a for k, a in enumerate(pos)):
-            return UNKNOWN, "git pull 은 원격 이름과 브랜치 이름만 판정해"
-        return SAFE, "원격의 새 커밋을 내 브랜치 뒤에 이어 붙이기만 해(합치기·rebase 없이)"
+            return UNKNOWN, "git pull 은 원격 이름과 브랜치 이름만 판정해요"
+        return SAFE, "원격의 새 커밋을 내 브랜치 뒤에 이어 붙이기만 해요(합치기·rebase 없이)"
     if sub == "push":
-        return IRREVERSIBLE, "GitHub에 코드를 올리려 해"
+        return IRREVERSIBLE, "GitHub에 코드를 올리려 해요"
     if sub == "fetch":  # 원격 변경을 받아 원격 추적 브랜치만 바꾼다. 작업 사본·내 브랜치는 그대로(#953)
         if not _opts_ok(rest, _regexes(RULES.get("git_fetch_options"))):
-            return UNKNOWN, "git fetch 에 목록에 없는 옵션이 있어"
+            return UNKNOWN, "git fetch 에 목록에 없는 옵션이 있어요"
         pos = [a for a in rest if not a.startswith("-")]
         # 원격 이름과 브랜치 이름만. 주소(://·@·경로)나 refspec(: +)은 내 브랜치를 바꾸거나 다른 곳에서 받을 수 있어 판정하지 않는다
         if len(pos) > 2 or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*" if k == 0 else r"[A-Za-z0-9][A-Za-z0-9._/-]*", a)
                                or ".." in a for k, a in enumerate(pos)):
-            return UNKNOWN, "git fetch 는 원격 이름과 브랜치 이름만 판정해"
-        return SAFE, "원격 변경을 받아 오기만 해(작업 중인 파일은 안 바뀌어)"
+            return UNKNOWN, "git fetch 는 원격 이름과 브랜치 이름만 판정해요"
+        return SAFE, "원격 변경을 받아 오기만 해요(작업 중인 파일은 안 바뀌어요)"
     if sub == "clean":
         if "f" in flags or "--force" in rest:
-            return IRREVERSIBLE, "추적하지 않는 파일을 지우려 해"
+            return IRREVERSIBLE, "추적하지 않는 파일을 지우려 해요"
         if rest and all(a in ("-n", "--dry-run", "-d", "-nd", "-dn") for a in rest):
-            return SAFE, "git 으로 지울 파일을 미리 보기만 해"
-        return UNKNOWN, "git clean 은 -n · --dry-run · -d 만 있을 때만 판정해"
+            return SAFE, "git 으로 지울 파일을 미리 보기만 해요"
+        return UNKNOWN, "git clean 은 -n · --dry-run · -d 만 있을 때만 판정해요"
     if sub == "reset":
-        return (IRREVERSIBLE, "저장하지 않은 변경을 버리려 해") if "--hard" in rest else (UNKNOWN, "git reset 은 판정 못 했어")
+        return (IRREVERSIBLE, "저장하지 않은 변경을 버리려 해요") if "--hard" in rest else (UNKNOWN, "git reset 은 판정 못 했어요")
     if sub == "restore":
-        return (UNKNOWN, "git restore --staged 는 판정 못 했어") if "--staged" in rest and "--worktree" not in rest else (IRREVERSIBLE, "저장하지 않은 변경을 버리려 해")
+        return (UNKNOWN, "git restore --staged 는 판정 못 했어요") if "--staged" in rest and "--worktree" not in rest else (IRREVERSIBLE, "저장하지 않은 변경을 버리려 해요")
     if sub == "stash":
         what = rest[0] if rest else ""
         if what in ("drop", "clear"):
-            return IRREVERSIBLE, "맡겨 둔 변경(stash)을 지우려 해"
-        return (SAFE, "맡겨 둔 변경 목록을 읽기만 해") if what == "list" and len(rest) == 1 else (UNKNOWN, "git stash 는 판정 못 했어")
+            return IRREVERSIBLE, "맡겨 둔 변경(stash)을 지우려 해요"
+        return (SAFE, "맡겨 둔 변경 목록을 읽기만 해요") if what == "list" and len(rest) == 1 else (UNKNOWN, "git stash 는 판정 못 했어요")
     if sub == "branch":
         if "-D" in rest or "-d" in rest or "--delete" in rest or any(re.fullmatch(r"-[A-Za-z]*[dD][A-Za-z]*", a) for a in rest):
-            return IRREVERSIBLE, "브랜치를 지우려 해"
+            return IRREVERSIBLE, "브랜치를 지우려 해요"
         if rest[:1] == ["--unset-upstream"] and len(rest) <= 2 and all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", a) and ".." not in a for a in rest[1:]):
-            return SAFE, "브랜치의 추적 설정만 풀어(커밋·파일은 그대로야)"  # #1043
+            return SAFE, "브랜치의 추적 설정만 풀어요(커밋·파일은 그대로예요)"  # #1043
         readonly = {"-a", "-r", "-v", "-vv", "--list", "-l", "--show-current", "--merged", "--no-merged", "--contains", "--all", "--remotes", "--verbose"}
-        return (SAFE, "브랜치 목록을 읽기만 해") if all(a in readonly or not a.startswith("-") and "--list" in rest for a in rest) else (UNKNOWN, "git branch 는 판정 못 했어")
+        return (SAFE, "브랜치 목록을 읽기만 해요") if all(a in readonly or not a.startswith("-") and "--list" in rest for a in rest) else (UNKNOWN, "git branch 는 판정 못 했어요")
     if sub in ("add", "commit"):
         if sub == "commit":  # 메시지를 표준 입력(heredoc)으로 받는 -F - 만 허용한다. -F <파일> 은 목록에 없어 판정 못 함(#951)
             rest = [a for k, a in enumerate(rest) if not (a in ("-F", "--file") and rest[k + 1:k + 2] == ["-"])
                     and not (a == "-" and k > 0 and rest[k - 1] in ("-F", "--file")) and a != "--file=-"]
         if not _opts_ok(rest, _regexes(RULES.get("git_add_options" if sub == "add" else "git_commit_options"))):
-            return UNKNOWN, f"git {sub} 에 목록에 없는 옵션이 있어"
+            return UNKNOWN, f"git {sub} 에 목록에 없는 옵션이 있어요"
         if sub == "add" and any(_name_blocked(a) for a in _positionals(rest, value_opts)):
-            return UNKNOWN, "비밀값이나 보호 경로를 git add 하려 해"
+            return UNKNOWN, "비밀값이나 보호 경로를 git add 하려 해요"
         if sub == "commit" and any(_name_blocked(a) for a in _positionals(rest, value_opts)):
-            return UNKNOWN, "비밀값이나 보호 경로를 commit 하려 해"
-        return SAFE, f"git {sub} 는 되돌릴 수 있어"
+            return UNKNOWN, "비밀값이나 보호 경로를 commit 하려 해요"
+        return SAFE, f"git {sub} 는 되돌릴 수 있어요"
     if sub in ("checkout", "switch"):
         force = _names("git_force_flags")
         if any(a in force or a.startswith("--force") or (re.fullmatch(r"-[A-Za-z]{2,}", a) and set(a[1:]) & {"f", "m", "B", "C"}) for a in rest):
-            return IRREVERSIBLE, "저장하지 않은 변경을 덮어쓸 수 있어"
+            return IRREVERSIBLE, "저장하지 않은 변경을 덮어쓸 수 있어요"
         if sub == "checkout" and ("--" in rest or rest[:1] == ["."]):
-            return IRREVERSIBLE, "저장하지 않은 변경을 버리려 해"
+            return IRREVERSIBLE, "저장하지 않은 변경을 버리려 해요"
         new = "-b" if sub == "checkout" else "-c"
         if rest[:1] == [new] and len(rest) >= 3 and rest.count("--no-track") == 1 and rest[2] == "--no-track":
             rest = [a for a in rest if a != "--no-track"]  # 시작점을 추적하지 않고 만드는 --no-track 은 이름 검사에서 뺀다(#1043)
         if (rest[:1] == [new] and 2 <= len(rest) <= 3 and not any(a.startswith("-") for a in rest[1:])
                 and all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", a) and ".." not in a for a in rest[1:])):  # 이름은 브랜치 이름 모양만(시작점 하나까지)
-            return SAFE, "새 브랜치를 만들 뿐이야"
+            return SAFE, "새 브랜치를 만들 뿐이에요"
         # 이미 있는 로컬 브랜치로 옮기기: 이름 하나이고 이 저장소의 refs/heads 에 있을 때만. 파일 이름이면 파일 되돌리기와 헷갈리므로 묻는다(#1018)
         if len(rest) == 1 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", rest[0]) and ".." not in rest[0] and _local_branch_exists(ctx, rest[0]):
-            return SAFE, "있는 로컬 브랜치로 옮길 뿐이야(저장하지 않은 변경은 덮어쓰지 않아)"
-        return UNKNOWN, f"git {sub} 는 판정 못 했어"
-    return UNKNOWN, f"git {sub} 는 목록에 없어"
+            return SAFE, "있는 로컬 브랜치로 옮길 뿐이에요(저장하지 않은 변경은 덮어쓰지 않아요)"
+        return UNKNOWN, f"git {sub} 는 판정 못 했어요"
+    return UNKNOWN, f"git {sub} 는 목록에 없어요"
 
 
 def _gh_flags_write(args: list[str]) -> bool:
@@ -582,7 +582,7 @@ def _gh_flags_write(args: list[str]) -> bool:
 def _gh_api_read(args: list[str]):
     """저장소 설정을 읽는 GET 경로(safe_tools.json gh_api_read_paths)에 --jq 단순 식만 붙은 `gh api` 는 읽기다(#1043). 나머지는 판정 못 함."""
     if args[:1] != ["api"]:
-        return UNKNOWN, "gh api 앞에 다른 옵션이 있어"
+        return UNKNOWN, "gh api 앞에 다른 옵션이 있어요"
     rest, jq = args[1:], RULES.get("gh_api_jq")
     paths = _regexes(RULES.get("gh_api_read_paths"))
     pos, k = [], 0
@@ -590,34 +590,34 @@ def _gh_api_read(args: list[str]):
         a = rest[k]
         if a in ("--jq", "-q"):
             if k + 1 >= len(rest) or not isinstance(jq, str) or not re.fullmatch(jq, rest[k + 1]):
-                return UNKNOWN, "gh api 의 --jq 가 단순한 필드 이름(.allow_auto_merge)이 아니야"
+                return UNKNOWN, "gh api 의 --jq 가 단순한 필드 이름(.allow_auto_merge)이 아니에요"
             k += 2
             continue
         if a.startswith("-"):
-            return UNKNOWN, f"gh api 에 목록에 없는 옵션({a[:20]})이 있어"
+            return UNKNOWN, f"gh api 에 목록에 없는 옵션({a[:20]})이 있어요"
         pos.append(a)
         k += 1
     if len(pos) != 1 or ".." in pos[0] or not any(p.fullmatch(pos[0]) for p in paths):
-        return UNKNOWN, "gh api 읽기는 저장소 설정 경로만 판정해"
-    return SAFE, "GitHub 저장소 설정을 읽기만 해"
+        return UNKNOWN, "gh api 읽기는 저장소 설정 경로만 판정해요"
+    return SAFE, "GitHub 저장소 설정을 읽기만 해요"
 
 
 def _gh(args: list[str]):
     pos = [a for a in args if not a.startswith("-")]
     if not pos:
-        return UNKNOWN, "gh 명령을 읽지 못했어"
+        return UNKNOWN, "gh 명령을 읽지 못했어요"
     area, sub = pos[0], pos[1] if len(pos) > 1 else ""
     if area == "api":
         if _gh_flags_write(args):
-            return IRREVERSIBLE, "GitHub 에 쓰는 API 호출이야"
+            return IRREVERSIBLE, "GitHub 에 쓰는 API 호출이에요"
         return _gh_api_read(args)
     if sub in _table("gh_write").get(area, frozenset()):
-        return IRREVERSIBLE, "GitHub 의 PR·이슈를 바꾸려 해" if area in ("pr", "issue") else "GitHub 에 쓰려 해"
+        return IRREVERSIBLE, "GitHub 의 PR·이슈를 바꾸려 해요" if area in ("pr", "issue") else "GitHub 에 쓰려 해요"
     if sub in _table("gh_read").get(area, frozenset()):
         if any(a in _table("gh_read_blocked_flags").get(area, frozenset()) for a in args):
-            return UNKNOWN, f"gh {area} {sub} 에 비밀값을 보이는 옵션이 있어"  # gh auth status --show-token
-        return SAFE, "GitHub 정보를 읽기만 해"
-    return UNKNOWN, f"gh {area} {sub} 는 목록에 없어".replace("  ", " ")
+            return UNKNOWN, f"gh {area} {sub} 에 비밀값을 보이는 옵션이 있어요"  # gh auth status --show-token
+        return SAFE, "GitHub 정보를 읽기만 해요"
+    return UNKNOWN, f"gh {area} {sub} 는 목록에 없어요".replace("  ", " ")
 
 
 # ---- 읽기 명령 ----
@@ -625,54 +625,54 @@ def _gh(args: list[str]):
 def _read_command(cmd: str, args: list[str], ctx: dict):
     spec = RULES["bash_read"][cmd]
     if not isinstance(spec, dict) or not _opts_ok(args, _regexes(spec.get("options"))):
-        return UNKNOWN, f"{cmd} 에 목록에 없거나 폴더를 통째로 읽는 옵션이 있어"
+        return UNKNOWN, f"{cmd} 에 목록에 없거나 폴더를 통째로 읽는 옵션이 있어요"
     vals = frozenset(x for x in spec.get("value_options", []) if isinstance(x, str))
     pos = _positionals(args, vals)  # 옵션이 따로 받는 값(-n 5, -g 글롭)은 경로가 아니다
     if spec.get("pattern_first") and "-e" not in args and pos:
         pos = pos[1:]  # 첫 낱말은 찾을 글이지 경로가 아니다
     if spec.get("needs_path") and not pos:
-        return UNKNOWN, f"{cmd} 에 파일 경로가 없으면 폴더를 통째로 읽어"
+        return UNKNOWN, f"{cmd} 에 파일 경로가 없으면 폴더를 통째로 읽어요"
     if isinstance(spec.get("max_positional"), int) and len(pos) > spec["max_positional"]:
-        return UNKNOWN, f"{cmd} 의 마지막 낱말은 파일을 쓸 수 있어"
+        return UNKNOWN, f"{cmd} 의 마지막 낱말은 파일을 쓸 수 있어요"
     if spec.get("paths"):
         for a in pos:
             why = _path_why(a, ctx)
             if why and not _harness_read_ok(a, ctx):
                 return UNKNOWN, f"{cmd} 의 {a[:60]}: {why}"
     if spec.get("no_dir_args") and any(os.path.isdir(_gitbash_path(a) if _is_abs(_gitbash_path(a)) else os.path.join(ctx["cur"][0], a)) for a in pos):
-        return UNKNOWN, f"{cmd} 가 폴더를 통째로 읽어"
-    return SAFE, "읽기만 하는 명령이야"
+        return UNKNOWN, f"{cmd} 가 폴더를 통째로 읽어요"
+    return SAFE, "읽기만 하는 명령이에요"
 
 
 def _sed(args: list[str], ctx: dict):
     script = RULES.get("sed_script")
     if args[:1] != ["-n"] or len(args) < 2 or not isinstance(script, str) or not re.fullmatch(script, args[1]):
-        return UNKNOWN, "sed 는 줄 번호 출력(sed -n '3,5p')만 읽기로 봐"
+        return UNKNOWN, "sed 는 줄 번호 출력(sed -n '3,5p')만 읽기로 봐요"
     files = args[2:]
     if any(a.startswith("-") for a in files):
-        return UNKNOWN, "sed 에 옵션이 더 있어"
+        return UNKNOWN, "sed 에 옵션이 더 있어요"
     for a in files:
         why = _path_why(a, ctx)
         if why and not _harness_read_ok(a, ctx):
             return UNKNOWN, f"sed 의 {a[:60]}: {why}"
-    return SAFE, "줄 번호로 읽기만 해"
+    return SAFE, "줄 번호로 읽기만 해요"
 
 
 def _cd(args: list[str], ctx: dict):
     """safe 는 맨 앞 `cd <폴더> && 명령` 꼴이고 그 폴더가 실제로 있는 작업 폴더 안일 때만이다."""
     if ctx.get("idx") != 0 or ctx.get("ops", [])[:1] != ["&&"]:
-        return UNKNOWN, "cd 는 명령 맨 앞의 `cd 폴더 && 명령` 꼴만 판정해"
+        return UNKNOWN, "cd 는 명령 맨 앞의 `cd 폴더 && 명령` 꼴만 판정해요"
     if len(args) != 1 or args[0].startswith("-"):
-        return UNKNOWN, "cd 에 옵션이 있거나 갈 곳이 하나가 아니야"
+        return UNKNOWN, "cd 에 옵션이 있거나 갈 곳이 하나가 아니에요"
     why = _path_why(args[0], ctx)
     if why:
         return UNKNOWN, f"cd {args[0][:60]}: {why}"
     native = _gitbash_path(args[0])
     target = native if _is_abs(native) else os.path.join(ctx["cur"][0], native)
     if not os.path.isdir(target):
-        return UNKNOWN, "cd 할 폴더가 실제로 없어"
+        return UNKNOWN, "cd 할 폴더가 실제로 없어요"
     ctx["cur"][0] = os.path.normpath(target)
-    return SAFE, "작업 폴더 안에서 옮겨 다닐 뿐이야"
+    return SAFE, "작업 폴더 안에서 옮겨 다닐 뿐이에요"
 
 
 # ---- 하네스 자체 스크립트·엔진(#1018) ----
@@ -731,14 +731,14 @@ def _harness_read_ok(p: str, ctx: dict) -> bool:
 def _check_args(spec, args: list[str], ctx: dict):
     """스크립트·모듈 인자를 목록(spec)대로 확인한다. options 정규식에 없는 -옵션, 변수·명령 실행($ 백틱), 목록 밖 위치 인자, 경로 값이 작업 폴더 밖이면 unknown."""
     if not isinstance(spec, dict):
-        return UNKNOWN, "목록에 없어"
+        return UNKNOWN, "목록에 없어요"
     subs = spec.get("subcommands")
     if isinstance(subs, dict):
         if not args or args[0] not in subs:
-            return UNKNOWN, "목록에 없는 하위 명령이야"
+            return UNKNOWN, "목록에 없는 하위 명령이에요"
         spec, args = subs[args[0]], args[1:]
         if not isinstance(spec, dict):
-            return UNKNOWN, "목록에 없어"
+            return UNKNOWN, "목록에 없어요"
     options = _regexes(spec.get("options"))
     patterns = spec.get("value_patterns") if isinstance(spec.get("value_patterns"), dict) else {}
     path_opts = frozenset(x for x in spec.get("path_options", []) if isinstance(x, str))
@@ -749,30 +749,30 @@ def _check_args(spec, args: list[str], ctx: dict):
     while i < len(args):
         a = args[i]
         if "$" in a or "`" in a:
-            return UNKNOWN, "인자에 변수나 명령 실행($ 또는 백틱)이 있어"
+            return UNKNOWN, "인자에 변수나 명령 실행($ 또는 백틱)이 있어요"
         if a in vals:
             v = args[i + 1] if i + 1 < len(args) else ""
             if not v or v.startswith("-") or "$" in v or "`" in v:
-                return UNKNOWN, f"{a} 의 값을 읽지 못했어"
+                return UNKNOWN, f"{a} 의 값을 읽지 못했어요"
             if a in patterns and not re.fullmatch(str(patterns[a]), v):
-                return UNKNOWN, f"{a} 의 값이 목록의 모양이 아니야"
+                return UNKNOWN, f"{a} 의 값이 목록의 모양이 아니에요"
             if a in path_opts:
                 why = _path_why(v, ctx)
                 if why:
                     return UNKNOWN, f"{a} {v[:60]}: {why}"
             if a in root_opts and _harness_parts(v, ctx) != []:
-                return UNKNOWN, f"{a} 가 하네스 설치본 폴더가 아니야"
+                return UNKNOWN, f"{a} 가 하네스 설치본 폴더가 아니에요"
             i += 2
             continue
         if a.startswith("-"):
             if not any(p.fullmatch(a) for p in options):
-                return UNKNOWN, f"{a} 는 목록에 없는 옵션이야"
+                return UNKNOWN, f"{a} 는 목록에 없는 옵션이에요"
         else:
             pos.append(a)
         i += 1
     limit = spec.get("max_positional", 0)
     if not isinstance(limit, int) or len(pos) > limit:
-        return UNKNOWN, "목록에 없는 위치 인자가 있어"
+        return UNKNOWN, "목록에 없는 위치 인자가 있어요"
     if spec.get("paths"):
         for a in pos:
             why = _path_why(a, ctx)
@@ -783,12 +783,12 @@ def _check_args(spec, args: list[str], ctx: dict):
 
 def _uv(args: list[str], ctx: dict):
     if args[:3] != ["run", "--no-project", "python"] or len(args) < 4:
-        return UNKNOWN, "uv 는 하네스 스크립트 실행(uv run --no-project python <설치본>/…)만 판정해"
+        return UNKNOWN, "uv 는 하네스 스크립트 실행(uv run --no-project python <설치본>/…)만 판정해요"
     parts = _harness_parts(args[3], ctx)
     scripts = RULES.get("harness_scripts")
     rel = "/".join(parts) if parts else ""
     if not rel or not isinstance(scripts, dict) or rel not in scripts or not rel.endswith(".py"):
-        return UNKNOWN, "하네스 설치본의 목록에 있는 스크립트가 아니라 판정 못 했어"
+        return UNKNOWN, "하네스 설치본의 목록에 있는 스크립트가 아니라 판정 못 했어요"
     spec, rest = scripts[rel], args[4:]
     if isinstance(spec, dict) and spec.get("engine_module"):  # run_engine.py <모듈> 인자… — 모듈별 규칙은 harness_modules 를 그대로 쓴다(#1043)
         modules = RULES.get("harness_modules")
@@ -796,30 +796,30 @@ def _uv(args: list[str], ctx: dict):
             rest = rest[2:]  # 시간 제한(초)은 읽기·쓰기를 바꾸지 않는다
         mod = rest[0] if rest else ""
         if not re.fullmatch(r"[a-z_][a-z0-9_]*", mod) or not isinstance(modules, dict) or mod not in modules:
-            return UNKNOWN, f"{mod[:40] or '모듈 없음'} 는 읽기만 하는 엔진 모듈 목록에 없어"
+            return UNKNOWN, f"{mod[:40] or '모듈 없음'} 는 읽기만 하는 엔진 모듈 목록에 없어요"
         verdict, why = _check_args(modules[mod], rest[1:], ctx)
-        return (SAFE, f"하네스 엔진의 {mod} 로 읽고 판정만 해") if verdict == SAFE else (verdict, f"{mod}: {why}")
+        return (SAFE, f"하네스 엔진의 {mod} 로 읽고 판정만 해요") if verdict == SAFE else (verdict, f"{mod}: {why}")
     writes = spec.get("irreversible_subcommands") if isinstance(spec, dict) else None
     if isinstance(writes, dict) and rest and isinstance(writes.get(rest[0]), str):
         return IRREVERSIBLE, writes[rest[0]]
     verdict, why = _check_args(spec, rest, ctx)
-    return (SAFE, f"하네스 {rel} 를 읽기만 하게 실행해") if verdict == SAFE else (verdict, f"{rel}: {why}")
+    return (SAFE, f"하네스 {rel} 를 읽기만 하게 실행해요") if verdict == SAFE else (verdict, f"{rel}: {why}")
 
 
 def _uvx(args: list[str], ctx: dict):
     if len(args) < 6 or args[0] != "--from" or args[2:5] != ["python", "-P", "-m"]:
-        return UNKNOWN, "uvx 는 하네스 엔진 실행(uvx --from <엔진 주소> python -P -m checker.<모듈>)만 판정해"
+        return UNKNOWN, "uvx 는 하네스 엔진 실행(uvx --from <엔진 주소> python -P -m checker.<모듈>)만 판정해요"
     src, mod = args[1], args[5]
     url = RULES.get("harness_engine_url")
     var = (ctx.get("engine_var") or "") if ctx.get("engine_seen") else ""
     if getattr(src, "esc", False) or not (var and src == "$" + var or isinstance(url, str) and re.fullmatch(url, src)):
-        return UNKNOWN, "엔진 주소가 하네스 저장소의 v숫자 판도 아니고, engine_spec.py 로 정한 값도 아니야"
+        return UNKNOWN, "엔진 주소가 하네스 저장소의 v숫자 판도 아니고, engine_spec.py 로 정한 값도 아니에요"
     m = re.fullmatch(r"checker\.([a-z_][a-z0-9_]*)", mod)
     modules = RULES.get("harness_modules")
     if not m or not isinstance(modules, dict) or m.group(1) not in modules:
-        return UNKNOWN, f"{mod} 는 읽기만 하는 엔진 모듈 목록에 없어"
+        return UNKNOWN, f"{mod} 는 읽기만 하는 엔진 모듈 목록에 없어요"
     verdict, why = _check_args(modules[m.group(1)], args[6:], ctx)
-    return (SAFE, f"하네스 엔진의 {m.group(1)} 로 읽고 판정만 해") if verdict == SAFE else (verdict, f"{m.group(1)}: {why}")
+    return (SAFE, f"하네스 엔진의 {m.group(1)} 로 읽고 판정만 해요") if verdict == SAFE else (verdict, f"{m.group(1)}: {why}")
 
 
 def _engine_group_ok(segs: list[list[str]], ops: list[str], i: int, ctx: dict) -> bool:
@@ -835,59 +835,59 @@ def _segment(words: list[str], ctx: dict):
     var = ctx.get("engine_var")
     if var and list(words) == [f"{var}={_ENGINE_MARK}"]:
         if ctx.get("engine_seen"):
-            return UNKNOWN, "엔진 판 대입이 두 번이야"
+            return UNKNOWN, "엔진 판 대입이 두 번이에요"
         ctx["engine_seen"] = True  # 이 조각 뒤에서만 "$변수" 를 인정한다
-        return SAFE, "하네스 engine_spec.py 로 엔진 판을 정할 뿐이야"
+        return SAFE, "하네스 engine_spec.py 로 엔진 판을 정할 뿐이에요"
     # 앞에 붙은 환경변수(A=1 cmd)는 떼고 본다. 지우기·올리기는 그대로 위험이고, 읽기는 판정 못 함으로 낮춘다.
     skipped = 0
     while skipped < len(words) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[skipped]):
         skipped += 1
     words = words[skipped:]
     if not words:
-        return UNKNOWN, "환경변수만 있는 명령이야"
+        return UNKNOWN, "환경변수만 있는 명령이에요"
     verdict, why = _command(words, ctx)
     if skipped and verdict == SAFE:
-        return UNKNOWN, "환경변수를 붙인 명령이라 판정 못 했어"
+        return UNKNOWN, "환경변수를 붙인 명령이라 판정 못 했어요"
     return verdict, why
 
 
 def _command(words: list[str], ctx: dict):
     cmd, args = _base(words[0]), words[1:]
     if cmd in _names("bash_delete_commands"):
-        return IRREVERSIBLE, "파일이나 폴더를 지우려 해"
+        return IRREVERSIBLE, "파일이나 폴더를 지우려 해요"
     if cmd in _names("bash_install_commands"):
-        return IRREVERSIBLE, "프로그램을 설치하려 해"
+        return IRREVERSIBLE, "프로그램을 설치하려 해요"
     if cmd in ("npm", "pnpm", "yarn"):
         if args[:1] and args[0] in ("install", "i", "add", "uninstall", "remove", "update") or "-g" in args or "--global" in args:
-            return IRREVERSIBLE, "프로그램을 설치하거나 지우려 해"
-        return UNKNOWN, f"{cmd} 는 목록에 없어"
+            return IRREVERSIBLE, "프로그램을 설치하거나 지우려 해요"
+        return UNKNOWN, f"{cmd} 는 목록에 없어요"
     if cmd in ("pip", "pip3") or (cmd in ("python", "python3", "py") and args[:3] == ["-m", "pip", "install"]):
-        return (IRREVERSIBLE, "프로그램을 설치하려 해") if "install" in args or "uninstall" in args else (UNKNOWN, "pip 는 목록에 없어")
+        return (IRREVERSIBLE, "프로그램을 설치하려 해요") if "install" in args or "uninstall" in args else (UNKNOWN, "pip 는 목록에 없어요")
     if cmd == "uv":
         if args[:2] == ["tool", "install"] or args[:2] == ["pip", "install"]:
-            return IRREVERSIBLE, "프로그램을 설치하려 해"
+            return IRREVERSIBLE, "프로그램을 설치하려 해요"
         return _uv(args, ctx)
     if cmd == "uvx":
         return _uvx(args, ctx)
     if cmd == "timeout":  # `timeout 30 명령` 은 뒤 명령을 그대로 판정한다(지우기·올리기면 그대로 위험)
         if len(args) >= 2 and re.fullmatch(r"\d{1,4}", args[0]):
             return _command(words[2:], ctx)
-        return UNKNOWN, "timeout 은 `timeout 초 명령` 꼴만 판정해"
+        return UNKNOWN, "timeout 은 `timeout 초 명령` 꼴만 판정해요"
     if cmd == "[":
         var = ctx.get("engine_var")
         if var and ctx.get("engine_seen") and list(words) == ["[", "-n", "$" + var, "]"]:
-            return SAFE, "엔진 판이 정해졌는지만 확인해"
-        return UNKNOWN, "[ 는 엔진 판 확인(`[ -n \"$변수\" ]`)만 판정해"
+            return SAFE, "엔진 판이 정해졌는지만 확인해요"
+        return UNKNOWN, "[ 는 엔진 판 확인(`[ -n \"$변수\" ]`)만 판정해요"
     if cmd == "git":
         return _git(args, ctx)
     if cmd == "gh":
         return _gh(args)
     if cmd == "node":
         if len(args) == 2 and args[0] in ("--check", "-c") and not args[1].startswith("-") and _path_ok(args[1], ctx):
-            return SAFE, "문법만 확인해"
-        return UNKNOWN, "node 는 문법 확인(--check 파일)만 읽기로 봐"
+            return SAFE, "문법만 확인해요"
+        return UNKNOWN, "node 는 문법 확인(--check 파일)만 읽기로 봐요"
     if cmd == "find" and "-delete" in args:
-        return IRREVERSIBLE, "찾은 파일을 지우려 해"
+        return IRREVERSIBLE, "찾은 파일을 지우려 해요"
     if cmd == "cd":
         return _cd(args, ctx)
     if cmd == "sed":
@@ -896,22 +896,22 @@ def _command(words: list[str], ctx: dict):
     if isinstance(plain, dict) and cmd in plain and isinstance(plain[cmd], list):
         dashed = [a for a in args if a.startswith("-")]
         if cmd not in _names("bash_dash_text_commands") and not all(a in plain[cmd] for a in dashed):  # echo 는 -[neE]+ 말고는 --- 같은 낱말도 글이다(#1018)
-            return UNKNOWN, f"{cmd} 에 목록에 없는 옵션이 있어"
+            return UNKNOWN, f"{cmd} 에 목록에 없는 옵션이 있어요"
         # echo "exit=$?" 처럼 직전 명령의 종료 코드 $? 만은 글이다. 다른 $ 확장·% ~ 백틱은 그대로 묻는다(#1018)
         if cmd in ("echo", "printf") and any(c in (a.replace("$?", "") if cmd == "echo" else a) for a in args for c in "$%~`"):
-            return UNKNOWN, f"{cmd} 인자에 변수·~ 확장이나 형식 문자가 있어"
-        return SAFE, "읽기만 하는 명령이야"
+            return UNKNOWN, f"{cmd} 인자에 변수·~ 확장이나 형식 문자가 있어요"
+        return SAFE, "읽기만 하는 명령이에요"
     reads = RULES.get("bash_read")
     if isinstance(reads, dict) and cmd in reads:
         return _read_command(cmd, args, ctx)
-    return UNKNOWN, f"{words[0]} 는 목록에 없어"
+    return UNKNOWN, f"{words[0]} 는 목록에 없어요"
 
 
 def classify_bash(command: str, cwd: str = "", powershell: bool = False, harness_roots=()):
     if not command.strip():
-        return UNKNOWN, "빈 명령이야"
+        return UNKNOWN, "빈 명령이에요"
     if len(command) > MAX_WITH_HEREDOC:
-        return UNKNOWN, "명령이 너무 길어서 읽지 못했어"
+        return UNKNOWN, "명령이 너무 길어서 읽지 못했어요"
     ctx = {"base": cwd, "cur": [cwd], "bs": True, "ops": [], "idx": 0, "harness_roots": tuple(harness_roots or ())}  # bs: 경로 인자에 \ 가 있으면 그 경로는 판정하지 않는다
     # 맨 앞의 e="$(uv run --no-project python "<설치본>/hooks/engine_spec.py")" 만 따로 읽어 표지로 바꾼다. 따옴표 안의 따옴표라 토크나이저가 못 읽는다(#1018)
     # 대입은 명령 맨 앞이거나 맨 앞 `cd <폴더> &&` 바로 다음 조각일 때만 받는다(한 번만). cd 자체는 아래에서 따로 판정한다(작업 폴더 안일 때만 safe)
@@ -933,7 +933,7 @@ def classify_bash(command: str, cwd: str = "", powershell: bool = False, harness
             command = head + re.sub(r"\$\{" + name + r"\}|\$" + name + r"(?![A-Za-z0-9_])", lambda _m: value, rest[var.end():])
     segs, ops, unsafe, body_chars, reds = _segments(command)
     if len(command) - body_chars > MAX_COMMAND:  # heredoc 본문(PR·커밋 글)은 길이에 세지 않는다(#951)
-        return UNKNOWN, "명령이 너무 길어서 읽지 못했어"
+        return UNKNOWN, "명령이 너무 길어서 읽지 못했어요"
     ctx["ops"] = ops
     results = []
     done = 0  # 엔진 판 실패 꼬리 `|| { echo …; exit 1; }` 로 이미 판정한 조각 수
@@ -941,10 +941,10 @@ def classify_bash(command: str, cwd: str = "", powershell: bool = False, harness
         ctx["idx"] = i
         if done:
             done -= 1
-            verdict, why = SAFE, "엔진 판을 못 정했을 때 멈추는 꼬리일 뿐이야"
+            verdict, why = SAFE, "엔진 판을 못 정했을 때 멈추는 꼬리일 뿐이에요"
         elif w[:1] == ["{"] and _engine_group_ok(segs, ops, i, ctx):
             done = 2
-            verdict, why = SAFE, "엔진 판을 못 정했을 때 멈추는 꼬리일 뿐이야"
+            verdict, why = SAFE, "엔진 판을 못 정했을 때 멈추는 꼬리일 뿐이에요"
         else:
             verdict, why = _segment(w, ctx)
         if verdict == SAFE:  # > · >> 로 파일에 쓰는 조각: 대상이 작업 폴더 안이고 쓰기 보호·비밀값 경로가 아닐 때만(Write 도구와 같은 기준, #1018)
@@ -958,15 +958,15 @@ def classify_bash(command: str, cwd: str = "", powershell: bool = False, harness
         if verdict == IRREVERSIBLE:
             return verdict, why
     if powershell:
-        return UNKNOWN, "PowerShell 명령은 지우기·올리기만 가려내고 나머지는 판정 못 해"
+        return UNKNOWN, "PowerShell 명령은 지우기·올리기만 가려내고 나머지는 판정 못 해요"
     if unsafe:
-        return UNKNOWN, "해석하지 못했어 · " + unsafe
+        return UNKNOWN, "해석하지 못했어요 · " + unsafe
     if not results:
-        return UNKNOWN, "명령을 읽지 못했어"
+        return UNKNOWN, "명령을 읽지 못했어요"
     for verdict, why in results:
         if verdict == UNKNOWN:
             return verdict, why
-    return SAFE, results[0][1] if len(results) == 1 else "읽기·되돌릴 수 있는 명령만 이어 붙였어"
+    return SAFE, results[0][1] if len(results) == 1 else "읽기·되돌릴 수 있는 명령만 이어 붙였어요"
 
 
 # ---- 파일 도구 ----
@@ -1065,12 +1065,12 @@ def _classify_mcp(name: str, cwd: str):
     parts = name.split("__")
     server, tool = (parts[1], parts[-1]) if len(parts) >= 3 else ("", parts[-1])
     if tool in _names("sap_write_tools"):
-        return IRREVERSIBLE, "SAP 시스템에 쓰려 해"
+        return IRREVERSIBLE, "SAP 시스템에 쓰려 해요"
     if tool in _names("sap_read_tools"):
         if server and server in _tier_servers(cwd):  # env/adt-tiers.yaml 에 정확히 같은 이름이 있을 때만
-            return SAFE, "SAP 에서 읽기만 해"
-        return UNKNOWN, f"{server or '이'} 서버는 env/adt-tiers.yaml 의 서버 목록에서 확인하지 못했어"
-    return UNKNOWN, f"{tool} 는 목록에 없어"
+            return SAFE, "SAP 에서 읽기만 해요"
+        return UNKNOWN, f"{server or '이'} 서버는 env/adt-tiers.yaml 의 서버 목록에서 확인하지 못했어요"
+    return UNKNOWN, f"{tool} 는 목록에 없어요"
 
 
 def plan_dir_of(config_dir) -> str:
@@ -1146,34 +1146,34 @@ def classify(tool_name, tool_input, cwd, plan_dir: str = "", config_roots=(), re
     if name in ("Bash", "PowerShell"):
         command = tool_input.get("command") if isinstance(tool_input, dict) else None
         if not isinstance(command, str):
-            return UNKNOWN, "명령을 읽지 못했어"
+            return UNKNOWN, "명령을 읽지 못했어요"
         return classify_bash(command, cwd, powershell=name == "PowerShell", harness_roots=read_roots)
     if name in _names("edit_tools"):
         path = _path_of(tool_input)
         if not path:
-            return UNKNOWN, "고칠 파일을 읽지 못했어"
+            return UNKNOWN, "고칠 파일을 읽지 못했어요"
         if not cwd:
-            return UNKNOWN, "작업 폴더를 몰라서 판정 못 했어"
+            return UNKNOWN, "작업 폴더를 몰라서 판정 못 했어요"
         full = _resolve(path, cwd)
         real = os.path.realpath(full)
         if _is_scratchpad(real):
-            return SAFE, "Claude 의 임시 폴더에 쓸 뿐이야"
+            return SAFE, "Claude 의 임시 폴더에 쓸 뿐이에요"
         if plan_dir and _is_plan_file(real, plan_dir, cwd, config_roots):
-            return SAFE, "계획 모드에서 계획 파일을 쓸 뿐이야"
+            return SAFE, "계획 모드에서 계획 파일을 쓸 뿐이에요"
         if not platform_compat.is_within(full, cwd):
-            return IRREVERSIBLE, "작업 폴더 밖 파일을 쓰려 해"
+            return IRREVERSIBLE, "작업 폴더 밖 파일을 쓰려 해요"
         if _protected(os.path.relpath(real, os.path.realpath(cwd))):
-            return UNKNOWN, "훅·설정·실행 설정 같은 파일이라 판정 못 했어"
-        return SAFE, "작업 폴더 안 파일을 고쳐"
+            return UNKNOWN, "훅·설정·실행 설정 같은 파일이라 판정 못 했어요"
+        return SAFE, "작업 폴더 안 파일을 고쳐요"
     if name in _names("path_tools"):
         if not cwd:
-            return UNKNOWN, "작업 폴더를 몰라서 판정 못 했어"
+            return UNKNOWN, "작업 폴더를 몰라서 판정 못 했어요"
         paths = [v for k, v in (tool_input.items() if isinstance(tool_input, dict) else []) if k in ("file_path", "notebook_path", "path") and isinstance(v, str) and v]
         if name == "Glob" and isinstance(tool_input, dict) and isinstance(tool_input.get("pattern"), str):
             paths.append(tool_input["pattern"])
         whys = [(p, _path_why(p, {"base": cwd, "cur": [cwd], "bs": False})) for p in paths]
         if not any(why for _, why in whys):
-            return SAFE, "읽기만 해"
+            return SAFE, "읽기만 해요"
         # 하네스 플러그인 폴더 안 읽기(스킬이 자기 플러그인의 다른 스킬 문서를 읽는 일, #953). 읽기 도구만이고 쓰기는 그대로 묻는다.
         # 도구가 실제로 열 경로로 본다: 상대 경로는 작업 폴더(Glob 의 pattern 은 path) 기준으로 붙이고, 링크를 푼 실제 경로도 그 폴더 안이어야 한다
         # (작업 폴더 안 Junction 이 밖을 가리키면 상대 경로가 밖을 읽는다, #960 점검). 훅·설정 같은 보호 경로와 비밀값 모양은 여기서도 묻는다
@@ -1181,12 +1181,12 @@ def classify(tool_name, tool_input, cwd, plan_dir: str = "", config_roots=(), re
             opened = _opened_paths(name, tool_input, cwd)
             for root in read_roots:
                 if root and opened and all(_path_ok(p, {"base": root, "cur": [root], "bs": False}) and _real_within(p, root) for p in opened):
-                    return SAFE, "하네스 플러그인 문서를 읽기만 해"
+                    return SAFE, "하네스 플러그인 문서를 읽기만 해요"
         bad, why = next((p, w) for p, w in whys if w)
         return UNKNOWN, f"{bad[:80]}: {why}"
     if name == "WebFetch":
         url = tool_input.get("url") if isinstance(tool_input, dict) else None
-        return (SAFE, "공개 웹 주소를 읽기만 해") if _public_web_url(url) else (UNKNOWN, "공개 웹 주소가 아니거나 읽지 못해 판정 못 했어")
+        return (SAFE, "공개 웹 주소를 읽기만 해요") if _public_web_url(url) else (UNKNOWN, "공개 웹 주소가 아니거나 읽지 못해 판정 못 했어요")
     if name in _names("stateless_tools"):
-        return SAFE, "읽기만 해"
-    return UNKNOWN, f"{name or '이 도구'} 는 목록에 없어"
+        return SAFE, "읽기만 해요"
+    return UNKNOWN, f"{name or '이 도구'} 는 목록에 없어요"
