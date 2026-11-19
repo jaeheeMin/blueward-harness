@@ -10,7 +10,7 @@
      승인/성공(--ok) 초록   허락 버튼 · 통과 · 합쳐짐 · 끝남 · 승인 도장
      확인 못 함(--unk) 보라 점선   검사를 못 해 통과도 위반도 아님
      중립            회남색 쉬는 중 · 남의 승인을 기다림 · 끝난 세션
-   빨강(--brand)은 로고에만 남는다. 역할마다 글자(--x) · 채움(--x-fill, 그 위 글자 --on-x) · 옅은 바탕(--x-bg) · 선(--x-line) 네 값을 둔다. */
+   로고(--brand)는 이름 Blueward 를 따른 하늘색이다(역할 색이 아니다). 역할마다 글자(--x) · 채움(--x-fill, 그 위 글자 --on-x) · 옅은 바탕(--x-bg) · 선(--x-line) 네 값을 둔다. */
 
 :root[data-theme="post"] {
   --bg: #F6F1E7; --surface: #EFE7D8; --deep: #E8DFCF; --text: #24304A; --sec: #445069; --muted: #5B647D;
@@ -25,7 +25,7 @@
   --btn-edge: #24304A; --btn-drop: #24304A; --btn-lift: #FFF3C8; --btn-face: #FFFCF6;
   /* app.css 가 쓰는 옛 변수는 역할로 잇는다 */
   --accent: var(--pri); --accent2: var(--ok-fill); --onaccent: var(--on-pri); --attn: var(--warn); --btn: var(--pri); --btnink: var(--on-pri);
-  --brand: #C73E31;
+  --brand: #3A8FCB;
   --line: rgba(36,48,74,.13); --line2: rgba(36,48,74,.3); --soft: rgba(36,48,74,.07); --edge: #8A8FA3;
   --track: #DDD2BE;
   --light: #FFFCF6; --lightink: #24304A; --lmuted: #5B647D; --lline: #DDD2BE; --card: #FFFFFF; --stbg: #EFE7D8; --okbg: var(--ok-bg); --okink: var(--ok);
@@ -163,7 +163,7 @@
 
 :root[data-theme="post"] .prail { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-height: 0; padding: 14px 10px; overflow-y: auto; background: var(--surface); border-right: 1px solid var(--line); }
 :root[data-theme="post"] .prail-logo { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 4px 0 14px; }
-:root[data-theme="post"] .prail-mark { width: 26px; height: 26px; border-radius: 4px; background: var(--brand); box-shadow: 0 0 0 3px var(--paper), 0 0 0 4.5px var(--brand); }  /* 로고: 빨강은 여기에만 남는다 */
+:root[data-theme="post"] .prail-mark { width: 26px; height: 26px; border-radius: 4px; background: var(--brand); box-shadow: 0 0 0 3px var(--paper), 0 0 0 4.5px var(--brand); }  /* 로고: 하늘색(D5) */
 :root[data-theme="post"] .prail-word { font: 600 11px/1 var(--font); letter-spacing: .02em; color: var(--sec); }
 :root[data-theme="post"] .prail-new, :root[data-theme="post"] .prail-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; border-radius: 12px; font-size: 11.5px; line-height: 1.3; font-weight: 500; color: var(--muted); text-align: center; }
 :root[data-theme="post"] .prail-new { margin-bottom: 12px; background: var(--pri); color: var(--on-pri); font-weight: 700; box-shadow: 0 2px 0 var(--pri-drop); transition: transform .08s, box-shadow .08s, background-color .12s; }
@@ -1183,7 +1183,7 @@
   --unk: #BDB0F5; --unk-bg: #2E2A4A; --unk-line: #A596E6;
   --focus: #8DB4F0;
   --btn-edge: #AEB6C8; --btn-drop: #0A0D14; --btn-lift: #343E57; --btn-face: #262E41;
-  --brand: #F0685A;
+  --brand: #6BBCE8;
   --line: #2A3245; --line2: #3A4459; --soft: rgba(243,238,227,.07); --edge: #7C849A;
   --track: #2D364B;
   --light: #202738; --lightink: #F3EEE3; --lmuted: #9CA3B5; --lline: #3A4459; --card: #202738; --stbg: #262E41;

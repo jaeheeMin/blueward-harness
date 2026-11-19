@@ -3475,7 +3475,7 @@ def _post_vars(block: str) -> dict:
 
 
 def test_post_colors_are_assigned_by_role():
-    """Cozy Office 색은 역할로만 쓴다(2026-11-19): 주 = 남색, 알림 = 파랑, 경고 = 노랑, 오류 = 빨강, 승인/성공 = 초록, 확인 못 함 = 보라. 빨강은 로고와 오류에만."""
+    """Cozy Office 색은 역할로만 쓴다(2026-11-19): 주 = 남색, 알림 = 파랑, 경고 = 노랑, 오류 = 빨강, 승인/성공 = 초록, 확인 못 함 = 보라. 빨강은 오류에만, 로고는 하늘색."""
     css = (STATIC / "theme-post.css").read_text(encoding="utf-8")
     light = _post_vars(css.split(':root[data-theme="post"] {', 1)[1].split("\n}", 1)[0])
     dark = dict(light, **_post_vars(css.split(':root[data-theme="post"][data-mode="dark"] {', 1)[1].split("\n}", 1)[0]))
@@ -3483,7 +3483,8 @@ def test_post_colors_are_assigned_by_role():
     assert light["--accent"] == "var(--pri)" and light["--btn"] == "var(--pri)" and light["--accent-fill"] == "var(--pri)" and light["--pri"] == "#24304A"
     assert light["--attn"] == "var(--warn)" and light["--danger"] == "var(--err-fill)" and light["--st-now"] == "var(--pri)"
     assert "--accent" not in _post_vars(css.split(':root[data-theme="post"][data-mode="dark"] {', 1)[1].split("\n}", 1)[0])  # 어두운 모드는 역할 값만 바꾼다
-    assert css.count("#C73E31") == 1 and "--brand: #C73E31" in css  # 로고 빨강 한 곳
+    assert "#C73E31" not in css and light["--brand"] == "#3A8FCB" and dark["--brand"] == "#6BBCE8"  # 로고는 하늘색(판정 D5) — 빨강은 오류에만
+    assert _ratio("#3A8FCB", light["--paper"]) >= 3 and _ratio("#6BBCE8", dark["--paper"]) >= 3  # 그림 대비 3:1
     # 글자 4.5:1 — 역할 글자색은 바탕·종이·옅은 바탕 위에서, 채움 위 글자는 채움 위에서(밝게·어둡게 둘 다)
     for name, v in (("light", light), ("dark", dark)):
         def ratio(a, b):
