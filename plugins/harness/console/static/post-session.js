@@ -17,7 +17,7 @@
     var f = el('figure', 'po-here');
     f.appendChild(PS.avatar(sessionId, state, { size: 'lg' }));
     var cap = el('figcaption');
-    cap.appendChild(el('b', null, PL.hereTitle(k, flow)));  // 안내판은 앉은 곳만 말한다. 상태 한 줄(옛 hereLine)은 뺐다(문구 6회차에 함수도 지움): 같은 화면의 머리 상태 표시와 그 아래 문장이 이미 말한다(요약 정리, 2026-11-19)
+    cap.appendChild(el('b', null, PL.hereTitle(k, flow, state)));  // 곳은 장면이 세운 곳(판정 D1). 안내판은 앉은 곳만 말한다. 상태 한 줄(옛 hereLine)은 뺐다(문구 6회차에 함수도 지움): 같은 화면의 머리 상태 표시와 그 아래 문장이 이미 말한다(요약 정리, 2026-11-19)
     f.appendChild(cap);
     return f;
   }

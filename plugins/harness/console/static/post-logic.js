@@ -109,11 +109,14 @@
   /* 세션 한 줄 상태 글에서 맨 앞 기호(✕ ? !)를 뗀다 — 기호는 상태 표시(po-st)가 따로 그린다. */
   function statusText(t) { return String(t == null ? '' : t).replace(/^[✕?!]\s*/, ''); }
 
-  /* 세션 머리 오른쪽 안내판(figure.po-here). 지금 앉은 곳 "{팀} · {단계}"(리뷰 룸·완료는 "리뷰 룸 · 검토"·"완료 · 합쳐짐", 팀이 없으면 "팀 없음") 한 줄이다.
+  /* 세션 머리 오른쪽 안내판(figure.po-here). 지금 선 곳 "{곳} · {단계}" 한 줄이다(곳 = 장면이 세운 곳 seatName).
      상태 한 줄(hereLine)은 요약 정리(5회차)에서 화면에서 빠졌고 문구 6회차에서 지웠다 — 상태는 머리 상태 표시가 말한다. */
   /* k = 단계 번호(0~4), flow = 세션의 팀을 정한 갈래(teamFlowOf). 번호 0~2 인데 팀이 없으면(갈래 없는 세션은 단계 2 로 두지만 팀 자리는 없다) "팀 없음". */
-  function hereTitle(k, flow) {
+  /* state 를 주면 곳은 장면이 그 사람을 세운 곳(seatName)이다(판정 D1) — PR 이 열린 채 답을 기다리는 사람은 「리뷰 룸」 이 아니라 그 팀 자리, 쉬는 사람은 카페.
+     단계 이름은 그대로 단계 번호로 부른다(검토 3 · 합쳐짐 4 · 0~2 는 갈래 일 이름). state 가 없으면 옛 식(단계 번호로 곳). */
+  function hereTitle(k, flow, state) {
     var i = Math.max(0, Math.min(4, k | 0));
+    if (state) { var at = seatName(state, flow); return i >= 3 ? at + ' · ' + STATION[i].name : teamOf(flow) ? at + ' · ' + stageName(i, flow) : at; }  // 팀이 없으면 단계를 지어내지 않는다
     if (i === 3) return STATION[3].desk + ' · ' + STATION[3].name;
     if (i === 4) return STATION[4].desk + ' · ' + STATION[4].name;
     var team = teamOf(flow);

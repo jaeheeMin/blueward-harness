@@ -1605,9 +1605,9 @@
   }
   function renderRail(d, cur) {
     var n = d.todo.length, rows = sortedSessions(), countHref = d.todo.length ? d.todo[0].href : '/', guest = null;
-    var railName = '답을 기다리는 일', railUnit = '건';  // Sauce: d.todo(답을 기다리는 일 건수)
+    var railName = '답을 기다리는 일', railUnit = '건', railShort = '';  // Sauce: d.todo(답을 기다리는 일 건수)
     if (isPostTheme() && window.BHPostScene) {
-      railName = '나를 찾는 사람'; railUnit = '명';  // Post: 걸러보기 「나를 찾는 사람」(세션 수 — 답을 기다려요 + 막혔어요 + 확인하지 못했어요)과 같은 수 — 접으면 숫자가 바뀌지 않게
+      railName = '나를 찾는 사람'; railUnit = '명'; railShort = '찾는 사람';  // 좁은 칸(64px)에 보이는 글만 줄인다 — 두 줄로 접혔다(판정 C2). 읽어 주는 이름 · 풀이는 그대로  // Post: 걸러보기 「나를 찾는 사람」(세션 수 — 답을 기다려요 + 막혔어요 + 확인하지 못했어요)과 같은 수 — 접으면 숫자가 바뀌지 않게
       var turnRows = rows.filter(function (s) { return window.BHPostLogic.filterMatch('turn', window.BHPostLogic.stateOf(s, window.BHLogic)); });
       n = turnRows.length;
       if (!d.todo.length && turnRows.length) countHref = '/s/' + encodeURIComponent(turnRows[0].id);
@@ -1618,7 +1618,7 @@
       isPostTheme() ? h('a', { class: 'po-skip po-skip-rail', href: '#main', 'data-skip': '1', text: '세션 목록 건너뛰기' }) : null,  // Post: 접힌 칸(좁은 화면은 늘 접힘)도 세션마다 고리가 있어 펼친 목록처럼 건너뛰게 한다
       foldBtn(true),
       link(countHref, { class: 'rail-count' + (n ? ' has' : ''), 'aria-label': railName + ' ' + n + railUnit, title: railName + ' ' + n + railUnit },
-        h('span', { class: 'n', text: String(n) }), h('span', { class: 'l', text: railName })),
+        h('span', { class: 'n', text: String(n) }), h('span', { class: 'l', text: railShort || railName, 'aria-hidden': 'true' })),
       rows.map(function (s) {
         var st = sideStatus(s), p = firstPending(s), name = sessionTitle(s);
         var onThis = cur === '/s/' + encodeURIComponent(s.id) || (p && cur === '/r/' + encodeURIComponent(p.rid)), say = name + ' · ' + st.text + (guest && guest.s === s ? ' · ' + guest.tag.text : '');

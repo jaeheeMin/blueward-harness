@@ -1608,6 +1608,7 @@ out.match = P.FILTERS.map(f => states.map(s => P.filterMatch(f.id, s) ? 1 : 0).j
 out.status = ['✕ 막혔어요 · 고친 뒤 이어서', '? 확인하지 못했어요 · 검사를 못 했어요', '답을 기다려요 · 승인하기', '', null].map(P.statusText);
 out.here = [[0, 'srs'], [1, 'spec'], [2, 'config'], [2, ''], [2, undefined], [3, 'dev'], [4, 'srs'], [9, 'dev'], [-2, 'srs-export']].map(a => P.hereTitle(a[0], a[1]));
 out.noHere = [typeof P.hereLine, typeof P.HERE];
+out.hereSeat = [[3, 'srs', 'turn'], [3, 'dev', 'wait'], [2, 'dev', 'idle'], [4, 'spec', 'done'], [2, '', 'run'], [1, 'spec', 'blocked'], [2, '', 'idle']].map(a => P.hereTitle(a[0], a[1], a[2]));  // 판정 D1: 곳은 장면이 세운 곳
 const cell = (id, value, tone) => ({ id, label: id === 'progress' ? 'AI 진행' : id, value, tone: tone || '' });
 out.info = P.infoRow([cell('step', '1 / 3 쓰기', 'g'), cell('req', 'REQ-007'), cell('pr', 'PR #301', 'w'), cell('progress', '40%')], 'SRS 쓰기').map(c => [c.label, c.value, c.tone]);
 out.infoEmpty = P.infoRow([], '').map(c => c.value).join('|');
@@ -1633,6 +1634,7 @@ def test_post_session_logic_filters_info_and_seals():
     assert out["match"] == ["11111111", "11100001", "00011000", "00000010"]
     assert out["status"] == ["막혔어요 · 고친 뒤 이어서", "확인하지 못했어요 · 검사를 못 했어요", "답을 기다려요 · 승인하기", "", ""]
     # 안내판 첫 줄은 앉은 곳: 팀 자리(0~2)는 세션의 팀 이름 + 단계(설정 갈래도 단계 번호 2 라 개발팀이 아니라 자기 팀, 단계 이름은 설정 — 9회차 ②), 리뷰 룸·완료는 팀과 무관, 팀이 없으면 "팀 없음"
+    assert out["hereSeat"] == ["요구분석팀 · 검토", "리뷰 룸 · 검토", "카페 · 개발", "카페 · 합쳐짐", "리셉션", "설계팀 · 개발 Spec", "카페"]  # PR 열린 채 답을 기다리는 사람은 팀 자리(판정 D1)
     assert out["here"] == ["요구분석팀 · 요구사항", "설계팀 · 개발 Spec", "기능컨설팅팀 · 설정", "팀 없음", "팀 없음", "리뷰 룸 · 검토", "완료 · 합쳐짐", "완료 · 합쳐짐", "요구분석팀 · 요구사항"]
     assert out["teams"] == ["요구분석팀", "유지보수팀", "", ""]
     # 안내판 둘째 줄의 상태 글(hereLine·HERE)은 화면에서 쓰지 않아 없앴다 — 상태는 LABEL 한 벌만 쓴다
@@ -3796,6 +3798,11 @@ out.lane = [P.laneOf(it(1, { done: true, kind: '설정' })), P.laneOf(it(2), [{ 
 out.sub = [P.summary({ items, hidden: 2 }), P.summary({ items: [it(1, { req: '' })] })];
 out.groups = P.groups([{ cwd: '/a', data: { repo: { key: 'k', name: 'r' }, state: 'yes', loading: true } }, { cwd: '/b', data: { repo: { key: 'k', name: 'r' }, state: 'yes' } },
   { cwd: '/c', data: { repo: { key: 'z', name: 'z' }, state: 'no' } }, { cwd: '/d', error: { status: 403 } }]).map(g => g.key + ':' + g.cwds.join('+') + ':' + !!g.data.loading);
+const pl = (prs) => { const r = P.prLine({ prs }); return r ? [r.g, r.tone, r.text] : null; };
+out.prLine = [pl([]), pl([{ number: 858, kind: 'work', checks: 'fail' }]), pl([{ number: 812, kind: 'work', checks: 'pass', awaitApproval: true }]),
+  pl([{ number: 5, kind: 'work', checks: 'pending' }]), pl([{ number: 6, kind: 'work', checks: 'pass', draft: true }]), pl([{ number: 7, kind: 'work', checks: 'pass' }]),
+  pl([{ number: 3, kind: 'spec', checks: 'fail' }, { number: 4, kind: 'work', checks: 'pass', awaitApproval: true }]), pl([{ number: 9, kind: 'work', checks: 'pass' }, { number: 8, kind: 'work', checks: 'fail' }])];
+out.sessLabel = [P.sessLabel('turn', 'err'), P.sessLabel('turn', 'warn'), P.sessLabel('turn', ''), P.sessLabel('blocked', null), P.sessLabel('run', null)];
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -3813,6 +3820,11 @@ def test_post_pipeline_attaches_sessions_and_places_lanes():
     assert out["lane"] == [4, 1, 0]  # 완료가 먼저, 다음 단계 미정이면 Spec 세션이 있어도 요구사항 칸
     assert out["sub"] == ["SRS 9건 · Spec 있는 개발 건 4 · 설정 1 · 표준 0 · 보류·취소 2건 뺌", "원장 1건 · Spec 있는 개발 건 0 · 설정 0 · 표준 0"]
     assert out["groups"] == ["k:/a+/b:false", "z:/c:false"]  # 같은 저장소 worktree 는 한 판, 다 읽은 값이 읽는 중 값을 대신한다
+    # 판정 P2: 카드 아래 줄의 PR 상태 — 일 PR 먼저, 여럿이면 급한 것(검사 실패 > 승인 대기 > 초안 > 검사 중 > 그 밖)
+    assert out["prLine"] == [None, ["blocked", "err", "PR 검사가 실패했어요 · #858"], ["wait", "", "승인을 기다려요 · PR #812"], ["run", "", "검사 중이에요 · PR #5"],
+                             ["idle", "", "초안이에요 · PR #6"], ["wait", "", "검토를 기다려요 · PR #7"], ["wait", "", "승인을 기다려요 · PR #4"], ["blocked", "err", "PR 검사가 실패했어요 · #8"]]
+    # 판정 P4: 답을 기다리는 세션은 홈과 같은 이름 — PR 검사 실패는 「고쳐야 해요」
+    assert out["sessLabel"] == ["고쳐야 해요", "승인을 기다려요", "답을 기다려요", "막혔어요", "일하는 중이에요"]
 
 
 def test_post_pipeline_wiring_route_rail_and_scoped_css():
@@ -4307,6 +4319,7 @@ def test_post_regress_sweep_fixes():
     assert "if (isPostTheme() && window.BHPostScene) {" in rail
     assert "window.BHPostLogic.filterMatch('turn', window.BHPostLogic.stateOf(s, window.BHLogic))" in rail and "n = turnRows.length;" in rail
     assert "countHref = d.todo.length ? d.todo[0].href : '/'" in rail and "link(countHref, { class: 'rail-count'" in rail
+    assert "railShort = '찾는 사람'" in rail and "text: railShort || railName, 'aria-hidden': 'true'" in rail  # 판정 C2: 좁은 칸 보이는 글만 한 줄로, 읽는 이름은 그대로
     assert rail.index("var n = d.todo.length") < rail.index("if (isPostTheme()")  # Sauce 는 요청 수 그대로
     # 2. 좁은 화면에서 붙어 있는 위 메뉴줄(z 5)을 스크롤할 때 머리 줄 말풍선(.nb-bubble 40)·도장(.po-seal 6)이 덮었다
     #    → 메뉴줄을 그 위로, 대화상자·알림 창·연결 끊김 띠(.conn, 전처럼 메뉴줄 위)는 그보다 위
@@ -4907,7 +4920,7 @@ def test_cozy_summary_one_place():
     assert "nb-more" not in host and "text: post ? (n > 99 ? '99+' : String(n)) : null" in host
     # 세션 화면 안내판은 앉은 곳만(상태 한 줄은 머리 상태 표시가 말한다), 팀 기록 머리 문장은 Post 에서 안 풀린 수를 되풀이하지 않는다
     sess = (STATIC / "post-session.js").read_text(encoding="utf-8")
-    assert "PL.hereTitle(k, flow)" in sess and "PL.hereLine(state)));" not in sess
+    assert "PL.hereTitle(k, flow, state)" in sess and "PL.hereLine(state)));" not in sess
     assert "(isPostNow() ? '' : ' · 아직 안 풀린 것 ' + st.open)" in (STATIC / "trouble.js").read_text(encoding="utf-8")
     # 작은 창 목록(번들): 정리 줄과 같은 묶음을 이름까지 — 나를 찾는 사람 · 끝낸 일 · 일하는 사람, 쉬는 중이에요은 수
     bundle = (STATIC / "post" / "office" / "office-post.js").read_text(encoding="utf-8")
