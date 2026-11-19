@@ -20,7 +20,7 @@
 ## 판 올리기 · 새 소식
 
 - `plugins/harness/.claude-plugin/plugin.json` 0.10.328 → **0.10.329**(1~8회차의 배포 파일: 콘솔 .py · static · `workflow.json` · `store.py` · 번들).
-- 새 소식 `plugins/harness/console/whats_new.d/2026-11-19-cozy-office.json`(이슈 번호가 없어 진행 기록 이름 꼴. 서버는 숫자 아닌 이름을 숫자 조각 뒤에 읽고, `version_rebase` 는 `.json` 만 본다). 화면에 나오는 글이라 해요체로 썼다 — 앞 판들의 새 소식 줄은 반말 그대로다.
+- 새 소식 `plugins/harness/console/whats_new.d/1082.json`(main 반영 이슈 #1082 번호. 로컬에서는 이슈 번호가 없어 진행 기록 이름 꼴 `2026-11-19-cozy-office.json` 이었다). 화면에 나오는 글이라 해요체로 썼다 — 앞 판들의 새 소식 줄은 반말 그대로다.
 - 길잡이 판 표기 `harness 0.10.329`.
 
 ## 확인
@@ -66,4 +66,4 @@
 
 ## 합류
 
-`post-main` worktree(로컬 main)의 남의 미커밋 변경 9개 파일(옛 라인아트 사람으로 프로필 그림을 그리는 다른 구현 `post-portrait.js` 와 그에 맞춘 8개 파일, 2026-11-19 01:35~01:55)은 사용자 답(「패치로 남기고 버리기」)에 따라 패치로 남기고 버린 뒤 `merge --ff-only` 했다. 결과는 핸드오프 「8회차 결과」 절.
+`post-main` worktree(로컬 main)의 남의 미커밋 변경 9개 파일(옛 라인아트 사람으로 프로필 그림을 그리는 다른 구현 `post-portrait.js` 와 그에 맞춘 8개 파일, 2026-11-19 01:35~01:55)은 사용자 답(「패치로 남기고 버리기」)에 따라 패치로 남기고 버린 뒤 `merge --ff-only` 했다(로컬 main = 3c78de1). 그 뒤 사용자 요청으로 #1082 이슈 · 브랜치 `fix/1082-cozy-office-diorama-main-sync` 로 GitHub main 에 올렸다(Actions 가 꺼져 있어 로컬 시험으로 확인, 태그 보충은 Actions 를 켠 뒤).
