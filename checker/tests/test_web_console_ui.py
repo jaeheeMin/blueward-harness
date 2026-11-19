@@ -248,6 +248,10 @@ const cases = {
     assert.strictEqual(cell({ prLinks: ['https://github.com/o/r/pull/32'] }).value, 'PR 아직');
     assert.strictEqual(cell({}).value, 'PR 아직');
     assert.strictEqual(cell({ flowPr: { number: 5, state: 'OPEN' }, prCreated: 'https://github.com/o/r/pull/77' }).value, 'PR #5 검토 중');
+    // 열린 PR 의 자동 검사가 실패했으면 초록 「검토 중」 이 아니라 빨강 「검사 실패」(홈 고쳐야 할 내 PR · 목록 칩과 같은 판정). 진행 중 · 통과는 그대로
+    assert.deepStrictEqual(cell({ flowPr: { number: 9, state: 'OPEN', checks: 'fail' } }), { id: 'pr', label: '검토 요청', tone: 'r', value: 'PR #9 검사 실패' });
+    assert.strictEqual(cell({ flowPr: { number: 9, state: 'OPEN', checks: 'pending' } }).value, 'PR #9 검토 중');
+    assert.strictEqual(cell({ flowPr: { number: 9, state: 'MERGED', checks: 'fail' } }).value, 'PR #9 합쳐짐');
   },
   pr_badge_says_waiting_for_approval() {
     // #1027 항목 12: 승인 대기 검사의 실패는 서버가 checks 에서 빼고 awaitApproval 로 알린다 — 고치기가 아니라 승인 기다림
@@ -3955,6 +3959,9 @@ def test_post_x2_data_screens_source_and_css():
     assert "function pick(entry, byUser)" in ui and "pv.scrollIntoView({ block: 'start' })" in ui and "pick(entry, true)" in ui
     assert "(ctx.btnAt || '아래') + ' 버튼으로 열어 보세요.'" in ui and ui.count("btnAt: isPost() ? '위' : ''") == 2
     assert "data-docs-more" in ui and "isPost() ? sessionList().filter(" in ui
+    # 산출물 탭(Post)은 홈 「최근 산출물」 이 읽는 이번 주 세션도 모은다 — 세션이 12개를 넘으면 홈은 파일이 있는데 탭은 「없어요」 였다(데이터를 채운 점검 S1)
+    assert "if (isPost()) L.weekPool(all, Date.now() / 1000, WEEK_POOL).forEach(function (s) { if (top.indexOf(s) < 0) top.push(s); });" in ui
+    assert "'최근에 움직인 세션 ' + pool().length + '개의 문서만 모았어요. 더 오래된 세션 ' + rest + '개의 문서는 여기에 안 나와요.'" in ui
     assert ":root[data-theme=\"post\"] .ext { display: inline-grid; place-items: center; flex: none; width: 44px;" in css and ".ext-docx { background: #2B579A;" in css
     assert ".docs-page .dprev { scroll-margin-top: 88px; }" in css and ".docs-page .drow .dn small { font-size: 11.5px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;" in css
     # 팀 기록: 거르기·찾기·종류 고르기로 화면을 다시 그려도(목록·한 건·새 기록 셋 다) Post 에서는 누르던 칸에 포커스가 남는다

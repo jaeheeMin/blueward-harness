@@ -537,7 +537,9 @@
     var pr = s && s.flowPr;
     if (pr && pr.number) {
       var st = String(pr.state || '').toUpperCase();
-      return st === 'MERGED' ? { value: 'PR #' + pr.number + ' 합쳐짐', tone: 'g' } : st === 'CLOSED' ? { value: 'PR #' + pr.number + ' 닫힘', tone: 'w' } : { value: 'PR #' + pr.number + ' 검토 중', tone: 'g' };
+      // 열린 PR 의 자동 검사가 실패했으면 「검토 중」(초록)이 아니라 「검사 실패」(빨강) — 홈 「고쳐야 할 내 PR」 · 세션 목록 칩(prBadge)과 같은 판정(prNeedsFix, 데이터를 채운 점검 S3)
+      return st === 'MERGED' ? { value: 'PR #' + pr.number + ' 합쳐짐', tone: 'g' } : st === 'CLOSED' ? { value: 'PR #' + pr.number + ' 닫힘', tone: 'w' }
+        : prNeedsFix(s) ? { value: 'PR #' + pr.number + ' 검사 실패', tone: 'r' } : { value: 'PR #' + pr.number + ' 검토 중', tone: 'g' };
     }
     // flowPr 를 아직 못 읽었어도 이 세션이 gh pr create 로 만든 PR(prCreated)이 있으면 번호를 먼저 보인다(#1027 D-1).
     // prLinks 는 PR 목록·상태 출력에 스친 남의 PR 주소까지 담아(실사용 시험: 다른 브랜치의 #32 가 보임) 갈래 세션에는 쓰지 않는다

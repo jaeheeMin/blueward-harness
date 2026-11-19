@@ -657,6 +657,8 @@
       // J14: Cozy Office 는 고른 문서의 세션이 최근 DOCS_PAGE_MAX 개 밖으로 밀려도 그 세션은 계속 모은다(목록에서 고르던 문서가 빠지고 포커스가 body 로 갔다)
       function pool() {
         var all = sessionList().filter(function (s) { return !s.handedOffTo; }).sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }), top = all.slice(0, DOCS_PAGE_MAX);
+        // Cozy Office: 홈 「최근 산출물」(recentCard)이 읽는 이번 주 세션(WEEK_POOL)도 모은다. 세션이 12개를 넘으면 홈은 「이번 주에 6개 뽑았어요」 인데 이 탭은 「없어요」 였다(데이터를 채운 점검 S1)
+        if (isPost()) L.weekPool(all, Date.now() / 1000, WEEK_POOL).forEach(function (s) { if (top.indexOf(s) < 0) top.push(s); });
         var pin = isPost() && st.picked && st.picked.session ? st.picked.session.id : '';
         if (pin && !top.some(function (s) { return s.id === pin; })) top = top.concat(all.filter(function (s) { return s.id === pin; }));
         return top;
@@ -910,7 +912,7 @@
         if (gone.length) notes.push(h('p', { class: 'note-muted', role: 'status', 'data-docs-gone': String(gone.length), text: goneNote(gone.length) }));
         // Post: 세션이 DOCS_PAGE_MAX 개를 넘으면 오래된 세션의 문서는 읽지 않는다. 말 없이 빠지면 "없다" 로 읽히니 몇 개가 빠졌는지 알린다.
         var rest = isPost() ? sessionList().filter(function (s) { return !s.handedOffTo; }).length - pool().length : 0;
-        if (rest > 0) notes.push(h('p', { class: 'note-muted', role: 'status', 'data-docs-more': String(rest), text: '최근에 움직인 세션 ' + Math.min(pool().length, DOCS_PAGE_MAX) + '개' + (pool().length > DOCS_PAGE_MAX ? '(와 고른 문서의 세션)' : '') + '의 문서만 모았어요. 더 오래된 세션 ' + rest + '개의 문서는 여기에 안 나와요.' }));
+        if (rest > 0) notes.push(h('p', { class: 'note-muted', role: 'status', 'data-docs-more': String(rest), text: '최근에 움직인 세션 ' + pool().length + '개의 문서만 모았어요. 더 오래된 세션 ' + rest + '개의 문서는 여기에 안 나와요.' }));
         st.parts.forEach(function (p) { if (p.note && !p.unknown) notes.push(h('p', { class: 'note-muted', role: 'status', text: p.note })); });  // 칩은 그대로 두고 안내만 한 줄 더한다
         if (!all.length) { page.appendChild(title('산출물', '내가 만든 문서')); page.appendChild(h('section', { class: 'light dsec' }, notes, h('p', { class: 'note-muted', text: rest > 0 ? '모은 세션에는 양식으로 뽑은 산출물이 없어요.' : '아직 양식으로 뽑은 산출물이 없어요.' }), attachBoxes())); return; }
         // 시안 G-15: 방금 고객 양식 xlsx 를 뽑았으면(가장 최근 산출물이 그 파일) 목록 없이 결과 화면을 먼저 보인다. '문서 목록 보기' 로 나가면 시안 G-14 목록 화면.
