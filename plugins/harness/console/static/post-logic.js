@@ -236,9 +236,16 @@
   /* 정보 칸(9회차 ①): 콘솔 갈래가 없는 세션은 단계 칸이 「정해진 갈래 없음」, 번호 칸이 비어 안내판의 팀과 달라 보였다.
      팀을 정한 근거가 있으면 단계 칸은 안내판과 같은 단계 이름(풀이는 title), 요구사항·개발 번호 칸은 그 근거의 번호. 근거가 없으면 칸을 그대로 둔다. */
   function teamCells(cells, s, k) {
-    var out = (cells || []).slice();
-    if (!s || s.flowId) return out;
-    var b = teamBasisOf(s), has = function (id) { return out.some(function (c) { return c.id === id; }); };
+    var out = (cells || []).slice(), has = function (id) { return out.some(function (c) { return c.id === id; }); };
+    if (!s) return out;
+    if (s.flowId) {
+      // 콘솔 갈래 세션: 단계 칸은 갈래 것 그대로. 번호 칸은 갈래가 다음 갈래 안내에서만 채워서, 브랜치 이슈가 가리키는 요구사항이 있어도 「–」 였다(데이터를 채운 점검 S2) — 같은 근거로 채운다
+      var rb = reqBasisOf(s, reqsFn ? reqsFn(s.cwd) : null);
+      if (rb.req && !has('req')) out.push({ id: 'req', label: '요구사항', tone: '', value: rb.req });
+      if (rb.dev && !has('dev')) out.push({ id: 'dev', label: '개발 번호', tone: '', value: rb.dev });
+      return out;
+    }
+    var b = teamBasisOf(s);
     if (b.flow && teamOf(b.flow)) {
       var why = b.by === 'skill' ? '쓴 스킬 /harness:' + b.skill : '브랜치 이슈 #' + b.issue + ' 의 ' + b.dev;
       out = out.map(function (c) { return c.id === 'step' ? { id: 'step', label: c.label, tone: '', value: stageName(k, b.flow), title: '콘솔에서 고른 갈래가 아니에요. ' + teamOf(b.flow) + '을 정한 근거: ' + why } : c; });

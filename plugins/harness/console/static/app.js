@@ -719,7 +719,7 @@
     if (!reqs.hooked) { reqs.hooked = true; PL.useReqs(function (cwd) { return reqs.data[cwd] || null; }); }
     sessions.forEach(function (s) {
       var cwd = s.cwd, br = String(s.branch || ''), m = /^[a-z]+\/(\d+)-/.exec(br);
-      if (!cwd || !m || s.flowId || reqs.busy[cwd]) return;
+      if (!cwd || !m || reqs.busy[cwd]) return;  // 콘솔 갈래 세션도 묻는다: 팀은 갈래로 정하지만 세션 화면 번호 칸(teamCells)이 이 판의 브랜치 이슈 번호를 쓴다(데이터를 채운 점검 S2)
       var d = reqs.data[cwd], key = cwd + '|' + br, miss = d && d.state === 'yes' && d.issues && d.issues.state === 'ok' && !(d.issues.byIssue || {})[m[1]];
       if (now - (reqs.at[key] || 0) < (miss ? REQS_MISS_MS : REQS_MS)) return;
       reqs.busy[cwd] = true;

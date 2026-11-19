@@ -3961,6 +3961,8 @@ def test_post_x2_data_screens_source_and_css():
     assert "data-docs-more" in ui and "isPost() ? sessionList().filter(" in ui
     # 산출물 탭(Post)은 홈 「최근 산출물」 이 읽는 이번 주 세션도 모은다 — 세션이 12개를 넘으면 홈은 파일이 있는데 탭은 「없어요」 였다(데이터를 채운 점검 S1)
     assert "if (isPost()) L.weekPool(all, Date.now() / 1000, WEEK_POOL).forEach(function (s) { if (top.indexOf(s) < 0) top.push(s); });" in ui
+    # 세션 화면 번호 칸(S2): 콘솔 갈래 세션의 폴더도 요구사항 판을 묻는다
+    assert "if (!cwd || !m || reqs.busy[cwd]) return;" in app and "if (!cwd || !m || s.flowId || reqs.busy[cwd]) return;" not in app
     assert "'최근에 움직인 세션 ' + pool().length + '개의 문서만 모았어요. 더 오래된 세션 ' + rest + '개의 문서는 여기에 안 나와요.'" in ui
     assert ":root[data-theme=\"post\"] .ext { display: inline-grid; place-items: center; flex: none; width: 44px;" in css and ".ext-docx { background: #2B579A;" in css
     assert ".docs-page .dprev { scroll-margin-top: 88px; }" in css and ".docs-page .drow .dn small { font-size: 11.5px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;" in css
@@ -4822,6 +4824,8 @@ const out = {
   cellsNone: P.infoRow(P.teamCells([{ id: 'step', label: '단계', value: '정해진 갈래 없음' }], S('feat/50-x'), 2), ''),
   cellsHas: P.teamCells([{ id: 'step', label: '단계', value: '정해진 갈래 없음' }, { id: 'req', label: '요구사항', value: 'REQ-009' }], S('chore/30-x'), 2).filter(c => c.id === 'req').map(c => c.value),
   cellsFlow: P.teamCells([{ id: 'step', label: '단계', value: '2 / 4 구현' }], S('chore/30-x', { flowId: 'dev' }), 2),
+  cellsFlowHas: P.teamCells([{ id: 'step', label: '단계', value: '2 / 4 구현' }, { id: 'req', label: '요구사항', value: 'REQ-009' }], S('chore/30-x', { flowId: 'dev' }), 2).filter(c => c.id === 'req').map(c => c.value),
+  cellsFlowNone: P.teamCells([{ id: 'step', label: '단계', value: '2 / 4 구현' }], S('feat/88-x', { flowId: 'dev' }), 2),
   // ② 단계 이름
   here: [P.hereTitle(2, 'config'), P.hereTitle(2, 'standard'), P.hereTitle(2, 'fix'), P.hereTitle(2, 'dev'), P.hereTitle(1, 'spec'), P.hereTitle(3, 'config'), P.hereTitle(2, '')],
   // D: 장면에서 팀 자리에 앉는 상태
@@ -4856,7 +4860,10 @@ def test_cozy_teams3_order_basis_stage_desk_and_lane():
     none = {c["id"]: c for c in out["cellsNone"]}
     assert none["step"]["value"] == "정해진 갈래 없음" and none["dev"]["value"] == "DEV-005"
     assert out["cellsHas"] == ["REQ-009"]  # 이미 있는 칸(다음 갈래 번호)은 덮지도 겹치지도 않는다
-    assert out["cellsFlow"] == [{"id": "step", "label": "단계", "value": "2 / 4 구현"}]  # 콘솔 갈래 세션은 그대로
+    # 콘솔 갈래 세션: 단계 칸은 그대로, 번호 칸은 브랜치 이슈가 가리키는 요구사항으로 채운다(데이터를 채운 점검 S2 — 전에는 「–」)
+    assert out["cellsFlow"] == [{"id": "step", "label": "단계", "value": "2 / 4 구현"}, {"id": "req", "label": "요구사항", "tone": "", "value": "REQ-003"},
+                                {"id": "dev", "label": "개발 번호", "tone": "", "value": "DEV-003"}]
+    assert out["cellsFlowHas"] == ["REQ-009"] and out["cellsFlowNone"] == [{"id": "step", "label": "단계", "value": "2 / 4 구현"}]  # 갈래가 준 번호는 그대로 · 근거 없으면 안 지어낸다
     assert out["here"] == ["기능컨설팅팀 · 설정", "표준화팀 · 표준", "유지보수팀 · 수정", "개발팀 · 개발", "설계팀 · 개발 Spec", "리뷰 룸 · 검토", "팀 없음"]
     assert out["desk"] == [True, True, True, True, False, False, False]
     assert out["laneSkill"] == 1 and out["laneOld"] == 0 and out["laneBasis"] == [7]
